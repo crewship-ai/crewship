@@ -111,6 +111,61 @@ crewship checkpoint delete chk_01HABC --yes
 
 The same operations are reachable over HTTP — see the [Endpoints summary](#endpoints-summary) below for the path/body shape, and `internal/api/cartographer.go` for the handler source of truth.
 
+## Examples
+
+### Pre-deploy bookmark, fork on regression
+
+The mission `MIS-42` reaches a green build of the staging branch. Before letting the agent attempt the production deploy step, you bookmark:
+
+```bash
+crewship checkpoint create --mission MIS-42 --label "green-staging"
+# ✓ Created chk_green at cursor j_…
+```
+
+The agent runs `deploy-prod`. Logs go red — the deploy hit an unrecognized AWS region and the agent is now stuck retrying. You don't want to roll the mission backward (the agent's context already knows the failure), but you do want a clean parallel attempt:
+
+```bash
+crewship checkpoint fork chk_green --label "deploy-retry-eu-west"
+# ✓ Forked into MIS-43 (fork_of=chk_green)
+```
+
+`MIS-43` opens at the green-staging cursor. You hand it a fresh hint ("use eu-west-1 explicitly") and let it retry. `MIS-42` keeps running its diagnostic in parallel — useful for the postmortem.
+
+### A/B prompt experimentation
+
+You've reached a decision point in `MIS-88`: should the agent draft the blog post in a casual or formal tone? Rather than picking one, checkpoint and fork twice:
+
+```bash
+crewship checkpoint create --mission MIS-88 --label "pre-tone-choice"
+# ✓ Created chk_tone at cursor j_…
+
+crewship checkpoint fork chk_tone --label "casual-draft"
+# ✓ Forked into MIS-89
+
+crewship checkpoint fork chk_tone --label "formal-draft"
+# ✓ Forked into MIS-90
+```
+
+`MIS-89` and `MIS-90` each get their own journal and their own agent runs from the same starting point. Once both drafts exist, compare side-by-side in the UI; pick the winner; the loser's mission row stays around as evidence of the alternative explored.
+
+### Post-incident forensic snapshot
+
+An operator notices the agent in `MIS-101` just sent a suspicious tool call. Snapshot *immediately* — before anything else changes:
+
+```bash
+crewship checkpoint create --mission MIS-101 --label "incident-2026-05-14T03:18Z"
+# ✓ Created chk_incident at cursor j_a1b2c3…
+```
+
+The mission keeps running (or you pause it via the UI) — the checkpoint already captures the state for investigation. For safe replay, fork into a sandbox mission rather than poking at the live one:
+
+```bash
+crewship checkpoint fork chk_incident --label "incident-investigation"
+# ✓ Forked into MIS-102
+```
+
+`MIS-102` is the investigation playground. Replay the suspicious tool call there with extra logging, try variants, prove the bug — none of it touches `MIS-101`, whose timeline must stay pristine for the audit log. When the postmortem closes, both missions get linked from the incident document via their IDs; the `fork_of` pointer on `MIS-102`'s checkpoint proves the parentage.
+
 ## Schema
 
 ```sql
