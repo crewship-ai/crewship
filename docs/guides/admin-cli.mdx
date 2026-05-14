@@ -175,6 +175,24 @@ sudo systemctl start crewshipd
 
 The audit timeline gets a `journal.admin_cli` entry attributed to the OS user who ran the rescue, so postmortem readers can see *exactly* how the workspace got unstuck without the change appearing as if the system had self-healed.
 
+## API reference
+
+The admin CLI is **deliberately not** exposed as an HTTP API — that's the whole point of the surface. Every other Crewship feature has a `/api-reference/<thing>` page; this one does not. Routing recovery through the same server you're recovering would be circular, and exposing these writes over HTTP would create a parallel auth surface to harden when the existing one already covers every healthy-system case.
+
+The full source of truth is one file: [`cmd/crewship/cmd_admin.go`](https://github.com/crewship-ai/crewship/blob/main/cmd/crewship/cmd_admin.go) (~407 lines). It's small enough to read top-to-bottom; the test file `cmd_admin_test.go` covers the same surface.
+
+The SQL surface area each subcommand touches:
+
+| Subcommand | Tables written | Constraints enforced |
+|------------|---------------|----------------------|
+| `reset-password` | `users.password_hash`, `users.password_updated_at` | Email must exist (no implicit `INSERT`). |
+| `list-users` | *(read-only)* | None — just `SELECT email, role, created_at, last_login_at FROM users`. |
+| `promote` | `workspace_members.role` | Refuses to demote the last `OWNER` of a workspace; if `--workspace` omitted, user must belong to exactly one workspace. |
+
+Every successful write also appends one row to `journal_entries` with `entry_type='journal.admin_cli'`, attributed to `host:$USER`. Read it back through the same [Crew Journal](/api-reference/journal) API the rest of the audit timeline uses — admin-CLI actions are first-class events, not invisible side-channels.
+
+For the user/workspace data model these commands operate on, see [`/api-reference/users`](/api-reference/users) and the workspace endpoints — the schemas are identical; the CLI just bypasses the HTTP layer that normally fronts them.
+
 ## Related
 
 - [Authentication](/guides/auth) — the in-band recovery flow (email-based password reset) for users without shell access.
