@@ -221,7 +221,7 @@ func (h *ProvisioningHandler) CacheDelete(w http.ResponseWriter, r *http.Request
 	_, err := h.gcClient.ImageRemove(r.Context(), tag, image.RemoveOptions{Force: force, PruneChildren: true})
 	if err != nil {
 		h.logger.Error("docker image remove", "tag", tag, "error", err)
-		replyError(w, http.StatusInternalServerError, err.Error())
+		replyError(w, http.StatusInternalServerError, "Failed to remove cached image")
 		return
 	}
 	// Cached image list no longer reflects local state.

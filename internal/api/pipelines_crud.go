@@ -282,7 +282,7 @@ func (h *PipelineHandler) ImportPipeline(w http.ResponseWriter, r *http.Request)
 	}
 	if err != nil {
 		h.logger.Error("pipeline import save", "error", err)
-		replyError(w, http.StatusInternalServerError, err.Error())
+		replyError(w, http.StatusInternalServerError, "Failed to import pipeline")
 		return
 	}
 	writeJSON(w, http.StatusCreated, toPipelineResponse(saved, true))
@@ -365,7 +365,8 @@ func (h *PipelineHandler) GetVersion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		replyError(w, http.StatusInternalServerError, err.Error())
+		h.logger.Error("pipeline get version", "pipeline_id", p.ID, "version", versionNum, "error", err)
+		replyError(w, http.StatusInternalServerError, "Failed to load pipeline version")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -414,7 +415,7 @@ func (h *PipelineHandler) Rollback(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		h.logger.Error("pipeline rollback", "error", err)
-		replyError(w, http.StatusInternalServerError, err.Error())
+		replyError(w, http.StatusInternalServerError, "Failed to roll back pipeline")
 		return
 	}
 	writeJSON(w, http.StatusOK, toPipelineResponse(rolled, true))
@@ -594,7 +595,7 @@ func (h *PipelineHandler) Save(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		h.logger.Error("pipeline user save", "error", err)
-		replyError(w, http.StatusInternalServerError, err.Error())
+		replyError(w, http.StatusInternalServerError, "Failed to save pipeline")
 		return
 	}
 	writeJSON(w, http.StatusCreated, toPipelineResponse(saved, true))
@@ -690,7 +691,7 @@ func (h *PipelineHandler) InternalSave(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		h.logger.Error("pipeline internal save", "error", err)
-		replyError(w, http.StatusInternalServerError, err.Error())
+		replyError(w, http.StatusInternalServerError, "Failed to save pipeline")
 		return
 	}
 	writeJSON(w, http.StatusCreated, toPipelineResponse(saved, true))

@@ -33,7 +33,8 @@ func (h *BackupHandler) Unlock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := backup.ForceReleaseLock(ctx, h.db, workspaceID); err != nil {
-		replyError(w, http.StatusInternalServerError, err.Error())
+		h.logger.Error("backup force-release-lock", "workspace_id", workspaceID, "error", err)
+		replyError(w, http.StatusInternalServerError, "Failed to release backup lock")
 		return
 	}
 	WriteAuditLog(ctx, h.db, h.journal, "backup.unlock", "backup", workspaceID, user.ID, workspaceID, nil)
@@ -85,12 +86,14 @@ func (h *BackupHandler) Rotate(w http.ResponseWriter, r *http.Request) {
 	}
 	dir, err := backup.DefaultBackupsDir()
 	if err != nil {
-		replyError(w, http.StatusInternalServerError, err.Error())
+		h.logger.Error("backup default-dir resolve", "error", err)
+		replyError(w, http.StatusInternalServerError, "Failed to resolve backup directory")
 		return
 	}
 	deleted, err := backup.Rotate(ctx, dir, workspaceID, req.KeepLast, req.KeepDays, req.DryRun)
 	if err != nil {
-		replyError(w, http.StatusInternalServerError, err.Error())
+		h.logger.Error("backup rotate", "workspace_id", workspaceID, "error", err)
+		replyError(w, http.StatusInternalServerError, "Failed to rotate backups")
 		return
 	}
 	if !req.DryRun {
@@ -145,7 +148,8 @@ func (h *BackupHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := backup.Delete(ctx, path); err != nil {
-		replyError(w, http.StatusInternalServerError, err.Error())
+		h.logger.Error("backup delete", "error", err)
+		replyError(w, http.StatusInternalServerError, "Failed to delete backup")
 		return
 	}
 	// Drop the catalog row too so the admin UI list view refreshes
@@ -188,13 +192,18 @@ func (h *BackupHandler) Download(w http.ResponseWriter, r *http.Request) {
 	}
 	f, err := os.Open(path)
 	if err != nil {
-		replyError(w, http.StatusNotFound, err.Error())
+		// 404 here, not 500, so we leak less. Path was validated above; the
+		// only realistic failure now is "deleted between validation and open"
+		// or a permission glitch — both fine to report as not-found.
+		h.logger.Warn("backup download open", "error", err)
+		replyError(w, http.StatusNotFound, "backup not found")
 		return
 	}
 	defer func() { _ = f.Close() }()
 	info, err := f.Stat()
 	if err != nil {
-		replyError(w, http.StatusInternalServerError, err.Error())
+		h.logger.Error("backup stat", "error", err)
+		replyError(w, http.StatusInternalServerError, "Failed to stat backup file")
 		return
 	}
 	// Bundle bytes contain sensitive workspace contents (even encrypted,
@@ -294,7 +303,7 @@ func (h *BackupHandler) SelfTest(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		h.logger.Error("backup self-test: pipeline", "crew_id", crewID, "error", err)
-		replyError(w, http.StatusInternalServerError, err.Error())
+		replyError(w, http.StatusInternalServerError, "Self-test pipeline failed")
 		return
 	}
 	// Happy and content-mismatch paths both return 200 with the result

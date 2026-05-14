@@ -49,7 +49,8 @@ func (h *BackupHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	cat, err := backup.ListCatalog(ctx, h.db, workspaceID)
 	if err != nil {
-		replyError(w, http.StatusInternalServerError, err.Error())
+		h.logger.Error("backup list catalog", "workspace_id", workspaceID, "error", err)
+		replyError(w, http.StatusInternalServerError, "Failed to list backup catalog")
 		return
 	}
 	if len(cat) > 0 {
@@ -75,12 +76,14 @@ func (h *BackupHandler) List(w http.ResponseWriter, r *http.Request) {
 	// list without a manual backfill step.
 	dir, err := backup.DefaultBackupsDir()
 	if err != nil {
-		replyError(w, http.StatusInternalServerError, err.Error())
+		h.logger.Error("backup default-dir resolve", "error", err)
+		replyError(w, http.StatusInternalServerError, "Failed to resolve backup directory")
 		return
 	}
 	entries, err := backup.ListBackups(ctx, dir)
 	if err != nil {
-		replyError(w, http.StatusInternalServerError, err.Error())
+		h.logger.Error("backup list disk", "error", err)
+		replyError(w, http.StatusInternalServerError, "Failed to list backups on disk")
 		return
 	}
 	filtered := entries[:0]
@@ -169,7 +172,8 @@ func (h *BackupHandler) Status(w http.ResponseWriter, r *http.Request) {
 	out.WorkspaceID = workspaceID
 	held, err := backup.IsLockHeld(ctx, h.db, workspaceID, time.Now())
 	if err != nil {
-		replyError(w, http.StatusInternalServerError, err.Error())
+		h.logger.Error("backup lock status", "workspace_id", workspaceID, "error", err)
+		replyError(w, http.StatusInternalServerError, "Failed to query backup lock status")
 		return
 	}
 	out.Held = held
@@ -214,7 +218,8 @@ func (h *BackupHandler) Verify(w http.ResponseWriter, r *http.Request) {
 	}
 	res, err := backup.Verify(ctx, path)
 	if err != nil {
-		replyError(w, http.StatusInternalServerError, err.Error())
+		h.logger.Error("backup verify", "error", err)
+		replyError(w, http.StatusInternalServerError, "Failed to verify backup")
 		return
 	}
 	errStr := ""

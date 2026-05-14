@@ -137,7 +137,7 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.logger.Error("pipeline run: exec", "error", err, "slug", slug)
-		replyError(w, http.StatusInternalServerError, err.Error())
+		replyError(w, http.StatusInternalServerError, "Failed to start pipeline run")
 		return
 	}
 	writeJSON(w, http.StatusOK, res)
@@ -176,7 +176,7 @@ func (h *PipelineHandler) DryRun(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		h.logger.Error("pipeline dry_run: exec", "error", err)
-		replyError(w, http.StatusInternalServerError, err.Error())
+		replyError(w, http.StatusInternalServerError, "Failed to dry-run pipeline")
 		return
 	}
 	writeJSON(w, http.StatusOK, res)
@@ -259,7 +259,8 @@ func (h *PipelineHandler) TestRun(w http.ResponseWriter, r *http.Request) {
 		saveToken = signSaveToken(h.saveTokenSecret, workspaceID, defHash, userID, time.Now())
 	}
 	if err != nil {
-		replyError(w, http.StatusInternalServerError, err.Error())
+		h.logger.Error("pipeline test_run: exec", "error", err)
+		replyError(w, http.StatusInternalServerError, "Failed to test-run pipeline")
 		return
 	}
 	// Wrap the RunResult with save_token. Embed the result's fields
@@ -534,7 +535,7 @@ func (h *PipelineHandler) ApproveWaitpoint(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		h.logger.Error("waitpoint complete", "error", err, "token", token)
-		replyError(w, http.StatusInternalServerError, err.Error())
+		replyError(w, http.StatusInternalServerError, "Failed to complete waitpoint")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "approved": body.Approved})
