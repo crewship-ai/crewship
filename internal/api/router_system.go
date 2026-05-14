@@ -11,6 +11,7 @@ import "net/http"
 //
 //	GET /api/health                  (no auth)
 //	GET /api/v1/system/setup-status  (no auth — first-run gate)
+//	GET /api/v1/system/telemetry     (no auth — Sentry consent gate)
 //	GET /api/v1/system/runtime       (auth)
 //	GET /api/v1/system/version       (auth)
 //	GET /api/v1/system/license       (auth)
@@ -27,6 +28,14 @@ func (r *Router) registerSystemRoutes() {
 	// redirect a visitor to /bootstrap on an empty database.
 	setupH := NewSetupStatusHandler(r.db, r.logger, r.allowSignup)
 	r.mux.HandleFunc("GET /api/v1/system/setup-status", setupH.Status)
+
+	// Telemetry consent gate (no auth) — read by the frontend's
+	// sentry.client.config before calling Sentry.init. Must be
+	// reachable pre-login so the login page itself can be covered
+	// by crash reporting once consent is on. Read-only; consent is
+	// flipped via the CLI (`crewship telemetry on/off`), not over HTTP.
+	telemetryH := NewTelemetryStatusHandler(r.db, r.logger)
+	r.mux.HandleFunc("GET /api/v1/system/telemetry", telemetryH.Status)
 
 	// System info (auth required).
 	//
