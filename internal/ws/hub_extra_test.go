@@ -21,35 +21,6 @@ import (
 	"golang.org/x/net/websocket"
 )
 
-// nopSessionsStore satisfies the sessions.Store interface for tests
-// that don't care about session lookup. Get returns ErrNotFound for
-// any non-empty id (so the upgrade path treats every WS ticket as
-// "no session row" and falls through to CLI semantics — no revoke
-// checks). This keeps the existing WS tests behavior-preserving:
-// they pass tickets with empty sid via IssueWSTicket("u","",...) and
-// the hub skips the session lookup entirely. For tests that want the
-// lookup branch, build a real *sessions.DBStore.
-type nopSessionsStore struct{}
-
-func (*nopSessionsStore) Create(ctx context.Context, userID, ua, ip string, ttl time.Duration) (*sessions.Session, error) {
-	return nil, errors.New("nop store: Create not supported")
-}
-func (*nopSessionsStore) Get(ctx context.Context, id string) (*sessions.Session, error) {
-	return nil, sessions.ErrNotFound
-}
-func (*nopSessionsStore) ListActiveForUser(ctx context.Context, userID string) ([]*sessions.Session, error) {
-	return nil, nil
-}
-func (*nopSessionsStore) Revoke(ctx context.Context, id, reason string) error { return nil }
-func (*nopSessionsStore) RevokeAllForUser(ctx context.Context, userID, reason string) (int64, error) {
-	return 0, nil
-}
-func (*nopSessionsStore) TouchLastUsed(ctx context.Context, id string) error { return nil }
-func (*nopSessionsStore) RotateRefreshJti(ctx context.Context, id, expected, next string) error {
-	return nil
-}
-func (*nopSessionsStore) SetClock(fn func() time.Time) {}
-
 // defaultTestValidator returns a JWT validator initialised with a
 // known test secret. Tests that need to forge tokens against the
 // same key reach for this.
@@ -140,7 +111,7 @@ func newRunningHub(t *testing.T, opts ...func(*hubOpts)) *Hub {
 	logger := logging.New("error", "json", io.Discard)
 	o := &hubOpts{
 		validator: defaultTestValidator(t),
-		sessions:  &nopSessionsStore{},
+		sessions:  NopSessionsForTests,
 	}
 	for _, fn := range opts {
 		fn(o)
@@ -831,7 +802,7 @@ func TestNewHubPanicsWithoutValidator(t *testing.T) {
 		}
 	}()
 	logger := logging.New("error", "json", io.Discard)
-	NewHub(logger, nil, nil, &nopSessionsStore{})
+	NewHub(logger, nil, nil, NopSessionsForTests)
 }
 
 // TestNewHubPanicsWithoutSessions covers the parallel guard for the
