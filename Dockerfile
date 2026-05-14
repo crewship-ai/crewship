@@ -31,13 +31,19 @@ COPY --from=frontend /app/out ./web/out
 ARG VERSION=dev
 ARG COMMIT=none
 ARG DATE=unknown
+# SENTRY_DSN is intentionally a build-arg with empty default. The release
+# workflow passes --build-arg SENTRY_DSN=$SENTRY_DSN from the GH secret;
+# local `docker build` produces a binary with telemetry hard-off (the
+# crashreport package treats empty DSN as "stay disabled regardless of
+# opt-in" so dev images never phone home).
+ARG SENTRY_DSN=""
 # -trimpath strips workspace paths from binary debug info — same
 # rationale as the Makefile / goreleaser changes: reproducible builds
 # so cosign-verified hashes match across builders.
 RUN --mount=type=cache,id=go-mod,target=/go/pkg/mod \
     --mount=type=cache,id=go-build,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOOS=linux go build -trimpath \
-    -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}" \
+    -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE} -X github.com/crewship-ai/crewship/internal/crashreport.DSN=${SENTRY_DSN}" \
     -o /crewship ./cmd/crewship
 
 # -- Runner --

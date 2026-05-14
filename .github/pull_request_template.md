@@ -36,6 +36,17 @@
 - [ ] Environment variables updated (check `.env.example`)
 - [ ] No deployment changes needed
 
+## Migration Safety (skip if no migrations)
+
+Migrations are forward-only and append-only — once a migration ships in `main`,
+its version and name are immutable. The `migration-lint` workflow enforces this,
+but please confirm:
+
+- [ ] New migration's `version` is strictly greater than every existing one
+- [ ] No existing migration in `main` was renamed, renumbered, or had its `sql` changed
+- [ ] Schema change is backwards-compatible (no `DROP COLUMN` of a column still read by code)
+- [ ] If adding a non-nullable column, a `DEFAULT` is provided OR a `restoreBackfill` hook is wired
+
 ## Checklist
 
 - [ ] Self-review completed

@@ -1,0 +1,79 @@
+name: Migration Lint
+
+# Catches the classic two-branch-merge collision: a PR rebased onto main keeps
+# a version number that another PR has already shipped with different SQL. The
+# runtime collision check in internal/database/migrate.go would catch this at
+# customer boot — which is far too late once we're in beta with real data.
+#
+# Runs on every PR that touches the migrations file or the lint tooling, plus
+# on push to main as a safety net.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'internal/database/migrate.go'
+      - 'internal/database/migrate_consts_*.go'
+      - 'internal/database/migrate_lint_test.go'
+      - 'scripts/lint-migrations/**'
+      - '.github/workflows/migration-lint.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'internal/database/migrate.go'
+      - 'internal/database/migrate_consts_*.go'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: migration-lint-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: "1.26"
+
+jobs:
+  lint:
+    name: Lint migrations
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # fetch-depth: 0 so the cross-branch comparison can read origin/main.
+      # The lint tool runs `git show origin/main:internal/database/migrate.go`
+      # which needs the full ref tree.
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      # Determine the base ref to compare against. For PRs this is the merge
+      # target (typically main); for push events on main there's nothing to
+      # diff against, so we just run the in-tree invariants.
+      - name: Resolve base ref
+        id: base
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "ref=origin/${{ github.base_ref }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=" >> "$GITHUB_OUTPUT"
+          fi
+
+      # In-tree invariants: monotonic versions, unique names, every migration
+      # has a body. Runs on every event — these are cheap and catch the
+      # majority of mistakes.
+      - name: In-tree migration invariants
+        run: |
+          go test ./internal/database/ \
+            -run 'TestMigrationsAreStrictlyIncreasing|TestMigrationNamesAreUnique|TestMigrationsHaveBody' \
+            -count=1 -v
+
+      # Cross-branch check: catches version renumbering / removal against the
+      # base ref. Only meaningful for PRs.
+      - name: Cross-branch lint (PR only)
+        if: steps.base.outputs.ref != ''
+        run: go run ./scripts/lint-migrations "${{ steps.base.outputs.ref }}"
