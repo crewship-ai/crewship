@@ -64,32 +64,7 @@ func (h *AuthHandler) setSessionCookies(ctx context.Context, w http.ResponseWrit
 		return err
 	}
 
-	secure := isHTTPS(r)
-	accessName := "authjs.session-token"
-	refreshName := "authjs.refresh-token"
-	if secure {
-		accessName = "__Secure-authjs.session-token"
-		refreshName = "__Secure-authjs.refresh-token"
-	}
-
-	http.SetCookie(w, &http.Cookie{
-		Name:     accessName,
-		Value:    access,
-		Path:     "/",
-		HttpOnly: true,
-		Secure:   secure,
-		SameSite: http.SameSiteLaxMode,
-		MaxAge:   int(auth.AccessTokenTTL.Seconds()),
-	})
-	http.SetCookie(w, &http.Cookie{
-		Name:     refreshName,
-		Value:    refresh,
-		Path:     refreshCookiePath,
-		HttpOnly: true,
-		Secure:   secure,
-		SameSite: http.SameSiteLaxMode,
-		MaxAge:   int(auth.RefreshTokenTTL.Seconds()),
-	})
+	setAuthCookies(w, r, access, refresh)
 	return nil
 }
 

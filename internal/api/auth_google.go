@@ -195,31 +195,7 @@ func (h *GoogleAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	secure := isHTTPS(r)
-	accessName := "authjs.session-token"
-	refreshName := "authjs.refresh-token"
-	if secure {
-		accessName = "__Secure-authjs.session-token"
-		refreshName = "__Secure-authjs.refresh-token"
-	}
-	http.SetCookie(w, &http.Cookie{
-		Name:     accessName,
-		Value:    accessTok,
-		Path:     "/",
-		HttpOnly: true,
-		Secure:   secure,
-		SameSite: http.SameSiteLaxMode,
-		MaxAge:   int(auth.AccessTokenTTL.Seconds()),
-	})
-	http.SetCookie(w, &http.Cookie{
-		Name:     refreshName,
-		Value:    refreshTok,
-		Path:     refreshCookiePath,
-		HttpOnly: true,
-		Secure:   secure,
-		SameSite: http.SameSiteLaxMode,
-		MaxAge:   int(auth.RefreshTokenTTL.Seconds()),
-	})
+	setAuthCookies(w, r, accessTok, refreshTok)
 
 	// Redirect to dashboard (validate again as defense-in-depth)
 	target := "/"
