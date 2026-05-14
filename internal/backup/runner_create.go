@@ -269,7 +269,14 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 	// Sweep stale .partial files older than one hour. A process that
 	// crashed mid-CreateBackup leaves one behind; without this sweep
 	// the admin accumulates orphans forever and disk fills up.
-	cleanupStalePartials(ctx, st, outDir, time.Hour)
+	// Scope the sweep to THIS workspace/crew slug so a concurrent
+	// long-running backup of a sibling tenant whose .partial happens
+	// to be >1h old isn't deleted out from under it.
+	cleanupSlug := target.Slug
+	if opts.Scope == ScopeCrew && len(target.CrewTargets) > 0 {
+		cleanupSlug = target.CrewTargets[0].Slug
+	}
+	cleanupStalePartials(ctx, st, outDir, cleanupSlug, time.Hour)
 
 	// 5. Build the payload tar to a temp file so peak memory is bounded
 	// by the zstd encoder's window (a few MB) rather than the full

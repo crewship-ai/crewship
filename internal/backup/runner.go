@@ -387,11 +387,25 @@ func columnExists(ctx context.Context, db *sql.DB, table, col string) (bool, err
 }
 
 // cleanupStalePartials removes *.partial files older than maxAge in
-// dir. A crashed or cancelled CreateBackup leaves one behind; without
-// this sweep they accumulate forever. Errors are swallowed — the only
-// consequence of a failed cleanup is a file that will be retried on
-// the next backup, not a correctness issue.
-func cleanupStalePartials(ctx context.Context, st StorageOps, dir string, maxAge time.Duration) {
+// dir, OPTIONALLY narrowed to a single workspace/crew slug. A crashed
+// or cancelled CreateBackup leaves one behind; without this sweep they
+// accumulate forever. Errors are swallowed — the only consequence of a
+// failed cleanup is a file that will be retried on the next backup,
+// not a correctness issue.
+//
+// Bundle filenames follow `crewship-<scope>-<slug>-<ts>.tar.zst[.partial]`
+// (see BundleFileName). When ownerSlug is non-empty, only `.partial`
+// files whose name contains the corresponding `-<slug>-` segment are
+// swept; otherwise every stale `.partial` qualifies (the old
+// behaviour, kept for callers that don't know which slug they're
+// cleaning up for — e.g. an admin-side sweeper).
+//
+// The scoped form prevents the classic multi-tenant footgun: workspace
+// A starts a large backup whose `.partial` is alive for >1h; meanwhile
+// workspace B fires its own CreateBackup, the unconditional sweep
+// removes A's still-active `.partial`, and A's restore mid-write hits
+// a "file removed under us" error after acquiring the lock.
+func cleanupStalePartials(ctx context.Context, st StorageOps, dir, ownerSlug string, maxAge time.Duration) {
 	if st == nil {
 		st = getDefaultStorage()
 	}
@@ -399,12 +413,23 @@ func cleanupStalePartials(ctx context.Context, st StorageOps, dir string, maxAge
 	if err != nil {
 		return
 	}
+	// `-<slug>-` rather than `<slug>` so a slug that is a substring of
+	// another workspace's slug doesn't accidentally match. The dashes
+	// are part of BundleFileName's contract (`crewship-<scope>-<slug>-`).
+	var slugInfix string
+	if ownerSlug != "" {
+		slugInfix = "-" + ownerSlug + "-"
+	}
 	cutoff := time.Now().Add(-maxAge)
 	for _, e := range entries {
 		if e.IsDir() {
 			continue
 		}
-		if !strings.HasSuffix(e.Name(), ".partial") {
+		name := e.Name()
+		if !strings.HasSuffix(name, ".partial") {
+			continue
+		}
+		if slugInfix != "" && !strings.Contains(name, slugInfix) {
 			continue
 		}
 		info, err := e.Info()
