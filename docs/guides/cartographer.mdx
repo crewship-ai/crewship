@@ -21,6 +21,18 @@ From a checkpoint you can:
 - **Fork** — spawn a new mission anchored at the checkpoint's cursor. This is the concrete "go back and try a different path" operation.
 - **Delete** — remove a checkpoint (forks that reference it via `fork_of` are orphaned, not cascaded).
 
+## When to use it
+
+Checkpoints are cheap to mint and cheap to ignore — favour creating one whenever there's a meaningful state worth being able to compare or branch from later. The canonical triggers:
+
+- **Right before a risky agent step.** About to let the agent run a `terraform apply` or a destructive migration? `crewship checkpoint create --mission MIS-42 --label "pre-apply"` first. If the step goes sideways, `restore` produces a diff against where things were, and `fork` lets you retry from clean state in a parallel mission.
+- **A/B experimentation on prompts or tooling.** A mission has reached a sensible decision point and you want to try two different strategies (different system prompts, different tool sets). Checkpoint the current state, then `fork` once per variant — each fork gets its own mission ID, its own journal, and its own audit timeline.
+- **Mid-mission debugging — "what changed since 14:32?"** When an operator asks why a mission's behaviour drifted, the `restore` divergence list is the answer: it enumerates exactly which journal entries posted after the checkpoint was taken. Beats grepping the timeline.
+- **Long-running missions where you want milestone bookmarks.** A mission running across several hours of agent work benefits from a periodic checkpoint at each "task complete" boundary. Future operators (or future-you) can jump to a specific stage without scrolling the whole journal.
+- **Post-incident investigation.** Suspected misbehaviour? Checkpoint *immediately* — the snapshot freezes the visible state and the cursor pins what the agent saw up to that instant. Subsequent investigation can fork from the checkpoint into a sandbox mission for safe replay without disturbing the real one.
+
+Skip checkpoints for **short, single-step missions** (the journal IS the bookmark — one entry to inspect), **transient missions in development** that you'll delete anyway, and **missions that have done no work yet** — Create returns 409 Conflict if the mission has no journal entries to anchor against, by design.
+
 ## Schema
 
 ```sql
