@@ -14,6 +14,19 @@ The implementation funnels every entry point through one router file (`internal/
 
 Two safety properties are load-bearing and worth knowing before changing this code. First, `/forgot` always returns 200 regardless of whether the email matches a real account, so the endpoint cannot be used to enumerate users; real-vs-fake is signalled only by what arrives in the user's inbox. Second, the reset-link origin is `CREWSHIP_PUBLIC_URL` and never `r.Host` — the latter is attacker-tainted via the `Host` header and would otherwise let a POST `/forgot` mail the victim a working reset link pointing at an attacker-controlled domain. The handler refuses to send reset mail if `CREWSHIP_PUBLIC_URL` is unset or malformed, on the principle that a broken email is strictly safer than a hijackable one.
 
+## When to use it
+
+Reach for this guide when you're configuring, debugging, or extending an authentication path — not for ordinary login flows, which Just Work via the web UI:
+
+- **You're setting up SSO for an organisation.** Google OAuth needs `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` plus a redirect URI registered with the Google Cloud project. The auth router auto-disables the `/auth/google/*` endpoints when either env var is unset, so a half-configured install fails closed rather than half-open.
+- **You're enabling in-band password recovery.** The mailer (`internal/mailer/`) reads `RESEND_API_KEY` and `RESEND_FROM` at startup; without them, `/forgot` still returns 200 but nothing is sent and users must recover via the [Admin CLI](/guides/admin-cli). `CREWSHIP_PUBLIC_URL` must also be set to a valid `http(s)` origin or the handler refuses to mail reset links.
+- **You're issuing long-lived CLI tokens** for scripts, CI, or another machine without an interactive browser. Tokens are minted via `POST /api/v1/auth/cli-token` while session-authed, persisted as bcrypt hashes, and revocable from Settings → Sessions or via `DELETE /api/v1/auth/cli-tokens/{id}`.
+- **You're pairing the `crewship` CLI on a new dev machine.** The device-code handoff produces the same token type as the in-app issuer but with the convenience that the user never has to copy-paste a secret — see the dedicated [CLI Pairing](/guides/cli-pairing) guide for the device-code flow itself.
+- **You're plugging the Next.js frontend (or another NextAuth client) into Crewship.** The `/api/auth/*` shim implements the NextAuth contract — CSRF, providers, session, callback/credentials, token refresh, signin/signout, error — so a drop-in `next-auth` client can treat Crewship as a regular provider without bespoke glue.
+- **You're investigating a "can't log in" report.** Order of checks: `crewship admin list-users` (the row exists with the email casing the user typed?), session cookie present in the browser request, mailer logs (was a reset link sent?), `auth_recovery.go` error logs for token-redemption failures.
+
+For one-off recovery without shell access, the in-band `/forgot` flow above is the answer; for an admin locked out at the host level, jump to the [Admin CLI](/guides/admin-cli) guide instead.
+
 ## Related
 
 - [Onboarding](/guides/onboarding) — the first-run flow that bootstraps the initial admin account.
