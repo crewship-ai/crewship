@@ -41,6 +41,8 @@ lib/generated/
 
 # SQLite
 *.db
+*.sqlite
+*.sqlite3
 
 # Go
 /crewship
