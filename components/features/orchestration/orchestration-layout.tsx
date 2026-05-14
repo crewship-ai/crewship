@@ -23,7 +23,7 @@ import { OrchestrationActivity } from "@/components/features/orchestration/orche
 import { type DetailContext } from "@/components/features/orchestration/context-detail-panel"
 import { MissionYamlEditor } from "@/components/features/orchestration/mission-yaml-editor"
 import { DockerOverview } from "@/components/features/orchestration/docker-overview"
-import type { Mission, MissionTask, IssueLabel, IssueComment, Project, SavedView } from "@/lib/types/mission"
+import type { Mission, MissionTask, IssueLabel, Project, SavedView } from "@/lib/types/mission"
 import type { CrewSummary, AgentSummary, CrewConnection } from "@/lib/types/orchestration"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useUserPreference } from "@/hooks/use-user-preference"
@@ -324,9 +324,7 @@ export function OrchestrationLayout({
 
   const {
     selectedIssue,
-    setSelectedIssue,
     issueComments,
-    setIssueComments,
     handleIssueSelect,
     handleIssueClose,
     handleIssueUpdated,
@@ -487,7 +485,7 @@ export function OrchestrationLayout({
   useEffect(() => {
     const items: BreadcrumbItem[] = []
     if (selectedProject) {
-      items.push({ label: selectedProject.name, onClick: () => { setSelectedIssue(null); setIssueComments([]) } })
+      items.push({ label: selectedProject.name, onClick: handleIssueClose })
     }
     if (selectedIssue) {
       items.push({ label: selectedIssue.identifier || selectedIssue.title })
@@ -611,7 +609,7 @@ export function OrchestrationLayout({
                         onProjectSelect={(id) => {
                           const newId = id === selectedProjectId ? null : id
                           setSelectedProjectId(newId)
-                          if (newId) { setSelectedIssue(null); setIssueComments([]) }
+                          if (newId) handleIssueClose()
                         }}
                         onIssueSelect={handleIssueSelect}
                         crews={panelCrews}
@@ -672,7 +670,7 @@ export function OrchestrationLayout({
                     onProjectSelect={(id) => {
                       const newId = id === selectedProjectId ? null : id
                       setSelectedProjectId(newId)
-                      setSelectedIssue(null); setIssueComments([])
+                      handleIssueClose()
                     }}
                     onIssueSelect={handleIssueSelect}
                     crews={panelCrews}

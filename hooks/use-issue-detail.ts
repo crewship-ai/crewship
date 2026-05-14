@@ -102,9 +102,7 @@ export function useIssueDetail({
 
   return {
     selectedIssue,
-    setSelectedIssue,
     issueComments,
-    setIssueComments,
     handleIssueSelect,
     handleIssueClose,
     handleIssueUpdated,
