@@ -299,6 +299,14 @@ func TestE2E_BackupRestoreRoundTrip(t *testing.T) {
 	if !createResult.Manifest.Encryption.Enabled {
 		t.Error("expected encrypted bundle (passphrase mode)")
 	}
+	// The manifest must record the EXACT set of migrations the source
+	// had applied at backup time — that's what the restore-side schema
+	// skew check and the backfill replay both depend on. A regression
+	// that stamps a wrong/empty list silently neuters both safeguards.
+	if !equalInts(createResult.Manifest.SchemaMigrationVersions, sourceMigrations) {
+		t.Errorf("manifest SchemaMigrationVersions drift:\n  source applied=%v\n  manifest stamped=%v",
+			sourceMigrations, createResult.Manifest.SchemaMigrationVersions)
+	}
 
 	// Fresh target DB — same schema, zero data. This is what a beta
 	// tester's "I lost my disk and restored from backup" looks like.
@@ -318,6 +326,13 @@ func TestE2E_BackupRestoreRoundTrip(t *testing.T) {
 	}
 	if restoreResult.RowsInserted <= 0 {
 		t.Errorf("RestoreBackup inserted %d rows; expected > 0", restoreResult.RowsInserted)
+	}
+	// seedWorkspace creates exactly 2 crews; assert the restorer
+	// reports the same. A drift here means either the manifest's
+	// Contents.Crews didn't capture both or the count is being computed
+	// from a different source.
+	if restoreResult.CrewsCount != 2 {
+		t.Errorf("RestoreResult.CrewsCount=%d; expected 2 seeded crews", restoreResult.CrewsCount)
 	}
 
 	// Per-table diff.
@@ -402,6 +417,22 @@ func TestE2E_UpgradePath_BackfillHookFires(t *testing.T) {
 		return err
 	})
 	t.Cleanup(unregister)
+
+	// Anti-vacuity guard: a future seed change (or a stray production
+	// migration) that pre-populates `description` would make the
+	// post-restore assertion succeed without the backfill ever firing.
+	// Pin the source's pre-backup state so the test can only pass when
+	// the hook actually did the work.
+	var prePop int
+	if err := source.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM agents WHERE workspace_id = ? AND description = ?`,
+		workspaceID, sentinelMarker).Scan(&prePop); err != nil {
+		t.Fatalf("pre-backup sentinel scan: %v", err)
+	}
+	if prePop != 0 {
+		t.Fatalf("seed contamination: %d source agents already carry the sentinel; "+
+			"the post-restore assertion would be vacuous", prePop)
+	}
 
 	const passphrase = "upgrade-path-e2e-passphrase-123"
 	bundleDir := t.TempDir()
