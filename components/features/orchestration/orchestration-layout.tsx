@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
 import {
   Workflow, Clock, Activity, GitBranch,
-  FileText, PanelLeftClose, PanelLeftOpen,
+  PanelLeftClose, PanelLeftOpen,
   MessageSquare, Terminal, FileCode2, Container,
   ChevronUp, ChevronDown, ChevronLeft, ChevronRight, X,
   CircleDot, FolderKanban, ScrollText,
@@ -492,7 +492,7 @@ export function OrchestrationLayout({
     }
     setBreadcrumbs(items)
     return () => setBreadcrumbs([])
-  }, [selectedProject, selectedIssue, setBreadcrumbs])
+  }, [selectedProject, selectedIssue, setBreadcrumbs, handleIssueClose])
 
   // Toolbar surfaces are mode-dependent:
   //   - issues: hide tab bar, show New Issue + New Project buttons
