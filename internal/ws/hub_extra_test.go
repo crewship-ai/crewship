@@ -316,6 +316,88 @@ func TestBroadcastNonBlockingForSlowClient(t *testing.T) {
 	recvOrTimeout(t, fast.send)
 }
 
+// TestConsecutiveDropsCounterResetsOnSuccess covers the success arm of
+// dispatch — a single drop followed by a successful enqueue must reset
+// consecutiveDrops back to zero. Without the reset, a long-lived but
+// occasionally-bursty client would eventually hit the
+// force-disconnect threshold despite never actually being stuck.
+func TestConsecutiveDropsCounterResetsOnSuccess(t *testing.T) {
+	t.Parallel()
+	hub := newRunningHub(t)
+	hub.SetChannelAuthorizer(allowAllAuthorizer{})
+
+	c := newClient(t, hub, "u1")
+	c.subscribe("session:s1")
+	// Fill the buffer so the next dispatch falls into the default branch.
+	for i := 0; i < cap(c.send); i++ {
+		c.send <- []byte("filler")
+	}
+	hub.dispatch("session:s1", []byte("dropped"), nil)
+	if got := c.consecutiveDrops.Load(); got != 1 {
+		t.Fatalf("consecutiveDrops after one drop = %d, want 1", got)
+	}
+
+	// Drain one slot so the next dispatch succeeds.
+	<-c.send
+	hub.dispatch("session:s1", []byte("delivered"), nil)
+	if got := c.consecutiveDrops.Load(); got != 0 {
+		t.Errorf("consecutiveDrops after successful send = %d, want 0", got)
+	}
+	if c.disconnectFired.Load() {
+		t.Error("disconnectFired must remain false after a successful send")
+	}
+}
+
+// TestSlowConsumerForceDisconnect drives consecutiveDropsBeforeDisconnect
+// drops in a row past the cutoff and asserts the client is torn down
+// exactly once. The disconnect runs in a goroutine so the test polls
+// for ctx cancellation rather than asserting synchronously, but the
+// counter and one-shot flag are observable immediately. dispatch is
+// invoked directly (rather than via Broadcast) so the assertions don't
+// race the buffered hub.broadcast channel + Run goroutine.
+func TestSlowConsumerForceDisconnect(t *testing.T) {
+	t.Parallel()
+	hub := newRunningHub(t)
+	hub.SetChannelAuthorizer(allowAllAuthorizer{})
+
+	stuck := newClient(t, hub, "stuck")
+	stuck.subscribe("session:s1")
+	// Fill the buffer so every dispatch drops.
+	for i := 0; i < cap(stuck.send); i++ {
+		stuck.send <- []byte("filler")
+	}
+
+	// Drive exactly enough drops to cross the threshold. dispatch is
+	// invoked directly (instead of via Broadcast) so the test doesn't
+	// race the buffered hub.broadcast channel + Run goroutine.
+	for i := 0; i < consecutiveDropsBeforeDisconnect; i++ {
+		hub.dispatch("session:s1", []byte("drop"), nil)
+	}
+	if got := stuck.consecutiveDrops.Load(); got < consecutiveDropsBeforeDisconnect {
+		t.Fatalf("consecutiveDrops = %d, want >= %d", got, consecutiveDropsBeforeDisconnect)
+	}
+	if !stuck.disconnectFired.Load() {
+		t.Fatal("disconnectFired = false after crossing threshold, want true")
+	}
+
+	// forceDisconnect runs in a goroutine — wait for it to cancel ctx.
+	waitFor(t, func() bool {
+		return stuck.ctx.Err() != nil
+	}, "stuck client context to cancel after force-disconnect")
+
+	// A second pass of dropped broadcasts must NOT spawn another
+	// disconnect goroutine (CompareAndSwap is the guard). The
+	// observable invariant: the flag stays exactly true; we can't
+	// directly count goroutines, but we can confirm extra drops don't
+	// flip the flag back or otherwise misbehave.
+	for i := 0; i < 16; i++ {
+		hub.dispatch("session:s1", []byte("extra"), nil)
+	}
+	if !stuck.disconnectFired.Load() {
+		t.Error("disconnectFired flipped after threshold — one-shot guard regressed")
+	}
+}
+
 // ---------- Subscribe / authorize ----------
 
 func TestSubscribeDeniedWithoutAuthorizer(t *testing.T) {
