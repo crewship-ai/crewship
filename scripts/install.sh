@@ -287,7 +287,14 @@ main() {
   fi
 
   printf '\n'
-  ok "$("${DEST}/crewship" version | head -n1)"
+  # Capture-then-extract rather than piping through `head -n1`. Under
+  # `set -euo pipefail` the pipeline can SIGPIPE if head closes its
+  # input before crewship has finished writing, which surfaces as a
+  # spurious install failure exit. Capturing into a variable first
+  # decouples the two.
+  version_full=$("${DEST}/crewship" version)
+  version_line=${version_full%%$'\n'*}
+  ok "$version_line"
   check_docker_hint
 
   # PATH hint if we installed somewhere not on PATH (rare given pick_install_dir).
