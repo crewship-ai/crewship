@@ -140,12 +140,12 @@ input on average).`,
 
 // forecastRow is one model + its projected $ for the requested run.
 type forecastRow struct {
-	Model       string  `json:"model"`
-	InputUSD    float64 `json:"input_usd"`
-	OutputUSD   float64 `json:"output_usd"`
-	TotalUSD    float64 `json:"total_usd"`
-	InTokens    int     `json:"input_tokens"`
-	OutTokens   int     `json:"output_tokens"`
+	Model     string  `json:"model"`
+	InputUSD  float64 `json:"input_usd"`
+	OutputUSD float64 `json:"output_usd"`
+	TotalUSD  float64 `json:"total_usd"`
+	InTokens  int     `json:"input_tokens"`
+	OutTokens int     `json:"output_tokens"`
 }
 
 // providerRate is one model + its public per-1M-token list price.

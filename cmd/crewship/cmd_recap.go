@@ -99,9 +99,8 @@ Be terse. No preamble. No "Here is the summary:". Start with the outcome.
 			_ = askCmd.Flags().Set("agent", v)
 		}
 
-		if !cmd.Flags().Changed("format") && cliCfg != nil && cliCfg.Format == "" {
-			// No-op — Format resolution happens in newFormatter.
-		}
+		// Format resolution is handled inside newFormatter (called by
+		// the ask command's RunE); no explicit fallback needed here.
 
 		if askCmd.RunE == nil {
 			return fmt.Errorf("internal: ask command has no RunE")

@@ -18,9 +18,9 @@ import (
 // the final assistant message of each linked chat, and renders a
 // terse diff. Use cases:
 //
-//	- "did v2 of my routine actually fix the bug?" → diff before/after
-//	- "what changed between Friday's prod run and Monday's regression?"
-//	- "did the agent give two different answers to the same prompt?"
+//   - "did v2 of my routine actually fix the bug?" → diff before/after
+//   - "what changed between Friday's prod run and Monday's regression?"
+//   - "did the agent give two different answers to the same prompt?"
 var diffCmd = &cobra.Command{
 	Use:   "diff <run-a> <run-b>",
 	Short: "Diff two existing runs (status, output, journal head)",
