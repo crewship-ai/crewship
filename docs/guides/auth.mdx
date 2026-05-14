@@ -44,6 +44,88 @@ For one-off recovery without shell access, the in-band `/forgot` flow above is t
 | **NextAuth shim** | The `/api/auth/*` set of endpoints (`csrf`, `providers`, `session`, `callback/credentials`, `token/refresh`, `signin`, `signout`, `error`) that implement the NextAuth client contract. Lets the Next.js frontend treat Crewship like any other NextAuth provider with no custom glue. |
 | **Mailer** | The interface in `internal/mailer/`. `mailer.NewFromEnv()` returns the Resend implementation when `RESEND_API_KEY` is set, or `mailer.Disabled` (which returns `ErrDisabled` on every `Send` call) otherwise. The disabled mailer is a feature, not a bug — it keeps `/forgot` non-enumerable on installs that haven't configured email. |
 
+## Usage
+
+The end-to-end operator path from a fresh binary to working login + recovery is six configuration steps and one bootstrap call. None of them are mandatory after the first — once the env vars are set and the admin exists, day-to-day sign-in needs nothing else.
+
+### 1. Set the public origin
+
+Required if you intend to enable in-band password recovery. This is the URL the reset email links to and the OAuth callback origin Google will see.
+
+```bash
+export CREWSHIP_PUBLIC_URL=https://crewship.example.com
+```
+
+The recovery handler parses this once at startup; a malformed or unset value silently disables reset-email sending (`/forgot` still returns 200 to preserve non-enumeration).
+
+### 2. Configure the mailer (optional)
+
+```bash
+export RESEND_API_KEY=re_abc123…
+export RESEND_FROM='Crewship <noreply@example.com>'
+```
+
+Without these, the mailer falls back to `mailer.Disabled` — installs without email still work, but users can't recover passwords in-band. They must instead use [Admin CLI](/guides/admin-cli) `reset-password` from the host shell.
+
+### 3. Configure Google OAuth (optional)
+
+```bash
+export GOOGLE_CLIENT_ID=...
+export GOOGLE_CLIENT_SECRET=...
+```
+
+The auth router mounts `/api/v1/auth/google/redirect` and `/callback` only when both are present. `/api/v1/auth/google/status` always responds with `{"enabled": true|false}` so the frontend can render — or skip — the "Sign in with Google" button without 404 noise.
+
+### 4. Bootstrap the first admin
+
+On a fresh database, the `/bootstrap` page or endpoint creates the initial `OWNER`:
+
+```bash
+curl -X POST https://crewship.example.com/api/v1/bootstrap \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"admin@example.com","password":"<strong>","name":"Admin"}'
+```
+
+The endpoint is idempotent — a second call against a database that already has any user returns 409, so re-running provisioning is safe.
+
+### 5. Sign in (day-to-day)
+
+The Next.js frontend handles credentials via `POST /api/auth/callback/credentials`, sets a session cookie, and every subsequent request rides on `RequireAuth`. No client-side state, no JWT inspection — the session is server-owned.
+
+### 6. Mint a CLI token (for scripts / CI)
+
+While session-authed in the web UI:
+
+```bash
+curl -sX POST https://crewship.example.com/api/v1/auth/cli-token \
+  -H "Cookie: $SESSION_COOKIE" \
+  -d '{"name":"deploy-script"}'
+# {"id":"tok_…","token":"crewship_pat_…"}
+```
+
+Store `token` in CI secrets and pass it as `Authorization: Bearer <token>` on subsequent requests. Revoke with `DELETE /api/v1/auth/cli-tokens/{id}` from the same UI or via the API.
+
+### Recovery flow walkthrough
+
+If a user forgets their password and the mailer is configured:
+
+```bash
+# 1. User hits /forgot in the UI; frontend posts:
+curl -X POST https://crewship.example.com/api/v1/auth/forgot \
+  -d '{"email":"forgetful@example.com"}'
+# Always returns 200 (non-enumeration), even for unknown emails.
+
+# 2. Resend delivers a link of the form:
+#    https://crewship.example.com/reset-password?token=<30-min-token>
+
+# 3. User submits the new password from that page:
+curl -X POST https://crewship.example.com/api/v1/auth/reset \
+  -d '{"token":"<…>","password":"<new>"}'
+# Atomically rotates the bcrypt hash AND invalidates all active sessions for the user.
+```
+
+If the mailer is `mailer.Disabled`, step 2 never happens — the user must go through host-level [Admin CLI](/guides/admin-cli) recovery instead.
+
 ## Related
 
 - [Onboarding](/guides/onboarding) — the first-run flow that bootstraps the initial admin account.
