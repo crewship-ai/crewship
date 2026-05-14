@@ -104,10 +104,11 @@ func TestEnforceOrigin_RefererFallback(t *testing.T) {
 }
 
 func TestEnforceOrigin_AllowedOriginsList(t *testing.T) {
-	// Override the package-level list for the test.
-	origAllowed := allowedOriginSuffixes
-	allowedOriginSuffixes = []string{"https://app.crewship.io", "https://staging.crewship.io"}
-	defer func() { allowedOriginSuffixes = origAllowed }()
+	// Override under the shared test-globals mutex (see
+	// withAllowedOriginSuffixes) so this stays parallel-safe; restored
+	// via t.Cleanup. CodeRabbit's R2 review caught the unguarded
+	// mutation pattern.
+	withAllowedOriginSuffixes(t, []string{"https://app.crewship.io", "https://staging.crewship.io"})
 
 	h := EnforceOrigin(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)

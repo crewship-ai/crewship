@@ -1,10 +1,19 @@
+//go:build !windows
+
+// The tests in this file exercise Unix-only syscalls (Mkfifo, ELOOP) that
+// don't exist on Windows. The build constraint keeps `go build`/`go test`
+// on a Windows host from failing to compile — the runtime.GOOS skips
+// inside each test only matter at test time and don't help the type
+// checker. Memory indexer itself runs only on Unix sidecars
+// (containers), so no Windows production path exercises the helper this
+// test covers.
+
 package memory
 
 import (
 	"errors"
 	"os"
 	"path/filepath"
-	"runtime"
 	"syscall"
 	"testing"
 	"time"
@@ -36,10 +45,8 @@ func TestReadRegularNoFollow_RegularFileOK(t *testing.T) {
 // O_NOFOLLOW makes the open syscall fail with ELOOP. We don't care which
 // specific error wraps it — only that the open did not succeed.
 func TestReadRegularNoFollow_RejectsSymlink(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("symlink semantics differ on Windows; threat model is Linux/macOS sidecar")
-	}
-
+	// Build constraint at the top of this file already excludes Windows
+	// from compiling these tests; no runtime check needed.
 	dir := t.TempDir()
 
 	// Create the file the symlink will point at — content the attacker
@@ -78,9 +85,7 @@ func TestReadRegularNoFollow_RejectsSymlink(t *testing.T) {
 // path with a deadline — pre-fix it would block past the deadline and
 // fail fast rather than hanging the whole suite.
 func TestReadRegularNoFollow_RejectsFIFO_DoesNotHang(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("FIFO not supported on Windows")
-	}
+	// Build constraint at the top of this file already excludes Windows.
 	dir := t.TempDir()
 	fifo := filepath.Join(dir, "pipe.md")
 	if err := syscall.Mkfifo(fifo, 0o600); err != nil {

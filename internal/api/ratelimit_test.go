@@ -4,6 +4,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 	"time"
 
@@ -87,9 +88,7 @@ func TestRateLimiter_SeparateIPsIndependent(t *testing.T) {
 // parsing walks past them to the true client.
 func TestExtractIP_XForwardedFor_FromTrustedProxy(t *testing.T) {
 	// The chain represents: client → cdn (70.41.3.18) → nginx (150.172.238.178) → us (loopback)
-	origCIDRs := trustedProxyCIDRs
-	trustedProxyCIDRs = parseTrustedProxies("70.41.3.18,150.172.238.178")
-	defer func() { trustedProxyCIDRs = origCIDRs }()
+	withTrustedProxyCIDRs(t, parseTrustedProxies("70.41.3.18,150.172.238.178"))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.RemoteAddr = "127.0.0.1:54321" // loopback = trusted (default)
@@ -116,9 +115,7 @@ func TestExtractIP_XRealIP_FromTrustedProxy(t *testing.T) {
 // trusted nginx hop and surfaces the real attacker IP for bucketing.
 func TestExtractIP_AppendProxyChain(t *testing.T) {
 	// Trust the nginx proxy at 10.0.0.5/32 in addition to the loopback default.
-	origCIDRs := trustedProxyCIDRs
-	trustedProxyCIDRs = parseTrustedProxies("10.0.0.5/32")
-	defer func() { trustedProxyCIDRs = origCIDRs }()
+	withTrustedProxyCIDRs(t, parseTrustedProxies("10.0.0.5/32"))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.RemoteAddr = "10.0.0.5:54321" // the nginx hop — trusted
@@ -141,9 +138,7 @@ func TestExtractIP_LeftmostStillUntrustedSingleProxy(t *testing.T) {
 
 // TestExtractIP_AllChainEntriesAreTrusted falls back to the connection IP.
 func TestExtractIP_AllChainEntriesAreTrusted(t *testing.T) {
-	origCIDRs := trustedProxyCIDRs
-	trustedProxyCIDRs = parseTrustedProxies("10.0.0.0/8")
-	defer func() { trustedProxyCIDRs = origCIDRs }()
+	withTrustedProxyCIDRs(t, parseTrustedProxies("10.0.0.0/8"))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.RemoteAddr = "10.0.0.5:9999"
@@ -156,9 +151,7 @@ func TestExtractIP_AllChainEntriesAreTrusted(t *testing.T) {
 // TestClientIPFromXFF_AcceptsHostPort handles real-world headers that
 // include the source port on XFF entries.
 func TestClientIPFromXFF_AcceptsHostPort(t *testing.T) {
-	origCIDRs := trustedProxyCIDRs
-	trustedProxyCIDRs = parseTrustedProxies("10.0.0.5/32")
-	defer func() { trustedProxyCIDRs = origCIDRs }()
+	withTrustedProxyCIDRs(t, parseTrustedProxies("10.0.0.5/32"))
 
 	got := clientIPFromXFF("8.8.8.8, 203.0.113.50:54321, 10.0.0.5:8080")
 	assert.Equal(t, "203.0.113.50", got, "host:port entries should resolve to host before trust check")
@@ -168,9 +161,7 @@ func TestClientIPFromXFF_AcceptsHostPort(t *testing.T) {
 // that knows the trusted-proxy IP from setting X-Real-IP=<that-IP> and
 // having extractIP echo it back.
 func TestExtractIP_XRealIPRejectsTrustedProxyValue(t *testing.T) {
-	origCIDRs := trustedProxyCIDRs
-	trustedProxyCIDRs = parseTrustedProxies("10.0.0.5/32")
-	defer func() { trustedProxyCIDRs = origCIDRs }()
+	withTrustedProxyCIDRs(t, parseTrustedProxies("10.0.0.5/32"))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.RemoteAddr = "10.0.0.5:9999"
@@ -277,6 +268,45 @@ func TestParseTrustedProxies_DropsInvalidEntries(t *testing.T) {
 	// Loopback defaults + the one valid entry survive; invalid entries don't crash.
 	assert.True(t, anyContains(cidrs, net.ParseIP("127.0.0.1")))
 	assert.True(t, anyContains(cidrs, net.ParseIP("10.0.0.1")))
+}
+
+// TestResolveRateLimitDisabled_NewVarBeatsLegacy is the regression
+// guard for CodeRabbit's R2 "make the renamed env var authoritative"
+// note. A stale CREWSHIP_DISABLE_RATELIMIT=true left in the environment
+// from before the rename must not silently override an explicit
+// CREWSHIP_RATELIMIT_DISABLED=false.
+func TestResolveRateLimitDisabled_NewVarBeatsLegacy(t *testing.T) {
+	cases := []struct {
+		name      string
+		newVar    *string // nil → unset
+		legacyVar *string
+		want      bool
+	}{
+		{"both unset", nil, nil, false},
+		{"new=true legacy=true", strPtr("true"), strPtr("true"), true},
+		{"new=true legacy=false", strPtr("true"), strPtr("false"), true},
+		{"new=false legacy=true (legacy must NOT win)", strPtr("false"), strPtr("true"), false},
+		{"new=false legacy unset", strPtr("false"), nil, false},
+		{"new unset legacy=true (legacy honoured)", nil, strPtr("true"), true},
+		{"new unset legacy=false", nil, strPtr("false"), false},
+		{"new=garbage legacy=true (new is set => authoritative even when unparseable)", strPtr("not-a-bool"), strPtr("true"), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.newVar != nil {
+				t.Setenv("CREWSHIP_RATELIMIT_DISABLED", *tc.newVar)
+			} else {
+				_ = os.Unsetenv("CREWSHIP_RATELIMIT_DISABLED")
+			}
+			if tc.legacyVar != nil {
+				t.Setenv("CREWSHIP_DISABLE_RATELIMIT", *tc.legacyVar)
+			} else {
+				_ = os.Unsetenv("CREWSHIP_DISABLE_RATELIMIT")
+			}
+			got := resolveRateLimitDisabled()
+			assert.Equal(t, tc.want, got, "case %q", tc.name)
+		})
+	}
 }
 
 func anyContains(cidrs []*net.IPNet, ip net.IP) bool {

@@ -12,19 +12,33 @@ import (
 	"golang.org/x/time/rate"
 )
 
-// rateLimitDisabled is true when CREWSHIP_RATELIMIT_DISABLED parses as a
-// truthy boolean. Typically only set in dev shells running E2E suites that
-// would otherwise exhaust the 10/min auth bucket. Fails closed on parse
-// error: empty string or unparseable value keeps rate-limiting engaged.
+// rateLimitDisabled is true when the operator has explicitly toggled the
+// rate limiter off. Two env vars are honoured, with strict precedence:
 //
-// Legacy alias: CREWSHIP_DISABLE_RATELIMIT is honoured for one release for
-// existing dev environments. Logged at startup so the operator notices the
-// rename. Will be removed in a follow-up release.
+//  1. CREWSHIP_RATELIMIT_DISABLED — the canonical, current name. If set
+//     (any value, even empty), it is authoritative.
+//  2. CREWSHIP_DISABLE_RATELIMIT — the legacy alias kept for one release
+//     to ease the rename. Only consulted when the canonical var is
+//     **not set at all**.
 //
-// In production (CREWSHIP_ENV=prod or production), this flag is ignored —
-// the limiter always runs. See SecureStartupCheck.
-var rateLimitDisabled = parseBoolEnv("CREWSHIP_RATELIMIT_DISABLED") ||
-	parseBoolEnv("CREWSHIP_DISABLE_RATELIMIT")
+// CodeRabbit's R2 review caught the ambiguity in the previous OR-form:
+// a stale `CREWSHIP_DISABLE_RATELIMIT=true` left over from before the
+// rename would silently override an explicit
+// `CREWSHIP_RATELIMIT_DISABLED=false`, and would also trip the
+// MustNotDisableRateLimitInProd guard after the rename.
+//
+// In production (CREWSHIP_ENV=prod or production), this flag is ignored
+// regardless of which env var set it — the limiter always runs. See
+// MustNotDisableRateLimitInProd.
+var rateLimitDisabled = resolveRateLimitDisabled()
+
+func resolveRateLimitDisabled() bool {
+	if v, ok := lookupBoolEnv("CREWSHIP_RATELIMIT_DISABLED"); ok {
+		return v
+	}
+	v, _ := lookupBoolEnv("CREWSHIP_DISABLE_RATELIMIT")
+	return v
+}
 
 // trustedProxyCIDRs lists the CIDRs of reverse proxies whose
 // X-Forwarded-For/X-Real-IP headers we trust. Set via
@@ -38,6 +52,32 @@ var rateLimitDisabled = parseBoolEnv("CREWSHIP_RATELIMIT_DISABLED") ||
 // uncapped token bucket — bypassing credential-stuffing throttles, the
 // `/credentials/test` validation oracle, and the general API limit alike.
 var trustedProxyCIDRs = parseTrustedProxies(os.Getenv("CREWSHIP_TRUSTED_PROXY_CIDRS"))
+
+// lookupBoolEnv reads a boolean env var with three-state semantics:
+//   - (false, false) → variable is not set at all (unset)
+//   - (true,  true)  → variable is set to a truthy value
+//   - (false, true)  → variable is set to a falsy / unparseable value
+//
+// The "set" bit is what `resolveRateLimitDisabled` uses to give the
+// canonical name precedence over the legacy alias even when its value
+// is `false`. parseBoolEnv stays as a lossy two-state wrapper for any
+// other caller that doesn't care about the distinction.
+func lookupBoolEnv(name string) (bool, bool) {
+	raw, ok := os.LookupEnv(name)
+	if !ok {
+		return false, false
+	}
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		// Set but blank — treat as "not enabled", but still authoritative.
+		return false, true
+	}
+	b, err := strconv.ParseBool(raw)
+	if err != nil {
+		return false, true
+	}
+	return b, true
+}
 
 func parseBoolEnv(name string) bool {
 	v := strings.TrimSpace(os.Getenv(name))
