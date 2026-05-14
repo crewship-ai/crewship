@@ -223,20 +223,29 @@ The UI redirects the operator into the new mission. The old mission is untouched
 - `cartographer.Capture(ctx, db, missionID)` walks the journal for that mission and produces `(snapshot, cursor)`.
 - If the mission has no journal entries, Create returns **409 Conflict** (`mission has no journal entries to anchor a checkpoint`) -- a checkpoint without anchor can't diverge.
 
-## Endpoints summary
+## API reference
+
+Full request/response schemas live at [`/api-reference/checkpoints`](/api-reference/checkpoints). The handler source is `internal/api/cartographer.go` — small enough to read end-to-end. The endpoints, grouped by mission-scope vs. checkpoint-scope:
+
+### Mission-scoped (mission ID in path)
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/v1/missions/{missionId}/checkpoints` | List newest-first (limit 1-200, default 50). |
-| POST | `/api/v1/missions/{missionId}/checkpoints` | Create checkpoint at current cursor. |
-| GET | `/api/v1/checkpoints/{id}` | Full checkpoint detail. |
-| POST | `/api/v1/checkpoints/{id}/restore` | Advisory -- returns divergence list. |
-| POST | `/api/v1/checkpoints/{id}/fork` | Spawn new mission + fork checkpoint. |
-| DELETE | `/api/v1/checkpoints/{id}` | Delete. Orphans `fork_of` children (no cascade). |
+| `GET` | `/api/v1/missions/{missionId}/checkpoints` | List newest-first. Query params: `limit` (1–200, default 50), `cursor` for keyset pagination. |
+| `POST` | `/api/v1/missions/{missionId}/checkpoints` | Create checkpoint at current cursor. Body: `{"label": "…"}` (optional). Returns 409 if mission has no journal entries. |
 
-Workspace isolation is enforced at the handler (mission must belong to caller's workspace) AND at the package (`cartographer.Get/Delete` re-check workspace). Cross-tenant IDs return 404 with the same shape as "not found".
+### Checkpoint-scoped (checkpoint ID in path)
 
-See [Checkpoints API](/api-reference/checkpoints) for request/response schemas.
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/api/v1/checkpoints/{id}` | Full checkpoint detail — snapshot, cursor, fork_of, created_by/at. |
+| `POST` | `/api/v1/checkpoints/{id}/restore` | Advisory. Returns `(checkpoint, journal_cursor, warn_divergence[])`. **Never mutates.** |
+| `POST` | `/api/v1/checkpoints/{id}/fork` | Spawn new mission + fork checkpoint. Body: `{"label": "…"}` (optional). Returns `{new_mission_id, new_checkpoint_id}`. |
+| `DELETE` | `/api/v1/checkpoints/{id}` | Delete checkpoint. Orphans children (sets their `fork_of` to NULL); does NOT cascade to forked missions. |
+
+Workspace isolation is enforced at the handler (mission must belong to the caller's workspace) AND at the package (`cartographer.Get` / `Delete` re-check workspace). Cross-tenant IDs return 404 with the same shape as "not found" — the same response a missing ID would produce — by design, to prevent existence enumeration.
+
+The CLI binary (`crewship checkpoint …`) maps 1:1 onto these endpoints; see [Usage](#usage) for invocations and `/cli/checkpoint` for full flag reference.
 
 ## CLI
 
