@@ -32,9 +32,7 @@ func (r *Router) registerAdminRoutes() {
 	keeperLog := NewKeeperLogHandler(r.db, r.logger)
 	r.mux.Handle("GET /api/v1/admin/keeper/requests", authed(wsCtx(http.HandlerFunc(keeperLog.List))))
 
-	// Backups (admin-only; require workspace context for scoping). See
-	// .claude/context/prd/BACKUP.md for the full API contract.
-	//
+	// Backups (admin-only; require workspace context for scoping).
 	// Adapt the concrete Docker client to backup.DockerOps so the
 	// admin-backup HTTP layer doesn't see the Moby SDK directly.
 	var backupDockerOps backup.DockerOps

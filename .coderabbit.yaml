@@ -112,7 +112,6 @@ reviews:
     - "!public/images/**"
     - "!node_modules/**"
     - "!.claude/artifacts/**"
-    - "!.claude/context/**"
     - "!**/*.min.js"
     - "!**/*.min.css"
     - "!tsconfig.tsbuildinfo"

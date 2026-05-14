@@ -12,8 +12,8 @@
 #   - restore into a fresh instance
 #
 # Those paths are exercised by the integration tests in the backup
-# package (go test ./internal/backup/... -count=1) and the manual
-# smoke drill in .claude/context/prd/BACKUP.md section 15.
+# package (go test ./internal/backup/... -count=1) and a manual
+# smoke drill documented internally.
 #
 # Run: scripts/e2e-backup-test.sh
 set -euo pipefail

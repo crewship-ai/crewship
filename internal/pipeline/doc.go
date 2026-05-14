@@ -74,7 +74,6 @@
 //
 //   - docs/guides/routines.mdx                — user-facing concepts
 //   - docs/cli/routine.mdx                    — CLI subcommand reference
-//   - .claude/context/prd/PIPELINES.md §17    — design / scope source of truth
 //   - schemas/routine.v1.json                 — JSON Schema for IDE support
 //   - internal/api/pipelines.go               — HTTP handlers
 //   - internal/api/pipelines_save_token.go    — HMAC save_token primitives
