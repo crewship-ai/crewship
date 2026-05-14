@@ -1,0 +1,103 @@
+---
+title: "crewship version"
+description: "Print version, commit SHA, build date, Go runtime, and OS/arch of the running binary."
+icon: "tag"
+---
+
+# crewship version
+
+Prints the binary's version metadata. First command to run on any new
+install to confirm what you actually installed.
+
+```bash
+crewship version
+```
+
+## Output
+
+```
+$ crewship version
+crewship v0.1.0-beta.1
+  commit:  92ecb9553fe0f9e71cdef38cc0a02edc3e3fa9c7
+  built:   2026-05-14T10:25:17+0200
+  go:      go1.26
+  os/arch: darwin/arm64
+```
+
+Five fields:
+
+| Field | Source |
+|-------|--------|
+| **version** | Goreleaser-injected tag at release-build time (`-X main.version`). For local `go build`, defaults to `dev`. |
+| **commit** | Git SHA of the build commit (`-X main.commit`). For local `go build`, defaults to `none`. |
+| **built** | ISO-8601 timestamp of the build commit (`-X main.date`). For local `go build`, defaults to `unknown`. |
+| **go** | `runtime.Version()` of the Go toolchain that compiled the binary. |
+| **os/arch** | `runtime.GOOS` and `runtime.GOARCH`. |
+
+The first three are baked at link time via ldflags; see the `builds`
+block in `.goreleaser.yml`. Local `go build` without flags omits them,
+which is how we tell a release artifact from a workstation build at a
+glance.
+
+## Comparison with `--version` flags
+
+Crewship deliberately does **not** support `crewship --version` or
+`-v` as version probes. `-v` is taken by `--verbose` (which `start`
+uses) and a top-level `--version` would conflict with sub-command
+flag parsing. Use `crewship version` as the single, unambiguous way.
+
+## Programmatic version checks
+
+For scripts that need to act on the running binary's version, parse
+the first line. Bash:
+
+```bash
+ver=$(crewship version | head -n1 | awk '{print $2}')
+echo "running: $ver"
+```
+
+Or JSON for tools that want structured output — wrap it:
+
+```bash
+crewship version | awk '
+  /^crewship/ { ver=$2 }
+  /^  commit/ { sha=$2 }
+  /^  built/  { date=$2 }
+  END { printf "{\"version\":\"%s\",\"commit\":\"%s\",\"built\":\"%s\"}\n", ver, sha, date }
+'
+```
+
+For long-term scriptable version checks, the server also exposes
+`GET /api/v1/system/version` which returns:
+
+```json
+{
+  "current": "v0.1.0-beta.1",
+  "latest":  "v0.1.0",
+  "newer":   true,
+  "url":     "https://github.com/crewship-ai/crewship/releases/tag/v0.1.0"
+}
+```
+
+(Authenticated endpoint. The `latest` / `newer` / `url` fields drive
+the update-available banner in the web UI.)
+
+## Update available?
+
+Both `crewship version` and `crewship doctor` print a banner if a
+newer release is available. Suppress via env:
+
+```bash
+CREWSHIP_SKIP_UPDATE_CHECK=1 crewship version
+```
+
+The check is HTTP GET to GitHub Releases API, cached 24h in
+`~/.crewship/cache/`. Skips silently for `version=dev` (local builds).
+
+## Related
+
+- [`crewship doctor`](/cli/doctor) — full pre-flight diagnostic;
+  uses the same update-check infrastructure.
+- [`crewship start`](/cli/start) — boot flow that logs the same
+  version string at INFO level.
+- [Install](/guides/install) — what each install path gives you.
