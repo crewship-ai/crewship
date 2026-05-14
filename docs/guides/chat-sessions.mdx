@@ -26,6 +26,24 @@ Most chat surface usage is self-evident — "talk to the agent" — but the dura
 
 For one-off "ask the agent a question" use, just open `/chat/<agent>` and start typing — the session row gets created automatically on first send.
 
+## Key concepts
+
+| Term | What it means here |
+|------|-------------------|
+| **Session** | One row in `chats`, scoped to one agent. Stable ID, persists across reloads and operators. Anyone with read access to the agent can resume the same transcript. Created lazily on first send (or explicitly via `POST /api/v1/agents/{agentId}/chats`). |
+| **`chats.origin`** | A `NULL`-able enum stamped at create time: `UI`, `CLI`, `WEBHOOK`, `CRON`, or `AGENT`. Anything else is stored as `NULL` so a rogue caller cannot inject arbitrary text into a UI chip. Migration v59. |
+| **Chat branch** | A divergence in the conversation tree produced by edit-and-resend. The truncated tail isn't deleted — it lives in `chat_branches` (migration v57) so the alternate timeline stays retrievable. The active branch is the one currently rendered. |
+| **Slash palette** | Server-registered command set surfaced by typing `/` at start-of-line or `Ctrl+K` anywhere. Commands like `/eval`, `/checkpoint`, `/skill` are parsed as structured commands (not chat messages) and route to dedicated handlers. |
+| **Model picker** | Per-turn override of the agent's `llm_model`. Lives next to the send button. The override applies only to the current send — the agent's default model is unchanged for subsequent turns. |
+| **Attachment** | A file uploaded into a chat — image, document, log, anything ≤25 MB. Stored on the server's storage provider with a `chat_attachments` row pointing at it (migration v57). The agent's container sees the file under `/output/<agentSlug>/attachments/<chatId>/<filename>`. |
+| **Reaction** | A workspace-shared emoji vote on a single assistant message. Persisted in `message_reactions` (migration v57) with `UNIQUE(chat, message, emoji, user)` so POST is idempotent. Aggregated counts (`{emoji, count, mine}`) returned by List. |
+| **Right-panel tab** | One of **Files** (F1), **Artifacts** (F2), **Diff** (F3), or **Terminal** (F4). Each tab streams independently; switching tabs doesn't retrigger inactive streams. URL state `&panel=…` deep-links to a tab. |
+| **Shallow router state** | Browser-only URL params written via `window.history.replaceState` (helper: `useShallowSearchParam`). Used for which panel is open, which message is being edited, slash-palette state — none of which justify a full Next.js navigation but all of which should appear in copy-pasted URLs. |
+| **`request_id`** | A client-generated UUID stamped on every send. The server idempotently dedupes by `request_id` so a retry after a WS reconnect never duplicates the user turn. Surfaced on outbound messages so clients can correlate sent-vs-acknowledged. |
+| **Presence chip** | The small status indicator in the composer footer — `online` / `thinking` / `blocked` / `offline`. Driven by the [Watch Roster](/guides/watch-roster); not a guess from idle timers. |
+| **Pinned session** | A session with a per-user pin flag set. Pinned sessions float to the top of the sidebar regardless of last-message timestamp. Useful for "the conversation I always come back to". |
+| **`workspace_files`** | The durable, workspace-scoped blob index (migration v57). The Files right-panel reads from this view; mid-edit files live there until the agent's next commit. |
+
 ## Routes
 
 Two top-level routes serve chat:
