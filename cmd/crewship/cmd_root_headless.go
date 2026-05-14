@@ -121,4 +121,3 @@ func init() {
 	// positional args by default unless ArbitraryArgs / MinimumNArgs is set.
 	rootCmd.Args = cobra.ArbitraryArgs
 }
-
