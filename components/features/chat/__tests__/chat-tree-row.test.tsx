@@ -4,12 +4,12 @@ import {
   buildTopLevelTree,
   insertTreeChildren,
   findTreeNode,
-  isPreviewable,
   getEditorLanguage,
   getChatFileIcon,
   type FileEntry,
   type TreeNode,
 } from "../chat-tree-row"
+import { isPreviewable } from "@/lib/file-format"
 
 function file(partial: Partial<FileEntry> & { name: string; is_dir: boolean }): FileEntry {
   return {
