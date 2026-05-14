@@ -28,11 +28,13 @@ export function useIssueDetail({
 }) {
   const [selectedIssue, setSelectedIssue] = useState<Mission | null>(null)
   const [issueComments, setIssueComments] = useState<IssueComment[]>([])
-  // Sequencing guard for fetchComments: each call bumps the request id,
-  // and only the latest response is allowed to mutate comments. Without
-  // this, rapid issue switching can let a slow earlier fetch land after
-  // a faster later one and overwrite the wrong panel.
+  // Sequencing guards. Each is bumped by mutations that should invalidate
+  // in-flight async work so a stale completion can't smear over fresher state.
+  //   commentRequestId — protects setIssueComments inside fetchComments.
+  //   issueUpdateRequestId — protects setSelectedIssue inside handleIssueUpdated,
+  //     which has its own multi-await chain that fetchComments alone can't cover.
   const commentRequestId = useRef(0)
+  const issueUpdateRequestId = useRef(0)
 
   const fetchComments = useCallback(
     async (crewId: string, identifier: string) => {
@@ -54,6 +56,9 @@ export function useIssueDetail({
 
   const handleIssueSelect = useCallback(
     async (issue: Mission) => {
+      // Any selection change invalidates an in-flight handleIssueUpdated
+      // for the previous issue — bump the update guard too.
+      issueUpdateRequestId.current++
       // Toggle: clicking the same issue again deselects it.
       if (selectedIssue?.id === issue.id) {
         commentRequestId.current++
@@ -74,20 +79,25 @@ export function useIssueDetail({
   )
 
   const handleIssueClose = useCallback(() => {
+    issueUpdateRequestId.current++
     commentRequestId.current++
     setSelectedIssue(null)
     setIssueComments([])
   }, [])
 
   const handleIssueUpdated = useCallback(async () => {
+    const myUpdateReq = ++issueUpdateRequestId.current
     await fetchIssues()
+    if (myUpdateReq !== issueUpdateRequestId.current) return
     if (selectedIssue?.crew_id && selectedIssue?.identifier) {
       try {
         const res = await fetch(
           `/api/v1/issues/${encodeURIComponent(selectedIssue.identifier)}?workspace_id=${encodeURIComponent(workspaceId)}`,
         )
+        if (myUpdateReq !== issueUpdateRequestId.current) return
         if (res.ok) {
           const fresh: Mission = await res.json()
+          if (myUpdateReq !== issueUpdateRequestId.current) return
           setSelectedIssue(fresh)
           if (fresh.crew_id && fresh.identifier) {
             await fetchComments(fresh.crew_id, fresh.identifier)
@@ -97,6 +107,7 @@ export function useIssueDetail({
         /* ignore — fetchIssues already refreshed the list */
       }
     }
+    if (myUpdateReq !== issueUpdateRequestId.current) return
     await fetchProjects()
   }, [fetchIssues, fetchProjects, fetchComments, selectedIssue?.crew_id, selectedIssue?.identifier, workspaceId])
 
