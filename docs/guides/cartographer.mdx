@@ -267,11 +267,16 @@ Full flags: [`crewship checkpoint`](/cli/checkpoint).
 | Restore | `checkpoint.restored` | `info` (advisory; divergence list in payload) |
 | Fork | `fork.created` | `notice` |
 
-## Gotchas
+## Common pitfalls
 
-- **Orphaned forks.** Deleting a checkpoint that other checkpoints `fork_of` reference sets those references to NULL; it does not delete the forked missions. This is deliberate -- the fork is a real mission with its own work, deleting the ancestor should not destroy it.
-- **`journal_cursor` is an entry ID, not a timestamp.** Pagination over the journal uses compound `(ts, id)`; cartographer uses just `id` because the cursor is an anchor, not a cursor for a range.
-- **Divergence is informational.** If the warn_divergence list is long, the snapshot may no longer reflect the real current state of the mission's external side-effects (committed code, created containers, sent messages). Fork, don't try to restore.
+- **Restore is advisory — never a rewind.** The endpoint name is misleading if you read it literally: `restore` returns a diff, not a time-machine. Crewship deliberately doesn't unwind sidecar state, container filesystems, or external side effects (commits pushed, messages sent, containers created) that fired after the checkpoint — partial rewind has no safe general form. If you actually want to "go back", **fork**; the divergence list tells you whether you should.
+- **Orphaned forks are deliberate.** Deleting a checkpoint that other checkpoints reference via `fork_of` sets those pointers to NULL — it does NOT cascade to the forked missions. A fork is a real mission with its own work; deleting the ancestor checkpoint should never destroy descendant work product. If you want the forked missions gone too, delete them explicitly first.
+- **`journal_cursor` is an entry ID, not a timestamp.** Pagination over the journal uses compound `(ts, id)`; cartographer uses just `id` because the cursor is an anchor, not a range pointer. Trying to "find the checkpoint nearest 14:32" via the cursor field is a category error — query the journal for the entry ID at that timestamp first, then use that to anchor.
+- **A divergence list that's grown long is a signal to fork, not investigate.** Once `warn_divergence` is more than a handful of entries, the snapshot's state probably no longer reflects the live mission's external reality. The checkpoint is still useful as a starting point for a fork; trying to use it as a baseline for "what should the mission look like now" gets unreliable fast.
+- **Cannot checkpoint a mission with no journal entries.** `Create` returns 409 (`mission has no journal entries to anchor a checkpoint`) if you try. The first journal entry must exist before a checkpoint can pin to anything — run the mission for at least one step first.
+- **Cross-tenant checkpoint IDs return 404, not 403.** A checkpoint ID from another workspace produces the same response as a non-existent ID — by design, to prevent existence enumeration. If you genuinely thought you owned a checkpoint and got 404, double-check the workspace context the CLI / API call is running under (the `CREWSHIP_WORKSPACE` env var or the session cookie's workspace claim).
+- **Forks live in the source workspace + crew.** A fork doesn't escape to a parent workspace or unrelated crew — it's a sibling mission in the same scope. If you need cross-workspace promotion (e.g., "this experiment graduated, copy to prod"), that's a separate workflow involving [Backup & Restore](/guides/backup) `--as-workspace`, not a fork.
+- **The state JSON is plaintext on disk.** Checkpoints are operational metadata, not secrets — but the `state` column captures whatever the mission's orchestrator saw at the time. Don't pin mission state mid-tool-call if the tool's arguments include credentials; the credential strings would land in the checkpoint snapshot. Use [Keeper](/guides/keeper)-backed credentials so tool inputs only ever reference IDs, not raw values.
 
 ## Related
 
