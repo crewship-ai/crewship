@@ -6,12 +6,20 @@ icon: "map"
 
 # Cartographer
 
-Cartographer pins named bookmarks into the mission journal -- **checkpoints**. Each checkpoint stores a JSON state snapshot plus a **journal cursor** (the ID of the last entry at the time the checkpoint was made). From a checkpoint you can:
+## Overview
 
-- **List** -- see all bookmarks in a mission.
-- **Restore** (advisory) -- get the checkpoint plus the list of journal entries that have diverged since. No mission state is mutated.
-- **Fork** -- spawn a new mission anchored at the checkpoint's cursor. This is the concrete "go back and try a different path" operation.
-- **Delete** -- remove a checkpoint (forks that reference it via `fork_of` are orphaned, not cascaded).
+Cartographer pins named bookmarks into the mission journal — **checkpoints**. Each checkpoint stores a JSON state snapshot plus a **journal cursor** (the ID of the last entry at the time the checkpoint was made). The two together let an operator answer "where were we at 14:32?" and "what happened since?" — first by reading the snapshot, then by replaying the journal entries past the cursor.
+
+Crucially, restore is *advisory*: it produces a report (`checkpoint + divergence`), not a database mutation. Cartographer never rewrites a mission's history — that's the [Crew Journal](/guides/crew-journal)'s job, and journals are append-only by design. When the operator actually wants to "go back and try a different path", the right operation is `fork`: spawn a fresh mission whose journal starts from the parent's checkpoint cursor. The new mission has its own ID, its own row, its own audit timeline; the original mission keeps running (or stays paused) without contamination. This is the same model Git's branch-from-commit takes — Cartographer is the mission-level equivalent, and the `fork_of` column on the new mission's row is the equivalent of a parent SHA pointer.
+
+The subsystem itself is small: a single table (`checkpoints`), one handler file (`internal/api/cartographer.go`), and a thin CLI wrapper. There's no scheduler, no background worker, no extra ports — checkpoints are written by explicit operator action and read on demand. The four operations are **List** (enumerate bookmarks for a mission), **Restore** (advisory diff against the journal), **Fork** (spawn the new mission anchored at the cursor), and **Delete** (drop a checkpoint; forks that reference it via `fork_of` are orphaned, not cascaded). Workspace-scope and crew-scope access checks ride on the same RBAC the rest of the API uses.
+
+From a checkpoint you can:
+
+- **List** — see all bookmarks in a mission.
+- **Restore** (advisory) — get the checkpoint plus the list of journal entries that have diverged since. No mission state is mutated.
+- **Fork** — spawn a new mission anchored at the checkpoint's cursor. This is the concrete "go back and try a different path" operation.
+- **Delete** — remove a checkpoint (forks that reference it via `fork_of` are orphaned, not cascaded).
 
 ## Schema
 
