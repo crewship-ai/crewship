@@ -368,15 +368,25 @@ func (h *SkillHandler) Import(w http.ResponseWriter, r *http.Request) {
 	}
 
 	imp := skills.NewImporter(h.db, h.logger)
-	imp.SkipURLValidation = h.SkipURLValidation
+	if h.SkipURLValidation {
+		// Flips both the validator AND the dial-time guard, so test
+		// fixtures using httptest.NewServer (loopback) keep working.
+		imp.SetSkipURLValidation(true)
+	}
 	result, err := imp.Import(r.Context(), wsID, user.ID, skills.ImportRequest{
 		URL:                req.URL,
 		Content:            req.Content,
 		AllowUnsafeLicense: req.AllowUnsafeLicense,
 	})
 	if err != nil {
-		h.logger.Info("skill import failed", "error", err)
-		writeProblem(http.StatusBadRequest, err.Error())
+		// Full error captured for ops; sanitised reason returned to the
+		// caller so the response can't double as an internal-network
+		// mapper. Anything net/http reports — resolved IPs, TLS cert SAN
+		// lists, distinguishable connection-refused-vs-timeout — would
+		// turn this endpoint into a precise port scanner against the
+		// dev-VM's reachable surface.
+		h.logger.Info("skill import failed", "error", err, "url", req.URL)
+		writeProblem(http.StatusBadRequest, sanitiseSkillImportError(err))
 		return
 	}
 
@@ -403,6 +413,56 @@ func (h *SkillHandler) Import(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusCreated, result)
+}
+
+// sanitiseSkillImportError turns the verbose error returned by the
+// importer into a short message that's safe to return in the API
+// response. The full error is still useful for ops — call sites should
+// log it under slog before using the sanitised form.
+//
+// The transformation closes F-002: previously the handler echoed the
+// raw net/http error verbatim, which leaked the resolved internal IP,
+// TLS cert SAN list, and distinguishable connection-refused-vs-timeout
+// signals. Combined with the F-001 dial-time guard upstream, the only
+// information a caller can extract from a denied import is the
+// classification, not the network topology.
+func sanitiseSkillImportError(err error) string {
+	if err == nil {
+		return ""
+	}
+	// SSRF guard fired — be explicit (helpful for legit callers using
+	// e.g. a misconfigured proxy hostname) without leaking the resolved IP.
+	if errors.Is(err, skills.ErrSSRFBlocked) {
+		return "import blocked: target resolves to a private, loopback, or otherwise restricted address"
+	}
+	// License-rejection messages are user-actionable (they name the SPDX
+	// id detected vs allowed) and don't leak network state. Pass through.
+	var licErr *skills.LicenseError
+	if errors.As(err, &licErr) {
+		return licErr.Error()
+	}
+	// Generic classification — never echoes the raw upstream error.
+	cat := skills.ClassifyFetchError(err)
+	if cat == "" {
+		return "could not import skill"
+	}
+	msg := err.Error()
+	// Validate-step errors from ValidateImportURL ("only HTTPS URLs are allowed",
+	// "localhost URLs are not allowed", "private/internal IP addresses are not
+	// allowed", "invalid URL: ...") are crafted by us, not by net/http, and are
+	// safe + helpful to pass through.
+	if strings.HasPrefix(msg, "only HTTPS URLs") ||
+		strings.Contains(msg, "localhost URLs are not allowed") ||
+		strings.Contains(msg, "private/internal IP addresses are not allowed") ||
+		strings.HasPrefix(msg, "invalid URL:") ||
+		strings.HasPrefix(msg, "url is required") {
+		return msg
+	}
+	// Parser errors are user-actionable but not network-revealing — pass through.
+	if strings.HasPrefix(msg, "parse skill:") || strings.HasPrefix(msg, "normalize skill URL:") {
+		return msg
+	}
+	return "could not fetch import URL (" + cat + ")"
 }
 
 // severityForUnsafe escalates the journal severity when the operator

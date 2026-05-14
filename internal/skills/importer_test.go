@@ -97,7 +97,7 @@ func TestImporter_FromURL_MockHTTPServer(t *testing.T) {
 	db := setupSkillTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	imp := skills.NewImporter(db, logger)
-	imp.SkipURLValidation = true // allow localhost for test
+	imp.SetSkipURLValidation(true) // allow localhost for test
 
 	result, err := imp.Import(context.Background(), "ws1", "user1", skills.ImportRequest{
 		URL: srv.URL + "/SKILL.md",
@@ -126,7 +126,7 @@ func TestImporter_FromURL_PathPreserved(t *testing.T) {
 	db := setupSkillTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	imp := skills.NewImporter(db, logger)
-	imp.SkipURLValidation = true // allow localhost for test
+	imp.SetSkipURLValidation(true) // allow localhost for test
 
 	_, err := imp.Import(context.Background(), "ws1", "user1", skills.ImportRequest{
 		URL: srv.URL + "/path/to/SKILL.md",
@@ -161,7 +161,7 @@ func TestImporter_URLFetchError(t *testing.T) {
 	db := setupSkillTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	imp := skills.NewImporter(db, logger)
-	imp.SkipURLValidation = true // allow localhost for test
+	imp.SetSkipURLValidation(true) // allow localhost for test
 
 	_, err := imp.Import(context.Background(), "ws1", "user1", skills.ImportRequest{
 		URL: srv.URL + "/missing.md",
@@ -301,7 +301,7 @@ func TestImporter_OversizedResponse_Rejected(t *testing.T) {
 	db := setupSkillTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	imp := skills.NewImporter(db, logger)
-	imp.SkipURLValidation = true // allow localhost for test
+	imp.SetSkipURLValidation(true) // allow localhost for test
 
 	_, err := imp.Import(context.Background(), "ws1", "user1", skills.ImportRequest{
 		URL: srv.URL + "/SKILL.md",

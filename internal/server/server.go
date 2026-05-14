@@ -109,6 +109,12 @@ func (d *Deps) Close() {
 // orchestrator, scheduler, stats collector, etc.) wired together.
 
 func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
+	// Refuse to start with rate limiting disabled in a production env.
+	// Catches the deployment-drift mode where CREWSHIP_RATELIMIT_DISABLED=true
+	// (or the legacy CREWSHIP_DISABLE_RATELIMIT) leaks from a dev shell into
+	// a prod deploy and silently exposes /api/auth/* to credential stuffing.
+	goapi.MustNotDisableRateLimitInProd()
+
 	mux := http.NewServeMux()
 	ipcMux := http.NewServeMux()
 
@@ -584,6 +590,17 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 func (s *Server) combinedHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
+		// Reject sensitive paths up front so the SPA fallback can't
+		// double as a 200-on-everything signal that masks them. Pre-fix
+		// scanners hitting /.env, /.git/HEAD, /debug/vars, etc. all got
+		// `200 text/html` (the SPA shell), which (a) creates noise in
+		// pentest reports and (b) hides a real leak if a future reverse
+		// proxy ever serves the actual file at the same path. Hard 404
+		// keeps the surface honest. F-004.
+		if isSensitiveStaticPath(path) {
+			http.NotFound(w, r)
+			return
+		}
 		if strings.HasPrefix(path, "/api/") ||
 			strings.HasPrefix(path, "/exposed/") ||
 			path == "/healthz" || path == "/readyz" ||
@@ -594,6 +611,58 @@ func (s *Server) combinedHandler() http.Handler {
 		}
 		s.spaHandler.ServeHTTP(w, r)
 	})
+}
+
+// sensitiveStaticPathPrefixes lists URL path prefixes that should never be
+// served by the SPA fallback. Hitting one of these means either a probe
+// or a misrouted request — either way, 404 not 200.
+var sensitiveStaticPathPrefixes = []string{
+	"/.git/", "/.env", "/.aws/", "/.ssh/",
+	"/debug/vars", "/debug/pprof/",
+	"/server-status", "/server-info",
+}
+
+// sensitiveStaticPathExact lists URL paths that are sensitive only as
+// exact matches (so the legitimate SPA route /package-json doesn't
+// accidentally match a /package.json denylist).
+var sensitiveStaticPathExact = map[string]struct{}{
+	"/.env":              {},
+	"/.gitignore":        {},
+	"/.git":              {},
+	"/.htaccess":         {},
+	"/composer.lock":     {},
+	"/composer.json":     {},
+	"/package.json":      {},
+	"/package-lock.json": {},
+	"/pnpm-lock.yaml":    {},
+	"/yarn.lock":         {},
+	"/go.mod":            {},
+	"/go.sum":            {},
+	"/Gemfile":           {},
+	"/Gemfile.lock":      {},
+	"/next.config.js":    {},
+	"/next.config.ts":    {},
+	"/next.config.mjs":   {},
+	"/wp-config.php":     {},
+	"/web.config":        {},
+	// Catch /debug/pprof and /debug/vars without a trailing slash too —
+	// the prefix denylist only matches "/debug/pprof/", missing the
+	// bare-form probes some scanners use first. CodeRabbit's slash-bypass
+	// note from the first review pass.
+	"/debug/pprof": {},
+	"/debug/vars":  {},
+}
+
+func isSensitiveStaticPath(path string) bool {
+	if _, ok := sensitiveStaticPathExact[path]; ok {
+		return true
+	}
+	for _, p := range sensitiveStaticPathPrefixes {
+		if strings.HasPrefix(path, p) {
+			return true
+		}
+	}
+	return false
 }
 
 // SetChatHandler sets the handler for WebSocket chat messages.
