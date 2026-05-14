@@ -107,6 +107,8 @@ func TestBackupMetrics_HandlerEmptiesWhenCallerHasNoLock(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 	var got map[string]any
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
-	heldRaw, _ := got["lock_held_seconds_by_workspace"].(map[string]any)
+	heldRaw, ok := got["lock_held_seconds_by_workspace"].(map[string]any)
+	require.True(t, ok,
+		"response must carry lock_held_seconds_by_workspace as a map[string]any; a missing or wrong-typed field would silently pass assert.Empty below and weaken this regression guard (CodeRabbit R2)")
 	assert.Empty(t, heldRaw, "caller with no active lock must see an empty map, not other workspaces' state; got: %v", heldRaw)
 }
