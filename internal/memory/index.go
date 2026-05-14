@@ -3,9 +3,11 @@ package memory
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -31,17 +33,37 @@ func (e *Engine) ReindexContext(ctx context.Context) error {
 		return fmt.Errorf("clear index: %w", err)
 	}
 
-	// Walk the memory directory for .md files
+	// Walk the memory directory for .md files. The agent (UID 1001) has
+	// write access into this directory; the indexer runs as the sidecar
+	// (UID 1002). Without the symlink check, an agent could plant a
+	// symlink like `.memory/AGENT.md → /etc/shadow` and have the sidecar
+	// read+index it under a different uid. The walker uses Lstat-style
+	// FileInfo, so symlinks show up as ModeSymlink rather than as their
+	// target's type — we can detect and skip them here. The follow-up
+	// O_NOFOLLOW open below catches any TOCTOU race between this walk
+	// and the read.
 	var files []string
 	err := filepath.Walk(e.basePath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil // skip unreadable files
+		}
+		// Reject any symlink — neither files nor directories. An agent
+		// has no legitimate reason to symlink into .memory/; if they
+		// want a file indexed, they should write the .md content
+		// directly.
+		if info.Mode()&os.ModeSymlink != 0 {
+			return nil
 		}
 		if info.IsDir() {
 			// Skip hidden dirs except the base itself
 			if strings.HasPrefix(info.Name(), ".") && path != e.basePath {
 				return filepath.SkipDir
 			}
+			return nil
+		}
+		// Skip non-regular files (devices, FIFOs, sockets) — same uid-
+		// crossing concern as symlinks.
+		if !info.Mode().IsRegular() {
 			return nil
 		}
 		if strings.HasSuffix(info.Name(), ".md") {
@@ -69,9 +91,13 @@ func (e *Engine) ReindexContext(ctx context.Context) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		data, err := os.ReadFile(fpath)
+		data, err := readRegularNoFollow(fpath)
 		if err != nil {
-			continue // skip unreadable files
+			// O_NOFOLLOW returns ELOOP (or "too many levels of
+			// symbolic links") if the agent raced us between Walk and
+			// open by replacing the file with a symlink. Either way,
+			// silently skip — the .md is just gone from this index pass.
+			continue
 		}
 
 		// Make file paths relative to basePath for cleaner display
@@ -98,4 +124,32 @@ func (e *Engine) ReindexContext(ctx context.Context) error {
 	}
 
 	return tx.Commit()
+}
+
+// readRegularNoFollow opens path with O_NOFOLLOW so the open syscall
+// fails (with ELOOP) if path's last component is a symlink. We Stat
+// after opening to confirm the file is still regular — defends against
+// the agent racing us between Lstat at walk time and Open here. Returns
+// the file contents or an error; the caller treats any error as "skip
+// this entry from this index pass."
+//
+// Note: O_NOFOLLOW only checks the FINAL component. Intermediate
+// symlinks in the path (e.g. .memory/sub being a symlink to /tmp/sub)
+// would still be traversed. For our threat model — agent has write
+// access to .memory/ but not to its parent directories — the final
+// component is the only attacker-controlled hop, so this is enough.
+func readRegularNoFollow(path string) ([]byte, error) {
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	st, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !st.Mode().IsRegular() {
+		return nil, fmt.Errorf("not a regular file: %s", path)
+	}
+	return io.ReadAll(f)
 }
