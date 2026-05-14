@@ -286,6 +286,26 @@ crewship backup restore crewship-workspace-acme-latest.tar.zst \
 
 A `backup.restore.dry_run` audit entry shows up in the workspace journal — auditors looking at "did anyone restore prod?" can tell drill runs apart from real restores by the action name.
 
+## API reference
+
+The backup surface is CLI-first — every operation is reachable via `crewship backup …` and every flag the CLI accepts maps to an HTTP body field. The full HTTP schema lives at [`/api-reference/backup`](/api-reference/backup); a quick orientation:
+
+| Method | Path | What it does |
+|--------|------|--------------|
+| `POST` | `/api/v1/backups` | Create a bundle. **Auth + OWNER/ADMIN.** Same trust gate as the CLI; concurrent calls hit the [advisory lock](#lock-semantics) and the second returns 409. |
+| `GET`  | `/api/v1/backups` | List bundles on disk for the current workspace. |
+| `GET`  | `/api/v1/backups/{filename}/manifest` | Plaintext manifest only — equivalent to `crewship backup inspect`. No passphrase required. |
+| `POST` | `/api/v1/backups/{filename}/verify` | End-to-end SHA-256 + AGE decrypt check. No DB writes. |
+| `POST` | `/api/v1/backups/{filename}/restore` | Restore. Body accepts `dry_run`, `as_workspace`, `as_crew`. **Holds the lock for the whole call.** |
+| `DELETE` | `/api/v1/backups/{filename}` | Delete a bundle. Idempotent — 404 is not an error in scripted use. |
+| `POST` | `/api/v1/backups/rotate` | Retention sweep. Body accepts `keep_last`, `keep_days`, `dry_run`. |
+| `GET`  | `/api/v1/backups/lock` | Inspect the advisory lock state (used by `crewship backup status`). |
+| `DELETE` | `/api/v1/backups/lock` | Force-release a stale lock. Requires `force=true` body field — **never** call from automation without a confirmation gate. |
+
+All routes are mounted in `internal/api/router_backup.go`. The CLI talks to these directly when run against a remote host (`--server` flag) and falls back to in-process Go calls when run on the same machine as `crewshipd` — bypassing HTTP entirely for the host-shell use case. The two paths share the same handler functions, so flags work identically.
+
+Webhook payloads for `backup.created` / `backup.restored` / `backup.restore.dry_run` events are documented separately under [Webhooks](#webhooks); metric emissions are documented under [Metrics](#metrics).
+
 ## Streaming & memory bounds (large backups)
 
 Restore and verify stream the sealed payload to a temp directory rather than buffering per-crew sections in a `map[slug][]byte`. Peak heap stays bounded by the zstd decoder window regardless of bundle size, so multi-GB restores run cleanly on small hosts. The extraction scratch directory is `os.TempDir()/crewship-backup-…` and is removed on `Close()`; a killed process leaves it behind for the next `os.TempDir` cleanup.
