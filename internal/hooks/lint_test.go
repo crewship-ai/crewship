@@ -25,6 +25,14 @@ func TestLintShellCommand(t *testing.T) {
 		{"only quotes", `""`, 0},
 		{"backslash-escaped quote does not toggle state", `echo "\"" $CREWSHIP_PAYLOAD`, 1},
 		{"two unquoted refs in one command", `echo $CREWSHIP_EVENT and $CREWSHIP_PAYLOAD`, 2},
+		// Inside single-quotes the backslash is LITERAL — it does not
+		// escape the closing quote. A previous version of this lint
+		// applied generic backslash-skip regardless of quote state,
+		// which made `'test\' $CREWSHIP_VAR` silently swallow the
+		// closing quote and stay forever "inside single quotes",
+		// hiding the unquoted ref that follows.
+		{"backslash inside single-quotes is literal — must still close span", `'test\' $CREWSHIP_VAR`, 1},
+		{"backslash inside single-quotes — multiple unquoted refs after close", `echo 'a\b' $CREWSHIP_EVENT $CREWSHIP_PAYLOAD`, 2},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

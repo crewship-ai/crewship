@@ -29,11 +29,16 @@ func LintShellCommand(cmd string) []string {
 	for i := 0; i < len(cmd); i++ {
 		c := cmd[i]
 		switch {
-		case c == '\\' && i+1 < len(cmd):
-			// Skip the escaped char so e.g. \" doesn't toggle the
-			// double-quote state. We don't try to model bash escaping
-			// inside single-quotes (where backslash is literal) because
-			// the variable check below is short-circuited by inSingle.
+		case c == '\\' && i+1 < len(cmd) && !inSingle:
+			// Outside single-quotes a backslash escapes the next char,
+			// so skip it to avoid e.g. `\"` flipping the double-quote
+			// state. Inside single-quotes (POSIX shell + bash)
+			// backslash is LITERAL — it does not escape the closing
+			// quote — so we fall through to the default case and let
+			// the next iteration see a real `'` that closes the span.
+			// Without the !inSingle guard `'test\' $CREWSHIP_VAR`
+			// would silently swallow the closing quote and miss every
+			// unquoted CREWSHIP_* reference that follows.
 			i++
 		case c == '\'' && !inDouble:
 			inSingle = !inSingle
