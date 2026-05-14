@@ -6,9 +6,13 @@ icon: "terminal"
 
 # CLI Adapters
 
-Crewship runs each agent as a subprocess of a vendor coding CLI inside the crew container. The agent record's `cli_adapter` column picks which binary and which command line; the orchestrator's `BuildCLICommand` (`internal/orchestrator/exec.go`) is the one place that knows the per-vendor flag conventions.
+## Overview
 
-Six adapters are supported as of 2026-04. Adding another adapter is a single new `case` in `BuildCLICommand` plus a normalisation rule in `agents_create.go` for the default tool profile.
+Crewship runs each agent as a subprocess of a vendor coding CLI inside the crew container. The agent record's `cli_adapter` column picks which binary and which command line; the orchestrator's `BuildCLICommand` (`internal/orchestrator/exec.go`) is the one place that knows the per-vendor flag conventions. Everything else in the orchestrator — prompt assembly, memory injection, journal writing, tool routing — is adapter-agnostic; the adapter layer is only responsible for translating Crewship's uniform internal representation into whatever flags / files / stdio shape a given vendor CLI expects.
+
+The adapter pattern exists because no two coding-CLI vendors agree on anything. Claude Code reads its system prompt from a `--system-prompt` flag; Cursor reads it from files in `CWD`; Codex CLI infers it from `AGENTS.md`; Gemini takes the user message via `-p`; Factory Droid expresses autonomy as a tier (`--auto low|medium`) instead of a tool list. Rather than picking a winner, Crewship supports all of them — six adapters as of 2026-04 — and lets the operator choose per agent. The selection lives on the agent row, so a `backend` crew can run Claude Code while a `data` crew uses Gemini, with no orchestrator-wide config change.
+
+Adding another vendor is intentionally small: one new `case` in `BuildCLICommand` for the command-line translation, plus a normalisation rule in `agents_create.go` for the default tool profile and any vendor-specific defaults. The `adapter_hint` field on the [CLI pairing](/guides/cli-pairing) request is *telemetry only* — the backend never routes on it, and the frontend list of adapters lives in `lib/cli-adapters.ts` rather than in Go, so a new adapter is a TypeScript file plus a Go switch arm, not a schema migration.
 
 ## Supported adapters
 
