@@ -13,14 +13,20 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/cli"
+	"github.com/crewship-ai/crewship/internal/crashreport"
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/provider/apple"
 	"github.com/crewship-ai/crewship/internal/provider/docker"
+	"github.com/crewship-ai/crewship/internal/update"
 	"github.com/spf13/cobra"
 )
 
 // checkResult is one row in the doctor output. status is one of
-// "PASS" / "WARN" / "FAIL"; detail is the human-readable explanation.
+// "PASS" / "WARN" / "FAIL" / "INFO"; detail is the human-readable
+// explanation. INFO is treated like PASS for exit-code purposes but
+// rendered in a neutral colour — it surfaces purely informational
+// findings (e.g. "update check failed, harmless") that should not be
+// confused with a real warning the operator must act on.
 //
 // The struct exists so each check can be a discrete function that
 // returns a single value, making the doctor easy to extend (add
@@ -29,7 +35,7 @@ import (
 // caring about ordering or rendering details).
 type checkResult struct {
 	name   string
-	status string // PASS / WARN / FAIL
+	status string // PASS / WARN / FAIL / INFO
 	detail string
 	hint   string
 }
@@ -43,6 +49,8 @@ func (r checkResult) print() {
 		color = cli.Yellow
 	case "FAIL":
 		color = cli.Red
+	case "INFO":
+		color = cli.Dim
 	default:
 		color = cli.Gray
 	}
@@ -77,7 +85,7 @@ are deliberately left to the operator with actionable URLs in the output.`,
 			return context.WithTimeout(parentCtx, 10*time.Second)
 		}
 
-		results := make([]checkResult, 0, 7)
+		results := make([]checkResult, 0, 11)
 		runProbe := func(fn func(context.Context) checkResult) {
 			ctx, cancel := withTimeout()
 			defer cancel()
@@ -90,6 +98,15 @@ are deliberately left to the operator with actionable URLs in the output.`,
 		results = append(results, checkSidecarBinary())
 		results = append(results, checkNextAuthSecret())
 		runProbe(checkServerReachable)
+
+		// New checks (CRE-XXX): telemetry visibility, DSN reachability,
+		// data-dir perm drift, and CLI staleness. Each one is implemented
+		// as a thin wrapper around a testable helper that accepts state via
+		// parameters; doctor wires in the production state here.
+		runProbe(runCheckTelemetryStatus)
+		runProbe(runCheckDsnReachability)
+		results = append(results, runCheckDataDirPerms())
+		runProbe(runCheckUpdateAvailable)
 
 		for _, r := range results {
 			r.print()
@@ -416,6 +433,274 @@ func checkServerReachable(ctx context.Context) checkResult {
 		name:   "server reachable",
 		status: "PASS",
 		detail: "TCP " + host + " ok",
+	}
+}
+
+// runCheckTelemetryStatus surfaces the crashreport consent state from the
+// local DB. The check is split into a thin wrapper that resolves the
+// production DB + DSN and an inner helper (checkTelemetryStatus) that
+// accepts both as parameters so unit tests can drive every branch with a
+// seeded temp DB.
+//
+// The "not asked" path is a WARN rather than PASS because operators reading
+// `crewship doctor` output after install should see *something* about
+// telemetry — the first `crewship start` will flip it to default-on per
+// the beta opt-out policy, and we want that visible before it happens.
+func runCheckTelemetryStatus(ctx context.Context) checkResult {
+	db, err := openLocalDB(ctx)
+	if err != nil {
+		return checkResult{
+			name:   "telemetry status",
+			status: "WARN",
+			detail: fmt.Sprintf("could not open local DB: %v", err),
+			hint:   "run 'crewship start' once to initialise the database",
+		}
+	}
+	defer db.Close()
+	return checkTelemetryStatus(ctx, db.DB, crashreport.ResolveDSN())
+}
+
+// checkTelemetryStatus is the testable inner form. dsn is the resolved DSN
+// (vendor default OR CREWSHIP_SENTRY_DSN override) — passed in rather than
+// re-resolved internally so tests can simulate "no DSN compiled" and
+// "DSN set" without touching env vars.
+func checkTelemetryStatus(ctx context.Context, db *sql.DB, dsn string) checkResult {
+	enabled, asked, _, err := crashreport.Status(ctx, db)
+	if err != nil {
+		return checkResult{
+			name:   "telemetry status",
+			status: "WARN",
+			detail: fmt.Sprintf("read consent: %v", err),
+		}
+	}
+	if !asked {
+		return checkResult{
+			name:   "telemetry status",
+			status: "WARN",
+			detail: "telemetry not yet configured (will default to ENABLED on next start)",
+			hint:   "run 'crewship telemetry status' for details, or opt out with 'crewship telemetry off'",
+		}
+	}
+	if !enabled {
+		return checkResult{
+			name:   "telemetry status",
+			status: "PASS",
+			detail: "disabled by operator",
+		}
+	}
+	if dsn == "" {
+		return checkResult{
+			name:   "telemetry status",
+			status: "WARN",
+			detail: "enabled but no DSN compiled in or set",
+			hint:   "set CREWSHIP_SENTRY_DSN, or rebuild with -X crashreport.DSN=...",
+		}
+	}
+	return checkResult{
+		name:   "telemetry status",
+		status: "PASS",
+		detail: fmt.Sprintf("enabled, endpoint %s", dsnEndpointHost(dsn)),
+	}
+}
+
+// runCheckDsnReachability does a best-effort TCP probe to the configured
+// Sentry-style DSN host:443. Skipped (no row in output) when telemetry is
+// disabled or no DSN is configured — there's no useful signal to emit and
+// adding a noisy "skipped" line every run trains operators to ignore the
+// section.
+//
+// Result is intentionally never FAIL: an unreachable Sentry endpoint is a
+// soft problem (events buffer or drop locally) that should not gate
+// `crewship doctor` for the rest of the system.
+func runCheckDsnReachability(ctx context.Context) checkResult {
+	db, err := openLocalDB(ctx)
+	if err != nil {
+		return checkResult{
+			name:   "telemetry endpoint",
+			status: "INFO",
+			detail: "skipped (local DB unavailable)",
+		}
+	}
+	defer db.Close()
+	return checkDsnReachability(ctx, db.DB, crashreport.ResolveDSN())
+}
+
+func checkDsnReachability(ctx context.Context, db *sql.DB, dsn string) checkResult {
+	enabled, asked, _, err := crashreport.Status(ctx, db)
+	if err != nil || !asked || !enabled {
+		return checkResult{
+			name:   "telemetry endpoint",
+			status: "INFO",
+			detail: "skipped (telemetry off)",
+		}
+	}
+	if dsn == "" {
+		return checkResult{
+			name:   "telemetry endpoint",
+			status: "INFO",
+			detail: "skipped (no DSN configured)",
+		}
+	}
+	host := dsnEndpointHost(dsn)
+	if host == "" || host == "unknown" {
+		return checkResult{
+			name:   "telemetry endpoint",
+			status: "WARN",
+			detail: "could not parse DSN host",
+			hint:   "verify CREWSHIP_SENTRY_DSN follows https://<key>@<host>/<project>",
+		}
+	}
+	target := host + ":443"
+	dialer := &net.Dialer{Timeout: 5 * time.Second}
+	conn, err := dialer.DialContext(ctx, "tcp", target)
+	if err != nil {
+		return checkResult{
+			name:   "telemetry endpoint",
+			status: "WARN",
+			detail: fmt.Sprintf("dial %s: %v", target, err),
+			hint:   "Sentry being unreachable will silently drop crash events; check egress firewall",
+		}
+	}
+	_ = conn.Close()
+	return checkResult{
+		name:   "telemetry endpoint",
+		status: "PASS",
+		detail: "TCP " + target + " ok",
+	}
+}
+
+// runCheckDataDirPerms surfaces drift in the strict permissions
+// internal/database.Open applies on every boot: 0700 on the directory and
+// 0600 on the .db file. TestOpenChmodsDBFile asserts the *initial* set;
+// this check catches the operator footgun where a backup restore, a chmod
+// fat-finger, or an rsync without --perms re-loosens the file underneath
+// a running install.
+//
+// Posix-only semantics: we skip the perm bits entirely on Windows where
+// the SQLite file inherits ACLs we can't usefully assert on with os.FileMode.
+func runCheckDataDirPerms() checkResult {
+	dataDir, err := database.DefaultDataDir()
+	if err != nil {
+		return checkResult{name: "data dir perms", status: "FAIL", detail: err.Error()}
+	}
+	return checkDataDirPerms(dataDir.Root, dataDir.DatabasePath())
+}
+
+func checkDataDirPerms(root, dbPath string) checkResult {
+	if runtime.GOOS == "windows" {
+		return checkResult{
+			name:   "data dir perms",
+			status: "INFO",
+			detail: "skipped (POSIX perm bits don't apply on Windows)",
+		}
+	}
+	dirInfo, err := os.Stat(root)
+	if os.IsNotExist(err) {
+		return checkResult{
+			name:   "data dir perms",
+			status: "WARN",
+			detail: "data dir does not exist (skipped)",
+		}
+	}
+	if err != nil {
+		return checkResult{name: "data dir perms", status: "FAIL", detail: err.Error()}
+	}
+	dirMode := dirInfo.Mode().Perm()
+	if dirMode != 0o700 {
+		return checkResult{
+			name:   "data dir perms",
+			status: "WARN",
+			detail: fmt.Sprintf("%s mode = %#o (want 0700)", root, dirMode),
+			hint:   "chmod 0700 " + root,
+		}
+	}
+	fileInfo, err := os.Stat(dbPath)
+	if os.IsNotExist(err) {
+		// Directory is correct but the DB hasn't been created yet — the
+		// next crewshipd boot will chmod it. PASS on the dir alone.
+		return checkResult{
+			name:   "data dir perms",
+			status: "PASS",
+			detail: fmt.Sprintf("%s 0700 (db file not yet created)", root),
+		}
+	}
+	if err != nil {
+		return checkResult{name: "data dir perms", status: "FAIL", detail: err.Error()}
+	}
+	fileMode := fileInfo.Mode().Perm()
+	if fileMode != 0o600 {
+		return checkResult{
+			name:   "data dir perms",
+			status: "WARN",
+			detail: fmt.Sprintf("%s mode = %#o (want 0600)", dbPath, fileMode),
+			hint:   "chmod 0600 " + dbPath,
+		}
+	}
+	return checkResult{
+		name:   "data dir perms",
+		status: "PASS",
+		detail: fmt.Sprintf("dir 0700, db file 0600 (%s)", root),
+	}
+}
+
+// runCheckUpdateAvailable hits the GitHub Releases API (cached on disk for
+// 24h by internal/update). The version-check semantics:
+//
+//   - version == "dev"               → skipped silently (developer build)
+//   - network failure                → INFO, not WARN — being offline isn't a
+//     health signal
+//   - newer release exists           → WARN with "vX available, you're on vY"
+//   - equal or newer-than-latest     → PASS
+//
+// Network calls in doctor are bounded by the 10s probe timeout from
+// run(); internal/update further caps at 5s for the HTTP request.
+func runCheckUpdateAvailable(ctx context.Context) checkResult {
+	return checkUpdateAvailable(ctx, version, update.Check)
+}
+
+// checkFunc is the indirection that lets tests stub update.Check without
+// invoking the real GitHub Releases API.
+type checkFunc func(ctx context.Context, currentVersion string) (*update.Result, error)
+
+func checkUpdateAvailable(ctx context.Context, currentVersion string, fn checkFunc) checkResult {
+	if currentVersion == "" || currentVersion == "dev" {
+		return checkResult{
+			name:   "update check",
+			status: "INFO",
+			detail: "skipped (development build)",
+		}
+	}
+	result, err := fn(ctx, currentVersion)
+	if err != nil {
+		// Network/parse failure is not a health signal — version checks
+		// have no operational consequence when they fail.
+		return checkResult{
+			name:   "update check",
+			status: "INFO",
+			detail: fmt.Sprintf("could not check for updates: %v", err),
+		}
+	}
+	if result == nil {
+		// update.Check returns (nil, nil) when the binary is "dev" or
+		// CREWSHIP_SKIP_UPDATE_CHECK is set. Mirror as a skipped INFO.
+		return checkResult{
+			name:   "update check",
+			status: "INFO",
+			detail: "skipped",
+		}
+	}
+	if result.Newer {
+		return checkResult{
+			name:   "update check",
+			status: "WARN",
+			detail: fmt.Sprintf("%s available, you're on %s", result.Latest, result.Current),
+			hint:   "brew upgrade crewship  OR  docker pull ghcr.io/crewship-ai/crewship:latest",
+		}
+	}
+	return checkResult{
+		name:   "update check",
+		status: "PASS",
+		detail: fmt.Sprintf("%s is current", result.Current),
 	}
 }
 

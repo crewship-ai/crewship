@@ -1,0 +1,208 @@
+name: Release Smoke Test
+
+# Runs AFTER goreleaser successfully publishes a GitHub release. The point is
+# to catch the embarrassing case where a release tag ships a binary that
+# segfaults on `crewship version` or returns 500 from `crewship doctor`.
+#
+# Failure of this workflow does NOT delete or yank the release — publishing
+# was already successful and rolling it back automatically would create a
+# race with users who started downloading. A red check on this workflow is
+# the signal to either ship a patch tag (v0.1.1) or manually mark the
+# release as a pre-release / delete it via the GitHub UI.
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  packages: read
+
+env:
+  # The release tag (e.g. v0.1.0-beta.1) shared by every matrix entry. Pulled
+  # from github.event.release.tag_name so a manual re-run on a specific
+  # release targets the right artifacts.
+  TAG: ${{ github.event.release.tag_name }}
+
+jobs:
+  binary:
+    name: Smoke ${{ matrix.os }} / ${{ matrix.arch }}
+    # Pinning the macOS arm64 runner to macos-14 explicitly: macos-latest still
+    # rotates between intel and arm64 hosts at the time of writing, and we want
+    # the smoke test to actually exercise the darwin/arm64 archive — not silently
+    # downgrade to x86 on whichever host the scheduler picks.
+    runs-on: ${{ matrix.runs-on }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: linux
+            arch: amd64
+            runs-on: ubuntu-latest
+          - os: darwin
+            arch: arm64
+            runs-on: macos-14
+            # Windows is excluded for now — its UX is documented as
+            # "experimental" in the README, the install script doesn't support
+            # it, and the .zip layout differs (PowerShell unzip vs tar -xz).
+            # Re-add a windows-2022 entry here when Windows graduates.
+    steps:
+      - name: Resolve archive name
+        id: archive
+        # goreleaser writes archives as crewship_<version-without-v>_<os>_<arch>.tar.gz.
+        # The leading `v` on git tags is stripped from the version in the
+        # archive name (matches the install.sh shape).
+        run: |
+          set -euo pipefail
+          VERSION="${TAG#v}"
+          NAME="crewship_${VERSION}_${{ matrix.os }}_${{ matrix.arch }}.tar.gz"
+          echo "name=${NAME}" >> "$GITHUB_OUTPUT"
+          echo "Resolved archive: ${NAME}"
+
+      - name: Download archive + checksums
+        # GH_TOKEN: the standard GITHUB_TOKEN has `contents: read` from the
+        # job-level permissions block above, which is enough to download
+        # release assets on the same repo.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh release download "$TAG" \
+            --repo "${{ github.repository }}" \
+            --pattern "${{ steps.archive.outputs.name }}" \
+            --pattern "checksums.txt"
+
+      - name: Verify SHA-256 against checksums.txt
+        # Mirrors scripts/install.sh:verify_checksum so the smoke test
+        # catches checksum drift in the same way an end-user install would.
+        run: |
+          set -euo pipefail
+          ARCHIVE="${{ steps.archive.outputs.name }}"
+          EXPECTED=$(grep -E "  ${ARCHIVE}$" checksums.txt | awk '{print $1}' | head -n1)
+          if [ -z "$EXPECTED" ]; then
+            echo "::error::checksum for ${ARCHIVE} missing from checksums.txt"
+            exit 1
+          fi
+          if command -v sha256sum >/dev/null 2>&1; then
+            ACTUAL=$(sha256sum "$ARCHIVE" | awk '{print $1}')
+          else
+            ACTUAL=$(shasum -a 256 "$ARCHIVE" | awk '{print $1}')
+          fi
+          if [ "$EXPECTED" != "$ACTUAL" ]; then
+            echo "::error::checksum mismatch for ${ARCHIVE}"
+            echo "  expected: $EXPECTED"
+            echo "  actual:   $ACTUAL"
+            exit 1
+          fi
+          echo "checksum ok: $ACTUAL"
+
+      - name: Extract archive
+        run: |
+          set -euo pipefail
+          tar -xzf "${{ steps.archive.outputs.name }}"
+          ls -la crewship
+
+      - name: Probe `crewship version`
+        # Assert non-zero exit AND that the printed version contains the tag —
+        # `version` defaults to "dev" on un-ldflagged binaries, so a successful
+        # ldflag injection is the actual signal we care about here.
+        run: |
+          set -euo pipefail
+          OUT=$(./crewship version)
+          echo "$OUT"
+          if ! echo "$OUT" | grep -qF "${TAG}"; then
+            echo "::error::'crewship version' output did not contain tag ${TAG}"
+            echo "got: $OUT"
+            exit 1
+          fi
+
+      - name: Probe `crewship doctor --no-color`
+        # doctor exits 0 unless a FAIL check fires. WARN is acceptable for a
+        # fresh runner (no Docker, no data dir yet), so we deliberately don't
+        # parse the output — exit code is the contract.
+        run: |
+          set -euo pipefail
+          ./crewship doctor --no-color || {
+            echo "::error::crewship doctor exited non-zero"
+            exit 1
+          }
+
+      - name: Probe `crewship --help`
+        run: |
+          set -euo pipefail
+          OUT=$(./crewship --help)
+          if ! echo "$OUT" | grep -qF "Available Commands"; then
+            echo "::error::--help output missing 'Available Commands' section"
+            exit 1
+          fi
+
+      - name: Probe `crewship start --no-docker` health endpoint
+        # We can't run `start` foreground and wait for a clean exit (it's a
+        # long-lived server) so we bound it with `timeout 10` and probe the
+        # health endpoint from a parallel shell. The `|| true` after timeout
+        # absorbs the SIGTERM exit code; the success signal is the curl
+        # returning HTTP 200 inside the polling loop.
+        #
+        # Port 9090 avoids the default 8080 which CI runners often have
+        # something else listening on.
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Boot the server in the background. --no-docker keeps it SQLite-only,
+          # which is what we want for a "did the binary even launch" smoke.
+          (./crewship start --no-docker --port 9090 >/tmp/crewship-start.log 2>&1 || true) &
+          SERVER_PID=$!
+          trap 'kill $SERVER_PID 2>/dev/null || true' EXIT
+
+          # Poll for up to 10s waiting for /api/health. We can't predict how
+          # fast the server boots on a cold runner, so we retry rather than
+          # assume a fixed sleep is enough.
+          STATUS=0
+          for _ in $(seq 1 20); do
+            if curl -sf --max-time 1 http://localhost:9090/api/health >/dev/null 2>&1; then
+              STATUS=200
+              break
+            fi
+            sleep 0.5
+          done
+
+          if [ "$STATUS" != "200" ]; then
+            echo "::error::health endpoint did not return 200 within 10s"
+            echo "---- crewship start log ----"
+            cat /tmp/crewship-start.log || true
+            exit 1
+          fi
+          echo "health endpoint ok"
+
+  docker:
+    name: Smoke Docker image
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Login to GHCR
+        # GHCR is public for crewship-ai but rate-limits anonymous pulls more
+        # aggressively. Log in with the workflow's GITHUB_TOKEN so the pull
+        # uses the authenticated quota.
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull image for tag
+        run: |
+          set -euo pipefail
+          docker pull "ghcr.io/${{ github.repository_owner }}/crewship:${TAG}"
+
+      - name: Probe `crewship version` inside container
+        run: |
+          set -euo pipefail
+          OUT=$(docker run --rm "ghcr.io/${{ github.repository_owner }}/crewship:${TAG}" version)
+          echo "$OUT"
+          if ! echo "$OUT" | grep -qF "${TAG}"; then
+            echo "::error::container 'crewship version' output did not contain tag ${TAG}"
+            exit 1
+          fi
