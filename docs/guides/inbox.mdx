@@ -8,7 +8,7 @@ icon: "inbox"
 
 The **Inbox** is your unified human-in-the-loop feed. Anything an agent — anywhere across your crews — needs you to look at lands here, in one ordered list, with the action you'd take inline on the detail panel. No tab switching, no hunting through `/issues` for the one paused routine, no separate "approvals queue" page to remember.
 
-It lives at [`/inbox`](/inbox) and is the first item in the **Plan** group of the sidebar. The bell in the top bar shares its unread count with the sidebar badge — both update over WebSocket so a peer triaging an item in another tab clears your bell instantly.
+It lives at `/inbox` in the running web UI and is the first item in the **Plan** group of the sidebar. The bell in the top bar shares its unread count with the sidebar badge — both update over WebSocket so a peer triaging an item in another tab clears your bell instantly.
 
 ## What lands in the Inbox
 
@@ -59,7 +59,7 @@ The detail panel's action row is what the source-of-truth call hangs off:
 - **Waitpoints** show **Approve** + **Deny**. Both hit `/pipelines/waitpoints/{token}/approve`; the boolean `approved` in the body disambiguates. (An empty body decoded to `approved=false` because Go's `json.Unmarshal` gives bools their zero value when absent — the inbox always sends the explicit value.)
 - **Failed runs** show **Retry** + **Cancel**. Retry replays the routine's `inputs_json`. If the payload is missing a `pipeline_slug` for some reason, the row falls back to "cancelled" rather than getting wedged.
 - **Escalations** show **Mark resolved** only — the actual decision is recorded by the escalation handler, the inbox just acknowledges you saw it.
-- **Messages** with an `issue_identifier` in payload show **Open <identifier>** as a direct link into `/issues/<id>`.
+- **Messages** with an `issue_identifier` in payload show **Open &lt;identifier&gt;** as a direct link into `/issues/&lt;id&gt;`.
 
 When a row is resolved, the detail panel dims, the action row replaces itself with a "Resolved Xm ago · approved" line, and the row still appears in the **All** and **Resolved** filter tabs.
 

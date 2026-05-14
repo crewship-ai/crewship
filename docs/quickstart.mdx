@@ -12,7 +12,7 @@ If you just want to see the dashboard come up on your machine, this is enough:
 
 ```bash
 # 1. Install (binary, single command)
-curl -fsSL https://get.crewship.ai | sh
+curl -fsSL https://crewship.ai/install | sh
 
 # 2. Start the runtime — embedded UI + SQLite + Go server, no Node.js, no external DB
 crewship start
@@ -32,13 +32,29 @@ That's it. The runtime is now serving on your hardware. No agents have been crea
 ## Installation
 
 <Tabs>
-  <Tab title="Binary (recommended)">
+  <Tab title="Homebrew">
     ```bash
-    # Download the latest release
-    curl -fsSL https://get.crewship.ai | sh
+    brew install crewship-ai/tap/crewship
 
-    # Verify installation
     crewship version
+    ```
+  </Tab>
+  <Tab title="curl | sh">
+    ```bash
+    # Verifies SHA-256 against signed checksums.txt; cosign signature
+    # verified too when cosign is on PATH.
+    curl -fsSL https://crewship.ai/install | sh
+
+    crewship version
+    ```
+  </Tab>
+  <Tab title="Docker Compose">
+    ```bash
+    git clone https://github.com/crewship-ai/crewship.git
+    cd crewship
+    cp .env.example .env
+    # Edit .env: set ENCRYPTION_KEY and NEXTAUTH_SECRET (both `openssl rand -hex 32`)
+    docker compose -f docker/docker-compose.prod.yml up -d
     ```
   </Tab>
   <Tab title="From source">
@@ -51,17 +67,9 @@ That's it. The runtime is now serving on your hardware. No agents have been crea
     ./crewship version
     ```
   </Tab>
-  <Tab title="Docker">
-    ```bash
-    docker run -d \
-      --name crewship \
-      -p 8080:8080 \
-      -v /var/run/docker.sock:/var/run/docker.sock \
-      -v crewship-data:/var/lib/crewship \
-      ghcr.io/crewship-ai/crewship:latest
-    ```
-  </Tab>
 </Tabs>
+
+For pinned versions, custom install directories, PostgreSQL mode, and air-gapped install paths see the full [Install guide](/guides/install).
 
 ## Initial Setup
 
@@ -115,6 +123,16 @@ That's it. The runtime is now serving on your hardware. No agents have been crea
     crewship doctor
     ```
     Verifies Docker is running and all runtime dependencies are met. The sidecar binary is embedded in the crewship binary at build time, so no separate pre-build step is required.
+  </Step>
+
+  <Step title="(Optional) Opt out of crash reporting">
+    Crewship v0.1 beta enables anonymous crash reporting by default. To opt out before any data leaves your machine:
+
+    ```bash
+    crewship telemetry off
+    ```
+
+    Full details — what is and isn't sent, routing to your own Sentry, defense-in-depth scrubbing — in the [Telemetry guide](/guides/telemetry).
   </Step>
 </Steps>
 
