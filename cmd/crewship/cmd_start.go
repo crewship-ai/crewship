@@ -91,6 +91,9 @@ var startCmd = &cobra.Command{
 		}
 		defer db.Close()
 
+		if err := database.SnapshotBeforeMigrate(context.Background(), db, logger); err != nil {
+			return fmt.Errorf("failed to snapshot database before migrations: %w", err)
+		}
 		if err := database.Migrate(context.Background(), db.DB, logger); err != nil {
 			return fmt.Errorf("failed to run migrations: %w", err)
 		}
