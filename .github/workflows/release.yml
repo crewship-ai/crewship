@@ -42,10 +42,31 @@ jobs:
         env:
           DATABASE_URL: "file:./dev.db"
 
+      # -- Resolve tag for the static bundle's Sentry release/environment --
+      # The same value is read by the Go side from -X main.version in
+      # goreleaser; doing this here too means the frontend Release tag in
+      # Sentry matches the backend's Release tag without a second source
+      # of truth (which would drift the day someone re-tags a hotfix).
+      - name: Resolve release tag
+        id: meta
+        run: echo "version=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+
       - name: Build Next.js static export
         run: pnpm build
         env:
           NEXTAUTH_SECRET: "build-time-placeholder"
+          # NEXT_PUBLIC_* envs are baked into the static bundle at build
+          # time. Empty fallback means a PR build from a fork (no secret
+          # access) produces a bundle with Sentry init no-op'd — the
+          # same defense-in-depth as the Go side.
+          #
+          # SENTRY_DSN_FRONTEND (not SENTRY_DSN) routes the embedded
+          # web UI's events to the `crewship-frontend` Sentry project,
+          # not the Go-backend project. Per-platform projects let us
+          # quota-cap and tag separately; see scripts/sentry-bootstrap.sh
+          # for the project ↔ secret mapping.
+          NEXT_PUBLIC_SENTRY_DSN: ${{ secrets.SENTRY_DSN_FRONTEND }}
+          NEXT_PUBLIC_CREWSHIP_VERSION: ${{ steps.meta.outputs.version }}
 
       - name: Copy static export for embedding
         run: rm -rf web/out && cp -r out web/out

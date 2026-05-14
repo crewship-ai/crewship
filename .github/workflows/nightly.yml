@@ -133,6 +133,19 @@ jobs:
         run: pnpm build
         env:
           NEXTAUTH_SECRET: "build-time-placeholder"
+          # Same NEXT_PUBLIC_* baking pattern as release.yml. The
+          # nightly channel uses "nightly-<sha>" as its version string;
+          # sentry.client.config's classifyEnv() maps that prefix into
+          # the "beta" environment, keeping nightly noise out of the
+          # production Sentry view while still surfacing it alongside
+          # the beta-channel events maintainers actually watch.
+          #
+          # SENTRY_DSN_FRONTEND (not SENTRY_DSN) routes to the
+          # `crewship-frontend` Sentry project; see release.yml for
+          # the per-platform rationale and scripts/sentry-bootstrap.sh
+          # for the secret mapping.
+          NEXT_PUBLIC_SENTRY_DSN: ${{ secrets.SENTRY_DSN_FRONTEND }}
+          NEXT_PUBLIC_CREWSHIP_VERSION: nightly-${{ github.sha }}
 
       - name: Copy static export for embedding
         run: rm -rf web/out && cp -r out web/out

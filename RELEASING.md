@@ -195,8 +195,29 @@ production data and a bad one is hard to undo. Guardrails:
 
 ## Telemetry (crash reporting) — Sentry setup
 
-Crewship ships with Sentry-backed crash reporting wired through
-`internal/crashreport`. The runtime behaviour for **v0.1 beta** is:
+Crewship ships with Sentry-backed crash reporting on both sides of the
+stack:
+
+- **Backend (Go):** wired through `internal/crashreport`, baked into
+  the binary at build time via `-ldflags="-X ...DSN=$SENTRY_DSN"`.
+- **Frontend (Next.js):** wired through `sentry.client.config.ts` (+
+  `.server.ts` / `.edge.ts`), baked into the static export via the
+  `NEXT_PUBLIC_SENTRY_DSN` env var that `pnpm build` consumes.
+
+Both streams route to the **same Sentry project** (`your-sentry-org/crewship-backend`)
+with a shared DSN secret. The Go events tag `ServerName` with the
+anonymous install ID; the JS events read that same install ID from
+`GET /api/v1/system/telemetry` so a backend error and a browser error
+from the same install group together in the Sentry UI.
+
+The frontend gates `Sentry.init` on the same `app_settings.telemetry_opt_in`
+row the Go side reads — when the operator runs `crewship telemetry off`,
+the next browser page load fetches `enabled: false` and skips init
+entirely. No client-side persistence, no separate browser-side consent
+prompt; the CLI is the single control surface. Any fetch failure on
+the consent endpoint defaults to NOT initialising (privacy bias).
+
+The runtime behaviour for **v0.1 beta** is:
 
 - **Default: ENABLED**. There is no first-run prompt — earlier drafts
   had a TTY prompt with hard-default-no, but that path was removed in
@@ -231,11 +252,15 @@ default. `crewship telemetry status` shows the resolved endpoint host
 
 ### One-time project setup
 
-1. Create a Sentry project (Platform: Go). Note its DSN.
+1. Create a Sentry project (Platform: Go, or "Multi-stack" — the same
+   project ingests both the Go SDK and the @sentry/nextjs browser SDK).
+   Note its DSN.
 2. Add `SENTRY_DSN` to the repo's GitHub Actions secrets. The
-   `release.yml` and `nightly.yml` workflows pass it as a build-arg to
-   goreleaser and the Docker image build. Local `go build` and PRs
-   from forks leave the DSN empty, so they ship telemetry-disabled.
+   `release.yml` and `nightly.yml` workflows pass it BOTH as a build-arg
+   to goreleaser / the Docker image build (Go side) AND as the
+   `NEXT_PUBLIC_SENTRY_DSN` env in `pnpm build` (frontend side). Local
+   `go build` and PRs from forks leave the DSN empty, so they ship
+   telemetry-disabled — same defense-in-depth applies to the JS bundle.
 3. **Configure server-side data-scrubbing rules in the Sentry UI.**
    The client-side BeforeSend hook in `sentry_adapter.go` scrubs
    request headers, query strings, request bodies, the User field,
@@ -272,8 +297,16 @@ user's hostname (`ServerName` is overridden with the anonymous
 install ID), the Go module list, or any of the runtime/device/culture
 contexts that sentry-go's default integrations would normally attach.
 See `internal/crashreport/sentry_adapter.go::scrubEvent` for the
-client-side filter and `crashreport_test.go::TestScrubEvent_DropsLeakyContexts`
+backend filter and `crashreport_test.go::TestScrubEvent_DropsLeakyContexts`
 for the pinning test.
+
+The **frontend mirrors the same scrubbing posture** in
+`sentry.client.config.ts::scrubEvent`: device/runtime/culture contexts
+dropped, User cleared, Breadcrumbs.data cleared, Modules cleared. The
+pinning test lives in `lib/__tests__/sentry-scrub.test.ts` and runs in
+the standard `pnpm test` flow — a future @sentry/nextjs upgrade that
+silently un-scrubs one of these fields fails CI rather than leaking
+quietly into production events.
 
 ## Branch protection
 
