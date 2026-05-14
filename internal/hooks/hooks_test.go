@@ -794,6 +794,80 @@ func TestShellHandlerTimeoutOverflowGuarded(t *testing.T) {
 	}
 }
 
+// TestShellHandlerSubSecondTimeoutHonored verifies that a sub-second
+// timeout_secs value (e.g. 0.5) is converted via float-space nanosecond
+// math instead of being cast to int(0) first. The bug it guards against:
+// `time.Duration(0.5) * time.Second` truncates the float to int zero
+// before the multiplication, producing an immediate context deadline —
+// every hook with a sub-second timeout would fire instantly with no
+// indication of why. The hook here sleeps longer than the timeout, so
+// timed_out=true on the result proves the timeout was non-zero.
+func TestShellHandlerSubSecondTimeoutHonored(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell handler requires sh")
+	}
+	res, err := shellHandler(context.Background(), Hook{
+		HandlerKind: HandlerKindShell,
+		HandlerConfig: map[string]any{
+			"command":      "sleep 2",
+			"timeout_secs": 0.5,
+		},
+	}, EventContext{})
+	if err != nil {
+		t.Fatalf("shellHandler returned err: %v", err)
+	}
+	if res.Outcome != OutcomeBlock {
+		t.Fatalf("expected OutcomeBlock from sub-second timeout, got %s (msg=%q)", res.Outcome, res.Message)
+	}
+	payload, _ := res.Payload.(map[string]any)
+	if b, _ := payload["timed_out"].(bool); !b {
+		t.Errorf("expected timed_out=true for 0.5s timeout vs `sleep 2`, got payload=%+v", payload)
+	}
+	// If the math regressed to integer truncation the timeout would be
+	// zero and the run would return in microseconds. Allow ample slack
+	// for CI scheduler jitter but reject the immediate-timeout case.
+	if res.Latency < 200*time.Millisecond {
+		t.Errorf("0.5s timeout fired suspiciously fast (%s) — math may have truncated to 0", res.Latency)
+	}
+}
+
+// TestShellHandlerNonPositiveTimeoutFallsBack verifies that zero or
+// negative timeout_secs values fall through to the 30s default rather
+// than being passed to time.Duration where a negative value would
+// instantly trip the context deadline. Documents intentional behavior
+// so a future change doesn't accidentally start surfacing these as
+// errors and break existing hook configs.
+func TestShellHandlerNonPositiveTimeoutFallsBack(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell handler requires sh")
+	}
+	for _, tc := range []struct {
+		name string
+		val  any
+	}{
+		{"negative_float", -1.5},
+		{"zero_float", 0.0},
+		{"negative_int", -100},
+		{"zero_int", 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			res, err := shellHandler(context.Background(), Hook{
+				HandlerKind: HandlerKindShell,
+				HandlerConfig: map[string]any{
+					"command":      "true",
+					"timeout_secs": tc.val,
+				},
+			}, EventContext{})
+			if err != nil {
+				t.Fatalf("shellHandler returned err: %v", err)
+			}
+			if res.Outcome != OutcomePass {
+				t.Errorf("expected OutcomePass with default timeout, got %s (msg=%q)", res.Outcome, res.Message)
+			}
+		})
+	}
+}
+
 // TestDispatcherNonBlockingHandlerPanicRecovered verifies that a panic
 // inside a non-blocking hook goroutine does NOT crash the process. Without
 // the recover guard, the goroutine's panic propagates to the runtime and

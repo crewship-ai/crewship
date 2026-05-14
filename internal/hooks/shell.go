@@ -64,13 +64,20 @@ func shellHandler(ctx context.Context, h Hook, ec EventContext) (Result, error) 
 	// context deadline. Cap any caller-supplied seconds at a defensible
 	// upper bound (24 hours) so misconfigured hooks fail at parse time
 	// instead of producing the surprising "immediate timeout" symptom.
+	//
+	// Sub-second floats need nanosecond math: `time.Duration(0.5) *
+	// time.Second` casts 0.5 to int(0) first, which is also an
+	// immediate-timeout footgun. Multiply in float space and cast once.
+	// Non-positive values fall through to the 30s default — surfacing an
+	// explicit error would break any hook author who left timeout_secs
+	// unset or zeroed.
 	const maxTimeoutSecs = 24 * 60 * 60
 	timeout := 30 * time.Second
 	if t, ok := h.HandlerConfig["timeout_secs"].(float64); ok && t > 0 {
 		if t > maxTimeoutSecs {
 			t = maxTimeoutSecs
 		}
-		timeout = time.Duration(t) * time.Second
+		timeout = time.Duration(t * float64(time.Second))
 	}
 	if t, ok := h.HandlerConfig["timeout_secs"].(int); ok && t > 0 {
 		if t > maxTimeoutSecs {
