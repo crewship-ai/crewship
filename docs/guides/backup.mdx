@@ -43,19 +43,23 @@ Skip backups for **ephemeral development workspaces** (the dev VM rebuilds them 
 | **Retention sweep** | `crewship backup rotate --keep-last N --keep-days D`. Per-workspace — never touches another workspace's bundles. Both flags can be combined; both must be positive. `--dry-run` lists what would be deleted without touching disk. |
 | **Stale lock** | A lock whose holder process is dead but whose row still exists. Detected when `acquired_at + DefaultLockTTL < now()`. Auto-released on next `create`; manually clearable via `crewship backup unlock --force` (admin-only, with confirmation). |
 
-## Subcommands at a glance
+## Usage
 
-| Command | Purpose |
-|---------|---------|
-| `crewship backup create` | Produce a new bundle for a workspace or crew. |
-| `crewship backup list` | List bundles on disk. |
-| `crewship backup inspect` | Print a bundle's manifest without decrypting the payload. |
-| `crewship backup verify` | Decrypt + checksum a bundle end-to-end (no DB writes). |
-| `crewship backup restore` | Restore a bundle (supports `--dry-run`). |
-| `crewship backup delete` | Remove a single bundle (interactive confirm or `--force`). |
-| `crewship backup rotate` | Retention sweep — `--keep-last N` / `--keep-days D`. |
-| `crewship backup status` | Show the advisory lock state for the current workspace. |
-| `crewship backup unlock` | Release a stale lock owned by this host (admin-only, confirm required). |
+The whole backup surface is the `crewship backup` command group — nine subcommands that cover the create → verify → restore → rotate lifecycle. Each subcommand has a dedicated section below with full flag reference and copy-pasteable examples; this table is the entry point.
+
+| Command | Purpose | Deep dive |
+|---------|---------|-----------|
+| `crewship backup create` | Produce a new bundle for a workspace or crew. | [Create a workspace backup](#create-a-workspace-backup) / [Back up a single crew](#back-up-a-single-crew) |
+| `crewship backup list` | List bundles on disk. | [List, inspect, verify](#list-inspect-verify) |
+| `crewship backup inspect` | Print a bundle's manifest without decrypting the payload. | [List, inspect, verify](#list-inspect-verify) |
+| `crewship backup verify` | Decrypt + checksum a bundle end-to-end (no DB writes). | [List, inspect, verify](#list-inspect-verify) |
+| `crewship backup restore` | Restore a bundle (supports `--dry-run`). | [Restore](#restore) |
+| `crewship backup delete` | Remove a single bundle (interactive confirm or `--force`). | [Delete & rotate](#delete--rotate) |
+| `crewship backup rotate` | Retention sweep — `--keep-last N` / `--keep-days D`. | [Delete & rotate](#delete--rotate) |
+| `crewship backup status` | Show the advisory lock state for the current workspace. | [Lock semantics](#lock-semantics) |
+| `crewship backup unlock` | Release a stale lock owned by this host (admin-only, confirm required). | [Lock semantics](#lock-semantics) |
+
+The minimum end-to-end loop is four commands: `create` to produce the bundle, `verify` to prove it's not corrupt, `restore --dry-run` to prove the destination will accept it, then `restore` for real. Every other subcommand exists for retention (`rotate`), introspection (`list`, `inspect`, `status`), or recovery (`unlock`).
 
 <Note>
   `create` and `restore` accept `--use-keyring` to cache and reuse the
