@@ -126,20 +126,34 @@ func (e *Engine) ReindexContext(ctx context.Context) error {
 	return tx.Commit()
 }
 
-// readRegularNoFollow opens path with O_NOFOLLOW so the open syscall
-// fails (with ELOOP) if path's last component is a symlink. We Stat
-// after opening to confirm the file is still regular — defends against
-// the agent racing us between Lstat at walk time and Open here. Returns
-// the file contents or an error; the caller treats any error as "skip
-// this entry from this index pass."
+// readRegularNoFollow opens path safely for indexing:
+//   - O_NOFOLLOW makes the open syscall fail (with ELOOP) if path's
+//     final component is a symlink — defends against the agent racing
+//     us between Lstat at walk time and Open here.
+//   - O_NONBLOCK keeps Open from hanging when an attacker swaps a
+//     regular .md for a FIFO (named pipe) with no writer. Without
+//     O_NONBLOCK the Open call would block until a writer connects,
+//     which can be never — Reindex holds e.mu the whole time, so a
+//     hung Open soft-DoSes every memory operation in the process.
+//     CodeRabbit caught this on the first review pass.
+//   - After open we re-Stat and reject anything that isn't a regular
+//     file (sockets, devices, FIFOs that survived O_NONBLOCK because
+//     they happened to have a writer, etc.).
 //
-// Note: O_NOFOLLOW only checks the FINAL component. Intermediate
-// symlinks in the path (e.g. .memory/sub being a symlink to /tmp/sub)
-// would still be traversed. For our threat model — agent has write
-// access to .memory/ but not to its parent directories — the final
-// component is the only attacker-controlled hop, so this is enough.
+// On nested symlink swaps in INTERMEDIATE path components (e.g.
+// .memory/sub being itself a symlink), O_NOFOLLOW does not protect
+// us — the kernel only checks the final component. Two layered
+// defenses: (1) the agent has write access only to .memory/ leaves
+// (not the parent dir) so it can't replace `sub` with a symlink at
+// our threat model layer, (2) the walk-time Lstat in the caller
+// already rejects symlinks at every level it visits, so a swap that
+// happens between walk and open would have to be at a depth the walker
+// already traversed — racing it requires winning a millisecond TOCTOU
+// against an indexer that's reading hundreds of files in a tight loop.
+// Acceptable residual risk; documented for follow-up if the threat
+// model widens.
 func readRegularNoFollow(path string) ([]byte, error) {
-	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, err
 	}

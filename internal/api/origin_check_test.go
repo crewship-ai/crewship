@@ -48,6 +48,25 @@ func TestEnforceOrigin_PostCrossOriginRejected(t *testing.T) {
 	assert.Contains(t, rec.Header().Get("WWW-Authenticate"), "origin_rejected")
 }
 
+// TestEnforceOrigin_NullOriginRejected — sandboxed iframe attack vector.
+// data: URIs, srcdoc, and file:// pages send `Origin: null`. Pre-fix
+// requestOrigin treated "null" as "no Origin header" and the request
+// passed through. CodeRabbit caught it on the first review pass —
+// "null" must compare against the allowlist (where it can never
+// match) and the request must be 403'd.
+func TestEnforceOrigin_NullOriginRejected(t *testing.T) {
+	h := EnforceOrigin(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	req := httptest.NewRequest(http.MethodPost, "http://crewship.local/api/v1/x", nil)
+	req.Host = "crewship.local"
+	req.Header.Set("Origin", "null")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusForbidden, rec.Code,
+		"Origin: null (sandboxed iframe) must be treated as cross-origin, not absent")
+}
+
 func TestEnforceOrigin_PostNoOriginPasses(t *testing.T) {
 	h := EnforceOrigin(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)

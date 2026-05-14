@@ -138,13 +138,13 @@ func safeDialContext() func(ctx context.Context, network, address string) (net.C
 // using the classified form in the API response.
 //
 // Categories:
-//   - "blocked"      — SSRF guard fired (private/loopback IP)
-//   - "dns_failed"   — hostname did not resolve
-//   - "tls_failed"   — TLS handshake or cert validation failed
-//   - "timeout"      — connection or read timed out
-//   - "unreachable"  — connection refused / network unreachable
-//   - "http_error:N" — upstream returned non-2xx (caller may format)
-//   - "fetch_failed" — anything else
+//   - "blocked"       — SSRF guard fired (private/loopback IP)
+//   - "dns_failed"    — hostname did not resolve
+//   - "tls_failed"    — TLS handshake or cert validation failed
+//   - "timeout"       — connection or read timed out
+//   - "unreachable"   — connection refused / network unreachable
+//   - "http_error:N"  — upstream returned non-2xx (N is the status code)
+//   - "fetch_failed"  — anything else
 //
 // Anything more specific would re-introduce the leak F-002 closed.
 func ClassifyFetchError(err error) string {
@@ -164,7 +164,42 @@ func ClassifyFetchError(err error) string {
 		return "timeout"
 	case strings.Contains(msg, "connection refused"), strings.Contains(msg, "network is unreachable"), strings.Contains(msg, "no route to host"):
 		return "unreachable"
-	default:
-		return "fetch_failed"
 	}
+	// Importer wraps upstream non-200 as `fetch url %q: status %d`. Pull
+	// the status code out so the caller can render "http_error:404" etc.
+	// The status code itself isn't sensitive — the *user* chose the URL,
+	// so they already know what they pointed at — but echoing it is a lot
+	// more useful than "fetch_failed" when the URL is a normal external
+	// 404 they typo'd.
+	if statusN := extractStatusCode(msg); statusN != 0 {
+		return fmt.Sprintf("http_error:%d", statusN)
+	}
+	return "fetch_failed"
+}
+
+// extractStatusCode pulls N out of "...: status N" or "...: status N ..."
+// strings produced by the importer's fetchURL on non-200 upstream
+// responses. Returns 0 when no usable status is found.
+func extractStatusCode(msg string) int {
+	const marker = ": status "
+	i := strings.LastIndex(msg, marker)
+	if i < 0 {
+		return 0
+	}
+	tail := msg[i+len(marker):]
+	// Read decimal digits until non-digit / end. http.Status is 100–599.
+	n := 0
+	for _, r := range tail {
+		if r < '0' || r > '9' {
+			break
+		}
+		n = n*10 + int(r-'0')
+		if n > 999 {
+			return 0
+		}
+	}
+	if n < 100 || n > 599 {
+		return 0
+	}
+	return n
 }

@@ -188,25 +188,74 @@ func (rl *RateLimiter) Middleware(next http.Handler) http.Handler {
 //
 // Trust list defaults to loopback. Operators behind a non-local proxy must
 // set CREWSHIP_TRUSTED_PROXY_CIDRS=<proxy-ip-or-cidr,...>.
+//
+// When XFF is honoured, the chain is parsed *right to left*, skipping
+// trusted-proxy hops, returning the first untrusted IP. The naive
+// "leftmost entry is the client" reading from the previous fix breaks
+// when the immediate proxy *appends* to XFF instead of overwriting it
+// — nginx with `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for`
+// (the default in many helm charts) does exactly this. With overwrite
+// proxies, leftmost-vs-rightmost is the same value. With append proxies,
+// an attacker can pre-seed `X-Forwarded-For: 8.8.8.8` and the proxy
+// turns it into `8.8.8.8, <real-attacker-ip>` — leftmost reads back
+// the spoof, rightmost-after-skip reads the real client. CodeRabbit
+// caught this on the first PR pass.
 func extractIP(r *http.Request) string {
 	hop := remoteHopIP(r)
 
 	if isTrustedProxy(hop) {
-		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-			// Per RFC 7239, the leftmost entry is the original client.
-			if comma := strings.IndexByte(xff, ','); comma != -1 {
-				xff = xff[:comma]
-			}
-			if ip := strings.TrimSpace(xff); ip != "" {
-				return ip
-			}
+		if ip := clientIPFromXFF(r.Header.Get("X-Forwarded-For")); ip != "" {
+			return ip
 		}
 		if xri := strings.TrimSpace(r.Header.Get("X-Real-IP")); xri != "" {
-			return xri
+			if parsed := net.ParseIP(xri); parsed != nil && !isTrustedProxy(parsed.String()) {
+				return parsed.String()
+			}
 		}
 	}
 
 	return hop
+}
+
+// clientIPFromXFF parses an X-Forwarded-For chain right to left, skips
+// any entry that is itself a trusted proxy, and returns the first IP
+// that isn't. Returns "" if no untrusted entry exists (which means the
+// caller should fall back to r.RemoteAddr).
+//
+// Right-to-left order is RFC 7239 §5.3 — the rightmost entry is the
+// proxy hop closest to us, the leftmost is whatever the originator
+// chose to put there. Skipping trusted hops is what defeats the spoof:
+// a forged leftmost entry is silently ignored because the real proxy
+// hop sits to its right. With a single overwrite-style proxy the
+// behaviour matches the previous leftmost reading; with an append-style
+// proxy chain it correctly walks past the proxy IPs to the real client.
+func clientIPFromXFF(xff string) string {
+	if xff == "" {
+		return ""
+	}
+	parts := strings.Split(xff, ",")
+	for i := len(parts) - 1; i >= 0; i-- {
+		raw := strings.TrimSpace(parts[i])
+		if raw == "" {
+			continue
+		}
+		// XFF entries can include a port in some proxy configurations
+		// ("1.2.3.4:54321"). net.ParseIP rejects those, so try
+		// SplitHostPort first; if it succeeds, use the host part.
+		host := raw
+		if h, _, err := net.SplitHostPort(raw); err == nil {
+			host = h
+		}
+		ip := net.ParseIP(host)
+		if ip == nil {
+			continue
+		}
+		if isTrustedProxy(ip.String()) {
+			continue
+		}
+		return ip.String()
+	}
+	return ""
 }
 
 // remoteHopIP extracts the connection-level peer IP from r.RemoteAddr,

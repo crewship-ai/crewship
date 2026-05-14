@@ -645,6 +645,12 @@ var sensitiveStaticPathExact = map[string]struct{}{
 	"/next.config.mjs":   {},
 	"/wp-config.php":     {},
 	"/web.config":        {},
+	// Catch /debug/pprof and /debug/vars without a trailing slash too —
+	// the prefix denylist only matches "/debug/pprof/", missing the
+	// bare-form probes some scanners use first. CodeRabbit's slash-bypass
+	// note from the first review pass.
+	"/debug/pprof": {},
+	"/debug/vars":  {},
 }
 
 func isSensitiveStaticPath(path string) bool {

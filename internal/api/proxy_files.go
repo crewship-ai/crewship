@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"path/filepath"
 	"strings"
 )
 
@@ -33,8 +32,8 @@ func (h *ProxyHandler) AgentFiles(w http.ResponseWriter, r *http.Request) {
 		ipcPath += "&recursive=true"
 	}
 	if subdir := r.URL.Query().Get("subdir"); subdir != "" {
-		cleanSub := filepath.Clean(subdir)
-		if strings.HasPrefix(cleanSub, "..") || filepath.IsAbs(cleanSub) {
+		cleanSub, ok := normalizeRequestPath(subdir)
+		if !ok {
 			replyError(w, http.StatusBadRequest, "Invalid subdir path")
 			return
 		}
@@ -208,7 +207,12 @@ func (h *ProxyHandler) CrewFiles(w http.ResponseWriter, r *http.Request) {
 		sep = "&"
 	}
 	if subdir := r.URL.Query().Get("subdir"); subdir != "" {
-		ipcPath += sep + "subdir=" + url.QueryEscape(subdir)
+		cleanSub, ok := normalizeRequestPath(subdir)
+		if !ok {
+			replyError(w, http.StatusBadRequest, "Invalid subdir path")
+			return
+		}
+		ipcPath += sep + "subdir=" + url.QueryEscape(cleanSub)
 	}
 	resp, err := h.ipcGet(r.Context(), ipcPath)
 	if err != nil {
@@ -327,7 +331,12 @@ func (h *ProxyHandler) AgentContainerFiles(w http.ResponseWriter, r *http.Reques
 
 	ipcPath := fmt.Sprintf("/crews/%s/container-files", crewID.String)
 	if subdir := r.URL.Query().Get("subdir"); subdir != "" {
-		ipcPath += "?subdir=" + url.QueryEscape(subdir)
+		cleanSub, ok := normalizeRequestPath(subdir)
+		if !ok {
+			replyError(w, http.StatusBadRequest, "Invalid subdir path")
+			return
+		}
+		ipcPath += "?subdir=" + url.QueryEscape(cleanSub)
 	}
 	resp, err := h.ipcGet(r.Context(), ipcPath)
 	if err != nil {

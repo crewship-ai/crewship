@@ -128,6 +128,11 @@ func TestClassifyFetchError(t *testing.T) {
 		{"refused", &net.OpError{Err: &netStub{msg: "connection refused"}}, "unreachable"},
 		{"timeout", &net.OpError{Err: &netStub{msg: "context deadline exceeded"}}, "timeout"},
 		{"tls", &net.OpError{Err: &netStub{msg: "tls: handshake failure"}}, "tls_failed"},
+		// http_error:N — importer wraps non-200 as "fetch url %q: status %d"
+		{"http_404", &netStub{msg: `fetch url "https://example.com/x": status 404`}, "http_error:404"},
+		{"http_503", &netStub{msg: `fetch url "https://example.com/x": status 503`}, "http_error:503"},
+		{"http_invalid_high", &netStub{msg: `fetch url: status 999`}, "fetch_failed"},
+		{"unparseable_status", &netStub{msg: "something else: status banana"}, "fetch_failed"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

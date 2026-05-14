@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"syscall"
 	"testing"
+	"time"
 )
 
 // TestReadRegularNoFollow_RegularFileOK confirms the helper still reads
@@ -67,10 +68,16 @@ func TestReadRegularNoFollow_RejectsSymlink(t *testing.T) {
 	}
 }
 
-// TestReadRegularNoFollow_RejectsFIFO confirms non-regular file types
-// are rejected after open. A FIFO under .memory/ would block forever
-// otherwise, hanging the indexer (a soft DoS).
-func TestReadRegularNoFollow_RejectsFIFO(t *testing.T) {
+// TestReadRegularNoFollow_RejectsFIFO_DoesNotHang is the CodeRabbit
+// follow-up. Pre-fix the helper used `O_RDONLY|O_NOFOLLOW`, which
+// blocks Open() forever on a FIFO with no writer. Reindex holds e.mu
+// during the whole walk, so a single planted FIFO under .memory/ would
+// soft-DoS every memory op in the process. The fix adds O_NONBLOCK so
+// the FIFO opens immediately; the post-open Stat then rejects it as
+// non-regular. This test exercises the actual readRegularNoFollow code
+// path with a deadline — pre-fix it would block past the deadline and
+// fail fast rather than hanging the whole suite.
+func TestReadRegularNoFollow_RejectsFIFO_DoesNotHang(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("FIFO not supported on Windows")
 	}
@@ -79,16 +86,21 @@ func TestReadRegularNoFollow_RejectsFIFO(t *testing.T) {
 	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
 		t.Skipf("mkfifo not permitted in this sandbox: %v", err)
 	}
-	// Open in non-blocking mode for the test would change the API; we
-	// rely on the readRegularNoFollow stat-after-open path to reject.
-	// To avoid the open-blocks-on-FIFO hang, hand the helper a path
-	// that's a regular file but make a separate assertion via Lstat
-	// outside the helper.
-	st, err := os.Lstat(fifo)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if st.Mode().IsRegular() {
-		t.Fatalf("fixture must be a FIFO, was regular")
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := readRegularNoFollow(fifo)
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatalf("readRegularNoFollow returned no error on FIFO — must reject as non-regular")
+		}
+		// Either the post-open Stat rejected it ("not a regular file")
+		// or the open itself failed (e.g. EOPNOTSUPP). Both acceptable.
+	case <-time.After(2 * time.Second):
+		t.Fatal("readRegularNoFollow blocked on FIFO open — O_NONBLOCK regression (Reindex would soft-DoS)")
 	}
 }

@@ -81,13 +81,21 @@ func TestRateLimiter_SeparateIPsIndependent(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
 
-// TestExtractIP_XForwardedFor_FromTrustedProxy validates that XFF is honoured
-// when the immediate hop is loopback (the default trusted CIDR).
+// TestExtractIP_XForwardedFor_FromTrustedProxy validates that XFF is
+// honoured when the immediate hop is loopback (the default trusted CIDR)
+// AND the chain's intermediate hops are also trusted, so right-to-left
+// parsing walks past them to the true client.
 func TestExtractIP_XForwardedFor_FromTrustedProxy(t *testing.T) {
+	// The chain represents: client → cdn (70.41.3.18) → nginx (150.172.238.178) → us (loopback)
+	origCIDRs := trustedProxyCIDRs
+	trustedProxyCIDRs = parseTrustedProxies("70.41.3.18,150.172.238.178")
+	defer func() { trustedProxyCIDRs = origCIDRs }()
+
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.RemoteAddr = "127.0.0.1:54321" // loopback = trusted
+	req.RemoteAddr = "127.0.0.1:54321" // loopback = trusted (default)
 	req.Header.Set("X-Forwarded-For", "203.0.113.50, 70.41.3.18, 150.172.238.178")
-	assert.Equal(t, "203.0.113.50", extractIP(req))
+	assert.Equal(t, "203.0.113.50", extractIP(req),
+		"with both intermediate hops trusted, right-to-left skips them and returns the originating client")
 }
 
 // TestExtractIP_XRealIP_FromTrustedProxy validates X-Real-IP from loopback.
@@ -96,6 +104,82 @@ func TestExtractIP_XRealIP_FromTrustedProxy(t *testing.T) {
 	req.RemoteAddr = "127.0.0.1:54321"
 	req.Header.Set("X-Real-IP", "203.0.113.50")
 	assert.Equal(t, "203.0.113.50", extractIP(req))
+}
+
+// TestExtractIP_AppendProxyChain is the F-007 / Rabbit-Critical follow-up.
+// nginx's default `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for`
+// APPENDS the immediate hop to whatever the client sent. An attacker that
+// pre-seeds `X-Forwarded-For: 8.8.8.8` then has nginx tack on the real IP,
+// producing `X-Forwarded-For: 8.8.8.8, <real-attacker>`. The previous
+// leftmost-reading code returned 8.8.8.8 — the spoof — and let the
+// attacker pop fresh per-IP token buckets. Right-to-left walks past the
+// trusted nginx hop and surfaces the real attacker IP for bucketing.
+func TestExtractIP_AppendProxyChain(t *testing.T) {
+	// Trust the nginx proxy at 10.0.0.5/32 in addition to the loopback default.
+	origCIDRs := trustedProxyCIDRs
+	trustedProxyCIDRs = parseTrustedProxies("10.0.0.5/32")
+	defer func() { trustedProxyCIDRs = origCIDRs }()
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "10.0.0.5:54321" // the nginx hop — trusted
+	// Attacker pre-seeded "8.8.8.8"; nginx appended the real client IP.
+	req.Header.Set("X-Forwarded-For", "8.8.8.8, 198.51.100.42, 10.0.0.5")
+	got := extractIP(req)
+	assert.Equal(t, "198.51.100.42", got,
+		"right-to-left parse must skip the trusted nginx hop and return the real attacker IP, not the leftmost spoof")
+}
+
+// TestExtractIP_LeftmostStillUntrustedSingleProxy keeps the previous
+// "single overwrite proxy" case green — when there's only one entry in
+// the chain and it's not a trusted proxy, that's the client.
+func TestExtractIP_LeftmostStillUntrustedSingleProxy(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "127.0.0.1:9999" // loopback proxy
+	req.Header.Set("X-Forwarded-For", "203.0.113.50")
+	assert.Equal(t, "203.0.113.50", extractIP(req))
+}
+
+// TestExtractIP_AllChainEntriesAreTrusted falls back to the connection IP.
+func TestExtractIP_AllChainEntriesAreTrusted(t *testing.T) {
+	origCIDRs := trustedProxyCIDRs
+	trustedProxyCIDRs = parseTrustedProxies("10.0.0.0/8")
+	defer func() { trustedProxyCIDRs = origCIDRs }()
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "10.0.0.5:9999"
+	req.Header.Set("X-Forwarded-For", "10.0.1.1, 10.0.2.2, 10.0.3.3")
+	// All XFF entries are inside 10/8 — trusted. clientIPFromXFF returns "",
+	// then X-Real-IP empty, then we fall back to RemoteAddr.
+	assert.Equal(t, "10.0.0.5", extractIP(req))
+}
+
+// TestClientIPFromXFF_AcceptsHostPort handles real-world headers that
+// include the source port on XFF entries.
+func TestClientIPFromXFF_AcceptsHostPort(t *testing.T) {
+	origCIDRs := trustedProxyCIDRs
+	trustedProxyCIDRs = parseTrustedProxies("10.0.0.5/32")
+	defer func() { trustedProxyCIDRs = origCIDRs }()
+
+	got := clientIPFromXFF("8.8.8.8, 203.0.113.50:54321, 10.0.0.5:8080")
+	assert.Equal(t, "203.0.113.50", got, "host:port entries should resolve to host before trust check")
+}
+
+// TestExtractIP_XRealIPFromTrustedProxyDoesNotSelfTrust keeps an attacker
+// that knows the trusted-proxy IP from setting X-Real-IP=<that-IP> and
+// having extractIP echo it back.
+func TestExtractIP_XRealIPRejectsTrustedProxyValue(t *testing.T) {
+	origCIDRs := trustedProxyCIDRs
+	trustedProxyCIDRs = parseTrustedProxies("10.0.0.5/32")
+	defer func() { trustedProxyCIDRs = origCIDRs }()
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "10.0.0.5:9999"
+	// XFF empty (so we fall to X-Real-IP), but the value points at
+	// the trusted proxy itself — accepting that would let an
+	// attacker who knows the proxy IP spoof.
+	req.Header.Set("X-Real-IP", "10.0.0.5")
+	assert.Equal(t, "10.0.0.5", extractIP(req),
+		"X-Real-IP equal to a trusted proxy must fall back to RemoteAddr (which happens to also be 10.0.0.5 here)")
 }
 
 // TestExtractIP_XForwardedFor_FromUntrustedClient is the regression guard for

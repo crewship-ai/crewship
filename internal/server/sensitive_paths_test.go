@@ -18,6 +18,7 @@ func TestIsSensitiveStaticPath(t *testing.T) {
 		{"/.aws/credentials", true},
 		{"/.ssh/id_rsa", true},
 		{"/debug/vars", true},
+		{"/debug/pprof", true}, // bare form — added per CodeRabbit slash-bypass note
 		{"/debug/pprof/", true},
 		{"/debug/pprof/heap", true},
 		{"/server-status", true},

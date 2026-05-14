@@ -56,11 +56,20 @@ func methodIsStateChanging(method string) bool {
 // modern browsers); Referer is the fallback because some legacy clients
 // strip Origin on same-origin POSTs.
 //
-// Returns "" when neither header is present. Callers decide whether the
-// absence is acceptable (it is for non-browser clients like the CLI,
-// curl, the sidecar IPC) — see EnforceOrigin.
+// Returns the literal "null" when the header value is "null" — that's
+// what sandboxed iframes (data: URIs, srcdoc, file:// pages) send as
+// their Origin. We need to surface it so originAllowed can compare it
+// against the allowlist and reject. Pre-fix the value was conflated
+// with "no Origin header", which let any sandboxed-iframe page on
+// attacker.com slip through as if it were a CLI client. CodeRabbit
+// caught this on the first review pass.
+//
+// Returns "" only when neither Origin nor Referer is present at all.
+// Callers decide whether the absence is acceptable (it is for
+// non-browser clients like the CLI, curl, the sidecar IPC) — see
+// EnforceOrigin.
 func requestOrigin(r *http.Request) string {
-	if o := strings.TrimSpace(r.Header.Get("Origin")); o != "" && o != "null" {
+	if o := strings.TrimSpace(r.Header.Get("Origin")); o != "" {
 		return strings.TrimRight(o, "/")
 	}
 	if ref := strings.TrimSpace(r.Header.Get("Referer")); ref != "" {
