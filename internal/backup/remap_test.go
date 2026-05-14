@@ -39,7 +39,7 @@ func newRemapTestDB(t *testing.T) *sql.DB {
 			workspace_id TEXT NOT NULL REFERENCES workspaces(id),
 			name TEXT
 		);
-		CREATE TABLE agent_chats (
+		CREATE TABLE chats (
 			id TEXT PRIMARY KEY,
 			agent_id TEXT NOT NULL REFERENCES agents(id),
 			body TEXT
@@ -70,7 +70,7 @@ func TestRemapIDs_RewritesPKsAndFKs(t *testing.T) {
 			"skills": {
 				{"id": "skill_1", "workspace_id": "ws_old", "name": "git"},
 			},
-			"agent_chats": {
+			"chats": {
 				{"id": "chat_1", "agent_id": "agent_1", "body": "hi"},
 			},
 		},
@@ -139,10 +139,10 @@ func TestRemapIDs_RewritesPKsAndFKs(t *testing.T) {
 	for _, a := range dump.Tables["agents"] {
 		newAgentIDs[a["name"].(string)] = a["id"].(string)
 	}
-	chat := dump.Tables["agent_chats"][0]
+	chat := dump.Tables["chats"][0]
 	got, _ := chat["agent_id"].(string)
 	if got != newAgentIDs["Alice"] {
-		t.Errorf("agent_chats.agent_id not rewritten: got %q want %q", got, newAgentIDs["Alice"])
+		t.Errorf("chats.agent_id not rewritten: got %q want %q", got, newAgentIDs["Alice"])
 	}
 }
 
