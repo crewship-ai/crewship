@@ -193,6 +193,17 @@ Every successful write also appends one row to `journal_entries` with `entry_typ
 
 For the user/workspace data model these commands operate on, see [`/api-reference/users`](/api-reference/users) and the workspace endpoints — the schemas are identical; the CLI just bypasses the HTTP layer that normally fronts them.
 
+## Common pitfalls
+
+- **Don't run as `root` against a service-owned data directory.** If `crewshipd` runs as a `crewship` system user, the data directory is owned by that account. Running `crewship admin` as `root` creates root-owned WAL / journal files; on next server start, `crewshipd` can't write them and the server bails with a permissions error. Always `sudo -u crewship crewship admin …`.
+- **Stop the server first, every time.** Two processes writing the same SQLite file is the failure mode this guard exists to prevent. The admin CLI probes for the lock and refuses to run when it's held, but if you ever see "lock acquired anyway" output (i.e. the probe was racy), assume the database is now in a partially-applied state and restore from backup before continuing.
+- **Take a backup before any write.** There is no undo for `reset-password` or `promote`. A `crewship backup create` (or just a copy of `crewship.db`) before the recovery makes a botched call a one-command rollback instead of a multi-hour incident.
+- **Email casing is significant.** `users.email` is stored as the user typed it; `Admin@example.com` and `admin@example.com` are distinct rows. Always `list-users` first and copy the email value verbatim — the reset will silently target nothing useful if the casing drifts.
+- **`reset-password` does NOT invalidate active sessions.** Active sessions for the affected user keep working until the server restarts (which drops the in-memory session store). If the reset is a security event (suspected compromise), restart `crewshipd` immediately after the reset.
+- **Don't put the password in shell history.** `--password='…'` lands in `~/.bash_history` and is visible in `ps` to anyone with shell access during the window the command runs. Prefer the interactive prompt; for scripted use, pass via `--password="$VAR"` where `VAR` is sourced from an env file or BuildKit secret mount.
+- **`CREWSHIP_DATA_DIR` overrides `~/.crewship`.** On a host where the service was started with a custom data dir (common on dev VMs), running `crewship admin` with default env points at the wrong empty database, silently fails to find the user, and prints a misleading "no such email" error. Export the same `CREWSHIP_DATA_DIR` the service uses, or pass `--data-dir`.
+- **Migration version conflicts can hide your write.** If the data directory predates the migration that added the column you're updating (e.g. `password_updated_at`), the write succeeds but the new column stays at its default. Always run `crewship migrate` before `crewship admin` on a database that was created on an older binary.
+
 ## Related
 
 - [Authentication](/guides/auth) — the in-band recovery flow (email-based password reset) for users without shell access.
