@@ -266,6 +266,21 @@ Network blips do not lose messages. Sends that were in-flight at disconnect time
 
 These query params are stable. Do not link to the Next.js internal route segments; those are subject to refactoring.
 
+## Common pitfalls
+
+- **Edit-and-resend truncates the active branch — but the tail isn't gone.** Editing a user message moves every message after it into `chat_branches`. The UI shows a small "view earlier branches" affordance, but a hurried operator may believe they've lost the alternate response. Train the muscle of opening the branch picker before assuming work is unrecoverable.
+- **Reactions are workspace-shared, not per-user-private.** A 👎 from one operator is visible to every other operator in the same workspace, and is also surfaced to the agent on the next turn. Use reactions as a deliberate signal — not as a private bookmark. If you need a private flag, use the [Inbox](/guides/inbox) pin instead.
+- **`chats.origin` silently NULLs unrecognised values.** Anything outside the `UI / CLI / WEBHOOK / CRON / AGENT` allow-list gets stored as `NULL` to keep the UI chip safe from injection. A webhook handler that posts `origin: "github"` will succeed (200 OK) but show no chip — the silent failure is by design. Validate the enum on your side before posting.
+- **Prisma TypeScript schema is intentionally stale on `chats.origin`.** Prisma is types-only in this project; the v59 migration was applied to SQLite but the `prisma/schema.prisma` was deliberately not regenerated. TS callers must query `origin` via the Go-typed API surface, not via Prisma Client.
+- **Attachment cap is 25 MB and silent.** Uploads larger than 25 MB return a 413 from `ProxyHandler.AgentChatAttachment`. The browser composer surfaces this as a toast, but a programmatic uploader (CLI, webhook) sees only the HTTP error — check status codes before assuming the file landed.
+- **The Files right-panel shows mid-edit state, not committed state.** It reads `workspace_files`, which tracks the agent's live working tree. If you want to see what was actually committed by the agent, look at the **Diff** tab against `HEAD`, or run `git log` in the **Terminal** tab — the Files view is intentionally optimistic.
+- **Closing the Terminal tab does NOT kill the agent's tmux session.** Re-opening reattaches to the same shell. This is a feature (long-running commands survive a tab close) but operators sometimes assume "close" means "stop". To actually stop, kill the process inside the terminal first.
+- **`request_id` must be stable per logical send, not per React render.** Generate the UUID once when the user hits **Send**, not in the render function. A re-render-derived ID lets the server treat a retry as a new turn — defeating the dedupe contract.
+- **Slash palette commands must be registered server-side.** `/foo` in the composer where `foo` isn't a registered command sends the literal text as a chat message — there's no client-side "unknown command" error. Add commands via the slash-command registration interface in `internal/api/chat.go` rather than expecting the UI to discover them.
+- **Shallow router state evaporates on hard navigation.** `panel=files` survives in-app tab switches and back/forward, but a hard reload that hits a 3xx redirect (e.g. auth expiry → login → bounce) loses everything past `?session=…`. Bookmark with intent, not panic.
+- **WS reconnect dedupes by `request_id`, not by content.** Two genuinely different sends that collide on a re-used `request_id` will silently merge into one turn server-side. Use a fresh UUID per logical send.
+- **Right-panel tabs don't unsubscribe on inactive.** Switching from Terminal to Files stops the *render* of the terminal stream but the WS subscription stays live in the background. This is intentional (re-opening the tab is instant) but means a workspace with many open chat tabs holds many parallel sidecar exec streams — heavy for the sidecar.
+
 ## Related
 
 - [User preferences API](/api-reference/preferences) — composer settings (default model, slash-palette behaviour).
