@@ -74,13 +74,23 @@ ehthumbs.db
 *.db-wal
 data/
 internal/orchestrator/data/
-.claude/
 /entrypoint.sh
 coverage_log.md
 
-# Internal — not for public repo
+# Internal — not for public repo (Mintlify is the canonical docs source)
 CLAUDE.md
 internal-docs/
+
+# Claude Code workspace — keep team tooling (commands/, settings.json),
+# ignore per-user state and internal design context
+.claude/context/
+.claude/wireframes/
+.claude/plans/
+.claude/mockups/
+.claude/prompts/
+.claude/worktrees/
+.claude/scheduled_tasks.lock
+.claude/settings.local.json
 
 # Local mockups / audit artifacts (kept untracked per user preference)
 audit-final/
