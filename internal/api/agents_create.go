@@ -80,7 +80,7 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if h.license != nil && req.CrewID != nil && *req.CrewID != "" {
 		if err := h.license.CheckAgentLimit(r.Context(), h.db, *req.CrewID); err != nil {
 			if license.IsLimitError(err) {
-				writeJSON(w, http.StatusPaymentRequired, map[string]string{"error": err.Error()})
+				replyError(w, http.StatusPaymentRequired, err.Error())
 				return
 			}
 			h.logger.Error("check agent limit", "error", err)

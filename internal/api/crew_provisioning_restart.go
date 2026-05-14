@@ -126,7 +126,7 @@ func (h *ProvisioningHandler) RestartCrewAgents(w http.ResponseWriter, r *http.R
 	// EnsureCrewRuntime which re-creates from the current cached_image.
 	if err := h.docker.ContainerRemove(r.Context(), containerID, container.RemoveOptions{Force: true}); err != nil {
 		h.logger.Error("remove crew container", "container_id", containerID, "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		replyError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 

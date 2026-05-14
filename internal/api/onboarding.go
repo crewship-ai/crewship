@@ -249,7 +249,7 @@ func (h *OnboardingHandler) Setup(w http.ResponseWriter, r *http.Request) {
 	// verbatim, producing a credential that loaded but never worked.
 	req.CredentialValue = strings.TrimSpace(req.CredentialValue)
 	if err := validateOnboardingCredential(r.Context(), req.LlmProvider, req.CredentialValue); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		replyError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -475,7 +475,7 @@ func (h *OnboardingHandler) setupFromTemplate(w http.ResponseWriter, r *http.Req
 		case errors.Is(err, errTemplateNotFound):
 			replyError(w, http.StatusBadRequest, "Unknown crew template")
 		case errors.Is(err, errCrewSlugConflict):
-			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+			replyError(w, http.StatusConflict, err.Error())
 		default:
 			h.logger.Error("onboarding template: deploy", "error", err)
 			replyError(w, http.StatusInternalServerError, "Internal server error")

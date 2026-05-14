@@ -49,7 +49,7 @@ func (h *BackupHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	cat, err := backup.ListCatalog(ctx, h.db, workspaceID)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		replyError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if len(cat) > 0 {
@@ -75,12 +75,12 @@ func (h *BackupHandler) List(w http.ResponseWriter, r *http.Request) {
 	// list without a manual backfill step.
 	dir, err := backup.DefaultBackupsDir()
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		replyError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	entries, err := backup.ListBackups(ctx, dir)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		replyError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	filtered := entries[:0]
@@ -123,7 +123,7 @@ func (h *BackupHandler) Inspect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := validateBackupPath(path); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		replyError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if !bundleBelongsToWorkspace(ctx, path, workspaceID) {
@@ -136,7 +136,7 @@ func (h *BackupHandler) Inspect(w http.ResponseWriter, r *http.Request) {
 	}
 	m, err := backup.Inspect(ctx, path)
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		replyError(w, http.StatusNotFound, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, m)
@@ -169,7 +169,7 @@ func (h *BackupHandler) Status(w http.ResponseWriter, r *http.Request) {
 	out.WorkspaceID = workspaceID
 	held, err := backup.IsLockHeld(ctx, h.db, workspaceID, time.Now())
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		replyError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	out.Held = held
@@ -205,7 +205,7 @@ func (h *BackupHandler) Verify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := validateBackupPath(path); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		replyError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if !bundleBelongsToWorkspace(ctx, path, workspaceID) {
@@ -214,7 +214,7 @@ func (h *BackupHandler) Verify(w http.ResponseWriter, r *http.Request) {
 	}
 	res, err := backup.Verify(ctx, path)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		replyError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	errStr := ""

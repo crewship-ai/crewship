@@ -100,7 +100,7 @@ func (h *WorkspaceHandler) AddMember(w http.ResponseWriter, r *http.Request) {
 	if h.license != nil {
 		if err := h.license.CheckMemberLimit(r.Context(), h.db, workspaceID); err != nil {
 			if license.IsLimitError(err) {
-				writeJSON(w, http.StatusPaymentRequired, map[string]string{"error": err.Error()})
+				replyError(w, http.StatusPaymentRequired, err.Error())
 				return
 			}
 			h.logger.Error("check member limit", "error", err)
@@ -329,7 +329,7 @@ func (h *WorkspaceHandler) CreateInvitation(w http.ResponseWriter, r *http.Reque
 	if h.license != nil {
 		if err := h.license.CheckMemberLimit(r.Context(), h.db, workspaceID); err != nil {
 			if license.IsLimitError(err) {
-				writeJSON(w, http.StatusPaymentRequired, map[string]string{"error": err.Error()})
+				replyError(w, http.StatusPaymentRequired, err.Error())
 				return
 			}
 			h.logger.Error("check member limit for invitation", "error", err)

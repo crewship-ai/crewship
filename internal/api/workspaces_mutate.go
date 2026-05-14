@@ -43,7 +43,7 @@ func (h *WorkspaceHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if req.PreferredLanguage != nil && *req.PreferredLanguage != "" {
 		resolved, err := resolveLanguage(*req.PreferredLanguage)
 		if err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			replyError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		req.PreferredLanguage = &resolved
@@ -146,7 +146,7 @@ func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if req.PreferredLanguage != nil && *req.PreferredLanguage != "" {
 		resolved, err := resolveLanguage(*req.PreferredLanguage)
 		if err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			replyError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		req.PreferredLanguage = &resolved

@@ -97,7 +97,7 @@ func (h *InternalHandler) CreateCrew(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if existing > 0 {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": fmt.Sprintf("crew with slug '%s' already exists", body.Slug)})
+		replyError(w, http.StatusConflict, fmt.Sprintf("crew with slug '%s' already exists", body.Slug))
 		return
 	}
 
@@ -197,7 +197,7 @@ func (h *InternalHandler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if existing > 0 {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": fmt.Sprintf("agent with slug '%s' already exists", body.Slug)})
+		replyError(w, http.StatusConflict, fmt.Sprintf("agent with slug '%s' already exists", body.Slug))
 		return
 	}
 

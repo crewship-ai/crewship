@@ -43,7 +43,7 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if h.license != nil {
 		if err := h.license.CheckCrewLimit(r.Context(), h.db, workspaceID); err != nil {
 			if license.IsLimitError(err) {
-				writeJSON(w, http.StatusPaymentRequired, map[string]string{"error": err.Error()})
+				replyError(w, http.StatusPaymentRequired, err.Error())
 				return
 			}
 			h.logger.Error("check crew limit", "error", err)
@@ -129,7 +129,7 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 		for _, d := range req.AllowedDomains {
 			h := normalizeDomain(d)
 			if h == "" {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("invalid domain: %q", d)})
+				replyError(w, http.StatusBadRequest, fmt.Sprintf("invalid domain: %q", d))
 				return
 			}
 			normalized = append(normalized, h)
@@ -158,13 +158,13 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.DevcontainerConfig != nil && *req.DevcontainerConfig != "" {
 		if _, err := devcontainer.ParseBytes([]byte(*req.DevcontainerConfig)); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid devcontainer_config: " + err.Error()})
+			replyError(w, http.StatusBadRequest, "invalid devcontainer_config: " + err.Error())
 			return
 		}
 	}
 	if req.MiseConfig != nil && *req.MiseConfig != "" {
 		if _, err := devcontainer.ParseMiseConfig(*req.MiseConfig); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid mise_config: " + err.Error()})
+			replyError(w, http.StatusBadRequest, "invalid mise_config: " + err.Error())
 			return
 		}
 	}

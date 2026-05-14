@@ -230,7 +230,7 @@ func (h *PipelineHandler) ImportPipeline(w http.ResponseWriter, r *http.Request)
 	// the receiving workspace's agents are checked too.
 	dsl, err := pipeline.Parse(bundle.Pipeline.Definition)
 	if err != nil {
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
+		replyError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
 	agentSlugs, _ := h.lookupAgentSlugs(r, bundle.AuthorCrewID)
@@ -282,7 +282,7 @@ func (h *PipelineHandler) ImportPipeline(w http.ResponseWriter, r *http.Request)
 	}
 	if err != nil {
 		h.logger.Error("pipeline import save", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		replyError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusCreated, toPipelineResponse(saved, true))
@@ -365,7 +365,7 @@ func (h *PipelineHandler) GetVersion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		replyError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -414,7 +414,7 @@ func (h *PipelineHandler) Rollback(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		h.logger.Error("pipeline rollback", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		replyError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, toPipelineResponse(rolled, true))
@@ -503,7 +503,7 @@ func (h *PipelineHandler) Save(w http.ResponseWriter, r *http.Request) {
 
 	dsl, err := pipeline.Parse(body.Definition)
 	if err != nil {
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
+		replyError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
 
@@ -527,11 +527,11 @@ func (h *PipelineHandler) Save(w http.ResponseWriter, r *http.Request) {
 		pipelineSlugs = nil
 	}
 	if err := pipeline.Validate(dsl, agentSlugs, pipelineSlugs); err != nil {
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
+		replyError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
 	if err := pipeline.CycleDetect(dsl, h.cycleResolver(r.Context(), workspaceID)); err != nil {
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
+		replyError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
 
@@ -594,7 +594,7 @@ func (h *PipelineHandler) Save(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		h.logger.Error("pipeline user save", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		replyError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusCreated, toPipelineResponse(saved, true))
@@ -628,7 +628,7 @@ func (h *PipelineHandler) InternalSave(w http.ResponseWriter, r *http.Request) {
 	// graph beyond `dsl` itself.
 	dsl, err := pipeline.Parse(body.Definition)
 	if err != nil {
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
+		replyError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
 	agentSlugs, err := h.lookupAgentSlugs(r, body.AuthorCrewID)
@@ -646,7 +646,7 @@ func (h *PipelineHandler) InternalSave(w http.ResponseWriter, r *http.Request) {
 		pipelineSlugs = nil
 	}
 	if err := pipeline.Validate(dsl, agentSlugs, pipelineSlugs); err != nil {
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
+		replyError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
 	// Cycle detection over the workspace's saved pipelines plus this
@@ -654,7 +654,7 @@ func (h *PipelineHandler) InternalSave(w http.ResponseWriter, r *http.Request) {
 	// aren't in the workspace yet stop the walk on that branch (no
 	// false positives — see pipeline.CycleDetect docstring).
 	if err := pipeline.CycleDetect(dsl, h.cycleResolver(r.Context(), body.WorkspaceID)); err != nil {
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
+		replyError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
 
@@ -690,7 +690,7 @@ func (h *PipelineHandler) InternalSave(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		h.logger.Error("pipeline internal save", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		replyError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusCreated, toPipelineResponse(saved, true))

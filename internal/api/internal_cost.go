@@ -142,7 +142,7 @@ func (r *Router) handleSidecarCostRecord(w http.ResponseWriter, req *http.Reques
 		// sentinel paymaster wraps validation faults with, so we get
 		// a precise validation-vs-infra split.
 		if errors.Is(err, paymaster.ErrInvalidRequest) {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			replyError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		r.logger.Error("sidecar cost record failed", "err", err, "provider", body.Provider, "model", body.Model)

@@ -33,7 +33,7 @@ func (h *BackupHandler) Unlock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := backup.ForceReleaseLock(ctx, h.db, workspaceID); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		replyError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	WriteAuditLog(ctx, h.db, h.journal, "backup.unlock", "backup", workspaceID, user.ID, workspaceID, nil)
@@ -85,12 +85,12 @@ func (h *BackupHandler) Rotate(w http.ResponseWriter, r *http.Request) {
 	}
 	dir, err := backup.DefaultBackupsDir()
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		replyError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	deleted, err := backup.Rotate(ctx, dir, workspaceID, req.KeepLast, req.KeepDays, req.DryRun)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		replyError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if !req.DryRun {
@@ -137,7 +137,7 @@ func (h *BackupHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := validateBackupPath(path); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		replyError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if !bundleBelongsToWorkspace(ctx, path, workspaceID) {
@@ -145,7 +145,7 @@ func (h *BackupHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := backup.Delete(ctx, path); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		replyError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	// Drop the catalog row too so the admin UI list view refreshes
@@ -179,7 +179,7 @@ func (h *BackupHandler) Download(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := validateBackupPath(path); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		replyError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if !bundleBelongsToWorkspace(ctx, path, workspaceID) {
@@ -188,13 +188,13 @@ func (h *BackupHandler) Download(w http.ResponseWriter, r *http.Request) {
 	}
 	f, err := os.Open(path)
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		replyError(w, http.StatusNotFound, err.Error())
 		return
 	}
 	defer func() { _ = f.Close() }()
 	info, err := f.Stat()
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		replyError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	// Bundle bytes contain sensitive workspace contents (even encrypted,
@@ -294,7 +294,7 @@ func (h *BackupHandler) SelfTest(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		h.logger.Error("backup self-test: pipeline", "crew_id", crewID, "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		replyError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	// Happy and content-mismatch paths both return 200 with the result

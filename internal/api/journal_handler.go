@@ -51,7 +51,7 @@ func (h *JournalHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	q, err := parseJournalQuery(r, workspaceID)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		replyError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -84,7 +84,7 @@ func (h *JournalHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	}
 	q, err := parseJournalQuery(r, workspaceID)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		replyError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	// `q.Limit` is left at the default; the seed loop and poll loop
@@ -466,7 +466,7 @@ func (h *JournalHandler) Count(w http.ResponseWriter, r *http.Request) {
 
 	q, err := parseJournalQuery(stripped, workspaceID)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		replyError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 

@@ -119,7 +119,7 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !crewFound {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("Invalid crew_id: %s", cid)})
+			replyError(w, http.StatusBadRequest, fmt.Sprintf("Invalid crew_id: %s", cid))
 			return
 		}
 	}
@@ -328,7 +328,7 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if !ok {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("Invalid crew_id: %s", cid)})
+				replyError(w, http.StatusBadRequest, fmt.Sprintf("Invalid crew_id: %s", cid))
 				return
 			}
 		}

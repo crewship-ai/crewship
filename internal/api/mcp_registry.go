@@ -460,7 +460,7 @@ func (h *MCPRegistryHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	whereClause, whereArgs, err := parseRegistryFilters(r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		replyError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	where := ""
@@ -523,7 +523,7 @@ func (h *MCPRegistryHandler) Search(w http.ResponseWriter, r *http.Request) {
 	// verified servers from the marketplace UI.
 	filterClause, filterArgs, ferr := parseRegistryFilters(r)
 	if ferr != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": ferr.Error()})
+		replyError(w, http.StatusBadRequest, ferr.Error())
 		return
 	}
 	likeClause := "(name LIKE ? OR description LIKE ? OR category LIKE ? OR display_name LIKE ?)"

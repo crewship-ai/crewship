@@ -10,14 +10,6 @@ import (
 	"github.com/crewship-ai/crewship/internal/pipeline"
 )
 
-// writeError is a thin wrapper around writeJSON for the schedule
-// handlers. The rest of pipelines.go uses inline map literals; we
-// adopt the helper here purely because the schedule endpoints have
-// many short error paths and the helper makes them grep-able.
-func writeError(w http.ResponseWriter, status int, msg string) {
-	writeJSON(w, status, map[string]string{"error": msg})
-}
-
 // scheduleResponse is the wire shape for pipeline_schedules. We
 // expose pipeline_slug alongside target_pipeline_id so the UI does
 // not need a second roundtrip to render a recognizable label, and
@@ -89,23 +81,23 @@ type scheduleRequestBody struct {
 // id from `crewship pipeline get`).
 func (h *PipelineHandler) CreateSchedule(w http.ResponseWriter, r *http.Request) {
 	if h.schedules == nil {
-		writeError(w, http.StatusServiceUnavailable, "pipeline_schedules backend not wired")
+		replyError(w, http.StatusServiceUnavailable, "pipeline_schedules backend not wired")
 		return
 	}
 	workspaceID := WorkspaceIDFromContext(r.Context())
 
 	var body scheduleRequestBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
+		replyError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
 		return
 	}
 	if body.CronExpr == "" {
-		writeError(w, http.StatusBadRequest, "cron_expr required")
+		replyError(w, http.StatusBadRequest, "cron_expr required")
 		return
 	}
 	pipelineID, slug, err := h.resolveSchedulePipelineID(r, workspaceID, &body)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		replyError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -130,11 +122,11 @@ func (h *PipelineHandler) CreateSchedule(w http.ResponseWriter, r *http.Request)
 		// surface them as 400 not 500 so the UI can show "fix the
 		// cron expression" instead of "server error".
 		if isUserScheduleError(err) {
-			writeError(w, http.StatusBadRequest, err.Error())
+			replyError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		h.logger.Warn("create pipeline schedule", "error", err)
-		writeError(w, http.StatusInternalServerError, "failed to create schedule")
+		replyError(w, http.StatusInternalServerError, "failed to create schedule")
 		return
 	}
 	writeJSON(w, http.StatusCreated, h.toScheduleResponse(saved, slug))
@@ -143,14 +135,14 @@ func (h *PipelineHandler) CreateSchedule(w http.ResponseWriter, r *http.Request)
 // ListSchedules GET /workspaces/{wsId}/pipeline-schedules
 func (h *PipelineHandler) ListSchedules(w http.ResponseWriter, r *http.Request) {
 	if h.schedules == nil {
-		writeError(w, http.StatusServiceUnavailable, "pipeline_schedules backend not wired")
+		replyError(w, http.StatusServiceUnavailable, "pipeline_schedules backend not wired")
 		return
 	}
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	rows, err := h.schedules.List(r.Context(), workspaceID)
 	if err != nil {
 		h.logger.Warn("list pipeline schedules", "error", err)
-		writeError(w, http.StatusInternalServerError, "failed to list schedules")
+		replyError(w, http.StatusInternalServerError, "failed to list schedules")
 		return
 	}
 	out := make([]scheduleResponse, 0, len(rows))
@@ -178,32 +170,32 @@ func (h *PipelineHandler) ListSchedules(w http.ResponseWriter, r *http.Request) 
 // simpler than partial-update merging logic.
 func (h *PipelineHandler) UpdateSchedule(w http.ResponseWriter, r *http.Request) {
 	if h.schedules == nil {
-		writeError(w, http.StatusServiceUnavailable, "pipeline_schedules backend not wired")
+		replyError(w, http.StatusServiceUnavailable, "pipeline_schedules backend not wired")
 		return
 	}
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	scheduleID := r.PathValue("scheduleId")
 	if scheduleID == "" {
-		writeError(w, http.StatusBadRequest, "scheduleId required")
+		replyError(w, http.StatusBadRequest, "scheduleId required")
 		return
 	}
 	existing, err := h.schedules.GetByID(r.Context(), scheduleID)
 	if err != nil {
 		if errors.Is(err, pipeline.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "schedule not found")
+			replyError(w, http.StatusNotFound, "schedule not found")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "failed to load schedule")
+		replyError(w, http.StatusInternalServerError, "failed to load schedule")
 		return
 	}
 	if existing.WorkspaceID != workspaceID {
-		writeError(w, http.StatusNotFound, "schedule not found")
+		replyError(w, http.StatusNotFound, "schedule not found")
 		return
 	}
 
 	var body scheduleRequestBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
+		replyError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
 		return
 	}
 
@@ -212,7 +204,7 @@ func (h *PipelineHandler) UpdateSchedule(w http.ResponseWriter, r *http.Request)
 	if body.TargetPipelineSlug != "" || body.TargetPipelineID != "" {
 		pid, sl, err := h.resolveSchedulePipelineID(r, workspaceID, &body)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
+			replyError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		pipelineID = pid
@@ -253,11 +245,11 @@ func (h *PipelineHandler) UpdateSchedule(w http.ResponseWriter, r *http.Request)
 	saved, err := h.schedules.Save(r.Context(), in)
 	if err != nil {
 		if isUserScheduleError(err) {
-			writeError(w, http.StatusBadRequest, err.Error())
+			replyError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		h.logger.Warn("update pipeline schedule", "error", err)
-		writeError(w, http.StatusInternalServerError, "failed to update schedule")
+		replyError(w, http.StatusInternalServerError, "failed to update schedule")
 		return
 	}
 	writeJSON(w, http.StatusOK, h.toScheduleResponse(saved, slug))
@@ -270,31 +262,31 @@ func (h *PipelineHandler) UpdateSchedule(w http.ResponseWriter, r *http.Request)
 // finish but no new runs will fire.
 func (h *PipelineHandler) DeleteSchedule(w http.ResponseWriter, r *http.Request) {
 	if h.schedules == nil {
-		writeError(w, http.StatusServiceUnavailable, "pipeline_schedules backend not wired")
+		replyError(w, http.StatusServiceUnavailable, "pipeline_schedules backend not wired")
 		return
 	}
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	scheduleID := r.PathValue("scheduleId")
 	if scheduleID == "" {
-		writeError(w, http.StatusBadRequest, "scheduleId required")
+		replyError(w, http.StatusBadRequest, "scheduleId required")
 		return
 	}
 	existing, err := h.schedules.GetByID(r.Context(), scheduleID)
 	if err != nil {
 		if errors.Is(err, pipeline.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "schedule not found")
+			replyError(w, http.StatusNotFound, "schedule not found")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "failed to load schedule")
+		replyError(w, http.StatusInternalServerError, "failed to load schedule")
 		return
 	}
 	if existing.WorkspaceID != workspaceID {
-		writeError(w, http.StatusNotFound, "schedule not found")
+		replyError(w, http.StatusNotFound, "schedule not found")
 		return
 	}
 	if err := h.schedules.SoftDelete(r.Context(), scheduleID); err != nil {
 		h.logger.Warn("delete pipeline schedule", "error", err)
-		writeError(w, http.StatusInternalServerError, "failed to delete schedule")
+		replyError(w, http.StatusInternalServerError, "failed to delete schedule")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

@@ -83,7 +83,7 @@ func (h *PortExposeHandler) RequestExpose(w http.ResponseWriter, r *http.Request
 
 	// Rate limits: count rows the agent already has live.
 	if err := h.checkQuota(r.Context(), body.AgentID, body.WorkspaceID); err != nil {
-		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": err.Error()})
+		replyError(w, http.StatusTooManyRequests, err.Error())
 		return
 	}
 
@@ -109,7 +109,7 @@ func (h *PortExposeHandler) RequestExpose(w http.ResponseWriter, r *http.Request
 	}
 	switch decision {
 	case ExposeDeny:
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "denied by policy: " + reason})
+		replyError(w, http.StatusForbidden, "denied by policy: " + reason)
 		return
 	case ExposePending:
 		// Reserved for a future change. Surface a clear error so the sidecar

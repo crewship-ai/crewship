@@ -85,19 +85,19 @@ type webhookRequestBody struct {
 // CreateWebhook POST /workspaces/{wsId}/pipeline-webhooks
 func (h *PipelineHandler) CreateWebhook(w http.ResponseWriter, r *http.Request) {
 	if h.webhooks == nil {
-		writeError(w, http.StatusServiceUnavailable, "pipeline_webhooks backend not wired")
+		replyError(w, http.StatusServiceUnavailable, "pipeline_webhooks backend not wired")
 		return
 	}
 	workspaceID := WorkspaceIDFromContext(r.Context())
 
 	var body webhookRequestBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
+		replyError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
 		return
 	}
 	pipelineID, slug, err := h.resolveWebhookPipelineID(r, workspaceID, &body)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		replyError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -118,7 +118,7 @@ func (h *PipelineHandler) CreateWebhook(w http.ResponseWriter, r *http.Request) 
 	saved, err := h.webhooks.Save(r.Context(), in)
 	if err != nil {
 		h.logger.Warn("create pipeline webhook", "error", err)
-		writeError(w, http.StatusInternalServerError, "failed to create webhook")
+		replyError(w, http.StatusInternalServerError, "failed to create webhook")
 		return
 	}
 	// Reveal the signing secret only on create — the UI shows it
@@ -130,14 +130,14 @@ func (h *PipelineHandler) CreateWebhook(w http.ResponseWriter, r *http.Request) 
 // ListWebhooks GET /workspaces/{wsId}/pipeline-webhooks
 func (h *PipelineHandler) ListWebhooks(w http.ResponseWriter, r *http.Request) {
 	if h.webhooks == nil {
-		writeError(w, http.StatusServiceUnavailable, "pipeline_webhooks backend not wired")
+		replyError(w, http.StatusServiceUnavailable, "pipeline_webhooks backend not wired")
 		return
 	}
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	rows, err := h.webhooks.List(r.Context(), workspaceID)
 	if err != nil {
 		h.logger.Warn("list pipeline webhooks", "error", err)
-		writeError(w, http.StatusInternalServerError, "failed to list webhooks")
+		replyError(w, http.StatusInternalServerError, "failed to list webhooks")
 		return
 	}
 	out := make([]webhookResponse, 0, len(rows))
@@ -158,31 +158,31 @@ func (h *PipelineHandler) ListWebhooks(w http.ResponseWriter, r *http.Request) {
 // DeleteWebhook DELETE /workspaces/{wsId}/pipeline-webhooks/{webhookId}
 func (h *PipelineHandler) DeleteWebhook(w http.ResponseWriter, r *http.Request) {
 	if h.webhooks == nil {
-		writeError(w, http.StatusServiceUnavailable, "pipeline_webhooks backend not wired")
+		replyError(w, http.StatusServiceUnavailable, "pipeline_webhooks backend not wired")
 		return
 	}
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	webhookID := r.PathValue("webhookId")
 	if webhookID == "" {
-		writeError(w, http.StatusBadRequest, "webhookId required")
+		replyError(w, http.StatusBadRequest, "webhookId required")
 		return
 	}
 	existing, err := h.webhooks.GetByID(r.Context(), webhookID)
 	if err != nil {
 		if errors.Is(err, pipeline.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "webhook not found")
+			replyError(w, http.StatusNotFound, "webhook not found")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "failed to load webhook")
+		replyError(w, http.StatusInternalServerError, "failed to load webhook")
 		return
 	}
 	if existing.WorkspaceID != workspaceID {
-		writeError(w, http.StatusNotFound, "webhook not found")
+		replyError(w, http.StatusNotFound, "webhook not found")
 		return
 	}
 	if err := h.webhooks.SoftDelete(r.Context(), webhookID); err != nil {
 		h.logger.Warn("delete pipeline webhook", "error", err)
-		writeError(w, http.StatusInternalServerError, "failed to delete webhook")
+		replyError(w, http.StatusInternalServerError, "failed to delete webhook")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -203,18 +203,18 @@ func (h *PipelineHandler) DeleteWebhook(w http.ResponseWriter, r *http.Request) 
 //   - 503 if the runner / webhook store isn't wired
 func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 	if h.webhooks == nil || h.runner == nil {
-		writeError(w, http.StatusServiceUnavailable, "webhook dispatch not wired")
+		replyError(w, http.StatusServiceUnavailable, "webhook dispatch not wired")
 		return
 	}
 	token := r.PathValue("token")
 	wh, err := h.webhooks.GetByToken(r.Context(), token)
 	if err != nil {
 		// 404 on every failure — never reveal which tokens exist.
-		writeError(w, http.StatusNotFound, "unknown webhook")
+		replyError(w, http.StatusNotFound, "unknown webhook")
 		return
 	}
 	if !wh.Enabled {
-		writeError(w, http.StatusNotFound, "unknown webhook")
+		replyError(w, http.StatusNotFound, "unknown webhook")
 		return
 	}
 
@@ -224,7 +224,7 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 	const maxBody = 1 << 20
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxBody))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "could not read body")
+		replyError(w, http.StatusBadRequest, "could not read body")
 		return
 	}
 
@@ -233,14 +233,14 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 	if wh.SigningSecret != "" {
 		sig := r.Header.Get("X-Crewship-Signature")
 		if !wh.ValidateSignature(body, sig) {
-			writeError(w, http.StatusUnauthorized, "signature mismatch")
+			replyError(w, http.StatusUnauthorized, "signature mismatch")
 			return
 		}
 	}
 
 	if !pipeline.AllowWebhookFire(wh.Token, wh.RateLimitPerMin) {
 		w.Header().Set("Retry-After", "60")
-		writeError(w, http.StatusTooManyRequests, "rate limit exceeded")
+		replyError(w, http.StatusTooManyRequests, "rate limit exceeded")
 		return
 	}
 
@@ -290,11 +290,11 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 		// can retry instead of recording a generic 5xx.
 		if errors.Is(err, pipeline.ErrConcurrencyLimitReached) {
 			w.Header().Set("Retry-After", "5")
-			writeError(w, http.StatusTooManyRequests, "concurrency limit reached")
+			replyError(w, http.StatusTooManyRequests, "concurrency limit reached")
 			return
 		}
 		h.logger.Warn("webhook fire", "error", err, "webhook_id", wh.ID)
-		writeError(w, http.StatusInternalServerError, "pipeline run failed")
+		replyError(w, http.StatusInternalServerError, "pipeline run failed")
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]any{

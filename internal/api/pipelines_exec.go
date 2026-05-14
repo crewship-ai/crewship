@@ -137,7 +137,7 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.logger.Error("pipeline run: exec", "error", err, "slug", slug)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		replyError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, res)
@@ -176,7 +176,7 @@ func (h *PipelineHandler) DryRun(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		h.logger.Error("pipeline dry_run: exec", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		replyError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, res)
@@ -222,7 +222,7 @@ func (h *PipelineHandler) TestRun(w http.ResponseWriter, r *http.Request) {
 
 	dsl, err := pipeline.Parse(body.Definition)
 	if err != nil {
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
+		replyError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
 	// Cross-reference validation on save uses agent_slug ⊆ author
@@ -232,7 +232,7 @@ func (h *PipelineHandler) TestRun(w http.ResponseWriter, r *http.Request) {
 	// typo gets a quick error from the runner, not a strict
 	// schema check).
 	if err := pipeline.Validate(dsl, nil, nil); err != nil {
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
+		replyError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
 
@@ -259,7 +259,7 @@ func (h *PipelineHandler) TestRun(w http.ResponseWriter, r *http.Request) {
 		saveToken = signSaveToken(h.saveTokenSecret, workspaceID, defHash, userID, time.Now())
 	}
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		replyError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	// Wrap the RunResult with save_token. Embed the result's fields
@@ -530,11 +530,11 @@ func (h *PipelineHandler) ApproveWaitpoint(w http.ResponseWriter, r *http.Reques
 	if err := wp.CompleteApproval(r.Context(), token, body.Approved, deciderID, payload); err != nil {
 		// pipeline.ErrAlreadyDecided → 409
 		if err.Error() == "waitpoint: already decided or expired" {
-			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+			replyError(w, http.StatusConflict, err.Error())
 			return
 		}
 		h.logger.Error("waitpoint complete", "error", err, "token", token)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		replyError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "approved": body.Approved})

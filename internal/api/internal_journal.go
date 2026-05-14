@@ -112,7 +112,7 @@ func (r *Router) handleSidecarEmit(w http.ResponseWriter, req *http.Request) {
 		// We surface the message so the sidecar can log something useful.
 		// Anything else (DB down, disk full) is 500.
 		if strings.HasPrefix(err.Error(), "journal:") {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			replyError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		r.logger.Error("sidecar journal emit failed", "err", err, "type", entryType)
