@@ -333,8 +333,17 @@ func TestRunAgentExitCodeError(t *testing.T) {
 		TimeoutSecs: 5,
 	}, nil)
 
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	// Non-zero exit produces TWO observable effects: (a) RunAgent returns
+	// a non-nil error so chatbridge can surface "agent exited with code N"
+	// into the chat instead of an empty assistant bubble, and (b) the run
+	// row is updated to status=error so the dashboard / journal records
+	// the failure. Both must hold — testing only one would let regressions
+	// silently re-introduce the empty-bubble bug class.
+	if err == nil {
+		t.Fatal("expected non-nil error for non-zero agent exit, got nil")
+	}
+	if !strings.Contains(err.Error(), "agent exited with code") {
+		t.Errorf("error should reference the exit-code surface message, got: %v", err)
 	}
 
 	data, _ := state.Get(context.Background(), "agent_runs", "s1")
