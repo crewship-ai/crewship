@@ -11,8 +11,13 @@ one row per check with a status. Designed for the "is everything OK
 before I file an issue?" workflow.
 
 ```bash
-crewship doctor [--no-color]
+crewship doctor [--no-color] [--fix]
 ```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--no-color` | `bool` | auto | Disable ANSI colours. Auto-detected when stdout is not a TTY. |
+| `--fix` | `bool` | `false` | Attempt safe auto-repairs while running the checks. Currently creates the missing data directory; future checks may opt in. |
 
 ## Exit codes
 
@@ -123,6 +128,20 @@ $ crewship doctor
   flag).
 - Status codes (`PASS`/`WARN`/`FAIL`/`INFO`) are always in left-padded
   brackets and parseable with `awk '{print $1}'`.
+
+## Auto-repair (`--fix`)
+
+`--fix` opts into safe, narrowly-scoped repair side-effects during the
+check run. Currently scoped to:
+
+- **Database directory missing** — creates `$CREWSHIP_DATA_DIR` (or
+  `~/.crewship`) with `0700` perms instead of failing the check. The
+  detail column then reads `(created via --fix)` so you can see what
+  changed.
+
+Anything destructive (file overwrites, mode-bit flips on existing
+files, DB schema repairs) is intentionally out of scope — `--fix` is
+for first-run onboarding, not running surgery on a populated install.
 
 ## When to run
 

@@ -17,8 +17,10 @@ crewship approvals <subcommand> [flags]
 | Command | Description |
 |---|---|
 | `list` | List approval requests. |
+| `get <id>` | Fetch a single approval request with full detail. |
 | `approve <id>` | Approve a pending request. |
 | `deny <id>` | Deny a pending request. |
+| `reset-auto-tuning <tool>` | Wipe rolling reward history for a tool to re-train gate auto-tuning. |
 
 `cancel` is deliberately absent -- the backend does not expose `POST /api/v1/approvals/{id}/cancel` yet.
 
@@ -76,6 +78,34 @@ crewship approvals deny req_01HXYZABCDEF --comment "wrong mission target"
 | Flag | Type | Default | Description |
 |---|---|---|---|
 | `--comment` | `string` | | Optional comment recorded with the decision. |
+
+---
+
+## `crewship approvals get <id>`
+
+Fetch one approval request and render its full detail (kind, args, reason, decision metadata). The entry is workspace-scoped — IDs from other workspaces return 404.
+
+```bash
+crewship approvals get apr_abc123
+crewship approvals get apr_abc123 --format json | jq .args
+```
+
+Text mode prints canonical fields (`id`, `status`, `kind`, `reason`, `crew_id`, `agent_id`, `mission_id`, `requested_by`, `decided_by`, `decided_at`, `comment`, `created_at`, `updated_at`) up top, then any extra keys verbatim so an evolving server payload still renders something useful.
+
+---
+
+## `crewship approvals reset-auto-tuning <tool>`
+
+Wipe the reward history used by Harbor Master gate auto-tuning for the given tool. Auto-tuning downgrades sync→async after 90%+ approvals and upgrades async→sync after 70%+ denials, over the last 20 decisions per tool+args shape. When that window gets skewed (e.g. automation approving on humans' behalf for a stretch), reset to make the gate respect the configured mode again until humans re-train it naturally.
+
+Requires `OWNER` or `ADMIN` on the caller's workspace.
+
+```bash
+crewship approvals reset-auto-tuning shell.exec
+crewship approvals reset-auto-tuning "terraform apply"
+```
+
+Output reports `rows_deleted` from `gate_reward_history`.
 
 ## Errors
 
