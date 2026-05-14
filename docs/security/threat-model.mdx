@@ -1,0 +1,200 @@
+---
+title: "Threat Model"
+description: "One-page summary of the Crewship trust boundaries: container isolation, sidecar credential broker, output scrubber, and the Keeper policy layer."
+icon: "shield-virus"
+---
+
+# Threat Model
+
+Crewship's security posture rests on four layers that compose into a
+defense-in-depth model. Each layer assumes the layer above it can
+fail. This page is the 1-page summary; deep-dive links for each layer
+are at the bottom.
+
+## Adversary
+
+The threat model we design against is an **agent that has been
+prompt-injected, jailbroken, or is otherwise misaligned** — an
+attacker has supplied input the agent treats as instructions, and we
+have to assume the agent will execute that input verbatim against
+whatever tools it has access to. The attacker is **not** assumed to
+have compromised the host machine, the operator's terminal, or the
+Crewship binary itself.
+
+In practice this means we trust:
+
+- The host kernel and container runtime.
+- The Crewship binary and sidecar binary on disk (verified by
+  `cosign` at install time — see [Install](/guides/install)).
+- The operator running `crewship`.
+
+We **do not** trust:
+
+- Anything the agent reads — system prompt, user prompt, tool output,
+  fetched documents, MCP server responses.
+- The agent's own output, until the scrubber has run over it.
+- Network destinations the agent wants to reach.
+
+## Layer 1 — Container isolation
+
+Every agent runs in its own Linux container. The container:
+
+- Runs as **non-root UID 1001** (`agent`), with the sidecar at UID 1002.
+- Drops **all Linux capabilities** (`--cap-drop=ALL`) — no
+  `SYS_ADMIN`, no `NET_RAW`, no `SETUID`.
+- Joins an **isolated Docker network** with no DNS resolution out of
+  the box; egress is only allowed where the operator has carved a hole.
+- Mounts the workspace directory read/write and `/output/<agent>/`
+  for any persistent files; nothing else is bind-mounted by default.
+- Has the Docker socket **explicitly absent**. The agent cannot launch
+  sibling containers, escape via a `docker.sock` mount, or
+  enumerate other agents on the host.
+
+Blast radius if the agent breaks out of the container runtime: it
+gets the host process namespace as UID 1001 with no capabilities and
+no Docker socket. This is the standard rootless-container failure
+mode, and the operator is expected to layer additional host hardening
+(SELinux, AppArmor, seccomp, kernel patching) on top.
+
+Detail: [Container isolation](/security/container-isolation).
+
+## Layer 2 — Sidecar credential broker
+
+The agent never sees raw credentials. Instead:
+
+1. **Credentials live in the host's encrypted store** (`internal/sidecar/credstore`)
+   encrypted with `AES-256-GCM` using the operator's `ENCRYPTION_KEY`.
+2. **A per-agent sidecar** runs alongside the agent container, also as
+   a non-root user (UID 1002).
+3. **The agent's outbound HTTP traffic is proxied through the sidecar.**
+   When the agent calls `https://api.openai.com/...`, the sidecar:
+   - Checks the destination against the per-agent **allowlist**.
+   - Looks up the credential mapped to that destination.
+   - Injects the `Authorization` header on the way out.
+   - Forwards the response back.
+4. **The sidecar's credentials are loaded once at startup over stdin**
+   as a base64-encoded JSON payload. They are never written to the
+   agent container's environment.
+
+The agent therefore cannot:
+
+- Read API keys via `printenv`, `cat /proc/1/environ`, or any other
+  env-var introspection.
+- Reach any HTTP destination not in its allowlist (DNS resolution
+  inside the agent container is overridden to route through the
+  sidecar; raw IP egress is blocked at the network policy).
+- Exfiltrate credentials by tricking the LLM into echoing them — the
+  scrubber (Layer 4) drops anything that looks like a key in the
+  agent's output before it lands in the journal or web UI.
+
+Detail: [Credentials guide](/guides/credentials) for the operator
+flow, [`internal/sidecar/`](https://github.com/crewship-ai/crewship/tree/main/internal/sidecar)
+for the source.
+
+## Layer 3 — Output scrubber
+
+Every byte the agent produces — chat messages, journal entries, tool
+input/output, status updates streamed over WebSocket — passes through
+`internal/scrubber/` before it is persisted or shown to a human. The
+scrubber owns **13+ credential-shaped patterns**:
+
+- OpenAI keys (`sk-...`)
+- Anthropic keys (`sk-ant-...`)
+- AWS access keys (`AKIA...`)
+- Google service account keys (`AIza...`)
+- GitHub PATs (`ghp_...`, `gho_...`, `ghu_...`, …)
+- Slack tokens (`xoxb-...`, `xoxp-...`)
+- Generic bearer tokens (`Bearer eyJ...`)
+- Generic private-key blocks (`-----BEGIN ... PRIVATE KEY-----`)
+- … and the list grows as the maintainer encounters new shapes in the wild.
+
+A scrub hit replaces the matched substring with `[REDACTED:<type>]`
+and increments a metric. The metric is what surfaces in operator
+dashboards — a sudden spike usually means a misaligned agent is
+trying to echo a credential, and the operator can investigate from
+the journal.
+
+The scrubber is **fail-closed** — a panic during scrubbing produces
+no output rather than raw output. Tests pin every pattern to a
+golden file (`internal/scrubber/testdata/`).
+
+## Layer 4 — Keeper policy layer
+
+Even with credentials brokered and output scrubbed, the agent can
+still take legitimate-looking actions the operator wants to gate:
+opening a high-risk file, hitting a paid API endpoint, calling a tool
+that modifies production data.
+
+**Keeper** is the per-workspace policy engine that evaluates each
+tool call against a YAML ruleset _before_ the call is dispatched.
+Rules can:
+
+- **Allow** — the call proceeds (default for everything not matched).
+- **Deny** — the call is blocked, the agent receives a structured
+  error, the decision is journalled.
+- **Require approval** — the call pauses, a `waitpoint` lands in
+  the operator's [Inbox](/guides/inbox), and the agent resumes (or
+  is denied) on the operator's choice.
+- **Escalate** — the call routes to a second-opinion agent
+  ("gatekeeper LLM") for a softer decision, with the final answer
+  captured in the journal.
+
+Keeper decisions are first-class journal entries (`entry_type =
+keeper.decision`) and are searchable in [Recall](/guides/crew-journal),
+so a postmortem can reconstruct exactly what the agent tried and
+why the policy held the line.
+
+Detail: [Keeper guide](/guides/keeper).
+
+## What this composition does and does not protect against
+
+| Threat | Layer that handles it |
+|---|---|
+| Agent tries to read API keys from env | Layer 2 (sidecar — keys aren't there) |
+| Agent tries to echo a stolen key in output | Layer 3 (scrubber redacts) |
+| Agent tries to reach an arbitrary URL | Layer 2 (allowlist denies) + container network policy |
+| Agent tries to call a sensitive internal API | Layer 4 (Keeper rule) |
+| Agent breaks out of container runtime | Layer 1 — host hardening |
+| Operator's `ENCRYPTION_KEY` is exfiltrated | **Out of scope** — host compromise |
+| Crewship binary is tampered with at install | **Mitigated at install time** — cosign verification ([Install](/guides/install)) |
+| Supply-chain attack on `sentry-go` / a dep | Partial — `go.sum` pinning, Renovate review, Dependabot |
+| Side-channel timing leak across agents | **Not modelled** — agents are not assumed co-tenant-isolated below the container-runtime layer |
+
+## Beta posture and known gaps
+
+Crewship v0.1 beta is the first public beta. The threat model above
+describes the **target** state. Gaps the maintainer is openly tracking:
+
+- **Egress filtering is allowlist-only**, not full L7 filtering. A
+  compromised agent on an allowed host can still send arbitrary
+  request bodies to that host.
+- **Scrubber patterns are conservative but not exhaustive.** New
+  credential shapes the maintainer hasn't seen yet won't match.
+  Report misses by opening a security issue.
+- **Container-runtime isolation is the host's responsibility.** The
+  default Docker config is _not_ rootless, and Apple Containers /
+  Colima have different threat profiles than upstream Docker.
+- **Keeper rulesets ship empty.** The operator is responsible for
+  writing the rules that matter for their environment — there is no
+  "secure by default" Keeper policy yet.
+
+When a gap closes, the entry leaves this list and lands in the
+appropriate layer description above.
+
+## Reporting issues
+
+Security issues go to
+[github.com/crewship-ai/crewship/security/advisories/new](https://github.com/crewship-ai/crewship/security/advisories/new)
+(private disclosure). For ambiguous reports, the regular issue
+tracker with the `security` label is also fine — the maintainer
+triages both.
+
+## Related
+
+- [Container isolation](/security/container-isolation)
+- [Encryption](/security/encryption)
+- [RBAC](/security/rbac)
+- [Audit logging](/security/audit)
+- [Credentials guide](/guides/credentials)
+- [Keeper guide](/guides/keeper)
+- [Telemetry](/guides/telemetry) — what crash-reporting does and does not send.

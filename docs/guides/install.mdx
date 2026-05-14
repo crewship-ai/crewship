@@ -1,0 +1,208 @@
+---
+title: "Install"
+description: "Three supported ways to install Crewship: Homebrew tap, signed curl|sh installer, or Docker Compose."
+icon: "down-to-bracket"
+---
+
+# Install Crewship
+
+Crewship ships as a single, statically-linked Go binary with the
+Next.js frontend embedded via `go:embed`. There is no Node runtime at
+production deploy time, and the only hard dependency is a container
+runtime if you intend to run agents (Docker, Podman, Colima, OrbStack,
+Apple Containers, or Rancher Desktop).
+
+Pick the install path that matches how you run software locally — the
+three below are first-class and tested on every release.
+
+<CardGroup cols={3}>
+  <Card title="Homebrew" icon="apple" href="#homebrew">
+    macOS and Linuxbrew — one command, auto-upgrades.
+  </Card>
+  <Card title="curl | sh" icon="terminal" href="#curl--sh">
+    OS-agnostic install script with SHA-256 + cosign verification.
+  </Card>
+  <Card title="Docker Compose" icon="docker" href="#docker-compose">
+    Containerised, host doesn't need Go or Node.
+  </Card>
+</CardGroup>
+
+## Homebrew
+
+The release pipeline publishes a Homebrew formula on every tag to
+`crewship-ai/homebrew-tap`.
+
+```bash
+brew install crewship-ai/tap/crewship
+```
+
+The tap is auto-resolved from the prefixed name, so you do not need a
+separate `brew tap` step. Upgrades follow the normal flow:
+
+```bash
+brew upgrade crewship
+```
+
+Once installed, jump to the [quickstart](/quickstart) to bring the
+server up.
+
+## curl | sh
+
+The one-liner installer detects your OS and architecture, downloads
+the matching release archive from GitHub, verifies the SHA-256 against
+the signed `checksums.txt`, and — when `cosign` is on your PATH — also
+verifies the keyless Sigstore signature against the expected GitHub
+Actions OIDC identity.
+
+```bash
+curl -fsSL https://crewship.ai/install | sh
+```
+
+Missing `cosign` produces a soft warning rather than a hard failure so
+the one-liner keeps working for first-time users — install it from
+[sigstore.dev/cosign](https://docs.sigstore.dev/cosign/installation/)
+for full supply-chain verification.
+
+### Pinning a version
+
+```bash
+CREWSHIP_VERSION=v0.1.0-beta.1 curl -fsSL https://crewship.ai/install | sh
+```
+
+Omitting the variable picks the latest stable tag.
+
+### Custom install directory
+
+By default the script picks the first writable directory on your
+`PATH` (`/usr/local/bin`, `~/.local/bin`, `~/bin`, …). Override with:
+
+```bash
+CREWSHIP_INSTALL_DIR=$HOME/.crewship/bin curl -fsSL https://crewship.ai/install | sh
+```
+
+<Warning>
+`CREWSHIP_SKIP_VERIFY=1` disables checksum and signature verification.
+Use it only for offline mirror testing — never for normal installs.
+</Warning>
+
+### What the script does
+
+1. `uname -sm` → resolves `OS-arch` → picks the matching release archive.
+2. Downloads the archive **and** `checksums.txt` over TLS.
+3. Computes SHA-256 of the archive, matches against the line in
+   `checksums.txt`.
+4. If `cosign` is present, verifies the archive's signature against
+   `EXPECTED_CERT_IDENTITY_RE = https://github.com/crewship-ai/crewship/.github/workflows/release.yml@.*`
+   and `EXPECTED_OIDC_ISSUER = https://token.actions.githubusercontent.com`.
+5. Extracts and moves the `crewship` binary into the install directory.
+
+Source: [`scripts/install.sh`](https://github.com/crewship-ai/crewship/blob/main/scripts/install.sh).
+
+## Docker Compose
+
+The repo ships a production-grade compose file at
+`docker/docker-compose.prod.yml`. It builds an image from the
+checked-out source, runs the binary as the `crewship` user, mounts the
+Docker socket read-only so agents can be launched, and exposes the
+single port (`8080` by default) on the host.
+
+### Quickstart
+
+```bash
+git clone https://github.com/crewship-ai/crewship.git
+cd crewship
+
+# Required env vars
+cp .env.example .env
+# Edit .env and fill in:
+#   ENCRYPTION_KEY=$(openssl rand -hex 32)
+#   NEXTAUTH_SECRET=$(openssl rand -hex 32)
+
+docker compose -f docker/docker-compose.prod.yml up -d
+```
+
+The server is reachable on `http://localhost:8080` once the
+healthcheck (`/healthz`) reports healthy — typically within 10 seconds.
+
+### Defaults
+
+| Setting | Default | Override |
+|---|---|---|
+| Host port | `8080` | `CREWSHIP_PORT` in `.env` |
+| Database | SQLite at `/data/crewship.db` (named volume `crewship-db`) | `DATABASE_URL` |
+| Storage | local FS at `/var/lib/crewship` (named volume `crewship-data`) | `CREWSHIP_STORAGE_BASE_PATH` |
+| Logs | `/var/log/crewship` (named volume `crewship-logs`) | `CREWSHIP_LOG_PATH` |
+| Container provider | Docker | `CREWSHIP_CONTAINER_PROVIDER` |
+| State backend | bbolt | `CREWSHIP_STATE_PROVIDER` |
+
+`ENCRYPTION_KEY` and `NEXTAUTH_SECRET` are **required** — the compose
+file uses `${VAR:?...}` syntax that fails fast on `docker compose up`
+if they're empty.
+
+### PostgreSQL mode
+
+For multi-user deployments where SQLite contention becomes a concern,
+the compose file ships with a commented-out PostgreSQL service. To
+enable:
+
+1. Uncomment the `postgres:` service block and the `crewship-pgdata:`
+   named volume.
+2. Set `DATABASE_URL=postgres://crewship:${POSTGRES_PASSWORD}@postgres:5432/crewship`
+   and `POSTGRES_PASSWORD` in `.env`.
+3. Restart the stack.
+
+The Crewship binary picks Postgres up from the `postgres://` scheme on
+`DATABASE_URL`; the rest of the configuration is identical.
+
+### Docker socket: socket proxy strongly recommended
+
+The default compose mount is `/var/run/docker.sock:/var/run/docker.sock:ro`.
+Read-only on the host, but **the container still has Docker API
+access**, which is functionally root on the host. For production,
+swap it for a [Tecnativa docker-socket-proxy](https://github.com/Tecnativa/docker-socket-proxy)
+with a minimal allow-list (`CONTAINERS=1`, `EXEC=1`, `IMAGES=1`,
+`POST=1`). The compose file calls this out in a comment.
+
+The full container threat model is documented in the
+[Security threat model](/security/threat-model).
+
+## Verifying the install
+
+After any of the three paths:
+
+```bash
+crewship version           # SHA + build date
+crewship doctor            # runtime + data-dir + DB sanity check
+```
+
+`crewship doctor` prints what it detected:
+
+- Container runtime (`docker` / `podman` / `colima` / …) and whether
+  the socket responds
+- Data directory location and write permissions
+- Database file present + readable
+- Whether [telemetry](/guides/telemetry) is on or off
+
+Next stop: [quickstart](/quickstart) for the first run and admin user
+bootstrap. For development work (running the Go server + Next.js dev
+server side-by-side), see [Developer installation](/guides/installation).
+
+## Air-gapped / offline installs
+
+Download the release tarball + `checksums.txt` + (optionally) the
+cosign bundle from GitHub Releases on a network-connected machine,
+verify it manually with `sha256sum -c` and `cosign verify-blob`, and
+copy the binary to your target host. The binary has no runtime fetch
+behavior — no embedded analytics, no auto-update — so once it's on
+disk you're done.
+
+For air-gapped Docker hosts, `docker save crewship-ai/crewship:v0.1.0-beta.1`
+into a tarball on a connected machine, transfer, then `docker load`
+on the target.
+
+## Related
+
+- [Quickstart](/quickstart) — first run, admin bootstrap, seeding demo data.
+- [Developer installation](/guides/installation) — building from source, `dev.sh`, multi-instance layout.
+- [Environment variables](/configuration/environment) — full reference of `CREWSHIP_*` knobs.
+- [Telemetry](/guides/telemetry) — opt-out before the first start if you prefer.
