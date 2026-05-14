@@ -527,17 +527,21 @@ func TestFeatureMetadataParsesRuntimeRequirements(t *testing.T) {
 	if err := json.Unmarshal(raw, &meta); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if !meta.Privileged {
-		t.Errorf("expected privileged=true")
+	// Inverted post-F-011: feature-declared host-elevation requests are
+	// now stripped at parse time. The fixture asks for privileged=true,
+	// SYS_ADMIN, and seccomp=unconfined — none of which an untrusted OCI
+	// feature should be able to grant itself.
+	if meta.Privileged {
+		t.Errorf("F-011: feature-supplied privileged=true must be stripped at parse time")
 	}
 	if !meta.Init {
-		t.Errorf("expected init=true")
+		t.Errorf("expected init=true (Init is not part of the host-elevation strip)")
 	}
-	if len(meta.CapAdd) != 1 || meta.CapAdd[0] != "SYS_ADMIN" {
-		t.Errorf("capAdd = %v, want [SYS_ADMIN]", meta.CapAdd)
+	if len(meta.CapAdd) != 0 {
+		t.Errorf("F-011: feature-supplied SYS_ADMIN must be filtered out; got %v", meta.CapAdd)
 	}
-	if len(meta.SecurityOpt) != 1 || meta.SecurityOpt[0] != "seccomp=unconfined" {
-		t.Errorf("securityOpt = %v", meta.SecurityOpt)
+	if len(meta.SecurityOpt) != 0 {
+		t.Errorf("F-011: feature-supplied seccomp=unconfined must be dropped; got %v", meta.SecurityOpt)
 	}
 	if len(meta.Mounts) != 1 {
 		t.Fatalf("mounts len = %d, want 1", len(meta.Mounts))

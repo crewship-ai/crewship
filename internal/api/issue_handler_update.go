@@ -98,6 +98,29 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 		if *req.ParentIssueID == "" {
 			ub.SetNull("parent_issue_id")
 		} else {
+			// Workspace check matches the same gate in Create — pre-fix a
+			// caller could PATCH parent_issue_id to point at another
+			// workspace's issue, silently linking unrelated tenants.
+			// Self-parenting is also rejected to stop the trivial cycle
+			// case (deeper cycles need a recursive walk; tracked
+			// separately).
+			if *req.ParentIssueID == missionID {
+				writeProblem(w, r, http.StatusBadRequest, "parent_issue_id cannot be the issue itself")
+				return
+			}
+			var parentExists int
+			err := h.db.QueryRowContext(r.Context(),
+				`SELECT COUNT(*) FROM missions WHERE id = ? AND workspace_id = ?`,
+				*req.ParentIssueID, wsID).Scan(&parentExists)
+			if err != nil {
+				h.logger.Error("validate parent_issue_id", "error", err)
+				writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+				return
+			}
+			if parentExists == 0 {
+				writeProblem(w, r, http.StatusBadRequest, "parent_issue_id does not exist in this workspace")
+				return
+			}
 			ub.Set("parent_issue_id", *req.ParentIssueID)
 		}
 	}

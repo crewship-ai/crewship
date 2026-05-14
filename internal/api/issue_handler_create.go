@@ -169,6 +169,29 @@ func (h *IssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Same workspace-scoping for parent_issue_id. Pre-fix the field was
+	// inserted verbatim from the request — a workspace-A user could
+	// POST a new issue under their own crew with parent_issue_id pointing
+	// at a workspace-B issue, silently linking unrelated tenants together.
+	// Either side reading the parent later would hit the wrong row or get
+	// a confusing 403 because the referenced issue wasn't in their visible
+	// set. We reject the cross-workspace parent at insert time.
+	if req.ParentIssueID != nil && *req.ParentIssueID != "" {
+		var parentExists int
+		err = tx.QueryRowContext(r.Context(),
+			`SELECT COUNT(*) FROM missions WHERE id = ? AND workspace_id = ?`,
+			*req.ParentIssueID, wsID).Scan(&parentExists)
+		if err != nil {
+			h.logger.Error("validate parent_issue_id", "error", err)
+			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			return
+		}
+		if parentExists == 0 {
+			writeProblem(w, r, http.StatusBadRequest, "parent_issue_id does not exist in this workspace")
+			return
+		}
+	}
+
 	_, err = tx.ExecContext(r.Context(), `
 		INSERT INTO missions (id, workspace_id, crew_id, lead_agent_id, trace_id,
 		    title, description, status, number, identifier, priority,
