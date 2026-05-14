@@ -42,14 +42,33 @@ type Importer struct {
 }
 
 // NewImporter creates an Importer with a 30-second HTTP timeout.
-// The HTTP client validates redirect targets against SSRF checks.
+//
+// SSRF defense is layered:
+//   - ValidateImportURL is the cheap string-level reject (HTTPS-only, no
+//     literal localhost / private IP) and runs before any DNS lookup.
+//   - The Transport's DialContext goes a layer deeper: it inspects the
+//     resolved IP at connect time and refuses private/loopback/link-local
+//     ranges. This catches DNS aliases (localtest.me → 127.0.0.1),
+//     split-horizon DNS, and DNS rebinding — none of which the URL string
+//     alone can see.
+//   - CheckRedirect re-runs ValidateImportURL on every 3xx so an attacker
+//     can't bounce off a permissive host into an internal one.
 func NewImporter(db *sql.DB, logger *slog.Logger) *Importer {
 	imp := &Importer{
 		db:     db,
 		logger: logger,
 	}
+	transport := &http.Transport{
+		DialContext:           safeDialContext(),
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 15 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+		MaxIdleConns:          16,
+		IdleConnTimeout:       90 * time.Second,
+	}
 	imp.client = &http.Client{
-		Timeout: 30 * time.Second,
+		Timeout:   30 * time.Second,
+		Transport: transport,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= 10 {
 				return fmt.Errorf("too many redirects")
