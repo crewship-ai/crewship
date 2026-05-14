@@ -437,3 +437,12 @@ Agents in one crew cannot access another crew's shared memory. Container bind mo
 - **Don't delete `AGENT.md` entries casually.** Memory is append-mostly. Remove only entries that are explicitly outdated — pruning live knowledge is what makes an agent feel "dumber than yesterday".
 - **Migration v54/v55 must be applied for hybrid retrieval.** Older databases that predate the Crew Journal era (PRs #211/#212) don't have the `importance_score`, `reference_count`, or `journal_entries_fts` columns these endpoints read. Run `crewship migrate` after a binary upgrade and before depending on RRF scoring.
 - **Docker network `Internal: true` blocks sidecar → embedding model.** If the agents network is `Internal: true`, the sidecar can read its on-disk FTS5 index but cannot reach a remote embedding service if one is configured, silently degrading hybrid retrieval to BM25-only. The fix lives in `internal/provider/docker/docker.go:ensureNetwork` — the network must be `Internal: false` with a gateway.
+
+## Related
+
+- [Episodic memory](/guides/episodic-memory) — the hybrid retrieval (RRF) + importance/decay/reinforce uplift from PRs #211/#212 that this guide builds on.
+- [Consolidate](/guides/consolidate) — the nightly worker that promotes recurring `daily/*.md` observations into `AGENT.md` / `CREW.md` and archives the original logs.
+- [Crew Journal](/guides/crew-journal) — the event log behind the FTS5 mirror and the `journal_embeddings` table memory reads from.
+- [Keeper](/guides/keeper) — where secrets belong instead of memory files (memory is not encrypted at rest).
+- [Orchestration](/guides/orchestration) — the runtime that calls `BuildMemoryBlock` to inject memory into system prompts at agent-run time.
+- [Skills](/guides/skills) — for agent-side packaged knowledge that doesn't change per-user/per-crew; complementary to memory rather than overlapping.
