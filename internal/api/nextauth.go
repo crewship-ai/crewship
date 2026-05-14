@@ -60,18 +60,56 @@ func (h *NextAuthHandler) csrfToken() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-func (h *NextAuthHandler) sessionCookieName(r *http.Request) string {
+// sessionCookieName resolves the access-token cookie name for r,
+// prefixed with __Secure- when the request is HTTPS so the browser
+// enforces the secure-context contract.
+func sessionCookieName(r *http.Request) string {
 	if isHTTPS(r) {
 		return "__Secure-authjs.session-token"
 	}
 	return "authjs.session-token"
 }
 
-func (h *NextAuthHandler) refreshCookieName(r *http.Request) string {
+// refreshCookieName resolves the refresh-token cookie name for r.
+// Pair with refreshCookiePath when issuing — keeps the cookie scoped
+// to the refresh endpoint instead of leaking onto every request.
+func refreshCookieName(r *http.Request) string {
 	if isHTTPS(r) {
 		return "__Secure-authjs.refresh-token"
 	}
 	return "authjs.refresh-token"
+}
+
+// setAuthCookies writes both the access + refresh cookies in the
+// canonical NextAuth-compatible shape: HttpOnly, SameSite=Lax, Secure
+// auto-toggled by TLS, __Secure- prefix over HTTPS, refresh path-scoped
+// to refreshCookiePath so it never reaches non-auth handlers.
+//
+// All three auth entry points (email/password, Google OAuth, the
+// NextAuth bridge) used to inline this shape; centralizing it here
+// means a flag change lands in one place and the three paths can't
+// drift. Callers that want non-default TTLs should construct the
+// cookies themselves rather than asking this helper to grow knobs.
+func setAuthCookies(w http.ResponseWriter, r *http.Request, access, refresh string) {
+	secure := isHTTPS(r)
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionCookieName(r),
+		Value:    access,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   secure,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   int(auth.AccessTokenTTL.Seconds()),
+	})
+	http.SetCookie(w, &http.Cookie{
+		Name:     refreshCookieName(r),
+		Value:    refresh,
+		Path:     refreshCookiePath,
+		HttpOnly: true,
+		Secure:   secure,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   int(auth.RefreshTokenTTL.Seconds()),
+	})
 }
 
 func isHTTPS(r *http.Request) bool {
@@ -118,7 +156,7 @@ func (h *NextAuthHandler) Providers(w http.ResponseWriter, _ *http.Request) {
 // error. The cookie is also dropped on validation failure so a stale
 // token doesn't keep getting sent until 30 days from now.
 func (h *NextAuthHandler) Session(w http.ResponseWriter, r *http.Request) {
-	cookieName := h.sessionCookieName(r)
+	cookieName := sessionCookieName(r)
 	cookie, err := r.Cookie(cookieName)
 	if err != nil || cookie.Value == "" {
 		writeJSON(w, http.StatusOK, map[string]interface{}{})
@@ -244,7 +282,7 @@ func (h *NextAuthHandler) CallbackCredentials(w http.ResponseWriter, r *http.Req
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
-	h.setAuthCookies(w, r, accessTok, refreshTok)
+	setAuthCookies(w, r, accessTok, refreshTok)
 	_ = sess
 
 	callbackUrl := r.FormValue("callbackUrl")
@@ -354,7 +392,7 @@ func (h *NextAuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cookie, err := r.Cookie(h.refreshCookieName(r))
+	cookie, err := r.Cookie(refreshCookieName(r))
 	if err != nil || cookie.Value == "" {
 		// Accept the legacy cookie name for one release cycle so users
 		// don't get bounced mid-session by the deploy. Migration to
@@ -465,7 +503,7 @@ func (h *NextAuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.setAuthCookies(w, r, access, refresh)
+	setAuthCookies(w, r, access, refresh)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"ok":      true,
 		"expires": time.Now().Add(auth.AccessTokenTTL).UTC().Format(time.RFC3339),
@@ -560,33 +598,6 @@ func (h *NextAuthHandler) issueSession(r *http.Request, userID, name, email stri
 	return sess, access, refresh, nil
 }
 
-// setAuthCookies writes both auth cookies. Access is Path=/ so every
-// API endpoint can read it; refresh is Path-scoped to the refresh
-// endpoint so it never leaks to other handlers.
-func (h *NextAuthHandler) setAuthCookies(w http.ResponseWriter, r *http.Request, access, refresh string) {
-	accessName := h.sessionCookieName(r)
-	refreshName := h.refreshCookieName(r)
-	secure := isHTTPS(r)
-
-	http.SetCookie(w, &http.Cookie{
-		Name:     accessName,
-		Value:    access,
-		Path:     "/",
-		HttpOnly: true,
-		Secure:   secure,
-		SameSite: http.SameSiteLaxMode,
-		MaxAge:   int(auth.AccessTokenTTL.Seconds()),
-	})
-	http.SetCookie(w, &http.Cookie{
-		Name:     refreshName,
-		Value:    refresh,
-		Path:     refreshCookiePath,
-		HttpOnly: true,
-		Secure:   secure,
-		SameSite: http.SameSiteLaxMode,
-		MaxAge:   int(auth.RefreshTokenTTL.Seconds()),
-	})
-}
 
 // clearAuthCookies expires both cookies. Called on signOut, refresh
 // failure, and detected stale cookies on /api/auth/session — the
@@ -596,10 +607,10 @@ func (h *NextAuthHandler) clearAuthCookies(w http.ResponseWriter, r *http.Reques
 		name string
 		path string
 	}{
-		{h.sessionCookieName(r), "/"},
+		{sessionCookieName(r), "/"},
 		{"authjs.session-token", "/"},
 		{"__Secure-authjs.session-token", "/"},
-		{h.refreshCookieName(r), refreshCookiePath},
+		{refreshCookieName(r), refreshCookiePath},
 		{"authjs.refresh-token", refreshCookiePath},
 		{"__Secure-authjs.refresh-token", refreshCookiePath},
 	} {
@@ -635,14 +646,14 @@ func (h *NextAuthHandler) respondCredentialsError(w http.ResponseWriter, r *http
 // Used by signOut, but suitable for any handler that needs to operate
 // on "the caller's session" without depending on access-cookie freshness.
 func (h *NextAuthHandler) findSessionID(r *http.Request) string {
-	if cookie, err := r.Cookie(h.sessionCookieName(r)); err == nil && cookie.Value != "" {
+	if cookie, err := r.Cookie(sessionCookieName(r)); err == nil && cookie.Value != "" {
 		if claims, err := h.validator.ValidateAccess(cookie.Value); err == nil && claims.Sid != "" {
 			return claims.Sid
 		}
 	}
 	// Try both the secure and non-secure name; we may get either at
 	// signout time (HTTPS upgrade, proxy quirks, downgrade attacks).
-	for _, name := range []string{h.refreshCookieName(r), "authjs.refresh-token", "__Secure-authjs.refresh-token"} {
+	for _, name := range []string{refreshCookieName(r), "authjs.refresh-token", "__Secure-authjs.refresh-token"} {
 		if cookie, err := r.Cookie(name); err == nil && cookie.Value != "" {
 			if claims, err := h.validator.ValidateRefresh(cookie.Value); err == nil && claims.Sid != "" {
 				return claims.Sid
