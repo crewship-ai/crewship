@@ -6,9 +6,13 @@ icon: "message-square"
 
 # Chat & Sessions
 
-Chatting with an agent is a first-class surface in Crewship. PRs #213, #214, #223, and #225 re-shaped it from a side drawer into a full-page experience with session history, attachments, message reactions, and a right-panel that exposes the agent's working files, artefacts, and a live terminal.
+## Overview
 
-This guide covers the model, the URL state, and the surfaces a power user (or integrator) cares about. The component reference lives in the frontend codebase; here we focus on what the platform persists.
+Chatting with an agent is a first-class surface in Crewship. PRs #213, #214, #223, and #225 re-shaped it from a side drawer into a full-page experience with session history, attachments, message reactions, and a right-panel that exposes the agent's working files, artefacts, and a live terminal. The split-screen layout from PR #314 finished the job — chat on the left, the agent's workspace surfaces on the right, both live and both deep-linkable.
+
+A "session" in Crewship is intentionally durable. It's a `chats` row scoped to one agent, with a stable ID that survives page reloads, browser restarts, and operator hand-off — anyone with read access to the agent can resume the same conversation history. The schema has grown alongside the UI: PR #225 added `chat_branches` (edit-and-resend trees), `message_reactions`, `chat_attachments`, and `workspace_files`, plus `chats.origin` (v59) for grouping in the Sessions sidebar by where the conversation started (`web` / `cli` / `webhook` / `crew`). The point of the breadth: a chat is more than text — it's a typed transcript backed by structured tables so search, audit, and replay all work the same way no matter which surface produced the message.
+
+This guide covers the model, the URL state, and the surfaces a power user (or integrator) cares about. The component reference lives in the frontend codebase (`app/(chat)/chat/`) and the persistence layer lives in `internal/api/chat.go` + the Go migrations under `internal/database/migrate.go`; here we focus on what the platform persists and how the URL state composes with it.
 
 ## Routes
 
