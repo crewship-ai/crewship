@@ -128,6 +128,58 @@ Paste into the SRE channel on Slack with one line: "Live terminal on the agent's
 
 When the incident closes, the session row survives — it stays as a permanent record of what was said, what was tried, and what fixed it. The webhook-triggered originals from step 2 and the human-driven escalation here live in the same `chats` table, distinguishable only by their `origin` chip in the sidebar.
 
+## API reference
+
+The chat surface is small — no dedicated `/api-reference/chats` page yet; the handler source is `internal/api/chat.go`. Every endpoint requires `Authorization: Bearer <CLI token>` or a valid session cookie, and access is gated by the caller's read/write role on the parent agent.
+
+### Sessions (chats)
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/api/v1/agents/{agentId}/chats` | Create a session. Body: `{initial_message?, origin?, metadata?}`. `origin` is one of `UI / CLI / WEBHOOK / CRON / AGENT` — anything else is stored as `NULL`. |
+| `GET` | `/api/v1/agents/{agentId}/chats` | List the agent's sessions. Query: `origin=…`, `pinned=true`, `archived=true`, `limit` (default 50). |
+| `GET` | `/api/v1/chats/{chatId}` | Full session detail including the message stream. |
+| `PATCH` | `/api/v1/chats/{chatId}` | Rename / pin / archive. Body: `{title?, pinned?, archived?}`. |
+| `DELETE` | `/api/v1/chats/{chatId}` | Delete a session. Cascade-deletes messages, reactions, attachments, branches. |
+
+### Messages
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/api/v1/chats/{chatId}/messages` | Send a user turn. Body: `{content, request_id, model?, attachments?}`. Idempotent under `request_id`. |
+| `GET` | `/api/v1/chats/{chatId}/messages` | Paginated message history. Keyset cursor; newest-first. |
+| `PATCH` | `/api/v1/chats/{chatId}/messages/{messageId}` | Edit a user turn. Truncates the active branch; the old tail moves to `chat_branches`. |
+
+### Reactions
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/api/v1/chats/{chatId}/messages/{messageId}/reactions` | Aggregated counts: `[{emoji, count, mine}]`. |
+| `POST` | `/api/v1/chats/{chatId}/messages/{messageId}/reactions` | Body: `{emoji}`. Idempotent under `UNIQUE(chat, message, emoji, user)`. |
+| `DELETE` | `/api/v1/chats/{chatId}/messages/{messageId}/reactions/{emoji}` | Emoji is a path segment. |
+
+### Attachments
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/api/v1/agents/{agentId}/chats/{chatId}/attachments` | Upload a file (multipart, ≤25 MB). Returns the file's storage URL + the `chat_attachments` row ID. Handler: `ProxyHandler.AgentChatAttachment` in `internal/api/proxy_attachments.go`. |
+| `GET` | `/api/v1/chats/{chatId}/attachments` | List attachments on a chat. |
+| `DELETE` | `/api/v1/chats/{chatId}/attachments/{attachmentId}` | Remove an attachment. The blob is also evicted from `workspace_files`. |
+
+### Realtime (WebSocket)
+
+The chat page subscribes to the workspace WS channel and listens for these events:
+
+| Event | When it fires |
+|---|---|
+| `chat.message.created` | Either party posts a turn. |
+| `chat.message.updated` | Edit-and-resend rewrites a turn (active branch truncated). |
+| `chat.reaction.added` / `removed` | Another operator reacts in the same workspace. |
+| `chat.presence.changed` | The agent transitions between `online / thinking / blocked / offline`. |
+| `attachment.uploaded` | A file finished uploading and is ready to use. |
+
+The trace hook re-fetches the affected message on each event rather than mutating local state imperatively; the next render is a function of the server's latest view. Reconnect is idempotent — sends in-flight at disconnect time carry the same client `request_id` and the server dedupes.
+
 ## Routes
 
 Two top-level routes serve chat:
