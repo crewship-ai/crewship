@@ -425,8 +425,15 @@ Agents in one crew cannot access another crew's shared memory. Container bind mo
 - **Use `scope=both`** to search across personal and crew knowledge simultaneously
 </Accordion>
 
-<Accordion title="Common pitfalls">
-- **Do not store secrets in memory files.** Memory is not encrypted at rest
-- **Do not rely on memory for large datasets.** 10 MB limit + token budget = curated facts only
-- **Do not delete AGENT.md entries casually.** Add new facts, only remove confirmed-outdated ones
-</Accordion>
+## Common pitfalls
+
+- **Memory is `memory_enabled=false` by default.** The most common "my agent isn't remembering anything" report is just an agent that was never opted in. Check `crewship agent get <slug>` and flip the flag if needed.
+- **Memory files are not encrypted at rest.** `AGENT.md`, `CREW.md`, daily logs, and the `index.sqlite` files live as plain on-disk bytes inside the container. Never write secrets, tokens, or PII into memory — credentials belong in [Keeper](/guides/keeper), not in `~/.memory/`.
+- **Crew reindex lags up to 60 seconds.** The lead sidecar reindexes the crew tier on a 60-second tick. Writes to `CREW.md` or `topics/*.md` are searchable on the next tick, not immediately — if you need instant visibility, hit `POST /memory/reindex?scope=crew` from the lead's sidecar.
+- **Single-agent crews have no crew tier.** The `crew` scope returns 503 for an agent that isn't a member of a crew (or whose crew has only itself). The budget for the agent tier is 100% in that case; no crew context to retrieve.
+- **Agents cannot read other agents' personal memory — even within the same crew.** Container bind mounts enforce this at the filesystem level, not by API check. If a workflow needs cross-agent state, the right surface is `CREW.md` or `topics/`, written by the lead.
+- **Budget is measured in characters, not tokens.** The default 15,000-character budget is ~3,500–4,500 tokens depending on language and content. Don't reason about budget as if it were tokens — the orchestrator slices on character boundaries.
+- **The 10 MB per-agent memory cap is a hard limit.** Once a directory exceeds it, new writes fail rather than evicting old ones — consolidation isn't automatic eviction. Curated facts only, not raw logs.
+- **Don't delete `AGENT.md` entries casually.** Memory is append-mostly. Remove only entries that are explicitly outdated — pruning live knowledge is what makes an agent feel "dumber than yesterday".
+- **Migration v54/v55 must be applied for hybrid retrieval.** Older databases that predate the Crew Journal era (PRs #211/#212) don't have the `importance_score`, `reference_count`, or `journal_entries_fts` columns these endpoints read. Run `crewship migrate` after a binary upgrade and before depending on RRF scoring.
+- **Docker network `Internal: true` blocks sidecar → embedding model.** If the agents network is `Internal: true`, the sidecar can read its on-disk FTS5 index but cannot reach a remote embedding service if one is configured, silently degrading hybrid retrieval to BM25-only. See the [Common pitfalls](/clademd#common-pitfalls) entry in CLAUDE.md for the full root cause.
