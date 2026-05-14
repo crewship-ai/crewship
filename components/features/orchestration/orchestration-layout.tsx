@@ -28,6 +28,8 @@ import type { CrewSummary, AgentSummary, CrewConnection } from "@/lib/types/orch
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useUserPreference } from "@/hooks/use-user-preference"
 import { useFilteredIssues } from "@/hooks/use-filtered-issues"
+import { useIssueDetail } from "@/hooks/use-issue-detail"
+import { useProjectDetail } from "@/hooks/use-project-detail"
 import { parseSavedViews, applySavedView } from "@/lib/saved-views"
 import { IssuesBoardInline, IssuesListInline, IssueDetailInline, ProjectDetailInline } from "@/components/features/orchestration/issues-inline"
 import { IssuesStatusChips } from "@/components/features/issues/issues-status-chips"
@@ -159,10 +161,7 @@ export function OrchestrationLayout({
     "board",
   )
   const [issueSearch, setIssueSearch] = useState("")
-  const [selectedIssue, setSelectedIssue] = useState<Mission | null>(null)
-  const [issueComments, setIssueComments] = useState<IssueComment[]>([])
   const [projects, setProjects] = useState<Project[]>([])
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
   // Project filter applied via saved views — does NOT open the detail panel.
   // `selectedProjectId` is for explicit project clicks (opens detail panel);
   // `filterProjectId` is only for filtering the issues list.
@@ -263,25 +262,6 @@ export function OrchestrationLayout({
     issueSearch,
   ])
 
-  // Derived data
-  // When an issue is selected, filter to just that mission so Graph/Timeline/Activity focus on it
-  const filteredMissions = useMemo(() => {
-    if (selectedIssue) {
-      const match = missions.find((m) => m.id === selectedIssue.id)
-      return match ? [match] : missions
-    }
-    if (selectedMissionId === "all") return missions
-    return missions.filter((m) => m.id === selectedMissionId)
-  }, [missions, selectedMissionId, selectedIssue])
-
-  const selectedMission = useMemo(() => {
-    if (selectedIssue) {
-      return missions.find((m) => m.id === selectedIssue.id) || null
-    }
-    if (selectedMissionId === "all") return null
-    return missions.find((m) => m.id === selectedMissionId) || null
-  }, [missions, selectedMissionId, selectedIssue])
-
   // Left panel filtered by selected mission
   const panelCrews = useMemo(() => {
     if (selectedMissionId === "all") return crews
@@ -342,23 +322,47 @@ export function OrchestrationLayout({
     fetchSavedViews()
   }, [fetchIssues, fetchIssueLabels, fetchProjects, fetchSavedViews])
 
-  const handleIssueSelect = useCallback(async (issue: Mission) => {
-    // Toggle: clicking the same issue again deselects it
-    if (selectedIssue?.id === issue.id) {
-      setSelectedIssue(null)
-      setIssueComments([])
-      return
+  const {
+    selectedIssue,
+    setSelectedIssue,
+    issueComments,
+    setIssueComments,
+    handleIssueSelect,
+    handleIssueClose,
+    handleIssueUpdated,
+  } = useIssueDetail({
+    workspaceId,
+    onIssueSelected: () => setDetailContext({ type: "none" }),
+    fetchIssues,
+    fetchProjects,
+  })
+
+  const {
+    selectedProjectId,
+    setSelectedProjectId,
+    selectedProject,
+    handleProjectClose,
+  } = useProjectDetail({ projects })
+
+  // Derived data — defined after useIssueDetail so the selectedIssue
+  // dependency resolves; when an issue is selected the Graph/Timeline/
+  // Activity tabs focus on its single mission.
+  const filteredMissions = useMemo(() => {
+    if (selectedIssue) {
+      const match = missions.find((m) => m.id === selectedIssue.id)
+      return match ? [match] : missions
     }
-    setSelectedIssue(issue)
-    setDetailContext({ type: "none" })
-    if (issue.crew_id && issue.identifier) {
-      try {
-        const res = await fetch(`/api/v1/crews/${encodeURIComponent(issue.crew_id)}/issues/${encodeURIComponent(issue.identifier)}/comments?workspace_id=${encodeURIComponent(workspaceId)}`)
-        if (res.ok) setIssueComments(await res.json())
-        else setIssueComments([])
-      } catch { setIssueComments([]) }
+    if (selectedMissionId === "all") return missions
+    return missions.filter((m) => m.id === selectedMissionId)
+  }, [missions, selectedMissionId, selectedIssue])
+
+  const selectedMission = useMemo(() => {
+    if (selectedIssue) {
+      return missions.find((m) => m.id === selectedIssue.id) || null
     }
-  }, [workspaceId, selectedIssue?.id])
+    if (selectedMissionId === "all") return null
+    return missions.find((m) => m.id === selectedMissionId) || null
+  }, [missions, selectedMissionId, selectedIssue])
 
   // selectedIssue / selectedProject take over the middle pane (same
   // pattern as /routines). When set, the board/list is hidden and the
@@ -452,7 +456,6 @@ export function OrchestrationLayout({
     }
   }, [drawerOpen, drawerTab])
 
-  const selectedProject = selectedProjectId ? projects.find((p) => p.id === selectedProjectId) || null : null
   // Routines tab manages its own right-side detail (RoutinesDetailPanel
   // inside RoutinesTab). Suppress the orchestration-level detail pane
   // there so an issue/task selected from a previous tab doesn't bleed
@@ -466,31 +469,6 @@ export function OrchestrationLayout({
     !issueDetailFullWidth &&
     !projectDetailFullWidth &&
     detailContext.type !== "none"
-
-  const handleIssueClose = useCallback(() => {
-    setSelectedIssue(null)
-    setIssueComments([])
-  }, [])
-
-  const handleIssueUpdated = useCallback(async () => {
-    await fetchIssues()
-    if (selectedIssue?.crew_id && selectedIssue?.identifier) {
-      try {
-        const res = await fetch(`/api/v1/issues/${encodeURIComponent(selectedIssue.identifier)}?workspace_id=${encodeURIComponent(workspaceId)}`)
-        if (res.ok) {
-          const fresh = await res.json()
-          setSelectedIssue(fresh)
-          const commRes = await fetch(`/api/v1/crews/${encodeURIComponent(fresh.crew_id)}/issues/${encodeURIComponent(fresh.identifier)}/comments?workspace_id=${encodeURIComponent(workspaceId)}`)
-          if (commRes.ok) setIssueComments(await commRes.json())
-        }
-      } catch {}
-    }
-    fetchProjects()
-  }, [fetchIssues, fetchProjects, selectedIssue?.crew_id, selectedIssue?.identifier, workspaceId])
-
-  const handleProjectClose = useCallback(() => {
-    setSelectedProjectId(null)
-  }, [])
 
   // Mobile back button: close whichever detail view is currently visible so that
   // showRightPanel ends up false and the overlay sheet actually dismisses.
