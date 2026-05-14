@@ -21,9 +21,12 @@
 # for new issues") is also removed so you don't get double-notifications.
 #
 # Requirements:
-#   - SENTRY_AUTH_TOKEN env var. Create at:
+#   - SENTRY_AUTH_TOKEN env var, OR a populated ~/.sentryclirc (sentry-cli's
+#     own config — auto-read as a fallback). Create the token at:
 #     https://sentry.io/settings/account/api/auth-tokens/
 #     Scopes needed: project:read, project:write, alerts:write
+#     (org:read NOT required — actions target IssueOwners so no
+#     /members/me/ lookup is performed)
 #   - jq, curl
 #
 # Usage:
@@ -54,9 +57,26 @@ RULES_OWNED=(
 )
 
 # ---------- preflight ----------
+# Fallback: pull the token from ~/.sentryclirc if SENTRY_AUTH_TOKEN isn't
+# already set. sentry-cli stores tokens in INI form under [auth] → token=...
+# so awk reads the first `token = ...` line, strips whitespace, and exports.
+# Skipped silently when no rc file exists; the empty-token check below still
+# catches the no-credentials case.
+if [ -z "${SENTRY_AUTH_TOKEN:-}" ] && [ -f "${HOME}/.sentryclirc" ]; then
+  SENTRY_AUTH_TOKEN=$(awk -F'=' '
+    /^[[:space:]]*token[[:space:]]*=/ {
+      sub(/^[[:space:]]*token[[:space:]]*=[[:space:]]*/, "")
+      print
+      exit
+    }' "${HOME}/.sentryclirc")
+  if [ -n "$SENTRY_AUTH_TOKEN" ]; then
+    echo "==> using token from ~/.sentryclirc"
+  fi
+fi
+
 if [ -z "${SENTRY_AUTH_TOKEN:-}" ]; then
   cat >&2 <<EOF
-SENTRY_AUTH_TOKEN is not set.
+SENTRY_AUTH_TOKEN is not set and ~/.sentryclirc has no token.
 
 Create one at https://${SENTRY_HOST}/settings/account/api/auth-tokens/
 with scopes: project:read project:write alerts:write
@@ -72,33 +92,62 @@ for cmd in curl jq; do
   command -v "$cmd" >/dev/null || { echo "missing: $cmd" >&2; exit 1; }
 done
 
-# Single curl wrapper — auth header, JSON content type, fail-on-error so
-# HTTP 4xx surfaces as a script exit instead of a silent empty body. The
-# trailing -- "$@" lets callers append --data-raw, query strings, etc.
+# Single curl wrapper — auth header, JSON content type, captures status
+# code so we can surface the response body on 4xx/5xx. Plain
+# --fail-with-body suppresses the response on success which we want,
+# but on error it eats the stderr trail; this wrapper unifies both.
 sentry_api() {
-  curl --silent --show-error --fail-with-body \
+  local tmp
+  tmp=$(mktemp)
+  local status
+  status=$(curl --silent --show-error \
+    -o "$tmp" \
+    -w '%{http_code}' \
     -H "Authorization: Bearer ${SENTRY_AUTH_TOKEN}" \
     -H "Content-Type: application/json" \
-    "$@"
+    "$@")
+  if [ "$status" -ge 400 ]; then
+    echo "sentry API ${status}:" >&2
+    cat "$tmp" >&2
+    echo >&2
+    rm -f "$tmp"
+    return 1
+  fi
+  cat "$tmp"
+  rm -f "$tmp"
 }
 
 echo "==> target: ${SENTRY_ORG}/${SENTRY_PROJECT} on ${SENTRY_HOST}"
 
-# ---------- 1. resolve "me" so email actions target the script runner ----------
-# The Member targetIdentifier for NotifyEmailAction is the org-member ID,
-# NOT the user ID. We fetch the current user's membership in this org.
-echo "==> resolving your org-member id..."
-ME_JSON=$(sentry_api "${API}/organizations/${SENTRY_ORG}/members/me/")
-MEMBER_ID=$(echo "$ME_JSON" | jq -r '.id')
-MEMBER_EMAIL=$(echo "$ME_JSON" | jq -r '.email')
-if [ -z "$MEMBER_ID" ] || [ "$MEMBER_ID" = "null" ]; then
-  echo "could not resolve member id; response was:" >&2
-  echo "$ME_JSON" | jq . >&2
-  exit 1
+# ---------- check environment availability ----------
+# Sentry environments are created implicitly on the first event tagged
+# with that environment — there is no explicit "create environment"
+# API call. If we put environment:"beta" on a rule before any beta
+# event has ever been ingested, the API rejects with
+# "This environment has not been created."
+#
+# So: peek at the live env list and use the filter only when the env
+# exists. Once the first beta release fires a real event, re-running
+# this script will start scoping the rule.
+echo "==> checking which environments exist..."
+ENV_JSON=$(sentry_api "${API}/projects/${SENTRY_ORG}/${SENTRY_PROJECT}/environments/" || echo '[]')
+HAS_BETA=$(echo "$ENV_JSON" | jq -r '[.[] | select(.name == "beta")] | length')
+if [ "$HAS_BETA" = "1" ]; then
+  echo "    'beta' env exists — New-issue rule will be scoped to it"
+  BETA_ENV_LINE='"environment": "beta",'
+else
+  echo "    'beta' env does not exist yet (first beta event creates it) — rule will fire on all envs"
+  BETA_ENV_LINE=''
 fi
-echo "    member: $MEMBER_EMAIL (id=$MEMBER_ID)"
 
-# ---------- 2. list + delete any rules we own ----------
+# ---------- 1. list + delete any rules we own ----------
+# We target NotifyEmailAction at "IssueOwners" rather than a specific
+# Member id. Why: explicit-member targeting needs an org-member lookup
+# (/members/me/), which requires org:read scope on the auth token. By
+# routing through IssueOwners + fallthroughType=AllMembers we deliver
+# to every org member (= just you for a solo setup, and the natural
+# behaviour for a team later). Same delivery semantics, one fewer scope
+# the operator has to grant.
 echo "==> listing existing rules..."
 EXISTING=$(sentry_api "${API}/projects/${SENTRY_ORG}/${SENTRY_PROJECT}/rules/")
 echo "    found $(echo "$EXISTING" | jq 'length') rule(s)"
@@ -135,7 +184,7 @@ cat <<JSON | sentry_api -X POST --data @- \
   "actionMatch": "all",
   "filterMatch": "all",
   "frequency": 5,
-  "environment": "beta",
+  ${BETA_ENV_LINE}
   "conditions": [
     {"id": "sentry.rules.conditions.first_seen_event.FirstSeenEventCondition"}
   ],
@@ -143,9 +192,8 @@ cat <<JSON | sentry_api -X POST --data @- \
   "actions": [
     {
       "id": "sentry.mail.actions.NotifyEmailAction",
-      "targetType": "Member",
-      "targetIdentifier": "${MEMBER_ID}",
-      "fallthroughType": "ActiveMembers"
+      "targetType": "IssueOwners",
+      "fallthroughType": "AllMembers"
     }
   ]
 }
@@ -177,9 +225,8 @@ cat <<JSON | sentry_api -X POST --data @- \
   "actions": [
     {
       "id": "sentry.mail.actions.NotifyEmailAction",
-      "targetType": "Member",
-      "targetIdentifier": "${MEMBER_ID}",
-      "fallthroughType": "ActiveMembers"
+      "targetType": "IssueOwners",
+      "fallthroughType": "AllMembers"
     }
   ]
 }
