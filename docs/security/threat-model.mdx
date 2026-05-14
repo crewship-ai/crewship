@@ -24,8 +24,13 @@ Crewship binary itself.
 In practice this means we trust:
 
 - The host kernel and container runtime.
-- The Crewship binary and sidecar binary on disk (verified by
-  `cosign` at install time — see [Install](/guides/install)).
+- The Crewship binary and sidecar binary on disk. The `curl | sh`
+  installer verifies the SHA-256 against a signed checksums file and
+  — **when `cosign` is on PATH** — also verifies the Sigstore
+  signature against the project's release workflow identity. Homebrew
+  and Docker Compose installs rely on the upstream channel's own
+  integrity; operators in regulated environments should run cosign
+  verification manually. See [Install](/guides/install).
 - The operator running `crewship`.
 
 We **do not** trust:
@@ -178,7 +183,7 @@ Detail: [Keeper guide](/guides/keeper).
 | Agent tries to call a sensitive internal API | Layer 4 (Keeper rule) |
 | Agent breaks out of container runtime | Layer 1 — host hardening |
 | Operator's `ENCRYPTION_KEY` is exfiltrated | **Out of scope** — host compromise |
-| Crewship binary is tampered with at install | **Mitigated at install time** — cosign verification ([Install](/guides/install)) |
+| Crewship binary is tampered with at install | **Partially mitigated** — `curl \| sh` checks SHA-256, and cosign signature when `cosign` is on PATH; Homebrew + Docker Compose paths rely on upstream channel integrity. See [Install](/guides/install) |
 | Supply-chain attack on `sentry-go` / a dep | Partial — `go.sum` pinning, Renovate review, Dependabot |
 | Side-channel timing leak across agents | **Not modelled** — agents are not assumed co-tenant-isolated below the container-runtime layer |
 
