@@ -504,8 +504,10 @@ The following items are intentionally deferred to v0.2. They do
 - The workspace bind mount (user code) and memory markdown files are included. AGE encryption of the payload is the only defence against leakage from physical bundle distribution — treat bundles like any other backup of your source tree.
 - Every `backup.*` event writes to `audit_log` with user, role, scope, sealed-payload SHA-256, and size. Dry-run restores write `backup.restore.dry_run` so auditors can tell rehearsals from real cutover.
 
-## See also
+## Related
 
-- [Backup API reference](/api-reference/backup) — REST endpoint shapes.
-- [Security → Audit log](/security/audit) — where backup events land.
-- [BACKUP.md PRD](https://github.com/crewship-ai/crewship/blob/main/.claude/context/prd/BACKUP.md) — design rationale, format versioning, and the V1.5 / V2 roadmap.
+- [Backup API reference](/api-reference/backup) — REST endpoint shapes for every `crewship backup` subcommand.
+- [Admin CLI](/guides/admin-cli) — the host-shell write surface that backups protect against; always `crewship backup create` before running admin writes in prod.
+- [Migrations Catalog](/guides/migrations) — what migration ran when, and which `restoreBackfill` hook (if any) will fire on a cross-version restore.
+- [Security → Audit log](/security/audit) — where `backup.created`, `backup.restored`, and `backup.restore.dry_run` events land.
+- [BACKUP.md PRD](https://github.com/crewship-ai/crewship/blob/main/.claude/context/prd/BACKUP.md) — design rationale, format versioning, and the v1.5 / v2 roadmap.
