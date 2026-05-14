@@ -84,3 +84,4 @@ internal-docs/
 
 # Local mockups / audit artifacts (kept untracked per user preference)
 audit-final/
+.pentest-*/

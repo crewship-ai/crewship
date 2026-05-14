@@ -109,6 +109,12 @@ func (d *Deps) Close() {
 // orchestrator, scheduler, stats collector, etc.) wired together.
 
 func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
+	// Refuse to start with rate limiting disabled in a production env.
+	// Catches the deployment-drift mode where CREWSHIP_RATELIMIT_DISABLED=true
+	// (or the legacy CREWSHIP_DISABLE_RATELIMIT) leaks from a dev shell into
+	// a prod deploy and silently exposes /api/auth/* to credential stuffing.
+	goapi.MustNotDisableRateLimitInProd()
+
 	mux := http.NewServeMux()
 	ipcMux := http.NewServeMux()
 
