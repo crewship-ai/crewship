@@ -113,6 +113,94 @@ re-run only the Homebrew step manually if needed.
   binary works on any modern distro. If the user is on
   Alpine + musl, the static build still runs.
 
+## Hotfix workflow
+
+When a P0 / data-loss bug lands in a released version, ship a patch
+without waiting for the next planned release.
+
+```bash
+# 1. Branch from the existing release tag (NOT main — main may have
+#    incompatible changes that you don't want in the hotfix).
+git checkout -b hotfix/v0.1.1 v0.1.0
+
+# 2. Cherry-pick the fix from main, or write the minimal fix directly
+#    on this branch. Keep scope tight — a hotfix is "patch the bug",
+#    not "while we're here, also...".
+git cherry-pick <sha-of-fix-on-main>
+
+# 3. Tag and push. The release workflow fires off this tag exactly
+#    like a normal release.
+git tag -a v0.1.1 -m "v0.1.1: hotfix for <one-line summary>"
+git push origin hotfix/v0.1.1 v0.1.1
+```
+
+Criteria for a hotfix (otherwise wait for the next regular release):
+
+- Data loss, data corruption, or silent data divergence.
+- Auth/authorisation bypass.
+- Security vulnerability (CVE-grade or equivalent).
+- Server fails to start on a version's own DB after a clean install.
+
+After shipping, forward-port the fix to `main` if it wasn't cherry-picked
+from there to begin with — otherwise the next regular release ships
+the bug again.
+
+**If the hotfix itself breaks something:** retag `v0.1.2` with a
+fix-of-the-hotfix. Don't try to "untag" v0.1.1 — once a tag is in
+the public release feed, customers have already pulled it. The fix-
+forward path is always cheaper than the rollback path.
+
+## Distribution channels
+
+Three concurrent channels serve different audiences:
+
+| Channel | Trigger | Docker tag | Binary | Use case |
+|---|---|---|---|---|
+| **stable** | clean semver tag (`v0.1.0`) | `:vX.Y.Z`, `:vX.Y`, `:latest` | GitHub Release, Homebrew | Production / default `brew install crewship` |
+| **beta** | pre-release tag (`v0.1.0-beta.1`) | `:vX.Y.Z-beta.N`, `:vX.Y` | GitHub Pre-release | Opt-in beta testers (`brew install crewship@0.1.0-beta.1` or `docker pull :vX.Y.Z-beta.N`) |
+| **nightly** | every push to `main` | `:nightly`, `:main-<sha>` | Rolling `nightly` GH pre-release | Internal CI, brave testers wanting trunk |
+
+The `:latest` Docker tag only moves on clean semver tags — pre-releases
+must never overwrite `:latest`, or `docker pull crewship` would silently
+hand beta to users expecting stable. See `.github/workflows/release.yml`
+for the gating logic.
+
+## Migration safety
+
+Migrations are the highest-risk part of every release — they touch
+production data and a bad one is hard to undo. Guardrails:
+
+1. **`migration-lint` CI workflow** runs on every PR touching
+   `internal/database/migrate.go`. Enforces append-only ordering
+   (versions strictly increase, no rename of a version already in
+   `main`). The Go test counterpart (`migrate_lint_test.go`) catches
+   the same class of mistake locally.
+
+2. **Auto-snapshot before apply** — `database.SnapshotBeforeMigrate`
+   takes a `VACUUM INTO` copy of the live DB as
+   `<dbpath>.pre-migrate-vN-to-vM-<UTC>.bak` whenever any migration is
+   pending. Last 10 snapshots are retained per database; opt out with
+   `CREWSHIP_SKIP_MIGRATION_BACKUP=1`.
+
+3. **Forward-only schema changes**. Never `DROP COLUMN` in the same
+   release that stops reading it: ship "stop reading" in vX, then
+   `DROP COLUMN` in vX+1. The previous-release client must remain
+   compatible with the next-release schema for at least one minor
+   bump.
+
+4. **Restore-from-backup tests** in `internal/backup/` exercise the
+   `restoreBackfill` hook chain — when a customer restores an older
+   bundle into a newer schema, every migration between source and
+   target gets a chance to populate any new columns.
+
+## Branch protection
+
+`main` is protected; configure via `scripts/setup-branch-protection.sh`
+(run once with repo-admin gh credentials). Required checks: Frontend,
+Backend, Lint migrations, Security, E2E. One approval needed (use
+auto-approve for trivial dep bumps via Renovate). Force-push is
+disallowed; linear history is required.
+
 ## Cadence
 
 Target cadence in pre-1.0:

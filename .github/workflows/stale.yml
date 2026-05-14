@@ -1,0 +1,59 @@
+name: Stale
+
+# Closes PRs and issues that have gone quiet so the open backlog reflects
+# what's actually being worked on. As a solo maintainer this is the single
+# biggest lever against "everyone-else's-fork" rot: contributors who lose
+# interest abandon PRs, and unstale issues lose context faster than the
+# repo can absorb them.
+#
+# Defaults err generous (long timeouts, opt-out labels) — better to leave
+# a useful PR open than slam a contributor's first contribution.
+
+on:
+  schedule:
+    # 07:30 UTC daily — early enough that a notification reaches contributors
+    # before their working day but late enough that midnight cron jitter
+    # doesn't spam at unsociable hours.
+    - cron: "30 7 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  stale:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/stale@5bef64f19d7facfb25b37b414482c7164d639639 # v9.1.0
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+          # ----- Issues -----
+          days-before-issue-stale: 60
+          days-before-issue-close: 30
+          stale-issue-label: stale
+          # Labels that pin an issue open forever — tracking work,
+          # roadmap items, and known-hard bugs shouldn't auto-close.
+          exempt-issue-labels: "pinned,roadmap,help-wanted,good-first-issue,security"
+          stale-issue-message: |
+            This issue has been quiet for 60 days. If it's still relevant, drop a comment or remove the `stale` label and we'll reopen the conversation. Otherwise it'll auto-close in 30 days to keep the backlog honest.
+          close-issue-message: |
+            Auto-closing because there hasn't been activity in 90 days. Reopen any time — closure isn't a verdict, just bookkeeping.
+
+          # ----- Pull requests -----
+          days-before-pr-stale: 30
+          days-before-pr-close: 14
+          stale-pr-label: stale
+          exempt-pr-labels: "pinned,wip,blocked"
+          stale-pr-message: |
+            This PR has been idle for 30 days. Push a commit or remove the `stale` label to keep it open; otherwise it'll auto-close in 14 days. Closure is reversible — your branch is still on your fork.
+          close-pr-message: |
+            Auto-closing this PR after 44 days of inactivity. Push to your branch and reopen any time.
+
+          # Order oldest-first so the noisiest end of the backlog gets
+          # attention first when the bot rate-limits itself.
+          ascending: true
+          # Cap per-run mutations so a backlog flush doesn't burst the
+          # GitHub API rate limit and brick the next CI run.
+          operations-per-run: 100
