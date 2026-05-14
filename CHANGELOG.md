@@ -93,7 +93,6 @@ Cross-tier consistency framework that makes routines a credible **agentic-progra
 - **JSON Schema gate enforcement** in `internal/pipeline/executor.go validateOutput`. Previously a no-op (`"documentation only"`); now uses `github.com/santhosh-tekuri/jsonschema/v5` (draft 2020-12). Distinct reason prefixes per failure class: `schema invalid:` (author bug), `output not valid JSON:` (worker didn't follow contract), `schema validation:` (output failed constraints).
 - **LLMRunner restored** (`internal/pipeline/runner_llm.go`) as opt-in fallback. Removed in commit `8408f3e6` when OrchestratorRunner shipped; restored here so the eval suite is runnable on a workstation without a fully provisioned crew container stack. Selection at boot: `CREWSHIP_PIPELINE_RUNNER=llm_direct` (explicit override) → `--no-docker` (auto-fallback) → OrchestratorRunner (default; production unchanged).
 - **`schemas/routine.v1.json`** picks up `outcomes`, `concurrency_key`, `max_concurrent` so IDE validation matches the server-accepted DSL surface.
-- **PRD §18** in `.claude/context/prd/PIPELINES.md` documents the framework end-to-end: scenario taxonomy, runner selection, schema-gate semantics, CLI surface, operator workflow for promoting routines to fast tier with confidence.
 
 Tests: 8 schema-gate cases, 9 tier-override sub-cases, 10 eval-CLI helper tests, 13 eval-scenario parse+validate tests — 40 new test cases total, all under `-race`.
 
@@ -146,7 +145,6 @@ The `pipeline` alias is preserved — every `crewship routine X` invocation also
 
 - `docs/guides/routines.mdx` — user guide (concepts, three authoring paths, DSL anatomy, all step types, two-tier execution, triggers, HITL, validation gates, observability, RBAC, troubleshooting).
 - `docs/cli/routine.mdx` — per-subcommand reference.
-- `.claude/context/prd/PIPELINES.md` §17 — current source of truth post-MVP.
 
 #### Seeded routines
 

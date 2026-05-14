@@ -212,7 +212,7 @@ WORKFLOW:
 
 KEY PATHS:
 - cmd/crewship/ (production entry), internal/api/ (HTTP API), internal/orchestrator/ (agent execution)
-- app/ (Next.js pages), components/ (React), .claude/context/ (authoritative docs)`,
+- app/ (Next.js pages), components/ (React), docs/ (public guides + API reference)`,
       webhook_secret: randomBytes(32).toString("hex"),
     },
   })
@@ -296,7 +296,7 @@ CONVENTIONS:
 
 WORKFLOW:
 - pnpm lint && pnpm build must pass before done
-- Check .claude/context/wireframes/ for screen designs
+- Match existing patterns in components/features/ and components/layout/
 - Feature components in components/features/, layout in components/layout/`,
       webhook_secret: randomBytes(32).toString("hex"),
     },
@@ -394,7 +394,7 @@ CREWSHIP ARCHITECTURE AWARENESS:
 
 WORKFLOW:
 - Review PRs for correctness, security, and convention adherence
-- Ensure .claude/context/ docs are updated after significant changes
+- Ensure docs/guides and docs/api-reference are updated after significant changes
 - Flag any NEVER DO violations from CLAUDE.md`,
       webhook_secret: randomBytes(32).toString("hex"),
     },

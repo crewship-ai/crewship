@@ -4,7 +4,7 @@
 // lock in the main database.
 //
 // This file defines the on-disk format version and the N-2 compatibility
-// policy. See .claude/context/prd/BACKUP.md section 8 for the rationale.
+// policy.
 //
 // Forward-compatibility contract:
 //

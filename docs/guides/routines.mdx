@@ -25,7 +25,7 @@ Compared to other layers in Crewship:
 | **Recipe** *(future)* | composite | Marketplace template | Crew + agents + integrations + routines bundled |
 | **Cyclic Issue** *(future)* | issue-tracker | recurring user issue | "Standup every Monday" without leaving Issues |
 
-The user-facing label is **Routine** across web UI, CLI, agent system prompts and marketing surfaces. The backend identifier (database table, Go package, HTTP route paths) remains `pipelines` for backwards compatibility — see [§17.1 of the PRD](./../../.claude/context/prd/PIPELINES.md) for the rename rationale.
+The user-facing label is **Routine** across web UI, CLI, agent system prompts and marketing surfaces. The backend identifier (database table, Go package, HTTP route paths) remains `pipelines` for backwards compatibility.
 
 <Note>
 **Naval theme.** Routines are the boring, accurate, repeated procedures a ship's crew runs every day — the equivalent of [naval drills](https://en.wikipedia.org/wiki/Drill_(naval)) in the Crewship metaphor. Programs your AI agents follow.
@@ -287,7 +287,7 @@ crewship routine schedules create --slug summarize-text \
     --inputs '{"text":"…default"}'
 ```
 
-5-field cron expression. Scheduler runs in-process and ticks every 30s, so minimum resolution is 1 minute. Single-instance only — running multiple replicas would double-fire (no leader election yet, see [§17.5 follow-up](./../../.claude/context/prd/PIPELINES.md)).
+5-field cron expression. Scheduler runs in-process and ticks every 30s, so minimum resolution is 1 minute. Single-instance only — running multiple replicas would double-fire (no leader election yet).
 
 ### Webhooks
 
@@ -505,5 +505,3 @@ The `pipeline` alias is preserved for back-compat on the legacy subcommands (`pi
 - **No cross-adapter tier swap yet** — same-provider model swap (Haiku→Opus) works; Claude→Gemini swap requires a shorthand→constant mapping not yet wired.
 - **No NL→cron converter** — ops still hand-type `0 9 * * *`. Foundation PRD has the design; not in MVP.
 - **No errors fingerprinting / bulk replay** — one-by-one rerun via `routine run` only.
-
-See [PIPELINES.md §17.7](./../../.claude/context/prd/PIPELINES.md) for the full deferred-features list and rationale.
