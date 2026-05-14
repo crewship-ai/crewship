@@ -35,7 +35,10 @@ export default defineConfig({
     baseURL,
     storageState: { cookies: [], origins: [] },
     screenshot: "only-on-failure",
-    trace: "on-first-retry",
+    // retries: 0 above means on-first-retry never fires; retain-on-
+    // failure keeps the trace whenever a test fails so debugging
+    // doesn't depend on a retry that won't happen.
+    trace: "retain-on-failure",
   },
 
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
