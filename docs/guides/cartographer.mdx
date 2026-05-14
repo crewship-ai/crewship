@@ -50,6 +50,67 @@ Skip checkpoints for **short, single-step missions** (the journal IS the bookmar
 | **Workspace isolation** | Enforced at the handler (mission must belong to the caller's workspace) AND at the package layer (`cartographer.Get` / `Delete` re-check). Cross-tenant IDs return 404 with the same shape as "not found" — by design, to prevent enumeration. |
 | **Journal entry types** | Three checkpoint-emitted types: `checkpoint.created` (info, on Create), `checkpoint.restored` (info, on advisory Restore — divergence list in payload), `fork.created` (notice, on Fork — written to the *new* mission's journal, not the parent's). |
 
+## Usage
+
+The `crewship checkpoint` command group covers the four operations end-to-end. Each subcommand maps 1:1 to the HTTP endpoint documented under [Endpoints summary](#endpoints-summary). The most common loop is bookmark → inspect → fork.
+
+### 1. Create a checkpoint at the current cursor
+
+```bash
+crewship checkpoint create --mission MIS-42 --label "green build"
+# ✓ Created chk_01HXYZ… at cursor j_a1b2c3d4e5f60718 (mission MIS-42)
+```
+
+The label is optional but recommended — it's what the UI shows in the bookmark rail. If `--mission` has no journal entries yet, the call returns 409 (`mission has no journal entries to anchor a checkpoint`); run the mission at least one step first.
+
+### 2. List bookmarks (newest-first)
+
+```bash
+crewship checkpoint list --mission MIS-42
+# ID                LABEL          CURSOR              CREATED_AT
+# chk_01HXYZ…       green build    j_a1b2c3d4…         2026-05-14T14:32:18Z
+# chk_01HABC…       pre-deploy     j_9f8e7d6c5…        2026-05-14T11:05:02Z
+```
+
+Pagination is `--limit` (1–200, default 50). The CLI hits `GET /api/v1/missions/{missionId}/checkpoints` and renders the response as a tab-aligned table.
+
+### 3. Restore (advisory — does not mutate the mission)
+
+```bash
+crewship checkpoint restore chk_01HXYZ
+# checkpoint:  chk_01HXYZ "green build"
+# anchored at: j_a1b2c3d4e5f60718
+# divergence (5 entries posted since):
+#   mission.status_change at j_xyz…
+#   exec.command at j_abc…
+#   exec.command at j_def…
+#   tool.invoke at j_ghi…
+#   waitpoint.created at j_jkl…
+```
+
+This reads `(checkpoint, divergence_list)` from the server and prints it. The mission keeps running — no state is rewound. Use the output to decide whether to keep going or fork.
+
+### 4. Fork into a new mission
+
+```bash
+crewship checkpoint fork chk_01HXYZ --label "experiment-tailwind-v4"
+# ✓ Forked into MIS-43 (new checkpoint chk_01HQRS, fork_of=chk_01HXYZ)
+# Open: https://crewship.example.com/missions/MIS-43
+```
+
+The new mission has its own journal and runs independently. The original mission is untouched — you can keep both side-by-side if you want to compare strategies, or pause the original and continue in the fork.
+
+### 5. Delete an obsolete checkpoint
+
+```bash
+crewship checkpoint delete chk_01HABC --yes
+# ✓ Deleted chk_01HABC; orphaned 1 fork's fork_of pointer (no missions removed)
+```
+
+`--yes` skips the interactive prompt for scripted use. Forks that reference the deleted checkpoint via `fork_of` get their pointer NULLed — the forked *missions* survive, only the genealogy back-pointer is lost.
+
+The same operations are reachable over HTTP — see the [Endpoints summary](#endpoints-summary) below for the path/body shape, and `internal/api/cartographer.go` for the handler source of truth.
+
 ## Schema
 
 ```sql
