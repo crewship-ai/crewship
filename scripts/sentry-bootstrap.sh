@@ -57,6 +57,7 @@ PROJECTS=(
   "crewship-backend    crewship-ai/crewship      SENTRY_DSN"
   "crewship-frontend   crewship-ai/crewship      SENTRY_DSN_FRONTEND"
   "crewship-web        crewship-ai/crewship-web  SENTRY_DSN"
+  "unify-web           Srbino/unify-web          SENTRY_DSN"
 )
 
 # ---------- preflight ----------
@@ -83,8 +84,12 @@ for cmd in curl jq gh; do
 done
 
 if [ "$SKIP_GH" != "1" ]; then
-  if ! gh auth status >/dev/null 2>&1; then
-    echo "gh CLI not authenticated. Run 'gh auth login' first." >&2
+  # `gh auth status` exits non-zero when ANY known account has stale
+  # credentials, even if the active one is healthy. We need only the
+  # active account to work — probe it directly via a cheap API call
+  # that exercises the same auth path `gh secret set` will use.
+  if ! gh api user --jq '.login' >/dev/null 2>&1; then
+    echo "gh CLI active account is not authenticated. Run 'gh auth login' first." >&2
     exit 1
   fi
 fi
