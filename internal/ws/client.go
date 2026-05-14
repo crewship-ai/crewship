@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/auth/sessions"
@@ -17,16 +18,27 @@ import (
 // CLI-token-derived tickets); the per-connection revoke watcher uses
 // it to detect server-side logout and force-close with the
 // session_revoked frame.
+//
+// consecutiveDrops + disconnectFired implement the slow-consumer
+// disconnect logic in Hub.dispatch. The hub-level recordDrop accounts
+// the global counter and logs every 16 drops, but a single stuck
+// client would otherwise stay subscribed indefinitely, accumulating
+// wasted dispatch work on every broadcast. consecutiveDrops resets on
+// the next successful send so transient hiccups don't trip the cutoff;
+// disconnectFired is a one-shot guard so the burst of drops that
+// follows the threshold doesn't spawn multiple teardown goroutines.
 type Client struct {
-	conn          *websocket.Conn
-	hub           *Hub
-	userID        string
-	authSessionID string
-	channels      map[string]bool
-	send          chan []byte
-	ctx           context.Context
-	cancel        context.CancelFunc
-	mu            sync.Mutex // protects channels map
+	conn             *websocket.Conn
+	hub              *Hub
+	userID           string
+	authSessionID    string
+	channels         map[string]bool
+	send             chan []byte
+	ctx              context.Context
+	cancel           context.CancelFunc
+	mu               sync.Mutex // protects channels map
+	consecutiveDrops atomic.Uint32
+	disconnectFired  atomic.Bool
 }
 
 func (c *Client) readPump() {
