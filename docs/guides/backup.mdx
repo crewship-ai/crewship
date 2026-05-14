@@ -26,6 +26,23 @@ Backups are cheap to make and expensive to wish you'd made. The five canonical r
 
 Skip backups for **ephemeral development workspaces** (the dev VM rebuilds them from seed scripts anyway) and **single-agent throwaways** with no user-visible state worth preserving — the bundle metadata cost is real (~few MB minimum) and not every workspace earns it.
 
+## Key concepts
+
+| Term | What it means here |
+|------|-------------------|
+| **Bundle** | A single `.tar.zst` artefact containing one `MANIFEST` (plaintext JSON), one `payload.age` (AGE-sealed tar of DB rows + workspace files), and one `payload.sha256`. The whole backup is this one file — portable, hashable, copy-able with `scp`. |
+| **Scope** | `workspace` (the workspace row + every crew under it) or `crew` (a single crew + its agents). Crew bundles restore independently of their parent workspace, so a "move this crew to another workspace" is a viable migration path. |
+| **Format version** | Integer in `MANIFEST.format_version`. Compatibility guarantee is N-2 — a bundle produced on format v3 restores on v3, v4, and v5 servers. Bumped only when a migration changes the bundle layout itself (not the schema rows inside). |
+| **`restoreBackfill` hook** | Per-migration Go function in `internal/backup/restore_backfill.go`. Runs when a bundle predates a migration and the restoring server has columns the source didn't. Pure `ADD COLUMN` migrations rely on the SQL DEFAULT; complex backfills (JSON shape changes, foreign keys) provide a hook so restored rows land sanely. |
+| **AGE encryption** | The bundle's payload is sealed with `filippo.io/age`. Default mode is passphrase (`scrypt`-derived key); `--recipient age1…` switches to X25519 public-key encryption for hand-offs. `--no-encrypt` produces a plaintext payload for test/CI use only. |
+| **Passphrase keyring** | Opt-in cache at `~/.crewship/backup-keyring.enc` (AGE-encrypted with a single OS-keyring-stored key) so operators don't retype the passphrase on every `rotate` / `verify`. Enabled via `--use-keyring` on `create` / `restore`. |
+| **Advisory lock** | A row in the `backup_locks` table, primary-keyed on workspace ID. Taken before any DB dump or docker pause; released by `defer Release()` on the happy path. 1-hour TTL (`DefaultLockTTL`) so a crashed backup self-heals after the window. |
+| **`refuseIfBackupInProgress` guard** | A shared middleware wired into the assignments, peer-query, and webhook handlers. Reads the lock state and refuses *new* agent runs while a backup is in progress — closes the TOCTOU window between `ensureAgentsIdle` (initial check) and `docker pause` (the actual freeze). |
+| **Dry-run restore** | `--dry-run` on `crewship backup restore`. Decrypts, validates the manifest, replays the DB transaction, then rolls back. The only side effect is one `backup.restore.dry_run` audit row — distinct from `backup.restore` so auditors can tell "verified" apart from "actually restored". |
+| **`--as-workspace` / `--as-crew` rename** | Restore the bundle under a new slug instead of the original. Refuses to run the docker phase (container names derive from the slug) and tells the operator to `crewship crew provision` afterwards. Avoids "two `acme` workspaces colliding" during DR drills. |
+| **Retention sweep** | `crewship backup rotate --keep-last N --keep-days D`. Per-workspace — never touches another workspace's bundles. Both flags can be combined; both must be positive. `--dry-run` lists what would be deleted without touching disk. |
+| **Stale lock** | A lock whose holder process is dead but whose row still exists. Detected when `acquired_at + DefaultLockTTL < now()`. Auto-released on next `create`; manually clearable via `crewship backup unlock --force` (admin-only, with confirmation). |
+
 ## Subcommands at a glance
 
 | Command | Purpose |
