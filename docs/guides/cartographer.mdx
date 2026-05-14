@@ -280,5 +280,9 @@ Full flags: [`crewship checkpoint`](/cli/checkpoint).
 
 ## Related
 
-- [Crew Journal](/guides/crew-journal) -- checkpoints anchor to the canonical event stream.
-- [`crewship checkpoint`](/cli/checkpoint) CLI, [Checkpoints API](/api-reference/checkpoints).
+- [Crew Journal](/guides/crew-journal) — the canonical append-only event stream that checkpoints anchor into via `journal_cursor`. Read this first to understand what "the cursor points at" actually means.
+- [Orchestration](/guides/orchestration) — the mission lifecycle (start → run → pause → complete) that checkpoints bookmark; fork creates a fresh mission lifecycle, not a thread on the existing one.
+- [Activity](/guides/activity) — the live operator surface that surfaces checkpoint creation and fork events on the canvas as they happen.
+- [Keeper](/guides/keeper) — the credential vault to use for tool inputs so the plaintext `state` column never captures raw secrets.
+- [Backup & Restore](/guides/backup) — for the "promote this fork to a different workspace" workflow that checkpoints/forks alone don't cover.
+- [`crewship checkpoint`](/cli/checkpoint) CLI reference and [Checkpoints API](/api-reference/checkpoints) for full HTTP schemas.
