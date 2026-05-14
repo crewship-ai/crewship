@@ -12,6 +12,7 @@ import "net/http"
 //	GET /api/health                  (no auth)
 //	GET /api/v1/system/setup-status  (no auth — first-run gate)
 //	GET /api/v1/system/runtime       (auth)
+//	GET /api/v1/system/version       (auth)
 //	GET /api/v1/system/license       (auth)
 //	GET /api/v1/system/keeper        (auth)
 func (r *Router) registerSystemRoutes() {
@@ -28,8 +29,9 @@ func (r *Router) registerSystemRoutes() {
 	r.mux.HandleFunc("GET /api/v1/system/setup-status", setupH.Status)
 
 	// System info (auth required)
-	system := NewSystemHandler(r.logger)
+	system := NewSystemHandler(r.logger, r.version)
 	r.mux.Handle("GET /api/v1/system/runtime", authed(http.HandlerFunc(system.Runtime)))
+	r.mux.Handle("GET /api/v1/system/version", authed(http.HandlerFunc(system.Version)))
 
 	// License info (auth required)
 	licenseH := NewLicenseHandler(r.license)

@@ -1501,7 +1501,7 @@ func TestSSRFSafeTransport_Construct(t *testing.T) {
 
 func TestSystem_Runtime_Unauthorized(t *testing.T) {
 	t.Parallel()
-	h := NewSystemHandler(testLogger())
+	h := NewSystemHandler(testLogger(), "test")
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	w := httptest.NewRecorder()
 	h.Runtime(w, req)
@@ -1512,7 +1512,7 @@ func TestSystem_Runtime_Unauthorized(t *testing.T) {
 
 func TestSystem_Runtime_Authenticated(t *testing.T) {
 	t.Parallel()
-	h := NewSystemHandler(testLogger())
+	h := NewSystemHandler(testLogger(), "test")
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req = req.WithContext(withUser(req.Context(), &AuthUser{ID: "u1"}))
 	w := httptest.NewRecorder()

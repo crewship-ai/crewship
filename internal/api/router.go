@@ -86,6 +86,19 @@ type Router struct {
 	// The router builds handlers before the orchestrator is fully
 	// initialised, so two-phase wiring is the cheapest fix.
 	PipelinesHandler *PipelineHandler
+
+	// version is the ldflags-injected binary version (e.g. "v0.1.0-beta.1"
+	// or "dev" for local builds). Surfaced on GET /api/v1/system/version
+	// so the web UI can render an "update available" banner.
+	version string
+}
+
+// SetVersion records the binary version for the version-info endpoint.
+// Called from cmd_start.go after construction because the version lives
+// in package main as an ldflags-injected var and can't be referenced
+// from internal/api.
+func (r *Router) SetVersion(v string) {
+	r.version = v
 }
 
 // Provisioning returns the registered ProvisioningHandler so wiring code (e.g.

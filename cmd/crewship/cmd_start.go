@@ -18,6 +18,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/license"
 	"github.com/crewship-ai/crewship/internal/logging"
 	"github.com/crewship-ai/crewship/internal/pipeline"
+	"github.com/crewship-ai/crewship/internal/update"
 	"github.com/crewship-ai/crewship/internal/provider/apple"
 	"github.com/crewship-ai/crewship/internal/provider/bbolt"
 	"github.com/crewship-ai/crewship/internal/provider/docker"
@@ -136,6 +137,22 @@ var startCmd = &cobra.Command{
 			"ipc_socket", cfg.IPC.SocketPath,
 		)
 
+		// Fire-and-forget update check. Result is logged on the next line
+		// after the network call returns; never blocks the boot path. The
+		// internal/update package caches for 24h so this is at most one
+		// GitHub API hit per day per install.
+		go func() {
+			r, err := update.Check(context.Background(), version)
+			if err != nil {
+				logger.Debug("update check failed", "error", err)
+				return
+			}
+			if r != nil && r.Newer {
+				logger.Info("crewship update available", "current", r.Current, "latest", r.Latest, "url", r.URL)
+				fmt.Fprint(os.Stderr, update.FormatBanner(r))
+			}
+		}()
+
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
@@ -189,6 +206,7 @@ var startCmd = &cobra.Command{
 		// purely to avoid an api → chatbridge import (api already depends on
 		// chatbridge for ChatHandler, so the dep flows the other way).
 		if apiRouter := srv.APIRouter(); apiRouter != nil {
+			apiRouter.SetVersion(version)
 			if ph := apiRouter.Provisioning(); ph != nil {
 				bridge.SetProvisioningEnqueuer(provisioningAdapter{h: ph})
 			}
