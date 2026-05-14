@@ -206,6 +206,86 @@ crewship backup unlock --force
   `backup unlock` is an emergency escape hatch. Only use it when you can confirm no backup is actually running (e.g. the previous CLI session crashed and the 1 h TTL has not yet fired). Forcibly releasing a live backup's lock will let a second backup start alongside it, and the two will race on the docker pause/unpause sequence.
 </Warning>
 
+## Examples
+
+### Nightly hot-spare backup with 14-day retention
+
+A workspace on `crewship-prod.example.com` should produce a bundle every night, ship it to a separate backup host, and keep 14 days on disk locally as a fast-rollback safety net.
+
+```bash
+# /etc/systemd/system/crewship-backup.service
+[Unit]
+Description=Crewship nightly backup
+After=crewshipd.service
+
+[Service]
+Type=oneshot
+User=crewship
+Environment=CREWSHIP_DATA_DIR=/var/lib/crewship
+ExecStart=/usr/local/bin/crewship backup create \
+  --scope=workspace \
+  --passphrase-file=/etc/crewship/backup.pw \
+  --use-keyring
+ExecStartPost=/usr/bin/rsync -a --remove-source-files \
+  /var/lib/crewship/backups/ \
+  backup-host:/srv/crewship-backups/prod/
+ExecStartPost=/usr/local/bin/crewship backup rotate \
+  --keep-last=14 --keep-days=14 --force
+```
+
+Paired with a `crewship-backup.timer` that fires at 02:37 daily (off-the-hour to avoid clustering with the rest of the fleet). The `--use-keyring` flag means the passphrase is read once and cached — the timer doesn't have to redeliver it. The `rotate` step runs after the rsync so local-disk pressure is bounded even on long runs without a remote-side sweep.
+
+### Workspace migration to a new host
+
+The `acme` workspace lives on `crewship-old`. You're moving it to `crewship-new` to retire the old host. The destination already has its own workspaces, so a same-slug restore would conflict.
+
+```bash
+# On crewship-old:
+crewship backup create --scope=workspace --passphrase-file backup.pw
+# ✓ Backup created: /home/admin/.crewship/backups/crewship-workspace-acme-2026-05-14T03-12-00Z.tar.zst
+
+# Ship it:
+scp ~/.crewship/backups/crewship-workspace-acme-*.tar.zst crewship-new:/tmp/
+
+# On crewship-new — pick a new slug because the host already has things:
+crewship backup restore /tmp/crewship-workspace-acme-*.tar.zst \
+  --as-workspace=acme-migrated \
+  --passphrase-file=backup.pw
+# ⚠ Docker phase skipped (--as-workspace supplied).
+#   Provision the new crews with `crewship crew provision`.
+
+# Stand the crews up under the new slug:
+crewship crew provision --workspace=acme-migrated --all
+```
+
+Once the new instance has parity (sanity-check via the UI), users get the new URL, and `acme` on the old host gets archived to cold storage before its workspace row is deleted.
+
+### DR drill with `--dry-run`
+
+Every quarter the team proves the disaster-recovery bundle is actually restorable, without disturbing production state. Run the drill on a throwaway VM:
+
+```bash
+# 1. Copy the most recent prod bundle to the drill host:
+scp prod:/var/lib/crewship/backups/crewship-workspace-acme-latest.tar.zst .
+
+# 2. Inspect the manifest first (no passphrase needed):
+crewship backup inspect crewship-workspace-acme-latest.tar.zst | jq '.format_version, .contents.workspace.slug'
+# 1
+# "acme"
+
+# 3. Verify checksum end-to-end:
+crewship backup verify crewship-workspace-acme-latest.tar.zst
+# ✓ VALID — crewship-workspace-acme-latest.tar.zst (487 MiB)
+
+# 4. Replay the restore inside a transaction, then roll back:
+crewship backup restore crewship-workspace-acme-latest.tar.zst \
+  --dry-run \
+  --passphrase-file=backup.pw
+# ✓ Restore validation complete (dry-run; no workspace/crew data changes applied)
+```
+
+A `backup.restore.dry_run` audit entry shows up in the workspace journal — auditors looking at "did anyone restore prod?" can tell drill runs apart from real restores by the action name.
+
 ## Streaming & memory bounds (large backups)
 
 Restore and verify stream the sealed payload to a temp directory rather than buffering per-crew sections in a `map[slug][]byte`. Peak heap stays bounded by the zstd decoder window regardless of bundle size, so multi-GB restores run cleanly on small hosts. The extraction scratch directory is `os.TempDir()/crewship-backup-…` and is removed on `Close()`; a killed process leaves it behind for the next `os.TempDir` cleanup.
