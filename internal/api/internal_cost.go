@@ -68,16 +68,16 @@ func (r *Router) handleSidecarCostRecord(w http.ResponseWriter, req *http.Reques
 
 	var body sidecarCostRecordRequest
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		replyError(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
 
 	if strings.TrimSpace(body.WorkspaceID) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "workspace_id required"})
+		replyError(w, http.StatusBadRequest, "workspace_id required")
 		return
 	}
 	if strings.TrimSpace(body.Provider) == "" || strings.TrimSpace(body.Model) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "provider and model required"})
+		replyError(w, http.StatusBadRequest, "provider and model required")
 		return
 	}
 
@@ -88,7 +88,7 @@ func (r *Router) handleSidecarCostRecord(w http.ResponseWriter, req *http.Reques
 	case "metered", "":
 		mode = paymaster.BillingMetered
 	default:
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "billing_mode must be 'metered' or 'flat_rate'"})
+		replyError(w, http.StatusBadRequest, "billing_mode must be 'metered' or 'flat_rate'")
 		return
 	}
 
@@ -146,7 +146,7 @@ func (r *Router) handleSidecarCostRecord(w http.ResponseWriter, req *http.Reques
 			return
 		}
 		r.logger.Error("sidecar cost record failed", "err", err, "provider", body.Provider, "model", body.Model)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "record failed"})
+		replyError(w, http.StatusInternalServerError, "record failed")
 		return
 	}
 

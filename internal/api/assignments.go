@@ -148,7 +148,7 @@ func (h *AssignmentHandler) List(w http.ResponseWriter, r *http.Request) {
 	`, crewID, crewID, workspaceID, limit, offset)
 	if err != nil {
 		h.logger.Error("list assignments", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	defer rows.Close()
@@ -163,14 +163,14 @@ func (h *AssignmentHandler) List(w http.ResponseWriter, r *http.Request) {
 			&item.AssignedToName, &item.AssignedToSlug,
 		); err != nil {
 			h.logger.Error("scan assignment", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
 		h.logger.Error("rows iteration", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -210,11 +210,11 @@ func (h *AssignmentHandler) Get(w http.ResponseWriter, r *http.Request) {
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "assignment not found"})
+			replyError(w, http.StatusNotFound, "assignment not found")
 			return
 		}
 		h.logger.Error("get assignment", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 

@@ -233,11 +233,11 @@ func (h *CredentialHandler) Test(w http.ResponseWriter, r *http.Request) {
 		Value    string `json:"value"`
 	}
 	if err := readJSON(r, &body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON body"})
+		replyError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
 	if body.Value == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Value is required"})
+		replyError(w, http.StatusBadRequest, "Value is required")
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
@@ -261,7 +261,7 @@ func (h *CredentialHandler) TestStored(w http.ResponseWriter, r *http.Request) {
 	// privilege boundary consistent: only roles that can update a
 	// credential may probe its current validity.
 	if !canRole(role, "update") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 
@@ -280,19 +280,19 @@ func (h *CredentialHandler) TestStored(w http.ResponseWriter, r *http.Request) {
 		WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL `+visFilter+`
 	`, args...).Scan(&provider, &ctype, &encValue)
 	if err == sql.ErrNoRows {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Credential not found"})
+		replyError(w, http.StatusNotFound, "Credential not found")
 		return
 	}
 	if err != nil {
 		h.logger.Error("test stored: lookup", "error", err, "credential_id", credID)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
 	value, err := encryption.Decrypt(encValue)
 	if err != nil {
 		h.logger.Error("test stored: decrypt", "error", err, "credential_id", credID)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to decrypt credential"})
+		replyError(w, http.StatusInternalServerError, "Failed to decrypt credential")
 		return
 	}
 

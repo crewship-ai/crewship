@@ -163,7 +163,7 @@ func (h *ProvisioningHandler) ProvisionStatus(w http.ResponseWriter, r *http.Req
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	crewID := r.PathValue("crewId")
 	if crewID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "crew ID is required"})
+		replyError(w, http.StatusBadRequest, "crew ID is required")
 		return
 	}
 
@@ -175,12 +175,12 @@ func (h *ProvisioningHandler) ProvisionStatus(w http.ResponseWriter, r *http.Req
 	).Scan(&devcontainerConfig, &cachedImage, &cfgHash, &slug)
 
 	if err == sql.ErrNoRows {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "crew not found"})
+		replyError(w, http.StatusNotFound, "crew not found")
 		return
 	}
 	if err != nil {
 		h.logger.Error("query crew provisioning status", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -660,12 +660,12 @@ func (h *ProvisioningHandler) ProvisionRebuild(w http.ResponseWriter, r *http.Re
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "create") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 	crewID := r.PathValue("crewId")
 	if crewID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "crew ID is required"})
+		replyError(w, http.StatusBadRequest, "crew ID is required")
 		return
 	}
 	// Clear cache so Provisioner won't short-circuit on the existing tag.
@@ -676,7 +676,7 @@ func (h *ProvisioningHandler) ProvisionRebuild(w http.ResponseWriter, r *http.Re
 	)
 	if err != nil {
 		h.logger.Error("clear cached image for rebuild", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	h.ProvisionTrigger(w, r)

@@ -51,12 +51,12 @@ type peerMessageRow struct {
 func (h *AgentInboxHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if workspaceID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "workspace required"})
+		replyError(w, http.StatusUnauthorized, "workspace required")
 		return
 	}
 	agentID := r.PathValue("agentId")
 	if agentID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "agentId required"})
+		replyError(w, http.StatusBadRequest, "agentId required")
 		return
 	}
 
@@ -65,12 +65,12 @@ func (h *AgentInboxHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		`SELECT crew_id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
 		agentID, workspaceID).Scan(&crewID)
 	if err == sql.ErrNoRows {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "agent not found"})
+		replyError(w, http.StatusNotFound, "agent not found")
 		return
 	}
 	if err != nil {
 		h.logger.Error("inbox: lookup agent", "err", err, "agent_id", agentID)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "lookup failed"})
+		replyError(w, http.StatusInternalServerError, "lookup failed")
 		return
 	}
 

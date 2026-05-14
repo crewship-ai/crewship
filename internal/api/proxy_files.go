@@ -20,7 +20,7 @@ func (h *ProxyHandler) AgentFiles(w http.ResponseWriter, r *http.Request) {
 		"SELECT slug, crew_id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
 		agentID, workspaceID).Scan(&slug, &crewID)
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+		replyError(w, http.StatusNotFound, "Agent not found")
 		return
 	}
 	if !crewID.Valid {
@@ -35,14 +35,14 @@ func (h *ProxyHandler) AgentFiles(w http.ResponseWriter, r *http.Request) {
 	if subdir := r.URL.Query().Get("subdir"); subdir != "" {
 		cleanSub := filepath.Clean(subdir)
 		if strings.HasPrefix(cleanSub, "..") || filepath.IsAbs(cleanSub) {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid subdir path"})
+			replyError(w, http.StatusBadRequest, "Invalid subdir path")
 			return
 		}
 		ipcPath += "&subdir=" + url.QueryEscape(cleanSub)
 	}
 	resp, err := h.ipcGet(r.Context(), ipcPath)
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "Failed to fetch files"})
+		replyError(w, http.StatusBadGateway, "Failed to fetch files")
 		return
 	}
 	defer resp.Body.Close()
@@ -71,7 +71,7 @@ func (h *ProxyHandler) AgentFileDownload(w http.ResponseWriter, r *http.Request)
 	filePath := r.URL.Query().Get("path")
 
 	if filePath == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path parameter required"})
+		replyError(w, http.StatusBadRequest, "path parameter required")
 		return
 	}
 
@@ -80,13 +80,13 @@ func (h *ProxyHandler) AgentFileDownload(w http.ResponseWriter, r *http.Request)
 		"SELECT slug, crew_id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
 		agentID, workspaceID).Scan(&slug, &crewID)
 	if err != nil || !crewID.Valid {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+		replyError(w, http.StatusNotFound, "Agent not found")
 		return
 	}
 
 	cleanPath := filepath.Clean(filePath)
 	if strings.HasPrefix(cleanPath, "..") || filepath.IsAbs(cleanPath) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid file path"})
+		replyError(w, http.StatusBadRequest, "Invalid file path")
 		return
 	}
 
@@ -97,7 +97,7 @@ func (h *ProxyHandler) AgentFileDownload(w http.ResponseWriter, r *http.Request)
 		fullPath = cleanPath
 	} else if strings.HasPrefix(cleanPath, crewID.String+"/") {
 		// Path is in the crew namespace but not under this agent — reject.
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "path not scoped to this agent"})
+		replyError(w, http.StatusForbidden, "path not scoped to this agent")
 		return
 	} else {
 		fullPath = prefix + cleanPath
@@ -107,13 +107,13 @@ func (h *ProxyHandler) AgentFileDownload(w http.ResponseWriter, r *http.Request)
 
 	resp, err := h.ipcGet(r.Context(), ipcPath)
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "File not found"})
+		replyError(w, http.StatusNotFound, "File not found")
 		return
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "File not found"})
+		replyError(w, http.StatusNotFound, "File not found")
 		return
 	}
 
@@ -134,13 +134,13 @@ func (h *ProxyHandler) AgentFileSave(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	// V-21: Require create permission for file save operations
 	if !canRole(role, "create") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 	filePath := r.URL.Query().Get("path")
 
 	if filePath == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path parameter required"})
+		replyError(w, http.StatusBadRequest, "path parameter required")
 		return
 	}
 
@@ -149,13 +149,13 @@ func (h *ProxyHandler) AgentFileSave(w http.ResponseWriter, r *http.Request) {
 		"SELECT slug, crew_id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
 		agentID, workspaceID).Scan(&slug, &crewID)
 	if err != nil || !crewID.Valid {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+		replyError(w, http.StatusNotFound, "Agent not found")
 		return
 	}
 
 	cleanPath := filepath.Clean(filePath)
 	if strings.HasPrefix(cleanPath, "..") || filepath.IsAbs(cleanPath) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid file path"})
+		replyError(w, http.StatusBadRequest, "Invalid file path")
 		return
 	}
 
@@ -167,7 +167,7 @@ func (h *ProxyHandler) AgentFileSave(w http.ResponseWriter, r *http.Request) {
 	if strings.HasPrefix(cleanPath, prefix) {
 		fullPath = cleanPath
 	} else if strings.HasPrefix(cleanPath, crewID.String+"/") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "path not scoped to this agent"})
+		replyError(w, http.StatusForbidden, "path not scoped to this agent")
 		return
 	} else {
 		fullPath = prefix + cleanPath
@@ -177,7 +177,7 @@ func (h *ProxyHandler) AgentFileSave(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := h.ipcPut(r.Context(), ipcPath, r.Body)
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "Failed to save file"})
+		replyError(w, http.StatusBadGateway, "Failed to save file")
 		return
 	}
 	h.proxyJSON(w, resp)
@@ -190,11 +190,11 @@ func (h *ProxyHandler) CrewFiles(w http.ResponseWriter, r *http.Request) {
 	found, err := crewExists(r.Context(), h.db, crewID, workspaceID)
 	if err != nil {
 		h.logger.Error("crew exists check", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	if !found {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew not found"})
+		replyError(w, http.StatusNotFound, "Crew not found")
 		return
 	}
 	ipcPath := fmt.Sprintf("/crews/%s/files", crewID)
@@ -212,7 +212,7 @@ func (h *ProxyHandler) CrewFiles(w http.ResponseWriter, r *http.Request) {
 	}
 	resp, err := h.ipcGet(r.Context(), ipcPath)
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "Failed to fetch files"})
+		replyError(w, http.StatusBadGateway, "Failed to fetch files")
 		return
 	}
 	defer resp.Body.Close()
@@ -232,33 +232,33 @@ func (h *ProxyHandler) CrewFileDownload(w http.ResponseWriter, r *http.Request) 
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	filePath := r.URL.Query().Get("path")
 	if filePath == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path parameter required"})
+		replyError(w, http.StatusBadRequest, "path parameter required")
 		return
 	}
 	found, err := crewExists(r.Context(), h.db, crewID, workspaceID)
 	if err != nil {
 		h.logger.Error("crew exists check", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	if !found {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew not found"})
+		replyError(w, http.StatusNotFound, "Crew not found")
 		return
 	}
 	cleanPath := filepath.Clean(filePath)
 	if strings.HasPrefix(cleanPath, "..") || filepath.IsAbs(cleanPath) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid file path"})
+		replyError(w, http.StatusBadRequest, "Invalid file path")
 		return
 	}
 	ipcPath := fmt.Sprintf("/crews/%s/files/download?path=%s", crewID, url.QueryEscape(cleanPath))
 	resp, err := h.ipcGet(r.Context(), ipcPath)
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "File not found"})
+		replyError(w, http.StatusNotFound, "File not found")
 		return
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "File not found"})
+		replyError(w, http.StatusNotFound, "File not found")
 		return
 	}
 	w.Header().Set("Content-Type", "application/octet-stream")
@@ -278,33 +278,33 @@ func (h *ProxyHandler) CrewFileSave(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	// V-21: Require create permission for file save operations
 	if !canRole(role, "create") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 	filePath := r.URL.Query().Get("path")
 	if filePath == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path parameter required"})
+		replyError(w, http.StatusBadRequest, "path parameter required")
 		return
 	}
 	found, err := crewExists(r.Context(), h.db, crewID, workspaceID)
 	if err != nil {
 		h.logger.Error("crew exists check", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	if !found {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew not found"})
+		replyError(w, http.StatusNotFound, "Crew not found")
 		return
 	}
 	cleanPath := filepath.Clean(filePath)
 	if strings.HasPrefix(cleanPath, "..") || filepath.IsAbs(cleanPath) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid file path"})
+		replyError(w, http.StatusBadRequest, "Invalid file path")
 		return
 	}
 	ipcPath := fmt.Sprintf("/crews/%s/files/save?path=%s", crewID, url.QueryEscape(cleanPath))
 	resp, err := h.ipcPut(r.Context(), ipcPath, r.Body)
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "Failed to save file"})
+		replyError(w, http.StatusBadGateway, "Failed to save file")
 		return
 	}
 	h.proxyJSON(w, resp)
@@ -321,7 +321,7 @@ func (h *ProxyHandler) AgentContainerFiles(w http.ResponseWriter, r *http.Reques
 		"SELECT crew_id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
 		agentID, workspaceID).Scan(&crewID)
 	if err != nil || !crewID.Valid {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found or not assigned to a crew"})
+		replyError(w, http.StatusNotFound, "Agent not found or not assigned to a crew")
 		return
 	}
 
@@ -331,7 +331,7 @@ func (h *ProxyHandler) AgentContainerFiles(w http.ResponseWriter, r *http.Reques
 	}
 	resp, err := h.ipcGet(r.Context(), ipcPath)
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "Failed to fetch container files"})
+		replyError(w, http.StatusBadGateway, "Failed to fetch container files")
 		return
 	}
 	defer resp.Body.Close()

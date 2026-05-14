@@ -94,45 +94,45 @@ var emailSlugCleanRE = regexp.MustCompile(`[^a-z0-9-]`)
 // POST /api/v1/auth/signup — disabled when CREWSHIP_ALLOW_SIGNUP is false.
 func (h *AuthHandler) Signup(w http.ResponseWriter, r *http.Request) {
 	if !h.allowSignup {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Registration is disabled. Set CREWSHIP_ALLOW_SIGNUP=true to enable."})
+		replyError(w, http.StatusForbidden, "Registration is disabled. Set CREWSHIP_ALLOW_SIGNUP=true to enable.")
 		return
 	}
 
 	var req signupRequest
 	if err := readJSON(r, &req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON body"})
+		replyError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
 
 	if len(req.FullName) < 2 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Name must be at least 2 characters"})
+		replyError(w, http.StatusBadRequest, "Name must be at least 2 characters")
 		return
 	}
 	if !emailRegex.MatchString(req.Email) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid email address"})
+		replyError(w, http.StatusBadRequest, "Invalid email address")
 		return
 	}
 	if len(req.Password) < 8 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Password must be at least 8 characters"})
+		replyError(w, http.StatusBadRequest, "Password must be at least 8 characters")
 		return
 	}
 
 	var existingID string
 	err := h.db.QueryRowContext(r.Context(), "SELECT id FROM users WHERE email = ?", req.Email).Scan(&existingID)
 	if err == nil {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "Email already registered"})
+		replyError(w, http.StatusConflict, "Email already registered")
 		return
 	}
 	if err != sql.ErrNoRows {
 		h.logger.Error("check existing email", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
 	hashed, err := bcrypt.GenerateFromPassword([]byte(req.Password), 12)
 	if err != nil {
 		h.logger.Error("hash password", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -147,7 +147,7 @@ func (h *AuthHandler) Signup(w http.ResponseWriter, r *http.Request) {
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
 		h.logger.Error("begin tx", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	defer tx.Rollback()
@@ -157,7 +157,7 @@ func (h *AuthHandler) Signup(w http.ResponseWriter, r *http.Request) {
 		userID, req.FullName, req.Email, string(hashed), now, now)
 	if err != nil {
 		h.logger.Error("insert user", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -167,7 +167,7 @@ func (h *AuthHandler) Signup(w http.ResponseWriter, r *http.Request) {
 		workspaceID, req.FullName+"'s Workspace", slug, now, now)
 	if err != nil {
 		h.logger.Error("insert workspace", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -176,13 +176,13 @@ func (h *AuthHandler) Signup(w http.ResponseWriter, r *http.Request) {
 		memberID, workspaceID, userID, "OWNER", now)
 	if err != nil {
 		h.logger.Error("insert membership", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
 	if err := tx.Commit(); err != nil {
 		h.logger.Error("commit tx", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -204,7 +204,7 @@ func (h *AuthHandler) Signup(w http.ResponseWriter, r *http.Request) {
 	if err := h.setSessionCookies(authCtx, w, r, userID, req.FullName, req.Email); err != nil {
 		h.logger.Error("set session cookies after signup — rolling back", "error", err)
 		h.cleanupOrphanedSignup(userID, workspaceID)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to establish session — please try again"})
+		replyError(w, http.StatusInternalServerError, "Failed to establish session — please try again")
 		return
 	}
 
@@ -233,26 +233,26 @@ func (h *AuthHandler) cleanupOrphanedSignup(userID, workspaceID string) {
 func (h *AuthHandler) Bootstrap(w http.ResponseWriter, r *http.Request) {
 	var req signupRequest
 	if err := readJSON(r, &req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON body"})
+		replyError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
 	if len(req.FullName) < 2 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Name must be at least 2 characters"})
+		replyError(w, http.StatusBadRequest, "Name must be at least 2 characters")
 		return
 	}
 	if !emailRegex.MatchString(req.Email) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid email address"})
+		replyError(w, http.StatusBadRequest, "Invalid email address")
 		return
 	}
 	if len(req.Password) < 8 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Password must be at least 8 characters"})
+		replyError(w, http.StatusBadRequest, "Password must be at least 8 characters")
 		return
 	}
 
 	hashed, err := bcrypt.GenerateFromPassword([]byte(req.Password), 12)
 	if err != nil {
 		h.logger.Error("bootstrap: hash password", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -267,7 +267,7 @@ func (h *AuthHandler) Bootstrap(w http.ResponseWriter, r *http.Request) {
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
 		h.logger.Error("bootstrap: begin tx", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	defer tx.Rollback()
@@ -276,11 +276,11 @@ func (h *AuthHandler) Bootstrap(w http.ResponseWriter, r *http.Request) {
 	var userCount int
 	if err := tx.QueryRowContext(r.Context(), "SELECT COUNT(*) FROM users").Scan(&userCount); err != nil {
 		h.logger.Error("bootstrap: count users", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	if userCount > 0 {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Already initialized — bootstrap is only available on an empty database"})
+		replyError(w, http.StatusForbidden, "Already initialized — bootstrap is only available on an empty database")
 		return
 	}
 
@@ -298,7 +298,7 @@ func (h *AuthHandler) Bootstrap(w http.ResponseWriter, r *http.Request) {
 		userID, req.FullName, req.Email, string(hashed), now, now)
 	if err != nil {
 		h.logger.Error("bootstrap: insert user", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -308,7 +308,7 @@ func (h *AuthHandler) Bootstrap(w http.ResponseWriter, r *http.Request) {
 		workspaceID, req.FullName+"'s Workspace", slug, now, now)
 	if err != nil {
 		h.logger.Error("bootstrap: insert workspace", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -317,7 +317,7 @@ func (h *AuthHandler) Bootstrap(w http.ResponseWriter, r *http.Request) {
 		memberID, workspaceID, userID, "OWNER", now)
 	if err != nil {
 		h.logger.Error("bootstrap: insert membership", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -325,7 +325,7 @@ func (h *AuthHandler) Bootstrap(w http.ResponseWriter, r *http.Request) {
 	tokenBytes := make([]byte, 20)
 	if _, err := rand.Read(tokenBytes); err != nil {
 		h.logger.Error("bootstrap: generate token", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	cliToken := cliTokenPrefix + hex.EncodeToString(tokenBytes)
@@ -338,13 +338,13 @@ func (h *AuthHandler) Bootstrap(w http.ResponseWriter, r *http.Request) {
 		tokenID, userID, "bootstrap", tokenHashHex, now)
 	if err != nil {
 		h.logger.Error("bootstrap: insert cli_token", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
 	if err := tx.Commit(); err != nil {
 		h.logger.Error("bootstrap: commit", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -409,14 +409,14 @@ func (h *AuthHandler) WsToken(w http.ResponseWriter, r *http.Request) {
 	// validator would panic on the next line. Fail closed instead.
 	if h.validator == nil {
 		h.logger.Error("WsToken called without configured JWT validator")
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
 	jweToken, err := h.validator.IssueWSTicket(user.ID, user.SessionID, user.Name, user.Email)
 	if err != nil {
 		h.logger.Error("issue ws ticket", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"token": jweToken})

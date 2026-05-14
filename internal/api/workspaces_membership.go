@@ -49,7 +49,7 @@ func (h *WorkspaceHandler) ListMembers(w http.ResponseWriter, r *http.Request) {
 	`, workspaceID)
 	if err != nil {
 		h.logger.Error("list members", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	defer rows.Close()
@@ -61,7 +61,7 @@ func (h *WorkspaceHandler) ListMembers(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(&m.ID, &m.WorkspaceID, &m.UserID, &m.Role, &m.CreatedAt, &m.UpdatedAt,
 			&u.ID, &u.Email, &u.FullName, &u.AvatarURL); err != nil {
 			h.logger.Error("scan member", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 		m.User = &u
@@ -69,7 +69,7 @@ func (h *WorkspaceHandler) ListMembers(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := rows.Err(); err != nil {
 		h.logger.Error("rows iteration (members)", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -93,7 +93,7 @@ func (h *WorkspaceHandler) AddMember(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 
 	if !canRole(role, "manage") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 
@@ -104,19 +104,19 @@ func (h *WorkspaceHandler) AddMember(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			h.logger.Error("check member limit", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 	}
 
 	var req addMemberRequest
 	if err := readJSON(r, &req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON body"})
+		replyError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
 
 	if req.UserID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "user_id is required"})
+		replyError(w, http.StatusBadRequest, "user_id is required")
 		return
 	}
 	if req.Role == "" {
@@ -126,12 +126,12 @@ func (h *WorkspaceHandler) AddMember(w http.ResponseWriter, r *http.Request) {
 	// V-02: Validate role against whitelist and prevent escalation
 	validAssignableRoles := map[string]bool{"ADMIN": true, "MANAGER": true, "MEMBER": true, "VIEWER": true}
 	if !validAssignableRoles[req.Role] {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "role must be ADMIN, MANAGER, MEMBER, or VIEWER"})
+		replyError(w, http.StatusBadRequest, "role must be ADMIN, MANAGER, MEMBER, or VIEWER")
 		return
 	}
 	// Only OWNER can assign ADMIN role
 	if req.Role == "ADMIN" && role != "OWNER" {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Only workspace owner can assign ADMIN role"})
+		replyError(w, http.StatusForbidden, "Only workspace owner can assign ADMIN role")
 		return
 	}
 
@@ -140,24 +140,24 @@ func (h *WorkspaceHandler) AddMember(w http.ResponseWriter, r *http.Request) {
 		"SELECT id FROM workspace_members WHERE workspace_id = ? AND user_id = ?",
 		workspaceID, req.UserID).Scan(&existingID)
 	if err == nil {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "User is already a member of this workspace"})
+		replyError(w, http.StatusConflict, "User is already a member of this workspace")
 		return
 	}
 	if err != sql.ErrNoRows {
 		h.logger.Error("check existing member", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
 	var userExists bool
 	err = h.db.QueryRowContext(r.Context(), "SELECT 1 FROM users WHERE id = ?", req.UserID).Scan(&userExists)
 	if err == sql.ErrNoRows {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "User not found"})
+		replyError(w, http.StatusNotFound, "User not found")
 		return
 	}
 	if err != nil {
 		h.logger.Error("check user exists", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -169,7 +169,7 @@ func (h *WorkspaceHandler) AddMember(w http.ResponseWriter, r *http.Request) {
 		memberID, workspaceID, req.UserID, req.Role, now, now)
 	if err != nil {
 		h.logger.Error("insert member", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -192,12 +192,12 @@ func (h *WorkspaceHandler) RemoveMember(w http.ResponseWriter, r *http.Request) 
 	memberID := r.PathValue("memberId")
 
 	if !canRole(role, "manage") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 
 	if memberID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "memberId is required"})
+		replyError(w, http.StatusBadRequest, "memberId is required")
 		return
 	}
 
@@ -207,16 +207,16 @@ func (h *WorkspaceHandler) RemoveMember(w http.ResponseWriter, r *http.Request) 
 		memberID, workspaceID).Scan(&memberRole)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Member not found"})
+			replyError(w, http.StatusNotFound, "Member not found")
 			return
 		}
 		h.logger.Error("get member", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
 	if memberRole == "OWNER" {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Cannot remove workspace owner"})
+		replyError(w, http.StatusForbidden, "Cannot remove workspace owner")
 		return
 	}
 
@@ -225,7 +225,7 @@ func (h *WorkspaceHandler) RemoveMember(w http.ResponseWriter, r *http.Request) 
 		memberID, workspaceID)
 	if err != nil {
 		h.logger.Error("delete member", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -268,7 +268,7 @@ func (h *WorkspaceHandler) ListInvitations(w http.ResponseWriter, r *http.Reques
 	`, workspaceID)
 	if err != nil {
 		h.logger.Error("list invitations", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	defer rows.Close()
@@ -281,7 +281,7 @@ func (h *WorkspaceHandler) ListInvitations(w http.ResponseWriter, r *http.Reques
 			&inv.InvitedBy, &inv.Token, &inv.ExpiresAt, &inv.AcceptedAt, &inv.CreatedAt,
 			&inviter.ID, &inviter.Email, &inviter.FullName); err != nil {
 			h.logger.Error("scan invitation", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 		inv.Inviter = &inviter
@@ -289,7 +289,7 @@ func (h *WorkspaceHandler) ListInvitations(w http.ResponseWriter, r *http.Reques
 	}
 	if err := rows.Err(); err != nil {
 		h.logger.Error("rows iteration (invitations)", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -322,7 +322,7 @@ func (h *WorkspaceHandler) CreateInvitation(w http.ResponseWriter, r *http.Reque
 	user := UserFromContext(r.Context())
 
 	if !canRole(role, "manage") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 
@@ -333,19 +333,19 @@ func (h *WorkspaceHandler) CreateInvitation(w http.ResponseWriter, r *http.Reque
 				return
 			}
 			h.logger.Error("check member limit for invitation", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 	}
 
 	var req createInvitationRequest
 	if err := readJSON(r, &req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON body"})
+		replyError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
 
 	if req.Email == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "email is required"})
+		replyError(w, http.StatusBadRequest, "email is required")
 		return
 	}
 	if req.Role == "" {
@@ -355,11 +355,11 @@ func (h *WorkspaceHandler) CreateInvitation(w http.ResponseWriter, r *http.Reque
 	// V-03: Validate role against whitelist and prevent escalation
 	validInviteRoles := map[string]bool{"ADMIN": true, "MANAGER": true, "MEMBER": true, "VIEWER": true}
 	if !validInviteRoles[req.Role] {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "role must be ADMIN, MANAGER, MEMBER, or VIEWER"})
+		replyError(w, http.StatusBadRequest, "role must be ADMIN, MANAGER, MEMBER, or VIEWER")
 		return
 	}
 	if req.Role == "ADMIN" && role != "OWNER" {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Only workspace owner can invite with ADMIN role"})
+		replyError(w, http.StatusForbidden, "Only workspace owner can invite with ADMIN role")
 		return
 	}
 
@@ -370,12 +370,12 @@ func (h *WorkspaceHandler) CreateInvitation(w http.ResponseWriter, r *http.Reque
 		WHERE wm.workspace_id = ? AND u.email = ?
 	`, workspaceID, req.Email).Scan(&existingMemberID)
 	if err == nil {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "User is already a member of this workspace"})
+		replyError(w, http.StatusConflict, "User is already a member of this workspace")
 		return
 	}
 	if err != sql.ErrNoRows {
 		h.logger.Error("check existing member by email", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -385,12 +385,12 @@ func (h *WorkspaceHandler) CreateInvitation(w http.ResponseWriter, r *http.Reque
 		WHERE workspace_id = ? AND email = ? AND accepted_at IS NULL AND expires_at > datetime('now')
 	`, workspaceID, req.Email).Scan(&existingInviteID)
 	if err == nil {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "An active invitation already exists for this email"})
+		replyError(w, http.StatusConflict, "An active invitation already exists for this email")
 		return
 	}
 	if err != sql.ErrNoRows {
 		h.logger.Error("check existing invitation", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -400,7 +400,7 @@ func (h *WorkspaceHandler) CreateInvitation(w http.ResponseWriter, r *http.Reque
 	token, err := generateToken()
 	if err != nil {
 		h.logger.Error("generate invitation token", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -411,7 +411,7 @@ func (h *WorkspaceHandler) CreateInvitation(w http.ResponseWriter, r *http.Reque
 		expiresAt.Format(time.RFC3339), now.Format(time.RFC3339))
 	if err != nil {
 		h.logger.Error("insert invitation", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 

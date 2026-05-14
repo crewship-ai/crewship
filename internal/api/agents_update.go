@@ -16,24 +16,24 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 
 	if !canRole(role, "create") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 
 	found, err := agentExists(r.Context(), h.db, agentID, workspaceID)
 	if err != nil {
 		h.logger.Error("check agent exists", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	if !found {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+		replyError(w, http.StatusNotFound, "Agent not found")
 		return
 	}
 
 	var body map[string]interface{}
 	if err := readJSON(r, &body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON body"})
+		replyError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
 
@@ -55,11 +55,11 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if slugVal, ok := body["slug"]; ok {
 		if slugStr, ok := slugVal.(string); ok {
 			if slugStr == "" || len(slugStr) < 2 || len(slugStr) > 50 {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "slug must be 2-50 characters"})
+				replyError(w, http.StatusBadRequest, "slug must be 2-50 characters")
 				return
 			}
 			if !validSlugFormat(slugStr) {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "slug must contain only lowercase letters, numbers, underscores, and hyphens"})
+				replyError(w, http.StatusBadRequest, "slug must contain only lowercase letters, numbers, underscores, and hyphens")
 				return
 			}
 		}
@@ -69,7 +69,7 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if roleVal, ok := body["agent_role"]; ok {
 		roleStr, _ := roleVal.(string)
 		if !validAgentRoles[roleStr] {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "agent_role must be AGENT or LEAD"})
+			replyError(w, http.StatusBadRequest, "agent_role must be AGENT or LEAD")
 			return
 		}
 
@@ -81,12 +81,12 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 				"SELECT crew_id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
 				agentID, workspaceID).Scan(&crewIDNull); err != nil {
 				h.logger.Error("query agent crew_id for promotion", "error", err)
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+				replyError(w, http.StatusInternalServerError, "Internal server error")
 				return
 			}
 
 			if !crewIDNull.Valid || crewIDNull.String == "" {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "LEAD role requires crew_id"})
+				replyError(w, http.StatusBadRequest, "LEAD role requires crew_id")
 				return
 			}
 
@@ -95,7 +95,7 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 				"UPDATE agents SET agent_role = 'AGENT' WHERE crew_id = ? AND agent_role = 'LEAD' AND deleted_at IS NULL AND id != ?",
 				crewIDNull.String, agentID); err != nil {
 				h.logger.Error("demote existing lead", "error", err)
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+				replyError(w, http.StatusInternalServerError, "Internal server error")
 				return
 			}
 		}
@@ -108,7 +108,7 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if modeVal, ok := body["lead_mode"]; ok {
 		modeStr, isStr := modeVal.(string)
 		if !isStr || !validLeadModes[modeStr] {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "lead_mode must be 'active' or 'passive'"})
+			replyError(w, http.StatusBadRequest, "lead_mode must be 'active' or 'passive'")
 			return
 		}
 	}
@@ -128,33 +128,33 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if v, ok := body["cli_adapter"]; ok {
 		s, isStr := v.(string)
 		if !isStr || s == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cli_adapter must be CLAUDE_CODE, OPENCODE, CODEX_CLI, GEMINI_CLI, CURSOR_CLI, or FACTORY_DROID"})
+			replyError(w, http.StatusBadRequest, "cli_adapter must be CLAUDE_CODE, OPENCODE, CODEX_CLI, GEMINI_CLI, CURSOR_CLI, or FACTORY_DROID")
 			return
 		}
 		if !validCLIAdapters[s] {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cli_adapter must be CLAUDE_CODE, OPENCODE, CODEX_CLI, GEMINI_CLI, CURSOR_CLI, or FACTORY_DROID"})
+			replyError(w, http.StatusBadRequest, "cli_adapter must be CLAUDE_CODE, OPENCODE, CODEX_CLI, GEMINI_CLI, CURSOR_CLI, or FACTORY_DROID")
 			return
 		}
 	}
 	if v, ok := body["llm_provider"]; ok {
 		s, isStr := v.(string)
 		if !isStr || s == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "llm_provider must be ANTHROPIC, OPENAI, GOOGLE, CURSOR, FACTORY, or OLLAMA"})
+			replyError(w, http.StatusBadRequest, "llm_provider must be ANTHROPIC, OPENAI, GOOGLE, CURSOR, FACTORY, or OLLAMA")
 			return
 		}
 		if !validLLMProviders[s] {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "llm_provider must be ANTHROPIC, OPENAI, GOOGLE, CURSOR, FACTORY, or OLLAMA"})
+			replyError(w, http.StatusBadRequest, "llm_provider must be ANTHROPIC, OPENAI, GOOGLE, CURSOR, FACTORY, or OLLAMA")
 			return
 		}
 	}
 	if v, ok := body["tool_profile"]; ok {
 		s, isStr := v.(string)
 		if !isStr || s == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "tool_profile must be MINIMAL, CODING, or FULL"})
+			replyError(w, http.StatusBadRequest, "tool_profile must be MINIMAL, CODING, or FULL")
 			return
 		}
 		if !validToolProfiles[s] {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "tool_profile must be MINIMAL, CODING, or FULL"})
+			replyError(w, http.StatusBadRequest, "tool_profile must be MINIMAL, CODING, or FULL")
 			return
 		}
 	}
@@ -170,7 +170,7 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if mcpCheck.MCPServers == nil {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "mcp_config_json must contain a \"mcpServers\" object"})
+				replyError(w, http.StatusBadRequest, "mcp_config_json must contain a \"mcpServers\" object")
 				return
 			}
 		}
@@ -193,14 +193,14 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if ub.Empty() {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "No fields to update"})
+		replyError(w, http.StatusBadRequest, "No fields to update")
 		return
 	}
 
 	query, args := ub.Build("agents", "id = ? AND workspace_id = ?", agentID, workspaceID)
 	if _, err := h.db.ExecContext(r.Context(), query, args...); err != nil {
 		h.logger.Error("update agent", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 

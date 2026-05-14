@@ -121,7 +121,7 @@ func (h *NextAuthHandler) CSRF(w http.ResponseWriter, r *http.Request) {
 	token, err := h.csrfToken()
 	if err != nil {
 		h.logger.Error("generate csrf token", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	cookieName := h.csrfCookieName(r)
@@ -188,7 +188,7 @@ func (h *NextAuthHandler) Session(w http.ResponseWriter, r *http.Request) {
 			return
 		case err != nil:
 			h.logger.Error("session lookup in /auth/session", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		case !sess.Active(time.Now()):
 			h.clearAuthCookies(w, r)
@@ -213,7 +213,7 @@ func (h *NextAuthHandler) Session(w http.ResponseWriter, r *http.Request) {
 func (h *NextAuthHandler) CallbackCredentials(w http.ResponseWriter, r *http.Request) {
 	csrfCookie, _ := r.Cookie(h.csrfCookieName(r))
 	if csrfCookie == nil || csrfCookie.Value == "" {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Missing CSRF token"})
+		replyError(w, http.StatusForbidden, "Missing CSRF token")
 		return
 	}
 
@@ -223,7 +223,7 @@ func (h *NextAuthHandler) CallbackCredentials(w http.ResponseWriter, r *http.Req
 	if isJSON {
 		var body map[string]interface{}
 		if err := readJSON(r, &body); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid request"})
+			replyError(w, http.StatusBadRequest, "Invalid request")
 			return
 		}
 		if v, ok := body["email"].(string); ok {
@@ -247,7 +247,7 @@ func (h *NextAuthHandler) CallbackCredentials(w http.ResponseWriter, r *http.Req
 		r.FormValue("redirect") == "false"
 
 	if subtle.ConstantTimeCompare([]byte(csrfToken), []byte(csrfCookie.Value)) != 1 {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Invalid CSRF token"})
+		replyError(w, http.StatusForbidden, "Invalid CSRF token")
 		return
 	}
 
@@ -279,7 +279,7 @@ func (h *NextAuthHandler) CallbackCredentials(w http.ResponseWriter, r *http.Req
 	sess, accessTok, refreshTok, err := h.issueSession(r, userID, fullName, email)
 	if err != nil {
 		h.logger.Error("issue session", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	setAuthCookies(w, r, accessTok, refreshTok)
@@ -383,7 +383,7 @@ func (h *NextAuthHandler) Error(w http.ResponseWriter, r *http.Request) {
 func (h *NextAuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", "POST")
-		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
+		replyError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
 	}
 
@@ -414,7 +414,7 @@ func (h *NextAuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 
 	if h.sessions == nil {
 		h.logger.Error("refresh: sessions store not configured")
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -432,7 +432,7 @@ func (h *NextAuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 		return
 	case err != nil:
 		h.logger.Error("refresh: session lookup", "error", err, "sid", claims.Sid)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	case !sess.Active(time.Now()):
 		h.clearAuthCookies(w, r)
@@ -464,19 +464,19 @@ func (h *NextAuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 	access, err := h.validator.IssueAccessToken(claims.ID, claims.Sid, fullName, email)
 	if err != nil {
 		h.logger.Error("issue access on refresh", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	refresh, err := h.validator.IssueRefreshToken(claims.ID, claims.Sid)
 	if err != nil {
 		h.logger.Error("issue refresh on refresh", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	newClaims, err := h.validator.ValidateRefresh(refresh)
 	if err != nil {
 		h.logger.Error("validate freshly-issued refresh", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -499,7 +499,7 @@ func (h *NextAuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.logger.Error("rotate refresh jti", "error", err, "sid", claims.Sid)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 

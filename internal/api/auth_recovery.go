@@ -246,15 +246,15 @@ type resetRequest struct {
 func (h *RecoveryHandler) Reset(w http.ResponseWriter, r *http.Request) {
 	var req resetRequest
 	if err := readJSON(r, &req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON body"})
+		replyError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
 	if len(req.Password) < 8 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Password must be at least 8 characters"})
+		replyError(w, http.StatusBadRequest, "Password must be at least 8 characters")
 		return
 	}
 	if req.Token == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Token is required"})
+		replyError(w, http.StatusBadRequest, "Token is required")
 		return
 	}
 
@@ -268,7 +268,7 @@ func (h *RecoveryHandler) Reset(w http.ResponseWriter, r *http.Request) {
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
 		h.logger.Error("reset password: begin tx", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	defer tx.Rollback() //nolint:errcheck
@@ -279,12 +279,12 @@ func (h *RecoveryHandler) Reset(w http.ResponseWriter, r *http.Request) {
 		SELECT identifier, expires FROM verification_tokens
 		WHERE token = ? AND purpose = 'password_reset'`, tokenHash).Scan(&email, &expiresStr)
 	if errors.Is(err, sql.ErrNoRows) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid or expired token"})
+		replyError(w, http.StatusBadRequest, "Invalid or expired token")
 		return
 	}
 	if err != nil {
 		h.logger.Error("reset password: token lookup", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -293,7 +293,7 @@ func (h *RecoveryHandler) Reset(w http.ResponseWriter, r *http.Request) {
 	// don't ride a millisecond timing oracle.
 	storedHash := tokenHash
 	if subtle.ConstantTimeCompare([]byte(tokenHash), []byte(storedHash)) != 1 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid or expired token"})
+		replyError(w, http.StatusBadRequest, "Invalid or expired token")
 		return
 	}
 
@@ -305,7 +305,7 @@ func (h *RecoveryHandler) Reset(w http.ResponseWriter, r *http.Request) {
 			"DELETE FROM verification_tokens WHERE token = ?", tokenHash); dbErr != nil {
 			h.logger.Warn("reset password: cleanup expired token", "error", dbErr)
 		}
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid or expired token"})
+		replyError(w, http.StatusBadRequest, "Invalid or expired token")
 		return
 	}
 
@@ -317,7 +317,7 @@ func (h *RecoveryHandler) Reset(w http.ResponseWriter, r *http.Request) {
 		"DELETE FROM verification_tokens WHERE token = ?", tokenHash)
 	if err != nil {
 		h.logger.Error("reset password: delete token", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	deleted, _ := delRes.RowsAffected()
@@ -325,7 +325,7 @@ func (h *RecoveryHandler) Reset(w http.ResponseWriter, r *http.Request) {
 		// Someone else consumed this token in parallel (or the row
 		// was swept between our SELECT and DELETE). Either way the
 		// caller sees the same generic error.
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid or expired token"})
+		replyError(w, http.StatusBadRequest, "Invalid or expired token")
 		return
 	}
 
@@ -334,14 +334,14 @@ func (h *RecoveryHandler) Reset(w http.ResponseWriter, r *http.Request) {
 	var userID string
 	if err := tx.QueryRowContext(r.Context(),
 		"SELECT id FROM users WHERE email = ?", email).Scan(&userID); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid or expired token"})
+		replyError(w, http.StatusBadRequest, "Invalid or expired token")
 		return
 	}
 
 	hashed, err := bcrypt.GenerateFromPassword([]byte(req.Password), 12)
 	if err != nil {
 		h.logger.Error("reset password: hash failed", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -354,13 +354,13 @@ func (h *RecoveryHandler) Reset(w http.ResponseWriter, r *http.Request) {
 		SET hashed_password = ?, failed_login_count = 0, locked_until = NULL, last_failed_login_at = NULL, updated_at = ?
 		WHERE id = ?`, string(hashed), now, userID); err != nil {
 		h.logger.Error("reset password: update user", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
 	if err := tx.Commit(); err != nil {
 		h.logger.Error("reset password: commit", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 

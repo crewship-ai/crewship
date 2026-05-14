@@ -24,7 +24,7 @@ func (h *AgentHandler) ListChats(w http.ResponseWriter, r *http.Request) {
 	`, agentID, workspaceID)
 	if err != nil {
 		h.logger.Error("list agent chats", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	defer rows.Close()
@@ -50,14 +50,14 @@ func (h *AgentHandler) ListChats(w http.ResponseWriter, r *http.Request) {
 			&c.Mode, &c.Status, &c.MessageCount,
 			&c.StartedAt, &c.EndedAt, &c.CreatedAt, &c.Origin); err != nil {
 			h.logger.Error("scan chat", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 		result = append(result, c)
 	}
 	if err := rows.Err(); err != nil {
 		h.logger.Error("rows iteration (chats)", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	if result == nil {
@@ -83,7 +83,7 @@ func (h *AgentHandler) CreateChat(w http.ResponseWriter, r *http.Request) {
 		Origin string `json:"origin"`
 	}
 	if err := readJSON(r, &body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid request"})
+		replyError(w, http.StatusBadRequest, "Invalid request")
 		return
 	}
 
@@ -104,11 +104,11 @@ func (h *AgentHandler) CreateChat(w http.ResponseWriter, r *http.Request) {
 	found, err := agentExists(r.Context(), h.db, agentID, workspaceID)
 	if err != nil {
 		h.logger.Error("check agent exists", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	if !found {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+		replyError(w, http.StatusNotFound, "Agent not found")
 		return
 	}
 
@@ -120,7 +120,7 @@ func (h *AgentHandler) CreateChat(w http.ResponseWriter, r *http.Request) {
 		chatID, agentID, workspaceID, userID, origin, agentID, workspaceID)
 	if err != nil {
 		h.logger.Error("create chat", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -130,15 +130,15 @@ func (h *AgentHandler) CreateChat(w http.ResponseWriter, r *http.Request) {
 		"SELECT agent_id FROM chats WHERE id = ?", chatID).Scan(&ownerAgentID); err != nil {
 		if err == sql.ErrNoRows {
 			// No row: agent was deleted between preflight and INSERT (WHERE EXISTS failed)
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+			replyError(w, http.StatusNotFound, "Agent not found")
 			return
 		}
 		h.logger.Error("verify chat owner", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	if ownerAgentID != agentID {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "Chat belongs to a different agent"})
+		replyError(w, http.StatusConflict, "Chat belongs to a different agent")
 		return
 	}
 
@@ -161,7 +161,7 @@ func (h *AgentHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		h.logger.Error("list agent runs", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 

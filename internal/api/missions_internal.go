@@ -50,11 +50,11 @@ func (h *InternalMissionHandler) Create(w http.ResponseWriter, r *http.Request) 
 		} `json:"tasks"`
 	}
 	if err := readJSON(r, &req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+		replyError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	if req.Title == "" || req.LeadAgentID == "" || req.CrewID == "" || req.WorkspaceID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "title, lead_agent_id, crew_id, workspace_id required"})
+		replyError(w, http.StatusBadRequest, "title, lead_agent_id, crew_id, workspace_id required")
 		return
 	}
 
@@ -65,7 +65,7 @@ func (h *InternalMissionHandler) Create(w http.ResponseWriter, r *http.Request) 
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
 		h.logger.Error("begin tx", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		replyError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 	defer tx.Rollback()
@@ -77,7 +77,7 @@ func (h *InternalMissionHandler) Create(w http.ResponseWriter, r *http.Request) 
 		req.Title, req.Description, req.Plan, req.WorkflowTemplate, now, now)
 	if err != nil {
 		h.logger.Error("create mission", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to create mission"})
+		replyError(w, http.StatusInternalServerError, "failed to create mission")
 		return
 	}
 
@@ -113,7 +113,7 @@ func (h *InternalMissionHandler) Create(w http.ResponseWriter, r *http.Request) 
 
 	if err := tx.Commit(); err != nil {
 		h.logger.Error("commit tx", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		replyError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
@@ -148,11 +148,11 @@ func (h *InternalMissionHandler) Start(w http.ResponseWriter, r *http.Request) {
 		`SELECT status FROM missions WHERE id = ?`, missionID).Scan(&currentStatus)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "mission not found"})
+			replyError(w, http.StatusNotFound, "mission not found")
 			return
 		}
 		h.logger.Error("get mission", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		replyError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
@@ -168,7 +168,7 @@ func (h *InternalMissionHandler) Start(w http.ResponseWriter, r *http.Request) {
 		`UPDATE missions SET status = 'IN_PROGRESS', updated_at = ? WHERE id = ?`,
 		now, missionID); err != nil {
 		h.logger.Error("update mission status", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to start mission"})
+		replyError(w, http.StatusInternalServerError, "failed to start mission")
 		return
 	}
 
@@ -210,11 +210,11 @@ func (h *InternalMissionHandler) Get(w http.ResponseWriter, r *http.Request) {
 		missionID).Scan(&m.ID, &m.TraceID, &m.Title, &m.Description, &m.Status, &m.CreatedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "mission not found"})
+			replyError(w, http.StatusNotFound, "mission not found")
 			return
 		}
 		h.logger.Error("get mission", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		replyError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
@@ -225,7 +225,7 @@ func (h *InternalMissionHandler) Get(w http.ResponseWriter, r *http.Request) {
 		missionID)
 	if err != nil {
 		h.logger.Error("get tasks", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		replyError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 	defer rows.Close()

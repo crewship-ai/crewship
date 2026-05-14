@@ -40,7 +40,7 @@ func (h *PortExposeHandler) RequestExpose(w http.ResponseWriter, r *http.Request
 	}
 	var body requestPayload
 	if err := readJSON(r, &body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON"})
+		replyError(w, http.StatusBadRequest, "Invalid JSON")
 		return
 	}
 
@@ -52,7 +52,7 @@ func (h *PortExposeHandler) RequestExpose(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if len(body.Description) > 200 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "description too long (max 200 chars)"})
+		replyError(w, http.StatusBadRequest, "description too long (max 200 chars)")
 		return
 	}
 
@@ -61,11 +61,11 @@ func (h *PortExposeHandler) RequestExpose(w http.ResponseWriter, r *http.Request
 	agentSlug, err := h.validateAgentBoundary(r.Context(), body.AgentID, body.CrewID, body.WorkspaceID)
 	if err != nil {
 		if errors.Is(err, errAgentNotFound) {
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": "agent does not belong to the requested crew/workspace"})
+			replyError(w, http.StatusForbidden, "agent does not belong to the requested crew/workspace")
 			return
 		}
 		h.logger.Error("port_expose: agent boundary check", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -104,7 +104,7 @@ func (h *PortExposeHandler) RequestExpose(w http.ResponseWriter, r *http.Request
 	})
 	if err != nil {
 		h.logger.Error("port_expose: policy check", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	switch decision {
@@ -115,13 +115,13 @@ func (h *PortExposeHandler) RequestExpose(w http.ResponseWriter, r *http.Request
 		// Reserved for a future change. Surface a clear error so the sidecar
 		// doesn't silently misbehave if someone wires ApprovalPolicy before
 		// the approval long-poll lands.
-		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "approval-required policy not yet supported"})
+		replyError(w, http.StatusNotImplemented, "approval-required policy not yet supported")
 		return
 	case ExposeAllow:
 		// fall through
 	default:
 		h.logger.Error("port_expose: unknown policy decision", "decision", string(decision))
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -142,14 +142,14 @@ func (h *PortExposeHandler) RequestExpose(w http.ResponseWriter, r *http.Request
 	if err != nil {
 		h.logger.Warn("port_expose: container IP lookup",
 			"container_id", body.ContainerID, "network", h.cfg.NetworkName, "error", err)
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "container not reachable on crew network"})
+		replyError(w, http.StatusBadGateway, "container not reachable on crew network")
 		return
 	}
 
 	token, err := generateExposeToken()
 	if err != nil {
 		h.logger.Error("port_expose: token generation", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -179,7 +179,7 @@ func (h *PortExposeHandler) RequestExpose(w http.ResponseWriter, r *http.Request
 	)
 	if err != nil {
 		h.logger.Error("port_expose: insert row", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 

@@ -206,6 +206,12 @@ func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 	json.NewEncoder(w).Encode(v)
 }
 
+// replyError writes a JSON error response with the canonical {"error": msg} shape.
+// Wraps the previously repeated writeJSON(w, status, map[string]string{"error": ...}) idiom.
+func replyError(w http.ResponseWriter, status int, msg string) {
+	writeJSON(w, status, map[string]string{"error": msg})
+}
+
 // readJSON decodes the request body (up to 1 MB) into v.
 func readJSON(r *http.Request, v interface{}) error {
 	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20)) // 1MB limit
@@ -213,6 +219,21 @@ func readJSON(r *http.Request, v interface{}) error {
 		return err
 	}
 	return json.Unmarshal(body, v)
+}
+
+// decodeBody reads + decodes the request body into v. On failure it writes a
+// 400 response with a canonical error shape and returns false; callers should
+// "return" immediately when this returns false.
+//
+// Use this for the very common "decode-or-400" handler entry pattern. For
+// handlers that need to render different error messages on decode failure,
+// fall through to json.NewDecoder + replyError directly.
+func decodeBody(w http.ResponseWriter, r *http.Request, v interface{}) bool {
+	if err := readJSON(r, v); err != nil {
+		replyError(w, http.StatusBadRequest, "invalid request body")
+		return false
+	}
+	return true
 }
 
 // updateBuilder accumulates SET clauses for dynamic UPDATE queries.

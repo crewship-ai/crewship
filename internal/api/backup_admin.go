@@ -25,11 +25,11 @@ func (h *BackupHandler) Unlock(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(ctx)
 	workspaceID := WorkspaceIDFromContext(ctx)
 	if !canRole(role, "manage") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role required"})
+		replyError(w, http.StatusForbidden, "admin role required")
 		return
 	}
 	if user == nil || workspaceID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+		replyError(w, http.StatusUnauthorized, "not authenticated")
 		return
 	}
 	if err := backup.ForceReleaseLock(ctx, h.db, workspaceID); err != nil {
@@ -59,16 +59,16 @@ func (h *BackupHandler) Rotate(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(ctx)
 	workspaceID := WorkspaceIDFromContext(ctx)
 	if !canRole(role, "manage") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role required"})
+		replyError(w, http.StatusForbidden, "admin role required")
 		return
 	}
 	if user == nil || workspaceID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+		replyError(w, http.StatusUnauthorized, "not authenticated")
 		return
 	}
 	var req rotateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		replyError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 	// Reject negatives explicitly. 0 disables a rule (documented);
@@ -76,11 +76,11 @@ func (h *BackupHandler) Rotate(w http.ResponseWriter, r *http.Request) {
 	// positive" gate with a positive counterpart and then fed the
 	// negative into Rotate, producing undefined behaviour.
 	if req.KeepLast < 0 || req.KeepDays < 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "keep_last and keep_days must be >= 0 (0 disables the rule)"})
+		replyError(w, http.StatusBadRequest, "keep_last and keep_days must be >= 0 (0 disables the rule)")
 		return
 	}
 	if req.KeepLast == 0 && req.KeepDays == 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "at least one of keep_last or keep_days must be positive"})
+		replyError(w, http.StatusBadRequest, "at least one of keep_last or keep_days must be positive")
 		return
 	}
 	dir, err := backup.DefaultBackupsDir()
@@ -124,16 +124,16 @@ func (h *BackupHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(ctx)
 	workspaceID := WorkspaceIDFromContext(ctx)
 	if !canRole(role, "manage") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role required"})
+		replyError(w, http.StatusForbidden, "admin role required")
 		return
 	}
 	if user == nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+		replyError(w, http.StatusUnauthorized, "not authenticated")
 		return
 	}
 	path := r.URL.Query().Get("path")
 	if path == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path query param required"})
+		replyError(w, http.StatusBadRequest, "path query param required")
 		return
 	}
 	if err := validateBackupPath(path); err != nil {
@@ -141,7 +141,7 @@ func (h *BackupHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !bundleBelongsToWorkspace(ctx, path, workspaceID) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "backup not found"})
+		replyError(w, http.StatusNotFound, "backup not found")
 		return
 	}
 	if err := backup.Delete(ctx, path); err != nil {
@@ -170,12 +170,12 @@ func (h *BackupHandler) Download(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(ctx)
 	workspaceID := WorkspaceIDFromContext(ctx)
 	if !canRole(role, "manage") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role required"})
+		replyError(w, http.StatusForbidden, "admin role required")
 		return
 	}
 	path := r.URL.Query().Get("path")
 	if path == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path query param required"})
+		replyError(w, http.StatusBadRequest, "path query param required")
 		return
 	}
 	if err := validateBackupPath(path); err != nil {
@@ -183,7 +183,7 @@ func (h *BackupHandler) Download(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !bundleBelongsToWorkspace(ctx, path, workspaceID) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "backup not found"})
+		replyError(w, http.StatusNotFound, "backup not found")
 		return
 	}
 	f, err := os.Open(path)
@@ -241,11 +241,11 @@ func (h *BackupHandler) SelfTest(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(ctx)
 	workspaceID := WorkspaceIDFromContext(ctx)
 	if !canRole(role, "manage") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role required"})
+		replyError(w, http.StatusForbidden, "admin role required")
 		return
 	}
 	if workspaceID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+		replyError(w, http.StatusUnauthorized, "not authenticated")
 		return
 	}
 	if h.dockerOps == nil {
@@ -257,12 +257,12 @@ func (h *BackupHandler) SelfTest(w http.ResponseWriter, r *http.Request) {
 
 	var req selfTestRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		replyError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 	crewID := strings.TrimSpace(req.CrewID)
 	if crewID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "crew_id required"})
+		replyError(w, http.StatusBadRequest, "crew_id required")
 		return
 	}
 
@@ -275,11 +275,11 @@ func (h *BackupHandler) SelfTest(w http.ResponseWriter, r *http.Request) {
 	`, crewID, workspaceID).Scan(&crewSlug)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "crew not found"})
+			replyError(w, http.StatusNotFound, "crew not found")
 			return
 		}
 		h.logger.Error("backup self-test: lookup crew", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		replyError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 

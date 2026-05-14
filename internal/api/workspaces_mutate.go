@@ -22,22 +22,22 @@ type createWorkspaceRequest struct {
 func (h *WorkspaceHandler) Create(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
 	if user == nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
+		replyError(w, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
 
 	var req createWorkspaceRequest
 	if err := readJSON(r, &req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON body"})
+		replyError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
 
 	if req.Name == "" || len(req.Name) < 2 || len(req.Name) > 100 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name must be 2-100 characters"})
+		replyError(w, http.StatusBadRequest, "name must be 2-100 characters")
 		return
 	}
 	if req.Slug == "" || len(req.Slug) < 2 || len(req.Slug) > 50 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "slug must be 2-50 characters"})
+		replyError(w, http.StatusBadRequest, "slug must be 2-50 characters")
 		return
 	}
 	if req.PreferredLanguage != nil && *req.PreferredLanguage != "" {
@@ -52,12 +52,12 @@ func (h *WorkspaceHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var existingID string
 	err := h.db.QueryRowContext(r.Context(), "SELECT id FROM workspaces WHERE slug = ?", req.Slug).Scan(&existingID)
 	if err == nil {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "Workspace slug already taken"})
+		replyError(w, http.StatusConflict, "Workspace slug already taken")
 		return
 	}
 	if err != sql.ErrNoRows {
 		h.logger.Error("check workspace slug", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -68,7 +68,7 @@ func (h *WorkspaceHandler) Create(w http.ResponseWriter, r *http.Request) {
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
 		h.logger.Error("begin tx", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	defer tx.Rollback()
@@ -78,7 +78,7 @@ func (h *WorkspaceHandler) Create(w http.ResponseWriter, r *http.Request) {
 		wsID, req.Name, req.Slug, req.PreferredLanguage, now, now)
 	if err != nil {
 		h.logger.Error("insert workspace", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -87,13 +87,13 @@ func (h *WorkspaceHandler) Create(w http.ResponseWriter, r *http.Request) {
 		memberID, wsID, user.ID, now, now)
 	if err != nil {
 		h.logger.Error("insert workspace member", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
 	if err := tx.Commit(); err != nil {
 		h.logger.Error("commit tx", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -124,22 +124,22 @@ func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 
 	if !canRole(role, "manage") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 
 	var req updateWorkspaceRequest
 	if err := readJSON(r, &req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON body"})
+		replyError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
 
 	if req.Name != nil && (len(*req.Name) < 2 || len(*req.Name) > 100) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name must be 2-100 characters"})
+		replyError(w, http.StatusBadRequest, "name must be 2-100 characters")
 		return
 	}
 	if req.Slug != nil && (len(*req.Slug) < 2 || len(*req.Slug) > 50) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "slug must be 2-50 characters"})
+		replyError(w, http.StatusBadRequest, "slug must be 2-50 characters")
 		return
 	}
 
@@ -157,12 +157,12 @@ func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 		err := h.db.QueryRowContext(r.Context(),
 			"SELECT id FROM workspaces WHERE slug = ? AND id != ?", *req.Slug, workspaceID).Scan(&existingID)
 		if err == nil {
-			writeJSON(w, http.StatusConflict, map[string]string{"error": "Workspace slug already taken"})
+			replyError(w, http.StatusConflict, "Workspace slug already taken")
 			return
 		}
 		if err != sql.ErrNoRows {
 			h.logger.Error("check workspace slug", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 	}
@@ -185,7 +185,7 @@ func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 		query, args := ub.Build("workspaces", "id = ?", workspaceID)
 		if _, err := h.db.ExecContext(r.Context(), query, args...); err != nil {
 			h.logger.Error("update workspace", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 	}
@@ -202,7 +202,7 @@ func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 		&ws.CreatedAt, &ws.UpdatedAt, &ws.CrewCount, &ws.AgentCount, &ws.MemberCount)
 	if err != nil {
 		h.logger.Error("get workspace after update", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 

@@ -122,21 +122,21 @@ func (h *BackupHandler) Create(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(ctx)
 
 	if !canRole(role, "manage") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role required"})
+		replyError(w, http.StatusForbidden, "admin role required")
 		return
 	}
 	if user == nil || workspaceID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+		replyError(w, http.StatusUnauthorized, "not authenticated")
 		return
 	}
 	var req createRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		replyError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 	scope := backup.Scope(req.Scope)
 	if !scope.Valid() || scope == backup.ScopeInstance {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "scope must be 'crew' or 'workspace'"})
+		replyError(w, http.StatusBadRequest, "scope must be 'crew' or 'workspace'")
 		return
 	}
 	// Normalise + validate the trimmed crew_id so a whitespace-only
@@ -145,7 +145,7 @@ func (h *BackupHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// get caught by this.
 	trimmedCrewID := strings.TrimSpace(req.CrewID)
 	if scope == backup.ScopeCrew && trimmedCrewID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "crew_id required for crew scope"})
+		replyError(w, http.StatusBadRequest, "crew_id required for crew scope")
 		return
 	}
 	// Trim ONLY for the "is this a real selector or whitespace
@@ -171,11 +171,11 @@ func (h *BackupHandler) Create(w http.ResponseWriter, r *http.Request) {
 		encryptionSelectors++
 	}
 	if encryptionSelectors == 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "passphrase, recipient, or no_encrypt=true required"})
+		replyError(w, http.StatusBadRequest, "passphrase, recipient, or no_encrypt=true required")
 		return
 	}
 	if encryptionSelectors > 1 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "exactly one of passphrase / recipient / no_encrypt may be supplied"})
+		replyError(w, http.StatusBadRequest, "exactly one of passphrase / recipient / no_encrypt may be supplied")
 		return
 	}
 
@@ -220,7 +220,7 @@ func (h *BackupHandler) Create(w http.ResponseWriter, r *http.Request) {
 		level = backup.DefaultScopeLevel
 	}
 	if !level.Valid() {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "scope_level must be 'quick', 'standard', or 'full'"})
+		replyError(w, http.StatusBadRequest, "scope_level must be 'quick', 'standard', or 'full'")
 		return
 	}
 
@@ -305,20 +305,20 @@ func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(ctx)
 
 	if !canRole(role, "manage") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role required"})
+		replyError(w, http.StatusForbidden, "admin role required")
 		return
 	}
 	if user == nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+		replyError(w, http.StatusUnauthorized, "not authenticated")
 		return
 	}
 	var req restoreRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		replyError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 	if req.Path == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path required"})
+		replyError(w, http.StatusBadRequest, "path required")
 		return
 	}
 	if err := validateBackupPath(req.Path); err != nil {
@@ -326,7 +326,7 @@ func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !bundleBelongsToWorkspace(ctx, req.Path, workspaceID) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "backup not found"})
+		replyError(w, http.StatusNotFound, "backup not found")
 		return
 	}
 

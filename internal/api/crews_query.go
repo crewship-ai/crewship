@@ -12,7 +12,7 @@ import (
 func (h *CrewHandler) List(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if workspaceID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "workspace_id is required"})
+		replyError(w, http.StatusBadRequest, "workspace_id is required")
 		return
 	}
 
@@ -36,7 +36,7 @@ func (h *CrewHandler) List(w http.ResponseWriter, r *http.Request) {
 	`, workspaceID, limit, offset)
 	if err != nil {
 		h.logger.Error("list crews", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	defer rows.Close()
@@ -52,7 +52,7 @@ func (h *CrewHandler) List(w http.ResponseWriter, r *http.Request) {
 			&c.RuntimeImage, &c.DevcontainerConfig, &c.MiseConfig, &c.CachedImage, &c.ConfigHash,
 			&c.CreatedAt, &c.UpdatedAt, &c.Count.Agents, &c.Count.Members); err != nil {
 			h.logger.Error("scan crew", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 		c.AllowedDomains = parseAllowedDomains(allowedDomainsJSON)
@@ -60,7 +60,7 @@ func (h *CrewHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := rows.Err(); err != nil {
 		h.logger.Error("rows iteration (crews)", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -79,7 +79,7 @@ func (h *CrewHandler) Get(w http.ResponseWriter, r *http.Request) {
 	crewID := r.PathValue("crewId")
 
 	if crewID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "crewId is required"})
+		replyError(w, http.StatusBadRequest, "crewId is required")
 		return
 	}
 
@@ -103,11 +103,11 @@ func (h *CrewHandler) Get(w http.ResponseWriter, r *http.Request) {
 		&c.CreatedAt, &c.UpdatedAt, &c.Count.Agents, &c.Count.Members)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew not found"})
+			replyError(w, http.StatusNotFound, "Crew not found")
 			return
 		}
 		h.logger.Error("get crew", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -124,12 +124,12 @@ func (h *CrewHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	crewID := r.PathValue("crewId")
 
 	if !canRole(role, "manage") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 
 	if crewID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "crewId is required"})
+		replyError(w, http.StatusBadRequest, "crewId is required")
 		return
 	}
 
@@ -137,11 +137,11 @@ func (h *CrewHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	found, err := crewExists(r.Context(), h.db, crewID, workspaceID)
 	if err != nil {
 		h.logger.Error("get crew for delete", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	if !found {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew not found"})
+		replyError(w, http.StatusNotFound, "Crew not found")
 		return
 	}
 
@@ -169,7 +169,7 @@ func (h *CrewHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		now, crewID)
 	if err != nil {
 		h.logger.Error("soft delete crew", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 

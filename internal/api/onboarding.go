@@ -78,7 +78,7 @@ func NewOnboardingHandler(db *sql.DB, svc *services.OnboardingService, logger *s
 func (h *OnboardingHandler) Status(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
 	if user == nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
+		replyError(w, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
 
@@ -86,12 +86,12 @@ func (h *OnboardingHandler) Status(w http.ResponseWriter, r *http.Request) {
 	err := h.db.QueryRowContext(r.Context(),
 		"SELECT onboarding_completed FROM users WHERE id = ?", user.ID).Scan(&completed)
 	if errors.Is(err, sql.ErrNoRows) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "User not found"})
+		replyError(w, http.StatusNotFound, "User not found")
 		return
 	}
 	if err != nil {
 		h.logger.Error("query onboarding status", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -124,7 +124,7 @@ func (h *OnboardingHandler) Status(w http.ResponseWriter, r *http.Request) {
 func (h *OnboardingHandler) Complete(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
 	if user == nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
+		replyError(w, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
 
@@ -133,17 +133,17 @@ func (h *OnboardingHandler) Complete(w http.ResponseWriter, r *http.Request) {
 		time.Now().UTC().Format(time.RFC3339), user.ID)
 	if err != nil {
 		h.logger.Error("complete onboarding", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	rows, err := res.RowsAffected()
 	if err != nil {
 		h.logger.Error("complete onboarding rows affected", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	if rows == 0 {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "User not found"})
+		replyError(w, http.StatusNotFound, "User not found")
 		return
 	}
 
@@ -199,13 +199,13 @@ func makeSlug(name string) string {
 func (h *OnboardingHandler) Setup(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
 	if user == nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
+		replyError(w, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
 
 	var req onboardingSetupRequest
 	if err := readJSON(r, &req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON body"})
+		replyError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
 
@@ -216,12 +216,12 @@ func (h *OnboardingHandler) Setup(w http.ResponseWriter, r *http.Request) {
 		WHERE wm.user_id = ? ORDER BY wm.created_at ASC LIMIT 1
 	`, user.ID).Scan(&workspaceID)
 	if errors.Is(err, sql.ErrNoRows) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "No workspace found for user"})
+		replyError(w, http.StatusBadRequest, "No workspace found for user")
 		return
 	}
 	if err != nil {
 		h.logger.Error("find workspace", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -266,11 +266,11 @@ func (h *OnboardingHandler) Setup(w http.ResponseWriter, r *http.Request) {
 	// onboarding shape so users who pick "Start blank" still get a
 	// workable initial agent. CrewName + AgentName are required here.
 	if req.CrewName == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "crew_name is required"})
+		replyError(w, http.StatusBadRequest, "crew_name is required")
 		return
 	}
 	if req.AgentName == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "agent_name is required"})
+		replyError(w, http.StatusBadRequest, "agent_name is required")
 		return
 	}
 
@@ -280,7 +280,7 @@ func (h *OnboardingHandler) Setup(w http.ResponseWriter, r *http.Request) {
 	}
 	llm, ok := resolveLLMProvider(req.LlmProvider)
 	if !ok {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "llm_provider must be ANTHROPIC, OPENAI, GOOGLE, CURSOR, FACTORY, or OLLAMA"})
+		replyError(w, http.StatusBadRequest, "llm_provider must be ANTHROPIC, OPENAI, GOOGLE, CURSOR, FACTORY, or OLLAMA")
 		return
 	}
 
@@ -321,11 +321,11 @@ func (h *OnboardingHandler) Setup(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		switch {
 		case errors.Is(err, services.ErrOnboardingAlreadyCompleted):
-			writeJSON(w, http.StatusConflict, map[string]string{"error": "Onboarding already completed"})
+			replyError(w, http.StatusConflict, "Onboarding already completed")
 		case errors.Is(err, services.ErrWorkspaceNotFound):
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "No workspace found for user"})
+			replyError(w, http.StatusBadRequest, "No workspace found for user")
 		default:
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			replyError(w, http.StatusInternalServerError, "Internal server error")
 		}
 		return
 	}
@@ -352,7 +352,7 @@ func (h *OnboardingHandler) setupFromTemplate(w http.ResponseWriter, r *http.Req
 		now, userID)
 	if err != nil {
 		h.logger.Error("onboarding template: lock", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	rows, err := guardRes.RowsAffected()
@@ -361,11 +361,11 @@ func (h *OnboardingHandler) setupFromTemplate(w http.ResponseWriter, r *http.Req
 		// "already completed", which would block a retry the user
 		// could otherwise succeed at.
 		h.logger.Error("onboarding template: lock rows affected", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	if rows == 0 {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "Onboarding already completed"})
+		replyError(w, http.StatusConflict, "Onboarding already completed")
 		return
 	}
 
@@ -430,7 +430,7 @@ func (h *OnboardingHandler) setupFromTemplate(w http.ResponseWriter, r *http.Req
 				time.Now().UTC().Format(time.RFC3339), userID); rbErr != nil {
 				h.logger.Error("onboarding template: rollback completion flag", "error", rbErr, "store_error", err)
 			}
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to store credential"})
+			replyError(w, http.StatusInternalServerError, "Failed to store credential")
 			return
 		}
 	}
@@ -473,12 +473,12 @@ func (h *OnboardingHandler) setupFromTemplate(w http.ResponseWriter, r *http.Req
 		}
 		switch {
 		case errors.Is(err, errTemplateNotFound):
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Unknown crew template"})
+			replyError(w, http.StatusBadRequest, "Unknown crew template")
 		case errors.Is(err, errCrewSlugConflict):
 			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
 		default:
 			h.logger.Error("onboarding template: deploy", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			replyError(w, http.StatusInternalServerError, "Internal server error")
 		}
 		return
 	}

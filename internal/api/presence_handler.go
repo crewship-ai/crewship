@@ -39,7 +39,7 @@ type rosterRow struct {
 func (h *PresenceHandler) Roster(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if workspaceID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "workspace required"})
+		replyError(w, http.StatusUnauthorized, "workspace required")
 		return
 	}
 	crewID := r.URL.Query().Get("crew_id")
@@ -47,13 +47,13 @@ func (h *PresenceHandler) Roster(w http.ResponseWriter, r *http.Request) {
 		ok, err := crewBelongsToWorkspace(r.Context(), h.db, crewID, workspaceID)
 		if err != nil {
 			h.logger.Error("presence roster: crew lookup failed", "err", err, "crew_id", crewID)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "crew lookup failed"})
+			replyError(w, http.StatusInternalServerError, "crew lookup failed")
 			return
 		}
 		if !ok {
 			// Cross-tenant crew lookup → flat 404 so existence doesn't leak
 			// across workspaces.
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "crew not found"})
+			replyError(w, http.StatusNotFound, "crew not found")
 			return
 		}
 	}
@@ -61,7 +61,7 @@ func (h *PresenceHandler) Roster(w http.ResponseWriter, r *http.Request) {
 	snaps, err := presence.ListByWorkspace(r.Context(), h.db, workspaceID)
 	if err != nil {
 		h.logger.Error("presence roster", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "list failed"})
+		replyError(w, http.StatusInternalServerError, "list failed")
 		return
 	}
 

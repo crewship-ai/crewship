@@ -76,11 +76,11 @@ func (h *QueryHandler) WaitForEscalationResponse(w http.ResponseWriter, r *http.
 	`, escalationID).Scan(&status, &escalationType, &resolution, &action, &redirectTo)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "escalation not found"})
+			replyError(w, http.StatusNotFound, "escalation not found")
 			return
 		}
 		h.logger.Error("wait escalation lookup", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -91,7 +91,7 @@ func (h *QueryHandler) WaitForEscalationResponse(w http.ResponseWriter, r *http.
 			dec, decErr := encryption.Decrypt(resolved)
 			if decErr != nil {
 				h.logger.Error("decrypt credential resolution", "error", decErr)
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+				replyError(w, http.StatusInternalServerError, "Internal server error")
 				return
 			}
 			resolved = dec

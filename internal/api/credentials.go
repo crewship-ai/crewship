@@ -94,7 +94,7 @@ func (h *CredentialHandler) List(w http.ResponseWriter, r *http.Request) {
 	`, args...)
 	if err != nil {
 		h.logger.Error("list credentials", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	defer rows.Close()
@@ -109,7 +109,7 @@ func (h *CredentialHandler) List(w http.ResponseWriter, r *http.Request) {
 			&c.LastUsedAt, &lastUsedIPsRaw, &tagsRaw,
 			&c.CreatedAt, &c.UpdatedAt, &c.AgentCount); err != nil {
 			h.logger.Error("scan credential", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 		c.LastUsedIPs = parseLastUsedIPs(lastUsedIPsRaw)
@@ -118,7 +118,7 @@ func (h *CredentialHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := rows.Err(); err != nil {
 		h.logger.Error("rows iteration (credentials)", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -180,11 +180,11 @@ func (h *CredentialHandler) Get(w http.ResponseWriter, r *http.Request) {
 	c.Tags = parseTags(tagsRaw)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Credential not found"})
+			replyError(w, http.StatusNotFound, "Credential not found")
 			return
 		}
 		h.logger.Error("get credential", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -207,7 +207,7 @@ func (h *CredentialHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 
 	if !canRole(role, "manage") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 
@@ -217,12 +217,12 @@ func (h *CredentialHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		now, credID, workspaceID)
 	if err != nil {
 		h.logger.Error("delete credential", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	affected, _ := res.RowsAffected()
 	if affected == 0 {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Credential not found"})
+		replyError(w, http.StatusNotFound, "Credential not found")
 		return
 	}
 

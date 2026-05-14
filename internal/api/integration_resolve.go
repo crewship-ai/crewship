@@ -41,10 +41,10 @@ func (h *IntegrationHandler) ResolveAgentIntegrations(w http.ResponseWriter, r *
 		"SELECT crew_id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
 		agentID, workspaceID).Scan(&crewID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+			replyError(w, http.StatusNotFound, "Agent not found")
 		} else {
 			h.logger.Error("lookup agent for integration resolution", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			replyError(w, http.StatusInternalServerError, "Internal server error")
 		}
 		return
 	}
@@ -58,7 +58,7 @@ func (h *IntegrationHandler) ResolveAgentIntegrations(w http.ResponseWriter, r *
 		WHERE workspace_id = ? AND enabled = 1 AND deleted_at IS NULL`, workspaceID)
 	if err != nil {
 		h.logger.Error("query workspace MCP servers", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	for wsRows.Next() {
@@ -93,7 +93,7 @@ func (h *IntegrationHandler) ResolveAgentIntegrations(w http.ResponseWriter, r *
 			WHERE crew_id = ? AND enabled = 1 AND deleted_at IS NULL`, crewID.String)
 		if err != nil {
 			h.logger.Error("query crew MCP servers", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 		for crewRows.Next() {
@@ -132,7 +132,7 @@ func (h *IntegrationHandler) ResolveAgentIntegrations(w http.ResponseWriter, r *
 		WHERE b.agent_id = ?`, agentID)
 	if err != nil {
 		h.logger.Error("query agent MCP bindings", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	for bindingRows.Next() {
@@ -177,7 +177,7 @@ func (h *IntegrationHandler) ResolveAgentIntegrations(w http.ResponseWriter, r *
 		GROUP BY b.mcp_server_id HAVING COUNT(*) > 0`, workspaceID)
 	if err != nil {
 		h.logger.Error("query servers with bindings", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	for bcRows.Next() {

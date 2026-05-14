@@ -24,7 +24,7 @@ func nilIfEmpty(s string) *string {
 func (h *InternalHandler) ListCrews(w http.ResponseWriter, r *http.Request) {
 	wsID := r.URL.Query().Get("workspace_id")
 	if wsID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "workspace_id required"})
+		replyError(w, http.StatusBadRequest, "workspace_id required")
 		return
 	}
 
@@ -38,7 +38,7 @@ func (h *InternalHandler) ListCrews(w http.ResponseWriter, r *http.Request) {
 		`SELECT id, name, slug FROM crews WHERE workspace_id = ? AND deleted_at IS NULL ORDER BY name`, wsID)
 	if err != nil {
 		h.logger.Error("list crews internal", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	defer rows.Close()
@@ -59,7 +59,7 @@ func (h *InternalHandler) ListCrews(w http.ResponseWriter, r *http.Request) {
 func (h *InternalHandler) CreateCrew(w http.ResponseWriter, r *http.Request) {
 	wsID := r.URL.Query().Get("workspace_id")
 	if wsID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "workspace_id required"})
+		replyError(w, http.StatusBadRequest, "workspace_id required")
 		return
 	}
 
@@ -71,11 +71,11 @@ func (h *InternalHandler) CreateCrew(w http.ResponseWriter, r *http.Request) {
 		Color       string `json:"color"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+		replyError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	if body.Name == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name is required"})
+		replyError(w, http.StatusBadRequest, "name is required")
 		return
 	}
 	if body.Slug == "" {
@@ -84,7 +84,7 @@ func (h *InternalHandler) CreateCrew(w http.ResponseWriter, r *http.Request) {
 		body.Slug = slugify(body.Slug)
 	}
 	if body.Slug == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "slug is required (could not derive from name)"})
+		replyError(w, http.StatusBadRequest, "slug is required (could not derive from name)")
 		return
 	}
 
@@ -93,7 +93,7 @@ func (h *InternalHandler) CreateCrew(w http.ResponseWriter, r *http.Request) {
 		`SELECT COUNT(*) FROM crews WHERE slug = ? AND workspace_id = ? AND deleted_at IS NULL`,
 		body.Slug, wsID).Scan(&existing); err != nil {
 		h.logger.Error("check crew slug uniqueness", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+		replyError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
 	if existing > 0 {
@@ -117,7 +117,7 @@ func (h *InternalHandler) CreateCrew(w http.ResponseWriter, r *http.Request) {
 		crewID, wsID, body.Name, body.Slug, body.Description, icon, color, now, now)
 	if err != nil {
 		h.logger.Error("internal create crew", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to create crew"})
+		replyError(w, http.StatusInternalServerError, "failed to create crew")
 		return
 	}
 
@@ -135,7 +135,7 @@ func (h *InternalHandler) CreateCrew(w http.ResponseWriter, r *http.Request) {
 func (h *InternalHandler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	wsID := r.URL.Query().Get("workspace_id")
 	if wsID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "workspace_id required"})
+		replyError(w, http.StatusBadRequest, "workspace_id required")
 		return
 	}
 
@@ -153,11 +153,11 @@ func (h *InternalHandler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		ToolProfile  string `json:"tool_profile"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+		replyError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	if body.Name == "" || body.CrewID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name and crew_id are required"})
+		replyError(w, http.StatusBadRequest, "name and crew_id are required")
 		return
 	}
 	if body.Slug == "" {
@@ -166,7 +166,7 @@ func (h *InternalHandler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		body.Slug = slugify(body.Slug)
 	}
 	if body.Slug == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "slug is required (could not derive from name)"})
+		replyError(w, http.StatusBadRequest, "slug is required (could not derive from name)")
 		return
 	}
 	if body.AgentRole == "" {
@@ -193,7 +193,7 @@ func (h *InternalHandler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		`SELECT COUNT(*) FROM agents WHERE slug = ? AND workspace_id = ? AND deleted_at IS NULL`,
 		body.Slug, wsID).Scan(&existing); err != nil {
 		h.logger.Error("check agent slug uniqueness", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+		replyError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
 	if existing > 0 {
@@ -216,7 +216,7 @@ func (h *InternalHandler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		1800, true, webhookSecret, now, now)
 	if err != nil {
 		h.logger.Error("internal create agent", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to create agent"})
+		replyError(w, http.StatusInternalServerError, "failed to create agent")
 		return
 	}
 
@@ -239,7 +239,7 @@ func (h *InternalHandler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 func (h *InternalHandler) ListCrewConnections(w http.ResponseWriter, r *http.Request) {
 	wsID := r.URL.Query().Get("workspace_id")
 	if wsID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "workspace_id required"})
+		replyError(w, http.StatusBadRequest, "workspace_id required")
 		return
 	}
 
@@ -262,7 +262,7 @@ func (h *InternalHandler) ListCrewConnections(w http.ResponseWriter, r *http.Req
 	rows, err := h.db.QueryContext(r.Context(), query, args...)
 	if err != nil {
 		h.logger.Error("list crew connections internal", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	defer rows.Close()
@@ -305,11 +305,11 @@ func (h *InternalHandler) RecordMCPToolCall(w http.ResponseWriter, r *http.Reque
 		ErrorMessage   string `json:"error_message"`
 	}
 	if err := readJSON(r, &body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON"})
+		replyError(w, http.StatusBadRequest, "Invalid JSON")
 		return
 	}
 	if body.WorkspaceID == "" || body.AgentID == "" || body.MCPServerID == "" || body.ToolName == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "workspace_id, agent_id, mcp_server_id, and tool_name are required"})
+		replyError(w, http.StatusBadRequest, "workspace_id, agent_id, mcp_server_id, and tool_name are required")
 		return
 	}
 	if body.MCPServerScope == "" {
@@ -325,7 +325,7 @@ func (h *InternalHandler) RecordMCPToolCall(w http.ResponseWriter, r *http.Reque
 		body.ToolName, body.Status, body.DurationMS, body.ErrorMessage)
 	if err != nil {
 		h.logger.Error("record mcp tool call", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to record"})
+		replyError(w, http.StatusInternalServerError, "Failed to record")
 		return
 	}
 

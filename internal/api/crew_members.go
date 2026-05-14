@@ -23,7 +23,7 @@ func (h *CrewHandler) ListMembers(w http.ResponseWriter, r *http.Request) {
 	crewID := r.PathValue("crewId")
 
 	if crewID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "crewId is required"})
+		replyError(w, http.StatusBadRequest, "crewId is required")
 		return
 	}
 
@@ -34,11 +34,11 @@ func (h *CrewHandler) ListMembers(w http.ResponseWriter, r *http.Request) {
 		crewID, workspaceID).Scan(&existingID)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew not found"})
+			replyError(w, http.StatusNotFound, "Crew not found")
 			return
 		}
 		h.logger.Error("get crew for list members", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -52,7 +52,7 @@ func (h *CrewHandler) ListMembers(w http.ResponseWriter, r *http.Request) {
 	`, crewID)
 	if err != nil {
 		h.logger.Error("list crew members", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	defer rows.Close()
@@ -64,7 +64,7 @@ func (h *CrewHandler) ListMembers(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(&m.ID, &m.CrewID, &m.UserID, &m.CreatedAt,
 			&u.ID, &u.Email, &u.FullName, &u.AvatarURL); err != nil {
 			h.logger.Error("scan crew member", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 		m.User = &u
@@ -72,7 +72,7 @@ func (h *CrewHandler) ListMembers(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := rows.Err(); err != nil {
 		h.logger.Error("rows iteration (crew members)", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -89,12 +89,12 @@ func (h *CrewHandler) AddMember(w http.ResponseWriter, r *http.Request) {
 	crewID := r.PathValue("crewId")
 
 	if !canRole(role, "create") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 
 	if crewID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "crewId is required"})
+		replyError(w, http.StatusBadRequest, "crewId is required")
 		return
 	}
 
@@ -105,22 +105,22 @@ func (h *CrewHandler) AddMember(w http.ResponseWriter, r *http.Request) {
 		crewID, workspaceID).Scan(&existingID)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew not found"})
+			replyError(w, http.StatusNotFound, "Crew not found")
 			return
 		}
 		h.logger.Error("get crew for add member", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
 	var req addCrewMemberRequest
 	if err := readJSON(r, &req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON body"})
+		replyError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
 
 	if req.UserID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "user_id is required"})
+		replyError(w, http.StatusBadRequest, "user_id is required")
 		return
 	}
 
@@ -130,12 +130,12 @@ func (h *CrewHandler) AddMember(w http.ResponseWriter, r *http.Request) {
 		"SELECT id FROM workspace_members WHERE workspace_id = ? AND user_id = ?",
 		workspaceID, req.UserID).Scan(&wsMemberID)
 	if err == sql.ErrNoRows {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "User is not a member of this workspace"})
+		replyError(w, http.StatusBadRequest, "User is not a member of this workspace")
 		return
 	}
 	if err != nil {
 		h.logger.Error("check workspace membership", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -145,12 +145,12 @@ func (h *CrewHandler) AddMember(w http.ResponseWriter, r *http.Request) {
 		"SELECT id FROM crew_members WHERE crew_id = ? AND user_id = ?",
 		crewID, req.UserID).Scan(&existingMemberID)
 	if err == nil {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "User is already a member of this crew"})
+		replyError(w, http.StatusConflict, "User is already a member of this crew")
 		return
 	}
 	if err != sql.ErrNoRows {
 		h.logger.Error("check crew membership", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -162,7 +162,7 @@ func (h *CrewHandler) AddMember(w http.ResponseWriter, r *http.Request) {
 		memberID, crewID, req.UserID, now)
 	if err != nil {
 		h.logger.Error("insert crew member", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -179,7 +179,7 @@ func (h *CrewHandler) AddMember(w http.ResponseWriter, r *http.Request) {
 		&u.ID, &u.Email, &u.FullName, &u.AvatarURL)
 	if err != nil {
 		h.logger.Error("get crew member after insert", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	m.User = &u
@@ -194,16 +194,16 @@ func (h *CrewHandler) RemoveMember(w http.ResponseWriter, r *http.Request) {
 	memberID := r.PathValue("memberId")
 
 	if !canRole(role, "manage") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 
 	if crewID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "crewId is required"})
+		replyError(w, http.StatusBadRequest, "crewId is required")
 		return
 	}
 	if memberID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "memberId is required"})
+		replyError(w, http.StatusBadRequest, "memberId is required")
 		return
 	}
 
@@ -214,11 +214,11 @@ func (h *CrewHandler) RemoveMember(w http.ResponseWriter, r *http.Request) {
 		crewID, workspaceID).Scan(&existingID)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew not found"})
+			replyError(w, http.StatusNotFound, "Crew not found")
 			return
 		}
 		h.logger.Error("get crew for remove member", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -229,11 +229,11 @@ func (h *CrewHandler) RemoveMember(w http.ResponseWriter, r *http.Request) {
 		memberID, crewID).Scan(&existingMemberID)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew member not found"})
+			replyError(w, http.StatusNotFound, "Crew member not found")
 			return
 		}
 		h.logger.Error("get crew member for remove", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -242,7 +242,7 @@ func (h *CrewHandler) RemoveMember(w http.ResponseWriter, r *http.Request) {
 		memberID, crewID)
 	if err != nil {
 		h.logger.Error("delete crew member", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 

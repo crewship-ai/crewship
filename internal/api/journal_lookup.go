@@ -72,7 +72,7 @@ type journalLookupResponse struct {
 func (h *JournalLookupHandler) Get(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if workspaceID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "workspace required"})
+		replyError(w, http.StatusUnauthorized, "workspace required")
 		return
 	}
 
@@ -92,7 +92,7 @@ func (h *JournalLookupHandler) Get(w http.ResponseWriter, r *http.Request) {
 		LIMIT ?`, workspaceID, lookupCap)
 	if err != nil {
 		h.logger.Error("journal lookup: crews", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "lookup failed"})
+		replyError(w, http.StatusInternalServerError, "lookup failed")
 		return
 	}
 	for crewRows.Next() {
@@ -101,7 +101,7 @@ func (h *JournalLookupHandler) Get(w http.ResponseWriter, r *http.Request) {
 		if err := crewRows.Scan(&c.ID, &c.Name, &c.Slug, &icon, &color); err != nil {
 			_ = crewRows.Close()
 			h.logger.Error("journal lookup: scan crew", "err", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "lookup failed"})
+			replyError(w, http.StatusInternalServerError, "lookup failed")
 			return
 		}
 		if icon.Valid {
@@ -117,7 +117,7 @@ func (h *JournalLookupHandler) Get(w http.ResponseWriter, r *http.Request) {
 	if err := crewRows.Err(); err != nil {
 		_ = crewRows.Close()
 		h.logger.Error("journal lookup: crew rows", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "lookup failed"})
+		replyError(w, http.StatusInternalServerError, "lookup failed")
 		return
 	}
 	_ = crewRows.Close()
@@ -133,7 +133,7 @@ func (h *JournalLookupHandler) Get(w http.ResponseWriter, r *http.Request) {
 		LIMIT ?`, workspaceID, lookupCap)
 	if err != nil {
 		h.logger.Error("journal lookup: agents", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "lookup failed"})
+		replyError(w, http.StatusInternalServerError, "lookup failed")
 		return
 	}
 	for agentRows.Next() {
@@ -142,7 +142,7 @@ func (h *JournalLookupHandler) Get(w http.ResponseWriter, r *http.Request) {
 		if err := agentRows.Scan(&a.ID, &a.Name, &a.Slug, &crewID, &seed, &style); err != nil {
 			_ = agentRows.Close()
 			h.logger.Error("journal lookup: scan agent", "err", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "lookup failed"})
+			replyError(w, http.StatusInternalServerError, "lookup failed")
 			return
 		}
 		if crewID.Valid {
@@ -162,7 +162,7 @@ func (h *JournalLookupHandler) Get(w http.ResponseWriter, r *http.Request) {
 	if err := agentRows.Err(); err != nil {
 		_ = agentRows.Close()
 		h.logger.Error("journal lookup: agent rows", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "lookup failed"})
+		replyError(w, http.StatusInternalServerError, "lookup failed")
 		return
 	}
 	_ = agentRows.Close()
@@ -178,7 +178,7 @@ func (h *JournalLookupHandler) Get(w http.ResponseWriter, r *http.Request) {
 		LIMIT ?`, workspaceID, lookupCap)
 	if err != nil {
 		h.logger.Error("journal lookup: missions", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "lookup failed"})
+		replyError(w, http.StatusInternalServerError, "lookup failed")
 		return
 	}
 	for missionRows.Next() {
@@ -186,7 +186,7 @@ func (h *JournalLookupHandler) Get(w http.ResponseWriter, r *http.Request) {
 		if err := missionRows.Scan(&m.ID, &m.Title, &m.Status); err != nil {
 			_ = missionRows.Close()
 			h.logger.Error("journal lookup: scan mission", "err", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "lookup failed"})
+			replyError(w, http.StatusInternalServerError, "lookup failed")
 			return
 		}
 		resp.Missions = append(resp.Missions, m)
@@ -194,7 +194,7 @@ func (h *JournalLookupHandler) Get(w http.ResponseWriter, r *http.Request) {
 	if err := missionRows.Err(); err != nil {
 		_ = missionRows.Close()
 		h.logger.Error("journal lookup: mission rows", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "lookup failed"})
+		replyError(w, http.StatusInternalServerError, "lookup failed")
 		return
 	}
 	_ = missionRows.Close()

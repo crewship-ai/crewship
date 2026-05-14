@@ -65,7 +65,7 @@ func (r *Router) handleSidecarEmit(w http.ResponseWriter, req *http.Request) {
 
 	var body sidecarJournalEmitRequest
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		replyError(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
 
@@ -74,16 +74,16 @@ func (r *Router) handleSidecarEmit(w http.ResponseWriter, req *http.Request) {
 	// append-only stream with events we can't retract.
 	entryType := journal.EntryType(strings.TrimSpace(body.Type))
 	if _, ok := allowedSidecarEntryTypes[entryType]; !ok {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "entry type not allowed from sidecar"})
+		replyError(w, http.StatusBadRequest, "entry type not allowed from sidecar")
 		return
 	}
 
 	if strings.TrimSpace(body.WorkspaceID) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "workspace_id required"})
+		replyError(w, http.StatusBadRequest, "workspace_id required")
 		return
 	}
 	if strings.TrimSpace(body.Summary) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "summary required"})
+		replyError(w, http.StatusBadRequest, "summary required")
 		return
 	}
 
@@ -116,7 +116,7 @@ func (r *Router) handleSidecarEmit(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 		r.logger.Error("sidecar journal emit failed", "err", err, "type", entryType)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "emit failed"})
+		replyError(w, http.StatusInternalServerError, "emit failed")
 		return
 	}
 

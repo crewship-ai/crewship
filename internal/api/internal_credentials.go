@@ -35,7 +35,7 @@ func (h *InternalHandler) ListCredentials(w http.ResponseWriter, r *http.Request
 	rows, err := h.db.QueryContext(r.Context(), query, args...)
 	if err != nil {
 		h.logger.Error("internal list credentials", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	defer rows.Close()
@@ -61,7 +61,7 @@ func (h *InternalHandler) ListCredentials(w http.ResponseWriter, r *http.Request
 		if err := rows.Scan(&c.ID, &c.WorkspaceID, &c.Name, &c.Type, &c.Provider,
 			&encValue, &encRefresh, &c.TokenExpires, &c.AccountLabel, &accountEmail, &c.Status); err != nil {
 			h.logger.Error("scan internal credential", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 		decrypted, err := encryption.Decrypt(encValue)
@@ -82,7 +82,7 @@ func (h *InternalHandler) ListCredentials(w http.ResponseWriter, r *http.Request
 	}
 	if err := rows.Err(); err != nil {
 		h.logger.Error("rows iteration (internal credentials)", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	if result == nil {
@@ -105,7 +105,7 @@ func (h *InternalHandler) UpdateCredentialStatus(w http.ResponseWriter, r *http.
 		TokenExpires *string `json:"token_expires_at"`
 	}
 	if err := readJSON(r, &body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON body"})
+		replyError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
 
@@ -113,7 +113,7 @@ func (h *InternalHandler) UpdateCredentialStatus(w http.ResponseWriter, r *http.
 		"ACTIVE": true, "EXPIRED": true, "RATE_LIMITED": true, "REVOKED": true, "ERROR": true,
 	}
 	if !validStatuses[body.Status] {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid status"})
+		replyError(w, http.StatusBadRequest, "Invalid status")
 		return
 	}
 
@@ -129,7 +129,7 @@ func (h *InternalHandler) UpdateCredentialStatus(w http.ResponseWriter, r *http.
 
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	defer tx.Rollback()
@@ -138,24 +138,24 @@ func (h *InternalHandler) UpdateCredentialStatus(w http.ResponseWriter, r *http.
 		"UPDATE credentials SET status = ?, last_checked_at = ?, updated_at = ? WHERE "+where,
 		append([]any{body.Status, now, now}, whereArgs...)...)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	n, err := result.RowsAffected()
 	if err != nil {
 		h.logger.Error("update credential rows affected", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	if n == 0 {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Credential not found"})
+		replyError(w, http.StatusNotFound, "Credential not found")
 		return
 	}
 
 	if body.LastError != nil {
 		if _, err := tx.ExecContext(r.Context(), "UPDATE credentials SET last_error = ? WHERE "+where, append([]any{*body.LastError}, whereArgs...)...); err != nil {
 			h.logger.Error("update credential last_error", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 	}
@@ -163,12 +163,12 @@ func (h *InternalHandler) UpdateCredentialStatus(w http.ResponseWriter, r *http.
 		enc, err := encryption.Encrypt(*body.AccessToken)
 		if err != nil {
 			h.logger.Error("encrypt access token", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to encrypt token"})
+			replyError(w, http.StatusInternalServerError, "Failed to encrypt token")
 			return
 		}
 		if _, err := tx.ExecContext(r.Context(), "UPDATE credentials SET encrypted_value = ? WHERE "+where, append([]any{enc}, whereArgs...)...); err != nil {
 			h.logger.Error("update credential access token", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 	}
@@ -176,25 +176,25 @@ func (h *InternalHandler) UpdateCredentialStatus(w http.ResponseWriter, r *http.
 		enc, err := encryption.Encrypt(*body.RefreshToken)
 		if err != nil {
 			h.logger.Error("encrypt refresh token", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to encrypt token"})
+			replyError(w, http.StatusInternalServerError, "Failed to encrypt token")
 			return
 		}
 		if _, err := tx.ExecContext(r.Context(), "UPDATE credentials SET encrypted_refresh_token = ? WHERE "+where, append([]any{enc}, whereArgs...)...); err != nil {
 			h.logger.Error("update credential refresh token", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 	}
 	if body.TokenExpires != nil {
 		if _, err := tx.ExecContext(r.Context(), "UPDATE credentials SET token_expires_at = ? WHERE "+where, append([]any{*body.TokenExpires}, whereArgs...)...); err != nil {
 			h.logger.Error("update credential token_expires_at", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 	}
 
 	if err := tx.Commit(); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -209,15 +209,15 @@ func (h *InternalHandler) GetWebhookSecret(w http.ResponseWriter, r *http.Reques
 	err := h.db.QueryRowContext(r.Context(), "SELECT webhook_secret FROM agents WHERE id = ?", agentID).Scan(&secret)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+			replyError(w, http.StatusNotFound, "Agent not found")
 			return
 		}
 		h.logger.Error("webhook secret lookup", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	if !secret.Valid || secret.String == "" {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Webhook secret not configured for agent"})
+		replyError(w, http.StatusNotFound, "Webhook secret not configured for agent")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"webhook_secret": secret.String})

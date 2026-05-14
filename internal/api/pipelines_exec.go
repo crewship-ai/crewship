@@ -52,19 +52,19 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 
 	p, err := h.store.GetBySlug(r.Context(), workspaceID, slug)
 	if errors.Is(err, pipeline.ErrNotFound) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "pipeline not found"})
+		replyError(w, http.StatusNotFound, "pipeline not found")
 		return
 	}
 	if err != nil {
 		h.logger.Error("pipeline run: load", "error", err, "slug", slug)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "load pipeline"})
+		replyError(w, http.StatusInternalServerError, "load pipeline")
 		return
 	}
 
 	var body runRequestBody
 	if r.ContentLength > 0 {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+			replyError(w, http.StatusBadRequest, "invalid request body")
 			return
 		}
 	}
@@ -152,18 +152,18 @@ func (h *PipelineHandler) DryRun(w http.ResponseWriter, r *http.Request) {
 	slug := r.PathValue("slug")
 	p, err := h.store.GetBySlug(r.Context(), workspaceID, slug)
 	if errors.Is(err, pipeline.ErrNotFound) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "pipeline not found"})
+		replyError(w, http.StatusNotFound, "pipeline not found")
 		return
 	}
 	if err != nil {
 		h.logger.Error("pipeline dry_run: load", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "load pipeline"})
+		replyError(w, http.StatusInternalServerError, "load pipeline")
 		return
 	}
 	var body runRequestBody
 	if r.ContentLength > 0 {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+			replyError(w, http.StatusBadRequest, "invalid request body")
 			return
 		}
 	}
@@ -198,7 +198,7 @@ func (h *PipelineHandler) DryRun(w http.ResponseWriter, r *http.Request) {
 func (h *PipelineHandler) TestRun(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if h.runner == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "pipeline runner not wired"})
+		replyError(w, http.StatusServiceUnavailable, "pipeline runner not wired")
 		return
 	}
 
@@ -208,15 +208,15 @@ func (h *PipelineHandler) TestRun(w http.ResponseWriter, r *http.Request) {
 		SampleInputs map[string]any  `json:"sample_inputs"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		replyError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 	if len(body.Definition) == 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "definition required"})
+		replyError(w, http.StatusBadRequest, "definition required")
 		return
 	}
 	if body.AuthorCrewID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "author_crew_id required"})
+		replyError(w, http.StatusBadRequest, "author_crew_id required")
 		return
 	}
 
@@ -297,12 +297,12 @@ func (h *PipelineHandler) ListRunRecords(w http.ResponseWriter, r *http.Request)
 	}
 	p, err := h.store.GetBySlug(r.Context(), workspaceID, slug)
 	if errors.Is(err, pipeline.ErrNotFound) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "pipeline not found"})
+		replyError(w, http.StatusNotFound, "pipeline not found")
 		return
 	}
 	if err != nil {
 		h.logger.Error("pipeline list run-records: load", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "load pipeline"})
+		replyError(w, http.StatusInternalServerError, "load pipeline")
 		return
 	}
 	limit := 50
@@ -315,7 +315,7 @@ func (h *PipelineHandler) ListRunRecords(w http.ResponseWriter, r *http.Request)
 	records, err := h.runStore.ListByPipeline(r.Context(), p.ID, statusFilter, limit)
 	if err != nil {
 		h.logger.Error("pipeline list run-records: query", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "list run records"})
+		replyError(w, http.StatusInternalServerError, "list run records")
 		return
 	}
 	// Stable wire shape — explicit DTO so internal renames don't
@@ -384,12 +384,12 @@ func (h *PipelineHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
 	slug := r.PathValue("slug")
 	p, err := h.store.GetBySlug(r.Context(), workspaceID, slug)
 	if errors.Is(err, pipeline.ErrNotFound) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "pipeline not found"})
+		replyError(w, http.StatusNotFound, "pipeline not found")
 		return
 	}
 	if err != nil {
 		h.logger.Error("pipeline list runs: load", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "load pipeline"})
+		replyError(w, http.StatusInternalServerError, "load pipeline")
 		return
 	}
 	limit := 50
@@ -429,7 +429,7 @@ ORDER BY ts DESC
 LIMIT ?`, workspaceID, entryFilter, p.ID, limit)
 	if err != nil {
 		h.logger.Error("pipeline list runs: query", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "list runs"})
+		replyError(w, http.StatusInternalServerError, "list runs")
 		return
 	}
 	defer rows.Close()
@@ -486,12 +486,12 @@ LIMIT ?`, workspaceID, entryFilter, p.ID, limit)
 // is parked on WaitFor(token); this call wakes it.
 func (h *PipelineHandler) ApproveWaitpoint(w http.ResponseWriter, r *http.Request) {
 	if h.waitpoints == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "waitpoint store not wired"})
+		replyError(w, http.StatusServiceUnavailable, "waitpoint store not wired")
 		return
 	}
 	token := r.PathValue("token")
 	if token == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "token required"})
+		replyError(w, http.StatusBadRequest, "token required")
 		return
 	}
 	var body struct {
@@ -500,7 +500,7 @@ func (h *PipelineHandler) ApproveWaitpoint(w http.ResponseWriter, r *http.Reques
 	}
 	if r.ContentLength > 0 {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+			replyError(w, http.StatusBadRequest, "invalid request body")
 			return
 		}
 	}
@@ -514,7 +514,7 @@ func (h *PipelineHandler) ApproveWaitpoint(w http.ResponseWriter, r *http.Reques
 	}
 	wp, ok := h.waitpoints.(approver)
 	if !ok {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "waitpoint store does not support completion"})
+		replyError(w, http.StatusServiceUnavailable, "waitpoint store does not support completion")
 		return
 	}
 	// Decider identity from the JWT user context — same path the
@@ -554,7 +554,7 @@ ORDER BY created_at DESC
 LIMIT 200`, workspaceID)
 	if err != nil {
 		h.logger.Error("waitpoints list", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "list waitpoints"})
+		replyError(w, http.StatusInternalServerError, "list waitpoints")
 		return
 	}
 	defer rows.Close()

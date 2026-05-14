@@ -12,12 +12,12 @@ func (h *CrewHandler) ApplyAvatarStyle(w http.ResponseWriter, r *http.Request) {
 	crewID := r.PathValue("crewId")
 
 	if !canRole(role, "manage") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 
 	if crewID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "crewId is required"})
+		replyError(w, http.StatusBadRequest, "crewId is required")
 		return
 	}
 
@@ -26,11 +26,11 @@ func (h *CrewHandler) ApplyAvatarStyle(w http.ResponseWriter, r *http.Request) {
 		"SELECT id FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
 		crewID, workspaceID).Scan(&existingID); err != nil {
 		if err == sql.ErrNoRows {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew not found"})
+			replyError(w, http.StatusNotFound, "Crew not found")
 			return
 		}
 		h.logger.Error("apply avatar style: lookup crew", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -39,12 +39,12 @@ func (h *CrewHandler) ApplyAvatarStyle(w http.ResponseWriter, r *http.Request) {
 		ResetOverrides bool   `json:"reset_overrides"`
 	}
 	if err := readJSON(r, &body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON body"})
+		replyError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
 
 	if !body.ResetOverrides && body.AvatarStyle == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "avatar_style is required"})
+		replyError(w, http.StatusBadRequest, "avatar_style is required")
 		return
 	}
 
@@ -63,7 +63,7 @@ func (h *CrewHandler) ApplyAvatarStyle(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		h.logger.Error("apply avatar style to agents", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 

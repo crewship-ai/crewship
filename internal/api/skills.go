@@ -152,7 +152,7 @@ func (h *SkillHandler) List(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.db.QueryContext(r.Context(), query, args...)
 	if err != nil {
 		h.logger.Error("list skills", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	defer rows.Close()
@@ -169,7 +169,7 @@ func (h *SkillHandler) List(w http.ResponseWriter, r *http.Request) {
 			&s.Runtime, &s.Maturity, &s.ScanStatus, &s.DescriptionQuality,
 			&s.CreatedAt, &s.UpdatedAt); err != nil {
 			h.logger.Error("scan skill", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 		s.Featured = featured == 1
@@ -181,7 +181,7 @@ func (h *SkillHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := rows.Err(); err != nil {
 		h.logger.Error("rows iteration (skills)", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -310,7 +310,7 @@ func (h *SkillHandler) Get(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.logger.Error("get skill", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	s.Featured = featured == 1

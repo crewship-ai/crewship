@@ -43,7 +43,7 @@ func (h *PipelineHandler) List(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.store.List(r.Context(), f)
 	if err != nil {
 		h.logger.Error("pipeline list", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "list pipelines"})
+		replyError(w, http.StatusInternalServerError, "list pipelines")
 		return
 	}
 	out := make([]pipelineResponse, 0, len(rows))
@@ -70,12 +70,12 @@ func (h *PipelineHandler) Get(w http.ResponseWriter, r *http.Request) {
 	slug := r.PathValue("slug")
 	p, err := h.store.GetBySlug(r.Context(), workspaceID, slug)
 	if errors.Is(err, pipeline.ErrNotFound) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "pipeline not found"})
+		replyError(w, http.StatusNotFound, "pipeline not found")
 		return
 	}
 	if err != nil {
 		h.logger.Error("pipeline get", "error", err, "slug", slug)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "load pipeline"})
+		replyError(w, http.StatusInternalServerError, "load pipeline")
 		return
 	}
 	writeJSON(w, http.StatusOK, toPipelineResponse(p, true))
@@ -88,17 +88,17 @@ func (h *PipelineHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	slug := r.PathValue("slug")
 	p, err := h.store.GetBySlug(r.Context(), workspaceID, slug)
 	if errors.Is(err, pipeline.ErrNotFound) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "pipeline not found"})
+		replyError(w, http.StatusNotFound, "pipeline not found")
 		return
 	}
 	if err != nil {
 		h.logger.Error("pipeline delete: lookup", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "load pipeline"})
+		replyError(w, http.StatusInternalServerError, "load pipeline")
 		return
 	}
 	if err := h.store.SoftDelete(r.Context(), p.ID); err != nil {
 		h.logger.Error("pipeline delete", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "delete pipeline"})
+		replyError(w, http.StatusInternalServerError, "delete pipeline")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -130,11 +130,11 @@ func (h *PipelineHandler) ExportPipeline(w http.ResponseWriter, r *http.Request)
 	slug := r.PathValue("slug")
 	p, err := h.store.GetBySlug(r.Context(), workspaceID, slug)
 	if errors.Is(err, pipeline.ErrNotFound) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "pipeline not found"})
+		replyError(w, http.StatusNotFound, "pipeline not found")
 		return
 	}
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "load pipeline"})
+		replyError(w, http.StatusInternalServerError, "load pipeline")
 		return
 	}
 	includeHistory := r.URL.Query().Get("include_history") == "1"
@@ -207,7 +207,7 @@ func (h *PipelineHandler) ImportPipeline(w http.ResponseWriter, r *http.Request)
 		AuthorCrewID string `json:"author_crew_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&bundle); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid bundle"})
+		replyError(w, http.StatusBadRequest, "invalid bundle")
 		return
 	}
 	if bundle.Format != "crewship-pipeline-bundle/v1" {
@@ -218,11 +218,11 @@ func (h *PipelineHandler) ImportPipeline(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if bundle.Pipeline.Name == "" || len(bundle.Pipeline.Definition) == 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bundle missing pipeline.name or pipeline.definition"})
+		replyError(w, http.StatusBadRequest, "bundle missing pipeline.name or pipeline.definition")
 		return
 	}
 	if bundle.AuthorCrewID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "author_crew_id required (the crew that will own this imported pipeline)"})
+		replyError(w, http.StatusBadRequest, "author_crew_id required (the crew that will own this imported pipeline)")
 		return
 	}
 	// Run validation at import — we don't want a malformed bundle
@@ -277,7 +277,7 @@ func (h *PipelineHandler) ImportPipeline(w http.ResponseWriter, r *http.Request)
 	}
 	saved, err := h.store.Save(r.Context(), in)
 	if errors.Is(err, pipeline.ErrSlugConflict) {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "slug already exists in workspace"})
+		replyError(w, http.StatusConflict, "slug already exists in workspace")
 		return
 	}
 	if err != nil {
@@ -295,12 +295,12 @@ func (h *PipelineHandler) ListVersions(w http.ResponseWriter, r *http.Request) {
 	slug := r.PathValue("slug")
 	p, err := h.store.GetBySlug(r.Context(), workspaceID, slug)
 	if errors.Is(err, pipeline.ErrNotFound) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "pipeline not found"})
+		replyError(w, http.StatusNotFound, "pipeline not found")
 		return
 	}
 	if err != nil {
 		h.logger.Error("pipeline list versions: load", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "load pipeline"})
+		replyError(w, http.StatusInternalServerError, "load pipeline")
 		return
 	}
 	limit := 100
@@ -312,7 +312,7 @@ func (h *PipelineHandler) ListVersions(w http.ResponseWriter, r *http.Request) {
 	versions, err := h.store.ListVersions(r.Context(), p.ID, limit)
 	if err != nil {
 		h.logger.Error("pipeline list versions: query", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "list versions"})
+		replyError(w, http.StatusInternalServerError, "list versions")
 		return
 	}
 	type versionRow struct {
@@ -347,21 +347,21 @@ func (h *PipelineHandler) GetVersion(w http.ResponseWriter, r *http.Request) {
 	versionStr := r.PathValue("n")
 	versionNum, perr := parseSmallInt(versionStr)
 	if perr != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "version must be a positive integer"})
+		replyError(w, http.StatusBadRequest, "version must be a positive integer")
 		return
 	}
 	p, err := h.store.GetBySlug(r.Context(), workspaceID, slug)
 	if errors.Is(err, pipeline.ErrNotFound) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "pipeline not found"})
+		replyError(w, http.StatusNotFound, "pipeline not found")
 		return
 	}
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "load pipeline"})
+		replyError(w, http.StatusInternalServerError, "load pipeline")
 		return
 	}
 	v, err := h.store.GetVersion(r.Context(), p.ID, versionNum)
 	if errors.Is(err, pipeline.ErrNotFound) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "version not found"})
+		replyError(w, http.StatusNotFound, "version not found")
 		return
 	}
 	if err != nil {
@@ -391,25 +391,25 @@ func (h *PipelineHandler) Rollback(w http.ResponseWriter, r *http.Request) {
 		Version int `json:"version"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		replyError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 	if body.Version < 1 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "version must be >= 1"})
+		replyError(w, http.StatusBadRequest, "version must be >= 1")
 		return
 	}
 	p, err := h.store.GetBySlug(r.Context(), workspaceID, slug)
 	if errors.Is(err, pipeline.ErrNotFound) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "pipeline not found"})
+		replyError(w, http.StatusNotFound, "pipeline not found")
 		return
 	}
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "load pipeline"})
+		replyError(w, http.StatusInternalServerError, "load pipeline")
 		return
 	}
 	rolled, err := h.store.Rollback(r.Context(), p.ID, body.Version)
 	if errors.Is(err, pipeline.ErrNotFound) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "version not found"})
+		replyError(w, http.StatusNotFound, "version not found")
 		return
 	}
 	if err != nil {
@@ -477,21 +477,21 @@ func (h *PipelineHandler) Save(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
 	role := RoleFromContext(r.Context())
 	if user == nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "auth required"})
+		replyError(w, http.StatusUnauthorized, "auth required")
 		return
 	}
 	if !canRole(role, "create") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "MANAGER+ role required to save routines"})
+		replyError(w, http.StatusForbidden, "MANAGER+ role required to save routines")
 		return
 	}
 
 	var body userSaveRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		replyError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 	if body.Slug == "" || len(body.Definition) == 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "slug + definition required"})
+		replyError(w, http.StatusBadRequest, "slug + definition required")
 		return
 	}
 	if body.SkipTestGate && role != "OWNER" && role != "ADMIN" {
@@ -589,7 +589,7 @@ func (h *PipelineHandler) Save(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if errors.Is(err, pipeline.ErrSlugConflict) {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "slug already exists in workspace"})
+		replyError(w, http.StatusConflict, "slug already exists in workspace")
 		return
 	}
 	if err != nil {
@@ -608,11 +608,11 @@ func (h *PipelineHandler) Save(w http.ResponseWriter, r *http.Request) {
 func (h *PipelineHandler) InternalSave(w http.ResponseWriter, r *http.Request) {
 	var body internalSaveRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		replyError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 	if body.WorkspaceID == "" || body.Slug == "" || len(body.Definition) == 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "workspace_id, slug, definition required"})
+		replyError(w, http.StatusBadRequest, "workspace_id, slug, definition required")
 		return
 	}
 
@@ -685,7 +685,7 @@ func (h *PipelineHandler) InternalSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if errors.Is(err, pipeline.ErrSlugConflict) {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "slug already exists in workspace"})
+		replyError(w, http.StatusConflict, "slug already exists in workspace")
 		return
 	}
 	if err != nil {

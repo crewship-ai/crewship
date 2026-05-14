@@ -149,7 +149,7 @@ func (h *QueryHandler) Standup(w http.ResponseWriter, r *http.Request) {
 		crewID = r.URL.Query().Get("crew_id")
 	}
 	if crewID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "crew_id required"})
+		replyError(w, http.StatusBadRequest, "crew_id required")
 		return
 	}
 
@@ -159,11 +159,11 @@ func (h *QueryHandler) Standup(w http.ResponseWriter, r *http.Request) {
 		found, err := crewExists(r.Context(), h.db, crewID, wsID)
 		if err != nil {
 			h.logger.Error("standup workspace validation", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 		if !found {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "crew not found in workspace"})
+			replyError(w, http.StatusNotFound, "crew not found in workspace")
 			return
 		}
 	}
@@ -172,7 +172,7 @@ func (h *QueryHandler) Standup(w http.ResponseWriter, r *http.Request) {
 	if since == "" {
 		since = time.Now().Add(-24 * time.Hour).UTC().Format(time.RFC3339)
 	} else if t, err := time.Parse(time.RFC3339, since); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "since must be a valid RFC3339 timestamp"})
+		replyError(w, http.StatusBadRequest, "since must be a valid RFC3339 timestamp")
 		return
 	} else {
 		since = t.UTC().Format(time.RFC3339)
@@ -182,7 +182,7 @@ func (h *QueryHandler) Standup(w http.ResponseWriter, r *http.Request) {
 	convs, err := h.fetchStandupConversations(r.Context(), crewID, since)
 	if err != nil {
 		h.logger.Error("standup query conversations", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 

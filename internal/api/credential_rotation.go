@@ -80,21 +80,21 @@ func (h *CredentialHandler) Rotate(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	user := UserFromContext(r.Context())
 	if !canRole(role, "manage") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 	if user == nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
+		replyError(w, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
 
 	var req credentialRotateRequest
 	if err := readJSON(r, &req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON body"})
+		replyError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
 	if strings.TrimSpace(req.Value) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "value required"})
+		replyError(w, http.StatusBadRequest, "value required")
 		return
 	}
 
@@ -120,18 +120,18 @@ func (h *CredentialHandler) Rotate(w http.ResponseWriter, r *http.Request) {
 		credID, workspaceID).Scan(&oldEncrypted)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Credential not found"})
+			replyError(w, http.StatusNotFound, "Credential not found")
 			return
 		}
 		h.logger.Error("read credential for rotate", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
 	newEncrypted, err := encryption.Encrypt(req.Value)
 	if err != nil {
 		h.logger.Error("encrypt rotated value", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to encrypt credential"})
+		replyError(w, http.StatusInternalServerError, "Failed to encrypt credential")
 		return
 	}
 
@@ -142,7 +142,7 @@ func (h *CredentialHandler) Rotate(w http.ResponseWriter, r *http.Request) {
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
 		h.logger.Error("begin rotate tx", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	defer func() {
@@ -157,7 +157,7 @@ func (h *CredentialHandler) Rotate(w http.ResponseWriter, r *http.Request) {
 		VALUES (?, ?, ?, ?, ?, ?, ?, 'ACTIVE')`,
 		rotationID, credID, oldEncrypted, graceSec, nowStr, expiresAt, user.ID); err != nil {
 		h.logger.Error("insert rotation row", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -167,13 +167,13 @@ func (h *CredentialHandler) Rotate(w http.ResponseWriter, r *http.Request) {
 		WHERE id = ?`,
 		newEncrypted, nowStr, credID); err != nil {
 		h.logger.Error("update credential value", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
 	if err := tx.Commit(); err != nil {
 		h.logger.Error("commit rotate tx", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -215,11 +215,11 @@ func (h *CredentialHandler) ListRotations(w http.ResponseWriter, r *http.Request
 		SELECT id FROM credentials WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
 		credID, workspaceID).Scan(&exists); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Credential not found"})
+			replyError(w, http.StatusNotFound, "Credential not found")
 			return
 		}
 		h.logger.Error("rotations: check credential exists", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -231,7 +231,7 @@ func (h *CredentialHandler) ListRotations(w http.ResponseWriter, r *http.Request
 		ORDER BY rotated_at DESC`, credID)
 	if err != nil {
 		h.logger.Error("list rotations", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	defer rows.Close()
@@ -260,7 +260,7 @@ func (h *CredentialHandler) CancelRotation(w http.ResponseWriter, r *http.Reques
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "manage") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 
@@ -275,11 +275,11 @@ func (h *CredentialHandler) CancelRotation(w http.ResponseWriter, r *http.Reques
 		rotationID, workspaceID).Scan(&status)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Rotation not found"})
+			replyError(w, http.StatusNotFound, "Rotation not found")
 			return
 		}
 		h.logger.Error("read rotation status", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -295,7 +295,7 @@ func (h *CredentialHandler) CancelRotation(w http.ResponseWriter, r *http.Reques
 		SET status = 'CANCELLED', old_value = ''
 		WHERE id = ? AND status = 'ACTIVE'`, rotationID); err != nil {
 		h.logger.Error("cancel rotation", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 

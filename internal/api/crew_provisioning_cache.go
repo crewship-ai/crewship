@@ -79,7 +79,7 @@ func (h *ProvisioningHandler) referencedCacheImages(ctx context.Context) (map[st
 func (h *ProvisioningHandler) CacheList(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "read") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 	if h.docker == nil {
@@ -99,7 +99,7 @@ func (h *ProvisioningHandler) CacheList(w http.ResponseWriter, r *http.Request) 
 		workspaceID)
 	if err != nil {
 		h.logger.Error("query referenced cache images", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	defer refRows.Close()
@@ -108,7 +108,7 @@ func (h *ProvisioningHandler) CacheList(w http.ResponseWriter, r *http.Request) 
 		var tag, slug string
 		if err := refRows.Scan(&tag, &slug); err != nil {
 			h.logger.Error("scan referenced cache image", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 		refs[tag] = append(refs[tag], slug)
@@ -117,7 +117,7 @@ func (h *ProvisioningHandler) CacheList(w http.ResponseWriter, r *http.Request) 
 	imgs, err := h.listLocalImagesCached(r.Context())
 	if err != nil {
 		h.logger.Error("docker image list", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	out := make([]CacheImageInfo, 0)
@@ -173,7 +173,7 @@ func (h *ProvisioningHandler) invalidateImageListCache() {
 func (h *ProvisioningHandler) CacheDelete(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "delete") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 	if h.docker == nil {
@@ -185,7 +185,7 @@ func (h *ProvisioningHandler) CacheDelete(w http.ResponseWriter, r *http.Request
 
 	tag := r.PathValue("tag")
 	if tag == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "tag is required"})
+		replyError(w, http.StatusBadRequest, "tag is required")
 		return
 	}
 	// Hard-enforce the crewship-cache namespace — we never delete an
@@ -203,7 +203,7 @@ func (h *ProvisioningHandler) CacheDelete(w http.ResponseWriter, r *http.Request
 		refs, err := h.referencedCacheImages(r.Context())
 		if err != nil {
 			h.logger.Error("query referenced cache images", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 		if crews, ok := refs[tag]; ok && len(crews) > 0 {
