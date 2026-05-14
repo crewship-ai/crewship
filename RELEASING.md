@@ -195,10 +195,31 @@ production data and a bad one is hard to undo. Guardrails:
 
 ## Telemetry (crash reporting) — Sentry setup
 
-Crewship ships with opt-in Sentry-backed crash reporting wired through
-`internal/crashreport`. The binary is a no-op until BOTH a DSN is baked
-in via `-X .../crashreport.DSN=...` AND the operator's `telemetry_opt_in`
-row in `app_settings` is `"1"`.
+Crewship ships with Sentry-backed crash reporting wired through
+`internal/crashreport`. For the **v0.1 beta only** the default is
+**enabled** (opt-out): on first `crewship start`, if no consent setting
+exists, `crashreport.Init` writes `"1"` to `app_settings` and starts
+the Sentry client. The operator can disable any time with
+`crewship telemetry off`; the off-state is sticky and Init will not
+flip it back.
+
+The opt-out stance is a deliberate beta choice — a solo maintainer
+needs the crash signal — and is intended to revert to opt-in for
+v1.0 GA. Tracking: the project memory `telemetry-beta-default-on`
+documents the revert plan.
+
+### Routing override
+
+Operators who want to route crash data to their own Sentry (or a
+self-hosted instance) set the `CREWSHIP_SENTRY_DSN` env var:
+
+```bash
+CREWSHIP_SENTRY_DSN=https://<key>@<org>.ingest.sentry.io/<project> crewship start
+```
+
+`crashreport.ResolveDSN()` prefers the env value over the ldflag-baked
+default. `crewship telemetry status` shows the resolved endpoint host
++ which source the DSN came from. Empty/unset env = vendor default.
 
 ### One-time project setup
 

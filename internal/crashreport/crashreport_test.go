@@ -182,9 +182,11 @@ func TestInit_NoDSN(t *testing.T) {
 	}
 }
 
-// TestInit_OptedOut confirms the consent gate: backend.Init must not run
-// when the operator has not opted in, regardless of DSN presence.
-func TestInit_OptedOut(t *testing.T) {
+// TestInit_BetaDefaultOn locks in the v0.1 beta opt-out semantic: when the
+// operator has never written a consent setting AND a DSN is wired in, Init
+// must enable telemetry AND persist "1" so subsequent boots are deterministic.
+// Flip this test alongside Init() when reverting to opt-in for v1.0 GA.
+func TestInit_BetaDefaultOn(t *testing.T) {
 	resetState(t)
 	db := setupDB(t)
 	fake := &fakeBackend{}
@@ -195,14 +197,75 @@ func TestInit_OptedOut(t *testing.T) {
 	DSN = "https://fake@sentry.example/1"
 	t.Cleanup(func() { DSN = prev })
 
+	// No SetOptIn call — simulate first boot.
+	if err := Init(context.Background(), db.DB, "v0.1.0", logger); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if !IsEnabled() {
+		t.Error("beta default: telemetry must be enabled without prior consent setting")
+	}
+	if !fake.inited {
+		t.Error("beta default: backend.Init should run on first boot")
+	}
+
+	// The "asked" flag must now be persisted so we don't keep treating
+	// every subsequent boot as a fresh default decision.
+	_, asked, _, err := Status(context.Background(), db.DB)
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if !asked {
+		t.Error("Init should have persisted consent setting after default-on decision")
+	}
+}
+
+// TestInit_StickyOptOut guards the higher-priority invariant: if the
+// operator ever writes "0" (explicit opt-out), Init must NOT flip it back
+// to enabled on the next boot, regardless of the beta default. This is
+// what makes `crewship telemetry off` reliable.
+func TestInit_StickyOptOut(t *testing.T) {
+	resetState(t)
+	db := setupDB(t)
+	fake := &fakeBackend{}
+	SetBackend(fake)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	prev := DSN
+	DSN = "https://fake@sentry.example/1"
+	t.Cleanup(func() { DSN = prev })
+
+	// Operator runs `crewship telemetry off`.
+	if _, _, err := SetOptIn(context.Background(), db.DB, false); err != nil {
+		t.Fatalf("SetOptIn(false): %v", err)
+	}
 	if err := Init(context.Background(), db.DB, "v0.1.0", logger); err != nil {
 		t.Fatalf("Init: %v", err)
 	}
 	if IsEnabled() {
-		t.Error("crashreport must stay disabled when consent absent")
+		t.Error("explicit opt-out must stick across Init — beta default cannot override")
 	}
 	if fake.inited {
-		t.Error("backend.Init must not run without consent")
+		t.Error("backend.Init must not run after explicit opt-out")
+	}
+}
+
+// TestResolveDSN_EnvOverride locks in the CREWSHIP_SENTRY_DSN escape
+// hatch: self-hosted operators who want to route crashes to their OWN
+// Sentry (or a self-hosted instance) set the env var, and it takes
+// priority over the ldflag-baked vendor DSN.
+func TestResolveDSN_EnvOverride(t *testing.T) {
+	prev := DSN
+	DSN = "https://vendor@sentry.example/1"
+	t.Cleanup(func() { DSN = prev })
+
+	t.Setenv("CREWSHIP_SENTRY_DSN", "")
+	if got := ResolveDSN(); got != "https://vendor@sentry.example/1" {
+		t.Errorf("empty env should yield vendor DSN, got %q", got)
+	}
+
+	t.Setenv("CREWSHIP_SENTRY_DSN", "https://operator@self.example/9")
+	if got := ResolveDSN(); got != "https://operator@self.example/9" {
+		t.Errorf("env var should override, got %q", got)
 	}
 }
 

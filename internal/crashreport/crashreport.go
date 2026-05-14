@@ -25,6 +25,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"log/slog"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -36,7 +37,26 @@ import (
 //
 // Goreleaser pipes the value from the SENTRY_DSN GitHub Actions secret. Local
 // builds leave it empty, which short-circuits Init() into no-op mode.
+//
+// Operators who want crash data routed to their OWN Sentry (or a self-hosted
+// instance) can override by setting the CREWSHIP_SENTRY_DSN env var — see
+// ResolveDSN(). Useful for enterprise self-hosters, regulated environments
+// that can't share telemetry with the vendor, or anyone who'd rather pay
+// their own Sentry quota.
 var DSN = ""
+
+// ResolveDSN returns the DSN that will actually be used at runtime:
+//   - CREWSHIP_SENTRY_DSN env var if set (operator override)
+//   - otherwise the ldflag-baked DSN (vendor default)
+//   - empty if neither is set (telemetry stays off regardless of consent)
+//
+// Pure function; safe to call from CLI sub-commands that haven't run Init.
+func ResolveDSN() string {
+	if env := os.Getenv("CREWSHIP_SENTRY_DSN"); env != "" {
+		return env
+	}
+	return DSN
+}
 
 // SettingOptIn is the app_settings key that stores the operator's
 // telemetry consent. Values: "1" = opted in, "0" = opted out, absent = not
@@ -101,17 +121,40 @@ func SetBackend(b Backend) {
 	backend = b
 }
 
-// Init reads the consent state from the DB, generates an install ID on
-// first opt-in, and primes the configured backend. Returns nil on success
-// or on a "telemetry is off" decision — only DB errors are returned.
+// Init reads the consent state from the DB, generates an install ID,
+// and primes the configured backend.
+//
+// Default behaviour for v0.1 beta is OPT-OUT: if no consent setting
+// exists yet (i.e. the operator has never run `crewship telemetry
+// on/off`), telemetry is treated as ENABLED. The first start writes
+// "1" to settle the setting. The operator can disable any time with
+// `crewship telemetry off`. This default-on stance is documented in
+// the README + RELEASING and is intended to be reverted to opt-in
+// when v1.0 GA ships.
+//
+// An explicit "0" in app_settings (the operator opted out) wins over
+// the default; opt-out is sticky.
 //
 // Safe to call multiple times; each call refreshes state, which matters
 // after `crewship telemetry on/off` flips the setting at runtime.
 func Init(ctx context.Context, db *sql.DB, version string, logger *slog.Logger) error {
-	enabled, err := optInEnabled(ctx, db)
+	enabled, asked, err := consentState(ctx, db)
 	if err != nil {
 		return err
 	}
+
+	// Beta default: if the operator has never been asked, treat as opted
+	// in and persist that decision so subsequent boots are deterministic.
+	// This lives in Init (not in some `defaultOptIn()` helper) on purpose:
+	// when the default flips back to opt-in for v1.0 we delete the block,
+	// not chase it through three packages.
+	if !asked {
+		if _, _, err := SetOptIn(ctx, db, true); err != nil {
+			return err
+		}
+		enabled = true
+	}
+
 	if !enabled {
 		state.store(&State{enabled: false, version: version, logger: logger})
 		return nil
@@ -122,24 +165,61 @@ func Init(ctx context.Context, db *sql.DB, version string, logger *slog.Logger) 
 		return err
 	}
 
-	if DSN == "" {
-		// Opt-in is on but no DSN was baked in. Log once and stay quiet —
-		// this is the expected state for unsigned local builds.
-		logger.Info("crashreport: opt-in is on but no DSN compiled in; staying off")
+	resolvedDSN := ResolveDSN()
+	if resolvedDSN == "" {
+		// Consent is on but no DSN is wired in. Expected for local builds
+		// and for operators who haven't set CREWSHIP_SENTRY_DSN.
+		logger.Info("crashreport: enabled by consent but no DSN compiled in or set; staying off")
 		state.store(&State{enabled: false, installID: installID, version: version, logger: logger})
 		return nil
 	}
 
-	if err := backend.Init(DSN, installID, version); err != nil {
+	if err := backend.Init(resolvedDSN, installID, version); err != nil {
 		// A backend failure is not fatal — the binary must still boot.
 		logger.Warn("crashreport backend init failed; continuing without telemetry", "error", err)
 		state.store(&State{enabled: false, installID: installID, version: version, logger: logger})
 		return nil
 	}
 
-	logger.Info("crashreport enabled", "install_id_prefix", installID[:8], "version", version)
+	logger.Info("crashreport enabled",
+		"install_id_prefix", installID[:8],
+		"version", version,
+		"endpoint", dsnEndpoint(resolvedDSN),
+	)
 	state.store(&State{enabled: true, installID: installID, version: version, logger: logger})
 	return nil
+}
+
+// consentState returns the current opt-in state plus an "asked" flag
+// indicating whether the setting has been written at least once. Used
+// by Init to gate the beta default-on behaviour.
+func consentState(ctx context.Context, db *sql.DB) (enabled, asked bool, err error) {
+	val, found, err := readSetting(ctx, db, SettingOptIn)
+	if err != nil {
+		return false, false, err
+	}
+	if !found {
+		return false, false, nil
+	}
+	return val == "1", true, nil
+}
+
+// dsnEndpoint extracts the host portion of a Sentry DSN for logging,
+// so the operator can see WHERE telemetry routes without dumping the
+// full secret-shaped URL into stdout. Returns "unknown" on a malformed
+// DSN rather than failing — logging is best-effort.
+func dsnEndpoint(dsn string) string {
+	// Sentry DSN shape: https://<key>@<host>/<project_id>
+	at := strings.Index(dsn, "@")
+	if at < 0 {
+		return "unknown"
+	}
+	rest := dsn[at+1:]
+	slash := strings.Index(rest, "/")
+	if slash < 0 {
+		return rest
+	}
+	return rest[:slash]
 }
 
 // IsEnabled reports the current consent + DSN state.

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
+	"strings"
 
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/crewship-ai/crewship/internal/crashreport"
@@ -22,24 +24,34 @@ import (
 var telemetryCmd = &cobra.Command{
 	Use:   "telemetry",
 	Short: "Manage anonymous crash reporting",
-	Long: `Crewship can optionally send anonymous crash reports to Sentry to help
-the maintainer diagnose bugs. The feature is OFF by default and the prompt
-runs once at first start. You can change your mind at any time:
+	Long: `Crewship sends anonymous crash reports to the project maintainer's Sentry
+to help diagnose bugs in the v0.1 beta. The feature is ENABLED by default
+during beta — disable any time with:
 
-  crewship telemetry on
   crewship telemetry off
-  crewship telemetry status
+  crewship telemetry on        # re-enable
+  crewship telemetry status    # show current state, endpoint, install ID
 
-What is sent (only when enabled):
+The default-on stance applies to the v0.1 beta only; v1.0 GA will revert
+to opt-in. Documented in README and RELEASING.md.
+
+Routing override:
+  Set CREWSHIP_SENTRY_DSN to your own Sentry DSN to redirect events to a
+  project you control instead of the maintainer's. Useful for enterprise
+  self-hosters and regulated environments. Empty/unset = vendor default.
+
+What is sent (when enabled):
   - Go stack traces and error messages
   - Crewship version, commit, OS/architecture
-  - An anonymous install ID generated locally on opt-in
+  - An anonymous install ID generated locally
+  - Sentry "environment" derived from the version tag (beta / production)
 
 What is NEVER sent:
   - Workspace, user, or credential data
   - HTTP request bodies
   - Authorization headers, cookies, or query-string secrets
-  - Environment variables`,
+  - Environment variables
+  - Hostname (ServerName is overridden with the install ID)`,
 }
 
 var telemetryOnCmd = &cobra.Command{
@@ -72,22 +84,56 @@ var telemetryStatusCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("read telemetry status: %w", err)
 		}
+		// Resolved DSN tells the operator WHERE events would route — important
+		// when CREWSHIP_SENTRY_DSN is set and we're not using the vendor
+		// default. We never print the raw URL (it would still leak the public
+		// key into terminal scrollback) — just the host portion.
+		dsn := crashreport.ResolveDSN()
+		dsnSource := "vendor default (compiled in)"
+		if os.Getenv("CREWSHIP_SENTRY_DSN") != "" {
+			dsnSource = "CREWSHIP_SENTRY_DSN env override"
+		}
+
 		switch {
 		case !asked:
-			fmt.Println("Telemetry: not yet configured. You'll be prompted on the next `crewship start`.")
+			// With beta default-on, this branch should be unreachable after
+			// the first `crewship start`. Kept as a safety net for builds
+			// that haven't called crashreport.Init yet.
+			fmt.Println("Telemetry: not yet configured. Will default to ENABLED on the next `crewship start` for v0.1 beta.")
 		case enabled:
-			fmt.Println("Telemetry: ENABLED (opt-in)")
+			fmt.Println("Telemetry: ENABLED")
 			if installID != "" {
 				fmt.Printf("  install_id: %s\n", installID)
 			}
-			if crashreport.DSN == "" {
-				cli.PrintWarning("This build has no Sentry DSN compiled in. Telemetry consent is recorded but no events are sent.")
+			if dsn == "" {
+				cli.PrintWarning("No DSN compiled in and CREWSHIP_SENTRY_DSN is not set — consent is recorded but no events are sent.")
+			} else {
+				fmt.Printf("  endpoint:   %s (%s)\n", dsnEndpointHost(dsn), dsnSource)
 			}
+			fmt.Println("  to disable: crewship telemetry off")
 		default:
-			fmt.Println("Telemetry: DISABLED (opt-out)")
+			fmt.Println("Telemetry: DISABLED")
+			fmt.Println("  to enable:  crewship telemetry on")
 		}
 		return nil
 	},
+}
+
+// dsnEndpointHost extracts the host portion of a Sentry DSN
+// (https://<key>@<host>/<project_id>) so we can show the operator where
+// telemetry routes without printing the full URL into terminal scrollback.
+// Mirrors internal/crashreport.dsnEndpoint but kept local to avoid
+// exporting a near-trivial helper.
+func dsnEndpointHost(dsn string) string {
+	at := strings.Index(dsn, "@")
+	if at < 0 {
+		return "unknown"
+	}
+	rest := dsn[at+1:]
+	if slash := strings.Index(rest, "/"); slash >= 0 {
+		return rest[:slash]
+	}
+	return rest
 }
 
 func init() {
@@ -115,8 +161,11 @@ func setTelemetry(enabled bool) error {
 		if installID != "" {
 			fmt.Printf("  install_id: %s\n", installID)
 		}
-		if crashreport.DSN == "" {
-			cli.PrintWarning("This build has no Sentry DSN compiled in. Consent is recorded but no events will be sent until you install a release binary.")
+		dsn := crashreport.ResolveDSN()
+		if dsn == "" {
+			cli.PrintWarning("No DSN compiled in and CREWSHIP_SENTRY_DSN is not set — consent recorded but no events will be sent until you install a release binary or set CREWSHIP_SENTRY_DSN.")
+		} else {
+			fmt.Printf("  endpoint:   %s\n", dsnEndpointHost(dsn))
 		}
 		return nil
 	}
