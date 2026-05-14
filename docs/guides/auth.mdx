@@ -1,0 +1,280 @@
+---
+title: "Authentication"
+description: "Sign-in, signup, password recovery, OAuth, sessions, and the CLI tokens / device-pairing flow — every way a user proves identity to Crewship."
+icon: "shield-check"
+---
+
+# Authentication
+
+## Overview
+
+Authentication in Crewship is the gate every other surface sits behind — agents, credentials, journal, runs, even the onboarding wizard run inside a session, and every subsystem trusts the user identity stamped on the request without re-checking. The auth layer therefore has to handle four distinct entry points: an email/password sign-in for the web UI, a Google OAuth flow for SSO installs, an out-of-band password recovery path for accounts that have lost their credential, and a token-and-pairing handshake for the `crewship` CLI to authenticate against the same server.
+
+The implementation funnels every entry point through one router file (`internal/api/router_auth.go`) so the entire surface can be audited at once. Routes split into three trust tiers: public bootstrap endpoints (signup, /bootstrap, OAuth callbacks, password-reset redemption) that establish a session cookie; session-authed endpoints (session list/revoke, CLI token issuance, pairing start/poll) that act on the caller's own identity; and the NextAuth-compatible `/api/auth/*` shim that lets the Next.js frontend treat Crewship as a drop-in NextAuth provider. CLI tokens are persisted as bcrypt hashes; passwords likewise — neither is recoverable from the database.
+
+Two safety properties are load-bearing and worth knowing before changing this code. First, `/forgot` always returns 200 regardless of whether the email matches a real account, so the endpoint cannot be used to enumerate users; real-vs-fake is signalled only by what arrives in the user's inbox. Second, the reset-link origin is `CREWSHIP_PUBLIC_URL` and never `r.Host` — the latter is attacker-tainted via the `Host` header and would otherwise let a POST `/forgot` mail the victim a working reset link pointing at an attacker-controlled domain. The handler refuses to send reset mail if `CREWSHIP_PUBLIC_URL` is unset or malformed, on the principle that a broken email is strictly safer than a hijackable one.
+
+## When to use it
+
+Reach for this guide when you're configuring, debugging, or extending an authentication path — not for ordinary login flows, which Just Work via the web UI:
+
+- **You're setting up SSO for an organisation.** Google OAuth needs `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` plus a redirect URI registered with the Google Cloud project. The auth router auto-disables the `/api/v1/auth/google/*` endpoints when either env var is unset, so a half-configured install fails closed rather than half-open.
+- **You're enabling in-band password recovery.** The mailer (`internal/mailer/`) reads `RESEND_API_KEY` and `RESEND_FROM` at startup; without them, `/forgot` still returns 200 but nothing is sent and users must recover via the [Admin CLI](/guides/admin-cli). `CREWSHIP_PUBLIC_URL` must also be set to a valid `http(s)` origin or the handler refuses to mail reset links.
+- **You're issuing long-lived CLI tokens** for scripts, CI, or another machine without an interactive browser. Tokens are minted via `POST /api/v1/auth/cli-token` while session-authed, persisted as bcrypt hashes, and revocable from Settings → Sessions or via `DELETE /api/v1/auth/cli-tokens/{id}`.
+- **You're pairing the `crewship` CLI on a new dev machine.** The device-code handoff produces the same token type as the in-app issuer but with the convenience that the user never has to copy-paste a secret — see the dedicated [CLI Pairing](/guides/cli-pairing) guide for the device-code flow itself.
+- **You're plugging the Next.js frontend (or another NextAuth client) into Crewship.** The `/api/auth/*` shim implements the NextAuth contract — CSRF, providers, session, callback/credentials, token refresh, signin/signout, error — so a drop-in `next-auth` client can treat Crewship as a regular provider without bespoke glue.
+- **You're investigating a "can't log in" report.** Order of checks: `crewship admin list-users` (the row exists with the email casing the user typed?), session cookie present in the browser request, mailer logs (was a reset link sent?), `auth_recovery.go` error logs for token-redemption failures.
+
+For one-off recovery without shell access, the in-band `/forgot` flow above is the answer; for an admin locked out at the host level, jump to the [Admin CLI](/guides/admin-cli) guide instead.
+
+## Key concepts
+
+| Term | What it means here |
+|------|-------------------|
+| **Bootstrap** | First-server-start endpoint (`POST /api/v1/bootstrap`) that creates the initial `OWNER` from a fresh database. Idempotent: refuses to mint a second admin if one already exists. The web wizard at `/bootstrap` is the human surface; CI installs hit the endpoint directly. |
+| **Session** | A server-side row in the sessions store, identified by a cookie set on sign-in. Listable + revocable by the owning user via `GET /api/v1/auth/sessions` and `POST /api/v1/auth/sessions/{id}/revoke`. Backs every authed HTTP request. |
+| **`RequireAuth` middleware** | The mux wrapper (`r.authMw.RequireAuth`) that gates every non-public route. Reads the session cookie, hits the sessions store, attaches the user to the request context via `UserFromContext`. Endpoints below this never re-check auth. |
+| **Bcrypt hash** | The on-disk form of every password and every CLI token. Cost factor is held constant across signup, admin-CLI reset, and pairing redemption so the verifier doesn't have to special-case origin. |
+| **`/forgot` non-enumeration** | The recovery flow always returns 200 regardless of whether the email matches a real user. Real vs fake is signalled only by what (if anything) arrives in the user's inbox — never by HTTP status or response shape. |
+| **Reset token** | A 30-minute single-use token mailed via Resend on a successful `/forgot`. Stored hashed in `password_reset_tokens`; redemption (`POST /api/v1/auth/reset`) invalidates all the user's active sessions atomically with the password write. |
+| **`CREWSHIP_PUBLIC_URL`** | The authoritative origin for reset-link URLs. Parsed once at handler construction; if unset or malformed, the mailer refuses to send rather than falling back to the `Host` header (which is attacker-tainted via Host-header injection on `/forgot`). |
+| **CLI token** | A long-lived API credential (`POST /api/v1/auth/cli-token`) that the `crewship` binary stores in `~/.crewship/cli-config.yaml`. Bcrypt-hashed at rest; revocable by the issuing user. |
+| **Pairing code** | An 8-character Crockford-base32 code with a 10-minute TTL produced by `POST /api/v1/auth/pair/start`. The CLI redeems it on `POST /api/v1/auth/pair/redeem` (unauthed by design — the code *is* the credential) and gets back a fresh CLI token. See [CLI Pairing](/guides/cli-pairing). |
+| **Google OAuth handler** | Optional. The `/api/v1/auth/google/*` routes only mount when both `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are set; `/api/v1/auth/google/status` always responds so the frontend can decide whether to render the "Sign in with Google" button. |
+| **NextAuth shim** | The `/api/auth/*` set of endpoints (`csrf`, `providers`, `session`, `callback/credentials`, `token/refresh`, `signin`, `signout`, `error`) that implement the NextAuth client contract. Lets the Next.js frontend treat Crewship like any other NextAuth provider with no custom glue. |
+| **Mailer** | The interface in `internal/mailer/`. `mailer.NewFromEnv()` returns the Resend implementation when `RESEND_API_KEY` is set, or `mailer.Disabled` (which returns `ErrDisabled` on every `Send` call) otherwise. The disabled mailer is a feature, not a bug — it keeps `/forgot` non-enumerable on installs that haven't configured email. |
+
+## Usage
+
+The end-to-end operator path from a fresh binary to working login + recovery is six configuration steps and one bootstrap call. None of them are mandatory after the first — once the env vars are set and the admin exists, day-to-day sign-in needs nothing else.
+
+### 1. Set the public origin
+
+Required if you intend to enable in-band password recovery. This is the URL the reset email links to and the OAuth callback origin Google will see.
+
+```bash
+export CREWSHIP_PUBLIC_URL=https://crewship.example.com
+```
+
+The recovery handler parses this once at startup; a malformed or unset value silently disables reset-email sending (`/forgot` still returns 200 to preserve non-enumeration).
+
+### 2. Configure the mailer (optional)
+
+```bash
+export RESEND_API_KEY=re_abc123…
+export RESEND_FROM='Crewship <noreply@example.com>'
+```
+
+Without these, the mailer falls back to `mailer.Disabled` — installs without email still work, but users can't recover passwords in-band. They must instead use [Admin CLI](/guides/admin-cli) `reset-password` from the host shell.
+
+### 3. Configure Google OAuth (optional)
+
+```bash
+export GOOGLE_CLIENT_ID=...
+export GOOGLE_CLIENT_SECRET=...
+```
+
+The auth router mounts `/api/v1/auth/google/redirect` and `/callback` only when both are present. `/api/v1/auth/google/status` always responds with `{"enabled": true|false}` so the frontend can render — or skip — the "Sign in with Google" button without 404 noise.
+
+### 4. Bootstrap the first admin
+
+On a fresh database, the `/bootstrap` page or endpoint creates the initial `OWNER`:
+
+```bash
+curl -X POST https://crewship.example.com/api/v1/bootstrap \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"admin@example.com","password":"<strong>","name":"Admin"}'
+```
+
+The endpoint is idempotent — a second call against a database that already has any user returns 409, so re-running provisioning is safe.
+
+### 5. Sign in (day-to-day)
+
+The Next.js frontend handles credentials via `POST /api/auth/callback/credentials`, sets a session cookie, and every subsequent request rides on `RequireAuth`. No client-side state, no JWT inspection — the session is server-owned.
+
+### 6. Mint a CLI token (for scripts / CI)
+
+While session-authed in the web UI:
+
+```bash
+curl -sX POST https://crewship.example.com/api/v1/auth/cli-token \
+  -H "Cookie: $SESSION_COOKIE" \
+  -d '{"name":"deploy-script"}'
+# {"id":"tok_…","token":"crewship_pat_…"}
+```
+
+Store `token` in CI secrets and pass it as `Authorization: Bearer <token>` on subsequent requests. Revoke with `DELETE /api/v1/auth/cli-tokens/{id}` from the same UI or via the API.
+
+### Recovery flow walkthrough
+
+If a user forgets their password and the mailer is configured:
+
+```bash
+# 1. User hits /forgot in the UI; frontend posts:
+curl -X POST https://crewship.example.com/api/v1/auth/forgot \
+  -d '{"email":"forgetful@example.com"}'
+# Always returns 200 (non-enumeration), even for unknown emails.
+
+# 2. Resend delivers a link of the form:
+#    https://crewship.example.com/reset-password?token=<30-min-token>
+
+# 3. User submits the new password from that page:
+curl -X POST https://crewship.example.com/api/v1/auth/reset \
+  -d '{"token":"<…>","password":"<new>"}'
+# Atomically rotates the bcrypt hash AND invalidates all active sessions for the user.
+```
+
+If the mailer is `mailer.Disabled`, step 2 never happens — the user must go through host-level [Admin CLI](/guides/admin-cli) recovery instead.
+
+## Examples
+
+### Turning on Google SSO for an org
+
+The product manager wants the team to sign in with their `@example.com` Google accounts instead of Crewship-local passwords.
+
+```bash
+# 1. Create OAuth credentials in Google Cloud Console:
+#    - Application type: Web application
+#    - Authorized redirect URI:
+#      https://crewship.example.com/api/v1/auth/google/callback
+#    Copy the client ID + secret.
+
+# 2. Plumb the values into crewshipd's env:
+export GOOGLE_CLIENT_ID=783...apps.googleusercontent.com
+export GOOGLE_CLIENT_SECRET=GOCSPX-...
+export CREWSHIP_PUBLIC_URL=https://crewship.example.com
+
+# 3. Restart the server:
+sudo systemctl restart crewshipd
+```
+
+On the next page load the frontend hits `/api/v1/auth/google/status`, sees `{"enabled": true}`, and renders the "Sign in with Google" button. The first user to click it lands at `/api/v1/auth/google/redirect` → Google consent screen → `/api/v1/auth/google/callback`, which creates a Crewship user row tied to the Google identity and signs them in with a regular session cookie.
+
+If Google access ever needs to be turned off later, just unset either env var and restart — the routes unmount and the frontend re-reads `enabled: false` on the next status poll.
+
+### CI bootstrap with no mailer configured
+
+A Docker-based deployment pipeline must produce a logged-in-able admin account, but `RESEND_API_KEY` isn't available in the build environment.
+
+```bash
+# Migrate + bootstrap during image build:
+crewship migrate
+crewship admin reset-password \
+  --email=admin@example.com \
+  --password="$BOOTSTRAP_PASSWORD"
+crewship admin promote --email=admin@example.com --role=OWNER
+
+# The web flow's /forgot still returns 200 in this state but no email goes out.
+# Document the recovery procedure for ops:
+echo "If you forget the password, SSH to the host and run:" \
+     " crewship admin reset-password --email=admin@example.com"
+```
+
+This is the canonical "self-hosted without email" path — the `mailer.Disabled` fallback keeps `/forgot` non-enumerable, and the admin CLI gives the operator an out-of-band recovery channel that doesn't depend on Resend.
+
+### Pairing the CLI from a new machine
+
+A developer just installed `crewship` on a fresh laptop and wants to authenticate it against their team's server.
+
+```bash
+# 1. On the laptop, ask the CLI to start a pairing:
+crewship login --pair
+# Open this URL in your browser:
+#   https://crewship.example.com/settings/cli
+# Enter this code:  QXC5-W7M3
+
+# 2. The user opens the URL in the browser (where they're already
+#    session-authed), pastes the 8-char Crockford code, and clicks Confirm.
+#    Behind the scenes the browser POSTs /api/v1/auth/pair/redeem with the
+#    code; the server creates a fresh CLI token, marks the pairing row
+#    consumed, and the browser shows "Paired ✓".
+
+# 3. The CLI's open polling on /api/v1/auth/pair/poll observes status=consumed,
+#    receives the token, writes it to ~/.crewship/cli-config.yaml, and prints:
+# Logged in as developer@example.com.
+```
+
+The whole exchange takes under a minute and the developer never has to copy or type a long credential — see [CLI Pairing](/guides/cli-pairing) for the device-code flow details and security properties.
+
+## API reference
+
+Every endpoint below lives in `internal/api/router_auth.go`. There's no dedicated `/api-reference/auth` page — the surface is small enough to inline, and the file is the source of truth.
+
+### Bootstrap & signup (public)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/v1/bootstrap` | Create the first `OWNER` on a fresh database. Idempotent — 409 if any user exists. |
+| `POST` | `/api/v1/auth/signup` | Create a new user account. Subject to `allowSignup` flag at server startup; disabled by default for self-hosted installs. |
+| `GET`  | `/api/v1/ws-token` | Mint a short-lived WebSocket auth token for the current session. **Auth required.** |
+
+### Sign-in & sessions (mixed)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/auth/callback/credentials` | NextAuth-compatible credential sign-in. Sets the session cookie. |
+| `POST` | `/api/auth/signout` | Clears the session cookie and revokes the server-side row. |
+| `GET`  | `/api/auth/session` | NextAuth-compatible "who am I" probe. Returns user + expiry, or `null`. |
+| `GET`  | `/api/auth/csrf` | NextAuth CSRF token. Required by NextAuth client before credential POST. |
+| `GET`  | `/api/auth/providers` | Lists available providers (`credentials` + `google` if enabled). |
+| `POST` | `/api/auth/token/refresh` | Rotates the session token. Idempotent. |
+| `GET`  | `/api/v1/auth/sessions` | List the caller's own active sessions. **Auth required.** |
+| `POST` | `/api/v1/auth/sessions/{id}/revoke` | Revoke one of the caller's sessions. **Auth required.** |
+
+### Password recovery (public)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/v1/auth/forgot` | Email a reset link. **Always returns 200** (non-enumeration). |
+| `POST` | `/api/v1/auth/reset` | Redeem a reset token. Atomically updates the password hash + invalidates all active sessions. |
+
+### CLI tokens & device pairing (mixed)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/v1/auth/cli-token` | Mint a new long-lived CLI token. **Auth required.** |
+| `GET`  | `/api/v1/auth/cli-token/validate` | Verify a CLI token presented as `Authorization: Bearer`. **Auth required.** |
+| `GET`  | `/api/v1/auth/cli-tokens` | List the caller's CLI tokens. **Auth required.** |
+| `DELETE` | `/api/v1/auth/cli-tokens/{tokenId}` | Revoke one of the caller's CLI tokens. **Auth required.** |
+| `POST` | `/api/v1/auth/pair/start` | Begin device-code pairing; returns code + `expires_at`. **Auth required.** |
+| `GET`  | `/api/v1/auth/pair/poll` | Poll for redemption. **Auth required.** |
+| `POST` | `/api/v1/auth/pair/redeem` | Redeem a pairing code, return CLI token. **Public by design** — the code IS the credential. |
+
+### Google OAuth (conditional)
+
+Routes mount only when `GOOGLE_CLIENT_ID` AND `GOOGLE_CLIENT_SECRET` are both set.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET`  | `/api/v1/auth/google/redirect` | Begin OAuth flow; 302s to Google. |
+| `GET`  | `/api/v1/auth/google/callback` | OAuth callback; creates or updates the Crewship user, sets session cookie. |
+| `GET`  | `/api/v1/auth/google/status` | Returns `{"enabled": bool}`. Always mounted, even when OAuth is disabled, so the frontend can decide button rendering. |
+
+### Onboarding (auth-required, but workspace-less)
+
+Mounted alongside auth because the wizard runs *before* any workspace context exists.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET`  | `/api/v1/onboarding/status` | Returns wizard progress. |
+| `POST` | `/api/v1/onboarding/setup` | Submit a single wizard step. |
+| `POST` | `/api/v1/onboarding/complete` | Mark onboarding complete and provision the first workspace + crew. |
+
+## Common pitfalls
+
+- **`CREWSHIP_PUBLIC_URL` is load-bearing for security, not just UX.** If you leave it unset and configure a mailer, the handler refuses to send reset links — by design. Don't be tempted to "fix" it by falling back to `r.Host`; the `Host` header is attacker-tainted, and the resulting reset link would point at whatever origin the attacker put in their `POST /forgot` request. Set the env var to your real public origin or accept that recovery requires the [Admin CLI](/guides/admin-cli).
+- **Never leak whether an email is registered.** `/forgot` always returns 200 — preserve that. Adding "user not found" or "we just sent you an email" responses gives an attacker an account-enumeration oracle. The browser-side UX intentionally says "If an account exists, you'll get an email" for the same reason.
+- **CLI tokens are not retrievable after creation.** The bcrypt hash is stored; the raw token is shown exactly once at `POST /api/v1/auth/cli-token` response time. If a user loses theirs, the path is "revoke + mint new" — don't add an endpoint that re-displays the value.
+- **Pairing codes are single-use and 10-minute-TTL'd.** If a user starts pairing and walks away, the code expires on its own. Don't extend the TTL to "be nice" — the security argument depends on a short window where a phished code can't be used.
+- **`/api/v1/auth/reset` invalidates ALL of the user's sessions.** This is a feature: if a password reset happens because of suspected compromise, leaving old session cookies valid would defeat the rotation. Anything UI-side that depends on "logged in everywhere" must reauthenticate after a reset.
+- **Google OAuth fails closed when half-configured.** Setting only `GOOGLE_CLIENT_ID` (no secret), or only the secret, leaves the `/api/v1/auth/google/*` routes unmounted. The frontend reads `/api/v1/auth/google/status` and renders accordingly. Don't try to mount one without the other.
+- **Signup is OFF by default for self-hosted installs.** `allowSignup` is a server-startup flag. On a multi-tenant SaaS deployment you'd flip it on; for a self-hosted single-org install, leaving `/api/v1/auth/signup` returning 404 is correct.
+- **NextAuth clients require the CSRF dance.** A frontend that POSTs `/api/auth/callback/credentials` without first GETting `/api/auth/csrf` and sending the token gets 401. This is the NextAuth contract — not optional even when you "trust" the origin.
+- **Bcrypt cost factor must match across signup, admin CLI, and pairing redemption.** All three paths produce hashes the same verifier reads. If you change the cost factor in one place and not the others, you've just made some users' passwords slower to verify than others — measurable timing oracle.
+- **Don't store the session cookie in `localStorage`.** It's intentionally `HttpOnly` + `Secure` + `SameSite=Lax`. Anything that lifts it into JS-readable storage breaks the XSS-resistance promise of server-side sessions.
+
+## Related
+
+- [Onboarding](/guides/onboarding) — the first-run flow that bootstraps the initial admin account.
+- [Credentials](/guides/credentials) — where the auth layer's `SECRET`-tier credentials (OAuth client secrets, mailer keys) live.
+- [Installation](/guides/installation) — the `CREWSHIP_PUBLIC_URL` and `RESEND_API_KEY` env vars that the recovery flow depends on.

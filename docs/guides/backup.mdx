@@ -6,23 +6,60 @@ icon: "shield"
 
 # Backup & Restore
 
-Crewship's backup system produces portable `.tar.zst` bundles that capture a workspace (or a single crew) in one file. Bundles are AGE-encrypted by default, carry a versioned manifest, and can be restored on any Crewship instance that speaks the same format version (N-2 compatibility guarantee).
+## Overview
 
-Every backup subcommand requires the **OWNER** or **ADMIN** role on the workspace — MEMBER and VIEWER roles are refused at both the CLI and the server.
+Crewship's backup system produces portable `.tar.zst` bundles that capture a workspace (or a single crew) in one file. Bundles are AGE-encrypted by default, carry a versioned manifest, and can be restored on any Crewship instance that speaks the same format version (N-2 compatibility guarantee). The whole subsystem is admin-only by design: every backup subcommand requires the **OWNER** or **ADMIN** role on the workspace, and the runner refuses MEMBER / VIEWER calls at both the CLI parsing layer and the server-side handler — defence in depth, not just a UI veneer.
 
-## Subcommands at a glance
+The architectural choice that shapes everything else is "one bundle, one file". Backups don't depend on an external object store, don't require a sidecar, and don't shard across files. A `.tar.zst` is a single artefact an operator can `scp` to a backup host, hand to a customer for legal hold, or check into a private bucket — without the rest of Crewship being available. Inside the tarball, the manifest is plaintext JSON (so `crewship backup inspect` can read it without the AGE recipient key) and the payload is the encrypted SQLite snapshot plus any referenced workspace files. The forward-compatible manifest schema means a bundle produced on N can restore on N-1 and N-2; older bundles run their migration's `restoreBackfill` hook so columns added since the snapshot are populated sanely instead of left at SQL defaults.
 
-| Command | Purpose |
-|---------|---------|
-| `crewship backup create` | Produce a new bundle for a workspace or crew. |
-| `crewship backup list` | List bundles on disk. |
-| `crewship backup inspect` | Print a bundle's manifest without decrypting the payload. |
-| `crewship backup verify` | Decrypt + checksum a bundle end-to-end (no DB writes). |
-| `crewship backup restore` | Restore a bundle (supports `--dry-run`). |
-| `crewship backup delete` | Remove a single bundle (interactive confirm or `--force`). |
-| `crewship backup rotate` | Retention sweep — `--keep-last N` / `--keep-days D`. |
-| `crewship backup status` | Show the advisory lock state for the current workspace. |
-| `crewship backup unlock` | Release a stale lock owned by this host (admin-only, confirm required). |
+Restores are intentionally cautious. `--dry-run` walks the entire restore plan — schema diff, row counts, blob deltas — and prints what *would* happen without writing a single byte to the destination database. Advisory locking (`backup_locks` table, per-workspace) prevents two concurrent `restore` runs from corrupting each other, and the lock file records the host + PID so `crewship backup status` can tell you who's holding it. If a host crashes mid-restore, `crewship backup unlock` is the manual recovery — admin-only with a confirmation prompt, because clearing a real lock from another live process is how you trash a workspace.
+
+## When to use it
+
+Backups are cheap to make and expensive to wish you'd made. The five canonical reasons to run `crewship backup create`:
+
+- **Before any destructive admin write.** Before `crewship admin reset-password`, before a database migration on a binary upgrade, before a large schema-changing PR lands in prod — capture the current state first. The bundle is the one-command rollback if anything goes wrong.
+- **Disaster recovery / hot spare.** Schedule a nightly `crewship backup create --scope=workspace --passphrase-file …` cron and ship the bundle to a separate host. If the primary disk dies, restoring onto a fresh binary is one `crewship backup restore` away — no replication agent, no streaming WAL, no extra moving parts.
+- **Workspace migration to another host.** Moving a workspace from a dev VM to a prod host (or between two prod hosts) is exactly what bundles are for. Create on the source, scp the file, `crewship backup restore --as-workspace <new-slug>` on the destination, then provision crews. The `--as-workspace` rename avoids the "two `acme` workspaces colliding" hazard.
+- **Legal hold or compliance archive.** Customer leaves; you need to keep their workspace state on cold storage for N years. One AGE-encrypted `.tar.zst` is a forever-readable artefact — no live database, no service required. `inspect` later proves the bundle's contents without decrypting.
+- **Forensic snapshot before incident response.** Suspected compromise of an admin account, or a "what was the state when X happened" investigation. `backup create` + immediate offsite copy preserves the audit trail before anyone (you, the attacker, the well-meaning oncall) starts changing things.
+
+Skip backups for **ephemeral development workspaces** (the dev VM rebuilds them from seed scripts anyway) and **single-agent throwaways** with no user-visible state worth preserving — the bundle metadata cost is real (~few MB minimum) and not every workspace earns it.
+
+## Key concepts
+
+| Term | What it means here |
+|------|-------------------|
+| **Bundle** | A single `.tar.zst` artefact containing one `MANIFEST` (plaintext JSON), one `payload.age` (AGE-sealed tar of DB rows + workspace files), and one `payload.sha256`. The whole backup is this one file — portable, hashable, copy-able with `scp`. |
+| **Scope** | `workspace` (the workspace row + every crew under it) or `crew` (a single crew + its agents). Crew bundles restore independently of their parent workspace, so a "move this crew to another workspace" is a viable migration path. |
+| **Format version** | Integer in `MANIFEST.format_version`. Compatibility guarantee is N-2 — a bundle produced on format v3 restores on v3, v4, and v5 servers. Bumped only when a migration changes the bundle layout itself (not the schema rows inside). |
+| **`restoreBackfill` hook** | Per-migration Go function in `internal/backup/restore_backfill.go`. Runs when a bundle predates a migration and the restoring server has columns the source didn't. Pure `ADD COLUMN` migrations rely on the SQL DEFAULT; complex backfills (JSON shape changes, foreign keys) provide a hook so restored rows land sanely. |
+| **AGE encryption** | The bundle's payload is sealed with `filippo.io/age`. Default mode is passphrase (`scrypt`-derived key); `--recipient age1…` switches to X25519 public-key encryption for hand-offs. `--no-encrypt` produces a plaintext payload for test/CI use only. |
+| **Passphrase keyring** | Opt-in cache at `~/.crewship/backup-keyring.enc` (AGE-encrypted with a single OS-keyring-stored key) so operators don't retype the passphrase on every `rotate` / `verify`. Enabled via `--use-keyring` on `create` / `restore`. |
+| **Advisory lock** | A row in the `backup_locks` table, primary-keyed on workspace ID. Taken before any DB dump or docker pause; released by `defer Release()` on the happy path. 1-hour TTL (`DefaultLockTTL`) so a crashed backup self-heals after the window. |
+| **`refuseIfBackupInProgress` guard** | A shared middleware wired into the assignments, peer-query, and webhook handlers. Reads the lock state and refuses *new* agent runs while a backup is in progress — closes the TOCTOU window between `ensureAgentsIdle` (initial check) and `docker pause` (the actual freeze). |
+| **Dry-run restore** | `--dry-run` on `crewship backup restore`. Decrypts, validates the manifest, replays the DB transaction, then rolls back. The only side effect is one `backup.restore.dry_run` audit row — distinct from `backup.restore` so auditors can tell "verified" apart from "actually restored". |
+| **`--as-workspace` / `--as-crew` rename** | Restore the bundle under a new slug instead of the original. Refuses to run the docker phase (container names derive from the slug) and tells the operator to `crewship crew provision` afterwards. Avoids "two `acme` workspaces colliding" during DR drills. |
+| **Retention sweep** | `crewship backup rotate --keep-last N --keep-days D`. Per-workspace — never touches another workspace's bundles. Both flags can be combined; both must be positive. `--dry-run` lists what would be deleted without touching disk. |
+| **Stale lock** | A lock whose holder process is dead but whose row still exists. Detected when `acquired_at + DefaultLockTTL < now()`. Auto-released on next `create`; manually clearable via `crewship backup unlock --force` (admin-only, with confirmation). |
+
+## Usage
+
+The whole backup surface is the `crewship backup` command group — nine subcommands that cover the create → verify → restore → rotate lifecycle. Each subcommand has a dedicated section below with full flag reference and copy-pasteable examples; this table is the entry point.
+
+| Command | Purpose | Deep dive |
+|---------|---------|-----------|
+| `crewship backup create` | Produce a new bundle for a workspace or crew. | [Create a workspace backup](#create-a-workspace-backup) / [Back up a single crew](#back-up-a-single-crew) |
+| `crewship backup list` | List bundles on disk. | [List, inspect, verify](#list-inspect-verify) |
+| `crewship backup inspect` | Print a bundle's manifest without decrypting the payload. | [List, inspect, verify](#list-inspect-verify) |
+| `crewship backup verify` | Decrypt + checksum a bundle end-to-end (no DB writes). | [List, inspect, verify](#list-inspect-verify) |
+| `crewship backup restore` | Restore a bundle (supports `--dry-run`). | [Restore](#restore) |
+| `crewship backup delete` | Remove a single bundle (interactive confirm or `--force`). | [Delete & rotate](#delete--rotate) |
+| `crewship backup rotate` | Retention sweep — `--keep-last N` / `--keep-days D`. | [Delete & rotate](#delete--rotate) |
+| `crewship backup status` | Show the advisory lock state for the current workspace. | [Lock semantics](#lock-semantics) |
+| `crewship backup unlock` | Release a stale lock owned by this host (admin-only, confirm required). | [Lock semantics](#lock-semantics) |
+
+The minimum end-to-end loop is four commands: `create` to produce the bundle, `verify` to prove it's not corrupt, `restore --dry-run` to prove the destination will accept it, then `restore` for real. Every other subcommand exists for retention (`rotate`), introspection (`list`, `inspect`, `status`), or recovery (`unlock`).
 
 <Note>
   `create` and `restore` accept `--use-keyring` to cache and reuse the
@@ -168,6 +205,106 @@ crewship backup unlock --force
 <Warning>
   `backup unlock` is an emergency escape hatch. Only use it when you can confirm no backup is actually running (e.g. the previous CLI session crashed and the 1 h TTL has not yet fired). Forcibly releasing a live backup's lock will let a second backup start alongside it, and the two will race on the docker pause/unpause sequence.
 </Warning>
+
+## Examples
+
+### Nightly hot-spare backup with 14-day retention
+
+A workspace on `prod-server.example.com` should produce a bundle every night, ship it to a separate backup host, and keep 14 days on disk locally as a fast-rollback safety net.
+
+```bash
+# /etc/systemd/system/crewship-backup.service
+[Unit]
+Description=Crewship nightly backup
+After=crewshipd.service
+
+[Service]
+Type=oneshot
+User=crewship
+Environment=CREWSHIP_DATA_DIR=/var/lib/crewship
+ExecStart=/usr/local/bin/crewship backup create \
+  --scope=workspace \
+  --passphrase-file=/etc/crewship/backup.pw \
+  --use-keyring
+ExecStartPost=/usr/bin/rsync -a --remove-source-files \
+  /var/lib/crewship/backups/ \
+  backup-host:/srv/crewship-backups/prod/
+ExecStartPost=/usr/local/bin/crewship backup rotate \
+  --keep-last=14 --keep-days=14 --force
+```
+
+Paired with a `crewship-backup.timer` that fires at 02:37 daily (off-the-hour to avoid clustering with the rest of the fleet). The `--use-keyring` flag means the passphrase is read once and cached — the timer doesn't have to redeliver it. The `rotate` step runs after the rsync so local-disk pressure is bounded even on long runs without a remote-side sweep.
+
+### Workspace migration to a new host
+
+The `acme` workspace lives on `crewship-old`. You're moving it to `crewship-new` to retire the old host. The destination already has its own workspaces, so a same-slug restore would conflict.
+
+```bash
+# On crewship-old:
+crewship backup create --scope=workspace --passphrase-file backup.pw
+# ✓ Backup created: /home/admin/.crewship/backups/crewship-workspace-acme-2026-05-14T03-12-00Z.tar.zst
+
+# Ship it:
+scp ~/.crewship/backups/crewship-workspace-acme-*.tar.zst crewship-new:/tmp/
+
+# On crewship-new — pick a new slug because the host already has things:
+crewship backup restore /tmp/crewship-workspace-acme-*.tar.zst \
+  --as-workspace=acme-migrated \
+  --passphrase-file=backup.pw
+# ⚠ Docker phase skipped (--as-workspace supplied).
+#   Provision the new crews with `crewship crew provision`.
+
+# Stand the crews up under the new slug:
+crewship crew provision --workspace=acme-migrated --all
+```
+
+Once the new instance has parity (sanity-check via the UI), users get the new URL, and `acme` on the old host gets archived to cold storage before its workspace row is deleted.
+
+### DR drill with `--dry-run`
+
+Every quarter the team proves the disaster-recovery bundle is actually restorable, without disturbing production state. Run the drill on a throwaway VM:
+
+```bash
+# 1. Copy the most recent prod bundle to the drill host:
+scp prod:/var/lib/crewship/backups/crewship-workspace-acme-latest.tar.zst .
+
+# 2. Inspect the manifest first (no passphrase needed):
+crewship backup inspect crewship-workspace-acme-latest.tar.zst | jq '.format_version, .contents.workspace.slug'
+# 1
+# "acme"
+
+# 3. Verify checksum end-to-end:
+crewship backup verify crewship-workspace-acme-latest.tar.zst
+# ✓ VALID — crewship-workspace-acme-latest.tar.zst (487 MiB)
+
+# 4. Replay the restore inside a transaction, then roll back:
+crewship backup restore crewship-workspace-acme-latest.tar.zst \
+  --dry-run \
+  --passphrase-file=backup.pw
+# ✓ Restore validation complete (dry-run; no workspace/crew data changes applied)
+```
+
+A `backup.restore.dry_run` audit entry shows up in the workspace journal — auditors looking at "did anyone restore prod?" can tell drill runs apart from real restores by the action name.
+
+## API reference
+
+The backup surface is CLI-first — every operation is reachable via `crewship backup …` and every flag the CLI accepts maps to an HTTP body field. The full HTTP schema lives at [`/api-reference/backup`](/api-reference/backup); a quick orientation:
+
+| Method | Path | What it does |
+|--------|------|--------------|
+| `POST` | `/api/v1/backups` | Create a bundle. **Auth + OWNER/ADMIN.** Same trust gate as the CLI; concurrent calls hit the [advisory lock](#lock-semantics) and the second returns 409. |
+| `GET`  | `/api/v1/backups` | List bundles on disk for the current workspace. |
+| `GET`  | `/api/v1/backups/{filename}/manifest` | Plaintext manifest only — equivalent to `crewship backup inspect`. No passphrase required. |
+| `POST` | `/api/v1/backups/{filename}/verify` | SHA-256 integrity check of the sealed bytes against the manifest. **Does not decrypt** — no passphrase required. No DB writes. |
+| `POST` | `/api/v1/backups/{filename}/restore` | Restore. Body accepts `dry_run`, `as_workspace`, `as_crew`. **Holds the lock for the whole call.** |
+| `DELETE` | `/api/v1/backups/{filename}` | Delete a bundle. Idempotent — 404 is not an error in scripted use. |
+| `POST` | `/api/v1/backups/rotate` | Retention sweep. Body accepts `keep_last`, `keep_days`, `dry_run`. |
+| `GET`  | `/api/v1/backups/lock` | Inspect the advisory lock state (used by `crewship backup status`). |
+| `DELETE` | `/api/v1/backups/lock` | Force-release a stale lock. Requires `force=true` body field — **never** call from automation without a confirmation gate. |
+
+All routes are mounted in `internal/api/router_backup.go`. The CLI talks to these directly when run against a remote host (`--server` flag) and falls back to in-process Go calls when run on the same machine as `crewshipd` — bypassing HTTP entirely for the host-shell use case. The two paths share the same handler functions, so flags work identically.
+
+Webhook payloads for `backup.created` / `backup.restored` / `backup.restore.dry_run` events are documented separately under [Webhooks](#webhooks); metric emissions are documented under [Metrics](#metrics).
 
 ## Streaming & memory bounds (large backups)
 
@@ -347,14 +484,30 @@ The following items are intentionally deferred to v0.2. They do
 - **Cross-process keyring lock.** The per-process mutex does not cover
   two concurrent CLI invocations racing on the same keyring file.
 
+## Common pitfalls
+
+- **Losing the passphrase = losing the data.** AGE bundles are not recoverable without the passphrase (or X25519 private key). There is no master key, no support escape hatch. Store the passphrase in a separate trust zone from the bundle — a password manager on a different host, a sealed envelope, anything that doesn't share a failure mode with the disk holding the `.tar.zst`.
+- **`backup unlock --force` on a live backup corrupts the bundle.** The advisory lock exists precisely because two concurrent backups race on the `docker pause` / `docker unpause` sequence. Only ever clear a lock when you can *prove* its holder is dead (CLI session crashed, host rebooted) and the 1-hour TTL hasn't fired yet. When in doubt, wait for the TTL.
+- **`CREWSHIP_DATA_DIR` mismatch silently targets the wrong database.** Like the [Admin CLI](/guides/admin-cli) trap — if the server runs with a custom data dir but you invoke `crewship backup …` without the same env var, the CLI defaults to `~/.crewship` and operates on an empty/separate database. Backups succeed but capture nothing useful; restores produce "workspace doesn't exist" errors. Export the same `CREWSHIP_DATA_DIR` the server uses, or pass `--data-dir`.
+- **Stop the server before a `restore` against the same database.** Restore takes the advisory lock but a running `crewshipd` may still hold open handles on tables the restorer wants to truncate. Symptoms range from "database is locked" SQLite errors to a half-applied restore that leaves the workspace in a non-bootable state. The lock guards against concurrent *backups*, not against the server's own writes — stop the service first.
+- **Format version drift breaks restores past N-2.** A bundle written by format v5 will restore on v5, v6, and v7 servers; v8 onward, the compatibility window has rolled past it. If you're restoring from cold storage that's been sitting for a year+, verify the manifest's `format_version` against the destination first with `crewship backup inspect`.
+- **`--recipient` / `--passphrase-file` / `--no-encrypt` are mutually exclusive.** Passing two raises a CLI error rather than silently picking one. A bundle encrypted with `--recipient age1…` will not decrypt with a passphrase, and vice versa — match the restore flag to the original create flag.
+- **Same-slug restore refuses by default.** `crewship backup restore` will not overwrite an existing workspace or crew under the same slug. If the existing one is stale and you want to replace it, delete it first (`crewship workspace delete` / `crewship crew delete`); if you want both side-by-side, use `--as-workspace=<new-slug>` and then `crewship crew provision`.
+- **Disk space during restore is not bounded by the heap streaming guarantee.** Peak RAM is fixed by the zstd window, but the extraction scratch directory at `$TMPDIR/crewship-backup-*` needs ~2× the bundle size on disk. Restoring a 4 GB bundle onto a host with 6 GB free in `/tmp` will fail mid-stream. Mount `/tmp` on the data volume or set `TMPDIR` to a larger filesystem.
+- **Scripted retries without `--use-keyring` deadlock on the passphrase prompt.** A non-TTY second invocation will block waiting for stdin. Either pass `--passphrase-file`, pipe the passphrase via stdin redirect, or use `--use-keyring` so the first call seeds the cache.
+- **Bundles include workspace bind-mount files.** User code in `/workspace`, agent memory markdown, anything mounted into the agent container — all included in the bundle. AGE encryption is the only defence; treat a `.tar.zst` like any other backup of source code and credentials.
+- **`/secrets` is the only directory NEVER included.** This is load-bearing — agents pull credentials from `/secrets` at runtime via Keeper, and including them in a portable bundle would defeat the SECRET-tier guarantee. Don't add code that bypasses the secret-skipping filter without an equally rigorous out-of-band channel.
+
 ## Security notes
 
 - The `/secrets` mount is **never** included in a bundle.
 - The workspace bind mount (user code) and memory markdown files are included. AGE encryption of the payload is the only defence against leakage from physical bundle distribution — treat bundles like any other backup of your source tree.
 - Every `backup.*` event writes to `audit_log` with user, role, scope, sealed-payload SHA-256, and size. Dry-run restores write `backup.restore.dry_run` so auditors can tell rehearsals from real cutover.
 
-## See also
+## Related
 
-- [Backup API reference](/api-reference/backup) — REST endpoint shapes.
-- [Security → Audit log](/security/audit) — where backup events land.
-- [BACKUP.md PRD](https://github.com/crewship-ai/crewship/blob/main/.claude/context/prd/BACKUP.md) — design rationale, format versioning, and the V1.5 / V2 roadmap.
+- [Backup API reference](/api-reference/backup) — REST endpoint shapes for every `crewship backup` subcommand.
+- [Admin CLI](/guides/admin-cli) — the host-shell write surface that backups protect against; always `crewship backup create` before running admin writes in prod.
+- [Migrations Catalog](/guides/migrations) — what migration ran when, and which `restoreBackfill` hook (if any) will fire on a cross-version restore.
+- [Security → Audit log](/security/audit) — where `backup.created`, `backup.restored`, and `backup.restore.dry_run` events land.
+- [BACKUP.md PRD](https://github.com/crewship-ai/crewship/blob/main/.claude/context/prd/BACKUP.md) — design rationale, format versioning, and the v1.5 / v2 roadmap.

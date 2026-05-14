@@ -1,0 +1,215 @@
+---
+title: "Admin CLI"
+description: "Host-only `crewship admin` subcommands that bypass the HTTP API and write directly to the SQLite database — the recovery surface for an operator who's locked out of the UI."
+icon: "wrench"
+---
+
+# Admin CLI
+
+## Overview
+
+The `crewship admin` command group is the operator-on-the-host recovery surface. Every subcommand here runs a direct write against the local SQLite database, intentionally bypassing the HTTP API. The model is the same one GitLab (`gitlab-rake gitlab:password:reset`), Gitea (`gitea admin user change-password`), Nextcloud (`occ user:resetpassword`) and Mattermost (`mmctl user change-password`) all adopt: shell access to the host *is* the credential. If you can ssh to the box, you are the admin — no second authentication factor would be meaningful, since you already control the data directory and could rewrite the database manually anyway.
+
+The flow is deliberately non-circular. The most important caller is an admin whose account is locked out and whose server may or may not be running — routing recovery through the same server they're recovering would be a chicken-and-egg failure. `crewship admin` therefore takes a read+write lock on `~/.crewship/crewship.db` (or whatever `CREWSHIP_DATA_DIR` points at), runs the requested SQL in a transaction, and exits. The HTTP layer never sees the request, the auth middleware never runs, and the audit journal records a `journal.admin_cli` entry attributed to `host:$USER` so the action still shows up in the timeline.
+
+Three subcommands ship today, all in `cmd/crewship/cmd_admin.go`: `reset-password` mints a fresh bcrypt hash for a user (interactive prompt by default, or `--password` for scripted recovery); `list-users` dumps every row of the `users` table to a tab-aligned table so an operator can verify which email actually exists before resetting it; and `promote` rewrites a user's workspace role (`OWNER` / `ADMIN` / `MANAGER`), accepting `--workspace=<slug>` or defaulting to the user's single workspace when there's exactly one. All three short-circuit early with a clear error if the data directory is missing or the database is locked by a running server.
+
+## When to use it
+
+Reach for `crewship admin` only when the in-band recovery paths can't apply. For everyday user management — invites, role changes on a healthy server, password rotation from inside the app — the web UI is the right surface; bypassing it leaves the audit trail thinner and risks racing the running server. The narrow set of legitimate uses:
+
+- **You can't log in at all.** Forgot password, sole owner of the workspace, mailer not configured, OAuth provider misconfigured — any combination where the web `/forgot` flow won't deliver a reset link. `crewship admin reset-password --email=…` mints a new hash directly.
+- **The mailer is unreachable or never set up.** Fresh self-hosted installs without `RESEND_API_KEY` get a deliberate `mailer.Disabled` — `/forgot` still returns 200 (no enumeration) but no email goes out. Use the CLI instead of standing up SMTP just to recover one account.
+- **CI / unattended provisioning needs a seeded admin.** A Dockerfile that bakes a baseline workspace can run `crewship admin reset-password --email=admin@example.com --password=$BOOTSTRAP_PASSWORD` non-interactively against the freshly migrated database, then start the server. The HTTP API isn't available yet at that point, so this is the only path.
+- **You need to verify which email actually exists.** Operators routinely guess at email casing (`Admin@…` vs `admin@…`) before a reset. `crewship admin list-users` dumps the table so the reset command targets the right row instead of silently failing.
+- **A botched RBAC change locked everyone out of a workspace.** If a `promote` from the UI accidentally demoted the last `OWNER`, the UI can no longer fix it (no `OWNER` left to call the endpoint). Re-promoting from the CLI is the unblock.
+
+If the server is healthy, the user is logged in, and the workspace still has at least one `OWNER`, prefer the corresponding HTTP endpoint or settings page — every admin-CLI call is one more uncontrolled DB write to keep out of the audit story.
+
+## Key concepts
+
+| Term | What it means here |
+|------|-------------------|
+| **Data directory** | The directory holding `crewship.db` and adjacent state. Defaults to `~/.crewship`; overridable via `CREWSHIP_DATA_DIR`. Every admin subcommand reads the directory before doing anything — missing or unreadable directory aborts before any SQL runs. |
+| **Bcrypt hash** | The on-disk form of a user password. Stored in `users.password_hash`; admin `reset-password` calls `bcrypt.GenerateFromPassword` with the cost factor used elsewhere in the codebase, so a hash written by the CLI is indistinguishable from one minted by the web signup flow. |
+| **Workspace role** | One of `OWNER`, `ADMIN`, `MANAGER`. Persisted in the `workspace_members` table per `(workspace_id, user_id)`. `OWNER` is the only role that can delete a workspace or demote another `OWNER`; `ADMIN` covers everything else; `MANAGER` is the user-management tier. |
+| **`--workspace` resolution** | If the user belongs to exactly one workspace, `promote` infers it. If they belong to multiple, the flag is required and a clear error tells the operator which slugs are eligible. No silent "picks the first one" behaviour. |
+| **`journal.admin_cli` entry** | The audit record left behind by every successful admin-CLI write. Attributed to `host:$USER` (the OS user who ran the command), with the subcommand name and target user email — visible on the workspace timeline alongside in-app actions. |
+| **DB lock** | SQLite advisory lock taken by the running `crewshipd` process. Admin commands probe for it on startup; if held, the command refuses to run with the exact message that tells the operator to `crewship stop` first. This prevents a half-applied write from racing the server's own connection. |
+| **`reset-password`** | Mints a new bcrypt hash for `--email=…`. Interactive password prompt by default; `--password=…` for scripted use (CI bootstrap). Does NOT invalidate active sessions automatically — restart the server to drop them. |
+| **`list-users`** | Reads the `users` table and renders it via `text/tabwriter`. Email, role, created-at, last-login. Usually run before `reset-password` to verify the email row exists with the expected casing. |
+| **`promote`** | Rewrites a single `workspace_members` row. Refuses to demote the last `OWNER` of a workspace — the constraint lives in the same transaction so a botched call can't leave a workspace ownerless. |
+
+## Usage
+
+Every admin subcommand expects access to the same SQLite file the server uses. Stop the server first — concurrent writes from two processes against the same DB are the failure mode this guard exists to prevent.
+
+### 1. Stop the server (if running)
+
+```bash
+crewship stop
+# Or if you started it as a systemd unit:
+sudo systemctl stop crewshipd
+```
+
+The admin commands refuse to run while another process holds the SQLite lock. The error message names the lock-holder PID so you don't have to guess.
+
+### 2. Verify the user exists
+
+```bash
+crewship admin list-users
+```
+
+Outputs a tab-aligned table:
+
+```
+EMAIL                    ROLE     CREATED              LAST_LOGIN
+admin@example.com        OWNER    2025-11-14 09:21     2026-05-13 18:04
+admin@example.com           ADMIN    2026-02-01 12:00     2026-05-13 17:55
+```
+
+Casing matters. `Admin@example.com` and `admin@example.com` are different rows for the `users` table; if the row you want isn't here, `reset-password` will fail loudly rather than silently create a new one.
+
+### 3. Reset a password
+
+Interactive (preferred — the password is not logged anywhere):
+
+```bash
+crewship admin reset-password --email=admin@example.com
+# New password: ********
+# Confirm:      ********
+# Updated user admin@example.com (last login 2026-05-13). Restart the server to drop active sessions.
+```
+
+Scripted (for CI / Docker provisioning):
+
+```bash
+crewship admin reset-password \
+  --email=admin@example.com \
+  --password="$BOOTSTRAP_PASSWORD"
+```
+
+Never embed the password as a literal in a shell history — pass it via env var or stdin redirection so it lands neither in `~/.bash_history` nor in `ps`.
+
+### 4. Promote (or demote) a workspace role
+
+```bash
+# Single-workspace user — slug is inferred:
+crewship admin promote --email=admin@example.com --role=OWNER
+
+# Multi-workspace user — slug is required:
+crewship admin promote \
+  --email=admin@example.com \
+  --role=ADMIN \
+  --workspace=acme-research
+```
+
+If the change would demote the last `OWNER` of a workspace, the command refuses with a message telling you which other user to promote first.
+
+### 5. Restart the server
+
+```bash
+crewship start
+# or
+sudo systemctl start crewshipd
+```
+
+The new password is now active. The user logs in normally — the audit timeline shows a `journal.admin_cli` entry recording who on the host (`host:pavel`) ran which subcommand, so the change is traceable even though the HTTP API was bypassed.
+
+## Examples
+
+### Locked-out solo admin, no mailer configured
+
+You're the sole `OWNER` of a self-hosted Crewship instance. The mailer was never set up (`RESEND_API_KEY` is unset), `/forgot` returns 200 but no email goes out, and you've forgotten your password. SSH to the host:
+
+```bash
+ssh prod-server
+sudo systemctl stop crewshipd
+sudo -u crewship crewship admin list-users
+# admin@example.com   OWNER   2025-09-01 14:22   2026-04-30 09:15
+sudo -u crewship crewship admin reset-password --email=admin@example.com
+# New password: ********
+sudo systemctl start crewshipd
+```
+
+The whole recovery is four commands. The `sudo -u crewship` matters: the data directory is owned by the service account, so running the admin CLI as `root` would create root-owned WAL files that confuse the next server start.
+
+### CI bootstrap of a freshly migrated database
+
+A Dockerfile that bakes a baseline workspace for a demo deployment:
+
+```dockerfile
+FROM crewship-ai/crewship:latest
+
+# Apply migrations so the schema exists
+RUN crewship migrate
+
+# Seed the OWNER account. The password is mounted as a BuildKit secret so it
+# never lands in image layers or metadata; the email is a plain ARG because
+# email addresses aren't sensitive.
+ARG BOOTSTRAP_EMAIL
+RUN --mount=type=secret,id=bootstrap_password \
+    crewship admin reset-password \
+      --email="$BOOTSTRAP_EMAIL" \
+      --password="$(cat /run/secrets/bootstrap_password)" \
+  && crewship admin promote \
+      --email="$BOOTSTRAP_EMAIL" \
+      --role=OWNER
+
+CMD ["crewship", "start"]
+```
+
+Build the image with `docker buildx build --secret id=bootstrap_password,src=./bootstrap.pw …` — the secret file is mounted only for the duration of that one `RUN` step and never becomes part of any image layer. Never use plain `ARG BOOTSTRAP_PASSWORD`: build args land in image history and are recoverable via `docker history <image>` for anyone who pulls the resulting image.
+
+The HTTP API isn't running during `RUN` steps — `crewship admin` is the only path that can produce a logged-in-able user before the server boots for the first time.
+
+### Restoring `OWNER` after a botched demotion
+
+A `MANAGER` accidentally clicked "Demote to ADMIN" on the only `OWNER` of the `marketing` workspace. The web UI now refuses every elevation request from that user (no `OWNER` left to authorise it). Recovery on the host:
+
+```bash
+sudo systemctl stop crewshipd
+crewship admin promote \
+  --email=lead@example.com \
+  --role=OWNER \
+  --workspace=marketing
+# Promoted lead@example.com to OWNER in workspace marketing.
+sudo systemctl start crewshipd
+```
+
+The audit timeline gets a `journal.admin_cli` entry attributed to the OS user who ran the rescue, so postmortem readers can see *exactly* how the workspace got unstuck without the change appearing as if the system had self-healed.
+
+## API reference
+
+The admin CLI is **deliberately not** exposed as an HTTP API — that's the whole point of the surface. Every other Crewship feature has a `/api-reference/<thing>` page; this one does not. Routing recovery through the same server you're recovering would be circular, and exposing these writes over HTTP would create a parallel auth surface to harden when the existing one already covers every healthy-system case.
+
+The full source of truth is one file: [`cmd/crewship/cmd_admin.go`](https://github.com/crewship-ai/crewship/blob/main/cmd/crewship/cmd_admin.go) (~407 lines). It's small enough to read top-to-bottom; the test file `cmd_admin_test.go` covers the same surface.
+
+The SQL surface area each subcommand touches:
+
+| Subcommand | Tables written | Constraints enforced |
+|------------|---------------|----------------------|
+| `reset-password` | `users.password_hash`, `users.password_updated_at` | Email must exist (no implicit `INSERT`). |
+| `list-users` | *(read-only)* | None — just `SELECT email, role, created_at, last_login_at FROM users`. |
+| `promote` | `workspace_members.role` | Refuses to demote the last `OWNER` of a workspace; if `--workspace` omitted, user must belong to exactly one workspace. |
+
+Every successful write also appends one row to `journal_entries` with `entry_type='journal.admin_cli'`, attributed to `host:$USER`. Read it back through the same [Crew Journal](/api-reference/journal) API the rest of the audit timeline uses — admin-CLI actions are first-class events, not invisible side-channels.
+
+For the user/workspace data model these commands operate on, see [`/api-reference/users`](/api-reference/users) and the workspace endpoints — the schemas are identical; the CLI just bypasses the HTTP layer that normally fronts them.
+
+## Common pitfalls
+
+- **Don't run as `root` against a service-owned data directory.** If `crewshipd` runs as a `crewship` system user, the data directory is owned by that account. Running `crewship admin` as `root` creates root-owned WAL / journal files; on next server start, `crewshipd` can't write them and the server bails with a permissions error. Always `sudo -u crewship crewship admin …`.
+- **Stop the server first, every time.** Two processes writing the same SQLite file is the failure mode this guard exists to prevent. The admin CLI probes for the lock and refuses to run when it's held, but if you ever see "lock acquired anyway" output (i.e. the probe was racy), assume the database is now in a partially-applied state and restore from backup before continuing.
+- **Take a backup before any write.** There is no undo for `reset-password` or `promote`. A `crewship backup create` (or just a copy of `crewship.db`) before the recovery makes a botched call a one-command rollback instead of a multi-hour incident.
+- **Email casing is significant.** `users.email` is stored as the user typed it; `Admin@example.com` and `admin@example.com` are distinct rows. Always `list-users` first and copy the email value verbatim — the reset will silently target nothing useful if the casing drifts.
+- **`reset-password` does NOT invalidate active sessions.** Active sessions for the affected user keep working until the server restarts (which drops the in-memory session store). If the reset is a security event (suspected compromise), restart `crewshipd` immediately after the reset.
+- **Don't put the password in shell history.** `--password='…'` lands in `~/.bash_history` and is visible in `ps` to anyone with shell access during the window the command runs. Prefer the interactive prompt; for scripted use, pass via `--password="$VAR"` where `VAR` is sourced from an env file or BuildKit secret mount.
+- **`CREWSHIP_DATA_DIR` overrides `~/.crewship`.** On a host where the service was started with a custom data dir (common on dev VMs), running `crewship admin` with default env points at the wrong empty database, silently fails to find the user, and prints a misleading "no such email" error. Export the same `CREWSHIP_DATA_DIR` the service uses, or pass `--data-dir`.
+- **Migration version conflicts can hide your write.** If the data directory predates the migration that added the column you're updating (e.g. `password_updated_at`), the write succeeds but the new column stays at its default. Always run `crewship migrate` before `crewship admin` on a database that was created on an older binary.
+
+## Related
+
+- [Authentication](/guides/auth) — the in-band recovery flow (email-based password reset) for users without shell access.
+- [Backup](/guides/backup) — what to do before running admin commands against a production database.
+- [Installation](/guides/installation) — where `CREWSHIP_DATA_DIR` is configured and the SQLite file lives.
