@@ -269,7 +269,7 @@ func TestConnectors_Verify_PATCallsHTTPEndpoint(t *testing.T) {
 	yaml := `id: ad-hoc
 name: Ad hoc
 auth_mode: pat
-brand: {logo: x, color: "#000"}
+brand: {logo: x, color: "#000000"}
 category: testing
 fields:
   - {key: api_key, label: API Key, type: password, required: true}
@@ -331,7 +331,7 @@ func TestConnectors_Verify_PATInvalidToken(t *testing.T) {
 	yaml := `id: bad-token
 name: Bad
 auth_mode: pat
-brand: {logo: x, color: "#000"}
+brand: {logo: x, color: "#000000"}
 category: testing
 fields:
   - {key: api_key, label: API Key, type: password, required: true}
