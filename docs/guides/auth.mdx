@@ -27,6 +27,23 @@ Reach for this guide when you're configuring, debugging, or extending an authent
 
 For one-off recovery without shell access, the in-band `/forgot` flow above is the answer; for an admin locked out at the host level, jump to the [Admin CLI](/guides/admin-cli) guide instead.
 
+## Key concepts
+
+| Term | What it means here |
+|------|-------------------|
+| **Bootstrap** | First-server-start endpoint (`POST /api/v1/bootstrap`) that creates the initial `OWNER` from a fresh database. Idempotent: refuses to mint a second admin if one already exists. The web wizard at `/bootstrap` is the human surface; CI installs hit the endpoint directly. |
+| **Session** | A server-side row in the sessions store, identified by a cookie set on sign-in. Listable + revocable by the owning user via `GET /api/v1/auth/sessions` and `POST /api/v1/auth/sessions/{id}/revoke`. Backs every authed HTTP request. |
+| **`RequireAuth` middleware** | The mux wrapper (`r.authMw.RequireAuth`) that gates every non-public route. Reads the session cookie, hits the sessions store, attaches the user to the request context via `UserFromContext`. Endpoints below this never re-check auth. |
+| **Bcrypt hash** | The on-disk form of every password and every CLI token. Cost factor is held constant across signup, admin-CLI reset, and pairing redemption so the verifier doesn't have to special-case origin. |
+| **`/forgot` non-enumeration** | The recovery flow always returns 200 regardless of whether the email matches a real user. Real vs fake is signalled only by what (if anything) arrives in the user's inbox — never by HTTP status or response shape. |
+| **Reset token** | A 30-minute single-use token mailed via Resend on a successful `/forgot`. Stored hashed in `password_reset_tokens`; redemption (`POST /auth/reset`) invalidates all the user's active sessions atomically with the password write. |
+| **`CREWSHIP_PUBLIC_URL`** | The authoritative origin for reset-link URLs. Parsed once at handler construction; if unset or malformed, the mailer refuses to send rather than falling back to the `Host` header (which is attacker-tainted via Host-header injection on `/forgot`). |
+| **CLI token** | A long-lived API credential (`POST /api/v1/auth/cli-token`) that the `crewship` binary stores in `~/.crewship/cli-config.yaml`. Bcrypt-hashed at rest; revocable by the issuing user. |
+| **Pairing code** | An 8-character Crockford-base32 code with a 10-minute TTL produced by `POST /auth/pair/start`. The CLI redeems it on `POST /auth/pair/redeem` (unauthed by design — the code *is* the credential) and gets back a fresh CLI token. See [CLI Pairing](/guides/cli-pairing). |
+| **Google OAuth handler** | Optional. The `/auth/google/*` routes only mount when both `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are set; `/auth/google/status` always responds so the frontend can decide whether to render the "Sign in with Google" button. |
+| **NextAuth shim** | The `/api/auth/*` set of endpoints (`csrf`, `providers`, `session`, `callback/credentials`, `token/refresh`, `signin`, `signout`, `error`) that implement the NextAuth client contract. Lets the Next.js frontend treat Crewship like any other NextAuth provider with no custom glue. |
+| **Mailer** | The interface in `internal/mailer/`. `mailer.NewFromEnv()` returns the Resend implementation when `RESEND_API_KEY` is set, or `mailer.Disabled` (which returns `ErrDisabled` on every `Send` call) otherwise. The disabled mailer is a feature, not a bug — it keeps `/forgot` non-enumerable on installs that haven't configured email. |
+
 ## Related
 
 - [Onboarding](/guides/onboarding) — the first-run flow that bootstraps the initial admin account.
