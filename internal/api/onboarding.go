@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -599,6 +600,15 @@ func validateOnboardingCredential(ctx context.Context, provider, value string) e
 // works. Other failures (network, 5xx) are treated as soft — we
 // log + accept rather than block onboarding on Anthropic flaking.
 func probeAnthropicOAuthToken(parent context.Context, token string) error {
+	// CREWSHIP_E2E_SKIP_TOKEN_PROBE short-circuits the live Anthropic
+	// call so the onboarding E2E suite can run in CI without burning a
+	// real CLI token (and without making nightly runs depend on
+	// api.anthropic.com being up). Only honoured for the truthy values
+	// "1" / "true" so an accidental empty-string export doesn't widen
+	// the gate. Never set this in production.
+	if v := os.Getenv("CREWSHIP_E2E_SKIP_TOKEN_PROBE"); v == "1" || v == "true" {
+		return nil
+	}
 	const url = "https://api.anthropic.com/v1/messages"
 	const body = `{"model":"claude-3-5-haiku-latest","max_tokens":1,"messages":[{"role":"user","content":"ok"}]}`
 	// Derive from the parent so request cancellation propagates here
