@@ -39,6 +39,12 @@ builds:
       - -X main.version={{.Version}}
       - -X main.commit={{.Commit}}
       - -X main.date={{.Date}}
+      # Sentry DSN injected from the SENTRY_DSN GitHub Actions secret.
+      # When unset (local goreleaser snapshot runs), the variable expands to
+      # an empty string and the crashreport package short-circuits Init() —
+      # consent state is still recorded but no events are sent. Production
+      # release builds must set this secret to enable crash visibility.
+      - -X github.com/crewship-ai/crewship/internal/crashreport.DSN={{ envOrDefault "SENTRY_DSN" "" }}
 
 archives:
   - id: default

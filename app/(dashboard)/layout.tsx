@@ -6,6 +6,7 @@ import { Loader2 } from "lucide-react"
 import { AppSidebar } from "@/components/layout/app-sidebar"
 import { AppToolbar } from "@/components/layout/app-toolbar"
 import { RuntimeBanner } from "@/components/layout/runtime-banner"
+import { UpdateBanner } from "@/components/layout/update-banner"
 import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar"
 import { RealtimeProvider } from "@/hooks/use-realtime"
 import { RealtimeToasts } from "@/components/layout/realtime-toasts"
@@ -41,6 +42,7 @@ export default function DashboardLayout({
           <AppToolbar />
           <RealtimeStatusBanner />
           <RuntimeBanner />
+          <UpdateBanner />
           <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden bg-background rounded-t-2xl">
             {children}
           </div>

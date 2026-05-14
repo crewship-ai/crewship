@@ -14,6 +14,7 @@ import (
 	api "github.com/crewship-ai/crewship/internal/api"
 	"github.com/crewship-ai/crewship/internal/chatbridge"
 	"github.com/crewship-ai/crewship/internal/config"
+	"github.com/crewship-ai/crewship/internal/crashreport"
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/license"
 	"github.com/crewship-ai/crewship/internal/logging"
@@ -25,6 +26,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/scheduler"
 	"github.com/crewship-ai/crewship/internal/server"
 	bundledSkills "github.com/crewship-ai/crewship/internal/skills/bundled"
+	"github.com/crewship-ai/crewship/internal/update"
 	"github.com/crewship-ai/crewship/internal/ws"
 	"github.com/crewship-ai/crewship/web"
 	"github.com/spf13/cobra"
@@ -91,6 +93,9 @@ var startCmd = &cobra.Command{
 		}
 		defer db.Close()
 
+		if err := database.SnapshotBeforeMigrate(context.Background(), db, logger); err != nil {
+			return fmt.Errorf("failed to snapshot database before migrations: %w", err)
+		}
 		if err := database.Migrate(context.Background(), db.DB, logger); err != nil {
 			return fmt.Errorf("failed to run migrations: %w", err)
 		}
@@ -100,6 +105,18 @@ var startCmd = &cobra.Command{
 		if err := bundledSkills.Install(context.Background(), db.DB, logger); err != nil {
 			logger.Warn("failed to install bundled anthropic skills", "error", err)
 		}
+
+		// Telemetry: ENABLED by default for v0.1 beta. crashreport.Init
+		// writes "1" to app_settings on first start (no prompt). The
+		// operator can disable any time with `crewship telemetry off`.
+		// The first-run TTY prompt previously called here is deprecated
+		// for the beta default-on stance; see project memory
+		// telemetry-beta-default-on. Revert to prompted opt-in when
+		// flipping the Init default back for v1.0.
+		if err := crashreport.Init(context.Background(), db.DB, version, logger); err != nil {
+			logger.Warn("crashreport init failed", "error", err)
+		}
+		defer crashreport.Flush(2 * time.Second)
 
 		lic := license.New()
 		if cfg.License.FilePath != "" {
@@ -132,6 +149,22 @@ var startCmd = &cobra.Command{
 			"http_addr", cfg.Server.Host+":"+strconv.Itoa(cfg.Server.Port),
 			"ipc_socket", cfg.IPC.SocketPath,
 		)
+
+		// Fire-and-forget update check. Result is logged on the next line
+		// after the network call returns; never blocks the boot path. The
+		// internal/update package caches for 24h so this is at most one
+		// GitHub API hit per day per install.
+		go func() {
+			r, err := update.Check(context.Background(), version)
+			if err != nil {
+				logger.Debug("update check failed", "error", err)
+				return
+			}
+			if r != nil && r.Newer {
+				logger.Info("crewship update available", "current", r.Current, "latest", r.Latest, "url", r.URL)
+				fmt.Fprint(os.Stderr, update.FormatBanner(r))
+			}
+		}()
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
@@ -186,6 +219,7 @@ var startCmd = &cobra.Command{
 		// purely to avoid an api → chatbridge import (api already depends on
 		// chatbridge for ChatHandler, so the dep flows the other way).
 		if apiRouter := srv.APIRouter(); apiRouter != nil {
+			apiRouter.SetVersion(version)
 			if ph := apiRouter.Provisioning(); ph != nil {
 				bridge.SetProvisioningEnqueuer(provisioningAdapter{h: ph})
 			}
