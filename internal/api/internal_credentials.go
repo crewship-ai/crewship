@@ -1,13 +1,83 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"errors"
+	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/encryption"
 )
+
+// sidecarUseDebounce throttles sidecar-driven USE events so the audit
+// timeline doesn't fill with one row per poll cycle. The sidecar fetches
+// credentials whenever an agent is about to consume them; a 60s window
+// is long enough to merge bursts (one agent run usually fetches each
+// credential once at start, maybe again on rotate) and short enough to
+// catch independent runs.
+const sidecarUseDebounce = 60 * time.Second
+
+// maybeRecordSidecarUse emits an AuditEventUse for credID iff the most
+// recent USE event for the same credential is older than
+// sidecarUseDebounce. Errors are logged but never bubbled — audit
+// failure must not block the credential fetch the sidecar is doing.
+//
+// Closes the gap noted in F-3 of the credentials/scrubber pentest agent:
+// the audit timeline previously showed only manual Test/Rotate/Revoke,
+// not the actual sidecar-driven USE that's what an incident responder
+// most cares about ("when was this credential last touched?").
+//
+// The debounce check is implemented as an atomic compare-and-swap
+// against the credentials.last_used_at column rather than a read-then-
+// decide pattern. Pre-fix two parallel sidecar polls within the
+// debounce window could both read the stale timestamp, both decide to
+// record, and emit two audit rows for what should have been one event.
+// CodeRabbit caught the race on the first review pass. The CAS
+// guarantees exactly one goroutine wins per debounce window — the
+// loser's UPDATE matches zero rows and bails before recording.
+func maybeRecordSidecarUse(ctx context.Context, db *sql.DB, logger *slog.Logger, credID string, ip string) {
+	if credID == "" {
+		return
+	}
+
+	// CAS step: bump last_used_at iff the stored value is older than
+	// (now - debounce) — or NULL (never used). A successful UPDATE means
+	// we own the right to record. Concurrent callers see RowsAffected == 0
+	// and bail.
+	now := time.Now().UTC()
+	threshold := now.Add(-sidecarUseDebounce).Format(time.RFC3339)
+	nowRFC := now.Format(time.RFC3339)
+
+	res, err := db.ExecContext(ctx, `
+		UPDATE credentials
+		   SET last_used_at = ?
+		 WHERE id = ?
+		   AND (last_used_at IS NULL OR last_used_at < ?)`,
+		nowRFC, credID, threshold)
+	if err != nil {
+		// CAS failure (DB error, etc.) shouldn't block the fetch — log
+		// and skip. Worst case the audit row is missed for this poll;
+		// the next poll past the debounce will catch it.
+		if logger != nil {
+			logger.Debug("sidecar use audit: CAS update failed", "credential_id", credID, "error", err)
+		}
+		return
+	}
+	n, err := res.RowsAffected()
+	if err != nil || n == 0 {
+		// Lost the race (another goroutine just bumped it) or the row
+		// doesn't exist at all (already deleted). Either way: skip.
+		return
+	}
+
+	if err := RecordCredentialEvent(ctx, db, logger, credID, AuditEventUse, "" /* agent unknown at this layer */, ip, map[string]any{"source": "sidecar_fetch"}); err != nil {
+		if logger != nil {
+			logger.Warn("sidecar use audit: record failed", "credential_id", credID, "error", err)
+		}
+	}
+}
 
 // ListCredentials returns active credentials for the sidecar, with decrypted values.
 // GET /api/v1/internal/credentials — called by sidecar to inject secrets into agent environments.
@@ -78,6 +148,11 @@ func (h *InternalHandler) ListCredentials(w http.ResponseWriter, r *http.Request
 				c.RefreshToken = &rt
 			}
 		}
+		// Best-effort USE audit. Empty IP is fine — internal callers are
+		// the sidecar (loopback) and the IP would always be 127.0.0.1
+		// which is no signal. Debounced to one row per credential per
+		// minute so a busy sidecar doesn't flood the timeline.
+		maybeRecordSidecarUse(r.Context(), h.db, h.logger, c.ID, "")
 		result = append(result, c)
 	}
 	if err := rows.Err(); err != nil {
