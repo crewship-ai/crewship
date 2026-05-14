@@ -961,6 +961,7 @@ export function OrchestrationLayout({
                   <div className="flex items-center gap-2 px-3 py-2 border-b border-white/[0.1] shrink-0">
                     <button
                       onClick={closeMobileDetail}
+                      aria-label="Back"
                       className="h-8 w-8 min-h-[44px] min-w-[44px] flex items-center justify-center text-muted-foreground hover:text-foreground"
                     >
                       <ChevronLeft className="h-4 w-4" aria-hidden="true" />

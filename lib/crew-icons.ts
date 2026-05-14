@@ -521,7 +521,9 @@ export const CREW_ICON_CATEGORIES = Object.keys(CATEGORY_MAP)
 export function searchCrewIcons(query: string): string[] {
   if (!query.trim()) return ALL_CREW_ICON_NAMES
 
-  const q = query.toLowerCase()
+  // Trim before lowercasing so " code " matches "code" — the icon picker
+  // input doesn't strip whitespace before passing the query in.
+  const q = query.trim().toLowerCase()
 
   const categoryMatch = CATEGORY_MAP[q]
   if (categoryMatch) {

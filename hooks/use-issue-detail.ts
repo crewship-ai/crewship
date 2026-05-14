@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useState } from "react"
+import { useCallback, useRef, useState } from "react"
 import type { Mission, IssueComment } from "@/lib/types/mission"
 
 /**
@@ -28,16 +28,24 @@ export function useIssueDetail({
 }) {
   const [selectedIssue, setSelectedIssue] = useState<Mission | null>(null)
   const [issueComments, setIssueComments] = useState<IssueComment[]>([])
+  // Sequencing guard for fetchComments: each call bumps the request id,
+  // and only the latest response is allowed to mutate comments. Without
+  // this, rapid issue switching can let a slow earlier fetch land after
+  // a faster later one and overwrite the wrong panel.
+  const commentRequestId = useRef(0)
 
   const fetchComments = useCallback(
     async (crewId: string, identifier: string) => {
+      const myReq = ++commentRequestId.current
       try {
         const res = await fetch(
           `/api/v1/crews/${encodeURIComponent(crewId)}/issues/${encodeURIComponent(identifier)}/comments?workspace_id=${encodeURIComponent(workspaceId)}`,
         )
+        if (myReq !== commentRequestId.current) return
         if (res.ok) setIssueComments(await res.json())
         else setIssueComments([])
       } catch {
+        if (myReq !== commentRequestId.current) return
         setIssueComments([])
       }
     },
@@ -48,6 +56,7 @@ export function useIssueDetail({
     async (issue: Mission) => {
       // Toggle: clicking the same issue again deselects it.
       if (selectedIssue?.id === issue.id) {
+        commentRequestId.current++
         setSelectedIssue(null)
         setIssueComments([])
         return
@@ -56,12 +65,16 @@ export function useIssueDetail({
       onIssueSelected?.()
       if (issue.crew_id && issue.identifier) {
         await fetchComments(issue.crew_id, issue.identifier)
+      } else {
+        commentRequestId.current++
+        setIssueComments([])
       }
     },
     [selectedIssue?.id, onIssueSelected, fetchComments],
   )
 
   const handleIssueClose = useCallback(() => {
+    commentRequestId.current++
     setSelectedIssue(null)
     setIssueComments([])
   }, [])

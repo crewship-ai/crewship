@@ -7,14 +7,15 @@ import (
 	"github.com/crewship-ai/crewship/internal/cli"
 )
 
-// looksLikeCUID returns true if s looks like a CUID (c[a-z0-9]{20,}+).
-// CUIDs are the canonical primary-key format across the API; if a caller
-// already has one, slug-resolution can short-circuit.
+// looksLikeCUID returns true if s looks like a CUID — the canonical primary-
+// key format across the API. The shape is "c" followed by at least 20
+// lowercase-alphanumeric chars (total ≥21), matching cuid2's default length.
+// If a caller already has one we can short-circuit slug resolution.
 func looksLikeCUID(s string) bool {
-	if len(s) < 20 || s[0] != 'c' {
+	if len(s) < 21 || s[0] != 'c' {
 		return false
 	}
-	for _, r := range s {
+	for _, r := range s[1:] {
 		if !((r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')) {
 			return false
 		}

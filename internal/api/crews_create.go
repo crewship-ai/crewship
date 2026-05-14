@@ -68,7 +68,7 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	// V-17: Validate slug format to prevent injection via container names / file paths
 	if !validSlugFormat(req.Slug) {
-		replyError(w, http.StatusBadRequest, "slug must contain only lowercase letters, numbers, and hyphens")
+		replyError(w, http.StatusBadRequest, "slug must contain only lowercase letters, numbers, hyphens, and underscores")
 		return
 	}
 

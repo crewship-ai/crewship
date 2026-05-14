@@ -431,9 +431,20 @@ export function filterPersonas(
 
 /** Per-category counts for the filter chip badges. */
 export function categoryCounts(personas: AgentPersona[]): Record<PersonaCategory | "all", number> {
-  const out: Record<string, number> = { all: personas.length }
+  // Initialise every category to zero so callers can render
+  // chips for empty categories (e.g. "custom" before any user
+  // personas exist) without each call site repeating the guard.
+  const out: Record<PersonaCategory | "all", number> = {
+    all: personas.length,
+    engineering: 0,
+    research: 0,
+    quality: 0,
+    writing: 0,
+    devops: 0,
+    custom: 0,
+  }
   for (const p of personas) {
     out[p.category] = (out[p.category] ?? 0) + 1
   }
-  return out as Record<PersonaCategory | "all", number>
+  return out
 }
