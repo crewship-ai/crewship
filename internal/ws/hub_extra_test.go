@@ -381,7 +381,9 @@ func TestConsecutiveDropsCounterResetsOnSuccess(t *testing.T) {
 // drops in a row past the cutoff and asserts the client is torn down
 // exactly once. The disconnect runs in a goroutine so the test polls
 // for ctx cancellation rather than asserting synchronously, but the
-// counter and one-shot flag are observable immediately.
+// counter and one-shot flag are observable immediately. dispatch is
+// invoked directly (rather than via Broadcast) so the assertions don't
+// race the buffered hub.broadcast channel + Run goroutine.
 func TestSlowConsumerForceDisconnect(t *testing.T) {
 	t.Parallel()
 	hub := newRunningHub(t)
