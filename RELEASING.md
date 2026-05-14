@@ -196,12 +196,20 @@ production data and a bad one is hard to undo. Guardrails:
 ## Telemetry (crash reporting) — Sentry setup
 
 Crewship ships with Sentry-backed crash reporting wired through
-`internal/crashreport`. For the **v0.1 beta only** the default is
-**enabled** (opt-out): on first `crewship start`, if no consent setting
-exists, `crashreport.Init` writes `"1"` to `app_settings` and starts
-the Sentry client. The operator can disable any time with
-`crewship telemetry off`; the off-state is sticky and Init will not
-flip it back.
+`internal/crashreport`. The runtime behaviour for **v0.1 beta** is:
+
+- **Default: ENABLED**. There is no first-run prompt — earlier drafts
+  had a TTY prompt with hard-default-no, but that path was removed in
+  favour of a deterministic default-on so a non-interactive deployment
+  (Docker, systemd, CI) doesn't end up silently telemetry-less. On
+  first `crewship start`, if no consent row exists in `app_settings`,
+  `crashreport.Init` writes `"1"` and brings the Sentry client up.
+- **`crewship telemetry off` is sticky.** Once the operator opts out
+  (writes `"0"` to `app_settings.telemetry_enabled`), Init treats that
+  as an explicit decision and never flips it back, regardless of the
+  beta default.
+- **Status visible any time** via `crewship telemetry status` — shows
+  enabled/disabled, install ID, and the resolved DSN endpoint host.
 
 The opt-out stance is a deliberate beta choice — a solo maintainer
 needs the crash signal — and is intended to revert to opt-in for

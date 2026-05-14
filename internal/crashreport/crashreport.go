@@ -24,6 +24,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"strings"
@@ -149,7 +150,7 @@ func CurrentBackend() Backend {
 func Init(ctx context.Context, db *sql.DB, version string, logger *slog.Logger) error {
 	enabled, asked, err := consentState(ctx, db)
 	if err != nil {
-		return err
+		return fmt.Errorf("read consent state: %w", err)
 	}
 
 	// Beta default: if the operator has never been asked, treat as opted
@@ -159,7 +160,7 @@ func Init(ctx context.Context, db *sql.DB, version string, logger *slog.Logger) 
 	// not chase it through three packages.
 	if !asked {
 		if _, _, err := SetOptIn(ctx, db, true); err != nil {
-			return err
+			return fmt.Errorf("persist beta default opt-in: %w", err)
 		}
 		enabled = true
 	}
@@ -171,7 +172,7 @@ func Init(ctx context.Context, db *sql.DB, version string, logger *slog.Logger) 
 
 	installID, err := ensureInstallID(ctx, db)
 	if err != nil {
-		return err
+		return fmt.Errorf("ensure install ID: %w", err)
 	}
 
 	resolvedDSN := ResolveDSN()
