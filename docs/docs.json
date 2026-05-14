@@ -24,7 +24,11 @@
           {
             "group": "Guides",
             "pages": [
+              "guides/install",
               "guides/installation",
+              "guides/onboarding",
+              "guides/auth",
+              "guides/admin-cli",
               "guides/first-crew",
               "guides/chat-sessions",
               "guides/devcontainers",
@@ -39,6 +43,7 @@
               "guides/routines-cookbook",
               "guides/routines-migration",
               "guides/cli-adapters",
+              "guides/cli-pairing",
               "guides/cli/claude-code",
               "guides/cli/codex",
               "guides/cli/gemini",
@@ -64,6 +69,7 @@
               "guides/watch-roster",
               "guides/consolidate",
               "guides/telemetry",
+              "guides/tracing",
               "guides/llm-middleware",
               "guides/migrations"
             ]
@@ -71,6 +77,7 @@
           {
             "group": "Security",
             "pages": [
+              "security/threat-model",
               "security/rbac",
               "security/encryption",
               "security/container-isolation",
@@ -134,6 +141,7 @@
               "api-reference/overview",
               "api-reference/crews",
               "api-reference/agents",
+              "api-reference/runs",
               "api-reference/missions",
               "api-reference/issues",
               "api-reference/credentials",

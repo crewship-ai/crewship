@@ -1,103 +1,166 @@
 ---
 title: "Telemetry"
-description: "OpenTelemetry GenAI spans with W3C Trace Context propagation into journal entries."
-icon: "activity"
+description: "Anonymous crash reporting in v0.1 beta — opt out with one command, override the Sentry DSN, and review exactly what does and does not leave your machine."
+icon: "shield-halved"
 ---
 
 # Telemetry
 
-The `telemetry` package wires Crewship to OpenTelemetry. It owns three concerns:
+Crewship sends anonymous crash reports to help the maintainer diagnose
+bugs in the v0.1 beta. This page covers what is sent, how to opt out,
+and how to redirect crash data to your own Sentry project.
 
-1. **Provider init** -- build an OTLP HTTP exporter or fall back to a no-op tracer when no endpoint is configured.
-2. **Span builders** -- typed helpers that create agent, tool, and LLM spans with the attributes prescribed by the OTel GenAI Semantic Conventions (`gen_ai.system`, `gen_ai.request.model`, `gen_ai.usage.*`).
-3. **Propagation + journal integration** -- W3C Trace Context injection/extraction over HTTP headers plus a resolver that feeds the journal package so every entry is stamped with the current `trace_id` / `span_id`.
+<Note>
+This guide is about **crash reporting** (the `crewship telemetry`
+command). For distributed-tracing setup (OpenTelemetry spans into a
+collector) see [Tracing](/guides/tracing). Different package, different
+concern — same English word.
+</Note>
 
-## Zero-config safety
+## Default for v0.1 beta: enabled
 
-If `OTEL_EXPORTER_OTLP_ENDPOINT` is unset and `Init` is called with an empty endpoint, the shutdown function is a no-op and `otel.GetTracerProvider()` keeps returning the noop provider. Spans still exist but never leave the process -- developers run the binary without a collector and nothing breaks.
+The first time you run `crewship start`, telemetry is enabled
+automatically and a consent row is written to the local database. There
+is no first-run prompt — non-interactive deployments (Docker, systemd,
+CI) would otherwise end up silently telemetry-less, and a solo
+maintainer needs the crash signal during beta.
 
-```go
-shutdown, err := telemetry.Init(ctx, os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"), "crewship")
-if err != nil { return err }
-defer shutdown()
+The default-on stance applies to the **v0.1 beta only**. It will revert
+to opt-in for v1.0 GA.
+
+If you'd rather opt out immediately, run the command below before or
+after the first `crewship start`. Opt-out is sticky — once you've said
+no, the beta default never flips it back on.
+
+## Opting out
+
+```bash
+crewship telemetry off
 ```
 
-## Configuration
+Output:
 
-| Env var | Purpose |
-|---|---|
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | Collector URL. Accepts `host:port` (plaintext) or `http(s)://host:port[/path]`. |
-| `CREWSHIP_VERSION` | Stamped as `service.version` on the resource. Empty = `"dev"`. |
-
-Endpoint resolution order:
-
-1. The explicit `endpoint` argument to `Init` (most specific wins).
-2. `OTEL_EXPORTER_OTLP_ENDPOINT`.
-3. Empty string -> no-op tracer, nothing exported.
-
-The propagator is set to the W3C composite (TraceContext + Baggage) unconditionally so `Inject`/`Extract` work even in no-op mode. Without this, cross-process links are silently dropped when the exporter is disabled.
-
-## Span types
-
-```go
-ctx, span := telemetry.StartLLMSpan(ctx, "anthropic", "claude-sonnet-4-5")
-defer span.End()
-// ... make the call ...
-telemetry.RecordLLMUsage(span,
-    resp.InputTokens,
-    resp.OutputTokens,
-    resp.CachedInputTokens,
-    resp.CacheCreationTokens,
-    resp.CostUSD)
+```
+Telemetry disabled. No crash reports will be sent.
 ```
 
-| Helper | Span name | Attributes |
-|---|---|---|
-| `StartAgentSpan(ctx, agentID, role)` | `agent.run` | `crewship.agent.id`, `crewship.agent.role` |
-| `StartToolSpan(ctx, toolName)` | `tool.<toolName>` | `crewship.tool.name` |
-| `StartLLMSpan(ctx, provider, model)` | `llm.complete` | `gen_ai.system`, `gen_ai.request.model` |
-| `RecordLLMUsage(span, ...)` | -- | `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, `gen_ai.usage.cached_tokens`, `crewship.cost.usd` |
-| `RecordError(span, err)` | -- | Sets status=Error, records exception event |
+The setting is stored in `app_settings.telemetry_opt_in` in the local
+SQLite database and survives binary upgrades. To opt back in:
 
-LLM spans are added by `telemetry.LLMMiddleware`, the outermost layer of the [LLM middleware stack](/guides/llm-middleware).
-
-## Journal integration
-
-At startup call `telemetry.RegisterJournalResolver()` -- this registers a `journal.SetTraceResolver` callback that pulls the active span context from `ctx` and returns `(trace_id, span_id)`. Every journal entry written via `Writer.Emit` then carries both IDs:
-
-```go
-// internal/journal/emit.go
-if e.TraceID == "" {
-    if t, s, ok := traceFromContext(ctx); ok {
-        e.TraceID, e.SpanID = t, s
-    }
-}
+```bash
+crewship telemetry on
 ```
 
-The `journal_entries` table indexes `trace_id` for efficient trace -> journal lookups:
+## Checking current state
 
-```sql
-CREATE INDEX idx_journal_trace ON journal_entries(trace_id) WHERE trace_id IS NOT NULL;
+```bash
+crewship telemetry status
 ```
 
-From a trace you've opened in your collector, search the journal for `trace_id = <that>` and you get every operation recorded during that request without grepping logs.
+Sample output when enabled:
 
-## Propagation across processes
+```
+Telemetry: ENABLED
+  install_id: 7c4a9f1e2b...
+  endpoint:   o12345.ingest.sentry.io (vendor default (compiled in))
+  to disable: crewship telemetry off
+```
 
-The sidecar speaks HTTP to crewshipd. The server chain injects trace headers on every outbound IPC call, and the sidecar extracts them on every inbound. Result: a span started in the web handler can span the sidecar's keeper evaluation call all the way to the gatekeeper LLM round-trip as a single trace.
+- `install_id` — anonymous random identifier (32 hex chars) generated
+  on first opt-in, stable across opt-out/opt-in cycles. The backend
+  uses it only to group crashes by install; it carries no PII.
+- `endpoint` — the host portion of the resolved Sentry DSN, so you can
+  see _where_ events route without the full secret-shaped URL ending
+  up in terminal scrollback.
 
-For external webhooks fired by [Hooks](/guides/hooks), the `http` handler calls `telemetry.InjectHTTP(ctx, req)` before sending so the receiving system can correlate.
+## Routing to your own Sentry
 
-## Gotchas
+If you self-host or have a regulated environment that can't share
+crash data with the vendor, point Crewship at your own Sentry project
+with the `CREWSHIP_SENTRY_DSN` env var:
 
-- **HTTP exporter only.** The `otlptrace-grpc` exporter pulls in grpc which balloons the build. HTTP is fine for expected volume and plays nicer with corporate proxies.
-- **Bare `host:port` is plaintext.** Use `https://collector:4318` if you need TLS -- bare hostports call `WithInsecure()`.
-- **Init is idempotent.** Re-calling it (tests, config reloads) swaps the global provider and shuts down the previous one cleanly.
-- **No spans without explicit wiring.** Adding telemetry to a new code path means wrapping the relevant call with a `StartXxxSpan` helper. The package does not auto-instrument HTTP handlers -- spans are deliberate, not reflexive.
-- **Don't stamp journal entries twice.** `Emit` fills `trace_id` only if the caller left it empty. If you construct an entry manually and set `TraceID` to something synthetic, the resolver won't overwrite it.
+```bash
+CREWSHIP_SENTRY_DSN=https://<key>@<org>.ingest.sentry.io/<project> crewship start
+```
+
+Resolution order (most specific wins):
+
+1. `CREWSHIP_SENTRY_DSN` environment variable
+2. The vendor DSN compiled into the release binary
+3. Empty — telemetry stays off regardless of consent
+
+`crewship telemetry status` will show `CREWSHIP_SENTRY_DSN env override`
+as the source when your value is in use. Local development builds ship
+with an empty compiled-in DSN, so they are off by default unless you
+provide one.
+
+## What is sent
+
+When telemetry is enabled:
+
+- Go **stack traces** and **error messages** (subject to scrubbing —
+  see below)
+- Crewship **version**, commit SHA, OS, and architecture
+- The anonymous **install ID** (random 32-hex)
+- A **Sentry "environment"** tag derived from the version (`beta`,
+  `production`)
+
+## What is never sent
+
+The client-side `BeforeSend` hook in `internal/crashreport/sentry_adapter.go`
+strips the following before the event leaves the process:
+
+- Workspace, user, or credential data
+- HTTP request bodies
+- `Authorization`, `Cookie`, `Set-Cookie`, `X-API-Key`, `X-Auth-Token`,
+  `X-CSRF-Token`, `X-Amz-Security-Token`, `Proxy-Authorization`, and
+  `X-Crewship-Internal-Token` headers
+- Query-string keys whose name contains `token`, `secret`, `password`,
+  `auth`, `session`, `code`, or `key`
+- Environment variables
+- The machine hostname — Sentry's `ServerName` field is overridden
+  with the anonymous install ID
+- The Go module list, runtime/device/culture contexts that `sentry-go`
+  normally attaches
+
+The pinning test `TestScrubEvent_DropsLeakyContexts` in
+`internal/crashreport/crashreport_test.go` enforces this list — adding
+a new context to the Sentry event requires updating the scrub hook _or_
+the test fails.
+
+### Server-side scrubbing as a defense in depth
+
+The client scrub catches everything in structured fields. It cannot
+reliably catch free-form strings _we_ generate, e.g.
+`fmt.Errorf("auth failed for %s", userEmail)`. The maintainer's Sentry
+project has server-side regex scrubbing rules enabled (`@email-pattern`,
+`@password-pattern`, `@creditcard-pattern`, bearer-token and API-key
+regexes) to mask anything that slips through.
+
+If you've routed Crewship to your **own** Sentry project via
+`CREWSHIP_SENTRY_DSN`, configure the same rules under **Project
+Settings → Security & Privacy → Data Scrubbing**. The full rule list
+is documented in [RELEASING.md](https://github.com/crewship-ai/crewship/blob/main/RELEASING.md#telemetry-crash-reporting--sentry-setup).
+
+## Verifying nothing leaks
+
+The cheapest end-to-end check is to opt in temporarily, raise a test
+error in your own Crewship instance, and inspect the event in the
+Sentry UI:
+
+1. `crewship telemetry on`
+2. Trigger a known-safe error (e.g. `crewship retry <run-with-nonexistent-id>`)
+3. Open the resulting Sentry event
+4. Confirm headers/query/env contexts are absent and `ServerName`
+   matches your install ID
+
+If anything looks wrong, **file an issue** (security label) at
+[github.com/crewship-ai/crewship/issues](https://github.com/crewship-ai/crewship/issues)
+and opt out (`crewship telemetry off`) while it's investigated.
 
 ## Related
 
-- [LLM middleware](/guides/llm-middleware) -- outermost layer starts LLM spans.
-- [Crew Journal](/guides/crew-journal) -- `trace_id` / `span_id` columns.
-- OTel GenAI Semantic Conventions: https://opentelemetry.io/docs/specs/semconv/gen-ai/
+- [Tracing (OpenTelemetry)](/guides/tracing) — distributed tracing
+  pipeline, different package, different opt-in surface.
+- [Threat model](/security/threat-model) — broader security posture.
+- `RELEASING.md` in the repo — maintainer-side Sentry project setup.

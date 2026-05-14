@@ -267,7 +267,7 @@ Cross-tenant existence is never leaked: unknown IDs return 404 with the same sha
 ## Gotchas
 
 - **TS precision.** Writes serialise as `2006-01-02T15:04:05.000Z` (milli). Reads also accept RFC3339Nano and second-precision strings so backfilled rows don't fail to parse.
-- **Empty trace/span.** The `trace_id`/`span_id` columns are populated by the [telemetry](/guides/telemetry) package's `SetTraceResolver`. If OpenTelemetry is not initialised the columns stay NULL -- this is fine, not a bug.
+- **Empty trace/span.** The `trace_id`/`span_id` columns are populated by the [tracing](/guides/tracing) package's `SetTraceResolver`. If OpenTelemetry is not initialised the columns stay NULL -- this is fine, not a bug.
 - **Do not rename entry types.** A rename breaks every existing row. Add a new type and dual-write during the transition instead.
 
 ## Related

@@ -195,7 +195,7 @@ The SQL surface area each subcommand touches:
 
 Every successful write also appends one row to `journal_entries` with `entry_type='journal.admin_cli'`, attributed to `host:$USER`. Read it back through the same [Crew Journal](/api-reference/journal) API the rest of the audit timeline uses — admin-CLI actions are first-class events, not invisible side-channels.
 
-For the user/workspace data model these commands operate on, see [`/api-reference/users`](/api-reference/users) and the workspace endpoints — the schemas are identical; the CLI just bypasses the HTTP layer that normally fronts them.
+For the user/workspace data model these commands operate on, see the [Admin API reference](/api-reference/admin) — the underlying schemas are the same; the admin CLI just bypasses the HTTP layer that normally fronts them.
 
 ## Common pitfalls
 

@@ -356,7 +356,7 @@ crewship eval baseline diff my-summarizer-v1 \
 |---|---|
 | `PRODUCTION_READY` (≥90%) at fast | Ship. Save baseline. Add to CI. |
 | `FLAKY` (70-90%) at fast | Look at fail breakdown. Top reason `cost-cap` → bump cap. Top reason `rubric-fail` → tighten prompt or escalate tier. |
-| `UNRELIABLE` (<70%) at fast | Don't ship at fast. Bench at moderate. If still <70%, the gate is unsatisfiable — rewrite. |
+| `UNRELIABLE` (&lt;70%) at fast | Don't ship at fast. Bench at moderate. If still &lt;70%, the gate is unsatisfiable — rewrite. |
 | `BROKEN` (0%) | Auth issue, unsatisfiable gate, or always-failing guardrail. Check `--cooldown-ms 1000` to rule out rate limiting. |
 
 ---
