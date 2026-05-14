@@ -26,6 +26,23 @@ Turn memory on for any agent or crew whose value compounds across sessions. The 
 
 Skip memory if the agent is single-use, the conversation never references prior sessions, or the user actively *wants* a stateless interaction. The budget cost of an enabled-but-unused memory layer is non-zero — it eats characters that could carry richer per-turn context instead.
 
+## Key concepts
+
+| Term | What it means here |
+|------|-------------------|
+| **Memory tier** | One of `agent`, `crew`, `session`. Each is a separate FTS5 index and a separate slice of the system-prompt budget. `agent` is per-agent private, `crew` is lead-owned shared, `session` is the live LLM context window (not persisted). |
+| **`AGENT.md`** | The canonical long-term knowledge file for one agent. Lives at `/crew/agents/{slug}/.memory/AGENT.md` inside the container, `~/.memory/AGENT.md` from the agent's POV. The agent is instructed to append rather than overwrite, and to only remove entries that are explicitly outdated. |
+| **`CREW.md`** | The crew equivalent of `AGENT.md`. Lives at `/crew/shared/.memory/CREW.md`. Only the lead writes; every agent in the crew reads. Curated, single-voice — not a free-for-all. |
+| **`daily/`** | Per-day session notes (`daily/2026-05-14.md`). Captures what was done, decisions, observations. Both `agent` and `crew` tiers have a `daily/` folder; the lead writes the crew one. Searchable via FTS5; consolidated into the evergreen `*.md` over time by the [Consolidation worker](/guides/consolidate). |
+| **`topics/`** | Crew-only. Domain-specific knowledge files (`topics/deployment.md`, `topics/security.md`) that accrete bounded subject expertise. Hybrid retrieval ranks them above daily noise on on-topic queries. |
+| **FTS5 index** | SQLite's full-text-search-5 extension. Each tier has its own `index.sqlite` file managed by the sidecar. BM25 ranks results — relevance scoring used by virtually every modern search system since Elasticsearch. |
+| **Hybrid retrieval (RRF)** | When an in-process embedding model is configured, dense vector scoring runs alongside BM25 and the two ranked lists are fused via reciprocal rank fusion. From PR #212; sub-millisecond on tens of thousands of chunks because nothing leaves the process. |
+| **Budget** | The character allowance for memory content in the system prompt. Default 15,000 chars. The crew tier is capped at 40% of total; the agent tier reclaims the remainder. Empty tiers reclaim their entire share. |
+| **System-prompt injection** | The orchestrator's `BuildMemoryBlock` reads the top-K chunks at session start and prepends them between `[AGENT MEMORY]` / `[END AGENT MEMORY]` and `[CREW SHARED MEMORY]` / `[END CREW SHARED MEMORY]` markers. The LLM sees memory as part of its system prompt; the agent never has to *ask* for it. |
+| **Sidecar memory engine** | Each agent container's sidecar process (`localhost:9119`) owns the agent's FTS5 index and proxies search to the lead's sidecar for crew-tier queries. The lead sidecar reindexes the crew tier every 60 seconds. |
+| **`memory_enabled`** | Per-agent flag. `false` by default — memory tiers are not read, written, or indexed for that agent. Flip via `crewship agent update --memory-enabled`. |
+| **Consolidation** | The nightly worker in `internal/consolidate/` that promotes recurring observations from `daily/*.md` into `AGENT.md` / `CREW.md` and archives the original log. Keeps the evergreen tier from drifting stale and the daily tier from growing unboundedly. |
+
 ## Memory Tiers
 
 ```
