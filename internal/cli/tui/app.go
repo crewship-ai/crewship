@@ -111,14 +111,15 @@ type model struct {
 
 	err     string
 	focus   panelFocus
-	filter  string
 	width   int
 	height  int
 	loading bool
 
-	// journalSSEStarted ensures we only kick off the SSE pump once;
-	// re-subscribing on every tick would leak goroutines.
-	journalSSEStarted bool
+	// Removed unused: `filter` and `journalSSEStarted` were placeholders
+	// for the planned "/" filter input and the future SSE pump on the
+	// journal panel. Re-introduce when those features actually wire up
+	// — leaving dead struct fields keeps golangci-lint (unused) red on
+	// every PR.
 }
 
 type journalLine struct {

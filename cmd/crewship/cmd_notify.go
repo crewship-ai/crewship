@@ -143,16 +143,16 @@ func maybeNotifyRunComplete(startedAt time.Time, agentSlug, finalStatus string) 
 	_ = cli.OSNotify(ctx, title, body, level)
 }
 
-// maybeNotifyApproval is called by `approvals` poller / SSE listeners
-// when a pending approval lands. Opt-in.
-func maybeNotifyApproval(approvalID, title string) {
-	if !cli.NotificationsEnabled(cliCfg) {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
-	defer cancel()
-	_ = cli.OSNotify(ctx, "Crewship — approval needed", fmt.Sprintf("%s — %s", approvalID, title), cli.NotifyCritical)
-}
+// maybeNotifyApproval was a planned helper for the approvals poller /
+// SSE listeners. Wire it back when those code paths land — the
+// expected shape is:
+//
+//	if !cli.NotificationsEnabled(cliCfg) { return }
+//	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+//	defer cancel()
+//	_ = cli.OSNotify(ctx, "Crewship — approval needed", id+" — "+title, cli.NotifyCritical)
+//
+// Removed until then to keep golangci-lint (unused) green.
 
 func init() {
 	notifySendCmd.Flags().String("level", "info", "Notification urgency: info|warn|critical")

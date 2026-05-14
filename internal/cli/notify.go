@@ -28,12 +28,12 @@ const (
 	NotifyCritical
 )
 
-// notifierState carries one-time warning state so a missing CLI tool
-// (notify-send, osascript) doesn't spam stderr on every invocation.
-var (
-	notifierWarnOnce  sync.Once
-	notifierAvailable = true
-)
+// notifierWarnOnce carries one-time warning state so a missing CLI
+// tool (notify-send, osascript) doesn't spam stderr on every
+// invocation. The "available" boolean previously paired with this
+// was only ever written, never read — callers always check the
+// concrete error returned by OSNotify instead.
+var notifierWarnOnce sync.Once
 
 // OSNotify shows a desktop notification with title and body.
 //
@@ -71,7 +71,6 @@ func OSNotify(ctx context.Context, title, body string, level NotifyLevel) error 
 		notifierWarnOnce.Do(func() {
 			fmt.Fprintf(os.Stderr, "%s[notify]%s desktop notifications not supported on %s\n",
 				Yellow, Reset, runtime.GOOS)
-			notifierAvailable = false
 		})
 		return nil
 	}
