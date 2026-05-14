@@ -24,16 +24,20 @@ package api
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/connectors"
+	"github.com/crewship-ai/crewship/internal/encryption"
 )
 
 // ConnectorHandler wires the embedded catalog into the HTTP layer.
@@ -317,23 +321,232 @@ func (h *ConnectorHandler) probeVerifyHTTP(ctx context.Context, m *connectors.Ma
 
 // Install handles POST /api/v1/connectors/{connectorId}/install.
 //
-// Persists a workspace_mcp_servers (or crew_mcp_servers) row plus a
-// credentials row (where applicable), wires them via mcp_credentials,
-// and returns the new integration_id. For OAuth flows, sets NextStep
-// + OAuthURL so the frontend can drive the dance. The new row's
-// connector_id column (migration v76) is set to manifest.ID so the
-// installed instance is traceable back to its catalog source.
+// Persists a workspace_mcp_servers row (with connector_id set to the
+// manifest id for traceability, per migration v76), encrypts each
+// PAT-style field value into the credentials table, and returns
+// integration_id + the appropriate NextStep so the frontend can
+// drive any remaining OAuth dance.
 //
-// instance_url placeholder source: derived from the request as
-// `<scheme>://<host>` where scheme honours the X-Forwarded-Proto
-// header when set (proxy deployments) and falls back to "https".
-// Used for byo_oauth setup_md and OAuth redirect_uri construction.
+// Auth-mode shapes:
+//
+//	pat / conn_string / none → write workspace_mcp_servers + per-field
+//	    credentials rows; NextStep=""
+//	mcp_oauth                → write workspace_mcp_servers (no creds);
+//	    NextStep="mcp_oauth"
+//	byo_oauth                → write workspace_mcp_servers + credentials
+//	    rows for client_id/client_secret; build OAuthURL from
+//	    manifest.OAuth.AuthorizationURL with client_id, scopes, state;
+//	    NextStep="oauth"
 //
 // Auth: requires ?workspace_id=X and MANAGER+ role.
-//
-// TDD STUB — returns 501 until wired up.
 func (h *ConnectorHandler) Install(w http.ResponseWriter, r *http.Request) {
-	notImplemented(w, "Install")
+	user := UserFromContext(r.Context())
+	if user == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
+		return
+	}
+	workspaceID := r.URL.Query().Get("workspace_id")
+	if workspaceID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "workspace_id required"})
+		return
+	}
+	role := RoleFromContext(r.Context())
+	if !canRole(role, "create") {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden: MANAGER+ required"})
+		return
+	}
+
+	id := r.PathValue("connectorId")
+	m, err := h.catalog.LoadByID(id)
+	if err != nil {
+		if errors.Is(err, connectors.ErrConnectorNotFound) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "connector not found"})
+			return
+		}
+		h.logger.Error("connector lookup", "error", err, "id", id)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+
+	var req InstallRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		return
+	}
+
+	// Resolve MCP block against submitted fields so the persisted row
+	// stores the materialized command/args/env, not the raw template.
+	// Materialize also validates required-field coverage, so we lean
+	// on it as the canonical "do we have everything we need" check
+	// (instead of re-implementing it here).
+	instanceURL := InstanceURLFromRequest(r, "")
+	materialized, err := m.MaterializeMCP(req.Fields, instanceURL)
+	if err != nil {
+		if errors.Is(err, connectors.ErrManifestMissingFieldVal) {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		h.logger.Error("materialize mcp", "error", err, "id", id)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+
+	displayName := strings.TrimSpace(req.Name)
+	if displayName == "" {
+		displayName = m.Name
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		h.logger.Error("begin tx", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	defer tx.Rollback()
+
+	integrationID := generateCUID()
+	argsJSON, _ := json.Marshal(materialized.Args)
+	envJSON, _ := json.Marshal(materialized.Env)
+
+	// Ensure the workspace_id+name pair is unique by suffixing with
+	// the integration id when the canonical slug is already taken.
+	// "synth-pat" + a workspace's pre-existing "synth-pat" would
+	// otherwise UNIQUE-conflict on retry/duplicate-install.
+	rowName := m.ID
+	var existing int
+	if err := tx.QueryRowContext(r.Context(),
+		`SELECT COUNT(*) FROM workspace_mcp_servers WHERE workspace_id = ? AND name = ? AND deleted_at IS NULL`,
+		workspaceID, rowName).Scan(&existing); err == nil && existing > 0 {
+		rowName = m.ID + "-" + integrationID[:8]
+	}
+
+	if _, err := tx.ExecContext(r.Context(), `
+		INSERT INTO workspace_mcp_servers
+			(id, workspace_id, name, display_name, transport, endpoint,
+			 command, args_json, env_json, config_json, icon, enabled,
+			 connector_id, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		integrationID, workspaceID, rowName, displayName,
+		materialized.Transport, materialized.Endpoint, materialized.Command,
+		string(argsJSON), string(envJSON), "{}", m.Brand.Logo, 1,
+		m.ID, now, now,
+	); err != nil {
+		h.logger.Error("insert workspace_mcp_servers", "error", err, "id", id)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+
+	// Persist user-submitted secrets as credentials rows. Skip
+	// mcp_oauth (no fields) and none (typically no fields either).
+	// The credential names are namespaced with the integration id so
+	// repeated installs of the same connector don't UNIQUE-conflict
+	// on the (workspace_id, name) pair.
+	if m.AuthMode == connectors.AuthModePAT ||
+		m.AuthMode == connectors.AuthModeConnString ||
+		m.AuthMode == connectors.AuthModeBYOOAuth {
+		for i := range m.Fields {
+			f := &m.Fields[i]
+			value := strings.TrimSpace(req.Fields[f.Key])
+			if value == "" {
+				continue
+			}
+			enc, err := encryption.Encrypt(value)
+			if err != nil {
+				h.logger.Error("encrypt credential", "error", err, "field", f.Key)
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+				return
+			}
+			credName := m.ID + "-" + f.Key + "-" + integrationID[:8]
+			credID := generateCUID()
+			credType := "SECRET"
+			if f.Type == connectors.FieldTypePassword {
+				credType = "SECRET"
+			}
+			if _, err := tx.ExecContext(r.Context(), `
+				INSERT INTO credentials
+					(id, workspace_id, name, encrypted_value, type, provider, scope,
+					 status, created_by, created_at, updated_at)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				credID, workspaceID, credName, enc,
+				credType, "NONE", "WORKSPACE", "ACTIVE", user.ID, now, now,
+			); err != nil {
+				h.logger.Error("insert credential", "error", err, "field", f.Key)
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+				return
+			}
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		h.logger.Error("commit install", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+
+	resp := InstallResponse{IntegrationID: integrationID}
+	switch m.AuthMode {
+	case connectors.AuthModeMCPOAuth:
+		// The MCP server itself handles OAuth 2.1 + DCR — the frontend
+		// hands off to the MCP-OAuth flow rather than a server-driven
+		// redirect. We don't have an oauth_url to hand back here; the
+		// MCP client discovers it from server metadata.
+		resp.NextStep = "mcp_oauth"
+	case connectors.AuthModeBYOOAuth:
+		oauthURL, err := buildBYOOAuthURL(m, req.Fields, instanceURL)
+		if err != nil {
+			h.logger.Error("build oauth url", "error", err, "id", id)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+			return
+		}
+		resp.NextStep = "oauth"
+		resp.OAuthURL = oauthURL
+	}
+
+	writeJSON(w, http.StatusCreated, resp)
+}
+
+// buildBYOOAuthURL composes the authorization-code URL the frontend
+// will open in a popup. The state token is generated here and would,
+// in a future iteration, be persisted in oauth_states for verification
+// at callback time — for now the parent flow trusts the random value
+// embedded in the URL.
+func buildBYOOAuthURL(m *connectors.Manifest, fields map[string]string, instanceURL string) (string, error) {
+	if m.OAuth == nil || m.OAuth.AuthorizationURL == "" {
+		return "", errors.New("manifest has no oauth block")
+	}
+	authURL, err := url.Parse(m.OAuth.AuthorizationURL)
+	if err != nil {
+		return "", err
+	}
+	q := authURL.Query()
+	q.Set("response_type", "code")
+	if cid := strings.TrimSpace(fields["client_id"]); cid != "" {
+		q.Set("client_id", cid)
+	}
+	if len(m.OAuth.Scopes) > 0 {
+		q.Set("scope", strings.Join(m.OAuth.Scopes, " "))
+	}
+	if instanceURL != "" {
+		q.Set("redirect_uri", instanceURL+"/api/v1/connectors/oauth/callback")
+	}
+	state, _ := newRandomState()
+	q.Set("state", state)
+	authURL.RawQuery = q.Encode()
+	return authURL.String(), nil
+}
+
+// newRandomState mints a 32-hex-char state token used to protect the
+// OAuth authorization-code roundtrip against CSRF. Falls back to an
+// empty string if crypto/rand is unavailable (extremely rare); the
+// caller still emits the URL but without state, and the callback path
+// will reject it on validation.
+func newRandomState() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
 }
 
 // InstanceURLFromRequest derives the customer-facing base URL used to

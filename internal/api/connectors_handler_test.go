@@ -104,6 +104,12 @@ func newSynthCatalog(t *testing.T) *connectors.Catalog {
 
 func newSynthHandler(t *testing.T) *ConnectorHandler {
 	t.Helper()
+	// Install persists user-submitted secrets via encryption.Encrypt,
+	// which fails on a missing ENCRYPTION_KEY. The shared parallel-
+	// safe helper sets it once per test binary so List/Get/Verify
+	// (which don't touch encryption) still work, and Install tests
+	// (which do) succeed without per-test plumbing.
+	setTestEncryptionKeyParallelSafe(t)
 	db := setupTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	return NewConnectorHandlerWithCatalog(db, logger, newSynthCatalog(t))
