@@ -1,93 +1,65 @@
-import { test, expect, type Page } from "@playwright/test"
+import { test, expect } from "@playwright/test"
 
 /**
- * Onboarding wizard E2E — full first-run journey from empty DB to a
- * deployed crew.
+ * Onboarding wizard E2E — first-run journey from empty DB to a
+ * deployed crew. Replaces the standalone `e2e/onboarding-fresh.mjs`
+ * script with a proper test-runner suite that slots into the
+ * e2e-devcontainer nightly workflow.
  *
- * Replaces the standalone `onboarding-fresh.mjs` script. Same assertion
- * surface, but runs inside the Playwright test runner so it shows up in
- * HTML reports, retries flakes on CI, and slots into the nightly
- * e2e-devcontainer workflow alongside the other E2E specs.
+ * Preconditions
+ * ─────────────
+ *   - Server has NEVER been bootstrapped (needs_bootstrap=true).
+ *     The suite skips itself with a clear message otherwise; in CI
+ *     the workflow asserts this before Playwright even starts.
+ *   - Server env CREWSHIP_E2E_SKIP_TOKEN_PROBE=1, so the Launch step
+ *     accepts a fake Claude Code CLI token instead of live-calling
+ *     api.anthropic.com.
  *
- * Fresh-DB precondition
- * ─────────────────────
- * The whole point of this suite is the first-run flow, so it can only
- * run against an instance that has NEVER been bootstrapped (no users,
- * no workspaces). The first test reads /api/v1/system/setup-status; if
- * needs_bootstrap=false the entire suite is skipped with a clear
- * message instead of false-failing on selectors that don't render once
- * the bootstrap chip is gone. CI gets a fresh DB per run from the
- * e2e-devcontainer workflow.
- *
- * Token-probe gate
- * ────────────────
- * Step 3 of the wizard live-calls api.anthropic.com to validate the
- * Claude Code CLI token before letting Launch succeed. Without a real
- * sk-ant-oat token nightly would either need an Anthropic secret in
- * GH Actions or perpetual flakes when the upstream wobbles, so the
- * server-side env CREWSHIP_E2E_SKIP_TOKEN_PROBE=1 short-circuits that
- * call. The workflow sets it; local devs can either export it before
- * pnpm dev or supply a real token via BOOTSTRAP_API_KEY.
- *
- * Serial execution
- * ────────────────
- * Bootstrap is a one-shot — POST /api/v1/bootstrap returns 403 after
- * the first user exists. Running the validation tests in parallel
- * with the happy path would race the single shot, so the whole
- * describe block is serial and the validation cases come first
- * (they never submit successfully and so don't consume the shot).
+ * Bootstrap is a one-shot (POST /api/v1/bootstrap returns 403 after
+ * the first user), so the whole describe block runs serially with the
+ * validation tests first — they fail submission so they don't consume
+ * the shot.
  */
 
 const SETUP_STATUS_PATH = "/api/v1/system/setup-status"
 
-// Test data — kept distinct so a happy-path run after a flake in the
-// validation tests can't accidentally land an email collision.
-const RUN_ID = String(Date.now())
-const EMAIL = process.env.BOOTSTRAP_EMAIL ?? `qa-${RUN_ID}@example.com`
-const PASSWORD = process.env.BOOTSTRAP_PASSWORD ?? "playwright-onboarding-pw"
-const FULL_NAME = process.env.BOOTSTRAP_NAME ?? "QA Tester"
-// Fake token only works because the server-side probe is gated off via
-// CREWSHIP_E2E_SKIP_TOKEN_PROBE. If you remove that env on the server
-// you must supply a real sk-ant-oat… via BOOTSTRAP_API_KEY.
-const API_KEY = process.env.BOOTSTRAP_API_KEY ?? "sk-ant-oat-e2e-fake-token"
+// Token only needs to be syntactically plausible; the server-side
+// probe is gated off in CI. Don't expose this as an env var — a real
+// token here would hit api.anthropic.com whenever the gate isn't set.
+const FAKE_API_KEY = "sk-ant-oat-e2e-fake-token"
 
-// Drop any cookies inherited from global-setup so this suite runs as
-// an anonymous visitor on a fresh instance.
 test.use({ storageState: { cookies: [], origins: [] } })
-
 test.describe.configure({ mode: "serial" })
 
 test.describe("onboarding wizard — first-run flow", () => {
+  // Per-run identifier kept inside the describe so it's evaluated when
+  // Playwright reaches this block, not at module load. Keeps email
+  // collisions out of cross-suite scenarios that load this file.
+  const runId = String(Date.now())
+  const fullName = process.env.BOOTSTRAP_NAME ?? "QA Tester"
+  const email = process.env.BOOTSTRAP_EMAIL ?? `qa-${runId}@example.com`
+  const password = process.env.BOOTSTRAP_PASSWORD ?? "playwright-onboarding-pw"
+
   let suiteSkipped = false
 
   test.beforeAll(async ({ request }) => {
-    // Probe once, gate the whole describe — avoids a separate "is it
-    // fresh?" call per test that would slow the suite down.
     const res = await request.get(SETUP_STATUS_PATH)
-    if (res.status() !== 200) {
-      // Server isn't even up properly — let the first test fail loudly
-      // with the real reason instead of skipping silently.
-      return
-    }
+    if (res.status() !== 200) return // let the first test fail loudly with the real reason
     const body = await res.json().catch(() => ({}))
     if (body?.needs_bootstrap !== true) {
       suiteSkipped = true
       console.log(
-        `[onboarding-wizard] skipping: instance already bootstrapped ` +
-          `(needs_bootstrap=${body?.needs_bootstrap}). Point Playwright at a ` +
-          `fresh instance — see e2e/onboarding-wizard.spec.ts header.`,
+        `[onboarding-wizard] skipping: needs_bootstrap=${body?.needs_bootstrap}. ` +
+          `Point Playwright at a fresh instance.`,
       )
     }
   })
 
   test.beforeEach(async () => {
-    test.skip(suiteSkipped, "instance already bootstrapped (see header)")
+    test.skip(suiteSkipped, "instance already bootstrapped")
   })
 
-  // ──────────────────────────────────────────────────────────────────
-  // Validation — these never submit successfully, so they don't burn
-  // the one-shot bootstrap. Always run before the happy-path test.
-  // ──────────────────────────────────────────────────────────────────
+  // ── Validation — don't submit successfully, don't burn the shot ──
 
   test("/login redirects anonymous visitor to /bootstrap on empty DB", async ({ page }) => {
     await page.goto("/login")
@@ -95,126 +67,94 @@ test.describe("onboarding wizard — first-run flow", () => {
     expect(page.url()).toContain("/bootstrap")
   })
 
-  test("bootstrap form rejects short name (client-side validation)", async ({ page }) => {
+  test("bootstrap form rejects short name", async ({ page }) => {
     await page.goto("/bootstrap")
-    // The page renders nothing while it's still checking setup-status
-    // (returns an empty div) — wait for the form before typing.
     await page.waitForSelector("#full_name")
-    await page.fill("#full_name", "A") // 1 char — below the 2-char minimum
-    await page.fill("#email", `pre-${EMAIL}`)
+    await page.fill("#full_name", "A")
+    await page.fill("#email", `pre-${email}`)
     await page.fill("#password", "long-enough-pw")
     await page.click("button[type=submit]")
-    // Error renders into a role="alert" region — assert on the visible
-    // string, not the toast position, so the test survives copy tweaks.
     await expect(page.getByRole("alert")).toContainText(/at least 2 characters/i)
-    // Page must NOT have navigated away — bootstrap form still mounted.
     expect(page.url()).toContain("/bootstrap")
   })
 
   test("bootstrap form rejects short password", async ({ page }) => {
     await page.goto("/bootstrap")
     await page.waitForSelector("#full_name")
-    await page.fill("#full_name", FULL_NAME)
-    await page.fill("#email", `pre-${EMAIL}`)
-    await page.fill("#password", "short") // 5 chars — below the 8-char minimum
+    await page.fill("#full_name", fullName)
+    await page.fill("#email", `pre-${email}`)
+    await page.fill("#password", "short")
     await page.click("button[type=submit]")
     await expect(page.getByRole("alert")).toContainText(/at least 8 characters/i)
     expect(page.url()).toContain("/bootstrap")
   })
 
-  // ──────────────────────────────────────────────────────────────────
-  // Happy path — single long test because the bootstrap → wizard →
-  // launch flow is one continuous journey from the user's POV and the
-  // wizard is single-page (step state lives in React useState; there
-  // is no per-step URL we could split on without losing the state).
-  // ──────────────────────────────────────────────────────────────────
+  // ── Happy path — single test because the wizard is single-page
+  // (step state in React useState; no per-step URL to split on). ──
 
   test("bootstrap → wizard (3 steps) → launch → DB rows present", async ({ page, request }) => {
     test.setTimeout(90_000)
 
-    // ── Bootstrap form ──────────────────────────────────────────────
+    // Bootstrap form
     await page.goto("/bootstrap")
     await page.waitForSelector("#full_name")
     await expect(page.getByText(/initial setup/i)).toBeVisible()
-    await page.fill("#full_name", FULL_NAME)
-    await page.fill("#email", EMAIL)
-    await page.fill("#password", PASSWORD)
+    await page.fill("#full_name", fullName)
+    await page.fill("#email", email)
+    await page.fill("#password", password)
     await page.click("button[type=submit]")
     await page.waitForURL(/\/onboarding/, { timeout: 20_000 })
 
-    // ── Edge case: refresh mid-wizard ──────────────────────────────
-    // Wizard state lives entirely in React useState — there's no
-    // localStorage persistence — so a reload between steps should
-    // bring the user back to step 1 with a fresh-looking form. This
-    // is a deliberate design choice (the alternative is half-filled
-    // forms that confuse users on Mondays), and we pin it here so a
-    // future "let's persist this in localStorage" PR notices.
+    // Mid-wizard reload — wizard state is in-memory, not localStorage.
+    // Pin that contract so a future persistence PR notices.
     await page.waitForSelector("#workspace_name", { timeout: 20_000 })
-    const ws1 = await page.inputValue("#workspace_name")
-    expect(ws1.length).toBeGreaterThanOrEqual(2)
+    expect((await page.inputValue("#workspace_name")).length).toBeGreaterThanOrEqual(2)
     await page.reload({ waitUntil: "networkidle" })
     await page.waitForSelector("#workspace_name", { timeout: 20_000 })
-    const ws2 = await page.inputValue("#workspace_name")
-    // Refresh re-derives the workspace name from email, so equal value
-    // is fine — we're asserting that no weird half-mount state survives.
-    expect(ws2.length).toBeGreaterThanOrEqual(2)
+    expect((await page.inputValue("#workspace_name")).length).toBeGreaterThanOrEqual(2)
 
-    // ── Step 1: workspace ───────────────────────────────────────────
-    expect(await page.locator('button[aria-label="Pick a language"]').count()).toBe(1)
-    await expectContinueAndClick(page)
+    // Step 1: workspace
+    await expect(page.locator('button[aria-label="Pick a language"]')).toHaveCount(1)
+    await expect(page.getByRole("button", { name: /continue/i })).toBeEnabled()
+    await page.getByRole("button", { name: /continue/i }).click()
 
-    // ── Step 2: pick crew template ──────────────────────────────────
+    // Step 2: pick crew template. AnimatePresence mounts only the
+    // active step, so visible aria-pressed buttons are all crew
+    // cards — assert the exact count so adding *or* removing a
+    // template trips the test.
     await page.waitForSelector("button[aria-pressed]", { timeout: 10_000 })
-    const crewCards = await page
-      .locator(
-        'button[aria-pressed]:has-text("Software Development"), ' +
-          'button[aria-pressed]:has-text("DevOps"), ' +
-          'button[aria-pressed]:has-text("Marketing"), ' +
-          'button[aria-pressed]:has-text("Accounting"), ' +
-          'button[aria-pressed]:has-text("blank")',
-      )
-      .count()
-    expect(crewCards).toBe(5)
+    await expect(page.locator("button[aria-pressed]")).toHaveCount(5)
     await page.getByRole("button", { name: /software development/i }).click()
-    // Preview animates — give the avatars a beat to mount before
-    // counting them.
     await page.waitForSelector('img[width="32"]', { timeout: 10_000 })
     expect(await page.locator('img[width="32"]').count()).toBe(4)
-    await expectContinueAndClick(page)
+    await expect(page.getByRole("button", { name: /continue/i })).toBeEnabled()
+    await page.getByRole("button", { name: /continue/i }).click()
 
-    // ── Step 3: adapter + token. Switch to "Chat in browser" so the
-    // Launch button gates on the API key field instead of the pair
-    // countdown (which never completes in CI). ──────────────────────
+    // Step 3: switch to browser mode so Launch gates on the API key
+    // field instead of the pair countdown (which never completes in CI).
     await page.waitForSelector('button:has-text("Pair my CLI")', { timeout: 10_000 })
     await page.getByRole("button", { name: /chat in browser/i }).click()
-    await page.waitForTimeout(300) // motion settle
-    await page.fill("#api_key", API_KEY)
+    // Wait for the pair snippet to actually leave the DOM rather than
+    // sleeping for a magic motion duration.
+    await expect(page.locator('code:has-text("crewship login --pair")')).toBeHidden()
+    await page.fill("#api_key", FAKE_API_KEY)
 
     const launch = page.getByRole("button", { name: /launch/i })
     await expect(launch).toBeEnabled()
 
-    // The /onboarding/setup POST is the contract this whole flow is
-    // protecting — race the navigation by waiting on the response.
     const setupRespPromise = page.waitForResponse(
       (r) => r.url().includes("/api/v1/onboarding/setup") && r.request().method() === "POST",
       { timeout: 30_000 },
     )
     await launch.click()
-    const setupResp = await setupRespPromise
-    expect(setupResp.status()).toBe(201)
+    expect((await setupRespPromise).status()).toBe(201)
 
-    // ── Post-launch: DB state assertions ────────────────────────────
     await page.waitForURL(/\/crews\/agents\//, { timeout: 15_000 })
 
-    // setup-status must flip — proves the admin user persisted.
+    // DB-state assertions
     const statusAfter = await (await request.get(SETUP_STATUS_PATH)).json()
     expect(statusAfter.needs_bootstrap).toBe(false)
 
-    // The wizard's submit creates a workspace row with a non-empty
-    // preferred_language (defaults from navigator.language).
-    // /api/v1/workspaces requires the session cookie, which the page
-    // context already carries from the bootstrap submit. We pull the
-    // request through the page so it inherits cookies.
     const wsRes = await page.request.get("/api/v1/workspaces")
     expect(wsRes.status()).toBe(200)
     const workspaces = await wsRes.json()
@@ -224,14 +164,9 @@ test.describe("onboarding wizard — first-run flow", () => {
     expect(workspaces[0].preferred_language.length).toBeGreaterThan(0)
   })
 
-  // ──────────────────────────────────────────────────────────────────
-  // Post-bootstrap guards — these depend on the happy-path test having
-  // run, so they go LAST and serial mode keeps the order honest.
-  // ──────────────────────────────────────────────────────────────────
+  // ── Post-bootstrap guards — depend on happy-path having run ──
 
   test("/bootstrap redirects to /login once the DB is initialised", async ({ browser }) => {
-    // Fresh context — no cookies — so we test the redirect that an
-    // unauthenticated visitor sees, not a session-cookie short-circuit.
     const ctx = await browser.newContext({ storageState: { cookies: [], origins: [] } })
     const page = await ctx.newPage()
     try {
@@ -247,7 +182,7 @@ test.describe("onboarding wizard — first-run flow", () => {
     const res = await request.post("/api/v1/bootstrap", {
       data: {
         full_name: "Second Admin",
-        email: `second-${RUN_ID}@example.com`,
+        email: `second-${runId}@example.com`,
         password: "another-pw-1234",
       },
       headers: { "Content-Type": "application/json" },
@@ -255,14 +190,3 @@ test.describe("onboarding wizard — first-run flow", () => {
     expect(res.status()).toBe(403)
   })
 })
-
-/**
- * The wizard's Continue button stays disabled until the current step's
- * fields validate — clicking it before that is a flaky no-op. Wrap the
- * "is it ready?" check + click together so the call sites read cleanly.
- */
-async function expectContinueAndClick(page: Page): Promise<void> {
-  const cont = page.getByRole("button", { name: /continue/i })
-  await expect(cont).toBeEnabled()
-  await cont.click()
-}
