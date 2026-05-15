@@ -59,7 +59,7 @@ CREATE TABLE workspace_mcp_servers (
 	updated_at TEXT NOT NULL DEFAULT (datetime('now')),
 	UNIQUE(workspace_id, name)
 );
-CREATE INDEX idx_ws_mcp_workspace ON workspace_mcp_servers(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_ws_mcp_workspace ON workspace_mcp_servers(workspace_id);
 
 -- Crew-level MCP server integrations (override or extend workspace)
 CREATE TABLE crew_mcp_servers (
@@ -80,7 +80,7 @@ CREATE TABLE crew_mcp_servers (
 	updated_at TEXT NOT NULL DEFAULT (datetime('now')),
 	UNIQUE(crew_id, name)
 );
-CREATE INDEX idx_crew_mcp_crew ON crew_mcp_servers(crew_id);
+CREATE INDEX IF NOT EXISTS idx_crew_mcp_crew ON crew_mcp_servers(crew_id);
 
 -- Per-agent MCP binding with credential assignment
 CREATE TABLE agent_mcp_bindings (
@@ -94,7 +94,7 @@ CREATE TABLE agent_mcp_bindings (
 	created_at TEXT NOT NULL DEFAULT (datetime('now')),
 	UNIQUE(agent_id, mcp_server_id, mcp_server_scope)
 );
-CREATE INDEX idx_agent_mcp_agent ON agent_mcp_bindings(agent_id);
+CREATE INDEX IF NOT EXISTS idx_agent_mcp_agent ON agent_mcp_bindings(agent_id);
 
 -- Audit log for MCP tool calls
 CREATE TABLE mcp_tool_calls (
@@ -112,8 +112,8 @@ CREATE TABLE mcp_tool_calls (
 	session_id TEXT,
 	created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
-CREATE INDEX idx_mcp_calls_ws ON mcp_tool_calls(workspace_id, created_at);
-CREATE INDEX idx_mcp_calls_agent ON mcp_tool_calls(agent_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_mcp_calls_ws ON mcp_tool_calls(workspace_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_mcp_calls_agent ON mcp_tool_calls(agent_id, created_at);
 `
 
 // v30: FixMCPGatewayConstraints
@@ -141,7 +141,7 @@ INSERT INTO workspace_mcp_servers_new (id, workspace_id, name, display_name, tra
 	SELECT id, workspace_id, name, display_name, transport, endpoint, command, args_json, env_json, config_json, icon, enabled, created_at, updated_at FROM workspace_mcp_servers;
 DROP TABLE workspace_mcp_servers;
 ALTER TABLE workspace_mcp_servers_new RENAME TO workspace_mcp_servers;
-CREATE INDEX idx_ws_mcp_workspace ON workspace_mcp_servers(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_ws_mcp_workspace ON workspace_mcp_servers(workspace_id);
 
 -- Recreate crew_mcp_servers with ON DELETE CASCADE
 CREATE TABLE crew_mcp_servers_new (
@@ -167,7 +167,7 @@ INSERT INTO crew_mcp_servers_new (id, crew_id, workspace_mcp_server_id, name, di
 	SELECT id, crew_id, workspace_mcp_server_id, name, display_name, transport, endpoint, command, args_json, env_json, config_json, icon, enabled, created_at, updated_at FROM crew_mcp_servers;
 DROP TABLE crew_mcp_servers;
 ALTER TABLE crew_mcp_servers_new RENAME TO crew_mcp_servers;
-CREATE INDEX idx_crew_mcp_crew ON crew_mcp_servers(crew_id);
+CREATE INDEX IF NOT EXISTS idx_crew_mcp_crew ON crew_mcp_servers(crew_id);
 CREATE INDEX idx_crew_mcp_ws_server ON crew_mcp_servers(workspace_mcp_server_id);
 
 -- Recreate agent_mcp_bindings with ON DELETE CASCADE / SET NULL + cred_type/cred_header
@@ -188,7 +188,7 @@ INSERT INTO agent_mcp_bindings_new (id, agent_id, mcp_server_id, mcp_server_scop
 	SELECT id, agent_id, mcp_server_id, mcp_server_scope, credential_id, enabled, config_override_json, created_at FROM agent_mcp_bindings;
 DROP TABLE agent_mcp_bindings;
 ALTER TABLE agent_mcp_bindings_new RENAME TO agent_mcp_bindings;
-CREATE INDEX idx_agent_mcp_agent ON agent_mcp_bindings(agent_id);
+CREATE INDEX IF NOT EXISTS idx_agent_mcp_agent ON agent_mcp_bindings(agent_id);
 CREATE INDEX idx_agent_mcp_server ON agent_mcp_bindings(mcp_server_id, mcp_server_scope);
 
 -- Add missing indexes on mcp_tool_calls

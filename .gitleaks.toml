@@ -18,6 +18,12 @@ useDefault = true
 description = "Narrowly scoped allowlist — verified false positives only"
 
 paths = [
+  # Scrubber source — defines the regex patterns that DETECT secrets, which
+  # gitleaks then matches against the regex source itself (the OPENSSH /
+  # PEM private-key headers appear literally in the regex string at
+  # internal/scrubber/scrubber.go:30,34). False positive — no real key.
+  '''internal/scrubber/scrubber\.go$''',
+
   # Scrubber test fixtures — these tests MUST contain fake API keys, private
   # keys, and JWTs to exercise the redaction logic. Verified: all matches are
   # hardcoded test vectors, no real credentials.
