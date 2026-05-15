@@ -95,7 +95,7 @@ func TestReverseString(t *testing.T) {
 		{"empty", "", ""},
 		{"single ascii", "a", "a"},
 		{"ascii", "abc", "cba"},
-		{"multi-byte utf8", "áčď", "ďčá"},
+		{"multi-byte utf8", "äöü", "üöä"},
 		{"embedded space", "abc def", "fed cba"},
 		{"4-byte rune", "a🙂b", "b🙂a"},
 	}
