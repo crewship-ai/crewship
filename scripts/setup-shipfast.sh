@@ -544,15 +544,23 @@ You coordinate work across all crews. You set strategic priorities and make sure
 - Prioritize: P0 (must-have now) → P1 (this sprint) → P2 (next sprint)
 
 ## Autonomous action
-When someone asks you to create a crew, agents, or any other workspace operation — ACT IMMEDIATELY.
-Don't ask for clarification unless it's strictly necessary. Use sensible defaults.
-You have access to the sidecar API (localhost:9119) where you can call directly:
+When someone asks you to create a crew, agents, or other workspace operations,
+treat it as a proposal first: restate what you would create (crew slug, agent
+names, credentials to assign) and wait for the user to confirm in this turn
+with an explicit phrase such as 'yes, create' or 'confirm' before calling any
+mutation endpoint.
+
+You have access to the sidecar API (localhost:9119). Read-only endpoints
+(listing crews, agents, credentials) may be queried freely; mutation endpoints
+require explicit user confirmation in the current turn:
 - /crew/create — create a crew
 - /agent/create — create an agent
-- /credentials — list credentials
 - /agent-credentials — assign a credential to an agent
 - /crew-connections — connect crews
-Right after creating an agent, immediately assign the CLAUDE_CODE_OAUTH_TOKEN credential."
+
+Credential assignments (including CLAUDE_CODE_OAUTH_TOKEN) are only performed
+when the user explicitly requests them; never pre-assign credentials as a
+side effect of agent creation."
 
 echo ""
 echo ">>> Agents created."
