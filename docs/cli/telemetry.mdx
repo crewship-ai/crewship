@@ -1,0 +1,136 @@
+---
+title: "crewship telemetry"
+description: "Manage anonymous crash reporting consent — opt in, opt out, show current state and endpoint."
+icon: "shield-halved"
+---
+
+# crewship telemetry
+
+Manages the crash-reporting consent state stored in the local
+`app_settings` table. The running server picks up changes on the
+next start.
+
+```bash
+crewship telemetry on        # opt in
+crewship telemetry off       # opt out (sticky)
+crewship telemetry status    # show current state, endpoint, install ID
+```
+
+<Note>
+**Default for v0.1 beta: ENABLED.** First `crewship start` on a fresh
+DB writes opt-in=true and starts the Sentry client. Documented in full
+in [Telemetry — Default for v0.1 beta](/guides/telemetry#default-for-v01-beta-enabled).
+The default-on stance reverts to opt-in for v1.0 GA.
+</Note>
+
+## `crewship telemetry on`
+
+Writes `telemetry_opt_in = "1"` to `app_settings` and generates an
+anonymous install ID (random 32-hex) if one doesn't exist yet.
+
+```
+$ crewship telemetry on
+✓ Telemetry enabled. Crash reports will be sent on the next server start.
+  install_id: c0be498f4cbe63e52ab4a5dfd8fa7a8b
+  endpoint:   o4511387688108032.ingest.de.sentry.io
+```
+
+The install ID is **stable** across opt-in/opt-out cycles — re-rolling
+it would make crash grouping unstable in the maintainer's Sentry view.
+
+## `crewship telemetry off`
+
+Writes `telemetry_opt_in = "0"`. The off-state is **sticky**: even if
+the v0.1 beta default-on logic would normally enable on fresh boot,
+an explicit "0" wins. This is what makes opt-out reliable.
+
+```
+$ crewship telemetry off
+✓ Telemetry disabled. No crash reports will be sent.
+```
+
+The install ID is preserved (just not used). Opt back in later and
+you'll keep the same ID — past crashes still group with future ones.
+
+## `crewship telemetry status`
+
+Shows the resolved state without changing anything.
+
+```
+$ crewship telemetry status
+Telemetry: ENABLED
+  install_id: c0be498f4cbe63e52ab4a5dfd8fa7a8b
+  endpoint:   o4511387688108032.ingest.de.sentry.io (vendor default (compiled in))
+  to disable: crewship telemetry off
+```
+
+Or when off:
+
+```
+$ crewship telemetry status
+Telemetry: DISABLED
+  to enable:  crewship telemetry on
+```
+
+The `endpoint` line shows **where** events would route plus **why**:
+
+- `vendor default (compiled in)` — DSN baked into the binary at
+  release time via `-X .../crashreport.DSN=...` ldflag. Routes to the
+  maintainer's Sentry (`unify-7b/crewship-backend`).
+- `CREWSHIP_SENTRY_DSN env override` — operator set the env var to
+  redirect events to their own Sentry instance. See
+  [Telemetry — Routing override](/guides/telemetry#routing-override).
+
+## Routing override (don't ship to maintainer)
+
+For enterprise self-hosters, regulated environments, or anyone who'd
+rather pay their own Sentry quota:
+
+```bash
+export CREWSHIP_SENTRY_DSN=https://<key>@self-hosted-sentry.example/123
+crewship start
+```
+
+`crashreport.ResolveDSN()` prefers the env value over the ldflag-baked
+default. `crewship telemetry status` will reflect the override in the
+`endpoint` line.
+
+## What gets sent (recap)
+
+| Sent | Never sent |
+|------|-----------|
+| Go stack traces + exception messages (subject to server-side regex scrub) | Workspace, user, or credential data |
+| Crewship version + commit + OS/arch | HTTP request bodies |
+| Anonymous install ID (32-hex, generated locally) | `Authorization` / `Cookie` / `X-API-Key` headers |
+| Sentry environment (`beta` / `production` / `development`) | Query-string secrets (`?token=...`, `?api_key=...`) |
+| `os` context (GOOS name) | Hostname (replaced with install ID) |
+| | Environment variables |
+| | Go module list |
+
+Full details and the implementation reference in
+[Telemetry — What gets sent](/guides/telemetry#what-gets-sent) and the
+client-side filter in `internal/crashreport/sentry_adapter.go::scrubEvent`.
+
+## Programmatic opt-out (CI / scripts)
+
+To pre-set the consent before the first `crewship start` — useful when
+provisioning Crewship from a config-management tool that doesn't want
+the beta default-on:
+
+```bash
+crewship telemetry off    # writes "0" to app_settings
+crewship start            # respects the explicit "0"
+```
+
+`crewship telemetry` opens the DB at the same path `crewship start`
+would and applies the v88 migration (`app_settings`) on first run, so
+the consent setting works even on a never-started fresh install.
+
+## Related
+
+- [Telemetry guide](/guides/telemetry) — privacy posture, what's
+  sent, server-side scrubbing rules, full routing-override flow.
+- [`crewship doctor`](/cli/doctor) — shows the same telemetry state
+  alongside other system checks.
+- [`crewship start`](/cli/start) — boot flow that initializes the
+  Sentry client based on consent.

@@ -144,7 +144,7 @@ func init() {
 	agentCreateCmd.PreRun = warnCoordinatorDeprecated
 	agentUpdateCmd.PreRun = warnCoordinatorDeprecated
 	agentCreateCmd.Flags().String("role-title", "", "Human-readable role title")
-	agentCreateCmd.Flags().String("cli-adapter", "CLAUDE_CODE", "CLI adapter: CLAUDE_CODE|GEMINI_CLI|OPENCODE")
+	agentCreateCmd.Flags().String("cli-adapter", "CLAUDE_CODE", "CLI adapter: CLAUDE_CODE|CODEX_CLI|GEMINI_CLI|OPENCODE|CURSOR_CLI|FACTORY_DROID")
 	agentCreateCmd.Flags().String("system-prompt", "", "System prompt text or @file.txt")
 	agentCreateCmd.Flags().String("tool-profile", "CODING", "Tool profile: MINIMAL|CODING|FULL")
 	agentCreateCmd.Flags().String("llm-provider", "", "LLM provider: ANTHROPIC|OPENAI|GOOGLE")

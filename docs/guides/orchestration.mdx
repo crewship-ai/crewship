@@ -309,7 +309,7 @@ DAG validation runs before the mission loop begins scheduling, preventing tasks 
 
 ## Deadlock Detection
 
-The mission engine detects deadlocks when all remaining tasks are `BLOCKED` with no task currently `RUNNING`, `PENDING`, or `AWAITING_APPROVAL`. The detection logic:
+The mission engine detects deadlocks when all remaining tasks are `BLOCKED` with no task currently `IN_PROGRESS`, `PENDING`, or `AWAITING_APPROVAL`. The detection logic:
 
 1. If any task is PENDING, IN_PROGRESS, or AWAITING_APPROVAL -- not deadlocked (progress is still possible)
 2. COMPLETED, SKIPPED, and FAILED tasks are terminal -- they cannot contribute to progress

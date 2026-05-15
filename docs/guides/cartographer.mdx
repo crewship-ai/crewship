@@ -176,7 +176,7 @@ CREATE TABLE checkpoints (
   mission_id     TEXT NOT NULL,
   label          TEXT,
   journal_cursor TEXT NOT NULL,          -- journal entry ID anchor
-  state          TEXT NOT NULL,          -- JSON snapshot
+  state_snapshot TEXT NOT NULL DEFAULT '{}', -- JSON snapshot
   fork_of        TEXT REFERENCES checkpoints(id) ON DELETE SET NULL,
   created_by     TEXT,
   created_at     TEXT NOT NULL

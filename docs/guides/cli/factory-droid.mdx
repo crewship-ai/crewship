@@ -72,7 +72,7 @@ Droid REQUIRES `type: stdio | http` discriminator on every server (Crewship's wr
 
 ## Memory
 
-Canonical memory set including `AGENTS.md` (Droid's primary discovery) and `.factory/AGENTS.md` (Droid alternate path).
+Canonical memory set including `AGENTS.md` (Droid's primary discovery) and `.factory/AGENTS.md` (Droid alternate path). Droid `exec` has no `--system-prompt` flag and `AGENTS.md` only loads on the second invocation, so turn-1 parity is achieved by prepending the preamble inline with `[SYSTEM]/[USER]` delimiters; turn-2+ relies on the file.
 
 ## Output stream
 

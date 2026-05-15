@@ -44,6 +44,7 @@ func shouldEmbed(entryType string, severity string) bool {
 | `eval.regression_detected` | Always |
 | `keeper.decision` | Only at severity warn/error (denied or risky) |
 | `mission.status_change` | Only at severity warn/error (failed or problematic) |
+| `peer.conversation` | Listed in `EmbeddableEntryTypes` but `shouldEmbed` always returns false — plain Q&A is too high-volume to embed. The indexer is expected to apply its own escalation-aware filter and force it via the override below when the question ends in an escalation. |
 | `exec.output_chunk`, `container.metrics`, `network.*` | **Never** |
 
 To force an embedding on an otherwise-filtered entry, tag it with `refs.episodic = true` in the journal payload. The indexer checks this flag before applying the type/severity filter.

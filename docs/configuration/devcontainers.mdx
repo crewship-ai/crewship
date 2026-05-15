@@ -109,9 +109,8 @@ If either remains empty and `CREWSHIP_SKIP_SIDECAR != 1`, `config.Load` returns 
 | `GET` | `/api/v1/crews/{crewId}/provision` | `ProvisioningHandler.ProvisionStatus` | Current status + cached image tag + config hash. |
 | `POST` | `/api/v1/crews/{crewId}/provision` | `ProvisioningHandler.ProvisionTrigger` | Enqueue async provisioning; returns `202 Accepted`. |
 | `POST` | `/api/v1/crews/{crewId}/rebuild` | `ProvisioningHandler.ProvisionRebuild` | Clear cache marker + re-provision. |
-| `GET` | `/api/v1/admin/devcontainer-features` | feature catalog handler | Dynamic catalog for UI (3-tier cache). |
-| `GET` | `/api/v1/admin/runtime-images` | runtime catalog handler | Curated base image list. |
-| `GET` | `/api/v1/admin/mise-tools` | mise catalog handler | Searchable mise tool registry. |
+| `GET` | `/api/v1/features/catalog` | feature/runtime catalog handler | Dynamic devcontainer + mise catalog for UI (3-tier cache). |
+| `GET` | `/api/v1/runtimes/catalog` | runtime catalog handler | Curated base-image + mise runtime list (the `cmd_features.go` / `cmd_runtimes.go` CLI commands hit these same endpoints). |
 
 All endpoints require a workspace-authenticated user. `ProvisionTrigger` returns `503 Service Unavailable` if the Docker client is not configured on the server.
 
@@ -172,7 +171,7 @@ Two crews with identical configs share the same cache image (deduped on first pr
 
 - **TTL:** 24 hours. Empty/negative results are also cached so a missing upstream does not trigger a HEAD storm.
 - **Bypass:** pin `runtime_image` to an explicit digest (`ghcr.io/…@sha256:…`). Digest-pinned references skip the HEAD round-trip.
-- **Shared:** the same resolver backs `GET /api/v1/admin/cache` so the admin UI and the provisioner do not double-pay for the registry check.
+- **Shared:** the same resolver backs `GET /api/v1/cache/images` so the admin UI and the provisioner do not double-pay for the registry check.
 
 ## Background GC
 
@@ -200,7 +199,7 @@ The sweeper logs a single line per pass with `removed`, `total_orphans`, and `sk
 
 ### Image-list cache
 
-Docker's `ImageList` is O(n) over every image on the host. The sweeper and `GET /api/v1/admin/cache` share a **10-second image-list cache** so admin UI polling does not pay that cost on every request. The cache is invalidated on any commit/delete performed by the provisioner itself, so the caller always sees its own writes.
+Docker's `ImageList` is O(n) over every image on the host. The sweeper and `GET /api/v1/cache/images` share a **10-second image-list cache** so admin UI polling does not pay that cost on every request. The cache is invalidated on any commit/delete performed by the provisioner itself, so the caller always sees its own writes.
 
 ## Code of record
 

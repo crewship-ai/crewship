@@ -42,6 +42,7 @@ Skip backups for **ephemeral development workspaces** (the dev VM rebuilds them 
 | **`--as-workspace` / `--as-crew` rename** | Restore the bundle under a new slug instead of the original. Refuses to run the docker phase (container names derive from the slug) and tells the operator to `crewship crew provision` afterwards. Avoids "two `acme` workspaces colliding" during DR drills. |
 | **Retention sweep** | `crewship backup rotate --keep-last N --keep-days D`. Per-workspace — never touches another workspace's bundles. Both flags can be combined; both must be positive. `--dry-run` lists what would be deleted without touching disk. |
 | **Stale lock** | A lock whose holder process is dead but whose row still exists. Detected when `acquired_at + DefaultLockTTL < now()`. Auto-released on next `create`; manually clearable via `crewship backup unlock --force` (admin-only, with confirmation). |
+| **Pre-migration snapshot** | An automatic safety net distinct from the manual bundle system. Whenever `crewship start` detects pending migrations, `database.SnapshotBeforeMigrate` writes a `VACUUM INTO` copy of the live SQLite database to `<dbpath>.pre-migrate-vN-to-vM-<UTC>.bak` before any DDL runs. Last 10 snapshots are retained per database; opt out with `CREWSHIP_SKIP_MIGRATION_BACKUP=1`. **Not a substitute** for proper backups — it's the binary upgrade safety net, not a disaster-recovery primitive. |
 
 ## Usage
 
@@ -504,9 +505,85 @@ The following items are intentionally deferred to v0.2. They do
 - The workspace bind mount (user code) and memory markdown files are included. AGE encryption of the payload is the only defence against leakage from physical bundle distribution — treat bundles like any other backup of your source tree.
 - Every `backup.*` event writes to `audit_log` with user, role, scope, sealed-payload SHA-256, and size. Dry-run restores write `backup.restore.dry_run` so auditors can tell rehearsals from real cutover.
 
+## Automatic pre-migration snapshots
+
+Distinct from the manual `crewship backup` bundle system above:
+Crewship auto-snapshots the SQLite DB **before** any pending migration
+runs. This is the "binary upgrade went sideways, give me my data
+back" safety net.
+
+### How it works
+
+Every `crewship start` calls
+`database.SnapshotBeforeMigrate` before `database.Migrate`. If any
+migrations are pending (rows in the `migrations[]` slice with version
+> `MAX(version) FROM _migrations`), the function:
+
+1. Resolves the SQLite file path from the connection DSN.
+2. Computes a target name:
+   `<dbpath>.pre-migrate-v<from>-to-v<to>-<UTC-RFC3339>.bak`.
+3. Issues `VACUUM INTO '<target>'` — SQLite's hot-copy mechanism. Safer
+   than a plain file copy because it serializes against concurrent
+   writers and produces a defragmented, WAL-checkpointed snapshot.
+4. Chmods the snapshot to `0600`.
+5. Prunes older snapshots, keeping the 10 most recent per database file.
+
+On error the boot aborts before any migration runs — silently
+continuing without a rollback point would defeat the entire purpose.
+
+### Opting out
+
+```bash
+CREWSHIP_SKIP_MIGRATION_BACKUP=1 crewship start
+```
+
+Skips the snapshot. Useful for CI environments where the DB is
+ephemeral and snapshot I/O is just overhead.
+
+### Recovering from a bad migration
+
+If `crewship start` succeeds, applies a migration, then exhibits
+runtime errors that point at schema drift:
+
+```bash
+# Find the most recent pre-migration snapshot
+ls -t ~/.crewship/crewship.db.pre-migrate-*.bak | head -1
+
+# Stop crewship
+crewship stop  # or kill -TERM if needed
+
+# Replace the current DB with the snapshot
+mv ~/.crewship/crewship.db ~/.crewship/crewship.db.bad
+cp ~/.crewship/crewship.db.pre-migrate-v66-to-v87-20260514T143012Z.bak \
+   ~/.crewship/crewship.db
+
+# Run with the PREVIOUS binary (the one that wrote the snapshot)
+/path/to/older/crewship start
+```
+
+The snapshot is a complete SQLite file — no special tooling needed.
+Tools like `sqlite3` open it directly for inspection.
+
+### Limits of pre-migration snapshots vs manual backups
+
+| Capability | Pre-migration snapshot | `crewship backup create` |
+|---|---|---|
+| Encrypted at rest | No (chmod 0600 only) | Yes (AGE) |
+| Portable across hosts | Same machine only | Yes |
+| Includes workspace files | No (DB only) | Yes (DB + bind-mount + memory) |
+| Captures container state | No | Yes (snapshots running containers) |
+| Cross-version restore | Snapshot binary only | Forward-compatible via `restoreBackfill` |
+| Triggered automatically | Yes, on pending migration | No (manual or scheduled) |
+| Retention | 10 newest per DB file | Operator-controlled via `rotate` |
+
+**Use both.** Pre-migration snapshots cover binary upgrades; `crewship
+backup` covers DR, host migration, legal hold, and forensic
+preservation. They are not interchangeable.
+
 ## Related
 
 - [Backup API reference](/api-reference/backup) — REST endpoint shapes for every `crewship backup` subcommand.
 - [Admin CLI](/guides/admin-cli) — the host-shell write surface that backups protect against; always `crewship backup create` before running admin writes in prod.
 - [Migrations Catalog](/guides/migrations) — what migration ran when, and which `restoreBackfill` hook (if any) will fire on a cross-version restore.
+- [Troubleshooting](/guides/troubleshooting) — recovering from a stuck migration or corrupt DB.
 - [Security → Audit log](/security/audit) — where `backup.created`, `backup.restored`, and `backup.restore.dry_run` events land.

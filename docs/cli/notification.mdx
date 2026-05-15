@@ -74,14 +74,13 @@ crewship notification read-all
 
 ## `crewship notification delete`
 
-Delete a single notification. Interactive confirmation required unless
-`--yes` is passed.
+Delete a single notification. The action is immediate — there is no
+confirmation prompt — so wrap in `--dry-run` upstream tooling if you
+need a check before commit.
 
 ```bash
 crewship notification delete <id>
-crewship notification delete <id> --yes
+crewship notification delete <id>  # alias: remove, rm
 ```
 
-| Flag | Short | Type | Default | Description |
-|------|-------|------|---------|-------------|
-| `--yes` | `-y` | `bool` | `false` | Skip interactive confirmation. Required in non-TTY sessions. |
+Aliases: `remove`, `rm`.

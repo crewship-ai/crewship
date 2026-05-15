@@ -170,29 +170,31 @@ The sidecar (`internal/sidecar/`) is an HTTP proxy running inside each crew cont
 | **free** (default) | Allow all outbound connections |
 | **restricted** | Only allow connections to allowlisted domains |
 
-Default allowed domains:
-- `api.anthropic.com`
-- `api.openai.com`
-- `generativelanguage.googleapis.com`
-- `api.factory.ai`
+Default allowed domains (from `internal/sidecar/allowlist.go` — each entry exists for a specific CLI):
 
-Unknown network modes default to **restricted** (fail closed).
+- **Anthropic** — `api.anthropic.com` (Claude Code API key + OAuth), `console.anthropic.com` (OAuth refresh callback)
+- **OpenAI / Codex** — `api.openai.com` (API key), `auth.openai.com` (ChatGPT-subscription login), `chatgpt.com` (subscription routing)
+- **Google / Gemini** — `generativelanguage.googleapis.com` (AI Studio path), `oauth2.googleapis.com` (OAuth), `accounts.google.com` (OAuth UI redirect)
+- **Cursor** — `api.cursor.sh` (auth/billing), `api2.cursor.sh` (model gateway, since 2026-Q1)
+- **Factory Droid** — `api.factory.ai` (legacy), `app.factory.ai` (CLI installer + API base)
 
-### Sidecar Endpoints (~36 handlers)
+Unknown network modes default to **restricted** (fail closed). Keep this list in sync with `components/features/crews/crew-network-policy.tsx` on the frontend.
 
-The sidecar exposes a comprehensive local API on port 9119:
+### Sidecar Endpoints (36 paths, 39 routes)
+
+The sidecar exposes a local API on port 9119 (`internal/sidecar/server.go`). The path count below is 36; the 39-route total reflects three paths that register multiple HTTP verbs (`/manifest` GET+PATCH, `/crew-connections` GET+POST, `/connections/{id}/files` GET+POST):
 
 | Category | Endpoints |
 |----------|-----------|
 | **Memory** | `/memory/search`, `/memory/status`, `/memory/reindex` |
-| **Assignment** | `/assign`, `/results/{id}`, `/query`, `/standup`, `/escalate` |
-| **Missions** | `/mission/create`, `/mission/{id}`, `/mission/{id}/start`, `/mission/templates`, `/missions/all`, `/missions/all/summary` |
+| **Assignment** | `/assign`, `/results/{id}`, `/query`, `/standup`, `/escalate`, `/report-confidence` |
+| **Missions** | `/mission/create`, `/mission/{id}`, `/mission/{id}/start`, `/mission/templates` |
 | **Keeper** | `/keeper/request`, `/keeper/execute` |
 | **MCP** | `/mcp/tools`, `/mcp/call`, `/mcp/status` |
-| **Connections** | `/connections`, `/connections/{id}/message`, `/connections/{id}/messages`, `/connections/{id}/files` |
-| **Management** | `/crews`, `/crew/create`, `/agent/create`, `/credentials`, `/agent-credentials` |
-| **Other** | `/crew-connections`, `/proposal`, `/proposals`, `/manifest`, `/report-confidence` |
-| **Health** | `/health`, `/healthz` |
+| **Connections** | `/connections`, `/connections/{id}/message`, `/connections/{id}/messages`, `/connections/{id}/files`, `/crew-connections` |
+| **Management** | `/crews`, `/crew/create`, `/agent/create`, `/credentials`, `/agent-credentials`, `/issue/create` |
+| **Pipelines** | `/pipelines`, `/pipelines/{slug}`, `/pipelines/save`, `/pipelines/{slug}/run`, `/pipelines/{slug}/dry_run` |
+| **Other** | `/manifest` (GET/PATCH), `/expose-port` |
 
 ## Keeper Request Lifecycle
 
@@ -207,7 +209,7 @@ The agent never holds a credential directly. Anything sensitive goes through one
 
 The sidecar forwards both endpoints over `/tmp/crewship.sock` to crewshipd, which calls into `internal/keeper/gatekeeper`:
 
-1. **L1 fast-path** — for `request` only (never `execute`), an L1 credential plus an intent at least ten meaningful characters long is auto-allowed without an LLM round-trip. Single-character or whitespace-only intents are rejected.
+1. **L1 fast-path** — for `request` only (never `execute`), an L1 credential plus an intent ≥ 10 non-whitespace characters AND ≥ 3 distinct non-whitespace characters is auto-allowed without an LLM round-trip. Single-character, whitespace-only, or trivial-filler intents like `"aaaaaaaaaa"` are rejected.
 2. **LLM evaluation** — every other request is scored by `Gatekeeper.Evaluate`, which prompts a local Ollama model with the request, the agent's recent conversation, and the credential's `SecurityLevel`. The model returns a structured `{ decision, reason, risk }` JSON object.
 3. **Fail-closed default** — if no LLM provider is configured, the Gatekeeper returns `DENY`. The same applies if the LLM response cannot be parsed as JSON.
 4. **Execute branch only** — on `ALLOW`, crewshipd runs the command via `docker exec` inside the crew container with the credential injected as an environment variable. Stdout and stderr pass through the [scrubber](#output-processing) before being returned. The credential value never crosses back into UID 1001.
@@ -226,7 +228,7 @@ sequenceDiagram
     Agent->>Side: POST /keeper/execute<br/>{credential_name, intent, command}
     Side->>Cd: POST /api/v1/internal/keeper/execute<br/>(over /tmp/crewship.sock)
     Cd->>GK: Evaluate(EvalRequest)
-    alt L1 request, no command, intent ≥ 10 chars
+    alt L1 request, no command, intent ≥ 10 non-whitespace chars AND ≥ 3 distinct non-whitespace chars
         GK-->>Cd: ALLOW (fast-path)
     else otherwise
         GK->>LLM: prompt with intent + history + risk

@@ -6,7 +6,7 @@ icon: "webhook"
 
 # crewship hooks
 
-Manage the lifecycle-hook registry -- scripts or webhooks that fire on platform events (`assignment.completed`, `on_approval_requested`, `keeper.decision`, ...). See the [Hooks guide](/guides/hooks) for event catalog and handler kinds.
+Manage the lifecycle-hook registry -- scripts or webhooks that fire on platform events (`pre_agent_start`, `post_agent_stop`, `on_approval_requested`, ...). See the [Hooks guide](/guides/hooks) for the full 15-event catalog and the three handler kinds (`shell`, `http`, `subagent`).
 
 ```bash
 crewship hooks <subcommand> [flags]

@@ -54,13 +54,15 @@ const (
 
 Runs a command via `exec.CommandContext`. Event context is passed as env vars (`CREWSHIP_EVENT`, `CREWSHIP_AGENT_ID`, `CREWSHIP_MISSION_ID`, `CREWSHIP_PAYLOAD`, ...). Stdout is captured as `Result.Payload`.
 
-Shell hooks require `OWNER` role at registration time -- an ADMIN cannot create a shell hook because arbitrary code execution on the host is a privilege escalation vector. The store enforces this:
+Shell hooks require `OWNER` role at registration time -- an ADMIN cannot create a shell hook because arbitrary code execution on the host is a privilege escalation vector. The store enforces this via a register-time argument, not a row property:
 
 ```go
-return nil, hooks.ErrShellHookNotAllowed // wrong role at register time
+const allowedShell = true // pass true only when the caller is confirmed OWNER
+_, err := hooks.Register(ctx, db, h, allowedShell)
+// returns hooks.ErrShellHookNotAllowed if h.HandlerKind == "shell" && !allowedShell
 ```
 
-Also requires `allowedShell=true` on the hook row, confirming the operator consciously allowed shell execution for this entry.
+`allowedShell` is the trailing boolean argument to `hooks.Register` (`internal/hooks/store.go:22`); the `hooks_config` table has no `allowed_shell` column. Callers that resolve role lazily (HTTP handlers, admin CLI) pass `true` only after confirming the request originated from an OWNER session.
 
 ### http
 

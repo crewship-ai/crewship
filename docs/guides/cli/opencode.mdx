@@ -83,7 +83,7 @@ OpenCode-specific:
 
 ## Memory
 
-`AGENTS.md` is OpenCode's auto-discovered system instructions file. Crewship writes it as part of the canonical memory set.
+`AGENTS.md` is OpenCode's auto-discovered system instructions file. Crewship writes it as part of the canonical memory set. For turn-1 parity (OpenCode discovers `AGENTS.md` on the second invocation, not the first), the orchestrator also prepends the preamble inline with `[SYSTEM]/[USER]` delimiters on the first turn — turn-2+ uses the file.
 
 ## Output stream
 

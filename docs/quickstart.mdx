@@ -12,7 +12,7 @@ If you just want to see the dashboard come up on your machine, this is enough:
 
 ```bash
 # 1. Install (binary, single command)
-curl -fsSL https://crewship.ai/install | sh
+curl -fsSL https://crewship.ai/install | bash
 
 # 2. Start the runtime — embedded UI + SQLite + Go server, no Node.js, no external DB
 crewship start
@@ -39,11 +39,11 @@ That's it. The runtime is now serving on your hardware. No agents have been crea
     crewship version
     ```
   </Tab>
-  <Tab title="curl | sh">
+  <Tab title="curl | bash">
     ```bash
     # Verifies SHA-256 against signed checksums.txt; cosign signature
     # verified too when cosign is on PATH.
-    curl -fsSL https://crewship.ai/install | sh
+    curl -fsSL https://crewship.ai/install | bash
 
     crewship version
     ```

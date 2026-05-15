@@ -18,7 +18,9 @@ crewship paymaster <subcommand> [flags]
 |---|---|
 | `by-crew` | Spend per crew in the workspace. |
 | `by-agent <crew>` | Spend per agent inside a specific crew. |
+| `by-mission <missionId>` | Spend rolled up for a single mission. |
 | `top` | Highest-cost scopes in the window. |
+| `subscriptions` | Subscription-plan usage rollup (flat-rate credentials). |
 
 ---
 
@@ -59,6 +61,17 @@ Takes a crew slug or ID as positional arg. Output columns: Agent, Cost (USD), Ca
 
 ---
 
+## `crewship paymaster by-mission <missionId>`
+
+Return the total cost ledger for a single mission (cost, call count, input/output tokens). Mission is workspace-scoped; foreign mission IDs return 404. There is no `--range` flag here — the server returns the mission's full cost history.
+
+```bash
+crewship paymaster by-mission mis_abc123
+crewship paymaster by-mission mis_abc123 --format json | jq .row.cost_usd
+```
+
+---
+
 ## `crewship paymaster top`
 
 ```bash
@@ -79,6 +92,26 @@ Sample output:
 ```
 
 Scope format: `<scope_kind>/<scope_id>` (one of `workspace`, `crew`, `mission`, `agent`).
+
+---
+
+## `crewship paymaster subscriptions`
+
+Show flat-rate subscription usage — the API counterpart to the "Subscription plans" panel on the Paymaster dashboard. No `$`-figures because flat-rate cost is always `$0` by construction; the row shape is plan + provider + call_count + token totals + last_used.
+
+```bash
+crewship paymaster subscriptions
+crewship paymaster subscriptions --range 30d
+crewship paymaster subscriptions --format json | jq '.[].call_count'
+```
+
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--range` | `string` | `7d` | Time window: `1h`, `24h`, `7d`, or `30d`. |
+| `--since` | `string` | | RFC3339 start cutoff (overrides `--range` if both set). |
+| `--until` | `string` | | RFC3339 end cutoff. |
+
+---
 
 ## Global output
 

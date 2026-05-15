@@ -14,8 +14,8 @@ All agent endpoints require authentication and workspace context (`workspace_id`
 GET /api/v1/agents/crews-status?workspace_id={workspaceId}
 
 # Response is a per-workspace aggregate counting agents by status
-# (IDLE/RUNNING/ERROR/STOPPED). Drives the 'Crews idle/online' badge
-# in the top toolbar.
+# (IDLE/RUNNING/ERROR — no STOPPED bucket). Drives the 'Crews idle/online'
+# badge in the top toolbar.
 ```
 
 Returns lightweight agent counts by status for toolbar/dashboard widgets.
@@ -27,12 +27,11 @@ Returns lightweight agent counts by status for toolbar/dashboard widgets.
   "total": 12,
   "running": 3,
   "error": 1,
-  "idle": 8,
-  "stopped": 0
+  "idle": 8
 }
 ```
 
-All four status fields (`running`, `error`, `idle`, `stopped`) are always present in the response — zero counts are not omitted.
+The three status fields (`running`, `error`, `idle`) are always present in the response — zero counts are not omitted. There is no `stopped` bucket: agents that exit cleanly are surfaced as `idle` until their container is reaped.
 
 ---
 

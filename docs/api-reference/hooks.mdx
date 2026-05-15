@@ -109,6 +109,7 @@ Same auth rules, same response shape with `"enabled": false`.
 No HTTP endpoint. Call `hooks.Register` from workspace provisioning code:
 
 ```go
+const allowedShell = false // flip to true only when the caller has confirmed OWNER
 _, err := hooks.Register(ctx, db, hooks.Hook{
     WorkspaceID: ws,
     Event:       hooks.EventOnApprovalRequested,
@@ -117,10 +118,10 @@ _, err := hooks.Register(ctx, db, hooks.Hook{
         "url": "https://...",
     },
     Enabled: true,
-})
+}, allowedShell)
 ```
 
-Shell hooks additionally require the caller's role to be `OWNER` -- `hooks.ErrShellHookNotAllowed` otherwise.
+The trailing `allowedShell bool` argument is the gate on `HandlerKindShell`: pass `false` for any non-OWNER context — the function returns `hooks.ErrShellHookNotAllowed` if the hook is a shell kind and this flag is `false`. HTTP / subagent hooks are unaffected by the flag.
 
 ## Related
 

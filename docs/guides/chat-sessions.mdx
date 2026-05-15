@@ -168,17 +168,18 @@ The chat surface is small — no dedicated `/api-reference/chats` page yet; the 
 
 ### Realtime (WebSocket)
 
-The chat page subscribes to the workspace WS channel and listens for these events:
+The chat page subscribes to the per-session WebSocket channel (`session:<chatID>`) and listens for the events the runtime actually emits. There are no `chat.message.*` or `chat.reaction.*` events today — message turns are read back via REST after a successful POST, and reactions are local-state-only on the client.
 
-| Event | When it fires |
-|---|---|
-| `chat.message.created` | Either party posts a turn. |
-| `chat.message.updated` | Edit-and-resend rewrites a turn (active branch truncated). |
-| `chat.reaction.added` / `removed` | Another operator reacts in the same workspace. |
-| `chat.presence.changed` | The agent transitions between `online / thinking / blocked / offline`. |
-| `attachment.uploaded` | A file finished uploading and is ready to use. |
+| Event | Channel | When it fires |
+|---|---|---|
+| `assignment_created` | `session:<chatID>` | The agent kicks off a new assignment from a user turn. |
+| `assignment_running` | `session:<chatID>` | The assignment transitions into execution. |
+| `assignment_completed` / `assignment_failed` | `session:<chatID>` | Terminal state — the agent's reply (or the failure) is ready to fetch. |
+| `peer_query_running` | `session:<chatID>` | A peer-query sub-task started inside this chat (multi-agent dispatch). |
+| `escalation_created` / `escalation_resolved` | `session:<chatID>` | The agent escalated to a human, or the escalation was decided. |
+| `port_expose_created` | `session:<chatID>` | The agent opened a container port and the proxy URL is ready. |
 
-The trace hook re-fetches the affected message on each event rather than mutating local state imperatively; the next render is a function of the server's latest view. Reconnect is idempotent — sends in-flight at disconnect time carry the same client `request_id` and the server dedupes.
+Each event triggers a REST re-fetch of the affected resource — the server-side state is authoritative and the next render is a function of that, not of imperative local mutations. Reconnect is idempotent: sends in-flight at disconnect time carry the same client `request_id` and the server dedupes.
 
 ## Routes
 

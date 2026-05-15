@@ -97,11 +97,13 @@ Each crew can have a network access policy:
   <Tab title="Restricted Mode">
     Only connections to allowlisted domains are permitted. Unknown domains are blocked with HTTP 403.
 
-    Default allowed domains:
-    - `api.anthropic.com`
-    - `api.openai.com`
-    - `generativelanguage.googleapis.com`
-    - `api.factory.ai`
+    Default allowed domains (`internal/sidecar/allowlist.go`):
+
+    - **Anthropic** — `api.anthropic.com`, `console.anthropic.com` (OAuth refresh callback)
+    - **OpenAI / Codex** — `api.openai.com`, `auth.openai.com` (ChatGPT-subscription login), `chatgpt.com` (subscription routing)
+    - **Google / Gemini** — `generativelanguage.googleapis.com`, `oauth2.googleapis.com` (OAuth), `accounts.google.com` (OAuth UI redirect)
+    - **Cursor** — `api.cursor.sh`, `api2.cursor.sh` (primary model gateway, since 2026-Q1)
+    - **Factory Droid** — `api.factory.ai` (legacy), `app.factory.ai` (CLI installer + API base)
 
     Additional domains can be added per-crew:
     ```json

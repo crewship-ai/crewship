@@ -73,10 +73,11 @@ Lists the curated base images recommended by Crewship for crew runtimes. Same se
 
 ```bash
 crewship features base-images
-# IMAGE                                                LABEL                          DESCRIPTION
-# debian:bookworm-slim                                 Debian 12 (slim) [RECOMMENDED] Small glibc-based base, broad compatibility.
-# ubuntu:24.04                                         Ubuntu 24.04 LTS               Familiar, large package archive.
-# mcr.microsoft.com/devcontainers/base:bookworm        MS devcontainer base           Pre-baked dev tooling, larger.
+# IMAGE                                                       LABEL                                     DESCRIPTION
+# mcr.microsoft.com/devcontainers/javascript-node:22-bookworm Node 22 (Debian) [RECOMMENDED]            Node.js 22 + npm + git + curl. Best for Claude Code and most AI workloads.
+# mcr.microsoft.com/devcontainers/base:bookworm               Debian 12 (bookworm)                       Minimal Debian with common utilities. Add features/runtimes as needed.
+# debian:bookworm-slim                                        Debian 12 (slim)                           Smaller glibc-based base, broad compatibility.
+# ubuntu:24.04                                                Ubuntu 24.04 LTS                           Familiar, large package archive.
 ```
 
 The `[RECOMMENDED]` tag is appended to the label of the curated default(s); there is no separate "default" column. Operators are not restricted to this list — any glibc-based Linux image works. The catalog is what the UI offers in the runtime picker, and the source of truth lives in `cmd/crewship/cmd_features.go` (`baseImagesCatalog`).
