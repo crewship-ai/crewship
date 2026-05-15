@@ -1,0 +1,235 @@
+---
+title: "Troubleshooting"
+description: "First-line diagnostics for the most common Crewship issues — start with `crewship doctor`, then walk this page by symptom."
+icon: "stethoscope"
+---
+
+# Troubleshooting
+
+Most beta-era problems fall into a small set of buckets. Start here
+before opening an issue.
+
+## First step: `crewship doctor`
+
+```bash
+crewship doctor
+```
+
+`doctor` runs a battery of checks and prints one row per check with a
+status: `PASS` / `WARN` / `FAIL` / `INFO`. Read each WARN/FAIL — the
+hint text in the second column is the remediation.
+
+`doctor` covers (as of v0.1 beta):
+
+- **Container runtime detected** — Docker / Podman / Colima / OrbStack
+  / Apple Containers. If FAIL, install one (see
+  [Install — container runtime requirement](/guides/install)).
+- **Port binding** — confirms the HTTP port (default `8080`) is not in
+  use by another process.
+- **Database file permissions** — confirms `~/.crewship/crewship.db`
+  is `0600` (owner-only). Drift here usually means a backup was
+  restored via `tar` without preserving the mode bit.
+- **Telemetry status** — shows current opt-in state and resolved
+  endpoint host (vendor default vs `CREWSHIP_SENTRY_DSN` override).
+- **DSN reachability** — best-effort TCP connect to the Sentry
+  endpoint:443 (5s timeout). Sentry being unreachable is **not** a
+  Crewship health signal — WARN here just informs you that crashes
+  won't ship until the network heals.
+- **Update available** — checks GitHub Releases API for a newer
+  version. WARN if a stable release is newer than your installed
+  build.
+
+```bash
+crewship doctor --no-color    # plain text output for log capture
+```
+
+## Symptom catalog
+
+### `crewship start` exits immediately, no error
+
+Almost always means migrations failed silently or the data directory
+isn't writable. Run:
+
+```bash
+crewship doctor
+crewship start --verbose
+```
+
+`--verbose` switches the logger to debug level. Look for `failed to
+run migrations` or `failed to open database`. Common fixes:
+
+- **Permission error:** `chmod 700 ~/.crewship && chmod 600
+  ~/.crewship/crewship.db`. The migrate path enforces 0600 on the DB
+  file but can't reset 0700 on the parent.
+- **Disk full:** `~/.crewship/crewship.db` lives next to a pre-migration
+  snapshot (`*.pre-migrate-*.bak`). If the disk is full, the snapshot
+  can't be written and the boot aborts to prevent a half-migrated DB.
+  Free space, then re-run.
+
+### Agent containers won't start
+
+```
+ERROR no Docker-compatible runtime found
+```
+
+`crewship doctor` will already have flagged this. Quick install paths
+on macOS:
+
+```bash
+# Option 1 — Docker Desktop
+open -a "Docker"   # if installed but not running
+
+# Option 2 — OrbStack (lightweight alternative)
+brew install --cask orbstack
+open -a OrbStack
+
+# Option 3 — Colima (CLI-only, daemon-less)
+brew install colima docker
+colima start
+```
+
+On Linux, `systemctl start docker` or install `podman`. Crewship picks
+whatever socket it finds — no further config needed.
+
+### "Agent exited with code 123"
+
+Specific to Claude Code adapter. **Almost always missing or invalid
+`CLAUDE_CODE_OAUTH_TOKEN`** — the agent CLI failed its startup auth
+check. Fix:
+
+```bash
+# In the host shell where your Claude Code is logged in:
+claude setup-token
+
+# Then paste the token in the Crewship UI:
+# Settings → Credentials → CLAUDE_CODE_OAUTH_TOKEN
+```
+
+Other non-zero exits (1, 2, 127) usually mean the agent CLI binary
+isn't installed in the container image — check `crewship agent debug
+<id>` for the container's resolved `PATH`.
+
+### `curl crewship.ai/install | bash` fails with "Bad substitution"
+
+Wrong shell. Use `bash`, not `sh`:
+
+```bash
+curl -fsSL https://crewship.ai/install | bash    # ✓ correct
+curl -fsSL https://crewship.ai/install | sh      # ✗ fails on dash
+```
+
+The script uses `set -euo pipefail` and array-expansion guards that
+Debian/Ubuntu `dash` (the default `/bin/sh`) does not implement. See
+the `bash` note in [Install](/guides/install).
+
+### `brew install crewship-ai/tap/crewship` fails with "tap not found"
+
+Update brew and try again:
+
+```bash
+brew update
+brew tap crewship-ai/tap
+brew install crewship
+```
+
+If the tap repo (https://github.com/crewship-ai/homebrew-tap) lists a
+formula version different from what you'd expect, the goreleaser
+auto-push for the latest release may have failed — file an issue and
+fall back to the `curl | bash` install.
+
+### macOS Gatekeeper blocks the binary
+
+Releases are cosign-signed but not Apple-notarized in v0.1 (Apple
+Developer Program enrollment is a separate workstream). After the
+first download you'll see:
+
+```
+"crewship" cannot be opened because the developer cannot be verified.
+```
+
+Unblock once:
+
+```bash
+xattr -d com.apple.quarantine $(which crewship)
+```
+
+Or right-click → Open → Open Anyway in Finder. The `brew install` path
+strips quarantine automatically; only direct downloads need this.
+
+### "Migration version N collision"
+
+This means your local DB has a migration applied under one name but
+the binary expects a different name at that version. Caused by
+upgrading from a fork or a pre-release build that shipped a renamed
+migration.
+
+```
+failed to run migrations: migration version 65 collision:
+database has "add_backup_schedules_and_destinations" applied,
+code expects "add_skill_bootstrap_fields" — rename the new migration
+to the next free version
+```
+
+**For end users:** restore your last backup with the matching binary,
+or wipe the DB if you have no data to preserve:
+
+```bash
+crewship doctor                                  # confirm the issue
+mv ~/.crewship/crewship.db ~/.crewship/crewship.db.bak
+crewship start                                   # fresh DB, replays migrations
+```
+
+**Maintainer-side:** the `migration-lint` CI workflow now catches this
+class of bug pre-merge, so it should not recur in v0.1+ releases.
+
+### Web UI loads but API requests fail with 401
+
+Token expired or never set. Two paths:
+
+```bash
+crewship login        # interactive
+# OR
+crewship token        # show current state
+```
+
+In the UI: log out and log back in. If the bootstrap user was reset
+(rare — only happens after `crewship.db` deletion), visit
+`/bootstrap` to recreate the initial admin account.
+
+### "Sentry endpoint unreachable" in doctor
+
+WARN, not FAIL. Telemetry won't ship until the network heals; nothing
+else breaks. If you want to silence the warning:
+
+```bash
+crewship telemetry off
+```
+
+Or redirect to a Sentry instance you can reach:
+
+```bash
+export CREWSHIP_SENTRY_DSN=https://<key>@self-hosted-sentry.example/1
+crewship start
+```
+
+## Where to go next
+
+If `crewship doctor` is green and you still hit issues:
+
+<CardGroup cols={2}>
+  <Card title="Open a GitHub issue" icon="github" href="https://github.com/crewship-ai/crewship/issues/new/choose">
+    Attach `crewship doctor --no-color` output and the relevant log
+    section.
+  </Card>
+  <Card title="Discord community" icon="discord" href="https://crewship.ai">
+    Real-time help, especially for "is this expected?" questions.
+  </Card>
+  <Card title="Crash-report dashboard" icon="bug" href="/guides/telemetry">
+    If telemetry is enabled and the crash has a Sentry event ID,
+    paste it into the issue — the maintainer can correlate immediately.
+  </Card>
+  <Card title="Source-map view" icon="code">
+    For frontend issues, the Sentry stack trace has a "View on GitHub"
+    link per frame — useful screenshots to attach to reports.
+  </Card>
+</CardGroup>

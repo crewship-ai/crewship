@@ -43,14 +43,14 @@ Crewship's adapter builds:
 ```bash
 claude --print --output-format stream-json --include-partial-messages \
        --dangerously-skip-permissions --verbose \
-       --bare --strict-mcp-config --no-session-persistence \
+       [--bare] --strict-mcp-config --no-session-persistence \
        --model <model> --system-prompt <preamble+persona> \
        --max-turns 50 \
        [--mcp-config /crew/agents/<slug>/.mcp.json] \
        -- <user message>
 ```
 
-`--bare` is recommended by Anthropic for SDK use (will become the `-p` default). It disables auto-discovery of `~/.claude/CLAUDE.md`, plugins, hooks, skills, MCP — Crewship sets these explicitly via flags.
+`--bare` disables auto-discovery of `~/.claude/CLAUDE.md`, plugins, hooks, skills, and MCP — Crewship sets all of those explicitly via flags. **It is appended only when the agent's credential is an API key.** Claude Code 2.x changed the `--bare` auth contract: it now strictly requires `ANTHROPIC_API_KEY` (or an `apiKeyHelper` via `--settings`) and IGNORES `CLAUDE_CODE_OAUTH_TOKEN`. To keep OAuth-seeded workspaces working (`AI_CLI_TOKEN` credentials with `sk-ant-oat*` values), the adapter drops `--bare` when it detects OAuth on the run, so the normal Claude auth flow can pick up `CLAUDE_CODE_OAUTH_TOKEN`. API-key runs keep the isolation win. See `internal/orchestrator/adapter_claude.go:21-50`.
 
 ## MCP
 

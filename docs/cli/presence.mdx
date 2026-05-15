@@ -26,12 +26,16 @@ Presence transitions are emitted by the agent runtime, not by this CLI -- the co
 
 ```bash
 crewship presence roster
-crewship presence roster --crew cmo2pe4dj0005ba0a129f
+crewship presence roster --crew backend-team
+crewship presence roster --watch
+crewship presence roster --crew backend-team --watch --interval 10s
 ```
 
-| Flag | Type | Description |
-|---|---|---|
-| `--crew` | `string` | Filter by crew ID. Slug resolution is not yet wired -- pass the ID. |
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--crew` | `string` | | Filter by crew slug or CUID. Slugs are resolved against the workspace's crew list before each request. |
+| `--watch` | `bool` | `false` | Re-poll the roster on an interval (Ctrl-C to exit). |
+| `--interval` | `duration` | `5s` | Polling interval for `--watch`. Floored at 1s. |
 
 Sample output:
 

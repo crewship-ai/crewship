@@ -1,0 +1,167 @@
+---
+title: "crewship doctor"
+description: "Pre-flight diagnostic: container runtime, port binding, DB perms, telemetry status, update availability."
+icon: "stethoscope"
+---
+
+# crewship doctor
+
+Runs a battery of checks against the local Crewship install and prints
+one row per check with a status. Designed for the "is everything OK
+before I file an issue?" workflow.
+
+```bash
+crewship doctor [--no-color] [--fix]
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--no-color` | `bool` | `false` | Disable ANSI colours. Automatically enabled when stdout is not a TTY (no need to pass the flag in CI / log-collection scripts). |
+| `--fix` | `bool` | `false` | Attempt safe auto-repairs while running the checks. Currently creates the missing data directory; future checks may opt in. |
+
+## Exit codes
+
+| Code | Meaning |
+|------|---------|
+| `0` | All checks PASS/INFO/WARN. Safe to run. WARNs indicate degraded features (read the remediation column) but do not block startup. |
+| `1` | One or more checks FAIL. Server cannot start (or some critical feature is broken). |
+
+WARN does **not** fail the command — you can wire `crewship doctor`
+into a healthcheck without false alarms on transient external state
+(e.g. Sentry endpoint briefly unreachable). FAIL means a core
+requirement for starting Crewship is missing or broken; treat the
+non-zero exit as a hard gate.
+
+## Check categories
+
+### Container runtime
+
+Detects which Docker-compatible runtime is available — Docker, Podman,
+Colima, OrbStack, Apple Containers, or Rancher Desktop. Auto-probes
+each candidate socket; the first reachable one wins.
+
+- **PASS** — runtime detected; agents can run.
+- **FAIL** — no runtime found. Install one; see [Install — container
+  runtime requirement](/guides/install#container-runtime-requirement).
+
+### Port binding
+
+Confirms the HTTP port (default `8080` or `CREWSHIP_PORT`) is free.
+
+- **PASS** — port is bindable.
+- **FAIL** — port in use. `lsof -i :8080` to find the squatter,
+  or change `CREWSHIP_PORT`.
+
+### Database file permissions
+
+Stats `~/.crewship/` directory and the SQLite DB file. Expects:
+
+- Parent directory: `0700`
+- DB file: `0600`
+- WAL + SHM sidecars (if present): `0600`
+
+Drift here usually means a backup was restored via `tar` without
+preserving mode bits. Fix:
+
+```bash
+chmod 0700 ~/.crewship
+chmod 0600 ~/.crewship/crewship.db ~/.crewship/crewship.db-wal ~/.crewship/crewship.db-shm 2>/dev/null
+```
+
+### Telemetry status
+
+Reads `app_settings.telemetry_opt_in` from the local DB. Reports:
+
+- **PASS — ENABLED + DSN** — telemetry is on and a DSN is wired in.
+  Shows the endpoint host (vendor default vs `CREWSHIP_SENTRY_DSN`
+  override).
+- **PASS — DISABLED** — operator opted out via `crewship telemetry off`.
+- **WARN — ENABLED but no DSN** — consent recorded but no DSN
+  available. Local dev builds without ldflag injection; not an error,
+  just informational.
+- **WARN — not configured** — fresh DB, never asked. Will default to
+  ENABLED on the next `crewship start` (v0.1 beta behaviour).
+
+See [Telemetry](/guides/telemetry) for opt-out and routing-override
+recipes.
+
+### DSN reachability
+
+Only runs when telemetry is enabled AND a DSN is set. Best-effort TCP
+connect (5s timeout) to the resolved endpoint at port 443.
+
+- **PASS** — endpoint reachable; events will ship.
+- **WARN** — endpoint unreachable. Crashes won't ship until network
+  heals. Not a Crewship health signal — could be local firewall, DNS
+  issue, or Sentry outage. `crewship doctor` does **not** fail on
+  this; you'd be silently angry at the wrong layer.
+
+### Update available
+
+Calls the GitHub Releases API for the project (cached 24h locally).
+
+- **PASS** — running latest stable, or running a newer pre-release.
+- **WARN** — newer stable available; output shows current → latest
+  with install hint (`brew upgrade crewship` or `docker pull`).
+- **INFO** — running a dev build, version check skipped.
+
+Suppress with `CREWSHIP_SKIP_UPDATE_CHECK=1`.
+
+## Example output
+
+```
+$ crewship doctor
+
+  [PASS]  container runtime              docker (Docker Desktop 4.35.1) at /var/run/docker.sock
+  [PASS]  port binding                   :8080 is bindable
+  [PASS]  database permissions           ~/.crewship (0700) + crewship.db (0600)
+  [PASS]  telemetry status               ENABLED, endpoint o4511387688108032.ingest.de.sentry.io (vendor default)
+  [PASS]  DSN reachability               connected to o4511387688108032.ingest.de.sentry.io:443 (94ms)
+  [WARN]  update available               v0.1.0 stable is out; you're on v0.1.0-beta.1
+                                         → brew upgrade crewship
+```
+
+## Output formats
+
+- `--no-color` — disable ANSI colors. Auto-detected when stdout is
+  not a TTY (so log-collection scripts get plain text without any
+  flag).
+- Status codes (`PASS`/`WARN`/`FAIL`/`INFO`) are always in left-padded
+  brackets and parseable with `awk '{print $1}'`.
+
+## Auto-repair (`--fix`)
+
+`--fix` opts into safe, narrowly-scoped repair side-effects during the
+check run. Currently scoped to:
+
+- **Database directory missing** — creates `$CREWSHIP_DATA_DIR` (or
+  `~/.crewship`) with `0700` perms instead of failing the check. The
+  detail column then reads `(created via --fix)` so you can see what
+  changed.
+
+Anything destructive (file overwrites, mode-bit flips on existing
+files, DB schema repairs) is intentionally out of scope — `--fix` is
+for first-run onboarding, not running surgery on a populated install.
+
+## When to run
+
+- **Before opening a GitHub issue** — attach `crewship doctor
+  --no-color` output. Saves a back-and-forth diagnostic round.
+- **After upgrading the binary** — pre-migration snapshot has run by
+  this point; doctor confirms the new binary is happy with the
+  existing DB.
+- **In CI smoke tests** — the `.github/workflows/smoke-test.yml`
+  workflow runs `crewship doctor` against the freshly-released
+  binary on each release tag to catch broken binaries before they
+  reach users.
+
+## Related
+
+- [`crewship start`](/cli/start) — the command doctor is checking
+  for. If doctor is green, `start` should succeed.
+- [`crewship telemetry`](/cli/telemetry) — flip consent state that
+  doctor reports.
+- [`crewship version`](/cli/version) — same version info doctor uses
+  for the update-availability check.
+- [Troubleshooting](/guides/troubleshooting) — symptom-keyed catalog
+  of common failures.

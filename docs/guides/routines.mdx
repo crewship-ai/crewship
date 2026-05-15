@@ -136,15 +136,15 @@ Templates are **regex substitution, not expression evaluation**. There is no ari
   "validation": {
     "schema": { "type": "object", "required": ["title"] },
     "must_not_contain": ["API_KEY=", "Bearer "],
-    "min_length": 30,
-    "on_validation_fail": "escalate_tier"
-  }
+    "min_length": 30
+  },
+  "on_fail": "escalate_tier"
 }
 ```
 
 `complexity` resolves through the workspace's `execution_tiers_json` mapping into `(adapter, model)`. With `complexity: "fast"`, the agent's CLI gets `--model claude-haiku-4-5-20251001` (or whatever the workspace mapped `fast` to). `model_override` is the explicit pin that wins over `complexity`.
 
-`on_validation_fail` is one of `escalate_tier | abort | retry_step` — `escalate_tier` walks the fallback chain (e.g., Haiku → Sonnet → Opus) until validation passes or the chain exhausts.
+`on_fail` lives at the step level (not inside `validation`) and is one of `escalate_tier | abort | retry_step` — `escalate_tier` walks the fallback chain (e.g., Haiku → Sonnet → Opus) until validation passes or the chain exhausts.
 
 ### `call_pipeline`
 
@@ -261,7 +261,7 @@ The economic value-prop: an Opus-class authoring model designs the routine, a Ha
 }
 ```
 
-Per-step `complexity` annotation drives the resolver. With `on_validation_fail: "escalate_tier"`, a failed validation walks the fallback chain — practically: Haiku tries first, Sonnet on validation fail, Opus on second fail.
+Per-step `complexity` annotation drives the resolver. With `on_fail: "escalate_tier"`, a failed validation walks the fallback chain — practically: Haiku tries first, Sonnet on validation fail, Opus on second fail.
 
 <Info>
 **Tier override at runtime.** The CLI flag `--model <model>` is constructed from the resolved tier and passed to the agent's CLI adapter, so a routine's `complexity: "fast"` actually fires Haiku, not the agent's default. `CLIAdapter` is preserved (so the agent's CLAUDE_CODE / GEMINI_CLI / etc. wiring stays intact); only the model name swaps.
@@ -351,7 +351,7 @@ Each step's `validation` block runs after the step output materializes. The sche
 - `must_contain: ["##"]` — output must include all of these
 - `min_length` / `max_length` — convenience for non-JSON outputs
 
-The `must_not_contain` gate is the credential-leak tripwire: if an agent is about to leak a real API key in its output, the gate fails the step before downstream consumers see it. Pair with `on_validation_fail: "abort"` for hard stop, or `escalate_tier` if you want the higher model to retry without the leak.
+The `must_not_contain` gate is the credential-leak tripwire: if an agent is about to leak a real API key in its output, the gate fails the step before downstream consumers see it. Pair with `on_fail: "abort"` (set at the step level, alongside `validation`) for hard stop, or `escalate_tier` if you want the higher model to retry without the leak.
 
 ## Observability
 
@@ -451,7 +451,7 @@ HMAC mismatch: check the `X-Crewship-Signature: sha256=<hex>` header, computed a
 
 ### Run cost is higher than `estimated_cost_usd`
 
-Two-tier escalation walks the fallback chain. With `on_validation_fail: escalate_tier`, a failed Haiku run retries on Sonnet (5-10× more expensive), then Opus (20-50× more expensive) before giving up. Tighten validation gates (loosen `must_contain`, raise `min_length`), or set `max_cost_usd` on the routine to abort the run between steps when a cost ceiling is hit.
+Two-tier escalation walks the fallback chain. With `on_fail: escalate_tier`, a failed Haiku run retries on Sonnet (5-10× more expensive), then Opus (20-50× more expensive) before giving up. Tighten validation gates (loosen `must_contain`, raise `min_length`), or set `max_cost_usd` on the routine to abort the run between steps when a cost ceiling is hit.
 
 ### "Pipeline X step Y stuck in pending state"
 

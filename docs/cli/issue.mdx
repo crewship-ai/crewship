@@ -44,7 +44,7 @@ crewship issue list --search "auth flow"
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--status` | `string` | | Filter by status: `BACKLOG`, `TODO`, `IN_PROGRESS`, `REVIEW`, `DONE`, `FAILED`, `CANCELLED`. |
+| `--status` | `string` | | Filter by status: `BACKLOG`, `TODO`, `IN_PROGRESS`, `REVIEW`, `DONE`, `FAILED`, `CANCELLED`, `DUPLICATE`. |
 | `--priority` | `string` | | Filter by priority: `none`, `low`, `medium`, `high`, `urgent`. |
 | `--crew` | `string` | | Filter by crew slug or ID. |
 | `--assignee` | `string` | | Filter by assignee ID. |
@@ -108,7 +108,7 @@ crewship issue update BE-42 --priority urgent --assignee franta
 |------|------|---------|-------------|
 | `--title` | `string` | | New title. |
 | `--description` | `string` | | New description. |
-| `--status` | `string` | | New status: `BACKLOG`, `TODO`, `IN_PROGRESS`, `REVIEW`, `DONE`, `FAILED`, `CANCELLED`. |
+| `--status` | `string` | | New status: `BACKLOG`, `TODO`, `IN_PROGRESS`, `REVIEW`, `DONE`, `FAILED`, `CANCELLED`, `DUPLICATE`. |
 | `--priority` | `string` | | New priority: `none`, `low`, `medium`, `high`, `urgent`. |
 | `--assignee` | `string` | | New assignee (agent slug). |
 | `--assignee-type` | `string` | | Assignee type: `agent` or `user`. |

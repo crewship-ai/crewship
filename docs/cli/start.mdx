@@ -1,0 +1,118 @@
+---
+title: "crewship start"
+description: "Boot the Crewship server — Go binary, embedded Next.js UI, SQLite-by-default, optional Docker provider."
+icon: "play"
+---
+
+# crewship start
+
+Starts the Crewship server. Single Go binary listens on HTTP (default
+`:8080`), serves the embedded Next.js UI, and connects to a container
+provider for agent runs.
+
+```bash
+crewship start [flags]
+```
+
+## What happens on start
+
+1. **Configuration resolution.** Reads `--config` if given, else
+   defaults from env (`CREWSHIP_*`) and built-in defaults.
+2. **Database open.** Opens SQLite at `~/.crewship/crewship.db` (or
+   `--db` override). Enforces WAL mode, 0600 file perms, foreign keys.
+3. **Pre-migration snapshot.** If any migrations are pending,
+   `SnapshotBeforeMigrate` writes a `VACUUM INTO` copy of the live DB
+   to `<dbpath>.pre-migrate-vN-to-vM-<UTC>.bak` before any DDL runs.
+   See [Backup &amp; Restore — automatic pre-migration snapshots](/guides/backup#automatic-pre-migration-snapshots).
+4. **Migrations apply.** Runs every pending migration in
+   `internal/database/migrate.go` order. Collision detection fails
+   loudly if the local DB has a different name applied at a given
+   version.
+5. **Telemetry init.** Reads consent from `app_settings`. v0.1 beta
+   default is enabled if no row exists; opt out with `crewship
+   telemetry off`. See [Telemetry](/guides/telemetry).
+6. **Update check.** Fires a goroutine that queries the GitHub Releases
+   API (cached 24h in `~/.crewship/cache/`). Prints a banner to stderr
+   if a newer release is available. Skip with
+   `CREWSHIP_SKIP_UPDATE_CHECK=1`.
+7. **Providers initialize.** Docker (or whichever container runtime is
+   detected), localfs storage, bbolt state. `--no-docker` skips the
+   container provider — useful for read-only browse mode without
+   running agents.
+8. **HTTP server starts.** Binds `0.0.0.0:8080` by default. WebSocket
+   on the same port at `/ws`. IPC socket at `/tmp/crewship.sock`.
+
+Boot typically takes 1–3 seconds on a warm machine; first-ever start
+(empty DB, full migration sweep) takes 5–10 seconds.
+
+## Flags
+
+| Flag | Default | Effect |
+|------|---------|--------|
+| `--config <path>` | `$HOME/.crewship/config.yaml` if present | Path to YAML config. CLI flags override config; config overrides env defaults. |
+| `--db <url>` | `file:~/.crewship/crewship.db` | SQLite DSN (`file:...`). PostgreSQL on the v0.2 roadmap. |
+| `--port <n>` | `8080` | HTTP port. WebSocket served on the same port. |
+| `--host <addr>` | `0.0.0.0` | Bind address. Set to `127.0.0.1` for loopback-only access. |
+| `--no-docker` | (off) | Skip the Docker provider init. Useful for read-only browse mode or sandboxed CI. |
+| `--verbose`, `-v` | (off) | Switch logger to debug. Default is INFO. |
+| `--no-color` | (off) | Disable ANSI colors in logs. Auto-detected when stdout is not a TTY. |
+| `--license <path>` | — | Path to a license file. Without it, community-edition limits apply (max crews, max agents, max members). |
+
+## Environment variables
+
+Beyond the flags above, `crewship start` respects:
+
+| Var | Default | Effect |
+|-----|---------|--------|
+| `CREWSHIP_PORT` | `8080` | Same as `--port`. |
+| `CREWSHIP_SOCKET_PATH` | `/tmp/crewship.sock` | IPC socket for sidecar coordination. |
+| `CREWSHIP_CONTAINER_NETWORK` | `crewship-agents` | Docker bridge name for agent containers. |
+| `CREWSHIP_CONTAINER_PROVIDER` | `docker` | `docker`, `apple`, or `none`. |
+| `CREWSHIP_STORAGE_PROVIDER` | `localfs` | Where workspace files live. |
+| `CREWSHIP_STATE_PROVIDER` | `bbolt` | KV store for ephemeral run state. |
+| `CREWSHIP_SKIP_MIGRATION_BACKUP` | (unset) | Skip pre-migration snapshot. Don't use on machines with valuable data. |
+| `CREWSHIP_SKIP_UPDATE_CHECK` | (unset) | Skip the daily GitHub Releases API check. |
+| `CREWSHIP_SENTRY_DSN` | (unset) | Override the vendor-baked Sentry DSN. Route crash reports to your own Sentry instance. See [Telemetry — routing](/guides/telemetry#routing-override). |
+| `NEXTAUTH_SECRET` | (required) | Auth session signing key. Generate with `openssl rand -base64 32`. |
+| `ENCRYPTION_KEY` | (required) | Credential vault AES-256-GCM key. Generate with `openssl rand -hex 32`. |
+
+`NEXTAUTH_SECRET` and `ENCRYPTION_KEY` MUST be set or the server
+refuses to boot — a fresh install loads them from `.env.local` (see
+[Quickstart](/quickstart)).
+
+## Multi-instance setup
+
+Crewship can run multiple instances on one host by suffixing the
+data directory and port. The `dev.sh` script handles this for
+development; for production, point `--db` and `CREWSHIP_PORT` at
+distinct paths:
+
+```bash
+CREWSHIP_PORT=8081 crewship start --db file:/opt/crewship-1/crewship.db
+CREWSHIP_PORT=8082 crewship start --db file:/opt/crewship-2/crewship.db
+```
+
+Each instance is fully isolated — separate DB, separate container
+network (`CREWSHIP_CONTAINER_NETWORK=crewship-agents-1`), separate
+IPC socket (`CREWSHIP_SOCKET_PATH=/tmp/crewship-1.sock`).
+
+## Graceful shutdown
+
+`crewship start` traps `SIGINT` and `SIGTERM`:
+
+- Stops accepting new HTTP requests
+- Finishes in-flight requests up to 30s
+- Flushes Sentry events (2s timeout)
+- Closes the database with WAL checkpoint
+- Closes the docker client
+
+Force-kill with `kill -9` if shutdown takes longer than 30s; expect a
+WAL replay on next boot (SQLite handles it automatically, just slower
+than a clean shutdown).
+
+## Related
+
+- [Quickstart](/quickstart) — 5-minute path from empty machine to first agent run.
+- [Install](/guides/install) — three install paths and what each gives you.
+- [Troubleshooting](/guides/troubleshooting) — common boot failures.
+- [`crewship doctor`](/cli/doctor) — pre-flight diagnostic for `start` problems.

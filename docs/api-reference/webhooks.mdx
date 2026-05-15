@@ -68,7 +68,7 @@ Data: {repository: org/repo, pr_number: 42, ...}
 
 The webhook returns immediately. Agent execution happens asynchronously.
 
-**`200 OK`** on success (the response format depends on the webhook handler implementation).
+**`202 Accepted`** on success — the body is `{"status": "accepted"}`. The status reflects the fire-and-forget contract: the agent run is enqueued asynchronously, and `202` (not `200`) signals "we received it, work has not finished".
 
 **`401 Unauthorized`** if the webhook secret is invalid or missing.
 

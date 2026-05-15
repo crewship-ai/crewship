@@ -10,20 +10,20 @@ icon: "terminal"
 
 Crewship runs each agent as a subprocess of a vendor coding CLI inside the crew container. The agent record's `cli_adapter` column picks which binary and which command line; the orchestrator's `BuildCLICommand` (`internal/orchestrator/exec.go`) is the one place that knows the per-vendor flag conventions. Everything else in the orchestrator — prompt assembly, memory injection, journal writing, tool routing — is adapter-agnostic; the adapter layer is only responsible for translating Crewship's uniform internal representation into whatever flags / files / stdio shape a given vendor CLI expects.
 
-The adapter pattern exists because no two coding-CLI vendors agree on anything. Claude Code reads its system prompt from a `--system-prompt` flag; Cursor reads it from files in `CWD`; Codex CLI infers it from `AGENTS.md`; Gemini takes the user message via `-p`; Factory Droid expresses autonomy as a tier (`--auto low|medium`) instead of a tool list. Rather than picking a winner, Crewship supports all of them — six adapters as of 2026-04 — and lets the operator choose per agent. The selection lives on the agent row, so a `backend` crew can run Claude Code while a `data` crew uses Gemini, with no orchestrator-wide config change.
+The adapter pattern exists because no two coding-CLI vendors agree on anything. Claude Code reads its system prompt from a `--system-prompt` flag; every other adapter has no equivalent flag, so Crewship prepends the preamble inline with `[SYSTEM]/[USER]` delimiters on turn 1 and lets the CLI's own file-discovery path (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.cursor/rules/`, `.factory/AGENTS.md`) carry the same content into turn 2+. Factory Droid additionally expresses autonomy as a tier (`--auto low|medium`) instead of a tool list. Rather than picking a winner, Crewship supports all of them — six adapters as of 2026-04 — and lets the operator choose per agent. The selection lives on the agent row, so a `backend` crew can run Claude Code while a `data` crew uses Gemini, with no orchestrator-wide config change.
 
 Adding another vendor is intentionally small: one new `case` in `BuildCLICommand` for the command-line translation, plus a normalisation rule in `agents_create.go` for the default tool profile and any vendor-specific defaults. The `adapter_hint` field on the [CLI pairing](/guides/cli-pairing) request is *telemetry only* — the backend never routes on it, and the frontend list of adapters lives in `lib/cli-adapters.ts` rather than in Go, so a new adapter is a TypeScript file plus a Go switch arm, not a schema migration.
 
 ## Supported adapters
 
-| Adapter | Binary | System prompt | Output | Notes |
-|---|---|---|---|---|
-| `CLAUDE_CODE` | `claude --print --output-format stream-json --include-partial-messages --dangerously-skip-permissions --verbose` | `--system-prompt` flag | stream-JSON on stdout | Supports `--model`, `--tools`, `--mcp-config <path>`. Default. |
-| `CODEX_CLI` | `codex --quiet` | (none — CLI reads `AGENTS.md`) | text | `--sandbox` enabled when `tool_profile=CODING`. |
-| `GEMINI_CLI` | `gemini -p <message>` | `--system-instruction` flag | text | Uses `-p` for the user message. |
-| `OPENCODE` | `opencode run <message>` | `AGENTS.md` written into CWD before exec | text | sst.dev's BYOK CLI; works with any provider. |
-| `CURSOR_CLI` | `cursor-agent -p --output-format stream-json` | `.cursor/rules/`, `AGENTS.md`, `CLAUDE.md` written into CWD | stream-JSON on stdout (same shape as Claude Code) | Added 2026-04. `-m <model>` for model override. |
-| `FACTORY_DROID` | `droid exec --auto {low\|medium}` | (CLI infers from CWD) | text | Added 2026-04. Tiered autonomy — see below. |
+| Adapter | Binary | Turn-1 system prompt | Turn-2+ persistence | Output | Notes |
+|---|---|---|---|---|---|
+| `CLAUDE_CODE` | `claude --print --output-format stream-json --include-partial-messages --dangerously-skip-permissions --verbose` | `--system-prompt` flag | `AGENTS.md` + canonical memory file set written to CWD | stream-JSON on stdout | Supports `--model`, `--tools`, `--mcp-config <path>`. Default. |
+| `CODEX_CLI` | `codex exec --json --sandbox <mode>` | `[SYSTEM]/[USER]` prepend in the prompt body (Codex has no system-prompt flag) | `AGENTS.md` written into CWD before exec | NDJSON | `--sandbox` enabled when `tool_profile=CODING`. |
+| `GEMINI_CLI` | `gemini -p <message> --output-format stream-json` | `[SYSTEM]/[USER]` prepend (no documented `--system-instruction` flag in headless mode) | `GEMINI.md` + canonical memory file set | NDJSON | Uses `-p` for the user message. |
+| `OPENCODE` | `opencode run <message>` | `[SYSTEM]/[USER]` prepend | `AGENTS.md` written into CWD before exec | text | sst.dev's BYOK CLI; works with any provider. |
+| `CURSOR_CLI` | `cursor-agent -p --output-format stream-json` | `[SYSTEM]/[USER]` prepend (no `--system-prompt` flag in headless mode) | `.cursor/rules/`, `AGENTS.md`, `CLAUDE.md` written into CWD | stream-JSON on stdout (same shape as Claude Code) | Added 2026-04. `-m <model>` for model override. |
+| `FACTORY_DROID` | `droid exec --auto {low\|medium}` | `[SYSTEM]/[USER]` prepend | `AGENTS.md` + `.factory/AGENTS.md` written into CWD | text | Added 2026-04. Tiered autonomy — see below. |
 
 The default fallback when `cli_adapter` is empty or unknown is `claude --print <message>` — minimal flags, no streaming, lowest-risk degradation.
 
@@ -31,7 +31,7 @@ The default fallback when `cli_adapter` is empty or unknown is `claude --print <
 
 `cursor-agent -p` is Cursor's headless mode. `-p` (print) prevents the interactive TUI from spawning; `--output-format stream-json` aligns the JSONL stream with the format the chat-bridge already parses for Claude Code, so the same reader handles both.
 
-Cursor reads its system instructions from files in the working directory: `.cursor/rules/`, `AGENTS.md`, and `CLAUDE.md`. `setupSystemPromptFiles()` writes those before exec, so there is no `--system-prompt` flag on the command line. If you customise the agent's persona in the UI, the file content changes — not the command line.
+Cursor reads its system instructions from files in the working directory: `.cursor/rules/`, `AGENTS.md`, and `CLAUDE.md`. `SetupSystemPrompt` writes those before exec, so there is no `--system-prompt` flag on the command line. The very first turn, however, has no file-discovery yet, so the orchestrator also prepends the preamble inline with `[SYSTEM]/[USER]` delimiters — turn-2+ then falls back to file-discovery so persona edits land without burning a re-prepend.
 
 `--mode=plan` and `--mode=ask` are valid Cursor flags (added 2026-01-16) but are not exposed today; the default `agent` mode is what `BuildCLICommand` emits. If a tool profile needs read-only browsing, extend the `CURSOR_CLI` case to map `tool_profile=CONSULTATIVE` to `--mode=ask`.
 

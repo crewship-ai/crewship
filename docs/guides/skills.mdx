@@ -16,7 +16,7 @@ When an agent has skills assigned, their content is injected as `<skill>` blocks
 [ACTIVE SKILLS]
 <skill name="Network Probe">
   # Network Probe
-  ## When to Activate
+  ## When to use this skill
   - Task involves ping, HTTP checks, DNS resolution...
   ## Instructions
   1. Always use -c flag with ping...
@@ -51,7 +51,7 @@ Crewship ships with five built-in skills in `cmd/crewship/seeddata/skills.go`:
 
 Every skill has three key sections:
 
-### When to Activate
+### When to use this skill
 Describes the conditions under which the agent should apply this skill. Uses keyword matching against the task description.
 
 ### Instructions
@@ -79,7 +79,7 @@ icon: "terminal"
 
 # My Custom Skill
 
-## When to Activate
+## When to use this skill
 - Task involves...
 
 ## Instructions
@@ -100,11 +100,17 @@ Import via the API endpoint `POST /api/v1/workspaces/{id}/skills/import` with th
 | Category | Description |
 |----------|-------------|
 | `CODING` | Code generation, file operations, scripting |
-| `MESSAGING` | Communication, notifications |
 | `AUTOMATION` | Workflow automation |
 | `DATA` | Data processing, analysis |
 | `DEVOPS` | Infrastructure, monitoring, deployment |
+| `WRITING` | Drafting and editing prose |
+| `RESEARCH` | Research, fact-finding |
+| `PM` | Product / project management |
+| `DESIGN` | UX, visual, design tasks |
 | `SUPPORT` | Customer support, help desk |
+| `SECURITY` | Security review, threat work |
+| `FINANCE` | Finance, accounting |
+| `OPS` | Operations, runbooks |
 | `SALES` | Sales automation |
 | `CUSTOM` | User-defined category |
 

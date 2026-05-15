@@ -71,7 +71,8 @@
               "guides/telemetry",
               "guides/tracing",
               "guides/llm-middleware",
-              "guides/migrations"
+              "guides/migrations",
+              "guides/troubleshooting"
             ]
           },
           {
@@ -101,10 +102,19 @@
         "tab": "CLI Reference",
         "groups": [
           {
-            "group": "CLI",
+            "group": "Getting started",
             "pages": [
               "cli/overview",
-              "cli/ai-workflows",
+              "cli/start",
+              "cli/version",
+              "cli/doctor",
+              "cli/telemetry",
+              "cli/ai-workflows"
+            ]
+          },
+          {
+            "group": "CLI",
+            "pages": [
               "cli/agent",
               "cli/crew",
               "cli/mission",

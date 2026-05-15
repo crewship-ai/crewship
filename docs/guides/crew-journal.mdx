@@ -47,14 +47,21 @@ Defined in `internal/journal/types.go`. Every type is a stable string -- renames
 | Communication | `peer.conversation`, `peer.escalation`, `message.broadcast`, `agent.mentioned` |
 | Mission | `mission.status_change`, `mission.comment`, `assignment.created/running/completed/failed`, `crew.action`, `task.delegated` |
 | **Runs** (since PR #234) | `run.started`, `run.completed`, `run.failed`, `run.cancelled`, `run.timeout` |
-| Security | `keeper.request`, `keeper.decision`, `guardrail.input_blocked`, `guardrail.output_blocked`, `approval.requested/granted/denied/timeout/cancelled` |
+| Security | `keeper.request`, `keeper.decision`, `keeper.rule_auto_tuned`, `guardrail.input_blocked`, `guardrail.output_blocked`, `approval.requested/granted/denied/timeout/cancelled` |
 | Cost | `llm.call`, `llm.cache_hit`, `cost.incurred`, `budget.exceeded`, `budget.warning` |
-| Memory | `memory.updated`, `memory.consolidated`, `summary.generated` |
+| Memory | `memory.updated`, `memory.consolidated`, `memory.priority_changed`, `summary.generated` |
 | Observability | `exec.command`, `exec.output_chunk`, `network.port_opened/closed`, `network.egress`, `file.written`, `container.metrics`, `container.snapshot` |
 | Presence | `agent.status_change` |
 | Checkpointing | `checkpoint.created`, `checkpoint.restored`, `fork.created` |
 | Eval | `eval.run_started`, `eval.metric`, `eval.regression_detected` |
 | Hooks | `hook.fired`, `hook.blocked` |
+| Pipeline | `pipeline.run.started/completed/failed`, `pipeline.step.started/completed/failed/skipped/retry/validation_failed`, `pipeline.dry_run` |
+| Credentials | `credential.auto_assign_failed`, `credential.auto_assign_empty` |
+| Skills | `skill.imported`, `skill.deleted`, `skill.assigned`, `skill.unassigned` |
+| Audit | `audit.entity_created/updated/deleted/restored` (mirrors `audit_logs`) |
+| Provisioning | `provisioning.queued/building/complete/failed` (crew runtime container build) |
+| Chat | `chat.user_message`, `chat.agent_response` (user↔agent turns) |
+| Agent error | `agent.error` (panic recoveries + stream-handling failures) |
 | System | `system.compaction`, `system.migration`, `system.hook_toggled`, `system.consolidation_triggered/completed` |
 
 #### `run.*` — agent run lifecycle

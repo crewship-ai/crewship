@@ -18,6 +18,7 @@ crewship config <subcommand>
 |---------|-------------|
 | `show` | Display current configuration |
 | `set` | Set a configuration value |
+| `validate` | Sanity-check the saved config (token authenticates, workspace exists, server reachable) |
 
 ---
 
@@ -46,11 +47,25 @@ crewship config set <key> <value>
 | `server` | Server URL (e.g., `http://10.0.0.1:8080`). |
 | `workspace` | Default workspace slug or ID. |
 | `format` | Default output format: `table`, `json`, `yaml`, or `quiet`. |
+| `default-agent` (alias: `default_agent`) | Default agent slug used by chat-style commands when `--agent` is omitted. |
+| `markdown` | Markdown-rendering toggle for terminal output: `on`, `off`, or `auto` (auto follows TTY detection). |
 
 ```bash
-crewship config set server http://localhost:8081
+crewship config set server http://localhost:8080
 crewship config set workspace my-workspace
 crewship config set format json
+crewship config set default-agent viktor
+crewship config set markdown auto
+```
+
+---
+
+## `crewship config validate`
+
+Sanity-check the saved CLI configuration end-to-end: parse the YAML, dial the server, verify the token authenticates, and confirm the recorded workspace exists for the caller. Useful as a one-shot health check before scripting against the CLI or wiring it into CI.
+
+```bash
+crewship config validate
 ```
 
 ---

@@ -103,9 +103,12 @@ the maintainer in production-shaped workloads; the pieces marked 🟡 and
   load and may run, but expect rough edges — file issues with logs.
 - **PostgreSQL is on the v0.2 roadmap.** Beta runs on SQLite via
   `modernc.org/sqlite` (single-binary, WAL mode, no extra services).
-- **No outbound telemetry by default.** Crewship does not phone home;
-  any future crash-reporting will be strictly opt-in (this is being
-  wired up in a separate PR — see #345).
+- **Telemetry is ON by default in v0.1 beta.** Anonymous crash reports
+  flow to the maintainer's Sentry to give a solo team enough signal to
+  fix bugs. Disable with `crewship telemetry off` (sticky), or
+  redirect to your own Sentry with `CREWSHIP_SENTRY_DSN=...`. Full
+  details in [docs/guides/telemetry](docs/guides/telemetry.mdx).
+  Reverts to opt-in for v1.0 GA.
 - **APIs may break across minor bumps** (v0.1 → v0.2). Patch bumps
   inside a minor (v0.1.0 → v0.1.1) are backwards-compatible.
 - **No multi-host clustering.** One Crewship instance manages many
@@ -117,36 +120,49 @@ Found a beta-blocker? [Open an issue][issues] — the
 
 [issues]: https://github.com/crewship-ai/crewship/issues/new/choose
 
-## Quick start (5 minutes to a running agent)
+## Install
+
+Three supported paths — pick whichever fits your machine. Full details
+in [docs/guides/install](docs/guides/install.mdx).
+
+```bash
+# macOS / Linux — Homebrew
+brew install crewship-ai/tap/crewship
+
+# Any Unix — signed installer
+curl -fsSL https://crewship.ai/install | bash
+
+# Self-hosted — Docker
+docker pull ghcr.io/crewship-ai/crewship:v0.1.0-beta.1
+```
+
+Then bring it up:
+
+```bash
+crewship start
+```
+
+Defaults: HTTP on `:8080`, SQLite at `~/.crewship/crewship.db`.
+Override with `CREWSHIP_PORT` / `--db file:/path`. Container runtime
+required (Docker, Podman, Colima, OrbStack, or Apple Containers) —
+`crewship doctor` autodetects and tells you what's missing.
+
+On first load the web UI walks a 6-step onboarding wizard (workspace
+→ crew → agent → credentials → done). Demo data: `crewship seed`.
+
+## Build from source (developers)
 
 ```bash
 git clone https://github.com/crewship-ai/crewship.git
 cd crewship
-
-# 1. install frontend deps (pnpm only — npm/yarn will lock-step drift)
-pnpm install
-
-# 2. generate the two secrets you need
-cp .env.example .env.local
-# then put real values into .env.local for at least:
-#   NEXTAUTH_SECRET=$(openssl rand -base64 32)
-#   ENCRYPTION_KEY=$(openssl rand -hex 32)
-
-# 3. start (SQLite is the default; no extra DB needed)
-./dev.sh start
+pnpm install                            # frontend deps (pnpm required)
+cp .env.example .env.local              # then fill NEXTAUTH_SECRET + ENCRYPTION_KEY
+./dev.sh start                          # SQLite, hot-reload, both ports
 ```
 
-Then open:
-
-- **UI:** http://localhost:3001
-- **API + WebSocket:** http://localhost:8080
-
-On first load you'll see a 6-step onboarding wizard (workspace → crew →
-agent → credentials → done). Demo data: `./dev.sh seed` after the server
-is up.
-
-Other `./dev.sh` subcommands: `stop`, `restart`, `status`, `seed`,
-`nuke`, `logs`, `logs:go`, `logs:next`.
+The dev server splits the Go binary (`:8080`) from Next.js (`:3001`)
+for fast iteration. Other `./dev.sh` subcommands: `stop`, `restart`,
+`status`, `seed`, `nuke`, `logs`, `logs:go`, `logs:next`.
 
 ### Single-binary production build
 
@@ -159,10 +175,6 @@ make build      # pnpm build → cp -r out web/out → go build -o crewship
 directly by `go build` — the `cp -r out web/out` step in between is
 required, otherwise the embedded UI drifts out of sync with the
 Next.js output.
-
-Defaults: port `:8080`, SQLite at `~/.crewship/crewship.db`.
-Override with `CREWSHIP_PORT` / `--db postgres://...` (PostgreSQL is
-on the v0.2 roadmap).
 
 ## Stack
 
@@ -207,9 +219,12 @@ internal/backup/       Age-encrypted bundle export / restore
 internal/provider/     Pluggable container / storage / state backends
 internal/connectors/   MCP/OAuth integration manifests (🟡 early)
 internal/episodic/     Long-term episodic memory (🟡 early, full wiring in v0.2)
+internal/crashreport/  Opt-out Sentry crash reporting in v0.1 beta
+internal/update/       GitHub-Releases version check + update banner
 
+ee/                    Enterprise add-ons (separate license, empty today)
 dev.sh                 Local dev orchestration
-scripts/               Release + dev tooling (install.sh, deploy-dev.sh, …)
+scripts/               Release + dev tooling (install.sh, sentry-bootstrap.sh, …)
 prisma/                Prisma schema (TypeScript types only — do NOT migrate)
 ```
 
@@ -228,6 +243,21 @@ larger changes.
 
 Security: see [SECURITY.md](SECURITY.md). Do not file public issues
 for vulnerabilities.
+
+Community: [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) — Contributor
+Covenant 2.1 applies in every project space.
+
+## Community & links
+
+- **Docs:** [docs.crewship.ai](https://docs.crewship.ai)
+- **Discord:** community help + showcase (invite link on
+  [crewship.ai](https://crewship.ai))
+- **Reddit:** [r/Crewship](https://reddit.com/r/Crewship) for
+  discussion + showcases
+- **X / Twitter:** [@crewshipai](https://twitter.com/crewshipai)
+- **Bluesky:** [@crewship.ai](https://bsky.app/profile/crewship.ai)
+- **YouTube:** [@crewshipai](https://youtube.com/@crewshipai)
+- **GitHub Discussions:** [crewship-ai/crewship/discussions](https://github.com/crewship-ai/crewship/discussions)
 
 ## License
 

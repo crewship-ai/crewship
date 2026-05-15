@@ -69,7 +69,7 @@ That gives you the pass-rate + cost variance you need to decide between `complex
 - **`must_contain` on `{`, `}`, `"item"`, `"qty"`, `"unit_price"`, `"currency"`** — anchors on JSON structure + every required key name. Catches the most common failure: model emits prose like *"Sure, here's the JSON: ..."* before the actual object.
 - **`must_not_contain` on `` ``` ``, `Here is`** — blocks code-fence wrappers and conversational lead-ins.
 - **`max_length: 400`** — caps verbosity drift. A weak tier sometimes ignores "no prose" and adds a paragraph of explanation; the cap trips it.
-- **No JSON Schema gate yet** — full schema validation now enforced (PR #284 follow-up). Use it when you want type-checking; the substring anchors are the cheap-but-effective layer.
+- **`validation.schema` (JSON Schema draft-2020-12)** — full schema walk is enforced when set, compiled and cached per definition by `internal/pipeline/executor_validate.go`. Use it when you want type-checking; the substring anchors above are the cheap-but-effective first layer that short-circuits the expensive compile + walk on obvious failures.
 
 ### Failure modes & fixes
 

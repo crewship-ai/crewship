@@ -42,6 +42,8 @@ All Crewship configuration can be set via environment variables. These override 
 
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `CREWSHIP_DATA_DIR` | `~/.crewship` | Root directory for `crewship.db`, output, chats, logs, skills, and workspace memory. Resolved by `database.DefaultDataDir` — every admin / backup / doctor / start path flows through it. |
+| `DATABASE_URL` | (unset) | Direct DSN override for `crewship admin` only. Bypasses `CREWSHIP_DATA_DIR` resolution. Use when running admin commands against a SQLite file outside the standard data-dir tree. |
 | `CREWSHIP_STORAGE_PROVIDER` | `localfs` | Storage backend: `localfs` or `s3` |
 | `CREWSHIP_STORAGE_BASE_PATH` | `/var/lib/crewship` | Base path for local file storage |
 | `CREWSHIP_LOG_PATH` | `/var/log/crewship` | Path for log files |
@@ -52,6 +54,32 @@ All Crewship configuration can be set via environment variables. These override 
 |----------|---------|-------------|
 | `CREWSHIP_STATE_PROVIDER` | `bbolt` | State store: `bbolt` (postgres on the v0.2 roadmap) |
 | `CREWSHIP_BOLT_PATH` | `/var/lib/crewship/state.db` | BoltDB file path |
+
+## Public-facing URL
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CREWSHIP_PUBLIC_URL` | (unset) | Externally-reachable base URL of the Crewship server. Required for password-recovery emails and for `/expose-port` (port-exposed agent containers). Without it the recovery email link is degraded and `/expose-port` returns `503` with a `CREWSHIP_PUBLIC_URL not set` log line. |
+
+## Crash reporting (Sentry)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CREWSHIP_SENTRY_DSN` | (vendor default, baked-in at build time) | Operator override for the crash-reporting DSN. Empty string disables crash reporting at startup even when telemetry consent is on. Read by `internal/crashreport/crashreport.go`. |
+
+## Email (password recovery)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `RESEND_API_KEY` | (unset — recovery emails disabled) | Resend API key for transactional email delivery. When unset, password-recovery flows surface a "configure RESEND_API_KEY or share the reset link manually" message instead of sending. |
+| `RESEND_FROM` | (unset — required together with API key) | `From:` address used for outbound recovery emails (e.g. `Crewship <recovery@example.com>`). |
+
+## Google sign-in (optional)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `GOOGLE_CLIENT_ID` | (unset — Google sign-in disabled) | OAuth 2.0 client ID for the "Sign in with Google" flow. Loaded via `applyEnvOverrides` in `internal/config/config.go`. |
+| `GOOGLE_CLIENT_SECRET` | (unset) | OAuth client secret paired with the client ID. Required when `GOOGLE_CLIENT_ID` is set. |
 
 ## Logging
 

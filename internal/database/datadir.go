@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 const defaultDirName = ".crewship"
@@ -14,9 +15,19 @@ type DataDir struct {
 	Root string
 }
 
-// DefaultDataDir returns a DataDir rooted at ~/.crewship, creating the
-// directory structure if it does not already exist.
+// DefaultDataDir returns a DataDir rooted at $CREWSHIP_DATA_DIR (if set)
+// or ~/.crewship otherwise, creating the directory structure if it does
+// not already exist. The env-var override is the single supported way to
+// move state off the home dir without passing --data-dir to every
+// command; admin / backup / doctor / start all flow through this helper.
 func DefaultDataDir() (*DataDir, error) {
+	if override := strings.TrimSpace(os.Getenv("CREWSHIP_DATA_DIR")); override != "" {
+		abs, err := filepath.Abs(override)
+		if err != nil {
+			return nil, fmt.Errorf("resolve CREWSHIP_DATA_DIR: %w", err)
+		}
+		return NewDataDir(abs)
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("get home dir: %w", err)
