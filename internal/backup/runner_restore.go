@@ -460,6 +460,12 @@ func rewriteCrewSlug(dump *DBDump, crewID, newSlug string) {
 // Each hook runs in its own transaction so one failure does not strand
 // a half-applied backfill. Failure returns ErrRestoreBackfillFailed
 // wrapping the inner error.
+//
+// Hook authors: RestoreBackfillFunc REQUIRES idempotency. The retry
+// path after a partial failure re-executes earlier hooks against the
+// same rows; a non-idempotent hook compounds on each retry. See the
+// type comment in internal/database/migrate.go for the full contract
+// and idiomatic recipes.
 func replayRestoreBackfills(ctx context.Context, db *sql.DB, bundleVersions []int, logger func(string)) error {
 	applied := AppliedMigrationVersions(ctx, db)
 	if len(applied) == 0 {

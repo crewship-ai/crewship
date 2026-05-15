@@ -103,16 +103,45 @@ type migration struct {
 	// applied (target > source) the backup subsystem calls the hook for
 	// each such migration so newly-added columns get populated on the
 	// restored rows. Pure ADD COLUMN migrations that rely on the DB
-	// DEFAULT need no hook. See internal/backup/runner.go RestoreBackup.
+	// DEFAULT need no hook. Hooks MUST be idempotent — see
+	// RestoreBackfillFunc for the full contract. See
+	// internal/backup/runner_restore.go replayRestoreBackfills.
 	restoreBackfill RestoreBackfillFunc
 }
 
 // RestoreBackfillFunc is the signature for per-migration hooks that
 // populate newly-added columns on rows just restored from an older
-// bundle. Runs in its own transaction after the main restore tx has
-// committed successfully; a returned error aborts the restore but does
-// not roll back the already-committed row inserts — callers log
-// loudly and prompt the operator to investigate.
+// bundle. Each hook runs in its OWN transaction inside the backup
+// runner's replayRestoreBackfills loop — that isolation matters for
+// the contract below.
+//
+// # Contract
+//
+// Hooks MUST be idempotent. This is a hard requirement, not a guideline.
+//
+// Why: replayRestoreBackfills walks the versions the target has applied
+// but the bundle did not, and runs the registered hook for each. Hooks
+// run sequentially, each in its own tx. If hook v83 commits successfully
+// and hook v84 returns an error, the restore aborts with
+// ErrRestoreBackfillFailed — but v83's changes are already on disk.
+// The operator's recovery path is to fix the cause and re-run the
+// restore; the next run will execute v83 AGAIN against the same rows.
+// A non-idempotent hook compounds (e.g. `counter = counter + 1`); the
+// second run silently double-counts and data corrupts.
+//
+// # Recipes for safe idempotency
+//
+//   - Conditional updates: `UPDATE t SET col = <value> WHERE col IS NULL`
+//     — the second run finds nothing to update.
+//   - Computed-from-source backfills: `UPDATE t SET derived = f(source)`
+//     where f is pure — re-running produces the same result.
+//   - Avoid: `UPDATE t SET counter = counter + 1`, `INSERT INTO t (...)`
+//     without an ON CONFLICT clause, anything order-dependent.
+//
+// A returned error aborts the restore but does not roll back the
+// already-committed row inserts from the main restore tx — callers
+// log loudly and prompt the operator to investigate, but the user-data
+// part of the restore is preserved.
 type RestoreBackfillFunc func(ctx context.Context, tx *sql.Tx, logger *slog.Logger) error
 
 var migrations = []migration{
