@@ -171,9 +171,9 @@ mise is installed as the `agent` user (UID 1001), so tools land under `/home/age
   <Tab title="UI (Crew Wizard)">
     The crew creation / edit wizard has a **Runtime Configuration** step with:
 
-    - Base image dropdown (populated from `/api/v1/admin/runtime-images` catalog)
-    - Feature picker (searchable, powered by `/api/v1/admin/devcontainer-features`)
-    - mise tool picker (searchable, powered by `/api/v1/admin/mise-tools`)
+    - Base image dropdown (populated from `/api/v1/runtimes/catalog`)
+    - Feature picker (searchable, powered by `/api/v1/features/catalog`)
+    - mise tool picker (searchable, same `/api/v1/runtimes/catalog` payload)
     - A side-by-side preview of the generated `devcontainer.json` and `mise.json` blobs
 
     Catalogs are refreshed on a 3-tier cache: in-memory → BoltDB → `containers.dev` scrape, TTL 24 h.

@@ -39,14 +39,16 @@ CREATE TABLE cost_ledger (
   -- [v62] Live rate-limit signal harvested from upstream response headers.
   -- NULL when the call had no rate-limit headers (e.g. local Ollama, errors).
   quota_remaining_pct   REAL,
-  quota_window          TEXT,             -- 'requests' | 'tokens' (most-restrictive)
+  quota_window          TEXT,             -- 'requests_per_min' | 'tokens_per_min' | 'input_tokens_per_min' | 'output_tokens_per_min' (most-restrictive)
   -- [v62] Display label for flat-rate rows. NULL for metered.
   subscription_plan     TEXT,
   -- [v62] Rate-card snapshot at write time (Langfuse pattern). A future
   -- pricing.go change cannot retroactively rewrite history.
-  rate_input_per_m      REAL NOT NULL DEFAULT 0,
-  rate_output_per_m     REAL NOT NULL DEFAULT 0,
-  rate_cached_in_per_m  REAL NOT NULL DEFAULT 0,
+  -- Stored as plain REAL (nullable, no DEFAULT); the writer always
+  -- supplies a non-NULL value so the column is effectively populated.
+  rate_input_per_m      REAL,
+  rate_output_per_m     REAL,
+  rate_cached_in_per_m  REAL,
   rate_cache_write_per_m REAL NOT NULL DEFAULT 0,
   -- [v62] Provenance label per row (Helicone pattern). UI never renders a
   -- $ figure without telling the operator how trustworthy it is.
@@ -141,7 +143,7 @@ func EnforceQuota(
     j journal.Emitter,
     scope Scope,
     remainingPct float64,   // 0.0–1.0; smallest of the parsed windows
-    window QuotaWindow,     // "requests" | "tokens" — display only
+    window QuotaWindow,     // requests_per_min | tokens_per_min | input_tokens_per_min | output_tokens_per_min — display only
     hadStatus429 bool,      // upstream sent 429 → authoritative "out"
 ) error
 ```
