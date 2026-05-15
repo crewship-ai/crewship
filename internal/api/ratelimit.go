@@ -324,7 +324,3 @@ func MustNotDisableRateLimitInProd() {
 			"; refusing to start. Unset the flag or change CREWSHIP_ENV to a non-prod value.")
 	}
 }
-
-// RateLimitDisabled reports whether rate limiting is currently bypassed.
-// Exposed for /api/health to surface the runtime state to scrapers.
-func RateLimitDisabled() bool { return rateLimitDisabled }

@@ -7,6 +7,9 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"errors"
+	"fmt"
+	"os"
+	"sync/atomic"
 	"testing"
 
 	_ "modernc.org/sqlite"
@@ -316,8 +319,13 @@ func TestWebhookStore_RateLimit_FastPath(t *testing.T) {
 }
 
 func TestWebhookStore_RateLimit_TripsAt(t *testing.T) {
-	// Distinct token to avoid bleed between tests
-	const tok = "token_ratelimit_test"
+	// AllowWebhookFire is backed by a package-level rateLimiter whose
+	// per-key window state lives for the lifetime of the test binary.
+	// Re-running this test in the same process (`go test -count=N`)
+	// would otherwise pre-charge the window from prior iterations and
+	// trip the limit before i=5. A unique token per call sidesteps the
+	// leak without needing to expose a reset hook on production code.
+	tok := fmt.Sprintf("token_ratelimit_test_%d_%d", os.Getpid(), atomic.AddInt64(&webhookRateLimitTestSeq, 1))
 	for i := 0; i < 5; i++ {
 		if !AllowWebhookFire(tok, 5) {
 			t.Errorf("rejection before limit reached at i=%d", i)
@@ -327,3 +335,8 @@ func TestWebhookStore_RateLimit_TripsAt(t *testing.T) {
 		t.Errorf("expected rejection at i=5 (over limit)")
 	}
 }
+
+// webhookRateLimitTestSeq makes every -count=N iteration use a fresh
+// token so the package-level rateLimiter's window state from prior
+// iterations doesn't pre-charge this one's count.
+var webhookRateLimitTestSeq int64
