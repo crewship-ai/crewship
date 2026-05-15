@@ -23,6 +23,12 @@ on:
   schedule:
     - cron: "30 2 * * *" # nightly 02:30 UTC
 
+# GitHub cron jitter can be ±5 min; cancel any in-flight run if a fresh
+# schedule fires so we don't queue duplicate slow E2E runs.
+concurrency:
+  group: e2e-devcontainer-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 

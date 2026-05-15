@@ -133,7 +133,9 @@ brew install crewship-ai/tap/crewship
 curl -fsSL https://crewship.ai/install | bash
 
 # Self-hosted — Docker
-docker pull ghcr.io/crewship-ai/crewship:v0.1.0-beta.1
+# `:latest` auto-tracks the most recent stable release. Pin a specific tag
+# (e.g. `:v0.1.0-beta.1`) once you've validated it in your environment.
+docker pull ghcr.io/crewship-ai/crewship:latest
 ```
 
 Then bring it up:

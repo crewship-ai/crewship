@@ -136,7 +136,11 @@
       "esbuild",
       "prisma",
       "sharp"
-    ]
+    ],
+    "overrides": {
+      "lodash-es": ">=4.18.1",
+      "fast-uri": ">=3.1.2"
+    }
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.11.3",

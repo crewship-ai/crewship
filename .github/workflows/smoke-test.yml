@@ -162,20 +162,22 @@ jobs:
           SERVER_PID=$!
           trap 'kill $SERVER_PID 2>/dev/null || true' EXIT
 
-          # Poll for up to 10s waiting for /api/health. We can't predict how
-          # fast the server boots on a cold runner, so we retry rather than
-          # assume a fixed sleep is enough.
+          # Poll for up to 30s waiting for /api/health. Cold GitHub-hosted
+          # runners can be slow at the binary's first boot; 10s was the
+          # previous budget and occasionally flaked. Tightened the sleep
+          # interval to 0.25s so detection of "actually ready" is faster
+          # once the server is up.
           STATUS=0
-          for _ in $(seq 1 20); do
+          for _ in $(seq 1 120); do
             if curl -sf --max-time 1 http://localhost:9090/api/health >/dev/null 2>&1; then
               STATUS=200
               break
             fi
-            sleep 0.5
+            sleep 0.25
           done
 
           if [ "$STATUS" != "200" ]; then
-            echo "::error::health endpoint did not return 200 within 10s"
+            echo "::error::health endpoint did not return 200 within 30s"
             echo "---- crewship start log ----"
             cat /tmp/crewship-start.log || true
             exit 1

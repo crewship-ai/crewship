@@ -158,7 +158,8 @@ jobs:
       - name: Build snapshot binaries
         uses: goreleaser/goreleaser-action@1a80836c5c9d9e5755a25cb59ec6f45a3b5f41a8 # v7
         with:
-          version: "~> v2"
+          # Match release.yml pin; `~> v2` allows v3 once released.
+          version: "v2.6.1"
           # --snapshot: skip tag validation; --skip=publish,sign,homebrew: just
           # produce dist/ artifacts. We attach those ourselves via gh release.
           args: release --snapshot --clean --skip=publish,sign,homebrew
