@@ -421,7 +421,7 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 		opts = append(opts, goapi.WithInternalBaseURL(ipcBase))
 		// Port-expose capability URLs hand an externally reachable origin
 		// back to the agent. CREWSHIP_PUBLIC_URL must be set to the host a
-		// user's browser can actually reach (e.g. http://10.0.0.1:8080).
+		// user's browser can actually reach (e.g. http://crewship.example.com:8080).
 		// Left unset, the port-expose endpoint returns 503 with a message
 		// pointing at this env var — better to fail loudly than to hand out
 		// localhost URLs that silently 404 for anyone not on the host.

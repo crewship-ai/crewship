@@ -44,7 +44,7 @@ func WithInternalBaseURL(url string) RouterOption {
 
 // WithPortExposePublicURL sets the base URL used when handing capability URLs
 // back to agents for exposed container ports. Should be the externally
-// reachable origin of this crewshipd (e.g. "http://10.0.0.1:8080").
+// reachable origin of this crewshipd (e.g. "http://crewship.example.com:8080").
 // If unset, the handler falls back to "http://localhost:8080" which is fine
 // for unit tests but not reachable from a user's browser.
 func WithPortExposePublicURL(u string) RouterOption {

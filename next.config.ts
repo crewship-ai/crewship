@@ -4,9 +4,17 @@ import { withSentryConfig } from "@sentry/nextjs"
 const isDev = process.env.NODE_ENV === "development"
 const goPort = process.env.NEXT_PUBLIC_GO_PORT || "8080"
 
+// Additional dev origins for cross-origin dev access (browser → LAN IP /
+// SSH-tunnelled hostname). Comma-separated env var; leave empty for the
+// default Next.js behaviour (`localhost` only).
+const extraDevOrigins = (process.env.CREWSHIP_DEV_ORIGINS ?? "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean)
+
 const nextConfig: NextConfig = {
   ...(isDev ? {} : { output: "export" }),
-  allowedDevOrigins: ["10.0.0.1", "crewship.example.com"],
+  allowedDevOrigins: extraDevOrigins,
   images: {
     unoptimized: true,
   },

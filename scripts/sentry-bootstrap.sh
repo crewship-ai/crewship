@@ -26,15 +26,19 @@
 #   export SENTRY_AUTH_TOKEN=sntryu_...
 #   ./scripts/sentry-bootstrap.sh
 #
-# Override defaults via env:
-#   SENTRY_ORG       (default: your-sentry-org)
+# Required env:
+#   SENTRY_ORG       Your Sentry organisation slug (no default — must export).
+# Optional env:
 #   SENTRY_HOST      (default: sentry.io — set for self-hosted)
 #   SKIP_GH          (default: 0; set to 1 to skip GitHub secrets — useful
 #                     for a dry-run audit of DSNs + alert rules)
 
 set -euo pipefail
 
-SENTRY_ORG="${SENTRY_ORG:-your-sentry-org}"
+if [ -z "${SENTRY_ORG:-}" ]; then
+  echo "error: SENTRY_ORG is required (export SENTRY_ORG=<your-sentry-org-slug>)" >&2
+  exit 2
+fi
 SENTRY_HOST="${SENTRY_HOST:-sentry.io}"
 API="https://${SENTRY_HOST}/api/0"
 SKIP_GH="${SKIP_GH:-0}"
@@ -56,17 +60,21 @@ SKIP_GH="${SKIP_GH:-0}"
 # The default project set scopes the script to the crewship-ai org —
 # touching personal repos by default would be a footgun for anyone
 # who clones this script and runs it expecting only Crewship work.
-# Set INCLUDE_PERSONAL_REPOS=1 to opt into the personal/non-org rows
-# below.
+# If you maintain additional repos under the same Sentry org and want
+# this script to bootstrap them too, export EXTRA_PROJECTS as a
+# newline-separated list of "<sentry_project> <github_owner/repo>
+# <secret_name>" rows.
+#
+#   export EXTRA_PROJECTS=$'my-project   my-org/my-repo    SENTRY_DSN'
 PROJECTS=(
   "crewship-backend    crewship-ai/crewship      SENTRY_DSN"
   "crewship-frontend   crewship-ai/crewship      SENTRY_DSN_FRONTEND"
   "crewship-web        crewship-ai/crewship-web  SENTRY_DSN"
 )
-if [ "${INCLUDE_PERSONAL_REPOS:-0}" = "1" ]; then
-  PROJECTS+=(
-    "unify-web           your-org/your-repo          SENTRY_DSN"
-  )
+if [ -n "${EXTRA_PROJECTS:-}" ]; then
+  while IFS= read -r row; do
+    [ -n "$row" ] && PROJECTS+=("$row")
+  done <<<"$EXTRA_PROJECTS"
 fi
 
 # ---------- preflight ----------

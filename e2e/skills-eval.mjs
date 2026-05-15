@@ -4,7 +4,7 @@
  * user complained about: Create Skill button works, panels are at
  * sensible widths, detail populates on click.
  *
- * Run: SMOKE_URL=http://crewship.example.com:8081 \
+ * Run: SMOKE_URL=http://localhost:8080 \
  *      SMOKE_EMAIL=demo@crewship.ai SMOKE_PASSWORD=password123 \
  *      node e2e/skills-eval.mjs
  */

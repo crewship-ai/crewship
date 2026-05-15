@@ -18,13 +18,13 @@ Playwright's `webServer` block in `playwright.config.ts` brings the
 Next.js dev server up automatically and reuses an existing one if
 port 3001 is already serving.
 
-## Running on the dev VM (`dev-server`)
+## Running on a remote dev server
 
-Chromium + system fonts aren't in the base image — bootstrap once:
+If you keep a long-running dev server (e.g. a VM) and want to run the suite there, Chromium + system fonts typically aren't in the base image — bootstrap once on that host:
 
 ```bash
-ssh dev-server
-cd /opt/crewship
+ssh <your-dev-server>
+cd <your-crewship-path>
 sudo apt-get update && sudo apt-get install -y chromium-browser fonts-liberation \
   libasound2t64 libatk-bridge2.0-0 libatk1.0-0 libcups2 libdrm2 libgbm1 \
   libnspr4 libnss3 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libxkbcommon0

@@ -4,7 +4,7 @@
  * name → click Create → verify the agent shows up in the API.
  *
  * Run via:  node e2e/smoke-create-agent.mjs
- *           SMOKE_URL=http://crewship.example.com:8081 node e2e/smoke-create-agent.mjs
+ *           SMOKE_URL=http://localhost:8081 node e2e/smoke-create-agent.mjs
  *
  * Each step prints ✓/✗; non-zero exit on any failure.
  *

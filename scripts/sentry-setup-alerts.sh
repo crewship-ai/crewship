@@ -35,16 +35,23 @@
 #   export SENTRY_AUTH_TOKEN=sntrys_xxx...
 #   ./scripts/sentry-setup-alerts.sh
 #
-# Override defaults via env:
-#   SENTRY_ORG=...        (default: your-sentry-org)
-#   SENTRY_PROJECT=...    (default: crewship-backend)
+# Required env:
+#   SENTRY_ORG=...        Your Sentry organisation slug (no default).
+#   SENTRY_PROJECT=...    Target Sentry project slug (no default).
+# Optional env:
 #   SENTRY_HOST=...       (default: sentry.io — set for self-hosted)
 
 set -euo pipefail
 
 # ---------- config ----------
-SENTRY_ORG="${SENTRY_ORG:-your-sentry-org}"
-SENTRY_PROJECT="${SENTRY_PROJECT:-crewship-backend}"
+if [ -z "${SENTRY_ORG:-}" ]; then
+  echo "error: SENTRY_ORG is required (export SENTRY_ORG=<your-sentry-org-slug>)" >&2
+  exit 2
+fi
+if [ -z "${SENTRY_PROJECT:-}" ]; then
+  echo "error: SENTRY_PROJECT is required (export SENTRY_PROJECT=<your-project-slug>)" >&2
+  exit 2
+fi
 SENTRY_HOST="${SENTRY_HOST:-sentry.io}"
 API="https://${SENTRY_HOST}/api/0"
 

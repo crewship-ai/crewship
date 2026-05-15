@@ -6,7 +6,7 @@
  * that authenticates a pre-existing demo user.
  *
  * Usage:
- *   ONBOARDING_URL=http://crewship.example.com:8082 \
+ *   ONBOARDING_URL=http://localhost:8080 \
  *   BOOTSTRAP_EMAIL=qa-$(date +%s)@example.com \
  *   BOOTSTRAP_PASSWORD=long-enough-pw \
  *   BOOTSTRAP_NAME="QA User" \

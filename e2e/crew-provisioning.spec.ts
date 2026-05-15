@@ -12,11 +12,11 @@ import type { Page } from "@playwright/test"
 //   5. After the build completes, the row offers "Restart agents".
 //   6. Restart succeeds.
 //
-// Designed to run against `dev-server` (or any deployment with a real
-// Docker daemon). Cap is 4 minutes total — the heaviest single feature
-// (common-utils on a fresh box) takes ~90 s, with headroom for a slow
-// network pull. Skipped on bare local runs without the dev URL set, so
-// the default `pnpm e2e` stays green.
+// Designed to run against any deployment with a real Docker daemon
+// (point `PLAYWRIGHT_BASE_URL` at it). Cap is 4 minutes total — the
+// heaviest single feature (common-utils on a fresh box) takes ~90 s,
+// with headroom for a slow network pull. Skipped on bare local runs
+// without the dev URL set, so the default `pnpm e2e` stays green.
 
 const HARD_TIMEOUT = 240_000
 const QUICK = 8_000
@@ -44,7 +44,7 @@ async function pickAnyCrew(page: Page): Promise<string> {
 test.describe("Toolbar provisioning popover — end-to-end", () => {
   test.skip(
     !process.env.PLAYWRIGHT_BASE_URL,
-    "Provisioning e2e requires a live backend with Docker; set PLAYWRIGHT_BASE_URL=http://crewship.example.com:3001 to run.",
+    "Provisioning e2e requires a live backend with Docker; set PLAYWRIGHT_BASE_URL=http://localhost:3001 (or your remote dev server) to run.",
   )
   test.setTimeout(HARD_TIMEOUT)
 

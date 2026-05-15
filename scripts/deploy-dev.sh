@@ -1,13 +1,26 @@
 #!/usr/bin/env bash
-# Deploy current branch to Proxmox dev server
+# Deploy current branch to a remote dev server over SSH.
+#
 # Usage: ./scripts/deploy-dev.sh [branch]
 #   - No args: deploys current local branch
 #   - With arg: deploys specified branch
 #   - Pushes to origin, pulls on server, rebuilds, restarts
+#
+# Required env (no defaults — must export):
+#   CREWSHIP_DEPLOY_HOST   SSH alias or user@host for the target dev server.
+#   CREWSHIP_DEPLOY_PATH   Absolute path to the crewship checkout on that host.
 set -euo pipefail
 
-SERVER_HOST="dev-server"
-SERVER_PATH="/opt/crewship"
+if [ -z "${CREWSHIP_DEPLOY_HOST:-}" ]; then
+  echo "error: CREWSHIP_DEPLOY_HOST is required (export CREWSHIP_DEPLOY_HOST=<ssh-alias-or-user@host>)" >&2
+  exit 2
+fi
+if [ -z "${CREWSHIP_DEPLOY_PATH:-}" ]; then
+  echo "error: CREWSHIP_DEPLOY_PATH is required (export CREWSHIP_DEPLOY_PATH=<absolute-path-on-server>)" >&2
+  exit 2
+fi
+SERVER_HOST="${CREWSHIP_DEPLOY_HOST}"
+SERVER_PATH="${CREWSHIP_DEPLOY_PATH}"
 GO_PATH_EXPORT='export PATH=$PATH:/usr/local/go/bin:$HOME/go/bin'
 
 BRANCH="${1:-$(git rev-parse --abbrev-ref HEAD)}"
@@ -17,25 +30,31 @@ echo ">>> Deploying branch '$BRANCH' to $SERVER_HOST..."
 echo ">>> Pushing to origin..."
 git push origin "$BRANCH" 2>&1
 
-# 2. On server: checkout branch, pull, rebuild, restart
+# 2. On server: checkout branch, pull, rebuild, restart.
+# SERVER_PATH and BRANCH are passed as positional args via `bash -s --`
+# so the remote heredoc is fully single-quoted and can't be tampered
+# with by crafted env values (CodeRabbit security catch). The remote
+# reads them as $1, $2.
 echo ">>> Deploying on server..."
-ssh "$SERVER_HOST" bash <<REMOTE
+ssh "$SERVER_HOST" bash -s -- "$SERVER_PATH" "$BRANCH" <<'REMOTE'
   set -euo pipefail
-  export PATH=\$PATH:/usr/local/go/bin:\$HOME/go/bin
+  SERVER_PATH="$1"
+  BRANCH="$2"
+  export PATH=$PATH:/usr/local/go/bin:$HOME/go/bin
   cd "$SERVER_PATH"
 
   # Stop containers to avoid stale processes
-  docker rm -f \$(docker ps -q --filter "name=crewship-team-") 2>/dev/null || true
+  docker rm -f $(docker ps -q --filter "name=crewship-team-") 2>/dev/null || true
 
   # Fetch and checkout
   git fetch origin "$BRANCH" 2>&1
-  CURRENT=\$(git branch --show-current)
-  if [ "\$CURRENT" != "$BRANCH" ]; then
+  CURRENT=$(git branch --show-current)
+  if [ "$CURRENT" != "$BRANCH" ]; then
     git checkout -- . 2>/dev/null || true
     git checkout "$BRANCH" 2>&1 || git checkout -b "$BRANCH" "origin/$BRANCH" 2>&1
   fi
   git reset --hard "origin/$BRANCH"
-  echo "  Branch: $BRANCH (\$(git log --oneline -1))"
+  echo "  Branch: $BRANCH ($(git log --oneline -1))"
 
   # Rebuild
   echo "  Building Go..."
@@ -50,5 +69,5 @@ ssh "$SERVER_HOST" bash <<REMOTE
   ./dev.sh start 2>&1
 
   echo ""
-  echo ">>> Deploy complete: $BRANCH on \$(hostname)"
+  echo ">>> Deploy complete: $BRANCH on $(hostname)"
 REMOTE

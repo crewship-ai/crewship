@@ -4,7 +4,7 @@
  * SKILL.md, not a stub. Asserts that the new skill appears in the DB
  * via the public list endpoint after the dialog closes.
  *
- * Run: SMOKE_URL=http://crewship.example.com:8081 \
+ * Run: SMOKE_URL=http://localhost:8080 \
  *      SMOKE_EMAIL=demo@crewship.ai SMOKE_PASSWORD=password123 \
  *      node e2e/skills-create-flow.mjs
  */

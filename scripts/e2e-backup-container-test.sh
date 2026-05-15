@@ -9,8 +9,8 @@
 # The point is to catch regressions in the pause / CopyFrom / CopyTo
 # chain that unit tests with a stub DockerOps cannot hit.
 #
-# Run on: dev-server (or any host with Docker + a running crewship
-# server + at least one provisioned crew).
+# Run on: any host with Docker + a running crewship server + at
+# least one provisioned crew.
 #
 # Required env:
 #   CREWSHIP_CREW     — crew slug whose container will be mutated

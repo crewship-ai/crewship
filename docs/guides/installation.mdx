@@ -123,31 +123,7 @@ Lifecycle:
 
 The same `.web-build-marker` keeps `./dev.sh start` and `./dev.sh restart` self-healing too. If you ever see "fresh `pnpm build` produces stale UI", the marker file is the place to look.
 
-The prod-server VM uses a similar but separate flow — `crewship-deploy.timer` polls every 5 minutes, fast-forwards `release`, and rebuilds if the SHA changed. To deploy to prod, push `main:release` rather than running deploy directly on the VM.
-
-### Remote Development Server
-
-Crewship development happens on a remote Proxmox VM via SSH:
-
-```bash
-ssh dev-server                    # Connect to dev VM
-cd /opt/crewship && ./dev.sh start  # Start services (run inside tmux)
-```
-
-| Resource | Value |
-|----------|-------|
-| Backend URL | `http://10.0.0.1:8080` |
-| Frontend URL | `http://10.0.0.1:3001` |
-| vCPU | 12 |
-| RAM | 64 GB |
-| Storage | 200 GB NVMe |
-
-<Tip>
-  Use VS Code Remote SSH for the best development experience:
-  ```bash
-  code --remote ssh-remote+dev-server /opt/crewship
-  ```
-</Tip>
+If you run a production instance behind a systemd timer or similar polling deployer, push your release ref (e.g. `main:release`) and let the timer fast-forward — never run an ad-hoc deploy directly on the prod host.
 
 ## Multi-Instance Support
 
