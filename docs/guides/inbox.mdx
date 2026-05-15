@@ -125,7 +125,7 @@ Inbox items are user-scoped via three target fields on the row:
 
 `inboxVisibilityClause` in `internal/api/inbox_handler.go` enforces the predicate on every read endpoint (`List`, `UnreadCount`, `PatchState`). Admins do **not** automatically see other users' targeted items — least privilege wins over convenience, the same way Linear's own Inbox works.
 
-If you genuinely need a workspace-wide view of who has what pending — say, to audit whether a payroll-grade routine has been sitting on someone's bell all weekend — query the `inbox_items` table directly (via `crewship inbox list --state all` workspace-wide) or the `pipeline_waitpoints` table for the gate side. The journal records `pipeline.run.failed` + `pipeline.step.validation_failed` + `escalation.created` for related signals, but waitpoint creation itself lives on the `pipeline_waitpoints` row, not in the journal stream.
+If you genuinely need a workspace-wide view of who has what pending — say, to audit whether a payroll-grade routine has been sitting on someone's bell all weekend — use a privileged data path: query the `inbox_items` table directly (admin-side SQL, bypassing `inboxVisibilityClause`) or the `pipeline_waitpoints` table for gate-side state. `crewship inbox list --state all` is **still user-scoped** — `--state` only widens the kind filter, it does not lift the ACL — so the CLI alone will not surface items targeted at other users. The journal records `pipeline.run.failed` + `pipeline.step.validation_failed` + `escalation.created` for related signals, but waitpoint creation itself lives on the `pipeline_waitpoints` row, not in the journal stream.
 
 ## What this replaces
 

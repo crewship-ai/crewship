@@ -22,7 +22,11 @@ type DataDir struct {
 // command; admin / backup / doctor / start all flow through this helper.
 func DefaultDataDir() (*DataDir, error) {
 	if override := strings.TrimSpace(os.Getenv("CREWSHIP_DATA_DIR")); override != "" {
-		return NewDataDir(override)
+		abs, err := filepath.Abs(override)
+		if err != nil {
+			return nil, fmt.Errorf("resolve CREWSHIP_DATA_DIR: %w", err)
+		}
+		return NewDataDir(abs)
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {

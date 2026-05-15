@@ -160,9 +160,9 @@ This is the only enforcement path that fires for flat-rate calls: subscription u
 
 ## Rate-card snapshotting (Langfuse pattern)
 
-Every metered row writes the four `rate_*_per_m` columns from `RateCard(provider, model)` at the moment of write. When `pricing.go` is later edited (a provider repriced, a new model was added), historical rollups stay consistent: the old row continues to imply its old rate. New rollup queries can either trust `cost_usd` directly or recompute from `rate_*_per_m * tokens` to verify nothing has drifted.
+Every metered row writes the `rate_*_per_m` columns from `RateCard(provider, model)` at the moment of write. When `pricing.go` is later edited (a provider repriced, a new model was added), historical rollups stay consistent: the old row continues to imply its old rate. New rollup queries can either trust `cost_usd` directly or recompute from `rate_*_per_m * tokens` to verify nothing has drifted.
 
-Zero is honest for ollama/local (genuinely free) and for unknown-provider lookups (we couldn't price). NULL would erase that distinction, so the columns are NOT NULL with default 0.
+Zero is the honest value for ollama/local (genuinely free) and for unknown-provider lookups (we couldn't price). The columns are stored as nullable `REAL` (the v62 migration adds them without a `NOT NULL` / `DEFAULT` constraint), but the writer always supplies an explicit zero in those cases, so historical rows never observe NULL in practice — readers can treat the column as effectively populated.
 
 ## Pricing — current rates
 

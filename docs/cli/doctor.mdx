@@ -16,21 +16,21 @@ crewship doctor [--no-color] [--fix]
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--no-color` | `bool` | auto | Disable ANSI colours. Auto-detected when stdout is not a TTY. |
+| `--no-color` | `bool` | `false` | Disable ANSI colours. Automatically enabled when stdout is not a TTY (no need to pass the flag in CI / log-collection scripts). |
 | `--fix` | `bool` | `false` | Attempt safe auto-repairs while running the checks. Currently creates the missing data directory; future checks may opt in. |
 
 ## Exit codes
 
 | Code | Meaning |
 |------|---------|
-| `0` | All checks PASS or INFO. Safe to run. |
-| `0` | One or more checks WARN. Server will run but some feature is degraded. Read each WARN — the second column is the remediation. |
+| `0` | All checks PASS/INFO/WARN. Safe to run. WARNs indicate degraded features (read the remediation column) but do not block startup. |
 | `1` | One or more checks FAIL. Server cannot start (or some critical feature is broken). |
 
 WARN does **not** fail the command — you can wire `crewship doctor`
 into a healthcheck without false alarms on transient external state
-(e.g. Sentry endpoint briefly unreachable). FAIL means something
-Crewship itself needs to start at all.
+(e.g. Sentry endpoint briefly unreachable). FAIL means a core
+requirement for starting Crewship is missing or broken; treat the
+non-zero exit as a hard gate.
 
 ## Check categories
 

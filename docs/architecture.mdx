@@ -180,9 +180,9 @@ Default allowed domains (from `internal/sidecar/allowlist.go` — each entry exi
 
 Unknown network modes default to **restricted** (fail closed). Keep this list in sync with `components/features/crews/crew-network-policy.tsx` on the frontend.
 
-### Sidecar Endpoints (39 handlers)
+### Sidecar Endpoints (36 paths, 39 routes)
 
-The sidecar exposes a local API on port 9119 (`internal/sidecar/server.go`):
+The sidecar exposes a local API on port 9119 (`internal/sidecar/server.go`). The path count below is 36; the 39-route total reflects three paths that register multiple HTTP verbs (`/manifest` GET+PATCH, `/crew-connections` GET+POST, `/connections/{id}/files` GET+POST):
 
 | Category | Endpoints |
 |----------|-----------|
@@ -228,7 +228,7 @@ sequenceDiagram
     Agent->>Side: POST /keeper/execute<br/>{credential_name, intent, command}
     Side->>Cd: POST /api/v1/internal/keeper/execute<br/>(over /tmp/crewship.sock)
     Cd->>GK: Evaluate(EvalRequest)
-    alt L1 request, no command, intent ≥ 10 chars
+    alt L1 request, no command, intent ≥ 10 non-whitespace chars AND ≥ 3 distinct non-whitespace chars
         GK-->>Cd: ALLOW (fast-path)
     else otherwise
         GK->>LLM: prompt with intent + history + risk
