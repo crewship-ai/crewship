@@ -481,12 +481,22 @@ func TestScheduleTask_CrossCrew_Connected(t *testing.T) {
 		t.Fatalf("scheduleTask failed: %v", err)
 	}
 
-	// Give goroutine time to dispatch
-	time.Sleep(100 * time.Millisecond)
-
-	got := disp.snapshot()
-	if len(got) != 1 {
-		t.Fatalf("expected 1 dispatch, got %d", len(got))
+	// Poll for the dispatch instead of sleeping a fixed interval —
+	// the dispatching goroutine's wall-clock time depends on scheduler
+	// pressure (slower under -race -count=3), so a bare time.Sleep is
+	// either flaky-low or wasteful-high. Bounded wait keeps the test
+	// parallel-safe and resilient on loaded CI runners.
+	deadline := time.Now().Add(1 * time.Second)
+	var got []DispatchRequest
+	for {
+		got = disp.snapshot()
+		if len(got) == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("expected 1 dispatch within 1s, got %d", len(got))
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 	d := got[0]
 	if d.CrewID != crewB {
