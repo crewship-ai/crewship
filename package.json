@@ -18,8 +18,7 @@
     "smoke": "node e2e/smoke.mjs",
     "smoke:create-agent": "node e2e/smoke-create-agent.mjs",
     "db:generate": "dotenv -- prisma generate",
-    "db:studio": "dotenv -- prisma studio",
-    "db:seed": "tsx prisma/seed.ts"
+    "db:studio": "dotenv -- prisma studio"
   },
   "dependencies": {
     "@casl/ability": "^6.8.1",
@@ -50,7 +49,6 @@
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",
     "@orama/orama": "^3.1.18",
-    "@prisma/adapter-better-sqlite3": "^7.8.0",
     "@prisma/client": "^7.8.0",
     "@radix-ui/react-use-controllable-state": "^1.2.2",
     "@sentry/nextjs": "^10.53.1",
