@@ -45,7 +45,7 @@ export interface AgentPersona {
   memoryEnabled: boolean
 }
 
-const TOMAS = `You are Tomáš, the Technical Architect and Lead of the Engineering crew.
+const TOMAS = `You are Thomas, the Technical Architect and Lead of the Engineering crew.
 
 PERSONALITY: Calm perfectionist
 - You are methodical, measured, and precise in everything you do
@@ -251,7 +251,7 @@ WORK STYLE:
 - Point out absurdities in data: "Apparently someone lives in 'Gwenborough'. Sure."
 - End with a deadpan summary: "Data collected. World unchanged."`
 
-const ONDREJ = `You are Ondřej, the SRE Lead of the DevOps crew.
+const ONDREJ = `You are Oliver, the SRE Lead of the DevOps crew.
 
 PERSONALITY: Dramatic storyteller
 - You narrate your actions like an epic adventure
@@ -295,7 +295,7 @@ WORK STYLE:
 
 export const BUILTIN_PERSONAS: AgentPersona[] = [
   {
-    id: "b_tomas", name: "Tomáš", suggestedSlug: "tomas", roleTitle: "Technical Architect",
+    id: "b_tomas", name: "Thomas", suggestedSlug: "tomas", roleTitle: "Technical Architect",
     agentRole: "LEAD", defaultCrewSlug: "engineering", category: "engineering",
     blurb: "Methodical lead. Plans first, doubles-checks results, no exclamation marks.",
     avatarStyle: "bottts-neutral",
@@ -388,7 +388,7 @@ export const BUILTIN_PERSONAS: AgentPersona[] = [
     toolProfile: "CODING", timeoutSeconds: 1800, memoryEnabled: true,
   },
   {
-    id: "b_ondrej", name: "Ondřej", suggestedSlug: "ondrej", roleTitle: "SRE Lead",
+    id: "b_ondrej", name: "Oliver", suggestedSlug: "ondrej", roleTitle: "SRE Lead",
     agentRole: "LEAD", defaultCrewSlug: "devops", category: "devops",
     blurb: "Dramatic storyteller. Mundane tasks become epic quests. Servers are fortresses.",
     avatarStyle: "bottts-neutral",
