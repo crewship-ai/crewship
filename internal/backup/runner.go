@@ -394,14 +394,17 @@ func columnExists(ctx context.Context, db *sql.DB, table, col string) (bool, err
 // not a correctness issue.
 //
 // Bundle filenames follow `crewship-<scope>-<slug>-<ts>.tar.zst[.partial]`
-// (see BundleFileName). When ownerSlug is non-empty, only `.partial`
-// files whose name contains the corresponding `-<slug>-` segment are
-// swept; otherwise every stale `.partial` qualifies (the old
-// behaviour, kept for callers that don't know which slug they're
-// cleaning up for — e.g. an admin-side sweeper).
+// (see BundleFileName). When ownerSlug is non-empty, the slug segment
+// is EXTRACTED from the filename and compared exactly — a simple
+// `Contains("-"+slug+"-")` would also match the scope token (e.g.
+// slug="workspace" would falsely match every workspace-scope bundle
+// because "-workspace-" lives between "crewship-" and any tenant's
+// slug). When ownerSlug is empty, every stale `.partial` qualifies
+// (the old global behaviour, kept for admin-side sweepers that don't
+// know which tenant is theirs).
 //
-// The scoped form prevents the classic multi-tenant footgun: workspace
-// A starts a large backup whose `.partial` is alive for >1h; meanwhile
+// The scoped form prevents the multi-tenant footgun: workspace A
+// starts a large backup whose `.partial` is alive for >1h; meanwhile
 // workspace B fires its own CreateBackup, the unconditional sweep
 // removes A's still-active `.partial`, and A's restore mid-write hits
 // a "file removed under us" error after acquiring the lock.
@@ -413,13 +416,6 @@ func cleanupStalePartials(ctx context.Context, st StorageOps, dir, ownerSlug str
 	if err != nil {
 		return
 	}
-	// `-<slug>-` rather than `<slug>` so a slug that is a substring of
-	// another workspace's slug doesn't accidentally match. The dashes
-	// are part of BundleFileName's contract (`crewship-<scope>-<slug>-`).
-	var slugInfix string
-	if ownerSlug != "" {
-		slugInfix = "-" + ownerSlug + "-"
-	}
 	cutoff := time.Now().Add(-maxAge)
 	for _, e := range entries {
 		if e.IsDir() {
@@ -429,8 +425,11 @@ func cleanupStalePartials(ctx context.Context, st StorageOps, dir, ownerSlug str
 		if !strings.HasSuffix(name, ".partial") {
 			continue
 		}
-		if slugInfix != "" && !strings.Contains(name, slugInfix) {
-			continue
+		if ownerSlug != "" {
+			gotSlug, ok := slugFromPartialName(name)
+			if !ok || gotSlug != ownerSlug {
+				continue
+			}
 		}
 		info, err := e.Info()
 		if err != nil {
@@ -440,6 +439,42 @@ func cleanupStalePartials(ctx context.Context, st StorageOps, dir, ownerSlug str
 			_ = st.Remove(ctx, filepath.Join(dir, e.Name()))
 		}
 	}
+}
+
+// slugFromPartialName extracts the slug segment from a bundle filename
+// produced by BundleFileName plus the ".partial" suffix. Returns
+// (slug, true) when the filename matches the expected shape, or
+// ("", false) when it doesn't — callers should treat the latter as
+// "skip; this isn't a bundle the runner produced" rather than crash.
+//
+// The format is `crewship-<scope>-<slug>-<YYYYMMDDTHHMMSSZ>.tar.zst.partial`
+// where <slug> is allowed to contain its own dashes. Parsing strategy:
+// strip the known prefix (`crewship-<scope>-`) and the known suffix
+// (`-<16-char-timestamp>.tar.zst.partial`); whatever remains is the
+// slug. The scope set matches the Scope type's valid values.
+func slugFromPartialName(name string) (string, bool) {
+	const (
+		prefix       = "crewship-"
+		suffixTarPar = ".tar.zst.partial"
+		// 16 = len("YYYYMMDDTHHMMSSZ") — the format BundleFileName stamps.
+		tsLen = 16
+	)
+	if !strings.HasPrefix(name, prefix) || !strings.HasSuffix(name, suffixTarPar) {
+		return "", false
+	}
+	mid := name[len(prefix) : len(name)-len(suffixTarPar)]
+	// Strip the scope token (workspace|crew|instance) plus its dash.
+	for _, scope := range []string{"workspace-", "crew-", "instance-"} {
+		if strings.HasPrefix(mid, scope) {
+			mid = mid[len(scope):]
+			// Strip "-<timestamp>" trailer.
+			if len(mid) > tsLen+1 && mid[len(mid)-tsLen-1] == '-' {
+				return mid[:len(mid)-tsLen-1], true
+			}
+			return "", false
+		}
+	}
+	return "", false
 }
 
 // currentInstance collects hostname / platform details for the manifest.
