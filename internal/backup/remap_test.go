@@ -39,9 +39,25 @@ func newRemapTestDB(t *testing.T) *sql.DB {
 			workspace_id TEXT NOT NULL REFERENCES workspaces(id),
 			name TEXT
 		);
+		CREATE TABLE users (
+			id TEXT PRIMARY KEY,
+			email TEXT
+		);
+		CREATE TABLE agent_skills (
+			id TEXT PRIMARY KEY,
+			agent_id TEXT NOT NULL REFERENCES agents(id),
+			skill_id TEXT NOT NULL REFERENCES skills(id)
+		);
+		CREATE TABLE crew_members (
+			id TEXT PRIMARY KEY,
+			crew_id TEXT NOT NULL REFERENCES crews(id),
+			user_id TEXT NOT NULL REFERENCES users(id)
+		);
 		CREATE TABLE chats (
 			id TEXT PRIMARY KEY,
 			agent_id TEXT NOT NULL REFERENCES agents(id),
+			workspace_id TEXT REFERENCES workspaces(id),
+			created_by TEXT REFERENCES users(id),
 			body TEXT
 		);
 	`)
@@ -182,5 +198,98 @@ func TestRemapIDs_UnmappedFKLeftAlone(t *testing.T) {
 	}
 	if a["id"] == "agent_x" {
 		t.Errorf("agent id still should be regenerated, got %v", a["id"])
+	}
+}
+
+// TestRemapIDs_GloballyNamespacedTablesNotRegenerated pins the
+// non-remappable contract: skills and users keep their original
+// primary keys through --as-workspace remap, AND dependent FK rows
+// (agent_skills.skill_id, chats.created_by, crew_members.user_id)
+// pass through unchanged in pass 2 — they still point at the
+// original id, which is what the target instance already has
+// thanks to SeedBundledSkills / prior user provisioning.
+//
+// Without the fix this test was added with, agent_skills rows
+// pointed at regenerated skill ids whose INSERT OR IGNORE had been
+// swallowed by the UNIQUE(name, slug) constraint on the target's
+// pre-existing bundled rows — the whole restore aborted on the
+// deferred FK check (observed when the live-restore arm of
+// TestE2E_AsWorkspace_SurfacesDroppedFilesystems was first written
+// without trimming bundled-skill bindings).
+func TestRemapIDs_GloballyNamespacedTablesNotRegenerated(t *testing.T) {
+	db := newRemapTestDB(t)
+
+	const (
+		bundledSkillID = "skill_coding_01"
+		adminUserID    = "u_admin_orig"
+	)
+	dump := &DBDump{
+		WorkspaceID: "ws_old",
+		Tables: map[string][]map[string]any{
+			"workspaces": {{"id": "ws_old", "slug": "old"}},
+			"crews": {
+				{"id": "crew_a", "workspace_id": "ws_old", "slug": "a"},
+			},
+			"agents": {
+				{"id": "agent_1", "crew_id": "crew_a", "name": "Alice"},
+			},
+			// Globally-namespaced — must NOT be regenerated.
+			"skills": {
+				{"id": bundledSkillID, "name": "Code Reviewer", "slug": "code-reviewer"},
+			},
+			"users": {
+				{"id": adminUserID, "email": "admin@example.com"},
+			},
+			// Dependent FK rows — their refs must pass through
+			// unchanged because the parent stays at its original id.
+			"agent_skills": {
+				{"id": "as_1", "agent_id": "agent_1", "skill_id": bundledSkillID},
+			},
+			"crew_members": {
+				{"id": "cm_1", "crew_id": "crew_a", "user_id": adminUserID},
+			},
+			"chats": {
+				{"id": "ch_1", "agent_id": "agent_1", "workspace_id": "ws_old", "created_by": adminUserID},
+			},
+		},
+	}
+
+	if err := RemapIDs(context.Background(), db, dump); err != nil {
+		t.Fatalf("RemapIDs: %v", err)
+	}
+
+	// 1. skills.id and users.id stay as-is.
+	if got := dump.Tables["skills"][0]["id"]; got != bundledSkillID {
+		t.Errorf("skills.id was regenerated; got %v, want %q (non-remappable)", got, bundledSkillID)
+	}
+	if got := dump.Tables["users"][0]["id"]; got != adminUserID {
+		t.Errorf("users.id was regenerated; got %v, want %q (non-remappable)", got, adminUserID)
+	}
+
+	// 2. Dependent FK rows still point at the unchanged parent ids.
+	if got := dump.Tables["agent_skills"][0]["skill_id"]; got != bundledSkillID {
+		t.Errorf("agent_skills.skill_id rewritten; got %v, want %q (target row stays at original id)",
+			got, bundledSkillID)
+	}
+	if got := dump.Tables["crew_members"][0]["user_id"]; got != adminUserID {
+		t.Errorf("crew_members.user_id rewritten; got %v, want %q",
+			got, adminUserID)
+	}
+	if got := dump.Tables["chats"][0]["created_by"]; got != adminUserID {
+		t.Errorf("chats.created_by rewritten; got %v, want %q",
+			got, adminUserID)
+	}
+
+	// 3. Remappable tables still get fresh ids — this is the
+	// regression guard against "the exclusion list accidentally
+	// matched everything".
+	if got := dump.Tables["workspaces"][0]["id"]; got == "ws_old" {
+		t.Errorf("workspaces.id should still be regenerated, got original %v", got)
+	}
+	if got := dump.Tables["crews"][0]["id"]; got == "crew_a" {
+		t.Errorf("crews.id should still be regenerated, got original %v", got)
+	}
+	if got := dump.Tables["agents"][0]["id"]; got == "agent_1" {
+		t.Errorf("agents.id should still be regenerated, got original %v", got)
 	}
 }

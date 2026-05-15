@@ -602,22 +602,16 @@ func TestE2E_AsWorkspace_SurfacesDroppedFilesystems(t *testing.T) {
 	source := openMigratedDB(t)
 	workspaceID := seedWorkspace(t, source)
 
-	// Narrow the seeded agent_skills set to ONLY the custom skill
-	// (sk_custom_e2e) for this test. Reason: --as-workspace forces
-	// RemapIDs over every row in BackupTables incl. `skills`, which
-	// regenerates each skill's id. Bundled skills (skill_coding_01,
-	// skill_research_01) collide on the UNIQUE(name, slug) constraint
-	// on the target's pre-seeded bundled rows when the renamed-id row
-	// tries to insert — INSERT OR IGNORE swallows the collision and
-	// the agent_skills rows then FK-abort on the now-missing skill.
-	// That's a separate, real --as-workspace remap-skills bug worth
-	// its own PR; it's not what this test pins. Strip the bindings
-	// to bundled skills so we exercise the dropped-filesystem signal
-	// in isolation.
-	if _, err := source.ExecContext(ctx,
-		`DELETE FROM agent_skills WHERE skill_id IN ('skill_coding_01', 'skill_research_01')`); err != nil {
-		t.Fatalf("trim agent_skills: %v", err)
-	}
+	// seedWorkspace seeds agent_skills bindings to both bundled
+	// (skill_coding_01, skill_research_01) and custom (sk_custom_e2e)
+	// skills. Earlier this test had to DELETE the bundled bindings
+	// before bundling because --as-workspace forced RemapIDs to
+	// regenerate every skill PK, then INSERT OR IGNORE collided on
+	// the target's UNIQUE(name, slug) on its own pre-seeded bundled
+	// rows and the dependent agent_skills FK-aborted the restore.
+	// nonRemappablePKTables now excludes skills (and users) so the
+	// trim is no longer necessary — leaving the bindings in place
+	// here is an end-to-end proof of that fix.
 
 	const passphrase = "as-workspace-fs-loss-e2e-123"
 	createResult, err := backup.CreateBackup(ctx, source, backup.CreateOptions{
