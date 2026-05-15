@@ -182,3 +182,76 @@ func TestReplayRestoreBackfills_EmptyAppliedIsNoOp(t *testing.T) {
 		t.Fatalf("replay: %v", err)
 	}
 }
+
+// TestReplayRestoreBackfills_HookContractIsIdempotent pins the
+// RestoreBackfillFunc contract: hooks MUST be idempotent because the
+// retry path after a partial failure re-executes them.
+//
+// Why this test matters: replayRestoreBackfills runs each hook in its
+// OWN tx (so one failure doesn't strand half-applied state). If hook
+// vN commits and hook vN+1 errors, the restore aborts but vN is on
+// disk. The operator's recovery is to fix the cause and re-run the
+// restore — at which point vN runs AGAIN against the same rows. A
+// hook that accumulates (counter += 1) would compound on every retry
+// and silently corrupt data; a hook that asserts (col = X WHERE col
+// IS NULL) re-runs cleanly.
+//
+// Test shape: build a target with a `counter` column initialised to
+// NULL; register an idempotent backfill (`SET counter = 1 WHERE col
+// IS NULL`); run the replay TWICE and assert the column lands on
+// exactly 1, not 2. A future change that swaps the hook to
+// `counter = counter + 1` would FAIL this test — and that's the
+// point: the test stops a non-idempotent hook from sneaking in.
+func TestReplayRestoreBackfills_HookContractIsIdempotent(t *testing.T) {
+	const versionUnderTest = 12345
+
+	name := fmt.Sprintf("crewship-backfill-idem-%d", backfillMemCounter.Add(1))
+	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", name)
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	// Minimal _migrations + target table. Target row starts with
+	// counter=NULL so the WHERE clause matches on the first run only.
+	if _, err := db.Exec(`
+		CREATE TABLE _migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL DEFAULT (datetime('now')));
+		CREATE TABLE rows_under_backfill (id TEXT PRIMARY KEY, counter INTEGER);
+		INSERT INTO _migrations (version, name) VALUES (?1, 'idempotency-pin');
+		INSERT INTO rows_under_backfill (id, counter) VALUES ('r1', NULL);
+	`, versionUnderTest); err != nil {
+		t.Fatalf("schema: %v", err)
+	}
+
+	// Idempotent backfill: the WHERE clause makes the second invocation
+	// a no-op. If anyone replaces this with `SET counter = counter + 1`
+	// the test catches it.
+	calls := 0
+	unregister := database.RegisterRestoreBackfill(versionUnderTest, func(ctx context.Context, tx *sql.Tx, _ *slog.Logger) error {
+		calls++
+		_, err := tx.ExecContext(ctx, `UPDATE rows_under_backfill SET counter = 1 WHERE counter IS NULL`)
+		return err
+	})
+	t.Cleanup(unregister)
+
+	// Two replay passes — bundle "knows nothing" so versionUnderTest is
+	// in the missing-on-source set both times.
+	for i := 1; i <= 2; i++ {
+		if err := replayRestoreBackfills(context.Background(), db, nil, nil); err != nil {
+			t.Fatalf("replay pass %d: %v", i, err)
+		}
+	}
+	if calls != 2 {
+		t.Fatalf("expected hook to fire twice (idempotency means safe to retry, not skip); got %d calls", calls)
+	}
+
+	var counter sql.NullInt64
+	if err := db.QueryRow(`SELECT counter FROM rows_under_backfill WHERE id='r1'`).Scan(&counter); err != nil {
+		t.Fatalf("post-replay scan: %v", err)
+	}
+	if !counter.Valid || counter.Int64 != 1 {
+		t.Errorf("counter after two idempotent replays = %v.%d; want 1 (anything ≠ 1 means the hook compounded — non-idempotent)",
+			counter.Valid, counter.Int64)
+	}
+}
