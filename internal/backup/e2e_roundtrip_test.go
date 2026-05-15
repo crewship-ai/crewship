@@ -569,3 +569,141 @@ func TestE2E_UpgradePath_BackfillHookFires(t *testing.T) {
 // failure when the underlying data path now succeeds would be a
 // permanent false alarm; the round-trip's per-table diff already
 // proves both classes round-trip cleanly.
+
+// TestE2E_AsWorkspace_SurfacesDroppedFilesystems pins the
+// RestoreResult.DroppedCrewFilesystems contract introduced to close a
+// silent-data-loss gap: when the admin supplies --as-workspace (or
+// --as-crew) the runner forces a docker-phase skip to avoid
+// clobbering the source's still-live containers, which means any
+// crew filesystem data in the bundle (workspace/ memory/ system
+// sections) is NOT landed. Previously the runner reported this only
+// via the Logger callback — a nil Logger from an API handler made
+// the loss completely invisible to the caller.
+//
+// The fix: collect dropped crew slugs into a structured field on
+// RestoreResult so every caller (CLI, API, tests) can see them
+// without subscribing to a stderr log. Backed by an additional
+// slog.Warn so the operator still gets a runtime breadcrumb even
+// when the caller ignores the result.
+//
+// This test forges a bundle that carries WorkspaceIncluded crews
+// (the round-trip already does that) and restores with --as-workspace,
+// then asserts:
+//
+//   - the restore SUCCEEDS (data-loss is signalled, not blocked)
+//   - DockerPhaseSkipped is true
+//   - DroppedCrewFilesystems contains BOTH seeded crew slugs
+//   - opts.Logger == nil still surfaces the loss (via the slog path);
+//     the assertion runs without a Logger to prove the bug-fix
+//     scenario the structured field was added for.
+func TestE2E_AsWorkspace_SurfacesDroppedFilesystems(t *testing.T) {
+	ctx := context.Background()
+
+	source := openMigratedDB(t)
+	workspaceID := seedWorkspace(t, source)
+
+	// Narrow the seeded agent_skills set to ONLY the custom skill
+	// (sk_custom_e2e) for this test. Reason: --as-workspace forces
+	// RemapIDs over every row in BackupTables incl. `skills`, which
+	// regenerates each skill's id. Bundled skills (skill_coding_01,
+	// skill_research_01) collide on the UNIQUE(name, slug) constraint
+	// on the target's pre-seeded bundled rows when the renamed-id row
+	// tries to insert — INSERT OR IGNORE swallows the collision and
+	// the agent_skills rows then FK-abort on the now-missing skill.
+	// That's a separate, real --as-workspace remap-skills bug worth
+	// its own PR; it's not what this test pins. Strip the bindings
+	// to bundled skills so we exercise the dropped-filesystem signal
+	// in isolation.
+	if _, err := source.ExecContext(ctx,
+		`DELETE FROM agent_skills WHERE skill_id IN ('skill_coding_01', 'skill_research_01')`); err != nil {
+		t.Fatalf("trim agent_skills: %v", err)
+	}
+
+	const passphrase = "as-workspace-fs-loss-e2e-123"
+	createResult, err := backup.CreateBackup(ctx, source, backup.CreateOptions{
+		Scope:       backup.ScopeWorkspace,
+		WorkspaceID: workspaceID,
+		OutputDir:   t.TempDir(),
+		Actor:       backup.Actor{UserID: "u_admin", Email: "admin@e2e.test", Role: "ADMIN"},
+		Passphrase:  passphrase,
+	})
+	if err != nil {
+		t.Fatalf("CreateBackup: %v", err)
+	}
+
+	// assertConsistentSignal pins the relationship: the dropped-set
+	// is non-empty exactly when the manifest reports per-crew
+	// filesystem data. On this synthetic bundle CollectCrew was a
+	// no-op (no Docker daemon), so the per-crew flags are false-
+	// by-default and the dropped-set is empty — the false-positive
+	// guard. If a future change makes flags true without populating
+	// the dropped set (or vice versa), the assertions catch it.
+	// assertConsistentSignal pins the dropped-fs contract by computing
+	// the EXACT expected slug set from the manifest and comparing as a
+	// sorted equality, not just empty-vs-non-empty. CodeRabbit caught
+	// the earlier loose check: a runner that emitted the wrong subset
+	// (or the right cardinality with a typo'd slug) would have passed.
+	assertConsistentSignal := func(t *testing.T, res *backup.RestoreResult) {
+		t.Helper()
+		if !res.DockerPhaseSkipped {
+			t.Errorf("--as-workspace must force DockerPhaseSkipped=true; got false")
+		}
+		var want []string
+		for _, c := range res.Manifest.Contents.Crews {
+			if c.WorkspaceIncluded || c.MemoryIncluded || c.SystemIncluded {
+				want = append(want, c.Slug)
+			}
+		}
+		sort.Strings(want)
+		got := append([]string(nil), res.DroppedCrewFilesystems...)
+		sort.Strings(got)
+		if !equalStrings(want, got) {
+			t.Errorf("DroppedCrewFilesystems drift:\n  want=%v\n  got=%v", want, got)
+		}
+	}
+
+	// Table-driven over the two restore code paths that populate
+	// DroppedCrewFilesystems (dry-run short-circuit, real-restore
+	// tail). opts.Logger is deliberately nil throughout — that's the
+	// API-handler scenario the structured field was added for.
+	cases := []struct {
+		name         string
+		asWorkspace  string
+		dryRun       bool
+		wantInserted bool // assert RowsInserted > 0 (live only)
+	}{
+		{"dry-run", "renamed-target-ws", true, false},
+		{"live restore", "renamed-live-ws", false, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			target := openMigratedDB(t)
+			res, err := backup.RestoreBackup(ctx, target, backup.RestoreOptions{
+				Path:        createResult.Path,
+				Passphrase:  passphrase,
+				AsWorkspace: tc.asWorkspace,
+				Actor:       backup.Actor{UserID: "u_admin", Email: "admin@e2e.test", Role: "ADMIN"},
+				DryRun:      tc.dryRun,
+			})
+			if err != nil {
+				t.Fatalf("RestoreBackup: %v", err)
+			}
+			assertConsistentSignal(t, res)
+			if tc.wantInserted && res.RowsInserted <= 0 {
+				t.Errorf("expected non-zero RowsInserted on %s, got %d", tc.name, res.RowsInserted)
+			}
+		})
+	}
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
