@@ -33,7 +33,7 @@ import type { Mission } from "@/lib/types/mission"
 // OrchestrationPageShell layout (which exposed Runs / Graph / Timeline
 // / Feed sub-tabs) with a single canvas + rail + panel layout.
 //
-// User intent: "co nejmíň přepínání, jednoduché celky" — one canvas
+// User intent: minimise context switching, keep it as a single canvas
 // is the answer. Sub-tabs got cut on purpose. The legacy RunsView is
 // still reachable from /orchestration as a fallback list view.
 //

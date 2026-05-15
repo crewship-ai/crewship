@@ -1,14 +1,14 @@
 import { test, expect, request as plwRequest } from "@playwright/test"
 
 /**
- * Komplexní integration smoke — po kompletním rename Fleet → Cruise → Crews
- * a Phase-10 refactoru. Cíl: ověřit, že nic zásadního nezůstalo rozbité.
+ * Comprehensive integration smoke — after the full Fleet → Cruise → Crews
+ * rename and the Phase-10 refactor. Goal: confirm nothing critical broke.
  *
- * Pokrývá 6 oblastí:
+ * Covers six areas:
  *   A) Auth + top-level routes
- *   B) Backend API contract (každý endpoint 200 s rozumnou payload shape)
- *   C) CRUD flow (agent + chat session přes UI form + API)
- *   D) Tab + sub-strip navigace (agent 7 + crew 6 + sub-strip query params)
+ *   B) Backend API contract (every endpoint returns 200 with a sane payload shape)
+ *   C) CRUD flow (agent + chat session via UI form + API)
+ *   D) Tab + sub-strip navigation (agent 7 + crew 6 + sub-strip query params)
  *   E) Agent inbox + peer messages (Phase 10)
  *   F) Avatar crew-level flow (apply + reset)
  */

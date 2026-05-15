@@ -706,7 +706,7 @@ DROP TABLE agent_runs;
 `},
 	// Subscription-aware paymaster: distinguishes API-key calls (where we can
 	// price per token) from OAuth/subscription calls (flat-rate, opaque). Adds
-	// rate-card snapshot columns so historical rows survive future ceník
+	// rate-card snapshot columns so historical rows survive future rate-card
 	// changes (Langfuse pattern), and a confidence column so the UI can label
 	// every cost figure with its provenance (Helicone pattern).
 	// Renumbered from v60 to v62 after PR #234 took 60+61 for the unified

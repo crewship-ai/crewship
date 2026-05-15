@@ -217,7 +217,7 @@ try {
   // ────────────────────────────────────────────────────────────────
   // T11 — preview pane renders 4 agent avatars (micah style)
   // ────────────────────────────────────────────────────────────────
-  // Avatar alts are now first names (Alex, Sam, Tomáš, etc.) instead
+  // Avatar alts are now first names (Alex, Sam, Thomas, etc.) instead
   // of role titles. Wait for the preview card to mount then count
   // images that live inside it.
   await page.waitForSelector('img[width="32"]', { timeout: 5000 }).catch(() => {})

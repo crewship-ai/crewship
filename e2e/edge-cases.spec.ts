@@ -1,9 +1,9 @@
 import { test, expect, request as plwRequest } from "@playwright/test"
 
 /**
- * Edge-case / robustness suite — věci, které happy-path testy nevidí.
+ * Edge-case / robustness suite — the things happy-path tests don't catch.
  *
- * Pokrývá:
+ * Coverage:
  *   1. Stale/unknown slug handling (toast + URL clear)
  *   2. Keyboard shortcuts (Esc, j/k cycle)
  *   3. Rapid selection switch — abort orphan fetches
