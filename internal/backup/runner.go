@@ -387,11 +387,28 @@ func columnExists(ctx context.Context, db *sql.DB, table, col string) (bool, err
 }
 
 // cleanupStalePartials removes *.partial files older than maxAge in
-// dir. A crashed or cancelled CreateBackup leaves one behind; without
-// this sweep they accumulate forever. Errors are swallowed — the only
-// consequence of a failed cleanup is a file that will be retried on
-// the next backup, not a correctness issue.
-func cleanupStalePartials(ctx context.Context, st StorageOps, dir string, maxAge time.Duration) {
+// dir, OPTIONALLY narrowed to a single workspace/crew slug. A crashed
+// or cancelled CreateBackup leaves one behind; without this sweep they
+// accumulate forever. Errors are swallowed — the only consequence of a
+// failed cleanup is a file that will be retried on the next backup,
+// not a correctness issue.
+//
+// Bundle filenames follow `crewship-<scope>-<slug>-<ts>.tar.zst[.partial]`
+// (see BundleFileName). When ownerSlug is non-empty, the slug segment
+// is EXTRACTED from the filename and compared exactly — a simple
+// `Contains("-"+slug+"-")` would also match the scope token (e.g.
+// slug="workspace" would falsely match every workspace-scope bundle
+// because "-workspace-" lives between "crewship-" and any tenant's
+// slug). When ownerSlug is empty, every stale `.partial` qualifies
+// (the old global behaviour, kept for admin-side sweepers that don't
+// know which tenant is theirs).
+//
+// The scoped form prevents the multi-tenant footgun: workspace A
+// starts a large backup whose `.partial` is alive for >1h; meanwhile
+// workspace B fires its own CreateBackup, the unconditional sweep
+// removes A's still-active `.partial`, and A's restore mid-write hits
+// a "file removed under us" error after acquiring the lock.
+func cleanupStalePartials(ctx context.Context, st StorageOps, dir, ownerSlug string, maxAge time.Duration) {
 	if st == nil {
 		st = getDefaultStorage()
 	}
@@ -404,8 +421,15 @@ func cleanupStalePartials(ctx context.Context, st StorageOps, dir string, maxAge
 		if e.IsDir() {
 			continue
 		}
-		if !strings.HasSuffix(e.Name(), ".partial") {
+		name := e.Name()
+		if !strings.HasSuffix(name, ".partial") {
 			continue
+		}
+		if ownerSlug != "" {
+			gotSlug, ok := slugFromPartialName(name)
+			if !ok || gotSlug != ownerSlug {
+				continue
+			}
 		}
 		info, err := e.Info()
 		if err != nil {
@@ -415,6 +439,42 @@ func cleanupStalePartials(ctx context.Context, st StorageOps, dir string, maxAge
 			_ = st.Remove(ctx, filepath.Join(dir, e.Name()))
 		}
 	}
+}
+
+// slugFromPartialName extracts the slug segment from a bundle filename
+// produced by BundleFileName plus the ".partial" suffix. Returns
+// (slug, true) when the filename matches the expected shape, or
+// ("", false) when it doesn't — callers should treat the latter as
+// "skip; this isn't a bundle the runner produced" rather than crash.
+//
+// The format is `crewship-<scope>-<slug>-<YYYYMMDDTHHMMSSZ>.tar.zst.partial`
+// where <slug> is allowed to contain its own dashes. Parsing strategy:
+// strip the known prefix (`crewship-<scope>-`) and the known suffix
+// (`-<16-char-timestamp>.tar.zst.partial`); whatever remains is the
+// slug. The scope set matches the Scope type's valid values.
+func slugFromPartialName(name string) (string, bool) {
+	const (
+		prefix       = "crewship-"
+		suffixTarPar = ".tar.zst.partial"
+		// 16 = len("YYYYMMDDTHHMMSSZ") — the format BundleFileName stamps.
+		tsLen = 16
+	)
+	if !strings.HasPrefix(name, prefix) || !strings.HasSuffix(name, suffixTarPar) {
+		return "", false
+	}
+	mid := name[len(prefix) : len(name)-len(suffixTarPar)]
+	// Strip the scope token (workspace|crew|instance) plus its dash.
+	for _, scope := range []string{"workspace-", "crew-", "instance-"} {
+		if strings.HasPrefix(mid, scope) {
+			mid = mid[len(scope):]
+			// Strip "-<timestamp>" trailer.
+			if len(mid) > tsLen+1 && mid[len(mid)-tsLen-1] == '-' {
+				return mid[:len(mid)-tsLen-1], true
+			}
+			return "", false
+		}
+	}
+	return "", false
 }
 
 // currentInstance collects hostname / platform details for the manifest.
