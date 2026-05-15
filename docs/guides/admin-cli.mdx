@@ -65,7 +65,7 @@ Outputs a tab-aligned table:
 ```
 EMAIL                    ROLE     CREATED              LAST_LOGIN
 admin@example.com        OWNER    2025-11-14 09:21     2026-05-13 18:04
-admin@example.com           ADMIN    2026-02-01 12:00     2026-05-13 17:55
+ops@example.com          ADMIN    2026-02-01 12:00     2026-05-13 17:55
 ```
 
 Casing matters. `Admin@example.com` and `admin@example.com` are different rows for the `users` table; if the row you want isn't here, `reset-password` will fail loudly rather than silently create a new one.
