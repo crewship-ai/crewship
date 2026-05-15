@@ -16,6 +16,32 @@ import (
 // internal/api; the formats are compatible either way.
 var remapCounter atomic.Uint64
 
+// nonRemappablePKTables enumerates BackupTables entries whose primary
+// keys must NOT be regenerated during --as-workspace / --as-crew
+// remap. These tables are globally namespaced and have a UNIQUE
+// constraint on a human-readable column the bundle and target both
+// own — so regenerating the PK in the dump and INSERT OR IGNOREing
+// the row collides on that UNIQUE constraint, drops the bundle row,
+// and leaves dependent FK rows pointing at the new id (which never
+// landed). See RemapIDs pass 1 for the full failure-mode write-up.
+//
+// The list intentionally stays small: only tables where a stable id
+// is correct AND a constraint blocks the renamed-id workaround.
+// workspaces/crews/agents/etc. are per-workspace and the whole point
+// of --as-workspace is to fork them under new ids, so they remain
+// remappable.
+var nonRemappablePKTables = map[string]bool{
+	// Skills have UNIQUE(name) and UNIQUE(slug). Bundled skills
+	// (skill_coding_01, skill_research_01, …) are seeded on every
+	// boot by SeedBundledSkills with stable IDs; the target row
+	// already exists when restore lands.
+	"skills": true,
+	// Users have UNIQUE(email). An admin restoring to an instance
+	// where their email is already provisioned would otherwise lose
+	// the bundle's user row to the UNIQUE collision.
+	"users": true,
+}
+
 // newRemapCUID produces a lowercase CUID-shaped string suitable for
 // every primary-key column Crewship uses. The format matches
 // internal/api.generateCUID (`c<base36 ts><4-hex counter><8-hex rand>`)
@@ -133,8 +159,25 @@ func RemapIDs(ctx context.Context, db *sql.DB, dump *DBDump) error {
 	// Pass 1: regenerate PKs. Walk in BackupTables order so the
 	// mapping for a parent table is populated before any child sees
 	// its FK rewritten in pass 2.
+	//
+	// Tables in nonRemappablePKTables are SKIPPED — their IDs are
+	// globally namespaced and protected by UNIQUE constraints on
+	// human-readable columns (skills.name/.slug, users.email). The
+	// target instance already has rows with these IDs (bundled skills
+	// from SeedBundledSkills on every boot; admin users from prior
+	// installs); regenerating PKs in the dump then INSERT OR IGNORE
+	// would collide on the UNIQUE constraint, swallow the bundle row,
+	// and leave dependent FK rows (agent_skills.skill_id,
+	// crew_members.user_id, chats.created_by) pointing at the new id
+	// — which never landed. The cascade aborts the whole restore on
+	// the deferred FK check. Skipping these tables means dependent
+	// FKs pass through unchanged in pass 2 (no idMap entry), and the
+	// target's stable row satisfies the FK at restore time.
 	idMap := map[string]map[string]string{}
 	for _, table := range BackupTables {
+		if nonRemappablePKTables[table] {
+			continue
+		}
 		rows := dump.Tables[table]
 		if len(rows) == 0 {
 			continue
