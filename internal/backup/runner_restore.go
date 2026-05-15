@@ -53,6 +53,20 @@ type RestoreResult struct {
 	CrewsCount          int
 	RowsInserted        int
 	DockerPhaseSkipped  bool
+	// DroppedCrewFilesystems carries the slugs of crews whose bundle
+	// section included filesystem data (workspace / memory / system
+	// paths) that this restore did NOT land — typically because the
+	// caller supplied --as-workspace or --as-crew, which forces a
+	// docker-phase skip to avoid clobbering the source's still-live
+	// containers. Empty for a clean full-fidelity restore; non-empty
+	// means an admin should treat the operation as DB-rows-only and
+	// either provision matching crews then re-run restore without the
+	// rewrite flag, or accept the loss explicitly.
+	//
+	// Surfacing this as structured state (vs the Logger-callback path
+	// only) is on purpose — when an API handler passes a nil Logger
+	// the old path silently dropped data.
+	DroppedCrewFilesystems []string
 }
 
 // RestoreBackup applies a bundle to the target DB + docker engine. It
@@ -275,8 +289,30 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 	// new crews via `crewship crew provision` and then re-run restore
 	// without --as-* to land the container state.
 	skipDocker := opts.AsWorkspace != "" || opts.AsCrew != ""
+	// Compute the dropped-filesystem set up front so it ends up on the
+	// RestoreResult even when dockerRestore is never called (dry-run)
+	// or short-circuits via skipDocker.
+	var droppedCrewFilesystems []string
+	if skipDocker {
+		for _, c := range manifest.Contents.Crews {
+			if c.WorkspaceIncluded || c.MemoryIncluded || c.SystemIncluded {
+				droppedCrewFilesystems = append(droppedCrewFilesystems, c.Slug)
+			}
+		}
+	}
 	dockerRestore := func(_ context.Context) error {
 		if skipDocker {
+			// The Logger callback is best-effort (a nil Logger from an
+			// API handler is allowed). slog goes through the runtime's
+			// default handler and reaches the operator regardless —
+			// silent data loss from a nil-Logger caller was the gap.
+			if len(droppedCrewFilesystems) > 0 {
+				slog.Warn("backup restore: docker phase skipped under --as-* rewrite; crew filesystem data NOT landed",
+					"dropped_crews", droppedCrewFilesystems,
+					"as_workspace", opts.AsWorkspace,
+					"as_crew", opts.AsCrew,
+				)
+			}
 			if opts.Logger != nil {
 				opts.Logger("docker phase skipped because --as-workspace / --as-crew was supplied; provision the new crews and re-run restore without the rewrite flag to land container state")
 			}
@@ -343,12 +379,13 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 			}
 		}
 		return &RestoreResult{
-			Manifest:            manifest,
-			RestoredWs:          firstWorkspaceSlug(extracted.DBDump),
-			RestoredWorkspaceID: firstWorkspaceID(extracted.DBDump),
-			CrewsCount:          len(manifest.Contents.Crews),
-			RowsInserted:        rowsSeen, // dry-run reports potential inserts
-			DockerPhaseSkipped:  skipDocker,
+			Manifest:               manifest,
+			RestoredWs:             firstWorkspaceSlug(extracted.DBDump),
+			RestoredWorkspaceID:    firstWorkspaceID(extracted.DBDump),
+			CrewsCount:             len(manifest.Contents.Crews),
+			RowsInserted:           rowsSeen, // dry-run reports potential inserts
+			DockerPhaseSkipped:     skipDocker,
+			DroppedCrewFilesystems: droppedCrewFilesystems,
 		}, nil
 	}
 
@@ -391,21 +428,30 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 	// they rolled state back but nothing changed. Surface a loud
 	// warning via a dedicated error so CLI + API both show it.
 	if stats.RowsSeen > 0 && stats.RowsInserted == 0 {
+		// Carry the same metadata as the success path so callers
+		// inspecting RestoreResult alongside ErrNoOpRestore (audit
+		// log writers, the API handler's webhook emit) see the same
+		// shape and don't lose DockerPhaseSkipped / DroppedCrewFilesystems
+		// / RestoredWorkspaceID just because the no-op path fired.
 		return &RestoreResult{
-			Manifest:     manifest,
-			RestoredWs:   firstWorkspaceSlug(extracted.DBDump),
-			CrewsCount:   len(manifest.Contents.Crews),
-			RowsInserted: 0,
+			Manifest:               manifest,
+			RestoredWs:             firstWorkspaceSlug(extracted.DBDump),
+			RestoredWorkspaceID:    firstWorkspaceID(extracted.DBDump),
+			CrewsCount:             len(manifest.Contents.Crews),
+			RowsInserted:           0,
+			DockerPhaseSkipped:     skipDocker,
+			DroppedCrewFilesystems: droppedCrewFilesystems,
 		}, fmt.Errorf("%w: 0 of %d rows inserted — every primary key collided with an existing row. Restore into a clean target instance, or supply --as-workspace to re-scope IDs (workspace scope only)", ErrNoOpRestore, stats.RowsSeen)
 	}
 
 	return &RestoreResult{
-		Manifest:            manifest,
-		RestoredWs:          firstWorkspaceSlug(extracted.DBDump),
-		RestoredWorkspaceID: firstWorkspaceID(extracted.DBDump),
-		CrewsCount:          len(manifest.Contents.Crews),
-		RowsInserted:        stats.RowsInserted,
-		DockerPhaseSkipped:  skipDocker,
+		Manifest:               manifest,
+		RestoredWs:             firstWorkspaceSlug(extracted.DBDump),
+		RestoredWorkspaceID:    firstWorkspaceID(extracted.DBDump),
+		CrewsCount:             len(manifest.Contents.Crews),
+		RowsInserted:           stats.RowsInserted,
+		DockerPhaseSkipped:     skipDocker,
+		DroppedCrewFilesystems: droppedCrewFilesystems,
 	}, nil
 }
 
