@@ -428,11 +428,19 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 	// they rolled state back but nothing changed. Surface a loud
 	// warning via a dedicated error so CLI + API both show it.
 	if stats.RowsSeen > 0 && stats.RowsInserted == 0 {
+		// Carry the same metadata as the success path so callers
+		// inspecting RestoreResult alongside ErrNoOpRestore (audit
+		// log writers, the API handler's webhook emit) see the same
+		// shape and don't lose DockerPhaseSkipped / DroppedCrewFilesystems
+		// / RestoredWorkspaceID just because the no-op path fired.
 		return &RestoreResult{
-			Manifest:     manifest,
-			RestoredWs:   firstWorkspaceSlug(extracted.DBDump),
-			CrewsCount:   len(manifest.Contents.Crews),
-			RowsInserted: 0,
+			Manifest:               manifest,
+			RestoredWs:             firstWorkspaceSlug(extracted.DBDump),
+			RestoredWorkspaceID:    firstWorkspaceID(extracted.DBDump),
+			CrewsCount:             len(manifest.Contents.Crews),
+			RowsInserted:           0,
+			DockerPhaseSkipped:     skipDocker,
+			DroppedCrewFilesystems: droppedCrewFilesystems,
 		}, fmt.Errorf("%w: 0 of %d rows inserted — every primary key collided with an existing row. Restore into a clean target instance, or supply --as-workspace to re-scope IDs (workspace scope only)", ErrNoOpRestore, stats.RowsSeen)
 	}
 

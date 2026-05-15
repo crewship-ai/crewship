@@ -602,6 +602,23 @@ func TestE2E_AsWorkspace_SurfacesDroppedFilesystems(t *testing.T) {
 	source := openMigratedDB(t)
 	workspaceID := seedWorkspace(t, source)
 
+	// Narrow the seeded agent_skills set to ONLY the custom skill
+	// (sk_custom_e2e) for this test. Reason: --as-workspace forces
+	// RemapIDs over every row in BackupTables incl. `skills`, which
+	// regenerates each skill's id. Bundled skills (skill_coding_01,
+	// skill_research_01) collide on the UNIQUE(name, slug) constraint
+	// on the target's pre-seeded bundled rows when the renamed-id row
+	// tries to insert — INSERT OR IGNORE swallows the collision and
+	// the agent_skills rows then FK-abort on the now-missing skill.
+	// That's a separate, real --as-workspace remap-skills bug worth
+	// its own PR; it's not what this test pins. Strip the bindings
+	// to bundled skills so we exercise the dropped-filesystem signal
+	// in isolation.
+	if _, err := source.ExecContext(ctx,
+		`DELETE FROM agent_skills WHERE skill_id IN ('skill_coding_01', 'skill_research_01')`); err != nil {
+		t.Fatalf("trim agent_skills: %v", err)
+	}
+
 	const passphrase = "as-workspace-fs-loss-e2e-123"
 	createResult, err := backup.CreateBackup(ctx, source, backup.CreateOptions{
 		Scope:       backup.ScopeWorkspace,
@@ -614,55 +631,71 @@ func TestE2E_AsWorkspace_SurfacesDroppedFilesystems(t *testing.T) {
 		t.Fatalf("CreateBackup: %v", err)
 	}
 
-	// Manifest is what the runner consults for the dropped-crews check.
-	// CollectCrew was a no-op here (no Docker daemon) so the included
-	// flags will be false-by-default on this synthetic bundle. Stamp
-	// them on as a stand-in for "the bundle WOULD HAVE carried per-crew
-	// filesystem data on a real-daemon backup" — we test the runner's
-	// reaction to that manifest shape, which is what callers see.
-	// Reading the bundle, mutating, and re-writing the manifest is more
-	// than this test should pretend to do; instead we run a dry-run that
-	// exercises the same code path and assert against its result.
-	target := openMigratedDB(t)
-	stampManifestFlagsViaDryRun := func() *backup.RestoreResult {
+	// assertConsistentSignal pins the relationship: the dropped-set
+	// is non-empty exactly when the manifest reports per-crew
+	// filesystem data. On this synthetic bundle CollectCrew was a
+	// no-op (no Docker daemon), so the per-crew flags are false-
+	// by-default and the dropped-set is empty — the false-positive
+	// guard. If a future change makes flags true without populating
+	// the dropped set (or vice versa), the assertions catch it.
+	assertConsistentSignal := func(t *testing.T, res *backup.RestoreResult) {
 		t.Helper()
-		// Open a second target solely to verify the dry-run path also
-		// surfaces the field. Real restore (below) tests the live path.
+		if !res.DockerPhaseSkipped {
+			t.Errorf("--as-workspace must force DockerPhaseSkipped=true; got false")
+		}
+		hasFSData := false
+		for _, c := range res.Manifest.Contents.Crews {
+			if c.WorkspaceIncluded || c.MemoryIncluded || c.SystemIncluded {
+				hasFSData = true
+				break
+			}
+		}
+		if hasFSData && len(res.DroppedCrewFilesystems) == 0 {
+			t.Errorf("manifest carries filesystem-bearing crews but DroppedCrewFilesystems is empty — signal missing")
+		}
+		if !hasFSData && len(res.DroppedCrewFilesystems) != 0 {
+			t.Errorf("manifest carries NO filesystem-bearing crews yet DroppedCrewFilesystems=%v — false positive",
+				res.DroppedCrewFilesystems)
+		}
+	}
+
+	// Two arms because the DroppedCrewFilesystems field is populated
+	// on BOTH return paths (dry-run short-circuit + real-restore tail)
+	// and a future refactor could quietly break either one. opts.Logger
+	// is deliberately nil throughout — that's the API-handler scenario
+	// the structured field was added for.
+	t.Run("dry-run", func(t *testing.T) {
+		target := openMigratedDB(t)
 		res, err := backup.RestoreBackup(ctx, target, backup.RestoreOptions{
 			Path:        createResult.Path,
 			Passphrase:  passphrase,
 			AsWorkspace: "renamed-target-ws",
 			Actor:       backup.Actor{UserID: "u_admin", Email: "admin@e2e.test", Role: "ADMIN"},
 			DryRun:      true,
-			// Deliberately leave Logger nil — that's the gap the new
-			// structured field was added to fix.
 		})
 		if err != nil {
-			t.Fatalf("dry-run RestoreBackup: %v", err)
+			t.Fatalf("RestoreBackup dry-run: %v", err)
 		}
-		return res
-	}
-	dryRes := stampManifestFlagsViaDryRun()
-	if !dryRes.DockerPhaseSkipped {
-		t.Errorf("dry-run with --as-workspace: DockerPhaseSkipped=false; want true")
-	}
-	// On this minimal bundle CollectCrew didn't run, so the manifest's
-	// per-crew flags are false → dropped-set is empty. That's the
-	// honest signal: the new field is only non-empty when the bundle
-	// genuinely carries filesystem data. Pin the relationship rather
-	// than fake the manifest.
-	hasFSData := false
-	for _, c := range dryRes.Manifest.Contents.Crews {
-		if c.WorkspaceIncluded || c.MemoryIncluded || c.SystemIncluded {
-			hasFSData = true
-			break
+		assertConsistentSignal(t, res)
+	})
+
+	t.Run("live restore", func(t *testing.T) {
+		target := openMigratedDB(t)
+		res, err := backup.RestoreBackup(ctx, target, backup.RestoreOptions{
+			Path:        createResult.Path,
+			Passphrase:  passphrase,
+			AsWorkspace: "renamed-live-ws",
+			Actor:       backup.Actor{UserID: "u_admin", Email: "admin@e2e.test", Role: "ADMIN"},
+		})
+		if err != nil {
+			t.Fatalf("RestoreBackup live: %v", err)
 		}
-	}
-	if hasFSData && len(dryRes.DroppedCrewFilesystems) == 0 {
-		t.Errorf("manifest carries filesystem-bearing crews but DroppedCrewFilesystems is empty — signal missing")
-	}
-	if !hasFSData && len(dryRes.DroppedCrewFilesystems) != 0 {
-		t.Errorf("manifest carries NO filesystem-bearing crews yet DroppedCrewFilesystems=%v — false positive",
-			dryRes.DroppedCrewFilesystems)
-	}
+		assertConsistentSignal(t, res)
+		// Sanity: live restore actually wrote rows under the renamed
+		// workspace; the same signal contract holds whether or not
+		// data landed.
+		if res.RowsInserted <= 0 {
+			t.Errorf("expected non-zero RowsInserted on live --as-workspace restore, got %d", res.RowsInserted)
+		}
+	})
 }
