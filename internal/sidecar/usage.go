@@ -11,7 +11,7 @@ import (
 // ledger row. All four channels are tracked separately because cached input
 // is priced at ~10% of fresh input on every major provider, and conflating
 // the two produces materially wrong cost figures (we got bitten by this in
-// the v1 ceník — Opus 4.7 was 3× over because cached input was billed at
+// the v1 pricing — Opus 4.7 was 3× over because cached input was billed at
 // fresh-input rates). Zero on any field means "not reported by upstream".
 type LLMUsage struct {
 	Provider            string

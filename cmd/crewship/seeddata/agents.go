@@ -20,7 +20,7 @@ type AgentDef struct {
 var Agents = []AgentDef{
 	// Engineering crew
 	{
-		Name: "Tomáš", Slug: "tomas", CrewSlug: "engineering",
+		Name: "Thomas", Slug: "tomas", CrewSlug: "engineering",
 		RoleTitle: "Technical Architect", AgentRole: "LEAD",
 		CLIAdapter: "CLAUDE_CODE", LLMProvider: "ANTHROPIC", LLMModel: "claude-haiku-4-5",
 		ToolProfile: "FULL", TimeoutSeconds: 3600, MemoryEnabled: true, PromptSlug: "tomas",
@@ -72,7 +72,7 @@ var Agents = []AgentDef{
 
 	// DevOps crew
 	{
-		Name: "Ondřej", Slug: "ondrej", CrewSlug: "devops",
+		Name: "Andrew", Slug: "ondrej", CrewSlug: "devops",
 		RoleTitle: "SRE Lead", AgentRole: "LEAD",
 		CLIAdapter: "CLAUDE_CODE", LLMProvider: "ANTHROPIC", LLMModel: "claude-haiku-4-5",
 		ToolProfile: "FULL", TimeoutSeconds: 3600, MemoryEnabled: true, PromptSlug: "ondrej",

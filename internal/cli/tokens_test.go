@@ -24,8 +24,8 @@ func TestEstimateTokens(t *testing.T) {
 }
 
 func TestEstimateTokens_UnicodeRuneCount(t *testing.T) {
-	// Czech: "české znaky" — 11 runes. len() in bytes would be ~16.
-	in := "české znaky"
+	// Mixed-diacritic UTF-8: "héllo wörld" — 11 runes. len() in bytes would be ~13.
+	in := "héllo wörld"
 	got := EstimateTokens(in)
 	// 11 / 4 = 2 tokens (integer division)
 	if got != 2 {

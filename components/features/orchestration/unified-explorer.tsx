@@ -358,7 +358,7 @@ export function UnifiedExplorer({
               </motion.span>
             )}
           </button>
-          {/* Proklik na celou /inbox stránku — visible on hover so the
+          {/* Click-through to the full /inbox page — visible on hover so the
               section header stays clean when not interacting. */}
           <Link
             href="/inbox"

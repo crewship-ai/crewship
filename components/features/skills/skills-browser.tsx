@@ -675,7 +675,7 @@ export function SkillsBrowser() {
                 // auto-rows-fr makes every row stretch to match the
                 // tallest card in that row, so the install-count line
                 // anchors at the same vertical position across the grid
-                // — addresses the 'rozhodí se výška karet' from the
+                // — addresses the 'card height gets thrown off' issue from the
                 // round-12 user feedback.
                 listClassName="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 auto-rows-fr gap-3 p-3"
                 itemClassName="min-h-[180px]"

@@ -188,7 +188,7 @@ export default function OnboardingPage() {
   }, [])
 
   // Seed the language picker from the browser locale so a Czech
-  // visitor gets "Čeština" preselected and English speakers see
+  // visitor gets "Czech" preselected and English speakers see
   // "English" without having to touch the picker. Effect runs once
   // on mount; if the user overrides we never re-detect.
   useEffect(() => {
@@ -1039,7 +1039,7 @@ function formatCountdown(sec: number): string {
  * Settings → General uses so a user who lands first in onboarding
  * and later opens settings sees the identical control. Searches
  * English name, native name, AND ISO code so a user who only
- * remembers "cs" or "Čeština" still finds Czech.
+ * remembers "cs" or "Czech" still finds Czech.
  *
  * Stores the English `name` (e.g. "Czech") in the parent state so it
  * lands verbatim in workspaces.preferred_language. The orchestrator
@@ -1084,7 +1084,7 @@ function LanguagePicker({
           filter={(itemValue, search) => {
             // itemValue is the English name we set on each CommandItem.
             // Match on English name, native name, and ISO code so a
-            // user typing "cs", "Čeština", or "Czech" all find Czech.
+            // user typing "cs", "Czech", or "Cesky" all find Czech.
             const lang = LANGUAGES.find((l) => l.name === itemValue)
             if (!lang) return 0
             const s = search.toLowerCase()

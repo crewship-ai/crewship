@@ -159,7 +159,7 @@ export function SkillCard({ skill, selected, onSelect }: SkillCardProps) {
       // h-full + flex column lets the card stretch to fill its grid
       // cell. Combined with auto-rows-fr on the parent grid, every
       // card in the same row matches its tallest sibling — fixes the
-      // visible "rozhodí se výška karet" the user pointed at.
+      // visible "card height gets thrown off" the user pointed at.
       className={cn(
         "group w-full h-full text-left flex",
         selected ? selection.card.selected : selection.card.default,

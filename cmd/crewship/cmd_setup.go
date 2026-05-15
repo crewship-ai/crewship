@@ -89,7 +89,7 @@ Available crew templates:
 
 func init() {
 	setupCmd.Flags().StringVar(&setupWorkspaceFlag, "workspace-name", "", "Display name for your workspace (optional, keeps existing if blank)")
-	setupCmd.Flags().StringVar(&setupLanguageFlag, "language", "", "Language for agent replies (e.g. English, Čeština, Deutsch)")
+	setupCmd.Flags().StringVar(&setupLanguageFlag, "language", "", "Language for agent replies (e.g. English, Czech, German)")
 	setupCmd.Flags().StringVar(&setupCrewFlag, "crew", "", "Crew template slug (software-development | devops-sre | content-marketing | accounting-finance | blank)")
 	setupCmd.Flags().StringVar(&setupAdapterFlag, "adapter", "", "CLI adapter (CLAUDE_CODE | OPENCODE | CODEX_CLI | GEMINI_CLI | CURSOR_CLI | FACTORY_DROID)")
 	setupCmd.Flags().StringVar(&setupModelFlag, "model", "", "LLM model (defaults to the adapter's recommended model)")
@@ -201,7 +201,7 @@ func runSetup(cmd *cobra.Command, _ []string) error {
 
 	if language == "" && interactive {
 		var err error
-		language, err = promptOptional("Agent language (e.g. English, Čeština) [English]", "English")
+		language, err = promptOptional("Agent language (e.g. English, Czech) [English]", "English")
 		if err != nil {
 			return err
 		}

@@ -321,7 +321,7 @@ func TestEmbedTruncatesAtRuneBoundary(t *testing.T) {
 
 	// Japanese "日" is 3 bytes in UTF-8. 4096 % 3 == 1, so cutting at byte
 	// 4096 lands one byte INTO a rune — exactly the case the byte-slice
-	// truncation breaks. With 2-byte runes (e.g. Czech "ř") 4096 is a
+	// truncation breaks. With 2-byte runes (e.g. German "ö") 4096 is a
 	// rune boundary by accident, hiding the bug.
 	in := strings.Repeat("日", 2000)
 	emb := NewOllamaEmbedder(srv.URL)

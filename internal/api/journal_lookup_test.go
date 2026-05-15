@@ -62,7 +62,7 @@ func TestJournalLookup_PopulatedWorkspace(t *testing.T) {
 	}
 
 	// Three agents — two in c-eng, one in c-qa.
-	seedAgentRow(t, db, "a-tomas", wsID, "c-eng", "Tomáš", "tomas", "AGENT")
+	seedAgentRow(t, db, "a-tomas", wsID, "c-eng", "Thomas", "tomas", "AGENT")
 	seedAgentRow(t, db, "a-viktor", wsID, "c-eng", "Viktor", "viktor", "AGENT")
 	seedAgentRow(t, db, "a-eva", wsID, "c-qa", "Eva", "eva", "AGENT")
 	// Bump avatar_seed on one to verify the field round-trips.
@@ -109,11 +109,11 @@ func TestJournalLookup_PopulatedWorkspace(t *testing.T) {
 		t.Errorf("crew 1: %+v", resp.Crews[1])
 	}
 
-	// Agents — three returned, alphabetical by name (Eva, Tomáš, Viktor).
+	// Agents — three returned, alphabetical by name (Eva, Thomas, Viktor).
 	if len(resp.Agents) != 3 {
 		t.Fatalf("agents len = %d want 3", len(resp.Agents))
 	}
-	// Spot-check: Tomáš must have the avatar_seed/style we set.
+	// Spot-check: Thomas must have the avatar_seed/style we set.
 	var tomas *lookupAgentEntry
 	for i := range resp.Agents {
 		if resp.Agents[i].ID == "a-tomas" {

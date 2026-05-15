@@ -54,7 +54,7 @@ func TestStripZeroWidth_FastPathPreservesText(t *testing.T) {
 func TestStripZeroWidth_KeepsRealWhitespaceAndNonAscii(t *testing.T) {
 	// Tab, newline, NBSP (U+00A0), accented chars must survive. We only
 	// strip the explicit zero-width set.
-	in := "abc\tdef\nghi jkl ŠČŘŽÝÁ"
+	in := "abc\tdef\nghi jkl ÄÖÜẞŸÇ"
 	out := stripZeroWidth(in)
 	if out != in {
 		t.Errorf("expected %q, got %q", in, out)

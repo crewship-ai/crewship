@@ -31,7 +31,7 @@ func newRunsTestFixture(t *testing.T) *runsTestFixture {
 	// those would all be nil and the enrichment branch wouldn't be
 	// covered.
 	crewID := seedCrewRow(t, db, "c-runs", wsID, "Engineering", "engineering")
-	agentID := seedAgentRow(t, db, "a-runs", wsID, crewID, "Tomáš", "tomas", "AGENT")
+	agentID := seedAgentRow(t, db, "a-runs", wsID, crewID, "Thomas", "tomas", "AGENT")
 	return &runsTestFixture{
 		h:     NewRunHandler(db, newTestLogger()),
 		wsID:  wsID,
@@ -115,7 +115,7 @@ func TestRunHandler_List_HappyPath(t *testing.T) {
 		t.Errorf("pagination.total=%d want 3", resp.Pagination.Total)
 	}
 	// Enrichment populated for the seeded agent.
-	if resp.Data[0].AgentName == nil || *resp.Data[0].AgentName != "Tomáš" {
+	if resp.Data[0].AgentName == nil || *resp.Data[0].AgentName != "Thomas" {
 		t.Errorf("agent_name not enriched: %v", resp.Data[0].AgentName)
 	}
 	if resp.Data[0].CrewName == nil || *resp.Data[0].CrewName != "Engineering" {

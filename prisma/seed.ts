@@ -177,7 +177,7 @@ async function main() {
     create: {
       workspace_id: org.id,
       crew_id: engineering.id,
-      name: "Tomáš",
+      name: "Thomas",
       slug: "tomas",
       role_title: "Technical Architect",
       agent_role: "LEAD",
@@ -187,7 +187,7 @@ async function main() {
       tool_profile: "FULL",
       timeout_seconds: 3600,
       memory_enabled: true,
-      system_prompt: `You are Tomáš, the Technical Architect and Lead of the Engineering crew at Crewship HQ.
+      system_prompt: `You are Thomas, the Technical Architect and Lead of the Engineering crew at Crewship HQ.
 
 RESPONSIBILITIES:
 - Architect and oversee all technical decisions for the Crewship platform
