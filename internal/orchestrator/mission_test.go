@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -390,14 +391,30 @@ func TestProgressWriter(t *testing.T) {
 	}
 }
 
-// mockDispatcher records dispatched assignments for testing.
+// mockDispatcher records dispatched assignments for testing. The mutex
+// is required because scheduleTask dispatches from a goroutine (see
+// mission_tasks.go), so the test's read of m.dispatched runs in a
+// different goroutine than DispatchAssignment's append. `time.Sleep`
+// in the test gives the dispatcher time to run but doesn't establish
+// a happens-before edge — the race detector flags both accesses.
 type mockDispatcher struct {
+	mu         sync.Mutex
 	dispatched []DispatchRequest
 }
 
 func (m *mockDispatcher) DispatchAssignment(_ context.Context, req DispatchRequest) error {
+	m.mu.Lock()
 	m.dispatched = append(m.dispatched, req)
+	m.mu.Unlock()
 	return nil
+}
+
+func (m *mockDispatcher) snapshot() []DispatchRequest {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]DispatchRequest, len(m.dispatched))
+	copy(out, m.dispatched)
+	return out
 }
 
 func TestScheduleTask_CrossCrew_Connected(t *testing.T) {
@@ -464,13 +481,24 @@ func TestScheduleTask_CrossCrew_Connected(t *testing.T) {
 		t.Fatalf("scheduleTask failed: %v", err)
 	}
 
-	// Give goroutine time to dispatch
-	time.Sleep(100 * time.Millisecond)
-
-	if len(disp.dispatched) != 1 {
-		t.Fatalf("expected 1 dispatch, got %d", len(disp.dispatched))
+	// Poll for the dispatch instead of sleeping a fixed interval —
+	// the dispatching goroutine's wall-clock time depends on scheduler
+	// pressure (slower under -race -count=3), so a bare time.Sleep is
+	// either flaky-low or wasteful-high. Bounded wait keeps the test
+	// parallel-safe and resilient on loaded CI runners.
+	deadline := time.Now().Add(1 * time.Second)
+	var got []DispatchRequest
+	for {
+		got = disp.snapshot()
+		if len(got) == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("expected 1 dispatch within 1s, got %d", len(got))
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
-	d := disp.dispatched[0]
+	d := got[0]
 	if d.CrewID != crewB {
 		t.Errorf("expected dispatch to crew-b, got %s", d.CrewID)
 	}

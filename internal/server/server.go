@@ -74,6 +74,19 @@ type Server struct {
 	runCtx            context.Context
 	runCancel         context.CancelFunc
 
+	// bgCtx / bgCancel scope the lifetime of goroutines launched by New()
+	// itself (rather than Start()) — currently the devcontainer catalog
+	// and mise runtime refresh tickers. Cancelled by Shutdown() and by
+	// StopBackground() so tests that build a Server without running the
+	// full Start/Shutdown lifecycle can still tear down its async writers
+	// before t.TempDir() cleanup walks the storage path. Without this the
+	// initial catalog HTTP fetch lands on disk under the test's TempDir
+	// AFTER cleanup walked the children but BEFORE the final unlinkat —
+	// surfaces as "directory not empty" under -race -count=3.
+	bgCtx    context.Context
+	bgCancel context.CancelFunc
+	bgWg     sync.WaitGroup
+
 	// fileJournalPtr is the pointer the file-watcher closure dereferences
 	// to emit file.written entries. Stored on the struct (instead of a
 	// local in New()) so Shutdown can clear it BEFORE journalWriter.Close
@@ -467,7 +480,14 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 		}
 
 		// Kick off initial + periodic refresh without blocking startup.
-		startCatalogRefresh(catalogFetcher, runtimeFetcher, logger)
+		// Bind to bgCtx so Shutdown / StopBackground can stop the ticker
+		// goroutine and cancel the in-flight HTTP fetch instead of
+		// leaking past process teardown (and past t.TempDir() cleanup
+		// in tests).
+		if s.bgCtx == nil {
+			s.bgCtx, s.bgCancel = context.WithCancel(context.Background())
+		}
+		startCatalogRefresh(s.bgCtx, &s.bgWg, catalogFetcher, runtimeFetcher, logger)
 
 		// Wire Keeper gatekeeper (Ollama-based credential access control)
 		opts = append(opts, goapi.WithKeeperConfig(&cfg.Keeper))

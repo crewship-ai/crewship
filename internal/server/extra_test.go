@@ -172,6 +172,7 @@ func TestCombinedHandler_RoutesAPIPathsToMux(t *testing.T) {
 	cfg := silentCfg()
 	logger := logging.New("error", "json", nil)
 	s := New(cfg, logger, &Deps{DB: openTestDB(t)})
+	t.Cleanup(s.StopBackground)
 	s.startedAt = time.Now()
 	s.spaHandler = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -288,6 +289,11 @@ func newServerWithStorage(t *testing.T) (*Server, string) {
 	s := New(cfg, logger, &Deps{Storage: stor, DB: openTestDB(t)})
 	s.startedAt = time.Now()
 	t.Cleanup(func() {
+		// Stop the catalog/runtime refresh goroutines and wait for
+		// their in-flight HTTP+disk writes to land BEFORE t.TempDir's
+		// RemoveAll runs — otherwise a late write into the temp dir
+		// causes "directory not empty" under -race -count=3.
+		s.StopBackground()
 		if s.fileWatcher != nil {
 			s.fileWatcher.Close()
 		}
@@ -476,6 +482,7 @@ func TestHandleCrewStats_WithRegisteredContainer(t *testing.T) {
 	s := New(cfg, logger, &Deps{Container: &mockContainer{}, DB: openTestDB(t)})
 	s.startedAt = time.Now()
 	t.Cleanup(func() {
+		s.StopBackground()
 		if s.fileWatcher != nil {
 			s.fileWatcher.Close()
 		}
@@ -533,6 +540,7 @@ func TestHandleContainerGitLog_CrewNotFound(t *testing.T) {
 	s := New(cfg, logger, &Deps{Container: &mockContainer{}, DB: db.DB})
 	s.startedAt = time.Now()
 	t.Cleanup(func() {
+		s.StopBackground()
 		if s.fileWatcher != nil {
 			s.fileWatcher.Close()
 		}
@@ -639,6 +647,7 @@ func TestStartIPC_BindsAndCleansUpStaleSocket(t *testing.T) {
 	cfg.IPC.SocketPath = sockPath
 	logger := logging.New("error", "json", nil)
 	s := New(cfg, logger, &Deps{DB: openTestDB(t)})
+	t.Cleanup(s.StopBackground)
 	s.startedAt = time.Now()
 
 	errCh := make(chan error, 1)

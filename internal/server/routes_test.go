@@ -92,6 +92,7 @@ func newTestServerWithDeps(t *testing.T) *Server {
 		DB: openTestDB(t),
 	}
 	s := New(cfg, logger, deps)
+	t.Cleanup(s.StopBackground)
 	s.startedAt = time.Now()
 	return s
 }

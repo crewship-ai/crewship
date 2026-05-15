@@ -91,6 +91,13 @@ func newTestServerForT(t *testing.T) *Server {
 	logger := logging.New("error", "json", nil)
 	s := New(cfg, logger, &Deps{DB: openTestDB(t)})
 	s.startedAt = time.Now()
+	if t != nil {
+		// Cancel the catalog/runtime refresh goroutines that New() spawned
+		// so they can't outrace t.TempDir() cleanup. See StopBackground
+		// doc for why. Bare-helper (t==nil) callers are short-lived
+		// process-level tests that exit before the refresh writes land.
+		t.Cleanup(s.StopBackground)
+	}
 	return s
 }
 

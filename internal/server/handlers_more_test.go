@@ -64,6 +64,7 @@ func TestHandleContainerFileList_ParsesFindOutput(t *testing.T) {
 	s := New(cfg, logger, &Deps{Container: mock, DB: db.DB})
 	s.startedAt = time.Now()
 	t.Cleanup(func() {
+		s.StopBackground()
 		if s.fileWatcher != nil {
 			s.fileWatcher.Close()
 		}
@@ -104,6 +105,7 @@ func TestHandleContainerFileList_InvalidSubdir(t *testing.T) {
 	s := New(cfg, logger, &Deps{Container: &mockContainer{}, DB: db.DB})
 	s.startedAt = time.Now()
 	t.Cleanup(func() {
+		s.StopBackground()
 		if s.fileWatcher != nil {
 			s.fileWatcher.Close()
 		}
@@ -142,6 +144,7 @@ func TestHandleContainerGitLog_ParsesCommits(t *testing.T) {
 	s := New(cfg, logger, &Deps{Container: mock, DB: db.DB})
 	s.startedAt = time.Now()
 	t.Cleanup(func() {
+		s.StopBackground()
 		if s.fileWatcher != nil {
 			s.fileWatcher.Close()
 		}

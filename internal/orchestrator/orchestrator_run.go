@@ -863,7 +863,7 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		// still surface SOMETHING actionable instead of silence.
 		switch exitCode {
 		case 123:
-			execErr = fmt.Errorf(
+			execErr = fmt.Errorf( //nolint:staticcheck // ST1005: user-facing error rendered in chat / journal UI
 				"agent exited with code %d — most likely a missing or invalid CLI token. "+
 					"Run `claude setup-token` (or the equivalent for your adapter) and re-paste the value in Settings → Credentials.",
 				exitCode,

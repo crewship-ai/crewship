@@ -276,7 +276,7 @@ func validatePromptName(name string) error {
 		}
 	}
 	if name == "." || name == ".." || strings.HasPrefix(name, ".") {
-		return fmt.Errorf("name cannot start with . or be . / ..")
+		return fmt.Errorf("name cannot start with %q or be %q / %q", ".", ".", "..")
 	}
 	return nil
 }

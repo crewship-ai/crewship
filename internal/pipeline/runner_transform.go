@@ -129,10 +129,7 @@ func evalTransform(v any, expr string) (string, error) {
 				return "", fmt.Errorf("index %d out of range (len=%d)", idx, len(arr))
 			}
 			cursor = arr[idx]
-			rest = rest[closeIdx+1:]
-			if strings.HasPrefix(rest, ".") {
-				rest = rest[1:]
-			}
+			rest = strings.TrimPrefix(rest[closeIdx+1:], ".")
 			continue
 		}
 		// Field access: name (until next . or [)
@@ -153,10 +150,7 @@ func evalTransform(v any, expr string) (string, error) {
 			return "", fmt.Errorf("field %q not found", field)
 		}
 		cursor = next
-		rest = rest[end:]
-		if strings.HasPrefix(rest, ".") {
-			rest = rest[1:]
-		}
+		rest = strings.TrimPrefix(rest[end:], ".")
 	}
 	return stringify(cursor), nil
 }

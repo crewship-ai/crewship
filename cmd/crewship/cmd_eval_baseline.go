@@ -171,7 +171,10 @@ var evalBaselineSaveCmd = &cobra.Command{
 func cellsToBaseline(matrix map[string]scenarioCell) map[string]baselineCell {
 	out := make(map[string]baselineCell, len(matrix))
 	for k, v := range matrix {
-		out[k] = baselineCell{Pass: v.Pass, Total: v.Total, AvgCost: v.AvgCost, AvgMs: v.AvgMs}
+		// Field-by-field is intentional — see doc comment. A future
+		// scenarioCell field must NOT silently leak into the on-disk
+		// baseline shape, so don't fold this into baselineCell(v).
+		out[k] = baselineCell{Pass: v.Pass, Total: v.Total, AvgCost: v.AvgCost, AvgMs: v.AvgMs} //nolint:staticcheck // S1016: intentional decoupling, see comment above
 	}
 	return out
 }
