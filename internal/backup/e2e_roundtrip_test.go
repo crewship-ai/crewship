@@ -638,64 +638,72 @@ func TestE2E_AsWorkspace_SurfacesDroppedFilesystems(t *testing.T) {
 	// by-default and the dropped-set is empty — the false-positive
 	// guard. If a future change makes flags true without populating
 	// the dropped set (or vice versa), the assertions catch it.
+	// assertConsistentSignal pins the dropped-fs contract by computing
+	// the EXACT expected slug set from the manifest and comparing as a
+	// sorted equality, not just empty-vs-non-empty. CodeRabbit caught
+	// the earlier loose check: a runner that emitted the wrong subset
+	// (or the right cardinality with a typo'd slug) would have passed.
 	assertConsistentSignal := func(t *testing.T, res *backup.RestoreResult) {
 		t.Helper()
 		if !res.DockerPhaseSkipped {
 			t.Errorf("--as-workspace must force DockerPhaseSkipped=true; got false")
 		}
-		hasFSData := false
+		var want []string
 		for _, c := range res.Manifest.Contents.Crews {
 			if c.WorkspaceIncluded || c.MemoryIncluded || c.SystemIncluded {
-				hasFSData = true
-				break
+				want = append(want, c.Slug)
 			}
 		}
-		if hasFSData && len(res.DroppedCrewFilesystems) == 0 {
-			t.Errorf("manifest carries filesystem-bearing crews but DroppedCrewFilesystems is empty — signal missing")
-		}
-		if !hasFSData && len(res.DroppedCrewFilesystems) != 0 {
-			t.Errorf("manifest carries NO filesystem-bearing crews yet DroppedCrewFilesystems=%v — false positive",
-				res.DroppedCrewFilesystems)
+		sort.Strings(want)
+		got := append([]string(nil), res.DroppedCrewFilesystems...)
+		sort.Strings(got)
+		if !equalStrings(want, got) {
+			t.Errorf("DroppedCrewFilesystems drift:\n  want=%v\n  got=%v", want, got)
 		}
 	}
 
-	// Two arms because the DroppedCrewFilesystems field is populated
-	// on BOTH return paths (dry-run short-circuit + real-restore tail)
-	// and a future refactor could quietly break either one. opts.Logger
-	// is deliberately nil throughout — that's the API-handler scenario
-	// the structured field was added for.
-	t.Run("dry-run", func(t *testing.T) {
-		target := openMigratedDB(t)
-		res, err := backup.RestoreBackup(ctx, target, backup.RestoreOptions{
-			Path:        createResult.Path,
-			Passphrase:  passphrase,
-			AsWorkspace: "renamed-target-ws",
-			Actor:       backup.Actor{UserID: "u_admin", Email: "admin@e2e.test", Role: "ADMIN"},
-			DryRun:      true,
+	// Table-driven over the two restore code paths that populate
+	// DroppedCrewFilesystems (dry-run short-circuit, real-restore
+	// tail). opts.Logger is deliberately nil throughout — that's the
+	// API-handler scenario the structured field was added for.
+	cases := []struct {
+		name         string
+		asWorkspace  string
+		dryRun       bool
+		wantInserted bool // assert RowsInserted > 0 (live only)
+	}{
+		{"dry-run", "renamed-target-ws", true, false},
+		{"live restore", "renamed-live-ws", false, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			target := openMigratedDB(t)
+			res, err := backup.RestoreBackup(ctx, target, backup.RestoreOptions{
+				Path:        createResult.Path,
+				Passphrase:  passphrase,
+				AsWorkspace: tc.asWorkspace,
+				Actor:       backup.Actor{UserID: "u_admin", Email: "admin@e2e.test", Role: "ADMIN"},
+				DryRun:      tc.dryRun,
+			})
+			if err != nil {
+				t.Fatalf("RestoreBackup: %v", err)
+			}
+			assertConsistentSignal(t, res)
+			if tc.wantInserted && res.RowsInserted <= 0 {
+				t.Errorf("expected non-zero RowsInserted on %s, got %d", tc.name, res.RowsInserted)
+			}
 		})
-		if err != nil {
-			t.Fatalf("RestoreBackup dry-run: %v", err)
-		}
-		assertConsistentSignal(t, res)
-	})
+	}
+}
 
-	t.Run("live restore", func(t *testing.T) {
-		target := openMigratedDB(t)
-		res, err := backup.RestoreBackup(ctx, target, backup.RestoreOptions{
-			Path:        createResult.Path,
-			Passphrase:  passphrase,
-			AsWorkspace: "renamed-live-ws",
-			Actor:       backup.Actor{UserID: "u_admin", Email: "admin@e2e.test", Role: "ADMIN"},
-		})
-		if err != nil {
-			t.Fatalf("RestoreBackup live: %v", err)
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
 		}
-		assertConsistentSignal(t, res)
-		// Sanity: live restore actually wrote rows under the renamed
-		// workspace; the same signal contract holds whether or not
-		// data landed.
-		if res.RowsInserted <= 0 {
-			t.Errorf("expected non-zero RowsInserted on live --as-workspace restore, got %d", res.RowsInserted)
-		}
-	})
+	}
+	return true
 }
