@@ -39,7 +39,7 @@ jobs:
           stale-issue-message: |
             This issue has been quiet for 60 days. If it's still relevant, drop a comment or remove the `stale` label and we'll reopen the conversation. Otherwise it'll auto-close in 30 days to keep the backlog honest.
           close-issue-message: |
-            Auto-closing because there hasn't been activity in 90 days. Reopen any time — closure isn't a verdict, just bookkeeping.
+            Auto-closing after 30 days as `stale` (90 days total since the last activity). Reopen any time — closure isn't a verdict, just bookkeeping.
 
           # ----- Pull requests -----
           days-before-pr-stale: 30

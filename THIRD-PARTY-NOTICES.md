@@ -40,6 +40,36 @@ Aggregate license breakdown as of the latest release (informational):
 Apache-2.0, MIT, ISC, BSD-2-Clause, BSD-3-Clause, MPL-2.0, LGPL-3.0-or-later,
 CC-BY-4.0, Unlicense. All compatible with Apache-2.0 redistribution.
 
+### LGPL-3.0 exception note — `@img/sharp-libvips-*`
+
+Crewship transitively depends on `@img/sharp-libvips-<platform>-<arch>`
+(via `sharp`, which Next.js uses for image optimization). These platform
+packages bundle the libvips native library under LGPL-3.0-or-later.
+
+The LGPL-3.0 license is **compatible with Apache-2.0 redistribution**
+under the following terms, which Crewship's distribution satisfies:
+
+1. **Dynamic linking only.** Crewship distributes libvips as a dynamic
+   library inside the npm package; the Go binary and Next.js bundle do
+   not statically link it. LGPL §4(d)(0) permits dynamic-linked LGPL
+   binaries inside otherwise-Apache works.
+2. **User-replaceable.** Operators who want to substitute their own
+   build of libvips can do so by replacing the `node_modules/@img/`
+   directory before `pnpm build`. No build flag forbids this.
+3. **Source availability.** The libvips source for the bundled version
+   is published at https://github.com/libvips/libvips/. The exact
+   commit corresponding to each release is captured in the binary
+   package's `versions.json` (see `node_modules/@img/sharp-libvips-*/`).
+4. **Notice retention.** This document preserves the LGPL-3.0
+   attribution required by §5 of the licence.
+
+If you redistribute Crewship downstream and modify libvips itself, you
+must publish the modified libvips source under LGPL-3.0; the Apache-2.0
+core remains under Apache-2.0. If you want a Crewship build with **no**
+LGPL component, replace `sharp` with a pure-Go or Apache/MIT-licensed
+image processor before `pnpm build` — no source-code surgery in
+`crewship` itself is required.
+
 ## Go dependency list
 
 | Package | License | Source URL |
