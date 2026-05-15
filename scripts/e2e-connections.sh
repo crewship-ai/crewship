@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # End-to-end smoke test for the Connections PR (feat/connections).
 #
-# Hits the live API on dev2 (instance 2 of crewship-dev, port 8082) and
-# walks the full happy path of each EPIC:
+# Hits a running Crewship API and walks the full happy path of each EPIC:
 #
 #   - login + workspace context
 #   - recipes (list, preview, install)
@@ -12,11 +11,12 @@
 #
 # Requires: curl, jq.
 # Usage:
-#   scripts/e2e-connections.sh                         # default dev2 URL
-#   scripts/e2e-connections.sh http://localhost:8082   # custom base
+#   scripts/e2e-connections.sh                         # defaults to http://localhost:8080
+#   scripts/e2e-connections.sh http://localhost:8082   # custom base (e.g. multi-instance dev)
+#   CREWSHIP_E2E_URL=https://crewship.example.com scripts/e2e-connections.sh
 set -euo pipefail
 
-BASE="${1:-http://crewship-dev.unifylab.cz:8082}"
+BASE="${1:-${CREWSHIP_E2E_URL:-http://localhost:8080}}"
 EMAIL="${E2E_EMAIL:-demo@crewship.ai}"
 PASSWORD="${E2E_PASSWORD:-password123}"
 

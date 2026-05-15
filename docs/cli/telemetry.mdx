@@ -76,7 +76,7 @@ The `endpoint` line shows **where** events would route plus **why**:
 
 - `vendor default (compiled in)` — DSN baked into the binary at
   release time via `-X .../crashreport.DSN=...` ldflag. Routes to the
-  maintainer's Sentry (`unify-7b/crewship-backend`).
+  maintainer's Sentry project (`crewship-backend`).
 - `CREWSHIP_SENTRY_DSN env override` — operator set the env var to
   redirect events to their own Sentry instance. See
   [Telemetry — Routing override](/guides/telemetry#routing-override).

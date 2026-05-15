@@ -65,7 +65,7 @@ Outputs a tab-aligned table:
 ```
 EMAIL                    ROLE     CREATED              LAST_LOGIN
 admin@example.com        OWNER    2025-11-14 09:21     2026-05-13 18:04
-pavel@unify.cz           ADMIN    2026-02-01 12:00     2026-05-13 17:55
+admin@example.com           ADMIN    2026-02-01 12:00     2026-05-13 17:55
 ```
 
 Casing matters. `Admin@example.com` and `admin@example.com` are different rows for the `users` table; if the row you want isn't here, `reset-password` will fail loudly rather than silently create a new one.
@@ -95,11 +95,11 @@ Never embed the password as a literal in a shell history — pass it via env var
 
 ```bash
 # Single-workspace user — slug is inferred:
-crewship admin promote --email=pavel@unify.cz --role=OWNER
+crewship admin promote --email=admin@example.com --role=OWNER
 
 # Multi-workspace user — slug is required:
 crewship admin promote \
-  --email=pavel@unify.cz \
+  --email=admin@example.com \
   --role=ADMIN \
   --workspace=acme-research
 ```
@@ -114,7 +114,7 @@ crewship start
 sudo systemctl start crewshipd
 ```
 
-The new password is now active. The user logs in normally — the audit timeline shows a `journal.admin_cli` entry recording who on the host (`host:pavel`) ran which subcommand, so the change is traceable even though the HTTP API was bypassed.
+The new password is now active. The user logs in normally — the audit timeline shows a `journal.admin_cli` entry recording who on the host (`host:<shell-user>`) ran which subcommand, so the change is traceable even though the HTTP API was bypassed.
 
 ## Examples
 

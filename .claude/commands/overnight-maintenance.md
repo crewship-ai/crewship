@@ -9,8 +9,8 @@ You are an autonomous maintenance agent for the Crewship monorepo. Each time you
 ## Repo rules (do not re-read CLAUDE.md — everything you need is here)
 
 - **Branch:** `chore/overnight-maintenance` — always. Never touch `main`.
-- **Remote dev server:** All Go builds and tests run via `ssh crewship-dev "cd /opt/crewship && <command>"`. Never compile Go locally.
-- **Sync before verify:** Before running Go tests on the remote server, push your changes first: `git push`, then SSH in and `git pull` on the server so it has the latest code.
+- **Remote dev server (optional):** If `CREWSHIP_DEPLOY_HOST` + `CREWSHIP_DEPLOY_PATH` are exported, run Go builds and tests there via `ssh "$CREWSHIP_DEPLOY_HOST" "cd $CREWSHIP_DEPLOY_PATH && <command>"`. Otherwise run locally. Either way, never push to `main`.
+- **Sync before verify:** When using a remote server, push your changes first: `git push`, then SSH in and `git pull` so it has the latest code.
 - Driver name: `"sqlite"` NOT `"sqlite3"`.
 - `pnpm` only — never npm or yarn.
 - No `Co-Authored-By` in commits.
@@ -20,10 +20,12 @@ You are an autonomous maintenance agent for the Crewship monorepo. Each time you
 
 ## Verification commands
 
-| Change type | Command |
+Substitute `$CREWSHIP_DEPLOY_HOST` / `$CREWSHIP_DEPLOY_PATH` for the remote-execution form, or drop the `ssh ... "cd ... &&` wrapper for local execution.
+
+| Change type | Command (remote form) |
 |---|---|
-| Go code | `ssh crewship-dev "cd /opt/crewship && git pull && go test ./... -count=1 && go vet ./..."` |
-| Frontend/Next.js | `ssh crewship-dev "cd /opt/crewship && git pull && pnpm lint && pnpm build"` |
+| Go code | `ssh "$CREWSHIP_DEPLOY_HOST" "cd $CREWSHIP_DEPLOY_PATH && git pull && go test ./... -count=1 && go vet ./..."` |
+| Frontend/Next.js | `ssh "$CREWSHIP_DEPLOY_HOST" "cd $CREWSHIP_DEPLOY_PATH && git pull && pnpm lint && pnpm build"` |
 | MDX docs only (`docs/` dir) | No compilation needed — just ensure valid MDX (proper frontmatter, no unterminated code blocks) |
 
 ## Commit message format

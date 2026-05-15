@@ -16,10 +16,10 @@ import { test, expect, request as plwRequest } from "@playwright/test"
 const E2E_EMAIL = process.env.E2E_EMAIL
 const E2E_PASSWORD = process.env.E2E_PASSWORD
 // The multi-instance convention is `3010+N` for instance N, but the
-// default Crewship dev shell (`./dev.sh start`) and the documented dev
-// VM (see CLAUDE.md → "Frontend: http://192.168.1.201:3001") both run
-// on 3001. Stay aligned with what actually listens by default; override
-// via PLAYWRIGHT_BASE_URL when running against a non-default instance.
+// default Crewship dev shell (`./dev.sh start`) listens on 3001. Stay
+// aligned with what actually listens by default; override via
+// PLAYWRIGHT_BASE_URL when running against a non-default instance or a
+// remote server.
 const BASE_URL = process.env.PLAYWRIGHT_BASE_URL || "http://localhost:3001"
 
 test.describe.configure({ mode: "serial" })

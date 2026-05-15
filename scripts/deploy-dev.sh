@@ -1,13 +1,26 @@
 #!/usr/bin/env bash
-# Deploy current branch to Proxmox dev server
+# Deploy current branch to a remote dev server over SSH.
+#
 # Usage: ./scripts/deploy-dev.sh [branch]
 #   - No args: deploys current local branch
 #   - With arg: deploys specified branch
 #   - Pushes to origin, pulls on server, rebuilds, restarts
+#
+# Required env (no defaults — must export):
+#   CREWSHIP_DEPLOY_HOST   SSH alias or user@host for the target dev server.
+#   CREWSHIP_DEPLOY_PATH   Absolute path to the crewship checkout on that host.
 set -euo pipefail
 
-SERVER_HOST="crewship-dev"
-SERVER_PATH="/opt/crewship"
+if [ -z "${CREWSHIP_DEPLOY_HOST:-}" ]; then
+  echo "error: CREWSHIP_DEPLOY_HOST is required (export CREWSHIP_DEPLOY_HOST=<ssh-alias-or-user@host>)" >&2
+  exit 2
+fi
+if [ -z "${CREWSHIP_DEPLOY_PATH:-}" ]; then
+  echo "error: CREWSHIP_DEPLOY_PATH is required (export CREWSHIP_DEPLOY_PATH=<absolute-path-on-server>)" >&2
+  exit 2
+fi
+SERVER_HOST="${CREWSHIP_DEPLOY_HOST}"
+SERVER_PATH="${CREWSHIP_DEPLOY_PATH}"
 GO_PATH_EXPORT='export PATH=$PATH:/usr/local/go/bin:$HOME/go/bin'
 
 BRANCH="${1:-$(git rev-parse --abbrev-ref HEAD)}"

@@ -72,7 +72,7 @@ type Router struct {
 	dockerClient           *dockerclient.Client
 	featureCacheDir        string
 	portExposeRegistry     *PortExposeRegistry // closed via Shutdown() on server stop
-	portExposePublicURL    string              // e.g. http://192.168.1.201:8080, used to build capability URLs
+	portExposePublicURL    string              // e.g. http://crewship.example.com:8080, used to build capability URLs
 	portExposeNetwork      string              // Docker bridge name; falls back to handler default when empty
 	authRateLimitedMux     http.Handler        // mux wrapped with auth rate limiter
 	apiRateLimitedMux      http.Handler        // mux wrapped with general API rate limiter
