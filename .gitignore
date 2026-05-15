@@ -83,16 +83,15 @@ coverage_log.md
 CLAUDE.md
 internal-docs/
 
-# Claude Code workspace — keep team tooling (commands/, settings.json),
-# ignore per-user state and internal design context
-.claude/context/
-.claude/wireframes/
-.claude/plans/
-.claude/mockups/
-.claude/prompts/
-.claude/worktrees/
-.claude/scheduled_tasks.lock
-.claude/settings.local.json
+# Claude Code workspace — default-deny, explicit-allow.
+# Ignore everything dropped under .claude/ so future PRDs, wireframes,
+# scratch notes, prompts, per-user state, etc. don't accidentally land
+# in the public repo. Add a `!` exception below for anything the team
+# genuinely wants tracked.
+.claude/*
+!.claude/audits/
+!.claude/commands/
+!.claude/settings.json
 
 # Local mockups / audit artifacts (kept untracked per user preference)
 audit-final/
