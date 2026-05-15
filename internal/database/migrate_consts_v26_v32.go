@@ -168,7 +168,7 @@ INSERT INTO crew_mcp_servers_new (id, crew_id, workspace_mcp_server_id, name, di
 DROP TABLE crew_mcp_servers;
 ALTER TABLE crew_mcp_servers_new RENAME TO crew_mcp_servers;
 CREATE INDEX IF NOT EXISTS idx_crew_mcp_crew ON crew_mcp_servers(crew_id);
-CREATE INDEX idx_crew_mcp_ws_server ON crew_mcp_servers(workspace_mcp_server_id);
+CREATE INDEX IF NOT EXISTS idx_crew_mcp_ws_server ON crew_mcp_servers(workspace_mcp_server_id);
 
 -- Recreate agent_mcp_bindings with ON DELETE CASCADE / SET NULL + cred_type/cred_header
 CREATE TABLE agent_mcp_bindings_new (
@@ -189,7 +189,7 @@ INSERT INTO agent_mcp_bindings_new (id, agent_id, mcp_server_id, mcp_server_scop
 DROP TABLE agent_mcp_bindings;
 ALTER TABLE agent_mcp_bindings_new RENAME TO agent_mcp_bindings;
 CREATE INDEX IF NOT EXISTS idx_agent_mcp_agent ON agent_mcp_bindings(agent_id);
-CREATE INDEX idx_agent_mcp_server ON agent_mcp_bindings(mcp_server_id, mcp_server_scope);
+CREATE INDEX IF NOT EXISTS idx_agent_mcp_server ON agent_mcp_bindings(mcp_server_id, mcp_server_scope);
 
 -- Add missing indexes on mcp_tool_calls
 CREATE INDEX IF NOT EXISTS idx_mcp_calls_server ON mcp_tool_calls(mcp_server_id, created_at);
