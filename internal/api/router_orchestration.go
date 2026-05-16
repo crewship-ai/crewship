@@ -264,6 +264,7 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	// approve/reject are gated to OWNER/ADMIN by the handler itself.
 	propH := NewProposedHandler(r.db, r.logger)
 	propH.SetJournal(r.Journal())
+	propH.SetBlobRoot(r.memoryVersionsBlobRoot)
 	r.mux.Handle("POST /api/v1/consolidate/proposed/{id}/approve", authed(wsCtx(http.HandlerFunc(propH.Approve))))
 	r.mux.Handle("POST /api/v1/consolidate/proposed/{id}/reject", authed(wsCtx(http.HandlerFunc(propH.Reject))))
 	r.mux.Handle("GET /api/v1/consolidate/proposed/{id}/explain", authed(wsCtx(http.HandlerFunc(propH.Explain))))

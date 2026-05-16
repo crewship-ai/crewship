@@ -41,6 +41,24 @@ type ApprovalResult struct {
 	RulesMerged   int
 	WorkspaceID   string
 	CrewID        string
+	// VersionSha is populated when ApprovalOptions.BlobRoot was set
+	// and a memory_versions row was recorded for the merged canonical
+	// file. Empty when versioning is disabled or recording failed
+	// (failures are logged best-effort; the approve itself still
+	// succeeds because the canonical file is on disk).
+	VersionSha string
+}
+
+// ApprovalOptions carries side-channel inputs the approve path needs
+// beyond the proposal id + user id. Today there is one — BlobRoot —
+// and it's a struct rather than a positional arg so that a future
+// field (retention override, attestation token, etc.) does not break
+// every caller. Zero value disables versioning silently.
+type ApprovalOptions struct {
+	// BlobRoot is the content-addressed memory-version blob directory.
+	// Empty disables the post-merge RecordVersion call — approve still
+	// succeeds, just without the v90 audit row.
+	BlobRoot string
 }
 
 // proposalRow is the in-memory representation of a memory_proposals row
@@ -87,6 +105,7 @@ func ApproveProposal(
 	j journal.Emitter,
 	logger *slog.Logger,
 	proposalID, userID string,
+	opts ApprovalOptions,
 ) (*ApprovalResult, error) {
 	if logger == nil {
 		logger = slog.Default()
@@ -118,6 +137,38 @@ func ApproveProposal(
 
 	if err := appendToCanonical(canonicalPath, now, rulesBlock); err != nil {
 		return nil, fmt.Errorf("append to canonical: %w", err)
+	}
+
+	// Versioning hook: record the post-merge canonical file as a
+	// memory_versions row + content-addressed blob. Best-effort —
+	// failures log warn but never abort the approve. The audit
+	// trail covers the human-decision event with writtenBy=userID
+	// (distinct from the consolidator's own writes which use
+	// writtenBy='consolidator').
+	var versionSha string
+	if opts.BlobRoot != "" {
+		auditPath := canonicalAuditPath(row.CrewID, filepath.Base(canonicalPath))
+		if content, rerr := os.ReadFile(canonicalPath); rerr == nil {
+			parent, _ := memory.LatestVersionSha(ctx, db, row.WorkspaceID, auditPath)
+			res, verr := memory.RecordVersion(ctx, db, memory.VersionRecord{
+				WorkspaceID: row.WorkspaceID,
+				Path:        auditPath,
+				Tier:        memory.TierLearned,
+				Content:     content,
+				WrittenBy:   userID,
+				ParentSha:   parent,
+				BlobRoot:    opts.BlobRoot,
+			})
+			if verr != nil {
+				logger.Warn("approve: version record failed",
+					"err", verr, "proposal_id", row.ID, "audit_path", auditPath)
+			} else {
+				versionSha = res.Sha256
+			}
+		} else {
+			logger.Warn("approve: read canonical for version record failed",
+				"err", rerr, "path", canonicalPath)
+		}
 	}
 
 	if err := markProposalDecided(ctx, db, row.ID, "approved", userID, now); err != nil {
@@ -155,6 +206,7 @@ func ApproveProposal(
 		RulesMerged:   row.RulesCount,
 		WorkspaceID:   row.WorkspaceID,
 		CrewID:        row.CrewID,
+		VersionSha:    versionSha,
 	}, nil
 }
 

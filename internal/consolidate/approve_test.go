@@ -49,7 +49,7 @@ func TestApproveProposal_HappyPath(t *testing.T) {
 
 	proposalID, outputDir := seedPendingProposal(t, db, w)
 
-	appr, err := ApproveProposal(context.Background(), db, w, quietLogger(), proposalID, "user_42")
+	appr, err := ApproveProposal(context.Background(), db, w, quietLogger(), proposalID, "user_42", ApprovalOptions{})
 	if err != nil {
 		t.Fatalf("ApproveProposal: %v", err)
 	}
@@ -126,10 +126,10 @@ func TestApproveProposal_NonPending_Returns409(t *testing.T) {
 	applyV89Schema(t, db)
 
 	proposalID, _ := seedPendingProposal(t, db, w)
-	if _, err := ApproveProposal(context.Background(), db, w, quietLogger(), proposalID, "u1"); err != nil {
+	if _, err := ApproveProposal(context.Background(), db, w, quietLogger(), proposalID, "u1", ApprovalOptions{}); err != nil {
 		t.Fatalf("first approve: %v", err)
 	}
-	_, err := ApproveProposal(context.Background(), db, w, quietLogger(), proposalID, "u2")
+	_, err := ApproveProposal(context.Background(), db, w, quietLogger(), proposalID, "u2", ApprovalOptions{})
 	if !errors.Is(err, ErrProposalNotPending) {
 		t.Errorf("second approve err = %v, want ErrProposalNotPending", err)
 	}
@@ -142,7 +142,7 @@ func TestApproveProposal_MissingProposal_Returns404(t *testing.T) {
 	defer w.Close()
 	applyV89Schema(t, db)
 
-	_, err := ApproveProposal(context.Background(), db, w, quietLogger(), "mp_doesnotexist", "u1")
+	_, err := ApproveProposal(context.Background(), db, w, quietLogger(), "mp_doesnotexist", "u1", ApprovalOptions{})
 	if !errors.Is(err, ErrProposalNotFound) {
 		t.Errorf("err = %v, want ErrProposalNotFound", err)
 	}
@@ -165,7 +165,7 @@ func TestApproveProposal_FileMissing_RowUntouched(t *testing.T) {
 		t.Fatalf("remove file: %v", err)
 	}
 
-	if _, err := ApproveProposal(context.Background(), db, w, quietLogger(), proposalID, "u1"); err == nil {
+	if _, err := ApproveProposal(context.Background(), db, w, quietLogger(), proposalID, "u1", ApprovalOptions{}); err == nil {
 		t.Fatalf("expected error when proposal file is missing, got nil")
 	}
 
@@ -213,6 +213,102 @@ func TestRejectProposal_HappyPath(t *testing.T) {
 	}
 }
 
+// TestApproveProposal_RecordsVersion asserts the post-merge audit row.
+// With ApprovalOptions.BlobRoot set, the approve writes a content-
+// addressed blob + memory_versions row whose path matches the canonical
+// audit-path convention 'crew:{crewID}/{filename}' and whose
+// written_by is the approving user (NOT 'consolidator').
+func TestApproveProposal_RecordsVersion(t *testing.T) {
+	db := openDB(t)
+	defer db.Close()
+	w := journal.NewWriter(db, quietLogger(), journal.WriterOptions{FlushSize: 1})
+	defer w.Close()
+	applyV89Schema(t, db)
+	// memory_versions table — minimal v90 schema, same shape the
+	// hook test uses.
+	if _, err := db.Exec(`
+CREATE TABLE IF NOT EXISTS memory_versions (
+    id           TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL,
+    path         TEXT NOT NULL,
+    tier         TEXT NOT NULL CHECK (tier IN ('agent','crew','workspace','pins','learned')),
+    sha256       TEXT NOT NULL,
+    bytes        INTEGER NOT NULL,
+    written_at   TEXT NOT NULL DEFAULT (datetime('now','subsec')),
+    written_by   TEXT,
+    parent_sha   TEXT,
+    payload_ref  TEXT NOT NULL
+);`); err != nil {
+		t.Fatalf("v90 schema: %v", err)
+	}
+
+	proposalID, outputDir := seedPendingProposal(t, db, w)
+	blobRoot := filepath.Join(outputDir, "versions")
+
+	appr, err := ApproveProposal(context.Background(), db, w, quietLogger(), proposalID, "operator_99",
+		ApprovalOptions{BlobRoot: blobRoot})
+	if err != nil {
+		t.Fatalf("ApproveProposal: %v", err)
+	}
+	if appr.VersionSha == "" {
+		t.Fatalf("expected VersionSha populated when BlobRoot is set, got empty")
+	}
+
+	// Row landed with tier=learned, written_by=operator, and the
+	// path follows the canonical audit convention.
+	var tier, path, writtenBy string
+	if err := db.QueryRow(
+		`SELECT tier, path, COALESCE(written_by,'') FROM memory_versions WHERE workspace_id = 'ws_test' ORDER BY written_at DESC LIMIT 1`,
+	).Scan(&tier, &path, &writtenBy); err != nil {
+		t.Fatalf("read memory_versions: %v", err)
+	}
+	if tier != "learned" {
+		t.Errorf("tier = %q, want learned", tier)
+	}
+	if !strings.Contains(path, "crew:crew_test/learned-") {
+		t.Errorf("path = %q, want prefix crew:crew_test/learned-", path)
+	}
+	if writtenBy != "operator_99" {
+		t.Errorf("written_by = %q, want operator_99 (the approving user, not 'consolidator')", writtenBy)
+	}
+
+	// Blob exists at sha-addressed path.
+	blobPath := filepath.Join(blobRoot, appr.VersionSha[:2], appr.VersionSha)
+	if _, err := os.Stat(blobPath); err != nil {
+		t.Errorf("blob missing at %s: %v", blobPath, err)
+	}
+}
+
+// TestApproveProposal_NoBlobRoot_SkipsVersioning asserts the legacy
+// approve contract survives: when ApprovalOptions{} (no BlobRoot)
+// is passed, the approve succeeds AND no memory_versions row lands.
+func TestApproveProposal_NoBlobRoot_SkipsVersioning(t *testing.T) {
+	db := openDB(t)
+	defer db.Close()
+	w := journal.NewWriter(db, quietLogger(), journal.WriterOptions{FlushSize: 1})
+	defer w.Close()
+	applyV89Schema(t, db)
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS memory_versions (id TEXT PRIMARY KEY, workspace_id TEXT, path TEXT, tier TEXT, sha256 TEXT, bytes INTEGER, written_at TEXT, written_by TEXT, parent_sha TEXT, payload_ref TEXT NOT NULL)`); err != nil {
+		t.Fatalf("schema: %v", err)
+	}
+
+	proposalID, _ := seedPendingProposal(t, db, w)
+	appr, err := ApproveProposal(context.Background(), db, w, quietLogger(), proposalID, "u1", ApprovalOptions{})
+	if err != nil {
+		t.Fatalf("ApproveProposal: %v", err)
+	}
+	if appr.VersionSha != "" {
+		t.Errorf("VersionSha = %q, want empty when BlobRoot disabled", appr.VersionSha)
+	}
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM memory_versions`).Scan(&count); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("no versioning rows expected when BlobRoot disabled, got %d", count)
+	}
+}
+
 func TestRejectProposal_NonPending_Returns409(t *testing.T) {
 	db := openDB(t)
 	defer db.Close()
@@ -221,7 +317,7 @@ func TestRejectProposal_NonPending_Returns409(t *testing.T) {
 	applyV89Schema(t, db)
 
 	proposalID, _ := seedPendingProposal(t, db, w)
-	if _, err := ApproveProposal(context.Background(), db, w, quietLogger(), proposalID, "u1"); err != nil {
+	if _, err := ApproveProposal(context.Background(), db, w, quietLogger(), proposalID, "u1", ApprovalOptions{}); err != nil {
 		t.Fatalf("seed approve: %v", err)
 	}
 	err := RejectProposal(context.Background(), db, w, quietLogger(), proposalID, "u2", "")

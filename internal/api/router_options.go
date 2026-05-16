@@ -222,6 +222,18 @@ func WithConsolidateMemoryRoot(path string) RouterOption {
 	}
 }
 
+// WithMemoryVersionsBlobRoot sets the content-addressed blob root the
+// v90 memory_versions audit trail writes under. Forwarded to the
+// ProposedHandler so ApproveProposal records a row + blob on every
+// successful canonical merge. Empty (or unconfigured) disables
+// versioning on the approve path silently — the approve itself still
+// succeeds, just without the EU AI Act Art. 14 audit row.
+func WithMemoryVersionsBlobRoot(path string) RouterOption {
+	return func(r *Router) {
+		r.memoryVersionsBlobRoot = path
+	}
+}
+
 // ServeHTTP dispatches incoming requests to the registered route handlers.
 // It applies security headers to all responses and per-IP rate limiting:
 // stricter limits on auth endpoints, general limits on public API,

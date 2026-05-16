@@ -28,6 +28,12 @@ type ProposedHandler struct {
 	db      *sql.DB
 	logger  *slog.Logger
 	journal journal.Emitter
+	// blobRoot is the content-addressed memory-version blob directory
+	// forwarded to consolidate.ApproveProposal. Empty disables
+	// versioning on approve (the approve still succeeds; the
+	// canonical file write just doesn't record a memory_versions
+	// row). Wired via SetBlobRoot from router_orchestration.go.
+	blobRoot string
 }
 
 func NewProposedHandler(db *sql.DB, logger *slog.Logger) *ProposedHandler {
@@ -36,6 +42,15 @@ func NewProposedHandler(db *sql.DB, logger *slog.Logger) *ProposedHandler {
 		logger:  logger,
 		journal: noopEmitter{},
 	}
+}
+
+// SetBlobRoot wires the version-blob directory. Same convention as
+// the consolidator's SetMemoryRoot — empty disables versioning, any
+// non-empty path is the content-addressed blob root the v90 audit
+// trail writes under. Safe to call before or after the handler is
+// mounted; the value is read on each Approve.
+func (h *ProposedHandler) SetBlobRoot(root string) {
+	h.blobRoot = root
 }
 
 // SetJournal wires the production emitter once the Router has one.
@@ -89,20 +104,28 @@ func (h *ProposedHandler) Approve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	res, err := consolidate.ApproveProposal(r.Context(), h.db, h.journal, h.logger, proposalID, user.ID)
+	res, err := consolidate.ApproveProposal(r.Context(), h.db, h.journal, h.logger, proposalID, user.ID,
+		consolidate.ApprovalOptions{BlobRoot: h.blobRoot})
 	if err != nil {
 		h.mapDecisionError(w, err, "approve")
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
+	out := map[string]any{
 		"proposal_id":    res.ProposalID,
 		"canonical_path": res.CanonicalPath,
 		"rules_merged":   res.RulesMerged,
 		"workspace_id":   res.WorkspaceID,
 		"crew_id":        res.CrewID,
 		"decided_by":     user.ID,
-	})
+	}
+	if res.VersionSha != "" {
+		// Only surface the audit sha when versioning actually ran.
+		// Absent field == "versioning disabled or recording failed"
+		// — the operator can correlate with the warn log if needed.
+		out["version_sha"] = res.VersionSha
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // Reject serves POST /api/v1/consolidate/proposed/{id}/reject.
