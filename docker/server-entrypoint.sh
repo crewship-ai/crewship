@@ -27,12 +27,19 @@ set -e
 needs_env=0
 if [ $# -eq 0 ]; then
   needs_env=1
-else
-  case "$1" in
-    start)
-      needs_env=1
-      ;;
-  esac
+elif [ "$1" = "start" ]; then
+  needs_env=1
+  # `start --help` / `start -h` / `start help` only prints usage and
+  # exits — gating it on env vars would block a legitimate diagnostic
+  # path. Same logic for the explicit help token cobra accepts.
+  for arg in "$@"; do
+    case "$arg" in
+      -h|--help|help)
+        needs_env=0
+        break
+        ;;
+    esac
+  done
 fi
 
 if [ "$needs_env" = "1" ]; then
