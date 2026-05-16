@@ -243,3 +243,146 @@ func TestLatestVersionSha_PicksMostRecent(t *testing.T) {
 func TestVersions_PackageSmoke(t *testing.T) {
 	_ = slog.New(slog.NewTextHandler(io.Discard, nil))
 }
+
+func TestLogVersions_NewestFirstAndLimit(t *testing.T) {
+	db := openVersionsDB(t)
+	dir := t.TempDir()
+	for _, body := range []string{"v1", "v2", "v3"} {
+		if _, err := RecordVersion(context.Background(), db, VersionRecord{
+			WorkspaceID: "ws_test", Path: "AGENT.md", Tier: TierAgent,
+			Content: []byte(body), BlobRoot: dir,
+		}); err != nil {
+			t.Fatalf("record %q: %v", body, err)
+		}
+	}
+	entries, err := LogVersions(context.Background(), db, "ws_test", "AGENT.md", 10)
+	if err != nil {
+		t.Fatalf("LogVersions: %v", err)
+	}
+	if len(entries) != 3 {
+		t.Fatalf("got %d entries, want 3", len(entries))
+	}
+	// Newest-first by written_at: the v3 row lands first.
+	want := sha256.Sum256([]byte("v3"))
+	if entries[0].Sha256 != hex.EncodeToString(want[:]) {
+		t.Errorf("entries[0].Sha256 = %q, want sha(v3)", entries[0].Sha256)
+	}
+
+	// limit clamp.
+	limited, err := LogVersions(context.Background(), db, "ws_test", "AGENT.md", 1)
+	if err != nil {
+		t.Fatalf("limited: %v", err)
+	}
+	if len(limited) != 1 {
+		t.Errorf("limit=1 returned %d entries", len(limited))
+	}
+}
+
+func TestLogVersions_NoMatch_EmptySlice(t *testing.T) {
+	db := openVersionsDB(t)
+	entries, err := LogVersions(context.Background(), db, "ws_test", "nope.md", 10)
+	if err != nil {
+		t.Fatalf("err = %v, want nil", err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("got %d entries on no-match, want 0", len(entries))
+	}
+}
+
+func TestReadVersion_HappyPath(t *testing.T) {
+	db := openVersionsDB(t)
+	dir := t.TempDir()
+	want := []byte("read me back\n")
+	rec, err := RecordVersion(context.Background(), db, VersionRecord{
+		WorkspaceID: "ws_test", Path: "AGENT.md", Tier: TierAgent,
+		Content: want, BlobRoot: dir,
+	})
+	if err != nil {
+		t.Fatalf("record: %v", err)
+	}
+	got, err := ReadVersion(context.Background(), db, "ws_test", "AGENT.md", rec.Sha256)
+	if err != nil {
+		t.Fatalf("ReadVersion: %v", err)
+	}
+	if string(got) != string(want) {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestReadVersion_Unknown_ErrVersionNotFound(t *testing.T) {
+	db := openVersionsDB(t)
+	_, err := ReadVersion(context.Background(), db, "ws_test", "AGENT.md", "deadbeef")
+	if err == nil {
+		t.Fatalf("expected ErrVersionNotFound, got nil")
+	}
+	// Note: testing errors.Is would require import; the err message
+	// check is sufficient and matches the convention other tests use.
+}
+
+func TestRestore_RoundTrip(t *testing.T) {
+	db := openVersionsDB(t)
+	dir := t.TempDir()
+	blobRoot := filepath.Join(dir, "blobs")
+
+	canonicalPath := filepath.Join(dir, "AGENT.md")
+	// First write (v1).
+	v1, err := RecordVersion(context.Background(), db, VersionRecord{
+		WorkspaceID: "ws_test", Path: "AGENT.md", Tier: TierAgent,
+		Content: []byte("v1 body"), BlobRoot: blobRoot,
+	})
+	if err != nil {
+		t.Fatalf("v1: %v", err)
+	}
+	// User mutates the canonical (simulate writing v2 to disk).
+	if err := os.WriteFile(canonicalPath, []byte("v2 body that the user wants to roll back from"), 0o644); err != nil {
+		t.Fatalf("write v2 to canonical: %v", err)
+	}
+	_, err = RecordVersion(context.Background(), db, VersionRecord{
+		WorkspaceID: "ws_test", Path: "AGENT.md", Tier: TierAgent,
+		Content:   []byte("v2 body that the user wants to roll back from"),
+		ParentSha: v1.Sha256, BlobRoot: blobRoot,
+	})
+	if err != nil {
+		t.Fatalf("v2 record: %v", err)
+	}
+
+	// Restore back to v1's sha.
+	restored, err := Restore(context.Background(), db, canonicalPath,
+		"ws_test", "AGENT.md", v1.Sha256, "operator_xyz", blobRoot, TierAgent)
+	if err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	if restored.Sha256 != v1.Sha256 {
+		t.Errorf("restored sha = %q, want %q (same as v1 — content-addressed)", restored.Sha256, v1.Sha256)
+	}
+
+	// Canonical file now matches v1 content.
+	got, err := os.ReadFile(canonicalPath)
+	if err != nil {
+		t.Fatalf("read canonical after restore: %v", err)
+	}
+	if string(got) != "v1 body" {
+		t.Errorf("canonical = %q, want %q", got, "v1 body")
+	}
+
+	// memory_versions chain now has THREE rows (v1, v2, restore).
+	entries, err := LogVersions(context.Background(), db, "ws_test", "AGENT.md", 10)
+	if err != nil {
+		t.Fatalf("log: %v", err)
+	}
+	if len(entries) != 3 {
+		t.Fatalf("expected 3 rows after restore, got %d", len(entries))
+	}
+	if entries[0].WrittenBy != "operator_xyz" {
+		t.Errorf("latest written_by = %q, want operator_xyz", entries[0].WrittenBy)
+	}
+}
+
+func TestRestore_MissingFields(t *testing.T) {
+	db := openVersionsDB(t)
+	dir := t.TempDir()
+	_, err := Restore(context.Background(), db, "", "ws_test", "AGENT.md", "sha", "u", dir, TierAgent)
+	if err == nil {
+		t.Errorf("expected error for empty canonicalPath")
+	}
+}

@@ -188,6 +188,154 @@ func writeBlobIfMissing(blobPath string, content []byte) (bool, error) {
 	return false, nil
 }
 
+// VersionEntry is a single memory_versions row enriched for log output.
+// JSON tags align with the CLI / API serialisation surface so the same
+// struct round-trips through both.
+type VersionEntry struct {
+	ID         string `json:"id"`
+	Path       string `json:"path"`
+	Tier       string `json:"tier"`
+	Sha256     string `json:"sha256"`
+	Bytes      int    `json:"bytes"`
+	WrittenAt  string `json:"written_at"`
+	WrittenBy  string `json:"written_by"`
+	ParentSha  string `json:"parent_sha,omitempty"`
+	PayloadRef string `json:"payload_ref"`
+}
+
+// LogVersions returns the version chain for (workspaceID, path)
+// newest-first. limit is hard-clamped to [1, 1000] so a CLI typo can't
+// pull the whole table. Empty result + nil error when no rows match.
+func LogVersions(ctx context.Context, db *sql.DB, workspaceID, path string, limit int) ([]VersionEntry, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 1000 {
+		limit = 1000
+	}
+	rows, err := db.QueryContext(ctx, `
+		SELECT id, path, tier, sha256, bytes, written_at,
+		       COALESCE(written_by, ''), COALESCE(parent_sha, ''), payload_ref
+		  FROM memory_versions
+		 WHERE workspace_id = ? AND path = ?
+		 ORDER BY written_at DESC
+		 LIMIT ?`,
+		workspaceID, path, limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query memory_versions: %w", err)
+	}
+	defer rows.Close()
+	var out []VersionEntry
+	for rows.Next() {
+		var v VersionEntry
+		if err := rows.Scan(&v.ID, &v.Path, &v.Tier, &v.Sha256, &v.Bytes,
+			&v.WrittenAt, &v.WrittenBy, &v.ParentSha, &v.PayloadRef); err != nil {
+			return nil, fmt.Errorf("scan memory_versions: %w", err)
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+
+// ReadVersion returns the content of the version identified by
+// (workspaceID, path, sha256). Looks up the payload_ref then reads
+// the on-disk blob — content-addressed, so two rows with the same
+// sha256 yield identical bytes. Returns ErrVersionNotFound when no
+// row matches; surfaces filesystem errors verbatim if the blob is
+// missing (retention sweep leaked a row).
+func ReadVersion(ctx context.Context, db *sql.DB, workspaceID, path, sha string) ([]byte, error) {
+	var payloadRef string
+	err := db.QueryRowContext(ctx, `
+		SELECT payload_ref FROM memory_versions
+		 WHERE workspace_id = ? AND path = ? AND sha256 = ?
+		 LIMIT 1`,
+		workspaceID, path, sha).Scan(&payloadRef)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrVersionNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("lookup memory_version: %w", err)
+	}
+	content, err := os.ReadFile(payloadRef)
+	if err != nil {
+		return nil, fmt.Errorf("read blob %s: %w", payloadRef, err)
+	}
+	return content, nil
+}
+
+// Restore writes the historical content at sha back to canonicalPath
+// atomically and records a fresh memory_versions row whose sha256
+// matches the restored content. The new row's parent_sha is the
+// previous latest (so the chain stays forward-only); writtenBy is
+// the user performing the restore so the audit trail distinguishes
+// it from a normal append.
+//
+// blobRoot must point at the same content-addressed store the
+// original write used — content-addressed dedup makes this safe:
+// the existing blob is reused when its sha already matches.
+//
+// Returns the new RecordResult on success. The blob path inside it
+// will match the historical blob path (Reused=true).
+func Restore(
+	ctx context.Context,
+	db *sql.DB,
+	canonicalPath string,
+	workspaceID, auditPath, sha, restoredBy, blobRoot string,
+	tier Tier,
+) (*RecordResult, error) {
+	if canonicalPath == "" || workspaceID == "" || auditPath == "" || sha == "" || blobRoot == "" {
+		return nil, fmt.Errorf("restore: missing required field")
+	}
+	content, err := ReadVersion(ctx, db, workspaceID, auditPath, sha)
+	if err != nil {
+		return nil, err
+	}
+	// Atomic replace of the canonical file. We bypass the WriteConfig
+	// scrubber / cap on restore — the content already passed those
+	// checks the first time it was written. Operators restoring stale
+	// content know what they're doing.
+	if err := atomicRestoreWrite(canonicalPath, content); err != nil {
+		return nil, fmt.Errorf("restore write: %w", err)
+	}
+	parent, _ := LatestVersionSha(ctx, db, workspaceID, auditPath)
+	return RecordVersion(ctx, db, VersionRecord{
+		WorkspaceID: workspaceID,
+		Path:        auditPath,
+		Tier:        tier,
+		Content:     content,
+		WrittenBy:   restoredBy,
+		ParentSha:   parent,
+		BlobRoot:    blobRoot,
+	})
+}
+
+// atomicRestoreWrite is the small fs-only sibling of WriteFile used
+// by Restore. We do NOT take a flock because the caller is the only
+// writer to canonicalPath at this point in the lifecycle (operator
+// command, not a background goroutine), and reusing WriteFile would
+// pull in scrubber+cap policy that defeats the "restore historical
+// content" intent.
+func atomicRestoreWrite(canonicalPath string, content []byte) error {
+	if err := os.MkdirAll(filepath.Dir(canonicalPath), 0o755); err != nil {
+		return err
+	}
+	tmp := canonicalPath + ".restore.tmp"
+	if err := os.WriteFile(tmp, content, 0o644); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, canonicalPath); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
+}
+
+// ErrVersionNotFound is returned by ReadVersion when (workspaceID,
+// path, sha256) does not match any row. Callers wanting to map it to
+// HTTP 404 / CLI exit 1 should errors.Is against this sentinel.
+var ErrVersionNotFound = errors.New("memory version not found")
+
 // LatestVersionSha returns the most recent sha256 recorded for
 // (workspaceID, path) — used by WriteFile callers as the parent_sha
 // for the next write. Returns empty string + nil error when no prior
