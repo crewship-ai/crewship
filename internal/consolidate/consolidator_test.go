@@ -3,6 +3,7 @@ package consolidate
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -271,9 +272,16 @@ func TestConsolidator_AppendsOnSameDay(t *testing.T) {
 	defer w.Close()
 
 	ids := seedEntries(t, db, w, "ws_test", "crew_test", 12, journal.EntryPeerEscalation)
-	reply := `[{"pattern":"p","action":"a","evidence":["` + ids[0] + `","` + ids[1] + `"],"confidence":0.5}]`
+	// Each call returns a distinct pattern so dedupAgainstPrior does
+	// not eat the second invocation's rule (it scans the same-day
+	// learned-*.md for the first call's pattern hash).
+	var callIdx int
+	stub := &stubSummarizer{ReplyFn: func(string) (string, error) {
+		callIdx++
+		return `[{"pattern":"pattern-` + fmt.Sprintf("%d", callIdx) + `","action":"a","evidence":["` + ids[0] + `","` + ids[1] + `"],"confidence":0.5}]`, nil
+	}}
 	c := &Consolidator{
-		DB: db, Journal: w, Summarizer: &stubSummarizer{Reply: reply}, Logger: quietLogger(),
+		DB: db, Journal: w, Summarizer: stub, Logger: quietLogger(),
 	}
 	tmp := t.TempDir()
 	cfg := Config{WorkspaceID: "ws_test", CrewID: "crew_test", Since: time.Hour, MinEntries: 10, OutputDir: tmp}

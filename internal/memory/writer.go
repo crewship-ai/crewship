@@ -187,13 +187,32 @@ func WriteFile(ctx context.Context, path string, content []byte, cfg WriteConfig
 	return WriteResult{BytesWritten: len(effective), Hits: hits}, nil
 }
 
-// writeLock is the small lock helper for WriteFile. Unix uses flock(2);
-// Windows uses LockFileEx via the build-tagged sibling file.
-type writeLock struct {
+// FileLock is an OS-level advisory lock anchored at a sentinel file
+// (created on first Lock if missing). Unix uses flock(2); Windows uses
+// LockFileEx via the build-tagged sibling file. The sentinel persists
+// on disk; flock state is per-fd, not per-inode, so a leftover empty
+// lockfile does not "stay locked" across runs.
+//
+// External callers (consolidator's appendRules / snapshotPins) wrap
+// their O_APPEND writes with Lock / Unlock to serialise concurrent
+// writers without paying for the full atomic-replace dance that
+// WriteFile does internally.
+type FileLock struct {
 	path string
 	f    *os.File
 }
 
+// writeLock is the unexported alias WriteFile uses internally so older
+// call sites do not need to import the public surface to talk to
+// themselves. Same machinery.
+type writeLock = FileLock
+
+// NewFileLock returns an unlocked FileLock that will operate on the
+// given sentinel path. Construction does no I/O.
+func NewFileLock(path string) *FileLock {
+	return &FileLock{path: path}
+}
+
 func newWriteLock(path string) *writeLock {
-	return &writeLock{path: path}
+	return &FileLock{path: path}
 }
