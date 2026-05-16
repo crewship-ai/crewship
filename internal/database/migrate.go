@@ -1193,102 +1193,51 @@ BEGIN
      WHERE key = OLD.key;
 END;
 `},
-	// v89 fixes two FK gaps the v01 init shipped with:
+	// v89 closes two FK gaps the v01 init shipped with:
 	//   - chats.created_by → users(id): had no ON DELETE clause, so
 	//     deleting a user FAILED with FK violation (NO ACTION is the
-	//     SQLite default) even though the column is nullable. SET NULL
-	//     matches the Prisma schema and the user expectation that
-	//     account deletion doesn't block on historical chat ownership.
-	//   - assignments.chat_id → chats(id): same problem, but here the
-	//     correct fix is CASCADE so deleting a chat sweeps its
-	//     assignments instead of leaving the chat undeletable.
+	//     SQLite default) even though the column is nullable. Intent
+	//     per Prisma schema is SET NULL — account deletion should not
+	//     block on historical chat ownership.
+	//   - assignments.chat_id → chats(id): same root cause. Deleting
+	//     a chat with sidebar assignments failed FK. Intent is CASCADE
+	//     so the chat delete sweeps its assignments.
 	//
-	// SQLite cannot ALTER a column's FK clause directly — the standard
-	// recipe is recreate-table-and-swap. We use defer_foreign_keys (the
-	// transaction-scoped pragma) so the DROP/RENAME sequence doesn't
-	// trip the FK check between the two table swaps. Indexes are
-	// recreated explicitly because DROP TABLE also drops them.
+	// The "natural" SQLite recipe — recreate the table with the new FK
+	// clause and swap — does NOT work inside Migrate()'s wrapper
+	// transaction on a populated database. DROP TABLE chats fires the
+	// existing assignments NO-ACTION FK and queues a deferred violation
+	// that COMMIT then refuses, even though the rename restores
+	// referential integrity within the same transaction. SQLite's
+	// official workaround (PRAGMA foreign_keys=OFF *outside* the tx,
+	// then foreign_key_check before COMMIT) can't be applied because
+	// foreign_keys can only be toggled in autocommit mode, and the
+	// migration framework already holds the tx.
 	//
-	// Idempotent via IF NOT EXISTS on the indexes; the swap itself
-	// is naturally one-shot because v89 runs only on databases where
-	// it hasn't been recorded yet.
-	{version: 89, name: "fix_chat_assignment_fk_cascades", sql: `
-PRAGMA defer_foreign_keys = ON;
+	// BEFORE-DELETE triggers achieve the same observable semantics
+	// without touching the FK clauses: clearing/removing the dependent
+	// rows first means the parent delete's implicit FK check finds
+	// nothing to block on. No data moves, no table is recreated, so
+	// the migration is safe on populated beta installs. Idempotent
+	// via DROP TRIGGER IF EXISTS.
+	{version: 89, name: "add_chat_assignment_cascade_triggers", sql: `
+-- chats.created_by → users(id): emulate ON DELETE SET NULL.
+DROP TRIGGER IF EXISTS trg_chats_creator_set_null_on_user_delete;
+CREATE TRIGGER trg_chats_creator_set_null_on_user_delete
+BEFORE DELETE ON users
+FOR EACH ROW
+BEGIN
+    UPDATE chats SET created_by = NULL WHERE created_by = OLD.id;
+END;
 
--- ── chats ───────────────────────────────────────────────────────
--- Add ON DELETE SET NULL on created_by. Other FKs stay unchanged.
-CREATE TABLE chats_new (
-    id TEXT PRIMARY KEY,
-    agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
-    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-    created_by TEXT REFERENCES users(id) ON DELETE SET NULL,
-    title TEXT,
-    mode TEXT NOT NULL DEFAULT 'CHAT',
-    status TEXT NOT NULL DEFAULT 'ACTIVE',
-    message_count INTEGER NOT NULL DEFAULT 0,
-    jsonl_path TEXT,
-    started_at TEXT NOT NULL DEFAULT (datetime('now')),
-    ended_at TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-    origin TEXT
-);
-INSERT INTO chats_new (
-    id, agent_id, workspace_id, created_by, title, mode, status,
-    message_count, jsonl_path, started_at, ended_at, created_at,
-    updated_at, origin
-) SELECT
-    id, agent_id, workspace_id, created_by, title, mode, status,
-    message_count, jsonl_path, started_at, ended_at, created_at,
-    updated_at, origin
-FROM chats;
-DROP TABLE chats;
-ALTER TABLE chats_new RENAME TO chats;
-CREATE INDEX IF NOT EXISTS idx_chat_agent ON chats(agent_id);
-CREATE INDEX IF NOT EXISTS idx_chat_workspace ON chats(workspace_id);
-CREATE INDEX IF NOT EXISTS idx_chat_created ON chats(created_at);
-CREATE INDEX IF NOT EXISTS idx_chat_created_by ON chats(created_by);
-CREATE INDEX IF NOT EXISTS idx_chat_agent_status_created ON chats(agent_id, status, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_chats_origin ON chats(origin) WHERE origin IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_chats_ws_created ON chats(workspace_id, created_at DESC);
-
--- ── assignments ────────────────────────────────────────────────
--- Add ON DELETE CASCADE on chat_id so deleting a chat cleans up
--- its assignment rows instead of failing the chat delete on FK
--- conflict. Other FKs unchanged (RESTRICT-by-default on agent
--- references is the right semantic — preventing agent delete is
--- safer than orphaning assignments).
-CREATE TABLE assignments_new (
-    id TEXT PRIMARY KEY,
-    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-    chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
-    assigned_by_id TEXT NOT NULL REFERENCES agents(id),
-    assigned_to_id TEXT NOT NULL REFERENCES agents(id),
-    task TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'PENDING',
-    started_at TEXT,
-    finished_at TEXT,
-    result_summary TEXT,
-    error_message TEXT,
-    group_id TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-INSERT INTO assignments_new (
-    id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task,
-    status, started_at, finished_at, result_summary, error_message,
-    group_id, created_at
-) SELECT
-    id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task,
-    status, started_at, finished_at, result_summary, error_message,
-    group_id, created_at
-FROM assignments;
-DROP TABLE assignments;
-ALTER TABLE assignments_new RENAME TO assignments;
-CREATE INDEX IF NOT EXISTS idx_assignment_chat ON assignments(chat_id);
-CREATE INDEX IF NOT EXISTS idx_assignment_by ON assignments(assigned_by_id);
-CREATE INDEX IF NOT EXISTS idx_assignment_to ON assignments(assigned_to_id);
-CREATE INDEX IF NOT EXISTS idx_assignment_group ON assignments(group_id);
-CREATE INDEX IF NOT EXISTS idx_assignment_workspace ON assignments(workspace_id);
+-- assignments.chat_id → chats(id): emulate ON DELETE CASCADE.
+DROP TRIGGER IF EXISTS trg_assignments_cascade_on_chat_delete;
+CREATE TRIGGER trg_assignments_cascade_on_chat_delete
+BEFORE DELETE ON chats
+FOR EACH ROW
+BEGIN
+    DELETE FROM assignments WHERE chat_id = OLD.id;
+END;
 `},
 }
 

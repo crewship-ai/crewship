@@ -481,11 +481,13 @@ model Assignment {
   created_at      DateTime         @default(now())
 
   workspace    Workspace @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
-  // chat: Cascade so deleting a chat removes its assignments (matches the
-  // user expectation that deleting a thread cleans up its sidebar entries).
-  // Without this, a chat delete fails on FK conflict and the user has to
-  // hunt down stale assignments first.
-  chat         Chat      @relation(fields: [chat_id], references: [id], onDelete: Cascade)
+  // chat: cascade-on-delete is enforced at runtime by the
+  // trg_assignments_cascade_on_chat_delete BEFORE-DELETE trigger
+  // installed by Go migration v89 (internal/database/migrate.go). The
+  // raw FK clause stays NO ACTION because SQLite forbids the natural
+  // table-recreate recipe inside the migration transaction; the
+  // trigger achieves identical observable semantics on a live install.
+  chat         Chat      @relation(fields: [chat_id], references: [id])
   assigned_by  Agent     @relation("AssignedBy", fields: [assigned_by_id], references: [id])
   assigned_to  Agent     @relation("AssignedTo", fields: [assigned_to_id], references: [id])
 
@@ -695,10 +697,11 @@ model Chat {
 
   agent       Agent        @relation(fields: [agent_id], references: [id], onDelete: Cascade)
   workspace   Workspace    @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
-  // creator: SetNull so deleting a user doesn't block (or worse, silently
-  // dangle the FK on) chats they started. Field is already nullable; only
-  // the cascade behavior was unset.
-  creator     User?        @relation("CreatedBy", fields: [created_by], references: [id], onDelete: SetNull)
+  // creator: set-null-on-delete is enforced at runtime by the
+  // trg_chats_creator_set_null_on_user_delete BEFORE-DELETE trigger
+  // installed by Go migration v89. The raw FK clause stays NO ACTION
+  // for the same SQLite-tx-recipe reason called out on Assignment.chat.
+  creator     User?        @relation("CreatedBy", fields: [created_by], references: [id])
   runs        AgentRun[]
   assignments Assignment[]
 
