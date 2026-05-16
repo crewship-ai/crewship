@@ -27,6 +27,7 @@ import { ActivityFeed } from "@/components/features/dashboard/activity-feed"
 import { InboxTile, type InboxEntry } from "@/components/features/dashboard/inbox-tile"
 import { RecentMissionsTable } from "@/components/features/dashboard/recent-missions-table"
 import { RecipesEmptyState } from "@/components/features/dashboard/recipes-cards"
+import { WelcomeChecklist } from "@/components/features/dashboard/welcome-checklist"
 
 import {
   AgentSummary, CrewSummary, ProjectSummary, RunsResponse,
@@ -464,6 +465,14 @@ export default function DashboardPage() {
 
   return (
     <div className="p-4 md:p-6 pb-10 space-y-4 bg-background min-h-[calc(100vh-48px)]">
+      {/* Post-onboarding welcome — self-gates on a localStorage flag
+          set at the end of the wizard, dismisses persistently. Reads
+          firstAgentId from the same localStorage breadcrumb so the
+          "Open chat" CTA lands on the agent the user just created. */}
+      <WelcomeChecklist
+        firstAgentId={typeof window !== "undefined" ? window.localStorage.getItem("crewship.firstAgentId") : null}
+      />
+
       {/* Recipes empty state — only when workspace has 0 crews. */}
       {crews.length === 0 && workspaceId && (
         <RecipesEmptyState

@@ -382,6 +382,25 @@ export default function OnboardingPage() {
         return
       }
       const data = await res.json()
+      // Drop a "just onboarded" breadcrumb so the dashboard knows to
+      // render the welcome checklist on the user's next mount. Both
+      // exit paths set it because the chat-redirect user may bounce
+      // straight to / via the sidebar before they've seen the chat,
+      // and we still want them to land on the checklist there. The
+      // banner has its own dismissed-flag check so a returning user
+      // who already opted out doesn't re-see it.
+      try {
+        if (typeof window !== "undefined") {
+          window.localStorage.setItem("crewship.justOnboarded", "1")
+          if (data.agent_id) {
+            window.localStorage.setItem("crewship.firstAgentId", String(data.agent_id))
+          }
+        }
+      } catch {
+        // localStorage unavailable (private mode) — skip the breadcrumb,
+        // dashboard will just not show the banner. Not worth blocking
+        // onboarding completion on.
+      }
       if (data.agent_id) {
         router.push(`/crews/agents/${data.agent_id}/chat`)
       } else {
