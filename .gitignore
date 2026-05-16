@@ -92,6 +92,14 @@ internal-docs/
 !.claude/audits/
 !.claude/commands/
 !.claude/settings.json
+# PRDs are forward-looking roadmap docs — tracked so they survive
+# across machines and are visible to teammates. Other subdirs under
+# .claude/context/ (wireframes, scratch) stay ignored by default;
+# add further `!.claude/context/<subdir>/` exceptions when needed.
+!.claude/context/
+.claude/context/*
+!.claude/context/prd/
+!.claude/context/prd/**
 
 # Local mockups / audit artifacts (kept untracked per user preference)
 audit-final/
