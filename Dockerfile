@@ -56,9 +56,16 @@ RUN mkdir -p /var/lib/crewship /var/log/crewship /data && \
     chown -R crewship:crewship /var/lib/crewship /var/log/crewship /data
 
 COPY --from=backend /crewship /usr/local/bin/crewship
+COPY docker/server-entrypoint.sh /usr/local/bin/crewship-entrypoint
+RUN chmod +x /usr/local/bin/crewship-entrypoint
 
 USER crewship
 
 EXPOSE 8080
 
-ENTRYPOINT ["crewship", "start"]
+# The wrapper script pre-flight-checks required env vars (NEXTAUTH_SECRET,
+# ENCRYPTION_KEY) and prints an actionable error before the binary panics
+# deep inside server.New(). `docker run` without these vars now exits 78
+# with copy-pasteable fix instructions instead of leaving the user with a
+# blank :8080 and a stack trace buried in `docker logs`.
+ENTRYPOINT ["crewship-entrypoint"]

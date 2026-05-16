@@ -24,16 +24,28 @@ fi
 # `required_status_checks.contexts` must list every workflow's job name that
 # should block merging. Names taken from the `name:` field of each job after
 # expansion by GitHub Actions — verify with `gh pr checks <PR>` if unsure.
+#
+# Names below match the real job `name:` fields:
+#   ci.yml           → Frontend, Frontend Test, Go, Go Lint
+#   migration-lint   → Lint migrations
+#   security.yml     → Gitleaks, Go Vuln Scan, License Check
+# Excluded on purpose:
+#   - Grype Source Scan: informational (fail-build: false until baseline clean)
+#   - E2E devcontainer: nightly / on-demand only, not in the per-PR gate
+#   - Binary Build: push-only post-merge embed sanity check
 read -r -d '' PAYLOAD <<'JSON' || true
 {
   "required_status_checks": {
     "strict": true,
     "contexts": [
       "Frontend",
-      "Backend (Go)",
+      "Frontend Test",
+      "Go",
+      "Go Lint",
       "Lint migrations",
-      "Security",
-      "End-to-end (devcontainer)"
+      "Gitleaks",
+      "Go Vuln Scan",
+      "License Check"
     ]
   },
   "enforce_admins": true,

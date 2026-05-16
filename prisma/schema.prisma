@@ -481,7 +481,11 @@ model Assignment {
   created_at      DateTime         @default(now())
 
   workspace    Workspace @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
-  chat         Chat      @relation(fields: [chat_id], references: [id])
+  // chat: Cascade so deleting a chat removes its assignments (matches the
+  // user expectation that deleting a thread cleans up its sidebar entries).
+  // Without this, a chat delete fails on FK conflict and the user has to
+  // hunt down stale assignments first.
+  chat         Chat      @relation(fields: [chat_id], references: [id], onDelete: Cascade)
   assigned_by  Agent     @relation("AssignedBy", fields: [assigned_by_id], references: [id])
   assigned_to  Agent     @relation("AssignedTo", fields: [assigned_to_id], references: [id])
 
@@ -691,7 +695,10 @@ model Chat {
 
   agent       Agent        @relation(fields: [agent_id], references: [id], onDelete: Cascade)
   workspace   Workspace    @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
-  creator     User?        @relation("CreatedBy", fields: [created_by], references: [id])
+  // creator: SetNull so deleting a user doesn't block (or worse, silently
+  // dangle the FK on) chats they started. Field is already nullable; only
+  // the cascade behavior was unset.
+  creator     User?        @relation("CreatedBy", fields: [created_by], references: [id], onDelete: SetNull)
   runs        AgentRun[]
   assignments Assignment[]
 

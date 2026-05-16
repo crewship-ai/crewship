@@ -155,16 +155,40 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: v2.7.0
+
       - name: Build snapshot binaries
         uses: goreleaser/goreleaser-action@1a80836c5c9d9e5755a25cb59ec6f45a3b5f41a8 # v7
         with:
           # Match release.yml pin; `~> v2` allows v3 once released.
           version: "v2.6.1"
-          # --snapshot: skip tag validation; --skip=publish,sign,homebrew: just
-          # produce dist/ artifacts. We attach those ourselves via gh release.
-          args: release --snapshot --clean --skip=publish,sign,homebrew
+          # --snapshot: skip tag validation; --skip=publish,homebrew: do NOT
+          # skip sign — nightly artifacts get the same cosign keyless
+          # provenance as tagged releases so testers can `cosign verify-blob`
+          # before installing. We still skip publish (we upload via gh
+          # release ourselves) and homebrew (no formula bump on nightly).
+          args: release --snapshot --clean --skip=publish,homebrew
         env:
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          # goreleaser's `signs:` block uses the GitHub Actions OIDC token to
+          # request a Fulcio short-lived cert (keyless cosign). The token is
+          # injected automatically because the workflow has `id-token: write`.
+
+      # Sign the checksums file out-of-band so testers can verify the
+      # archives transitively (cosign verify-blob → checksums.txt → sha256
+      # of each tarball). goreleaser's per-archive signing is already on via
+      # the `signs:` block, but we sign checksums.txt explicitly here so a
+      # single-shot `curl + cosign verify-blob` is enough to validate.
+      - name: Sign checksums.txt
+        if: hashFiles('dist/checksums.txt') != ''
+        run: |
+          cosign sign-blob --yes \
+            --output-signature dist/checksums.txt.sig \
+            --output-certificate dist/checksums.txt.pem \
+            dist/checksums.txt
 
       # Rolling pre-release: delete and recreate to ensure assets reflect HEAD.
       # gh release delete is idempotent enough — if the release doesn't exist
@@ -186,10 +210,10 @@ jobs:
             --title "Nightly (main @ ${GITHUB_SHA:0:7})" \
             --notes "$NOTES" \
             --target "$GITHUB_SHA" \
-            dist/*.tar.gz dist/*.zip dist/checksums.txt 2>/dev/null || \
+            dist/*.tar.gz dist/*.zip dist/checksums.txt dist/*.sig dist/*.pem 2>/dev/null || \
           gh release create nightly \
             --prerelease \
             --title "Nightly (main @ ${GITHUB_SHA:0:7})" \
             --notes "$NOTES" \
             --target "$GITHUB_SHA" \
-            $(find dist -maxdepth 1 -type f \( -name '*.tar.gz' -o -name '*.zip' -o -name 'checksums.txt' \) | tr '\n' ' ')
+            $(find dist -maxdepth 1 -type f \( -name '*.tar.gz' -o -name '*.zip' -o -name 'checksums.txt' -o -name '*.sig' -o -name '*.pem' \) | tr '\n' ' ')

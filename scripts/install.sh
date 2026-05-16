@@ -2,7 +2,11 @@
 #
 # Crewship installer
 #
-#   curl -fsSL https://crewship.ai/install | bash
+#   curl -fsSL https://raw.githubusercontent.com/crewship-ai/crewship/main/scripts/install.sh | bash
+#
+# (The short crewship.ai/install redirect lands once the project
+#  website is live; until then, fetch the script straight from the
+#  repo as shown above.)
 #
 # (Pipe to `bash`, not `sh`. The script uses `set -euo pipefail` and
 #  array expansion guards that POSIX sh does not implement; piping to

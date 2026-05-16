@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect } from "react"
+import * as Sentry from "@sentry/nextjs"
 import { AlertTriangle, RotateCcw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -13,6 +14,14 @@ export default function Error({
   reset: () => void
 }) {
   useEffect(() => {
+    // Forward to Sentry first — captureException is gated on consent
+    // by sentry.client.config (no DSN / no opt-in = no-op). Without
+    // this the App-level React error boundary would log to the
+    // browser console only, and the maintainer would never see the
+    // bug. Console.error stays as a developer-time aid.
+    Sentry.captureException(error, {
+      tags: { boundary: "app", digest: error.digest ?? "" },
+    })
     console.error("App error boundary caught:", error)
   }, [error])
 
