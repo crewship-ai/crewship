@@ -51,7 +51,15 @@ const _avatarCache = new Map<string, string>()
  * @param styleName - Avatar style key from AVATAR_STYLES; defaults to bottts-neutral.
  */
 export function getAgentAvatarUrl(seed: string, styleName?: string | null): string {
-  const key = `${styleName ?? DEFAULT_AVATAR_STYLE}:${seed}`
+  // Canonicalize unknown / null style names to DEFAULT_AVATAR_STYLE
+  // BEFORE building the cache key. Otherwise three callers passing
+  // "robots", "robot", and undefined (all of which fall back to the
+  // default in the lookup below) would each spawn a separate cache
+  // entry for the same generated URI, eroding the LRU's effective
+  // working set on a misconfigured caller.
+  const resolvedStyle =
+    styleName && AVATAR_STYLES[styleName] ? styleName : DEFAULT_AVATAR_STYLE
+  const key = `${resolvedStyle}:${seed}`
   const cached = _avatarCache.get(key)
   if (cached !== undefined) {
     // Bump the hit to the most-recently-used slot. Without this we'd
@@ -61,7 +69,7 @@ export function getAgentAvatarUrl(seed: string, styleName?: string | null): stri
     _avatarCache.set(key, cached)
     return cached
   }
-  const entry = AVATAR_STYLES[styleName || DEFAULT_AVATAR_STYLE] ?? AVATAR_STYLES[DEFAULT_AVATAR_STYLE]
+  const entry = AVATAR_STYLES[resolvedStyle]
   const uri = createAvatar(entry.style, { seed, size: 128 }).toDataUri()
   if (_avatarCache.size >= AVATAR_CACHE_MAX_ENTRIES) {
     // Evict the oldest entry — Map's iterator yields keys in

@@ -84,4 +84,18 @@ describe("getAgentAvatarUrl LRU cache", () => {
     const b = getAgentAvatarUrl("agent-y", "bottts-neutral")
     expect(a).toBe(b)
   })
+
+  it("canonicalizes unknown styles to one cache slot per seed", () => {
+    // Five callers, four different unknown/empty style names plus the
+    // explicit default — before the fix this would have produced five
+    // separate cache entries that all rendered the default style. Now
+    // they collapse to one because the key is built from the resolved
+    // style, not the raw input.
+    getAgentAvatarUrl("agent-z", "robots")
+    getAgentAvatarUrl("agent-z", "Robot")
+    getAgentAvatarUrl("agent-z", null)
+    getAgentAvatarUrl("agent-z", undefined)
+    getAgentAvatarUrl("agent-z", "bottts-neutral")
+    expect(_avatarCacheSizeForTest()).toBe(1)
+  })
 })

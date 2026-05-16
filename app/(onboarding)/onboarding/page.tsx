@@ -394,6 +394,13 @@ export default function OnboardingPage() {
           window.localStorage.setItem("crewship.justOnboarded", "1")
           if (data.agent_id) {
             window.localStorage.setItem("crewship.firstAgentId", String(data.agent_id))
+          } else {
+            // Setup succeeded without spawning a default agent (e.g.
+            // user picked the "blank" crew template). Clear any stale
+            // value from a previous run-through — otherwise the welcome
+            // checklist's "Open chat" CTA would deep-link to an agent
+            // that no longer exists.
+            window.localStorage.removeItem("crewship.firstAgentId")
           }
         }
       } catch {

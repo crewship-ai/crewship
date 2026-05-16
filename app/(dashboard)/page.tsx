@@ -55,6 +55,12 @@ export default function DashboardPage() {
   const [containerStats, setContainerStats] = useState<Map<string, ContainerStatsEntry>>(new Map())
   const [loading, setLoading] = useState(true)
   const [onboardingChecked, setOnboardingChecked] = useState(false)
+  // Post-onboarding breadcrumb — read in an effect, not inline in
+  // render. localStorage access during SSR or in restricted contexts
+  // (private browsing with storage disabled) can throw; reading it in
+  // the JSX would crash the dashboard. Effect-with-try/catch degrades
+  // to "no agent id, show generic CTA" instead.
+  const [firstAgentId, setFirstAgentId] = useState<string | null>(null)
 
   // ── Onboarding gate ────────────────────────────────────────────────
   useEffect(() => {
@@ -69,6 +75,19 @@ export default function DashboardPage() {
       })
       .catch(() => setOnboardingChecked(true))
   }, [router])
+
+  useEffect(() => {
+    try {
+      if (typeof window !== "undefined") {
+        setFirstAgentId(window.localStorage.getItem("crewship.firstAgentId"))
+      }
+    } catch {
+      // Restricted-storage browsers throw on .getItem. Fall through
+      // to null so WelcomeChecklist shows its generic "Browse agents"
+      // CTA instead of crashing the dashboard render.
+      setFirstAgentId(null)
+    }
+  }, [])
 
   // ── Fetchers ────────────────────────────────────────────────────────
   //
@@ -466,12 +485,10 @@ export default function DashboardPage() {
   return (
     <div className="p-4 md:p-6 pb-10 space-y-4 bg-background min-h-[calc(100vh-48px)]">
       {/* Post-onboarding welcome — self-gates on a localStorage flag
-          set at the end of the wizard, dismisses persistently. Reads
-          firstAgentId from the same localStorage breadcrumb so the
-          "Open chat" CTA lands on the agent the user just created. */}
-      <WelcomeChecklist
-        firstAgentId={typeof window !== "undefined" ? window.localStorage.getItem("crewship.firstAgentId") : null}
-      />
+          set at the end of the wizard, dismisses persistently. The
+          firstAgentId state is hydrated in an effect (above) so we
+          never touch storage in render. */}
+      <WelcomeChecklist firstAgentId={firstAgentId} />
 
       {/* Recipes empty state — only when workspace has 0 crews. */}
       {crews.length === 0 && workspaceId && (
