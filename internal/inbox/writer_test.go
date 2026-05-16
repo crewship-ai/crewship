@@ -219,14 +219,22 @@ func TestInsert_ValidatesRequiredFields(t *testing.T) {
 	// Every shape with a missing required field must be a no-op (no
 	// row written, no error returned). The writer's early-return
 	// guard exists so callers can pass partial data from upstream
-	// parse failures without poisoning the inbox.
-	cases := []Item{
-		{WorkspaceID: "", Kind: "waitpoint", SourceID: "x"},
-		{WorkspaceID: "ws1", Kind: "", SourceID: "x"},
-		{WorkspaceID: "ws1", Kind: "waitpoint", SourceID: ""},
+	// parse failures without poisoning the inbox. Subtests isolate
+	// failure attribution — if one shape regresses we want the name
+	// in the report, not "case index 2 of 3".
+	cases := []struct {
+		name string
+		item Item
+	}{
+		{"missing_workspace", Item{WorkspaceID: "", Kind: "waitpoint", SourceID: "x"}},
+		{"missing_kind", Item{WorkspaceID: "ws1", Kind: "", SourceID: "x"}},
+		{"missing_source_id", Item{WorkspaceID: "ws1", Kind: "waitpoint", SourceID: ""}},
 	}
-	for _, it := range cases {
-		Insert(ctx, db, quietLogger(), it)
+	for _, tc := range cases {
+		tc := tc // capture for the subtest closure
+		t.Run(tc.name, func(t *testing.T) {
+			Insert(ctx, db, quietLogger(), tc.item)
+		})
 	}
 
 	var count int
@@ -350,9 +358,50 @@ func TestResolveBySource_NoMatchIsSilent(t *testing.T) {
 func TestResolveBySource_ValidatesRequiredFields(t *testing.T) {
 	t.Parallel()
 	db := newInboxTestDB(t)
-	// Mirror Insert's required-fields contract — empty kind or
-	// source_id is a no-op, not a panic or a wildcard UPDATE.
-	ResolveBySource(context.Background(), db, quietLogger(), "", "x", "a", "u")
-	ResolveBySource(context.Background(), db, quietLogger(), "waitpoint", "", "a", "u")
-	ResolveBySource(context.Background(), nil, quietLogger(), "waitpoint", "x", "a", "u")
+	ctx := context.Background()
+
+	// Seed one valid row that the invalid calls below must NOT touch.
+	// Without this assertion the test only proves "no panic" — a
+	// regression that accidentally turned the WHERE clause into a
+	// wildcard UPDATE would flip every row in the workspace and the
+	// old single-loop version would pass anyway.
+	Insert(ctx, db, quietLogger(), Item{
+		WorkspaceID: "ws1",
+		Kind:        "waitpoint",
+		SourceID:    "x",
+		Title:       "pending",
+	})
+
+	// Each invalid shape gets its own subtest so failures name the
+	// offending case instead of "index N." Mirror Insert's
+	// required-fields contract — empty kind or source_id, or a nil
+	// db handle, must short-circuit to a no-op.
+	cases := []struct {
+		name             string
+		db               *sql.DB
+		kind, sourceID   string
+		action, userID   string
+	}{
+		{"missing_kind", db, "", "x", "a", "u"},
+		{"missing_source_id", db, "waitpoint", "", "a", "u"},
+		{"nil_db", nil, "waitpoint", "x", "a", "u"},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			ResolveBySource(ctx, tc.db, quietLogger(), tc.kind, tc.sourceID, tc.action, tc.userID)
+		})
+	}
+
+	// The seeded row must still be unread — no invalid call should
+	// have flipped its state.
+	var state string
+	if err := db.QueryRow(
+		`SELECT state FROM inbox_items WHERE kind='waitpoint' AND source_id='x'`,
+	).Scan(&state); err != nil {
+		t.Fatalf("re-read seeded row: %v", err)
+	}
+	if state != "unread" {
+		t.Errorf("invalid inputs should be no-op; got state=%q on seeded row", state)
+	}
 }
