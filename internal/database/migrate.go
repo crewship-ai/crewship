@@ -1239,6 +1239,17 @@ BEGIN
     DELETE FROM assignments WHERE chat_id = OLD.id;
 END;
 `},
+	// v90 introduces the HITL staging surface for the memory
+	// consolidator (memory_proposals table) plus widens the
+	// inbox_items.kind CHECK constraint to admit 'memory_consolidation'
+	// inbox items, plus adds a per-workspace memory_config JSON column
+	// on workspaces for fine-grained scrubber / cap / watcher overrides.
+	// See migrate_consts_v90_memory_proposals.go for full design notes.
+	// (Originally authored as v89 in feat/memory-reliability-bundle;
+	// renumbered to v90 on rebase because the cascade-triggers
+	// migration above took v89 in main first. Migration bodies are
+	// independent — both apply cleanly in either order.)
+	{version: 90, name: "add_memory_proposals", sql: migrationAddMemoryProposals},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

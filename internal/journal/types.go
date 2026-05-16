@@ -71,6 +71,26 @@ const (
 	EntryMemoryUpdated      EntryType = "memory.updated"
 	EntryMemoryConsolidated EntryType = "memory.consolidated"
 	EntrySummaryGenerated   EntryType = "summary.generated"
+	// EntryMemoryWriteRejected fires when a sidecar /memory/write call
+	// is rejected by the scrubber (credential pattern matched in block
+	// mode) or by a cap check (file would exceed AGENT.md/CREW.md/pins.md
+	// byte ceiling). Payload carries `tier`, `file`, `reason` ∈ {scrubber,
+	// cap}, `bytes_attempted`, `bytes_limit`, and `hits` (list of pattern
+	// names for scrubber rejections). Severity is `warn` — the write was
+	// refused at the boundary, no data was corrupted, but operators
+	// should see it to tune allowlists.
+	EntryMemoryWriteRejected EntryType = "memory.write_rejected"
+	// EntryMemoryConsolidationProposed is the HITL-mode sibling of
+	// EntryMemoryConsolidated. When the consolidator runs with
+	// ProposalMode=true (env CREWSHIP_CONSOLIDATE_HITL=1) it writes the
+	// extracted rules to {outputDir}/.proposed/proposal-{runID}.md and
+	// inserts a memory_consolidation row into the inbox instead of
+	// appending to learned-YYYY-MM-DD.md directly. The EntryMemoryConsolidated
+	// final emit only fires after an operator approves the proposal via
+	// POST /api/v1/consolidate/proposed/{id}/approve. Keeping the two
+	// types distinct preserves the existing downstream semantic
+	// ("rules are live now") on the old event.
+	EntryMemoryConsolidationProposed EntryType = "memory.consolidation_proposed"
 
 	// Observability (Crow's Nest)
 	EntryExecCommand       EntryType = "exec.command"
