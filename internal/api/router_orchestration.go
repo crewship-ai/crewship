@@ -256,6 +256,18 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	conH.SetMemoryRoot(r.consolidateMemoryRoot)
 	r.mux.Handle("POST /api/v1/consolidate/run", authed(wsCtx(http.HandlerFunc(conH.Run))))
 
+	// HITL proposal decision surface. When the consolidator runs in
+	// ProposalMode (CREWSHIP_CONSOLIDATE_HITL=1), each extracted rule
+	// set lands in .proposed/proposal-*.md + a memory_proposals row +
+	// an inbox_items entry — these three endpoints are the human-
+	// decision side of that flow. Explain is read-only (MEMBER+);
+	// approve/reject are gated to OWNER/ADMIN by the handler itself.
+	propH := NewProposedHandler(r.db, r.logger)
+	propH.SetJournal(r.Journal())
+	r.mux.Handle("POST /api/v1/consolidate/proposed/{id}/approve", authed(wsCtx(http.HandlerFunc(propH.Approve))))
+	r.mux.Handle("POST /api/v1/consolidate/proposed/{id}/reject", authed(wsCtx(http.HandlerFunc(propH.Reject))))
+	r.mux.Handle("GET /api/v1/consolidate/proposed/{id}/explain", authed(wsCtx(http.HandlerFunc(propH.Explain))))
+
 	// Quartermaster eval: mission replay + regression + list. Both
 	// mutating calls run in a goroutine and return 202 with a run_id
 	// the caller can later poll for in the list endpoint.
