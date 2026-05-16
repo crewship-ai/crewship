@@ -17,6 +17,18 @@ import (
 	"time"
 )
 
+// Kind constants enumerate the inbox_items.kind CHECK values. Callers
+// should use these so a typo can't quietly write a row with a kind the
+// list endpoint won't render. Keep these in sync with the DB CHECK
+// (currently widened by migration v89 to admit KindMemoryConsolidation).
+const (
+	KindWaitpoint           = "waitpoint"
+	KindEscalation          = "escalation"
+	KindFailedRun           = "failed_run"
+	KindMessage             = "message"
+	KindMemoryConsolidation = "memory_consolidation"
+)
+
 // Item is the payload passed to Insert. The exported fields map 1:1
 // onto inbox_items columns; the writer fills in the deterministic
 // id, state ('unread'), and timestamps so callers don't repeat that

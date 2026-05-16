@@ -186,6 +186,15 @@ func (c *Consolidator) Run(ctx context.Context, cfg Config) (ConsolidationResult
 		}, nil
 	}
 
+	// HITL path: stage the rules in .proposed/ and emit the
+	// EntryMemoryConsolidationProposed marker instead of touching
+	// the canonical learned-*.md. The operator approves via the
+	// API; on approve the proposal body is merged into the canonical
+	// file and the regular EntryMemoryConsolidated emit fires.
+	if cfg.ProposalMode {
+		return c.writeProposal(ctx, cfg, now, rules, len(filtered))
+	}
+
 	outPath, err := c.appendRules(cfg.OutputDir, now, rules)
 	if err != nil {
 		return ConsolidationResult{EntriesScanned: len(filtered)},
