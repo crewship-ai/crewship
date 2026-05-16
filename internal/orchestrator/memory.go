@@ -28,6 +28,7 @@ const (
 	defaultMemoryContextChars = 15000
 	memoryReadTimeout         = 5 * time.Second
 	crewMemoryMaxPct          = 40  // crew memory capped at 40% of total budget
+	pinsMemoryMaxPct          = 10  // operator-pinned entries capped at 10%
 	minTruncationChars        = 100 // don't bother with sections smaller than this
 )
 
@@ -47,8 +48,22 @@ func (o *Orchestrator) buildMemoryContext(ctx context.Context, req AgentRunReque
 	}
 	today := time.Now().UTC().Format("2006-01-02")
 
-	// --- Crew memory (cap at 40%) ---
+	// --- Pins (cap at 10%) ---
+	// Operator-pinned journal entries — small, high-priority,
+	// surfaced before the larger tiers so they survive an aggressive
+	// truncation pass. The consolidator's snapshotPins writes them
+	// at /crew/shared/.memory/{crew_slug}/topics/pins.md inside the
+	// container; we read by path and frame as [PINS] / [END PINS].
 	remaining := charBudget
+	var pinsBlock string
+	var pinsUsed int
+	if req.CrewID != "" && req.CrewSlug != "" {
+		pinsBudget := remaining * pinsMemoryMaxPct / 100
+		pinsBlock, pinsUsed = o.buildPinsBlock(ctx, req, pinsBudget)
+	}
+
+	// --- Crew memory (cap at 40% of remaining after pins) ---
+	remaining -= pinsUsed
 	var crewBlock string
 	var crewUsed int
 	if req.CrewID != "" {
@@ -61,7 +76,7 @@ func (o *Orchestrator) buildMemoryContext(ctx context.Context, req AgentRunReque
 	agentBlock := o.buildAgentMemoryBlock(ctx, req, agentBudget, today)
 
 	// If no memory files at all, return just instructions
-	if agentBlock == "" && crewBlock == "" {
+	if agentBlock == "" && crewBlock == "" && pinsBlock == "" {
 		return buildMemoryInstructions(today)
 	}
 
@@ -71,6 +86,9 @@ func (o *Orchestrator) buildMemoryContext(ctx context.Context, req AgentRunReque
 	}
 	if crewBlock != "" {
 		b.WriteString(crewBlock)
+	}
+	if pinsBlock != "" {
+		b.WriteString(pinsBlock)
 	}
 	b.WriteString(buildMemoryInstructions(today))
 	// Agent-curated nudge + cost awareness — two small blocks that
@@ -89,11 +107,13 @@ func (o *Orchestrator) buildMemoryContext(ctx context.Context, req AgentRunReque
 
 // nudgeThreshold is how many new journal entries for the agent since
 // the last memory.updated emit will trigger the "consider updating
-// AGENT.md" prompt. 30 is pragmatic: below 30 the agent usually
-// hasn't seen enough to have a pattern worth writing down; above 30
-// they probably do. Adjust in production based on how often agents
-// actually follow through.
-const nudgeThreshold = 30
+// AGENT.md" prompt. Raised from 30 to 60 once the sidecar
+// /memory/write path started actually emitting memory.updated — at
+// 30 the nudge fired on essentially every session after a memory
+// write, which produces user-visible churn for negligible signal.
+// 60 is the new pragmatic floor where the agent has seen enough
+// distinct events to have a pattern worth writing down.
+const nudgeThreshold = 60
 
 // buildNudgeBlock counts journal entries attributed to this agent
 // since the last memory.updated emit and, above a threshold,
@@ -188,6 +208,34 @@ func (o *Orchestrator) buildCrewMemoryBlock(ctx context.Context, req AgentRunReq
 	}
 
 	block := assembleSections("[CREW SHARED MEMORY]", "[END CREW SHARED MEMORY]", sections, budget)
+	return block, len(block)
+}
+
+// buildPinsBlock reads the operator-pinned entries file
+// (/crew/shared/.memory/{crew_slug}/topics/pins.md) and renders it as
+// a budget-capped [PINS] block. Empty string + 0 if the file does not
+// exist or the crew slug is unknown — pins.md is the consolidator's
+// per-crew snapshot of PriorityPin journal entries, so it only exists
+// once the consolidator has run and a pin has been emitted.
+//
+// The block is intentionally framed as [PINS] (not [PINNED MEMORY])
+// so it doesn't shadow the [AGENT MEMORY] / [CREW SHARED MEMORY]
+// markers existing prompt parsing keys on.
+func (o *Orchestrator) buildPinsBlock(ctx context.Context, req AgentRunRequest, budget int) (string, int) {
+	if req.ContainerID == "" || req.CrewSlug == "" {
+		return "", 0
+	}
+	readCtx, cancel := context.WithTimeout(ctx, memoryReadTimeout)
+	defer cancel()
+	pinsPath := path.Join("/crew/shared/.memory", req.CrewSlug, "topics", "pins.md")
+	content, err := o.readContainerFile(readCtx, req.ContainerID, pinsPath)
+	if err != nil || content == "" {
+		return "", 0
+	}
+	sections := []memorySection{
+		{"pins.md (operator-pinned entries)", content},
+	}
+	block := assembleSections("[PINS]", "[END PINS]", sections, budget)
 	return block, len(block)
 }
 
