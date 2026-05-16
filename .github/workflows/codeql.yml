@@ -1,0 +1,115 @@
+name: CodeQL
+
+# Static analysis for Go and JavaScript/TypeScript. CodeQL is GitHub-native
+# (no external account, no extra cost) and complements the existing
+# security.yml suite: gitleaks catches committed secrets, govulncheck
+# catches vulnerable dependencies, grype catches OS-package vulns,
+# and CodeQL closes the SAST gap — code-level injection, taint, hard-
+# coded crypto material, untrusted-input flows that the others miss.
+#
+# Findings land in the Security tab (Code scanning alerts) as SARIF.
+# We intentionally do NOT fail PRs on CodeQL findings yet — the first
+# pass against an established codebase typically surfaces dozens of
+# medium-severity hits that need triage. Promote `fail-on-severity`
+# once the baseline is clean.
+
+on:
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - '**/*.mdx'
+      - 'LICENSE'
+      - 'THIRD-PARTY-NOTICES.md'
+      - '.github/ISSUE_TEMPLATE/**'
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - '**/*.mdx'
+      - 'LICENSE'
+      - 'THIRD-PARTY-NOTICES.md'
+      - '.github/ISSUE_TEMPLATE/**'
+  schedule:
+    # Re-scan main weekly even without a code change so CodeQL's own
+    # query updates surface new findings on stable branches. Sunday
+    # 06:00 UTC = low-traffic window for both EU and US contributors.
+    - cron: '0 6 * * 0'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  # security-events: write is what lets the action upload SARIF to the
+  # repository's Code scanning alerts.
+  security-events: write
+  # actions: read is needed by the CodeQL upload step to associate
+  # alerts back to the workflow run.
+  actions: read
+
+jobs:
+  analyze:
+    name: Analyze ${{ matrix.language }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: go
+            # `manual` build-mode + an explicit Go build step gives us full
+            # control over the compilation flags. CodeQL's autobuild can
+            # miss tagged builds; manual mode is what release.yml uses too.
+            build-mode: manual
+          - language: javascript-typescript
+            build-mode: none
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      # Set up Go BEFORE initializing CodeQL so the `go build` step inside
+      # the analyze phase finds the right toolchain.
+      - if: matrix.language == 'go'
+        uses: ./.github/actions/setup-go-embed
+        with:
+          go-version: "1.26"
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@3b1a19a80ab047f35cbb237b5bd9bdc1e14f166c # v3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          # security-extended pulls in the security-and-quality query
+          # pack; default queries miss several taint paths that
+          # security-extended catches (e.g. cleartext-logging,
+          # insecure-randomness).
+          queries: security-extended
+
+      # For Go, we build the main binary so CodeQL sees the actual code
+      # paths the release artifact will compile. web/out is empty in this
+      # workflow (no `pnpm build`), so we stub it just enough for the
+      # embed directive to resolve — CodeQL analyzes Go source, not the
+      # embedded JS bundle.
+      - if: matrix.language == 'go'
+        name: Stub web/out for embed
+        run: |
+          mkdir -p web/out
+          : > web/out/index.html
+
+      - if: matrix.language == 'go'
+        name: Build for CodeQL
+        run: go build ./cmd/crewship
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@3b1a19a80ab047f35cbb237b5bd9bdc1e14f166c # v3
+        with:
+          category: "/language:${{ matrix.language }}"
+          # upload: defaults to true; explicit for clarity. SARIF results
+          # go to the Security tab regardless of `fail-on-severity` so
+          # findings are visible without blocking the PR while the
+          # baseline gets triaged.
+          upload: always
