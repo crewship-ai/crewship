@@ -3,12 +3,21 @@ package database
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"io"
 	"log/slog"
+	"sync/atomic"
 	"testing"
 
 	_ "modernc.org/sqlite"
 )
+
+// migrateV89Counter generates unique in-memory DB names so parallel test
+// runs don't share state. The bare `file::memory:?cache=shared` DSN
+// points every connection at the SAME global in-memory database, so
+// `t.Parallel()` was bleeding seed rows between sibling tests — same
+// pattern fix as internal/backup/catalog_test.go's catalogMemCounter.
+var migrateV89Counter atomic.Int64
 
 // TestMigration089_ChatAssignmentCascades verifies v89's fix for the two
 // FK gaps the v01 init shipped with: chats.created_by getting SET NULL on
@@ -22,7 +31,9 @@ import (
 func TestMigration089_ChatAssignmentCascades(t *testing.T) {
 	t.Parallel()
 
-	db, err := sql.Open("sqlite", "file::memory:?cache=shared&_pragma=foreign_keys(ON)")
+	name := fmt.Sprintf("crewship-migrate-v89-%d", migrateV89Counter.Add(1))
+	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared&_pragma=foreign_keys(ON)", name)
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}

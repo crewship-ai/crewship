@@ -98,7 +98,15 @@ func TestIsWebSocketUpgrade(t *testing.T) {
 		{"plain api", "/api/v1/foo", "", false},
 		{"ws path", "/ws", "", true},
 		{"ws terminal path", "/ws/terminal", "", true},
-		{"upgrade header", "/api/v1/foo", "websocket", true},
+		{"upgrade header lowercase", "/api/v1/foo", "websocket", true},
+		// RFC 6455 mandates case-insensitive — exact-equality used to miss
+		// these and let WS panics fall through to the 500 writer, which
+		// then corrupted the in-flight upgrade response.
+		{"upgrade header mixed case", "/api/v1/foo", "WebSocket", true},
+		{"upgrade header upper", "/api/v1/foo", "WEBSOCKET", true},
+		// RFC 9110 allows comma-separated protocol lists.
+		{"upgrade comma list", "/api/v1/foo", "h2c, websocket", true},
+		{"upgrade with spaces", "/api/v1/foo", "  websocket  ", true},
 		{"unknown upgrade header", "/api/v1/foo", "h2c", false},
 	}
 	for _, tc := range cases {

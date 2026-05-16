@@ -129,7 +129,7 @@ in [docs/guides/install](docs/guides/install.mdx).
 # macOS / Linux — Homebrew
 brew install crewship-ai/tap/crewship
 
-# Any Unix — signed installer (fetch the script direct from the release)
+# Any Unix — signed installer (fetch the script direct from the repo)
 curl -fsSL https://raw.githubusercontent.com/crewship-ai/crewship/main/scripts/install.sh | bash
 
 # Self-hosted — Docker

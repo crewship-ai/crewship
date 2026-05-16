@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"runtime/debug"
+	"strings"
 
 	"github.com/crewship-ai/crewship/internal/crashreport"
 )
@@ -75,9 +76,16 @@ func isWebSocketUpgrade(r *http.Request) bool {
 	if r.URL.Path == "/ws" || r.URL.Path == "/ws/terminal" {
 		return true
 	}
+	// RFC 6455 §4.2.1 mandates case-insensitive matching for the
+	// `websocket` token, and RFC 9110 allows the Upgrade header to carry a
+	// comma-separated protocol list. Split each header value, trim, and
+	// compare case-insensitively so "WebSocket" / "WEBSOCKET" /
+	// "websocket, h2c" all resolve correctly.
 	for _, v := range r.Header.Values("Upgrade") {
-		if v == "websocket" {
-			return true
+		for _, token := range strings.Split(v, ",") {
+			if strings.EqualFold(strings.TrimSpace(token), "websocket") {
+				return true
+			}
 		}
 	}
 	return false
