@@ -580,6 +580,12 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 	}
 	// V-10: Wrap with security headers middleware
 	mainHandler = securityHeadersMiddleware(mainHandler)
+	// Panic recovery is the OUTERMOST wrapper so it also catches panics
+	// inside securityHeadersMiddleware itself (rare but possible if a
+	// future header derivation path-traverses a nil request). Forwards
+	// the panic to crashreport so the maintainer gets a Sentry signal
+	// without depending on users to ship logs.
+	mainHandler = panicRecoveryMiddleware(logger, mainHandler)
 
 	s.httpServer = &http.Server{
 		Addr:        fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port),

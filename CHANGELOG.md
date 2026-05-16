@@ -49,7 +49,10 @@ guidance.
   rolling `nightly` GitHub pre-release with prebuilt binaries.
 - **One-line installer.** `scripts/install.sh` detects OS+arch, verifies
   sha256 + cosign signatures, installs to `~/.local/bin` (no sudo) or
-  `/usr/local/bin`. Designed for `curl -fsSL https://crewship.ai/install | sh`.
+  `/usr/local/bin`. Until the project website is live, fetch direct from
+  the repo: `curl -fsSL https://raw.githubusercontent.com/crewship-ai/crewship/main/scripts/install.sh | bash`.
+  The short `crewship.ai/install` redirect will land alongside the
+  website launch.
 - **Update notification.** `internal/update` queries GitHub Releases API
   daily (cached in `~/.crewship/cache`). CLI prints upgrade banner at
   startup; web UI surfaces a dismissable banner via

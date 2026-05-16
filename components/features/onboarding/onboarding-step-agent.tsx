@@ -76,25 +76,43 @@ export function StepAgent({
             const cfg = CLI_ADAPTERS[key]
             const Icon = cfg.icon
             const isActive = cliAdapter === key
+            const isExperimental = cfg.status === "experimental"
             return (
               <button
                 key={key}
                 type="button"
                 aria-pressed={isActive}
                 onClick={() => handleAdapterChange(key)}
-                className={`flex items-center gap-3 rounded-lg border p-3 text-left transition-colors ${
+                className={`flex items-start gap-3 rounded-lg border p-3 text-left transition-colors ${
                   isActive ? "border-primary bg-primary/5" : "border-border hover:bg-muted"
                 }`}
               >
                 <Icon className={`h-5 w-5 shrink-0 ${isActive ? "text-primary" : "text-muted-foreground"}`} />
-                <div className="min-w-0">
-                  <div className="text-sm font-medium">{cfg.label}</div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-sm font-medium">{cfg.label}</span>
+                    {isExperimental && (
+                      <span
+                        className="inline-flex items-center rounded-sm border border-amber-300/50 bg-amber-50 px-1 py-px text-[9px] font-medium uppercase tracking-wide text-amber-700 dark:border-amber-700/40 dark:bg-amber-950/40 dark:text-amber-300"
+                        title={cfg.caveat ?? "Scaffolded but lacks parity testing for the beta release."}
+                      >
+                        Beta
+                      </span>
+                    )}
+                  </div>
                   <div className="text-[10px] text-muted-foreground">{cfg.description}</div>
                 </div>
               </button>
             )
           })}
         </div>
+        {cliAdapter && CLI_ADAPTERS[cliAdapter]?.status === "experimental" && (
+          <p className="text-[11px] leading-tight text-amber-700 dark:text-amber-300">
+            <span className="font-medium">Experimental adapter.</span>{" "}
+            {CLI_ADAPTERS[cliAdapter]?.caveat ??
+              "Scaffolded but lacks parity testing — use Claude Code for the production-tested path."}
+          </p>
+        )}
       </div>
       <div className="space-y-2">
         <Label>Model</Label>

@@ -16,6 +16,22 @@ export interface ModelOption {
   category?: "frontier" | "reasoning" | "fast" | "cheap" | "legacy"
 }
 
+/**
+ * Maturity of a CLI adapter in the current release.
+ *
+ * - `production`: parity tested against the upstream CLI, full feature
+ *   surface (streaming, tool use, MCP if applicable). Safe default.
+ * - `experimental`: scaffolded and mechanically working but lacks one or
+ *   more of: parity tests, fixture-based stream parsing, MCP integration,
+ *   prompt-injection scrubbers. Show a warning before users opt in.
+ *
+ * The badge surfaces in the onboarding picker, the agent creation form,
+ * and anywhere else the adapter is selectable so beta testers are not
+ * surprised by silent feature gaps. Update `cli-adapters.spec.ts` (when
+ * present) before flipping experimental → production.
+ */
+export type CLIAdapterStatus = "production" | "experimental"
+
 /** Configuration for a CLI adapter (Claude Code, OpenCode, Codex, Gemini, Cursor, Factory). */
 export interface CLIAdapterConfig {
   label: string
@@ -25,6 +41,15 @@ export interface CLIAdapterConfig {
   models: ModelOption[]
   defaultModel: string
   description: string
+  status: CLIAdapterStatus
+  /**
+   * Optional short caveat shown next to the experimental badge in the
+   * picker. Use for known limitations the user MUST see at selection
+   * time (e.g. "MCP not supported in headless mode"). Leave undefined
+   * for production adapters or experimental ones with no specific
+   * runtime caveat beyond "not yet parity-tested".
+   */
+  caveat?: string
 }
 
 // ===== ANTHROPIC =====
@@ -145,7 +170,15 @@ const OPENCODE_MODELS: ModelOption[] = [
   { value: "openrouter/openai/gpt-5.5", label: "OpenRouter / GPT-5.5", category: "frontier" },
 ]
 
-/** Registry of all supported CLI adapters with their provider, models, and icon. */
+/**
+ * Registry of all supported CLI adapters with their provider, models, and icon.
+ *
+ * Status reflects v0.1.0-beta.1 release notes: only Claude Code has parity
+ * testing + production-grade prompt scrubbers. Others are scaffolded —
+ * Cursor's MCP path is broken upstream in headless mode, Codex's stream
+ * parser is a stub (no incremental events surface during a run). Update
+ * the `status` and `caveat` here when each adapter's gaps are closed.
+ */
 export const CLI_ADAPTERS: Record<string, CLIAdapterConfig> = {
   CLAUDE_CODE: {
     label: "Claude Code",
@@ -155,6 +188,7 @@ export const CLI_ADAPTERS: Record<string, CLIAdapterConfig> = {
     models: ANTHROPIC_MODELS,
     defaultModel: "claude-sonnet-4-6",
     description: "Anthropic's coding agent",
+    status: "production",
   },
   OPENCODE: {
     label: "OpenCode",
@@ -164,6 +198,7 @@ export const CLI_ADAPTERS: Record<string, CLIAdapterConfig> = {
     models: OPENCODE_MODELS,
     defaultModel: "anthropic/claude-sonnet-4-6",
     description: "Open-source multi-provider CLI",
+    status: "experimental",
   },
   CODEX_CLI: {
     label: "Codex CLI",
@@ -173,6 +208,8 @@ export const CLI_ADAPTERS: Record<string, CLIAdapterConfig> = {
     models: OPENAI_CODEX_MODELS,
     defaultModel: "gpt-5.5",
     description: "OpenAI's coding agent",
+    status: "experimental",
+    caveat: "Live event stream not yet parsed — results appear only after the run finishes.",
   },
   GEMINI_CLI: {
     label: "Gemini CLI",
@@ -182,6 +219,7 @@ export const CLI_ADAPTERS: Record<string, CLIAdapterConfig> = {
     models: GOOGLE_MODELS,
     defaultModel: "gemini-2.5-pro",
     description: "Google's coding agent",
+    status: "experimental",
   },
   CURSOR_CLI: {
     label: "Cursor CLI",
@@ -191,6 +229,8 @@ export const CLI_ADAPTERS: Record<string, CLIAdapterConfig> = {
     models: CURSOR_MODELS,
     defaultModel: "composer",
     description: "Cursor's headless agent",
+    status: "experimental",
+    caveat: "MCP tools are not invoked in Cursor's headless mode (upstream limitation).",
   },
   FACTORY_DROID: {
     label: "Factory Droid",
@@ -200,6 +240,7 @@ export const CLI_ADAPTERS: Record<string, CLIAdapterConfig> = {
     models: DROID_MODELS,
     defaultModel: "claude-sonnet-4-6",
     description: "Factory's autonomous coding agent",
+    status: "experimental",
   },
 }
 

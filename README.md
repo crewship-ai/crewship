@@ -129,14 +129,18 @@ in [docs/guides/install](docs/guides/install.mdx).
 # macOS / Linux — Homebrew
 brew install crewship-ai/tap/crewship
 
-# Any Unix — signed installer
-curl -fsSL https://crewship.ai/install | bash
+# Any Unix — signed installer (fetch the script direct from the repo)
+curl -fsSL https://raw.githubusercontent.com/crewship-ai/crewship/main/scripts/install.sh | bash
 
 # Self-hosted — Docker
 # `:latest` auto-tracks the most recent stable release. Pin a specific tag
 # (e.g. `:v0.1.0-beta.1`) once you've validated it in your environment.
 docker pull ghcr.io/crewship-ai/crewship:latest
 ```
+
+> The short `crewship.ai/install` redirect lands once the project website
+> goes live; until then, fetch the script straight from the repo as
+> shown above.
 
 Then bring it up:
 

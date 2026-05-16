@@ -1193,6 +1193,52 @@ BEGIN
      WHERE key = OLD.key;
 END;
 `},
+	// v89 closes two FK gaps the v01 init shipped with:
+	//   - chats.created_by → users(id): had no ON DELETE clause, so
+	//     deleting a user FAILED with FK violation (NO ACTION is the
+	//     SQLite default) even though the column is nullable. Intent
+	//     per Prisma schema is SET NULL — account deletion should not
+	//     block on historical chat ownership.
+	//   - assignments.chat_id → chats(id): same root cause. Deleting
+	//     a chat with sidebar assignments failed FK. Intent is CASCADE
+	//     so the chat delete sweeps its assignments.
+	//
+	// The "natural" SQLite recipe — recreate the table with the new FK
+	// clause and swap — does NOT work inside Migrate()'s wrapper
+	// transaction on a populated database. DROP TABLE chats fires the
+	// existing assignments NO-ACTION FK and queues a deferred violation
+	// that COMMIT then refuses, even though the rename restores
+	// referential integrity within the same transaction. SQLite's
+	// official workaround (PRAGMA foreign_keys=OFF *outside* the tx,
+	// then foreign_key_check before COMMIT) can't be applied because
+	// foreign_keys can only be toggled in autocommit mode, and the
+	// migration framework already holds the tx.
+	//
+	// BEFORE-DELETE triggers achieve the same observable semantics
+	// without touching the FK clauses: clearing/removing the dependent
+	// rows first means the parent delete's implicit FK check finds
+	// nothing to block on. No data moves, no table is recreated, so
+	// the migration is safe on populated beta installs. Idempotent
+	// via DROP TRIGGER IF EXISTS.
+	{version: 89, name: "add_chat_assignment_cascade_triggers", sql: `
+-- chats.created_by → users(id): emulate ON DELETE SET NULL.
+DROP TRIGGER IF EXISTS trg_chats_creator_set_null_on_user_delete;
+CREATE TRIGGER trg_chats_creator_set_null_on_user_delete
+BEFORE DELETE ON users
+FOR EACH ROW
+BEGIN
+    UPDATE chats SET created_by = NULL WHERE created_by = OLD.id;
+END;
+
+-- assignments.chat_id → chats(id): emulate ON DELETE CASCADE.
+DROP TRIGGER IF EXISTS trg_assignments_cascade_on_chat_delete;
+CREATE TRIGGER trg_assignments_cascade_on_chat_delete
+BEFORE DELETE ON chats
+FOR EACH ROW
+BEGIN
+    DELETE FROM assignments WHERE chat_id = OLD.id;
+END;
+`},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

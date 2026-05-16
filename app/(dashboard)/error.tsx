@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect } from "react"
+import * as Sentry from "@sentry/nextjs"
 import { AlertTriangle, RotateCcw, Home } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -14,6 +15,9 @@ export default function DashboardError({
   reset: () => void
 }) {
   useEffect(() => {
+    Sentry.captureException(error, {
+      tags: { boundary: "dashboard", digest: error.digest ?? "" },
+    })
     console.error("Dashboard error boundary caught:", error)
   }, [error])
 
