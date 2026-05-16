@@ -29,8 +29,27 @@ const (
 	memoryReadTimeout         = 5 * time.Second
 	crewMemoryMaxPct          = 40  // crew memory capped at 40% of total budget
 	pinsMemoryMaxPct          = 10  // operator-pinned entries capped at 10%
+	workspaceMemoryMaxPct     = 15  // workspace tier capped at 15% of post-pins remainder
 	minTruncationChars        = 100 // don't bother with sections smaller than this
 )
+
+// WorkspaceMemoryReader is the narrow interface buildWorkspaceMemoryBlock
+// uses to render a [WORKSPACE MEMORY] block. The concrete impl lives in
+// internal/memory.WorkspaceMemory; this interface keeps the orchestrator
+// from importing the memory package's filesystem semantics. Returns
+// ("", 0) when there is no workspace memory to render.
+type WorkspaceMemoryReader interface {
+	GetContext(budget int) (string, int)
+}
+
+// WorkspaceMemoryProvider resolves the WorkspaceMemoryReader for a given
+// workspace id. A nil provider, a nil returned reader, or a reader that
+// returns ("", 0) all collapse to "no workspace tier in the prompt" so
+// the existing two-tier behaviour survives byte-for-byte when no
+// workspace memory is configured.
+type WorkspaceMemoryProvider interface {
+	For(workspaceID string) WorkspaceMemoryReader
+}
 
 // memorySection pairs a label with content for budget-aware assembly.
 type memorySection struct {
@@ -71,12 +90,27 @@ func (o *Orchestrator) buildMemoryContext(ctx context.Context, req AgentRunReque
 		crewBlock, crewUsed = o.buildCrewMemoryBlock(ctx, req, crewBudget, today)
 	}
 
+	// --- Workspace memory (cap at 15% of post-pins-and-crew remainder) ---
+	// Tier ordering: pins → crew → workspace → agent (remainder). Workspace
+	// gets a smaller slice than crew because cross-crew context is the most
+	// "background" signal — relevant but rarely the deciding factor for a
+	// specific session. The block only appears when a WorkspaceMemoryProvider
+	// is wired AND has content for this workspace; otherwise its budget
+	// reclaims to the agent tier dynamically.
+	remaining -= crewUsed
+	var workspaceBlock string
+	var workspaceUsed int
+	if req.WorkspaceID != "" {
+		wsBudget := remaining * workspaceMemoryMaxPct / 100
+		workspaceBlock, workspaceUsed = o.buildWorkspaceMemoryBlock(req.WorkspaceID, wsBudget)
+	}
+
 	// --- Agent memory gets remainder (dynamic reclaim from empty tiers) ---
-	agentBudget := remaining - crewUsed
+	agentBudget := remaining - workspaceUsed
 	agentBlock := o.buildAgentMemoryBlock(ctx, req, agentBudget, today)
 
 	// If no memory files at all, return just instructions
-	if agentBlock == "" && crewBlock == "" && pinsBlock == "" {
+	if agentBlock == "" && crewBlock == "" && pinsBlock == "" && workspaceBlock == "" {
 		return buildMemoryInstructions(today)
 	}
 
@@ -86,6 +120,9 @@ func (o *Orchestrator) buildMemoryContext(ctx context.Context, req AgentRunReque
 	}
 	if crewBlock != "" {
 		b.WriteString(crewBlock)
+	}
+	if workspaceBlock != "" {
+		b.WriteString(workspaceBlock)
 	}
 	if pinsBlock != "" {
 		b.WriteString(pinsBlock)
@@ -208,6 +245,39 @@ func (o *Orchestrator) buildCrewMemoryBlock(ctx context.Context, req AgentRunReq
 	}
 
 	block := assembleSections("[CREW SHARED MEMORY]", "[END CREW SHARED MEMORY]", sections, budget)
+	return block, len(block)
+}
+
+// buildWorkspaceMemoryBlock asks the configured WorkspaceMemoryProvider
+// for content keyed on the run's workspace id and frames it as a
+// [WORKSPACE MEMORY] block. Returns ("", 0) when no provider is wired,
+// when the provider returns no reader for this workspace, or when the
+// reader has nothing to render. The block is intentionally lighter
+// than the agent / crew blocks (no instructions header, just the
+// markers + content) — workspace tier is contextual reference, not
+// session-state.
+func (o *Orchestrator) buildWorkspaceMemoryBlock(workspaceID string, budget int) (string, int) {
+	if budget <= 0 || workspaceID == "" {
+		return "", 0
+	}
+	o.mu.RLock()
+	provider := o.workspaceMemory
+	o.mu.RUnlock()
+	if provider == nil {
+		return "", 0
+	}
+	reader := provider.For(workspaceID)
+	if reader == nil {
+		return "", 0
+	}
+	content, used := reader.GetContext(budget)
+	if used == 0 || content == "" {
+		return "", 0
+	}
+	// Match the assembleSections framing the other tiers use so the
+	// agent's prompt parser sees a consistent shape across blocks.
+	sections := []memorySection{{label: "workspace-wide memory", content: content}}
+	block := assembleSections("[WORKSPACE MEMORY]", "[END WORKSPACE MEMORY]", sections, budget)
 	return block, len(block)
 }
 

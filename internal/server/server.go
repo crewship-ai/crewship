@@ -29,6 +29,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/llmproxy"
 	"github.com/crewship-ai/crewship/internal/logcollector"
 	"github.com/crewship-ai/crewship/internal/logging"
+	"github.com/crewship-ai/crewship/internal/memory"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider"
 	dockerprovider "github.com/crewship-ai/crewship/internal/provider/docker"
@@ -147,6 +148,19 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 	if cfg.Container.SidecarEnabled {
 		orch.SetSidecarEnabled(true)
 		logger.Info("sidecar proxy enabled for credential injection")
+	}
+	// Workspace-tier memory: when MemoryRoot is configured (production
+	// wires this from DataDir.Root/memory in cmd_start), spin up the
+	// lazy registry and adapt it to the orchestrator's interface. The
+	// adapter is a one-liner because *memory.WorkspaceMemory already
+	// satisfies orchestrator.WorkspaceMemoryReader by structural match
+	// (GetContext(int) (string, int)). The typed-nil-interface gotcha
+	// is handled here: if the registry returns a nil concrete pointer
+	// we return a nil interface, not a non-nil interface wrapping nil.
+	if cfg.Storage.MemoryRoot != "" {
+		workspaceRegistry := memory.NewWorkspaceMemoryRegistry(cfg.Storage.MemoryRoot, logger)
+		orch.SetWorkspaceMemoryProvider(orchestratorWorkspaceProvider{reg: workspaceRegistry})
+		logger.Info("workspace memory tier wired", "root", cfg.Storage.MemoryRoot)
 	}
 	if cfg.Keeper.Enabled {
 		orch.SetKeeperEnabled(true)

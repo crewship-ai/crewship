@@ -103,6 +103,14 @@ type StorageConfig struct {
 	Provider string `yaml:"provider"` // "localfs" | "s3"
 	BasePath string `yaml:"base_path"`
 	LogPath  string `yaml:"log_path"`
+	// MemoryRoot is the parent directory for workspace-tier memory.
+	// Each workspace gets a subdirectory MemoryRoot/{workspace_id}
+	// that holds AGENT.md / CREW.md / topics/ etc. for the cross-
+	// crew tier injected via [WORKSPACE MEMORY]. Empty disables the
+	// tier — orchestrator's buildWorkspaceMemoryBlock no-ops when no
+	// WorkspaceMemoryProvider is wired, so absence is safe.
+	// Production wires this to {DataDir.Root}/memory via cmd_start.
+	MemoryRoot string `yaml:"memory_root"`
 }
 
 // StateConfig holds key-value state storage settings.
