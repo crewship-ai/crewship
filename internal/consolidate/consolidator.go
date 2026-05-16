@@ -130,6 +130,12 @@ func (c *Consolidator) Run(ctx context.Context, cfg Config) (ConsolidationResult
 	}
 	if err := snapshotPins(cfg, prioEntries); err != nil && logger != nil {
 		logger.Warn("consolidate: pins snapshot failed", "err", err)
+	} else if err == nil && len(prioEntries) > 0 {
+		// snapshotPins is best-effort; only record a version row when
+		// the write actually landed (any pinned entries in the
+		// window). The audit path is `crew:{id}/pins.md`.
+		pinsPath := filepath.Join(cfg.OutputDir, "pins.md")
+		c.recordCanonicalVersion(ctx, cfg, pinsPath, memory.TierPins, canonicalAuditPath(cfg.CrewID, "pins.md"))
 	}
 
 	if len(filtered) < cfg.MinEntries && !hasPermanent {
@@ -200,6 +206,7 @@ func (c *Consolidator) Run(ctx context.Context, cfg Config) (ConsolidationResult
 		return ConsolidationResult{EntriesScanned: len(filtered)},
 			fmt.Errorf("consolidate: write rules: %w", err)
 	}
+	c.recordCanonicalVersion(ctx, cfg, outPath, memory.TierLearned, canonicalAuditPath(cfg.CrewID, filepath.Base(outPath)))
 
 	evidenceAll := collectEvidence(rules)
 	id, err := c.Journal.Emit(ctx, journal.Entry{
@@ -545,4 +552,62 @@ func (c *Consolidator) appendRules(outputDir string, now time.Time, rules []Lear
 		return "", fmt.Errorf("write %s: %w", path, err)
 	}
 	return path, nil
+}
+
+// recordCanonicalVersion reads the canonical file at canonicalPath and
+// inserts a memory_versions row + content-addressed blob for it. Used
+// after appendRules and snapshotPins so every successful canonical
+// write contributes to the EU AI Act Art. 14 audit trail. Best-effort:
+// failures log a warning but never abort the consolidation pipeline —
+// the canonical file is on disk and operators see it whether or not
+// the audit row landed. Versioning is gated by (c.DB != nil &&
+// cfg.BlobRoot != ""); either zero-value silently disables versioning
+// without affecting the rest of the flow.
+func (c *Consolidator) recordCanonicalVersion(ctx context.Context, cfg Config, canonicalPath string, tier memory.Tier, auditPath string) {
+	if c.DB == nil || cfg.BlobRoot == "" {
+		return
+	}
+	content, err := os.ReadFile(canonicalPath)
+	if err != nil {
+		c.logger().Warn("version record: read canonical failed",
+			"err", err, "path", canonicalPath)
+		return
+	}
+	parent, _ := memory.LatestVersionSha(ctx, c.DB, cfg.WorkspaceID, auditPath)
+	if _, err := memory.RecordVersion(ctx, c.DB, memory.VersionRecord{
+		WorkspaceID: cfg.WorkspaceID,
+		Path:        auditPath,
+		Tier:        tier,
+		Content:     content,
+		WrittenBy:   "consolidator",
+		ParentSha:   parent,
+		BlobRoot:    cfg.BlobRoot,
+	}); err != nil {
+		c.logger().Warn("version record: insert failed",
+			"err", err, "audit_path", auditPath, "workspace_id", cfg.WorkspaceID)
+	}
+}
+
+// logger returns the Consolidator's logger with a slog.Default fallback
+// so the recordCanonicalVersion helper doesn't have to guard every
+// call site. The existing Run() path also uses slog.Default when
+// c.Logger is nil; this keeps the pattern consistent.
+func (c *Consolidator) logger() *slog.Logger {
+	if c.Logger != nil {
+		return c.Logger
+	}
+	return slog.Default()
+}
+
+// canonicalAuditPath produces the (workspace_id, path) pair the audit
+// log keys on. crew:{crewID}/{filename} disambiguates per-crew files
+// at the same name (e.g. both crew A and crew B have a
+// learned-2026-05-17.md). Keeping the prefix human-readable so the
+// `crewship memory log <path>` CLI can show a useful listing without
+// joining through the crews table.
+func canonicalAuditPath(crewID, filename string) string {
+	if crewID == "" {
+		return filename
+	}
+	return "crew:" + crewID + "/" + filename
 }

@@ -56,6 +56,12 @@ type RunnerOptions struct {
 	// empty the runner defaults to "/crew/shared/.memory".
 	CrewMemoryRoot string
 
+	// BlobRoot is propagated to every per-crew Config as the content-
+	// addressed memory version blob directory. Empty disables
+	// versioning (legacy behaviour pre-v90). Production wires
+	// {DataDir.Root}/memory/versions in cmd_start.
+	BlobRoot string
+
 	// Logger for runner events (tick fires, skips, errors). Default: slog.Default().
 	Logger *slog.Logger
 }
@@ -178,6 +184,7 @@ func consolidateAllCrews(ctx context.Context, db *sql.DB, c *Consolidator, opts 
 			LLMModel:     opts.LLMModel,
 			OutputDir:    filepath.Join(opts.CrewMemoryRoot, cr.Slug, "topics"),
 			ProposalMode: hitlEnabled(),
+			BlobRoot:     opts.BlobRoot,
 		}
 		res, rerr := c.Run(ctx, cfg)
 		switch {
