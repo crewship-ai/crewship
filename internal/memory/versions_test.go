@@ -1,0 +1,245 @@
+package memory
+
+import (
+	"context"
+	"crypto/sha256"
+	"database/sql"
+	"encoding/hex"
+	"io"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"testing"
+
+	_ "modernc.org/sqlite"
+)
+
+// openVersionsDB sets up the v90 schema in isolation so the test
+// doesn't depend on the full migrate chain. memory_versions has a
+// FK against workspaces(id); we create both tables flat.
+func openVersionsDB(t *testing.T) *sql.DB {
+	t.Helper()
+	dir := t.TempDir()
+	db, err := sql.Open("sqlite", "file:"+filepath.Join(dir, "test.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if _, err := db.Exec(`
+CREATE TABLE workspaces (
+    id TEXT PRIMARY KEY, name TEXT NOT NULL, slug TEXT NOT NULL UNIQUE,
+    created_at TEXT, updated_at TEXT, deleted_at TEXT
+);
+INSERT INTO workspaces (id, name, slug) VALUES ('ws_test', 'WS', 'ws_test');
+CREATE TABLE memory_versions (
+    id           TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    path         TEXT NOT NULL,
+    tier         TEXT NOT NULL CHECK (tier IN ('agent','crew','workspace','pins','learned')),
+    sha256       TEXT NOT NULL,
+    bytes        INTEGER NOT NULL,
+    written_at   TEXT NOT NULL DEFAULT (datetime('now','subsec')),
+    written_by   TEXT,
+    parent_sha   TEXT,
+    payload_ref  TEXT NOT NULL
+);
+CREATE INDEX idx_memory_versions_ws_path_ts ON memory_versions (workspace_id, path, written_at DESC);
+`); err != nil {
+		t.Fatalf("schema: %v", err)
+	}
+	return db
+}
+
+func TestRecordVersion_HappyPath(t *testing.T) {
+	db := openVersionsDB(t)
+	dir := t.TempDir()
+	content := []byte("hello memory\n")
+	res, err := RecordVersion(context.Background(), db, VersionRecord{
+		WorkspaceID: "ws_test",
+		Path:        "AGENT.md",
+		Tier:        TierAgent,
+		Content:     content,
+		WrittenBy:   "agent_42",
+		BlobRoot:    dir,
+	})
+	if err != nil {
+		t.Fatalf("RecordVersion: %v", err)
+	}
+
+	// SHA matches.
+	want := sha256.Sum256(content)
+	wantHex := hex.EncodeToString(want[:])
+	if res.Sha256 != wantHex {
+		t.Errorf("sha256 = %q, want %q", res.Sha256, wantHex)
+	}
+	if res.Bytes != len(content) {
+		t.Errorf("bytes = %d, want %d", res.Bytes, len(content))
+	}
+	if res.Reused {
+		t.Errorf("first write should not be reused")
+	}
+
+	// Blob on disk at the content-addressed location.
+	blobBytes, err := os.ReadFile(res.BlobPath)
+	if err != nil {
+		t.Fatalf("read blob: %v", err)
+	}
+	if string(blobBytes) != string(content) {
+		t.Errorf("blob content mismatch: got %q want %q", blobBytes, content)
+	}
+
+	// DB row inserted with the right shape.
+	var id, path, tier, sha, writtenBy, payloadRef string
+	var bytes int
+	if err := db.QueryRow(
+		`SELECT id, path, tier, sha256, bytes, written_by, payload_ref FROM memory_versions WHERE id = ?`,
+		res.VersionID).Scan(&id, &path, &tier, &sha, &bytes, &writtenBy, &payloadRef); err != nil {
+		t.Fatalf("read row: %v", err)
+	}
+	if path != "AGENT.md" || tier != "agent" || sha != wantHex || bytes != len(content) {
+		t.Errorf("row mismatch: path=%q tier=%q sha=%q bytes=%d", path, tier, sha, bytes)
+	}
+	if writtenBy != "agent_42" {
+		t.Errorf("written_by = %q, want agent_42", writtenBy)
+	}
+	if payloadRef != res.BlobPath {
+		t.Errorf("payload_ref = %q, want %q", payloadRef, res.BlobPath)
+	}
+}
+
+func TestRecordVersion_IdenticalContent_BlobReused(t *testing.T) {
+	db := openVersionsDB(t)
+	dir := t.TempDir()
+	content := []byte("dedup me\n")
+
+	first, err := RecordVersion(context.Background(), db, VersionRecord{
+		WorkspaceID: "ws_test", Path: "AGENT.md", Tier: TierAgent,
+		Content: content, BlobRoot: dir,
+	})
+	if err != nil {
+		t.Fatalf("first: %v", err)
+	}
+	second, err := RecordVersion(context.Background(), db, VersionRecord{
+		WorkspaceID: "ws_test", Path: "AGENT.md", Tier: TierAgent,
+		Content: content, BlobRoot: dir,
+	})
+	if err != nil {
+		t.Fatalf("second: %v", err)
+	}
+	if !second.Reused {
+		t.Errorf("identical content should reuse the blob, got reused=false")
+	}
+	if first.BlobPath != second.BlobPath {
+		t.Errorf("blob path differed across identical writes: %q vs %q", first.BlobPath, second.BlobPath)
+	}
+
+	// Two DB rows even though the blob is one — audit trail integrity.
+	var rowCount int
+	if err := db.QueryRow(
+		`SELECT COUNT(*) FROM memory_versions WHERE workspace_id = ? AND path = ?`,
+		"ws_test", "AGENT.md").Scan(&rowCount); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if rowCount != 2 {
+		t.Errorf("identical writes should still record both events, got %d rows", rowCount)
+	}
+}
+
+func TestRecordVersion_DifferentContent_DifferentBlob(t *testing.T) {
+	db := openVersionsDB(t)
+	dir := t.TempDir()
+	first, err := RecordVersion(context.Background(), db, VersionRecord{
+		WorkspaceID: "ws_test", Path: "AGENT.md", Tier: TierAgent,
+		Content: []byte("v1"), BlobRoot: dir,
+	})
+	if err != nil {
+		t.Fatalf("first: %v", err)
+	}
+	second, err := RecordVersion(context.Background(), db, VersionRecord{
+		WorkspaceID: "ws_test", Path: "AGENT.md", Tier: TierAgent,
+		Content: []byte("v2"), ParentSha: first.Sha256, BlobRoot: dir,
+	})
+	if err != nil {
+		t.Fatalf("second: %v", err)
+	}
+	if first.Sha256 == second.Sha256 {
+		t.Errorf("different content should produce different shas")
+	}
+	if first.BlobPath == second.BlobPath {
+		t.Errorf("different shas should land at different blob paths")
+	}
+	// parent_sha wired through.
+	var parent string
+	if err := db.QueryRow(`SELECT parent_sha FROM memory_versions WHERE id = ?`, second.VersionID).Scan(&parent); err != nil {
+		t.Fatalf("read parent_sha: %v", err)
+	}
+	if parent != first.Sha256 {
+		t.Errorf("parent_sha = %q, want %q", parent, first.Sha256)
+	}
+}
+
+func TestRecordVersion_InvalidTier_ErrInvalidTier(t *testing.T) {
+	db := openVersionsDB(t)
+	dir := t.TempDir()
+	_, err := RecordVersion(context.Background(), db, VersionRecord{
+		WorkspaceID: "ws_test", Path: "AGENT.md", Tier: Tier("bogus"),
+		Content: []byte("x"), BlobRoot: dir,
+	})
+	if err == nil {
+		t.Fatalf("expected error for bogus tier")
+	}
+}
+
+func TestRecordVersion_RequiredFields(t *testing.T) {
+	db := openVersionsDB(t)
+	dir := t.TempDir()
+	cases := []VersionRecord{
+		{Path: "AGENT.md", Tier: TierAgent, Content: []byte("x"), BlobRoot: dir},                        // missing workspace
+		{WorkspaceID: "ws_test", Tier: TierAgent, Content: []byte("x"), BlobRoot: dir},                  // missing path
+		{WorkspaceID: "ws_test", Path: "AGENT.md", Content: []byte("x"), BlobRoot: dir},                 // missing tier (zero-value = "")
+		{WorkspaceID: "ws_test", Path: "AGENT.md", Tier: TierAgent, Content: []byte("x"), BlobRoot: ""}, // missing blob root
+	}
+	for i, c := range cases {
+		if _, err := RecordVersion(context.Background(), db, c); err == nil {
+			t.Errorf("case %d should have failed: %+v", i, c)
+		}
+	}
+}
+
+func TestLatestVersionSha_NoRows_EmptyString(t *testing.T) {
+	db := openVersionsDB(t)
+	sha, err := LatestVersionSha(context.Background(), db, "ws_test", "AGENT.md")
+	if err != nil {
+		t.Fatalf("err = %v, want nil", err)
+	}
+	if sha != "" {
+		t.Errorf("sha = %q, want empty", sha)
+	}
+}
+
+func TestLatestVersionSha_PicksMostRecent(t *testing.T) {
+	db := openVersionsDB(t)
+	dir := t.TempDir()
+	for _, body := range []string{"v1", "v2", "v3"} {
+		if _, err := RecordVersion(context.Background(), db, VersionRecord{
+			WorkspaceID: "ws_test", Path: "AGENT.md", Tier: TierAgent,
+			Content: []byte(body), BlobRoot: dir,
+		}); err != nil {
+			t.Fatalf("record %q: %v", body, err)
+		}
+	}
+	got, err := LatestVersionSha(context.Background(), db, "ws_test", "AGENT.md")
+	if err != nil {
+		t.Fatalf("latest: %v", err)
+	}
+	want := sha256.Sum256([]byte("v3"))
+	wantHex := hex.EncodeToString(want[:])
+	if got != wantHex {
+		t.Errorf("got %q, want %q (v3 sha)", got, wantHex)
+	}
+}
+
+// Sanity: the test infra does not log to stderr noisily.
+func TestVersions_PackageSmoke(t *testing.T) {
+	_ = slog.New(slog.NewTextHandler(io.Discard, nil))
+}
