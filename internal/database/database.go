@@ -61,9 +61,20 @@ func Open(databaseURL string) (*DB, error) {
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}
 
-	// SQLite supports only one concurrent writer. Limiting open connections
-	// ensures busy_timeout and other pragmas apply to every connection in the pool.
-	db.SetMaxOpenConns(2)
+	// SQLite supports one concurrent writer, but WAL mode (enabled
+	// above) lets readers run alongside the writer without blocking.
+	// The previous cap of 2 connections forced even read-only API
+	// hits to serialize against any in-flight write, which manifested
+	// as request stalls under modest concurrent dashboard load
+	// (4–5 simultaneous tabs polling /api/v1/missions etc).
+	//
+	// 5 connections gives ~4 concurrent readers + 1 writer, which is
+	// what WAL is designed for. Going higher buys no extra writer
+	// throughput (writers still serialize via busy_timeout) and just
+	// pads memory; lower than 5 reintroduces the dashboard-tab stall.
+	// busy_timeout(5000ms) applies per-connection via the DSN pragma
+	// above, so it stays in effect at any pool size.
+	db.SetMaxOpenConns(5)
 
 	if err := db.Ping(); err != nil {
 		db.Close()
