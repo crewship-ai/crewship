@@ -265,6 +265,23 @@ func (s *Server) searchBothScopes(w http.ResponseWriter, r *http.Request, query 
 		all = all[:limit]
 	}
 
+	// Emit memory.searched here too — the searchSingleScope sibling
+	// already does it, but scope="both" lands here, and CR caught
+	// that telemetry was missing on the merged-result path. FTS chunk
+	// identifiers are file paths (not journal entry ids), so
+	// hit_chunk_ids stays empty — same shape as singleScope's emit.
+	if len(all) > 0 {
+		s.emitJournal(r.Context(), "memory.searched",
+			"sidecar memory search (both scopes) returned "+itoa(len(all))+" hit(s)",
+			map[string]any{
+				"query":         query,
+				"scope":         "both",
+				"hit_count":     len(all),
+				"hit_chunk_ids": []string{},
+				"source":        "sidecar_fts_both",
+			}, nil)
+	}
+
 	writeJSONResponse(w, http.StatusOK, map[string]interface{}{
 		"results": all,
 		"count":   len(all),
