@@ -249,6 +249,56 @@ func TestQueue_ClaimCrewSlot_QueuedRowReclaimable(t *testing.T) {
 	}
 }
 
+func TestQueue_ClaimCrewSlot_RejectsCrossCrewAssignment(t *testing.T) {
+	// CodeRabbit catch on PR #395: if a caller passes an assignment
+	// id that lives in crew B but crewID=A, the previous CAS would
+	// count A's RUNNING for budget and flip B's row to RUNNING based
+	// on A's slot availability — a tenant-isolation bug. The EXISTS
+	// constraint on agents.crew_id makes the row-match part of the
+	// WHERE clause so an id/crew mismatch is a no-op.
+	db, crewA, agentsA, chatID := queueTestRig(t, 1)
+	// Seed a second crew + agent + assignment that belongs to crew B.
+	if _, err := db.Exec(`
+		INSERT INTO crews (id, workspace_id, name, slug, icon, color, container_memory_mb, container_cpus)
+		VALUES ('crew_iso_b', 'test-workspace-id', 'Crew B', 'crew-b', '🛟', '#000', 4096, 2)`); err != nil {
+		t.Fatalf("seed crew B: %v", err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO agents (id, crew_id, workspace_id, name, slug, role_title, agent_role, cli_adapter, llm_provider, llm_model)
+		VALUES ('agent_iso_b', 'crew_iso_b', 'test-workspace-id', 'B', 'agent-iso-b', 'Tester', 'AGENT', 'CLAUDE_CODE', 'ANTHROPIC', 'claude-sonnet-4-6')`); err != nil {
+		t.Fatalf("seed agent B: %v", err)
+	}
+	insertAssignment(t, db, "a_in_b", "test-workspace-id", chatID, agentsA[0], "agent_iso_b", "PENDING")
+
+	// Try to claim a_in_b passing crew A's id. The CAS must REFUSE
+	// even with a generous budget — the assignment is in crew B.
+	claimed, err := claimCrewSlot(context.Background(), db, "a_in_b", crewA, 100)
+	if err != nil {
+		t.Fatalf("claimCrewSlot: %v", err)
+	}
+	if claimed {
+		t.Fatalf("cross-crew claim succeeded — tenant isolation broken")
+	}
+	if got := assignmentStatus(t, db, "a_in_b"); got != "PENDING" {
+		t.Errorf("status = %q, want PENDING (row in crew B must not have flipped)", got)
+	}
+
+	// Sanity: passing the correct crew id DOES claim the same row.
+	// Lock the success path so a future regression that over-tightens
+	// the EXISTS clause (e.g. typo in the join condition) is caught
+	// next to the cross-crew rejection.
+	ok, err := claimCrewSlot(context.Background(), db, "a_in_b", "crew_iso_b", 100)
+	if err != nil {
+		t.Fatalf("claimCrewSlot (correct crew): %v", err)
+	}
+	if !ok {
+		t.Fatalf("matching-crew claim returned false — EXISTS clause over-tightened?")
+	}
+	if got := assignmentStatus(t, db, "a_in_b"); got != "RUNNING" {
+		t.Errorf("status = %q, want RUNNING after correct-crew claim", got)
+	}
+}
+
 func TestQueue_ClaimCrewSlot_ZeroBudgetTreatedAsNoSlot(t *testing.T) {
 	// Defence in depth: even though the CHECK constraint blocks
 	// operator-set 0, a future caller computing budget incorrectly

@@ -111,6 +111,15 @@ func claimCrewSlot(ctx context.Context, db *sql.DB, assignmentID, crewID string,
 		// queues but logs the misconfig.
 		return false, nil
 	}
+	// Constrain the UPDATE to the (assignment, crew) pair via the
+	// EXISTS subquery on agents. The previous version trusted the
+	// caller to pass matching ids — if a caller ever passes
+	// assignmentID owned by crew B but crewID=A, the inflight
+	// subquery would count A's RUNNING and the row in crew B would
+	// flip to RUNNING based on A's budget. Tenant-isolation regression
+	// guard from CodeRabbit on PR #395. Bind crewID twice: once for
+	// the EXISTS constraint on the target row, once for the inflight
+	// count.
 	res, err := db.ExecContext(ctx, `
 		UPDATE assignments
 		   SET status = 'RUNNING',
@@ -118,13 +127,18 @@ func claimCrewSlot(ctx context.Context, db *sql.DB, assignmentID, crewID string,
 		       started_at = COALESCE(started_at, datetime('now','subsec'))
 		 WHERE id = ?
 		   AND status IN ('PENDING', 'QUEUED')
+		   AND EXISTS (
+		     SELECT 1 FROM agents ag_target
+		      WHERE ag_target.id = assignments.assigned_to_id
+		        AND ag_target.crew_id = ?
+		   )
 		   AND ? > (
 		     SELECT COUNT(*) FROM assignments inflight
 		       JOIN agents ag ON ag.id = inflight.assigned_to_id
 		      WHERE inflight.status = 'RUNNING'
 		        AND ag.crew_id = ?
 		   )`,
-		assignmentID, budget, crewID,
+		assignmentID, crewID, budget, crewID,
 	)
 	if err != nil {
 		return false, fmt.Errorf("claim crew slot: %w", err)
