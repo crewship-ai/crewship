@@ -336,6 +336,151 @@ func atomicRestoreWrite(canonicalPath string, content []byte) error {
 // HTTP 404 / CLI exit 1 should errors.Is against this sentinel.
 var ErrVersionNotFound = errors.New("memory version not found")
 
+// PruneResult is what PruneOldVersions returns to its caller. Counts
+// are best-effort: a per-row delete failure is logged and skipped,
+// then surfaced via Errors so the daily sweep doesn't abort on one
+// stuck blob.
+type PruneResult struct {
+	RowsDeleted  int64
+	BlobsDeleted int64
+	Errors       []error
+}
+
+// PruneOldVersions enforces the retention policy on memory_versions
+// and sweeps orphan blobs. Two rules, applied in this order:
+//
+//  1. **Keep latest N per (workspace_id, path) regardless of age.**
+//     A path with N=3 retains the 3 newest rows even if they're 90
+//     days old. Matches Anthropic Managed Agents' "always keep the
+//     last N versions" guarantee — operators always have at least N
+//     restore targets per file.
+//
+//  2. **Delete rows older than cutoff.** Anything older than
+//     (now - olderThan) that did NOT survive rule 1 is removed.
+//
+// After the row delete pass, any blob under blobRoot whose sha256
+// is no longer referenced by ANY remaining row is deleted from
+// disk. The sha256 index makes the existence check O(1) per blob.
+//
+// Zero / negative values for keepLatestN and olderThan act as
+// disable signals: keepLatestN <= 0 means "keep every row newer
+// than cutoff"; olderThan <= 0 disables the age-based delete
+// entirely (the keep-N rule still applies).
+func PruneOldVersions(
+	ctx context.Context,
+	db *sql.DB,
+	blobRoot string,
+	olderThan time.Duration,
+	keepLatestN int,
+) (*PruneResult, error) {
+	out := &PruneResult{}
+	if keepLatestN < 0 {
+		keepLatestN = 0
+	}
+
+	cutoff := ""
+	if olderThan > 0 {
+		cutoff = time.Now().Add(-olderThan).UTC().Format(time.RFC3339Nano)
+	}
+
+	// Row prune: find (workspace_id, path) groups + delete the rows
+	// that are both older than cutoff AND outside the keep-N window.
+	// SQLite's `ROW_NUMBER() OVER (PARTITION BY ... ORDER BY ...)` does
+	// this cleanly in one DELETE.
+	if cutoff != "" {
+		res, err := db.ExecContext(ctx, `
+			DELETE FROM memory_versions
+			WHERE id IN (
+				SELECT id FROM (
+					SELECT id, written_at,
+					       ROW_NUMBER() OVER (
+					         PARTITION BY workspace_id, path
+					         ORDER BY written_at DESC
+					       ) AS rn
+					FROM memory_versions
+				) ranked
+				WHERE rn > ? AND written_at < ?
+			)`,
+			keepLatestN, cutoff,
+		)
+		if err != nil {
+			out.Errors = append(out.Errors, fmt.Errorf("delete old rows: %w", err))
+		} else {
+			out.RowsDeleted, _ = res.RowsAffected()
+		}
+	}
+
+	// Orphan blob sweep: build the set of still-referenced shas, walk
+	// the blob dir, delete files whose sha isn't in the set. Skipped
+	// when blobRoot is empty (caller has no on-disk store to sweep).
+	if blobRoot == "" {
+		return out, nil
+	}
+	deleted, sweepErrs := sweepOrphanBlobs(ctx, db, blobRoot)
+	out.BlobsDeleted = deleted
+	out.Errors = append(out.Errors, sweepErrs...)
+	return out, nil
+}
+
+// sweepOrphanBlobs walks blobRoot's two-level sharded directory and
+// removes any file whose name (the content sha) isn't referenced by
+// a memory_versions row. The dir layout is blobRoot/{sha[:2]}/{sha};
+// non-matching entries are ignored so concurrent writes don't trip
+// the sweep.
+func sweepOrphanBlobs(ctx context.Context, db *sql.DB, blobRoot string) (int64, []error) {
+	var errs []error
+	rows, err := db.QueryContext(ctx, `SELECT DISTINCT sha256 FROM memory_versions`)
+	if err != nil {
+		return 0, []error{fmt.Errorf("list referenced shas: %w", err)}
+	}
+	defer rows.Close()
+	referenced := make(map[string]struct{}, 256)
+	for rows.Next() {
+		var sha string
+		if err := rows.Scan(&sha); err != nil {
+			errs = append(errs, fmt.Errorf("scan sha: %w", err))
+			continue
+		}
+		referenced[sha] = struct{}{}
+	}
+
+	var deleted int64
+	walkErr := filepath.Walk(blobRoot, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			// A missing blobRoot itself is fine — nothing to sweep.
+			if os.IsNotExist(walkErr) {
+				return nil
+			}
+			errs = append(errs, fmt.Errorf("walk %s: %w", path, walkErr))
+			return nil
+		}
+		if info.IsDir() {
+			return nil
+		}
+		name := info.Name()
+		// Skip .tmp files from in-flight writeBlobIfMissing calls.
+		// File names are content shas (lowercase hex, 64 chars) — anything
+		// else is either temp scaffolding or operator-placed scratch and
+		// shouldn't be touched.
+		if len(name) != 64 {
+			return nil
+		}
+		if _, ok := referenced[name]; ok {
+			return nil
+		}
+		if err := os.Remove(path); err != nil {
+			errs = append(errs, fmt.Errorf("delete orphan blob %s: %w", path, err))
+			return nil
+		}
+		deleted++
+		return nil
+	})
+	if walkErr != nil && !os.IsNotExist(walkErr) {
+		errs = append(errs, walkErr)
+	}
+	return deleted, errs
+}
+
 // LatestVersionSha returns the most recent sha256 recorded for
 // (workspaceID, path) — used by WriteFile callers as the parent_sha
 // for the next write. Returns empty string + nil error when no prior

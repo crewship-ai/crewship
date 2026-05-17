@@ -30,6 +30,12 @@ func TestApplyDefaults_AllZeroValues(t *testing.T) {
 	if got.CrewMemoryRoot != "/crew/shared/.memory" {
 		t.Errorf("CrewMemoryRoot = %q, want default path", got.CrewMemoryRoot)
 	}
+	if got.MemoryVersionsRetention != 30*24*time.Hour {
+		t.Errorf("MemoryVersionsRetention = %v, want 30d default", got.MemoryVersionsRetention)
+	}
+	if got.MemoryVersionsKeepLatest != 3 {
+		t.Errorf("MemoryVersionsKeepLatest = %d, want 3 default", got.MemoryVersionsKeepLatest)
+	}
 	if got.Logger == nil {
 		t.Error("Logger should default to slog.Default")
 	}

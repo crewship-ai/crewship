@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -384,5 +385,129 @@ func TestRestore_MissingFields(t *testing.T) {
 	_, err := Restore(context.Background(), db, "", "ws_test", "AGENT.md", "sha", "u", dir, TierAgent)
 	if err == nil {
 		t.Errorf("expected error for empty canonicalPath")
+	}
+}
+
+func TestPruneOldVersions_KeepsLatestN(t *testing.T) {
+	db := openVersionsDB(t)
+	dir := t.TempDir()
+
+	// 5 versions of the same path; each gets a distinct sha so a
+	// row delete is distinguishable from a blob delete.
+	for _, body := range []string{"v1", "v2", "v3", "v4", "v5"} {
+		if _, err := RecordVersion(context.Background(), db, VersionRecord{
+			WorkspaceID: "ws_test", Path: "AGENT.md", Tier: TierAgent,
+			Content: []byte(body), BlobRoot: dir,
+		}); err != nil {
+			t.Fatalf("record %q: %v", body, err)
+		}
+	}
+
+	// Prune with olderThan=1ns (effectively "delete anything older
+	// than NOW") AND keepLatestN=2. Expected: 3 rows deleted, 2 kept.
+	res, err := PruneOldVersions(context.Background(), db, dir, time.Nanosecond, 2)
+	if err != nil {
+		t.Fatalf("PruneOldVersions: %v", err)
+	}
+	if res.RowsDeleted != 3 {
+		t.Errorf("RowsDeleted = %d, want 3", res.RowsDeleted)
+	}
+	var rowCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM memory_versions WHERE path = 'AGENT.md'`).Scan(&rowCount); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if rowCount != 2 {
+		t.Errorf("post-prune row count = %d, want 2", rowCount)
+	}
+
+	// Orphan blobs deleted too — pre-prune we had 5 blobs, post-
+	// prune the 3 deleted-row shas have no references so they
+	// should be swept. The 2 retained shas keep their blobs.
+	if res.BlobsDeleted != 3 {
+		t.Errorf("BlobsDeleted = %d, want 3", res.BlobsDeleted)
+	}
+}
+
+func TestPruneOldVersions_OlderThanDisabled(t *testing.T) {
+	db := openVersionsDB(t)
+	dir := t.TempDir()
+	for _, body := range []string{"a", "b", "c"} {
+		if _, err := RecordVersion(context.Background(), db, VersionRecord{
+			WorkspaceID: "ws_test", Path: "AGENT.md", Tier: TierAgent,
+			Content: []byte(body), BlobRoot: dir,
+		}); err != nil {
+			t.Fatalf("record: %v", err)
+		}
+	}
+	// olderThan=0 → row delete pass is skipped. Even though keepN=1
+	// suggests we'd want 2 deletions, the row prune only fires when
+	// the age cutoff is set — keepN is the *floor*, not the *cap*.
+	res, err := PruneOldVersions(context.Background(), db, dir, 0, 1)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if res.RowsDeleted != 0 {
+		t.Errorf("RowsDeleted = %d, want 0 when olderThan disabled", res.RowsDeleted)
+	}
+}
+
+func TestPruneOldVersions_NewRowsSurvive(t *testing.T) {
+	db := openVersionsDB(t)
+	dir := t.TempDir()
+	// Insert 3 fresh rows; cutoff is 1 hour ago. None of the rows
+	// are old enough to be eligible for deletion regardless of N.
+	for _, body := range []string{"x", "y", "z"} {
+		if _, err := RecordVersion(context.Background(), db, VersionRecord{
+			WorkspaceID: "ws_test", Path: "AGENT.md", Tier: TierAgent,
+			Content: []byte(body), BlobRoot: dir,
+		}); err != nil {
+			t.Fatalf("record: %v", err)
+		}
+	}
+	res, err := PruneOldVersions(context.Background(), db, dir, time.Hour, 0)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if res.RowsDeleted != 0 {
+		t.Errorf("fresh rows should not be eligible for deletion, got %d deleted", res.RowsDeleted)
+	}
+}
+
+func TestPruneOldVersions_OrphanSweep_PreservesReferenced(t *testing.T) {
+	db := openVersionsDB(t)
+	dir := t.TempDir()
+	// Create a blob through normal RecordVersion (referenced).
+	ref, err := RecordVersion(context.Background(), db, VersionRecord{
+		WorkspaceID: "ws_test", Path: "AGENT.md", Tier: TierAgent,
+		Content: []byte("kept"), BlobRoot: dir,
+	})
+	if err != nil {
+		t.Fatalf("record: %v", err)
+	}
+
+	// Plant an orphan blob by hand at a valid sha-shaped path.
+	orphanSha := "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+	orphanDir := filepath.Join(dir, orphanSha[:2])
+	if err := os.MkdirAll(orphanDir, 0o755); err != nil {
+		t.Fatalf("mkdir orphan: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(orphanDir, orphanSha), []byte("orphan"), 0o644); err != nil {
+		t.Fatalf("write orphan blob: %v", err)
+	}
+
+	// Prune with no row-delete pass (olderThan=0), only the orphan
+	// sweep runs.
+	res, err := PruneOldVersions(context.Background(), db, dir, 0, 0)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if res.BlobsDeleted != 1 {
+		t.Errorf("BlobsDeleted = %d, want 1", res.BlobsDeleted)
+	}
+	if _, err := os.Stat(ref.BlobPath); err != nil {
+		t.Errorf("referenced blob disappeared: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(orphanDir, orphanSha)); err == nil {
+		t.Errorf("orphan blob still on disk")
 	}
 }

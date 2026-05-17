@@ -14,6 +14,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/episodic"
 	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/memory"
 )
 
 // RunnerOptions configures the background runner's cadence and paths.
@@ -61,6 +62,19 @@ type RunnerOptions struct {
 	// versioning (legacy behaviour pre-v90). Production wires
 	// {DataDir.Root}/memory/versions in cmd_start.
 	BlobRoot string
+
+	// MemoryVersionsRetention is the age cutoff for the daily
+	// retention sweep. Rows older than (now - retention) are
+	// eligible for deletion (subject to MemoryVersionsKeepLatest).
+	// Default: 30 days. Zero disables the age-based delete pass
+	// entirely; the orphan-blob sweep still runs.
+	MemoryVersionsRetention time.Duration
+
+	// MemoryVersionsKeepLatest is the per-(workspace_id, path) floor
+	// — the N most recent rows are never deleted, regardless of age.
+	// Matches Anthropic Managed Agents' "always keep last N" rule.
+	// Default: 3.
+	MemoryVersionsKeepLatest int
 
 	// Logger for runner events (tick fires, skips, errors). Default: slog.Default().
 	Logger *slog.Logger
@@ -134,6 +148,22 @@ func applyDefaults(opts RunnerOptions) RunnerOptions {
 	}
 	if opts.CrewMemoryRoot == "" {
 		opts.CrewMemoryRoot = "/crew/shared/.memory"
+	}
+	if opts.MemoryVersionsRetention < 0 {
+		opts.MemoryVersionsRetention = 0
+	} else if opts.MemoryVersionsRetention == 0 {
+		// 30-day default — matches Anthropic Managed Agents'
+		// shipped retention. Operators wanting an explicit
+		// "disable retention sweep" must pass a negative value
+		// (which we then clamp to 0 above on next runner restart);
+		// today the natural way to disable is BlobRoot="" which
+		// short-circuits the prune entirely.
+		opts.MemoryVersionsRetention = 30 * 24 * time.Hour
+	}
+	if opts.MemoryVersionsKeepLatest < 0 {
+		opts.MemoryVersionsKeepLatest = 0
+	} else if opts.MemoryVersionsKeepLatest == 0 {
+		opts.MemoryVersionsKeepLatest = 3
 	}
 	if opts.Logger == nil {
 		opts.Logger = slog.Default()
@@ -236,6 +266,26 @@ func runCompactionLoop(ctx context.Context, db *sql.DB, comp *Compactor, opts Ru
 		// so the dashboard has a daily time-series to plot.
 		if err := snapshotAllWorkspaces(ctx, db, opts); err != nil {
 			opts.Logger.Warn("health snapshot tick failed", "err", err)
+		}
+		// Memory-versions retention sweep: prune rows older than
+		// MemoryVersionsRetention while keeping the latest N per
+		// (workspace_id, path). Then sweep orphan blobs. Best-
+		// effort — failures land in opts.Logger and the tick moves
+		// on. Disabled silently when BlobRoot or retention window
+		// is unset (test harness, dev mode).
+		if opts.BlobRoot != "" && opts.MemoryVersionsRetention > 0 {
+			res, err := memory.PruneOldVersions(ctx, db, opts.BlobRoot, opts.MemoryVersionsRetention, opts.MemoryVersionsKeepLatest)
+			if err != nil {
+				opts.Logger.Warn("memory_versions retention sweep failed", "err", err)
+			} else {
+				opts.Logger.Info("memory_versions retention sweep",
+					"rows_deleted", res.RowsDeleted,
+					"blobs_deleted", res.BlobsDeleted,
+					"errors", len(res.Errors))
+				for _, e := range res.Errors {
+					opts.Logger.Warn("retention sweep partial failure", "err", e)
+				}
+			}
 		}
 	}
 }
