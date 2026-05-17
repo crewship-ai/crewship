@@ -1,0 +1,233 @@
+name: Nightly Smoke
+
+# Runs immediately after nightly.yml publishes a fresh rolling `nightly`
+# release. The release smoke-test.yml is gated on `release: published`
+# with strict tag-name assertions (it expects v-prefixed semver), so it
+# does not cover the nightly channel cleanly. This workflow is the
+# nightly-specific equivalent: it pulls the archive from the rolling
+# release, checks it boots, talks to its own health endpoint, and that
+# the cosign signature on checksums.txt verifies.
+#
+# A red check here means the most recent main commit produced a binary
+# that beta testers shouldn't install. The signal to the maintainer is
+# "investigate that commit before pointing anyone at nightly," not "yank
+# the release" — nightly is explicitly disposable.
+
+on:
+  workflow_run:
+    workflows: ["Nightly"]
+    types: [completed]
+  # Manual re-run for triage after a transient flake.
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-smoke
+  cancel-in-progress: true
+
+jobs:
+  binary:
+    name: Nightly binary smoke
+    # Skip when the triggering Nightly run itself failed — no point
+    # exercising a binary that never published. Always run on
+    # workflow_dispatch (no triggering run to inspect).
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: v2.7.0
+
+      - name: Resolve and download nightly archive + checksums + signatures
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Resolve the exact asset name from the Releases API instead
+          # of post-download globbing. The rolling `nightly` release is
+          # delete-and-recreate per Nightly run, so it SHOULD only
+          # carry one matching archive — but a partial publish or a
+          # future change uploading multiple snapshot variants would
+          # leave stale assets behind, and a glob+head silently
+          # validates whichever sorted first. Fail loudly on >1 match.
+          mapfile -t MATCHES < <(gh release view nightly \
+            --repo "${{ github.repository }}" \
+            --json assets \
+            --jq '.assets[].name | select(test("linux_amd64\\.tar\\.gz$"))')
+          if [ "${#MATCHES[@]}" -eq 0 ]; then
+            echo "::error::no linux_amd64 archive on the nightly release"
+            exit 1
+          fi
+          if [ "${#MATCHES[@]}" -gt 1 ]; then
+            echo "::error::expected exactly one linux_amd64 archive on the nightly release, got ${#MATCHES[@]}:"
+            printf '  %s\n' "${MATCHES[@]}"
+            echo "::error::a previous Nightly run likely left a stale asset; delete it via the Releases UI and re-run."
+            exit 1
+          fi
+          ARCHIVE="${MATCHES[0]}"
+          echo "Resolved archive: $ARCHIVE"
+          echo "ARCHIVE=$ARCHIVE" >> "$GITHUB_ENV"
+          gh release download nightly \
+            --repo "${{ github.repository }}" \
+            --pattern "$ARCHIVE" \
+            --pattern 'checksums.txt' \
+            --pattern 'checksums.txt.sig' \
+            --pattern 'checksums.txt.pem'
+          ls -la
+
+      - name: Verify cosign signature on checksums.txt
+        # PR #375 wired keyless cosign signing of checksums.txt into
+        # nightly.yml. A missing or bad signature means either the
+        # nightly publish didn't run sign-blob, or the bundle was
+        # tampered with on GHCR / GitHub Releases. Either way, refuse
+        # to trust the binary downstream.
+        run: |
+          set -euo pipefail
+          cosign verify-blob \
+            --certificate checksums.txt.pem \
+            --signature checksums.txt.sig \
+            --certificate-identity-regexp 'https://github\.com/${{ github.repository }}/\.github/workflows/nightly\.yml@.*' \
+            --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+            checksums.txt
+
+      - name: Verify SHA-256 of the archive
+        # Mirrors scripts/install.sh — same exact-second-field awk match
+        # so the smoke test fails for the same reasons a user install
+        # would. Catches a tampered archive even if checksums.txt itself
+        # verified cosign-clean. ARCHIVE comes from the API-resolved
+        # name in the previous step (via $GITHUB_ENV) so we never rely
+        # on shell glob ordering.
+        run: |
+          set -euo pipefail
+          EXPECTED=$(awk -v a="$ARCHIVE" '$2==a {print $1; exit}' checksums.txt)
+          if [ -z "$EXPECTED" ]; then
+            echo "::error::checksum for ${ARCHIVE} missing from checksums.txt"
+            exit 1
+          fi
+          ACTUAL=$(sha256sum "$ARCHIVE" | awk '{print $1}')
+          if [ "$EXPECTED" != "$ACTUAL" ]; then
+            echo "::error::checksum mismatch for ${ARCHIVE}"
+            echo "  expected: $EXPECTED"
+            echo "  actual:   $ACTUAL"
+            exit 1
+          fi
+          echo "checksum ok: $ACTUAL"
+
+      - name: Extract archive
+        run: |
+          set -euo pipefail
+          tar -xzf "$ARCHIVE"
+          ls -la crewship
+
+      - name: Probe `crewship version`
+        # Nightly uses a snapshot version (no semver tag), so we just
+        # assert non-empty output that ISN'T the unldflagged "dev"
+        # sentinel — `dev` would mean -X main.version never made it
+        # into the build (release.yml does it via -ldflags, snapshot
+        # mode in nightly.yml inherits the same goreleaser config).
+        run: |
+          set -euo pipefail
+          OUT=$(./crewship version)
+          echo "$OUT"
+          if [ -z "$OUT" ]; then
+            echo "::error::'crewship version' produced no output"
+            exit 1
+          fi
+          if echo "$OUT" | grep -qx "dev"; then
+            echo "::error::'crewship version' returned the 'dev' sentinel — ldflag injection broke"
+            exit 1
+          fi
+
+      - name: Probe `crewship doctor --no-color`
+        # Same contract as the release smoke: exit 0 unless a FAIL check
+        # fires. WARN is acceptable on a fresh CI runner with no Docker.
+        run: |
+          set -euo pipefail
+          ./crewship doctor --no-color
+
+      - name: Probe `crewship --help`
+        run: |
+          set -euo pipefail
+          OUT=$(./crewship --help)
+          if ! echo "$OUT" | grep -qF "Available Commands"; then
+            echo "::error::--help output missing 'Available Commands' section"
+            exit 1
+          fi
+
+      - name: Probe health endpoint via `crewship start --no-docker`
+        # Port 9091 instead of 9090 (release smoke uses 9090) so a
+        # rare parallel run on the same runner pool doesn't collide.
+        #
+        # NEXTAUTH_SECRET / ENCRYPTION_KEY are required at startup by
+        # server.New() (since #375 — used to be a silent fall-back
+        # which served unauthenticated traffic). Seeding deterministic
+        # 64-hex-char throwaways here lets the probe actually reach
+        # /api/health; without them the binary panics inside server
+        # construction and the probe just times out — green check on a
+        # broken build.
+        env:
+          NEXTAUTH_SECRET: "00000000000000000000000000000000000000000000000000000000deadbeef"
+          ENCRYPTION_KEY: "11111111111111111111111111111111111111111111111111111111cafebabe"
+        shell: bash
+        run: |
+          set -euo pipefail
+          (./crewship start --no-docker --port 9091 >/tmp/crewship-start.log 2>&1 || true) &
+          SERVER_PID=$!
+          trap 'kill $SERVER_PID 2>/dev/null || true' EXIT
+
+          STATUS=0
+          for _ in $(seq 1 120); do
+            if curl -sf --max-time 1 http://localhost:9091/api/health >/dev/null 2>&1; then
+              STATUS=200
+              break
+            fi
+            sleep 0.25
+          done
+
+          if [ "$STATUS" != "200" ]; then
+            echo "::error::health endpoint did not return 200 within 30s"
+            echo "---- crewship start log ----"
+            cat /tmp/crewship-start.log || true
+            exit 1
+          fi
+          echo "health endpoint ok"
+
+  docker:
+    name: Nightly Docker smoke
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Login to GHCR
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull nightly image
+        run: |
+          set -euo pipefail
+          docker pull "ghcr.io/${{ github.repository_owner }}/crewship:nightly"
+
+      - name: Probe `crewship version` inside container
+        run: |
+          set -euo pipefail
+          OUT=$(docker run --rm "ghcr.io/${{ github.repository_owner }}/crewship:nightly" version)
+          echo "$OUT"
+          if [ -z "$OUT" ] || echo "$OUT" | grep -qx "dev"; then
+            echo "::error::container 'crewship version' missing or returned 'dev' sentinel"
+            exit 1
+          fi
