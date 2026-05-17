@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -168,9 +169,13 @@ func TestResend_Send_OmitsEmptyTextField(t *testing.T) {
 	// wire payload reflects that.
 	var bodyBytes []byte
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		buf := make([]byte, r.ContentLength)
-		_, _ = r.Body.Read(buf)
-		bodyBytes = buf
+		// io.ReadAll, not a single r.Body.Read into a ContentLength-
+		// sized buffer — net/http does NOT promise the latter fills
+		// the slice in one syscall, so a flushed-in-pieces body would
+		// leave the `"text"` field outside what we capture and the
+		// "omitempty omitted text" assertion below would pass on a
+		// truncated read. ReadAll drains the body completely.
+		bodyBytes, _ = io.ReadAll(r.Body)
 		w.WriteHeader(http.StatusOK)
 	}))
 	t.Cleanup(srv.Close)
