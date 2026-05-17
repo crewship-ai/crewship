@@ -334,6 +334,17 @@ export function AppToolbar() {
           const systemOnline = engineStatus === "connected" && wsStatus === "connected"
           const systemChecking = engineStatus === "checking" || wsStatus === "connecting"
 
+          // QUEUED counts assignments parked in the per-crew admission
+          // queue (PR #396). Before the backend reported this number,
+          // those dispatches looked like "errors" in the toolbar
+          // because the dispatcher had marked them non-RUNNING without
+          // any underlying agent being in ERROR. Now we surface it as
+          // a first-class state. The legacy `error` count is preserved
+          // for genuine agent errors and rendered as a separate
+          // segment in the tooltip so an operator can still spot real
+          // failures alongside a deep queue.
+          const queued = crewsStatus?.queued ?? 0
+          const cap99 = (n: number) => (n > 99 ? "99+" : String(n))
           let crewsLabel = ""
           let crewsColor: "emerald" | "amber" | "red" | "muted" = "muted"
           if (!crewsStatus) {
@@ -343,14 +354,28 @@ export function AppToolbar() {
             crewsLabel = "No agents"
             crewsColor = "muted"
           } else if (crewsStatus.error > 0 && crewsStatus.running > 0) {
-            crewsLabel = `${crewsStatus.running > 99 ? "99+" : crewsStatus.running} active \u00b7 ${crewsStatus.error} error${crewsStatus.error > 1 ? "s" : ""}`
+            crewsLabel = `${cap99(crewsStatus.running)} active \u00b7 ${crewsStatus.error} error${crewsStatus.error > 1 ? "s" : ""}`
             crewsColor = "amber"
           } else if (crewsStatus.error > 0) {
             crewsLabel = `${crewsStatus.error} error${crewsStatus.error > 1 ? "s" : ""}`
             crewsColor = "red"
+          } else if (crewsStatus.running > 0 && queued > 0) {
+            // Healthy state: agents are working AND there's a backlog.
+            // Surface both so the operator immediately sees the queue
+            // depth without opening the tooltip.
+            crewsLabel = `${cap99(crewsStatus.running)} active \u00b7 ${cap99(queued)} queued`
+            crewsColor = "amber"
           } else if (crewsStatus.running > 0) {
-            crewsLabel = `${crewsStatus.running > 99 ? "99+" : crewsStatus.running} active`
+            crewsLabel = `${cap99(crewsStatus.running)} active`
             crewsColor = "emerald"
+          } else if (queued > 0) {
+            // Nothing running but a queue exists \u2014 happens briefly
+            // between dispatch + claim, and also when a crew's
+            // max_concurrent_agents is 0 (operator error). Amber, not
+            // red: the queue is the system working as designed, not a
+            // fault.
+            crewsLabel = `${cap99(queued)} queued`
+            crewsColor = "amber"
           } else {
             crewsLabel = "Crews idle"
             crewsColor = "muted"
@@ -397,7 +422,24 @@ export function AppToolbar() {
                   </div>
                 </TooltipTrigger>
                 <TooltipContent>
-                  {crewsStatus ? `${crewsStatus.total} agents: ${crewsStatus.running} running, ${crewsStatus.idle} idle, ${crewsStatus.error} errors` : "Loading crews status..."}
+                  {crewsStatus ? (() => {
+                    // Compose the breakdown line by line so segments
+                    // can be hidden when zero. Spec: always show
+                    // running + idle; show queued only when >0; show
+                    // errors only when >0. Drops the noisy "0 errors"
+                    // tail that the old string always rendered even
+                    // on a clean workspace, while keeping a clear
+                    // signal when something IS broken.
+                    const parts = [
+                      `${crewsStatus.running} running`,
+                    ]
+                    if (queued > 0) parts.push(`${queued} queued`)
+                    parts.push(`${crewsStatus.idle} idle`)
+                    if (crewsStatus.error > 0) {
+                      parts.push(`${crewsStatus.error} error${crewsStatus.error > 1 ? "s" : ""}`)
+                    }
+                    return `${crewsStatus.total} agents: ${parts.join(", ")}`
+                  })() : "Loading crews status..."}
                 </TooltipContent>
               </Tooltip>
 
