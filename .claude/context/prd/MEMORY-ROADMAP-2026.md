@@ -21,9 +21,10 @@ pattern dedup against last 7 days of `learned-*.md`, pins.md readback into
 the agent system prompt, journal nudge query fixed, and feature-flagged
 HITL staging (`CREWSHIP_CONSOLIDATE_HITL=1`) that writes consolidator output
 to `.proposed/proposal-*.md` plus `memory_proposals` DB row plus
-`inbox_items` row plus distinct journal type. Migration v89 widens
+`inbox_items` row plus distinct journal type. Migration v90 widens
 `inbox_items.kind` CHECK, adds `memory_proposals` table, adds
-`workspaces.memory_config` column.
+`workspaces.memory_config` column. (Originally authored as v89; renumbered to
+v90 on rebase after a cascade-triggers migration took v89 in main first.)
 
 Live-validated on dev2 (`/opt/crewship_2`): **16/16 contract assertions
 PASS** across schema, journal, and sidecar HTTP surfaces. Verification
@@ -486,7 +487,7 @@ build green, race-clean). Commit map:
 | 4 | `55137823` | `internal/consolidate/post_run_trigger.go` — debounced sleep-time trigger |
 | 5 | `f3f82c23` | `internal/consolidate/skill_promote.go` — memory→Skills bridge primitive |
 | 6 | `e2aff97c` | Bridge wired into `writeProposal` (non-fatal hook) |
-| 7 | `b0b35d3c` | `GET/POST /api/v1/skills/proposed[/approve|/reject]` HITL HTTP surface |
+| 7 | `b0b35d3c` | `GET/POST /api/v1/skills/proposed[/approve\|/reject]` HITL HTTP surface |
 
 The four-step roadmap (PR #1 reliability → PR #2 close-the-loop → PR #3
 smart memory → PR #4 research-grade) is therefore feature-complete in
