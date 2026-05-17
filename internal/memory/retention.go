@@ -44,6 +44,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/journal"
@@ -243,7 +244,13 @@ func extractRetentionDays(memCfg string) int {
 		if v <= 0 {
 			return DefaultRetentionDays
 		}
-		return int(v)
+		// Positive fractional values (e.g. 0.5) would truncate to 0
+		// via int(v), silently disabling the sweep — exactly the
+		// "accidentally disable without an explicit decision" trap
+		// the <=0 guard above tries to close. Ceil instead: any
+		// positive fraction rounds up to at least 1 day. CodeRabbit
+		// review catch on PR #399.
+		return int(math.Ceil(v))
 	case int:
 		if v <= 0 {
 			return DefaultRetentionDays

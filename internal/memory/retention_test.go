@@ -392,8 +392,15 @@ func TestRetentionExtractRetentionDaysFallbacks(t *testing.T) {
 		"negative":          {`{"versions_retention_days":-5}`, DefaultRetentionDays},
 		"non-numeric":       {`{"versions_retention_days":"7"}`, DefaultRetentionDays},
 		"valid 7":           {`{"versions_retention_days":7}`, 7},
-		"valid 365":         {`{"versions_retention_days":365}`, 365},
-		"float (truncates)": {`{"versions_retention_days":15.7}`, 15},
+		"valid 365": {`{"versions_retention_days":365}`, 365},
+		// 15.7 → ceil(15.7) = 16. Pre-fix this was int(15.7)=15.
+		// Post-CodeRabbit fix on PR #399 uses math.Ceil so any
+		// positive fractional value rounds UP to the next whole day.
+		"float ceils to next int": {`{"versions_retention_days":15.7}`, 16},
+		// Used to truncate to 0 and silently disable the sweep
+		// — exactly the trap the <=0 guard above tries to close
+		// for negatives. Regression guard from PR #399's review.
+		"float below 1 day": {`{"versions_retention_days":0.5}`, 1},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
