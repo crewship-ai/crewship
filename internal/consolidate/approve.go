@@ -266,6 +266,13 @@ type ProposalExplanation struct {
 	DecidedAt      *string         `json:"decided_at,omitempty"`
 	DecidedBy      *string         `json:"decided_by_user_id,omitempty"`
 	Evidence       json.RawMessage `json:"evidence"`
+	// Scores carries the per-rule ScoreResult breakdown populated
+	// by writeProposal (PR #4 step 2). Shape:
+	//   {"<rule_pattern>": ScoreResult, ...}
+	// Empty object ('{}') for proposals created before PR #4 step
+	// 2 — the v91 migration default keeps the column populated so
+	// clients can blindly Unmarshal without nil-checks.
+	Scores json.RawMessage `json:"scores"`
 }
 
 // ExplainProposal reads the row + evidence_json without side effects.
@@ -274,15 +281,20 @@ func ExplainProposal(ctx context.Context, db *sql.DB, proposalID string) (*Propo
 	out := &ProposalExplanation{}
 	var decidedAt, decidedBy sql.NullString
 	var evidenceJSON string
+	var scoreJSON sql.NullString
 	var entriesScanned int
+	// score_json was added in v91. COALESCE keeps the SELECT shape
+	// stable for tests / instances that haven't run v91 yet —
+	// missing column path returns the SQL NULL we then map to '{}'.
 	err := db.QueryRowContext(ctx, `
 		SELECT id, workspace_id, crew_id, status, proposal_path,
 		       rules_count, entries_scanned, created_at,
-		       decided_at, decided_by_user_id, evidence_json
+		       decided_at, decided_by_user_id, evidence_json,
+		       COALESCE(score_json, '{}')
 		FROM memory_proposals WHERE id = ?`, proposalID).Scan(
 		&out.ProposalID, &out.WorkspaceID, &out.CrewID, &out.Status,
 		&out.ProposalPath, &out.RulesCount, &entriesScanned, &out.CreatedAt,
-		&decidedAt, &decidedBy, &evidenceJSON,
+		&decidedAt, &decidedBy, &evidenceJSON, &scoreJSON,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrProposalNotFound
@@ -300,6 +312,11 @@ func ExplainProposal(ctx context.Context, db *sql.DB, proposalID string) (*Propo
 		out.DecidedBy = &s
 	}
 	out.Evidence = json.RawMessage(evidenceJSON)
+	if scoreJSON.Valid && scoreJSON.String != "" {
+		out.Scores = json.RawMessage(scoreJSON.String)
+	} else {
+		out.Scores = json.RawMessage("{}")
+	}
 	return out, nil
 }
 
