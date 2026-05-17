@@ -456,6 +456,12 @@ memory_search — keyword + semantic recall across memory tiers:
     -d '{"query":"<your query>","scope":"both","limit":10}'
   scope: "agent" | "crew" | "both". Returns ranked snippets with
   source tags so you know which tier the hit came from.
+  Add "hybrid":true to fuse FTS markdown hits with episodic
+  (journal-entry) vector recall via RRF — useful when your query
+  paraphrases something the markdown doesn't lexically contain.
+  When hybrid=true the X-Memory-Hybrid-Fallback response header
+  signals if the cross-corpus path degraded (e.g.
+  "ipc_not_configured" means you got FTS-only).
 
 memory_read — fetch full content of a specific memory file:
   curl -s 'http://127.0.0.1:9119/memory/read?file=AGENT.md&scope=agent'

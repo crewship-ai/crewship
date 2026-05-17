@@ -26,6 +26,12 @@ func TestBuildMemoryToolsBlock_StructureAndEndpoints(t *testing.T) {
 		// Search example must declare the scope: enum so the agent
 		// knows it's not arbitrary.
 		`"scope":"both"`,
+		// Hybrid option documented — without this the agent never
+		// learns it can ask for cross-corpus RRF recall.
+		`"hybrid":true`,
+		// Fallback header documented so the agent reads it and
+		// understands degradation when IPC is missing.
+		"X-Memory-Hybrid-Fallback",
 		// Write example must mention the credential rejection so the
 		// agent expects 422 on a leak, not a generic 500.
 		"422",
