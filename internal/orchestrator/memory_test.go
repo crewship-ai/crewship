@@ -189,9 +189,14 @@ func TestBuildMemoryContext_Truncation(t *testing.T) {
 
 	result := o.buildMemoryContext(context.Background(), req, 0)
 
-	// Result should be bounded — AGENT.md alone is >15k chars
-	if len(result) > defaultMemoryContextChars+2000 { // allow some overhead for headers/instructions
-		t.Errorf("result too large: %d chars (max should be ~%d)", len(result), defaultMemoryContextChars)
+	// Result should be bounded — AGENT.md alone is >15k chars.
+	// Header overhead now accommodates four sibling blocks beyond
+	// the budgeted content tiers: [MEMORY INSTRUCTIONS] (~1KB),
+	// [MEMORY TOOLS] (~1.7KB), nudge + cost-awareness (~500B
+	// combined when populated). 5KB cap is generous on purpose so
+	// future small instructions additions don't trip the test.
+	if len(result) > defaultMemoryContextChars+5000 {
+		t.Errorf("result too large: %d chars (max should be ~%d + 5000 header overhead)", len(result), defaultMemoryContextChars)
 	}
 	if !strings.Contains(result, "truncated") {
 		t.Error("expected truncation marker")
