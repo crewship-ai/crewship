@@ -128,12 +128,33 @@ VALUES ('ibx_mc_1', 'ws1', 'memory_consolidation', 'prop_1', 'Memory consolidati
 		}
 	})
 	t.Run("rejects_unknown_kind", func(t *testing.T) {
-		if _, err := db.Exec(`
+		_, err := db.Exec(`
 INSERT INTO inbox_items (id, workspace_id, kind, source_id, title)
-VALUES ('ibx_bad_1', 'ws1', 'bogus_kind', 'x', 'x')`); err == nil {
+VALUES ('ibx_bad_1', 'ws1', 'bogus_kind', 'x', 'x')`)
+		if err == nil {
 			t.Fatalf("expected CHECK violation on unknown kind, got nil")
 		}
+		// Tighten: a NOT NULL or FK violation would also produce a
+		// non-nil err and silently pass this test for the wrong
+		// reason. Assert the underlying constraint type so only a
+		// genuine CHECK failure satisfies the contract.
+		if !isCheckConstraintErr(err) {
+			t.Fatalf("expected CHECK violation, got %T: %v", err, err)
+		}
 	})
+}
+
+// isCheckConstraintErr returns true when err is a CHECK-constraint
+// violation from the SQLite driver. The driver wraps the constraint
+// failure in a generic Error type whose Error() includes "CHECK
+// constraint failed"; case-insensitive substring is the portable check
+// across driver versions. A Postgres-targeted port would assert
+// *pq.Error.Code == "23514" instead.
+func isCheckConstraintErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "check constraint failed")
 }
 
 // assertProposalStatusMatrix is the table-driven sibling of the old
@@ -143,14 +164,21 @@ VALUES ('ibx_bad_1', 'ws1', 'bogus_kind', 'x', 'x')`); err == nil {
 // O(1) — add a row, don't append another insert block.
 func assertProposalStatusMatrix(t *testing.T, db *sql.DB) {
 	t.Helper()
+	// Fixed timestamp passed as a parameter, not inlined as
+	// datetime('now') SQL — keeps the test deterministic AND removes
+	// the SQL-injection-via-string-concat shape the earlier table
+	// had. We're inserting test fixtures so the precise time doesn't
+	// matter; pick any past-but-non-zero RFC3339 timestamp.
+	const decidedTS = "2026-05-17T12:00:00Z"
 	cases := []struct {
-		name          string
-		id            string
-		status        string
-		decidedAt     sql.NullString
-		decidedByUser sql.NullString
-		wantAccept    bool
-		violationHint string
+		name           string
+		id             string
+		status         string
+		bindDecidedAt  bool
+		bindDecidedBy  bool
+		decidedByValue string
+		wantAccept     bool
+		violationHint  string
 	}{
 		{
 			name:       "pending_with_neither_decided_field",
@@ -169,60 +197,69 @@ func assertProposalStatusMatrix(t *testing.T, db *sql.DB) {
 			name:          "approved_with_decided_at_only",
 			id:            "p_approved_partial",
 			status:        "approved",
-			decidedAt:     sql.NullString{String: "datetime('now')", Valid: true},
+			bindDecidedAt: true,
 			wantAccept:    false,
 			violationHint: "approved with decided_at but NO decided_by_user_id must violate CHECK (audit trail integrity)",
 		},
 		{
-			name:          "approved_with_both_decided_fields",
-			id:            "p_approved_full",
-			status:        "approved",
-			decidedAt:     sql.NullString{String: "datetime('now')", Valid: true},
-			decidedByUser: sql.NullString{String: "usr_op_1", Valid: true},
-			wantAccept:    true,
+			name:           "approved_with_both_decided_fields",
+			id:             "p_approved_full",
+			status:         "approved",
+			bindDecidedAt:  true,
+			bindDecidedBy:  true,
+			decidedByValue: "usr_op_1",
+			wantAccept:     true,
 		},
 		{
 			name:          "rejected_with_decided_at_only",
 			id:            "p_rejected_partial",
 			status:        "rejected",
-			decidedAt:     sql.NullString{String: "datetime('now')", Valid: true},
+			bindDecidedAt: true,
 			wantAccept:    false,
 			violationHint: "rejected with decided_at but NO decided_by_user_id must violate CHECK",
 		},
 		{
-			name:          "rejected_with_both_decided_fields",
-			id:            "p_rejected_full",
-			status:        "rejected",
-			decidedAt:     sql.NullString{String: "datetime('now')", Valid: true},
-			decidedByUser: sql.NullString{String: "usr_op_2", Valid: true},
-			wantAccept:    true,
+			name:           "rejected_with_both_decided_fields",
+			id:             "p_rejected_full",
+			status:         "rejected",
+			bindDecidedAt:  true,
+			bindDecidedBy:  true,
+			decidedByValue: "usr_op_2",
+			wantAccept:     true,
 		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			// Build the INSERT dynamically based on which decided_*
-			// fields are set. datetime('now') is a SQL expression so
-			// it must NOT be parameter-bound; the bool flags decide
-			// whether to inline it as raw SQL.
+			// fields are set. Both values are now parameter-bound —
+			// no SQL strings come from the case struct, so even a
+			// future test-case adder can't accidentally introduce
+			// injection-shaped patterns.
 			cols := []string{"id", "workspace_id", "crew_id", "proposal_path", "status"}
 			vals := []string{"?", "?", "?", "?", "?"}
 			args := []any{c.id, "ws1", "crew1", "/tmp/" + c.id + ".md", c.status}
-			if c.decidedAt.Valid {
+			if c.bindDecidedAt {
 				cols = append(cols, "decided_at")
-				vals = append(vals, c.decidedAt.String) // inline SQL expr
+				vals = append(vals, "?")
+				args = append(args, decidedTS)
 			}
-			if c.decidedByUser.Valid {
+			if c.bindDecidedBy {
 				cols = append(cols, "decided_by_user_id")
 				vals = append(vals, "?")
-				args = append(args, c.decidedByUser.String)
+				args = append(args, c.decidedByValue)
 			}
 			q := "INSERT INTO memory_proposals (" + strings.Join(cols, ", ") + ") VALUES (" + strings.Join(vals, ", ") + ")"
 			_, err := db.Exec(q, args...)
 			if c.wantAccept && err != nil {
 				t.Errorf("insert should have succeeded but failed: %v\n  query: %s", err, q)
 			}
-			if !c.wantAccept && err == nil {
-				t.Errorf("insert should have violated CHECK but succeeded.\n  hint: %s\n  query: %s", c.violationHint, q)
+			if !c.wantAccept {
+				switch {
+				case err == nil:
+					t.Errorf("insert should have violated CHECK but succeeded.\n  hint: %s\n  query: %s", c.violationHint, q)
+				case !isCheckConstraintErr(err):
+					t.Errorf("insert failed for non-CHECK reason: %v\n  hint: %s\n  query: %s", err, c.violationHint, q)
+				}
 			}
 		})
 	}
