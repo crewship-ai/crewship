@@ -1269,6 +1269,15 @@ END;
 	// (Originally authored as v91 in PR #4; renumbered to v92 on rebase
 	// because PR #2's renumbered add_memory_versions took v91 first.)
 	{version: 92, name: "add_proposal_scoring", sql: migrationAddProposalScoring},
+	// v93 lays the per-crew admission-queue schema:
+	//   - assignments.queued_at + assignments.running_at columns
+	//   - crews.max_concurrent_agents column (NULL = compute from
+	//     container_memory_mb)
+	//   - partial index on assignments(status, queued_at) WHERE
+	//     status='QUEUED' for the queue-pump read path.
+	// See internal/database/migrate_consts_v93_assignment_queue.go
+	// and .claude/context/prd/QUEUE-MECHANISM-2026.md.
+	{version: 93, name: "add_assignment_queue", sql: migrationAddAssignmentQueue},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the
