@@ -96,12 +96,14 @@ func TestBuildMemoryContext_ToolsBlockSurvivesEmptyTiers(t *testing.T) {
 	if !strings.Contains(out, "[MEMORY INSTRUCTIONS]") {
 		t.Errorf("instructions block must appear even with no memory files")
 	}
-	// Today the early-return branch skips the tools block. That's
-	// a documented gap — empty-memory agents only learn the writing
-	// guidelines from instructions, not the HTTP surface. We assert
-	// this so a future implementation change is intentional, not
-	// accidental.
+	// Lock the current contract: the early-return branch deliberately
+	// skips [MEMORY TOOLS] because the surface only matters once the
+	// agent has at least one tier of memory to consult. Asserting
+	// (rather than logging) here forces a future implementation
+	// change to be deliberate — adding tools to the empty path is
+	// fine, but it should be a code change paired with this assertion
+	// flipping, not a silent test passing on either behaviour.
 	if strings.Contains(out, "[MEMORY TOOLS]") {
-		t.Logf("note: tools block now appears on empty-memory path — update test if intentional")
+		t.Errorf("[MEMORY TOOLS] should NOT appear on empty-tier early-return; the contract is 'tools only when there is memory to query'")
 	}
 }

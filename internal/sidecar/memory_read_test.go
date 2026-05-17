@@ -79,7 +79,9 @@ func TestHandleMemoryRead_Subdir(t *testing.T) {
 		t.Fatalf("status = %d", rr.Code)
 	}
 	var resp MemoryReadResponse
-	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
 	if resp.Content != "session notes\n" {
 		t.Errorf("content = %q, want %q", resp.Content, "session notes\n")
 	}
@@ -160,7 +162,9 @@ func TestHandleMemoryRead_EmptyFile_NotMissing(t *testing.T) {
 		t.Errorf("status = %d, want 200 for empty existing file", rr.Code)
 	}
 	var resp MemoryReadResponse
-	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
 	if resp.Bytes != 0 {
 		t.Errorf("bytes = %d, want 0", resp.Bytes)
 	}

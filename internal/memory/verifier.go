@@ -1,8 +1,10 @@
 package memory
 
 import (
+	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -309,47 +311,89 @@ func looksLikePath(s string) bool {
 }
 
 // resolveCitation tries each search root in order, returning the
-// first absolute path whose Stat succeeds. Symlinks are followed
-// implicitly via os.Stat.
+// first path whose Stat succeeds AND which sits inside one of the
+// configured roots. Both absolute and relative citations are confined
+// to roots — without confinement, an absolute "/etc/passwd" would
+// validate against the host filesystem and leak filesystem metadata
+// (existence, size) through the verifier's rejection details.
 func resolveCitation(rel string, roots []string) (string, bool) {
-	// Absolute paths are taken at face value — useful for /workspace
-	// style bind-mount references.
-	if filepath.IsAbs(rel) {
-		if _, err := os.Stat(rel); err == nil {
-			return rel, true
-		}
+	if len(roots) == 0 {
 		return "", false
 	}
 	for _, root := range roots {
-		full := filepath.Join(root, rel)
-		if _, err := os.Stat(full); err == nil {
-			return full, true
+		absRoot, err := filepath.Abs(root)
+		if err != nil {
+			continue
+		}
+		candidate := rel
+		if !filepath.IsAbs(candidate) {
+			candidate = filepath.Join(absRoot, rel)
+		}
+		absCandidate, err := filepath.Abs(candidate)
+		if err != nil {
+			continue
+		}
+		// Containment check: separator-anchored prefix so a citation
+		// like "/var/lib-evil/x" cannot escape "/var/lib".
+		rootWithSep := filepath.Clean(absRoot) + string(filepath.Separator)
+		cleanCand := filepath.Clean(absCandidate) + string(filepath.Separator)
+		if !strings.HasPrefix(cleanCand, rootWithSep) {
+			continue
+		}
+		if _, err := os.Stat(absCandidate); err == nil {
+			return absCandidate, true
 		}
 	}
 	return "", false
 }
 
-// lineExceedsFile reads the file just enough to count newlines.
+// lineExceedsFile streams the file and counts newlines.
 // Returns true when `line` > number of lines in file. Errors on
 // read failure (caller treats it as stale_citation).
 //
-// For large files we could fseek to a sliding window, but real
-// citations point at code/markdown — kilobytes, not megabytes —
-// so a full ReadFile is fine.
+// Streaming defends against the user-controlled-input DoS shape:
+// every memory write surfaces citations through the verifier, and
+// loading multi-MB files into RAM per write would let a tampered
+// citation block reads with a memory spike. bufio.Scanner walks the
+// file with a constant-size buffer; we short-circuit once the count
+// passes `line` so verifying a citation against a 100MB log is
+// O(line bytes), not O(filesize).
 func lineExceedsFile(path string, line int) (bool, error) {
-	data, err := os.ReadFile(path)
+	f, err := os.Open(path)
 	if err != nil {
 		return false, err
 	}
-	// Counting '\n' is the line count - 1 for a file without
-	// trailing newline; we want "addressable line count" which
-	// is the count of newlines + (1 if file is non-empty), i.e.
-	// strings.Count + bool flag.
-	count := strings.Count(string(data), "\n")
-	if len(data) > 0 && data[len(data)-1] != '\n' {
-		count++
+	defer f.Close()
+
+	// Use ReadByte through bufio.Reader rather than Scanner so we
+	// don't allocate per-line strings just to discard them.
+	br := bufio.NewReader(f)
+	var count int
+	var sawAny bool
+	for {
+		b, err := br.ReadByte()
+		if err == io.EOF {
+			// File ends without trailing newline: count the trailing
+			// fragment as an addressable line.
+			if sawAny && b != '\n' {
+				count++
+			}
+			return line > count, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		sawAny = true
+		if b == '\n' {
+			count++
+			if count >= line {
+				// Early-exit: we've already reached the cited line,
+				// so the citation is NOT out of range regardless of
+				// what follows.
+				return false, nil
+			}
+		}
 	}
-	return line > count, nil
 }
 
 // Wire-into WriteFile: implemented in writer.go via a new field on

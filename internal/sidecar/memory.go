@@ -73,6 +73,20 @@ func (s *Server) handleMemorySearch(w http.ResponseWriter, r *http.Request) {
 	if req.Scope == "" {
 		req.Scope = "agent"
 	}
+	// Validate scope BEFORE the hybrid-forward branch — without this,
+	// scope="bogus" silently translated to "" in the IPC bridge and
+	// returned results from the wrong vocabulary. The switch below
+	// also validates, but only for the non-hybrid path; hybrid takes
+	// the early-return so the validation must mirror up here.
+	switch req.Scope {
+	case "agent", "crew", "both":
+		// valid — the switch below handles each accordingly
+	default:
+		writeJSONResponse(w, http.StatusBadRequest, map[string]string{
+			"error": "invalid scope: use agent, crew, or both",
+		})
+		return
+	}
 
 	if req.Hybrid && s.ipc != nil {
 		s.forwardHybridSearch(w, r, req.Query, req.Limit, req.Scope)

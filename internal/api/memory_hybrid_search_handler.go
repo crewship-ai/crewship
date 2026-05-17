@@ -96,6 +96,18 @@ func (h *MemoryHybridSearchHandler) Search(w http.ResponseWriter, r *http.Reques
 	if body.Limit <= 0 {
 		body.Limit = 10
 	}
+	// Validate raw scope before translation. ScopeForRole would silently
+	// coerce unknown values to "" (= no scope filter), which leaks
+	// cross-agent results to a caller that just typo'd. Accept only the
+	// documented surface — empty (no filter, MEMBER+ implied),
+	// "own" (agent-only), "crew_shared" (crew_id-bound).
+	switch body.Scope {
+	case "", "own", "crew_shared":
+		// accepted
+	default:
+		replyError(w, http.StatusBadRequest, "invalid scope (allowed: '', own, crew_shared)")
+		return
+	}
 	scope := episodic.ScopeForRole(body.Scope)
 
 	// Resolve workspace's FTS engine. nil is fine — handler downgrades
