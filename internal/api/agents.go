@@ -61,6 +61,26 @@ func (h *AgentHandler) SetLicense(lic *license.License) { h.license = lic }
 func (h *AgentHandler) SetScheduler(su ScheduleUpdater) { h.scheduleUpdater = su }
 
 // CrewsStatus returns lightweight agent counts by status for the toolbar.
+//
+// The "queued" field counts ASSIGNMENTS (not agents) currently in the
+// QUEUED state — the per-crew admission queue introduced in PR #396
+// (Phase 1B) can park dispatches when a crew's slot budget is
+// saturated. Without surfacing this distinctly, queued dispatches
+// were mis-counted as agents-in-error in the toolbar (because no
+// underlying agent is in ERROR — the dispatcher simply hasn't
+// claimed a slot yet).
+//
+// Agents and assignments are two different tables, and one
+// assignment can target an agent that's otherwise IDLE, so the two
+// counts are independent and reported as separate fields. The widget
+// renders "X running, Y queued, Z idle" when Y > 0, hiding the
+// queued segment entirely when nobody is queued so we don't spam
+// "0 queued" on idle workspaces.
+//
+// On a server that pre-dates the QUEUED migration, the assignments
+// table has no rows with status='QUEUED' so the count returns 0 —
+// the field is present in the JSON shape but semantically inert.
+// Old clients that don't read the field are unaffected.
 
 func (h *AgentHandler) CrewsStatus(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
@@ -78,6 +98,7 @@ func (h *AgentHandler) CrewsStatus(w http.ResponseWriter, r *http.Request) {
 		Running int `json:"running"`
 		Error   int `json:"error"`
 		Idle    int `json:"idle"`
+		Queued  int `json:"queued"`
 	}{}
 	for rows.Next() {
 		var status string
@@ -95,6 +116,25 @@ func (h *AgentHandler) CrewsStatus(w http.ResponseWriter, r *http.Request) {
 			result.Idle += count
 		}
 	}
+
+	// Queued assignments are a workspace-scoped, in-flight count.
+	// Failure here is non-fatal: degrade to queued=0 rather than
+	// 500-ing the whole toolbar — the rest of the payload is still
+	// useful and the next poll cycle will re-attempt. Errors are
+	// logged so a persistent issue surfaces in the engine log.
+	var queued int
+	if err := h.db.QueryRowContext(r.Context(),
+		`SELECT COUNT(*) FROM assignments WHERE workspace_id = ? AND status = 'QUEUED'`,
+		workspaceID,
+	).Scan(&queued); err != nil {
+		if h.logger != nil {
+			h.logger.Warn("crews-status: count queued assignments failed",
+				"workspace_id", workspaceID, "error", err)
+		}
+	} else {
+		result.Queued = queued
+	}
+
 	writeJSON(w, http.StatusOK, result)
 }
 

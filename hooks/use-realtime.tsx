@@ -22,6 +22,18 @@ export type RealtimeEventType =
   | "agent.updated"
   | "agent.deleted"
   | "assignment.updated"
+  // Per-assignment lifecycle events introduced for the per-crew
+  // admission queue (PR #396 — Phase 1B of the queue mechanism).
+  // Distinct from the generic "assignment.updated" because the queue
+  // pump fires both: "assignment_unqueued" first (UI can animate the
+  // dequeue), then "assignment_running" once runAssignment starts.
+  // Underscore naming matches the backend broadcast — session-channel
+  // events have always used snake_case while workspace-wide events
+  // use dot-notation; these are emitted on BOTH channels so the
+  // toolbar (workspace-scoped) and chat view (session-scoped) can
+  // each subscribe with the same name.
+  | "assignment_queued"
+  | "assignment_unqueued"
   | "escalation.created"
   | "escalation.resolved"
   | "mission.updated"
@@ -65,7 +77,8 @@ interface RealtimeContextValue {
 const VALID_REALTIME_TYPES: Set<string> = new Set([
   "run.started", "run.completed", "run.failed",
   "agent.status", "agent.created", "agent.updated", "agent.deleted",
-  "assignment.updated", "escalation.created",
+  "assignment.updated", "assignment_queued", "assignment_unqueued",
+  "escalation.created",
   "escalation.resolved", "mission.updated", "task.updated",
   "peer_conversation.updated", "crew.created", "crew.updated", "crew.deleted",
   "agent.log", "file.event", "container.stats",
