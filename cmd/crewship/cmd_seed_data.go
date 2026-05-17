@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/crewship-ai/crewship/cmd/crewship/seeddata"
@@ -74,6 +75,76 @@ func seedCrews(ctx context.Context, client *cli.Client, userID string) (map[stri
 		fmt.Fprintf(os.Stderr, "  Linked user to %d/%d crews\n", linked, len(ids))
 	}
 	return ids, nil
+}
+
+// seedCrewConnections POSTs a bidirectional connection for every unordered
+// crew pair so cross-crew task delegation works out of the box.
+//
+// Why this exists: the mission planner happily produces tasks whose
+// assigned_agent_id lives in a different crew than the mission's owning
+// crew (observed on dev1 with DEV-4 — a devops mission delegated a step
+// to a quality agent). At dispatch time mission_tasks.go:385 refuses the
+// hand-off unless crew_connections has an active row joining the two
+// crews. The old seed never wrote that row, so every cross-crew task
+// failed with "crew X is not connected to crew Y — create a crew
+// connection first" before the agent ever ran.
+//
+// We seed all-pairs because the demo workspace has only four crews
+// (C(4,2)=6 rows) and the planner has no advance notice which pairs the
+// LEAD will reach for. Production deployments can prune via the
+// /api/v1/crew-connections DELETE endpoint or the `crewship crew
+// connection rm` CLI if a strict policy is desired.
+func seedCrewConnections(ctx context.Context, client *cli.Client, crewIDs map[string]string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if len(crewIDs) < 2 {
+		return nil
+	}
+	fmt.Fprintln(os.Stderr, "Connecting crews (all-pairs, bidirectional)...")
+
+	// Deterministic ordering so the resulting (from, to) tuples are
+	// stable across re-runs and CI snapshots.
+	slugs := make([]string, 0, len(crewIDs))
+	for s := range crewIDs {
+		slugs = append(slugs, s)
+	}
+	sort.Strings(slugs)
+
+	created, skipped := 0, 0
+	for i := 0; i < len(slugs); i++ {
+		for j := i + 1; j < len(slugs); j++ {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			fromSlug, toSlug := slugs[i], slugs[j]
+			body := map[string]string{
+				"from_crew_id": crewIDs[fromSlug],
+				"to_crew_id":   crewIDs[toSlug],
+				"direction":    "bidirectional",
+			}
+			resp, err := client.Post("/api/v1/crew-connections", body)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "  ! Connect %s↔%s: %v\n", fromSlug, toSlug, err)
+				continue
+			}
+			// 409 = already exists (idempotent re-seed); anything else
+			// outside the 2xx success band is unexpected and gets
+			// surfaced so a real misconfiguration doesn't go silent.
+			switch {
+			case resp.StatusCode == http.StatusCreated || resp.StatusCode == http.StatusOK:
+				created++
+				fmt.Fprintf(os.Stderr, "  + Connection: %s ↔ %s\n", fromSlug, toSlug)
+			case resp.StatusCode == http.StatusConflict:
+				skipped++
+			default:
+				fmt.Fprintf(os.Stderr, "  ! Connect %s↔%s: HTTP %d\n", fromSlug, toSlug, resp.StatusCode)
+			}
+			resp.Body.Close()
+		}
+	}
+	fmt.Fprintf(os.Stderr, "  Connected %d new pair(s), %d already present\n", created, skipped)
+	return nil
 }
 
 // ════════════════════════════════════════════════════════════════════════════
