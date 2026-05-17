@@ -46,9 +46,19 @@ func (w *WorkspaceMemory) Search(query string, limit int) ([]SearchResult, error
 	return w.engine.Search(ctx, query, limit)
 }
 
-// GetContext returns a formatted workspace memory block for system prompt injection.
-// It reads markdown files directly (not via FTS5 search) to build the context.
-// Returns empty string and 0 if no workspace memory files exist.
+// GetContext returns the raw workspace memory body for the orchestrator
+// to frame as a [WORKSPACE MEMORY] block. Reads markdown files directly
+// (not via FTS5 search). Returns empty string and 0 if no workspace
+// memory files exist.
+//
+// IMPORTANT: this method returns content without [WORKSPACE MEMORY]
+// / [END WORKSPACE MEMORY] markers. Framing is the orchestrator's
+// responsibility (assembleSections in buildWorkspaceMemoryBlock).
+// An earlier version of this function wrapped the body in markers,
+// but the orchestrator then re-wrapped via assembleSections, producing
+// nested markers + double-counted budget on every non-empty read.
+// Returning raw content keeps the orchestrator as the single source
+// of truth for block framing.
 //
 // The supplied ctx is checked between file visits so a stuck filesystem
 // (NFS hang, BFS-mount stall) doesn't pin prompt assembly past the
@@ -95,16 +105,12 @@ func (w *WorkspaceMemory) GetContext(ctx context.Context, budget int) (string, i
 	}
 
 	var b strings.Builder
-	b.WriteString("[WORKSPACE MEMORY]\n")
-	totalChars := len("[WORKSPACE MEMORY]\n")
-
-	markerEnd := "[END WORKSPACE MEMORY]\n"
-	reservedEnd := len(markerEnd)
+	var totalChars int
 
 	for _, f := range files {
 		section := fmt.Sprintf("--- %s ---\n%s\n", f.rel, f.content)
-		if totalChars+len(section)+reservedEnd > budget {
-			remaining := budget - totalChars - reservedEnd - 20
+		if totalChars+len(section) > budget {
+			remaining := budget - totalChars - 20
 			if remaining > 50 {
 				section = section[:remaining] + "\n...(truncated)\n"
 				b.WriteString(section)
@@ -115,9 +121,6 @@ func (w *WorkspaceMemory) GetContext(ctx context.Context, budget int) (string, i
 		b.WriteString(section)
 		totalChars += len(section)
 	}
-
-	b.WriteString(markerEnd)
-	totalChars += reservedEnd
 
 	return b.String(), totalChars
 }

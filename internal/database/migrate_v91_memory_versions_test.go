@@ -54,6 +54,14 @@ func TestMigrateV90_MemoryVersionsSchema(t *testing.T) {
 		}
 		got[name] = strings.ToUpper(ctype)
 	}
+	// rows.Err() surfaces iterator-level errors that rows.Next() can
+	// silently mask (DB closed mid-iteration, malformed PRAGMA output,
+	// etc.). Without this check a schema-assertion FAIL could be
+	// reported for "wrong reason" — the actual fail being the query
+	// dying halfway through.
+	if err := rows.Err(); err != nil {
+		t.Fatalf("table_info rows: %v", err)
+	}
 	for col, ctype := range wantCols {
 		if got[col] != ctype {
 			t.Errorf("memory_versions.%s = %q, want %q", col, got[col], ctype)

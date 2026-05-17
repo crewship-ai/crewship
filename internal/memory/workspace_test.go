@@ -62,12 +62,15 @@ func TestWorkspaceMemory_GetContext(t *testing.T) {
 		t.Errorf("used chars (%d) should not exceed budget (5000)", used)
 	}
 
-	// Should contain workspace block markers
-	if !containsStr(block, "[WORKSPACE MEMORY]") {
-		t.Error("missing [WORKSPACE MEMORY] marker")
+	// GetContext now returns raw content; framing is the orchestrator's
+	// job (assembleSections in buildWorkspaceMemoryBlock). The marker
+	// strings must NOT appear here — if they did the orchestrator's
+	// wrapper would nest them on every render.
+	if containsStr(block, "[WORKSPACE MEMORY]") {
+		t.Error("GetContext must not include the [WORKSPACE MEMORY] marker — framing is the orchestrator's job")
 	}
-	if !containsStr(block, "[END WORKSPACE MEMORY]") {
-		t.Error("missing [END WORKSPACE MEMORY] marker")
+	if containsStr(block, "[END WORKSPACE MEMORY]") {
+		t.Error("GetContext must not include the [END WORKSPACE MEMORY] marker")
 	}
 	if !containsStr(block, "all deploys require approval") {
 		t.Error("missing workspace content")
