@@ -100,6 +100,22 @@ const (
 	// was refused at the boundary, no data was corrupted.
 	EntryMemoryWriteVerifierBlocked EntryType = "memory.write_verifier_blocked"
 
+	// EntryMemorySearched fires when an agent (or HTTP caller) issues a
+	// memory search — FTS, hybrid, or whichever surface returned a
+	// non-empty result. The payload captures `query` (the raw query
+	// string), `scope` (own/crew_shared/...), `hit_count`, and
+	// `hit_chunk_ids` (slice of chunk-/entry-ids that matched).
+	// Downstream consumers:
+	//   - the consolidator scoring path counts distinct hits per
+	//     rule.Evidence to populate CandidateMetrics.RecallCount, and
+	//     distinct query strings to populate UniqueQueries. Without
+	//     these signals the Skill-promotion gate never fires in
+	//     steady state (PRD §8.1 known follow-up — closed by this).
+	//   - the observability dashboard renders search-frequency
+	//     rollups per scope for capacity planning.
+	// Severity is info — these are operational events, not warnings.
+	EntryMemorySearched EntryType = "memory.searched"
+
 	// EntryMemorySkillProposed fires when the memory→Skills bridge stages
 	// a learned rule as .proposed/skill-{slug}.md. Distinct from
 	// EntryMemoryConsolidationProposed because the lifecycle is
