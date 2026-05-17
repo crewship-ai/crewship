@@ -241,34 +241,6 @@ func marshalScoresJSON(scores map[string]ScoreResult) string {
 	return string(b)
 }
 
-// computeProposalScores runs the OpenClaw six-signal scorer over each
-// candidate rule and returns a map keyed by rule pattern. Callers
-// either marshal the result for the score_json column
-// (marshalScoresJSON) or consume it directly for downstream gating
-// (promoteProposalSkills) — re-running the scorer would be cheap but
-// pointless.
-//
-// CandidateMetrics population is intentionally conservative:
-//
-//   - RawRelevance ← LearnedRule.Confidence (already in [0,1] per
-//     the LLM prompt template's contract)
-//   - EvidenceCount ← len(rule.Evidence)
-//   - DistinctEntryTypes ← 1 (placeholder: we don't have the entry
-//     types here without re-querying the journal; populated in a
-//     follow-up step that wires journal-side counters)
-//   - RecallCount / UniqueQueries / ConsolidationCount / LastSeenAt
-//     ← zero values (the gates block promotion at this stage —
-//     the proposal hasn't been recalled yet by definition)
-//
-// This means the very-first proposal for a pattern always lands
-// with Promoted=false at score time. That's correct: a brand-new
-// proposal hasn't been recalled even once. The score gets re-
-// computed on subsequent consolidator runs when the recall
-// counters tick up.
-func computeProposalScores(rules []LearnedRule, now time.Time) map[string]ScoreResult {
-	return computeProposalScoresWithRecall(context.Background(), nil, "", rules, 0, now)
-}
-
 // recallLookbackWindow is the period over which we count distinct
 // `memory.searched` events when populating CandidateMetrics. 7 days
 // matches the consolidator's own dedup window — a rule that has been

@@ -159,7 +159,7 @@ func TestMatches(t *testing.T) {
 				Tools:    []string{"Bash"},
 				AgentIDs: []string{"a1"},
 			},
-			ctx: EventContext{ToolName: "Bash", AgentID: "different"},
+			ctx:  EventContext{ToolName: "Bash", AgentID: "different"},
 			want: false,
 		},
 
