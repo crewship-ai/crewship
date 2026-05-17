@@ -20,7 +20,7 @@ func TestExplainProposal_ReturnsScores(t *testing.T) {
 	applyV89Schema(t, db)
 
 	// Seed a proposal via the real writeProposal path so score_json
-	// gets populated by encodeProposalScores.
+	// gets populated by computeProposalScores + marshalScoresJSON.
 	ids := seedEntries(t, db, w, "ws_test", "crew_test", 12, journal.EntryPeerEscalation)
 	reply := `[{"pattern":"explain me","action":"act","evidence":["` + ids[0] + `","` + ids[1] + `"],"confidence":0.75}]`
 	c := &Consolidator{DB: db, Journal: w, Summarizer: &stubSummarizer{Reply: reply}, Logger: quietLogger()}

@@ -97,7 +97,8 @@ func (c *Consolidator) writeProposal(
 	// .Confidence and the rest at conservative defaults — future
 	// iterations populate RecallCount/UniqueQueries from journal
 	// queries against the rule's evidence ids.
-	scoreJSON := encodeProposalScores(rules, now)
+	scores := computeProposalScores(rules, now)
+	scoreJSON := marshalScoresJSON(scores)
 	proposalID := "mp_" + runID
 	if c.DB != nil {
 		if _, err := c.DB.ExecContext(ctx, `
@@ -135,6 +136,20 @@ func (c *Consolidator) writeProposal(
 				"entries_scanned": entriesScanned,
 			},
 		})
+	}
+
+	// memory→Skills bridge: any rule that has accumulated sustained
+	// operator-validated traction (recall ≥ 10 + composite ≥ 0.85 in
+	// the score map) graduates to a staged Anthropic SKILL.md under
+	// .proposed/skill-{slug}.md. The bridge is non-fatal: on the very
+	// first proposal for a pattern, recall is by definition 0 and no
+	// skill is written; only repeated, recalled-against rules cross
+	// the gate on later runs. See skill_promote.go for the thresholds.
+	if skillPaths := c.promoteProposalSkills(rules, scores, cfg.OutputDir, now); len(skillPaths) > 0 {
+		logger.Info("memory→skills promotion staged",
+			"proposal_id", proposalID,
+			"skill_count", len(skillPaths),
+			"skill_paths", skillPaths)
 	}
 
 	id, emitErr := c.Journal.Emit(ctx, journal.Entry{
@@ -209,11 +224,23 @@ func proposalInboxBody(rulesCount, entriesScanned int) string {
 	)
 }
 
-// encodeProposalScores runs the OpenClaw six-signal scorer over each
-// candidate rule and returns a JSON object whose keys are rule
-// patterns and values are ScoreResult — same shape the explain
-// endpoint will surface back via the API. Returns "{}" on error so
-// the column's NOT-NULL DEFAULT contract holds.
+// marshalScoresJSON serialises a per-pattern scores map for the
+// score_json column. Returns "{}" on error so the NOT-NULL DEFAULT
+// contract on the column holds even under pathological inputs.
+func marshalScoresJSON(scores map[string]ScoreResult) string {
+	b, err := json.Marshal(scores)
+	if err != nil {
+		return "{}"
+	}
+	return string(b)
+}
+
+// computeProposalScores runs the OpenClaw six-signal scorer over each
+// candidate rule and returns a map keyed by rule pattern. Callers
+// either marshal the result for the score_json column
+// (marshalScoresJSON) or consume it directly for downstream gating
+// (promoteProposalSkills) — re-running the scorer would be cheap but
+// pointless.
 //
 // CandidateMetrics population is intentionally conservative:
 //
@@ -232,7 +259,7 @@ func proposalInboxBody(rulesCount, entriesScanned int) string {
 // proposal hasn't been recalled even once. The score gets re-
 // computed on subsequent consolidator runs when the recall
 // counters tick up.
-func encodeProposalScores(rules []LearnedRule, now time.Time) string {
+func computeProposalScores(rules []LearnedRule, now time.Time) map[string]ScoreResult {
 	scores := make(map[string]ScoreResult, len(rules))
 	for _, r := range rules {
 		scores[r.Pattern] = ComputeScore(
@@ -246,11 +273,40 @@ func encodeProposalScores(rules []LearnedRule, now time.Time) string {
 			now,
 		)
 	}
-	b, err := json.Marshal(scores)
-	if err != nil {
-		return "{}"
+	return scores
+}
+
+// promoteProposalSkills is the post-DB-insert hook that runs the
+// memory→Skills bridge against any rules whose ScoreResult meets the
+// Skill-promotion gate (recall ≥ 10 + composite ≥ 0.85 by default).
+// Failures are logged-not-fatal: a Skill that fails to stage does not
+// invalidate the underlying proposal — operators still see the
+// learned-rule proposal under .proposed/proposal-*.md and can approve
+// it normally; the missing Skill simply means no SKILL.md was staged
+// for that rule on this run, and the next consolidator pass will try
+// again.
+//
+// Returns the absolute paths of any Skills that landed on disk so the
+// caller can include them in observability logs.
+func (c *Consolidator) promoteProposalSkills(
+	rules []LearnedRule,
+	scores map[string]ScoreResult,
+	outputDir string,
+	now time.Time,
+) []string {
+	logger := c.Logger
+	if logger == nil {
+		logger = slog.Default()
 	}
-	return string(b)
+	paths, err := PromoteEligibleRules(rules, scores, SkillPromoteOptions{
+		OutputDir: outputDir,
+		Now:       now,
+	})
+	if err != nil {
+		logger.Warn("memory→skills promotion partial failure",
+			"err", err, "promoted_count", len(paths))
+	}
+	return paths
 }
 
 // newProposalID returns a short, sortable run identifier. Format:
