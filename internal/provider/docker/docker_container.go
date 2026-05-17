@@ -161,12 +161,15 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	// crews.container_memory_mb via chatbridge.resolver, but every call
 	// site that *also* hits this path must survive — 512 MiB caused
 	// Docker OOM-kill (exit 137) on real agent runs.
+	// Guard against any non-positive value (including a stray -1 / -N
+	// from a future "unset sentinel" convention) so we never pass a
+	// negative limit to the Docker daemon, which rejects it outright.
 	memoryMB := team.MemoryMB
-	if memoryMB == 0 {
+	if memoryMB <= 0 {
 		memoryMB = 8192
 	}
 	cpus := team.CPUs
-	if cpus == 0 {
+	if cpus <= 0 {
 		cpus = 2.0
 	}
 
