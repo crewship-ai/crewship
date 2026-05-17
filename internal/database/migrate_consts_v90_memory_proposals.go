@@ -61,9 +61,15 @@ CREATE TABLE IF NOT EXISTS memory_proposals (
     created_at          TEXT NOT NULL DEFAULT (datetime('now','subsec')),
     decided_at          TEXT,
     decided_by_user_id  TEXT,
+    -- HITL approval trail integrity: a terminal decision (approved/
+    -- rejected) must record BOTH a timestamp and the user_id of the
+    -- operator who made the call. Earlier we only enforced decided_at,
+    -- which let a row terminate with no actor recorded — orphaning
+    -- the audit trail required by SOC2/EU AI Act Art. 14 for HITL
+    -- actions on memory.
     CHECK (
-      (status = 'pending'  AND decided_at IS NULL) OR
-      (status IN ('approved','rejected') AND decided_at IS NOT NULL)
+      (status = 'pending'  AND decided_at IS NULL AND decided_by_user_id IS NULL) OR
+      (status IN ('approved','rejected') AND decided_at IS NOT NULL AND decided_by_user_id IS NOT NULL)
     )
 );
 

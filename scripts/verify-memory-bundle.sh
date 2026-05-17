@@ -86,7 +86,7 @@ BAD_APPROVED=$(sqlite3 "${DB}" "
   SELECT 'should_not_reach';
   ROLLBACK;
 " 2>&1 || true)
-assert_contains "  approved without decided_at rejected by CHECK" "${BAD_APPROVED}" "CHECK constraint failed"
+assert_contains "  approved without decided_at + decided_by_user_id rejected by CHECK" "${BAD_APPROVED}" "CHECK constraint failed"
 
 bold "4) inbox_items.kind CHECK admits memory_consolidation"
 INBOX_OK=$(sqlite3 "${DB}" "

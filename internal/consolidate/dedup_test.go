@@ -91,7 +91,10 @@ func TestDedupRules_OutsideWindow_NotApplied(t *testing.T) {
 // TestDedupRules_NoOutputDir: a non-existent dir is a no-op.
 func TestDedupRules_NoOutputDir(t *testing.T) {
 	in := []LearnedRule{{Pattern: "X", Action: "Y"}}
-	out := dedupAgainstPrior(in, "/definitely/does/not/exist", time.Now(), 7*24*time.Hour)
+	// Build a definitely-missing path from t.TempDir() so the test
+	// works on Windows where /absolute/unix/paths are invalid syntax.
+	missing := filepath.Join(t.TempDir(), "definitely", "does", "not", "exist")
+	out := dedupAgainstPrior(in, missing, time.Now(), 7*24*time.Hour)
 	if len(out) != 1 {
 		t.Errorf("dedup with missing dir should pass through, got %d", len(out))
 	}

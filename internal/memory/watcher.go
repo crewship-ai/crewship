@@ -55,6 +55,11 @@ type Watcher struct {
 	stop      chan struct{}
 	wg        sync.WaitGroup
 	closeOnce sync.Once
+	// flushWG tracks in-flight flush() calls spawned by time.AfterFunc
+	// so Stop() can wait for them before closing w.events. Without
+	// this, a flush firing concurrently with Stop could send on a
+	// closed channel and panic the watcher goroutine.
+	flushWG sync.WaitGroup
 
 	// debounceMu guards pendingPaths + debounceTimer. The dispatcher
 	// goroutine batches incoming raw events into pendingPaths until
@@ -136,6 +141,14 @@ func (w *Watcher) Events() <-chan WatchEvent {
 }
 
 // Stop drains the goroutines and closes the event channel. Idempotent.
+//
+// Shutdown order matters: (a) signal stop so producer goroutines bail,
+// (b) cancel any pending debounce timer so no NEW flush starts, then
+// (c) wait for already-spawned flush callbacks to drain via flushWG.
+// Only after that is it safe to close(w.events). The prior version
+// closed events directly after w.wg.Wait() — but time.AfterFunc
+// callbacks are NOT tracked in wg, so an in-flight flush could send
+// on a closed channel and panic. The flushWG fix closes that race.
 func (w *Watcher) Stop() {
 	w.closeOnce.Do(func() {
 		close(w.stop)
@@ -145,6 +158,12 @@ func (w *Watcher) Stop() {
 			w.debounceTimer.Stop()
 		}
 		w.debounceMu.Unlock()
+		// Wait for any flush() callback that was already mid-execution
+		// when Stop began. Their send-on-w.events is guarded by a
+		// select on w.stop, so they will fall through quickly — but
+		// they MUST complete before close(w.events) to avoid the
+		// "send on closed channel" panic.
+		w.flushWG.Wait()
 		close(w.events)
 	})
 }
@@ -165,6 +184,19 @@ func (w *Watcher) runFsnotify(fw *fsnotify.Watcher) {
 		case ev, ok := <-fw.Events:
 			if !ok {
 				return
+			}
+			// fsnotify is non-recursive: a Watcher.Add() on /root
+			// does NOT auto-watch subdirectories created later.
+			// Without this, agent-side mkdir of e.g. .memory/daily/
+			// goes undetected until the poll fallback ticks. Add
+			// the new dir as soon as we see its Create event.
+			if ev.Op&fsnotify.Create != 0 {
+				if info, err := os.Stat(ev.Name); err == nil && info.IsDir() {
+					if addErr := fw.Add(ev.Name); addErr != nil {
+						w.cfg.Logger.Warn("memory watcher: add new subdir",
+							"path", ev.Name, "error", addErr)
+					}
+				}
 			}
 			if !isMarkdownEvent(ev) {
 				continue
@@ -259,6 +291,13 @@ func (w *Watcher) note(path string) {
 // WatchEvent. If Stop fires concurrently the send is dropped via
 // the select on w.stop so we never block on a closed channel.
 func (w *Watcher) flush() {
+	// Hold flushWG for the entire callback so Stop() blocks until
+	// every in-flight flush has reached its select-on-stop branch.
+	// Decrement is deferred so the WaitGroup balances even if the
+	// function panics inside the body.
+	w.flushWG.Add(1)
+	defer w.flushWG.Done()
+
 	w.debounceMu.Lock()
 	paths := make([]string, 0, len(w.pendingPaths))
 	for p := range w.pendingPaths {

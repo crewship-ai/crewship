@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -298,9 +299,9 @@ func compactAllWorkspaces(ctx context.Context, db *sql.DB, comp *Compactor, opts
 // anything else is treated as off. Defaults to off so the existing
 // direct-write contract survives the upgrade unchanged.
 func hitlEnabled() bool {
-	v := os.Getenv("CREWSHIP_CONSOLIDATE_HITL")
-	switch v {
-	case "1", "true", "True", "TRUE", "yes", "YES":
+	v := strings.TrimSpace(os.Getenv("CREWSHIP_CONSOLIDATE_HITL"))
+	switch strings.ToLower(v) {
+	case "1", "true", "yes", "on":
 		return true
 	}
 	return false

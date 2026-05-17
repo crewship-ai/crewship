@@ -58,6 +58,12 @@ func TestMigrateV90_MemoryProposalsSchema(t *testing.T) {
 		}
 		got[name] = strings.ToUpper(ctype)
 	}
+	// Surface iterator-level failures (closed DB, malformed PRAGMA)
+	// before checking column types — otherwise a partial-iteration
+	// failure would produce a false-green or wrong-reason FAIL.
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate table_info rows: %v", err)
+	}
 	for col, ctype := range wantCols {
 		if got[col] != ctype {
 			t.Errorf("memory_proposals.%s type = %q, want %q (full schema: %+v)", col, got[col], ctype, got)
@@ -113,9 +119,16 @@ INSERT INTO memory_proposals (id, workspace_id, crew_id, proposal_path, status)
 VALUES ('p2', 'ws1', 'crew1', '/tmp/p2.md', 'approved')`); err == nil {
 		t.Fatalf("approved without decided_at must violate CHECK, got nil")
 	}
+	// decided_at alone is now insufficient: the CHECK also requires
+	// decided_by_user_id so the audit trail records the actor.
 	if _, err := db.Exec(`
 INSERT INTO memory_proposals (id, workspace_id, crew_id, proposal_path, status, decided_at)
-VALUES ('p3', 'ws1', 'crew1', '/tmp/p3.md', 'approved', datetime('now'))`); err != nil {
-		t.Fatalf("approved with decided_at must succeed: %v", err)
+VALUES ('p3_partial', 'ws1', 'crew1', '/tmp/p3.md', 'approved', datetime('now'))`); err == nil {
+		t.Fatalf("approved with decided_at but NO decided_by_user_id must violate CHECK, got nil")
+	}
+	if _, err := db.Exec(`
+INSERT INTO memory_proposals (id, workspace_id, crew_id, proposal_path, status, decided_at, decided_by_user_id)
+VALUES ('p3', 'ws1', 'crew1', '/tmp/p3.md', 'approved', datetime('now'), 'usr_op_1')`); err != nil {
+		t.Fatalf("approved with decided_at + decided_by_user_id must succeed: %v", err)
 	}
 }

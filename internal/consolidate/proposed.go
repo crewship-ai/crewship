@@ -80,7 +80,15 @@ func (c *Consolidator) writeProposal(
 		return ConsolidationResult{EntriesScanned: entriesScanned}, fmt.Errorf("write proposal: %w", err)
 	}
 
-	evidenceJSON, _ := json.Marshal(rules)
+	evidenceJSON, err := json.Marshal(rules)
+	if err != nil {
+		// Silently dropping the error leaves evidence_json blank for
+		// downstream explain readers — better to fail the whole
+		// proposal write so the operator sees the bug before it
+		// becomes "why are all my proposals empty in HITL UI".
+		_ = os.Remove(proposalPath)
+		return ConsolidationResult{EntriesScanned: entriesScanned}, fmt.Errorf("marshal proposal evidence: %w", err)
+	}
 	proposalID := "mp_" + runID
 	if c.DB != nil {
 		if _, err := c.DB.ExecContext(ctx, `

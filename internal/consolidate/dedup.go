@@ -42,14 +42,17 @@ import (
 // is a fresh allocation containing the surviving rules in input order.
 func dedupAgainstPrior(rules []LearnedRule, outputDir string, now time.Time, window time.Duration) []LearnedRule {
 	if len(rules) == 0 {
-		return rules
+		// Fast path: contract says "fresh allocation, doesn't mutate
+		// input". Returning the original slice would violate that
+		// for callers that subsequently mutate either side.
+		return append([]LearnedRule(nil), rules...)
 	}
 	if window <= 0 {
 		window = 7 * 24 * time.Hour
 	}
 	priors := loadPriorPatternHashes(outputDir, now, window)
 	if len(priors) == 0 {
-		return rules
+		return append([]LearnedRule(nil), rules...)
 	}
 	out := make([]LearnedRule, 0, len(rules))
 	for _, r := range rules {

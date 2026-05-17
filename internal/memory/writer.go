@@ -73,6 +73,12 @@ type WriteResult struct {
 // Callers that want a non-blocking write should run WriteFile in a
 // goroutine — the flock acquire here is blocking by design.
 func WriteFile(ctx context.Context, path string, content []byte, cfg WriteConfig) (WriteResult, error) {
+	// Defend against nil ctx — the preflight check would otherwise
+	// panic on the very first dereference. Callers that haven't yet
+	// wired a context get background timing semantics.
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if err := ctx.Err(); err != nil {
 		return WriteResult{}, fmt.Errorf("preflight context check: %w", err)
 	}

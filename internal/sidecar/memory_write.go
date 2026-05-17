@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -71,6 +72,15 @@ var memoryWriteCaps = map[string]int{
 // that.
 const dailyCap = 100_000
 
+// maxMemoryWriteRequestBytes caps the inbound JSON body for
+// handleMemoryWrite. dailyCap is the largest legitimate `content`
+// payload; +16 KB covers JSON framing (field names, escapes, scope/
+// allowlist overhead) so the wrapper never rejects valid daily-log
+// writes. Anything past this is either a misuse or an attempt to
+// pressure the sidecar by allocating a giant body before the cap
+// gate would have caught it later.
+const maxMemoryWriteRequestBytes int64 = dailyCap + 16_384
+
 // handleMemoryWrite handles POST /memory/write. Returns:
 //
 //	201 Created   on success (path persisted)
@@ -79,8 +89,22 @@ const dailyCap = 100_000
 //	422 Unprocessable Entity on scrubber or cap rejection (structured envelope)
 //	503 Service Unavailable on missing memory engine for scope
 func (s *Server) handleMemoryWrite(w http.ResponseWriter, r *http.Request) {
+	// Cap the request body size BEFORE json.Decoder allocates it.
+	// dailyCap (100 KB) is the largest legitimate content; add some
+	// JSON framing slack so the limit doesn't reject valid payloads
+	// at the byte boundary. Without this guard a localhost client
+	// could POST gigabytes and force the sidecar to allocate them
+	// in memory just to fail at the cap check later.
+	r.Body = http.MaxBytesReader(w, r.Body, maxMemoryWriteRequestBytes)
 	var req MemoryWriteRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			writeJSONResponse(w, http.StatusRequestEntityTooLarge, map[string]string{
+				"error": "request body exceeds size limit",
+			})
+			return
+		}
 		writeJSONResponse(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
 		return
 	}
@@ -110,21 +134,22 @@ func (s *Server) handleMemoryWrite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Reject paths outside the known whitelist. memoryWriteCaps holds
-	// the three canonical basenames (AGENT.md / CREW.md / pins.md); any
-	// path under daily/ gets dailyCap; everything else is refused at
-	// the boundary. The prior fallback of cap=0 was an unbounded write
-	// path — any in-base path the caller could construct was accepted
-	// with no byte ceiling, defeating the whole reason the caps map
-	// exists.
+	// Reject paths outside the known whitelist. memoryWriteCaps is
+	// keyed by the EXACT cleaned relative path — not by basename —
+	// so a request like "foo/AGENT.md" or "nested/pins.md" is
+	// rejected. The earlier basename-only check let nested forgeries
+	// through (foo/AGENT.md basenamed to AGENT.md and inherited its
+	// cap). For daily/*, require exactly one slash so a path like
+	// "daily/x/y.md" is also refused.
 	rel := filepath.ToSlash(filepath.Clean(req.File))
-	cap, known := memoryWriteCaps[filepath.Base(rel)]
+	cap, known := memoryWriteCaps[rel]
 	if !known {
-		if strings.HasPrefix(rel, "daily/") {
+		// daily/<name>.md — single segment only.
+		if rest, ok := strings.CutPrefix(rel, "daily/"); ok && rest != "" && !strings.Contains(rest, "/") {
 			cap = dailyCap
 		} else {
 			writeJSONResponse(w, http.StatusBadRequest, map[string]string{
-				"error": "unsupported file path; allowed: AGENT.md, CREW.md, pins.md, daily/*",
+				"error": "unsupported file path; allowed: AGENT.md, CREW.md, pins.md, daily/<name>.md",
 			})
 			return
 		}
@@ -245,6 +270,31 @@ func safeJoinUnder(base, rel string) (string, error) {
 		return "", err
 	}
 	if !strings.HasPrefix(absCleaned, absBase+string(filepath.Separator)) && absCleaned != absBase {
+		return "", errIllegalPath
+	}
+	// Symlink-escape guard: filepath.Clean is purely textual, so a
+	// symlink planted inside base that points outside still passes
+	// the prefix check above. Resolve the parent dir's real path
+	// (the file itself may not exist yet on first write) and verify
+	// it stays inside base. We don't EvalSymlinks the full target —
+	// that would fail when the file is brand new — only the parent.
+	parent := filepath.Dir(absCleaned)
+	resolved, err := filepath.EvalSymlinks(parent)
+	if err != nil {
+		// On first write the parent may not exist; fall back to
+		// returning the (already prefix-checked) cleaned path. The
+		// downstream MkdirAll will create it inside base, so the
+		// symlink-escape window is closed for the create case.
+		if os.IsNotExist(err) {
+			return cleaned, nil
+		}
+		return "", err
+	}
+	resolvedBase, err := filepath.EvalSymlinks(absBase)
+	if err != nil {
+		return "", err
+	}
+	if !strings.HasPrefix(resolved, resolvedBase+string(filepath.Separator)) && resolved != resolvedBase {
 		return "", errIllegalPath
 	}
 	return cleaned, nil

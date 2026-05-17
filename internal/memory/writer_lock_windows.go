@@ -13,6 +13,15 @@ import (
 // LockFileEx. The Unix flock(2) semantics map to Windows
 // LockFileEx with LOCKFILE_EXCLUSIVE_LOCK over the entire file
 // range. Blocking by default — no LOCKFILE_FAIL_IMMEDIATELY flag.
+//
+// Range encoding: the (low, high) pair specifies the number of bytes
+// to lock starting at offset 0. The prior code passed (1, 0) which
+// locks exactly ONE byte at offset 0 — not the whole file — so two
+// writers could each acquire single-byte locks on different ranges
+// and both proceed concurrently, defeating the flock contract. We
+// instead pass (0xFFFFFFFF, 0xFFFFFFFF) which encodes a 64-bit-max
+// byte range, matching Microsoft's documented "lock the entire
+// file" convention.
 func (l *writeLock) Lock() error {
 	f, err := os.OpenFile(l.path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
@@ -22,7 +31,7 @@ func (l *writeLock) Lock() error {
 	if err := windows.LockFileEx(
 		windows.Handle(f.Fd()),
 		windows.LOCKFILE_EXCLUSIVE_LOCK,
-		0, 1, 0, &ol,
+		0, 0xFFFFFFFF, 0xFFFFFFFF, &ol,
 	); err != nil {
 		_ = f.Close()
 		return fmt.Errorf("LockFileEx: %w", err)
@@ -32,6 +41,7 @@ func (l *writeLock) Lock() error {
 }
 
 // Unlock releases the lock and closes the underlying fd. Idempotent.
+// Must release the same byte range that Lock acquired.
 func (l *writeLock) Unlock() error {
 	if l.f == nil {
 		return nil
@@ -40,7 +50,7 @@ func (l *writeLock) Unlock() error {
 	var firstErr error
 	if err := windows.UnlockFileEx(
 		windows.Handle(l.f.Fd()),
-		0, 1, 0, &ol,
+		0, 0xFFFFFFFF, 0xFFFFFFFF, &ol,
 	); err != nil {
 		firstErr = err
 	}

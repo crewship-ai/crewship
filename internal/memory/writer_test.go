@@ -180,11 +180,21 @@ func TestWriteFile_AtomicReplace_UnderConcurrency(t *testing.T) {
 
 	const N = 8
 	payloads := make([][]byte, N)
-	want := map[string]bool{"": true}
+	// FINAL-state map: empty file ("") is NOT allowed once all writers
+	// have returned, because every WriteFile call commits a complete
+	// payload via atomic rename — at least one of them must have won
+	// the race. Allowing "" here would let a buggy implementation
+	// (e.g. truncate-on-open) silently pass.
+	want := map[string]bool{}
+	// PRE-rename map: while writers race, the partial-byte sampler
+	// below may legitimately catch an empty file (between MkdirAll
+	// and the first successful rename). Track that separately.
+	wantDuringRace := map[string]bool{"": true}
 	for i := 0; i < N; i++ {
 		// Different sizes increase the chance any partial-write would be visible.
 		payloads[i] = []byte(strings.Repeat("abcdef\n", 100+i*7))
 		want[string(payloads[i])] = true
+		wantDuringRace[string(payloads[i])] = true
 	}
 
 	var wg sync.WaitGroup
@@ -209,7 +219,10 @@ func TestWriteFile_AtomicReplace_UnderConcurrency(t *testing.T) {
 	for {
 		select {
 		case <-done:
-			final, _ := os.ReadFile(path)
+			final, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("final ReadFile: %v", err)
+			}
 			if !want[string(final)] {
 				t.Errorf("final file content not one of the expected payloads (len=%d)", len(final))
 			}
@@ -217,7 +230,11 @@ func TestWriteFile_AtomicReplace_UnderConcurrency(t *testing.T) {
 		default:
 			data, err := os.ReadFile(path)
 			if err == nil {
-				if !want[string(data)] {
+				// During the race the file may not yet exist or may
+				// hold any of the N payloads — both are fine. Only
+				// after wg has completed (the <-done branch above)
+				// do we tighten to "must be a real payload".
+				if !wantDuringRace[string(data)] {
 					t.Errorf("torn-write observed: file content (len=%d) does not match any expected payload", len(data))
 					return
 				}
