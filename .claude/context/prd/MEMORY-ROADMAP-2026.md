@@ -209,7 +209,9 @@ The `memory.WorkspaceMemory` primitive already exists at
 #### 6.3 Versioned memory + audit (EU AI Act Art. 14)
 
 Every successful write via `memory.WriteFile` records an append-only row
-to a new `memory_versions` table (DB migration v90).
+to a new `memory_versions` table (DB migration v91). (Originally
+authored as v90; renumbered to v91 on rebase after PR #1's
+`add_memory_proposals` took v90 first.)
 
 Schema:
 ```sql
@@ -248,7 +250,7 @@ API mirrors:
 **Files touched:**
 - `internal/memory/writer.go` — emit version record on every
   successful write (after rename, before return)
-- `internal/database/migrate_consts_v90_memory_versions.go` (new)
+- `internal/database/migrate_consts_v91_memory_versions.go` (new; renumbered from v90 on rebase)
 - `internal/memory/versions.go` (new) — Log, Show, Restore helpers
 - `cmd/crewship/cmd_memory.go` (new) — CLI subcommand
 - `internal/api/memory_versions_handler.go` (new)
@@ -265,7 +267,7 @@ API mirrors:
 ### PR #2 verification
 
 Extend `scripts/verify-memory-bundle.sh`:
-- Assert `memory_versions` table exists with the 9 columns
+- Assert `memory_versions` table exists with the 10 columns (see schema above)
 - Insert a row, retrieve via API, restore via API, assert canonical
   content matches restored sha
 - Approve a proposal end-to-end (with a real `.proposed/` file)
