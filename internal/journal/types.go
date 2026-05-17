@@ -116,6 +116,18 @@ const (
 	// Severity is info — these are operational events, not warnings.
 	EntryMemorySearched EntryType = "memory.searched"
 
+	// EntryMemoryVersionsSwept fires when the per-workspace memory_versions
+	// retention sweep deletes one or more rows from the audit-trail table.
+	// Payload carries `workspace_id`, `deleted_count` (int), and
+	// `retention_days` (the cutoff in days that was applied to this
+	// workspace — extracted from workspaces.memory_config.versions_retention_days
+	// or the 30-day default). Severity is `info`: routine maintenance.
+	// Operators tail this entry to verify the sweep is firing and to
+	// audit how much history has been trimmed. Blob GC is a separate
+	// concern handled by the consolidate package's daily prune — this
+	// event only describes row deletions.
+	EntryMemoryVersionsSwept EntryType = "memory.versions_swept"
+
 	// EntryMemorySkillProposed fires when the memory→Skills bridge stages
 	// a learned rule as .proposed/skill-{slug}.md. Distinct from
 	// EntryMemoryConsolidationProposed because the lifecycle is
