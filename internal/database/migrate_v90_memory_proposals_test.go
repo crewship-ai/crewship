@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"database/sql"
 	"io"
 	"log/slog"
 	"path/filepath"
@@ -14,6 +15,11 @@ import (
 // inbox_items.kind CHECK now admits 'memory_consolidation', and
 // workspaces gained the memory_config column. (Originally v89 on
 // feat/memory-reliability-bundle; renumbered to v90 on rebase.)
+//
+// Refactored into subtests + table-driven status matrix per the project's
+// test-style guidelines: one t.Fatalf in a flat function masks downstream
+// regressions, whereas distinct subtests let CI surface every breakage at
+// once.
 func TestMigrateV90_MemoryProposalsSchema(t *testing.T) {
 	dir := t.TempDir()
 	db, err := Open("file:" + filepath.Join(dir, "v90.db"))
@@ -27,7 +33,43 @@ func TestMigrateV90_MemoryProposalsSchema(t *testing.T) {
 		t.Fatalf("Migrate: %v", err)
 	}
 
-	// memory_proposals table exists with the strict columns we care about.
+	// Seed the prerequisite workspace + crew once; the inbox + status
+	// subtests reuse them.
+	if _, err := db.Exec(`INSERT INTO workspaces (id, name, slug) VALUES ('ws1', 'WS', 'ws1')`); err != nil {
+		t.Fatalf("insert workspace: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO crews (id, workspace_id, name, slug) VALUES ('crew1', 'ws1', 'Crew', 'crew1')`); err != nil {
+		t.Fatalf("insert crew: %v", err)
+	}
+
+	t.Run("schema", func(t *testing.T) {
+		assertMemoryProposalsSchema(t, db.DB)
+	})
+
+	t.Run("inbox_kind_check", func(t *testing.T) {
+		assertInboxKindCheck(t, db.DB)
+	})
+
+	t.Run("workspace_memory_config_column", func(t *testing.T) {
+		var memCfg *string
+		if err := db.QueryRow(`SELECT memory_config FROM workspaces WHERE id = 'ws1'`).Scan(&memCfg); err != nil {
+			t.Fatalf("read workspaces.memory_config: %v", err)
+		}
+		if memCfg != nil {
+			t.Errorf("expected memory_config NULL by default, got %q", *memCfg)
+		}
+	})
+
+	t.Run("proposal_status_matrix", func(t *testing.T) {
+		assertProposalStatusMatrix(t, db.DB)
+	})
+}
+
+// assertMemoryProposalsSchema runs the column-type table check for the
+// memory_proposals table. Kept in a helper so the t.Run wrapper above
+// stays readable.
+func assertMemoryProposalsSchema(t *testing.T, db *sql.DB) {
+	t.Helper()
 	wantCols := map[string]string{
 		"id":                 "TEXT",
 		"workspace_id":       "TEXT",
@@ -69,66 +111,116 @@ func TestMigrateV90_MemoryProposalsSchema(t *testing.T) {
 			t.Errorf("memory_proposals.%s type = %q, want %q (full schema: %+v)", col, got[col], ctype, got)
 		}
 	}
+}
 
-	// inbox_items now admits memory_consolidation kind without violating the CHECK.
-	if _, err := db.Exec(`INSERT INTO workspaces (id, name, slug) VALUES ('ws1', 'WS', 'ws1')`); err != nil {
-		t.Fatalf("insert workspace: %v", err)
-	}
-	// Seed a crew so the FK on memory_proposals.crew_id (added in
-	// this migration) is satisfied by the INSERTs below.
-	if _, err := db.Exec(`INSERT INTO crews (id, workspace_id, name, slug) VALUES ('crew1', 'ws1', 'Crew', 'crew1')`); err != nil {
-		t.Fatalf("insert crew: %v", err)
-	}
-	if _, err := db.Exec(`
+// assertInboxKindCheck asserts the widened CHECK admits the new
+// memory_consolidation kind and still rejects unknown kinds.
+func assertInboxKindCheck(t *testing.T, db *sql.DB) {
+	t.Helper()
+	t.Run("accepts_memory_consolidation", func(t *testing.T) {
+		if _, err := db.Exec(`
 INSERT INTO inbox_items (id, workspace_id, kind, source_id, title)
 VALUES ('ibx_mc_1', 'ws1', 'memory_consolidation', 'prop_1', 'Memory consolidation proposal')`); err != nil {
-		t.Fatalf("insert memory_consolidation inbox item: %v", err)
-	}
-
-	// Pre-existing kinds still allowed.
-	if _, err := db.Exec(`
-INSERT INTO inbox_items (id, workspace_id, kind, source_id, title)
-VALUES ('ibx_wp_1', 'ws1', 'waitpoint', 'tok_1', 'Waitpoint')`); err != nil {
-		t.Fatalf("insert waitpoint inbox item: %v", err)
-	}
-
-	// Unknown kind still rejected by the rebuilt CHECK.
-	if _, err := db.Exec(`
+			t.Fatalf("insert memory_consolidation inbox item: %v", err)
+		}
+	})
+	t.Run("rejects_unknown_kind", func(t *testing.T) {
+		if _, err := db.Exec(`
 INSERT INTO inbox_items (id, workspace_id, kind, source_id, title)
 VALUES ('ibx_bad_1', 'ws1', 'bogus_kind', 'x', 'x')`); err == nil {
-		t.Fatalf("expected CHECK violation on unknown kind, got nil")
-	}
+			t.Fatalf("expected CHECK violation on unknown kind, got nil")
+		}
+	})
+}
 
-	// workspaces.memory_config column exists and is nullable.
-	var memCfg *string
-	if err := db.QueryRow(`SELECT memory_config FROM workspaces WHERE id = 'ws1'`).Scan(&memCfg); err != nil {
-		t.Fatalf("read workspaces.memory_config: %v", err)
+// assertProposalStatusMatrix is the table-driven sibling of the old
+// flat insert sequence. Each row describes one (status, decided_at,
+// decided_by_user_id) combination and whether the CHECK should accept
+// it. Table-driven so a future status-vocabulary expansion stays
+// O(1) — add a row, don't append another insert block.
+func assertProposalStatusMatrix(t *testing.T, db *sql.DB) {
+	t.Helper()
+	cases := []struct {
+		name          string
+		id            string
+		status        string
+		decidedAt     sql.NullString
+		decidedByUser sql.NullString
+		wantAccept    bool
+		violationHint string
+	}{
+		{
+			name:       "pending_with_neither_decided_field",
+			id:         "p_pending_ok",
+			status:     "pending",
+			wantAccept: true,
+		},
+		{
+			name:          "approved_without_either_decided_field",
+			id:            "p_approved_bare",
+			status:        "approved",
+			wantAccept:    false,
+			violationHint: "approved with no decided_at AND no decided_by_user_id must violate CHECK",
+		},
+		{
+			name:          "approved_with_decided_at_only",
+			id:            "p_approved_partial",
+			status:        "approved",
+			decidedAt:     sql.NullString{String: "datetime('now')", Valid: true},
+			wantAccept:    false,
+			violationHint: "approved with decided_at but NO decided_by_user_id must violate CHECK (audit trail integrity)",
+		},
+		{
+			name:          "approved_with_both_decided_fields",
+			id:            "p_approved_full",
+			status:        "approved",
+			decidedAt:     sql.NullString{String: "datetime('now')", Valid: true},
+			decidedByUser: sql.NullString{String: "usr_op_1", Valid: true},
+			wantAccept:    true,
+		},
+		{
+			name:          "rejected_with_decided_at_only",
+			id:            "p_rejected_partial",
+			status:        "rejected",
+			decidedAt:     sql.NullString{String: "datetime('now')", Valid: true},
+			wantAccept:    false,
+			violationHint: "rejected with decided_at but NO decided_by_user_id must violate CHECK",
+		},
+		{
+			name:          "rejected_with_both_decided_fields",
+			id:            "p_rejected_full",
+			status:        "rejected",
+			decidedAt:     sql.NullString{String: "datetime('now')", Valid: true},
+			decidedByUser: sql.NullString{String: "usr_op_2", Valid: true},
+			wantAccept:    true,
+		},
 	}
-	if memCfg != nil {
-		t.Errorf("expected memory_config NULL by default, got %q", *memCfg)
-	}
-
-	// memory_proposals status CHECK: pending must have decided_at NULL.
-	if _, err := db.Exec(`
-INSERT INTO memory_proposals (id, workspace_id, crew_id, proposal_path, status)
-VALUES ('p1', 'ws1', 'crew1', '/tmp/p1.md', 'pending')`); err != nil {
-		t.Fatalf("insert pending proposal: %v", err)
-	}
-	if _, err := db.Exec(`
-INSERT INTO memory_proposals (id, workspace_id, crew_id, proposal_path, status)
-VALUES ('p2', 'ws1', 'crew1', '/tmp/p2.md', 'approved')`); err == nil {
-		t.Fatalf("approved without decided_at must violate CHECK, got nil")
-	}
-	// decided_at alone is now insufficient: the CHECK also requires
-	// decided_by_user_id so the audit trail records the actor.
-	if _, err := db.Exec(`
-INSERT INTO memory_proposals (id, workspace_id, crew_id, proposal_path, status, decided_at)
-VALUES ('p3_partial', 'ws1', 'crew1', '/tmp/p3.md', 'approved', datetime('now'))`); err == nil {
-		t.Fatalf("approved with decided_at but NO decided_by_user_id must violate CHECK, got nil")
-	}
-	if _, err := db.Exec(`
-INSERT INTO memory_proposals (id, workspace_id, crew_id, proposal_path, status, decided_at, decided_by_user_id)
-VALUES ('p3', 'ws1', 'crew1', '/tmp/p3.md', 'approved', datetime('now'), 'usr_op_1')`); err != nil {
-		t.Fatalf("approved with decided_at + decided_by_user_id must succeed: %v", err)
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			// Build the INSERT dynamically based on which decided_*
+			// fields are set. datetime('now') is a SQL expression so
+			// it must NOT be parameter-bound; the bool flags decide
+			// whether to inline it as raw SQL.
+			cols := []string{"id", "workspace_id", "crew_id", "proposal_path", "status"}
+			vals := []string{"?", "?", "?", "?", "?"}
+			args := []any{c.id, "ws1", "crew1", "/tmp/" + c.id + ".md", c.status}
+			if c.decidedAt.Valid {
+				cols = append(cols, "decided_at")
+				vals = append(vals, c.decidedAt.String) // inline SQL expr
+			}
+			if c.decidedByUser.Valid {
+				cols = append(cols, "decided_by_user_id")
+				vals = append(vals, "?")
+				args = append(args, c.decidedByUser.String)
+			}
+			q := "INSERT INTO memory_proposals (" + strings.Join(cols, ", ") + ") VALUES (" + strings.Join(vals, ", ") + ")"
+			_, err := db.Exec(q, args...)
+			if c.wantAccept && err != nil {
+				t.Errorf("insert should have succeeded but failed: %v\n  query: %s", err, q)
+			}
+			if !c.wantAccept && err == nil {
+				t.Errorf("insert should have violated CHECK but succeeded.\n  hint: %s\n  query: %s", c.violationHint, q)
+			}
+		})
 	}
 }
