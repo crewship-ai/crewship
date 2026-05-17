@@ -27,6 +27,12 @@ type WriteConfig struct {
 	Scrubber       *scrubber.Scrubber
 	ScrubberMode   scrubber.Mode
 	AllowlistRegex string
+	// Verifier runs after the scrubber + cap pass but before the
+	// flock + write. Zero value (VerifierConfig{}, Mode=VerifierOff)
+	// is "no verification" — matches the legacy contract.
+	// Production-side callers wire this from workspace_settings
+	// .memory_config.verifier_mode to support per-workspace policy.
+	Verifier VerifierConfig
 }
 
 // WriteResult is what WriteFile returns to its caller. A rejected
@@ -44,6 +50,12 @@ type WriteResult struct {
 	RejectionKind   string
 	RejectionDetail map[string]any
 	Hits            []scrubber.Hit
+	// VerifierFindings is the verifier's per-rule findings list,
+	// populated when WriteConfig.Verifier was active regardless of
+	// whether the write was rejected. Allows callers to log near-
+	// miss signals (e.g. a citation that ALMOST matched) for
+	// post-hoc tuning. Empty when verifier was off.
+	VerifierFindings []VerifierFinding
 }
 
 // WriteFile persists `content` at `path` with optional cap + scrubber
@@ -132,6 +144,32 @@ func WriteFile(ctx context.Context, path string, content []byte, cfg WriteConfig
 		}
 	}
 
+	// 2.5. Verifier pass — citation-staleness + (future) contradiction
+	// checks. Runs against the effective content (post-redact in
+	// scrubber.ModeRedact) so a redacted-then-rejected sequence is
+	// impossible: the verifier reads what would actually land on
+	// disk. Zero-value VerifierConfig (Mode=VerifierOff) bypasses
+	// the call without I/O.
+	var verifierFindings []VerifierFinding
+	if cfg.Verifier.Mode != VerifierOff {
+		vres, vErr := VerifyWrite(ctx, effective, cfg.Verifier)
+		if vErr != nil {
+			return WriteResult{}, fmt.Errorf("verifier: %w", vErr)
+		}
+		verifierFindings = vres.Findings
+		if vres.Decision == VerifierReject {
+			return WriteResult{
+				Rejected:      true,
+				RejectionKind: "verifier",
+				RejectionDetail: map[string]any{
+					"verifier_kind":     vres.Kind,
+					"verifier_findings": vres.Findings,
+				},
+				VerifierFindings: vres.Findings,
+			}, nil
+		}
+	}
+
 	// 3. Filesystem path: MkdirAll, lock, tempfile, fsync, rename.
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return WriteResult{}, fmt.Errorf("mkdir parent: %w", err)
@@ -213,7 +251,11 @@ func WriteFile(ctx context.Context, path string, content []byte, cfg WriteConfig
 		return WriteResult{}, fmt.Errorf("open parent dir for fsync: %w", openErr)
 	}
 
-	return WriteResult{BytesWritten: len(effective), Hits: hits}, nil
+	return WriteResult{
+		BytesWritten:     len(effective),
+		Hits:             hits,
+		VerifierFindings: verifierFindings,
+	}, nil
 }
 
 // FileLock is an OS-level advisory lock anchored at a sentinel file
