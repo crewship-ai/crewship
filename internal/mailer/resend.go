@@ -12,11 +12,13 @@ import (
 	"time"
 )
 
-// resendAPIURL is the only Resend endpoint we hit. Hardcoded rather
-// than env-configurable: if Resend ever moves their API base, every
-// other library will break too — there's no scenario where pointing
-// this elsewhere produces a working setup.
-const resendAPIURL = "https://api.resend.com/emails"
+// resendAPIURL is the only Resend endpoint we hit. Not env-configurable:
+// if Resend ever moves their API base, every other library will break
+// too — there's no scenario where pointing this elsewhere produces a
+// working setup. Declared as var (not const) solely so the test file
+// can swap it for an httptest server URL inside a t.Cleanup; production
+// callers must treat it as immutable.
+var resendAPIURL = "https://api.resend.com/emails"
 
 // Resend is the production transport for transactional auth emails
 // (password reset today, email verification next). Reads its
