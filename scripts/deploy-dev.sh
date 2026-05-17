@@ -36,10 +36,19 @@ git push origin "$BRANCH" 2>&1
 # with by crafted env values (CodeRabbit security catch). The remote
 # reads them as $1, $2.
 echo ">>> Deploying on server..."
-ssh "$SERVER_HOST" bash -s -- "$SERVER_PATH" "$BRANCH" <<'REMOTE'
+# Forward SENTRY_DSN / NEXT_PUBLIC_SENTRY_DSN through to the remote when set
+# locally. Empty default keeps existing dev-VM deploys telemetry-silent (matches
+# Makefile + .goreleaser.yml + Dockerfile contract). Passed as positional args
+# rather than `ssh -o SendEnv` so we don't depend on AcceptEnv being configured
+# on the dev server's sshd_config.
+SENTRY_DSN_VAL="${SENTRY_DSN:-}"
+NEXT_PUBLIC_SENTRY_DSN_VAL="${NEXT_PUBLIC_SENTRY_DSN:-}"
+ssh "$SERVER_HOST" bash -s -- "$SERVER_PATH" "$BRANCH" "$SENTRY_DSN_VAL" "$NEXT_PUBLIC_SENTRY_DSN_VAL" <<'REMOTE'
   set -euo pipefail
   SERVER_PATH="$1"
   BRANCH="$2"
+  export SENTRY_DSN="${3:-}"
+  export NEXT_PUBLIC_SENTRY_DSN="${4:-}"
   export PATH=$PATH:/usr/local/go/bin:$HOME/go/bin
   cd "$SERVER_PATH"
 
@@ -56,9 +65,11 @@ ssh "$SERVER_HOST" bash -s -- "$SERVER_PATH" "$BRANCH" <<'REMOTE'
   git reset --hard "origin/$BRANCH"
   echo "  Branch: $BRANCH ($(git log --oneline -1))"
 
-  # Rebuild
+  # Rebuild via Make so LDFLAGS (incl. -X crashreport.DSN=$SENTRY_DSN) are
+  # applied consistently with CI / goreleaser. Empty SENTRY_DSN leaves the
+  # binary telemetry-silent — same shape as a local `make build:go`.
   echo "  Building Go..."
-  go build -o crewship ./cmd/crewship 2>&1
+  make build:go 2>&1
 
   echo "  Installing npm deps..."
   pnpm install 2>&1 | tail -2

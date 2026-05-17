@@ -4,7 +4,16 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "none")
 DATE    ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 LICENSE_PUBKEY ?=
-LDFLAGS    = -ldflags "-s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE) -X github.com/crewship-ai/crewship/internal/license.publicKey=$(LICENSE_PUBKEY)"
+# SENTRY_DSN is the Go-side crash-report endpoint, baked in at link time
+# via -X internal/crashreport.DSN. Empty default keeps local `make build`
+# fully telemetry-silent; CI/release paths export the real value from the
+# SENTRY_DSN GitHub Actions secret. Mirrors .goreleaser.yml + Dockerfile so
+# all three build paths agree on the contract. The frontend equivalent
+# (NEXT_PUBLIC_SENTRY_DSN, routed to the SENTRY_DSN_FRONTEND secret in CI)
+# is consumed directly by `pnpm build` from process env — no wiring needed
+# here as long as it's exported when `make build` is invoked.
+SENTRY_DSN ?=
+LDFLAGS    = -ldflags "-s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE) -X github.com/crewship-ai/crewship/internal/license.publicKey=$(LICENSE_PUBKEY) -X github.com/crewship-ai/crewship/internal/crashreport.DSN=$(SENTRY_DSN)"
 # -trimpath strips workspace paths (/Users/.../crewship_2/...) from the
 # binary, giving reproducible builds across machines and shaving a few KB
 # off the embedded debug info. Adds nothing measurable to compile time.
