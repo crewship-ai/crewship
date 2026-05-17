@@ -40,17 +40,21 @@ import (
 // score_json column (an empty map serialises to "{}" rather than
 // "null").
 func TestConsolidate_ComputeProposalScores_EmptyRulesReturnsEmptyMap(t *testing.T) {
-	scores := computeProposalScores(nil, time.Now())
+	// Use computeProposalScoresWithRecall directly (the wrapper
+	// computeProposalScores was removed as unused in PR #391; this
+	// test was authored before the cleanup and still asserts the
+	// same contract — empty input → non-nil empty map).
+	scores := computeProposalScoresWithRecall(context.Background(), nil, "", nil, 0, time.Now())
 	if scores == nil {
-		t.Errorf("computeProposalScores(nil) returned nil map; want non-nil empty map for JSON-marshal compatibility")
+		t.Errorf("computeProposalScoresWithRecall(nil rules) returned nil map; want non-nil empty map for JSON-marshal compatibility")
 	}
 	if len(scores) != 0 {
 		t.Errorf("len = %d, want 0 for empty input", len(scores))
 	}
 
-	scores = computeProposalScores([]LearnedRule{}, time.Now())
+	scores = computeProposalScoresWithRecall(context.Background(), nil, "", []LearnedRule{}, 0, time.Now())
 	if scores == nil {
-		t.Errorf("computeProposalScores([]) returned nil map; want non-nil empty map")
+		t.Errorf("computeProposalScoresWithRecall([] rules) returned nil map; want non-nil empty map")
 	}
 	if len(scores) != 0 {
 		t.Errorf("len = %d, want 0 for empty input", len(scores))
