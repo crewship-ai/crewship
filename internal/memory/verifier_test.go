@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -124,7 +125,7 @@ func TestVerifyWrite_NoSearchRoots_NoOp(t *testing.T) {
 	}
 }
 
-func TestVerifyWrite_LLMMode_DegradesToCheapWithFinding(t *testing.T) {
+func TestVerifyWrite_LLMMode_NoLLM_SkippedFinding(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "ok.go"), []byte("a\nb\n"), 0o644); err != nil {
 		t.Fatalf("seed: %v", err)
@@ -133,20 +134,169 @@ func TestVerifyWrite_LLMMode_DegradesToCheapWithFinding(t *testing.T) {
 		[]byte("see ok.go:1"),
 		VerifierConfig{Mode: VerifierLLM, CitationSearchRoots: []string{root}})
 	if res.Decision != VerifierAllow {
-		t.Errorf("LLM mode with valid citation should allow, got %v", res.Decision)
+		t.Errorf("LLM mode without LLM should allow, got %v", res.Decision)
 	}
-	// llm_skipped finding present so audit shows the mode degraded.
 	found := false
 	for _, f := range res.Findings {
 		if f.CheckName == "llm_skipped" {
 			found = true
+			if reason, _ := f.Detail["reason"].(string); reason != "no LLM verifier wired" {
+				t.Errorf("skipped reason = %q, want 'no LLM verifier wired'", reason)
+			}
 			break
 		}
 	}
 	if !found {
-		t.Errorf("expected llm_skipped Finding in LLM mode")
+		t.Errorf("expected llm_skipped Finding in LLM mode without LLM")
 	}
 }
+
+// stubLLMVerifier returns canned (contradicts, reason) so the LLM
+// integration tests don't need a real Ollama. Calls are recorded
+// for assertion.
+type stubLLMVerifier struct {
+	contradicts bool
+	reason      string
+	err         error
+	calls       int
+}
+
+func (s *stubLLMVerifier) VerifyContradiction(_ context.Context, content []byte, pinnedFacts []string) (bool, string, error) {
+	s.calls++
+	return s.contradicts, s.reason, s.err
+}
+
+func TestVerifyWrite_LLMMode_Contradiction_Rejects(t *testing.T) {
+	llm := &stubLLMVerifier{contradicts: true, reason: "candidate says X; pin says NOT X"}
+	res, err := VerifyWrite(context.Background(),
+		[]byte("any candidate body"),
+		VerifierConfig{
+			Mode:        VerifierLLM,
+			LLM:         llm,
+			PinnedFacts: []string{"NOT X is the established truth"},
+		})
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if res.Decision != VerifierReject {
+		t.Fatalf("contradiction should reject, got %v", res.Decision)
+	}
+	if res.Kind != "contradiction" {
+		t.Errorf("Kind = %q, want contradiction", res.Kind)
+	}
+	if llm.calls != 1 {
+		t.Errorf("LLM calls = %d, want 1", llm.calls)
+	}
+	// Reason wired through to the Finding.
+	found := false
+	for _, f := range res.Findings {
+		if f.CheckName == "contradiction" {
+			found = true
+			if r, _ := f.Detail["reason"].(string); !strings.Contains(r, "NOT X") {
+				t.Errorf("contradiction reason missing LLM detail: %v", f.Detail)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("expected 'contradiction' Finding")
+	}
+}
+
+func TestVerifyWrite_LLMMode_NoContradiction_Allow(t *testing.T) {
+	llm := &stubLLMVerifier{contradicts: false, reason: "no overlap"}
+	res, _ := VerifyWrite(context.Background(),
+		[]byte("unrelated body"),
+		VerifierConfig{Mode: VerifierLLM, LLM: llm, PinnedFacts: []string{"X is true"}})
+	if res.Decision != VerifierAllow {
+		t.Errorf("no-contradiction should allow, got %v", res.Decision)
+	}
+	// Positive Finding records the clean check — audit shows the
+	// LLM ran even when it found nothing.
+	hasClean := false
+	for _, f := range res.Findings {
+		if f.CheckName == "contradiction_clean" {
+			hasClean = true
+		}
+	}
+	if !hasClean {
+		t.Errorf("expected contradiction_clean Finding on no-contradiction allow")
+	}
+}
+
+func TestVerifyWrite_LLMMode_EmptyPinnedFacts_Skipped(t *testing.T) {
+	llm := &stubLLMVerifier{}
+	res, _ := VerifyWrite(context.Background(),
+		[]byte("anything"),
+		VerifierConfig{Mode: VerifierLLM, LLM: llm, PinnedFacts: nil})
+	if res.Decision != VerifierAllow {
+		t.Errorf("empty pins should allow, got %v", res.Decision)
+	}
+	if llm.calls != 0 {
+		t.Errorf("LLM should NOT be called with empty pins; calls=%d", llm.calls)
+	}
+	hasSkipped := false
+	for _, f := range res.Findings {
+		if f.CheckName == "llm_skipped" {
+			hasSkipped = true
+			if reason, _ := f.Detail["reason"].(string); reason != "no pinned facts to compare against" {
+				t.Errorf("skipped reason = %q, want 'no pinned facts...'", reason)
+			}
+		}
+	}
+	if !hasSkipped {
+		t.Errorf("expected llm_skipped Finding when PinnedFacts empty")
+	}
+}
+
+func TestVerifyWrite_LLMMode_LLMError_DegradesToAllow(t *testing.T) {
+	llm := &stubLLMVerifier{err: errStubLLMUnavailable}
+	res, _ := VerifyWrite(context.Background(),
+		[]byte("anything"),
+		VerifierConfig{Mode: VerifierLLM, LLM: llm, PinnedFacts: []string{"X"}})
+	if res.Decision != VerifierAllow {
+		t.Errorf("LLM error should degrade to allow (not block writes on LLM downtime), got %v", res.Decision)
+	}
+	hasError := false
+	for _, f := range res.Findings {
+		if f.CheckName == "llm_error" {
+			hasError = true
+		}
+	}
+	if !hasError {
+		t.Errorf("expected llm_error Finding on LLM call failure")
+	}
+}
+
+// TestVerifyWrite_LLMMode_ContradictionTrumpStaleCitation: when both
+// the LLM finds a contradiction AND a stale citation exists, the
+// contradiction Reject takes priority and the function returns early
+// — operator sees the strongest signal first.
+func TestVerifyWrite_LLMMode_ContradictionTrumpStaleCitation(t *testing.T) {
+	llm := &stubLLMVerifier{contradicts: true, reason: "conflicts with pin"}
+	root := t.TempDir() // empty — citation would also be stale
+	res, _ := VerifyWrite(context.Background(),
+		[]byte("see missing.go:42 (stale citation)"),
+		VerifierConfig{
+			Mode:                VerifierLLM,
+			LLM:                 llm,
+			PinnedFacts:         []string{"X is established"},
+			CitationSearchRoots: []string{root},
+		})
+	if res.Decision != VerifierReject {
+		t.Fatalf("should reject, got %v", res.Decision)
+	}
+	if res.Kind != "contradiction" {
+		t.Errorf("Kind = %q, want contradiction (contradiction trumps stale_citation)", res.Kind)
+	}
+}
+
+// errStubLLMUnavailable mirrors a real Ollama-down error shape so
+// the degradation test reads like production.
+var errStubLLMUnavailable = stubErr("llm unavailable: connection refused")
+
+type stubErr string
+
+func (e stubErr) Error() string { return string(e) }
 
 func TestWriteFile_VerifierRejection_NoFilesystemWrite(t *testing.T) {
 	dir := t.TempDir()

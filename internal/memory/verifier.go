@@ -42,6 +42,40 @@ const (
 type VerifierConfig struct {
 	Mode                VerifierMode
 	CitationSearchRoots []string
+	// PinnedFacts is the list of operator-pinned facts the LLM
+	// verifier should treat as ground truth. The verifier rejects
+	// any candidate write that contradicts any pinned fact.
+	// Empty list disables the contradiction check even in
+	// VerifierLLM mode.
+	PinnedFacts []string
+	// LLM is the pluggable LLM verifier used in VerifierLLM mode.
+	// Nil falls back to a "skipped" finding so VerifierLLM
+	// degrades to VerifierCheap when no LLM client is wired
+	// (test harness, dev mode without Ollama). The interface
+	// stays narrow so a future swap from Ollama-phi3 to Anthropic
+	// Haiku is one constructor change.
+	LLM LLMVerifier
+}
+
+// LLMVerifier is the narrow surface VerifyWrite uses for the
+// contradiction check in VerifierLLM mode. Implementations call a
+// cheap LLM with the candidate content + the list of pinned facts
+// and return whether the content contradicts any pin.
+//
+// Contract:
+//
+//   - `pinnedFacts` is non-empty; the caller skips the LLM hop
+//     entirely when there's nothing to compare against.
+//   - `reason` carries the LLM's free-text explanation, surfaced in
+//     the rejection envelope for operator review. Empty on
+//     contradicts=false.
+//   - Errors should be returned verbatim; VerifyWrite logs them
+//     and degrades to cheap-only rather than failing the whole
+//     write. Hard-failing on LLM errors would couple memory
+//     writes to LLM uptime, which is exactly what the security
+//     literature (arXiv 2601.05504) warns against.
+type LLMVerifier interface {
+	VerifyContradiction(ctx context.Context, content []byte, pinnedFacts []string) (contradicts bool, reason string, err error)
 }
 
 // VerifierDecision is the verifier's binary verdict. Allow means the
@@ -115,14 +149,59 @@ func VerifyWrite(ctx context.Context, content []byte, cfg VerifierConfig) (Verif
 
 	result := VerifierResult{Decision: VerifierAllow}
 
-	// VerifierLLM mode placeholder: log a Finding so audit reviewers
-	// know the optional LLM check was requested but not yet wired.
-	// The cheap checks below still run.
+	// VerifierLLM mode: run the LLM contradiction check first so
+	// a contradiction Reject takes priority over citation Reject
+	// (operator-pinned facts are the strongest signal). Falls back
+	// gracefully when no LLM client is wired or no pinned facts
+	// are supplied — both surface as a "llm_skipped" Finding so
+	// audit reviewers see the mode was requested but didn't fire.
 	if cfg.Mode == VerifierLLM {
-		result.Findings = append(result.Findings, VerifierFinding{
-			CheckName: "llm_skipped",
-			Detail:    map[string]any{"reason": "VerifierLLM mode not yet implemented; ran VerifierCheap"},
-		})
+		switch {
+		case cfg.LLM == nil:
+			result.Findings = append(result.Findings, VerifierFinding{
+				CheckName: "llm_skipped",
+				Detail:    map[string]any{"reason": "no LLM verifier wired"},
+			})
+		case len(cfg.PinnedFacts) == 0:
+			result.Findings = append(result.Findings, VerifierFinding{
+				CheckName: "llm_skipped",
+				Detail:    map[string]any{"reason": "no pinned facts to compare against"},
+			})
+		default:
+			contradicts, reason, llmErr := cfg.LLM.VerifyContradiction(ctx, content, cfg.PinnedFacts)
+			if llmErr != nil {
+				// Degrade: log via the Finding (caller's logger
+				// picks it up), don't reject. Coupling memory
+				// writes to LLM uptime defeats the verifier's
+				// purpose.
+				result.Findings = append(result.Findings, VerifierFinding{
+					CheckName: "llm_error",
+					Detail:    map[string]any{"error": llmErr.Error()},
+				})
+			} else if contradicts {
+				result.Findings = append(result.Findings, VerifierFinding{
+					CheckName: "contradiction",
+					Detail: map[string]any{
+						"reason":       reason,
+						"pinned_count": len(cfg.PinnedFacts),
+					},
+				})
+				result.Decision = VerifierReject
+				result.Kind = "contradiction"
+				// Short-circuit: a contradiction is a stronger
+				// rejection signal than a stale citation, so we
+				// return now rather than potentially overwriting
+				// the kind with "stale_citation" below.
+				return result, nil
+			} else {
+				// Allow path with a positive Finding so the audit
+				// trail records "LLM verified, no contradiction".
+				result.Findings = append(result.Findings, VerifierFinding{
+					CheckName: "contradiction_clean",
+					Detail:    map[string]any{"reason": reason},
+				})
+			}
+		}
 	}
 
 	// Citation-staleness check. Skipped when no search roots are
