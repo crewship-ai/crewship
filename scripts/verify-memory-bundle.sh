@@ -129,6 +129,86 @@ EMIT_REJECT=$(sqlite3 "${DB}" "
 " 2>&1 | tail -1)
 assert "  memory.write_rejected + memory.consolidation_proposed accepted" "${EMIT_REJECT}" "journal_types_ok"
 
+bold "7) Approve-flow staging shape (proposal + inbox row insertable)"
+# This sub-shell asserts the DB-side staging shape the API approve
+# handler reads back is insertable on a freshly-migrated schema —
+# the FK + CHECK contract holds for a proposal + paired inbox row.
+# The FULL end-to-end (real .proposed/ file on disk → POST /approve →
+# canonical learned-*.md merged → version row → inbox resolved →
+# journal emit) lives in consolidate_proposed_handler_test.go which
+# covers HTTP + auth gate + atomic merge — a bash probe can't
+# simulate those layers. Runs inside BEGIN/ROLLBACK so the dev DB
+# stays clean — failures inside never persist.
+APPROVE_PROBE=$(sqlite3 "${DB}" "
+  BEGIN;
+  INSERT INTO workspaces (id, name, slug) VALUES ('ws_appv_$$', 'tmp', 'appv-$$');
+  INSERT INTO crews (id, workspace_id, name, slug) VALUES ('crew_appv_$$', 'ws_appv_$$', 'tmp', 'crew-appv-$$');
+  INSERT INTO memory_proposals (
+    id, workspace_id, crew_id, proposal_path, status, evidence_json,
+    rules_count, entries_scanned, score_json
+  ) VALUES (
+    'mp_appv_$$', 'ws_appv_$$', 'crew_appv_$$', '/tmp/proposal-appv-$$.md',
+    'pending', '[]', 1, 12, '{}'
+  );
+  INSERT INTO inbox_items (id, workspace_id, kind, source_id, title)
+    VALUES ('ibx_appv_$$', 'ws_appv_$$', 'memory_consolidation', 'mp_appv_$$', 'Approve probe');
+  SELECT 'staged_ok';
+  ROLLBACK;
+" 2>&1 | tail -1)
+assert "  staged proposal + inbox row insertable" "${APPROVE_PROBE}" "staged_ok"
+
+bold "8) memory_versions audit row insertable (tier CHECK + FK)"
+# Acceptance: every memory.WriteFile produces a memory_versions row.
+# This sub-shell asserts the schema admits the documented shape — the
+# Go-side test suite covers the full RecordVersion flow.
+# PRAGMA foreign_keys=ON inside the tx; SQLite defaults to OFF per
+# connection and an FK violation would silently land otherwise.
+VERSIONS_PROBE=$(sqlite3 "${DB}" "
+  BEGIN;
+  PRAGMA foreign_keys = ON;
+  INSERT INTO workspaces (id, name, slug) VALUES ('ws_mv_$$', 'tmp', 'mv-$$');
+  INSERT INTO memory_versions (
+    id, workspace_id, path, tier, sha256, bytes, payload_ref
+  ) VALUES (
+    'mv_$$', 'ws_mv_$$', 'crew:x/learned-2026-05-17.md', 'learned',
+    '0000000000000000000000000000000000000000000000000000000000000000',
+    42, '/tmp/blob/00/0000...'
+  );
+  SELECT 'version_ok';
+  -- tier CHECK rejects garbage tiers
+  INSERT INTO memory_versions (
+    id, workspace_id, path, tier, sha256, bytes, payload_ref
+  ) VALUES (
+    'mv_bad_$$', 'ws_mv_$$', 'x', 'garbage_tier',
+    '0000000000000000000000000000000000000000000000000000000000000001',
+    1, '/tmp/b'
+  );
+  SELECT 'should_not_reach';
+  ROLLBACK;
+" 2>&1 | tr '\n' ' ')
+assert_contains "  memory_versions row + tier CHECK rejects garbage" "${VERSIONS_PROBE}" "version_ok"
+assert_contains "  garbage tier rejected by CHECK" "${VERSIONS_PROBE}" "CHECK constraint failed"
+
+# FK enforcement — workspace_id REFERENCES workspaces(id) ON DELETE
+# CASCADE. The prior claim "FK + tier CHECK" in the section header
+# was unsupported by an actual FK violation test; without
+# PRAGMA foreign_keys = ON SQLite silently accepts orphan rows. Now
+# both halves are exercised.
+FK_PROBE=$(sqlite3 "${DB}" "
+  BEGIN;
+  PRAGMA foreign_keys = ON;
+  INSERT INTO memory_versions (
+    id, workspace_id, path, tier, sha256, bytes, payload_ref
+  ) VALUES (
+    'mv_orphan_$$', 'ws_does_not_exist_$$', 'x', 'agent',
+    '0000000000000000000000000000000000000000000000000000000000000002',
+    1, '/tmp/b'
+  );
+  SELECT 'should_not_reach';
+  ROLLBACK;
+" 2>&1 || true)
+assert_contains "  workspace_id FK rejects orphan row" "${FK_PROBE}" "FOREIGN KEY constraint failed"
+
 echo
 bold "Summary: ${pass} passed, ${fail} failed"
 if [[ "${fail}" -gt 0 ]]; then
