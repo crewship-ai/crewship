@@ -74,7 +74,7 @@ check() {
 
 echo
 echo "[1] POST /memory/write — happy path"
-STATUS=$(curl -s -o ${R1_JSON} -w '%{http_code}' -X POST -H 'Content-Type: application/json' \
+STATUS=$(curl -s -o "${R1_JSON}" -w '%{http_code}' -X POST -H 'Content-Type: application/json' \
   -d '{"file":"AGENT.md","content":"# Agent\nlong-term memory body\n"}' \
   "http://127.0.0.1:${PORT}/memory/write")
 check "happy path returns 201" "${STATUS}" "201"
@@ -88,33 +88,33 @@ fi
 
 echo
 echo "[2] POST /memory/write — scrubber should reject anthropic key"
-STATUS=$(curl -s -o ${R2_JSON} -w '%{http_code}' -X POST -H 'Content-Type: application/json' \
+STATUS=$(curl -s -o "${R2_JSON}" -w '%{http_code}' -X POST -H 'Content-Type: application/json' \
   -d '{"file":"AGENT.md","content":"my key sk-ant-api03-abcd1234efgh5678ijkl, don '"'"'t share"}' \
   "http://127.0.0.1:${PORT}/memory/write")
 check "scrubber rejection returns 422" "${STATUS}" "422"
-KIND=$(jq -r .kind ${R2_JSON} 2>/dev/null || echo missing)
+KIND=$(jq -r .kind "${R2_JSON}" 2>/dev/null || echo missing)
 check "  rejection kind = scrubber" "${KIND}" "scrubber"
 
 echo
 echo "[3] POST /memory/write — cap overflow should 422"
 BIG=$(python3 -c "print('x' * 5000)")
-STATUS=$(curl -s -o ${R3_JSON} -w '%{http_code}' -X POST -H 'Content-Type: application/json' \
+STATUS=$(curl -s -o "${R3_JSON}" -w '%{http_code}' -X POST -H 'Content-Type: application/json' \
   -d "{\"file\":\"AGENT.md\",\"content\":\"${BIG}\"}" \
   "http://127.0.0.1:${PORT}/memory/write")
 check "cap overflow returns 422" "${STATUS}" "422"
-KIND=$(jq -r .kind ${R3_JSON} 2>/dev/null || echo missing)
+KIND=$(jq -r .kind "${R3_JSON}" 2>/dev/null || echo missing)
 check "  rejection kind = cap" "${KIND}" "cap"
 
 echo
 echo "[4] POST /memory/write — path traversal must 403"
-STATUS=$(curl -s -o ${R4_JSON} -w '%{http_code}' -X POST -H 'Content-Type: application/json' \
+STATUS=$(curl -s -o "${R4_JSON}" -w '%{http_code}' -X POST -H 'Content-Type: application/json' \
   -d '{"file":"../../../etc/passwd","content":"x"}' \
   "http://127.0.0.1:${PORT}/memory/write")
 check "path traversal returns 403" "${STATUS}" "403"
 
 echo
 echo "[5] Daily log path resolves under daily/"
-STATUS=$(curl -s -o ${R5_JSON} -w '%{http_code}' -X POST -H 'Content-Type: application/json' \
+STATUS=$(curl -s -o "${R5_JSON}" -w '%{http_code}' -X POST -H 'Content-Type: application/json' \
   -d '{"file":"daily/2026-05-16.md","content":"session notes\n"}' \
   "http://127.0.0.1:${PORT}/memory/write")
 check "daily log returns 201" "${STATUS}" "201"
@@ -143,7 +143,7 @@ fi
 echo
 echo "[6] Verifier: stale citation surfaced as rejection envelope"
 R6_JSON=$(mktemp /tmp/sidecar-r6.XXXX.json)
-STATUS=$(CREWSHIP_MEMORY_VERIFIER_MODE=full curl -s -o ${R6_JSON} -w '%{http_code}' \
+STATUS=$(CREWSHIP_MEMORY_VERIFIER_MODE=full curl -s -o "${R6_JSON}" -w '%{http_code}' \
   -X POST -H 'Content-Type: application/json' \
   -d '{"file":"AGENT.md","content":"see definitely-not-a-real-file.go:42 for context"}' \
   "http://127.0.0.1:${PORT}/memory/write")
