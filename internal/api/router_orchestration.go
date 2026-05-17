@@ -269,6 +269,18 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	r.mux.Handle("POST /api/v1/consolidate/proposed/{id}/reject", authed(wsCtx(http.HandlerFunc(propH.Reject))))
 	r.mux.Handle("GET /api/v1/consolidate/proposed/{id}/explain", authed(wsCtx(http.HandlerFunc(propH.Explain))))
 
+	// Memory versions audit surface — the HTTP mirror of `crewship
+	// memory log/show/restore`. List + show are MEMBER+ (read-only
+	// audit visibility); restore is OWNER/ADMIN-gated inside the
+	// handler. Workspace anchoring lives in the handler too — query
+	// strings never carry workspace_id, so a cross-workspace probe
+	// can't smuggle a foreign id through.
+	mvH := NewMemoryVersionsHandler(r.db, r.logger)
+	mvH.SetBlobRoot(r.memoryVersionsBlobRoot)
+	r.mux.Handle("GET /api/v1/memory/versions", authed(wsCtx(http.HandlerFunc(mvH.List))))
+	r.mux.Handle("GET /api/v1/memory/versions/{sha}", authed(wsCtx(http.HandlerFunc(mvH.Show))))
+	r.mux.Handle("POST /api/v1/memory/versions/{sha}/restore", authed(wsCtx(http.HandlerFunc(mvH.Restore))))
+
 	// Quartermaster eval: mission replay + regression + list. Both
 	// mutating calls run in a goroutine and return 202 with a run_id
 	// the caller can later poll for in the list endpoint.
