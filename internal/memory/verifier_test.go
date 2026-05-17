@@ -95,9 +95,12 @@ func TestVerifyWrite_MixedCitations_AnyStaleRejects(t *testing.T) {
 	}
 	// First citation valid; second points at non-existent file.
 	// Even one stale citation flips the decision to Reject.
-	res, _ := VerifyWrite(context.Background(),
+	res, err := VerifyWrite(context.Background(),
 		[]byte("see auth.go:2 and missing.go:1 for context"),
 		VerifierConfig{Mode: VerifierCheap, CitationSearchRoots: []string{root}})
+	if err != nil {
+		t.Fatalf("VerifyWrite: %v", err)
+	}
 	if res.Decision != VerifierReject {
 		t.Fatalf("mixed pass+fail should reject, got %v", res.Decision)
 	}
@@ -106,9 +109,12 @@ func TestVerifyWrite_MixedCitations_AnyStaleRejects(t *testing.T) {
 func TestVerifyWrite_VersionStrings_NotMatched(t *testing.T) {
 	// "v1.2:3" looks like a citation to a naive regex but isn't a
 	// real path. looksLikePath filters numeric-only "extensions".
-	res, _ := VerifyWrite(context.Background(),
+	res, err := VerifyWrite(context.Background(),
 		[]byte("released v1.2:3 yesterday"),
 		VerifierConfig{Mode: VerifierCheap, CitationSearchRoots: []string{t.TempDir()}})
+	if err != nil {
+		t.Fatalf("VerifyWrite: %v", err)
+	}
 	if res.Decision != VerifierAllow {
 		t.Errorf("version string should not trigger citation check, got %v", res.Decision)
 	}
@@ -117,9 +123,12 @@ func TestVerifyWrite_VersionStrings_NotMatched(t *testing.T) {
 func TestVerifyWrite_NoSearchRoots_NoOp(t *testing.T) {
 	// Without configured roots the citation check is silently skipped
 	// — operator opted into cheap mode but didn't supply paths.
-	res, _ := VerifyWrite(context.Background(),
+	res, err := VerifyWrite(context.Background(),
 		[]byte("see auth/login.go:42"),
 		VerifierConfig{Mode: VerifierCheap})
+	if err != nil {
+		t.Fatalf("VerifyWrite: %v", err)
+	}
 	if res.Decision != VerifierAllow {
 		t.Errorf("no roots configured should silently allow, got %v", res.Decision)
 	}
@@ -130,9 +139,12 @@ func TestVerifyWrite_LLMMode_NoLLM_SkippedFinding(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "ok.go"), []byte("a\nb\n"), 0o644); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	res, _ := VerifyWrite(context.Background(),
+	res, err := VerifyWrite(context.Background(),
 		[]byte("see ok.go:1"),
 		VerifierConfig{Mode: VerifierLLM, CitationSearchRoots: []string{root}})
+	if err != nil {
+		t.Fatalf("VerifyWrite: %v", err)
+	}
 	if res.Decision != VerifierAllow {
 		t.Errorf("LLM mode without LLM should allow, got %v", res.Decision)
 	}
@@ -204,9 +216,12 @@ func TestVerifyWrite_LLMMode_Contradiction_Rejects(t *testing.T) {
 
 func TestVerifyWrite_LLMMode_NoContradiction_Allow(t *testing.T) {
 	llm := &stubLLMVerifier{contradicts: false, reason: "no overlap"}
-	res, _ := VerifyWrite(context.Background(),
+	res, err := VerifyWrite(context.Background(),
 		[]byte("unrelated body"),
 		VerifierConfig{Mode: VerifierLLM, LLM: llm, PinnedFacts: []string{"X is true"}})
+	if err != nil {
+		t.Fatalf("VerifyWrite: %v", err)
+	}
 	if res.Decision != VerifierAllow {
 		t.Errorf("no-contradiction should allow, got %v", res.Decision)
 	}
@@ -225,9 +240,12 @@ func TestVerifyWrite_LLMMode_NoContradiction_Allow(t *testing.T) {
 
 func TestVerifyWrite_LLMMode_EmptyPinnedFacts_Skipped(t *testing.T) {
 	llm := &stubLLMVerifier{}
-	res, _ := VerifyWrite(context.Background(),
+	res, err := VerifyWrite(context.Background(),
 		[]byte("anything"),
 		VerifierConfig{Mode: VerifierLLM, LLM: llm, PinnedFacts: nil})
+	if err != nil {
+		t.Fatalf("VerifyWrite: %v", err)
+	}
 	if res.Decision != VerifierAllow {
 		t.Errorf("empty pins should allow, got %v", res.Decision)
 	}
@@ -250,9 +268,12 @@ func TestVerifyWrite_LLMMode_EmptyPinnedFacts_Skipped(t *testing.T) {
 
 func TestVerifyWrite_LLMMode_LLMError_DegradesToAllow(t *testing.T) {
 	llm := &stubLLMVerifier{err: errStubLLMUnavailable}
-	res, _ := VerifyWrite(context.Background(),
+	res, err := VerifyWrite(context.Background(),
 		[]byte("anything"),
 		VerifierConfig{Mode: VerifierLLM, LLM: llm, PinnedFacts: []string{"X"}})
+	if err != nil {
+		t.Fatalf("VerifyWrite: %v", err)
+	}
 	if res.Decision != VerifierAllow {
 		t.Errorf("LLM error should degrade to allow (not block writes on LLM downtime), got %v", res.Decision)
 	}
@@ -274,7 +295,7 @@ func TestVerifyWrite_LLMMode_LLMError_DegradesToAllow(t *testing.T) {
 func TestVerifyWrite_LLMMode_ContradictionTrumpStaleCitation(t *testing.T) {
 	llm := &stubLLMVerifier{contradicts: true, reason: "conflicts with pin"}
 	root := t.TempDir() // empty — citation would also be stale
-	res, _ := VerifyWrite(context.Background(),
+	res, err := VerifyWrite(context.Background(),
 		[]byte("see missing.go:42 (stale citation)"),
 		VerifierConfig{
 			Mode:                VerifierLLM,
@@ -282,6 +303,9 @@ func TestVerifyWrite_LLMMode_ContradictionTrumpStaleCitation(t *testing.T) {
 			PinnedFacts:         []string{"X is established"},
 			CitationSearchRoots: []string{root},
 		})
+	if err != nil {
+		t.Fatalf("VerifyWrite: %v", err)
+	}
 	if res.Decision != VerifierReject {
 		t.Fatalf("should reject, got %v", res.Decision)
 	}
@@ -345,7 +369,10 @@ func TestWriteFile_VerifierAllow_WritesAsUsual(t *testing.T) {
 	if res.Rejected {
 		t.Fatalf("should allow valid citation, got %+v", res)
 	}
-	got, _ := os.ReadFile(path)
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
 	if string(got) != "notes: see src.go:2" {
 		t.Errorf("on-disk content mismatch: %q", got)
 	}
