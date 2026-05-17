@@ -8,3 +8,12 @@
 # Scrubber source contains regex patterns to DETECT private keys.
 # The regex literal itself matches gitleaks' private-key rule. Not a real key.
 11003c24d54ab4bf2bccfeff49f3f9f7c32a9916:internal/scrubber/scrubber.go:private-key:30
+
+# Wireframe HTML mockups (file already deleted on HEAD; lives only in
+# history). Both are UI mockup strings, not real credentials:
+#   - 07-agent-runs.html:128 shows the *display name* "ANTHROPIC_KEY_1"
+#     in an error row mocking a rate-limit UI.
+#   - 21-admin.html:382 hits the generic-api-key rule on the substring
+#     "APIs', 'bg-neutral-100" inside a Tailwind class concatenation.
+452b7e08804fc11d72e9a80311065c016fb5ac36:.claude/context/wireframes/07-agent-runs.html:generic-api-key:128
+452b7e08804fc11d72e9a80311065c016fb5ac36:.claude/context/wireframes/21-admin.html:generic-api-key:382
