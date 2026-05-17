@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -108,6 +109,19 @@ func (t *PostRunTrigger) OnRunCompleted(ctx context.Context, workspaceID, crewID
 		return false
 	}
 	if workspaceID == "" || crewID == "" {
+		return false
+	}
+	// crewSlug becomes a path segment in OutputDir below. Reject any
+	// value that could escape crewMemoryRoot. The DB-side slug column
+	// is unique-per-workspace but its filesystem-safety contract is
+	// owned by this layer.
+	if crewSlug == "" ||
+		strings.ContainsAny(crewSlug, `/\`) ||
+		strings.Contains(crewSlug, "..") ||
+		filepath.Clean(crewSlug) != crewSlug ||
+		filepath.IsAbs(crewSlug) {
+		t.logger.Warn("post-run consolidator: rejected malformed crew slug",
+			"workspace_id", workspaceID, "crew_id", crewID, "crew_slug", crewSlug)
 		return false
 	}
 	key := workspaceID + ":" + crewID

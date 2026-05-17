@@ -85,16 +85,50 @@ func PromoteRuleToSkill(rule LearnedRule, score ScoreResult, opts SkillPromoteOp
 		return "", fmt.Errorf("promote: mkdir .proposed: %w", err)
 	}
 
-	path, err := uniqueSkillPath(proposedDir, slug)
+	body := renderSkillMarkdown(rule, score, slug, opts.Now)
+	// Atomic create-or-fail so concurrent promotions never clobber
+	// each other's staged files. Two consolidator passes that pick
+	// the same slug both race uniqueSkillPath + WriteFile separately;
+	// O_EXCL serializes them at the kernel level.
+	path, err := writeUniqueSkillFile(proposedDir, slug, []byte(body))
 	if err != nil {
 		return "", err
 	}
-
-	body := renderSkillMarkdown(rule, score, slug, opts.Now)
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-		return "", fmt.Errorf("promote: write skill: %w", err)
-	}
 	return path, nil
+}
+
+// writeUniqueSkillFile picks the first non-colliding skill-{slug}.md
+// name and writes the body atomically. The OS handles the race —
+// O_CREATE | O_EXCL means "create or fail if exists", so concurrent
+// callers picking the same suffix get serialised: the loser sees
+// EEXIST and tries the next suffix.
+func writeUniqueSkillFile(dir, slug string, body []byte) (string, error) {
+	for i := 1; i < 100; i++ {
+		var name string
+		if i == 1 {
+			name = "skill-" + slug + ".md"
+		} else {
+			name = fmt.Sprintf("skill-%s-%d.md", slug, i)
+		}
+		path := filepath.Join(dir, name)
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+		if err != nil {
+			if os.IsExist(err) {
+				continue // suffix taken — try the next one
+			}
+			return "", fmt.Errorf("promote: open skill: %w", err)
+		}
+		if _, werr := f.Write(body); werr != nil {
+			_ = f.Close()
+			_ = os.Remove(path)
+			return "", fmt.Errorf("promote: write skill: %w", werr)
+		}
+		if cerr := f.Close(); cerr != nil {
+			return "", fmt.Errorf("promote: close skill: %w", cerr)
+		}
+		return path, nil
+	}
+	return "", fmt.Errorf("promote: ran out of slugs trying to disambiguate skill-%s.md", slug)
 }
 
 // PromoteEligibleRules iterates rules and promotes only those that pass
@@ -140,24 +174,6 @@ func PromoteEligibleRules(rules []LearnedRule, scores map[string]ScoreResult, op
 	return written, firstErr
 }
 
-// uniqueSkillPath returns the first non-colliding skill-{slug}.md path
-// under dir. The bare slug is tried first; if it's taken, skill-{slug}-2.md,
-// skill-{slug}-3.md, ... up to a sanity cap of 100. After that we error
-// — a hundred copies of the same rule is a bug, not a workflow.
-func uniqueSkillPath(dir, slug string) (string, error) {
-	base := filepath.Join(dir, "skill-"+slug+".md")
-	if _, err := os.Stat(base); os.IsNotExist(err) {
-		return base, nil
-	}
-	for i := 2; i < 100; i++ {
-		p := filepath.Join(dir, fmt.Sprintf("skill-%s-%d.md", slug, i))
-		if _, err := os.Stat(p); os.IsNotExist(err) {
-			return p, nil
-		}
-	}
-	return "", fmt.Errorf("promote: ran out of slugs trying to disambiguate skill-%s.md", slug)
-}
-
 // renderSkillMarkdown produces the on-disk SKILL.md text. Kept as a
 // pure function so the test suite can hammer it without disk I/O.
 //
@@ -173,8 +189,15 @@ func renderSkillMarkdown(rule LearnedRule, score ScoreResult, slug string, now t
 
 	var sb strings.Builder
 	sb.WriteString("---\n")
+	// All scalar values that come from model-derived input (description)
+	// or could in principle contain YAML-significant characters (`:`,
+	// `#`, leading `-`, newlines, `&`, `*`, `!`, `|`, `>`) are quoted
+	// with safeYAMLString so the parser never sees a body line as
+	// "another key". slug is already constrained by skills.Slugify, so
+	// it's safe to emit unquoted; the others would unintentionally pass
+	// model-text past the YAML grammar.
 	sb.WriteString("name: " + slug + "\n")
-	sb.WriteString("description: " + desc + "\n")
+	sb.WriteString("description: " + safeYAMLString(desc) + "\n")
 	sb.WriteString("category: CUSTOM\n")
 	sb.WriteString("runtime: INSTRUCTIONS\n")
 	sb.WriteString("maturity: EXPERIMENTAL\n")
@@ -211,6 +234,14 @@ func renderSkillMarkdown(rule LearnedRule, score ScoreResult, slug string, now t
 // If the combined pattern+action is too short, we pad with the action
 // hint so the field still reads coherently.
 func buildDescription(pattern, action string) string {
+	// Normalize whitespace before assembly. Model-derived text can
+	// contain newlines / tabs / CRs that would corrupt YAML even
+	// inside a quoted scalar (a literal `\n` would split the scalar
+	// across two YAML lines on some parsers). strings.Fields + Join
+	// collapses every whitespace run to a single space and drops
+	// leading/trailing whitespace.
+	pattern = strings.Join(strings.Fields(pattern), " ")
+	action = strings.Join(strings.Fields(action), " ")
 	d := "Use when " + pattern
 	if action != "" {
 		d += " — " + action
@@ -230,4 +261,37 @@ func buildDescription(pattern, action string) string {
 		d = d[:maxDesc-1] + "…"
 	}
 	return d
+}
+
+// safeYAMLString wraps a value in YAML double-quotes and escapes the
+// characters that would otherwise be parser-significant inside a
+// double-quoted scalar (backslash and the closing quote). The result
+// is unambiguous regardless of the value's content — colons, hashes,
+// leading dashes, indicators (&, *, !, |, >), and any other glyph
+// that YAML treats specially in plain or single-quoted scalars are
+// neutralised by the double-quote context. buildDescription has
+// already normalized whitespace, so we don't need to handle newlines
+// here, but escaping is conservative.
+func safeYAMLString(s string) string {
+	var b strings.Builder
+	b.Grow(len(s) + 2)
+	b.WriteByte('"')
+	for _, r := range s {
+		switch r {
+		case '\\':
+			b.WriteString(`\\`)
+		case '"':
+			b.WriteString(`\"`)
+		case '\n':
+			b.WriteString(`\n`)
+		case '\r':
+			b.WriteString(`\r`)
+		case '\t':
+			b.WriteString(`\t`)
+		default:
+			b.WriteRune(r)
+		}
+	}
+	b.WriteByte('"')
+	return b.String()
 }

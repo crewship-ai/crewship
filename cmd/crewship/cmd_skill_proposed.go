@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 
 	"github.com/crewship-ai/crewship/internal/cli"
@@ -120,7 +121,13 @@ func runSkillProposedList(cmd *cobra.Command, _ []string) error {
 	format, _ := cmd.Flags().GetString("format")
 
 	client := newAPIClient()
-	resp, err := client.Get("/api/v1/skills/proposed?crew_id=" + crewID)
+	// URL-encode the crew_id so a value with `&` or `?` doesn't
+	// silently change query semantics. Crew ids are CUID-format
+	// today (no special chars), but the encoding is cheap and the
+	// safety case is non-hypothetical for any future id scheme.
+	q := url.Values{}
+	q.Set("crew_id", crewID)
+	resp, err := client.Get("/api/v1/skills/proposed?" + q.Encode())
 	if err != nil {
 		return err
 	}

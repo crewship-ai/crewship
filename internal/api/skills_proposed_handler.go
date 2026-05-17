@@ -369,6 +369,19 @@ func (h *SkillProposedHandler) proposedDirForCrew(ctx context.Context, workspace
 		}
 		return "", err
 	}
+	// Slug comes from the DB, but the DB layer enforces only the
+	// uniqueness constraint — not the filesystem-safety contract this
+	// path join needs. A historical row with "../foo" or "x/y" slug
+	// would let the .proposed directory escape crewMemoryRoot. Reject
+	// these explicitly so the bug surfaces as "crew not found" (the
+	// caller's UX wouldn't change), not as a path leak.
+	if slug == "" ||
+		strings.ContainsAny(slug, `/\`) ||
+		strings.Contains(slug, "..") ||
+		filepath.Clean(slug) != slug ||
+		filepath.IsAbs(slug) {
+		return "", os.ErrNotExist
+	}
 	return filepath.Join(h.crewMemoryRoot, slug, "topics", ".proposed"), nil
 }
 
@@ -383,7 +396,12 @@ func (h *SkillProposedHandler) mapDirError(w http.ResponseWriter, err error) {
 	case err.Error() == "crew memory root not configured":
 		replyError(w, http.StatusServiceUnavailable, "skills proposal listing not configured on this server")
 	default:
-		replyError(w, http.StatusInternalServerError, err.Error())
+		// Log the raw error server-side; surface a generic message to
+		// the client. Raw DB / filesystem errors leak internals (table
+		// names, paths, OS-level errno strings) that an attacker can
+		// use to probe the deployment.
+		h.logger.Error("skills proposed: resolve dir", "err", err)
+		replyError(w, http.StatusInternalServerError, "internal server error")
 	}
 }
 
