@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -139,7 +140,16 @@ func (s *Server) Start(ctx context.Context) error {
 		} else {
 			s.logger.Info("memory consolidation disabled (set KEEPER_OLLAMA_URL + KEEPER_MODEL to enable)")
 		}
-		consolidate.StartBackground(ctx, s.db, s.journalWriter, summarizer, consolidate.RunnerOptions{})
+		// Versioning blob root: feeds consolidate's RecordVersion call
+		// on every successful appendRules / snapshotPins. Empty when
+		// no MemoryRoot is configured — versioning silently disables.
+		var blobRoot string
+		if s.cfg.Storage.MemoryRoot != "" {
+			blobRoot = filepath.Join(s.cfg.Storage.MemoryRoot, "versions")
+		}
+		consolidate.StartBackground(ctx, s.db, s.journalWriter, summarizer, consolidate.RunnerOptions{
+			BlobRoot: blobRoot,
+		})
 	}
 
 	select {

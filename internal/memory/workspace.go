@@ -46,10 +46,27 @@ func (w *WorkspaceMemory) Search(query string, limit int) ([]SearchResult, error
 	return w.engine.Search(ctx, query, limit)
 }
 
-// GetContext returns a formatted workspace memory block for system prompt injection.
-// It reads markdown files directly (not via FTS5 search) to build the context.
-// Returns empty string and 0 if no workspace memory files exist.
-func (w *WorkspaceMemory) GetContext(budget int) (string, int) {
+// GetContext returns the raw workspace memory body for the orchestrator
+// to frame as a [WORKSPACE MEMORY] block. Reads markdown files directly
+// (not via FTS5 search). Returns empty string and 0 if no workspace
+// memory files exist.
+//
+// IMPORTANT: this method returns content without [WORKSPACE MEMORY]
+// / [END WORKSPACE MEMORY] markers. Framing is the orchestrator's
+// responsibility (assembleSections in buildWorkspaceMemoryBlock).
+// An earlier version of this function wrapped the body in markers,
+// but the orchestrator then re-wrapped via assembleSections, producing
+// nested markers + double-counted budget on every non-empty read.
+// Returning raw content keeps the orchestrator as the single source
+// of truth for block framing.
+//
+// The supplied ctx is checked between file visits so a stuck filesystem
+// (NFS hang, BFS-mount stall) doesn't pin prompt assembly past the
+// orchestrator's timeout. Cancellation aborts the walk and returns
+// whatever has been collected so far (gracefully degraded) rather than
+// surfacing the ctx err — the agent gets a partial workspace block
+// rather than the prompt failing entirely.
+func (w *WorkspaceMemory) GetContext(ctx context.Context, budget int) (string, int) {
 	// Walk workspace dir for .md files and read their content directly.
 	// This is a host-level operation (workspace memory lives on host, not in container).
 	var files []struct {
@@ -58,6 +75,13 @@ func (w *WorkspaceMemory) GetContext(budget int) (string, int) {
 	}
 
 	filepath.Walk(w.path, func(fpath string, info os.FileInfo, err error) error {
+		select {
+		case <-ctx.Done():
+			// Abort the walk on cancellation; whatever we already
+			// collected is still usable for the prompt.
+			return filepath.SkipAll
+		default:
+		}
 		if err != nil || info.IsDir() {
 			return nil
 		}
@@ -81,16 +105,12 @@ func (w *WorkspaceMemory) GetContext(budget int) (string, int) {
 	}
 
 	var b strings.Builder
-	b.WriteString("[WORKSPACE MEMORY]\n")
-	totalChars := len("[WORKSPACE MEMORY]\n")
-
-	markerEnd := "[END WORKSPACE MEMORY]\n"
-	reservedEnd := len(markerEnd)
+	var totalChars int
 
 	for _, f := range files {
 		section := fmt.Sprintf("--- %s ---\n%s\n", f.rel, f.content)
-		if totalChars+len(section)+reservedEnd > budget {
-			remaining := budget - totalChars - reservedEnd - 20
+		if totalChars+len(section) > budget {
+			remaining := budget - totalChars - 20
 			if remaining > 50 {
 				section = section[:remaining] + "\n...(truncated)\n"
 				b.WriteString(section)
@@ -101,9 +121,6 @@ func (w *WorkspaceMemory) GetContext(budget int) (string, int) {
 		b.WriteString(section)
 		totalChars += len(section)
 	}
-
-	b.WriteString(markerEnd)
-	totalChars += reservedEnd
 
 	return b.String(), totalChars
 }

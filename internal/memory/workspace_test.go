@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -49,7 +50,7 @@ func TestWorkspaceMemory_GetContext(t *testing.T) {
 	}
 	defer wm.Close()
 
-	block, used := wm.GetContext(5000)
+	block, used := wm.GetContext(context.Background(), 5000)
 
 	if block == "" {
 		t.Error("GetContext should return non-empty block")
@@ -61,12 +62,15 @@ func TestWorkspaceMemory_GetContext(t *testing.T) {
 		t.Errorf("used chars (%d) should not exceed budget (5000)", used)
 	}
 
-	// Should contain workspace block markers
-	if !containsStr(block, "[WORKSPACE MEMORY]") {
-		t.Error("missing [WORKSPACE MEMORY] marker")
+	// GetContext now returns raw content; framing is the orchestrator's
+	// job (assembleSections in buildWorkspaceMemoryBlock). The marker
+	// strings must NOT appear here — if they did the orchestrator's
+	// wrapper would nest them on every render.
+	if containsStr(block, "[WORKSPACE MEMORY]") {
+		t.Error("GetContext must not include the [WORKSPACE MEMORY] marker — framing is the orchestrator's job")
 	}
-	if !containsStr(block, "[END WORKSPACE MEMORY]") {
-		t.Error("missing [END WORKSPACE MEMORY] marker")
+	if containsStr(block, "[END WORKSPACE MEMORY]") {
+		t.Error("GetContext must not include the [END WORKSPACE MEMORY] marker")
 	}
 	if !containsStr(block, "all deploys require approval") {
 		t.Error("missing workspace content")
@@ -82,7 +86,7 @@ func TestWorkspaceMemory_Empty(t *testing.T) {
 	}
 	defer wm.Close()
 
-	block, used := wm.GetContext(5000)
+	block, used := wm.GetContext(context.Background(), 5000)
 
 	if block != "" {
 		t.Errorf("empty workspace should return empty block, got %q", block)
@@ -106,7 +110,7 @@ func TestWorkspaceMemory_BudgetTruncation(t *testing.T) {
 	defer wm.Close()
 
 	// Tiny budget → should truncate
-	block, used := wm.GetContext(500)
+	block, used := wm.GetContext(context.Background(), 500)
 
 	if used > 600 { // allow some margin for markers
 		t.Errorf("used chars (%d) should be near budget (500)", used)

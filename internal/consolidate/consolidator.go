@@ -128,8 +128,20 @@ func (c *Consolidator) Run(ctx context.Context, cfg Config) (ConsolidationResult
 			break
 		}
 	}
-	if err := snapshotPins(cfg, prioEntries); err != nil && logger != nil {
-		logger.Warn("consolidate: pins snapshot failed", "err", err)
+	pinsWrote, pinsErr := snapshotPins(cfg, prioEntries)
+	if pinsErr != nil && logger != nil {
+		logger.Warn("consolidate: pins snapshot failed", "err", pinsErr)
+	} else if pinsErr == nil && pinsWrote {
+		// Only record a canonical-version row when snapshotPins
+		// actually appended new content. The earlier check
+		// (`len(prioEntries) > 0`) recorded a row whenever there
+		// were any pinned entries in the window — including reruns
+		// where every candidate ID was already in pins.md and
+		// nothing was written. That produced a phantom version row
+		// claiming "pins.md changed" when on-disk content was
+		// byte-identical to the previous version.
+		pinsPath := filepath.Join(cfg.OutputDir, "pins.md")
+		c.recordCanonicalVersion(ctx, cfg, pinsPath, memory.TierPins, canonicalAuditPath(cfg.CrewID, "pins.md"))
 	}
 
 	if len(filtered) < cfg.MinEntries && !hasPermanent {
@@ -195,11 +207,16 @@ func (c *Consolidator) Run(ctx context.Context, cfg Config) (ConsolidationResult
 		return c.writeProposal(ctx, cfg, now, rules, len(filtered))
 	}
 
-	outPath, err := c.appendRules(cfg.OutputDir, now, rules)
+	outPath, outContent, err := c.appendRules(cfg.OutputDir, now, rules)
 	if err != nil {
 		return ConsolidationResult{EntriesScanned: len(filtered)},
 			fmt.Errorf("consolidate: write rules: %w", err)
 	}
+	// Pass the in-memory content captured during the appendRules
+	// flock window. recordCanonicalVersion would otherwise re-read
+	// from disk and risk capturing a sibling tick's changes against
+	// THIS run's parent_sha.
+	c.recordCanonicalVersionContent(ctx, cfg, outContent, memory.TierLearned, canonicalAuditPath(cfg.CrewID, filepath.Base(outPath)))
 
 	evidenceAll := collectEvidence(rules)
 	id, err := c.Journal.Emit(ctx, journal.Entry{
@@ -402,9 +419,15 @@ func collectEvidence(rules []LearnedRule) []string {
 // point of a pin is "I want every future session to remember this".
 // Duplicate IDs are skipped so rerunning consolidation on the same
 // entries doesn't grow the file unboundedly.
-func snapshotPins(cfg Config, entries []journal.Entry) error {
+//
+// The wrote return reports whether pins.md was actually modified on
+// this call. Callers (e.g. the canonical-version recorder) use this
+// to skip an audit-version row when no write happened — the prior
+// logic that recorded a version "if there were any pinned entries in
+// the window" would falsely audit duplicate pin IDs as new versions.
+func snapshotPins(cfg Config, entries []journal.Entry) (wrote bool, err error) {
 	if cfg.OutputDir == "" {
-		return nil
+		return false, nil
 	}
 	var pins []journal.Entry
 	for _, e := range entries {
@@ -413,10 +436,10 @@ func snapshotPins(cfg Config, entries []journal.Entry) error {
 		}
 	}
 	if len(pins) == 0 {
-		return nil
+		return false, nil
 	}
 	if err := os.MkdirAll(cfg.OutputDir, 0o755); err != nil {
-		return fmt.Errorf("pins mkdir: %w", err)
+		return false, fmt.Errorf("pins mkdir: %w", err)
 	}
 	path := filepath.Join(cfg.OutputDir, "pins.md")
 
@@ -427,7 +450,7 @@ func snapshotPins(cfg Config, entries []journal.Entry) error {
 	// best-effort; flock is the durable fix).
 	lk := memory.NewFileLock(path + ".lock")
 	if err := lk.Lock(); err != nil {
-		return fmt.Errorf("pins lock: %w", err)
+		return false, fmt.Errorf("pins lock: %w", err)
 	}
 	defer func() { _ = lk.Unlock() }()
 
@@ -472,27 +495,39 @@ func snapshotPins(cfg Config, entries []journal.Entry) error {
 		appended++
 	}
 	if appended == 0 {
-		return nil
+		// Every candidate pin was already in the file — no write
+		// happened, so caller must NOT record a canonical-version
+		// row.
+		return false, nil
 	}
 
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
-		return fmt.Errorf("pins open: %w", err)
+		return false, fmt.Errorf("pins open: %w", err)
 	}
 	defer f.Close()
 	if _, err := f.WriteString(block.String()); err != nil {
-		return fmt.Errorf("pins write: %w", err)
+		return false, fmt.Errorf("pins write: %w", err)
 	}
-	return nil
+	return true, nil
 }
 
 // appendRules writes the rendered rules to
 // {outputDir}/learned-YYYY-MM-DD.md, creating the directory if missing.
 // If the file already exists, the new block is appended after a divider
 // so multiple runs on the same day accumulate rather than overwrite.
-func (c *Consolidator) appendRules(outputDir string, now time.Time, rules []LearnedRule) (string, error) {
+//
+// Returns the path AND the full canonical content as it landed on disk
+// — captured inside the same flock window as the write. The caller
+// passes that captured content into recordCanonicalVersion instead of
+// re-reading from disk, so the audit-trail blob always reflects the
+// exact mutation that just happened. The previous re-read pattern was
+// vulnerable to a sibling writer racing in between unlock and read,
+// which would record a blob containing the sibling's changes against
+// THIS run's parent_sha — a subtle audit-drift bug.
+func (c *Consolidator) appendRules(outputDir string, now time.Time, rules []LearnedRule) (string, []byte, error) {
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
-		return "", fmt.Errorf("mkdir %s: %w", outputDir, err)
+		return "", nil, fmt.Errorf("mkdir %s: %w", outputDir, err)
 	}
 	fname := fmt.Sprintf("learned-%s.md", now.Format("2006-01-02"))
 	path := filepath.Join(outputDir, fname)
@@ -503,7 +538,7 @@ func (c *Consolidator) appendRules(outputDir string, now time.Time, rules []Lear
 	// file. flock is per-fd, blocking — the second caller waits.
 	lk := memory.NewFileLock(path + ".lock")
 	if err := lk.Lock(); err != nil {
-		return "", fmt.Errorf("lock %s: %w", path, err)
+		return "", nil, fmt.Errorf("lock %s: %w", path, err)
 	}
 	defer func() { _ = lk.Unlock() }()
 
@@ -538,11 +573,96 @@ func (c *Consolidator) appendRules(outputDir string, now time.Time, rules []Lear
 
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
-		return "", fmt.Errorf("open %s: %w", path, err)
+		return "", nil, fmt.Errorf("open %s: %w", path, err)
 	}
 	defer f.Close()
 	if _, err := f.WriteString(block.String()); err != nil {
-		return "", fmt.Errorf("write %s: %w", path, err)
+		return "", nil, fmt.Errorf("write %s: %w", path, err)
 	}
-	return path, nil
+	// Read back the full file content WHILE STILL HOLDING THE LOCK so
+	// the bytes the caller hands to recordCanonicalVersion match the
+	// exact post-append state. Reading outside the lock would race
+	// with the next consolidator tick's append.
+	if err := f.Sync(); err != nil {
+		// fsync failure surfaces as a wrapped error rather than
+		// silent half-write; the lockfile + defer-unlock still run.
+		return "", nil, fmt.Errorf("sync %s: %w", path, err)
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return "", nil, fmt.Errorf("read back %s: %w", path, err)
+	}
+	return path, content, nil
+}
+
+// recordCanonicalVersion reads the canonical file at canonicalPath and
+// inserts a memory_versions row + content-addressed blob for it. Used
+// after appendRules and snapshotPins so every successful canonical
+// write contributes to the EU AI Act Art. 14 audit trail. Best-effort:
+// failures log a warning but never abort the consolidation pipeline —
+// the canonical file is on disk and operators see it whether or not
+// the audit row landed. Versioning is gated by (c.DB != nil &&
+// cfg.BlobRoot != ""); either zero-value silently disables versioning
+// without affecting the rest of the flow.
+func (c *Consolidator) recordCanonicalVersion(ctx context.Context, cfg Config, canonicalPath string, tier memory.Tier, auditPath string) {
+	if c.DB == nil || cfg.BlobRoot == "" {
+		return
+	}
+	content, err := os.ReadFile(canonicalPath)
+	if err != nil {
+		c.logger().Warn("version record: read canonical failed",
+			"err", err, "path", canonicalPath)
+		return
+	}
+	c.recordCanonicalVersionContent(ctx, cfg, content, tier, auditPath)
+}
+
+// recordCanonicalVersionContent is the read-disk-skipping sibling of
+// recordCanonicalVersion. Callers that already hold the canonical
+// file's lock should pass the post-mutation bytes directly — re-
+// reading from disk would let a sibling tick race in between unlock
+// and read, recording someone else's content under THIS tick's
+// parent_sha. Same gating + same best-effort semantics as the
+// path-based variant.
+func (c *Consolidator) recordCanonicalVersionContent(ctx context.Context, cfg Config, content []byte, tier memory.Tier, auditPath string) {
+	if c.DB == nil || cfg.BlobRoot == "" {
+		return
+	}
+	parent, _ := memory.LatestVersionSha(ctx, c.DB, cfg.WorkspaceID, auditPath)
+	if _, err := memory.RecordVersion(ctx, c.DB, memory.VersionRecord{
+		WorkspaceID: cfg.WorkspaceID,
+		Path:        auditPath,
+		Tier:        tier,
+		Content:     content,
+		WrittenBy:   "consolidator",
+		ParentSha:   parent,
+		BlobRoot:    cfg.BlobRoot,
+	}); err != nil {
+		c.logger().Warn("version record: insert failed",
+			"err", err, "audit_path", auditPath, "workspace_id", cfg.WorkspaceID)
+	}
+}
+
+// logger returns the Consolidator's logger with a slog.Default fallback
+// so the recordCanonicalVersion helper doesn't have to guard every
+// call site. The existing Run() path also uses slog.Default when
+// c.Logger is nil; this keeps the pattern consistent.
+func (c *Consolidator) logger() *slog.Logger {
+	if c.Logger != nil {
+		return c.Logger
+	}
+	return slog.Default()
+}
+
+// canonicalAuditPath produces the (workspace_id, path) pair the audit
+// log keys on. crew:{crewID}/{filename} disambiguates per-crew files
+// at the same name (e.g. both crew A and crew B have a
+// learned-2026-05-17.md). Keeping the prefix human-readable so the
+// `crewship memory log <path>` CLI can show a useful listing without
+// joining through the crews table.
+func canonicalAuditPath(crewID, filename string) string {
+	if crewID == "" {
+		return filename
+	}
+	return "crew:" + crewID + "/" + filename
 }

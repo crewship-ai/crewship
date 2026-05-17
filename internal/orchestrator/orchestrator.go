@@ -205,6 +205,12 @@ type Orchestrator struct {
 	episodicRecall EpisodicRecaller
 	presence       PresenceTracker
 	memoryMetrics  MemoryMetricsReader
+	// workspaceMemory resolves cross-crew memory for a workspace into a
+	// [WORKSPACE MEMORY] system-prompt block. Nil-safe — when no
+	// provider is wired (default), buildWorkspaceMemoryBlock returns
+	// ("", 0) and the budget reclaims to the agent tier unchanged.
+	// Wired from server.New via SetWorkspaceMemoryProvider.
+	workspaceMemory WorkspaceMemoryProvider
 
 	// episodicUnreachableLastLogged tracks when we last surfaced an
 	// "ollama unreachable" log so we can dedup the spam without going
@@ -578,6 +584,17 @@ func (o *Orchestrator) RegisterStatsContainer(containerID, crewID, workspaceID s
 	if reg != nil {
 		reg(containerID, crewID, workspaceID)
 	}
+}
+
+// SetWorkspaceMemoryProvider wires the cross-crew memory tier into
+// buildMemoryContext. Until this is called, agents only see their own
+// memory + their crew's shared memory + pins. Passing nil disables
+// the tier (test convenience). Concurrency-safe; can be re-wired
+// after construction.
+func (o *Orchestrator) SetWorkspaceMemoryProvider(p WorkspaceMemoryProvider) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.workspaceMemory = p
 }
 
 // SetSidecarEnabled enables the sidecar proxy for credential injection.

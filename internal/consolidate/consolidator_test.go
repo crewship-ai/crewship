@@ -504,13 +504,16 @@ func TestAppendRulesCreatesDirectory(t *testing.T) {
 	tmp := t.TempDir()
 	nested := filepath.Join(tmp, "a", "b", "c")
 	c := &Consolidator{}
-	path, err := c.appendRules(nested, time.Date(2026, 4, 17, 10, 0, 0, 0, time.UTC),
+	path, content, err := c.appendRules(nested, time.Date(2026, 4, 17, 10, 0, 0, 0, time.UTC),
 		[]LearnedRule{{Pattern: "p", Action: "a", Evidence: []string{"x", "y"}, Confidence: 0.5}})
 	if err != nil {
 		t.Fatalf("appendRules: %v", err)
 	}
 	if !strings.HasSuffix(path, "learned-2026-04-17.md") {
 		t.Errorf("unexpected path: %s", path)
+	}
+	if len(content) == 0 {
+		t.Errorf("returned content should be the post-write file body, got empty")
 	}
 	if _, err := os.Stat(path); err != nil {
 		t.Errorf("file not created: %v", err)

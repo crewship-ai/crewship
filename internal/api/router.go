@@ -80,6 +80,11 @@ type Router struct {
 	journal                journal.Emitter     // Crew Journal emitter; nil → emits become no-ops so dev builds without the server-level wiring still work
 	consolidator           *consolidate.Consolidator
 	consolidateMemoryRoot  string
+	// memoryVersionsBlobRoot is the v90 content-addressed blob
+	// directory ApproveProposal records under. Empty disables
+	// versioning on approve (the approve still succeeds; the
+	// canonical merge just doesn't record an audit row).
+	memoryVersionsBlobRoot string
 	provisioning           *ProvisioningHandler // exposed via Provisioning() so chatbridge can auto-trigger builds
 	// PipelinesHandler is exposed (capitalised) so the orchestrator
 	// boot path can hand it the AgentRunner adapter post-construction.

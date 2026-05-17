@@ -59,6 +59,16 @@ type Config struct {
 	// Defaults to false so an operator who doesn't opt in keeps the
 	// existing direct-write contract.
 	ProposalMode bool
+
+	// BlobRoot is the parent directory for content-addressed memory
+	// version blobs. Each successful canonical write
+	// (appendRules / snapshotPins) records a memory_versions row +
+	// writes the content blob under BlobRoot/{sha[:2]}/{sha}.
+	//
+	// Empty disables versioning silently — agent runs proceed exactly
+	// as before, just without the audit trail. Production wires
+	// {DataDir.Root}/memory/versions; tests pass t.TempDir().
+	BlobRoot string
 }
 
 // LearnedRule is one extracted "pattern -> action" lesson. Evidence is the

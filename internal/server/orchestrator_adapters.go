@@ -9,9 +9,36 @@ import (
 	"github.com/crewship-ai/crewship/internal/harbormaster"
 	"github.com/crewship-ai/crewship/internal/hooks"
 	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/memory"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/presence"
 )
+
+// orchestratorWorkspaceProvider adapts the *memory.WorkspaceMemoryRegistry
+// to orchestrator.WorkspaceMemoryProvider. The adapter exists to handle
+// the typed-nil-interface gotcha: a registry lookup that returns a nil
+// *memory.WorkspaceMemory must surface as a nil orchestrator
+// .WorkspaceMemoryReader interface, not a non-nil interface wrapping a
+// nil pointer. The orchestrator's buildWorkspaceMemoryBlock checks
+// `reader == nil` and would skip the no-op-then-panic path only if
+// this adapter returns interface-nil cleanly.
+type orchestratorWorkspaceProvider struct {
+	reg *memory.WorkspaceMemoryRegistry
+}
+
+// For resolves the WorkspaceMemoryReader for a workspace. Returns nil
+// (interface-nil) when the registry has nothing, so the orchestrator's
+// existing nil check is the single guard.
+func (a orchestratorWorkspaceProvider) For(workspaceID string) orchestrator.WorkspaceMemoryReader {
+	if a.reg == nil {
+		return nil
+	}
+	wm := a.reg.For(workspaceID)
+	if wm == nil {
+		return nil
+	}
+	return wm
+}
 
 // Three tiny adapters that wire orchestrator's narrow integration
 // interfaces (HookDispatcher, ApprovalGate, EpisodicRecaller) to the

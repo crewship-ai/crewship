@@ -1250,6 +1250,16 @@ END;
 	// migration above took v89 in main first. Migration bodies are
 	// independent — both apply cleanly in either order.)
 	{version: 90, name: "add_memory_proposals", sql: migrationAddMemoryProposals},
+	// v91 introduces the memory_versions audit table for every
+	// memory.WriteFile call — append-only, content-addressed blob
+	// references on disk under {memoryRoot}/versions/{sha[:2]}/{sha}.
+	// Satisfies EU AI Act Art. 14 oversight requirements (enforcement
+	// Aug 2 2026) and matches the immutable-versions pattern Anthropic
+	// Managed Agents shipped April 2026. See
+	// migrate_consts_v91_memory_versions.go for full design notes.
+	// (Originally authored as v90 in PR #2; renumbered to v91 on rebase
+	// because the renumbered add_memory_proposals took v90 first.)
+	{version: 91, name: "add_memory_versions", sql: migrationAddMemoryVersions},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

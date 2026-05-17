@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"syscall"
@@ -85,6 +86,11 @@ var startCmd = &cobra.Command{
 			databaseURL = dataDir.DatabaseURL()
 			cfg.Storage.BasePath = dataDir.OutputDir()
 			cfg.Storage.LogPath = dataDir.LogsDir()
+			// Workspace-tier memory lives under DataDir.Root/memory.
+			// Per-workspace subdirs are lazy-created by the
+			// WorkspaceMemoryRegistry on first agent run that asks
+			// for the workspace tier in its prompt.
+			cfg.Storage.MemoryRoot = filepath.Join(dataDir.Root, "memory")
 		}
 
 		db, err := database.Open(databaseURL)
