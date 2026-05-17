@@ -91,6 +91,14 @@ const (
 	// types distinct preserves the existing downstream semantic
 	// ("rules are live now") on the old event.
 	EntryMemoryConsolidationProposed EntryType = "memory.consolidation_proposed"
+	// EntryMemoryWriteVerifierBlocked sibling of EntryMemoryWriteRejected
+	// for the verifier rejection class. Distinct type so audit reviewers
+	// can separate scrubber/cap denials (boundary policy) from verifier
+	// denials (truthiness/citation policy) without parsing payloads.
+	// Payload carries: tier, file, kind (stale_citation | contradiction),
+	// detail (specific failure metadata). Severity is warn — the write
+	// was refused at the boundary, no data was corrupted.
+	EntryMemoryWriteVerifierBlocked EntryType = "memory.write_verifier_blocked"
 
 	// Observability (Crow's Nest)
 	EntryExecCommand       EntryType = "exec.command"

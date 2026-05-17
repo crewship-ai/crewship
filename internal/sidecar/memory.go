@@ -29,13 +29,29 @@ func (s *Server) resolveMemoryEngine(scope string) (*memory.Engine, bool) {
 }
 
 // handleMemorySearch handles POST /memory/search.
-// Request body: {"query": "...", "limit": 10, "scope": "agent|crew|both"}
+// Request body: {"query": "...", "limit": 10, "scope": "agent|crew|both",
+//
+//	"hybrid": false}
+//
 // scope defaults to "agent" for backward compatibility.
+//
+// When hybrid=true AND IPC is wired, the call is forwarded to the
+// host-side /api/v1/memory/search/hybrid endpoint, which combines the
+// workspace FTS engine + episodic vec+BM25 recall via RRF. Sidecar's
+// own FTS engines are bypassed on the hybrid path because the
+// container-local markdown corpus duplicates what's already in the
+// workspace tier (the consolidator writes to both). The agent calling
+// hybrid=true expects cross-corpus recall, not just markdown.
+//
+// When hybrid=true but IPC is not configured, falls back to the
+// FTS-only path with a Warning header so the operator can tell the
+// degradation happened.
 func (s *Server) handleMemorySearch(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Query string `json:"query"`
-		Limit int    `json:"limit"`
-		Scope string `json:"scope"`
+		Query  string `json:"query"`
+		Limit  int    `json:"limit"`
+		Scope  string `json:"scope"`
+		Hybrid bool   `json:"hybrid"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSONResponse(w, http.StatusBadRequest, map[string]string{
@@ -57,6 +73,31 @@ func (s *Server) handleMemorySearch(w http.ResponseWriter, r *http.Request) {
 	if req.Scope == "" {
 		req.Scope = "agent"
 	}
+	// Validate scope BEFORE the hybrid-forward branch — without this,
+	// scope="bogus" silently translated to "" in the IPC bridge and
+	// returned results from the wrong vocabulary. The switch below
+	// also validates, but only for the non-hybrid path; hybrid takes
+	// the early-return so the validation must mirror up here.
+	switch req.Scope {
+	case "agent", "crew", "both":
+		// valid — the switch below handles each accordingly
+	default:
+		writeJSONResponse(w, http.StatusBadRequest, map[string]string{
+			"error": "invalid scope: use agent, crew, or both",
+		})
+		return
+	}
+
+	if req.Hybrid && s.ipc != nil {
+		s.forwardHybridSearch(w, r, req.Query, req.Limit, req.Scope)
+		return
+	}
+	if req.Hybrid && s.ipc == nil {
+		// Surface the degradation so an agent inspecting headers sees
+		// "you asked for hybrid but I gave you FTS only" rather than
+		// silently masking the missing wiring.
+		w.Header().Set("X-Memory-Hybrid-Fallback", "ipc_not_configured")
+	}
 
 	switch req.Scope {
 	case "agent":
@@ -70,6 +111,43 @@ func (s *Server) handleMemorySearch(w http.ResponseWriter, r *http.Request) {
 			"error": "invalid scope: use agent, crew, or both",
 		})
 	}
+}
+
+// forwardHybridSearch translates the sidecar's scope vocabulary
+// ("agent" / "crew" / "both") to the host hybrid endpoint's scope
+// vocabulary ("own" / "crew_shared" / "") and proxies via
+// X-Internal-Token. Same 15 s timeout the rest of proxyIPCJSON
+// callers use; same auth.
+func (s *Server) forwardHybridSearch(w http.ResponseWriter, r *http.Request, query string, limit int, scope string) {
+	hostScope := ""
+	switch scope {
+	case "agent":
+		hostScope = "own"
+	case "crew":
+		hostScope = "crew_shared"
+	case "both":
+		// "both" has no direct host equivalent — pass empty so the
+		// host's ScopeForRole picks ScopeOwn (the default) and the
+		// caller's agent-id-from-token does the filtering.
+		hostScope = ""
+	}
+	body, _ := json.Marshal(map[string]any{
+		"query":   query,
+		"limit":   limit,
+		"scope":   hostScope,
+		"crew_id": s.ipcCrewID(),
+	})
+	s.proxyIPCJSON(w, r, "POST", "/api/v1/memory/search/hybrid", "memory hybrid search", body)
+}
+
+// ipcCrewID returns the crew id from the IPC config so the hybrid
+// query's episodic side scopes correctly. Empty when IPC is unset
+// or the field is blank.
+func (s *Server) ipcCrewID() string {
+	if s == nil || s.ipc == nil {
+		return ""
+	}
+	return s.ipc.CrewID
 }
 
 func (s *Server) searchSingleScope(w http.ResponseWriter, r *http.Request, engine *memory.Engine, scope, query string, limit int) {

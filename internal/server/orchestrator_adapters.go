@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"log/slog"
 
+	goapi "github.com/crewship-ai/crewship/internal/api"
 	"github.com/crewship-ai/crewship/internal/episodic"
 	"github.com/crewship-ai/crewship/internal/harbormaster"
 	"github.com/crewship-ai/crewship/internal/hooks"
@@ -30,6 +31,26 @@ type orchestratorWorkspaceProvider struct {
 // (interface-nil) when the registry has nothing, so the orchestrator's
 // existing nil check is the single guard.
 func (a orchestratorWorkspaceProvider) For(workspaceID string) orchestrator.WorkspaceMemoryReader {
+	if a.reg == nil {
+		return nil
+	}
+	wm := a.reg.For(workspaceID)
+	if wm == nil {
+		return nil
+	}
+	return wm
+}
+
+// apiWorkspaceProvider adapts the same registry to the api package's
+// hybrid-search WorkspaceMemoryProvider — same typed-nil-interface
+// gotcha guard, different downstream interface. Two adapters because
+// the orchestrator and api packages each declare their own narrow
+// interface to avoid cross-package coupling.
+type apiWorkspaceProvider struct {
+	reg *memory.WorkspaceMemoryRegistry
+}
+
+func (a apiWorkspaceProvider) For(workspaceID string) goapi.WorkspaceEngineHolder {
 	if a.reg == nil {
 		return nil
 	}

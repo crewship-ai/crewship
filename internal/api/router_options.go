@@ -9,6 +9,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/config"
 	"github.com/crewship-ai/crewship/internal/consolidate"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
+	"github.com/crewship-ai/crewship/internal/episodic"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
 	"github.com/crewship-ai/crewship/internal/license"
@@ -231,6 +232,26 @@ func WithConsolidateMemoryRoot(path string) RouterOption {
 func WithMemoryVersionsBlobRoot(path string) RouterOption {
 	return func(r *Router) {
 		r.memoryVersionsBlobRoot = path
+	}
+}
+
+// WithHybridSearchEmbedder feeds the dense-vector half of the
+// MemoryHybridSearchHandler. nil is fine — the handler degrades to
+// FTS-only when this is missing. Production wires the same Ollama
+// embedder the episodic recall adapter uses, so a single embedder
+// instance covers both surfaces.
+func WithHybridSearchEmbedder(e episodic.Embedder) RouterOption {
+	return func(r *Router) {
+		r.hybridSearchEmbedder = e
+	}
+}
+
+// WithHybridSearchProvider feeds the FTS half of the hybrid
+// search handler. nil is fine — handler degrades to episodic-only.
+// Production wires an adapter around *memory.WorkspaceMemoryRegistry.
+func WithHybridSearchProvider(p WorkspaceMemoryProvider) RouterOption {
+	return func(r *Router) {
+		r.hybridSearchProvider = p
 	}
 }
 
