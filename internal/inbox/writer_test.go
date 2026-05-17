@@ -377,10 +377,10 @@ func TestResolveBySource_ValidatesRequiredFields(t *testing.T) {
 	// required-fields contract — empty kind or source_id, or a nil
 	// db handle, must short-circuit to a no-op.
 	cases := []struct {
-		name             string
-		db               *sql.DB
-		kind, sourceID   string
-		action, userID   string
+		name           string
+		db             *sql.DB
+		kind, sourceID string
+		action, userID string
 	}{
 		{"missing_kind", db, "", "x", "a", "u"},
 		{"missing_source_id", db, "waitpoint", "", "a", "u"},
