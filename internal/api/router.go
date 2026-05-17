@@ -15,6 +15,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/config"
 	"github.com/crewship-ai/crewship/internal/consolidate"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
+	"github.com/crewship-ai/crewship/internal/episodic"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
 	"github.com/crewship-ai/crewship/internal/license"
@@ -85,7 +86,13 @@ type Router struct {
 	// versioning on approve (the approve still succeeds; the
 	// canonical merge just doesn't record an audit row).
 	memoryVersionsBlobRoot string
-	provisioning           *ProvisioningHandler // exposed via Provisioning() so chatbridge can auto-trigger builds
+	// hybridSearchEmbedder + hybridSearchProvider feed the
+	// MemoryHybridSearchHandler. Either may be nil; the underlying
+	// memory.HybridSearch degrades gracefully (FTS-only when
+	// embedder is nil, episodic-only when provider is nil).
+	hybridSearchEmbedder episodic.Embedder
+	hybridSearchProvider WorkspaceMemoryProvider
+	provisioning         *ProvisioningHandler // exposed via Provisioning() so chatbridge can auto-trigger builds
 	// PipelinesHandler is exposed (capitalised) so the orchestrator
 	// boot path can hand it the AgentRunner adapter post-construction.
 	// The router builds handlers before the orchestrator is fully

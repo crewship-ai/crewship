@@ -563,6 +563,16 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 			// of the same content dedupe to the same blob.
 			opts = append(opts, goapi.WithMemoryVersionsBlobRoot(filepath.Join(cfg.Storage.MemoryRoot, "versions")))
 		}
+		// Hybrid search wiring — reuse the same embedder instance the
+		// episodic recall adapter already uses (single Ollama client
+		// for both surfaces), and a registry adapter for the FTS half.
+		if embedder != nil {
+			opts = append(opts, goapi.WithHybridSearchEmbedder(embedder))
+		}
+		if cfg.Storage.MemoryRoot != "" {
+			hybridRegistry := memory.NewWorkspaceMemoryRegistry(cfg.Storage.MemoryRoot, logger)
+			opts = append(opts, goapi.WithHybridSearchProvider(apiWorkspaceProvider{reg: hybridRegistry}))
+		}
 
 		apiRouter, err := goapi.NewRouter(deps.DB, cfg.Auth.JWTSecret, logger, opts...)
 		if err != nil {

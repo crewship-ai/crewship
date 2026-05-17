@@ -125,6 +125,17 @@ func (w *WorkspaceMemory) GetContext(ctx context.Context, budget int) (string, i
 	return b.String(), totalChars
 }
 
+// Engine exposes the underlying memory.Engine so callers that need
+// to drive lower-level operations (HybridSearch, custom reindex) can
+// reach it. Higher-level callers should continue to use Search /
+// GetContext / Reindex — Engine is the escape hatch.
+func (w *WorkspaceMemory) Engine() *Engine {
+	if w == nil {
+		return nil
+	}
+	return w.engine
+}
+
 // Reindex rebuilds the FTS5 index from workspace memory files.
 func (w *WorkspaceMemory) Reindex() error {
 	return w.engine.Reindex()

@@ -281,6 +281,15 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	r.mux.Handle("GET /api/v1/memory/versions/{sha}", authed(wsCtx(http.HandlerFunc(mvH.Show))))
 	r.mux.Handle("POST /api/v1/memory/versions/{sha}/restore", authed(wsCtx(http.HandlerFunc(mvH.Restore))))
 
+	// Host-side hybrid search — combines workspace FTS + episodic
+	// vec+BM25 via RRF (memory.HybridSearch primitive). MEMBER+ at
+	// the handler level; workspace-anchored so cross-workspace
+	// probes can't smuggle foreign ids.
+	hsH := NewMemoryHybridSearchHandler(r.db, r.logger)
+	hsH.SetEmbedder(r.hybridSearchEmbedder)
+	hsH.SetWorkspaceProvider(r.hybridSearchProvider)
+	r.mux.Handle("POST /api/v1/memory/search/hybrid", authed(wsCtx(http.HandlerFunc(hsH.Search))))
+
 	// Quartermaster eval: mission replay + regression + list. Both
 	// mutating calls run in a goroutine and return 202 with a run_id
 	// the caller can later poll for in the list endpoint.
