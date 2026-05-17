@@ -3,8 +3,8 @@ package database
 import (
 	"context"
 	"database/sql"
-	"io"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -28,8 +28,11 @@ func TestMigrateV90_MemoryProposalsSchema(t *testing.T) {
 	}
 	defer db.Close()
 
-	silent := slog.New(slog.NewTextHandler(io.Discard, nil))
-	if err := Migrate(context.Background(), db.DB, silent); err != nil {
+	// Suite-standard test logger: warnings + errors only on stderr.
+	// io.Discard would hide useful migration diagnostics (cascade-
+	// trigger conflicts, partial-applies) on a failing test run.
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	if err := Migrate(context.Background(), db.DB, logger); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
 
