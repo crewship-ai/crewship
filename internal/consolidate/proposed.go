@@ -97,7 +97,13 @@ func (c *Consolidator) writeProposal(
 	// .Confidence and the rest at conservative defaults — future
 	// iterations populate RecallCount/UniqueQueries from journal
 	// queries against the rule's evidence ids.
-	scores := computeProposalScores(rules, now)
+	// Populate RecallCount + UniqueQueries from journal-backed
+	// memory.searched events. Without this the Skill-promotion gate
+	// would never fire in steady state — every rule would have
+	// recall=0 at score time, blocking promotion regardless of LLM
+	// confidence. db nil-safe: tests that pass nil get the legacy
+	// zero-counter behaviour.
+	scores := computeProposalScoresWithRecall(ctx, c.DB, cfg.WorkspaceID, rules, recallLookbackWindow, now)
 	scoreJSON := marshalScoresJSON(scores)
 	proposalID := "mp_" + runID
 	if c.DB != nil {
@@ -260,11 +266,52 @@ func marshalScoresJSON(scores map[string]ScoreResult) string {
 // computed on subsequent consolidator runs when the recall
 // counters tick up.
 func computeProposalScores(rules []LearnedRule, now time.Time) map[string]ScoreResult {
+	return computeProposalScoresWithRecall(context.Background(), nil, "", rules, 0, now)
+}
+
+// recallLookbackWindow is the period over which we count distinct
+// `memory.searched` events when populating CandidateMetrics. 7 days
+// matches the consolidator's own dedup window — a rule that has been
+// recalled in the last week is the operational definition of
+// "actively useful" for the Skill-promotion gate. Shorter windows
+// produce noisy false-negatives; longer windows let stale rules
+// accumulate phantom recall credit.
+const recallLookbackWindow = 7 * 24 * time.Hour
+
+// computeProposalScoresWithRecall is the database-aware variant of
+// computeProposalScores. When db is non-nil, every rule's RecallCount
+// and UniqueQueries get populated from the journal's
+// EntryMemorySearched entries within the lookback window — closing
+// the PRD §8.1 gap where the Skill-promotion gate never fired in
+// steady state because both counters were always zero.
+//
+// db == nil short-circuits to the previous behaviour (RecallCount=0,
+// UniqueQueries=0) so the function is safe to call from tests or
+// callers that haven't yet wired the journal-backed DB.
+//
+// lookback == 0 defaults to recallLookbackWindow (7 days).
+func computeProposalScoresWithRecall(
+	ctx context.Context,
+	db *sql.DB,
+	workspaceID string,
+	rules []LearnedRule,
+	lookback time.Duration,
+	now time.Time,
+) map[string]ScoreResult {
+	if lookback <= 0 {
+		lookback = recallLookbackWindow
+	}
 	scores := make(map[string]ScoreResult, len(rules))
 	for _, r := range rules {
+		recallCount, uniqueQueries := 0, 0
+		if db != nil && workspaceID != "" && len(r.Evidence) > 0 {
+			recallCount, uniqueQueries = loadRecallMetrics(ctx, db, workspaceID, r.Evidence, now.Add(-lookback))
+		}
 		scores[r.Pattern] = ComputeScore(
 			CandidateMetrics{
 				RawRelevance:       r.Confidence,
+				RecallCount:        recallCount,
+				UniqueQueries:      uniqueQueries,
 				EvidenceCount:      len(r.Evidence),
 				DistinctEntryTypes: 1,
 			},
@@ -274,6 +321,69 @@ func computeProposalScores(rules []LearnedRule, now time.Time) map[string]ScoreR
 		)
 	}
 	return scores
+}
+
+// loadRecallMetrics queries journal_entries for memory.searched events
+// whose payload hit_chunk_ids list intersects with the rule's
+// evidence ids, since the supplied cutoff. Returns (recallCount,
+// uniqueQueries). SQLite-specific JSON predicate — Postgres port
+// would substitute jsonb @> array containment.
+//
+// Failure modes: every error is logged and treated as zero counts.
+// A scoring miss is strictly preferable to crashing the consolidator;
+// the next tick re-queries.
+func loadRecallMetrics(ctx context.Context, db *sql.DB, workspaceID string, evidenceIDs []string, since time.Time) (int, int) {
+	if len(evidenceIDs) == 0 {
+		return 0, 0
+	}
+	// Build a single SELECT that pulls (entry_id, query) for every
+	// memory.searched row within the window whose hit_chunk_ids JSON
+	// array contains ANY of the evidence ids. json_each unrolls the
+	// array; the WHERE filters to rows whose unrolled element equals
+	// one of our ids. DISTINCT (id, query) prevents one search hitting
+	// multiple evidence ids from inflating either counter.
+	placeholders := make([]string, len(evidenceIDs))
+	args := make([]any, 0, len(evidenceIDs)+2)
+	args = append(args, workspaceID, since.UTC().Format(time.RFC3339Nano))
+	for i, eid := range evidenceIDs {
+		placeholders[i] = "?"
+		args = append(args, eid)
+	}
+	q := `
+		SELECT DISTINCT je.id, COALESCE(json_extract(je.payload, '$.query'), '') AS q
+		FROM journal_entries je, json_each(json_extract(je.payload, '$.hit_chunk_ids')) AS hits
+		WHERE je.workspace_id = ?
+		  AND je.entry_type = 'memory.searched'
+		  AND je.ts >= ?
+		  AND hits.value IN (` + strings.Join(placeholders, ",") + `)`
+	rows, err := db.QueryContext(ctx, q, args...)
+	if err != nil {
+		// Most likely cause: journal payload is non-JSON on a legacy
+		// row. Don't pollute the consolidator log with this on every
+		// scoring pass — the consolidator's caller logs ScoreResult,
+		// which surfaces the zero counts.
+		return 0, 0
+	}
+	defer rows.Close()
+	queries := make(map[string]struct{})
+	recallCount := 0
+	for rows.Next() {
+		var id, query string
+		if err := rows.Scan(&id, &query); err != nil {
+			continue
+		}
+		recallCount++
+		q := strings.ToLower(strings.TrimSpace(query))
+		if q != "" {
+			queries[q] = struct{}{}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		// Iterator-level failure — fall back to whatever we already
+		// counted rather than zeroing it.
+		return recallCount, len(queries)
+	}
+	return recallCount, len(queries)
 }
 
 // promoteProposalSkills is the post-DB-insert hook that runs the

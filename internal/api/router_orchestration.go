@@ -324,6 +324,7 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	hsH := NewMemoryHybridSearchHandler(r.db, r.logger)
 	hsH.SetEmbedder(r.hybridSearchEmbedder)
 	hsH.SetWorkspaceProvider(r.hybridSearchProvider)
+	hsH.SetJournal(r.Journal())
 	r.mux.Handle("POST /api/v1/memory/search/hybrid", authed(wsCtx(http.HandlerFunc(hsH.Search))))
 
 	// Quartermaster eval: mission replay + regression + list. Both

@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strconv"
 
 	"github.com/crewship-ai/crewship/internal/episodic"
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/memory"
 )
 
@@ -44,10 +46,24 @@ type MemoryHybridSearchHandler struct {
 	logger   *slog.Logger
 	embedder episodic.Embedder
 	provider WorkspaceMemoryProvider
+	journal  journal.Emitter
 }
 
 func NewMemoryHybridSearchHandler(db *sql.DB, logger *slog.Logger) *MemoryHybridSearchHandler {
-	return &MemoryHybridSearchHandler{db: db, logger: logger}
+	return &MemoryHybridSearchHandler{db: db, logger: logger, journal: noopEmitter{}}
+}
+
+// SetJournal wires the journal emitter used to record memory.searched
+// events on every non-empty search. The consolidator scoring path
+// reads these back to populate RecallCount + UniqueQueries
+// CandidateMetrics (PRD §8.1 closing). nil maps to the no-op so
+// tests stay simple.
+func (h *MemoryHybridSearchHandler) SetJournal(j journal.Emitter) {
+	if j == nil {
+		h.journal = noopEmitter{}
+		return
+	}
+	h.journal = j
 }
 
 // SetEmbedder wires the dense-vector half. Optional — handler
@@ -131,6 +147,38 @@ func (h *MemoryHybridSearchHandler) Search(w http.ResponseWriter, r *http.Reques
 		h.logger.Error("hybrid search failed", "error", err, "workspace_id", wsID)
 		replyError(w, http.StatusInternalServerError, "search failed")
 		return
+	}
+
+	// Emit memory.searched on every non-empty result. The
+	// consolidator scoring path reads these events back to populate
+	// RecallCount + UniqueQueries, which gates Skill promotion.
+	// hit_chunk_ids carries the journal entry ids from episodic hits
+	// — those are the same ids LearnedRule.Evidence references, so
+	// the scoring JOIN is direct.
+	if len(hits) > 0 {
+		hitIDs := make([]string, 0, len(hits))
+		for _, hit := range hits {
+			if hit.Episodic != nil && hit.Episodic.EntryID != "" {
+				hitIDs = append(hitIDs, hit.Episodic.EntryID)
+			}
+		}
+		if _, emitErr := h.journal.Emit(r.Context(), journal.Entry{
+			WorkspaceID: wsID,
+			AgentID:     agentID,
+			CrewID:      body.CrewID,
+			Type:        journal.EntryMemorySearched,
+			ActorType:   journal.ActorUser,
+			Severity:    journal.SeverityInfo,
+			Summary:     "memory search returned " + strconv.Itoa(len(hits)) + " hit(s)",
+			Payload: map[string]any{
+				"query":         body.Query,
+				"scope":         string(scope),
+				"hit_count":     len(hits),
+				"hit_chunk_ids": hitIDs,
+			},
+		}); emitErr != nil {
+			h.logger.Debug("memory.searched emit", "err", emitErr)
+		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
