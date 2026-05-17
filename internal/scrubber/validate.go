@@ -100,8 +100,16 @@ func (s *Scrubber) ValidateWithAllowlist(input string, mode Mode, allowlist stri
 		matches := p.re.FindAllStringIndex(normalised, -1)
 		for _, m := range matches {
 			matched := normalised[m[0]:m[1]]
-			if allowRe != nil && allowRe.MatchString(matched) {
-				continue
+			// Allowlist patterns must match the full matched span,
+			// not a substring of it. MatchString would happily accept
+			// a pattern like "test" as a license to write any string
+			// containing the substring "test" — including
+			// "sk-ant-test-..." which is exactly what the allowlist
+			// is meant NOT to cover. Anchor on span boundaries instead.
+			if allowRe != nil {
+				if span := allowRe.FindStringIndex(matched); span != nil && span[0] == 0 && span[1] == len(matched) {
+					continue
+				}
 			}
 			hits = append(hits, Hit{
 				Pattern: p.name,

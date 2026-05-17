@@ -128,7 +128,10 @@ func TestWriteFile_ScrubberWarn(t *testing.T) {
 		t.Errorf("hits should be populated in warn mode")
 	}
 
-	got, _ := os.ReadFile(path)
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
 	if !bytes.Equal(got, content) {
 		t.Errorf("warn mode should write original content; got %q want %q", got, content)
 	}
@@ -152,7 +155,10 @@ func TestWriteFile_ScrubberRedact(t *testing.T) {
 		t.Fatalf("redact mode should not reject, got %+v", res)
 	}
 
-	got, _ := os.ReadFile(path)
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
 	if !strings.Contains(string(got), "[REDACTED:anthropic_key]") {
 		t.Errorf("expected redacted marker in on-disk content; got %q", got)
 	}
@@ -255,7 +261,10 @@ func TestWriteFile_ParentDirCreated(t *testing.T) {
 	if res.Rejected {
 		t.Fatalf("vanilla write was rejected: %+v", res)
 	}
-	got, _ := os.ReadFile(path)
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
 	if !bytes.Equal(got, content) {
 		t.Errorf("nested write content mismatch: got %q", got)
 	}

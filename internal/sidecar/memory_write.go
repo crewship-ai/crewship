@@ -110,9 +110,24 @@ func (s *Server) handleMemoryWrite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cap := memoryWriteCaps[filepath.Base(req.File)]
-	if cap == 0 && strings.HasPrefix(filepath.ToSlash(req.File), "daily/") {
-		cap = dailyCap
+	// Reject paths outside the known whitelist. memoryWriteCaps holds
+	// the three canonical basenames (AGENT.md / CREW.md / pins.md); any
+	// path under daily/ gets dailyCap; everything else is refused at
+	// the boundary. The prior fallback of cap=0 was an unbounded write
+	// path — any in-base path the caller could construct was accepted
+	// with no byte ceiling, defeating the whole reason the caps map
+	// exists.
+	rel := filepath.ToSlash(filepath.Clean(req.File))
+	cap, known := memoryWriteCaps[filepath.Base(rel)]
+	if !known {
+		if strings.HasPrefix(rel, "daily/") {
+			cap = dailyCap
+		} else {
+			writeJSONResponse(w, http.StatusBadRequest, map[string]string{
+				"error": "unsupported file path; allowed: AGENT.md, CREW.md, pins.md, daily/*",
+			})
+			return
+		}
 	}
 
 	cfg := memory.WriteConfig{

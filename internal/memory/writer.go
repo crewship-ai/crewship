@@ -74,7 +74,7 @@ type WriteResult struct {
 // goroutine — the flock acquire here is blocking by design.
 func WriteFile(ctx context.Context, path string, content []byte, cfg WriteConfig) (WriteResult, error) {
 	if err := ctx.Err(); err != nil {
-		return WriteResult{}, err
+		return WriteResult{}, fmt.Errorf("preflight context check: %w", err)
 	}
 
 	// 1. Cap check happens first — rejecting on size never touches disk.
@@ -138,7 +138,7 @@ func WriteFile(ctx context.Context, path string, content []byte, cfg WriteConfig
 	defer func() { _ = lk.Unlock() }()
 
 	if err := ctx.Err(); err != nil {
-		return WriteResult{}, err
+		return WriteResult{}, fmt.Errorf("post-lock context check: %w", err)
 	}
 
 	// Random suffix avoids tempfile collisions when two writers race
@@ -182,6 +182,29 @@ func WriteFile(ctx context.Context, path string, content []byte, cfg WriteConfig
 	if err := os.Rename(tmpPath, path); err != nil {
 		cleanupTmp()
 		return WriteResult{}, fmt.Errorf("atomic rename: %w", err)
+	}
+
+	// fsync the parent directory so the rename's directory-entry
+	// update lands on disk. os.Rename is atomic at the inode level
+	// but on ext4/xfs/btrfs the rename's metadata commit is buffered
+	// in the directory's page cache until the next dirty-data flush;
+	// a crash between rename and that flush can revive the prior
+	// directory entry pointing at our (now-removed) tmpPath, making
+	// the rename effectively roll back. fsync on the dir handle forces
+	// the entry update to the journal before we report success. We do
+	// not roll back the data file on dir-fsync failure — the file is
+	// already at `path` and a follow-up writer will overwrite it.
+	if dir, openErr := os.Open(filepath.Dir(path)); openErr == nil {
+		syncErr := dir.Sync()
+		closeErr := dir.Close()
+		if syncErr != nil {
+			return WriteResult{}, fmt.Errorf("fsync parent dir: %w", syncErr)
+		}
+		if closeErr != nil {
+			return WriteResult{}, fmt.Errorf("close parent dir: %w", closeErr)
+		}
+	} else {
+		return WriteResult{}, fmt.Errorf("open parent dir for fsync: %w", openErr)
 	}
 
 	return WriteResult{BytesWritten: len(effective), Hits: hits}, nil

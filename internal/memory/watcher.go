@@ -50,6 +50,7 @@ type WatchEvent struct {
 type Watcher struct {
 	cfg       WatchConfig
 	root      string
+	ctx       context.Context
 	events    chan WatchEvent
 	stop      chan struct{}
 	wg        sync.WaitGroup
@@ -95,9 +96,13 @@ func StartWatcher(ctx context.Context, root string, cfg WatchConfig) (*Watcher, 
 		return nil, fmt.Errorf("watch root %q is not a directory", root)
 	}
 
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	w := &Watcher{
 		cfg:          cfg,
 		root:         root,
+		ctx:          ctx,
 		events:       make(chan WatchEvent, 4),
 		stop:         make(chan struct{}),
 		pendingPaths: make(map[string]struct{}),
@@ -155,6 +160,8 @@ func (w *Watcher) runFsnotify(fw *fsnotify.Watcher) {
 		select {
 		case <-w.stop:
 			return
+		case <-w.ctx.Done():
+			return
 		case ev, ok := <-fw.Events:
 			if !ok {
 				return
@@ -183,6 +190,8 @@ func (w *Watcher) runPoll() {
 	for {
 		select {
 		case <-w.stop:
+			return
+		case <-w.ctx.Done():
 			return
 		case <-ticker.C:
 			next := w.snapshot()

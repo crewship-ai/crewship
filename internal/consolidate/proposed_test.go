@@ -27,8 +27,17 @@ func TestProposalMode_LandsInProposedDir(t *testing.T) {
 
 	ids := seedEntries(t, db, w, "ws_test", "crew_test", 12, journal.EntryPeerEscalation)
 	reply := `[{"pattern":"x","action":"y","evidence":["` + ids[0] + `","` + ids[1] + `"],"confidence":0.7}]`
+	// Pin the consolidator clock to a single instant so the
+	// canonical-path assertion below derives its date from that same
+	// instant — defends against the (rare but real) flake where Run()
+	// and the time.Now() in the assertion straddle a UTC midnight.
+	// We anchor on the current real time rather than a fixed past date
+	// so the consolidator's "Since: time.Hour" window still covers the
+	// freshly seeded journal entries.
+	fixedNow := time.Now().UTC()
 	c := &Consolidator{
 		DB: db, Journal: w, Summarizer: &stubSummarizer{Reply: reply}, Logger: quietLogger(),
+		Now: func() time.Time { return fixedNow },
 	}
 
 	tmp := t.TempDir()
@@ -53,7 +62,7 @@ func TestProposalMode_LandsInProposedDir(t *testing.T) {
 	}
 
 	// Canonical learned-*.md MUST NOT exist when ProposalMode is on.
-	canonical := filepath.Join(tmp, "learned-"+time.Now().UTC().Format("2006-01-02")+".md")
+	canonical := filepath.Join(tmp, "learned-"+fixedNow.UTC().Format("2006-01-02")+".md")
 	if _, err := os.Stat(canonical); !os.IsNotExist(err) {
 		t.Errorf("canonical learned-*.md should not exist in proposal mode, stat err=%v", err)
 	}

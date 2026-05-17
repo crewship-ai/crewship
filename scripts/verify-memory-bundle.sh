@@ -68,9 +68,9 @@ assert "  memory_proposals column count == 12" "${COL_COUNT}" "12"
 
 PENDING_INS=$(sqlite3 "${DB}" "
   BEGIN;
-  INSERT INTO workspaces (id, name, slug) VALUES ('ws_verify_tmp','tmp','tmp_$$');
+  INSERT INTO workspaces (id, name, slug) VALUES ('ws_verify_tmp_$$','tmp','tmp_$$');
   INSERT INTO memory_proposals (id, workspace_id, crew_id, proposal_path, status)
-    VALUES ('mp_verify_$$', 'ws_verify_tmp', 'crew_x', '/tmp/p.md', 'pending');
+    VALUES ('mp_verify_$$', 'ws_verify_tmp_$$', 'crew_x', '/tmp/p.md', 'pending');
   SELECT 'pending_ok';
   ROLLBACK;
 " 2>&1 | tail -1)
@@ -78,9 +78,9 @@ assert "  pending proposal insert succeeds" "${PENDING_INS}" "pending_ok"
 
 BAD_APPROVED=$(sqlite3 "${DB}" "
   BEGIN;
-  INSERT INTO workspaces (id, name, slug) VALUES ('ws_verify_tmp2','tmp','tmp_$$_b');
+  INSERT INTO workspaces (id, name, slug) VALUES ('ws_verify_tmp2_$$','tmp','tmp_$$_b');
   INSERT INTO memory_proposals (id, workspace_id, crew_id, proposal_path, status)
-    VALUES ('mp_v2_$$', 'ws_verify_tmp2', 'crew_x', '/tmp/p.md', 'approved');
+    VALUES ('mp_v2_$$', 'ws_verify_tmp2_$$', 'crew_x', '/tmp/p.md', 'approved');
   SELECT 'should_not_reach';
   ROLLBACK;
 " 2>&1 || true)
@@ -89,9 +89,9 @@ assert_contains "  approved without decided_at rejected by CHECK" "${BAD_APPROVE
 bold "4) inbox_items.kind CHECK admits memory_consolidation"
 INBOX_OK=$(sqlite3 "${DB}" "
   BEGIN;
-  INSERT INTO workspaces (id, name, slug) VALUES ('ws_verify_tmp3','tmp','tmp_$$_c');
+  INSERT INTO workspaces (id, name, slug) VALUES ('ws_verify_tmp3_$$','tmp','tmp_$$_c');
   INSERT INTO inbox_items (id, workspace_id, kind, source_id, title)
-    VALUES ('ibx_mc_verify_$$', 'ws_verify_tmp3', 'memory_consolidation', 'mp_x', 'verify');
+    VALUES ('ibx_mc_verify_$$', 'ws_verify_tmp3_$$', 'memory_consolidation', 'mp_x', 'verify');
   SELECT 'memory_consolidation_ok';
   ROLLBACK;
 " 2>&1 | tail -1)
@@ -99,9 +99,9 @@ assert "  memory_consolidation kind admitted" "${INBOX_OK}" "memory_consolidatio
 
 BAD_KIND=$(sqlite3 "${DB}" "
   BEGIN;
-  INSERT INTO workspaces (id, name, slug) VALUES ('ws_verify_tmp4','tmp','tmp_$$_d');
+  INSERT INTO workspaces (id, name, slug) VALUES ('ws_verify_tmp4_$$','tmp','tmp_$$_d');
   INSERT INTO inbox_items (id, workspace_id, kind, source_id, title)
-    VALUES ('ibx_bad_$$', 'ws_verify_tmp4', 'bogus_kind', 'src', 'verify');
+    VALUES ('ibx_bad_$$', 'ws_verify_tmp4_$$', 'bogus_kind', 'src', 'verify');
   SELECT 'should_not_reach';
   ROLLBACK;
 " 2>&1 || true)
@@ -117,11 +117,11 @@ bold "6) Journal accepts new entry types"
 # validation is what the new entry types live in).
 EMIT_REJECT=$(sqlite3 "${DB}" "
   BEGIN;
-  INSERT INTO workspaces (id, name, slug) VALUES ('ws_verify_tmp5','tmp','tmp_$$_e');
+  INSERT INTO workspaces (id, name, slug) VALUES ('ws_verify_tmp5_$$','tmp','tmp_$$_e');
   INSERT INTO journal_entries (id, workspace_id, ts, entry_type, severity, actor_type, summary, payload)
-    VALUES ('j_verify_$$_1', 'ws_verify_tmp5', datetime('now'), 'memory.write_rejected', 'warn', 'sidecar', 'scrubber rejected key', '{}');
+    VALUES ('j_verify_$$_1', 'ws_verify_tmp5_$$', datetime('now'), 'memory.write_rejected', 'warn', 'sidecar', 'scrubber rejected key', '{}');
   INSERT INTO journal_entries (id, workspace_id, ts, entry_type, severity, actor_type, summary, payload)
-    VALUES ('j_verify_$$_2', 'ws_verify_tmp5', datetime('now'), 'memory.consolidation_proposed', 'notice', 'system', 'proposal pending', '{}');
+    VALUES ('j_verify_$$_2', 'ws_verify_tmp5_$$', datetime('now'), 'memory.consolidation_proposed', 'notice', 'system', 'proposal pending', '{}');
   SELECT 'journal_types_ok';
   ROLLBACK;
 " 2>&1 | tail -1)
