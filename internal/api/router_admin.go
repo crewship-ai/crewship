@@ -32,6 +32,15 @@ func (r *Router) registerAdminRoutes() {
 	keeperLog := NewKeeperLogHandler(r.db, r.logger)
 	r.mux.Handle("GET /api/v1/admin/keeper/requests", authed(wsCtx(http.HandlerFunc(keeperLog.List))))
 
+	// Memory stats — operator observability for the memory subsystem.
+	// Reads memory_versions directly; the audit watcher (Iter 1 of
+	// the memory-hardening series) keeps that table honest about
+	// both sidecar-mediated and direct-filesystem writes, so the
+	// dashboard numbers stay correct regardless of which path the
+	// agent took.
+	memStats := NewMemoryStatsHandler(r.db, r.logger)
+	r.mux.Handle("GET /api/v1/admin/memory/stats", authed(wsCtx(http.HandlerFunc(memStats.Stats))))
+
 	// Backups (admin-only; require workspace context for scoping).
 	// Adapt the concrete Docker client to backup.DockerOps so the
 	// admin-backup HTTP layer doesn't see the Moby SDK directly.
