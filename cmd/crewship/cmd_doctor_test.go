@@ -89,6 +89,78 @@ func TestCheckTelemetryStatus(t *testing.T) {
 	})
 }
 
+func TestCheckSentryDSNWiring(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	t.Run("not asked → INFO with hint", func(t *testing.T) {
+		// Fresh DB: app_settings has no row for telemetry_opt_in. We still
+		// want to nudge the operator toward wiring a DSN now so the next
+		// `crewship start` (which flips consent on by beta default) doesn't
+		// silently route crashes to /dev/null.
+		got := checkSentryDSNWiring(ctx, db.DB, "")
+		if got.status != "INFO" {
+			t.Errorf("status = %q, want INFO; detail=%q", got.status, got.detail)
+		}
+		if got.hint == "" {
+			t.Errorf("expected DSN wiring hint, got empty")
+		}
+		if !strings.Contains(got.hint, "CREWSHIP_SENTRY_DSN") {
+			t.Errorf("hint missing env var name: %q", got.hint)
+		}
+	})
+
+	t.Run("enabled + DSN set → PASS", func(t *testing.T) {
+		if _, _, err := crashreport.SetOptIn(ctx, db.DB, true); err != nil {
+			t.Fatalf("SetOptIn(true): %v", err)
+		}
+		got := checkSentryDSNWiring(ctx, db.DB, "https://k@sentry.example.com/42")
+		if got.status != "PASS" {
+			t.Errorf("status = %q, want PASS; detail=%q", got.status, got.detail)
+		}
+		if !strings.Contains(got.detail, "sentry.example.com") {
+			t.Errorf("expected endpoint host in detail, got %q", got.detail)
+		}
+	})
+
+	t.Run("enabled + DSN empty → WARN (the gap we're closing)", func(t *testing.T) {
+		// Re-set consent explicitly so the subtest is order-independent
+		// (same pattern CodeRabbit enforced on the neighbouring tests).
+		if _, _, err := crashreport.SetOptIn(ctx, db.DB, true); err != nil {
+			t.Fatalf("SetOptIn(true): %v", err)
+		}
+		got := checkSentryDSNWiring(ctx, db.DB, "")
+		if got.status != "WARN" {
+			t.Errorf("status = %q, want WARN; detail=%q", got.status, got.detail)
+		}
+		if !strings.Contains(got.detail, "enabled") || !strings.Contains(got.detail, "DSN") {
+			t.Errorf("WARN detail should mention enabled + DSN: %q", got.detail)
+		}
+		if !strings.Contains(got.hint, "CREWSHIP_SENTRY_DSN") {
+			t.Errorf("hint missing env var name: %q", got.hint)
+		}
+		if !strings.Contains(got.hint, "-X") {
+			t.Errorf("hint should mention ldflag rebuild path: %q", got.hint)
+		}
+	})
+
+	t.Run("opted out → INFO, no hint, no warn", func(t *testing.T) {
+		if _, _, err := crashreport.SetOptIn(ctx, db.DB, false); err != nil {
+			t.Fatalf("SetOptIn(false): %v", err)
+		}
+		got := checkSentryDSNWiring(ctx, db.DB, "")
+		if got.status != "INFO" {
+			t.Errorf("status = %q, want INFO; detail=%q", got.status, got.detail)
+		}
+		if got.hint != "" {
+			// Don't second-guess the operator's opt-out by hinting at DSN
+			// setup — they already declined.
+			t.Errorf("opted-out path should not push a hint, got %q", got.hint)
+		}
+	})
+}
+
 func TestCheckDsnReachability(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
