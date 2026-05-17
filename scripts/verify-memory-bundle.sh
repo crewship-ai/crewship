@@ -63,8 +63,11 @@ V90=$(sqlite3 "${DB}" "SELECT version || ':' || name FROM _migrations WHERE vers
 assert "  v90 row present" "${V90}" "90:add_memory_proposals"
 
 bold "3) memory_proposals schema"
+# Expected: 12 columns from v90 + 1 added by v92 (score_json) = 13.
+# This breaks intentionally on the next schema addition so the verify
+# script gets bumped in lockstep with migrations.
 COL_COUNT=$(sqlite3 "${DB}" "SELECT COUNT(*) FROM pragma_table_info('memory_proposals')")
-assert "  memory_proposals column count == 12" "${COL_COUNT}" "12"
+assert "  memory_proposals column count == 13" "${COL_COUNT}" "13"
 
 PENDING_INS=$(sqlite3 "${DB}" "
   BEGIN;
@@ -161,11 +164,12 @@ bold "8) memory_versions audit row insertable (tier CHECK + FK)"
 # Acceptance: every memory.WriteFile produces a memory_versions row.
 # This sub-shell asserts the schema admits the documented shape — the
 # Go-side test suite covers the full RecordVersion flow.
-# PRAGMA foreign_keys=ON inside the tx; SQLite defaults to OFF per
-# connection and an FK violation would silently land otherwise.
+# PRAGMA foreign_keys must be set BEFORE BEGIN — SQLite silently
+# ignores it inside an open transaction, so `BEGIN; PRAGMA …` would
+# leave FK enforcement OFF and orphan rows would pass.
 VERSIONS_PROBE=$(sqlite3 "${DB}" "
-  BEGIN;
   PRAGMA foreign_keys = ON;
+  BEGIN;
   INSERT INTO workspaces (id, name, slug) VALUES ('ws_mv_$$', 'tmp', 'mv-$$');
   INSERT INTO memory_versions (
     id, workspace_id, path, tier, sha256, bytes, payload_ref
@@ -185,7 +189,12 @@ VERSIONS_PROBE=$(sqlite3 "${DB}" "
   );
   SELECT 'should_not_reach';
   ROLLBACK;
-" 2>&1 | tr '\n' ' ')
+" 2>&1 | tr '\n' ' ' || true)
+# `|| true` because the second INSERT is *expected* to fail with a tier
+# CHECK violation (sqlite3 exits 19). Without the suppression the
+# script's `set -euo pipefail` propagates the non-zero status through
+# the pipe and aborts before either assert_contains check runs,
+# producing a misleading "verify script failed" exit.
 assert_contains "  memory_versions row + tier CHECK rejects garbage" "${VERSIONS_PROBE}" "version_ok"
 assert_contains "  garbage tier rejected by CHECK" "${VERSIONS_PROBE}" "CHECK constraint failed"
 
@@ -195,8 +204,8 @@ assert_contains "  garbage tier rejected by CHECK" "${VERSIONS_PROBE}" "CHECK co
 # PRAGMA foreign_keys = ON SQLite silently accepts orphan rows. Now
 # both halves are exercised.
 FK_PROBE=$(sqlite3 "${DB}" "
-  BEGIN;
   PRAGMA foreign_keys = ON;
+  BEGIN;
   INSERT INTO memory_versions (
     id, workspace_id, path, tier, sha256, bytes, payload_ref
   ) VALUES (
