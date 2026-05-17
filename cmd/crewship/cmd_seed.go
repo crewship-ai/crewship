@@ -98,6 +98,21 @@ func runSeed(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// ── Phase 2a: Connect crews (all-pairs, bidirectional) ──
+	// Mission planner can dispatch tasks across crew boundaries and
+	// the orchestrator blocks the hand-off unless a crew_connections
+	// row authorises it. Wired here so the LEAD can delegate to any
+	// other crew on the demo workspace without the operator having
+	// to click through the connections UI first. Non-fatal — a
+	// missing connection produces a clear error at dispatch, so a
+	// partial failure here is recoverable manually.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := seedCrewConnections(ctx, client, crewIDs); err != nil {
+		fmt.Fprintf(os.Stderr, "Crew connection seeding hit an error (continuing): %v\n", err)
+	}
+
 	// ── Phase 2b: Provision crews with devcontainer config (parallel) ──
 	// Without provisioning, `crewship run <agent>` fails with "Crew has
 	// devcontainer configuration but no provisioned image". In default

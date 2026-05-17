@@ -157,13 +157,20 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 		runtime = v
 	}
 
+	// Last-resort defaults. The real value should arrive from
+	// crews.container_memory_mb via chatbridge.resolver, but every call
+	// site that *also* hits this path must survive — 512 MiB caused
+	// Docker OOM-kill (exit 137) on real agent runs.
+	// Guard against any non-positive value (including a stray -1 / -N
+	// from a future "unset sentinel" convention) so we never pass a
+	// negative limit to the Docker daemon, which rejects it outright.
 	memoryMB := team.MemoryMB
-	if memoryMB == 0 {
-		memoryMB = 512
+	if memoryMB <= 0 {
+		memoryMB = 8192
 	}
 	cpus := team.CPUs
-	if cpus == 0 {
-		cpus = 1.0
+	if cpus <= 0 {
+		cpus = 2.0
 	}
 
 	// Image selection chain: CachedImage > Image > default RuntimeImage
