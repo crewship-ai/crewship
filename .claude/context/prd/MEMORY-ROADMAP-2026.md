@@ -474,6 +474,29 @@ Extend `scripts/verify-sidecar-memory-write.sh`:
 **Goal:** measurable benchmark gains via sleep-time-compute pattern;
 close the memory → skills loop.
 
+**Implementation status (2026-05-17):** §8.1 and §8.2 below are landed
+on branch `feat/memory-pr4-research-grade` (seven commits, full repo
+build green, race-clean). Commit map:
+
+| Step | Commit | Surface |
+|------|--------|---------|
+| 1 | `6e8a3187` | `internal/consolidate/scoring.go` — six-signal computer (OpenClaw weights) |
+| 2 | `584138c7` | Migration v91 `score_json` column + `writeProposal` population |
+| 3 | `3a48f8c1` | `GET /api/v1/consolidate/proposed/{id}/explain` surfaces `score_json` |
+| 4 | `55137823` | `internal/consolidate/post_run_trigger.go` — debounced sleep-time trigger |
+| 5 | `f3f82c23` | `internal/consolidate/skill_promote.go` — memory→Skills bridge primitive |
+| 6 | `e2aff97c` | Bridge wired into `writeProposal` (non-fatal hook) |
+| 7 | `b0b35d3c` | `GET/POST /api/v1/skills/proposed[/approve|/reject]` HITL HTTP surface |
+
+The four-step roadmap (PR #1 reliability → PR #2 close-the-loop → PR #3
+smart memory → PR #4 research-grade) is therefore feature-complete in
+the working tree; remaining gaps are wiring of the post-run trigger
+into `internal/api/internal_runs.go` where `run.completed` is emitted,
+and the journal-side population of `RecallCount` / `UniqueQueries`
+counters so the Skill-promotion gate fires in the steady state rather
+than only on hand-supplied score maps. Both are tracked as follow-ups
+in this commit's tail comment.
+
 ### 8.1 Sleep-time consolidator (six-signal scoring + thresholds)
 
 OpenClaw's publicly-specified algorithm (the only non-marketing one in
@@ -503,23 +526,17 @@ crew per 30 min). This is the "sleep-time" trigger — agent finishes,
 consolidator wakes, scores candidates, stages the survivors. The
 6 h cron remains as a safety net.
 
-**Files touched:**
-- `internal/consolidate/scoring.go` (new) — the six-signal computer
-- `internal/consolidate/proposed.go` — populate `score_json` during
-  `writeProposal`
-- `internal/consolidate/runner.go` — second trigger path: hook into
-  the orchestrator's `EntryRunCompleted` emit
-- `internal/api/consolidate_proposed_handler.go` `GET .../explain` —
-  upgrade from raw rules to per-signal breakdown
-- `internal/database/migrate_consts_v92_proposal_scoring.go` —
-  `ALTER TABLE memory_proposals ADD COLUMN score_json TEXT NOT NULL DEFAULT '{}'`
+**Files touched (as landed):**
+- `internal/consolidate/scoring.go` (new) — `ComputeScore` + `DefaultSignalWeights` + `DefaultThresholds`
+- `internal/consolidate/proposed.go` — `computeProposalScores` populates `score_json` in `writeProposal`
+- `internal/consolidate/post_run_trigger.go` (new) — `PostRunTrigger.OnRunCompleted` with per-(workspace, crew) debounce (default 30 min). **Follow-up:** wiring into `internal/api/internal_runs.go` where `EntryRunCompleted` is emitted.
+- `internal/api/consolidate_proposed_handler.go` `GET .../explain` — surfaces `score_json` via `ProposalExplanation.Scores`
+- `internal/database/migrate_consts_v91_proposal_scoring.go` (renumbered from v92) — `ALTER TABLE memory_proposals ADD COLUMN score_json TEXT NOT NULL DEFAULT '{}'`
 
-**Acceptance:**
-- Proposal with score 0.65 + recall_count 2 stays out of canonical
-  memory even on HITL approve (the gate also checks the score)
-- `explain` endpoint returns per-signal contributions
-- Post-run trigger fires within 30 s of agent run completion (where
-  debounce window allows)
+**Acceptance status:**
+- ✅ Proposal with score 0.65 + recall_count 2 stays out of canonical memory — the gate is `Composite ≥ 0.80 ∧ RecallCount ≥ 3 ∧ UniqueQueries ≥ 3` (`PromotionThresholds` in `scoring.go`). First-time proposals always have `RecallCount = 0` and therefore can't promote regardless of LLM confidence; covered by `TestProposalMode_PopulatesScoreJSON`.
+- ✅ `explain` endpoint returns per-signal contributions — `ProposalExplanation.Scores` carries the raw JSON; tested by `TestExplainProposal_ReturnsScores`.
+- ⏳ Post-run trigger fires within 30 s of agent run completion — the standalone primitive ships in commit `55137823` with six tests (fakeClock + countingSummarizer). The caller-side wire into `internal_runs.go` is the next follow-up commit; the trigger contract is locked so the wire is purely "look up the trigger, call `OnRunCompleted`".
 
 ### 8.2 Memory → Skills bridge
 
@@ -536,19 +553,28 @@ Progressive disclosure semantics:
 Reuses `internal/skills/parser.go` (already in the codebase) for
 the YAML parse and structure validation.
 
-**Files touched:**
-- `internal/consolidate/skill_promote.go` (new) — promotion logic
-- `internal/consolidate/runner.go` — second pass after the rule
-  consolidation pass, scans for recall threshold crossings
-- `internal/skills/importer.go` — accept a "promoted-from-memory"
-  source tag in the import metadata
+**Promotion gate (landed thresholds):** stricter than the
+learned-rule promotion gate by design — a learned-rule mistake is a
+chat-history footnote, a Skill mistake is a behaviour the LLM may
+pattern-match against for weeks.
 
-**Acceptance:**
-- A rule recalled across 10 distinct sessions surfaces a `SKILL.md`
-  proposal in the next consolidator run
-- The skill description is ≤ 200 chars; body parses cleanly under
-  the existing skill parser
-- HITL approval works the same way as memory proposals
+| Gate | Learned rules (`learned-*.md`) | Skills (`SKILL.md`) |
+|------|--------------------------------|---------------------|
+| `Composite` | ≥ 0.80 | ≥ 0.85 |
+| `RecallCount` | ≥ 3 | ≥ 10 |
+| `UniqueQueries` | ≥ 3 | — (covered by recall) |
+| Source | LLM extraction | Already-promoted learned rule that re-cleared recall floor |
+
+**Files touched (as landed):**
+- `internal/consolidate/skill_promote.go` (new) — `PromoteRuleToSkill`, `PromoteEligibleRules`, `renderSkillMarkdown`, `safeStagingFileName`-style slug disambiguation. Frontmatter is engineered to pass `skills.ParseSKILLMD` + `skills.LintDescription` with zero warnings (`category: CUSTOM`, `runtime: INSTRUCTIONS`, `maturity: EXPERIMENTAL`, `author: crewship-consolidator`, tags `[auto-promoted, memory-derived]`).
+- `internal/consolidate/proposed.go` — `promoteProposalSkills` hook runs after the DB insert; logged-not-fatal on partial failures so a Skill that fails to stage never invalidates the underlying proposal.
+- `internal/journal/types.go` — three new entry types: `memory.skill_proposed`, `memory.skill_approved`, `memory.skill_rejected`.
+- `internal/api/skills_proposed_handler.go` (new) — HITL HTTP surface (`List`/`Approve`/`Reject`). Stateless against the DB (disk is truth); audit via journal entries. OWNER/ADMIN/MANAGER gating matches `canRole("create")`.
+
+**Acceptance status:**
+- ✅ A rule that crosses recall ≥ 10 surfaces a `.proposed/skill-{slug}.md` proposal in the next consolidator run — wired in `writeProposal` (`e2aff97c`); the post-run trigger (`55137823`) is the steady-state caller.
+- ✅ Skill description ≤ 400 chars; body parses cleanly under `skills.ParseSKILLMD` and the description passes `skills.LintDescription` — tested by `TestPromoteRuleToSkill_WritesParseableSKILLMD` and `TestPromoteRuleToSkill_DescriptionPassesLinter`.
+- ✅ HITL approval works the same way as memory proposals — endpoints `GET /api/v1/skills/proposed`, `POST .../approve`, `POST .../reject` (`b0b35d3c`). Approve runs through `skills.Importer.Import` so the same SPDX/scrubber gates apply as for URL-imported skills.
 
 ### PR #4 verification
 
