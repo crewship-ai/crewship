@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"sort"
+	"strconv"
 
 	"github.com/crewship-ai/crewship/internal/memory"
 )
@@ -172,11 +173,36 @@ func (s *Server) searchSingleScope(w http.ResponseWriter, r *http.Request, engin
 		scoped[i] = scopedResult{SearchResult: res, Source: scope}
 	}
 
+	// Emit memory.searched on every non-empty result so the host-side
+	// consolidator scoring path can count distinct recalls per rule
+	// (PRD §8.1 — closes the sidecar-side half left as a follow-up
+	// on PR #385). FTS hits return file paths, not journal entry ids,
+	// so hit_chunk_ids stays empty for now; the host hybrid endpoint
+	// is the canonical source of intersecting ids. We still emit a
+	// row with query + scope + hit_count for dashboard rollups, and
+	// so a future sidecar-side episodic bridge can fill hit_chunk_ids
+	// without re-plumbing this site.
+	if len(results) > 0 {
+		s.emitJournal(r.Context(), "memory.searched",
+			"sidecar memory search returned "+itoa(len(results))+" hit(s)",
+			map[string]any{
+				"query":         query,
+				"scope":         scope,
+				"hit_count":     len(results),
+				"hit_chunk_ids": []string{}, // FTS file paths != journal ids
+				"source":        "sidecar_fts",
+			}, nil)
+	}
+
 	writeJSONResponse(w, http.StatusOK, map[string]interface{}{
 		"results": scoped,
 		"count":   len(scoped),
 	})
 }
+
+// itoa keeps the import list lean — strconv is already imported by
+// the package for other places that need numeric→string conversion.
+func itoa(n int) string { return strconv.Itoa(n) }
 
 func (s *Server) searchBothScopes(w http.ResponseWriter, r *http.Request, query string, limit int) {
 	// At least one engine must be available
