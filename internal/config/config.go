@@ -165,12 +165,20 @@ func Default() *Config {
 			SocketPath: "/tmp/crewship.sock",
 		},
 		Container: ContainerConfig{
-			Provider:        "docker",
-			RuntimeImage:    "debian:bookworm-slim",
-			DefaultRuntime:  "runc",
-			Network:         "crewship-agents",
-			DefaultMemoryMB: 512,
-			DefaultCPUs:     1.0,
+			Provider:       "docker",
+			RuntimeImage:   "debian:bookworm-slim",
+			DefaultRuntime: "runc",
+			Network:        "crewship-agents",
+			// 512 MiB was a debug-era guess from before the Claude/Gemini
+			// CLIs and MCP servers landed inside the container. Real agent
+			// runs reliably tripped Docker OOM-kill (exit 137) on
+			// concurrent dispatch — observed when 15 issues were started
+			// against 4 crews on dev1 (39 GiB host). Bumped to 8 GiB so a
+			// single crew container can host its 3 agents plus the MCP
+			// processes without thrashing. Operators with smaller hosts
+			// override via crews.container_memory_mb or config.
+			DefaultMemoryMB: 8192,
+			DefaultCPUs:     2.0,
 		},
 		Storage: StorageConfig{
 			Provider: "localfs",

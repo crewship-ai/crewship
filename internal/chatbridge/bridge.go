@@ -136,11 +136,15 @@ func New(
 	cfg BridgeConfig,
 	logger *slog.Logger,
 ) *Bridge {
+	// Fallback only — primary path is crews.container_memory_mb threaded
+	// through resolver. Kept generous because the old 512 MiB caused
+	// Docker OOM-kills on real agent workloads (claude/gemini CLI +
+	// MCP servers easily exceed 512 MiB once warmed up).
 	if cfg.DefaultMemoryMB == 0 {
-		cfg.DefaultMemoryMB = 512
+		cfg.DefaultMemoryMB = 8192
 	}
 	if cfg.DefaultCPUs == 0 {
-		cfg.DefaultCPUs = 1.0
+		cfg.DefaultCPUs = 2.0
 	}
 	return &Bridge{
 		orch:           orch,
