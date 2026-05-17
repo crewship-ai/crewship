@@ -5,7 +5,7 @@
 #
 # What this script asserts:
 #   1. Health endpoint responds
-#   2. Migration v89 (add_memory_proposals) is applied
+#   2. Migration v90 (add_memory_proposals) is applied
 #   3. memory_proposals table has the expected columns + CHECK behaviour
 #   4. inbox_items.kind CHECK admits 'memory_consolidation'
 #   5. workspaces.memory_config column is present
@@ -58,9 +58,9 @@ bold "1) Health endpoint"
 HEALTH=$(curl -sS -m 5 "${BASE}/api/health" || true)
 assert_contains "  /api/health responds OK" "${HEALTH}" '"status":"ok"'
 
-bold "2) Migration v89 applied"
-V89=$(sqlite3 "${DB}" "SELECT version || ':' || name FROM _migrations WHERE version = 89")
-assert "  v89 row present" "${V89}" "89:add_memory_proposals"
+bold "2) Migration v90 applied"
+V90=$(sqlite3 "${DB}" "SELECT version || ':' || name FROM _migrations WHERE version = 90")
+assert "  v90 row present" "${V90}" "90:add_memory_proposals"
 
 bold "3) memory_proposals schema"
 COL_COUNT=$(sqlite3 "${DB}" "SELECT COUNT(*) FROM pragma_table_info('memory_proposals')")
@@ -69,8 +69,9 @@ assert "  memory_proposals column count == 12" "${COL_COUNT}" "12"
 PENDING_INS=$(sqlite3 "${DB}" "
   BEGIN;
   INSERT INTO workspaces (id, name, slug) VALUES ('ws_verify_tmp_$$','tmp','tmp_$$');
+  INSERT INTO crews (id, workspace_id, name, slug) VALUES ('crew_verify_$$', 'ws_verify_tmp_$$', 'tmp', 'crew-tmp-$$');
   INSERT INTO memory_proposals (id, workspace_id, crew_id, proposal_path, status)
-    VALUES ('mp_verify_$$', 'ws_verify_tmp_$$', 'crew_x', '/tmp/p.md', 'pending');
+    VALUES ('mp_verify_$$', 'ws_verify_tmp_$$', 'crew_verify_$$', '/tmp/p.md', 'pending');
   SELECT 'pending_ok';
   ROLLBACK;
 " 2>&1 | tail -1)
@@ -79,8 +80,9 @@ assert "  pending proposal insert succeeds" "${PENDING_INS}" "pending_ok"
 BAD_APPROVED=$(sqlite3 "${DB}" "
   BEGIN;
   INSERT INTO workspaces (id, name, slug) VALUES ('ws_verify_tmp2_$$','tmp','tmp_$$_b');
+  INSERT INTO crews (id, workspace_id, name, slug) VALUES ('crew_verify2_$$', 'ws_verify_tmp2_$$', 'tmp', 'crew-tmp2-$$');
   INSERT INTO memory_proposals (id, workspace_id, crew_id, proposal_path, status)
-    VALUES ('mp_v2_$$', 'ws_verify_tmp2_$$', 'crew_x', '/tmp/p.md', 'approved');
+    VALUES ('mp_v2_$$', 'ws_verify_tmp2_$$', 'crew_verify2_$$', '/tmp/p.md', 'approved');
   SELECT 'should_not_reach';
   ROLLBACK;
 " 2>&1 || true)

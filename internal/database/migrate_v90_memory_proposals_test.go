@@ -68,6 +68,11 @@ func TestMigrateV90_MemoryProposalsSchema(t *testing.T) {
 	if _, err := db.Exec(`INSERT INTO workspaces (id, name, slug) VALUES ('ws1', 'WS', 'ws1')`); err != nil {
 		t.Fatalf("insert workspace: %v", err)
 	}
+	// Seed a crew so the FK on memory_proposals.crew_id (added in
+	// this migration) is satisfied by the INSERTs below.
+	if _, err := db.Exec(`INSERT INTO crews (id, workspace_id, name, slug) VALUES ('crew1', 'ws1', 'Crew', 'crew1')`); err != nil {
+		t.Fatalf("insert crew: %v", err)
+	}
 	if _, err := db.Exec(`
 INSERT INTO inbox_items (id, workspace_id, kind, source_id, title)
 VALUES ('ibx_mc_1', 'ws1', 'memory_consolidation', 'prop_1', 'Memory consolidation proposal')`); err != nil {

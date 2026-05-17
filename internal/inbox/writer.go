@@ -20,7 +20,7 @@ import (
 // Kind constants enumerate the inbox_items.kind CHECK values. Callers
 // should use these so a typo can't quietly write a row with a kind the
 // list endpoint won't render. Keep these in sync with the DB CHECK
-// (currently widened by migration v89 to admit KindMemoryConsolidation).
+// (currently widened by migration v90 to admit KindMemoryConsolidation).
 const (
 	KindWaitpoint           = "waitpoint"
 	KindEscalation          = "escalation"

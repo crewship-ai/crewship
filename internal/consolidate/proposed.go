@@ -197,8 +197,16 @@ func proposalInboxBody(rulesCount, entriesScanned int) string {
 // of proposals on disk sorts chronologically. Random suffix avoids
 // collision when two ticks land in the same second.
 func newProposalID(now time.Time) string {
-	var r [3]byte
-	_, _ = rand.Read(r[:])
+	// 8 bytes of random for 16 hex chars of suffix (vs 6 chars before) —
+	// negligible bandwidth, much tighter collision floor for the
+	// pathological "many proposals in one second" case. If crypto/rand
+	// fails (extremely rare; OS RNG drained), fall back to UnixNano so
+	// the suffix is still unique within the process — better than a
+	// silently-empty suffix which the prior `_, _ = rand.Read` masked.
+	var r [8]byte
+	if _, err := rand.Read(r[:]); err != nil {
+		return now.UTC().Format("20060102150405") + "-" + fmt.Sprintf("%016x", now.UTC().UnixNano())
+	}
 	return now.UTC().Format("20060102150405") + "-" + hex.EncodeToString(r[:])
 }
 

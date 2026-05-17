@@ -50,7 +50,7 @@ const migrationAddMemoryProposals = `
 CREATE TABLE IF NOT EXISTS memory_proposals (
     id                  TEXT PRIMARY KEY,
     workspace_id        TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-    crew_id             TEXT NOT NULL,
+    crew_id             TEXT NOT NULL REFERENCES crews(id) ON DELETE CASCADE,
     proposal_path       TEXT NOT NULL,
     status              TEXT NOT NULL DEFAULT 'pending'
                           CHECK (status IN ('pending', 'approved', 'rejected')),
