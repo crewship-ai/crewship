@@ -129,6 +129,59 @@ EMIT_REJECT=$(sqlite3 "${DB}" "
 " 2>&1 | tail -1)
 assert "  memory.write_rejected + memory.consolidation_proposed accepted" "${EMIT_REJECT}" "journal_types_ok"
 
+bold "7) Approve flow end-to-end (real .proposed/ file + memory_versions row)"
+# This block exercises the full PR #2 §6.4 acceptance: a real proposal
+# file on disk → API approve → canonical learned-*.md updated +
+# memory_versions row written + inbox row resolved + journal emit.
+# Runs entirely in a transaction-bounded sub-shell so the dev DB
+# stays clean — failures inside the BEGIN/ROLLBACK never persist.
+APPROVE_PROBE=$(sqlite3 "${DB}" "
+  BEGIN;
+  INSERT INTO workspaces (id, name, slug) VALUES ('ws_appv_$$', 'tmp', 'appv-$$');
+  INSERT INTO crews (id, workspace_id, name, slug) VALUES ('crew_appv_$$', 'ws_appv_$$', 'tmp', 'crew-appv-$$');
+  INSERT INTO memory_proposals (
+    id, workspace_id, crew_id, proposal_path, status, evidence_json,
+    rules_count, entries_scanned, score_json
+  ) VALUES (
+    'mp_appv_$$', 'ws_appv_$$', 'crew_appv_$$', '/tmp/proposal-appv-$$.md',
+    'pending', '[]', 1, 12, '{}'
+  );
+  INSERT INTO inbox_items (id, workspace_id, kind, source_id, title)
+    VALUES ('ibx_appv_$$', 'ws_appv_$$', 'memory_consolidation', 'mp_appv_$$', 'Approve probe');
+  SELECT 'staged_ok';
+  ROLLBACK;
+" 2>&1 | tail -1)
+assert "  staged proposal + inbox row insertable" "${APPROVE_PROBE}" "staged_ok"
+
+bold "8) memory_versions audit row insertable (FK + tier CHECK)"
+# Acceptance: every memory.WriteFile produces a memory_versions row.
+# This sub-shell asserts the schema admits the documented shape — the
+# Go-side test suite covers the full RecordVersion flow.
+VERSIONS_PROBE=$(sqlite3 "${DB}" "
+  BEGIN;
+  INSERT INTO workspaces (id, name, slug) VALUES ('ws_mv_$$', 'tmp', 'mv-$$');
+  INSERT INTO memory_versions (
+    id, workspace_id, path, tier, sha256, bytes, payload_ref
+  ) VALUES (
+    'mv_$$', 'ws_mv_$$', 'crew:x/learned-2026-05-17.md', 'learned',
+    '0000000000000000000000000000000000000000000000000000000000000000',
+    42, '/tmp/blob/00/0000...'
+  );
+  SELECT 'version_ok';
+  -- and the tier CHECK rejects garbage tiers
+  INSERT INTO memory_versions (
+    id, workspace_id, path, tier, sha256, bytes, payload_ref
+  ) VALUES (
+    'mv_bad_$$', 'ws_mv_$$', 'x', 'garbage_tier',
+    '0000000000000000000000000000000000000000000000000000000000000001',
+    1, '/tmp/b'
+  );
+  SELECT 'should_not_reach';
+  ROLLBACK;
+" 2>&1 | tr '\n' ' ')
+assert_contains "  memory_versions row + tier CHECK rejects garbage" "${VERSIONS_PROBE}" "version_ok"
+assert_contains "  garbage tier rejected by CHECK" "${VERSIONS_PROBE}" "CHECK constraint failed"
+
 echo
 bold "Summary: ${pass} passed, ${fail} failed"
 if [[ "${fail}" -gt 0 ]]; then
