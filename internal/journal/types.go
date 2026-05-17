@@ -100,6 +100,29 @@ const (
 	// was refused at the boundary, no data was corrupted.
 	EntryMemoryWriteVerifierBlocked EntryType = "memory.write_verifier_blocked"
 
+	// EntryMemorySkillProposed fires when the memory→Skills bridge stages
+	// a learned rule as .proposed/skill-{slug}.md. Distinct from
+	// EntryMemoryConsolidationProposed because the lifecycle is
+	// independent: the same rule may produce both a learned-rule
+	// proposal and a Skill proposal, and operators may approve one
+	// without the other. Payload carries: skill_path, source_pattern,
+	// composite, recall_count.
+	EntryMemorySkillProposed EntryType = "memory.skill_proposed"
+
+	// EntryMemorySkillApproved fires when an operator approves a staged
+	// skill via POST /api/v1/skills/proposed/approve. The handler
+	// imports the SKILL.md content through the canonical skills
+	// importer and removes the staging file. Payload carries:
+	// skill_id (the imported row's id), skill_path (the now-deleted
+	// staging path), workspace_id, actor user id.
+	EntryMemorySkillApproved EntryType = "memory.skill_approved"
+
+	// EntryMemorySkillRejected fires when an operator rejects a staged
+	// skill. The staging file is deleted; no DB row is created. Payload
+	// carries: skill_path, workspace_id, actor user id, optional
+	// rejection note.
+	EntryMemorySkillRejected EntryType = "memory.skill_rejected"
+
 	// Observability (Crow's Nest)
 	EntryExecCommand       EntryType = "exec.command"
 	EntryExecOutputChunk   EntryType = "exec.output_chunk"

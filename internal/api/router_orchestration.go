@@ -269,6 +269,21 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	r.mux.Handle("POST /api/v1/consolidate/proposed/{id}/reject", authed(wsCtx(http.HandlerFunc(propH.Reject))))
 	r.mux.Handle("GET /api/v1/consolidate/proposed/{id}/explain", authed(wsCtx(http.HandlerFunc(propH.Explain))))
 
+	// memory→Skills bridge HITL surface (PR #4 step 7). When the
+	// consolidator auto-promotes a stable learned rule into
+	// .proposed/skill-{slug}.md, these three endpoints let an
+	// operator list, approve (import via the canonical skills
+	// importer), or reject (delete) the staged SKILL.md. Handler is
+	// stateless — disk is the source of truth; audit is via journal
+	// entries. OWNER/ADMIN/MANAGER gating happens inside the handler
+	// to match the canonical skill-import permission.
+	skillPropH := NewSkillProposedHandler(r.db, r.logger)
+	skillPropH.SetJournal(r.Journal())
+	skillPropH.SetCrewMemoryRoot(r.consolidateMemoryRoot)
+	r.mux.Handle("GET /api/v1/skills/proposed", authed(wsCtx(http.HandlerFunc(skillPropH.List))))
+	r.mux.Handle("POST /api/v1/skills/proposed/approve", authed(wsCtx(http.HandlerFunc(skillPropH.Approve))))
+	r.mux.Handle("POST /api/v1/skills/proposed/reject", authed(wsCtx(http.HandlerFunc(skillPropH.Reject))))
+
 	// Memory versions audit surface — the HTTP mirror of `crewship
 	// memory log/show/restore`. List + show are MEMBER+ (read-only
 	// audit visibility); restore is OWNER/ADMIN-gated inside the
