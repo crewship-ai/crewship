@@ -77,11 +77,18 @@ func TestBuildMemoryContext_AppendsToolsBlockAfterInstructions(t *testing.T) {
 	}
 }
 
-// TestBuildMemoryContext_ToolsBlockSurvivesEmptyTiers — when no
+// TestBuildMemoryContext_ToolsBlockAbsentOnEmptyTiers — when no
 // memory files exist the function early-returns the instructions
-// block alone. Tools block must still appear on the early-return
-// path so a fresh agent learns how to write its first memory entry.
-func TestBuildMemoryContext_ToolsBlockSurvivesEmptyTiers(t *testing.T) {
+// block alone, deliberately WITHOUT the [MEMORY TOOLS] surface.
+// The tools block only matters once the agent has at least one
+// tier of memory to consult; surfacing it on the empty path
+// would add a surface that exists in name only.
+//
+// Renamed from ...SurvivesEmptyTiers because the previous name
+// implied the opposite contract — locking the test name + the
+// assertion together so a future refactor that flips one but not
+// the other fails to compile rather than passing silently.
+func TestBuildMemoryContext_ToolsBlockAbsentOnEmptyTiers(t *testing.T) {
 	mc := mockContainerForMemory(map[string]string{})
 	o := New(mc, newMemState(), slog.Default())
 	req := AgentRunRequest{

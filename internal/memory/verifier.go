@@ -370,12 +370,20 @@ func lineExceedsFile(path string, line int) (bool, error) {
 	br := bufio.NewReader(f)
 	var count int
 	var sawAny bool
+	// lastWasNewline tracks the byte we *most recently* read. We
+	// can't consult `b` on EOF because ReadByte returns b=0 along
+	// with err=io.EOF — using b at that point would treat every
+	// EOF as "file ended without trailing newline" even for files
+	// that did end with one.
+	var lastWasNewline bool
 	for {
 		b, err := br.ReadByte()
 		if err == io.EOF {
 			// File ends without trailing newline: count the trailing
-			// fragment as an addressable line.
-			if sawAny && b != '\n' {
+			// fragment as an addressable line. lastWasNewline reflects
+			// the genuine final byte read before EOF, not the zero
+			// value ReadByte returns on the EOF call.
+			if sawAny && !lastWasNewline {
 				count++
 			}
 			return line > count, nil
@@ -384,6 +392,7 @@ func lineExceedsFile(path string, line int) (bool, error) {
 			return false, err
 		}
 		sawAny = true
+		lastWasNewline = b == '\n'
 		if b == '\n' {
 			count++
 			if count >= line {
