@@ -89,17 +89,27 @@ func (c *Consolidator) writeProposal(
 		_ = os.Remove(proposalPath)
 		return ConsolidationResult{EntriesScanned: entriesScanned}, fmt.Errorf("marshal proposal evidence: %w", err)
 	}
+	// Score every candidate rule with the OpenClaw six-signal model
+	// at proposal-creation time. The blob is keyed by rule index so
+	// the explain endpoint can render per-rule signal breakdowns
+	// without re-running the scorer. CandidateMetrics fields are
+	// best-effort: today we pass RawRelevance from LearnedRule
+	// .Confidence and the rest at conservative defaults — future
+	// iterations populate RecallCount/UniqueQueries from journal
+	// queries against the rule's evidence ids.
+	scores := computeProposalScores(rules, now)
+	scoreJSON := marshalScoresJSON(scores)
 	proposalID := "mp_" + runID
 	if c.DB != nil {
 		if _, err := c.DB.ExecContext(ctx, `
 			INSERT INTO memory_proposals (
 				id, workspace_id, crew_id, proposal_path,
 				status, evidence_json, rules_count, entries_scanned,
-				created_at
-			) VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?)`,
+				created_at, score_json
+			) VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)`,
 			proposalID, cfg.WorkspaceID, cfg.CrewID, proposalPath,
 			string(evidenceJSON), len(rules), entriesScanned,
-			now.UTC().Format(time.RFC3339Nano),
+			now.UTC().Format(time.RFC3339Nano), scoreJSON,
 		); err != nil {
 			// Roll back the on-disk file so an operator does not see
 			// a proposal markdown that has no DB row to actually
@@ -126,6 +136,20 @@ func (c *Consolidator) writeProposal(
 				"entries_scanned": entriesScanned,
 			},
 		})
+	}
+
+	// memory→Skills bridge: any rule that has accumulated sustained
+	// operator-validated traction (recall ≥ 10 + composite ≥ 0.85 in
+	// the score map) graduates to a staged Anthropic SKILL.md under
+	// .proposed/skill-{slug}.md. The bridge is non-fatal: on the very
+	// first proposal for a pattern, recall is by definition 0 and no
+	// skill is written; only repeated, recalled-against rules cross
+	// the gate on later runs. See skill_promote.go for the thresholds.
+	if skillPaths := c.promoteProposalSkills(rules, scores, cfg.OutputDir, now); len(skillPaths) > 0 {
+		logger.Info("memory→skills promotion staged",
+			"proposal_id", proposalID,
+			"skill_count", len(skillPaths),
+			"skill_paths", skillPaths)
 	}
 
 	id, emitErr := c.Journal.Emit(ctx, journal.Entry{
@@ -198,6 +222,91 @@ func proposalInboxBody(rulesCount, entriesScanned int) string {
 		"The memory consolidator extracted %d rule(s) from %d journal entries and parked them for review. Approve to merge into the canonical learned-*.md, or reject to discard.",
 		rulesCount, entriesScanned,
 	)
+}
+
+// marshalScoresJSON serialises a per-pattern scores map for the
+// score_json column. Returns "{}" on error so the NOT-NULL DEFAULT
+// contract on the column holds even under pathological inputs.
+func marshalScoresJSON(scores map[string]ScoreResult) string {
+	b, err := json.Marshal(scores)
+	if err != nil {
+		return "{}"
+	}
+	return string(b)
+}
+
+// computeProposalScores runs the OpenClaw six-signal scorer over each
+// candidate rule and returns a map keyed by rule pattern. Callers
+// either marshal the result for the score_json column
+// (marshalScoresJSON) or consume it directly for downstream gating
+// (promoteProposalSkills) — re-running the scorer would be cheap but
+// pointless.
+//
+// CandidateMetrics population is intentionally conservative:
+//
+//   - RawRelevance ← LearnedRule.Confidence (already in [0,1] per
+//     the LLM prompt template's contract)
+//   - EvidenceCount ← len(rule.Evidence)
+//   - DistinctEntryTypes ← 1 (placeholder: we don't have the entry
+//     types here without re-querying the journal; populated in a
+//     follow-up step that wires journal-side counters)
+//   - RecallCount / UniqueQueries / ConsolidationCount / LastSeenAt
+//     ← zero values (the gates block promotion at this stage —
+//     the proposal hasn't been recalled yet by definition)
+//
+// This means the very-first proposal for a pattern always lands
+// with Promoted=false at score time. That's correct: a brand-new
+// proposal hasn't been recalled even once. The score gets re-
+// computed on subsequent consolidator runs when the recall
+// counters tick up.
+func computeProposalScores(rules []LearnedRule, now time.Time) map[string]ScoreResult {
+	scores := make(map[string]ScoreResult, len(rules))
+	for _, r := range rules {
+		scores[r.Pattern] = ComputeScore(
+			CandidateMetrics{
+				RawRelevance:       r.Confidence,
+				EvidenceCount:      len(r.Evidence),
+				DistinctEntryTypes: 1,
+			},
+			DefaultSignalWeights(),
+			DefaultThresholds(),
+			now,
+		)
+	}
+	return scores
+}
+
+// promoteProposalSkills is the post-DB-insert hook that runs the
+// memory→Skills bridge against any rules whose ScoreResult meets the
+// Skill-promotion gate (recall ≥ 10 + composite ≥ 0.85 by default).
+// Failures are logged-not-fatal: a Skill that fails to stage does not
+// invalidate the underlying proposal — operators still see the
+// learned-rule proposal under .proposed/proposal-*.md and can approve
+// it normally; the missing Skill simply means no SKILL.md was staged
+// for that rule on this run, and the next consolidator pass will try
+// again.
+//
+// Returns the absolute paths of any Skills that landed on disk so the
+// caller can include them in observability logs.
+func (c *Consolidator) promoteProposalSkills(
+	rules []LearnedRule,
+	scores map[string]ScoreResult,
+	outputDir string,
+	now time.Time,
+) []string {
+	logger := c.Logger
+	if logger == nil {
+		logger = slog.Default()
+	}
+	paths, err := PromoteEligibleRules(rules, scores, SkillPromoteOptions{
+		OutputDir: outputDir,
+		Now:       now,
+	})
+	if err != nil {
+		logger.Warn("memory→skills promotion partial failure",
+			"err", err, "promoted_count", len(paths))
+	}
+	return paths
 }
 
 // newProposalID returns a short, sortable run identifier. Format:

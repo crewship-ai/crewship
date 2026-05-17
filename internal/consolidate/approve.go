@@ -10,12 +10,55 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/memory"
 )
+
+// scoreJSONColumnCache memoises the score_json column-presence probe.
+// The schema doesn't change during a process's lifetime — once the
+// answer is known we never re-probe. sync.Map keys by *sql.DB pointer
+// so multiple databases (tests) keep independent answers.
+var scoreJSONColumnCache sync.Map
+
+// hasScoreJSONColumn returns true when the score_json column exists
+// on memory_proposals. Used to pick the SELECT shape in
+// ExplainProposal so a binary deployed against a pre-v92 schema
+// returns '{}' literally rather than failing the SELECT.
+func hasScoreJSONColumn(ctx context.Context, db *sql.DB) bool {
+	if v, ok := scoreJSONColumnCache.Load(db); ok {
+		return v.(bool)
+	}
+	rows, err := db.QueryContext(ctx, `PRAGMA table_info(memory_proposals)`)
+	if err != nil {
+		// On probe failure assume the modern schema — the caller
+		// will surface any real query error.
+		scoreJSONColumnCache.Store(db, true)
+		return true
+	}
+	defer rows.Close()
+	var present bool
+	for rows.Next() {
+		// table_info columns: cid, name, type, notnull, dflt_value, pk
+		var cid int
+		var name, typ string
+		var notnull int
+		var dflt sql.NullString
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
+			continue
+		}
+		if name == "score_json" {
+			present = true
+			break
+		}
+	}
+	scoreJSONColumnCache.Store(db, present)
+	return present
+}
 
 // Sentinel errors so the HTTP layer can map proposal-lookup failures to
 // the right status code without parsing strings. The DB row identity is
@@ -266,6 +309,13 @@ type ProposalExplanation struct {
 	DecidedAt      *string         `json:"decided_at,omitempty"`
 	DecidedBy      *string         `json:"decided_by_user_id,omitempty"`
 	Evidence       json.RawMessage `json:"evidence"`
+	// Scores carries the per-rule ScoreResult breakdown populated
+	// by writeProposal (PR #4 step 2). Shape:
+	//   {"<rule_pattern>": ScoreResult, ...}
+	// Empty object ('{}') for proposals created before PR #4 step
+	// 2 — the v91 migration default keeps the column populated so
+	// clients can blindly Unmarshal without nil-checks.
+	Scores json.RawMessage `json:"scores"`
 }
 
 // ExplainProposal reads the row + evidence_json without side effects.
@@ -274,15 +324,29 @@ func ExplainProposal(ctx context.Context, db *sql.DB, proposalID string) (*Propo
 	out := &ProposalExplanation{}
 	var decidedAt, decidedBy sql.NullString
 	var evidenceJSON string
+	var scoreJSON sql.NullString
 	var entriesScanned int
+	// score_json was added in v92 (originally v91 on the PR #4 branch,
+	// renumbered on rebase). COALESCE handles NULL values but not a
+	// missing column — a binary deployed before the migration runs
+	// would surface a hard query error. Detect column presence once
+	// and pick the SELECT shape accordingly. After the migration runs
+	// hasScoreJSONColumn returns true and the COALESCE form runs
+	// normally; before, the literal '{}' AS score_json shape returns
+	// the same shape so the caller code below doesn't branch.
+	scoreCol := "COALESCE(score_json, '{}')"
+	if !hasScoreJSONColumn(ctx, db) {
+		scoreCol = "'{}'"
+	}
 	err := db.QueryRowContext(ctx, `
 		SELECT id, workspace_id, crew_id, status, proposal_path,
 		       rules_count, entries_scanned, created_at,
-		       decided_at, decided_by_user_id, evidence_json
+		       decided_at, decided_by_user_id, evidence_json,
+		       `+scoreCol+`
 		FROM memory_proposals WHERE id = ?`, proposalID).Scan(
 		&out.ProposalID, &out.WorkspaceID, &out.CrewID, &out.Status,
 		&out.ProposalPath, &out.RulesCount, &entriesScanned, &out.CreatedAt,
-		&decidedAt, &decidedBy, &evidenceJSON,
+		&decidedAt, &decidedBy, &evidenceJSON, &scoreJSON,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrProposalNotFound
@@ -300,6 +364,11 @@ func ExplainProposal(ctx context.Context, db *sql.DB, proposalID string) (*Propo
 		out.DecidedBy = &s
 	}
 	out.Evidence = json.RawMessage(evidenceJSON)
+	if scoreJSON.Valid && scoreJSON.String != "" {
+		out.Scores = json.RawMessage(scoreJSON.String)
+	} else {
+		out.Scores = json.RawMessage("{}")
+	}
 	return out, nil
 }
 

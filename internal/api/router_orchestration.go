@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/chatbridge"
+	"github.com/crewship-ai/crewship/internal/consolidate"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 )
 
@@ -29,6 +30,11 @@ type orchestrationHandlers struct {
 	assign      *AssignmentHandler
 	queries     *QueryHandler
 	portExposeH *PortExposeHandler
+	// postRunTrigger is the sleep-time consolidator hook (PRD §8.1).
+	// nil → no opportunistic firing, 6h cron stays as the safety net.
+	// The internal registrar attaches this to InternalHandler so
+	// UpdateRun can call it on every run.completed.
+	postRunTrigger postRunTriggerHook
 }
 
 // registerOrchestrationRoutes wires the orchestration surface and
@@ -256,6 +262,21 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	conH.SetMemoryRoot(r.consolidateMemoryRoot)
 	r.mux.Handle("POST /api/v1/consolidate/run", authed(wsCtx(http.HandlerFunc(conH.Run))))
 
+	// PostRunTrigger — sleep-time consolidator hook (PRD §8.1). Built
+	// only when a consolidator + memory root are wired; otherwise we
+	// leave the trigger nil and InternalHandler.UpdateRun no-ops on
+	// the call site. The trigger does its own per-(workspace, crew)
+	// debouncing (default 30 min) so a chatty crew with many short
+	// runs doesn't dogpile the LLM extractor.
+	var postRunTrigger postRunTriggerHook
+	if r.consolidator != nil && r.consolidateMemoryRoot != "" {
+		postRunTrigger = consolidate.NewPostRunTrigger(r.consolidator, consolidate.PostRunTriggerOptions{
+			CrewMemoryRoot: r.consolidateMemoryRoot,
+			BlobRoot:       r.memoryVersionsBlobRoot,
+			Logger:         r.logger,
+		})
+	}
+
 	// HITL proposal decision surface. When the consolidator runs in
 	// ProposalMode (CREWSHIP_CONSOLIDATE_HITL=1), each extracted rule
 	// set lands in .proposed/proposal-*.md + a memory_proposals row +
@@ -268,6 +289,21 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	r.mux.Handle("POST /api/v1/consolidate/proposed/{id}/approve", authed(wsCtx(http.HandlerFunc(propH.Approve))))
 	r.mux.Handle("POST /api/v1/consolidate/proposed/{id}/reject", authed(wsCtx(http.HandlerFunc(propH.Reject))))
 	r.mux.Handle("GET /api/v1/consolidate/proposed/{id}/explain", authed(wsCtx(http.HandlerFunc(propH.Explain))))
+
+	// memory→Skills bridge HITL surface (PR #4 step 7). When the
+	// consolidator auto-promotes a stable learned rule into
+	// .proposed/skill-{slug}.md, these three endpoints let an
+	// operator list, approve (import via the canonical skills
+	// importer), or reject (delete) the staged SKILL.md. Handler is
+	// stateless — disk is the source of truth; audit is via journal
+	// entries. OWNER/ADMIN/MANAGER gating happens inside the handler
+	// to match the canonical skill-import permission.
+	skillPropH := NewSkillProposedHandler(r.db, r.logger)
+	skillPropH.SetJournal(r.Journal())
+	skillPropH.SetCrewMemoryRoot(r.consolidateMemoryRoot)
+	r.mux.Handle("GET /api/v1/skills/proposed", authed(wsCtx(http.HandlerFunc(skillPropH.List))))
+	r.mux.Handle("POST /api/v1/skills/proposed/approve", authed(wsCtx(http.HandlerFunc(skillPropH.Approve))))
+	r.mux.Handle("POST /api/v1/skills/proposed/reject", authed(wsCtx(http.HandlerFunc(skillPropH.Reject))))
 
 	// Memory versions audit surface — the HTTP mirror of `crewship
 	// memory log/show/restore`. List + show are MEMBER+ (read-only
@@ -446,8 +482,9 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	}
 
 	return orchestrationHandlers{
-		assign:      assign,
-		queries:     queries,
-		portExposeH: portExposeH,
+		assign:         assign,
+		queries:        queries,
+		portExposeH:    portExposeH,
+		postRunTrigger: postRunTrigger,
 	}
 }

@@ -3,6 +3,7 @@ package consolidate
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -96,6 +97,65 @@ func TestProposalMode_LandsInProposedDir(t *testing.T) {
 	}
 }
 
+// TestProposalMode_PopulatesScoreJSON asserts the v91 score_json
+// column carries the per-rule six-signal breakdown after writeProposal.
+// We don't assert exact numeric values (the scorer has its own unit
+// tests) — just that the JSON has the expected shape so the explain
+// endpoint can parse it back out.
+func TestProposalMode_PopulatesScoreJSON(t *testing.T) {
+	db := openDB(t)
+	defer db.Close()
+	w := journal.NewWriter(db, quietLogger(), journal.WriterOptions{FlushSize: 1})
+	defer w.Close()
+	applyV89Schema(t, db)
+
+	ids := seedEntries(t, db, w, "ws_test", "crew_test", 12, journal.EntryPeerEscalation)
+	reply := `[{"pattern":"first","action":"a","evidence":["` + ids[0] + `","` + ids[1] + `"],"confidence":0.85}]`
+	c := &Consolidator{DB: db, Journal: w, Summarizer: &stubSummarizer{Reply: reply}, Logger: quietLogger()}
+	tmp := t.TempDir()
+	cfg := Config{
+		WorkspaceID: "ws_test", CrewID: "crew_test", Since: time.Hour,
+		MinEntries: 10, OutputDir: tmp, ProposalMode: true,
+	}
+	if _, err := c.Run(context.Background(), cfg); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	var scoreBlob string
+	if err := db.QueryRow(`SELECT score_json FROM memory_proposals WHERE workspace_id = 'ws_test' LIMIT 1`).Scan(&scoreBlob); err != nil {
+		t.Fatalf("read score_json: %v", err)
+	}
+	// Parse back; expect a map keyed by rule pattern with the
+	// ScoreResult shape inside.
+	var scores map[string]struct {
+		Composite     float64 `json:"composite"`
+		Promoted      bool    `json:"promoted"`
+		RecallCount   int     `json:"recall_count"`
+		UniqueQueries int     `json:"unique_queries"`
+		Signals       struct {
+			Relevance float64 `json:"relevance"`
+		} `json:"signals"`
+	}
+	if err := json.Unmarshal([]byte(scoreBlob), &scores); err != nil {
+		t.Fatalf("score_json shape unparseable: %v\nraw=%s", err, scoreBlob)
+	}
+	got, ok := scores["first"]
+	if !ok {
+		t.Fatalf("score_json missing rule key 'first': %v", scores)
+	}
+	// Relevance signal should reflect the LLM-reported 0.85 confidence.
+	if got.Signals.Relevance < 0.84 || got.Signals.Relevance > 0.86 {
+		t.Errorf("relevance signal = %v, want ~0.85", got.Signals.Relevance)
+	}
+	// First-time proposal: RecallCount + UniqueQueries are 0 today
+	// (no journal-side counters yet) so Promoted MUST be false even
+	// though Relevance is high — the gate is the whole point of the
+	// triple-condition rule.
+	if got.Promoted {
+		t.Errorf("first-time proposal must not be promoted; got Promoted=true (composite=%v)", got.Composite)
+	}
+}
+
 // TestProposalMode_DefaultOff: without explicit ProposalMode, the
 // canonical write path still fires (no regression on existing flow).
 func TestProposalMode_DefaultOff(t *testing.T) {
@@ -144,7 +204,8 @@ CREATE TABLE IF NOT EXISTS memory_proposals (
     entries_scanned     INTEGER NOT NULL DEFAULT 0,
     created_at          TEXT NOT NULL DEFAULT (datetime('now','subsec')),
     decided_at          TEXT,
-    decided_by_user_id  TEXT
+    decided_by_user_id  TEXT,
+    score_json          TEXT NOT NULL DEFAULT '{}'
 );`); err != nil {
 		t.Fatalf("create memory_proposals: %v", err)
 	}

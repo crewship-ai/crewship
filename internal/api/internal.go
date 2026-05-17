@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/subtle"
 	"database/sql"
 	"log/slog"
@@ -27,6 +28,19 @@ type InternalHandler struct {
 	keeperEnabled atomic.Bool
 	hub           *ws.Hub
 	journal       journal.Emitter
+	// postRunTrigger fires the memory consolidator opportunistically
+	// after each successful run.completed emit. nil → no trigger (the
+	// 6h cron stays as the safety net). Wired via SetPostRunTrigger
+	// from router_orchestration.go once the consolidator is ready.
+	postRunTrigger postRunTriggerHook
+}
+
+// postRunTriggerHook is the narrow interface UpdateRun calls. The
+// concrete impl lives in internal/consolidate.PostRunTrigger; this
+// interface keeps the api package from importing the consolidate
+// package's heavyweight transitive dependencies (LLM, episodic, ...).
+type postRunTriggerHook interface {
+	OnRunCompleted(ctx context.Context, workspaceID, crewID, crewSlug string) bool
 }
 
 // NewInternalHandler creates an InternalHandler with the given database, internal token, and logger.
@@ -54,6 +68,14 @@ func (h *InternalHandler) SetJournal(j journal.Emitter) {
 // SetKeeperEnabled toggles whether Keeper is advertised as enabled in the agent config.
 func (h *InternalHandler) SetKeeperEnabled(enabled bool) {
 	h.keeperEnabled.Store(enabled)
+}
+
+// SetPostRunTrigger wires the memory→consolidator post-run hook. Pass
+// nil (or skip the call) to disable the sleep-time trigger entirely;
+// the 6h cron remains as the safety net. The hook is consulted in
+// UpdateRun after a successful run.completed emit.
+func (h *InternalHandler) SetPostRunTrigger(t postRunTriggerHook) {
+	h.postRunTrigger = t
 }
 
 func (h *InternalHandler) requireInternal(next http.Handler) http.Handler {

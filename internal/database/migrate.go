@@ -1260,6 +1260,15 @@ END;
 	// (Originally authored as v90 in PR #2; renumbered to v91 on rebase
 	// because the renumbered add_memory_proposals took v90 first.)
 	{version: 91, name: "add_memory_versions", sql: migrationAddMemoryVersions},
+	// v92 adds score_json TEXT column to memory_proposals so the
+	// consolidator persists the six-signal scoring breakdown
+	// (relevance / frequency / query diversity / recency /
+	// consolidation / conceptual richness) alongside each proposal.
+	// The explain endpoint surfaces it back to operators for HITL
+	// review. See migrate_consts_v92_proposal_scoring.go.
+	// (Originally authored as v91 in PR #4; renumbered to v92 on rebase
+	// because PR #2's renumbered add_memory_versions took v91 first.)
+	{version: 92, name: "add_proposal_scoring", sql: migrationAddProposalScoring},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the
