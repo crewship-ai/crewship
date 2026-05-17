@@ -6,6 +6,17 @@ icon: "rocket"
 
 Crewship is a **self-hosted runtime for AI coding agents**. This page gets you from zero to a running agent in two passes: a 60-second smoke test that proves the runtime is alive on your hardware, then a 5-minute full setup that creates your first crew.
 
+<Warning>
+  **v0.1 beta — use the Claude Code adapter.** Crewship ships scaffolds
+  for Codex, Gemini, OpenCode, Cursor, and Factory Droid, but only
+  **Claude Code** has parity-tested streaming, MCP support, and prompt
+  scrubbers in this release. Pick Claude Code in the agent picker for
+  the supported path; the other adapters are marked **Beta** in-product
+  and have known gaps (Cursor MCP is upstream-broken in headless mode;
+  the Codex live-event stream parser is still a stub). See the README's
+  "Beta status & limitations" section for the full matrix.
+</Warning>
+
 ## 60-Second Smoke Test
 
 If you just want to see the dashboard come up on your machine, this is enough:
