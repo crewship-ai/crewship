@@ -39,7 +39,12 @@ const (
 // from importing the memory package's filesystem semantics. Returns
 // ("", 0) when there is no workspace memory to render.
 type WorkspaceMemoryReader interface {
-	GetContext(budget int) (string, int)
+	// GetContext reads workspace-tier memory under the supplied
+	// budget. The ctx is honoured so a stuck FTS5 query or filesystem
+	// stall cannot block prompt assembly past the orchestrator's
+	// memoryReadTimeout; implementations should plumb the ctx into
+	// any DB/file IO they do under the hood.
+	GetContext(ctx context.Context, budget int) (string, int)
 }
 
 // WorkspaceMemoryProvider resolves the WorkspaceMemoryReader for a given
@@ -102,7 +107,7 @@ func (o *Orchestrator) buildMemoryContext(ctx context.Context, req AgentRunReque
 	var workspaceUsed int
 	if req.WorkspaceID != "" {
 		wsBudget := remaining * workspaceMemoryMaxPct / 100
-		workspaceBlock, workspaceUsed = o.buildWorkspaceMemoryBlock(req.WorkspaceID, wsBudget)
+		workspaceBlock, workspaceUsed = o.buildWorkspaceMemoryBlock(ctx, req.WorkspaceID, wsBudget)
 	}
 
 	// --- Agent memory gets remainder (dynamic reclaim from empty tiers) ---
@@ -256,7 +261,7 @@ func (o *Orchestrator) buildCrewMemoryBlock(ctx context.Context, req AgentRunReq
 // than the agent / crew blocks (no instructions header, just the
 // markers + content) — workspace tier is contextual reference, not
 // session-state.
-func (o *Orchestrator) buildWorkspaceMemoryBlock(workspaceID string, budget int) (string, int) {
+func (o *Orchestrator) buildWorkspaceMemoryBlock(ctx context.Context, workspaceID string, budget int) (string, int) {
 	if budget <= 0 || workspaceID == "" {
 		return "", 0
 	}
@@ -270,7 +275,13 @@ func (o *Orchestrator) buildWorkspaceMemoryBlock(workspaceID string, budget int)
 	if reader == nil {
 		return "", 0
 	}
-	content, used := reader.GetContext(budget)
+	// Bounded read: the other tier blocks already cap their FTS reads
+	// at memoryReadTimeout; the workspace tier needs the same defence
+	// or a slow workspace FTS pass would stall the entire prompt
+	// assembly.
+	readCtx, cancel := context.WithTimeout(ctx, memoryReadTimeout)
+	defer cancel()
+	content, used := reader.GetContext(readCtx, budget)
 	if used == 0 || content == "" {
 		return "", 0
 	}

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"io"
 	"log/slog"
 	"os"
@@ -316,8 +317,13 @@ func TestReadVersion_Unknown_ErrVersionNotFound(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected ErrVersionNotFound, got nil")
 	}
-	// Note: testing errors.Is would require import; the err message
-	// check is sufficient and matches the convention other tests use.
+	// Asserting the sentinel directly is the contract callers code
+	// against (errors.Is(err, ErrVersionNotFound)) — without it, a
+	// future change that wrapped the error in a different sentinel
+	// would slip past this test.
+	if !errors.Is(err, ErrVersionNotFound) {
+		t.Fatalf("error = %v, want ErrVersionNotFound", err)
+	}
 }
 
 func TestRestore_RoundTrip(t *testing.T) {

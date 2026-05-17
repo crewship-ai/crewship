@@ -49,7 +49,14 @@ func (w *WorkspaceMemory) Search(query string, limit int) ([]SearchResult, error
 // GetContext returns a formatted workspace memory block for system prompt injection.
 // It reads markdown files directly (not via FTS5 search) to build the context.
 // Returns empty string and 0 if no workspace memory files exist.
-func (w *WorkspaceMemory) GetContext(budget int) (string, int) {
+//
+// The supplied ctx is checked between file visits so a stuck filesystem
+// (NFS hang, BFS-mount stall) doesn't pin prompt assembly past the
+// orchestrator's timeout. Cancellation aborts the walk and returns
+// whatever has been collected so far (gracefully degraded) rather than
+// surfacing the ctx err — the agent gets a partial workspace block
+// rather than the prompt failing entirely.
+func (w *WorkspaceMemory) GetContext(ctx context.Context, budget int) (string, int) {
 	// Walk workspace dir for .md files and read their content directly.
 	// This is a host-level operation (workspace memory lives on host, not in container).
 	var files []struct {
@@ -58,6 +65,13 @@ func (w *WorkspaceMemory) GetContext(budget int) (string, int) {
 	}
 
 	filepath.Walk(w.path, func(fpath string, info os.FileInfo, err error) error {
+		select {
+		case <-ctx.Done():
+			// Abort the walk on cancellation; whatever we already
+			// collected is still usable for the prompt.
+			return filepath.SkipAll
+		default:
+		}
 		if err != nil || info.IsDir() {
 			return nil
 		}

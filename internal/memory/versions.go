@@ -298,7 +298,14 @@ func Restore(
 	if err := atomicRestoreWrite(canonicalPath, content); err != nil {
 		return nil, fmt.Errorf("restore write: %w", err)
 	}
-	parent, _ := LatestVersionSha(ctx, db, workspaceID, auditPath)
+	// Fail fast if parent lookup fails — proceeding would record a
+	// restore row with broken lineage metadata (empty parent_sha)
+	// which downstream audit reviewers cannot distinguish from a
+	// legitimate first-version write.
+	parent, err := LatestVersionSha(ctx, db, workspaceID, auditPath)
+	if err != nil {
+		return nil, fmt.Errorf("lookup latest version sha for parent: %w", err)
+	}
 	return RecordVersion(ctx, db, VersionRecord{
 		WorkspaceID: workspaceID,
 		Path:        auditPath,
@@ -446,6 +453,15 @@ func sweepOrphanBlobs(ctx context.Context, db *sql.DB, blobRoot string) (int64, 
 
 	var deleted int64
 	walkErr := filepath.Walk(blobRoot, func(path string, info os.FileInfo, walkErr error) error {
+		// Honour context cancellation between file visits. On large
+		// blob roots a full walk can take seconds; without this
+		// check, shutdown signals stall the sweep until the walk
+		// completes naturally.
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
 		if walkErr != nil {
 			// A missing blobRoot itself is fine — nothing to sweep.
 			if os.IsNotExist(walkErr) {

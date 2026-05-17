@@ -29,14 +29,23 @@ type stubWorkspaceReader struct {
 	content string
 }
 
-func (s *stubWorkspaceReader) GetContext(budget int) (string, int) {
+func (s *stubWorkspaceReader) GetContext(_ context.Context, budget int) (string, int) {
 	if s == nil || s.content == "" || budget <= 0 {
 		return "", 0
 	}
 	if len(s.content) > budget {
 		// Mirror the WorkspaceMemory.GetContext truncation semantics —
-		// not exactly the same chars but representative for tests.
-		out := s.content[:budget-20] + "\n...(truncated)\n"
+		// not exactly the same chars but representative for tests. The
+		// budget-20 cushion would underflow for very small budgets; clamp
+		// the cut to 1 byte so the test stub never panics on edge inputs.
+		cut := budget - 20
+		if cut < 1 {
+			cut = 1
+		}
+		if cut > len(s.content) {
+			cut = len(s.content)
+		}
+		out := s.content[:cut] + "\n...(truncated)\n"
 		return out, len(out)
 	}
 	return s.content, len(s.content)
@@ -49,7 +58,7 @@ func (s *stubWorkspaceReader) GetContext(budget int) (string, int) {
 func TestBuildWorkspaceMemoryBlock_NoProvider_Empty(t *testing.T) {
 	mc := mockContainerForMemory(map[string]string{})
 	o := New(mc, newMemState(), slog.Default())
-	block, used := o.buildWorkspaceMemoryBlock("ws_test", 2000)
+	block, used := o.buildWorkspaceMemoryBlock(context.Background(), "ws_test", 2000)
 	if block != "" || used != 0 {
 		t.Errorf("with no provider wired: block=%q used=%d, want empty", block, used)
 	}
@@ -63,7 +72,7 @@ func TestBuildWorkspaceMemoryBlock_ProviderReturnsNilReader_Empty(t *testing.T) 
 	o.SetWorkspaceMemoryProvider(&stubWorkspaceProvider{readers: map[string]WorkspaceMemoryReader{
 		"other_ws": &stubWorkspaceReader{content: "other content"},
 	}})
-	block, used := o.buildWorkspaceMemoryBlock("ws_test", 2000)
+	block, used := o.buildWorkspaceMemoryBlock(context.Background(), "ws_test", 2000)
 	if block != "" || used != 0 {
 		t.Errorf("with provider but no reader for workspace: block=%q used=%d, want empty", block, used)
 	}
@@ -78,7 +87,7 @@ func TestBuildWorkspaceMemoryBlock_RenderedWithFraming(t *testing.T) {
 	o.SetWorkspaceMemoryProvider(&stubWorkspaceProvider{readers: map[string]WorkspaceMemoryReader{
 		"ws_test": &stubWorkspaceReader{content: "shared workspace insight"},
 	}})
-	block, used := o.buildWorkspaceMemoryBlock("ws_test", 2000)
+	block, used := o.buildWorkspaceMemoryBlock(context.Background(), "ws_test", 2000)
 	if !strings.Contains(block, "[WORKSPACE MEMORY]") {
 		t.Errorf("missing [WORKSPACE MEMORY] header in %q", block)
 	}
@@ -101,7 +110,7 @@ func TestBuildWorkspaceMemoryBlock_SmallBudget_Empty(t *testing.T) {
 	o.SetWorkspaceMemoryProvider(&stubWorkspaceProvider{readers: map[string]WorkspaceMemoryReader{
 		"ws_test": &stubWorkspaceReader{content: "something"},
 	}})
-	block, used := o.buildWorkspaceMemoryBlock("ws_test", 10)
+	block, used := o.buildWorkspaceMemoryBlock(context.Background(), "ws_test", 10)
 	if block != "" || used != 0 {
 		t.Errorf("with tiny budget: block=%q used=%d, want empty", block, used)
 	}

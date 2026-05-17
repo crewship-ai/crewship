@@ -3,7 +3,9 @@ package memory
 import (
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 )
 
@@ -55,6 +57,20 @@ func (r *WorkspaceMemoryRegistry) For(workspaceID string) *WorkspaceMemory {
 	if r == nil || workspaceID == "" || r.rootDir == "" {
 		return nil
 	}
+	// Reject malformed workspace ids before joining filesystem paths.
+	// A caller passing "../foo" or "/etc/passwd" or "ws/../leak" would
+	// otherwise escape the memory root. The cuid-like ids the system
+	// produces never contain these characters; refusing here closes the
+	// path-injection vector while leaving the legitimate hot path
+	// untouched.
+	if strings.ContainsRune(workspaceID, os.PathSeparator) ||
+		filepath.Clean(workspaceID) != workspaceID ||
+		filepath.IsAbs(workspaceID) ||
+		workspaceID == "." || workspaceID == ".." {
+		r.logger.Warn("rejected malformed workspace id for memory registry",
+			"workspace_id", workspaceID)
+		return nil
+	}
 
 	r.mu.RLock()
 	wm, ok := r.cache[workspaceID]
@@ -65,6 +81,12 @@ func (r *WorkspaceMemoryRegistry) For(workspaceID string) *WorkspaceMemory {
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	// Guard against post-Close use: Close sets cache=nil and a stray
+	// caller racing past the shutdown hook would otherwise panic on
+	// the map write below.
+	if r.cache == nil {
+		return nil
+	}
 	// Double-check after acquiring the write lock — a second caller
 	// that beat us to the upgrade may have already populated.
 	if wm, ok := r.cache[workspaceID]; ok {
@@ -104,6 +126,9 @@ func (r *WorkspaceMemoryRegistry) Close() error {
 			firstErr = fmt.Errorf("close workspace memory %s: %w", id, err)
 		}
 	}
+	// nil signals "closed" to For(); without the matching guard there a
+	// post-Close caller would panic on the map write that follows the
+	// double-check miss path.
 	r.cache = nil
 	return firstErr
 }

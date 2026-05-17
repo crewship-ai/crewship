@@ -6,10 +6,40 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/crewship-ai/crewship/internal/memory"
 )
+
+// restoreCanonicalPathSafe enforces server-side containment: the
+// restore target must land inside the memory root that contains
+// blobRoot. blobRoot is {memoryRoot}/versions, so the allowed root is
+// filepath.Dir(blobRoot). Empty blobRoot is treated as "no
+// containment configured" → reject all restores; this fails closed
+// rather than letting a misconfigured server become an arbitrary
+// file-overwrite primitive.
+func restoreCanonicalPathSafe(canonicalPath, blobRoot string) bool {
+	if strings.TrimSpace(canonicalPath) == "" || strings.Contains(canonicalPath, "..") {
+		return false
+	}
+	if blobRoot == "" {
+		return false
+	}
+	memRoot := filepath.Dir(blobRoot)
+	absP, err := filepath.Abs(canonicalPath)
+	if err != nil {
+		return false
+	}
+	absRoot, err := filepath.Abs(memRoot)
+	if err != nil {
+		return false
+	}
+	rootWithSep := filepath.Clean(absRoot) + string(os.PathSeparator)
+	return strings.HasPrefix(filepath.Clean(absP)+string(os.PathSeparator), rootWithSep)
+}
 
 // MemoryVersionsHandler serves the v90 audit-trail surface over HTTP.
 // Same operations the CLI `crewship memory log/show/restore` exposes
@@ -160,6 +190,19 @@ func (h *MemoryVersionsHandler) Restore(w http.ResponseWriter, r *http.Request) 
 	tier := memory.Tier(body.Tier)
 	if !memory.ValidTier(tier) {
 		replyError(w, http.StatusBadRequest, "invalid tier (allowed: agent|crew|workspace|pins|learned)")
+		return
+	}
+	// Server-side path confinement: the HTTP surface lets an OWNER/ADMIN
+	// pick the canonical target, but the target must land inside the
+	// configured memory root. Without this check a credential leak (or
+	// CSRF on the admin endpoint) lets the attacker overwrite any file
+	// the server process can write to. The CLI has its own --force
+	// bypass; the HTTP API has none — there is no operator intent to
+	// "force into /etc" that justifies the risk surface.
+	if !restoreCanonicalPathSafe(body.CanonicalPath, h.blobRoot) {
+		h.logger.Warn("memory restore rejected: canonical path outside allowed root",
+			"workspace_id", wsID, "canonical_path", body.CanonicalPath, "blob_root", h.blobRoot)
+		replyError(w, http.StatusBadRequest, "canonical_path must resolve inside the configured memory root")
 		return
 	}
 

@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -49,7 +50,7 @@ func TestWorkspaceMemory_GetContext(t *testing.T) {
 	}
 	defer wm.Close()
 
-	block, used := wm.GetContext(5000)
+	block, used := wm.GetContext(context.Background(), 5000)
 
 	if block == "" {
 		t.Error("GetContext should return non-empty block")
@@ -82,7 +83,7 @@ func TestWorkspaceMemory_Empty(t *testing.T) {
 	}
 	defer wm.Close()
 
-	block, used := wm.GetContext(5000)
+	block, used := wm.GetContext(context.Background(), 5000)
 
 	if block != "" {
 		t.Errorf("empty workspace should return empty block, got %q", block)
@@ -106,7 +107,7 @@ func TestWorkspaceMemory_BudgetTruncation(t *testing.T) {
 	defer wm.Close()
 
 	// Tiny budget → should truncate
-	block, used := wm.GetContext(500)
+	block, used := wm.GetContext(context.Background(), 500)
 
 	if used > 600 { // allow some margin for markers
 		t.Errorf("used chars (%d) should be near budget (500)", used)

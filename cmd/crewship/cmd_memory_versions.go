@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -200,8 +201,15 @@ func runMemoryRestore(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	if !force && !canonicalPathIsSafe(canonicalPath) {
-		return fmt.Errorf("refusing to restore to %q (pass --force to override)", canonicalPath)
+	// Confine the restore target to the data dir tree (one level above
+	// blobRoot — blobRoot is {data}/memory/versions, so {data}/memory
+	// is the allowed root). --force bypasses for operators recovering
+	// content outside the standard tree (e.g. a workspace bound to a
+	// different memory dir via env).
+	restoreRoot := filepath.Dir(blobRoot)
+	if !force && !canonicalPathIsSafe(canonicalPath, restoreRoot) {
+		return fmt.Errorf("refusing to restore to %q (outside %q; pass --force to override)",
+			canonicalPath, restoreRoot)
 	}
 
 	db, err := openAdminDB()
@@ -245,15 +253,37 @@ func defaultBlobRoot() (string, error) {
 	return home + "/.crewship/memory/versions", nil
 }
 
-// canonicalPathIsSafe rejects empty paths + obvious traversal
-// attempts. Callers passing --force bypass this; non-force callers
-// need a path that is non-empty and does not contain "..".
-func canonicalPathIsSafe(p string) bool {
+// canonicalPathIsSafe rejects empty paths + traversal attempts + any
+// target that resolves outside the supplied allowedRoot. Callers
+// passing --force bypass this; non-force callers need a path that is
+// non-empty, contains no ".." segments, and lands inside allowedRoot
+// after symlink + Clean resolution.
+//
+// allowedRoot is canonicalised (filepath.Abs + filepath.Clean) before
+// the containment check so a trailing slash or a relative root passed
+// from the CLI flag still does the right thing.
+func canonicalPathIsSafe(p, allowedRoot string) bool {
 	if strings.TrimSpace(p) == "" {
 		return false
 	}
 	if strings.Contains(p, "..") {
 		return false
 	}
-	return true
+	if allowedRoot == "" {
+		// No root supplied; fall back to the old "non-empty + no .."
+		// gate. Callers should always pass a root; this keeps the
+		// helper non-breaking for any future caller that didn't yet.
+		return true
+	}
+	absP, err := filepath.Abs(p)
+	if err != nil {
+		return false
+	}
+	absRoot, err := filepath.Abs(allowedRoot)
+	if err != nil {
+		return false
+	}
+	// Add the separator so "/foo/bar-evil" doesn't match prefix "/foo/bar".
+	rootWithSep := filepath.Clean(absRoot) + string(os.PathSeparator)
+	return strings.HasPrefix(filepath.Clean(absP)+string(os.PathSeparator), rootWithSep)
 }
