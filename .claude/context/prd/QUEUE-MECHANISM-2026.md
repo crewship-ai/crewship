@@ -9,7 +9,7 @@
 
 ## Current state (post #389)
 
-```
+```text
 Issue dispatcher → mission_tasks.go → for each task:
   EnsureCrewRuntime()    # start container if cold
   AgentRun()             # spawn agent process inside container
@@ -37,14 +37,17 @@ A dispatcher that respects a per-crew concurrency budget:
 
 ### State
 
-Extend `assignments` table:
+The same lifecycle has to widen in **two** tables — `assignments` and `agent_runs` — because the dashboard widget reads from `agent_runs.status` while the dispatcher tracks `assignments.status`. Drifting them is exactly the bug that produces "12 errors" instead of "12 queued" in the UI.
 
 ```sql
 ALTER TABLE assignments ADD COLUMN queued_at TEXT;
--- Existing status enum widens to include 'QUEUED' (CHECK constraint).
+-- Existing status CHECK on assignments widens to include 'QUEUED'.
+-- agent_runs.status CHECK is widened in the same migration so the
+-- dashboard ("3 running, 9 queued") and the dispatcher see the same
+-- enum.
 ```
 
-Statuses become: `PENDING → QUEUED → RUNNING → (COMPLETED | FAILED | CANCELLED)`.
+Statuses become: `PENDING → QUEUED → RUNNING → (COMPLETED | FAILED | CANCELLED)`. Same ordering on both tables.
 
 `QUEUED` is the new state. `PENDING` keeps its current meaning (created but not yet looked at by the dispatcher).
 
@@ -56,38 +59,86 @@ Override per-crew via a new `crews.max_concurrent_agents` column (NULL → compu
 
 ### Dispatcher logic
 
+The "check inflight → set RUNNING" sequence is **not** safe as two reads-then-write — two dispatchers can both read `inflight < budget` and both transition to RUNNING, blowing the budget by 1 each time. The fix is to make slot-claim atomic: a single `UPDATE … WHERE` that succeeds for **exactly one** caller per available slot, and falls through to QUEUED for the rest.
+
 ```go
 func dispatch(ctx, assignmentID) {
   ass := loadAssignment(assignmentID)
-  budget, inflight := loadCrewBudget(ass.CrewID)
-  if inflight >= budget {
-    setStatus(ass.ID, "QUEUED", queuedAt: now)
-    journal.Emit("assignment.queued", crew: ass.CrewID, ahead_of: inflight - budget + 1)
-    return  // dispatcher returns immediately; ws emits queued state
+  claimed, err := claimCrewSlot(ctx, ass.ID, ass.CrewID)
+  if err != nil {
+    return err
   }
-  setStatus(ass.ID, "RUNNING")
-  runAgent(...)  // existing path
+  if !claimed {
+    // budget full — stamp QUEUED + emit. UI sees the assignment hold
+    // its position until pumpQueue picks it up.
+    if err := setStatus(ctx, ass.ID, "QUEUED", queuedAt: now); err != nil {
+      return err
+    }
+    journal.Emit(ctx, "assignment_queued", crew: ass.CrewID, ahead_of: queueDepth(ass.CrewID))
+    ws.Emit(ws_channel(ass.WorkspaceID), "assignment_queued", payload)
+    return
+  }
+  // Claim succeeded → row already at RUNNING with the slot counted.
+  // If runAgent setup fails, the deferred rollback below releases the slot.
+  releaseOnError := true
+  defer func() {
+    if releaseOnError {
+      _ = releaseCrewSlot(ctx, ass.ID, ass.CrewID)
+    }
+  }()
+  if err := runAgent(ctx, ass); err != nil {
+    return err
+  }
+  releaseOnError = false // success path: terminal status handler releases
 }
 ```
+
+`claimCrewSlot` is the contract:
+
+```sql
+-- Atomic CAS in one statement: succeed iff this row is still PENDING
+-- AND the crew's current RUNNING count is below budget. SQLite
+-- evaluates the WHERE subquery + the UPDATE under the same write
+-- lock, so two callers can't both win.
+UPDATE assignments
+   SET status = 'RUNNING', running_at = datetime('now','subsec')
+ WHERE id = ?
+   AND status = 'PENDING'
+   AND (
+     SELECT COUNT(*) FROM assignments
+      WHERE crew_id = ? AND status = 'RUNNING'
+   ) < (
+     SELECT COALESCE(max_concurrent_agents, ?)
+       FROM crews WHERE id = ?
+   );
+-- Caller checks RowsAffected: 1 = slot claimed, 0 = budget full.
+```
+
+The fallback `?` in the second subquery is the computed default (`floor(container_memory_mb / agent_memory_estimate_mb)`) supplied by the dispatcher — so a NULL `max_concurrent_agents` falls back to the memory-derived value without a separate read.
 
 On completion:
 
 ```go
 func onRunDone(ctx, assignmentID, terminalStatus) {
-  setStatus(assignmentID, terminalStatus)
-  journal.Emit("run." + terminalStatus, ...)
+  ass := loadAssignment(assignmentID)
+  setStatus(ctx, assignmentID, terminalStatus)
+  journal.Emit(ctx, "run_" + terminalStatus, ...)
   pumpQueue(ctx, ass.CrewID)  // NEW
 }
 
 func pumpQueue(ctx, crewID) {
-  // Read crew budget; for each QUEUED assignment in FIFO order while
-  // inflight < budget, transition to RUNNING and dispatch. Single-pass.
-  // Wraps in a transaction so two completions don't both grab the same
-  // QUEUED row.
+  // Atomically claim the oldest QUEUED slot for this crew, transition
+  // it to RUNNING + emit assignment_unqueued, and recurse until the
+  // CAS fails (no QUEUED rows OR budget full). Same UPDATE…WHERE
+  // pattern as claimCrewSlot above, scoped to status='QUEUED' and
+  // ordered by queued_at ASC.
+  // Each successful claim spawns a goroutine for runAgent; the next
+  // iteration re-reads inflight (the claim already incremented it
+  // via the status flip, so the next CAS sees the new total).
 }
 ```
 
-Race condition: two simultaneous completions trying to pump the queue. SQLite's WAL + the explicit transaction is sufficient — the second caller sees the first's transitions and re-reads inflight before deciding. No external coordination needed.
+**Naming convention** for events is **underscored**: `assignment_queued`, `assignment_unqueued`, `assignment_running`, `assignment_completed`, `assignment_failed`, `run_completed`, `run_failed`. Both `journal.Emit` and the WS channel use the same strings — no mapping function, no drift. Existing journal types already use this shape (`agent.status_change`, `run.completed` are the legacy dotted form; the new events stick to underscored to avoid mixing within one feature).
 
 ### WS events
 
@@ -100,13 +151,13 @@ Existing `assignment_running` / `assignment_completed` / `assignment_failed` sta
 
 ### Dashboard widget
 
-Today's widget reads `agent_runs` and counts terminal statuses (12 errors). Update to also read pending+queued counts:
+Today's widget reads `agent_runs.status` and counts terminal statuses ("12 errors"). After the migration widens both `assignments.status` AND `agent_runs.status` to include `QUEUED`, the widget query becomes:
 
-```
+```text
 12 agents: 3 running, 9 queued, 0 idle, 0 errors
 ```
 
-This is a UI-only change once the backend emits the new events.
+This is a UI-only change once the backend emits the new events AND `agent_runs.status` carries the new state.
 
 ### Inbox
 
