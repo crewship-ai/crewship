@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/memory"
 )
 
 // Consolidator turns a window of recent journal entries for one crew into
@@ -149,6 +150,12 @@ func (c *Consolidator) Run(ctx context.Context, cfg Config) (ConsolidationResult
 	// over-fitted noise; demanding at least two supporting entries is
 	// a cheap filter the LLM should respect but we enforce it again here.
 	rules = filterMultipleEvidence(rules)
+	// Drop any rule whose normalised pattern already appeared in a
+	// learned-*.md within the last 7 days. The LLM is liable to
+	// re-propose the same pattern across consecutive 6h ticks while
+	// the underlying entries are still in the window; the dedup
+	// guards the on-disk corpus against re-appending those.
+	rules = dedupAgainstPrior(rules, cfg.OutputDir, now, 7*24*time.Hour)
 	if len(rules) == 0 {
 		// Still emit the journal marker so operators can see the worker
 		// ran. Nothing written to disk because there is nothing to write.
@@ -177,6 +184,15 @@ func (c *Consolidator) Run(ctx context.Context, cfg Config) (ConsolidationResult
 			RulesAppended:  0,
 			JournalEntryID: id,
 		}, nil
+	}
+
+	// HITL path: stage the rules in .proposed/ and emit the
+	// EntryMemoryConsolidationProposed marker instead of touching
+	// the canonical learned-*.md. The operator approves via the
+	// API; on approve the proposal body is merged into the canonical
+	// file and the regular EntryMemoryConsolidated emit fires.
+	if cfg.ProposalMode {
+		return c.writeProposal(ctx, cfg, now, rules, len(filtered))
 	}
 
 	outPath, err := c.appendRules(cfg.OutputDir, now, rules)
@@ -404,6 +420,17 @@ func snapshotPins(cfg Config, entries []journal.Entry) error {
 	}
 	path := filepath.Join(cfg.OutputDir, "pins.md")
 
+	// Lock for the full read-then-append window so two consolidator
+	// runs cannot both see the same `existing` set and double-append
+	// the same pin IDs. Pre-fix pins.md occasionally accumulated dup
+	// lines under concurrent ticks (the comment-marker dedup is
+	// best-effort; flock is the durable fix).
+	lk := memory.NewFileLock(path + ".lock")
+	if err := lk.Lock(); err != nil {
+		return fmt.Errorf("pins lock: %w", err)
+	}
+	defer func() { _ = lk.Unlock() }()
+
 	// Pre-read existing pins to skip IDs already captured. pins.md is
 	// an append-only human-curated reference — rewriting or deduping
 	// the entire file would surprise operators who annotated entries
@@ -469,6 +496,16 @@ func (c *Consolidator) appendRules(outputDir string, now time.Time, rules []Lear
 	}
 	fname := fmt.Sprintf("learned-%s.md", now.Format("2006-01-02"))
 	path := filepath.Join(outputDir, fname)
+
+	// Serialise concurrent appends. Two consolidator goroutines (one
+	// per crew, sharing an output dir if the operator misconfigures
+	// them) could otherwise interleave block fragments on the same
+	// file. flock is per-fd, blocking — the second caller waits.
+	lk := memory.NewFileLock(path + ".lock")
+	if err := lk.Lock(); err != nil {
+		return "", fmt.Errorf("lock %s: %w", path, err)
+	}
+	defer func() { _ = lk.Unlock() }()
 
 	var block strings.Builder
 	_, statErr := os.Stat(path)

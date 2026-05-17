@@ -103,11 +103,22 @@ type Server struct {
 	proxy            *Proxy
 	memoryEngine     *memory.Engine
 	crewMemoryEngine *memory.Engine // crew shared memory — only initialized for lead agents
-	ipc              *IPCConfig
-	crewMembers      []CrewMember
-	mcpGateway       *MCPGateway
-	logger           *slog.Logger
-	readyCh          chan struct{} // closed when the TCP listener is bound
+	// agentMemoryBase / crewMemoryBase are the resolved base paths
+	// the write handler joins relative paths under. Mirrors what's
+	// in cfg.Memory.{BasePath,CrewMemoryPath}, stashed on the Server
+	// so handleMemoryWrite can validate path-traversal without
+	// reaching back into the construction config.
+	agentMemoryBase string
+	crewMemoryBase  string
+	// scrubber is the shared credential-pattern detector applied to
+	// memory writes in ModeBlock. nil disables scrubbing — primarily
+	// used in tests; production paths always wire one.
+	scrubber    *scrubber.Scrubber
+	ipc         *IPCConfig
+	crewMembers []CrewMember
+	mcpGateway  *MCPGateway
+	logger      *slog.Logger
+	readyCh     chan struct{} // closed when the TCP listener is bound
 }
 
 // NewServer creates a sidecar server ready to start.
@@ -157,6 +168,12 @@ func NewServer(cfg ServerConfig) *Server {
 		crewMembers: cfg.CrewMembers,
 		logger:      cfg.Logger,
 		readyCh:     make(chan struct{}),
+		// Shared scrubber instance reused by every /memory/write
+		// validation pass. The scrubber is read-only at runtime
+		// (its pattern list is fixed by New() — AddPattern is not
+		// called on the sidecar path), so a single instance under
+		// concurrent handlers is safe.
+		scrubber: scrubber.New(),
 	}
 
 	// Billing-mode + plan come from the orchestrator-set env vars in
@@ -191,6 +208,7 @@ func NewServer(cfg ServerConfig) *Server {
 			cfg.Logger.Error("failed to init memory engine", "error", err, "path", cfg.Memory.BasePath)
 		} else {
 			s.memoryEngine = engine
+			s.agentMemoryBase = cfg.Memory.BasePath
 			// Index existing memory files on startup
 			if err := engine.Reindex(); err != nil {
 				cfg.Logger.Warn("initial memory reindex failed", "error", err)
@@ -210,6 +228,7 @@ func NewServer(cfg ServerConfig) *Server {
 				cfg.Logger.Error("failed to init crew memory engine", "error", err, "path", cfg.Memory.CrewMemoryPath)
 			} else {
 				s.crewMemoryEngine = crewEngine
+				s.crewMemoryBase = cfg.Memory.CrewMemoryPath
 				if err := crewEngine.Reindex(); err != nil {
 					cfg.Logger.Warn("initial crew memory reindex failed", "error", err)
 				}
@@ -246,6 +265,9 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 			switch {
 			case r.Method == http.MethodPost && r.URL.Path == "/memory/search":
 				s.handleMemorySearch(w, r)
+				return
+			case r.Method == http.MethodPost && r.URL.Path == "/memory/write":
+				s.handleMemoryWrite(w, r)
 				return
 			case r.Method == http.MethodGet && r.URL.Path == "/memory/status":
 				s.handleMemoryStatus(w, r)

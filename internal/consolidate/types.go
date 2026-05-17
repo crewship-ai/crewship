@@ -45,6 +45,20 @@ type Config struct {
 	MinEntries  int           // skip LLM if fewer than this many candidate entries; default 10
 	LLMModel    string        // model identifier passed to the summarizer; informational
 	OutputDir   string        // where learned-YYYY-MM-DD.md is written
+
+	// ProposalMode flips the consolidator to HITL-staging behaviour.
+	// When true:
+	//   - rules are written to {OutputDir}/.proposed/proposal-{runID}.md
+	//     instead of the canonical learned-YYYY-MM-DD.md
+	//   - a memory_proposals row is inserted with status='pending'
+	//   - an inbox_items row (kind=memory_consolidation) is inserted
+	//   - the journal emit is EntryMemoryConsolidationProposed (not
+	//     the regular EntryMemoryConsolidated)
+	//
+	// The runner enables this flag from CREWSHIP_CONSOLIDATE_HITL=1.
+	// Defaults to false so an operator who doesn't opt in keeps the
+	// existing direct-write contract.
+	ProposalMode bool
 }
 
 // LearnedRule is one extracted "pattern -> action" lesson. Evidence is the

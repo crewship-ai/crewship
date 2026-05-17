@@ -163,10 +163,17 @@ func newMemoryMetricsAdapter(db *sql.DB) *memoryMetricsAdapter {
 
 func (a *memoryMetricsAdapter) EntriesSinceLastMemoryUpdate(ctx context.Context, workspaceID, agentID string) (int64, error) {
 	var n int64
+	// Exclude memory.updated rows themselves from the count: the
+	// counter is meant to capture "real work the agent did since
+	// the last memory write". Without the exclusion, every
+	// memory.updated emit would land as a +1 on its own bucket and
+	// the threshold-60 nudge would over-fire (plan-agent caught
+	// this cascade during the bundled PR design).
 	err := a.db.QueryRowContext(ctx, `
 		SELECT COUNT(*)
 		  FROM journal_entries
 		 WHERE workspace_id = ? AND agent_id = ?
+		   AND entry_type <> 'memory.updated'
 		   AND ts > COALESCE(
 		     (SELECT MAX(ts) FROM journal_entries
 		        WHERE workspace_id = ? AND agent_id = ? AND entry_type = 'memory.updated'),

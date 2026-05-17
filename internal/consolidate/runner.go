@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -169,12 +171,13 @@ func consolidateAllCrews(ctx context.Context, db *sql.DB, c *Consolidator, opts 
 		default:
 		}
 		cfg := Config{
-			WorkspaceID: cr.WorkspaceID,
-			CrewID:      cr.ID,
-			Since:       opts.ConsolidationSince,
-			MinEntries:  opts.MinEntries,
-			LLMModel:    opts.LLMModel,
-			OutputDir:   filepath.Join(opts.CrewMemoryRoot, cr.Slug, "topics"),
+			WorkspaceID:  cr.WorkspaceID,
+			CrewID:       cr.ID,
+			Since:        opts.ConsolidationSince,
+			MinEntries:   opts.MinEntries,
+			LLMModel:     opts.LLMModel,
+			OutputDir:    filepath.Join(opts.CrewMemoryRoot, cr.Slug, "topics"),
+			ProposalMode: hitlEnabled(),
 		}
 		res, rerr := c.Run(ctx, cfg)
 		switch {
@@ -288,6 +291,20 @@ func compactAllWorkspaces(ctx context.Context, db *sql.DB, comp *Compactor, opts
 		)
 	}
 	return errors.Join(errs...)
+}
+
+// hitlEnabled reads CREWSHIP_CONSOLIDATE_HITL on every tick so an
+// operator can flip the kill switch without restarting the server.
+// Accepts the conventional "1", "true", "yes" forms (case-insensitive);
+// anything else is treated as off. Defaults to off so the existing
+// direct-write contract survives the upgrade unchanged.
+func hitlEnabled() bool {
+	v := strings.TrimSpace(os.Getenv("CREWSHIP_CONSOLIDATE_HITL"))
+	switch strings.ToLower(v) {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
 }
 
 // nextDailyAt returns the next UTC instant whose hour equals hour and
