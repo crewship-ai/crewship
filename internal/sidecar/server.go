@@ -269,6 +269,9 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 			case r.Method == http.MethodPost && r.URL.Path == "/memory/write":
 				s.handleMemoryWrite(w, r)
 				return
+			case r.Method == http.MethodGet && r.URL.Path == "/memory/read":
+				s.handleMemoryRead(w, r)
+				return
 			case r.Method == http.MethodGet && r.URL.Path == "/memory/status":
 				s.handleMemoryStatus(w, r)
 				return
