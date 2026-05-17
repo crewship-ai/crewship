@@ -277,6 +277,51 @@ func (h *AssignmentHandler) DispatchAssignment(ctx context.Context, req orchestr
 		"brief_len", len(body.Task),
 	)
 
+	// Per-crew admission control. Lead-planning assignments skip
+	// the queue: a deferred lead deadlocks its whole mission while
+	// it waits for slots that won't free until the lead's sub-
+	// assignments complete. The lead is allowed to oversubscribe by
+	// one. Everyone else competes for crew budget.
+	if !req.LeadPlanning {
+		budget, budgetErr := computeCrewBudget(ctx, h.db, req.CrewID)
+		if budgetErr != nil {
+			// Fall back to budget=1 so we under-provision rather
+			// than oversubscribe. The completion-path pump catches
+			// up on the next terminal status.
+			h.logger.Warn("computeCrewBudget failed; falling back to budget=1",
+				"crew_id", req.CrewID, "error", budgetErr)
+			budget = 1
+		}
+		claimed, claimErr := claimCrewSlot(ctx, h.db, req.AssignmentID, req.CrewID, budget)
+		if claimErr != nil {
+			return fmt.Errorf("claim crew slot for %s: %w", req.AssignmentID, claimErr)
+		}
+		if !claimed {
+			if err := markAssignmentQueued(ctx, h.db, req.AssignmentID); err != nil {
+				return fmt.Errorf("mark queued %s: %w", req.AssignmentID, err)
+			}
+			h.emitAssignmentQueued(ctx, req.AssignmentID, req.ChatID, req.WorkspaceID, req.CrewID, target.Slug)
+			h.logger.Info("assignment queued (crew at budget)",
+				"assignment_id", req.AssignmentID,
+				"mission_id", req.MissionID,
+				"crew_id", req.CrewID,
+				"crew", target.CrewSlug,
+				"budget", budget,
+			)
+			// QUEUED is a tracked in-flight state from the
+			// orchestrator's perspective — pumpAndDispatch picks it
+			// up when an inflight run completes. Return nil so the
+			// mission engine treats this as a successful dispatch.
+			return nil
+		}
+		// Claim succeeded — emit the unqueued event for
+		// observability (claim turned the row to RUNNING; UI may
+		// want to animate even when the wait was zero). The
+		// assignment_running event still follows from
+		// runAssignment.
+		h.emitAssignmentUnqueued(ctx, req.AssignmentID, req.ChatID, req.WorkspaceID, req.CrewID)
+	}
+
 	h.runAssignment(ctx, req.AssignmentID, body, target, creds)
 	return nil
 }

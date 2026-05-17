@@ -500,6 +500,37 @@ func (h *AssignmentHandler) finishAssignment(
 		}
 	}
 
+	// Drain the queue: now that this assignment's slot is free,
+	// promote the oldest QUEUED row for the same crew (if any)
+	// before doing any further work. Done BEFORE the mission
+	// callback so the next dispatch fires while the mission engine
+	// is still processing this completion — improves end-to-end
+	// queue latency by ~one orchestrator tick.
+	//
+	// We use a fresh context.Background for the pump scheduling
+	// because the spawned dispatchByID goroutines outlive the
+	// caller's ctx (caller is typically the HTTP request that
+	// finished the agent run). The pump's own DB work uses ctx so
+	// a cancelled completion doesn't leave the pump running.
+	if crewID, cerr := h.crewIDForAssignment(ctx, assignmentID); cerr == nil && crewID != "" {
+		if claimed, perr := h.pumpAndDispatch(ctx, crewID); perr != nil {
+			h.logger.Warn("post-completion queue pump failed",
+				"assignment_id", assignmentID,
+				"crew_id", crewID,
+				"error", perr,
+			)
+		} else if claimed > 0 {
+			h.logger.Info("post-completion queue pump dispatched",
+				"assignment_id", assignmentID,
+				"crew_id", crewID,
+				"dispatched", claimed,
+			)
+		}
+	} else if cerr != nil {
+		h.logger.Warn("crewIDForAssignment failed; queue not pumped",
+			"assignment_id", assignmentID, "error", cerr)
+	}
+
 	// Notify MissionEngine first — must run regardless of websocket availability
 	if h.missionCallback != nil {
 		if err := h.missionCallback.OnAssignmentCompleted(ctx, assignmentID, status, result, errMsg); err != nil {
