@@ -89,17 +89,26 @@ func (c *Consolidator) writeProposal(
 		_ = os.Remove(proposalPath)
 		return ConsolidationResult{EntriesScanned: entriesScanned}, fmt.Errorf("marshal proposal evidence: %w", err)
 	}
+	// Score every candidate rule with the OpenClaw six-signal model
+	// at proposal-creation time. The blob is keyed by rule index so
+	// the explain endpoint can render per-rule signal breakdowns
+	// without re-running the scorer. CandidateMetrics fields are
+	// best-effort: today we pass RawRelevance from LearnedRule
+	// .Confidence and the rest at conservative defaults — future
+	// iterations populate RecallCount/UniqueQueries from journal
+	// queries against the rule's evidence ids.
+	scoreJSON := encodeProposalScores(rules, now)
 	proposalID := "mp_" + runID
 	if c.DB != nil {
 		if _, err := c.DB.ExecContext(ctx, `
 			INSERT INTO memory_proposals (
 				id, workspace_id, crew_id, proposal_path,
 				status, evidence_json, rules_count, entries_scanned,
-				created_at
-			) VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?)`,
+				created_at, score_json
+			) VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)`,
 			proposalID, cfg.WorkspaceID, cfg.CrewID, proposalPath,
 			string(evidenceJSON), len(rules), entriesScanned,
-			now.UTC().Format(time.RFC3339Nano),
+			now.UTC().Format(time.RFC3339Nano), scoreJSON,
 		); err != nil {
 			// Roll back the on-disk file so an operator does not see
 			// a proposal markdown that has no DB row to actually
@@ -198,6 +207,50 @@ func proposalInboxBody(rulesCount, entriesScanned int) string {
 		"The memory consolidator extracted %d rule(s) from %d journal entries and parked them for review. Approve to merge into the canonical learned-*.md, or reject to discard.",
 		rulesCount, entriesScanned,
 	)
+}
+
+// encodeProposalScores runs the OpenClaw six-signal scorer over each
+// candidate rule and returns a JSON object whose keys are rule
+// patterns and values are ScoreResult — same shape the explain
+// endpoint will surface back via the API. Returns "{}" on error so
+// the column's NOT-NULL DEFAULT contract holds.
+//
+// CandidateMetrics population is intentionally conservative:
+//
+//   - RawRelevance ← LearnedRule.Confidence (already in [0,1] per
+//     the LLM prompt template's contract)
+//   - EvidenceCount ← len(rule.Evidence)
+//   - DistinctEntryTypes ← 1 (placeholder: we don't have the entry
+//     types here without re-querying the journal; populated in a
+//     follow-up step that wires journal-side counters)
+//   - RecallCount / UniqueQueries / ConsolidationCount / LastSeenAt
+//     ← zero values (the gates block promotion at this stage —
+//     the proposal hasn't been recalled yet by definition)
+//
+// This means the very-first proposal for a pattern always lands
+// with Promoted=false at score time. That's correct: a brand-new
+// proposal hasn't been recalled even once. The score gets re-
+// computed on subsequent consolidator runs when the recall
+// counters tick up.
+func encodeProposalScores(rules []LearnedRule, now time.Time) string {
+	scores := make(map[string]ScoreResult, len(rules))
+	for _, r := range rules {
+		scores[r.Pattern] = ComputeScore(
+			CandidateMetrics{
+				RawRelevance:       r.Confidence,
+				EvidenceCount:      len(r.Evidence),
+				DistinctEntryTypes: 1,
+			},
+			DefaultSignalWeights(),
+			DefaultThresholds(),
+			now,
+		)
+	}
+	b, err := json.Marshal(scores)
+	if err != nil {
+		return "{}"
+	}
+	return string(b)
 }
 
 // newProposalID returns a short, sortable run identifier. Format:
