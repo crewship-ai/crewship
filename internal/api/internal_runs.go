@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -250,6 +251,36 @@ func (h *InternalHandler) UpdateRun(w http.ResponseWriter, r *http.Request) {
 		var readBack string
 		if err := h.db.QueryRowContext(r.Context(), "SELECT status FROM agents WHERE id = ?", agentID).Scan(&readBack); err == nil {
 			agentStatus = readBack
+		}
+	}
+
+	// Sleep-time trigger: when an agent run completes successfully,
+	// notify the post-run consolidator trigger so it can fire the
+	// extraction pass while the agent is between tasks (PRD §8.1).
+	// Only on COMPLETED — failed / cancelled / timeout runs don't
+	// produce stable signal for consolidation, and triggering on
+	// them would just generate noisy proposals.
+	//
+	// The trigger does its own per-(workspace, crew) debouncing and
+	// fires the consolidation pass asynchronously, so this call
+	// never blocks the response. agentID → crew_id lookup is a tiny
+	// extra SELECT, but only happens once per run completion.
+	if body.Status == "COMPLETED" && h.postRunTrigger != nil && agentID != "" {
+		var crewID, crewSlug sql.NullString
+		if err := h.db.QueryRowContext(r.Context(), `
+			SELECT c.id, c.slug
+			FROM agents a
+			LEFT JOIN crews c ON c.id = a.crew_id
+			WHERE a.id = ?`, agentID).Scan(&crewID, &crewSlug); err != nil {
+			h.logger.Debug("post-run trigger: agent → crew lookup",
+				"error", err, "agent_id", agentID)
+		} else if crewID.Valid && crewSlug.Valid {
+			// Fire on a fresh background context so the trigger
+			// outlives the HTTP request that birthed it; the
+			// trigger itself spawns a goroutine for the actual
+			// consolidator run.
+			h.postRunTrigger.OnRunCompleted(context.Background(),
+				workspaceID, crewID.String, crewSlug.String)
 		}
 	}
 

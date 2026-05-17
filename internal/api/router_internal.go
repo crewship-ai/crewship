@@ -31,6 +31,9 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 		internal.SetKeeperEnabled(true)
 	}
 	internal.SetJournal(r.Journal())
+	// Attach the sleep-time consolidator hook (PRD §8.1). nil is a
+	// no-op; SetPostRunTrigger no-ops on a nil receiver hook.
+	internal.SetPostRunTrigger(oh.postRunTrigger)
 	internalAuth := internal.requireInternal
 	// Pipeline save — sidecar→main forward. Trust comes from
 	// X-Internal-Token (sidecar attaches it via proxyIPCJSON);
