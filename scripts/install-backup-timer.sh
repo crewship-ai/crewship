@@ -92,10 +92,18 @@ if [[ -z "${CREWSHIP_BIN}" ]]; then
   exit 4
 fi
 
-# Suffix unit names with a short hash of the workspace id so installs
-# for multiple workspaces coexist. We use the first 8 chars of the id
-# rather than the whole thing because systemd unit names get unwieldy.
-WS_SUFFIX="${WORKSPACE_ID:0:8}"
+# Suffix unit names with a stable hash of the workspace id rather than
+# the literal first 8 characters. Crewship's CUID-style ids share a
+# common prefix during the same epoch second (timestamp-derived), so a
+# naive substring suffix collides between workspaces created back to
+# back. sha256 -> first 8 hex chars has ~2^-32 collision odds — fine
+# for unit-file uniqueness on a single host.
+if command -v sha256sum >/dev/null 2>&1; then
+  WS_SUFFIX="$(printf '%s' "${WORKSPACE_ID}" | sha256sum | cut -c1-8)"
+else
+  # macOS / BSD fallback: shasum is in the default toolchain.
+  WS_SUFFIX="$(printf '%s' "${WORKSPACE_ID}" | shasum -a 256 | cut -c1-8)"
+fi
 SERVICE_NAME="crewship-backup@${WS_SUFFIX}.service"
 TIMER_NAME="crewship-backup@${WS_SUFFIX}.timer"
 ROTATE_SERVICE="crewship-backup-rotate@${WS_SUFFIX}.service"
@@ -125,10 +133,20 @@ ExecStart=${CREWSHIP_BIN} backup create --workspace ${WORKSPACE_ID} --scope work
 ProtectSystem=strict
 ProtectHome=read-only
 ReadWritePaths=/home/${TARGET_USER}/.crewship
-# Network needed for the catalog index reconcile call. Restrict to
-# AF_INET/AF_INET6 — the binary doesn't use AF_UNIX externally.
 PrivateTmp=yes
 NoNewPrivileges=yes
+# Defence-in-depth: backup needs IP networking (catalog reconcile) and
+# nothing else from the kernel surface. Disabling each capability below
+# is a no-op for the documented workload — they're guards against a
+# future regression where someone adds e.g. a kernel-module probe to
+# the backup binary and the test suite doesn't catch it.
+RestrictAddressFamilies=AF_INET AF_INET6
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
 
 [Install]
 WantedBy=multi-user.target
@@ -167,6 +185,16 @@ ProtectHome=read-only
 ReadWritePaths=/home/${TARGET_USER}/.crewship
 PrivateTmp=yes
 NoNewPrivileges=yes
+# Same hardening surface as the create service — rotate is a strict
+# subset (it only deletes / inspects on-disk bundles + emits a
+# catalog row, no extra capabilities needed).
+RestrictAddressFamilies=AF_INET AF_INET6
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
 
 [Install]
 WantedBy=multi-user.target
