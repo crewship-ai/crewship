@@ -85,7 +85,7 @@ are deliberately left to the operator with actionable URLs in the output.`,
 			return context.WithTimeout(parentCtx, 10*time.Second)
 		}
 
-		results := make([]checkResult, 0, 11)
+		results := make([]checkResult, 0, 12)
 		runProbe := func(fn func(context.Context) checkResult) {
 			ctx, cancel := withTimeout()
 			defer cancel()
@@ -104,6 +104,7 @@ are deliberately left to the operator with actionable URLs in the output.`,
 		// as a thin wrapper around a testable helper that accepts state via
 		// parameters; doctor wires in the production state here.
 		runProbe(runCheckTelemetryStatus)
+		runProbe(runCheckSentryDSNWiring)
 		runProbe(runCheckDsnReachability)
 		results = append(results, runCheckDataDirPerms())
 		runProbe(runCheckUpdateAvailable)
@@ -500,6 +501,90 @@ func checkTelemetryStatus(ctx context.Context, db *sql.DB, dsn string) checkResu
 		name:   "telemetry status",
 		status: "PASS",
 		detail: fmt.Sprintf("enabled, endpoint %s", dsnEndpointHost(dsn)),
+	}
+}
+
+// runCheckSentryDSNWiring closes the gap that crashreport.Init logs once at
+// boot and then silently swallows: "enabled by consent but no DSN compiled in
+// or set". In production that line scrolls past systemd-journal noise and
+// the operator never learns that crashes are routing to /dev/null. `crewship
+// doctor` is the surface where that trap should surface explicitly.
+//
+// This check is intentionally narrower than the broader "telemetry status"
+// row above — that one reports the consent state from the operator's POV
+// (have they been asked, did they say yes/no). This one asks the orthogonal
+// question: regardless of consent, is the DSN actually wired? Both rows can
+// fire in the same run and that's by design — they describe different
+// failure modes and a fix for one (set CREWSHIP_SENTRY_DSN) is irrelevant
+// to the other (operator hasn't opted in yet).
+//
+// Splitting the wrapper from the inner helper mirrors checkTelemetryStatus:
+// the inner form takes db + dsn as parameters so tests can drive every
+// branch without touching env vars or rebuilding with ldflags.
+func runCheckSentryDSNWiring(ctx context.Context) checkResult {
+	db, err := openLocalDB(ctx)
+	if err != nil {
+		return checkResult{
+			name:   "sentry DSN wiring",
+			status: "INFO",
+			detail: fmt.Sprintf("skipped (local DB unavailable: %v)", err),
+		}
+	}
+	defer db.Close()
+	return checkSentryDSNWiring(ctx, db.DB, crashreport.ResolveDSN())
+}
+
+// dsnWiringHint is the single source of truth for the "how do I fix this"
+// line. Both the WARN (enabled-but-empty) and the INFO (not-yet-configured)
+// paths reuse it so operators see the same remediation regardless of which
+// state surfaced the missing DSN.
+const dsnWiringHint = "set CREWSHIP_SENTRY_DSN in /etc/crewship/<env-file> + systemctl restart, " +
+	"or rebuild with -X github.com/crewship-ai/crewship/internal/crashreport.DSN=https://..."
+
+func checkSentryDSNWiring(ctx context.Context, db *sql.DB, dsn string) checkResult {
+	enabled, asked, _, err := crashreport.Status(ctx, db)
+	if err != nil {
+		// Don't escalate a transient DB read failure into a WARN here — the
+		// telemetry-status row above already surfaces that, and duplicating
+		// the warning would just train operators to ignore both.
+		return checkResult{
+			name:   "sentry DSN wiring",
+			status: "INFO",
+			detail: fmt.Sprintf("skipped (could not read consent: %v)", err),
+		}
+	}
+	if !asked {
+		// Beta default is opt-in-on-first-start, so the operator WILL want
+		// the DSN wired before that flip. INFO + hint is the right shape:
+		// nothing is broken yet, but here's what to set before it matters.
+		return checkResult{
+			name:   "sentry DSN wiring",
+			status: "INFO",
+			detail: "telemetry not yet configured; DSN wiring will matter on first start",
+			hint:   dsnWiringHint,
+		}
+	}
+	if !enabled {
+		// Operator deliberately opted out. No DSN required, no hint —
+		// surfacing one here would second-guess their consent decision.
+		return checkResult{
+			name:   "sentry DSN wiring",
+			status: "INFO",
+			detail: "telemetry disabled by operator (DSN not required)",
+		}
+	}
+	if dsn == "" {
+		return checkResult{
+			name:   "sentry DSN wiring",
+			status: "WARN",
+			detail: "telemetry enabled but no Sentry DSN compiled in or set — crashes will not be reported",
+			hint:   dsnWiringHint,
+		}
+	}
+	return checkResult{
+		name:   "sentry DSN wiring",
+		status: "PASS",
+		detail: fmt.Sprintf("DSN resolved (%s)", dsnEndpointHost(dsn)),
 	}
 }
 
