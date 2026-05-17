@@ -35,14 +35,22 @@ func seedProposalRow(t *testing.T, db *sql.DB, workspaceID, crewID, status strin
 		t.Fatalf("write proposal: %v", err)
 	}
 
-	var decidedAt sql.NullString
+	// v90's CHECK constraint demands that a terminal status (approved/
+	// rejected) carries BOTH decided_at AND decided_by_user_id — leaving
+	// either NULL produces a CHECK violation. The original helper only
+	// filled decided_at, so any test seeding a non-pending row hit
+	// "constraint failed" on insert. decided_by_user_id is TEXT with no
+	// FK, so a synthetic id is enough to satisfy the constraint without
+	// requiring the caller to thread a real user through.
+	var decidedAt, decidedBy sql.NullString
 	if status != "pending" {
 		decidedAt = sql.NullString{String: time.Now().UTC().Format(time.RFC3339Nano), Valid: true}
+		decidedBy = sql.NullString{String: "test-decider-" + workspaceID, Valid: true}
 	}
 	if _, err := db.Exec(`
-		INSERT INTO memory_proposals (id, workspace_id, crew_id, proposal_path, status, evidence_json, rules_count, entries_scanned, decided_at)
-		VALUES (?, ?, ?, ?, ?, '[]', 1, 12, ?)`,
-		proposalID, workspaceID, crewID, proposalPath, status, decidedAt); err != nil {
+		INSERT INTO memory_proposals (id, workspace_id, crew_id, proposal_path, status, evidence_json, rules_count, entries_scanned, decided_at, decided_by_user_id)
+		VALUES (?, ?, ?, ?, ?, '[]', 1, 12, ?, ?)`,
+		proposalID, workspaceID, crewID, proposalPath, status, decidedAt, decidedBy); err != nil {
 		t.Fatalf("insert proposal: %v", err)
 	}
 	if _, err := db.Exec(`
