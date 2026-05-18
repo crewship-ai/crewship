@@ -117,13 +117,17 @@ paths = [
   # Triggers private-key rule on the header pattern.
   '''components/features/credentials/add-credential-wizard/step-paste\.tsx$''',
 
-  # Historical pipeline LLM test fixture (gitleaks scans full git history
-  # with fetch-depth: 0, so commits no longer in the working tree still
-  # surface). The original commit contained a fake API key for a mock
-  # LLM client; even though the file has since been renamed/refactored,
-  # the historical match keeps re-firing on every Security run. Path
-  # pin silences the historical reference; if a new test file with the
-  # same name appears, it would have to be re-verified.
+  # Pipeline LLM test fixture introduced in PR #407 (open as of
+  # 2026-05-18, branch overnight-tests-2026-05-17, commit
+  # 61466fdd0f16293086200c1389bc689b197c6efa). gitleaks-action runs
+  # with fetch-depth: 0 and scans commits reachable from all fetched
+  # refs, so the file shows up on Security runs even though it isn't
+  # yet in main. The line at runner_llm_test.go:85 is a synthetic
+  # generic-api-key string for mocking the LLM client — no production
+  # credential. Once #407 merges and gitleaks accepts the file via
+  # this allowlist, the path remains pinned (verified false positive).
+  # If a NEW commit on the same path needs a different verification,
+  # tighten this to a fingerprint allowlist instead.
   '''internal/pipeline/runner_llm_test\.go$''',
 
   # Gitleaks own config files (false positive loop prevention).
