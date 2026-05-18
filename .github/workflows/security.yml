@@ -205,3 +205,25 @@ jobs:
           go-licenses check ./cmd/crewship \
             --disallowed_types=forbidden,restricted \
             --ignore modernc.org/mathutil
+
+  # ── OSV scan: osv-scanner ──
+  # govulncheck (above) does Go-source call-graph analysis. osv-scanner is
+  # complementary — it cross-references go.sum + pnpm-lock.yaml against the
+  # full OSV.dev database (covers Go, npm, and more). Catches advisories that
+  # don't yet have a Go-specific GO-YYYY-NNNN entry. Free, OSS, run by Google.
+  osv-scan:
+    name: OSV Scanner
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      # SHA-pinned per Shai-Hulud-style supply-chain guidance; Dependabot
+      # bumps both the SHA and the trailing version comment together.
+      - uses: google/osv-scanner-action@9bb69575e74019c2ad085a1860787043adf47ccb # v2.2.4
+        with:
+          scan-args: |-
+            --lockfile=go.sum
+            --lockfile=pnpm-lock.yaml
+            --recursive
+            .
