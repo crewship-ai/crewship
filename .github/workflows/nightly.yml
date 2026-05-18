@@ -113,9 +113,9 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Version-less: pnpm/action-setup reads `packageManager` from
+      # package.json. See release.yml for the rationale.
       - uses: pnpm/action-setup@739bfe42ca9233c5e6aca07c1a25a9d34aca49b0 # v6.0.7
-        with:
-          version: ${{ env.PNPM_VERSION }}
 
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:

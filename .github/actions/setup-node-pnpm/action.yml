@@ -9,15 +9,22 @@ inputs:
     description: Node.js version
     required: true
   pnpm-version:
-    description: pnpm major version
-    required: true
+    description: >
+      pnpm version. Deprecated and ignored — pnpm/action-setup reads the
+      `packageManager` field from package.json, and passing `version:`
+      alongside it errors out with ERR_PNPM_BAD_PM_VERSION. Kept as an
+      input so existing call sites that still pass it do not break;
+      remove from callers and then from here.
+    required: false
 
 runs:
   using: composite
   steps:
+    # Version-less invocation: pnpm/action-setup picks up
+    # `packageManager: pnpm@X.Y.Z` from package.json so CI, the
+    # Dockerfile (via corepack), and dev laptops all install the
+    # exact same pnpm.
     - uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda # v4.1.0
-      with:
-        version: ${{ inputs.pnpm-version }}
 
     - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
       with:
