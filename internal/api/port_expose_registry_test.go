@@ -37,6 +37,17 @@ func newRegistryTestDB(t *testing.T) *sql.DB {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
+	// SQLite ":memory:" databases are per-connection: each connection in
+	// the database/sql pool would see its own empty schema. The lifecycle
+	// test starts a purger goroutine that issues UPDATE statements
+	// concurrently with the test goroutine's SELECT — if the pool grows
+	// to 2+ connections under the higher scheduling concurrency on the
+	// ubuntu CI runner, the SELECT lands on a different connection from
+	// the one CREATE TABLE ran on and fails with
+	// "no such table: port_exposures". Locally on macOS the pool stays
+	// at 1 and the test passes. Pin the pool to a single connection so
+	// every caller in the test process sees the same in-memory schema.
+	db.SetMaxOpenConns(1)
 	t.Cleanup(func() { db.Close() })
 	// The simple path is to create only what the registry/proxy actually
 	// touch: the port_exposures table without FK validation. Registry
