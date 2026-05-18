@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -68,34 +67,71 @@ func memStatsRespond(t *testing.T, h *MemoryStatsHandler, userID, wsID, role str
 	return rr.Code, resp
 }
 
-// ── Role gate ────────────────────────────────────────────────────────
+// ── Auth + workspace preconditions ───────────────────────────────────
+//
+// Combined into one table-driven test so each new precondition case
+// (role downgrade, missing workspace, missing user, etc.) adds one
+// row instead of one func + setup duplication. Per CodeRabbit
+// suggestion on this PR and the repo-wide "table-driven tests +
+// subtests with t.Run" convention.
 
-func TestMemoryStats_MemberRole_Returns403(t *testing.T) {
-	// canRole("manage") gates this — MEMBER must not see workspace-
-	// wide memory numbers (path names alone can leak project
-	// structure). Regression guard for the role boundary.
+func TestMemoryStats_Preconditions(t *testing.T) {
 	h, _, userID, wsID := memStatsRig(t)
-	code, _ := memStatsRespond(t, h, userID, wsID, "MEMBER")
-	if code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403", code)
-	}
-}
 
-func TestMemoryStats_MissingWorkspace_Returns400(t *testing.T) {
-	// Workspace context comes from middleware; an OWNER without a
-	// workspace context (test mocks, broken middleware ordering)
-	// must 400 with a clear message rather than returning a
-	// workspace-less default response.
-	h, _, userID, _ := memStatsRig(t)
-	req := httptest.NewRequest("GET", "/api/v1/admin/memory/stats", nil)
-	// User context, no workspace context.
-	ctx := withUser(req.Context(), &AuthUser{ID: userID, Email: userID + "@example.com"})
-	ctx = withWorkspace(ctx, "", "OWNER")
-	req = req.WithContext(ctx)
-	rr := httptest.NewRecorder()
-	h.Stats(rr, req)
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", rr.Code)
+	cases := []struct {
+		name string
+		// withWS=true uses the standard rig respond helper (auth +
+		// workspace context wired). withWS=false crafts the request
+		// by hand with an empty workspace ID, to exercise the
+		// middleware-bypass path: an OWNER that lost their
+		// workspace must still 400, never quietly leak a
+		// workspace-less aggregate.
+		withWS bool
+		role   string
+		want   int
+	}{
+		{
+			// canRole("manage") gates the endpoint. MEMBER must not
+			// see workspace-wide memory numbers — path names alone
+			// can leak project structure, so the role boundary is
+			// the regression-sensitive line here.
+			name:   "member_role_forbidden",
+			withWS: true,
+			role:   "MEMBER",
+			want:   http.StatusForbidden,
+		},
+		{
+			// Workspace context comes from middleware; an OWNER
+			// without a workspace context (test mocks, broken
+			// middleware ordering) must 400 with a clear message
+			// rather than returning a workspace-less default
+			// response that would aggregate across tenants.
+			name:   "missing_workspace_bad_request",
+			withWS: false,
+			role:   "OWNER",
+			want:   http.StatusBadRequest,
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.withWS {
+				code, _ := memStatsRespond(t, h, userID, wsID, tc.role)
+				if code != tc.want {
+					t.Fatalf("status = %d, want %d", code, tc.want)
+				}
+				return
+			}
+			req := httptest.NewRequest("GET", "/api/v1/admin/memory/stats", nil)
+			ctx := withUser(req.Context(), &AuthUser{ID: userID, Email: userID + "@example.com"})
+			ctx = withWorkspace(ctx, "", tc.role)
+			rr := httptest.NewRecorder()
+			h.Stats(rr, req.WithContext(ctx))
+			if rr.Code != tc.want {
+				t.Fatalf("status = %d, want %d", rr.Code, tc.want)
+			}
+		})
 	}
 }
 
@@ -241,22 +277,30 @@ func TestMemoryStats_CrossWorkspaceIsolation(t *testing.T) {
 	}
 }
 
-// ── compile guard ────────────────────────────────────────────────────
+// ── compile-time response shape guard ────────────────────────────────
+//
+// Pinned as a Test* function (not a package-level var) so the
+// `unused` linter sees it as exercised by `go test`. The body never
+// asserts — its job is to refuse to compile if anyone renames a
+// JSON-tagged field on memoryStatsResponse / memoryStatsTotals
+// without updating the dashboard contract.
+//
+// Why this matters: a rename like `ByTier → Tiers` would compile
+// fine, ship through tests that don't reference the field by name,
+// and only break the UI after deploy. Listing every field here
+// turns silent breakage into a compile error.
 
-// memStatsCompileGuard ensures the response struct keeps the JSON
-// keys the dashboard reads. A field rename (e.g. ByTier → Tiers)
-// would compile but break the UI; downstream snapshot tests would
-// catch it but only after a deploy. This package-level reference
-// holds the line at build time.
-var memStatsCompileGuard = func() {
+func TestMemoryStats_ResponseShapeContract(t *testing.T) {
 	_ = memoryStatsResponse{
 		WorkspaceID: "",
-		Totals:      memoryStatsTotals{Versions: 0, Bytes: 0, Blobs: 0},
-		ByTier:      nil,
-		ByAgent:     nil,
+		Totals: memoryStatsTotals{
+			Versions: 0,
+			Bytes:    0,
+			Blobs:    0,
+			OldestAt: "",
+			NewestAt: "",
+		},
+		ByTier:  []memoryStatsByTier{{Tier: "", Versions: 0, Bytes: 0}},
+		ByAgent: []memoryStatsByAgent{{AgentSlug: "", Versions: 0, Bytes: 0, NewestAt: ""}},
 	}
 }
-
-// underscore use so the compile guard isn't flagged unused if a
-// future refactor reshuffles the file.
-var _ = context.Background

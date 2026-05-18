@@ -42,6 +42,7 @@ package api
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"log/slog"
 	"net/http"
 )
@@ -155,7 +156,7 @@ func (h *MemoryStatsHandler) loadTotals(ctx context.Context, workspaceID string)
 		 WHERE workspace_id = ?`, workspaceID,
 	).Scan(&t.Versions, &t.Bytes, &t.Blobs, &oldest, &newest)
 	if err != nil {
-		return t, err
+		return t, fmt.Errorf("memory stats: load totals: %w", err)
 	}
 	if oldest.Valid {
 		t.OldestAt = oldest.String
@@ -177,18 +178,21 @@ func (h *MemoryStatsHandler) loadByTier(ctx context.Context, workspaceID string)
 		 GROUP BY tier
 		 ORDER BY tier ASC`, workspaceID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("memory stats: load by_tier: %w", err)
 	}
 	defer rows.Close()
 	out := make([]memoryStatsByTier, 0, 5) // 5 documented tiers
 	for rows.Next() {
 		var t memoryStatsByTier
 		if err := rows.Scan(&t.Tier, &t.Versions, &t.Bytes); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("memory stats: scan by_tier row: %w", err)
 		}
 		out = append(out, t)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("memory stats: iterate by_tier: %w", err)
+	}
+	return out, nil
 }
 
 // loadByAgent extracts the agent slug from the canonical path
@@ -213,7 +217,7 @@ func (h *MemoryStatsHandler) loadByAgent(ctx context.Context, workspaceID string
 		 GROUP BY agent_slug
 		 ORDER BY agent_slug ASC`, workspaceID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("memory stats: load by_agent: %w", err)
 	}
 	defer rows.Close()
 	out := make([]memoryStatsByAgent, 0, 16)
@@ -221,12 +225,15 @@ func (h *MemoryStatsHandler) loadByAgent(ctx context.Context, workspaceID string
 		var a memoryStatsByAgent
 		var newest sql.NullString
 		if err := rows.Scan(&a.AgentSlug, &a.Versions, &a.Bytes, &newest); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("memory stats: scan by_agent row: %w", err)
 		}
 		if newest.Valid {
 			a.NewestAt = newest.String
 		}
 		out = append(out, a)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("memory stats: iterate by_agent: %w", err)
+	}
+	return out, nil
 }
