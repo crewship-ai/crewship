@@ -611,14 +611,30 @@ func TestRunAgentCancelledContext(t *testing.T) {
 	// When the context is cancelled (user pressed stop), RunAgent should:
 	// 1. Return an error containing "run cancelled"
 	// 2. Update run state to "cancelled"
-	r, w := io.Pipe()
+	//
+	// Cancellation is triggered synchronously inside the agent-CLI exec
+	// callback. By the time Exec returns, ctx.Err() is already non-nil,
+	// so the ctx.Err() check at the end of RunAgent reliably fires on
+	// any scheduler. The earlier raced version (cancel() in a separate
+	// goroutine) passed on a fast Mac but lost the race on ubuntu-latest
+	// three runs in a row.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	mc := &mockContainer{
-		execResults: []*provider.ExecResult{
-			{ExecID: "tmux-check", Reader: io.NopCloser(strings.NewReader(""))},
-			{ExecID: "mkdir-1", Reader: io.NopCloser(strings.NewReader(""))},
-			{ExecID: "config-1", Reader: io.NopCloser(strings.NewReader(""))},
-			{ExecID: "exec-1", Reader: r},
+		// Cancel ctx synchronously inside the first Exec invocation. By
+		// the time the call returns, ctx.Err() is non-nil, so every
+		// subsequent setup step and the main agent exec see a cancelled
+		// ctx. RunAgent has no ctx.Err() short-circuit until after
+		// streamOutput, so it walks the full path and reliably hits the
+		// "run cancelled" branch on every scheduler. cancel is
+		// idempotent, so calling it on every Exec is safe.
+		execFn: func(_ provider.ExecConfig) (*provider.ExecResult, error) {
+			cancel()
+			return &provider.ExecResult{
+				ExecID: "noop",
+				Reader: io.NopCloser(strings.NewReader("")),
+			}, nil
 		},
 		inspectResult: struct {
 			running  bool
@@ -628,18 +644,6 @@ func TestRunAgentCancelledContext(t *testing.T) {
 
 	state := newMemState()
 	o := New(mc, state, slog.Default())
-
-	ctx, cancel := context.WithCancel(context.Background())
-	// Close the writer when the context is cancelled to unblock readers
-	go func() {
-		<-ctx.Done()
-		_ = w.Close()
-	}()
-	// Cancel immediately to simulate user pressing stop
-	go func() {
-		// Small delay to let RunAgent start the exec
-		cancel()
-	}()
 
 	err := o.RunAgent(ctx, AgentRunRequest{
 		AgentID:     "a1",
