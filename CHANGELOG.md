@@ -11,16 +11,23 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 (empty — next version's entries go here)
 
-## [0.1.0-beta.1] — 2026-05-18
+## [0.1.0-beta.2] — 2026-05-18
 
 **First public beta release.** APIs and data models may break across
 minor bumps until v1.0. See `RELEASING.md` for upgrade and rollback
 guidance.
 
+> v0.1.0-beta.1 was burned by a series of release-pipeline iterations
+> (cosign version pin, pnpm toolchain mismatch in the Dockerfile,
+> Windows cross-compile, missing direct deps for Turbopack,
+> port_exposures test flake). The "release immutability" toggle was
+> enabled mid-iteration and permanently reserved that tag name even
+> after deletion. The first public tag is therefore v0.1.0-beta.2.
+
 ### TL;DR for beta testers
 
 - Install: `brew install crewship-ai/tap/crewship` (macOS) or
-  `docker pull ghcr.io/crewship-ai/crewship:v0.1.0-beta.1` (Linux/Docker).
+  `docker pull ghcr.io/crewship-ai/crewship:v0.1.0-beta.2` (Linux/Docker).
 - One adapter is production-ready in beta: **Claude Code (Anthropic)**.
   Codex / Gemini / OpenCode / Cursor / Factory Droid have scaffolds
   but lack parity testing — see README "Beta status & limitations".
@@ -388,5 +395,5 @@ The following are planned for v0.2 but not in v0.1 at all:
 - The `release` branch tracks deployable state (a 5-minute systemd timer
   on the dogfood prod VM polls it). Push `main:release` to deploy.
 
-[Unreleased]: https://github.com/crewship-ai/crewship/compare/v0.1.0-beta.1...HEAD
-[0.1.0-beta.1]: https://github.com/crewship-ai/crewship/releases/tag/v0.1.0-beta.1
+[Unreleased]: https://github.com/crewship-ai/crewship/compare/v0.1.0-beta.2...HEAD
+[0.1.0-beta.2]: https://github.com/crewship-ai/crewship/releases/tag/v0.1.0-beta.2
