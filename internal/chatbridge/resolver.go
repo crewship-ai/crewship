@@ -205,7 +205,7 @@ func (r *IPCResolver) CreateRun(ctx context.Context, runID, agentID, chatID, wor
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
-		respBody, _ := io.ReadAll(resp.Body)
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 8*1024))
 		return fmt.Errorf("create run: server returned %d: %s", resp.StatusCode, respBody)
 	}
 	return nil
@@ -240,7 +240,7 @@ func (r *IPCResolver) UpdateRun(ctx context.Context, runID, status string, exitC
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
-		respBody, _ := io.ReadAll(resp.Body)
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 8*1024))
 		return fmt.Errorf("update run: server returned %d: %s", resp.StatusCode, respBody)
 	}
 	return nil

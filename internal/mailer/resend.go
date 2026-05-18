@@ -133,8 +133,9 @@ func (r *Resend) Send(ctx context.Context, msg Message) error {
 
 	// Resend's error envelope is consistent: { name, message }.
 	// Surface both — name is enum-like (validation_error,
-	// rate_limit, etc.), message is human prose.
-	respBody, _ := io.ReadAll(resp.Body)
+	// rate_limit, etc.), message is human prose. Bound the read in
+	// case the upstream ever sends an unexpectedly large body.
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 8*1024))
 	var er resendErrorResponse
 	_ = json.Unmarshal(respBody, &er)
 	if er.Message != "" {

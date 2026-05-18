@@ -223,7 +223,7 @@ func (ts *TokenSyncer) sync(ctx context.Context) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 8*1024))
 		return fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(body))
 	}
 
