@@ -80,6 +80,16 @@ import (
 // 400 error message so operators see the cap before retrying.
 const MaxRetentionDays = 3650
 
+// memoryConfigMaxBodyBytes is the PATCH request-body size limit.
+// 16 KB matches the other write surfaces in this codebase
+// (user_preferences, internal_journal, internal_cost). The
+// expected payload is a handful of small JSON fields; an
+// authenticated admin posting megabytes of unknown keys would
+// otherwise let one privileged-but-misbehaving client OOM the
+// server through the json.Decoder path and stuff junk into
+// memory_config that every GET would re-parse forever.
+const memoryConfigMaxBodyBytes = 16 * 1024
+
 type MemoryConfigHandler struct {
 	db      *sql.DB
 	logger  *slog.Logger
@@ -134,6 +144,16 @@ func (h *MemoryConfigHandler) Get(w http.ResponseWriter, r *http.Request) {
 // The handler reads the existing JSON, merges the patch body's
 // keys, validates, writes the result back, and emits an audit
 // event when at least one key actually changed value.
+//
+// Concurrency: the read-merge-write is wrapped in a SQLite
+// BEGIN IMMEDIATE transaction so two operators PATCHing
+// different keys at the same time cannot last-write-wins each
+// other's edits. Without the transaction, A.read({}) and
+// B.read({}) could both succeed before either's UPDATE,
+// producing a merged document that drops whichever key the
+// loser ran with. BEGIN IMMEDIATE acquires the write lock
+// upfront, serialising the operators at the cost of a brief
+// wait under contention.
 func (h *MemoryConfigHandler) Patch(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	role := RoleFromContext(ctx)
@@ -148,16 +168,39 @@ func (h *MemoryConfigHandler) Patch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Body-size guard: cap request at memoryConfigMaxBodyBytes
+	// before the decoder reads anything. Matches the pattern on
+	// every other write surface in this codebase. An OWNER
+	// posting megabytes of nested JSON would otherwise pin a
+	// goroutine's heap and propagate the bloat into the stored
+	// memory_config column where every subsequent GET would
+	// re-parse it.
+	r.Body = http.MaxBytesReader(w, r.Body, memoryConfigMaxBodyBytes)
+
 	// Decode the patch body into an opaque map so unknown keys
 	// pass through to the merged document. A `json.Number` decoder
 	// would preserve integer-vs-float ambiguity, but the validator
 	// below tolerates float64 (which is what map[string]any
 	// produces by default) and reports cleaner type errors that
 	// way.
+	//
+	// Strict-decode: dec.More() after Decode rejects trailing
+	// garbage like `{"k":1} JUNK`. The default streaming
+	// decoder consumes only the first JSON value and ignores
+	// the rest, which can mask malformed-but-partially-valid
+	// payloads from a misbehaving client.
 	var patch map[string]any
 	dec := json.NewDecoder(r.Body)
-	dec.DisallowUnknownFields() // doesn't fire on map[string]any but keeps us honest if we tighten later
 	if err := dec.Decode(&patch); err != nil {
+		// http.MaxBytesError wraps as *http.MaxBytesError; surface
+		// 413 specifically so client-side tooling can distinguish
+		// "your JSON is malformed" from "your body was too big".
+		var mbe *http.MaxBytesError
+		if errors.As(err, &mbe) {
+			replyError(w, http.StatusRequestEntityTooLarge,
+				fmt.Sprintf("request body exceeds %d bytes", memoryConfigMaxBodyBytes))
+			return
+		}
 		replyError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
 		return
 	}
@@ -165,11 +208,32 @@ func (h *MemoryConfigHandler) Patch(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusBadRequest, "request body required")
 		return
 	}
+	if dec.More() {
+		replyError(w, http.StatusBadRequest, "request body has trailing content after JSON value")
+		return
+	}
 
-	// Read the current document so we know which keys actually
-	// changed (audit-trail accuracy) and so unspecified keys are
-	// preserved (PATCH semantics, not PUT).
-	current, currentRaw, err := h.loadConfigDoc(ctx, workspaceID)
+	// BEGIN IMMEDIATE: take the write lock now so the read-merge-
+	// write below cannot interleave with a concurrent PATCH. A
+	// deferred ROLLBACK is harmless after Commit().
+	tx, err := h.db.BeginTx(ctx, nil)
+	if err != nil {
+		h.logger.Error("memory config: begin tx", "workspace_id", workspaceID, "error", err)
+		replyError(w, http.StatusInternalServerError, "transaction begin failed")
+		return
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// Read the current document inside the transaction so we
+	// know which keys actually changed (audit-trail accuracy)
+	// and so unspecified keys are preserved (PATCH semantics,
+	// not PUT). If the stored JSON is malformed (data
+	// corruption, manual SQL edit gone wrong), recover by
+	// treating the doc as empty + logging — the PATCH can then
+	// overwrite the bad row. Without this recovery, PATCH
+	// would be permanently wedged on corrupt rows, which
+	// defeats the point of having an admin write surface.
+	current, currentRaw, err := loadConfigDocTx(ctx, tx, workspaceID)
 	if err != nil {
 		h.logger.Error("memory config: load before patch", "workspace_id", workspaceID, "error", err)
 		replyError(w, http.StatusInternalServerError, "load failed")
@@ -199,8 +263,12 @@ func (h *MemoryConfigHandler) Patch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if len(changes) == 0 {
-		// No-op PATCH: don't write, don't audit. 200 with the
-		// current shape so the client can refresh its view.
+		// No-op PATCH: don't write, don't audit, but still
+		// commit the (empty) transaction so the lock is
+		// released cleanly. 200 with the current shape.
+		if commitErr := tx.Commit(); commitErr != nil {
+			h.logger.Warn("memory config: no-op commit", "workspace_id", workspaceID, "error", commitErr)
+		}
 		resp, err := h.buildResponse(workspaceID, merged, currentRaw)
 		if err != nil {
 			h.logger.Error("memory config: serialise current", "workspace_id", workspaceID, "error", err)
@@ -220,17 +288,25 @@ func (h *MemoryConfigHandler) Patch(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusInternalServerError, "marshal failed")
 		return
 	}
-	if _, err := h.db.ExecContext(ctx,
+	if _, err := tx.ExecContext(ctx,
 		`UPDATE workspaces SET memory_config = ? WHERE id = ?`,
 		string(mergedBytes), workspaceID); err != nil {
 		h.logger.Error("memory config: update", "workspace_id", workspaceID, "error", err)
 		replyError(w, http.StatusInternalServerError, "update failed")
 		return
 	}
+	if err := tx.Commit(); err != nil {
+		h.logger.Error("memory config: commit", "workspace_id", workspaceID, "error", err)
+		replyError(w, http.StatusInternalServerError, "commit failed")
+		return
+	}
 
 	// Emit the audit event AFTER the UPDATE commits so a crash
 	// mid-emit doesn't leave a journal entry claiming a change
-	// that didn't happen.
+	// that didn't happen. Severity is Error (not Warn) on emit
+	// failure: a successful column change with no audit row is
+	// compliance-relevant — operators MUST be able to
+	// reconstruct who set what when.
 	var actorID string
 	if user != nil {
 		actorID = user.ID
@@ -247,9 +323,11 @@ func (h *MemoryConfigHandler) Patch(w http.ResponseWriter, r *http.Request) {
 			"changes":      changes,
 		},
 	}); emitErr != nil {
-		// Best-effort — the column is already updated. Log so
-		// operators can spot if audit emission is broken.
-		h.logger.Warn("memory config: audit emit failed",
+		// The column is already updated; rolling back the column
+		// change to "preserve" audit consistency would discard
+		// the operator's intent, which is worse than a missing
+		// audit row. Log at Error so SRE alerting catches it.
+		h.logger.Error("memory config: audit emit failed",
 			"workspace_id", workspaceID, "error", emitErr)
 	}
 
@@ -279,6 +357,13 @@ func (h *MemoryConfigHandler) loadConfig(ctx context.Context, workspaceID string
 // string is needed by the PATCH path to preserve byte-level
 // fidelity in the response when the operator can compare the
 // stored doc against what they sent.
+//
+// GET semantics: malformed stored JSON returns an error so the
+// operator sees the corruption explicitly (500). PATCH uses
+// loadConfigDocTx below which RECOVERS from malformed JSON by
+// treating the doc as empty — the whole point of an admin write
+// endpoint is to fix corrupt rows, so wedging on corruption
+// here defeats the purpose.
 func (h *MemoryConfigHandler) loadConfigDoc(ctx context.Context, workspaceID string) (map[string]any, *string, error) {
 	var raw sql.NullString
 	err := h.db.QueryRowContext(ctx,
@@ -303,6 +388,44 @@ func (h *MemoryConfigHandler) loadConfigDoc(ctx context.Context, workspaceID str
 		// rather than silently returning defaults (which would
 		// hide the corruption).
 		return nil, nil, fmt.Errorf("memory config: stored JSON malformed: %w", err)
+	}
+	rawStr := raw.String
+	return doc, &rawStr, nil
+}
+
+// loadConfigDocTx is the PATCH-side variant of loadConfigDoc.
+// Same signature, but reads through the supplied transaction
+// AND recovers from malformed stored JSON by returning an
+// empty doc with the raw string preserved.
+//
+// The recovery is the load-bearing difference: an admin write
+// endpoint that can't fix its own corruption is useless, so
+// PATCH should ALWAYS be able to overwrite a bad row. The raw
+// string is kept so the response can echo what was in the
+// column before the merge for operator inspection.
+func loadConfigDocTx(ctx context.Context, tx *sql.Tx, workspaceID string) (map[string]any, *string, error) {
+	var raw sql.NullString
+	err := tx.QueryRowContext(ctx,
+		`SELECT memory_config FROM workspaces WHERE id = ?`, workspaceID,
+	).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil, fmt.Errorf("workspace %s: not found", workspaceID)
+	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("memory config: select: %w", err)
+	}
+	if !raw.Valid || raw.String == "" {
+		return map[string]any{}, nil, nil
+	}
+	var doc map[string]any
+	if err := json.Unmarshal([]byte(raw.String), &doc); err != nil {
+		// Recovery path: surface the corruption via the response
+		// (raw_config will show the bad bytes) but let the
+		// merge proceed against an empty doc. The PATCH that
+		// follows will overwrite the corrupt column with valid
+		// JSON, fixing the row.
+		rawStr := raw.String
+		return map[string]any{}, &rawStr, nil
 	}
 	rawStr := raw.String
 	return doc, &rawStr, nil

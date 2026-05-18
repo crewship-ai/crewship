@@ -334,6 +334,158 @@ func TestValidateMemoryConfig_ContractTable(t *testing.T) {
 	}
 }
 
+// ── Self-review fixes: body cap + TOCTOU + corruption recovery ───────
+
+func TestMemoryConfig_Patch_OversizeBody_Returns413(t *testing.T) {
+	// Self-review finding (HIGH): PATCH had no body cap. An
+	// authenticated OWNER could post arbitrary megabytes and
+	// either OOM the server or land bloat in the stored column
+	// where every GET re-parses it. http.MaxBytesReader caps
+	// at memoryConfigMaxBodyBytes (16 KB) — pin the 413 here.
+	h, _, userID, wsID, _ := memConfigRig(t)
+	huge := make([]byte, memoryConfigMaxBodyBytes+1024)
+	for i := range huge {
+		huge[i] = 'a'
+	}
+	// Wrap in a minimally-valid JSON envelope so the size cap
+	// fires BEFORE the unmarshal sees the malformed body.
+	body := append([]byte(`{"junk":"`), huge...)
+	body = append(body, []byte(`"}`)...)
+
+	code, respBody := memConfigDoPatch(t, h, userID, wsID, "OWNER", body)
+	if code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413; body=%s", code, respBody)
+	}
+}
+
+func TestMemoryConfig_Patch_ConcurrentPATCHesPreserveBothKeys(t *testing.T) {
+	// Self-review finding (HIGH): without a transaction wrapper
+	// around loadConfigDoc + UPDATE, two concurrent PATCHes
+	// that touch DIFFERENT keys could last-write-wins each
+	// other. BeginTx + ExecContext inside the same tx now
+	// serialises them. Verify by firing two goroutines and
+	// asserting the final stored doc has BOTH keys.
+	h, db, userID, wsID, jw := memConfigRig(t)
+
+	type result struct {
+		code int
+		body []byte
+	}
+	results := make(chan result, 2)
+
+	go func() {
+		c, b := memConfigDoPatch(t, h, userID, wsID, "OWNER",
+			[]byte(`{"versions_retention_days": 7}`))
+		results <- result{c, b}
+	}()
+	go func() {
+		c, b := memConfigDoPatch(t, h, userID, wsID, "OWNER",
+			[]byte(`{"future_field": "concurrent_value"}`))
+		results <- result{c, b}
+	}()
+
+	for i := 0; i < 2; i++ {
+		r := <-results
+		if r.code != http.StatusOK {
+			t.Fatalf("concurrent PATCH %d: status = %d; body=%s", i, r.code, r.body)
+		}
+	}
+	if err := jw.Flush(context.Background()); err != nil {
+		t.Fatalf("flush journal: %v", err)
+	}
+
+	// Final stored doc must carry BOTH keys.
+	_, resp := memConfigDoGet(t, h, userID, wsID, "OWNER")
+	if resp.RawConfig == nil {
+		t.Fatalf("raw_config nil after concurrent PATCHes; want a JSON doc")
+	}
+	if !strings.Contains(*resp.RawConfig, `"versions_retention_days":7`) {
+		t.Errorf("concurrent PATCH lost versions_retention_days=7: %s", *resp.RawConfig)
+	}
+	if !strings.Contains(*resp.RawConfig, `"future_field":"concurrent_value"`) {
+		t.Errorf("concurrent PATCH lost future_field: %s", *resp.RawConfig)
+	}
+	// Both PATCHes ran, so the journal must show two emit events.
+	var count int
+	if err := db.QueryRow(
+		`SELECT COUNT(*) FROM journal_entries WHERE workspace_id = ? AND entry_type = 'memory.config_updated'`,
+		wsID,
+	).Scan(&count); err != nil {
+		t.Fatalf("count audit events: %v", err)
+	}
+	if count != 2 {
+		t.Errorf("audit events = %d, want 2 (one per concurrent PATCH)", count)
+	}
+}
+
+func TestMemoryConfig_Patch_RecoversFromMalformedStoredJSON(t *testing.T) {
+	// Self-review finding (MEDIUM): if the stored column is
+	// malformed JSON (manual SQL edit gone wrong, corruption,
+	// historical bad data), the prior implementation wedged
+	// PATCH on the read step — operators couldn't fix the
+	// row through the very endpoint designed for that. The
+	// loadConfigDocTx variant now treats malformed JSON as
+	// "empty doc, but echo raw" so PATCH overwrites cleanly.
+	h, db, userID, wsID, _ := memConfigRig(t)
+
+	if _, err := db.Exec(`UPDATE workspaces SET memory_config = ? WHERE id = ?`,
+		"this is not json {", wsID); err != nil {
+		t.Fatalf("seed bad json: %v", err)
+	}
+
+	// GET surfaces the corruption as 500 so operators see it.
+	getReq := withWorkspaceUser(
+		httptest.NewRequest("GET", "/api/v1/admin/memory/config", nil),
+		userID, wsID, "OWNER",
+	)
+	getRR := httptest.NewRecorder()
+	h.Get(getRR, getReq)
+	if getRR.Code != http.StatusInternalServerError {
+		t.Errorf("GET on corrupt row: status = %d, want 500 (surface the corruption)", getRR.Code)
+	}
+
+	// PATCH MUST succeed — the recovery path treats the bad
+	// row as empty and overwrites with valid JSON.
+	code, body := memConfigDoPatch(t, h, userID, wsID, "OWNER",
+		[]byte(`{"versions_retention_days": 14}`))
+	if code != http.StatusOK {
+		t.Fatalf("PATCH on corrupt row: status = %d, want 200; body=%s", code, body)
+	}
+
+	// After the recovery PATCH, GET should now succeed.
+	_, resp := memConfigDoGet(t, h, userID, wsID, "OWNER")
+	if resp.VersionsRetentionDays != 14 {
+		t.Errorf("after recovery PATCH: versions_retention_days = %d, want 14", resp.VersionsRetentionDays)
+	}
+}
+
+func TestMemoryConfig_Patch_MalformedJSONBody_Returns400NotEmpty(t *testing.T) {
+	// Edge case the body-cap change introduces: io.LimitReader
+	// + json.Decoder error messages need to stay
+	// distinguishable. An obvious "not JSON" body should still
+	// land as 400 (BadRequest), not 413.
+	h, _, userID, wsID, _ := memConfigRig(t)
+	cases := []struct {
+		name string
+		body string
+		want int
+	}{
+		{name: "garbage", body: "lol", want: http.StatusBadRequest},
+		{name: "trailing_garbage", body: `{"k": 1} JUNK`, want: http.StatusBadRequest},
+		{name: "boolean_top_level", body: `true`, want: http.StatusBadRequest},
+		{name: "array_top_level", body: `[1, 2, 3]`, want: http.StatusBadRequest},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			code, _ := memConfigDoPatch(t, h, userID, wsID, "OWNER", []byte(tc.body))
+			if code != tc.want {
+				t.Errorf("body=%q: status = %d, want %d", tc.body, code, tc.want)
+			}
+		})
+	}
+}
+
 // fmtItoa is a 1-line helper (avoids importing strconv just for
 // the validator test).
 func fmtItoa(n int) string {
