@@ -209,8 +209,10 @@ Crewship headless — every step has a `crewship` subcommand:
 crewship init --email you@example.com --name "You"   # creates the first admin on an empty DB; returns a CLI token
 crewship login --token <token-from-init>             # persists to ~/.crewship/cli-config.yaml
 crewship crew create --name "Engineering" --slug eng --icon code --color blue
-echo "sk-ant-..." | crewship credential create \
-  --name anthropic-key --type API_KEY --provider ANTHROPIC --value-stdin
+read -rs -p "Anthropic API key: " KEY && \
+  printf '%s' "$KEY" | crewship credential create \
+    --name anthropic-key --type API_KEY --provider ANTHROPIC --value-stdin && \
+  unset KEY
 crewship agent create --name "Viktor" --crew eng --role LEAD \
   --cli-adapter CLAUDE_CODE --tool-profile CODING --system-prompt @prompts/lead.md
 crewship doctor                                       # verifies Docker, ports, DB, sidecar reachability
