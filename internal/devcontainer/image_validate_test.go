@@ -99,7 +99,7 @@ type statusErr struct {
 	msg  string
 }
 
-func (e *statusErr) Error() string  { return e.msg }
+func (e *statusErr) Error() string   { return e.msg }
 func (e *statusErr) StatusCode() int { return e.code }
 
 func TestIsAuthError_TransportStatusCode_401_403_AreAuth(t *testing.T) {

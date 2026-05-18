@@ -268,10 +268,10 @@ func TestFirstNonEmpty(t *testing.T) {
 
 func TestTruncateForError(t *testing.T) {
 	cases := []struct {
-		name      string
-		in        string
-		n         int
-		want      string
+		name string
+		in   string
+		n    int
+		want string
 	}{
 		{"under-limit", "hi", 10, "hi"},
 		{"exact-limit", "hello", 5, "hello"},

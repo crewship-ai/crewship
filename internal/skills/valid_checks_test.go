@@ -34,11 +34,11 @@ func TestValidCategory_KnownValues(t *testing.T) {
 func TestValidCategory_Rejects(t *testing.T) {
 	for _, c := range []string{
 		"",
-		"coding",          // lowercase rejected — pins case-sensitivity
-		"CODING ",         // trailing space
-		" CODING",         // leading space
-		"UNKNOWN",         // outside the set
-		"CODING,WRITING",  // comma-separated input rejected
+		"coding",         // lowercase rejected — pins case-sensitivity
+		"CODING ",        // trailing space
+		" CODING",        // leading space
+		"UNKNOWN",        // outside the set
+		"CODING,WRITING", // comma-separated input rejected
 	} {
 		t.Run(c, func(t *testing.T) {
 			if ValidCategory(c) {

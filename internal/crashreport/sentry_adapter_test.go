@@ -164,7 +164,7 @@ func TestClassifyEnv_Categorisation(t *testing.T) {
 		{"production-no-prefix", "1.2.3", "production"},
 		{"empty-string", "", "development"},
 		{"dev-literal", "dev", "development"},
-		{"sneaky-beta-substring", "v1.0.0-betatest", "beta"}, // substring match — pin current behavior
+		{"sneaky-beta-substring", "v1.0.0-betatest", "beta"},  // substring match — pin current behavior
 		{"alpha-not-classed", "v1.0.0-alpha.1", "production"}, // only beta/rc map to beta; alpha lands in production
 	}
 	for _, tc := range cases {
