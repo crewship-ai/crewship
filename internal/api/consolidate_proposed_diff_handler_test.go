@@ -355,6 +355,73 @@ func TestProposed_Diff_ByteEqualToApprove_NoDriftBetweenPreviewAndWrite(t *testi
 	}
 }
 
+// ── Self-review fixes: size caps on proposal + canonical reads ───────
+
+func TestProposed_Diff_OversizeProposalMarkdown_Returns413(t *testing.T) {
+	// Self-review finding (HIGH): the handler did unbounded
+	// os.ReadFile on the proposal markdown. A pathological
+	// LLM extraction could produce a multi-MB body, and the
+	// diff handler would dutifully load + double-allocate it
+	// (string conversion for difflib + merge buffer). Cap is
+	// proposalDiffMaxBytes=8 MB; oversize → 413.
+	_, db, userID, wsID, crewID := newProposedHandlerTest(t)
+	proposalID, proposalPath := seedProposalRow(t, db, wsID, crewID, "pending")
+
+	huge := make([]byte, proposalDiffMaxBytes+1024)
+	for i := range huge {
+		huge[i] = 'x'
+	}
+	if err := os.WriteFile(proposalPath, huge, 0o644); err != nil {
+		t.Fatalf("write huge proposal: %v", err)
+	}
+
+	h := NewProposedHandler(db, newTestLogger())
+	req := httptest.NewRequest("GET", "/api/v1/consolidate/proposed/"+proposalID+"/diff", nil)
+	req.SetPathValue("id", proposalID)
+	req = withWorkspaceUser(req, userID, wsID, "MEMBER")
+	rr := httptest.NewRecorder()
+	h.Diff(rr, req)
+
+	if rr.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413 (oversize proposal)", rr.Code)
+	}
+	if !strings.Contains(rr.Body.String(), "proposal markdown exceeds") {
+		t.Errorf("error body should mention proposal markdown cap; got %q", rr.Body.String())
+	}
+}
+
+func TestProposed_Diff_OversizeCanonical_Returns413(t *testing.T) {
+	// Symmetric to the proposal cap: canonical is append-only
+	// and could theoretically grow past the cap after many
+	// approves on a single day. Refuse rather than load it
+	// into RAM 4× (current + merged + 2× string).
+	_, db, userID, wsID, crewID := newProposedHandlerTest(t)
+	proposalID, proposalPath := seedProposalRow(t, db, wsID, crewID, "pending")
+
+	canonicalPath := consolidate.CanonicalPathForProposal(proposalPath, time.Now().UTC())
+	huge := make([]byte, proposalDiffMaxBytes+1024)
+	for i := range huge {
+		huge[i] = 'y'
+	}
+	if err := os.WriteFile(canonicalPath, huge, 0o644); err != nil {
+		t.Fatalf("write huge canonical: %v", err)
+	}
+
+	h := NewProposedHandler(db, newTestLogger())
+	req := httptest.NewRequest("GET", "/api/v1/consolidate/proposed/"+proposalID+"/diff", nil)
+	req.SetPathValue("id", proposalID)
+	req = withWorkspaceUser(req, userID, wsID, "MEMBER")
+	rr := httptest.NewRecorder()
+	h.Diff(rr, req)
+
+	if rr.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413 (oversize canonical)", rr.Code)
+	}
+	if !strings.Contains(rr.Body.String(), "canonical learned-*.md exceeds") {
+		t.Errorf("error body should mention canonical cap; got %q", rr.Body.String())
+	}
+}
+
 // ── helpers ──────────────────────────────────────────────────────────
 
 // stripApprovedAtLine removes the "## Approved at HH:MM:SS MST"

@@ -45,6 +45,8 @@ package api
 
 import (
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -54,6 +56,46 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/consolidate"
 )
+
+// proposalDiffMaxBytes caps the per-file read size for both
+// the proposal markdown and the current canonical learned-*.md.
+// 8 MB sits well above any legitimate single-day rule corpus
+// (a real workspace's day-rotated canonical tops out around
+// 50 KB) but stops a pathological LLM extraction or an
+// append-loop bug from forcing a multi-GB read into RAM and
+// turning the diff handler into a memory-exhaustion vector.
+//
+// 4× peak memory at request time = current + merged + two
+// string-of-bytes conversions for difflib.SplitLines. With
+// the 8 MB cap and 100 concurrent diffs the worst case is
+// ~3.2 GB RSS, which is loud enough to alert on without
+// crashing a typical 8 GB box.
+const proposalDiffMaxBytes = 8 * 1024 * 1024
+
+// readWithCap is os.ReadFile + an 8 MB safety cap. Returns the
+// bytes, an "exceeded" flag (true iff the file was larger than
+// proposalDiffMaxBytes), and any other read error.
+//
+// We deliberately read up to cap+1 so we can distinguish
+// "exactly cap bytes" (still fine) from "larger than cap"
+// (413). os.ReadFile + io.LimitReader is the standard
+// idiom; the +1 byte is the canonical way to surface
+// truncation when the source size is unknown a priori.
+func readWithCap(path string) ([]byte, bool, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, false, err
+	}
+	defer f.Close()
+	buf, err := io.ReadAll(io.LimitReader(f, proposalDiffMaxBytes+1))
+	if err != nil {
+		return nil, false, err
+	}
+	if int64(len(buf)) > proposalDiffMaxBytes {
+		return nil, true, nil
+	}
+	return buf, false, nil
+}
 
 type proposalDiffStats struct {
 	Additions     int `json:"additions"`
@@ -107,7 +149,7 @@ func (h *ProposedHandler) Diff(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	body, err := os.ReadFile(exp.ProposalPath)
+	body, oversize, err := readWithCap(exp.ProposalPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			// Proposal row outlived its markdown file (deleted
@@ -120,6 +162,13 @@ func (h *ProposedHandler) Diff(w http.ResponseWriter, r *http.Request) {
 		}
 		h.logger.Error("proposal diff: read body", "proposal_id", proposalID, "error", err)
 		replyError(w, http.StatusInternalServerError, "diff failed")
+		return
+	}
+	if oversize {
+		h.logger.Error("proposal diff: proposal markdown exceeds cap",
+			"proposal_id", proposalID, "path", exp.ProposalPath, "cap_bytes", proposalDiffMaxBytes)
+		replyError(w, http.StatusRequestEntityTooLarge,
+			fmt.Sprintf("proposal markdown exceeds %d bytes; refusing to diff", proposalDiffMaxBytes))
 		return
 	}
 	rulesBlock := consolidate.ExtractProposalRulesBody(string(body))
@@ -135,11 +184,19 @@ func (h *ProposedHandler) Diff(w http.ResponseWriter, r *http.Request) {
 
 	var current []byte
 	canonicalExists := true
-	if c, rerr := os.ReadFile(canonicalPath); rerr == nil {
+	c, canonOversize, rerr := readWithCap(canonicalPath)
+	switch {
+	case rerr == nil && !canonOversize:
 		current = c
-	} else if errors.Is(rerr, os.ErrNotExist) {
+	case rerr == nil && canonOversize:
+		h.logger.Error("proposal diff: canonical exceeds cap",
+			"path", canonicalPath, "cap_bytes", proposalDiffMaxBytes)
+		replyError(w, http.StatusRequestEntityTooLarge,
+			fmt.Sprintf("canonical learned-*.md exceeds %d bytes; refusing to diff", proposalDiffMaxBytes))
+		return
+	case errors.Is(rerr, os.ErrNotExist):
 		canonicalExists = false
-	} else {
+	default:
 		h.logger.Error("proposal diff: read canonical", "path", canonicalPath, "error", rerr)
 		replyError(w, http.StatusInternalServerError, "diff failed")
 		return
