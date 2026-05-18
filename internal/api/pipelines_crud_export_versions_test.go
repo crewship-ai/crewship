@@ -176,7 +176,9 @@ func TestExportPipeline_IncludeHistory_AttachesVersionsArray(t *testing.T) {
 		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
 	}
 	var bundle map[string]any
-	json.Unmarshal(rr.Body.Bytes(), &bundle)
+	if err := json.Unmarshal(rr.Body.Bytes(), &bundle); err != nil {
+		t.Fatalf("decode bundle: %v body=%s", err, rr.Body.String())
+	}
 	hist, ok := bundle["history"].([]any)
 	if !ok {
 		t.Fatalf("history missing or wrong type: %T", bundle["history"])
@@ -242,7 +244,9 @@ func TestListVersions_HappyPath_DESCOrder(t *testing.T) {
 		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
 	}
 	var rows []map[string]any
-	json.Unmarshal(rr.Body.Bytes(), &rows)
+	if err := json.Unmarshal(rr.Body.Bytes(), &rows); err != nil {
+		t.Fatalf("decode rows: %v body=%s", err, rr.Body.String())
+	}
 	if len(rows) != 4 {
 		t.Fatalf("rows = %d, want 4", len(rows))
 	}
@@ -285,8 +289,13 @@ func TestListVersions_LimitClamping(t *testing.T) {
 			req = withWorkspaceUser(req, userID, wsID, "OWNER")
 			rr := httptest.NewRecorder()
 			h.ListVersions(rr, req)
+			if rr.Code != http.StatusOK {
+				t.Fatalf("%s: status = %d body=%s", tc.name, rr.Code, rr.Body.String())
+			}
 			var rows []map[string]any
-			json.Unmarshal(rr.Body.Bytes(), &rows)
+			if err := json.Unmarshal(rr.Body.Bytes(), &rows); err != nil {
+				t.Fatalf("%s: decode rows: %v body=%s", tc.name, err, rr.Body.String())
+			}
 			if len(rows) != tc.want {
 				t.Errorf("%s: rows = %d, want %d", tc.name, len(rows), tc.want)
 			}
@@ -350,7 +359,9 @@ func TestGetVersion_HappyPath_ReturnsFullDSL(t *testing.T) {
 		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
 	}
 	var got map[string]any
-	json.Unmarshal(rr.Body.Bytes(), &got)
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode response: %v body=%s", err, rr.Body.String())
+	}
 	if got["version"] != float64(2) {
 		t.Errorf("version = %v, want 2", got["version"])
 	}

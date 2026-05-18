@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/pipeline"
@@ -227,44 +228,17 @@ func TestTruncateErrorForList_MultibyteSafe(t *testing.T) {
 	if !strings.HasSuffix(got, "…") {
 		t.Errorf("output missing ellipsis: %q", got)
 	}
-	// Must be valid UTF-8 — no half-rune bytes leaked.
+	// Must be valid UTF-8 — no half-rune bytes leaked. The stdlib
+	// validator also rejects surrogate code points (U+D800-U+DFFF)
+	// which the previous hand-rolled walker accepted as valid 3-byte
+	// sequences. unicode/utf8 is the canonical implementation; using
+	// it removes a 30-line custom helper and tightens the assertion.
 	for i := 0; i < len(got); {
-		_, size := decodeRune(got[i:])
-		if size == 0 {
+		r, size := utf8.DecodeRuneInString(got[i:])
+		if r == utf8.RuneError && size == 1 {
 			t.Errorf("invalid UTF-8 at byte %d in %q", i, got)
 			return
 		}
 		i += size
 	}
-}
-
-// decodeRune is a minimal valid-utf8 walker — returns size=0 on invalid
-// sequences. Avoids importing unicode/utf8 for one assertion.
-func decodeRune(s string) (rune, int) {
-	if len(s) == 0 {
-		return 0, 0
-	}
-	b := s[0]
-	switch {
-	case b < 0x80:
-		return rune(b), 1
-	case b < 0xC2:
-		return 0, 0 // continuation byte at start
-	case b < 0xE0:
-		if len(s) < 2 || s[1]&0xC0 != 0x80 {
-			return 0, 0
-		}
-		return rune(b&0x1F)<<6 | rune(s[1]&0x3F), 2
-	case b < 0xF0:
-		if len(s) < 3 || s[1]&0xC0 != 0x80 || s[2]&0xC0 != 0x80 {
-			return 0, 0
-		}
-		return rune(b&0x0F)<<12 | rune(s[1]&0x3F)<<6 | rune(s[2]&0x3F), 3
-	case b < 0xF5:
-		if len(s) < 4 || s[1]&0xC0 != 0x80 || s[2]&0xC0 != 0x80 || s[3]&0xC0 != 0x80 {
-			return 0, 0
-		}
-		return rune(b&0x07)<<18 | rune(s[1]&0x3F)<<12 | rune(s[2]&0x3F)<<6 | rune(s[3]&0x3F), 4
-	}
-	return 0, 0
 }

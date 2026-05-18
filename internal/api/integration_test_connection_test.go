@@ -127,7 +127,9 @@ func TestWorkspaceIntegrationConnection_StdioTransport_RoutesToSkipped(t *testin
 		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
 	}
 	var got testConnectionResponse
-	json.Unmarshal(rr.Body.Bytes(), &got)
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode response: %v body=%s", err, rr.Body.String())
+	}
 	if got.Status != "skipped" {
 		t.Errorf("Status = %q, want \"skipped\"", got.Status)
 	}
@@ -152,7 +154,9 @@ func TestWorkspaceIntegrationConnection_UnknownTransport_RoutesToErrorWithName(t
 		t.Fatalf("status = %d", rr.Code)
 	}
 	var got testConnectionResponse
-	json.Unmarshal(rr.Body.Bytes(), &got)
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode response: %v body=%s", err, rr.Body.String())
+	}
 	if got.Status != "error" {
 		t.Errorf("Status = %q, want \"error\"", got.Status)
 	}
@@ -239,7 +243,9 @@ func TestCrewIntegrationConnection_StdioTransport_RoutesToSkipped(t *testing.T) 
 		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
 	}
 	var got testConnectionResponse
-	json.Unmarshal(rr.Body.Bytes(), &got)
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode response: %v body=%s", err, rr.Body.String())
+	}
 	if got.Status != "skipped" {
 		t.Errorf("Status = %q, want \"skipped\"", got.Status)
 	}

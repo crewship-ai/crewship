@@ -138,7 +138,9 @@ func TestListRuns_DefaultFilter_OnlyRunLevelEntries(t *testing.T) {
 		t.Fatalf("status = %d", rr.Code)
 	}
 	var got []map[string]any
-	json.Unmarshal(rr.Body.Bytes(), &got)
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode response: %v body=%s", err, rr.Body.String())
+	}
 	if len(got) != 2 {
 		t.Fatalf("default filter returned %d rows, want 2 (only run-level entries)", len(got))
 	}
@@ -165,7 +167,9 @@ func TestListRuns_IncludeStepsWidensFilter(t *testing.T) {
 		t.Fatalf("status = %d", rr.Code)
 	}
 	var got []map[string]any
-	json.Unmarshal(rr.Body.Bytes(), &got)
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode response: %v body=%s", err, rr.Body.String())
+	}
 	if len(got) != 2 {
 		t.Errorf("include_steps=1 returned %d rows, want 2 (run + step)", len(got))
 	}
@@ -186,7 +190,9 @@ func TestListRuns_CrossPipelineExclusion(t *testing.T) {
 	rr := httptest.NewRecorder()
 	h.ListRuns(rr, req)
 	var got []map[string]any
-	json.Unmarshal(rr.Body.Bytes(), &got)
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode response: %v body=%s", err, rr.Body.String())
+	}
 	if len(got) != 1 {
 		t.Fatalf("returned %d rows, want 1 (other pipeline must be excluded)", len(got))
 	}
@@ -220,7 +226,9 @@ func TestListRuns_LimitClamping(t *testing.T) {
 			rr := httptest.NewRecorder()
 			h.ListRuns(rr, req)
 			var got []map[string]any
-			json.Unmarshal(rr.Body.Bytes(), &got)
+			if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+				t.Fatalf("decode response: %v body=%s", err, rr.Body.String())
+			}
 			if len(got) != tc.want {
 				t.Errorf("%s: rows = %d, want %d", tc.name, len(got), tc.want)
 			}
@@ -414,7 +422,9 @@ func TestListPendingWaitpoints_FiltersByStatusPendingAndWorkspace(t *testing.T) 
 		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
 	}
 	var got []map[string]any
-	json.Unmarshal(rr.Body.Bytes(), &got)
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode response: %v body=%s", err, rr.Body.String())
+	}
 	if len(got) != 2 {
 		t.Fatalf("got %d rows, want 2 (pending only, own workspace only)", len(got))
 	}

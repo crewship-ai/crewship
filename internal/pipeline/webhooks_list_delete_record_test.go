@@ -243,7 +243,9 @@ func TestWebhookStore_RecordFire_FireCountIncrementsPerCall(t *testing.T) {
 			t.Fatalf("RecordFire #%d: %v", i, err)
 		}
 		var n int64
-		_ = db.QueryRow(`SELECT fire_count FROM pipeline_webhooks WHERE id = ?`, wh.ID).Scan(&n)
+		if err := db.QueryRow(`SELECT fire_count FROM pipeline_webhooks WHERE id = ?`, wh.ID).Scan(&n); err != nil {
+			t.Fatalf("read fire_count after fire #%d: %v", i, err)
+		}
 		if int(n) != i {
 			t.Errorf("after fire #%d: fire_count = %d, want %d", i, n, i)
 		}

@@ -160,7 +160,9 @@ func TestCrewsStatus_EmptyWorkspace_AllZeros(t *testing.T) {
 		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
 	}
 	var body map[string]int
-	json.Unmarshal(rr.Body.Bytes(), &body)
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v body=%s", err, rr.Body.String())
+	}
 	for _, key := range []string{"total", "running", "error", "idle", "queued"} {
 		if body[key] != 0 {
 			t.Errorf("%s = %d on empty workspace, want 0", key, body[key])
@@ -226,7 +228,9 @@ func TestCrewsStatus_AggregatesByStatusAndQueued(t *testing.T) {
 	var body struct {
 		Total, Running, Error, Idle, Queued int
 	}
-	json.Unmarshal(rr.Body.Bytes(), &body)
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v body=%s", err, rr.Body.String())
+	}
 
 	if body.Running != 2 {
 		t.Errorf("running = %d, want 2", body.Running)
@@ -260,10 +264,15 @@ func TestCrewsStatus_NoCrossWorkspaceAgentLeak(t *testing.T) {
 	req = withWorkspaceUser(req, userID, wsID, "OWNER")
 	rr := httptest.NewRecorder()
 	h.CrewsStatus(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
+	}
 	var body struct {
 		Total int
 	}
-	json.Unmarshal(rr.Body.Bytes(), &body)
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v body=%s", err, rr.Body.String())
+	}
 	if body.Total != 0 {
 		t.Errorf("total = %d, want 0 (foreign workspace agents must not leak)", body.Total)
 	}

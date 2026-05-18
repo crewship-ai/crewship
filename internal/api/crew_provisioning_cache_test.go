@@ -251,7 +251,9 @@ func TestCacheDelete_RefusesReferenced_AcrossWorkspaces(t *testing.T) {
 		t.Fatalf("referenced delete code = %d, want 409", rr.Code)
 	}
 	var body map[string]any
-	json.Unmarshal(rr.Body.Bytes(), &body)
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode 409 response: %v body=%s", err, rr.Body.String())
+	}
 	refs, _ := body["referenced_by"].([]any)
 	if len(refs) != 1 || refs[0] != "crew-x" {
 		t.Errorf("referenced_by = %v, want [crew-x]", refs)

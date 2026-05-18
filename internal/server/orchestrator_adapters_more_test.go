@@ -187,8 +187,14 @@ func TestMemoryMetricsAdapter_EntriesSinceLastMemoryUpdate_ScopedByAgent(t *test
 	seedJournalRowAtTime(t, db, wsID, "agent-B", "tool_call", now.Add(-2*time.Hour).Format(time.RFC3339))
 
 	a := newMemoryMetricsAdapter(db)
-	nA, _ := a.EntriesSinceLastMemoryUpdate(context.Background(), wsID, "agent-A")
-	nB, _ := a.EntriesSinceLastMemoryUpdate(context.Background(), wsID, "agent-B")
+	nA, errA := a.EntriesSinceLastMemoryUpdate(context.Background(), wsID, "agent-A")
+	if errA != nil {
+		t.Fatalf("EntriesSinceLastMemoryUpdate(agent-A): %v", errA)
+	}
+	nB, errB := a.EntriesSinceLastMemoryUpdate(context.Background(), wsID, "agent-B")
+	if errB != nil {
+		t.Fatalf("EntriesSinceLastMemoryUpdate(agent-B): %v", errB)
+	}
 	if nA != 1 {
 		t.Errorf("agent-A count = %d, want 1", nA)
 	}
@@ -271,11 +277,17 @@ func TestMemoryMetricsAdapter_AgentSpendLast24h_ScopedByWorkspace(t *testing.T) 
 	seedCostLedgerRow(t, db, "iso-2", "ws_spend_iso_b", "agent-shared", 999.0, 9999, 9999, now.Add(-1*time.Hour))
 
 	a := newMemoryMetricsAdapter(db)
-	usdA, _, callsA, _ := a.AgentSpendLast24h(context.Background(), "ws_spend_iso_a", "agent-shared")
+	usdA, _, callsA, errA := a.AgentSpendLast24h(context.Background(), "ws_spend_iso_a", "agent-shared")
+	if errA != nil {
+		t.Fatalf("AgentSpendLast24h(workspace_a): %v", errA)
+	}
 	if usdA != 1.0 || callsA != 1 {
 		t.Errorf("workspace_a got (%v, %d), want (1.0, 1) — foreign workspace row leaked", usdA, callsA)
 	}
-	usdB, _, callsB, _ := a.AgentSpendLast24h(context.Background(), "ws_spend_iso_b", "agent-shared")
+	usdB, _, callsB, errB := a.AgentSpendLast24h(context.Background(), "ws_spend_iso_b", "agent-shared")
+	if errB != nil {
+		t.Fatalf("AgentSpendLast24h(workspace_b): %v", errB)
+	}
 	if usdB != 999.0 || callsB != 1 {
 		t.Errorf("workspace_b got (%v, %d), want (999.0, 1)", usdB, callsB)
 	}

@@ -98,7 +98,9 @@ func TestInboxHandler_List_VisibilityAndFilters(t *testing.T) {
 	rr2 := httptest.NewRecorder()
 	h.List(rr2, req2)
 	var resp2 inboxListResponse
-	json.Unmarshal(rr2.Body.Bytes(), &resp2)
+	if err := json.Unmarshal(rr2.Body.Bytes(), &resp2); err != nil {
+		t.Fatalf("decode unread response: %v body=%s", err, rr2.Body.String())
+	}
 	if resp2.Count != 3 {
 		t.Errorf("unread-only count = %d, want 3", resp2.Count)
 	}
@@ -109,7 +111,9 @@ func TestInboxHandler_List_VisibilityAndFilters(t *testing.T) {
 	rr3 := httptest.NewRecorder()
 	h.List(rr3, req3)
 	var resp3 inboxListResponse
-	json.Unmarshal(rr3.Body.Bytes(), &resp3)
+	if err := json.Unmarshal(rr3.Body.Bytes(), &resp3); err != nil {
+		t.Fatalf("decode escalation response: %v body=%s", err, rr3.Body.String())
+	}
 	if resp3.Count != 1 {
 		t.Errorf("escalation-only count = %d, want 1", resp3.Count)
 	}
@@ -140,7 +144,9 @@ func TestInboxHandler_List_VisibilityAndFilters(t *testing.T) {
 	rr6 := httptest.NewRecorder()
 	h.List(rr6, req6)
 	var resp6 inboxListResponse
-	json.Unmarshal(rr6.Body.Bytes(), &resp6)
+	if err := json.Unmarshal(rr6.Body.Bytes(), &resp6); err != nil {
+		t.Fatalf("decode limit response: %v body=%s", err, rr6.Body.String())
+	}
 	if resp6.Count != 2 {
 		t.Errorf("limit=2 returned %d rows", resp6.Count)
 	}
@@ -181,7 +187,9 @@ func TestInboxHandler_UnreadCount(t *testing.T) {
 		t.Fatalf("count status = %d body=%s", rr.Code, rr.Body.String())
 	}
 	var body map[string]int
-	json.Unmarshal(rr.Body.Bytes(), &body)
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode count response: %v body=%s", err, rr.Body.String())
+	}
 	if body["unread_count"] != 2 {
 		t.Errorf("unread_count = %d, want 2 (visibility filter applied)", body["unread_count"])
 	}
@@ -360,7 +368,9 @@ func TestInboxHandler_PatchState_SourceManagedKinds(t *testing.T) {
 			t.Errorf("%s resolved: code = %d, want 409 (source endpoint required)", kind, rr2.Code)
 		}
 		var body map[string]string
-		json.Unmarshal(rr2.Body.Bytes(), &body)
+		if err := json.Unmarshal(rr2.Body.Bytes(), &body); err != nil {
+			t.Fatalf("%s resolved: decode 409 response: %v body=%s", kind, err, rr2.Body.String())
+		}
 		if body["kind"] != kind {
 			t.Errorf("%s resolved: 409 body should echo kind, got %+v", kind, body)
 		}

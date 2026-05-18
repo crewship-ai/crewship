@@ -141,7 +141,9 @@ func TestAgentDelete_HappyPath_SoftDeletesAndReturnsSuccess(t *testing.T) {
 		t.Fatalf("delete = %d body=%s, want 200", rr.Code, rr.Body.String())
 	}
 	var body map[string]bool
-	json.Unmarshal(rr.Body.Bytes(), &body)
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v body=%s", err, rr.Body.String())
+	}
 	if !body["success"] {
 		t.Errorf("response = %v, want success:true", body)
 	}
@@ -363,7 +365,9 @@ func TestAgentLoad_TokensUsedCoalescesToTokenCount(t *testing.T) {
 		AgentID         string `json:"agent_id"`
 		TokensUsedToday int    `json:"tokens_used_today"`
 	}
-	json.Unmarshal(rr.Body.Bytes(), &got)
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode response: %v body=%s", err, rr.Body.String())
+	}
 	var found bool
 	for _, e := range got {
 		if e.AgentID == "ag-coa" {

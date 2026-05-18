@@ -80,12 +80,16 @@ func TestRegistry_StartPurger_ExpiresInMemoryAndDB(t *testing.T) {
 
 	deadline := time.Now().Add(500 * time.Millisecond)
 	var status string
+	var lastErr error
 	for time.Now().Before(deadline) {
-		_ = db.QueryRow(`SELECT status FROM port_exposures WHERE id = 'ex-1'`).Scan(&status)
-		if status == "EXPIRED" {
+		lastErr = db.QueryRow(`SELECT status FROM port_exposures WHERE id = 'ex-1'`).Scan(&status)
+		if lastErr == nil && status == "EXPIRED" {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+	if lastErr != nil {
+		t.Fatalf("query status for ex-1 failed: %v", lastErr)
 	}
 	if status != "EXPIRED" {
 		t.Errorf("DB status = %q after purger ran, want EXPIRED", status)

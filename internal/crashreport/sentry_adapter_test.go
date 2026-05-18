@@ -105,7 +105,15 @@ func TestScrubQueryString_CaseInsensitive(t *testing.T) {
 	// SHOUTY_TOKEN and Mixed-Case-Secret must both be caught.
 	in := "X-API-Key=k1&AUTH_TOKEN=t1&NotSecretAtAll=ok&Password=p1"
 	got := scrubQueryString(in)
-	parsed, _ := url.ParseQuery(got)
+	// Check ParseQuery error explicitly — scrubQueryString guarantees
+	// valid output, but a regression that emitted malformed bytes
+	// would silently make every Get() return "" and the assertions
+	// below would still "pass" (k1 == "" → that branch fails, but
+	// "[redacted]" check would silently let invalid output through).
+	parsed, err := url.ParseQuery(got)
+	if err != nil {
+		t.Fatalf("scrubQueryString produced invalid query: %v (%q)", err, got)
+	}
 	if parsed.Get("X-API-Key") != "[redacted]" {
 		t.Errorf("X-API-Key = %q, want \"[redacted]\"", parsed.Get("X-API-Key"))
 	}

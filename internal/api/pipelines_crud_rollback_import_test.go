@@ -141,7 +141,9 @@ func TestImportPipeline_WrongFormat_400EchoesFormat(t *testing.T) {
 		t.Fatalf("status = %d, want 400", rr.Code)
 	}
 	var resp map[string]string
-	json.Unmarshal(rr.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v body=%s", err, rr.Body.String())
+	}
 	if resp["error"] == "" || !strings.Contains(resp["error"], "unsupported") {
 		t.Errorf("error body = %+v, want unsupported-bundle-format error", resp)
 	}
@@ -229,7 +231,9 @@ func TestImportPipeline_ValidationFailure_AgentSlugMissing_422(t *testing.T) {
 		t.Fatalf("status = %d body=%s, want 422", rr.Code, rr.Body.String())
 	}
 	var resp map[string]string
-	json.Unmarshal(rr.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v body=%s", err, rr.Body.String())
+	}
 	if !strings.Contains(resp["error"], "validation") {
 		t.Errorf("error body = %+v, want a validation-failure message", resp)
 	}

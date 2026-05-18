@@ -193,7 +193,9 @@ func TestPaymaster_SpendByAgent_Happy(t *testing.T) {
 		Rows   []map[string]any `json:"rows"`
 		CrewID string           `json:"crew_id"`
 	}
-	json.Unmarshal(rr.Body.Bytes(), &body)
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v body=%s", err, rr.Body.String())
+	}
 	if body.CrewID != "crew-a" {
 		t.Errorf("crew_id = %s, want crew-a", body.CrewID)
 	}
@@ -319,7 +321,9 @@ func TestPaymaster_TopSpenders_LimitClamping(t *testing.T) {
 			var body struct {
 				Limit int `json:"limit"`
 			}
-			json.Unmarshal(rr.Body.Bytes(), &body)
+			if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+				t.Fatalf("%s: decode response: %v body=%s", tc.name, err, rr.Body.String())
+			}
 			if body.Limit != tc.want {
 				t.Errorf("%s: limit = %d, want %d", tc.name, body.Limit, tc.want)
 			}
@@ -352,7 +356,9 @@ func TestPaymaster_SubscriptionUsage_EmptyHappyPath(t *testing.T) {
 	}
 	// Empty workspace must still return a window — since/until present.
 	var body map[string]any
-	json.Unmarshal(rr.Body.Bytes(), &body)
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v body=%s", err, rr.Body.String())
+	}
 	if _, ok := body["since"]; !ok {
 		t.Error("response missing 'since'")
 	}

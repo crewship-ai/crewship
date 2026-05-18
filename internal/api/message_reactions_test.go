@@ -180,10 +180,22 @@ func TestReactions_List_EmptyMessage_ReturnsEmptyArray(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d", rr.Code)
 	}
-	body := rr.Body.String()
-	// Must be {"reactions":[]} — never null (UI iterates).
-	if !strings.Contains(body, `"reactions":[]`) {
-		t.Errorf("empty body = %q, want reactions:[]", body)
+	// Decode the response and assert reactions is a non-nil empty slice —
+	// the UI iterates over it, and `null` (which json.Unmarshal would
+	// accept silently for a []T target) would crash on the JS side.
+	// A substring check was order-sensitive; a structured assertion
+	// catches a key-order regression OR a marshaller that emitted null.
+	var body struct {
+		Reactions []map[string]any `json:"reactions"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v body=%s", err, rr.Body.String())
+	}
+	if body.Reactions == nil {
+		t.Errorf("reactions = null; want non-nil empty array (UI iterates)")
+	}
+	if len(body.Reactions) != 0 {
+		t.Errorf("reactions = %+v, want empty array", body.Reactions)
 	}
 }
 
