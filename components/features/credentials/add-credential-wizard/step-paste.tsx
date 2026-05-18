@@ -247,12 +247,23 @@ function PEMFields({
     : "-----BEGIN CERTIFICATE-----\n…\n-----END CERTIFICATE-----"
 
   // Soft client-side hint. Backend validateCredentialPayload does the
-  // canonical PEM check; this just nudges users who paste obviously
-  // wrong content (public key, plain string) before they hit Submit.
+  // canonical PEM check (looksLikePEM in internal/api/credentials_types.go);
+  // this just nudges users who paste obviously wrong content before they
+  // hit Submit. The most common foot-gun for SSH_KEY is pasting an
+  // OpenSSH public key (`ssh-rsa AAAA…` or `-----BEGIN PUBLIC KEY-----`)
+  // into a field that needs the *private* half — the basic structural
+  // check ("starts with BEGIN, contains END") would still pass that, so
+  // we also verify the first-line label ends with the right marker.
   const trimmed = state.value.trim()
+  const expectedMarker = isSSH ? "PRIVATE KEY" : "CERTIFICATE"
+  const firstLine = trimmed.split("\n", 1)[0] ?? ""
   const looksWrongShape =
     trimmed.length > 0 &&
-    !(trimmed.startsWith("-----BEGIN ") && trimmed.includes("-----END "))
+    !(
+      trimmed.startsWith("-----BEGIN ") &&
+      trimmed.includes("-----END ") &&
+      firstLine.replace(/^-----BEGIN /, "").replace(/-----$/, "").trim().endsWith(expectedMarker)
+    )
 
   return (
     <div className="space-y-3">
@@ -299,10 +310,24 @@ function PEMFields({
         />
         {looksWrongShape && (
           <p className="text-[11px] text-amber-400 leading-relaxed">
-            That doesn&rsquo;t look PEM-shaped — the value should start with{" "}
-            <code className="rounded bg-black/40 px-1 font-mono">-----BEGIN</code> and end with{" "}
-            <code className="rounded bg-black/40 px-1 font-mono">-----END</code>.{" "}
-            {isSSH ? "Did you paste a public key by mistake?" : null}
+            {isSSH ? (
+              <>
+                That doesn&rsquo;t look like a PEM-encoded{" "}
+                <strong>private</strong> key — expected{" "}
+                <code className="rounded bg-black/40 px-1 font-mono">-----BEGIN ... PRIVATE KEY-----</code>.{" "}
+                If you pasted an{" "}
+                <code className="rounded bg-black/40 px-1 font-mono">ssh-rsa</code> /{" "}
+                <code className="rounded bg-black/40 px-1 font-mono">ssh-ed25519</code>{" "}
+                line or a <code className="rounded bg-black/40 px-1 font-mono">PUBLIC KEY</code>{" "}
+                block, that&rsquo;s the wrong half — Crewship needs the private key here.
+              </>
+            ) : (
+              <>
+                That doesn&rsquo;t look PEM-shaped — expected{" "}
+                <code className="rounded bg-black/40 px-1 font-mono">-----BEGIN CERTIFICATE-----</code>{" "}
+                … <code className="rounded bg-black/40 px-1 font-mono">-----END CERTIFICATE-----</code>.
+              </>
+            )}
           </p>
         )}
       </div>
