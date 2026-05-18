@@ -353,7 +353,9 @@ func (r *IPCResolver) resolve(ctx context.Context, resolveURL string) (*ChatInfo
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	// Bound the read at 1 MiB: resolve responses are small JSON envelopes
+	// (agent metadata + a credential list). A runaway peer must not OOM us.
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1*1024*1024))
 	if err != nil {
 		return nil, fmt.Errorf("read response body: %w", err)
 	}
