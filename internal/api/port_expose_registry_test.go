@@ -47,6 +47,11 @@ func newRegistryTestDB(t *testing.T) *sql.DB {
 	// "no such table: port_exposures". Locally on macOS the pool stays
 	// at 1 and the test passes. Pin the pool to a single connection so
 	// every caller in the test process sees the same in-memory schema.
+	//
+	// Pattern note: any future *Test* helper that opens `:memory:` AND is
+	// used by a test that spawns background goroutines hitting the same
+	// DB must do the same. Single-threaded request/response tests don't
+	// need this pin because the pool naturally stays at one connection.
 	db.SetMaxOpenConns(1)
 	t.Cleanup(func() { db.Close() })
 	// The simple path is to create only what the registry/proxy actually
