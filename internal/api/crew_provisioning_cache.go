@@ -120,7 +120,7 @@ func (h *ProvisioningHandler) CacheList(w http.ResponseWriter, r *http.Request) 
 		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
-	out := make([]CacheImageInfo, 0)
+	out := make([]CacheImageInfo, 0, len(imgs))
 	for _, img := range imgs {
 		for _, tag := range img.RepoTags {
 			if !strings.HasPrefix(tag, cacheImagePrefix) {

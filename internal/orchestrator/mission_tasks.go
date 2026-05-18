@@ -179,7 +179,7 @@ func (e *MissionEngine) buildMissionBrief(ctx context.Context, ms *missionState,
 	// Collect dependency outputs first — we need to know if they exist for the preamble.
 	// Prefer structured handoff summary when available (concise, designed for next agent).
 	deps, _ := parseDependsOn(task.DependsOn)
-	depOutputs := make([]string, 0)
+	depOutputs := make([]string, 0, len(deps))
 	for _, depID := range deps {
 		for _, t := range allTasks {
 			if t.ID == depID && t.ResultSummary != nil && *t.ResultSummary != "" {

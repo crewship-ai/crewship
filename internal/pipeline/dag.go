@@ -171,7 +171,7 @@ func (e *Executor) runDAG(
 
 	for {
 		// Compute the ready set: completed[needs[*]] && !completed[id]
-		ready := make([]*Step, 0)
+		ready := make([]*Step, 0, len(dsl.Steps))
 		resMu.Lock()
 		for i := range dsl.Steps {
 			s := &dsl.Steps[i]
