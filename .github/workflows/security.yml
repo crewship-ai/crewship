@@ -207,10 +207,19 @@ jobs:
             --ignore modernc.org/mathutil
 
   # ── OSV scan: osv-scanner ──
-  # govulncheck (above) does Go-source call-graph analysis. osv-scanner is
-  # complementary — it cross-references go.sum + pnpm-lock.yaml against the
-  # full OSV.dev database (covers Go, npm, and more). Catches advisories that
-  # don't yet have a Go-specific GO-YYYY-NNNN entry. Free, OSS, run by Google.
+  # govulncheck (above) does Go-source call-graph analysis on cmd/crewship,
+  # only failing on reachable vulnerabilities. osv-scanner is complementary —
+  # it cross-references go.sum + pnpm-lock.yaml against the full OSV.dev
+  # database (covers Go, npm, and more), failing on anything present in the
+  # dep graph regardless of reachability. Catches advisories that don't yet
+  # have a Go-specific GO-YYYY-NNNN entry, and surfaces npm chain issues
+  # govulncheck never sees. Free, OSS, run by Google.
+  #
+  # We install the binary directly rather than using the composite action —
+  # the action's scan-args input batches whitespace-separated flags as a
+  # single Docker argument and triggers "could not determine extractor
+  # suitable to this file." The CLI install is two lines and SHA-stable via
+  # `go install` against a pinned version.
   osv-scan:
     name: OSV Scanner
     runs-on: ubuntu-latest
@@ -218,14 +227,15 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
-      # SHA-pinned per Shai-Hulud-style supply-chain guidance; Dependabot
-      # bumps both the SHA and the trailing version comment together. The
-      # composite action lives in the osv-scanner-action/ subdirectory of
-      # google/osv-scanner-action — the repo root has no `runs:` field.
-      - uses: google/osv-scanner-action/osv-scanner-action@9bb69575e74019c2ad085a1860787043adf47ccb # v2.2.4
+      - uses: ./.github/actions/setup-go-embed
         with:
-          scan-args: |-
-            --lockfile=go.sum
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Install osv-scanner
+        run: go install github.com/google/osv-scanner/v2/cmd/osv-scanner@v2.2.4
+
+      - name: Run osv-scanner against lockfiles
+        run: |
+          osv-scanner \
+            --lockfile=go.mod \
             --lockfile=pnpm-lock.yaml
-            --recursive
-            .
