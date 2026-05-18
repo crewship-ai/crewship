@@ -5,8 +5,15 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 )
+
+// stderrCaptureMu serializes captureStderr calls so the os.Stderr swap
+// doesn't cross-contaminate when tests run in parallel. The Print*
+// helpers all write to os.Stderr; without this lock a concurrent test
+// would capture output from a sibling test.
+var stderrCaptureMu sync.Mutex
 
 // ---------------------------------------------------------------------------
 // formatter.go — NewFormatter, glamourStyleForEnv, PrintSuccess/Error/Warning.
@@ -93,10 +100,15 @@ func TestGlamourStyleForEnv_NoColorUnset_ReturnsDark(t *testing.T) {
 // whatever was written. Used by the Print* tests below.
 func captureStderr(t *testing.T, fn func()) string {
 	t.Helper()
+	stderrCaptureMu.Lock()
+	defer stderrCaptureMu.Unlock()
+
 	r, w, err := os.Pipe()
 	if err != nil {
 		t.Fatalf("pipe: %v", err)
 	}
+	defer func() { _ = r.Close() }() // explicit close prevents fd leak across repeated calls
+
 	old := os.Stderr
 	os.Stderr = w
 	defer func() { os.Stderr = old }()

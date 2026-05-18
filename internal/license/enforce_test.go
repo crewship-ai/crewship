@@ -3,6 +3,7 @@ package license
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -120,8 +121,11 @@ func TestIsLimitError_DetectsLimitError(t *testing.T) {
 	// — IsLimitError does a direct type-assertion, not errors.As. Pin
 	// the current behavior so a future migration to errors.As
 	// (which the wrapped-error idiom would prefer) is an explicit
-	// breaking-change visible here.
-	wrapped := errors.New("wrapped: " + e.Error())
+	// breaking-change visible here. Uses fmt.Errorf with %w so the
+	// assertion actually exercises an error chain — a plain errors.New
+	// concatenation wouldn't form a wrap and the test would silently
+	// pass regardless of whether IsLimitError used errors.As or not.
+	wrapped := fmt.Errorf("wrapped: %w", e)
 	if IsLimitError(wrapped) {
 		t.Error("IsLimitError(wrapped) = true; current implementation requires direct *LimitError, not errors.As")
 	}

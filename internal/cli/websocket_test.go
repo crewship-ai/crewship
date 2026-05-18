@@ -377,9 +377,12 @@ func TestWSClient_ReadMessage_ConnClosedErrors(t *testing.T) {
 		t.Error("expected error when server closes connection")
 	}
 	// Don't pin the exact error string (it's transport-dependent) but
-	// it must satisfy errors.Is(io.EOF) or contain "closed"/"EOF" —
-	// commonly observed shapes from golang.org/x/net/websocket.
-	if !strings.Contains(err.Error(), "EOF") && !errors.Is(err, http.ErrAbortHandler) {
-		t.Logf("ReadMessage on closed conn err = %v (acceptable transport-shape variation)", err)
+	// it must satisfy a recognized closed-connection shape — EOF or
+	// "closed" substring, or http.ErrAbortHandler. A failure here would
+	// indicate a real regression in how the websocket layer surfaces
+	// peer-closed errors; a t.Logf would let that drift through silently.
+	msg := strings.ToLower(err.Error())
+	if !strings.Contains(msg, "eof") && !strings.Contains(msg, "closed") && !errors.Is(err, http.ErrAbortHandler) {
+		t.Errorf("ReadMessage on closed conn err = %v; want one of: EOF / contains \"closed\" / http.ErrAbortHandler", err)
 	}
 }

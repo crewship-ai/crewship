@@ -73,20 +73,25 @@ func TestSetClock_NilRestoresTimeNow(t *testing.T) {
 	v.SetClock(func() time.Time { return time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC) })
 	v.SetClock(nil)
 
+	// Bracket the issuance with before/after wall-clock samples so the
+	// assertion stays accurate even under slow CI scheduling. A fixed
+	// 5-second delta was flaky on a loaded runner.
+	before := time.Now().Unix()
 	tok, err := v.IssueAccessToken("u1", "s1", "Name", "n@x")
 	if err != nil {
 		t.Fatalf("IssueAccessToken: %v", err)
 	}
+	after := time.Now().Unix()
 	if _, err := v.ValidateAccess(tok); err != nil {
 		t.Fatalf("ValidateAccess after SetClock(nil) = %v, want nil (real clock restored)", err)
 	}
 
-	// iat must be within a small window of real now — if SetClock(nil)
-	// silently kept the stale fn, iat would still be the 2020 value.
+	// iat must fall in the wall-clock window we captured — if SetClock(nil)
+	// silently kept the stale fn, iat would be the 2020 Unix timestamp
+	// which is far below `before`.
 	claims := decryptClaimsForTest(t, v, tok, v.accessKey)
-	delta := time.Now().Unix() - claims.Iat
-	if delta < 0 || delta > 5 {
-		t.Errorf("iat = %d (delta from now = %ds); SetClock(nil) did not restore time.Now", claims.Iat, delta)
+	if claims.Iat < before || claims.Iat > after {
+		t.Errorf("iat = %d outside issuance window [%d, %d]; SetClock(nil) did not restore time.Now", claims.Iat, before, after)
 	}
 }
 

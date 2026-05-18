@@ -2,6 +2,7 @@ package crashreport
 
 import (
 	"errors"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -62,10 +63,14 @@ func TestNoopBackend_Capture_NoPanic_AnyInput(t *testing.T) {
 		"version":      "v0.1.0",
 	})
 	// Large tag map (defensive — code paths that map every annotation
-	// might end up here with many keys).
+	// might end up here with many keys). Use the loop index for unique
+	// keys; an earlier version keyed on time.Now().Format which
+	// collapsed entries when the loop ran inside a single nanosecond
+	// (only the highest-N-digits formatter, no fractional info → most
+	// iterations produced the same string).
 	big := make(map[string]string, 100)
 	for i := 0; i < 100; i++ {
-		big["tag-"+time.Now().Format("999999999")] = "value"
+		big["tag-"+strconv.Itoa(i)] = "value"
 	}
 	b.Capture(errors.New("boom"), big)
 }

@@ -137,22 +137,23 @@ func TestPipelineScheduler_StartFiresInitialTick(t *testing.T) {
 	// Source comment: "Fire one tick on startup so newly-due schedules
 	// don't wait 30s." The initial tick runs listDueSchedules; with
 	// no schedules seeded it's a clean read returning empty. Verify
-	// the initial-tick path runs without crashing on an empty DB
-	// (no panic, no double-stopped-channel-close).
+	// the initial-tick path runs without crashing on an empty DB.
+	//
+	// Determinism note: we deliberately do NOT time.Sleep here.
+	// Stop()'s `<-s.stopped` blocks until run() returns, and run()
+	// only reaches its `defer close(stopped)` AFTER executing the
+	// initial s.tick(ctx) call (the tick is synchronous and runs
+	// before the select loop). So if Stop returns within the 2s
+	// budget, the initial tick has provably completed — sleeping
+	// first would just be magic-number padding with no signal value.
 	s := newSchedulerTestRig(t)
 	s.Start(context.Background())
-
-	// Give the run goroutine a moment to execute its initial tick
-	// before we shut it down. Without a deterministic signal we just
-	// poll briefly that Stop completes — that itself proves run()
-	// reached its select loop after the initial tick.
-	time.Sleep(50 * time.Millisecond)
 
 	done := make(chan struct{})
 	go func() { s.Stop(); close(done) }()
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):
-		t.Fatal("initial tick may have wedged the goroutine; Stop did not return")
+		t.Fatal("initial tick wedged the goroutine; Stop did not return — run() never reached its select after s.tick(ctx)")
 	}
 }

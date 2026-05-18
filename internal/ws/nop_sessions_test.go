@@ -51,8 +51,12 @@ func TestNopHubSessions_ListActiveForUserReturnsEmpty(t *testing.T) {
 	if err != nil {
 		t.Errorf("ListActiveForUser err = %v, want nil (empty list is a valid no-op)", err)
 	}
-	if got != nil {
-		t.Errorf("ListActiveForUser returned %+v; nop store should return nil/empty", got)
+	// Accept either nil or an empty non-nil slice — both are valid
+	// no-op shapes and downstream iteration over `for _, s := range got`
+	// behaves identically either way. Pinning to nil-only would reject
+	// a legitimate implementation that pre-allocates.
+	if len(got) != 0 {
+		t.Errorf("ListActiveForUser returned %+v; want nil or empty", got)
 	}
 }
 

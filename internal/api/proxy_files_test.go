@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -124,9 +125,15 @@ func TestCrewFileSave_HappyPath_ForwardsBodyAndPathToIPC(t *testing.T) {
 		if r.URL.RawQuery != "" {
 			gotPath += "?" + r.URL.RawQuery
 		}
-		buf := make([]byte, 1024)
-		n, _ := r.Body.Read(buf)
-		gotBody = string(buf[:n])
+		// io.ReadAll: a single r.Body.Read can return partial data, so
+		// the assertion would be flaky for bodies spanning multiple
+		// reads (HTTP/1.1 chunked, slow client, etc.).
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read ipc request body: %v", err)
+			return
+		}
+		gotBody = string(body)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"saved":true}`))
 	}))

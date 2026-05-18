@@ -3,11 +3,19 @@ package api
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/encryption"
 )
+
+// skipTokenProbeMu serializes access to the package-global
+// skipTokenProbe variable so concurrent tests in internal/api can't
+// race on its mutation. Without this, a test that flipped the flag
+// would leak its state into a parallel sibling and one of them would
+// see the wrong probe behavior.
+var skipTokenProbeMu sync.Mutex
 
 // ---------------------------------------------------------------------------
 // onboarding.go — validateOnboardingCredential + insertOnboardingCredential.
@@ -21,8 +29,12 @@ import (
 
 func withTokenProbeSkipped(t *testing.T) {
 	t.Helper()
+	skipTokenProbeMu.Lock()
 	orig := skipTokenProbe
-	t.Cleanup(func() { skipTokenProbe = orig })
+	t.Cleanup(func() {
+		skipTokenProbe = orig
+		skipTokenProbeMu.Unlock()
+	})
 	skipTokenProbe = true
 }
 
