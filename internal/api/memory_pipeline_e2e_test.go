@@ -57,10 +57,11 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -266,6 +267,20 @@ func TestMemoryPipeline_E2E_ConsolidateDiffApproveStatsCompose(t *testing.T) {
 	// memory_config row → defaults to 30 days. The just-written
 	// learned row is far younger than 30 d, so the sweep must be
 	// a no-op (positive assertion).
+	//
+	// Scope the before/after count to wsID specifically. The
+	// stats endpoint's Totals.Versions also only counts the
+	// caller's workspace, so today both numbers agree by
+	// design — but pinning the per-workspace count BEFORE
+	// the sweep removes any cross-tenant-row drift risk if
+	// a future helper seeds multiple workspaces in the same
+	// fixture.
+	var versionsBefore int
+	if err := db.QueryRow(
+		`SELECT COUNT(*) FROM memory_versions WHERE workspace_id = ?`, wsID,
+	).Scan(&versionsBefore); err != nil {
+		t.Fatalf("count versions before sweep: %v", err)
+	}
 	if err := memory.SweepAllWorkspaces(context.Background(), db, jw); err != nil {
 		t.Fatalf("SweepAllWorkspaces: %v", err)
 	}
@@ -275,9 +290,9 @@ func TestMemoryPipeline_E2E_ConsolidateDiffApproveStatsCompose(t *testing.T) {
 	).Scan(&versionsAfter); err != nil {
 		t.Fatalf("count versions after sweep: %v", err)
 	}
-	if versionsAfter != stats.Totals.Versions {
+	if versionsAfter != versionsBefore {
 		t.Errorf("retention sweep deleted rows under default 30d window: before=%d after=%d",
-			stats.Totals.Versions, versionsAfter)
+			versionsBefore, versionsAfter)
 	}
 
 	// Final sanity: the proposal row went all the way to
@@ -291,6 +306,14 @@ func TestMemoryPipeline_E2E_ConsolidateDiffApproveStatsCompose(t *testing.T) {
 // schema's CHECK constraints satisfied) and returns the
 // generated entry ids in seed order. The seeded entries are
 // the source the consolidator scans.
+//
+// FlushSize=1 on the writer commits synchronously per entry,
+// and the trailing w.Flush() is the explicit barrier — by the
+// time this function returns, the consolidator can SELECT
+// against journal_entries and see all n rows. Earlier
+// iterations of this helper had a getRowCount probe AFTER
+// the Flush call, but it always returned a hardcoded (1,
+// true) — pure cargo-cult; deleted.
 func seedE2EJournalEntries(t *testing.T, w *journal.Writer, wsID, crewID string, n int) []string {
 	t.Helper()
 	ids := make([]string, 0, n)
@@ -302,7 +325,12 @@ func seedE2EJournalEntries(t *testing.T, w *journal.Writer, wsID, crewID string,
 			ActorType:   journal.ActorAgent,
 			ActorID:     "agent_e2e",
 			Severity:    journal.SeverityInfo,
-			Summary:     "escalation #" + filepath.Base(t.TempDir()),
+			// Earlier iteration used `filepath.Base(t.TempDir())`
+			// here, which CREATED a temp dir per loop iteration
+			// just to extract its basename for the summary
+			// string — 12 leaked TempDirs per test run × any
+			// -count=N multiplier. Simple counter is plenty.
+			Summary: fmt.Sprintf("escalation #%d", i),
 			Payload: map[string]any{
 				"i":       i,
 				"context": "e2e pipeline test seed",
@@ -313,49 +341,23 @@ func seedE2EJournalEntries(t *testing.T, w *journal.Writer, wsID, crewID string,
 		}
 		ids = append(ids, id)
 	}
-	// Forces all queued entries to flush before the consolidator
-	// queries — otherwise journal.List returns empty and the
-	// consolidator skips for "below threshold".
 	if err := w.Flush(context.Background()); err != nil {
 		t.Fatalf("flush journal: %v", err)
 	}
-	// Wait for the writer's batch goroutine to commit. FlushSize=1
-	// already commits synchronously, but a paranoid double-check
-	// against the rows so we know the consolidator will see them.
-	if _, ok := getRowCount(t, w, wsID); !ok {
-		t.Fatalf("journal rows not visible after flush; check FlushSize / batcher state")
-	}
-	_ = ids
 	return ids
 }
 
-// getRowCount checks that at least one journal_entries row for
-// the workspace is visible. Returns (count, true) on success.
-// Used as a barrier between emit and consolidator query.
-func getRowCount(t *testing.T, w *journal.Writer, wsID string) (int, bool) {
-	t.Helper()
-	// We do not have a direct accessor to the writer's *sql.DB
-	// from this test, so use the package-private knowledge that
-	// FlushSize=1 + Flush() is sufficient. The function is
-	// defensive structure; an actual count query against the
-	// writer would require lifting the *sql.DB. Returning (1,
-	// true) is intentional — the real guarantee comes from
-	// Flush() above.
-	return 1, true
-}
-
-// Compile-time guard against accidental signature drift on the
-// helpers this test depends on. If a future refactor changes
-// the Consolidator.Run / ApproveProposal / Diff signatures,
-// this line fails to compile and the test author has to
-// re-confirm the test still represents the integration
-// contract.
+// Compile-time guard: signature drift on Consolidator.Run or
+// ApproveProposal would break this test in surprising ways
+// (silent assertion mismatch). The literal references below
+// fail to compile if either signature changes, forcing the
+// test author to re-confirm the integration contract before
+// the change can land.
 var _ = func(c *consolidate.Consolidator, cfg consolidate.Config) {
 	var ctx context.Context
 	_, _ = c.Run(ctx, cfg)
 }
-var _ = func(db *sql.DB, j journal.Emitter, l *e2eStubSummarizer) {
-	_ = l
-	_ = db
-	_ = j
+var _ = func(ctx context.Context, db *sql.DB, j journal.Emitter, logger *slog.Logger,
+	proposalID, userID string, opts consolidate.ApprovalOptions) {
+	_, _ = consolidate.ApproveProposal(ctx, db, j, logger, proposalID, userID, opts)
 }
