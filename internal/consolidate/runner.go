@@ -267,12 +267,33 @@ func runCompactionLoop(ctx context.Context, db *sql.DB, comp *Compactor, opts Ru
 		if err := snapshotAllWorkspaces(ctx, db, opts); err != nil {
 			opts.Logger.Warn("health snapshot tick failed", "err", err)
 		}
-		// Memory-versions retention sweep: prune rows older than
-		// MemoryVersionsRetention while keeping the latest N per
-		// (workspace_id, path). Then sweep orphan blobs. Best-
-		// effort — failures land in opts.Logger and the tick moves
-		// on. Disabled silently when BlobRoot or retention window
-		// is unset (test harness, dev mode).
+		// Memory-versions retention has two coordinated passes, both
+		// driven from this single daily tick so we never have two
+		// background loops racing on memory_versions:
+		//
+		//   1. Global pass — memory.PruneOldVersions. Enforces a
+		//      cluster-wide floor (keep latest N per
+		//      (workspace_id, path) regardless of age) and sweeps
+		//      orphan blobs. The keep-N floor is the load-bearing
+		//      bit: a workspace with retention_days=7 that wrote
+		//      one critical pin 14 days ago and never updated it
+		//      still keeps the pin because the global pass refuses
+		//      to delete the LAST row at a path.
+		//
+		//   2. Per-workspace pass — memory.SweepAllWorkspaces. Reads
+		//      workspaces.memory_config.versions_retention_days and
+		//      tightens for tenants with windows shorter than the
+		//      global retention. A dev sandbox with retention_days=7
+		//      drops older versions even though the global window
+		//      is 30 days. Runs AFTER the global pass so the keep-N
+		//      floor is already satisfied; the per-workspace pass
+		//      only trims by age and respects the same single-
+		//      statement transactional guarantees.
+		//
+		// Disabled silently when BlobRoot or retention window is
+		// unset (test harness, dev mode). The per-workspace pass
+		// runs regardless of BlobRoot — it doesn't touch blobs,
+		// only rows.
 		if opts.BlobRoot != "" && opts.MemoryVersionsRetention > 0 {
 			res, err := memory.PruneOldVersions(ctx, db, opts.BlobRoot, opts.MemoryVersionsRetention, opts.MemoryVersionsKeepLatest)
 			if err != nil {
@@ -286,6 +307,15 @@ func runCompactionLoop(ctx context.Context, db *sql.DB, comp *Compactor, opts Ru
 					opts.Logger.Warn("retention sweep partial failure", "err", e)
 				}
 			}
+		}
+		// Per-workspace tightening pass. comp.Journal is the same
+		// emitter the rest of the runner uses, so the
+		// memory.versions_swept events land alongside the
+		// compaction.completed events for the same tick. A nil
+		// emitter (test harness) is fine — SweepAllWorkspaces
+		// skips the emit when emitter==nil.
+		if err := memory.SweepAllWorkspaces(ctx, db, comp.Journal); err != nil {
+			opts.Logger.Warn("per-workspace memory retention sweep failed", "err", err)
 		}
 	}
 }
