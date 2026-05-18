@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -460,23 +461,31 @@ func RunIDFromContext(ctx context.Context) string {
 // OpenTelemetry directly. The telemetry package registers a resolver at
 // startup via SetTraceResolver. If nothing is registered the function
 // returns ok=false and the entry records empty trace/span.
-var (
-	traceResolver   func(ctx context.Context) (traceID, spanID string, ok bool)
-	traceResolverMu sync.RWMutex
-)
+//
+// Stored as an atomic.Pointer (not a mutex-guarded var) because the
+// resolver is read on every Emit but written only once at process
+// startup — paying RLock/RUnlock per emit just to read a pointer that
+// effectively never changes is wasted work, and a hypothetical late
+// SetTraceResolver caller would briefly starve concurrent emits under
+// the RWMutex's writer-preference. atomic.Pointer.Load is a single
+// atomic read with no blocking.
+type traceResolverFunc func(ctx context.Context) (traceID, spanID string, ok bool)
+
+var traceResolver atomic.Pointer[traceResolverFunc]
 
 func SetTraceResolver(fn func(ctx context.Context) (string, string, bool)) {
-	traceResolverMu.Lock()
-	traceResolver = fn
-	traceResolverMu.Unlock()
+	if fn == nil {
+		traceResolver.Store(nil)
+		return
+	}
+	typed := traceResolverFunc(fn)
+	traceResolver.Store(&typed)
 }
 
 func traceFromContext(ctx context.Context) (string, string, bool) {
-	traceResolverMu.RLock()
-	fn := traceResolver
-	traceResolverMu.RUnlock()
+	fn := traceResolver.Load()
 	if fn == nil {
 		return "", "", false
 	}
-	return fn(ctx)
+	return (*fn)(ctx)
 }
