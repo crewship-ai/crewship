@@ -213,10 +213,15 @@ func (h *MemoryConfigHandler) Patch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// BEGIN IMMEDIATE: take the write lock now so the read-merge-
-	// write below cannot interleave with a concurrent PATCH. A
-	// deferred ROLLBACK is harmless after Commit().
-	tx, err := h.db.BeginTx(ctx, nil)
+	// Serializable isolation forces SQLite to take the write lock
+	// up-front (BEGIN IMMEDIATE) so the read-merge-write sequence
+	// below can't interleave with a concurrent PATCH. The previous
+	// `BeginTx(ctx, nil)` defaulted to DEFERRED, which acquires the
+	// lock only at first write — leaving a window where two patches
+	// could each read the same JSON document and clobber each
+	// other's changes. Mirror the pattern in internal/backup/lock.go.
+	// Deferred ROLLBACK below is harmless after Commit().
+	tx, err := h.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
 	if err != nil {
 		h.logger.Error("memory config: begin tx", "workspace_id", workspaceID, "error", err)
 		replyError(w, http.StatusInternalServerError, "transaction begin failed")

@@ -38,6 +38,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/journal"
@@ -159,7 +160,12 @@ func TestMemoryConfig_Patch_HappyPath_PersistsAndAudits(t *testing.T) {
 	}
 
 	// Round-trip: a follow-up GET sees the persisted value.
-	_, getResp := memConfigDoGet(t, h, userID, wsID, "OWNER")
+	// Assert status before inspecting fields — otherwise a 500 here
+	// reports as "GET = {0 false}" which obscures the real failure.
+	getCode, getResp := memConfigDoGet(t, h, userID, wsID, "OWNER")
+	if getCode != http.StatusOK {
+		t.Fatalf("GET after PATCH: status = %d, want 200", getCode)
+	}
 	if getResp.VersionsRetentionDays != 7 || getResp.IsDefault {
 		t.Errorf("GET after PATCH = %+v; want versions_retention_days=7, is_default=false", getResp)
 	}
@@ -253,7 +259,10 @@ func TestMemoryConfig_Patch_PreservesUnknownKeysForForwardCompat(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", code)
 	}
-	_, resp := memConfigDoGet(t, h, userID, wsID, "OWNER")
+	getCode, resp := memConfigDoGet(t, h, userID, wsID, "OWNER")
+	if getCode != http.StatusOK {
+		t.Fatalf("GET: status = %d, want 200", getCode)
+	}
 	if resp.RawConfig == nil {
 		t.Fatalf("raw_config nil after patch with unknown key")
 	}
@@ -372,17 +381,33 @@ func TestMemoryConfig_Patch_ConcurrentPATCHesPreserveBothKeys(t *testing.T) {
 		body []byte
 	}
 	results := make(chan result, 2)
+	// Start barrier — both goroutines block on the same close-of-
+	// channel signal so neither can run to completion before the
+	// other has even started. Without this, Go's scheduler will
+	// often run goroutine 1 to completion before 2 wakes up, which
+	// turns the "concurrent" test into a serial one and silently
+	// stops exercising the TOCTOU window this regression test
+	// exists to guard.
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(2)
 
 	go func() {
+		defer wg.Done()
+		<-start
 		c, b := memConfigDoPatch(t, h, userID, wsID, "OWNER",
 			[]byte(`{"versions_retention_days": 7}`))
 		results <- result{c, b}
 	}()
 	go func() {
+		defer wg.Done()
+		<-start
 		c, b := memConfigDoPatch(t, h, userID, wsID, "OWNER",
 			[]byte(`{"future_field": "concurrent_value"}`))
 		results <- result{c, b}
 	}()
+	close(start)
+	wg.Wait()
 
 	for i := 0; i < 2; i++ {
 		r := <-results
@@ -395,7 +420,10 @@ func TestMemoryConfig_Patch_ConcurrentPATCHesPreserveBothKeys(t *testing.T) {
 	}
 
 	// Final stored doc must carry BOTH keys.
-	_, resp := memConfigDoGet(t, h, userID, wsID, "OWNER")
+	getCode, resp := memConfigDoGet(t, h, userID, wsID, "OWNER")
+	if getCode != http.StatusOK {
+		t.Fatalf("GET after concurrent PATCHes: status = %d, want 200", getCode)
+	}
 	if resp.RawConfig == nil {
 		t.Fatalf("raw_config nil after concurrent PATCHes; want a JSON doc")
 	}
@@ -453,7 +481,10 @@ func TestMemoryConfig_Patch_RecoversFromMalformedStoredJSON(t *testing.T) {
 	}
 
 	// After the recovery PATCH, GET should now succeed.
-	_, resp := memConfigDoGet(t, h, userID, wsID, "OWNER")
+	getCode, resp := memConfigDoGet(t, h, userID, wsID, "OWNER")
+	if getCode != http.StatusOK {
+		t.Fatalf("GET after recovery PATCH: status = %d, want 200", getCode)
+	}
 	if resp.VersionsRetentionDays != 14 {
 		t.Errorf("after recovery PATCH: versions_retention_days = %d, want 14", resp.VersionsRetentionDays)
 	}
