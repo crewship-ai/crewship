@@ -394,7 +394,7 @@ func (h *InternalHandler) lookupCrewNamesForWorkspace(r *http.Request, workspace
 // resolveAgentCredentials fetches and decrypts credentials assigned to the agent.
 func (h *InternalHandler) resolveAgentCredentials(r *http.Request, agentID string) ([]mcpCredEntry, error) {
 	rows, err := h.db.QueryContext(r.Context(), `
-		SELECT ac.credential_id, ac.env_var_name, ac.priority, c.encrypted_value, c.type
+		SELECT ac.credential_id, ac.env_var_name, ac.priority, c.encrypted_value, c.type, COALESCE(c.username, '')
 		FROM agent_credentials ac
 		JOIN credentials c ON c.id = ac.credential_id
 		WHERE ac.agent_id = ? AND c.deleted_at IS NULL
@@ -410,7 +410,7 @@ func (h *InternalHandler) resolveAgentCredentials(r *http.Request, agentID strin
 	for rows.Next() {
 		var ce mcpCredEntry
 		var encValue string
-		if err := rows.Scan(&ce.ID, &ce.EnvVar, &ce.Priority, &encValue, &ce.Type); err != nil {
+		if err := rows.Scan(&ce.ID, &ce.EnvVar, &ce.Priority, &encValue, &ce.Type, &ce.Username); err != nil {
 			h.logger.Error("scan credential for resolve", "error", err)
 			return nil, err
 		}

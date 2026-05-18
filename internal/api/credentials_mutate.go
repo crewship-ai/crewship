@@ -5,6 +5,7 @@ package api
 // enough to deserve their own file. Extracted from credentials.go.
 
 import (
+	"database/sql"
 	"fmt"
 	"net/http"
 	"strings"
@@ -28,6 +29,11 @@ type createCredentialRequest struct {
 	RefreshToken  *string  `json:"refresh_token"`
 	TokenExpires  *string  `json:"token_expires_at"`
 	SecurityLevel *int     `json:"security_level"`
+	// USERPASS: cleartext identifier half (e.g. "user@gmail.com").
+	// Stored unencrypted in credentials.username because usernames are
+	// identifiers, not secrets — mirrors Bitwarden's login.username
+	// shape. The password lives in the existing encrypted Value field.
+	Username *string `json:"username"`
 	// OAuth 2.0 fields (used when type = OAUTH2)
 	OAuthClientID     *string `json:"oauth_client_id"`
 	OAuthClientSecret *string `json:"oauth_client_secret"`
@@ -88,6 +94,14 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Scope == "" {
 		req.Scope = "WORKSPACE"
+	}
+
+	// Per-type validation (closed enum + USERPASS/SSH_KEY/CERTIFICATE
+	// field requirements). Runs after the OAuth pending-value fixup so
+	// the validator sees the same Value the DB will store.
+	if msg := validateCredentialPayload(&req); msg != "" {
+		replyError(w, http.StatusBadRequest, msg)
+		return
 	}
 
 	// Merge crew_ids and legacy crew_id into a single list
@@ -171,11 +185,11 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	_, err = tx.ExecContext(r.Context(), `
 		INSERT INTO credentials (id, workspace_id, name, description, encrypted_value,
-			type, provider, scope, crew_id, account_label, account_email,
+			type, provider, scope, crew_id, account_label, account_email, username,
 			token_expires_at, security_level, status, tags, created_by, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		credID, workspaceID, req.Name, req.Description, encryptedValue,
-		req.Type, req.Provider, req.Scope, legacyCrewID, req.AccountLabel, req.AccountEmail,
+		req.Type, req.Provider, req.Scope, legacyCrewID, req.AccountLabel, req.AccountEmail, req.Username,
 		req.TokenExpires, secLevel, credStatus, tagsArg, user.ID, now, now)
 	if err != nil {
 		tx.Rollback()
@@ -279,14 +293,23 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	credFound, err := credentialExists(r.Context(), h.db, credID, workspaceID)
+	// Load current type+username up front so the merged-payload
+	// validation below sees the persisted state, not just the patch.
+	// Doubles as the existence + workspace-scoping check that
+	// credentialExists used to do — single round-trip, same gate.
+	var currentType string
+	var currentUsername sql.NullString
+	err := h.db.QueryRowContext(r.Context(),
+		`SELECT type, username FROM credentials
+		 WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
+		credID, workspaceID).Scan(&currentType, &currentUsername)
 	if err != nil {
-		h.logger.Error("credential exists check", "error", err)
+		if err == sql.ErrNoRows {
+			replyError(w, http.StatusNotFound, "Credential not found")
+			return
+		}
+		h.logger.Error("load credential for update", "error", err)
 		replyError(w, http.StatusInternalServerError, "Internal server error")
-		return
-	}
-	if !credFound {
-		replyError(w, http.StatusNotFound, "Credential not found")
 		return
 	}
 
@@ -294,6 +317,106 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if err := readJSON(r, &body); err != nil {
 		replyError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
+	}
+
+	// Merged-payload validation: overlay patch fields onto current row
+	// state, then enforce the closed enum + per-type invariants the
+	// Create path checks. Without this, a PATCH can drop a credential
+	// into an inconsistent state — set type=USERPASS without a
+	// username, change type to SSH_KEY while the stored value is a
+	// raw API key, paste a public key over an existing SSH_KEY's
+	// value, etc. — that the resolver then trips over at agent-run
+	// time. Create blocks all of these; Update used to silently
+	// accept them.
+	//
+	// JSON-shape gating: type/username/value must be either absent or
+	// a string (or null, where the column is nullable). A naked
+	// `v.(string)` assertion with `ok` silently treats a non-string
+	// like the field is missing, but the downstream `for jsonKey, col`
+	// loop still calls `ub.Set(col, val)` with the raw `any`, writing
+	// e.g. a numeric `{"type": 123}` straight into the TEXT column
+	// as "123" — past the closed-enum check, past any sane downstream
+	// resolver behaviour. Fail closed up-front instead.
+	mergedType := currentType
+	if v, ok := body["type"]; ok {
+		s, isStr := v.(string)
+		if !isStr {
+			replyError(w, http.StatusBadRequest, "type must be a string")
+			return
+		}
+		mergedType = s
+	}
+	if _, ok := validCredentialTypes[mergedType]; !ok {
+		replyError(w, http.StatusBadRequest, "type must be one of: AI_CLI_TOKEN, API_KEY, CLI_TOKEN, SECRET, OAUTH2, USERPASS, SSH_KEY, CERTIFICATE, GENERIC_SECRET")
+		return
+	}
+
+	// Per-type field rules. Skip value-shape checks for SSH_KEY and
+	// CERTIFICATE when the patch doesn't touch `value` — we trust the
+	// stored encrypted blob was PEM-shaped when it was written by
+	// Create. Only the cases where the patch could newly violate the
+	// invariant need to fail closed here.
+	valueSent := false
+	valueStr := ""
+	if v, ok := body["value"]; ok {
+		s, isStr := v.(string)
+		if !isStr {
+			replyError(w, http.StatusBadRequest, "value must be a string")
+			return
+		}
+		if s != "" {
+			valueSent = true
+			valueStr = s
+		}
+	}
+	typeChanged := mergedType != currentType
+
+	switch mergedType {
+	case CredTypeUserPass:
+		// USERPASS must always end up with a non-empty username.
+		// Effective username = patch username if sent, else current.
+		// null clears it (rejected below); non-string is a malformed
+		// request (rejected up-front, like type/value above).
+		effectiveUsername := currentUsername.String
+		if v, ok := body["username"]; ok {
+			switch s := v.(type) {
+			case string:
+				effectiveUsername = s
+			case nil:
+				effectiveUsername = ""
+			default:
+				replyError(w, http.StatusBadRequest, "username must be a string")
+				return
+			}
+		}
+		if strings.TrimSpace(effectiveUsername) == "" {
+			replyError(w, http.StatusBadRequest, "username is required for USERPASS credentials")
+			return
+		}
+
+	case CredTypeSSHKey:
+		// Changing TO SSH_KEY requires a new value — we can't validate
+		// the existing encrypted blob's shape without decrypting it
+		// in the hot path, and the existing value almost certainly
+		// isn't PEM-shaped if the row was previously API_KEY/SECRET/etc.
+		if typeChanged && !valueSent {
+			replyError(w, http.StatusBadRequest, "changing type to SSH_KEY requires a new value")
+			return
+		}
+		if valueSent && !looksLikePEM(valueStr, "PRIVATE KEY") {
+			replyError(w, http.StatusBadRequest, "ssh key must be a PEM-encoded private key (begins with -----BEGIN ... PRIVATE KEY-----)")
+			return
+		}
+
+	case CredTypeCertificate:
+		if typeChanged && !valueSent {
+			replyError(w, http.StatusBadRequest, "changing type to CERTIFICATE requires a new value")
+			return
+		}
+		if valueSent && !looksLikePEM(valueStr, "CERTIFICATE") {
+			replyError(w, http.StatusBadRequest, "certificate must be PEM-encoded (begins with -----BEGIN CERTIFICATE-----)")
+			return
+		}
 	}
 
 	// Note: "status" is intentionally excluded to prevent users from
@@ -304,7 +427,7 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 		"provider": "provider", "scope": "scope",
 		"crew_id": "crew_id", "account_label": "account_label",
 		"account_email": "account_email", "token_expires_at": "token_expires_at",
-		"security_level": "security_level",
+		"security_level": "security_level", "username": "username",
 	}
 
 	// Parse crew_ids if provided — will be written to junction table

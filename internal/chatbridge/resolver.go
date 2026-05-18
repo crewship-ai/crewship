@@ -135,6 +135,9 @@ type credentialResponse struct {
 	Value    string `json:"value"`
 	Priority int    `json:"priority"`
 	Type     string `json:"type"`
+	// Username is populated for USERPASS credentials only — see the
+	// per-type behaviour table in orchestrator.buildCredFileScript.
+	Username string `json:"username,omitempty"`
 }
 
 // CreateChatRequest holds the parameters for creating a new chat session.
@@ -373,6 +376,7 @@ func (r *IPCResolver) resolve(ctx context.Context, resolveURL string) (*ChatInfo
 			PlainValue: c.Value,
 			Priority:   c.Priority,
 			Type:       c.Type,
+			Username:   c.Username,
 		}
 	}
 
