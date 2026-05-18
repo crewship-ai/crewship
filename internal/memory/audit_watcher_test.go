@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -25,10 +26,24 @@ func auditTestRig(t *testing.T) (string, *sql.DB, journal.Emitter, *scrubber.Scr
 	t.Helper()
 	base := t.TempDir()
 
-	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "audit.db"))
+	// WAL + a generous busy timeout: the audit_watcher path can
+	// have two writers contending on the same DB at the same
+	// instant — the journal.Writer goroutine flushing a queued
+	// entry (FlushSize=1 below for test determinism) and the main
+	// goroutine's RecordVersion INSERT. SQLite's default rollback
+	// journal mode fails the second writer with SQLITE_BUSY; WAL
+	// lets the second writer block briefly. busy_timeout=5000
+	// gives the loser up to 5 s to retry before the test fails.
+	// modernc.org/sqlite (our driver) reads pragmas via the
+	// _pragma= URL parameter.
+	dbPath := filepath.Join(t.TempDir(), "audit.db")
+	db, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)")
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
+	// Single connection avoids the second-connection-pool race that
+	// would re-introduce SQLITE_BUSY under WAL when the pool grows.
+	db.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = db.Close() })
 
 	// Inline schema mirrors the production migrations' columns for
@@ -211,12 +226,16 @@ func TestAuditWatcher_HappyPath_RecordsVersionAndEmitsUpdated(t *testing.T) {
 
 	// One memory_versions row with the right shape.
 	var rows int
-	_ = db.QueryRow(`SELECT COUNT(*) FROM memory_versions`).Scan(&rows)
+	if err := db.QueryRow(`SELECT COUNT(*) FROM memory_versions`).Scan(&rows); err != nil {
+		t.Fatalf("count memory_versions: %v", err)
+	}
 	if rows != 1 {
 		t.Fatalf("rows = %d, want 1", rows)
 	}
 	var path, tier, writtenBy, hash string
-	_ = db.QueryRow(`SELECT path, tier, written_by, sha256 FROM memory_versions`).Scan(&path, &tier, &writtenBy, &hash)
+	if err := db.QueryRow(`SELECT path, tier, written_by, sha256 FROM memory_versions`).Scan(&path, &tier, &writtenBy, &hash); err != nil {
+		t.Fatalf("scan memory_versions row: %v", err)
+	}
 	if path != "agent:martin/AGENT.md" {
 		t.Errorf("path = %q", path)
 	}
@@ -233,7 +252,9 @@ func TestAuditWatcher_HappyPath_RecordsVersionAndEmitsUpdated(t *testing.T) {
 
 	// One memory.updated journal entry.
 	var jRows int
-	_ = db.QueryRow(`SELECT COUNT(*) FROM journal_entries WHERE entry_type = 'memory.updated'`).Scan(&jRows)
+	if err := db.QueryRow(`SELECT COUNT(*) FROM journal_entries WHERE entry_type = 'memory.updated'`).Scan(&jRows); err != nil {
+		t.Fatalf("count journal_entries: %v", err)
+	}
 	if jRows != 1 {
 		t.Errorf("memory.updated entries = %d, want 1", jRows)
 	}
@@ -423,12 +444,76 @@ func TestStartAuditWatcher_MissingRoot_DefersAndStartsOnCreate(t *testing.T) {
 	// On a fresh install the crews dir doesn't exist yet. The
 	// watcher must wait for it (deferred boot) rather than failing
 	// outright. Verify by booting against an empty base, creating
-	// the crews dir, and observing that a write triggers an audit
-	// row within a few seconds.
+	// the crews dir + a memory file, and observing that the audit
+	// row + journal entry land within the deferred-boot window.
+	//
+	// We drive the test fast by overriding DeferredBootInterval to
+	// 50 ms; production stays on the 30 s default. Skip in -short
+	// to keep `go test -short` snappy.
 	if testing.Short() {
-		t.Skip("relies on a 30s deferred-boot poller; skip in -short")
+		t.Skip("touches fsnotify + ticker; skip in -short")
 	}
-	t.Skip("manual: the deferred-boot ticker uses 30s; harness can't wait that long without flakiness. Covered conceptually by TestStartAuditWatcher_EmptyBasePath_NoOp + auditOnePath unit tests.")
+
+	base, db, j, scr := auditTestRig(t)
+	// The rig creates an empty TempDir as base and seeds the crews
+	// DB row but NOT the filesystem crews/ subtree (that's deferred
+	// until writeMemoryFile fires). So we already meet the
+	// precondition: {base}/crews/ does not exist when
+	// StartAuditWatcher is called below.
+	crewsRoot := filepath.Join(base, "crews")
+	if _, err := os.Stat(crewsRoot); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("precondition: crews root must not exist before StartAuditWatcher; stat err=%v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	StartAuditWatcher(ctx, db, j, AuditWatcherConfig{
+		BasePath:             base,
+		BlobRoot:             filepath.Join(base, "versions"),
+		Scrubber:             scr,
+		DeferredBootInterval: 50 * time.Millisecond,
+		// Fast poll fallback so the test doesn't depend on
+		// fsnotify's recursive auto-add catching up to a deeply
+		// nested mkdir+write that happens in the same instant.
+		// Production uses the 30 s default; the test compresses
+		// the loop so the polling sweep certainly fires within
+		// the 3 s deadline.
+		PollFallbackInterval: 100 * time.Millisecond,
+		DebounceInterval:     20 * time.Millisecond,
+	}, logger)
+
+	// Create the crews dir first so the deferred poller can
+	// detect it and boot StartWatcher. Then write the memory file
+	// — the poll fallback in memory.Watcher scans the tree every
+	// 100 ms, so the AGENT.md write will be picked up regardless
+	// of fsnotify recursive-add timing.
+	if err := os.MkdirAll(crewsRoot, 0o755); err != nil {
+		t.Fatalf("step 1 mkdir crews root: %v", err)
+	}
+	time.Sleep(200 * time.Millisecond) // let the 50 ms poller detect + boot
+
+	_ = writeMemoryFile(t, base, "crew_audit", "martin", "AGENT.md",
+		[]byte("# Martin\n\nNotes after deferred boot.\n"))
+
+	// Poll up to 3 s for the audit row to land. The deferred ticker
+	// fires every 50 ms; fsnotify + scrubber + record should be
+	// sub-second on a quiet CI box.
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		var rows int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM memory_versions WHERE workspace_id = ?`, "ws_audit").Scan(&rows); err != nil {
+			t.Fatalf("count after deferred boot: %v", err)
+		}
+		if rows == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("deferred-boot watcher did not record the write within 3s (rows=%d)", rows)
+		}
+		time.Sleep(40 * time.Millisecond)
+	}
 }
 
 // stringContains is a small helper so log-assertions stay readable.

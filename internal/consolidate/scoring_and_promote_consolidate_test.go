@@ -40,24 +40,30 @@ import (
 // score_json column (an empty map serialises to "{}" rather than
 // "null").
 func TestConsolidate_ComputeProposalScores_EmptyRulesReturnsEmptyMap(t *testing.T) {
-	// Use computeProposalScoresWithRecall directly (the wrapper
-	// computeProposalScores was removed as unused in PR #391; this
-	// test was authored before the cleanup and still asserts the
-	// same contract — empty input → non-nil empty map).
-	scores := computeProposalScoresWithRecall(context.Background(), nil, "", nil, 0, time.Now())
-	if scores == nil {
-		t.Errorf("computeProposalScoresWithRecall(nil rules) returned nil map; want non-nil empty map for JSON-marshal compatibility")
-	}
-	if len(scores) != 0 {
-		t.Errorf("len = %d, want 0 for empty input", len(scores))
+	// computeProposalScoresWithRecall is the post-PR-#391 entry
+	// point (the unused-wrapper computeProposalScores was removed
+	// in that PR). Both nil and []LearnedRule{} must return a
+	// non-nil, zero-length map so the score_json column always
+	// serialises to "{}" rather than "null".
+	cases := []struct {
+		name  string
+		rules []LearnedRule
+	}{
+		{name: "nil rules", rules: nil},
+		{name: "empty rules", rules: []LearnedRule{}},
 	}
 
-	scores = computeProposalScoresWithRecall(context.Background(), nil, "", []LearnedRule{}, 0, time.Now())
-	if scores == nil {
-		t.Errorf("computeProposalScoresWithRecall([] rules) returned nil map; want non-nil empty map")
-	}
-	if len(scores) != 0 {
-		t.Errorf("len = %d, want 0 for empty input", len(scores))
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			scores := computeProposalScoresWithRecall(context.Background(), nil, "", tc.rules, 0, time.Now())
+			if scores == nil {
+				t.Fatalf("computeProposalScoresWithRecall(%s) returned nil map; want non-nil empty map for JSON-marshal compatibility", tc.name)
+			}
+			if len(scores) != 0 {
+				t.Fatalf("len = %d, want 0 for empty input", len(scores))
+			}
+		})
 	}
 }
 

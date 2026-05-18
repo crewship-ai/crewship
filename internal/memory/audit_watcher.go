@@ -129,6 +129,14 @@ type AuditWatcherConfig struct {
 	// 30 s default. Polling fires when fsnotify can't keep up (Docker
 	// Desktop bind-mounts, NFS, etc.).
 	PollFallbackInterval time.Duration
+
+	// DeferredBootInterval is how often waitForRootThenWatch
+	// re-checks for the crews root after a deferred boot. Zero ->
+	// 30 s default. Tests override this to a few milliseconds so
+	// they can exercise the "root appears after start" code path
+	// in well under a second; production leaves the default so a
+	// crew provision doesn't burn a poll storm.
+	DeferredBootInterval time.Duration
 }
 
 // StartAuditWatcher launches a goroutine that watches BasePath/crews
@@ -138,11 +146,20 @@ type AuditWatcherConfig struct {
 //
 // db must be a live SQL connection; journal an Emitter; logger a
 // non-nil slog.Logger. Passing nil for any of these is a programming
-// error and panics — by the time we boot the audit watcher, the
-// server's depencency graph has already initialised them.
+// error and panics here — by the time we boot the audit watcher, the
+// server's dependency graph has already initialised them, so a nil
+// argument is a wiring bug, not a runtime condition. Panicking at
+// boot is loud; the alternative (surfacing the nil deref inside the
+// audit goroutine) hides the wiring bug for hours.
 func StartAuditWatcher(ctx context.Context, db *sql.DB, j journal.Emitter, cfg AuditWatcherConfig, logger *slog.Logger) {
 	if logger == nil {
 		panic("memory: StartAuditWatcher: nil logger")
+	}
+	if db == nil {
+		panic("memory: StartAuditWatcher: nil db")
+	}
+	if j == nil {
+		panic("memory: StartAuditWatcher: nil journal emitter")
 	}
 	if cfg.BasePath == "" {
 		logger.Info("memory audit watcher: BasePath empty, watcher disabled")
@@ -167,7 +184,11 @@ func StartAuditWatcher(ctx context.Context, db *sql.DB, j journal.Emitter, cfg A
 }
 
 func waitForRootThenWatch(ctx context.Context, db *sql.DB, j journal.Emitter, cfg AuditWatcherConfig, root string, logger *slog.Logger) {
-	t := time.NewTicker(30 * time.Second)
+	interval := cfg.DeferredBootInterval
+	if interval <= 0 {
+		interval = 30 * time.Second
+	}
+	t := time.NewTicker(interval)
 	defer t.Stop()
 	for {
 		select {
@@ -184,7 +205,14 @@ func waitForRootThenWatch(ctx context.Context, db *sql.DB, j journal.Emitter, cf
 }
 
 func runAuditWatcher(ctx context.Context, db *sql.DB, j journal.Emitter, cfg AuditWatcherConfig, root string, logger *slog.Logger) {
+	// UseFsnotify=true so the audit lands within fsnotify's
+	// sub-second debounce window rather than the 30s poll
+	// fallback. The poll fallback still runs (PollInterval > 0)
+	// so the audit also catches the bind-mount cases where
+	// fsnotify on Docker Desktop / NFS misses events — fsnotify
+	// is the fast path, poll is the safety net.
 	wc := WatchConfig{
+		UseFsnotify:  true,
 		Debounce:     cfg.DebounceInterval,
 		PollInterval: cfg.PollFallbackInterval,
 		Logger:       logger,
@@ -231,9 +259,13 @@ func auditOnePath(ctx context.Context, db *sql.DB, j journal.Emitter, cfg AuditW
 		return nil
 	}
 
-	// stat-then-read so we skip directories + transient .tmp files
-	// the writer creates during atomic-rename.
-	info, err := os.Stat(fullPath)
+	// Lstat (not Stat) so a symlinked memory file doesn't let a
+	// malicious crew container point at e.g. /etc/passwd and have
+	// the audit watcher slurp host secrets into the journal payload.
+	// We refuse to follow symlinks under .memory/ — legitimate
+	// memory writes are plain files written by the agent or the
+	// sidecar's atomic-rename path.
+	info, err := os.Lstat(fullPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			// File deleted between fsnotify event and our stat —
@@ -241,7 +273,12 @@ func auditOnePath(ctx context.Context, db *sql.DB, j journal.Emitter, cfg AuditW
 			// can emit memory.deleted here; today we skip.
 			return nil
 		}
-		return fmt.Errorf("stat: %w", err)
+		return fmt.Errorf("lstat: %w", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		logger.Warn("memory audit watcher: refusing to follow symlink under .memory",
+			"path", fullPath)
+		return nil
 	}
 	if info.IsDir() {
 		return nil
@@ -274,17 +311,34 @@ func auditOnePath(ctx context.Context, db *sql.DB, j journal.Emitter, cfg AuditW
 	// Dedup against the sidecar's path. If a row with the same
 	// (workspace, path, sha256) was inserted recently, the sidecar
 	// already audited this write; we'd just duplicate the row.
+	//
+	// Error handling is deliberate: sql.ErrNoRows means "no recent
+	// match → not a duplicate, fall through and record". Any OTHER
+	// error means the DB is broken (locked, schema-skewed,
+	// connection dropped) and we MUST NOT silently treat that as
+	// "not deduped" — that would let a real duplicate sneak in
+	// every time the DB hiccups. Propagate so the per-file warn
+	// log surfaces the underlying failure.
 	dedupCutoff := time.Now().Add(-auditDedupWindow).UTC().Format(time.RFC3339Nano)
 	var existing int
-	if err := db.QueryRowContext(ctx, `
+	switch err := db.QueryRowContext(ctx, `
 		SELECT 1 FROM memory_versions
 		 WHERE workspace_id = ? AND path = ? AND sha256 = ?
 		   AND written_at >= ?
 		 LIMIT 1`,
 		workspaceID, parsed.RelPath, hash, dedupCutoff,
-	).Scan(&existing); err == nil && existing == 1 {
-		// Already audited within window — done.
-		return nil
+	).Scan(&existing); {
+	case err == nil:
+		if existing == 1 {
+			// Already audited within window — done.
+			return nil
+		}
+		// Should be unreachable (SELECT 1 always returns 1 when a
+		// row matches), but harmless fall-through.
+	case errors.Is(err, sql.ErrNoRows):
+		// No recent duplicate — proceed to record.
+	default:
+		return fmt.Errorf("dedup lookup: %w", err)
 	}
 
 	// Scrubber pass. ModeWarn surfaces hits but doesn't block — the
