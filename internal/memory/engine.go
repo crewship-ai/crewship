@@ -90,38 +90,61 @@ func initSchema(db *sql.DB) error {
 	return err
 }
 
-// Status returns information about the memory index state.
-func (e *Engine) Status(ctx context.Context) (*Status, error) {
+// statusSnapshot is the data Status reads from the DB and engine config
+// under the RLock. Pulling it into a struct lets the lock-scoped helper
+// keep its `defer RUnlock()` while still returning early on error.
+type statusSnapshot struct {
+	totalChunks   int
+	totalFiles    int
+	indexedAtStr  sql.NullString
+	basePath      string
+	searchEnabled bool
+}
+
+func (e *Engine) statusSnapshot(ctx context.Context) (statusSnapshot, error) {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 
-	var totalChunks int
-	if err := e.db.QueryRowContext(ctx, "SELECT count(*) FROM memory_chunks").Scan(&totalChunks); err != nil {
-		return nil, fmt.Errorf("count chunks: %w", err)
+	var s statusSnapshot
+	if err := e.db.QueryRowContext(ctx, "SELECT count(*) FROM memory_chunks").Scan(&s.totalChunks); err != nil {
+		return s, fmt.Errorf("count chunks: %w", err)
+	}
+	if err := e.db.QueryRowContext(ctx, "SELECT count(DISTINCT file) FROM memory_chunks").Scan(&s.totalFiles); err != nil {
+		return s, fmt.Errorf("count files: %w", err)
+	}
+	if err := e.db.QueryRowContext(ctx, "SELECT value FROM memory_meta WHERE key = 'last_indexed'").Scan(&s.indexedAtStr); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return s, fmt.Errorf("read last_indexed: %w", err)
+	}
+	s.basePath = e.basePath
+	s.searchEnabled = e.config.SearchEnabled
+	return s, nil
+}
+
+// Status returns information about the memory index state.
+func (e *Engine) Status(ctx context.Context) (*Status, error) {
+	// Take the RLock only over the DB reads — they need consistency with
+	// any in-flight Reindex (which takes Lock). The filesystem walk for
+	// computeDirSize is unrelated to the index and can take a noticeable
+	// amount of time on large memory directories; doing it under RLock
+	// pointlessly extends the window that blocks Reindex acquisition.
+	s, err := e.statusSnapshot(ctx)
+	if err != nil {
+		return nil, err
 	}
 
-	var totalFiles int
-	if err := e.db.QueryRowContext(ctx, "SELECT count(DISTINCT file) FROM memory_chunks").Scan(&totalFiles); err != nil {
-		return nil, fmt.Errorf("count files: %w", err)
-	}
-
-	var indexedAtStr sql.NullString
-	if err := e.db.QueryRowContext(ctx, "SELECT value FROM memory_meta WHERE key = 'last_indexed'").Scan(&indexedAtStr); err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return nil, fmt.Errorf("read last_indexed: %w", err)
-	}
 	var indexedAt time.Time
-	if indexedAtStr.Valid {
-		indexedAt, _ = time.Parse(time.RFC3339, indexedAtStr.String)
+	if s.indexedAtStr.Valid {
+		indexedAt, _ = time.Parse(time.RFC3339, s.indexedAtStr.String)
 	}
 
-	totalSize := computeDirSize(e.basePath)
+	totalSize := computeDirSize(s.basePath)
 
 	return &Status{
-		TotalFiles:  totalFiles,
-		TotalChunks: totalChunks,
+		TotalFiles:  s.totalFiles,
+		TotalChunks: s.totalChunks,
 		IndexedAt:   indexedAt,
 		TotalSizeKB: totalSize / 1024,
-		SearchReady: e.config.SearchEnabled,
+		SearchReady: s.searchEnabled,
 	}, nil
 }
 
