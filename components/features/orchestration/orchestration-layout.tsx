@@ -163,9 +163,14 @@ export function OrchestrationLayout({
   const [issueSearch, setIssueSearch] = useState("")
   const [projects, setProjects] = useState<Project[]>([])
   // Project filter applied via saved views — does NOT open the detail panel.
-  // `selectedProjectId` is for explicit project clicks (opens detail panel);
-  // `filterProjectId` is only for filtering the issues list.
-  const [filterProjectId] = useState<string | null>(null)
+  // `selectedProjectId` is the authoritative "user navigated to this project"
+  // state and is the only thing that opens the right-hand detail panel.
+  // `filterProjectId` is the saved-view-scoped filter and feeds only
+  // `useFilteredIssues`. Keeping them separate (issue #320) means applying
+  // or clearing a saved view's project filter never opens or closes the
+  // detail panel, and explicitly clicking a project never leaks back into
+  // the saved-view's filter state.
+  const [filterProjectId, setFilterProjectId] = useState<string | null>(null)
   const [filterCrewId, setFilterCrewId] = useState<string | null>(null)
   const [filterAgentId, setFilterAgentId] = useState<string | null>(null)
   // Multi-select status filter (empty = show all). Priority filter is
@@ -796,10 +801,14 @@ export function OrchestrationLayout({
                   setActiveViewId(id)
                   if (viewType) setIssueViewMode(viewType)
 
-                  // Clearing the selected view ("All Issues"): reset filters to
-                  // the same defaults used when the page initialises.
+                  // Clearing the selected view ("All Issues"): reset filters
+                  // to the same defaults used when the page initialises.
+                  // We deliberately clear `filterProjectId` (the saved-view
+                  // filter) but leave `selectedProjectId` alone — explicit
+                  // project-detail navigation should survive a saved-view
+                  // change. The user can close the detail panel separately.
                   if (id === null) {
-                    setSelectedProjectId(null)
+                    setFilterProjectId(null)
                     setFilterCrewId(null)
                     setFilterAgentId(null)
                     setFilterStatuses([])
@@ -810,12 +819,20 @@ export function OrchestrationLayout({
 
                   // Look up the saved view and apply any filter fields that
                   // map onto the state consumed by `filteredIssues`.
+                  //
+                  // Issue #320: write the view's project_id to
+                  // `filterProjectId`, NOT `selectedProjectId`. Conflating
+                  // the two (the pre-#318 behaviour) caused saved-view
+                  // application to silently open the detail panel for the
+                  // view's project, and explicit project clicks to leak
+                  // back into the saved view's filter set.
+                  //
                   // TODO: wire up status/label/priority filters and
                   // sort_json once the issue list supports them.
                   const view = savedViews.find((v) => v.id === id)
                   if (!view) return
                   const f = applySavedView(view)
-                  setSelectedProjectId(f.projectId)
+                  setFilterProjectId(f.projectId)
                   setFilterCrewId(f.crewId)
                   setFilterAgentId(f.agentId)
                   setIssueSearch(f.search)
