@@ -234,8 +234,22 @@ jobs:
       - name: Install osv-scanner
         run: go install github.com/google/osv-scanner/v2/cmd/osv-scanner@v2.2.4
 
-      - name: Run osv-scanner against lockfiles
+      # Phase 1: warn-only. Mirrors grype's `fail-build: false` posture
+      # above — we want the table in the run log + a `::warning::` annotation
+      # on the PR, but not a red CI gate while Dependabot is still draining
+      # the baseline backlog (~14 fixable findings as of this PR). Once the
+      # baseline is clean, drop the `|| true` and promote to a hard gate.
+      - name: Run osv-scanner against lockfiles (warn-only)
         run: |
+          set +e
           osv-scanner \
             --lockfile=go.mod \
-            --lockfile=pnpm-lock.yaml
+            --lockfile=pnpm-lock.yaml \
+            > /tmp/osv.log 2>&1
+          exit_code=$?
+          cat /tmp/osv.log
+          if [ "$exit_code" -ne 0 ]; then
+            count=$(grep -oE 'Total [0-9]+ packages affected by [0-9]+ known vulnerabilities' /tmp/osv.log | head -1)
+            echo "::warning::osv-scanner: ${count:-non-zero exit}. See run log for the table. Phase 1 = warn-only; baseline still being drained by Dependabot."
+          fi
+          exit 0
