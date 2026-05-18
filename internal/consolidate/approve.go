@@ -439,8 +439,36 @@ func appendToCanonical(canonicalPath string, now time.Time, body string) error {
 	}
 	defer func() { _ = lk.Unlock() }()
 
+	_, statErr := os.Stat(canonicalPath)
+	canonicalExists := !os.IsNotExist(statErr)
+	block := BuildCanonicalAppendBlock(canonicalExists, now, body)
+
+	f, err := os.OpenFile(canonicalPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return fmt.Errorf("open canonical: %w", err)
+	}
+	defer f.Close()
+	if _, err := f.WriteString(block); err != nil {
+		return fmt.Errorf("write canonical: %w", err)
+	}
+	return nil
+}
+
+// BuildCanonicalAppendBlock returns the exact byte slice that
+// appendToCanonical would append to a learned-*.md file given the
+// supplied rules body. Pure function — no IO, no clocks beyond the
+// caller's `now`. The HITL diff endpoint uses this to preview a
+// merge without touching disk; appendToCanonical uses it to keep
+// the preview and the write byte-identical.
+//
+// `canonicalExists` decides whether the block leads with the
+// file's first-time header (false) or with the multi-block "---"
+// divider (true). Either branch always ends with the rules body
+// terminated by a newline so the next call has a clean append
+// boundary.
+func BuildCanonicalAppendBlock(canonicalExists bool, now time.Time, body string) string {
 	var block strings.Builder
-	if _, statErr := os.Stat(canonicalPath); os.IsNotExist(statErr) {
+	if !canonicalExists {
 		block.WriteString("# Learned rules — ")
 		block.WriteString(now.Format("2006-01-02"))
 		block.WriteString("\n\n")
@@ -457,16 +485,33 @@ func appendToCanonical(canonicalPath string, now time.Time, body string) error {
 	if !strings.HasSuffix(body, "\n") {
 		block.WriteByte('\n')
 	}
+	return block.String()
+}
 
-	f, err := os.OpenFile(canonicalPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
-	if err != nil {
-		return fmt.Errorf("open canonical: %w", err)
+// CanonicalPathForProposal mirrors the proposal→canonical resolution
+// approve.go does inline. Given a proposal_path that lives in
+// {crewMemory}/.proposed/proposal-*.md, returns the learned-*.md
+// path the merge would land in for `now`. Returned even when the
+// canonical file does not exist yet — callers stat the path
+// themselves when they need to distinguish.
+//
+// Exported so the HITL diff endpoint can resolve the same path
+// the eventual approve would resolve, without forking the rule.
+func CanonicalPathForProposal(proposalPath string, now time.Time) string {
+	canonicalDir := filepath.Dir(proposalPath)
+	if filepath.Base(canonicalDir) == ".proposed" {
+		canonicalDir = filepath.Dir(canonicalDir)
 	}
-	defer f.Close()
-	if _, err := f.WriteString(block.String()); err != nil {
-		return fmt.Errorf("write canonical: %w", err)
-	}
-	return nil
+	return filepath.Join(canonicalDir, "learned-"+now.Format("2006-01-02")+".md")
+}
+
+// ExtractProposalRulesBody is the exported alias of the internal
+// extractRulesBody helper. The diff endpoint needs the same
+// header-stripping that ApproveProposal applies before invoking
+// appendToCanonical; exposing the helper avoids duplicating the
+// "split on first ---" rule.
+func ExtractProposalRulesBody(body string) string {
+	return extractRulesBody(body)
 }
 
 // extractRulesBody peels off the proposal markdown's header scaffolding

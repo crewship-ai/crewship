@@ -289,6 +289,12 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	r.mux.Handle("POST /api/v1/consolidate/proposed/{id}/approve", authed(wsCtx(http.HandlerFunc(propH.Approve))))
 	r.mux.Handle("POST /api/v1/consolidate/proposed/{id}/reject", authed(wsCtx(http.HandlerFunc(propH.Reject))))
 	r.mux.Handle("GET /api/v1/consolidate/proposed/{id}/explain", authed(wsCtx(http.HandlerFunc(propH.Explain))))
+	// Diff: preview the byte-level change an approve would land in
+	// the canonical learned-*.md file. Read-only, MEMBER+ — same
+	// auth surface as Explain. Pairs with the existing approve/
+	// reject flow so the HITL UI can show a diff before the
+	// operator commits.
+	r.mux.Handle("GET /api/v1/consolidate/proposed/{id}/diff", authed(wsCtx(http.HandlerFunc(propH.Diff))))
 
 	// memory→Skills bridge HITL surface (PR #4 step 7). When the
 	// consolidator auto-promotes a stable learned rule into
