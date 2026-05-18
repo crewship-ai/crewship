@@ -45,13 +45,23 @@ package database
 // preserving every current credential's behaviour. No data migration
 // needed.
 //
-// mount_type carries a CHECK constraint so manual writes, future
-// backfills, and any code path that bypasses the API can't drift the
-// column off the closed {env, file} set. Defense in depth — the API
-// already validates, but the discriminator is load-bearing for the
-// container mount script in internal/orchestrator/exec_sidecar.go and
-// a typo'd value there ("File", "ENV", "filesystem") would silently
-// fall through to env-mode injection and put SSH keys in env vars.
+// mount_type carries a CHECK constraint so any future code path that
+// writes the column — admin SQL, an importer, a migration that
+// backfills bindings — can't drift the value off the closed
+// {env, file} set. Defense in depth: today the orchestrator branches
+// on Credential.Type alone (USERPASS always splits env vars, SSH_KEY
+// always file-mounts, etc.) so this column is metadata, not the
+// discriminator. The hedge is for the binding-level override the
+// PRD reserves for a later iteration — when a workspace wants a
+// given SSH_KEY credential to mount as an env var for one agent
+// and as a file for another. Until that ships, the column is
+// effectively NOT YET LOAD-BEARING — every reader uses Type instead.
+//
+// Downgrade: SQLite < 3.35 can't DROP COLUMN, so this migration is
+// effectively one-way. v94 is additive and idempotent enough that
+// rollback to v93 isn't needed in practice — if a release ever needs
+// it, the path is "checkpoint backup → restore from v93 backup",
+// not "ALTER TABLE drop the columns we just added."
 const migrationAddCredentialVaultTypes = `
 ALTER TABLE credentials
     ADD COLUMN username TEXT;

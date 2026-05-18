@@ -859,6 +859,34 @@ func TestCredUpdate_MergedValidation(t *testing.T) {
 			wantBodyContains: "value must be a string",
 		},
 		{
+			// JSON-shape gate for the generic allowed map: provider
+			// (and the rest of the string-or-null TEXT columns) used
+			// to silently coerce non-strings into the column. Closed
+			// in the same review round as type/value/username.
+			name:             "rejects numeric provider",
+			seedType:         "API_KEY",
+			seedPlain:        "ghp_x",
+			body:             `{"provider":123}`,
+			wantStatus:       http.StatusBadRequest,
+			wantBodyContains: "provider must be a string",
+		},
+		{
+			name:             "rejects array account_label",
+			seedType:         "API_KEY",
+			seedPlain:        "ghp_x",
+			body:             `{"account_label":["x","y"]}`,
+			wantStatus:       http.StatusBadRequest,
+			wantBodyContains: "account_label must be a string",
+		},
+		{
+			name:             "rejects boolean scope",
+			seedType:         "API_KEY",
+			seedPlain:        "ghp_x",
+			body:             `{"scope":true}`,
+			wantStatus:       http.StatusBadRequest,
+			wantBodyContains: "scope must be a string",
+		},
+		{
 			name:       "allows type change to USERPASS with username + value",
 			seedType:   "SECRET",
 			seedPlain:  "old-password",

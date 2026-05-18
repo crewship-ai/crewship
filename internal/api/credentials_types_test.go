@@ -192,6 +192,31 @@ func TestLooksLikePEM(t *testing.T) {
 			"CERTIFICATE",
 			false,
 		},
+		// HasSuffix substring confusion: a payload labelled XPRIVATE
+		// KEY would slip past a naked HasSuffix(label, "PRIVATE KEY").
+		// labelMatchesMarker requires either exact equality or a
+		// space-separated prefix to close the foot-gun.
+		{
+			"BEGIN XPRIVATE KEY — rejected (no space before marker)",
+			"-----BEGIN XPRIVATE KEY-----\nABC\n-----END XPRIVATE KEY-----",
+			"PRIVATE KEY",
+			false,
+		},
+		{
+			"BEGIN MYCERTIFICATE — rejected against CERTIFICATE marker",
+			"-----BEGIN MYCERTIFICATE-----\nABC\n-----END MYCERTIFICATE-----",
+			"CERTIFICATE",
+			false,
+		},
+		// Empty marker is a future-caller foot-gun — HasSuffix(any, "")
+		// is true, so a forgotten label constant would silently turn
+		// the validator into "accept any PEM." Fail closed.
+		{
+			"empty marker rejects everything",
+			pemFixture("RSA PRIVATE KEY", "ABC"),
+			"",
+			false,
+		},
 	}
 
 	for _, tt := range tests {

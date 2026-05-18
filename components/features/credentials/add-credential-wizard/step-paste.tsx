@@ -19,15 +19,28 @@ const NON_TESTABLE_TYPES = new Set(["USERPASS", "SSH_KEY", "CERTIFICATE", "GENER
 export function StepPaste({ state, setState }: Props) {
   const [bulkMode, setBulkMode] = React.useState(false)
   const debounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+  const abortRef = React.useRef<AbortController | null>(null)
 
   // Auto-test debounced 800ms after paste. Skipped for vault types
   // (no /test endpoint) and for the legacy NONE provider (no upstream
   // to test against).
+  //
+  // Race protection: an in-flight /test fetch must be aborted if the
+  // user switches tile or auth method (changing state.type / .provider)
+  // OR clears the value, otherwise a stale response can land in
+  // setState() after the user has already moved past — e.g. flipping
+  // from API_KEY → USERPASS while a test was pending would render a
+  // ghost "Invalid" verdict on a non-testable type. AbortController +
+  // an effect dep on type/provider closes both windows.
   React.useEffect(() => {
     if (NON_TESTABLE_TYPES.has(state.type) || state.provider === "NONE" || !state.value.trim()) {
       return
     }
     if (debounceRef.current) clearTimeout(debounceRef.current)
+    // Cancel any in-flight test from a prior keystroke / tile change.
+    if (abortRef.current) abortRef.current.abort()
+    const ctrl = new AbortController()
+    abortRef.current = ctrl
     debounceRef.current = setTimeout(async () => {
       setState({ testing: true, testResult: null })
       try {
@@ -39,6 +52,7 @@ export function StepPaste({ state, setState }: Props) {
             type: state.type,
             value: state.value.trim(),
           }),
+          signal: ctrl.signal,
         })
         if (!res.ok) {
           setState({ testing: false, testResult: { valid: false, error: "Test request failed" } })
@@ -46,15 +60,18 @@ export function StepPaste({ state, setState }: Props) {
         }
         const data = await res.json()
         setState({ testing: false, testResult: { valid: data.valid, error: data.error } })
-      } catch {
+      } catch (err) {
+        // AbortError is the expected outcome when type/provider/value
+        // changes mid-flight — don't surface it as a network error.
+        if ((err as Error)?.name === "AbortError") return
         setState({ testing: false, testResult: { valid: false, error: "Network error" } })
       }
     }, 800)
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current)
+      ctrl.abort()
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.value])
+  }, [state.value, state.type, state.provider, setState])
 
   if (bulkMode) {
     return <BulkImport setBulkMode={setBulkMode} />
@@ -259,16 +276,51 @@ function PEMFields({
   // key (Windows openssl, Notepad) — where split('\n')[0] keeps a
   // trailing '\r' that prevents `-----$` from matching — still resolves
   // to the right marker. Mirrors the early TrimSpace in looksLikePEM.
-  const trimmed = state.value.trim()
+  //
+  // The warning is computed against a debounced snapshot of the
+  // value, not the live keystroke, so a user typing a fresh BEGIN
+  // line doesn't see the amber warning flash on every character.
+  // Also suppressed entirely while the textarea has focus — show
+  // only once they tab away or after they stop typing for 350ms.
+  const [debouncedValue, setDebouncedValue] = React.useState(state.value)
+  const [focused, setFocused] = React.useState(false)
+  React.useEffect(() => {
+    const t = setTimeout(() => setDebouncedValue(state.value), 350)
+    return () => clearTimeout(t)
+  }, [state.value])
+
+  const trimmed = debouncedValue.trim()
   const expectedMarker = isSSH ? "PRIVATE KEY" : "CERTIFICATE"
   const firstLine = (trimmed.split("\n", 1)[0] ?? "").trim()
   const looksWrongShape =
+    !focused &&
     trimmed.length > 0 &&
     !(
       trimmed.startsWith("-----BEGIN ") &&
       trimmed.includes("-----END ") &&
       firstLine.replace(/^-----BEGIN /, "").replace(/-----$/, "").trim().endsWith(expectedMarker)
     )
+
+  // onPaste normalises CRLF → LF and strips leading whitespace some
+  // terminals / Confluence-style copies inject before each line. The
+  // backend tolerates CRLF (looksLikePEM TrimSpaces firstLine) but
+  // the user-facing warning is easier to satisfy if the value is
+  // clean, and the sidecar PEM parser is stricter than our gate.
+  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const raw = e.clipboardData.getData("text")
+    if (!raw) return
+    const normalised = raw
+      .replace(/\r\n?/g, "\n")
+      .split("\n")
+      .map((line) => line.replace(/^[ \t]+(?=-----)/, "")) // strip indent before armour lines
+      .join("\n")
+    if (normalised === raw) return // nothing to fix, let default paste happen
+    e.preventDefault()
+    const target = e.currentTarget
+    const start = target.selectionStart ?? state.value.length
+    const end = target.selectionEnd ?? state.value.length
+    setState({ value: state.value.slice(0, start) + normalised + state.value.slice(end) })
+  }
 
   return (
     <div className="space-y-3">
@@ -308,6 +360,9 @@ function PEMFields({
           rows={10}
           value={state.value}
           onChange={(e) => setState({ value: e.target.value })}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+          onPaste={handlePaste}
           placeholder={placeholder}
           spellCheck={false}
           autoComplete="off"
