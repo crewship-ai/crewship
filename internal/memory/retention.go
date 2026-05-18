@@ -278,23 +278,34 @@ func extractRetentionDays(memCfg string) int {
 // interval <= 0 falls back to 24h (matches the documented "daily"
 // cadence in the PRD).
 //
-// NOTE — wiring. This helper is NOT currently registered in
-// server_lifecycle.go because the existing consolidate.runCompactionLoop
-// already does a global PruneOldVersions sweep that includes the
-// row-delete behaviour (with a hard-coded global retention). Adding
-// this sweeper alongside would result in two background loops touching
-// memory_versions on different cadences. A follow-up PR should either:
+// WIRING — important. As of the per-workspace retention rollout
+// (Iter 4 of the memory-hardening series), the production path
+// does NOT use StartRetentionSweeper directly. The per-workspace
+// pass piggy-backs the existing consolidate.runCompactionLoop
+// daily tick — runCompactionLoop calls SweepAllWorkspaces after
+// the global memory.PruneOldVersions pass, so one ticker drives
+// both passes in coordinated order:
 //
-//   - Replace the consolidate.runCompactionLoop's PruneOldVersions
-//     call with a SweepAllWorkspaces call so per-workspace retention
-//     wins, OR
+//  1. PruneOldVersions — global retention + keep-N floor + blob GC
+//  2. SweepAllWorkspaces — per-workspace tightening for tenants
+//     with retention_days < the global cutoff
 //
-//   - Wire StartRetentionSweeper from server_lifecycle.go AFTER
-//     removing the memory-versions branch from runCompactionLoop.
+// StartRetentionSweeper is kept exported for two cases the folded
+// path does not cover:
 //
-// Either path lands per-workspace retention end-to-end; this PR
-// supplies only the building blocks so the consolidator change can
-// stay focused on the routing question.
+//   - A deployment that runs ONLY the retention sweep (no
+//     consolidation worker — e.g. a future "lite" mode that ships
+//     without the LLM-driven consolidator) can wire this directly
+//     from its own lifecycle.
+//   - Tests that want to exercise the boot-time-tick / cancel
+//     semantics in isolation from the consolidator's wider state
+//     machine.
+//
+// Pointing the production server at this helper would result in
+// two background loops both calling SweepAllWorkspaces — the
+// folded path is the single source of truth; do not re-wire it
+// from server_lifecycle.go without removing the runCompactionLoop
+// call first.
 func StartRetentionSweeper(
 	ctx context.Context,
 	db *sql.DB,
