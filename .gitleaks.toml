@@ -29,6 +29,10 @@ paths = [
   # hardcoded test vectors, no real credentials.
   '''internal/scrubber/scrubber_test\.go$''',
   '''internal/scrubber/security_test\.go$''',
+  # Same contract for scrubber's "extra" tests from PR #393's bulk
+  # test batch — fake credential strings used to exercise the
+  # redaction patterns.
+  '''internal/scrubber/scrubber_extra_test\.go$''',
 
   # Encryption test vectors (AES-GCM roundtrip tests with fake keys).
   # All three encryption test files contain hardcoded hex keys
@@ -37,6 +41,13 @@ paths = [
   '''internal/encryption/encryption_test\.go$''',
   '''internal/encryption/encryption_bench_test\.go$''',
   '''internal/encryption/layout_test\.go$''',
+
+  # Encryption "extra" tests added in PR #393's bulk test batch. Same
+  # contract as encryption_test.go: hardcoded fake hex keys for
+  # AES-GCM roundtrip assertions. Verified inline — every literal
+  # string is a deterministic test vector (sequential alphabet,
+  # repeated digits), no production credentials.
+  '''internal/encryption/encryption_extra_test\.go$''',
 
   # Onboarding test fixture: ENCRYPTION_KEY string passed to mock
   # bootstrap calls — generic-api-key rule fires on the high-entropy
@@ -98,6 +109,22 @@ paths = [
   # client components and contain no actual credentials.
   '''app/\(dashboard\)/agents/\[agentId\]/runs/page\.tsx$''',
   '''app/\(dashboard\)/agents/\[agentId\]/credentials/page\.tsx$''',
+
+  # Credentials wizard "paste" step (PR #408). UI hint placeholder for
+  # users showing the canonical PEM/OpenSSH key envelope they should
+  # paste. The literal string is the BEGIN/END header with a Unicode
+  # ellipsis (…) between them — no key bytes, no production secret.
+  # Triggers private-key rule on the header pattern.
+  '''components/features/credentials/add-credential-wizard/step-paste\.tsx$''',
+
+  # Historical pipeline LLM test fixture (gitleaks scans full git history
+  # with fetch-depth: 0, so commits no longer in the working tree still
+  # surface). The original commit contained a fake API key for a mock
+  # LLM client; even though the file has since been renamed/refactored,
+  # the historical match keeps re-firing on every Security run. Path
+  # pin silences the historical reference; if a new test file with the
+  # same name appears, it would have to be re-verified.
+  '''internal/pipeline/runner_llm_test\.go$''',
 
   # Gitleaks own config files (false positive loop prevention).
   '''\.gitleaks\.toml$''',
