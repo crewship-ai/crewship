@@ -736,172 +736,179 @@ func seedTypedCredential(t *testing.T, db *sql.DB, wsID, userID, credID, name, c
 	}
 }
 
-func TestCredUpdate_RejectsBadTypeChange(t *testing.T) {
+// TestCredUpdate_MergedValidation is the table-driven suite for
+// CredentialHandler.Update's merged-payload validation. Every row
+// seeds a typed credential, fires a PATCH, and asserts the expected
+// HTTP status. Failure-case subtests also verify the DB row was NOT
+// mutated; success-case subtests verify the new column values are
+// what they should be.
+//
+// Coverage targets:
+//   - closed-enum gate (unknown type rejected)
+//   - non-string JSON gate for type/username/value (must be strings,
+//     not the silent fall-through that lets {"type": 123} through)
+//   - per-type field requirements (USERPASS needs username, SSH_KEY
+//     needs PEM-shaped value)
+//   - type transitions that can/can't validate the existing value
+//   - metadata-only PATCH on a vault-type row skips value re-check
+func TestCredUpdate_MergedValidation(t *testing.T) {
 	t.Parallel()
-	h, db := newCredHandler(t)
-	userID := seedTestUser(t, db)
-	wsID := seedTestWorkspace(t, db, userID)
 
-	// Existing API_KEY row; PATCH tries to flip type to USERPASS
-	// without providing a username — invalid because USERPASS rows
-	// must always have a username.
-	seedTypedCredential(t, db, wsID, userID, "c1", "GH", "API_KEY", "", "ghp_legacy")
+	pemSSH := pemFixture("OPENSSH PRIVATE KEY", "abc")
 
-	body := bytes.NewBufferString(`{"type":"USERPASS"}`)
-	req := httptest.NewRequest("PATCH", "/api/v1/credentials/c1", body)
-	req.SetPathValue("credentialId", "c1")
-	req = req.WithContext(withWorkspace(req.Context(), wsID, "OWNER"))
-	rr := httptest.NewRecorder()
-	h.Update(rr, req)
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400; body: %s", rr.Code, rr.Body.String())
+	tests := []struct {
+		name string
+		// seed describes the starting row — type, username, encrypted-value
+		// plaintext source. Empty username → NULL.
+		seedType, seedUsername, seedPlain string
+		body                              string
+		wantStatus                        int
+		// wantBodyContains: substring the response body must contain
+		// (skipped if empty). Useful for asserting the user-facing reason.
+		wantBodyContains string
+		// dbAssert (optional) runs after the handler returns. Lets a
+		// success case inspect the rotated columns, or a failure case
+		// confirm the row wasn't mutated.
+		dbAssert func(t *testing.T, db *sql.DB)
+	}{
+		{
+			name:             "rejects type change to USERPASS without username",
+			seedType:         "API_KEY",
+			seedPlain:        "ghp_legacy",
+			body:             `{"type":"USERPASS"}`,
+			wantStatus:       http.StatusBadRequest,
+			wantBodyContains: "username is required",
+			dbAssert: func(t *testing.T, db *sql.DB) {
+				var got string
+				db.QueryRow("SELECT type FROM credentials WHERE id = 'c1'").Scan(&got)
+				if got != "API_KEY" {
+					t.Errorf("type after rejected PATCH = %q, want API_KEY", got)
+				}
+			},
+		},
+		{
+			name:             "rejects type change to SSH_KEY without new value",
+			seedType:         "API_KEY",
+			seedPlain:        "ghp_legacy",
+			body:             `{"type":"SSH_KEY"}`,
+			wantStatus:       http.StatusBadRequest,
+			wantBodyContains: "requires a new value",
+		},
+		{
+			name:             "rejects type change to CERTIFICATE without new value",
+			seedType:         "API_KEY",
+			seedPlain:        "ghp_legacy",
+			body:             `{"type":"CERTIFICATE"}`,
+			wantStatus:       http.StatusBadRequest,
+			wantBodyContains: "requires a new value",
+		},
+		{
+			name:             "rejects non-PEM value swapped onto existing SSH_KEY",
+			seedType:         "SSH_KEY",
+			seedPlain:        pemSSH,
+			body:             `{"value":"ssh-rsa AAAAB3NzaC1yc2example"}`,
+			wantStatus:       http.StatusBadRequest,
+			wantBodyContains: "PEM-encoded private key",
+		},
+		{
+			name:             "rejects nulling username on existing USERPASS",
+			seedType:         "USERPASS",
+			seedUsername:     "user@gmail.com",
+			seedPlain:        "pwd",
+			body:             `{"username":null}`,
+			wantStatus:       http.StatusBadRequest,
+			wantBodyContains: "username is required",
+		},
+		{
+			name:             "rejects unknown type string",
+			seedType:         "API_KEY",
+			seedPlain:        "ghp_x",
+			body:             `{"type":"BANANA"}`,
+			wantStatus:       http.StatusBadRequest,
+			wantBodyContains: "type must be one of",
+		},
+		{
+			// Defense against JSON-shape smuggling — without the
+			// explicit type assertion in Update, a numeric "type"
+			// would skip the validator (cast to string fails →
+			// treated as absent → mergedType=currentType=valid) but
+			// still flow through the generic ub.Set loop and end up
+			// in the column as a string. Reject at the boundary.
+			name:             "rejects numeric type (non-string JSON)",
+			seedType:         "API_KEY",
+			seedPlain:        "ghp_x",
+			body:             `{"type":123}`,
+			wantStatus:       http.StatusBadRequest,
+			wantBodyContains: "type must be a string",
+		},
+		{
+			name:             "rejects numeric username on USERPASS",
+			seedType:         "USERPASS",
+			seedUsername:     "user@gmail.com",
+			seedPlain:        "pwd",
+			body:             `{"username":42}`,
+			wantStatus:       http.StatusBadRequest,
+			wantBodyContains: "username must be a string",
+		},
+		{
+			name:             "rejects array value on SSH_KEY",
+			seedType:         "SSH_KEY",
+			seedPlain:        pemSSH,
+			body:             `{"value":["array","not","string"]}`,
+			wantStatus:       http.StatusBadRequest,
+			wantBodyContains: "value must be a string",
+		},
+		{
+			name:       "allows type change to USERPASS with username + value",
+			seedType:   "SECRET",
+			seedPlain:  "old-password",
+			body:       `{"type":"USERPASS","username":"user@gmail.com","value":"new-pass"}`,
+			wantStatus: http.StatusOK,
+			dbAssert: func(t *testing.T, db *sql.DB) {
+				var gotType string
+				var gotUsername sql.NullString
+				db.QueryRow("SELECT type, username FROM credentials WHERE id = 'c1'").Scan(&gotType, &gotUsername)
+				if gotType != "USERPASS" {
+					t.Errorf("type = %q, want USERPASS", gotType)
+				}
+				if !gotUsername.Valid || gotUsername.String != "user@gmail.com" {
+					t.Errorf("username = %v, want user@gmail.com", gotUsername)
+				}
+			},
+		},
+		{
+			name:       "metadata-only PATCH on existing SSH_KEY skips value re-check",
+			seedType:   "SSH_KEY",
+			seedPlain:  pemSSH,
+			body:       `{"description":"updated desc"}`,
+			wantStatus: http.StatusOK,
+		},
 	}
-	if !strings.Contains(rr.Body.String(), "username is required") {
-		t.Errorf("body should mention 'username is required', got: %s", rr.Body.String())
-	}
 
-	// DB unchanged.
-	var got string
-	db.QueryRow("SELECT type FROM credentials WHERE id = 'c1'").Scan(&got)
-	if got != "API_KEY" {
-		t.Errorf("type after rejected PATCH = %q, want API_KEY", got)
-	}
-}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			h, db := newCredHandler(t)
+			userID := seedTestUser(t, db)
+			wsID := seedTestWorkspace(t, db, userID)
+			seedTypedCredential(t, db, wsID, userID, "c1", "c1-name", tt.seedType, tt.seedUsername, tt.seedPlain)
 
-func TestCredUpdate_RejectsTypeChangeToSSHWithoutValue(t *testing.T) {
-	t.Parallel()
-	h, db := newCredHandler(t)
-	userID := seedTestUser(t, db)
-	wsID := seedTestWorkspace(t, db, userID)
-	seedTypedCredential(t, db, wsID, userID, "c1", "GH", "API_KEY", "", "ghp_legacy")
+			req := httptest.NewRequest("PATCH", "/api/v1/credentials/c1", bytes.NewBufferString(tt.body))
+			req.SetPathValue("credentialId", "c1")
+			req = req.WithContext(withWorkspace(req.Context(), wsID, "OWNER"))
+			rr := httptest.NewRecorder()
+			h.Update(rr, req)
 
-	// Flipping to SSH_KEY without sending a new PEM value is invalid:
-	// the existing ghp_legacy isn't PEM-shaped, and we can't validate
-	// what we can't see (encrypted blob).
-	body := bytes.NewBufferString(`{"type":"SSH_KEY"}`)
-	req := httptest.NewRequest("PATCH", "/api/v1/credentials/c1", body)
-	req.SetPathValue("credentialId", "c1")
-	req = req.WithContext(withWorkspace(req.Context(), wsID, "OWNER"))
-	rr := httptest.NewRecorder()
-	h.Update(rr, req)
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400; body: %s", rr.Code, rr.Body.String())
-	}
-	if !strings.Contains(rr.Body.String(), "requires a new value") {
-		t.Errorf("body should explain new value is required, got: %s", rr.Body.String())
-	}
-}
-
-func TestCredUpdate_RejectsNonPEMValueOnSSH(t *testing.T) {
-	t.Parallel()
-	h, db := newCredHandler(t)
-	userID := seedTestUser(t, db)
-	wsID := seedTestWorkspace(t, db, userID)
-
-	// Existing SSH_KEY row; PATCH tries to swap in a non-PEM value
-	// (common foot-gun: pasting an OpenSSH public key, "ssh-rsa AAAA…").
-	seedTypedCredential(t, db, wsID, userID, "c1", "DEPLOY", "SSH_KEY", "", pemFixture("OPENSSH PRIVATE KEY", "abc"))
-
-	body := bytes.NewBufferString(`{"value":"ssh-rsa AAAAB3NzaC1yc2example"}`)
-	req := httptest.NewRequest("PATCH", "/api/v1/credentials/c1", body)
-	req.SetPathValue("credentialId", "c1")
-	req = req.WithContext(withWorkspace(req.Context(), wsID, "OWNER"))
-	rr := httptest.NewRecorder()
-	h.Update(rr, req)
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400; body: %s", rr.Code, rr.Body.String())
-	}
-	if !strings.Contains(rr.Body.String(), "PEM-encoded private key") {
-		t.Errorf("body should mention PEM, got: %s", rr.Body.String())
-	}
-}
-
-func TestCredUpdate_AllowsTypeChangeToUserPassWithUsername(t *testing.T) {
-	t.Parallel()
-	h, db := newCredHandler(t)
-	userID := seedTestUser(t, db)
-	wsID := seedTestWorkspace(t, db, userID)
-	seedTypedCredential(t, db, wsID, userID, "c1", "GMAIL", "SECRET", "", "old-password")
-
-	// Flipping to USERPASS while supplying both username and value
-	// (re-encrypted as the new password) is the legitimate
-	// migration path — accept it.
-	body := bytes.NewBufferString(`{"type":"USERPASS","username":"user@gmail.com","value":"new-pass"}`)
-	req := httptest.NewRequest("PATCH", "/api/v1/credentials/c1", body)
-	req.SetPathValue("credentialId", "c1")
-	req = req.WithContext(withWorkspace(req.Context(), wsID, "OWNER"))
-	rr := httptest.NewRecorder()
-	h.Update(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, body: %s", rr.Code, rr.Body.String())
-	}
-
-	var gotType string
-	var gotUsername sql.NullString
-	db.QueryRow("SELECT type, username FROM credentials WHERE id = 'c1'").Scan(&gotType, &gotUsername)
-	if gotType != "USERPASS" {
-		t.Errorf("type = %q, want USERPASS", gotType)
-	}
-	if !gotUsername.Valid || gotUsername.String != "user@gmail.com" {
-		t.Errorf("username = %v, want user@gmail.com", gotUsername)
-	}
-}
-
-func TestCredUpdate_RejectsNullingUsernameOnUserPass(t *testing.T) {
-	t.Parallel()
-	h, db := newCredHandler(t)
-	userID := seedTestUser(t, db)
-	wsID := seedTestWorkspace(t, db, userID)
-	seedTypedCredential(t, db, wsID, userID, "c1", "GMAIL", "USERPASS", "user@gmail.com", "pwd")
-
-	// PATCH that explicitly sets username to null on a USERPASS row
-	// must be rejected — the row would otherwise become invalid.
-	body := bytes.NewBufferString(`{"username":null}`)
-	req := httptest.NewRequest("PATCH", "/api/v1/credentials/c1", body)
-	req.SetPathValue("credentialId", "c1")
-	req = req.WithContext(withWorkspace(req.Context(), wsID, "OWNER"))
-	rr := httptest.NewRecorder()
-	h.Update(rr, req)
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400; body: %s", rr.Code, rr.Body.String())
-	}
-}
-
-func TestCredUpdate_MetadataOnlyPatchSkipsValueValidation(t *testing.T) {
-	t.Parallel()
-	h, db := newCredHandler(t)
-	userID := seedTestUser(t, db)
-	wsID := seedTestWorkspace(t, db, userID)
-	// Existing SSH_KEY — encrypted blob isn't PEM-checked at rest,
-	// but the row was validated at Create time. A pure-metadata
-	// PATCH (just renaming) must not re-validate the value.
-	seedTypedCredential(t, db, wsID, userID, "c1", "DEPLOY", "SSH_KEY", "", pemFixture("OPENSSH PRIVATE KEY", "abc"))
-
-	body := bytes.NewBufferString(`{"description":"updated desc"}`)
-	req := httptest.NewRequest("PATCH", "/api/v1/credentials/c1", body)
-	req.SetPathValue("credentialId", "c1")
-	req = req.WithContext(withWorkspace(req.Context(), wsID, "OWNER"))
-	rr := httptest.NewRecorder()
-	h.Update(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, body: %s", rr.Code, rr.Body.String())
-	}
-}
-
-func TestCredUpdate_RejectsUnknownType(t *testing.T) {
-	t.Parallel()
-	h, db := newCredHandler(t)
-	userID := seedTestUser(t, db)
-	wsID := seedTestWorkspace(t, db, userID)
-	seedTypedCredential(t, db, wsID, userID, "c1", "GH", "API_KEY", "", "ghp_x")
-
-	body := bytes.NewBufferString(`{"type":"BANANA"}`)
-	req := httptest.NewRequest("PATCH", "/api/v1/credentials/c1", body)
-	req.SetPathValue("credentialId", "c1")
-	req = req.WithContext(withWorkspace(req.Context(), wsID, "OWNER"))
-	rr := httptest.NewRecorder()
-	h.Update(rr, req)
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400; body: %s", rr.Code, rr.Body.String())
+			if rr.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d; body: %s", rr.Code, tt.wantStatus, rr.Body.String())
+			}
+			if tt.wantBodyContains != "" && !strings.Contains(rr.Body.String(), tt.wantBodyContains) {
+				t.Errorf("body missing substring %q, got: %s", tt.wantBodyContains, rr.Body.String())
+			}
+			if tt.dbAssert != nil {
+				tt.dbAssert(t, db)
+			}
+		})
 	}
 }

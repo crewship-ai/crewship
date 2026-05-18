@@ -328,11 +328,23 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 	// value, etc. — that the resolver then trips over at agent-run
 	// time. Create blocks all of these; Update used to silently
 	// accept them.
+	//
+	// JSON-shape gating: type/username/value must be either absent or
+	// a string (or null, where the column is nullable). A naked
+	// `v.(string)` assertion with `ok` silently treats a non-string
+	// like the field is missing, but the downstream `for jsonKey, col`
+	// loop still calls `ub.Set(col, val)` with the raw `any`, writing
+	// e.g. a numeric `{"type": 123}` straight into the TEXT column
+	// as "123" — past the closed-enum check, past any sane downstream
+	// resolver behaviour. Fail closed up-front instead.
 	mergedType := currentType
 	if v, ok := body["type"]; ok {
-		if s, ok := v.(string); ok {
-			mergedType = s
+		s, isStr := v.(string)
+		if !isStr {
+			replyError(w, http.StatusBadRequest, "type must be a string")
+			return
 		}
+		mergedType = s
 	}
 	if _, ok := validCredentialTypes[mergedType]; !ok {
 		replyError(w, http.StatusBadRequest, "type must be one of: AI_CLI_TOKEN, API_KEY, CLI_TOKEN, SECRET, OAUTH2, USERPASS, SSH_KEY, CERTIFICATE, GENERIC_SECRET")
@@ -347,7 +359,12 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 	valueSent := false
 	valueStr := ""
 	if v, ok := body["value"]; ok {
-		if s, isStr := v.(string); isStr && s != "" {
+		s, isStr := v.(string)
+		if !isStr {
+			replyError(w, http.StatusBadRequest, "value must be a string")
+			return
+		}
+		if s != "" {
 			valueSent = true
 			valueStr = s
 		}
@@ -358,12 +375,18 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 	case CredTypeUserPass:
 		// USERPASS must always end up with a non-empty username.
 		// Effective username = patch username if sent, else current.
+		// null clears it (rejected below); non-string is a malformed
+		// request (rejected up-front, like type/value above).
 		effectiveUsername := currentUsername.String
 		if v, ok := body["username"]; ok {
-			if s, isStr := v.(string); isStr {
+			switch s := v.(type) {
+			case string:
 				effectiveUsername = s
-			} else if v == nil {
+			case nil:
 				effectiveUsername = ""
+			default:
+				replyError(w, http.StatusBadRequest, "username must be a string")
+				return
 			}
 		}
 		if strings.TrimSpace(effectiveUsername) == "" {
