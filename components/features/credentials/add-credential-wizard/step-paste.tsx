@@ -254,9 +254,14 @@ function PEMFields({
   // into a field that needs the *private* half — the basic structural
   // check ("starts with BEGIN, contains END") would still pass that, so
   // we also verify the first-line label ends with the right marker.
+  //
+  // firstLine is .trim()'d *before* the regex replace so a CRLF-pasted
+  // key (Windows openssl, Notepad) — where split('\n')[0] keeps a
+  // trailing '\r' that prevents `-----$` from matching — still resolves
+  // to the right marker. Mirrors the early TrimSpace in looksLikePEM.
   const trimmed = state.value.trim()
   const expectedMarker = isSSH ? "PRIVATE KEY" : "CERTIFICATE"
-  const firstLine = trimmed.split("\n", 1)[0] ?? ""
+  const firstLine = (trimmed.split("\n", 1)[0] ?? "").trim()
   const looksWrongShape =
     trimmed.length > 0 &&
     !(
