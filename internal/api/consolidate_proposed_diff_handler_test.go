@@ -196,9 +196,23 @@ func TestProposed_Diff_HTTPContract(t *testing.T) {
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
+			// Capture `now` ONCE at the top of the subtest so
+			// fixture seeding, the handler's own time.Now(), and
+			// the assertions all share the same UTC-day stamp.
+			// Previous version captured tc.now just before the
+			// handler call; if seedCanonical (which derives a
+			// learned-*.md filename from a separate
+			// time.Now().UTC()) had crossed a UTC-day boundary
+			// between seeding and assertion, the seeded file
+			// would carry yesterday's date and the handler
+			// would see canonical_exists=false. CodeRabbit
+			// follow-up #2 on PR #409.
+			now := time.Now().UTC()
+
 			h, db, userID, wsID, crewID := newProposedHandlerTest(t)
 			ctx := diffTestCtx{
 				h: h, db: db, userID: userID, wsID: wsID, crewID: crewID,
+				now: now,
 			}
 
 			// Per-case prep — only one proposal row by default;
@@ -214,7 +228,11 @@ func TestProposed_Diff_HTTPContract(t *testing.T) {
 				}
 			}
 			if tc.seedCanonical {
-				canonicalPath := consolidate.CanonicalPathForProposal(ctx.proposalPath, time.Now().UTC())
+				// Use the SAME `now` we'll pass through to the
+				// handler's expected-canonical assertion so the
+				// seeded file and the handler's resolved path
+				// share a date stamp.
+				canonicalPath := consolidate.CanonicalPathForProposal(ctx.proposalPath, now)
 				if err := os.WriteFile(canonicalPath, []byte("# Learned rules — pre-existing\n\nbody\n"), 0o644); err != nil {
 					t.Fatalf("seed canonical: %v", err)
 				}
@@ -249,11 +267,6 @@ func TestProposed_Diff_HTTPContract(t *testing.T) {
 			case tc.authRole != "":
 				req = withWorkspaceUser(req, userID, wsID, tc.authRole)
 			}
-
-			// Capture now() immediately before the handler call
-			// so any wall-clock-derived assertion (canonical path
-			// date stamp) uses the same instant the handler does.
-			ctx.now = time.Now().UTC()
 
 			rr := httptest.NewRecorder()
 			h.Diff(rr, req)
