@@ -507,8 +507,8 @@ func TestDockerProvider_RuntimeOverride_DefaultRunc(t *testing.T) {
 // the env var is opt-in: when it's unset, cfg.DefaultRuntime takes
 // effect. Order at docker_container.go:152-158:
 //
-//	1. cfg.DefaultRuntime (or "runc" if empty)
-//	2. CREWSHIP_RUNTIME env (if non-empty)
+//  1. cfg.DefaultRuntime (or "runc" if empty)
+//  2. CREWSHIP_RUNTIME env (if non-empty)
 func TestDockerProvider_RuntimeOverride_ConfigUsedWhenEnvUnset(t *testing.T) {
 	// NOT t.Parallel(): mutates env.
 	t.Setenv("CREWSHIP_RUNTIME", "")

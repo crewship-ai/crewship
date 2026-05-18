@@ -358,4 +358,3 @@ func TestEmitAssignmentQueued_PayloadIncludesQueueDepth(t *testing.T) {
 		t.Errorf("queue_depth = %d, want 2", depth)
 	}
 }
-

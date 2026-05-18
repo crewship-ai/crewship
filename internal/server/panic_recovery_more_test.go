@@ -282,11 +282,11 @@ func TestPanicRecovery_WebSocketUpgrade_DoesNotWrite500Body(t *testing.T) {
 // middleware's 500 attempt landed as a no-op after the handler already
 // flushed.
 type flushAfterHeaderWriter struct {
-	headers       http.Header
-	body          bytes.Buffer
-	statusCalls   []int
-	wroteHeader   bool
-	bytesWritten  int
+	headers      http.Header
+	body         bytes.Buffer
+	statusCalls  []int
+	wroteHeader  bool
+	bytesWritten int
 }
 
 func newFlushWriter() *flushAfterHeaderWriter {

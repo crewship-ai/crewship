@@ -93,6 +93,7 @@ func TestMissionTasks_AreCrewsConnected_Bidirectional_BothDirectionsTrue(t *test
 // as A→B unidirectional, so:
 //   - (A, B) — checking "can mission in A dispatch to agent in B?" — TRUE
 //   - (B, A) — checking "can mission in B dispatch to agent in A?" — FALSE
+//
 // If this regressed and both returned true, unidirectional would be
 // indistinguishable from bidirectional and the entire access model
 // collapses.

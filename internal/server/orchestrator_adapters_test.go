@@ -255,4 +255,3 @@ func TestServer_PresenceAdapter_NilLogger_DoesNotPanic(t *testing.T) {
 		t.Errorf("Track must swallow upstream errors, got %v", err)
 	}
 }
-

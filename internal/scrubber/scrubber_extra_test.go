@@ -39,9 +39,9 @@ func TestScrubber_BearerJWTWithTabAndDoubleSpace_Redacted(t *testing.T) {
 	s := New()
 	jwt := "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0." + strings.Repeat("a", 24)
 	inputs := []string{
-		"Authorization: Bearer\t" + jwt,        // single tab
-		"Authorization: Bearer  \t" + jwt,      // tabs + spaces mix
-		"Authorization: Bearer \n " + jwt,      // newline counts as \s
+		"Authorization: Bearer\t" + jwt,   // single tab
+		"Authorization: Bearer  \t" + jwt, // tabs + spaces mix
+		"Authorization: Bearer \n " + jwt, // newline counts as \s
 		"Authorization: Bearer not-jwt-x", // NBSP + non-JWT: must NOT be redacted (no JWT)
 	}
 	for i, in := range inputs {
@@ -223,8 +223,8 @@ func TestScrubber_BlockModeFirstHitSurfacesOuterRule(t *testing.T) {
 func TestScrubber_UTF8WrappedSecret_OffsetsAreByteAccurate(t *testing.T) {
 	s := New()
 	aws := "AKIA" + strings.Repeat("Q", 16)
-	prefix := "héllo 文字 "                  // multi-byte UTF-8
-	suffix := " ümlaut after"             // multi-byte UTF-8
+	prefix := "héllo 文字 "     // multi-byte UTF-8
+	suffix := " ümlaut after" // multi-byte UTF-8
 	in := prefix + aws + suffix
 	if !utf8.ValidString(in) {
 		t.Fatalf("test setup: input not valid UTF-8")

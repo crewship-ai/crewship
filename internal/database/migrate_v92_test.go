@@ -345,7 +345,9 @@ VALUES ('mv_orphan', 'ws_nonexistent', 'AGENT.md', 'agent', 'shaO', 100, 'a1', '
 
 // TestMigrate_V91_TierCheck_AcceptsDocumentedAndRejectsUnknown locks in
 // the exact tier vocabulary declared in migrate_consts_v91_memory_versions.go:
-//   CHECK (tier IN ('agent','crew','workspace','pins','learned'))
+//
+//	CHECK (tier IN ('agent','crew','workspace','pins','learned'))
+//
 // A typo'd 'garbage_tier' must be rejected; each documented tier must be
 // accepted. The existing v91 test covers the same set with a positive-
 // only loop; this test adds the negative case for 'garbage_tier' (which

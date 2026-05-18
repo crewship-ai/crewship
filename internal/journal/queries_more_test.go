@@ -280,11 +280,11 @@ func TestJournal_SinceYesterdayNoon_ReturnsOnlyLaterSubset(t *testing.T) {
 			TS:          ts,
 		})
 	}
-	emit(yesterdayNoon.Add(-6*time.Hour), "before-1")        // yesterday 06:00
-	emit(yesterdayNoon.Add(-1*time.Minute), "before-2")      // yesterday 11:59
-	emit(yesterdayNoon.Add(30*time.Minute), "after-1")       // yesterday 12:30
-	emit(yesterdayNoon.Add(8*time.Hour), "after-2")          // yesterday 20:00
-	emit(now.Add(-30*time.Minute), "after-3")                // today 13:30
+	emit(yesterdayNoon.Add(-6*time.Hour), "before-1")   // yesterday 06:00
+	emit(yesterdayNoon.Add(-1*time.Minute), "before-2") // yesterday 11:59
+	emit(yesterdayNoon.Add(30*time.Minute), "after-1")  // yesterday 12:30
+	emit(yesterdayNoon.Add(8*time.Hour), "after-2")     // yesterday 20:00
+	emit(now.Add(-30*time.Minute), "after-3")           // today 13:30
 
 	if err := w.Flush(ctx); err != nil {
 		t.Fatalf("flush: %v", err)
@@ -455,4 +455,3 @@ func TestJournal_MemorySearchedEvent_RoundTripsPayload(t *testing.T) {
 		t.Errorf("payload.hit_chunk_ids contents: %v", ids)
 	}
 }
-
