@@ -886,6 +886,42 @@ func TestCredUpdate_MergedValidation(t *testing.T) {
 			wantStatus:       http.StatusBadRequest,
 			wantBodyContains: "scope must be a string",
 		},
+		// The shape-loop covers six fields uniformly through the
+		// default branch, but only three were exercised by the
+		// previous round. The remaining three get explicit cases so
+		// a future per-key carve-out (mirroring the existing
+		// security_level / type / username paths) can't silently
+		// regress one of the untested keys.
+		{
+			name:             "rejects numeric account_email",
+			seedType:         "API_KEY",
+			seedPlain:        "ghp_x",
+			body:             `{"account_email":42}`,
+			wantStatus:       http.StatusBadRequest,
+			wantBodyContains: "account_email must be a string",
+		},
+		{
+			name:             "rejects object token_expires_at",
+			seedType:         "API_KEY",
+			seedPlain:        "ghp_x",
+			body:             `{"token_expires_at":{"y":2026}}`,
+			wantStatus:       http.StatusBadRequest,
+			wantBodyContains: "token_expires_at must be a string",
+		},
+		{
+			// Legacy single-crew patch path — separate from the
+			// shape-loop. Hits the `else if crewIDVal, ok := body["crew_id"]; ok`
+			// branch in credentials_mutate.go. Pre-fix, a numeric
+			// crew_id here silently fell through and was caught by
+			// the downstream loop; now the legacy branch fails
+			// closed itself.
+			name:             "rejects numeric crew_id (legacy single-crew path)",
+			seedType:         "API_KEY",
+			seedPlain:        "ghp_x",
+			body:             `{"crew_id":99}`,
+			wantStatus:       http.StatusBadRequest,
+			wantBodyContains: "crew_id must be a string",
+		},
 		{
 			name:       "allows type change to USERPASS with username + value",
 			seedType:   "SECRET",
