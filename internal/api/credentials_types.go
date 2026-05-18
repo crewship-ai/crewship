@@ -125,6 +125,13 @@ func validateCredentialPayload(req *createCredentialRequest) string {
 // `-----`. Without the early trim, TrimSuffix("-----") silently
 // no-ops on the `…KEY-----\r` form and we'd reject a valid key.
 func looksLikePEM(value, marker string) bool {
+	// Empty marker is a programmer error — HasSuffix(any, "") is
+	// trivially true, so without this guard a future caller that
+	// forgot to pass a label would silently accept any PEM-shaped
+	// blob. Fail closed so the foot-gun never reaches production.
+	if marker == "" {
+		return false
+	}
 	v := strings.TrimSpace(value)
 	if !strings.HasPrefix(v, "-----BEGIN ") {
 		return false
@@ -134,7 +141,7 @@ func looksLikePEM(value, marker string) bool {
 	}
 
 	beginLabel := pemLabel(v, "-----BEGIN ")
-	if !strings.HasSuffix(beginLabel, marker) {
+	if !labelMatchesMarker(beginLabel, marker) {
 		return false
 	}
 	// END label sits on the last non-empty line. Extract it via the
@@ -151,7 +158,20 @@ func looksLikePEM(value, marker string) bool {
 		return false
 	}
 	endLabel := pemLabel(endLine, "-----END ")
-	return strings.HasSuffix(endLabel, marker)
+	return labelMatchesMarker(endLabel, marker)
+}
+
+// labelMatchesMarker returns true when the PEM label is exactly the
+// marker (e.g. "PRIVATE KEY" matches "PRIVATE KEY") or a
+// space-separated variant (e.g. "OPENSSH PRIVATE KEY" matches
+// "PRIVATE KEY"). The space gate keeps `XPRIVATE KEY` from sneaking
+// past — a naked HasSuffix lets any string ending in the marker pass,
+// which is the entire foot-gun this function exists to close.
+func labelMatchesMarker(label, marker string) bool {
+	if label == marker {
+		return true
+	}
+	return strings.HasSuffix(label, " "+marker)
 }
 
 // pemLabel pulls the label out of a PEM armour line — given

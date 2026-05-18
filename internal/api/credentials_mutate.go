@@ -544,10 +544,36 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 		body["security_level"] = n
 	}
 
+	// JSON-shape gate for the generic allowed map. type/value/username
+	// already got their explicit assertions above; this loop catches
+	// the rest (provider/scope/crew_id/account_label/account_email/
+	// token_expires_at) — without it, `{"provider": 123}` would
+	// silently land "123" in the TEXT column. security_level is
+	// numeric by design and has its own validator earlier; null is
+	// accepted because it nulls the column (legitimate operation for
+	// the *nullable string fields).
 	for jsonKey, col := range allowed {
-		if val, ok := body[jsonKey]; ok {
-			ub.Set(col, val)
+		val, ok := body[jsonKey]
+		if !ok {
+			continue
 		}
+		switch jsonKey {
+		case "security_level":
+			// Already normalised to an int above.
+		case "type", "username":
+			// Already typed above; the merged-validation block ran on
+			// the same body and rejected non-strings before we got here.
+		default:
+			// Remaining keys are all string-or-null TEXT columns.
+			switch val.(type) {
+			case string, nil:
+				// OK.
+			default:
+				replyError(w, http.StatusBadRequest, jsonKey+" must be a string")
+				return
+			}
+		}
+		ub.Set(col, val)
 	}
 
 	if ub.Empty() && !updateCrewIDs {
