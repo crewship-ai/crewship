@@ -119,11 +119,17 @@ func sanitizeFTSQuery(q string) string {
 	}, q)
 
 	words := strings.Fields(cleaned)
-	var parts []string
+	parts := make([]string, 0, len(words))
 	for _, w := range words {
-		upper := strings.ToUpper(w)
-		if upper == "AND" || upper == "OR" || upper == "NOT" {
-			parts = append(parts, upper)
+		switch {
+		case strings.EqualFold(w, "AND"):
+			parts = append(parts, "AND")
+			continue
+		case strings.EqualFold(w, "OR"):
+			parts = append(parts, "OR")
+			continue
+		case strings.EqualFold(w, "NOT"):
+			parts = append(parts, "NOT")
 			continue
 		}
 		// Remove any internal quotes, re-wrap for safety
