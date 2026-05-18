@@ -61,6 +61,19 @@ func (r *Router) registerAdminRoutes() {
 	r.mux.Handle("GET /api/v1/admin/memory/versions/{id}/content",
 		authed(wsCtx(http.HandlerFunc(memContent.Content))))
 
+	// Memory config — read + partial write of
+	// workspaces.memory_config. Iter 4 wired the per-workspace
+	// retention sweep that consumes the column; this endpoint
+	// (Iter 6 of the memory-hardening series) is the write
+	// surface so operators can adjust retention without editing
+	// SQLite by hand. PATCH emits memory.config_updated to the
+	// journal so compliance audits can trace policy changes
+	// over time.
+	memCfg := NewMemoryConfigHandler(r.db, r.logger)
+	memCfg.SetJournal(r.Journal())
+	r.mux.Handle("GET /api/v1/admin/memory/config", authed(wsCtx(http.HandlerFunc(memCfg.Get))))
+	r.mux.Handle("PATCH /api/v1/admin/memory/config", authed(wsCtx(http.HandlerFunc(memCfg.Patch))))
+
 	// Backups (admin-only; require workspace context for scoping).
 	// Adapt the concrete Docker client to backup.DockerOps so the
 	// admin-backup HTTP layer doesn't see the Moby SDK directly.

@@ -128,6 +128,16 @@ const (
 	// event only describes row deletions.
 	EntryMemoryVersionsSwept EntryType = "memory.versions_swept"
 
+	// EntryMemoryConfigUpdated fires when an operator changes
+	// workspaces.memory_config via the admin endpoint
+	// PATCH /api/v1/admin/memory/config. Payload carries the
+	// before-after diff (only fields that actually changed are
+	// included; unchanged fields are omitted) so audit reviews can
+	// trace exactly which retention policy was in effect for a
+	// given window. Severity=Notice — the change itself isn't
+	// alarming, but it IS load-bearing for compliance audits.
+	EntryMemoryConfigUpdated EntryType = "memory.config_updated"
+
 	// EntryMemorySkillProposed fires when the memory→Skills bridge stages
 	// a learned rule as .proposed/skill-{slug}.md. Distinct from
 	// EntryMemoryConsolidationProposed because the lifecycle is
