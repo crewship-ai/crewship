@@ -93,7 +93,15 @@ type Credential struct {
 	EnvVarName string `json:"env_var"`
 	PlainValue string `json:"value"`
 	Priority   int    `json:"priority"`
-	Type       string `json:"type,omitempty"` // API_KEY, AI_CLI_TOKEN, SECRET
+	// Type is one of: AI_CLI_TOKEN, API_KEY, CLI_TOKEN, SECRET, OAUTH2,
+	// USERPASS, SSH_KEY, CERTIFICATE, GENERIC_SECRET. See
+	// internal/api/credentials_types.go for the closed enum.
+	Type string `json:"type,omitempty"`
+	// Username is the cleartext identifier half of a USERPASS credential
+	// (e.g. "user@gmail.com"). Empty for all other types. Kept separate
+	// from PlainValue so the env-var pair X_USERNAME / X_PASSWORD can
+	// be emitted at mount time without re-parsing a JSON blob.
+	Username string `json:"username,omitempty"`
 }
 
 // RunState tracks the runtime state of an active agent run, persisted in the

@@ -1278,6 +1278,15 @@ END;
 	// See internal/database/migrate_consts_v93_assignment_queue.go
 	// and .claude/context/prd/QUEUE-MECHANISM-2026.md.
 	{version: 93, name: "add_assignment_queue", sql: migrationAddAssignmentQueue},
+	// v94 extends credentials + agent_credentials to support the
+	// USERPASS, SSH_KEY, CERTIFICATE, and GENERIC_SECRET vault types.
+	// Adds credentials.username (cleartext identifier, like Bitwarden's
+	// login.username field) and agent_credentials.mount_type to
+	// discriminate env-var injection from in-container file mounts.
+	// (Originally authored as v93; renumbered to v94 on rebase because
+	// PR #395's add_assignment_queue took v93 first.)
+	// See migrate_consts_v94_credential_vault_types.go.
+	{version: 94, name: "add_credential_vault_types", sql: migrationAddCredentialVaultTypes},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

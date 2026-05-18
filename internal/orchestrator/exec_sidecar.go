@@ -57,11 +57,171 @@ func PreRunInstallPackages(
 	return nil
 }
 
-// writeCredentialFiles writes CLI_TOKEN and SECRET credentials as individual files
-// into the agent's secrets directory. Each credential is written as a separate file
-// named after its env var (e.g., /secrets/{agent-slug}/GH_TOKEN). A combined .env
-// file is also generated for tools that source environment files.
-// Files are written as root (UID 0) then chowned to 1001:1001 with mode 0400 (read-only).
+// credFileSpec is the per-file plan emitted by buildCredFileScript.
+// One Credential may expand into multiple specs (USERPASS → 2 entries),
+// or into one spec with a non-default mode (SSH_KEY → 0600 in ssh/
+// subdir). Pulled out so tests can assert the expansion shape without
+// going through a container exec.
+type credFileSpec struct {
+	EnvVar string // .env mapping key (e.g. GMAIL_USERNAME, GITHUB_SSH_PATH)
+	Value  string // raw cleartext bytes to write to the file
+	Path   string // absolute path inside the container, e.g. /secrets/agent/ssh/github
+	Mode   string // octal string for chmod, e.g. "0400" or "0600"
+}
+
+// buildCredFileScript translates a slice of decrypted credentials into
+// the shell script that mounts them into the agent container and the
+// list of .env entries the agent reads at startup.
+//
+// Per-type behaviour:
+//
+//	API_KEY, AI_CLI_TOKEN, OAUTH2  → skipped (sidecar proxy handles them)
+//	CLI_TOKEN, SECRET, GENERIC_SECRET
+//	                               → one file at secretsAgentDir/<envvar>,
+//	                                 mode 0400. .env maps envvar to path.
+//	USERPASS                       → two files <envvar>_USERNAME and
+//	                                 <envvar>_PASSWORD, mode 0400.
+//	                                 Cleartext username is stored on the
+//	                                 Credential struct, not encrypted (it's
+//	                                 an identifier, not a secret —
+//	                                 matches Bitwarden's login.username).
+//	SSH_KEY                        → file at secretsAgentDir/ssh/<envvar>,
+//	                                 mode 0600 (OpenSSH refuses world-
+//	                                 readable keys; 0600 is the strictest
+//	                                 mode the client still accepts).
+//	                                 .env exposes <envvar>_PATH so the
+//	                                 agent can locate the key without
+//	                                 hardcoding the convention.
+//	CERTIFICATE                    → file at secretsAgentDir/certs/<envvar>.pem,
+//	                                 mode 0400. Same _PATH helper env var.
+//
+// Returns the joined-with-&& script ready for `sh -c`, the count of
+// files mounted (for logging), or an error if any env var name fails
+// the sanitiser. Empty input yields ("", 0, nil) so callers can early-
+// exit without a noop exec.
+func buildCredFileScript(creds []Credential, secretsAgentDir string) (string, int, error) {
+	var specs []credFileSpec
+	var envLines []string
+
+	for _, c := range creds {
+		if c.EnvVarName == "" || c.PlainValue == "" {
+			continue
+		}
+		if !envVarNameRE.MatchString(c.EnvVarName) {
+			return "", 0, fmt.Errorf("invalid credential env var name: %q", c.EnvVarName)
+		}
+
+		switch c.Type {
+		case "CLI_TOKEN", "SECRET", "GENERIC_SECRET":
+			path := secretsAgentDir + "/" + c.EnvVarName
+			specs = append(specs, credFileSpec{
+				EnvVar: c.EnvVarName, Value: c.PlainValue, Path: path, Mode: "0400",
+			})
+			envLines = append(envLines, c.EnvVarName+"="+path)
+
+		case "USERPASS":
+			// Username is cleartext on the Credential struct; password
+			// rides on PlainValue (encrypted at rest, decrypted by the
+			// resolver). Both must be present — the validator at the
+			// API tier enforces that, so empty username here means a
+			// data-shape regression we'd rather surface than silently
+			// inject "" as the username.
+			if c.Username == "" {
+				return "", 0, fmt.Errorf("USERPASS credential %q missing username", c.EnvVarName)
+			}
+			userPath := secretsAgentDir + "/" + c.EnvVarName + "_USERNAME"
+			passPath := secretsAgentDir + "/" + c.EnvVarName + "_PASSWORD"
+			specs = append(specs,
+				credFileSpec{EnvVar: c.EnvVarName + "_USERNAME", Value: c.Username, Path: userPath, Mode: "0400"},
+				credFileSpec{EnvVar: c.EnvVarName + "_PASSWORD", Value: c.PlainValue, Path: passPath, Mode: "0400"},
+			)
+			envLines = append(envLines,
+				c.EnvVarName+"_USERNAME="+userPath,
+				c.EnvVarName+"_PASSWORD="+passPath,
+			)
+
+		case "SSH_KEY":
+			// 0600 (not 0400) because some SSH client builds tolerate
+			// 0400 but the canonical "strict" mode for id_rsa et al.
+			// is 0600 — keeping it consistent with what ssh-keygen
+			// writes by default avoids "WARNING: UNPROTECTED PRIVATE
+			// KEY FILE" surprises when the agent runs ssh interactively.
+			path := secretsAgentDir + "/ssh/" + c.EnvVarName
+			specs = append(specs, credFileSpec{
+				EnvVar: c.EnvVarName, Value: c.PlainValue, Path: path, Mode: "0600",
+			})
+			envLines = append(envLines, c.EnvVarName+"_PATH="+path)
+
+		case "CERTIFICATE":
+			// Certs aren't keys — 0400 read-only is fine and stricter
+			// than 0600 (no write bit). Helper env var name mirrors
+			// SSH_KEY for consistency.
+			path := secretsAgentDir + "/certs/" + c.EnvVarName + ".pem"
+			specs = append(specs, credFileSpec{
+				EnvVar: c.EnvVarName, Value: c.PlainValue, Path: path, Mode: "0400",
+			})
+			envLines = append(envLines, c.EnvVarName+"_PATH="+path)
+
+		default:
+			// API_KEY, AI_CLI_TOKEN, OAUTH2, and any unknown type are
+			// intentionally skipped: the sidecar proxy injects them at
+			// outbound-request time so they never touch disk.
+			continue
+		}
+	}
+
+	if len(specs) == 0 {
+		return "", 0, nil
+	}
+
+	// Pre-create the ssh/ and certs/ subdirectories with restrictive
+	// perms before any file write, so an unprivileged process can't
+	// race in and create the dir with a wider mode. mkdir -p is
+	// idempotent — safe to run unconditionally.
+	scriptParts := []string{
+		fmt.Sprintf("mkdir -p %s/ssh %s/certs", secretsAgentDir, secretsAgentDir),
+		fmt.Sprintf("chown 1001:1001 %s/ssh %s/certs", secretsAgentDir, secretsAgentDir),
+		fmt.Sprintf("chmod 0700 %s/ssh %s/certs", secretsAgentDir, secretsAgentDir),
+	}
+
+	for _, s := range specs {
+		// base64 round-trip prevents any shell interpretation of the
+		// secret value — newlines in PEM bodies, single-quotes in
+		// passwords, etc. all pass through opaquely.
+		valB64 := base64.StdEncoding.EncodeToString([]byte(s.Value))
+		scriptParts = append(scriptParts,
+			fmt.Sprintf("echo '%s' | base64 -d > %s", valB64, s.Path),
+			fmt.Sprintf("chown 1001:1001 %s", s.Path),
+			fmt.Sprintf("chmod %s %s", s.Mode, s.Path),
+		)
+	}
+
+	// .env maps each env var to its file path (never the raw value), so
+	// nothing sensitive ends up in /proc/<pid>/environ if the agent
+	// spawns subprocesses that inherit the env block.
+	envContent := strings.Join(envLines, "\n") + "\n"
+	envB64 := base64.StdEncoding.EncodeToString([]byte(envContent))
+	envPath := secretsAgentDir + "/.env"
+	scriptParts = append(scriptParts,
+		fmt.Sprintf("echo '%s' | base64 -d > %s", envB64, envPath),
+		fmt.Sprintf("chown 1001:1001 %s", envPath),
+		fmt.Sprintf("chmod 0400 %s", envPath),
+		// Chown the secrets dir itself (not recursively) so sibling
+		// agents on the same UID can't list each other's secret dirs.
+		fmt.Sprintf("chown 1001:1001 %s", secretsAgentDir),
+	)
+
+	return strings.Join(scriptParts, " && "), len(specs), nil
+}
+
+// writeCredentialFiles writes file-mountable credentials into the
+// agent's secrets directory. Thin wrapper around buildCredFileScript
+// that runs the resulting script as root (UID 0) inside the container,
+// because only root can chown to the agent's UID 1001.
+//
+// Per-type behaviour is documented on buildCredFileScript. The
+// secretsSharedDir parameter is unused today but retained on the
+// signature for the crew-shared credentials work tracked separately.
 func writeCredentialFiles(
 	ctx context.Context,
 	ctr provider.ContainerProvider,
@@ -72,60 +232,13 @@ func writeCredentialFiles(
 	secretsSharedDir string,
 	logger *slog.Logger,
 ) error {
-	// Collect credentials that should be written as files.
-	// API_KEY and AI_CLI_TOKEN are handled by the sidecar proxy — not written to disk.
-	type credFile struct {
-		EnvVar string
-		Value  string
+	script, fileCount, err := buildCredFileScript(creds, secretsAgentDir)
+	if err != nil {
+		return err
 	}
-	var files []credFile
-	for _, c := range creds {
-		if (c.Type == "CLI_TOKEN" || c.Type == "SECRET") && c.EnvVarName != "" && c.PlainValue != "" {
-			if !envVarNameRE.MatchString(c.EnvVarName) {
-				return fmt.Errorf("invalid credential env var name: %q", c.EnvVarName)
-			}
-			files = append(files, credFile{EnvVar: c.EnvVarName, Value: c.PlainValue})
-		}
-	}
-
-	if len(files) == 0 {
+	if script == "" {
 		return nil
 	}
-
-	// Build a shell script that writes each credential as a file and generates .env.
-	// Uses base64 encoding to prevent shell injection from credential values.
-	var scriptParts []string
-	var envLines []string
-
-	for _, f := range files {
-		valB64 := base64.StdEncoding.EncodeToString([]byte(f.Value))
-		filePath := secretsAgentDir + "/" + f.EnvVar
-		scriptParts = append(scriptParts,
-			fmt.Sprintf("echo '%s' | base64 -d > %s", valB64, filePath),
-			fmt.Sprintf("chown 1001:1001 %s", filePath),
-			fmt.Sprintf("chmod 0400 %s", filePath),
-		)
-		envLines = append(envLines, f.EnvVar+"="+filePath)
-	}
-
-	// Write .env file (maps env var names to file paths, not raw values)
-	envContent := strings.Join(envLines, "\n") + "\n"
-	envB64 := base64.StdEncoding.EncodeToString([]byte(envContent))
-	envPath := secretsAgentDir + "/.env"
-	scriptParts = append(scriptParts,
-		fmt.Sprintf("echo '%s' | base64 -d > %s", envB64, envPath),
-		fmt.Sprintf("chown 1001:1001 %s", envPath),
-		fmt.Sprintf("chmod 0400 %s", envPath),
-	)
-
-	// Chown the secrets dir itself (not recursively) and each file individually.
-	// Chowning individual files rather than the parent dir prevents agents sharing
-	// UID 1001 from traversing or listing sibling agents' secret directories.
-	scriptParts = append(scriptParts,
-		fmt.Sprintf("chown 1001:1001 %s", secretsAgentDir),
-	)
-
-	script := strings.Join(scriptParts, " && ")
 
 	cfg := provider.ExecConfig{
 		ContainerID: containerID,
@@ -143,7 +256,7 @@ func writeCredentialFiles(
 	logger.Info("credential files written",
 		"agent_slug", agentSlug,
 		"secrets_dir", secretsAgentDir,
-		"file_count", len(files),
+		"file_count", fileCount,
 	)
 	return nil
 }

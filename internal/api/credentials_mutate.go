@@ -28,6 +28,11 @@ type createCredentialRequest struct {
 	RefreshToken  *string  `json:"refresh_token"`
 	TokenExpires  *string  `json:"token_expires_at"`
 	SecurityLevel *int     `json:"security_level"`
+	// USERPASS: cleartext identifier half (e.g. "user@gmail.com").
+	// Stored unencrypted in credentials.username because usernames are
+	// identifiers, not secrets — mirrors Bitwarden's login.username
+	// shape. The password lives in the existing encrypted Value field.
+	Username *string `json:"username"`
 	// OAuth 2.0 fields (used when type = OAUTH2)
 	OAuthClientID     *string `json:"oauth_client_id"`
 	OAuthClientSecret *string `json:"oauth_client_secret"`
@@ -88,6 +93,14 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Scope == "" {
 		req.Scope = "WORKSPACE"
+	}
+
+	// Per-type validation (closed enum + USERPASS/SSH_KEY/CERTIFICATE
+	// field requirements). Runs after the OAuth pending-value fixup so
+	// the validator sees the same Value the DB will store.
+	if msg := validateCredentialPayload(&req); msg != "" {
+		replyError(w, http.StatusBadRequest, msg)
+		return
 	}
 
 	// Merge crew_ids and legacy crew_id into a single list
@@ -171,11 +184,11 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	_, err = tx.ExecContext(r.Context(), `
 		INSERT INTO credentials (id, workspace_id, name, description, encrypted_value,
-			type, provider, scope, crew_id, account_label, account_email,
+			type, provider, scope, crew_id, account_label, account_email, username,
 			token_expires_at, security_level, status, tags, created_by, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		credID, workspaceID, req.Name, req.Description, encryptedValue,
-		req.Type, req.Provider, req.Scope, legacyCrewID, req.AccountLabel, req.AccountEmail,
+		req.Type, req.Provider, req.Scope, legacyCrewID, req.AccountLabel, req.AccountEmail, req.Username,
 		req.TokenExpires, secLevel, credStatus, tagsArg, user.ID, now, now)
 	if err != nil {
 		tx.Rollback()
@@ -304,7 +317,7 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 		"provider": "provider", "scope": "scope",
 		"crew_id": "crew_id", "account_label": "account_label",
 		"account_email": "account_email", "token_expires_at": "token_expires_at",
-		"security_level": "security_level",
+		"security_level": "security_level", "username": "username",
 	}
 
 	// Parse crew_ids if provided — will be written to junction table

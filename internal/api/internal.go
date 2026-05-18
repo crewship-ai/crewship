@@ -18,6 +18,10 @@ type mcpCredEntry struct {
 	Value    string `json:"value"`
 	Priority int    `json:"priority"`
 	Type     string `json:"type"`
+	// Username carries the cleartext identifier half of a USERPASS
+	// credential. Always empty for other types — the sidecar mount
+	// path branches on Type and only reads Username for USERPASS.
+	Username string `json:"username,omitempty"`
 }
 
 // InternalHandler provides endpoints called by the sidecar over the Unix socket using X-Internal-Token auth.
