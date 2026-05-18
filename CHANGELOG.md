@@ -11,7 +11,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 (empty — next version's entries go here)
 
-## [0.1.0-beta.1] — 2026-05-14
+## [0.1.0-beta.1] — 2026-05-18
 
 **First public beta release.** APIs and data models may break across
 minor bumps until v1.0. See `RELEASING.md` for upgrade and rollback
