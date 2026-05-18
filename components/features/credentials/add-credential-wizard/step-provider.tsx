@@ -1,12 +1,11 @@
 "use client"
 
 import * as React from "react"
-import { Search } from "lucide-react"
+import { Search, Lock, User, KeyRound, ShieldCheck } from "lucide-react"
 import {
   AnthropicIcon, OpenAIIcon, GeminiIcon, CursorIcon, FactoryIcon,
   GitHubIcon, GitLabIcon, VercelIcon, AWSIcon, CustomCLIIcon,
 } from "@/components/icons/provider-icons"
-import { Lock } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { CredentialProvider, WizardState } from "./types"
 import { PROVIDER_TILES, defaultEnvVarName } from "./types"
@@ -23,6 +22,12 @@ const ICONS: Record<CredentialProvider, React.ComponentType<{ className?: string
   AWS: AWSIcon,
   CUSTOM_CLI: CustomCLIIcon,
   NONE: Lock,
+  // Vault tiles use generic, universally-recognised symbols rather
+  // than brand marks — these credentials have no upstream provider.
+  VAULT_USERPASS: User,
+  VAULT_SSH_KEY: KeyRound,
+  VAULT_CERTIFICATE: ShieldCheck,
+  VAULT_GENERIC: Lock,
 }
 
 interface Props {
@@ -66,6 +71,13 @@ export function StepProvider({ state, setState }: Props) {
                   authMethod: tile.defaultMethod,
                   type: tile.defaultType,
                   name: envName,
+                  // Reset value/username when switching tile so the
+                  // type-specific step-paste UI starts clean — a
+                  // half-typed API key shouldn't survive a hop to
+                  // SSH_KEY where the placeholder/textarea differs.
+                  value: "",
+                  username: "",
+                  testResult: null,
                 })
               }}
               className={cn(
@@ -87,8 +99,11 @@ export function StepProvider({ state, setState }: Props) {
           TIP
         </span>
         <span className="leading-relaxed">
-          Pick the provider your agent will call. Missing yours? Use <strong>Custom CLI</strong> for
-          arbitrary CLI tools, or <strong>Generic Secret</strong> for any opaque value.
+          Pick the provider your agent will call. Missing yours? Use <strong>Custom CLI</strong>{" "}
+          for arbitrary CLI tools, or one of the vault tiles
+          (<strong>SSH Key</strong>, <strong>TLS Certificate</strong>,{" "}
+          <strong>Username + Password</strong>, <strong>Generic Secret</strong>) for raw
+          credentials that have no upstream service.
         </span>
       </div>
     </div>

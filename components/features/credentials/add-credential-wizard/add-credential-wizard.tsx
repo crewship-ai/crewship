@@ -56,6 +56,19 @@ export function AddCredentialWizard({ workspaceId, open, onOpenChange, onSuccess
         scope: state.scope,
         account_label: state.accountLabel.trim(),
       }
+      // USERPASS carries a cleartext username in its own field so the
+      // backend stores it in the dedicated `username` column rather
+      // than packing it into the encrypted value. PEM types and other
+      // single-value credentials send no username.
+      if (state.type === "USERPASS" && state.username.trim()) {
+        body.username = state.username.trim()
+      }
+      // PEM bodies must NOT be .trim()'d above — leading whitespace
+      // before -----BEGIN is fine but trimming trailing newlines can
+      // break some PEM parsers. Send PEM types verbatim.
+      if (state.type === "SSH_KEY" || state.type === "CERTIFICATE") {
+        body.value = state.value
+      }
       if (state.description.trim()) body.description = state.description.trim()
       if (state.expiresAt) body.token_expires_at = new Date(state.expiresAt).toISOString()
       if (state.scope === "CREW") body.crew_ids = state.crewIds
@@ -113,7 +126,15 @@ export function AddCredentialWizard({ workspaceId, open, onOpenChange, onSuccess
           <SheetDescription className="text-[12.5px]">
             {state.step === 1 && "Pick the provider this credential authenticates against."}
             {state.step === 2 && "Choose how you'll authenticate. Provider-driven; we picked the recommended default."}
-            {state.step === 3 && "Paste the value. We auto-test it as soon as you paste."}
+            {state.step === 3 && (
+              state.type === "USERPASS"
+                ? "Enter the username and password. Stored encrypted; injected as two env vars."
+                : state.type === "SSH_KEY"
+                  ? "Paste the PEM-encoded private key. Mounted at mode 0600 inside the container."
+                  : state.type === "CERTIFICATE"
+                    ? "Paste the PEM-encoded certificate. Mounted at mode 0400 inside the container."
+                    : "Paste the value. We auto-test it as soon as you paste."
+            )}
             {state.step === 4 && "Name it, scope it, and assign agents."}
           </SheetDescription>
         </SheetHeader>
@@ -209,7 +230,19 @@ function StepStrip({ step, onJump }: { step: WizardStep; onJump: (s: WizardStep)
 function stepIsValid(s: WizardState): boolean {
   if (s.step === 1) return s.provider !== null
   if (s.step === 2) return s.authMethod !== null
-  if (s.step === 3) return s.value.trim().length > 0
+  if (s.step === 3) {
+    // USERPASS requires BOTH username and password — the backend
+    // rejects USERPASS-without-username with a 400 ("username is
+    // required"), surface that as an early step-gate so users don't
+    // get rejected at the Identity step's submit.
+    if (s.type === "USERPASS") {
+      return s.username.trim().length > 0 && s.value.length > 0
+    }
+    // PEM types: don't trim before checking length — looksWrongShape
+    // in step-paste does the structural hint; here we just need any
+    // content so Continue activates.
+    return s.value.trim().length > 0
+  }
   if (s.step === 4) {
     if (s.name.trim().length === 0) return false
     if (s.accountLabel.trim().length === 0) return false

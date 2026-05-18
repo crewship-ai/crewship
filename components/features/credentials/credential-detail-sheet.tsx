@@ -31,6 +31,11 @@ interface CredentialSummary {
   scope: string
   account_label: string | null
   account_email: string | null
+  // username is the cleartext half of USERPASS credentials. null for
+  // every other type — the Overview tab renders a Username row only
+  // when this is populated, so it stays out of the way for the other
+  // 8 types that don't have one.
+  username: string | null
   token_expires_at: string | null
   last_checked_at: string | null
   last_used_at: string | null
@@ -224,6 +229,16 @@ export function CredentialDetailSheet({
               <TabsContent value="overview" className="m-0 space-y-3">
                 <Field label="Type">{credential.type.replace(/_/g, " ")}</Field>
                 <Field label="Provider">{credential.provider}</Field>
+                {credential.username && (
+                  // USERPASS only — username is cleartext (it's an
+                  // identifier, not a secret). The password lives in
+                  // encrypted_value and is never returned by any
+                  // read endpoint, so we don't even need to mask
+                  // anything on this tab.
+                  <Field label="Username">
+                    <span className="font-mono">{credential.username}</span>
+                  </Field>
+                )}
                 <Field label="Scope">{credential.scope}</Field>
                 <Field label="Created">{formatDate(credential.created_at)}</Field>
                 {credential.token_expires_at && (

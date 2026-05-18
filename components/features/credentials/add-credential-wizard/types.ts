@@ -1,12 +1,32 @@
 // Wizard state for the Crew-styled Add Credential flow.
 // Matches the 4-step model from CONNECTIONS.md §4.4.
 
-export type CredentialType = "AI_CLI_TOKEN" | "API_KEY" | "CLI_TOKEN" | "SECRET" | "OAUTH2"
+// CredentialType mirrors the backend's closed enum in
+// internal/api/credentials_types.go. Vault types (USERPASS, SSH_KEY,
+// CERTIFICATE, GENERIC_SECRET) ship with PR feat/credentials-vault-ui;
+// keep these in sync with the Go validator or the wizard will start
+// emitting 400s.
+export type CredentialType =
+  | "AI_CLI_TOKEN"
+  | "API_KEY"
+  | "CLI_TOKEN"
+  | "SECRET"
+  | "OAUTH2"
+  | "USERPASS"
+  | "SSH_KEY"
+  | "CERTIFICATE"
+  | "GENERIC_SECRET"
 
+// CredentialProvider is also the brand-registry lookup key. The
+// VAULT_* IDs are wizard-only buckets for the four runtime-vault
+// types — backend stores the literal string, but they're semantically
+// generic (no upstream provider). Mapped to dedicated tiles + icons in
+// PROVIDER_TILES below and BRAND_REGISTRY in lib/credential-providers.
 export type CredentialProvider =
   | "ANTHROPIC" | "OPENAI" | "GOOGLE"
   | "GITHUB" | "GITLAB" | "VERCEL" | "AWS"
   | "CURSOR" | "FACTORY" | "CUSTOM_CLI" | "NONE"
+  | "VAULT_USERPASS" | "VAULT_SSH_KEY" | "VAULT_CERTIFICATE" | "VAULT_GENERIC"
 
 export type WizardStep = 1 | 2 | 3 | 4
 
@@ -17,6 +37,9 @@ export type AuthMethod =
   | "pat"          // GitHub/GitLab/Vercel PAT
   | "github-app"   // GitHub App
   | "secret"       // generic secret
+  | "userpass"     // username + password (Bitwarden-style)
+  | "ssh-key"      // PEM-encoded private key, file-mounted in container
+  | "certificate"  // PEM-encoded cert chain, file-mounted in container
 
 export interface WizardState {
   step: WizardStep
@@ -27,6 +50,10 @@ export interface WizardState {
   type: CredentialType
   // Step 3
   value: string
+  // username is the cleartext identifier half of a USERPASS credential.
+  // Empty for every other type. Kept separate from `value` so the API
+  // can store it in its own column (it's an identifier, not a secret).
+  username: string
   testResult: { valid: boolean; error?: string } | null
   testing: boolean
   // Step 4
@@ -48,6 +75,7 @@ export const INITIAL: WizardState = {
   authMethod: null,
   type: "API_KEY",
   value: "",
+  username: "",
   testResult: null,
   testing: false,
   name: "",
@@ -72,7 +100,18 @@ export const PROVIDER_TILES: { id: CredentialProvider; label: string; defaultMet
   { id: "VERCEL", label: "Vercel", defaultMethod: "pat", defaultType: "CLI_TOKEN" },
   { id: "AWS", label: "AWS", defaultMethod: "pat", defaultType: "CLI_TOKEN" },
   { id: "CUSTOM_CLI", label: "Custom CLI", defaultMethod: "pat", defaultType: "CLI_TOKEN" },
-  { id: "NONE", label: "Generic Secret", defaultMethod: "secret", defaultType: "SECRET" },
+  // Vault-type tiles — provider buckets for credentials with no
+  // upstream service (just raw secrets the agent consumes in-container).
+  // Order matters for the picker grid: put the most common ones first.
+  { id: "VAULT_USERPASS", label: "Username + Password", defaultMethod: "userpass", defaultType: "USERPASS" },
+  { id: "VAULT_SSH_KEY", label: "SSH Key", defaultMethod: "ssh-key", defaultType: "SSH_KEY" },
+  { id: "VAULT_CERTIFICATE", label: "TLS Certificate", defaultMethod: "certificate", defaultType: "CERTIFICATE" },
+  { id: "VAULT_GENERIC", label: "Generic Secret", defaultMethod: "secret", defaultType: "GENERIC_SECRET" },
+  // Kept for backwards compat — older code paths still set provider="NONE"
+  // for opaque secrets. The new VAULT_GENERIC tile above is the wizard
+  // entry point; this row is only here so existing rows render with a
+  // sensible label/icon.
+  { id: "NONE", label: "Legacy Secret", defaultMethod: "secret", defaultType: "SECRET" },
 ]
 
 // Auth methods available per provider. Empty list = whatever the
@@ -89,6 +128,10 @@ export const PROVIDER_AUTH_METHODS: Partial<Record<CredentialProvider, AuthMetho
 // Default env var name (becomes credentials.name) per provider+method.
 export function defaultEnvVarName(provider: CredentialProvider, method: AuthMethod): string {
   if (method === "secret") return ""
+  // Vault types: the wizard prompts the user for a meaningful name
+  // (it becomes the env var prefix the agent sees, e.g. GMAIL_USERNAME
+  // / GMAIL_PASSWORD for a USERPASS named "GMAIL"). No sensible default.
+  if (method === "userpass" || method === "ssh-key" || method === "certificate") return ""
   switch (provider) {
     case "ANTHROPIC": return "ANTHROPIC_API_KEY"
     case "OPENAI": return "OPENAI_API_KEY"
