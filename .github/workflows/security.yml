@@ -219,8 +219,10 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       # SHA-pinned per Shai-Hulud-style supply-chain guidance; Dependabot
-      # bumps both the SHA and the trailing version comment together.
-      - uses: google/osv-scanner-action@9bb69575e74019c2ad085a1860787043adf47ccb # v2.2.4
+      # bumps both the SHA and the trailing version comment together. The
+      # composite action lives in the osv-scanner-action/ subdirectory of
+      # google/osv-scanner-action — the repo root has no `runs:` field.
+      - uses: google/osv-scanner-action/osv-scanner-action@9bb69575e74019c2ad085a1860787043adf47ccb # v2.2.4
         with:
           scan-args: |-
             --lockfile=go.sum

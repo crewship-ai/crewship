@@ -65,7 +65,7 @@ reporting in a later version), the change will be:
 Everything Crewship records — workspaces, agents, missions, journal
 entries, credentials, conversation history — lives in your local
 SQLite database on disk. Encryption at rest for credentials uses
-AES-256-GCM (see [docs/security/encryption.mdx](docs/guides/encryption.mdx)).
+AES-256-GCM (see [docs/security/encryption.mdx](docs/security/encryption.mdx)).
 
 Credentials are injected into agent containers per-request via the
 sidecar over a Unix domain socket — they are never written to
@@ -86,7 +86,7 @@ of that flow — you chose the provider and the credentials.
 Provider documentation:
 
 - [Anthropic Privacy Policy](https://www.anthropic.com/legal/privacy)
-- [OpenAI Privacy Policy](https://openai.com/policies/privacy-policy/)
+- [OpenAI Privacy Policy](https://openai.com/policies/privacy-policy)
 - [Google AI Privacy Policy](https://policies.google.com/privacy)
 
 If your workflow requires you to keep prompt contents inside the EU,
