@@ -273,6 +273,7 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Tags:         respTags,
 		AccountLabel: req.AccountLabel,
 		AccountEmail: req.AccountEmail,
+		Username:     req.Username,
 		LastUsedIPs:  []string{},
 		CreatedAt:    now,
 		UpdatedAt:    now,

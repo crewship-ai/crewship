@@ -48,13 +48,20 @@ interface Credential {
   name: string
   description: string | null
   type: "AI_CLI_TOKEN" | "API_KEY" | "CLI_TOKEN" | "SECRET" | "OAUTH2"
-  provider: "ANTHROPIC" | "OPENAI" | "GOOGLE" | "CURSOR" | "FACTORY" | "GITHUB" | "GITLAB" | "VERCEL" | "AWS" | "CUSTOM_CLI" | "NONE"
+       | "USERPASS" | "SSH_KEY" | "CERTIFICATE" | "GENERIC_SECRET"
+  provider: "ANTHROPIC" | "OPENAI" | "GOOGLE" | "CURSOR" | "FACTORY"
+          | "GITHUB" | "GITLAB" | "VERCEL" | "AWS" | "CUSTOM_CLI" | "NONE"
+          | "VAULT_USERPASS" | "VAULT_SSH_KEY" | "VAULT_CERTIFICATE" | "VAULT_GENERIC"
   status: "ACTIVE" | "EXPIRED" | "RATE_LIMITED" | "REVOKED" | "ERROR" | "PENDING"
   scope: "WORKSPACE" | "CREW"
   crew_id: string | null
   crew_ids: string[]
   account_label: string | null
   account_email: string | null
+  // username is cleartext for USERPASS credentials, null otherwise.
+  // Backend sets the column to NULL for legacy types so a null-check
+  // is the cheapest "is this USERPASS-ish" detector at render time.
+  username: string | null
   token_expires_at: string | null
   last_checked_at: string | null
   last_error: string | null
@@ -104,6 +111,10 @@ const TYPE_LABEL: Record<Credential["type"], string> = {
   CLI_TOKEN: "token",
   SECRET: "secret",
   OAUTH2: "oauth",
+  USERPASS: "userpass",
+  SSH_KEY: "ssh key",
+  CERTIFICATE: "cert",
+  GENERIC_SECRET: "secret",
 }
 
 type SortKey = "last_used" | "name" | "created"

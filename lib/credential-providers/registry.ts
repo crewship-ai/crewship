@@ -13,7 +13,7 @@
 // the substring match in detectBrandFromName — keep them lowercase.
 
 import type { ComponentType, SVGProps } from "react"
-import { Key } from "lucide-react"
+import { Key, KeyRound, ShieldCheck, User, Lock } from "lucide-react"
 
 import {
   // AI / inference
@@ -352,6 +352,18 @@ export const BRAND_REGISTRY: BrandEntry[] = [
 
   // ─── Crewship internals (CLI tooling) ───────────────────────────
   { key: "CUSTOM_CLI", label: "Custom CLI", hex: "#9CA3AF", Icon: CustomCLIIcon as IconComponent, category: "Other", keywords: ["custom_cli"] },
+
+  // ─── Crewship vault types ───────────────────────────────────────
+  // Generic, brand-less entries for credentials whose provider is the
+  // vault itself (no upstream service). Icons come from lucide so they
+  // visually distinguish themselves from the Simple Icons brand marks
+  // — the user reads them as "generic secret, not a third-party brand".
+  // Hex sits in the muted-grey range used by Lucide's stroke colour
+  // palette so the icon doesn't shout for attention in the list row.
+  { key: "VAULT_USERPASS", label: "Username + Password", hex: "#9CA3AF", Icon: User as unknown as IconComponent, category: "Auth", keywords: ["userpass", "login"] },
+  { key: "VAULT_SSH_KEY", label: "SSH Key", hex: "#9CA3AF", Icon: KeyRound as unknown as IconComponent, category: "Auth", keywords: ["ssh"] },
+  { key: "VAULT_CERTIFICATE", label: "TLS Certificate", hex: "#9CA3AF", Icon: ShieldCheck as unknown as IconComponent, category: "Auth", keywords: ["certificate", "tls", "mtls", "pem"] },
+  { key: "VAULT_GENERIC", label: "Generic Secret", hex: "#9CA3AF", Icon: Lock as unknown as IconComponent, category: "Auth", keywords: ["secret", "webhook"] },
 ]
 
 // ── Lookup helpers ─────────────────────────────────────────────────

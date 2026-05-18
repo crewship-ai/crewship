@@ -11,15 +11,20 @@ interface Props {
   setState: (patch: Partial<WizardState>) => void
 }
 
+// Types that have no /test endpoint — raw vault secrets the agent
+// consumes directly. Skip the debounced auto-test for these so we
+// don't fire pointless 404s every 800ms during typing.
+const NON_TESTABLE_TYPES = new Set(["USERPASS", "SSH_KEY", "CERTIFICATE", "GENERIC_SECRET", "SECRET"])
+
 export function StepPaste({ state, setState }: Props) {
-  const [showValue, setShowValue] = React.useState(false)
   const [bulkMode, setBulkMode] = React.useState(false)
   const debounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Auto-test debounced 800ms after paste — but skip for SECRET type
-  // (no provider to test against) and for value === "" (cleared).
+  // Auto-test debounced 800ms after paste. Skipped for vault types
+  // (no /test endpoint) and for the legacy NONE provider (no upstream
+  // to test against).
   React.useEffect(() => {
-    if (state.type === "SECRET" || state.provider === "NONE" || !state.value.trim()) {
+    if (NON_TESTABLE_TYPES.has(state.type) || state.provider === "NONE" || !state.value.trim()) {
       return
     }
     if (debounceRef.current) clearTimeout(debounceRef.current)
@@ -55,6 +60,69 @@ export function StepPaste({ state, setState }: Props) {
     return <BulkImport setBulkMode={setBulkMode} />
   }
 
+  // Type-specific input UIs — see each Fields component for the
+  // shape. The shared test-status bar + bulk-import shortcut sit
+  // below, so each component renders only its own input(s).
+  const inputs =
+    state.type === "USERPASS" ? (
+      <UserPassFields state={state} setState={setState} />
+    ) : state.type === "SSH_KEY" ? (
+      <PEMFields state={state} setState={setState} kind="ssh" />
+    ) : state.type === "CERTIFICATE" ? (
+      <PEMFields state={state} setState={setState} kind="cert" />
+    ) : (
+      <SingleValueField state={state} setState={setState} />
+    )
+
+  return (
+    <div className="space-y-3">
+      {inputs}
+
+      {/* Test status + bulk-import shortcut. The status bar is hidden
+          for non-testable types so we don't render an empty 24px gap
+          for credentials that never report a verdict. */}
+      <div className="flex items-center justify-between min-h-[24px]">
+        <div className="text-xs">
+          {!NON_TESTABLE_TYPES.has(state.type) && state.testing && (
+            <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              Testing key...
+            </span>
+          )}
+          {!NON_TESTABLE_TYPES.has(state.type) && !state.testing && state.testResult?.valid && (
+            <span className="inline-flex items-center gap-1.5 text-emerald-400">
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              Valid
+            </span>
+          )}
+          {!NON_TESTABLE_TYPES.has(state.type) && !state.testing && state.testResult && !state.testResult.valid && (
+            <span className={cn("inline-flex items-center gap-1.5 text-red-400")}>
+              <XCircle className="h-3.5 w-3.5" />
+              {state.testResult.error || "Invalid"}
+            </span>
+          )}
+        </div>
+        <button
+          type="button"
+          onClick={() => setBulkMode(true)}
+          className="text-[11px] text-muted-foreground hover:text-foreground inline-flex items-center gap-1"
+        >
+          <FileUp className="h-3 w-3" />
+          Import from .env
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// SingleValueField is the original step-paste input — one masked text
+// field with an eye toggle, used for API keys, tokens, OAuth blobs,
+// and opaque secrets. Placeholder hints come from the provider since
+// the user's most common task is pasting *this specific provider's*
+// key shape.
+function SingleValueField({ state, setState }: Props) {
+  const [showValue, setShowValue] = React.useState(false)
+
   const placeholder =
     state.authMethod === "setup-token"
       ? "Paste output of `claude setup-token`..."
@@ -67,7 +135,7 @@ export function StepPaste({ state, setState }: Props) {
             : "Paste value..."
 
   return (
-    <div className="space-y-3">
+    <>
       {state.authMethod === "setup-token" && (
         <div className="rounded-md border border-blue-500/25 bg-blue-500/[0.05] px-3 py-2.5 text-xs space-y-1.5">
           <p className="font-medium">How to get a setup token:</p>
@@ -101,37 +169,172 @@ export function StepPaste({ state, setState }: Props) {
           </button>
         </div>
       </div>
+    </>
+  )
+}
 
-      {/* Test status */}
-      <div className="flex items-center justify-between min-h-[24px]">
-        <div className="text-xs">
-          {state.testing && (
-            <span className="inline-flex items-center gap-1.5 text-muted-foreground">
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              Testing key...
-            </span>
-          )}
-          {!state.testing && state.testResult?.valid && (
-            <span className="inline-flex items-center gap-1.5 text-emerald-400">
-              <CheckCircle2 className="h-3.5 w-3.5" />
-              Valid
-            </span>
-          )}
-          {!state.testing && state.testResult && !state.testResult.valid && (
-            <span className={cn("inline-flex items-center gap-1.5 text-red-400")}>
-              <XCircle className="h-3.5 w-3.5" />
-              {state.testResult.error || "Invalid"}
-            </span>
-          )}
+// UserPassFields renders the Bitwarden-style two-field input pair for
+// USERPASS credentials. The username is cleartext (it's an identifier),
+// the password is masked by default with an eye-toggle. The injected
+// env-var pair is <NAME>_USERNAME + <NAME>_PASSWORD; the hint below
+// the inputs spells that out so the user knows what to expect inside
+// the agent container.
+function UserPassFields({ state, setState }: Props) {
+  const [showPassword, setShowPassword] = React.useState(false)
+
+  return (
+    <div className="space-y-3">
+      <div className="space-y-1.5">
+        <label className="block text-[11px] uppercase tracking-wider text-muted-foreground font-medium">
+          Username
+        </label>
+        <input
+          autoFocus
+          type="text"
+          value={state.username}
+          onChange={(e) => setState({ username: e.target.value })}
+          placeholder="user@gmail.com"
+          autoComplete="off"
+          className="w-full bg-zinc-950 border border-white/15 rounded-md px-3 py-2 text-sm font-mono outline-none focus:border-blue-400"
+        />
+      </div>
+
+      <div className="space-y-1.5">
+        <label className="block text-[11px] uppercase tracking-wider text-muted-foreground font-medium">
+          Password
+        </label>
+        <div className="relative">
+          <input
+            type={showPassword ? "text" : "password"}
+            value={state.value}
+            onChange={(e) => setState({ value: e.target.value })}
+            placeholder="••••••••"
+            autoComplete="new-password"
+            className="w-full bg-zinc-950 border border-white/15 rounded-md px-3 py-2 pr-10 text-sm font-mono outline-none focus:border-blue-400"
+          />
+          <button
+            type="button"
+            onClick={() => setShowPassword((s) => !s)}
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+          >
+            {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={() => setBulkMode(true)}
-          className="text-[11px] text-muted-foreground hover:text-foreground inline-flex items-center gap-1"
-        >
-          <FileUp className="h-3 w-3" />
-          Import from .env
-        </button>
+      </div>
+
+      <p className="text-[11px] text-muted-foreground leading-relaxed">
+        Injected as <code className="rounded bg-black/40 px-1 font-mono">{"<NAME>"}_USERNAME</code>{" "}
+        and <code className="rounded bg-black/40 px-1 font-mono">{"<NAME>"}_PASSWORD</code> env vars,
+        where <code className="rounded bg-black/40 px-1 font-mono">{"<NAME>"}</code> is the binding
+        name you set on the next step.
+      </p>
+    </div>
+  )
+}
+
+// PEMFields renders a multi-line monospaced textarea for PEM-encoded
+// keys / certs. `kind` switches the inline help and placeholder so the
+// SSH and CERTIFICATE variants explain their own format without two
+// near-duplicate components.
+function PEMFields({
+  state,
+  setState,
+  kind,
+}: Props & { kind: "ssh" | "cert" }) {
+  const isSSH = kind === "ssh"
+  const placeholder = isSSH
+    ? "-----BEGIN OPENSSH PRIVATE KEY-----\n…\n-----END OPENSSH PRIVATE KEY-----"
+    : "-----BEGIN CERTIFICATE-----\n…\n-----END CERTIFICATE-----"
+
+  // Soft client-side hint. Backend validateCredentialPayload does the
+  // canonical PEM check (looksLikePEM in internal/api/credentials_types.go);
+  // this just nudges users who paste obviously wrong content before they
+  // hit Submit. The most common foot-gun for SSH_KEY is pasting an
+  // OpenSSH public key (`ssh-rsa AAAA…` or `-----BEGIN PUBLIC KEY-----`)
+  // into a field that needs the *private* half — the basic structural
+  // check ("starts with BEGIN, contains END") would still pass that, so
+  // we also verify the first-line label ends with the right marker.
+  //
+  // firstLine is .trim()'d *before* the regex replace so a CRLF-pasted
+  // key (Windows openssl, Notepad) — where split('\n')[0] keeps a
+  // trailing '\r' that prevents `-----$` from matching — still resolves
+  // to the right marker. Mirrors the early TrimSpace in looksLikePEM.
+  const trimmed = state.value.trim()
+  const expectedMarker = isSSH ? "PRIVATE KEY" : "CERTIFICATE"
+  const firstLine = (trimmed.split("\n", 1)[0] ?? "").trim()
+  const looksWrongShape =
+    trimmed.length > 0 &&
+    !(
+      trimmed.startsWith("-----BEGIN ") &&
+      trimmed.includes("-----END ") &&
+      firstLine.replace(/^-----BEGIN /, "").replace(/-----$/, "").trim().endsWith(expectedMarker)
+    )
+
+  return (
+    <div className="space-y-3">
+      <div className="rounded-md border border-blue-500/25 bg-blue-500/[0.05] px-3 py-2.5 text-xs space-y-1.5">
+        <p className="font-medium">
+          {isSSH ? "Paste the SSH private key (PEM)" : "Paste the certificate (PEM)"}
+        </p>
+        <p className="text-foreground/80 leading-relaxed">
+          {isSSH ? (
+            <>
+              The agent mounts it at{" "}
+              <code className="rounded bg-black/40 px-1 font-mono">~/.ssh/keys/{"<NAME>"}</code>{" "}
+              with mode 0600. Use the{" "}
+              <code className="rounded bg-black/40 px-1 font-mono">{"<NAME>"}_PATH</code>{" "}
+              env var to locate it (e.g.{" "}
+              <code className="rounded bg-black/40 px-1 font-mono">ssh -i $GITHUB_PATH …</code>).
+            </>
+          ) : (
+            <>
+              The agent mounts it at{" "}
+              <code className="rounded bg-black/40 px-1 font-mono">
+                /secrets/{"<agent>"}/certs/{"<NAME>"}.pem
+              </code>{" "}
+              with mode 0400. Locate via the auto-injected{" "}
+              <code className="rounded bg-black/40 px-1 font-mono">{"<NAME>"}_PATH</code> env var.
+            </>
+          )}
+        </p>
+      </div>
+
+      <div className="space-y-1.5">
+        <label className="block text-[11px] uppercase tracking-wider text-muted-foreground font-medium">
+          {isSSH ? "Private key (PEM)" : "Certificate (PEM)"}
+        </label>
+        <textarea
+          autoFocus
+          rows={10}
+          value={state.value}
+          onChange={(e) => setState({ value: e.target.value })}
+          placeholder={placeholder}
+          spellCheck={false}
+          autoComplete="off"
+          className="w-full bg-zinc-950 border border-white/15 rounded-md px-3 py-2 text-[11px] font-mono leading-snug outline-none focus:border-blue-400 resize-y"
+        />
+        {looksWrongShape && (
+          <p className="text-[11px] text-amber-400 leading-relaxed">
+            {isSSH ? (
+              <>
+                That doesn&rsquo;t look like a PEM-encoded{" "}
+                <strong>private</strong> key — expected{" "}
+                <code className="rounded bg-black/40 px-1 font-mono">-----BEGIN ... PRIVATE KEY-----</code>.{" "}
+                If you pasted an{" "}
+                <code className="rounded bg-black/40 px-1 font-mono">ssh-rsa</code> /{" "}
+                <code className="rounded bg-black/40 px-1 font-mono">ssh-ed25519</code>{" "}
+                line or a <code className="rounded bg-black/40 px-1 font-mono">PUBLIC KEY</code>{" "}
+                block, that&rsquo;s the wrong half — Crewship needs the private key here.
+              </>
+            ) : (
+              <>
+                That doesn&rsquo;t look PEM-shaped — expected{" "}
+                <code className="rounded bg-black/40 px-1 font-mono">-----BEGIN CERTIFICATE-----</code>{" "}
+                … <code className="rounded bg-black/40 px-1 font-mono">-----END CERTIFICATE-----</code>.
+              </>
+            )}
+          </p>
+        )}
       </div>
     </div>
   )

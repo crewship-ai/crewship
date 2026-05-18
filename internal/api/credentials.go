@@ -22,20 +22,25 @@ func NewCredentialHandler(db *sql.DB, logger *slog.Logger) *CredentialHandler {
 }
 
 type credentialResponse struct {
-	ID             string   `json:"id"`
-	Name           string   `json:"name"`
-	Description    *string  `json:"description"`
-	Type           string   `json:"type"`
-	Provider       string   `json:"provider"`
-	Status         string   `json:"status"`
-	Scope          string   `json:"scope"`
-	CrewID         *string  `json:"crew_id"`
-	CrewIDs        []string `json:"crew_ids"`
-	AccountLabel   *string  `json:"account_label"`
-	AccountEmail   *string  `json:"account_email"`
-	TokenExpiresAt *string  `json:"token_expires_at"`
-	LastCheckedAt  *string  `json:"last_checked_at"`
-	LastError      *string  `json:"last_error"`
+	ID           string   `json:"id"`
+	Name         string   `json:"name"`
+	Description  *string  `json:"description"`
+	Type         string   `json:"type"`
+	Provider     string   `json:"provider"`
+	Status       string   `json:"status"`
+	Scope        string   `json:"scope"`
+	CrewID       *string  `json:"crew_id"`
+	CrewIDs      []string `json:"crew_ids"`
+	AccountLabel *string  `json:"account_label"`
+	AccountEmail *string  `json:"account_email"`
+	// Username is the cleartext identifier half of USERPASS credentials,
+	// nil for every other type. Safe to expose because usernames are
+	// not secrets — the password lives encrypted in encrypted_value
+	// and is never returned by any read endpoint.
+	Username       *string `json:"username"`
+	TokenExpiresAt *string `json:"token_expires_at"`
+	LastCheckedAt  *string `json:"last_checked_at"`
+	LastError      *string `json:"last_error"`
 	// LastUsedAt is the latest USE event recorded by RecordCredentialEvent.
 	// Distinct from LastCheckedAt — that's a health-check timestamp.
 	// Drives the Stale status (last_used_at < now-90d) in the 5-state
@@ -79,7 +84,7 @@ func (h *CredentialHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT c.id, c.name, c.description, c.type, c.provider, c.status,
-			c.scope, c.crew_id, c.account_label, c.account_email,
+			c.scope, c.crew_id, c.account_label, c.account_email, c.username,
 			c.token_expires_at, c.last_checked_at, c.last_error,
 			c.last_used_at, c.last_used_ips, c.tags,
 			c.created_at, c.updated_at,
@@ -104,7 +109,7 @@ func (h *CredentialHandler) List(w http.ResponseWriter, r *http.Request) {
 		var c credentialResponse
 		var lastUsedIPsRaw, tagsRaw sql.NullString
 		if err := rows.Scan(&c.ID, &c.Name, &c.Description, &c.Type, &c.Provider,
-			&c.Status, &c.Scope, &c.CrewID, &c.AccountLabel, &c.AccountEmail,
+			&c.Status, &c.Scope, &c.CrewID, &c.AccountLabel, &c.AccountEmail, &c.Username,
 			&c.TokenExpiresAt, &c.LastCheckedAt, &c.LastError,
 			&c.LastUsedAt, &lastUsedIPsRaw, &tagsRaw,
 			&c.CreatedAt, &c.UpdatedAt, &c.AgentCount); err != nil {
@@ -164,7 +169,7 @@ func (h *CredentialHandler) Get(w http.ResponseWriter, r *http.Request) {
 	var lastUsedIPsRaw, tagsRaw sql.NullString
 	err := h.db.QueryRowContext(r.Context(), `
 		SELECT c.id, c.name, c.description, c.type, c.provider, c.status,
-			c.scope, c.crew_id, c.account_label, c.account_email,
+			c.scope, c.crew_id, c.account_label, c.account_email, c.username,
 			c.token_expires_at, c.last_checked_at, c.last_error,
 			c.last_used_at, c.last_used_ips, c.tags,
 			c.created_at, c.updated_at,
@@ -172,7 +177,7 @@ func (h *CredentialHandler) Get(w http.ResponseWriter, r *http.Request) {
 		FROM credentials c
 		WHERE c.id = ? AND c.workspace_id = ? AND c.deleted_at IS NULL `+visFilter+`
 	`, args...).Scan(&c.ID, &c.Name, &c.Description, &c.Type, &c.Provider,
-		&c.Status, &c.Scope, &c.CrewID, &c.AccountLabel, &c.AccountEmail,
+		&c.Status, &c.Scope, &c.CrewID, &c.AccountLabel, &c.AccountEmail, &c.Username,
 		&c.TokenExpiresAt, &c.LastCheckedAt, &c.LastError,
 		&c.LastUsedAt, &lastUsedIPsRaw, &tagsRaw,
 		&c.CreatedAt, &c.UpdatedAt, &c.AgentCount)

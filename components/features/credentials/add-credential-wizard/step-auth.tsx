@@ -1,6 +1,6 @@
 "use client"
 
-import { Bot, Key, ExternalLink, Lock, Terminal } from "lucide-react"
+import { Bot, Key, ExternalLink, Lock, Terminal, User, KeyRound, ShieldCheck } from "lucide-react"
 import { GitHubIcon } from "@/components/icons/provider-icons"
 import { cn } from "@/lib/utils"
 import type { AuthMethod, WizardState } from "./types"
@@ -53,6 +53,30 @@ const METHOD_META: Record<AuthMethod, {
     description: "Opaque value stored encrypted; injected into the agent as ENV.",
     type: "SECRET",
   },
+  // Vault types — the StepProvider flow sets these defaults directly,
+  // so the user normally never sees this picker. Entries exist here
+  // because METHOD_META is a Record<AuthMethod, …> and TS rightly
+  // refuses partial maps, and because the single-method-card branch
+  // above renders for any provider whose PROVIDER_AUTH_METHODS list
+  // is omitted (vault tiles fall through to that branch).
+  "userpass": {
+    label: "Username + Password",
+    icon: User,
+    description: "Cleartext username + encrypted password. Injected as <NAME>_USERNAME / <NAME>_PASSWORD env vars.",
+    type: "USERPASS",
+  },
+  "ssh-key": {
+    label: "SSH private key",
+    icon: KeyRound,
+    description: "PEM-encoded private key, mounted at ~/.ssh/keys/<name> with mode 0600.",
+    type: "SSH_KEY",
+  },
+  "certificate": {
+    label: "TLS certificate",
+    icon: ShieldCheck,
+    description: "PEM-encoded cert chain, mounted at /secrets/<agent>/certs/<name>.pem with mode 0400.",
+    type: "CERTIFICATE",
+  },
 }
 
 export function StepAuth({ state, setState }: Props) {
@@ -101,8 +125,11 @@ export function StepAuth({ state, setState }: Props) {
                 authMethod: m,
                 type: meta.type,
                 name: defaultEnvVarName(state.provider!, m),
-                // Reset value+test if auth method changed mid-flow
+                // Reset value+username+test if auth method changed
+                // mid-flow — switching from "pat" to "userpass" must
+                // not leak the half-typed token into the new fields.
                 value: "",
+                username: "",
                 testResult: null,
               })
             }}
