@@ -18,13 +18,17 @@ type SearchResult struct {
 // Search performs a BM25-ranked FTS5 search over indexed memory chunks.
 // The query supports FTS5 query syntax (e.g. "foo AND bar", "foo OR bar",
 // prefix queries "foo*").
+//
+// No e.mu RLock is held: SQLite is opened in WAL mode (see New) and
+// Reindex's DELETE+INSERTs run inside a single transaction, so a
+// concurrent search sees a consistent snapshot of the index — either
+// the pre-reindex or post-reindex state, never an in-progress write.
+// Close() racing with an in-flight search just propagates as a normal
+// sql.DB error; no lock is needed to guard that path.
 func (e *Engine) Search(ctx context.Context, query string, limit int) ([]SearchResult, error) {
 	if !e.config.SearchEnabled {
 		return nil, fmt.Errorf("search is disabled")
 	}
-
-	e.mu.RLock()
-	defer e.mu.RUnlock()
 
 	if limit <= 0 {
 		limit = 10
