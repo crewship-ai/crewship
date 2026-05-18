@@ -906,6 +906,27 @@ func TestCredUpdate_MergedValidation(t *testing.T) {
 			if tt.wantBodyContains != "" && !strings.Contains(rr.Body.String(), tt.wantBodyContains) {
 				t.Errorf("body missing substring %q, got: %s", tt.wantBodyContains, rr.Body.String())
 			}
+			// Default DB-immutability check for rejection cases that
+			// don't override dbAssert. Catches a class of partial-
+			// write regressions where the validator returns 400 but
+			// some upstream code path (ub.Set, tx unflushed) already
+			// mutated the row before the error bubbled up.
+			if rr.Code >= 400 && tt.dbAssert == nil {
+				var gotType string
+				var gotUsername sql.NullString
+				if err := db.QueryRow(`SELECT type, username FROM credentials WHERE id = 'c1'`).Scan(&gotType, &gotUsername); err != nil {
+					t.Fatalf("reload row for immutability check: %v", err)
+				}
+				if gotType != tt.seedType {
+					t.Errorf("type after rejected PATCH = %q, want %q (row mutated despite 400)", gotType, tt.seedType)
+				}
+				switch {
+				case tt.seedUsername == "" && gotUsername.Valid:
+					t.Errorf("username after rejected PATCH = %q, want NULL", gotUsername.String)
+				case tt.seedUsername != "" && (!gotUsername.Valid || gotUsername.String != tt.seedUsername):
+					t.Errorf("username after rejected PATCH = %v, want %q", gotUsername, tt.seedUsername)
+				}
+			}
 			if tt.dbAssert != nil {
 				tt.dbAssert(t, db)
 			}

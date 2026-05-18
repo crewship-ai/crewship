@@ -169,6 +169,29 @@ func TestLooksLikePEM(t *testing.T) {
 			"PRIVATE KEY",
 			true,
 		},
+		// Mismatched BEGIN/END labels: real PEMs always pair, so a
+		// mismatched header is either copy-paste damage or a hostile
+		// shape. The pre-fix structural check passed these because it
+		// only validated the BEGIN label and the existence of any
+		// "-----END " substring.
+		{
+			"BEGIN PRIVATE KEY but END CERTIFICATE — rejected",
+			"-----BEGIN OPENSSH PRIVATE KEY-----\nABC\n-----END CERTIFICATE-----",
+			"PRIVATE KEY",
+			false,
+		},
+		{
+			"BEGIN PUBLIC KEY but END CERTIFICATE — rejected against CERT",
+			"-----BEGIN PUBLIC KEY-----\nABC\n-----END CERTIFICATE-----",
+			"CERTIFICATE",
+			false,
+		},
+		{
+			"BEGIN CERTIFICATE but END PRIVATE KEY — rejected against CERT",
+			"-----BEGIN CERTIFICATE-----\nABC\n-----END PRIVATE KEY-----",
+			"CERTIFICATE",
+			false,
+		},
 	}
 
 	for _, tt := range tests {

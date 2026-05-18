@@ -234,7 +234,7 @@ func writeCredentialFiles(
 ) error {
 	script, fileCount, err := buildCredFileScript(creds, secretsAgentDir)
 	if err != nil {
-		return err
+		return fmt.Errorf("build credential script: %w", err)
 	}
 	if script == "" {
 		return nil

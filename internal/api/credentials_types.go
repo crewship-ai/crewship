@@ -109,6 +109,21 @@ func validateCredentialPayload(req *createCredentialRequest) string {
 // `marker` is the PEM type label, e.g. "PRIVATE KEY" or "CERTIFICATE".
 // For private keys we accept both "PRIVATE KEY" and "RSA PRIVATE KEY"
 // / "OPENSSH PRIVATE KEY" / "EC PRIVATE KEY" by matching the suffix.
+//
+// BOTH the BEGIN and END labels must match the marker — a payload
+// shaped like `-----BEGIN PUBLIC KEY-----\n…\n-----END CERTIFICATE-----`
+// would otherwise sail through the SSH_KEY check because the BEGIN
+// label looked unrelated to "PRIVATE KEY" but `strings.Contains(v,
+// "-----END ")` was trivially true. Real PEMs always have matching
+// labels; mismatched pairs are either copy-paste accidents or
+// hostile shapes.
+//
+// TrimSpace before stripping the dashes catches CRLF line endings —
+// a key exported from a Windows openssl build, or pasted from
+// Notepad, lands here as `-----BEGIN ... PRIVATE KEY-----\r\n…` and
+// the naked IndexByte('\n') leaves a stray `\r` glued to the closing
+// `-----`. Without the early trim, TrimSuffix("-----") silently
+// no-ops on the `…KEY-----\r` form and we'd reject a valid key.
 func looksLikePEM(value, marker string) bool {
 	v := strings.TrimSpace(value)
 	if !strings.HasPrefix(v, "-----BEGIN ") {
@@ -117,22 +132,38 @@ func looksLikePEM(value, marker string) bool {
 	if !strings.Contains(v, "-----END ") {
 		return false
 	}
-	// First line: "-----BEGIN <label>-----". Check the label ends
-	// with the requested marker so "PRIVATE KEY" matches all four
-	// flavours (PKCS#1, PKCS#8, OpenSSH, EC).
-	//
-	// TrimSpace before stripping the dashes catches CRLF line endings
-	// — a key exported from a Windows openssl build, or pasted from
-	// Notepad, lands here as `-----BEGIN ... PRIVATE KEY-----\r\n…`
-	// and the naked IndexByte('\n') leaves a stray `\r` glued to the
-	// closing `-----`. Without the early trim, TrimSuffix("-----")
-	// silently no-ops on the `…KEY-----\r` form and we end up
-	// rejecting a perfectly valid key.
-	firstLine := v
-	if nl := strings.IndexByte(v, '\n'); nl >= 0 {
-		firstLine = v[:nl]
+
+	beginLabel := pemLabel(v, "-----BEGIN ")
+	if !strings.HasSuffix(beginLabel, marker) {
+		return false
+	}
+	// END label sits on the last non-empty line. Extract it via the
+	// last LF — if there's no LF in the value, the whole thing is one
+	// line (which can't have both a BEGIN and END block anyway, but
+	// we already gated on Contains above so the single-line case
+	// would mean the payload is malformed).
+	endLine := v
+	if nl := strings.LastIndexByte(v, '\n'); nl >= 0 {
+		endLine = v[nl+1:]
+	}
+	endLine = strings.TrimSpace(endLine)
+	if !strings.HasPrefix(endLine, "-----END ") {
+		return false
+	}
+	endLabel := pemLabel(endLine, "-----END ")
+	return strings.HasSuffix(endLabel, marker)
+}
+
+// pemLabel pulls the label out of a PEM armour line — given
+// "-----BEGIN OPENSSH PRIVATE KEY-----" and "-----BEGIN ", returns
+// "OPENSSH PRIVATE KEY". Works for END lines too by passing
+// "-----END ". Callers pass an already-trimmed first/last line.
+func pemLabel(line, prefix string) string {
+	firstLine := line
+	if nl := strings.IndexByte(firstLine, '\n'); nl >= 0 {
+		firstLine = firstLine[:nl]
 	}
 	firstLine = strings.TrimSpace(firstLine)
-	firstLine = strings.TrimSuffix(strings.TrimPrefix(firstLine, "-----BEGIN "), "-----")
-	return strings.HasSuffix(strings.TrimSpace(firstLine), marker)
+	stripped := strings.TrimSuffix(strings.TrimPrefix(firstLine, prefix), "-----")
+	return strings.TrimSpace(stripped)
 }
