@@ -134,10 +134,17 @@ func seedAgentForStatus(t *testing.T, h *AgentHandler, agentID, wsID, crewID, st
 	if deleted {
 		del = time.Now().UTC().Format(time.RFC3339)
 	}
+	// crew_id is REFERENCES crews(id) — passing "" trips the FK gate.
+	// Translate empty string to SQL NULL, matching the convention in
+	// seedAgentRow (core_handlers_test.go).
+	var crew interface{} = crewID
+	if crewID == "" {
+		crew = nil
+	}
 	_, err := h.db.Exec(`INSERT INTO agents (id, workspace_id, crew_id, name, slug, agent_role, status,
 		cli_adapter, tool_profile, timeout_seconds, memory_enabled, deleted_at)
 		VALUES (?, ?, ?, ?, ?, 'AGENT', ?, 'CLAUDE_CODE', 'CODING', 1800, 0, ?)`,
-		agentID, wsID, crewID, "N-"+agentID, agentID, status, del)
+		agentID, wsID, crew, "N-"+agentID, agentID, status, del)
 	if err != nil {
 		t.Fatalf("seed agent %s: %v", agentID, err)
 	}
