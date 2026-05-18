@@ -97,6 +97,14 @@ func TestMemoryPipeline_E2E_ConsolidateDiffApproveStatsCompose(t *testing.T) {
 		t.Skip("E2E pipeline test exercises consolidator + handlers; skip in -short")
 	}
 
+	// Shared setup. The six pipeline phases below run as t.Run
+	// subtests so a failure points at the specific phase rather
+	// than the monolithic test body. Per-phase state is threaded
+	// through the outer-scope vars (proposalID, blobRoot, etc.)
+	// — the test deliberately doesn't isolate phases because the
+	// whole point is to assert they COMPOSE; running them in
+	// separate t.Run blocks keeps failure isolation without
+	// pretending the phases are independent.
 	db := setupTestDB(t)
 	userID := seedTestUser(t, db)
 	wsID := seedTestWorkspace(t, db, userID)
@@ -113,7 +121,6 @@ func TestMemoryPipeline_E2E_ConsolidateDiffApproveStatsCompose(t *testing.T) {
 		t.Fatalf("flush journal: %v", err)
 	}
 
-	// Step 1: consolidator in ProposalMode.
 	outputDir := t.TempDir()
 	blobRoot := t.TempDir()
 	conso := &consolidate.Consolidator{
@@ -122,183 +129,202 @@ func TestMemoryPipeline_E2E_ConsolidateDiffApproveStatsCompose(t *testing.T) {
 		Summarizer: &e2eStubSummarizer{EvidenceIDs: entryIDs[:2]},
 		Logger:     newTestLogger(),
 	}
-	if _, err := conso.Run(context.Background(), consolidate.Config{
-		WorkspaceID:  wsID,
-		CrewID:       crewID,
-		Since:        time.Hour,
-		MinEntries:   10,
-		OutputDir:    outputDir,
-		ProposalMode: true,
-		BlobRoot:     blobRoot,
-	}); err != nil {
-		t.Fatalf("consolidator Run: %v", err)
-	}
-
-	// Verify the proposal row + inbox item + .proposed/ markdown
-	// all materialised.
-	var proposalID, proposalPath, status string
-	if err := db.QueryRow(
-		`SELECT id, proposal_path, status FROM memory_proposals WHERE workspace_id = ? LIMIT 1`, wsID,
-	).Scan(&proposalID, &proposalPath, &status); err != nil {
-		t.Fatalf("read proposal: %v", err)
-	}
-	if status != "pending" {
-		t.Errorf("proposal status = %q after consolidator; want pending", status)
-	}
-	if _, err := os.Stat(proposalPath); err != nil {
-		t.Errorf("proposal markdown missing on disk: %v", err)
-	}
-	var inboxKind string
-	if err := db.QueryRow(
-		`SELECT kind FROM inbox_items WHERE source_id = ?`, proposalID,
-	).Scan(&inboxKind); err != nil {
-		t.Errorf("inbox item not created for proposal: %v", err)
-	}
-
-	// Step 2: GET /diff returns a meaningful preview.
 	diffH := NewProposedHandler(db, newTestLogger())
 	diffH.SetJournal(jw)
-	diffReq := httptest.NewRequest("GET", "/api/v1/consolidate/proposed/"+proposalID+"/diff", nil)
-	diffReq.SetPathValue("id", proposalID)
-	diffReq = withWorkspaceUser(diffReq, userID, wsID, "MEMBER")
-	diffRR := httptest.NewRecorder()
-	diffH.Diff(diffRR, diffReq)
-	if diffRR.Code != http.StatusOK {
-		t.Fatalf("/diff before approve: status %d, body=%s", diffRR.Code, diffRR.Body.String())
-	}
-	var preview proposalDiffResponse
-	if err := json.Unmarshal(diffRR.Body.Bytes(), &preview); err != nil {
-		t.Fatalf("decode preview: %v", err)
-	}
-	if preview.Status != "pending" {
-		t.Errorf("preview.status = %q before approve; want pending", preview.Status)
-	}
-	if preview.Stats.Additions <= 0 {
-		t.Errorf("preview.stats.additions = %d; want >0", preview.Stats.Additions)
-	}
-	if !strings.Contains(preview.Diff, "escalation requires authoring user lookup") {
-		t.Errorf("preview diff missing the seeded rule pattern; got:\n%s", preview.Diff)
-	}
 
-	// Step 3: Approve commits the merge with BlobRoot wired so
-	// the audit row lands in memory_versions.
-	apprRes, err := consolidate.ApproveProposal(context.Background(), db, jw, newTestLogger(),
-		proposalID, userID, consolidate.ApprovalOptions{BlobRoot: blobRoot})
-	if err != nil {
-		t.Fatalf("ApproveProposal: %v", err)
-	}
-	if apprRes.RulesMerged != 1 {
-		t.Errorf("RulesMerged = %d; want 1", apprRes.RulesMerged)
-	}
-	if apprRes.CanonicalPath == "" {
-		t.Errorf("CanonicalPath empty after approve")
-	}
-	canonical, err := os.ReadFile(apprRes.CanonicalPath)
-	if err != nil {
-		t.Fatalf("read canonical post-approve: %v", err)
-	}
-	if !strings.Contains(string(canonical), "escalation requires authoring user lookup") {
-		t.Errorf("canonical missing seeded rule pattern; got:\n%s", canonical)
-	}
+	// Threaded state between phases.
+	var (
+		proposalID   string
+		proposalPath string
+		apprRes      *consolidate.ApprovalResult
+	)
 
-	// Verify inbox item resolved. inbox_items uses `state`
-	// (unread/read/resolved), not `status` — different vocabulary
-	// from memory_proposals.
-	var inboxState string
-	if err := db.QueryRow(
-		`SELECT state FROM inbox_items WHERE source_id = ?`, proposalID,
-	).Scan(&inboxState); err != nil {
-		t.Fatalf("read inbox state: %v", err)
-	}
-	if inboxState != "resolved" {
-		t.Errorf("inbox state = %q after approve; want resolved", inboxState)
-	}
-
-	// Step 4: re-running /diff on the now-approved proposal still
-	// works (no 404 or 500) and reflects the new status.
-	diffReq2 := httptest.NewRequest("GET", "/api/v1/consolidate/proposed/"+proposalID+"/diff", nil)
-	diffReq2.SetPathValue("id", proposalID)
-	diffReq2 = withWorkspaceUser(diffReq2, userID, wsID, "MEMBER")
-	diffRR2 := httptest.NewRecorder()
-	diffH.Diff(diffRR2, diffReq2)
-	if diffRR2.Code != http.StatusOK {
-		t.Errorf("/diff after approve: status %d, want 200; body=%s",
-			diffRR2.Code, diffRR2.Body.String())
-	}
-	var preview2 proposalDiffResponse
-	if err := json.Unmarshal(diffRR2.Body.Bytes(), &preview2); err != nil {
-		t.Fatalf("decode preview after approve: %v", err)
-	}
-	if preview2.Status != "approved" {
-		t.Errorf("preview.status post-approve = %q; want approved", preview2.Status)
-	}
-
-	// Step 5: stats endpoint sees the audit row the approve wrote.
-	statsH := NewMemoryStatsHandler(db, newTestLogger())
-	statsReq := httptest.NewRequest("GET", "/api/v1/admin/memory/stats", nil)
-	statsReq = withWorkspaceUser(statsReq, userID, wsID, "OWNER")
-	statsRR := httptest.NewRecorder()
-	statsH.Stats(statsRR, statsReq)
-	if statsRR.Code != http.StatusOK {
-		t.Fatalf("/stats: status %d, body=%s", statsRR.Code, statsRR.Body.String())
-	}
-	var stats memoryStatsResponse
-	if err := json.Unmarshal(statsRR.Body.Bytes(), &stats); err != nil {
-		t.Fatalf("decode stats: %v", err)
-	}
-	if stats.Totals.Versions < 1 {
-		t.Errorf("stats.totals.versions = %d; want >=1 (approve recorded one audit row)",
-			stats.Totals.Versions)
-	}
-	// The recorded row should be tier=learned (canonical_audit_path
-	// in approve.go writes to TierLearned).
-	foundLearned := false
-	for _, byT := range stats.ByTier {
-		if byT.Tier == string(memory.TierLearned) && byT.Versions >= 1 {
-			foundLearned = true
-			break
+	t.Run("consolidate_proposal_mode", func(t *testing.T) {
+		if _, err := conso.Run(context.Background(), consolidate.Config{
+			WorkspaceID:  wsID,
+			CrewID:       crewID,
+			Since:        time.Hour,
+			MinEntries:   10,
+			OutputDir:    outputDir,
+			ProposalMode: true,
+			BlobRoot:     blobRoot,
+		}); err != nil {
+			t.Fatalf("consolidator Run: %v", err)
 		}
-	}
-	if !foundLearned {
-		t.Errorf("stats.by_tier missing learned tier with >=1 version; got %+v", stats.ByTier)
-	}
+	})
 
-	// Step 6: Per-workspace retention sweep (Iter 4). No
-	// memory_config row → defaults to 30 days. The just-written
-	// learned row is far younger than 30 d, so the sweep must be
-	// a no-op (positive assertion).
-	//
-	// Scope the before/after count to wsID specifically. The
-	// stats endpoint's Totals.Versions also only counts the
-	// caller's workspace, so today both numbers agree by
-	// design — but pinning the per-workspace count BEFORE
-	// the sweep removes any cross-tenant-row drift risk if
-	// a future helper seeds multiple workspaces in the same
-	// fixture.
-	var versionsBefore int
-	if err := db.QueryRow(
-		`SELECT COUNT(*) FROM memory_versions WHERE workspace_id = ?`, wsID,
-	).Scan(&versionsBefore); err != nil {
-		t.Fatalf("count versions before sweep: %v", err)
-	}
-	if err := memory.SweepAllWorkspaces(context.Background(), db, jw); err != nil {
-		t.Fatalf("SweepAllWorkspaces: %v", err)
-	}
-	var versionsAfter int
-	if err := db.QueryRow(
-		`SELECT COUNT(*) FROM memory_versions WHERE workspace_id = ?`, wsID,
-	).Scan(&versionsAfter); err != nil {
-		t.Fatalf("count versions after sweep: %v", err)
-	}
-	if versionsAfter != versionsBefore {
-		t.Errorf("retention sweep deleted rows under default 30d window: before=%d after=%d",
-			versionsBefore, versionsAfter)
-	}
+	t.Run("verify_proposal_inbox_artefact", func(t *testing.T) {
+		var status string
+		if err := db.QueryRow(
+			`SELECT id, proposal_path, status FROM memory_proposals WHERE workspace_id = ? LIMIT 1`, wsID,
+		).Scan(&proposalID, &proposalPath, &status); err != nil {
+			t.Fatalf("read proposal: %v", err)
+		}
+		if status != "pending" {
+			t.Errorf("proposal status = %q after consolidator; want pending", status)
+		}
+		if _, err := os.Stat(proposalPath); err != nil {
+			t.Errorf("proposal markdown missing on disk: %v", err)
+		}
+		var inboxKind string
+		if err := db.QueryRow(
+			`SELECT kind FROM inbox_items WHERE source_id = ?`, proposalID,
+		).Scan(&inboxKind); err != nil {
+			t.Errorf("inbox item not created for proposal: %v", err)
+		}
+	})
 
-	// Final sanity: the proposal row went all the way to
-	// approved, the canonical file holds the rule, the audit
-	// trail shows the row, and the inbox is resolved. The
-	// pipeline composes — Iter 1–4 are coherent.
+	t.Run("diff_before_approve", func(t *testing.T) {
+		diffReq := httptest.NewRequest("GET", "/api/v1/consolidate/proposed/"+proposalID+"/diff", nil)
+		diffReq.SetPathValue("id", proposalID)
+		diffReq = withWorkspaceUser(diffReq, userID, wsID, "MEMBER")
+		diffRR := httptest.NewRecorder()
+		diffH.Diff(diffRR, diffReq)
+		if diffRR.Code != http.StatusOK {
+			t.Fatalf("/diff before approve: status %d, body=%s", diffRR.Code, diffRR.Body.String())
+		}
+		var preview proposalDiffResponse
+		if err := json.Unmarshal(diffRR.Body.Bytes(), &preview); err != nil {
+			t.Fatalf("decode preview: %v", err)
+		}
+		if preview.Status != "pending" {
+			t.Errorf("preview.status = %q before approve; want pending", preview.Status)
+		}
+		if preview.Stats.Additions <= 0 {
+			t.Errorf("preview.stats.additions = %d; want >0", preview.Stats.Additions)
+		}
+		// The merge is append-only — the diff endpoint must
+		// never report deletions for a fresh proposal against
+		// (a) no canonical or (b) an existing canonical that
+		// keeps all prior content. A non-zero deletion count
+		// here would mean a regression in BuildCanonicalAppendBlock
+		// or the diff renderer that silently drops prior rules.
+		if preview.Stats.Deletions != 0 {
+			t.Errorf("preview.stats.deletions = %d; want 0 (append-only merge)", preview.Stats.Deletions)
+		}
+		if !strings.Contains(preview.Diff, "escalation requires authoring user lookup") {
+			t.Errorf("preview diff missing the seeded rule pattern; got:\n%s", preview.Diff)
+		}
+	})
+
+	t.Run("approve_writes_canonical_and_records_audit", func(t *testing.T) {
+		var err error
+		apprRes, err = consolidate.ApproveProposal(context.Background(), db, jw, newTestLogger(),
+			proposalID, userID, consolidate.ApprovalOptions{BlobRoot: blobRoot})
+		if err != nil {
+			t.Fatalf("ApproveProposal: %v", err)
+		}
+		if apprRes.RulesMerged != 1 {
+			t.Errorf("RulesMerged = %d; want 1", apprRes.RulesMerged)
+		}
+		if apprRes.CanonicalPath == "" {
+			t.Errorf("CanonicalPath empty after approve")
+		}
+		canonical, err := os.ReadFile(apprRes.CanonicalPath)
+		if err != nil {
+			t.Fatalf("read canonical post-approve: %v", err)
+		}
+		if !strings.Contains(string(canonical), "escalation requires authoring user lookup") {
+			t.Errorf("canonical missing seeded rule pattern; got:\n%s", canonical)
+		}
+
+		// Verify inbox item resolved. inbox_items uses `state`
+		// (unread/read/resolved), not `status` — different
+		// vocabulary from memory_proposals.
+		var inboxState string
+		if err := db.QueryRow(
+			`SELECT state FROM inbox_items WHERE source_id = ?`, proposalID,
+		).Scan(&inboxState); err != nil {
+			t.Fatalf("read inbox state: %v", err)
+		}
+		if inboxState != "resolved" {
+			t.Errorf("inbox state = %q after approve; want resolved", inboxState)
+		}
+	})
+
+	t.Run("diff_after_approve_reflects_status", func(t *testing.T) {
+		// Re-running /diff on the now-approved proposal still
+		// works (no 404 or 500). Operator double-clicking the
+		// preview should not be a special case.
+		diffReq2 := httptest.NewRequest("GET", "/api/v1/consolidate/proposed/"+proposalID+"/diff", nil)
+		diffReq2.SetPathValue("id", proposalID)
+		diffReq2 = withWorkspaceUser(diffReq2, userID, wsID, "MEMBER")
+		diffRR2 := httptest.NewRecorder()
+		diffH.Diff(diffRR2, diffReq2)
+		if diffRR2.Code != http.StatusOK {
+			t.Errorf("/diff after approve: status %d, want 200; body=%s",
+				diffRR2.Code, diffRR2.Body.String())
+		}
+		var preview2 proposalDiffResponse
+		if err := json.Unmarshal(diffRR2.Body.Bytes(), &preview2); err != nil {
+			t.Fatalf("decode preview after approve: %v", err)
+		}
+		if preview2.Status != "approved" {
+			t.Errorf("preview.status post-approve = %q; want approved", preview2.Status)
+		}
+	})
+
+	t.Run("stats_sees_recorded_audit_row", func(t *testing.T) {
+		statsH := NewMemoryStatsHandler(db, newTestLogger())
+		statsReq := httptest.NewRequest("GET", "/api/v1/admin/memory/stats", nil)
+		statsReq = withWorkspaceUser(statsReq, userID, wsID, "OWNER")
+		statsRR := httptest.NewRecorder()
+		statsH.Stats(statsRR, statsReq)
+		if statsRR.Code != http.StatusOK {
+			t.Fatalf("/stats: status %d, body=%s", statsRR.Code, statsRR.Body.String())
+		}
+		var stats memoryStatsResponse
+		if err := json.Unmarshal(statsRR.Body.Bytes(), &stats); err != nil {
+			t.Fatalf("decode stats: %v", err)
+		}
+		if stats.Totals.Versions < 1 {
+			t.Errorf("stats.totals.versions = %d; want >=1 (approve recorded one audit row)",
+				stats.Totals.Versions)
+		}
+		// The recorded row should be tier=learned (canonical_audit_path
+		// in approve.go writes to TierLearned).
+		foundLearned := false
+		for _, byT := range stats.ByTier {
+			if byT.Tier == string(memory.TierLearned) && byT.Versions >= 1 {
+				foundLearned = true
+				break
+			}
+		}
+		if !foundLearned {
+			t.Errorf("stats.by_tier missing learned tier with >=1 version; got %+v", stats.ByTier)
+		}
+	})
+
+	t.Run("retention_sweep_default_30d_preserves_fresh_rows", func(t *testing.T) {
+		// Per-workspace retention sweep (Iter 4). No memory_config
+		// row → defaults to 30 days. The just-written learned row
+		// is far younger than 30 d, so the sweep must be a no-op
+		// (positive assertion).
+		//
+		// Scope the before/after count to wsID specifically so a
+		// future helper that seeds multiple workspaces in the
+		// same fixture can't accidentally satisfy the equality
+		// across tenants.
+		var versionsBefore int
+		if err := db.QueryRow(
+			`SELECT COUNT(*) FROM memory_versions WHERE workspace_id = ?`, wsID,
+		).Scan(&versionsBefore); err != nil {
+			t.Fatalf("count versions before sweep: %v", err)
+		}
+		if err := memory.SweepAllWorkspaces(context.Background(), db, jw); err != nil {
+			t.Fatalf("SweepAllWorkspaces: %v", err)
+		}
+		var versionsAfter int
+		if err := db.QueryRow(
+			`SELECT COUNT(*) FROM memory_versions WHERE workspace_id = ?`, wsID,
+		).Scan(&versionsAfter); err != nil {
+			t.Fatalf("count versions after sweep: %v", err)
+		}
+		if versionsAfter != versionsBefore {
+			t.Errorf("retention sweep deleted rows under default 30d window: before=%d after=%d",
+				versionsBefore, versionsAfter)
+		}
+	})
 }
 
 // seedE2EJournalEntries inserts `n` EntryPeerEscalation rows
