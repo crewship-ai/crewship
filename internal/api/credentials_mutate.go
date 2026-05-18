@@ -466,7 +466,17 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 		delete(body, "crew_ids")
 	} else if crewIDVal, ok := body["crew_id"]; ok && crewIDVal != nil {
-		if crewIDStr, ok := crewIDVal.(string); ok && crewIDStr != "" {
+		// Legacy single-crew patch path. Mirror the new shape-loop's
+		// strictness so a non-string crew_id fails closed here rather
+		// than silently being caught by the downstream loop — keeps
+		// behaviour stable if a future refactor moves the loop and
+		// makes the failure mode discoverable from the right call site.
+		crewIDStr, ok := crewIDVal.(string)
+		if !ok {
+			replyError(w, http.StatusBadRequest, "crew_id must be a string")
+			return
+		}
+		if crewIDStr != "" {
 			crewFound, err := crewExists(r.Context(), h.db, crewIDStr, workspaceID)
 			if err != nil {
 				h.logger.Error("crew exists check", "error", err)
