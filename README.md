@@ -156,6 +156,49 @@ required (Docker, Podman, Colima, OrbStack, or Apple Containers) —
 On first load the web UI walks a 6-step onboarding wizard (workspace
 → crew → agent → credentials → done). Demo data: `crewship seed`.
 
+## After install — what now?
+
+The first thing to run after a fresh install:
+
+```bash
+crewship doctor      # checks container runtime, ports, data dir, deps
+crewship start       # boots the daemon on :8080
+open http://localhost:8080
+```
+
+`crewship doctor` is the friendly diagnostic — it tells you which
+container runtime it found (Docker / Podman / OrbStack / Colima /
+Apple Containers), whether port 8080 is free, and what to install if
+something is missing. Run it first; it never starts the server.
+
+`crewship start` boots the daemon in the foreground (Ctrl-C stops
+it). Run with `--background` on macOS/Linux to detach. The
+six-step onboarding wizard in the browser walks you through
+workspace → crew → agent → credentials → done.
+
+Stuck? Common patterns by platform:
+
+```bash
+# macOS — Gatekeeper "app can't be opened"
+# (only if you bypass Homebrew and double-click a downloaded binary)
+xattr -d com.apple.quarantine "$(command -v crewship)"
+
+# Linux — daemon won't start on boot
+loginctl enable-linger "$USER"
+systemctl --user enable --now crewship
+
+# Windows — SmartScreen "Don't run"
+# Right-click crewship.exe → Properties → check "Unblock" → OK
+# (one-time per binary; we sign Windows builds later in the beta)
+
+# Anywhere — "no container runtime found"
+crewship doctor      # tells you which runtime, exact install command
+```
+
+Full onboarding walkthrough, including the equivalent CLI flow for
+the wizard, lives in
+[docs/guides/onboarding](docs/guides/onboarding.mdx).
+
 ## Build from source (developers)
 
 ```bash

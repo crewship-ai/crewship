@@ -205,3 +205,51 @@ jobs:
           go-licenses check ./cmd/crewship \
             --disallowed_types=forbidden,restricted \
             --ignore modernc.org/mathutil
+
+  # ── OSV scan: osv-scanner ──
+  # govulncheck (above) does Go-source call-graph analysis on cmd/crewship,
+  # only failing on reachable vulnerabilities. osv-scanner is complementary —
+  # it cross-references go.sum + pnpm-lock.yaml against the full OSV.dev
+  # database (covers Go, npm, and more), failing on anything present in the
+  # dep graph regardless of reachability. Catches advisories that don't yet
+  # have a Go-specific GO-YYYY-NNNN entry, and surfaces npm chain issues
+  # govulncheck never sees. Free, OSS, run by Google.
+  #
+  # We install the binary directly rather than using the composite action —
+  # the action's scan-args input batches whitespace-separated flags as a
+  # single Docker argument and triggers "could not determine extractor
+  # suitable to this file." The CLI install is two lines and SHA-stable via
+  # `go install` against a pinned version.
+  osv-scan:
+    name: OSV Scanner
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - uses: ./.github/actions/setup-go-embed
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Install osv-scanner
+        run: go install github.com/google/osv-scanner/v2/cmd/osv-scanner@v2.2.4
+
+      # Phase 1: warn-only. Mirrors grype's `fail-build: false` posture
+      # above — we want the table in the run log + a `::warning::` annotation
+      # on the PR, but not a red CI gate while Dependabot is still draining
+      # the baseline backlog (~14 fixable findings as of this PR). Once the
+      # baseline is clean, drop the `|| true` and promote to a hard gate.
+      - name: Run osv-scanner against lockfiles (warn-only)
+        run: |
+          set +e
+          osv-scanner \
+            --lockfile=go.mod \
+            --lockfile=pnpm-lock.yaml \
+            > /tmp/osv.log 2>&1
+          exit_code=$?
+          cat /tmp/osv.log
+          if [ "$exit_code" -ne 0 ]; then
+            count=$(grep -oE 'Total [0-9]+ packages affected by [0-9]+ known vulnerabilities' /tmp/osv.log | head -1)
+            echo "::warning::osv-scanner: ${count:-non-zero exit}. See run log for the table. Phase 1 = warn-only; baseline still being drained by Dependabot."
+          fi
+          exit 0
