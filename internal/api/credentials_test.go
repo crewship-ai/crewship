@@ -702,3 +702,206 @@ func TestCredCreate_WithCrewIDs(t *testing.T) {
 		t.Errorf("credential_crews count = %d, want 1", count)
 	}
 }
+
+// ---- Update — merged-payload validation ----
+//
+// Guards the invariant that Update enforces the same per-type rules as
+// Create: a PATCH can't drop a credential into a state that the
+// resolver / sidecar mount path can't handle. Each subtest seeds a
+// row, fires a PATCH, and asserts the right status + an unchanged DB
+// row when the patch is rejected.
+//
+// See the merged-payload validation block at the top of
+// CredentialHandler.Update in credentials_mutate.go.
+
+// seedTypedCredential is a USERPASS-aware variant of seedCredentialEnc
+// — lets the PATCH-validation suite express "this row was a USERPASS
+// with username U and encrypted password P" without copy-pasting the
+// INSERT.
+func seedTypedCredential(t *testing.T, db *sql.DB, wsID, userID, credID, name, credType, username, plainValue string) {
+	t.Helper()
+	enc, err := encryption.Encrypt(plainValue)
+	if err != nil {
+		t.Fatalf("encrypt: %v", err)
+	}
+	var usernameArg any
+	if username != "" {
+		usernameArg = username
+	}
+	if _, err := db.Exec(`
+		INSERT INTO credentials (id, workspace_id, name, encrypted_value, type, provider, scope, status, username, created_by, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, 'NONE', 'WORKSPACE', 'ACTIVE', ?, ?, datetime('now'), datetime('now'))`,
+		credID, wsID, name, enc, credType, usernameArg, userID); err != nil {
+		t.Fatalf("seed typed cred: %v", err)
+	}
+}
+
+func TestCredUpdate_RejectsBadTypeChange(t *testing.T) {
+	t.Parallel()
+	h, db := newCredHandler(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	// Existing API_KEY row; PATCH tries to flip type to USERPASS
+	// without providing a username — invalid because USERPASS rows
+	// must always have a username.
+	seedTypedCredential(t, db, wsID, userID, "c1", "GH", "API_KEY", "", "ghp_legacy")
+
+	body := bytes.NewBufferString(`{"type":"USERPASS"}`)
+	req := httptest.NewRequest("PATCH", "/api/v1/credentials/c1", body)
+	req.SetPathValue("credentialId", "c1")
+	req = req.WithContext(withWorkspace(req.Context(), wsID, "OWNER"))
+	rr := httptest.NewRecorder()
+	h.Update(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body: %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "username is required") {
+		t.Errorf("body should mention 'username is required', got: %s", rr.Body.String())
+	}
+
+	// DB unchanged.
+	var got string
+	db.QueryRow("SELECT type FROM credentials WHERE id = 'c1'").Scan(&got)
+	if got != "API_KEY" {
+		t.Errorf("type after rejected PATCH = %q, want API_KEY", got)
+	}
+}
+
+func TestCredUpdate_RejectsTypeChangeToSSHWithoutValue(t *testing.T) {
+	t.Parallel()
+	h, db := newCredHandler(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	seedTypedCredential(t, db, wsID, userID, "c1", "GH", "API_KEY", "", "ghp_legacy")
+
+	// Flipping to SSH_KEY without sending a new PEM value is invalid:
+	// the existing ghp_legacy isn't PEM-shaped, and we can't validate
+	// what we can't see (encrypted blob).
+	body := bytes.NewBufferString(`{"type":"SSH_KEY"}`)
+	req := httptest.NewRequest("PATCH", "/api/v1/credentials/c1", body)
+	req.SetPathValue("credentialId", "c1")
+	req = req.WithContext(withWorkspace(req.Context(), wsID, "OWNER"))
+	rr := httptest.NewRecorder()
+	h.Update(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body: %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "requires a new value") {
+		t.Errorf("body should explain new value is required, got: %s", rr.Body.String())
+	}
+}
+
+func TestCredUpdate_RejectsNonPEMValueOnSSH(t *testing.T) {
+	t.Parallel()
+	h, db := newCredHandler(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	// Existing SSH_KEY row; PATCH tries to swap in a non-PEM value
+	// (common foot-gun: pasting an OpenSSH public key, "ssh-rsa AAAA…").
+	seedTypedCredential(t, db, wsID, userID, "c1", "DEPLOY", "SSH_KEY", "", pemFixture("OPENSSH PRIVATE KEY", "abc"))
+
+	body := bytes.NewBufferString(`{"value":"ssh-rsa AAAAB3NzaC1yc2example"}`)
+	req := httptest.NewRequest("PATCH", "/api/v1/credentials/c1", body)
+	req.SetPathValue("credentialId", "c1")
+	req = req.WithContext(withWorkspace(req.Context(), wsID, "OWNER"))
+	rr := httptest.NewRecorder()
+	h.Update(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body: %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "PEM-encoded private key") {
+		t.Errorf("body should mention PEM, got: %s", rr.Body.String())
+	}
+}
+
+func TestCredUpdate_AllowsTypeChangeToUserPassWithUsername(t *testing.T) {
+	t.Parallel()
+	h, db := newCredHandler(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	seedTypedCredential(t, db, wsID, userID, "c1", "GMAIL", "SECRET", "", "old-password")
+
+	// Flipping to USERPASS while supplying both username and value
+	// (re-encrypted as the new password) is the legitimate
+	// migration path — accept it.
+	body := bytes.NewBufferString(`{"type":"USERPASS","username":"user@gmail.com","value":"new-pass"}`)
+	req := httptest.NewRequest("PATCH", "/api/v1/credentials/c1", body)
+	req.SetPathValue("credentialId", "c1")
+	req = req.WithContext(withWorkspace(req.Context(), wsID, "OWNER"))
+	rr := httptest.NewRecorder()
+	h.Update(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body: %s", rr.Code, rr.Body.String())
+	}
+
+	var gotType string
+	var gotUsername sql.NullString
+	db.QueryRow("SELECT type, username FROM credentials WHERE id = 'c1'").Scan(&gotType, &gotUsername)
+	if gotType != "USERPASS" {
+		t.Errorf("type = %q, want USERPASS", gotType)
+	}
+	if !gotUsername.Valid || gotUsername.String != "user@gmail.com" {
+		t.Errorf("username = %v, want user@gmail.com", gotUsername)
+	}
+}
+
+func TestCredUpdate_RejectsNullingUsernameOnUserPass(t *testing.T) {
+	t.Parallel()
+	h, db := newCredHandler(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	seedTypedCredential(t, db, wsID, userID, "c1", "GMAIL", "USERPASS", "user@gmail.com", "pwd")
+
+	// PATCH that explicitly sets username to null on a USERPASS row
+	// must be rejected — the row would otherwise become invalid.
+	body := bytes.NewBufferString(`{"username":null}`)
+	req := httptest.NewRequest("PATCH", "/api/v1/credentials/c1", body)
+	req.SetPathValue("credentialId", "c1")
+	req = req.WithContext(withWorkspace(req.Context(), wsID, "OWNER"))
+	rr := httptest.NewRecorder()
+	h.Update(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body: %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestCredUpdate_MetadataOnlyPatchSkipsValueValidation(t *testing.T) {
+	t.Parallel()
+	h, db := newCredHandler(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	// Existing SSH_KEY — encrypted blob isn't PEM-checked at rest,
+	// but the row was validated at Create time. A pure-metadata
+	// PATCH (just renaming) must not re-validate the value.
+	seedTypedCredential(t, db, wsID, userID, "c1", "DEPLOY", "SSH_KEY", "", pemFixture("OPENSSH PRIVATE KEY", "abc"))
+
+	body := bytes.NewBufferString(`{"description":"updated desc"}`)
+	req := httptest.NewRequest("PATCH", "/api/v1/credentials/c1", body)
+	req.SetPathValue("credentialId", "c1")
+	req = req.WithContext(withWorkspace(req.Context(), wsID, "OWNER"))
+	rr := httptest.NewRecorder()
+	h.Update(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body: %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestCredUpdate_RejectsUnknownType(t *testing.T) {
+	t.Parallel()
+	h, db := newCredHandler(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	seedTypedCredential(t, db, wsID, userID, "c1", "GH", "API_KEY", "", "ghp_x")
+
+	body := bytes.NewBufferString(`{"type":"BANANA"}`)
+	req := httptest.NewRequest("PATCH", "/api/v1/credentials/c1", body)
+	req.SetPathValue("credentialId", "c1")
+	req = req.WithContext(withWorkspace(req.Context(), wsID, "OWNER"))
+	rr := httptest.NewRecorder()
+	h.Update(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body: %s", rr.Code, rr.Body.String())
+	}
+}

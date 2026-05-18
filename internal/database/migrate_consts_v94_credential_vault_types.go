@@ -44,10 +44,19 @@ package database
 // Backfill: existing rows get NULL username and mount_type='env',
 // preserving every current credential's behaviour. No data migration
 // needed.
+//
+// mount_type carries a CHECK constraint so manual writes, future
+// backfills, and any code path that bypasses the API can't drift the
+// column off the closed {env, file} set. Defense in depth — the API
+// already validates, but the discriminator is load-bearing for the
+// container mount script in internal/orchestrator/exec_sidecar.go and
+// a typo'd value there ("File", "ENV", "filesystem") would silently
+// fall through to env-mode injection and put SSH keys in env vars.
 const migrationAddCredentialVaultTypes = `
 ALTER TABLE credentials
     ADD COLUMN username TEXT;
 
 ALTER TABLE agent_credentials
-    ADD COLUMN mount_type TEXT NOT NULL DEFAULT 'env';
+    ADD COLUMN mount_type TEXT NOT NULL DEFAULT 'env'
+    CHECK (mount_type IN ('env', 'file'));
 `

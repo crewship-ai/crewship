@@ -5,6 +5,7 @@ package api
 // enough to deserve their own file. Extracted from credentials.go.
 
 import (
+	"database/sql"
 	"fmt"
 	"net/http"
 	"strings"
@@ -292,14 +293,23 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	credFound, err := credentialExists(r.Context(), h.db, credID, workspaceID)
+	// Load current type+username up front so the merged-payload
+	// validation below sees the persisted state, not just the patch.
+	// Doubles as the existence + workspace-scoping check that
+	// credentialExists used to do — single round-trip, same gate.
+	var currentType string
+	var currentUsername sql.NullString
+	err := h.db.QueryRowContext(r.Context(),
+		`SELECT type, username FROM credentials
+		 WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
+		credID, workspaceID).Scan(&currentType, &currentUsername)
 	if err != nil {
-		h.logger.Error("credential exists check", "error", err)
+		if err == sql.ErrNoRows {
+			replyError(w, http.StatusNotFound, "Credential not found")
+			return
+		}
+		h.logger.Error("load credential for update", "error", err)
 		replyError(w, http.StatusInternalServerError, "Internal server error")
-		return
-	}
-	if !credFound {
-		replyError(w, http.StatusNotFound, "Credential not found")
 		return
 	}
 
@@ -307,6 +317,83 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if err := readJSON(r, &body); err != nil {
 		replyError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
+	}
+
+	// Merged-payload validation: overlay patch fields onto current row
+	// state, then enforce the closed enum + per-type invariants the
+	// Create path checks. Without this, a PATCH can drop a credential
+	// into an inconsistent state — set type=USERPASS without a
+	// username, change type to SSH_KEY while the stored value is a
+	// raw API key, paste a public key over an existing SSH_KEY's
+	// value, etc. — that the resolver then trips over at agent-run
+	// time. Create blocks all of these; Update used to silently
+	// accept them.
+	mergedType := currentType
+	if v, ok := body["type"]; ok {
+		if s, ok := v.(string); ok {
+			mergedType = s
+		}
+	}
+	if _, ok := validCredentialTypes[mergedType]; !ok {
+		replyError(w, http.StatusBadRequest, "type must be one of: AI_CLI_TOKEN, API_KEY, CLI_TOKEN, SECRET, OAUTH2, USERPASS, SSH_KEY, CERTIFICATE, GENERIC_SECRET")
+		return
+	}
+
+	// Per-type field rules. Skip value-shape checks for SSH_KEY and
+	// CERTIFICATE when the patch doesn't touch `value` — we trust the
+	// stored encrypted blob was PEM-shaped when it was written by
+	// Create. Only the cases where the patch could newly violate the
+	// invariant need to fail closed here.
+	valueSent := false
+	valueStr := ""
+	if v, ok := body["value"]; ok {
+		if s, isStr := v.(string); isStr && s != "" {
+			valueSent = true
+			valueStr = s
+		}
+	}
+	typeChanged := mergedType != currentType
+
+	switch mergedType {
+	case CredTypeUserPass:
+		// USERPASS must always end up with a non-empty username.
+		// Effective username = patch username if sent, else current.
+		effectiveUsername := currentUsername.String
+		if v, ok := body["username"]; ok {
+			if s, isStr := v.(string); isStr {
+				effectiveUsername = s
+			} else if v == nil {
+				effectiveUsername = ""
+			}
+		}
+		if strings.TrimSpace(effectiveUsername) == "" {
+			replyError(w, http.StatusBadRequest, "username is required for USERPASS credentials")
+			return
+		}
+
+	case CredTypeSSHKey:
+		// Changing TO SSH_KEY requires a new value — we can't validate
+		// the existing encrypted blob's shape without decrypting it
+		// in the hot path, and the existing value almost certainly
+		// isn't PEM-shaped if the row was previously API_KEY/SECRET/etc.
+		if typeChanged && !valueSent {
+			replyError(w, http.StatusBadRequest, "changing type to SSH_KEY requires a new value")
+			return
+		}
+		if valueSent && !looksLikePEM(valueStr, "PRIVATE KEY") {
+			replyError(w, http.StatusBadRequest, "ssh key must be a PEM-encoded private key (begins with -----BEGIN ... PRIVATE KEY-----)")
+			return
+		}
+
+	case CredTypeCertificate:
+		if typeChanged && !valueSent {
+			replyError(w, http.StatusBadRequest, "changing type to CERTIFICATE requires a new value")
+			return
+		}
+		if valueSent && !looksLikePEM(valueStr, "CERTIFICATE") {
+			replyError(w, http.StatusBadRequest, "certificate must be PEM-encoded (begins with -----BEGIN CERTIFICATE-----)")
+			return
+		}
 	}
 
 	// Note: "status" is intentionally excluded to prevent users from
