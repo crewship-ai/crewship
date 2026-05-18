@@ -133,10 +133,15 @@ describe("useFilteredIssues — issue #320 saved-view vs project-detail separati
   })
 
   it("filterProjectId composes with crew + agent filters AND-style", () => {
-    // Saved-view project alpha + crew c2 — expect only the
-    // intersection (i3 in this fixture). Pins the AND-compose
-    // contract so a future refactor that drops the filter
-    // chain doesn't silently widen results.
+    // Saved-view project alpha + crew c2 + agent a2 — expect
+    // only the intersection (i3 in this fixture). Pins the
+    // AND-compose contract across ALL three filter branches:
+    // a future refactor that drops any of project / crew /
+    // agent filtering would widen the result set and fail
+    // this assertion. CodeRabbit caught that the prior version
+    // of this test passed `filterAgentId: null`, which left
+    // the agent branch unexercised — fixed here with a real
+    // agent id matching i3's assignee_id.
     const { result } = renderHook(() =>
       useFilteredIssues({
         issues,
@@ -144,7 +149,7 @@ describe("useFilteredIssues — issue #320 saved-view vs project-detail separati
         selectedProjectId: null,
         filterProjectId: "p-alpha",
         filterCrewId: "c2",
-        filterAgentId: null,
+        filterAgentId: "a2",
         filterStatuses: [],
         filterPriority: null,
       }),
