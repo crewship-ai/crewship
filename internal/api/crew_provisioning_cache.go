@@ -141,9 +141,22 @@ func (h *ProvisioningHandler) CacheList(w http.ResponseWriter, r *http.Request) 
 // memoization. Callers must treat the slice as read-only.
 
 func (h *ProvisioningHandler) listLocalImagesCached(ctx context.Context) ([]image.Summary, error) {
+	// Fast path: cache hit under RLock. With a 10 s TTL the vast majority
+	// of admin-UI polls land here, so they shouldn't serialize on each
+	// other or on an unrelated invalidate.
+	h.imgListMu.RLock()
+	if h.imgListCache.images != nil && time.Since(h.imgListCache.fetchedAt) < imageListCacheTTL {
+		cached := h.imgListCache.images
+		h.imgListMu.RUnlock()
+		return cached, nil
+	}
+	h.imgListMu.RUnlock()
+
+	// Miss: take the write lock and re-check. Concurrent misses queue
+	// here, but only the first one calls Docker — the rest find the
+	// cache fresh on re-check and return immediately.
 	h.imgListMu.Lock()
 	defer h.imgListMu.Unlock()
-
 	if h.imgListCache.images != nil && time.Since(h.imgListCache.fetchedAt) < imageListCacheTTL {
 		return h.imgListCache.images, nil
 	}
