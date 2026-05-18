@@ -1,11 +1,10 @@
 name: CI
 
 on:
-  # Manual re-trigger. Useful when the self-hosted runner was offline at
-  # the time of the original push and the resulting run got stranded in
-  # `queued` (verified failure mode during PR #235 — runner saturated,
-  # PR's CI never got picked up before merge). With workflow_dispatch
-  # the run can be re-queued from the Actions tab or via:
+  # Manual re-trigger. Useful for cases where the original push's run
+  # got stranded in `queued` (GitHub-hosted runner pool saturated, rare
+  # but observed during peak hours). With workflow_dispatch the run
+  # can be re-queued from the Actions tab or via:
   #   gh workflow run ci.yml --ref <branch>
   # without needing an empty commit.
   workflow_dispatch: {}
@@ -57,7 +56,7 @@ jobs:
   # ── Frontend: lint, typecheck, build ──
   frontend:
     name: Frontend
-    runs-on: [self-hosted, macos-arm64]
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -102,7 +101,7 @@ jobs:
   # ── Frontend tests (Vitest) ──
   frontend-test:
     name: Frontend Test
-    runs-on: [self-hosted, macos-arm64]
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -118,14 +117,14 @@ jobs:
   # ── Go: vet, build, test ──
   go:
     name: Go
-    runs-on: [self-hosted, macos-arm64]
-    # 30 min: setup-go-embed alone has shown 602-1052s variance across
-    # consecutive runs on this self-hosted runner (mba-m3-arm64) —
-    # actions/setup-go fetches the Go SDK and the runner network
-    # occasionally serves it slowly. Actual vet+build+test on this
-    # codebase is ~75s; the rest of the budget is buffer for setup
-    # variance.
-    timeout-minutes: 30
+    runs-on: ubuntu-latest
+    # 15 min: GitHub-hosted ubuntu-latest setup-go is consistently
+    # fast (cached module download via the action's built-in cache,
+    # which we now re-enable in setup-go-embed). Real work
+    # (vet+build+test) is ~75s on this codebase; the rest of the
+    # budget is buffer for first-run cache miss + Go SDK download
+    # (one-time per runner image cycle).
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
@@ -145,12 +144,11 @@ jobs:
   # ── Go lint: golangci-lint ──
   go-lint:
     name: Go Lint
-    runs-on: [self-hosted, macos-arm64]
-    # 20 min, matching the Go job's expanded budget — setup-go-embed
-    # variance can eat the entire 10-min original budget before lint
-    # even starts. Lint itself runs in ~30s with the cached
-    # golangci-lint binary.
-    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    # 15 min: same calculus as the Go job above. golangci-lint
+    # itself runs in ~30s with the cached binary; the rest of the
+    # budget is one-time cold-cache buffer.
+    timeout-minutes: 15
     env:
       GOLANGCI_VERSION: v2.1.6
     steps:
@@ -194,11 +192,11 @@ jobs:
   # detection is acceptable for the budget.
   binary:
     name: Binary Build
-    runs-on: [self-hosted, macos-arm64]
-    # 20 min, not 10: same setup-go-embed network variability as the
-    # Go and Go Lint jobs above. Go build itself finishes in seconds;
-    # the budget is entirely network-buffer for actions/setup-go.
-    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    # 15 min: ubuntu-latest setup-go is consistent enough that 10
+    # would usually do, but we keep a small buffer for first-run
+    # cache miss on the Go SDK download.
+    timeout-minutes: 15
     needs: [frontend, go]
     if: github.event_name == 'push'
     steps:
