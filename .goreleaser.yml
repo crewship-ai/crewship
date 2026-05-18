@@ -24,16 +24,18 @@ builds:
     # chain below — verifiers compare hashes against signed digests.
     flags:
       - -trimpath
+    # Windows omitted for v0.1.0-beta.1: internal/memory uses
+    # syscall.O_NOFOLLOW for TOCTOU-safe markdown reads, which is a
+    # Unix-only constant. Proper Windows support needs a build-tagged
+    # file split (index_unix.go / index_windows.go) — tracked for
+    # v0.1.0-beta.2. Most Windows users run Crewship via Docker or WSL
+    # in the beta period, so dropping the native binary is acceptable.
     goos:
       - darwin
       - linux
-      - windows
     goarch:
       - amd64
       - arm64
-    ignore:
-      - goos: windows
-        goarch: arm64
     ldflags:
       - -s -w
       - -X main.version={{.Version}}
@@ -51,9 +53,6 @@ archives:
     format: tar.gz
     name_template: >-
       {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
-    format_overrides:
-      - goos: windows
-        format: zip
 
 checksum:
   name_template: "checksums.txt"
