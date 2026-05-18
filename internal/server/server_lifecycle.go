@@ -23,8 +23,10 @@ import (
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/harbormaster"
 	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/memory"
 	"github.com/crewship-ai/crewship/internal/presence"
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/scrubber"
 )
 
 // Server is the main crewship process, wiring together the HTTP server, IPC
@@ -150,6 +152,31 @@ func (s *Server) Start(ctx context.Context) error {
 		consolidate.StartBackground(ctx, s.db, s.journalWriter, summarizer, consolidate.RunnerOptions{
 			BlobRoot: blobRoot,
 		})
+
+		// Memory audit watcher: catches direct filesystem writes by
+		// agents that bypass the sidecar /memory/write IPC (e.g.
+		// Claude Code's Write tool writes to ~/.memory/daily/*.md
+		// without curl-ing the sidecar). Without this, the journal,
+		// memory_versions, and downstream HITL flow see zero events
+		// for ~75% of real-world writes observed on dev1. The
+		// watcher reads each changed file, runs the scrubber for
+		// PII surfacing, dedups against recent sidecar-recorded
+		// rows, and emits memory.updated so the audit trail holds
+		// regardless of which path the agent took.
+		//
+		// fsnotify init can fail on hosts where the kernel doesn't
+		// support inotify (Docker-for-Mac bind-mounts, exotic FS)
+		// — the helper logs at warn and the server boots normally;
+		// the audit is best-effort observability, not a hard gate.
+		// Scrubber instance dedicated to the audit watcher — a
+		// fresh one rather than sharing with the sidecar because
+		// the sidecar runs in-container and we're on the host.
+		// Cheap to construct; one per server is the right grain.
+		memory.StartAuditWatcher(ctx, s.db, s.journalWriter, memory.AuditWatcherConfig{
+			BasePath: s.cfg.Storage.BasePath,
+			BlobRoot: blobRoot,
+			Scrubber: scrubber.New(),
+		}, s.logger)
 	}
 
 	select {
