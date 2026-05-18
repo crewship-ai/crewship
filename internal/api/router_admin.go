@@ -41,6 +41,14 @@ func (r *Router) registerAdminRoutes() {
 	memStats := NewMemoryStatsHandler(r.db, r.logger)
 	r.mux.Handle("GET /api/v1/admin/memory/stats", authed(wsCtx(http.HandlerFunc(memStats.Stats))))
 
+	// Memory versions list — row-level drill-down into
+	// memory_versions. Stats (above) is the aggregate; this
+	// endpoint is the detail. Filters by tier / agent_slug /
+	// path prefix / time range, paginated via keyset cursor.
+	// Iter 7 of the memory-hardening series.
+	memVer := NewMemoryVersionsListHandler(r.db, r.logger)
+	r.mux.Handle("GET /api/v1/admin/memory/versions", authed(wsCtx(http.HandlerFunc(memVer.List))))
+
 	// Backups (admin-only; require workspace context for scoping).
 	// Adapt the concrete Docker client to backup.DockerOps so the
 	// admin-backup HTTP layer doesn't see the Moby SDK directly.
