@@ -28,9 +28,9 @@ package database
 //     agent_memory_estimate_mb)). NULL → use the computed value.
 //     Non-NULL → trust the operator. The CHECK below guards the
 //     two trap configurations:
-//       - 0 would deadlock the queue (claimCrewSlot can never
-//         succeed; every dispatch goes QUEUED forever).
-//       - Negative is nonsensical.
+//     - 0 would deadlock the queue (claimCrewSlot can never
+//     succeed; every dispatch goes QUEUED forever).
+//     - Negative is nonsensical.
 //
 // We intentionally do NOT add a CHECK on assignments.status to
 // constrain the enum to {PENDING, QUEUED, RUNNING, COMPLETED, FAILED,

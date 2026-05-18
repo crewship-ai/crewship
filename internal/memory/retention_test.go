@@ -385,14 +385,14 @@ func TestRetentionExtractRetentionDaysFallbacks(t *testing.T) {
 		input string
 		want  int
 	}{
-		"empty":             {"", DefaultRetentionDays},
-		"malformed":         {"not json", DefaultRetentionDays},
-		"missing key":       {`{"other":"value"}`, DefaultRetentionDays},
-		"zero":              {`{"versions_retention_days":0}`, DefaultRetentionDays},
-		"negative":          {`{"versions_retention_days":-5}`, DefaultRetentionDays},
-		"non-numeric":       {`{"versions_retention_days":"7"}`, DefaultRetentionDays},
-		"valid 7":           {`{"versions_retention_days":7}`, 7},
-		"valid 365": {`{"versions_retention_days":365}`, 365},
+		"empty":       {"", DefaultRetentionDays},
+		"malformed":   {"not json", DefaultRetentionDays},
+		"missing key": {`{"other":"value"}`, DefaultRetentionDays},
+		"zero":        {`{"versions_retention_days":0}`, DefaultRetentionDays},
+		"negative":    {`{"versions_retention_days":-5}`, DefaultRetentionDays},
+		"non-numeric": {`{"versions_retention_days":"7"}`, DefaultRetentionDays},
+		"valid 7":     {`{"versions_retention_days":7}`, 7},
+		"valid 365":   {`{"versions_retention_days":365}`, 365},
 		// 15.7 → ceil(15.7) = 16. Pre-fix this was int(15.7)=15.
 		// Post-CodeRabbit fix on PR #399 uses math.Ceil so any
 		// positive fractional value rounds UP to the next whole day.

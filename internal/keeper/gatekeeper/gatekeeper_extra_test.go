@@ -57,7 +57,7 @@ func TestGatekeeper_L1AutoAllow_RejectsLowDistinctCharFiller(t *testing.T) {
 		name   string
 		intent string
 	}{
-		{"all_same_char_10", "aaaaaaaaaa"},        // 10 chars, 1 distinct
+		{"all_same_char_10", "aaaaaaaaaa"},         // 10 chars, 1 distinct
 		{"two_distinct_padded", "ababababab"},      // 10 chars, 2 distinct — still <3
 		{"whitespace_separated_same", "a a a a a"}, // distinct count ignores whitespace → 1 distinct
 	}
