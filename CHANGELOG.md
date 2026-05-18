@@ -11,7 +11,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 (empty — next version's entries go here)
 
-## [0.1.0-beta.1] — 2026-05-14
+## [0.1.0-beta.1] — 2026-05-18
 
 **First public beta release.** APIs and data models may break across
 minor bumps until v1.0. See `RELEASING.md` for upgrade and rollback
@@ -239,13 +239,7 @@ The `pipeline` alias is preserved — every `crewship routine X` invocation also
 
 `./dev.sh seed` now populates 5 starter routines on a fresh workspace: `summarize-text`, `fetch-and-summarize`, `pr-review-structured`, `daily-status-digest`, `incident-triage`. Each is independently runnable with default inputs.
 
-## [0.1.0-beta.1] — 2026-05-03
-
-First public beta. Self-hosted runtime for AI coding agents — every crew
-gets its own Linux container, with cost budgets, approval gates, audit
-logs, and encrypted credential vault out of the box.
-
-### Added
+### Added — Core platform
 
 - Self-hosted runtime: single Go binary with embedded Next.js UI, embedded
   SQLite DB, and a sidecar proxy for credential injection.
