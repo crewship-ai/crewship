@@ -13,6 +13,11 @@ import (
 // envVarNamePattern allows only characters valid in POSIX environment variable names.
 var envVarNamePattern = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 
+// envVarSanitizePattern matches runs of characters that are NOT valid in the
+// uppercased env-var name we derive from a credential name as a fallback.
+// Used to collapse those runs into a single underscore.
+var envVarSanitizePattern = regexp.MustCompile(`[^A-Z0-9]+`)
+
 // interpreterPattern matches commands that invoke a shell or scripting
 // language interpreter with inline code. An attacker can bypass the
 // metachar filter by wrapping a payload inside single quotes passed
