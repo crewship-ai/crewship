@@ -35,11 +35,11 @@ func TestSanitizeMCPName_NormalNamesPassthrough(t *testing.T) {
 		{"github", "github"},
 		{"postgres", "postgres"},
 		{"slack", "slack"},
-		{"server-fs", "server-fs"},     // hyphen
-		{"server_fs", "server_fs"},     // underscore
-		{"server.v2", "server.v2"},     // dot
-		{"@scope-pkg", "@scope-pkg"},   // @ allowed (npm scope leading)
-		{"a", "a"},                     // single char
+		{"server-fs", "server-fs"},               // hyphen
+		{"server_fs", "server_fs"},               // underscore
+		{"server.v2", "server.v2"},               // dot
+		{"@scope-pkg", "@scope-pkg"},             // @ allowed (npm scope leading)
+		{"a", "a"},                               // single char
 		{"123-abc-XYZ_v0.1", "123-abc-XYZ_v0.1"}, // mixed
 	}
 	for _, tc := range cases {
@@ -134,7 +134,7 @@ func TestSanitizeMCPName_EmptyOrAllUnsafeFallsBackToDefault(t *testing.T) {
 		{"only-slashes", "////"},
 		{"only-pipes", "|||"},
 		{"only-semicolons", ";;;"},
-		{"single-dot", "."},   // explicit fallback case
+		{"single-dot", "."},     // explicit fallback case
 		{"single-dotdot", ".."}, // explicit fallback case
 	}
 	for _, tc := range cases {

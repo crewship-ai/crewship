@@ -325,4 +325,3 @@ func TestExpireGracedRotations_NoActiveRows_NoOp(t *testing.T) {
 		t.Errorf("expired count = %d, want 0 (already EXPIRED rows untouched)", n)
 	}
 }
-

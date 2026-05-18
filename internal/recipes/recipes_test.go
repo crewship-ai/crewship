@@ -110,8 +110,8 @@ func TestFindBySlug_UnknownReturnsNil(t *testing.T) {
 	for _, in := range []string{
 		"",
 		"never-existed",
-		"code-review", // close to "code-review-crew" but distinct — must NOT prefix-match
-		"CODE-REVIEW-CREW", // case-sensitive — slugs are exact
+		"code-review",       // close to "code-review-crew" but distinct — must NOT prefix-match
+		"CODE-REVIEW-CREW",  // case-sensitive — slugs are exact
 		"code-review-crew ", // trailing space — must NOT trim
 		" code-review-crew",
 	} {

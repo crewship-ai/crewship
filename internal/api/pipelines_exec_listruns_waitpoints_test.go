@@ -37,7 +37,9 @@ type stubApproverWaitpoints struct {
 func (s *stubApproverWaitpoints) CreateApproval(_ context.Context, _ pipeline.WaitpointApprovalRequest) (string, error) {
 	return "", nil
 }
-func (s *stubApproverWaitpoints) WaitFor(_ context.Context, _ string) (bool, error) { return false, nil }
+func (s *stubApproverWaitpoints) WaitFor(_ context.Context, _ string) (bool, error) {
+	return false, nil
+}
 
 // CompleteApproval matches the inline `approver` interface in
 // ApproveWaitpoint. Production wiring uses *pipeline.SQLWaitpointStore.
