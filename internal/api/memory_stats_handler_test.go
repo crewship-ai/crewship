@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -277,22 +278,37 @@ func TestMemoryStats_CrossWorkspaceIsolation(t *testing.T) {
 	}
 }
 
-// ── compile-time response shape guard ────────────────────────────────
+// ── compile-time + JSON-key response shape guard ─────────────────────
 //
-// Pinned as a Test* function (not a package-level var) so the
-// `unused` linter sees it as exercised by `go test`. The body never
-// asserts — its job is to refuse to compile if anyone renames a
-// JSON-tagged field on memoryStatsResponse / memoryStatsTotals
-// without updating the dashboard contract.
+// Two contracts in one test, pinned together so a regression in
+// EITHER triggers a single failure:
 //
-// Why this matters: a rename like `ByTier → Tiers` would compile
-// fine, ship through tests that don't reference the field by name,
-// and only break the UI after deploy. Listing every field here
-// turns silent breakage into a compile error.
+//   1. Compile-time: the struct literal lists every exported field.
+//      A rename like `ByTier → Tiers` on memoryStatsResponse stops
+//      compiling here — the build catches the breakage before
+//      reaching deploy.
+//
+//   2. JSON wire contract: the struct is marshalled and the raw
+//      JSON is scanned for every key name downstream consumers
+//      (dashboard widget, ops dashboards, future CLI) read. A
+//      change to a `json:"..."` tag (e.g. `"by_tier"` →
+//      `"tiers"`) would pass the compile check but fail the
+//      key-presence assertion. This branch is the one
+//      CodeRabbit asked for in PR #404 — the compile-only
+//      guard was insufficient because Go struct names and
+//      wire-format keys are independently mutable.
+//
+// Listing required keys explicitly (rather than introspecting via
+// reflection) keeps the contract readable and forces a deliberate
+// edit when extending the shape. A field added without updating
+// this list is fine; a field RENAMED in the wire format will fail
+// the test until both this list and the dashboard consumers move
+// together.
 
 func TestMemoryStats_ResponseShapeContract(t *testing.T) {
-	_ = memoryStatsResponse{
-		WorkspaceID: "",
+	// (1) Compile-time guard — every exported field referenced.
+	resp := memoryStatsResponse{
+		WorkspaceID: "ws_shape_check",
 		Totals: memoryStatsTotals{
 			Versions: 0,
 			Bytes:    0,
@@ -300,7 +316,63 @@ func TestMemoryStats_ResponseShapeContract(t *testing.T) {
 			OldestAt: "",
 			NewestAt: "",
 		},
-		ByTier:  []memoryStatsByTier{{Tier: "", Versions: 0, Bytes: 0}},
-		ByAgent: []memoryStatsByAgent{{AgentSlug: "", Versions: 0, Bytes: 0, NewestAt: ""}},
+		ByTier:  []memoryStatsByTier{{Tier: "agent", Versions: 0, Bytes: 0}},
+		ByAgent: []memoryStatsByAgent{{AgentSlug: "alice", Versions: 0, Bytes: 0, NewestAt: ""}},
+	}
+
+	// (2) JSON wire-format guard — marshal and assert every key
+	// the dashboard reads is present. Done via raw substring on
+	// the JSON bytes rather than Unmarshal-into-map so a TYPO
+	// like `agentslug` vs `agent_slug` is caught even when the
+	// types happen to align.
+	raw, err := json.Marshal(resp)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	jsonStr := string(raw)
+
+	requiredKeys := []string{
+		// Top-level
+		`"workspace_id"`,
+		`"totals"`,
+		`"by_tier"`,
+		`"by_agent"`,
+		// Totals
+		`"versions"`,
+		`"bytes"`,
+		`"blobs"`,
+		`"oldest_at"`,
+		`"newest_at"`,
+		// By-tier (versions / bytes already covered above)
+		`"tier"`,
+		// By-agent
+		`"agent_slug"`,
+	}
+	for _, k := range requiredKeys {
+		if !strings.Contains(jsonStr, k) {
+			t.Errorf("dashboard contract: expected JSON key %s missing from response shape; got:\n%s", k, jsonStr)
+		}
+	}
+
+	// Round-trip into a map so the *types* under each key also
+	// stay locked — a future change of memoryStatsTotals.Versions
+	// from int to string (unlikely, but possible during a
+	// migration to bigint or a string-typed cursor) would be
+	// caught here.
+	var roundTrip map[string]any
+	if err := json.Unmarshal(raw, &roundTrip); err != nil {
+		t.Fatalf("round-trip unmarshal: %v", err)
+	}
+	totals, ok := roundTrip["totals"].(map[string]any)
+	if !ok {
+		t.Fatalf("`totals` is not a JSON object: %T", roundTrip["totals"])
+	}
+	// json.Unmarshal produces float64 for any JSON number into
+	// map[string]any; this asserts the numeric-typed contract
+	// without pinning the Go-side type.
+	for _, k := range []string{"versions", "bytes", "blobs"} {
+		if _, ok := totals[k].(float64); !ok {
+			t.Errorf("totals.%s should be a JSON number; got %T", k, totals[k])
+		}
 	}
 }
