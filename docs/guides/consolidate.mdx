@@ -95,7 +95,7 @@ LIMIT 100;
 
 The frontend `/journal` view does **not** read from the archive by default — operators have to explicitly opt in via `?include_archive=true`. This keeps the live UI fast and the archive as a forensic-only surface.
 
-If you want to tune retention, edit `RunnerOptions.CompactionOlderThan` and restart. Per-workspace retention is a follow-up.
+If you want to tune journal compaction retention, edit `RunnerOptions.CompactionOlderThan` and restart. Per-workspace retention for `memory_versions` (a separate sweep, run by the Iter 4 coordinator) is configurable at runtime via `PATCH /admin/memory/config` — see [Memory Observability — Per-workspace retention](/guides/memory-observability#per-workspace-retention).
 
 ## Manual trigger
 

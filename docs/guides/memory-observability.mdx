@@ -1,0 +1,119 @@
+---
+title: "Memory Observability"
+description: "Operator drill-down into memory_versions, per-workspace retention policy, and HITL diff preview for consolidator proposals."
+icon: "magnifying-glass-chart"
+---
+
+# Memory Observability
+
+This guide is for the human running the instance — not for agents and not for end users. It covers the four read surfaces operators have over the memory subsystem, the per-workspace retention knob, and the diff-preview workflow that gates consolidator proposals before they hit disk.
+
+For the agent-side primer on what memory _is_, see [Memory System](/guides/agent-memory) and [Episodic memory](/guides/episodic-memory). For the consolidator's own lifecycle (when it runs, what it writes), see [Consolidate](/guides/consolidate).
+
+## Why this exists
+
+Two things made the memory subsystem effectively opaque to operators until this iteration:
+
+1. **Direct filesystem writes bypassed the audit pipeline.** Agents running Claude Code (and any other CLI that writes through its own `Write`/`Edit` tools rather than the sidecar's `/memory/write` IPC) landed bytes in `/crew/agents/{slug}/.memory/` without going through scrubber, `memory_versions`, or the `memory.updated` journal event. On a typical dev instance this was ~75% of real writes. Compliance / PII review was structurally blind for those writes.
+2. **`memory_versions` had no read surface.** Even for IPC-mediated writes that _did_ produce rows, operators had no way to query "how much memory does this workspace hold?", "which agents have written the most?", or "what's actually inside that blob the scrubber flagged?" without `sqlite3` against the embedded DB.
+
+The audit watcher (PR #403) closes gap 1 — a host-side fsnotify watcher rooted at the crew bind-mount writes a `memory_versions` row and a `memory.updated` journal entry for every `.md` write, regardless of whether the agent went through the sidecar. The admin endpoints (PRs #404 / #413 / #414 / #412) close gap 2.
+
+## The four lenses
+
+| Surface | Endpoint | Use it when |
+|---|---|---|
+| Aggregate stats | [`GET /admin/memory/stats`](/api-reference/admin#get-apiv1adminmemorystats) | "How big is memory in this workspace right now?" |
+| Row-level list | [`GET /admin/memory/versions`](/api-reference/admin#get-apiv1adminmemoryversions) | "Which rows? Filter by tier / agent / path / time window." |
+| Single-row content | [`GET /admin/memory/versions/{id}/content`](/api-reference/admin#get-apiv1adminmemoryversionsidcontent) | "Show me the actual bytes — I need to see what the scrubber saw." |
+| Retention config | [`GET` / `PATCH /admin/memory/config`](/api-reference/admin#get-apiv1adminmemoryconfig) | "How long are we keeping versions for this workspace?" |
+
+All four require workspace context and the `manage` role. Field shapes, query parameters, and error codes live in [the Admin API reference](/api-reference/admin) — this guide does not duplicate them.
+
+## Audit watcher
+
+Wired at server startup; no operator configuration required beyond having `CREWSHIP_BASE_PATH` point at the directory the crew bind-mounts live under. The watcher runs on the host, watches `{basePath}/crews/**` for close-write events, shape-matches paths against the canonical layout (`AGENT.md`, `CREW.md`, `pins/`, `learned-*.md`, `daily/*.md`), and:
+
+- Skips silently on unknown shapes (`.tmp` staging files, `.lock` files, hidden dotfiles, non-`.md` scratch).
+- Skips silently when the path resolves to an orphaned bind-mount (crew was deleted, files remain on disk).
+- Writes a `memory_versions` row with `written_by="audit-watcher"` so a row's provenance — direct filesystem write vs. IPC-mediated — is preserved for forensics.
+- Emits the same `memory.updated` journal entry the sidecar emits, so dashboards and consumers don't need to distinguish.
+
+If `CREWSHIP_BASE_PATH` is empty the watcher is disabled and logs a single `info`-level "watcher disabled" line — pre-existing behaviour for hostless builds. If fsnotify init fails the server stays up; the warning is logged but does not gate startup.
+
+## HITL preview workflow
+
+The consolidator can be configured to propose `learned-YYYY-MM-DD.md` updates instead of writing them directly. Proposals land in `memory_proposals` and emit `memory.consolidation_proposed`. The reviewer flow is:
+
+1. **List pending proposals** — surface them in the journal stream or query `memory_proposals` directly (no public list endpoint yet; track via `memory.consolidation_proposed` events).
+2. **Preview the diff** — [`GET /consolidate/proposed/{id}/diff`](/api-reference/consolidate#preview-proposal-diff) returns a 3-line-context unified diff between the current canonical file and what an approve would write. The post-merge half of the diff is byte-identical to what `/approve` will commit, modulo the per-instant `Approved at HH:MM:SS` line. That equality is the load-bearing UX promise — what you read is what gets written.
+3. **Read the rationale** — `GET /consolidate/proposed/{id}/explain` returns the source journal entries the consolidator extracted the rule from.
+4. **Approve or reject** — `POST /consolidate/proposed/{id}/approve` writes the merged file and emits `memory.consolidated`. `POST .../reject` flips the proposal row to `status='rejected'` (with `decided_at` / `decided_by_user_id` populated), resolves the inbox item, and logs the reason at notice level — there is no `memory.*` event for rejection; the audit trail is the row state plus the log line.
+
+The diff endpoint is read-only and idempotent. Calling it repeatedly is fine; it does not advance state.
+
+## Per-workspace retention
+
+`PruneOldVersions` runs daily and reads `workspaces.memory_config.versions_retention_days` per workspace. If unset, `memory.DefaultRetentionDays` (30 days) applies — that constant lives in `internal/memory/retention.go` and is the single source of truth, surfaced as `is_default: true` in the admin GET response. Per sweep the runner emits a `memory.versions_swept` journal entry with `workspace_id`, `rows_deleted`, and the effective retention window.
+
+To read the current setting:
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" \
+  -H "X-Workspace-ID: $WS_ID" \
+  https://crewship.example.com/api/v1/admin/memory/config
+```
+
+`is_default: true` means no stored override; the global default is in effect. `is_default: false` means a stored value is being applied; `raw_config` is the literal JSON so you can spot drift between "what's stored" and "what's effective" (typo'd keys, unknown fields, etc.).
+
+To tighten retention to 14 days for a dev sandbox workspace:
+
+```bash
+curl -X PATCH \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "X-Workspace-ID: $WS_ID" \
+  -H "Content-Type: application/json" \
+  -d '{"versions_retention_days": 14}' \
+  https://crewship.example.com/api/v1/admin/memory/config
+```
+
+PATCH is partial — keys you don't send are left untouched. To clear an override and fall back to the default, send `{"versions_retention_days": null}`. The PATCH runs under a serializable transaction so two concurrent PATCHes for the same workspace can't clobber each other.
+
+The change takes effect on the next daily sweep tick (03:00 UTC). It does **not** retroactively delete rows — only the next sweep deletes anything older than the new window.
+
+## Common operator tasks
+
+### "I want to verify the scrubber caught a PII leak"
+
+1. Use `GET /admin/memory/versions` filtered by `agent_slug` and a tight `since` window to find the row.
+2. Fetch the content via `GET /admin/memory/versions/{id}/content`. The body is the post-scrubber bytes — what's actually on disk. If the PII is still there, the scrubber didn't match it; that's a scrubber-config bug, not a memory bug.
+3. Cross-reference with the `memory.updated` (or `memory.write_rejected` if it was an IPC-mediated write that the scrubber blocked) journal entry to see the timeline.
+
+The content endpoint refuses to follow symlinks (`EvalSymlinks` rejects payload_refs outside the configured blob root), caps reads at 10 MB (both the row's claimed bytes AND the on-disk read), verifies the on-disk SHA matches the row, and sanitises CRLF in response headers. A symlink to an off-root file returns 500 (`payload path violates blob root boundary`), not 200; a tampered file whose SHA no longer matches returns 500 (`blob integrity check failed`); a row whose blob is missing on disk returns 410.
+
+### "I want tighter retention for a dev sandbox"
+
+`PATCH /admin/memory/config` with a low `versions_retention_days` (14 or 7). The next daily sweep at 03:00 UTC trims. Re-check the next morning with `GET /admin/memory/stats` — the row count for that workspace should drop. Confirm via the `memory.versions_swept` journal entry, which carries `rows_deleted`.
+
+### "I want to see what the consolidator would write before approving"
+
+`GET /consolidate/proposed/{id}/diff`. Read the diff. If you're happy, `POST /consolidate/proposed/{id}/approve`. The committed bytes will match the post-merge half of the diff modulo the `Approved at` timestamp line. If you're not happy, `POST .../reject` with a `reason` body — that reason lands in the journal entry for post-hoc review.
+
+### "I want to know which agent is writing the most memory"
+
+`GET /admin/memory/stats` returns a `by_agent` array that's already pre-aggregated by slug — that's the right starting point. If you need row-level detail behind a high-count slug, follow up with `GET /admin/memory/versions?agent_slug=<slug>&limit=200` and inspect by `bytes` client-side. The versions endpoint orders newest-first and does not accept an `order` query parameter; if you need a different ordering, sort client-side after pagination.
+
+## Gotchas
+
+- **The watcher is host-side, not container-side.** If you run Crewship in an environment where the crew bind-mount lives on a filesystem that doesn't propagate inotify events (some Docker-Desktop-on-macOS configurations under heavy load), the watcher falls back to a 30 s polling sweep. The fallback is correct but laggy; rows appear ~30 s after the write, not synchronously.
+- **`written_by` is the provenance field.** `"audit-watcher"` means the watcher caught the write; `"sidecar"` means the agent went through `/memory/write`. Don't filter `written_by != "audit-watcher"` thinking you're filtering out the watcher's noise — you'd be hiding ~75% of real-world writes.
+- **Stats recomputes on every read.** It does not read a cached snapshot. On large workspaces (>100k rows) the query can take several seconds. There's no rate limit; cache client-side if you poll.
+- **Content endpoint reads from disk, not from the DB blob.** The `memory_versions` row records SHA + path; the content endpoint resolves the path, verifies the SHA, and streams the bytes. If the on-disk file has drifted from what the row claims (manual edit, restored backup, etc.) the endpoint returns 500 with `blob integrity check failed (sha mismatch)` and logs at error level. This is the only place that mismatch surfaces — keep an eye on it after restore operations.
+
+## Related
+
+- [Memory System](/guides/agent-memory) — agent-side primer (tiers, file structure, sidecar IPC).
+- [Episodic memory](/guides/episodic-memory) — FTS5 index and health scoring.
+- [Consolidate](/guides/consolidate) — the worker whose proposals feed the HITL preview.
+- [Crew Journal](/guides/crew-journal) — every memory write, sweep, and proposal lands here as an event.
+- [Admin API](/api-reference/admin), [Consolidate API](/api-reference/consolidate) — field-level reference.

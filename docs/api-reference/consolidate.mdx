@@ -66,6 +66,242 @@ In both cases the journal records a `system.consolidation_triggered` + `system.c
 | 500 | DB error. |
 | 503 | Consolidator not wired in this build (dev/test). |
 
+## Preview proposal diff
+
+```
+GET /api/v1/consolidate/proposed/{id}/diff
+```
+
+**Auth:** `MEMBER` or higher (matches Explain -- no write authority needed to preview).
+
+Returns a 3-line-context unified diff between the current canonical `learned-YYYY-MM-DD.md` and the file an approve of `{id}` would land on disk. The post-merge half of the diff is byte-identical to what `POST /api/v1/consolidate/proposed/{id}/approve` would write (modulo the per-instant `Approved at HH:MM:SS` line, which races the wall clock between preview and approve by definition). That equality is the load-bearing UX promise -- a reviewer can read the diff, click approve, and trust that the committed bytes match what they saw.
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" \
+  https://crewship.example.com/api/v1/consolidate/proposed/mp_8f3a2b1c/diff
+```
+
+**Response: `200 OK`:**
+
+```json
+{
+  "proposal_id": "mp_8f3a2b1c",
+  "workspace_id": "wks_a1b2c3",
+  "crew_id": "crw_backend",
+  "status": "pending",
+  "canonical_path": "/var/lib/crewship/memory/crw_backend/topics/learned-2026-05-18.md",
+  "canonical_exists": true,
+  "proposal_path": "/var/lib/crewship/memory/crw_backend/topics/.proposed/proposal-mp_8f3a2b1c.md",
+  "rules_count": 3,
+  "diff": "--- canonical (current)\n+++ canonical (post-merge)\n@@ -12,3 +12,17 @@\n - Always pin migration versions by name, not number.\n - Reload SecretStore after credential rotation.\n - Keeper L1 with >=10-char intent auto-allows.\n+\n+## Approved 2026-05-18 (Approved at 14:22:07 UTC)\n+\n+- Retry sidecar /assign on 503 with exponential backoff.\n+- Treat cross-workspace 404 as deny; do not leak existence.\n+- Cap proposal markdown reads at 8 MB.\n",
+  "stats": {
+    "additions": 14,
+    "deletions": 0,
+    "rules_appended": 3
+  }
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `proposal_id` | string | Echo of `{id}`. |
+| `workspace_id` | string | Owning workspace; always matches the caller's scope (cross-workspace probes are 404). |
+| `crew_id` | string | Crew the proposal belongs to. |
+| `status` | string | Carries through from the row -- `pending`, `approved`, or `rejected`. Previewing an already-resolved proposal is permitted (operator double-click is fine). |
+| `canonical_path` | string | Absolute path the merge would land on, derived from today's UTC date. |
+| `canonical_exists` | boolean | `false` on first-time merges for the day; the diff in that case is pure additions against an empty file. |
+| `proposal_path` | string | Back-link to the `.proposed/proposal-*.md` source file. |
+| `rules_count` | integer | Count of rules in the proposal, matches `stats.rules_appended`. |
+| `diff` | string | Unified diff body with `--- canonical (current)` / `+++ canonical (post-merge)` chrome. Empty string iff the merge is a no-op. |
+| `stats.additions` | integer | Content lines starting with `+` (header lines excluded). |
+| `stats.deletions` | integer | Content lines starting with `-` (header lines excluded). Always `0` today -- the merge is append-only. The counter exists so a future dedup-aware merge surfaces removals without a schema change. |
+| `stats.rules_appended` | integer | Mirrors `rules_count`. |
+
+**Errors:**
+
+| Status | Condition |
+|---|---|
+| 400 | Missing `{id}` path param. |
+| 401 | Not authenticated, or no workspace context. |
+| 404 | Unknown `{id}`, or proposal belongs to a different workspace (same 404 -- no existence leak). |
+| 410 | Proposal row exists but the `.proposed/proposal-*.md` file is missing on disk (deleted out-of-band; recoverable by re-running the consolidator). |
+| 413 | Proposal markdown or canonical file exceeds the 8 MB read cap (DoS guard). |
+| 500 | Read error other than not-found, or diff builder failure. |
+
+## Approve proposal
+
+```
+POST /api/v1/consolidate/proposed/{id}/approve
+```
+
+**Auth:** `OWNER` or `ADMIN` only (403 otherwise); workspace context required.
+
+The proposal id + caller identity are the entire state machine -- any request body is ignored. The handler does a read-only `ExplainProposal` lookup first; a cross-workspace probe surfaces as 404 (no existence leak) and an already-decided row short-circuits with 409 before any state changes. On success the proposal's rendered body is appended to the canonical `learned-YYYY-MM-DD.md` for today (UTC), the row flips to `status='approved'` with `decided_at` + `decided_by_user_id`, the matching inbox row resolves with `action='approved'`, and `memory.consolidated` lands on the journal. When `BlobRoot` is wired (see [Memory observability](/guides/memory-observability)), a `memory_versions` audit row is also recorded against the post-merge canonical file.
+
+```bash
+curl -X POST -H "Authorization: Bearer $TOKEN" \
+  https://crewship.example.com/api/v1/consolidate/proposed/mp_8f3a2b1c/approve
+```
+
+**Response: `200 OK`:**
+
+```json
+{
+  "proposal_id": "mp_8f3a2b1c",
+  "canonical_path": "/var/lib/crewship/memory/crw_backend/topics/learned-2026-05-18.md",
+  "rules_merged": 3,
+  "workspace_id": "wks_a1b2c3",
+  "crew_id": "crw_backend",
+  "decided_by": "usr_7d4e9f",
+  "version_sha": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `proposal_id` | string | Echo of `{id}`. |
+| `canonical_path` | string | Absolute path the rules were merged into; derived from today's UTC date. |
+| `rules_merged` | integer | Number of rules pulled from the proposal body into the canonical file. Matches the proposal's `rules_count`. |
+| `workspace_id` | string | Owning workspace; always matches the caller's scope. |
+| `crew_id` | string | Crew the proposal belonged to. |
+| `decided_by` | string | User id that approved -- the caller's identity, lifted from auth context. |
+| `version_sha` | string | Content-addressed sha256 of the post-merge canonical file. Omitted when versioning is disabled (`BlobRoot` unset) or the audit-row write failed best-effort (the approve itself still succeeded; correlate via the warn log). |
+
+**Errors:**
+
+| Status | Condition |
+|---|---|
+| 400 | Missing `{id}` path param. |
+| 401 | Not authenticated, or no workspace context. |
+| 403 | Authenticated but not `OWNER`/`ADMIN`. |
+| 404 | Unknown `{id}`, or proposal belongs to a different workspace (same 404 -- no existence leak). |
+| 409 | Proposal already decided (`approved` or `rejected`); idempotent retry is rejected so the body is not re-merged. |
+| 500 | Canonical append failed, DB transition failed, or unexpected lookup error. |
+
+## Reject proposal
+
+```
+POST /api/v1/consolidate/proposed/{id}/reject
+```
+
+**Auth:** `OWNER` or `ADMIN` only (403 otherwise); workspace context required.
+
+Same workspace boundary pattern as approve -- the lookup runs first, a cross-workspace probe is 404, an already-decided row is 409, and only then does the row flip to `status='rejected'`. The inbox item resolves with `action='rejected'` and the reason is logged at notice level so audit reviews don't have to JOIN through `memory_proposals` for the "why". The `.proposed/proposal-*.md` file stays on disk for audit; a separate retention sweep removes it. No `memory.consolidated` journal entry is emitted on reject -- the inbox audit trail and the original `memory.consolidation_proposed` from the seed run carry the lineage.
+
+**Request body (optional):**
+
+```json
+{
+  "reason": "duplicates an existing rule in learned-2026-05-10.md"
+}
+```
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `reason` | string | No | `""` | Free-form rejection note. Malformed JSON body falls through to no reason (permissive happy path -- the proposal still rejects). |
+
+```bash
+curl -X POST -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"reason":"duplicates an existing rule"}' \
+  https://crewship.example.com/api/v1/consolidate/proposed/mp_8f3a2b1c/reject
+```
+
+**Response: `200 OK`:**
+
+```json
+{
+  "proposal_id": "mp_8f3a2b1c",
+  "status": "rejected",
+  "decided_by": "usr_7d4e9f",
+  "reason": "duplicates an existing rule"
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `proposal_id` | string | Echo of `{id}`. |
+| `status` | string | Always `"rejected"` on a 200. |
+| `decided_by` | string | User id that rejected -- the caller's identity. |
+| `reason` | string | Echo of the request body's `reason`; empty string when no body, an unparseable body, or an explicit empty field. |
+
+**Errors:**
+
+| Status | Condition |
+|---|---|
+| 400 | Missing `{id}` path param. |
+| 401 | Not authenticated, or no workspace context. |
+| 403 | Authenticated but not `OWNER`/`ADMIN`. |
+| 404 | Unknown `{id}`, or proposal belongs to a different workspace (same 404 -- no existence leak). |
+| 409 | Proposal already decided. |
+| 500 | DB transition failed, or unexpected lookup error. |
+
+## Explain proposal
+
+```
+GET /api/v1/consolidate/proposed/{id}/explain
+```
+
+**Auth:** `MEMBER` or higher inside the workspace -- read-only, no write authority needed to review what was proposed.
+
+Returns the full proposal row plus the evidence the summarizer LLM looked at, so the HITL review UI can show "why this rule, given which journal entries". Cross-workspace probes return 404 (no existence leak). The endpoint is safe to call on already-decided proposals; `status`, `decided_at`, and `decided_by_user_id` carry the resolution. `scores` is the per-rule `ScoreResult` map populated by the proposal writer once scoring is wired -- proposals from before that landed return a literal `{}` so clients can blindly `Unmarshal` without nil-checks.
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" \
+  https://crewship.example.com/api/v1/consolidate/proposed/mp_8f3a2b1c/explain
+```
+
+**Response: `200 OK`:**
+
+```json
+{
+  "proposal_id": "mp_8f3a2b1c",
+  "workspace_id": "wks_a1b2c3",
+  "crew_id": "crw_backend",
+  "status": "pending",
+  "proposal_path": "/var/lib/crewship/memory/crw_backend/topics/.proposed/proposal-mp_8f3a2b1c.md",
+  "rules_count": 3,
+  "entries_scanned": 42,
+  "created_at": "2026-05-18T08:00:11.214Z",
+  "evidence": [
+    {"type": "peer.escalation", "id": "jrn_001", "summary": "..."},
+    {"type": "keeper.decision", "id": "jrn_017", "summary": "..."}
+  ],
+  "scores": {
+    "Always pin migration versions by name, not number.": {
+      "evidence_count": 4,
+      "recency_score": 0.81,
+      "severity_score": 0.62,
+      "final": 0.74
+    }
+  }
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `proposal_id` | string | Echo of `{id}`. |
+| `workspace_id` | string | Owning workspace; always matches the caller's scope. |
+| `crew_id` | string | Crew the proposal belongs to. |
+| `status` | string | `pending`, `approved`, or `rejected`. |
+| `proposal_path` | string | Absolute path to the rendered `.proposed/proposal-*.md` file. |
+| `rules_count` | integer | Number of rules in the proposal body. |
+| `entries_scanned` | integer | How many candidate journal entries the summarizer pass considered before extracting the rules. |
+| `created_at` | string | RFC3339 timestamp from the `memory_proposals` row. |
+| `decided_at` | string | RFC3339 timestamp; omitted while `status == "pending"`. |
+| `decided_by_user_id` | string | User id of the approver/rejector; omitted while `status == "pending"`. |
+| `evidence` | json | Raw JSON array of source journal entries the LLM looked at -- shape is whatever the summarizer wrote into `evidence_json` (no re-shaping at the API boundary). |
+| `scores` | json | Per-rule `ScoreResult` map keyed by rule pattern. Literal `{}` for proposals created before scoring was wired, or when running against a pre-v92 schema (the handler detects column presence once and falls back to `'{}'` literal). |
+
+**Errors:**
+
+| Status | Condition |
+|---|---|
+| 400 | Missing `{id}` path param. |
+| 401 | No workspace context. |
+| 404 | Unknown `{id}`, or proposal belongs to a different workspace (same 404 -- no existence leak). |
+| 500 | DB query failure. |
+
 ## Side effects
 
 A successful run:
@@ -83,5 +319,6 @@ Background scheduler: every 6h. Compactor: daily at 03:00 UTC. Both wired at ser
 ## Related
 
 - [Consolidate guide](/guides/consolidate).
+- [Memory observability](/guides/memory-observability) -- operator playbook for the HITL approve/reject/explain flow and the `memory_versions` audit trail.
 - [`crewship consolidate`](/cli/consolidate).
 - [Episodic memory](/guides/episodic-memory) -- indexer runs on the same tick.
