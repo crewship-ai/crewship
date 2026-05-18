@@ -303,6 +303,161 @@ func TestMemoryVersionContent_PayloadOutsideBlobRoot_Returns500(t *testing.T) {
 	}
 }
 
+func TestMemoryVersionContent_SymlinkBypassRejected(t *testing.T) {
+	// Self-review finding (HIGH): the prior implementation used
+	// filepath.Abs which only does lexical cleanup. A symlink
+	// physically located inside blobRoot but pointing at a
+	// host secret would pass the HasPrefix check, and
+	// os.ReadFile would follow the link. The fix is
+	// filepath.EvalSymlinks, which resolves the link first
+	// so the prefix comparison sees the REAL target.
+	//
+	// Setup: a real blob, then a symlink under blobRoot
+	// pointing at a file OUTSIDE blobRoot. A memory_versions
+	// row whose payload_ref is the symlink path must NOT
+	// serve the off-root content.
+	r := contentTestRig(t)
+
+	// "Host secret" — a file outside blobRoot.
+	secret := filepath.Join(t.TempDir(), "host_secret")
+	if err := os.WriteFile(secret, []byte("HOST_SECRET_PLEASE_DO_NOT_LEAK"), 0o644); err != nil {
+		t.Fatalf("seed secret: %v", err)
+	}
+
+	// Plant a symlink inside blobRoot that points at the secret.
+	shaSyn := "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+	shard := filepath.Join(r.blobRoot, shaSyn[:2])
+	if err := os.MkdirAll(shard, 0o755); err != nil {
+		t.Fatalf("mkdir shard: %v", err)
+	}
+	symlinkPath := filepath.Join(shard, shaSyn)
+	if err := os.Symlink(secret, symlinkPath); err != nil {
+		t.Skipf("symlink not supported on this filesystem: %v", err)
+	}
+
+	// Insert a row whose payload_ref is the symlink path. The
+	// sha256 column is the row's claim; the symlink target
+	// SHOULD be unreachable.
+	id := fmt.Sprintf("mv_symlink_%d", memContentCounter.Add(1))
+	if _, err := r.db.Exec(`
+		INSERT INTO memory_versions
+		(id, workspace_id, path, tier, sha256, bytes, payload_ref, written_at)
+		VALUES (?, ?, 'agent:evil/AGENT.md', 'agent', ?, ?, ?, ?)`,
+		id, r.wsID, shaSyn, 100, symlinkPath,
+		time.Now().UTC().Format(time.RFC3339Nano),
+	); err != nil {
+		t.Fatalf("seed row: %v", err)
+	}
+
+	rr := contentRequest(t, r, "OWNER", id)
+	// Must NOT be 200 with the secret bytes. The prefix-check
+	// after EvalSymlinks resolves the symlink target (outside
+	// blobRoot) and 500s on the boundary violation.
+	if rr.Code == http.StatusOK {
+		t.Fatalf("symlink to host secret was served! Code=200 body=%q", rr.Body.String())
+	}
+	if rr.Code != http.StatusInternalServerError {
+		t.Logf("non-200 status: %d (acceptable as long as it's not 200)", rr.Code)
+	}
+}
+
+func TestMemoryVersionContent_OnDiskOversize_Returns413(t *testing.T) {
+	// Self-review finding (MEDIUM): bytesStored is the row's
+	// CLAIM; if the file on disk is bigger than the claim
+	// (corruption, out-of-band rewrite), os.ReadFile would
+	// happily load the whole thing into RAM before the sha
+	// check rejected it. io.LimitReader caps the actual read
+	// at cap+1 so we can distinguish "in spec" from
+	// "exceeded".
+	r := contentTestRig(t)
+
+	// Seed a row claiming a small size but with a large file
+	// on disk. The cap check before the read passes (claim
+	// is small); the read-cap fires on the actual bytes.
+	body := make([]byte, memVersionsContentMaxBytes+1024)
+	for i := range body {
+		body[i] = 'X'
+	}
+	sum := sha256.Sum256(body)
+	sha := hex.EncodeToString(sum[:])
+	shard := filepath.Join(r.blobRoot, sha[:2])
+	if err := os.MkdirAll(shard, 0o755); err != nil {
+		t.Fatalf("mkdir shard: %v", err)
+	}
+	blobPath := filepath.Join(shard, sha)
+	if err := os.WriteFile(blobPath, body, 0o644); err != nil {
+		t.Fatalf("write huge blob: %v", err)
+	}
+	id := fmt.Sprintf("mv_ondisk_huge_%d", memContentCounter.Add(1))
+	if _, err := r.db.Exec(`
+		INSERT INTO memory_versions
+		(id, workspace_id, path, tier, sha256, bytes, payload_ref, written_at)
+		VALUES (?, ?, 'agent:big/file.md', 'agent', ?, ?, ?, ?)`,
+		id, r.wsID, sha, 100, blobPath, // claim 100 bytes, actually MB+
+		time.Now().UTC().Format(time.RFC3339Nano),
+	); err != nil {
+		t.Fatalf("seed mismatch row: %v", err)
+	}
+
+	rr := contentRequest(t, r, "OWNER", id)
+	if rr.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413 (on-disk file exceeds cap regardless of claimed size)", rr.Code)
+	}
+	if !strings.Contains(rr.Body.String(), "on-disk blob size exceeds cap") {
+		t.Errorf("error body should mention on-disk cap; got %q", rr.Body.String())
+	}
+}
+
+func TestMemoryVersionContent_HeaderCRLFSanitized(t *testing.T) {
+	// Self-review finding (LOW): X-Memory-Path and
+	// X-Memory-Written-By carry DB-sourced strings into HTTP
+	// headers. net/http panics on \r\n since Go 1.20; a
+	// corrupted row would crash the response goroutine.
+	// sanitizeHeader replaces newlines with spaces so a
+	// poisoned row degrades gracefully (operators still get
+	// a 200 + the body; the header just shows the mangled
+	// value).
+	r := contentTestRig(t)
+	body := []byte("# notes")
+	sum := sha256.Sum256(body)
+	sha := hex.EncodeToString(sum[:])
+	shard := filepath.Join(r.blobRoot, sha[:2])
+	_ = os.MkdirAll(shard, 0o755)
+	blobPath := filepath.Join(shard, sha)
+	_ = os.WriteFile(blobPath, body, 0o644)
+
+	id := fmt.Sprintf("mv_crlf_%d", memContentCounter.Add(1))
+	if _, err := r.db.Exec(`
+		INSERT INTO memory_versions
+		(id, workspace_id, path, tier, sha256, bytes, payload_ref, written_at, written_by)
+		VALUES (?, ?, ?, 'agent', ?, ?, ?, ?, ?)`,
+		id, r.wsID,
+		"agent:evil\r\nX-Injected: pwned/AGENT.md", // path with CRLF
+		sha, len(body), blobPath,
+		time.Now().UTC().Format(time.RFC3339Nano),
+		"writer\nname", // written_by with LF
+	); err != nil {
+		t.Fatalf("seed crlf row: %v", err)
+	}
+
+	rr := contentRequest(t, r, "OWNER", id)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (sanitized headers should not break the response)", rr.Code)
+	}
+	// X-Injected MUST NOT appear as a header — the CRLF was
+	// stripped, so the bogus header line doesn't materialise.
+	if got := rr.Header().Get("X-Injected"); got != "" {
+		t.Errorf("CRLF in path leaked as injected header X-Injected=%q", got)
+	}
+	if strings.Contains(rr.Header().Get("X-Memory-Path"), "\n") ||
+		strings.Contains(rr.Header().Get("X-Memory-Path"), "\r") {
+		t.Errorf("X-Memory-Path retains CRLF: %q", rr.Header().Get("X-Memory-Path"))
+	}
+	if strings.Contains(rr.Header().Get("X-Memory-Written-By"), "\n") {
+		t.Errorf("X-Memory-Written-By retains LF: %q", rr.Header().Get("X-Memory-Written-By"))
+	}
+}
+
 func TestMemoryVersionContent_BlobRootUnset_Returns503(t *testing.T) {
 	db := setupTestDB(t)
 	userID := seedTestUser(t, db)

@@ -51,6 +51,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -160,15 +161,36 @@ func (h *MemoryVersionsContentHandler) Content(w http.ResponseWriter, r *http.Re
 	// that case — defence-in-depth against a malicious or
 	// corrupted INSERT that tries to use payload_ref as a
 	// path-traversal vector.
-	cleanRoot, err := filepath.Abs(h.blobRoot)
+	//
+	// EvalSymlinks (not Abs) is the load-bearing call: Abs
+	// only does lexical cleanup, so a symlink physically
+	// located inside blobRoot but pointing at /etc/passwd
+	// would pass the HasPrefix check and let os.ReadFile
+	// follow the link to the host secret. EvalSymlinks
+	// resolves the link first, so the prefix check sees the
+	// REAL target.
+	cleanRoot, err := filepath.EvalSymlinks(h.blobRoot)
 	if err != nil {
-		h.logger.Error("memory content: blob root abs", "blob_root", h.blobRoot, "error", err)
+		h.logger.Error("memory content: blob root eval-symlinks",
+			"blob_root", h.blobRoot, "error", err)
 		replyError(w, http.StatusInternalServerError, "blob root resolution failed")
 		return
 	}
-	cleanPath, err := filepath.Abs(payloadRef)
+	cleanPath, err := filepath.EvalSymlinks(payloadRef)
 	if err != nil {
-		h.logger.Error("memory content: payload abs", "payload_ref", payloadRef, "error", err)
+		if errors.Is(err, os.ErrNotExist) {
+			// Row outlived its blob — same 410 as the
+			// post-read NotExist branch below. Catching
+			// it here means we don't 500 on a missing-blob
+			// row that happens to fail EvalSymlinks before
+			// the open. The os.ReadFile fallback below
+			// covers the case where the file exists but is
+			// inaccessible.
+			replyError(w, http.StatusGone, "blob is missing on disk")
+			return
+		}
+		h.logger.Error("memory content: payload eval-symlinks",
+			"payload_ref", payloadRef, "error", err)
 		replyError(w, http.StatusInternalServerError, "payload path resolution failed")
 		return
 	}
@@ -181,7 +203,15 @@ func (h *MemoryVersionsContentHandler) Content(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	content, err := os.ReadFile(cleanPath)
+	// Read with an actual cap, not just the bytesStored claim.
+	// bytesStored is what the row CLAIMS the blob is; if the
+	// file on disk is bigger (corruption, out-of-band rewrite),
+	// os.ReadFile would happily load it all into RAM before
+	// the sha check rejects it. io.LimitReader caps the read
+	// at memVersionsContentMaxBytes+1 so we can distinguish
+	// "exactly cap bytes" (still fine — sha will fail if the
+	// row claimed less) from "exceeded the cap" (refuse).
+	f, err := os.Open(cleanPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			// Row outlived its blob — retention sweep deleted
@@ -194,9 +224,26 @@ func (h *MemoryVersionsContentHandler) Content(w http.ResponseWriter, r *http.Re
 			replyError(w, http.StatusGone, "blob is missing on disk")
 			return
 		}
+		h.logger.Error("memory content: open blob",
+			"version_id", versionID, "payload_ref", cleanPath, "error", err)
+		replyError(w, http.StatusInternalServerError, "blob open failed")
+		return
+	}
+	defer f.Close()
+	content, err := io.ReadAll(io.LimitReader(f, memVersionsContentMaxBytes+1))
+	if err != nil {
 		h.logger.Error("memory content: read blob",
 			"version_id", versionID, "payload_ref", cleanPath, "error", err)
 		replyError(w, http.StatusInternalServerError, "blob read failed")
+		return
+	}
+	if int64(len(content)) > memVersionsContentMaxBytes {
+		h.logger.Error("memory content: on-disk blob exceeds cap",
+			"version_id", versionID, "cap_bytes", memVersionsContentMaxBytes,
+			"bytes_stored", bytesStored, "payload_ref", cleanPath)
+		replyError(w, http.StatusRequestEntityTooLarge,
+			fmt.Sprintf("on-disk blob size exceeds cap %d (row claimed %d)",
+				memVersionsContentMaxBytes, bytesStored))
 		return
 	}
 
@@ -218,13 +265,21 @@ func (h *MemoryVersionsContentHandler) Content(w http.ResponseWriter, r *http.Re
 	// Headers carry the audit metadata so the client can
 	// render the content alongside provenance without a
 	// second round trip.
+	//
+	// sanitizeHeader strips CR/LF from DB-sourced values
+	// before they go on the wire. net/http rejects headers
+	// containing those bytes with a panic in Go ≥1.20; the
+	// pre-flight strip keeps a poisoned row (e.g. a writer
+	// name with embedded newlines) from killing the response
+	// goroutine. Today the watcher controls these fields, so
+	// risk is theoretical — but cheap defence-in-depth.
 	w.Header().Set("X-Memory-Sha256", shaStored)
 	w.Header().Set("X-Memory-Bytes", strconv.FormatInt(bytesStored, 10))
-	w.Header().Set("X-Memory-Tier", tier)
-	w.Header().Set("X-Memory-Path", path)
-	w.Header().Set("X-Memory-Written-At", writtenAt)
+	w.Header().Set("X-Memory-Tier", sanitizeHeader(tier))
+	w.Header().Set("X-Memory-Path", sanitizeHeader(path))
+	w.Header().Set("X-Memory-Written-At", sanitizeHeader(writtenAt))
 	if writtenBy.Valid {
-		w.Header().Set("X-Memory-Written-By", writtenBy.String)
+		w.Header().Set("X-Memory-Written-By", sanitizeHeader(writtenBy.String))
 	}
 	// Content-Type from the canonical-path extension — .md
 	// gets text/markdown; everything else falls back to
@@ -249,4 +304,23 @@ func (h *MemoryVersionsContentHandler) Content(w http.ResponseWriter, r *http.Re
 		h.logger.Warn("memory content: response write",
 			"version_id", versionID, "bytes", len(content), "error", err)
 	}
+}
+
+// sanitizeHeader strips CR/LF from a string before it lands in
+// an HTTP header. net/http panics on header values containing
+// those bytes since Go 1.20; a corrupted row with embedded
+// newlines would otherwise crash the response goroutine
+// rather than serve a clean 500.
+func sanitizeHeader(s string) string {
+	if !strings.ContainsAny(s, "\r\n") {
+		return s
+	}
+	// Replace with a single space rather than dropping so a
+	// reader can still spot that the original value was
+	// pathological (one space between what should have been
+	// two lines).
+	out := strings.ReplaceAll(s, "\r\n", " ")
+	out = strings.ReplaceAll(out, "\r", " ")
+	out = strings.ReplaceAll(out, "\n", " ")
+	return out
 }
