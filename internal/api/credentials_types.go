@@ -120,10 +120,19 @@ func looksLikePEM(value, marker string) bool {
 	// First line: "-----BEGIN <label>-----". Check the label ends
 	// with the requested marker so "PRIVATE KEY" matches all four
 	// flavours (PKCS#1, PKCS#8, OpenSSH, EC).
+	//
+	// TrimSpace before stripping the dashes catches CRLF line endings
+	// — a key exported from a Windows openssl build, or pasted from
+	// Notepad, lands here as `-----BEGIN ... PRIVATE KEY-----\r\n…`
+	// and the naked IndexByte('\n') leaves a stray `\r` glued to the
+	// closing `-----`. Without the early trim, TrimSuffix("-----")
+	// silently no-ops on the `…KEY-----\r` form and we end up
+	// rejecting a perfectly valid key.
 	firstLine := v
 	if nl := strings.IndexByte(v, '\n'); nl >= 0 {
 		firstLine = v[:nl]
 	}
+	firstLine = strings.TrimSpace(firstLine)
 	firstLine = strings.TrimSuffix(strings.TrimPrefix(firstLine, "-----BEGIN "), "-----")
 	return strings.HasSuffix(strings.TrimSpace(firstLine), marker)
 }

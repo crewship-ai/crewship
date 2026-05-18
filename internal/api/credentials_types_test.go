@@ -146,6 +146,29 @@ func TestLooksLikePEM(t *testing.T) {
 		{"certificate does NOT match PRIVATE KEY marker", pemFixture("CERTIFICATE", "ABC"), "PRIVATE KEY", false},
 		{"public key does NOT match PRIVATE KEY", pemFixture("PUBLIC KEY", "ABC"), "PRIVATE KEY", false},
 		{"surrounding whitespace tolerated", "  \n" + pemFixture("CERTIFICATE", "ABC") + "\n  ", "CERTIFICATE", true},
+		// CRLF line endings: a PEM exported on Windows or pasted from
+		// Notepad uses \r\n. The naked split-on-\n leaves the trailing
+		// \r glued to the closing dashes, which trips the label check
+		// if we don't TrimSpace before stripping suffixes. Regression
+		// guard for that exact bug.
+		{
+			"CRLF line endings on private key",
+			pemFixture("OPENSSH PRIVATE KEY", "ABC") + "",
+			"PRIVATE KEY",
+			true,
+		},
+		{
+			"CRLF line endings on certificate",
+			strings.ReplaceAll(pemFixture("CERTIFICATE", "ABC"), "\n", "\r\n"),
+			"CERTIFICATE",
+			true,
+		},
+		{
+			"CRLF line endings on private key (literal CRLF)",
+			strings.ReplaceAll(pemFixture("RSA PRIVATE KEY", "ABC"), "\n", "\r\n"),
+			"PRIVATE KEY",
+			true,
+		},
 	}
 
 	for _, tt := range tests {
