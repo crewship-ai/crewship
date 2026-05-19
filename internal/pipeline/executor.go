@@ -712,6 +712,34 @@ func (e *Executor) runStep(
 	}
 }
 
+// resolveInputGuardAction reads the routine's per-routine input guard
+// policy and returns the action string the AgentStepRequest carries
+// down to runner_llm.go (which passes it to lookout.WithAction). Empty
+// is the platform default — block on high-severity match — and is
+// returned whenever the DSL omits the guardrails block or any of the
+// nested fields, so a routine without explicit policy keeps the
+// historical behaviour.
+//
+// Returning a string instead of a typed enum lets pipeline/types keep
+// its zero dependency on lookout — adding the typed import would
+// create a cycle the moment lookout takes a pipeline.GuardrailsConfig
+// in any future enrichment.
+func resolveInputGuardAction(dsl *DSL) string {
+	if dsl == nil || dsl.Guardrails == nil || dsl.Guardrails.Input == nil {
+		return ""
+	}
+	pi := dsl.Guardrails.Input.PromptInjection
+	if pi == nil {
+		return ""
+	}
+	switch pi.Action {
+	case "block", "sanitize", "log":
+		return pi.Action
+	default:
+		return ""
+	}
+}
+
 // runAgentStep invokes the AgentRunner for an agent_run step,
 // applies the validation gate, and escalates through the fallback
 // tier chain on validation failure if on_fail = escalate_tier.
@@ -769,18 +797,19 @@ func (e *Executor) runAgentStep(
 			attemptPrompt = injectValidationFeedback(basePrompt, lastValidationReason)
 		}
 		req := AgentStepRequest{
-			WorkspaceID:     in.WorkspaceID,
-			AuthorCrewID:    in.AuthorCrewID,
-			AgentSlug:       step.AgentSlug,
-			Adapter:         am.Adapter,
-			Model:           am.Model,
-			Prompt:          attemptPrompt,
-			TimeoutSec:      step.TimeoutSec,
-			PipelineID:      pipelineID,
-			PipelineRunID:   runID,
-			StepID:          step.ID,
-			InvokingCrewID:  in.InvokingCrewID,
-			InvokingAgentID: in.InvokingAgentID,
+			WorkspaceID:      in.WorkspaceID,
+			AuthorCrewID:     in.AuthorCrewID,
+			AgentSlug:        step.AgentSlug,
+			Adapter:          am.Adapter,
+			Model:            am.Model,
+			Prompt:           attemptPrompt,
+			TimeoutSec:       step.TimeoutSec,
+			PipelineID:       pipelineID,
+			PipelineRunID:    runID,
+			StepID:           step.ID,
+			InvokingCrewID:   in.InvokingCrewID,
+			InvokingAgentID:  in.InvokingAgentID,
+			InputGuardAction: resolveInputGuardAction(in.dsl),
 		}
 		res, err := e.runRunnerWithTransientRetry(ctx, req, step, emit)
 		if err != nil {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/crewship-ai/crewship/internal/journal"
 )
@@ -18,7 +19,52 @@ const (
 	// request. Callers MUST attach a Scope before invoking the guards
 	// (typically in the HTTP handler chain that wraps the agent runner).
 	ctxKeyScope ctxKey = iota
+
+	// ctxKeyAction overrides the default block-on-detect behaviour for
+	// the input guard so a per-routine config can opt into softer
+	// modes ("sanitize" or "log") without forking the guard
+	// implementation. Defaults to GuardActionBlock when unset, which
+	// preserves backwards-compat with every caller that pre-dates this
+	// feature.
+	ctxKeyAction
 )
+
+// GuardAction is the policy a routine can attach to its input-guard
+// scan. The default GuardActionBlock matches Crewship's historical
+// "refuse the call" behaviour. Sanitize replaces the matched span with
+// a redaction marker and lets the (now-defanged) text through. Log
+// emits the journal entry but passes the text through unchanged — the
+// right choice when an operator wants production telemetry on injection
+// attempts without breaking a noisy upstream that occasionally trips
+// the heuristic on benign content.
+type GuardAction string
+
+const (
+	GuardActionBlock    GuardAction = "block"
+	GuardActionSanitize GuardAction = "sanitize"
+	GuardActionLog      GuardAction = "log"
+)
+
+// WithAction returns a derived context carrying a non-default guard
+// action. The orchestrator's RunAgent wires this from per-routine
+// config so a routine flagged "log-only" doesn't refuse user prompts
+// that match the heuristic.
+func WithAction(ctx context.Context, action GuardAction) context.Context {
+	if action == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, ctxKeyAction, action)
+}
+
+// ActionFromContext returns the configured guard action or
+// GuardActionBlock when none was attached. Always returns a usable
+// value so callers don't have to nil-check.
+func ActionFromContext(ctx context.Context) GuardAction {
+	if v, ok := ctx.Value(ctxKeyAction).(GuardAction); ok && v != "" {
+		return v
+	}
+	return GuardActionBlock
+}
 
 // Scope identifies which workspace/crew/agent the guard is acting on.
 // Mirrored after journal.Scope but kept separate so callers don't have to
@@ -84,8 +130,8 @@ func InputGuard(j journal.Emitter) Middleware {
 		if result.Verdict != VerdictBlock {
 			return text, nil
 		}
-		// Pick the highest-severity finding for the BlockedError; this is
-		// the one the operator most cares about.
+		// Pick the highest-severity finding for the journal entry + the
+		// BlockedError; this is the one the operator most cares about.
 		primary := result.Findings[0]
 		for _, f := range result.Findings[1:] {
 			if severityRank(f.Severity) > severityRank(primary.Severity) {
@@ -93,12 +139,57 @@ func InputGuard(j journal.Emitter) Middleware {
 			}
 		}
 		emitErr := emitGuardEntry(ctx, j, journal.EntryGuardrailInput, "input", result, primary)
-		blocked := &BlockedError{Direction: "input", Finding: primary}
-		if emitErr != nil {
-			return "", errors.Join(blocked, emitErr)
+
+		// Branch on the configured action. Block (default) refuses the
+		// call; Sanitize masks every match in-place and returns the
+		// reformed text; Log lets the original through unchanged because
+		// the operator opted into observability-only mode.
+		switch ActionFromContext(ctx) {
+		case GuardActionSanitize:
+			sanitized := sanitizeFindings(text, result.Findings)
+			if emitErr != nil {
+				return sanitized, emitErr
+			}
+			return sanitized, nil
+		case GuardActionLog:
+			if emitErr != nil {
+				return text, emitErr
+			}
+			return text, nil
+		default:
+			blocked := &BlockedError{Direction: "input", Finding: primary}
+			if emitErr != nil {
+				return "", errors.Join(blocked, emitErr)
+			}
+			return "", blocked
 		}
-		return "", blocked
 	}
+}
+
+// sanitizeFindings replaces each Finding.Matched span with a fixed
+// "[REDACTED]" marker. We don't try to be smart about reformatting
+// surrounding whitespace: the goal is to defang the injection, not to
+// preserve readability for downstream prompt rendering. Replacements
+// are done left-to-right; overlapping matches collapse into the
+// outermost span because strings.ReplaceAll handles all instances of a
+// given substring.
+//
+// Why not the more surgical loc-based replacement that ScanInput
+// already has? The Findings expose only the matched text + position
+// for the FIRST hit, not every span — running strings.ReplaceAll on
+// the matched literal is good enough for the heuristic patterns we
+// detect (jailbreak prose, role overrides) where a single match per
+// kind is the realistic case. If a future detector returns N spans
+// for the same pattern, this still defangs all of them.
+func sanitizeFindings(text string, findings []Finding) string {
+	out := text
+	for _, f := range findings {
+		if f.Matched == "" {
+			continue
+		}
+		out = strings.ReplaceAll(out, f.Matched, "[REDACTED]")
+	}
+	return out
 }
 
 // OutputGuard returns a middleware that scans LLM/tool output for secrets

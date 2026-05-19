@@ -133,6 +133,14 @@ func (r *LLMRunner) RunStep(ctx context.Context, req AgentStepRequest) (AgentSte
 	}
 	ctx = lookout.WithScope(ctx, scope)
 
+	// Per-routine input-guard action override. The DSL plumbs through
+	// AgentStepRequest.InputGuardAction (empty leaves the default).
+	// We pass the string through WithAction; the helper coerces empty
+	// to no-op so we don't have to branch here.
+	if req.InputGuardAction != "" {
+		ctx = lookout.WithAction(ctx, lookout.GuardAction(req.InputGuardAction))
+	}
+
 	// Build the LLM request. We pass the resolved system prompt
 	// + the pipeline's rendered prompt as a single user turn.
 	// Multi-turn pipelines come from chaining steps in the DSL,

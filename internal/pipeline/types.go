@@ -47,7 +47,38 @@ type DSL struct {
 	// pipelines; use MaxCostUSD to STOP one already in flight from
 	// going further into the red.
 	MaxCostUSD float64 `json:"max_cost_usd,omitempty"`
-	Steps      []Step  `json:"steps"`
+	// Guardrails configures input/output safety scanning per routine.
+	// Empty leaves the platform defaults (input guard = hard block on
+	// any high-severity match). A routine can opt into "sanitize" or
+	// "log" modes when its upstream produces text that occasionally
+	// trips the heuristic on benign content.
+	Guardrails *GuardrailsConfig `json:"guardrails,omitempty"`
+	Steps      []Step            `json:"steps"`
+}
+
+// GuardrailsConfig is the per-routine safety policy. Currently scoped
+// to input-side prompt-injection scanning; future iterations may add
+// per-routine output PII rules + LLM-based classifiers as a second
+// tier behind the regex heuristic.
+type GuardrailsConfig struct {
+	Input *InputGuardrailsConfig `json:"input,omitempty"`
+}
+
+// InputGuardrailsConfig carries the prompt-injection scan policy. The
+// only knob today is the verdict action — block (default), sanitize
+// (replace matched spans, let the text through), or log (pass through
+// and emit a journal entry only).
+type InputGuardrailsConfig struct {
+	PromptInjection *PromptInjectionConfig `json:"prompt_injection,omitempty"`
+}
+
+// PromptInjectionConfig.Action mirrors lookout.GuardAction; kept as a
+// plain string here so the pipeline types package doesn't depend on
+// lookout (the dependency would create a cycle through the executor
+// once we wire the guardrail call site). The executor maps the string
+// to lookout.GuardAction at the call site.
+type PromptInjectionConfig struct {
+	Action string `json:"action,omitempty"` // block | sanitize | log
 }
 
 // ExecutionTier overrides the workspace-level tier mapping for a single
@@ -592,6 +623,13 @@ type AgentStepRequest struct {
 	StepID          string
 	InvokingCrewID  string
 	InvokingAgentID string
+
+	// InputGuardAction is the lookout.GuardAction value derived from the
+	// routine's DSL.Guardrails.Input.PromptInjection.Action. Plain string
+	// here so this package doesn't import lookout (would create a cycle
+	// through the executor's runner). Empty leaves the lookout default
+	// (block on high-severity match).
+	InputGuardAction string
 }
 
 // AgentStepResult is the executor's view of a completed step. The
