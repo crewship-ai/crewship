@@ -146,7 +146,7 @@ func (h *InboxHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	out := make([]inboxItemResponse, 0)
+	out := make([]inboxItemResponse, 0, limit)
 	for rows.Next() {
 		var item inboxItemResponse
 		var blocking int

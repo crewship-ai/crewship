@@ -18,13 +18,17 @@ type SearchResult struct {
 // Search performs a BM25-ranked FTS5 search over indexed memory chunks.
 // The query supports FTS5 query syntax (e.g. "foo AND bar", "foo OR bar",
 // prefix queries "foo*").
+//
+// No e.mu RLock is held: SQLite is opened in WAL mode (see New) and
+// Reindex's DELETE+INSERTs run inside a single transaction, so a
+// concurrent search sees a consistent snapshot of the index — either
+// the pre-reindex or post-reindex state, never an in-progress write.
+// Close() racing with an in-flight search just propagates as a normal
+// sql.DB error; no lock is needed to guard that path.
 func (e *Engine) Search(ctx context.Context, query string, limit int) ([]SearchResult, error) {
 	if !e.config.SearchEnabled {
 		return nil, fmt.Errorf("search is disabled")
 	}
-
-	e.mu.RLock()
-	defer e.mu.RUnlock()
 
 	if limit <= 0 {
 		limit = 10
@@ -119,11 +123,17 @@ func sanitizeFTSQuery(q string) string {
 	}, q)
 
 	words := strings.Fields(cleaned)
-	var parts []string
+	parts := make([]string, 0, len(words))
 	for _, w := range words {
-		upper := strings.ToUpper(w)
-		if upper == "AND" || upper == "OR" || upper == "NOT" {
-			parts = append(parts, upper)
+		switch {
+		case strings.EqualFold(w, "AND"):
+			parts = append(parts, "AND")
+			continue
+		case strings.EqualFold(w, "OR"):
+			parts = append(parts, "OR")
+			continue
+		case strings.EqualFold(w, "NOT"):
+			parts = append(parts, "NOT")
 			continue
 		}
 		// Remove any internal quotes, re-wrap for safety

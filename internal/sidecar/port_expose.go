@@ -124,8 +124,9 @@ func (s *Server) handleExposePort(w http.ResponseWriter, r *http.Request) {
 
 	// Pass the crewshipd response through verbatim. We deliberately don't
 	// try to re-shape errors — the agent is more useful when it sees the
-	// exact server message.
-	raw, err := io.ReadAll(resp.Body)
+	// exact server message. Bound the read at 1 MiB: port-expose responses
+	// are small JSON envelopes, so anything beyond this is pathological.
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1*1024*1024))
 	if err != nil {
 		writeJSONResponse(w, http.StatusBadGateway, map[string]string{
 			"error": "invalid response from crewshipd",

@@ -44,7 +44,12 @@ type ProvisioningHandler struct {
 	// the UI poll cost and the background sweep. Workspace-scoped
 	// `referenced_by` data is still queried fresh per request (cheap index
 	// lookup) so tenants never see cross-workspace state.
-	imgListMu    sync.Mutex
+	//
+	// RWMutex (not Mutex): cache hits are the steady-state case and only
+	// need RLock, so concurrent admin-UI polls don't serialize on each
+	// other. Misses take the write Lock and re-check the cache to dedupe
+	// concurrent refreshes down to a single Docker.ImageList call.
+	imgListMu    sync.RWMutex
 	imgListCache cachedImageList
 
 	// bgCtx scopes the lifetime of the cleanup + GC goroutines. Stop()

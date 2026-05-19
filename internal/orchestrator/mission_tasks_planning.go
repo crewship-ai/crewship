@@ -299,11 +299,15 @@ func (e *MissionEngine) ValidateDAG(ctx context.Context, missionID string) error
 		taskIDs[t.ID] = true
 	}
 
-	// Build adjacency list and check for nonexistent deps
-	graph := make(map[string][]string, len(tasks)) // taskID → deps
+	// Build reverse adjacency (parent → children) and in-degree counts in
+	// one pass over the task list, parsing each task's depends_on JSON
+	// exactly once. The Kahn loop below then walks dependents[node] in
+	// O(1) per edge instead of rescanning every task and re-parsing JSON
+	// per visit — the previous implementation was O(n²·d) with JSON
+	// parses on the hot path.
+	dependents := make(map[string][]string, len(tasks))
 	inDegree := make(map[string]int, len(tasks))
 	for _, t := range tasks {
-		graph[t.ID] = nil
 		inDegree[t.ID] = 0
 	}
 	for _, t := range tasks {
@@ -315,13 +319,13 @@ func (e *MissionEngine) ValidateDAG(ctx context.Context, missionID string) error
 			if !taskIDs[dep] {
 				return fmt.Errorf("task %q depends on nonexistent task %q", t.Title, dep)
 			}
-			graph[t.ID] = append(graph[t.ID], dep)
+			dependents[dep] = append(dependents[dep], t.ID)
 			inDegree[t.ID]++
 		}
 	}
 
-	// Kahn's algorithm for cycle detection
-	var queue []string
+	// Kahn's algorithm for cycle detection — O(V+E).
+	queue := make([]string, 0, len(tasks))
 	for id, deg := range inDegree {
 		if deg == 0 {
 			queue = append(queue, id)
@@ -333,16 +337,10 @@ func (e *MissionEngine) ValidateDAG(ctx context.Context, missionID string) error
 		node := queue[0]
 		queue = queue[1:]
 		visited++
-		// Find tasks that depend on this node
-		for _, t := range tasks {
-			deps, _ := parseDependsOn(t.DependsOn)
-			for _, dep := range deps {
-				if dep == node {
-					inDegree[t.ID]--
-					if inDegree[t.ID] == 0 {
-						queue = append(queue, t.ID)
-					}
-				}
+		for _, child := range dependents[node] {
+			inDegree[child]--
+			if inDegree[child] == 0 {
+				queue = append(queue, child)
 			}
 		}
 	}

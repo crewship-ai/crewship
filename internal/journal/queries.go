@@ -82,9 +82,7 @@ func List(ctx context.Context, db *sql.DB, q Query) ([]Entry, string, error) {
 	args = append(args, q.WorkspaceID)
 
 	if len(q.CrewIDs) > 0 {
-		placeholders := strings.Repeat("?,", len(q.CrewIDs))
-		placeholders = placeholders[:len(placeholders)-1]
-		conds = append(conds, "crew_id IN ("+placeholders+")")
+		conds = append(conds, "crew_id IN ("+sqlInPlaceholders(len(q.CrewIDs))+")")
 		for _, id := range q.CrewIDs {
 			args = append(args, id)
 		}
@@ -93,9 +91,7 @@ func List(ctx context.Context, db *sql.DB, q Query) ([]Entry, string, error) {
 		args = append(args, q.CrewID)
 	}
 	if len(q.AgentIDs) > 0 {
-		placeholders := strings.Repeat("?,", len(q.AgentIDs))
-		placeholders = placeholders[:len(placeholders)-1]
-		conds = append(conds, "agent_id IN ("+placeholders+")")
+		conds = append(conds, "agent_id IN ("+sqlInPlaceholders(len(q.AgentIDs))+")")
 		for _, id := range q.AgentIDs {
 			args = append(args, id)
 		}
@@ -112,41 +108,31 @@ func List(ctx context.Context, db *sql.DB, q Query) ([]Entry, string, error) {
 		args = append(args, q.TraceID)
 	}
 	if len(q.Types) > 0 {
-		placeholders := strings.Repeat("?,", len(q.Types))
-		placeholders = placeholders[:len(placeholders)-1]
-		conds = append(conds, "entry_type IN ("+placeholders+")")
+		conds = append(conds, "entry_type IN ("+sqlInPlaceholders(len(q.Types))+")")
 		for _, t := range q.Types {
 			args = append(args, string(t))
 		}
 	}
 	if len(q.ExcludeTypes) > 0 {
-		placeholders := strings.Repeat("?,", len(q.ExcludeTypes))
-		placeholders = placeholders[:len(placeholders)-1]
-		conds = append(conds, "entry_type NOT IN ("+placeholders+")")
+		conds = append(conds, "entry_type NOT IN ("+sqlInPlaceholders(len(q.ExcludeTypes))+")")
 		for _, t := range q.ExcludeTypes {
 			args = append(args, string(t))
 		}
 	}
 	if len(q.Severities) > 0 {
-		placeholders := strings.Repeat("?,", len(q.Severities))
-		placeholders = placeholders[:len(placeholders)-1]
-		conds = append(conds, "severity IN ("+placeholders+")")
+		conds = append(conds, "severity IN ("+sqlInPlaceholders(len(q.Severities))+")")
 		for _, s := range q.Severities {
 			args = append(args, string(s))
 		}
 	}
 	if len(q.ActorTypes) > 0 {
-		placeholders := strings.Repeat("?,", len(q.ActorTypes))
-		placeholders = placeholders[:len(placeholders)-1]
-		conds = append(conds, "actor_type IN ("+placeholders+")")
+		conds = append(conds, "actor_type IN ("+sqlInPlaceholders(len(q.ActorTypes))+")")
 		for _, a := range q.ActorTypes {
 			args = append(args, string(a))
 		}
 	}
 	if len(q.Priorities) > 0 {
-		placeholders := strings.Repeat("?,", len(q.Priorities))
-		placeholders = placeholders[:len(placeholders)-1]
-		conds = append(conds, "priority IN ("+placeholders+")")
+		conds = append(conds, "priority IN ("+sqlInPlaceholders(len(q.Priorities))+")")
 		for _, p := range q.Priorities {
 			args = append(args, string(p))
 		}
@@ -336,9 +322,7 @@ func Count(ctx context.Context, db *sql.DB, q Query) (int64, error) {
 		args  = []any{q.WorkspaceID}
 	)
 	if len(q.CrewIDs) > 0 {
-		placeholders := strings.Repeat("?,", len(q.CrewIDs))
-		placeholders = placeholders[:len(placeholders)-1]
-		conds = append(conds, "crew_id IN ("+placeholders+")")
+		conds = append(conds, "crew_id IN ("+sqlInPlaceholders(len(q.CrewIDs))+")")
 		for _, id := range q.CrewIDs {
 			args = append(args, id)
 		}
@@ -347,9 +331,7 @@ func Count(ctx context.Context, db *sql.DB, q Query) (int64, error) {
 		args = append(args, q.CrewID)
 	}
 	if len(q.AgentIDs) > 0 {
-		placeholders := strings.Repeat("?,", len(q.AgentIDs))
-		placeholders = placeholders[:len(placeholders)-1]
-		conds = append(conds, "agent_id IN ("+placeholders+")")
+		conds = append(conds, "agent_id IN ("+sqlInPlaceholders(len(q.AgentIDs))+")")
 		for _, id := range q.AgentIDs {
 			args = append(args, id)
 		}
@@ -370,41 +352,31 @@ func Count(ctx context.Context, db *sql.DB, q Query) (int64, error) {
 	// ignored these, so filtered UI views would show a total that
 	// didn't line up with the rows the user could see.
 	if len(q.Types) > 0 {
-		placeholders := strings.Repeat("?,", len(q.Types))
-		placeholders = placeholders[:len(placeholders)-1]
-		conds = append(conds, "entry_type IN ("+placeholders+")")
+		conds = append(conds, "entry_type IN ("+sqlInPlaceholders(len(q.Types))+")")
 		for _, t := range q.Types {
 			args = append(args, string(t))
 		}
 	}
 	if len(q.ExcludeTypes) > 0 {
-		placeholders := strings.Repeat("?,", len(q.ExcludeTypes))
-		placeholders = placeholders[:len(placeholders)-1]
-		conds = append(conds, "entry_type NOT IN ("+placeholders+")")
+		conds = append(conds, "entry_type NOT IN ("+sqlInPlaceholders(len(q.ExcludeTypes))+")")
 		for _, t := range q.ExcludeTypes {
 			args = append(args, string(t))
 		}
 	}
 	if len(q.Severities) > 0 {
-		placeholders := strings.Repeat("?,", len(q.Severities))
-		placeholders = placeholders[:len(placeholders)-1]
-		conds = append(conds, "severity IN ("+placeholders+")")
+		conds = append(conds, "severity IN ("+sqlInPlaceholders(len(q.Severities))+")")
 		for _, s := range q.Severities {
 			args = append(args, string(s))
 		}
 	}
 	if len(q.ActorTypes) > 0 {
-		placeholders := strings.Repeat("?,", len(q.ActorTypes))
-		placeholders = placeholders[:len(placeholders)-1]
-		conds = append(conds, "actor_type IN ("+placeholders+")")
+		conds = append(conds, "actor_type IN ("+sqlInPlaceholders(len(q.ActorTypes))+")")
 		for _, a := range q.ActorTypes {
 			args = append(args, string(a))
 		}
 	}
 	if len(q.Priorities) > 0 {
-		placeholders := strings.Repeat("?,", len(q.Priorities))
-		placeholders = placeholders[:len(placeholders)-1]
-		conds = append(conds, "priority IN ("+placeholders+")")
+		conds = append(conds, "priority IN ("+sqlInPlaceholders(len(q.Priorities))+")")
 		for _, p := range q.Priorities {
 			args = append(args, string(p))
 		}

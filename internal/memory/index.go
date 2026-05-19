@@ -28,11 +28,6 @@ func (e *Engine) ReindexContext(ctx context.Context) error {
 		return err
 	}
 
-	// Clear existing index
-	if _, err := e.db.Exec("DELETE FROM memory_chunks"); err != nil {
-		return fmt.Errorf("clear index: %w", err)
-	}
-
 	// Walk the memory directory for .md files. The agent (UID 1001) has
 	// write access into this directory; the indexer runs as the sidecar
 	// (UID 1002). Without the symlink check, an agent could plant a
@@ -80,6 +75,14 @@ func (e *Engine) ReindexContext(ctx context.Context) error {
 		return fmt.Errorf("begin reindex tx: %w", err)
 	}
 	defer tx.Rollback()
+
+	// Clear existing index inside the transaction so readers never observe
+	// an empty table mid-reindex: with the DELETE outside the tx (or
+	// outside any read-blocking lock) a concurrent reader could land in
+	// the window between DELETE and the in-tx INSERTs and see no chunks.
+	if _, err := tx.Exec("DELETE FROM memory_chunks"); err != nil {
+		return fmt.Errorf("clear index: %w", err)
+	}
 
 	stmt, err := tx.Prepare("INSERT INTO memory_chunks (file, content) VALUES (?, ?)")
 	if err != nil {

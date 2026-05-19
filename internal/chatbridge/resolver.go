@@ -205,7 +205,7 @@ func (r *IPCResolver) CreateRun(ctx context.Context, runID, agentID, chatID, wor
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
-		respBody, _ := io.ReadAll(resp.Body)
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 8*1024))
 		return fmt.Errorf("create run: server returned %d: %s", resp.StatusCode, respBody)
 	}
 	return nil
@@ -240,7 +240,7 @@ func (r *IPCResolver) UpdateRun(ctx context.Context, runID, status string, exitC
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
-		respBody, _ := io.ReadAll(resp.Body)
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 8*1024))
 		return fmt.Errorf("update run: server returned %d: %s", resp.StatusCode, respBody)
 	}
 	return nil
@@ -353,7 +353,9 @@ func (r *IPCResolver) resolve(ctx context.Context, resolveURL string) (*ChatInfo
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	// Bound the read at 1 MiB: resolve responses are small JSON envelopes
+	// (agent metadata + a credential list). A runaway peer must not OOM us.
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1*1024*1024))
 	if err != nil {
 		return nil, fmt.Errorf("read response body: %w", err)
 	}

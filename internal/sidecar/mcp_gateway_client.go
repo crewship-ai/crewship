@@ -182,7 +182,10 @@ func (c *mcpClient) sendRequest(ctx context.Context, rpcReq jsonRPCRequest) (*js
 		return parseSSEResponse(resp.Body)
 	}
 
-	respBody, err := io.ReadAll(resp.Body)
+	// Bound the read: MCP tool responses can legitimately be large (file
+	// contents, large query results) but a runaway server must not be able
+	// to OOM us. 32 MiB covers any realistic tool output.
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 32*1024*1024))
 	if err != nil {
 		return nil, fmt.Errorf("read response: %w", err)
 	}
