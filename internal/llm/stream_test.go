@@ -488,3 +488,52 @@ func TestOllamaToOllamaMessage_AssistantWithToolCalls(t *testing.T) {
 		t.Errorf("tool calls = %+v", m.ToolCalls)
 	}
 }
+
+// TestAnthropicStream_CacheTokens guards the streaming cache-usage path.
+// Anthropic ships the full usage block on message_start, including cache
+// read + creation counts. Dropping them silently produced zero in
+// telemetry's gen_ai.usage.cached_input_tokens which makes the LLM trace
+// view useless for cost forensics.
+func TestAnthropicStream_CacheTokens(t *testing.T) {
+	t.Parallel()
+	const sse = `event: message_start
+data: {"type":"message_start","message":{"usage":{"input_tokens":50,"output_tokens":0,"cache_read_input_tokens":2000,"cache_creation_input_tokens":300}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ok"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5}}
+
+event: message_stop
+data: {"type":"message_stop"}
+
+data: [DONE]
+`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(sse))
+	}))
+	defer srv.Close()
+
+	p := newTestAnthropic("k", srv)
+	resp, err := p.Stream(context.Background(), Request{
+		Model:    "claude-3-5-haiku-20241022",
+		Messages: []Message{{Role: RoleUser, Content: "hi"}},
+	}, func(StreamEvent) error { return nil })
+	if err != nil {
+		t.Fatalf("stream: %v", err)
+	}
+	if resp.CachedInputToks != 2000 {
+		t.Errorf("cached input toks = %d, want 2000", resp.CachedInputToks)
+	}
+	if resp.CacheCreationToks != 300 {
+		t.Errorf("cache creation toks = %d, want 300", resp.CacheCreationToks)
+	}
+}

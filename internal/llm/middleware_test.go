@@ -172,6 +172,51 @@ func TestMiddleware_HappyPath(t *testing.T) {
 	}
 }
 
+// TestMiddleware_CacheTokensFlowToLedger guards the cost-ledger end of
+// the prompt-cache wiring: cache_read and cache_creation counts reported
+// by the provider must reach the cost_ledger columns so the rate-card
+// lookup (10% off for cache reads on Anthropic) bills correctly. A
+// previous gap silently dropped them in providerCaller.Call so reports
+// always read zero cached tokens regardless of how many breakpoints hit.
+func TestMiddleware_CacheTokensFlowToLedger(t *testing.T) {
+	db := openLLMTestDB(t)
+	em := &fakeLLMEmitter{}
+	stub := &stubProvider{
+		name: "anthropic",
+		resp: &Response{
+			Content:           "ok",
+			StopReason:        StopEndTurn,
+			InputToks:         100,
+			OutputToks:        20,
+			CachedInputToks:   500,
+			CacheCreationToks: 200,
+		},
+	}
+	mw := Middleware(stub, em, db)
+	ctx := lookout.WithScope(context.Background(), lookout.Scope{WorkspaceID: "ws-1"})
+
+	if _, err := mw.Complete(ctx, Request{
+		Model:    "claude-haiku-4-5",
+		Messages: []Message{{Role: RoleUser, Content: "hi"}},
+	}); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+
+	var cachedIn, cacheCreate int64
+	err := db.QueryRowContext(context.Background(),
+		`SELECT cached_input_tokens, cache_creation_tokens FROM cost_ledger LIMIT 1`).
+		Scan(&cachedIn, &cacheCreate)
+	if err != nil {
+		t.Fatalf("ledger query: %v", err)
+	}
+	if cachedIn != 500 {
+		t.Errorf("cost_ledger.cached_input_tokens = %d, want 500", cachedIn)
+	}
+	if cacheCreate != 200 {
+		t.Errorf("cost_ledger.cache_creation_tokens = %d, want 200", cacheCreate)
+	}
+}
+
 // TestMiddleware_NamePreserved makes sure the wrapped provider still
 // reports the inner provider's name. Call sites that branch on Name()
 // (e.g. Captain's suggest path) must see "anthropic", not "middleware".

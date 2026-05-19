@@ -46,6 +46,130 @@ func TestAnthropicComplete(t *testing.T) {
 	}
 }
 
+// TestAnthropicCacheTokens guards the prompt-caching wire path. Anthropic
+// returns cache_read_input_tokens + cache_creation_input_tokens alongside
+// the regular usage block when cache_control hits a breakpoint; both must
+// surface on llm.Response so paymaster prices cache reads at the lower
+// rate and OTel gen_ai.usage.cached_input_tokens reflects real hit ratios.
+// A previous version of the parser dropped these fields silently, which
+// is why we assert non-zero values rather than just non-error.
+func TestAnthropicCacheTokens(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"content":     []map[string]string{{"type": "text", "text": "ok"}},
+			"stop_reason": "end_turn",
+			"usage": map[string]int{
+				"input_tokens":                100,
+				"output_tokens":               20,
+				"cache_read_input_tokens":     500,
+				"cache_creation_input_tokens": 200,
+			},
+		})
+	}))
+	defer srv.Close()
+
+	p := newTestAnthropic("test-key", srv)
+	resp, err := p.Complete(context.Background(), Request{
+		Model:    "claude-3-5-haiku-20241022",
+		Messages: []Message{{Role: RoleUser, Content: "Hi"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.InputToks != 100 || resp.OutputToks != 20 {
+		t.Errorf("got input/output %d/%d, want 100/20", resp.InputToks, resp.OutputToks)
+	}
+	if resp.CachedInputToks != 500 {
+		t.Errorf("got cached_input_toks %d, want 500", resp.CachedInputToks)
+	}
+	if resp.CacheCreationToks != 200 {
+		t.Errorf("got cache_creation_toks %d, want 200", resp.CacheCreationToks)
+	}
+}
+
+// TestAnthropicToolsCacheControl confirms the last tool entry carries a
+// cache_control: ephemeral marker. Anthropic interprets this as "cache the
+// prefix through this item," which covers the whole tools array — the
+// single highest-leverage cache breakpoint for agent workloads (tool
+// schemas are large and stable across turns).
+func TestAnthropicToolsCacheControl(t *testing.T) {
+	var sawCacheControl bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		tools, _ := body["tools"].([]any)
+		if len(tools) == 0 {
+			t.Fatal("expected tools in request")
+		}
+		last, _ := tools[len(tools)-1].(map[string]any)
+		if cc, ok := last["cache_control"].(map[string]any); ok {
+			if cc["type"] == "ephemeral" {
+				sawCacheControl = true
+			}
+		}
+		json.NewEncoder(w).Encode(map[string]any{
+			"content":     []map[string]string{{"type": "text", "text": "ok"}},
+			"stop_reason": "end_turn",
+			"usage":       map[string]int{"input_tokens": 1, "output_tokens": 1},
+		})
+	}))
+	defer srv.Close()
+
+	p := newTestAnthropic("test-key", srv)
+	_, err := p.Complete(context.Background(), Request{
+		Model:    "claude-3-5-haiku-20241022",
+		Messages: []Message{{Role: RoleUser, Content: "Hi"}},
+		Tools: []ToolDef{
+			{Name: "a", Description: "a tool", InputSchema: map[string]any{"type": "object"}},
+			{Name: "b", Description: "b tool", InputSchema: map[string]any{"type": "object"}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sawCacheControl {
+		t.Error("last tool missing cache_control: ephemeral — prompt cache is broken for tool definitions")
+	}
+}
+
+// TestOpenAICachedTokens guards the auto-cache wire path. OpenAI activates
+// prompt caching automatically for prompts ≥1024 tokens (Sept 2025) and
+// reports the read count in usage.prompt_tokens_details.cached_tokens.
+// Dropping it leaves dashboards unable to compute cache-hit ratio for the
+// OpenAI fleet.
+func TestOpenAICachedTokens(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{
+				"message":       map[string]string{"role": "assistant", "content": "ok"},
+				"finish_reason": "stop",
+			}},
+			"usage": map[string]any{
+				"prompt_tokens":     1500,
+				"completion_tokens": 50,
+				"prompt_tokens_details": map[string]int{
+					"cached_tokens": 1200,
+				},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	p := NewOpenAIWithBaseURL("test-key", srv.URL+"/v1/chat/completions")
+	resp, err := p.Complete(context.Background(), Request{
+		Model:    "gpt-4o-mini",
+		Messages: []Message{{Role: RoleUser, Content: "Hi"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.CachedInputToks != 1200 {
+		t.Errorf("got cached_input_toks %d, want 1200", resp.CachedInputToks)
+	}
+}
+
 func TestAnthropicToolUse(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any

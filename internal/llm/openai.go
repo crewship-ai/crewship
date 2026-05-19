@@ -168,15 +168,22 @@ type openaiResponse struct {
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
 	Usage struct {
-		PromptTokens     int `json:"prompt_tokens"`
-		CompletionTokens int `json:"completion_tokens"`
+		PromptTokens        int `json:"prompt_tokens"`
+		CompletionTokens    int `json:"completion_tokens"`
+		PromptTokensDetails struct {
+			// OpenAI auto-caches prompts ≥1024 tokens since Sept 2025;
+			// cached_tokens is the read count (no separate "creation"
+			// counter — caching is opaque on their side).
+			CachedTokens int `json:"cached_tokens"`
+		} `json:"prompt_tokens_details"`
 	} `json:"usage"`
 }
 
 func (r *openaiResponse) toResponse() *Response {
 	resp := &Response{
-		InputToks:  r.Usage.PromptTokens,
-		OutputToks: r.Usage.CompletionTokens,
+		InputToks:       r.Usage.PromptTokens,
+		OutputToks:      r.Usage.CompletionTokens,
+		CachedInputToks: r.Usage.PromptTokensDetails.CachedTokens,
 	}
 	if len(r.Choices) == 0 {
 		resp.StopReason = StopEndTurn
@@ -295,8 +302,11 @@ func (o *OpenAI) parseSSEStream(r io.Reader, handler func(StreamEvent) error) (*
 				FinishReason string `json:"finish_reason"`
 			} `json:"choices"`
 			Usage *struct {
-				PromptTokens     int `json:"prompt_tokens"`
-				CompletionTokens int `json:"completion_tokens"`
+				PromptTokens        int `json:"prompt_tokens"`
+				CompletionTokens    int `json:"completion_tokens"`
+				PromptTokensDetails struct {
+					CachedTokens int `json:"cached_tokens"`
+				} `json:"prompt_tokens_details"`
 			} `json:"usage"`
 		}
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
@@ -305,6 +315,7 @@ func (o *OpenAI) parseSSEStream(r io.Reader, handler func(StreamEvent) error) (*
 		if chunk.Usage != nil {
 			final.InputToks = chunk.Usage.PromptTokens
 			final.OutputToks = chunk.Usage.CompletionTokens
+			final.CachedInputToks = chunk.Usage.PromptTokensDetails.CachedTokens
 		}
 
 		if len(chunk.Choices) == 0 {
