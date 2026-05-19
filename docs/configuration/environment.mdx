@@ -98,25 +98,25 @@ All Crewship configuration can be set via environment variables. These override 
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `NEXTAUTH_SECRET` | (required) | JWT signing secret for user authentication |
+| `NEXTAUTH_SECRET` | Auto-generated on first boot | JWT signing secret for user authentication. Generated via `crypto/rand` (32 bytes → 64 hex chars) and persisted to `<dataDir>/secrets.env` on first start; subsequent boots read the file back. Explicit env vars always win, so Vault / Kubernetes secret mounts / `EnvironmentFile=` keep working unchanged. |
 | `CREWSHIP_NEXTJS_URL` | Auto-derived from port | Internal URL for self-referencing API calls |
-| `CREWSHIP_INTERNAL_TOKEN` | Auto-generated | Token for sidecar-to-crewshipd IPC authentication |
+| `CREWSHIP_INTERNAL_TOKEN` | Auto-generated on first boot | Token for sidecar-to-crewshipd IPC authentication. Same auto-gen + persist path as `NEXTAUTH_SECRET`; **stays stable across restarts** once the file exists. |
 | `CREWSHIP_ALLOW_SIGNUP` | `false` | Allow new user registration (`true` or `1`) |
 
-<Warning>
-  If `CREWSHIP_INTERNAL_TOKEN` is not set, a cryptographically random 32-byte token is auto-generated at each startup. This is secure but means the token changes on restart. For clustered deployments, set it explicitly.
-</Warning>
+<Note>
+  As of PR #446 (`internal/secrets`), `NEXTAUTH_SECRET`, `ENCRYPTION_KEY` and `CREWSHIP_INTERNAL_TOKEN` are all bootstrapped on first start: missing values are generated with `crypto/rand`, persisted atomically to `<dataDir>/secrets.env` at mode `0600`, and re-exported into the process environment so existing `os.Getenv` call sites see them unchanged. Explicit env vars override the file; partial persistence is handled (one missing key is filled, the other valid keys are preserved). For clustered deployments, set them explicitly via your secret manager.
+</Note>
 
 ### Auto-Derived Values
 
 - `CREWSHIP_NEXTJS_URL`: If not explicitly set, defaults to `http://localhost:{CREWSHIP_PORT}`. In single-binary mode, the internal resolver calls itself on the same port.
-- `CREWSHIP_INTERNAL_TOKEN`: If empty, auto-generated via `crypto/rand` (32 bytes, hex-encoded = 64 chars).
+- `CREWSHIP_INTERNAL_TOKEN`: Auto-generated on first boot and persisted (see Note above). Stays stable across restarts.
 
 ## Encryption
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `ENCRYPTION_KEY` | (required) | 256-bit hex-encoded AES key for credential encryption |
+| `ENCRYPTION_KEY` | Auto-generated on first boot | 256-bit hex-encoded AES key for credential encryption. Same auto-gen + persist path as `NEXTAUTH_SECRET` (32 bytes → 64 hex chars in `<dataDir>/secrets.env`). |
 | `ENCRYPTION_KEY_V2` | (optional) | Rotated encryption key (for key versioning) |
 
 ## Keeper (AI Security Gatekeeper)
