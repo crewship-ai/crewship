@@ -57,6 +57,19 @@ vi.mock("@/components/features/chat/status-indicator", () => ({
   ),
 }))
 
+// TurnFeedbackActions calls useSession() to namespace the feedback
+// store by user (privacy fix for the per-user persisted state). The
+// real useAuth/useSession require an AuthProvider; tests don't have
+// one and shouldn't — the feedback wiring is an implementation detail
+// for these dispatch-logic tests. Stub useSession to a fixed identity
+// so the component renders without throwing.
+vi.mock("@/hooks/use-auth", () => ({
+  useSession: () => ({
+    data: { user: { id: "test-user", name: "Test", email: "t@e.com" }, expires: "" },
+    status: "authenticated" as const,
+  }),
+}))
+
 import { AssistantTurn } from "../assistant-turn"
 
 function part(partial: Partial<TurnPart> & { type: TurnPart["type"] }): TurnPart {
