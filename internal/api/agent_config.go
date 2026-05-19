@@ -893,7 +893,12 @@ func (h *InternalHandler) resolveAgentMCPServers(r *http.Request, data *agentCon
 			for credRows.Next() {
 				var cid, encVal string
 				if credRows.Scan(&cid, &encVal) == nil {
-					if plain, err := decryptCredential(encVal); err == nil && !isPendingSentinel(plain) {
+					// Skip empty bodies — they pass the later
+					// `_, ok := credTokens[cid]` membership check
+					// and would have the MCP server look bound
+					// despite carrying no usable token. Mirrors
+					// the resolveOAuthAccessTokens guard.
+					if plain, err := decryptCredential(encVal); err == nil && plain != "" && !isPendingSentinel(plain) {
 						credTokens[cid] = plain
 					}
 				}

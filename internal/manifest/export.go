@@ -22,11 +22,11 @@ type ExportOptions struct {
 	// When false, only the slug is emitted — useful for a
 	// "structure-only" overview manifest.
 	IncludeSkillBodies bool
-	// SkillsPath, when non-empty, switches export to multi-file
-	// mode: each skill body is written to <SkillsPath>/<slug>/SKILL.md
-	// and the manifest references it via `path:`. Empty preserves
-	// inline mode.
-	SkillsPath string
+	// Future: multi-file mode where each skill body is written to
+	// a sibling SKILL.md and the manifest references it via
+	// `path:`. Not implemented; the option used to live on this
+	// struct but it was misleading to expose without a code path
+	// that read it. Track in a follow-up PR.
 }
 
 // DefaultExportOptions are the inline-everything-into-one-file
@@ -89,11 +89,12 @@ func ExportCrew(ctx context.Context, c *Client, slug string, opts ExportOptions)
 	}
 	if hasDevcontainerFields(crew) {
 		spec.Devcontainer = &Devcontainer{
-			MemoryMB:     crew.ContainerMemoryMB,
-			CPUs:         crew.ContainerCPUs,
-			TTLHours:     crew.ContainerTTLHours,
-			NetworkMode:  deref(crew.NetworkMode),
-			RuntimeImage: deref(crew.RuntimeImage),
+			MemoryMB:       crew.ContainerMemoryMB,
+			CPUs:           crew.ContainerCPUs,
+			TTLHours:       crew.ContainerTTLHours,
+			NetworkMode:    deref(crew.NetworkMode),
+			AllowedDomains: crew.AllowedDomains,
+			RuntimeImage:   deref(crew.RuntimeImage),
 		}
 		if deref(crew.MiseConfig) != "" {
 			spec.Devcontainer.Mise = *crew.MiseConfig
@@ -269,15 +270,20 @@ func ExportWorkspace(ctx context.Context, c *Client, opts ExportOptions) (string
 		if err != nil {
 			return "", fmt.Errorf("export crew %q: %w", crewSlug, err)
 		}
-		// Round-trip back through Load to grab the spec.
+		// Round-trip back through Load to grab the spec. Since
+		// the YAML we're parsing was just produced by ExportCrew
+		// in this same call, any Load failure or missing spec
+		// indicates a real bug in the serialiser — silently
+		// skipping the crew would produce a workspace export
+		// missing crews the operator declared.
 		b, err := Load([]byte(yamlStr))
-		if err != nil || len(b.Documents) == 0 {
-			continue
+		if err != nil {
+			return "", fmt.Errorf("reload exported crew %q: %w", crewSlug, err)
+		}
+		if len(b.Documents) == 0 || b.Documents[0].Spec == nil {
+			return "", fmt.Errorf("reload exported crew %q: missing document/spec", crewSlug)
 		}
 		spec := b.Documents[0].Spec
-		if spec == nil {
-			continue
-		}
 		// Lift skills + credentials to the workspace level so they
 		// dedupe across crews. The per-crew spec keeps the agent
 		// refs pointing at the slug/env, which resolves against the
@@ -353,7 +359,7 @@ func ExportWorkspace(ctx context.Context, c *Client, opts ExportOptions) (string
 		}
 	}
 
-	wsDoc.Metadata.Name, wsDoc.Metadata.Slug = workspaceMeta(c)
+	wsDoc.Metadata.Name, wsDoc.Metadata.Slug = workspaceMeta(ctx, c)
 
 	var sb strings.Builder
 	sb.WriteString("# yaml-language-server: $schema=https://schemas.crewship.ai/v1/manifest.json\n")
@@ -371,12 +377,16 @@ func ExportWorkspace(ctx context.Context, c *Client, opts ExportOptions) (string
 // and the export should still produce a usable file when the API
 // is unavailable. Consolidates what used to be two round-trips
 // returning one field each.
-func workspaceMeta(c *Client) (name, slug string) {
+//
+// ctx is threaded through so a cancelled or deadline-bound
+// ExportWorkspace call aborts cleanly here instead of issuing a
+// blind HTTP request after the caller has already given up.
+func workspaceMeta(ctx context.Context, c *Client) (name, slug string) {
 	wsID := c.api.GetWorkspaceID()
 	if wsID == "" {
 		return "", ""
 	}
-	body, err := c.fetchBody("/api/v1/workspaces/" + wsID)
+	body, err := c.fetchBodyCtx(ctx, "/api/v1/workspaces/"+wsID)
 	if err != nil || len(body) == 0 {
 		return "", ""
 	}
@@ -394,17 +404,31 @@ func workspaceMeta(c *Client) (name, slug string) {
 // representation suitable for committing to a repo. Adds a
 // $schema yaml-language-server hint at the top so editors get
 // autocomplete without any extra config.
+//
+// doc is passed by value but its Spec pointer is shared with the
+// caller, so we clone the spec (and any slices we mutate) before
+// applying export-only filtering. Without the clone, MarshalDocument
+// would permanently strip credentials and skill bodies from the
+// caller's in-memory manifest — a surprising side effect for a
+// "serialiser" name.
 func MarshalDocument(doc Document, opts ExportOptions) (string, error) {
 	var sb strings.Builder
 	sb.WriteString("# yaml-language-server: $schema=https://schemas.crewship.ai/v1/manifest.json\n")
-	if !opts.IncludeCredentials && doc.Spec != nil {
-		doc.Spec.Credentials = nil
-	}
-	if !opts.IncludeSkillBodies && doc.Spec != nil {
-		for i := range doc.Spec.Skills {
-			doc.Spec.Skills[i].Inline = ""
-			doc.Spec.Skills[i].Path = ""
+	if doc.Spec != nil && (!opts.IncludeCredentials || !opts.IncludeSkillBodies) {
+		clonedSpec := *doc.Spec
+		if !opts.IncludeCredentials {
+			clonedSpec.Credentials = nil
 		}
+		if !opts.IncludeSkillBodies {
+			clonedSkills := make([]Skill, len(clonedSpec.Skills))
+			for i, s := range clonedSpec.Skills {
+				s.Inline = ""
+				s.Path = ""
+				clonedSkills[i] = s
+			}
+			clonedSpec.Skills = clonedSkills
+		}
+		doc.Spec = &clonedSpec
 	}
 	out, err := yaml.Marshal(doc)
 	if err != nil {
@@ -425,7 +449,13 @@ func hasDevcontainerFields(c *CrewResponse) bool {
 	if c == nil {
 		return false
 	}
+	// NetworkMode counts here because a crew that only flips
+	// network_mode to "restricted" (with allowed_domains) needs
+	// a devcontainer block on re-apply — without it the export
+	// loses the policy and the crew comes back as "free" on the
+	// next apply.
 	return c.RuntimeImage != nil ||
+		c.NetworkMode != nil ||
 		c.DevcontainerConfig != nil ||
 		c.MiseConfig != nil ||
 		c.ContainerMemoryMB != nil ||

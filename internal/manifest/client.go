@@ -83,6 +83,7 @@ type CrewResponse struct {
 	ContainerCPUs      *float64 `json:"container_cpus"`
 	ContainerTTLHours  *int     `json:"container_ttl_hours"`
 	NetworkMode        *string  `json:"network_mode"`
+	AllowedDomains     []string `json:"allowed_domains"`
 	RuntimeImage       *string  `json:"runtime_image"`
 	DevcontainerConfig *string  `json:"devcontainer_config"`
 	MiseConfig         *string  `json:"mise_config"`
@@ -577,6 +578,39 @@ func (c *Client) ListCrewIntegrations(ctx context.Context, crewID string) ([]MCP
 // 2xx check and body-close discipline.
 func (c *Client) fetchBody(path string) ([]byte, error) {
 	resp, err := c.api.Get(path)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if err := cli.CheckError(resp); err != nil {
+		return nil, err
+	}
+	return io.ReadAll(io.LimitReader(resp.Body, 10<<20))
+}
+
+// fetchBodyCtx is the cancellation-aware variant of fetchBody used
+// by export paths that already carry the caller's context. When
+// the underlying API client supports WithContext (i.e. *cli.Client),
+// the request honours the ctx's deadline/cancellation. Tests that
+// inject a bare APIClient fall back to fetchBody — losing
+// cancellation is a known limit of the test fake, not a production
+// path.
+func (c *Client) fetchBodyCtx(ctx context.Context, path string) ([]byte, error) {
+	type contextual interface {
+		WithContext(context.Context) *cli.Client
+	}
+	if cc, ok := c.api.(contextual); ok && ctx != nil {
+		return fetchBodyVia(cc.WithContext(ctx), path)
+	}
+	return c.fetchBody(path)
+}
+
+// fetchBodyVia is the same logic as fetchBody but against a caller-
+// supplied client (used by fetchBodyCtx when it swaps in a
+// ctx-bound copy). Kept separate to avoid threading a generic
+// "client interface" type through every call site.
+func fetchBodyVia(client *cli.Client, path string) ([]byte, error) {
+	resp, err := client.Get(path)
 	if err != nil {
 		return nil, err
 	}
