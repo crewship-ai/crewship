@@ -52,9 +52,16 @@
               "guides/orchestration",
               "guides/inbox",
               "guides/activity",
-              "guides/routines",
-              "guides/routines-cookbook",
-              "guides/routines-migration",
+              {
+                "group": "Routines",
+                "icon": "workflow",
+                "expanded": false,
+                "pages": [
+                  "guides/routines",
+                  "guides/routines-cookbook",
+                  "guides/routines-migration"
+                ]
+              },
               {
                 "group": "CLI adapters",
                 "icon": "plug",
