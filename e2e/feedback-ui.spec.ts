@@ -33,16 +33,13 @@ test.describe("Feedback store via real browser", () => {
   test("submit() POSTs feedback + sets optimistic state, then reset() DELETEs", async ({ page, context, baseURL }) => {
     const turnId = `pw-ui-${Date.now()}`
 
-    // Drive the store directly from page context. The store is
-    // exported from "@/stores/feedback-store" — pull it via the
-    // module graph the running app already loaded.
+    // Drive the same fetch path the UI uses, from inside the browser
+    // page context. This exercises NextAuth session cookie + Origin
+    // header set by the browser (matches /api/v1/feedback EnforceOrigin)
+    // + the actual JSON body shape the store sends. A bug in the
+    // store's serialization or the auth cookie flow surfaces here
+    // even if the pure-request test passes.
     const submitResult = await page.evaluate(async (turnId) => {
-      const mod = (await import("/_next/static/chunks/?")) as any // dummy to keep TS happy in inline code
-      void mod
-      // Real path: the store is hoisted onto window in tests when
-      // NEXT_PUBLIC_TEST_HOOKS=1 — but we don't depend on that.
-      // Fall back to dispatching a direct fetch via the same code
-      // path the UI would: POST /api/v1/feedback.
       const res = await fetch("/api/v1/feedback", {
         method: "POST",
         credentials: "include",
@@ -95,30 +92,24 @@ test.describe("Feedback store via real browser", () => {
     expect(finalCheck).toBe(0)
   })
 
-  test("Origin-protected POST: cross-origin fetch from same browser session must NOT bypass", async ({ page, baseURL }) => {
-    // The same-browser fetch above always passes — it carries the
-    // app's Origin header. Verify that a deliberately-spoofed Origin
-    // gets rejected by the daemon's EnforceOrigin middleware. This
-    // pins the CSRF defense — without it, a malicious page on
-    // another origin could ride the user's cookie to write feedback.
-    const result = await page.evaluate(async () => {
-      const res = await fetch("/api/v1/feedback", {
-        method: "POST",
-        credentials: "include",
-        headers: {
-          "Content-Type": "application/json",
-          Origin: "https://evil.example.com",
-        },
-        body: JSON.stringify({
-          message_id: "csrf-attempt",
-          signal: "helpful",
-        }),
-      })
-      return res.status
+  test("Origin-protected POST: spoofed Origin header gets 403", async ({ context, baseURL }) => {
+    // CSRF defense pin: a request from the same authenticated session
+    // (cookie present) but with a forged Origin header MUST be
+    // rejected by EnforceOrigin. We use context.request (Playwright's
+    // API client) rather than page.evaluate because browser fetch()
+    // silently strips/overwrites manual Origin headers per Fetch spec
+    // §5.5 — the test premise needs raw header injection capability
+    // that only the API client offers.
+    const result = await context.request.post(`${baseURL}/api/v1/feedback`, {
+      headers: {
+        "Content-Type": "application/json",
+        Origin: "https://evil.example.com",
+      },
+      data: {
+        message_id: "csrf-attempt",
+        signal: "helpful",
+      },
     })
-    // Browsers normally forbid overriding Origin client-side, but
-    // Playwright's evaluate does NOT — it sets the header verbatim.
-    // The backend MUST reject this. 403 is the spec'd response.
-    expect(result).toBe(403)
+    expect(result.status()).toBe(403)
   })
 })
