@@ -40,26 +40,6 @@ Crewship ships as a **single binary** that embeds the Next.js frontend, SQLite d
     ```
   </Step>
 
-  <Step title="Generate an encryption key">
-    ```bash
-    openssl rand -hex 32
-    ```
-    Save this value -- you will need it for `ENCRYPTION_KEY`.
-  </Step>
-
-  <Step title="Create environment file">
-    Create a `.env.local` file in the project root:
-    ```bash
-    ENCRYPTION_KEY=<your-256-bit-hex-key>
-    NEXTAUTH_SECRET=<random-secret-for-jwt>
-    CREWSHIP_ALLOW_SIGNUP=true
-    ```
-
-    <Note>
-      The `CREWSHIP_INTERNAL_TOKEN` is auto-generated cryptographically at startup if not set. A 32-byte random hex token is created each time, eliminating any hardcoded defaults.
-    </Note>
-  </Step>
-
   <Step title="Build the binary">
     ```bash
     make build
@@ -80,6 +60,25 @@ Crewship ships as a **single binary** that embeds the Next.js frontend, SQLite d
     ./crewship start
     ```
     The server starts on `http://localhost:8080` by default. The frontend is served from the embedded static files.
+
+    <Note>
+      `crewship start` auto-generates the secrets it needs on first
+      boot — `ENCRYPTION_KEY`, `NEXTAUTH_SECRET`, and
+      `CREWSHIP_INTERNAL_TOKEN` are all written to
+      `~/.crewship/secrets.env` (mode `0600`) and reused on subsequent
+      starts. No manual env file is required. To bring your own
+      secrets (e.g. from a secret manager), export the matching env
+      vars before running `crewship start` and the auto-generation is
+      skipped for any that are already set.
+    </Note>
+  </Step>
+
+  <Step title="Open the web UI and complete onboarding">
+    Open `http://localhost:8080` in a browser. With an empty database
+    you'll be redirected to `/onboarding`, where the wizard creates the
+    first admin user, the initial workspace, and your first crew. No
+    CLI bootstrap (`crewship init`, manual DB seeding, etc.) is part
+    of the supported install flow.
   </Step>
 </Steps>
 
