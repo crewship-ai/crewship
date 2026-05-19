@@ -28,6 +28,22 @@ Defined in `internal/hooks/types.go` (15 events currently):
 
 - `pre_agent_start`, `post_agent_stop` -- orchestrator agent lifecycle. **Both payloads carry `mission_id` since PR #210** so a hook can scope its action to the running mission without a separate join.
 - `on_approval_requested` -- fires when [Harbor Master](/guides/harbormaster)'s `Gate` returns `Required=true`, before the request lands in the approvals queue. The hook receives the same scope (`workspace_id`, `crew_id`, `agent_id`, `mission_id`), the credential ID, and the `intent` string. Use this to forward HITL notifications to Slack / PagerDuty / your own pager-of-choice. PR #210 finally wired this dispatch site — earlier docs claimed it fired but the call site was missing.
+- `on_guardrail_triggered` -- fires from [Lookout](/guides/lookout)'s `InputGuard` on every finding (block, sanitize, AND log mode — log isn't "guard disabled," it's observability + alerting without breaking the call). Wired via a `GuardListener` context callback in `internal/pipeline/runner_llm.go` so the integration path stays decoupled (lookout has no dep on the hooks package). Payload:
+
+  ```json
+  {
+    "direction": "input",
+    "kind": "role_override",        // role_override | system_prompt_leak | jailbreak | zero_width_unicode | rtl_override_unicode | lakera_detected
+    "detail": "instruction-override request",
+    "matched": "ignore previous instructions",
+    "pipeline_id": "...",
+    "pipeline_run": "...",
+    "step_id": "...",
+    "agent_slug": "..."
+  }
+  ```
+
+  Severity on the `HookEventContext` is the finding's severity (`info` | `warn` | `error`) so a webhook can throttle by criticality. Dispatch failures are logged but never change the guard's verdict — a blocked call stays blocked even if the alert channel is down.
 
 **Defined but not yet dispatched** (add a `hooks.Dispatch` call at the relevant point when the corresponding platform path wires through):
 
@@ -36,7 +52,7 @@ Defined in `internal/hooks/types.go` (15 events currently):
 - `pre_llm_call`, `post_llm_call` -- fits cleanly into `llm.Middleware`.
 - `pre_memory_write`, `post_memory_write` -- memory consolidation path.
 - `pre_peer_conversation`, `post_peer_conversation` -- peer bridge.
-- `on_budget_exceeded`, `on_guardrail_triggered` -- Paymaster and Lookout already emit journal entries; hooks are the natural next step.
+- `on_budget_exceeded` -- Paymaster already emits journal entries; hooks are the natural next step.
 
 When adding a new dispatch site, also add a row to `AllEvents` in `types.go` and test coverage in `hooks_test.go`.
 
@@ -163,6 +179,6 @@ Payload includes `hook_id`, `handler_kind`, `outcome`, `latency_ms`, `blocking`,
 
 - [Harbor Master](/guides/harbormaster) -- emits `on_approval_requested`.
 - [Paymaster](/guides/paymaster) -- future `on_budget_exceeded` source.
-- [Lookout](/guides/lookout) -- future `on_guardrail_triggered` source.
+- [Lookout](/guides/lookout) -- emits `on_guardrail_triggered` via the GuardListener context callback.
 - [Crew Journal](/guides/crew-journal) -- `hook.fired`, `hook.blocked`, `system.hook_toggled`.
 - [`crewship hooks`](/cli/hooks), [Hooks API](/api-reference/hooks).

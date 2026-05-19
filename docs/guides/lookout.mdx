@@ -64,6 +64,41 @@ Detectors (in `injection.go`):
 
 The guard is wired into [`llm.Middleware`](/guides/llm-middleware) so every `Complete()` call is scanned. The `Stream()` path scans up-front synchronously -- a separate guard in `llm/middleware.go` refuses prompt-injection before the first token flows.
 
+### Per-routine action policy
+
+The default is hard-block on any high/critical finding. Routines whose upstream produces text that occasionally trips the heuristic on benign content (translations, security write-ups, adversarial-prompt research) can opt into a softer mode via DSL:
+
+```yaml
+name: my-routine
+guardrails:
+  input:
+    prompt_injection:
+      action: sanitize    # block (default) | sanitize | log
+```
+
+| Action | Behaviour | When to use |
+|---|---|---|
+| `block` (default) | Refuses the call; returns `*BlockedError`. | Production routines processing trusted inputs. |
+| `sanitize` | Replaces matched byte ranges with `[REDACTED]`, lets the (defanged) text through. | Noisy upstreams where false positives would block legit traffic. |
+| `log` | Passes the original text through unchanged; emits the journal entry only. | Observability-only mode; great for tuning the heuristic against a real workload. |
+
+The journal entry fires for ALL modes — log mode is observability, not "guard disabled". The `GuardListener` integration hook (below) fires for all modes too.
+
+Sanitize uses **offset-based replacement** (`Finding.Position` + `Finding.MatchEnd`) so long matches and synthetic unicode findings (zero-width, RTL override) are properly redacted. An earlier substring-based implementation silently let those through.
+
+### Integration callback
+
+Wire a callback to a notification target (Slack, PagerDuty, the [hooks](/guides/hooks) subsystem) so guardrail trips don't just land in the journal:
+
+```go
+ctx = lookout.WithGuardListener(ctx, func(ctx context.Context, direction string, f lookout.Finding) {
+    // synchronous — keep cheap or dispatch async inside
+    notify(direction, f)
+})
+```
+
+Runs synchronously after the journal entry is written, regardless of the action policy. The pipeline runner (`internal/pipeline/runner_llm.go`) already wires this to `hooks.Dispatch(EventOnGuardrailTriggered, ...)` when both the DB and a journal emitter are available — see the [`on_guardrail_triggered` hook event](/guides/hooks).
+
 ## Output guard
 
 The default output policy is sanitize-and-pass. The secrets scanner runs over every outbound text and returns a redacted copy alongside findings:

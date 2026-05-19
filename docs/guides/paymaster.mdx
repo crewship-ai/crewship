@@ -158,6 +158,20 @@ Quota signals are **per-call, ephemeral** — they are journaled but not persist
 
 This is the only enforcement path that fires for flat-rate calls: subscription users hit provider rate limits before they hit a \$ ceiling. The error type is intentionally identical so `*BudgetExceededError` handlers do not need to know whether the cause was \$ or quota.
 
+## Prompt-cache token flow
+
+Cache token counts are provider-reported and surface as discounted ledger lines. The wire path:
+
+1. **Provider returns usage** — Anthropic emits `cache_read_input_tokens` + `cache_creation_input_tokens` in the `usage` block (both non-streaming and `message_start` SSE events); OpenAI emits `prompt_tokens_details.cached_tokens` (no separate creation counter — caching is opaque on their side).
+2. **`internal/llm/{anthropic,openai}.go` parses** the fields into `Response.CachedInputToks` + `Response.CacheCreationToks`.
+3. **`internal/llm/middleware.go` plumbs** them through `providerCaller` / `streamCaller` into `paymaster.CallResponse.CachedInputTokens` + `.CacheCreationTokens`.
+4. **`paymaster.Middleware` records** them into the matching `cost_ledger` columns alongside the rate-card snapshot. Cache reads bill at `rate_cached_in_per_m`; cache creates at `rate_cache_write_per_m`.
+5. **`telemetry.LLMMiddleware` stamps** the same counts as `gen_ai.usage.cached_input_tokens` + `gen_ai.usage.cache_creation_tokens` on the `llm.call` span — see [Tracing](/guides/tracing).
+
+The 10% discount for Anthropic cache reads (a `claude-haiku-4-5` cache read bills $0.10/M vs $1.00/M base input) lands automatically because the rate-card column is its own field; no per-row multiplier needed.
+
+A regression earlier in this PR's history shipped the parser without consuming the cache fields — every workspace recorded zero cached tokens and the discount never triggered. The `cost_ledger.cached_input_tokens` column has been present since v62 but was effectively dead until this wiring landed.
+
 ## Rate-card snapshotting (Langfuse pattern)
 
 Every metered row writes the `rate_*_per_m` columns from `RateCard(provider, model)` at the moment of write. When `pricing.go` is later edited (a provider repriced, a new model was added), historical rollups stay consistent: the old row continues to imply its old rate. New rollup queries can either trust `cost_usd` directly or recompute from `rate_*_per_m * tokens` to verify nothing has drifted.
