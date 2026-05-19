@@ -247,6 +247,7 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	mfh := NewMessageFeedbackHandler(r.db, r.logger)
 	r.mux.Handle("POST /api/v1/feedback", authed(http.HandlerFunc(mfh.Create)))
 	r.mux.Handle("GET /api/v1/feedback", authed(http.HandlerFunc(mfh.List)))
+	r.mux.Handle("DELETE /api/v1/feedback", authed(http.HandlerFunc(mfh.Delete)))
 
 	// Hooks registry: lifecycle intercepts. List is available to every
 	// workspace member for auditability; enable/disable is OWNER/ADMIN

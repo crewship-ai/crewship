@@ -10,15 +10,15 @@ package database
 // (replay|regression) set to include 'online' requires the standard
 // recreate dance:
 //
-//   1. Rename the old table aside.
-//   2. CREATE a fresh table with the widened CHECK + the two new
-//      columns (routine_slug, pipeline_run_id) that link an online
-//      eval back to the routine that triggered the sample.
-//   3. INSERT … SELECT to copy every row, padding the new columns
-//      with NULL.
-//   4. DROP the renamed old table.
-//   5. Recreate every index. We do this explicitly rather than relying
-//      on SQLite to carry indexes over a rename (it doesn't).
+//  1. Rename the old table aside.
+//  2. CREATE a fresh table with the widened CHECK + the two new
+//     columns (routine_slug, pipeline_run_id) that link an online
+//     eval back to the routine that triggered the sample.
+//  3. INSERT … SELECT to copy every row, padding the new columns
+//     with NULL.
+//  4. DROP the renamed old table.
+//  5. Recreate every index. We do this explicitly rather than relying
+//     on SQLite to carry indexes over a rename (it doesn't).
 //
 // trace_id ties an eval row back to the OTel trace the sample came
 // from so an operator who clicks "why was this graded poorly?" in the
@@ -75,5 +75,13 @@ CREATE INDEX IF NOT EXISTS idx_eval_runs_kind ON eval_runs(kind, created_at DESC
 CREATE INDEX IF NOT EXISTS idx_eval_runs_mission ON eval_runs(mission_id, created_at DESC) WHERE mission_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_eval_runs_routine ON eval_runs(routine_slug, created_at DESC) WHERE routine_slug IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_eval_runs_trace ON eval_runs(trace_id) WHERE trace_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_eval_runs_pipeline_run ON eval_runs(pipeline_run_id) WHERE pipeline_run_id IS NOT NULL;
+-- Idempotency guard for the online sampler: enforce one online eval row
+-- per pipeline_run_id at the schema layer. Without this, a duplicate
+-- sampler instance (HA + accidental double-start) or a crash-recovery
+-- watermark replay can enqueue the same run twice and the grader runs
+-- twice for it. The partial WHERE limits the constraint to online rows
+-- so replay/regression runs that legitimately reference the same
+-- mission across many eval_runs are unaffected.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_eval_runs_online_pipeline_run
+    ON eval_runs(pipeline_run_id) WHERE kind = 'online' AND pipeline_run_id IS NOT NULL;
 `

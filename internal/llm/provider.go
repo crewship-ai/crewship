@@ -62,13 +62,13 @@ const (
 // cache info leave both fields zero — dashboards can still compute
 // "cached / input" without branching per provider.
 type Response struct {
-	Content          string     `json:"content,omitempty"`
-	ToolCalls        []ToolCall `json:"tool_calls,omitempty"`
-	StopReason       StopReason `json:"stop_reason"`
-	InputToks        int        `json:"input_tokens,omitempty"`
-	OutputToks       int        `json:"output_tokens,omitempty"`
-	CachedInputToks  int        `json:"cached_input_tokens,omitempty"`
-	CacheCreationToks int       `json:"cache_creation_tokens,omitempty"`
+	Content           string     `json:"content,omitempty"`
+	ToolCalls         []ToolCall `json:"tool_calls,omitempty"`
+	StopReason        StopReason `json:"stop_reason"`
+	InputToks         int        `json:"input_tokens,omitempty"`
+	OutputToks        int        `json:"output_tokens,omitempty"`
+	CachedInputToks   int        `json:"cached_input_tokens,omitempty"`
+	CacheCreationToks int        `json:"cache_creation_tokens,omitempty"`
 }
 
 // StreamEvent is emitted during streaming.

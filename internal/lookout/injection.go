@@ -89,6 +89,7 @@ func ScanInput(text string) ScanResult {
 				Detail:   r.detail,
 				Matched:  truncate(match, 80),
 				Position: loc[0],
+				MatchEnd: loc[1],
 			})
 		}
 	}
@@ -105,6 +106,12 @@ func ScanInput(text string) ScanResult {
 					Detail:   fmt.Sprintf("zero-width unicode codepoint U+%04X present", r),
 					Matched:  fmt.Sprintf("U+%04X", r),
 					Position: i,
+					// MatchEnd covers the single rune at `i`; size depends
+					// on which zero-width codepoint we matched. utf8.RuneLen
+					// would also work but the four codepoints we accept are
+					// all 3-byte sequences in UTF-8, so a constant is
+					// equivalent and avoids the import.
+					MatchEnd: i + utf8.RuneLen(r),
 				})
 			}
 		case rtlOverr:
@@ -116,12 +123,18 @@ func ScanInput(text string) ScanResult {
 		if rtlCount >= rtlOverrideThreshold && len(text) < 1024 {
 			sev = SeverityHigh
 		}
+		pos := strings.IndexRune(text, rtlOverr)
+		end := pos
+		if pos >= 0 {
+			end = pos + utf8.RuneLen(rtlOverr)
+		}
 		res.Findings = append(res.Findings, Finding{
 			Kind:     KindRTLOverride,
 			Severity: sev,
 			Detail:   fmt.Sprintf("right-to-left override present (%d occurrences)", rtlCount),
 			Matched:  "U+202E",
-			Position: strings.IndexRune(text, rtlOverr),
+			Position: pos,
+			MatchEnd: end,
 		})
 	}
 

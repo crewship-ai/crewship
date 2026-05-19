@@ -77,12 +77,22 @@ const (
 // rule (NEVER set this to a raw secret — secrets layer fills it with the
 // kind only). Position is the byte offset into the scanned text or -1 if
 // not applicable.
+//
+// MatchEnd is the byte offset one past the last byte of the actual
+// match in the source text. It is the AUTHORITATIVE replacement span
+// for sanitization — Matched is for human display (and gets truncated
+// for long hits, plus carries synthetic strings like "U+202E" for
+// unicode findings) so a sanitize-mode redaction cannot rely on it.
+// Position == MatchEnd means "no byte range" (synthetic finding from
+// the secrets scanner) and sanitize must fall back to leaving the
+// text alone for that finding.
 type Finding struct {
 	Kind     Kind     `json:"kind"`
 	Severity Severity `json:"severity"`
 	Detail   string   `json:"detail"`
 	Matched  string   `json:"matched,omitempty"`
 	Position int      `json:"position"`
+	MatchEnd int      `json:"match_end,omitempty"`
 }
 
 // ScanResult bundles the findings and the resulting verdict for a single

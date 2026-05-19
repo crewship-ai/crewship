@@ -33,6 +33,11 @@ interface AssistantTurnProps {
    *  tests), the affordance is hidden rather than risk cross-agent
    *  reads/writes against the global artifact store. */
   agentId?: string
+  /** Active chat id — passed into feedback POSTs so the row lands in
+   *  the workspace the chat belongs to (the server derives via
+   *  chats.workspace_id) rather than the user's primary workspace
+   *  fallback. Optional; tests can omit it. */
+  chatId?: string
 }
 
 function formatDuration(ms: number): string {
@@ -416,7 +421,7 @@ function DelegationContent({ content }: { content: string }) {
   )
 }
 
-export function AssistantTurn({ turn, onCopy, onFileClick, agentId }: AssistantTurnProps) {
+export function AssistantTurn({ turn, onCopy, onFileClick, agentId, chatId }: AssistantTurnProps) {
   // Collect all text content for copy action
   const fullText = turn.parts
     .filter((p) => p.type === "text")
@@ -531,7 +536,7 @@ export function AssistantTurn({ turn, onCopy, onFileClick, agentId }: AssistantT
 
       {/* Actions (only when done streaming and has text content) */}
       {!turn.isStreaming && fullText && !hasDelegation && (
-        <TurnFeedbackActions turn={turn} onCopy={onCopy} fullText={fullText} />
+        <TurnFeedbackActions turn={turn} onCopy={onCopy} fullText={fullText} chatId={chatId} />
       )}
     </Message>
   )
@@ -566,10 +571,12 @@ function TurnFeedbackActions({
   turn,
   onCopy,
   fullText,
+  chatId,
 }: {
   turn: ChatTurn
   onCopy: (content: string) => void
   fullText: string
+  chatId?: string
 }) {
   const submitted = useFeedbackStore((s) => s.byTurn[turn.id]) ?? {}
   const submit = useFeedbackStore((s) => s.submit)
@@ -583,10 +590,10 @@ function TurnFeedbackActions({
 
   const handle = (signal: "helpful" | "not_helpful") => {
     if (submitted[signal]) {
-      reset(turn.id, signal)
+      void reset(turn.id, signal)
       return
     }
-    void submit(turn.id, signal, { traceId })
+    void submit(turn.id, signal, { chatId, traceId })
   }
 
   return (

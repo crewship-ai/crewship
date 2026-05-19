@@ -137,74 +137,177 @@ type scannedRun struct {
 	workspaceID string
 	pipelineID  string
 	slug        string
+	completedAt string // RFC3339Nano string from pipeline_runs
 }
 
-// runOnce executes a single scan + enqueue pass. Exported via tests
-// as a side effect of the Tick helper; in production it only runs
-// from the loop above.
+// scanPageSize bounds one SQL fetch so a huge backlog can't pin a
+// single connection in QueryContext for the full poll. We page on
+// completed_at (strictly monotonic per row because pipeline_runs uses
+// timestamp-with-precision keys) and advance the watermark by the
+// LAST row we ACTUALLY processed, never by an arbitrary wall-clock
+// scanEnd. That closes the silent-data-loss path where LIMIT 500 hit
+// a saturated window and rows beyond the cap got dropped because the
+// watermark jumped to scanEnd regardless.
+const scanPageSize = 500
+
+// runOnce executes a single scan + enqueue pass. Pages through the
+// pipeline_runs window in scanPageSize batches; advances the watermark
+// only past rows that were actually iterated. Transient per-row
+// failures (DSL resolver outage, INSERT error other than UNIQUE
+// conflict) leave the watermark short of those rows so the next tick
+// retries them.
 func (s *OnlineSampler) runOnce(ctx context.Context) {
 	scanEnd := time.Now().UTC()
-	rows, err := s.db.QueryContext(ctx, `
-SELECT id, workspace_id, pipeline_id, pipeline_slug
+	scanEndStr := scanEnd.Format(time.RFC3339Nano)
+
+	totalScanned := 0
+	totalEnqueued := 0
+	entropyOutages := 0
+	hadRetryableErr := false
+
+	// Track the watermark candidate: the highest completed_at we
+	// successfully handled (either enqueued, sampled out, or
+	// deterministically skipped). Transient failures leave the
+	// watermark behind so the next tick retries.
+	lastHandled := s.watermark.Format(time.RFC3339Nano)
+	cursor := lastHandled
+
+	for {
+		rows, err := s.db.QueryContext(ctx, `
+SELECT id, workspace_id, pipeline_id, pipeline_slug, completed_at
 FROM pipeline_runs
 WHERE status = 'completed'
   AND completed_at IS NOT NULL
-  AND completed_at >= ?
+  AND completed_at > ?
   AND completed_at < ?
 ORDER BY completed_at ASC
-LIMIT 500
-`, s.watermark.Format(time.RFC3339Nano), scanEnd.Format(time.RFC3339Nano))
-	if err != nil {
-		s.logger.Warn("online sampler scan failed", "err", err)
-		return
+LIMIT ?
+`, cursor, scanEndStr, scanPageSize)
+		if err != nil {
+			s.logger.Warn("online sampler scan failed", "err", err)
+			return
+		}
+
+		candidates := make([]scannedRun, 0, scanPageSize)
+		for rows.Next() {
+			var r scannedRun
+			if err := rows.Scan(&r.id, &r.workspaceID, &r.pipelineID, &r.slug, &r.completedAt); err != nil {
+				s.logger.Warn("online sampler scan row failed", "err", err)
+				continue
+			}
+			candidates = append(candidates, r)
+		}
+		iterErr := rows.Err()
+		rows.Close()
+		if iterErr != nil {
+			s.logger.Warn("online sampler scan iter failed", "err", iterErr)
+			return
+		}
+		if len(candidates) == 0 {
+			break
+		}
+
+		// Once a retryable error fires inside a page, freeze the
+		// watermark — every row AFTER the failure must wait for the
+		// next tick to keep ordering. Without this, a failed row
+		// followed by a successful row would advance the watermark
+		// past the failure and orphan it forever. We still iterate
+		// through the rest of the page so the loop counters
+		// (totalScanned, entropyOutages) reflect what was seen, and
+		// so we don't loop on the same SQL window.
+		stuck := false
+		advance := func(ts string) {
+			if !stuck {
+				lastHandled = ts
+			}
+		}
+
+		for _, r := range candidates {
+			totalScanned++
+
+			dsl, err := s.dslResolver.GetDSLByPipelineID(ctx, r.pipelineID)
+			if err != nil {
+				stuck = true
+				hadRetryableErr = true
+				continue
+			}
+			if dsl == nil || dsl.Eval == nil || dsl.Eval.Online == nil {
+				advance(r.completedAt)
+				continue
+			}
+			rate := dsl.Eval.Online.SampleRate
+			if rate <= 0 {
+				advance(r.completedAt)
+				continue
+			}
+			if dsl.Eval.Online.GraderAgentSlug == "" {
+				// No grader configured = nothing to enqueue against.
+				// Deterministic skip — advance so we don't re-scan a
+				// misconfigured routine every tick forever.
+				advance(r.completedAt)
+				continue
+			}
+			if rate < 1.0 {
+				sample, ok := cryptoSample()
+				if !ok {
+					entropyOutages++
+					stuck = true
+					hadRetryableErr = true
+					continue
+				}
+				if sample >= rate {
+					advance(r.completedAt)
+					continue
+				}
+			}
+
+			if err := s.enqueue(ctx, r.workspaceID, r.slug, r.id, dsl.Eval.Online); err != nil {
+				s.logger.Warn("online sampler enqueue failed",
+					"err", err, "run_id", r.id, "pipeline_id", r.pipelineID)
+				stuck = true
+				hadRetryableErr = true
+				continue
+			}
+			totalEnqueued++
+			advance(r.completedAt)
+		}
+
+		// If we got stuck mid-page, end the tick — next tick retries
+		// from the held watermark. Otherwise move the cursor to the
+		// last row in this page so pagination continues making progress
+		// on a deterministic skip backlog.
+		if stuck {
+			break
+		}
+		cursor = candidates[len(candidates)-1].completedAt
+		if len(candidates) < scanPageSize {
+			break
+		}
 	}
 
-	candidates := make([]scannedRun, 0, 32)
-	for rows.Next() {
-		var r scannedRun
-		if err := rows.Scan(&r.id, &r.workspaceID, &r.pipelineID, &r.slug); err != nil {
-			s.logger.Warn("online sampler scan row failed", "err", err)
-			continue
-		}
-		candidates = append(candidates, r)
-	}
-	iterErr := rows.Err()
-	rows.Close()
-	if iterErr != nil {
-		s.logger.Warn("online sampler scan iter failed", "err", iterErr)
-		return
+	_ = scanEnd // referenced only for the scanEndStr bound above; keeps intent obvious.
+
+	// Watermark advances to the high-water mark of successfully-handled
+	// rows. Retryable per-row errors hold it back so the next tick gets
+	// another shot at the same rows.
+	parsed, err := time.Parse(time.RFC3339Nano, lastHandled)
+	if err == nil {
+		s.watermark = parsed.UTC()
+	} else {
+		// Defensive: never advance to garbage. The startup watermark is
+		// scanEnd - 1h; if parsing fails we leave the existing value.
+		s.logger.Warn("watermark parse failed; leaving in place", "value", lastHandled, "err", err)
 	}
 
-	enqueued := 0
-	for _, r := range candidates {
-		dsl, err := s.dslResolver.GetDSLByPipelineID(ctx, r.pipelineID)
-		if err != nil || dsl == nil || dsl.Eval == nil || dsl.Eval.Online == nil {
-			continue
-		}
-		rate := dsl.Eval.Online.SampleRate
-		if rate <= 0 {
-			continue
-		}
-		if rate < 1.0 && cryptoSample() >= rate {
-			continue
-		}
-
-		if err := s.enqueue(ctx, r.workspaceID, r.slug, r.id, dsl.Eval.Online); err != nil {
-			s.logger.Warn("online sampler enqueue failed",
-				"err", err, "run_id", r.id, "pipeline_id", r.pipelineID)
-			continue
-		}
-		enqueued++
+	if entropyOutages > 0 {
+		s.logger.Warn("online sampler hit entropy outage; deferred rows for next tick",
+			"deferred", entropyOutages)
 	}
-
-	// Advance watermark only after a clean scan — a partial scan that
-	// errored mid-iteration leaves the watermark alone so the next
-	// tick re-covers the same window.
-	s.watermark = scanEnd
-
-	if len(candidates) > 0 {
+	if totalScanned > 0 {
 		s.logger.Debug("online sampler tick",
-			"scanned", len(candidates), "enqueued", enqueued,
+			"scanned", totalScanned,
+			"enqueued", totalEnqueued,
+			"retryable_errors", hadRetryableErr,
 			"watermark", s.watermark.Format(time.RFC3339))
 	}
 }
@@ -219,13 +322,26 @@ func (s *OnlineSampler) enqueue(
 	cfg *pipeline.OnlineEvalConfig,
 ) error {
 	id := generateRunID()
-	_, err := s.db.ExecContext(ctx, `
-INSERT INTO eval_runs
+	// INSERT OR IGNORE on the partial UNIQUE INDEX uq_eval_runs_online_pipeline_run
+	// makes the enqueue idempotent at the schema layer. A duplicate sampler
+	// instance, a watermark-replay after crash recovery, or a retry that
+	// crossed paths with a successful prior insert all collapse to a no-op
+	// rather than enqueueing the same pipeline_run twice and double-billing
+	// the grader.
+	result, err := s.db.ExecContext(ctx, `
+INSERT OR IGNORE INTO eval_runs
     (id, workspace_id, kind, status, routine_slug, pipeline_run_id, sample_rate)
 VALUES (?, ?, 'online', 'queued', ?, ?, ?)
 `, id, workspaceID, routineSlug, pipelineRunID, cfg.SampleRate)
 	if err != nil {
 		return err
+	}
+	// RowsAffected==0 means the UNIQUE conflict triggered — the duplicate
+	// is benign, just don't emit a misleading journal entry saying we
+	// just queued one. We also skip the journal entry in that path so
+	// dashboards don't double-count.
+	if affected, _ := result.RowsAffected(); affected == 0 {
+		return nil
 	}
 	if s.emitter != nil {
 		_, _ = s.emitter.Emit(ctx, journal.Entry{
@@ -247,21 +363,30 @@ VALUES (?, ?, 'online', 'queued', ?, ?, ?)
 	return nil
 }
 
-// cryptoSample returns a float in [0,1) drawn from crypto/rand. Used
-// instead of math/rand so the sampling pattern can't be predicted
-// from a known PRNG seed.
-func cryptoSample() float64 {
+// cryptoSample returns a float in [0,1) drawn from crypto/rand, plus
+// an ok flag. Used instead of math/rand so the sampling pattern can't
+// be predicted from a known PRNG seed.
+//
+// On entropy outage (/dev/urandom unreadable — rare in production but
+// possible in container-init / restricted-sysfs setups) the function
+// returns (0, false). The original cut returned a fixed 0.5 and
+// claimed in a comment that this "over-samples on entropy outage,
+// the safer side for observability." That was wrong in both directions:
+// the decision rule in runOnce is `if cryptoSample() >= rate
+// { continue }`, so 0.5 at the realistic production rate of 0.05
+// flips the condition to `0.5 >= 0.05 ⇒ true ⇒ skip every row`,
+// producing 0% sample coverage exactly when the operator most needs
+// the trail. Returning (_, false) and skipping the tick instead is
+// the only honest fail-safe — we lose the sample but don't lie about
+// having taken it.
+func cryptoSample() (float64, bool) {
 	var b [8]byte
 	if _, err := rand.Read(b[:]); err != nil {
-		// Fallback to a deterministic mid-range value when the OS
-		// entropy source is unavailable. This is conservative — we
-		// over-sample on entropy outages, which is the safer side
-		// for an observability feature.
-		return 0.5
+		return 0, false
 	}
 	// Mask to 53 bits (float64 mantissa) and divide for uniform [0,1).
 	u := binary.BigEndian.Uint64(b[:]) & ((1 << 53) - 1)
-	return float64(u) / (1 << 53)
+	return float64(u) / (1 << 53), true
 }
 
 // generateRunID mints a fresh eval_runs.id. Local to this file to

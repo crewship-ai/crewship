@@ -56,6 +56,13 @@ var allowedFeedbackSignals = map[string]struct{}{
 // hazard.
 const maxFeedbackReasonChars = 4096
 
+// maxFeedbackIDChars bounds id-shaped fields (message_id, chat_id,
+// trace_id). Internal Crewship ids are CUIDs (~25 chars); OTel
+// trace_ids are 32 hex chars. Allowing 256 here gives 10× headroom
+// for future longer-prefixed schemes while keeping a 1 KB
+// abuse-prevention ceiling well below the reason cap.
+const maxFeedbackIDChars = 256
+
 type feedbackCreateRequest struct {
 	MessageID string `json:"message_id"`
 	ChatID    string `json:"chat_id,omitempty"`
@@ -121,9 +128,21 @@ func (h *MessageFeedbackHandler) Create(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	body.MessageID = strings.TrimSpace(body.MessageID)
+	body.ChatID = strings.TrimSpace(body.ChatID)
+	body.TraceID = strings.TrimSpace(body.TraceID)
 	body.Signal = strings.TrimSpace(body.Signal)
 	if body.MessageID == "" {
 		replyError(w, http.StatusBadRequest, "message_id required")
+		return
+	}
+	// Cap id-shaped fields at maxFeedbackIDChars. Without this, an
+	// attacker can POST a 10 MB trace_id and exercise the partial index
+	// every query. The cap is generous (10× longest realistic id) so
+	// no legitimate caller trips it.
+	if len(body.MessageID) > maxFeedbackIDChars ||
+		len(body.ChatID) > maxFeedbackIDChars ||
+		len(body.TraceID) > maxFeedbackIDChars {
+		replyError(w, http.StatusBadRequest, "id field exceeds maximum length")
 		return
 	}
 	if _, ok := allowedFeedbackSignals[body.Signal]; !ok {
@@ -135,11 +154,26 @@ func (h *MessageFeedbackHandler) Create(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// chat_id is optional in the payload — older clients may not know
-	// it — but if provided, we use it to derive the workspace via the
-	// chats table and to enforce that the user can actually see the
-	// chat. Without a chat_id we fall back to the user's primary
-	// workspace (the user is signed in, so they have at least one).
+	// chat_id is optional in the payload — older clients (eval widgets,
+	// CLI feedback) may not have one — but providing it is strongly
+	// preferred. When present, we derive the workspace from the chat
+	// row and verify the user is a member of that workspace.
+	//
+	// Message↔chat ownership is NOT validated here because messages
+	// live in JSONL files (chats.jsonl_path), not a SQL table — a
+	// per-POST file read would slow the path enough to discourage
+	// real-time feedback collection. The threat model is acceptable:
+	// workspaces are trust boundaries, so a workspace member filing
+	// feedback against any chat in their workspace is by design.
+	// Cross-tenant probes are blocked by ensureChatVisible. Forged
+	// fabricated message_ids are visible at eval-mining time (the
+	// grader joins back to the JSONL store and orphans are dropped).
+	//
+	// When absent we fall back to the user's MOST RECENT workspace
+	// (ORDER BY created_at DESC). The previous version sorted ASC,
+	// picking the oldest membership — defensible for "primary" but a
+	// surprising default for a user whose primary membership has moved.
+	// DESC matches the implicit "current active org" mental model.
 	var workspaceID string
 	var chatPtr *string
 	if body.ChatID != "" {
@@ -151,11 +185,8 @@ func (h *MessageFeedbackHandler) Create(w http.ResponseWriter, r *http.Request) 
 		workspaceID = ws
 		chatPtr = &body.ChatID
 	} else {
-		// Fall back: derive the user's most recent workspace. This keeps
-		// feedback collection working for clients that POST from a
-		// surface without easy chat_id access (e.g. an embed widget).
 		err := h.db.QueryRowContext(r.Context(),
-			`SELECT workspace_id FROM workspace_members WHERE user_id = ? ORDER BY created_at LIMIT 1`,
+			`SELECT workspace_id FROM workspace_members WHERE user_id = ? ORDER BY created_at DESC LIMIT 1`,
 			user.ID).Scan(&workspaceID)
 		if err != nil {
 			h.logger.Error("feedback workspace lookup", "err", err)
@@ -173,19 +204,23 @@ func (h *MessageFeedbackHandler) Create(w http.ResponseWriter, r *http.Request) 
 		reasonPtr = &body.Reason
 	}
 
-	// UNIQUE(message_id, user_id, signal) — INSERT OR REPLACE keeps the
-	// row id stable when a user updates their reason text, but writes a
-	// new row id when the (message_id, user_id, signal) tuple was never
-	// recorded. Return the resulting id either way so the client can
-	// reference the row in a follow-up GET.
+	// UNIQUE(message_id, user_id, signal) — UPSERT keeps the row id
+	// stable when a user updates their reason text and re-anchors the
+	// workspace + chat references to the latest POST. Re-anchoring
+	// matters when an earlier POST came in without chat_id (workspace
+	// fallback) and a later one carries the real chat: without the
+	// workspace_id overwrite the row stays parked in the fallback
+	// workspace and List queries scoped to the actual workspace miss
+	// it.
 	id := generateCUID()
 	_, err := h.db.ExecContext(r.Context(), `
 INSERT INTO message_feedback (id, workspace_id, chat_id, message_id, trace_id, signal, reason, user_id)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(message_id, user_id, signal) DO UPDATE SET
-    reason   = excluded.reason,
-    trace_id = COALESCE(excluded.trace_id, message_feedback.trace_id),
-    chat_id  = COALESCE(excluded.chat_id, message_feedback.chat_id)
+    workspace_id = excluded.workspace_id,
+    reason       = excluded.reason,
+    trace_id     = COALESCE(excluded.trace_id, message_feedback.trace_id),
+    chat_id      = COALESCE(excluded.chat_id, message_feedback.chat_id)
 `, id, workspaceID, chatPtr, body.MessageID, tracePtr, body.Signal, reasonPtr, user.ID)
 	if err != nil {
 		h.logger.Error("insert feedback", "err", err)
@@ -203,6 +238,44 @@ ON CONFLICT(message_id, user_id, signal) DO UPDATE SET
 		persistedID = id
 	}
 	writeJSON(w, http.StatusCreated, map[string]string{"id": persistedID})
+}
+
+// Delete handles DELETE /api/v1/feedback?message_id=...&signal=... .
+// Removes the authenticated user's feedback for the given (message_id,
+// signal) tuple. Other users' rows on the same message are untouched.
+// The route is the under-undo path for the chat UI: a thumb-down that
+// gets toggled off must actually remove the row so the eval pipeline
+// doesn't keep counting a retracted signal.
+//
+// Scoped via the workspace membership of the row, not chat ownership
+// — a user can only delete their OWN feedback (user_id = current
+// user), which is the strictest reasonable rule. We return 204 on
+// successful delete AND on "row didn't exist" so the client can call
+// DELETE freely without checking first.
+func (h *MessageFeedbackHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	user := UserFromContext(r.Context())
+	if user == nil {
+		replyError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	messageID := strings.TrimSpace(r.URL.Query().Get("message_id"))
+	signal := strings.TrimSpace(r.URL.Query().Get("signal"))
+	if messageID == "" || signal == "" {
+		replyError(w, http.StatusBadRequest, "message_id and signal required")
+		return
+	}
+	if _, ok := allowedFeedbackSignals[signal]; !ok {
+		replyError(w, http.StatusBadRequest, "unknown signal")
+		return
+	}
+	if _, err := h.db.ExecContext(r.Context(),
+		`DELETE FROM message_feedback WHERE message_id = ? AND user_id = ? AND signal = ?`,
+		messageID, user.ID, signal); err != nil {
+		h.logger.Error("delete feedback", "err", err)
+		replyError(w, http.StatusInternalServerError, "internal")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // List handles GET /api/v1/feedback?message_id=... | ?trace_id=... .

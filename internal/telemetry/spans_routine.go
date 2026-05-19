@@ -14,11 +14,11 @@ import (
 // Operators querying their collector for "all routines named X" use
 // these attributes; renaming requires a coordinated dashboard update.
 const (
-	AttrCrewshipRoutineSlug      = "crewship.routine.slug"
-	AttrCrewshipRoutineRunID     = "crewship.routine.run_id"
-	AttrCrewshipRoutinePipelineID = "crewship.routine.pipeline_id"
-	AttrCrewshipRoutineStepID    = "crewship.routine.step.id"
-	AttrCrewshipRoutineStepType  = "crewship.routine.step.type"
+	AttrCrewshipRoutineSlug        = "crewship.routine.slug"
+	AttrCrewshipRoutineRunID       = "crewship.routine.run_id"
+	AttrCrewshipRoutinePipelineID  = "crewship.routine.pipeline_id"
+	AttrCrewshipRoutineStepID      = "crewship.routine.step.id"
+	AttrCrewshipRoutineStepType    = "crewship.routine.step.type"
 	AttrCrewshipRoutineStepAttempt = "crewship.routine.step.attempt"
 )
 

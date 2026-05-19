@@ -21,22 +21,24 @@ interface FeedbackState {
   byTurn: Record<string, Partial<Record<FeedbackSignal, true>>>
 
   /** Submit a feedback signal. Optimistic: the local map updates
-   *  immediately and the POST happens in the background. On HTTP failure
-   *  we leave the optimistic state intact — the user shouldn't see a
-   *  flickering thumb because the network blipped, and the server-side
-   *  UPSERT will reconcile on the next attempt. */
+   *  immediately and the POST happens in the background. If the POST
+   *  comes back !res.ok (validation, auth, server error), the optimistic
+   *  flip is rolled back so the UI doesn't lie about a signal the server
+   *  never recorded. Network rejections (offline, DNS) keep the flip
+   *  because a retry could still succeed and the server-side UPSERT
+   *  will reconcile. */
   submit: (turnId: string, signal: FeedbackSignal, opts?: {
     chatId?: string
     traceId?: string
     reason?: string
   }) => Promise<void>
 
-  /** Local-only un-submit. Used when the user clicks the same thumb
-   *  twice to toggle off. The backend doesn't currently expose a delete
-   *  endpoint — the row stays but the UI state goes back to neutral.
-   *  Acceptable for v1 because the eval pipeline reads on a rolling
-   *  window where stale rows are harmless. */
-  reset: (turnId: string, signal: FeedbackSignal) => void
+  /** Toggle off a previously-submitted signal. Calls DELETE on the
+   *  server first so the eval pipeline doesn't keep counting a
+   *  retracted signal, then clears local state on success. A failed
+   *  DELETE keeps the local state pointing at "submitted" so a refresh
+   *  reconciles back to truth; the user can retry. */
+  reset: (turnId: string, signal: FeedbackSignal) => Promise<void>
 }
 
 export const useFeedbackStore = create<FeedbackState>()(
@@ -54,8 +56,15 @@ export const useFeedbackStore = create<FeedbackState>()(
           },
         }))
 
+        const rollback = () =>
+          set((s) => {
+            const cur = { ...(s.byTurn[turnId] ?? {}) }
+            delete cur[signal]
+            return { byTurn: { ...s.byTurn, [turnId]: cur } }
+          })
+
         try {
-          await fetch("/api/v1/feedback", {
+          const res = await fetch("/api/v1/feedback", {
             method: "POST",
             credentials: "include",
             headers: { "Content-Type": "application/json" },
@@ -67,22 +76,54 @@ export const useFeedbackStore = create<FeedbackState>()(
               reason: opts.reason,
             }),
           })
+          if (!res.ok) {
+            // 4xx/5xx — the server REJECTED the signal. The optimistic
+            // flip is now a lie; reverse it so the UI matches truth.
+            // The user can click again to retry once the issue clears
+            // (e.g. session restored, validation fixed).
+            if (process.env.NODE_ENV !== "production") {
+              console.warn(`[feedback] submit returned ${res.status}; rolling back`)
+            }
+            rollback()
+          }
         } catch (err) {
-          // Log but don't roll back — the user gave the signal, we
-          // just couldn't deliver it. The next submit on the same
-          // turn+signal tuple will UPSERT and the server reconciles.
+          // Network rejection — keep the optimistic state so the user
+          // doesn't see a flicker on transient offline blips. A
+          // subsequent submit on the same (turn, signal) UPSERTs
+          // server-side.
           if (process.env.NODE_ENV !== "production") {
-            console.warn("[feedback] submit failed:", err)
+            console.warn("[feedback] submit network error:", err)
           }
         }
       },
 
-      reset: (turnId, signal) =>
+      reset: async (turnId, signal) => {
+        // DELETE on the server FIRST so a failure keeps the local
+        // state pointing at "submitted" — better UX than a phantom
+        // un-submitted thumb that re-appears on refresh.
+        try {
+          const res = await fetch(
+            `/api/v1/feedback?message_id=${encodeURIComponent(turnId)}&signal=${encodeURIComponent(signal)}`,
+            { method: "DELETE", credentials: "include" },
+          )
+          if (!res.ok) {
+            if (process.env.NODE_ENV !== "production") {
+              console.warn(`[feedback] reset returned ${res.status}; keeping local state`)
+            }
+            return
+          }
+        } catch (err) {
+          if (process.env.NODE_ENV !== "production") {
+            console.warn("[feedback] reset network error:", err)
+          }
+          return
+        }
         set((s) => {
           const cur = { ...(s.byTurn[turnId] ?? {}) }
           delete cur[signal]
           return { byTurn: { ...s.byTurn, [turnId]: cur } }
-        }),
+        })
+      },
     }),
     {
       name: "crewship.message_feedback",

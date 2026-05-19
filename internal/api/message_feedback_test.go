@@ -288,3 +288,125 @@ func TestFeedback_List_MissingQuery_400(t *testing.T) {
 		t.Errorf("no query = %d, want 400", rr.Code)
 	}
 }
+
+// ---- Delete ----
+
+// TestFeedback_Delete_RemovesOwnRow is the under-undo path: a thumb
+// toggled off must actually remove the server row so the eval pipeline
+// stops counting it. Other users' rows on the same message stay.
+func TestFeedback_Delete_RemovesOwnRow(t *testing.T) {
+	bed := setupFeedbackTestBed(t)
+	// Seed the user's row + a row for another user (different signal,
+	// shouldn't matter — we filter by user_id AND signal so this is
+	// just defensive).
+	if _, err := bed.h.db.Exec(
+		`INSERT INTO message_feedback (id, workspace_id, chat_id, message_id, signal, user_id)
+        VALUES ('fb-own', ?, ?, ?, 'not_helpful', ?), ('fb-other', ?, ?, ?, 'helpful', ?)`,
+		bed.wsID, bed.chatID, bed.messageID, bed.userID,
+		bed.wsID, bed.chatID, bed.messageID, bed.otherID); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	req := feedbackReq("DELETE",
+		"/api/v1/feedback?message_id="+bed.messageID+"&signal=not_helpful",
+		"", bed.userID)
+	rr := httptest.NewRecorder()
+	bed.h.Delete(rr, req)
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("delete = %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	// Own row gone, other user's row preserved.
+	var ownCount, otherCount int
+	_ = bed.h.db.QueryRow(`SELECT COUNT(*) FROM message_feedback WHERE id = 'fb-own'`).Scan(&ownCount)
+	_ = bed.h.db.QueryRow(`SELECT COUNT(*) FROM message_feedback WHERE id = 'fb-other'`).Scan(&otherCount)
+	if ownCount != 0 {
+		t.Errorf("own row not deleted: count=%d", ownCount)
+	}
+	if otherCount != 1 {
+		t.Errorf("other user's row clobbered: count=%d", otherCount)
+	}
+}
+
+// TestFeedback_Delete_NonExistent_204 pins the idempotent contract:
+// DELETE against a row that doesn't exist returns 204, so a client
+// can fire DELETE on every toggle-off click without first checking
+// existence.
+func TestFeedback_Delete_NonExistent_204(t *testing.T) {
+	bed := setupFeedbackTestBed(t)
+	req := feedbackReq("DELETE",
+		"/api/v1/feedback?message_id=nope&signal=helpful", "", bed.userID)
+	rr := httptest.NewRecorder()
+	bed.h.Delete(rr, req)
+	if rr.Code != http.StatusNoContent {
+		t.Errorf("delete of non-existent = %d, want 204", rr.Code)
+	}
+}
+
+func TestFeedback_Delete_NoAuth_401(t *testing.T) {
+	bed := setupFeedbackTestBed(t)
+	req := feedbackReq("DELETE",
+		"/api/v1/feedback?message_id="+bed.messageID+"&signal=helpful", "", "")
+	rr := httptest.NewRecorder()
+	bed.h.Delete(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Errorf("anonymous delete = %d, want 401", rr.Code)
+	}
+}
+
+// TestFeedback_Create_UpsertReanchorsWorkspace pins the UPSERT
+// workspace_id overwrite: a user with multi-workspace membership who
+// first POSTs without chat_id (lands in fallback workspace) and then
+// POSTs with chat_id (real workspace) must end up with the row
+// pointing at the real workspace. The previous SET clause skipped
+// workspace_id and left feedback orphaned in the wrong tenant.
+func TestFeedback_Create_UpsertReanchorsWorkspace(t *testing.T) {
+	bed := setupFeedbackTestBed(t)
+
+	// Add the user to a second workspace so the fallback path picks one
+	// that's NOT bed.wsID. ORDER BY created_at DESC means the more
+	// recently created membership wins — make this one the newer.
+	fbWS := "ws-fb-fallback"
+	if _, err := bed.h.db.Exec(`INSERT INTO workspaces (id, name, slug) VALUES (?, 'F', 'f')`, fbWS); err != nil {
+		t.Fatalf("seed fallback ws: %v", err)
+	}
+	if _, err := bed.h.db.Exec(`INSERT INTO workspace_members (id, workspace_id, user_id, role, created_at)
+        VALUES ('m-fb-fallback', ?, ?, 'OWNER', datetime('now', '+1 day'))`, fbWS, bed.userID); err != nil {
+		t.Fatalf("seed fallback member: %v", err)
+	}
+
+	// First POST: no chat_id → workspace fallback to fbWS.
+	req := feedbackReq("POST", "/api/v1/feedback",
+		`{"message_id":"`+bed.messageID+`","signal":"helpful"}`, bed.userID)
+	rr := httptest.NewRecorder()
+	bed.h.Create(rr, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("first create = %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var firstWS string
+	_ = bed.h.db.QueryRow(`SELECT workspace_id FROM message_feedback
+        WHERE message_id = ? AND user_id = ? AND signal = 'helpful'`,
+		bed.messageID, bed.userID).Scan(&firstWS)
+	if firstWS != fbWS {
+		t.Fatalf("first POST workspace = %q, want %q (fallback)", firstWS, fbWS)
+	}
+
+	// Second POST: real chat_id → re-anchors to bed.wsID.
+	req = feedbackReq("POST", "/api/v1/feedback",
+		`{"message_id":"`+bed.messageID+`","chat_id":"`+bed.chatID+`","signal":"helpful"}`,
+		bed.userID)
+	rr = httptest.NewRecorder()
+	bed.h.Create(rr, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("second create = %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var secondWS string
+	_ = bed.h.db.QueryRow(`SELECT workspace_id FROM message_feedback
+        WHERE message_id = ? AND user_id = ? AND signal = 'helpful'`,
+		bed.messageID, bed.userID).Scan(&secondWS)
+	if secondWS != bed.wsID {
+		t.Errorf("after re-anchor, workspace = %q, want %q — UPSERT didn't update workspace_id", secondWS, bed.wsID)
+	}
+}

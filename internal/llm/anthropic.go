@@ -161,9 +161,9 @@ type anthropicResponse struct {
 	Content    []anthropicContentBlock `json:"content"`
 	StopReason string                  `json:"stop_reason"`
 	Usage      struct {
-		InputTokens             int `json:"input_tokens"`
-		OutputTokens            int `json:"output_tokens"`
-		CacheReadInputTokens    int `json:"cache_read_input_tokens"`
+		InputTokens              int `json:"input_tokens"`
+		OutputTokens             int `json:"output_tokens"`
+		CacheReadInputTokens     int `json:"cache_read_input_tokens"`
 		CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
 	} `json:"usage"`
 }
@@ -235,14 +235,6 @@ func toAnthropicMessage(m Message) anthropicMessage {
 		return anthropicMessage{Role: "assistant", Content: blocks}
 	}
 	return anthropicMessage{Role: m.Role, Content: m.Content}
-}
-
-func toAnthropicTools(tools []ToolDef) []anthropicTool {
-	out := make([]anthropicTool, len(tools))
-	for i, t := range tools {
-		out[i] = anthropicTool(t)
-	}
-	return out
 }
 
 // toAnthropicToolsCached marshals tools as a heterogeneous []map so the

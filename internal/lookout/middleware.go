@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
+	"sort"
 
 	"github.com/crewship-ai/crewship/internal/journal"
 )
@@ -211,28 +211,79 @@ func InputGuard(j journal.Emitter) Middleware {
 	}
 }
 
-// sanitizeFindings replaces each Finding.Matched span with a fixed
-// "[REDACTED]" marker. We don't try to be smart about reformatting
-// surrounding whitespace: the goal is to defang the injection, not to
-// preserve readability for downstream prompt rendering. Replacements
-// are done left-to-right; overlapping matches collapse into the
-// outermost span because strings.ReplaceAll handles all instances of a
-// given substring.
+// sanitizeFindings replaces each Finding's authoritative byte range
+// [Position, MatchEnd) with a "[REDACTED]" marker. Critical correctness
+// note: an earlier version of this function used
+// `strings.ReplaceAll(text, f.Matched, "[REDACTED]")`. That was BROKEN
+// for two real-world cases and silently let injections through:
 //
-// Why not the more surgical loc-based replacement that ScanInput
-// already has? The Findings expose only the matched text + position
-// for the FIRST hit, not every span — running strings.ReplaceAll on
-// the matched literal is good enough for the heuristic patterns we
-// detect (jailbreak prose, role overrides) where a single match per
-// kind is the realistic case. If a future detector returns N spans
-// for the same pattern, this still defangs all of them.
+//  1. Long regex matches. ScanInput truncates Matched to 80 runes
+//     before stamping the Finding (Matched is for display, not for
+//     replacement). A jailbreak prose match longer than 80 chars is
+//     truncated with a "…" suffix, so the literal is no longer a
+//     substring of the source text and ReplaceAll matches nothing.
+//
+//  2. Unicode findings. Zero-width and RTL-override findings carry
+//     a synthetic Matched like "U+202E", not the actual codepoint, so
+//     ReplaceAll never finds them in the text and the attacker's
+//     filename-spoof / homoglyph payload passes through verbatim.
+//
+// Offset-based replacement using Position + MatchEnd dodges both. We
+// sort findings descending by Position so a left-to-right rewrite
+// preserves the offsets of later replacements (replacing earlier in
+// the string would shift later positions). Findings with no valid
+// span (Position < 0 or MatchEnd <= Position) are skipped — those
+// come from synthetic sources (secrets scanner pre-MatchEnd) that
+// don't carry a byte range; better to leave them than corrupt the
+// text.
+//
+// Overlapping spans are coalesced into the outermost: if finding A
+// covers [10, 25) and finding B covers [15, 22), the second
+// replacement is skipped because its range is already covered by the
+// [REDACTED] marker. This matches the user-facing contract — one
+// matched region, one redaction marker.
 func sanitizeFindings(text string, findings []Finding) string {
-	out := text
+	// Collect valid spans only. Each span is [start, end) into text.
+	type span struct{ start, end int }
+	spans := make([]span, 0, len(findings))
 	for _, f := range findings {
-		if f.Matched == "" {
+		if f.Position < 0 || f.MatchEnd <= f.Position || f.MatchEnd > len(text) {
 			continue
 		}
-		out = strings.ReplaceAll(out, f.Matched, "[REDACTED]")
+		spans = append(spans, span{f.Position, f.MatchEnd})
+	}
+	if len(spans) == 0 {
+		return text
+	}
+
+	// Sort ascending by start so we can coalesce overlaps into the
+	// outermost range. After this pass `coalesced` holds non-overlapping,
+	// strictly-increasing ranges.
+	sort.Slice(spans, func(i, j int) bool { return spans[i].start < spans[j].start })
+	coalesced := spans[:0]
+	cur := spans[0]
+	for _, s := range spans[1:] {
+		if s.start <= cur.end {
+			if s.end > cur.end {
+				cur.end = s.end
+			}
+			continue
+		}
+		coalesced = append(coalesced, cur)
+		cur = s
+	}
+	coalesced = append(coalesced, cur)
+
+	// Rewrite right-to-left so each replacement leaves earlier offsets
+	// intact. The marker is fixed — we don't try to preserve length
+	// (a "[REDACTED]" string of a different length than the original
+	// is intentional; the goal is to defang the injection, not to
+	// preserve any downstream prompt's byte layout).
+	const marker = "[REDACTED]"
+	out := text
+	for i := len(coalesced) - 1; i >= 0; i-- {
+		s := coalesced[i]
+		out = out[:s.start] + marker + out[s.end:]
 	}
 	return out
 }

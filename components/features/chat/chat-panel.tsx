@@ -298,6 +298,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
                     onEditUserMessage={!isStreaming ? editAndResend : undefined}
                     animateAfter={animateAfter}
                     agentId={agentId}
+                    chatId={sessionId}
                   />
                 ))}
               </AnimatePresence>
@@ -370,6 +371,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
                     onEditUserMessage={!isStreaming ? editAndResend : undefined}
                     animateAfter={animateAfter}
                     agentId={agentId}
+                    chatId={sessionId}
                   />
                 ))}
               </AnimatePresence>

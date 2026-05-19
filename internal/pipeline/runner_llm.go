@@ -145,28 +145,39 @@ func (r *LLMRunner) RunStep(ctx context.Context, req AgentStepRequest) (AgentSte
 	// Wire the hooks subsystem to the guardrail event. When the input
 	// guard fires, dispatch on_guardrail_triggered so workspace admins
 	// can route the signal to Slack / PagerDuty / a webhook without
-	// scraping the journal. Best-effort: a Dispatch failure logs but
-	// doesn't change the guard's verdict (a blocked call is still
-	// blocked even if the integration is down).
+	// scraping the journal. Failures log but don't change the guard's
+	// verdict — a blocked call is still blocked even if the alert
+	// channel is down.
 	if r.db != nil && r.journal != nil {
-		dbCopy, journCopy := r.db, r.journal
+		dbCopy, journCopy, loggerCopy := r.db, r.journal, r.logger
 		ctx = lookout.WithGuardListener(ctx, func(hctx context.Context, direction string, finding lookout.Finding) {
-			_ = hooks.Dispatch(hctx, dbCopy, journCopy, hooks.EventOnGuardrailTriggered, hooks.EventContext{
+			if err := hooks.Dispatch(hctx, dbCopy, journCopy, hooks.EventOnGuardrailTriggered, hooks.EventContext{
 				WorkspaceID: req.WorkspaceID,
 				CrewID:      req.AuthorCrewID,
 				AgentID:     authorAgentID,
 				Severity:    string(finding.Severity),
 				Payload: map[string]any{
-					"direction":     direction,
-					"kind":          string(finding.Kind),
-					"detail":        finding.Detail,
-					"matched":       finding.Matched,
-					"pipeline_id":   req.PipelineID,
-					"pipeline_run":  req.PipelineRunID,
-					"step_id":       req.StepID,
-					"agent_slug":    req.AgentSlug,
+					"direction":    direction,
+					"kind":         string(finding.Kind),
+					"detail":       finding.Detail,
+					"matched":      finding.Matched,
+					"pipeline_id":  req.PipelineID,
+					"pipeline_run": req.PipelineRunID,
+					"step_id":      req.StepID,
+					"agent_slug":   req.AgentSlug,
 				},
-			})
+			}); err != nil {
+				// Surface integration outages — without this, an operator
+				// expecting guardrail alerts has no way to tell they've
+				// gone silent. The error is the inner dispatcher's
+				// (HTTP webhook timeout, subagent failure, etc.).
+				loggerCopy.Warn("guardrail hook dispatch failed",
+					"err", err,
+					"workspace_id", req.WorkspaceID,
+					"crew_id", req.AuthorCrewID,
+					"kind", string(finding.Kind),
+				)
+			}
 		})
 	}
 

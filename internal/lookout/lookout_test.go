@@ -428,6 +428,45 @@ func TestInputGuard_ActionLog(t *testing.T) {
 	}
 }
 
+// TestInputGuard_ActionSanitize_UnicodeFinding is the regression test
+// for a real security bug shipped in the first cut of this feature:
+// the old sanitize path did strings.ReplaceAll(text, f.Matched,
+// "[REDACTED]"). For unicode findings (zero-width, RTL-override) the
+// scanner stamps a SYNTHETIC Matched value like "U+200B" or "U+202E"
+// rather than the actual codepoint, so ReplaceAll searched the source
+// text for the literal string "U+202E" — which is never present, and
+// the homoglyph / filename-spoof payload passed through verbatim with
+// only a journal entry. Offset-based replacement using Position +
+// MatchEnd now redacts the actual rune. This test pins the fix so a
+// refactor back to substring matching fails loudly.
+// same security regression: zero-width and RTL-override findings carry
+// synthetic Matched values like "U+200B" or "U+202E", not the actual
+// codepoint. The old ReplaceAll path searched the source text for the
+// literal string "U+202E" — which is never present, so a homoglyph or
+// filename-spoof payload passed through verbatim. Offset-based
+// replacement now redacts the actual rune.
+func TestInputGuard_ActionSanitize_UnicodeFinding(t *testing.T) {
+	emitter := &recordingEmitter{}
+	guard := InputGuard(emitter)
+	ctx := WithScope(context.Background(), Scope{WorkspaceID: "ws_1"})
+	ctx = WithAction(ctx, GuardActionSanitize)
+
+	// Embed a zero-width space (U+200B) into otherwise benign text.
+	// The scanner's high-severity zero-width rule fires; sanitize must
+	// remove the actual rune.
+	in := "benign​payload"
+	out, err := guard(ctx, in)
+	if err != nil {
+		t.Fatalf("sanitize must not error, got %v", err)
+	}
+	if strings.ContainsRune(out, '​') {
+		t.Errorf("zero-width rune survived sanitize: %q", out)
+	}
+	if !strings.Contains(out, "[REDACTED]") {
+		t.Errorf("expected redaction marker, got %q", out)
+	}
+}
+
 // TestInputGuard_ListenerFires verifies the integration callback runs
 // on every guardrail trip — independent of the configured action.
 // Even in log-only mode the listener must fire so the operator's

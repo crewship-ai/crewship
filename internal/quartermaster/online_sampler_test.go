@@ -158,7 +158,10 @@ func TestOnlineSampler_ZeroRateEnqueuesNothing(t *testing.T) {
 			},
 		},
 	}}
-	s, _ := NewOnlineSampler(SamplerConfig{DB: db, Emitter: em, DSLResolver: resolver, Interval: time.Hour})
+	s, errCtor := NewOnlineSampler(SamplerConfig{DB: db, Emitter: em, DSLResolver: resolver, Interval: time.Hour})
+	if errCtor != nil {
+		t.Fatalf("ctor: %v", errCtor)
+	}
 	s.watermark = time.Now().Add(-1 * time.Hour).UTC()
 	seedRun(t, db, "prn-1", "pl-1", "nightly", time.Now().UTC())
 
@@ -181,7 +184,10 @@ func TestOnlineSampler_NoEvalConfigSkips(t *testing.T) {
 	resolver := &fakeDSLResolver{byID: map[string]*pipeline.DSL{
 		"pl-1": {Name: "nightly"}, // no Eval at all
 	}}
-	s, _ := NewOnlineSampler(SamplerConfig{DB: db, DSLResolver: resolver, Interval: time.Hour})
+	s, errCtor := NewOnlineSampler(SamplerConfig{DB: db, DSLResolver: resolver, Interval: time.Hour})
+	if errCtor != nil {
+		t.Fatalf("ctor: %v", errCtor)
+	}
 	s.watermark = time.Now().Add(-1 * time.Hour).UTC()
 	seedRun(t, db, "prn-1", "pl-1", "nightly", time.Now().UTC())
 
@@ -195,14 +201,24 @@ func TestOnlineSampler_NoEvalConfigSkips(t *testing.T) {
 }
 
 // TestOnlineSampler_WatermarkAdvances pins the catch-up behaviour:
-// after a tick covering [t0, t1), the next tick must cover [t1, t2).
-// Re-scanning the same window would multi-enqueue every sampled run.
+// after a tick covering (watermark, scanEnd), the next tick must scan
+// past the last handled row. Re-scanning the same window would
+// multi-enqueue every sampled run. Plus the UNIQUE index on
+// (kind='online', pipeline_run_id) defends against multi-enqueue at
+// the schema layer; this test verifies the watermark itself moves so
+// we don't lean on the UNIQUE constraint to mask a watermark bug.
 func TestOnlineSampler_WatermarkAdvances(t *testing.T) {
 	db := openSamplerTestDB(t)
 	resolver := &fakeDSLResolver{byID: map[string]*pipeline.DSL{
-		"pl-1": {Eval: &pipeline.EvalConfig{Online: &pipeline.OnlineEvalConfig{SampleRate: 1.0}}},
+		"pl-1": {Eval: &pipeline.EvalConfig{Online: &pipeline.OnlineEvalConfig{
+			SampleRate:      1.0,
+			GraderAgentSlug: "qa-grader",
+		}}},
 	}}
-	s, _ := NewOnlineSampler(SamplerConfig{DB: db, DSLResolver: resolver, Interval: time.Hour})
+	s, err := NewOnlineSampler(SamplerConfig{DB: db, DSLResolver: resolver, Interval: time.Hour})
+	if err != nil {
+		t.Fatalf("ctor: %v", err)
+	}
 	s.watermark = time.Now().Add(-1 * time.Hour).UTC()
 
 	// First tick — one row, expect 1 enqueue.
@@ -214,9 +230,82 @@ func TestOnlineSampler_WatermarkAdvances(t *testing.T) {
 	s.runOnce(context.Background())
 
 	var count int
-	_ = db.QueryRow(`SELECT COUNT(*) FROM eval_runs`).Scan(&count)
+	if err := db.QueryRow(`SELECT COUNT(*) FROM eval_runs`).Scan(&count); err != nil {
+		t.Fatalf("count query: %v", err)
+	}
 	if count != 1 {
 		t.Errorf("watermark didn't advance — got %d enqueues, want 1", count)
+	}
+}
+
+// TestOnlineSampler_NoGraderSkips pins the new contract: a routine
+// with Eval.Online.SampleRate > 0 but no GraderAgentSlug is a
+// misconfiguration the sampler treats as a deterministic skip (not
+// a retryable error) so it doesn't loop on the same routine every
+// tick forever. Without this check the row would land in eval_runs
+// with an empty grader_agent_slug and the grader worker would no-op
+// + log on every poll.
+func TestOnlineSampler_NoGraderSkips(t *testing.T) {
+	db := openSamplerTestDB(t)
+	resolver := &fakeDSLResolver{byID: map[string]*pipeline.DSL{
+		"pl-1": {Eval: &pipeline.EvalConfig{Online: &pipeline.OnlineEvalConfig{
+			SampleRate: 1.0, // no GraderAgentSlug
+		}}},
+	}}
+	s, err := NewOnlineSampler(SamplerConfig{DB: db, DSLResolver: resolver, Interval: time.Hour})
+	if err != nil {
+		t.Fatalf("ctor: %v", err)
+	}
+	s.watermark = time.Now().Add(-1 * time.Hour).UTC()
+	seedRun(t, db, "prn-1", "pl-1", "nightly", time.Now().UTC())
+	s.runOnce(context.Background())
+
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM eval_runs`).Scan(&count); err != nil {
+		t.Fatalf("count query: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("missing grader still enqueued %d, want 0", count)
+	}
+}
+
+// TestOnlineSampler_DuplicateRunNoDoubleEnqueue pins the UNIQUE index
+// idempotency guard. The sampler is supposed to be safe to start
+// twice (HA + accidental restart, watermark rewind on crash). The
+// schema-level UNIQUE INDEX makes two enqueues against the same
+// pipeline_run_id collapse to one row.
+func TestOnlineSampler_DuplicateRunNoDoubleEnqueue(t *testing.T) {
+	db := openSamplerTestDB(t)
+	// Apply the same partial unique index the v96 migration creates.
+	if _, err := db.Exec(`CREATE UNIQUE INDEX uq_eval_runs_online_pipeline_run
+        ON eval_runs(pipeline_run_id) WHERE kind = 'online' AND pipeline_run_id IS NOT NULL`); err != nil {
+		t.Fatalf("apply unique index: %v", err)
+	}
+	resolver := &fakeDSLResolver{byID: map[string]*pipeline.DSL{
+		"pl-1": {Eval: &pipeline.EvalConfig{Online: &pipeline.OnlineEvalConfig{
+			SampleRate:      1.0,
+			GraderAgentSlug: "qa-grader",
+		}}},
+	}}
+	s, err := NewOnlineSampler(SamplerConfig{DB: db, DSLResolver: resolver, Interval: time.Hour})
+	if err != nil {
+		t.Fatalf("ctor: %v", err)
+	}
+	s.watermark = time.Now().Add(-1 * time.Hour).UTC()
+	seedRun(t, db, "prn-dup", "pl-1", "nightly", time.Now().UTC())
+
+	s.runOnce(context.Background())
+	// Roll the watermark back and re-run — simulates a crash-recovery
+	// or a duplicate sampler instance pointing at the same DB.
+	s.watermark = time.Now().Add(-1 * time.Hour).UTC()
+	s.runOnce(context.Background())
+
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM eval_runs WHERE pipeline_run_id = 'prn-dup'`).Scan(&count); err != nil {
+		t.Fatalf("count query: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("UNIQUE index didn't prevent double-enqueue: count=%d, want 1", count)
 	}
 }
 
@@ -229,7 +318,11 @@ func TestCryptoSample_DistributionRoughly(t *testing.T) {
 	below := 0
 	const n = 10000
 	for i := 0; i < n; i++ {
-		if cryptoSample() < 0.5 {
+		v, ok := cryptoSample()
+		if !ok {
+			t.Fatalf("cryptoSample reported entropy outage on draw %d — host /dev/urandom unreachable?", i)
+		}
+		if v < 0.5 {
 			below++
 		}
 	}
