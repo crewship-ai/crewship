@@ -313,16 +313,20 @@ func runNoStream(serverURL, wsToken, agentID, chatID, prompt string, quiet bool,
 
 	text := fullText.String()
 	if text != "" {
-		// Save raw (un-styled) text to file so the saved artefact is plain
-		// markdown — useful for piping into tools or committing. Failures
-		// here (disk full, permission denied) propagate as a non-zero exit
-		// so scripts can rely on the artefact being either complete or
-		// known-broken.
+		// Save un-styled, control-char-stripped text to file so the saved
+		// artefact is plain markdown — useful for piping into tools or
+		// committing. Sanitising before write means a malicious tool
+		// result that emitted ANSI/OSC sequences can't survive into the
+		// persisted artifact (and surprise the next `cat saved.md`).
+		// Failures here (disk full, permission denied) propagate as a
+		// non-zero exit so scripts can rely on the artefact being
+		// either complete or known-broken.
+		safeText := sanitizeTerminal(text)
 		if save != nil {
-			if _, err := save.WriteString(text); err != nil {
+			if _, err := save.WriteString(safeText); err != nil {
 				return fmt.Errorf("save write: %w", err)
 			}
-			if !strings.HasSuffix(text, "\n") {
+			if !strings.HasSuffix(safeText, "\n") {
 				if _, err := save.WriteString("\n"); err != nil {
 					return fmt.Errorf("save write: %w", err)
 				}
@@ -453,11 +457,14 @@ func streamEvents(ws *cli.WSClient, quiet bool, md *cli.MarkdownRenderer, save *
 	// non-zero exit at the cobra level.
 	var saveErr error
 	emitText := func(s string) {
-		// Always write raw text to the save file before any markdown
-		// styling — saved files should be plain markdown the user can
-		// re-process, not a screencast of ANSI codes.
+		// Sanitise once so both the save file and the raw-terminal
+		// branch get control-char-stripped bytes. The markdown
+		// renderer does its own escaping so it still gets the
+		// original `s`. Saved files are meant to be plain markdown
+		// the user can re-process — not a screencast of ANSI codes.
+		safe := sanitizeTerminal(s)
 		if save != nil && saveErr == nil {
-			if _, err := save.WriteString(s); err != nil {
+			if _, err := save.WriteString(safe); err != nil {
 				saveErr = fmt.Errorf("save write: %w", err)
 				fmt.Fprintf(os.Stderr, "%s[save]%s write failed: %v\n", cli.Yellow, cli.Reset, err)
 			}
@@ -468,7 +475,7 @@ func streamEvents(ws *cli.WSClient, quiet bool, md *cli.MarkdownRenderer, save *
 			// Raw text from the agent flows straight to the user's
 			// terminal — strip control chars so a tool result can't
 			// emit ANSI escapes / OSC links and rewrite the scrollback.
-			fmt.Print(sanitizeTerminal(s))
+			fmt.Print(safe)
 		}
 	}
 	// joinErrs combines a save-time error with a stream-time error so
