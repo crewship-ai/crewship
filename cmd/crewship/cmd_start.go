@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -30,6 +31,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/provider/docker"
 	"github.com/crewship-ai/crewship/internal/provider/localfs"
 	"github.com/crewship-ai/crewship/internal/scheduler"
+	"github.com/crewship-ai/crewship/internal/secrets"
 	"github.com/crewship-ai/crewship/internal/server"
 	bundledSkills "github.com/crewship-ai/crewship/internal/skills/bundled"
 	"github.com/crewship-ai/crewship/internal/update"
@@ -68,6 +70,21 @@ var startCmd = &cobra.Command{
 		bootstrapLogger := logging.New("info", "json", os.Stdout)
 		slog.SetDefault(bootstrapLogger)
 
+		// Resolve the data dir BEFORE loading config: config.Load reads
+		// NEXTAUTH_SECRET / ENCRYPTION_KEY via os.Getenv, and the
+		// downstream Server.New panics if NEXTAUTH_SECRET is still
+		// empty when it gets called. secrets.LoadOrGenerate seeds those
+		// env vars from <dataDir>/secrets.env on first run (generating
+		// + persisting them when absent), so the rest of startup keeps
+		// using its existing os.Getenv reads with no changes.
+		dataDir, err := database.DefaultDataDir()
+		if err != nil {
+			return fmt.Errorf("failed to create data directory: %w", err)
+		}
+		if err := secrets.LoadOrGenerate(dataDir.Root, bootstrapLogger); err != nil {
+			return fmt.Errorf("bootstrap secrets: %w", err)
+		}
+
 		cfg, err := config.Load(configPath)
 		if err != nil {
 			return fmt.Errorf("failed to load config: %w", err)
@@ -84,10 +101,6 @@ var startCmd = &cobra.Command{
 			databaseURL = os.Getenv("DATABASE_URL")
 		}
 		if databaseURL == "" {
-			dataDir, err := database.DefaultDataDir()
-			if err != nil {
-				return fmt.Errorf("failed to create data directory: %w", err)
-			}
 			databaseURL = dataDir.DatabaseURL()
 			cfg.Storage.BasePath = dataDir.OutputDir()
 			cfg.Storage.LogPath = dataDir.LogsDir()
@@ -96,6 +109,16 @@ var startCmd = &cobra.Command{
 			// WorkspaceMemoryRegistry on first agent run that asks
 			// for the workspace tier in its prompt.
 			cfg.Storage.MemoryRoot = filepath.Join(dataDir.Root, "memory")
+			// bbolt state lives next to the SQLite DB in the data dir
+			// too. The package default is /var/lib/crewship/state.db,
+			// which a non-root user on a fresh box can't create — and
+			// `crewship start` for end users is decidedly non-root.
+			// Skip the rewrite if the operator already pinned a path
+			// via CREWSHIP_BOLT_PATH (applyEnvOverrides ran before us
+			// and set BoltPath from the env var).
+			if !cfgBoltPathFromEnv() {
+				cfg.State.BoltPath = filepath.Join(dataDir.Root, "state.db")
+			}
 		}
 
 		db, err := database.Open(databaseURL)
@@ -517,6 +540,17 @@ func checkAnyRuntime(ctx context.Context) bool {
 		return true
 	}
 	return false
+}
+
+// cfgBoltPathFromEnv reports whether CREWSHIP_BOLT_PATH supplied the
+// current State.BoltPath value. The default-data-dir branch in start
+// rewrites BoltPath to live under the data dir for non-root installs,
+// but only when the operator hasn't explicitly pinned it. We don't
+// have a separate "value came from env" flag, so we ask the env
+// directly — applyEnvOverrides already trimmed-and-applied any value
+// it found, so seeing it set here means the override path won.
+func cfgBoltPathFromEnv() bool {
+	return strings.TrimSpace(os.Getenv("CREWSHIP_BOLT_PATH")) != ""
 }
 
 func initProviders(ctx context.Context, cfg *config.Config, logger *slog.Logger, skipDocker bool) (*server.Deps, error) {

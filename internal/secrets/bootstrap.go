@@ -1,0 +1,224 @@
+// Package secrets owns the "crewship has never run here before" path
+// for cryptographic secrets the server needs to start. The end-user
+// install flow is `curl install.sh | bash` → `crewship start` → open
+// the URL → web onboarding wizard; that flow falls apart the moment
+// startup demands a human paste in 64 hex chars of entropy. So on a
+// fresh data dir we generate ENCRYPTION_KEY and NEXTAUTH_SECRET
+// ourselves, persist them under <dataDir>/secrets.env at mode 0600,
+// and re-export them through os.Setenv so every existing call site
+// (config.Load, encryption.getEncryptionKey, auth.NewJWTValidator,
+// …) continues reading via os.Getenv with no diff at the read sites.
+package secrets
+
+import (
+	"bufio"
+	"crypto/rand"
+	"encoding/hex"
+	"fmt"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+)
+
+// managed is the canonical list of secrets we auto-bootstrap. Adding
+// a new entry is the only step needed to extend coverage — readFile
+// preserves unknown keys on disk and writeFile sorts deterministically.
+//
+// ENCRYPTION_KEY feeds aes.NewCipher in internal/encryption, which
+// REQUIRES exactly 32 bytes (AES-256). The hex-encoded representation
+// is what getEncryptionKey() already hex.DecodeStrings, so the on-disk
+// form is 64 hex chars.
+//
+// NEXTAUTH_SECRET feeds HKDF in internal/auth/jwt.go to derive three
+// downstream keys (access, refresh, WS). Any random source >= 32
+// bytes is cryptographically adequate; we match ENCRYPTION_KEY's
+// 32-byte width so the file is visually uniform.
+var managed = []struct {
+	EnvVar string
+	Bytes  int
+}{
+	{"ENCRYPTION_KEY", 32},
+	{"NEXTAUTH_SECRET", 32},
+}
+
+const (
+	secretsFileName = "secrets.env"
+	secretsFileMode = 0o600
+	secretsDirMode  = 0o700
+)
+
+// LoadOrGenerate populates the managed secrets for the running process,
+// generating any that are missing and persisting them so subsequent
+// boots stay deterministic.
+//
+// Resolution order per secret:
+//
+//  1. If the env var is already set non-empty, use it as-is. This
+//     preserves deployments that inject secrets via systemd
+//     EnvironmentFile, Kubernetes secret mount, Vault, etc.
+//  2. Otherwise, if persisted in <dataDir>/secrets.env, load it and
+//     re-export via os.Setenv so the downstream call sites (which
+//     read via os.Getenv) work unchanged.
+//  3. Otherwise, generate a cryptographically random value, persist
+//     to <dataDir>/secrets.env atomically at mode 0600, and export
+//     via os.Setenv.
+//
+// The function is idempotent across restarts: once secrets land on
+// disk, subsequent boots take path (2) and emit no log lines.
+func LoadOrGenerate(dataDir string, logger *slog.Logger) error {
+	if dataDir == "" {
+		return fmt.Errorf("secrets: dataDir is required")
+	}
+	if logger == nil {
+		logger = slog.Default()
+	}
+	path := filepath.Join(dataDir, secretsFileName)
+
+	persisted, err := readFile(path)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", path, err)
+	}
+
+	generated := false
+	for _, m := range managed {
+		if v := os.Getenv(m.EnvVar); v != "" {
+			continue
+		}
+		if v, ok := persisted[m.EnvVar]; ok && v != "" {
+			if err := os.Setenv(m.EnvVar, v); err != nil {
+				return fmt.Errorf("setenv %s: %w", m.EnvVar, err)
+			}
+			continue
+		}
+		v, err := generateHex(m.Bytes)
+		if err != nil {
+			return fmt.Errorf("generate %s: %w", m.EnvVar, err)
+		}
+		persisted[m.EnvVar] = v
+		if err := os.Setenv(m.EnvVar, v); err != nil {
+			return fmt.Errorf("setenv %s: %w", m.EnvVar, err)
+		}
+		generated = true
+		logger.Info("first-run secret generated", "key", m.EnvVar, "bytes", m.Bytes)
+	}
+
+	if generated {
+		if err := writeFile(path, persisted); err != nil {
+			return fmt.Errorf("persist secrets to %s: %w", path, err)
+		}
+		logger.Info("first-run secrets persisted", "path", path)
+	}
+	return nil
+}
+
+func generateHex(n int) (string, error) {
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
+}
+
+// readFile parses a minimal env-file format (KEY=value, # comments,
+// blank lines). It tolerates an absent file (returns an empty map)
+// because that's the first-run case. Optional surrounding double
+// quotes are stripped so a hand-edited file written with quoting still
+// round-trips correctly.
+func readFile(path string) (map[string]string, error) {
+	out := map[string]string{}
+	f, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return out, nil
+		}
+		return nil, err
+	}
+	defer f.Close()
+
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		idx := strings.IndexByte(line, '=')
+		if idx <= 0 {
+			continue
+		}
+		k := strings.TrimSpace(line[:idx])
+		v := strings.TrimSpace(line[idx+1:])
+		v = strings.Trim(v, `"`)
+		out[k] = v
+	}
+	return out, sc.Err()
+}
+
+// writeFile persists secrets atomically. We write to a temp file in
+// the same directory (so os.Rename is a rename, not a cross-fs copy),
+// chmod 0600 BEFORE writing the secret bytes (so an interrupted write
+// never leaves a world-readable file on disk), fsync the contents,
+// then rename over the destination.
+func writeFile(path string, values map[string]string) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, secretsDirMode); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, secretsFileName+".*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	// Best-effort cleanup if anything below the rename fails. After a
+	// successful rename the temp path no longer exists, so the Remove
+	// is harmless.
+	defer os.Remove(tmpPath)
+
+	if err := os.Chmod(tmpPath, secretsFileMode); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+
+	w := bufio.NewWriter(tmp)
+	if _, err := fmt.Fprintln(w, "# crewship: auto-generated secrets — do not commit to source control"); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if _, err := fmt.Fprintln(w, "# Override any value by exporting the matching env var before `crewship start`."); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+
+	keys := make([]string, 0, len(values))
+	for k := range values {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		if _, err := fmt.Fprintf(w, "%s=%s\n", k, values[k]); err != nil {
+			_ = tmp.Close()
+			return err
+		}
+	}
+	if err := w.Flush(); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, path)
+}
+
+// SecretsFilePath returns the absolute path where LoadOrGenerate
+// persists auto-generated secrets for the given data dir. Exposed so
+// `crewship doctor` can mention the file in its diagnostic output
+// without re-deriving the join.
+func SecretsFilePath(dataDir string) string {
+	return filepath.Join(dataDir, secretsFileName)
+}

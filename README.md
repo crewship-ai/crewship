@@ -236,9 +236,14 @@ device-code flow Claude Code itself uses.
 git clone https://github.com/crewship-ai/crewship.git
 cd crewship
 pnpm install                            # frontend deps (pnpm required)
-cp .env.example .env.local              # then fill NEXTAUTH_SECRET + ENCRYPTION_KEY
 ./dev.sh start                          # SQLite, hot-reload, both ports
 ```
+
+`./dev.sh start` runs `crewship start`, which auto-generates
+`NEXTAUTH_SECRET` and `ENCRYPTION_KEY` into `~/.crewship/secrets.env`
+on first boot. No `.env.local` editing is needed for the happy path;
+copy from `.env.example` only when you want to override individual
+values (custom ports, alternate DB URL, third-party API keys, …).
 
 The dev server splits the Go binary (`:8080`) from Next.js (`:3001`)
 for fast iteration. Other `./dev.sh` subcommands: `stop`, `restart`,

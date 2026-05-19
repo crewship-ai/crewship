@@ -19,6 +19,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/provider/apple"
 	"github.com/crewship-ai/crewship/internal/provider/docker"
+	"github.com/crewship-ai/crewship/internal/secrets"
 	"github.com/crewship-ai/crewship/internal/update"
 	"github.com/spf13/cobra"
 )
@@ -384,33 +385,56 @@ func checkSidecarBinary() checkResult {
 	}
 }
 
-// checkNextAuthSecret guards the "silent 404 if NEXTAUTH_SECRET is
-// missing" trap documented in MEMORY (project_prod_vm_setup.md). The
-// env var is only meaningful for the Next.js web UI; the CLI doesn't
-// use it directly, so we WARN rather than FAIL. The check is a hard
-// emptiness test — short / weak secrets are still up to the operator.
+// checkNextAuthSecret used to FAIL/WARN when NEXTAUTH_SECRET was unset
+// because the old startup path took the process down on a missing
+// secret. As of the zero-friction-install change, `crewship start`
+// auto-generates the secret on first boot and persists it under
+// <dataDir>/secrets.env, so an empty env is no longer a problem
+// post-start — doctor's job is now to surface where the value lives
+// (env vs persisted file) and confirm it's at least minimum strength.
 func checkNextAuthSecret() checkResult {
-	v := os.Getenv("NEXTAUTH_SECRET")
-	if v == "" {
+	if v := os.Getenv("NEXTAUTH_SECRET"); v != "" {
+		if len(v) < 32 {
+			return checkResult{
+				name:   "NEXTAUTH_SECRET",
+				status: "WARN",
+				detail: fmt.Sprintf("env-provided value is short (%d chars)", len(v)),
+				hint:   "regenerate with openssl rand -hex 32 (≥32 chars recommended)",
+			}
+		}
 		return checkResult{
 			name:   "NEXTAUTH_SECRET",
-			status: "WARN",
-			detail: "not set — Next.js will return 404 silently",
-			hint:   "export NEXTAUTH_SECRET=$(openssl rand -base64 32)  in the env that runs the web UI",
+			status: "PASS",
+			detail: fmt.Sprintf("env-provided (%d chars)", len(v)),
 		}
 	}
-	if len(v) < 32 {
+
+	// Not in env — check the persisted secrets file the auto-bootstrap
+	// would write. Missing == "crewship start hasn't been run yet on
+	// this data dir", which is fine; the next `crewship start` will
+	// generate the value.
+	dataDir, err := database.DefaultDataDir()
+	if err != nil {
 		return checkResult{
 			name:   "NEXTAUTH_SECRET",
 			status: "WARN",
-			detail: fmt.Sprintf("set but short (%d chars)", len(v)),
-			hint:   "regenerate with openssl rand -base64 32 (≥32 chars recommended)",
+			detail: "not in env; could not locate data dir to check persisted file",
+			hint:   fmt.Sprintf("resolve data dir error: %v", err),
+		}
+	}
+	path := secrets.SecretsFilePath(dataDir.Root)
+	if _, err := os.Stat(path); err == nil {
+		return checkResult{
+			name:   "NEXTAUTH_SECRET",
+			status: "PASS",
+			detail: "auto-managed in " + path,
 		}
 	}
 	return checkResult{
 		name:   "NEXTAUTH_SECRET",
-		status: "PASS",
-		detail: fmt.Sprintf("set (%d chars)", len(v)),
+		status: "INFO",
+		detail: "not yet bootstrapped",
+		hint:   "first `crewship start` will generate and persist this to " + path,
 	}
 }
 
