@@ -66,6 +66,41 @@ func ActionFromContext(ctx context.Context) GuardAction {
 	return GuardActionBlock
 }
 
+// GuardListener is invoked synchronously when InputGuard detects a
+// finding. It's the integration hook for the hooks package — callers
+// that want an external system (Slack, PagerDuty, the hooks subsystem)
+// notified on every guardrail trip attach a listener via
+// WithGuardListener BEFORE invoking the guard. Empty listener means
+// "no external notification beyond the journal entry."
+//
+// The listener runs in the same goroutine as the guard, so callers
+// should keep it cheap or dispatch asynchronously inside. The lookout
+// package deliberately doesn't goroutine the call itself: synchronous
+// notification preserves the existing latency contract and lets the
+// listener participate in the request's cancellation.
+type GuardListener func(ctx context.Context, direction string, finding Finding)
+
+// guardListenerKey is the context-value type for GuardListener. Kept
+// as a struct{} so adding more context keys doesn't conflict.
+type guardListenerKey struct{}
+
+// WithGuardListener returns a derived context carrying fn so InputGuard
+// will invoke it on every finding. Pass nil to clear an inherited
+// listener — useful in tests that want to assert a code path doesn't
+// fire the hook even when called from a context that would normally
+// have one.
+func WithGuardListener(ctx context.Context, fn GuardListener) context.Context {
+	return context.WithValue(ctx, guardListenerKey{}, fn)
+}
+
+// GuardListenerFromContext extracts the listener attached by
+// WithGuardListener. Returns nil when none was set — callers must
+// nil-check before invoking.
+func GuardListenerFromContext(ctx context.Context) GuardListener {
+	v, _ := ctx.Value(guardListenerKey{}).(GuardListener)
+	return v
+}
+
 // Scope identifies which workspace/crew/agent the guard is acting on.
 // Mirrored after journal.Scope but kept separate so callers don't have to
 // import the journal package just to talk to the middleware.
@@ -139,6 +174,16 @@ func InputGuard(j journal.Emitter) Middleware {
 			}
 		}
 		emitErr := emitGuardEntry(ctx, j, journal.EntryGuardrailInput, "input", result, primary)
+
+		// Fire the integration hook BEFORE we branch on action. The
+		// listener should see every trip even in log-mode runs — that's
+		// the whole point of log mode (observability without breaking
+		// the user). Done after emitGuardEntry so the journal row
+		// already exists by the time the listener runs and any sync
+		// downstream consumer can correlate via trace_id.
+		if listener := GuardListenerFromContext(ctx); listener != nil {
+			listener(ctx, "input", primary)
+		}
 
 		// Branch on the configured action. Block (default) refuses the
 		// call; Sanitize masks every match in-place and returns the

@@ -8,6 +8,7 @@ import (
 	"log/slog"
 
 	"github.com/crewship-ai/crewship/internal/encryption"
+	"github.com/crewship-ai/crewship/internal/hooks"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/llm"
 	"github.com/crewship-ai/crewship/internal/lookout"
@@ -139,6 +140,34 @@ func (r *LLMRunner) RunStep(ctx context.Context, req AgentStepRequest) (AgentSte
 	// to no-op so we don't have to branch here.
 	if req.InputGuardAction != "" {
 		ctx = lookout.WithAction(ctx, lookout.GuardAction(req.InputGuardAction))
+	}
+
+	// Wire the hooks subsystem to the guardrail event. When the input
+	// guard fires, dispatch on_guardrail_triggered so workspace admins
+	// can route the signal to Slack / PagerDuty / a webhook without
+	// scraping the journal. Best-effort: a Dispatch failure logs but
+	// doesn't change the guard's verdict (a blocked call is still
+	// blocked even if the integration is down).
+	if r.db != nil && r.journal != nil {
+		dbCopy, journCopy := r.db, r.journal
+		ctx = lookout.WithGuardListener(ctx, func(hctx context.Context, direction string, finding lookout.Finding) {
+			_ = hooks.Dispatch(hctx, dbCopy, journCopy, hooks.EventOnGuardrailTriggered, hooks.EventContext{
+				WorkspaceID: req.WorkspaceID,
+				CrewID:      req.AuthorCrewID,
+				AgentID:     authorAgentID,
+				Severity:    string(finding.Severity),
+				Payload: map[string]any{
+					"direction":     direction,
+					"kind":          string(finding.Kind),
+					"detail":        finding.Detail,
+					"matched":       finding.Matched,
+					"pipeline_id":   req.PipelineID,
+					"pipeline_run":  req.PipelineRunID,
+					"step_id":       req.StepID,
+					"agent_slug":    req.AgentSlug,
+				},
+			})
+		})
 	}
 
 	// Build the LLM request. We pass the resolved system prompt
