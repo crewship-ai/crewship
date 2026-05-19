@@ -53,7 +53,32 @@ type DSL struct {
 	// "log" modes when its upstream produces text that occasionally
 	// trips the heuristic on benign content.
 	Guardrails *GuardrailsConfig `json:"guardrails,omitempty"`
-	Steps      []Step            `json:"steps"`
+	// Eval configures continuous grading of production runs of this
+	// routine. The online sampler reads sample_rate to decide whether
+	// to enqueue a completed run for rubric grading via grader_agent.
+	// Empty leaves online grading disabled (existing replay/regression
+	// suites still work).
+	Eval  *EvalConfig `json:"eval,omitempty"`
+	Steps []Step      `json:"steps"`
+}
+
+// EvalConfig groups eval-time configuration. Currently scoped to
+// online sampling; future iterations may add baseline_dataset_id for
+// the regression suite + alert_thresholds for the drift detector.
+type EvalConfig struct {
+	Online *OnlineEvalConfig `json:"online,omitempty"`
+}
+
+// OnlineEvalConfig is the sampling policy for production traffic.
+// SampleRate=0.05 means "grade 5% of completed runs"; SampleRate=0
+// disables sampling for this routine; SampleRate=1.0 grades every
+// run (expensive — typically only set for newly-launched routines
+// while the grader's calibration is being verified). GraderAgentSlug
+// references an agent in the routine's author crew that exposes a
+// rubric grader prompt (same shape as Step.Outcomes.Grader).
+type OnlineEvalConfig struct {
+	SampleRate      float64 `json:"sample_rate"`
+	GraderAgentSlug string  `json:"grader_agent_slug,omitempty"`
 }
 
 // GuardrailsConfig is the per-routine safety policy. Currently scoped

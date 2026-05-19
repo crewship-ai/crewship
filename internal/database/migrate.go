@@ -1291,6 +1291,12 @@ END;
 	// trace_id for ADLC phase-7 continuous-learning signal. See
 	// migrate_consts_v95_message_feedback.go.
 	{version: 95, name: "add_message_feedback", sql: migrationAddMessageFeedback},
+	// Online eval sampler — widens eval_runs.kind to include 'online'
+	// and adds routine_slug + pipeline_run_id + trace_id + sample_rate
+	// so production traffic can be continuously graded. SQLite recreate
+	// pattern (CHECK constraints are immutable in place).
+	// See migrate_consts_v96_eval_runs_online.go.
+	{version: 96, name: "eval_runs_online", sql: migrationEvalRunsOnline},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the
