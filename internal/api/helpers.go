@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -34,26 +35,66 @@ func broadcastWorkspaceEvent(hub *ws.Hub, wsID, eventType string, payload any) {
 	hub.BroadcastWorkspace(wsID, eventType, payload)
 }
 
-// isSafeRedirect validates that a redirect target is a relative path on the
-// same origin. It rejects empty strings, absolute URLs, protocol-relative
-// URLs (//evil.com), and paths with backslashes to prevent open redirects.
+// isSafeRedirect validates that a redirect target is a same-origin
+// relative path. The check is "leading slash, second char is neither
+// `/` nor `\\`, no embedded backslashes anywhere, parseable, and the
+// parsed URL has no scheme/host" — which together close the open
+// redirect classes CodeQL go/bad-redirect-check flags:
+//
+//   - "//evil.com/path"   — protocol-relative; second char is '/'
+//   - "/\\evil.com/path"  — backslash trick that some browsers
+//     normalise to '/' before resolving
+//   - "https://evil.com"  — absolute URL with explicit scheme
+//   - "javascript:..."    — non-http(s) scheme
+//
+// Empty strings are rejected so caller code doesn't accidentally
+// redirect to the current path on a missing param.
 func isSafeRedirect(target string) bool {
 	if target == "" {
 		return false
 	}
-	// Must start with "/" (relative path)
-	if !strings.HasPrefix(target, "/") {
+	// Must start with "/"
+	if target[0] != '/' {
 		return false
 	}
-	// Reject protocol-relative URLs like "//evil.com"
-	if strings.HasPrefix(target, "//") {
+	// The second char being '/' or '\\' is the classic protocol-
+	// relative bypass that strings.HasPrefix(target, "//") alone
+	// misses (CodeQL go/bad-redirect-check).
+	if len(target) > 1 && (target[1] == '/' || target[1] == '\\') {
 		return false
 	}
-	// Reject backslash tricks (some browsers normalize "\/")
+	// Any backslash anywhere (some browsers normalize "\/" → "//").
 	if strings.Contains(target, "\\") {
 		return false
 	}
+	// Defence in depth: a malformed URL or one that parses with a
+	// host (means an absolute URL slipped through) is not a same-
+	// origin relative path.
+	u, err := url.Parse(target)
+	if err != nil || u.Scheme != "" || u.Host != "" {
+		return false
+	}
 	return true
+}
+
+// maxListCapacity is the upper bound on any per-request slice/map
+// pre-allocation derived from a ?limit= query param. parseListPagination
+// already clamps to a per-endpoint max, but CodeQL's
+// go/uncontrolled-allocation-size rule can only see proximate bounds —
+// applying capacityHint at every make(...) call gives the analyser the
+// local evidence and protects against future code paths that bypass
+// parseListPagination.
+const maxListCapacity = 1000
+
+// capacityHint returns a safe cap-hint for a user-derived list size,
+// floored at 0 and ceiled at maxListCapacity. Uses the Go 1.21+ min
+// builtin so CodeQL's go/uncontrolled-allocation-size rule recognises
+// the cap as a bound on the inflow value.
+func capacityHint(n int) int {
+	if n < 0 {
+		return 0
+	}
+	return min(n, maxListCapacity)
 }
 
 // parsePagination reads "limit" and "offset" query params, clamping limit to

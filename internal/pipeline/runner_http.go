@@ -10,6 +10,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/httpsafe"
 )
 
 // runHTTPStep handles a StepHTTP. Single outbound request,
@@ -37,9 +39,29 @@ func (e *Executor) runHTTPStep(ctx context.Context, step Step, parentRender Rend
 	if rawURL == "" {
 		return "", 0, 0, fmt.Errorf("http step %q rendered empty URL", step.ID)
 	}
-	parsed, err := url.Parse(rawURL)
-	if err != nil {
-		return "", 0, 0, fmt.Errorf("http step %q parse url: %w", step.ID, err)
+	// Defence in depth: ValidateURL is the cheap scheme + literal-IP
+	// reject; SafeTransport below catches DNS aliases / rebinding.
+	// http+https are both permitted here — operators legitimately call
+	// intranet HTTP endpoints from pipeline steps, and the egress
+	// allowlist (set per-deployment) is the host-level gate.
+	//
+	// The test-only allowPrivateHTTP escape hatch routes around the
+	// SSRF check so unit tests can use httptest.NewServer (which binds
+	// to 127.0.0.1). Production callers never flip this flag — see
+	// Executor.SetAllowPrivateHTTPForTesting for the rationale.
+	var parsed *url.URL
+	if e.allowPrivateHTTP {
+		var perr error
+		parsed, perr = url.Parse(rawURL)
+		if perr != nil {
+			return "", 0, 0, fmt.Errorf("http step %q parse url: %w", step.ID, perr)
+		}
+	} else {
+		var verr error
+		parsed, verr = httpsafe.ValidateURL(rawURL, "http", "https")
+		if verr != nil {
+			return "", 0, 0, fmt.Errorf("http step %q: %w", step.ID, verr)
+		}
 	}
 	// Egress allowlist: enforce host check at the runtime even
 	// though sidecar already gates network for agent_run. For
@@ -82,14 +104,34 @@ func (e *Executor) runHTTPStep(ctx context.Context, step Step, parentRender Rend
 	}
 
 	// CheckRedirect re-validates the destination host against the
-	// egress allowlist on every 3xx hop. Without this, a sender that
-	// allows api.partner.com → 302 → 169.254.169.254 (AWS IMDS) or
-	// localhost or any other internal host would leak metadata into
-	// the step output. Default Go client follows up to 10 redirects;
-	// checking each is the only safe stance.
+	// egress allowlist AND re-runs the URL scheme/IP guard on every
+	// 3xx hop. Without this, a sender that allows api.partner.com →
+	// 302 → 169.254.169.254 (AWS IMDS) or localhost or any other
+	// internal host would leak metadata into the step output. Default
+	// Go client follows up to 10 redirects; checking each is the only
+	// safe stance.
+	//
+	// httpsafe.SafeTransport is the dial-time guard: even if a
+	// rendered URL passes the string-level checks, a DNS alias to a
+	// private IP is refused at connect time. Tests with
+	// allowPrivateHTTP=true fall back to the default transport so they
+	// can target httptest.NewServer on 127.0.0.1.
+	transport := http.RoundTripper(httpsafe.SafeTransport())
+	if e.allowPrivateHTTP {
+		transport = http.DefaultTransport
+	}
 	client := http.Client{
-		Timeout: time.Duration(timeoutSec) * time.Second,
-		CheckRedirect: func(redirReq *http.Request, _ []*http.Request) error {
+		Timeout:   time.Duration(timeoutSec) * time.Second,
+		Transport: transport,
+		CheckRedirect: func(redirReq *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return fmt.Errorf("http step %q: too many redirects", step.ID)
+			}
+			if !e.allowPrivateHTTP {
+				if _, err := httpsafe.ValidateURL(redirReq.URL.String(), "http", "https"); err != nil {
+					return fmt.Errorf("http step %q redirect %w", step.ID, err)
+				}
+			}
 			if e.egressAllowed != nil && !e.egressAllowed(redirReq.URL.Host) {
 				return fmt.Errorf("http step %q redirect to %q blocked by egress allowlist", step.ID, redirReq.URL.Host)
 			}

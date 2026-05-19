@@ -145,7 +145,18 @@ func (c *pipelineEmitContext) emitRunStarted(ctx context.Context, mode RunMode, 
 // Variadic pairs follow the slog/log/value convention: even-indexed
 // args are keys (strings), odd-indexed are values.
 func mergePayload(base map[string]any, kv ...any) map[string]any {
-	out := make(map[string]any, len(base)+len(kv)/2)
+	// Cap each input length BEFORE the addition so an arithmetic
+	// overflow can't reach the make() at all. CodeQL's
+	// go/allocation-size-overflow rule flags the bare len() + len()/2
+	// expression because the addition itself can wrap on 32-bit ints
+	// when one of the inputs is pathologically large — even though
+	// the post-add clamp would have rejected the result. min() is on
+	// CodeQL's recognised-bound list.
+	const maxPayloadHint = 256
+	baseLen := min(len(base), maxPayloadHint)
+	kvPairs := min(len(kv)/2, maxPayloadHint)
+	hint := min(baseLen+kvPairs, maxPayloadHint)
+	out := make(map[string]any, hint)
 	for k, v := range base {
 		out[k] = v
 	}

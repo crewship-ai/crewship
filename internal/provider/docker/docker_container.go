@@ -16,6 +16,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/safepath"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/mount"
 	dockernetwork "github.com/docker/docker/api/types/network"
@@ -52,6 +53,19 @@ func (p *Provider) FindCrewContainer(ctx context.Context, slug string) (string, 
 // per-crew mutex makes the second caller see the freshly-created
 // container and reuse it instead.
 func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConfig) (string, error) {
+	// crew_id/slug end up as filesystem path components below — validate
+	// before any filepath.Join so a malformed ID can't reach the bind
+	// mount layer (which would let an attacker who controls the DB pin
+	// container output at /etc, /root, etc.).
+	if _, err := safepath.ValidateComponent(team.ID); err != nil {
+		return "", fmt.Errorf("crew id not safe for path: %w", err)
+	}
+	if team.Slug != "" {
+		if _, err := safepath.ValidateComponent(team.Slug); err != nil {
+			return "", fmt.Errorf("crew slug not safe for path: %w", err)
+		}
+	}
+
 	mu := p.lockForCrew(team.ID)
 	mu.Lock()
 	defer mu.Unlock()

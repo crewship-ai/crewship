@@ -13,13 +13,16 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/connectors"
+	"github.com/crewship-ai/crewship/internal/httpsafe"
 )
 
 // -------------------------------------------------------------------
@@ -271,7 +274,20 @@ func TestConnectors_Verify_PATCallsHTTPEndpoint(t *testing.T) {
 	}))
 	defer fake.Close()
 
-	// Build a one-off catalog whose verify URL points at the fake.
+	// Tests use a verify URL of "https://verify.test/me" that passes
+	// httpsafe.ValidateURL; SetVerifyHTTPClientForTesting installs a
+	// rewriteRoundTripper that routes the actual bytes to the
+	// loopback fake without weakening the SSRF guard in production.
+	target, err := url.Parse(fake.URL)
+	if err != nil {
+		t.Fatalf("parse fake URL: %v", err)
+	}
+	restoreVerify := SetVerifyHTTPClientForTesting(&http.Client{
+		Timeout:   5 * time.Second,
+		Transport: &httpsafe.RewriteRoundTripper{Target: target},
+	})
+	defer restoreVerify()
+
 	yaml := `id: ad-hoc
 name: Ad hoc
 auth_mode: pat
@@ -285,7 +301,7 @@ mcp:
 verify:
   http:
     method: GET
-    url: "` + fake.URL + `/me"
+    url: "https://verify.test/me"
     headers:
       Authorization: "Bearer ${field.api_key}"
     expect_status: 200
@@ -334,6 +350,19 @@ func TestConnectors_Verify_PATInvalidToken(t *testing.T) {
 	}))
 	defer fake.Close()
 
+	// rewriteRoundTripper retargets verify.test → loopback so the
+	// production code path's httpsafe.ValidateURL stays unconditional
+	// (see PATCallsHTTPEndpoint for the full rationale).
+	target, err := url.Parse(fake.URL)
+	if err != nil {
+		t.Fatalf("parse fake URL: %v", err)
+	}
+	restoreVerify := SetVerifyHTTPClientForTesting(&http.Client{
+		Timeout:   5 * time.Second,
+		Transport: &httpsafe.RewriteRoundTripper{Target: target},
+	})
+	defer restoreVerify()
+
 	yaml := `id: bad-token
 name: Bad
 auth_mode: pat
@@ -347,7 +376,7 @@ mcp:
 verify:
   http:
     method: GET
-    url: "` + fake.URL + `/me"
+    url: "https://verify.test/me"
     headers:
       Authorization: "Bearer ${field.api_key}"
     expect_status: 200

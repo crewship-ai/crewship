@@ -7,8 +7,11 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"testing"
+
+	"github.com/crewship-ai/crewship/internal/httpsafe"
 )
 
 const validSkillMDForAPI = `---
@@ -71,10 +74,20 @@ func TestSkillsImport_ValidURL(t *testing.T) {
 	}))
 	defer srv.Close()
 
+	// Test pairs SkipURLValidation with a RewriteRoundTripper so the
+	// production fetchURL path's unconditional ValidateImportURL guard
+	// (CodeQL go/request-forgery requirement) still passes for a
+	// synthetic URL like "https://skills.test/SKILL.md" — the bytes
+	// land at the loopback httptest server via the rewrite.
+	target, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatalf("parse test server URL: %v", err)
+	}
 	handler := NewSkillHandler(db, logger)
-	handler.SkipURLValidation = true // allow localhost for test
+	handler.SkipURLValidation = true
+	handler.TestRoundTripper = &httpsafe.RewriteRoundTripper{Target: target}
 
-	body := bytes.NewBufferString(`{"url": "` + srv.URL + `/SKILL.md"}`)
+	body := bytes.NewBufferString(`{"url": "https://skills.test/SKILL.md"}`)
 	req := httptest.NewRequest("POST", "/api/v1/workspaces/"+wsID+"/skills/import", body)
 	req = req.WithContext(withUser(req.Context(), &AuthUser{ID: userID}))
 	req = req.WithContext(withWorkspace(req.Context(), wsID, "OWNER"))

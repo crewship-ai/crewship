@@ -104,7 +104,15 @@ Examples:
 			default:
 				eventColor = cli.Gray
 			}
-			fmt.Printf("%s%s%s %s[%s]%s %s\n", cli.Dim, ts, cli.Reset, eventColor, l.Event, cli.Reset, truncate(l.Content, 200))
+			// Both event tag (constrained enum) and content (agent
+			// stdout) are sanitised before reaching the terminal so a
+			// rogue log entry can't smuggle ANSI escapes / OSC links
+			// into the operator's scrollback. Same hardening as the
+			// streaming path below.
+			fmt.Printf("%s%s%s %s[%s]%s %s\n",
+				cli.Dim, ts, cli.Reset,
+				eventColor, sanitizeTerminal(l.Event), cli.Reset,
+				truncate(sanitizeTerminal(l.Content), 200))
 		}
 
 		if follow {
@@ -147,7 +155,14 @@ func logsFollow(client *cli.Client, agentID, agentSlug string) error {
 		}
 
 		ts := time.Now().Format("2006-01-02 15:04:05")
-		fmt.Printf("%s%s%s [%s] %s\n", cli.Dim, ts, cli.Reset, event.Type, truncate(event.Content, 200))
+		// event.Type is a constrained enum from the journal but we
+		// sanitise anyway so an unknown type from a future agent can't
+		// smuggle ANSI escapes into the user's terminal. event.Content
+		// is fully untrusted (agent stdout) and definitely needs it.
+		fmt.Printf("%s%s%s [%s] %s\n",
+			cli.Dim, ts, cli.Reset,
+			sanitizeTerminal(event.Type),
+			truncate(sanitizeTerminal(event.Content), 200))
 	}
 }
 

@@ -9,6 +9,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/httpsafe"
 )
 
 // OAuthServerMetadata holds discovered OAuth server configuration (RFC 8414).
@@ -40,6 +42,12 @@ type DiscoveredOAuth struct {
 	SupportsDCR          bool   `json:"supports_dcr"`
 }
 
+// discoveryClient is the prod HTTP client. ssrfSafeTransport is the
+// dial-time SSRF guard (refuses private/loopback IPs at connect).
+// Tests swap discoveryClient.Transport with a roundTripFunc that
+// intercepts Do() without any real network call, so URL validation
+// (inline httpsafe.ValidateURL below) can stay unconditional and
+// CodeQL go/request-forgery sees a complete sanitiser chain.
 var discoveryClient = &http.Client{
 	Timeout:   10 * time.Second,
 	Transport: ssrfSafeTransport(),
@@ -124,7 +132,16 @@ type DCRResponse struct {
 }
 
 // dynamicClientRegister performs RFC 7591 Dynamic Client Registration.
+//
+// registrationURL is derived from oauth-authorization-server metadata
+// discovered for an MCP server — i.e. originally user-supplied via the
+// MCP install flow. httpsafe.ValidateURL keeps the safety property
+// local to this function (matches the fetchJSON pattern) so CodeQL
+// go/request-forgery sees the sanitiser at the request entry.
 func dynamicClientRegister(ctx context.Context, registrationURL, redirectURI string) (*DCRResponse, error) {
+	if _, err := httpsafe.ValidateURL(registrationURL, "http", "https"); err != nil {
+		return nil, fmt.Errorf("DCR: %w", err)
+	}
 	reqBody := DCRRequest{
 		RedirectURIs:            []string{redirectURI},
 		ClientName:              "Crewship",
@@ -167,8 +184,19 @@ func dynamicClientRegister(ctx context.Context, registrationURL, redirectURI str
 }
 
 // fetchJSON is a generic helper to GET a URL and decode JSON.
-func fetchJSON[T any](ctx context.Context, url string) (*T, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+//
+// httpsafe.ValidateURL is the string-level reject (scheme, userinfo,
+// literal RFC1918). discoveryClient is wired with ssrfSafeTransport so
+// the dial-time guard catches DNS aliases; the inline ValidateURL
+// gives CodeQL go/request-forgery the local evidence that the URL is
+// sanitised before it reaches http.NewRequestWithContext. Tests swap
+// discoveryClient.Transport with a mock RoundTripper so no real
+// network call happens — the URL validation stays unconditional.
+func fetchJSON[T any](ctx context.Context, rawURL string) (*T, error) {
+	if _, err := httpsafe.ValidateURL(rawURL, "http", "https"); err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return nil, err
 	}

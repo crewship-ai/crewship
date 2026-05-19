@@ -7,14 +7,35 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/database"
+	"github.com/crewship-ai/crewship/internal/httpsafe"
 	"github.com/crewship-ai/crewship/internal/skills"
 )
+
+// installRewriteClient swaps the importer's http.Client for one whose
+// transport reroutes every request to `srv`. Tests can then pass a
+// validation-passing URL like "https://skills.test/SKILL.md" and the
+// bytes still land at the loopback httptest server. Pairs with
+// SetSkipURLValidation(true) which is still needed for the upstream
+// ValidateImportURL guard in Import() entry.
+func installRewriteClient(t *testing.T, imp *skills.Importer, srv *httptest.Server) {
+	t.Helper()
+	target, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatalf("parse test server URL: %v", err)
+	}
+	imp.SetHTTPClientForTesting(&http.Client{
+		Timeout:   5 * time.Second,
+		Transport: &httpsafe.RewriteRoundTripper{Target: target},
+	})
+}
 
 func setupSkillTestDB(t *testing.T) *sql.DB {
 	t.Helper()
@@ -97,10 +118,11 @@ func TestImporter_FromURL_MockHTTPServer(t *testing.T) {
 	db := setupSkillTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	imp := skills.NewImporter(db, logger)
-	imp.SetSkipURLValidation(true) // allow localhost for test
+	imp.SetSkipURLValidation(true) // bypass Import()-entry ValidateImportURL
+	installRewriteClient(t, imp, srv)
 
 	result, err := imp.Import(context.Background(), "ws1", "user1", skills.ImportRequest{
-		URL: srv.URL + "/SKILL.md",
+		URL: "https://skills.test/SKILL.md",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -126,10 +148,11 @@ func TestImporter_FromURL_PathPreserved(t *testing.T) {
 	db := setupSkillTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	imp := skills.NewImporter(db, logger)
-	imp.SetSkipURLValidation(true) // allow localhost for test
+	imp.SetSkipURLValidation(true) // bypass Import()-entry ValidateImportURL
+	installRewriteClient(t, imp, srv)
 
 	_, err := imp.Import(context.Background(), "ws1", "user1", skills.ImportRequest{
-		URL: srv.URL + "/path/to/SKILL.md",
+		URL: "https://skills.test/path/to/SKILL.md",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -161,10 +184,11 @@ func TestImporter_URLFetchError(t *testing.T) {
 	db := setupSkillTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	imp := skills.NewImporter(db, logger)
-	imp.SetSkipURLValidation(true) // allow localhost for test
+	imp.SetSkipURLValidation(true) // bypass Import()-entry ValidateImportURL
+	installRewriteClient(t, imp, srv)
 
 	_, err := imp.Import(context.Background(), "ws1", "user1", skills.ImportRequest{
-		URL: srv.URL + "/missing.md",
+		URL: "https://skills.test/missing.md",
 	})
 	if err == nil {
 		t.Fatal("expected error for 404 URL, got nil")
@@ -301,10 +325,11 @@ func TestImporter_OversizedResponse_Rejected(t *testing.T) {
 	db := setupSkillTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	imp := skills.NewImporter(db, logger)
-	imp.SetSkipURLValidation(true) // allow localhost for test
+	imp.SetSkipURLValidation(true) // bypass Import()-entry ValidateImportURL
+	installRewriteClient(t, imp, srv)
 
 	_, err := imp.Import(context.Background(), "ws1", "user1", skills.ImportRequest{
-		URL: srv.URL + "/SKILL.md",
+		URL: "https://skills.test/SKILL.md",
 	})
 	if err == nil {
 		t.Fatal("expected error for oversized response")

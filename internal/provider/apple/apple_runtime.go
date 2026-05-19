@@ -9,10 +9,22 @@ import (
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/safepath"
 )
 
 func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConfig) (string, error) {
 	p.logger.Debug("EnsureCrewRuntime", "crew_id", team.ID, "crew_slug", team.Slug)
+
+	// crew_id/slug end up as filesystem path components below — validate
+	// before any filepath.Join so a malformed ID can't reach the bind
+	// mount layer (which would let an attacker who controls the DB pin
+	// container output at /etc, /root, etc.).
+	if _, err := safepath.ValidateComponent(team.ID); err != nil {
+		return "", fmt.Errorf("crew id not safe for path: %w", err)
+	}
+	if _, err := safepath.ValidateComponent(team.Slug); err != nil {
+		return "", fmt.Errorf("crew slug not safe for path: %w", err)
+	}
 
 	if p.cfg.Network != "" {
 		if err := p.ensureNetwork(ctx, p.cfg.Network); err != nil {
@@ -172,6 +184,9 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 }
 
 func (p *Provider) RemoveCrewVolumes(_ context.Context, slug string) error {
+	if _, err := safepath.ValidateComponent(slug); err != nil {
+		return fmt.Errorf("crew slug not safe for path: %w", err)
+	}
 	homePath := filepath.Join(p.cfg.OutputBasePath, "homes", slug)
 	if err := os.RemoveAll(homePath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("remove crew home %s: %w", slug, err)

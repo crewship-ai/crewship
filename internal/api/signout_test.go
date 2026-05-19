@@ -136,7 +136,13 @@ func TestSignIn_OpenRedirectBlocked(t *testing.T) {
 		{"protocol-relative", "//evil.example.com", "/login?callbackUrl=%2F"},
 		{"absolute http", "http://evil.example.com", "/login?callbackUrl=%2F"},
 		{"absolute https", "https://evil.example.com", "/login?callbackUrl=%2F"},
-		{"backslash trick", "/\\evil", "/login?callbackUrl=%2F%5Cevil"},
+		// "/\evil" is the classic browser-normalised protocol-relative
+		// bypass — Chrome/Firefox treat `\` as `/` after a leading `/`,
+		// so a redirect to `/\evil.example.com` ends up navigating to
+		// the attacker host. isSafeRedirect now rejects backslashes
+		// outright (CodeQL go/bad-redirect-check), so the callback
+		// resets to "/" rather than being preserved as `/\evil`.
+		{"backslash trick", "/\\evil", "/login?callbackUrl=%2F"},
 		{"javascript scheme", "javascript:alert(1)", "/login?callbackUrl=%2F"},
 		{"safe relative", "/missions/abc", "/login?callbackUrl=%2Fmissions%2Fabc"},
 		{"empty defaults to /", "", "/login?callbackUrl=%2F"},
