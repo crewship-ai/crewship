@@ -239,15 +239,31 @@ crewship inspect r_abc --filter '.entries[] | select(.severity=="error")'
 crewship inspect r_abc --watch 2s         # follow a running mission
 ```
 
-### `crewship export`
+### `crewship apply`
 
-Bundle a run's prompt + response + journal + messages into a folder for handoffs / post-mortems.
+Apply a YAML manifest describing a crew or workspace (agents + skills + credentials + sidecar services). Idempotent, plan-then-confirm, Terraform-style. See [CLI → apply](/cli/apply) and [Guides → Workspace Manifests](/guides/manifests).
 
 ```bash
+crewship apply --file team.yaml --from-env       # convergent sync
+crewship apply --file team.yaml --dry-run        # plan only
+crewship apply --file team.yaml --strict         # fail if any resource exists
+```
+
+### `crewship export`
+
+Two distinct shapes:
+
+```bash
+# Manifest export — round-trip partner of apply
+crewship export crew code-review > code-review.crew.yaml
+crewship export workspace > acme.workspace.yaml
+
+# Run export — bundle one run's chat + journal for post-mortems
 crewship export r_abc                 # ./run-r_abc/{prompt,response,messages,journal,timeline}
 crewship export r_abc --out /tmp/pm
-crewship export r_abc --no-journal    # skip journal pass
 ```
+
+See [CLI → export](/cli/export) for details.
 
 ### `crewship prompt`
 

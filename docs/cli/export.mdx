@@ -1,0 +1,162 @@
+---
+title: "Export"
+description: "Export a crew or workspace as a YAML manifest, or bundle a single run's chat and journal artefacts."
+icon: "file-export"
+---
+
+# crewship export
+
+Two distinct things live under `export`:
+
+- **`crewship export crew <slug>`** / **`crewship export workspace`** — render the live workspace as a YAML manifest you can commit to git, share with a teammate, or re-apply on another machine.
+- **`crewship export <run-id>`** — bundle a single run's prompt, response, journal entries and metadata into a folder for post-mortems.
+
+```bash
+crewship export <subcommand|run-id> [flags]
+```
+
+## `crewship export crew`
+
+Pull a crew's current state and render it as a `kind: Crew` manifest. Round-trip partner of `crewship apply`: piping the output back through apply on a fresh workspace recreates the same shape.
+
+```bash
+crewship export crew <slug> [flags]
+```
+
+### Flags
+
+| Flag | Default | Purpose |
+| --- | --- | --- |
+| `-o`, `--output <path>` | stdout | Write to a file instead of stdout. |
+| `--no-credentials` | `false` | Strip credential slots from output (consumers must declare their own). |
+| `--no-skill-bodies` | `false` | Skip skill bodies; emit slug-only references for a structure-only overview. |
+
+### Examples
+
+```bash
+# Snapshot to stdout
+crewship export crew code-review
+
+# Snapshot to a file under version control
+crewship export crew code-review -o ./manifests/code-review.crew.yaml
+
+# Structure-only overview (no inline skill bodies)
+crewship export crew code-review --no-skill-bodies > overview.yaml
+```
+
+### What's included
+
+- Crew metadata (name, slug, icon, color, description)
+- Devcontainer fields (image, memory, CPUs, mise config)
+- Sidecar `services:` (Redis, Postgres, etc.) — full shape, including healthchecks and volume names
+- Every agent — slug, prompt, role, LLM provider/model, tool profile, memory flag
+- Each agent's `skills:` and `env_refs:` bindings
+- Skill **bodies** (inline by default) for every skill bound to an agent
+- Credential **slots** (without values — these never travel in the export)
+- Crew-scoped MCP servers (`crew_integrations`)
+
+### What's not included
+
+- Credential values (intentional — manifests are safe to commit)
+- Computed fields (IDs, timestamps, cached image hashes)
+- Workspace members (they're per-user identity, not workspace-shareable)
+- Routines / schedules / inbox / eval scenarios (out of scope for v1 manifests)
+
+## `crewship export workspace`
+
+Render every crew in the active workspace as a single `kind: Workspace` bundle. Workspace-level deduplication is applied: skills and credentials used by any agent in any crew are lifted to the workspace scope so consumers see one declaration each.
+
+```bash
+crewship export workspace [flags]
+```
+
+### Flags
+
+| Flag | Default | Purpose |
+| --- | --- | --- |
+| `-o`, `--output <path>` | stdout | Write to a file instead of stdout. |
+| `--no-credentials` | `false` | Strip credential slots. |
+| `--no-skill-bodies` | `false` | Skip skill bodies; emit slug-only refs. |
+
+### Examples
+
+```bash
+# Full backup
+crewship export workspace -o ./acme.workspace.yaml
+
+# Re-apply on another instance
+crewship export workspace > /tmp/acme.yaml
+ssh other-host crewship apply --file - --from-env < /tmp/acme.yaml
+```
+
+### Dedup behaviour
+
+If three crews each declare `house-style`, the workspace export emits **one** skill at workspace scope and per-crew `skills: [house-style]` references. Same for credentials — `ANTHROPIC_API_KEY` becomes a single workspace-scope slot regardless of how many agents reference it.
+
+## `crewship export <run-id>`
+
+Bundle a single run's chat, journal, and metadata into a folder. Used for post-mortems, handoffs, or piping the conversation into a different LLM.
+
+```bash
+crewship export <run-id> [flags]
+```
+
+### Flags
+
+| Flag | Default | Purpose |
+| --- | --- | --- |
+| `--out <dir>` | `./run-<run-id>` | Output directory. |
+| `--no-journal` | `false` | Skip the journal pass. |
+
+### Output layout
+
+```
+<out>/
+  run.json       — runMetadata + window
+  prompt.md      — first user message recovered from chat
+  response.md    — concatenated assistant text
+  messages.json  — full chat message list (raw)
+  journal.json   — journal entries (oldest-first)
+  timeline.txt   — human-readable timeline
+```
+
+### Examples
+
+```bash
+# Default directory: ./run-r_abc/
+crewship export r_abc
+
+# Custom out path, skip journal
+crewship export r_abc --out /tmp/post-mortem --no-journal
+```
+
+## Round-trip with apply
+
+The manifest exports (`crew` / `workspace`) are designed for round-trip:
+
+```bash
+crewship export crew code-review > backup.yaml
+# ... later, on another machine
+crewship apply --file backup.yaml --from-env --yes
+```
+
+A few intentional gaps make this **not byte-exact**:
+
+- The exporter strips computed fields (IDs, timestamps).
+- Credential values never travel — pass them via `--from-env` / `--secrets-file` on re-apply.
+- URL-fetched skills are re-exported as inline content (the source URL isn't preserved in the DB row).
+
+For a `--dry-run` check that confirms the round-trip is clean:
+
+```bash
+crewship export crew code-review > round-trip.yaml
+crewship apply --file round-trip.yaml --dry-run
+```
+
+The plan should show every resource as `=` (unchanged).
+
+## See also
+
+- [CLI → apply](/cli/apply) — the round-trip partner
+- [Guides → Workspace Manifests](/guides/manifests) — narrative tour of the manifest format
+- [CLI → activity](/cli/activity) — for the run-id form of export

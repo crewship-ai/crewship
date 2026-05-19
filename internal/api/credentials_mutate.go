@@ -40,6 +40,16 @@ type createCredentialRequest struct {
 	OAuthAuthURL      *string `json:"oauth_auth_url"`
 	OAuthTokenURL     *string `json:"oauth_token_url"`
 	OAuthScopes       *string `json:"oauth_scopes"`
+	// Pending, when true, creates a placeholder credential without a real
+	// value — the row's status is set to PENDING and the encrypted_value
+	// holds a sentinel. Used by `crewship apply -f` so a manifest can
+	// declare credential slots that the user fills in later through the
+	// UI or `crewship credential set`. Mirrors the OAuth-pending path
+	// (value="pending_oauth") which is already wired into the resolver,
+	// so no orchestrator changes are needed: pending creds simply fail
+	// agent runs with a "credential not configured" error until the user
+	// supplies a real value.
+	Pending bool `json:"pending"`
 }
 
 // Create stores a new encrypted credential in the workspace.
@@ -76,13 +86,23 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusBadRequest, "name is required")
 		return
 	}
+	// Pending credentials (manifest slot path) bypass the value check —
+	// the whole point is "create the row now, fill the value later". The
+	// sentinel mirrors the OAuth-pending pattern so the resolver path
+	// already handles it: agent runs fail with "credential not configured"
+	// instead of leaking the placeholder to the LLM.
+	manifestPending := false
+	if req.Pending && req.Value == "" {
+		req.Value = pendingSentinelManifest
+		manifestPending = true
+	}
 	if req.Value == "" && req.Type != "OAUTH2" {
 		replyError(w, http.StatusBadRequest, "value is required")
 		return
 	}
 	oauthPending := false
 	if req.Value == "" && req.Type == "OAUTH2" {
-		req.Value = "pending_oauth" // placeholder until OAuth flow completes
+		req.Value = pendingSentinelOAuth // placeholder until OAuth flow completes
 		oauthPending = true
 	}
 
@@ -96,10 +116,17 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 		req.Scope = "WORKSPACE"
 	}
 
-	// Per-type validation (closed enum + USERPASS/SSH_KEY/CERTIFICATE
-	// field requirements). Runs after the OAuth pending-value fixup so
-	// the validator sees the same Value the DB will store.
-	if msg := validateCredentialPayload(&req); msg != "" {
+	// Per-type validation. Pending manifest slots skip the value-shape
+	// checks (PEM markers, USERPASS-username pairing) since the value
+	// is intentionally a placeholder until the user fills it in — but
+	// the closed type enum is still enforced so an unknown type cannot
+	// slip through as a "pending" of something we don't support.
+	if manifestPending {
+		if msg := validateCredentialType(req.Type); msg != "" {
+			replyError(w, http.StatusBadRequest, msg)
+			return
+		}
+	} else if msg := validateCredentialPayload(&req); msg != "" {
 		replyError(w, http.StatusBadRequest, msg)
 		return
 	}
@@ -174,7 +201,7 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	credStatus := "ACTIVE"
-	if oauthPending {
+	if oauthPending || manifestPending {
 		credStatus = "PENDING"
 	}
 
@@ -266,7 +293,7 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Description:  req.Description,
 		Type:         req.Type,
 		Provider:     req.Provider,
-		Status:       "ACTIVE",
+		Status:       credStatus,
 		Scope:        req.Scope,
 		CrewID:       legacyCrewID,
 		CrewIDs:      respCrewIDs,

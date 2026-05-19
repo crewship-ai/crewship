@@ -59,7 +59,14 @@ type ChatInfo struct {
 	CachedImage        string
 	DevcontainerConfig string
 	MiseConfig         string
-	ContainerEnv       map[string]string
+	ServicesJSON       string
+	// ServiceEnvLookup resolves a credential env-var name to its
+	// plaintext value (for env_refs in services_json). Nil is a
+	// safe default — env_refs that can't be resolved are simply
+	// not injected. Provided by the agent-config loader which has
+	// access to the credential vault.
+	ServiceEnvLookup func(envVar string) string
+	ContainerEnv     map[string]string
 	// CachedRequirements are aggregated feature requirements (privileged,
 	// capAdd, mounts, securityOpt) persisted at provision time and applied
 	// to the HostConfig. Nil means no extra requirements.
@@ -405,10 +412,52 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		// Root-level postStartCommand runs after feature hooks so user intent
 		// (e.g. "start my app-specific DB") wins over feature defaults.
 		cc.PostStartCommands = append(cc.PostStartCommands, info.RootPostStart...)
+
+		// Sidecar services declared in the crew's services_json get
+		// translated into provider.CrewService entries with env_refs
+		// resolved against the workspace credential vault. The
+		// docker provider starts them on the same network as the
+		// agent before EnsureCrewRuntime returns so the agent's
+		// first DB call hits a ready endpoint.
+		if info.ServicesJSON != "" {
+			svcs, err := decodeServicesForRuntime(info.ServicesJSON, info.ServiceEnvLookup)
+			if err != nil {
+				// services_json was validated on write, but a future
+				// schema bump or DB tamper could still produce a
+				// body we can't decode. Surface as a status, not a
+				// hard failure — the agent can still run, just
+				// without its sidecars.
+				b.logger.Warn("decode services_json", "crew_slug", info.CrewSlug, "error", err)
+				streamFn(ws.ChatEvent{Type: "status", Content: "Sidecar services skipped (config invalid)"})
+			} else {
+				cc.Services = svcs
+			}
+		}
+
 		cID, err := b.container.EnsureCrewRuntime(ctx, cc)
 		if err != nil {
 			streamFn(ws.ChatEvent{Type: "error", Content: "failed to start agent container"})
 			return fmt.Errorf("ensure team runtime: %w", err)
+		}
+		// Start sidecars after the agent runtime is ready so the
+		// crew bridge network exists. Providers that don't
+		// implement SidecarProvider silently skip — log a
+		// one-time warning so the operator knows their services:
+		// declarations are dormant.
+		if len(cc.Services) > 0 {
+			if sp, ok := b.container.(provider.SidecarProvider); ok {
+				ids, err := sp.EnsureCrewServices(ctx, cc)
+				if err != nil {
+					streamFn(ws.ChatEvent{Type: "error", Content: "failed to start sidecar services: " + err.Error()})
+					return fmt.Errorf("ensure crew services: %w", err)
+				}
+				b.logger.Info("sidecar services ready", "crew_slug", info.CrewSlug, "count", len(ids))
+			} else {
+				b.logger.Warn("container provider does not support sidecars; services skipped",
+					"crew_slug", info.CrewSlug, "service_count", len(cc.Services))
+				streamFn(ws.ChatEvent{Type: "status",
+					Content: "Sidecar services declared but provider doesn't support them yet"})
+			}
 		}
 		containerID = cID
 		b.containerMu.Lock()

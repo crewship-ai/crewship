@@ -133,6 +133,7 @@ type crewResponse struct {
 	RuntimeImage       *string           `json:"runtime_image,omitempty"`
 	DevcontainerConfig *string           `json:"devcontainer_config,omitempty"`
 	MiseConfig         *string           `json:"mise_config,omitempty"`
+	ServicesJSON       *string           `json:"services_json,omitempty"`
 	CachedImage        *string           `json:"cached_image,omitempty"`
 	ConfigHash         *string           `json:"config_hash,omitempty"`
 	IssuePrefix        *string           `json:"issue_prefix"`

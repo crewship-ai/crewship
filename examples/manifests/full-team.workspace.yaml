@@ -1,0 +1,114 @@
+# yaml-language-server: $schema=https://schemas.crewship.ai/v1/manifest.json
+#
+# Workspace bundle: two crews share workspace-level credentials and
+# skills, then each crew adds its own agents and integrations.
+# Apply with:
+#
+#   crewship apply --file full-team.workspace.yaml --from-env
+
+apiVersion: crewship/v1
+kind: Workspace
+
+metadata:
+  name: ACME Engineering
+  slug: acme-engineering
+  description: Full development team with code review + triage.
+  preferred_language: en
+  author: ACME Corp
+  version: 0.1.0
+
+spec:
+  credentials:
+    - env: ANTHROPIC_API_KEY
+      provider: ANTHROPIC
+      type: API_KEY
+      label: Anthropic API key
+    - env: GH_TOKEN
+      provider: GITHUB
+      type: CLI_TOKEN
+      label: GitHub PAT
+    - env: LINEAR_API_KEY
+      provider: NONE
+      type: API_KEY
+      label: Linear API key
+
+  skills:
+    - slug: house-style
+      inline: |
+        ---
+        name: house-style
+        description: ACME's internal code-style + commit conventions.
+        license: MIT
+        ---
+
+        # House Style
+
+        - One feature per PR, max 400 LOC diff
+        - Commits in imperative mood ("add", "fix", not "added"/"fixes")
+        - Public functions get a doc comment; private helpers don't
+        - Prefer composition over inheritance; never deeper than 3 levels
+        - Tests live next to source as `<file>_test.go` / `<file>.test.ts`
+
+  crews:
+    - slug: code-review
+      name: Code Review
+      icon: git-pull-request
+      color: blue
+      devcontainer:
+        image: mcr.microsoft.com/devcontainers/javascript-node:22-bookworm
+      mcp_servers:
+        - name: github
+          display_name: GitHub
+          transport: stdio
+          command: npx
+          args: [-y, "@modelcontextprotocol/server-github"]
+          env_mapping:
+            GITHUB_PERSONAL_ACCESS_TOKEN: GH_TOKEN
+      agents:
+        - slug: daniel
+          name: Daniel
+          role_title: Code Reviewer
+          agent_role: LEAD
+          cli_adapter: CLAUDE_CODE
+          llm:
+            provider: ANTHROPIC
+            model: claude-haiku-4-5
+          tool_profile: MINIMAL
+          memory_enabled: true
+          skills: [house-style]
+          env_refs: [ANTHROPIC_API_KEY, GH_TOKEN]
+          prompt: |
+            You are Daniel, a senior code reviewer. Apply the
+            house-style skill, then run a security and correctness
+            pass. End every review with APPROVE / REQUEST_CHANGES /
+            NEEDS_DISCUSSION.
+
+    - slug: triage
+      name: Triage
+      icon: list-checks
+      color: violet
+      devcontainer:
+        image: mcr.microsoft.com/devcontainers/javascript-node:22-bookworm
+      mcp_servers:
+        - name: linear
+          display_name: Linear
+          transport: stdio
+          command: npx
+          args: [-y, "@linear/mcp-server"]
+          env_mapping:
+            LINEAR_API_KEY: LINEAR_API_KEY
+      agents:
+        - slug: alice
+          name: Alice
+          role_title: Triage Lead
+          agent_role: LEAD
+          cli_adapter: CLAUDE_CODE
+          llm:
+            provider: ANTHROPIC
+            model: claude-haiku-4-5
+          tool_profile: MINIMAL
+          env_refs: [ANTHROPIC_API_KEY, LINEAR_API_KEY]
+          prompt: |
+            You triage the Linear backlog every morning. Use the
+            house-style skill to label items consistently.
+          skills: [house-style]

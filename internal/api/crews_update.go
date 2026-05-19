@@ -33,6 +33,7 @@ type updateCrewRequest struct {
 	RuntimeImage       *string   `json:"runtime_image"`
 	DevcontainerConfig *string   `json:"devcontainer_config"`
 	MiseConfig         *string   `json:"mise_config"`
+	ServicesJSON       *string   `json:"services_json"`
 }
 
 // List returns all non-deleted crews in the workspace with member and agent counts.
@@ -119,6 +120,26 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		if _, err := devcontainer.ParseMiseConfig(*req.MiseConfig); err != nil {
 			replyError(w, http.StatusBadRequest, "invalid mise_config: "+err.Error())
 			return
+		}
+	}
+	// Services validation mirrors the create path. Empty/null/
+	// whitespace-only services_json clears the column; a populated
+	// body must match the validator's schema before storage. The
+	// TrimSpace handles a payload of "   " or "\n", which the
+	// previous != "" check would have stored verbatim, diverging
+	// from the documented clear-on-empty semantics.
+	if req.ServicesJSON != nil {
+		trimmedServices := strings.TrimSpace(*req.ServicesJSON)
+		req.ServicesJSON = &trimmedServices
+		if trimmedServices != "" {
+			if len(trimmedServices) > 64*1024 {
+				replyError(w, http.StatusBadRequest, "services_json exceeds 64KB limit")
+				return
+			}
+			if err := validateServicesJSON(trimmedServices); err != nil {
+				replyError(w, http.StatusBadRequest, "invalid services_json: "+err.Error())
+				return
+			}
 		}
 	}
 
@@ -249,6 +270,18 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		ub.Set("config_hash", nil)
 		ub.Set("cached_requirements", nil)
 	}
+	if req.ServicesJSON != nil {
+		if *req.ServicesJSON == "" {
+			ub.Set("services_json", nil)
+		} else {
+			ub.Set("services_json", *req.ServicesJSON)
+		}
+		// Services do NOT participate in the cached image hash —
+		// they're separate containers built from upstream images,
+		// not baked into the agent runtime. Changing services
+		// triggers a sidecar restart at next EnsureCrewRuntime,
+		// not a devcontainer rebuild.
+	}
 	// Track whether the resolved mode is free — if so, always clear allowed_domains.
 	updatedModeFree := false
 	if req.NetworkMode != nil {
@@ -334,10 +367,14 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		"id": crewID, "name": c.Name, "slug": c.Slug,
 	})
 
-	// Restart crew container when network policy changes so the sidecar
-	// picks up the new config on the next agent run. Runs after response
-	// is sent to avoid SQLite lock contention.
-	if req.NetworkMode != nil || req.AllowedDomains != nil {
+	// Restart crew container when network policy or sidecar services
+	// change so the docker provider picks up the new config on the
+	// next agent run. services_json edits otherwise stay stale
+	// against a cached running container — the docker provider only
+	// re-reads services_json on EnsureCrewRuntime, and a reused
+	// warm container skips that path. Runs after response is sent
+	// to avoid SQLite lock contention.
+	if req.NetworkMode != nil || req.AllowedDomains != nil || req.ServicesJSON != nil {
 		go h.restartCrewContainer(crewID)
 	}
 }
