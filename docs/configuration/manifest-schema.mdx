@@ -207,17 +207,34 @@ Mirrors docker-compose's healthcheck shape.
 
 ## Cross-reference rules
 
-The validator runs the following cross-checks at apply time. Errors abort before any mutation lands.
+The validator runs the following cross-checks at validate time (no network, no DB). Every failure is collected into a single `ValidationError` so the author can fix all of them in one pass.
 
 | Rule | Failing message |
 | --- | --- |
-| Every `agent.skills[]` slug must be declared in the merged workspace + crew skill scope | `agent "X" references unknown skill "Y"` |
-| Every `agent.env_refs[]` env name must be declared in the merged credential scope | `agent "X" references unknown credential env "Y"` |
-| Every `mcp.env_mapping[]` value must be declared in the merged credential scope | `mcp "X": env_mapping[KEY] → "Y" references unknown credential` |
-| Every `service.env_refs[]` env name must be declared in the merged credential scope | `service "X": env_refs[Y] references unknown credential` |
-| Each skill must have exactly one source (`path` / `source` / `inline`) | `skill "X": must have one of path/source/inline` |
-| At most one agent per crew may have `agent_role: LEAD` | `crew "X" has more than one LEAD` |
-| Service names must be unique within a crew | `crew "X": duplicate service name "Y"` |
+| Every `agent.skills[]` slug must be declared in the merged workspace + crew skill scope | `crew "X" agent "Y" references unknown skill "Z"` |
+| Every `agent.env_refs[]` env name must be declared in the merged credential scope | `crew "X" agent "Y" references unknown credential env "Z"` |
+| Every `mcp.env_mapping[]` value must be declared in the merged credential scope | `crew "X" mcp "Y": env_mapping[KEY] -> "Z" references unknown credential` |
+| Every `service.env_refs[]` env name must be declared in the merged credential scope | `crew "X" service "Y": env_refs[Z] references unknown credential` |
+
+## Shape rules
+
+| Rule | Failing message |
+| --- | --- |
+| Slugs must match `^[a-z0-9][a-z0-9_-]{0,49}$` | `<scope>: invalid slug "X" (lowercase letters, digits, '-', '_'; max 50 chars; must start with letter or digit)` |
+| Each skill must have **exactly** one source | zero: `<scope> skill "X": must have one of path, source, or inline` ; more than one: `<scope> skill "X": only one of path, source, or inline may be set` |
+| At most one agent per crew may have `agent_role: LEAD` | `crew "X" crew has more than one LEAD` |
+| `agent_role` must be `AGENT` or `LEAD` | `<agent>: agent_role "X" invalid (want AGENT or LEAD)` |
+| `cli_adapter` must be one of the 6 supported enum values | `<agent>: cli_adapter "X" invalid` |
+| `tool_profile` must be `FULL`, `CODING`, or `MINIMAL` | `<agent>: tool_profile "X" invalid (want FULL, CODING, MINIMAL)` |
+| Each crew needs at least one agent | `crew "X": at least one agent is required` |
+| Slugs / names unique within scope | `<scope>: duplicate <thing> "X"` (skill / credential / agent / mcp / service / crew) |
+| Service `name` must be a DNS label | `<scope> service "X": name must be a DNS label (lowercase letters/digits/'-', start with letter, end with letter or digit)` |
+| Service volumes must be named (no bind mounts) | `<scope> service "X": volume "Y" looks like a bind mount; manifests only support named volumes for portability` |
+| Service volumes need both `name:` and `mount:`, and `mount:` is unique within the service | `<scope> service "X": volumes[N] needs both name and mount` / `duplicate mount "Y"` |
+| `healthcheck:` requires a `test:` command when set | `<scope> service "X": healthcheck declared without a test command` |
+| MCP transport must be set and known | `transport is required` / `unknown transport "X"` |
+| `stdio` MCP transport requires `command:` | `<scope> mcp "X": stdio transport requires command` |
+| `streamable-http` / `http` / `sse` MCP transport requires `endpoint:` | `<scope> mcp "X": <transport> transport requires endpoint` |
 
 ## Size caps
 
