@@ -429,6 +429,17 @@ func checkNextAuthSecret() checkResult {
 			status: "PASS",
 			detail: "auto-managed in " + path,
 		}
+	} else if !os.IsNotExist(err) {
+		// File exists but we can't stat it — most commonly a
+		// permission problem on the data dir. Surface the real
+		// error so the operator can fix it, not "not yet bootstrapped"
+		// which would lie about a healthy state.
+		return checkResult{
+			name:   "NEXTAUTH_SECRET",
+			status: "WARN",
+			detail: fmt.Sprintf("cannot inspect persisted secret file: %v", err),
+			hint:   "check permissions / ownership on " + path,
+		}
 	}
 	return checkResult{
 		name:   "NEXTAUTH_SECRET",

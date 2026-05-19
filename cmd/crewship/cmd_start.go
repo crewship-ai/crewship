@@ -77,13 +77,21 @@ var startCmd = &cobra.Command{
 		// env vars from <dataDir>/secrets.env on first run (generating
 		// + persisting them when absent), so the rest of startup keeps
 		// using its existing os.Getenv reads with no changes.
+		//
+		// Bootstrap runs under a 5 s ctx — the only thing it does is
+		// small file I/O in the data dir, so a multi-second hang is
+		// almost certainly a stuck filesystem and the operator wants a
+		// clean error rather than a wedged startup.
 		dataDir, err := database.DefaultDataDir()
 		if err != nil {
 			return fmt.Errorf("failed to create data directory: %w", err)
 		}
-		if err := secrets.LoadOrGenerate(dataDir.Root, bootstrapLogger); err != nil {
+		bootCtx, bootCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := secrets.LoadOrGenerate(bootCtx, dataDir.Root, bootstrapLogger); err != nil {
+			bootCancel()
 			return fmt.Errorf("bootstrap secrets: %w", err)
 		}
+		bootCancel()
 
 		cfg, err := config.Load(configPath)
 		if err != nil {
@@ -113,10 +121,23 @@ var startCmd = &cobra.Command{
 			// too. The package default is /var/lib/crewship/state.db,
 			// which a non-root user on a fresh box can't create — and
 			// `crewship start` for end users is decidedly non-root.
-			// Skip the rewrite if the operator already pinned a path
-			// via CREWSHIP_BOLT_PATH (applyEnvOverrides ran before us
-			// and set BoltPath from the env var).
-			if !cfgBoltPathFromEnv() {
+			//
+			// Two narrow predicates protect operator intent:
+			//   * `cfgBoltPathFromEnv()` — env var pin via
+			//     CREWSHIP_BOLT_PATH (applyEnvOverrides ran first and
+			//     already set BoltPath from it).
+			//   * a YAML config can also set state.bolt_path; if that
+			//     value is anything other than the package default
+			//     ("" or "/var/lib/crewship/state.db"), the operator
+			//     made an explicit choice and we leave it alone.
+			//
+			// The literal `/var/lib/crewship/state.db` is the one in
+			// internal/config/config.go:190. If that default ever
+			// moves, this check needs to follow it; a regression test
+			// in internal/config covers that the rewritten path
+			// actually creates and the default does not.
+			defaulted := cfg.State.BoltPath == "" || cfg.State.BoltPath == "/var/lib/crewship/state.db"
+			if !cfgBoltPathFromEnv() && defaulted {
 				cfg.State.BoltPath = filepath.Join(dataDir.Root, "state.db")
 			}
 		}

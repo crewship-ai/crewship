@@ -1,6 +1,7 @@
 package secrets
 
 import (
+	"context"
 	"io/fs"
 	"log/slog"
 	"os"
@@ -31,7 +32,7 @@ func TestLoadOrGenerate_FirstRun_GeneratesPersistsAndSetsEnv(t *testing.T) {
 	scrubEnv(t)
 	dir := t.TempDir()
 
-	if err := LoadOrGenerate(dir, silentLogger()); err != nil {
+	if err := LoadOrGenerate(context.Background(), dir, silentLogger()); err != nil {
 		t.Fatalf("LoadOrGenerate first run: %v", err)
 	}
 
@@ -74,8 +75,9 @@ func TestLoadOrGenerate_FirstRun_GeneratesPersistsAndSetsEnv(t *testing.T) {
 func TestLoadOrGenerate_SecondRun_ReadsFromFile(t *testing.T) {
 	scrubEnv(t)
 	dir := t.TempDir()
+	ctx := context.Background()
 
-	if err := LoadOrGenerate(dir, silentLogger()); err != nil {
+	if err := LoadOrGenerate(ctx, dir, silentLogger()); err != nil {
 		t.Fatalf("first run: %v", err)
 	}
 	firstRunValues := map[string]string{}
@@ -92,7 +94,7 @@ func TestLoadOrGenerate_SecondRun_ReadsFromFile(t *testing.T) {
 	}
 
 	scrubEnv(t)
-	if err := LoadOrGenerate(dir, silentLogger()); err != nil {
+	if err := LoadOrGenerate(ctx, dir, silentLogger()); err != nil {
 		t.Fatalf("second run: %v", err)
 	}
 
@@ -114,9 +116,10 @@ func TestLoadOrGenerate_SecondRun_ReadsFromFile(t *testing.T) {
 func TestLoadOrGenerate_EnvVarWinsOverFile(t *testing.T) {
 	scrubEnv(t)
 	dir := t.TempDir()
+	ctx := context.Background()
 
 	// First run to plant a file with generated values.
-	if err := LoadOrGenerate(dir, silentLogger()); err != nil {
+	if err := LoadOrGenerate(ctx, dir, silentLogger()); err != nil {
 		t.Fatalf("first run: %v", err)
 	}
 	fileValue := os.Getenv("ENCRYPTION_KEY")
@@ -130,7 +133,7 @@ func TestLoadOrGenerate_EnvVarWinsOverFile(t *testing.T) {
 		"deadbeef" + "deadbeef" + "deadbeef" + "deadbeef"
 	t.Setenv("ENCRYPTION_KEY", overrideKey)
 
-	if err := LoadOrGenerate(dir, silentLogger()); err != nil {
+	if err := LoadOrGenerate(ctx, dir, silentLogger()); err != nil {
 		t.Fatalf("override run: %v", err)
 	}
 
@@ -151,15 +154,16 @@ func TestLoadOrGenerate_EnvVarWinsOverFile(t *testing.T) {
 func TestLoadOrGenerate_PartialFile_FillsMissingOnes(t *testing.T) {
 	scrubEnv(t)
 	dir := t.TempDir()
+	ctx := context.Background()
 
 	// Plant a file with only ENCRYPTION_KEY; NEXTAUTH_SECRET should
 	// be generated and appended on the next run.
 	plantedKey := strings.Repeat("ab", 32) // 64 hex chars
-	if err := writeFile(SecretsFilePath(dir), map[string]string{"ENCRYPTION_KEY": plantedKey}); err != nil {
+	if err := writeFile(ctx, SecretsFilePath(dir), map[string]string{"ENCRYPTION_KEY": plantedKey}); err != nil {
 		t.Fatalf("plant file: %v", err)
 	}
 
-	if err := LoadOrGenerate(dir, silentLogger()); err != nil {
+	if err := LoadOrGenerate(ctx, dir, silentLogger()); err != nil {
 		t.Fatalf("LoadOrGenerate: %v", err)
 	}
 
@@ -184,7 +188,7 @@ func TestLoadOrGenerate_PartialFile_FillsMissingOnes(t *testing.T) {
 
 func TestLoadOrGenerate_EmptyDataDir_Errors(t *testing.T) {
 	scrubEnv(t)
-	if err := LoadOrGenerate("", silentLogger()); err == nil {
+	if err := LoadOrGenerate(context.Background(), "", silentLogger()); err == nil {
 		t.Error("expected error for empty dataDir, got nil")
 	}
 }
@@ -192,6 +196,7 @@ func TestLoadOrGenerate_EmptyDataDir_Errors(t *testing.T) {
 func TestLoadOrGenerate_PreservesUnknownKeysOnDisk(t *testing.T) {
 	scrubEnv(t)
 	dir := t.TempDir()
+	ctx := context.Background()
 
 	// Plant a file containing a key we don't manage. On the next
 	// boot we should leave it alone — readFile keeps it, and since
@@ -200,14 +205,14 @@ func TestLoadOrGenerate_PreservesUnknownKeysOnDisk(t *testing.T) {
 	// missing managed key forces a regen), the unknown key must
 	// round-trip back to disk.
 	planted := map[string]string{
-		"ENCRYPTION_KEY":          strings.Repeat("ab", 32),
+		"ENCRYPTION_KEY":            strings.Repeat("ab", 32),
 		"SOME_CUSTOM_OPERATOR_FLAG": "yes",
 	}
-	if err := writeFile(SecretsFilePath(dir), planted); err != nil {
+	if err := writeFile(ctx, SecretsFilePath(dir), planted); err != nil {
 		t.Fatalf("plant: %v", err)
 	}
 
-	if err := LoadOrGenerate(dir, silentLogger()); err != nil {
+	if err := LoadOrGenerate(ctx, dir, silentLogger()); err != nil {
 		t.Fatalf("LoadOrGenerate: %v", err)
 	}
 
@@ -220,12 +225,30 @@ func TestLoadOrGenerate_PreservesUnknownKeysOnDisk(t *testing.T) {
 	}
 }
 
+func TestLoadOrGenerate_RespectsCancelledContext(t *testing.T) {
+	scrubEnv(t)
+	dir := t.TempDir()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := LoadOrGenerate(ctx, dir, silentLogger())
+	if err == nil {
+		t.Fatal("expected error from cancelled context, got nil")
+	}
+	// The file must not exist — we cancelled before any generation
+	// could persist.
+	if _, statErr := os.Stat(SecretsFilePath(dir)); !os.IsNotExist(statErr) {
+		t.Errorf("expected secrets file to not exist after cancelled bootstrap; stat err = %v", statErr)
+	}
+}
+
 func TestWriteFile_AtomicReplace(t *testing.T) {
 	// Ensure the rename leaves no stray .tmp siblings behind.
 	dir := t.TempDir()
 	path := filepath.Join(dir, secretsFileName)
 
-	if err := writeFile(path, map[string]string{"A": "1"}); err != nil {
+	if err := writeFile(context.Background(), path, map[string]string{"A": "1"}); err != nil {
 		t.Fatalf("writeFile: %v", err)
 	}
 	entries, err := os.ReadDir(dir)
@@ -295,7 +318,7 @@ func TestWriteFile_PermissionsOnDirAndFile(t *testing.T) {
 
 	dir := t.TempDir()
 	path := filepath.Join(dir, secretsFileName)
-	if err := writeFile(path, map[string]string{"K": "v"}); err != nil {
+	if err := writeFile(context.Background(), path, map[string]string{"K": "v"}); err != nil {
 		t.Fatalf("writeFile: %v", err)
 	}
 	info, err := os.Stat(path)
