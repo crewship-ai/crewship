@@ -8,6 +8,7 @@ import (
 	"log/slog"
 
 	"github.com/crewship-ai/crewship/internal/encryption"
+	"github.com/crewship-ai/crewship/internal/hooks"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/llm"
 	"github.com/crewship-ai/crewship/internal/lookout"
@@ -132,6 +133,84 @@ func (r *LLMRunner) RunStep(ctx context.Context, req AgentStepRequest) (AgentSte
 		AgentID:     authorAgentID,
 	}
 	ctx = lookout.WithScope(ctx, scope)
+
+	// Per-routine input-guard action override. The DSL plumbs through
+	// AgentStepRequest.InputGuardAction (empty leaves the default).
+	// We pass the string through WithAction; the helper coerces empty
+	// to no-op so we don't have to branch here.
+	if req.InputGuardAction != "" {
+		ctx = lookout.WithAction(ctx, lookout.GuardAction(req.InputGuardAction))
+	}
+
+	// Wire the hooks subsystem to the guardrail event. When the input
+	// guard fires, dispatch on_guardrail_triggered so workspace admins
+	// can route the signal to Slack / PagerDuty / a webhook without
+	// scraping the journal. Failures log but don't change the guard's
+	// verdict — a blocked call is still blocked even if the alert
+	// channel is down.
+	if r.db != nil && r.journal != nil {
+		dbCopy, journCopy, loggerCopy := r.db, r.journal, r.logger
+		ctx = lookout.WithGuardListener(ctx, func(hctx context.Context, direction string, findings []lookout.Finding) {
+			if len(findings) == 0 {
+				return
+			}
+			// Pick the most severe finding to drive the hook's Severity
+			// + Kind fields (one event represents one guardrail trip,
+			// not N events) but include the FULL findings list in the
+			// payload so a SIEM integration can audit every detection
+			// rather than just the headline. After per-occurrence emit
+			// for ZW + RTL bypass fixes, a single payload commonly
+			// produces 2-4 findings — the headline-only signature
+			// dropped all but the first.
+			primary := findings[0]
+			for _, f := range findings[1:] {
+				if lookout.SeverityRank(f.Severity) > lookout.SeverityRank(primary.Severity) {
+					primary = f
+				}
+			}
+			summary := make([]map[string]any, 0, len(findings))
+			for _, f := range findings {
+				summary = append(summary, map[string]any{
+					"kind":      string(f.Kind),
+					"severity":  string(f.Severity),
+					"detail":    f.Detail,
+					"matched":   f.Matched,
+					"position":  f.Position,
+					"match_end": f.MatchEnd,
+				})
+			}
+			if err := hooks.Dispatch(hctx, dbCopy, journCopy, hooks.EventOnGuardrailTriggered, hooks.EventContext{
+				WorkspaceID: req.WorkspaceID,
+				CrewID:      req.AuthorCrewID,
+				AgentID:     authorAgentID,
+				Severity:    string(primary.Severity),
+				Payload: map[string]any{
+					"direction":     direction,
+					"kind":          string(primary.Kind),
+					"detail":        primary.Detail,
+					"matched":       primary.Matched,
+					"findings":      summary,
+					"finding_count": len(findings),
+					"pipeline_id":   req.PipelineID,
+					"pipeline_run":  req.PipelineRunID,
+					"step_id":       req.StepID,
+					"agent_slug":    req.AgentSlug,
+				},
+			}); err != nil {
+				// Surface integration outages — without this, an operator
+				// expecting guardrail alerts has no way to tell they've
+				// gone silent. The error is the inner dispatcher's
+				// (HTTP webhook timeout, subagent failure, etc.).
+				loggerCopy.Warn("guardrail hook dispatch failed",
+					"err", err,
+					"workspace_id", req.WorkspaceID,
+					"crew_id", req.AuthorCrewID,
+					"kind", string(primary.Kind),
+					"finding_count", len(findings),
+				)
+			}
+		})
+	}
 
 	// Build the LLM request. We pass the resolved system prompt
 	// + the pipeline's rendered prompt as a single user turn.

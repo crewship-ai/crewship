@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 
 	"github.com/crewship-ai/crewship/internal/journal"
 )
@@ -18,7 +19,96 @@ const (
 	// request. Callers MUST attach a Scope before invoking the guards
 	// (typically in the HTTP handler chain that wraps the agent runner).
 	ctxKeyScope ctxKey = iota
+
+	// ctxKeyAction overrides the default block-on-detect behaviour for
+	// the input guard so a per-routine config can opt into softer
+	// modes ("sanitize" or "log") without forking the guard
+	// implementation. Defaults to GuardActionBlock when unset, which
+	// preserves backwards-compat with every caller that pre-dates this
+	// feature.
+	ctxKeyAction
 )
+
+// GuardAction is the policy a routine can attach to its input-guard
+// scan. The default GuardActionBlock matches Crewship's historical
+// "refuse the call" behaviour. Sanitize replaces the matched span with
+// a redaction marker and lets the (now-defanged) text through. Log
+// emits the journal entry but passes the text through unchanged — the
+// right choice when an operator wants production telemetry on injection
+// attempts without breaking a noisy upstream that occasionally trips
+// the heuristic on benign content.
+type GuardAction string
+
+const (
+	GuardActionBlock    GuardAction = "block"
+	GuardActionSanitize GuardAction = "sanitize"
+	GuardActionLog      GuardAction = "log"
+)
+
+// WithAction returns a derived context carrying a non-default guard
+// action. The orchestrator's RunAgent wires this from per-routine
+// config so a routine flagged "log-only" doesn't refuse user prompts
+// that match the heuristic.
+func WithAction(ctx context.Context, action GuardAction) context.Context {
+	if action == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, ctxKeyAction, action)
+}
+
+// ActionFromContext returns the configured guard action or
+// GuardActionBlock when none was attached. Always returns a usable
+// value so callers don't have to nil-check.
+func ActionFromContext(ctx context.Context) GuardAction {
+	if v, ok := ctx.Value(ctxKeyAction).(GuardAction); ok && v != "" {
+		return v
+	}
+	return GuardActionBlock
+}
+
+// GuardListener is invoked synchronously when InputGuard detects one
+// or more findings. It's the integration hook for the hooks package —
+// callers that want an external system (Slack, PagerDuty, the hooks
+// subsystem) notified on every guardrail trip attach a listener via
+// WithGuardListener BEFORE invoking the guard. Empty listener means
+// "no external notification beyond the journal entry."
+//
+// Signature carries the FULL list of findings, not just the
+// highest-severity one. An earlier signature passed a single primary
+// Finding which silently dropped subsequent findings of the same
+// scan — after the per-occurrence emit shipped for ZW + RTL bypass
+// fixes, a payload with ZWSP + ZWJ + RTL would produce three
+// findings but the listener only learned about one. SIEM
+// integrations need the whole set to record what was actually
+// present.
+//
+// The listener runs in the same goroutine as the guard, so callers
+// should keep it cheap or dispatch asynchronously inside. The lookout
+// package deliberately doesn't goroutine the call itself: synchronous
+// notification preserves the existing latency contract and lets the
+// listener participate in the request's cancellation.
+type GuardListener func(ctx context.Context, direction string, findings []Finding)
+
+// guardListenerKey is the context-value type for GuardListener. Kept
+// as a struct{} so adding more context keys doesn't conflict.
+type guardListenerKey struct{}
+
+// WithGuardListener returns a derived context carrying fn so InputGuard
+// will invoke it on every finding. Pass nil to clear an inherited
+// listener — useful in tests that want to assert a code path doesn't
+// fire the hook even when called from a context that would normally
+// have one.
+func WithGuardListener(ctx context.Context, fn GuardListener) context.Context {
+	return context.WithValue(ctx, guardListenerKey{}, fn)
+}
+
+// GuardListenerFromContext extracts the listener attached by
+// WithGuardListener. Returns nil when none was set — callers must
+// nil-check before invoking.
+func GuardListenerFromContext(ctx context.Context) GuardListener {
+	v, _ := ctx.Value(guardListenerKey{}).(GuardListener)
+	return v
+}
 
 // Scope identifies which workspace/crew/agent the guard is acting on.
 // Mirrored after journal.Scope but kept separate so callers don't have to
@@ -84,8 +174,8 @@ func InputGuard(j journal.Emitter) Middleware {
 		if result.Verdict != VerdictBlock {
 			return text, nil
 		}
-		// Pick the highest-severity finding for the BlockedError; this is
-		// the one the operator most cares about.
+		// Pick the highest-severity finding for the journal entry + the
+		// BlockedError; this is the one the operator most cares about.
 		primary := result.Findings[0]
 		for _, f := range result.Findings[1:] {
 			if severityRank(f.Severity) > severityRank(primary.Severity) {
@@ -93,12 +183,127 @@ func InputGuard(j journal.Emitter) Middleware {
 			}
 		}
 		emitErr := emitGuardEntry(ctx, j, journal.EntryGuardrailInput, "input", result, primary)
-		blocked := &BlockedError{Direction: "input", Finding: primary}
-		if emitErr != nil {
-			return "", errors.Join(blocked, emitErr)
+
+		// Fire the integration hook BEFORE we branch on action. The
+		// listener should see every trip even in log-mode runs — that's
+		// the whole point of log mode (observability without breaking
+		// the user). Done after emitGuardEntry so the journal row
+		// already exists by the time the listener runs and any sync
+		// downstream consumer can correlate via trace_id.
+		//
+		// Pass ALL findings, not just primary. After the per-occurrence
+		// emit for zero-width/RTL the listener used to lose every
+		// finding except the first; a SIEM integration would never
+		// know a payload chained ZWSP + ZWJ.
+		if listener := GuardListenerFromContext(ctx); listener != nil {
+			listener(ctx, "input", result.Findings)
 		}
-		return "", blocked
+
+		// Branch on the configured action. Block (default) refuses the
+		// call; Sanitize masks every match in-place and returns the
+		// reformed text; Log lets the original through unchanged
+		// because the operator opted into observability-only mode.
+		//
+		// Soft modes (sanitize / log) explicitly DO NOT propagate
+		// emitErr to the caller. emitGuardEntry is best-effort audit
+		// — returning its error from a "let it through" path turns
+		// the soft action into a hard failure for every caller that
+		// treats non-nil err as "the guard refused this call." Block
+		// mode keeps the errors.Join(blocked, emitErr) wrap because
+		// blocked IS the failure signal and any join with it stays a
+		// failure. The emit error is still in the slog/log fallback
+		// from emitGuardEntry so operators can spot a sick journal
+		// emitter without it derailing live calls.
+		switch ActionFromContext(ctx) {
+		case GuardActionSanitize:
+			return sanitizeFindings(text, result.Findings), nil
+		case GuardActionLog:
+			return text, nil
+		default:
+			blocked := &BlockedError{Direction: "input", Finding: primary}
+			if emitErr != nil {
+				return "", errors.Join(blocked, emitErr)
+			}
+			return "", blocked
+		}
 	}
+}
+
+// sanitizeFindings replaces each Finding's authoritative byte range
+// [Position, MatchEnd) with a "[REDACTED]" marker. Critical correctness
+// note: an earlier version of this function used
+// `strings.ReplaceAll(text, f.Matched, "[REDACTED]")`. That was BROKEN
+// for two real-world cases and silently let injections through:
+//
+//  1. Long regex matches. ScanInput truncates Matched to 80 runes
+//     before stamping the Finding (Matched is for display, not for
+//     replacement). A jailbreak prose match longer than 80 chars is
+//     truncated with a "…" suffix, so the literal is no longer a
+//     substring of the source text and ReplaceAll matches nothing.
+//
+//  2. Unicode findings. Zero-width and RTL-override findings carry
+//     a synthetic Matched like "U+202E", not the actual codepoint, so
+//     ReplaceAll never finds them in the text and the attacker's
+//     filename-spoof / homoglyph payload passes through verbatim.
+//
+// Offset-based replacement using Position + MatchEnd dodges both. We
+// sort findings descending by Position so a left-to-right rewrite
+// preserves the offsets of later replacements (replacing earlier in
+// the string would shift later positions). Findings with no valid
+// span (Position < 0 or MatchEnd <= Position) are skipped — those
+// come from synthetic sources (secrets scanner pre-MatchEnd) that
+// don't carry a byte range; better to leave them than corrupt the
+// text.
+//
+// Overlapping spans are coalesced into the outermost: if finding A
+// covers [10, 25) and finding B covers [15, 22), the second
+// replacement is skipped because its range is already covered by the
+// [REDACTED] marker. This matches the user-facing contract — one
+// matched region, one redaction marker.
+func sanitizeFindings(text string, findings []Finding) string {
+	// Collect valid spans only. Each span is [start, end) into text.
+	type span struct{ start, end int }
+	spans := make([]span, 0, len(findings))
+	for _, f := range findings {
+		if f.Position < 0 || f.MatchEnd <= f.Position || f.MatchEnd > len(text) {
+			continue
+		}
+		spans = append(spans, span{f.Position, f.MatchEnd})
+	}
+	if len(spans) == 0 {
+		return text
+	}
+
+	// Sort ascending by start so we can coalesce overlaps into the
+	// outermost range. After this pass `coalesced` holds non-overlapping,
+	// strictly-increasing ranges.
+	sort.Slice(spans, func(i, j int) bool { return spans[i].start < spans[j].start })
+	coalesced := spans[:0]
+	cur := spans[0]
+	for _, s := range spans[1:] {
+		if s.start <= cur.end {
+			if s.end > cur.end {
+				cur.end = s.end
+			}
+			continue
+		}
+		coalesced = append(coalesced, cur)
+		cur = s
+	}
+	coalesced = append(coalesced, cur)
+
+	// Rewrite right-to-left so each replacement leaves earlier offsets
+	// intact. The marker is fixed — we don't try to preserve length
+	// (a "[REDACTED]" string of a different length than the original
+	// is intentional; the goal is to defang the injection, not to
+	// preserve any downstream prompt's byte layout).
+	const marker = "[REDACTED]"
+	out := text
+	for i := len(coalesced) - 1; i >= 0; i-- {
+		s := coalesced[i]
+		out = out[:s.start] + marker + out[s.end:]
+	}
+	return out
 }
 
 // OutputGuard returns a middleware that scans LLM/tool output for secrets
@@ -187,7 +392,16 @@ func journalSeverityFor(s Severity) journal.Severity {
 	}
 }
 
-func severityRank(s Severity) int {
+// SeverityRank returns an integer ordering of the Severity values so
+// callers can pick the highest-severity Finding from a slice without
+// duplicating the switch. Used by external callers (pipeline runner
+// hook bridge) to drive a single hook event's primary kind off the
+// most-severe finding while still passing the full slice in payload.
+//
+// Higher rank = more severe. Unknown values rank 0 (below low) so a
+// mis-typed Severity sorts at the bottom rather than accidentally
+// outranking real findings.
+func SeverityRank(s Severity) int {
 	switch s {
 	case SeverityCritical:
 		return 4
@@ -200,3 +414,7 @@ func severityRank(s Severity) int {
 	}
 	return 0
 }
+
+// severityRank is the internal alias kept for the existing in-package
+// callers; new code should use the exported SeverityRank.
+func severityRank(s Severity) int { return SeverityRank(s) }

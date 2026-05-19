@@ -53,9 +53,14 @@ An SRE looking at a slow trace must see every contributor: budget check, guardra
 
 **Load-bearing.** Running Lookout INSIDE Paymaster means: **if Lookout blocks the call, no `cost_ledger` row is written because `next.Call` is never invoked.** A blocked call is not a billable call. If the order were reversed, Paymaster would record a ledger row for work that never reached the provider.
 
-### 4. Caching (future) inside lookout
+### 4. Caching (provider-side) below lookout
 
-Reserved slot. A cache hit must still flow through Paymaster for hit-event accounting but bypass Lookout (we already scanned the prompt on the first call) and the provider. Anthropic's own prompt caching is handled wire-side in `anthropic.go` today.
+A future request-level cache layer would sit here. Anthropic and OpenAI prompt caching is handled wire-side today:
+
+- **Anthropic** — `internal/llm/anthropic.go` ships `anthropic-beta: prompt-caching-2024-07-31` by default and stamps `cache_control: ephemeral` on the system prompt and the last tool definition (tool schemas are usually large and stable across turns — single highest-leverage breakpoint). Response usage parses `cache_read_input_tokens` + `cache_creation_input_tokens`.
+- **OpenAI** — auto-activates for prompts ≥1024 tokens (Sept 2025). Response usage parses `prompt_tokens_details.cached_tokens` (no separate creation counter).
+
+Both counts plumb through `Response.CachedInputToks` + `.CacheCreationToks` into `paymaster.CallResponse` and onto the `cost_ledger` row + the OTel `llm.call` span. See [Paymaster](/guides/paymaster#prompt-cache-token-flow) and [Tracing](/guides/tracing#prompt-cache-attributes) for the downstream details.
 
 ### 5. Base provider innermost
 

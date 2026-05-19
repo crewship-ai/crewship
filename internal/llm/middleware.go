@@ -167,19 +167,23 @@ func (s *streamCaller) Call(ctx context.Context, req paymaster.CallRequest) (pay
 		var partial paymaster.CallResponse
 		if resp != nil {
 			partial = paymaster.CallResponse{
-				Output:       resp,
-				InputTokens:  int64(resp.InputToks),
-				OutputTokens: int64(resp.OutputToks),
-				CompletedAt:  time.Now().UTC(),
+				Output:              resp,
+				InputTokens:         int64(resp.InputToks),
+				OutputTokens:        int64(resp.OutputToks),
+				CachedInputTokens:   int64(resp.CachedInputToks),
+				CacheCreationTokens: int64(resp.CacheCreationToks),
+				CompletedAt:         time.Now().UTC(),
 			}
 		}
 		return partial, err
 	}
 	return paymaster.CallResponse{
-		Output:       resp,
-		InputTokens:  int64(resp.InputToks),
-		OutputTokens: int64(resp.OutputToks),
-		CompletedAt:  time.Now().UTC(),
+		Output:              resp,
+		InputTokens:         int64(resp.InputToks),
+		OutputTokens:        int64(resp.OutputToks),
+		CachedInputTokens:   int64(resp.CachedInputToks),
+		CacheCreationTokens: int64(resp.CacheCreationToks),
+		CompletedAt:         time.Now().UTC(),
 	}, nil
 }
 
@@ -200,10 +204,12 @@ func (c providerCaller) Call(ctx context.Context, req paymaster.CallRequest) (pa
 		return paymaster.CallResponse{}, err
 	}
 	return paymaster.CallResponse{
-		Output:       resp,
-		InputTokens:  int64(resp.InputToks),
-		OutputTokens: int64(resp.OutputToks),
-		CompletedAt:  time.Now().UTC(),
+		Output:              resp,
+		InputTokens:         int64(resp.InputToks),
+		OutputTokens:        int64(resp.OutputToks),
+		CachedInputTokens:   int64(resp.CachedInputToks),
+		CacheCreationTokens: int64(resp.CacheCreationToks),
+		CompletedAt:         time.Now().UTC(),
 	}, nil
 }
 

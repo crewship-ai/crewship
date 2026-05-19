@@ -47,6 +47,13 @@ export interface ChatTurn {
   parts: TurnPart[]
   isStreaming: boolean
   timestamp: Date
+  /** Per-turn metadata. Currently only `trace_id` is consumed (by the
+   *  feedback store to link signals back to the OTel trace that
+   *  produced the message). Backend wiring is not yet shipped — see
+   *  the open follow-up in the feedback guide — so this field is
+   *  populated only when the WebSocket event carries it, and is
+   *  always optional for downstream readers. */
+  metadata?: { trace_id?: string }
 }
 
 // --- Legacy types (kept for history loading compatibility) ---

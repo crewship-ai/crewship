@@ -47,7 +47,63 @@ type DSL struct {
 	// pipelines; use MaxCostUSD to STOP one already in flight from
 	// going further into the red.
 	MaxCostUSD float64 `json:"max_cost_usd,omitempty"`
-	Steps      []Step  `json:"steps"`
+	// Guardrails configures input/output safety scanning per routine.
+	// Empty leaves the platform defaults (input guard = hard block on
+	// any high-severity match). A routine can opt into "sanitize" or
+	// "log" modes when its upstream produces text that occasionally
+	// trips the heuristic on benign content.
+	Guardrails *GuardrailsConfig `json:"guardrails,omitempty"`
+	// Eval configures continuous grading of production runs of this
+	// routine. The online sampler reads sample_rate to decide whether
+	// to enqueue a completed run for rubric grading via grader_agent.
+	// Empty leaves online grading disabled (existing replay/regression
+	// suites still work).
+	Eval  *EvalConfig `json:"eval,omitempty"`
+	Steps []Step      `json:"steps"`
+}
+
+// EvalConfig groups eval-time configuration. Currently scoped to
+// online sampling; future iterations may add baseline_dataset_id for
+// the regression suite + alert_thresholds for the drift detector.
+type EvalConfig struct {
+	Online *OnlineEvalConfig `json:"online,omitempty"`
+}
+
+// OnlineEvalConfig is the sampling policy for production traffic.
+// SampleRate=0.05 means "grade 5% of completed runs"; SampleRate=0
+// disables sampling for this routine; SampleRate=1.0 grades every
+// run (expensive — typically only set for newly-launched routines
+// while the grader's calibration is being verified). GraderAgentSlug
+// references an agent in the routine's author crew that exposes a
+// rubric grader prompt (same shape as Step.Outcomes.Grader).
+type OnlineEvalConfig struct {
+	SampleRate      float64 `json:"sample_rate"`
+	GraderAgentSlug string  `json:"grader_agent_slug,omitempty"`
+}
+
+// GuardrailsConfig is the per-routine safety policy. Currently scoped
+// to input-side prompt-injection scanning; future iterations may add
+// per-routine output PII rules + LLM-based classifiers as a second
+// tier behind the regex heuristic.
+type GuardrailsConfig struct {
+	Input *InputGuardrailsConfig `json:"input,omitempty"`
+}
+
+// InputGuardrailsConfig carries the prompt-injection scan policy. The
+// only knob today is the verdict action — block (default), sanitize
+// (replace matched spans, let the text through), or log (pass through
+// and emit a journal entry only).
+type InputGuardrailsConfig struct {
+	PromptInjection *PromptInjectionConfig `json:"prompt_injection,omitempty"`
+}
+
+// PromptInjectionConfig.Action mirrors lookout.GuardAction; kept as a
+// plain string here so the pipeline types package doesn't depend on
+// lookout (the dependency would create a cycle through the executor
+// once we wire the guardrail call site). The executor maps the string
+// to lookout.GuardAction at the call site.
+type PromptInjectionConfig struct {
+	Action string `json:"action,omitempty"` // block | sanitize | log
 }
 
 // ExecutionTier overrides the workspace-level tier mapping for a single
@@ -592,6 +648,13 @@ type AgentStepRequest struct {
 	StepID          string
 	InvokingCrewID  string
 	InvokingAgentID string
+
+	// InputGuardAction is the lookout.GuardAction value derived from the
+	// routine's DSL.Guardrails.Input.PromptInjection.Action. Plain string
+	// here so this package doesn't import lookout (would create a cycle
+	// through the executor's runner). Empty leaves the lookout default
+	// (block on high-severity match).
+	InputGuardAction string
 }
 
 // AgentStepResult is the executor's view of a completed step. The

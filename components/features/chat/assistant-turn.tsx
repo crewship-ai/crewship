@@ -3,6 +3,9 @@
 import { Copy, ThumbsUp, ThumbsDown, AlertCircle, AlertTriangle, Crown, CheckCircle2, Clock, FileText, DollarSign, Zap, CircleDot, HelpCircle, FileCode } from "lucide-react"
 import { useArtifactStore } from "@/stores/artifact-store"
 import { useReactionsStore } from "@/stores/reactions-store"
+import { useEffect } from "react"
+import { useFeedbackStore } from "@/stores/feedback-store"
+import { useSession } from "@/hooks/use-auth"
 import { ReactionPicker } from "./reactions/reaction-picker"
 import { ReactionsRow } from "./reactions/reactions-row"
 import {
@@ -32,6 +35,11 @@ interface AssistantTurnProps {
    *  tests), the affordance is hidden rather than risk cross-agent
    *  reads/writes against the global artifact store. */
   agentId?: string
+  /** Active chat id — passed into feedback POSTs so the row lands in
+   *  the workspace the chat belongs to (the server derives via
+   *  chats.workspace_id) rather than the user's primary workspace
+   *  fallback. Optional; tests can omit it. */
+  chatId?: string
 }
 
 function formatDuration(ms: number): string {
@@ -415,7 +423,7 @@ function DelegationContent({ content }: { content: string }) {
   )
 }
 
-export function AssistantTurn({ turn, onCopy, onFileClick, agentId }: AssistantTurnProps) {
+export function AssistantTurn({ turn, onCopy, onFileClick, agentId, chatId }: AssistantTurnProps) {
   // Collect all text content for copy action
   const fullText = turn.parts
     .filter((p) => p.type === "text")
@@ -530,18 +538,7 @@ export function AssistantTurn({ turn, onCopy, onFileClick, agentId }: AssistantT
 
       {/* Actions (only when done streaming and has text content) */}
       {!turn.isStreaming && fullText && !hasDelegation && (
-        <MessageActions>
-          <MessageAction tooltip="Copy" onClick={() => onCopy(fullText)}>
-            <Copy className="h-3.5 w-3.5" />
-          </MessageAction>
-          <MessageAction tooltip="Good response">
-            <ThumbsUp className="h-3.5 w-3.5" />
-          </MessageAction>
-          <MessageAction tooltip="Bad response">
-            <ThumbsDown className="h-3.5 w-3.5" />
-          </MessageAction>
-          <ReactionPicker onPick={(emoji) => useReactionsStore.getState().add(turn.id, emoji)} />
-        </MessageActions>
+        <TurnFeedbackActions turn={turn} onCopy={onCopy} fullText={fullText} chatId={chatId} />
       )}
     </Message>
   )
@@ -557,5 +554,97 @@ function TurnReactions({ turnId, streaming }: { turnId: string; streaming: boole
       onToggle={(emoji) => toggle(turnId, emoji)}
       className="mt-1"
     />
+  )
+}
+
+// TurnFeedbackActions wires the per-turn message actions (Copy / thumbs /
+// emoji picker) into the typed feedback store. The thumbs are kept
+// separate from the open-emoji ReactionPicker on purpose: thumbs are a
+// structured eval signal that the ADLC phase-7 loop reads, while emoji
+// reactions are social/decorative. Mixing them would force the eval
+// dataset builder to filter on Unicode codepoints.
+//
+// chat_id propagation: the chat id is not on the ChatTurn shape today,
+// so we derive it from the pathname only when present. If absent the
+// POST falls back to the user's primary workspace — see the
+// MessageFeedbackHandler in internal/api/message_feedback.go for the
+// fallback semantics.
+function TurnFeedbackActions({
+  turn,
+  onCopy,
+  fullText,
+  chatId,
+}: {
+  turn: ChatTurn
+  onCopy: (content: string) => void
+  fullText: string
+  chatId?: string
+}) {
+  // Bind the feedback store to the authenticated user. Without this,
+  // signing out and back in as a different account on the same browser
+  // would rehydrate the previous user's votes — a privacy leak the
+  // store's setUser action guards against by clearing byTurn on any
+  // user switch (including null → real user on first auth resolve).
+  const session = useSession()
+  const setUser = useFeedbackStore((s) => s.setUser)
+  const boundUserId = useFeedbackStore((s) => s.userId)
+  useEffect(() => {
+    const currentId = session.data?.user.id ?? null
+    if (boundUserId !== currentId) {
+      setUser(currentId)
+    }
+  }, [session.data?.user.id, boundUserId, setUser])
+
+  const submitted = useFeedbackStore((s) => s.byTurn[turn.id]) ?? {}
+  const submit = useFeedbackStore((s) => s.submit)
+  const reset = useFeedbackStore((s) => s.reset)
+
+  // trace_id is plumbed through ChatTurn.metadata when the WS event
+  // for the assistant turn carries it. Backend wiring (orchestrator →
+  // WS payload → useChat → ChatTurn) is a tracked follow-up — until
+  // then this resolves to undefined and the feedback POST simply omits
+  // the field. No double-cast: the optional shape is now part of the
+  // ChatTurn interface in hooks/use-chat.ts.
+  const traceId = turn.metadata?.trace_id
+
+  const handle = (signal: "helpful" | "not_helpful") => {
+    // Per-(turn, signal) sequencing lives inside the store — submit
+    // and reset chain through the same in-flight Promise so a fast
+    // click → click again can't have its DELETE land before the prior
+    // POST creates the row. We don't need to gate at the call site.
+    if (submitted[signal]) {
+      void reset(turn.id, signal)
+      return
+    }
+    void submit(turn.id, signal, { chatId, traceId })
+  }
+
+  return (
+    <MessageActions>
+      <MessageAction tooltip="Copy" onClick={() => onCopy(fullText)}>
+        <Copy className="h-3.5 w-3.5" />
+      </MessageAction>
+      <MessageAction
+        tooltip={submitted.helpful ? "Marked good — click to undo" : "Good response"}
+        onClick={() => handle("helpful")}
+        aria-pressed={!!submitted.helpful}
+        data-active={submitted.helpful ? "true" : "false"}
+      >
+        <ThumbsUp
+          className={"h-3.5 w-3.5 " + (submitted.helpful ? "text-emerald-500" : "")}
+        />
+      </MessageAction>
+      <MessageAction
+        tooltip={submitted.not_helpful ? "Marked bad — click to undo" : "Bad response"}
+        onClick={() => handle("not_helpful")}
+        aria-pressed={!!submitted.not_helpful}
+        data-active={submitted.not_helpful ? "true" : "false"}
+      >
+        <ThumbsDown
+          className={"h-3.5 w-3.5 " + (submitted.not_helpful ? "text-rose-500" : "")}
+        />
+      </MessageAction>
+      <ReactionPicker onPick={(emoji) => useReactionsStore.getState().add(turn.id, emoji)} />
+    </MessageActions>
   )
 }

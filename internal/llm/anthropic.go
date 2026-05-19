@@ -120,7 +120,13 @@ func (a *Anthropic) buildRequestBody(req Request, stream bool) ([]byte, error) {
 		body["temperature"] = *req.Temperature
 	}
 	if len(req.Tools) > 0 {
-		body["tools"] = toAnthropicTools(req.Tools)
+		// Cache the entire tools array. Tool definitions are usually large
+		// (JSON schemas, descriptions) and stable across turns — a single
+		// cache_control on the LAST tool tells Anthropic to cache
+		// everything up to that point, which covers the whole array.
+		// Counts as one of the 4 cache breakpoints Anthropic allows per
+		// request; the other three remain available for system + history.
+		body["tools"] = toAnthropicToolsCached(req.Tools)
 	}
 	if stream {
 		body["stream"] = true
@@ -145,25 +151,23 @@ type anthropicContentBlock struct {
 	Content   string `json:"content,omitempty"`
 }
 
-type anthropicTool struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	InputSchema any    `json:"input_schema"`
-}
-
 type anthropicResponse struct {
 	Content    []anthropicContentBlock `json:"content"`
 	StopReason string                  `json:"stop_reason"`
 	Usage      struct {
-		InputTokens  int `json:"input_tokens"`
-		OutputTokens int `json:"output_tokens"`
+		InputTokens              int `json:"input_tokens"`
+		OutputTokens             int `json:"output_tokens"`
+		CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+		CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
 	} `json:"usage"`
 }
 
 func (r *anthropicResponse) toResponse() *Response {
 	resp := &Response{
-		InputToks:  r.Usage.InputTokens,
-		OutputToks: r.Usage.OutputTokens,
+		InputToks:         r.Usage.InputTokens,
+		OutputToks:        r.Usage.OutputTokens,
+		CachedInputToks:   r.Usage.CacheReadInputTokens,
+		CacheCreationToks: r.Usage.CacheCreationInputTokens,
 	}
 	switch r.StopReason {
 	case "tool_use":
@@ -227,10 +231,24 @@ func toAnthropicMessage(m Message) anthropicMessage {
 	return anthropicMessage{Role: m.Role, Content: m.Content}
 }
 
-func toAnthropicTools(tools []ToolDef) []anthropicTool {
-	out := make([]anthropicTool, len(tools))
+// toAnthropicToolsCached marshals tools as a heterogeneous []map so the
+// last entry can carry cache_control without polluting anthropicTool with
+// optional fields that don't round-trip cleanly through other call sites
+// (tests, fixtures). The cache breakpoint sits on the final tool;
+// Anthropic interprets that as "cache the prefix up to and including this
+// item," which covers the whole tools array.
+func toAnthropicToolsCached(tools []ToolDef) []map[string]any {
+	out := make([]map[string]any, len(tools))
 	for i, t := range tools {
-		out[i] = anthropicTool(t)
+		m := map[string]any{
+			"name":         t.Name,
+			"description":  t.Description,
+			"input_schema": t.InputSchema,
+		}
+		if i == len(tools)-1 {
+			m["cache_control"] = map[string]string{"type": "ephemeral"}
+		}
+		out[i] = m
 	}
 	return out
 }
@@ -351,8 +369,10 @@ func (a *Anthropic) parseSSEStream(r io.Reader, handler func(StreamEvent) error)
 			} `json:"delta"`
 			Message *anthropicResponse `json:"message"`
 			Usage   *struct {
-				InputTokens  int `json:"input_tokens"`
-				OutputTokens int `json:"output_tokens"`
+				InputTokens              int `json:"input_tokens"`
+				OutputTokens             int `json:"output_tokens"`
+				CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+				CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
 			} `json:"usage"`
 		}
 		if err := json.Unmarshal([]byte(data), &event); err != nil {
@@ -361,8 +381,15 @@ func (a *Anthropic) parseSSEStream(r io.Reader, handler func(StreamEvent) error)
 
 		switch event.Type {
 		case "message_start":
+			// Anthropic ships the full usage block (incl. cache token counts)
+			// on message_start. Both the streaming caller's final.* slots and
+			// the surrounding cache-read/creation slots are populated here
+			// so paymaster + telemetry see a complete picture even if the
+			// stream errors before message_delta.
 			if event.Message != nil {
 				final.InputToks = event.Message.Usage.InputTokens
+				final.CachedInputToks = event.Message.Usage.CacheReadInputTokens
+				final.CacheCreationToks = event.Message.Usage.CacheCreationInputTokens
 			}
 
 		case "content_block_start":

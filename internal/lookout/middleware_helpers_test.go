@@ -107,6 +107,41 @@ func TestBlockedError_IsBlocked_ErrorsAsCompatible(t *testing.T) {
 
 // ---- severityRank ----
 
+// TestSeverityRank_ExportedSurface pins the EXPORTED contract on the
+// public SeverityRank. The exported name is consumed by callers
+// outside this package (e.g. pipeline/runner_llm.go picks the primary
+// finding from a multi-finding GuardListener payload). Internal
+// `severityRank` is exercised below; this test guarantees the
+// exported alias delegates identically. A future refactor that
+// silently drifts the exported signature must trip this assertion
+// instead of breaking downstream packages at build time.
+func TestSeverityRank_ExportedSurface(t *testing.T) {
+	cases := []struct {
+		s    Severity
+		rank int
+	}{
+		{SeverityCritical, 4},
+		{SeverityHigh, 3},
+		{SeverityMedium, 2},
+		{SeverityLow, 1},
+		{Severity("unknown"), 0},
+		{Severity(""), 0},
+	}
+	for _, tc := range cases {
+		t.Run(string(tc.s), func(t *testing.T) {
+			if got := SeverityRank(tc.s); got != tc.rank {
+				t.Errorf("SeverityRank(%q) = %d, want %d", tc.s, got, tc.rank)
+			}
+			// Exported MUST match internal — internal is the alias of
+			// exported per the implementation. Re-asserting here pins
+			// the alias relationship so a future split fails loudly.
+			if SeverityRank(tc.s) != severityRank(tc.s) {
+				t.Errorf("exported SeverityRank diverged from internal severityRank for %q", tc.s)
+			}
+		})
+	}
+}
+
 func TestSeverityRank_OrderedDescending(t *testing.T) {
 	// The exact ordering pin: Critical > High > Medium > Low > unknown.
 	// The guards use this to pick the "primary" finding for the

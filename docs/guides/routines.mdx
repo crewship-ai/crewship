@@ -88,6 +88,8 @@ Minimal valid routine:
 | `egress_targets` | array of string | Declared outbound hosts. Enforced for `http` step. |
 | `credentials_required` | array of CredReq | Declared credential needs (`type` + `scope`). |
 | `max_cost_usd` | number | Runtime cost cap; run aborts if exceeded between steps. |
+| `guardrails` | object | Per-routine [Lookout](/guides/lookout) policy. `guardrails.input.prompt_injection.action`: `block` (default) \| `sanitize` \| `log`. |
+| `eval` | object | Continuous online grading. See [Online eval](#online-eval-sampler) below. |
 
 ### InputSpec
 
@@ -342,6 +344,44 @@ crewship routine waitpoints reject  <token> --comment "needs revision"
 ```
 
 The decision comment is forwarded to the parked run as the wait step's output, so downstream steps can read approval rationale via `{{ steps.<wait_step_id>.output }}`.
+
+## Online eval sampler
+
+The online sampler watches completed routine runs and grades a configurable percentage of them through the existing rubric grader so production traffic continuously feeds the drift detector — not just on-demand replays or scheduled regression suites.
+
+Per-routine DSL:
+
+```yaml
+name: nightly-summary
+eval:
+  online:
+    sample_rate: 0.05              # grade 5% of runs; 0 disables, 1.0 grades every run
+    grader_agent_slug: qa-grader   # references an agent in the AUTHOR crew with a rubric prompt
+```
+
+What happens on a tick (default cadence: every 1 minute):
+
+1. Scan `pipeline_runs WHERE status = 'completed' AND completed_at > watermark`.
+2. For each candidate, resolve the routine DSL. If `eval.online` is absent or `sample_rate <= 0`, skip.
+3. Draw from `crypto/rand`. If the sample lands above `sample_rate`, skip.
+4. Otherwise, INSERT into `eval_runs` with `kind = 'online'`, `status = 'queued'`. The existing grader worker picks it up and writes the result back.
+
+| Field | Notes |
+|---|---|
+| `sample_rate` | Float `[0, 1]`. `0` disables — useful as an incident "pause grading" toggle. `1.0` is expensive but ok for newly-launched routines while calibrating the grader. Realistic prod default: `0.05`. |
+| `grader_agent_slug` | Required when `sample_rate > 0`. Missing grader is treated as a deterministic skip (logged once, no retry storm). |
+
+**Correctness guarantees:**
+
+- **Schema-layer idempotency** — `eval_runs` has a partial `UNIQUE INDEX (pipeline_run_id) WHERE kind='online'`. A duplicate sampler instance or a crash-recovery watermark replay can attempt the same enqueue twice; the second collapses to a no-op rather than queueing twice and double-billing the grader.
+- **`(completed_at, id)` tuple cursor** — parallel fan-out steps that complete at the same nanosecond all get graded; a timestamp-only cursor would orphan siblings.
+- **Stuck-on-error watermark** — a transient per-row error (resolver outage, entropy outage, enqueue conflict) freezes the watermark at the row before the failure so the next tick retries. Deterministic skips (no eval config, sample roll missed) advance normally.
+- **Trace correlation** — the eval row carries `routine_slug` + `pipeline_run_id` so an operator clicking a low-scoring grade in the eval UI lands on the actual trace via `pipeline_run_id` -> [trace](/guides/tracing).
+
+**Limitations:**
+
+- Watermark is in-memory only. On process restart it resets to `now - 1h`; outages longer than that leave a gap in grading coverage. The UNIQUE index keeps reprocessing harmless.
+- Page cap is 500 rows/tick. A workspace processing > 500 routine runs/minute at `sample_rate = 1.0` will accumulate backlog; the watermark only advances past successfully-handled rows, so the backlog drains across subsequent ticks rather than being lost.
 
 ## Validation gates and credential leak guards
 

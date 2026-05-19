@@ -37,10 +37,16 @@ interface TurnRendererProps {
    *  scoped to the agent that produced the turn. Optional; tests and
    *  legacy callers can omit it (the artifact affordance hides itself). */
   agentId?: string
+  /** Active chat id — forwarded to AssistantTurn so feedback rows
+   *  land in the right workspace via the chats.workspace_id derivation
+   *  on the server. Without this, the API falls back to the user's
+   *  primary workspace, which on a multi-workspace user attaches the
+   *  row to the wrong tenant. */
+  chatId?: string
 }
 
 /** Render a single turn (user, assistant, or system). */
-export const TurnRenderer = React.memo(function TurnRenderer({ turn, onCopy, onFileClick, isLastAssistant, onRegenerate, onEditUserMessage, animateAfter, agentId }: TurnRendererProps) {
+export const TurnRenderer = React.memo(function TurnRenderer({ turn, onCopy, onFileClick, isLastAssistant, onRegenerate, onEditUserMessage, animateAfter, agentId, chatId }: TurnRendererProps) {
   const shouldAnimate = animateAfter == null || turn.timestamp.getTime() >= animateAfter
   const initialAnim = shouldAnimate ? arrival.initial : false
   const transition = shouldAnimate ? arrival.transition : { duration: 0 }
@@ -164,7 +170,7 @@ export const TurnRenderer = React.memo(function TurnRenderer({ turn, onCopy, onF
       transition={transition}
       data-turn-id={turn.id}
     >
-      <AssistantTurn turn={turn} onCopy={onCopy} onFileClick={onFileClick} agentId={agentId} />
+      <AssistantTurn turn={turn} onCopy={onCopy} onFileClick={onFileClick} agentId={agentId} chatId={chatId} />
       {isLastAssistant && onRegenerate && !turn.isStreaming && (
         <div className="flex pl-4 -mt-1 mb-2">
           <button

@@ -1,0 +1,123 @@
+---
+title: "Feedback"
+description: "Per-message thumbs / edit / regenerate signals bound to OTel trace_id — the continuous-learning loop for production agents."
+icon: "thumbs-up"
+---
+
+# Feedback
+
+Feedback is Crewship's structured signal layer: thumb-up, thumb-down, "edit", "regenerate", "abandon". It sits alongside open-vocabulary [emoji reactions](/guides/chat-sessions) but exposes a tight six-value enum so the eval pipeline and the [online sampler](/guides/routines#online-eval-sampler) can query a stable target without LIKE-matching codepoints.
+
+## Why feedback (and not reactions)
+
+Reactions are social — 👍 on a message means "I liked this," same UX as Slack. The eval pipeline can't reliably mine that signal across emoji families (👍 vs 👍🏼 vs ☹️ vs 😀), and it can't capture the strongest training signal of all: a user editing the assistant's answer to what they actually wanted.
+
+The `message_feedback` table (migration v96) gives consumers a typed `signal` column with a CHECK constraint, a free-form `reason`, and a `trace_id` link back to the [OTel trace](/guides/tracing) of the run that produced the message. Eval datasets join on `trace_id` to recover the (prompt, original answer, preferred answer, ts) tuple.
+
+## Signal vocabulary
+
+| Signal | Meaning | Source |
+|---|---|---|
+| `helpful` | Explicit thumb-up. | Click handler on `assistant-turn.tsx`. |
+| `not_helpful` | Explicit thumb-down. | Click handler; most common feedback kind. |
+| `inaccurate` | "The answer was wrong" — thumb-down + reason chip. | UI follow-up after thumb-down. |
+| `unsafe` | "This was harmful / leaked secrets." | UI follow-up after thumb-down. |
+| `edit` | User replaced the assistant text with their own. **Highest-quality training signal** — not "this was bad" but "this is what I wanted." `reason` holds the replacement text. | Inline editor. |
+| `regenerate` | User asked for a different answer without editing. Weak negative signal. | Regenerate button. |
+
+Adding a new signal requires both a UI patch and a migration that widens the v96 CHECK clause — the handler validates the enum before any DB work so a renamed value fails fast with a readable 400 instead of a SQLite constraint violation.
+
+## Privacy contract
+
+Feedback is **private to the author**. Even a workspace owner cannot list another member's thumb-downs or "edit" reasons — same threat model as a Slack reaction or a Google Docs comment, where candid signal needs a closed loop with the eval pipeline (server-side, not API-exposed).
+
+| Operation | Visibility |
+|---|---|
+| `POST /api/v1/feedback` | Caller writes their own row. UPSERT semantics. |
+| `GET /api/v1/feedback` | Caller sees ONLY their own rows. `WHERE user_id = ?` is the privacy gate; workspace membership is defense-in-depth. |
+| `DELETE /api/v1/feedback` | Caller removes their own row. |
+| Eval pipeline | Reads all rows server-side (joins on `trace_id`). Not API-exposed. |
+
+The UI's optimistic-update store (`stores/feedback-store.ts`) persists per-user state to `localStorage` and reconciles via the API on submit. A 4xx/5xx response or transport rejection rolls back the optimistic flip so the local state never lies about a row that doesn't exist on the server.
+
+## Trace correlation
+
+Every POST accepts an optional `trace_id`. The intended end state is: the orchestrator stamps the active OTel trace id onto each assistant-message WebSocket event, the frontend lifts it onto `ChatTurn.metadata.trace_id`, and the feedback store passes it into the POST payload — so each feedback row lands indexed for `WHERE trace_id = ?` queries:
+
+```sql
+CREATE INDEX idx_feedback_trace ON message_feedback(trace_id) WHERE trace_id IS NOT NULL;
+```
+
+That powers the "show me every signal for this routine run" eval-mining query: collector trace ID → `message_feedback.trace_id` → all signals filed against that conversation.
+
+<Note>
+  **Current state (PR #447):** the schema, API, frontend store, and `ChatTurn.metadata.trace_id` interface are wired and consume the field when present. The orchestrator → WebSocket → `ChatTurn` propagation is **not yet shipped** — feedback rows for `assistant` turns produced after this PR will land with `trace_id = NULL` until the follow-up lands. The partial index `WHERE trace_id IS NOT NULL` keeps the lookup path cheap regardless. Direct API callers (CLI, eval widgets) that already have the trace id in hand can pass it on POST today.
+</Note>
+
+## UI flow
+
+The chat UI surfaces the signals through `<TurnFeedbackActions>` in `components/features/chat/assistant-turn.tsx`. Behaviour:
+
+1. User clicks thumb → optimistic state flip in the zustand store → background `POST /api/v1/feedback` with `message_id`, `chat_id`, `trace_id`, `signal`.
+2. On `res.ok` → state is the truth. On 4xx/5xx or network reject → roll back; user can retry.
+3. User clicks the same thumb again → `DELETE /api/v1/feedback?message_id=...&signal=...` first, then clear local state on success. A failed delete keeps the local state pointing at "submitted" so a refresh reconciles back to truth.
+
+The store is intentionally async because syncing thumbs through the streaming `useChat` would couple two unrelated concerns. The trade-off is a one-frame flicker on flaky networks; the upside is that the chat path stays unaware of feedback wiring.
+
+## API contract
+
+See the [Feedback API reference](/api-reference/feedback) for the full endpoint catalog. Quick sketch:
+
+```bash
+# Submit
+curl -X POST https://<host>/api/v1/feedback \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "message_id": "msg_abc",
+    "chat_id":    "chat_xyz",
+    "trace_id":   "4f3a...",
+    "signal":     "not_helpful",
+    "reason":     "Wrong tool — should have used the calendar instead."
+  }'
+# → 201 {"id":"fb_..."}
+
+# Retract
+curl -X DELETE 'https://<host>/api/v1/feedback?message_id=msg_abc&signal=not_helpful'
+# → 204 (idempotent: also 204 if the row didn't exist)
+```
+
+## Workspace re-anchoring
+
+The `chat_id` parameter is optional on POST so eval widgets and CLI fallbacks without a chat context can still submit. Without it the server falls back to the caller's most-recent workspace (`ORDER BY workspace_members.created_at DESC LIMIT 1`).
+
+A later POST against the same `(message_id, user_id, signal)` tuple that *does* carry `chat_id` re-anchors the row to the correct workspace via the UPSERT clause:
+
+```sql
+ON CONFLICT(message_id, user_id, signal) DO UPDATE SET
+    workspace_id = excluded.workspace_id,
+    reason       = excluded.reason,
+    trace_id     = COALESCE(excluded.trace_id, message_feedback.trace_id),
+    chat_id      = COALESCE(excluded.chat_id, message_feedback.chat_id)
+```
+
+Without `workspace_id = excluded.workspace_id`, a user with multi-workspace membership who first POSTed from a widget (fallback to workspace A) and later POSTed from their real chat (workspace B) would have the row stuck in A; eval queries scoped to workspace B would miss it.
+
+## Limits
+
+| Field | Limit | Why |
+|---|---|---|
+| `reason` | 4096 chars | "edit" payloads carry the user's replacement text; 4KB is generous without becoming a storage hazard. |
+| `message_id`, `chat_id`, `trace_id` | 256 chars each | 10× longest realistic id (OTel trace_id is 32 hex chars; Crewship CUIDs ~25). Caps a hostile client that POSTs a 10 MB trace_id. |
+| Rows per `(message_id, user_id, signal)` tuple | 1 | UNIQUE constraint. Re-POSTs UPSERT in place. |
+
+## Limitations
+
+- **No server-side hydration of the UI state** on initial load — the frontend reads localStorage; a fresh browser starts with empty state. The server is the truth, and `GET /api/v1/feedback?message_id=...` exposes it for any UI that wants to rehydrate.
+- **No "retracted" signal value** — DELETE removes the row entirely. The eval pipeline distinguishes "row exists" from "row doesn't exist," so a once-thumbed-then-untoggled message reads as "no signal" rather than "explicitly retracted." Future iterations may add a `retracted` value if the distinction starts mattering.
+- **`message_id` ownership is not enforced** — messages live in JSONL files (`chats.jsonl_path`), not a SQL table, so a per-POST file read would slow the path too much. Workspace membership is the trust boundary; cross-tenant probes are still blocked.
+
+## Related
+
+- [Online eval sampler](/guides/routines#online-eval-sampler) — consumes feedback rows by `trace_id` for drift detection.
+- [Tracing](/guides/tracing) — the `trace_id` source.
+- [Chat sessions](/guides/chat-sessions) — sibling reactions store for open emoji.

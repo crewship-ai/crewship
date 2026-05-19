@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"log/slog"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/telemetry"
 )
 
 // ErrPipelineNotFound is returned by Run when a call_pipeline step
@@ -422,7 +424,7 @@ type RunInput struct {
 
 // runDSL is the actual step loop. depth bounds call_pipeline recursion
 // across nested invocations; the top-level Run starts depth at 0.
-func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (*RunResult, error) {
+func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (result *RunResult, err error) {
 	if depth >= MaxNestedPipelineDepth {
 		return nil, ErrMaxDepthExceeded
 	}
@@ -450,6 +452,30 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (*RunResu
 		runID = generateRunID()
 	}
 	startedAt := time.Now()
+
+	// Open the outermost OTel span for this routine run. Every step
+	// span beneath becomes a child via ctx propagation. Top-level only —
+	// nested call_pipeline invocations live as child spans under the
+	// step.run that triggered them, not as siblings, so the trace tree
+	// mirrors the DSL composition.
+	if depth == 0 {
+		runSpanCtx, runSpan := telemetry.StartRoutineRunSpan(ctx, pipelineSlug, runID, pipelineID)
+		ctx = runSpanCtx
+		defer func() {
+			// On panic the named `err` stays nil and the span would
+			// close as OK — operators reading the trace would never
+			// see the crash. Stamp the recovered value as an error
+			// before re-panicking so the runtime's normal unwind
+			// still happens. RecoverPanic preserves the original
+			// crash stack across this and outer recovers via a
+			// *telemetry.PanicWithStack wrapper.
+			if r := recover(); r != nil {
+				telemetry.RecoverPanic(runSpan, r)
+			}
+			telemetry.RecordError(runSpan, err)
+			runSpan.End()
+		}()
+	}
 
 	emit := &pipelineEmitContext{
 		emitter:         e.emitter,
@@ -481,7 +507,7 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (*RunResu
 	// reaches the grader as `in.Inputs = {}` and rubrics that
 	// reference "the original input" can't resolve anything.
 	in.Inputs = inputsForCtx
-	result := &RunResult{
+	result = &RunResult{
 		RunID:        runID,
 		PipelineID:   pipelineID,
 		PipelineSlug: pipelineSlug,
@@ -684,6 +710,26 @@ func (e *Executor) runStep(
 	depth int,
 ) (output string, costUSD float64, durationMs int64, err error) {
 
+	// Wrap every step type in a routine.step span so the trace tree shows
+	// step boundaries even for transform / http / code steps that have no
+	// inner LLM span. Attempt is 0 here — agent_run's own tier-escalation
+	// chain produces sibling step spans at attempt 1, 2, … through
+	// runAgentStep's internal loop where we don't have visibility from
+	// this dispatch level.
+	ctx, span := telemetry.StartRoutineStepSpan(ctx, step.ID, string(step.Type), 0)
+	defer func() {
+		// Same panic-safety pattern as runDSL. This is the INNERMOST
+		// recover in the runStep → runDSL → RunAgent chain, so
+		// RecoverPanic captures debug.Stack() here — the captured
+		// stack points at the original crash location, not at any
+		// later re-panic site. Outer recovers reuse this wrapper.
+		if r := recover(); r != nil {
+			telemetry.RecoverPanic(span, r)
+		}
+		telemetry.RecordError(span, err)
+		span.End()
+	}()
+
 	switch step.Type {
 	case StepAgentRun:
 		return e.runAgentStep(ctx, step, renderedPrompt, primary, fallback, in, runID, pipelineID, emit)
@@ -699,6 +745,34 @@ func (e *Executor) runStep(
 		return e.runTransformStep(step, parentRender)
 	default:
 		return "", 0, 0, fmt.Errorf("unsupported step type %q", step.Type)
+	}
+}
+
+// resolveInputGuardAction reads the routine's per-routine input guard
+// policy and returns the action string the AgentStepRequest carries
+// down to runner_llm.go (which passes it to lookout.WithAction). Empty
+// is the platform default — block on high-severity match — and is
+// returned whenever the DSL omits the guardrails block or any of the
+// nested fields, so a routine without explicit policy keeps the
+// historical behaviour.
+//
+// Returning a string instead of a typed enum lets pipeline/types keep
+// its zero dependency on lookout — adding the typed import would
+// create a cycle the moment lookout takes a pipeline.GuardrailsConfig
+// in any future enrichment.
+func resolveInputGuardAction(dsl *DSL) string {
+	if dsl == nil || dsl.Guardrails == nil || dsl.Guardrails.Input == nil {
+		return ""
+	}
+	pi := dsl.Guardrails.Input.PromptInjection
+	if pi == nil {
+		return ""
+	}
+	switch pi.Action {
+	case "block", "sanitize", "log":
+		return pi.Action
+	default:
+		return ""
 	}
 }
 
@@ -759,18 +833,19 @@ func (e *Executor) runAgentStep(
 			attemptPrompt = injectValidationFeedback(basePrompt, lastValidationReason)
 		}
 		req := AgentStepRequest{
-			WorkspaceID:     in.WorkspaceID,
-			AuthorCrewID:    in.AuthorCrewID,
-			AgentSlug:       step.AgentSlug,
-			Adapter:         am.Adapter,
-			Model:           am.Model,
-			Prompt:          attemptPrompt,
-			TimeoutSec:      step.TimeoutSec,
-			PipelineID:      pipelineID,
-			PipelineRunID:   runID,
-			StepID:          step.ID,
-			InvokingCrewID:  in.InvokingCrewID,
-			InvokingAgentID: in.InvokingAgentID,
+			WorkspaceID:      in.WorkspaceID,
+			AuthorCrewID:     in.AuthorCrewID,
+			AgentSlug:        step.AgentSlug,
+			Adapter:          am.Adapter,
+			Model:            am.Model,
+			Prompt:           attemptPrompt,
+			TimeoutSec:       step.TimeoutSec,
+			PipelineID:       pipelineID,
+			PipelineRunID:    runID,
+			StepID:           step.ID,
+			InvokingCrewID:   in.InvokingCrewID,
+			InvokingAgentID:  in.InvokingAgentID,
+			InputGuardAction: resolveInputGuardAction(in.dsl),
 		}
 		res, err := e.runRunnerWithTransientRetry(ctx, req, step, emit)
 		if err != nil {

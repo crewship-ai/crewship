@@ -1,0 +1,161 @@
+---
+title: "Feedback"
+description: "Per-message feedback signals (thumb-up/down, edit, regenerate) bound to OTel trace_id."
+icon: "thumbs-up"
+---
+
+Endpoints under `/api/v1/feedback` capture structured per-message signal for the [continuous-learning loop](/guides/feedback). All endpoints require authentication; rows are private to the authoring user (no cross-user reads, even within the same workspace).
+
+See the [Feedback guide](/guides/feedback) for the design contract and UI flow.
+
+---
+
+## Create / upsert feedback
+
+```
+POST /api/v1/feedback
+```
+
+Idempotent at the `(message_id, user_id, signal)` tuple. A re-submit with the same triple replaces `reason`, `trace_id`, `chat_id`, and `workspace_id` on the existing row rather than producing a duplicate.
+
+**Request body:**
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `message_id` | string | yes | Turn id from the chat UI. Max 256 chars. |
+| `signal` | enum | yes | One of: `helpful`, `not_helpful`, `inaccurate`, `unsafe`, `edit`, `regenerate`. |
+| `chat_id` | string | no | When provided, the row is scoped to the workspace owning the chat. When absent, fallback to the caller's most-recent workspace. Max 256 chars. |
+| `trace_id` | string | no | OTel trace id linking the row back to the conversation trace. Max 256 chars. |
+| `reason` | string | no | Free-form text. For `edit` signals, holds the replacement text. Max 4096 chars. |
+
+**Response:** `201 Created`
+
+```json
+{ "id": "fb_abc123" }
+```
+
+**Errors:**
+
+| Status | Cause |
+|---|---|
+| `400` | Missing `message_id`, unknown `signal`, `reason` > 4096 chars, any id field > 256 chars, malformed JSON. |
+| `401` | No authenticated user. Returned BEFORE any DB lookup so anonymous probes can't enumerate ids via response codes. |
+| `403` | Authenticated user has no workspace membership (fallback path). |
+| `404` | Provided `chat_id` is not in a workspace the caller belongs to. |
+| `500` | DB write failure. The error body is `{"error":"internal"}` — details land in server logs. |
+
+**Example:**
+
+```bash
+curl -X POST https://api.crewship.local/api/v1/feedback \
+  -b session.txt \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "message_id": "turn_4f3a2c",
+    "chat_id":    "chat_8d1e9b",
+    "trace_id":   "4f3a2c1b8d1e9b00000000000000abcd",
+    "signal":     "not_helpful",
+    "reason":     "Mixed up which calendar to query."
+  }'
+```
+
+---
+
+## List feedback
+
+```
+GET /api/v1/feedback?message_id=<id>
+GET /api/v1/feedback?trace_id=<id>
+```
+
+Exactly one of `message_id` or `trace_id` must be provided. Returns only rows authored by the caller — no cross-user visibility.
+
+**Response:** `200 OK`
+
+```json
+{
+  "feedback": [
+    {
+      "id":          "fb_abc123",
+      "message_id":  "turn_4f3a2c",
+      "chat_id":     "chat_8d1e9b",
+      "trace_id":    "4f3a2c1b8d1e9b00000000000000abcd",
+      "signal":      "not_helpful",
+      "reason":      "Mixed up which calendar to query.",
+      "user_id":     "usr_caller",
+      "created_at":  "2026-05-19T14:23:00Z"
+    }
+  ]
+}
+```
+
+Ordered by `created_at DESC`. Empty array when no matching rows visible to the caller.
+
+**Errors:**
+
+| Status | Cause |
+|---|---|
+| `400` | Neither `message_id` nor `trace_id` provided. |
+| `401` | No authenticated user. |
+| `500` | DB read failure. |
+
+---
+
+## Delete feedback
+
+```
+DELETE /api/v1/feedback?message_id=<id>&signal=<signal>
+```
+
+Removes the caller's row for the given `(message_id, signal)` tuple. Other users' rows on the same message are untouched.
+
+**Query parameters:**
+
+| Param | Type | Required | Notes |
+|---|---|---|---|
+| `message_id` | string | yes | The message the feedback was attached to. |
+| `signal` | enum | yes | Which signal to clear. Same enum as POST. |
+
+**Response:** `204 No Content`
+
+Idempotent: returns 204 even when no row matched, so a client can fire DELETE on every toggle-off click without first checking existence.
+
+**Errors:**
+
+| Status | Cause |
+|---|---|
+| `400` | Missing `message_id` or `signal`; unknown `signal`. |
+| `401` | No authenticated user. |
+| `500` | DB write failure. |
+
+---
+
+## Schema
+
+`message_feedback` table (added in migration v96):
+
+```sql
+CREATE TABLE message_feedback (
+    id           TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    chat_id      TEXT REFERENCES chats(id) ON DELETE CASCADE,
+    message_id   TEXT NOT NULL,
+    trace_id     TEXT,
+    signal       TEXT NOT NULL CHECK (signal IN (
+        'helpful','not_helpful','inaccurate','unsafe','edit','regenerate'
+    )),
+    reason       TEXT,
+    user_id      TEXT REFERENCES users(id) ON DELETE SET NULL,
+    created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(message_id, user_id, signal)
+);
+
+CREATE INDEX idx_feedback_trace
+    ON message_feedback(trace_id) WHERE trace_id IS NOT NULL;
+CREATE INDEX idx_feedback_ws_created
+    ON message_feedback(workspace_id, created_at DESC);
+CREATE INDEX idx_feedback_message
+    ON message_feedback(message_id);
+```
+
+The eval pipeline reads from this table by `trace_id` to join feedback signals onto the routine run that produced them; see [Online eval sampler](/guides/routines#online-eval-sampler).
