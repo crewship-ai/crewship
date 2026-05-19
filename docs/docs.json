@@ -58,7 +58,6 @@
               },
               "guides/orchestration",
               "guides/inbox",
-              "guides/activity",
               {
                 "group": "Routines",
                 "icon": "workflow",
@@ -100,20 +99,28 @@
                   "guides/llm-middleware"
                 ]
               },
+              {
+                "group": "Observability",
+                "icon": "activity",
+                "expanded": false,
+                "pages": [
+                  "guides/crew-journal",
+                  "guides/activity",
+                  "guides/tracing",
+                  "guides/feedback",
+                  "guides/telemetry"
+                ]
+              },
               "guides/scheduling",
               "guides/files-and-output",
               "guides/backup",
-              "guides/crew-journal",
               "guides/paymaster",
               "guides/lookout",
               "guides/harbormaster",
               "guides/cartographer",
               "guides/hooks",
-              "guides/feedback",
               "guides/quartermaster",
               "guides/watch-roster",
-              "guides/telemetry",
-              "guides/tracing",
               "guides/migrations",
               "guides/troubleshooting"
             ]
