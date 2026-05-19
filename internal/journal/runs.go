@@ -105,7 +105,7 @@ func ListRuns(ctx context.Context, db *sql.DB, q RunsQuery) ([]RunAggregated, in
 
 	// terminalIN expands to an IN-list of the terminal entry_types so
 	// the CTE picks them up uniformly.
-	terminalIN := "(" + strings.Trim(strings.Repeat("?,", len(terminalEntryTypes)), ",") + ")"
+	terminalIN := "(" + sqlInPlaceholders(len(terminalEntryTypes)) + ")"
 	terminalArgs := make([]any, 0, len(terminalEntryTypes))
 	for _, t := range terminalEntryTypes {
 		terminalArgs = append(terminalArgs, t)
@@ -287,7 +287,7 @@ func countRuns(ctx context.Context, db *sql.DB, _ RunsQuery,
 	innerConds []string, innerArgs []any,
 	outerConds []string, outerArgs []any,
 	terminalArgs []any) (int, error) {
-	terminalIN := "(" + strings.Trim(strings.Repeat("?,", len(terminalEntryTypes)), ",") + ")"
+	terminalIN := "(" + sqlInPlaceholders(len(terminalEntryTypes)) + ")"
 	q := `
 WITH run_aggregates AS (
     SELECT trace_id,

@@ -1,7 +1,8 @@
 {
   "name": "crewship",
-  "version": "0.1.0",
+  "version": "0.1.0-beta.2",
   "private": true,
+  "packageManager": "pnpm@10.11.0",
   "type": "module",
   "engines": {
     "node": ">=22.13"
@@ -33,7 +34,7 @@
     "@codemirror/language": "^6.12.3",
     "@codemirror/state": "^6.6.0",
     "@codemirror/theme-one-dark": "^6.1.3",
-    "@codemirror/view": "^6.42.1",
+    "@codemirror/view": "^6.43.0",
     "@dagrejs/dagre": "^3.0.0",
     "@dicebear/adventurer": "^9.4.2",
     "@dicebear/avataaars": "^9.4.2",
@@ -57,6 +58,7 @@
     "@streamdown/math": "^1.0.2",
     "@streamdown/mermaid": "^1.0.2",
     "@tanstack/react-query": "^5.100.10",
+    "@tiptap/core": "^3.23.2",
     "@tiptap/extension-code-block-lowlight": "^3.23.2",
     "@tiptap/extension-color": "^3.23.2",
     "@tiptap/extension-highlight": "^3.23.2",
@@ -93,6 +95,7 @@
     "dompurify": "^3.4.2",
     "embla-carousel-react": "^8.6.0",
     "frimousse": "^0.3.0",
+    "highlight.js": "^11.11.1",
     "lowlight": "^3.3.0",
     "lucide-react": "^1.14.0",
     "marked": "^18.0.3",

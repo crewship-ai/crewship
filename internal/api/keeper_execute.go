@@ -175,8 +175,7 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 			envVar = assignedEnvVar
 		} else {
 			// Fallback: derive from credential name
-			envVar = strings.ToUpper(regexp.MustCompile(`[^A-Z0-9]+`).ReplaceAllString(
-				strings.ToUpper(credName), "_"))
+			envVar = envVarSanitizePattern.ReplaceAllString(strings.ToUpper(credName), "_")
 			if envVar == "" || !envVarNamePattern.MatchString(envVar) {
 				envVar = "KEEPER_SECRET"
 			}

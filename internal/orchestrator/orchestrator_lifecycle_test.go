@@ -27,10 +27,10 @@ import (
 type lifecycleFakeContainer struct {
 	mu sync.Mutex
 
-	ensureCalls       int
-	ensureCfg         provider.CrewConfig
-	ensureReturnID    string
-	ensureReturnErr   error
+	ensureCalls     int
+	ensureCfg       provider.CrewConfig
+	ensureReturnID  string
+	ensureReturnErr error
 
 	stopCalls       int
 	stopContainerID string
@@ -64,7 +64,9 @@ func (f *lifecycleFakeContainer) Exec(_ context.Context, _ provider.ExecConfig) 
 func (f *lifecycleFakeContainer) ExecInspect(_ context.Context, _ string) (bool, int, error) {
 	return false, 0, nil
 }
-func (f *lifecycleFakeContainer) CrewContainerName(slug string) string { return "crewship-team-" + slug }
+func (f *lifecycleFakeContainer) CrewContainerName(slug string) string {
+	return "crewship-team-" + slug
+}
 func (f *lifecycleFakeContainer) CopyToContainer(_ context.Context, _, _ string, _ io.Reader) error {
 	return nil
 }

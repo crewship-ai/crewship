@@ -156,6 +156,80 @@ required (Docker, Podman, Colima, OrbStack, or Apple Containers) —
 On first load the web UI walks a 6-step onboarding wizard (workspace
 → crew → agent → credentials → done). Demo data: `crewship seed`.
 
+## After install — what now?
+
+The first thing to run after a fresh install:
+
+```bash
+crewship doctor      # checks container runtime, ports, data dir, deps
+crewship start       # boots the daemon on :8080
+open http://localhost:8080
+```
+
+`crewship doctor` is the friendly diagnostic — it tells you which
+container runtime it found (Docker / Podman / OrbStack / Colima /
+Apple Containers), whether port 8080 is free, and what to install if
+something is missing. Run it first; it never starts the server.
+
+`crewship start` boots the daemon in the foreground (Ctrl-C stops
+it). Run with `--background` on macOS/Linux to detach. The
+six-step onboarding wizard in the browser walks you through
+workspace → crew → agent → credentials → done.
+
+Stuck? Common patterns by platform:
+
+```bash
+# macOS — Gatekeeper "app can't be opened"
+# (only if you bypass Homebrew and double-click a downloaded binary)
+xattr -d com.apple.quarantine "$(command -v crewship)"
+
+# Linux — daemon won't start on boot
+loginctl enable-linger "$USER"
+systemctl --user enable --now crewship
+
+# Windows — SmartScreen "Don't run"
+# Right-click crewship.exe → Properties → check "Unblock" → OK
+# (one-time per binary; we sign Windows builds later in the beta)
+
+# Anywhere — "no container runtime found"
+crewship doctor      # tells you which runtime, exact install command
+```
+
+Full onboarding walkthrough, including the equivalent CLI flow for
+the wizard, lives in
+[docs/guides/onboarding](docs/guides/onboarding.mdx).
+
+## First crew — CLI walkthrough
+
+The web UI's onboarding wizard is the easy path. If you'd rather wire
+the same setup from your terminal — to script it, dotfile it, or run
+Crewship headless — every step has a `crewship` subcommand:
+
+```bash
+crewship init --email you@example.com --name "You"   # creates the first admin on an empty DB; returns a CLI token
+crewship login --token <token-from-init>             # persists to ~/.crewship/cli-config.yaml
+crewship crew create --name "Engineering" --slug eng --icon code --color blue
+read -rs -p "Anthropic API key: " KEY && \
+  printf '%s' "$KEY" | crewship credential create \
+    --name anthropic-key --type API_KEY --provider ANTHROPIC --value-stdin && \
+  unset KEY
+crewship agent create --name "Viktor" --crew eng --role LEAD \
+  --cli-adapter CLAUDE_CODE --tool-profile CODING --system-prompt @prompts/lead.md
+crewship doctor                                       # verifies Docker, ports, DB, sidecar reachability
+```
+
+Then talk to the agent from the same shell:
+
+```bash
+crewship ask viktor "scaffold a Go HTTP service with a /health endpoint"
+```
+
+Full CLI reference: [docs/cli/overview.mdx](docs/cli/overview.mdx)
+(or [docs.crewship.ai/cli](https://docs.crewship.ai/cli) once the docs
+site is live). Pair an already-running server with a fresh CLI install
+via [docs/guides/cli-pairing.mdx](docs/guides/cli-pairing.mdx) — same
+device-code flow Claude Code itself uses.
+
 ## Build from source (developers)
 
 ```bash

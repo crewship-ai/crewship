@@ -162,7 +162,7 @@ func (h *ProvisioningHandler) sweepOrphanCacheImages(ctx context.Context) {
 		os.Getenv(cacheGCAutoDeleteEnv) == "1"
 
 	safeCutoff := time.Now().Add(-cacheImageMinAge).Unix()
-	orphans := make([]string, 0)
+	orphans := make([]string, 0, len(imgs))
 	tooYoung := 0
 	for _, img := range imgs {
 		for _, tag := range img.RepoTags {

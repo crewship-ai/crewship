@@ -99,6 +99,272 @@ Lists workspace details with member, agent, and crew counts.
   This endpoint is scoped to the current workspace only. It does not list other workspaces in the system.
 </Note>
 
+## GET /api/v1/admin/memory/stats
+
+Returns aggregate statistics for the memory subsystem within the current workspace -- totals, per-tier rollups, and per-agent rollups derived from `memory_versions`.
+
+**Required role:** ADMIN or OWNER (manage permission)
+
+### Response
+
+```json
+{
+  "workspace_id": "ws-uuid",
+  "totals": {
+    "versions": 1284,
+    "bytes": 4823104,
+    "blobs": 612,
+    "oldest_at": "2026-03-02T07:14:22Z",
+    "newest_at": "2026-05-18T08:30:00Z"
+  },
+  "by_tier": [
+    { "tier": "agent", "versions": 904, "bytes": 3120388 },
+    { "tier": "crew", "versions": 220, "bytes": 1102716 },
+    { "tier": "workspace", "versions": 160, "bytes": 600000 }
+  ],
+  "by_agent": [
+    { "agent_slug": "", "versions": 380, "bytes": 1702716, "newest_at": "2026-05-18T08:12:11Z" },
+    { "agent_slug": "martin", "versions": 412, "bytes": 1880388, "newest_at": "2026-05-18T08:30:00Z" }
+  ]
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `workspace_id` | `string` | Current workspace ID |
+| `totals.versions` | `integer` | Total `memory_versions` rows |
+| `totals.bytes` | `integer` | Sum of `bytes` across all rows |
+| `totals.blobs` | `integer` | Distinct sha256s; content-identical re-writes share one blob |
+| `totals.oldest_at` | `string` | RFC3339 of the oldest row; `""` when no rows |
+| `totals.newest_at` | `string` | RFC3339 of the newest row; `""` when no rows |
+| `by_tier[].tier` | `string` | `agent`, `crew`, `workspace`, `pins`, or `learned` |
+| `by_tier[].versions` | `integer` | Row count for the tier |
+| `by_tier[].bytes` | `integer` | Sum of `bytes` for the tier |
+| `by_agent[].agent_slug` | `string` | Slug extracted from canonical `agent:<slug>/...` prefix; `""` for crew/workspace-tier rows |
+| `by_agent[].versions` | `integer` | Row count for the agent |
+| `by_agent[].bytes` | `integer` | Sum of `bytes` for the agent |
+| `by_agent[].newest_at` | `string` | RFC3339 of the agent's newest row |
+
+### Example
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" \
+  https://crewship.example.com/api/v1/admin/memory/stats
+```
+
+| Status | Condition |
+|--------|-----------|
+| `400` | Missing workspace context |
+| `403` | MEMBER role (manage permission required) |
+| `500` | Underlying SQLite query failure |
+
+<Note>
+  Tiers with zero rows are omitted from `by_tier`. Tiers with rows the operator has never written to are NOT included as zero entries.
+</Note>
+
+## GET /api/v1/admin/memory/versions
+
+Row-level drill-down into `memory_versions`. Pairs with the stats endpoint above: stats answers "how much memory does this workspace have?", versions answers "which rows specifically?". Results are ordered newest-first by `written_at DESC, id DESC` and paginated via an opaque keyset cursor.
+
+**Required role:** ADMIN or OWNER (manage permission)
+
+### Query Parameters
+
+All parameters are optional and AND-composed.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `tier` | `string` | -- | Exact tier filter: `agent`, `crew`, `workspace`, `pins`, or `learned` |
+| `agent_slug` | `string` | -- | Slug from canonical `agent:<slug>/...` prefix; literal `%` / `_` in the slug match themselves |
+| `path_prefix` | `string` | -- | Match rows whose canonical path starts with this string; literal `%` / `_` match themselves |
+| `since` | `string` | -- | RFC3339 lower bound on `written_at` (inclusive) |
+| `until` | `string` | -- | RFC3339 upper bound on `written_at` (exclusive) |
+| `limit` | `integer` | `50` | Page size; hard cap at `500` |
+| `cursor` | `string` | -- | Opaque `next_cursor` from a prior response |
+
+### Response
+
+```json
+{
+  "workspace_id": "ws-uuid",
+  "rows": [
+    {
+      "id": "mv_01HZ...",
+      "path": "agent:martin/AGENT.md",
+      "tier": "agent",
+      "sha256": "abc...",
+      "bytes": 1234,
+      "written_at": "2026-05-18T08:30:00Z",
+      "written_by": "audit-watcher",
+      "parent_sha": "def..."
+    }
+  ],
+  "next_cursor": "djE6MjAyNi0wNS0xOFQwODozMDowMC4wMDBafG12XzAxSFo...",
+  "limit": 50,
+  "filters_applied": {
+    "tier": "agent",
+    "agent_slug": "martin"
+  }
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `workspace_id` | `string` | Current workspace ID |
+| `rows[].id` | `string` | `memory_versions.id` |
+| `rows[].path` | `string` | Canonical memory path |
+| `rows[].tier` | `string` | Tier (`agent` / `crew` / `workspace` / `pins` / `learned`) |
+| `rows[].sha256` | `string` | Content sha256 of the blob |
+| `rows[].bytes` | `integer` | Byte length of the blob |
+| `rows[].written_at` | `string` | RFC3339 timestamp |
+| `rows[].written_by` | `string` | Writer identifier; `""` when NULL |
+| `rows[].parent_sha` | `string?` | Previous version's sha256; omitted when NULL |
+| `next_cursor` | `string?` | Opaque cursor for the next page; `null` on last page |
+| `limit` | `integer` | The resolved page size |
+| `filters_applied` | `object` | Echo of the normalised filters that produced this response |
+
+The cursor is a base64url-encoded `v1:<rfc3339nano>|<id>` tuple pinning `(written_at, id)`. Offset pagination would duplicate or skip rows because the audit watcher writes continuously; keyset pagination pins the boundary so concurrent inserts above the cursor land on the next refresh naturally.
+
+### Example
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" \
+  "https://crewship.example.com/api/v1/admin/memory/versions?tier=agent&agent_slug=martin&limit=20"
+```
+
+| Status | Condition |
+|--------|-----------|
+| `400` | Unknown tier, malformed `since` / `until` (not RFC3339), non-positive `limit`, or unparseable `cursor` |
+| `403` | MEMBER role |
+| `500` | Underlying SQLite query failure |
+
+## GET /api/v1/admin/memory/versions/{id}/content
+
+Returns the raw blob bytes for a single `memory_versions` row. Used by the dashboard's row-detail view and by compliance auditors who need the literal content (not just the metadata) -- for example, to confirm a PII scrubber fired on the offending payload.
+
+**Required role:** ADMIN or OWNER (manage permission)
+
+### Response
+
+The body is the raw blob bytes (NOT JSON-wrapped). `Content-Type` is `text/markdown; charset=utf-8` for paths ending in `.md`, otherwise `application/octet-stream` so the client cannot auto-render untrusted bytes as HTML.
+
+Audit metadata travels alongside the body via response headers:
+
+| Header | Description |
+|--------|-------------|
+| `X-Memory-Sha256` | sha256 from the `memory_versions` row |
+| `X-Memory-Bytes` | Length from the row (matches the row's recorded size) |
+| `X-Memory-Tier` | Tier (`agent` / `crew` / `workspace` / `pins` / `learned`) |
+| `X-Memory-Path` | Canonical memory path |
+| `X-Memory-Written-At` | RFC3339 timestamp |
+| `X-Memory-Written-By` | Writer identifier (omitted when NULL) |
+| `Cache-Control` | `private, max-age=31536000, immutable` -- blobs are content-addressed |
+
+### Example
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" \
+  -D - \
+  https://crewship.example.com/api/v1/admin/memory/versions/mv_01HZ.../content
+```
+
+| Status | Condition |
+|--------|-----------|
+| `400` | Missing `id` path segment |
+| `401` | Missing workspace context |
+| `403` | MEMBER role |
+| `404` | Unknown id OR cross-workspace probe (no existence leak) |
+| `410` | Row exists but the blob file is missing on disk (retention sweep, restore-from-backup race) |
+| `413` | Blob exceeds the 10 MB cap (DB-claimed size OR on-disk size) |
+| `500` | sha mismatch (blob tampered after recording) OR `payload_ref` resolves outside the configured blob root |
+| `503` | Memory versioning is not configured (lite-mode deployment without blob root) |
+
+<Warning>
+  The handler refuses to follow symlinks under `payload_ref`. The on-disk layout is fixed at `blobRoot/<sha[:2]>/<sha>`; `filepath.EvalSymlinks` is used to verify the resolved path stays inside the blob root, defending against path-traversal vectors in a corrupted or malicious `payload_ref`.
+</Warning>
+
+## GET /api/v1/admin/memory/config
+
+Returns the per-workspace memory configuration. Drives the retention sweep (`versions_retention_days`) and is the operator's read surface for inspecting drift between "what's stored on the row" and "what's effective".
+
+**Required role:** ADMIN or OWNER (manage permission)
+
+### Response
+
+```json
+{
+  "workspace_id": "ws-uuid",
+  "versions_retention_days": 30,
+  "is_default": true,
+  "raw_config": null
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `workspace_id` | `string` | Current workspace ID |
+| `versions_retention_days` | `integer` | Resolved retention window; falls back to the built-in default (30) when no row or no key is set |
+| `is_default` | `boolean` | `true` when no row exists, the key is missing, or the value fell back to the default |
+| `raw_config` | `string?` | Literal JSON stored on the `workspaces.memory_config` column; `null` when empty |
+
+### Example
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" \
+  https://crewship.example.com/api/v1/admin/memory/config
+```
+
+| Status | Condition |
+|--------|-----------|
+| `400` | Missing workspace context |
+| `403` | MEMBER role |
+| `500` | Stored JSON is malformed (PATCH still works -- see below) |
+
+## PATCH /api/v1/admin/memory/config
+
+Partial-merge update of the per-workspace memory configuration. Merges the request body's keys into the existing JSON document; unspecified keys are preserved.
+
+**Required role:** ADMIN or OWNER (manage permission)
+
+### Request Body
+
+```json
+{
+  "versions_retention_days": 7
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `versions_retention_days` | `integer` | Positive integer in `[1, 3650]`. Zero, negative, fractional, or non-numeric values produce a 400 naming the offending field |
+
+Unknown top-level keys are passed through to the stored document for forward compatibility (e.g. future fields like `compaction_hour_override`).
+
+### Response
+
+Returns the post-merge config in the same shape as the GET response above. A PATCH that produces no diff (e.g. resetting to the same value) returns `200` with the current shape and emits NO journal entry -- the audit trail tracks actual change, not request count.
+
+### Example
+
+```bash
+curl -X PATCH \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"versions_retention_days": 7}' \
+  https://crewship.example.com/api/v1/admin/memory/config
+```
+
+| Status | Condition |
+|--------|-----------|
+| `400` | Missing workspace context, malformed JSON, trailing garbage after the JSON value, empty body, or `versions_retention_days` outside `[1, 3650]` / not a positive integer |
+| `403` | MEMBER role |
+| `413` | Request body exceeds 16 KB |
+| `500` | UPDATE / commit failure |
+
+<Note>
+  The read-merge-write runs inside a SQLite `BEGIN IMMEDIATE` (serializable) transaction so concurrent PATCHes touching different keys serialise rather than last-write-wins. Each real diff emits a `memory.config_updated` journal entry (Notice severity, ActorUser) with payload `{workspace_id, changes: {field: {from, to}}}`. If the stored JSON is corrupt, PATCH still succeeds (treats the existing document as empty) so operators can fix the row without resorting to manual SQL.
+</Note>
+
 ## GET /api/v1/admin/keeper/requests
 
 Returns the Keeper access request audit log -- every credential access and command execution request evaluated by the Keeper.

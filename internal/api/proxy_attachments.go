@@ -125,8 +125,9 @@ func (h *ProxyHandler) AgentChatAttachment(w http.ResponseWriter, r *http.Reques
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
 		// Forward the IPC error verbatim — gives operators a usable
-		// diagnostic without leaking internals.
-		buf, _ := io.ReadAll(resp.Body)
+		// diagnostic without leaking internals. Bound the read: a
+		// runaway IPC error body shouldn't be able to OOM us.
+		buf, _ := io.ReadAll(io.LimitReader(resp.Body, 8*1024))
 		writeJSON(w, resp.StatusCode, map[string]string{"error": string(buf)})
 		return
 	}

@@ -13,6 +13,8 @@ before:
     - go mod tidy
 
 builds:
+  # Full binary — daemon + server + embedded Next.js UI + CLI. ~55 MB.
+  # The one most users want. Shipped as `crewship` in Homebrew.
   - id: crewship
     main: ./cmd/crewship
     binary: crewship
@@ -24,16 +26,17 @@ builds:
     # chain below — verifiers compare hashes against signed digests.
     flags:
       - -trimpath
+    # Windows omitted: internal/memory uses syscall.O_NOFOLLOW for
+    # TOCTOU-safe markdown reads, which is a Unix-only constant. Proper
+    # Windows support needs a build-tagged file split (index_unix.go /
+    # index_windows.go). Most Windows users run Crewship via Docker or
+    # WSL during the beta period.
     goos:
       - darwin
       - linux
-      - windows
     goarch:
       - amd64
       - arm64
-    ignore:
-      - goos: windows
-        goarch: arm64
     ldflags:
       - -s -w
       - -X main.version={{.Version}}
@@ -46,14 +49,51 @@ builds:
       # release builds must set this secret to enable crash visibility.
       - -X github.com/crewship-ai/crewship/internal/crashreport.DSN={{ envOrDefault "SENTRY_DSN" "" }}
 
+  # CLI-only build — same cmd/crewship entry point, built with the
+  # `clionly` tag. Strips the embedded Next.js bundle (web/embed.go),
+  # the daemon server (cmd_start.go), local-host commands that touch
+  # SQLite directly (cmd_doctor.go, cmd_admin.go, cmd_telemetry.go,
+  # cmd_memory_versions.go), and the entire daemon-side dependency
+  # graph (Docker SDK, scheduler, license, server, api). Result ~27 MB
+  # vs ~55 MB full. Shipped as `crewship-cli` in Homebrew.
+  #
+  # The binary inside the archive is still named `crewship` so user
+  # scripts that already say `crewship ask "…"` keep working. The two
+  # Homebrew formulae declare a mutual conflict so a host installs
+  # one or the other.
+  - id: crewship-cli
+    main: ./cmd/crewship
+    binary: crewship
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+      - -tags=clionly
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+
 archives:
   - id: default
+    builds:
+      - crewship
     format: tar.gz
     name_template: >-
       {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
-    format_overrides:
-      - goos: windows
-        format: zip
+  - id: cli
+    builds:
+      - crewship-cli
+    format: tar.gz
+    name_template: >-
+      {{ .ProjectName }}-cli_{{ .Version }}_{{ .Os }}_{{ .Arch }}
 
 checksum:
   name_template: "checksums.txt"
@@ -102,20 +142,51 @@ changelog:
       - "^style:"
 
 brews:
+  # Full daemon + CLI in one binary. Default install for self-hosting.
   - repository:
       owner: crewship-ai
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
     directory: Formula
     name: crewship
+    ids:
+      - default
     homepage: "https://crewship.ai"
-    description: "AI Agent Orchestration Platform -- manage AI virtual employees in crews"
+    description: "Self-hosted runtime for AI coding agents — daemon + CLI + web UI in one binary"
     license: "Apache-2.0"
+    conflicts:
+      - crewship-cli
     install: |
       bin.install "crewship"
     test: |
       system "#{bin}/crewship", "version"
     commit_msg_template: "chore: update crewship formula to {{ .Tag }}"
+
+  # CLI-only build for users connecting to a remote crewshipd. Roughly
+  # half the install footprint (~27 MB vs ~55 MB) — no embedded Next.js
+  # bundle, no Docker SDK, no scheduler, no `crewship start` /
+  # `crewship doctor` / `crewship admin` / `crewship telemetry`. The
+  # binary inside the archive is still named `crewship` so existing
+  # scripts keep working; the two formulae declare a mutual conflict
+  # so a host installs one or the other.
+  - repository:
+      owner: crewship-ai
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Formula
+    name: crewship-cli
+    ids:
+      - cli
+    homepage: "https://crewship.ai"
+    description: "Crewship CLI — lightweight client for a remote crewshipd (no daemon, no UI bundle)"
+    license: "Apache-2.0"
+    conflicts:
+      - crewship
+    install: |
+      bin.install "crewship"
+    test: |
+      system "#{bin}/crewship", "version"
+    commit_msg_template: "chore: update crewship-cli formula to {{ .Tag }}"
 
 release:
   github:

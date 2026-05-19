@@ -249,4 +249,3 @@ func TestIndexerStart_AlreadyCancelledContext_ReturnsQuickly(t *testing.T) {
 		t.Fatal("Start with pre-cancelled ctx did not return within 1s")
 	}
 }
-

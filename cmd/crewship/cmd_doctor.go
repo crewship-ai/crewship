@@ -1,3 +1,5 @@
+//go:build !clionly
+
 package main
 
 import (
@@ -85,6 +87,17 @@ are deliberately left to the operator with actionable URLs in the output.`,
 			return context.WithTimeout(parentCtx, 10*time.Second)
 		}
 
+		// Header banner — gives the operator a moment to read what we're
+		// running before the result table scrolls past. Match width to the
+		// widest expected detail string (~64 chars) so terminals narrower
+		// than that wrap gracefully and wider ones don't waste real estate.
+		fmt.Println()
+		fmt.Printf("  %sCrewship doctor%s — environment check\n", cli.Bold, cli.Reset)
+		fmt.Printf("  %sbinary:%s  %s   %sos:%s %s/%s\n",
+			cli.Dim, cli.Reset, version,
+			cli.Dim, cli.Reset, runtime.GOOS, runtime.GOARCH)
+		fmt.Println()
+
 		results := make([]checkResult, 0, 12)
 		runProbe := func(fn func(context.Context) checkResult) {
 			ctx, cancel := withTimeout()
@@ -125,13 +138,28 @@ are deliberately left to the operator with actionable URLs in the output.`,
 		fmt.Println()
 		switch {
 		case failed > 0:
-			fmt.Printf("%s%d failed, %d warned%s — fix the FAILs and re-run.\n",
+			fmt.Printf("  %s%d failed, %d warned%s — fix the FAILs and re-run.\n",
 				cli.Red, failed, warned, cli.Reset)
+			fmt.Println()
+			fmt.Printf("  %sNeed help?%s  https://docs.crewship.ai/troubleshooting\n", cli.Dim, cli.Reset)
 		case warned > 0:
-			fmt.Printf("%s%d warned%s — review and re-run.\n", cli.Yellow, warned, cli.Reset)
+			fmt.Printf("  %s%d warned%s — review and re-run.\n", cli.Yellow, warned, cli.Reset)
+			fmt.Println()
+			fmt.Printf("  %sNext steps:%s\n", cli.Bold, cli.Reset)
+			fmt.Printf("    1. crewship start\n")
+			fmt.Printf("    2. open http://localhost:8080\n")
+			fmt.Printf("    3. follow the onboarding wizard (workspace → crew → agent → credentials)\n")
 		default:
-			fmt.Printf("%sAll checks passed.%s\n", cli.Green, cli.Reset)
+			fmt.Printf("  %sAll checks passed.%s\n", cli.Green, cli.Reset)
+			fmt.Println()
+			fmt.Printf("  %sNext steps:%s\n", cli.Bold, cli.Reset)
+			fmt.Printf("    1. crewship start\n")
+			fmt.Printf("    2. open http://localhost:8080\n")
+			fmt.Printf("    3. follow the onboarding wizard (workspace → crew → agent → credentials)\n")
+			fmt.Println()
+			fmt.Printf("  %sCLI walkthrough:%s  https://docs.crewship.ai/guides/onboarding\n", cli.Dim, cli.Reset)
 		}
+		fmt.Println()
 	},
 }
 

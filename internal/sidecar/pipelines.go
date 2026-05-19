@@ -309,7 +309,9 @@ func (s *Server) ipcRequestJSON(ctx context.Context, method, path string, body [
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
+	// Bound the read: internal IPC payloads are small structured JSON;
+	// 10 MiB is well above anything legitimate but caps a runaway peer.
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
 	if err != nil {
 		return nil, fmt.Errorf("read response: %w", err)
 	}

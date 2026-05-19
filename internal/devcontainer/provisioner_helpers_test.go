@@ -133,8 +133,8 @@ func TestFeatureLeafID_Cases(t *testing.T) {
 		{"path-no-tag", "ghcr.io/foo/bar", "bar"},
 		{"trailing-slash-empty-leaf", "ghcr.io/foo/", ""}, // trailing slash → empty leaf
 		{"empty", "", ""},
-		{"just-tag", ":1", ""},                                                  // strip tag → empty
-		{"mixed-case-preserved", "ghcr.io/Foo/Bar:tag", "Bar"},                  // no lower-casing
+		{"just-tag", ":1", ""}, // strip tag → empty
+		{"mixed-case-preserved", "ghcr.io/Foo/Bar:tag", "Bar"}, // no lower-casing
 		{"deep-path", "registry.example.com/org/group/sub/feature:v2", "feature"},
 	}
 	for _, tc := range cases {

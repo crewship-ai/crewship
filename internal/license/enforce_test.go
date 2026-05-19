@@ -138,14 +138,14 @@ func TestIsLimitError_RejectsOther(t *testing.T) {
 	if IsLimitError(errors.New("some other error")) {
 		t.Error("IsLimitError(plain error) = true, want false")
 	}
-	// errors.Is-style sentinel — must NOT match (it's not a *LimitError).
-	type customErr struct{ msg string }
-	// inline struct without Error() method won't satisfy error; use the
-	// inline declaration below.
+	// errors.Is-style sentinel — must NOT match (it's not a
+	// *LimitError). The package-level fakeNonLimit type (defined
+	// below) carries an Error() method but is not the sentinel
+	// LimitError; this asserts the type-assertion gate inside
+	// IsLimitError actually fires.
 	if IsLimitError(&fakeNonLimit{}); IsLimitError(&fakeNonLimit{}) {
 		t.Error("IsLimitError(*fakeNonLimit) = true; only *LimitError should match")
 	}
-	_ = customErr{} // silence unused
 }
 
 type fakeNonLimit struct{}

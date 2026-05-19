@@ -68,6 +68,7 @@
               "guides/episodic-memory",
               "guides/watch-roster",
               "guides/consolidate",
+              "guides/memory-observability",
               "guides/telemetry",
               "guides/tracing",
               "guides/llm-middleware",

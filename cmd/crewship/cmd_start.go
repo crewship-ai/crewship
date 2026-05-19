@@ -1,7 +1,10 @@
+//go:build !clionly
+
 package main
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log/slog"
 	"os"
@@ -11,6 +14,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/cli"
 
 	api "github.com/crewship-ai/crewship/internal/api"
 	"github.com/crewship-ai/crewship/internal/chatbridge"
@@ -111,6 +116,14 @@ var startCmd = &cobra.Command{
 		if err := bundledSkills.Install(context.Background(), db.DB, logger); err != nil {
 			logger.Warn("failed to install bundled anthropic skills", "error", err)
 		}
+
+		// First-run welcome: detected as "no users in the DB after
+		// migrations completed." Prints a short banner pointing at the
+		// browser-side onboarding wizard. Best-effort — a query error is
+		// surfaced as a warning, not a startup failure, because a stale or
+		// half-migrated DB is the symptom we WANT visible via the regular
+		// migration log, not silently retried here.
+		printFirstRunWelcome(db.DB, logger)
 
 		// Telemetry: ENABLED by default for v0.1 beta. crashreport.Init
 		// writes "1" to app_settings on first start (no prompt). The
@@ -614,6 +627,50 @@ func initProviders(ctx context.Context, cfg *config.Config, logger *slog.Logger,
 	}
 
 	return deps, nil
+}
+
+// printFirstRunWelcome detects a fresh install ("no rows in `users`")
+// and writes a short stdout banner pointing the operator at the
+// browser-side onboarding wizard. Query errors are logged as warnings
+// and swallowed — a stale or half-migrated database is already
+// surfaced via the migration log, and a missing `users` table would
+// indicate the upstream migration runner skipped a step we want
+// visible, not silently re-handled here.
+//
+// Suppressed when stdout is not a TTY (CI, redirected starts) so the
+// banner doesn't pollute structured log files or systemd journal output.
+func printFirstRunWelcome(db *sql.DB, logger *slog.Logger) {
+	fi, err := os.Stdout.Stat()
+	if err != nil || (fi.Mode()&os.ModeCharDevice) == 0 {
+		return
+	}
+	var n int
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM users`).Scan(&n); err != nil {
+		logger.Warn("first-run welcome: count(users) failed", "error", err)
+		return
+	}
+	if n > 0 {
+		return
+	}
+	port := os.Getenv("CREWSHIP_PORT")
+	if port == "" {
+		port = "8080"
+	}
+	fmt.Println()
+	fmt.Printf("  %sWelcome to Crewship!%s  %s%s%s\n",
+		cli.Bold, cli.Reset, cli.Dim, version, cli.Reset)
+	fmt.Println()
+	fmt.Printf("  This is a fresh install. To finish setup:\n")
+	fmt.Println()
+	fmt.Printf("    1. open  %shttp://localhost:%s%s\n", cli.Green, port, cli.Reset)
+	fmt.Printf("    2. work through the 6-step wizard\n")
+	fmt.Printf("       workspace → crew → agent → credentials → done\n")
+	fmt.Println()
+	fmt.Printf("  Prefer the CLI? Run %screwship init --email you@example.com --name \"You\"%s\n", cli.Dim, cli.Reset)
+	fmt.Printf("  then follow https://docs.crewship.ai/guides/onboarding\n")
+	fmt.Println()
 }
 
 func init() {

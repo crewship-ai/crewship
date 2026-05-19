@@ -54,9 +54,7 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&flagNoColor, "no-color", false, "Disable ANSI colors")
 
 	rootCmd.AddCommand(initCmd)
-	rootCmd.AddCommand(startCmd)
 	rootCmd.AddCommand(versionCmd)
-	rootCmd.AddCommand(doctorCmd)
 	rootCmd.AddCommand(loginCmd)
 	rootCmd.AddCommand(logoutCmd)
 	rootCmd.AddCommand(whoamiCmd)
@@ -117,7 +115,6 @@ func init() {
 	rootCmd.AddCommand(notificationCmd)
 	rootCmd.AddCommand(labelCmd)
 	rootCmd.AddCommand(backupCmd)
-	rootCmd.AddCommand(telemetryCmd)
 }
 
 func main() {

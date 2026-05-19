@@ -91,10 +91,14 @@ func initSchema(db *sql.DB) error {
 }
 
 // Status returns information about the memory index state.
+//
+// No e.mu RLock is held over the DB reads: SQLite is opened in WAL mode
+// and Reindex writes inside a single transaction, so the SELECTs below
+// see a consistent snapshot of the index. The filesystem walk for the
+// directory size happens after the DB reads — it has nothing to do with
+// the index and adding it under any kind of lock would just extend the
+// window that delays Reindex acquisition for no benefit.
 func (e *Engine) Status(ctx context.Context) (*Status, error) {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-
 	var totalChunks int
 	if err := e.db.QueryRowContext(ctx, "SELECT count(*) FROM memory_chunks").Scan(&totalChunks); err != nil {
 		return nil, fmt.Errorf("count chunks: %w", err)
