@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"log/slog"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -179,7 +180,29 @@ func (s *OnlineSampler) Start(ctx context.Context) {
 // persistent entropy outage) before deciding whether to actually call
 // runOnce this round. Decrementing in Start rather than runOnce keeps
 // the locked critical section narrow.
+//
+// A deferred recover() wraps the runOnce call so a single bad tick
+// (DB Scan blowup on a malformed completed_at row, panicking DSL
+// resolver, journal emit explosion, anything) doesn't kill the
+// entire daemon. The recovery logs the panic + stack so an operator
+// sees what went wrong without losing the goroutine. The next tick
+// retries from the held watermark — runOnce holds s.mu via defer
+// Unlock, so the mutex is released cleanly on the unwind even
+// without our recovery code running.
+//
+// Irony note: PR #447 added explicit panic-safety to RunAgent +
+// runDSL + runStep but the sampler — a long-lived background
+// goroutine — shipped without one. A 6th hostile pass caught it.
 func (s *OnlineSampler) tickWithBackoff(ctx context.Context) {
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Error("online sampler tick panicked; loop continues",
+				"err", r,
+				"stack", string(debug.Stack()),
+			)
+		}
+	}()
+
 	s.mu.Lock()
 	skip := s.backoffSkips
 	if skip > 0 {

@@ -131,10 +131,3 @@ func innerFunc(t *testing.T) {
 	t.Helper()
 	panic("original-crash")
 }
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}

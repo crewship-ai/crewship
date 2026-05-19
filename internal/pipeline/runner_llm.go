@@ -171,11 +171,12 @@ func (r *LLMRunner) RunStep(ctx context.Context, req AgentStepRequest) (AgentSte
 			summary := make([]map[string]any, 0, len(findings))
 			for _, f := range findings {
 				summary = append(summary, map[string]any{
-					"kind":     string(f.Kind),
-					"severity": string(f.Severity),
-					"detail":   f.Detail,
-					"matched":  f.Matched,
-					"position": f.Position,
+					"kind":      string(f.Kind),
+					"severity":  string(f.Severity),
+					"detail":    f.Detail,
+					"matched":   f.Matched,
+					"position":  f.Position,
+					"match_end": f.MatchEnd,
 				})
 			}
 			if err := hooks.Dispatch(hctx, dbCopy, journCopy, hooks.EventOnGuardrailTriggered, hooks.EventContext{
