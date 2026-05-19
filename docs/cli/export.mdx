@@ -15,9 +15,13 @@ Two distinct things live under `export`:
 crewship export <subcommand|run-id> [flags]
 ```
 
+All three forms require an authenticated session and a workspace context (inherited from the current CLI profile, same as `crewship apply`).
+
 ## `crewship export crew`
 
 Pull a crew's current state and render it as a `kind: Crew` manifest. Round-trip partner of `crewship apply`: piping the output back through apply on a fresh workspace recreates the same shape.
+
+The output is YAML with a `yaml-language-server` `$schema` directive on the first line, so editors with the YAML language server (VS Code, JetBrains, Neovim with `coc-yaml`) give autocomplete and validation while you edit. Pipe through `yq -o json` if you need JSON.
 
 ```bash
 crewship export crew <slug> [flags]
@@ -159,4 +163,5 @@ The plan should show every resource as `=` (unchanged).
 
 - [CLI → apply](/cli/apply) — the round-trip partner
 - [Guides → Workspace Manifests](/guides/manifests) — narrative tour of the manifest format
-- [CLI → activity](/cli/activity) — for the run-id form of export
+- [Guides → Activity](/guides/activity) — UI view that lists run-ids you can pass to `crewship export <run-id>`
+- [CLI → journal](/cli/journal) — query journal entries directly without bundling a full run
