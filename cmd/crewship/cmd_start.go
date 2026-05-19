@@ -26,6 +26,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/license"
 	"github.com/crewship-ai/crewship/internal/logging"
 	"github.com/crewship-ai/crewship/internal/pipeline"
+	"github.com/crewship-ai/crewship/internal/quartermaster"
 	"github.com/crewship-ai/crewship/internal/provider/apple"
 	"github.com/crewship-ai/crewship/internal/provider/bbolt"
 	"github.com/crewship-ai/crewship/internal/provider/docker"
@@ -504,6 +505,32 @@ var startCmd = &cobra.Command{
 				scheduler.Start(ctx)
 				defer scheduler.Stop()
 				logger.Info("pipeline scheduler wired (cron triggers; 30s tick)")
+			}
+		}
+
+		// Online eval sampler — watches completed pipeline_runs and
+		// queues a configurable percentage for rubric grading via
+		// eval_runs(kind='online'). The DSL resolver wraps pipeline.Store
+		// so the sampler can read each routine's eval.online.sample_rate
+		// without importing the executor. Sampler is in-memory + singleton
+		// (sync.Once inside Start); the partial UNIQUE INDEX from
+		// migration v97 makes accidental double-wiring harmless.
+		if deps.DB != nil {
+			samplerPipeStore := pipeline.NewStore(deps.DB)
+			samplerResolver := &samplerDSLResolver{store: samplerPipeStore}
+			sampler, samplerErr := quartermaster.NewOnlineSampler(quartermaster.SamplerConfig{
+				DB:          deps.DB,
+				Emitter:     srv.JournalWriter(),
+				Logger:      logger,
+				Interval:    time.Minute,
+				DSLResolver: samplerResolver,
+			})
+			if samplerErr != nil {
+				logger.Warn("online eval sampler init failed; continuous grading disabled",
+					"err", samplerErr)
+			} else {
+				go sampler.Start(ctx)
+				logger.Info("online eval sampler wired (1m tick; per-routine sample_rate)")
 			}
 		}
 
