@@ -599,11 +599,13 @@ function TurnFeedbackActions({
   const submit = useFeedbackStore((s) => s.submit)
   const reset = useFeedbackStore((s) => s.reset)
 
-  // trace_id can be threaded onto the turn metadata when the orchestrator
-  // emits it; until that wiring lands here, we read defensively so the
-  // POST simply omits the field instead of erroring.
-  const meta = (turn as unknown as { metadata?: { trace_id?: string } }).metadata
-  const traceId = meta?.trace_id
+  // trace_id is plumbed through ChatTurn.metadata when the WS event
+  // for the assistant turn carries it. Backend wiring (orchestrator →
+  // WS payload → useChat → ChatTurn) is a tracked follow-up — until
+  // then this resolves to undefined and the feedback POST simply omits
+  // the field. No double-cast: the optional shape is now part of the
+  // ChatTurn interface in hooks/use-chat.ts.
+  const traceId = turn.metadata?.trace_id
 
   const handle = (signal: "helpful" | "not_helpful") => {
     // Per-(turn, signal) sequencing lives inside the store — submit

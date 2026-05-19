@@ -66,19 +66,28 @@ func ActionFromContext(ctx context.Context) GuardAction {
 	return GuardActionBlock
 }
 
-// GuardListener is invoked synchronously when InputGuard detects a
-// finding. It's the integration hook for the hooks package — callers
-// that want an external system (Slack, PagerDuty, the hooks subsystem)
-// notified on every guardrail trip attach a listener via
+// GuardListener is invoked synchronously when InputGuard detects one
+// or more findings. It's the integration hook for the hooks package —
+// callers that want an external system (Slack, PagerDuty, the hooks
+// subsystem) notified on every guardrail trip attach a listener via
 // WithGuardListener BEFORE invoking the guard. Empty listener means
 // "no external notification beyond the journal entry."
+//
+// Signature carries the FULL list of findings, not just the
+// highest-severity one. An earlier signature passed a single primary
+// Finding which silently dropped subsequent findings of the same
+// scan — after the per-occurrence emit shipped for ZW + RTL bypass
+// fixes, a payload with ZWSP + ZWJ + RTL would produce three
+// findings but the listener only learned about one. SIEM
+// integrations need the whole set to record what was actually
+// present.
 //
 // The listener runs in the same goroutine as the guard, so callers
 // should keep it cheap or dispatch asynchronously inside. The lookout
 // package deliberately doesn't goroutine the call itself: synchronous
 // notification preserves the existing latency contract and lets the
 // listener participate in the request's cancellation.
-type GuardListener func(ctx context.Context, direction string, finding Finding)
+type GuardListener func(ctx context.Context, direction string, findings []Finding)
 
 // guardListenerKey is the context-value type for GuardListener. Kept
 // as a struct{} so adding more context keys doesn't conflict.
@@ -181,8 +190,13 @@ func InputGuard(j journal.Emitter) Middleware {
 		// the user). Done after emitGuardEntry so the journal row
 		// already exists by the time the listener runs and any sync
 		// downstream consumer can correlate via trace_id.
+		//
+		// Pass ALL findings, not just primary. After the per-occurrence
+		// emit for zero-width/RTL the listener used to lose every
+		// finding except the first; a SIEM integration would never
+		// know a payload chained ZWSP + ZWJ.
 		if listener := GuardListenerFromContext(ctx); listener != nil {
-			listener(ctx, "input", primary)
+			listener(ctx, "input", result.Findings)
 		}
 
 		// Branch on the configured action. Block (default) refuses the
@@ -378,7 +392,16 @@ func journalSeverityFor(s Severity) journal.Severity {
 	}
 }
 
-func severityRank(s Severity) int {
+// SeverityRank returns an integer ordering of the Severity values so
+// callers can pick the highest-severity Finding from a slice without
+// duplicating the switch. Used by external callers (pipeline runner
+// hook bridge) to drive a single hook event's primary kind off the
+// most-severe finding while still passing the full slice in payload.
+//
+// Higher rank = more severe. Unknown values rank 0 (below low) so a
+// mis-typed Severity sorts at the bottom rather than accidentally
+// outranking real findings.
+func SeverityRank(s Severity) int {
 	switch s {
 	case SeverityCritical:
 		return 4
@@ -391,3 +414,7 @@ func severityRank(s Severity) int {
 	}
 	return 0
 }
+
+// severityRank is the internal alias kept for the existing in-package
+// callers; new code should use the exported SeverityRank.
+func severityRank(s Severity) int { return SeverityRank(s) }

@@ -66,6 +66,14 @@ type OnlineSampler struct {
 	// cursor" into "two callers serialize."
 	mu sync.Mutex
 
+	// startOnce enforces the singleton contract: only the first
+	// caller of Start runs the poll loop. Subsequent calls return
+	// immediately. Without this, a second Start spawns a second
+	// ticker — both ticks fire and serialize through s.mu, but the
+	// load on the DB doubles and the journal alerts duplicate. With
+	// sync.Once an accidental second bootstrap call is a no-op.
+	startOnce sync.Once
+
 	// watermark + watermarkID together form the high-water mark of
 	// successfully-handled rows; the next tick scans rows whose
 	// (completed_at, id) tuple is strictly greater than this pair.
@@ -143,27 +151,28 @@ func NewOnlineSampler(cfg SamplerConfig) (*OnlineSampler, error) {
 // flaky DB connection shouldn't kill continuous grading until the
 // process is restarted.
 //
-// Start MUST be called exactly once per OnlineSampler instance.
-// Two concurrent Start goroutines on the same instance will race
-// on s.watermark / s.watermarkID; the internal mutex serializes
-// them to avoid corruption, but the resulting behaviour is two
-// tickers fighting for the same cursor and is operationally
-// pointless. The bootstrap call sites wire this once at server
-// init via cmd/crewship/main.go.
+// Start is idempotent: only the first call runs the loop. Subsequent
+// calls return immediately without spawning a second ticker. This
+// enforces what the documentation always promised — one poll loop
+// per sampler instance — so an accidental double-wire (main +
+// debug admin endpoint) becomes a no-op rather than doubling the
+// DB load.
 func (s *OnlineSampler) Start(ctx context.Context) {
-	t := time.NewTicker(s.interval)
-	defer t.Stop()
-	// Run one tick immediately so a startup picks up backlog without
-	// waiting the full interval. Subsequent ticks come from the ticker.
-	s.tickWithBackoff(ctx)
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-			s.tickWithBackoff(ctx)
+	s.startOnce.Do(func() {
+		t := time.NewTicker(s.interval)
+		defer t.Stop()
+		// Run one tick immediately so a startup picks up backlog without
+		// waiting the full interval. Subsequent ticks come from the ticker.
+		s.tickWithBackoff(ctx)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				s.tickWithBackoff(ctx)
+			}
 		}
-	}
+	})
 }
 
 // tickWithBackoff consults the backoff counter (set by runOnce on

@@ -42,13 +42,17 @@ The UI's optimistic-update store (`stores/feedback-store.ts`) persists per-user 
 
 ## Trace correlation
 
-Every POST accepts an optional `trace_id`. When the orchestrator wires the active OTel trace onto the assistant turn (`turn.metadata.trace_id`), the frontend includes it in the payload and the row lands indexed for `WHERE trace_id = ?` queries.
+Every POST accepts an optional `trace_id`. The intended end state is: the orchestrator stamps the active OTel trace id onto each assistant-message WebSocket event, the frontend lifts it onto `ChatTurn.metadata.trace_id`, and the feedback store passes it into the POST payload — so each feedback row lands indexed for `WHERE trace_id = ?` queries:
 
 ```sql
 CREATE INDEX idx_feedback_trace ON message_feedback(trace_id) WHERE trace_id IS NOT NULL;
 ```
 
-This is what powers the "show me every signal for this routine run" eval-mining query: collector trace ID → `message_feedback.trace_id` → all signals filed against that conversation.
+That powers the "show me every signal for this routine run" eval-mining query: collector trace ID → `message_feedback.trace_id` → all signals filed against that conversation.
+
+<Note>
+  **Current state (PR #447):** the schema, API, frontend store, and `ChatTurn.metadata.trace_id` interface are wired and consume the field when present. The orchestrator → WebSocket → `ChatTurn` propagation is **not yet shipped** — feedback rows for `assistant` turns produced after this PR will land with `trace_id = NULL` until the follow-up lands. The partial index `WHERE trace_id IS NOT NULL` keeps the lookup path cheap regardless. Direct API callers (CLI, eval widgets) that already have the trace id in hand can pass it on POST today.
+</Note>
 
 ## UI flow
 

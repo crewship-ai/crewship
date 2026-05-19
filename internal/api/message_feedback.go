@@ -64,6 +64,14 @@ const maxFeedbackReasonChars = 4096
 // abuse-prevention ceiling well below the reason cap.
 const maxFeedbackIDChars = 256
 
+// maxFeedbackSignalChars caps the `signal` field beyond the enum check.
+// The enum lookup itself runs in O(n) over the input string (Go map
+// hashing iterates every byte); without a length cap, a 10 MB
+// `?signal=...` query param would force a 10 MB hash before the
+// expected miss. 64 chars is comfortably above the longest legal
+// value ("regenerate" = 10) and well below abuse territory.
+const maxFeedbackSignalChars = 64
+
 // maxFeedbackBodyBytes caps the HTTP body BEFORE json.Decode runs.
 // The field-level limits (maxFeedbackReasonChars + maxFeedbackIDChars
 // × 3) cap memory at the application layer, but a malicious client
@@ -188,6 +196,10 @@ func (h *MessageFeedbackHandler) Create(w http.ResponseWriter, r *http.Request) 
 		len(body.ChatID) > maxFeedbackIDChars ||
 		len(body.TraceID) > maxFeedbackIDChars {
 		replyError(w, http.StatusBadRequest, "id field exceeds maximum length")
+		return
+	}
+	if len(body.Signal) > maxFeedbackSignalChars {
+		replyError(w, http.StatusBadRequest, "signal exceeds maximum length")
 		return
 	}
 	if _, ok := allowedFeedbackSignals[body.Signal]; !ok {
@@ -333,6 +345,10 @@ func (h *MessageFeedbackHandler) Delete(w http.ResponseWriter, r *http.Request) 
 	// inherited the gap.
 	if len(messageID) > maxFeedbackIDChars {
 		replyError(w, http.StatusBadRequest, "message_id exceeds maximum length")
+		return
+	}
+	if len(signal) > maxFeedbackSignalChars {
+		replyError(w, http.StatusBadRequest, "signal exceeds maximum length")
 		return
 	}
 	if _, ok := allowedFeedbackSignals[signal]; !ok {

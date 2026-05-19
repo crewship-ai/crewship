@@ -57,9 +57,12 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	ctx, span := telemetry.StartAgentSpan(ctx, req.AgentID, req.AgentRole, req.CrewID, req.MissionID)
 	defer func() {
 		if r := recover(); r != nil {
-			telemetry.RecordError(span, fmt.Errorf("panic: %v", r))
-			span.End()
-			panic(r)
+			// telemetry.RecoverPanic stamps span + re-panics with a
+			// *PanicWithStack wrapper so the original crash stack is
+			// preserved across nested defers. Inner recover sites
+			// (runStep, runDSL) populated the wrapper; this outer
+			// one just reuses the captured stack.
+			telemetry.RecoverPanic(span, r)
 		}
 		telemetry.RecordError(span, err)
 		span.End()
