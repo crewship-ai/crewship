@@ -16,6 +16,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/logcollector"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/telemetry"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
@@ -661,7 +662,23 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		b.logger.Warn("failed to update message count", "chat_id", chatID, "error", err)
 	}
 
-	streamFn(ws.ChatEvent{Type: "done", Content: ""})
+	// Stamp the active OTel trace id onto the "done" event so the
+	// frontend can attach it to the assistant turn. This is what
+	// powers feedback signal correlation — the user's thumb-down on
+	// a turn lands in message_feedback with trace_id pointing back
+	// at the routine run that produced the answer. When no telemetry
+	// provider is configured the trace context is invalid and
+	// ResolveTrace returns ok=false; we just omit the field in that
+	// case so the frontend's optional read stays clean.
+	doneMeta := map[string]any{}
+	if traceID, _, ok := telemetry.ResolveTrace(ctx); ok {
+		doneMeta["trace_id"] = traceID
+	}
+	doneEvt := ws.ChatEvent{Type: "done", Content: ""}
+	if len(doneMeta) > 0 {
+		doneEvt.Metadata = doneMeta
+	}
+	streamFn(doneEvt)
 
 	return nil
 }

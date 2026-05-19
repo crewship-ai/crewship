@@ -610,7 +610,13 @@ export function useChat({ wsUrl, getToken, sessionId }: UseChatOptions) {
     [],
   )
 
-  const handleDoneEvent = useCallback(() => {
+  const handleDoneEvent = useCallback((metadata?: Record<string, unknown>) => {
+    // The "done" WS event may carry { trace_id } in metadata — the
+    // backend stamps the active OTel trace id there so the assistant
+    // turn ties back to the routine run that produced it. Lifted onto
+    // ChatTurn.metadata.trace_id so feedback POSTs from this turn can
+    // include the trace id for eval-mining correlation.
+    const traceID = metadata && typeof metadata.trace_id === "string" ? (metadata.trace_id as string) : undefined
     setTurns((prev) => {
       // Remove any orphaned status-only assistant turns and finalize the streaming turn
       const cleaned = prev.filter((t) => {
@@ -625,10 +631,15 @@ export function useChat({ wsUrl, getToken, sessionId }: UseChatOptions) {
           .map((p) => (p.isStreaming ? { ...p, isStreaming: false } : p))
           // Remove status parts once done (they were just progress indicators)
           .filter((p) => p.type !== "status")
-        return [
-          ...cleaned.slice(0, -1),
-          { ...last, parts: finalParts, isStreaming: false },
-        ]
+        const finalTurn: ChatTurn = {
+          ...last,
+          parts: finalParts,
+          isStreaming: false,
+        }
+        if (traceID) {
+          finalTurn.metadata = { ...(last.metadata ?? {}), trace_id: traceID }
+        }
+        return [...cleaned.slice(0, -1), finalTurn]
       }
       return cleaned
     })
@@ -756,7 +767,7 @@ export function useChat({ wsUrl, getToken, sessionId }: UseChatOptions) {
           handleSystemEvent(content, metadata)
           break
         case "done":
-          handleDoneEvent()
+          handleDoneEvent(metadata)
           break
         case "crew_provisioning":
           handleCrewProvisioningEvent(content, metadata)

@@ -166,6 +166,14 @@ generate_env_local() {
     echo "CREWSHIP_LOG_PATH=${LOG_PATH}"
     echo "CREWSHIP_BOLT_PATH=${STATE_DIR}/state.db"
     echo "CREWSHIP_NEXTJS_URL=http://localhost:${NEXT_PORT}"
+    # Origin allowlist for state-changing requests. The default same-
+    # origin gate rejects POST/PUT/DELETE when Origin (Next.js port)
+    # differs from the daemon's host:port (Go port). Listing both
+    # local hostnames here keeps E2E tooling (Playwright, curl with
+    # CORS preflights) green without ad-hoc echoes into .env.local
+    # that disappear on the next nuke. Production deployments set
+    # CREWSHIP_ALLOWED_ORIGINS explicitly to their public origin.
+    echo "CREWSHIP_ALLOWED_ORIGINS=http://localhost:${NEXT_PORT},http://127.0.0.1:${NEXT_PORT}"
   } >> "$tmp_file"
 
   mv "$tmp_file" "$env_file"
