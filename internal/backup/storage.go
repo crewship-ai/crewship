@@ -32,7 +32,20 @@ func cleanPath(p string) (string, error) {
 	if strings.ContainsRune(p, '\x00') {
 		return "", fmt.Errorf("%w: NUL byte in path", ErrUnsafeBackupPath)
 	}
-	return filepath.Clean(p), nil
+	cleaned := filepath.Clean(p)
+	// Segment-level ".." rejection. filepath.Clean alone collapses
+	// "a/b/../c" to "a/c", but a leading "../" or a single ".."
+	// component survives — which is what enables the path-injection
+	// vector that CodeQL's go/path-injection rule flags. Splitting on
+	// the OS separator and refusing any segment that is exactly ".."
+	// is both stricter than Clean and the recognised sanitiser shape
+	// that lets CodeQL prove the os.* sink is safe.
+	for _, seg := range strings.Split(cleaned, string(filepath.Separator)) {
+		if seg == ".." {
+			return "", fmt.Errorf("%w: traversal segment in path %q", ErrUnsafeBackupPath, p)
+		}
+	}
+	return cleaned, nil
 }
 
 // StorageOps abstracts the file-system operations the backup runner

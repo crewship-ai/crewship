@@ -27,10 +27,21 @@ func validateCrewFlags(memoryMB int, cpus float64, ttl int, ttlSet bool, network
 	return nil
 }
 
-// sanitizeTerminal strips control characters (e.g. ANSI escapes, OSC links)
-// from untrusted strings before printing them to the terminal. Newlines and
-// tabs are preserved.
+// sanitizeTerminal strips control characters (ANSI escapes, OSC links,
+// CR) from untrusted strings before printing them to the terminal —
+// agents have no legitimate need to drive the terminal, and a
+// malicious tool result could otherwise rewrite the user's scrollback.
+//
+// The explicit strings.ReplaceAll passes are functionally redundant
+// with the strings.Map below (it already strips control chars including
+// CR), but they're the form CodeQL's go/log-injection rule recognises
+// as a log-injection sanitiser. Without them, CodeQL still flags every
+// fmt.Print site downstream because strings.Map(fn, s) isn't on its
+// sanitiser allowlist. Newlines stay preserved for the streaming path.
 func sanitizeTerminal(s string) string {
+	// Explicit CR strip + control-char stripper — CodeQL sees the
+	// ReplaceAll as a recognised sanitiser hook for go/log-injection.
+	s = strings.ReplaceAll(s, "\r", "")
 	return strings.Map(func(r rune) rune {
 		if r == '\n' || r == '\t' || !unicode.IsControl(r) {
 			return r

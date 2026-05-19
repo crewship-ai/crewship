@@ -87,15 +87,14 @@ func isSafeRedirect(target string) bool {
 const maxListCapacity = 1000
 
 // capacityHint returns a safe cap-hint for a user-derived list size,
-// floored at 0 and ceiled at maxListCapacity.
+// floored at 0 and ceiled at maxListCapacity. Uses the Go 1.21+ min
+// builtin so CodeQL's go/uncontrolled-allocation-size rule recognises
+// the cap as a bound on the inflow value.
 func capacityHint(n int) int {
 	if n < 0 {
 		return 0
 	}
-	if n > maxListCapacity {
-		return maxListCapacity
-	}
-	return n
+	return min(n, maxListCapacity)
 }
 
 // parsePagination reads "limit" and "offset" query params, clamping limit to

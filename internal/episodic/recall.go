@@ -144,13 +144,14 @@ func Recall(ctx context.Context, db *sql.DB, emb Embedder, q Query) ([]Hit, erro
 	})
 
 	// q.K is already clamped to [1, 50] at the top of this function,
-	// but re-applying the bound at the make() call lets CodeQL's
-	// go/uncontrolled-allocation-size rule see the cap locally and
-	// also defends against a future caller that bypasses the
-	// normalisation block above.
-	allocCap := q.K
-	if allocCap < 0 || allocCap > 50 {
-		allocCap = 50
+	// but applying the literal bound inline at every make() call
+	// matches the pattern CodeQL's go/uncontrolled-allocation-size
+	// rule recognises as a safe cap. The Go 1.21+ min builtin is
+	// followed by a non-negative clamp because q.K could be -1 from a
+	// future caller bypassing the normalisation block.
+	allocCap := min(q.K, 50)
+	if allocCap < 0 {
+		allocCap = 0
 	}
 	out := make([]Hit, 0, allocCap)
 	picked := make([]string, 0, allocCap)

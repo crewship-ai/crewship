@@ -153,24 +153,34 @@ func (f *CatalogFetcher) fetchUpstream(ctx context.Context) ([]CatalogEntry, err
 }
 
 // featureRefRegex matches devcontainer feature refs of the form
-// `ghcr.io/<owner>/<repo>:<digits>`. The pattern is bounded on both
-// ends so it cannot accidentally swallow surrounding HTML content
-// (CodeQL go/regex/missing-regexp-anchor — without the `\b` left
-// anchor a substring like `evil-ghcr.io/foo:1` would match and we
-// would treat `evil-` as part of the host).
+// `ghcr.io/<owner>/<repo>:<digits>` inside surrounding HTML markup.
 //
-// `\b` is a word boundary, which is the right anchor for an
-// HTML-scraping regex: we want to refuse matches that share a word
-// character with surrounding markup, but still match `"ghcr.io/...":1`
-// inside attribute values. The `:[0-9]+(?:\b|$)` tail keeps the tag
-// numeric segment from spilling into the next word.
-var featureRefRegex = regexp.MustCompile(`\bghcr\.io/[a-zA-Z0-9][a-zA-Z0-9/_.-]*:[0-9]+\b`)
+// The leading `(?:^|[^a-zA-Z0-9._-])` group is an explicit
+// non-capturing lookbehind-equivalent that CodeQL's
+// go/regex/missing-regexp-anchor rule recognises as a left anchor —
+// it's a real character-class check rather than the `\b` word
+// boundary it does not treat as an anchor for URL-shaped patterns.
+// `extractFeaturesFromHTML` trims the leading delimiter back off via
+// strings.TrimLeft before handing the ref downstream.
+//
+// The trailing `(?:$|[^0-9])` plays the same role on the right: we
+// stop the numeric tag at a non-digit so `:1234` doesn't bleed into
+// `:1234567` from an unrelated word.
+var featureRefRegex = regexp.MustCompile(`(?:^|[^a-zA-Z0-9._-])(ghcr\.io/[a-zA-Z0-9][a-zA-Z0-9/_.-]*:[0-9]+)(?:$|[^0-9])`)
 
 func extractFeaturesFromHTML(body []byte) []CatalogEntry {
-	matches := featureRefRegex.FindAllString(string(body), -1)
+	// FindAllStringSubmatch pulls out the inner capture group from
+	// featureRefRegex — the surrounding (?:^|[^...]) / (?:$|[^0-9])
+	// boundaries are how CodeQL recognises the anchor, but downstream
+	// only wants the bare "ghcr.io/owner/repo:tag" form.
+	matches := featureRefRegex.FindAllStringSubmatch(string(body), -1)
 	seen := make(map[string]bool, len(matches))
 	entries := make([]CatalogEntry, 0, len(matches))
-	for _, ref := range matches {
+	for _, m := range matches {
+		if len(m) < 2 {
+			continue
+		}
+		ref := m[1]
 		if seen[ref] {
 			continue
 		}

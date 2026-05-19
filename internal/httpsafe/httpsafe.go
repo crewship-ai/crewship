@@ -188,6 +188,34 @@ func SafeTransport() *http.Transport {
 	}
 }
 
+// RewriteRoundTripper retargets every outbound request to `Target`
+// while preserving the path / method / headers / body. Intended for
+// test wiring only: tests pass a validation-passing URL like
+// "https://test.example/path" and install a RewriteRoundTripper that
+// reroutes the bytes to an httptest.NewServer on 127.0.0.1. This
+// keeps the production code path's inline ValidateURL guard
+// unconditional — CodeQL go/request-forgery sees a single, complete
+// sanitiser chain because the bypass lives entirely in the transport
+// layer.
+//
+// Production code must not construct one; the type is only exported
+// so test packages outside internal/api can reuse the same trick
+// (skills, future packages with their own http.Client).
+type RewriteRoundTripper struct {
+	Target *url.URL
+}
+
+// RoundTrip implements http.RoundTripper. Clones the request so the
+// caller's URL value isn't mutated, swaps the scheme + host, and
+// hands off to http.DefaultTransport. The original Host header is
+// preserved so handlers that key off it still see the "logical" host.
+func (rt *RewriteRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	r := req.Clone(req.Context())
+	r.URL.Scheme = rt.Target.Scheme
+	r.URL.Host = rt.Target.Host
+	return http.DefaultTransport.RoundTrip(r)
+}
+
 // SafeClient returns an http.Client with SafeTransport and the given
 // total timeout (request + response). A CheckRedirect is wired in to
 // re-validate every 3xx hop so a permissive host can't bounce into a

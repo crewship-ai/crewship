@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
 	"sync/atomic"
@@ -21,6 +22,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/connectors"
+	"github.com/crewship-ai/crewship/internal/httpsafe"
 )
 
 // -------------------------------------------------------------------
@@ -272,14 +274,20 @@ func TestConnectors_Verify_PATCallsHTTPEndpoint(t *testing.T) {
 	}))
 	defer fake.Close()
 
-	// SafeClient + ValidateURL in probeVerifyHTTP would otherwise
-	// refuse the loopback fake server. SetVerifyHTTPClientForTesting
-	// swaps both for no-op variants — the SSRF defences are still
-	// covered by httpsafe's own unit tests.
-	restoreVerify := SetVerifyHTTPClientForTesting(&http.Client{Timeout: 5 * time.Second})
+	// Tests use a verify URL of "https://verify.test/me" that passes
+	// httpsafe.ValidateURL; SetVerifyHTTPClientForTesting installs a
+	// rewriteRoundTripper that routes the actual bytes to the
+	// loopback fake without weakening the SSRF guard in production.
+	target, err := url.Parse(fake.URL)
+	if err != nil {
+		t.Fatalf("parse fake URL: %v", err)
+	}
+	restoreVerify := SetVerifyHTTPClientForTesting(&http.Client{
+		Timeout:   5 * time.Second,
+		Transport: &httpsafe.RewriteRoundTripper{Target: target},
+	})
 	defer restoreVerify()
 
-	// Build a one-off catalog whose verify URL points at the fake.
 	yaml := `id: ad-hoc
 name: Ad hoc
 auth_mode: pat
@@ -293,7 +301,7 @@ mcp:
 verify:
   http:
     method: GET
-    url: "` + fake.URL + `/me"
+    url: "https://verify.test/me"
     headers:
       Authorization: "Bearer ${field.api_key}"
     expect_status: 200
@@ -342,11 +350,17 @@ func TestConnectors_Verify_PATInvalidToken(t *testing.T) {
 	}))
 	defer fake.Close()
 
-	// Without this the prod SafeClient/ValidateURL would refuse the
-	// loopback fake (the test would then "pass" via the URL-reject
-	// branch in probeVerifyHTTP and never exercise the 401-from-
-	// provider path it claims to cover).
-	restoreVerify := SetVerifyHTTPClientForTesting(&http.Client{Timeout: 5 * time.Second})
+	// rewriteRoundTripper retargets verify.test → loopback so the
+	// production code path's httpsafe.ValidateURL stays unconditional
+	// (see PATCallsHTTPEndpoint for the full rationale).
+	target, err := url.Parse(fake.URL)
+	if err != nil {
+		t.Fatalf("parse fake URL: %v", err)
+	}
+	restoreVerify := SetVerifyHTTPClientForTesting(&http.Client{
+		Timeout:   5 * time.Second,
+		Transport: &httpsafe.RewriteRoundTripper{Target: target},
+	})
 	defer restoreVerify()
 
 	yaml := `id: bad-token
@@ -362,7 +376,7 @@ mcp:
 verify:
   http:
     method: GET
-    url: "` + fake.URL + `/me"
+    url: "https://verify.test/me"
     headers:
       Authorization: "Bearer ${field.api_key}"
     expect_status: 200

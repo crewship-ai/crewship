@@ -190,10 +190,12 @@ LIMIT ? OFFSET ?`
 
 	// q.Limit is clamped to [1, 100] in the validation block above;
 	// re-apply at the make() call so the cap is locally visible to
-	// CodeQL's go/uncontrolled-allocation-size rule.
-	allocCap := q.Limit
-	if allocCap < 0 || allocCap > 100 {
-		allocCap = 100
+	// CodeQL's go/uncontrolled-allocation-size rule (min builtin is on
+	// CodeQL's recognised-sanitiser list; the local allocCap = q.Limit
+	// + if-clamp pattern was not).
+	allocCap := min(q.Limit, 100)
+	if allocCap < 0 {
+		allocCap = 0
 	}
 	out := make([]RunAggregated, 0, allocCap)
 	for rows.Next() {

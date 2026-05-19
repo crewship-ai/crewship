@@ -132,32 +132,22 @@ type InstallResponse struct {
 // that resolves an attacker-controlled host into a private IP cannot
 // reach loopback / RFC1918 / cloud-metadata addresses.
 //
-// verifyURLValidate is the matching string-level guard. Both vars are
-// pointers (not function-scoped) so a single test helper can swap both
-// to an unsafe pair that allows httptest.NewServer; production code
-// path never reassigns them.
-var (
-	verifyHTTPClient  = httpsafe.SafeClient(10*time.Second, "http", "https")
-	verifyURLValidate = func(raw string) error {
-		_, err := httpsafe.ValidateURL(raw, "http", "https")
-		return err
-	}
-)
+// Tests swap only verifyHTTPClient.Transport via
+// SetVerifyHTTPClientForTesting; the URL validator inside
+// probeVerifyHTTP stays an inline httpsafe.ValidateURL call so CodeQL
+// go/request-forgery sees a single, unconditional sanitiser at the
+// network boundary.
+var verifyHTTPClient = httpsafe.SafeClient(10*time.Second, "http", "https")
 
 // SetVerifyHTTPClientForTesting swaps the package-level verify client
-// + URL validator with a no-op pair so unit tests targeting
-// httptest.NewServer (127.0.0.1) can drive Verify end-to-end. Returns
-// a restore func; defer it in test bodies. Production code must not
-// call this — there is no production wiring path that does.
+// so unit tests can drive Verify against an httptest.NewServer via a
+// rewriteRoundTripper. Returns a restore func; defer it in test
+// bodies. Production code must not call this — there is no production
+// wiring path that does.
 func SetVerifyHTTPClientForTesting(c *http.Client) (restore func()) {
-	prevClient := verifyHTTPClient
-	prevValidate := verifyURLValidate
+	prev := verifyHTTPClient
 	verifyHTTPClient = c
-	verifyURLValidate = func(string) error { return nil }
-	return func() {
-		verifyHTTPClient = prevClient
-		verifyURLValidate = prevValidate
-	}
+	return func() { verifyHTTPClient = prev }
 }
 
 // List handles GET /api/v1/connectors. Returns 200 with the catalog
@@ -301,12 +291,14 @@ func (h *ConnectorHandler) probeVerifyHTTP(ctx context.Context, m *connectors.Ma
 	}
 	// Manifest URLs are author-controlled and field substitutions are
 	// user-controlled — both untrusted from the verify endpoint's POV.
-	// verifyURLValidate handles the cheap rejects (scheme, literal
+	// httpsafe.ValidateURL handles the cheap rejects (scheme, literal
 	// RFC1918, userinfo); SafeTransport on verifyHTTPClient catches
-	// DNS aliases. The function-pointer indirection exists so
-	// SetVerifyHTTPClientForTesting can replace the validator with a
-	// no-op for unit tests targeting httptest.NewServer.
-	if err := verifyURLValidate(resolvedURL); err != nil {
+	// DNS aliases at dial time. Inlining the call (rather than going
+	// through a function pointer) keeps CodeQL go/request-forgery's
+	// taint analysis intact — it recognises ValidateURL as a sink
+	// sanitiser only when the call is statically visible at the
+	// request-building site.
+	if _, err := httpsafe.ValidateURL(resolvedURL, "http", "https"); err != nil {
 		return false, "verify URL rejected: " + err.Error()
 	}
 
