@@ -74,10 +74,12 @@ Useful for piping from `sed`, `op inject`, or a templating step.
 
 `secrets.env`:
 
-```
-# Lines starting with # are comments
+```bash
+# Lines starting with # are comments (only on their OWN line —
+# inline trailing comments after a value become part of the value).
 ANTHROPIC_API_KEY=sk-ant-…
-GH_TOKEN="ghp_… "    # quoted values are stripped
+# Quoted values have the surrounding quotes stripped:
+GH_TOKEN="ghp_…"
 ```
 
 ```bash

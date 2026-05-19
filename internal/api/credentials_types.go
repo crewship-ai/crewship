@@ -62,6 +62,27 @@ func validateCredentialType(t string) string {
 	return ""
 }
 
+// pendingSentinel values are written to credentials.encrypted_value
+// (via encryption.Encrypt) when a credential row is created in the
+// PENDING state — either because the OAuth dance hasn't completed
+// or because a manifest declared the slot without supplying a value.
+// The status='ACTIVE' filter on every resolver query is the primary
+// guard; isPendingSentinel is a defence-in-depth check so a future
+// code path that decrypts a row outside the filtered queries still
+// drops the placeholder instead of injecting it as a real env var.
+const (
+	pendingSentinelOAuth    = "pending_oauth"
+	pendingSentinelManifest = "pending_manifest"
+)
+
+// isPendingSentinel reports whether a decrypted credential value is
+// one of the well-known placeholders we use for PENDING rows. Code
+// that resolves credentials for env-var injection or token forwarding
+// should bail when this returns true.
+func isPendingSentinel(decrypted string) bool {
+	return decrypted == pendingSentinelOAuth || decrypted == pendingSentinelManifest
+}
+
 // validateCredentialPayload enforces per-type field requirements. It
 // runs after the generic "value required unless OAUTH2" gate in the
 // Create handler so this function can assume Value is populated for

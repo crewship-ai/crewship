@@ -394,12 +394,22 @@ func (h *InternalHandler) lookupCrewNamesForWorkspace(r *http.Request, workspace
 // -----------------------------------------------------------------------------
 
 // resolveAgentCredentials fetches and decrypts credentials assigned to the agent.
+//
+// Only credentials with status='ACTIVE' are returned. PENDING rows
+// (manifest slots awaiting a value, OAuth flows mid-handshake,
+// rotation in progress) carry sentinel encrypted bodies — letting
+// them through would inject "pending_manifest" / "pending_oauth"
+// as a real env var value at the agent boundary, leaking the
+// placeholder to the LLM and silently letting auth-required calls
+// proceed with garbage tokens. Filtering at the SQL boundary is
+// the load-bearing guard; the defensive sentinel check inside the
+// decrypt loop catches a future code path that bypasses this query.
 func (h *InternalHandler) resolveAgentCredentials(r *http.Request, agentID string) ([]mcpCredEntry, error) {
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT ac.credential_id, ac.env_var_name, ac.priority, c.encrypted_value, c.type, COALESCE(c.username, '')
 		FROM agent_credentials ac
 		JOIN credentials c ON c.id = ac.credential_id
-		WHERE ac.agent_id = ? AND c.deleted_at IS NULL
+		WHERE ac.agent_id = ? AND c.deleted_at IS NULL AND c.status = 'ACTIVE'
 		ORDER BY ac.priority ASC
 	`, agentID)
 	if err != nil {
@@ -419,6 +429,13 @@ func (h *InternalHandler) resolveAgentCredentials(r *http.Request, agentID strin
 		dec, err := decryptCredential(encValue)
 		if err != nil {
 			h.logger.Error("decrypt credential for resolve", "id", ce.ID, "error", err)
+			continue
+		}
+		// Defence in depth: even with the SQL filter above, a future
+		// code path that decrypts a row we missed shouldn't leak a
+		// placeholder. The two known sentinels are written when
+		// status flips to PENDING in credentials_mutate.go.
+		if isPendingSentinel(dec) {
 			continue
 		}
 		ce.Value = dec
@@ -455,11 +472,15 @@ func (h *InternalHandler) resolveOAuthAccessTokens(r *http.Request, creds []mcpC
 		if hasAccessToken {
 			continue
 		}
-		// Fetch and decrypt the access token
+		// Fetch and decrypt the access token. PENDING rows would
+		// carry the "pending_oauth" sentinel; status='ACTIVE'
+		// filter + the in-code sentinel check below keep them out
+		// of the resolver's output the same way
+		// resolveAgentCredentials does.
 		var encVal string
 		if err := h.db.QueryRowContext(r.Context(),
-			"SELECT encrypted_value FROM credentials WHERE id = ? AND deleted_at IS NULL", credID).Scan(&encVal); err == nil {
-			if dec, err := decryptCredential(encVal); err == nil && dec != "" {
+			"SELECT encrypted_value FROM credentials WHERE id = ? AND deleted_at IS NULL AND status = 'ACTIVE'", credID).Scan(&encVal); err == nil {
+			if dec, err := decryptCredential(encVal); err == nil && dec != "" && !isPendingSentinel(dec) {
 				creds = append(creds, mcpCredEntry{
 					ID:     credID,
 					EnvVar: "_OAUTH_ACCESS_TOKEN:" + credID,
@@ -867,12 +888,12 @@ func (h *InternalHandler) resolveAgentMCPServers(r *http.Request, data *agentCon
 			args[i] = id
 		}
 		if credRows, err := h.db.QueryContext(r.Context(),
-			"SELECT id, encrypted_value FROM credentials WHERE id IN ("+strings.Join(placeholders, ",")+") AND deleted_at IS NULL",
+			"SELECT id, encrypted_value FROM credentials WHERE id IN ("+strings.Join(placeholders, ",")+") AND deleted_at IS NULL AND status = 'ACTIVE'",
 			args...); err == nil {
 			for credRows.Next() {
 				var cid, encVal string
 				if credRows.Scan(&cid, &encVal) == nil {
-					if plain, err := decryptCredential(encVal); err == nil {
+					if plain, err := decryptCredential(encVal); err == nil && !isPendingSentinel(plain) {
 						credTokens[cid] = plain
 					}
 				}

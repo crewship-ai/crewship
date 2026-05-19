@@ -93,7 +93,7 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// instead of leaking the placeholder to the LLM.
 	manifestPending := false
 	if req.Pending && req.Value == "" {
-		req.Value = "pending_manifest"
+		req.Value = pendingSentinelManifest
 		manifestPending = true
 	}
 	if req.Value == "" && req.Type != "OAUTH2" {
@@ -102,7 +102,7 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	oauthPending := false
 	if req.Value == "" && req.Type == "OAUTH2" {
-		req.Value = "pending_oauth" // placeholder until OAuth flow completes
+		req.Value = pendingSentinelOAuth // placeholder until OAuth flow completes
 		oauthPending = true
 	}
 

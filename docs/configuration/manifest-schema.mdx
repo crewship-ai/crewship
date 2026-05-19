@@ -177,7 +177,7 @@ Sidecar container that runs alongside the agent on the crew's bridge network. Ag
 
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
-| `name` | string | ✓ | DNS-label (`[a-z][a-z0-9-]{0,30}[a-z0-9]`). Becomes the bridge-network alias. |
+| `name` | string | ✓ | DNS label (RFC 1035, 1–63 chars): `[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?`. Becomes the bridge-network alias. |
 | `image` | string | ✓ | Anything `docker pull` can fetch. Pinning a digest is encouraged. |
 | `command` | `[]string` | — | Overrides image ENTRYPOINT + CMD. |
 | `env` | `map<string,string>` | — | Literal env vars (no secrets — use `env_refs:`). |

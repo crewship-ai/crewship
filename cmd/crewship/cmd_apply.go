@@ -148,14 +148,26 @@ func runApply(cmd *cobra.Command, args []string) error {
 		Yes:      yes,
 		OnReport: func(string) { /* plan already printed */ },
 	})
-	if err != nil && !errors.Is(err, manifest.ErrConfirmationRequired) {
+	// Any error from Apply means nothing was committed past the
+	// point of failure — print whatever summary we have and bail.
+	// ErrConfirmationRequired specifically maps to a user-facing
+	// "aborted" so the operator sees what to do (pass --yes or
+	// remove the destructive operation from the manifest) rather
+	// than a confusing wrapped-error message. Treating it as a
+	// successful exit (the previous behaviour) would let the
+	// remainder of this function deref a possibly-nil result and
+	// fool downstream tooling into thinking apply succeeded.
+	if err != nil {
 		printSummary(plan, result)
+		if errors.Is(err, manifest.ErrConfirmationRequired) {
+			return fmt.Errorf("aborted: destructive plan requires confirmation (pass --yes)")
+		}
 		return err
 	}
 
 	printSummary(plan, result)
 
-	if len(result.PendingCredentials) > 0 {
+	if result != nil && len(result.PendingCredentials) > 0 {
 		fmt.Fprintln(os.Stdout)
 		fmt.Fprintf(os.Stdout, "%sPENDING credentials (set values in the UI, or via 'crewship credential set'):%s\n",
 			cli.Yellow, cli.Reset)
@@ -176,13 +188,25 @@ func runApply(cmd *cobra.Command, args []string) error {
 // loadManifestBundle reads from a file path, or from stdin when the
 // path is "-". The "-" sentinel matches POSIX convention used by
 // every tool that reads optional file input (curl, jq, kubectl).
+//
+// Stdin is hard-capped at the same 4 MiB ceiling LoadFile enforces.
+// io.LimitReader silently truncates on overflow, so reading +1 byte
+// past the limit + comparing length is the only way to distinguish
+// "exactly 4 MiB" from "more than 4 MiB"; without that distinction,
+// a 10 MiB pipe would parse-and-apply the first 4 MiB and skip the
+// rest, producing partially-applied sync state — unsafe given
+// destructive defaults.
 func loadManifestBundle(path string) (*manifest.Bundle, error) {
 	if path != "-" {
 		return manifest.LoadFile(path)
 	}
-	data, err := io.ReadAll(io.LimitReader(os.Stdin, 4<<20))
+	const maxStdinManifestBytes = 4 << 20
+	data, err := io.ReadAll(io.LimitReader(os.Stdin, maxStdinManifestBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("read stdin: %w", err)
+	}
+	if len(data) > maxStdinManifestBytes {
+		return nil, fmt.Errorf("manifest from stdin exceeds %d bytes; split the file or write it to disk first", maxStdinManifestBytes)
 	}
 	return manifest.Load(data)
 }

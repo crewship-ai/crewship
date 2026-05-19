@@ -309,15 +309,24 @@ func ExportWorkspace(ctx context.Context, c *Client, opts ExportOptions) (string
 		skillSlugs = append(skillSlugs, s)
 	}
 	sort.Strings(skillSlugs)
+	// Hoist ListSkills out of the per-slug loop. The Client caches
+	// the result after the first call, so the previous in-loop call
+	// only paid an extra map allocation per iteration — but making
+	// the O(1) intent obvious in the source beats relying on the
+	// cache. Build a slug→response index once and reuse it.
+	var skillBySlug map[string]SkillResponse
+	if opts.IncludeSkillBodies && len(skillSlugs) > 0 {
+		all, _ := c.ListSkills(ctx)
+		skillBySlug = make(map[string]SkillResponse, len(all))
+		for _, s := range all {
+			skillBySlug[s.Slug] = s
+		}
+	}
 	for _, slug := range skillSlugs {
 		decl := Skill{Slug: slug}
 		if opts.IncludeSkillBodies {
-			all, _ := c.ListSkills(ctx)
-			for _, s := range all {
-				if s.Slug == slug && s.ID != "" {
-					decl.Inline = c.fetchSkillContent(s.ID)
-					break
-				}
+			if s, ok := skillBySlug[slug]; ok && s.ID != "" {
+				decl.Inline = c.fetchSkillContent(s.ID)
 			}
 		}
 		if decl.Inline == "" {
@@ -344,8 +353,7 @@ func ExportWorkspace(ctx context.Context, c *Client, opts ExportOptions) (string
 		}
 	}
 
-	wsDoc.Metadata.Name = workspaceMetaName(c)
-	wsDoc.Metadata.Slug = workspaceMetaSlug(c)
+	wsDoc.Metadata.Name, wsDoc.Metadata.Slug = workspaceMeta(c)
 
 	var sb strings.Builder
 	sb.WriteString("# yaml-language-server: $schema=https://schemas.crewship.ai/v1/manifest.json\n")
@@ -357,40 +365,29 @@ func ExportWorkspace(ctx context.Context, c *Client, opts ExportOptions) (string
 	return sb.String(), nil
 }
 
-// workspaceMetaName tries to read the workspace's display name from
-// the active workspace endpoint. Falls back to the slug when the API
-// can't be reached. Empty values are tolerated — the manifest's
-// metadata.name is informational.
-func workspaceMetaName(c *Client) string {
+// workspaceMeta fetches the active workspace's display name and
+// slug in a single API call. Falls back to empty strings on any
+// failure — these fields are informational on the exported manifest
+// and the export should still produce a usable file when the API
+// is unavailable. Consolidates what used to be two round-trips
+// returning one field each.
+func workspaceMeta(c *Client) (name, slug string) {
 	wsID := c.api.GetWorkspaceID()
 	if wsID == "" {
-		return ""
+		return "", ""
 	}
 	body, err := c.fetchBody("/api/v1/workspaces/" + wsID)
 	if err != nil || len(body) == 0 {
-		return ""
+		return "", ""
 	}
 	var ws struct {
 		Name string `json:"name"`
-	}
-	_ = json.Unmarshal(body, &ws)
-	return ws.Name
-}
-
-func workspaceMetaSlug(c *Client) string {
-	wsID := c.api.GetWorkspaceID()
-	if wsID == "" {
-		return ""
-	}
-	body, err := c.fetchBody("/api/v1/workspaces/" + wsID)
-	if err != nil || len(body) == 0 {
-		return ""
-	}
-	var ws struct {
 		Slug string `json:"slug"`
 	}
-	_ = json.Unmarshal(body, &ws)
-	return ws.Slug
+	if jsonErr := json.Unmarshal(body, &ws); jsonErr != nil {
+		return "", ""
+	}
+	return ws.Name, ws.Slug
 }
 
 // MarshalDocument serialises a single document to a stable YAML

@@ -302,12 +302,15 @@ spec:
   agents:
     - { slug: a, name: A, agent_role: LEAD, prompt: x }
 `)
-	b, _ := Load(body)
+	b, err := Load(body)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
 
 	fake := newFakeAPI(t)
 	fake.crewsBySlug["t"] = map[string]any{"id": "crew_existing", "slug": "t", "workspace_id": fake.wsID, "name": "T"}
 	client := NewClient(fake)
-	_, err := Apply(context.Background(), client, b, Options{Mode: ApplyStrict})
+	_, err = Apply(context.Background(), client, b, Options{Mode: ApplyStrict})
 	if err == nil || !strings.Contains(err.Error(), "already exists") {
 		t.Fatalf("want strict-conflict error, got %v", err)
 	}
@@ -322,7 +325,10 @@ spec:
   agents:
     - { slug: a, name: A, agent_role: LEAD, prompt: x }
 `)
-	b, _ := Load(body)
+	b, err := Load(body)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
 
 	fake := newFakeAPI(t)
 	fake.crewsBySlug["t"] = map[string]any{"id": "crew_existing", "slug": "t", "workspace_id": fake.wsID, "name": "T-OLD"}
@@ -347,7 +353,10 @@ spec:
   agents:
     - { slug: a, name: A, agent_role: LEAD, prompt: x, env_refs: [MY_KEY] }
 `)
-	b, _ := Load(body)
+	b, err := Load(body)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
 
 	src := MapSecretsSource{"MY_KEY": "secret-from-env"}
 	fake := newFakeAPI(t)
@@ -382,11 +391,14 @@ spec:
   agents:
     - { slug: a, name: A, agent_role: LEAD, prompt: x }
 `)
-	b, _ := Load(body)
+	b, err := Load(body)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
 
 	fake := newFakeAPI(t)
 	client := NewClient(fake)
-	_, err := Apply(context.Background(), client, b, Options{Mode: ApplyUpsert, DryRun: true})
+	_, err = Apply(context.Background(), client, b, Options{Mode: ApplyUpsert, DryRun: true})
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -406,8 +418,14 @@ spec:
   agents:
     - { slug: a, name: A, agent_role: LEAD, prompt: x }
 `)
-	b1, _ := Load(body)
-	b2, _ := Load(body)
+	b1, errLoad1 := Load(body)
+	if errLoad1 != nil {
+		t.Fatalf("Load: %v", errLoad1)
+	}
+	b2, errLoad2 := Load(body)
+	if errLoad2 != nil {
+		t.Fatalf("Load: %v", errLoad2)
+	}
 
 	fake := newFakeAPI(t)
 	client := NewClient(fake)
