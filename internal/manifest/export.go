@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 
@@ -136,7 +137,15 @@ func ExportCrew(ctx context.Context, c *Client, slug string, opts ExportOptions)
 			},
 			Prompt: deref(a.SystemPrompt),
 		}
-		if skillBindings, err := c.ListAgentSkills(ctx, a.ID); err == nil {
+		// Best-effort: a failure here loses bindings for this one
+		// agent but the rest of the crew still exports. We write a
+		// stderr note so an operator running `crewship export crew`
+		// can correlate "why are my skills missing?" against an
+		// upstream API hiccup. Errors are not propagated because a
+		// partial export is more useful than no export at all.
+		if skillBindings, err := c.ListAgentSkills(ctx, a.ID); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: ListAgentSkills(%q) failed; agent %q exports without skill bindings: %v\n", a.ID, a.Slug, err)
+		} else {
 			sort.Slice(skillBindings, func(i, j int) bool { return skillBindings[i].Skill.Slug < skillBindings[j].Skill.Slug })
 			for _, b := range skillBindings {
 				if b.Skill.Slug == "" {
@@ -146,7 +155,9 @@ func ExportCrew(ctx context.Context, c *Client, slug string, opts ExportOptions)
 				skillSlugSet[b.Skill.Slug] = true
 			}
 		}
-		if credBindings, err := c.ListAgentCredentials(ctx, a.ID); err == nil {
+		if credBindings, err := c.ListAgentCredentials(ctx, a.ID); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: ListAgentCredentials(%q) failed; agent %q exports without credential bindings: %v\n", a.ID, a.Slug, err)
+		} else {
 			sort.Slice(credBindings, func(i, j int) bool { return credBindings[i].EnvVarName < credBindings[j].EnvVarName })
 			for _, b := range credBindings {
 				agentDecl.EnvRefs = append(agentDecl.EnvRefs, b.EnvVarName)
