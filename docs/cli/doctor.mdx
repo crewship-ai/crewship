@@ -68,6 +68,20 @@ chmod 0700 ~/.crewship
 chmod 0600 ~/.crewship/crewship.db ~/.crewship/crewship.db-wal ~/.crewship/crewship.db-shm 2>/dev/null
 ```
 
+### NEXTAUTH_SECRET
+
+Surfaces where the JWT signing secret lives (env var vs `<dataDir>/secrets.env`) and validates the value is at least 32 characters. As of PR #446 the secret is auto-bootstrapped on first start, so a missing value is no longer a failure — doctor reports INFO and the next `crewship start` generates it.
+
+| Result | Trigger |
+|--------|---------|
+| **PASS — `env-provided (N chars)`** | `NEXTAUTH_SECRET` is in the process env and ≥ 32 chars. |
+| **PASS — `auto-managed in <path> (N chars)`** | Not in env; the persisted `secrets.env` has a valid entry. |
+| **INFO — `not yet bootstrapped`** | Not in env and `secrets.env` doesn't exist yet. The next `crewship start` will generate and persist it. |
+| **WARN — `env-provided value is short (N chars)`** | In env but below 32 chars. Regenerate with `openssl rand -hex 32`. |
+| **WARN — `persisted value invalid: …`** | The persisted entry exists but failed `ValidateNextAuthSecret`. Replace the line in `secrets.env`. |
+| **WARN — `persisted secret file exists but NEXTAUTH_SECRET entry is missing`** | The file was hand-edited or partial; delete it so the next `start` regenerates (any credentials encrypted under the missing key are unrecoverable). |
+| **WARN — `cannot inspect persisted secret file: …`** | Usually a permission/ownership problem on the data dir. Check `~/.crewship` (or `$CREWSHIP_DATA_DIR`) permissions. |
+
 ### Telemetry status
 
 Reads `app_settings.telemetry_opt_in` from the local DB. Reports:
@@ -115,6 +129,7 @@ $ crewship doctor
   [PASS]  container runtime              docker (Docker Desktop 4.35.1) at /var/run/docker.sock
   [PASS]  port binding                   :8080 is bindable
   [PASS]  database permissions           ~/.crewship (0700) + crewship.db (0600)
+  [PASS]  NEXTAUTH_SECRET                auto-managed in /Users/you/.crewship/secrets.env (64 chars)
   [PASS]  telemetry status               ENABLED, endpoint o4511387688108032.ingest.de.sentry.io (vendor default)
   [PASS]  DSN reachability               connected to o4511387688108032.ingest.de.sentry.io:443 (94ms)
   [WARN]  update available               v0.1.0 stable is out; you're on v0.1.0-beta.1
