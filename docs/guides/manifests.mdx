@@ -281,8 +281,16 @@ What the provisioner does for each service:
 1. Pull the image (best-effort: tolerates registry outages when a local copy exists).
 2. Create per-crew named volumes (`crewship-svc-{crew-slug}-vol-{name}`).
 3. Start the container with a DNS alias matching `name`, on the crew bridge.
-4. Wait for `healthcheck.test` to report HEALTHY (capped at 60 s across all sidecars).
+4. Wait for `healthcheck.test` to report HEALTHY — **capped at 60 s across all sidecars** in the crew (`internal/provider/docker/sidecar.go:EnsureCrewServices`).
 5. Only then start the agent runtime.
+
+<Warning>
+A failed healthcheck (timeout, non-zero exit) **prevents the agent from starting** — the error surfaces as `sidecar "X" not healthy: ...`. This is intentional: silently proceeding would mask half-broken setups that look fine until the first DB query times out. Test your healthcheck command locally before committing the manifest.
+</Warning>
+
+<Note>
+Services declared **without** a `healthcheck:` block aren't gated — Crewship considers them ready as soon as Docker reports the container running. Use a healthcheck whenever the agent's first call depends on the service being initialized (Postgres after `initdb`, Redis after AOF replay, etc.).
+</Note>
 
 <Note>
 Volumes are **always named volumes**. The validator rejects bind-mount paths so manifests stay portable across machines.
