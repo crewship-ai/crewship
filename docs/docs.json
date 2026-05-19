@@ -29,11 +29,18 @@
             "group": "Guides",
             "icon": "book-open",
             "pages": [
-              "guides/install",
-              "guides/installation",
-              "guides/onboarding",
-              "guides/auth",
-              "guides/admin-cli",
+              {
+                "group": "Setup",
+                "icon": "download",
+                "expanded": true,
+                "pages": [
+                  "guides/install",
+                  "guides/installation",
+                  "guides/onboarding",
+                  "guides/auth",
+                  "guides/admin-cli"
+                ]
+              },
               "guides/first-crew",
               "guides/chat-sessions",
               "guides/manifests",
