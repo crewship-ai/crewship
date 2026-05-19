@@ -61,6 +61,12 @@ All Crewship configuration can be set via environment variables. These override 
 |----------|---------|-------------|
 | `CREWSHIP_PUBLIC_URL` | (unset) | Externally-reachable base URL of the Crewship server. Required for password-recovery emails and for `/expose-port` (port-exposed agent containers). Without it the recovery email link is degraded and `/expose-port` returns `503` with a `CREWSHIP_PUBLIC_URL not set` log line. |
 
+## Origin enforcement (CORS / EnforceOrigin)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CREWSHIP_ALLOWED_ORIGINS` | (unset — same-origin only) | Comma-separated allowlist of cross-origin `scheme://host[:port]` values that may issue state-changing requests (POST/PUT/PATCH/DELETE). Parsed by `internal/api/origin_check.go`; matched as **exact host equality** after `url.Parse` (no suffix wildcards, no IDN tricks — those previously enabled bypasses). Required whenever the frontend is served from a different origin than the daemon (cross-origin Playwright E2E, separate `:3001` dev frontend on `nuke`-reset envs, reverse-proxy host with custom domain). `dev.sh` writes this automatically alongside `NEXTAUTH_URL`/`CREWSHIP_PORT` so the value survives `./dev.sh nuke`. Example: `CREWSHIP_ALLOWED_ORIGINS=https://app.crewship.io,https://staging.crewship.io`. |
+
 ## Crash reporting (Sentry)
 
 | Variable | Default | Description |
