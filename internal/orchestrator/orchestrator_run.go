@@ -14,6 +14,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/conversation"
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/telemetry"
 	"github.com/crewship-ai/crewship/internal/tokenutil"
 )
 
@@ -29,13 +30,27 @@ func (o *Orchestrator) SetConversationStore(store *conversation.Store) {
 
 // RunAgent executes an agent run inside its crew's container, streaming events
 
-func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handler EventHandler) error {
+func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handler EventHandler) (err error) {
 	o.mu.RLock()
 	if !o.accepting {
 		o.mu.RUnlock()
 		return fmt.Errorf("orchestrator not accepting new runs")
 	}
 	o.mu.RUnlock()
+
+	// Open the outermost OTel span for this agent invocation. Every
+	// downstream LLM call, tool execution, and sub-agent fan-out becomes
+	// a child of this span via context propagation. We capture the
+	// returned error in the deferred cleanup so RecordError stamps the
+	// span status without every error return having to know about
+	// telemetry. Added FIRST so its End() runs LAST in LIFO order —
+	// after the post_agent_stop hook and refreshActivity defers below,
+	// so those operations stay inside the trace.
+	ctx, span := telemetry.StartAgentSpan(ctx, req.AgentID, req.AgentRole, req.CrewID, req.MissionID)
+	defer func() {
+		telemetry.RecordError(span, err)
+		span.End()
+	}()
 
 	// Capture the user prompt that triggered this run as a journal
 	// entry. Lands in the Timeline as the "what kicked this off"

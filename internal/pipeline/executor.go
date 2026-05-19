@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"log/slog"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/telemetry"
 )
 
 // ErrPipelineNotFound is returned by Run when a call_pipeline step
@@ -404,7 +406,7 @@ type RunInput struct {
 
 // runDSL is the actual step loop. depth bounds call_pipeline recursion
 // across nested invocations; the top-level Run starts depth at 0.
-func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (*RunResult, error) {
+func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (result *RunResult, err error) {
 	if depth >= MaxNestedPipelineDepth {
 		return nil, ErrMaxDepthExceeded
 	}
@@ -432,6 +434,20 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (*RunResu
 		runID = generateRunID()
 	}
 	startedAt := time.Now()
+
+	// Open the outermost OTel span for this routine run. Every step
+	// span beneath becomes a child via ctx propagation. Top-level only —
+	// nested call_pipeline invocations live as child spans under the
+	// step.run that triggered them, not as siblings, so the trace tree
+	// mirrors the DSL composition.
+	if depth == 0 {
+		runSpanCtx, runSpan := telemetry.StartRoutineRunSpan(ctx, pipelineSlug, runID, pipelineID)
+		ctx = runSpanCtx
+		defer func() {
+			telemetry.RecordError(runSpan, err)
+			runSpan.End()
+		}()
+	}
 
 	emit := &pipelineEmitContext{
 		emitter:         e.emitter,
@@ -463,7 +479,7 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (*RunResu
 	// reaches the grader as `in.Inputs = {}` and rubrics that
 	// reference "the original input" can't resolve anything.
 	in.Inputs = inputsForCtx
-	result := &RunResult{
+	result = &RunResult{
 		RunID:        runID,
 		PipelineID:   pipelineID,
 		PipelineSlug: pipelineSlug,
@@ -665,6 +681,18 @@ func (e *Executor) runStep(
 	parentRender RenderContext,
 	depth int,
 ) (output string, costUSD float64, durationMs int64, err error) {
+
+	// Wrap every step type in a routine.step span so the trace tree shows
+	// step boundaries even for transform / http / code steps that have no
+	// inner LLM span. Attempt is 0 here — agent_run's own tier-escalation
+	// chain produces sibling step spans at attempt 1, 2, … through
+	// runAgentStep's internal loop where we don't have visibility from
+	// this dispatch level.
+	ctx, span := telemetry.StartRoutineStepSpan(ctx, step.ID, string(step.Type), 0)
+	defer func() {
+		telemetry.RecordError(span, err)
+		span.End()
+	}()
 
 	switch step.Type {
 	case StepAgentRun:
