@@ -68,6 +68,7 @@ type chatResolveResponse struct {
 	CachedRequirements string                   `json:"cached_requirements"`
 	DevcontainerConfig string                   `json:"devcontainer_config"`
 	MiseConfig         string                   `json:"mise_config"`
+	ServicesJSON       string                   `json:"services_json"`
 	MCPServers         []mcpServerResponse      `json:"mcp_servers,omitempty"`
 	CrewMCPConfigJSON  string                   `json:"crew_mcp_config_json"`
 	AgentMCPConfigJSON string                   `json:"agent_mcp_config_json"`
@@ -515,6 +516,8 @@ func (r *IPCResolver) resolve(ctx context.Context, resolveURL string) (*ChatInfo
 		CachedImage:        data.CachedImage,
 		DevcontainerConfig: data.DevcontainerConfig,
 		MiseConfig:         data.MiseConfig,
+		ServicesJSON:       data.ServicesJSON,
+		ServiceEnvLookup:   buildServiceEnvLookup(creds),
 		ContainerEnv:       containerEnv,
 		CachedRequirements: cachedReqs,
 		RootPostStart:      rootPostStart,

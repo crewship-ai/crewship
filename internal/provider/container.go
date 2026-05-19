@@ -43,6 +43,47 @@ type CrewConfig struct {
 	// retry. Intentionally excluded from the provisioning hash; mutating the
 	// list does not invalidate the cached image.
 	PostStartCommands []string
+
+	// Services are sidecar containers (Redis, Postgres, etc.) the
+	// provider should start alongside the crew's runtime, on the
+	// same network, so the agent can reach them by Service.Name.
+	// Empty / nil means "no sidecars", which is the historical
+	// default. Providers that don't yet support sidecars should
+	// log + ignore — the orchestrator surfaces a warning to the
+	// user through the manifest-apply path.
+	Services []CrewService
+}
+
+// CrewService is one sidecar container declaration. Mirrors the
+// manifest's Service shape but lives in provider/ to avoid a cyclic
+// dependency between provider and manifest packages — the API layer
+// translates from the on-disk JSON into this struct before invoking
+// the provider.
+type CrewService struct {
+	Name        string
+	Image       string
+	Command     []string
+	Env         map[string]string // literal env vars (already resolved)
+	Ports       []string          // "5432" or "5432/tcp"
+	Volumes     []CrewServiceVolume
+	Healthcheck *CrewServiceHealthcheck
+}
+
+// CrewServiceVolume names a per-crew named volume and where it
+// mounts inside the sidecar.
+type CrewServiceVolume struct {
+	Name  string
+	Mount string
+}
+
+// CrewServiceHealthcheck mirrors docker's healthcheck shape so the
+// provider can wait for HEALTHY before reporting the crew ready.
+type CrewServiceHealthcheck struct {
+	Test        []string
+	Interval    time.Duration
+	Timeout     time.Duration
+	Retries     int
+	StartPeriod time.Duration
 }
 
 // CrewMount declares an additional bind or volume mount to apply to the crew
@@ -110,6 +151,19 @@ type ContainerProvider interface {
 // the host's actual IP since each container runs in its own VM.
 type HostAddressProvider interface {
 	HostAddress() string
+}
+
+// SidecarProvider is the optional capability for container providers
+// that can start crew-scoped sidecar containers (Redis, Postgres,
+// etc.). The docker provider implements it; the apple-container
+// provider does not yet, and orchestrator callers that need
+// sidecars must type-assert at the call site (graceful degradation:
+// if the provider doesn't support sidecars, the manifest's
+// `services:` block is ignored at runtime with a warning).
+type SidecarProvider interface {
+	EnsureCrewServices(ctx context.Context, team CrewConfig) (map[string]string, error)
+	StopCrewServices(ctx context.Context, crewSlug string) error
+	RemoveCrewServices(ctx context.Context, crewSlug string) error
 }
 
 // CrewContainerLookup is an optional interface that container providers

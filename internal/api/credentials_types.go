@@ -51,6 +51,17 @@ var validCredentialTypes = map[CredentialType]struct{}{
 	CredTypeGenericSecret: {},
 }
 
+// validateCredentialType checks only the closed type enum — extracted
+// so callers that don't have a payload to shape-check (manifest-pending
+// slot creation) can still gate on the type without running the full
+// per-type field validation.
+func validateCredentialType(t string) string {
+	if _, ok := validCredentialTypes[t]; !ok {
+		return "type must be one of: AI_CLI_TOKEN, API_KEY, CLI_TOKEN, SECRET, OAUTH2, USERPASS, SSH_KEY, CERTIFICATE, GENERIC_SECRET"
+	}
+	return ""
+}
+
 // validateCredentialPayload enforces per-type field requirements. It
 // runs after the generic "value required unless OAUTH2" gate in the
 // Create handler so this function can assume Value is populated for
@@ -60,8 +71,8 @@ var validCredentialTypes = map[CredentialType]struct{}{
 // Returns an empty string when the payload is valid, otherwise an
 // end-user-readable error message suitable for a 400 response body.
 func validateCredentialPayload(req *createCredentialRequest) string {
-	if _, ok := validCredentialTypes[req.Type]; !ok {
-		return "type must be one of: AI_CLI_TOKEN, API_KEY, CLI_TOKEN, SECRET, OAUTH2, USERPASS, SSH_KEY, CERTIFICATE, GENERIC_SECRET"
+	if msg := validateCredentialType(req.Type); msg != "" {
+		return msg
 	}
 
 	switch req.Type {

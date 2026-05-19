@@ -1,0 +1,64 @@
+# yaml-language-server: $schema=https://schemas.crewship.ai/v1/manifest.json
+#
+# Python crew with Redis + Postgres installed INSIDE the agent
+# container via devcontainer Features. Works today with zero
+# provisioner changes — the trade-off is that the databases share
+# the agent's lifecycle (container restart = restart DB, named
+# volumes still persist data).
+#
+# When the sidecar provisioner ships, the python-with-services
+# example becomes the recommended shape (DB lifecycle decoupled
+# from agent).
+
+apiVersion: crewship/v1
+kind: Crew
+
+metadata:
+  name: Python Backend Crew (features-based DBs)
+  slug: python-backend-features
+  description: Python agent with Redis + Postgres installed via devcontainer features.
+  icon: code
+  color: green
+
+spec:
+  devcontainer:
+    image: mcr.microsoft.com/devcontainers/python:3.12
+    features:
+      # Postgres feature — installs the server + client + initdb hook.
+      # The feature exposes connection at 127.0.0.1:5432 inside the
+      # agent container.
+      "ghcr.io/itsmechlark/features/postgresql:1":
+        version: "16"
+        # Empty password is fine for a dev-only DB that never leaves
+        # the agent container. In production you would rotate this
+        # via a credential slot.
+        password: ""
+      # Redis feature — installs redis-server on 127.0.0.1:6379.
+      "ghcr.io/itsmechlark/features/redis-server:1": {}
+    env:
+      DATABASE_URL: postgres://postgres@localhost:5432/postgres
+      REDIS_URL: redis://localhost:6379
+
+  credentials:
+    - env: ANTHROPIC_API_KEY
+      provider: ANTHROPIC
+      type: API_KEY
+
+  agents:
+    - slug: pavel
+      name: Pavel
+      role_title: Python Backend Engineer
+      agent_role: LEAD
+      cli_adapter: CLAUDE_CODE
+      llm:
+        provider: ANTHROPIC
+        model: claude-haiku-4-5
+      tool_profile: CODING
+      memory_enabled: true
+      env_refs: [ANTHROPIC_API_KEY]
+      prompt: |
+        You are Pavel, a Python backend engineer. The runtime has a
+        Postgres server at localhost:5432 and a Redis server at
+        localhost:6379 — both running inside this container. Use
+        them for development; production should use a real sidecar
+        deployment.

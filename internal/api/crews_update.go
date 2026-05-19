@@ -33,6 +33,7 @@ type updateCrewRequest struct {
 	RuntimeImage       *string   `json:"runtime_image"`
 	DevcontainerConfig *string   `json:"devcontainer_config"`
 	MiseConfig         *string   `json:"mise_config"`
+	ServicesJSON       *string   `json:"services_json"`
 }
 
 // List returns all non-deleted crews in the workspace with member and agent counts.
@@ -118,6 +119,19 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if req.MiseConfig != nil && *req.MiseConfig != "" {
 		if _, err := devcontainer.ParseMiseConfig(*req.MiseConfig); err != nil {
 			replyError(w, http.StatusBadRequest, "invalid mise_config: "+err.Error())
+			return
+		}
+	}
+	// Services validation mirrors the create path. Empty/null
+	// services_json clears the column; a populated body must match
+	// the validator's schema before storage.
+	if req.ServicesJSON != nil && *req.ServicesJSON != "" {
+		if len(*req.ServicesJSON) > 64*1024 {
+			replyError(w, http.StatusBadRequest, "services_json exceeds 64KB limit")
+			return
+		}
+		if err := validateServicesJSON(*req.ServicesJSON); err != nil {
+			replyError(w, http.StatusBadRequest, "invalid services_json: "+err.Error())
 			return
 		}
 	}
@@ -248,6 +262,18 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		ub.Set("cached_image", nil)
 		ub.Set("config_hash", nil)
 		ub.Set("cached_requirements", nil)
+	}
+	if req.ServicesJSON != nil {
+		if *req.ServicesJSON == "" {
+			ub.Set("services_json", nil)
+		} else {
+			ub.Set("services_json", *req.ServicesJSON)
+		}
+		// Services do NOT participate in the cached image hash —
+		// they're separate containers built from upstream images,
+		// not baked into the agent runtime. Changing services
+		// triggers a sidecar restart at next EnsureCrewRuntime,
+		// not a devcontainer rebuild.
 	}
 	// Track whether the resolved mode is free — if so, always clear allowed_domains.
 	updatedModeFree := false

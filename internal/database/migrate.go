@@ -1287,6 +1287,10 @@ END;
 	// PR #395's add_assignment_queue took v93 first.)
 	// See migrate_consts_v94_credential_vault_types.go.
 	{version: 94, name: "add_credential_vault_types", sql: migrationAddCredentialVaultTypes},
+	// v95: stores sidecar service declarations (Redis/Postgres/etc.)
+	// alongside the crew's other provisioning config. See
+	// migrate_consts_v95_crew_services.go for the rationale.
+	{version: 95, name: "add_crew_services", sql: migrationAddCrewServices},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

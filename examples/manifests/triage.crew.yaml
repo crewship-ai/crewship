@@ -1,0 +1,78 @@
+# yaml-language-server: $schema=https://schemas.crewship.ai/v1/manifest.json
+#
+# Triage crew with an inline mini-skill for the housekeeping rule.
+# Demonstrates `inline:` (small skill body in the manifest itself)
+# and `source:` (skill fetched from a remote git host at apply-time).
+#
+#   crewship apply --file triage.crew.yaml
+
+apiVersion: crewship/v1
+kind: Crew
+
+metadata:
+  name: Triage Crew
+  slug: triage
+  description: OpenAI-powered agent that triages a Linear backlog.
+  icon: list-checks
+  color: violet
+
+spec:
+  devcontainer:
+    image: mcr.microsoft.com/devcontainers/javascript-node:22-bookworm
+
+  credentials:
+    - env: OPENAI_API_KEY
+      provider: OPENAI
+      type: API_KEY
+      label: OpenAI API key
+      help_url: https://platform.openai.com/api-keys
+    - env: LINEAR_API_KEY
+      provider: NONE
+      type: API_KEY
+      label: Linear API key
+      help_url: https://linear.app/settings/api
+
+  mcp_servers:
+    - name: linear
+      display_name: Linear
+      transport: stdio
+      command: npx
+      args: [-y, "@linear/mcp-server"]
+      env_mapping:
+        LINEAR_API_KEY: LINEAR_API_KEY
+
+  skills:
+    - slug: triage-rules
+      inline: |
+        ---
+        name: triage-rules
+        description: House rules for what counts as a P0 vs P1 vs P2 issue.
+        license: MIT
+        ---
+
+        # Triage rules
+
+        - P0 = production user-visible outage, single-incident
+        - P1 = regression in a customer workflow, affects > 1 user
+        - P2 = bug with workaround, or feature gap
+        - P3 = polish, ergonomics, dev-experience
+        - "feature request" without a customer signal → tag `dreaming`
+
+  agents:
+    - slug: alice
+      name: Alice
+      role_title: Triage Lead
+      agent_role: LEAD
+      cli_adapter: CODEX_CLI
+      llm:
+        provider: OPENAI
+        model: gpt-4o
+      tool_profile: MINIMAL
+      timeout_seconds: 1800
+      skills: [triage-rules]
+      env_refs: [OPENAI_API_KEY, LINEAR_API_KEY]
+      prompt: |
+        You are Alice. Every morning, scan the Linear backlog for
+        items added in the last 24 h. For each, apply the
+        `triage-rules` skill to set priority and add a one-line
+        summary in the comments.

@@ -1,0 +1,74 @@
+# yaml-language-server: $schema=https://schemas.crewship.ai/v1/manifest.json
+#
+# A self-contained Code Review crew. Apply with:
+#
+#   crewship apply --file code-review.crew.yaml --from-env
+#
+# `--from-env` reads ANTHROPIC_API_KEY and GH_TOKEN from the process
+# environment. Drop the flag to create them as PENDING slots that the
+# user fills in via the UI.
+
+apiVersion: crewship/v1
+kind: Crew
+
+metadata:
+  name: Code Review Crew
+  slug: code-review
+  description: Anthropic-powered agent that reviews GitHub pull requests.
+  icon: git-pull-request
+  color: blue
+  author: Crewship
+  version: 1.0.0
+  license: MIT
+
+spec:
+  devcontainer:
+    image: mcr.microsoft.com/devcontainers/javascript-node:22-bookworm
+    memory_mb: 4096
+    cpus: 2.0
+    features:
+      "ghcr.io/devcontainers-extra/features/claude-code:2": {}
+    env:
+      PATH: /home/agent/.local/bin:/usr/local/bin:/usr/bin:/bin
+
+  credentials:
+    - env: ANTHROPIC_API_KEY
+      provider: ANTHROPIC
+      type: API_KEY
+      label: Anthropic API key
+      help_url: https://console.anthropic.com/settings/keys
+    - env: GH_TOKEN
+      provider: GITHUB
+      type: CLI_TOKEN
+      label: GitHub personal access token
+      help_url: https://github.com/settings/tokens
+
+  mcp_servers:
+    - name: github
+      display_name: GitHub
+      transport: stdio
+      command: npx
+      args: [-y, "@modelcontextprotocol/server-github"]
+      icon: github
+      env_mapping:
+        GITHUB_PERSONAL_ACCESS_TOKEN: GH_TOKEN
+
+  skills:
+    - slug: security-review
+      path: ./code-review/skills/security-review/SKILL.md
+
+  agents:
+    - slug: daniel
+      name: Daniel
+      role_title: Code Reviewer
+      agent_role: LEAD
+      cli_adapter: CLAUDE_CODE
+      llm:
+        provider: ANTHROPIC
+        model: claude-haiku-4-5
+      tool_profile: MINIMAL
+      timeout_seconds: 1800
+      memory_enabled: true
+      skills: [security-review]
+      env_refs: [ANTHROPIC_API_KEY, GH_TOKEN]
+      prompt_file: ./code-review/prompts/daniel.md

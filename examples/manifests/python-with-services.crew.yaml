@@ -1,0 +1,80 @@
+# yaml-language-server: $schema=https://schemas.crewship.ai/v1/manifest.json
+#
+# Python crew with sidecar Redis + Postgres.
+#
+# Sidecars run alongside the agent container on the crew's bridge
+# network. Agents reach them by service name — `redis:6379`,
+# `postgres:5432`. Volumes are per-crew named volumes; nothing is
+# published to the host.
+
+apiVersion: crewship/v1
+kind: Crew
+
+metadata:
+  name: Python Backend Crew
+  slug: python-backend
+  description: Python agent with a Redis cache and Postgres database on the side.
+  icon: code
+  color: green
+
+spec:
+  devcontainer:
+    image: mcr.microsoft.com/devcontainers/python:3.12
+    env:
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@postgres:5432/app
+      REDIS_URL: redis://redis:6379
+
+  credentials:
+    - env: ANTHROPIC_API_KEY
+      provider: ANTHROPIC
+      type: API_KEY
+    - env: POSTGRES_PASSWORD
+      provider: NONE
+      type: GENERIC_SECRET
+      label: Postgres root password
+
+  services:
+    - name: redis
+      image: redis:7-alpine
+      ports: ["6379"]
+      healthcheck:
+        test: ["CMD", "redis-cli", "ping"]
+        interval: 5s
+        timeout: 3s
+        retries: 5
+
+    - name: postgres
+      image: postgres:16-alpine
+      env:
+        POSTGRES_DB: app
+        POSTGRES_USER: postgres
+      env_refs: [POSTGRES_PASSWORD]
+      ports: ["5432"]
+      volumes:
+        - name: pg-data
+          mount: /var/lib/postgresql/data
+      healthcheck:
+        test: ["CMD-SHELL", "pg_isready -U postgres"]
+        interval: 5s
+        timeout: 3s
+        retries: 10
+        start_period: 10s
+
+  agents:
+    - slug: pavel
+      name: Pavel
+      role_title: Python Backend Engineer
+      agent_role: LEAD
+      cli_adapter: CLAUDE_CODE
+      llm:
+        provider: ANTHROPIC
+        model: claude-haiku-4-5
+      tool_profile: CODING
+      memory_enabled: true
+      env_refs: [ANTHROPIC_API_KEY, POSTGRES_PASSWORD]
+      prompt: |
+        You are Pavel, a Python backend engineer. The crew runtime
+        has a Redis cache reachable at redis:6379 and a Postgres
+        database at postgres:5432 (database "app", user "postgres",
+        password in $POSTGRES_PASSWORD). Use them for any work that
+        needs persistence or shared state.
