@@ -18,7 +18,7 @@ For the narrative tour and the manifest format, see [Guides → Workspace Manife
 
 | Flag | Default | Purpose |
 | --- | --- | --- |
-| `--file <path>` | (required) | Path to manifest YAML/JSON. Use `-` to read from stdin. |
+| `--file <path>` | (required) | Path to manifest YAML/JSON. Use `-` to read from stdin (capped at 4 MiB; split larger files). |
 | `--dry-run` | `false` | Validate, render the plan, and exit without mutating. |
 | `--strict` | `false` | Fail if any resource in the manifest already exists. Use in CI when you require a fresh workspace. |
 | `--replace` | `false` | Delete every matching resource before recreating it. Destructive; prompts unless `--yes`. |
@@ -26,7 +26,7 @@ For the narrative tour and the manifest format, see [Guides → Workspace Manife
 | `--secrets-file <path>` | `""` | Load credential values from a `KEY=VALUE` file. Comments (`#`) and quoted values supported. |
 | `-y`, `--yes` | `false` | Skip confirmation prompts. Required when running in a non-TTY (CI) with destructive operations. |
 
-`--strict` and `--replace` are mutually exclusive.
+`--strict` and `--replace` are mutually exclusive. Apply also requires an authenticated session (`crewship login`) and a workspace context — both are inherited from the current CLI profile.
 
 ## Examples
 
@@ -78,9 +78,12 @@ Useful for piping from `sed`, `op inject`, or a templating step.
 # Lines starting with # are comments (only on their OWN line —
 # inline trailing comments after a value become part of the value).
 ANTHROPIC_API_KEY=sk-ant-…
-# Quoted values have the surrounding quotes stripped:
+# Surrounding single OR double quotes are stripped:
 GH_TOKEN="ghp_…"
+SLACK_BOT_TOKEN='xoxb-…'
 ```
+
+The format mirrors Docker Compose's `--env-file`: no env-var expansion happens, the file is the source of truth.
 
 ```bash
 crewship apply --file team.yaml --secrets-file ./secrets.env --yes
@@ -155,12 +158,25 @@ Resources **not** synced (additive only):
 ## Common errors
 
 - **`crew "code-review" already exists`** — drop `--strict` to update in place, or pass `--replace` to recreate.
-- **`destructive plan requires confirmation`** — pass `-y/--yes` in CI, or run interactively.
+- **`aborted: destructive plan requires confirmation (pass --yes)`** — `apply` saw a `-` line in the plan and stdin isn't a TTY. Pass `-y/--yes` in CI, or run interactively.
 - **`invalid services_json: services["xyz"]: name must be a DNS label`** — service names must be valid RFC 1035 DNS labels (1–63 chars, lowercase letters/digits/`-`, starting with a letter and ending with letter or digit) since they become bridge-network DNS aliases.
 - **`skill "X" references unknown credential env "Y"`** — every `env_refs:` entry must point at a credential declared in the same manifest (in the crew or at workspace scope).
+
+## Next step after apply
+
+When the manifest declares `spec.devcontainer` on any crew, `apply` prints a hint at the end:
+
+```
+Next: build crew containers with:
+  crewship crew provision code-review
+  crewship crew provision triage
+```
+
+The original design auto-provisioned containers, but the apply CLI had already exited by the time provisioning streamed progress — so we surface the chained command instead of hiding it behind a flag. Run the printed line(s) to actually pull images and start the bridge network.
 
 ## See also
 
 - [Guides → Workspace Manifests](/guides/manifests) — the narrative tour
 - [CLI → export](/cli/export) — round-trip back to YAML
+- [CLI → crew provision](/cli/crew) — chained step for crews with devcontainers
 - [Configuration → Manifest Schema](/configuration/manifest-schema) — every field, every default
