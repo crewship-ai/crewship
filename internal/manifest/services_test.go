@@ -49,7 +49,7 @@ spec:
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	b, _ := Load([]byte(`
+	b, errLoad := Load([]byte(`
 apiVersion: crewship/v1
 kind: Crew
 metadata: {name: T, slug: t}
@@ -60,6 +60,9 @@ spec:
   agents:
     - {slug: a, name: A, agent_role: LEAD, prompt: x}
 `))
+	if errLoad != nil {
+		t.Fatalf("Load: %v", errLoad)
+	}
 	err = b.Validate()
 	if err == nil || !strings.Contains(err.Error(), "DNS label") {
 		t.Errorf("want DNS-label error, got %v", err)
@@ -140,7 +143,10 @@ spec:
   agents:
     - {slug: a, name: A, agent_role: LEAD, prompt: x}
 `)
-	b, _ := Load(body)
+	b, errLoad := Load(body)
+	if errLoad != nil {
+		t.Fatalf("Load: %v", errLoad)
+	}
 	fake := newFakeAPI(t)
 	client := NewClient(fake)
 	plan, err := BuildPlan(context.Background(), client, b, Options{Mode: ApplyUpsert})
@@ -176,7 +182,10 @@ spec:
   agents:
     - {slug: a, name: A, agent_role: LEAD, prompt: x}
 `)
-	b, _ := Load(body)
+	b, errLoad := Load(body)
+	if errLoad != nil {
+		t.Fatalf("Load: %v", errLoad)
+	}
 	fake := newFakeAPI(t)
 	client := NewClient(fake)
 	_, err := Apply(context.Background(), client, b, Options{Mode: ApplyUpsert, Yes: true})

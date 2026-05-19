@@ -81,7 +81,7 @@ func runExportWorkspace(cmd *cobra.Command, args []string) error {
 	noCreds, _ := cmd.Flags().GetBool("no-credentials")
 	noSkillBodies, _ := cmd.Flags().GetBool("no-skill-bodies")
 
-	client := manifest.NewClient(newAPIClient())
+	client := manifest.NewClientFromCLI(newAPIClient())
 	opts := manifest.DefaultExportOptions()
 	opts.IncludeCredentials = !noCreds
 	opts.IncludeSkillBodies = !noSkillBodies
@@ -114,7 +114,7 @@ func runExportCrew(cmd *cobra.Command, args []string) error {
 	noCreds, _ := cmd.Flags().GetBool("no-credentials")
 	noSkillBodies, _ := cmd.Flags().GetBool("no-skill-bodies")
 
-	client := manifest.NewClient(newAPIClient())
+	client := manifest.NewClientFromCLI(newAPIClient())
 	opts := manifest.DefaultExportOptions()
 	opts.IncludeCredentials = !noCreds
 	opts.IncludeSkillBodies = !noSkillBodies

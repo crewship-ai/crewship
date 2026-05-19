@@ -422,18 +422,28 @@ func (pb *planBuilder) planCrew(ctx context.Context, meta Metadata, spec *CrewSp
 	// "exec deferred" wrapper that resolves the ID at apply time by
 	// re-fetching the crew list (the cache is invalidated by the
 	// create).
-	pb.planCrewChildren(ctx, slug, crewIDForChildren, &specCopy, wsCreds, wsSkills)
-	return nil
+	return pb.planCrewChildren(ctx, slug, crewIDForChildren, &specCopy, wsCreds, wsSkills)
 }
 
 // planCrewChildren emits plan items for MCP servers + agents + their
 // cross-refs. When the parent crew is new (crewIDForChildren == ""),
 // the exec closures look up the crew by slug at apply-time.
-func (pb *planBuilder) planCrewChildren(ctx context.Context, crewSlug, crewID string, spec *CrewSpec, wsCreds map[string]Credential, wsSkills map[string]Skill) {
+//
+// Errors from the list-state API calls are now propagated up rather
+// than swallowed. Previously a transient ListCrewIntegrations
+// failure would turn into "no existing MCPs" and the plan would
+// confidently emit creates for resources that already exist,
+// producing 409s at apply time with no upstream signal that the
+// plan was based on partial state.
+func (pb *planBuilder) planCrewChildren(ctx context.Context, crewSlug, crewID string, spec *CrewSpec, wsCreds map[string]Credential, wsSkills map[string]Skill) error {
 	// MCP servers
 	var existingMCPs []MCPServerResponse
 	if crewID != "" {
-		existingMCPs, _ = pb.client.ListCrewIntegrations(ctx, crewID)
+		mcps, err := pb.client.ListCrewIntegrations(ctx, crewID)
+		if err != nil {
+			return fmt.Errorf("list mcp integrations for crew %q: %w", crewSlug, err)
+		}
+		existingMCPs = mcps
 	}
 	mcpExisting := map[string]MCPServerResponse{}
 	for _, m := range existingMCPs {
@@ -446,8 +456,17 @@ func (pb *planBuilder) planCrewChildren(ctx context.Context, crewSlug, crewID st
 		body := buildMCPBody(&mcp)
 		if existing, ok := mcpExisting[mcp.Name]; ok {
 			if mcpBodyDiffers(&existing, &mcp) {
-				pb.appendItem(ActionUpdate, "mcp",
-					fmt.Sprintf("%s/%s (configuration drift — server keeps existing config; manual edit required)", crewSlug, mcp.Name),
+				// MCP integrations don't expose a PATCH endpoint
+				// at the server today — the only way to "update"
+				// an MCP server config is delete + recreate, which
+				// would interrupt the running agent. We surface
+				// drift as an Unchanged-with-warning entry so the
+				// operator sees the mismatch in the plan and can
+				// decide to re-create manually, without misleading
+				// them with an ActionUpdate that has no exec
+				// closure attached.
+				pb.appendItem(ActionUnchanged, "mcp",
+					fmt.Sprintf("%s/%s (drift detected — server keeps existing config; recreate manually if needed)", crewSlug, mcp.Name),
 					nil)
 			} else {
 				pb.appendItem(ActionUnchanged, "mcp", crewSlug+"/"+mcp.Name, nil)
@@ -484,7 +503,11 @@ func (pb *planBuilder) planCrewChildren(ctx context.Context, crewSlug, crewID st
 	// Agents
 	var existingAgents []AgentResponse
 	if crewID != "" {
-		existingAgents, _ = pb.client.ListAgentsByCrew(ctx, crewID)
+		agents, err := pb.client.ListAgentsByCrew(ctx, crewID)
+		if err != nil {
+			return fmt.Errorf("list agents for crew %q: %w", crewSlug, err)
+		}
+		existingAgents = agents
 	}
 	agentExisting := map[string]AgentResponse{}
 	for _, a := range existingAgents {
@@ -510,7 +533,9 @@ func (pb *planBuilder) planCrewChildren(ctx context.Context, crewSlug, crewID st
 			} else {
 				pb.appendItem(ActionUnchanged, "agent", desc, nil)
 			}
-			pb.planAgentLinks(ctx, existing.ID, &a, wsCreds, wsSkills, crewSlug)
+			if err := pb.planAgentLinks(ctx, existing.ID, &a, wsCreds, wsSkills, crewSlug); err != nil {
+				return err
+			}
 		} else {
 			agentCopy := a
 			pb.appendItem(ActionCreate, "agent", desc,
@@ -545,6 +570,7 @@ func (pb *planBuilder) planCrewChildren(ctx context.Context, crewSlug, crewID st
 				})
 		}
 	}
+	return nil
 }
 
 // planAgentLinks emits unchanged/create/delete entries for an
@@ -554,8 +580,11 @@ func (pb *planBuilder) planCrewChildren(ctx context.Context, crewSlug, crewID st
 // The actual link mutations happen inside the agent's exec closure
 // during apply (createAgent path) or via these helpers when the
 // agent already exists.
-func (pb *planBuilder) planAgentLinks(ctx context.Context, agentID string, a *Agent, wsCreds map[string]Credential, wsSkills map[string]Skill, crewSlug string) {
-	existingSkills, _ := pb.client.ListAgentSkills(ctx, agentID)
+func (pb *planBuilder) planAgentLinks(ctx context.Context, agentID string, a *Agent, wsCreds map[string]Credential, wsSkills map[string]Skill, crewSlug string) error {
+	existingSkills, err := pb.client.ListAgentSkills(ctx, agentID)
+	if err != nil {
+		return fmt.Errorf("list agent skills for %q/%q: %w", crewSlug, a.Slug, err)
+	}
 	existingSkillSlugs := map[string]string{}
 	for _, b := range existingSkills {
 		existingSkillSlugs[b.Skill.Slug] = b.SkillID
@@ -596,7 +625,10 @@ func (pb *planBuilder) planAgentLinks(ctx context.Context, agentID string, a *Ag
 		}
 	}
 
-	existingCreds, _ := pb.client.ListAgentCredentials(ctx, agentID)
+	existingCreds, err := pb.client.ListAgentCredentials(ctx, agentID)
+	if err != nil {
+		return fmt.Errorf("list agent credentials for %q/%q: %w", crewSlug, a.Slug, err)
+	}
 	existingCredsByEnv := map[string]AgentCredentialBinding{}
 	for _, b := range existingCreds {
 		existingCredsByEnv[b.EnvVarName] = b
@@ -631,6 +663,7 @@ func (pb *planBuilder) planAgentLinks(ctx context.Context, agentID string, a *Ag
 				})
 		}
 	}
+	return nil
 }
 
 // applyAgentRefs links a freshly-created agent's skills and

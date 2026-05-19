@@ -36,6 +36,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"sort"
@@ -436,12 +437,20 @@ func (p *Provider) waitSidecarHealthy(ctx context.Context, containerID string) e
 
 // StopCrewServices stops every sidecar container belonging to the
 // crew. Volumes are preserved.
+//
+// Per-container failures are logged AND aggregated into the
+// returned error so the caller knows the operation was partial.
+// We still attempt every container before returning — short-
+// circuiting on the first failure would leave the rest of the
+// crew's sidecars running, which is the worst outcome (the agent
+// is gone but its dependents linger).
 func (p *Provider) StopCrewServices(ctx context.Context, crewSlug string) error {
 	containers, err := p.client.ContainerList(ctx, container.ListOptions{All: true})
 	if err != nil {
 		return fmt.Errorf("list containers: %w", err)
 	}
 	timeout := 10
+	var failures []error
 	for _, c := range containers {
 		if c.Labels["crewship.crew"] != crewSlug || c.Labels["crewship.kind"] != "sidecar" {
 			continue
@@ -451,33 +460,44 @@ func (p *Provider) StopCrewServices(ctx context.Context, crewSlug string) error 
 		}
 		if err := p.client.ContainerStop(ctx, c.ID, container.StopOptions{Timeout: &timeout}); err != nil {
 			p.logger.Warn("stop sidecar failed", "container", c.ID, "error", err)
+			failures = append(failures, fmt.Errorf("stop %s: %w", c.ID, err))
 		}
+	}
+	if len(failures) > 0 {
+		return fmt.Errorf("stop %d sidecar(s) for crew %q: %w", len(failures), crewSlug, errors.Join(failures...))
 	}
 	return nil
 }
 
 // RemoveCrewServices force-removes every sidecar container for the
 // crew. Volumes are NOT removed — call RemoveCrewServiceVolumes if
-// you want a full teardown.
+// you want a full teardown. Like StopCrewServices, attempts every
+// container and aggregates failures.
 func (p *Provider) RemoveCrewServices(ctx context.Context, crewSlug string) error {
 	containers, err := p.client.ContainerList(ctx, container.ListOptions{All: true})
 	if err != nil {
 		return fmt.Errorf("list containers: %w", err)
 	}
+	var failures []error
 	for _, c := range containers {
 		if c.Labels["crewship.crew"] != crewSlug || c.Labels["crewship.kind"] != "sidecar" {
 			continue
 		}
 		if err := p.client.ContainerRemove(ctx, c.ID, container.RemoveOptions{Force: true, RemoveVolumes: false}); err != nil {
 			p.logger.Warn("remove sidecar failed", "container", c.ID, "error", err)
+			failures = append(failures, fmt.Errorf("remove %s: %w", c.ID, err))
 		}
+	}
+	if len(failures) > 0 {
+		return fmt.Errorf("remove %d sidecar(s) for crew %q: %w", len(failures), crewSlug, errors.Join(failures...))
 	}
 	return nil
 }
 
 // RemoveCrewServiceVolumes removes every named volume created for
 // the crew's sidecars. Call AFTER RemoveCrewServices so docker
-// doesn't refuse with "volume in use".
+// doesn't refuse with "volume in use". Per-volume failures are
+// aggregated; the rest of the volumes are still attempted.
 func (p *Provider) RemoveCrewServiceVolumes(ctx context.Context, crewSlug string) error {
 	prefix := p.cfg.ContainerPrefix
 	if prefix == "" {
@@ -491,13 +511,18 @@ func (p *Provider) RemoveCrewServiceVolumes(ctx context.Context, crewSlug string
 	if err != nil {
 		return fmt.Errorf("list volumes: %w", err)
 	}
+	var failures []error
 	for _, vol := range list.Volumes {
 		if vol == nil || !strings.HasPrefix(vol.Name, wantPrefix) {
 			continue
 		}
 		if err := p.client.VolumeRemove(ctx, vol.Name, true); err != nil {
 			p.logger.Warn("remove sidecar volume failed", "volume", vol.Name, "error", err)
+			failures = append(failures, fmt.Errorf("remove %s: %w", vol.Name, err))
 		}
+	}
+	if len(failures) > 0 {
+		return fmt.Errorf("remove %d sidecar volume(s) for crew %q: %w", len(failures), crewSlug, errors.Join(failures...))
 	}
 	return nil
 }

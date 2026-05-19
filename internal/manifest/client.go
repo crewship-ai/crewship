@@ -12,16 +12,47 @@ import (
 	"github.com/crewship-ai/crewship/internal/cli"
 )
 
-// APIClient is the subset of *cli.Client that internal/manifest needs.
-// Defined as an interface so tests can swap in a fake without spinning
-// up a real HTTP server. The real implementation is *cli.Client; the
-// methods listed here match its signatures exactly.
+// APIClient is the contract internal/manifest needs from an HTTP
+// client. Defined as an interface so tests can swap in a fake
+// without spinning up a real server. Each mutating/read method
+// takes a ctx so manifest apply/export can be cancelled (Ctrl-C
+// from the CLI, deadline from CI) without leaving in-flight
+// requests dangling. Use NewClientFromCLI to adapt a *cli.Client
+// into this shape.
 type APIClient interface {
-	Get(path string) (*http.Response, error)
-	Post(path string, body any) (*http.Response, error)
-	Patch(path string, body any) (*http.Response, error)
-	Delete(path string) (*http.Response, error)
+	Get(ctx context.Context, path string) (*http.Response, error)
+	Post(ctx context.Context, path string, body any) (*http.Response, error)
+	Patch(ctx context.Context, path string, body any) (*http.Response, error)
+	Delete(ctx context.Context, path string) (*http.Response, error)
 	GetWorkspaceID() string
+}
+
+// cliAdapter wraps a *cli.Client so it satisfies APIClient with
+// per-call ctx. The underlying cli.Client takes ctx via
+// WithContext (binds to a copy); we call that on every operation
+// so the bound ctx is exactly the caller's, never an older one
+// that happened to be the construction-time default.
+type cliAdapter struct{ inner *cli.Client }
+
+func (a *cliAdapter) Get(ctx context.Context, path string) (*http.Response, error) {
+	return a.inner.WithContext(ctx).Get(path)
+}
+func (a *cliAdapter) Post(ctx context.Context, path string, body any) (*http.Response, error) {
+	return a.inner.WithContext(ctx).Post(path, body)
+}
+func (a *cliAdapter) Patch(ctx context.Context, path string, body any) (*http.Response, error) {
+	return a.inner.WithContext(ctx).Patch(path, body)
+}
+func (a *cliAdapter) Delete(ctx context.Context, path string) (*http.Response, error) {
+	return a.inner.WithContext(ctx).Delete(path)
+}
+func (a *cliAdapter) GetWorkspaceID() string { return a.inner.GetWorkspaceID() }
+
+// NewClientFromCLI is the production constructor: wraps a
+// *cli.Client (which the CLI builds via newAPIClient) in a ctx-
+// aware adapter and returns a manifest.Client ready to use.
+func NewClientFromCLI(c *cli.Client) *Client {
+	return NewClient(&cliAdapter{inner: c})
 }
 
 // Client wraps APIClient with manifest-specific operations. Each
@@ -97,7 +128,7 @@ func (c *Client) ListCrews(ctx context.Context) ([]CrewResponse, error) {
 	if c.crewsLoaded {
 		return c.crewsCache, nil
 	}
-	body, err := c.fetchBody("/api/v1/crews")
+	body, err := c.fetchBody(ctx, "/api/v1/crews")
 	if err != nil {
 		return nil, fmt.Errorf("list crews: %w", err)
 	}
@@ -129,7 +160,7 @@ func (c *Client) FindCrewBySlug(ctx context.Context, slug string) (*CrewResponse
 }
 
 func (c *Client) CreateCrew(ctx context.Context, body map[string]any) (*CrewResponse, error) {
-	resp, err := c.api.Post("/api/v1/crews", body)
+	resp, err := c.api.Post(ctx, "/api/v1/crews", body)
 	if err != nil {
 		return nil, fmt.Errorf("create crew: %w", err)
 	}
@@ -146,7 +177,7 @@ func (c *Client) CreateCrew(ctx context.Context, body map[string]any) (*CrewResp
 }
 
 func (c *Client) UpdateCrew(ctx context.Context, crewID string, body map[string]any) (*CrewResponse, error) {
-	resp, err := c.api.Patch("/api/v1/crews/"+crewID, body)
+	resp, err := c.api.Patch(ctx, "/api/v1/crews/"+crewID, body)
 	if err != nil {
 		return nil, fmt.Errorf("update crew: %w", err)
 	}
@@ -163,7 +194,7 @@ func (c *Client) UpdateCrew(ctx context.Context, crewID string, body map[string]
 }
 
 func (c *Client) DeleteCrew(ctx context.Context, crewID string) error {
-	resp, err := c.api.Delete("/api/v1/crews/" + crewID)
+	resp, err := c.api.Delete(ctx, "/api/v1/crews/"+crewID)
 	if err != nil {
 		return fmt.Errorf("delete crew: %w", err)
 	}
@@ -200,7 +231,7 @@ func (c *Client) ListAgentsByCrew(ctx context.Context, crewID string) ([]AgentRe
 	if cached, ok := c.agentsByCrew[crewID]; ok {
 		return cached, nil
 	}
-	body, err := c.fetchBody("/api/v1/agents?crew_id=" + crewID)
+	body, err := c.fetchBody(ctx, "/api/v1/agents?crew_id="+crewID)
 	if err != nil {
 		return nil, err
 	}
@@ -215,7 +246,7 @@ func (c *Client) ListAgentsByCrew(ctx context.Context, crewID string) ([]AgentRe
 }
 
 func (c *Client) CreateAgent(ctx context.Context, body map[string]any) (*AgentResponse, error) {
-	resp, err := c.api.Post("/api/v1/agents", body)
+	resp, err := c.api.Post(ctx, "/api/v1/agents", body)
 	if err != nil {
 		return nil, fmt.Errorf("create agent: %w", err)
 	}
@@ -234,7 +265,7 @@ func (c *Client) CreateAgent(ctx context.Context, body map[string]any) (*AgentRe
 }
 
 func (c *Client) UpdateAgent(ctx context.Context, agentID string, body map[string]any) (*AgentResponse, error) {
-	resp, err := c.api.Patch("/api/v1/agents/"+agentID, body)
+	resp, err := c.api.Patch(ctx, "/api/v1/agents/"+agentID, body)
 	if err != nil {
 		return nil, fmt.Errorf("update agent: %w", err)
 	}
@@ -255,7 +286,7 @@ func (c *Client) UpdateAgent(ctx context.Context, agentID string, body map[strin
 // DeleteAgent removes an agent from the workspace. Used by sync mode
 // to drop agents that the manifest no longer declares.
 func (c *Client) DeleteAgent(ctx context.Context, agentID, crewID string) error {
-	resp, err := c.api.Delete("/api/v1/agents/" + agentID)
+	resp, err := c.api.Delete(ctx, "/api/v1/agents/"+agentID)
 	if err != nil {
 		return fmt.Errorf("delete agent: %w", err)
 	}
@@ -290,7 +321,7 @@ func (c *Client) ImportSkill(ctx context.Context, body map[string]any) (*SkillRe
 	if wsID == "" {
 		return nil, errors.New("workspace_id is required for skill import")
 	}
-	resp, err := c.api.Post("/api/v1/workspaces/"+wsID+"/skills/import", body)
+	resp, err := c.api.Post(ctx, "/api/v1/workspaces/"+wsID+"/skills/import", body)
 	if err != nil {
 		return nil, fmt.Errorf("import skill: %w", err)
 	}
@@ -313,13 +344,13 @@ func (c *Client) ImportSkill(ctx context.Context, body map[string]any) (*SkillRe
 
 func (c *Client) ListSkills(ctx context.Context) ([]SkillResponse, error) {
 	wsID := c.api.GetWorkspaceID()
-	body, err := c.fetchBody("/api/v1/workspaces/" + wsID + "/skills")
+	body, err := c.fetchBody(ctx, "/api/v1/workspaces/"+wsID+"/skills")
 	if err != nil {
 		// The workspace-scoped path is what the router registers;
 		// /api/v1/skills doesn't exist as of v94 but earlier
 		// branches did register both. Fall back so existing
 		// downstreams keep working without an API version bump.
-		alt, altErr := c.fetchBody("/api/v1/skills")
+		alt, altErr := c.fetchBody(ctx, "/api/v1/skills")
 		if altErr != nil {
 			return nil, err
 		}
@@ -354,7 +385,7 @@ func decodeSkillsList(body []byte) ([]SkillResponse, error) {
 // server: a duplicate POST returns 409, which we swallow because the
 // desired state ("skill linked") is achieved either way.
 func (c *Client) AddSkillToAgent(ctx context.Context, agentID, skillID string) error {
-	resp, err := c.api.Post("/api/v1/agents/"+agentID+"/skills", map[string]any{
+	resp, err := c.api.Post(ctx, "/api/v1/agents/"+agentID+"/skills", map[string]any{
 		"skill_id": skillID,
 	})
 	if err != nil {
@@ -370,7 +401,7 @@ func (c *Client) AddSkillToAgent(ctx context.Context, agentID, skillID string) e
 // RemoveSkillFromAgent unlinks a skill from an agent. Used by sync
 // mode to drop agent_skills rows the manifest no longer declares.
 func (c *Client) RemoveSkillFromAgent(ctx context.Context, agentID, skillID string) error {
-	resp, err := c.api.Delete("/api/v1/agents/" + agentID + "/skills/" + skillID)
+	resp, err := c.api.Delete(ctx, "/api/v1/agents/"+agentID+"/skills/"+skillID)
 	if err != nil {
 		return fmt.Errorf("remove skill from agent: %w", err)
 	}
@@ -394,7 +425,7 @@ type AgentSkillBinding struct {
 }
 
 func (c *Client) ListAgentSkills(ctx context.Context, agentID string) ([]AgentSkillBinding, error) {
-	body, err := c.fetchBody("/api/v1/agents/" + agentID + "/skills")
+	body, err := c.fetchBody(ctx, "/api/v1/agents/"+agentID+"/skills")
 	if err != nil {
 		return nil, err
 	}
@@ -418,7 +449,7 @@ type AgentCredentialBinding struct {
 }
 
 func (c *Client) ListAgentCredentials(ctx context.Context, agentID string) ([]AgentCredentialBinding, error) {
-	body, err := c.fetchBody("/api/v1/agents/" + agentID + "/credentials")
+	body, err := c.fetchBody(ctx, "/api/v1/agents/"+agentID+"/credentials")
 	if err != nil {
 		return nil, err
 	}
@@ -434,7 +465,7 @@ func (c *Client) ListAgentCredentials(ctx context.Context, agentID string) ([]Ag
 // RemoveCredentialFromAgent unlinks a credential binding (by the
 // agent_credentials row id) from an agent.
 func (c *Client) RemoveCredentialFromAgent(ctx context.Context, agentID, assignmentID string) error {
-	resp, err := c.api.Delete("/api/v1/agents/" + agentID + "/credentials/" + assignmentID)
+	resp, err := c.api.Delete(ctx, "/api/v1/agents/"+agentID+"/credentials/"+assignmentID)
 	if err != nil {
 		return fmt.Errorf("remove credential from agent: %w", err)
 	}
@@ -463,7 +494,7 @@ func (c *Client) ListCredentials(ctx context.Context) ([]CredentialResponse, err
 	if c.credsLoaded {
 		return c.credsCache, nil
 	}
-	body, err := c.fetchBody("/api/v1/credentials")
+	body, err := c.fetchBody(ctx, "/api/v1/credentials")
 	if err != nil {
 		return nil, err
 	}
@@ -506,7 +537,7 @@ func (c *Client) FindCredentialByName(ctx context.Context, name string) (*Creden
 // a real value or "pending": true for a slot. The handler enforces
 // the value/pending invariant.
 func (c *Client) CreateCredential(ctx context.Context, body map[string]any) (*CredentialResponse, error) {
-	resp, err := c.api.Post("/api/v1/credentials", body)
+	resp, err := c.api.Post(ctx, "/api/v1/credentials", body)
 	if err != nil {
 		return nil, fmt.Errorf("create credential: %w", err)
 	}
@@ -525,7 +556,7 @@ func (c *Client) CreateCredential(ctx context.Context, body map[string]any) (*Cr
 // LinkCredentialToAgent associates an existing credential with an
 // agent under a specific env var name. Idempotent (409 = noop).
 func (c *Client) LinkCredentialToAgent(ctx context.Context, agentID, credentialID, envVarName string) error {
-	resp, err := c.api.Post("/api/v1/agents/"+agentID+"/credentials", map[string]any{
+	resp, err := c.api.Post(ctx, "/api/v1/agents/"+agentID+"/credentials", map[string]any{
 		"credential_id": credentialID,
 		"env_var_name":  envVarName,
 	})
@@ -553,7 +584,7 @@ type MCPServerResponse struct {
 }
 
 func (c *Client) ListCrewIntegrations(ctx context.Context, crewID string) ([]MCPServerResponse, error) {
-	body, err := c.fetchBody("/api/v1/crews/" + crewID + "/integrations")
+	body, err := c.fetchBody(ctx, "/api/v1/crews/"+crewID+"/integrations")
 	if err != nil {
 		return nil, err
 	}
@@ -575,42 +606,11 @@ func (c *Client) ListCrewIntegrations(ctx context.Context, crewID string) ([]MCP
 
 // fetchBody issues a GET, buffers the body so it can be decoded into
 // multiple candidate shapes, and returns the bytes. Centralises the
-// 2xx check and body-close discipline.
-func (c *Client) fetchBody(path string) ([]byte, error) {
-	resp, err := c.api.Get(path)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if err := cli.CheckError(resp); err != nil {
-		return nil, err
-	}
-	return io.ReadAll(io.LimitReader(resp.Body, 10<<20))
-}
-
-// fetchBodyCtx is the cancellation-aware variant of fetchBody used
-// by export paths that already carry the caller's context. When
-// the underlying API client supports WithContext (i.e. *cli.Client),
-// the request honours the ctx's deadline/cancellation. Tests that
-// inject a bare APIClient fall back to fetchBody — losing
-// cancellation is a known limit of the test fake, not a production
-// path.
-func (c *Client) fetchBodyCtx(ctx context.Context, path string) ([]byte, error) {
-	type contextual interface {
-		WithContext(context.Context) *cli.Client
-	}
-	if cc, ok := c.api.(contextual); ok && ctx != nil {
-		return fetchBodyVia(cc.WithContext(ctx), path)
-	}
-	return c.fetchBody(path)
-}
-
-// fetchBodyVia is the same logic as fetchBody but against a caller-
-// supplied client (used by fetchBodyCtx when it swaps in a
-// ctx-bound copy). Kept separate to avoid threading a generic
-// "client interface" type through every call site.
-func fetchBodyVia(client *cli.Client, path string) ([]byte, error) {
-	resp, err := client.Get(path)
+// 2xx check and body-close discipline. ctx flows through to the
+// underlying HTTP request so a cancelled apply/export aborts
+// in-flight instead of dangling for the 30 s client timeout.
+func (c *Client) fetchBody(ctx context.Context, path string) ([]byte, error) {
+	resp, err := c.api.Get(ctx, path)
 	if err != nil {
 		return nil, err
 	}
@@ -624,8 +624,8 @@ func fetchBodyVia(client *cli.Client, path string) ([]byte, error) {
 // fetchSkillContent returns the raw SKILL.md body for a skill by ID.
 // Returns "" if the skill doesn't exist or has no content (the row
 // can be a metadata-only stub for skills that live in OCI images).
-func (c *Client) fetchSkillContent(id string) string {
-	body, err := c.fetchBody("/api/v1/skills/" + id)
+func (c *Client) fetchSkillContent(ctx context.Context, id string) string {
+	body, err := c.fetchBody(ctx, "/api/v1/skills/"+id)
 	if err != nil || len(body) == 0 {
 		return ""
 	}
@@ -649,7 +649,7 @@ func firstBytes(b []byte, n int) string {
 }
 
 func (c *Client) CreateCrewIntegration(ctx context.Context, crewID string, body map[string]any) error {
-	resp, err := c.api.Post("/api/v1/crews/"+crewID+"/integrations", body)
+	resp, err := c.api.Post(ctx, "/api/v1/crews/"+crewID+"/integrations", body)
 	if err != nil {
 		return fmt.Errorf("create crew integration: %w", err)
 	}
@@ -672,7 +672,7 @@ func (c *Client) CreateCrewIntegration(ctx context.Context, crewID string, body 
 // DeleteCrewIntegration removes an MCP server from a crew. Used by
 // sync mode to drop integrations the manifest no longer declares.
 func (c *Client) DeleteCrewIntegration(ctx context.Context, crewID, integrationID string) error {
-	resp, err := c.api.Delete("/api/v1/crews/" + crewID + "/integrations/" + integrationID)
+	resp, err := c.api.Delete(ctx, "/api/v1/crews/"+crewID+"/integrations/"+integrationID)
 	if err != nil {
 		return fmt.Errorf("delete crew integration: %w", err)
 	}

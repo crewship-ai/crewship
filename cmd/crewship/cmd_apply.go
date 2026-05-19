@@ -112,7 +112,7 @@ func runApply(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	client := manifest.NewClient(newAPIClient())
+	client := manifest.NewClientFromCLI(newAPIClient())
 
 	// Two-pass run: build plan, render it, prompt on destructive
 	// operations, then execute. The plan-then-confirm shape mirrors

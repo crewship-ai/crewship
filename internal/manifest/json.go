@@ -18,6 +18,11 @@ func jsonMarshal(v any) ([]byte, error) {
 	if err := enc.Encode(v); err != nil {
 		return nil, err
 	}
-	out := strings.TrimRight(sb.String(), "\n")
+	// json.Encoder.Encode always appends exactly one newline. Use
+	// TrimSuffix instead of TrimRight so we strip only that single
+	// newline — TrimRight would over-trim a payload whose own
+	// trailing content happens to be newline-suffixed (e.g. a JSON
+	// string value ending in `"\n"`).
+	out := strings.TrimSuffix(sb.String(), "\n")
 	return []byte(out), nil
 }

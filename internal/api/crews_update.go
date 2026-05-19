@@ -122,17 +122,24 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	// Services validation mirrors the create path. Empty/null
-	// services_json clears the column; a populated body must match
-	// the validator's schema before storage.
-	if req.ServicesJSON != nil && *req.ServicesJSON != "" {
-		if len(*req.ServicesJSON) > 64*1024 {
-			replyError(w, http.StatusBadRequest, "services_json exceeds 64KB limit")
-			return
-		}
-		if err := validateServicesJSON(*req.ServicesJSON); err != nil {
-			replyError(w, http.StatusBadRequest, "invalid services_json: "+err.Error())
-			return
+	// Services validation mirrors the create path. Empty/null/
+	// whitespace-only services_json clears the column; a populated
+	// body must match the validator's schema before storage. The
+	// TrimSpace handles a payload of "   " or "\n", which the
+	// previous != "" check would have stored verbatim, diverging
+	// from the documented clear-on-empty semantics.
+	if req.ServicesJSON != nil {
+		trimmedServices := strings.TrimSpace(*req.ServicesJSON)
+		req.ServicesJSON = &trimmedServices
+		if trimmedServices != "" {
+			if len(trimmedServices) > 64*1024 {
+				replyError(w, http.StatusBadRequest, "services_json exceeds 64KB limit")
+				return
+			}
+			if err := validateServicesJSON(trimmedServices); err != nil {
+				replyError(w, http.StatusBadRequest, "invalid services_json: "+err.Error())
+				return
+			}
 		}
 	}
 

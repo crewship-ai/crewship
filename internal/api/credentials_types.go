@@ -70,9 +70,18 @@ func validateCredentialType(t string) string {
 // guard; isPendingSentinel is a defence-in-depth check so a future
 // code path that decrypts a row outside the filtered queries still
 // drops the placeholder instead of injecting it as a real env var.
+//
+// The sentinels are intentionally unguessable byte sequences rather
+// than human-readable strings: a real credential whose plaintext
+// happens to be "pending_oauth" would otherwise be silently dropped
+// at the resolver, which would surface as "credential not
+// configured" with no obvious cause. The double-underscore-wrapped
+// upper-snake-case form is conventional for "this is a system
+// sentinel, not user data" and the embedded UUID-shaped suffix
+// makes accidental collisions infeasible.
 const (
-	pendingSentinelOAuth    = "pending_oauth"
-	pendingSentinelManifest = "pending_manifest"
+	pendingSentinelOAuth    = "__CREWSHIP_PENDING_OAUTH_4f2c8a91-3b6d-4e5a-9f8c-1d2e3f4a5b6c__"
+	pendingSentinelManifest = "__CREWSHIP_PENDING_MANIFEST_7e8d9a0b-1c2d-3e4f-5a6b-7c8d9e0f1a2b__"
 )
 
 // isPendingSentinel reports whether a decrypted credential value is

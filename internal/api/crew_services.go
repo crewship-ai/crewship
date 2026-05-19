@@ -95,8 +95,27 @@ func validateServicesJSON(body string) error {
 			}
 			seenVol[v.Mount] = true
 		}
-		if s.Healthcheck != nil && len(s.Healthcheck.Test) == 0 {
-			return fmt.Errorf("services[%q]: healthcheck declared without test command", s.Name)
+		if s.Healthcheck != nil {
+			if len(s.Healthcheck.Test) == 0 {
+				return fmt.Errorf("services[%q]: healthcheck declared without test command", s.Name)
+			}
+			// Parse-validate each duration string up front so a
+			// typo ("5sec" instead of "5s") is reported at write
+			// time. Previously servicesFromJSON silently defaulted
+			// any unparseable duration to its hardcoded default,
+			// hiding config drift behind a happy-looking runtime.
+			for fieldName, value := range map[string]string{
+				"interval":     s.Healthcheck.Interval,
+				"timeout":      s.Healthcheck.Timeout,
+				"start_period": s.Healthcheck.StartPeriod,
+			} {
+				if value == "" {
+					continue
+				}
+				if _, err := time.ParseDuration(value); err != nil {
+					return fmt.Errorf("services[%q]: healthcheck.%s %q is not a valid duration: %w", s.Name, fieldName, value, err)
+				}
+			}
 		}
 	}
 	return nil

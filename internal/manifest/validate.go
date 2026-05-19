@@ -94,6 +94,15 @@ func (v *validator) checkWorkspaceDoc(doc *WorkspaceDocument) {
 			v.errf("workspace %q: crews[%d] needs a slug", doc.Metadata.Slug, i)
 			continue
 		}
+		// Run the same slug-format check as the standalone-crew
+		// path so malformed slugs (uppercase, dots, spaces) fail
+		// at validate time with a clear message — not at apply
+		// time deep inside the server's per-resource handler.
+		if !slugFormat.MatchString(slug) {
+			v.errf("workspace %q: crews[%d] invalid slug %q (lowercase letters, digits, '-', '_'; max 50 chars; must start with letter or digit)",
+				doc.Metadata.Slug, i, slug)
+			continue
+		}
 		if seen[slug] {
 			v.errf("workspace %q: duplicate crew slug %q", doc.Metadata.Slug, slug)
 			continue

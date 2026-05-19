@@ -68,7 +68,7 @@ func resp(status int, v any) *http.Response {
 	}
 }
 
-func (f *fakeAPIClient) Get(path string) (*http.Response, error) {
+func (f *fakeAPIClient) Get(_ context.Context, path string) (*http.Response, error) {
 	f.record("GET", path, nil)
 	switch {
 	case path == "/api/v1/crews":
@@ -107,7 +107,7 @@ func (f *fakeAPIClient) Get(path string) (*http.Response, error) {
 	return resp(404, map[string]any{"error": "not found"}), nil
 }
 
-func (f *fakeAPIClient) Post(path string, body any) (*http.Response, error) {
+func (f *fakeAPIClient) Post(_ context.Context, path string, body any) (*http.Response, error) {
 	f.record("POST", path, body)
 	b, _ := body.(map[string]any)
 	switch {
@@ -164,12 +164,12 @@ func (f *fakeAPIClient) Post(path string, body any) (*http.Response, error) {
 	return resp(404, map[string]any{"error": "not found"}), nil
 }
 
-func (f *fakeAPIClient) Patch(path string, body any) (*http.Response, error) {
+func (f *fakeAPIClient) Patch(_ context.Context, path string, body any) (*http.Response, error) {
 	f.record("PATCH", path, body)
 	return resp(200, body), nil
 }
 
-func (f *fakeAPIClient) Delete(path string) (*http.Response, error) {
+func (f *fakeAPIClient) Delete(_ context.Context, path string) (*http.Response, error) {
 	f.record("DELETE", path, nil)
 	// Track deletes that sync mode performs so tests can assert
 	// the right resource was targeted. The map state stays

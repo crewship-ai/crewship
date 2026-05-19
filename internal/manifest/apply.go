@@ -238,16 +238,27 @@ func buildCrewBody(name, slug string, spec *CrewSpec) (map[string]any, error) {
 		if dc.Mise != "" {
 			body["mise_config"] = dc.Mise
 		}
-		if cfg := buildDevcontainerJSON(dc); cfg != "" {
+		cfg, err := buildDevcontainerJSON(dc)
+		if err != nil {
+			return nil, fmt.Errorf("build devcontainer_config: %w", err)
+		}
+		if cfg != "" {
 			body["devcontainer_config"] = cfg
 		}
 	}
 	return body, nil
 }
 
-func buildDevcontainerJSON(dc *Devcontainer) string {
+// buildDevcontainerJSON serialises the Devcontainer struct into the
+// JSON shape the server expects in `devcontainer_config`. Returns
+// "" + nil when there's nothing to serialise; an explicit error
+// when marshal fails. The previous mustJSON-panic implementation
+// would crash the whole apply process on a future Devcontainer
+// field that json.Marshal couldn't handle — now the failure flows
+// back to the caller as a normal apply error.
+func buildDevcontainerJSON(dc *Devcontainer) (string, error) {
 	if dc == nil {
-		return ""
+		return "", nil
 	}
 	obj := map[string]any{}
 	for k, v := range dc.Raw {
@@ -263,17 +274,13 @@ func buildDevcontainerJSON(dc *Devcontainer) string {
 		obj["containerEnv"] = dc.Env
 	}
 	if len(obj) == 0 {
-		return ""
+		return "", nil
 	}
-	return mustJSON(obj)
-}
-
-func mustJSON(v any) string {
-	out, err := jsonMarshal(v)
+	data, err := jsonMarshal(obj)
 	if err != nil {
-		panic(fmt.Sprintf("manifest: build devcontainer json: %v", err))
+		return "", fmt.Errorf("marshal devcontainer_config: %w", err)
 	}
-	return string(out)
+	return string(data), nil
 }
 
 func copyMap(in map[string]any) map[string]any {

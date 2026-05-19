@@ -13,12 +13,15 @@ func TestIsPendingSentinel(t *testing.T) {
 		in   string
 		want bool
 	}{
-		{"oauth-sentinel", "pending_oauth", true},
-		{"manifest-sentinel", "pending_manifest", true},
+		{"oauth-sentinel", pendingSentinelOAuth, true},
+		{"manifest-sentinel", pendingSentinelManifest, true},
 		{"empty-string", "", false},
 		{"real-api-key", "sk-ant-real-key", false},
+		// User-typed plausible secrets that resemble the OLD
+		// human-readable sentinels must NOT collide.
+		{"old-oauth-shape", "pending_oauth", false},
+		{"old-manifest-shape", "pending_manifest", false},
 		{"prefix-only-must-not-match", "pending_", false},
-		{"superset-must-not-match", "pending_oauth_token", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := isPendingSentinel(tc.in); got != tc.want {

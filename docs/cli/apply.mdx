@@ -156,7 +156,7 @@ Resources **not** synced (additive only):
 
 - **`crew "code-review" already exists`** — drop `--strict` to update in place, or pass `--replace` to recreate.
 - **`destructive plan requires confirmation`** — pass `-y/--yes` in CI, or run interactively.
-- **`invalid services_json: services["xyz"]: name must be a DNS label`** — service names must match `[a-z][a-z0-9-]{0,30}[a-z0-9]` since they become bridge-network DNS aliases.
+- **`invalid services_json: services["xyz"]: name must be a DNS label`** — service names must be valid RFC 1035 DNS labels (1–63 chars, lowercase letters/digits/`-`, starting with a letter and ending with letter or digit) since they become bridge-network DNS aliases.
 - **`skill "X" references unknown credential env "Y"`** — every `env_refs:` entry must point at a credential declared in the same manifest (in the crew or at workspace scope).
 
 ## See also

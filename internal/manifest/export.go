@@ -178,7 +178,7 @@ func ExportCrew(ctx context.Context, c *Client, slug string, opts ExportOptions)
 				decl := Skill{Slug: slug}
 				if opts.IncludeSkillBodies {
 					if s, ok := byslug[slug]; ok && s.ID != "" {
-						decl.Inline = c.fetchSkillContent(s.ID)
+						decl.Inline = c.fetchSkillContent(ctx, s.ID)
 					}
 				}
 				if decl.Inline == "" && decl.Path == "" && decl.Source == "" {
@@ -332,7 +332,7 @@ func ExportWorkspace(ctx context.Context, c *Client, opts ExportOptions) (string
 		decl := Skill{Slug: slug}
 		if opts.IncludeSkillBodies {
 			if s, ok := skillBySlug[slug]; ok && s.ID != "" {
-				decl.Inline = c.fetchSkillContent(s.ID)
+				decl.Inline = c.fetchSkillContent(ctx, s.ID)
 			}
 		}
 		if decl.Inline == "" {
@@ -386,7 +386,7 @@ func workspaceMeta(ctx context.Context, c *Client) (name, slug string) {
 	if wsID == "" {
 		return "", ""
 	}
-	body, err := c.fetchBodyCtx(ctx, "/api/v1/workspaces/"+wsID)
+	body, err := c.fetchBody(ctx, "/api/v1/workspaces/"+wsID)
 	if err != nil || len(body) == 0 {
 		return "", ""
 	}
