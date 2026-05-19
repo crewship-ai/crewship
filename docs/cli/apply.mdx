@@ -1,0 +1,164 @@
+---
+title: "Apply"
+description: "Apply a workspace manifest. Idempotent, plan-then-confirm, Terraform-style."
+icon: "play"
+---
+
+# crewship apply
+
+Apply a YAML manifest that describes a crew or workspace. Re-running apply is idempotent and convergent: missing resources are created, drifted ones updated, and resources that disappeared from the manifest are deleted (with confirmation). Mutations go through normal REST endpoints so RBAC, audit logging, and WebSocket events fire the same way they would for an interactive user.
+
+```bash
+crewship apply --file <path> [flags]
+```
+
+For the narrative tour and the manifest format, see [Guides → Workspace Manifests](/guides/manifests).
+
+## Flags
+
+| Flag | Default | Purpose |
+| --- | --- | --- |
+| `--file <path>` | (required) | Path to manifest YAML/JSON. Use `-` to read from stdin. |
+| `--dry-run` | `false` | Validate, render the plan, and exit without mutating. |
+| `--strict` | `false` | Fail if any resource in the manifest already exists. Use in CI when you require a fresh workspace. |
+| `--replace` | `false` | Delete every matching resource before recreating it. Destructive; prompts unless `--yes`. |
+| `--from-env` | `false` | Read credential values from the process environment (var name = credential's `env:` field). |
+| `--secrets-file <path>` | `""` | Load credential values from a `KEY=VALUE` file. Comments (`#`) and quoted values supported. |
+| `-y`, `--yes` | `false` | Skip confirmation prompts. Required when running in a non-TTY (CI) with destructive operations. |
+
+`--strict` and `--replace` are mutually exclusive.
+
+## Examples
+
+### Idempotent re-apply
+
+```bash
+crewship apply --file team.yaml --from-env
+```
+
+The most common shape. Reads credential values from env vars matching each `env:` entry in the manifest. Re-running converges drift.
+
+### Dry-run as a CI check
+
+```bash
+crewship apply --file team.yaml --dry-run
+```
+
+Prints the plan, never mutates. Exit code is 0 unless validation fails. Useful as a PR check that catches "this manifest is malformed before review".
+
+### Strict mode for ephemeral workspaces
+
+```bash
+crewship apply --file team.yaml --strict --from-env --yes
+```
+
+Use when you spin up a brand-new workspace per branch — strict catches the case where a previous run wasn't cleaned up.
+
+### Replace an existing crew
+
+```bash
+crewship apply --file team.yaml --replace
+```
+
+Deletes anything matching the manifest's slugs and recreates from scratch. Use when you've broken the schema so badly that upsert can't reconcile.
+
+### Read from stdin
+
+```bash
+cat team.yaml | crewship apply --file -
+```
+
+Useful for piping from `sed`, `op inject`, or a templating step.
+
+### KEY=VALUE secrets file
+
+`secrets.env`:
+
+```
+# Lines starting with # are comments
+ANTHROPIC_API_KEY=sk-ant-…
+GH_TOKEN="ghp_… "    # quoted values are stripped
+```
+
+```bash
+crewship apply --file team.yaml --secrets-file ./secrets.env --yes
+```
+
+## Plan + confirm flow
+
+Apply is two-pass: it computes the full plan first, prints it, asks for confirmation on anything destructive, and only then executes.
+
+```
+$ crewship apply --file team.yaml
+
+Plan:
+  + credential ANTHROPIC_API_KEY (ANTHROPIC)
+  + crew code-review
+  + skill house-style (workspace)
+  + agent code-review/daniel
+  ~ agent code-review/petra        ← prompt body changed
+  - agent code-review/old-bot      ← in workspace, not in manifest
+
+Plan includes 1 destructive operation. Continue? [y/N] y
+
+Applied: 4 created, 1 updated, 0 unchanged, 1 deleted.
+
+PENDING credentials (set values in the UI, or via 'crewship credential set'):
+  - ANTHROPIC_API_KEY
+```
+
+The leading character on each line tells you the action:
+
+| Marker | Meaning |
+| --- | --- |
+| `+` | Create — resource is in the manifest but missing in the workspace |
+| `~` | Update — drift between manifest and current state |
+| `=` | Unchanged — matches |
+| `-` | Delete — exists in workspace, manifest doesn't declare it |
+
+## Credential resolution
+
+Manifests never carry secret values. `crewship apply` resolves the `env:` slot through a chain of sources, in order:
+
+1. `--secrets-file <path>` if supplied
+2. `--from-env` (process environment) if supplied
+3. Otherwise the credential is created as `status=PENDING` and printed at the end
+
+PENDING credentials never inject their placeholder into the agent's environment. Agents that need a pending credential fail with `credential not configured` until you set the value through the UI or `crewship credential set`.
+
+## What gets deleted on sync
+
+Resources synced (= deleted when missing from the manifest, with confirmation):
+
+- crews (in workspace bundles)
+- agents within each declared crew
+- agent skill bindings
+- agent credential bindings
+- MCP servers on each declared crew
+
+Resources **not** synced (additive only):
+
+- skills at workspace scope — drop them via `crewship skill rm`
+- credentials themselves — drop them via UI or `crewship credential rm`
+
+## Exit codes
+
+| Code | Meaning |
+| --- | --- |
+| `0` | Success (apply completed, or dry-run validated cleanly) |
+| `1` | Generic failure (validation, network, partial apply) |
+
+`apply` doesn't surface a Terraform-style "code 2 = changes applied" because every CI pipeline already knows the previous state via git. Use `--dry-run` for the "did anything change?" check.
+
+## Common errors
+
+- **`crew "code-review" already exists`** — drop `--strict` to update in place, or pass `--replace` to recreate.
+- **`destructive plan requires confirmation`** — pass `-y/--yes` in CI, or run interactively.
+- **`invalid services_json: services["xyz"]: name must be a DNS label`** — service names must match `[a-z][a-z0-9-]{0,30}[a-z0-9]` since they become bridge-network DNS aliases.
+- **`skill "X" references unknown credential env "Y"`** — every `env_refs:` entry must point at a credential declared in the same manifest (in the crew or at workspace scope).
+
+## See also
+
+- [Guides → Workspace Manifests](/guides/manifests) — the narrative tour
+- [CLI → export](/cli/export) — round-trip back to YAML
+- [Configuration → Manifest Schema](/configuration/manifest-schema) — every field, every default

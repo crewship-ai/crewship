@@ -1,0 +1,447 @@
+---
+title: "Workspace Manifests"
+description: "Declare crews, agents, skills, credentials and sidecar services as YAML. Apply converges your workspace toward the manifest — like Terraform, for AI agents."
+icon: "file-code"
+---
+
+# Workspace Manifests
+
+A **manifest** is a single YAML file that describes a Crewship workspace as data — agents, skills, credentials, MCP servers, and sidecar containers (Redis, Postgres, etc.). `crewship apply --file manifest.yaml` converges the live workspace toward the file's declared state through the same REST API the UI uses; nothing skips RBAC, nothing writes to the database directly.
+
+This guide is the narrative tour. For per-field reference, see [Configuration → Manifest Schema](/configuration/manifest-schema). For the apply / export CLI flags, see [CLI → apply](/cli/apply) and [CLI → export](/cli/export).
+
+## When to use it
+
+<CardGroup cols={2}>
+  <Card title="One file = one workspace" icon="copy">
+    Copy-paste a crew between teams, machines, or environments without re-clicking through the UI.
+  </Card>
+  <Card title="Git as source of truth" icon="code-branch">
+    Commit your crews next to your code. Diff agent prompts. PR-review skill changes.
+  </Card>
+  <Card title="Reproducible setups" icon="rotate">
+    `crewship apply` is idempotent — re-running the same manifest produces the same workspace.
+  </Card>
+  <Card title="CI-friendly" icon="server">
+    Run from a pipeline with `--yes --from-env` to provision a fresh workspace per branch.
+  </Card>
+</CardGroup>
+
+## Mental model
+
+```
++-----------------------+        +-----------------------+
+|   manifest.yaml       |        |   Crewship workspace  |
+|   (your repo)         |   →    |   (live state)        |
+|                       |        |                       |
+|  apiVersion: v1       |        |  crews                |
+|  kind: Crew           |        |  agents               |
+|  metadata: {…}        |        |  skills               |
+|  spec:                |        |  credentials (PENDING |
+|    credentials: […]   |        |    until you fill in) |
+|    services:    […]   |        |  agent_skills         |
+|    agents:      […]   |        |  agent_credentials    |
+|    skills:      […]   |        |  crew_integrations    |
+|    mcp_servers: […]   |        |  crew sidecars        |
++-----------------------+        +-----------------------+
+
+   crewship apply --file manifest.yaml
+   1. Parse + validate
+   2. Fetch current state
+   3. Compute plan (create / update / unchanged / delete)
+   4. Prompt on destructive ops (skipped with --yes)
+   5. Execute through normal REST endpoints
+```
+
+Two top-level kinds:
+
+| `kind:` | Use when |
+| ------- | -------- |
+| `Crew`  | Single crew + its agents + its skills |
+| `Workspace` | Multiple crews sharing workspace-scope credentials and skills |
+
+## Your first manifest
+
+Save this as `code-review.crew.yaml`:
+
+```yaml
+# yaml-language-server: $schema=https://schemas.crewship.ai/v1/manifest.json
+apiVersion: crewship/v1
+kind: Crew
+
+metadata:
+  name: Code Review Crew
+  slug: code-review
+  icon: git-pull-request
+  color: blue
+
+spec:
+  devcontainer:
+    image: mcr.microsoft.com/devcontainers/javascript-node:22-bookworm
+
+  credentials:
+    - env: ANTHROPIC_API_KEY
+      provider: ANTHROPIC
+      type: API_KEY
+    - env: GH_TOKEN
+      provider: GITHUB
+      type: CLI_TOKEN
+
+  mcp_servers:
+    - name: github
+      transport: stdio
+      command: npx
+      args: [-y, "@modelcontextprotocol/server-github"]
+      env_mapping:
+        GITHUB_PERSONAL_ACCESS_TOKEN: GH_TOKEN
+
+  agents:
+    - slug: daniel
+      name: Daniel
+      role_title: Code Reviewer
+      agent_role: LEAD
+      cli_adapter: CLAUDE_CODE
+      llm:
+        provider: ANTHROPIC
+        model: claude-haiku-4-5
+      tool_profile: MINIMAL
+      env_refs: [ANTHROPIC_API_KEY, GH_TOKEN]
+      prompt: |
+        You are Daniel, a senior code reviewer. Walk through every
+        changed file and report findings inline, grouped by severity.
+```
+
+Apply it:
+
+```bash
+crewship apply --file code-review.crew.yaml --from-env
+```
+
+Output:
+
+```
+Plan:
+  + credential ANTHROPIC_API_KEY (ANTHROPIC)
+  + credential GH_TOKEN (GITHUB)
+  + crew code-review
+  + mcp code-review/github
+  + agent code-review/daniel
+  + agent_credential code-review/daniel:ANTHROPIC_API_KEY
+  + agent_credential code-review/daniel:GH_TOKEN
+
+Plan: 7 to create, 0 to update, 0 unchanged, 0 to delete.
+Applied: 7 created, 0 updated, 0 unchanged, 0 deleted.
+```
+
+`--from-env` reads `ANTHROPIC_API_KEY` and `GH_TOKEN` from the process environment. Skip it (or set `--secrets-file env.list`) and the credentials are created as **PENDING slots** that show up in the UI as "Needs value" with a CTA to fill them in.
+
+## Apply modes
+
+Re-running apply is idempotent and **convergent** — the manifest is the source of truth, so resources missing from the live workspace get created, drifted ones updated, and resources that disappeared from the manifest get deleted.
+
+| Existing state | Default (`sync`) | `--strict` | `--replace` |
+| --- | --- | --- | --- |
+| Missing | create | create | create |
+| Exists, identical | no-op | error 409 | delete + create |
+| Exists, drift | update in place | error 409 | delete + create |
+| Workspace has X, manifest doesn't | delete (prompts) | keep | keep |
+
+<Warning>
+Destructive operations (delete, replace) **always prompt for confirmation** unless `--yes` is passed. The plan is printed first so you can see exactly what will be mutated.
+</Warning>
+
+What sync **does** delete when missing from the manifest:
+
+- crews (per workspace bundle)
+- agents within each declared crew
+- agent skill bindings (`agent_skills` join)
+- agent credential bindings (`agent_credentials` join)
+- MCP servers on each declared crew
+
+What sync **does not** delete (additive only — drop them through the UI or other CLI commands):
+
+- skills at workspace scope (often shared across multiple crews)
+- credentials themselves (their values may live elsewhere)
+
+## Credential safety
+
+Manifests **never** carry secret values. The `credentials:` block declares slots — `env`, `provider`, `type`, `label`. Values arrive at apply-time through one of three paths:
+
+```bash
+# 1. From the process environment (matches credential.env name)
+crewship apply --file team.yaml --from-env
+
+# 2. From a KEY=VALUE file (docker-compose --env-file shape)
+crewship apply --file team.yaml --secrets-file ./secrets.env
+
+# 3. Slot only — value supplied later via UI or `crewship credential set`
+crewship apply --file team.yaml
+```
+
+The third mode creates credentials with `status=PENDING`. Agents that need a pending credential fail with `credential not configured` until the user fills it in; the PENDING sentinel is never injected into the agent's environment, so the LLM can't read or exfiltrate it.
+
+After apply, the CLI prints the list of pending env vars so you know what's still left to fill in:
+
+```
+PENDING credentials (set values in the UI, or via 'crewship credential set'):
+  - ANTHROPIC_API_KEY
+  - GH_TOKEN
+```
+
+## Skills: three sources
+
+Every skill entry picks **one** source:
+
+```yaml
+skills:
+  # Multi-file: SKILL.md in a sibling directory. Recommended for skills
+  # longer than a paragraph.
+  - slug: security-review
+    path: ./skills/security-review/SKILL.md
+
+  # URL: fetched at apply time. Pin with ref + digest for reproducibility.
+  - slug: git-flow
+    source: https://github.com/anthropics/skills/blob/main/git-flow/SKILL.md
+    ref: v1.2.0
+
+  # Inline: SKILL.md body in the manifest itself. Hard cap 8 KB.
+  - slug: house-style
+    inline: |
+      ---
+      name: house-style
+      description: Internal naming conventions
+      license: MIT
+      ---
+      Use named exports only.
+```
+
+Agents reference skills by slug:
+
+```yaml
+agents:
+  - slug: daniel
+    skills: [security-review, house-style]
+```
+
+The validator rejects dangling references (agent points at a skill the manifest doesn't declare) — no half-applied state.
+
+## Sidecar services (Redis, Postgres, etc.)
+
+Declare sidecar containers that run alongside the agent on the crew bridge network. Agents reach them by service name — `redis:6379`, `postgres:5432` — over a private network that's never published to the host.
+
+```yaml
+spec:
+  devcontainer:
+    image: mcr.microsoft.com/devcontainers/python:3.12
+    env:
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@postgres:5432/app
+      REDIS_URL: redis://redis:6379
+
+  credentials:
+    - env: POSTGRES_PASSWORD
+      provider: NONE
+      type: GENERIC_SECRET
+
+  services:
+    - name: redis
+      image: redis:7-alpine
+      ports: ["6379"]
+      healthcheck:
+        test: ["CMD", "redis-cli", "ping"]
+        interval: 5s
+        retries: 5
+
+    - name: postgres
+      image: postgres:16
+      env:
+        POSTGRES_DB: app
+        POSTGRES_USER: postgres
+      env_refs: [POSTGRES_PASSWORD]    # injected from the credential vault
+      ports: ["5432"]
+      volumes:
+        - name: pg-data
+          mount: /var/lib/postgresql/data
+      healthcheck:
+        test: ["CMD-SHELL", "pg_isready -U postgres"]
+        interval: 5s
+        retries: 10
+        start_period: 10s
+```
+
+What the provisioner does for each service:
+
+1. Pull the image (best-effort: tolerates registry outages when a local copy exists).
+2. Create per-crew named volumes (`crewship-svc-{crew-slug}-vol-{name}`).
+3. Start the container with a DNS alias matching `name`, on the crew bridge.
+4. Wait for `healthcheck.test` to report HEALTHY (capped at 60 s across all sidecars).
+5. Only then start the agent runtime.
+
+<Note>
+Volumes are **always named volumes**. The validator rejects bind-mount paths so manifests stay portable across machines.
+</Note>
+
+### Alternative: in-container databases via devcontainer features
+
+If you prefer the database's lifecycle to match the agent's container (a smaller setup, but DB restarts whenever the agent restarts), you can use [devcontainer features](/guides/devcontainers) instead:
+
+```yaml
+devcontainer:
+  image: mcr.microsoft.com/devcontainers/python:3.12
+  features:
+    "ghcr.io/itsmechlark/features/postgresql:1": { version: "16" }
+    "ghcr.io/itsmechlark/features/redis-server:1": {}
+```
+
+The agent reaches both at `localhost:5432` and `localhost:6379`. Works today with zero provisioner changes, but the DB lives inside the same container as the agent.
+
+## Workspace bundles: multi-crew setups
+
+When you want to ship more than one crew in a single file, switch to `kind: Workspace`:
+
+```yaml
+apiVersion: crewship/v1
+kind: Workspace
+
+metadata:
+  name: ACME Engineering
+  slug: acme-engineering
+
+spec:
+  credentials:
+    - { env: ANTHROPIC_API_KEY, provider: ANTHROPIC, type: API_KEY }
+    - { env: GH_TOKEN, provider: GITHUB, type: CLI_TOKEN }
+
+  skills:
+    - slug: house-style
+      inline: |
+        ---
+        name: house-style
+        description: ACME's code style + commit conventions
+        license: MIT
+        ---
+        Imperative commit messages, max 400 LOC per PR.
+
+  crews:
+    - slug: code-review
+      name: Code Review
+      agents:
+        - slug: daniel
+          name: Daniel
+          agent_role: LEAD
+          cli_adapter: CLAUDE_CODE
+          skills: [house-style]
+          env_refs: [ANTHROPIC_API_KEY, GH_TOKEN]
+          prompt: |
+            You are Daniel. Apply house-style.
+
+    - slug: triage
+      name: Triage
+      agents:
+        - slug: alice
+          name: Alice
+          agent_role: LEAD
+          cli_adapter: CLAUDE_CODE
+          skills: [house-style]
+          env_refs: [ANTHROPIC_API_KEY]
+          prompt: |
+            You triage the Linear backlog.
+```
+
+Workspace-scoped credentials and skills are available to every nested crew. A nested crew can override or add to them in its own `credentials:` / `skills:` block.
+
+## Plan → confirm → apply
+
+Apply is two-pass: it computes the full plan first, prints it, asks for confirmation on anything destructive, and only then mutates. The flow mirrors `terraform plan && terraform apply` so you can always see what's about to change.
+
+```
+$ crewship apply --file acme.workspace.yaml
+
+Plan:
+  + credential ANTHROPIC_API_KEY (ANTHROPIC)
+  + credential GH_TOKEN (GITHUB)
+  + crew code-review
+  + crew triage
+  + skill house-style (workspace)
+  + agent code-review/daniel
+  + agent triage/alice
+  ~ agent code-review/petra        ← updated, body changed
+  - agent code-review/old-bot      ← in workspace but not in manifest
+
+Plan includes 1 destructive operation. Continue? [y/N]
+```
+
+`--dry-run` runs the plan phase only — perfect for code review or CI:
+
+```bash
+crewship apply --file acme.workspace.yaml --dry-run
+```
+
+## Exporting an existing workspace
+
+`crewship export` is the round-trip partner of apply. It pulls the current workspace state and renders it as a manifest — useful for backing up, snapshotting, or migrating a workspace someone else built in the UI.
+
+```bash
+# One crew
+crewship export crew code-review > code-review.crew.yaml
+
+# Everything in the active workspace
+crewship export workspace > acme.workspace.yaml
+```
+
+The export includes credential **slots** (without values — they never travel in the file) and skill bodies. Re-applying the exported file on a fresh workspace recreates the same shape:
+
+```bash
+crewship export crew code-review > backup.yaml
+# ... later, on a different machine
+crewship apply --file backup.yaml --from-env
+```
+
+## IDE autocomplete
+
+Add this line at the top of any manifest and your editor (VS Code, Cursor, JetBrains with the YAML language server) gets autocomplete and inline validation:
+
+```yaml
+# yaml-language-server: $schema=https://schemas.crewship.ai/v1/manifest.json
+```
+
+## CI patterns
+
+```bash
+# Strict create — fail if anything already exists. Use for "one workspace per PR".
+crewship apply --file team.yaml --strict --from-env
+
+# Idempotent re-apply — converges drifted state, skips identical.
+crewship apply --file team.yaml --from-env --yes
+
+# Dry-run as a PR check
+crewship apply --file team.yaml --dry-run
+```
+
+Pair with secret managers via `--secrets-file`:
+
+```bash
+# Pull secrets into a temp file from your vault, then apply
+op inject -i secrets.tpl.env > /tmp/secrets.env
+crewship apply --file team.yaml --secrets-file /tmp/secrets.env --yes
+rm /tmp/secrets.env
+```
+
+## Examples
+
+The repo ships with five reference manifests under `examples/manifests/`:
+
+| File | Demonstrates |
+| --- | --- |
+| `code-review.crew.yaml` | Multi-file pattern (`path:` skill + `prompt_file:`) |
+| `triage.crew.yaml` | Inline skill body |
+| `full-team.workspace.yaml` | Workspace bundle with 2 crews sharing creds + skill |
+| `python-with-features.crew.yaml` | In-container Redis + Postgres via devcontainer features |
+| `python-with-services.crew.yaml` | Sidecar Redis + Postgres on a crew bridge network |
+
+## See also
+
+- [CLI → apply](/cli/apply) — every flag and exit code
+- [CLI → export](/cli/export) — round-trip the other way
+- [Configuration → Manifest Schema](/configuration/manifest-schema) — flat reference of every field
+- [Guides → Devcontainers](/guides/devcontainers) — for in-container database workflows
+- [Guides → Credentials](/guides/credentials) — credential lifecycle, status, rotation

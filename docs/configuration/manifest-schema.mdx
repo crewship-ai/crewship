@@ -1,0 +1,246 @@
+---
+title: "Manifest Schema"
+description: "Flat reference for every field in a Crewship workspace manifest (apiVersion crewship/v1)."
+icon: "list-tree"
+---
+
+# Manifest Schema
+
+Flat reference for every field accepted under `apiVersion: crewship/v1`. For the narrative + examples, see [Guides → Workspace Manifests](/guides/manifests). For CLI flags, see [CLI → apply](/cli/apply) and [CLI → export](/cli/export).
+
+The Go type definitions live at `internal/manifest/schema.go`; this page mirrors them.
+
+## Top level
+
+Every manifest must start with these three keys:
+
+```yaml
+apiVersion: crewship/v1
+kind: Crew | Workspace
+metadata: { … }
+spec: { … }
+```
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `apiVersion` | string | ✓ | Always `crewship/v1` for v1 manifests. Server accepts every past version it has shipped. |
+| `kind` | `"Crew"` \| `"Workspace"` | ✓ | Discriminates the `spec:` shape. |
+| `metadata` | object | ✓ | Identity + descriptive header. |
+| `spec` | object | ✓ | The actual declaration. Shape depends on `kind:`. |
+
+Multi-document YAML is supported via `---` separators — each document is independently typed by its own `apiVersion` + `kind`.
+
+## `metadata`
+
+Shared between both kinds. Only `slug` is load-bearing for apply (it's the idempotency key); the rest is descriptive.
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `name` | string | Human-readable name. |
+| `slug` | string | `[a-z0-9][a-z0-9_-]{0,49}` — workspace-unique identity key. |
+| `description` | string | Free text. |
+| `icon` | string | Crewship icon set (`git-pull-request`, `list-checks`, …). |
+| `color` | string | Tailwind palette name. |
+| `author` | string | Display only — useful for shared manifests. |
+| `version` | string | Semver, display only. |
+| `license` | string | SPDX, display only. |
+| `preferred_language` | string | Workspace-only. Language hint (`cs`, `en`). |
+| `labels` | `map<string,string>` | Free tags. Not yet used by the server. |
+
+## `kind: Crew`
+
+`spec:` is a single `CrewSpec` (described below).
+
+## `kind: Workspace`
+
+`spec:` wraps workspace-scope state and a list of nested crews:
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `credentials` | `[]Credential` | Workspace-scope slots shared by every nested crew. |
+| `skills` | `[]Skill` | Workspace-scope skills available to every nested crew. |
+| `crews` | `[]CrewSpec` | One entry per crew in the bundle. |
+
+## `CrewSpec`
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `slug` | string | Override for nested crews. Standalone `kind: Crew` ignores this and uses `metadata.slug`. |
+| `name` | string | Override (nested only). |
+| `description` | string | |
+| `icon` | string | |
+| `color` | string | |
+| `devcontainer` | `Devcontainer` | Container runtime. Nil → no container, agents run on the host. |
+| `credentials` | `[]Credential` | Crew-scope credential slots. Merged with workspace-scope. |
+| `mcp_servers` | `[]MCPServer` | Crew-scoped MCP integrations. |
+| `skills` | `[]Skill` | Crew-scope skills. Merged with workspace-scope. |
+| `services` | `[]Service` | Sidecar containers (Redis, Postgres, …). |
+| `agents` | `[]Agent` | (required) At least one agent. |
+
+## `Devcontainer`
+
+Subset of devcontainer.json. Hand-written JSON can be passed through under `raw:` for fields not modelled here. Structured fields take precedence on conflict.
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `image` | string | Base runtime image. Glibc Linux only. |
+| `features` | `map<string, object>` | Devcontainer features map. Same shape as the spec. |
+| `env` | `map<string,string>` | Becomes `containerEnv` in the generated config. |
+| `mise` | string | `[tools]` config block fed to mise at provision time. |
+| `runtime_image` | string | Alternative to `image:`; falls back to `image` when empty. |
+| `memory_mb` | int | Container memory cap. |
+| `cpus` | float | CPU cores. |
+| `ttl_hours` | int | Auto-stop after idle period. `0` = no TTL. |
+| `network_mode` | `"free"` \| `"restricted"` | When `restricted`, only `allowed_domains` are reachable. |
+| `allowed_domains` | `[]string` | Domain allowlist for `restricted` mode. |
+| `raw` | `map<string,any>` | Free-form devcontainer.json keys passed through. |
+
+See [Configuration → Devcontainers](/configuration/devcontainers) for the full devcontainer field reference.
+
+## `Credential`
+
+Slot declaration. **Never** carries values — those arrive at apply-time through `--from-env` or `--secrets-file`.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `env` | string | ✓ | Env var name the agent binds against. Also the workspace-unique credential name. |
+| `provider` | string | ✓ | `ANTHROPIC`, `OPENAI`, `GITHUB`, `NONE`, … |
+| `type` | string | ✓ | `API_KEY`, `OAUTH2`, `CLI_TOKEN`, `AI_CLI_TOKEN`, `SECRET`, `USERPASS`, `SSH_KEY`, `CERTIFICATE`, `GENERIC_SECRET` |
+| `label` | string | — | UI label shown in the "Set value" wizard. |
+| `help_url` | string | — | Link to provider's "where do I find this?" docs. |
+| `description` | string | — | |
+| `required` | bool | — | Reserved for a future "soft requirement" mode. Treated as required today. |
+
+Apply behaviour when a value is **not** supplied:
+
+- `status` set to `PENDING` on the server.
+- UI shows "Needs value" with a CTA.
+- Agent runs needing the credential fail with `credential not configured`.
+- Placeholder is **never** injected into the agent environment — the LLM can't read or leak it.
+
+## `Skill`
+
+Pick **exactly one** of `path:`, `source:`, or `inline:`.
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `slug` | string | (required) Workspace-unique identity key. |
+| `path` | string | Relative path to a `SKILL.md` file beside the manifest. Recommended for skills longer than a paragraph. |
+| `source` | string | HTTPS URL to a `SKILL.md`. Fetched at apply time. |
+| `ref` | string | Git ref/tag/sha for URL sources (optional). |
+| `digest` | string | `sha256:…` digest for URL sources (optional). |
+| `inline` | string | `SKILL.md` body in the manifest itself. **Hard cap 8 KB.** |
+| `allow_unsafe_license` | bool | Bypass the SPDX allowlist gate (license-allow-list applies otherwise). |
+
+Path resolution uses the manifest's directory as the root. `..` escapes and absolute paths are rejected; symlinks are evaluated and their targets must also stay inside the manifest directory.
+
+## `MCPServer`
+
+Crew-scoped MCP integration. Mirrors what `POST /api/v1/crews/{id}/integrations` accepts.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `name` | string | ✓ | Crew-unique. |
+| `display_name` | string | — | Falls back to `name`. |
+| `transport` | `"stdio"` \| `"streamable-http"` | ✓ | |
+| `command` | string | conditional | Required for `stdio`. |
+| `args` | `[]string` | — | |
+| `endpoint` | string | conditional | Required for `streamable-http`. |
+| `env_mapping` | `map<string,string>` | — | `{server_env_var: credential_env_name}`. Resolved against the merged workspace + crew credential scope at apply time. |
+| `icon` | string | — | Brand logo hint. |
+| `enabled` | bool | — | Default `true`. |
+
+## `Agent`
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `slug` | string | ✓ | Workspace-unique. |
+| `name` | string | ✓ | Display name. |
+| `description` | string | — | |
+| `role_title` | string | — | Free text job title. |
+| `agent_role` | `"AGENT"` \| `"LEAD"` | — | Default `AGENT`. Max one `LEAD` per crew. |
+| `lead_mode` | `"active"` \| `"passive"` | — | Only meaningful when `agent_role: LEAD`. |
+| `cli_adapter` | enum | — | `CLAUDE_CODE` (default), `OPENCODE`, `CODEX_CLI`, `GEMINI_CLI`, `CURSOR_CLI`, `FACTORY_DROID`. |
+| `llm.provider` | string | — | `ANTHROPIC`, `OPENAI`, `GOOGLE`, `CURSOR`, `FACTORY`, `OLLAMA`. |
+| `llm.model` | string | — | Free string; CLI adapter enforces the right shape. |
+| `tool_profile` | `"FULL"` \| `"CODING"` \| `"MINIMAL"` | — | Default `CODING`. |
+| `timeout_seconds` | int | — | Default `1800`. |
+| `memory_enabled` | bool | — | Enables the file-first agent memory. |
+| `prompt` | string | — | Inline system prompt. Hard cap 64 KB. |
+| `prompt_file` | string | — | Relative path. Mutually exclusive with `prompt:`. |
+| `skills` | `[]string` | — | Slug references; must resolve in the merged workspace + crew scope. |
+| `env_refs` | `[]string` | — | Env var name references; must resolve in the merged credential scope. |
+
+## `Service`
+
+Sidecar container that runs alongside the agent on the crew's bridge network. Agents reach services by name (`redis:6379`, `postgres:5432`) on a private network — sidecars are never published to the host.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `name` | string | ✓ | DNS-label (`[a-z][a-z0-9-]{0,30}[a-z0-9]`). Becomes the bridge-network alias. |
+| `image` | string | ✓ | Anything `docker pull` can fetch. Pinning a digest is encouraged. |
+| `command` | `[]string` | — | Overrides image ENTRYPOINT + CMD. |
+| `env` | `map<string,string>` | — | Literal env vars (no secrets — use `env_refs:`). |
+| `env_refs` | `[]string` | — | Credential env names to inject from the vault. PENDING credentials are silently omitted. |
+| `ports` | `[]string` | — | `"5432"` or `"5432/tcp"`. Container-internal only. |
+| `volumes` | `[]ServiceVolume` | — | Named volumes only. Bind mounts to host paths are rejected for portability. |
+| `healthcheck` | `ServiceHealthcheck` | — | Provisioner waits for `HEALTHY` before starting the agent. |
+
+### `ServiceVolume`
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `name` | string | Per-crew namespaced internally as `crewship-svc-{crew-slug}-vol-{name}`. Two crews can both declare `pg-data` and get isolated stores. |
+| `mount` | string | Absolute path inside the sidecar (e.g. `/var/lib/postgresql/data`). |
+
+### `ServiceHealthcheck`
+
+Mirrors docker-compose's healthcheck shape.
+
+| Field | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `test` | `[]string` | (required) | `["CMD", …]` or `["CMD-SHELL", "..."]`. |
+| `interval` | duration string | `5s` | Go duration syntax (`5s`, `30s`, `1m`). |
+| `timeout` | duration string | `3s` | |
+| `retries` | int | — | |
+| `start_period` | duration string | `0s` | Grace period before failures count. |
+
+## Cross-reference rules
+
+The validator runs the following cross-checks at apply time. Errors abort before any mutation lands.
+
+| Rule | Failing message |
+| --- | --- |
+| Every `agent.skills[]` slug must be declared in the merged workspace + crew skill scope | `agent "X" references unknown skill "Y"` |
+| Every `agent.env_refs[]` env name must be declared in the merged credential scope | `agent "X" references unknown credential env "Y"` |
+| Every `mcp.env_mapping[]` value must be declared in the merged credential scope | `mcp "X": env_mapping[KEY] → "Y" references unknown credential` |
+| Every `service.env_refs[]` env name must be declared in the merged credential scope | `service "X": env_refs[Y] references unknown credential` |
+| Each skill must have exactly one source (`path` / `source` / `inline`) | `skill "X": must have one of path/source/inline` |
+| At most one agent per crew may have `agent_role: LEAD` | `crew "X" has more than one LEAD` |
+| Service names must be unique within a crew | `crew "X": duplicate service name "Y"` |
+
+## Size caps
+
+The parser refuses oversized inputs to bound apply-time memory and prevent half-applied state from a malformed file.
+
+| Subject | Cap | Notes |
+| --- | --- | --- |
+| Manifest file itself | 4 MB | |
+| Skill body via `path:` | 512 KB | Mirrors the existing `internal/skills` cap. |
+| Skill body via `inline:` | 8 KB | Use `path:` for larger skills. |
+| Agent `prompt` (inline or via `prompt_file`) | 64 KB | |
+| `services_json` on the server | 64 KB | Across all sidecars in one crew. |
+
+## Apply / sync semantics
+
+For the full apply-mode matrix (default sync vs `--strict` vs `--replace`), see [CLI → apply](/cli/apply#plan--confirm-flow).
+
+In short: by default the manifest is the source of truth. Crews / agents / agent_skills / agent_credentials / mcp_servers that exist in the workspace but aren't in the manifest get **deleted** with a confirmation prompt. Skills and credentials themselves are additive-only — delete those via UI or dedicated CLI commands.
+
+## See also
+
+- [Guides → Workspace Manifests](/guides/manifests) — narrative
+- [CLI → apply](/cli/apply)
+- [CLI → export](/cli/export)
+- [Configuration → Devcontainers](/configuration/devcontainers) — for `devcontainer.features` semantics
+- `internal/manifest/schema.go` — Go source of truth
