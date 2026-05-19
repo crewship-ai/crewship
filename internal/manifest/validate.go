@@ -226,8 +226,10 @@ func (v *validator) checkSkills(scope string, skills []Skill) {
 // serviceNameRe enforces a DNS-label-safe shape because the name
 // becomes the bridge-network alias agents resolve. Allowing arbitrary
 // characters would either produce un-resolvable hostnames or, worse,
-// silently rewrite them in the runtime.
-var serviceNameRe = regexp.MustCompile(`^[a-z][a-z0-9-]{0,30}[a-z0-9]$`)
+// silently rewrite them in the runtime. RFC 1035: 1–63 chars,
+// lowercase letters/digits/'-', must start with a letter and end
+// with letter or digit. The single-char form ("r") is also valid.
+var serviceNameRe = regexp.MustCompile(`^[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
 
 func (v *validator) checkServices(scope string, services []Service, creds map[string]Credential) {
 	seen := map[string]bool{}

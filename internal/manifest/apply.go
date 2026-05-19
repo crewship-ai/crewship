@@ -182,8 +182,14 @@ type Result struct {
 }
 
 // buildCrewBody packs a CrewSpec into the body the /crews POST
-// endpoint expects.
-func buildCrewBody(name, slug string, spec *CrewSpec) map[string]any {
+// endpoint expects. Returns an error when the services payload
+// can't be marshalled — silently dropping it would let apply
+// "succeed" while the user's declared sidecars never reach the
+// server, which is a foot-gun the manifest pipeline must not
+// produce. validate.go already gates services structurally so a
+// marshal failure here is always an unexpected programmer error
+// (e.g. an unsupported type sneaks into a future Service field).
+func buildCrewBody(name, slug string, spec *CrewSpec) (map[string]any, error) {
 	body := map[string]any{
 		"name": name,
 		"slug": slug,
@@ -201,9 +207,11 @@ func buildCrewBody(name, slug string, spec *CrewSpec) map[string]any {
 		// Serialise as JSON text — the server stores the body
 		// verbatim in crews.services_json and re-parses at agent
 		// run time. Mirrors how devcontainer_config is shipped.
-		if data, err := jsonMarshal(spec.Services); err == nil {
-			body["services_json"] = string(data)
+		data, err := jsonMarshal(spec.Services)
+		if err != nil {
+			return nil, fmt.Errorf("marshal services_json: %w", err)
 		}
+		body["services_json"] = string(data)
 	}
 	if spec.Devcontainer != nil {
 		dc := spec.Devcontainer
@@ -234,7 +242,7 @@ func buildCrewBody(name, slug string, spec *CrewSpec) map[string]any {
 			body["devcontainer_config"] = cfg
 		}
 	}
-	return body
+	return body, nil
 }
 
 func buildDevcontainerJSON(dc *Devcontainer) string {

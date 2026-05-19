@@ -364,7 +364,18 @@ func safeJoin(base, rel string) (string, error) {
 	}
 	full := filepath.Join(base, cleaned)
 
+	// Both base and full need to be absolute before EvalSymlinks
+	// + Rel can produce a comparable answer. filepath.Rel returns
+	// an error when one side is absolute and the other relative
+	// (it'd need cwd to interpret the relative half), and
+	// EvalSymlinks on a relative path returns a relative path —
+	// so the lexical comparison could miss a sibling-of-cwd
+	// escape. Normalising both to absolute closes that gap.
 	absBase, err := filepath.Abs(base)
+	if err != nil {
+		return "", err
+	}
+	absFull, err := filepath.Abs(full)
 	if err != nil {
 		return "", err
 	}
@@ -374,19 +385,16 @@ func safeJoin(base, rel string) (string, error) {
 	// repo checkout (common with package managers and worktrees) and
 	// without resolving it, every safe target would look "outside".
 	// EvalSymlinks errors when the target doesn't exist — fall back to
-	// the lexical path so a path: to a not-yet-created file (rare but
-	// valid for templates) still surfaces as a read error rather than
-	// a confusing symlink error.
+	// the lexical absolute path so a path: to a not-yet-created file
+	// (rare but valid for templates) still surfaces as a read error
+	// rather than a confusing symlink error.
 	resolvedBase, err := filepath.EvalSymlinks(absBase)
 	if err != nil {
 		resolvedBase = absBase
 	}
-	resolvedFull, err := filepath.EvalSymlinks(full)
+	resolvedFull, err := filepath.EvalSymlinks(absFull)
 	if err != nil {
-		// Target doesn't exist or unreadable; use the lexical full
-		// path for the boundary check. The downstream ReadFile call
-		// will then return the proper not-found error to the user.
-		resolvedFull = full
+		resolvedFull = absFull
 	}
 
 	rel2, err := filepath.Rel(resolvedBase, resolvedFull)

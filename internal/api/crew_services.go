@@ -50,7 +50,9 @@ type serviceHealthcheckWire struct {
 // duplicated rather than imported so package api stays free of a
 // dependency on package manifest (which imports cli, which would
 // otherwise introduce a cycle with the future webhook signing path).
-var serviceNameRe = regexp.MustCompile(`^[a-z][a-z0-9-]{0,30}[a-z0-9]$`)
+// RFC 1035 DNS label: 1–63 chars, lowercase letters/digits/'-',
+// must start with letter and end with letter or digit.
+var serviceNameRe = regexp.MustCompile(`^[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
 
 // validateServicesJSON enforces the per-service shape so a
 // malformed document never reaches the docker provider. Reads the

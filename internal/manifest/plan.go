@@ -334,7 +334,10 @@ func (pb *planBuilder) planCrew(ctx context.Context, meta Metadata, spec *CrewSp
 		return err
 	}
 
-	crewBody := buildCrewBody(name, slug, spec)
+	crewBody, err := buildCrewBody(name, slug, spec)
+	if err != nil {
+		return fmt.Errorf("crew %q: %w", slug, err)
+	}
 	specCopy := *spec
 	var crewIDForChildren string
 

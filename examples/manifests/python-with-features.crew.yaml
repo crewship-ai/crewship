@@ -6,9 +6,11 @@
 # the agent's lifecycle (container restart = restart DB, named
 # volumes still persist data).
 #
-# When the sidecar provisioner ships, the python-with-services
-# example becomes the recommended shape (DB lifecycle decoupled
-# from agent).
+# For production-shape setups, prefer python-with-services.crew.yaml
+# — the docker provider runs Postgres + Redis as sidecar containers
+# on a crew bridge network with healthcheck-gated agent start. Use
+# the features-based approach below when you want a single-container
+# dev environment where the DB's lifecycle matches the agent's.
 
 apiVersion: crewship/v1
 kind: Crew

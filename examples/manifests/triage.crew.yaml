@@ -1,8 +1,7 @@
 # yaml-language-server: $schema=https://schemas.crewship.ai/v1/manifest.json
 #
 # Triage crew with an inline mini-skill for the housekeeping rule.
-# Demonstrates `inline:` (small skill body in the manifest itself)
-# and `source:` (skill fetched from a remote git host at apply-time).
+# Demonstrates `inline:` (small skill body in the manifest itself).
 #
 #   crewship apply --file triage.crew.yaml
 

@@ -233,8 +233,16 @@ Declare sidecar containers that run alongside the agent on the crew bridge netwo
 spec:
   devcontainer:
     image: mcr.microsoft.com/devcontainers/python:3.12
+    # The agent assembles its connection strings at runtime from
+    # the injected credential (POSTGRES_PASSWORD comes in via the
+    # agent's env_refs below). DATABASE_HOST/PORT/USER/NAME are
+    # literals here; manifest devcontainer.env does NOT expand
+    # ${VAR} substitution — runtime code does.
     env:
-      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@postgres:5432/app
+      DATABASE_HOST: postgres
+      DATABASE_PORT: "5432"
+      DATABASE_USER: postgres
+      DATABASE_NAME: app
       REDIS_URL: redis://redis:6379
 
   credentials:
@@ -398,7 +406,11 @@ crewship apply --file backup.yaml --from-env
 
 ## IDE autocomplete
 
-Add this line at the top of any manifest and your editor (VS Code, Cursor, JetBrains with the YAML language server) gets autocomplete and inline validation:
+<Note>
+The hosted JSON Schema endpoint (`https://schemas.crewship.ai/v1/manifest.json`) is not live yet — it ships in a follow-up release. Until then, validation falls back to the YAML language server's basic shape checks. The `crewship apply --dry-run` path is the authoritative validator in the meantime.
+</Note>
+
+Once published, add this line at the top of any manifest and your editor (VS Code, Cursor, JetBrains with the YAML language server) will get autocomplete and inline validation:
 
 ```yaml
 # yaml-language-server: $schema=https://schemas.crewship.ai/v1/manifest.json

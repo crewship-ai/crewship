@@ -64,7 +64,7 @@ Identity key is the **slug** within its workspace:
 Manifests **never** carry credential values. The `credentials:` block
 declares slots; values are supplied at apply-time via flags:
 
-```
+```bash
 crewship apply -f team.yaml --from-env          # read ANTHROPIC_API_KEY etc. from process env
 crewship apply -f team.yaml --secrets-file s.env # KEY=VALUE file
 crewship apply -f team.yaml                      # values omitted → PENDING slots
@@ -207,7 +207,7 @@ See `python-with-services.crew.yaml` for the full template.
 
 `crewship export crew <slug>` is the round-trip partner of apply:
 
-```
+```bash
 crewship export crew code-review > code-review.crew.yaml
 crewship apply -f code-review.crew.yaml --dry-run
 ```
@@ -217,7 +217,7 @@ values, so the output is safe to commit.
 
 ## CLI summary
 
-```
+```text
 crewship apply --file manifest.yaml [flags]
   --dry-run            Validate + show plan, no mutations
   --strict             Fail on any existing resource
@@ -225,7 +225,6 @@ crewship apply --file manifest.yaml [flags]
   --from-env           Read credential values from process env
   --secrets-file FILE  Read credential values from KEY=VALUE file
   --yes                Skip confirmation prompts
-  --provision          Hint to also build devcontainers after apply
 
 crewship export crew <slug> [flags]
   --output FILE        Write to file (default: stdout)

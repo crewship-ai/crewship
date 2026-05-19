@@ -64,7 +64,20 @@ func decodeServicesForRuntime(body string, envValueFor func(envVar string) strin
 	}
 
 	out := make([]provider.CrewService, 0, len(services))
-	for _, s := range services {
+	for i, s := range services {
+		// Lightweight schema guards. services_json is validated on
+		// write by the API layer, but a stored row could still go
+		// stale through a manual DB edit or an older crewship
+		// version writing a different shape. Catching it here lets
+		// the caller (bridge.go) treat the run as "sidecars not
+		// configured" instead of hard-failing in the docker
+		// provider with a less actionable error.
+		if strings.TrimSpace(s.Name) == "" || strings.TrimSpace(s.Image) == "" {
+			return nil, fmt.Errorf("services[%d]: name and image are required", i)
+		}
+		if s.Healthcheck != nil && len(s.Healthcheck.Test) == 0 {
+			return nil, fmt.Errorf("services[%q]: healthcheck declared without a test command", s.Name)
+		}
 		env := map[string]string{}
 		for k, v := range s.Env {
 			env[k] = v

@@ -111,7 +111,10 @@ spec:
   agents:
     - {slug: alice, name: Alice, agent_role: LEAD, prompt: hi}
 `)
-	b, _ := Load(body)
+	b, err := Load(body)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
 
 	fake := newFakeAPI(t)
 	fake.crewsBySlug["t"] = map[string]any{"id": "crew_existing", "slug": "t", "workspace_id": fake.wsID, "name": "T"}
@@ -147,7 +150,10 @@ spec:
   agents:
     - {slug: alice, name: Alice, agent_role: LEAD, prompt: hi}
 `)
-	b, _ := Load(body)
+	b, err := Load(body)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
 
 	fake := newFakeAPI(t)
 	fake.crewsBySlug["t"] = map[string]any{"id": "crew_existing", "slug": "t", "workspace_id": fake.wsID, "name": "T"}
@@ -155,7 +161,7 @@ spec:
 	fake.agentsBySlug["ghost"] = map[string]any{"id": "agent_ghost", "slug": "ghost", "name": "Ghost", "agent_role": "AGENT", "crew_id": "crew_existing"}
 
 	client := NewClient(fake)
-	_, err := Apply(context.Background(), client, b, Options{Mode: ApplyUpsert, Yes: false})
+	_, err = Apply(context.Background(), client, b, Options{Mode: ApplyUpsert, Yes: false})
 	if err != ErrConfirmationRequired {
 		t.Errorf("want ErrConfirmationRequired, got %v", err)
 	}
@@ -178,7 +184,10 @@ spec:
   agents:
     - {slug: alice, name: Alice, agent_role: LEAD, prompt: hi, skills: [keep]}
 `)
-	b, _ := Load(body)
+	b, err := Load(body)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
 
 	fake := newFakeAPI(t)
 	fake.crewsBySlug["t"] = map[string]any{"id": "crew_x", "slug": "t", "workspace_id": fake.wsID, "name": "T"}
@@ -220,7 +229,10 @@ spec:
   agents:
     - {slug: alice, name: Alice, agent_role: LEAD, prompt: hi}
 `)
-	b, _ := Load(body)
+	b, err := Load(body)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
 
 	fake := newFakeAPI(t)
 	client := NewClient(fake)

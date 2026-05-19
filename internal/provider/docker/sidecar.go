@@ -33,8 +33,12 @@ package docker
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"time"
 
@@ -48,6 +52,65 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/provider"
 )
+
+// sidecarSpecHashLabel stores a digest of the full desired spec on
+// every sidecar container we create, so on next EnsureCrewServices
+// we can detect drift in any field (command, env, ports, volumes,
+// healthcheck) — not just image. Image is checked separately so the
+// error path can name "image drift" specifically.
+const sidecarSpecHashLabel = "crewship.svc.spec_hash"
+
+// computeSidecarSpecHash returns a SHA-256 of the fields that, when
+// changed, require recreating the container. Image is intentionally
+// excluded because it's checked + reported separately upstream.
+// Maps are walked in sorted key order so the digest is stable
+// regardless of YAML key ordering or Go map iteration.
+func computeSidecarSpecHash(svc *provider.CrewService) string {
+	// Sort env + volumes for determinism. Slices keep their author
+	// order — flipping the args list is a meaningful change.
+	envKeys := make([]string, 0, len(svc.Env))
+	for k := range svc.Env {
+		envKeys = append(envKeys, k)
+	}
+	sort.Strings(envKeys)
+	envPairs := make([][2]string, 0, len(envKeys))
+	for _, k := range envKeys {
+		envPairs = append(envPairs, [2]string{k, svc.Env[k]})
+	}
+
+	vols := append([]provider.CrewServiceVolume(nil), svc.Volumes...)
+	sort.Slice(vols, func(i, j int) bool {
+		if vols[i].Name != vols[j].Name {
+			return vols[i].Name < vols[j].Name
+		}
+		return vols[i].Mount < vols[j].Mount
+	})
+
+	payload := struct {
+		Command     []string
+		Env         [][2]string
+		Ports       []string
+		Volumes     []provider.CrewServiceVolume
+		Healthcheck *provider.CrewServiceHealthcheck
+	}{
+		Command:     svc.Command,
+		Env:         envPairs,
+		Ports:       svc.Ports,
+		Volumes:     vols,
+		Healthcheck: svc.Healthcheck,
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		// Marshal failure on a struct with only strings, slices,
+		// maps, and one pointer is unreachable — but a zero hash
+		// would silently disable drift detection. Return a unique
+		// sentinel so the next reconcile triggers a recreate
+		// rather than masking the problem.
+		return "marshal-err"
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:16]) // 32 hex chars — short label, ample collision space
+}
 
 // readToDiscard drains a reader into io.Discard. Wrapper exists so
 // sidecar.go doesn't pull the entire io package; matches the
@@ -131,7 +194,13 @@ func (p *Provider) EnsureCrewServices(ctx context.Context, team provider.CrewCon
 	}
 
 	// Wait for healthchecks (capped at 60s total across all
-	// sidecars to keep the agent-start latency bounded).
+	// sidecars to keep the agent-start latency bounded). A failed
+	// healthcheck now propagates as an error rather than a warning
+	// so the agent never starts against a dependency the operator
+	// declared a healthcheck for — silently proceeding would mask
+	// half-broken setups that look fine until the first DB query
+	// times out. Healthcheck-less services aren't gated (the
+	// upstream image didn't declare one, we don't synthesise one).
 	waitCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 	for _, svc := range team.Services {
@@ -139,44 +208,73 @@ func (p *Provider) EnsureCrewServices(ctx context.Context, team provider.CrewCon
 			continue
 		}
 		if err := p.waitSidecarHealthy(waitCtx, ids[svc.Name]); err != nil {
-			p.logger.Warn("sidecar not healthy in time", "service", svc.Name, "error", err)
+			return ids, fmt.Errorf("sidecar %q not healthy: %w", svc.Name, err)
 		}
 	}
 	return ids, nil
 }
 
 // ensureSidecar starts a single sidecar, reusing the existing
-// container if its image+command+env match the desired spec.
+// container if its image AND full spec hash match. Any drift
+// (image, command, env, ports, volumes, healthcheck) triggers a
+// stop + remove + recreate so apply is true sync for sidecars,
+// not just "fresh creates work."
 func (p *Provider) ensureSidecar(ctx context.Context, crewSlug string, svc *provider.CrewService) (string, error) {
 	name := p.sidecarContainerName(crewSlug, svc.Name)
+	desiredHash := computeSidecarSpecHash(svc)
 
 	containers, err := p.client.ContainerList(ctx, container.ListOptions{All: true})
 	if err != nil {
 		return "", fmt.Errorf("list containers: %w", err)
 	}
 	for _, c := range containers {
+		var matched bool
 		for _, n := range c.Names {
-			if n != "/"+name {
-				continue
-			}
-			// Image drift triggers a full recreate so an
-			// in-flight `services_json` edit (e.g. postgres:15 →
-			// postgres:16) takes effect without manual cleanup.
-			if c.Image != svc.Image {
-				p.logger.Info("sidecar image drift; recreating", "service", svc.Name,
-					"old", c.Image, "new", svc.Image)
-				timeout := 5
-				_ = p.client.ContainerStop(ctx, c.ID, container.StopOptions{Timeout: &timeout})
-				_ = p.client.ContainerRemove(ctx, c.ID, container.RemoveOptions{Force: true, RemoveVolumes: false})
+			if n == "/"+name {
+				matched = true
 				break
 			}
-			if c.State != "running" {
-				if err := p.client.ContainerStart(ctx, c.ID, container.StartOptions{}); err != nil {
-					return "", fmt.Errorf("start existing sidecar: %w", err)
-				}
-			}
-			return c.ID, nil
 		}
+		if !matched {
+			continue
+		}
+
+		// Drift detection in two passes so the operator log gets
+		// the most actionable reason. Image is the common case
+		// (postgres:15 → postgres:16) and worth surfacing
+		// specifically; everything else falls under "spec drift"
+		// and the hash diff identifies it without enumerating
+		// fields in the log message.
+		drift := ""
+		if c.Image != svc.Image {
+			drift = fmt.Sprintf("image drift: %s → %s", c.Image, svc.Image)
+		} else if c.Labels[sidecarSpecHashLabel] != desiredHash {
+			drift = "spec drift (command/env/ports/volumes/healthcheck)"
+		}
+		if drift != "" {
+			p.logger.Info("sidecar drift; recreating", "service", svc.Name, "reason", drift)
+			timeout := 5
+			if err := p.client.ContainerStop(ctx, c.ID, container.StopOptions{Timeout: &timeout}); err != nil {
+				// Stop can fail when the container is already
+				// gone (race with another reconcile). Inspect
+				// + skip-if-not-found would be cleaner, but
+				// the subsequent Remove with Force handles the
+				// happy path; only error out if Remove also
+				// fails, since that's the load-bearing step.
+				p.logger.Debug("sidecar stop returned error (may be already stopped)",
+					"service", svc.Name, "error", err)
+			}
+			if err := p.client.ContainerRemove(ctx, c.ID, container.RemoveOptions{Force: true, RemoveVolumes: false}); err != nil {
+				return "", fmt.Errorf("remove sidecar %q for recreate: %w", svc.Name, err)
+			}
+			break // fall through to create
+		}
+		if c.State != "running" {
+			if err := p.client.ContainerStart(ctx, c.ID, container.StartOptions{}); err != nil {
+				return "", fmt.Errorf("start existing sidecar: %w", err)
+			}
+		}
+		return c.ID, nil
 	}
 
 	// Pull image (best-effort: tolerate offline + local copy).
@@ -234,10 +332,11 @@ func (p *Provider) ensureSidecar(ctx context.Context, crewSlug string, svc *prov
 		Env:          envSlice,
 		ExposedPorts: exposed,
 		Labels: map[string]string{
-			"managed-by":    "crewship",
-			"crewship.crew": crewSlug,
-			"crewship.kind": "sidecar",
-			"crewship.svc":  svc.Name,
+			"managed-by":         "crewship",
+			"crewship.crew":      crewSlug,
+			"crewship.kind":      "sidecar",
+			"crewship.svc":       svc.Name,
+			sidecarSpecHashLabel: desiredHash,
 		},
 		Healthcheck: hc,
 	}

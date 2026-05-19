@@ -360,10 +360,14 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		"id": crewID, "name": c.Name, "slug": c.Slug,
 	})
 
-	// Restart crew container when network policy changes so the sidecar
-	// picks up the new config on the next agent run. Runs after response
-	// is sent to avoid SQLite lock contention.
-	if req.NetworkMode != nil || req.AllowedDomains != nil {
+	// Restart crew container when network policy or sidecar services
+	// change so the docker provider picks up the new config on the
+	// next agent run. services_json edits otherwise stay stale
+	// against a cached running container — the docker provider only
+	// re-reads services_json on EnsureCrewRuntime, and a reused
+	// warm container skips that path. Runs after response is sent
+	// to avoid SQLite lock contention.
+	if req.NetworkMode != nil || req.AllowedDomains != nil || req.ServicesJSON != nil {
 		go h.restartCrewContainer(crewID)
 	}
 }
