@@ -23,6 +23,25 @@ import (
 	"strings"
 )
 
+// managedSecret describes one auto-bootstrap secret: where it lives
+// (env var name), how big a fresh value should be, and a Validate
+// hook that catches truncated or hand-edited values BEFORE downstream
+// callers blow up far away from the source.
+//
+// Validate is called against every value we accept — from env, from
+// the persisted file, and even freshly generated ones (cheap insurance
+// against generator bugs). It returns nil for "this value is usable as
+// the env var promises," any other error for "regenerate or surface to
+// the operator." LoadOrGenerate currently surfaces invalid persisted
+// or env values rather than silently regenerating, on the principle
+// that overwriting an operator-supplied secret without consent is
+// worse than refusing to start.
+type managedSecret struct {
+	EnvVar   string
+	Bytes    int
+	Validate func(string) error
+}
+
 // managed is the canonical list of secrets we auto-bootstrap. Adding
 // a new entry is the only step needed to extend coverage — readFile
 // preserves unknown keys on disk and writeFile sorts deterministically.
@@ -30,18 +49,65 @@ import (
 // ENCRYPTION_KEY feeds aes.NewCipher in internal/encryption, which
 // REQUIRES exactly 32 bytes (AES-256). The hex-encoded representation
 // is what getEncryptionKey() already hex.DecodeStrings, so the on-disk
-// form is 64 hex chars.
+// form is 64 hex chars; the validator enforces that contract here
+// rather than letting it fail mid-request in encryption.Encrypt().
 //
 // NEXTAUTH_SECRET feeds HKDF in internal/auth/jwt.go to derive three
 // downstream keys (access, refresh, WS). Any random source >= 32
-// bytes is cryptographically adequate; we match ENCRYPTION_KEY's
-// 32-byte width so the file is visually uniform.
-var managed = []struct {
-	EnvVar string
-	Bytes  int
-}{
-	{"ENCRYPTION_KEY", 32},
-	{"NEXTAUTH_SECRET", 32},
+// bytes is cryptographically adequate; we enforce a 32-char minimum
+// to match the doctor warning threshold so an under-strength value
+// produces a consistent failure at every diagnostic surface.
+var managed = []managedSecret{
+	{
+		EnvVar:   "ENCRYPTION_KEY",
+		Bytes:    32,
+		Validate: validateHex32,
+	},
+	{
+		EnvVar:   "NEXTAUTH_SECRET",
+		Bytes:    32,
+		Validate: validateMinLen(32),
+	},
+}
+
+func validateHex32(v string) error {
+	b, err := hex.DecodeString(v)
+	if err != nil {
+		return fmt.Errorf("invalid hex encoding: %w", err)
+	}
+	if len(b) != 32 {
+		return fmt.Errorf("expected 32 bytes after hex decode, got %d", len(b))
+	}
+	return nil
+}
+
+func validateMinLen(min int) func(string) error {
+	return func(v string) error {
+		if len(v) < min {
+			return fmt.Errorf("expected at least %d characters, got %d", min, len(v))
+		}
+		return nil
+	}
+}
+
+// ValidateNextAuthSecret exposes the same minimum-length check the
+// bootstrap uses, so `crewship doctor` can confirm the persisted file
+// holds a usable value rather than just confirming the file exists.
+func ValidateNextAuthSecret(v string) error {
+	return validateMinLen(32)(v)
+}
+
+// NextAuthSecretKey is the env-var name `LoadOrGenerate` writes the
+// NEXTAUTH_SECRET value under. Exposed so doctor and other diagnostic
+// surfaces can read the persisted file without hard-coding the literal.
+const NextAuthSecretKey = "NEXTAUTH_SECRET"
+
+// ReadPersisted parses the on-disk secrets file and returns its
+// key→value map. Missing file returns (empty map, nil) — that's the
+// "not yet bootstrapped" state. Exposed for diagnostic callers; the
+// authoritative read path inside the package stays private.
+func ReadPersisted(path string) (map[string]string, error) {
+	return readFile(path)
 }
 
 const (
@@ -95,18 +161,43 @@ func LoadOrGenerate(ctx context.Context, dataDir string, logger *slog.Logger) er
 		if err := ctx.Err(); err != nil {
 			return fmt.Errorf("secrets bootstrap: %w", err)
 		}
+
+		// 1. Env var wins outright — but it has to actually be usable
+		// downstream. Surfacing a clear "your ENCRYPTION_KEY isn't
+		// valid AES-256 hex" beats letting encryption.Encrypt panic
+		// twenty function calls later with no breadcrumb back.
 		if v := os.Getenv(m.EnvVar); v != "" {
+			if err := m.Validate(v); err != nil {
+				return fmt.Errorf("secrets: env %s is invalid: %w", m.EnvVar, err)
+			}
 			continue
 		}
+
+		// 2. Persisted file — same validation. We don't auto-rewrite
+		// a corrupt persisted value: doing so silently could erase a
+		// secret the operator hand-edited, and any in-DB data
+		// encrypted with the persisted key is already unrecoverable
+		// at that point, so silent regeneration just papers over the
+		// real problem.
 		if v, ok := persisted[m.EnvVar]; ok && v != "" {
+			if err := m.Validate(v); err != nil {
+				return fmt.Errorf("secrets: persisted %s in secrets.env is invalid: %w (delete the entry to regenerate, or restore from backup)", m.EnvVar, err)
+			}
 			if err := os.Setenv(m.EnvVar, v); err != nil {
 				return fmt.Errorf("secrets: setenv %s: %w", m.EnvVar, err)
 			}
 			continue
 		}
+
+		// 3. Generate fresh. Validate as cheap insurance against a
+		// future bug in generateHex (e.g. someone changes Bytes to a
+		// value that no longer satisfies the validator).
 		v, err := generateHex(m.Bytes)
 		if err != nil {
 			return fmt.Errorf("secrets: generate %s: %w", m.EnvVar, err)
+		}
+		if err := m.Validate(v); err != nil {
+			return fmt.Errorf("secrets: generated %s failed validation (generator bug): %w", m.EnvVar, err)
 		}
 		persisted[m.EnvVar] = v
 		if err := os.Setenv(m.EnvVar, v); err != nil {

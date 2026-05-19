@@ -225,6 +225,108 @@ func TestLoadOrGenerate_PreservesUnknownKeysOnDisk(t *testing.T) {
 	}
 }
 
+func TestLoadOrGenerate_RejectsInvalidPersistedEncryptionKey(t *testing.T) {
+	scrubEnv(t)
+	dir := t.TempDir()
+	ctx := context.Background()
+
+	// Plant a non-hex value where ENCRYPTION_KEY should be — the
+	// kind of damage a human edit could plausibly cause.
+	if err := writeFile(ctx, SecretsFilePath(dir), map[string]string{
+		"ENCRYPTION_KEY": "not-hex-at-all-just-some-text-that-is-the-right-length-but-bad",
+	}); err != nil {
+		t.Fatalf("plant: %v", err)
+	}
+
+	err := LoadOrGenerate(ctx, dir, silentLogger())
+	if err == nil {
+		t.Fatal("expected error for invalid persisted ENCRYPTION_KEY, got nil")
+	}
+	if !strings.Contains(err.Error(), "ENCRYPTION_KEY") {
+		t.Errorf("error should name the failing secret; got: %v", err)
+	}
+}
+
+func TestLoadOrGenerate_RejectsTooShortPersistedEncryptionKey(t *testing.T) {
+	scrubEnv(t)
+	dir := t.TempDir()
+	ctx := context.Background()
+
+	// 30 hex chars (15 bytes) — valid hex, wrong length for AES-256.
+	if err := writeFile(ctx, SecretsFilePath(dir), map[string]string{
+		"ENCRYPTION_KEY": strings.Repeat("ab", 15),
+	}); err != nil {
+		t.Fatalf("plant: %v", err)
+	}
+
+	err := LoadOrGenerate(ctx, dir, silentLogger())
+	if err == nil {
+		t.Fatal("expected error for 15-byte ENCRYPTION_KEY, got nil")
+	}
+}
+
+func TestLoadOrGenerate_RejectsInvalidEnvEncryptionKey(t *testing.T) {
+	scrubEnv(t)
+	dir := t.TempDir()
+
+	// Env value wins over file; but if it's nonsense, we fail with a
+	// clear "your env is wrong" error instead of letting AES.NewCipher
+	// blow up later inside an encryption.Encrypt call.
+	t.Setenv("ENCRYPTION_KEY", "definitely-not-32-bytes-of-hex")
+
+	err := LoadOrGenerate(context.Background(), dir, silentLogger())
+	if err == nil {
+		t.Fatal("expected error for invalid env ENCRYPTION_KEY, got nil")
+	}
+	if !strings.Contains(err.Error(), "env ENCRYPTION_KEY") {
+		t.Errorf("error should call out env source: %v", err)
+	}
+}
+
+func TestLoadOrGenerate_RejectsShortNextAuthSecret(t *testing.T) {
+	scrubEnv(t)
+	dir := t.TempDir()
+
+	// 8 chars — well below the 32-char floor. Even though Auth.js
+	// would technically accept this, downstream HKDF derivation loses
+	// guarantees we'd prefer not to whisper about.
+	t.Setenv("NEXTAUTH_SECRET", "tooshort")
+
+	err := LoadOrGenerate(context.Background(), dir, silentLogger())
+	if err == nil {
+		t.Fatal("expected error for short NEXTAUTH_SECRET, got nil")
+	}
+}
+
+func TestValidateNextAuthSecret(t *testing.T) {
+	if err := ValidateNextAuthSecret(strings.Repeat("a", 32)); err != nil {
+		t.Errorf("32-char value should validate; got %v", err)
+	}
+	if err := ValidateNextAuthSecret(strings.Repeat("a", 31)); err == nil {
+		t.Error("31-char value should fail validation")
+	}
+	if err := ValidateNextAuthSecret(""); err == nil {
+		t.Error("empty value should fail validation")
+	}
+}
+
+func TestReadPersisted_ExposesFileContents(t *testing.T) {
+	dir := t.TempDir()
+	ctx := context.Background()
+	if err := writeFile(ctx, SecretsFilePath(dir), map[string]string{
+		"NEXTAUTH_SECRET": strings.Repeat("z", 64),
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	got, err := ReadPersisted(SecretsFilePath(dir))
+	if err != nil {
+		t.Fatalf("ReadPersisted: %v", err)
+	}
+	if got["NEXTAUTH_SECRET"] != strings.Repeat("z", 64) {
+		t.Errorf("round-trip mismatch: %q", got["NEXTAUTH_SECRET"])
+	}
+}
+
 func TestLoadOrGenerate_RespectsCancelledContext(t *testing.T) {
 	scrubEnv(t)
 	dir := t.TempDir()

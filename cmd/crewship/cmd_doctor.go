@@ -423,13 +423,15 @@ func checkNextAuthSecret() checkResult {
 		}
 	}
 	path := secrets.SecretsFilePath(dataDir.Root)
-	if _, err := os.Stat(path); err == nil {
-		return checkResult{
-			name:   "NEXTAUTH_SECRET",
-			status: "PASS",
-			detail: "auto-managed in " + path,
+	if _, err := os.Stat(path); err != nil {
+		if os.IsNotExist(err) {
+			return checkResult{
+				name:   "NEXTAUTH_SECRET",
+				status: "INFO",
+				detail: "not yet bootstrapped",
+				hint:   "first `crewship start` will generate and persist this to " + path,
+			}
 		}
-	} else if !os.IsNotExist(err) {
 		// File exists but we can't stat it — most commonly a
 		// permission problem on the data dir. Surface the real
 		// error so the operator can fix it, not "not yet bootstrapped"
@@ -441,11 +443,41 @@ func checkNextAuthSecret() checkResult {
 			hint:   "check permissions / ownership on " + path,
 		}
 	}
+
+	// File exists — inspect its contents and mirror the env-branch
+	// validation. A stale or hand-edited secrets.env with the key
+	// missing or too short would otherwise pass this check while
+	// silently bricking the next server start.
+	persisted, err := secrets.ReadPersisted(path)
+	if err != nil {
+		return checkResult{
+			name:   "NEXTAUTH_SECRET",
+			status: "WARN",
+			detail: fmt.Sprintf("cannot parse persisted secret file: %v", err),
+			hint:   "inspect " + path + " for malformed lines",
+		}
+	}
+	v, ok := persisted[secrets.NextAuthSecretKey]
+	if !ok || v == "" {
+		return checkResult{
+			name:   "NEXTAUTH_SECRET",
+			status: "WARN",
+			detail: "persisted secret file exists but " + secrets.NextAuthSecretKey + " entry is missing",
+			hint:   "delete " + path + " so the next `crewship start` regenerates it (any encrypted credentials encrypted under the missing key are unrecoverable)",
+		}
+	}
+	if err := secrets.ValidateNextAuthSecret(v); err != nil {
+		return checkResult{
+			name:   "NEXTAUTH_SECRET",
+			status: "WARN",
+			detail: fmt.Sprintf("persisted value invalid: %v", err),
+			hint:   "regenerate with openssl rand -hex 32 and replace the entry in " + path,
+		}
+	}
 	return checkResult{
 		name:   "NEXTAUTH_SECRET",
-		status: "INFO",
-		detail: "not yet bootstrapped",
-		hint:   "first `crewship start` will generate and persist this to " + path,
+		status: "PASS",
+		detail: fmt.Sprintf("auto-managed in %s (%d chars)", path, len(v)),
 	}
 }
 
