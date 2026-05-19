@@ -342,6 +342,13 @@ func TestConnectors_Verify_PATInvalidToken(t *testing.T) {
 	}))
 	defer fake.Close()
 
+	// Without this the prod SafeClient/ValidateURL would refuse the
+	// loopback fake (the test would then "pass" via the URL-reject
+	// branch in probeVerifyHTTP and never exercise the 401-from-
+	// provider path it claims to cover).
+	restoreVerify := SetVerifyHTTPClientForTesting(&http.Client{Timeout: 5 * time.Second})
+	defer restoreVerify()
+
 	yaml := `id: bad-token
 name: Bad
 auth_mode: pat

@@ -35,8 +35,14 @@ func NewWorkspaceMemory(workspacePath string) (*WorkspaceMemory, error) {
 	if filepath.Clean(workspacePath) != workspacePath {
 		return nil, fmt.Errorf("workspace memory path must be in canonical form, got %q", workspacePath)
 	}
-	if strings.Contains(workspacePath, "..") {
-		return nil, fmt.Errorf("%w: workspace memory path contains traversal: %q", safepath.ErrUnsafe, workspacePath)
+	// Segment-level ".." check. The previous strings.Contains version
+	// also rejected legitimate dir names containing ".." (e.g.
+	// "/data/..hidden/x"); checking each separator-delimited segment
+	// only refuses actual traversal components.
+	for _, seg := range strings.Split(workspacePath, string(filepath.Separator)) {
+		if seg == ".." {
+			return nil, fmt.Errorf("%w: workspace memory path contains traversal segment: %q", safepath.ErrUnsafe, workspacePath)
+		}
 	}
 	if err := os.MkdirAll(workspacePath, 0o755); err != nil {
 		return nil, fmt.Errorf("create workspace memory dir: %w", err)

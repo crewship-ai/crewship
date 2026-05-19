@@ -299,7 +299,10 @@ func runNoStream(serverURL, wsToken, agentID, chatID, prompt string, quiet bool,
 		case "text":
 			fullText.WriteString(event.Content)
 		case "error":
-			streamErr = event.Content
+			// Sanitise on capture rather than on emit so every later
+			// use (stderr print, returned error string) is uniformly
+			// safe and we don't have to remember at each call site.
+			streamErr = sanitizeTerminal(event.Content)
 		case "done":
 			gotDone = true
 		}
@@ -520,23 +523,26 @@ func streamEvents(ws *cli.WSClient, quiet bool, md *cli.MarkdownRenderer, save *
 			}
 		case "tool_call":
 			if !quiet {
-				fmt.Fprintf(os.Stderr, "%s[tool]%s %s\n", cli.Cyan, cli.Reset, truncate(event.Content, 100))
+				fmt.Fprintf(os.Stderr, "%s[tool]%s %s\n", cli.Cyan, cli.Reset, truncate(sanitizeTerminal(event.Content), 100))
 			}
 		case "tool_result":
 			if !quiet && flagVerbose {
-				fmt.Fprintf(os.Stderr, "%s[result]%s %s\n", cli.Gray, cli.Reset, truncate(event.Content, 200))
+				fmt.Fprintf(os.Stderr, "%s[result]%s %s\n", cli.Gray, cli.Reset, truncate(sanitizeTerminal(event.Content), 200))
 			}
 		case "status":
 			if !quiet {
-				fmt.Fprintf(os.Stderr, "%s[status]%s %s\n", cli.Dim, cli.Reset, event.Content)
+				fmt.Fprintf(os.Stderr, "%s[status]%s %s\n", cli.Dim, cli.Reset, sanitizeTerminal(event.Content))
 			}
 		case "error":
 			flush()
 			// Don't commit save — defer Close in the caller discards the
 			// tempfile so an aborted run never overwrites a previous artefact.
-			fmt.Fprintf(os.Stderr, "%s[error]%s %s\n", cli.Red, cli.Reset, event.Content)
+			// Sanitise once and reuse so both the stderr line and the
+			// returned error string are uniformly free of control chars.
+			safeErr := sanitizeTerminal(event.Content)
+			fmt.Fprintf(os.Stderr, "%s[error]%s %s\n", cli.Red, cli.Reset, safeErr)
 			maybeNotifyRunComplete(startedAt, "", "FAILED")
-			return joinErrs(fmt.Errorf("agent error: %s", event.Content))
+			return joinErrs(fmt.Errorf("agent error: %s", safeErr))
 		case "done":
 			flush()
 			if save != nil && saveErr == nil {

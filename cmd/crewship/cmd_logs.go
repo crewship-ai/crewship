@@ -104,7 +104,15 @@ Examples:
 			default:
 				eventColor = cli.Gray
 			}
-			fmt.Printf("%s%s%s %s[%s]%s %s\n", cli.Dim, ts, cli.Reset, eventColor, l.Event, cli.Reset, truncate(l.Content, 200))
+			// Both event tag (constrained enum) and content (agent
+			// stdout) are sanitised before reaching the terminal so a
+			// rogue log entry can't smuggle ANSI escapes / OSC links
+			// into the operator's scrollback. Same hardening as the
+			// streaming path below.
+			fmt.Printf("%s%s%s %s[%s]%s %s\n",
+				cli.Dim, ts, cli.Reset,
+				eventColor, sanitizeTerminal(l.Event), cli.Reset,
+				truncate(sanitizeTerminal(l.Content), 200))
 		}
 
 		if follow {

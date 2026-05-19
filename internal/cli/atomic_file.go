@@ -90,11 +90,11 @@ func (a *AtomicFile) Commit() error {
 		_ = err
 	}
 	if err := a.f.Close(); err != nil {
-		_ = os.Remove(filepath.Clean(a.tmpPath))
+		_ = os.Remove(a.tmpPath)
 		return fmt.Errorf("close tempfile: %w", err)
 	}
-	if err := os.Rename(filepath.Clean(a.tmpPath), filepath.Clean(a.target)); err != nil {
-		_ = os.Remove(filepath.Clean(a.tmpPath))
+	if err := os.Rename(a.tmpPath, a.target); err != nil {
+		_ = os.Remove(a.tmpPath)
 		return fmt.Errorf("rename %s -> %s: %w", a.tmpPath, a.target, err)
 	}
 	a.committed = true
@@ -109,7 +109,7 @@ func (a *AtomicFile) Close() error {
 		return nil
 	}
 	_ = a.f.Close()
-	_ = os.Remove(filepath.Clean(a.tmpPath))
+	_ = os.Remove(a.tmpPath)
 	a.committed = true // prevent double-cleanup
 	return nil
 }
