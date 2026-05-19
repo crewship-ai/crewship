@@ -11,6 +11,148 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 (empty — next version's entries go here)
 
+## [0.1.0-beta.4] — 2026-05-19
+
+**Routines 2026, declarative manifests, security hardening.** Substantial
+beta covering observability (OTel spans, prompt-cache token plumbing),
+ADLC phase-7 signal (typed feedback API + thumbs UI), continuous online
+grading (sampler worker), per-routine guardrails, declarative workspace
+manifests with sidecar services, and security CI cleanup. v0.1.0-beta.3
+was skipped — this tag bundles everything from beta.2 → beta.4 on `main`.
+
+### Operator upgrade notes
+
+- **Backup `crewship.db` before upgrading.** Migration v97 recreates
+  the `eval_runs` table via the standard SQLite RENAME → CREATE →
+  `INSERT...SELECT` → DROP pattern to widen the `kind` CHECK constraint
+  for the new `online` sampling kind. The migration runs in a
+  transaction so a mid-migration crash atomically rolls back, but it
+  has not been benchmarked on a production-sized eval suite — schedule
+  the upgrade during a quiet window.
+- **`CREWSHIP_ALLOWED_ORIGINS`** must be set in production env config
+  for browser-driven POSTs (Next.js → daemon cross-port). `dev.sh` now
+  emits it automatically alongside other managed keys; systemd-driven
+  prod deploys must add it to their unit env file.
+- **Online eval sampler runs on every server boot** with a 60-second
+  tick. Routines without `eval.online.sample_rate > 0` are zero-cost
+  deterministic skips. Operators introducing `sample_rate: 1.0` on
+  high-throughput routines should size their grader budget; the sampler
+  enqueues at the routine's rate but the grader cost is per-eval.
+- **Shadow features available but require operator config:**
+  - **Prompt caching:** ledger + telemetry plumb provider-reported
+    `cached_input_tokens` once an `API_KEY`-typed Anthropic credential
+    is provisioned (Claude Code CLI tokens don't go through this path).
+  - **OTel routine spans:** `routine.run` / `routine.step` /
+    `agent.invoke` / `llm.call` spans emit when `OTEL_EXPORTER_OTLP_ENDPOINT`
+    is set; collector wire-up is operator's choice (Langfuse, Phoenix,
+    Datadog LLM Observability all consume the GenAI semconv format
+    natively).
+  - **Per-routine input-guard action policy:** DSL
+    `guardrails.input.prompt_injection.action: block | sanitize | log`
+    only fires for routines that opt in.
+
+### Added — Observability
+
+- **OpenTelemetry GenAI spans** wired across the hot path:
+  `routine.run`, `routine.step`, `agent.invoke`, `llm.call` with the
+  prescribed `gen_ai.*` + `crewship.*` attributes. New
+  `StartRoutineRunSpan` + `StartRoutineStepSpan` helpers
+  (`internal/telemetry/spans_routine.go`). Trace tree mirrors DSL
+  composition; `call_pipeline` nests as a child step. Panic recovery
+  pattern preserves the original crash stack across nested defers
+  via `telemetry.PanicWithStack` so post-mortem traces point at the
+  real explode site, not at the re-panic line. (#447)
+- **Prompt-cache token plumbing** through provider → ledger → OTel.
+  Anthropic's `cache_read_input_tokens` + `cache_creation_input_tokens`
+  and OpenAI's `prompt_tokens_details.cached_tokens` now surface on
+  `llm.Response`, flow into `paymaster.CallResponse.CachedInputTokens`,
+  land in `cost_ledger.cached_input_tokens` / `cache_creation_tokens`,
+  and stamp `gen_ai.usage.cached_input_tokens` on every LLM span.
+  Anthropic tools array gets a `cache_control: ephemeral` breakpoint
+  by default — the single highest-leverage cache hit for agent
+  workloads. (#447)
+
+### Added — Feedback (ADLC phase-7)
+
+- **Typed per-message feedback API** (`/api/v1/feedback`) with six
+  signals (helpful, not_helpful, inaccurate, unsafe, edit, regenerate)
+  bound to `trace_id` for eval-mining correlation. Migration v96
+  introduces `message_feedback`. POST is UPSERT-idempotent; DELETE is
+  idempotent (204 on missing row); GET is workspace + per-user scoped.
+  Body capped at 16 KiB via `MaxBytesReader` before JSON parse;
+  per-field caps at 4096 chars on `reason` and 256 chars on id fields. (#447)
+- **Frontend optimistic-update store** (`stores/feedback-store.ts`)
+  with per-(turn, signal) Promise-chained serialization so a fast
+  thumb-toggle can't race between POST and DELETE. State is namespaced
+  by `user.id`; switching accounts on the same browser clears the
+  previous user's votes. (#447)
+- **Trace_id WS propagation** — `internal/chatbridge/bridge.go` stamps
+  the active OTel trace id onto the `done` event metadata;
+  `hooks/use-chat.ts` lifts it onto `ChatTurn.metadata.trace_id`. The
+  feedback POST flows it through so every signal lands indexed against
+  the routine run that produced the message. (#450)
+
+### Added — Online eval sampler
+
+- **Continuous production grading** via `internal/quartermaster/online_sampler.go`.
+  Worker scans completed `pipeline_runs` every 60s, picks rows at the
+  routine's configured `eval.online.sample_rate`, and enqueues a
+  `kind='online'` eval row. Schema-layer idempotency via partial
+  `UNIQUE INDEX uq_eval_runs_online_pipeline_run`; (ended_at, id) tuple
+  cursor handles sub-millisecond pipeline_run completions without
+  orphaning siblings; doubling-skip backoff on entropy outages capped
+  at 10 ticks. Wired into `cmd/crewship` server start. (#447, #449)
+
+### Added — Guardrails
+
+- **Per-routine input-guard action policy**
+  (`guardrails.input.prompt_injection.action`) with `block` (default) /
+  `sanitize` / `log` modes. Sanitize uses offset-based replacement via
+  new `Finding.MatchEnd` field — earlier substring-based redaction
+  silently let through long jailbreak matches and synthetic unicode
+  findings like `"U+202E"`. (#447)
+- **`on_guardrail_triggered` hook dispatch** via context-attached
+  `GuardListener` callback. Lookout stays zero-dep on the hooks
+  package; the pipeline runner bridges them. Listener receives the
+  full findings slice. (#447)
+
+### Added — Tooling
+
+- **`crewship apply` / `crewship export`** for declarative workspace
+  manifests with sidecar service declarations (Redis, Postgres, MySQL,
+  MongoDB). Migration v95 adds `crews.services_json`. (#448)
+- **Playwright E2E specs:** `e2e/feedback.spec.ts` (8 contract tests)
+  and `e2e/feedback-ui.spec.ts` (browser-side fetch via real NextAuth
+  cookie + CSRF defense pin via spoofed Origin → 403). (#450)
+
+### Added — Installation
+
+- **Auto-generate secrets on first run.** `crewship start` writes
+  NEXTAUTH_SECRET + ENCRYPTION_KEY to
+  `~/.local/share/crewship/secrets.env` when missing. End users no
+  longer touch env files for the happy path. (#446)
+
+### Fixed
+
+- **Online sampler was dead code in PR #447** — `NewOnlineSampler`
+  had test coverage but no production call site. Wired into bootstrap. (#449)
+- **Sampler SQL queried non-existent `completed_at` column.** Real
+  column is `ended_at`. The test fixture matched the bug so unit
+  tests passed; real schema check on dev-VM smoke caught it. (#449)
+- **Code-scanning alerts.** All open CodeQL + Grype findings closed. (#445)
+- **Privacy leak in `GET /api/v1/feedback`** — earlier draft scoped
+  only by workspace membership; now scoped by `user_id` AND workspace. (#447)
+- **Sanitize bypass via mixed zero-width characters.** ScanInput
+  emitted a Finding only for the FIRST zero-width rune; subsequent
+  ZWNJ/ZWJ/BOM in the same payload survived sanitize. Now emits one
+  Finding per occurrence. (#447)
+- **OnlineSampler data race** on watermark cursor between concurrent
+  Start callers — `go test -race` reproduced. Added `sync.Mutex`;
+  `Start` now wrapped in `sync.Once`. (#447)
+- **Sampler panic-naked.** A panic in `runOnce` would kill the
+  daemon. Added deferred `recover()` in `tickWithBackoff` that logs
+  + lets the loop continue. (#447)
+
 ## [0.1.0-beta.2] — 2026-05-18
 
 **First public beta release.** APIs and data models may break across
