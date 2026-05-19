@@ -46,9 +46,16 @@
               "guides/manifests",
               "guides/devcontainers",
               "guides/credentials",
-              "guides/skills",
-              "guides/skills-authoring",
-              "guides/skills-format",
+              {
+                "group": "Skills",
+                "icon": "sparkles",
+                "expanded": false,
+                "pages": [
+                  "guides/skills",
+                  "guides/skills-authoring",
+                  "guides/skills-format"
+                ]
+              },
               "guides/orchestration",
               "guides/inbox",
               "guides/activity",
