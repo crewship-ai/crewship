@@ -67,7 +67,18 @@
               "guides/keeper",
               "guides/integrations",
               "guides/templates",
-              "guides/agent-memory",
+              {
+                "group": "Memory",
+                "icon": "brain",
+                "expanded": false,
+                "pages": [
+                  "guides/agent-memory",
+                  "guides/episodic-memory",
+                  "guides/consolidate",
+                  "guides/memory-observability",
+                  "guides/llm-middleware"
+                ]
+              },
               "guides/scheduling",
               "guides/files-and-output",
               "guides/backup",
@@ -79,13 +90,9 @@
               "guides/hooks",
               "guides/feedback",
               "guides/quartermaster",
-              "guides/episodic-memory",
               "guides/watch-roster",
-              "guides/consolidate",
-              "guides/memory-observability",
               "guides/telemetry",
               "guides/tracing",
-              "guides/llm-middleware",
               "guides/migrations",
               "guides/troubleshooting"
             ]
