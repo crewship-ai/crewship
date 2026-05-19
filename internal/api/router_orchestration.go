@@ -242,7 +242,7 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	// Typed feedback signal: thumbs / edit / regenerate bound to trace_id
 	// for the ADLC phase-7 continuous-learning loop. Sits beside reactions
 	// rather than replacing it — reactions are open-vocabulary social
-	// signal, feedback is structured eval signal. Migration v95 owns
+	// signal, feedback is structured eval signal. Migration v96 owns
 	// the table.
 	mfh := NewMessageFeedbackHandler(r.db, r.logger)
 	r.mux.Handle("POST /api/v1/feedback", authed(http.HandlerFunc(mfh.Create)))

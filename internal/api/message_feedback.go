@@ -31,13 +31,13 @@ type MessageFeedbackHandler struct {
 }
 
 // NewMessageFeedbackHandler constructs the handler. db must have the
-// v95 schema applied; older installations get a build-time mismatch via
+// v96 schema applied; older installations get a build-time mismatch via
 // the migrations table and a clearer runtime error than a missing column.
 func NewMessageFeedbackHandler(db *sql.DB, logger *slog.Logger) *MessageFeedbackHandler {
 	return &MessageFeedbackHandler{db: db, logger: logger}
 }
 
-// allowedFeedbackSignals mirrors the CHECK constraint in v95. Kept in Go
+// allowedFeedbackSignals mirrors the CHECK constraint in v96. Kept in Go
 // so the handler can reject the value before the DB does, giving a
 // readable 400 message instead of a SQLite constraint violation.
 var allowedFeedbackSignals = map[string]struct{}{

@@ -276,7 +276,7 @@ func TestOnlineSampler_NoGraderSkips(t *testing.T) {
 // pipeline_run_id collapse to one row.
 func TestOnlineSampler_DuplicateRunNoDoubleEnqueue(t *testing.T) {
 	db := openSamplerTestDB(t)
-	// Apply the same partial unique index the v96 migration creates.
+	// Apply the same partial unique index the v97 migration creates.
 	if _, err := db.Exec(`CREATE UNIQUE INDEX uq_eval_runs_online_pipeline_run
         ON eval_runs(pipeline_run_id) WHERE kind = 'online' AND pipeline_run_id IS NOT NULL`); err != nil {
 		t.Fatalf("apply unique index: %v", err)

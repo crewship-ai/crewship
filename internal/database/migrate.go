@@ -1287,16 +1287,23 @@ END;
 	// PR #395's add_assignment_queue took v93 first.)
 	// See migrate_consts_v94_credential_vault_types.go.
 	{version: 94, name: "add_credential_vault_types", sql: migrationAddCredentialVaultTypes},
+	// v95: stores sidecar service declarations (Redis/Postgres/etc.)
+	// alongside the crew's other provisioning config. See
+	// migrate_consts_v95_crew_services.go for the rationale.
+	{version: 95, name: "add_crew_services", sql: migrationAddCrewServices},
 	// Typed per-message feedback (thumbs/edit/regenerate/abandon) bound to
 	// trace_id for ADLC phase-7 continuous-learning signal. See
-	// migrate_consts_v95_message_feedback.go.
-	{version: 95, name: "add_message_feedback", sql: migrationAddMessageFeedback},
+	// migrate_consts_v96_message_feedback.go.
+	// (Renumbered from v95 to v96 on rebase because main's
+	// add_crew_services took v95 first.)
+	{version: 96, name: "add_message_feedback", sql: migrationAddMessageFeedback},
 	// Online eval sampler — widens eval_runs.kind to include 'online'
 	// and adds routine_slug + pipeline_run_id + trace_id + sample_rate
 	// so production traffic can be continuously graded. SQLite recreate
 	// pattern (CHECK constraints are immutable in place).
-	// See migrate_consts_v96_eval_runs_online.go.
-	{version: 96, name: "eval_runs_online", sql: migrationEvalRunsOnline},
+	// See migrate_consts_v97_eval_runs_online.go.
+	// (Renumbered from v96 to v97 on rebase for the same reason.)
+	{version: 97, name: "eval_runs_online", sql: migrationEvalRunsOnline},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

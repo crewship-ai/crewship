@@ -153,7 +153,7 @@ func (h *AssignmentHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	items := make([]assignmentListItem, 0, limit)
+	items := make([]assignmentListItem, 0, capacityHint(limit))
 	for rows.Next() {
 		var item assignmentListItem
 		if err := rows.Scan(

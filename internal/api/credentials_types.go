@@ -51,6 +51,47 @@ var validCredentialTypes = map[CredentialType]struct{}{
 	CredTypeGenericSecret: {},
 }
 
+// validateCredentialType checks only the closed type enum — extracted
+// so callers that don't have a payload to shape-check (manifest-pending
+// slot creation) can still gate on the type without running the full
+// per-type field validation.
+func validateCredentialType(t string) string {
+	if _, ok := validCredentialTypes[t]; !ok {
+		return "type must be one of: AI_CLI_TOKEN, API_KEY, CLI_TOKEN, SECRET, OAUTH2, USERPASS, SSH_KEY, CERTIFICATE, GENERIC_SECRET"
+	}
+	return ""
+}
+
+// pendingSentinel values are written to credentials.encrypted_value
+// (via encryption.Encrypt) when a credential row is created in the
+// PENDING state — either because the OAuth dance hasn't completed
+// or because a manifest declared the slot without supplying a value.
+// The status='ACTIVE' filter on every resolver query is the primary
+// guard; isPendingSentinel is a defence-in-depth check so a future
+// code path that decrypts a row outside the filtered queries still
+// drops the placeholder instead of injecting it as a real env var.
+//
+// The sentinels are intentionally unguessable byte sequences rather
+// than human-readable strings: a real credential whose plaintext
+// happens to be "pending_oauth" would otherwise be silently dropped
+// at the resolver, which would surface as "credential not
+// configured" with no obvious cause. The double-underscore-wrapped
+// upper-snake-case form is conventional for "this is a system
+// sentinel, not user data" and the embedded UUID-shaped suffix
+// makes accidental collisions infeasible.
+const (
+	pendingSentinelOAuth    = "__CREWSHIP_PENDING_OAUTH_4f2c8a91-3b6d-4e5a-9f8c-1d2e3f4a5b6c__"
+	pendingSentinelManifest = "__CREWSHIP_PENDING_MANIFEST_7e8d9a0b-1c2d-3e4f-5a6b-7c8d9e0f1a2b__"
+)
+
+// isPendingSentinel reports whether a decrypted credential value is
+// one of the well-known placeholders we use for PENDING rows. Code
+// that resolves credentials for env-var injection or token forwarding
+// should bail when this returns true.
+func isPendingSentinel(decrypted string) bool {
+	return decrypted == pendingSentinelOAuth || decrypted == pendingSentinelManifest
+}
+
 // validateCredentialPayload enforces per-type field requirements. It
 // runs after the generic "value required unless OAUTH2" gate in the
 // Create handler so this function can assume Value is populated for
@@ -60,8 +101,8 @@ var validCredentialTypes = map[CredentialType]struct{}{
 // Returns an empty string when the payload is valid, otherwise an
 // end-user-readable error message suitable for a 400 response body.
 func validateCredentialPayload(req *createCredentialRequest) string {
-	if _, ok := validCredentialTypes[req.Type]; !ok {
-		return "type must be one of: AI_CLI_TOKEN, API_KEY, CLI_TOKEN, SECRET, OAUTH2, USERPASS, SSH_KEY, CERTIFICATE, GENERIC_SECRET"
+	if msg := validateCredentialType(req.Type); msg != "" {
+		return msg
 	}
 
 	switch req.Type {

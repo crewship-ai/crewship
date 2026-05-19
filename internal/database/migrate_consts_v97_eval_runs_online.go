@@ -1,6 +1,6 @@
 package database
 
-// migrationEvalRunsOnline (v96) extends eval_runs to support the online
+// migrationEvalRunsOnline (v97) extends eval_runs to support the online
 // sampling kind. The sampler watches completed pipeline runs and grades
 // a configurable percentage of them through the existing rubric grader
 // so production traffic continuously feeds the ADLC phase-7 drift
@@ -23,14 +23,14 @@ package database
 // trace_id ties an eval row back to the OTel trace the sample came
 // from so an operator who clicks "why was this graded poorly?" in the
 // eval UI lands on the actual trace view. Indexed for the
-// /api/v1/feedback?trace_id query path which already exists from v95.
+// /api/v1/feedback?trace_id query path which already exists from v96.
 //
 // Backwards-compat invariant: every existing row keeps its kind and
 // every column value. The recreate is byte-equivalent for replay /
 // regression rows; only the CHECK relaxes and the four new columns
 // (which default NULL) are added.
 const migrationEvalRunsOnline = `
-ALTER TABLE eval_runs RENAME TO eval_runs_v95;
+ALTER TABLE eval_runs RENAME TO eval_runs_pre_v97;
 
 CREATE TABLE eval_runs (
     id TEXT PRIMARY KEY,
@@ -66,9 +66,9 @@ SELECT id, workspace_id, kind, mission_id, baseline_mission_id,
        candidate_mission_id, status, result, seed, signature,
        total_tokens, total_cost_usd, regressed, created_by,
        created_at, completed_at
-FROM eval_runs_v95;
+FROM eval_runs_pre_v97;
 
-DROP TABLE eval_runs_v95;
+DROP TABLE eval_runs_pre_v97;
 
 CREATE INDEX IF NOT EXISTS idx_eval_runs_ws_created ON eval_runs(workspace_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_eval_runs_kind ON eval_runs(kind, created_at DESC);

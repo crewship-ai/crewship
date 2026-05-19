@@ -18,6 +18,13 @@ type SkillHandler struct {
 	journal journal.Emitter
 	// SkipURLValidation disables SSRF checks on import URLs (testing only).
 	SkipURLValidation bool
+	// TestRoundTripper, when non-nil, is installed on every importer the
+	// handler builds. Tests pair this with SkipURLValidation=true to
+	// drive Import against an httptest.NewServer via
+	// httpsafe.RewriteRoundTripper — the production fetchURL path
+	// validates URLs unconditionally so loopback URLs would otherwise
+	// be refused. Production wiring never sets this field.
+	TestRoundTripper http.RoundTripper
 }
 
 // NewSkillHandler creates a SkillHandler with the given database and logger.
@@ -369,9 +376,15 @@ func (h *SkillHandler) Import(w http.ResponseWriter, r *http.Request) {
 
 	imp := skills.NewImporter(h.db, h.logger)
 	if h.SkipURLValidation {
-		// Flips both the validator AND the dial-time guard, so test
-		// fixtures using httptest.NewServer (loopback) keep working.
+		// Flips the entry-level validator AND the dial-time guard.
+		// fetchURL still validates the URL string unconditionally
+		// (CodeQL go/request-forgery requirement) — so test fixtures
+		// also need TestRoundTripper to rewrite loopback URLs to
+		// validation-passing synthetic hosts.
 		imp.SetSkipURLValidation(true)
+	}
+	if h.TestRoundTripper != nil {
+		imp.SetHTTPClientForTesting(&http.Client{Transport: h.TestRoundTripper})
 	}
 	result, err := imp.Import(r.Context(), wsID, user.ID, skills.ImportRequest{
 		URL:                req.URL,

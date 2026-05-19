@@ -1,6 +1,6 @@
 package database
 
-// migrationAddMessageFeedback (v95) introduces a dedicated table for
+// migrationAddMessageFeedback (v96) introduces a dedicated table for
 // per-message user feedback signals: thumbs up/down, "edit", "regenerate",
 // "abandon", and free-form "inaccurate"/"unsafe" markers.
 //

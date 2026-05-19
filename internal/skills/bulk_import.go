@@ -109,9 +109,21 @@ func (imp *Importer) BulkImport(ctx context.Context, req BulkImportRequest) (*Bu
 			"--single-branch",
 		}
 		if req.GitRef != "" {
+			// Ref name is operator-supplied. validateGitRef enforces the
+			// safe subset of git-check-ref-format(1) — refuses ".." /
+			// leading "-" / control chars so a crafted branch like
+			// "--upload-pack=…" can't reach git as another option flag.
+			if err := validateGitRef(req.GitRef); err != nil {
+				return nil, err
+			}
 			args = append(args, "--branch", req.GitRef)
 		}
-		args = append(args, req.GitURL, dir)
+		// "--" terminates option parsing. validateGitURL already
+		// guarantees the URL begins with "https://", but the explicit
+		// separator means a future relaxation of that check (or a
+		// future caller bypassing it) can't translate into option
+		// injection.
+		args = append(args, "--", req.GitURL, dir)
 		cloneCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
 		defer cancel()
 		cmd := exec.CommandContext(cloneCtx, "git", args...)
@@ -246,6 +258,42 @@ func (imp *Importer) BulkImport(ctx context.Context, req BulkImportRequest) (*Bu
 		return out, fmt.Errorf("walk skills: %w", walkErr)
 	}
 	return out, nil
+}
+
+// validateGitRef enforces a conservative subset of git-check-ref-format(1)
+// before the ref name reaches `git clone --branch`. Without this a
+// crafted ref like "--upload-pack=evil" or one containing a NUL would
+// either be interpreted by git as another option flag or terminate the
+// argv list early on some shells. Refs are user-supplied via the bulk
+// import request and untrusted by definition; the subset below covers
+// every legitimate branch/tag/sha we have ever seen in the wild.
+func validateGitRef(ref string) error {
+	if ref == "" {
+		return fmt.Errorf("git ref must not be empty")
+	}
+	if len(ref) > 255 {
+		return fmt.Errorf("git ref too long")
+	}
+	if strings.HasPrefix(ref, "-") {
+		return fmt.Errorf("git ref must not start with '-': %q", ref)
+	}
+	for _, r := range ref {
+		// allowed: letters, digits, '.', '_', '/', '-' (only after the
+		// first char). Anything else — control chars, NUL, spaces, '$',
+		// '`', backticks — is rejected.
+		switch {
+		case r >= 'a' && r <= 'z':
+		case r >= 'A' && r <= 'Z':
+		case r >= '0' && r <= '9':
+		case r == '.' || r == '_' || r == '/' || r == '-':
+		default:
+			return fmt.Errorf("git ref contains disallowed char %q in %q", r, ref)
+		}
+	}
+	if strings.Contains(ref, "..") {
+		return fmt.Errorf("git ref must not contain '..': %q", ref)
+	}
+	return nil
 }
 
 // validateGitURL rejects file:// and git@ shorthand URLs that would

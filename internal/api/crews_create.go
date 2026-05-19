@@ -29,6 +29,13 @@ type createCrewRequest struct {
 	RuntimeImage       *string  `json:"runtime_image"`
 	DevcontainerConfig *string  `json:"devcontainer_config"`
 	MiseConfig         *string  `json:"mise_config"`
+	// ServicesJSON is an opaque JSON document describing sidecar
+	// services (Redis, Postgres, MySQL, etc.) that the docker
+	// provider should run alongside the agent container. Validated
+	// by parseServicesJSON before storage; the docker provider
+	// re-parses at EnsureCrewRuntime time so a schema bump never
+	// silently corrupts a running crew.
+	ServicesJSON *string `json:"services_json"`
 }
 
 func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
@@ -168,6 +175,21 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// Services JSON is validated structurally (per-service shape +
+	// closed set of well-known keys) so a malformed body can't
+	// reach the docker provider. Size cap is 64 KB — generous for
+	// a couple dozen sidecars, tight enough that an attacker can't
+	// stuff arbitrary content past JSON parsing.
+	if req.ServicesJSON != nil && *req.ServicesJSON != "" {
+		if len(*req.ServicesJSON) > 64*1024 {
+			replyError(w, http.StatusBadRequest, "services_json exceeds 64KB limit")
+			return
+		}
+		if err := validateServicesJSON(*req.ServicesJSON); err != nil {
+			replyError(w, http.StatusBadRequest, "invalid services_json: "+err.Error())
+			return
+		}
+	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	crewID := generateCUID()
@@ -197,9 +219,9 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, err = h.db.ExecContext(r.Context(),
-		`INSERT INTO crews (id, workspace_id, name, slug, description, color, icon, container_memory_mb, container_cpus, container_ttl_hours, network_mode, allowed_domains, runtime_image, devcontainer_config, mise_config, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		crewID, workspaceID, req.Name, req.Slug, req.Description, req.Color, req.Icon, memoryMB, cpus, ttlHours, networkMode, allowedDomainsDB, req.RuntimeImage, req.DevcontainerConfig, req.MiseConfig, now, now)
+		`INSERT INTO crews (id, workspace_id, name, slug, description, color, icon, container_memory_mb, container_cpus, container_ttl_hours, network_mode, allowed_domains, runtime_image, devcontainer_config, mise_config, services_json, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		crewID, workspaceID, req.Name, req.Slug, req.Description, req.Color, req.Icon, memoryMB, cpus, ttlHours, networkMode, allowedDomainsDB, req.RuntimeImage, req.DevcontainerConfig, req.MiseConfig, req.ServicesJSON, now, now)
 	if err != nil {
 		h.logger.Error("insert crew", "error", err)
 		replyError(w, http.StatusInternalServerError, "Internal server error")
@@ -222,6 +244,7 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 		RuntimeImage:       req.RuntimeImage,
 		DevcontainerConfig: req.DevcontainerConfig,
 		MiseConfig:         req.MiseConfig,
+		ServicesJSON:       req.ServicesJSON,
 		CreatedAt:          now,
 		UpdatedAt:          now,
 	})

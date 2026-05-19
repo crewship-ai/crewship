@@ -268,7 +268,7 @@ func (h *MemoryVersionsListHandler) List(w http.ResponseWriter, r *http.Request)
 	}
 	defer rows.Close()
 
-	out := make([]memVersionRow, 0, limit)
+	out := make([]memVersionRow, 0, capacityHint(limit))
 	for rows.Next() {
 		var row memVersionRow
 		var parent sql.NullString

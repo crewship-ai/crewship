@@ -31,6 +31,7 @@
               "guides/admin-cli",
               "guides/first-crew",
               "guides/chat-sessions",
+              "guides/manifests",
               "guides/devcontainers",
               "guides/credentials",
               "guides/skills",
@@ -95,7 +96,8 @@
               "configuration/environment",
               "configuration/yaml-config",
               "configuration/providers",
-              "configuration/devcontainers"
+              "configuration/devcontainers",
+              "configuration/manifest-schema"
             ]
           }
         ]
@@ -111,7 +113,9 @@
               "cli/version",
               "cli/doctor",
               "cli/telemetry",
-              "cli/ai-workflows"
+              "cli/ai-workflows",
+              "cli/apply",
+              "cli/export"
             ]
           },
           {

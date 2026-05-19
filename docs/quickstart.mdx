@@ -63,9 +63,11 @@ That's it. The runtime is now serving on your hardware. No agents have been crea
     ```bash
     git clone https://github.com/crewship-ai/crewship.git
     cd crewship
-    cp .env.example .env
-    # Edit .env: set ENCRYPTION_KEY and NEXTAUTH_SECRET (both `openssl rand -hex 32`)
     docker compose -f docker/docker-compose.prod.yml up -d
+    # ENCRYPTION_KEY + NEXTAUTH_SECRET are auto-generated and persisted
+    # to the container's data volume on first boot. Set them via
+    # docker-compose `environment:` only if you want to manage secrets
+    # yourself (e.g. via Docker secrets or an external vault).
     ```
   </Tab>
   <Tab title="From source">

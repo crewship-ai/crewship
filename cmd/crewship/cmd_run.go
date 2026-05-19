@@ -299,7 +299,10 @@ func runNoStream(serverURL, wsToken, agentID, chatID, prompt string, quiet bool,
 		case "text":
 			fullText.WriteString(event.Content)
 		case "error":
-			streamErr = event.Content
+			// Sanitise on capture rather than on emit so every later
+			// use (stderr print, returned error string) is uniformly
+			// safe and we don't have to remember at each call site.
+			streamErr = sanitizeTerminal(event.Content)
 		case "done":
 			gotDone = true
 		}
@@ -310,16 +313,20 @@ func runNoStream(serverURL, wsToken, agentID, chatID, prompt string, quiet bool,
 
 	text := fullText.String()
 	if text != "" {
-		// Save raw (un-styled) text to file so the saved artefact is plain
-		// markdown — useful for piping into tools or committing. Failures
-		// here (disk full, permission denied) propagate as a non-zero exit
-		// so scripts can rely on the artefact being either complete or
-		// known-broken.
+		// Save un-styled, control-char-stripped text to file so the saved
+		// artefact is plain markdown — useful for piping into tools or
+		// committing. Sanitising before write means a malicious tool
+		// result that emitted ANSI/OSC sequences can't survive into the
+		// persisted artifact (and surprise the next `cat saved.md`).
+		// Failures here (disk full, permission denied) propagate as a
+		// non-zero exit so scripts can rely on the artefact being
+		// either complete or known-broken.
+		safeText := sanitizeTerminal(text)
 		if save != nil {
-			if _, err := save.WriteString(text); err != nil {
+			if _, err := save.WriteString(safeText); err != nil {
 				return fmt.Errorf("save write: %w", err)
 			}
-			if !strings.HasSuffix(text, "\n") {
+			if !strings.HasSuffix(safeText, "\n") {
 				if _, err := save.WriteString("\n"); err != nil {
 					return fmt.Errorf("save write: %w", err)
 				}
@@ -335,6 +342,15 @@ func runNoStream(serverURL, wsToken, agentID, chatID, prompt string, quiet bool,
 		toPrint := text
 		if md != nil {
 			toPrint = md.Render(text)
+		} else {
+			// Strip control characters (ANSI escapes, OSC sequences,
+			// cursor manipulation) from raw model output before
+			// printing — agents have no legitimate need to drive the
+			// terminal, and a malicious tool result could otherwise
+			// rewrite the user's scrollback. The markdown renderer
+			// already does its own sanitisation, so the strip only
+			// runs on the raw path.
+			toPrint = sanitizeTerminal(toPrint)
 		}
 		fmt.Print(toPrint)
 		if !strings.HasSuffix(toPrint, "\n") {
@@ -441,11 +457,14 @@ func streamEvents(ws *cli.WSClient, quiet bool, md *cli.MarkdownRenderer, save *
 	// non-zero exit at the cobra level.
 	var saveErr error
 	emitText := func(s string) {
-		// Always write raw text to the save file before any markdown
-		// styling — saved files should be plain markdown the user can
-		// re-process, not a screencast of ANSI codes.
+		// Sanitise once so both the save file and the raw-terminal
+		// branch get control-char-stripped bytes. The markdown
+		// renderer does its own escaping so it still gets the
+		// original `s`. Saved files are meant to be plain markdown
+		// the user can re-process — not a screencast of ANSI codes.
+		safe := sanitizeTerminal(s)
 		if save != nil && saveErr == nil {
-			if _, err := save.WriteString(s); err != nil {
+			if _, err := save.WriteString(safe); err != nil {
 				saveErr = fmt.Errorf("save write: %w", err)
 				fmt.Fprintf(os.Stderr, "%s[save]%s write failed: %v\n", cli.Yellow, cli.Reset, err)
 			}
@@ -453,7 +472,10 @@ func streamEvents(ws *cli.WSClient, quiet bool, md *cli.MarkdownRenderer, save *
 		if md != nil {
 			fmt.Print(md.Write(s))
 		} else {
-			fmt.Print(s)
+			// Raw text from the agent flows straight to the user's
+			// terminal — strip control chars so a tool result can't
+			// emit ANSI escapes / OSC links and rewrite the scrollback.
+			fmt.Print(safe)
 		}
 	}
 	// joinErrs combines a save-time error with a stream-time error so
@@ -495,33 +517,39 @@ func streamEvents(ws *cli.WSClient, quiet bool, md *cli.MarkdownRenderer, save *
 			// becomes part of the captured output; --quiet alone still
 			// suppresses the dim stderr peek. Untruncated text can be
 			// huge for some models — that's the user's choice.
+			// sanitizeTerminal strips any control chars the model
+			// emitted before they reach the user's terminal.
+			thinking := sanitizeTerminal(event.Content)
 			if showThinking {
-				fmt.Print(event.Content)
-				if !strings.HasSuffix(event.Content, "\n") {
+				fmt.Print(thinking)
+				if !strings.HasSuffix(thinking, "\n") {
 					fmt.Println()
 				}
 			} else if !quiet {
-				fmt.Fprintf(os.Stderr, "%s[thinking]%s %s\n", cli.Gray, cli.Reset, truncate(event.Content, 100))
+				fmt.Fprintf(os.Stderr, "%s[thinking]%s %s\n", cli.Gray, cli.Reset, truncate(thinking, 100))
 			}
 		case "tool_call":
 			if !quiet {
-				fmt.Fprintf(os.Stderr, "%s[tool]%s %s\n", cli.Cyan, cli.Reset, truncate(event.Content, 100))
+				fmt.Fprintf(os.Stderr, "%s[tool]%s %s\n", cli.Cyan, cli.Reset, truncate(sanitizeTerminal(event.Content), 100))
 			}
 		case "tool_result":
 			if !quiet && flagVerbose {
-				fmt.Fprintf(os.Stderr, "%s[result]%s %s\n", cli.Gray, cli.Reset, truncate(event.Content, 200))
+				fmt.Fprintf(os.Stderr, "%s[result]%s %s\n", cli.Gray, cli.Reset, truncate(sanitizeTerminal(event.Content), 200))
 			}
 		case "status":
 			if !quiet {
-				fmt.Fprintf(os.Stderr, "%s[status]%s %s\n", cli.Dim, cli.Reset, event.Content)
+				fmt.Fprintf(os.Stderr, "%s[status]%s %s\n", cli.Dim, cli.Reset, sanitizeTerminal(event.Content))
 			}
 		case "error":
 			flush()
 			// Don't commit save — defer Close in the caller discards the
 			// tempfile so an aborted run never overwrites a previous artefact.
-			fmt.Fprintf(os.Stderr, "%s[error]%s %s\n", cli.Red, cli.Reset, event.Content)
+			// Sanitise once and reuse so both the stderr line and the
+			// returned error string are uniformly free of control chars.
+			safeErr := sanitizeTerminal(event.Content)
+			fmt.Fprintf(os.Stderr, "%s[error]%s %s\n", cli.Red, cli.Reset, safeErr)
 			maybeNotifyRunComplete(startedAt, "", "FAILED")
-			return joinErrs(fmt.Errorf("agent error: %s", event.Content))
+			return joinErrs(fmt.Errorf("agent error: %s", safeErr))
 		case "done":
 			flush()
 			if save != nil && saveErr == nil {

@@ -38,6 +38,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/connectors"
 	"github.com/crewship-ai/crewship/internal/encryption"
+	"github.com/crewship-ai/crewship/internal/httpsafe"
 )
 
 // ConnectorHandler wires the embedded catalog into the HTTP layer.
@@ -126,9 +127,28 @@ type InstallResponse struct {
 
 // verifyHTTPClient handles the outbound HTTP request the Verify
 // endpoint issues against a provider. Bounded timeout keeps a slow
-// provider from holding a server worker indefinitely. Package-level
-// so tests using httptest.NewServer don't need to override anything.
-var verifyHTTPClient = &http.Client{Timeout: 10 * time.Second}
+// provider from holding a server worker indefinitely. SafeClient wires
+// in the SSRF dialer + redirect re-validation so a connector manifest
+// that resolves an attacker-controlled host into a private IP cannot
+// reach loopback / RFC1918 / cloud-metadata addresses.
+//
+// Tests swap only verifyHTTPClient.Transport via
+// SetVerifyHTTPClientForTesting; the URL validator inside
+// probeVerifyHTTP stays an inline httpsafe.ValidateURL call so CodeQL
+// go/request-forgery sees a single, unconditional sanitiser at the
+// network boundary.
+var verifyHTTPClient = httpsafe.SafeClient(10*time.Second, "http", "https")
+
+// SetVerifyHTTPClientForTesting swaps the package-level verify client
+// so unit tests can drive Verify against an httptest.NewServer via a
+// rewriteRoundTripper. Returns a restore func; defer it in test
+// bodies. Production code must not call this — there is no production
+// wiring path that does.
+func SetVerifyHTTPClientForTesting(c *http.Client) (restore func()) {
+	prev := verifyHTTPClient
+	verifyHTTPClient = c
+	return func() { verifyHTTPClient = prev }
+}
 
 // List handles GET /api/v1/connectors. Returns 200 with the catalog
 // as []ConnectorListItem in stable insertion order. Empty array (not
@@ -265,16 +285,28 @@ func (h *ConnectorHandler) Verify(w http.ResponseWriter, r *http.Request) {
 func (h *ConnectorHandler) probeVerifyHTTP(ctx context.Context, m *connectors.Manifest, fields map[string]string) (bool, string) {
 	v := m.Verify.HTTP
 	rctx := connectors.ResolveContext{Fields: fields}
-	url, err := m.Resolve(v.URL, rctx)
+	resolvedURL, err := m.Resolve(v.URL, rctx)
 	if err != nil {
 		return false, "verify URL resolution failed: " + err.Error()
+	}
+	// Manifest URLs are author-controlled and field substitutions are
+	// user-controlled — both untrusted from the verify endpoint's POV.
+	// httpsafe.ValidateURL handles the cheap rejects (scheme, literal
+	// RFC1918, userinfo); SafeTransport on verifyHTTPClient catches
+	// DNS aliases at dial time. Inlining the call (rather than going
+	// through a function pointer) keeps CodeQL go/request-forgery's
+	// taint analysis intact — it recognises ValidateURL as a sink
+	// sanitiser only when the call is statically visible at the
+	// request-building site.
+	if _, err := httpsafe.ValidateURL(resolvedURL, "http", "https"); err != nil {
+		return false, "verify URL rejected: " + err.Error()
 	}
 
 	method := v.Method
 	if method == "" {
 		method = http.MethodGet
 	}
-	req, err := http.NewRequestWithContext(ctx, method, url, nil)
+	req, err := http.NewRequestWithContext(ctx, method, resolvedURL, nil)
 	if err != nil {
 		return false, "verify request build failed: " + err.Error()
 	}

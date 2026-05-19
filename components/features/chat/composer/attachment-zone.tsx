@@ -61,8 +61,11 @@ async function uploadOne(
   form.append("file", file)
   // workspace_id is required by the wsCtx middleware — without it the
   // request 400s before reaching the handler. Same pattern as every
-  // other agent-scoped endpoint on the canvas.
-  const url = `/api/v1/agents/${agentId}/chats/${sessionId}/attachments?workspace_id=${encodeURIComponent(workspaceId)}`
+  // other agent-scoped endpoint on the canvas. encodeURIComponent on
+  // agentId / sessionId stops a malformed identifier from drifting into
+  // a different endpoint (e.g. an id with a slash in it) — CodeQL flags
+  // unescaped path interpolation as js/client-side-request-forgery.
+  const url = `/api/v1/agents/${encodeURIComponent(agentId)}/chats/${encodeURIComponent(sessionId)}/attachments?workspace_id=${encodeURIComponent(workspaceId)}`
   const res = await fetch(url, {
     method: "POST",
     credentials: "include",

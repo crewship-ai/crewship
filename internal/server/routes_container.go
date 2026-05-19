@@ -90,6 +90,17 @@ func (s *Server) handleContainerStop(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "container stop failed"})
 		return
 	}
+	// Stop sidecars on the same crew bridge. The provider's
+	// SidecarProvider implementation is optional; providers without
+	// it (Apple Containers today) silently skip. Sidecar stop is
+	// best-effort — a failure here doesn't break the crew-stop
+	// response, since the agent is already down and the only
+	// remaining work is releasing some MB of Postgres memory.
+	if sp, ok := s.container.(provider.SidecarProvider); ok && slug != "" {
+		if err := sp.StopCrewServices(r.Context(), slug); err != nil {
+			s.logger.Warn("sidecar stop failed", "crew_id", id, "error", err)
+		}
+	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{"crew_id": id, "status": "stopped"})
 }

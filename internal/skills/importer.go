@@ -69,9 +69,25 @@ func NewImporter(db *sql.DB, logger *slog.Logger) *Importer {
 // SetSkipURLValidation flips the test-only flag and rebuilds the http
 // client so the dial-time SSRF guard is also disabled. Production code
 // must never call this.
+//
+// NOTE: as of the CodeQL go/request-forgery hardening, fetchURL
+// validates the URL string unconditionally — SkipURLValidation only
+// affects the Import() entry, NormalizeSkillURL, and the dial-time
+// guard. Tests targeting loopback should use SetHTTPClientForTesting
+// with a rewriteRoundTripper so the production fetchURL path sees a
+// validation-passing URL.
 func (imp *Importer) SetSkipURLValidation(v bool) {
 	imp.SkipURLValidation = v
 	imp.rebuildClient()
+}
+
+// SetHTTPClientForTesting installs a test http.Client (typically with a
+// custom RoundTripper that rewrites loopback URLs) so the production
+// fetchURL path can drive against httptest servers without disabling
+// the inline httpsafe-equivalent ValidateImportURL guard. Production
+// code must not call this.
+func (imp *Importer) SetHTTPClientForTesting(c *http.Client) {
+	imp.client = c
 }
 
 // rebuildClient constructs the http.Client with or without the SSRF
@@ -163,8 +179,25 @@ func (imp *Importer) Import(ctx context.Context, _, _ string, req ImportRequest)
 	return imp.upsertEnriched(ctx, parsed, vendor, spdx, scan, source)
 }
 
-func (imp *Importer) fetchURL(ctx context.Context, url string) (string, error) {
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+func (imp *Importer) fetchURL(ctx context.Context, rawURL string) (string, error) {
+	// Re-validate at the network boundary. Import() already calls
+	// ValidateImportURL upstream, but fetchURL is also reachable from
+	// upsertEnriched + future code paths; the redundant check makes
+	// the safety property local to this function rather than a
+	// property of the caller chain. CodeQL's go/request-forgery rule
+	// reads it the same way — without this it cannot prove the URL
+	// is safe.
+	//
+	// Unconditional (no SkipURLValidation short-circuit): CodeQL's
+	// taint analysis flags the call as a sink unless the sanitiser is
+	// reachable on every path. Tests that need to drive against a
+	// loopback fake should set imp.SetSkipURLValidation(true) AND
+	// supply a custom http.Client.Transport that rewrites the URL —
+	// see oauth_test.go's rewriteRoundTripper for the pattern.
+	if err := ValidateImportURL(ctx, rawURL); err != nil {
+		return "", fmt.Errorf("validate fetch URL: %w", err)
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return "", fmt.Errorf("build request: %w", err)
 	}
@@ -176,7 +209,7 @@ func (imp *Importer) fetchURL(ctx context.Context, url string) (string, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("fetch url %q: status %d", url, resp.StatusCode)
+		return "", fmt.Errorf("fetch url %q: status %d", rawURL, resp.StatusCode)
 	}
 
 	const limit = int64(512 * 1024)

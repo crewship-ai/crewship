@@ -61,7 +61,7 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	result := make([]agentResponse, 0, limit)
+	result := make([]agentResponse, 0, capacityHint(limit))
 	for rows.Next() {
 		var a agentResponse
 		var memEnabled, schedEnabled int

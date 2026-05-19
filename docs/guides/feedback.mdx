@@ -12,7 +12,7 @@ Feedback is Crewship's structured signal layer: thumb-up, thumb-down, "edit", "r
 
 Reactions are social — 👍 on a message means "I liked this," same UX as Slack. The eval pipeline can't reliably mine that signal across emoji families (👍 vs 👍🏼 vs ☹️ vs 😀), and it can't capture the strongest training signal of all: a user editing the assistant's answer to what they actually wanted.
 
-The `message_feedback` table (migration v95) gives consumers a typed `signal` column with a CHECK constraint, a free-form `reason`, and a `trace_id` link back to the [OTel trace](/guides/tracing) of the run that produced the message. Eval datasets join on `trace_id` to recover the (prompt, original answer, preferred answer, ts) tuple.
+The `message_feedback` table (migration v96) gives consumers a typed `signal` column with a CHECK constraint, a free-form `reason`, and a `trace_id` link back to the [OTel trace](/guides/tracing) of the run that produced the message. Eval datasets join on `trace_id` to recover the (prompt, original answer, preferred answer, ts) tuple.
 
 ## Signal vocabulary
 
@@ -25,7 +25,7 @@ The `message_feedback` table (migration v95) gives consumers a typed `signal` co
 | `edit` | User replaced the assistant text with their own. **Highest-quality training signal** — not "this was bad" but "this is what I wanted." `reason` holds the replacement text. | Inline editor. |
 | `regenerate` | User asked for a different answer without editing. Weak negative signal. | Regenerate button. |
 
-Adding a new signal requires both a UI patch and a migration that widens the v95 CHECK clause — the handler validates the enum before any DB work so a renamed value fails fast with a readable 400 instead of a SQLite constraint violation.
+Adding a new signal requires both a UI patch and a migration that widens the v96 CHECK clause — the handler validates the enum before any DB work so a renamed value fails fast with a readable 400 instead of a SQLite constraint violation.
 
 ## Privacy contract
 

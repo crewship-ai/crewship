@@ -41,8 +41,53 @@ export interface ApiFetchInit extends Omit<RequestInit, "credentials"> {
   skipRefresh?: boolean
 }
 
+/** assertSameOrigin refuses cross-origin or non-/api/ URLs before the
+ *  fetch leaves the page. The auth cookies the apiFetch wrapper attaches
+ *  (`credentials: "include"`) would otherwise be sent to whatever host
+ *  the caller passed — exactly the surface CodeQL js/client-side-request-
+ *  forgery flags. The runtime guard means a caller that accidentally
+ *  pipes a server URL through `apiFetch(externalRecord.callback_url)`
+ *  fails loud at the call site instead of leaking the session cookie
+ *  to the attacker-supplied origin.
+ *
+ *  Allowed inputs:
+ *    - string starting with `/` (same-origin relative path)
+ *    - URL whose origin matches window.location.origin
+ *    - Request object whose URL matches the above
+ *
+ *  Server-side renders (window === undefined) skip the origin check
+ *  because there's no cookie context to protect. */
+function assertSameOrigin(input: RequestInfo | URL): string {
+  const reject = (): never => {
+    throw new Error("apiFetch: refusing cross-origin request — only same-origin /api/* URLs are allowed")
+  }
+  let urlStr: string
+  if (typeof input === "string") {
+    urlStr = input
+  } else if (input instanceof URL) {
+    urlStr = input.toString()
+  } else {
+    urlStr = input.url
+  }
+  if (typeof window === "undefined") return urlStr
+  // Same-origin relative paths are the common case — accept without
+  // parsing.
+  if (urlStr.startsWith("/") && !urlStr.startsWith("//") && !urlStr.startsWith("/\\")) {
+    return urlStr
+  }
+  let parsed: URL
+  try {
+    parsed = new URL(urlStr, window.location.origin)
+  } catch {
+    return reject()
+  }
+  if (parsed.origin !== window.location.origin) return reject()
+  return parsed.toString()
+}
+
 /** Centralised fetch with refresh-on-401-once + session-expired event. */
 export async function apiFetch(input: RequestInfo | URL, init?: ApiFetchInit): Promise<Response> {
+  assertSameOrigin(input)
   // credentials goes AFTER the spread so callers can't override —
   // {credentials: "include", ...init} would let init.credentials win
   // and silently disable cookie auth.

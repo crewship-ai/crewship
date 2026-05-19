@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/encryption"
+	"github.com/crewship-ai/crewship/internal/httpsafe"
 )
 
 // newOAuthHandler creates a handler with the test DB and encryption key.
@@ -593,13 +594,27 @@ func TestOAuth_StoreStateWithPKCE_RoundTrip(t *testing.T) {
 //   * the connection-error path with an unroutable address (RFC 5737 192.0.2.x)
 //   * discovery / DCR by swapping the package-level discoveryClient for the test
 
-// withTestDiscoveryClient swaps the package-level discoveryClient so it allows
-// loopback connections (default Transport instead of ssrfSafeTransport).
-func withTestDiscoveryClient(t *testing.T) {
+// withTestDiscoveryClient swaps discoveryClient to a client whose
+// transport reroutes every request to `srv` (a loopback httptest
+// server), letting tests drive discovery without weakening the
+// unconditional httpsafe.ValidateURL guard in fetchJSON /
+// dynamicClientRegister. Tests pass synthetic URLs like
+// "https://discovery.test/..." that pass validation; the
+// httpsafe.RewriteRoundTripper then sends the actual bytes to the
+// test server. See the type doc on RewriteRoundTripper for why this
+// indirection lives in the transport layer rather than as a URL bypass.
+func withTestDiscoveryClient(t *testing.T, srv *httptest.Server) {
 	t.Helper()
-	orig := discoveryClient
-	discoveryClient = &http.Client{Timeout: 5 * time.Second}
-	t.Cleanup(func() { discoveryClient = orig })
+	target, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatalf("parse test server URL: %v", err)
+	}
+	origClient := discoveryClient
+	discoveryClient = &http.Client{
+		Timeout:   5 * time.Second,
+		Transport: &httpsafe.RewriteRoundTripper{Target: target},
+	}
+	t.Cleanup(func() { discoveryClient = origClient })
 }
 
 func TestExchangeOAuthCode_HTTPError(t *testing.T) {
@@ -767,7 +782,6 @@ func TestOAuth_SetHub(t *testing.T) {
 // ---- Discovery (oauth_discovery.go) ----
 
 func TestDiscoverOAuthFromMCPURL_AuthServerEndpoint(t *testing.T) {
-	withTestDiscoveryClient(t)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/.well-known/oauth-authorization-server", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -782,8 +796,9 @@ func TestDiscoverOAuthFromMCPURL_AuthServerEndpoint(t *testing.T) {
 	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
+	withTestDiscoveryClient(t, srv)
 
-	got, err := discoverOAuthFromMCPURL(context.Background(), srv.URL+"/some/mcp")
+	got, err := discoverOAuthFromMCPURL(context.Background(), "https://discovery.test/some/mcp")
 	if err != nil {
 		t.Fatalf("discover: %v", err)
 	}
@@ -802,39 +817,39 @@ func TestDiscoverOAuthFromMCPURL_AuthServerEndpoint(t *testing.T) {
 }
 
 func TestDiscoverOAuthFromMCPURL_MissingEndpoints(t *testing.T) {
-	withTestDiscoveryClient(t)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, `{"issuer":"http://x"}`)
 	}))
 	defer srv.Close()
-	_, err := discoverOAuthFromMCPURL(context.Background(), srv.URL)
+	withTestDiscoveryClient(t, srv)
+	_, err := discoverOAuthFromMCPURL(context.Background(), "https://discovery.test/")
 	if err == nil {
 		t.Error("expected error for missing endpoints")
 	}
 }
 
 func TestDiscoverOAuthFromMCPURL_NotFound(t *testing.T) {
-	withTestDiscoveryClient(t)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer srv.Close()
-	_, err := discoverOAuthFromMCPURL(context.Background(), srv.URL)
+	withTestDiscoveryClient(t, srv)
+	_, err := discoverOAuthFromMCPURL(context.Background(), "https://discovery.test/")
 	if err == nil {
 		t.Error("expected discovery to fail")
 	}
 }
 
 func TestDynamicClientRegister_Success(t *testing.T) {
-	withTestDiscoveryClient(t)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		fmt.Fprint(w, `{"client_id":"dyn-id","client_secret":"dyn-sec"}`)
 	}))
 	defer srv.Close()
-	got, err := dynamicClientRegister(context.Background(), srv.URL, "https://app/cb")
+	withTestDiscoveryClient(t, srv)
+	got, err := dynamicClientRegister(context.Background(), "https://dcr.test/register", "https://app/cb")
 	if err != nil {
 		t.Fatalf("dcr: %v", err)
 	}
@@ -844,25 +859,25 @@ func TestDynamicClientRegister_Success(t *testing.T) {
 }
 
 func TestDynamicClientRegister_HTTPError(t *testing.T) {
-	withTestDiscoveryClient(t)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	defer srv.Close()
-	_, err := dynamicClientRegister(context.Background(), srv.URL, "https://app/cb")
+	withTestDiscoveryClient(t, srv)
+	_, err := dynamicClientRegister(context.Background(), "https://dcr.test/register", "https://app/cb")
 	if err == nil {
 		t.Error("expected error")
 	}
 }
 
 func TestDynamicClientRegister_EmptyClientID(t *testing.T) {
-	withTestDiscoveryClient(t)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, `{}`)
 	}))
 	defer srv.Close()
-	_, err := dynamicClientRegister(context.Background(), srv.URL, "x")
+	withTestDiscoveryClient(t, srv)
+	_, err := dynamicClientRegister(context.Background(), "https://dcr.test/register", "x")
 	if err == nil {
 		t.Error("expected error for empty client_id")
 	}
