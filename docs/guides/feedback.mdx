@@ -51,7 +51,7 @@ CREATE INDEX idx_feedback_trace ON message_feedback(trace_id) WHERE trace_id IS 
 That powers the "show me every signal for this routine run" eval-mining query: collector trace ID → `message_feedback.trace_id` → all signals filed against that conversation.
 
 <Note>
-  **Current state (PR #447):** the schema, API, frontend store, and `ChatTurn.metadata.trace_id` interface are wired and consume the field when present. The orchestrator → WebSocket → `ChatTurn` propagation is **not yet shipped** — feedback rows for `assistant` turns produced after this PR will land with `trace_id = NULL` until the follow-up lands. The partial index `WHERE trace_id IS NOT NULL` keeps the lookup path cheap regardless. Direct API callers (CLI, eval widgets) that already have the trace id in hand can pass it on POST today.
+  **End-to-end as of PR #450.** The orchestrator → WebSocket → `ChatTurn` propagation is wired: `internal/chatbridge/bridge.go` calls `telemetry.ResolveTrace(ctx)` and stamps `trace_id` onto the `"done"` event metadata; `hooks/use-chat.ts` `handleDoneEvent` lifts it onto `ChatTurn.metadata.trace_id`; the feedback POST consumes it. New feedback rows land with `trace_id` populated whenever an OTel provider is configured. When no telemetry provider is configured (`SpanContextFromContext` returns invalid), the field is omitted — rows still land, just without the trace anchor — and the partial index `WHERE trace_id IS NOT NULL` keeps the lookup path cheap either way.
 </Note>
 
 ## UI flow
