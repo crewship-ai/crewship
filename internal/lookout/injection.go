@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"regexp"
-	"strings"
 	"time"
 	"unicode/utf8"
 )
@@ -94,27 +93,38 @@ func ScanInput(text string) ScanResult {
 		}
 	}
 
-	zwCount, rtlCount := 0, 0
+	// Emit one Finding per zero-width occurrence so SANITIZE can redact
+	// every single one, not just the first. An earlier version emitted
+	// a single Finding for the first ZW rune which left every subsequent
+	// ZWSP/ZWNJ/ZWJ/BOM in the source text untouched after sanitize —
+	// an adversary could chain ZWSP + ZWJ and slip the ZWJ past the
+	// homoglyph-joining defense. We keep the severity at "high" for the
+	// first occurrence (drives the block verdict) and "low" for the
+	// rest (so the block decision in soft modes isn't influenced by
+	// rune count, but sanitize still walks every span). Block-mode
+	// callers don't care about the per-rune findings because they fail
+	// closed regardless.
+	zwSeen := false
+	rtlSpans := make([]int, 0, 4) // start byte offsets of RTL override runes
+	rtlCount := 0
 	for i, r := range text {
 		switch r {
 		case zwsp, zwnj, zwj, bom:
-			zwCount++
-			if zwCount == 1 {
-				res.Findings = append(res.Findings, Finding{
-					Kind:     KindZeroWidth,
-					Severity: SeverityHigh,
-					Detail:   fmt.Sprintf("zero-width unicode codepoint U+%04X present", r),
-					Matched:  fmt.Sprintf("U+%04X", r),
-					Position: i,
-					// MatchEnd covers the single rune at `i`; size depends
-					// on which zero-width codepoint we matched. utf8.RuneLen
-					// would also work but the four codepoints we accept are
-					// all 3-byte sequences in UTF-8, so a constant is
-					// equivalent and avoids the import.
-					MatchEnd: i + utf8.RuneLen(r),
-				})
+			sev := SeverityLow
+			if !zwSeen {
+				sev = SeverityHigh
+				zwSeen = true
 			}
+			res.Findings = append(res.Findings, Finding{
+				Kind:     KindZeroWidth,
+				Severity: sev,
+				Detail:   fmt.Sprintf("zero-width unicode codepoint U+%04X present", r),
+				Matched:  fmt.Sprintf("U+%04X", r),
+				Position: i,
+				MatchEnd: i + utf8.RuneLen(r),
+			})
 		case rtlOverr:
+			rtlSpans = append(rtlSpans, i)
 			rtlCount++
 		}
 	}
@@ -123,19 +133,24 @@ func ScanInput(text string) ScanResult {
 		if rtlCount >= rtlOverrideThreshold && len(text) < 1024 {
 			sev = SeverityHigh
 		}
-		pos := strings.IndexRune(text, rtlOverr)
-		end := pos
-		if pos >= 0 {
-			end = pos + utf8.RuneLen(rtlOverr)
+		// Emit one Finding per RTL override occurrence so sanitize
+		// covers every span. Same reasoning as the zero-width loop —
+		// a single Finding for the FIRST occurrence let later RTL
+		// overrides survive sanitize.
+		for idx, pos := range rtlSpans {
+			perSev := SeverityLow
+			if idx == 0 {
+				perSev = sev
+			}
+			res.Findings = append(res.Findings, Finding{
+				Kind:     KindRTLOverride,
+				Severity: perSev,
+				Detail:   fmt.Sprintf("right-to-left override present (%d occurrences)", rtlCount),
+				Matched:  "U+202E",
+				Position: pos,
+				MatchEnd: pos + utf8.RuneLen(rtlOverr),
+			})
 		}
-		res.Findings = append(res.Findings, Finding{
-			Kind:     KindRTLOverride,
-			Severity: sev,
-			Detail:   fmt.Sprintf("right-to-left override present (%d occurrences)", rtlCount),
-			Matched:  "U+202E",
-			Position: pos,
-			MatchEnd: end,
-		})
 	}
 
 	for _, f := range res.Findings {

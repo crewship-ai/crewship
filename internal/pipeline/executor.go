@@ -444,6 +444,16 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (result *
 		runSpanCtx, runSpan := telemetry.StartRoutineRunSpan(ctx, pipelineSlug, runID, pipelineID)
 		ctx = runSpanCtx
 		defer func() {
+			// On panic the named `err` stays nil and the span would
+			// close as OK — operators reading the trace would never
+			// see the crash. Stamp the recovered value as an error
+			// before re-panicking so the runtime's normal unwind
+			// still happens.
+			if r := recover(); r != nil {
+				telemetry.RecordError(runSpan, fmt.Errorf("panic: %v", r))
+				runSpan.End()
+				panic(r)
+			}
 			telemetry.RecordError(runSpan, err)
 			runSpan.End()
 		}()
@@ -690,6 +700,14 @@ func (e *Executor) runStep(
 	// this dispatch level.
 	ctx, span := telemetry.StartRoutineStepSpan(ctx, step.ID, string(step.Type), 0)
 	defer func() {
+		// Same panic-safety pattern as runDSL: a panicking step must
+		// stamp the routine.step span as errored before unwinding so
+		// the trace view doesn't silently report "step ran clean."
+		if r := recover(); r != nil {
+			telemetry.RecordError(span, fmt.Errorf("panic: %v", r))
+			span.End()
+			panic(r)
+		}
 		telemetry.RecordError(span, err)
 		span.End()
 	}()

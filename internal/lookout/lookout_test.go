@@ -428,6 +428,71 @@ func TestInputGuard_ActionLog(t *testing.T) {
 	}
 }
 
+// TestInputGuard_ActionSanitize_MultiUnicodeBypass is a regression test
+// for a SECOND security bug shipped while fixing the first: an earlier
+// cut of the scanner emitted a single zero-width Finding when the
+// counter hit 1 and stopped — so a payload containing ZWSP + ZWJ + BOM
+// in the same string had only the FIRST rune sanitized. An attacker
+// could pad with one ZWSP up front, then carry their actual ZWJ
+// homoglyph-joining attack past the defense unscathed.
+//
+// This test mixes three distinct zero-width characters across the
+// payload and asserts that NONE of them survive sanitize.
+func TestInputGuard_ActionSanitize_MultiUnicodeBypass(t *testing.T) {
+	emitter := &recordingEmitter{}
+	guard := InputGuard(emitter)
+	ctx := WithScope(context.Background(), Scope{WorkspaceID: "ws_1"})
+	ctx = WithAction(ctx, GuardActionSanitize)
+
+	// Build the payload with explicit escapes so the source file
+	// stays ASCII-clean. Go refuses to compile a file containing a
+	// literal U+FEFF byte-order mark in a string literal, so we use
+	// \u escapes for every zero-width codepoint.
+	const zwsp = "\u200B"
+	const zwj = "\u200D"
+	const bom = "\uFEFF"
+	in := "hello" + zwsp + "world" + zwj + "foo" + bom + "bar"
+
+	out, err := guard(ctx, in)
+	if err != nil {
+		t.Fatalf("sanitize must not error, got %v", err)
+	}
+	if strings.Contains(out, zwsp) {
+		t.Errorf("ZWSP (U+200B) survived sanitize: %q", out)
+	}
+	if strings.Contains(out, zwj) {
+		t.Errorf("ZWJ (U+200D) survived sanitize: %q", out)
+	}
+	if strings.Contains(out, bom) {
+		t.Errorf("BOM (U+FEFF) survived sanitize: %q", out)
+	}
+}
+
+// TestInputGuard_ActionSanitize_MultiRTLBypass mirrors the multi-ZW
+// bypass test for the RTL override character. Earlier the scanner
+// emitted a single Finding for the rtlCount > 0 condition, so even
+// when rtlCount was 5, only the FIRST RTL override got sanitized —
+// the remaining 4 padded out the spoofing payload intact.
+func TestInputGuard_ActionSanitize_MultiRTLBypass(t *testing.T) {
+	emitter := &recordingEmitter{}
+	guard := InputGuard(emitter)
+	ctx := WithScope(context.Background(), Scope{WorkspaceID: "ws_1"})
+	ctx = WithAction(ctx, GuardActionSanitize)
+
+	// Multiple RTL overrides — classic filename-spoofing pattern.
+	const rtl = "\u202E"
+	in := "name" + rtl + "gpj.exe other" + rtl + "gpj.bat"
+
+	out, err := guard(ctx, in)
+	if err != nil {
+		t.Fatalf("sanitize must not error, got %v", err)
+	}
+	if strings.Count(out, rtl) > 0 {
+		t.Errorf("RTL override survived sanitize: %q (count=%d)",
+			out, strings.Count(out, rtl))
+	}
+}
+
 // TestInputGuard_ActionSanitize_UnicodeFinding is the regression test
 // for a real security bug shipped in the first cut of this feature:
 // the old sanitize path did strings.ReplaceAll(text, f.Matched,

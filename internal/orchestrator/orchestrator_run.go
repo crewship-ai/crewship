@@ -46,8 +46,21 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	// telemetry. Added FIRST so its End() runs LAST in LIFO order —
 	// after the post_agent_stop hook and refreshActivity defers below,
 	// so those operations stay inside the trace.
+	//
+	// Panic recovery is part of the same defer: on panic the named err
+	// stays nil so RecordError would close the span with default-OK
+	// status, hiding the crash from anyone reading the trace tree.
+	// We synthesize an error from recover(), stamp the span, then
+	// re-panic so the runtime's panic machinery still surfaces the
+	// crash to the caller — we only borrow the goroutine for one
+	// extra observation frame before letting it unwind.
 	ctx, span := telemetry.StartAgentSpan(ctx, req.AgentID, req.AgentRole, req.CrewID, req.MissionID)
 	defer func() {
+		if r := recover(); r != nil {
+			telemetry.RecordError(span, fmt.Errorf("panic: %v", r))
+			span.End()
+			panic(r)
+		}
 		telemetry.RecordError(span, err)
 		span.End()
 	}()

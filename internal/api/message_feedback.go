@@ -325,6 +325,16 @@ func (h *MessageFeedbackHandler) Delete(w http.ResponseWriter, r *http.Request) 
 		replyError(w, http.StatusBadRequest, "message_id and signal required")
 		return
 	}
+	// Cap id-shaped query params at the same ceiling as the POST body's
+	// equivalent fields. Without this, a workspace member could DoS-amplify
+	// by spamming DELETE with a 6-8 KB message_id (URL limit) — each call
+	// would drive an indexed lookup against an oversized key. The POST
+	// path already enforces this via maxFeedbackIDChars; DELETE + List
+	// inherited the gap.
+	if len(messageID) > maxFeedbackIDChars {
+		replyError(w, http.StatusBadRequest, "message_id exceeds maximum length")
+		return
+	}
 	if _, ok := allowedFeedbackSignals[signal]; !ok {
 		replyError(w, http.StatusBadRequest, "unknown signal")
 		return
@@ -365,6 +375,13 @@ func (h *MessageFeedbackHandler) List(w http.ResponseWriter, r *http.Request) {
 	traceID := strings.TrimSpace(r.URL.Query().Get("trace_id"))
 	if messageID == "" && traceID == "" {
 		replyError(w, http.StatusBadRequest, "message_id or trace_id required")
+		return
+	}
+	// Same DoS-amplification protection as POST + DELETE: cap both
+	// id-shaped query params at maxFeedbackIDChars before they reach
+	// the partial-index lookup.
+	if len(messageID) > maxFeedbackIDChars || len(traceID) > maxFeedbackIDChars {
+		replyError(w, http.StatusBadRequest, "id field exceeds maximum length")
 		return
 	}
 

@@ -75,15 +75,23 @@ function inflightKey(userId: string, turnId: string, signal: FeedbackSignal): st
 /** chain registers `op` after any prior promise for the same key, then
  *  installs the new tail on the map. On resolution it cleans up only
  *  when it was the LAST scheduled op so the map doesn't grow without
- *  bound but doesn't accidentally drop a still-pending follow-up. */
+ *  bound but doesn't accidentally drop a still-pending follow-up.
+ *
+ *  Implementation note: we attach the cleanup via the SAME `.then`
+ *  call we return so there's no orphaned promise produced by a
+ *  separate `.finally`. The cleanup ignores its input (the resolved
+ *  value of `op`) and never throws, so the inner promise carries no
+ *  rejection that would land as an unhandled-promise warning in
+ *  Node/Vitest. */
 function chain(key: string, op: () => Promise<void>): Promise<void> {
   const prev = inflight.get(key) ?? Promise.resolve()
-  const next = prev.then(op, op)
-  inflight.set(key, next)
-  next.finally(() => {
-    if (inflight.get(key) === next) inflight.delete(key)
-  })
-  return next
+  let self: Promise<void>
+  const cleanup = () => {
+    if (inflight.get(key) === self) inflight.delete(key)
+  }
+  self = prev.then(op, op).then(cleanup, cleanup)
+  inflight.set(key, self)
+  return self
 }
 
 export const useFeedbackStore = create<FeedbackState>()(
@@ -207,11 +215,18 @@ export const useFeedbackStore = create<FeedbackState>()(
     {
       name: "crewship.message_feedback",
       storage: createJSONStorage(() => localStorage),
-      // Persist userId so the on-hydrate guard (in the component that
-      // calls setUser) has something to compare against. byTurn IS
-      // persisted but only consumed when setUser confirms the bound
-      // user matches.
-      partialize: (state) => ({ userId: state.userId, byTurn: state.byTurn }),
+      // Persist ONLY userId — not byTurn. The previous version
+      // persisted both, which meant a sign-out followed by sign-in
+      // as another account on the same browser would render the
+      // previous user's votes for one frame before the bound
+      // useEffect could fire setUser and clear them. Dropping byTurn
+      // from persistence closes that window entirely: each tab/session
+      // starts with an empty optimistic map and rebuilds it as the
+      // user interacts. The trade-off is losing the cross-refresh
+      // optimistic state — acceptable because the server is the
+      // source of truth (a future enhancement could hydrate byTurn
+      // via GET /api/v1/feedback?message_id=… per visible turn).
+      partialize: (state) => ({ userId: state.userId }),
     },
   ),
 )

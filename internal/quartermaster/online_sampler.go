@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/journal"
@@ -54,6 +55,17 @@ type OnlineSampler struct {
 	// already implements this; tests pass a fake.
 	dslResolver DSLResolver
 
+	// mu protects watermark + watermarkID + backoffSkips. The sampler
+	// is documented as a singleton (Start should run exactly once per
+	// process), but operators occasionally wire it twice by accident
+	// — once in the main bootstrap and once in a debug admin path —
+	// and `go test -race` catches the unsynchronized writes from
+	// concurrent runOnce calls immediately. The mutex is cheap (we
+	// hold it only around the bookkeeping reads/writes, not around
+	// SQL or DSL resolver calls) and turns "two callers corrupt the
+	// cursor" into "two callers serialize."
+	mu sync.Mutex
+
 	// watermark + watermarkID together form the high-water mark of
 	// successfully-handled rows; the next tick scans rows whose
 	// (completed_at, id) tuple is strictly greater than this pair.
@@ -68,7 +80,18 @@ type OnlineSampler struct {
 	// kind='online' makes any re-handled row collapse to a no-op.
 	watermark   time.Time
 	watermarkID string
+
+	// backoffSkips counts how many upcoming ticks to skip due to a
+	// persistent entropy outage. Set by runOnce on cryptoSample()
+	// failure, decremented by Start on each tick. Caps at
+	// maxBackoffSkips so the sampler always comes back eventually.
+	backoffSkips int
 }
+
+// maxBackoffSkips caps the entropy-outage exponential backoff so a
+// long outage still results in periodic retry attempts (and journal
+// alerts) instead of going silent forever.
+const maxBackoffSkips = 10
 
 // DSLResolver returns the active DSL for a pipeline by id. Implemented
 // by pipeline.Store in production; a tiny fake suffices for tests.
@@ -119,20 +142,46 @@ func NewOnlineSampler(cfg SamplerConfig) (*OnlineSampler, error) {
 // Errors during a tick are logged but never abort the loop — a
 // flaky DB connection shouldn't kill continuous grading until the
 // process is restarted.
+//
+// Start MUST be called exactly once per OnlineSampler instance.
+// Two concurrent Start goroutines on the same instance will race
+// on s.watermark / s.watermarkID; the internal mutex serializes
+// them to avoid corruption, but the resulting behaviour is two
+// tickers fighting for the same cursor and is operationally
+// pointless. The bootstrap call sites wire this once at server
+// init via cmd/crewship/main.go.
 func (s *OnlineSampler) Start(ctx context.Context) {
 	t := time.NewTicker(s.interval)
 	defer t.Stop()
 	// Run one tick immediately so a startup picks up backlog without
 	// waiting the full interval. Subsequent ticks come from the ticker.
-	s.runOnce(ctx)
+	s.tickWithBackoff(ctx)
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			s.runOnce(ctx)
+			s.tickWithBackoff(ctx)
 		}
 	}
+}
+
+// tickWithBackoff consults the backoff counter (set by runOnce on
+// persistent entropy outage) before deciding whether to actually call
+// runOnce this round. Decrementing in Start rather than runOnce keeps
+// the locked critical section narrow.
+func (s *OnlineSampler) tickWithBackoff(ctx context.Context) {
+	s.mu.Lock()
+	skip := s.backoffSkips
+	if skip > 0 {
+		s.backoffSkips--
+	}
+	s.mu.Unlock()
+	if skip > 0 {
+		s.logger.Debug("online sampler tick skipped due to entropy backoff", "skips_remaining", skip-1)
+		return
+	}
+	s.runOnce(ctx)
 }
 
 // scannedRun is the candidate row carried from the SELECT to the
@@ -166,7 +215,18 @@ const scanPageSize = 500
 // failures (DSL resolver outage, INSERT error other than UNIQUE
 // conflict) leave the watermark short of those rows so the next tick
 // retries them.
+//
+// The whole body runs under s.mu so the watermark + watermarkID
+// reads/writes are race-free even if Start is wired twice. We hold
+// the lock across SQL too — that's intentional: paging through a
+// large backlog mid-tick is rare and we'd rather serialize than risk
+// two callers leapfrogging each other's watermark advances. The lock
+// is per-instance; multiple OnlineSamplers (rare but possible in
+// multi-process tests) don't contend.
 func (s *OnlineSampler) runOnce(ctx context.Context) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	scanEnd := time.Now().UTC()
 	scanEndStr := scanEnd.Format(time.RFC3339Nano)
 
@@ -331,8 +391,30 @@ LIMIT ?
 	}
 
 	if entropyOutages > 0 {
+		// Doubling-skip backoff per consecutive outage: each tick that
+		// hits the entropy floor schedules 2× as many tick-skips as
+		// the last (1 → 2 → 4 → 8 → …), capped at maxBackoffSkips so
+		// the sampler always comes back periodically and the operator
+		// keeps seeing the warn log. Without backoff, a persistent
+		// /dev/urandom outage at a fixed 60 s tick rate would spam
+		// the journal at 60 Hz forever AND keep refusing to advance,
+		// growing the backlog unbounded.
+		current := s.backoffSkips
+		next := current * 2
+		if next < 1 {
+			next = 1
+		}
+		if next > maxBackoffSkips {
+			next = maxBackoffSkips
+		}
+		s.backoffSkips = next
 		s.logger.Warn("online sampler hit entropy outage; deferred rows for next tick",
-			"deferred", entropyOutages)
+			"deferred", entropyOutages,
+			"backoff_skips_set", next)
+	} else if s.backoffSkips > 0 {
+		// Successful tick clears the backoff entirely so steady-state
+		// healthy operation doesn't carry residual delay.
+		s.backoffSkips = 0
 	}
 	if totalScanned > 0 {
 		s.logger.Debug("online sampler tick",
