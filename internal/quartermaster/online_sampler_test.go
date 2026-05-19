@@ -309,6 +309,53 @@ func TestOnlineSampler_DuplicateRunNoDoubleEnqueue(t *testing.T) {
 	}
 }
 
+// TestOnlineSampler_SameTimestampSiblings is the regression test for a
+// pagination bug: when two pipeline_runs share an EXACT completed_at
+// (parallel fan-out steps finishing in the same scheduler tick is the
+// realistic case), a timestamp-only cursor advanced past one of them
+// orphaned the others forever. The (completed_at, id) tuple cursor +
+// `WHERE (ts > ? OR (ts = ? AND id > ?))` predicate + matching ORDER
+// BY clauses fix it. This test wires three siblings at the same
+// nanosecond and asserts all three are enqueued.
+func TestOnlineSampler_SameTimestampSiblings(t *testing.T) {
+	db := openSamplerTestDB(t)
+	if _, err := db.Exec(`CREATE UNIQUE INDEX uq_eval_runs_online_pipeline_run
+        ON eval_runs(pipeline_run_id) WHERE kind = 'online' AND pipeline_run_id IS NOT NULL`); err != nil {
+		t.Fatalf("apply unique index: %v", err)
+	}
+	resolver := &fakeDSLResolver{byID: map[string]*pipeline.DSL{
+		"pl-1": {Eval: &pipeline.EvalConfig{Online: &pipeline.OnlineEvalConfig{
+			SampleRate:      1.0,
+			GraderAgentSlug: "qa-grader",
+		}}},
+	}}
+	s, errCtor := NewOnlineSampler(SamplerConfig{DB: db, DSLResolver: resolver, Interval: time.Hour})
+	if errCtor != nil {
+		t.Fatalf("ctor: %v", errCtor)
+	}
+	s.watermark = time.Now().Add(-1 * time.Hour).UTC()
+
+	// Three pipeline_runs at the EXACT same completed_at nanosecond.
+	// Ids sort alphabetically so the cursor advances "prn-a" → "prn-b"
+	// → "prn-c" on successive iterations of the SAME page; without
+	// the tuple predicate the second page query would set
+	// completed_at > sharedTS and skip prn-b + prn-c forever.
+	sharedTS := time.Now().UTC()
+	seedRun(t, db, "prn-a", "pl-1", "nightly", sharedTS)
+	seedRun(t, db, "prn-b", "pl-1", "nightly", sharedTS)
+	seedRun(t, db, "prn-c", "pl-1", "nightly", sharedTS)
+
+	s.runOnce(context.Background())
+
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM eval_runs WHERE kind = 'online'`).Scan(&count); err != nil {
+		t.Fatalf("count query: %v", err)
+	}
+	if count != 3 {
+		t.Errorf("same-timestamp siblings enqueued %d, want 3 (pagination skipped some?)", count)
+	}
+}
+
 // TestCryptoSample_DistributionRoughly bounds the crypto/rand sampler:
 // 10000 draws should land between 30% and 70% under-0.5. Tighter bounds
 // would create flaky tests; this is wide enough to never false-positive

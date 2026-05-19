@@ -187,19 +187,23 @@ func InputGuard(j journal.Emitter) Middleware {
 
 		// Branch on the configured action. Block (default) refuses the
 		// call; Sanitize masks every match in-place and returns the
-		// reformed text; Log lets the original through unchanged because
-		// the operator opted into observability-only mode.
+		// reformed text; Log lets the original through unchanged
+		// because the operator opted into observability-only mode.
+		//
+		// Soft modes (sanitize / log) explicitly DO NOT propagate
+		// emitErr to the caller. emitGuardEntry is best-effort audit
+		// — returning its error from a "let it through" path turns
+		// the soft action into a hard failure for every caller that
+		// treats non-nil err as "the guard refused this call." Block
+		// mode keeps the errors.Join(blocked, emitErr) wrap because
+		// blocked IS the failure signal and any join with it stays a
+		// failure. The emit error is still in the slog/log fallback
+		// from emitGuardEntry so operators can spot a sick journal
+		// emitter without it derailing live calls.
 		switch ActionFromContext(ctx) {
 		case GuardActionSanitize:
-			sanitized := sanitizeFindings(text, result.Findings)
-			if emitErr != nil {
-				return sanitized, emitErr
-			}
-			return sanitized, nil
+			return sanitizeFindings(text, result.Findings), nil
 		case GuardActionLog:
-			if emitErr != nil {
-				return text, emitErr
-			}
 			return text, nil
 		default:
 			blocked := &BlockedError{Direction: "input", Finding: primary}

@@ -279,9 +279,20 @@ func (h *MessageFeedbackHandler) Delete(w http.ResponseWriter, r *http.Request) 
 }
 
 // List handles GET /api/v1/feedback?message_id=... | ?trace_id=... .
-// Returns rows visible to the authenticated user (scoped via the
-// workspace membership of the row, not the user's primary workspace —
-// a user with multiple memberships can see feedback across any of them).
+// Returns ONLY the caller's own feedback rows for the requested
+// message/trace. Feedback is private to the user who wrote it — even
+// a workspace owner shouldn't be able to read another member's
+// thumb-downs or "edit" reasons by polling this endpoint, both for
+// the same reason a Slack reaction or a Google Docs comment isn't
+// publicly enumerable: those signals carry candid feedback the user
+// expects only the eval pipeline (server-side, not API-exposed) to
+// see.
+//
+// An earlier version scoped only by workspace membership, which let
+// any workspace member fetch every other member's rows. The bug was
+// caught in PR review; the fix is the additional user_id = ? clause
+// below. Workspace scope is kept as a defense-in-depth predicate so
+// a cross-workspace probe still returns 0 rows.
 func (h *MessageFeedbackHandler) List(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
 	if user == nil {
@@ -296,13 +307,16 @@ func (h *MessageFeedbackHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Scope the result to workspaces the user is a member of. The
-	// subquery is on workspace_members so a user with no membership at
-	// all simply sees an empty list, which is the right answer.
+	// Two predicates: the caller is the row's author AND the row's
+	// workspace_id is one the caller belongs to. The second clause is
+	// belt-and-suspenders — if a row's workspace ever gets corrupted
+	// or the user is removed mid-query we still don't surface stale
+	// cross-tenant data.
 	const baseQuery = `
 SELECT id, message_id, chat_id, trace_id, signal, reason, user_id, created_at
 FROM message_feedback
-WHERE workspace_id IN (SELECT workspace_id FROM workspace_members WHERE user_id = ?)
+WHERE user_id = ?
+  AND workspace_id IN (SELECT workspace_id FROM workspace_members WHERE user_id = ?)
 `
 	var (
 		rows *sql.Rows
@@ -312,11 +326,11 @@ WHERE workspace_id IN (SELECT workspace_id FROM workspace_members WHERE user_id 
 	case messageID != "":
 		rows, err = h.db.QueryContext(r.Context(),
 			baseQuery+` AND message_id = ? ORDER BY created_at DESC`,
-			user.ID, messageID)
+			user.ID, user.ID, messageID)
 	default:
 		rows, err = h.db.QueryContext(r.Context(),
 			baseQuery+` AND trace_id = ? ORDER BY created_at DESC`,
-			user.ID, traceID)
+			user.ID, user.ID, traceID)
 	}
 	if err != nil {
 		h.logger.Error("list feedback", "err", err)

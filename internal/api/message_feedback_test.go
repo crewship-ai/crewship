@@ -191,7 +191,9 @@ func TestFeedback_Create_Idempotent(t *testing.T) {
 		var body struct {
 			ID string `json:"id"`
 		}
-		_ = json.Unmarshal(rr.Body.Bytes(), &body)
+		if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+			t.Fatalf("decode create response: %v body=%s", err, rr.Body.String())
+		}
 		return body.ID
 	}
 	id1 := post("first reason")
@@ -241,9 +243,9 @@ func TestFeedback_Create_OversizeReason_400(t *testing.T) {
 
 // ---- List ----
 
-func TestFeedback_List_ByTraceID_ScopedToWorkspace(t *testing.T) {
+func TestFeedback_List_ByTraceID_ScopedToCallerAndWorkspace(t *testing.T) {
 	bed := setupFeedbackTestBed(t)
-	// Seed a row in bed.wsID with trace tr-1.
+	// Seed the caller's own row in bed.wsID with trace tr-1.
 	if _, err := bed.h.db.Exec(
 		`INSERT INTO message_feedback (id, workspace_id, chat_id, message_id, trace_id, signal, reason, user_id)
         VALUES ('fb1', ?, ?, 'm1', 'tr-1', 'helpful', '', ?)`,
@@ -251,7 +253,8 @@ func TestFeedback_List_ByTraceID_ScopedToWorkspace(t *testing.T) {
 		t.Fatalf("seed fb1: %v", err)
 	}
 	// Seed an unrelated row in the OTHER workspace, same trace id. List
-	// from bed.userID must not see this — workspace scoping is the gate.
+	// from bed.userID must not see this — workspace scoping is the
+	// belt-and-suspenders gate against cross-tenant probes.
 	if _, err := bed.h.db.Exec(
 		`INSERT INTO message_feedback (id, workspace_id, message_id, trace_id, signal, reason, user_id)
         VALUES ('fb2', 'ws-other-fb', 'm2', 'tr-1', 'helpful', '', ?)`,
@@ -276,6 +279,56 @@ func TestFeedback_List_ByTraceID_ScopedToWorkspace(t *testing.T) {
 	}
 	if body.Feedback[0].ID != "fb1" {
 		t.Errorf("got id = %s, want fb1", body.Feedback[0].ID)
+	}
+}
+
+// TestFeedback_List_DoesNotLeakOtherUsersFeedback pins the privacy
+// fix: even within the same workspace and on the same message_id, a
+// user must NOT be able to read another member's feedback rows. The
+// previous List query scoped only by workspace membership, which let
+// any workspace member enumerate everyone else's thumbs-downs / "edit"
+// reasons by polling the API.
+func TestFeedback_List_DoesNotLeakOtherUsersFeedback(t *testing.T) {
+	bed := setupFeedbackTestBed(t)
+
+	// Put bed.otherID in bed.wsID as well — they're now both members of
+	// the same workspace, mimicking the realistic threat scenario.
+	if _, err := bed.h.db.Exec(`INSERT INTO workspace_members (id, workspace_id, user_id, role)
+        VALUES ('m-other-in-shared', ?, ?, 'MEMBER')`, bed.wsID, bed.otherID); err != nil {
+		t.Fatalf("seed shared membership: %v", err)
+	}
+	// Seed feedback rows for both users against the same message.
+	if _, err := bed.h.db.Exec(
+		`INSERT INTO message_feedback (id, workspace_id, chat_id, message_id, signal, reason, user_id)
+        VALUES ('fb-mine', ?, ?, ?, 'helpful', 'mine', ?), ('fb-other', ?, ?, ?, 'not_helpful', 'other-private', ?)`,
+		bed.wsID, bed.chatID, bed.messageID, bed.userID,
+		bed.wsID, bed.chatID, bed.messageID, bed.otherID); err != nil {
+		t.Fatalf("seed feedback rows: %v", err)
+	}
+
+	req := feedbackReq("GET", "/api/v1/feedback?message_id="+bed.messageID, "", bed.userID)
+	rr := httptest.NewRecorder()
+	bed.h.List(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("list = %d body=%s", rr.Code, rr.Body.String())
+	}
+	var body struct {
+		Feedback []feedbackRow `json:"feedback"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(body.Feedback) != 1 {
+		t.Fatalf("got %d rows, want 1 (other user's feedback leaked?)", len(body.Feedback))
+	}
+	if body.Feedback[0].ID != "fb-mine" {
+		t.Errorf("got id = %s, want fb-mine — privacy gate failed", body.Feedback[0].ID)
+	}
+	// Belt-and-suspenders: explicitly assert other user's reason text
+	// is nowhere in the response body, so a refactor to "List all rows
+	// from my workspaces" fails loudly here too.
+	if strings.Contains(rr.Body.String(), "other-private") {
+		t.Errorf("response leaked another user's reason text: %s", rr.Body.String())
 	}
 }
 
@@ -318,8 +371,12 @@ func TestFeedback_Delete_RemovesOwnRow(t *testing.T) {
 
 	// Own row gone, other user's row preserved.
 	var ownCount, otherCount int
-	_ = bed.h.db.QueryRow(`SELECT COUNT(*) FROM message_feedback WHERE id = 'fb-own'`).Scan(&ownCount)
-	_ = bed.h.db.QueryRow(`SELECT COUNT(*) FROM message_feedback WHERE id = 'fb-other'`).Scan(&otherCount)
+	if err := bed.h.db.QueryRow(`SELECT COUNT(*) FROM message_feedback WHERE id = 'fb-own'`).Scan(&ownCount); err != nil {
+		t.Fatalf("count own: %v", err)
+	}
+	if err := bed.h.db.QueryRow(`SELECT COUNT(*) FROM message_feedback WHERE id = 'fb-other'`).Scan(&otherCount); err != nil {
+		t.Fatalf("count other: %v", err)
+	}
 	if ownCount != 0 {
 		t.Errorf("own row not deleted: count=%d", ownCount)
 	}
@@ -385,9 +442,11 @@ func TestFeedback_Create_UpsertReanchorsWorkspace(t *testing.T) {
 	}
 
 	var firstWS string
-	_ = bed.h.db.QueryRow(`SELECT workspace_id FROM message_feedback
+	if err := bed.h.db.QueryRow(`SELECT workspace_id FROM message_feedback
         WHERE message_id = ? AND user_id = ? AND signal = 'helpful'`,
-		bed.messageID, bed.userID).Scan(&firstWS)
+		bed.messageID, bed.userID).Scan(&firstWS); err != nil {
+		t.Fatalf("first workspace lookup: %v", err)
+	}
 	if firstWS != fbWS {
 		t.Fatalf("first POST workspace = %q, want %q (fallback)", firstWS, fbWS)
 	}
@@ -403,9 +462,11 @@ func TestFeedback_Create_UpsertReanchorsWorkspace(t *testing.T) {
 	}
 
 	var secondWS string
-	_ = bed.h.db.QueryRow(`SELECT workspace_id FROM message_feedback
+	if err := bed.h.db.QueryRow(`SELECT workspace_id FROM message_feedback
         WHERE message_id = ? AND user_id = ? AND signal = 'helpful'`,
-		bed.messageID, bed.userID).Scan(&secondWS)
+		bed.messageID, bed.userID).Scan(&secondWS); err != nil {
+		t.Fatalf("second workspace lookup: %v", err)
+	}
 	if secondWS != bed.wsID {
 		t.Errorf("after re-anchor, workspace = %q, want %q — UPSERT didn't update workspace_id", secondWS, bed.wsID)
 	}

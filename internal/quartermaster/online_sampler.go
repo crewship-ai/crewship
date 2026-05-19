@@ -54,10 +54,20 @@ type OnlineSampler struct {
 	// already implements this; tests pass a fake.
 	dslResolver DSLResolver
 
-	// watermark is the start of the next scan window; carrying state
-	// here keeps the sampler self-contained instead of requiring a
-	// dedicated DB column for "last_online_eval_scan_at".
-	watermark time.Time
+	// watermark + watermarkID together form the high-water mark of
+	// successfully-handled rows; the next tick scans rows whose
+	// (completed_at, id) tuple is strictly greater than this pair.
+	// The id half is necessary because two pipeline_runs can complete
+	// at the same nanosecond (parallel fan-out steps); a timestamp-only
+	// watermark would re-pick the just-handled row on every tick
+	// indefinitely.
+	//
+	// State is in-memory only. On process restart we reset to
+	// (now - 1h, "") which conservatively re-scans the last hour;
+	// the partial UNIQUE INDEX on eval_runs(pipeline_run_id) WHERE
+	// kind='online' makes any re-handled row collapse to a no-op.
+	watermark   time.Time
+	watermarkID string
 }
 
 // DSLResolver returns the active DSL for a pipeline by id. Implemented
@@ -165,12 +175,29 @@ func (s *OnlineSampler) runOnce(ctx context.Context) {
 	entropyOutages := 0
 	hadRetryableErr := false
 
-	// Track the watermark candidate: the highest completed_at we
-	// successfully handled (either enqueued, sampled out, or
-	// deterministically skipped). Transient failures leave the
-	// watermark behind so the next tick retries.
-	lastHandled := s.watermark.Format(time.RFC3339Nano)
-	cursor := lastHandled
+	// Track the pagination cursor as a (completed_at, id) tuple.
+	// Using completed_at alone is insufficient because two
+	// pipeline_runs can complete at the same nanosecond — common when
+	// a routine fans out parallel steps that finish in the same
+	// scheduler tick. With `> cursor_ts` on the next page query,
+	// the sibling row with the same timestamp gets skipped forever
+	// once one of them has been handled. Adding `id` as a deterministic
+	// tie-breaker (every pipeline_run has a unique id) closes the
+	// hole; the ORDER BY mirrors the cursor predicate so a row's
+	// position is fully determined.
+	//
+	// lastHandledTS / lastHandledID track the high-water mark for
+	// successfully-handled rows (advance-on-success). lastInPage
+	// tracks where the SQL cursor moves to for the NEXT page; on a
+	// retryable error we hold the watermark but still move the
+	// cursor so we don't loop on the same window — the next tick
+	// will rescan everything we paused on.
+	startTS := s.watermark.Format(time.RFC3339Nano)
+	startID := s.watermarkID
+	lastHandledTS := startTS
+	lastHandledID := startID
+	cursorTS := startTS
+	cursorID := startID
 
 	for {
 		rows, err := s.db.QueryContext(ctx, `
@@ -178,11 +205,11 @@ SELECT id, workspace_id, pipeline_id, pipeline_slug, completed_at
 FROM pipeline_runs
 WHERE status = 'completed'
   AND completed_at IS NOT NULL
-  AND completed_at > ?
   AND completed_at < ?
-ORDER BY completed_at ASC
+  AND (completed_at > ? OR (completed_at = ? AND id > ?))
+ORDER BY completed_at ASC, id ASC
 LIMIT ?
-`, cursor, scanEndStr, scanPageSize)
+`, scanEndStr, cursorTS, cursorTS, cursorID, scanPageSize)
 		if err != nil {
 			s.logger.Warn("online sampler scan failed", "err", err)
 			return
@@ -208,17 +235,17 @@ LIMIT ?
 		}
 
 		// Once a retryable error fires inside a page, freeze the
-		// watermark — every row AFTER the failure must wait for the
-		// next tick to keep ordering. Without this, a failed row
-		// followed by a successful row would advance the watermark
-		// past the failure and orphan it forever. We still iterate
-		// through the rest of the page so the loop counters
-		// (totalScanned, entropyOutages) reflect what was seen, and
-		// so we don't loop on the same SQL window.
+		// (lastHandled) watermark — every row AFTER the failure must
+		// wait for the next tick to keep ordering. Without this, a
+		// failed row followed by a successful row would advance the
+		// watermark past the failure and orphan it forever. We still
+		// iterate through the rest of the page so the loop counters
+		// (totalScanned, entropyOutages) reflect what was seen.
 		stuck := false
-		advance := func(ts string) {
+		advance := func(ts, id string) {
 			if !stuck {
-				lastHandled = ts
+				lastHandledTS = ts
+				lastHandledID = id
 			}
 		}
 
@@ -232,19 +259,19 @@ LIMIT ?
 				continue
 			}
 			if dsl == nil || dsl.Eval == nil || dsl.Eval.Online == nil {
-				advance(r.completedAt)
+				advance(r.completedAt, r.id)
 				continue
 			}
 			rate := dsl.Eval.Online.SampleRate
 			if rate <= 0 {
-				advance(r.completedAt)
+				advance(r.completedAt, r.id)
 				continue
 			}
 			if dsl.Eval.Online.GraderAgentSlug == "" {
 				// No grader configured = nothing to enqueue against.
 				// Deterministic skip — advance so we don't re-scan a
 				// misconfigured routine every tick forever.
-				advance(r.completedAt)
+				advance(r.completedAt, r.id)
 				continue
 			}
 			if rate < 1.0 {
@@ -256,7 +283,7 @@ LIMIT ?
 					continue
 				}
 				if sample >= rate {
-					advance(r.completedAt)
+					advance(r.completedAt, r.id)
 					continue
 				}
 			}
@@ -269,17 +296,20 @@ LIMIT ?
 				continue
 			}
 			totalEnqueued++
-			advance(r.completedAt)
+			advance(r.completedAt, r.id)
 		}
 
 		// If we got stuck mid-page, end the tick — next tick retries
-		// from the held watermark. Otherwise move the cursor to the
-		// last row in this page so pagination continues making progress
-		// on a deterministic skip backlog.
+		// from the held watermark. Otherwise move the SQL cursor to
+		// the last (completed_at, id) tuple in this page so
+		// pagination makes progress through a long deterministic-skip
+		// backlog without overlapping with the previous page.
 		if stuck {
 			break
 		}
-		cursor = candidates[len(candidates)-1].completedAt
+		last := candidates[len(candidates)-1]
+		cursorTS = last.completedAt
+		cursorID = last.id
 		if len(candidates) < scanPageSize {
 			break
 		}
@@ -287,16 +317,17 @@ LIMIT ?
 
 	_ = scanEnd // referenced only for the scanEndStr bound above; keeps intent obvious.
 
-	// Watermark advances to the high-water mark of successfully-handled
-	// rows. Retryable per-row errors hold it back so the next tick gets
-	// another shot at the same rows.
-	parsed, err := time.Parse(time.RFC3339Nano, lastHandled)
+	// Watermark advances to the (completed_at, id) high-water mark of
+	// successfully-handled rows. Retryable per-row errors hold both
+	// halves back so the next tick gets another shot at the same rows.
+	parsed, err := time.Parse(time.RFC3339Nano, lastHandledTS)
 	if err == nil {
 		s.watermark = parsed.UTC()
+		s.watermarkID = lastHandledID
 	} else {
 		// Defensive: never advance to garbage. The startup watermark is
 		// scanEnd - 1h; if parsing fails we leave the existing value.
-		s.logger.Warn("watermark parse failed; leaving in place", "value", lastHandled, "err", err)
+		s.logger.Warn("watermark parse failed; leaving in place", "value", lastHandledTS, "err", err)
 	}
 
 	if entropyOutages > 0 {

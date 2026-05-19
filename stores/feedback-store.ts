@@ -21,12 +21,15 @@ interface FeedbackState {
   byTurn: Record<string, Partial<Record<FeedbackSignal, true>>>
 
   /** Submit a feedback signal. Optimistic: the local map updates
-   *  immediately and the POST happens in the background. If the POST
-   *  comes back !res.ok (validation, auth, server error), the optimistic
-   *  flip is rolled back so the UI doesn't lie about a signal the server
-   *  never recorded. Network rejections (offline, DNS) keep the flip
-   *  because a retry could still succeed and the server-side UPSERT
-   *  will reconcile. */
+   *  immediately and the POST happens in the background. The flip is
+   *  rolled back on ANY failure — HTTP non-2xx OR network/transport
+   *  rejection — so a persisted-localStorage flag never claims a row
+   *  exists on the server when it doesn't. Earlier versions kept the
+   *  optimistic state on network failure under the theory that "a
+   *  retry could still succeed," but with persisted state a permanent
+   *  offline transition (e.g. a user closes the laptop and returns
+   *  days later) left the UI permanently lying about a signal that
+   *  was never submitted. */
   submit: (turnId: string, signal: FeedbackSignal, opts?: {
     chatId?: string
     traceId?: string
@@ -79,21 +82,24 @@ export const useFeedbackStore = create<FeedbackState>()(
           if (!res.ok) {
             // 4xx/5xx — the server REJECTED the signal. The optimistic
             // flip is now a lie; reverse it so the UI matches truth.
-            // The user can click again to retry once the issue clears
-            // (e.g. session restored, validation fixed).
             if (process.env.NODE_ENV !== "production") {
               console.warn(`[feedback] submit returned ${res.status}; rolling back`)
             }
             rollback()
           }
         } catch (err) {
-          // Network rejection — keep the optimistic state so the user
-          // doesn't see a flicker on transient offline blips. A
-          // subsequent submit on the same (turn, signal) UPSERTs
-          // server-side.
+          // Network rejection (offline, DNS, fetch abort). The signal
+          // was NOT delivered — we must roll back the optimistic
+          // state because the store is persisted to localStorage and
+          // would otherwise claim a signal that never reached the
+          // server, including after the user goes back online days
+          // later without re-clicking. The cost is a one-frame
+          // flicker on flaky-network UX; the upside is that the
+          // local state never lies.
           if (process.env.NODE_ENV !== "production") {
-            console.warn("[feedback] submit network error:", err)
+            console.warn("[feedback] submit network error; rolling back:", err)
           }
+          rollback()
         }
       },
 
