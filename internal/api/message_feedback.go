@@ -3,6 +3,7 @@ package api
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -63,6 +64,20 @@ const maxFeedbackReasonChars = 4096
 // abuse-prevention ceiling well below the reason cap.
 const maxFeedbackIDChars = 256
 
+// maxFeedbackBodyBytes caps the HTTP body BEFORE json.Decode runs.
+// The field-level limits (maxFeedbackReasonChars + maxFeedbackIDChars
+// × 3) cap memory at the application layer, but a malicious client
+// could still force Decode to allocate a multi-MB string for `reason`
+// before our trim/length check fires. http.MaxBytesReader bounds the
+// parsing pass itself: anything over the cap fails the read and
+// returns *http.MaxBytesError without touching the JSON decoder's
+// allocator.
+//
+// 16 KiB = 4 × maxFeedbackReasonChars headroom for JSON overhead
+// + the three id fields + signal + chat_id. Real payloads are well
+// under 5 KiB.
+const maxFeedbackBodyBytes = 16 * 1024
+
 type feedbackCreateRequest struct {
 	MessageID string `json:"message_id"`
 	ChatID    string `json:"chat_id,omitempty"`
@@ -86,28 +101,47 @@ type feedbackRow struct {
 // scoped to a chat the authenticated user can already see. Workspace
 // membership comes via workspace_members because the route doesn't
 // carry workspace_id in the URL.
-func (h *MessageFeedbackHandler) ensureChatVisible(r *http.Request, chatID string) (workspaceID string, ok bool) {
+//
+// Return shape distinguishes three states the caller must handle
+// separately:
+//
+//   - (ws, true, nil)   — chat exists and the caller is a member
+//   - ("", false, nil)  — chat doesn't exist OR caller isn't a member
+//     (404 — we don't leak which one to avoid an
+//     existence-probing oracle on chat ids)
+//   - ("", false, err)  — DB outage / schema mismatch (500)
+//
+// An earlier version collapsed every error into the (false, nil)
+// branch, hiding real outages behind false 404s. The eyes-only fix
+// (treat sql.ErrNoRows as the only expected miss) is below.
+func (h *MessageFeedbackHandler) ensureChatVisible(r *http.Request, chatID string) (workspaceID string, ok bool, err error) {
 	if chatID == "" {
-		return "", false
+		return "", false, nil
 	}
 	user := UserFromContext(r.Context())
 	if user == nil {
-		return "", false
+		return "", false, nil
 	}
 	var owner string
-	err := h.db.QueryRowContext(r.Context(),
+	err = h.db.QueryRowContext(r.Context(),
 		"SELECT workspace_id FROM chats WHERE id = ?", chatID).Scan(&owner)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
 	if err != nil {
-		return "", false
+		return "", false, err
 	}
 	var role string
 	err = h.db.QueryRowContext(r.Context(),
 		"SELECT role FROM workspace_members WHERE workspace_id = ? AND user_id = ?",
 		owner, user.ID).Scan(&role)
-	if err != nil {
-		return "", false
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
 	}
-	return owner, true
+	if err != nil {
+		return "", false, err
+	}
+	return owner, true, nil
 }
 
 // Create handles POST /api/v1/feedback. Returns 201 with the inserted
@@ -122,8 +156,19 @@ func (h *MessageFeedbackHandler) Create(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Cap the request body BEFORE JSON parsing. MaxBytesReader returns
+	// *http.MaxBytesError on overflow, which we surface as 413; any
+	// other Decode error (malformed JSON, type mismatch) collapses to
+	// 400 since they're equivalent client bugs from the API contract's
+	// perspective.
+	r.Body = http.MaxBytesReader(w, r.Body, maxFeedbackBodyBytes)
 	var body feedbackCreateRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			replyError(w, http.StatusRequestEntityTooLarge, "request body too large")
+			return
+		}
 		replyError(w, http.StatusBadRequest, "invalid json")
 		return
 	}
@@ -177,7 +222,16 @@ func (h *MessageFeedbackHandler) Create(w http.ResponseWriter, r *http.Request) 
 	var workspaceID string
 	var chatPtr *string
 	if body.ChatID != "" {
-		ws, ok := h.ensureChatVisible(r, body.ChatID)
+		ws, ok, err := h.ensureChatVisible(r, body.ChatID)
+		if err != nil {
+			// DB outage / schema drift — surface as 500 instead of a
+			// false 404 that would mask the real issue from the
+			// operator (and confuse the client into retrying against
+			// a non-existent chat).
+			h.logger.Error("feedback chat visibility check", "err", err, "chat_id", body.ChatID)
+			replyError(w, http.StatusInternalServerError, "internal")
+			return
+		}
 		if !ok {
 			replyError(w, http.StatusNotFound, "chat not found")
 			return
@@ -188,9 +242,16 @@ func (h *MessageFeedbackHandler) Create(w http.ResponseWriter, r *http.Request) 
 		err := h.db.QueryRowContext(r.Context(),
 			`SELECT workspace_id FROM workspace_members WHERE user_id = ? ORDER BY created_at DESC LIMIT 1`,
 			user.ID).Scan(&workspaceID)
-		if err != nil {
-			h.logger.Error("feedback workspace lookup", "err", err)
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			// User has no workspace memberships at all. 403 is honest
+			// here — the call shape is valid, the caller just isn't
+			// authorized to write anywhere.
 			replyError(w, http.StatusForbidden, "no workspace membership")
+			return
+		case err != nil:
+			h.logger.Error("feedback workspace lookup", "err", err)
+			replyError(w, http.StatusInternalServerError, "internal")
 			return
 		}
 	}

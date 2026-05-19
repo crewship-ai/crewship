@@ -220,6 +220,31 @@ func TestFeedback_Create_Idempotent(t *testing.T) {
 	}
 }
 
+// TestFeedback_Create_OversizeBody_413 covers the BEFORE-parse cap
+// (MaxBytesReader). A body larger than maxFeedbackBodyBytes must
+// produce 413 without ever reaching the field-level checks — that's
+// what stops a malicious client from forcing Decode to allocate
+// multi-MB strings before our trim/length validation fires.
+func TestFeedback_Create_OversizeBody_413(t *testing.T) {
+	bed := setupFeedbackTestBed(t)
+	// Build a >16 KiB payload by stuffing a huge reason. The 4096-char
+	// field-level cap would catch this at the validation layer, but
+	// we're testing that MaxBytesReader catches it FIRST, before
+	// allocating the full string.
+	huge := strings.Repeat("a", 20*1024)
+	jsonBody, _ := json.Marshal(map[string]string{
+		"message_id": bed.messageID,
+		"signal":     "edit",
+		"reason":     huge,
+	})
+	req := feedbackReq("POST", "/api/v1/feedback", string(jsonBody), bed.userID)
+	rr := httptest.NewRecorder()
+	bed.h.Create(rr, req)
+	if rr.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("oversize body = %d, want 413", rr.Code)
+	}
+}
+
 // TestFeedback_Create_OversizeReason_400 caps the free-form reason at
 // maxFeedbackReasonChars. A 10 KB payload from a buggy or malicious
 // client should be rejected at the API layer rather than pumped into

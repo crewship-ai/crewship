@@ -3,7 +3,9 @@
 import { Copy, ThumbsUp, ThumbsDown, AlertCircle, AlertTriangle, Crown, CheckCircle2, Clock, FileText, DollarSign, Zap, CircleDot, HelpCircle, FileCode } from "lucide-react"
 import { useArtifactStore } from "@/stores/artifact-store"
 import { useReactionsStore } from "@/stores/reactions-store"
+import { useEffect } from "react"
 import { useFeedbackStore } from "@/stores/feedback-store"
+import { useSession } from "@/hooks/use-auth"
 import { ReactionPicker } from "./reactions/reaction-picker"
 import { ReactionsRow } from "./reactions/reactions-row"
 import {
@@ -578,6 +580,21 @@ function TurnFeedbackActions({
   fullText: string
   chatId?: string
 }) {
+  // Bind the feedback store to the authenticated user. Without this,
+  // signing out and back in as a different account on the same browser
+  // would rehydrate the previous user's votes — a privacy leak the
+  // store's setUser action guards against by clearing byTurn on any
+  // user switch (including null → real user on first auth resolve).
+  const session = useSession()
+  const setUser = useFeedbackStore((s) => s.setUser)
+  const boundUserId = useFeedbackStore((s) => s.userId)
+  useEffect(() => {
+    const currentId = session.data?.user.id ?? null
+    if (boundUserId !== currentId) {
+      setUser(currentId)
+    }
+  }, [session.data?.user.id, boundUserId, setUser])
+
   const submitted = useFeedbackStore((s) => s.byTurn[turn.id]) ?? {}
   const submit = useFeedbackStore((s) => s.submit)
   const reset = useFeedbackStore((s) => s.reset)
@@ -589,6 +606,10 @@ function TurnFeedbackActions({
   const traceId = meta?.trace_id
 
   const handle = (signal: "helpful" | "not_helpful") => {
+    // Per-(turn, signal) sequencing lives inside the store — submit
+    // and reset chain through the same in-flight Promise so a fast
+    // click → click again can't have its DELETE land before the prior
+    // POST creates the row. We don't need to gate at the call site.
     if (submitted[signal]) {
       void reset(turn.id, signal)
       return
