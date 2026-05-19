@@ -292,14 +292,18 @@ func (s *OnlineSampler) runOnce(ctx context.Context) {
 	cursorID := startID
 
 	for {
+		// pipeline_runs uses `ended_at` (NULL until terminal) — NOT
+		// `completed_at`. An earlier version of this query targeted the
+		// non-existent `completed_at` column, which made every tick fail
+		// with "no such column" and the sampler emit zero eval rows.
 		rows, err := s.db.QueryContext(ctx, `
-SELECT id, workspace_id, pipeline_id, pipeline_slug, completed_at
+SELECT id, workspace_id, pipeline_id, pipeline_slug, ended_at
 FROM pipeline_runs
 WHERE status = 'completed'
-  AND completed_at IS NOT NULL
-  AND completed_at < ?
-  AND (completed_at > ? OR (completed_at = ? AND id > ?))
-ORDER BY completed_at ASC, id ASC
+  AND ended_at IS NOT NULL
+  AND ended_at < ?
+  AND (ended_at > ? OR (ended_at = ? AND id > ?))
+ORDER BY ended_at ASC, id ASC
 LIMIT ?
 `, scanEndStr, cursorTS, cursorTS, cursorID, scanPageSize)
 		if err != nil {

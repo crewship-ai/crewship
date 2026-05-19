@@ -36,7 +36,7 @@ func openSamplerTestDB(t *testing.T) *sql.DB {
 			pipeline_slug TEXT NOT NULL,
 			status TEXT NOT NULL,
 			started_at TEXT,
-			completed_at TEXT
+			ended_at TEXT
 		)`,
 		`CREATE TABLE eval_runs (
 			id TEXT PRIMARY KEY,
@@ -81,11 +81,11 @@ func (r *samplerTestEmitter) Emit(_ context.Context, e journal.Entry) (string, e
 }
 func (r *samplerTestEmitter) Flush(context.Context) error { return nil }
 
-func seedRun(t *testing.T, db *sql.DB, id, pipelineID, slug string, completedAt time.Time) {
+func seedRun(t *testing.T, db *sql.DB, id, pipelineID, slug string, endedAt time.Time) {
 	t.Helper()
-	if _, err := db.Exec(`INSERT INTO pipeline_runs (id, workspace_id, pipeline_id, pipeline_slug, status, completed_at)
+	if _, err := db.Exec(`INSERT INTO pipeline_runs (id, workspace_id, pipeline_id, pipeline_slug, status, ended_at)
         VALUES (?, 'ws1', ?, ?, 'completed', ?)`,
-		id, pipelineID, slug, completedAt.Format(time.RFC3339Nano)); err != nil {
+		id, pipelineID, slug, endedAt.Format(time.RFC3339Nano)); err != nil {
 		t.Fatalf("seed run %s: %v", id, err)
 	}
 }
