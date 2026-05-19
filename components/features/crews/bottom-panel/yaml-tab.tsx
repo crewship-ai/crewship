@@ -38,7 +38,13 @@ function toYaml(rec: Record<string, unknown>, indent = 0): string {
         }
       }
     } else {
-      const s = typeof v === "string" && (v.includes("\n") || v.includes(":")) ? `"${v.replace(/"/g, '\\"')}"` : String(v)
+      // Escape backslashes BEFORE quotes — otherwise a value containing
+      // `\"` becomes `\\"` (backslash + escaped quote) which JSON-style
+      // parsers interpret as a literal backslash followed by an
+      // unescaped quote, breaking the quoted run. Order matters.
+      const s = typeof v === "string" && (v.includes("\n") || v.includes(":"))
+        ? `"${v.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`
+        : String(v)
       out += `${pad}${k}: ${s}\n`
     }
   }

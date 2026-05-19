@@ -40,6 +40,14 @@ type Executor struct {
 	// useful for tests; production wiring sets a real allowlist.
 	egressAllowed func(host string) bool
 
+	// allowPrivateHTTP is a test-only escape hatch: when true,
+	// runHTTPStep skips the httpsafe SSRF guards (URL string check +
+	// safe dialer) so unit tests can target httptest.NewServer which
+	// binds to 127.0.0.1. Production never flips this — leaving the
+	// flag false is the secure default and the prod wiring path has no
+	// setter for it. SetAllowPrivateHTTPForTesting is the only mutator.
+	allowPrivateHTTP bool
+
 	// credentialByType resolves a credential type ("slack", "stripe",
 	// etc.) to its decrypted value at run time. Nil = HTTP steps
 	// run without credential injection (public endpoints only).
@@ -87,6 +95,16 @@ type Executor struct {
 func (e *Executor) WithEgressGate(allowed func(host string) bool) *Executor {
 	e.egressAllowed = allowed
 	return e
+}
+
+// SetAllowPrivateHTTPForTesting is a test-only knob that disables the
+// httpsafe SSRF guard on runHTTPStep so unit tests can target
+// httptest.NewServer (which binds to 127.0.0.1). Production code never
+// calls this — leaving the flag at its zero value keeps the secure
+// default in place, and the prod wiring chain in cmd/crewshipd has no
+// access to this setter by convention.
+func (e *Executor) SetAllowPrivateHTTPForTesting(v bool) {
+	e.allowPrivateHTTP = v
 }
 
 // WithCredentialResolver wires HTTP credential injection. The

@@ -18,6 +18,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/connectors"
 )
@@ -270,6 +271,13 @@ func TestConnectors_Verify_PATCallsHTTPEndpoint(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer fake.Close()
+
+	// SafeClient + ValidateURL in probeVerifyHTTP would otherwise
+	// refuse the loopback fake server. SetVerifyHTTPClientForTesting
+	// swaps both for no-op variants — the SSRF defences are still
+	// covered by httpsafe's own unit tests.
+	restoreVerify := SetVerifyHTTPClientForTesting(&http.Client{Timeout: 5 * time.Second})
+	defer restoreVerify()
 
 	// Build a one-off catalog whose verify URL points at the fake.
 	yaml := `id: ad-hoc

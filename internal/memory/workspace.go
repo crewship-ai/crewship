@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/safepath"
 )
 
 // WorkspaceMemory wraps a memory Engine for workspace-level (cross-crew) memory.
@@ -20,7 +22,22 @@ type WorkspaceMemory struct {
 // NewWorkspaceMemory creates a workspace memory manager at the given path.
 // It initializes the FTS5 engine and performs an initial reindex.
 // Path is typically ~/.crewship/memory/{workspace-id}/.
+//
+// workspacePath MUST be absolute and free of "..". Callers compose it from
+// trusted root + a single workspace-id component, which is itself a CUID;
+// rejecting non-absolute / traversal paths here is defence-in-depth so a
+// future caller mis-composing the path can't accidentally land memory
+// state outside of the crewship data root.
 func NewWorkspaceMemory(workspacePath string) (*WorkspaceMemory, error) {
+	if workspacePath == "" || !filepath.IsAbs(workspacePath) {
+		return nil, fmt.Errorf("workspace memory path must be absolute, got %q", workspacePath)
+	}
+	if filepath.Clean(workspacePath) != workspacePath {
+		return nil, fmt.Errorf("workspace memory path must be in canonical form, got %q", workspacePath)
+	}
+	if strings.Contains(workspacePath, "..") {
+		return nil, fmt.Errorf("%w: workspace memory path contains traversal: %q", safepath.ErrUnsafe, workspacePath)
+	}
 	if err := os.MkdirAll(workspacePath, 0o755); err != nil {
 		return nil, fmt.Errorf("create workspace memory dir: %w", err)
 	}

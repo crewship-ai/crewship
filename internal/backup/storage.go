@@ -2,11 +2,38 @@ package backup
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 )
+
+// ErrUnsafeBackupPath is returned when a caller passes a path that no
+// `crewship backup` CLI invocation would have produced — empty, or
+// containing a NUL byte. Restoring/inspecting an arbitrary path on the
+// operator's box is a feature (admins legitimately point at network
+// mounts and tarballs in /tmp), so we do NOT restrict to a root, but we
+// also refuse the kind of paths that can only come from malicious
+// callers wiring in untrusted strings.
+var ErrUnsafeBackupPath = errors.New("backup storage: unsafe path")
+
+// cleanPath canonicalises an operator-supplied path and rejects the
+// obvious red flags: empty string, embedded NUL. Returns the cleaned
+// path on success. Every LocalStorageOps method funnels through this
+// so the underlying os.* call only ever sees a sanitised value, which
+// is what CodeQL's go/path-injection rule expects to see on the way in.
+func cleanPath(p string) (string, error) {
+	if p == "" {
+		return "", fmt.Errorf("%w: empty path", ErrUnsafeBackupPath)
+	}
+	if strings.ContainsRune(p, '\x00') {
+		return "", fmt.Errorf("%w: NUL byte in path", ErrUnsafeBackupPath)
+	}
+	return filepath.Clean(p), nil
+}
 
 // StorageOps abstracts the file-system operations the backup runner
 // needs so a remote backend (S3, B2, GCS) can be swapped in without
@@ -90,86 +117,140 @@ func (LocalStorageOps) Home() (string, error) {
 // with the operation + path so a downstream log surfaces both —
 // preserves errors.Is via %w.
 func (LocalStorageOps) MkdirAll(_ context.Context, path string, perm os.FileMode) error {
-	if err := os.MkdirAll(path, perm); err != nil {
-		return fmt.Errorf("backup storage: mkdirall %q: %w", path, err)
+	clean, err := cleanPath(path)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(clean, perm); err != nil {
+		return fmt.Errorf("backup storage: mkdirall %q: %w", clean, err)
 	}
 	return nil
 }
 
 // ReadDir implements StorageOps.
 func (LocalStorageOps) ReadDir(_ context.Context, path string) ([]os.DirEntry, error) {
-	entries, err := os.ReadDir(path)
+	clean, err := cleanPath(path)
 	if err != nil {
-		return nil, fmt.Errorf("backup storage: readdir %q: %w", path, err)
+		return nil, err
+	}
+	entries, err := os.ReadDir(clean)
+	if err != nil {
+		return nil, fmt.Errorf("backup storage: readdir %q: %w", clean, err)
 	}
 	return entries, nil
 }
 
 // Open implements StorageOps.
 func (LocalStorageOps) Open(_ context.Context, path string) (io.ReadCloser, error) {
-	f, err := os.Open(path)
+	clean, err := cleanPath(path)
 	if err != nil {
-		return nil, fmt.Errorf("backup storage: open %q: %w", path, err)
+		return nil, err
+	}
+	f, err := os.Open(clean)
+	if err != nil {
+		return nil, fmt.Errorf("backup storage: open %q: %w", clean, err)
 	}
 	return f, nil
 }
 
 // Create implements StorageOps.
 func (LocalStorageOps) Create(_ context.Context, path string, perm os.FileMode) (io.WriteCloser, error) {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm)
+	clean, err := cleanPath(path)
 	if err != nil {
-		return nil, fmt.Errorf("backup storage: create %q: %w", path, err)
+		return nil, err
+	}
+	f, err := os.OpenFile(clean, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm)
+	if err != nil {
+		return nil, fmt.Errorf("backup storage: create %q: %w", clean, err)
 	}
 	return f, nil
 }
 
-// CreateTemp implements StorageOps.
+// CreateTemp implements StorageOps. An empty dir is forwarded as-is so
+// callers retain the standard "use OS default" affordance; otherwise we
+// canonicalise.
 func (LocalStorageOps) CreateTemp(_ context.Context, dir, pattern string) (TempFile, error) {
-	f, err := os.CreateTemp(dir, pattern)
+	cleanDir := dir
+	if dir != "" {
+		var err error
+		cleanDir, err = cleanPath(dir)
+		if err != nil {
+			return nil, err
+		}
+	}
+	f, err := os.CreateTemp(cleanDir, pattern)
 	if err != nil {
-		return nil, fmt.Errorf("backup storage: createtemp %q/%q: %w", dir, pattern, err)
+		return nil, fmt.Errorf("backup storage: createtemp %q/%q: %w", cleanDir, pattern, err)
 	}
 	return f, nil
 }
 
 // MkdirTemp implements StorageOps.
 func (LocalStorageOps) MkdirTemp(_ context.Context, dir, pattern string) (string, error) {
-	d, err := os.MkdirTemp(dir, pattern)
+	cleanDir := dir
+	if dir != "" {
+		var err error
+		cleanDir, err = cleanPath(dir)
+		if err != nil {
+			return "", err
+		}
+	}
+	d, err := os.MkdirTemp(cleanDir, pattern)
 	if err != nil {
-		return "", fmt.Errorf("backup storage: mkdirtemp %q/%q: %w", dir, pattern, err)
+		return "", fmt.Errorf("backup storage: mkdirtemp %q/%q: %w", cleanDir, pattern, err)
 	}
 	return d, nil
 }
 
 // Remove implements StorageOps.
 func (LocalStorageOps) Remove(_ context.Context, path string) error {
-	if err := os.Remove(path); err != nil {
-		return fmt.Errorf("backup storage: remove %q: %w", path, err)
+	clean, err := cleanPath(path)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(clean); err != nil {
+		return fmt.Errorf("backup storage: remove %q: %w", clean, err)
 	}
 	return nil
 }
 
 // RemoveAll implements StorageOps.
 func (LocalStorageOps) RemoveAll(_ context.Context, path string) error {
-	if err := os.RemoveAll(path); err != nil {
-		return fmt.Errorf("backup storage: removeall %q: %w", path, err)
+	clean, err := cleanPath(path)
+	if err != nil {
+		return err
+	}
+	if err := os.RemoveAll(clean); err != nil {
+		return fmt.Errorf("backup storage: removeall %q: %w", clean, err)
 	}
 	return nil
 }
 
 // Rename implements StorageOps.
 func (LocalStorageOps) Rename(_ context.Context, oldPath, newPath string) error {
-	if err := os.Rename(oldPath, newPath); err != nil {
-		return fmt.Errorf("backup storage: rename %q→%q: %w", oldPath, newPath, err)
+	cleanOld, err := cleanPath(oldPath)
+	if err != nil {
+		return err
+	}
+	cleanNew, err := cleanPath(newPath)
+	if err != nil {
+		return err
+	}
+	if err := os.Rename(cleanOld, cleanNew); err != nil {
+		return fmt.Errorf("backup storage: rename %q→%q: %w", cleanOld, cleanNew, err)
 	}
 	return nil
 }
 
 // Stat implements StorageOps.
 func (LocalStorageOps) Stat(_ context.Context, path string) (os.FileInfo, error) {
-	info, err := os.Stat(path)
+	clean, err := cleanPath(path)
 	if err != nil {
-		return nil, fmt.Errorf("backup storage: stat %q: %w", path, err)
+		return nil, err
+	}
+	info, err := os.Stat(clean)
+	if err != nil {
+		return nil, fmt.Errorf("backup storage: stat %q: %w", clean, err)
 	}
 	return info, nil
 }

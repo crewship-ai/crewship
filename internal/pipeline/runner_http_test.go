@@ -19,6 +19,7 @@ func TestHTTPStep_GET_Success(t *testing.T) {
 	store, resolver, cleanup := openExecutorTestDB(t)
 	defer cleanup()
 	exec := NewExecutor(store, resolver, nil, nil)
+	exec.SetAllowPrivateHTTPForTesting(true)
 
 	step := Step{
 		ID:   "fetch",
@@ -45,6 +46,7 @@ func TestHTTPStep_BlockedByEgressAllowlist(t *testing.T) {
 	exec := NewExecutor(store, resolver, nil, nil).WithEgressGate(func(host string) bool {
 		return false // deny everything
 	})
+	exec.SetAllowPrivateHTTPForTesting(true)
 
 	step := Step{ID: "fetch", Type: StepHTTP, HTTP: &HTTPStep{Method: "GET", URL: srv.URL}}
 	_, _, _, err := exec.runHTTPStep(context.Background(), step, RenderContext{})
@@ -63,6 +65,7 @@ func TestHTTPStep_NonSuccessStatusFails(t *testing.T) {
 	store, resolver, cleanup := openExecutorTestDB(t)
 	defer cleanup()
 	exec := NewExecutor(store, resolver, nil, nil)
+	exec.SetAllowPrivateHTTPForTesting(true)
 
 	step := Step{ID: "fetch", Type: StepHTTP, HTTP: &HTTPStep{Method: "GET", URL: srv.URL}}
 	out, _, _, err := exec.runHTTPStep(context.Background(), step, RenderContext{})
@@ -87,6 +90,7 @@ func TestHTTPStep_BearerCredentialInjection(t *testing.T) {
 	exec := NewExecutor(store, resolver, nil, nil).WithCredentialResolver(
 		func(_ context.Context, t string) (string, error) { return "secret-token", nil },
 	)
+	exec.SetAllowPrivateHTTPForTesting(true)
 
 	step := Step{
 		ID: "post", Type: StepHTTP,
@@ -115,6 +119,7 @@ func TestHTTPStep_TemplateSubstitution(t *testing.T) {
 	store, resolver, cleanup := openExecutorTestDB(t)
 	defer cleanup()
 	exec := NewExecutor(store, resolver, nil, nil)
+	exec.SetAllowPrivateHTTPForTesting(true)
 
 	step := Step{
 		ID: "post", Type: StepHTTP,
@@ -144,6 +149,7 @@ func TestHTTPStep_MaxResponseBytesTruncates(t *testing.T) {
 	store, resolver, cleanup := openExecutorTestDB(t)
 	defer cleanup()
 	exec := NewExecutor(store, resolver, nil, nil)
+	exec.SetAllowPrivateHTTPForTesting(true)
 
 	step := Step{
 		ID: "fetch", Type: StepHTTP,
@@ -191,6 +197,7 @@ func TestHTTPStep_SSRFViaRedirectBlocked(t *testing.T) {
 	exec := NewExecutor(store, resolver, nil, nil).WithEgressGate(func(host string) bool {
 		return host == allowedHost // ONLY the entrypoint, NOT the redirect target
 	})
+	exec.SetAllowPrivateHTTPForTesting(true)
 
 	step := Step{
 		ID:   "fetch",

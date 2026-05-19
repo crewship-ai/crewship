@@ -9,6 +9,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/httpsafe"
 )
 
 // OAuthServerMetadata holds discovered OAuth server configuration (RFC 8414).
@@ -43,6 +45,17 @@ type DiscoveredOAuth struct {
 var discoveryClient = &http.Client{
 	Timeout:   10 * time.Second,
 	Transport: ssrfSafeTransport(),
+}
+
+// discoveryURLValidate is the string-level scheme/IP guard run on every
+// fetchJSON / dynamicClientRegister entry. Function-pointer indirection
+// lets tests (via withTestDiscoveryClient) replace both the transport
+// and the validator with no-op variants so they can drive discovery
+// against httptest.NewServer (127.0.0.1, http). Production callers
+// never reassign it.
+var discoveryURLValidate = func(raw string) error {
+	_, err := httpsafe.ValidateURL(raw, "http", "https")
+	return err
 }
 
 // discoverOAuthFromMCPURL tries to discover OAuth metadata for an MCP server URL.
@@ -124,7 +137,15 @@ type DCRResponse struct {
 }
 
 // dynamicClientRegister performs RFC 7591 Dynamic Client Registration.
+//
+// registrationURL is derived from oauth-authorization-server metadata
+// discovered for an MCP server — i.e. originally user-supplied via the
+// MCP install flow. discoveryURLValidate keeps the safety property
+// local to this function (matches the fetchJSON pattern).
 func dynamicClientRegister(ctx context.Context, registrationURL, redirectURI string) (*DCRResponse, error) {
+	if err := discoveryURLValidate(registrationURL); err != nil {
+		return nil, fmt.Errorf("DCR: %w", err)
+	}
 	reqBody := DCRRequest{
 		RedirectURIs:            []string{redirectURI},
 		ClientName:              "Crewship",
@@ -167,8 +188,17 @@ func dynamicClientRegister(ctx context.Context, registrationURL, redirectURI str
 }
 
 // fetchJSON is a generic helper to GET a URL and decode JSON.
-func fetchJSON[T any](ctx context.Context, url string) (*T, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+//
+// discoveryURLValidate is the string-level reject (scheme, userinfo,
+// literal RFC1918). discoveryClient is already wired with
+// ssrfSafeTransport so the dial-time guard catches DNS aliases; the
+// per-call validate gives CodeQL the local evidence that the URL is
+// checked before it lands in http.NewRequestWithContext.
+func fetchJSON[T any](ctx context.Context, rawURL string) (*T, error) {
+	if err := discoveryURLValidate(rawURL); err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return nil, err
 	}

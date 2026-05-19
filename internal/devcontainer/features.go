@@ -367,9 +367,20 @@ func (d *FeatureDownloader) pull(ctx context.Context, ref, destDir string) error
 // extractTarGz reads a tar stream (already uncompressed — go-containerregistry's
 // Uncompressed() handles any gzip layer transparently, and devcontainer feature
 // artifacts use raw tar layers) and writes entries into destDir. It protects
-// against path traversal by rejecting entries that resolve outside destDir.
+// against path traversal by validating each entry name with filepath.IsLocal
+// and verifying the resolved path lives under destDir.
+//
+// Why two layers: filepath.IsLocal rejects ".." / absolute paths at the
+// entry-name level, which is enough for well-formed archives. filepath.Rel
+// against the cleaned destination is the belt-and-braces check that
+// covers exotic encodings the registry layer might have normalised
+// differently than we do. We refuse symlinks outright — feature
+// artifacts have never needed them and a symlink entry is a classic
+// follow-on for an already-extracted file to redirect a later write
+// outside the destination.
 func extractTarGz(r io.Reader, destDir string) error {
 	tr := tar.NewReader(r)
+	cleanDest := filepath.Clean(destDir)
 	for {
 		hdr, err := tr.Next()
 		if err == io.EOF {
@@ -379,15 +390,27 @@ func extractTarGz(r io.Reader, destDir string) error {
 			return fmt.Errorf("reading tar entry: %w", err)
 		}
 
-		// Sanitize: strip leading "./" or "/" and reject path traversal.
-		cleanName := filepath.Clean(hdr.Name)
-		if strings.HasPrefix(cleanName, "..") {
-			continue // skip entries that try to escape
+		// Symlinks and hardlinks can redirect later writes outside the
+		// destination even when the link entry itself is in-bounds —
+		// drop them. Feature artifacts are flat trees of files; if a
+		// future feature needs a link, we'll add an explicit allowlist.
+		if hdr.Typeflag == tar.TypeSymlink || hdr.Typeflag == tar.TypeLink {
+			continue
 		}
-		target := filepath.Join(destDir, cleanName)
 
-		// Verify the resolved path is inside destDir.
-		if !strings.HasPrefix(target, filepath.Clean(destDir)+string(os.PathSeparator)) && target != filepath.Clean(destDir) {
+		cleanName := filepath.Clean(hdr.Name)
+		// IsLocal rejects "..", absolute paths, and (on Windows)
+		// reserved names like NUL/CON — exactly the class of entries an
+		// attacker would use for traversal.
+		if cleanName == "." || !filepath.IsLocal(cleanName) {
+			continue
+		}
+		target := filepath.Join(cleanDest, cleanName)
+
+		// Defence in depth: after filepath.Join verify the result
+		// really lives under destDir.
+		rel, relErr := filepath.Rel(cleanDest, target)
+		if relErr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
 			continue
 		}
 

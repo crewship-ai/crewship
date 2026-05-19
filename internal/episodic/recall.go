@@ -143,8 +143,17 @@ func Recall(ctx context.Context, db *sql.DB, emb Embedder, q Query) ([]Hit, erro
 		return li > lj
 	})
 
-	out := make([]Hit, 0, q.K)
-	picked := make([]string, 0, q.K)
+	// q.K is already clamped to [1, 50] at the top of this function,
+	// but re-applying the bound at the make() call lets CodeQL's
+	// go/uncontrolled-allocation-size rule see the cap locally and
+	// also defends against a future caller that bypasses the
+	// normalisation block above.
+	allocCap := q.K
+	if allocCap < 0 || allocCap > 50 {
+		allocCap = 50
+	}
+	out := make([]Hit, 0, allocCap)
+	picked := make([]string, 0, allocCap)
 	for i := 0; i < q.K && i < len(cands); i++ {
 		// Strip vec from output; it's internal.
 		out = append(out, cands[i].Hit)

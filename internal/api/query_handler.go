@@ -518,7 +518,7 @@ func (h *QueryHandler) ListPeerConversations(w http.ResponseWriter, r *http.Requ
 	}
 	defer rows.Close()
 
-	items := make([]peerConvItem, 0, limit)
+	items := make([]peerConvItem, 0, capacityHint(limit))
 	for rows.Next() {
 		var item peerConvItem
 		var escalatedInt int

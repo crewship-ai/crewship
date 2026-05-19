@@ -289,8 +289,10 @@ func (h *NextAuthHandler) CallbackCredentials(w http.ResponseWriter, r *http.Req
 	if callbackUrl == "" {
 		callbackUrl = "/"
 	}
-	// V-06: Prevent open redirect — only allow relative paths
-	if !strings.HasPrefix(callbackUrl, "/") || strings.HasPrefix(callbackUrl, "//") {
+	// V-06: Prevent open redirect. isSafeRedirect closes the
+	// "/\\evil.com" and embedded-backslash bypasses that the bare
+	// HasPrefix check would miss (CodeQL go/bad-redirect-check).
+	if !isSafeRedirect(callbackUrl) {
 		callbackUrl = "/"
 	}
 
@@ -345,8 +347,10 @@ func (h *NextAuthHandler) SignIn(w http.ResponseWriter, r *http.Request) {
 	if callbackUrl == "" {
 		callbackUrl = "/"
 	}
-	// V-06: Prevent open redirect — only allow relative paths
-	if !strings.HasPrefix(callbackUrl, "/") || strings.HasPrefix(callbackUrl, "//") {
+	// V-06: Prevent open redirect. isSafeRedirect closes the
+	// "/\\evil.com" and embedded-backslash bypasses that the bare
+	// HasPrefix check would miss (CodeQL go/bad-redirect-check).
+	if !isSafeRedirect(callbackUrl) {
 		callbackUrl = "/"
 	}
 	http.Redirect(w, r, "/login?callbackUrl="+url.QueryEscape(callbackUrl), http.StatusFound)

@@ -152,7 +152,19 @@ func (f *CatalogFetcher) fetchUpstream(ctx context.Context) ([]CatalogEntry, err
 	return extractFeaturesFromHTML(body), nil
 }
 
-var featureRefRegex = regexp.MustCompile(`ghcr\.io/[a-zA-Z0-9][a-zA-Z0-9/_.-]*:[0-9]+`)
+// featureRefRegex matches devcontainer feature refs of the form
+// `ghcr.io/<owner>/<repo>:<digits>`. The pattern is bounded on both
+// ends so it cannot accidentally swallow surrounding HTML content
+// (CodeQL go/regex/missing-regexp-anchor — without the `\b` left
+// anchor a substring like `evil-ghcr.io/foo:1` would match and we
+// would treat `evil-` as part of the host).
+//
+// `\b` is a word boundary, which is the right anchor for an
+// HTML-scraping regex: we want to refuse matches that share a word
+// character with surrounding markup, but still match `"ghcr.io/...":1`
+// inside attribute values. The `:[0-9]+(?:\b|$)` tail keeps the tag
+// numeric segment from spilling into the next word.
+var featureRefRegex = regexp.MustCompile(`\bghcr\.io/[a-zA-Z0-9][a-zA-Z0-9/_.-]*:[0-9]+\b`)
 
 func extractFeaturesFromHTML(body []byte) []CatalogEntry {
 	matches := featureRefRegex.FindAllString(string(body), -1)

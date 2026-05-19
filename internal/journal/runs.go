@@ -188,7 +188,14 @@ LIMIT ? OFFSET ?`
 	}
 	defer rows.Close()
 
-	out := make([]RunAggregated, 0, q.Limit)
+	// q.Limit is clamped to [1, 100] in the validation block above;
+	// re-apply at the make() call so the cap is locally visible to
+	// CodeQL's go/uncontrolled-allocation-size rule.
+	allocCap := q.Limit
+	if allocCap < 0 || allocCap > 100 {
+		allocCap = 100
+	}
+	out := make([]RunAggregated, 0, allocCap)
 	for rows.Next() {
 		var (
 			traceID, startedTS                             string

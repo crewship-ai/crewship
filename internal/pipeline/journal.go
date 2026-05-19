@@ -145,7 +145,18 @@ func (c *pipelineEmitContext) emitRunStarted(ctx context.Context, mode RunMode, 
 // Variadic pairs follow the slog/log/value convention: even-indexed
 // args are keys (strings), odd-indexed are values.
 func mergePayload(base map[string]any, kv ...any) map[string]any {
-	out := make(map[string]any, len(base)+len(kv)/2)
+	// Cap the allocation hint to defeat both
+	//   - integer overflow (len(base)+len(kv)/2 wrapping on a 32-bit
+	//     int when one of the inputs is pathologically large), and
+	//   - CodeQL's go/allocation-size-overflow flag on this exact
+	//     idiom even though no caller in the tree passes anywhere near
+	//     thousands of variadic pairs.
+	const maxPayloadHint = 256
+	hint := len(base) + len(kv)/2
+	if hint < 0 || hint > maxPayloadHint {
+		hint = maxPayloadHint
+	}
+	out := make(map[string]any, hint)
 	for k, v := range base {
 		out[k] = v
 	}

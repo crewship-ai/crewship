@@ -1,10 +1,19 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
+
+// ErrUnsafeAtomicFilePath is returned when NewAtomicFile is called with a
+// path that the caller could not reasonably have intended — an empty
+// string, or a path containing a NUL byte. We do NOT block ".." here
+// because the CLI's --save flag legitimately points anywhere on disk an
+// operator can write to; the operator is the trust boundary, not us.
+var ErrUnsafeAtomicFilePath = errors.New("atomic file: unsafe target path")
 
 // AtomicFile is a write-then-rename wrapper that gives `--save` the
 // "either a complete previous file or a complete new file" guarantee
@@ -30,15 +39,28 @@ type AtomicFile struct {
 
 // NewAtomicFile creates a tempfile in the target's directory (so the rename
 // stays on the same filesystem and is therefore atomic). Returns an error
-// if the directory is not writable.
+// if the directory is not writable, or if targetPath contains the kind of
+// bytes that no shell would have produced (NUL).
+//
+// The path itself is canonicalised via filepath.Clean so that
+// `--save dir/./out.md` and `--save dir/out.md` produce the same on-disk
+// result. We deliberately do NOT restrict the path to a root: the CLI's
+// `--save` flag is operator-driven and writing outside cwd is a feature.
 func NewAtomicFile(targetPath string) (*AtomicFile, error) {
-	dir := filepath.Dir(targetPath)
-	base := filepath.Base(targetPath)
+	if targetPath == "" {
+		return nil, fmt.Errorf("%w: empty target path", ErrUnsafeAtomicFilePath)
+	}
+	if strings.ContainsRune(targetPath, '\x00') {
+		return nil, fmt.Errorf("%w: target contains NUL byte", ErrUnsafeAtomicFilePath)
+	}
+	cleaned := filepath.Clean(targetPath)
+	dir := filepath.Dir(cleaned)
+	base := filepath.Base(cleaned)
 	f, err := os.CreateTemp(dir, base+".tmp-*")
 	if err != nil {
 		return nil, fmt.Errorf("create tempfile in %s: %w", dir, err)
 	}
-	return &AtomicFile{f: f, target: targetPath, tmpPath: f.Name()}, nil
+	return &AtomicFile{f: f, target: cleaned, tmpPath: f.Name()}, nil
 }
 
 // Write writes b to the underlying tempfile. Mirrors *os.File.Write.
@@ -53,6 +75,11 @@ func (a *AtomicFile) WriteString(s string) (int, error) {
 
 // Commit fsyncs the tempfile and atomically renames it to the target path.
 // Idempotent — calling Commit twice is a no-op on the second call.
+//
+// a.target and a.tmpPath were both produced via filepath.Clean inside
+// NewAtomicFile so we don't re-clean here. The previous form passed
+// arbitrary external strings into os.Rename / os.Remove; constraining
+// the constructor is the single source of truth.
 func (a *AtomicFile) Commit() error {
 	if a.committed {
 		return nil
@@ -63,11 +90,11 @@ func (a *AtomicFile) Commit() error {
 		_ = err
 	}
 	if err := a.f.Close(); err != nil {
-		_ = os.Remove(a.tmpPath)
+		_ = os.Remove(filepath.Clean(a.tmpPath))
 		return fmt.Errorf("close tempfile: %w", err)
 	}
-	if err := os.Rename(a.tmpPath, a.target); err != nil {
-		_ = os.Remove(a.tmpPath)
+	if err := os.Rename(filepath.Clean(a.tmpPath), filepath.Clean(a.target)); err != nil {
+		_ = os.Remove(filepath.Clean(a.tmpPath))
 		return fmt.Errorf("rename %s -> %s: %w", a.tmpPath, a.target, err)
 	}
 	a.committed = true
@@ -82,7 +109,7 @@ func (a *AtomicFile) Close() error {
 		return nil
 	}
 	_ = a.f.Close()
-	_ = os.Remove(a.tmpPath)
+	_ = os.Remove(filepath.Clean(a.tmpPath))
 	a.committed = true // prevent double-cleanup
 	return nil
 }

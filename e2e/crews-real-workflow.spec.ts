@@ -31,7 +31,7 @@ async function pickFirstAgent(page: Page): Promise<string> {
 async function pickFirstCrew(page: Page): Promise<string> {
   await page.goto("/crews")
   // Click the crew row (chevron + name + agent count) — pick any.
-  const crewRow = page.locator("aside button").filter({ hasText: /^Research|DevOps|Engineering|Quality/ }).first()
+  const crewRow = page.locator("aside button").filter({ hasText: /^(Research|DevOps|Engineering|Quality)/ }).first()
   await expect(crewRow).toBeVisible({ timeout: TIMEOUT })
   await crewRow.click()
   await expect(page).toHaveURL(/[?&]crew=/, { timeout: TIMEOUT })

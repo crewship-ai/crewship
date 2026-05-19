@@ -594,12 +594,19 @@ func TestOAuth_StoreStateWithPKCE_RoundTrip(t *testing.T) {
 //   * discovery / DCR by swapping the package-level discoveryClient for the test
 
 // withTestDiscoveryClient swaps the package-level discoveryClient so it allows
-// loopback connections (default Transport instead of ssrfSafeTransport).
+// loopback connections (default Transport instead of ssrfSafeTransport),
+// and disables the string-level URL validator so http:// + 127.0.0.1 URLs
+// produced by httptest.NewServer don't get rejected before the request.
 func withTestDiscoveryClient(t *testing.T) {
 	t.Helper()
-	orig := discoveryClient
+	origClient := discoveryClient
+	origValidate := discoveryURLValidate
 	discoveryClient = &http.Client{Timeout: 5 * time.Second}
-	t.Cleanup(func() { discoveryClient = orig })
+	discoveryURLValidate = func(string) error { return nil }
+	t.Cleanup(func() {
+		discoveryClient = origClient
+		discoveryURLValidate = origValidate
+	})
 }
 
 func TestExchangeOAuthCode_HTTPError(t *testing.T) {

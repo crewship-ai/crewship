@@ -163,8 +163,19 @@ func (imp *Importer) Import(ctx context.Context, _, _ string, req ImportRequest)
 	return imp.upsertEnriched(ctx, parsed, vendor, spdx, scan, source)
 }
 
-func (imp *Importer) fetchURL(ctx context.Context, url string) (string, error) {
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+func (imp *Importer) fetchURL(ctx context.Context, rawURL string) (string, error) {
+	// Re-validate at the network boundary. Import() already calls
+	// ValidateImportURL upstream, but fetchURL is also reachable from
+	// upsertEnriched + future code paths; the redundant check makes the
+	// safety property local to this function rather than a property of
+	// the caller chain. CodeQL's go/request-forgery rule reads it the
+	// same way — without this it cannot prove the URL is safe.
+	if !imp.SkipURLValidation {
+		if err := ValidateImportURL(ctx, rawURL); err != nil {
+			return "", fmt.Errorf("validate fetch URL: %w", err)
+		}
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return "", fmt.Errorf("build request: %w", err)
 	}
@@ -176,7 +187,7 @@ func (imp *Importer) fetchURL(ctx context.Context, url string) (string, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("fetch url %q: status %d", url, resp.StatusCode)
+		return "", fmt.Errorf("fetch url %q: status %d", rawURL, resp.StatusCode)
 	}
 
 	const limit = int64(512 * 1024)

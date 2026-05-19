@@ -335,6 +335,15 @@ func runNoStream(serverURL, wsToken, agentID, chatID, prompt string, quiet bool,
 		toPrint := text
 		if md != nil {
 			toPrint = md.Render(text)
+		} else {
+			// Strip control characters (ANSI escapes, OSC sequences,
+			// cursor manipulation) from raw model output before
+			// printing — agents have no legitimate need to drive the
+			// terminal, and a malicious tool result could otherwise
+			// rewrite the user's scrollback. The markdown renderer
+			// already does its own sanitisation, so the strip only
+			// runs on the raw path.
+			toPrint = sanitizeTerminal(toPrint)
 		}
 		fmt.Print(toPrint)
 		if !strings.HasSuffix(toPrint, "\n") {
@@ -453,7 +462,10 @@ func streamEvents(ws *cli.WSClient, quiet bool, md *cli.MarkdownRenderer, save *
 		if md != nil {
 			fmt.Print(md.Write(s))
 		} else {
-			fmt.Print(s)
+			// Raw text from the agent flows straight to the user's
+			// terminal — strip control chars so a tool result can't
+			// emit ANSI escapes / OSC links and rewrite the scrollback.
+			fmt.Print(sanitizeTerminal(s))
 		}
 	}
 	// joinErrs combines a save-time error with a stream-time error so
@@ -495,13 +507,16 @@ func streamEvents(ws *cli.WSClient, quiet bool, md *cli.MarkdownRenderer, save *
 			// becomes part of the captured output; --quiet alone still
 			// suppresses the dim stderr peek. Untruncated text can be
 			// huge for some models — that's the user's choice.
+			// sanitizeTerminal strips any control chars the model
+			// emitted before they reach the user's terminal.
+			thinking := sanitizeTerminal(event.Content)
 			if showThinking {
-				fmt.Print(event.Content)
-				if !strings.HasSuffix(event.Content, "\n") {
+				fmt.Print(thinking)
+				if !strings.HasSuffix(thinking, "\n") {
 					fmt.Println()
 				}
 			} else if !quiet {
-				fmt.Fprintf(os.Stderr, "%s[thinking]%s %s\n", cli.Gray, cli.Reset, truncate(event.Content, 100))
+				fmt.Fprintf(os.Stderr, "%s[thinking]%s %s\n", cli.Gray, cli.Reset, truncate(thinking, 100))
 			}
 		case "tool_call":
 			if !quiet {
