@@ -3,6 +3,7 @@
 import { Copy, ThumbsUp, ThumbsDown, AlertCircle, AlertTriangle, Crown, CheckCircle2, Clock, FileText, DollarSign, Zap, CircleDot, HelpCircle, FileCode } from "lucide-react"
 import { useArtifactStore } from "@/stores/artifact-store"
 import { useReactionsStore } from "@/stores/reactions-store"
+import { useFeedbackStore } from "@/stores/feedback-store"
 import { ReactionPicker } from "./reactions/reaction-picker"
 import { ReactionsRow } from "./reactions/reactions-row"
 import {
@@ -530,18 +531,7 @@ export function AssistantTurn({ turn, onCopy, onFileClick, agentId }: AssistantT
 
       {/* Actions (only when done streaming and has text content) */}
       {!turn.isStreaming && fullText && !hasDelegation && (
-        <MessageActions>
-          <MessageAction tooltip="Copy" onClick={() => onCopy(fullText)}>
-            <Copy className="h-3.5 w-3.5" />
-          </MessageAction>
-          <MessageAction tooltip="Good response">
-            <ThumbsUp className="h-3.5 w-3.5" />
-          </MessageAction>
-          <MessageAction tooltip="Bad response">
-            <ThumbsDown className="h-3.5 w-3.5" />
-          </MessageAction>
-          <ReactionPicker onPick={(emoji) => useReactionsStore.getState().add(turn.id, emoji)} />
-        </MessageActions>
+        <TurnFeedbackActions turn={turn} onCopy={onCopy} fullText={fullText} />
       )}
     </Message>
   )
@@ -557,5 +547,74 @@ function TurnReactions({ turnId, streaming }: { turnId: string; streaming: boole
       onToggle={(emoji) => toggle(turnId, emoji)}
       className="mt-1"
     />
+  )
+}
+
+// TurnFeedbackActions wires the per-turn message actions (Copy / thumbs /
+// emoji picker) into the typed feedback store. The thumbs are kept
+// separate from the open-emoji ReactionPicker on purpose: thumbs are a
+// structured eval signal that the ADLC phase-7 loop reads, while emoji
+// reactions are social/decorative. Mixing them would force the eval
+// dataset builder to filter on Unicode codepoints.
+//
+// chat_id propagation: the chat id is not on the ChatTurn shape today,
+// so we derive it from the pathname only when present. If absent the
+// POST falls back to the user's primary workspace — see the
+// MessageFeedbackHandler in internal/api/message_feedback.go for the
+// fallback semantics.
+function TurnFeedbackActions({
+  turn,
+  onCopy,
+  fullText,
+}: {
+  turn: ChatTurn
+  onCopy: (content: string) => void
+  fullText: string
+}) {
+  const submitted = useFeedbackStore((s) => s.byTurn[turn.id]) ?? {}
+  const submit = useFeedbackStore((s) => s.submit)
+  const reset = useFeedbackStore((s) => s.reset)
+
+  // trace_id can be threaded onto the turn metadata when the orchestrator
+  // emits it; until that wiring lands here, we read defensively so the
+  // POST simply omits the field instead of erroring.
+  const meta = (turn as unknown as { metadata?: { trace_id?: string } }).metadata
+  const traceId = meta?.trace_id
+
+  const handle = (signal: "helpful" | "not_helpful") => {
+    if (submitted[signal]) {
+      reset(turn.id, signal)
+      return
+    }
+    void submit(turn.id, signal, { traceId })
+  }
+
+  return (
+    <MessageActions>
+      <MessageAction tooltip="Copy" onClick={() => onCopy(fullText)}>
+        <Copy className="h-3.5 w-3.5" />
+      </MessageAction>
+      <MessageAction
+        tooltip={submitted.helpful ? "Marked good — click to undo" : "Good response"}
+        onClick={() => handle("helpful")}
+        aria-pressed={!!submitted.helpful}
+        data-active={submitted.helpful ? "true" : "false"}
+      >
+        <ThumbsUp
+          className={"h-3.5 w-3.5 " + (submitted.helpful ? "text-emerald-500" : "")}
+        />
+      </MessageAction>
+      <MessageAction
+        tooltip={submitted.not_helpful ? "Marked bad — click to undo" : "Bad response"}
+        onClick={() => handle("not_helpful")}
+        aria-pressed={!!submitted.not_helpful}
+        data-active={submitted.not_helpful ? "true" : "false"}
+      >
+        <ThumbsDown
+          className={"h-3.5 w-3.5 " + (submitted.not_helpful ? "text-rose-500" : "")}
+        />
+      </MessageAction>
+      <ReactionPicker onPick={(emoji) => useReactionsStore.getState().add(turn.id, emoji)} />
+    </MessageActions>
   )
 }

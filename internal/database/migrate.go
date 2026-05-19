@@ -1287,6 +1287,10 @@ END;
 	// PR #395's add_assignment_queue took v93 first.)
 	// See migrate_consts_v94_credential_vault_types.go.
 	{version: 94, name: "add_credential_vault_types", sql: migrationAddCredentialVaultTypes},
+	// Typed per-message feedback (thumbs/edit/regenerate/abandon) bound to
+	// trace_id for ADLC phase-7 continuous-learning signal. See
+	// migrate_consts_v95_message_feedback.go.
+	{version: 95, name: "add_message_feedback", sql: migrationAddMessageFeedback},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

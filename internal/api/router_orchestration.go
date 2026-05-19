@@ -239,6 +239,15 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	r.mux.Handle("DELETE /api/v1/chats/{chatId}/messages/{messageId}/reactions/{emoji}",
 		authed(http.HandlerFunc(mrh.Remove)))
 
+	// Typed feedback signal: thumbs / edit / regenerate bound to trace_id
+	// for the ADLC phase-7 continuous-learning loop. Sits beside reactions
+	// rather than replacing it — reactions are open-vocabulary social
+	// signal, feedback is structured eval signal. Migration v95 owns
+	// the table.
+	mfh := NewMessageFeedbackHandler(r.db, r.logger)
+	r.mux.Handle("POST /api/v1/feedback", authed(http.HandlerFunc(mfh.Create)))
+	r.mux.Handle("GET /api/v1/feedback", authed(http.HandlerFunc(mfh.List)))
+
 	// Hooks registry: lifecycle intercepts. List is available to every
 	// workspace member for auditability; enable/disable is OWNER/ADMIN
 	// only because flipping a hook can invoke shell commands.
