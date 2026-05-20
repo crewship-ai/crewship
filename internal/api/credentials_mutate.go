@@ -453,24 +453,34 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 		respTags = []string{}
 	}
 
+	// v98 attribution echoes back to the caller so the UI can render
+	// the "Crewship-managed" badge immediately after create. Pre-fix
+	// the response builder dropped these three fields, so the UI saw
+	// a normal credential with null provenance until the next list
+	// refresh — at which point the SELECT picked them up from the
+	// row that had been carrying them all along.
+	actorTypeResp := &actorType
 	writeJSON(w, http.StatusCreated, credentialResponse{
-		ID:           credID,
-		Name:         req.Name,
-		Description:  req.Description,
-		Type:         req.Type,
-		Provider:     req.Provider,
-		Status:       credStatus,
-		Scope:        req.Scope,
-		CrewID:       legacyCrewID,
-		CrewIDs:      respCrewIDs,
-		Tags:         respTags,
-		AccountLabel: req.AccountLabel,
-		AccountEmail: req.AccountEmail,
-		Username:     req.Username,
-		LastUsedIPs:  []string{},
-		CreatedAt:    now,
-		UpdatedAt:    now,
-		AgentNames:   []string{},
+		ID:                    credID,
+		Name:                  req.Name,
+		Description:           req.Description,
+		Type:                  req.Type,
+		Provider:              req.Provider,
+		Status:                credStatus,
+		Scope:                 req.Scope,
+		CrewID:                legacyCrewID,
+		CrewIDs:               respCrewIDs,
+		Tags:                  respTags,
+		AccountLabel:          req.AccountLabel,
+		AccountEmail:          req.AccountEmail,
+		Username:              req.Username,
+		LastUsedIPs:           []string{},
+		CreatedAt:             now,
+		UpdatedAt:             now,
+		AgentNames:            []string{},
+		CreatedByActorType:    actorTypeResp,
+		CreatedByActorID:      actorID,
+		ProvisionedForService: provisionedForService,
 	})
 }
 
