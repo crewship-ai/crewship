@@ -227,6 +227,30 @@ type AgentResponse struct {
 	RoleTitle      *string `json:"role_title"`
 }
 
+// FindLeadAgentByCrew returns the LEAD-role agent of a crew, or
+// (nil, nil) when the crew has agents but none with agent_role=LEAD.
+// Returns an error only on transport failure. Used by the
+// AUTO_MANAGED credential dispatch to pin attribution to whichever
+// agent owns the crew's sidecar provisioning.
+//
+// Convention assumption: a crew that declares any agents has at most
+// one LEAD; manifest validation enforces uniqueness. Multiple LEAD
+// rows would surface here as "first match wins" (sort order from the
+// API), and the validator catches the conflict upstream so this
+// helper doesn't have to.
+func (c *Client) FindLeadAgentByCrew(ctx context.Context, crewID string) (*AgentResponse, error) {
+	agents, err := c.ListAgentsByCrew(ctx, crewID)
+	if err != nil {
+		return nil, err
+	}
+	for i := range agents {
+		if agents[i].AgentRole == "LEAD" {
+			return &agents[i], nil
+		}
+	}
+	return nil, nil
+}
+
 func (c *Client) ListAgentsByCrew(ctx context.Context, crewID string) ([]AgentResponse, error) {
 	if cached, ok := c.agentsByCrew[crewID]; ok {
 		return cached, nil
@@ -485,6 +509,13 @@ type CredentialResponse struct {
 	Provider string `json:"provider"`
 	Status   string `json:"status"`
 	Scope    string `json:"scope"`
+	// Attribution (v98) — see internal/api/credentials.go. The
+	// manifest dispatch uses ProvisionedForService for cross-crew
+	// collision detection: same name + same tag = re-apply, same
+	// name + different tag = real conflict.
+	CreatedByActorType    *string `json:"created_by_actor_type"`
+	CreatedByActorID      *string `json:"created_by_actor_id"`
+	ProvisionedForService *string `json:"provisioned_for_service"`
 }
 
 // ListCredentials returns every credential in the workspace,

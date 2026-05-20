@@ -8,11 +8,21 @@ import (
 	"database/sql"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/encryption"
 )
+
+// provisionedForServiceRe enforces the canonical `<crew>/<service>`
+// shape: two non-empty DNS-label-safe segments separated by exactly
+// one slash. Mirrors the crew + service name regex
+// internal/manifest/validate.go uses on the manifest side. Without
+// this gate, callers could write whitespace, malformed strings, or
+// multi-slash tags that break the cross-crew collision detection
+// (which keys on the literal value).
+var provisionedForServiceRe = regexp.MustCompile(`^[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?/[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
 
 type createCredentialRequest struct {
 	Name          string   `json:"name"`
@@ -29,6 +39,22 @@ type createCredentialRequest struct {
 	RefreshToken  *string  `json:"refresh_token"`
 	TokenExpires  *string  `json:"token_expires_at"`
 	SecurityLevel *int     `json:"security_level"`
+	// Attribution (v98). Together these answer "who created this
+	// credential row?" — the existing `created_by` column captures
+	// the calling user, but Crewship now also writes credentials on
+	// behalf of agents (sidecar auto-managed passwords) and system
+	// processes (seed / backup restore). When CreatedByActorType is
+	// 'agent' the caller MUST be OWNER or ADMIN — anyone with lower
+	// role lacks the authority to attribute a workspace mutation to
+	// a non-self actor. Default 'user' with the authenticated user.
+	CreatedByActorType *string `json:"created_by_actor_type,omitempty"`
+	CreatedByActorID   *string `json:"created_by_actor_id,omitempty"`
+	// ProvisionedForService marks the row as owned by a specific
+	// sidecar service declaration in `<crew-slug>/<service-name>`
+	// form. Non-empty rows are treated as Crewship-managed in the UI:
+	// reveal / edit actions are hidden, rotate is the only mutation.
+	// Manifest apply sets this for AUTO_MANAGED rows.
+	ProvisionedForService *string `json:"provisioned_for_service,omitempty"`
 	// USERPASS: cleartext identifier half (e.g. "user@gmail.com").
 	// Stored unencrypted in credentials.username because usernames are
 	// identifiers, not secrets — mirrors Bitwarden's login.username
@@ -50,6 +76,78 @@ type createCredentialRequest struct {
 	// agent runs with a "credential not configured" error until the user
 	// supplies a real value.
 	Pending bool `json:"pending"`
+}
+
+// attributionError is the shape resolveCreateAttribution returns
+// on rejection — wraps the HTTP status + message so the caller
+// (Create) just maps to replyError. Kept private to this file
+// because no other handler needs this exact pair.
+type attributionError struct {
+	status  int
+	message string
+}
+
+// resolveCreateAttribution implements the (actor_type, actor_id)
+// resolution rules described above the Create handler's call site.
+// Returns the resolved (type, id, nil) on success, or
+// (zero, nil, *attributionError) when the request shape is
+// malformed or the caller's role doesn't authorise the requested
+// attribution.
+//
+// The function is intentionally outside the Create method body so
+// it can be unit-tested without spinning up an HTTP request +
+// authed context — see credentials_mutate_attribution_test.go.
+func resolveCreateAttribution(req createCredentialRequest, user *AuthUser, role string) (string, *string, *attributionError) {
+	actorType := "user"
+	if req.CreatedByActorType != nil && *req.CreatedByActorType != "" {
+		actorType = *req.CreatedByActorType
+	}
+	switch actorType {
+	case "user", "agent", "system":
+		// valid
+	default:
+		return "", nil, &attributionError{http.StatusBadRequest, "created_by_actor_type must be user|agent|system"}
+	}
+
+	// OWNER/ADMIN gate for any non-default actor type. Lower roles
+	// can only attribute to themselves.
+	isPrivileged := role == "OWNER" || role == "ADMIN"
+	if actorType != "user" && !isPrivileged {
+		return "", nil, &attributionError{http.StatusForbidden, "non-self actor attribution requires OWNER or ADMIN role"}
+	}
+
+	var actorID *string
+	switch actorType {
+	case "user":
+		// Default to self. Allow overriding to another user.id ONLY
+		// for OWNER/ADMIN (e.g. admin migrating ownership); a
+		// regular user that supplies a foreign id is a spoof attempt.
+		id := user.ID
+		if req.CreatedByActorID != nil && *req.CreatedByActorID != "" && *req.CreatedByActorID != user.ID {
+			if !isPrivileged {
+				return "", nil, &attributionError{http.StatusForbidden, "created_by_actor_id must match authenticated user"}
+			}
+			id = *req.CreatedByActorID
+		}
+		actorID = &id
+	case "agent":
+		// Agent attribution MUST carry an explicit agent id — we
+		// don't silently fall back to the caller (that's exactly the
+		// spoof shape we're protecting against).
+		if req.CreatedByActorID == nil || *req.CreatedByActorID == "" {
+			return "", nil, &attributionError{http.StatusBadRequest, "created_by_actor_id is required when created_by_actor_type=agent"}
+		}
+		id := *req.CreatedByActorID
+		actorID = &id
+	case "system":
+		// System actors have no natural id. A caller-supplied id is
+		// rejected to keep the row's actor_id NULL — querying for
+		// "system rows" stays a simple actor_type filter.
+		if req.CreatedByActorID != nil && *req.CreatedByActorID != "" {
+			return "", nil, &attributionError{http.StatusBadRequest, "created_by_actor_id must be empty when created_by_actor_type=system"}
+		}
+	}
+	return actorType, actorID, nil
 }
 
 // Create stores a new encrypted credential in the workspace.
@@ -178,6 +276,72 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 		h.logger.Warn("cleanup soft-deleted credential", "name", req.Name, "error", err)
 	}
 
+	// Resolve attribution (v98). Done BEFORE BeginTx so a malformed
+	// request doesn't open and abandon a transaction — see the
+	// "transaction leak" trail at credentials_mutate_test.go.
+	//
+	// Three valid (actor_type, actor_id) shapes:
+	//
+	//   ('user',   <user-id>)   — default. The caller can override
+	//                              actor_id only as OWNER/ADMIN (e.g.
+	//                              an admin auditing-in another user's
+	//                              ownership); a regular user that
+	//                              specifies a non-self actor_id is
+	//                              treated as a spoof attempt and
+	//                              rejected.
+	//   ('agent',  <agent-id>)  — requires OWNER/ADMIN (manifest apply
+	//                              dispatch runs as the workspace
+	//                              owner). actor_id is REQUIRED — a
+	//                              nil/empty payload is rejected so
+	//                              we never silently fall back to
+	//                              "self as agent."
+	//   ('system', <empty>)     — server-side machinery (manifest
+	//                              dispatch for v98 AUTO_MANAGED).
+	//                              actor_id is intentionally nil; no
+	//                              one specific natural identity
+	//                              maps to "system." Requires
+	//                              OWNER/ADMIN — same reasoning.
+	actorType, actorID, attrErr := resolveCreateAttribution(req, user, role)
+	if attrErr != nil {
+		replyError(w, attrErr.status, attrErr.message)
+		return
+	}
+	// provisioned_for_service marks the row as Crewship-owned (the UI
+	// hides reveal / edit / delete on these). Two layers of gating:
+	//
+	//   1. Provenance gate — the legitimate stamping path is exactly
+	//      one shape: manifest apply's auto-managed dispatch posts
+	//      (provider=AUTO_MANAGED, actor_type=system,
+	//      provisioned_for_service=<crew>/<svc>). Any other combo is
+	//      a spoof attempt; the UI badge must not be opportunistic.
+	//
+	//   2. Shape gate — even with the right provenance, the value
+	//      itself has to be canonical `<crew>/<service>` with two
+	//      non-empty DNS-label segments. The cross-crew collision
+	//      detection in the manifest dispatch keys on this exact
+	//      string; whitespace, missing slash, or multi-slash junk
+	//      would silently break that check downstream.
+	//
+	// Empty / whitespace-only is treated as "not stamped" and falls
+	// through to the nil branch — same as omitting the field.
+	var provisionedForService *string
+	if req.ProvisionedForService != nil {
+		canonical := strings.TrimSpace(*req.ProvisionedForService)
+		if canonical != "" {
+			if req.Provider != "AUTO_MANAGED" || actorType != "system" {
+				replyError(w, http.StatusBadRequest,
+					"provisioned_for_service is reserved for AUTO_MANAGED system credentials (set provider=AUTO_MANAGED and created_by_actor_type=system, or omit this field)")
+				return
+			}
+			if !provisionedForServiceRe.MatchString(canonical) {
+				replyError(w, http.StatusBadRequest,
+					"provisioned_for_service must be canonical <crew>/<service> with two non-empty DNS-label segments")
+				return
+			}
+			provisionedForService = &canonical
+		}
+	}
+
 	now := time.Now().UTC().Format(time.RFC3339)
 	credID := generateCUID()
 
@@ -213,11 +377,13 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 	_, err = tx.ExecContext(r.Context(), `
 		INSERT INTO credentials (id, workspace_id, name, description, encrypted_value,
 			type, provider, scope, crew_id, account_label, account_email, username,
-			token_expires_at, security_level, status, tags, created_by, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			token_expires_at, security_level, status, tags, created_by, created_at, updated_at,
+			created_by_actor_type, created_by_actor_id, provisioned_for_service)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		credID, workspaceID, req.Name, req.Description, encryptedValue,
 		req.Type, req.Provider, req.Scope, legacyCrewID, req.AccountLabel, req.AccountEmail, req.Username,
-		req.TokenExpires, secLevel, credStatus, tagsArg, user.ID, now, now)
+		req.TokenExpires, secLevel, credStatus, tagsArg, user.ID, now, now,
+		actorType, actorID, provisionedForService)
 	if err != nil {
 		tx.Rollback()
 		if strings.Contains(err.Error(), "UNIQUE") {

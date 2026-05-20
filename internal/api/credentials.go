@@ -57,6 +57,14 @@ type credentialResponse struct {
 	AgentCount int      `json:"_count_agent_credentials"`
 	AgentNames []string `json:"agent_names"`
 	MCPUsed    bool     `json:"mcp_used"`
+	// Attribution (v98). CreatedByActorType is one of 'user' /
+	// 'agent' / 'system'; nil only on pre-v98 rows that the
+	// migration hasn't backfilled to 'user' (no such case in
+	// SQLite since the default kicks in, kept *string for forward-
+	// compat with future schema changes).
+	CreatedByActorType    *string `json:"created_by_actor_type"`
+	CreatedByActorID      *string `json:"created_by_actor_id"`
+	ProvisionedForService *string `json:"provisioned_for_service"`
 }
 
 // Batch loaders and junction-table helpers live in credentials_loaders.go
@@ -88,6 +96,7 @@ func (h *CredentialHandler) List(w http.ResponseWriter, r *http.Request) {
 			c.token_expires_at, c.last_checked_at, c.last_error,
 			c.last_used_at, c.last_used_ips, c.tags,
 			c.created_at, c.updated_at,
+			c.created_by_actor_type, c.created_by_actor_id, c.provisioned_for_service,
 			(SELECT COUNT(*) FROM agent_credentials WHERE credential_id = c.id) AS agent_count
 		FROM credentials c
 		WHERE c.workspace_id = ? AND c.deleted_at IS NULL `+visFilter+`
@@ -112,7 +121,9 @@ func (h *CredentialHandler) List(w http.ResponseWriter, r *http.Request) {
 			&c.Status, &c.Scope, &c.CrewID, &c.AccountLabel, &c.AccountEmail, &c.Username,
 			&c.TokenExpiresAt, &c.LastCheckedAt, &c.LastError,
 			&c.LastUsedAt, &lastUsedIPsRaw, &tagsRaw,
-			&c.CreatedAt, &c.UpdatedAt, &c.AgentCount); err != nil {
+			&c.CreatedAt, &c.UpdatedAt,
+			&c.CreatedByActorType, &c.CreatedByActorID, &c.ProvisionedForService,
+			&c.AgentCount); err != nil {
 			h.logger.Error("scan credential", "error", err)
 			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return
@@ -173,6 +184,7 @@ func (h *CredentialHandler) Get(w http.ResponseWriter, r *http.Request) {
 			c.token_expires_at, c.last_checked_at, c.last_error,
 			c.last_used_at, c.last_used_ips, c.tags,
 			c.created_at, c.updated_at,
+			c.created_by_actor_type, c.created_by_actor_id, c.provisioned_for_service,
 			(SELECT COUNT(*) FROM agent_credentials WHERE credential_id = c.id) AS agent_count
 		FROM credentials c
 		WHERE c.id = ? AND c.workspace_id = ? AND c.deleted_at IS NULL `+visFilter+`
@@ -180,7 +192,9 @@ func (h *CredentialHandler) Get(w http.ResponseWriter, r *http.Request) {
 		&c.Status, &c.Scope, &c.CrewID, &c.AccountLabel, &c.AccountEmail, &c.Username,
 		&c.TokenExpiresAt, &c.LastCheckedAt, &c.LastError,
 		&c.LastUsedAt, &lastUsedIPsRaw, &tagsRaw,
-		&c.CreatedAt, &c.UpdatedAt, &c.AgentCount)
+		&c.CreatedAt, &c.UpdatedAt,
+		&c.CreatedByActorType, &c.CreatedByActorID, &c.ProvisionedForService,
+		&c.AgentCount)
 	c.LastUsedIPs = parseLastUsedIPs(lastUsedIPsRaw)
 	c.Tags = parseTags(tagsRaw)
 	if err != nil {
