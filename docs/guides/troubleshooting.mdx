@@ -156,6 +156,33 @@ xattr -d com.apple.quarantine $(which crewship)
 Or right-click → Open → Open Anyway in Finder. The `brew install` path
 strips quarantine automatically; only direct downloads need this.
 
+### Linux: daemon won't survive logout
+
+`crewship start` as a `systemctl --user` service (or a `tmux`-less SSH
+session) is killed when the user logs out, because systemd-user
+sessions are tied to the login by default.
+
+Enable lingering so the user manager keeps running:
+
+```bash
+loginctl enable-linger "$USER"
+systemctl --user enable --now crewship
+```
+
+`loginctl show-user "$USER" | grep Linger=` reports `Linger=yes` once
+it's on. Headless servers (no interactive shell) are the common case;
+desktop installs that always have a logged-in graphical session can
+skip this step.
+
+### Windows: SmartScreen blocks the binary
+
+Windows builds aren't Authenticode-signed in v0.1 (we sign later in
+the beta). On first launch you'll see a SmartScreen "Don't run" prompt.
+
+Right-click `crewship.exe` → **Properties** → check **Unblock** → OK.
+One-time per binary — subsequent runs skip the prompt. The Homebrew
+and Docker Compose install paths bypass this entirely.
+
 ### "Migration version N collision"
 
 This means your local DB has a migration applied under one name but
