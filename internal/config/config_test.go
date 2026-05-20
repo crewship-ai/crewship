@@ -126,6 +126,10 @@ server:
 // operator who set KEEPER_ENABLED=yes ended up with the keeper disabled
 // and no signal that their intent was lost.
 func TestEnvBoolAcceptsCommonVariants(t *testing.T) {
+	// PR-Z Z.2: enabling Keeper now requires an explicit model. Set both
+	// vars so this test stays focused on boolean variant parsing rather
+	// than colliding with the new validation rule.
+	t.Setenv("KEEPER_MODEL", "claude-haiku-4-5")
 	for _, raw := range []string{"true", "1", "yes", "YES", "on", "ON", "TRUE", "y", "True"} {
 		t.Setenv("KEEPER_ENABLED", raw)
 		cfg, err := Load("")
@@ -270,6 +274,42 @@ func TestValidationInvalidStateProvider(t *testing.T) {
 	err := cfg.Validate()
 	if err == nil {
 		t.Error("expected error for invalid state provider")
+	}
+}
+
+// TestValidationKeeperEnabledRequiresModel guards PR-Z Z.2: silent phi3:mini
+// fallback was removed; an enabled Keeper without a configured model must
+// fail validation loudly at config load, not silently degrade to a default
+// model at runtime. F3 (PR-B) will reintroduce defaults via
+// cfg.Auxiliary.Keeper.Model with explicit Haiku selection.
+func TestValidationKeeperEnabledRequiresModel(t *testing.T) {
+	cfg := Default()
+	cfg.Keeper.Enabled = true
+	cfg.Keeper.Model = ""
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected error when keeper.enabled=true and keeper.model is empty")
+	}
+}
+
+func TestValidationKeeperDisabledAllowsEmptyModel(t *testing.T) {
+	cfg := Default()
+	cfg.Keeper.Enabled = false
+	cfg.Keeper.Model = ""
+
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("disabled keeper should not require a model, got: %v", err)
+	}
+}
+
+func TestValidationKeeperEnabledWithModel(t *testing.T) {
+	cfg := Default()
+	cfg.Keeper.Enabled = true
+	cfg.Keeper.Model = "claude-haiku-4-5"
+
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("enabled keeper with explicit model should validate, got: %v", err)
 	}
 }
 

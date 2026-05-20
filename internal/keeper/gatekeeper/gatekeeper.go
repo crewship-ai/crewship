@@ -1,6 +1,6 @@
 // Package gatekeeper evaluates credential access requests using an AI model.
-// The Keeper Agent reviews the requesting agent's conversation history and task
-// context before returning ALLOW / DENY / ESCALATE.
+// The Keeper Agent reviews the requesting agent's conversation history before
+// returning ALLOW / DENY / ESCALATE.
 package gatekeeper
 
 import (
@@ -53,7 +53,6 @@ type EvalRequest struct {
 	CredentialName string
 	SecurityLevel  keeper.SecurityLevel
 	ConvHistory    string // last N messages of requesting agent
-	TaskContext    string // optional task description
 	AgentName      string
 	CrewName       string
 	Command        string // non-empty for /execute requests: the command to run with the credential
@@ -69,12 +68,16 @@ type Gatekeeper struct {
 
 // New creates a Gatekeeper that uses an LLM provider for decisions.
 // If provider is nil, falls back to the safe deny-all policy.
+//
+// The model name MUST be set by the caller (typically from cfg.Keeper.Model
+// or — once F3 ships in PR-B — from cfg.Auxiliary.Keeper.Model). An empty
+// model used to silently default to "phi3:mini"; that fallback was removed
+// in PR-Z Z.2 because silent degradation hid mis-configuration. Startup
+// validation in internal/server/server.go now refuses to enable Keeper if
+// the model is unset.
 func New(provider llm.Provider, model string, logger *slog.Logger) *Gatekeeper {
 	if logger == nil {
 		logger = slog.Default()
-	}
-	if model == "" {
-		model = "phi3:mini"
 	}
 	return &Gatekeeper{provider: provider, model: model, logger: logger}
 }
@@ -217,12 +220,6 @@ func (g *Gatekeeper) buildPrompt(req EvalRequest) string {
 	}
 
 	sb.WriteString("=================================================\n\n")
-
-	if req.TaskContext != "" {
-		sb.WriteString("[TASK CONTEXT]\n")
-		sb.WriteString(req.TaskContext)
-		sb.WriteString("\n\n")
-	}
 
 	sb.WriteString("Decision criteria:\n")
 	sb.WriteString("- ALLOW: the intent is legitimate, matches the conversation context, and the credential level is proportional to the task\n")
