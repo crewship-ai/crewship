@@ -89,6 +89,8 @@ Minimal valid routine:
 | `egress_targets` | array of string | Declared outbound hosts. Enforced for `http` step. |
 | `credentials_required` | array of CredReq | Declared credential needs (`type` + `scope`). |
 | `max_cost_usd` | number | Runtime cost cap; run aborts if exceeded between steps. |
+| `concurrency_key` | string | Template that gates how many runs can be in flight at once for the same workspace + rendered key. Typical pattern `"{{ inputs.account_id }}"` to serialise per-tenant runs. Empty (default) = no gate. See [Concurrency + idempotency](/guides/routines-cookbook#recipe-5-idempotent-routine-with-concurrency-key) recipe and the fail-fast note in [Troubleshooting](#run-returns-500-pipeline-concurrency_key-rendered-to-empty-value). |
+| `max_concurrent` | integer | Cap on simultaneous runs sharing the resolved `concurrency_key`. Defaults to `1` when `concurrency_key` is set (strict per-key serialisation); ignored otherwise. |
 | `guardrails` | object | Per-routine [Lookout](/guides/lookout) policy. `guardrails.input.prompt_injection.action`: `block` (default) \| `sanitize` \| `log`. |
 | `eval` | object | Continuous online grading. See [Online eval](#online-eval-sampler) below. |
 
@@ -430,6 +432,15 @@ Every routine run emits a sequence of journal entries:
 
 Plus WebSocket broadcast on the workspace channel for live UI updates (PipelineRunNode in the orchestration graph + Runs sub-tab waterfall both subscribe).
 
+### Per-step cost + duration
+
+Both the UI Runs sub-tab waterfall and `crewship routine logs <run_id> --slug X` surface the `cost_usd` and `duration_ms` fields the executor stamps on every `pipeline.step.completed` event. Same data, two presentation surfaces:
+
+- **UI**: right-aligned columns next to each step row, with a footer total summing the run. An em-dash (`—`) renders for events that don't carry cost (`pipeline.step.started`, `.failed`, live-only echoes) — easier to scan than `$0.0000` next to real values.
+- **CLI logs**: extra `DURATION` and `COST` columns in the timeline output. Same em-dash rule for non-positive values.
+
+Worker tier escalation is visible too — a failed validation gate that retries on a higher tier emits a second `step.started`+`step.completed` pair with its own cost on the retry, so the column-summed footer reflects the *full* spend (including retries), not just the first attempt.
+
 Three terminal-side observability surfaces, ordered by when you'd reach for each:
 
 | Phase | Command | Why |
@@ -491,6 +502,24 @@ crewship routine cancel <run_id>
 
 Signals the run goroutine; it stops at the next safe point and emits `pipeline.run.failed` with reason "cancelled".
 
+### "Serialise runs per tenant / customer / repo"
+
+Use `concurrency_key` with a template referencing the tenant-identifying input:
+
+```json
+{
+  "concurrency_key": "{{ inputs.account_id }}",
+  "max_concurrent": 1,
+  "inputs": [
+    { "name": "account_id", "type": "string", "required": true }
+  ]
+}
+```
+
+Two requests for the same `account_id` queue rather than fan out; requests for different `account_id`s run in parallel. Pair with the `Idempotency-Key` header for webhook handlers (see the [Concurrency + idempotency recipe](/guides/routines-cookbook#recipe-5-idempotent-routine-with-concurrency-key)).
+
+The platform **fails fast** if the rendered key is empty (missing input + no literal prefix in the template) — see [Troubleshooting](#run-returns-500-pipeline-concurrency_key-rendered-to-empty-value) for why and how to fix.
+
 ## Troubleshooting
 
 **Before going through this list:** run `crewship routine doctor <slug>` first. Most "blind alley" failures (missing crew provisioning, agent slug typo, missing credential, contradictory validation gate, cost cap too tight) surface as a ✗ check on doctor before they ever cost an LLM call.
@@ -522,6 +551,22 @@ Two-tier escalation walks the fallback chain. With `on_fail: escalate_tier`, a f
 ### "Pipeline X step Y stuck in pending state"
 
 Probably a waitpoint without a matching listener (process restarted between the `wait` step starting and a decision arriving). Check `crewship routine waitpoints list`; if listed, decide via approve/reject. The recovery scan at server boot reports stranded waitpoints in the log line `pipeline waitpoint store wired (...) stranded_pending=N`.
+
+### Run returns 500 "pipeline: concurrency_key rendered to empty value"
+
+The DSL declared a non-empty `concurrency_key` template but the rendered value is an empty string — typically because a referenced input was omitted at trigger time. Full error message:
+
+```
+pipeline: concurrency_key rendered to empty value (referenced input missing or empty): template "{{ inputs.<NAME> }}"
+```
+
+Why fail-fast: a routine that declares `concurrency_key: "{{ inputs.account_id }}"` is asking the platform to serialise runs per tenant. If `account_id` is missing, treating the empty key as "no gate" would silently allow unlimited parallelism for a routine the author explicitly asked us to serialise — a denial-of-self by misconfiguration. The executor refuses to start the run.
+
+Fixes, in order of preference:
+1. **Supply the input.** The caller (curl / `crewship routine run --inputs '{...}'` / scheduler / webhook) needs to pass the referenced input. For webhooks this means the `inputs_template` in the webhook config must produce it from the incoming payload.
+2. **Set a default on the InputSpec.** If the input is genuinely optional but you still want a tenant-style gate, add `"default": "global"` (or any non-empty sentinel) to the `InputSpec`. The platform merges defaults before rendering the key.
+3. **Use a literal prefix.** A template like `"vendor-alert-{{ inputs.vendor_id }}"` always renders non-empty (the literal `vendor-alert-` survives even when `vendor_id` is missing); the key still gates, just less granularly.
+4. **Drop the gate.** If you genuinely don't want concurrency control, omit `concurrency_key` entirely (do NOT set it to `""` — that's the *unset* sentinel).
 
 ## CLI reference
 
