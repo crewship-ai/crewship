@@ -1,0 +1,109 @@
+---
+title: "Login, Logout, Whoami"
+description: "Authenticate the CLI against a Crewship server — interactive credentials, API token, Google OAuth, or device-code pairing — then check who you are."
+icon: "log-in"
+---
+
+# Login, Logout, Whoami
+
+Three commands defined in `cmd/crewship/cmd_login.go` cover every way the CLI authenticates against a Crewship server. The token always lands in `~/.crewship/cli-config.yaml`; subsequent commands pick it up from there. All three respect `--server` and `--workspace` flags for overriding the active profile.
+
+## `crewship login`
+
+Four mutually exclusive modes — pick one. Interactive is the default when no mode flag is set.
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--token <api-token>` | string | (unset) | Non-interactive: validates the token via `GET /api/v1/auth/cli-token/validate` and saves it. Use this in CI. |
+| `--google` | bool | `false` | Browser-based Google OAuth. Opens `/api/v1/auth/google/redirect`; after sign-in, you mint a CLI token from **Settings → CLI tokens** and paste it. Requires `GOOGLE_CLIENT_ID` on the server. |
+| `--pair` | bool | `false` | Device-code pairing — use with `--code XXXX-XXXX` from the browser's onboarding wizard. The code's TTL is 10 minutes. |
+| `--code <code>` | string | (unset) | Pairing code from the browser. Required when `--pair` is set. |
+| `--adapter <name>` | string | (unset) | Optional telemetry hint, one of `CLAUDE_CODE`, `GEMINI_CLI`, `CODEX_CLI`, `OPENCODE`, `CURSOR_CLI`, `FACTORY_DROID`. Server never routes on this — it's adapter-blind. |
+
+### Interactive
+
+```bash
+crewship login
+# Crewship server: https://crewship.example.com
+# Email: petra@example.com
+# Password: <hidden>
+# ✓ Login successful! Token saved to ~/.crewship/cli-config.yaml
+```
+
+The interactive flow uses NextAuth's credentials provider under the hood (CSRF → `/api/auth/callback/credentials` → session cookie → `POST /api/v1/auth/cli-token` to mint a permanent CLI token; falls back to the session token if the CLI-token endpoint isn't available on an older server).
+
+### Token
+
+```bash
+crewship login --token crewship_cli_abc123…
+```
+
+Useful for CI: provision the token once in the web UI under **Settings → CLI tokens**, drop it into your CI secret store, point env at it.
+
+### Google OAuth
+
+```bash
+crewship login --google
+# Opening browser to complete Google sign-in:
+#   https://crewship.example.com/api/v1/auth/google/redirect
+# After sign-in completes, mint a CLI token at:
+#   https://crewship.example.com/settings#cli-tokens
+# Paste CLI token (or Ctrl-C to abort):
+```
+
+The flow is intentionally hybrid: Google's redirect-URI flow lands the session cookie on the browser, not on the CLI, so the CLI doesn't try to fake a loopback redirect that would need a new server endpoint. You sign in in the browser, mint a CLI token from settings, paste it back into the terminal — the CLI validates and stores it.
+
+### Device-code pairing
+
+```bash
+# Browser onboarding wizard shows: K3F9-X2NM (expires in 10:00)
+crewship login --pair --code K3F9-X2NM
+# ✓ Paired as petra@example.com. Token saved to ~/.crewship/cli-config.yaml
+#
+# Next steps:
+#   • Back in the browser the onboarding wizard will unlock automatically.
+#   • Or finish from the terminal:
+#       crewship setup
+#     (interactive prompts for crew template, adapter, API key, language)
+```
+
+Pairing is what the **First-run wizard → Pair CLI** card hands out. The browser polls the server every few seconds; once the code is redeemed, the wizard's "Launch Crew" button unlocks.
+
+### Common errors
+
+- **`pair: the pair code didn't work — codes expire after 10 minutes`** — codes have a 10-min TTL. The server intentionally folds *wrong code / expired / already consumed* into one message to avoid being an enumeration oracle; the most likely cause is the TTL.
+- **`Google sign-in is not configured on <server>`** — the server returned `enabled=false` from `/api/v1/auth/google/status`. The operator hasn't set `GOOGLE_CLIENT_ID` + `GOOGLE_CLIENT_SECRET`.
+- **`refusing to overwrite a malformed file — fix or remove ~/.crewship/cli-config.yaml and retry`** — the config file exists but isn't valid YAML. Surfaced explicitly so the CLI doesn't silently wipe your saved server/workspace.
+
+## `crewship logout`
+
+```bash
+crewship logout
+# ✓ Logged out successfully.
+```
+
+Clears the `token` field in `~/.crewship/cli-config.yaml`. Leaves `server` and `workspace` alone so the next `crewship login` re-uses the same profile without retyping the URL. The token is **not** revoked on the server — to do that, delete it from **Settings → CLI tokens** in the web UI (`DELETE /api/v1/auth/cli-tokens/{tokenId}`).
+
+## `crewship whoami`
+
+```bash
+crewship whoami
+# User:      petra@example.com
+# Server:    https://crewship.example.com
+# Workspace: ACME Engineering (acme-engineering)
+# Role:      OWNER
+```
+
+Hits `GET /api/v1/workspaces` plus `GET /api/v1/auth/cli-token/validate` to print the email, server URL, currently selected workspace (if any), and your role in it. Useful as a CI smoke check (`crewship whoami || exit 1`) before running a real mutation.
+
+When no workspace is selected, prints how many are available and how to pick one:
+
+```
+Workspaces: 3 available (none selected, use 'crewship workspace use <slug>')
+```
+
+## See also
+
+- [`crewship setup`](/cli/setup) — interactive crew bootstrap right after pairing.
+- [Authentication guide](/guides/auth) — the full identity / session / pairing story.
+- [Admin CLI](/guides/admin-cli) — `crewship admin reset-password` for the locked-out-of-UI case.

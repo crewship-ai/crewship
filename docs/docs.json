@@ -167,6 +167,7 @@
             "pages": [
               "cli/overview",
               "cli/start",
+              "cli/login",
               "cli/version",
               "cli/doctor",
               "cli/telemetry",
