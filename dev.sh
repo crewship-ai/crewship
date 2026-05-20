@@ -81,9 +81,30 @@ detect_db_mode() {
 check_prerequisites() {
   local missing=0
 
+  # .env.local auto-bootstrap. Pre-fix `dev.sh start` would hard-fail
+  # on a missing .env.local with "copy from .env.example and fill in
+  # values", which contradicts the project's zero-friction install
+  # principle: the binary itself auto-generates ENCRYPTION_KEY +
+  # NEXTAUTH_SECRET into $HOME/.crewship/secrets.env on first start.
+  # .env.local exists only to carry dev-tool overrides (port numbers,
+  # paths, optional debugging flags), so a missing file should
+  # bootstrap from .env.example silently and let the operator move on.
+  # If the example file is also missing, that's a real prereq
+  # failure — surface it.
   if [[ ! -f "$PROJECT_DIR/.env.local" ]]; then
-    err ".env.local not found -- copy from .env.example and fill in values"
-    missing=1
+    if [[ -f "$PROJECT_DIR/.env.example" ]]; then
+      log ".env.local missing — bootstrapping from .env.example"
+      if cp "$PROJECT_DIR/.env.example" "$PROJECT_DIR/.env.local"; then
+        chmod 600 "$PROJECT_DIR/.env.local" 2>/dev/null || true
+        ok ".env.local created from .env.example"
+      else
+        err "could not copy .env.example -> .env.local (check filesystem permissions)"
+        missing=1
+      fi
+    else
+      err ".env.local missing and no .env.example to bootstrap from"
+      missing=1
+    fi
   fi
 
   for cmd in node pnpm go; do
@@ -547,7 +568,8 @@ cmd_nuke() {
   echo "  - Bolt state ($STATE_DIR)"
   echo "  - Conversations ($DATA_DIR/conversations)"
   echo "  - Log files ($LOG_PATH)"
-  echo "  - Docker containers (crewship${S}-team-*)"
+  echo "  - Docker containers (crewship${S}-*  — team + sidecars + init)"
+  echo "  - Docker volumes (crewship${S}-*    — home, tools, sidecar volumes)"
   echo "  - Docker network ($CONTAINER_NETWORK)"
   echo ""
 
@@ -564,12 +586,22 @@ cmd_nuke() {
   log "Stopping services..."
   cmd_stop 2>/dev/null || true
 
-  # 2. Remove Docker containers for this instance
+  # 2. Remove Docker containers + volumes for this instance.
+  #
+  # The filter is `crewship${S}-` (no `-team-` suffix) so it catches
+  # sidecar containers too: crewship-N-svc-<crew>-<service> from the
+  # SPEC-4 sugar path stayed running across nukes before this fix,
+  # which left a "factory reset complete" message lying — the next
+  # `dev.sh start` would join the old postgres/redis still holding
+  # their old passwords. Volumes (home / tools / svc-*-vol) needed
+  # the same widening: nuke that leaves volumes behind isn't a
+  # nuke, the next agent picks up a populated /home/agent and acts
+  # like nothing was reset.
   log "Removing Docker containers..."
   local docker_cmd
   docker_cmd=$(command -v docker 2>/dev/null || echo "$HOME/.docker/bin/docker")
   if [[ -x "$docker_cmd" ]] || command -v docker &>/dev/null; then
-    local prefix="crewship${S}-team-"
+    local prefix="crewship${S}-"
     local containers
     containers=$($docker_cmd ps -a --filter "name=${prefix}" --format '{{.ID}}' 2>/dev/null || true)
     if [[ -n "$containers" ]]; then
@@ -577,6 +609,17 @@ cmd_nuke() {
       ok "Containers removed"
     else
       ok "No containers to remove"
+    fi
+
+    # Volumes: same prefix filter. xargs -r so an empty list is a noop
+    # instead of a no-args `docker volume rm` (which errors loudly).
+    local volumes
+    volumes=$($docker_cmd volume ls --filter "name=${prefix}" --format '{{.Name}}' 2>/dev/null || true)
+    if [[ -n "$volumes" ]]; then
+      echo "$volumes" | xargs $docker_cmd volume rm 2>/dev/null || true
+      ok "Volumes removed"
+    else
+      ok "No volumes to remove"
     fi
 
     # Remove network
