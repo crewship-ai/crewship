@@ -67,10 +67,16 @@ var memoryWriteCaps = map[string]int{
 	"pins.md":  8000,
 }
 
-// dailyCap is the byte ceiling applied to anything under daily/. The
-// engine's per-file daily cap default is 100 KB; the writer mirrors
-// that.
-const dailyCap = 100_000
+// dailyCap is the byte ceiling applied to anything under daily/.
+// PR-A F1 lowered this from 100 KB → 30 KB so a single day's daily
+// file no longer consumes ~20% of a 200k context window if loaded
+// into the boot snapshot. The new native memory dispatcher
+// (internal/memory/tools.go capDailyBytes) holds the same value as
+// the single source of truth — keep these in sync until the legacy
+// /memory/write HTTP path is retired. Soft-cap warning at 80% lives
+// only on the native dispatcher path; the legacy HTTP surface is
+// deprecated (agents stopped calling it via curl after PR-Z Z.1).
+const dailyCap = 30_000
 
 // maxMemoryWriteRequestBytes caps the inbound JSON body for
 // handleMemoryWrite. dailyCap is the largest legitimate `content`
