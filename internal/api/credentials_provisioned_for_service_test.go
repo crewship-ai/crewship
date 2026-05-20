@@ -31,19 +31,19 @@ func TestCredCreate_ProvisionedForServiceSpoofGate(t *testing.T) {
 	}{
 		{
 			name: "owner stamps provisioned_for_service without AUTO_MANAGED → 400",
-			body: `{"name":"PG_X","value":"v","type":"SECRET","provider":"NONE","provisioned_for_service":"crewA/postgres"}`,
+			body: `{"name":"PG_X","value":"v","type":"SECRET","provider":"NONE","provisioned_for_service":"crew-a/postgres"}`,
 			role: "OWNER",
 			want: http.StatusBadRequest,
 		},
 		{
 			name: "owner stamps AUTO_MANAGED without system actor → 400",
-			body: `{"name":"PG_X","value":"v","type":"SECRET","provider":"AUTO_MANAGED","created_by_actor_type":"user","provisioned_for_service":"crewA/postgres"}`,
+			body: `{"name":"PG_X","value":"v","type":"SECRET","provider":"AUTO_MANAGED","created_by_actor_type":"user","provisioned_for_service":"crew-a/postgres"}`,
 			role: "OWNER",
 			want: http.StatusBadRequest,
 		},
 		{
 			name: "owner posts AUTO_MANAGED + system + provisioned_for_service → 201 (the legitimate dispatch path)",
-			body: `{"name":"PG_X","value":"deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef","type":"GENERIC_SECRET","provider":"AUTO_MANAGED","created_by_actor_type":"system","provisioned_for_service":"crewA/postgres"}`,
+			body: `{"name":"PG_X","value":"deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef","type":"GENERIC_SECRET","provider":"AUTO_MANAGED","created_by_actor_type":"system","provisioned_for_service":"crew-a/postgres"}`,
 			role: "OWNER",
 			want: http.StatusCreated,
 		},
@@ -52,6 +52,38 @@ func TestCredCreate_ProvisionedForServiceSpoofGate(t *testing.T) {
 			body: `{"name":"PG_X","value":"v","type":"SECRET","provider":"NONE"}`,
 			role: "OWNER",
 			want: http.StatusCreated,
+		},
+		// Shape-gate cases — even with the right provenance combo,
+		// the value itself must be canonical <crew>/<service>.
+		{
+			name: "whitespace-only value treated as omitted → 201",
+			body: `{"name":"PG_X","value":"v","type":"SECRET","provider":"NONE","provisioned_for_service":"   "}`,
+			role: "OWNER",
+			want: http.StatusCreated,
+		},
+		{
+			name: "missing slash → 400",
+			body: `{"name":"PG_X","value":"deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef","type":"GENERIC_SECRET","provider":"AUTO_MANAGED","created_by_actor_type":"system","provisioned_for_service":"crewA-postgres"}`,
+			role: "OWNER",
+			want: http.StatusBadRequest,
+		},
+		{
+			name: "empty service segment → 400",
+			body: `{"name":"PG_X","value":"deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef","type":"GENERIC_SECRET","provider":"AUTO_MANAGED","created_by_actor_type":"system","provisioned_for_service":"crewA/"}`,
+			role: "OWNER",
+			want: http.StatusBadRequest,
+		},
+		{
+			name: "multi-slash junk → 400",
+			body: `{"name":"PG_X","value":"deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef","type":"GENERIC_SECRET","provider":"AUTO_MANAGED","created_by_actor_type":"system","provisioned_for_service":"crewA/postgres/extra"}`,
+			role: "OWNER",
+			want: http.StatusBadRequest,
+		},
+		{
+			name: "uppercase segment violates DNS label → 400",
+			body: `{"name":"PG_X","value":"deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef","type":"GENERIC_SECRET","provider":"AUTO_MANAGED","created_by_actor_type":"system","provisioned_for_service":"CrewA/postgres"}`,
+			role: "OWNER",
+			want: http.StatusBadRequest,
 		},
 	}
 

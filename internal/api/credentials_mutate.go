@@ -8,11 +8,21 @@ import (
 	"database/sql"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/encryption"
 )
+
+// provisionedForServiceRe enforces the canonical `<crew>/<service>`
+// shape: two non-empty DNS-label-safe segments separated by exactly
+// one slash. Mirrors the crew + service name regex
+// internal/manifest/validate.go uses on the manifest side. Without
+// this gate, callers could write whitespace, malformed strings, or
+// multi-slash tags that break the cross-crew collision detection
+// (which keys on the literal value).
+var provisionedForServiceRe = regexp.MustCompile(`^[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?/[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
 
 type createCredentialRequest struct {
 	Name          string   `json:"name"`
@@ -297,21 +307,39 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// provisioned_for_service marks the row as Crewship-owned (the UI
-	// hides reveal / edit / delete on these). Any caller that can
-	// reach Create could otherwise stamp the badge onto an
-	// arbitrary credential and impersonate auto-managed ownership.
-	// The legitimate stamping path is exactly one shape: manifest
-	// apply's auto-managed dispatch posts (provider=AUTO_MANAGED,
-	// actor_type=system, provisioned_for_service=<crew>/<svc>).
-	// Anything else is a spoof attempt — refuse the row.
+	// hides reveal / edit / delete on these). Two layers of gating:
+	//
+	//   1. Provenance gate — the legitimate stamping path is exactly
+	//      one shape: manifest apply's auto-managed dispatch posts
+	//      (provider=AUTO_MANAGED, actor_type=system,
+	//      provisioned_for_service=<crew>/<svc>). Any other combo is
+	//      a spoof attempt; the UI badge must not be opportunistic.
+	//
+	//   2. Shape gate — even with the right provenance, the value
+	//      itself has to be canonical `<crew>/<service>` with two
+	//      non-empty DNS-label segments. The cross-crew collision
+	//      detection in the manifest dispatch keys on this exact
+	//      string; whitespace, missing slash, or multi-slash junk
+	//      would silently break that check downstream.
+	//
+	// Empty / whitespace-only is treated as "not stamped" and falls
+	// through to the nil branch — same as omitting the field.
 	var provisionedForService *string
-	if req.ProvisionedForService != nil && *req.ProvisionedForService != "" {
-		if req.Provider != "AUTO_MANAGED" || actorType != "system" {
-			replyError(w, http.StatusBadRequest,
-				"provisioned_for_service is reserved for AUTO_MANAGED system credentials (set provider=AUTO_MANAGED and created_by_actor_type=system, or omit this field)")
-			return
+	if req.ProvisionedForService != nil {
+		canonical := strings.TrimSpace(*req.ProvisionedForService)
+		if canonical != "" {
+			if req.Provider != "AUTO_MANAGED" || actorType != "system" {
+				replyError(w, http.StatusBadRequest,
+					"provisioned_for_service is reserved for AUTO_MANAGED system credentials (set provider=AUTO_MANAGED and created_by_actor_type=system, or omit this field)")
+				return
+			}
+			if !provisionedForServiceRe.MatchString(canonical) {
+				replyError(w, http.StatusBadRequest,
+					"provisioned_for_service must be canonical <crew>/<service> with two non-empty DNS-label segments")
+				return
+			}
+			provisionedForService = &canonical
 		}
-		provisionedForService = req.ProvisionedForService
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
