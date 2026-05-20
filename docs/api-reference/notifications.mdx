@@ -1,0 +1,113 @@
+---
+title: "Notifications"
+description: "Per-user notification feed — list, count unread, mark read, delete. Backed by the notifications table; new rows fan out over WebSocket on the user channel."
+icon: "bell"
+---
+
+# Notifications
+
+Per-user activity feed. Other handlers create rows by calling the internal `CreateNotification` helper (`internal/api/notification_handler.go`); the user-facing endpoints below let the frontend list and dismiss them. Every new row also fans out over WebSocket on the `user:{userID}` channel as `notification.created` so the dashboard updates without polling.
+
+All endpoints below require an authenticated session. Notifications are strictly per-user — every query scopes to `user_id = <session user>`.
+
+## Response shape
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | string (CUID) | Notification id |
+| `actor_type` | `"user"` \| `"agent"` | Who triggered the notification |
+| `actor_id` | string | User or agent id |
+| `actor_name` | string \| null | Joined from `users.full_name` or `agents.name`; null if the actor was deleted |
+| `action` | string | Free-form action verb (e.g. `mentioned`, `assigned`, `completed`) |
+| `entity_type` | string | Entity kind the action targets (e.g. `mission`, `issue`, `chat`) |
+| `entity_id` | string \| null | Entity id |
+| `entity_title` | string \| null | Cached title; safe to display without joining |
+| `read_at` | RFC3339 \| null | `null` = unread |
+| `created_at` | RFC3339 | Always set |
+
+## `GET /api/v1/notifications`
+
+Paginated list, newest first.
+
+| Query param | Type | Default | Notes |
+|---|---|---|---|
+| `limit` | int | `50` | Capped at `100` server-side. |
+| `offset` | int | `0` | |
+| `read` | `"true"` \| `"false"` | (unset = all) | Filter by read state. |
+
+Returns `200` with a JSON array (possibly empty — never `null`).
+
+```bash
+curl -H "Cookie: <session>" \
+  "https://crewship.example.com/api/v1/notifications?read=false&limit=20"
+```
+
+```json
+[
+  {
+    "id": "ntf_01HVZ...",
+    "actor_type": "user",
+    "actor_id": "u_01HVY...",
+    "actor_name": "Petra Nováková",
+    "action": "mentioned",
+    "entity_type": "mission",
+    "entity_id": "mis_01HVX...",
+    "entity_title": "Q4 onboarding refresh",
+    "read_at": null,
+    "created_at": "2026-05-20T08:14:22Z"
+  }
+]
+```
+
+## `GET /api/v1/notifications/count`
+
+Unread count, cheap. Used to drive the navbar badge.
+
+```json
+{ "unread": 7 }
+```
+
+## `POST /api/v1/notifications/{notificationId}/read`
+
+Mark a single notification read. Idempotent — re-reading an already-read notification still returns `200`. Returns `404` only when the notification does not exist (or belongs to a different user, which is indistinguishable on purpose).
+
+```json
+{ "status": "ok" }
+```
+
+## `POST /api/v1/notifications/read-all`
+
+Mark every currently-unread notification read for the calling user. Returns the row count.
+
+```json
+{ "updated": 23 }
+```
+
+## `DELETE /api/v1/notifications/{notificationId}`
+
+Hard delete. Returns `204 No Content` on success, `404` when the row doesn't exist or doesn't belong to the calling user.
+
+## WebSocket event
+
+When any handler in the server calls `CreateNotification`, the new row is broadcast on the `user:{userID}` channel:
+
+```json
+{
+  "type": "notification.created",
+  "data": {
+    "id": "ntf_01HVZ...",
+    "action": "mentioned",
+    "entity_type": "mission",
+    "entity_id": "mis_01HVX...",
+    "entity_title": "Q4 onboarding refresh"
+  }
+}
+```
+
+The frontend listens on its own user channel — see [WebSocket](/api-reference/websocket) for the connect + subscribe protocol.
+
+## See also
+
+- [Inbox](/guides/inbox) — the user-facing UI on top of notifications + assignments.
+- [WebSocket](/api-reference/websocket) — `notification.created` channel format.
+- [Crew Journal](/api-reference/journal) — system-level event stream (notifications are downstream of journal entries).
