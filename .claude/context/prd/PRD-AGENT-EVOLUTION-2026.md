@@ -166,11 +166,17 @@ Pavel explicitly requested: "natvrdo to nastav a tečka — zamysli se nad dalš
 **Why:** Pavel: "MVP = Haiku, local models Phase 2". `phi3:mini` is silent degradation when Ollama is unavailable; better is loud error.
 **Action:** Remove default. New behavior: if no model configured, return `error: keeper aux model not configured (CREWSHIP_AUX_KEEPER_MODEL)` and refuse to start.
 
-### Z.3 — Deprecate `agents.system_prompt` column
+### Z.3 — Deprecate `agents.system_prompt` column (lighter scope in PR-Z)
 
 **Where:** `internal/database/migrate_consts_v01_init.go:140` (`system_prompt TEXT`).
 **Why:** F6 PERSONA.md covers the same need *better* (versioned via `memory_versions`, cap-controlled, scanned for injection, supports crew-default-with-agent-override). Two mechanisms for the same thing = drift.
-**Action:** Migration vNN-Z: rename column to `system_prompt_legacy`, mark deprecated in code comments. On first PERSONA.md write per agent, value flows from `system_prompt_legacy` into PERSONA.md if PERSONA.md is empty. After 30 days post-PR-E ship: schedule drop migration.
+**Action (revised during PR-Z implementation):**
+- In PR-Z: **comments only**. The column rename was originally planned for PR-Z but ~15 Go SQL call sites + test fixtures would need updates simultaneously. Doing both halves of the deprecation in one PR creates a churn-heavy PR with no functional improvement before PR-E lands. Instead:
+  - Add deprecation marker to column definition in `migrate_consts_v01_init.go:140`
+  - Add `// Deprecated:` Go doc comments on each `SystemPrompt` struct field so editors/linters surface the warning at use sites (per Go doc convention)
+- In PR-E: actual column rename to `system_prompt_legacy` happens alongside PERSONA.md migration. First PERSONA.md write per agent flows the legacy value into PERSONA.md if empty. After 30 days post-PR-E ship: schedule drop migration.
+
+**Rationale for split:** PR-Z preserves the "no functional regression, only cleanup" property — the rename without consumers being migrated would force every reader to handle both names temporarily. PR-E is the natural home for the rename because it introduces the replacement and can update consumers in lockstep.
 
 ### Z.4 — Fix ESCALATE → Inbox silent gap
 

@@ -137,6 +137,12 @@ CREATE TABLE IF NOT EXISTS agents (
 	cli_adapter TEXT NOT NULL DEFAULT 'CLAUDE_CODE',
 	llm_provider TEXT,
 	llm_model TEXT,
+	-- Deprecated (PR-Z Z.3): superseded by PERSONA.md in PR-E. PR-E will
+	-- migrate this column to system_prompt_legacy and flow the value into
+	-- /output/{agent}/.memory/PERSONA.md on first PERSONA write per agent.
+	-- After 30 days post-PR-E ship: schedule drop migration. New code
+	-- should not introduce additional read sites; prefer the PERSONA
+	-- memory tier (F1 memory.read tool).
 	system_prompt TEXT,
 	temperature REAL NOT NULL DEFAULT 0.7,
 	max_tokens INTEGER,
