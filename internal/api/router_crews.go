@@ -73,6 +73,17 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.mux.Handle("PUT /api/v1/crews/{crewId}", authed(wsCtx(http.HandlerFunc(crews.Update))))
 	r.mux.Handle("DELETE /api/v1/crews/{crewId}", authed(wsCtx(http.HandlerFunc(crews.Delete))))
 
+	// Per-crew autonomy policy (PR-B F2). Workspace-scoped list +
+	// per-crew GET/PUT. PUT invalidates the shared resolver cache so
+	// downstream subsystems (memory write gating, skill creation
+	// HITL, behavior monitor, ephemeral spawn) see the new state
+	// without waiting for the 10s TTL.
+	policies := NewCrewPolicyHandler(r.db, r.PolicyResolver(), r.logger)
+	policies.SetJournal(r.Journal())
+	r.mux.Handle("GET /api/v1/policies", authed(wsCtx(http.HandlerFunc(policies.List))))
+	r.mux.Handle("GET /api/v1/crews/{crewId}/policy", authed(wsCtx(http.HandlerFunc(policies.Get))))
+	r.mux.Handle("PUT /api/v1/crews/{crewId}/policy", authed(wsCtx(http.HandlerFunc(policies.Put))))
+
 	// Crew members
 	r.mux.Handle("GET /api/v1/crews/{crewId}/members", authed(wsCtx(http.HandlerFunc(crews.ListMembers))))
 	r.mux.Handle("POST /api/v1/crews/{crewId}/members", authed(wsCtx(http.HandlerFunc(crews.AddMember))))
