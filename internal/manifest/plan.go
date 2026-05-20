@@ -878,6 +878,18 @@ func applyAgentRefs(ctx context.Context, c *Client, agentID string, a *Agent, ws
 // fields don't match the existing crew. Only fields the manifest
 // can drive are compared — server-managed fields (created_at,
 // cached_image, etc.) are excluded.
+//
+// Historical note: services_json + container limits + network policy
+// used to be missing from this comparison. The symptom: an operator
+// would edit a manifest (add a sidecar, change cpus, scope the
+// network), re-apply, and see "0 updated" while the server still ran
+// the old config. With services_json in particular, the SPEC-4 sugar
+// auto-credential rotation never propagated because the patch wasn't
+// sent at all — the server's UpdateCrew handler is the place that
+// invalidates `cached_image` on services_json drift, so a missing
+// PATCH meant a stale agent runtime forever. The field set below is
+// the subset of CrewResponse that buildCrewBody actually drives;
+// anything new added to buildCrewBody must be mirrored here.
 func crewBodyDiffers(existing *CrewResponse, body map[string]any) bool {
 	if v, ok := body["name"].(string); ok && v != existing.Name {
 		return true
@@ -900,7 +912,59 @@ func crewBodyDiffers(existing *CrewResponse, body map[string]any) bool {
 	if v, ok := body["mise_config"].(string); ok && deref(existing.MiseConfig) != v {
 		return true
 	}
+	if v, ok := body["services_json"].(string); ok && deref(existing.ServicesJSON) != v {
+		return true
+	}
+	// Container shape and network policy. nil-deref for *int / *float64
+	// returns the zero value, which is fine: if the manifest is silent
+	// (no devcontainer block at all) buildCrewBody doesn't set these
+	// keys, so the map lookup fails and we skip the check.
+	if v, ok := body["container_memory_mb"].(int); ok && derefInt(existing.ContainerMemoryMB) != v {
+		return true
+	}
+	if v, ok := body["container_cpus"].(float64); ok && derefFloat(existing.ContainerCPUs) != v {
+		return true
+	}
+	if v, ok := body["container_ttl_hours"].(int); ok && derefInt(existing.ContainerTTLHours) != v {
+		return true
+	}
+	if v, ok := body["network_mode"].(string); ok && deref(existing.NetworkMode) != v {
+		return true
+	}
+	if v, ok := body["allowed_domains"].([]string); ok && !stringSliceEq(existing.AllowedDomains, v) {
+		return true
+	}
 	return false
+}
+
+// derefInt / derefFloat / stringSliceEq are the small helpers
+// crewBodyDiffers needs but the deref helper above only handles
+// *string. Kept package-private so they don't pollute the public
+// surface; collocated with their only caller.
+func derefInt(p *int) int {
+	if p == nil {
+		return 0
+	}
+	return *p
+}
+
+func derefFloat(p *float64) float64 {
+	if p == nil {
+		return 0
+	}
+	return *p
+}
+
+func stringSliceEq(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func agentBodyDiffers(existing *AgentResponse, a *Agent) bool {
