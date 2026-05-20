@@ -305,6 +305,31 @@ To rotate the secret: delete the webhook + create a new one. There is no in-plac
 
 `crewship routine run <slug> --inputs '{...}'` or click the Run button in the UI detail panel. Same execution path.
 
+## Dry-run preview
+
+Three execution modes, distinguished by `Mode` in the request body and surface:
+
+| Mode | Side effects | Increments invocation_count | Cost |
+|------|--------------|------------------------------|------|
+| `run` | yes (agents called) | yes | real |
+| `test_run` | yes (agents called) | no | real |
+| `dry_run` | no (templates rendered, agents skipped) | no | estimated |
+
+Dry-run is the safe "what would this routine do?" preview. It walks the DSL, renders all template substitutions against the supplied inputs, resolves each step's execution tier (adapter + model), and reports a `would_execute` list with per-step estimated cost. No agents are invoked, no journal entries beyond a single `pipeline.dry_run` audit row are written.
+
+```bash
+crewship routine dry-run email-fetch --inputs '{"since":"yesterday"}'
+```
+
+In the UI: click **Dry run** in the routine detail panel. The `would_execute` report renders inline above the tab bar with per-step:
+
+- Step ID + type
+- Resolved `tier_adapter:tier_model` (e.g. `claude:claude-haiku-4-5`)
+- Estimated cost in USD (order-of-magnitude only — the executor uses a flat token-density heuristic, not real pricing)
+- `would_call_agent` / `would_call_pipeline` target
+
+The estimate is intentionally labelled "estimated" everywhere it surfaces — it's a planning aid, not a quote. Real cost only lands once you switch to `run` or `test_run`.
+
 ## Versioning + rollback
 
 Every save creates a new immutable row in `pipeline_versions` (v79 migration). The `pipelines.head_version` column points at the current. Rollback creates a NEW version on top of HEAD whose definition equals the target's:

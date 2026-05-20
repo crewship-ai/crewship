@@ -473,9 +473,15 @@ var pipelineDryRunCmd = &cobra.Command{
 			return err
 		}
 		var result struct {
-			Status       string  `json:"status"`
-			DurationMs   int64   `json:"duration_ms"`
-			CostUSD      float64 `json:"cost_usd"`
+			Status     string  `json:"status"`
+			DurationMs int64   `json:"duration_ms"`
+			CostUSD    float64 `json:"cost_usd"`
+			// JSON tag MUST match the server-side wire name (`would_execute`)
+			// — the server marshals types.RunResult.WouldExecute with
+			// `json:"would_execute,omitempty"` (internal/pipeline/types.go).
+			// Previously this struct used `json:"WouldExecute"` which never
+			// matched the wire, so the CLI silently rendered "0 steps" for
+			// every dry-run regardless of what the server returned.
 			WouldExecute []struct {
 				StepID         string  `json:"step_id"`
 				StepType       string  `json:"step_type"`
@@ -485,7 +491,7 @@ var pipelineDryRunCmd = &cobra.Command{
 				TierAdapter    string  `json:"tier_adapter,omitempty"`
 				TierModel      string  `json:"tier_model,omitempty"`
 				EstimatedCost  float64 `json:"estimated_cost_usd,omitempty"`
-			} `json:"WouldExecute"`
+			} `json:"would_execute"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 			return fmt.Errorf("decode dry_run response: %w", err)

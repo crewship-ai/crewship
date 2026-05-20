@@ -21,6 +21,14 @@ var ErrPipelineNotFound = errors.New("pipeline: target pipeline not found")
 // only flagged at runtime.
 var ErrMaxDepthExceeded = fmt.Errorf("pipeline: max nested depth %d exceeded", MaxNestedPipelineDepth)
 
+// ErrConcurrencyKeyEmpty is returned when a DSL declares a non-empty
+// concurrency_key template but the rendered value is empty — typically
+// because a referenced input was omitted at trigger time. Treating it
+// as "no gate" would silently allow unlimited parallelism for a
+// routine the author explicitly asked us to serialise, so we fail
+// fast and surface the misconfiguration.
+var ErrConcurrencyKeyEmpty = errors.New("pipeline: concurrency_key rendered to empty value (referenced input missing or empty)")
+
 // Executor runs a parsed DSL against an AgentRunner, emitting journal
 // entries as it goes. One Executor instance is reusable across many
 // pipeline runs — the per-run state lives in Run's stack frame, not
@@ -318,8 +326,27 @@ func (e *Executor) Run(ctx context.Context, in RunInput) (*RunResult, error) {
 	// compete for production slots. Reservation goes against the
 	// rendered concurrency_key (template-substituted from inputs)
 	// so per-tenant gating works without DSL edits.
+	//
+	// Inputs MUST be defaults-merged before rendering the key. A
+	// routine declaring `default: "global"` on the input referenced
+	// by the key would otherwise trip ErrConcurrencyKeyEmpty when the
+	// caller omits it — defeating the whole point of having a default.
+	// runDSL does its own mergeInputs later for template-render
+	// purposes; we duplicate it here because Acquire happens BEFORE
+	// runDSL.
 	if e.runs != nil && in.Mode == ModeRun {
-		key := renderConcurrencyKey(ctx, dsl.ConcurrencyKey, in.Inputs)
+		mergedInputs := mergeInputs(in.Inputs, dsl)
+		key, gated, keyErr := renderConcurrencyKey(ctx, dsl.ConcurrencyKey, mergedInputs)
+		if keyErr != nil {
+			// Author wanted a gate but the rendered value is empty.
+			// Free the idempotency reservation (mirrors the Acquire
+			// failure path below) and surface the misconfiguration.
+			if in.IdempotencyKey != "" && e.idempotency != nil {
+				_ = e.idempotency.Forget(ctx, in.WorkspaceID, in.IdempotencyKey)
+			}
+			return nil, fmt.Errorf("%w: template %q", keyErr, dsl.ConcurrencyKey)
+		}
+		_ = gated // reserved for future telemetry — distinguishes "no gate" from "gated"
 		regCtx, release, regErr := e.runs.Acquire(ctx, AcquireOpts{
 			RunID:          preallocRunID,
 			WorkspaceID:    in.WorkspaceID,

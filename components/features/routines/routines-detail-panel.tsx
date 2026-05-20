@@ -15,6 +15,7 @@ import { RoutineVersionsTab } from "./routine-versions-tab"
 import { RoutineSchedulesTab } from "./routine-schedules-tab"
 import { RoutineWebhooksTab } from "./routine-webhooks-tab"
 import { RoutineWaitpointsTab } from "./routine-waitpoints-tab"
+import { RoutineDryRunReport, type DryRunResult } from "./routine-dry-run-report"
 
 // RoutinesDetailPanel — right-side detail for the selected routine.
 // Hosts the seven sub-tabs (Overview, Editor, Runs, Versions,
@@ -57,6 +58,9 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [busyAction, setBusyAction] = useState<string | null>(null)
+  // dryRunResult holds the `would_execute` report from the most recent
+  // dry_run invocation so we can render it inline. Cleared on close.
+  const [dryRunResult, setDryRunResult] = useState<DryRunResult | null>(null)
   // abortRef tracks the in-flight fetch so a fast workspace/slug
   // switch cancels stale work. Without this, a slow network +
   // rapid-fire selection could race-overwrite the panel with the
@@ -91,6 +95,12 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
   }
 
   useEffect(() => {
+    // Clear any leftover dry-run report from the previously-selected
+    // routine. Without this, the violet panel above the tab bar keeps
+    // rendering the prior routine's would_execute list until the user
+    // manually dismisses it — a confusing "this report doesn't match
+    // what I'm looking at" surface bug.
+    setDryRunResult(null)
     fetchRoutine()
     return () => {
       abortRef.current?.abort()
@@ -111,14 +121,34 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
         throw new Error(`${res.status}: ${t || res.statusText}`)
       }
       const data = await res.json().catch(() => ({}))
-      toast.success(`${actionLabel(action)} started`, {
-        description:
-          action === "dry_run"
-            ? "Dry-run report ready — see Runs tab"
-            : data.run_id
-              ? `Run ${String(data.run_id).slice(0, 12)}…`
-              : "Watch the Runs tab for live status",
-      })
+      if (action === "dry_run") {
+        // Surface the would_execute report inline. Pre-fix this
+        // payload was dropped — the toast pointed at the Runs tab
+        // but dry runs don't emit step events. Now the user gets
+        // per-step tier resolution + estimated cost up top.
+        //
+        // cost_usd / duration_ms are intentionally LEFT UNDEFINED
+        // when the server doesn't return a number — coercing to 0
+        // would render "$0.0000" indistinguishably from a real
+        // zero-cost run. The report component falls back to summing
+        // per-step estimates when the top-level total is missing.
+        setDryRunResult({
+          run_id: typeof data.run_id === "string" ? data.run_id : "",
+          status: typeof data.status === "string" ? data.status : "DRY_RUN_OK",
+          cost_usd: typeof data.cost_usd === "number" ? data.cost_usd : undefined,
+          duration_ms: typeof data.duration_ms === "number" ? data.duration_ms : undefined,
+          would_execute: Array.isArray(data.would_execute) ? data.would_execute : [],
+        })
+        toast.success("Dry-run report ready", {
+          description: "Per-step tier + cost estimate shown above the tabs.",
+        })
+      } else {
+        toast.success(`${actionLabel(action)} started`, {
+          description: data.run_id
+            ? `Run ${String(data.run_id).slice(0, 12)}…`
+            : "Watch the Runs tab for live status",
+        })
+      }
       onChanged()
       // Re-fetch so invocation_count + last_invocation_status update.
       fetchRoutine()
@@ -260,6 +290,12 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
           </Button>
         </div>
       </div>
+
+      {/* Dry-run report — surfaces would_execute when the user clicks
+          "Dry run". Pre-fix this payload was silently dropped. */}
+      {dryRunResult && (
+        <RoutineDryRunReport result={dryRunResult} onClose={() => setDryRunResult(null)} />
+      )}
 
       {/* Tab bar — primitive with animated underline */}
       {routine && (
