@@ -1311,6 +1311,14 @@ END;
 	// dispatch starts tagging AUTO_MANAGED rows with 'agent'.
 	// See migrate_consts_v98_credential_attribution.go.
 	{version: 98, name: "credential_attribution", sql: migrationAddCredentialAttribution},
+
+	// Per-crew autonomy policy (PRD §6 F2 / PR-B): autonomy_level
+	// + behavior_mode + audit triple. Net-new columns with column-
+	// level CHECK constraints; no recreate dance.
+	// Originally numbered v98; bumped to v99 during rebase onto main
+	// after SPEC-4 took v98 for credential_attribution.
+	// See migrate_consts_v99_autonomy.go.
+	{version: 99, name: "autonomy", sql: migrationAutonomy},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the
