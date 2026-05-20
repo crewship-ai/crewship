@@ -549,16 +549,35 @@ func (pb *planBuilder) planAutoManagedCredentials(crewSlug string, planned []pla
 				if err != nil {
 					return fmt.Errorf("auto-managed %s: lookup existing: %w", ac.Name, err)
 				}
+				provServiceTag := crewSlug + "/" + ac.ProvisionedForService
 				if existing != nil {
+					// The plan-time check in planCrew already rejects
+					// cross-crew collisions, but TOCTOU between plan
+					// and exec is real: another apply, a UI mutate,
+					// or a race in CI could materialise a colliding
+					// row in the meantime. Re-check provenance here
+					// — same tag is idempotent, anything else is a
+					// real conflict the dispatch must not paper over.
+					if existing.Provider == "AUTO_MANAGED" &&
+						existing.ProvisionedForService != nil &&
+						*existing.ProvisionedForService == provServiceTag {
+						return nil
+					}
 					if existing.Provider == "AUTO_MANAGED" {
-						return nil // idempotent re-apply, value already in services_json
+						otherTag := "(no provisioned_for_service)"
+						if existing.ProvisionedForService != nil {
+							otherTag = *existing.ProvisionedForService
+						}
+						return fmt.Errorf(
+							"auto-managed %s: name collides with another AUTO_MANAGED credential bound to %s; "+
+								"workspace credential names must be unique per service",
+							ac.Name, otherTag)
 					}
 					return fmt.Errorf(
 						"auto-managed %s: credential already exists with provider=%s; "+
 							"delete it manually or rename the auto-credential to resolve the conflict",
 						ac.Name, existing.Provider)
 				}
-				provServiceTag := crewSlug + "/" + ac.ProvisionedForService
 				body := map[string]any{
 					"name":                    ac.Name,
 					"value":                   ac.Value,

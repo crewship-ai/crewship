@@ -68,6 +68,78 @@ type createCredentialRequest struct {
 	Pending bool `json:"pending"`
 }
 
+// attributionError is the shape resolveCreateAttribution returns
+// on rejection — wraps the HTTP status + message so the caller
+// (Create) just maps to replyError. Kept private to this file
+// because no other handler needs this exact pair.
+type attributionError struct {
+	status  int
+	message string
+}
+
+// resolveCreateAttribution implements the (actor_type, actor_id)
+// resolution rules described above the Create handler's call site.
+// Returns the resolved (type, id, nil) on success, or
+// (zero, nil, *attributionError) when the request shape is
+// malformed or the caller's role doesn't authorise the requested
+// attribution.
+//
+// The function is intentionally outside the Create method body so
+// it can be unit-tested without spinning up an HTTP request +
+// authed context — see credentials_mutate_attribution_test.go.
+func resolveCreateAttribution(req createCredentialRequest, user *AuthUser, role string) (string, *string, *attributionError) {
+	actorType := "user"
+	if req.CreatedByActorType != nil && *req.CreatedByActorType != "" {
+		actorType = *req.CreatedByActorType
+	}
+	switch actorType {
+	case "user", "agent", "system":
+		// valid
+	default:
+		return "", nil, &attributionError{http.StatusBadRequest, "created_by_actor_type must be user|agent|system"}
+	}
+
+	// OWNER/ADMIN gate for any non-default actor type. Lower roles
+	// can only attribute to themselves.
+	isPrivileged := role == "OWNER" || role == "ADMIN"
+	if actorType != "user" && !isPrivileged {
+		return "", nil, &attributionError{http.StatusForbidden, "non-self actor attribution requires OWNER or ADMIN role"}
+	}
+
+	var actorID *string
+	switch actorType {
+	case "user":
+		// Default to self. Allow overriding to another user.id ONLY
+		// for OWNER/ADMIN (e.g. admin migrating ownership); a
+		// regular user that supplies a foreign id is a spoof attempt.
+		id := user.ID
+		if req.CreatedByActorID != nil && *req.CreatedByActorID != "" && *req.CreatedByActorID != user.ID {
+			if !isPrivileged {
+				return "", nil, &attributionError{http.StatusForbidden, "created_by_actor_id must match authenticated user"}
+			}
+			id = *req.CreatedByActorID
+		}
+		actorID = &id
+	case "agent":
+		// Agent attribution MUST carry an explicit agent id — we
+		// don't silently fall back to the caller (that's exactly the
+		// spoof shape we're protecting against).
+		if req.CreatedByActorID == nil || *req.CreatedByActorID == "" {
+			return "", nil, &attributionError{http.StatusBadRequest, "created_by_actor_id is required when created_by_actor_type=agent"}
+		}
+		id := *req.CreatedByActorID
+		actorID = &id
+	case "system":
+		// System actors have no natural id. A caller-supplied id is
+		// rejected to keep the row's actor_id NULL — querying for
+		// "system rows" stays a simple actor_type filter.
+		if req.CreatedByActorID != nil && *req.CreatedByActorID != "" {
+			return "", nil, &attributionError{http.StatusBadRequest, "created_by_actor_id must be empty when created_by_actor_type=system"}
+		}
+	}
+	return actorType, actorID, nil
+}
+
 // Create stores a new encrypted credential in the workspace.
 // POST /api/v1/credentials
 
@@ -194,6 +266,41 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 		h.logger.Warn("cleanup soft-deleted credential", "name", req.Name, "error", err)
 	}
 
+	// Resolve attribution (v98). Done BEFORE BeginTx so a malformed
+	// request doesn't open and abandon a transaction — see the
+	// "transaction leak" trail at credentials_mutate_test.go.
+	//
+	// Three valid (actor_type, actor_id) shapes:
+	//
+	//   ('user',   <user-id>)   — default. The caller can override
+	//                              actor_id only as OWNER/ADMIN (e.g.
+	//                              an admin auditing-in another user's
+	//                              ownership); a regular user that
+	//                              specifies a non-self actor_id is
+	//                              treated as a spoof attempt and
+	//                              rejected.
+	//   ('agent',  <agent-id>)  — requires OWNER/ADMIN (manifest apply
+	//                              dispatch runs as the workspace
+	//                              owner). actor_id is REQUIRED — a
+	//                              nil/empty payload is rejected so
+	//                              we never silently fall back to
+	//                              "self as agent."
+	//   ('system', <empty>)     — server-side machinery (manifest
+	//                              dispatch for v98 AUTO_MANAGED).
+	//                              actor_id is intentionally nil; no
+	//                              one specific natural identity
+	//                              maps to "system." Requires
+	//                              OWNER/ADMIN — same reasoning.
+	actorType, actorID, attrErr := resolveCreateAttribution(req, user, role)
+	if attrErr != nil {
+		replyError(w, attrErr.status, attrErr.message)
+		return
+	}
+	var provisionedForService *string
+	if req.ProvisionedForService != nil && *req.ProvisionedForService != "" {
+		provisionedForService = req.ProvisionedForService
+	}
+
 	now := time.Now().UTC().Format(time.RFC3339)
 	credID := generateCUID()
 
@@ -224,33 +331,6 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var tagsArg any
 	if encoded, ok := encodeTagsJSON(req.Tags); ok {
 		tagsArg = encoded
-	}
-
-	// Resolve attribution (v98). Default is the calling user; AUTO_MANAGED
-	// rows from manifest apply override to 'agent' with the crew's lead
-	// agent id. Anything other than 'user' requires OWNER/ADMIN — the
-	// canRole("create") check above already gates this code path, but
-	// reaffirm here so a future refactor that drops MANAGER from "create"
-	// doesn't accidentally relax the actor-type rule.
-	actorType := "user"
-	if req.CreatedByActorType != nil && *req.CreatedByActorType != "" {
-		actorType = *req.CreatedByActorType
-	}
-	if actorType != "user" && actorType != "agent" && actorType != "system" {
-		replyError(w, http.StatusBadRequest, "created_by_actor_type must be user|agent|system")
-		return
-	}
-	if actorType != "user" && role != "OWNER" && role != "ADMIN" {
-		replyError(w, http.StatusForbidden, "non-self actor attribution requires OWNER or ADMIN role")
-		return
-	}
-	actorID := user.ID
-	if req.CreatedByActorID != nil && *req.CreatedByActorID != "" {
-		actorID = *req.CreatedByActorID
-	}
-	var provisionedForService *string
-	if req.ProvisionedForService != nil && *req.ProvisionedForService != "" {
-		provisionedForService = req.ProvisionedForService
 	}
 
 	_, err = tx.ExecContext(r.Context(), `
