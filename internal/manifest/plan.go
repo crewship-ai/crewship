@@ -520,11 +520,11 @@ func (pb *planBuilder) planCrew(ctx context.Context, meta Metadata, spec *CrewSp
 // planAutoManagedCredentials emits one plan item per generated
 // auto-credential. The closure that runs at apply time:
 //
-//   1. Checks workspace credentials for an existing AUTO_MANAGED row
-//      with the same name; on match, no-ops (re-apply idempotency).
-//   2. POSTs a fresh credential with provider=AUTO_MANAGED, status=
-//      ACTIVE, created_by_actor_type='system' (v98 MVP), and
-//      provisioned_for_service=<crew>/<service>.
+//  1. Checks workspace credentials for an existing AUTO_MANAGED row
+//     with the same name; on match, no-ops (re-apply idempotency).
+//  2. POSTs a fresh credential with provider=AUTO_MANAGED, status=
+//     ACTIVE, created_by_actor_type='system' (v98 MVP), and
+//     provisioned_for_service=<crew>/<service>.
 //
 // Attribution is intentionally 'system' (not 'agent') for v98. The
 // row's provisioned_for_service tag is the load-bearing audit signal

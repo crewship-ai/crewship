@@ -28,7 +28,7 @@ func TestResolveCreateAttribution_DefaultsToUserSelf(t *testing.T) {
 }
 
 func TestResolveCreateAttribution_RejectsBadType(t *testing.T) {
-	req := createCredentialRequest{CreatedByActorType: ptr("hacker")}
+	req := createCredentialRequest{CreatedByActorType: sptr("hacker")}
 	user := &AuthUser{ID: "user_a"}
 	_, _, err := resolveCreateAttribution(req, user, "OWNER")
 	if err == nil {
@@ -53,8 +53,8 @@ func TestResolveCreateAttribution_NonUserRequiresPrivileged(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.role, func(t *testing.T) {
 			req := createCredentialRequest{
-				CreatedByActorType: ptr("agent"),
-				CreatedByActorID:   ptr("agent_x"),
+				CreatedByActorType: sptr("agent"),
+				CreatedByActorID:   sptr("agent_x"),
 			}
 			user := &AuthUser{ID: "user_a"}
 			_, _, err := resolveCreateAttribution(req, user, tc.role)
@@ -68,7 +68,7 @@ func TestResolveCreateAttribution_NonUserRequiresPrivileged(t *testing.T) {
 func TestResolveCreateAttribution_UserCannotSpoofAnotherUserID(t *testing.T) {
 	// MEMBER providing a different user.id is treated as a spoof.
 	req := createCredentialRequest{
-		CreatedByActorType: ptr("user"),
+		CreatedByActorType: sptr("user"),
 		CreatedByActorID:   ptr("user_b"),
 	}
 	user := &AuthUser{ID: "user_a"}
@@ -85,7 +85,7 @@ func TestResolveCreateAttribution_OwnerCanReattributeToOtherUser(t *testing.T) {
 	// Audit / ownership-migration use case — admin assigns a
 	// credential to a different user.
 	req := createCredentialRequest{
-		CreatedByActorType: ptr("user"),
+		CreatedByActorType: sptr("user"),
 		CreatedByActorID:   ptr("user_b"),
 	}
 	user := &AuthUser{ID: "user_a"}
@@ -101,7 +101,7 @@ func TestResolveCreateAttribution_OwnerCanReattributeToOtherUser(t *testing.T) {
 func TestResolveCreateAttribution_AgentRequiresExplicitID(t *testing.T) {
 	// nil agent id → reject (no silent self-fallback).
 	req := createCredentialRequest{
-		CreatedByActorType: ptr("agent"),
+		CreatedByActorType: sptr("agent"),
 		// CreatedByActorID intentionally absent
 	}
 	user := &AuthUser{ID: "user_a"}
@@ -116,7 +116,7 @@ func TestResolveCreateAttribution_AgentRequiresExplicitID(t *testing.T) {
 
 func TestResolveCreateAttribution_AgentHappyPath(t *testing.T) {
 	req := createCredentialRequest{
-		CreatedByActorType: ptr("agent"),
+		CreatedByActorType: sptr("agent"),
 		CreatedByActorID:   ptr("agent_trapper"),
 	}
 	user := &AuthUser{ID: "user_a"}
@@ -133,7 +133,7 @@ func TestResolveCreateAttribution_SystemRejectsExplicitID(t *testing.T) {
 	// System actor must NOT carry an id — querying "system rows"
 	// should stay a simple type filter, not a polymorphic match.
 	req := createCredentialRequest{
-		CreatedByActorType: ptr("system"),
+		CreatedByActorType: sptr("system"),
 		CreatedByActorID:   ptr("something"),
 	}
 	user := &AuthUser{ID: "user_a"}
@@ -144,7 +144,7 @@ func TestResolveCreateAttribution_SystemRejectsExplicitID(t *testing.T) {
 }
 
 func TestResolveCreateAttribution_SystemNilID(t *testing.T) {
-	req := createCredentialRequest{CreatedByActorType: ptr("system")}
+	req := createCredentialRequest{CreatedByActorType: sptr("system")}
 	user := &AuthUser{ID: "user_a"}
 	gotType, gotID, err := resolveCreateAttribution(req, user, "OWNER")
 	if err != nil {
