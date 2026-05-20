@@ -204,21 +204,16 @@ keeper:
 
 ## Minimal Configuration
 
-The minimum viable configuration requires only:
+As of PR #446, **no env vars are required for first boot**. Run `crewship start` against an empty data directory and the server will:
 
-```yaml
-# No YAML file needed -- just environment variables:
-# ENCRYPTION_KEY=<64-hex-chars>
-# NEXTAUTH_SECRET=<random-secret>
-```
-
-All other values have sensible defaults. The server will:
 - Listen on `0.0.0.0:8080`
 - Use Docker as container provider
-- Store data in `/var/lib/crewship`
+- Store data in `~/.crewship` (or `$CREWSHIP_DATA_DIR`)
 - Use BoltDB for state
-- Auto-generate the internal token
-- Auto-derive the NextJS URL
+- **Auto-generate** `ENCRYPTION_KEY`, `NEXTAUTH_SECRET`, and `CREWSHIP_INTERNAL_TOKEN` with `crypto/rand`, persisting them to `<dataDir>/secrets.env` at mode `0600`
+- Auto-derive the NextJS URL from the listen port
+
+Set env vars only when you need to override a default (different port, external secret manager, custom data dir, etc.). See [Environment Reference](/configuration/environment) for the full list.
 
 ## Production Configuration
 

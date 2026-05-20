@@ -213,9 +213,11 @@ minutes (closing the race between `docker commit` and the DB update inside
 ## Complete Example
 
 ```bash
-# Required
-ENCRYPTION_KEY=a1b2c3d4e5f6...  # 64 hex chars
-NEXTAUTH_SECRET=your-jwt-secret
+# Secrets — optional: auto-generated on first boot and persisted to
+# <dataDir>/secrets.env. Set these explicitly only when an external
+# secret manager owns them (Vault, k8s secret, systemd EnvironmentFile).
+# ENCRYPTION_KEY=a1b2c3d4e5f6...  # 64 hex chars
+# NEXTAUTH_SECRET=your-jwt-secret
 
 # Server
 CREWSHIP_HOST=0.0.0.0
