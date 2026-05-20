@@ -65,15 +65,15 @@ Two reasons. **One**: silent bypass is a class of bug where the failure mode is 
 One-line: `json:"WouldExecute"` → `json:"would_execute"`. Added a comment explaining why the wire name is load-bearing so the next person editing this struct doesn't re-introduce the bug.
 
 ### Why it wasn't caught
-No CLI smoke test exercises dry-run end-to-end against a populated routine. We don't add one here — the failure mode is now structural (the field name matches the wire name verbatim), and a future CLI integration suite is its own piece of work.
+No CLI smoke test exercises dry-run end-to-end against a populated routine. **This PR adds the regression guard** as `cmd/crewship/cmd_pipeline_dryrun_decode_test.go` — it marshals a populated `pipeline.RunResult` through the wire and asserts the CLI's local decode struct round-trips it field-by-field. The second test (`TestDryRunCLIDecode_RejectsPascalCaseTag`) documents the original buggy shape as a negative case so a future copy-paste fix doesn't weaken the type.
 
-## Change 3: Step-level cost + duration in Runs tab waterfall
+## Change 3: Step-level cost + duration across UI + CLI
 
 ### Today
-`journal.EntryPipelineStepCompleted` payload (internal/pipeline/journal.go:197) includes `step_id`, `cost_usd`, `duration_ms`. The Runs tab waterfall (`routine-runs-tab.tsx`) only renders `step_id`. The data is on the wire, dropped client-side.
+`journal.EntryPipelineStepCompleted` payload (internal/pipeline/journal.go:197) includes `step_id`, `cost_usd`, `duration_ms`. The Runs tab waterfall (`routine-runs-tab.tsx`) only rendered `step_id`. The CLI `routine logs` timeline rendered only `TIME EVENT SEVERITY SUMMARY` — cost / duration silently dropped on the floor on both surfaces. The data was on the wire; both clients ignored it.
 
 ### Fix
-Extracted shared parsing + formatting into `components/features/routines/routine-cost-format.ts`:
+**UI**: extracted shared parsing + formatting into `components/features/routines/routine-cost-format.ts`:
 
 - `extractStepMeta(payload)` — tolerates parsed-object / JSON-string / absent payloads, returns `{stepId, costUSD, durationMs}`
 - `formatStepDuration(ms)` — em-dash for non-positive; `Xms` / `X.XXs` / `XmYYs` ramps
@@ -81,11 +81,21 @@ Extracted shared parsing + formatting into `components/features/routines/routine
 
 Waterfall renders cost + duration columns right-aligned in tabular-nums, with a footer total row matching the per-run number on the Overview tab.
 
+**CLI**: `cmd_routine_logs.go` timeline gains two columns:
+
+```
+TIME          EVENT           SEVERITY  DURATION  COST     SUMMARY
+18:42:03.421  step.completed  info      2.31s     $0.0021  …
+```
+
+`formatPayloadCost` / `formatPayloadDuration` helpers mirror the TS formatters byte-for-byte (same em-dash rule, same ramps, same precision). A user gets the same shape whether they look at the UI waterfall or pipe `crewship routine logs` into grep.
+
 ### Why em-dash, not $0.0000
 "$0.0000" alongside "$0.0123" in a column is harder to scan than "—" alongside "$0.0123". The em-dash signals "not applicable" (started / failed / live-only events don't carry cost) without competing visually with real values.
 
 ### Tests
-`components/features/routines/__tests__/routine-cost-format.test.ts` — 14 unit tests pinning empty / zero / NaN behaviour, double-encoded JSON tolerance, format precision contract.
+- `components/features/routines/__tests__/routine-cost-format.test.ts` — 14 unit tests pinning empty / zero / NaN behaviour, double-encoded JSON tolerance, format precision contract.
+- `cmd/crewship/cmd_routine_logs_format_test.go` — 25 unit tests on the Go formatters using the same fixtures as the TS tests so a drift between surfaces fails CI before it fails users.
 
 ## Change 4: Dry-run report inline in detail panel
 

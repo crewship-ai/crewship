@@ -163,9 +163,14 @@ Output formats:
 			return nil
 		}
 
-		// Pretty timeline
+		// Pretty timeline. `pipeline.step.completed` events carry
+		// per-step cost_usd + duration_ms in the journal payload
+		// (internal/pipeline/journal.go:emitStepCompleted). We surface
+		// them as right-aligned columns so a user can scan "which step
+		// burned the money?" without a follow-up jq pass — matches the
+		// Runs tab waterfall in the UI which renders the same numbers.
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "TIME\tEVENT\tSEVERITY\tSUMMARY")
+		fmt.Fprintln(w, "TIME\tEVENT\tSEVERITY\tDURATION\tCOST\tSUMMARY")
 		for _, r := range matched {
 			t := parseTime(r.Timestamp)
 			kind := strings.TrimPrefix(r.EntryType, "pipeline.")
@@ -173,8 +178,11 @@ Output formats:
 			if sev == "" {
 				sev = "info"
 			}
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
-				t.Local().Format("15:04:05.000"), kind, sev, r.Summary)
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
+				t.Local().Format("15:04:05.000"), kind, sev,
+				formatPayloadDuration(r.Payload),
+				formatPayloadCost(r.Payload),
+				r.Summary)
 		}
 		_ = w.Flush()
 
@@ -201,6 +209,64 @@ Output formats:
 		}
 		return nil
 	},
+}
+
+// formatPayloadCost renders the `cost_usd` field of a step-completed
+// payload as $X.XXXX or "—" when absent. Kept lenient on the type
+// (JSON unmarshals numbers to float64; defensive fallthrough to
+// json.Number / int in case an upstream change shifts the type).
+func formatPayloadCost(p map[string]interface{}) string {
+	if p == nil {
+		return "—"
+	}
+	switch v := p["cost_usd"].(type) {
+	case float64:
+		if v <= 0 {
+			return "—"
+		}
+		return fmt.Sprintf("$%.4f", v)
+	case int:
+		if v <= 0 {
+			return "—"
+		}
+		return fmt.Sprintf("$%.4f", float64(v))
+	}
+	return "—"
+}
+
+// formatPayloadDuration renders the `duration_ms` field as Xms /
+// X.XXs / XmYYs matching the UI's formatStepDuration (kept in sync
+// with components/features/routines/routine-cost-format.ts so users
+// see the same shape across surfaces).
+func formatPayloadDuration(p map[string]interface{}) string {
+	if p == nil {
+		return "—"
+	}
+	var ms float64
+	switch v := p["duration_ms"].(type) {
+	case float64:
+		ms = v
+	case int:
+		ms = float64(v)
+	default:
+		return "—"
+	}
+	if ms <= 0 {
+		return "—"
+	}
+	if ms < 1000 {
+		return fmt.Sprintf("%dms", int(ms))
+	}
+	s := ms / 1000
+	if s < 10 {
+		return fmt.Sprintf("%.2fs", s)
+	}
+	if s < 60 {
+		return fmt.Sprintf("%.1fs", s)
+	}
+	m := int(s) / 60
+	rem := int(s) - m*60
+	return fmt.Sprintf("%dm%02ds", m, rem)
 }
 
 func parseTime(s string) time.Time {

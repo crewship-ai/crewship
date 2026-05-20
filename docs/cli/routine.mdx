@@ -212,6 +212,22 @@ crewship routine logs run_cmox10oci00016b48aacd --slug eval-extract-emails
 crewship routine logs run_cmox... --slug eval-... --json | jq '.events[] | select(.type=="pipeline.step.failed")'
 ```
 
+Example output (table mode, with `--slug`):
+
+```text
+TIME          EVENT             SEVERITY  DURATION  COST     SUMMARY
+18:42:01.103  run.started       info      —         —        Pipeline pr-review starting…
+18:42:01.110  step.started      info      —         —        Pipeline pr-review step extract started
+18:42:03.421  step.completed    info      2.31s     $0.0021  Pipeline pr-review step extract completed
+18:42:03.428  step.started      info      —         —        Pipeline pr-review step summarise started
+18:42:05.812  step.completed    info      2.38s     $0.0013  Pipeline pr-review step summarise completed
+18:42:05.820  run.completed     info      —         —        Pipeline pr-review completed
+
+Completed in 4.7s · cost $0.0034
+```
+
+The `DURATION` and `COST` columns surface the per-step `duration_ms` / `cost_usd` from the journal payload (em-dash means "not applicable" — started / failed events don't carry them). Matches the Runs-tab waterfall in the UI so the same numbers reconcile across surfaces.
+
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--slug` | | Routine slug the run belongs to (optional; enables full journal timeline) |
