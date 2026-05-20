@@ -21,6 +21,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/license"
 	"github.com/crewship-ai/crewship/internal/logcollector"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
+	"github.com/crewship-ai/crewship/internal/policy"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/ws"
 	dockerclient "github.com/docker/docker/client"
@@ -110,6 +111,25 @@ type Router struct {
 	// or "dev" for local builds). Surfaced on GET /api/v1/system/version
 	// so the web UI can render an "update available" banner.
 	version string
+
+	// policyResolver is the shared per-crew autonomy + behavior_mode
+	// resolver introduced by PR-B F2. Carried on Router so PATCH
+	// handlers can invalidate the cache (otherwise subsystems would
+	// see stale values for up to the 10s TTL after an operator flip).
+	// PR-C / PR-D / PR-E consumers will read through this same
+	// instance.
+	policyResolver *policy.Resolver
+}
+
+// PolicyResolver returns (lazily constructs) the shared per-crew
+// policy resolver. Callers should always go through this rather
+// than constructing their own — sharing the cache is what makes
+// Invalidate work end-to-end.
+func (r *Router) PolicyResolver() *policy.Resolver {
+	if r.policyResolver == nil {
+		r.policyResolver = policy.NewResolver(r.db)
+	}
+	return r.policyResolver
 }
 
 // SetVersion records the binary version for the version-info endpoint.
