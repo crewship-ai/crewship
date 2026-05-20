@@ -29,6 +29,22 @@ type createCredentialRequest struct {
 	RefreshToken  *string  `json:"refresh_token"`
 	TokenExpires  *string  `json:"token_expires_at"`
 	SecurityLevel *int     `json:"security_level"`
+	// Attribution (v98). Together these answer "who created this
+	// credential row?" — the existing `created_by` column captures
+	// the calling user, but Crewship now also writes credentials on
+	// behalf of agents (sidecar auto-managed passwords) and system
+	// processes (seed / backup restore). When CreatedByActorType is
+	// 'agent' the caller MUST be OWNER or ADMIN — anyone with lower
+	// role lacks the authority to attribute a workspace mutation to
+	// a non-self actor. Default 'user' with the authenticated user.
+	CreatedByActorType *string `json:"created_by_actor_type,omitempty"`
+	CreatedByActorID   *string `json:"created_by_actor_id,omitempty"`
+	// ProvisionedForService marks the row as owned by a specific
+	// sidecar service declaration in `<crew-slug>/<service-name>`
+	// form. Non-empty rows are treated as Crewship-managed in the UI:
+	// reveal / edit actions are hidden, rotate is the only mutation.
+	// Manifest apply sets this for AUTO_MANAGED rows.
+	ProvisionedForService *string `json:"provisioned_for_service,omitempty"`
 	// USERPASS: cleartext identifier half (e.g. "user@gmail.com").
 	// Stored unencrypted in credentials.username because usernames are
 	// identifiers, not secrets — mirrors Bitwarden's login.username
@@ -210,14 +226,43 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 		tagsArg = encoded
 	}
 
+	// Resolve attribution (v98). Default is the calling user; AUTO_MANAGED
+	// rows from manifest apply override to 'agent' with the crew's lead
+	// agent id. Anything other than 'user' requires OWNER/ADMIN — the
+	// canRole("create") check above already gates this code path, but
+	// reaffirm here so a future refactor that drops MANAGER from "create"
+	// doesn't accidentally relax the actor-type rule.
+	actorType := "user"
+	if req.CreatedByActorType != nil && *req.CreatedByActorType != "" {
+		actorType = *req.CreatedByActorType
+	}
+	if actorType != "user" && actorType != "agent" && actorType != "system" {
+		replyError(w, http.StatusBadRequest, "created_by_actor_type must be user|agent|system")
+		return
+	}
+	if actorType != "user" && role != "OWNER" && role != "ADMIN" {
+		replyError(w, http.StatusForbidden, "non-self actor attribution requires OWNER or ADMIN role")
+		return
+	}
+	actorID := user.ID
+	if req.CreatedByActorID != nil && *req.CreatedByActorID != "" {
+		actorID = *req.CreatedByActorID
+	}
+	var provisionedForService *string
+	if req.ProvisionedForService != nil && *req.ProvisionedForService != "" {
+		provisionedForService = req.ProvisionedForService
+	}
+
 	_, err = tx.ExecContext(r.Context(), `
 		INSERT INTO credentials (id, workspace_id, name, description, encrypted_value,
 			type, provider, scope, crew_id, account_label, account_email, username,
-			token_expires_at, security_level, status, tags, created_by, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			token_expires_at, security_level, status, tags, created_by, created_at, updated_at,
+			created_by_actor_type, created_by_actor_id, provisioned_for_service)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		credID, workspaceID, req.Name, req.Description, encryptedValue,
 		req.Type, req.Provider, req.Scope, legacyCrewID, req.AccountLabel, req.AccountEmail, req.Username,
-		req.TokenExpires, secLevel, credStatus, tagsArg, user.ID, now, now)
+		req.TokenExpires, secLevel, credStatus, tagsArg, user.ID, now, now,
+		actorType, actorID, provisionedForService)
 	if err != nil {
 		tx.Rollback()
 		if strings.Contains(err.Error(), "UNIQUE") {

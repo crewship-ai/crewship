@@ -41,22 +41,39 @@ var credListCmd = &cobra.Command{
 		}
 
 		var creds []struct {
-			ID         string `json:"id"`
-			Name       string `json:"name"`
-			Type       string `json:"type"`
-			Provider   string `json:"provider"`
-			Status     string `json:"status"`
-			AgentCount int    `json:"_count_agent_credentials"`
+			ID                    string  `json:"id"`
+			Name                  string  `json:"name"`
+			Type                  string  `json:"type"`
+			Provider              string  `json:"provider"`
+			Status                string  `json:"status"`
+			AgentCount            int     `json:"_count_agent_credentials"`
+			CreatedByActorType    *string `json:"created_by_actor_type"`
+			ProvisionedForService *string `json:"provisioned_for_service"`
 		}
 		if err := cli.ReadJSON(resp, &creds); err != nil {
 			return err
 		}
 
+		// SOURCE column surfaces who/what owns the row: a literal
+		// "user" for the default (operator created via UI / CLI),
+		// "system" for v98 AUTO_MANAGED rows minted by the manifest
+		// dispatch, "agent" for future per-agent-attributed rows.
+		// When a row is tagged with provisioned_for_service we suffix
+		// the service slug so operators see *what* the auto-managed
+		// row belongs to without a second `crewship credential get`.
 		f := newFormatter()
-		headers := []string{"ID", "NAME", "TYPE", "PROVIDER", "STATUS", "AGENTS"}
+		headers := []string{"ID", "NAME", "TYPE", "PROVIDER", "STATUS", "AGENTS", "SOURCE"}
 		var rows [][]string
 		for _, c := range creds {
-			rows = append(rows, []string{c.ID, c.Name, c.Type, c.Provider, c.Status, fmt.Sprintf("%d", c.AgentCount)})
+			actor := "user"
+			if c.CreatedByActorType != nil && *c.CreatedByActorType != "" {
+				actor = *c.CreatedByActorType
+			}
+			source := actor
+			if c.ProvisionedForService != nil && *c.ProvisionedForService != "" {
+				source = actor + " (" + *c.ProvisionedForService + ")"
+			}
+			rows = append(rows, []string{c.ID, c.Name, c.Type, c.Provider, c.Status, fmt.Sprintf("%d", c.AgentCount), source})
 		}
 		return f.Auto(creds, headers, rows)
 	},

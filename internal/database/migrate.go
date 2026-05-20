@@ -1304,6 +1304,13 @@ END;
 	// See migrate_consts_v97_eval_runs_online.go.
 	// (Renumbered from v96 to v97 on rebase for the same reason.)
 	{version: 97, name: "eval_runs_online", sql: migrationEvalRunsOnline},
+
+	// Credential attribution: who created the row + what sidecar
+	// service (if any) it belongs to. Backfills as 'user' for every
+	// pre-v98 credential, so behaviour is unchanged until the apply
+	// dispatch starts tagging AUTO_MANAGED rows with 'agent'.
+	// See migrate_consts_v98_credential_attribution.go.
+	{version: 98, name: "credential_attribution", sql: migrationAddCredentialAttribution},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

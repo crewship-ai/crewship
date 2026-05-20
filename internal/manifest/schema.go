@@ -193,6 +193,92 @@ type Service struct {
 	// when this is set, so agents don't race ahead of a DB that
 	// hasn't finished its first migration.
 	Healthcheck *ServiceHealthcheck `yaml:"healthcheck,omitempty" json:"healthcheck,omitempty"`
+
+	// AutoCredentials declares secrets that Crewship should
+	// generate and manage on the operator's behalf. Each entry
+	// produces an AUTO_MANAGED credential row at apply time
+	// (attributed to the crew's lead agent), is injected as an
+	// env var into this sidecar's runtime, and is automatically
+	// appended to every agent's env_refs in the same crew so the
+	// agent can reach the sidecar with the right value.
+	//
+	// Operators rarely fill this slice by hand: for well-known
+	// images (postgres:*, mysql:*, mongo:*, etc.) the parser
+	// merges in a sugar default — see DefaultAutoCredentialsForImage.
+	// Explicit entries win over sugar defaults with the same Name.
+	//
+	// When a service publishes a port to the host
+	// (sidecar leaves the crew bridge), AUTO_MANAGED is unsafe:
+	// the external attack surface deserves an operator-chosen
+	// credential, so validate.go refuses auto_credentials in that
+	// configuration.
+	AutoCredentials []AutoCredential `yaml:"auto_credentials,omitempty" json:"auto_credentials,omitempty"`
+}
+
+// AutoCredential is one auto-managed secret declaration on a Service.
+// All fields except Name have sane defaults; minimal authoring is:
+//
+//	auto_credentials:
+//	  - { name: POSTGRES_PASSWORD }
+//
+// Length defaults to 32 random bytes (64 hex chars). InjectAsEnv
+// defaults to Name. InjectToAgents defaults to true.
+type AutoCredential struct {
+	// Name is both the credential's workspace-unique name AND the
+	// default env-var name on the sidecar + on every agent in the
+	// crew. Use SCREAMING_SNAKE_CASE; same constraints as the
+	// existing Credential.EnvVar field.
+	Name string `yaml:"name" json:"name"`
+
+	// InjectAsEnv overrides the env-var name the sidecar receives.
+	// Some images want POSTGRES_PASSWORD literally; others
+	// (e.g. mariadb) want MARIADB_ROOT_PASSWORD. Empty = use Name.
+	InjectAsEnv string `yaml:"inject_as_env,omitempty" json:"inject_as_env,omitempty"`
+
+	// InjectToAgents controls whether crew agents pick the
+	// credential up automatically. Nil pointer = true; set false
+	// when the sidecar uses the secret internally but no agent
+	// should ever see it (rare).
+	InjectToAgents *bool `yaml:"inject_to_agents,omitempty" json:"inject_to_agents,omitempty"`
+
+	// Length is the number of random bytes Crewship generates
+	// before hex-encoding. Default 32 bytes (64 hex chars).
+	// Minimum 16 bytes; below that the validator refuses the row.
+	Length int `yaml:"length,omitempty" json:"length,omitempty"`
+
+	// Description is shown in the UI when the operator hovers the
+	// "Created by <agent>" row. Optional; the sugar layer fills
+	// this in with a human sentence for known images.
+	Description string `yaml:"description,omitempty" json:"description,omitempty"`
+}
+
+// EffectiveInjectAsEnv returns the env-var name the sidecar should
+// receive — InjectAsEnv when set, else Name. Centralised so the
+// dispatch and the validator agree on the same fallback rule.
+func (a *AutoCredential) EffectiveInjectAsEnv() string {
+	if a.InjectAsEnv != "" {
+		return a.InjectAsEnv
+	}
+	return a.Name
+}
+
+// EffectiveInjectToAgents returns the bool with default-true
+// resolution. Same centralisation rationale as EffectiveInjectAsEnv.
+func (a *AutoCredential) EffectiveInjectToAgents() bool {
+	if a.InjectToAgents == nil {
+		return true
+	}
+	return *a.InjectToAgents
+}
+
+// EffectiveLength returns the resolved byte count, applying the
+// 32-byte default when Length is zero. Caller is responsible for
+// rejecting positive values below 16 (validate.go does that).
+func (a *AutoCredential) EffectiveLength() int {
+	if a.Length <= 0 {
+		return 32
+	}
+	return a.Length
 }
 
 // ServiceVolume is a named-volume → mount-path binding.

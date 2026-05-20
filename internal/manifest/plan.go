@@ -366,11 +366,22 @@ func (pb *planBuilder) planCrew(ctx context.Context, meta Metadata, spec *CrewSp
 		return err
 	}
 
-	crewBody, err := buildCrewBody(name, slug, spec)
+	// Auto-managed sidecar credentials: expand IN-PLACE on a deep
+	// enough copy that we don't mutate the caller's manifest. The
+	// expansion writes generated values into the services' Env map
+	// and appends credential names to every agent's env_refs in the
+	// crew. The returned slice tells us what credential rows to
+	// queue AFTER the crew + agents are created.
+	specCopy := deepCopyCrewSpec(spec)
+	plannedAutoCreds, err := expandAutoCredentialsInCrewSpec(&specCopy)
+	if err != nil {
+		return fmt.Errorf("crew %q: auto-managed credentials: %w", slug, err)
+	}
+
+	crewBody, err := buildCrewBody(name, slug, &specCopy)
 	if err != nil {
 		return fmt.Errorf("crew %q: %w", slug, err)
 	}
-	specCopy := *spec
 	var crewIDForChildren string
 
 	switch {
@@ -454,7 +465,80 @@ func (pb *planBuilder) planCrew(ctx context.Context, meta Metadata, spec *CrewSp
 	// "exec deferred" wrapper that resolves the ID at apply time by
 	// re-fetching the crew list (the cache is invalidated by the
 	// create).
-	return pb.planCrewChildren(ctx, slug, crewIDForChildren, &specCopy, wsCreds, wsSkills)
+	if err := pb.planCrewChildren(ctx, slug, crewIDForChildren, &specCopy, wsCreds, wsSkills); err != nil {
+		return err
+	}
+
+	// Auto-managed sidecar credentials (v98). One plan item per
+	// (service, auto-credential) tuple. Each runs AFTER the crew +
+	// agents are created so the closure can pin the LEAD agent for
+	// attribution and the credential row's `created_by_actor_id`.
+	// Idempotent: if a row with the same name+workspace already
+	// exists with provider=AUTO_MANAGED, the closure no-ops.
+	pb.planAutoManagedCredentials(slug, plannedAutoCreds)
+	return nil
+}
+
+// planAutoManagedCredentials emits one plan item per generated
+// auto-credential. The closure that runs at apply time:
+//
+//   1. Checks workspace credentials for an existing AUTO_MANAGED row
+//      with the same name; on match, no-ops (re-apply idempotency).
+//   2. POSTs a fresh credential with provider=AUTO_MANAGED, status=
+//      ACTIVE, created_by_actor_type='system' (v98 MVP), and
+//      provisioned_for_service=<crew>/<service>.
+//
+// Attribution is intentionally 'system' (not 'agent') for v98. The
+// row's provisioned_for_service tag is the load-bearing audit signal
+// — UI surfaces "Auto-managed for <crew>/<service>" from it, and a
+// follow-up patch can hydrate the attributed agent once the
+// rank-ordering chicken-and-egg with agent creation is resolved.
+// See SPEC-4 §"Two-phase attribution" for the deferred design.
+//
+// Plan output renders one row per credential ("create credential
+// POSTGRES_PASSWORD for uo-outlands/postgres"). The generated value
+// is intentionally NOT in that string — captured inside the closure.
+//
+// Kind is "credential" so these items rank with normal credentials
+// (well before agents that env_ref them).
+func (pb *planBuilder) planAutoManagedCredentials(crewSlug string, planned []plannedAutoCredential) {
+	for i := range planned {
+		ac := planned[i] // local capture; closure must not share loop var
+		pb.appendItem(ActionCreate, "credential",
+			fmt.Sprintf("%s (auto-managed for %s/%s)", ac.Name, crewSlug, ac.ProvisionedForService),
+			func(ctx context.Context, client *Client, opts Options) error {
+				existing, err := client.FindCredentialByName(ctx, ac.Name)
+				if err != nil {
+					return fmt.Errorf("auto-managed %s: lookup existing: %w", ac.Name, err)
+				}
+				if existing != nil {
+					if existing.Provider == "AUTO_MANAGED" {
+						return nil // idempotent re-apply, value already in services_json
+					}
+					return fmt.Errorf(
+						"auto-managed %s: credential already exists with provider=%s; "+
+							"delete it manually or rename the auto-credential to resolve the conflict",
+						ac.Name, existing.Provider)
+				}
+				provServiceTag := crewSlug + "/" + ac.ProvisionedForService
+				body := map[string]any{
+					"name":                    ac.Name,
+					"value":                   ac.Value,
+					"type":                    "GENERIC_SECRET",
+					"provider":                "AUTO_MANAGED",
+					"scope":                   "WORKSPACE",
+					"created_by_actor_type":   "system",
+					"provisioned_for_service": provServiceTag,
+				}
+				if ac.Description != "" {
+					body["description"] = ac.Description
+				}
+				if _, err := client.CreateCredential(ctx, body); err != nil {
+					return fmt.Errorf("auto-managed %s: create: %w", ac.Name, err)
+				}
+				return nil
+			})
+	}
 }
 
 // planCrewChildren emits plan items for MCP servers + agents + their

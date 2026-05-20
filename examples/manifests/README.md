@@ -170,16 +170,39 @@ on `crewship apply` today with no extra flags. See
 
 For production-shape separation (DB lifecycle decoupled from agent,
 volumes persisted across container rebuilds, healthchecks gate the
-agent start) declare sidecars under `spec.services`:
+agent start) declare sidecars under `spec.services`. The **minimum**
+manifest for a known database image is one line — Crewship
+auto-generates and manages the root password for you:
 
 ```yaml
 spec:
   devcontainer:
     image: python:3.12
   services:
-    - name: redis
-      image: redis:7-alpine
-      ports: ["6379"]
+    - { name: postgres, image: postgres:16-alpine }
+    - { name: redis,    image: redis:7-alpine }
+```
+
+That's enough to bring up Postgres + Redis: the dispatch recognises
+`postgres:*` from the known-sidecar catalog, sets
+`POSTGRES_USER=postgres`, generates a 32-byte hex password, and
+materialises a credential row in the workspace tagged
+`provisioned_for_service=<crew>/postgres` with `provider=AUTO_MANAGED`.
+The same value gets injected into every crew agent's env as
+`POSTGRES_PASSWORD` automatically — no `env_refs:` to author by
+hand.
+
+Catalog (v98): `postgres`, `mariadb`, `mysql`, `mongo`, `rabbitmq`,
+`elasticsearch`. `redis` is included with no auto-credentials (the
+default deployment doesn't require AUTH on a crew-private bridge).
+Operators who want full control still get to write everything by
+hand — see `auto_credentials:` for explicit declarations.
+
+For full control, the long form is also still supported:
+
+```yaml
+spec:
+  services:
     - name: postgres
       image: postgres:16
       env: { POSTGRES_DB: app, POSTGRES_USER: postgres }
@@ -190,12 +213,32 @@ spec:
       healthcheck:
         test: ["CMD-SHELL", "pg_isready -U postgres"]
         interval: 5s
+      # OR: explicit auto_credentials for unknown images
+      auto_credentials:
+        - name: POSTGRES_PASSWORD
+          inject_as_env: PG_PWD       # default = name
+          inject_to_agents: true       # default = true
+          length: 48                   # default = 32 bytes (hex-encoded)
 ```
 
 Agents inside the crew reach services by name (`redis:6379`,
 `postgres:5432`) on the crew-private bridge network. The docker
 provider starts each sidecar before the agent runtime so the first
 DB call lands on a healthy endpoint (healthchecks gate readiness).
+
+#### Threat model for auto-managed credentials
+
+The generated password lives in two places: the encrypted
+`credentials.encrypted_value` column (for UI + audit) and the
+plaintext sidecar env via `crews.services_json` (for docker to
+actually start the container). The literal-in-services_json is
+intentional because the sidecar is bound to the **crew-private
+bridge network** with no host port published — anyone with shell
+access to the host already controls bridge isolation and the
+duplicated value isn't an attack-surface widening. Operators
+who want host-published ports must declare credentials the
+traditional way (T2: `credentials:` block) so a real credential
+review happens.
 
 Volumes are per-crew named volumes — two crews that declare the
 same `pg-data` name get isolated stores. Bind mounts to host paths
