@@ -34,9 +34,29 @@ const APIVersion = "crewship/v1"
 // is a multi-crew bundle that nests Crew specs inside it; Crew is the
 // single-crew bundle that lives on its own. Both share the same Spec
 // types under the hood — Workspace just adds outer wrapping.
+//
+// SPEC-2 added 14 additional kinds for declarative deployment of
+// projects, labels, milestones, routines, workflow templates, triage
+// rules, recurring issues, saved views, feature flags, instance
+// settings, recipes, crew templates, connectors, and hooks. Their
+// document types live under internal/manifest/kinds.
 const (
-	KindCrew      = "Crew"
-	KindWorkspace = "Workspace"
+	KindCrew             = "Crew"
+	KindWorkspace        = "Workspace"
+	KindProject          = "Project"
+	KindLabel            = "Label"
+	KindMilestone        = "Milestone"
+	KindWorkflowTemplate = "WorkflowTemplate"
+	KindTriageRule       = "TriageRule"
+	KindRecurringIssue   = "RecurringIssue"
+	KindSavedView        = "SavedView"
+	KindRoutine          = "Routine"
+	KindFeatureFlag      = "FeatureFlag"
+	KindInstanceSetting  = "InstanceSetting"
+	KindRecipe           = "Recipe"
+	KindCrewTemplate     = "CrewTemplate"
+	KindConnector        = "Connector"
+	KindHook             = "Hook"
 )
 
 // Document is the discriminated top-level shape. apiVersion + kind

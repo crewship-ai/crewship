@@ -74,6 +74,9 @@ func init() {
 	rootCmd.AddCommand(triageCmd)
 	rootCmd.AddCommand(recurringCmd)
 	rootCmd.AddCommand(savedViewCmd)
+	rootCmd.AddCommand(workflowCmd)    // SPEC-2: workflow templates
+	rootCmd.AddCommand(featureFlagCmd) // SPEC-2: feature flags
+	rootCmd.AddCommand(instanceCmd)    // SPEC-2: instance settings
 	rootCmd.AddCommand(mcpCallsCmd)
 	rootCmd.AddCommand(metricsCmd)
 	rootCmd.AddCommand(lintCmd)

@@ -157,6 +157,7 @@ var pipelineGetCmd = &cobra.Command{
 		if err := requireWorkspace(); err != nil {
 			return err
 		}
+		format, _ := cmd.Flags().GetString("format")
 		client := newAPIClient()
 		ws := client.GetWorkspaceID()
 		resp, err := client.Get(fmt.Sprintf("/api/v1/workspaces/%s/pipelines/%s", ws, args[0]))
@@ -171,6 +172,24 @@ var pipelineGetCmd = &cobra.Command{
 		if err := json.NewDecoder(resp.Body).Decode(&p); err != nil {
 			return fmt.Errorf("decode response: %w", err)
 		}
+
+		switch strings.ToLower(format) {
+		case "json":
+			// Machine-readable mode: emit the whole row as
+			// pretty-printed JSON. Used by `crewship export` callers
+			// and any operator scripting against the CLI.
+			out, err := json.MarshalIndent(p, "", "  ")
+			if err != nil {
+				return fmt.Errorf("marshal routine to JSON: %w", err)
+			}
+			fmt.Println(string(out))
+			return nil
+		case "", "human", "table":
+			// fall through to human-readable rendering below
+		default:
+			return fmt.Errorf("unknown --format %q (want human | json)", format)
+		}
+
 		// Pretty-print: human header on top, full DSL JSON below.
 		// Tabwriter for the header keeps the layout aligned even when
 		// fields wrap.
@@ -259,15 +278,12 @@ reuse contract).`,
 		// CLI surfaces the same gate the sidecar enforces for
 		// in-container agents.
 		fmt.Println("Running test_run gate against the execution tier...")
-		testBody, err := json.Marshal(map[string]any{
+		testBody := map[string]any{
 			"definition":     json.RawMessage(definitionRaw),
 			"author_crew_id": authorCrew,
 			"sample_inputs":  sampleInputs,
-		})
-		if err != nil {
-			return fmt.Errorf("marshal test_run body: %w", err)
 		}
-		testResp, err := client.Post(fmt.Sprintf("/api/v1/workspaces/%s/pipelines/test_run", ws), bytes.NewReader(testBody))
+		testResp, err := client.Post(fmt.Sprintf("/api/v1/workspaces/%s/pipelines/test_run", ws), testBody)
 		if err != nil {
 			return err
 		}
@@ -298,7 +314,7 @@ reuse contract).`,
 		// because user-driven save flows from the CLI need to land
 		// here too.
 		nowRFC := time.Now().UTC().Format(time.RFC3339Nano)
-		saveBody, err := json.Marshal(map[string]any{
+		saveBody := map[string]any{
 			"workspace_id":         ws,
 			"slug":                 slugifyName(name),
 			"name":                 name,
@@ -308,11 +324,8 @@ reuse contract).`,
 			"author_agent_id":      authorAgent,
 			"last_test_run_at":     nowRFC,
 			"last_test_run_passed": true,
-		})
-		if err != nil {
-			return fmt.Errorf("marshal save body: %w", err)
 		}
-		saveResp, err := client.Post("/api/v1/internal/pipelines/save", bytes.NewReader(saveBody))
+		saveResp, err := client.Post("/api/v1/internal/pipelines/save", saveBody)
 		if err != nil {
 			return err
 		}
@@ -632,6 +645,7 @@ func indent(s, prefix string) string {
 
 func init() {
 	pipelineListCmd.Flags().String("order", "popularity", "sort order: popularity | recent | name")
+	pipelineGetCmd.Flags().StringP("format", "f", "human", "output format: human | json")
 	pipelineRunsCmd.Flags().Int("limit", 20, "max number of run entries to return (1-500)")
 
 	pipelineSaveCmd.Flags().String("name", "", "human-readable name (REQUIRED; slug derived from this)")
