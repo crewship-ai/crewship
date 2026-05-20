@@ -513,7 +513,7 @@ func (pb *planBuilder) planCrew(ctx context.Context, meta Metadata, spec *CrewSp
 	// attribution and the credential row's `created_by_actor_id`.
 	// Idempotent: if a row with the same name+workspace already
 	// exists with provider=AUTO_MANAGED, the closure no-ops.
-	pb.planAutoManagedCredentials(slug, plannedAutoCreds)
+	pb.planAutoManagedCredentials(ctx, slug, plannedAutoCreds)
 	return nil
 }
 
@@ -539,17 +539,40 @@ func (pb *planBuilder) planCrew(ctx context.Context, meta Metadata, spec *CrewSp
 //
 // Kind is "credential" so these items rank with normal credentials
 // (well before agents that env_ref them).
-func (pb *planBuilder) planAutoManagedCredentials(crewSlug string, planned []plannedAutoCredential) {
+func (pb *planBuilder) planAutoManagedCredentials(ctx context.Context, crewSlug string, planned []plannedAutoCredential) {
 	for i := range planned {
 		ac := planned[i] // local capture; closure must not share loop var
-		pb.appendItem(ActionCreate, "credential",
-			fmt.Sprintf("%s (auto-managed for %s/%s)", ac.Name, crewSlug, ac.ProvisionedForService),
+		provServiceTag := crewSlug + "/" + ac.ProvisionedForService
+		summary := fmt.Sprintf("%s (auto-managed for %s/%s)", ac.Name, crewSlug, ac.ProvisionedForService)
+
+		// Plan-time prediction. A re-apply against a workspace that
+		// already carries the matching auto-managed credential is a
+		// no-op — same name, same provider, same provisioned_for_service
+		// tag, same value (expandAutoCredentialsInCrewSpec reused the
+		// prior value via reuseOrGenerate). Reporting that as
+		// "+ credential" + "1 created" was misleading: the row count
+		// in the plan footer never matched what actually changed in
+		// the DB. Look up the workspace's current credentials so the
+		// plan output matches reality.
+		//
+		// The closure below still runs the same provenance check —
+		// it remains load-bearing as a TOCTOU defence and as the
+		// authoritative path that returns nil-or-error.
+		predicted := ActionCreate
+		if existing, err := pb.client.FindCredentialByName(ctx, ac.Name); err == nil &&
+			existing != nil &&
+			existing.Provider == "AUTO_MANAGED" &&
+			existing.ProvisionedForService != nil &&
+			*existing.ProvisionedForService == provServiceTag {
+			predicted = ActionUnchanged
+		}
+
+		pb.appendItem(predicted, "credential", summary,
 			func(ctx context.Context, client *Client, opts Options) error {
 				existing, err := client.FindCredentialByName(ctx, ac.Name)
 				if err != nil {
 					return fmt.Errorf("auto-managed %s: lookup existing: %w", ac.Name, err)
 				}
-				provServiceTag := crewSlug + "/" + ac.ProvisionedForService
 				if existing != nil {
 					// The plan-time check in planCrew already rejects
 					// cross-crew collisions, but TOCTOU between plan
