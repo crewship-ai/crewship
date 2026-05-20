@@ -113,7 +113,6 @@
               },
               "guides/scheduling",
               "guides/files-and-output",
-              "guides/backup",
               "guides/paymaster",
               "guides/lookout",
               "guides/harbormaster",
@@ -121,8 +120,16 @@
               "guides/hooks",
               "guides/quartermaster",
               "guides/watch-roster",
-              "guides/migrations",
-              "guides/troubleshooting"
+              {
+                "group": "Operations",
+                "icon": "wrench",
+                "expanded": false,
+                "pages": [
+                  "guides/backup",
+                  "guides/migrations",
+                  "guides/troubleshooting"
+                ]
+              }
             ]
           },
           {
