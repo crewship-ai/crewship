@@ -88,6 +88,27 @@ func expandAutoCredentialsInCrewSpec(spec *CrewSpec, existingServicesJSON string
 	var out []plannedAutoCredential
 	for i := range spec.Services {
 		svc := &spec.Services[i]
+
+		// Snapshot the env keys the operator literally pinned in the
+		// manifest, BEFORE ResolveEnv overlays catalog defaults. This
+		// is the only way to tell "operator wrote
+		// POSTGRES_PASSWORD: my-literal" apart from "catalog set
+		// POSTGRES_USER=postgres" once the two maps have merged.
+		//
+		// The sidecar catalog deliberately never lists an
+		// auto-credential's inject_as_env as a default in its Env map
+		// (passwords are minted, not defaulted), so any key collision
+		// here is genuinely operator-pinned and we treat it as
+		// authoritative — skip generation, skip the DB row, skip the
+		// agent env_refs append. Mirrors the schema docstring on
+		// ResolveEnv: "Operator values always win on key collision."
+		operatorPinned := make(map[string]bool, len(svc.Env))
+		for k, v := range svc.Env {
+			if v != "" {
+				operatorPinned[k] = true
+			}
+		}
+
 		// Apply sugar defaults to env (postgres → POSTGRES_USER=postgres etc.)
 		if resolved := svc.ResolveEnv(); resolved != nil {
 			svc.Env = resolved
@@ -97,6 +118,14 @@ func expandAutoCredentialsInCrewSpec(spec *CrewSpec, existingServicesJSON string
 			continue
 		}
 		for _, ac := range autoCreds {
+			injectKey := ac.EffectiveInjectAsEnv()
+			if operatorPinned[injectKey] {
+				// Operator-pinned literal wins; no sugar generation,
+				// no credential row, no agent env_refs append.
+				// svc.Env already carries the operator's value from
+				// the ResolveEnv overlay above.
+				continue
+			}
 			if first, dup := seen[ac.Name]; dup {
 				return nil, fmt.Errorf(
 					"auto_credential %q is declared by both service %q and %q (names must be unique within a workspace)",
@@ -117,7 +146,7 @@ func expandAutoCredentialsInCrewSpec(spec *CrewSpec, existingServicesJSON string
 			if svc.Env == nil {
 				svc.Env = make(map[string]string, 1)
 			}
-			svc.Env[ac.EffectiveInjectAsEnv()] = value
+			svc.Env[injectKey] = value
 
 			// Agent env_refs: append to every agent in the crew that
 			// inject_to_agents=true asks us to reach.
