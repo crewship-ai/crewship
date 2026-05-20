@@ -120,6 +120,57 @@ func parsePolymorphicCommand(data json.RawMessage, field string) (any, error) {
 	return nil, fmt.Errorf("devcontainer: %s must be string, []string, or map[string]string", field)
 }
 
+// commonUtilsFeatureRef is the canonical devcontainer common-utils
+// feature, version-pinned so behaviour stays stable when upstream
+// publishes a new tag. Bumping requires re-verifying that the
+// `username` / `uid` / `gid` install options are still respected.
+const commonUtilsFeatureRef = "ghcr.io/devcontainers/features/common-utils:2"
+
+// commonUtilsRefPrefix is the registry prefix used to detect ANY
+// pinned version of the feature (e.g. `:1`, `:2`, sha digests). We
+// match on prefix so an operator who pinned `:1` for compatibility
+// reasons still counts as having opted in — we don't second-guess
+// their version pick.
+const commonUtilsRefPrefix = "ghcr.io/devcontainers/features/common-utils"
+
+// EnsureAgentUser injects the devcontainer common-utils feature with
+// username=agent + UID/GID 1001 when the manifest / API caller didn't
+// declare any flavour of common-utils themselves. Crewship's container
+// runtime hard-codes UID 1001 (see Validate above), but without
+// common-utils there's no `agent` user inside the image to map onto —
+// so an operator who forgot the feature would hit "user 'agent' does
+// not exist" at exec time. Auto-injecting the same feature the docs
+// historically asked authors to type by hand eliminates that footgun.
+//
+// Idempotent: if any common-utils variant (any tag, any options) is
+// already declared, the function leaves Features untouched so an
+// operator who picked a different version / options keeps full
+// control. Returns true when something was injected, false when no
+// change was needed — callers wanting to log "auto-injected default
+// agent user" key on the bool.
+func (c *Config) EnsureAgentUser() bool {
+	if c == nil {
+		return false
+	}
+	if c.Features == nil {
+		c.Features = make(map[string]map[string]any)
+	}
+	for ref := range c.Features {
+		if strings.HasPrefix(ref, commonUtilsRefPrefix) {
+			return false // operator opted in; respect their config
+		}
+	}
+	c.Features[commonUtilsFeatureRef] = map[string]any{
+		"username":                   "agent",
+		"uid":                        "1001",
+		"gid":                        "1001",
+		"installZsh":                 "false", // keep image lean; agents bash
+		"upgradePackages":            "false", // determinism > freshness for cached images
+		"configureZshAsDefaultShell": "false",
+	}
+	return true
+}
+
 // Validate checks that the Config is well-formed.
 func (c *Config) Validate() error {
 	if c.Image == "" {
