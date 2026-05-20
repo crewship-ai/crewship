@@ -126,11 +126,17 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
         // payload was dropped — the toast pointed at the Runs tab
         // but dry runs don't emit step events. Now the user gets
         // per-step tier resolution + estimated cost up top.
+        //
+        // cost_usd / duration_ms are intentionally LEFT UNDEFINED
+        // when the server doesn't return a number — coercing to 0
+        // would render "$0.0000" indistinguishably from a real
+        // zero-cost run. The report component falls back to summing
+        // per-step estimates when the top-level total is missing.
         setDryRunResult({
           run_id: typeof data.run_id === "string" ? data.run_id : "",
           status: typeof data.status === "string" ? data.status : "DRY_RUN_OK",
-          cost_usd: typeof data.cost_usd === "number" ? data.cost_usd : 0,
-          duration_ms: typeof data.duration_ms === "number" ? data.duration_ms : 0,
+          cost_usd: typeof data.cost_usd === "number" ? data.cost_usd : undefined,
+          duration_ms: typeof data.duration_ms === "number" ? data.duration_ms : undefined,
           would_execute: Array.isArray(data.would_execute) ? data.would_execute : [],
         })
         toast.success("Dry-run report ready", {

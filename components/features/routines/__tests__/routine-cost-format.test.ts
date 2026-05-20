@@ -115,7 +115,13 @@ describe("formatStepDuration", () => {
     // boundary so a future refactor can't reintroduce it.
     expect(formatStepDuration(119999)).toBe("2m00s")
     expect(formatStepDuration(179500)).toBe("3m00s") // 2m59.5s → carry
-    expect(formatStepDuration(59999)).toBe("60.0s") // just under 60s threshold, stays in "<60s" branch
+    // 59999ms rounds to 60s total → must enter the minute branch.
+    // Pre-fix this returned "60.0s", inconsistent with the very next
+    // millisecond at 60000ms ⇒ "1m00s".
+    expect(formatStepDuration(59999)).toBe("1m00s")
+    // 59499ms rounds DOWN to 59s → stays in the "seconds" branch.
+    // Companion case so the boundary stays pinned on both sides.
+    expect(formatStepDuration(59499)).toBe("59.5s")
   })
 })
 

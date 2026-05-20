@@ -54,13 +54,18 @@ export function formatStepDuration(ms: number): string {
   if (!Number.isFinite(ms) || ms <= 0) return "—"
   if (ms < 1000) return `${Math.round(ms)}ms`
   const s = ms / 1000
-  if (s < 60) return `${s.toFixed(s < 10 ? 2 : 1)}s`
-  // Round the TOTAL seconds first, then split into minutes + seconds.
-  // The previous formula computed Math.floor(s/60) and
-  // Math.round(s - m*60) separately, which produced "1m60s" for
-  // 119999ms because rem rounded to 60 before the minute carried.
-  // Working in whole seconds avoids the carry entirely.
+  // Round to whole seconds up front so the boundary check matches the
+  // minute formatter. Pre-fix, `s < 60` admitted 59999ms (s = 59.999)
+  // into the "seconds" branch and toFixed(1) rendered "60.0s" — a
+  // string inconsistent with the very next millisecond (60000ms ⇒
+  // "1m00s"). Carrying the rounded total seconds into the
+  // boundary check eliminates the 1ms gap.
   const totalSec = Math.round(s)
+  if (totalSec < 60) {
+    return `${s.toFixed(s < 10 ? 2 : 1)}s`
+  }
+  // Working in whole seconds avoids the "1m60s" carry bug for
+  // 119999ms — both m and rem derive from the same rounded number.
   const m = Math.floor(totalSec / 60)
   const rem = totalSec % 60
   return `${m}m${rem.toString().padStart(2, "0")}s`

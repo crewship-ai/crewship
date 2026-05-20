@@ -52,8 +52,13 @@ func TestFormatPayloadDuration(t *testing.T) {
 		{"missing field", map[string]interface{}{"step_id": "x"}, "—"},
 		{"zero duration", map[string]interface{}{"duration_ms": 0.0}, "—"},
 		{"negative duration", map[string]interface{}{"duration_ms": -1.0}, "—"},
-		// Sub-second → integer ms.
+		// Sub-second → rounded integer ms. Pre-fix int(ms) truncated
+		// (456.7 → 456ms); the TS counterpart Math.round's, so we
+		// match it here. Companion fixtures pin both halves of the
+		// boundary (round-up vs round-down).
 		{"single-digit ms", map[string]interface{}{"duration_ms": 7.0}, "7ms"},
+		{"sub-second round up", map[string]interface{}{"duration_ms": 456.7}, "457ms"},
+		{"sub-second round down", map[string]interface{}{"duration_ms": 456.4}, "456ms"},
 		{"sub-second", map[string]interface{}{"duration_ms": 999.0}, "999ms"},
 		// 1s ≤ d < 10s → 2-decimal seconds.
 		{"sub-10s 2dp", map[string]interface{}{"duration_ms": 1234.0}, "1.23s"},
@@ -69,6 +74,12 @@ func TestFormatPayloadDuration(t *testing.T) {
 		// fixture so a drift between surfaces fails both suites.
 		{"rollover 119999ms → 2m00s", map[string]interface{}{"duration_ms": 119999.0}, "2m00s"},
 		{"rollover 179500ms → 3m00s", map[string]interface{}{"duration_ms": 179500.0}, "3m00s"},
+		// 59999ms rounds to 60s total → must enter the minute branch
+		// rather than emit the inconsistent "60.0s" that the previous
+		// `s < 60` early-return would have rendered.
+		{"rollover 59999ms → 1m00s", map[string]interface{}{"duration_ms": 59999.0}, "1m00s"},
+		// Companion: 59499ms rounds DOWN to 59s → stays in seconds.
+		{"sub-rollover 59499ms → 59.5s", map[string]interface{}{"duration_ms": 59499.0}, "59.5s"},
 		// Defensive: int path.
 		{"int ms", map[string]interface{}{"duration_ms": 500}, "500ms"},
 		// Wrong type → em-dash, not panic.

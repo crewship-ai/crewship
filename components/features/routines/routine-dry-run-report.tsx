@@ -33,8 +33,14 @@ export interface DryRunStep {
 export interface DryRunResult {
   run_id: string
   status: string
-  cost_usd: number
-  duration_ms: number
+  // cost_usd / duration_ms are optional because a server that doesn't
+  // populate them (older builds, partial dry-run reports) should NOT
+  // be papered over as "$0.0000" — that string is indistinguishable
+  // from a valid zero-cost run. Treating "unknown" as 0 hides a real
+  // shape issue with the response; leave it undefined and let the
+  // renderer fall back to the per-step sum.
+  cost_usd?: number
+  duration_ms?: number
   would_execute: DryRunStep[]
 }
 

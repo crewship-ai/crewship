@@ -255,20 +255,28 @@ func formatPayloadDuration(p map[string]interface{}) string {
 		return "—"
 	}
 	if ms < 1000 {
-		return fmt.Sprintf("%dms", int(ms))
+		// Round (not truncate) so 456.7ms → "457ms" matches what the
+		// TS formatter does (Math.round). Pre-fix int(ms) silently
+		// dropped the fractional part, drifting the two surfaces.
+		return fmt.Sprintf("%dms", int(ms+0.5))
 	}
 	s := ms / 1000
-	if s < 10 {
-		return fmt.Sprintf("%.2fs", s)
-	}
-	if s < 60 {
+	// Round to whole seconds up front. If the rounded value lands at
+	// 60+, fall through to the minute branch instead of emitting
+	// "60.0s" — that string is inconsistent with the next step
+	// (60000ms = "1m00s") and a user scanning the column shouldn't
+	// have to know about a 1ms gap to interpret it.
+	totalSec := int(s + 0.5)
+	if totalSec < 60 {
+		if s < 10 {
+			return fmt.Sprintf("%.2fs", s)
+		}
 		return fmt.Sprintf("%.1fs", s)
 	}
-	// Round to whole seconds before splitting into minutes — see the
-	// TS counterpart in components/features/routines/
-	// routine-cost-format.ts:formatStepDuration for the rationale.
-	// 119999ms must produce "2m00s", not "1m60s".
-	totalSec := int(s + 0.5)
+	// 119999ms must produce "2m00s", not "1m60s". Computing the
+	// minute and second remainder against totalSec (already rounded)
+	// avoids the carry bug the previous independent floor + round
+	// could trigger.
 	m := totalSec / 60
 	rem := totalSec % 60
 	return fmt.Sprintf("%dm%02ds", m, rem)
