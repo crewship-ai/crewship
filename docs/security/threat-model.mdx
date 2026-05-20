@@ -194,7 +194,7 @@ Detail: [Keeper guide](/guides/keeper).
 | Agent breaks out of container runtime | Layer 1 — host hardening |
 | Operator's `ENCRYPTION_KEY` is exfiltrated | **Out of scope** — host compromise |
 | Crewship binary is tampered with at install | **Partially mitigated** — `curl \| sh` checks SHA-256, and cosign signature when `cosign` is on PATH; Homebrew + Docker Compose paths rely on upstream channel integrity. See [Install](/guides/install) |
-| Supply-chain attack on `sentry-go` / a dep | Partial — `go.sum` pinning, Renovate review, Dependabot |
+| Supply-chain attack on `sentry-go` / a dep | Multi-layer — `go.sum` + `pnpm-lock.yaml` pinning; Renovate / Dependabot review; **govulncheck** (Go source call-graph analysis on `cmd/crewship`, fails only on reachable vulns); **osv-scanner** (PR #441, cross-refs both lockfiles against the full OSV.dev DB, fails on anything in the dep graph regardless of reachability — catches npm-chain issues govulncheck never sees); **CodeQL** + **Grype** (PR #445) on every PR |
 | Side-channel timing leak across agents | **Not modelled** — agents are not assumed co-tenant-isolated below the container-runtime layer |
 
 ## Beta posture and known gaps
