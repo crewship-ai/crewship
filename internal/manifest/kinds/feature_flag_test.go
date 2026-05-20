@@ -250,6 +250,61 @@ func TestFeatureFlag_Validate_HappyPath(t *testing.T) {
 	}
 }
 
+// TestFeatureFlag_Validate_AcceptsServerKeyShapes pins the round-trip
+// contract: anything the backend accepts as a feature_flags.key MUST
+// validate cleanly so ExportFeatureFlags → Apply doesn't break. Keys
+// from real-world use can carry dots (namespaced flags), uppercase
+// (legacy), and length > 50 — the earlier strict kebab regex rejected
+// all three even though the schema permits them.
+func TestFeatureFlag_Validate_AcceptsServerKeyShapes(t *testing.T) {
+	for _, slug := range []string{
+		"experimental.llm-cache", // dotted namespace
+		"EXPERIMENTAL_LLM_CACHE", // uppercase
+		"team.platform.long-flag-name-that-exceeds-fifty-chars-by-design", // > 50 chars
+		"a", // 1-char minimum
+	} {
+		t.Run(slug, func(t *testing.T) {
+			doc := &FeatureFlagDocument{
+				APIVersion: "crewship/v1",
+				Kind:       "FeatureFlag",
+				Metadata:   internalapi.Metadata{Name: slug, Slug: slug},
+				Spec:       FeatureFlagSpec{DefaultPercentage: 0},
+			}
+			if err := doc.Validate(internalapi.WorkspaceContext{}); err != nil {
+				t.Fatalf("server-shaped slug %q should pass Validate, got: %v", slug, err)
+			}
+		})
+	}
+}
+
+// TestFeatureFlag_Validate_RejectsPathBreakingSlugs pins the security
+// backstop side of the relaxed regex: slugs that would derail an HTTP
+// request even after url.PathEscape still fail loudly at Validate.
+func TestFeatureFlag_Validate_RejectsPathBreakingSlugs(t *testing.T) {
+	for _, slug := range []string{
+		"foo/bar",  // path injection
+		"foo?x=1",  // query smuggle
+		"foo#frag", // fragment smuggle
+		"foo bar",  // whitespace
+		"foo\nbar", // newline
+		"foo\tbar", // tab
+		"\x00null", // null byte
+		"",         // empty (separate error message, but still rejected)
+	} {
+		t.Run(slug, func(t *testing.T) {
+			doc := &FeatureFlagDocument{
+				APIVersion: "crewship/v1",
+				Kind:       "FeatureFlag",
+				Metadata:   internalapi.Metadata{Name: "x", Slug: slug},
+				Spec:       FeatureFlagSpec{DefaultPercentage: 0},
+			}
+			if err := doc.Validate(internalapi.WorkspaceContext{}); err == nil {
+				t.Fatalf("dangerous slug %q should be rejected; got nil", slug)
+			}
+		})
+	}
+}
+
 // ---------------------------------------------------------------------------
 // 2. Validate — error paths (slug missing, percentage out of range)
 // ---------------------------------------------------------------------------

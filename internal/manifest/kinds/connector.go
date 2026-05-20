@@ -225,12 +225,14 @@ func (d *ConnectorDocument) Plan(
 		remote = fetched
 	}
 
-	// Validate required-credential coverage only when this manifest
-	// asks to INSTALL. Uninstall doesn't need credentials, and gating
-	// the delete branch on credential mappings would block the
-	// rollback path for an operator who removed the credentials first
-	// and now wants to uninstall — exactly the wrong direction.
-	if d.Spec.Install {
+	switch {
+	case d.Spec.Install && !remote.Installed:
+		// This is the only branch that issues a POST, so this is the
+		// only branch where missing credential mappings can actually
+		// hurt. An already-installed connector (next branch) makes no
+		// HTTP call and an exported install:true manifest may legitimately
+		// have no `credentials:` block — the original CR feedback flagged
+		// gating this earlier as breaking re-apply of exported state.
 		if missing := missingRequiredCredentials(remote.RequiredCredentials, d.Spec.Credentials); len(missing) > 0 {
 			// Emit a single PlanItem with Action=Create whose Exec returns
 			// the error before any HTTP call. Apply surfaces Exec errors
@@ -250,10 +252,6 @@ func (d *ConnectorDocument) Plan(
 				},
 			}}, nil
 		}
-	}
-
-	switch {
-	case d.Spec.Install && !remote.Installed:
 		// Verify each mapped workspace credential exists. We only
 		// surface a "missing on remote" warning at Plan time if the
 		// credential isn't in the live list AND isn't declared

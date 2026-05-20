@@ -20,10 +20,21 @@ import (
 	"github.com/crewship-ai/crewship/internal/manifest/internalapi"
 )
 
-// ffSlugFormat keeps slugs path-safe by construction. Documents that
-// pass Validate are guaranteed not to need additional escaping at
-// every call site — slugs go straight into endpoint paths.
-var ffSlugFormat = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,49}$`)
+// ffSlugSanity enforces a loose key-shape rule that matches what the
+// feature_flags backend actually accepts (TEXT NOT NULL UNIQUE — no
+// charset constraint). The earlier kebab-only regex rejected
+// legitimate exported keys with dots (`experimental.llm-cache`),
+// uppercase (`EXPERIMENTAL_LLM_CACHE`), or length > 50, so
+// ExportFeatureFlags → Apply round-trips broke for anything created
+// via the UI / direct API.
+//
+// We still reject the characters that would derail an HTTP request
+// path even after url.PathEscape (control chars, embedded newlines,
+// null bytes) and put a generous 256-byte cap to keep an attacker
+// from stuffing arbitrary content past the validator. PathEscape on
+// every embedding site is the real defence; this regex is the
+// "loud-failure for obviously broken input" backstop.
+var ffSlugSanity = regexp.MustCompile(`^[^\x00-\x1f\x7f\s/?#]{1,256}$`)
 
 // ----- YAML schema types ---------------------------------------------------
 
@@ -95,12 +106,15 @@ func (d *FeatureFlagDocument) Validate(_ internalapi.WorkspaceContext) error {
 	if d.Metadata.Slug == "" {
 		return fmt.Errorf("FeatureFlag %q: metadata.slug is required (used as flag key)", d.Metadata.Name)
 	}
-	// Slug goes directly into endpoint paths (POST /feature-flags/{key},
-	// PUT /feature-flags/{key}/override). Enforcing a kebab-safe charset
-	// at Validate time means call sites don't need defensive URL escaping
-	// and a slug like "foo/bar" can't smuggle through a path injection.
-	if !ffSlugFormat.MatchString(d.Metadata.Slug) {
-		return fmt.Errorf("FeatureFlag %q: invalid slug %q (lowercase letters, digits, '-', '_'; max 50 chars; must start with letter or digit)", d.Metadata.Name, d.Metadata.Slug)
+	// Slug shape is loose on purpose: the backend stores `key` as
+	// `TEXT NOT NULL UNIQUE` with no charset constraint, so anything
+	// the UI / direct API accepts MUST round-trip through Export →
+	// Apply cleanly. We reject only characters that would break HTTP
+	// request paths even after url.PathEscape (control chars,
+	// whitespace, `/?#`), plus a 256-byte cap. The path-escape calls
+	// at the embedding sites below are the real defence.
+	if !ffSlugSanity.MatchString(d.Metadata.Slug) {
+		return fmt.Errorf("FeatureFlag %q: invalid slug %q (must be 1-256 chars, no whitespace, control chars, or '/?#')", d.Metadata.Name, d.Metadata.Slug)
 	}
 	if d.Spec.DefaultPercentage < 0 || d.Spec.DefaultPercentage > 100 {
 		return fmt.Errorf("FeatureFlag %q: default_percentage must be in [0,100], got %d",

@@ -144,11 +144,20 @@ const commonUtilsRefPrefix = "ghcr.io/devcontainers/features/common-utils"
 // isCommonUtilsRef returns true iff ref is the common-utils feature
 // at any tag or digest. Rejects sibling refs whose names extend the
 // prefix (e.g. common-utils-extra).
+//
+// Registry refs are case-insensitive at the resolver layer (Docker /
+// OCI both fold names to lower case before lookup), so an operator
+// who pasted `GHCR.IO/devcontainers/features/common-utils:1` from a
+// release-notes page is semantically declaring the same feature as
+// the canonical lowercased ref. We normalise before comparing so the
+// idempotency check holds either way and EnsureAgentUser doesn't
+// double-inject under a case variant.
 func isCommonUtilsRef(ref string) bool {
-	if !strings.HasPrefix(ref, commonUtilsRefPrefix) {
+	lower := strings.ToLower(ref)
+	if !strings.HasPrefix(lower, commonUtilsRefPrefix) {
 		return false
 	}
-	suffix := ref[len(commonUtilsRefPrefix):]
+	suffix := lower[len(commonUtilsRefPrefix):]
 	if suffix == "" {
 		return true // unversioned reference
 	}
