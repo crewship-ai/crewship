@@ -509,6 +509,13 @@ type CredentialResponse struct {
 	Provider string `json:"provider"`
 	Status   string `json:"status"`
 	Scope    string `json:"scope"`
+	// Attribution (v98) — see internal/api/credentials.go. The
+	// manifest dispatch uses ProvisionedForService for cross-crew
+	// collision detection: same name + same tag = re-apply, same
+	// name + different tag = real conflict.
+	CreatedByActorType    *string `json:"created_by_actor_type"`
+	CreatedByActorID      *string `json:"created_by_actor_id"`
+	ProvisionedForService *string `json:"provisioned_for_service"`
 }
 
 // ListCredentials returns every credential in the workspace,

@@ -370,12 +370,50 @@ func (pb *planBuilder) planCrew(ctx context.Context, meta Metadata, spec *CrewSp
 	// enough copy that we don't mutate the caller's manifest. The
 	// expansion writes generated values into the services' Env map
 	// and appends credential names to every agent's env_refs in the
-	// crew. The returned slice tells us what credential rows to
-	// queue AFTER the crew + agents are created.
+	// crew. On a re-apply, the existing services_json carries the
+	// previously-generated values; passing it in lets expand reuse
+	// them so the credential row and the sidecar env stay in lockstep
+	// across consecutive applies.
 	specCopy := deepCopyCrewSpec(spec)
-	plannedAutoCreds, err := expandAutoCredentialsInCrewSpec(&specCopy)
+	var existingServicesJSON string
+	if existing != nil && existing.ServicesJSON != nil {
+		existingServicesJSON = *existing.ServicesJSON
+	}
+	plannedAutoCreds, err := expandAutoCredentialsInCrewSpec(&specCopy, existingServicesJSON)
 	if err != nil {
 		return fmt.Errorf("crew %q: auto-managed credentials: %w", slug, err)
+	}
+
+	// Cross-crew collision check: a workspace-scoped credential
+	// already exists under one of our planned names. Two outcomes
+	// matter — if the existing row IS the same auto-managed
+	// (matching provisioned_for_service tag), we no-op later via
+	// idempotency. If it's a different crew's auto-managed row, or
+	// an operator's manual credential, that's a real conflict and
+	// the operator has to rename.
+	for i := range plannedAutoCreds {
+		ac := &plannedAutoCreds[i]
+		existingCred, lookErr := pb.client.FindCredentialByName(ctx, ac.Name)
+		if lookErr != nil {
+			return fmt.Errorf("crew %q: lookup credential %q: %w", slug, ac.Name, lookErr)
+		}
+		if existingCred == nil {
+			continue
+		}
+		wantTag := slug + "/" + ac.ProvisionedForService
+		if existingCred.Provider == "AUTO_MANAGED" &&
+			existingCred.ProvisionedForService != nil &&
+			*existingCred.ProvisionedForService == wantTag {
+			continue // same crew, same service — re-apply idempotency handles it
+		}
+		owner := "operator-managed"
+		if existingCred.Provider == "AUTO_MANAGED" && existingCred.ProvisionedForService != nil {
+			owner = "auto-managed for " + *existingCred.ProvisionedForService
+		}
+		return fmt.Errorf(
+			"crew %q: auto_credential %q clashes with an existing workspace credential (%s); "+
+				"rename the auto_credential (e.g. %s_%s) to keep workspace names unique",
+			slug, ac.Name, owner, ac.Name, strings.ToUpper(strings.ReplaceAll(slug, "-", "_")))
 	}
 
 	crewBody, err := buildCrewBody(name, slug, &specCopy)

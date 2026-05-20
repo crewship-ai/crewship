@@ -17,7 +17,7 @@ func TestExpandAutoCredentials_PostgresSugarFires(t *testing.T) {
 			{Slug: "worker", Name: "Worker", AgentRole: "AGENT"},
 		},
 	}
-	planned, err := expandAutoCredentialsInCrewSpec(&spec)
+	planned, err := expandAutoCredentialsInCrewSpec(&spec, "")
 	if err != nil {
 		t.Fatalf("expand: %v", err)
 	}
@@ -67,7 +67,7 @@ func TestExpandAutoCredentials_InjectToAgentsFalseSkipsAgentEnvRef(t *testing.T)
 			{Slug: "lead", Name: "Lead", AgentRole: "LEAD"},
 		},
 	}
-	planned, err := expandAutoCredentialsInCrewSpec(&spec)
+	planned, err := expandAutoCredentialsInCrewSpec(&spec, "")
 	if err != nil {
 		t.Fatalf("expand: %v", err)
 	}
@@ -96,7 +96,7 @@ func TestExpandAutoCredentials_InjectAsEnvOverride(t *testing.T) {
 			},
 		},
 	}
-	planned, err := expandAutoCredentialsInCrewSpec(&spec)
+	planned, err := expandAutoCredentialsInCrewSpec(&spec, "")
 	if err != nil {
 		t.Fatalf("expand: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestExpandAutoCredentials_DuplicateNameAcrossServicesError(t *testing.T) {
 			{Name: "replica", Image: "postgres:16"},
 		},
 	}
-	_, err := expandAutoCredentialsInCrewSpec(&spec)
+	_, err := expandAutoCredentialsInCrewSpec(&spec, "")
 	if err == nil {
 		t.Fatal("expected error for duplicate POSTGRES_PASSWORD across services, got nil")
 	}
@@ -137,7 +137,7 @@ func TestExpandAutoCredentials_NoOpOnEmptyOrUnknown(t *testing.T) {
 	}
 	for i, spec := range cases {
 		t.Run("case_"+string(rune('0'+i)), func(t *testing.T) {
-			planned, err := expandAutoCredentialsInCrewSpec(spec)
+			planned, err := expandAutoCredentialsInCrewSpec(spec, "")
 			if err != nil {
 				t.Errorf("expected nil err for no-op case, got %v", err)
 			}
@@ -257,5 +257,90 @@ spec:
 	}
 	if !strings.Contains(crewServicesJSON, "POSTGRES_USER") {
 		t.Errorf("services_json missing POSTGRES_USER sugar default: %s", crewServicesJSON)
+	}
+}
+
+// Idempotent re-apply: when a prior services_json already carries
+// a generated value, expand reuses it instead of producing a fresh
+// one. This is load-bearing — sidecars boot from services_json,
+// credential rows live in the DB, the two MUST agree.
+func TestExpandAutoCredentials_ReusesPriorValueOnReapply(t *testing.T) {
+	spec := CrewSpec{
+		Services: []Service{{Name: "postgres", Image: "postgres:16-alpine"}},
+	}
+	priorValue := strings.Repeat("ab", 32)
+	priorJSON := `[{"name":"postgres","image":"postgres:16-alpine","env":{"POSTGRES_USER":"postgres","POSTGRES_PASSWORD":"` + priorValue + `"}}]`
+
+	planned, err := expandAutoCredentialsInCrewSpec(&spec, priorJSON)
+	if err != nil {
+		t.Fatalf("expand: %v", err)
+	}
+	if len(planned) != 1 {
+		t.Fatalf("expected 1 planned, got %d", len(planned))
+	}
+	if planned[0].Value != priorValue {
+		t.Errorf("expected reuse of prior value, got fresh: %q vs %q", planned[0].Value, priorValue)
+	}
+	if spec.Services[0].Env["POSTGRES_PASSWORD"] != priorValue {
+		t.Errorf("sidecar env did not get the reused value: %q", spec.Services[0].Env["POSTGRES_PASSWORD"])
+	}
+}
+
+// Drift recovery: a prior value with the wrong length (operator
+// changed AutoCredential.Length in the manifest) is regenerated.
+func TestExpandAutoCredentials_RegeneratesOnLengthMismatch(t *testing.T) {
+	spec := CrewSpec{
+		Services: []Service{
+			{
+				Name:  "postgres",
+				Image: "postgres:16-alpine",
+				AutoCredentials: []AutoCredential{
+					{Name: "POSTGRES_PASSWORD", Length: 64},
+				},
+			},
+		},
+	}
+	priorShort := strings.Repeat("ab", 32)
+	priorJSON := `[{"name":"postgres","image":"postgres:16-alpine","env":{"POSTGRES_PASSWORD":"` + priorShort + `"}}]`
+
+	planned, err := expandAutoCredentialsInCrewSpec(&spec, priorJSON)
+	if err != nil {
+		t.Fatalf("expand: %v", err)
+	}
+	if planned[0].Value == priorShort {
+		t.Errorf("expected regeneration on length drift, but old value was reused")
+	}
+	if len(planned[0].Value) != 128 {
+		t.Errorf("expected new 64-byte (128 hex) value, got %d chars", len(planned[0].Value))
+	}
+}
+
+// Defends against a hand-edited services_json (operator drift).
+func TestExpandAutoCredentials_RegeneratesOnNonHexPrior(t *testing.T) {
+	spec := CrewSpec{
+		Services: []Service{{Name: "postgres", Image: "postgres:16"}},
+	}
+	priorJSON := `[{"name":"postgres","image":"postgres:16","env":{"POSTGRES_PASSWORD":"not-hex-but-64-chars-long-padding-padding-padding-padding-padd"}}]`
+	planned, err := expandAutoCredentialsInCrewSpec(&spec, priorJSON)
+	if err != nil {
+		t.Fatalf("expand: %v", err)
+	}
+	if _, decodeErr := hex.DecodeString(planned[0].Value); decodeErr != nil {
+		t.Errorf("regenerated value is not hex: %v", decodeErr)
+	}
+}
+
+// Robustness: malformed prior JSON is treated as "no prior state"
+// (fresh generation) rather than crashing the plan.
+func TestExpandAutoCredentials_TolerantOfMalformedPrior(t *testing.T) {
+	spec := CrewSpec{
+		Services: []Service{{Name: "postgres", Image: "postgres:16"}},
+	}
+	planned, err := expandAutoCredentialsInCrewSpec(&spec, `{not valid json at all`)
+	if err != nil {
+		t.Fatalf("expand: %v", err)
+	}
+	if len(planned[0].Value) != 64 {
+		t.Errorf("expected fresh 64-char value, got %d", len(planned[0].Value))
 	}
 }

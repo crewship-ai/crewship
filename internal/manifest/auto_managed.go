@@ -43,28 +43,42 @@ package manifest
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 )
 
 // expandAutoCredentialsInCrewSpec mutates the CrewSpec in place to
 // implement the AUTO_MANAGED contract before the rest of the plan
-// pipeline serialises it. The mutations are intentionally
-// idempotent: a second call on the same spec with the same generated
-// values is a no-op.
+// pipeline serialises it. The mutations are idempotent across
+// re-applies: when an existing crew already has the value baked into
+// its services_json, the same value is reused instead of regenerated.
+// That guarantee is load-bearing — sidecars boot from services_json,
+// credential rows live in the DB, and the two MUST agree.
 //
-// Returned slice carries the (cred-name, generated-value, sugar-
-// description, lead-required) tuples that the credential-create
-// closure needs later — the closure runs AFTER the crew + agents
-// are created, at which point we can look up the lead agent ID for
-// attribution and POST the credential row.
+// existingServicesJSON, when non-empty, is the current state of
+// crews.services_json for the crew being re-applied. It's parsed
+// best-effort: malformed JSON is treated as "no prior state" and
+// fresh values are generated. Pre-existing values that don't satisfy
+// the auto_credential's Length / shape requirements are also
+// regenerated — the validator enforces shape at the manifest
+// boundary, so any stored value that fails the same check is
+// treated as drift to repair.
 //
-// The function uses crypto/rand for value generation. Errors are
-// purely "rand source failed," which on any modern platform means
-// the host has bigger problems than a manifest apply.
-func expandAutoCredentialsInCrewSpec(spec *CrewSpec) ([]plannedAutoCredential, error) {
+// Returned slice carries the (cred-name, generated-or-reused-value,
+// description) tuples the credential-create closure needs later.
+// The closure runs AFTER the crew + agents are created.
+//
+// The function uses crypto/rand for fresh value generation. Errors
+// are purely "rand source failed," which on any modern platform
+// means the host has bigger problems than a manifest apply.
+func expandAutoCredentialsInCrewSpec(spec *CrewSpec, existingServicesJSON string) ([]plannedAutoCredential, error) {
 	if spec == nil || len(spec.Services) == 0 {
 		return nil, nil
 	}
+
+	// Parse the existing services_json into a name → env-map lookup
+	// so we can pull out the prior value per (service, env-key).
+	priorEnvByService := parseExistingServiceEnvs(existingServicesJSON)
 
 	// Track names so we can detect cross-service collisions early —
 	// two services can't both declare POSTGRES_PASSWORD because the
@@ -90,9 +104,13 @@ func expandAutoCredentialsInCrewSpec(spec *CrewSpec) ([]plannedAutoCredential, e
 			}
 			seen[ac.Name] = svc.Name
 
-			value, err := generateAutoCredentialValue(ac.EffectiveLength())
-			if err != nil {
-				return nil, fmt.Errorf("generate value for %s: %w", ac.Name, err)
+			value, reused := reuseOrGenerate(ac, priorEnvByService[svc.Name])
+			if !reused {
+				v, err := generateAutoCredentialValue(ac.EffectiveLength())
+				if err != nil {
+					return nil, fmt.Errorf("generate value for %s: %w", ac.Name, err)
+				}
+				value = v
 			}
 
 			// Sidecar env: write under inject_as_env (often same as Name).
@@ -116,11 +134,71 @@ func expandAutoCredentialsInCrewSpec(spec *CrewSpec) ([]plannedAutoCredential, e
 				Name:                  ac.Name,
 				Value:                 value,
 				Description:           ac.Description,
-				ProvisionedForService: svc.Name, // crew slug joined at plan time
+				ProvisionedForService: svc.Name,
 			})
 		}
 	}
 	return out, nil
+}
+
+// reuseOrGenerate returns (value, true) when the prior services_json
+// env map carries a value for ac's inject_as_env key that satisfies
+// the AutoCredential's length contract (≥ EffectiveLength * 2 hex
+// chars). Anything else returns ("", false) so the caller generates
+// fresh — including malformed prior content, drift, or first-ever
+// apply (priorEnv is nil).
+//
+// Why the length check: an operator who lowered the auto_credential
+// length in the manifest expects a fresh shorter value, and an
+// operator who raised it expects a fresh longer one. Reusing values
+// that no longer satisfy the declared length would leave the
+// manifest and the DB out of sync.
+func reuseOrGenerate(ac AutoCredential, priorEnv map[string]string) (string, bool) {
+	if priorEnv == nil {
+		return "", false
+	}
+	prior, ok := priorEnv[ac.EffectiveInjectAsEnv()]
+	if !ok || prior == "" {
+		return "", false
+	}
+	wantChars := ac.EffectiveLength() * 2 // hex doubles byte count
+	if len(prior) != wantChars {
+		return "", false
+	}
+	// Confirm the prior value is hex — a hand-edited services_json
+	// could carry anything; we'd rather regen than copy junk forward.
+	if _, err := hex.DecodeString(prior); err != nil {
+		return "", false
+	}
+	return prior, true
+}
+
+// parseExistingServiceEnvs decodes a services_json blob into a
+// service-name → env-map lookup. Returns nil when the input is
+// empty or unparsable — the caller treats a nil map as "first apply,
+// generate fresh." We intentionally don't surface parse errors:
+// services_json on a real crew is server-authored, but operator
+// drift can land there too, and a malformed prior shouldn't block a
+// fresh-value path.
+func parseExistingServiceEnvs(servicesJSON string) map[string]map[string]string {
+	if servicesJSON == "" {
+		return nil
+	}
+	var services []Service
+	if err := json.Unmarshal([]byte(servicesJSON), &services); err != nil {
+		return nil
+	}
+	if len(services) == 0 {
+		return nil
+	}
+	out := make(map[string]map[string]string, len(services))
+	for i := range services {
+		if services[i].Env == nil {
+			continue
+		}
+		out[services[i].Name] = services[i].Env
+	}
+	return out
 }
 
 // plannedAutoCredential carries everything the deferred credential-

@@ -240,6 +240,21 @@ func (v *validator) checkSkills(scope string, skills []Skill) {
 // with letter or digit. The single-char form ("r") is also valid.
 var serviceNameRe = regexp.MustCompile(`^[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
 
+// envVarNameRe is the POSIX env-var name shape (1+ chars, letter or
+// underscore start, alnum or underscore after). Matches the same
+// regex internal/manifest/kinds/connector.go uses for env-mapping
+// validation — the duplication is acceptable because the kinds
+// sub-package can't import its parent. If a future PR pulls this
+// into a manifest/internal helper, both call sites can collapse.
+var envVarNameRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// minAutoCredentialBytes is the floor for AutoCredential.Length.
+// Below 16 bytes (128 bits) entropy is insufficient for the typical
+// rotation cadence — keep the manifest authors honest. AutoCredential
+// values default to 32 bytes when Length is 0, and the validator
+// only fires for non-zero values that fall short.
+const minAutoCredentialBytes = 16
+
 func (v *validator) checkServices(scope string, services []Service, creds map[string]Credential) {
 	seen := map[string]bool{}
 	for i := range services {
@@ -284,6 +299,67 @@ func (v *validator) checkServices(scope string, services []Service, creds map[st
 		}
 		if s.Healthcheck != nil && len(s.Healthcheck.Test) == 0 {
 			v.errf("%s service %q: healthcheck declared without a test command", scope, s.Name)
+		}
+		v.checkAutoCredentials(scope, s, creds)
+	}
+}
+
+// checkAutoCredentials validates the shape of an auto_credentials
+// block on one service. The expand path generates values from these
+// entries during plan, so a malformed entry now is the right place
+// to refuse — we'd rather fail on `crewship apply --dry-run` than
+// at sidecar startup when the value lands in a container env.
+//
+// Rules (each maps to one v.errf):
+//
+//   - Name must be a POSIX env-var (letter/_, then alnum/_). Embeds
+//     in both the credential row's `name` column and the sidecar
+//     container's env literal — anything else breaks one or both.
+//   - Name must not collide with the crew's `credentials:` block.
+//     Two declarations for the same env-var would race for the
+//     row at apply time; the dispatch can't tell which the operator
+//     intended. Forbid up front.
+//   - InjectAsEnv, when set, must also be POSIX env-var shaped.
+//     Same reasoning — it's the literal sidecar env key.
+//   - Length, when positive, must be at least minAutoCredentialBytes.
+//     Zero means "use the default" (handled by EffectiveLength), so
+//     a 0 isn't a violation; sub-floor positives are.
+//
+// Cross-service collisions (two services both declaring the same
+// auto_credential name) are caught at expand-time in
+// expandAutoCredentialsInCrewSpec — leaving them out of the
+// validator keeps the validation pass O(services) instead of
+// O(services * names).
+func (v *validator) checkAutoCredentials(scope string, s *Service, creds map[string]Credential) {
+	if len(s.AutoCredentials) == 0 {
+		return
+	}
+	seen := map[string]bool{}
+	for i := range s.AutoCredentials {
+		ac := &s.AutoCredentials[i]
+		if ac.Name == "" {
+			v.errf("%s service %q: auto_credentials[%d] missing name", scope, s.Name, i)
+			continue
+		}
+		if !envVarNameRe.MatchString(ac.Name) {
+			v.errf("%s service %q: auto_credential %q is not a valid env-var name (allowed: %s)",
+				scope, s.Name, ac.Name, envVarNameRe.String())
+		}
+		if seen[ac.Name] {
+			v.errf("%s service %q: duplicate auto_credential name %q within the service", scope, s.Name, ac.Name)
+		}
+		seen[ac.Name] = true
+		if _, clash := creds[ac.Name]; clash {
+			v.errf("%s service %q: auto_credential %q collides with the crew's credentials[] declaration; rename one to avoid ambiguity",
+				scope, s.Name, ac.Name)
+		}
+		if ac.InjectAsEnv != "" && !envVarNameRe.MatchString(ac.InjectAsEnv) {
+			v.errf("%s service %q: auto_credential %q inject_as_env %q is not a valid env-var name",
+				scope, s.Name, ac.Name, ac.InjectAsEnv)
+		}
+		if ac.Length > 0 && ac.Length < minAutoCredentialBytes {
+			v.errf("%s service %q: auto_credential %q length %d is below the %d-byte minimum",
+				scope, s.Name, ac.Name, ac.Length, minAutoCredentialBytes)
 		}
 	}
 }
