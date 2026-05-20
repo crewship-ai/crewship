@@ -73,12 +73,10 @@ Beyond the flags above, `crewship start` respects:
 | `CREWSHIP_SKIP_MIGRATION_BACKUP` | (unset) | Skip pre-migration snapshot. Don't use on machines with valuable data. |
 | `CREWSHIP_SKIP_UPDATE_CHECK` | (unset) | Skip the daily GitHub Releases API check. |
 | `CREWSHIP_SENTRY_DSN` | (unset) | Override the vendor-baked Sentry DSN. Route crash reports to your own Sentry instance. See [Telemetry — routing](/guides/telemetry#routing-override). |
-| `NEXTAUTH_SECRET` | (required) | Auth session signing key. Generate with `openssl rand -base64 32`. |
-| `ENCRYPTION_KEY` | (required) | Credential vault AES-256-GCM key. Generate with `openssl rand -hex 32`. |
+| `NEXTAUTH_SECRET` | Auto-generated on first boot | Auth session signing key. If not in env, generated via `crypto/rand` (32 bytes → 64 hex chars) and persisted to `<dataDir>/secrets.env` (mode `0600`). Set explicitly for clustered deployments. |
+| `ENCRYPTION_KEY` | Auto-generated on first boot | Credential vault AES-256-GCM key. Same auto-gen + persist path as `NEXTAUTH_SECRET`. |
 
-`NEXTAUTH_SECRET` and `ENCRYPTION_KEY` MUST be set or the server
-refuses to boot — a fresh install loads them from `.env.local` (see
-[Quickstart](/quickstart)).
+As of PR #446, `crewship start` auto-bootstraps `NEXTAUTH_SECRET`, `ENCRYPTION_KEY`, and `CREWSHIP_INTERNAL_TOKEN` on first boot — `curl install.sh | bash → crewship start` works with **no env files to hand-edit**. Subsequent boots read the persisted file. Explicit env vars always win, so Vault / Kubernetes secret mounts / systemd `EnvironmentFile=` keep working unchanged. Run `crewship doctor` to see where each secret lives ("env-provided" vs "auto-managed in `<path>`"). See [Configuration → Environment](/configuration/environment#authentication) for the full bootstrap pipeline.
 
 ## Multi-instance setup
 
