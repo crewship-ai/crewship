@@ -134,12 +134,17 @@ func TestResolveCreateAttribution_SystemRejectsExplicitID(t *testing.T) {
 	// should stay a simple type filter, not a polymorphic match.
 	req := createCredentialRequest{
 		CreatedByActorType: sptr("system"),
-		CreatedByActorID:   ptr("something"),
+		CreatedByActorID:   sptr("something"),
 	}
 	user := &AuthUser{ID: "user_a"}
 	_, _, err := resolveCreateAttribution(req, user, "OWNER")
 	if err == nil {
 		t.Fatal("expected rejection for system actor with explicit id")
+	}
+	// Status is part of the contract — pin it so a future helper
+	// refactor can't silently flip the rejection from 400 to 5xx.
+	if err.status != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", err.status)
 	}
 }
 

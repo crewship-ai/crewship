@@ -19,156 +19,121 @@ func loadBundleOrFail(t *testing.T, body []byte) *Bundle {
 	return b
 }
 
-func TestValidate_AutoCredentialBadName(t *testing.T) {
-	body := []byte(`
+// TestValidate_AutoCredentialShape is the table-driven exhaustion of
+// the validator's auto_credentials clauses. Each row pins one rule:
+// the YAML is minimal, the expected outcome is a (wantErr,
+// errMustContain) pair. New shape rules go here, not as separate
+// top-level Tests — keeps the validator's contract surface in one
+// place per the project's table-driven test convention.
+func TestValidate_AutoCredentialShape(t *testing.T) {
+	const head = `
 apiVersion: crewship/v1
 kind: Crew
 metadata: {name: T, slug: t}
 spec:
+`
+	const tail = `
+  agents:
+    - {slug: a, name: A, agent_role: LEAD, prompt: x}
+`
+
+	cases := []struct {
+		name            string
+		body            string
+		wantErr         bool
+		errMustContain  string
+		errMustNotMatch string // optional sanity hook for happy-path
+	}{
+		{
+			name: "bad name lowercase",
+			body: `
   services:
     - name: pg
       image: postgres:16-alpine
       auto_credentials:
-        - { name: "lower-case-bad" }
-  agents:
-    - {slug: a, name: A, agent_role: LEAD, prompt: x}
-`)
-	b := loadBundleOrFail(t, body)
-	if err := b.Validate(); err == nil {
-		t.Fatal("expected validation error for lowercase auto_credential name")
-	} else if !strings.Contains(err.Error(), "lower-case-bad") {
-		t.Errorf("error should name the offending field: %v", err)
-	}
-}
-
-func TestValidate_AutoCredentialLengthBelowFloor(t *testing.T) {
-	body := []byte(`
-apiVersion: crewship/v1
-kind: Crew
-metadata: {name: T, slug: t}
-spec:
+        - { name: "lower-case-bad" }`,
+			wantErr:        true,
+			errMustContain: "lower-case-bad",
+		},
+		{
+			name: "length below floor",
+			body: `
   services:
     - name: pg
       image: postgres:16-alpine
       auto_credentials:
-        - { name: POSTGRES_PASSWORD, length: 8 }
-  agents:
-    - {slug: a, name: A, agent_role: LEAD, prompt: x}
-`)
-	b := loadBundleOrFail(t, body)
-	if err := b.Validate(); err == nil {
-		t.Fatal("expected validation error for length < minAutoCredentialBytes")
-	}
-}
-
-func TestValidate_AutoCredentialLengthZeroAllowed(t *testing.T) {
-	// 0 means "use the default" (resolved in EffectiveLength()), so
-	// it must NOT trip the floor check.
-	body := []byte(`
-apiVersion: crewship/v1
-kind: Crew
-metadata: {name: T, slug: t}
-spec:
+        - { name: POSTGRES_PASSWORD, length: 8 }`,
+			wantErr: true,
+		},
+		{
+			name: "length zero allowed as default",
+			body: `
   services:
     - name: pg
       image: postgres:16-alpine
       auto_credentials:
-        - { name: POSTGRES_PASSWORD, length: 0 }
-  agents:
-    - {slug: a, name: A, agent_role: LEAD, prompt: x}
-`)
-	b := loadBundleOrFail(t, body)
-	if err := b.Validate(); err != nil {
-		t.Errorf("length:0 should be treated as default, not a violation; got %v", err)
-	}
-}
-
-func TestValidate_AutoCredentialBadInjectAsEnv(t *testing.T) {
-	body := []byte(`
-apiVersion: crewship/v1
-kind: Crew
-metadata: {name: T, slug: t}
-spec:
+        - { name: POSTGRES_PASSWORD, length: 0 }`,
+			wantErr: false,
+		},
+		{
+			name: "bad inject_as_env digit-leading",
+			body: `
   services:
     - name: pg
       image: postgres:16-alpine
       auto_credentials:
-        - { name: POSTGRES_PASSWORD, inject_as_env: "9starts-with-digit" }
-  agents:
-    - {slug: a, name: A, agent_role: LEAD, prompt: x}
-`)
-	b := loadBundleOrFail(t, body)
-	if err := b.Validate(); err == nil {
-		t.Fatal("expected validation error for inject_as_env starting with a digit")
-	}
-}
-
-func TestValidate_AutoCredentialDuplicateInSameService(t *testing.T) {
-	body := []byte(`
-apiVersion: crewship/v1
-kind: Crew
-metadata: {name: T, slug: t}
-spec:
+        - { name: POSTGRES_PASSWORD, inject_as_env: "9starts-with-digit" }`,
+			wantErr: true,
+		},
+		{
+			name: "duplicate within same service",
+			body: `
   services:
     - name: pg
       image: postgres:16-alpine
       auto_credentials:
         - { name: POSTGRES_PASSWORD }
-        - { name: POSTGRES_PASSWORD, inject_as_env: PG_PWD }
-  agents:
-    - {slug: a, name: A, agent_role: LEAD, prompt: x}
-`)
-	b := loadBundleOrFail(t, body)
-	if err := b.Validate(); err == nil {
-		t.Fatal("expected validation error for duplicate auto_credential within same service")
-	}
-}
-
-func TestValidate_AutoCredentialClashesWithCredentialsBlock(t *testing.T) {
-	// Operator declared POSTGRES_PASSWORD as a manual credential AND
-	// as an auto-credential — collision. The validator must refuse
-	// to let apply proceed; the dispatch can't tell which one the
-	// operator actually intended.
-	body := []byte(`
-apiVersion: crewship/v1
-kind: Crew
-metadata: {name: T, slug: t}
-spec:
+        - { name: POSTGRES_PASSWORD, inject_as_env: PG_PWD }`,
+			wantErr: true,
+		},
+		{
+			name: "clashes with credentials[] block",
+			body: `
   credentials:
     - { env: POSTGRES_PASSWORD, provider: NONE, type: GENERIC_SECRET }
   services:
     - name: pg
       image: postgres:16-alpine
       auto_credentials:
-        - { name: POSTGRES_PASSWORD }
-  agents:
-    - {slug: a, name: A, agent_role: LEAD, prompt: x}
-`)
-	b := loadBundleOrFail(t, body)
-	if err := b.Validate(); err == nil {
-		t.Fatal("expected validation error for auto_credential clashing with credentials[] block")
-	} else if !strings.Contains(err.Error(), "credentials[] declaration") {
-		t.Errorf("error should explain the collision: %v", err)
-	}
-}
-
-func TestValidate_AutoCredentialHappyPath(t *testing.T) {
-	body := []byte(`
-apiVersion: crewship/v1
-kind: Crew
-metadata: {name: T, slug: t}
-spec:
+        - { name: POSTGRES_PASSWORD }`,
+			wantErr:        true,
+			errMustContain: "credentials[] declaration",
+		},
+		{
+			name: "happy path with overrides",
+			body: `
   services:
     - name: pg
       image: postgres:16-alpine
       auto_credentials:
-        - { name: PG_REPLICATION_PASSWORD, inject_as_env: PG_REPL, length: 24, description: replication }
-  agents:
-    - {slug: a, name: A, agent_role: LEAD, prompt: x}
-`)
-	b := loadBundleOrFail(t, body)
-	if err := b.Validate(); err != nil {
-		t.Fatalf("valid auto_credential rejected: %v", err)
+        - { name: PG_REPLICATION_PASSWORD, inject_as_env: PG_REPL, length: 24, description: replication }`,
+			wantErr: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			b := loadBundleOrFail(t, []byte(head+tc.body+tail))
+			err := b.Validate()
+			switch {
+			case tc.wantErr && err == nil:
+				t.Fatal("expected validation error, got nil")
+			case !tc.wantErr && err != nil:
+				t.Fatalf("unexpected validation error: %v", err)
+			case tc.wantErr && tc.errMustContain != "" && !strings.Contains(err.Error(), tc.errMustContain):
+				t.Errorf("error message should contain %q, got: %v", tc.errMustContain, err)
+			}
+		})
 	}
 }
 

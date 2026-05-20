@@ -296,8 +296,21 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 		replyError(w, attrErr.status, attrErr.message)
 		return
 	}
+	// provisioned_for_service marks the row as Crewship-owned (the UI
+	// hides reveal / edit / delete on these). Any caller that can
+	// reach Create could otherwise stamp the badge onto an
+	// arbitrary credential and impersonate auto-managed ownership.
+	// The legitimate stamping path is exactly one shape: manifest
+	// apply's auto-managed dispatch posts (provider=AUTO_MANAGED,
+	// actor_type=system, provisioned_for_service=<crew>/<svc>).
+	// Anything else is a spoof attempt — refuse the row.
 	var provisionedForService *string
 	if req.ProvisionedForService != nil && *req.ProvisionedForService != "" {
+		if req.Provider != "AUTO_MANAGED" || actorType != "system" {
+			replyError(w, http.StatusBadRequest,
+				"provisioned_for_service is reserved for AUTO_MANAGED system credentials (set provider=AUTO_MANAGED and created_by_actor_type=system, or omit this field)")
+			return
+		}
 		provisionedForService = req.ProvisionedForService
 	}
 
