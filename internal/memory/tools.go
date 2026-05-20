@@ -243,8 +243,37 @@ func (d *Dispatcher) handleRead(_ context.Context, raw json.RawMessage) (ToolRes
 	if err != nil {
 		return ToolResult{IsError: true, Content: "memory.read: " + err.Error()}, nil
 	}
+	// PR-A F1: inbound prompt-injection scan. Memory files are written
+	// by the same agent that reads them, but external operators / past
+	// sessions / future ingestion paths (skill marketplace import,
+	// crew-shared CREW.md edited via PR) can land poisoned content.
+	// Catching it on the read path means the model never sees the
+	// payload even if the file was authored maliciously.
+	body := string(data)
+	if hit := ScanContent(body); hit != nil {
+		label := tierSourceLabel(a.Tier, a.Key)
+		placeholder, sha, qerr := Quarantine(d.ctx.AgentMemoryDir, label, body, hit)
+		if qerr != nil {
+			// If we can't quarantine, surface IsError instead of
+			// returning the poisoned body — fail closed.
+			return ToolResult{
+				IsError: true,
+				Content: fmt.Sprintf("memory.read: scan hit %s/%s but quarantine failed: %v", hit.Category, hit.Pattern, qerr),
+			}, nil
+		}
+		return ToolResult{
+			Content: placeholder,
+			Metadata: map[string]any{
+				"quarantined":         true,
+				"quarantine_sha256":   sha,
+				"quarantine_category": hit.Category,
+				"quarantine_pattern":  hit.Pattern,
+				"source":              label,
+			},
+		}, nil
+	}
 	return ToolResult{
-		Content: string(data),
+		Content: body,
 		Metadata: map[string]any{
 			"path":  path,
 			"bytes": len(data),
