@@ -73,6 +73,30 @@ func readPromptFile(path string) (string, error) {
 // Documents holds one entry per `---`-separated YAML doc in the
 // source. A typical file has exactly one entry; a workspace bundle
 // with extra crew overlays has more.
+// isEmpty reports whether the bundle has zero documents across every
+// kind slice. Used by Load to refuse manifests that parse cleanly but
+// declare nothing. Must list every populated slice on Bundle — adding
+// a kind without updating isEmpty would silently regress to "single-
+// new-kind manifest errors with 'no documents'".
+func (b *Bundle) isEmpty() bool {
+	return len(b.Documents) == 0 &&
+		len(b.Workspaces) == 0 &&
+		len(b.Projects) == 0 &&
+		len(b.Labels) == 0 &&
+		len(b.Milestones) == 0 &&
+		len(b.WorkflowTemplates) == 0 &&
+		len(b.TriageRules) == 0 &&
+		len(b.RecurringIssues) == 0 &&
+		len(b.SavedViews) == 0 &&
+		len(b.Routines) == 0 &&
+		len(b.FeatureFlags) == 0 &&
+		len(b.InstanceSettings) == 0 &&
+		len(b.Recipes) == 0 &&
+		len(b.CrewTemplates) == 0 &&
+		len(b.Connectors) == 0 &&
+		len(b.Hooks) == 0
+}
+
 type Bundle struct {
 	SourcePath string
 	Documents  []Document
@@ -273,7 +297,7 @@ func Load(data []byte) (*Bundle, error) {
 		}
 	}
 
-	if len(out.Documents) == 0 && len(out.Workspaces) == 0 {
+	if out.isEmpty() {
 		return nil, errors.New("no documents in manifest")
 	}
 	// Resolve inline content immediately. path: and prompt_file:

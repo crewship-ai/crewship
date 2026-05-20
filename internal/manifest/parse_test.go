@@ -113,6 +113,56 @@ metadata: { name: x, slug: x }
 	}
 }
 
+// TestLoad_AcceptsSingleNewKindDoc pins the regression: before this
+// fix Load returned "no documents in manifest" for a manifest that
+// declared only new-kind documents (Project / Label / …) without an
+// accompanying Crew or Workspace, because the empty-check looked at
+// Documents+Workspaces only. Bundle.isEmpty() now covers every slice.
+func TestLoad_AcceptsSingleNewKindDoc(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want func(*Bundle) bool
+	}{
+		{
+			"project alone",
+			"apiVersion: crewship/v1\nkind: Project\nmetadata: { name: P, slug: p }\nspec: { status: active }\n",
+			func(b *Bundle) bool { return len(b.Projects) == 1 },
+		},
+		{
+			"label alone",
+			"apiVersion: crewship/v1\nkind: Label\nmetadata: { name: bug, slug: bug }\nspec: { color: \"#EF4444\" }\n",
+			func(b *Bundle) bool { return len(b.Labels) == 1 },
+		},
+		{
+			"hook alone",
+			"apiVersion: crewship/v1\nkind: Hook\nmetadata: { name: pre, slug: pre }\nspec: { enabled: true }\n",
+			func(b *Bundle) bool { return len(b.Hooks) == 1 },
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			b, err := Load([]byte(tc.body))
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if !tc.want(b) {
+				t.Fatalf("expected document populated, got bundle=%+v", b)
+			}
+		})
+	}
+}
+
+// TestLoad_EmptyManifestStillRejected confirms isEmpty correctly
+// refuses a file with zero documents (vs. the previous check that
+// only counted Documents+Workspaces).
+func TestLoad_EmptyManifestStillRejected(t *testing.T) {
+	_, err := Load([]byte("# just a comment\n"))
+	if err == nil || !strings.Contains(err.Error(), "no documents") {
+		t.Errorf("want 'no documents' error, got %v", err)
+	}
+}
+
 func TestLoadFile_ResolvesPaths(t *testing.T) {
 	dir := t.TempDir()
 	skillDir := filepath.Join(dir, "skills", "house-style")
