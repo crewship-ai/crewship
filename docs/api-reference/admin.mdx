@@ -238,7 +238,7 @@ curl -H "Authorization: Bearer $TOKEN" \
 | `403` | MEMBER role |
 | `500` | Underlying SQLite query failure |
 
-## GET /api/v1/admin/memory/versions/{id}/content
+## `GET /api/v1/admin/memory/versions/{id}/content`
 
 Returns the raw blob bytes for a single `memory_versions` row. Used by the dashboard's row-detail view and by compliance auditors who need the literal content (not just the metadata) -- for example, to confirm a PII scrubber fired on the offending payload.
 
