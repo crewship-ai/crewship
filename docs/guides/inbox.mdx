@@ -17,7 +17,7 @@ Four kinds of items get written through to `inbox_items` (migration v85) the mom
 | Kind | When it's created | Resolves via |
 |------|-------------------|--------------|
 | `waitpoint` | A routine hits a `wait` step of `kind: approval` (Harbormaster gate) | Approve / Deny — calls `/pipelines/waitpoints/{token}/approve` |
-| `escalation` | An agent or sub-task calls `/escalate` on the sidecar, or `internal/api/escalations.go` records one | Mark resolved (decision is recorded in the escalation row separately) |
+| `escalation` | An agent or sub-task calls `/escalate` on the sidecar, or `internal/api/escalation_handler.go` records one | Mark resolved (decision is recorded in the escalation row separately) |
 | `failed_run` | A `pipeline_run` reaches the `failed` terminal state | Retry (re-fires the routine with the same inputs) or Cancel |
 | `message` | The orchestrator broadcasts a notification — e.g. "ENG-12 ready for review" — addressed at a user or role | One-click jump to the linked issue, or Dismiss |
 

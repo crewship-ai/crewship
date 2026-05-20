@@ -12,7 +12,7 @@ Cartographer pins named bookmarks into the mission journal — **checkpoints**. 
 
 Crucially, restore is *advisory*: it produces a report (`checkpoint + divergence`), not a database mutation. Cartographer never rewrites a mission's history — that's the [Crew Journal](/guides/crew-journal)'s job, and journals are append-only by design. When the operator actually wants to "go back and try a different path", the right operation is `fork`: spawn a fresh mission whose journal starts from the parent's checkpoint cursor. The new mission has its own ID, its own row, its own audit timeline; the original mission keeps running (or stays paused) without contamination. This is the same model Git's branch-from-commit takes — Cartographer is the mission-level equivalent, and the `fork_of` column on the new mission's row is the equivalent of a parent SHA pointer.
 
-The subsystem itself is small: a single table (`checkpoints`), one handler file (`internal/api/cartographer.go`), and a thin CLI wrapper. There's no scheduler, no background worker, no extra ports — checkpoints are written by explicit operator action and read on demand. The four operations are **List** (enumerate bookmarks for a mission), **Restore** (advisory diff against the journal), **Fork** (spawn the new mission anchored at the cursor), and **Delete** (drop a checkpoint; forks that reference it via `fork_of` are orphaned, not cascaded). Workspace-scope and crew-scope access checks ride on the same RBAC the rest of the API uses.
+The subsystem itself is small: a single table (`checkpoints`), one handler file (`internal/api/cartographer_handler.go`), and a thin CLI wrapper. There's no scheduler, no background worker, no extra ports — checkpoints are written by explicit operator action and read on demand. The four operations are **List** (enumerate bookmarks for a mission), **Restore** (advisory diff against the journal), **Fork** (spawn the new mission anchored at the cursor), and **Delete** (drop a checkpoint; forks that reference it via `fork_of` are orphaned, not cascaded). Workspace-scope and crew-scope access checks ride on the same RBAC the rest of the API uses.
 
 From a checkpoint you can:
 
@@ -109,7 +109,7 @@ crewship checkpoint delete chk_01HABC --yes
 
 `--yes` skips the interactive prompt for scripted use. Forks that reference the deleted checkpoint via `fork_of` get their pointer NULLed — the forked *missions* survive, only the genealogy back-pointer is lost.
 
-The same operations are reachable over HTTP — see the [API reference](#api-reference) below for the path/body shape, and `internal/api/cartographer.go` for the handler source of truth.
+The same operations are reachable over HTTP — see the [API reference](#api-reference) below for the path/body shape, and `internal/api/cartographer_handler.go` for the handler source of truth.
 
 ## Examples
 
@@ -225,7 +225,7 @@ The UI redirects the operator into the new mission. The old mission is untouched
 
 ## API reference
 
-Full request/response schemas live at [`/api-reference/checkpoints`](/api-reference/checkpoints). The handler source is `internal/api/cartographer.go` — small enough to read end-to-end. The endpoints, grouped by mission-scope vs. checkpoint-scope:
+Full request/response schemas live at [`/api-reference/checkpoints`](/api-reference/checkpoints). The handler source is `internal/api/cartographer_handler.go` — small enough to read end-to-end. The endpoints, grouped by mission-scope vs. checkpoint-scope:
 
 ### Mission-scoped (mission ID in path)
 

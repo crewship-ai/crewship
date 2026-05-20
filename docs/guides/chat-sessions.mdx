@@ -12,7 +12,7 @@ Chatting with an agent is a first-class surface in Crewship. PRs #213, #214, #22
 
 A "session" in Crewship is intentionally durable. It's a `chats` row scoped to one agent, with a stable ID that survives page reloads, browser restarts, and operator hand-off — anyone with read access to the agent can resume the same conversation history. The schema has grown alongside the UI: PR #225 added `chat_branches` (edit-and-resend trees), `message_reactions`, `chat_attachments`, and `workspace_files`, plus `chats.origin` (migration v59) for grouping in the Sessions sidebar by where the conversation started — one of `UI / CLI / WEBHOOK / CRON / AGENT`, written by `POST /api/v1/agents/{agentId}/chats`. The point of the breadth: a chat is more than text — it's a typed transcript backed by structured tables so search, audit, and replay all work the same way no matter which surface produced the message.
 
-This guide covers the model, the URL state, and the surfaces a power user (or integrator) cares about. The component reference lives in the frontend codebase (`app/(chat)/chat/`) and the persistence layer lives in `internal/api/chat.go` + the Go migrations under `internal/database/migrate.go`; here we focus on what the platform persists and how the URL state composes with it.
+This guide covers the model, the URL state, and the surfaces a power user (or integrator) cares about. The component reference lives in the frontend codebase (`app/(chat)/chat/`) and the persistence layer lives in `internal/api/agent_chats.go` + the Go migrations under `internal/database/migrate.go`; here we focus on what the platform persists and how the URL state composes with it.
 
 ## When to use it
 
@@ -130,7 +130,7 @@ When the incident closes, the session row survives — it stays as a permanent r
 
 ## API reference
 
-The chat surface is small — no dedicated `/api-reference/chats` page yet; the handler source is `internal/api/chat.go`. Every endpoint requires `Authorization: Bearer <CLI token>` or a valid session cookie, and access is gated by the caller's read/write role on the parent agent.
+The chat surface is small — no dedicated `/api-reference/chats` page yet; the handler source is `internal/api/agent_chats.go`. Every endpoint requires `Authorization: Bearer <CLI token>` or a valid session cookie, and access is gated by the caller's read/write role on the parent agent.
 
 ### Sessions (chats)
 
@@ -277,7 +277,7 @@ These query params are stable. Do not link to the Next.js internal route segment
 - **The Files right-panel shows mid-edit state, not committed state.** It reads `workspace_files`, which tracks the agent's live working tree. If you want to see what was actually committed by the agent, look at the **Diff** tab against `HEAD`, or run `git log` in the **Terminal** tab — the Files view is intentionally optimistic.
 - **Closing the Terminal tab does NOT kill the agent's tmux session.** Re-opening reattaches to the same shell. This is a feature (long-running commands survive a tab close) but operators sometimes assume "close" means "stop". To actually stop, kill the process inside the terminal first.
 - **`request_id` must be stable per logical send, not per React render.** Generate the UUID once when the user hits **Send**, not in the render function. A re-render-derived ID lets the server treat a retry as a new turn — defeating the dedupe contract.
-- **Slash palette commands must be registered server-side.** `/foo` in the composer where `foo` isn't a registered command sends the literal text as a chat message — there's no client-side "unknown command" error. Add commands via the slash-command registration interface in `internal/api/chat.go` rather than expecting the UI to discover them.
+- **Slash palette commands must be registered server-side.** `/foo` in the composer where `foo` isn't a registered command sends the literal text as a chat message — there's no client-side "unknown command" error. Add commands via the slash-command registration interface in `internal/api/agent_chats.go` rather than expecting the UI to discover them.
 - **Shallow router state evaporates on hard navigation.** `panel=files` survives in-app tab switches and back/forward, but a hard reload that hits a 3xx redirect (e.g. auth expiry → login → bounce) loses everything past `?session=…`. Bookmark with intent, not panic.
 - **WS reconnect dedupes by `request_id`, not by content.** Two genuinely different sends that collide on a re-used `request_id` will silently merge into one turn server-side. Use a fresh UUID per logical send.
 - **Right-panel tabs don't unsubscribe on inactive.** Switching from Terminal to Files stops the *render* of the terminal stream but the WS subscription stays live in the background. This is intentional (re-opening the tab is instant) but means a workspace with many open chat tabs holds many parallel sidecar exec streams — heavy for the sidecar.
