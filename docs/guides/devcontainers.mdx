@@ -404,7 +404,7 @@ After every successful agent exec, `internal/containerstate.Snapshot` runs four 
 
 Every probe is **soft-fail**: missing binaries (no `pip` in a Node-only image, no `npm` in a Python-only one) yield empty lists rather than errors. The snapshot is hashed (`SHA-256` over the canonical-sorted package set + os details). The orchestrator emits a `container.snapshot` journal entry **only when the hash changes** — so quiet sessions that don't mutate the container produce no churn at all.
 
-A typical session that adds one Python dependency emits exactly one `container.snapshot` entry (the new `pip` line), which then survives compaction the same way other observability entries do — see [Crew Journal — `container.snapshot`](/guides/crew-journal#container-snapshot--container-actuals) for the payload schema.
+A typical session that adds one Python dependency emits exactly one `container.snapshot` entry (the new `pip` line), which then survives compaction the same way other observability entries do — see [Crew Journal — `container.snapshot`](/guides/crew-journal) for the payload schema.
 
 Operators can use these entries to diff intent vs reality:
 

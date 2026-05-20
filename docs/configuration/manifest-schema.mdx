@@ -250,7 +250,7 @@ The parser refuses oversized inputs to bound apply-time memory and prevent half-
 
 ## Apply / sync semantics
 
-For the full apply-mode matrix (default sync vs `--strict` vs `--replace`), see [CLI → apply](/cli/apply#plan--confirm-flow).
+For the full apply-mode matrix (default sync vs `--strict` vs `--replace`), see [CLI → apply](/cli/apply).
 
 In short: by default the manifest is the source of truth. Crews / agents / agent_skills / agent_credentials / mcp_servers that exist in the workspace but aren't in the manifest get **deleted** with a confirmation prompt. Skills and credentials themselves are additive-only — delete those via UI or dedicated CLI commands.
 

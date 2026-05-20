@@ -79,7 +79,7 @@ The `endpoint` line shows **where** events would route plus **why**:
   maintainer's Sentry project (`crewship-backend`).
 - `CREWSHIP_SENTRY_DSN env override` — operator set the env var to
   redirect events to their own Sentry instance. See
-  [Telemetry — Routing override](/guides/telemetry#routing-override).
+  [Telemetry — Routing override](/guides/telemetry).
 
 ## Routing override (don't ship to maintainer)
 
@@ -108,7 +108,7 @@ default. `crewship telemetry status` will reflect the override in the
 | | Go module list |
 
 Full details and the implementation reference in
-[Telemetry — What gets sent](/guides/telemetry#what-gets-sent) and the
+[Telemetry — What gets sent](/guides/telemetry) and the
 client-side filter in `internal/crashreport/sentry_adapter.go::scrubEvent`.
 
 ## Programmatic opt-out (CI / scripts)

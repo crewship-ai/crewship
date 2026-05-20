@@ -78,7 +78,7 @@ Beyond the flags above, `crewship start` respects:
 | `CREWSHIP_STATE_PROVIDER` | `bbolt` | KV store for ephemeral run state. |
 | `CREWSHIP_SKIP_MIGRATION_BACKUP` | (unset) | Skip pre-migration snapshot. Don't use on machines with valuable data. |
 | `CREWSHIP_SKIP_UPDATE_CHECK` | (unset) | Skip the daily GitHub Releases API check. |
-| `CREWSHIP_SENTRY_DSN` | (unset) | Override the vendor-baked Sentry DSN. Route crash reports to your own Sentry instance. See [Telemetry — routing](/guides/telemetry#routing-override). |
+| `CREWSHIP_SENTRY_DSN` | (unset) | Override the vendor-baked Sentry DSN. Route crash reports to your own Sentry instance. See [Telemetry — routing](/guides/telemetry). |
 | `NEXTAUTH_SECRET` | Auto-generated on first boot | Auth session signing key. If not in env, generated via `crypto/rand` (32 bytes → 64 hex chars) and persisted to `<dataDir>/secrets.env` (mode `0600`). Set explicitly for clustered deployments. |
 | `ENCRYPTION_KEY` | Auto-generated on first boot | Credential vault AES-256-GCM key. Same auto-gen + persist path as `NEXTAUTH_SECRET`. |
 
