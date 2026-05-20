@@ -381,3 +381,111 @@ func TestKeeper_RiskScore_ClampedToValidRange(t *testing.T) {
 		t.Errorf("expected risk_score in [1,10], got %d", riskScore)
 	}
 }
+
+// TestKeeper_EscalateDecision_CreatesInboxItem guards PR-Z Z.4: ESCALATE
+// decisions used to land only in the journal, leaving operators with no
+// actionable surface. After Z.4 every ESCALATE must write a blocking
+// inbox_items row (kind='escalation') so the bell badge and inbox feed
+// see it. F4 endpoints (Phase 2) will reuse the same plumbing for
+// behavior / skill-review / memory-health / negative-learning escalations.
+func TestKeeper_EscalateDecision_CreatesInboxItem(t *testing.T) {
+	db := setupTestDB(t)
+	wsID, crewID, agentID, credID := seedKeeperFixture(t, db)
+
+	gk := &mockEvaluator{resp: keeper.GatekeeperResponse{
+		Decision:  string(keeper.DecisionEscalate),
+		Reason:    "L3 credential, agent context inadequate",
+		RiskScore: 8,
+	}}
+	h := newKeeperHandlerWithGK(t, db, gk)
+
+	w := doKeeperRequest(h, keeperRequestBody{
+		RequestingAgentID: agentID,
+		RequestingCrewID:  crewID,
+		WorkspaceID:       wsID,
+		CredentialID:      credID,
+		Intent:            "I need prod-ssh for the deployment",
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var result keeper.RequestResult
+	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if result.Decision != keeper.DecisionEscalate {
+		t.Fatalf("expected ESCALATE decision, got %s", result.Decision)
+	}
+
+	var (
+		inboxKind      string
+		inboxBlocking  int
+		inboxWorkspace string
+		inboxState     string
+	)
+	err := db.QueryRowContext(context.Background(), `
+		SELECT kind, blocking, workspace_id, state
+		FROM inbox_items
+		WHERE kind = 'escalation' AND source_id = ?`,
+		result.RequestID,
+	).Scan(&inboxKind, &inboxBlocking, &inboxWorkspace, &inboxState)
+	if err != nil {
+		t.Fatalf("expected inbox_items row for ESCALATE request_id=%s: %v", result.RequestID, err)
+	}
+	if inboxKind != "escalation" {
+		t.Errorf("expected kind=escalation, got %q", inboxKind)
+	}
+	if inboxBlocking != 1 {
+		t.Errorf("expected blocking=1 for ESCALATE inbox item, got %d", inboxBlocking)
+	}
+	if inboxWorkspace != wsID {
+		t.Errorf("expected workspace=%s, got %q", wsID, inboxWorkspace)
+	}
+	if inboxState != "unread" {
+		t.Errorf("expected initial state=unread, got %q", inboxState)
+	}
+}
+
+// TestKeeper_AllowDecision_DoesNotCreateInboxItem ensures Z.4 only fires
+// for ESCALATE: an ALLOW or DENY decision must not pollute the inbox.
+// Operators expect the bell to surface things needing action, not every
+// keeper decision.
+func TestKeeper_AllowDecision_DoesNotCreateInboxItem(t *testing.T) {
+	db := setupTestDB(t)
+	wsID, crewID, agentID, credID := seedKeeperFixture(t, db)
+
+	gk := &mockEvaluator{resp: keeper.GatekeeperResponse{
+		Decision:  string(keeper.DecisionAllow),
+		Reason:    "looks fine",
+		RiskScore: 2,
+	}}
+	h := newKeeperHandlerWithGK(t, db, gk)
+
+	w := doKeeperRequest(h, keeperRequestBody{
+		RequestingAgentID: agentID,
+		RequestingCrewID:  crewID,
+		WorkspaceID:       wsID,
+		CredentialID:      credID,
+		Intent:            "I need prod-ssh for the deployment",
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	var result keeper.RequestResult
+	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	var count int
+	if err := db.QueryRowContext(context.Background(),
+		`SELECT COUNT(*) FROM inbox_items WHERE source_id = ?`,
+		result.RequestID,
+	).Scan(&count); err != nil {
+		t.Fatalf("count inbox rows: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("expected 0 inbox rows for ALLOW decision, got %d", count)
+	}
+}
