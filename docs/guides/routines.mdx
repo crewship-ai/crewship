@@ -430,6 +430,15 @@ Every routine run emits a sequence of journal entries:
 
 Plus WebSocket broadcast on the workspace channel for live UI updates (PipelineRunNode in the orchestration graph + Runs sub-tab waterfall both subscribe).
 
+### Per-step cost + duration
+
+Both the UI Runs sub-tab waterfall and `crewship routine logs <run_id> --slug X` surface the `cost_usd` and `duration_ms` fields the executor stamps on every `pipeline.step.completed` event. Same data, two presentation surfaces:
+
+- **UI**: right-aligned columns next to each step row, with a footer total summing the run. An em-dash (`—`) renders for events that don't carry cost (`pipeline.step.started`, `.failed`, live-only echoes) — easier to scan than `$0.0000` next to real values.
+- **CLI logs**: extra `DURATION` and `COST` columns in the timeline output. Same em-dash rule for non-positive values.
+
+Worker tier escalation is visible too — a failed validation gate that retries on a higher tier emits a second `step.started`+`step.completed` pair with its own cost on the retry, so the column-summed footer reflects the *full* spend (including retries), not just the first attempt.
+
 Three terminal-side observability surfaces, ordered by when you'd reach for each:
 
 | Phase | Command | Why |
