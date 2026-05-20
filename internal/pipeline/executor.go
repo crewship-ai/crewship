@@ -326,8 +326,17 @@ func (e *Executor) Run(ctx context.Context, in RunInput) (*RunResult, error) {
 	// compete for production slots. Reservation goes against the
 	// rendered concurrency_key (template-substituted from inputs)
 	// so per-tenant gating works without DSL edits.
+	//
+	// Inputs MUST be defaults-merged before rendering the key. A
+	// routine declaring `default: "global"` on the input referenced
+	// by the key would otherwise trip ErrConcurrencyKeyEmpty when the
+	// caller omits it — defeating the whole point of having a default.
+	// runDSL does its own mergeInputs later for template-render
+	// purposes; we duplicate it here because Acquire happens BEFORE
+	// runDSL.
 	if e.runs != nil && in.Mode == ModeRun {
-		key, gated, keyErr := renderConcurrencyKey(ctx, dsl.ConcurrencyKey, in.Inputs)
+		mergedInputs := mergeInputs(in.Inputs, dsl)
+		key, gated, keyErr := renderConcurrencyKey(ctx, dsl.ConcurrencyKey, mergedInputs)
 		if keyErr != nil {
 			// Author wanted a gate but the rendered value is empty.
 			// Free the idempotency reservation (mirrors the Acquire

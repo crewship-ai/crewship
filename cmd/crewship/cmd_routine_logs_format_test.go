@@ -60,6 +60,11 @@ func TestFormatPayloadDuration(t *testing.T) {
 		{"1m flat", map[string]interface{}{"duration_ms": 60000.0}, "1m00s"},
 		{"2m05s", map[string]interface{}{"duration_ms": 125000.0}, "2m05s"},
 		{"10m10s", map[string]interface{}{"duration_ms": 610000.0}, "10m10s"},
+		// Rollover boundary — must NOT emit "1m60s". See the TS
+		// counterpart in routine-cost-format.test.ts for the same
+		// fixture so a drift between surfaces fails both suites.
+		{"rollover 119999ms → 2m00s", map[string]interface{}{"duration_ms": 119999.0}, "2m00s"},
+		{"rollover 179500ms → 3m00s", map[string]interface{}{"duration_ms": 179500.0}, "3m00s"},
 		// Defensive: int path.
 		{"int ms", map[string]interface{}{"duration_ms": 500}, "500ms"},
 		// Wrong type → em-dash, not panic.

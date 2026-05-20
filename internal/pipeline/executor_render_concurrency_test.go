@@ -260,3 +260,48 @@ func TestRenderConcurrencyKey_NilInputsMap_WithLiteral_Succeeds(t *testing.T) {
 		t.Errorf("got (%q, %v), want (\"k-\", true)", got, gated)
 	}
 }
+
+func TestRenderConcurrencyKey_AppliedAfterMergeDefaults(t *testing.T) {
+	// The fail-fast must NOT trip when the input the key references
+	// is satisfied by an InputSpec default rather than the raw caller
+	// payload. The bug this guards: executor.Run originally rendered
+	// the key against `in.Inputs` (raw) before runDSL did its
+	// mergeInputs pass, so a routine declaring
+	//
+	//   inputs:           [{name: "tenant", default: "global"}]
+	//   concurrency_key:  "{{ inputs.tenant }}"
+	//
+	// would falsely return ErrConcurrencyKeyEmpty when the caller
+	// POST'd `{"inputs":{}}` — defeating the entire point of having
+	// a default. The fix in executor.go calls mergeInputs first;
+	// this test pins that the merged-map path resolves correctly.
+	dsl := &DSL{
+		Inputs:         []InputSpec{{Name: "tenant", Type: "string", Default: "global"}},
+		ConcurrencyKey: "{{ inputs.tenant }}",
+	}
+	merged := mergeInputs(map[string]any{}, dsl) // caller passed nothing
+	got, gated, err := renderConcurrencyKey(context.Background(), dsl.ConcurrencyKey, merged)
+	if err != nil {
+		t.Fatalf("unexpected error after merge: %v", err)
+	}
+	if got != "global" || !gated {
+		t.Errorf("got (%q, %v), want (\"global\", true) — default should have flowed through", got, gated)
+	}
+}
+
+func TestRenderConcurrencyKey_FailsFastEvenAfterMerge_WhenNoDefault(t *testing.T) {
+	// Inverse companion: the routine declares the input but DOES NOT
+	// give it a default, and the caller omits it. After merge, the
+	// map is still {} → render to "" → fail fast. Pin so the fix
+	// doesn't accidentally introduce a phantom default like "" or
+	// "<missing>" that re-opens the silent-bypass class.
+	dsl := &DSL{
+		Inputs:         []InputSpec{{Name: "tenant", Type: "string"}}, // no default
+		ConcurrencyKey: "{{ inputs.tenant }}",
+	}
+	merged := mergeInputs(map[string]any{}, dsl)
+	_, _, err := renderConcurrencyKey(context.Background(), dsl.ConcurrencyKey, merged)
+	if !errors.Is(err, ErrConcurrencyKeyEmpty) {
+		t.Fatalf("got err=%v, want ErrConcurrencyKeyEmpty (no default → still empty after merge)", err)
+	}
+}

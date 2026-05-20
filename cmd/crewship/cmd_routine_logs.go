@@ -264,8 +264,13 @@ func formatPayloadDuration(p map[string]interface{}) string {
 	if s < 60 {
 		return fmt.Sprintf("%.1fs", s)
 	}
-	m := int(s) / 60
-	rem := int(s) - m*60
+	// Round to whole seconds before splitting into minutes — see the
+	// TS counterpart in components/features/routines/
+	// routine-cost-format.ts:formatStepDuration for the rationale.
+	// 119999ms must produce "2m00s", not "1m60s".
+	totalSec := int(s + 0.5)
+	m := totalSec / 60
+	rem := totalSec % 60
 	return fmt.Sprintf("%dm%02ds", m, rem)
 }
 

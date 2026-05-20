@@ -107,6 +107,16 @@ describe("formatStepDuration", () => {
     expect(formatStepDuration(125000)).toBe("2m05s")
     expect(formatStepDuration(610000)).toBe("10m10s")
   })
+
+  it("carries the rounded-seconds rollover into minutes", () => {
+    // Regression for the "1m60s" bug — Math.round on the seconds
+    // remainder could yield 60 when the floor of (s/60) and the
+    // rounded remainder were computed independently. Pin the
+    // boundary so a future refactor can't reintroduce it.
+    expect(formatStepDuration(119999)).toBe("2m00s")
+    expect(formatStepDuration(179500)).toBe("3m00s") // 2m59.5s → carry
+    expect(formatStepDuration(59999)).toBe("60.0s") // just under 60s threshold, stays in "<60s" branch
+  })
 })
 
 describe("formatStepCost", () => {

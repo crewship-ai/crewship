@@ -95,6 +95,12 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
   }
 
   useEffect(() => {
+    // Clear any leftover dry-run report from the previously-selected
+    // routine. Without this, the violet panel above the tab bar keeps
+    // rendering the prior routine's would_execute list until the user
+    // manually dismisses it — a confusing "this report doesn't match
+    // what I'm looking at" surface bug.
+    setDryRunResult(null)
     fetchRoutine()
     return () => {
       abortRef.current?.abort()
