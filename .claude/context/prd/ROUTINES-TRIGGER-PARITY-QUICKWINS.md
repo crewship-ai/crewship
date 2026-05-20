@@ -3,7 +3,7 @@
 **Status:** Implemented in this PR. Captured 2026-05-20.
 **Problem:** A Trigger.dev gap-analysis surfaced one silent-bypass safety bug, one broken CLI output path, and two missing UI surfaces that turn would-be observability into "trust me bro". Each is small individually; bundled they close the most painful corners of the routines MVP without dragging in the multi-week durability work (wait checkpointing, multi-replica state) that needs its own design.
 **Pattern:** Fix what's silently broken first; surface what we already compute second; defer what requires architectural change.
-**Why now:** A user asked "are routines plnohodnotné?" The honest answer was "73% of Trigger.dev parity, plus four embarrassments." Three of the four are quickwins.
+**Why now:** A user asked "are routines plnohodnotné?" (Czech for "fully featured / production-ready"). The honest answer was "73% of Trigger.dev parity, plus four embarrassments." Three of the four are quickwins.
 
 ---
 
@@ -83,7 +83,7 @@ Waterfall renders cost + duration columns right-aligned in tabular-nums, with a 
 
 **CLI**: `cmd_routine_logs.go` timeline gains two columns:
 
-```
+```text
 TIME          EVENT           SEVERITY  DURATION  COST     SUMMARY
 18:42:03.421  step.completed  info      2.31s     $0.0021  …
 ```

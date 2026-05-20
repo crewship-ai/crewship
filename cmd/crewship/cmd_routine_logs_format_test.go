@@ -10,6 +10,7 @@ import "testing"
 // here too.
 
 func TestFormatPayloadCost(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		in   map[string]interface{}
@@ -30,7 +31,9 @@ func TestFormatPayloadCost(t *testing.T) {
 		{"string cost rejected", map[string]interface{}{"cost_usd": "0.05"}, "—"},
 	}
 	for _, tc := range cases {
+		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			if got := formatPayloadCost(tc.in); got != tc.want {
 				t.Errorf("formatPayloadCost = %q, want %q", got, tc.want)
 			}
@@ -39,6 +42,7 @@ func TestFormatPayloadCost(t *testing.T) {
 }
 
 func TestFormatPayloadDuration(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		in   map[string]interface{}
@@ -71,7 +75,9 @@ func TestFormatPayloadDuration(t *testing.T) {
 		{"string ms rejected", map[string]interface{}{"duration_ms": "100"}, "—"},
 	}
 	for _, tc := range cases {
+		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			if got := formatPayloadDuration(tc.in); got != tc.want {
 				t.Errorf("formatPayloadDuration = %q, want %q", got, tc.want)
 			}
