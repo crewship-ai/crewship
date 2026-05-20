@@ -164,9 +164,32 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.DevcontainerConfig != nil && *req.DevcontainerConfig != "" {
-		if _, err := devcontainer.ParseBytes([]byte(*req.DevcontainerConfig)); err != nil {
+		cfg, err := devcontainer.ParseBytes([]byte(*req.DevcontainerConfig))
+		if err != nil {
 			replyError(w, http.StatusBadRequest, "invalid devcontainer_config: "+err.Error())
 			return
+		}
+		// Auto-inject common-utils when the operator didn't declare a
+		// user-creating feature themselves. Crewship's runtime hard-
+		// codes UID 1001 but the IMAGE needs a matching `agent` user
+		// for that mapping to succeed — without this, an operator who
+		// forgot the feature would hit "user 'agent' does not exist"
+		// at exec time, which is the #1 onboarding footgun. Idempotent:
+		// if any common-utils variant is already present, the config
+		// is left untouched.
+		if cfg.EnsureAgentUser() {
+			normalised, err := json.Marshal(cfg)
+			if err != nil {
+				// Log the underlying error server-side; surface only a
+				// generic message to the client. The marshal payload
+				// could carry user-supplied keys / values that aren't
+				// useful to expose in an error response.
+				h.logger.Error("crews.create: marshal devcontainer_config after auto-inject", "error", err)
+				replyError(w, http.StatusInternalServerError, "internal error normalising devcontainer config")
+				return
+			}
+			s := string(normalised)
+			req.DevcontainerConfig = &s
 		}
 	}
 	if req.MiseConfig != nil && *req.MiseConfig != "" {

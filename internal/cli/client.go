@@ -57,11 +57,20 @@ func (c *Client) WithContext(ctx context.Context) *Client {
 func (c *Client) Do(method, path string, body interface{}) (*http.Response, error) {
 	var bodyReader io.Reader
 	if body != nil {
-		data, err := json.Marshal(body)
-		if err != nil {
-			return nil, fmt.Errorf("marshal body: %w", err)
+		// io.Reader bodies pass through verbatim — callers that
+		// pre-serialised JSON used to silently get json.Marshal'd
+		// again (producing `{}` for *bytes.Reader since it has no
+		// exported fields), so the server saw an empty body. The
+		// io.Reader fast-path makes that pattern do the right thing.
+		if r, ok := body.(io.Reader); ok {
+			bodyReader = r
+		} else {
+			data, err := json.Marshal(body)
+			if err != nil {
+				return nil, fmt.Errorf("marshal body: %w", err)
+			}
+			bodyReader = bytes.NewReader(data)
 		}
-		bodyReader = bytes.NewReader(data)
 	}
 
 	u, err := url.Parse(c.BaseURL + path)

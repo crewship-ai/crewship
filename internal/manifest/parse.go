@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/crewship-ai/crewship/internal/manifest/kinds"
 )
 
 // Defensive size caps. These match the skills package's
@@ -71,10 +73,53 @@ func readPromptFile(path string) (string, error) {
 // Documents holds one entry per `---`-separated YAML doc in the
 // source. A typical file has exactly one entry; a workspace bundle
 // with extra crew overlays has more.
+// isEmpty reports whether the bundle has zero documents across every
+// kind slice. Used by Load to refuse manifests that parse cleanly but
+// declare nothing. Must list every populated slice on Bundle — adding
+// a kind without updating isEmpty would silently regress to "single-
+// new-kind manifest errors with 'no documents'".
+func (b *Bundle) isEmpty() bool {
+	return len(b.Documents) == 0 &&
+		len(b.Workspaces) == 0 &&
+		len(b.Projects) == 0 &&
+		len(b.Labels) == 0 &&
+		len(b.Milestones) == 0 &&
+		len(b.WorkflowTemplates) == 0 &&
+		len(b.TriageRules) == 0 &&
+		len(b.RecurringIssues) == 0 &&
+		len(b.SavedViews) == 0 &&
+		len(b.Routines) == 0 &&
+		len(b.FeatureFlags) == 0 &&
+		len(b.InstanceSettings) == 0 &&
+		len(b.Recipes) == 0 &&
+		len(b.CrewTemplates) == 0 &&
+		len(b.Connectors) == 0 &&
+		len(b.Hooks) == 0
+}
+
 type Bundle struct {
 	SourcePath string
 	Documents  []Document
 	Workspaces []WorkspaceDocument
+
+	// SPEC-2 kinds — per-kind slices populated by Load when the
+	// parser encounters one of the new top-level kinds. The kinds
+	// package owns each doc shape; this package only routes by
+	// apiVersion+kind.
+	Projects          []kinds.ProjectDocument
+	Labels            []kinds.LabelDocument
+	Milestones        []kinds.MilestoneDocument
+	WorkflowTemplates []kinds.WorkflowTemplateDocument
+	TriageRules       []kinds.TriageRuleDocument
+	RecurringIssues   []kinds.RecurringIssueDocument
+	SavedViews        []kinds.SavedViewDocument
+	Routines          []kinds.RoutineDocument
+	FeatureFlags      []kinds.FeatureFlagDocument
+	InstanceSettings  []kinds.InstanceSettingDocument
+	Recipes           []kinds.RecipeDocument
+	CrewTemplates     []kinds.CrewTemplateDocument
+	Connectors        []kinds.ConnectorDocument
+	Hooks             []kinds.HookDocument
 }
 
 // LoadFile reads a manifest file and returns the parsed bundle with
@@ -161,14 +206,98 @@ func Load(data []byte) (*Bundle, error) {
 				return nil, fmt.Errorf("decode Workspace document: %w", err)
 			}
 			out.Workspaces = append(out.Workspaces, doc)
+		case KindProject:
+			var doc kinds.ProjectDocument
+			if err := raw.Decode(&doc); err != nil {
+				return nil, fmt.Errorf("decode Project document: %w", err)
+			}
+			out.Projects = append(out.Projects, doc)
+		case KindLabel:
+			var doc kinds.LabelDocument
+			if err := raw.Decode(&doc); err != nil {
+				return nil, fmt.Errorf("decode Label document: %w", err)
+			}
+			out.Labels = append(out.Labels, doc)
+		case KindMilestone:
+			var doc kinds.MilestoneDocument
+			if err := raw.Decode(&doc); err != nil {
+				return nil, fmt.Errorf("decode Milestone document: %w", err)
+			}
+			out.Milestones = append(out.Milestones, doc)
+		case KindWorkflowTemplate:
+			var doc kinds.WorkflowTemplateDocument
+			if err := raw.Decode(&doc); err != nil {
+				return nil, fmt.Errorf("decode WorkflowTemplate document: %w", err)
+			}
+			out.WorkflowTemplates = append(out.WorkflowTemplates, doc)
+		case KindTriageRule:
+			var doc kinds.TriageRuleDocument
+			if err := raw.Decode(&doc); err != nil {
+				return nil, fmt.Errorf("decode TriageRule document: %w", err)
+			}
+			out.TriageRules = append(out.TriageRules, doc)
+		case KindRecurringIssue:
+			var doc kinds.RecurringIssueDocument
+			if err := raw.Decode(&doc); err != nil {
+				return nil, fmt.Errorf("decode RecurringIssue document: %w", err)
+			}
+			out.RecurringIssues = append(out.RecurringIssues, doc)
+		case KindSavedView:
+			var doc kinds.SavedViewDocument
+			if err := raw.Decode(&doc); err != nil {
+				return nil, fmt.Errorf("decode SavedView document: %w", err)
+			}
+			out.SavedViews = append(out.SavedViews, doc)
+		case KindRoutine:
+			var doc kinds.RoutineDocument
+			if err := raw.Decode(&doc); err != nil {
+				return nil, fmt.Errorf("decode Routine document: %w", err)
+			}
+			out.Routines = append(out.Routines, doc)
+		case KindFeatureFlag:
+			var doc kinds.FeatureFlagDocument
+			if err := raw.Decode(&doc); err != nil {
+				return nil, fmt.Errorf("decode FeatureFlag document: %w", err)
+			}
+			out.FeatureFlags = append(out.FeatureFlags, doc)
+		case KindInstanceSetting:
+			var doc kinds.InstanceSettingDocument
+			if err := raw.Decode(&doc); err != nil {
+				return nil, fmt.Errorf("decode InstanceSetting document: %w", err)
+			}
+			out.InstanceSettings = append(out.InstanceSettings, doc)
+		case KindRecipe:
+			var doc kinds.RecipeDocument
+			if err := raw.Decode(&doc); err != nil {
+				return nil, fmt.Errorf("decode Recipe document: %w", err)
+			}
+			out.Recipes = append(out.Recipes, doc)
+		case KindCrewTemplate:
+			var doc kinds.CrewTemplateDocument
+			if err := raw.Decode(&doc); err != nil {
+				return nil, fmt.Errorf("decode CrewTemplate document: %w", err)
+			}
+			out.CrewTemplates = append(out.CrewTemplates, doc)
+		case KindConnector:
+			var doc kinds.ConnectorDocument
+			if err := raw.Decode(&doc); err != nil {
+				return nil, fmt.Errorf("decode Connector document: %w", err)
+			}
+			out.Connectors = append(out.Connectors, doc)
+		case KindHook:
+			var doc kinds.HookDocument
+			if err := raw.Decode(&doc); err != nil {
+				return nil, fmt.Errorf("decode Hook document: %w", err)
+			}
+			out.Hooks = append(out.Hooks, doc)
 		case "":
-			return nil, errors.New("missing kind: (expected Crew or Workspace)")
+			return nil, errors.New("missing kind: (expected one of: Crew, Workspace, Project, Label, Milestone, WorkflowTemplate, TriageRule, RecurringIssue, SavedView, Routine, FeatureFlag, InstanceSetting, Recipe, CrewTemplate, Connector, Hook)")
 		default:
-			return nil, fmt.Errorf("unsupported kind %q (expected Crew or Workspace)", head.Kind)
+			return nil, fmt.Errorf("unsupported kind %q (expected one of: Crew, Workspace, Project, Label, Milestone, WorkflowTemplate, TriageRule, RecurringIssue, SavedView, Routine, FeatureFlag, InstanceSetting, Recipe, CrewTemplate, Connector, Hook)", head.Kind)
 		}
 	}
 
-	if len(out.Documents) == 0 && len(out.Workspaces) == 0 {
+	if out.isEmpty() {
 		return nil, errors.New("no documents in manifest")
 	}
 	// Resolve inline content immediately. path: and prompt_file:

@@ -137,6 +137,27 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	r.mux.Handle("PATCH /api/v1/triage-rules/{ruleId}", authed(wsCtx(http.HandlerFunc(triage.UpdateRule))))
 	r.mux.Handle("DELETE /api/v1/triage-rules/{ruleId}", authed(wsCtx(http.HandlerFunc(triage.DeleteRule))))
 	r.mux.Handle("POST /api/v1/triage/process", authed(wsCtx(http.HandlerFunc(triage.Process))))
+	// Workflow Templates (custom issue status flows). SPEC-2: new in this PR.
+	wt := NewWorkflowTemplateHandler(r.db, r.hub, r.logger)
+	r.mux.Handle("GET /api/v1/workflow-templates", authed(wsCtx(http.HandlerFunc(wt.List))))
+	r.mux.Handle("POST /api/v1/workflow-templates", authed(wsCtx(http.HandlerFunc(wt.Create))))
+	r.mux.Handle("GET /api/v1/workflow-templates/{id}", authed(wsCtx(http.HandlerFunc(wt.Get))))
+	r.mux.Handle("PATCH /api/v1/workflow-templates/{id}", authed(wsCtx(http.HandlerFunc(wt.Update))))
+	r.mux.Handle("DELETE /api/v1/workflow-templates/{id}", authed(wsCtx(http.HandlerFunc(wt.Delete))))
+	// Feature Flags (instance-default + per-workspace override). SPEC-2: new in this PR.
+	ff := NewFeatureFlagHandler(r.db, r.hub, r.logger)
+	r.mux.Handle("GET /api/v1/feature-flags", authed(wsCtx(http.HandlerFunc(ff.List))))
+	r.mux.Handle("POST /api/v1/feature-flags", authed(wsCtx(http.HandlerFunc(ff.Create))))
+	r.mux.Handle("PATCH /api/v1/feature-flags/{key}", authed(wsCtx(http.HandlerFunc(ff.Update))))
+	r.mux.Handle("DELETE /api/v1/feature-flags/{key}", authed(wsCtx(http.HandlerFunc(ff.Delete))))
+	r.mux.Handle("PUT /api/v1/feature-flags/{key}/override", authed(wsCtx(http.HandlerFunc(ff.UpsertOverride))))
+	r.mux.Handle("DELETE /api/v1/feature-flags/{key}/override", authed(wsCtx(http.HandlerFunc(ff.DeleteOverride))))
+	// Instance Settings (admin-only key/value config). SPEC-2: new in this PR.
+	inst := NewInstanceSettingsHandler(r.db, r.hub, r.logger)
+	r.mux.Handle("GET /api/v1/instance/settings", authed(wsCtx(http.HandlerFunc(inst.List))))
+	r.mux.Handle("GET /api/v1/instance/settings/{key}", authed(wsCtx(http.HandlerFunc(inst.Get))))
+	r.mux.Handle("PUT /api/v1/instance/settings/{key}", authed(wsCtx(http.HandlerFunc(inst.Put))))
+	r.mux.Handle("DELETE /api/v1/instance/settings/{key}", authed(wsCtx(http.HandlerFunc(inst.Delete))))
 	// Issue Bulk Operations
 	r.mux.Handle("PATCH /api/v1/issues/bulk", authed(wsCtx(http.HandlerFunc(issues.BulkUpdate))))
 	// Issue Sub-issues

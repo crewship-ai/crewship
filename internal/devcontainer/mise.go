@@ -34,16 +34,118 @@ type MiseConfig struct {
 	Env   map[string]string `json:"env,omitempty"` // e.g., {"NODE_OPTIONS": "--max-old-space-size=4096"}
 }
 
-// ParseMiseConfig parses a JSON string into MiseConfig.
+// ParseMiseConfig parses either a JSON or a TOML string into MiseConfig.
+//
+// Mise's native config format is TOML (`.mise.toml`), so authors writing
+// the `devcontainer.mise:` manifest field naturally use TOML — which is
+// also what the examples in `examples/manifests/README.md` show. The DB
+// stores the canonical JSON shape, so a JSON input is still accepted
+// (and is what older callers serialised via `MiseConfig.toJSON()` write
+// down). Detection is by leading non-whitespace character: `{` → JSON,
+// anything else → TOML.
+//
+// The embedded TOML parser is intentionally minimal — mise configs only
+// use `[tools]` + `[env]` sections with `key = "value"` pairs, so we
+// don't pull a full TOML dependency just for this.
 func ParseMiseConfig(data string) (*MiseConfig, error) {
-	var cfg MiseConfig
-	if err := json.Unmarshal([]byte(data), &cfg); err != nil {
-		return nil, fmt.Errorf("mise: invalid JSON: %w", err)
+	trimmed := strings.TrimLeft(data, " \t\r\n")
+	if strings.HasPrefix(trimmed, "{") {
+		var cfg MiseConfig
+		if err := json.Unmarshal([]byte(data), &cfg); err != nil {
+			return nil, fmt.Errorf("mise: invalid JSON: %w", err)
+		}
+		if cfg.Tools == nil {
+			cfg.Tools = make(map[string]string)
+		}
+		return &cfg, nil
 	}
-	if cfg.Tools == nil {
-		cfg.Tools = make(map[string]string)
+	return parseMiseTOML(data)
+}
+
+// miseFindCommentIndex returns the byte index of the first `#` that
+// opens a real comment (i.e. lives outside any double-quoted string),
+// or -1 if no comment is present. Mise TOML doesn't use single-quoted
+// strings, so the only quote-aware state we track is whether we're
+// currently inside a `"..."` span. Escape sequences inside quoted
+// strings aren't expected for mise values (they're versions / env
+// names) but a `\"` inside quotes is still tolerated as not closing
+// the span, mirroring how the standard TOML grammar would handle it.
+func miseFindCommentIndex(s string) int {
+	inQuote := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch c {
+		case '\\':
+			if inQuote && i+1 < len(s) {
+				i++ // skip the next byte; it's escaped
+			}
+		case '"':
+			inQuote = !inQuote
+		case '#':
+			if !inQuote {
+				return i
+			}
+		}
 	}
-	return &cfg, nil
+	return -1
+}
+
+// parseMiseTOML is a minimal TOML parser scoped to the shape mise
+// configs actually use: section headers `[tools]` / `[env]`, comments
+// starting with `#`, blank lines, and string-valued key = "value" pairs.
+// Anything else returns an error so users get a clear "use TOML or JSON"
+// signal instead of silently dropping fields.
+func parseMiseTOML(data string) (*MiseConfig, error) {
+	cfg := &MiseConfig{
+		Tools: make(map[string]string),
+		Env:   make(map[string]string),
+	}
+	currentSection := ""
+	for lineNo, raw := range strings.Split(data, "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		// Section header.
+		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
+			currentSection = strings.TrimSpace(line[1 : len(line)-1])
+			if currentSection != "tools" && currentSection != "env" {
+				return nil, fmt.Errorf("mise: line %d: unsupported TOML section %q (want [tools] or [env])", lineNo+1, currentSection)
+			}
+			continue
+		}
+		// Key = value.
+		eq := strings.IndexByte(line, '=')
+		if eq < 0 {
+			return nil, fmt.Errorf("mise: line %d: expected 'key = \"value\"', got %q", lineNo+1, line)
+		}
+		key := strings.TrimSpace(line[:eq])
+		rawVal := strings.TrimSpace(line[eq+1:])
+		// Strip trailing inline comment. The previous global-IndexByte
+		// approach mis-fired on values like `"abc#def" # comment` —
+		// the in-string `#` was found first and the parser then bailed
+		// because the residual `"abc` didn't end in a quote. Walk the
+		// string respecting double-quoted spans so a `#` inside a
+		// quoted value never counts as the comment opener.
+		if commentIdx := miseFindCommentIndex(rawVal); commentIdx >= 0 {
+			rawVal = strings.TrimSpace(rawVal[:commentIdx])
+		}
+		// Values must be double-quoted strings — mise versions / env
+		// values are always strings, so this keeps the grammar narrow.
+		if !strings.HasPrefix(rawVal, "\"") || !strings.HasSuffix(rawVal, "\"") || len(rawVal) < 2 {
+			return nil, fmt.Errorf("mise: line %d: value for %q must be a quoted string", lineNo+1, key)
+		}
+		val := rawVal[1 : len(rawVal)-1]
+		switch currentSection {
+		case "tools":
+			cfg.Tools[key] = val
+		case "env":
+			cfg.Env[key] = val
+		case "":
+			return nil, fmt.Errorf("mise: line %d: %q outside any section (expected [tools] or [env] header first)", lineNo+1, key)
+		}
+	}
+	return cfg, nil
 }
 
 // ToTOML converts MiseConfig to mise's native .mise.toml format.

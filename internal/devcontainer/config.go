@@ -120,6 +120,88 @@ func parsePolymorphicCommand(data json.RawMessage, field string) (any, error) {
 	return nil, fmt.Errorf("devcontainer: %s must be string, []string, or map[string]string", field)
 }
 
+// commonUtilsFeatureRef is the canonical devcontainer common-utils
+// feature, version-pinned so behaviour stays stable when upstream
+// publishes a new tag. Bumping requires re-verifying that the
+// `username` / `uid` / `gid` install options are still respected.
+const commonUtilsFeatureRef = "ghcr.io/devcontainers/features/common-utils:2"
+
+// commonUtilsRefPrefix is the registry prefix used to detect ANY
+// pinned version of the feature (e.g. `:1`, `:2`, sha digests). We
+// match on prefix so an operator who pinned `:1` for compatibility
+// reasons still counts as having opted in — we don't second-guess
+// their version pick.
+//
+// The trailing separator is required: a bare prefix would also match
+// future or third-party features like `common-utils-extra:1`, which
+// don't create the `agent` user, so auto-inject would be wrongly
+// suppressed and runtime would fail with "user 'agent' does not
+// exist". The set of legal separators after the feature name is small
+// and stable (`:` for tag, `@` for digest), so an exhaustive check is
+// safer than a regex.
+const commonUtilsRefPrefix = "ghcr.io/devcontainers/features/common-utils"
+
+// isCommonUtilsRef returns true iff ref is the common-utils feature
+// at any tag or digest. Rejects sibling refs whose names extend the
+// prefix (e.g. common-utils-extra).
+//
+// Registry refs are case-insensitive at the resolver layer (Docker /
+// OCI both fold names to lower case before lookup), so an operator
+// who pasted `GHCR.IO/devcontainers/features/common-utils:1` from a
+// release-notes page is semantically declaring the same feature as
+// the canonical lowercased ref. We normalise before comparing so the
+// idempotency check holds either way and EnsureAgentUser doesn't
+// double-inject under a case variant.
+func isCommonUtilsRef(ref string) bool {
+	lower := strings.ToLower(ref)
+	if !strings.HasPrefix(lower, commonUtilsRefPrefix) {
+		return false
+	}
+	suffix := lower[len(commonUtilsRefPrefix):]
+	if suffix == "" {
+		return true // unversioned reference
+	}
+	return suffix[0] == ':' || suffix[0] == '@'
+}
+
+// EnsureAgentUser injects the devcontainer common-utils feature with
+// username=agent + UID/GID 1001 when the manifest / API caller didn't
+// declare any flavour of common-utils themselves. Crewship's container
+// runtime hard-codes UID 1001 (see Validate above), but without
+// common-utils there's no `agent` user inside the image to map onto —
+// so an operator who forgot the feature would hit "user 'agent' does
+// not exist" at exec time. Auto-injecting the same feature the docs
+// historically asked authors to type by hand eliminates that footgun.
+//
+// Idempotent: if any common-utils variant (any tag, any options) is
+// already declared, the function leaves Features untouched so an
+// operator who picked a different version / options keeps full
+// control. Returns true when something was injected, false when no
+// change was needed — callers wanting to log "auto-injected default
+// agent user" key on the bool.
+func (c *Config) EnsureAgentUser() bool {
+	if c == nil {
+		return false
+	}
+	if c.Features == nil {
+		c.Features = make(map[string]map[string]any)
+	}
+	for ref := range c.Features {
+		if isCommonUtilsRef(ref) {
+			return false // operator opted in; respect their config
+		}
+	}
+	c.Features[commonUtilsFeatureRef] = map[string]any{
+		"username":                   "agent",
+		"uid":                        "1001",
+		"gid":                        "1001",
+		"installZsh":                 "false", // keep image lean; agents bash
+		"upgradePackages":            "false", // determinism > freshness for cached images
+		"configureZshAsDefaultShell": "false",
+	}
+	return true
+}
+
 // Validate checks that the Config is well-formed.
 func (c *Config) Validate() error {
 	if c.Image == "" {

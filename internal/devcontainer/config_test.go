@@ -6,6 +6,103 @@ import (
 	"testing"
 )
 
+// ---------------------------------------------------------------------------
+// EnsureAgentUser — auto-injection of common-utils for the agent user
+// ---------------------------------------------------------------------------
+
+func TestEnsureAgentUser_InjectsWhenFeaturesEmpty(t *testing.T) {
+	c := &Config{Image: "alpine:3.20"}
+	if !c.EnsureAgentUser() {
+		t.Fatal("expected injection, got no-op")
+	}
+	feat, ok := c.Features[commonUtilsFeatureRef]
+	if !ok {
+		t.Fatalf("expected %s key in Features, got %+v", commonUtilsFeatureRef, c.Features)
+	}
+	if feat["username"] != "agent" || feat["uid"] != "1001" || feat["gid"] != "1001" {
+		t.Errorf("injected options wrong: %+v", feat)
+	}
+}
+
+func TestEnsureAgentUser_NilConfig(t *testing.T) {
+	var c *Config
+	if c.EnsureAgentUser() {
+		t.Fatal("nil config should report no-op, not crash")
+	}
+}
+
+func TestEnsureAgentUser_IdempotentOnExistingCommonUtilsV2(t *testing.T) {
+	c := &Config{
+		Image: "alpine:3.20",
+		Features: map[string]map[string]any{
+			commonUtilsFeatureRef: {"username": "myuser", "uid": "2000"},
+		},
+	}
+	if c.EnsureAgentUser() {
+		t.Fatal("explicit common-utils should be respected (no-op), got injection")
+	}
+	if c.Features[commonUtilsFeatureRef]["username"] != "myuser" {
+		t.Errorf("operator's username was overwritten: %+v", c.Features[commonUtilsFeatureRef])
+	}
+}
+
+func TestEnsureAgentUser_IdempotentOnDifferentVersionTag(t *testing.T) {
+	// Operator pinned :1 for compat — we still treat it as "opted in"
+	// and don't double-inject :2 alongside.
+	c := &Config{
+		Image: "alpine:3.20",
+		Features: map[string]map[string]any{
+			"ghcr.io/devcontainers/features/common-utils:1": {"username": "agent"},
+		},
+	}
+	if c.EnsureAgentUser() {
+		t.Fatal("pinned :1 should be respected, got injection")
+	}
+	if _, has := c.Features[commonUtilsFeatureRef]; has {
+		t.Errorf("auto-injected :2 alongside operator's :1: %+v", c.Features)
+	}
+}
+
+// TestEnsureAgentUser_RejectsSiblingPrefix pins the CodeRabbit fix:
+// `common-utils-extra:1` shares the prefix string with common-utils
+// but is an entirely different feature that does NOT create the
+// agent user. A naive HasPrefix check would silently suppress
+// injection and leave the operator with the original "user 'agent'
+// does not exist" footgun. isCommonUtilsRef requires a `:` or `@`
+// after the canonical name.
+func TestEnsureAgentUser_RejectsSiblingPrefix(t *testing.T) {
+	c := &Config{
+		Image: "alpine:3.20",
+		Features: map[string]map[string]any{
+			"ghcr.io/devcontainers/features/common-utils-extra:1": {},
+		},
+	}
+	if !c.EnsureAgentUser() {
+		t.Fatal("sibling prefix common-utils-extra must NOT suppress injection")
+	}
+	if _, has := c.Features[commonUtilsFeatureRef]; !has {
+		t.Errorf("expected canonical common-utils:2 injected alongside common-utils-extra, got %+v", c.Features)
+	}
+}
+
+func TestEnsureAgentUser_PreservesUnrelatedFeatures(t *testing.T) {
+	c := &Config{
+		Image: "alpine:3.20",
+		Features: map[string]map[string]any{
+			"ghcr.io/devcontainers/features/git:1": {},
+		},
+	}
+	if !c.EnsureAgentUser() {
+		t.Fatal("expected injection alongside git feature")
+	}
+	if _, has := c.Features["ghcr.io/devcontainers/features/git:1"]; !has {
+		t.Error("git feature was dropped during inject")
+	}
+	if _, has := c.Features[commonUtilsFeatureRef]; !has {
+		t.Error("common-utils not injected")
+	}
+}
+
 func TestParseMinimal(t *testing.T) {
 	input := `{"image": "mcr.microsoft.com/devcontainers/base:ubuntu"}`
 	c, err := ParseBytes([]byte(input))

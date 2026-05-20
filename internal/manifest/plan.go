@@ -148,6 +148,13 @@ func BuildPlan(ctx context.Context, c *Client, b *Bundle, opts Options) (*Plan, 
 		}
 	}
 
+	// SPEC-2 kinds — Project / Label / Routine / etc. Dispatched
+	// through internal/manifest/kinds, with the action mapping +
+	// closure wrapping in apply_kinds.go.
+	if err := pb.planNewKinds(ctx, b); err != nil {
+		return nil, err
+	}
+
 	// Sort: bucket by action (create / update / unchanged / delete)
 	// then by dependency-aware kind order within each bucket so
 	// children land after parents on create, and parents land after
@@ -192,6 +199,7 @@ func planActionOrder(a Action) int {
 // On delete: reverse — links first, then children, then parents.
 func kindOrder(kind string, action Action) int {
 	rank := map[string]int{
+		// Legacy crew-bundle kinds (lowercase = manifest internals).
 		"credential":       0,
 		"skill":            1,
 		"crew":             2,
@@ -200,6 +208,27 @@ func kindOrder(kind string, action Action) int {
 		"mcp":              5,
 		"agent_skill":      6,
 		"agent_credential": 6,
+
+		// SPEC-2 kinds (capitalised = doc-kind names emitted by the
+		// per-kind packages under internal/manifest/kinds). Order
+		// mirrors the topological phases documented in SPEC-2:
+		// foundations first, automation last, hooks at the very end.
+		"Project":          10,
+		"Label":            10, // parallel to Project — neither depends on the other
+		"Milestone":        11, // depends on Project
+		"WorkflowTemplate": 12,
+		"FeatureFlag":      13,
+		"InstanceSetting":  14,
+		"Recipe":           15, // catalog installs (need workspace creds in place)
+		"CrewTemplate":     16,
+		"Connector":        17,
+		"Routine":          18, // depends on Crew + Agent
+		"Schedule":         19, // nested under Routine
+		"Webhook":          19,
+		"RecurringIssue":   20, // depends on Project + Label + Crew
+		"TriageRule":       21, // depends on Project + Label + Crew
+		"SavedView":        22, // depends on Label + Project
+		"Hook":             23, // toggles existing rows
 	}
 	r, ok := rank[kind]
 	if !ok {
@@ -207,8 +236,11 @@ func kindOrder(kind string, action Action) int {
 	}
 	if action == ActionDelete {
 		// Reverse the order so we tear down links before agents,
-		// agents before crews.
-		return 10 - r
+		// agents before crews — and SPEC-2 kinds tear down before
+		// their FK parents. The constant is large enough to keep new
+		// kinds (10..23) below the unknown-kind fallback (99) even
+		// after reversal.
+		return 100 - r
 	}
 	return r
 }
