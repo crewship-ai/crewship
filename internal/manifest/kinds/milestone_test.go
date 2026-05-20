@@ -546,9 +546,13 @@ func TestMilestone_Export_RoundTrip(t *testing.T) {
 	if v1.Spec.Status != "planned" {
 		t.Errorf("status: got %q", v1.Spec.Status)
 	}
-	// Synthetic slug should be kebab-cased from name.
-	if v1.Metadata.Slug != "v1-0-launch" {
-		t.Errorf("synthetic slug should be kebab-cased from name; got %q", v1.Metadata.Slug)
+	// Synthetic slug is namespaced by project so two projects with the
+	// same milestone name don't collide on re-apply. Format:
+	// "<project-slug>--<kebab-name>" — the double-dash separator is
+	// rejected by the workspace's slug regex, so it can't be confused
+	// with an operator-authored slug.
+	if v1.Metadata.Slug != "q2-roadmap--v1-0-launch" {
+		t.Errorf("synthetic slug should be project-namespaced; got %q", v1.Metadata.Slug)
 	}
 
 	// And the exported doc should immediately re-validate against a

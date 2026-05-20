@@ -64,7 +64,12 @@ func wrapResponse(resp *http.Response, err error) (*internalapi.Response, error)
 		return nil, err
 	}
 	if resp == nil {
-		return nil, nil
+		// (nil, nil) used to propagate as a quietly-invalid state and
+		// surface much later as "nil pointer dereference" inside a
+		// kind's response handler. Returning an actionable error here
+		// keeps the blast radius at the adapter boundary where the
+		// caller can still attach context (which path? which kind?).
+		return nil, fmt.Errorf("manifest: APIClient returned nil response with nil error — likely transport bug")
 	}
 	defer resp.Body.Close()
 	const maxBody = 16 << 20

@@ -62,6 +62,34 @@ func ParseMiseConfig(data string) (*MiseConfig, error) {
 	return parseMiseTOML(data)
 }
 
+// miseFindCommentIndex returns the byte index of the first `#` that
+// opens a real comment (i.e. lives outside any double-quoted string),
+// or -1 if no comment is present. Mise TOML doesn't use single-quoted
+// strings, so the only quote-aware state we track is whether we're
+// currently inside a `"..."` span. Escape sequences inside quoted
+// strings aren't expected for mise values (they're versions / env
+// names) but a `\"` inside quotes is still tolerated as not closing
+// the span, mirroring how the standard TOML grammar would handle it.
+func miseFindCommentIndex(s string) int {
+	inQuote := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch c {
+		case '\\':
+			if inQuote && i+1 < len(s) {
+				i++ // skip the next byte; it's escaped
+			}
+		case '"':
+			inQuote = !inQuote
+		case '#':
+			if !inQuote {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
 // parseMiseTOML is a minimal TOML parser scoped to the shape mise
 // configs actually use: section headers `[tools]` / `[env]`, comments
 // starting with `#`, blank lines, and string-valued key = "value" pairs.
@@ -93,18 +121,14 @@ func parseMiseTOML(data string) (*MiseConfig, error) {
 		}
 		key := strings.TrimSpace(line[:eq])
 		rawVal := strings.TrimSpace(line[eq+1:])
-		// Strip trailing inline comment.
-		if hash := strings.IndexByte(rawVal, '#'); hash >= 0 {
-			// Only honour the `#` when it's outside a quoted string.
-			// Simplest correct rule: a `#` after a closing quote.
-			if strings.HasPrefix(rawVal, "\"") {
-				closeQuote := strings.IndexByte(rawVal[1:], '"')
-				if closeQuote >= 0 && hash > closeQuote+1 {
-					rawVal = strings.TrimSpace(rawVal[:hash])
-				}
-			} else {
-				rawVal = strings.TrimSpace(rawVal[:hash])
-			}
+		// Strip trailing inline comment. The previous global-IndexByte
+		// approach mis-fired on values like `"abc#def" # comment` —
+		// the in-string `#` was found first and the parser then bailed
+		// because the residual `"abc` didn't end in a quote. Walk the
+		// string respecting double-quoted spans so a `#` inside a
+		// quoted value never counts as the comment opener.
+		if commentIdx := miseFindCommentIndex(rawVal); commentIdx >= 0 {
+			rawVal = strings.TrimSpace(rawVal[:commentIdx])
 		}
 		// Values must be double-quoted strings — mise versions / env
 		// values are always strings, so this keeps the grammar narrow.

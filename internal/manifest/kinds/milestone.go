@@ -265,12 +265,19 @@ func ExportMilestones(ctx context.Context, c internalapi.Client) ([]*MilestoneDo
 			return nil, fmt.Errorf("export milestones for project %q: %w", p.Slug, err)
 		}
 		for _, m := range milestones {
+			// Namespace milestone slugs by their parent project. Two
+			// projects can each have a milestone named "v1"; deriving
+			// the slug purely from the name would emit duplicate
+			// metadata.slug values, which fails on re-apply because
+			// the manifest validator rejects same-slug-twice within
+			// one kind. `<project-slug>--<milestone-slug>` keeps the
+			// pair unique without inventing a new ID space.
 			doc := &MilestoneDocument{
 				APIVersion: "crewship/v1",
 				Kind:       "Milestone",
 				Metadata: internalapi.Metadata{
 					Name: m.Name,
-					Slug: milestoneSlugFromName(m.Name),
+					Slug: p.Slug + "--" + milestoneSlugFromName(m.Name),
 				},
 				Spec: MilestoneSpec{
 					ProjectSlug: p.Slug,

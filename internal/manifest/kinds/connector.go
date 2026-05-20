@@ -225,28 +225,31 @@ func (d *ConnectorDocument) Plan(
 		remote = fetched
 	}
 
-	// Validate required-credential coverage *before* anything else.
-	// We do this even on the "uninstall" branch so a manifest with a
-	// stale mapping doesn't silently pass on the way to delete; the
-	// user wants to know about the typo regardless.
-	if missing := missingRequiredCredentials(remote.RequiredCredentials, d.Spec.Credentials); len(missing) > 0 {
-		// Emit a single PlanItem with Action=Create whose Exec returns
-		// the error before any HTTP call. Apply surfaces Exec errors
-		// through the same channel as network failures, so the user
-		// sees one consolidated "missing binding" message.
-		msg := fmt.Sprintf(
-			"connector %q: missing credential mapping for required env var(s) %s — add spec.credentials entries",
-			slug, strings.Join(missing, ", "),
-		)
-		return []internalapi.PlanItem{{
-			Kind:        "connector",
-			Slug:        slug,
-			Action:      internalapi.ActionCreate,
-			Description: msg,
-			Exec: func(_ context.Context, _ internalapi.Client) error {
-				return errors.New(msg)
-			},
-		}}, nil
+	// Validate required-credential coverage only when this manifest
+	// asks to INSTALL. Uninstall doesn't need credentials, and gating
+	// the delete branch on credential mappings would block the
+	// rollback path for an operator who removed the credentials first
+	// and now wants to uninstall — exactly the wrong direction.
+	if d.Spec.Install {
+		if missing := missingRequiredCredentials(remote.RequiredCredentials, d.Spec.Credentials); len(missing) > 0 {
+			// Emit a single PlanItem with Action=Create whose Exec returns
+			// the error before any HTTP call. Apply surfaces Exec errors
+			// through the same channel as network failures, so the user
+			// sees one consolidated "missing binding" message.
+			msg := fmt.Sprintf(
+				"connector %q: missing credential mapping for required env var(s) %s — add spec.credentials entries",
+				slug, strings.Join(missing, ", "),
+			)
+			return []internalapi.PlanItem{{
+				Kind:        "Connector",
+				Slug:        slug,
+				Action:      internalapi.ActionCreate,
+				Description: msg,
+				Exec: func(_ context.Context, _ internalapi.Client) error {
+					return errors.New(msg)
+				},
+			}}, nil
+		}
 	}
 
 	switch {
@@ -265,7 +268,7 @@ func (d *ConnectorDocument) Plan(
 			"credentials": d.Spec.Credentials,
 		}
 		return []internalapi.PlanItem{{
-			Kind:        "connector",
+			Kind:        "Connector",
 			Slug:        slug,
 			Action:      internalapi.ActionCreate,
 			Description: fmt.Sprintf("install connector %q", d.Metadata.Name),
@@ -284,7 +287,7 @@ func (d *ConnectorDocument) Plan(
 
 	case d.Spec.Install && remote.Installed:
 		return []internalapi.PlanItem{{
-			Kind:        "connector",
+			Kind:        "Connector",
 			Slug:        slug,
 			Action:      internalapi.ActionUnchanged,
 			Description: fmt.Sprintf("connector %q is already installed", d.Metadata.Name),
@@ -296,7 +299,7 @@ func (d *ConnectorDocument) Plan(
 		// degraded to ActionUnchanged with a description that flags
 		// the manual cleanup. Other 4xx / 5xx still fail Apply.
 		return []internalapi.PlanItem{{
-			Kind:        "connector",
+			Kind:        "Connector",
 			Slug:        slug,
 			Action:      internalapi.ActionDelete,
 			Description: fmt.Sprintf("uninstall connector %q", d.Metadata.Name),
@@ -324,7 +327,7 @@ func (d *ConnectorDocument) Plan(
 
 	default:
 		return []internalapi.PlanItem{{
-			Kind:        "connector",
+			Kind:        "Connector",
 			Slug:        slug,
 			Action:      internalapi.ActionUnchanged,
 			Description: fmt.Sprintf("connector %q is already uninstalled", d.Metadata.Name),

@@ -14,9 +14,16 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"regexp"
 
 	"github.com/crewship-ai/crewship/internal/manifest/internalapi"
 )
+
+// ffSlugFormat keeps slugs path-safe by construction. Documents that
+// pass Validate are guaranteed not to need additional escaping at
+// every call site — slugs go straight into endpoint paths.
+var ffSlugFormat = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,49}$`)
 
 // ----- YAML schema types ---------------------------------------------------
 
@@ -87,6 +94,13 @@ type FeatureFlagRemote struct {
 func (d *FeatureFlagDocument) Validate(_ internalapi.WorkspaceContext) error {
 	if d.Metadata.Slug == "" {
 		return fmt.Errorf("FeatureFlag %q: metadata.slug is required (used as flag key)", d.Metadata.Name)
+	}
+	// Slug goes directly into endpoint paths (POST /feature-flags/{key},
+	// PUT /feature-flags/{key}/override). Enforcing a kebab-safe charset
+	// at Validate time means call sites don't need defensive URL escaping
+	// and a slug like "foo/bar" can't smuggle through a path injection.
+	if !ffSlugFormat.MatchString(d.Metadata.Slug) {
+		return fmt.Errorf("FeatureFlag %q: invalid slug %q (lowercase letters, digits, '-', '_'; max 50 chars; must start with letter or digit)", d.Metadata.Name, d.Metadata.Slug)
 	}
 	if d.Spec.DefaultPercentage < 0 || d.Spec.DefaultPercentage > 100 {
 		return fmt.Errorf("FeatureFlag %q: default_percentage must be in [0,100], got %d",
@@ -167,7 +181,7 @@ func (d *FeatureFlagDocument) Plan(_ context.Context, c internalapi.Client, remo
 			Action:      internalapi.ActionUpdate,
 			Description: fmt.Sprintf("update feature flag %q definition", key),
 			Exec: func(ctx context.Context, c internalapi.Client) error {
-				resp, err := c.Patch(ctx, "/api/v1/feature-flags/"+key, body)
+				resp, err := c.Patch(ctx, "/api/v1/feature-flags/"+url.PathEscape(key), body)
 				return ffCheckStatus(resp, err, http.StatusOK)
 			},
 		})
@@ -222,7 +236,7 @@ func planOverrideDiff(key string, declared *bool, remoteFlag *FeatureFlagRemote)
 			Action:      internalapi.ActionDelete,
 			Description: fmt.Sprintf("remove workspace override for feature flag %q", key),
 			Exec: func(ctx context.Context, c internalapi.Client) error {
-				resp, err := c.Delete(ctx, "/api/v1/feature-flags/"+key+"/override")
+				resp, err := c.Delete(ctx, "/api/v1/feature-flags/"+url.PathEscape(key)+"/override")
 				return ffCheckStatus(resp, err, http.StatusOK, http.StatusNoContent)
 			},
 		}
@@ -240,7 +254,7 @@ func planOverrideDiff(key string, declared *bool, remoteFlag *FeatureFlagRemote)
 		Description: fmt.Sprintf("set workspace override for feature flag %q to %t", key, val),
 		Exec: func(ctx context.Context, c internalapi.Client) error {
 			body := map[string]any{"enabled": val}
-			resp, err := c.Put(ctx, "/api/v1/feature-flags/"+key+"/override", body)
+			resp, err := c.Put(ctx, "/api/v1/feature-flags/"+url.PathEscape(key)+"/override", body)
 			return ffCheckStatus(resp, err, http.StatusOK, http.StatusCreated, http.StatusNoContent)
 		},
 	}

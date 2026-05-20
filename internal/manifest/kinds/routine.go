@@ -430,8 +430,7 @@ func (d *RoutineDocument) Plan(ctx context.Context, c internalapi.Client, remote
 			Action:      internalapi.ActionDelete,
 			Description: fmt.Sprintf("delete schedule %s.%s (no longer declared)", d.Metadata.Slug, name),
 			Exec: func(ctx context.Context, c internalapi.Client) error {
-				_, err := c.Delete(ctx, fmt.Sprintf("/api/v1/workspaces/%s/pipeline-schedules/%s", wsID, schedID))
-				return err
+				return jsonDelete(ctx, c, fmt.Sprintf("/api/v1/workspaces/%s/pipeline-schedules/%s", wsID, schedID))
 			},
 		})
 	}
@@ -475,7 +474,7 @@ func (d *RoutineDocument) Plan(ctx context.Context, c internalapi.Client, remote
 					// the update path is delete-then-recreate. We do
 					// that inline so the plan item still represents one
 					// logical change.
-					if _, err := c.Delete(ctx, fmt.Sprintf("/api/v1/workspaces/%s/pipeline-webhooks/%s", wsID, hookID)); err != nil {
+					if err := jsonDelete(ctx, c, fmt.Sprintf("/api/v1/workspaces/%s/pipeline-webhooks/%s", wsID, hookID)); err != nil {
 						return err
 					}
 					_, err := jsonPost(ctx, c, fmt.Sprintf("/api/v1/workspaces/%s/pipeline-webhooks", wsID), body)
@@ -500,8 +499,7 @@ func (d *RoutineDocument) Plan(ctx context.Context, c internalapi.Client, remote
 			Action:      internalapi.ActionDelete,
 			Description: fmt.Sprintf("delete webhook for routine %s (no longer declared)", d.Metadata.Slug),
 			Exec: func(ctx context.Context, c internalapi.Client) error {
-				_, err := c.Delete(ctx, fmt.Sprintf("/api/v1/workspaces/%s/pipeline-webhooks/%s", wsID, hookID))
-				return err
+				return jsonDelete(ctx, c, fmt.Sprintf("/api/v1/workspaces/%s/pipeline-webhooks/%s", wsID, hookID))
 			},
 		})
 	}
@@ -665,6 +663,20 @@ func jsonPatch(ctx context.Context, c internalapi.Client, path string, body any)
 		return nil, err
 	}
 	return readBodyChecked(resp)
+}
+
+// jsonDelete wraps c.Delete with the same status-aware check the rest
+// of routine.go uses for POST/PATCH. The previous direct `c.Delete`
+// call sites swallowed 4xx/5xx responses — Apply would report
+// "schedule deleted" even when the server replied 500, leaving the
+// row in place and the user surprised on the next reconciliation.
+func jsonDelete(ctx context.Context, c internalapi.Client, path string) error {
+	resp, err := c.Delete(ctx, path)
+	if err != nil {
+		return err
+	}
+	_, err = readBodyChecked(resp)
+	return err
 }
 
 // readBodyChecked drains the response body (always — leaving it open

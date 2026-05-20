@@ -131,7 +131,29 @@ const commonUtilsFeatureRef = "ghcr.io/devcontainers/features/common-utils:2"
 // match on prefix so an operator who pinned `:1` for compatibility
 // reasons still counts as having opted in — we don't second-guess
 // their version pick.
+//
+// The trailing separator is required: a bare prefix would also match
+// future or third-party features like `common-utils-extra:1`, which
+// don't create the `agent` user, so auto-inject would be wrongly
+// suppressed and runtime would fail with "user 'agent' does not
+// exist". The set of legal separators after the feature name is small
+// and stable (`:` for tag, `@` for digest), so an exhaustive check is
+// safer than a regex.
 const commonUtilsRefPrefix = "ghcr.io/devcontainers/features/common-utils"
+
+// isCommonUtilsRef returns true iff ref is the common-utils feature
+// at any tag or digest. Rejects sibling refs whose names extend the
+// prefix (e.g. common-utils-extra).
+func isCommonUtilsRef(ref string) bool {
+	if !strings.HasPrefix(ref, commonUtilsRefPrefix) {
+		return false
+	}
+	suffix := ref[len(commonUtilsRefPrefix):]
+	if suffix == "" {
+		return true // unversioned reference
+	}
+	return suffix[0] == ':' || suffix[0] == '@'
+}
 
 // EnsureAgentUser injects the devcontainer common-utils feature with
 // username=agent + UID/GID 1001 when the manifest / API caller didn't
@@ -156,7 +178,7 @@ func (c *Config) EnsureAgentUser() bool {
 		c.Features = make(map[string]map[string]any)
 	}
 	for ref := range c.Features {
-		if strings.HasPrefix(ref, commonUtilsRefPrefix) {
+		if isCommonUtilsRef(ref) {
 			return false // operator opted in; respect their config
 		}
 	}

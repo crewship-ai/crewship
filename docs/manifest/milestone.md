@@ -90,7 +90,7 @@ spec:
   status: planned
 ```
 
-The `Project` and `Milestone` documents may live in the same multi-doc YAML file or in separate files under `crewship apply --dir`. Apply runs `Project` (phase 3) before `Milestone` (phase 5) regardless of declaration order, so the parent `project_id` is always resolvable by the time the milestone Plan executes.
+The `Project` and `Milestone` documents may live in the same multi-doc YAML file. Apply runs `Project` (phase 3) before `Milestone` (phase 5) regardless of declaration order, so the parent `project_id` is always resolvable by the time the milestone Plan executes. (A `--dir` flag for walking a manifest directory is on the follow-up list but not yet shipped — for now collect every kind in one `---`-separated file.)
 
 ## CLI reference
 

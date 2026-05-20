@@ -180,7 +180,12 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 		if cfg.EnsureAgentUser() {
 			normalised, err := json.Marshal(cfg)
 			if err != nil {
-				replyError(w, http.StatusInternalServerError, "rewrite devcontainer_config after auto-inject: "+err.Error())
+				// Log the underlying error server-side; surface only a
+				// generic message to the client. The marshal payload
+				// could carry user-supplied keys / values that aren't
+				// useful to expose in an error response.
+				h.logger.Error("crews.create: marshal devcontainer_config after auto-inject", "error", err)
+				replyError(w, http.StatusInternalServerError, "internal error normalising devcontainer config")
 				return
 			}
 			s := string(normalised)

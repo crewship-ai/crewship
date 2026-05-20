@@ -272,13 +272,34 @@ func findWorkflowTemplateBySlug(client *cli.Client, slug string) (*workflowTempl
 		return nil, err
 	}
 	target := strings.ToLower(strings.TrimSpace(slug))
+	// Exact-name match wins: an operator who typed the literal name
+	// expects that hit even if other templates happen to slugify to
+	// the same value. After that, fall back to a slug match — but
+	// detect collisions across the catalog so `workflow delete <slug>`
+	// can't silently target the wrong row.
 	for i := range templates {
-		t := &templates[i]
-		if strings.EqualFold(t.Name, slug) || slugify(t.Name) == target {
-			return t, nil
+		if strings.EqualFold(templates[i].Name, slug) {
+			return &templates[i], nil
 		}
 	}
-	return nil, fmt.Errorf("no workflow template matches slug %q", slug)
+	var matches []*workflowTemplateItem
+	for i := range templates {
+		if slugify(templates[i].Name) == target {
+			matches = append(matches, &templates[i])
+		}
+	}
+	switch len(matches) {
+	case 0:
+		return nil, fmt.Errorf("no workflow template matches slug %q", slug)
+	case 1:
+		return matches[0], nil
+	default:
+		names := make([]string, 0, len(matches))
+		for _, m := range matches {
+			names = append(names, fmt.Sprintf("%q (id=%s)", m.Name, m.ID))
+		}
+		return nil, fmt.Errorf("ambiguous slug %q matches %d workflow templates: %s — use the exact name to disambiguate", slug, len(matches), strings.Join(names, ", "))
+	}
 }
 
 // loadWorkflowTemplateBody reads a YAML manifest from disk and converts it

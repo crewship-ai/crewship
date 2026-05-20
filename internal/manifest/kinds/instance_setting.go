@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"regexp"
 	"sort"
@@ -219,6 +220,31 @@ func resolveEnv(v string, lookup func(string) (string, bool)) (string, error) {
 	}
 	if !strings.Contains(v, "${") {
 		return v, nil
+	}
+	// Pre-flight: every literal `${` opener in the input must be the
+	// start of a well-formed placeholder. The previous implementation
+	// silently passed `${X:-y}` / `${BAD NAME}` / unbalanced `${X`
+	// through because ReplaceAllStringFunc only fires on matches —
+	// the loud-failure contract documented at the top of the file
+	// required this explicit pass.
+	rest := v
+	for {
+		i := strings.Index(rest, "${")
+		if i < 0 {
+			break
+		}
+		// Anchor envPlaceholder at the opener position.
+		loc := envPlaceholder.FindStringIndex(rest[i:])
+		if loc == nil || loc[0] != 0 {
+			snippet := rest[i:]
+			if end := strings.Index(snippet, "}"); end >= 0 && end <= 32 {
+				snippet = snippet[:end+1]
+			} else if len(snippet) > 32 {
+				snippet = snippet[:32] + "…"
+			}
+			return "", fmt.Errorf("InstanceSetting value contains malformed placeholder %q — only ${ENV_VAR_NAME} is supported (no `${VAR:-default}`, no spaces, no nested braces)", snippet)
+		}
+		rest = rest[i+loc[1]:]
 	}
 	var firstErr error
 	out := envPlaceholder.ReplaceAllStringFunc(v, func(match string) string {
@@ -483,7 +509,7 @@ func fetchInstanceSettings(ctx context.Context, c internalapi.Client) (InstanceS
 // putInstanceSetting upserts one key. The body shape mirrors the
 // SPEC-2 contract: {"value": "..."}.
 func putInstanceSetting(ctx context.Context, c internalapi.Client, key, value string) error {
-	resp, err := c.Put(ctx, "/api/v1/instance/settings/"+key, map[string]any{"value": value})
+	resp, err := c.Put(ctx, "/api/v1/instance/settings/"+url.PathEscape(key), map[string]any{"value": value})
 	if err != nil {
 		return fmt.Errorf("PUT instance setting %q: %w", key, err)
 	}
@@ -503,7 +529,7 @@ func putInstanceSetting(ctx context.Context, c internalapi.Client, key, value st
 // pruning. A 404 is a no-op (the key was deleted between Plan and
 // Apply by another actor).
 func deleteInstanceSetting(ctx context.Context, c internalapi.Client, key string) error {
-	resp, err := c.Delete(ctx, "/api/v1/instance/settings/"+key)
+	resp, err := c.Delete(ctx, "/api/v1/instance/settings/"+url.PathEscape(key))
 	if err != nil {
 		return fmt.Errorf("DELETE instance setting %q: %w", key, err)
 	}

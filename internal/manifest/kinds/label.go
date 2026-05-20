@@ -91,7 +91,17 @@ func (d *LabelDocument) Validate(_ internalapi.WorkspaceContext) error {
 			d.Metadata.Name, d.Metadata.Slug, d.Metadata.Name,
 		)
 	}
-	if d.Spec.Color != "" && !labelHexColorPattern.MatchString(d.Spec.Color) {
+	// Color is required by the backend (POST /api/v1/labels returns
+	// 400 "color is required" when missing — see
+	// internal/api/issue_handler_labels.go). Catching this at
+	// validate time means the operator sees one consolidated
+	// "missing color" message in the same pass that lists other
+	// validation issues, instead of getting a surprise 400 partway
+	// through Apply when half the manifest has already been written.
+	if d.Spec.Color == "" {
+		return fmt.Errorf("label %q: spec.color is required (hex pattern ^#[0-9A-Fa-f]{6}$)", d.Metadata.Name)
+	}
+	if !labelHexColorPattern.MatchString(d.Spec.Color) {
 		return fmt.Errorf(
 			"label %q: spec.color %q must match pattern ^#[0-9A-Fa-f]{6}$",
 			d.Metadata.Name, d.Spec.Color,

@@ -205,15 +205,19 @@ func TestLabel_Validate_HappyPath(t *testing.T) {
 	}
 }
 
-func TestLabel_Validate_NoColorOK(t *testing.T) {
-	// Color is required by the backend but Validate's job is purely
-	// structural — the empty-color case is allowed here so the
-	// server-side 400 surfaces the real issue. The test pins that
-	// behaviour so a future tightening of Validate is intentional.
+func TestLabel_Validate_EmptyColorRejected(t *testing.T) {
+	// Validate now refuses an empty color because POST /api/v1/labels
+	// returns 400 "color is required" — catching it client-side gives
+	// the operator one consolidated validation error instead of a mid-
+	// apply server failure with half the manifest already written.
 	doc := labelSampleDoc()
 	doc.Spec.Color = ""
-	if err := doc.Validate(internalapi.WorkspaceContext{}); err != nil {
-		t.Errorf("Validate with empty color should pass, got: %v", err)
+	err := doc.Validate(internalapi.WorkspaceContext{})
+	if err == nil {
+		t.Fatal("Validate with empty color should reject; got nil")
+	}
+	if !strings.Contains(err.Error(), "spec.color is required") {
+		t.Errorf("unexpected error message: %v", err)
 	}
 }
 

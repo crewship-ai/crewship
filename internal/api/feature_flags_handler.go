@@ -29,10 +29,25 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/ws"
 )
+
+// isUniqueViolation reports whether err is a SQLite UNIQUE constraint
+// violation. The modernc.org driver surfaces these as wrapped errors
+// whose string contains "UNIQUE constraint failed". Pinning on the
+// substring keeps this resilient to wrapper changes — sql.ErrNoRows
+// is the only typed error we get out of database/sql, so constraint
+// codes have to be matched textually.
+func isUniqueViolation(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "UNIQUE constraint failed") || strings.Contains(msg, "constraint failed: UNIQUE")
+}
 
 // FeatureFlagHandler implements CRUD for feature flag definitions plus
 // per-workspace override upsert/delete.
@@ -69,6 +84,14 @@ type featureFlagResponse struct {
 // workspace context, the current workspace's per-flag override (or null
 // when no override row exists for that flag).
 func (h *FeatureFlagHandler) List(w http.ResponseWriter, r *http.Request) {
+	// "read" gate keeps the empty-role / no-membership case out — feature
+	// flags can carry product-strategy signal so we don't enumerate them
+	// for callers who aren't members of any workspace role. canRole("")
+	// returns false for every action, which is exactly the contract the
+	// RBAC matrix test pins.
+	if !requireRole(w, r, "read") {
+		return
+	}
 	wsID := WorkspaceIDFromContext(r.Context())
 
 	// LEFT JOIN so flags without an override still come back.
@@ -150,21 +173,6 @@ func (h *FeatureFlagHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Reject duplicate keys with a 409 before hitting the UNIQUE constraint
-	// so the caller gets a structured error instead of a generic 500.
-	var existing string
-	err := h.db.QueryRowContext(r.Context(),
-		`SELECT id FROM feature_flags WHERE key = ?`, req.Key).Scan(&existing)
-	if err == nil {
-		writeProblem(w, r, http.StatusConflict, "feature flag with this key already exists")
-		return
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		h.logger.Error("check feature flag key uniqueness", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
-		return
-	}
-
 	id := generateCUID()
 	now := time.Now().UTC().Format(time.RFC3339)
 
@@ -173,11 +181,23 @@ func (h *FeatureFlagHandler) Create(w http.ResponseWriter, r *http.Request) {
 		enabledInt = 1
 	}
 
-	_, err = h.db.ExecContext(r.Context(), `
+	// Race-free uniqueness: let the UNIQUE(key) constraint do the
+	// check inside the INSERT. The previous "SELECT then INSERT"
+	// pattern raced under concurrent creates — two callers could
+	// both observe "key not found" and then both attempt to insert,
+	// surfacing a 500 instead of the intended 409 to the loser.
+	// SQLite reports the violation through the modernc.org driver as
+	// either a "constraint failed" message; either is enough to map
+	// to a clean 409.
+	_, err := h.db.ExecContext(r.Context(), `
 		INSERT INTO feature_flags (id, key, description, enabled, percentage, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		id, req.Key, req.Description, enabledInt, req.Percentage, now, now)
 	if err != nil {
+		if isUniqueViolation(err) {
+			writeProblem(w, r, http.StatusConflict, "feature flag with this key already exists")
+			return
+		}
 		h.logger.Error("insert feature flag", "error", err)
 		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 		return
@@ -377,13 +397,24 @@ func (h *FeatureFlagHandler) UpsertOverride(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// Pointer so we can distinguish absent (rejected) from explicit
+	// false. The previous non-pointer decode accepted `{}` and
+	// silently flipped the flag off, which is a serious foot-gun for
+	// a privileged endpoint — an operator that meant to set
+	// `enabled: true` and mis-typed the body would silently disable
+	// the flag for the whole workspace.
 	var req struct {
-		Enabled bool `json:"enabled"`
+		Enabled *bool `json:"enabled"`
 	}
 	if err := readJSON(r, &req); err != nil {
 		writeProblem(w, r, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
+	if req.Enabled == nil {
+		writeProblem(w, r, http.StatusBadRequest, "request body must include an explicit boolean 'enabled' field")
+		return
+	}
+	enabledVal := *req.Enabled
 
 	// Resolve flag key → id (flag must exist; we don't auto-create).
 	var flagID string
@@ -399,7 +430,7 @@ func (h *FeatureFlagHandler) UpsertOverride(w http.ResponseWriter, r *http.Reque
 	}
 
 	enabledInt := 0
-	if req.Enabled {
+	if enabledVal {
 		enabledInt = 1
 	}
 
@@ -423,7 +454,7 @@ func (h *FeatureFlagHandler) UpsertOverride(w http.ResponseWriter, r *http.Reque
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"key":     key,
-		"enabled": req.Enabled,
+		"enabled": enabledVal,
 	})
 }
 

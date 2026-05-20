@@ -560,8 +560,9 @@ func TestFeatureFlag_RBAC_Matrix(t *testing.T) {
 		{role: "VIEWER", wantList: http.StatusOK, wantCreate: http.StatusForbidden, wantUpdate: http.StatusForbidden, wantDelete: http.StatusForbidden, wantUpsert: http.StatusForbidden, wantClear: http.StatusForbidden},
 		// Empty role = unauthenticated-ish state. canRole rejects "" for
 		// EVERY action including "read" as defense in depth — so even List
-		// should return 403 here.
-		{role: "", wantList: http.StatusOK, wantCreate: http.StatusForbidden, wantUpdate: http.StatusForbidden, wantDelete: http.StatusForbidden, wantUpsert: http.StatusForbidden, wantClear: http.StatusForbidden},
+		// returns 403. The handler now gates List on requireRole("read")
+		// to make this real instead of just an aspirational comment.
+		{role: "", wantList: http.StatusForbidden, wantCreate: http.StatusForbidden, wantUpdate: http.StatusForbidden, wantDelete: http.StatusForbidden, wantUpsert: http.StatusForbidden, wantClear: http.StatusForbidden},
 	}
 
 	for _, tc := range matrix {

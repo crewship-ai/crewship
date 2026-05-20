@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"net/url"
 
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/spf13/cobra"
@@ -111,7 +112,7 @@ var featureFlagInheritCmd = &cobra.Command{
 
 		key := args[0]
 		client := newAPIClient()
-		resp, err := client.Delete("/api/v1/feature-flags/" + key + "/override")
+		resp, err := client.Delete("/api/v1/feature-flags/" + url.PathEscape(key) + "/override")
 		if err != nil {
 			return err
 		}
@@ -140,7 +141,7 @@ func setOverride(key string, enabled bool) error {
 	// internal/cli.Client.Do covers all verbs — there's no .Put method,
 	// but Do("PUT", …) serializes the body via the same JSON pipeline as
 	// Post/Patch, so we go through the generic call directly.
-	resp, err := client.Do("PUT", "/api/v1/feature-flags/"+key+"/override",
+	resp, err := client.Do("PUT", "/api/v1/feature-flags/"+url.PathEscape(key)+"/override",
 		map[string]bool{"enabled": enabled})
 	if err != nil {
 		return err
