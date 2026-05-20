@@ -121,6 +121,10 @@ crewship routine run eval-extract-emails --tier-override smart
 
 Output: `run_id`, `status`, `output`, `duration_ms`, `cost_usd`.
 
+### Common errors
+
+- **API error (500): `pipeline: concurrency_key rendered to empty value (referenced input missing or empty)`** — the DSL declared a `concurrency_key` template that references an input you didn't supply, and the template has no literal text to fall back on. See [Troubleshooting in the routines guide](/guides/routines#run-returns-500-pipeline-concurrency_key-rendered-to-empty-value) for the four fixes.
+
 ---
 
 ## `crewship routine doctor <slug>`
