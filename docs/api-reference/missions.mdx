@@ -273,11 +273,20 @@ Validates the task dependency DAG before starting. Uses atomic compare-and-swap 
 POST /api/v1/crews/{crewId}/missions/{missionId}/restart?workspace_id={workspaceId}
 ```
 
-Restarts a `FAILED`, `COMPLETED`, or `CANCELLED` mission. Resets all tasks to `PENDING` and sets status to `IN_PROGRESS`.
+Restarts a `COMPLETED`, `FAILED`, or `CANCELLED` mission. Resets non-COMPLETED tasks (PENDING if dependencies allow, BLOCKED otherwise), increments their `iteration`, clears errors, and moves the mission back to `PLANNING` (call `start` afterwards to dispatch). (`internal/api/task_state.go:14`)
 
 **Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
 
 **Response:** `200 OK`
+
+```json
+{ "id": "mission_abc", "status": "PLANNING" }
+```
+
+| Status | Condition |
+|---|---|
+| `404` | Mission not found |
+| `409` | Mission is not in a terminal state (`COMPLETED`/`FAILED`/`CANCELLED`) |
 
 ---
 
@@ -287,11 +296,17 @@ Restarts a `FAILED`, `COMPLETED`, or `CANCELLED` mission. Resets all tasks to `P
 POST /api/v1/crews/{crewId}/missions/{missionId}/resume?workspace_id={workspaceId}
 ```
 
-Resumes an `IN_PROGRESS` mission that has stalled (e.g., after a server restart). Re-engages the MissionEngine to continue dispatching pending tasks.
+Resumes a `FAILED` mission from the point of failure. The handler atomically claims the mission into `RESUMING`, resets the FAILED/AWAITING_APPROVAL tasks plus their downstream dependents, validates the DAG, and re-engages the MissionEngine. COMPLETED tasks are preserved. (`internal/api/task_state.go:103`)
 
 **Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
 
 **Response:** `200 OK`
+
+| Status | Condition |
+|---|---|
+| `400` | No failed tasks to resume from, or invalid DAG |
+| `404` | Mission not found |
+| `409` | Mission is not currently `FAILED` |
 
 ---
 
@@ -301,11 +316,17 @@ Resumes an `IN_PROGRESS` mission that has stalled (e.g., after a server restart)
 POST /api/v1/crews/{crewId}/missions/{missionId}/clone?workspace_id={workspaceId}
 ```
 
-Creates a copy of the mission with all its tasks, resetting statuses to `PLANNING`/`PENDING`.
+Creates a copy of the mission with all its tasks, resetting statuses to `PLANNING`/`PENDING` (or `BLOCKED` if the cloned task carries dependencies).
 
 **Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
 
-**Response:** `201 Created` -- the new cloned mission object.
+**Response:** `201 Created`
+
+```json
+{ "id": "mission_new", "status": "PLANNING" }
+```
+
+The handler returns the new mission id and status only; fetch `GET /api/v1/crews/{crewId}/missions/{newId}` for the full mission object (`internal/api/task_state.go:472`).
 
 ---
 
@@ -319,17 +340,18 @@ Add a task to a mission.
 
 **Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
 
-**Request Body:**
+**Request Body:** (`internal/api/task_handler.go:42`)
 
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `title` | string | Yes | -- | Task title |
 | `description` | string | No | `null` | Task description |
 | `assigned_agent_id` | string | No | `null` | Agent to assign to |
-| `task_order` | integer | No | auto | Position in task list |
+| `task_order` | integer | No | `0` | Position in task list |
 | `depends_on` | string[] | No | `[]` | Array of task IDs this depends on |
 | `max_iterations` | integer | No | `null` | Max retry iterations |
-| `approval_required` | boolean | No | `false` | Require human approval |
+
+Tasks can only be added to missions in `PLANNING` or `IN_PROGRESS` state. If any dependency task is not `COMPLETED`, the new task is created with status `BLOCKED`; otherwise `PENDING`.
 
 **Response:** `201 Created`
 
@@ -341,18 +363,22 @@ Add a task to a mission.
 PATCH /api/v1/crews/{crewId}/missions/{missionId}/tasks/{taskId}?workspace_id={workspaceId}
 ```
 
-**Request Body:** All fields optional.
+**Request Body:** All fields optional. (`internal/api/task_handler.go:146`)
 
 | Field | Type | Description |
 |---|---|---|
-| `title` | string | Task title |
-| `description` | string | Task description |
+| `title` | string | Task title (PENDING/BLOCKED only) |
+| `description` | string | Task description (PENDING/BLOCKED only) |
 | `assigned_agent_id` | string | Reassign to a different agent |
 | `status` | string | New status (valid transition required) |
-| `task_order` | integer | Position in task list |
-| `depends_on` | string[] | Dependency task IDs |
-| `max_iterations` | integer | Max iterations |
-| `approval_required` | boolean | Require approval |
+| `depends_on` | string | JSON-encoded dependency task IDs (PENDING/BLOCKED only) |
+| `result_summary` | string | Result summary text |
+| `error_message` | string | Error message text |
+| `output_path` | string | Output file path |
+| `token_count` | integer | Token usage |
+| `estimated_cost` | number | Estimated cost in USD |
+
+`status` and `depends_on` cannot be set in the same request — the handler returns `400` with "Cannot update status and depends_on in the same request" (`internal/api/task_handler.go:359`). `task_order`, `max_iterations`, and `approval_required` are not currently mutable through this endpoint.
 
 **Task Status Transitions:**
 

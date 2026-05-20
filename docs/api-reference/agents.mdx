@@ -154,8 +154,8 @@ POST /api/v1/agents?workspace_id={workspaceId}
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `name` | string | Yes | -- | Display name (2-100 characters) |
-| `slug` | string | Yes | -- | URL-safe identifier (2-50 chars) |
-| `crew_id` | string | Yes | -- | Parent crew ID |
+| `slug` | string | Yes | -- | URL-safe identifier (2-50 chars, lowercase letters/digits/hyphens) |
+| `crew_id` | string | Conditional | `null` | Parent crew ID. Required when `agent_role` is `LEAD`; optional for `AGENT` (`internal/api/agents_create.go:73`) |
 | `description` | string | No | `null` | Agent description |
 | `role_title` | string | No | `null` | Human-readable role title |
 | `agent_role` | string | No | `"AGENT"` | `AGENT` or `LEAD` |
@@ -227,18 +227,17 @@ PATCH /api/v1/agents/{agentId}?workspace_id={workspaceId}
 
 Partial update -- only provided fields are changed.
 
-**Auth:** `OWNER` or `ADMIN` role
+**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role (`canRole(role, "create")` in `internal/api/agents_update.go:18`)
 
-**Request Body:** Same fields as Create, all optional. Additionally supports:
+**Request Body:** Same fields as Create, all optional. `status` is not mutable through this endpoint. Additionally supports:
 
 | Field | Type | Description |
 |---|---|---|
-| `status` | string | Agent status |
 | `cli_tools` | string | Comma-separated CLI tools |
 | `schedule_cron` | string | Cron expression |
 | `schedule_prompt` | string | Schedule prompt |
 | `schedule_enabled` | boolean | Enable/disable schedule |
-| `mcp_config_json` | string | Agent MCP config JSON |
+| `mcp_config_json` | string | Agent MCP config JSON (must contain an `mcpServers` object) |
 
 **Response:** `200 OK` -- updated agent object.
 
@@ -250,11 +249,15 @@ Partial update -- only provided fields are changed.
 DELETE /api/v1/agents/{agentId}?workspace_id={workspaceId}
 ```
 
-Soft-deletes the agent.
+Soft-deletes the agent (sets `deleted_at`).
 
-**Auth:** `OWNER` or `ADMIN` role
+**Auth:** `OWNER` or `ADMIN` role (`canRole(role, "manage")` in `internal/api/agents_query.go:220`)
 
-**Response:** `204 No Content`
+**Response:** `200 OK`
+
+```json
+{ "success": true }
+```
 
 ---
 
@@ -308,13 +311,36 @@ GET /api/v1/agents/{agentId}/credentials?workspace_id={workspaceId}
 POST /api/v1/agents/{agentId}/credentials?workspace_id={workspaceId}
 ```
 
+**Auth:** `OWNER` or `ADMIN` role (`canRole(role, "manage")` in `internal/api/agent_credentials.go:89`)
+
+**Request Body:**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `credential_id` | string | Yes | Credential to assign (must exist in this workspace) |
+| `env_var_name` | string | Yes | Environment variable name to inject into the agent container |
+| `priority` | integer | No | Resolution priority when multiple credentials share an `env_var_name` |
+
 ```json
 {
-  "credential_id": "cred_abc"
+  "credential_id": "cred_abc",
+  "env_var_name": "ANTHROPIC_API_KEY",
+  "priority": 0
 }
 ```
 
 **Response:** `201 Created`
+
+```json
+{ "id": "<assignment_id>" }
+```
+
+| Status | Condition |
+|---|---|
+| `400` | Missing `credential_id` or `env_var_name` |
+| `403` | Insufficient role |
+| `404` | Agent or credential not found |
+| `409` | Credential already assigned to this agent |
 
 ### Remove Credential
 
@@ -322,7 +348,15 @@ POST /api/v1/agents/{agentId}/credentials?workspace_id={workspaceId}
 DELETE /api/v1/agents/{agentId}/credentials/{assignmentId}?workspace_id={workspaceId}
 ```
 
-**Response:** `204 No Content`
+The path segment is the **assignment ID** (`agent_credentials.id`), not the credential id.
+
+**Auth:** `OWNER` or `ADMIN` role (`canRole(role, "manage")` in `internal/api/agent_credentials.go:146`)
+
+**Response:** `200 OK`
+
+```json
+{ "success": true }
+```
 
 ---
 

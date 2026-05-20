@@ -18,13 +18,18 @@ GET /api/v1/skills?workspace_id={workspaceId}
 
 **Auth:** Session or CLI token + workspace membership
 
-**Query Parameters:**
+**Query Parameters:** (`internal/api/skills.go:99`)
 
 | Parameter | Type | Description |
 |---|---|---|
 | `category` | string | Filter by category |
 | `source` | string | Filter by source |
 | `search` | string | Search in name, display_name, and description |
+| `vendor` | string | Filter by vendor |
+| `maturity` | string | Filter by maturity (`OFFICIAL`, `CURATED`, `COMMUNITY`, `EXPERIMENTAL`) |
+| `runtime` | string | Filter by runtime |
+| `installed` | string | Set to `"1"` to return only skills assigned to at least one agent in the workspace |
+| `installed_for_agent_id` | string | Narrow the list to skills assigned to a specific agent |
 
 **Response:** `200 OK`
 
@@ -77,6 +82,14 @@ GET /api/v1/skills?workspace_id={workspaceId}
 | `featured` | boolean | Whether skill is featured |
 | `pricing_tier` | string | Pricing tier |
 | `tool_count` | integer? | Number of tools provided |
+| `vendor` | string? | Vendor name |
+| `homepage` | string? | Homepage URL |
+| `spdx_license` | string? | SPDX license identifier |
+| `runtime` | string | Skill runtime |
+| `maturity` | string | `OFFICIAL`, `CURATED`, `COMMUNITY`, or `EXPERIMENTAL` |
+| `scan_status` | string | Security scan status |
+| `description_quality` | string? | Description quality rating |
+| `installed_on` | array? | Per-agent install metadata (agent + crew info); always populated |
 
 ### Get Skill
 
@@ -120,12 +133,13 @@ Import a skill from a URL (GitHub raw content) or raw SKILL.md content.
 
 **Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
 
-**Request Body:** Provide exactly one of `url` or `content`.
+**Request Body:** Provide exactly one of `url` or `content`. (`internal/api/skills.go:351`)
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `url` | string | Conditional | URL to fetch SKILL.md from |
 | `content` | string | Conditional | Raw SKILL.md content |
+| `allow_unsafe_license` | boolean | No | Opt-in to import skills whose SPDX license is flagged as unsafe (default `false`) |
 
 ```json
 {
@@ -149,6 +163,29 @@ URLs are validated against SSRF attacks (private IP ranges are blocked).
 |---|---|
 | `400` | Invalid JSON, no url/content, both provided, invalid URL, parse error |
 | `403` | Insufficient role |
+
+---
+
+### Delete Skill
+
+```
+DELETE /api/v1/workspaces/{workspaceId}/skills/{skillId}
+```
+
+Permanently deletes a non-bundled skill (`internal/api/skills.go:519`).
+
+**Auth:** `OWNER` or `ADMIN` role (`canRole(role, "manage")`)
+
+**Response:** `200 OK`
+
+```json
+{ "deleted": true, "skill_id": "skill_abc" }
+```
+
+| Status | Condition |
+|---|---|
+| `403` | Insufficient role, or attempt to delete a `BUNDLED` skill (re-seeded on server start) |
+| `404` | Skill not found |
 
 ---
 
