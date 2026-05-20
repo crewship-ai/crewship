@@ -105,7 +105,7 @@ spec:
 
 ## Apply modes
 
-```
+```bash
 crewship apply --file foo.yaml                # ApplyUpsert (default): create/update/delete to match
 crewship apply --file foo.yaml --strict       # Fail if any slug already exists
 crewship apply --file foo.yaml --replace --yes # Destructive: delete existing, recreate fresh
@@ -115,7 +115,7 @@ crewship apply --dir ./manifests/             # Walk a directory; apply every YA
 
 ## Round-trip via export
 
-```
+```bash
 crewship export workspace                     # everything in the workspace (multi-doc YAML)
 crewship export workspace --split-dir ./out/  # one file per kind
 crewship export crew uo-outlands              # the crew + everything labelled `crew: uo-outlands`

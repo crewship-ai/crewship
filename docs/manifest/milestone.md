@@ -94,7 +94,7 @@ The `Project` and `Milestone` documents may live in the same multi-doc YAML file
 
 ## CLI reference
 
-```
+```bash
 crewship milestone list --project <project-slug>   # nested list
 crewship milestone get <milestone-id>              # GET /api/v1/milestones/{id}
 crewship milestone create -f milestone.yaml        # POST /api/v1/projects/{projectId}/milestones

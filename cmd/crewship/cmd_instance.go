@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"net/url"
 
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/spf13/cobra"
@@ -111,7 +112,7 @@ var instanceSettingsGetCmd = &cobra.Command{
 		}
 
 		client := newAPIClient()
-		resp, err := client.Get("/api/v1/instance/settings/" + key)
+		resp, err := client.Get("/api/v1/instance/settings/" + url.PathEscape(key))
 		if err != nil {
 			return err
 		}
@@ -165,7 +166,7 @@ rather than reading the value back.`,
 		client := newAPIClient()
 		// cli.Client has no PUT helper; fall through to Do() which all
 		// the other verbs (Get/Post/Patch/Delete) wrap.
-		resp, err := client.Do("PUT", "/api/v1/instance/settings/"+key, body)
+		resp, err := client.Do("PUT", "/api/v1/instance/settings/"+url.PathEscape(key), body)
 		if err != nil {
 			return err
 		}
@@ -212,7 +213,7 @@ on the next restart.`,
 		}
 
 		client := newAPIClient()
-		resp, err := client.Delete("/api/v1/instance/settings/" + key)
+		resp, err := client.Delete("/api/v1/instance/settings/" + url.PathEscape(key))
 		if err != nil {
 			return err
 		}

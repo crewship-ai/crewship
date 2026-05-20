@@ -137,7 +137,7 @@ Multiple templates may be declared in one file; each is applied independently. T
 
 ## CLI reference
 
-```
+```bash
 crewship workflow list                          # GET /api/v1/workflow-templates
 crewship workflow get <slug>                    # GET /api/v1/workflow-templates/{id}, slug→id resolved
 crewship workflow create -f workflow.yaml       # POST /api/v1/workflow-templates

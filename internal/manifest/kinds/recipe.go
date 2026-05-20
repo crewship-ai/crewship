@@ -133,7 +133,7 @@ func (d *RecipeDocument) Plan(ctx context.Context, c internalapi.Client, remote 
 	if d.Spec.Install {
 		if remote != nil && remote.Installed {
 			return []internalapi.PlanItem{{
-				Kind:        "recipe",
+				Kind:        "Recipe",
 				Slug:        d.Metadata.Slug,
 				Action:      internalapi.ActionUnchanged,
 				Description: fmt.Sprintf("recipe %q is already installed", d.Metadata.Slug),
@@ -142,7 +142,7 @@ func (d *RecipeDocument) Plan(ctx context.Context, c internalapi.Client, remote 
 		body := d.toInstallBody()
 		slug := d.Metadata.Slug
 		return []internalapi.PlanItem{{
-			Kind:        "recipe",
+			Kind:        "Recipe",
 			Slug:        slug,
 			Action:      internalapi.ActionCreate,
 			Description: fmt.Sprintf("install recipe %q", slug),
@@ -161,14 +161,14 @@ func (d *RecipeDocument) Plan(ctx context.Context, c internalapi.Client, remote 
 	// time of writing, so the planner records intent and warns.
 	if remote != nil && remote.Installed {
 		return []internalapi.PlanItem{{
-			Kind:        "recipe",
+			Kind:        "Recipe",
 			Slug:        d.Metadata.Slug,
 			Action:      internalapi.ActionUnchanged,
 			Description: fmt.Sprintf("recipe %q: %s", d.Metadata.Slug, uninstallWarning),
 		}}, nil
 	}
 	return []internalapi.PlanItem{{
-		Kind:        "recipe",
+		Kind:        "Recipe",
 		Slug:        d.Metadata.Slug,
 		Action:      internalapi.ActionUnchanged,
 		Description: fmt.Sprintf("recipe %q is not installed", d.Metadata.Slug),

@@ -68,7 +68,7 @@ spec:
 [`github.com/robfig/cron/v3`](https://pkg.go.dev/github.com/robfig/cron/v3),
 which mirrors the dialect of crontab(5):
 
-```
+```text
 ┌───────────── minute        (0-59)
 │ ┌───────────── hour          (0-23)
 │ │ ┌───────────── day of month (1-31)
@@ -240,7 +240,7 @@ a brand-new workspace.
 
 The endpoint is:
 
-```
+```text
 POST   /api/v1/recurring-issues          Create
 GET    /api/v1/recurring-issues          List (workspace-scoped)
 PATCH  /api/v1/recurring-issues/{id}     Update
