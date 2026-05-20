@@ -203,21 +203,35 @@ Pavel explicitly requested: "natvrdo to nastav a tečka — zamysli se nad dalš
 
 **PR-Z now has 7 items, not 8.** Renumbering avoided to preserve cross-references in this PRD; Z.6 stays as voided placeholder.
 
-### Z.7 — Unify `learned-rules-*.md`, `learned-*.md` into single `lessons.md`
+### Z.7 — Introduce unified `lessons.md` writer for kind-discriminated entries (lighter scope)
 
-**Where:** `internal/consolidate/skill_promote.go` writes `learned-rules-*.md`; existing flows reference `learned-*.md` inconsistently. F4.4 PRD would add a third `antipatterns-*.md`.
-**Why:** Three files for the same concept (agent-extracted insights). One source of truth, kind-discriminated.
-**Action:** Migrate existing learned files to single `lessons.md` per agent with markdown frontmatter:
-```yaml
----
-entries:
-  - id: ent_xxx
-    kind: positive | negative | neutral
-    captured_at: ...
-    source: skill_promote | negative_learning | manual
----
-```
-Add migration step in PR-Z that reads existing learned files and converts. F4.4 writes to this unified file with `kind: negative`.
+**Verification finding:** PR-Z planning assumed three fragmented files
+(`learned-rules-*.md` + `learned-*.md` + `antipatterns-*.md`).
+Actually only **one** format exists today: `learned-YYYY-MM-DD.md`
+(daily, written by `internal/consolidate/consolidator.go:532` and
+mirrored by `approve.go:179`). The "third file" `antipatterns-*.md` was
+a *future* F4.4 introduction. So Z.7 is about pre-designing the unified
+schema before F4.4 ships and creates the fragmentation problem.
+
+**Action (revised during PR-Z implementation):**
+- In PR-Z (this PR): introduce `internal/consolidate/lesson_writer.go`
+  exposing `WriteLesson(ctx, agentMemoryDir, entry)` that appends to a
+  single per-agent `lessons.md` file with frontmatter `kind:
+  positive | negative | neutral`, `captured_at`, `source`, `id`.
+  Unit tests cover schema + idempotency + cap-aware append.
+- In PR-C (F4.4): the negative-learning evaluator writes via this
+  writer. F4.4 is the first real consumer; landing the writer in PR-Z
+  means PR-C imports a stable primitive instead of inventing one.
+- In PR-C (also): consolidator + approve.go switch from
+  `learned-YYYY-MM-DD.md` to `lessons.md` via the same writer.
+  Migration step (read existing daily files, fold into `lessons.md`)
+  ships alongside the call-site swap so the cutover happens in one
+  reviewable change. PR-Z deliberately leaves existing flow untouched
+  to preserve "no functional regression".
+
+**Rationale for split:** Same as Z.3 — moving consumers and writer in
+one PR (instead of two halves) keeps each PR cleanly reviewable and
+avoids a half-migrated intermediate state on the trunk.
 
 ### Z.8 — Remove Anthropic `memory_20250818` shim placeholder
 
