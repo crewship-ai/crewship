@@ -133,13 +133,12 @@ func (o *Orchestrator) buildMemoryContext(ctx context.Context, req AgentRunReque
 		b.WriteString(pinsBlock)
 	}
 	b.WriteString(buildMemoryInstructions(today))
-	// Mid-session memory tools — CLI-agnostic HTTP surface the
-	// agent calls via curl. Always appended (no MemoryEnabled
-	// branch needed; the buildMemoryContext caller already gates
-	// on MemoryEnabled). Cached implicitly because the function
-	// returns a constant string.
-	b.WriteString("\n\n")
-	b.WriteString(buildMemoryToolsBlock())
+	// PR-Z Z.1: the curl-based [MEMORY TOOLS] block that used to be
+	// appended here is gone. F1 in PR-A wires native function-calling
+	// tools per CLI adapter (memory.read/write/search/append_daily)
+	// instead of teaching the model to construct HTTP requests. Until
+	// PR-A merges, mid-session memory access degrades to the boot
+	// snapshot only — this is the documented hard-reset window.
 	// Agent-curated nudge + cost awareness — two small blocks that
 	// only fire when there's something to say. Both draw from the
 	// journal / paymaster rollups and are bounded in size so they
@@ -413,80 +412,6 @@ func buildMemoryInstructions(today string) string {
 	return rendered
 }
 
-// buildMemoryToolsBlock renders the tool-surface description the agent
-// uses to call memory mid-session (PR #3 step 4). Separate from the
-// generic instructions block so tests asserting "[MEMORY INSTRUCTIONS]"
-// ordering keep passing. The block is appended after the instructions.
-//
-// Design choices:
-//
-//   - Bash-callable HTTP surface, not a native CLI tool. Each CLI
-//     adapter (Claude Code, Codex, Cursor, Droid, Gemini, OpenCode)
-//     has its own native tool API but all six can invoke curl. A
-//     CLI-agnostic prompt block ships value today without per-adapter
-//     plumbing. Native tool integration lives in a separate future
-//     iteration that wraps these endpoints in each adapter's tool
-//     schema.
-//
-//   - Hard-codes 127.0.0.1:9119 (sidecar listen address). Same value
-//     exec_env.go puts in HTTP_PROXY; same value crewship-sidecar's
-//     --addr flag defaults to. A future env var could replace the
-//     literal but the discoverability win of "the agent sees the
-//     real port" outweighs the abstraction.
-//
-//   - Examples use plain curl + jq so the agent can copy-paste. The
-//     -s flag silences progress; agents adding their own | jq don't
-//     have to filter curl's status text.
-//
-//   - Boot snapshot semantics: the [AGENT MEMORY] / [CREW SHARED
-//     MEMORY] / [WORKSPACE MEMORY] / [PINS] blocks are still
-//     injected at session start. The tool surface is for mid-session
-//     recall when the snapshot doesn't have what the agent needs.
-func buildMemoryToolsBlock() string {
-	return `[MEMORY TOOLS]
-You can call memory operations mid-session via the sidecar HTTP API
-at http://127.0.0.1:9119. The boot context already injects your
-most relevant memory at session start; use these tools when you
-need to recall something specific not in the snapshot, or to save
-a fact you don't want to lose.
-
-memory_search — keyword + semantic recall across memory tiers:
-  curl -s -X POST http://127.0.0.1:9119/memory/search \
-    -H 'Content-Type: application/json' \
-    -d '{"query":"<your query>","scope":"both","limit":10}'
-  scope: "agent" | "crew" | "both". Returns ranked snippets with
-  source tags so you know which tier the hit came from.
-  Add "hybrid":true to fuse FTS markdown hits with episodic
-  (journal-entry) vector recall via RRF — useful when your query
-  paraphrases something the markdown doesn't lexically contain.
-  When hybrid=true the X-Memory-Hybrid-Fallback response header
-  signals if the cross-corpus path degraded (e.g.
-  "ipc_not_configured" means you got FTS-only).
-
-memory_read — fetch full content of a specific memory file:
-  curl -s 'http://127.0.0.1:9119/memory/read?file=AGENT.md&scope=agent'
-  Use when search hits a path but you want the whole document.
-  Returns 404 if the file doesn't exist; that's not an error,
-  just means it hasn't been written yet.
-
-memory_write — persist a fact or session note:
-  curl -s -X POST http://127.0.0.1:9119/memory/write \
-    -H 'Content-Type: application/json' \
-    -d '{"file":"AGENT.md","content":"<your content>"}'
-  Files: AGENT.md (long-term), daily/YYYY-MM-DD.md (session log),
-  pins.md (operator-curated, append-only).
-  Returns 422 if a credential pattern is detected, if the file
-  exceeds its byte cap, or if a citation in your content points at
-  a file/line that doesn't exist. Read the rejection envelope to
-  fix and retry.
-
-When to use each:
-  - Search FIRST before writing — avoid duplicating an existing fact.
-  - Read when you need the whole file, not a snippet.
-  - Write SHORT, FACTUAL entries. Memory has byte caps; long-form
-    notes belong in daily/, evergreen claims belong in AGENT.md.
-[END MEMORY TOOLS]`
-}
 
 // renderMemoryInstructions formats the template. Kept separate from the
 // cached accessor so tests can exercise the raw template when needed.
@@ -513,7 +438,8 @@ CREW SHARED MEMORY:
 - CREW.md: crew-level decisions, conventions, and shared context (Lead maintains).
 - /crew/shared/.memory/daily/{date}.md: crew daily log.
 - /crew/shared/.memory/topics/*.md: domain-specific crew knowledge.
-- Search crew memory: curl $SIDECAR/memory/search with {"scope":"crew"} or {"scope":"both"}.
+- The boot snapshot above already includes the relevant crew memory tier;
+  mid-session recall via native memory tools lands in PR-A (F1).
 - If you are the Lead: write important crew decisions to /crew/shared/.memory/CREW.md.
 - If you are an Agent: read crew memory for context. Write personal notes to YOUR agent memory.
 - Do not duplicate facts across agent and crew memory.
