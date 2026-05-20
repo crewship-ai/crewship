@@ -81,6 +81,23 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 
 	containerName := p.CrewContainerName(team.Slug)
 
+	// Compute the image we WANT to run, mirroring the
+	// CachedImage > Image > default chain used at create time
+	// below. Lifted earlier so the existing-container loop can
+	// notice when the manifest has been provisioned to a new
+	// image tag (post-feature-add rebuild, for example) and
+	// rebuild the container instead of silently reusing the
+	// stale one. Pre-fix the loop short-circuited on State=running
+	// without checking Config.Image, so the operator had to
+	// `docker rm -f <name>` by hand after every devcontainer edit.
+	desiredImage := p.cfg.RuntimeImage
+	if team.Image != "" {
+		desiredImage = team.Image
+	}
+	if team.CachedImage != "" {
+		desiredImage = team.CachedImage
+	}
+
 	p.logger.Debug("listing containers")
 	// Check if container already exists
 	containers, err := p.client.ContainerList(ctx, container.ListOptions{All: true})
@@ -95,6 +112,22 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 				inspect, inspErr := p.client.ContainerInspect(ctx, c.ID)
 				if inspErr != nil {
 					return "", fmt.Errorf("inspect existing container %s: %w", containerName, inspErr)
+				}
+				// Image-drift check before the mount checks: if a
+				// re-provision produced a new image tag, the running
+				// container is stale by definition (its filesystem
+				// reflects the OLD provisioned image). Tear it down
+				// and fall through to create-new with the new tag.
+				if inspect.Config != nil && desiredImage != "" && inspect.Config.Image != desiredImage {
+					p.logger.Info("recreating container (image drift)",
+						"container", containerName,
+						"running_image", inspect.Config.Image,
+						"desired_image", desiredImage,
+					)
+					timeout := 10
+					_ = p.client.ContainerStop(ctx, c.ID, container.StopOptions{Timeout: &timeout})
+					_ = p.client.ContainerRemove(ctx, c.ID, container.RemoveOptions{Force: true})
+					break // fall through to create new container
 				}
 				// Check required mounts: /crew, /home/agent (volume), /opt/crew-tools (volume).
 				requiredMounts := map[string]bool{"/crew": false, "/home/agent": false, "/opt/crew-tools": false}
@@ -187,14 +220,11 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 		cpus = 2.0
 	}
 
-	// Image selection chain: CachedImage > Image > default RuntimeImage
-	runtimeImage := p.cfg.RuntimeImage
-	if team.Image != "" {
-		runtimeImage = team.Image
-	}
-	if team.CachedImage != "" {
-		runtimeImage = team.CachedImage
-	}
+	// Image selection chain was already resolved into desiredImage
+	// at the top of EnsureCrewRuntime so the existing-container
+	// loop could detect drift. Alias here keeps the create-path
+	// reads readable without recomputing.
+	runtimeImage := desiredImage
 
 	p.logger.Debug("ensuring image", "image", runtimeImage)
 	if err := p.ensureImage(ctx, runtimeImage); err != nil {
