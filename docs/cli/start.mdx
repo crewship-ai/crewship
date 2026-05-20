@@ -41,6 +41,12 @@ crewship start [flags]
    running agents.
 8. **HTTP server starts.** Binds `0.0.0.0:8080` by default. WebSocket
    on the same port at `/ws`. IPC socket at `/tmp/crewship.sock`.
+9. **First-run welcome.** If post-migration the `users` table is empty
+   AND stdout is a TTY, prints a one-screen banner pointing at the
+   browser onboarding wizard (PR #441). Suppressed on non-TTY so
+   systemd journal / log scrapes stay clean. Query errors warn-and-
+   continue rather than fail the start — a stale or half-migrated
+   DB is already surfaced via the migration log.
 
 Boot typically takes 1–3 seconds on a warm machine; first-ever start
 (empty DB, full migration sweep) takes 5–10 seconds.
