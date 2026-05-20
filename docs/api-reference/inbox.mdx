@@ -1,0 +1,161 @@
+---
+title: "Inbox"
+description: "Unified human-in-the-loop inbox — list, count, and transition items between unread / read / resolved. Backed by inbox_items (migration v85)."
+icon: "inbox"
+---
+
+# Inbox
+
+The inbox is the unified human-in-the-loop surface for the workspace. Rows are written by source-of-truth handlers (`waitpoint create`, `escalation create`, `run-failure terminal`, generic agent messages); these three endpoints are the **read + state-flip surface** the UI consumes — no inserts. For the source endpoints that create inbox items (and the conflict rules about how items get resolved), see the [Inbox guide](/guides/inbox).
+
+All endpoints require an authenticated session and a workspace context.
+
+## Visibility model
+
+Every query restricts to:
+
+```
+workspace_id = <current workspace> AND (
+   (target_user_id IS NULL AND target_role IS NULL)   -- workspace-wide
+   OR target_user_id = <session user>                 -- addressed to me
+   OR target_role    = <my workspace role>            -- addressed to my role (OWNER, ADMIN, ...)
+)
+```
+
+An item addressed to OWNER never appears for a MEMBER, even if both belong to the same workspace. The visibility predicate is identical across List / UnreadCount / PatchState — a cross-workspace or cross-target id returns `404`, not a silent no-op, so the surface can't be probed for which items exist.
+
+## Item shape
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | string (CUID) | |
+| `workspace_id` | string | Always the current workspace. |
+| `kind` | string | `waitpoint`, `escalation`, `failed_run`, `message` (extensible). |
+| `source_id` | string | Source row id — e.g. waitpoint token, escalation id, pipeline run id. |
+| `target_user_id` | string \| omitted | Set when addressed to a specific user. |
+| `target_role` | string \| omitted | Set when addressed to a workspace role. |
+| `title` | string | Display title. |
+| `body_md` | string \| omitted | Markdown body for the detail panel. |
+| `sender_type` | string \| omitted | `user` or `agent`. |
+| `sender_id` | string \| omitted | |
+| `sender_name` | string \| omitted | Pre-joined display name. |
+| `state` | `"unread"` \| `"read"` \| `"resolved"` | |
+| `priority` | string | `low` / `normal` / `high` / `urgent`. |
+| `blocking` | bool | When `true`, the source flow is paused until the item is resolved. |
+| `payload` | object \| omitted | Parsed JSON — inlined so the UI doesn't need a second `JSON.parse`. |
+| `read_at` | RFC3339 \| omitted | |
+| `resolved_at` | RFC3339 \| omitted | |
+| `resolved_by_user_id` | string \| omitted | |
+| `resolved_action` | string \| omitted | `approved`, `rejected`, `retried`, `cancelled` — what the human did. |
+| `created_at` | RFC3339 | |
+| `updated_at` | RFC3339 | |
+
+## `GET /api/v1/inbox`
+
+Paginated, newest-first list. The UI calls this on first load and after every WS `inbox.updated` event.
+
+| Query param | Type | Default | Notes |
+|---|---|---|---|
+| `state` | `unread` \| `read` \| `resolved` \| `all` | `all` | Linear-Triage default — resolved items stay visible-but-dimmed. Invalid value → `400 invalid state`. |
+| `kind` | string | (unset) | Narrows by item type. |
+| `limit` | int | `100` | Capped at `500`. |
+
+The response inlines both row count and unread count so the bell badge renders from the same fetch (no second round-trip on every poll):
+
+```json
+{
+  "rows": [
+    {
+      "id": "ibx_01HVZ...",
+      "workspace_id": "ws_01HV...",
+      "kind": "waitpoint",
+      "source_id": "wp_tok_abc",
+      "target_role": "OWNER",
+      "title": "Review production deploy",
+      "body_md": "PR #128 ready for production roll-out…",
+      "sender_type": "agent",
+      "sender_id": "ag_01HVY...",
+      "sender_name": "Daniel",
+      "state": "unread",
+      "priority": "high",
+      "blocking": true,
+      "payload": { "deploy_target": "prod-us-east-1" },
+      "created_at": "2026-05-20T08:14:22Z",
+      "updated_at": "2026-05-20T08:14:22Z"
+    }
+  ],
+  "count": 1,
+  "unread_count": 7
+}
+```
+
+## `GET /api/v1/inbox/count`
+
+Bell-badge endpoint. Same visibility predicate as List, cheaper payload — no JSON parse, no payload column read.
+
+```json
+{ "unread_count": 7 }
+```
+
+## `PATCH /api/v1/inbox/{id}`
+
+Flip an item's state. The body is JSON:
+
+```json
+{
+  "state": "resolved",
+  "resolved_action": "approved"
+}
+```
+
+| Field | Type | Notes |
+|---|---|---|
+| `state` | `"unread"` \| `"read"` \| `"resolved"` | Required. Invalid → `400 state must be unread\|read\|resolved`. |
+| `resolved_action` | string | Optional. Recorded on `resolved` transitions so the audit trail captures *what* the user did, not just that they did something. Conventional values: `approved`, `rejected`, `retried`, `cancelled`. |
+
+Returns `200`:
+
+```json
+{ "id": "ibx_01HVZ...", "state": "resolved" }
+```
+
+### Source-managed kinds — `409 Conflict`
+
+For `kind` in `{ waitpoint, escalation, failed_run }`, the inbox row is a mirror of an authoritative source row (the waitpoint token, the escalation row, the failed pipeline run). PATCH only supports `state: "read"` for these — `unread` and `resolved` would desync the inbox row from the source, because the user expects the flip to *also* approve the waitpoint / close the escalation / retry the run, and the inbox PATCH doesn't do that.
+
+The non-read transition returns `409` with a hint at the right endpoint:
+
+```json
+{
+  "error": "use the source endpoint for this kind (e.g. /pipelines/waitpoints/{token}/approve) — inbox PATCH only supports 'read' for source-managed items",
+  "kind": "waitpoint"
+}
+```
+
+Generic kinds (`message`) flip freely between all three states.
+
+### State transitions
+
+- **→ read** sets `read_at` and `read_by_user_id` (both `COALESCE`'d so re-reading doesn't move the timestamp).
+- **→ unread** clears `read_at`, `read_by_user_id`, `resolved_at`, `resolved_by_user_id`, `resolved_action`.
+- **→ resolved** sets `resolved_at`, `resolved_by_user_id`, `resolved_action` (and overwrites whatever's currently set, in case the user resolved with a different action).
+
+## WebSocket event
+
+Every successful PATCH broadcasts on the workspace channel:
+
+```json
+{
+  "type": "inbox.updated",
+  "data": { "id": "ibx_01HVZ...", "state": "resolved" }
+}
+```
+
+The frontend re-fetches list + count on this event so every connected client sees the same state without polling.
+
+## See also
+
+- [Inbox guide](/guides/inbox) — the user-facing UI on top of these endpoints, and the source-handler conflict rules.
+- [Notifications](/api-reference/notifications) — the read-only activity feed (different table, different fan-out path).
+- [Approvals](/api-reference/approvals) — waitpoint approve/reject endpoints invoked when an inbox item's source is a waitpoint.
+- [WebSocket](/api-reference/websocket) — channel + event format for `inbox.updated`.

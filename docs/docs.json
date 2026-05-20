@@ -226,6 +226,7 @@
               "api-reference/conversations",
               "api-reference/preferences",
               "api-reference/notifications",
+              "api-reference/inbox",
               "api-reference/webhooks",
               "api-reference/websocket",
               "api-reference/admin",
