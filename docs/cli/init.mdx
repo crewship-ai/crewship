@@ -1,0 +1,65 @@
+---
+title: "Init"
+description: "Bootstrap the first admin user on a fresh Crewship instance and print a CLI token."
+icon: "sparkles"
+---
+
+# crewship init
+
+Create the very first admin user on a fresh Crewship instance. Only works against an empty database — once a user exists, the bootstrap endpoint refuses to run again. The command returns a CLI token so you can authenticate immediately without going through the web UI.
+
+```bash
+crewship init --email <email> --name "<full name>" [flags]
+```
+
+This is the unauthenticated counterpart to `crewship setup`. Typical order on a new install:
+
+1. `crewship init` — creates the OWNER admin and prints a token.
+2. `crewship login --token <printed-token>` — saves the token to `~/.crewship/cli-config.yaml`.
+3. `crewship setup` — deploys a crew template and your first adapter.
+
+## Flags
+
+| Flag | Default | Purpose |
+| --- | --- | --- |
+| `--server <url>` | `http://localhost:8080` | URL of the Crewship server to initialise. |
+| `--email <email>` | (required) | Admin email address. Becomes the OWNER user. |
+| `--name "<full name>"` | (required) | Admin full name (display name in the UI). |
+| `--password <pw>` | (prompted, hidden input) | Admin password. Minimum 8 characters. When omitted, the command reads it from the terminal without echo. |
+
+`--email` and `--name` are hard-required. `--password` is prompted when missing; passing it on the command line is convenient for scripted installs but leaks into shell history — prefer the prompt or pipe via `--password "$(cat secret.txt)"`.
+
+## Example
+
+```bash
+crewship init \
+  --server http://localhost:8080 \
+  --email admin@acme-engineering.com \
+  --name "Pavel Srba"
+# Password (min 8 chars): ********
+# ✓ Crewship initialized!
+#
+#   Admin:     admin@acme-engineering.com
+#   Workspace: w_abc123
+#   CLI Token: crewship_cli_xyz789…
+#
+# To start using the CLI:
+#
+#   crewship login --server http://localhost:8080 --token crewship_cli_xyz789…
+```
+
+Calls `POST /api/v1/bootstrap` and prints the returned `user_id`, `workspace_id`, and `cli_token`. The printed `crewship login --token …` line is ready to copy-paste.
+
+## Common errors
+
+- **`--email is required`** / **`--name is required`** — both are mandatory.
+- **`password must be at least 8 characters`** — server-side rule, enforced client-side first so you don't waste a round-trip.
+- **`bootstrap request failed: HTTP 403: Already initialized — …`** — the database already has a user. `init` is a one-shot. Use `crewship login` and (if you've lost UI access) `crewship admin reset-password` instead.
+- **`bootstrap request failed (is the server running at http://localhost:8080?)`** — the server didn't answer on `--server`. Check `crewship start` is running or pass the right URL.
+
+## See also
+
+- [`crewship login`](/cli/login) — log the saved token in for subsequent commands.
+- [`crewship setup`](/cli/setup) — deploy the first crew template after init.
+- [`crewship seed`](/cli/seed) — for dev/demo data, `seed` does its own bootstrap on an empty DB.
+- [Admin CLI](/guides/admin-cli) — `crewship admin reset-password` for the locked-out case.

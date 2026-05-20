@@ -1,0 +1,48 @@
+---
+title: "Completion"
+description: "Generate shell completion scripts for bash, zsh, fish, or powershell."
+icon: "terminal"
+---
+
+# Completion
+
+`cmd/crewship/cmd_completion.go` is the standard Cobra-generated shell-completion command. Emits a completion script to stdout for the requested shell. No flags — just a single positional arg.
+
+## `crewship completion <shell>`
+
+Valid args: `bash`, `zsh`, `fish`, `powershell`.
+
+### Bash
+
+```bash
+source <(crewship completion bash)
+# Persist:
+crewship completion bash > /etc/bash_completion.d/crewship
+```
+
+### Zsh
+
+```zsh
+source <(crewship completion zsh)
+# Persist:
+crewship completion zsh > "${fpath[1]}/_crewship"
+```
+
+### Fish
+
+```fish
+crewship completion fish | source
+# Persist:
+crewship completion fish > ~/.config/fish/completions/crewship.fish
+```
+
+### PowerShell
+
+```powershell
+crewship completion powershell | Out-String | Invoke-Expression
+```
+
+## See also
+
+- [`crewship shell`](/cli/shell) — the in-CLI REPL (different concept — no shell-level completion).
+- [`crewship login`](/cli/login) — first command to set up before completions are useful.

@@ -1,0 +1,186 @@
+---
+title: "MCP"
+description: "MCP registry, audit log, and raw mcp_config_json editing for crews and agents."
+icon: "network"
+---
+
+# crewship mcp
+
+`mcp` is the top-level MCP root: audit log, public registry, and the raw `mcp_config_json` blob editors that sit on crews and agents. Use `crewship integration` for the higher-level CRUD (bindings, per-tool toggles, credential plumbing); `mcp` is what you reach for when you need the raw JSON or want to inspect calls after the fact. Defined in `cmd/crewship/cmd_mcp.go`.
+
+```bash
+crewship mcp <subcommand> [flags]
+crewship crew mcp <crew-slug> [flags]
+crewship agent mcp <agent-slug> [flags]
+```
+
+Auth: every subcommand requires `crewship login`. Registry browse/search don't require a workspace (registry data is workspace-agnostic and the CLI strips the `workspace_id` header before sending). Everything else does.
+
+## Subcommands
+
+### `mcp` root
+
+| Command | Purpose |
+| --- | --- |
+| `mcp audit list` | List recent MCP tool calls (audit log). Same data as the legacy `mcp-calls` alias. |
+| `mcp registry list` | List cached MCP registry entries (synced from the public feed). |
+| `mcp registry search <query>` | Search registry entries by name, description, or category. |
+| `mcp registry sync` | Trigger a manual sync (admin-only, 1h cooldown). |
+
+### Crew / agent JSON editing
+
+These live under `crewship crew` and `crewship agent`, registered from this file:
+
+| Command | Purpose |
+| --- | --- |
+| `crew mcp <crew-slug>` | Show, set, or clear the crew's `mcp_config_json`. |
+| `agent mcp <agent-slug>` | Show, set, or clear the agent's `mcp_config_json`. Supports `--resolved` for merged view. |
+
+## Flags
+
+### `mcp audit list`
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `--limit <n>` | `50` | Max calls to return. |
+| `--since <iso>` | (unset) | Only calls newer than this ISO-8601 timestamp. |
+
+Output is the raw JSON shape — pipe through `jq` for filtering (`jq '.[] | select(.status=="error")'`).
+
+### `mcp registry list`
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `--limit <n>` | `50` | Max entries to return (server caps at 200). |
+| `--trust-tier <enum>` | (unset) | `anthropic`, `crewship`, or `community`. |
+| `--featured` | `false` | Only show featured entries. |
+
+### `mcp registry search <query>`
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `--limit <n>` | `50` | Max results. |
+| `--trust-tier <enum>` | (unset) | `anthropic`, `crewship`, or `community`. |
+
+### `crew mcp <crew-slug>`
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `--set <json>` | (unset) | Replace the crew's MCP config with the inline JSON. Pass `''` to clear. |
+| `--set-file <path>` | (unset) | Replace from a file. Mutually exclusive with `--set`. |
+
+With neither flag, the command runs in GET mode: it pretty-prints the current config or says `no MCP config set`.
+
+### `agent mcp <agent-slug>`
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `--set <json>` | (unset) | Replace the agent's MCP config. Pass `''` to clear. |
+| `--set-file <path>` | (unset) | Replace from a file. Mutually exclusive with `--set`. |
+| `--resolved` | `false` | Print the effective merged config (crew + agent; agent keys win). Cannot be combined with `--set` / `--set-file`. |
+
+## JSON shape
+
+Both `crew mcp` and `agent mcp` validate the JSON before sending. It must contain an `mcpServers` object — anything else returns `JSON must contain a "mcpServers" object`. Inside, the standard MCP shape:
+
+```json
+{
+  "mcpServers": {
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": { "GITHUB_TOKEN": "${GITHUB_TOKEN}" }
+    },
+    "jira": {
+      "type": "http",
+      "url": "https://mcp.atlassian.com/jira",
+      "headers": { "Authorization": "Bearer ${JIRA_TOKEN}" }
+    }
+  }
+}
+```
+
+The CLI re-marshals into compact form before writing — the stored value is normalised JSON, not whatever whitespace you pasted.
+
+## Examples
+
+### Audit recent tool calls
+
+```bash
+crewship mcp audit list --limit 100
+crewship mcp audit list --since 2026-05-19T00:00:00Z | jq '.[] | select(.error != null)'
+```
+
+### Browse the registry
+
+```bash
+crewship mcp registry list --featured
+# NAME           DISPLAY            CATEGORY      TRANSPORT          TRUST       FEATURED  PACKAGE
+# github         GitHub             dev-tools     streamable-http    anthropic   yes       @modelcontextprotocol/server-github
+# linear         Linear             project-mgmt  streamable-http    crewship    yes       —
+# Total: 24
+```
+
+### Search the registry
+
+```bash
+crewship mcp registry search slack --trust-tier crewship
+crewship mcp registry search "calendar"
+```
+
+### Trigger a manual sync (admin)
+
+```bash
+crewship mcp registry sync
+# ✓ MCP registry sync triggered.
+```
+
+A 429 means someone synced recently — cooldown is 1 hour.
+
+### Show / set a crew's config
+
+```bash
+# Show
+crewship crew mcp acme-engineering
+
+# Set inline
+crewship crew mcp acme-engineering --set '{"mcpServers":{"github":{"command":"npx","args":["-y","@modelcontextprotocol/server-github"],"env":{"GITHUB_TOKEN":"${GITHUB_TOKEN}"}}}}'
+
+# Set from file
+crewship crew mcp acme-engineering --set-file .mcp.json
+
+# Clear
+crewship crew mcp acme-engineering --set ''
+```
+
+The success line tells you how many servers landed: `Crew acme-engineering: MCP config set (3 servers).`
+
+### Show / set an agent's config
+
+```bash
+# Show agent-only config
+crewship agent mcp daniel
+
+# Show effective merged config (crew base + agent overrides)
+crewship agent mcp daniel --resolved
+
+# Override one server on an agent
+crewship agent mcp daniel --set-file daniel-mcp.json
+```
+
+`--resolved` merges by `mcpServers.<name>` — agent keys win over crew keys with the same name, additive otherwise.
+
+## Common errors
+
+- **`invalid MCP JSON: ...`** — the value didn't parse as JSON.
+- **`JSON must contain a "mcpServers" object`** — top-level key missing.
+- **`--set and --set-file are mutually exclusive`** — pick one.
+- **`--resolved cannot be combined with --set or --set-file`** — `--resolved` is a read flag.
+- **`read file <path>: ...`** — `--set-file` couldn't open the path.
+
+## See also
+
+- [`crewship integration`](/cli/integration) — higher-level bindings, credentials, per-tool toggles.
+- [`crewship crew`](/cli/crew) — full crew CRUD; `crew mcp` is registered from here.
+- [`crewship agent`](/cli/agent) — full agent CRUD; `agent mcp` is registered from here.
+- [MCP Registry API](/api-reference/mcp/registry-list) — `GET /api/v1/mcp-registry`.

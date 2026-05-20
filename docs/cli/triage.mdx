@@ -1,0 +1,36 @@
+---
+title: "Triage"
+description: "Manage triage rules and run the triage processor over pending issues."
+icon: "filter"
+---
+
+# Triage
+
+`cmd/crewship/cmd_admin_extras.go` exposes the triage-rules surface: declarative classification rules the server can apply to pending issues in bulk.
+
+## `crewship triage list`
+
+`GET /api/v1/triage-rules`. JSON-shaped output by default; structured filters via `--filter`.
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--filter <expr>` | string | (unset) | gojq filter applied before output. |
+
+```bash
+crewship triage list
+crewship triage list --filter '.[] | select(.enabled)'
+```
+
+## `crewship triage process`
+
+`POST /api/v1/triage/process` with `{}`. Runs the processor: every enabled rule is applied to all pending issues. Returns whatever the server reports as the processed counts and per-rule outcomes.
+
+```bash
+crewship triage process
+crewship triage process --format yaml
+```
+
+## See also
+
+- [`crewship issue`](/cli/issue) — view the issues the triage processor acts on.
+- [`crewship label`](/cli/label) — labels are the most common rule action.

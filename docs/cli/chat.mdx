@@ -1,0 +1,104 @@
+---
+title: "Chat"
+description: "Inspect, attach to, and react inside chat sessions — the persistent thread behind every agent run."
+icon: "message-circle"
+---
+
+# crewship chat
+
+A chat session is the thread that backs every `crewship run` or `crewship ask`. The top-level `chat <chat-id>` command prints the whole transcript; the subcommands let you list recent chats per agent, upload attachments, and add emoji reactions. Defined in `cmd/crewship/cmd_chat.go`.
+
+```bash
+crewship chat <chat-id> [flags]
+crewship chat <subcommand> ...
+```
+
+Auth: every subcommand requires an authenticated session (`crewship login`) and a selected workspace. The transcript hits `GET /api/v1/chats/{id}/messages?limit=500` — the cap is server-side and not paged today.
+
+## Subcommands
+
+| Command | Purpose |
+| --- | --- |
+| `chat <chat-id>` | Print the full message history of one chat as a rendered transcript. |
+| `chat list <agent-slug-or-id>` | List recent chats for an agent (most-recent-first). |
+| `chat attach <chat-id> <path>` | Upload a file into the chat (lands under `/output/<agent-slug>/attachments/<chat-id>/` in the container). |
+| `chat react add <chat-id> <msg-id> <emoji>` | Add an emoji reaction to a single message. |
+| `chat react remove <chat-id> <msg-id> <emoji>` | Remove your reaction (`rm` / `delete` aliases). |
+| `chat react list <chat-id> <msg-id>` | List reactions with counts and whether the caller already reacted. |
+
+## Flags
+
+### `chat <chat-id>`
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `--since <duration>` | (unset) | Only show messages newer than this. Accepts `1h`, `24h`, an RFC 3339 timestamp. Filtering is client-side over the 500-row server response. |
+| `--markdown` | `false` | Force markdown ANSI styling (overrides config). |
+| `--no-markdown` | `false` | Disable markdown ANSI styling. |
+| `--filter <jq>` | (unset) | jq expression applied to the raw `[]message` JSON. Implies JSON output. |
+
+The transcript renders assistant / `model` messages through the markdown ANSI renderer; user and system messages stay plain. Each block carries a coloured `role · timestamp` header (yellow for user, green for assistant, dim for system).
+
+### `chat attach <chat-id> <path>`
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `--agent <slug-or-id>` | (auto) | Override the auto-resolved agent. By default the CLI walks `GET /api/v1/agents` and asks each agent for its chats until the chat id is found. |
+
+The upload is one multipart POST to `POST /api/v1/agents/{agentId}/chats/{chatId}/attachments`. The server caps the body at 25 MB; the CLI assembles the multipart body in memory rather than streaming because the bound is small.
+
+## Examples
+
+### Print a transcript
+
+```bash
+crewship chat c_abc123
+crewship chat c_abc123 --no-markdown
+crewship chat c_abc123 --format json | jq '.[] | {role, content}'
+crewship chat c_abc123 --since 24h
+```
+
+### List an agent's recent chats
+
+```bash
+crewship chat list daniel
+# ID            TITLE                                 STATUS    MSGS  STARTED            ORIGIN
+# c_abc123      Refactor the queue worker             active    14    2026-05-19 14:02   CLI
+# c_xyz789      Audit pass on auth middleware         done      6     2026-05-19 09:18   web
+```
+
+The `ORIGIN` column distinguishes chats spawned by `crewship run` / `crewship ask` (`CLI`) from the web UI — handy when grep-ing for terminal sessions to attach a file to.
+
+### Attach a file
+
+```bash
+crewship chat attach c_abc123 ./diagram.png
+crewship chat attach c_abc123 ./logs.tar.gz --agent daniel
+```
+
+Pass `--agent` when the auto-lookup is ambiguous (the chat lives on more than one agent in your visible set) or when you've already pre-resolved the slug.
+
+### React to a message
+
+```bash
+crewship chat react add c_abc123 msg_7a3b "👍"
+crewship chat react list c_abc123 msg_7a3b
+# EMOJI  COUNT  MINE
+# 👍     2      yes
+crewship chat react rm c_abc123 msg_7a3b "👍"
+```
+
+Server-side reactions are idempotent per `(chat, message, emoji, user)` — `add` and `remove` can be called blindly without first checking `list`.
+
+## Common errors
+
+- **`chat <id> not found in any agent's recent sessions`** — `chat attach` auto-lookup walked every visible agent and didn't find the chat. Pass `--agent` to short-circuit the search.
+- **`bad --since: ...`** — the value isn't a Go duration (`1h`, `24h`) or an RFC 3339 timestamp.
+- **`open <path>: no such file or directory`** — `chat attach` couldn't open the local file.
+
+## See also
+
+- [`crewship run`](/cli/run) — start an agent run (creates the chat).
+- [`crewship ask`](/cli/ask) — one-shot prompt (also creates a chat, tagged `origin=CLI`).
+- [`crewship session`](/cli/session) — browser session management, unrelated noun.
+- [Chats API](/api-reference/chats/list-messages) — the underlying endpoints.

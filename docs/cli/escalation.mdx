@@ -1,0 +1,59 @@
+---
+title: "Escalation"
+description: "List, resolve, and count crew escalations — when an agent or peer flags something for human attention."
+icon: "alert-triangle"
+---
+
+# Escalation
+
+`cmd/crewship/cmd_escalation.go` covers the three escalation verbs: per-crew listing, single-row resolution, and the workspace-wide pending-count aggregator used by dashboards and alerting.
+
+## `crewship escalation list`
+
+Lists escalations under one crew via `GET /api/v1/crews/{crewId}/escalations`. `--crew` is required — the server enforces crew-level auth, and listing across all crews would require N fan-out calls anyway.
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--crew <slug-or-id>` | string | (required) | Crew to list. Returns `--crew is required (crew slug or ID)` when missing. |
+| `--status <state>` | string | (unset) | `PENDING` or `RESOLVED`. Server-side `?status=`. |
+| `--limit <n>` | int | `0` | Cap rows returned **client-side** (0 = unbounded). Server has no `limit=` yet. |
+| `--since <window>` | string | (unset) | Client-side filter — `1h`, `24h`, `7d`, or RFC3339. |
+
+Table columns: `ID`, `FROM`, `REASON` (50-char truncated), `STATUS`, `CREATED`.
+
+```bash
+crewship escalation list --crew backend-team
+crewship escalation list --crew backend-team --status PENDING
+crewship escalation list --crew backend-team --since 7d --limit 20
+crewship escalation list --crew backend-team --format json | jq
+```
+
+## `crewship escalation resolve <id>`
+
+`PATCH /api/v1/escalations/{id}/resolve`. Optional notes land in the audit row.
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--resolution <text>` | string | (unset) | Free-form notes recorded with the resolve. |
+
+```bash
+crewship escalation resolve esc_abc
+crewship escalation resolve esc_abc --resolution "false alarm — rotation completed at 14:02"
+```
+
+Prints `Escalation <id> resolved.` on success.
+
+## `crewship escalation pending-count`
+
+Workspace-wide aggregate — backs dashboard tiles and alerting that just needs the total without per-crew fan-out. `GET /api/v1/escalations/pending-count` returns `{"count": N}`.
+
+```bash
+crewship escalation pending-count                   # prints "3"
+crewship escalation pending-count --format json     # {"count": 3}
+```
+
+## See also
+
+- [`crewship approvals`](/cli/approvals) — the related human-in-the-loop surface (Keeper denials, MCP gates).
+- [`crewship notify`](/cli/notify) — desktop notifications when escalations land.
+- [`crewship journal`](/cli/journal) — live event tail (escalations are journaled).

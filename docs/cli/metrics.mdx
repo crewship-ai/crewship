@@ -1,0 +1,88 @@
+---
+title: "Metrics"
+description: "Mission performance summary (success rate, p50/p99 duration) or a metric timeseries over a window."
+icon: "chart-line"
+---
+
+# crewship metrics
+
+Fetch mission performance metrics or pull a metric timeseries. Without flags, returns the mission summary — success rate, p50/p99 durations, total runs over the last default window. With `--series <name>`, switches to a timeseries endpoint and returns time-bucketed points.
+
+```bash
+crewship metrics [flags]
+```
+
+Requires an authenticated session and a selected workspace (`requireAuthAndWorkspace`).
+
+The output is always structured JSON (or YAML with `--format yaml`). Pipe through `jq` or use `--filter` for ad-hoc shapes — there is no canonical table form for the records returned.
+
+## Flags
+
+| Flag | Default | Purpose |
+| --- | --- | --- |
+| `--series <name>` | `""` | Fetch a timeseries for the named metric instead of the mission summary. Routes to `/api/v1/metrics/timeseries`. |
+| `--range <window>` | `24h` | Window for `--series` — `1h`, `24h`, `7d` are the supported sugar values. |
+| `--filter <jq-expr>` | `""` | Pipe JSON output through `jq <expr>` (requires `jq` in `$PATH`). |
+
+The global `--format` flag (`table` / `json` / `yaml` / `ndjson` / `quiet`) is honoured. The default is indented JSON because the data here is structured records without a single canonical "table" shape.
+
+## Endpoints
+
+| Mode | Endpoint |
+| --- | --- |
+| Default | `GET /api/v1/mission-metrics` |
+| `--series <name>` | `GET /api/v1/metrics/timeseries?metric=<name>&range=<window>` |
+
+## Examples
+
+### Mission summary
+
+```bash
+crewship metrics
+# {
+#   "total_runs": 142,
+#   "success_rate": 0.93,
+#   "duration_p50_ms": 4280,
+#   "duration_p99_ms": 28150,
+#   "cost_usd_total": 2.84
+# }
+```
+
+### Active-runs timeseries over the last hour
+
+```bash
+crewship metrics --series active_runs --range 1h
+```
+
+### Week-long window
+
+```bash
+crewship metrics --series active_runs --range 7d
+```
+
+### Pull a single field via jq
+
+```bash
+crewship metrics --filter '.success_rate'
+```
+
+### YAML output
+
+```bash
+crewship metrics --format yaml
+```
+
+### Pipe to a chart
+
+```bash
+crewship metrics --series active_runs --range 24h --format json \
+  | jq -r '.points[] | "\(.ts) \(.value)"' \
+  | gnuplot -p -e "plot '<cat' using 1:2 with lines"
+```
+
+## See also
+
+- [`crewship paymaster`](/cli/paymaster) — cost-oriented view of the same underlying data.
+- [`crewship telemetry`](/cli/telemetry) — distributed-trace observability across crews.
+- [`crewship journal`](/cli/journal) — per-agent execution events behind the metrics aggregation.
+- [`crewship history`](/cli/agent) — individual run records that feed the success-rate and duration percentiles.

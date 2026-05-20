@@ -177,32 +177,163 @@
             ]
           },
           {
-            "group": "CLI",
-            "icon": "square-terminal",
+            "group": "Sessions & identity",
+            "icon": "user",
+            "expanded": false,
+            "pages": [
+              "cli/init",
+              "cli/setup",
+              "cli/session",
+              "cli/token",
+              "cli/me"
+            ]
+          },
+          {
+            "group": "Agents & conversations",
+            "icon": "message-circle",
+            "expanded": false,
             "pages": [
               "cli/agent",
+              "cli/ask",
+              "cli/chat",
+              "cli/run",
+              "cli/resume",
+              "cli/retry",
+              "cli/wait",
+              "cli/watch",
+              "cli/history",
+              "cli/recall",
+              "cli/recap",
+              "cli/inspect"
+            ]
+          },
+          {
+            "group": "Crews, projects & workspaces",
+            "icon": "users",
+            "expanded": false,
+            "pages": [
               "cli/crew",
+              "cli/project",
+              "cli/workspace"
+            ]
+          },
+          {
+            "group": "Missions & routines",
+            "icon": "workflow",
+            "expanded": false,
+            "pages": [
               "cli/mission",
-              "cli/routine",
+              "cli/routine"
+            ]
+          },
+          {
+            "group": "Issues & triage",
+            "icon": "list-checks",
+            "expanded": false,
+            "pages": [
               "cli/issue",
               "cli/label",
-              "cli/notification",
-              "cli/credential",
+              "cli/triage",
+              "cli/recurring",
+              "cli/saved-view",
+              "cli/escalation"
+            ]
+          },
+          {
+            "group": "Skills & integrations",
+            "icon": "plug",
+            "expanded": false,
+            "pages": [
               "cli/skill",
+              "cli/integration",
+              "cli/mcp",
+              "cli/mcp-calls"
+            ]
+          },
+          {
+            "group": "Inbox & notifications",
+            "icon": "inbox",
+            "expanded": false,
+            "pages": [
+              "cli/inbox",
+              "cli/notification",
+              "cli/notify"
+            ]
+          },
+          {
+            "group": "Memory & journal",
+            "icon": "brain",
+            "expanded": false,
+            "pages": [
               "cli/memory",
-              "cli/config",
-              "cli/backup",
-              "cli/system",
               "cli/journal",
-              "cli/paymaster",
+              "cli/audit"
+            ]
+          },
+          {
+            "group": "Observability",
+            "icon": "activity",
+            "expanded": false,
+            "pages": [
+              "cli/activity",
+              "cli/logs",
+              "cli/metrics",
+              "cli/presence"
+            ]
+          },
+          {
+            "group": "Cost & paymaster",
+            "icon": "credit-card",
+            "expanded": false,
+            "pages": [
+              "cli/cost",
+              "cli/paymaster"
+            ]
+          },
+          {
+            "group": "Approvals & hooks",
+            "icon": "shield-check",
+            "expanded": false,
+            "pages": [
               "cli/approvals",
-              "cli/checkpoint",
-              "cli/eval",
               "cli/hooks",
-              "cli/presence",
-              "cli/consolidate",
+              "cli/checkpoint"
+            ]
+          },
+          {
+            "group": "Configuration & system",
+            "icon": "settings",
+            "expanded": false,
+            "pages": [
+              "cli/config",
+              "cli/system",
+              "cli/backup",
               "cli/features",
-              "cli/runtimes"
+              "cli/runtimes",
+              "cli/eval",
+              "cli/consolidate",
+              "cli/credential",
+              "cli/seed"
+            ]
+          },
+          {
+            "group": "Utilities",
+            "icon": "wrench",
+            "expanded": false,
+            "pages": [
+              "cli/diff",
+              "cli/explain",
+              "cli/expose",
+              "cli/lint",
+              "cli/open",
+              "cli/plan",
+              "cli/prompt",
+              "cli/slash",
+              "cli/shell",
+              "cli/tui",
+              "cli/completion",
+              "cli/copy-prompt",
+              "cli/template"
             ]
           }
         ]
@@ -215,13 +346,19 @@
             "icon": "globe",
             "pages": [
               "api-reference/overview",
+              "api-reference/workspaces",
               "api-reference/crews",
               "api-reference/agents",
               "api-reference/runs",
               "api-reference/missions",
               "api-reference/issues",
+              "api-reference/milestones",
+              "api-reference/recurring-issues",
+              "api-reference/saved-views",
+              "api-reference/triage",
               "api-reference/credentials",
               "api-reference/skills",
+              "api-reference/recipes",
               "api-reference/integrations",
               "api-reference/conversations",
               "api-reference/preferences",

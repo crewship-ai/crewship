@@ -1,0 +1,151 @@
+---
+title: "Run"
+description: "Run an agent with a prompt, stream the response, optionally hop into an interactive REPL."
+icon: "play"
+---
+
+# crewship run
+
+`run` invokes a named agent and streams its response over WebSocket. Unlike `ask`, the agent slug is positional (no `default-agent` fallback) and the command supports interactive sessions, follow-ups on an existing chat, and shell-friendly streaming. Defined in `cmd/crewship/cmd_run.go`.
+
+```bash
+crewship run <agent-slug> [prompt] [flags]
+crewship run list
+```
+
+Each invocation creates a new chat by default (origin=`CLI`, so the web UI sidebar tags it). Pass `--chat <chat-id>` to continue an existing thread. Auth: `crewship login` plus workspace context. Both checks are skipped in `--dry-run` / `--estimate` offline modes.
+
+## Subcommands
+
+| Command | Purpose |
+| --- | --- |
+| `run <agent-slug> [prompt]` | Start (or continue) a streamed run. |
+| `run list` | List recent runs across every agent in the workspace (`GET /api/v1/runs`). |
+
+## Flags
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `-p`, `--prompt <text>` | (unset) | Prompt text, `@path` to read a file, or `@-` for stdin. |
+| `--interactive` | `false` | Drop into a REPL after the first prompt. Ctrl-D exits, Ctrl-C cancels the current turn. |
+| `--chat <chat-id>` | (unset) | Continue an existing chat instead of creating one. |
+| `--no-stream` | `false` | Wait for completion and print the final text only. |
+| `-q`, `--quiet` | `false` | Suppress `[agent: …]` / `[thinking]` / `[done]` stderr chatter. |
+| `--timeout <secs>` | `0` | HTTP timeout (`0` = unbounded). |
+| `--with-git-diff` | `false` | Append `git diff` as context. |
+| `--with-git-staged` | `false` | Append `git diff --staged`. |
+| `--with-git-log` | `false` | Append the last 20 commits. |
+| `--with-git-status` | `false` | Append `git status -s`. |
+| `--with-file <path>` | (unset) | Append file contents. Repeatable. |
+| `--with-cmd <shell>` | (unset) | Append the stdout of a shell command. Repeatable. |
+| `--paste` | `false` | Append the system clipboard (`pbpaste` / `wl-paste` / `xclip` / `xsel`). |
+| `--dry-run` | `false` | Print the assembled prompt and exit. No auth, no server. |
+| `--estimate` | `false` | Print token-count + cost estimate and exit. |
+| `--markdown` | `false` | Force markdown ANSI styling. |
+| `--no-markdown` | `false` | Disable markdown ANSI styling. |
+| `--save <path>` | (unset) | Tee the agent's text (no ANSI) to `path` via an atomic tempfile — committed on a clean `done`, discarded on error. |
+| `--plan` | `false` | Plan mode — step-by-step plan without executing tools. |
+| `--effort <level>` | (unset) | Reasoning effort: `minimal|low|medium|high|xhigh`. |
+| `--show-thinking` | `false` | Surface reasoning blocks on stdout (un-truncated). |
+
+When stdin is a pipe and a positional prompt is also given, the positional becomes the instruction and stdin is appended as context.
+
+## Examples
+
+### Run an agent
+
+```bash
+crewship run daniel "Create a REST API for the orders service"
+```
+
+### Read the prompt from a file
+
+```bash
+crewship run daniel --prompt @task.txt
+crewship run daniel --prompt @-          # stdin
+```
+
+### Continue an existing chat
+
+```bash
+crewship run daniel --chat c_abc123 "follow-up: now write the integration test"
+```
+
+`--chat` skips the `POST /api/v1/agents/{id}/chats` step and sends the prompt straight to the existing session over `agent:{agentId}` WS.
+
+### Stdin as context
+
+```bash
+cat issue.md | crewship run daniel "fix this bug"
+git diff | crewship run code-review "review" --with-git-status
+```
+
+### Interactive REPL
+
+```bash
+crewship run daniel --interactive
+# [agent: daniel] Ready. Type your message (Ctrl+D to exit):
+#
+# > help me design the migration
+# ...response streams...
+# > now write it
+```
+
+Ctrl-C cancels the current turn (sends a `cancel` message over WS) without killing the REPL. A second Ctrl-C exits.
+
+### Cancel-friendly streaming
+
+```bash
+crewship run daniel "long-running task"
+# Ctrl-C → sends cancel, prints "[cancelled]", lets the server clean up
+# A second Ctrl-C exits the process immediately
+```
+
+### Save the answer to disk
+
+```bash
+crewship run daniel "generate ADR for sidecar isolation" --save adr.md
+```
+
+Saved bytes are sanitised — any ANSI / OSC sequences a tool result emitted are stripped before they hit the file, so `cat adr.md` is safe.
+
+### List recent runs
+
+```bash
+crewship run list
+# ID                AGENT      STATUS     TRIGGER  CREATED              FINISHED
+# r_xxxxxxx         daniel     COMPLETED  CLI      2026-05-19 14:02     2026-05-19 14:04
+# r_yyyyyyy         viktor     RUNNING    CLI      2026-05-19 14:18     -
+```
+
+Use `--format json` for piping (`crewship run list --format json | jq '.[] | select(.status=="FAILED")'`).
+
+## Streaming protocol
+
+`run` subscribes to `session:{chatId}` and posts via `agent:{agentId}`. Event types it renders:
+
+| Event | Where it goes | Visible |
+| --- | --- | --- |
+| `text` | stdout (sanitised; markdown-styled if enabled) | always |
+| `thinking` | stderr (truncated) or stdout (`--show-thinking`) | unless `--quiet` |
+| `tool_call` | stderr, `[tool] …` | unless `--quiet` |
+| `tool_result` | stderr, `[result] …` | `--verbose` only |
+| `status` | stderr, `[status] …` | unless `--quiet` |
+| `error` | stderr, `[error] …`; exit non-zero | always |
+| `done` | stderr, `[done]`; commit `--save` tempfile | unless `--quiet` |
+
+A dropped WebSocket connection mid-run exits non-zero so wrapping scripts (`crewship run x "y" || alert`) catch it.
+
+## Common errors
+
+- **`prompt is required (provide as argument, --prompt flag, or use --interactive)`** — every path requires content unless you're starting a REPL.
+- **`ws read: ...`** — the WebSocket dropped before `done`. Most often a server restart.
+- **`agent error: <message>`** — the model or a tool returned a hard error event. The exit code is non-zero and the message is sanitised before display.
+- **`save commit: ...`** — `--save` tempfile couldn't be atomically renamed (disk full, permission denied). Reported separately from a stream error so neither one masks the other.
+
+## See also
+
+- [`crewship ask`](/cli/ask) — one-shot variant with default-agent resolution.
+- [`crewship chat`](/cli/chat) — re-read the chat after the run.
+- [`crewship agent`](/cli/agent) — manage agents, including `stop` and `logs`.
+- [Runs API](/api-reference/runs/list) — `GET /api/v1/runs`.

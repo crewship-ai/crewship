@@ -83,10 +83,10 @@ On a fresh database, the `/bootstrap` page or endpoint creates the initial `OWNE
 ```bash
 curl -X POST https://crewship.example.com/api/v1/bootstrap \
   -H 'Content-Type: application/json' \
-  -d '{"email":"admin@example.com","password":"<strong>","name":"Admin"}'
+  -d '{"email":"admin@example.com","password":"<strong>","full_name":"Admin"}'
 ```
 
-The endpoint is idempotent — a second call against a database that already has any user returns 409, so re-running provisioning is safe.
+The endpoint is idempotent — a second call against a database that already has any user returns 403 (`Already initialized — bootstrap is only available on an empty database`), so re-running provisioning is safe.
 
 ### 5. Sign in (day-to-day)
 
@@ -204,7 +204,7 @@ Every endpoint below lives in `internal/api/router_auth.go`. There's no dedicate
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/api/v1/bootstrap` | Create the first `OWNER` on a fresh database. Idempotent — 409 if any user exists. |
+| `POST` | `/api/v1/bootstrap` | Create the first `OWNER` on a fresh database. Idempotent — 403 if any user exists. |
 | `POST` | `/api/v1/auth/signup` | Create a new user account. Subject to `allowSignup` flag at server startup; disabled by default for self-hosted installs. |
 | `GET`  | `/api/v1/ws-token` | Mint a short-lived WebSocket auth token for the current session. **Auth required.** |
 

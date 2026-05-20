@@ -1,0 +1,141 @@
+---
+title: "Inbox"
+description: "Triage waitpoints, escalations, failed runs, and human-targeted messages from the terminal."
+icon: "inbox"
+---
+
+# crewship inbox
+
+The inbox is the unified "things needing a human" feed — waitpoints awaiting approval, escalations from agents, failed runs, and direct messages. The CLI is the scriptable mirror of the `/inbox` web page; cron + jq + `inbox list` is the canonical "ping Slack when unread piles up" recipe. Defined in `cmd/crewship/cmd_inbox.go`.
+
+```bash
+crewship inbox <subcommand> [flags]
+```
+
+Auth: every subcommand requires `crewship login` plus an active workspace. The inbox is backed by the `inbox_items` table (migration v85), written-through by waitpoint creation, escalation creation, and run-failure handlers.
+
+## Subcommands
+
+| Command | Purpose |
+| --- | --- |
+| `inbox list` | List inbox items (default: unread only). |
+| `inbox count` | Print the bell-badge unread count (cheaper than `list` for polling). |
+| `inbox read <id>` | Mark an item as read. |
+| `inbox unread <id>` | Flip an item back to unread. |
+| `inbox resolve <id>` | Mark resolved, optionally recording the action taken. |
+| `inbox bulk read` | Bulk-mark items as read. |
+| `inbox bulk resolve` | Bulk-mark items as resolved. |
+
+## Flags
+
+### `inbox list`
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `--state <enum>` | `unread` | Filter by state. One of `unread`, `read`, `resolved`, `all`. |
+| `--kind <enum>` | (unset) | Filter by kind. One of `waitpoint`, `escalation`, `failed_run`, `message`. |
+| `--limit <n>` | `50` | Max rows. Server caps at 500. |
+
+### `inbox resolve`
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `--action <enum>` | (unset) | Record what was done: `approved`, `denied`, `retried`, `cancelled`, `acknowledged`, `dismissed`. Stored in `resolved_action` for the audit trail. |
+
+### `inbox bulk read`
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `--ids <csv>` | (unset) | Comma-separated inbox item IDs. |
+| `--all-unread` | `false` | Target every currently-unread item (server cap: 500 per call). |
+
+### `inbox bulk resolve`
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `--ids <csv>` | (unset) | Comma-separated inbox item IDs. |
+| `--all-unread` | `false` | Target every currently-unread item. |
+| `--action <enum>` | (unset) | `approved|denied|retried|cancelled|acknowledged|dismissed`. |
+
+`--ids` and `--all-unread` are mutually exclusive on both bulk subcommands.
+
+## Examples
+
+### Triage
+
+```bash
+crewship inbox list                       # unread only (default)
+crewship inbox list --state all           # include read + resolved
+crewship inbox list --kind waitpoint      # narrow by kind
+crewship inbox list --limit 200
+crewship inbox list --format json | jq '.[] | {id, kind, title}'
+```
+
+Output is coloured by state (yellow=unread, cyan=read, green=resolved) and kind (yellow=waitpoint, red=escalation/failed_run, cyan=message), so a 50-row feed scans at a glance.
+
+### Polling the badge
+
+```bash
+while true; do
+  if [ "$(crewship inbox count)" -gt 0 ]; then
+    notify-send "Crewship: inbox needs attention"
+  fi
+  sleep 60
+done
+```
+
+`inbox count` hits `GET /api/v1/inbox/count` (the bell-badge endpoint) — much cheaper than `inbox list` when you only need the integer.
+
+### Mark an item
+
+```bash
+crewship inbox read inbox_abc123
+crewship inbox unread inbox_abc123        # flip back
+crewship inbox resolve inbox_abc123 --action approved
+crewship inbox resolve inbox_abc123 --action retried
+crewship inbox resolve inbox_abc123       # generic, no action
+```
+
+`resolve` is the inbox-side only — it does **not** call the source endpoint. To actually approve a waitpoint through to the executor, use `crewship approvals approve <id>`. To resolve an escalation lifecycle, use `crewship escalation resolve <id>`. The inbox row tracks the decision; the source endpoint enacts it.
+
+### Bulk operations
+
+```bash
+# Mark a known set
+crewship inbox bulk read --ids inbox_abc,inbox_def,inbox_ghi
+
+# Wipe the unread queue (capped at 500 per call)
+crewship inbox bulk read --all-unread
+
+# Bulk-resolve with an action tag
+crewship inbox bulk resolve --ids inbox_abc,inbox_def --action acknowledged
+```
+
+The bulk loop is sequential, not concurrent (the server has no bulk endpoint today). Per-item failures are reported but **do not abort the loop** — a stale id won't void a 200-item clean-up. The final line is `N ok / M failed`, and the process exits non-zero if any item failed.
+
+If `--all-unread` returns exactly the page cap (500), the CLI refuses to proceed silently and tells you to re-run or narrow with `--ids`, so the tail isn't lost.
+
+## Sources
+
+| Kind | Created by |
+| --- | --- |
+| `waitpoint` | Waitpoint creation (mission step paused for human input). |
+| `escalation` | Agent escalation (agent asked for help). |
+| `failed_run` | Run-failure handler when a run exits non-zero. |
+| `message` | Direct message addressed at a human via `crewship notification`. |
+
+The inbox is *human-attention-scoped*. The lower-level per-entity event log lives under `crewship notification`.
+
+## Common errors
+
+- **`either --ids <csv> or --all-unread is required`** — bulk command needs one of them.
+- **`--ids and --all-unread are mutually exclusive`** — pick one.
+- **`--ids parsed to empty list (got "")`** — comma-string was blank after trimming.
+- **`more than 500 unread items — re-run after this batch, or pass --ids to target a specific subset`** — server cap hit on `--all-unread`. Re-run will hit the next 500.
+- **`N of M items failed`** — non-zero exit when any bulk row failed. Stderr lists the failed ids.
+
+## See also
+
+- [`crewship approvals`](/cli/approvals) — waitpoint approve/deny lifecycle (the source side of `resolve --action approved`).
+- [`crewship notification`](/cli/notification) — per-entity event log; lower-level, larger volume.
+- [Inbox API](/api-reference/inbox/list) — `GET /api/v1/inbox`.

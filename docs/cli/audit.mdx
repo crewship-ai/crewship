@@ -1,0 +1,102 @@
+---
+title: "Audit"
+description: "Query the workspace audit log — by action, entity, user, date range, or free-text."
+icon: "scroll"
+---
+
+# crewship audit
+
+Surface the workspace audit log from the terminal. Filters mirror the `/api/v1/audit` query params 1:1 — the same expressiveness as the admin UI's filter chips. Names are kept identical to the UI fields so a user clicking through the dashboard can reproduce the same view from the CLI by reading the URL bar.
+
+```bash
+crewship audit [flags]
+```
+
+Requires an authenticated session (`requireAuth`) and a selected workspace (`requireWorkspace`).
+
+`--action` values are intentionally not enumerated in the help text. The audit table stores domain verbs (`agent.run`, `workspace.create`, `credential.rotate`, `backup.export`, …) that grow over time; listing a stale "create/update/delete" trio in the help would misdirect users. Pointing at the server-side enum is more honest.
+
+## Flags
+
+| Flag | Default | Purpose |
+| --- | --- | --- |
+| `--action <verb>` | `""` | Domain verb (`agent.run`, `workspace.create`, `credential.rotate`, …). |
+| `--entity-type <kind>` | `""` | Entity kind (`AGENT`, `BACKUP`, `CREDENTIAL`, `CREW`, `USER`, …). |
+| `--entity-id <id>` | `""` | Narrow to a specific entity row (e.g. an agent ID). |
+| `--user <user-id>` | `""` | Filter by the user ID who performed the action. |
+| `--since <when>` | `""` | Start of date range. RFC3339 (`2026-05-01T00:00:00Z`) or duration sugar (`1h`, `24h`, `7d`). |
+| `--until <when>` | `""` | End of date range. Same syntax as `--since`. |
+| `--search <text>` | `""` | Free-text search across `action`, `entity_type`, and the user's email/name. |
+| `--page <n>` | `0` | 1-based page number for pagination. `0` means "no page param sent". |
+| `--lines <n>` | `50` | Entries per page. Server caps at 100. |
+
+The global `--format` flag (`table` / `json` / `yaml` / `ndjson` / `quiet`) is honoured by the underlying formatter.
+
+## Output
+
+Default table columns:
+
+| TIME | ACTION | ENTITY | ENTITY_ID | USER |
+| --- | --- | --- | --- | --- |
+| `2026-05-19 14:02:11` | `agent.run` | `AGENT` | `a_abc123def4` | `petra@acme-engineering.com` |
+| `2026-05-19 14:01:48` | `credential.rotate` | `CREDENTIAL` | `c_xyz789ghi0` | `pavel@acme-engineering.com` |
+
+Entity IDs are truncated to 12 characters in the table view; switch to `--format json` to see the full ID and additional fields.
+
+## Examples
+
+### Latest 50 entries
+
+```bash
+crewship audit
+```
+
+### Find every agent run in the last day
+
+```bash
+crewship audit --action agent.run --since 24h --lines 100
+```
+
+### Credential changes only
+
+```bash
+crewship audit --entity-type CREDENTIAL --since 7d
+```
+
+### Who rotated which credential
+
+```bash
+crewship audit --search rotate --until 2026-05-01T00:00:00Z
+```
+
+`--search` matches across `action`, `entity_type`, and the user's email/name, so this catches both `credential.rotate` events and any `rotation`-tagged automation.
+
+### Activity for one user
+
+```bash
+crewship audit --user u_abc123 --page 2 --lines 100
+```
+
+### One specific entity's full history
+
+```bash
+crewship audit --entity-type AGENT --entity-id a_xyz789ghi0 --since 30d
+```
+
+### Pipe to jq
+
+```bash
+crewship audit --action workspace.create --format json | jq '.[].user_email'
+```
+
+## Common errors
+
+- **`bad --since: …`** / **`bad --until: …`** — the value is neither RFC3339 nor a duration. Accept formats: `2026-05-01T00:00:00Z`, `1h`, `24h`, `7d`.
+- HTTP `403 Forbidden` (surfaced as a generic CLI error) — audit reads are restricted to OWNER / ADMIN by default. Ask an owner to grant access or check your role with `crewship whoami`.
+
+## See also
+
+- [`crewship journal`](/cli/journal) — per-agent execution journal, lower-level than audit.
+- [`crewship inspect`](/cli/inspect) — run-scoped timeline (uses journal, not audit).
+- [`crewship telemetry`](/cli/telemetry) — broader observability surface.
+- [`crewship credential`](/cli/credential) — `credential audit <name>` for the credential-rotation slice of the same log.

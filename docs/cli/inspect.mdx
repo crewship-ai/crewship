@@ -1,0 +1,95 @@
+---
+title: "Inspect"
+description: "Deterministic structured timeline of a single run — journal events, cost roll-up, and tool-call counts (no LLM)."
+icon: "search"
+---
+
+# crewship inspect
+
+Print the journal entries for a run as a one-line-per-event timeline. Each line shows timestamp, severity chip, entry type, and summary. Costs and tool calls are pulled out into a footer block when present.
+
+Sibling design with [`crewship explain`](/cli/agent):
+
+- `crewship inspect <run-id>` — structured timeline (this command, fast, no LLM)
+- `crewship explain <run-id>` — LLM-summarised narrative (slower, costs tokens)
+
+Both share `fetchRun` plus the journal endpoint; `explain` feeds the entries to an agent, `inspect` formats them directly.
+
+```bash
+crewship inspect <run-id> [flags]
+```
+
+Requires an authenticated session and a selected workspace (`requireAuthAndWorkspace`).
+
+## Flags
+
+| Flag | Default | Purpose |
+| --- | --- | --- |
+| `--types <list>` | `""` (all) | Comma-separated journal entry types to include — e.g. `error,exec.error,keeper.decision`. |
+| `--filter <jq-expr>` | `""` | Pipe JSON output through `jq <expr>` (requires `jq` in `$PATH`). |
+| `--watch <duration>` | `""` | Auto-refresh every duration (e.g. `5s`, `1m`). Minimum 1s. |
+
+The global `--format` flag (`table` / `json` / `yaml` / `ndjson` / `quiet`) is honoured. JSON / YAML / `--filter` paths bypass the table formatter and emit the raw entry list with `run_id`, `agent_id`, and `entries`.
+
+## Examples
+
+### Default (table view)
+
+```bash
+crewship inspect r_abc
+# Run r_abc · agent code-review  (42 entries)
+# ────────────────────────────────────────────────────────────────────────────────
+# 14:02:11  [        ]  exec.start              spawning claude --print
+# 14:02:12  [        ]  llm.request             prompt 1842 tokens
+# 14:02:14  [        ]  tool_call               read_file: src/api/router.go
+# 14:02:15  [notice  ]  cost.incurred           $0.0142 (1842 prompt + 280 output)
+# 14:02:18  [error   ]  exec.error              tool exit 1: linter failed
+# ────────────────────────────────────────────────────────────────────────────────
+# total cost: $0.0142   tool calls: 3   errors: 1
+```
+
+### Narrow to errors and keeper decisions
+
+```bash
+crewship inspect r_abc --types error,exec.error,keeper.decision
+```
+
+`--types` is forwarded to the server as the `entry_type` query param on `/api/v1/journal`, so filtering is applied DB-side before the entries are reversed for chronological display.
+
+### Pull a single field via jq
+
+```bash
+crewship inspect r_abc --filter '.entries[] | select(.severity=="error")'
+```
+
+`--filter` short-circuits to JSON output; the expression is piped through `jq`.
+
+### Raw JSON for piping
+
+```bash
+crewship inspect r_abc --format json | jq '.entries[] | .entry_type' | sort | uniq -c
+```
+
+### Live tail
+
+```bash
+crewship inspect r_abc --watch 5s
+```
+
+Re-runs the inspect every 5 seconds. Useful for runs that are still streaming events.
+
+## How the run is scoped
+
+The CLI fetches journal entries scoped to the run's agent and the run's time window, then filters down to entries whose `trace_id` matches the run ID. By convention `trace_id == run_id` for journal entries (see `internal/journal/types.go`). Older entries that pre-date the trace rollout, or non-run-scoped events that the user explicitly `--types`-included, have no `trace_id` and are kept on the assumption the user wants to see them.
+
+## Common errors
+
+- **`run <id> has no agent_id`** — the run record is malformed (or you passed something that isn't a run ID). Run IDs start with `r_`.
+- **`no entries in journal window — run may be older than recall horizon`** — the run is older than the journal retention window (typically 7d). Printed dimmed under the header instead of a hard error.
+
+## See also
+
+- [`crewship journal`](/cli/journal) — agent-scoped journal browser; `inspect` is the run-scoped distillation.
+- [`crewship explain`](/cli/agent) — LLM-summarised narrative of the same data.
+- [`crewship history`](/cli/agent) — list recent runs to find a run ID.
+- [`crewship telemetry`](/cli/telemetry) — wider-view tracing across the workspace.

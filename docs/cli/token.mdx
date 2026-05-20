@@ -1,0 +1,89 @@
+---
+title: "Token"
+description: "Manage CLI authentication tokens — list, create, revoke, rotate, validate."
+icon: "key"
+---
+
+# Token
+
+`cmd/crewship/cmd_token.go` exposes the CLI-token surface (`/api/v1/auth/cli-tokens`). These are the long-lived bearers `crewship login --token` consumes and that you create in **Settings → CLI tokens** in the web UI. All subcommands clear `WorkspaceID` on the client — tokens are user-scoped, not workspace-scoped.
+
+## `crewship token list`
+
+`GET /api/v1/auth/cli-tokens`. Columns: `ID` (first 12 chars), `NAME`, `CREATED`, `LAST USED`, `STATUS`.
+
+```bash
+crewship token list
+crewship token list --format json
+```
+
+## `crewship token create [name]`
+
+`POST /api/v1/auth/cli-token`. Name defaults to `"CLI token"`. Returns the full bearer **once** — stored only at creation.
+
+```bash
+crewship token create
+crewship token create "ci-runner"
+```
+
+Output:
+
+```
+Token created: ci-runner
+ID:     tok_abc12345
+Token:  crewship_cli_eyJ...
+
+Store this token securely — it won't be shown again.
+```
+
+## `crewship token revoke <token-id>`
+
+`DELETE /api/v1/auth/cli-tokens/{id}`. Anything still using the token starts getting 401 immediately.
+
+```bash
+crewship token revoke tok_abc12345
+# ✓ Token revoked.
+```
+
+## `crewship token rotate <token-id>`
+
+Atomic-ish replacement: creates a new token (carrying the old name with a rotation timestamp suffix), prints it, then revokes the old. No dedicated server rotate endpoint exists — this is the same shape the web UI uses.
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--name <text>` | string | `"<old name> (rotated YYYY-MM-DD)"` | Override the new token's name. |
+
+```bash
+crewship token rotate tok_abc12345
+crewship token rotate tok_abc12345 --name "ci-runner v2"
+```
+
+Safety notes (printed in `--help` and embedded in the rotation flow):
+
+- The new token is printed **before** revoke is attempted. If revoke fails, the new one is already valid — re-run `crewship token revoke <old-id>` manually to finish.
+- We do **not** roll back the new token on revoke failure — that would leave you with neither.
+- Anything still using the old token will start getting 401 the moment revoke lands. Update clients first, then rotate — or rotate then immediately update clients.
+
+Errors:
+
+- **`token <id> is already revoked`** — pick a different token or just `create` a fresh one.
+- **`token <id> not found (run 'crewship token list')`** — typo or the token belongs to another user.
+- **`revoke old token (new token IS active, re-run 'crewship token revoke <old-id>'): <err>`** — exactly the case described above; the new token is fine, finish manually.
+
+## `crewship token validate`
+
+`GET /api/v1/auth/cli-token/validate`. Returns `user_id`, `email`, and (when present) `expires_at`.
+
+```bash
+crewship token validate
+# ✓ Token is valid.
+#   User: petra@example.com
+```
+
+`401` / `403` map to `token is invalid or expired`.
+
+## See also
+
+- [`crewship login`](/cli/login) — how a token becomes the active credential.
+- [`crewship whoami`](/cli/login) — confirm which token/identity is in use.
+- [`crewship config`](/cli/config) — view/edit the `token` key in `cli-config.yaml`.

@@ -1,0 +1,61 @@
+---
+title: "Cost"
+description: "Quick spend summary — total, top spenders, per-crew rollup, subscription usage — in one screen."
+icon: "dollar-sign"
+---
+
+# Cost
+
+`cmd/crewship/cmd_cost.go` is a high-density single-screen cost summary for the impatient. [`crewship paymaster ...`](/cli/paymaster) exposes the underlying rollups in full fidelity; `cost` is what you reach for when you just want to know "how much am I spending and on what?" without remembering which subcommand to run.
+
+Composes three paymaster endpoints into one view:
+- `GET /api/v1/paymaster/top-spenders` — N highest-spend scopes
+- `GET /api/v1/paymaster/spend/by-crew` — per-crew rollup
+- `GET /api/v1/paymaster/subscriptions` — subscription-plan usage (best-effort; not every workspace has plans)
+
+All three are scoped to the same time range so rows line up.
+
+## `crewship cost`
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--range <window>` | string | `24h` | Time window: `1h`, `24h`, `7d`, `30d`. Threaded into every underlying call. |
+| `--limit <n>` | int | `5` | Number of top spenders to print. |
+| `--watch` | bool | `false` | Re-render on interval (shared `addWatchFlag` helper). |
+
+### Examples
+
+```bash
+crewship cost
+crewship cost --range 7d
+crewship cost --range 30d --limit 10
+crewship cost --format json     # full structured payload for scripts
+crewship cost --watch
+```
+
+### Output
+
+```
+Cost summary  range=24h  total=$3.4216  calls=421  crews=4
+────────────────────────────────────────────────────────────────
+
+Top spenders
+   1. agent/agt_abc                            $  1.8421   142 calls
+   2. crew/backend-team                        $  0.9100    87 calls
+   ...
+
+By crew
+  backend-team                    $  1.8200    142 calls   54 211 tokens
+  frontend-trio                   $  0.6100     94 calls   18 922 tokens
+
+Subscription plans (no per-call $)
+  team/anthropic  120 calls  41 222 tokens last=2026-05-19T13:00:00Z
+```
+
+Per-crew rows are sorted descending by `cost_usd` regardless of server return order, so the highest-spend crew is always at the top.
+
+## See also
+
+- [`crewship paymaster`](/cli/paymaster) — full-fidelity rollups (top, by-crew, subscriptions, forecast).
+- [`crewship cost-forecast`](/cli/paymaster) — projected month-end spend.
+- [`crewship history`](/cli/history) — recent runs to correlate with cost spikes.

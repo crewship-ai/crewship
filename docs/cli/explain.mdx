@@ -1,0 +1,53 @@
+---
+title: "Explain"
+description: "Summarize what happened in a run — feeds journal entries to the default agent for a plain-English narrative."
+icon: "message-circle-question"
+---
+
+# Explain
+
+`cmd/crewship/cmd_explain.go` is "tell me what happened in this run, in plain English." Pure orchestration over existing primitives — no new server surface area:
+
+1. Look up the run via `fetchRun` (shared with `retry`).
+2. Fetch journal entries filtered by the run's agent and a window starting 5 min before `created_at`.
+3. Compose a prompt that includes the formatted timeline (oldest first), capped at 200 entries.
+4. Send the prompt to the default agent (or `--agent` override) using the same streaming pipeline as `ask`.
+
+Useful for understanding why a run failed, what tools it called, or what decisions the keeper made.
+
+## `crewship explain <run-id>`
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--agent <slug>` | string | default-agent | Agent to summarize via. Falls back to `CREWSHIP_DEFAULT_AGENT` env, then `default_agent` config. |
+| `--types <list>` | string | (all) | Comma-separated entry types to include. Sent server-side as `entry_type=`. |
+| `-q`, `--quiet` | bool | `false` | Suppress the `[explain <run> via <agent>]` meta line. |
+| `--markdown` | bool | (config) | Force markdown ANSI styling on. |
+| `--no-markdown` | bool | (config) | Force markdown styling off. |
+| `--save <path>` | string | (unset) | Tee the response to file. |
+
+### Examples
+
+```bash
+crewship explain r_abc                                # summarize via default agent
+crewship explain r_abc --agent viktor
+crewship explain r_abc --types error,keeper.decision,peer.escalation
+crewship explain r_abc --save explain.md
+```
+
+### Output shape
+
+The default prompt instructs the agent to produce 3-6 bullets that highlight errors, escalations, keeper denials, budget warnings, or unexpected control flow. Normal runs collapse to one line. The exact template is `buildExplainPrompt()` in `cmd_explain.go`.
+
+### Common errors
+
+- **`run <id> has no agent_id; cannot scope journal lookup`** — the run record is incomplete.
+- **`no journal entries found for agent in window starting <ts>`** — agent has no journal activity in the scoped window.
+- **`no agent set to summarize. Use --agent, set CREWSHIP_DEFAULT_AGENT, or run 'crewship config set default-agent <slug>'`** — no default and no override.
+- **`run <id> not in recent window`** (warning, fallback to 1 h ago) — run is older than the latest 100 entries from `/api/v1/runs`.
+
+## See also
+
+- [`crewship diff <a> <b>`](/cli/diff) — compare two runs structurally.
+- [`crewship recap <chat-id>`](/cli/recap) — same idea for a whole chat thread.
+- [`crewship journal`](/cli/journal) — read the underlying entries yourself.

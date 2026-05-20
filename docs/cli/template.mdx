@@ -1,0 +1,49 @@
+---
+title: "Template"
+description: "Crew templates — blueprints for pre-configured crews. List, inspect, and deploy."
+icon: "layout-template"
+---
+
+# Template
+
+`cmd/crewship/cmd_template.go` manages crew templates: named bundles of a crew plus its agents that you can stamp out fresh in one call. Useful for "every new project gets a backend + frontend + reviewer triad" workflows. Backed by `/api/v1/crew-templates`.
+
+## `crewship template list`
+
+`GET /api/v1/crew-templates`. Table: `SLUG`, `NAME`, `CATEGORY`, `AGENTS` (count), `BUILTIN`, `DESCRIPTION` (40-char truncated).
+
+```bash
+crewship template list
+crewship template list --format json
+```
+
+## `crewship template get <slug>`
+
+`GET /api/v1/crew-templates/{slug}`. Detail block plus, in table mode, a secondary `AGENTS` table with each agent's slug, name, role title, and `agent_role`.
+
+```bash
+crewship template get backend-trio
+crewship template get backend-trio --format yaml
+```
+
+## `crewship template deploy <slug>`
+
+`POST /api/v1/crew-templates/{slug}/deploy`. Creates the crew + every agent the template defines.
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--name <text>` | string | (required) | Crew name. Missing → `--name is required (crew name for the deployed template)`. |
+| `--slug <text>` | string | (auto) | Crew slug. Auto-generated from the name when omitted. |
+
+```bash
+crewship template deploy backend-trio --name "ACME Backend"
+crewship template deploy backend-trio --name "Probe" --slug probe
+```
+
+Success line: `Template deployed: crew "<slug>" (<id>) with <n> agent(s)`.
+
+## See also
+
+- [`crewship crew`](/cli/crew) — manage the crews this template produces.
+- [`crewship agent`](/cli/agent) — manage the agents inside a deployed crew.
+- [`crewship apply`](/cli/apply) — declarative workspace manifests if you want template-style deploy with config-as-code.

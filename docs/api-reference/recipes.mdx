@@ -1,0 +1,222 @@
+---
+title: "Recipes"
+description: "1-click crew bundles — list, preview (dry run), install. A recipe ships a curated crew + the credentials and MCP servers it needs; install commits everything in one transaction."
+icon: "package-open"
+---
+
+# Recipes
+
+A recipe is a hardcoded bundle of:
+
+- a curated **crew identity** (name, slug, icon, color),
+- the **credentials** it needs (provider + env var name + UX label), and
+- the **MCP servers** it should run (transport, command, env mapping).
+
+Recipes are baked into the binary (`internal/recipes`) for the MVP — there is no admin UI to author them; a future migration may promote them to a DB-backed catalogue. The browse / preview / install endpoints below back the dashboard empty state and the "Install recipe" Sheet.
+
+The implementation lives in `internal/api/recipes.go`. Install is **atomic**: credentials, the new crew, and its MCP servers are all created in a single transaction — any failure rolls back everything, so a half-installed recipe (orphan crew without its credentials, etc.) never exists.
+
+## Recipe shape
+
+| Field | Type | Notes |
+|---|---|---|
+| `slug` | string | URL-stable identifier, e.g. `code-review-crew`. |
+| `name` | string | Human label shown on the dashboard card. |
+| `description` | string | One-line tagline shown under the name. |
+| `icon` | string | Lucide icon name (matches the `CrewIcon` palette). |
+| `color` | string | Palette color id (`blue`, `violet`, `amber`, ...). |
+| `crew_slug` | string | Preferred slug for the new crew. Install resolves `slug` → `slug-2` → `slug-3` etc. if it's already taken. |
+| `credentials` | array | Credentials the recipe needs — see below. |
+| `mcp_servers` | array | MCP servers to provision on the new crew. |
+
+Each credential entry:
+
+| Field | Type | Notes |
+|---|---|---|
+| `env_var_name` | string | What the agent will see at runtime (`ANTHROPIC_API_KEY`, `GH_TOKEN`, ...). Doubles as the credential `name` in the workspace per the existing convention. |
+| `provider` | string | Canonical provider enum (`ANTHROPIC`, `GITHUB`, `OPENAI`, `NONE`, ...). |
+| `type` | string | Credential type (`API_KEY`, `AI_CLI_TOKEN`, `OAUTH2`, `CLI_TOKEN`, `SECRET`). |
+| `label` | string | Human prompt shown in the install wizard ("Anthropic API key"). |
+| `help_url` | string \| omitted | Where the user finds the value (e.g. `https://console.anthropic.com/settings/keys`). |
+
+Each MCP server entry:
+
+| Field | Type | Notes |
+|---|---|---|
+| `name` | string | URL-stable name on the crew (must satisfy the `crew_mcp_servers.name` UNIQUE constraint). |
+| `display_name` | string | What shows in the connected list and marketplace cards. |
+| `transport` | string | `stdio` or `streamable-http`. |
+| `command` | string \| omitted | Launch command for stdio servers. |
+| `args` | string[] \| omitted | Argv for stdio servers. |
+| `endpoint` | string \| omitted | URL for HTTP transports. |
+| `env_mapping` | object \| omitted | Map of `ENV_NAME` → recipe credential `env_var_name`. The install flow turns this into the `env_json` the integration handlers consume. |
+| `icon` | string \| omitted | Brand logo hint. |
+
+## `GET /api/v1/recipes`
+
+Return the curated recipe set in display order. No pagination — the catalogue is intentionally small (3 entries at the time of writing).
+
+**Auth:** authenticated session (no workspace context required — recipes are static).
+
+```json
+[
+  {
+    "slug": "code-review-crew",
+    "name": "Code review crew",
+    "description": "Anthropic-powered agent that reviews your GitHub pull requests.",
+    "icon": "git-pull-request",
+    "color": "blue",
+    "crew_slug": "code-review",
+    "credentials": [
+      {
+        "env_var_name": "ANTHROPIC_API_KEY",
+        "provider": "ANTHROPIC",
+        "type": "API_KEY",
+        "label": "Anthropic API key",
+        "help_url": "https://console.anthropic.com/settings/keys"
+      },
+      {
+        "env_var_name": "GH_TOKEN",
+        "provider": "GITHUB",
+        "type": "CLI_TOKEN",
+        "label": "GitHub personal access token",
+        "help_url": "https://github.com/settings/tokens"
+      }
+    ],
+    "mcp_servers": [
+      {
+        "name": "github",
+        "display_name": "GitHub",
+        "transport": "stdio",
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-github"],
+        "icon": "github",
+        "env_mapping": { "GITHUB_PERSONAL_ACCESS_TOKEN": "GH_TOKEN" }
+      }
+    ]
+  }
+]
+```
+
+## `GET /api/v1/recipes/{slug}`
+
+Return a single recipe by slug. Distinct from List so the install Sheet can fetch fresh detail without re-iterating the whole catalogue.
+
+**Auth:** authenticated session.
+
+| Status | Condition |
+|---|---|
+| `200` | Recipe found — returns the recipe object (same shape as a List entry). |
+| `404` | Recipe slug not found. |
+
+## `GET /api/v1/recipes/{slug}/preview`
+
+Dry run for the install Sheet. Tells the FE which credentials the user **already has** in the workspace (so the wizard can skip the "Paste your X" step for those), and which crew slug the install will actually resolve to (suffixes `-2` / `-3` ... if the recipe's preferred slug is already taken).
+
+Does not mutate any state.
+
+**Auth:** authenticated session + workspace context (`workspace_id` query parameter).
+
+**Response:** `200 OK`
+
+```json
+{
+  "recipe": { "...": "full recipe object" },
+  "needed_credentials": ["BRAVE_API_KEY"],
+  "existing_credentials": { "ANTHROPIC_API_KEY": true },
+  "crew_slug_available": false,
+  "resolved_crew_slug": "research-2"
+}
+```
+
+| Field | Type | Notes |
+|---|---|---|
+| `recipe` | object | Full recipe (same shape as `GET /api/v1/recipes/{slug}`) — included so the FE can render the install Sheet from one round-trip. |
+| `needed_credentials` | string[] | Credentials the user must paste before install. Keyed by `env_var_name`. |
+| `existing_credentials` | object | Map of `env_var_name → true` for credentials already present in the workspace. Only `true` values are included. |
+| `crew_slug_available` | bool | `true` if the recipe's preferred `crew_slug` is free in this workspace. |
+| `resolved_crew_slug` | string | The slug install will actually use — equal to `recipe.crew_slug` if available, otherwise the first free `-N` suffix. |
+
+| Status | Condition |
+|---|---|
+| `404` | Recipe slug not found. |
+| `500` | Credential lookup or slug resolution failed (rare — surfaces a DB-level error rather than silently treating a failed query as "missing credential" and then 409-ing mid-install). |
+
+## `POST /api/v1/recipes/{slug}/install`
+
+Atomic install. Creates the credentials the recipe needs (or reuses existing ones), the crew, and the MCP servers in a single SQLite transaction. The response describes what was actually created vs. reused so the FE can phrase the success toast accurately.
+
+**Auth:** authenticated session + workspace context + `OWNER`, `ADMIN`, or `MANAGER` role (`canRole(role, "manage")`).
+
+```json
+{
+  "credential_values": {
+    "ANTHROPIC_API_KEY": "sk-ant-...",
+    "GH_TOKEN": "ghp_..."
+  },
+  "account_labels": {
+    "ANTHROPIC_API_KEY": "Personal — Anthropic Console",
+    "GH_TOKEN": "Bot account"
+  }
+}
+```
+
+| Field | Type | Notes |
+|---|---|---|
+| `credential_values` | object | Map of `env_var_name → raw secret`. **Missing entries are treated as "user already has this credential"** — install looks the row up by `env_var_name` and reuses it. Bad shape → `400`. |
+| `account_labels` | object | Optional. Map of `env_var_name → human label` for the credential row. If absent, the recipe's `label` is used. |
+
+### Validation
+
+The handler does a cheap shape check **outside** the transaction so it can `400` fast on bad input: for every credential the recipe declares, either the workspace must already contain it (looked up by `env_var_name`) **or** the request body must carry a non-empty value for it. Anything else returns:
+
+```json
+{
+  "error": "Missing credential values",
+  "missing_credentials": ["BRAVE_API_KEY"]
+}
+```
+
+### Race-safe credential upsert
+
+Two concurrent installs of the same recipe on the same workspace must both converge on the same credential row rather than 500-ing the loser on `UNIQUE(workspace_id, name)`. Implementation uses `INSERT OR IGNORE` followed by `SELECT id` — the loser's insert becomes a no-op; the follow-up `SELECT` returns whichever id won the race.
+
+### Race-safe crew slug allocation
+
+Crew slug allocation also happens inside the transaction. If the recipe's `crew_slug` is taken at insert time, the handler retries with `slug-2`, `slug-3`, ... up to 100 attempts. Slug resolution from the Preview endpoint is advisory only — the install does its own lookup inside the tx so the existence check and the insert see the same snapshot.
+
+### Response
+
+**Status:** `201 Created`
+
+```json
+{
+  "crew_id": "crw_01HVZ...",
+  "crew_slug": "research-2",
+  "credentials_added": ["BRAVE_API_KEY"],
+  "credentials_reused": ["ANTHROPIC_API_KEY"],
+  "mcp_servers_added": ["brave-search"]
+}
+```
+
+| Field | Type | Notes |
+|---|---|---|
+| `crew_id` | string (CUID) | The new crew's id. The FE redirects to `/crews?crew={crew_slug}` — returning the id lets it skip a follow-up fetch. |
+| `crew_slug` | string | The resolved slug (matches `resolved_crew_slug` from Preview, but Preview is advisory; this is the authoritative value). |
+| `credentials_added` | string[] | `env_var_name`s the install created. |
+| `credentials_reused` | string[] | `env_var_name`s already present in the workspace and reused. |
+| `mcp_servers_added` | string[] | MCP server `name`s provisioned on the new crew. |
+
+| Status | Condition |
+|---|---|
+| `400` | Bad JSON body or missing `credential_values` for credentials the workspace doesn't already have. |
+| `401` | Not authenticated. |
+| `403` | Caller is below the `MANAGER` role. |
+| `404` | Recipe slug not found. |
+| `500` | Tx commit failed, encryption failed, or slug allocation exhausted 100 attempts (the last is effectively impossible in practice — nobody installs the same recipe a hundred times). |
+
+## See also
+
+- [Credentials](/api-reference/credentials) — the workspace credential table that recipes upsert into.
+- [Crews](/api-reference/crews) — the crew row that recipes create.
+- [Integrations](/api-reference/integrations) — the MCP server table (`crew_mcp_servers`) that recipes populate.

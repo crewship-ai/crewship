@@ -1,0 +1,35 @@
+---
+title: "MCP Calls"
+description: "Audit MCP tool invocations across the workspace — which tool, which agent, what arguments, what outcome."
+icon: "plug"
+---
+
+# MCP Calls
+
+`cmd/crewship/cmd_admin_extras.go` wraps `GET /api/v1/mcp-tool-calls`. Lists recent MCP tool invocations across the workspace — useful for tracking which external integrations are doing real work and which are dormant.
+
+## `crewship mcp-calls`
+
+Each row in the response carries the tool name, the agent that called it, the arguments, and the outcome.
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--limit <n>` | int | `50` | Max calls to return. Sent as `?limit=`. |
+| `--filter <expr>` | string | (unset) | gojq filter applied before output. |
+
+### Examples
+
+```bash
+crewship mcp-calls
+crewship mcp-calls --limit 200
+crewship mcp-calls --filter '.[] | select(.tool == "linear:create_issue")'
+crewship mcp-calls --format yaml
+```
+
+Default output is indented JSON — the rows don't have a canonical table form, so JSON + `jq` is the most useful pretty default.
+
+## See also
+
+- [`crewship mcp`](/cli/agent) — install and configure MCP integrations.
+- [`crewship integration`](/cli/agent) — broader integration management.
+- [`crewship audit`](/cli/audit) — workspace audit trail (MCP calls are also journaled).

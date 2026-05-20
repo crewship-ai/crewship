@@ -1,0 +1,87 @@
+---
+title: "Prompt"
+description: "Local prompt library — save, list, view, edit, and delete prompts kept under ~/.crewship/prompts/. Pure local, no server round-trip."
+icon: "bookmark"
+---
+
+# Prompt
+
+`cmd/crewship/cmd_prompt.go` is a server-free prompt library. Save common prompts once as `<name>.md` files under `~/.crewship/prompts/`, then reach for them from `crewship ask --prompt @<path>` or pipe via stdin. Plain markdown — portable, grep-able, dotfile-trackable.
+
+## Name validation
+
+Names are restricted to `a-z A-Z 0-9 - _ .`, max 64 characters, can't start with `.`, can't be `.` or `..`. Path-traversal-safe (`prompt save ../etc/passwd` → `invalid character "/"`).
+
+## `crewship prompt list`
+
+Lists saved prompts as a sortable table (`NAME`, `SIZE`, `MODIFIED`).
+
+```bash
+crewship prompt list
+crewship prompt list --format json
+crewship prompt list --format quiet     # names only, one per line — good for shell pipelines
+```
+
+Empty library: `No prompts saved.  Try: crewship prompt save <name>`.
+
+## `crewship prompt save <name>`
+
+Writes `~/.crewship/prompts/<name>.md`. Content precedence: `--content` > `--file` > stdin.
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--content <text>` | string | (unset) | Inline content; overrides stdin and `--file`. |
+| `--file <path>` | string | (unset) | Read content from this file. |
+
+```bash
+crewship prompt save review --content "Review this diff:"
+crewship prompt save review --file ~/notes/review.md
+cat review.md | crewship prompt save review
+```
+
+Errors: `no content: pass --content, --file, or pipe content via stdin` (when stdin is a TTY and neither flag is set).
+
+## `crewship prompt use <name>`
+
+Prints a saved prompt to stdout. Pipe into `ask` or `run`.
+
+```bash
+crewship prompt use review-go | crewship ask
+```
+
+## `crewship prompt path <name>`
+
+Prints the absolute filesystem path. Designed for shell composition:
+
+```bash
+crewship ask --prompt @"$(crewship prompt path review)"
+```
+
+## `crewship prompt edit <name>`
+
+Opens the prompt in `$EDITOR` (falls back to `vi`). Creates the file if missing. `$EDITOR` is split on whitespace so values like `code -w` or `vim -c "set wrap"` work correctly — the first token is the binary, the rest are leading args, and the prompt path is appended.
+
+## `crewship prompt delete <name>`
+
+Aliases: `rm`. Removes the saved prompt.
+
+```bash
+crewship prompt delete review
+crewship prompt rm review
+```
+
+## Did-you-mean suggestions
+
+`use`, `path`, `edit`, and `delete` all run a fuzzy match on not-found errors:
+
+```
+prompt "reveiw" not found. Did you mean: review, review-go?
+```
+
+If the prompts directory itself is unreadable, the underlying I/O error propagates unchanged — you're not misled with "not found" when the real problem is `chmod 000` on the directory.
+
+## See also
+
+- [`crewship ask --prompt @<path>`](/cli/agent) — consume a saved prompt.
+- [`crewship slash`](/cli/slash) — full slash commands when you outgrow plain text.
+- [`crewship copy-prompt <run-id>`](/cli/copy-prompt) — recover a past prompt to seed a new library entry.

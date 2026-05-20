@@ -1,0 +1,52 @@
+---
+title: "History"
+description: "Workspace-wide list of recent agent runs with timestamps, status, trigger, and (optionally) the prompt that kicked each run off."
+icon: "history"
+---
+
+# History
+
+`cmd/crewship/cmd_history.go` is the "what did I run lately?" command. Reads `GET /api/v1/runs` for the run list and, with `--prompts`, fetches `GET /api/v1/chats/{chatId}/messages` for the first user-role message of each run in a bounded 4-way worker pool.
+
+Different from [`crewship run list`](/cli/agent):
+- Adds an optional first-message preview per run.
+- Defaults to the last 24 h window.
+- Pretty single-line rendering with truncation.
+
+## `crewship history`
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--limit <n>` | int | `20` | Max runs to list. Must be > 0 (otherwise `bad --limit: must be greater than 0`). |
+| `--since <window>` | string | `24h` | Time window — `1h`, `24h`, `7d`, or RFC3339. Applied client-side (the runs API has no `since=`). Inclusive on the boundary. |
+| `--status <state>` | string | (unset) | Filter by status: `running`, `completed`, `failed`. Server-side `?status=`. |
+| `--agent <slug-or-id>` | string | (unset) | Filter by agent. Resolved to ID before the request. |
+| `--prompts` | bool | `false` | Also fetch the first user message per run. 4-way concurrent; failures degrade silently. |
+| `--watch` | bool | `false` | Re-render on interval (shared `addWatchFlag` helper). |
+
+### Examples
+
+```bash
+crewship history
+crewship history --limit 50
+crewship history --since 7d --status failed
+crewship history --prompts                    # also fetch first user message
+crewship history --agent viktor --format json | jq '.[].id'
+```
+
+Output:
+
+```
+2026-05-19 14:02  viktor             completed  CLI     "review the auth diff"
+2026-05-19 13:51  petra              failed     ROUTINE
+2026-05-19 13:38  default-agent      completed  CLI     "list open PRs"
+```
+
+Status colours: green (completed/succeeded), red (failed/error), yellow (running), gray (other).
+
+## See also
+
+- [`crewship retry <run-id>`](/cli/retry) — rerun the same agent + recovered prompt.
+- [`crewship copy-prompt <run-id>`](/cli/copy-prompt) — recover just the prompt text.
+- [`crewship recall <query>`](/cli/recall) — search the journal by free text.
+- [`crewship explain <run-id>`](/cli/explain) — summarize what a run did.

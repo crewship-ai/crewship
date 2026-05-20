@@ -1,0 +1,59 @@
+---
+title: "Diff"
+description: "Compare two persisted runs side-by-side — status, output, journal head."
+icon: "git-compare"
+---
+
+# Diff
+
+`cmd/crewship/cmd_diff.go` takes two existing run IDs, fetches their state plus the last assistant message of each linked chat, and renders a terse before/after view. Distinct from `eval compare`, which re-runs an eval scenario on two tiers — `diff` works strictly on what already happened.
+
+Use cases:
+- "Did v2 of my routine actually fix the bug?" → diff before/after
+- "What changed between Friday's prod run and Monday's regression?"
+- "Did the agent give two different answers to the same prompt?"
+
+Both runs are fetched in parallel; partial failures surface as `run-a <id>: <err>` or `run-b <id>: <err>`.
+
+## `crewship diff <run-a> <run-b>`
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--full` | bool | `false` | Show full assistant output. Without it, each side is truncated to 1 KiB with an ellipsis. |
+
+### Examples
+
+```bash
+crewship diff r_abc r_def
+crewship diff r_abc r_def --full
+crewship diff r_abc r_def --format json     # both RunDetails + a_text/b_text in one object
+```
+
+### Output
+
+Side-by-side headers (agent, status, started, finished) with status colours (green/red/yellow), then a minimal line-by-line diff of the assistant output:
+
+```
+Run A  r_abc
+  agent  : viktor
+  status : COMPLETED
+  ...
+
+Run B  r_def
+  agent  : viktor
+  status : FAILED
+  ...
+
+── Output diff ──
+  Reviewed 3 files.
+- All checks pass.
++ Linter warnings on src/auth.go:42.
+```
+
+The diff is intentionally not Myers — for run comparison users want the gist, not patch-applicable hunks.
+
+## See also
+
+- [`crewship eval compare`](/cli/eval) — re-run an eval scenario on two model tiers.
+- [`crewship history`](/cli/history) — find the two run IDs.
+- [`crewship explain <run-id>`](/cli/explain) — explain what one run did, with journal context.

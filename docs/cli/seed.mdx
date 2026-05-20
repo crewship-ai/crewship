@@ -1,0 +1,119 @@
+---
+title: "Seed"
+description: "Provision a complete demo workspace — crews, agents, credentials, integrations, routines, and sample issues — through the REST API."
+icon: "leaf"
+---
+
+# crewship seed
+
+Replaces the old `prisma/seed.ts` script. Creates a full demo environment — admin user, workspace, four connected crews, agents with system prompts, credentials, integrations, routines, schedules, and sample issues — entirely through the REST API so business logic (validation, encryption, audit logging) is exercised end-to-end.
+
+```bash
+crewship seed [flags]
+```
+
+On a fresh database, seed bootstraps the admin user (`demo@crewship.ai`) itself. On an existing database, it requires authentication (run `crewship login` first) and a selected workspace.
+
+## Flags
+
+| Flag | Default | Purpose |
+| --- | --- | --- |
+| `--nuke` | `false` | Delete all workspace contents before seeding. Runs *after* auth, so a missing/invalid token won't wipe the wrong workspace. |
+| `--skip-issues` | `false` | Skip the issue/project/label phase. Useful when you only need crews + agents and want a faster seed. |
+| `--password <pw>` | `password123` | Admin password used by bootstrap. The default is the dev convention `password123` — override in any non-local environment. |
+| `--smoke-test` | `false` | After seeding, send a test prompt to each agent to verify end-to-end execution. Implies `--wait-provision`. |
+| `--smoke-timeout <s>` | `60` | Per-agent timeout (seconds) for the smoke test. |
+| `--provision-timeout <s>` | `900` | Per-crew provisioning timeout (seconds). |
+| `--wait-provision` | `false` | Block until all crews finish provisioning. Default is fire-and-forget — seed returns while provisioning runs in the background. |
+| `--test-backup` | `false` | After seeding, run a backup/restore round-trip self-test on one crew. Implies `--wait-provision`. |
+
+## Examples
+
+### First run on a fresh dev DB
+
+```bash
+crewship seed
+# Bootstrapping...
+#   Using dev default admin password: password123
+#   (override with --password for production)
+#   Bootstrapped admin: demo@crewship.ai
+#   Workspace: w_abc123
+# …
+# Provisioning 4 crew(s) in the background.
+#   Agents in these crews become runnable once provisioning finishes (~few minutes).
+#   Status: crewship crew provision status <slug>   (or re-run `crewship seed --wait-provision`)
+#
+# ✓ Seed complete: 4 crews, 14 agents
+# Login: demo@crewship.ai / password123
+```
+
+The token + workspace are saved to `~/.crewship/cli-config.yaml`, so any follow-up command picks up the demo session.
+
+### Reset and reseed
+
+```bash
+crewship seed --nuke
+```
+
+Wipes the active workspace's contents first, then seeds. The auth step runs before `--nuke` so a typo in `--server` or a stale token won't trash a different workspace.
+
+### CI-friendly run that waits
+
+```bash
+crewship seed --wait-provision --smoke-test
+```
+
+Blocks until every crew is provisioned, then sends one prompt to each agent. Non-zero exit on any failure — drop straight into `pnpm test:e2e` after this lands.
+
+### Skip the issue phase for a faster crew-only seed
+
+```bash
+crewship seed --skip-issues --password "$(op read op://Dev/crewship/admin)"
+```
+
+The issue/project/label phase is the slowest because it inserts dozens of rows and creates Linear-style backlogs; `--skip-issues` halves wall-clock time for crew-development work.
+
+### Backup self-test (CI guardrail)
+
+```bash
+crewship seed --test-backup
+```
+
+Implies `--wait-provision`. Picks the first provisioned crew (preferring `research` because its container is small and dependency-light), runs a backup/restore round-trip via the admin self-test endpoint, and fails the command if the canary doesn't verify. Use as a CI guard for the backup pipeline.
+
+## Seed phases (in order)
+
+| Phase | What it does | Failure mode |
+| --- | --- | --- |
+| 1. Bootstrap / auth | Hits `/api/v1/bootstrap` on a fresh DB; falls back to existing CLI token | Fatal |
+| 0. Nuke (if `--nuke`) | Wipes workspace contents | Fatal |
+| 2. Crews + members | Creates four crews and links the admin user | Fatal |
+| 2a. Crew connections | All-pairs bidirectional `crew_connections` so missions can hand off | Non-fatal (logs and continues) |
+| 2b. Provision crews | Triggers devcontainer image builds in parallel | Errors deferred to end |
+| 3. Agents | Inserts agents with system prompts | Fatal |
+| 4–5. Skills + assignments | Workspace skills + per-agent skill bindings | Fatal |
+| 6–7. Credentials + assignments | Demo API keys + per-agent credential bindings | Fatal |
+| 8–9. Integrations + bindings | MCP servers, GitHub/Slack stubs | Fatal |
+| 9b. Routines | Five starter routine recipes | Non-fatal |
+| 9b. Schedules | One demo cron so `/activity` has data on first load | Non-fatal |
+| 10. Issues | Sample issues, projects, labels (unless `--skip-issues`) | Fatal |
+| 10b. Wait for provisioning | If `--wait-provision`, blocks until images are ready | Fatal in sync mode, deferred otherwise |
+| 10c. Backup self-test | If `--test-backup`, full round-trip on one crew | Fatal |
+| 11. Summary | Prints `Seed complete: N crews, M agents` | — |
+| 12. Smoke test | If `--smoke-test`, one prompt per agent | Fatal on any failure |
+
+The async-by-default model means a plain `crewship seed` returns quickly (~seconds for the API mutations) while crew containers warm up in the background. Pair with `crewship crew provision status <slug>` to check on individual crews.
+
+## Common errors
+
+- **`bootstrap request failed (is the server running at http://localhost:8080?)`** — the server didn't answer. Start it with `crewship start` and retry.
+- **`DB already initialized. not logged in — run \`crewship login\` first`** — the database has a user but the CLI has no token. Log in (or use `crewship admin reset-password` if you've lost UI access).
+- **`--test-backup requested, but no crew successfully started provisioning`** — every crew failed to trigger provisioning. The seed wasn't going to be useful anyway; the explicit error is so CI doesn't go green on a broken pipeline.
+- **`Routine seeding hit an error (continuing): …`** — printed but non-fatal. Routines depend only on crews, so a parse error in one DSL doesn't torpedo the rest of the seed.
+
+## See also
+
+- [`crewship init`](/cli/init) — minimal admin-only bootstrap if you don't want demo data.
+- [`crewship setup`](/cli/setup) — interactive template picker for a single-crew workspace.
+- [`crewship crew`](/cli/crew) — `crewship crew provision status <slug>` for checking background builds.
+- [`crewship apply`](/cli/apply) — declarative manifest as a longer-term alternative to seed.

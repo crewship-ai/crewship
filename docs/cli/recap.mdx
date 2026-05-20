@@ -1,0 +1,46 @@
+---
+title: "Recap"
+description: "Agent-generated summary of a chat session — outcome, key decisions, open threads, and a suggested follow-up."
+icon: "scroll-text"
+---
+
+# Recap
+
+`cmd/crewship/cmd_recap.go` produces a structured summary of an existing chat session by dispatching the transcript through the default agent. Useful when picking up an older thread, sharing a session with a teammate, or auditing what an agent actually did across many turns.
+
+Pulls up to 500 messages (same cap as `crewship chat`), compresses tool-call noise to names only, truncates each turn at 800 characters to keep prompt tokens bounded, then re-uses `crewship ask`'s streaming pipeline so output renders incrementally.
+
+## `crewship recap <chat-id>`
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--agent <slug>` | string | default-agent | Agent slug used to generate the summary. Falls through to `default_agent` config when unset. |
+| `--bullets <n>` | int | `8` | Cap on the "Key decisions" section. |
+
+### Examples
+
+```bash
+crewship recap c_abc123
+crewship recap c_abc123 --agent viktor
+crewship recap c_abc123 --bullets 5    # shorter
+```
+
+### Output shape
+
+The summarising agent is instructed to produce a markdown block with these sections, in order, with no preamble:
+
+1. **Final outcome** — one sentence
+2. **Key decisions** — up to `--bullets` items
+3. **Open threads** — anything unresolved, or `(none)`
+4. **What to ask next** — one suggested follow-up prompt
+
+### Common errors
+
+- **`chat <id> has no messages`** — the chat is empty or doesn't exist.
+- **`internal: ask command has no RunE`** — wiring error; should not appear in shipped builds.
+
+## See also
+
+- [`crewship ask`](/cli/agent) — the underlying one-shot prompt path.
+- [`crewship resume <chat-id>`](/cli/resume) — pick up the session instead of summarising it.
+- [`crewship explain <run-id>`](/cli/explain) — same idea, scoped to one run via journal entries.

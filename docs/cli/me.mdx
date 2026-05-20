@@ -1,0 +1,77 @@
+---
+title: "Me, Today, Now"
+description: "Three quick-action commands that compose multiple REST endpoints into single-screen workflow shortcuts — what's mine, what happened today, what's running now."
+icon: "user"
+---
+
+# Me, Today, Now
+
+`cmd/crewship/cmd_quickactions.go` ships three composite commands. Each fans out to 2-3 endpoints with `sync.WaitGroup` + best-effort error handling, so one slow endpoint never blocks the rest of the screen — partial views are preferred over blank ones. Partial errors land on stderr as `[partial] <label>: <err>` lines after the main render.
+
+## `crewship me`
+
+"What's on your plate right now."
+
+| Endpoint | Used for |
+|---|---|
+| `GET /api/v1/missions?assignee=me` | Missions assigned to you |
+| `GET /api/v1/approvals?status=pending&assignee=me` | Approvals waiting on you |
+| `GET /api/v1/runs?actor=me&limit=10` | Your recent runs |
+
+```bash
+crewship me
+crewship me --format json
+```
+
+## `crewship today`
+
+Today's runs + spend across the workspace. Useful for retrospectives and standups.
+
+| Endpoint | Used for |
+|---|---|
+| `GET /api/v1/runs?limit=100` | All recent runs, filtered to today (UTC) client-side |
+| `GET /api/v1/paymaster/top-spenders?range=24h&limit=5` | Cost summary |
+
+Output groups runs by status (`completed × 12`, `failed × 1`, …) plus a one-line cost teaser pointing at [`crewship cost`](/cli/cost) for the full breakdown.
+
+```bash
+crewship today
+crewship today --format json
+```
+
+## `crewship now`
+
+Live status board.
+
+| Endpoint | Used for |
+|---|---|
+| `GET /api/v1/runs?status=RUNNING&limit=20` | Currently-running runs |
+| `GET /api/v1/agents` | Agent inventory; classified into idle vs busy by `status` |
+| `GET /api/v1/approvals?status=pending` | Pending approvals across the workspace |
+
+```bash
+crewship now
+crewship now --format json
+```
+
+Output:
+
+```
+Now  14:02:17 UTC
+
+Running missions/runs: 2
+  r_abc • agent=viktor  started=2026-05-19T14:00:11Z
+  r_def • agent=petra   started=2026-05-19T13:58:42Z
+
+Agents: 4 idle, 2 busy
+
+Pending approvals: 1
+  appr_xyz • Deploy frontend v2.3
+```
+
+## See also
+
+- [`crewship inbox`](/cli/agent) — paginated daily-driver inbox (deeper than `me`).
+- [`crewship cost`](/cli/cost) — full cost breakdown (`today` only teases this).
+- [`crewship tui`](/cli/tui) — full-screen real-time dashboard.
+- [`crewship approvals`](/cli/approvals) — act on the pending items `me` / `now` surface.

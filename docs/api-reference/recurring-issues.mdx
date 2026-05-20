@@ -1,0 +1,177 @@
+---
+title: "Recurring Issues"
+description: "Cron-scheduled issue templates — a recurring issue creates a fresh backlog row on every cron tick. List, create, update, delete; CRON parsing happens server-side and computes next_run on write."
+icon: "repeat"
+---
+
+# Recurring Issues
+
+A recurring issue is a **template** that produces a fresh backlog issue on every cron tick: same title, description, priority, project, milestone, assignee, and labels. The intended workflow is "weekly bug triage", "daily standup digest", "monthly cost review" — anything you'd otherwise re-type as an issue on a schedule.
+
+Implementation: `internal/api/recurring_issue_handler.go`. Backed by the `recurring_issues` table.
+
+The cron expression is parsed and validated **at write time** using the standard 5-field syntax (`Minute | Hour | DayOfMonth | Month | DayOfWeek`); the parser is `github.com/robfig/cron/v3`. The next fire time is computed on create and on every cron change and stored in `next_run`, so the dispatcher can wake by index without re-parsing.
+
+All endpoints require an authenticated session and workspace context.
+
+## Recurring issue shape
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | string (CUID) | |
+| `crew_id` | string | Owning crew. Verified against `workspace_id` on create. |
+| `crew_name` | string | Pre-joined from `crews.name` for display — empty string if the crew was deleted. |
+| `title` | string | Template title used verbatim on each fire. |
+| `description` | string \| null | Template description (Markdown). |
+| `priority` | string | One of `low`, `normal`, `high`, `urgent`, or `none`. Defaults to `none` when omitted on create. |
+| `project_id` | string \| null | Optional project to file the new issue under. |
+| `milestone_id` | string \| null | Optional milestone to attach. |
+| `assignee_type` | string \| null | `agent` or `user`. |
+| `assignee_id` | string \| null | The agent or user id. |
+| `labels_json` | string \| null | Opaque JSON array of label ids — applied verbatim to each fire. |
+| `cron_expression` | string | Standard 5-field cron expression. |
+| `enabled` | bool | When `false`, the dispatcher skips the row. Created enabled by default. |
+| `next_run` | RFC3339 \| null | Computed from `cron_expression` at write time. |
+| `last_run` | RFC3339 \| null | Set by the dispatcher after a successful fire. |
+| `run_count` | int | Total successful fires. |
+| `created_at` | RFC3339 | |
+
+## `GET /api/v1/recurring-issues`
+
+List recurring issues in the workspace, newest first.
+
+**Auth:** authenticated session + workspace context.
+
+**Query parameters:**
+
+| Param | Type | Default | Notes |
+|---|---|---|---|
+| `crew_id` | string | (unset) | Narrow to a single crew. |
+
+**Response:** `200 OK` — JSON array (never `null`).
+
+```json
+[
+  {
+    "id": "ri_01HVZ...",
+    "crew_id": "crw_backend",
+    "crew_name": "Backend",
+    "title": "Weekly dependency audit",
+    "description": "Run `npm audit` and `pnpm outdated`; file follow-ups for critical advisories.",
+    "priority": "normal",
+    "project_id": "prj_security",
+    "milestone_id": null,
+    "assignee_type": "agent",
+    "assignee_id": "agt_viktor",
+    "labels_json": "[\"lbl_security\",\"lbl_chore\"]",
+    "cron_expression": "0 9 * * 1",
+    "enabled": true,
+    "next_run": "2026-05-25T09:00:00Z",
+    "last_run": "2026-05-18T09:00:00Z",
+    "run_count": 14,
+    "created_at": "2026-02-03T12:01:00Z"
+  }
+]
+```
+
+## `POST /api/v1/recurring-issues`
+
+Create a new recurring issue template.
+
+**Auth:** authenticated session + workspace context + `OWNER`, `ADMIN`, or `MANAGER` role (`requireRole("create")`).
+
+**Request body:**
+
+| Field | Type | Required | Default | Notes |
+|---|---|---|---|---|
+| `crew_id` | string | Yes | — | Must exist in the current workspace (`SELECT 1 FROM crews WHERE id = ? AND workspace_id = ?`). A missing crew → `400 Crew not found in workspace`. |
+| `title` | string | Yes | — | Empty → `400 title is required`. |
+| `description` | string | No | `null` | |
+| `priority` | string | No | `"none"` | |
+| `project_id` | string | No | `null` | |
+| `milestone_id` | string | No | `null` | |
+| `assignee_type` | string | No | `null` | `agent` or `user`. |
+| `assignee_id` | string | No | `null` | |
+| `labels_json` | string | No | `null` | Opaque JSON. |
+| `cron_expression` | string | Yes | — | Standard 5-field cron. Invalid → `400 Invalid cron expression: <parser error>`. `next_run` is computed from this immediately. |
+
+`enabled` is forced to `true` on create; flip it with `PATCH`.
+
+**Response:** `201 Created` with the full recurring issue object.
+
+**WebSocket event:** `recurring_issue.created` broadcast on the workspace channel.
+
+| Status | Condition |
+|---|---|
+| `400` | Missing `crew_id` / `title` / `cron_expression`, invalid cron expression, or crew does not belong to the workspace. |
+| `401` | Not authenticated. |
+| `403` | Caller is below the `MANAGER` role. |
+
+## `PATCH /api/v1/recurring-issues/{recurringId}`
+
+Partial update. When `cron_expression` is changed, the new value is re-parsed and `next_run` is recomputed in the same write — so the dispatcher's next wake reflects the new schedule without a second round-trip.
+
+**Auth:** authenticated session + workspace context + `OWNER`, `ADMIN`, or `MANAGER` role.
+
+**Request body:** every field optional.
+
+| Field | Type | Notes |
+|---|---|---|
+| `crew_id` | string | |
+| `title` | string | |
+| `description` | string | |
+| `priority` | string | |
+| `project_id` | string | `""` → NULL. |
+| `milestone_id` | string | `""` → NULL. |
+| `assignee_type` | string | |
+| `assignee_id` | string | |
+| `labels_json` | string | |
+| `cron_expression` | string | Re-parsed; invalid → `400`. Forces `next_run` recompute. |
+| `enabled` | bool | |
+
+**Response:** `200 OK` with the full updated recurring issue object (with `crew_name` re-joined from `crews`).
+
+**WebSocket event:** `recurring_issue.updated` broadcast on the workspace channel.
+
+| Status | Condition |
+|---|---|
+| `400` | Malformed JSON body, invalid cron expression, or no fields to update. |
+| `401` | Not authenticated. |
+| `403` | Caller is below the `MANAGER` role. |
+| `404` | Recurring issue id not found in this workspace. |
+
+## `DELETE /api/v1/recurring-issues/{recurringId}`
+
+Hard delete. The recurring template is removed; **already-fired issues are not touched** — they remain in the backlog with whatever state they've reached.
+
+**Auth:** authenticated session + workspace context + `OWNER` or `ADMIN` role (`requireRole("manage")`).
+
+**Response:** `204 No Content`.
+
+**WebSocket event:** `recurring_issue.deleted` broadcast on the workspace channel.
+
+| Status | Condition |
+|---|---|
+| `401` | Not authenticated. |
+| `403` | Caller is below the `ADMIN` role. |
+| `404` | Recurring issue id not found in this workspace. |
+
+## Cron syntax cheatsheet
+
+5-field expression: `<minute> <hour> <day-of-month> <month> <day-of-week>`.
+
+| Expression | Meaning |
+|---|---|
+| `0 9 * * 1` | Every Monday at 09:00 UTC. |
+| `*/15 * * * *` | Every 15 minutes. |
+| `0 0 1 * *` | Midnight UTC on the 1st of every month. |
+| `0 0 * * 0` | Midnight UTC every Sunday. |
+
+All times are interpreted in **UTC**. There is currently no per-workspace timezone offset — the dispatcher schedules from `next_run` directly.
+
+## See also
+
+- [Issues](/api-reference/issues) — the missions table where each fire lands.
+- [Triage Rules](/api-reference/triage) — auto-route the newly-created backlog issue to a crew / agent.
+- [Crews](/api-reference/crews) — the `crew_id` target.
+- [Milestones](/api-reference/milestones) — optional `milestone_id` target.

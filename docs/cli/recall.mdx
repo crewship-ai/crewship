@@ -1,0 +1,48 @@
+---
+title: "Recall"
+description: "Free-text FTS5 search across the Crew Journal — \"did we discuss / try / decide X before?\""
+icon: "search"
+---
+
+# Recall
+
+`cmd/crewship/cmd_recall.go` hits the journal `?q=` FTS5 endpoint and renders results in a snippet form optimised for question-answering ("how did we ship the auth fix?"). Different mental model from `crewship journal`, which is for filtered tailing/auditing — the two share the underlying endpoint but differ in defaults, presentation, and intent.
+
+## `crewship recall <query>`
+
+The query is everything after the command name (joined with spaces). Server caps `q=` at 200 characters; longer queries fail fast with `query too long: <n> chars (max 200)`.
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--limit <n>` | int | `20` | Max matches to return. |
+| `--since <window>` | string | (unset) | `1h`, `24h`, `7d`, or RFC3339. Sent server-side. |
+| `--crew <slug-or-id>` | string | (unset) | Filter by crew. Resolved to ID. |
+| `--agent <id>` | string | (unset) | Filter by agent ID. |
+
+### Examples
+
+```bash
+crewship recall "auth migration"
+crewship recall "rate limit" --since 30d --limit 30
+crewship recall "keeper denied" --crew backend-team
+crewship recall "deploy" --format json | jq '.[].summary'
+```
+
+Each hit renders as a snippet card with timestamp, entry type, scope (crew/agent), the summary, and a body excerpt windowed around the first match. Matches are highlighted in bold ANSI when output is a TTY.
+
+```
+2026-04-30 10:13  [peer.escalation]  backend-team / viktor
+  agent escalated to lead — repeated DB lock timeout
+  ...lock contention on credentials table during reload...
+```
+
+### Common errors
+
+- **`query too long: <n> chars (max 200)`** — server-side limit.
+- **`bad --since: <reason>`** — value did not parse as duration or RFC3339.
+
+## See also
+
+- [`crewship journal`](/cli/journal) — filtered tailing/audit, not question-answering.
+- [`crewship activity`](/cli/activity) — high-level cross-crew feed.
+- [`crewship recap <chat-id>`](/cli/recap) — agent-generated summary of one session.

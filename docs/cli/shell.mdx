@@ -1,0 +1,68 @@
+---
+title: "Shell"
+description: "Interactive REPL — each line is a prompt to the default agent. Slash-commands control session state."
+icon: "terminal"
+---
+
+# Shell
+
+`cmd/crewship/cmd_shell.go` opens an interactive REPL session. Each typed line is dispatched to the default agent via the [`ask`](/cli/agent) pipeline; slash-commands inside the REPL control session state. `@`-prefixed tokens (e.g. `summarise @notes.md`) inline file content via the same `ExpandAtFiles` helper used elsewhere.
+
+The active agent latches across turns — `/agent viktor`, then plain "what's up" still targets viktor.
+
+## `crewship shell`
+
+No flags. The REPL is built on `cli.NewREPL()` and reads until EOF (Ctrl-D) or `/quit`.
+
+```bash
+crewship shell
+# crewship shell — type /help for commands, Ctrl-D to exit.
+# crewship [default-agent] › what time is it?
+# ...
+# crewship [default-agent] › /agent viktor
+# agent → viktor
+# crewship [viktor] › summarise @notes.md
+```
+
+The prompt string carries the active agent slug in square brackets so at a glance you know which agent will get the next message.
+
+## Slash commands (v1)
+
+| Command | Effect |
+|---|---|
+| `/help` | List commands. |
+| `/agent <slug>` | Switch the active agent. No arg → print current. |
+| `/workspace <slug>` (alias `/cd`) | Switch workspace. |
+| `/plan` | Toggle plan-mode for subsequent prompts. Sticky. |
+| `/effort <level>` | Set reasoning effort: `minimal`, `low`, `medium`, `high`, `xhigh`. |
+| `/think` | Toggle `--show-thinking`. |
+| `/clear` | Clear the terminal (`\033[2J\033[H`). |
+| `/history` | Stub — readline history is a v2 feature. Use shell-level history for now. |
+| `/quit`, `/exit` | Leave. |
+
+### Examples (typed at the prompt)
+
+```
+what time is it?
+/agent viktor
+summarise @notes.md
+/plan
+rewrite the auth flow
+/effort high
+/quit
+```
+
+### Sticky state
+
+Once set, `/agent`, `/effort`, `/think`, and `/plan` persist across turns. Plan-mode in particular wraps every subsequent prompt with the plan-mode prefix until `/plan` toggles it off — handy for an architect-only working session.
+
+### Common errors
+
+- **`no active agent. Set one with /agent <slug>`** — no default-agent configured and no `/agent` issued.
+- **`usage: /workspace <slug>`** — `/workspace` (or `/cd`) called with no argument.
+
+## See also
+
+- [`crewship ask`](/cli/agent) — the one-shot equivalent; `shell` is essentially a REPL wrapper around it.
+- [`crewship slash`](/cli/slash) — top-level slash commands (different surface: user-defined `.md` files).
+- [`crewship tui`](/cli/tui) — full-screen Bubble Tea dashboard for monitoring rather than chat.

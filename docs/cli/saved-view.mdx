@@ -1,0 +1,39 @@
+---
+title: "Saved View"
+description: "Manage saved views — query bookmarks across issues / runs / activity."
+icon: "bookmark"
+---
+
+# Saved View
+
+`cmd/crewship/cmd_admin_extras.go` exposes the saved-views surface. A saved view is a named, server-stored query bookmark — the filters and sort you set in the web UI, persisted and addressable from the CLI.
+
+Aliases: `saved-views`, `view`.
+
+## `crewship saved-view list`
+
+`GET /api/v1/saved-views`. JSON-shaped output by default.
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--filter <expr>` | string | (unset) | gojq filter applied before output. |
+
+```bash
+crewship saved-view list
+crewship saved-view list --filter '.[] | {id, name, owner}'
+crewship view list                              # alias
+```
+
+## `crewship saved-view delete <view-id>`
+
+`DELETE /api/v1/saved-views/{id}`. Prints `[deleted view <id>]` on success.
+
+```bash
+crewship saved-view delete sv_abc123
+crewship saved-views delete sv_abc123           # alias
+```
+
+## See also
+
+- [`crewship issue`](/cli/issue) — most saved views target the issue tracker.
+- [`crewship activity`](/cli/activity) — adjacent feed surface.

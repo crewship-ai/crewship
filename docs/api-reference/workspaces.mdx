@@ -1,0 +1,1201 @@
+---
+title: "Workspaces"
+description: "Manage workspaces -- the top-level tenant boundary that owns crews, members, invitations, skills, pipelines, schedules, and webhooks."
+icon: "building"
+---
+
+A **workspace** is the top-level tenant in Crewship. Every crew, agent, credential, skill, and pipeline belongs to exactly one workspace, and a user joins a workspace with a role (`OWNER`, `ADMIN`, `MANAGER`, `MEMBER`, `VIEWER`).
+
+Workspace-scoped endpoints are nested under `/api/v1/workspaces/{workspaceId}/...` and require:
+
+- A valid JWT session cookie **or** a CLI token (`crewship_cli_…`) in the `Authorization` header.
+- The authenticated user to be a member of the workspace (enforced by the `wsCtx` middleware, which also injects `workspace_id` and `role` into the request context).
+
+Errors follow [RFC 7807 Problem Details](https://datatracker.ietf.org/doc/html/rfc7807) -- responses include `type`, `title`, `status`, `detail`, and `instance`.
+
+---
+
+## Workspace metadata
+
+### List workspaces
+
+```
+GET /api/v1/workspaces
+```
+
+Returns every workspace the authenticated user belongs to, ordered by `created_at` DESC. Soft-deleted workspaces (`deleted_at IS NOT NULL`) are excluded.
+
+**Auth:** Any authenticated user.
+
+**Response:** `200 OK`
+
+```json
+[
+  {
+    "id": "ws_cm1abc123",
+    "name": "Acme Robotics",
+    "slug": "acme-robotics",
+    "logo_url": null,
+    "preferred_language": "English",
+    "created_at": "2026-04-12T09:18:22Z",
+    "updated_at": "2026-05-09T14:02:11Z",
+    "currentUserRole": "OWNER",
+    "_count_crews": 4,
+    "_count_agents": 12,
+    "_count_members": 7
+  }
+]
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | string | Workspace ID (CUID) |
+| `name` | string | Display name (2-100 chars) |
+| `slug` | string | URL-safe identifier (2-50 chars, globally unique) |
+| `logo_url` | string? | URL to workspace logo |
+| `preferred_language` | string? | Canonical language name (e.g. `"Czech"`, `"English"`) -- see [language list](#preferred_language-values) |
+| `currentUserRole` | string | Caller's role in this workspace (`OWNER` / `ADMIN` / `MANAGER` / `MEMBER` / `VIEWER`) |
+| `_count_crews` | integer | Number of non-deleted crews |
+| `_count_agents` | integer | Number of non-deleted agents |
+| `_count_members` | integer | Number of workspace members |
+| `created_at` / `updated_at` | string | RFC 3339 timestamp |
+
+### Create workspace
+
+```
+POST /api/v1/workspaces
+```
+
+Provisions a new workspace and adds the calling user as `OWNER` in a single transaction.
+
+**Auth:** Any authenticated user.
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | Display name (2-100 chars) |
+| `slug` | string | yes | URL-safe identifier (2-50 chars, must be globally unique) |
+| `preferred_language` | string | no | Either a canonical name (`"Czech"`) or ISO code (`"cs"`, `"pt-BR"`); validated against [`validLanguages`](#preferred_language-values). Empty string is allowed and stored as NULL. |
+
+```json
+{
+  "name": "Acme Robotics",
+  "slug": "acme-robotics",
+  "preferred_language": "en"
+}
+```
+
+**Response:** `201 Created` -- same shape as the List response item (without `currentUserRole` / counts).
+
+| Status | Condition |
+|---|---|
+| `400` | Missing/invalid `name`, `slug`, or `preferred_language` |
+| `401` | Not authenticated |
+| `409` | `slug` already taken |
+
+### Get workspace
+
+```
+GET /api/v1/workspaces/{workspaceId}
+```
+
+**Response:** `200 OK` -- single workspace object (same fields as List) with `currentUserRole` populated from the JWT.
+
+| Status | Condition |
+|---|---|
+| `404` | Workspace not found or soft-deleted |
+
+### Update workspace
+
+```
+PATCH /api/v1/workspaces/{workspaceId}
+```
+
+Partial update -- only provided fields are changed. Setting `preferred_language` to an empty string clears it (`NULL`).
+
+**Auth:** `OWNER` or `ADMIN` (`canRole "manage"`).
+
+**Request body:** All fields optional.
+
+| Field | Type | Description |
+|---|---|---|
+| `name` | string | 2-100 chars |
+| `slug` | string | 2-50 chars; must remain unique across all workspaces |
+| `preferred_language` | string | Canonical name or ISO code; empty string clears the field |
+
+**Response:** `200 OK` -- updated workspace object.
+
+| Status | Condition |
+|---|---|
+| `400` | Invalid field values |
+| `403` | Caller is not `OWNER`/`ADMIN` |
+| `409` | New `slug` already taken |
+
+> **Note:** There is no `DELETE /workspaces/{workspaceId}` endpoint. Workspace deletion is handled out-of-band (`crewship admin workspace delete` on the host).
+
+---
+
+## Members
+
+### List members
+
+```
+GET /api/v1/workspaces/{workspaceId}/members
+```
+
+Returns all members of the workspace ordered by `created_at` ASC, joined to `users` for display fields.
+
+**Response:** `200 OK`
+
+```json
+[
+  {
+    "id": "wm_cm9xyz",
+    "workspace_id": "ws_cm1abc123",
+    "user_id": "user_jdoe42",
+    "role": "OWNER",
+    "created_at": "2026-04-12T09:18:22Z",
+    "updated_at": "2026-04-12T09:18:22Z",
+    "user": {
+      "id": "user_jdoe42",
+      "email": "jdoe@acme.example",
+      "full_name": "Jane Doe",
+      "avatar_url": "https://acme.example/avatars/jdoe.png"
+    }
+  }
+]
+```
+
+### Add member
+
+```
+POST /api/v1/workspaces/{workspaceId}/members
+```
+
+Adds an existing user to the workspace by user ID. Use this when the user already has a Crewship account; for unknown email addresses, use [Create invitation](#create-invitation) instead.
+
+**Auth:** `OWNER` or `ADMIN` (`canRole "manage"`).
+
+**Request body:**
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `user_id` | string | yes | -- | Target user's CUID |
+| `role` | string | no | `MEMBER` | One of `ADMIN`, `MANAGER`, `MEMBER`, `VIEWER` (`OWNER` cannot be assigned via API). Assigning `ADMIN` requires the caller to be `OWNER`. |
+
+```json
+{
+  "user_id": "user_jdoe42",
+  "role": "MANAGER"
+}
+```
+
+**Response:** `201 Created` -- the new member row.
+
+| Status | Condition |
+|---|---|
+| `400` | Missing `user_id`, invalid `role` |
+| `402` | License member limit exceeded |
+| `403` | Caller not `OWNER`/`ADMIN`, or tried to assign `ADMIN` without being `OWNER` |
+| `404` | `user_id` does not match any user |
+| `409` | User is already a member |
+
+### Remove member
+
+```
+DELETE /api/v1/workspaces/{workspaceId}/members/{memberId}
+```
+
+Removes a workspace member. **You cannot remove the workspace OWNER.**
+
+**Auth:** `OWNER` or `ADMIN` (`canRole "manage"`).
+
+**Response:** `200 OK`
+
+```json
+{ "success": true }
+```
+
+| Status | Condition |
+|---|---|
+| `403` | Caller not `OWNER`/`ADMIN`, **or** target member is the `OWNER` |
+| `404` | `memberId` not found in this workspace |
+
+---
+
+## Invitations
+
+Invitations issue a token-gated link that the recipient redeems via the auth flow. They expire after 7 days.
+
+### List invitations
+
+```
+GET /api/v1/workspaces/{workspaceId}/invitations
+```
+
+Returns pending (un-accepted) invitations ordered by `created_at` DESC, joined to `users` for the inviter.
+
+**Response:** `200 OK`
+
+```json
+[
+  {
+    "id": "inv_cm0aaa1",
+    "workspace_id": "ws_cm1abc123",
+    "email": "newhire@acme.example",
+    "role": "MEMBER",
+    "invited_by": "user_jdoe42",
+    "token": "EXAMPLE-NOT-A-REAL-32-BYTE-HEX-TOKEN",
+    "expires_at": "2026-05-26T09:18:22Z",
+    "accepted_at": null,
+    "created_at": "2026-05-19T09:18:22Z",
+    "inviter": {
+      "id": "user_jdoe42",
+      "email": "jdoe@acme.example",
+      "full_name": "Jane Doe"
+    }
+  }
+]
+```
+
+### Create invitation
+
+```
+POST /api/v1/workspaces/{workspaceId}/invitations
+```
+
+**Auth:** `OWNER` or `ADMIN` (`canRole "manage"`). Assigning the `ADMIN` role requires the caller to be `OWNER`.
+
+**Request body:**
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `email` | string | yes | -- | Recipient email |
+| `role` | string | no | `MEMBER` | One of `ADMIN`, `MANAGER`, `MEMBER`, `VIEWER` |
+
+**Response:** `201 Created` -- invitation object with the freshly minted hex `token` (this is the only time the token is returned).
+
+| Status | Condition |
+|---|---|
+| `400` | Missing/invalid email or role |
+| `402` | License member limit exceeded |
+| `403` | Caller not `OWNER`/`ADMIN`, or tried to invite as `ADMIN` without being `OWNER` |
+| `409` | Email belongs to an existing member, or there's already a non-expired invitation for this email |
+
+---
+
+## Pipelines
+
+Pipelines (also called *routines* in the UI) are versioned, workspace-scoped DSL programs that orchestrate agent runs, sub-pipeline calls, parallel forks, and approval waitpoints. See the [Pipelines guide](/guides/routines) and the [DSL reference](/guides/routines-cookbook) for authoring details.
+
+### List pipelines
+
+```
+GET /api/v1/workspaces/{workspaceId}/pipelines
+```
+
+Returns workspace-visible, non-ephemeral pipelines. Each row is enriched with `author_agent_name` (best-effort lookup) and the most recent 3 issue identifiers bound via `missions.routine_id` so the UI can render an "ENG-5, ENG-9 +1" chip without a second fetch.
+
+**Query parameters:**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `include_ephemeral` | `1` | off | Include auto-generated delegation-wrap pipelines |
+| `include_hidden` | `1` | off | Include rows with `workspace_visible=0` |
+| `author_crew_id` | string | -- | Filter to one author crew |
+| `order` | `popularity` / `recent` / `name` | `popularity` | Sort order |
+
+**Response:** `200 OK`
+
+```json
+[
+  {
+    "id": "pipe_cmRoutine42",
+    "slug": "weekly-changelog",
+    "name": "Weekly changelog",
+    "description": "Summarise merged PRs into the public changelog",
+    "dsl_version": "v1",
+    "definition_hash": "f3c1...",
+    "ephemeral": false,
+    "workspace_visible": true,
+    "invocation_count": 17,
+    "last_invoked_at": "2026-05-18T08:00:00Z",
+    "last_invocation_status": "COMPLETED",
+    "author_crew_id": "crew_eng",
+    "author_agent_id": "agent_eva",
+    "author_agent_name": "Eva",
+    "author_user_id": "",
+    "authored_via": "agent",
+    "linked_issue_count": 3,
+    "linked_issues": ["ENG-5", "ENG-9", "ENG-12"],
+    "created_at": "2026-04-30T11:00:00Z",
+    "updated_at": "2026-05-18T08:00:01Z"
+  }
+]
+```
+
+The `definition` field is **omitted** from the List response and only returned by [Get pipeline](#get-pipeline).
+
+### Get pipeline
+
+```
+GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}
+```
+
+Returns the same shape as List but with the full `definition` (raw DSL JSON) inlined.
+
+| Status | Condition |
+|---|---|
+| `404` | Pipeline not found in this workspace |
+
+### Delete pipeline
+
+```
+DELETE /api/v1/workspaces/{workspaceId}/pipelines/{slug}
+```
+
+Soft-deletes the pipeline (`deleted_at` set). Versions, run history, and bound schedules/webhooks are retained.
+
+**Response:** `204 No Content`
+
+| Status | Condition |
+|---|---|
+| `404` | Pipeline not found |
+
+### Save pipeline
+
+```
+POST /api/v1/workspaces/{workspaceId}/pipelines/save
+```
+
+Creates or updates a pipeline for the calling user. `authored_via` is always set to `"user_api"` and `author_user_id` is extracted from the JWT (callers cannot forge identity).
+
+**Auth:** `MANAGER`+ (`canRole "create"`).
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `slug` | string | yes | URL-safe pipeline slug |
+| `name` | string | no | Display name (falls back to `slug`) |
+| `description` | string | no | -- |
+| `definition` | object | yes | DSL JSON document |
+| `author_crew_id` | string | no | Pin a crew context for runtime resolution; without it, runs fall back to the first crew the saving user belongs to |
+| `last_test_run_at` | string | conditional | RFC 3339 timestamp from a recent `/test_run`; required unless `save_token` or `skip_test_gate` is used |
+| `last_test_run_passed` | boolean | conditional | Must be `true` if relying on body-trust |
+| `save_token` | string | no | HMAC-signed proof returned by `/test_run`; supersedes the body-trust on `last_test_run_at` |
+| `skip_test_gate` | boolean | no | OWNER/ADMIN-only escape hatch -- bypass the 5-minute test-run gate entirely |
+
+**Response:** `201 Created` -- full pipeline object including `definition`.
+
+| Status | Condition |
+|---|---|
+| `400` | Missing `slug` or `definition`, invalid JSON |
+| `401` | Not authenticated |
+| `403` | Role below `MANAGER`, or `skip_test_gate` requested without OWNER/ADMIN |
+| `409` | Slug already exists in this workspace |
+| `422` | DSL parse / validate / cycle-detect failure, expired `save_token`, or test-run gate not satisfied |
+
+### Test-run a draft
+
+```
+POST /api/v1/workspaces/{workspaceId}/pipelines/test_run
+```
+
+Executes an **unsaved** DSL against the runner so the author can confirm it works before calling `/save`. On success the response includes a `save_token` HMAC-bound to `(workspace_id, definition_hash, user_id)` that can be passed to `/save` instead of a body-trust timestamp.
+
+**Request body:**
+
+```json
+{
+  "definition": { /* DSL JSON */ },
+  "author_crew_id": "crew_eng",
+  "sample_inputs": { "issue": "ENG-9" }
+}
+```
+
+**Response:** `200 OK` -- a [`RunResult`](#runresult-shape) with an additional `save_token` field when the run completed successfully and a token signing secret is wired.
+
+| Status | Condition |
+|---|---|
+| `400` | Missing `definition` or `author_crew_id`, invalid JSON |
+| `422` | DSL parse/validate failure |
+| `503` | Runner not wired (orchestrator hasn't booted, or build excluded the runner) |
+
+### Dry-run a saved pipeline
+
+```
+POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/dry_run
+```
+
+Returns the structured **WouldExecute** report for the supplied inputs -- no agent invocations, no journal entries.
+
+**Request body:** Same shape as [Run](#run-pipeline). All fields optional.
+
+**Response:** `200 OK` -- `RunResult` with `mode="dry_run"`.
+
+### Run pipeline
+
+```
+POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/run
+```
+
+Invokes a saved pipeline. Returns synchronously with the full `RunResult`; for live progress, subscribe to the workspace WebSocket channel and filter `pipeline.*` journal entries by `run_id`.
+
+**Request body:**
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `inputs` | object | `{}` | Input map -- defaults from the pipeline's input spec are applied for missing keys |
+| `tier_override` | string | -- | One of `trivial` / `fast` / `moderate` / `smart` -- replaces every `agent_run` step's complexity for this run only. Unknown values are silently ignored. |
+| `triggered_via` | string | `manual` | Closed enum: `manual`, `schedule`, `webhook`, `call_pipeline`, `issue` |
+| `triggered_by_id` | string | -- | Free-form attribution id (e.g. an issue identifier when `triggered_via=issue`) |
+
+**Headers:**
+
+| Header | Description |
+|---|---|
+| `Idempotency-Key` | Dedupes redeliveries within 24h -- a second request with the same key returns the original run with `status="DEDUPED"`. Falls through silently when the idempotency store isn't wired. |
+| `X-Crewship-Invoking-Crew` / `X-Crewship-Invoking-Agent` | Injected by the sidecar when an in-container agent triggers the run |
+
+**Response:** `200 OK` -- `RunResult`.
+
+| Status | Condition |
+|---|---|
+| `404` | Pipeline not found |
+| `429` | A run with the same `concurrency_key` is already in flight (sets `Retry-After: 5`) |
+| `503` | Runner not wired |
+
+#### `RunResult` shape
+
+```json
+{
+  "run_id": "run_cm9abc",
+  "pipeline_id": "pipe_cmRoutine42",
+  "status": "COMPLETED",
+  "mode": "run",
+  "output": "Drafted changelog for sprint 42",
+  "step_outputs": {
+    "draft": "...",
+    "review": "..."
+  },
+  "cost_usd": 0.0241,
+  "duration_ms": 18432,
+  "deduped": false
+}
+```
+
+### List pipeline runs (journal-backed)
+
+```
+GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/runs
+```
+
+Returns `pipeline.run.*` journal entries for the named pipeline, newest first.
+
+**Query parameters:**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `limit` | integer | 50 | Hard cap 500 |
+| `include_steps` | `1` | off | Widen to `pipeline.*` (also include `pipeline.step.*` entries for the waterfall view) |
+
+Each row carries `id`, `ts`, `entry_type`, `severity`, `summary`, `pipeline_id`, `run_id`, and the raw `payload`.
+
+### List pipeline run records (projection table)
+
+```
+GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/run-records
+```
+
+Column-typed scan over `pipeline_runs` (migration v83). Faster than `/runs` because it skips the journal LIKE-pattern + `json_extract` path. Returns 503 with a `legacy: "/runs"` hint when the run store isn't wired.
+
+**Query parameters:**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `limit` | integer | 50 | Hard cap 500 |
+| `status` | string | -- | Filter to a single `RunStatus` (`running`, `completed`, `failed`, `paused`, `queued`, `cancelled`) |
+
+**Response:** `200 OK` -- array of run records. Each record:
+
+```json
+{
+  "id": "run_cm9abc",
+  "pipeline_id": "pipe_cmRoutine42",
+  "pipeline_slug": "weekly-changelog",
+  "status": "completed",
+  "mode": "run",
+  "started_at": "2026-05-18T08:00:00.123456Z",
+  "ended_at": "2026-05-18T08:00:18.555432Z",
+  "current_step_id": "",
+  "output": "Drafted changelog for sprint 42",
+  "cost_usd": 0.0241,
+  "duration_ms": 18432,
+  "error_message": "",
+  "failed_at_step": "",
+  "error_fingerprint": "",
+  "triggered_via": "manual",
+  "triggered_by_id": "",
+  "idempotency_key": ""
+}
+```
+
+`error_message` is sanitised in this view (single-line, ≤200 chars). The full error stays in `journal_entries`.
+
+### List active runs (in-memory registry)
+
+```
+GET /api/v1/workspaces/{workspaceId}/pipelines/runs/active
+```
+
+Returns the in-flight run set scoped to this workspace from the in-memory `RunRegistry`. Used by the dashboard's "running now" badge and cancel buttons. **Single-instance scope** -- in a multi-replica deployment, each replica only sees its own runs until a shared registry lands. Returns an empty list when the registry is not wired.
+
+**Response:** `200 OK`
+
+```json
+[
+  {
+    "run_id": "run_cm9abc",
+    "workspace_id": "ws_cm1abc123",
+    "pipeline_id": "pipe_cmRoutine42",
+    "pipeline_slug": "weekly-changelog",
+    "concurrency_key": "weekly-changelog:main",
+    "started_at": "2026-05-19T08:00:00.123456Z",
+    "cancel_requested": false
+  }
+]
+```
+
+### List workspace runs (cross-pipeline feed)
+
+```
+GET /api/v1/workspaces/{workspaceId}/pipeline-runs
+```
+
+Workspace-scoped run feed for the `/activity` page. Returns recent runs across **every** pipeline with enrichment (`pipeline_name`, `issue_identifier` when `triggered_via=issue`). Sorted by `started_at` DESC.
+
+**Query parameters:**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `limit` | integer | 50 | Hard cap 200 |
+| `status` | string | -- | Filter; `active` is a dashboard shortcut for `running + queued + paused` |
+| `since` | string (RFC 3339) | -- | `created_at` lower bound for cursor pagination |
+
+**Response:** `200 OK`
+
+```json
+{
+  "rows": [
+    {
+      "id": "run_cm9abc",
+      "pipeline_id": "pipe_cmRoutine42",
+      "pipeline_slug": "weekly-changelog",
+      "pipeline_name": "Weekly changelog",
+      "status": "running",
+      "mode": "run",
+      "started_at": "2026-05-19T08:00:00.123456Z",
+      "ended_at": "",
+      "current_step_id": "review",
+      "step_outputs": { "draft": "..." },
+      "cost_usd": 0.012,
+      "duration_ms": 4321,
+      "triggered_via": "schedule",
+      "triggered_by_id": "sched_cmWeekly",
+      "invoking_crew_id": "",
+      "invoking_agent_id": "",
+      "invoking_user_id": "",
+      "error_message": "",
+      "failed_at_step": "",
+      "issue_identifier": ""
+    }
+  ],
+  "count": 1
+}
+```
+
+### Get pipeline run
+
+```
+GET /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}
+```
+
+Returns the persisted state of a single run from `pipeline_runs`, joined to `pipelines` and `missions` for human-readable enrichment. `step_outputs_json` is parsed server-side into an object so the UI does not have to `JSON.parse` twice.
+
+**Response:** `200 OK` -- single row with the same fields as the workspace-runs list plus `workspace_id`, `inputs` (parsed), and `idempotency_key`.
+
+| Status | Condition |
+|---|---|
+| `404` | Run not found in this workspace |
+
+### Cancel pipeline run
+
+```
+POST /api/v1/workspaces/{workspaceId}/pipelines/runs/{runId}/cancel
+```
+
+Pre-empts an in-flight run by triggering its context. The run loop checks `ctx.Err()` between steps and propagates cancellation into the agent runner, which kills the underlying CLI process.
+
+Idempotent: cancelling an already-cancelled run is a no-op (200 with the same response). Cancelling a **finished** run returns 404 because the in-memory registry only tracks live runs.
+
+**Response:** `200 OK`
+
+```json
+{
+  "run_id": "run_cm9abc",
+  "cancel_requested": true,
+  "cancel_requested_at": "2026-05-19T08:01:33.123Z"
+}
+```
+
+| Status | Condition |
+|---|---|
+| `404` | Run not found in this workspace (already finished, or never started here) |
+| `503` | Run registry not wired |
+
+---
+
+## Versions
+
+### List versions
+
+```
+GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/versions
+```
+
+Returns the version history (newest first) for a pipeline.
+
+**Query parameters:** `limit` (default 100).
+
+**Response:** `200 OK`
+
+```json
+[
+  {
+    "version": 4,
+    "definition_hash": "f3c1...",
+    "author_type": "user",
+    "author_id": "user_jdoe42",
+    "parent_version": 3,
+    "change_summary": "Add review step before publish",
+    "created_at": "2026-05-18T08:00:01.123Z"
+  }
+]
+```
+
+### Get one version
+
+```
+GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/versions/{n}
+```
+
+Returns a specific version including the full DSL `definition`.
+
+| Status | Condition |
+|---|---|
+| `400` | `n` is not a positive integer |
+| `404` | Pipeline or version not found |
+
+### Rollback to a version
+
+```
+POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/rollback
+```
+
+Rolls the pipeline's head pointer + `definition_json` back to the named version. History is preserved -- rollback does not delete newer versions.
+
+**Request body:**
+
+```json
+{ "version": 3 }
+```
+
+**Response:** `200 OK` -- full pipeline object with the restored definition.
+
+| Status | Condition |
+|---|---|
+| `400` | `version` missing or < 1 |
+| `404` | Pipeline or version not found |
+
+---
+
+## Import / export
+
+### Export pipeline bundle
+
+```
+GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/export
+```
+
+Returns a portable `crewship-pipeline-bundle/v1` document. Author identity, runtime stats, and any installation-specific data are deliberately stripped -- the receiving workspace fills them in at import time.
+
+**Query parameters:**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `include_history` | `1` | Include up to 500 prior versions in the bundle |
+
+**Response:** `200 OK`
+
+```json
+{
+  "format": "crewship-pipeline-bundle/v1",
+  "pipeline": {
+    "name": "Weekly changelog",
+    "description": "Summarise merged PRs into the public changelog",
+    "slug": "weekly-changelog",
+    "dsl_version": "v1",
+    "definition": { /* DSL */ }
+  },
+  "metadata": {
+    "exported_at": "2026-05-19T09:00:00Z",
+    "source_workspace_id": "ws_cm1abc123",
+    "definition_hash": "f3c1...",
+    "head_version": 17
+  },
+  "history": [ /* present only when include_history=1 */ ]
+}
+```
+
+> The bundle's `metadata.head_version` field is misnamed in the current build -- it actually carries `invocation_count`. Treat it as opaque metadata.
+
+### Import pipeline bundle
+
+```
+POST /api/v1/workspaces/{workspaceId}/pipelines/import
+```
+
+Creates a pipeline from a previously exported bundle. The receiving workspace becomes the author context; the original bundle's source workspace id is preserved on the pipeline row as `imported_from_url` for audit.
+
+Imports **skip the test-run gate** by design -- a marketplace bundle is presumed to have passed test-run in its source workspace.
+
+**Request body:** the bundle JSON plus an explicit `author_crew_id`:
+
+```json
+{
+  "format": "crewship-pipeline-bundle/v1",
+  "pipeline": { /* as exported */ },
+  "metadata":  { /* as exported */ },
+  "author_crew_id": "crew_eng"
+}
+```
+
+**Response:** `201 Created` -- full pipeline object.
+
+| Status | Condition |
+|---|---|
+| `400` | Invalid bundle JSON, unsupported `format`, missing `pipeline.name`/`pipeline.definition`, missing `author_crew_id` |
+| `409` | Slug already exists in this workspace |
+| `422` | DSL parse / validate failure (receiving workspace doesn't have every referenced agent slug) |
+
+---
+
+## Approval waitpoints
+
+When a pipeline hits a `step_wait` of kind `approval`, the run parks and a waitpoint row is created. The UI's `/inbox` lists pending waitpoints; approving or rejecting wakes the parked run.
+
+### List pending waitpoints
+
+```
+GET /api/v1/workspaces/{workspaceId}/pipelines/waitpoints
+```
+
+Returns up to 200 pending waitpoints across the workspace, newest first.
+
+**Response:** `200 OK`
+
+```json
+[
+  {
+    "token": "wp_8f3c1...",
+    "pipeline_run_id": "run_cm9abc",
+    "step_id": "review-approval",
+    "kind": "approval",
+    "prompt": "Approve the drafted changelog before publishing.",
+    "invoking_crew_id": "crew_eng",
+    "timeout_at": "2026-05-19T10:00:00Z",
+    "created_at": "2026-05-19T08:00:18Z"
+  }
+]
+```
+
+### Approve / reject waitpoint
+
+```
+POST /api/v1/workspaces/{workspaceId}/pipelines/waitpoints/{token}/approve
+```
+
+Completes a pending approval. Decider identity is taken from the JWT user context.
+
+**Request body:**
+
+```json
+{
+  "approved": true,
+  "comment": "LGTM, ship it"
+}
+```
+
+**Response:** `200 OK`
+
+```json
+{ "ok": true, "approved": true }
+```
+
+| Status | Condition |
+|---|---|
+| `400` | Missing `token` or invalid body |
+| `409` | Waitpoint already decided or expired |
+| `503` | Waitpoint store not wired, or the wired implementation does not support completion |
+
+---
+
+## Schedules
+
+Schedules fire pipelines on a cron expression. The in-process scheduler ticks every minute and skips soft-deleted rows.
+
+### List schedules
+
+```
+GET /api/v1/workspaces/{workspaceId}/pipeline-schedules
+```
+
+**Response:** `200 OK`
+
+```json
+[
+  {
+    "id": "sched_cmWeekly",
+    "workspace_id": "ws_cm1abc123",
+    "name": "Weekly changelog",
+    "target_pipeline_id": "pipe_cmRoutine42",
+    "target_pipeline_slug": "weekly-changelog",
+    "target_pipeline_version": null,
+    "cron_expr": "0 9 * * MON",
+    "timezone": "Europe/Prague",
+    "inputs": { "since": "last_monday" },
+    "enabled": true,
+    "last_run_at": "2026-05-12T07:00:00Z",
+    "last_status": "completed",
+    "last_run_id": "run_cm9abc",
+    "next_run_at": "2026-05-19T07:00:00Z",
+    "created_at": "2026-04-12T09:00:00Z",
+    "updated_at": "2026-05-12T07:00:00Z"
+  }
+]
+```
+
+### Create schedule
+
+```
+POST /api/v1/workspaces/{workspaceId}/pipeline-schedules
+```
+
+Accepts either `target_pipeline_slug` (UI-friendly) or `target_pipeline_id` (CLI-friendly).
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | no | Falls back to the pipeline slug |
+| `target_pipeline_slug` | string | one-of | -- |
+| `target_pipeline_id` | string | one-of | -- |
+| `target_pipeline_version` | integer | no | Pin to a specific version; default = always head |
+| `cron_expr` | string | yes | 5-field cron |
+| `timezone` | string | no | IANA name (e.g. `"Europe/Prague"`); default UTC |
+| `inputs` | object | no | Static inputs passed on every fire |
+| `enabled` | boolean | no | Default `true` |
+
+**Response:** `201 Created` -- schedule object.
+
+| Status | Condition |
+|---|---|
+| `400` | Missing `cron_expr`, invalid cron / timezone, pipeline not found in this workspace |
+| `503` | Schedule store not wired |
+
+### Update schedule
+
+```
+PATCH /api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}
+```
+
+**Whole-row replace semantics** -- the caller sends the post-edit state, missing fields fall back to the existing row.
+
+**Response:** `200 OK` -- updated schedule.
+
+| Status | Condition |
+|---|---|
+| `400` | Invalid body / cron / timezone |
+| `404` | Schedule not found in this workspace |
+| `503` | Schedule store not wired |
+
+### Delete schedule
+
+```
+DELETE /api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}
+```
+
+Soft delete. In-flight scheduled runs finish; no new runs fire.
+
+**Response:** `204 No Content`
+
+| Status | Condition |
+|---|---|
+| `404` | Schedule not found |
+| `503` | Schedule store not wired |
+
+---
+
+## Webhooks
+
+Webhooks let external systems trigger a pipeline by POSTing to a public URL. Each webhook has its own opaque token and optional HMAC signing secret. The public dispatch entrypoint (`POST /api/v1/webhooks/{token}`) is **not** under `/workspaces/...` -- see the [Webhooks API doc](/api-reference/webhooks).
+
+### List webhooks
+
+```
+GET /api/v1/workspaces/{workspaceId}/pipeline-webhooks
+```
+
+Returns all non-deleted webhooks. The `signing_secret` value is **never** returned outside the create response.
+
+**Response:** `200 OK`
+
+```json
+[
+  {
+    "id": "wh_cmGithub",
+    "workspace_id": "ws_cm1abc123",
+    "name": "github-push",
+    "target_pipeline_id": "pipe_cmRoutine42",
+    "target_pipeline_slug": "weekly-changelog",
+    "target_pipeline_version": null,
+    "token": "whk_EXAMPLE_PLACEHOLDER",
+    "signing_secret_set": true,
+    "inputs_template": { "branch": "{{ inputs.event.ref }}" },
+    "enabled": true,
+    "rate_limit_per_min": 60,
+    "last_fired_at": "2026-05-19T07:55:00Z",
+    "last_status": "COMPLETED",
+    "last_run_id": "run_cm9abc",
+    "fire_count": 42,
+    "created_at": "2026-04-12T09:00:00Z",
+    "updated_at": "2026-05-19T07:55:00Z"
+  }
+]
+```
+
+### Create webhook
+
+```
+POST /api/v1/workspaces/{workspaceId}/pipeline-webhooks
+```
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | no | Falls back to the pipeline slug |
+| `target_pipeline_slug` | string | one-of | -- |
+| `target_pipeline_id` | string | one-of | -- |
+| `target_pipeline_version` | integer | no | -- |
+| `signing_secret` | string | no | Used for HMAC-SHA256 verification of the `X-Crewship-Signature` header |
+| `inputs_template` | object | no | Merged on top of the default `{event, raw, headers}` envelope when the webhook fires |
+| `enabled` | boolean | no | Default `true` |
+| `rate_limit_per_min` | integer | no | Per-token rate limit; 0 disables |
+
+**Response:** `201 Created` -- webhook object **including** `signing_secret` (this is the only time it is returned; subsequent reads return only `signing_secret_set: true`).
+
+| Status | Condition |
+|---|---|
+| `400` | Missing/invalid pipeline reference |
+| `503` | Webhook store not wired |
+
+### Delete webhook
+
+```
+DELETE /api/v1/workspaces/{workspaceId}/pipeline-webhooks/{webhookId}
+```
+
+Soft delete.
+
+**Response:** `204 No Content`
+
+| Status | Condition |
+|---|---|
+| `404` | Webhook not found in this workspace |
+| `503` | Webhook store not wired |
+
+---
+
+## Skills
+
+These endpoints manage the workspace-scoped *write* surface for the skills registry. Browsing skills (`GET /api/v1/skills`) is **not** workspace-scoped and lives in the [Skills API doc](/api-reference/skills).
+
+### Import skill (URL or paste)
+
+```
+POST /api/v1/workspaces/{workspaceId}/skills/import
+```
+
+Imports a single `SKILL.md` either by URL (SSRF-validated, HTTPS-only, no loopback / private addresses) or by pasted content. Re-imports of the same slug update in place.
+
+**Auth:** `MANAGER`+ (`canRole "create"`).
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `url` | string | one-of | HTTPS URL to a raw `SKILL.md` |
+| `content` | string | one-of | Inline `SKILL.md` (YAML frontmatter + markdown body) |
+| `allow_unsafe_license` | boolean | no | Bypass the SPDX allowlist; the journal entry is upgraded to `WARN` severity |
+
+**Response:** `201 Created`
+
+```json
+{
+  "skill_id": "sk_a1b2c3d4e5f6",
+  "slug": "github-pr-review",
+  "created": true,
+  "name": "github-pr-review",
+  "display_name": "GitHub PR Review",
+  "scan_status": "CLEAN"
+}
+```
+
+| Status | Condition |
+|---|---|
+| `400` | Missing/both of `url` + `content`, SSRF block (private/loopback/non-HTTPS), parse failure, license rejection |
+| `403` | Caller below `MANAGER` |
+
+### Bulk import from git repo
+
+```
+POST /api/v1/workspaces/{workspaceId}/skills/bulk-import
+```
+
+Walks a public git repository for `SKILL.md` files and upserts each through the same license-gated path as single-import. Per-skill rejections are reported in the response's `skipped` list rather than failing the whole batch.
+
+> Local-path bulk import (the importer's `Paths` field beyond the optional in-repo subdirectory filter) is intentionally **not** exposed -- it would turn the endpoint into an arbitrary host-FS read primitive.
+
+**Auth:** `MANAGER`+ (`canRole "create"`).
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `git_url` | string | yes | HTTPS git URL (no embedded credentials, no loopback) |
+| `git_ref` | string | no | Branch / tag / commit; default = repo HEAD |
+| `paths` | string[] | no | Subdirectory filter inside the repo |
+| `vendor` | string | no | Override the `vendor` field on every imported skill |
+| `allow_unsafe_license` | boolean | no | Bypass SPDX allowlist |
+| `dry_run` | boolean | no | Walk + validate but don't write to the DB |
+
+**Response:** `200 OK`
+
+```json
+{
+  "source": "git:https://github.com/acme/skills.git@main",
+  "total_found": 12,
+  "total_imported": 9,
+  "imported": [
+    { "skill_id": "sk_...", "slug": "lint-typescript", "created": true }
+  ],
+  "skipped": [
+    { "path": "skills/old/SKILL.md", "slug": "old-thing", "reason": "license MIT-no-attribution not allowed" }
+  ],
+  "truncated": false
+}
+```
+
+| Status | Condition |
+|---|---|
+| `400` | Missing `git_url`, invalid workspace |
+| `403` | Caller below `MANAGER` |
+| `502` | Walker failure (git clone failed, missing `git` binary, etc.); validation errors are echoed verbatim while raw clone-process stderr is replaced with a generic message |
+
+### Generate skill (LLM)
+
+```
+POST /api/v1/workspaces/{workspaceId}/skills/generate
+```
+
+Calls Anthropic with a condensed skill-creator system prompt, validates the output against the parser, and writes it back as a fresh row with `source='GENERATED'`. The generated content can then be edited via the regular import flow.
+
+Requires an `ACTIVE` Anthropic credential of type `API_KEY` (a real `sk-ant-...` -- OAuth bearers from the Claude Code login flow are rejected because they only work against `claude.ai`, not the Messages API).
+
+**Auth:** `MANAGER`+ (`canRole "create"`).
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `slug` | string | yes | Desired skill slug (slugified server-side) |
+| `prompt` | string | yes | User's intent / brief |
+| `model` | string | no | Default `claude-sonnet-4-6` |
+
+**Response:** `201 Created`
+
+```json
+{
+  "skill_id": "sk_a1b2c3d4e5f6",
+  "slug": "extract-pdf-tables",
+  "content": "---\nname: extract-pdf-tables\n...---\n## When to use\n...",
+  "scan_status": "CLEAN",
+  "scan_reason": "",
+  "description_quality": ""
+}
+```
+
+| Status | Condition |
+|---|---|
+| `400` | Missing `slug` or `prompt`, invalid JSON |
+| `403` | Caller below `MANAGER` |
+| `409` | Generated slug collides with an existing row |
+| `412` | No active `ANTHROPIC` / `API_KEY` credential for this workspace |
+| `502` | Upstream LLM call failed, or generated content didn't parse as a valid `SKILL.md` |
+
+### Delete skill
+
+```
+DELETE /api/v1/workspaces/{workspaceId}/skills/{skillId}
+```
+
+Removes a skill from the registry. Cascades to `agent_skills` via FK. **`BUNDLED` skills are refused** -- the binary re-seeds them on every startup, so a delete is a no-op churn and creates a malicious-operator window.
+
+**Auth:** `OWNER` or `ADMIN` (`canRole "manage"`). The skills registry is shared global state; destructive operations get the higher tier.
+
+**Response:** `200 OK`
+
+```json
+{ "deleted": true, "skill_id": "sk_a1b2c3d4e5f6" }
+```
+
+| Status | Condition |
+|---|---|
+| `400` | Missing `skill_id` path value |
+| `403` | Caller below `ADMIN`, or skill is `BUNDLED` |
+| `404` | Skill not found |
+
+---
+
+## `preferred_language` values
+
+`preferred_language` accepts either the canonical English name or an ISO code. The resolver normalises both to the canonical name before storage. Supported values:
+
+`Afrikaans` (`af`), `Arabic` (`ar`), `Bulgarian` (`bg`), `Bengali` (`bn`), `Catalan` (`ca`), `Czech` (`cs`), `Danish` (`da`), `German` (`de`), `Greek` (`el`), `English` (`en`), `Spanish` (`es`), `Estonian` (`et`), `Persian` (`fa`), `Finnish` (`fi`), `French` (`fr`), `Hebrew` (`he`), `Hindi` (`hi`), `Croatian` (`hr`), `Hungarian` (`hu`), `Indonesian` (`id`), `Italian` (`it`), `Japanese` (`ja`), `Korean` (`ko`), `Lithuanian` (`lt`), `Latvian` (`lv`), `Malay` (`ms`), `Norwegian` (`nb`), `Dutch` (`nl`), `Polish` (`pl`), `Portuguese` (`pt`), `Portuguese (Brazil)` (`pt-BR`), `Romanian` (`ro`), `Russian` (`ru`), `Slovak` (`sk`), `Slovenian` (`sl`), `Serbian` (`sr`), `Swedish` (`sv`), `Swahili` (`sw`), `Tamil` (`ta`), `Thai` (`th`), `Turkish` (`tr`), `Ukrainian` (`uk`), `Urdu` (`ur`), `Vietnamese` (`vi`), `Chinese` (`zh`), `Chinese (Traditional)` (`zh-TW`).
+
+The list lives in `internal/api/workspaces.go` and must stay in sync with `lib/languages.ts` on the frontend.
+
+---
+
+## See also
+
+- [Crews API](/api-reference/crews) -- crews live inside a workspace
+- [Skills API](/api-reference/skills) -- read-side / cross-workspace browse endpoints
+- [Webhooks API](/api-reference/webhooks) -- public dispatch entrypoint for the tokens minted here
+- [Orchestration guide](/guides/orchestration) -- how the orchestrator binds crews, agents, and pipelines
+- [Routines guide](/guides/routines) -- authoring DSL pipelines end-to-end
+- [Routines cookbook](/guides/routines-cookbook) -- copy-paste pipeline examples
+- [Credentials guide](/guides/credentials) -- required for the `/skills/generate` endpoint

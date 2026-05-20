@@ -1,0 +1,160 @@
+---
+title: "Project"
+description: "Group missions and issues under a delivery project. Status, priority, health, progress, breakdown stats."
+icon: "layers"
+---
+
+# crewship project
+
+Projects are the unit of delivery — a named bundle of missions, issues, and crews working toward a target date. They carry status, priority, and health independently, so a planning dashboard can show "in progress / at risk / 60% complete" without reading every issue. Aliases: `projects`. Defined in `cmd/crewship/cmd_project.go`.
+
+```bash
+crewship project <subcommand> [flags]
+```
+
+Auth: every subcommand requires `crewship login` plus an active workspace. The PATCH/DELETE surface mirrors `internal/api/project_handler.go` — fields you don't set with `Changed()` aren't sent, so partial updates won't clobber unrelated columns.
+
+## Subcommands
+
+| Command | Purpose |
+| --- | --- |
+| `project list` | List every project in the workspace with progress + health. |
+| `project create` | Create a project. |
+| `project get <id-or-slug>` | Show detail view (issues totals, lead, target, description). |
+| `project update <id>` | Patch any mutable field. |
+| `project delete <id>` | Delete the project. Issues are unlinked (set `project_id = NULL`), not deleted. |
+| `project stats <id>` | Breakdown by status / assignee / label / crews. |
+
+## Flags
+
+### `project create`
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `--name <string>` | (required) | Display name. |
+| `--description <string>` | (unset) | Free-text description. |
+| `--color <hex>` | (unset) | Hex color (e.g. `#3B82F6`). |
+| `--icon <name>` | (unset) | Lucide icon name. |
+| `--status <enum>` | `planned` | `backlog`, `planned`, `in_progress`, `paused`, `completed`, `cancelled`. |
+| `--priority <enum>` | `none` | `none`, `low`, `medium`, `high`, `urgent`. |
+| `--lead-id <id>` | (unset) | User or agent ID that leads the project. |
+| `--lead-type <enum>` | (unset) | `user` or `agent`. |
+| `--start-date <iso>` | (unset) | ISO date (e.g. `2026-05-01`). |
+| `--target-date <iso>` | (unset) | ISO date target. |
+
+### `project update`
+
+Every flag is opt-in — only fields the user actually set hit the wire. Pass an explicit empty string to clear a nullable column.
+
+| Flag | Effect |
+| --- | --- |
+| `--name <string>` | Rename. |
+| `--description <string>` | Replace description. |
+| `--icon <name>` | Lucide icon. |
+| `--color <hex>` | Hex color. |
+| `--status <enum>` | `backlog|planned|in_progress|paused|completed|cancelled`. |
+| `--priority <enum>` | `none|low|medium|high|urgent`. |
+| `--health <enum>` | `on_track|at_risk|off_track|on_hold|complete`. |
+| `--lead-id <id>` | Lead user/agent ID. |
+| `--lead-type <enum>` | `user` or `agent`. |
+| `--start-date <iso>` | ISO start date. |
+| `--target-date <iso>` | ISO target date. |
+
+### `project delete`
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `-y`, `--yes` | `false` | Skip the confirmation prompt. |
+
+## Examples
+
+### List
+
+```bash
+crewship project list
+# NAME                STATUS         PRIORITY  HEALTH    ISSUES   PROGRESS  TARGET
+# Onboarding rewrite  in_progress    high      on_track  4/12     33%       2026-06-30
+# Q3 platform-eng     planned        medium    -         0/0      0%        -
+```
+
+### Create
+
+```bash
+crewship project create \
+  --name "Mobile launch" \
+  --status in_progress \
+  --priority high \
+  --target-date 2026-07-15 \
+  --lead-id usr_abc \
+  --lead-type user
+```
+
+### Get details
+
+```bash
+crewship project get mobile-launch
+# Name        Mobile launch
+# Status      in_progress
+# Priority    high
+# Health      on_track
+# Lead        Petra Nováková
+# Issues      12 total, 4 done
+# Progress    33%
+# Target      2026-07-15
+# Description Phase 1 — auth + onboarding only.
+```
+
+### Update
+
+```bash
+# Bump the health and slip the target date.
+crewship project update mobile-launch --health at_risk --target-date 2026-08-15
+```
+
+You can clear a nullable field by passing an empty string explicitly — `--description ""` removes the description, while omitting the flag leaves it untouched.
+
+### Breakdown stats
+
+```bash
+crewship project stats mobile-launch
+# Issues: 12 total / 4 completed (33%)
+#
+# By status:
+#   todo            5
+#   in_progress     3
+#   done            4
+#
+# By assignee:
+#   daniel                         6 total / 2 done
+#   viktor                         4 total / 2 done
+#
+# By label:
+#   bug                            3
+#   feature                        7
+#
+# Crews: [code-review onboarding]
+```
+
+`--format json` returns the raw shape for piping into jq.
+
+### Delete
+
+```bash
+crewship project delete mobile-launch
+# Delete project "mobile-launch"? (issues will be unlinked, not deleted) [y/N]
+```
+
+The delete unlinks every issue and mission (sets `project_id = NULL` in the same transaction) so the destroy doesn't cascade into issue loss.
+
+## Common errors
+
+- **`--name is required`** — `create` was called without a name.
+- **`no fields to update — pass at least one of --name/--status/--priority/--health/--lead-id/--lead-type/--start-date/--target-date/--icon/--color/--description`** — `update` needs at least one field.
+- **`workspace_id required`** — no active workspace; run `crewship workspace use <slug>` first.
+
+## See also
+
+- [`crewship mission`](/cli/mission) — missions roll up into projects.
+- [`crewship issue`](/cli/issue) — issues live inside projects (or float unlinked).
+- [`crewship label`](/cli/label) — the labels referenced in the breakdown.
+- [Projects API](/api-reference/projects/list) — `GET /api/v1/projects`.

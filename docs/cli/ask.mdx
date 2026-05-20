@@ -1,0 +1,141 @@
+---
+title: "Ask"
+description: "One-shot prompt to your default agent. Pipe-friendly, stdin-aware, supports fan-out across agents."
+icon: "sparkles"
+---
+
+# crewship ask
+
+`ask` is the low-friction prompt — type a question, get an answer, no agent slug to remember. The agent resolves from `--agent`, then the saved `default-agent` config key, then (in a TTY) an interactive picker. Designed for shell pipelines like `git diff | crewship ask "review this"`. Defined in `cmd/crewship/cmd_ask.go`.
+
+```bash
+crewship ask [prompt] [flags]
+```
+
+A new chat is created per invocation (origin tagged `CLI`, so the web UI sidebar shows a violet `CLI` chip). To send follow-ups to an existing chat, use `crewship run --chat <chat-id>` instead.
+
+Auth: requires `crewship login` plus a workspace context. Both checks are skipped in offline modes (`--dry-run`, `--estimate`).
+
+## Flags
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `--agent <slug-or-id>` | (config) | Override the saved default-agent. Resolved via `/api/v1/agents`. |
+| `--agents <csv>` | (unset) | Fan out the prompt across multiple agents in parallel. Overrides `--agent`. |
+| `-p`, `--prompt <text>` | (unset) | Prompt text, `@path` to read a file, or `@-` to read from stdin. |
+| `-q`, `--quiet` | `false` | Only print the agent's text — no `[agent: …]` / `[done]` banners on stderr. |
+| `--no-stream` | `false` | Wait for `done`, print only the final text. |
+| `--timeout <secs>` | `0` | HTTP timeout in seconds; `0` = no timeout. |
+| `--with-git-diff` | `false` | Append `git diff` as context. |
+| `--with-git-staged` | `false` | Append `git diff --staged` as context. |
+| `--with-git-log` | `false` | Append the last 20 commits. |
+| `--with-git-status` | `false` | Append `git status -s`. |
+| `--with-file <path>` | (unset) | Append a file's contents. Repeatable. |
+| `--with-cmd <shell>` | (unset) | Append the stdout of a shell command. Repeatable. |
+| `--paste` | `false` | Append the system clipboard (`pbpaste` / `wl-paste` / `xclip` / `xsel`). |
+| `--dry-run` | `false` | Print the assembled prompt and exit. No auth, no agent, no run. |
+| `--estimate` | `false` | Print token-count + cost estimate and exit. No run. |
+| `--markdown` | `false` | Force markdown ANSI styling. |
+| `--no-markdown` | `false` | Disable markdown ANSI styling. |
+| `--save <path>` | (unset) | Tee the agent's text response (no ANSI) to `path`, written atomically. |
+| `--plan` | `false` | Plan mode — produce a step-by-step plan without executing tools. |
+| `--effort <level>` | (unset) | Reasoning effort: `minimal|low|medium|high|xhigh`. |
+| `--show-thinking` | `false` | Print reasoning blocks to stdout (un-truncated). |
+
+`--dry-run` and `--estimate` are mutually exclusive with the chat-creation path: nothing hits the server.
+
+## Examples
+
+### Smallest case
+
+```bash
+crewship ask "what time is it on the staging box?"
+```
+
+If `default-agent` isn't set and stdin is a TTY, the CLI opens a picker. After choosing once, it offers to save the pick as the default so subsequent `ask` calls are zero-config.
+
+### Pipe stdin as the prompt
+
+```bash
+git diff | crewship ask "review this change"
+cat issue.md | crewship ask "summarize"
+```
+
+When stdin is a pipe and a positional prompt is also given, the positional becomes the *instruction* and stdin becomes the *context*.
+
+### Compose context flags
+
+```bash
+crewship ask "explain this failure" \
+  --with-cmd "make test" \
+  --with-git-status \
+  --with-file CHANGELOG.md
+```
+
+Every `--with-*` flag is appended as a fenced markdown block; the assistant sees them in order.
+
+### Fan out to multiple agents
+
+```bash
+crewship ask "rate this PR description" --agents code-review,docs-lead,design-review
+```
+
+Runs all three agents in parallel against the same prompt. Each agent's stream is interleaved with a coloured prefix so you can scan who said what.
+
+### Dry-run the assembled prompt
+
+```bash
+crewship ask "fix the failing test" \
+  --with-cmd "go test ./..." \
+  --dry-run
+```
+
+Useful for double-checking which context blocks survived deduplication before paying for inference.
+
+### Estimate cost without running
+
+```bash
+crewship ask --prompt @big-spec.md --estimate
+```
+
+Prints input-token count and a rough cost figure based on the workspace's pricing config.
+
+### Save the response for later
+
+```bash
+crewship ask "summarize this week's runs" \
+  --with-cmd "crewship run list" \
+  --save weekly.md
+```
+
+`--save` writes the unstyled markdown via an atomic tempfile — a crashed run leaves the previous file intact rather than truncating it.
+
+### Read the prompt from stdin
+
+```bash
+crewship ask --prompt @-
+# (type or paste, EOF with Ctrl-D)
+```
+
+## Configuration
+
+Set the default agent once:
+
+```bash
+crewship config set default-agent daniel
+```
+
+Saved to `~/.crewship/cli-config.yaml`. Unset by passing an empty string or deleting the key.
+
+## Common errors
+
+- **`no default agent set. Use --agent <slug>, --agents <list>, or run 'crewship config set default-agent <slug>'`** — non-TTY mode (CI, piped stdin) and no agent specified.
+- **`prompt is required (positional, --prompt, stdin pipe, or --with-* flag)`** — the assembled prompt was empty.
+- **`no agents available in this workspace`** — the picker fired but `GET /api/v1/agents` came back empty.
+
+## See also
+
+- [`crewship run`](/cli/run) — pick an agent explicitly, supports `--interactive` and `--chat`.
+- [`crewship chat`](/cli/chat) — read back the chat that `ask` created.
+- [`crewship config`](/cli/config) — manage `default-agent`, markdown, server URL.
+- [Agents API](/api-reference/agents/create-chat) — `POST /api/v1/agents/{id}/chats`.

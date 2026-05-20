@@ -1,0 +1,36 @@
+---
+title: "Watch"
+description: "Top-level shortcut for `crewship journal --follow` — live SSE tail of the Crew Journal."
+icon: "eye"
+---
+
+# Watch
+
+`cmd/crewship/cmd_watch.go` is a thin top-level alias of [`crewship journal --follow`](/cli/journal). Same SSE-backed live tail, same `Last-Event-ID` reconnection, same filter flags — just the name people actually reach for when they want to "watch what's happening." Press Ctrl-C to exit.
+
+## `crewship watch`
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--crew <slug-or-id>` | string | (unset) | Filter by crew. Resolved to `crew_id`. |
+| `--agent <id>` | string | (unset) | Filter by agent ID. |
+| `--type <list>` | string | (unset) | Comma-separated entry types (e.g. `peer.escalation,keeper.decision`). |
+| `--severity <list>` | string | (unset) | Comma-separated severities: `info`, `notice`, `warn`, `error`. |
+
+### Examples
+
+```bash
+crewship watch
+crewship watch --severity warn,error
+crewship watch --crew backend-team
+crewship watch --type peer.escalation,keeper.decision
+crewship watch --agent agt_abc --severity error
+```
+
+Startup prints `watching journal — Ctrl-C to exit` to stderr; events land on stdout in the same shape as `journal --follow`.
+
+## See also
+
+- [`crewship journal`](/cli/journal) — the canonical command (paginated browse + `--follow`).
+- [`crewship activity`](/cli/activity) — coarser, paginated cross-crew feed (no SSE).
+- [`crewship recall <query>`](/cli/recall) — search past events instead of tailing live.

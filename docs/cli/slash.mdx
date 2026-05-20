@@ -1,0 +1,70 @@
+---
+title: "Slash"
+description: "User-defined slash commands loaded from ~/.crewship/commands/*.md and mounted as cobra subcommands at startup."
+icon: "slash"
+---
+
+# Slash
+
+Crewship loads any `*.md` file under `~/.crewship/commands/` as a top-level command. Each file is parsed for YAML frontmatter (`name`, `description`, `vars`, `agent`, `effort`, `plan`) and a markdown body that's rendered against positional args and `$args`. The wiring (`cmd/crewship/cmd_slash.go`) plus the admin surface (`cmd/crewship/cmd_slash_admin.go`) make this practical.
+
+Naming-collision policy: built-in commands always win. A slash file that would shadow `ask`, `run`, `tui`, etc. is skipped with a `[slash] <name> shadows built-in command — skipping` warning rather than silently masking. Loader failures (missing dir, malformed file) degrade to warnings — the CLI keeps working without user-defined commands.
+
+The admin surface lives under `crewship slash`:
+
+## `crewship slash list`
+
+Lists loaded slash commands with name, description, agent override, and source file.
+
+```bash
+crewship slash list
+crewship slash list --format json
+```
+
+## `crewship slash init`
+
+Scaffolds `~/.crewship/commands/` and writes a sample `review.md`. If the sample already exists, leaves it alone (`Sample already exists at <path> — leaving it alone`).
+
+```bash
+crewship slash init
+# Created /Users/you/.crewship/commands/review.md — try: crewship review staged 'changes'
+```
+
+The sample looks like:
+
+```markdown
+---
+name: review
+description: Ask the default agent to review a git diff
+vars:
+  - target
+plan: false
+---
+Review the following ${target} for correctness, security, and style.
+Be terse. Lead with the highest-severity issue.
+
+```
+$args
+```
+```
+
+Once saved, you invoke it like a built-in: `crewship review staged 'auth refactor'`.
+
+## Frontmatter fields
+
+| Key | Type | Effect |
+|---|---|---|
+| `name` | string | Command name (defaults to filename). |
+| `description` | string | Help text shown in `crewship --help`. |
+| `vars` | list | Positional template variables (consumed in order). |
+| `agent` | string | Pin the slash command to a specific agent slug. |
+| `effort` | string | Reasoning effort: `minimal`, `low`, `medium`, `high`, `xhigh`. |
+| `plan` | bool | Force plan-mode (no tool execution). |
+
+`$args` in the body is replaced with everything the user typed after the command name. Variables from `vars:` are bound positionally in order.
+
+## See also
+
+- [`crewship prompt`](/cli/prompt) — local prompt library, lower-cost than a full slash command.
+- [`crewship ask`](/cli/agent) — the dispatch target for every slash command.
+- [`crewship plan`](/cli/plan) — what `plan: true` in frontmatter activates.

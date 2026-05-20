@@ -1,0 +1,31 @@
+---
+title: "TUI"
+description: "Real-time Bubble Tea dashboard — Mission Control for running missions, approvals, and the live journal."
+icon: "monitor"
+---
+
+# TUI
+
+`cmd/crewship/cmd_tui.go` opens a full-screen real-time dashboard built on Bubble Tea. Lightweight wiring file — all model/view code lives under `internal/cli/tui`. The dashboard shows running missions/runs, pending approvals, and a live journal stream side-by-side.
+
+## `crewship tui`
+
+No flags. Resolves the server URL via the same `cli.ResolveServer` helper every other command uses (`--server`, env, then config).
+
+```bash
+crewship tui
+```
+
+### Keys
+
+| Key | Action |
+|---|---|
+| `q`, `Ctrl-C` | Quit. |
+| `r` | Force refresh. |
+| `Tab` | Cycle panel focus. |
+
+## See also
+
+- [`crewship watch`](/cli/watch) — narrower: just the live journal stream.
+- [`crewship inbox`](/cli/agent) — paginated, terminal-native (no full-screen UI).
+- [`crewship approvals`](/cli/approvals) — what the approvals panel surfaces.

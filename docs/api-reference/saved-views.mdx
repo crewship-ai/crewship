@@ -1,0 +1,130 @@
+---
+title: "Saved Views"
+description: "Per-user saved issue views with optional workspace sharing — store filters_json + sort_json so a user (or the workspace) can replay a Linear-style filter from one click."
+icon: "bookmark"
+---
+
+# Saved Views
+
+A saved view is a named bundle of issue filters and sort preferences a user wants to recall later. It backs the "Star this view" / "Open saved view" surface on the issues list — the FE owns the schema of `filters_json` and `sort_json`; the server stores the bytes opaquely.
+
+Implementation: `internal/api/saved_view_handler.go`. Backed by the `saved_views` table.
+
+All endpoints require an authenticated session and workspace context.
+
+## Visibility model
+
+Each row is **owned by one user** but can optionally be shared with the entire workspace via the `shared` flag. `List` returns the union:
+
+```
+workspace_id = <current workspace> AND (user_id = <session user> OR shared = 1)
+```
+
+A view owned by another user but shared is returned read-only — `Update` and `Delete` are restricted to the owner (`user_id` must match the session user, otherwise the handler returns `403 Only the view owner can update/delete it`).
+
+## View shape
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | string (CUID) | View id. |
+| `name` | string | Display name (the user types this when starring the view). |
+| `filters_json` | string | Opaque JSON blob — the FE-defined filter expression. Stored as-is, returned as-is. |
+| `sort_json` | string \| null | Opaque JSON blob describing the sort. `null` means "use the default". |
+| `view_type` | string | `"list"`, `"board"`, etc. Defaults to `"list"` on create when omitted. |
+| `is_default` | bool | Marks one view per user/view-type as the default that opens automatically. Only mutable via `Update` — never set on create. |
+| `shared` | bool | When `true`, the view is visible to every workspace member. |
+| `created_at` | RFC3339 | |
+
+## `GET /api/v1/saved-views`
+
+List the calling user's views plus every shared view in the workspace. Defaults pinned to the top, then alphabetical by name.
+
+**Auth:** authenticated session + workspace context.
+
+**Response:** `200 OK` — JSON array (never `null`).
+
+```json
+[
+  {
+    "id": "sv_01HVZ...",
+    "name": "My open bugs",
+    "filters_json": "{\"status\":[\"backlog\",\"in_progress\"],\"label\":[\"bug\"]}",
+    "sort_json": "{\"field\":\"priority\",\"dir\":\"desc\"}",
+    "view_type": "list",
+    "is_default": true,
+    "shared": false,
+    "created_at": "2026-05-19T18:22:10Z"
+  }
+]
+```
+
+## `POST /api/v1/saved-views`
+
+Create a new saved view owned by the calling user.
+
+**Auth:** authenticated session + workspace context + `OWNER`, `ADMIN`, or `MANAGER` role (`requireRole("create")`).
+
+**Request body:**
+
+| Field | Type | Required | Default | Notes |
+|---|---|---|---|---|
+| `name` | string | Yes | — | Display name. Empty → `400 name is required`. |
+| `filters_json` | string | Yes | — | Opaque filter JSON. Empty → `400 filters_json is required`. |
+| `sort_json` | string \| null | No | `null` | Opaque sort JSON. |
+| `view_type` | string | No | `"list"` | Empty string is normalised to `"list"`. |
+| `shared` | bool | No | `false` | When `true`, the view appears for every member of the workspace. |
+
+`is_default` is **always `false` on create** — promote a view to default with `PATCH`.
+
+**Response:** `201 Created` with the saved view object (same shape as a List entry).
+
+| Status | Condition |
+|---|---|
+| `400` | Missing `name`, missing `filters_json`, or malformed JSON body. |
+| `401` | Not authenticated. |
+| `403` | Caller is below the `MANAGER` role. |
+
+## `PATCH /api/v1/saved-views/{viewId}`
+
+Partial update. Only the **owner** of the view can update it — `Update` reads `user_id` from the row and compares it against the session user.
+
+**Auth:** authenticated session + workspace context + `OWNER`, `ADMIN`, or `MANAGER` role + ownership of the row.
+
+**Request body:** every field optional; only provided keys are written.
+
+| Field | Type | Notes |
+|---|---|---|
+| `name` | string | |
+| `filters_json` | string | |
+| `sort_json` | string \| null | |
+| `view_type` | string | |
+| `is_default` | bool | Promote / demote default state. The server does not currently demote a previous default automatically — set it explicitly on the displaced view if you want one-default-only semantics. |
+| `shared` | bool | Toggle workspace-wide visibility. |
+
+**Response:** `200 OK` with the full updated view object.
+
+| Status | Condition |
+|---|---|
+| `400` | Malformed JSON body or no fields provided (`No fields to update`). |
+| `401` | Not authenticated. |
+| `403` | Caller is not the view owner. |
+| `404` | View id does not exist. |
+
+## `DELETE /api/v1/saved-views/{viewId}`
+
+Hard delete. As with `PATCH`, only the owner can delete.
+
+**Auth:** authenticated session + ownership of the row. (No role gate beyond ownership — a user can always delete their own view.)
+
+**Response:** `204 No Content`.
+
+| Status | Condition |
+|---|---|
+| `401` | Not authenticated. |
+| `403` | Caller is not the view owner. |
+| `404` | View id does not exist. |
+
+## See also
+
+- [Issues](/api-reference/issues) — the list this view filters.
+- [User Preferences](/api-reference/preferences) — adjacent per-user state (UI density, last-opened tabs); preferences are a flat key-value store, saved views are first-class rows because they're shared.

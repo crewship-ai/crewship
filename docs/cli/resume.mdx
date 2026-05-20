@@ -1,0 +1,46 @@
+---
+title: "Resume"
+description: "Pick up an existing session by chat-id, run-id, or PR URL — or pick interactively from the 10 most recent CLI sessions."
+icon: "play"
+---
+
+# Resume
+
+`cmd/crewship/cmd_resume.go` continues a previous session by threading `--chat <id>` into the standard `run` flow against the agent that owns the chat. Four resolution paths:
+
+| Input | Resolution |
+|---|---|
+| (no arg) | Interactive `huh` picker over the 10 most recent CLI-origin chats. Requires a TTY on stdin **and** stderr. |
+| `c_…` | Treated as a chat ID. |
+| `r_…` / `run_…` | Looked up via `client.GetRun`; the run's `chat_id` is followed. |
+| `https://github.com/owner/repo/pull/<n>` | Searches the journal for the PR identifier and reuses the chat that produced it (best-effort — only works if an agent journaled the PR creation). |
+
+If the agent slug isn't part of the resolved object, the chat detail is fetched from `GET /api/v1/chats/{id}` to recover it.
+
+## `crewship resume [chat-id | run-id | pr-url]`
+
+No flags of its own — all flags belong to `crewship run` (it's the dispatch target). The two flags that get forced are `--chat <id>` and `--interactive=true`.
+
+### Examples
+
+```bash
+crewship resume                                          # interactive picker
+crewship resume c_abc123                                 # explicit chat
+crewship resume r_xyz789                                 # via run
+crewship resume https://github.com/foo/bar/pull/42       # via journal lookup
+```
+
+### Common errors
+
+- **`interactive picker requires a TTY; pass a chat-id or run-id`** — running without a TTY but no argument.
+- **`run <id> has no associated chat to resume`** — the run pre-dates chat threading or was created without one.
+- **`could not determine agent for chat <id>`** — chat detail lookup did not surface an agent.
+- **`no recent sessions to resume`** — the workspace has no CLI-origin chats in the last 10 entries.
+- **`no session found for PR <owner/repo#n> — pass a chat-id directly`** — journal search came up empty; fall back to the chat-id form.
+- **`list recent: chats endpoint: <err>; fallback runs: <err>`** — both `/api/v1/chats` and the `/runs` fallback failed; both errors are surfaced to make the actual problem identifiable.
+
+## See also
+
+- [`crewship history`](/cli/history) — list of recent runs, grab a chat-id from the table.
+- [`crewship recap <chat-id>`](/cli/recap) — summarise the session instead of continuing it.
+- [`crewship retry <run-id>`](/cli/retry) — start a fresh run with the same prompt.

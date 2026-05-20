@@ -1,0 +1,86 @@
+---
+title: "Session"
+description: "Audit and revoke active browser sessions — the CLI mirror of Settings → Sessions."
+icon: "log-in"
+---
+
+# crewship session
+
+Manage the caller's active browser sessions — the same surface the **Settings → Sessions** web panel exposes. Two use cases drive this:
+
+1. **Audit who's logged in** — `session list` shows device, IP, and last-seen for every active session. Pipe through `jq` for compliance reports without opening a browser.
+2. **Force logout** — `session revoke` kills one session by id. Combined with `whoami` and `token revoke` it gives an admin everything needed to neutralise a leaked credential.
+
+Defined in `cmd/crewship/cmd_session.go`. Sessions are *user-scoped*, not workspace-scoped — the CLI client clears the `workspace_id` query param on both endpoints so the request lands clean.
+
+```bash
+crewship session <subcommand>
+```
+
+Auth: every subcommand requires `crewship login`. No workspace context required.
+
+## Subcommands
+
+| Command | Purpose |
+| --- | --- |
+| `session list` | List active browser sessions for the current user. |
+| `session revoke <session-id>` | Revoke one session by id. |
+
+## Flags
+
+Neither subcommand defines local flags. Use the global `--format json` / `--format yaml` for scripting.
+
+## Examples
+
+### List
+
+```bash
+crewship session list
+# ID                CURRENT  CREATED           LAST USED         IP             USER AGENT
+# sess_abc1234567   yes      2026-05-19 09:02  2026-05-19 14:51  10.0.4.7       Mozilla/5.0 (Macintosh; In
+# sess_xyz9876543   -        2026-04-30 11:18  2026-05-18 16:30  198.51.100.42  Mozilla/5.0 (Windows NT 1
+```
+
+`CURRENT` flags the session that owns the token you're using right now — careful with `revoke` on this row.
+
+### Audit dump for compliance
+
+```bash
+crewship session list --format json | jq '
+  .[] | {id, ip, last_used: .last_used_at, ua: .user_agent}
+'
+```
+
+### Revoke another session
+
+```bash
+crewship session revoke sess_xyz9876543
+# ✓ Session sess_xyz9876543 revoked.
+```
+
+### Revoke your own session
+
+```bash
+crewship session revoke sess_abc1234567
+# ✓ Session sess_abc1234567 revoked.
+# Note: that was your current session — re-run 'crewship login' to continue.
+```
+
+Self-revocation is allowed by design — the server returns `is_current=true` and the CLI prints a yellow note so a careless script can warn the human before it locks itself out.
+
+## Security notes
+
+- Foreign session ids (sessions belonging to other users) return 404 with the same shape as "does not exist", so the endpoint can't be used to enumerate other users' sessions by id.
+- Revoking a session does *not* invalidate any CLI tokens that user holds. CLI tokens have their own lifecycle — manage them under **Settings → CLI tokens** or via `crewship token revoke`.
+
+## Common errors
+
+- **`404 Not Found`** — the session id doesn't exist *or* it belongs to another user. Indistinguishable on purpose.
+- **`401 unauthorized`** — your current session was revoked. Run `crewship login`.
+
+## See also
+
+- [`crewship login`](/cli/login) — re-authenticate after a self-revoke.
+- [`crewship whoami`](/cli/login#crewship-whoami) — verify the active token is still valid.
+- [`crewship token`](/cli/token) — CLI token lifecycle, separate from browser sessions.
+- [Auth Sessions API](/api-reference/auth/list-sessions) — `GET /api/v1/auth/sessions`.

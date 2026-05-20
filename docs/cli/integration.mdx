@@ -1,0 +1,226 @@
+---
+title: "Integration"
+description: "Manage MCP server integrations at workspace, crew, and agent scope — plus per-tool toggles."
+icon: "plug-zap"
+---
+
+# crewship integration
+
+Integrations are MCP servers Crewship can call into. They exist at three scopes:
+
+- **Workspace** — declared once, shared across crews. Workspace-level integrations live at `/api/v1/integrations`.
+- **Crew** — declared inside one crew. May optionally link to a workspace-level template (`--link-workspace-server`).
+- **Agent binding** — links an agent to a server with a specific credential.
+
+Plus a fourth layer for crew-scoped servers: per-tool enable/disable (`mcp_tool_bindings`), so an agent that imports a 30-tool server doesn't see all 30 in its tool list by default.
+
+Aliases: `intg`. Defined in `cmd/crewship/cmd_integration.go`, with the crew/tools/agent subtrees in companion files.
+
+```bash
+crewship integration <subcommand> [flags]
+crewship intg <subcommand> [flags]
+```
+
+Auth: every subcommand requires `crewship login` plus an active workspace.
+
+## Subcommands
+
+### Workspace-scoped
+
+| Command | Purpose |
+| --- | --- |
+| `integration list` | List workspace integrations with agent/crew reference counts. |
+| `integration add` | Add a workspace integration. |
+| `integration get <id-or-name>` | Show detail (transport, endpoint/command, enabled). |
+| `integration remove <id-or-name>` | Delete a workspace integration. |
+| `integration enable <id-or-name>` | Enable. |
+| `integration disable <id-or-name>` | Disable. |
+| `integration test <id-or-name>` | Hit `POST /integrations/{id}/test` and print the result. |
+| `integration crews-overview` | Cross-crew integrations table (which crews reference which servers). |
+
+### Agent bindings
+
+| Command | Purpose |
+| --- | --- |
+| `integration bind` | Bind an agent to an integration with a credential. |
+| `integration unbind` | Remove an agent binding (by binding id). |
+| `integration agent-bindings <agent-slug>` | List bindings for an agent. |
+| `integration resolve <agent-slug>` | Show effective integrations after cascade resolution (workspace ↘ crew ↘ agent). |
+| `integration agent update-binding <agent-slug> <binding-id>` | Patch a binding (credential, type, env var, enabled). |
+
+### Crew-scoped CRUD
+
+| Command | Purpose |
+| --- | --- |
+| `integration crew list <crew-slug>` | List crew integrations. |
+| `integration crew create <crew-slug>` | Create a crew-scoped integration. |
+| `integration crew update <crew-slug> <integration-id>` | Patch fields. |
+| `integration crew delete <crew-slug> <integration-id>` | Delete (prompts unless `-y`). |
+| `integration crew test <crew-slug> <integration-id>` | Test the connection. |
+
+### Per-tool toggles (crew-scoped only)
+
+| Command | Purpose |
+| --- | --- |
+| `integration tools list <crew-slug> <integration-id>` | List discovered tools + their enabled state. |
+| `integration tools enable <crew-slug> <integration-id> <tool-name>` | Enable one tool. |
+| `integration tools disable <crew-slug> <integration-id> <tool-name>` | Disable one tool. |
+| `integration tools refresh <crew-slug> <integration-id>` | Reconcile bindings with live MCP discovery (today: scaffolding, server treats empty payload as no-op). |
+
+## Flags
+
+### `integration add`
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `--name <slug>` | (required) | Integration name (slug). |
+| `--display <string>` | (= `--name`) | Display name. |
+| `--transport <enum>` | `streamable-http` | `streamable-http` or `stdio`. |
+| `--endpoint <url>` | (unset) | MCP server URL (streamable-http). |
+| `--command <string>` | (unset) | Command line (stdio). |
+| `--icon <name>` | (unset) | Lucide icon name. |
+
+### `integration bind`
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `--agent <slug>` | (required) | Agent slug. |
+| `--server <name>` | (required) | Integration name. |
+| `--credential <name>` | (unset) | Credential to attach. |
+| `--cred-type <enum>` | `bearer` | `bearer`, `api_key`, `basic`. |
+| `--cred-header <name>` | (unset) | Custom header name (for `api_key`). |
+
+### `integration unbind`
+
+| Flag | Effect |
+| --- | --- |
+| `--agent <slug>` | Agent slug. Required. |
+| `--binding-id <id>` | Binding ID to remove. Required. |
+
+### `integration crew create`
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `--name <slug>` | (required) | Integration name. |
+| `--display <string>` | (= `--name`) | Display name. |
+| `--transport <enum>` | `streamable-http` | `streamable-http` or `stdio`. |
+| `--endpoint <url>` | (unset) | MCP server URL. |
+| `--command <string>` | (unset) | stdio command. |
+| `--icon <name>` | (unset) | Lucide icon. |
+| `--link-workspace-server <id>` | (unset) | Reference an existing workspace integration. |
+
+### `integration crew update`
+
+| Flag | Effect |
+| --- | --- |
+| `--display` | New display name. |
+| `--transport` | `streamable-http` or `stdio`. |
+| `--endpoint` | New URL. |
+| `--command` | New stdio command. |
+| `--icon` | Lucide icon. |
+| `--enabled` | Enable/disable (default `true`). |
+
+### `integration crew delete`
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `-y`, `--yes` | `false` | Skip the confirmation prompt. |
+
+### `integration agent update-binding`
+
+| Flag | Effect |
+| --- | --- |
+| `--credential <name>` | New credential name. Empty string clears the binding. |
+| `--cred-type <enum>` | `bearer`, `api_key`, `basic`. |
+| `--cred-header <name>` | Custom header for `api_key`. |
+| `--env-var-name <name>` | Env-var name; empty string clears it. |
+| `--enabled <bool>` | Set enabled state. |
+
+`<binding-id>` here is the `agent_mcp_bindings.id` printed under the `BINDING ID` column by `integration agent-bindings`. It is **not** the workspace integration's id.
+
+## Examples
+
+### Add a workspace integration
+
+```bash
+crewship integration add \
+  --name gmail \
+  --display "Google Gmail" \
+  --transport streamable-http \
+  --endpoint https://mcp.example.com/gmail
+```
+
+stdio:
+
+```bash
+crewship integration add \
+  --name local-tools \
+  --transport stdio \
+  --command "npx @modelcontextprotocol/server-github"
+```
+
+### Bind an agent to it
+
+```bash
+crewship integration bind \
+  --agent daniel \
+  --server gmail \
+  --credential daniel-gmail-token
+```
+
+### Inspect an agent's effective integrations
+
+```bash
+crewship integration resolve daniel
+# NAME      DISPLAY        SCOPE      TRANSPORT          CREDENTIAL
+# gmail     Google Gmail   workspace  streamable-http    daniel-gmail-token
+# linear    Linear         crew       streamable-http    crew-linear-token
+```
+
+The cascade is workspace ↘ crew ↘ agent — closer scopes win.
+
+### Crew-scoped integration
+
+```bash
+crewship integration crew create acme-engineering \
+  --name linear \
+  --transport streamable-http \
+  --endpoint https://mcp.linear.app/sse
+```
+
+### Toggle a single tool
+
+```bash
+crewship integration tools list acme-engineering intg_abc123
+# TOOL              ENABLED  DESCRIPTION                              UPDATED
+# list_issues       yes      List issues in a Linear team             2026-05-19T…
+# create_issue      yes      Create a new issue                       2026-05-19T…
+# delete_issue      no       Delete an issue (irreversible)           2026-05-19T…
+
+crewship integration tools disable acme-engineering intg_abc123 delete_issue
+```
+
+### Patch a binding
+
+```bash
+crewship integration agent update-binding daniel bind_xyz \
+  --credential daniel-gmail-token-v2 \
+  --cred-type bearer
+```
+
+Pass `--credential ""` to clear the binding's credential link.
+
+## Common errors
+
+- **`--name is required`** — `integration add` or `integration crew create` was called without a name.
+- **`--agent and --server are required`** — `integration bind` needs both flags.
+- **`--agent and --binding-id are required`** — `integration unbind`.
+- **`no fields to update`** — crew `update` or agent `update-binding` was called with no `Changed()` flags.
+- **`no fields to update (use --credential, --cred-type, --cred-header, --env-var-name, or --enabled)`** — explicit guidance from `agent update-binding`.
+
+## See also
+
+- [`crewship mcp`](/cli/mcp) — MCP registry, audit log, and raw `mcp_config_json` editing.
+- [`crewship credential`](/cli/credential) — the credentials bound to integrations.
+- [`crewship crew`](/cli/crew) — crew CRUD; integrations are crew-scoped by default.
+- [Integrations API](/api-reference/integrations/list) — `GET /api/v1/integrations`.

@@ -1,0 +1,36 @@
+---
+title: "Recurring"
+description: "Manage recurring-issue schedules — scheduled issue creation."
+icon: "repeat"
+---
+
+# Recurring
+
+`cmd/crewship/cmd_admin_extras.go` ships thin REST wrappers for endpoints that have a server but no dedicated CLI. `recurring` exposes scheduled issue creation — issues that the server stamps out on a cadence.
+
+## `crewship recurring list`
+
+`GET /api/v1/recurring-issues`. Default output is indented JSON (the data has no canonical table shape; pipe through `jq` for selective extraction).
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--filter <expr>` | string | (unset) | gojq filter expression applied before output. |
+
+```bash
+crewship recurring list
+crewship recurring list --filter '.[] | {id, cadence, title}'
+crewship recurring list --format yaml
+```
+
+## `crewship recurring delete <recurring-id>`
+
+`DELETE /api/v1/recurring-issues/{id}`. Prints `[deleted recurring <id>]` on success.
+
+```bash
+crewship recurring delete rec_abc123
+```
+
+## See also
+
+- [`crewship issue`](/cli/issue) — manage issues created by these schedules.
+- [`crewship routine`](/cli/routine) — for recurring *agent runs* (different surface).

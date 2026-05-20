@@ -1,0 +1,46 @@
+---
+title: "Wait"
+description: "Block until a run reaches a terminal status. kubectl-wait-style exit codes for shell scripting."
+icon: "hourglass"
+---
+
+# Wait
+
+`cmd/crewship/cmd_wait.go` polls a run's status until it transitions to a final state, then exits with a status-aware code so scripts can act on the outcome without re-parsing JSON.
+
+## `crewship wait <run-id>`
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--timeout <dur>` | duration | `30m` | Hard ceiling on the wait. `0` = forever. |
+| `--interval <dur>` | duration | `2s` | Poll cadence. Values ≤ 0 fall back to `2s`. |
+| `-q`, `--quiet` | bool | `false` | Print only the terminal status string (no `[wait]` log lines, no `[done]` banner). |
+
+When neither `--quiet` nor a structured `--format` (`json`/`yaml`/`ndjson`) is set, status transitions are logged to stderr as `[wait] <run> status=<S> elapsed=<dur>` and the final state lands on stdout as `[done] <run> status=COMPLETED elapsed=12s`.
+
+### Exit codes
+
+| Code | Meaning |
+|---|---|
+| `0` | `COMPLETED` |
+| `1` | `FAILED` |
+| `2` | `CANCELLED` |
+| `3` | `TIMEOUT` — server-reported, or `--timeout` reached |
+| `4` | Network/auth error before any status could be read |
+
+### Examples
+
+```bash
+RUN=$(crewship ask --no-stream -q "do X" | jq -r .id)
+crewship wait "$RUN" && echo "done" || echo "broke"
+
+crewship wait r_abc --interval 500ms --timeout 5m
+crewship wait r_abc --quiet                       # prints "COMPLETED" or similar
+crewship wait r_abc --format json                 # full RunDetail on completion
+```
+
+## See also
+
+- [`crewship watch`](/cli/watch) — live event tail (use to follow what's happening *during* the run).
+- [`crewship history`](/cli/history) — find a run-id to wait on.
+- [`crewship retry <run-id>`](/cli/retry) — kick off a fresh run that you'll likely want to `wait` on.

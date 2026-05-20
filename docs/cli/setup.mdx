@@ -1,0 +1,117 @@
+---
+title: "Setup"
+description: "Finish onboarding from the terminal — pick a crew template, an adapter, paste a CLI token."
+icon: "rocket"
+---
+
+# crewship setup
+
+The CLI-side counterpart to the browser onboarding wizard. After `crewship login --pair --code=…` you have an authenticated session but no crew yet — the wizard hasn't run. `crewship setup` closes that gap so a user who prefers the terminal can complete onboarding without opening a browser.
+
+Hits the same `POST /api/v1/onboarding/setup` endpoint as the browser, so server-side validation, language injection, and template deploy behave identically across both surfaces.
+
+```bash
+crewship setup [flags]
+```
+
+Requires an authenticated session (`crewship login`). Errors with `not logged in — run \`crewship login --pair --code=…\` first` when no token is present.
+
+## Flags
+
+| Flag | Default | Purpose |
+| --- | --- | --- |
+| `--workspace-name <name>` | `""` | Display name for your workspace. Empty keeps the existing one (the server uses the user's default workspace). |
+| `--language <name>` | `""` | Language for agent replies (e.g. `English`, `Čeština`, `Deutsch`). Injected into every agent's system prompt. |
+| `--crew <slug>` | (prompted) | Crew template — one of `software-development`, `devops-sre`, `content-marketing`, `accounting-finance`, `blank`. |
+| `--adapter <key>` | (prompted) | CLI adapter — one of `CLAUDE_CODE`, `OPENCODE`, `CODEX_CLI`, `GEMINI_CLI`, `CURSOR_CLI`, `FACTORY_DROID`. |
+| `--model <model>` | (adapter default) | LLM model. Defaults to the adapter's recommended model (`claude-sonnet-4-6`, `gemini-2.5-pro`, `gpt-5.5`, `composer`, …). |
+| `--token <token>` | (prompted, hidden input) | The **CLI token** for the chosen adapter — output of `claude setup-token`, `gemini auth print-token`, etc. **Not** the vendor's account-level API key. |
+| `--api-key <token>` | `""` | Deprecated alias for `--token`. Will be removed. |
+| `--yes` | `false` | Skip interactive prompts; every required value must be supplied via flags. |
+
+When `--token` is not passed, the command falls back to the adapter's conventional env var (`ANTHROPIC_API_KEY` for `CLAUDE_CODE`/`OPENCODE`, `GOOGLE_API_KEY` for `GEMINI_CLI`, `OPENAI_API_KEY` for `CODEX_CLI`, `CURSOR_API_KEY`, `FACTORY_API_KEY`). Only when that's empty does it prompt.
+
+## Crew templates
+
+| Slug | What it deploys |
+| --- | --- |
+| `software-development` | Tech Lead + Backend + Frontend + QA (4 agents) — interactive default |
+| `devops-sre` | SRE Lead + Platform + Security + CI/CD (4 agents) |
+| `content-marketing` | Lead + Researcher + Copy + SEO (4 agents) |
+| `accounting-finance` | Lead + Bookkeeper + Tax + Reporting (4 agents) |
+| `blank` | Single agent of your choosing (1 agent) |
+
+The list lives in the binary (not fetched from `/api/v1/crew-templates`) so `crewship setup --help` is usable on an air-gapped machine.
+
+## Examples
+
+### Interactive (recommended)
+
+```bash
+crewship setup
+# Pick your first crew:
+#   1) Software Development (Tech Lead, Backend, Frontend, QA)
+#   2) DevOps / SRE (SRE Lead, Platform, Security, CI/CD)
+#   3) Content Marketing (Lead, Researcher, Copy, SEO)
+#   4) Accounting & Finance (Lead, Bookkeeper, Tax, Reporting)
+#   5) Blank (single agent, name yourself)
+# Choice [1]: 1
+# Pick your CLI adapter:
+#   1) Claude Code (Anthropic)
+#   …
+# Choice [1]: 1
+# Paste your Claude Code (Anthropic) CLI token (input is hidden): ********
+# Agent language (e.g. English, Čeština) [English]: English
+# ✓ Workspace ready — crew "software-development" deployed with 4 agents.
+```
+
+Each prompt has a sensible default; bare Enter accepts the first option.
+
+### Scripted / CI
+
+```bash
+crewship setup \
+  --crew software-development \
+  --adapter CLAUDE_CODE \
+  --token "$(claude setup-token)" \
+  --language English \
+  --yes
+```
+
+In `--yes` mode the command fails fast if `--crew`, `--adapter`, or the token are missing. Errors:
+
+- **`--crew is required in non-interactive mode`**
+- **`--adapter is required in non-interactive mode`**
+- **`no token provided — pass --token=$(claude setup-token) (or the equivalent for <adapter>), or export <ENV_VAR> before running setup`**
+
+### Blank crew (single agent)
+
+```bash
+crewship setup --crew blank --adapter GEMINI_CLI --token "$(gemini auth print-token)" --yes
+```
+
+A `blank` template creates one crew named `My Crew` with a single agent named after the adapter (e.g. `Gemini CLI (Google) #1`).
+
+## Common errors
+
+- **`unknown crew template "X" — see \`crewship setup --help\` for the list`** — `--crew` accepted only the five slugs above.
+- **`unknown adapter "X" — see \`crewship setup --help\``** — adapter keys are uppercase with underscores; `claude-code` is rejected, `CLAUDE_CODE` is accepted.
+- **`token looks too short (need at least 8 characters)`** — quick guard against pasting a partial token.
+- **`that looks like an Anthropic API key (sk-ant-api…). Crewship needs the CLI token from \`claude setup-token\` (sk-ant-oat… value) — run that command on your machine and paste the result`** — surfaced when an Anthropic adapter is paired with what looks like a console API key. The CLI tokens start with `sk-ant-oat`, not `sk-ant-api`.
+
+## What it prints on success
+
+```
+✓ Workspace ready — crew "software-development" deployed with 4 agents.
+First agent ID: a_abc123
+Open it in the browser: https://crewship.example.com/crews/agents/a_abc123/chat
+```
+
+The server URL is whichever one this CLI invocation actually talked to (resolved from `--server`, then env, then `~/.crewship/cli-config.yaml`), so the printed link always matches the workspace you just provisioned.
+
+## See also
+
+- [`crewship login`](/cli/login) — pair the CLI before running setup.
+- [`crewship init`](/cli/init) — bootstrap the very first admin user on a fresh server (run *before* `setup`).
+- [`crewship seed`](/cli/seed) — populate a dev/demo workspace with crews, agents, and integrations.
+- [`crewship crew`](/cli/crew) — manage crews after the initial template lands.

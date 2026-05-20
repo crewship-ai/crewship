@@ -1,0 +1,142 @@
+---
+title: "Workspace"
+description: "Switch the active workspace, list members, invite users, and update workspace settings."
+icon: "folder"
+---
+
+# crewship workspace
+
+A workspace is the top-level tenant. Every other resource — crews, agents, credentials, projects, integrations — lives inside one. Aliases: `ws`. Defined in `cmd/crewship/cmd_workspace.go`.
+
+```bash
+crewship workspace <subcommand> [flags]
+crewship ws <subcommand> [flags]
+```
+
+The active workspace is stored in `~/.crewship/cli-config.yaml` under `workspace` (slug or id). It is sent as `workspace_id=` on every API request by the CLI client, so switching workspaces is purely client-side — no server round-trip.
+
+Auth: `list`, `use`, and `get` require `crewship login`; mutations additionally require an active workspace context. Role gates apply server-side — `OWNER`/`ADMIN` to update or invite, `MEMBER+` to read.
+
+## Subcommands
+
+| Command | Purpose |
+| --- | --- |
+| `workspace list` | List every workspace the caller can see; marks the active one with `*`. |
+| `workspace use <slug-or-id>` | Set the default workspace in the local config. |
+| `workspace get [slug-or-id]` | Show workspace details (defaults to the active one). |
+| `workspace create` | Create a new workspace (you become its OWNER). |
+| `workspace update` | Patch mutable fields on the current workspace. |
+| `workspace member list` | List members of the active workspace. |
+| `workspace member add <user-id>` | Add an existing user to the workspace. |
+| `workspace member remove <user-id>` | Remove a member (prompts unless `-y`). |
+| `workspace invite [email]` | Invite by email (shortcut for `invite create`). |
+| `workspace invite create <email>` | Create an invitation. |
+| `workspace invite list` | List pending invitations. |
+
+## Flags
+
+### `workspace create`
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `--name <string>` | (required) | Display name. |
+| `--slug <string>` | (auto) | URL slug. Auto-generated from `--name` if omitted. |
+| `--language <code>` | (server default) | Preferred language (e.g. `cs`, `en`). Influences UI defaults. |
+
+### `workspace update`
+
+Only flags you actually set are sent — passing nothing returns `no fields to update`.
+
+| Flag | Effect |
+| --- | --- |
+| `--name <string>` | Rename the workspace. |
+| `--slug <string>` | Change the slug (URLs flip immediately). |
+| `--language <code>` | Update preferred language. |
+
+### `workspace member add`
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `--role <ROLE>` | `MEMBER` | One of `MEMBER` or `ADMIN`. Owners are seeded at workspace-create time. |
+
+### `workspace member remove`
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `-y`, `--yes` | `false` | Skip the confirmation prompt. |
+
+### `workspace invite` / `workspace invite create`
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `--role <ROLE>` | `MEMBER` | Role to grant on acceptance. `MEMBER` or `ADMIN`. |
+
+The role flag is mirrored on the parent `invite` command so the shortcut form (`workspace invite alice@example.com --role ADMIN`) works without an explicit `create`.
+
+## Examples
+
+### List + switch
+
+```bash
+crewship workspace list
+# SLUG                     NAME                ID        ROLE
+# acme-engineering *       ACME Engineering    ws_…      OWNER
+# acme-design              ACME Design         ws_…      MEMBER
+
+crewship ws use acme-design
+# ✓ Default workspace set to: acme-design
+```
+
+`workspace use` validates that the slug actually exists and is accessible before writing the config, so a typo doesn't quietly orphan every future command.
+
+### Create a workspace
+
+```bash
+crewship workspace create \
+  --name "ACME Platform" \
+  --slug acme-platform \
+  --language en
+```
+
+### Update a workspace
+
+```bash
+crewship workspace update --name "ACME Platform Team" --language cs
+```
+
+### Member management
+
+```bash
+crewship workspace member list
+crewship workspace member add usr_abc123 --role ADMIN
+crewship workspace member remove usr_abc123 --yes
+```
+
+User IDs come from `crewship admin user list` or the web UI's user table.
+
+### Invitations
+
+```bash
+crewship workspace invite alice@acme.com --role ADMIN
+# ✓ Invitation sent to alice@acme.com (ADMIN role).
+
+crewship workspace invite list
+# ID            EMAIL                ROLE     EXPIRES               CREATED
+# inv_…         alice@acme.com       ADMIN    2026-05-26T…          2026-05-19T…
+```
+
+The shortcut form (`invite <email>`) and the explicit form (`invite create <email>`) share one implementation, so role flags behave identically on both.
+
+## Common errors
+
+- **`workspace "X" not found or not accessible`** — `workspace use` validated against `/api/v1/workspaces` and your token has no membership.
+- **`--name is required`** — `create` needs at least a name.
+- **`no fields to update`** — `update` was called without any of `--name` / `--slug` / `--language`.
+- **`no workspace selected`** — `update` ran without an active workspace. Run `crewship workspace use` first or pass `--workspace`.
+
+## See also
+
+- [`crewship login`](/cli/login) — `crewship login --workspace <slug>` sets the workspace at login time.
+- [`crewship config`](/cli/config) — direct access to the `workspace` config key.
+- [`crewship admin`](/cli/admin) — cross-workspace operations (only OWNER on the workspace itself, or instance admin).
+- [Workspaces API](/api-reference/workspaces/list) — `GET /api/v1/workspaces`.

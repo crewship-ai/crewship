@@ -1,0 +1,190 @@
+---
+title: "Triage Rules"
+description: "Pattern-matching rules that auto-assign new backlog issues to a crew / agent / project + tag them with priority and labels. List, create, update, delete, and a one-shot Process endpoint that runs all enabled rules against the current backlog."
+icon: "list-checks"
+---
+
+# Triage Rules
+
+A triage rule matches an issue **title** against a `pattern` (substring, regex, or exact) and applies a bundle of updates: pick a crew, set an assignee, set priority, project, and labels. Rules are evaluated in `position` order; the **first matching rule wins** per issue (other rules don't apply, even if they'd also match).
+
+Implementation: `internal/api/triage_handler.go`. Backed by the `triage_rules` table.
+
+All endpoints require an authenticated session and workspace context.
+
+## Rule shape
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | string (CUID) | Rule id. |
+| `name` | string | Display name. |
+| `pattern` | string | The thing to match. For `regex`, validated at create/update time with `regexp.Compile`. |
+| `match_type` | string | `contains`, `regex`, or `exact`. `contains` is case-insensitive; `exact` and `regex` are case-sensitive. Anything else → `400 match_type must be: contains, regex, or exact`. |
+| `crew_id` | string \| null | Crew to assign the issue to. |
+| `assignee_id` | string \| null | Agent id; `assignee_type` is forced to `"agent"` when this is set by `Process`. |
+| `priority` | string \| null | `low`, `normal`, `high`, `urgent`, or `none`. |
+| `project_id` | string \| null | Project to attach the issue to. |
+| `labels_json` | string \| null | Opaque JSON array of label ids. The FE owns the schema; server stores bytes. |
+| `position` | int | Evaluation order, ascending. Auto-assigned on create as `MAX(position) + 1`. |
+| `enabled` | bool | Disabled rules are skipped by `Process`. Created enabled by default. |
+| `match_count` | int | Number of issues this rule has ever matched. Incremented atomically inside `Process`. |
+| `created_at` | RFC3339 | |
+
+## `GET /api/v1/triage-rules`
+
+List every rule in the workspace, ordered by `position ASC, created_at ASC`.
+
+**Auth:** authenticated session + workspace context.
+
+**Response:** `200 OK` — JSON array (never `null`).
+
+```json
+[
+  {
+    "id": "tr_01HVZ...",
+    "name": "Auto-assign backend bugs",
+    "pattern": "(?i)^(bug|fix):.*api",
+    "match_type": "regex",
+    "crew_id": "crw_backend",
+    "assignee_id": "agt_viktor",
+    "priority": "high",
+    "project_id": null,
+    "labels_json": "[\"lbl_bug\",\"lbl_backend\"]",
+    "position": 1,
+    "enabled": true,
+    "match_count": 47,
+    "created_at": "2026-04-12T09:00:00Z"
+  }
+]
+```
+
+## `POST /api/v1/triage-rules`
+
+Create a new rule. Auto-positioned at the end of the queue (`MAX(position) + 1`); reorder with `PATCH`.
+
+**Auth:** authenticated session + workspace context + `OWNER`, `ADMIN`, or `MANAGER` role (`requireRole("create")`).
+
+**Request body:**
+
+| Field | Type | Required | Default | Notes |
+|---|---|---|---|---|
+| `name` | string | Yes | — | Empty → `400 name is required`. |
+| `pattern` | string | Yes | — | Empty → `400 pattern is required`. For `match_type: "regex"` the pattern is compiled at creation — invalid regex → `400 Invalid regex pattern: <error>`. |
+| `match_type` | string | Yes | — | Must be `contains`, `regex`, or `exact`. |
+| `crew_id` | string | No | `null` | |
+| `assignee_id` | string | No | `null` | Agent id (not user id). `Process` sets `assignee_type = "agent"` when applying. |
+| `priority` | string | No | `null` | |
+| `project_id` | string | No | `null` | |
+| `labels_json` | string | No | `null` | |
+
+Rules are created `enabled = true` and `match_count = 0`.
+
+**Response:** `201 Created` with the rule object (same shape as List).
+
+**WebSocket event:** `triage_rule.created` broadcast on the workspace channel with `{ "id": "<rule id>" }`.
+
+| Status | Condition |
+|---|---|
+| `400` | Missing `name` / `pattern`, invalid `match_type`, invalid regex pattern. |
+| `401` | Not authenticated. |
+| `403` | Caller is below the `MANAGER` role. |
+
+## `PATCH /api/v1/triage-rules/{ruleId}`
+
+Partial update. Every field optional. Pass `crew_id`, `assignee_id`, or `project_id` as `""` to NULL them out (the handler distinguishes "field absent" from "field set to empty string" and routes the empty string to `SET column = NULL`).
+
+**Auth:** authenticated session + workspace context + `OWNER`, `ADMIN`, or `MANAGER` role.
+
+**Request body:**
+
+| Field | Type | Notes |
+|---|---|---|
+| `name` | string | |
+| `pattern` | string | |
+| `match_type` | string | Must be one of `contains`, `regex`, `exact`. |
+| `crew_id` | string | `""` → NULL. |
+| `assignee_id` | string | `""` → NULL. |
+| `priority` | string | |
+| `project_id` | string | `""` → NULL. |
+| `labels_json` | string | |
+| `position` | int | Reorder. |
+| `enabled` | bool | |
+
+When **both** `pattern` and `match_type` are present and `match_type` is `regex`, the new pattern is recompiled — invalid regex → `400`. If only one of the two is supplied, no recompile happens, so changing `match_type` from `contains` → `regex` without also resending the pattern can leave the rule with an unvalidated regex; the runtime `Process` path catches that and skips the rule rather than aborting the batch.
+
+**Response:** `200 OK` with the full updated rule object.
+
+**WebSocket event:** `triage_rule.updated` broadcast on the workspace channel.
+
+| Status | Condition |
+|---|---|
+| `400` | Malformed JSON, invalid `match_type`, invalid regex, or no fields to update. |
+| `401` | Not authenticated. |
+| `403` | Caller is below the `MANAGER` role. |
+| `404` | Rule id not found in this workspace. |
+
+## `DELETE /api/v1/triage-rules/{ruleId}`
+
+Hard delete. Higher role bar than create / update because the rule is the source of truth for downstream automation.
+
+**Auth:** authenticated session + workspace context + `OWNER` or `ADMIN` role (`requireRole("manage")`).
+
+**Response:** `204 No Content`.
+
+**WebSocket event:** `triage_rule.deleted` broadcast on the workspace channel.
+
+| Status | Condition |
+|---|---|
+| `401` | Not authenticated. |
+| `403` | Caller is below the `ADMIN` role. |
+| `404` | Rule id not found in this workspace. |
+
+## `POST /api/v1/triage/process`
+
+Run all enabled rules against every **unassigned BACKLOG issue** in the workspace and apply the first-match update to each. Idempotent: re-running on a backlog where everything matched already does nothing — once an issue has an `assignee_id`, the rule loader's `WHERE assignee_id IS NULL` excludes it.
+
+**Auth:** authenticated session + workspace context + `OWNER`, `ADMIN`, or `MANAGER` role (`requireRole("create")`).
+
+### Algorithm
+
+1. Load enabled rules ordered by `position ASC`. Regex patterns are pre-compiled once per call (so a single bad regex in the rule set logs a warning and skips that rule, but doesn't abort the batch or re-compile per issue).
+2. Load all BACKLOG missions where `assignee_id IS NULL` and `mission_type = 'issue'` (sub-issues, missions, and crew missions are excluded).
+3. For each issue, walk the rule list and apply the **first matching rule** — set `crew_id`, `assignee_id` (with `assignee_type = 'agent'`), `priority`, and `project_id` from the rule. Subsequent rules are skipped for that issue even if they'd also match.
+4. Increment `match_count` on rules that matched.
+5. Broadcast `triage.processed` on the workspace channel with `processed` (total backlog scanned) and `matched` (rows mutated) — only when at least one match occurred.
+
+### Match-type semantics
+
+| `match_type` | Comparison |
+|---|---|
+| `contains` | `strings.Contains(lower(title), lower(pattern))` — case-insensitive substring. |
+| `regex` | Pre-compiled `*regexp.Regexp` matched against the raw title. Invalid patterns are dropped at load time with a warning; they never abort `Process`. |
+| `exact` | `title == pattern` — case-sensitive equality. |
+
+`labels_json` is currently **read but not applied** to the issue inside `Process` — only `crew_id`, `assignee_id`/`assignee_type`, `priority`, and `project_id` are written. The column exists on the rule for forwards compatibility.
+
+### Response
+
+```json
+{ "processed": 42, "matched": 11 }
+```
+
+| Field | Type | Notes |
+|---|---|---|
+| `processed` | int | Number of unassigned backlog issues considered. |
+| `matched` | int | Number of issues actually updated (1 per matched issue — at most one rule applies). |
+
+If no rules are enabled the response is still `200` with `{ "processed": 0, "matched": 0 }` (no SQL is run against missions).
+
+| Status | Condition |
+|---|---|
+| `401` | Not authenticated. |
+| `403` | Caller is below the `MANAGER` role. |
+| `500` | Rule load or issue load failed. Per-issue update failures are logged and continue — they don't fail the batch. |
+
+## See also
+
+- [Issues](/api-reference/issues) — the missions table `Process` updates.
+- [Crews](/api-reference/crews) — `crew_id` targets a crew row.
+- [Agents](/api-reference/agents) — `assignee_id` is an agent id.
+- [Recurring Issues](/api-reference/recurring-issues) — cron-driven issue creation; triage rules run on whatever lands in the backlog (manual or recurring).

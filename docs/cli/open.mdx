@@ -1,0 +1,65 @@
+---
+title: "Open"
+description: "Open the web-UI page for a CLI resource in your default browser. Hybrid terminal/web workflow."
+icon: "external-link"
+---
+
+# Open
+
+`cmd/crewship/cmd_open.go` opens the relevant web-UI page for a CLI resource in your default browser. The point: do everything in the terminal until you hit something better viewed visually (a chat, a mission timeline, an approval queue), then jump.
+
+`open` deliberately does **not** require auth — it's just a URL resolver. The browser handles login if needed.
+
+Cross-platform launcher: `open` (macOS), `cmd /c start ""` (Windows), `xdg-open` (Linux). Dependency-free — uses `os/exec` rather than a Go browser library.
+
+## `crewship open <resource> [id]`
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--print-only` | bool | `false` | Print the URL to stdout instead of launching the browser. Useful for scripting. |
+
+### Resources
+
+| Resource | Args | URL path |
+|---|---|---|
+| `inbox` (`dashboard`, `home`) | — | `/inbox` |
+| `activity` | — | `/activity` |
+| `agents` | — | `/agents` |
+| `agent` | `<slug-or-id>` | `/agents/<id>` |
+| `crews` | — | `/crews` |
+| `crew` | `<slug-or-id>` | `/crews/<id>` |
+| `chat` | `<agent-slug>` | `/chat/<slug>` |
+| `mission` | `<mission-id>` | `/missions/<id>/timeline` |
+| `journal` | — | `/journal` |
+| `approvals` | — | `/approvals` |
+| `integrations` | — | `/integrations` |
+| `routines` | — | `/routines` |
+| `issues` | `[id]` | `/issues` or `/issues/<id>` |
+| `runs` | — | `/runs` |
+| `settings` | — | `/settings` |
+| `admin` | — | `/admin` |
+| `audit` | — | `/audit` |
+| `credentials` | — | `/credentials` |
+
+All IDs are `url.PathEscape`'d, so slugs with `:` or other reserved characters survive.
+
+### Examples
+
+```bash
+crewship open inbox
+crewship open chat viktor
+crewship open mission MIS-42
+crewship open --print-only mission MIS-42       # print URL, don't open
+crewship open agent agt_abc123
+crewship open issues CRE-128
+```
+
+### Common errors
+
+- **`unknown resource "foobar" (try: inbox, activity, agent[s], crew[s], chat, mission, journal, approvals, integrations, routines, issues, runs, settings, admin, audit, credentials)`** — typo or unsupported resource.
+- **`<resource> requires exactly 1 argument(s), got 0`** — missed the ID.
+
+## See also
+
+- [`crewship inbox`](/cli/agent) — the same destination, but stays in the terminal.
+- [`crewship login`](/cli/login) — the `--server` flag this command honours.

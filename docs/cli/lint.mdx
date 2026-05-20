@@ -1,0 +1,61 @@
+---
+title: "Lint"
+description: "Static-analyse local CLI configuration and prompt library — catch the boring class of mistakes before they hit at use-time."
+icon: "check-circle"
+---
+
+# Lint
+
+`cmd/crewship/cmd_lint.go` is read-only static analysis over the user's local CLI footprint. Catches the boring class of mistakes that block AI workflows but don't surface as runtime errors:
+
+- `cli-config.yaml` uses a removed or typo'd key
+- A prompt-library file has an invalid name (would fail at `crewship prompt use`)
+- A prompt-library file is empty (probably accidental)
+- The markdown config value isn't `auto|on|off`
+
+Goal: catch at lint time, not at ask time. Never modifies anything.
+
+## `crewship lint`
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--strict` | bool | `false` | Warnings also fail (non-zero exit). Suitable for CI. |
+
+Exit code is non-zero when at least one error is found (warnings don't fail the run by default), so safe to wire into shell init scripts.
+
+### Examples
+
+```bash
+crewship lint
+crewship lint --strict        # warnings also fail
+```
+
+### Output
+
+```
+Linting local CLI footprint
+  warn     /Users/you/.crewship/cli-config.yaml — unknown config key "deafult_agent" (typo? supported: server, workspace, token, format, default_agent, markdown)
+  error    /Users/you/.crewship/prompts/bad name.md — invalid prompt name (invalid character " " in name (allowed: a-z A-Z 0-9 - _ .)) — won't be reachable via `crewship prompt use`
+  warn     /Users/you/.crewship/prompts/empty.md — prompt is empty (0 bytes) — accidental?
+
+result: 1 error(s), 2 warning(s)
+Error: lint failed
+```
+
+### Checks
+
+| Severity | What |
+|---|---|
+| warn | Config file missing (`run \`crewship login\``). |
+| error | Config YAML is malformed. |
+| warn | Unknown config keys — typos against `server, workspace, token, format, default_agent, markdown`. |
+| error | Invalid `markdown` value (allowed: `auto|on|off|true|false|1|0|yes|no`). |
+| warn | Subdirectories or non-`.md` files under `~/.crewship/prompts/`. |
+| error | Prompt filename violates the name rules (won't be reachable via `crewship prompt use`). |
+| warn | Prompt file is zero bytes. |
+
+## See also
+
+- [`crewship config`](/cli/config) — the file `lint` validates.
+- [`crewship prompt`](/cli/prompt) — the library `lint` validates.
+- [`crewship doctor`](/cli/doctor) — server-side diagnostics (different scope).

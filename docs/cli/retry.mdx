@@ -1,0 +1,52 @@
+---
+title: "Retry"
+description: "Re-run a previous run with the same agent + recovered prompt — or with a tweaked prompt — into a new chat or continuing the old one."
+icon: "rotate-cw"
+---
+
+# Retry
+
+`cmd/crewship/cmd_retry.go` looks up a prior run, fetches its first user prompt from chat messages, and starts a new run against the same agent. Iteration workflow:
+
+```bash
+crewship history --status failed
+crewship retry <run-id>                         # exact same again
+crewship retry <run-id> --new-prompt "..."      # same agent, edited prompt
+```
+
+The run lookup uses the `/api/v1/runs?limit=100` list and filters client-side — if the run is older than the most recent 100, the command fails with `run <id> not found in last 100 runs`. Targeted re-runs are the intended use case; for archival lookup, fetch the chat ID some other way and pass `--new-prompt`.
+
+## `crewship retry <run-id>`
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--new-prompt <text>` | string | (unset) | Override the recovered prompt with this text. Required when the run has no chat (e.g. `run <id> has no chat_id; pass --new-prompt to retry`). |
+| `--continue` | bool | `false` | Append to the original chat instead of starting a new one. Requires the original to have `chat_id`. |
+| `-q`, `--quiet` | bool | `false` | Only output agent text — suppress meta lines. |
+| `--no-stream` | bool | `false` | Wait for completion then print, instead of streaming. |
+| `--markdown` | bool | (config) | Force markdown ANSI styling on. |
+| `--no-markdown` | bool | (config) | Force markdown styling off. |
+| `--save <path>` | string | (unset) | Tee the agent's text response (no ANSI) to file. |
+
+### Examples
+
+```bash
+crewship retry r_abc                            # same agent, same prompt, new chat
+crewship retry r_abc --continue                 # append to the same chat
+crewship retry r_abc --new-prompt "be more specific"
+crewship retry r_abc --quiet --save out.md
+crewship retry r_abc --no-stream
+```
+
+### Common errors
+
+- **`run <id> not found in last 100 runs`** — run is older than the recent window; pass a `--new-prompt` and use a different command.
+- **`run <id> has no chat_id; pass --new-prompt to retry`** — the original run never produced a chat (rare; e.g. pre-chat trace runs).
+- **`could not recover original prompt for run <id>; pass --new-prompt`** — the chat exists but no user-role message was found.
+- **`--continue requires the original run to have a chat_id`** — combine `--continue` with `--new-prompt` against a runnable chat instead.
+
+## See also
+
+- [`crewship history`](/cli/history) — find the run-id to retry.
+- [`crewship copy-prompt <run-id>`](/cli/copy-prompt) — recover the prompt without starting a new run.
+- [`crewship resume <run-id>`](/cli/resume) — continue the existing chat interactively.

@@ -1,0 +1,73 @@
+---
+title: "Plan"
+description: "Architect mode — read-only step-by-step plan before executing. Agent outputs plan + file list, no tools."
+icon: "list-ordered"
+---
+
+# Plan
+
+`cmd/crewship/cmd_plan.go` runs the default agent in PLAN mode. The agent outputs a step-by-step plan plus the files it would touch, without calling any tools or modifying anything. Useful before kicking off a long autonomous run — review, adjust, then re-run with [`crewship run`](/cli/agent) or [`crewship ask`](/cli/agent).
+
+The agent stays a normal CHAT agent server-side — plan mode is achieved by prompting alone, not by a separate API mode. This keeps the feature shippable in one PR at the cost of relying on instruction-following: if the agent ignores "do not call tools," output degrades gracefully into a verbose preview.
+
+## Prompt template
+
+Plan mode injects the following prefix into the prompt:
+
+```
+[plan-mode] You are in PLAN mode. Do NOT call any tools, do NOT modify files, do NOT run code. Output ONLY:
+
+1. A concise step-by-step plan (numbered).
+2. The files you would touch (bulleted).
+3. Risks or open questions.
+4. End with the literal line: PLAN READY
+
+User request follows:
+---
+```
+
+The terminator `PLAN READY` is grep-able for shell pipelines that gate on "is the plan finished".
+
+## `crewship plan [prompt]`
+
+`--quiet` is forced on by default so the plan body isn't lost in `[agent: …]` noise. Pass `--quiet=false` to re-enable meta output.
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--agent <slug>` | string | default-agent | Override the agent. |
+| `-p`, `--prompt <text>` | string | (positional) | Prompt text, `@file`, or `@-` for stdin. |
+| `-q`, `--quiet` | bool | `true` | Only output agent text. |
+| `--with-git-diff` | bool | `false` | Append `git diff` output as context. |
+| `--with-git-staged` | bool | `false` | Append `git diff --staged` as context. |
+| `--with-git-log` | bool | `false` | Append last 20 commits as context. |
+| `--with-git-status` | bool | `false` | Append `git status -s` as context. |
+| `--with-file <path>` | string-slice | `[]` | Append file content as context. Repeatable. |
+| `--with-cmd <cmd>` | string-slice | `[]` | Append shell command output as context. Repeatable. |
+| `--paste` | bool | `false` | Append system clipboard as context. |
+| `--markdown` | bool | (config) | Force markdown ANSI styling on. |
+| `--no-markdown` | bool | (config) | Force markdown styling off. |
+
+### Examples
+
+```bash
+crewship plan "rewrite auth to use JWT"
+git diff | crewship plan "what would you do next?"
+crewship plan --agent viktor "fix the failing tests"
+crewship plan "refactor the credential store" --with-file internal/creds/store.go
+crewship plan "review my changes" --with-git-staged --with-git-status
+```
+
+### Common errors
+
+- **`plan requires a prompt (positional, --prompt, or stdin)`** — empty input.
+- **`internal: ask command has no RunE`** — wiring error, should never appear in shipped builds.
+
+## `--plan` on ask / run
+
+`crewship ask --plan` and `crewship run <slug> --plan` flip the same latch (`planModeRequested`) and prepend the same prefix, so plan-mode is reachable from both directions.
+
+## See also
+
+- [`crewship ask`](/cli/agent) — execute the plan once you're happy.
+- [`crewship run`](/cli/agent) — same idea, agent-pinned.
+- [`crewship explain <run-id>`](/cli/explain) — post-hoc summary of what an executed run actually did.

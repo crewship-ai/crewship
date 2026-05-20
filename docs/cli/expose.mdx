@@ -1,0 +1,50 @@
+---
+title: "Expose"
+description: "Audit and revoke agent-initiated port exposures (capability URLs). The agent creates them via the sidecar; humans audit and tear down."
+icon: "wifi"
+---
+
+# Expose
+
+`cmd/crewship/cmd_expose.go` is the human side of port exposures. Agents create exposures themselves by calling the sidecar's `/expose-port` endpoint; this CLI is for the audit (list) and teardown (revoke) verbs. MVP doesn't ship `approve` because the default policy is open — when a future policy introduces approval, the `approve` verb lands here next to the others.
+
+All subcommands scope to one crew because the server enforces crew-level auth on the underlying routes.
+
+## `crewship expose list`
+
+`GET /api/v1/crews/{crewId}/port-expose`.
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--crew <slug-or-id>` | string | (required) | Crew to list. Missing → `--crew is required (crew slug or ID)`. |
+| `--status <state>` | string | `active` (server default) | `active`, `revoked`, `expired`, or `all`. Lowercased before send. |
+
+Columns: `ID` (14-char trunc), `AGENT`, `PORT`, `STATUS`, `EXPIRES`, `DESCRIPTION` (40-char trunc).
+
+```bash
+crewship expose list --crew backend-team
+crewship expose list --crew backend-team --status revoked
+crewship expose list --crew backend-team --status all --format json
+```
+
+## `crewship expose revoke <id>`
+
+`POST /api/v1/crews/{crewId}/port-expose/{id}/revoke`. Flips an active exposure to `REVOKED`. Requires MANAGER+ (same as escalation resolve).
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--crew <slug-or-id>` | string | (required) | Crew the exposure belongs to. |
+| `--reason <text>` | string | (unset) | Human-readable reason recorded in the audit row. |
+
+```bash
+crewship expose revoke exp_abc --crew backend-team
+crewship expose revoke exp_abc --crew backend-team --reason "demo finished, tearing it down"
+```
+
+Success: `Exposure <id> revoked.`
+
+## See also
+
+- [`crewship credential`](/cli/credential) — adjacent secrets surface (different access pattern).
+- [`crewship audit`](/cli/audit) — full audit trail including revoke reasons.
+- [`crewship agent`](/cli/agent) — the agent identity that initiated the exposure.

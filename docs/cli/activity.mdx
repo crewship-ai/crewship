@@ -1,0 +1,46 @@
+---
+title: "Activity"
+description: "Cross-crew activity feed — assignments, peer conversations, and escalations merged into one DESC-by-time list."
+icon: "activity"
+---
+
+# Activity
+
+`cmd/crewship/cmd_activity.go` wraps `GET /api/v1/activity`. The server merges three sources (assignments, peer conversations, escalations) into a single list, descending by `created_at`, narrowable by crew. Anything beyond that (free-text search, type filter, time window) is applied client-side after the page lands — the endpoint itself has no `type=` or `since=` parameter, and there is intentionally no SSE stream.
+
+For a live tail of granular events, use [`crewship journal --follow`](/cli/journal) or its shortcut [`crewship watch`](/cli/watch).
+
+## `crewship activity`
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--crew <slug-or-id>` | string | (unset) | Narrow to a single crew. Server-side filter via `crew_id`. |
+| `--lines <n>` | int | `50` | Page size. The server caps at 100. |
+| `--type <substring>` | string | (unset) | Client-side filter by activity type substring (case-insensitive). |
+| `--since <window>` | string | (unset) | Client-side filter — `1h`, `24h`, `7d`, or RFC3339 timestamp. |
+| `--export <fmt>` | string | (unset) | Dump the current page: `ndjson` or `csv`. Wins over `--format`. |
+| `--out <path>` | string | (unset) | Write `--export` output to file (default: stdout). |
+
+### Examples
+
+```bash
+crewship activity
+crewship activity --crew backend-team --lines 100
+crewship activity --type escalation --since 24h
+crewship activity --export ndjson --out activity.ndjson
+crewship activity --export csv > activity.csv
+```
+
+Default output is a coloured one-line-per-event table with timestamps, type tag (ASSIGNMENT, COMPLETED, ESCALATION, QUERY, RESPONSE), crew slug, and summary.
+
+### Common errors
+
+- **`bad --since: <reason>`** — value did not parse as `1h`/`24h`/`7d` or RFC3339.
+- **`--export must be ndjson or csv (got "xlsx")`** — only those two shapes are supported.
+- **`open --out: <fs error>`** — destination file path is unwritable.
+
+## See also
+
+- [`crewship journal`](/cli/journal) — filtered tailing/audit (`--follow` for live).
+- [`crewship watch`](/cli/watch) — top-level alias of `journal --follow`.
+- [`crewship recall <query>`](/cli/recall) — free-text search across the journal.

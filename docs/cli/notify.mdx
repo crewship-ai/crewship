@@ -1,0 +1,76 @@
+---
+title: "Notify"
+description: "Desktop notifications — enable / disable / status / test / send. Crewship pings you when long runs finish."
+icon: "bell"
+---
+
+# Notify
+
+`cmd/crewship/cmd_notify.go` manages OS-level desktop notifications. Crewship pings you when a long run completes, an approval is waiting, or an escalation arrives — useful when the CLI is in the background.
+
+The preference is stored in `~/.crewship/cli-config.yaml` (`notifications: true|false`).
+
+## `crewship notify enable`
+
+Opt in. Sets `notifications: true` in the config file.
+
+```bash
+crewship notify enable
+# notifications: enabled
+```
+
+## `crewship notify disable`
+
+Opt out.
+
+```bash
+crewship notify disable
+# notifications: disabled
+```
+
+## `crewship notify status`
+
+Show the current setting.
+
+```bash
+crewship notify status
+# notifications: enabled
+```
+
+## `crewship notify test`
+
+Fire one notification right now via `cli.OSNotify`. Confirms the OS integration is wired up.
+
+```bash
+crewship notify test
+# notification sent
+```
+
+## `crewship notify send <title> <body>`
+
+Ad-hoc notification — scripting hook.
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--level <urgency>` | string | `info` | `info`, `warn`, or `critical`. Maps to `cli.NotifyInfo|Warn|Critical`. |
+
+```bash
+crewship notify send "Deploy done" "merged feature/x"
+crewship notify send "Build broken" "tests failed on main" --level critical
+```
+
+## Long-run threshold
+
+The internal helper `maybeNotifyRunComplete` only fires when:
+1. The user opted in via `notify enable`, **and**
+2. The run took longer than the threshold (default `30s`).
+
+Override the threshold with `CREWSHIP_NOTIFY_LONG_RUN=<seconds>` — tighter cadence for quick feedback, looser cadence to suppress noise from short routine runs.
+
+Failed runs land with the title `Crewship — run FAILED` at `Critical` urgency; normal completion lands as `Crewship — run done` at `Info`.
+
+## See also
+
+- [`crewship config`](/cli/config) — direct view of the `notifications` key.
+- [`crewship escalation`](/cli/escalation) — escalations are one of the events that fire notifications.
+- [`crewship wait`](/cli/wait) — script-blocking alternative to desktop pings.

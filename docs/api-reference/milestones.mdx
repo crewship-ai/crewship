@@ -1,0 +1,140 @@
+---
+title: "Milestones"
+description: "Project milestones — named, dated checkpoints with issue rollup counts. List and create are nested under projects; update and delete take the milestone id directly."
+icon: "flag"
+---
+
+# Milestones
+
+A milestone is a named checkpoint inside a project — typically a release target, a deadline, or a logical chunk of work. Each milestone tracks an issue rollup (`issue_count`, `done_count`) so the FE can render burn-down without a separate query.
+
+Implementation: `internal/api/milestone_handler.go`. Backed by the `milestones` table; issue counts are computed from `missions WHERE mission_type = 'issue'`.
+
+All endpoints require an authenticated session and workspace context. The URL space is split:
+
+- **List / Create** are nested under the project: `/api/v1/projects/{projectId}/milestones`. The project must belong to the calling workspace (`projects.workspace_id`), otherwise `404`.
+- **Update / Delete** address the milestone directly: `/api/v1/milestones/{milestoneId}`. Workspace ownership is verified by joining `milestones → projects → workspace_id`.
+
+## Milestone shape
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | string (CUID) | |
+| `project_id` | string | Owning project. |
+| `name` | string | Display name. |
+| `description` | string \| null | Markdown body. |
+| `target_date` | string \| null | ISO 8601 date (`YYYY-MM-DD`) or full RFC3339 — stored verbatim. |
+| `status` | string | `active`, `completed`, `archived`, ... (server doesn't enforce the enum). Defaults to `"active"` on create when omitted. |
+| `position` | int | Ordering within the project, ascending. Auto-assigned on create as `MAX(position) + 1`. |
+| `issue_count` | int | Issues attached to this milestone (`missions WHERE milestone_id = ? AND mission_type = 'issue'`). |
+| `done_count` | int | Subset of `issue_count` where `status IN ('DONE', 'COMPLETED')`. |
+| `created_at` | RFC3339 | |
+| `updated_at` | RFC3339 | |
+
+## `GET /api/v1/projects/{projectId}/milestones`
+
+List milestones in a project, ordered by `position ASC, created_at ASC`.
+
+**Auth:** authenticated session + workspace context.
+
+**Response:** `200 OK` — JSON array (never `null`).
+
+```json
+[
+  {
+    "id": "mls_01HVZ...",
+    "project_id": "prj_q3_release",
+    "name": "Beta cut",
+    "description": "Feature freeze + first external beta tag.",
+    "target_date": "2026-06-15",
+    "status": "active",
+    "position": 1,
+    "issue_count": 23,
+    "done_count": 11,
+    "created_at": "2026-04-01T10:00:00Z",
+    "updated_at": "2026-05-12T14:30:00Z"
+  }
+]
+```
+
+The List query uses a `LEFT JOIN` against an aggregated subquery so milestones with zero issues still appear (counts come back as `0`, not `null`).
+
+| Status | Condition |
+|---|---|
+| `401` | Not authenticated. |
+| `404` | Project not found, or project does not belong to the current workspace. |
+
+## `POST /api/v1/projects/{projectId}/milestones`
+
+Create a new milestone in the project. Position is auto-assigned at the end of the project's milestone list.
+
+**Auth:** authenticated session + workspace context + `OWNER`, `ADMIN`, or `MANAGER` role (`requireRole("create")`).
+
+**Request body:**
+
+| Field | Type | Required | Default | Notes |
+|---|---|---|---|---|
+| `name` | string | Yes | — | Empty → `400 name is required`. |
+| `description` | string | No | `null` | |
+| `target_date` | string | No | `null` | Server stores it verbatim — pass `YYYY-MM-DD` or full RFC3339; no parse-time validation. |
+| `status` | string | No | `"active"` | Empty string is normalised to `"active"`. |
+
+**Response:** `201 Created` with the milestone object (`issue_count: 0`, `done_count: 0`).
+
+**WebSocket event:** `milestone.created` broadcast on the workspace channel with `{ "id": "<id>", "project_id": "<projectId>" }`.
+
+| Status | Condition |
+|---|---|
+| `400` | Malformed JSON body or missing `name`. |
+| `401` | Not authenticated. |
+| `403` | Caller is below the `MANAGER` role. |
+| `404` | Project not found in this workspace. |
+
+## `PATCH /api/v1/milestones/{milestoneId}`
+
+Partial update. Workspace ownership is verified by joining `milestones → projects → workspace_id` — a cross-workspace id returns `404`, not `403`, so the surface can't be probed for which milestone ids exist.
+
+**Auth:** authenticated session + workspace context + `OWNER`, `ADMIN`, or `MANAGER` role.
+
+**Request body:** every field optional.
+
+| Field | Type | Notes |
+|---|---|---|
+| `name` | string | |
+| `description` | string | |
+| `target_date` | string | Same loose format as on create. |
+| `status` | string | |
+| `position` | int | Reorder within the project. |
+
+**Response:** `200 OK` with the full updated milestone object (rollup counts are recomputed inline via correlated subqueries).
+
+**WebSocket event:** `milestone.updated` broadcast on the workspace channel with `{ "id": "<id>", "project_id": "<projectId>" }`.
+
+| Status | Condition |
+|---|---|
+| `400` | Malformed JSON body or no fields to update. |
+| `401` | Not authenticated. |
+| `403` | Caller is below the `MANAGER` role. |
+| `404` | Milestone id not found in this workspace. |
+
+## `DELETE /api/v1/milestones/{milestoneId}`
+
+Hard delete the milestone. Attached issues are **not** deleted — they're unlinked from the milestone (`UPDATE missions SET milestone_id = NULL WHERE milestone_id = ?`) inside the same transaction as the milestone row delete. This keeps history intact while letting the project be reorganised without orphan FK errors.
+
+**Auth:** authenticated session + workspace context + `OWNER` or `ADMIN` role (`requireRole("manage")`).
+
+**Response:** `204 No Content`.
+
+**WebSocket event:** `milestone.deleted` broadcast on the workspace channel with `{ "id": "<id>", "project_id": "<projectId>" }`.
+
+| Status | Condition |
+|---|---|
+| `401` | Not authenticated. |
+| `403` | Caller is below the `ADMIN` role. |
+| `404` | Milestone id not found in this workspace. |
+
+## See also
+
+- [Issues](/api-reference/issues) — `milestone_id` on a mission attaches it here; delete unlinks instead of cascading.
+- [Recurring Issues](/api-reference/recurring-issues) — can target a milestone via `milestone_id` so every fire lands in the right bucket.
+- [Crews](/api-reference/crews) — projects belong to a workspace, not a crew, but crews are the runtime container for the missions filed against the milestone.

@@ -1,0 +1,47 @@
+---
+title: "Copy Prompt"
+description: "Recover the first user prompt from a previous run — to stdout or the system clipboard. Edit it, re-issue it."
+icon: "clipboard-copy"
+---
+
+# Copy Prompt
+
+`cmd/crewship/cmd_copy_prompt.go` recovers the first user prompt from a previous run and writes it to stdout or the system clipboard. The "I want to tweak this and rerun" workflow that doesn't end with a network round-trip.
+
+Why a top-level command rather than a flag on retry: copy-prompt is local; users routinely want to grab a past prompt, edit it in `$EDITOR`, and re-issue. Keeping it separate keeps [`crewship retry`](/cli/retry)'s mental model ("rerun this exactly") clean.
+
+## `crewship copy-prompt <run-id>`
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--clipboard` | bool | `false` | Copy via `pbcopy` / `wl-copy` / `xclip` / `xsel` instead of writing to stdout. Falls through to a clear error on headless servers. |
+
+### Examples
+
+```bash
+crewship copy-prompt r_abc                          # to stdout
+crewship copy-prompt r_abc --clipboard              # to system clipboard
+crewship copy-prompt r_abc | pbcopy                 # alternate route on macOS
+crewship copy-prompt r_abc > prompt.txt             # save to file for editing
+```
+
+A trailing newline is added if missing so shells display cleanly. With `--clipboard`, stderr gets `[copied <n> chars to clipboard]`.
+
+### Re-issuing
+
+```bash
+crewship retry r_abc                                # same agent + same prompt, new chat
+crewship retry r_abc --new-prompt "tweaked"         # same agent, edited prompt
+```
+
+### Common errors
+
+- **`run <id> has no chat_id`** — the run pre-dates chat threading.
+- **`could not recover prompt for run <id>`** — no USER/HUMAN-role message in the chat.
+- **`no clipboard helper found (install pbcopy/wl-copy/xclip/xsel)`** — headless box or missing dependency.
+
+## See also
+
+- [`crewship retry <run-id>`](/cli/retry) — uses the same recovery path internally.
+- [`crewship history`](/cli/history) — find the run-id.
+- [`crewship prompt save <name>`](/cli/prompt) — save the recovered prompt to your local library.

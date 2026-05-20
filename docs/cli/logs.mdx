@@ -1,0 +1,80 @@
+---
+title: "Logs"
+description: "Tail an agent's container logs — recent lines or live WebSocket stream."
+icon: "file-text"
+---
+
+# crewship logs
+
+Print recent log lines for an agent, or follow them live over WebSocket. The agent must be assigned to a crew — logs are sourced from the crew container, so a crew-less agent fails with `agent has no crew (logs require a crew)`.
+
+```bash
+crewship logs <agent-slug> [flags]
+```
+
+Tab-completes `<agent-slug>` against the workspace's agents. Both the slug and the agent ID are accepted.
+
+Requires an authenticated session (`requireAuth`) and a selected workspace (`requireWorkspace`).
+
+## Flags
+
+| Flag | Short | Default | Purpose |
+| --- | --- | --- | --- |
+| `--lines <n>` | `-n` | `100` | Number of historical log lines to print. |
+| `--follow` | `-F` | `false` | After the initial batch, stream new events live via WebSocket. Ctrl+C to stop. |
+
+## Examples
+
+### Last 100 lines
+
+```bash
+crewship logs viktor
+# 2026-05-19 14:02:11 [output] starting code-review run …
+# 2026-05-19 14:02:14 [output] reading src/api/router.go
+# 2026-05-19 14:02:18 [error]  linter exited 1
+```
+
+Each line is `<timestamp> [<event>] <content>`. Events are colour-coded: `output` (white), `error` (red), everything else (gray).
+
+### Smaller window
+
+```bash
+crewship logs viktor --lines 50
+```
+
+### Live tail
+
+```bash
+crewship logs viktor --follow
+# 2026-05-19 14:02:11 [output] …
+# [following logs for viktor, Ctrl+C to stop]
+# 2026-05-19 14:02:22 [text]   draft PR description …
+# 2026-05-19 14:02:25 [done]   run complete
+```
+
+Follow mode prints the historical batch first, then opens a WebSocket against the `agent:<id>` channel using a short-lived token from `GET /api/v1/ws-token`. Lines streamed after the prompt are formatted identically to the initial batch.
+
+### Combined with jq via JSON
+
+The default output is line-formatted. For structured tooling, use the underlying journal:
+
+```bash
+crewship journal --agent viktor --format json | jq 'select(.event=="error")'
+```
+
+## Terminal hardening
+
+Both the event tag and content are passed through a terminal sanitiser before printing, so a rogue log entry can't smuggle ANSI escapes or OSC links into the operator's scrollback. The content is also truncated at 200 characters per line — log payloads larger than that show as `<first 200 chars>…`.
+
+## Common errors
+
+- **`agent not found: <slug>`** — no agent matches the slug or ID in the active workspace. Run `crewship agent list` to see what's available.
+- **`agent has no crew (logs require a crew)`** — the agent record exists but isn't attached to a crew. Logs come from the crew container; attach the agent with `crewship agent assign` first.
+- **`get WS token for follow: …`** — `--follow` needs the WebSocket endpoint; this surfaces when `/api/v1/ws-token` is unreachable. Usually a server restart or revoked CLI token.
+
+## See also
+
+- [`crewship journal`](/cli/journal) — structured event view of the same data, with filtering and jq support.
+- [`crewship inspect`](/cli/inspect) — one-shot, run-scoped timeline; for an entire run, not a tailing process.
+- [`crewship agent`](/cli/agent) — `agent list` / `agent get` for slugs and IDs.
+- [`crewship chat`](/cli/agent) — interactive REPL against an agent.
