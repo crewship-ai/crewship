@@ -229,7 +229,27 @@ Preview what the routine WOULD execute without invoking agents. Returns a struct
 crewship routine dry-run summarize-text --inputs '{"text":"..."}'
 ```
 
+Example output:
+
+```
+Dry run: DRY_RUN_OK (estimated 0ms, $0.0034 total)
+
+Step 1 [extract] (agent_run):
+  would call agent: viktor
+  resolved tier: claude/claude-haiku-4-5
+  estimated cost: $0.0021
+  would pass: Extract the key entities from the following text...
+
+Step 2 [summarise] (agent_run):
+  would call agent: tomas
+  resolved tier: claude/claude-sonnet-4-6
+  estimated cost: $0.0013
+  would pass: Write a 2-sentence summary of...
+```
+
 Zero side effects — useful for "is this routine wired correctly?" without burning tokens.
+
+The cost figure is an order-of-magnitude estimate (flat token-density heuristic, not real pricing). The same report renders inline in the UI: click **Dry run** in the routine detail panel and the report appears above the tab bar.
 
 ---
 

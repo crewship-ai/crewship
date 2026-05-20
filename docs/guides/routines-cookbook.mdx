@@ -300,6 +300,16 @@ Without `project_title`, the LLM step would see the entire JSON response (often 
 
 Use both for a webhook handler. The concurrency key prevents a burst from fanning out; the idempotency header prevents a delayed retry from re-running an already-completed job.
 
+### `concurrency_key` validation
+
+The platform fails fast when a non-empty `concurrency_key` template renders to an empty string. Example: a routine declares `concurrency_key: "{{ inputs.order_id }}"` but the caller triggers without supplying `order_id` — the rendered key is `""`, which would otherwise be treated as "no gate" and silently allow unlimited parallelism. The executor instead returns:
+
+```
+pipeline: concurrency_key rendered to empty value (referenced input missing or empty): template "{{ inputs.order_id }}"
+```
+
+This protects against a class of denial-of-self bugs where a misconfigured caller bypasses the per-tenant gate the routine author asked for. If you genuinely want a static gate, use a literal value (e.g. `"global"`); if you want no gate, omit the field entirely.
+
 ### Triggering safely
 
 ```bash

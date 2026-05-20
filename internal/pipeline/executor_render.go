@@ -52,13 +52,32 @@ func evalIfCondition(rendered string) bool {
 // renderConcurrencyKey renders the DSL's concurrency_key template
 // against the inputs map. We only support `{{ inputs.X }}` here —
 // the full Render pipeline isn't reachable yet (no step outputs at
-// reservation time). Empty template → empty key (no gate).
-func renderConcurrencyKey(_ context.Context, template string, inputs map[string]any) string {
+// reservation time).
+//
+// Three outcomes:
+//
+//   - template == ""                 → ("", false, nil)  unset by author, no gate
+//   - non-empty template, renders OK → (key, true, nil)  gate engaged
+//   - non-empty template, empty out  → ("", true, err)   author asked for a gate
+//     but a referenced input is missing/empty — that's a silent-bypass bug if
+//     we let it through, so caller MUST fail the run.
+//
+// Why: a routine that declares `concurrency_key: "{{ inputs.account_id }}"`
+// is asking the platform to serialise runs per tenant. If account_id is
+// missing, returning empty key (no gate) would silently allow unlimited
+// parallelism — a Denial-of-Self via unintended fan-out. The fail-fast
+// here matches Trigger.dev's behaviour: a queue/concurrencyKey with no
+// resolved value is a config error, not "no gate."
+func renderConcurrencyKey(_ context.Context, template string, inputs map[string]any) (string, bool, error) {
 	if template == "" {
-		return ""
+		return "", false, nil
 	}
 	rc := RenderContext{Inputs: inputs, StepOutputs: map[string]string{}, Env: map[string]string{}}
-	return Render(template, rc)
+	rendered := Render(template, rc)
+	if rendered == "" {
+		return "", true, ErrConcurrencyKeyEmpty
+	}
+	return rendered, true, nil
 }
 
 // estimateStepCost returns a coarse cost guess for a dry-run step.

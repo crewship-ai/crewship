@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils"
 import { useRealtimeEvent, type RealtimeEvent } from "@/hooks/use-realtime"
 import { RoutineRunsSkeleton } from "./routine-skeletons"
 import { Card, EmptyState, Pill } from "./_shared"
+import { extractStepMeta, formatStepCost, formatStepDuration } from "./routine-cost-format"
 
 // RoutineRunsTab — list of recent runs for one routine. Click to
 // expand a run inline and see step-level waterfall.
@@ -222,21 +223,43 @@ function RunWaterfall({
   // object (parsed JSON) or a string (when an upstream JSON.parse
   // failure pushed raw bytes through). We tolerate both rather than
   // showing "No step events" when the actual data is present.
-  const merged: Array<{ ts: string; kind: string; stepId: string; summary: string; severity: string }> = []
+  const merged: Array<{
+    ts: string
+    kind: string
+    stepId: string
+    summary: string
+    severity: string
+    costUSD: number
+    durationMs: number
+  }> = []
   for (const entry of journalEntries) {
-    const stepId = extractStepID(entry.payload)
-    if (entry.entry_type.startsWith("pipeline.step.") && stepId) {
+    const meta = extractStepMeta(entry.payload)
+    if (entry.entry_type.startsWith("pipeline.step.") && meta.stepId) {
       merged.push({
         ts: entry.ts,
         kind: entry.entry_type.replace("pipeline.step.", ""),
-        stepId,
+        stepId: meta.stepId,
         summary: entry.summary,
         severity: entry.severity,
+        costUSD: meta.costUSD,
+        durationMs: meta.durationMs,
       })
     }
   }
   for (const live of liveSteps) {
-    merged.push({ ts: live.ts, kind: live.kind, stepId: live.step_id, summary: "(live event)", severity: "info" })
+    merged.push({
+      ts: live.ts,
+      kind: live.kind,
+      stepId: live.step_id,
+      summary: "(live event)",
+      severity: "info",
+      // Live WS events for step.completed carry cost+duration in the
+      // payload; handleStepEvent above only forwards step_id and a few
+      // fields today, so live entries render with "—" until the
+      // journal echo lands a moment later with the full payload.
+      costUSD: 0,
+      durationMs: 0,
+    })
   }
   merged.sort((a, b) => a.ts.localeCompare(b.ts))
 
@@ -261,31 +284,56 @@ function RunWaterfall({
     )
   }
 
+  // Roll up totals across all `completed` events so the waterfall has
+  // a footer matching the per-run number in the Overview tab — makes
+  // the column subtotals reconcilable at a glance.
+  const totalCost = deduped.reduce((a, m) => a + m.costUSD, 0)
+  const totalDuration = deduped.reduce((a, m) => a + m.durationMs, 0)
+  const anyCostShown = deduped.some((m) => m.costUSD > 0)
+  const anyDurationShown = deduped.some((m) => m.durationMs > 0)
+
   return (
-    <ol className="space-y-1.5">
-      {deduped.map((s, i) => (
-        <li key={i} className="flex items-center gap-3 text-sm">
-          <span className="font-mono text-[11px] text-muted-foreground tabular-nums">
-            {new Date(s.ts).toLocaleTimeString()}
-          </span>
-          <Pill
-            tone={
-              s.kind === "completed"
-                ? "emerald"
-                : s.kind === "failed"
-                  ? "rose"
-                  : s.kind === "validation_failed"
-                    ? "amber"
-                    : "default"
-            }
-            className="capitalize"
-          >
-            {s.kind.replace(/_/g, " ")}
-          </Pill>
-          <span className="font-mono text-foreground/90">{s.stepId}</span>
-        </li>
-      ))}
-    </ol>
+    <div className="space-y-2">
+      <ol className="space-y-1.5">
+        {deduped.map((s, i) => (
+          <li key={i} className="flex items-center gap-3 text-sm">
+            <span className="font-mono text-[11px] text-muted-foreground tabular-nums">
+              {new Date(s.ts).toLocaleTimeString()}
+            </span>
+            <Pill
+              tone={
+                s.kind === "completed"
+                  ? "emerald"
+                  : s.kind === "failed"
+                    ? "rose"
+                    : s.kind === "validation_failed"
+                      ? "amber"
+                      : "default"
+              }
+              className="capitalize"
+            >
+              {s.kind.replace(/_/g, " ")}
+            </Pill>
+            <span className="font-mono text-foreground/90">{s.stepId}</span>
+            <span className="ml-auto flex items-center gap-3 font-mono text-[11px] tabular-nums text-muted-foreground">
+              <span className="min-w-[3.5rem] text-right" title="Step duration">
+                {formatStepDuration(s.durationMs)}
+              </span>
+              <span className="min-w-[4.5rem] text-right" title="Step cost (USD)">
+                {formatStepCost(s.costUSD)}
+              </span>
+            </span>
+          </li>
+        ))}
+      </ol>
+      {(anyCostShown || anyDurationShown) && (
+        <div className="flex items-center justify-end gap-3 border-t border-border/40 pt-2 font-mono text-[11px] tabular-nums text-muted-foreground">
+          <span>Total</span>
+          <span className="min-w-[3.5rem] text-right">{formatStepDuration(totalDuration)}</span>
+          <span className="min-w-[4.5rem] text-right">{formatStepCost(totalCost)}</span>
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -327,25 +375,9 @@ function groupRunsByRunId(rows: Array<{ id: string; ts: string; entry_type: stri
   return Array.from(groups.values()).sort((a, b) => b.startedAt.localeCompare(a.startedAt))
 }
 
-// extractStepID pulls the step_id from a journal entry's payload field,
-// tolerating three on-the-wire shapes: parsed object (the common case),
-// JSON-encoded string (when upstream serialized it twice), and absent.
-function extractStepID(payload: unknown): string {
-  if (!payload) return ""
-  if (typeof payload === "string") {
-    try {
-      const parsed = JSON.parse(payload) as { step_id?: unknown }
-      return typeof parsed.step_id === "string" ? parsed.step_id : ""
-    } catch {
-      return ""
-    }
-  }
-  if (typeof payload === "object" && payload !== null) {
-    const obj = payload as { step_id?: unknown }
-    return typeof obj.step_id === "string" ? obj.step_id : ""
-  }
-  return ""
-}
+// Step-meta + cost/duration formatting moved to routine-cost-format.ts
+// so the Overview tab and dry-run report panel reuse the same parsing
+// tolerances (see that file's header for the reasoning).
 
 function formatRelative(iso: string): string {
   const then = new Date(iso).getTime()
