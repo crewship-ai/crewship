@@ -29,22 +29,39 @@ three below are first-class and tested on every release.
 
 ## Homebrew
 
-The release pipeline publishes a Homebrew formula on every tag to
-`crewship-ai/homebrew-tap`.
+The release pipeline publishes two Homebrew formulae on every tag to `crewship-ai/homebrew-tap` (PR #444): a **full** binary that runs the daemon + embedded Next.js UI + CLI, and a **CLI-only** binary that's about half the size and only talks to a remote `crewshipd`.
 
 ```bash
+# Full — self-hosting users who'll run `crewship start` on this box
 brew install crewship-ai/tap/crewship
+
+# CLI-only — talks to a remote daemon (e.g. colleague.tail.ts.net:8080)
+brew install crewship-ai/tap/crewship-cli
 ```
 
-The tap is auto-resolved from the prefixed name, so you do not need a
-separate `brew tap` step. Upgrades follow the normal flow:
+| | `crewship` (full) | `crewship-cli` |
+|---|---|---|
+| Binary size (darwin/arm64, stripped) | 55 MB | **27 MB** |
+| `crewship ask` / `crew` / `agent` / `credential` / `mission` (HTTP-only) | ✅ | ✅ |
+| `crewship start` (run the daemon) | ✅ | ❌ |
+| `crewship doctor` (local Docker / Apple Container detection) | ✅ | ❌ |
+| `crewship admin` (direct SQLite recovery) | ✅ | ❌ |
+| `crewship telemetry` | ✅ | ❌ |
+| `crewship memory log/show/restore` (local audit chain) | ✅ | ❌ |
+
+The two formulae declare `conflicts:` against each other, so Homebrew refuses to install both on one host. Both archives ship the binary under the same name (`crewship`), so existing scripts keep working when you switch formulae.
+
+<Note>
+Running a daemon-only subcommand from the CLI-only binary produces cobra's `unknown command "start"` error. If you need to bring up a daemon, install the full formula instead.
+</Note>
+
+The tap is auto-resolved from the prefixed name, so you do not need a separate `brew tap` step. Upgrades follow the normal flow:
 
 ```bash
-brew upgrade crewship
+brew upgrade crewship       # or: brew upgrade crewship-cli
 ```
 
-Once installed, jump to the [quickstart](/quickstart) to bring the
-server up.
+Once installed (full variant), jump to the [quickstart](/quickstart) to bring the server up.
 
 ## curl | bash
 
