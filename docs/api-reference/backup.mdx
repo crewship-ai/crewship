@@ -38,6 +38,7 @@ Create a new backup bundle. Runs inline (seconds to minutes); no async job queue
 ```json
 {
   "scope": "workspace",
+  "scope_level": "standard",
   "crew_id": "",
   "passphrase": "correct horse battery staple",
   "recipient": "",
@@ -49,7 +50,8 @@ Create a new backup bundle. Runs inline (seconds to minutes); no async job queue
 | Field | Type | Notes |
 |---|---|---|
 | `scope` | `"workspace"` \| `"crew"` | Required. `"instance"` is reserved for the CLI-only flow and rejected by the API. |
-| `crew_id` | string | Required when `scope == "crew"`. |
+| `scope_level` | `"quick"` \| `"standard"` \| `"full"` | Optional. Defaults to `backup.DefaultScopeLevel` when omitted. Invalid values rejected with 400. |
+| `crew_id` | string | Required when `scope == "crew"`. Whitespace-only values are rejected. |
 | `passphrase` | string | AGE passphrase. Exactly one of `passphrase` / `recipient` / `no_encrypt` must be supplied. |
 | `recipient` | string | AGE X25519 public key (`age1…`). Parsed with `age.ParseX25519Recipient`. |
 | `no_encrypt` | bool | Plaintext payload. Use for test / CI only. |
@@ -64,16 +66,19 @@ Create a new backup bundle. Runs inline (seconds to minutes); no async job queue
   "payload_sha256": "b5f7…",
   "format_version": 1,
   "scope": "workspace",
+  "scope_level": "standard",
   "created_at": "2026-04-15T12:05:01Z",
   "encrypted": true
 }
 ```
 
+`scope_level` is omitted when the bundle has no explicit level recorded in its manifest.
+
 ### Errors
 
 | Status | Condition |
 |---|---|
-| `400` | Invalid body, invalid scope, missing `crew_id`, multiple or zero encryption selectors, invalid AGE recipient, `output_dir` escapes the default directory. |
+| `400` | Invalid body, invalid scope, invalid `scope_level`, missing `crew_id`, multiple or zero encryption selectors, invalid AGE recipient, `output_dir` escapes the default directory. |
 | `401` | Missing or invalid auth. |
 | `403` | Role < ADMIN. |
 | `409` | Another backup already holds the lock (`ErrLockHeld`) or an agent run is active (`ErrAgentRunning`). |
@@ -95,6 +100,7 @@ List bundles from `~/.crewship/backups` filtered to the caller's workspace (bund
       "file_name": "crewship-workspace-acme-2026-04-15T12-05-01Z.tar.zst",
       "size_bytes": 13421772,
       "scope": "workspace",
+      "scope_level": "standard",
       "encrypted": true,
       "created_at": "2026-04-15T12:05:01Z",
       "format_version": 1
@@ -102,6 +108,8 @@ List bundles from `~/.crewship/backups` filtered to the caller's workspace (bund
   ]
 }
 ```
+
+Entries are sourced from `backup_catalog` first (reconciled against disk on each call); a missing/empty catalog falls back to a filesystem scan. `scope_level` is omitted when the source manifest did not record it.
 
 ## GET /api/v1/admin/backups/status
 
@@ -119,7 +127,7 @@ Report the workspace's advisory lock.
 }
 ```
 
-`held: false` omits the detail fields. The lock TTL is 1 hour (`backup.DefaultLockTTL`).
+`held: false` omits the detail fields. The lock TTL is 1 hour (`backup.DefaultLockTTL`). Missing workspace context returns `400` (not 401).
 
 ## GET /api/v1/admin/backups/metrics
 
@@ -157,39 +165,30 @@ Duration quantiles are approximated from an in-memory ring buffer (tens-to-hundr
 
 ## POST /api/v1/admin/backups/self-test
 
-Round-trip self-test: create a synthetic backup, verify its MANIFEST + payload, and clean up. Used by health checks and CI to confirm encryption keys, storage paths, and the restore-side decrypt path are all wired correctly.
+Per-crew round-trip canary: collect → destroy a canary marker inside the crew container → restore → verify → cleanup. Used by the seed CLI and CI harness to validate the backup pipeline end-to-end without leaving a bundle on disk. Lightweight: no encryption, no DB dump.
+
+Gated by workspace `OWNER`/`ADMIN` (`canRole(role, "manage")`), the same as the other backup admin endpoints — **not** by `CREWSHIP_OWNER_EMAIL`.
 
 **Request body:**
 
 ```json
-{
-  "dry_run": false
-}
+{ "crew_id": "crew_abc123" }
 ```
 
-- `dry_run`: when `true`, validate configuration and storage permissions without writing a bundle. Default `false`.
+| Field | Required | Notes |
+|---|---|---|
+| `crew_id` | ✓ | Crew within the caller's workspace. Whitespace-only is rejected. |
 
-**Response:** `200 OK`
-
-```json
-{
-  "ok": true,
-  "created_path": "/var/lib/crewship/backups/self-test-2026-05-11T07-30-00Z.crewbackup",
-  "verified": true
-}
-```
-
-If `dry_run: true`, `created_path` is empty and `verified` reflects only configuration checks.
+**Response:** `200 OK` — `backup.SelfTestResult` JSON (collect/restore/verify status and timing for each phase).
 
 | Status | Condition |
 |--------|-----------|
-| `400 Bad Request` | Malformed body. |
-| `401 Unauthorized` | No authenticated session. |
-| `403 Forbidden` | Authenticated, but email does not match `CREWSHIP_OWNER_EMAIL`. |
-| `409 Conflict` | Another backup operation holds the workspace lock. |
-| `500 Internal Server Error` | Storage path unwritable, encryption key missing, or verify-decrypt failed. |
-
-Audit action: `backup.self_test`.
+| `400 Bad Request` | Malformed body or missing `crew_id`. |
+| `401 Unauthorized` | No workspace context. |
+| `403 Forbidden` | Role < ADMIN on this workspace. |
+| `404 Not Found` | Crew not found in the caller's workspace. |
+| `503 Service Unavailable` | `dockerOps` not wired (no Docker daemon). |
+| `500 Internal Server Error` | Canary insert/destroy/restore/verify failed. |
 
 ## DELETE /api/v1/admin/backups/status
 
@@ -214,6 +213,12 @@ Returns the manifest JSON as produced by `backup.Inspect` (`internal/backup/mani
 ## GET /api/v1/admin/backups/verify
 
 Recompute the sealed-payload SHA-256 and compare against the MANIFEST. Does not decrypt. Streams the payload from a temp file so peak heap is bounded by the zstd decoder window.
+
+### Query
+
+| Parameter | Required | Notes |
+|---|---|---|
+| `path` | ✓ | Absolute path. Subject to the same path-safety checks as `inspect`; bundles outside the caller's workspace return `404`. |
 
 ### Response — `200 OK`
 
@@ -278,6 +283,7 @@ Restore a bundle into the current workspace.
 {
   "path": "/home/admin/.crewship/backups/crewship-workspace-acme-…tar.zst",
   "passphrase": "correct horse battery staple",
+  "identity": "",
   "as_workspace": "",
   "as_crew": "",
   "dry_run": false
@@ -287,7 +293,8 @@ Restore a bundle into the current workspace.
 | Field | Notes |
 |---|---|
 | `path` | Required. Subject to the same path-safety checks as `inspect`. |
-| `passphrase` | Required for encrypted bundles. Empty for `--no-encrypt` bundles. |
+| `passphrase` | Required for passphrase-encrypted bundles. Empty for `--no-encrypt` or recipient-encrypted bundles. |
+| `identity` | AGE X25519 secret key (`AGE-SECRET-KEY-1…`) for bundles sealed with `--recipient`. Parsed with `age.ParseX25519Identity`; invalid values return 400. |
 | `as_workspace` | Land the workspace under a new slug. Docker phase is skipped. |
 | `as_crew` | Land the crew under a new slug (crew-scope bundles only). Docker phase is skipped. |
 | `dry_run` | Decrypt + replay the DB transaction, then **roll back**. No workspace / crew / agent writes are applied. |

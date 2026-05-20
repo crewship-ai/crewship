@@ -392,6 +392,86 @@ PATCH /api/v1/crews/{crewId}/missions/{missionId}/tasks/{taskId}?workspace_id={w
 
 ---
 
+## Mission Checkpoints
+
+Cartographer checkpoints capture a mission's journal cursor plus a state snapshot (agent-memory hashes, pending tasks, open assignments, crew container id) so the timeline UI can offer "list bookmarks" and (advisory) "restore/fork from here" affordances. The full restore/fork/get/delete surface is documented on the [Checkpoints](/api-reference/checkpoints) page; the two endpoints below are mission-scoped and live here for convenience. (`internal/api/cartographer_handler.go`)
+
+### List Mission Checkpoints
+
+```
+GET /api/v1/missions/{missionId}/checkpoints?limit=50
+```
+
+Returns newest-first checkpoints for a mission. Cross-workspace IDs are folded into the same `404` shape as "mission not found" so existence isn't leaked.
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `limit` | integer | `50` | 1-200. Values outside the range fall back to the default. |
+
+**Response:** `200 OK`
+
+```json
+{
+  "mission_id": "mission_abc",
+  "count": 1,
+  "checkpoints": [
+    {
+      "id": "chk_01h9z7k0",
+      "workspace_id": "ws_123",
+      "crew_id": "crew_456",
+      "mission_id": "mission_abc",
+      "label": "green build",
+      "journal_cursor": "j_7f3e2a1b8c9d0e12",
+      "state": {
+        "agent_memory": { "backend-dev": "sha256:…" },
+        "pending_tasks": ["task_1"],
+        "open_assignments": [],
+        "crew_container_id": "crew_456-runner"
+      },
+      "created_by": "user_5",
+      "created_at": "2026-05-14T09:12:44Z"
+    }
+  ]
+}
+```
+
+| Status | Condition |
+|---|---|
+| `400` | Missing `missionId` path value |
+| `401` | No workspace context on the request |
+| `404` | Mission not in caller's workspace |
+
+### Create Mission Checkpoint
+
+```
+POST /api/v1/missions/{missionId}/checkpoints
+```
+
+Captures the mission's current journal cursor + materialized state and writes a checkpoint row. Body is optional -- an unlabelled checkpoint is a valid "bookmark right now" gesture. (`internal/api/cartographer_handler.go:91`)
+
+**Request Body:** (optional)
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `label` | string | No | Human-readable label for the timeline UI |
+
+```json
+{ "label": "green build" }
+```
+
+**Response:** `201 Created` -- full checkpoint object (same shape as the List array entries above). When the row was committed but the immediate re-read failed, the response degrades to `{ "id": "chk_..." }` so the client can still navigate to it.
+
+| Status | Condition |
+|---|---|
+| `400` | Missing `missionId`, or invalid JSON body |
+| `401` | No workspace context on the request |
+| `404` | Mission not in caller's workspace |
+| `409` | Mission has no journal entries to anchor a checkpoint against |
+
+---
+
 ## Mission Metrics
 
 ```

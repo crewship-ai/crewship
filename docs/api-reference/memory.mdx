@@ -77,6 +77,100 @@ The CLI uses these exact thresholds (`internal/cli` colour helpers) and the FE f
 
 ---
 
+## Memory versions audit trail
+
+The HTTP mirror of `crewship memory log/show`. Workspace is anchored from the session -- query strings never carry `workspace_id`, so a cross-workspace probe can't smuggle a foreign id through. Restore (`POST /api/v1/memory/versions/{sha}/restore`) is documented separately on the [Admin reference](/api-reference/admin) because it requires OWNER/ADMIN and mutates canonical state; the two read endpoints below are MEMBER+.
+
+### `GET /api/v1/memory/versions`
+
+Returns the audit chain for one canonical memory path, newest-first.
+
+**Auth:** required + workspace context.
+
+**Query parameters:**
+
+| Param | Type | Default | Description |
+|---|---|---|---|
+| `path` | string | -- | Required. Canonical memory path (e.g. `agent:martin/AGENT.md`). 400 when omitted. |
+| `limit` | integer | `20` | Max rows to return. Any positive integer is accepted; non-positive or non-numeric values fall back to the default. |
+
+**Response:** `200 OK`
+
+```json
+{
+  "path": "agent:martin/AGENT.md",
+  "count": 2,
+  "entries": [
+    {
+      "id": "mv_01HZA...",
+      "sha256": "abc...",
+      "bytes": 1284,
+      "written_at": "2026-05-18T08:30:00Z",
+      "written_by": "audit-watcher",
+      "parent_sha": "def..."
+    },
+    {
+      "id": "mv_01HZ9...",
+      "sha256": "def...",
+      "bytes": 1180,
+      "written_at": "2026-05-17T22:11:48Z",
+      "written_by": "audit-watcher",
+      "parent_sha": null
+    }
+  ]
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `path` | string | Echo of the request's `path`. |
+| `count` | integer | `len(entries)` -- handy when paging is bounded by `limit`. |
+| `entries[]` | array | Newest-first list of `memory_versions` rows for this path in the caller's workspace. |
+
+| Status | Condition |
+|---|---|
+| `400` | Missing `path` query parameter. |
+| `401` | No workspace context in the session. |
+| `500` | Underlying `memory.LogVersions` query failed. |
+
+### `GET /api/v1/memory/versions/{sha}`
+
+Returns the raw blob bytes for one historical version. Pipe-friendly: the body **is** the historical content, metadata travels in headers so a CLI pipe to a file produces the exact bytes that were written.
+
+**Auth:** required + workspace context.
+
+**Path parameters:**
+
+| Param | Description |
+|---|---|
+| `sha` | Content sha256 from `memory_versions.sha256`. |
+
+**Query parameters:**
+
+| Param | Type | Description |
+|---|---|---|
+| `path` | string | Required. The canonical memory path the sha was written under. The same sha can be paired with different paths if two paths happen to converge on identical content. |
+
+**Response:** `200 OK` -- raw bytes, `Content-Type: application/octet-stream`.
+
+| Header | Description |
+|---|---|
+| `X-Memory-Version-Sha` | Echo of the path's sha. |
+| `X-Memory-Version-Bytes` | Body length (matches `memory_versions.bytes`). |
+
+| Status | Condition |
+|---|---|
+| `400` | Missing `sha` path segment or missing `path` query parameter. |
+| `401` | No workspace context. |
+| `404` | No `memory_versions` row matches `(workspace_id, path, sha)` -- cross-workspace lookups masked as 404 to avoid leaking row existence. |
+| `500` | Read failure from the underlying blob store. |
+
+<Note>
+  The restore endpoint (`POST /api/v1/memory/versions/{sha}/restore`) is OWNER/ADMIN-only and applies extra server-side path confinement to refuse canonical targets outside the configured memory root. See the [Admin reference](/api-reference/admin) for the full mutation surface.
+</Note>
+
+---
+
 ## Tenancy
 
 - `workspace_id` is always pulled from the session — never accepted as a query parameter or body field.

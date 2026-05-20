@@ -68,7 +68,13 @@ Returns all crews in the workspace, ordered by creation date descending.
 | `allowed_domains` | string[] | Allowed domains (restricted mode only) |
 | `mcp_config_json` | string? | Raw MCP server config JSON |
 | `escalation_config` | string? | Escalation policy config JSON |
-| `issue_prefix` | string? | Issue identifier prefix (e.g., `"ENG"`) |
+| `runtime_image` | string? | Custom runtime image (e.g., `ghcr.io/org/runtime:1.0`) |
+| `devcontainer_config` | string? | Raw devcontainer.json (max 100 KB) |
+| `mise_config` | string? | Raw mise config TOML (max 10 KB) |
+| `services_json` | string? | Sidecar services JSON (max 64 KB) |
+| `cached_image` | string? | Locally built image tag (set by provisioner) |
+| `config_hash` | string? | Hash of devcontainer/mise/runtime inputs used for `cached_image` |
+| `issue_prefix` | string? | Issue identifier prefix (e.g., `"ENG"`); always `null` on List (only populated by Get) |
 | `created_at` | string | ISO 8601 timestamp |
 | `updated_at` | string | ISO 8601 timestamp |
 | `_count.agents` | integer | Number of active agents |
@@ -97,7 +103,11 @@ POST /api/v1/crews?workspace_id={workspaceId}
 | `container_cpus` | number | No | `2.0` | Container CPU limit |
 | `container_ttl_hours` | integer | No | `null` | Container time-to-live in hours |
 | `network_mode` | string | No | `"free"` | `"free"` or `"restricted"` |
-| `allowed_domains` | string[] | No | `[]` | Allowed domains when `network_mode` is `"restricted"` |
+| `allowed_domains` | string[] | No | `[]` | Allowed domains when `network_mode` is `"restricted"` (ignored otherwise) |
+| `runtime_image` | string | No | `null` | Custom runtime image; existence is validated against the registry before insert |
+| `devcontainer_config` | string | No | `null` | Raw devcontainer.json (max 100 KB; parsed for syntax) |
+| `mise_config` | string | No | `null` | Raw mise config TOML (max 10 KB; parsed for syntax) |
+| `services_json` | string | No | `null` | Sidecar services JSON (max 64 KB; structurally validated) |
 
 ```json
 {
@@ -119,7 +129,7 @@ POST /api/v1/crews?workspace_id={workspaceId}
 
 | Status | Condition |
 |---|---|
-| `400` | Invalid name length, slug format, or network_mode value |
+| `400` | Invalid name/slug length or format, invalid `network_mode`, invalid domain entry, `runtime_image` not found in registry, oversize or invalid `devcontainer_config`/`mise_config`/`services_json` |
 | `402` | License crew limit exceeded |
 | `403` | Insufficient role |
 | `409` | Slug already taken in this workspace |
@@ -172,17 +182,21 @@ Both `PATCH` and `PUT` are supported and behave identically (partial update -- o
 | `container_ttl_hours` | integer | Container TTL in hours |
 | `network_mode` | string | `"free"` or `"restricted"` |
 | `allowed_domains` | string[] | Allowed domains (restricted mode) |
-| `mcp_config_json` | string | Raw MCP server config JSON |
-| `escalation_config` | string | Escalation policy config JSON |
-| `issue_prefix` | string | Issue identifier prefix (e.g., `"ENG"`) |
+| `mcp_config_json` | string | Raw MCP server config JSON (must contain `mcpServers` object) |
+| `escalation_config` | string | Escalation policy config JSON (thresholds 0-1, `auto_approve_threshold` > `require_approval_below`) |
+| `issue_prefix` | string | Issue identifier prefix (e.g., `"ENG"`); empty string clears |
+| `runtime_image` | string | Custom runtime image (empty string clears; existence validated) |
+| `devcontainer_config` | string | Raw devcontainer.json (empty string clears; max 100 KB) |
+| `mise_config` | string | Raw mise config TOML (empty string clears; max 10 KB) |
+| `services_json` | string | Sidecar services JSON (empty/whitespace clears; max 64 KB) |
 
 **Response:** `200 OK` -- updated crew object.
 
-**Note:** Changing `network_mode` or `allowed_domains` triggers a container restart to apply the new network policy.
+**Note:** Changing `network_mode`, `allowed_domains`, or `services_json` triggers a container restart so the docker provider picks up the new policy / sidecar set on the next agent run. Changing `runtime_image`, `devcontainer_config`, or `mise_config` invalidates `cached_image` + `config_hash` to force a rebuild.
 
 | Status | Condition |
 |---|---|
-| `400` | Invalid field values |
+| `400` | Invalid field values (name/slug length, slug format, `network_mode`, domain entry, `container_ttl_hours` negative, MCP JSON missing `mcpServers`, escalation thresholds out of range, oversize or invalid `devcontainer_config`/`mise_config`/`services_json`, `runtime_image` not found) |
 | `403` | Insufficient role |
 | `404` | Crew not found |
 | `409` | Slug already taken |
@@ -195,11 +209,15 @@ Both `PATCH` and `PUT` are supported and behave identically (partial update -- o
 DELETE /api/v1/crews/{crewId}?workspace_id={workspaceId}
 ```
 
-Soft-deletes the crew (sets `deleted_at`). The slug is freed for reuse.
+Soft-deletes the crew (sets `deleted_at`) and cascade-deletes its missions, mission tasks, and crew members so identifier prefixes can be reused. The slug is rewritten to `{slug}_deleted_{id}` on next Create reuse.
 
 **Auth:** Session or CLI token + `OWNER` or `ADMIN` role
 
-**Response:** `204 No Content`
+**Response:** `200 OK`
+
+```json
+{ "success": true }
+```
 
 | Status | Condition |
 |---|---|
@@ -226,6 +244,8 @@ GET /api/v1/crews/{crewId}/members?workspace_id={workspaceId}
 POST /api/v1/crews/{crewId}/members?workspace_id={workspaceId}
 ```
 
+**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
+
 **Request Body:**
 
 ```json
@@ -234,7 +254,13 @@ POST /api/v1/crews/{crewId}/members?workspace_id={workspaceId}
 }
 ```
 
-**Response:** `201 Created`
+**Response:** `201 Created` -- member object with nested `user` (id/email/full_name/avatar_url).
+
+| Status | Condition |
+|---|---|
+| `400` | Missing `user_id`, or user is not a workspace member |
+| `404` | Crew not found |
+| `409` | User is already a member of this crew |
 
 ### Remove Member
 
@@ -242,7 +268,17 @@ POST /api/v1/crews/{crewId}/members?workspace_id={workspaceId}
 DELETE /api/v1/crews/{crewId}/members/{memberId}?workspace_id={workspaceId}
 ```
 
-**Response:** `204 No Content`
+**Auth:** `OWNER` or `ADMIN` role
+
+**Response:** `200 OK`
+
+```json
+{ "success": true }
+```
+
+| Status | Condition |
+|---|---|
+| `404` | Crew or member not found |
 
 ---
 
@@ -252,11 +288,29 @@ DELETE /api/v1/crews/{crewId}/members/{memberId}?workspace_id={workspaceId}
 POST /api/v1/crews/{crewId}/apply-avatar-style?workspace_id={workspaceId}
 ```
 
-Applies the crew's `avatar_style` to all agents in the crew.
+Applies an `avatar_style` to all non-deleted agents in the crew, or clears per-agent overrides.
 
-**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
+**Auth:** `OWNER` or `ADMIN` role
+
+**Request Body:**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `avatar_style` | string | Conditional | Style to apply (required unless `reset_overrides` is `true`) |
+| `reset_overrides` | boolean | No | When `true`, clears `avatar_style` on every agent (ignores `avatar_style`) |
 
 **Response:** `200 OK`
+
+```json
+{ "updated": 3, "style": "bottts" }
+```
+
+When `reset_overrides` is `true`, the response is `{ "updated": N, "reset": true }`.
+
+| Status | Condition |
+|---|---|
+| `400` | `avatar_style` missing and `reset_overrides` not set |
+| `404` | Crew not found |
 
 ---
 
@@ -270,7 +324,26 @@ Crew connections define which crews can communicate with each other for cross-cr
 GET /api/v1/crew-connections?workspace_id={workspaceId}
 ```
 
-**Response:** `200 OK` -- array of connection objects.
+**Response:** `200 OK` -- array of connection objects:
+
+```json
+[
+  {
+    "id": "cc_abc",
+    "workspace_id": "ws_123",
+    "from_crew_id": "crew_abc",
+    "from_crew_name": "Engineering",
+    "from_crew_slug": "engineering",
+    "to_crew_id": "crew_xyz",
+    "to_crew_name": "Design",
+    "to_crew_slug": "design",
+    "direction": "bidirectional",
+    "status": "active",
+    "created_at": "2024-01-15T10:00:00Z",
+    "updated_at": "2024-01-15T10:00:00Z"
+  }
+]
+```
 
 ### Create Connection
 
@@ -278,14 +351,35 @@ GET /api/v1/crew-connections?workspace_id={workspaceId}
 POST /api/v1/crew-connections?workspace_id={workspaceId}
 ```
 
+**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
+
+**Request Body:**
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `from_crew_id` | string | Yes | -- | Source crew ID |
+| `to_crew_id` | string | Yes | -- | Target crew ID (must differ from `from_crew_id`) |
+| `direction` | string | No | `"bidirectional"` | `"bidirectional"` or `"unidirectional"` |
+
 ```json
 {
-  "source_crew_id": "crew_abc",
-  "target_crew_id": "crew_xyz"
+  "from_crew_id": "crew_abc",
+  "to_crew_id": "crew_xyz",
+  "direction": "bidirectional"
 }
 ```
 
 **Response:** `201 Created`
+
+```json
+{ "id": "cc_abc" }
+```
+
+| Status | Condition |
+|---|---|
+| `400` | Missing IDs, same source/target, or invalid `direction` |
+| `404` | One or both crews not found in this workspace |
+| `409` | Connection already exists (or other UNIQUE/constraint violation) |
 
 ### Delete Connection
 
@@ -293,7 +387,13 @@ POST /api/v1/crew-connections?workspace_id={workspaceId}
 DELETE /api/v1/crew-connections/{connectionId}?workspace_id={workspaceId}
 ```
 
+**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
+
 **Response:** `204 No Content`
+
+| Status | Condition |
+|---|---|
+| `404` | Connection not found |
 
 ---
 

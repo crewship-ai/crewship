@@ -424,6 +424,123 @@ Returns the Keeper access request audit log -- every credential access and comma
 | `created_at` | `string` | ISO 8601 request timestamp |
 | `decided_at` | `string?` | ISO 8601 decision timestamp |
 
+## System
+
+Small cross-cutting endpoints that don't belong to any single domain handler. They surface install state, telemetry consent, the running binary's version, and dashboard time-series metrics. Three are intentionally unauthenticated because the login page itself needs to read them before any session exists.
+
+### GET /api/v1/system/setup-status
+
+First-run gate. Returns whether the install needs to be bootstrapped (empty `users` table) and whether public signup is enabled. The login page calls this on every page paint -- when `needs_bootstrap` is `true`, the browser routes to `/bootstrap` instead of `/login`.
+
+**Auth:** none -- the answer is what tells the browser which page to render.
+
+#### Response
+
+```json
+{
+  "needs_bootstrap": false,
+  "allow_signup": false
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `needs_bootstrap` | boolean | `true` when `COUNT(*) FROM users = 0`. DB errors fail closed as `false` -- a transient blip won't ship the user into the bootstrap flow on a healthy install. |
+| `allow_signup` | boolean | Mirrors the `CREWSHIP_ALLOW_SIGNUP` server flag. When `false`, the login page hides the "Sign up" link. |
+
+### GET /api/v1/system/telemetry
+
+Read-only consent gate for the frontend's Sentry client. The Next.js `sentry.client.config.ts` fetches this before calling `Sentry.init` and bails out if `enabled=false`. Consent is flipped via the CLI (`crewship telemetry on/off`), never over HTTP -- making this endpoint mutating would create a CSRF vector that flips the bit on every cross-site navigation.
+
+**Auth:** none -- the login page must boot crash reporting before any session exists.
+
+#### Response
+
+```json
+{
+  "enabled": true,
+  "install_id": "a3f9c2e1b8d74f5a"
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `enabled` | boolean | `true` only when the operator has opted in, a DSN is wired, AND the backend Sentry init succeeded. |
+| `install_id` | string | Anonymous identifier the backend already ships as Sentry's `ServerName`. Exposed so frontend events group with backend events for the same install. |
+
+Errors fall back to `{enabled: false, install_id: ""}` rather than 5xx -- a transient DB blip defaults to the privacy-preserving outcome.
+
+### GET /api/v1/system/version
+
+Reports the running binary's version and (cache-permitting) the latest release from GitHub. The web UI uses this to render an "update available" banner.
+
+**Auth:** required (any authenticated user, no workspace role needed).
+
+#### Response
+
+```json
+{
+  "current": "0.4.1",
+  "latest": "0.4.2",
+  "newer": true,
+  "url": "https://github.com/crewship-ai/crewship/releases/tag/v0.4.2"
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `current` | string | The running binary's version (`SetVersion`-injected from `cmd_start`). |
+| `latest` | string? | Latest release tag from GitHub. `null` on a cold cache + GitHub timeout. |
+| `newer` | boolean | `true` when `latest > current` by semver. |
+| `url` | string? | Release page URL. `null` paired with `null` `latest`. |
+
+The handler imposes a 4 s upper bound on top of the update package's 5 s internal HTTP timeout -- a cold cache + slow network still returns "no info" rather than blocking the UI render.
+
+### GET /api/v1/metrics/timeseries
+
+Bucketed time-series metrics for the dashboard charts. Returns zero-filled bucket sequences so the client never has to patch visual gaps. Reads `workspace_id` from the request context, never from a query param.
+
+**Auth:** required + workspace context.
+
+#### Query parameters
+
+| Param | Type | Default | Description |
+|---|---|---|---|
+| `metric` | string | -- | Required. One of `issues_closed`, `cost_usd`, `runs_count`, `active_missions`. |
+| `window` | string | `"24h"` | One of `24h`, `7d`, `30d`. |
+| `bucket` | string | `"1h"` | One of `15m`, `1h`, `1d`. Combinations producing &gt;200 buckets are rejected. |
+| `group_by` | string | `"none"` | One of `none`, `crew`, `model`, `status`. Some group-by values are metric-specific (see error matrix). |
+
+#### Response
+
+```json
+{
+  "metric": "issues_closed",
+  "window": "7d",
+  "bucket": "1d",
+  "group_by": "none",
+  "buckets": [
+    { "ts": "2026-05-14T00:00:00Z", "series": { "total": 4 } },
+    { "ts": "2026-05-15T00:00:00Z", "series": { "total": 0 } },
+    { "ts": "2026-05-16T00:00:00Z", "series": { "total": 7 } }
+  ],
+  "series_labels": { "total": "Total" }
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `metric` / `window` / `bucket` / `group_by` | string | Echo of the resolved query parameters. |
+| `buckets[].ts` | string | Bucket-start in UTC, aligned to wall-clock boundaries (`15m` → `:00/:15/:30/:45`, `1h` → top of hour, `1d` → UTC midnight). |
+| `buckets[].series` | object | Map of series key to numeric value. Always floats on the wire so cost and counts share the JSON shape. |
+| `series_labels` | object | Map of series key to display label (e.g. crew name, model name, status). For `group_by=none` always contains `{"total": "Total"}`. |
+
+| Status | Condition |
+|---|---|
+| `400` | Unknown `metric` / `window` / `bucket` / `group_by`; bucket larger than window; combination produces &gt;200 buckets; `group_by=model` for a metric other than `cost_usd`; `group_by=crew` for a metric other than `issues_closed`/`runs_count`; `group_by=status` for a metric other than `issues_closed`/`active_missions`. |
+| `401` | Workspace context missing from the request. |
+| `500` | SQLite fill query failed. |
+
 ## License System
 
 <Note>

@@ -101,6 +101,13 @@ Returns issues across the workspace with filtering, sorting, and pagination.
 | `labels` | array | Array of label objects |
 | `project_id` | string? | Parent project ID |
 | `project_name` | string? | Project name (when project_id is set) |
+| `estimate` | integer? | Effort/points estimate |
+| `parent_issue_id` | string? | Parent issue ID for sub-issues |
+| `milestone_id` | string? | Associated milestone ID |
+| `sub_issues_count` | integer | Count of child issues with `parent_issue_id` = this issue |
+| `routine_id` | string? | Bound pipeline ID for `/run-routine` (omitted if unbound) |
+| `routine_slug` | string? | Slug of the bound pipeline (denormalized for UI) |
+| `routine_name` | string? | Name of the bound pipeline (denormalized for UI) |
 | `comment_count` | integer | Number of comments |
 | `created_at` | string | ISO 8601 timestamp |
 | `updated_at` | string | ISO 8601 timestamp |
@@ -145,7 +152,12 @@ The crew must have a LEAD agent. The issue identifier is auto-generated from the
 | `assignee_id` | string | No | `null` | Assignee ID |
 | `due_date` | string | No | `null` | Due date (YYYY-MM-DD) |
 | `project_id` | string | No | `null` | Parent project ID |
+| `estimate` | integer | No | `null` | Effort/points estimate |
+| `parent_issue_id` | string | No | `null` | Parent issue ID for sub-issues (validated against current workspace) |
+| `milestone_id` | string | No | `null` | Associated milestone ID |
 | `labels` | string[] | No | `[]` | Array of label IDs to attach |
+| `routine_id` | string | No | `null` | Pipeline ID to bind for `/run-routine` (must exist in workspace) |
+| `routine_inputs` | object | No | `{}` | JSON object of routine input values; rejected with 400 if set without `routine_id` |
 
 ```json
 {
@@ -162,7 +174,7 @@ The crew must have a LEAD agent. The issue identifier is auto-generated from the
 
 | Status | Condition |
 |---|---|
-| `400` | Missing title, crew has no lead agent |
+| `400` | Missing title, crew has no lead agent, `routine_inputs` set without `routine_id`, `routine_id`/`parent_issue_id` not in workspace, or `routine_inputs` not valid JSON |
 | `403` | Insufficient role |
 | `404` | Crew not found |
 
@@ -202,8 +214,13 @@ PATCH /api/v1/crews/{crewId}/issues/{identifier}?workspace_id={workspaceId}
 | `assignee_id` | string | Assignee ID |
 | `due_date` | string | Due date |
 | `project_id` | string | Project ID (empty string to unlink) |
+| `estimate` | integer | Effort/points estimate |
+| `parent_issue_id` | string | Parent issue ID; empty string unlinks; cannot equal the issue itself |
+| `milestone_id` | string | Milestone ID; empty string unlinks |
 | `sort_order` | number | Manual sort order |
 | `labels` | string[] | Replace all labels with this set of label IDs |
+| `routine_id` | string | Pipeline ID to bind; empty string clears binding (also resets `routine_inputs`) |
+| `routine_inputs` | object | Full-replacement JSON object for routine inputs |
 
 **Status Transitions:**
 
@@ -225,7 +242,7 @@ Significant changes (status, assignee, priority) are logged as activity entries.
 
 | Status | Condition |
 |---|---|
-| `400` | Invalid status transition, no fields to update |
+| `400` | Invalid status transition, no fields to update, `parent_issue_id` equals issue itself, `parent_issue_id`/`routine_id` not in workspace, or `routine_inputs` not valid JSON |
 | `404` | Issue not found |
 
 **WebSocket event:** `issue.updated` on `workspace:{workspaceId}`
@@ -357,6 +374,82 @@ Submit a review decision for an issue in `REVIEW` or `IN_PROGRESS` status.
 |---|---|
 | `400` | Invalid action, or issue not in reviewable status |
 | `404` | Issue not found |
+
+---
+
+## Bulk Update
+
+```
+PATCH /api/v1/issues/bulk
+```
+
+Apply a single set of field updates to up to 100 issues at once. Used by the board/list views' multi-select toolbar. Each issue is processed in its own statement -- partial success is possible: a request touching 50 ids where 3 have invalid status transitions returns `{"updated": 47}` rather than rolling back.
+
+**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role (`create` permission).
+
+**Request Body:**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `ids` | string[] | Yes | 1-100 mission ids. Ids outside the caller's workspace are skipped silently. |
+| `updates.status` | string | No | New status. Invalid transitions are skipped per-issue (not 400). When `DONE` or `CANCELLED`, `completed_at` is set automatically. |
+| `updates.priority` | string | No | Priority level. |
+| `updates.assignee_type` | string | No | `"user"` or `"agent"`. |
+| `updates.assignee_id` | string | No | Assignee id. |
+| `updates.project_id` | string | No | Project id; empty string unlinks. |
+| `updates.labels` | string[] | No | Replace **all** labels on each issue with this set of label ids. |
+
+```json
+{
+  "ids": ["issue_abc", "issue_def", "issue_ghi"],
+  "updates": {
+    "status": "TODO",
+    "priority": "high",
+    "labels": ["label_bug", "label_blocker"]
+  }
+}
+```
+
+**Response:** `200 OK`
+
+```json
+{ "updated": 3 }
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `updated` | integer | Count of issues that successfully applied **at least one** field. Issues whose `updates` resolved to a no-op are excluded. |
+
+| Status | Condition |
+|---|---|
+| `400` | Invalid JSON, missing `ids`, or `ids` length &gt; 100. |
+| `403` | Caller lacks the `create` permission for the workspace. |
+
+When `updated > 0`, an `issues.bulk_updated` WebSocket event is broadcast on `workspace:{workspaceId}` with the count. Per-issue status changes additionally produce activity entries (`status_changed`, details suffixed with `(bulk)`).
+
+---
+
+## List Sub-issues
+
+```
+GET /api/v1/crews/{crewId}/issues/{identifier}/subtasks
+```
+
+Returns the children of one parent issue -- rows where `parent_issue_id` equals the resolved parent id. Ordered by `sort_order ASC, created_at ASC` so the response matches the order operators see in the UI's nested list.
+
+**Path parameters:**
+
+| Param | Description |
+|---|---|
+| `crewId` | Crew id (used to disambiguate identifiers across crews). |
+| `identifier` | Human-readable identifier (e.g. `ENG-42`) or raw mission id of the parent. |
+
+**Response:** `200 OK` -- array of full issue objects matching the `GET /api/v1/issues` shape. Empty array (never `null`) when the parent has no sub-issues.
+
+| Status | Condition |
+|---|---|
+| `404` | Parent issue not found in the supplied crew + workspace. |
+| `500` | DB read failure. |
 
 ---
 
@@ -726,6 +819,58 @@ Returns breakdown data: counts by status, by assignee, by label, and crew list.
   "crews": ["crew_abc"]
 }
 ```
+
+---
+
+## Bulk Update
+
+```
+PATCH /api/v1/issues/bulk?workspace_id={workspaceId}
+```
+
+Apply the same field updates to up to 100 issues in a single request. Issues not in the caller's workspace are silently skipped; invalid status transitions are also skipped per-issue.
+
+**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
+
+**Request Body:**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `ids` | string[] | Yes | Issue IDs (1-100) |
+| `updates.status` | string | No | New status (skipped for issues where transition is invalid) |
+| `updates.priority` | string | No | Priority level |
+| `updates.assignee_type` | string | No | `"user"` or `"agent"` |
+| `updates.assignee_id` | string | No | Assignee ID |
+| `updates.project_id` | string | No | Project ID (empty string to unlink) |
+| `updates.labels` | string[] | No | Replace all labels with this set of label IDs |
+
+**Response:** `200 OK`
+
+```json
+{ "updated": 7 }
+```
+
+| Status | Condition |
+|---|---|
+| `400` | `ids` empty or > 100 |
+
+**WebSocket event:** `issues.bulk_updated` on `workspace:{workspaceId}` (only when at least one issue was updated)
+
+---
+
+## List Sub-Issues
+
+```
+GET /api/v1/crews/{crewId}/issues/{identifier}/subtasks?workspace_id={workspaceId}
+```
+
+Returns all child issues whose `parent_issue_id` references this issue, ordered by `sort_order` then `created_at`.
+
+**Response:** `200 OK` -- array of issue objects (same shape as List Issues).
+
+| Status | Condition |
+|---|---|
+| `404` | Parent issue not found |
 
 ---
 

@@ -1,0 +1,415 @@
+---
+title: "Authentication"
+description: "Google sign-in, device pairing for the CLI, active-session management, long-lived CLI tokens, and email-based password recovery."
+icon: "lock"
+---
+
+# Authentication
+
+Authentication surface in Crewship is split across several flows. The interactive web flow is `/api/auth/*` (NextAuth-compatible -- see [Internal API](/api-reference/internal)); everything covered on this page is the `/api/v1/auth/*` surface that wraps Google sign-in, CLI pairing, active session listing/revocation, long-lived CLI tokens, and password recovery.
+
+All `/api/v1/auth/*` routes are mounted behind a rate limit of 10 req/min/IP. Routes marked **auth required** read the caller's identity from the session cookie issued by `/api/auth/callback/credentials`; the rest are intentionally unauthenticated because the request body (a state token, pairing code, or reset token) IS the credential.
+
+---
+
+## Google sign-in
+
+Three endpoints implement the OAuth2 redirect dance. They are wired only when `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are set at startup; otherwise `/redirect` and `/callback` are not registered at all and `/status` reports `enabled: false`.
+
+### `GET /api/v1/auth/google/status`
+
+Probe that tells the login page whether to render the "Continue with Google" button.
+
+**Auth:** none.
+
+**Response:** `200 OK`
+
+```json
+{ "enabled": true }
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `enabled` | boolean | `true` when both `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are set on the server. |
+
+### `GET /api/v1/auth/google/redirect`
+
+Starts the OAuth2 flow. The handler mints a single-use state token (16 random bytes, stored in `oauth_states` with the requested post-login redirect, 15-min TTL) and 302s the browser to `accounts.google.com`.
+
+**Auth:** none.
+
+**Query parameters:**
+
+| Param | Type | Description |
+|---|---|---|
+| `redirect` | string | Optional post-login destination. Validated by `isSafeRedirect`; anything that escapes the local origin falls back to `/`. |
+
+**Response:** `307 Temporary Redirect` to the Google authorization URL. Errors land as `404` ("Google sign-in not configured") when OAuth is disabled or `500` on a state-insert failure.
+
+### `GET /api/v1/auth/google/callback`
+
+Google's redirect target. Atomically consumes the state token (single-use via `DELETE ... RETURNING`), exchanges the auth code for an access token, fetches the user's profile from `https://www.googleapis.com/oauth2/v3/userinfo`, upserts the row in `users` + `accounts`, and mints a fresh `user_sessions` row plus access/refresh cookies. Then 307s the browser to the validated `redirect_uri` captured during `/redirect`.
+
+**Auth:** none.
+
+**Query parameters:**
+
+| Param | Type | Description |
+|---|---|---|
+| `state` | string | Required. The opaque token from `/redirect`. |
+| `code` | string | Required. Google's authorization code. |
+
+| Status | Condition |
+|---|---|
+| `307` | Success -- session cookies set, browser redirected. |
+| `400` | Missing `state`/`code`, unknown state, state older than 15 min, or Google code exchange failed. |
+| `404` | Google sign-in not configured (env vars missing). |
+| `502` | Userinfo fetch or JSON decode failed. |
+| `500` | DB insert, session create, or token mint failed (a ghost session, if created, is revoked before responding). |
+
+---
+
+## Device pairing
+
+A device-code flow (RFC 8628 in spirit) that hands a Crewship session to a locally-installed CLI without copy-pasting a long token. The UI calls `/pair/start` to mint a human-typeable code, polls `/pair/poll` for status, and the CLI on the operator's machine exchanges the same code at `/pair/redeem` for a long-lived CLI token. Codes are 8 chars of Crockford-ish base32 (no `0/O/1/I/L`) formatted as `XXXX-XXXX`, 10-minute TTL.
+
+### `POST /api/v1/auth/pair/start`
+
+Mint a new pairing code for the authenticated user.
+
+**Auth:** required.
+
+**Request body** (optional):
+
+```json
+{ "adapter_hint": "CLAUDE_CODE" }
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `adapter_hint` | string | Optional. `[A-Z_0-9]` up to 32 chars; anything else is stripped. Telemetry-only -- the backend never routes on it. |
+
+**Response:** `200 OK`
+
+```json
+{
+  "code": "K3F9-X2NM",
+  "expires_at": "2026-05-20T08:50:00Z"
+}
+```
+
+### `GET /api/v1/auth/pair/poll`
+
+UI polls this every ~2s while showing the code to the user. The row is reported as `expired` when (a) the code doesn't exist, (b) it belongs to a different user, or (c) the TTL has passed -- the three cases are indistinguishable on purpose so `/poll` cannot enumerate other users' codes.
+
+**Auth:** required.
+
+**Query parameters:**
+
+| Param | Type | Description |
+|---|---|---|
+| `code` | string | Required. The code returned by `/pair/start`. Case- and dash-insensitive. |
+
+**Response:** `200 OK`
+
+```json
+{
+  "status": "pending",
+  "adapter_hint": "CLAUDE_CODE",
+  "expires_at": "2026-05-20T08:50:00Z"
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `status` | string | One of `pending`, `consumed`, `expired`. |
+| `adapter_hint` | string? | Echo of the hint stored on `/start`. Omitted when empty. |
+| `expires_at` | string | RFC3339. |
+
+### `POST /api/v1/auth/pair/redeem`
+
+The CLI calls this from the operator's machine to exchange the code for a fresh `cli_tokens` row. **Unauthenticated by design** -- the code IS the credential. Single-use (the UPDATE filters on `status='pending'` so two concurrent redeems can't both win), 10-min TTL, and the route inherits the 10 req/min/IP cap from the auth-tier rate limiter.
+
+**Auth:** none.
+
+**Request body:**
+
+```json
+{
+  "code": "K3F9-X2NM",
+  "adapter_hint": "CLAUDE_CODE"
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `code` | string | Required. The pairing code, case- and dash-insensitive. |
+| `adapter_hint` | string | Optional. Same `[A-Z_0-9]≤32` sanitisation as `/start`. |
+
+**Response:** `200 OK`
+
+```json
+{
+  "cli_token": "crewship_cli_3f9a4d2b8e7c1f5a0d6b9e2c4f8a1d3b5e7c9f1a",
+  "user_id": "u_01HVY...",
+  "email": "petra@example.com"
+}
+```
+
+| Status | Condition |
+|---|---|
+| `400` | Invalid JSON, missing/normalised code, unknown code, status not `pending`, or TTL expired. |
+| `500` | DB read/write failure (token is not minted on error). |
+
+---
+
+## Active session management
+
+The Settings → Sessions UI uses these endpoints to show the user every device currently signed in, with a "revoke" button per row. Revoking the caller's own session is allowed; the frontend handles the resulting 401 by hard-redirecting to `/login`.
+
+### `GET /api/v1/auth/sessions`
+
+Lists the caller's active (non-revoked) sessions, newest-active first.
+
+**Auth:** required.
+
+**Response:** `200 OK`
+
+```json
+[
+  {
+    "id": "sess_01HVZ...",
+    "created_at": "2026-05-20T07:55:14Z",
+    "last_used_at": "2026-05-20T08:31:02Z",
+    "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5)",
+    "ip": "203.0.113.42",
+    "is_current": true
+  }
+]
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | string | `user_sessions.id`. Pass back to `/revoke`. |
+| `created_at` | string | RFC3339. |
+| `last_used_at` | string | RFC3339, refreshed by the auth middleware on every authenticated request. |
+| `user_agent` | string | Captured at session create. Omitted when empty. |
+| `ip` | string | Client IP recorded at session create. Omitted when empty. |
+| `is_current` | boolean | `true` for the session backing this very request -- the UI uses this to add a "this device" badge and warn before revoking. |
+
+### `POST /api/v1/auth/sessions/{id}/revoke`
+
+Flips `revoked_at` on a single session owned by the caller. The 404 path covers both "doesn't exist" and "doesn't belong to you" so callers can't enumerate other users' session ids by guessing.
+
+**Auth:** required.
+
+**Path parameters:**
+
+| Param | Description |
+|---|---|
+| `id` | `user_sessions.id` from the list endpoint. |
+
+**Response:** `200 OK`
+
+```json
+{
+  "ok": true,
+  "id": "sess_01HVZ...",
+  "is_current": false
+}
+```
+
+| Status | Condition |
+|---|---|
+| `400` | Empty `id`. |
+| `404` | Session doesn't exist or belongs to a different user. |
+| `500` | DB error during the revoke write. |
+
+---
+
+## CLI tokens
+
+Long-lived bearer tokens used by `crewship` CLI invocations and CI agents. Tokens are minted once, only the SHA-256 hash is stored, and the raw value is returned exactly once in the `create` response -- the rest of the surface returns metadata only.
+
+Token format: `crewship_cli_` + 40 hex chars (20 random bytes). `IsCLIToken` is the helper the auth middleware uses to detect this prefix before falling through to JWE validation.
+
+### `POST /api/v1/auth/cli-token`
+
+Mints a new token for the calling user.
+
+**Auth:** required.
+
+**Request body** (optional):
+
+```json
+{ "name": "ci-runner" }
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `name` | string | Optional. Defaults to `"CLI token"`. Free-form label rendered in the Settings list. |
+
+**Response:** `200 OK`
+
+```json
+{
+  "token": "crewship_cli_3f9a4d2b8e7c1f5a0d6b9e2c4f8a1d3b5e7c9f1a",
+  "id": "clt_01HVZ...",
+  "name": "ci-runner",
+  "created_at": "2026-05-20T08:31:02Z"
+}
+```
+
+<Warning>
+  The `token` field is the **only** time the raw value leaves the server. Store it immediately -- there is no recovery path. Lost tokens must be revoked and replaced.
+</Warning>
+
+### `GET /api/v1/auth/cli-token/validate`
+
+Confirms the current request's CLI token (the `Authorization: Bearer ...` header) is valid. Used by `crewship login --status` and the CLI's startup self-check.
+
+**Auth:** required (call this with the token you want to verify).
+
+**Response:** `200 OK`
+
+```json
+{
+  "valid": true,
+  "user_id": "u_01HVY...",
+  "user_email": "petra@example.com"
+}
+```
+
+A revoked or unknown token never reaches this handler -- the auth middleware rejects with `401` before dispatch.
+
+### `GET /api/v1/auth/cli-tokens`
+
+Lists all CLI tokens belonging to the calling user, newest first. The plaintext is never returned.
+
+**Auth:** required.
+
+**Response:** `200 OK`
+
+```json
+{
+  "data": [
+    {
+      "id": "clt_01HVZ...",
+      "name": "ci-runner",
+      "created_at": "2026-05-20T08:31:02Z",
+      "last_used_at": "2026-05-20T08:42:15Z"
+    },
+    {
+      "id": "clt_01HVX...",
+      "name": "pair-claude_code",
+      "created_at": "2026-05-19T14:02:11Z",
+      "revoked_at": "2026-05-19T19:18:00Z"
+    }
+  ]
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | string | Token id. |
+| `name` | string | Operator-supplied label. Pairing-flow tokens are named `pair[-<adapter_hint>]`. |
+| `created_at` | string | RFC3339. |
+| `last_used_at` | string? | RFC3339 of the last successful auth. Updated asynchronously by `ValidateCLIToken`. Omitted on tokens never used. |
+| `revoked_at` | string? | RFC3339 when `/auth/cli-tokens/{tokenId}` was called. Omitted on still-active tokens. |
+
+### `DELETE /api/v1/auth/cli-tokens/{tokenId}`
+
+Marks a token revoked. Subsequent uses are rejected by the auth middleware (`ValidateCLIToken` returns "CLI token revoked").
+
+**Auth:** required.
+
+**Path parameters:**
+
+| Param | Description |
+|---|---|
+| `tokenId` | `cli_tokens.id` from the list endpoint. |
+
+**Response:** `200 OK`
+
+```json
+{ "status": "revoked" }
+```
+
+| Status | Condition |
+|---|---|
+| `404` | Token doesn't exist or belongs to a different user. |
+| `500` | DB error during the revoke write. |
+
+---
+
+## Password recovery
+
+Email-based recovery for users who don't have shell access to the box. Admins should prefer `crewship admin reset-password` -- it writes directly to the DB and doesn't require a mailer.
+
+The mailer transport is wired at startup from `RESEND_API_KEY` + `RESEND_FROM`. The reset link is built from `CREWSHIP_PUBLIC_URL` (a validated `http(s)://host` value parsed once at boot). When the public URL is unset or malformed, `/forgot` silently no-ops -- without it there's no safe way to build a link that isn't `Host`-header-injection-controllable.
+
+### `POST /api/v1/auth/forgot`
+
+Issues a single-use, 30-min reset token if the email matches a user **and** a mailer transport is configured. Always returns `200` with the same JSON body regardless -- the endpoint cannot be used to enumerate accounts.
+
+**Auth:** none.
+
+**Request body:**
+
+```json
+{ "email": "petra@example.com" }
+```
+
+**Response:** `200 OK`
+
+```json
+{
+  "ok": true,
+  "message": "If an account exists for that email and email is configured on this server, a reset link has been sent. Self-hosted administrators without email configured should run `crewship admin reset-password` on the server."
+}
+```
+
+The response body is byte-for-byte identical for "no such email", "mailer disabled", "public URL unset", and a successful send -- the only signal a successful send happened is the user receiving the email.
+
+### `POST /api/v1/auth/reset`
+
+Consumes the reset token and sets a new password. The token row is burned inside a transaction (race-protected: two concurrent calls with the same token serialise on the DELETE, only one wins). On success, **every** active session for the user is revoked so a stolen cookie can't outlive the reset.
+
+**Auth:** none -- the token IS the credential.
+
+**Request body:**
+
+```json
+{
+  "token": "EXAMPLE_64_HEX_PASSWORD_RESET_TOKEN_NOT_REAL",
+  "new_password": "correct horse battery staple"
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `token` | string | Required. The raw 32-byte hex token from the email link. Server compares its SHA-256 against `verification_tokens.token`. |
+| `new_password` | string | Required. Minimum 8 characters. Hashed with bcrypt (cost 12) before storage. |
+
+**Response:** `200 OK`
+
+```json
+{ "ok": true }
+```
+
+| Status | Condition |
+|---|---|
+| `400` | Invalid JSON, missing token, password shorter than 8 chars, unknown/expired token, or token already consumed by a parallel call. |
+| `500` | bcrypt failure, DB error, **or** session revocation failed after the password write committed (the body explains the user must retry login; the password was updated). |
+
+<Note>
+  Password reset is one of the few endpoints where a 500 with a non-generic message is intentional: if the password write commits but session revocation fails, leaving the user with valid old cookies would silently undo the security purpose of the reset. The 500 forces an admin-visible log entry.
+</Note>
+
+---
+
+## See also
+
+- [Internal API](/api-reference/internal) -- the NextAuth-compatible `/api/auth/*` surface used by the browser session cookie flow.
+- [Security overview](/security/rbac) -- how the session token feeds into RBAC.
+- [`crewship login`](/cli/login) -- CLI commands that consume `/pair/start` + `/pair/redeem` and store the resulting token in `~/.crewship/cli-config.yaml`.

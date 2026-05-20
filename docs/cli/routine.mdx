@@ -207,14 +207,15 @@ Falls back with a clear message to `crewship routine runs <slug>` when the serve
 Fetch the full journal trace for a single run. Post-mortem and CI-diagnostics surface — every step's prompt, output, validation verdict, and cost in one document.
 
 ```bash
+crewship routine logs run_cmox10oci00016b48aacd
 crewship routine logs run_cmox10oci00016b48aacd --slug eval-extract-emails
 crewship routine logs run_cmox... --slug eval-... --json | jq '.events[] | select(.type=="pipeline.step.failed")'
 ```
 
-| Flag | Required | Description |
-|------|:---:|-------------|
-| `--slug` | ✓ | Routine slug the run belongs to |
-| `--json` | | JSON output for scripting |
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--slug` | | Routine slug the run belongs to (optional; enables full journal timeline) |
+| `--json` | `false` | JSON output for scripting |
 
 Pair with `routine watch` for live observation and `routine logs` for post-hoc forensics.
 

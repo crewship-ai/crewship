@@ -166,6 +166,116 @@ URLs are validated against SSRF attacks (private IP ranges are blocked).
 
 ---
 
+### Generate Skill
+
+```
+POST /api/v1/workspaces/{workspaceId}/skills/generate
+```
+
+Authors a SKILL.md from a natural-language intent by calling Anthropic with a condensed skill-creator prompt, then inserts it with `source = 'GENERATED'`. The user can edit the body via the skills detail page afterwards. (`internal/api/skills_generate.go:94`)
+
+**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role (`canRole(role, "create")`). This endpoint spends real Anthropic tokens against the workspace's API key on every call.
+
+**Prerequisite:** Workspace must have an `ACTIVE` credential with `provider = ANTHROPIC` and `type = API_KEY` (not `AI_CLI_TOKEN`). OAuth bearer tokens from `claude` CLI login won't work against the Messages API.
+
+**Request Body:**
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `slug` | string | Yes | -- | Desired skill slug (will be slugified) |
+| `prompt` | string | Yes | -- | Natural-language intent describing what the skill should do |
+| `model` | string | No | `"claude-sonnet-4-6"` | Override the Anthropic model used for authoring |
+
+```json
+{
+  "slug": "extract-pdf-tables",
+  "prompt": "Use this when the user wants to extract tables from PDF documents into CSV."
+}
+```
+
+**Response:** `201 Created`
+
+```json
+{
+  "skill_id": "sk_a1b2c3d4e5f60718",
+  "slug": "extract-pdf-tables",
+  "content": "---\nname: extract-pdf-tables\n...\n---\n# Extract PDF Tables\n...",
+  "scan_status": "CLEAN",
+  "scan_reason": "",
+  "description_quality": "good"
+}
+```
+
+| Status | Condition |
+|---|---|
+| `400` | Missing `slug`/`prompt`, invalid JSON, or missing `workspaceId` path value |
+| `403` | Insufficient role |
+| `409` | Insert conflict (slug already exists in this workspace) |
+| `412` | No active Anthropic `API_KEY` credential available in the workspace |
+| `502` | Anthropic call failed, frontmatter missing, or parser rejected the model's output |
+
+---
+
+### Bulk Import Skills
+
+```
+POST /api/v1/workspaces/{workspaceId}/skills/bulk-import
+```
+
+Walks a remote git repository for `SKILL.md` files and upserts each through the same v65-aware path used by `Import`, including SPDX license gating and the content scanner. Per-skill rejections are returned in the `skipped` array rather than failing the whole batch. (`internal/api/skills_bulk_import.go:106`)
+
+**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role (`canRole(role, "create")`)
+
+**Request Body:**
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `git_url` | string | Yes | -- | HTTPS git URL. Private IPs, `localhost`, and embedded user-info are rejected. |
+| `git_ref` | string | No | repo default | Branch, tag, or commit to clone |
+| `paths` | string[] | No | `[]` | Optional sub-paths inside the repo to scan |
+| `vendor` | string | No | repo host | Override the `vendor` column written on each row |
+| `allow_unsafe_license` | boolean | No | `false` | Import skills whose SPDX license is flagged unsafe |
+| `dry_run` | boolean | No | `false` | Walk and validate without writing to the database |
+
+`local_path` is intentionally **not** part of the HTTP surface (it would turn the endpoint into an arbitrary host-FS read primitive).
+
+```json
+{
+  "git_url": "https://github.com/example/skills-pack.git",
+  "git_ref": "main",
+  "allow_unsafe_license": false,
+  "dry_run": false
+}
+```
+
+**Response:** `200 OK`
+
+```json
+{
+  "source": "https://github.com/example/skills-pack.git@main",
+  "total_found": 12,
+  "total_imported": 10,
+  "imported": [
+    { "skill_id": "sk_abc", "slug": "code-reviewer", "created": true },
+    { "skill_id": "sk_def", "slug": "release-notes", "created": false }
+  ],
+  "skipped": [
+    { "path": "skills/internal/SKILL.md", "slug": "internal", "reason": "license GPL-3.0 blocked; pass allow_unsafe_license=true to override" }
+  ],
+  "truncated": false
+}
+```
+
+`truncated` is `true` when the walker hit its per-batch cap before reaching the end of the source tree.
+
+| Status | Condition |
+|---|---|
+| `400` | Invalid JSON, missing `git_url`, or missing `workspaceId` path value |
+| `403` | Insufficient role |
+| `502` | Validation rejected (private/internal IP, malformed URL) or git clone failed |
+
+---
+
 ### Delete Skill
 
 ```
@@ -186,6 +296,115 @@ Permanently deletes a non-bundled skill (`internal/api/skills.go:519`).
 |---|---|
 | `403` | Insufficient role, or attempt to delete a `BUNDLED` skill (re-seeded on server start) |
 | `404` | Skill not found |
+
+---
+
+## Proposed Skills (memory → Skills bridge)
+
+When the memory consolidator runs in proposal mode it stages auto-promoted SKILL.md files under `.memory/{crew-slug}/topics/.proposed/skill-*.md`. These endpoints are the HITL surface for reviewing those stagings. The handler is stateless against the database — disk is the source of truth, and approve/reject emit `EntryMemorySkillApproved` / `EntryMemorySkillRejected` journal entries. (`internal/api/skills_proposed_handler.go`)
+
+**Auth (all three):** `OWNER`, `ADMIN`, or `MANAGER` role -- same threshold as canonical skill import.
+
+### List Proposed Skills
+
+```
+GET /api/v1/skills/proposed?crew_id={crewId}
+```
+
+Lists skill files staged for review under the given crew. Returns an empty array when no `.proposed` directory exists for the crew.
+
+**Query Parameters:**
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `crew_id` | string | Yes | Crew whose `.proposed/` directory should be inspected |
+
+**Response:** `200 OK`
+
+```json
+[
+  {
+    "file_name": "skill-release-notes.md",
+    "name": "release-notes",
+    "description": "Use when the user asks to summarise commits between two tags.",
+    "description_quality": "good",
+    "category": "automation"
+  }
+]
+```
+
+A file that fails the SKILL.md parser is still surfaced with `description_quality` set to `"parse error: <reason>"` so an operator can manually reject it.
+
+| Status | Condition |
+|---|---|
+| `400` | Missing `crew_id` |
+| `401` | No workspace context on the request |
+| `403` | Insufficient role |
+| `404` | Crew not found in this workspace |
+| `503` | Server has no crew-memory root configured |
+
+### Approve Proposed Skill
+
+```
+POST /api/v1/skills/proposed/approve
+```
+
+Imports the staged SKILL.md through the canonical skills importer (same path as URL/paste import), then removes the staging file on success.
+
+**Note:** The router pattern is `/skills/proposed/approve` (body-based), not a path-parameter `/{id}/approve` form.
+
+**Request Body:**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `crew_id` | string | Yes | Crew the file lives under |
+| `file_name` | string | Yes | Bare basename returned by List (must match `skill-*.md`; path traversal is rejected) |
+
+```json
+{ "crew_id": "crew_123", "file_name": "skill-release-notes.md" }
+```
+
+**Response:** `200 OK`
+
+```json
+{
+  "skill_id": "sk_a1b2c3d4e5f60718",
+  "slug": "release-notes",
+  "created": true,
+  "file_name": "skill-release-notes.md"
+}
+```
+
+| Status | Condition |
+|---|---|
+| `400` | Invalid JSON, missing `crew_id`/`file_name`, or unsafe `file_name` |
+| `403` | Insufficient role |
+| `404` | Crew not found, or staged file missing |
+| `422` | Staged content failed the importer (frontmatter malformed, license rejected) |
+| `503` | Server has no crew-memory root configured |
+
+### Reject Proposed Skill
+
+```
+POST /api/v1/skills/proposed/reject
+```
+
+Deletes the staging file and emits an audit entry. Idempotent: calling reject twice returns `200` with `removed: false` on the second call.
+
+**Request Body:** Same shape as Approve (`crew_id`, `file_name`).
+
+**Response:** `200 OK`
+
+```json
+{ "file_name": "skill-release-notes.md", "removed": true }
+```
+
+| Status | Condition |
+|---|---|
+| `400` | Invalid JSON, missing fields, or unsafe `file_name` |
+| `403` | Insufficient role |
+| `404` | Crew not found |
+| `503` | Server has no crew-memory root configured |
 
 ---
 

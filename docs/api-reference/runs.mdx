@@ -92,6 +92,54 @@ Returns a paginated list of runs with KPI tiles (`stats`) and pagination metadat
 
 ---
 
+## Get a single run
+
+```
+GET /api/v1/runs/{id}
+```
+
+Returns a single run by trace id. The response shape is identical to one element of the `data[]` array from `GET /api/v1/runs` -- the handler reuses the same enrichment so dashboard detail views can share the row renderer.
+
+**Path parameters:**
+
+| Param | Description |
+|---|---|
+| `id` | The run's `trace_id`. |
+
+**Response:** `200 OK`
+
+```json
+{
+  "id": "run_a1b2c3",
+  "workspace_id": "ws_123",
+  "agent_id": "agt_viktor",
+  "agent_name": "Viktor",
+  "agent_slug": "viktor",
+  "crew_name": "Backend",
+  "chat_id": "chat_xyz",
+  "triggered_by": "user_42",
+  "trigger_type": "USER",
+  "status": "COMPLETED",
+  "started_at": "2026-04-30T10:00:00Z",
+  "finished_at": "2026-04-30T10:02:00Z",
+  "error_message": null,
+  "exit_code": 0,
+  "metadata": {"tags": ["urgent", "compliance"]},
+  "created_at": "2026-04-30T10:00:00Z"
+}
+```
+
+The handler does not have a direct `journal.GetRunByID` primitive yet -- it scans up to 10 pages of `journal.ListRuns` (1000 rows) looking for the trace id. The typical lookup is page 1 (recent runs); the deeper scan keeps older runs resolvable without a contract change.
+
+| Status | Condition |
+|---|---|
+| `400` | Empty `id` path segment. |
+| `401` | No workspace context. |
+| `404` | No run with that id in the caller's workspace (cross-workspace probes are masked as 404 -- the journal store filter never matches a foreign workspace's trace id). |
+| `500` | Journal page query failed, or enrichment returned an empty slice for a found row (data integrity issue). |
+
+---
+
 ## Tenancy
 
 - `workspace_id` is taken from the session context — never from a query parameter.

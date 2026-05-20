@@ -78,10 +78,10 @@ crewship crew create --name "Backend Team" --memory-mb 4096 --cpus 2.0
 | `--name` | `string` | _(required)_ | Crew name. |
 | `--slug` | `string` | _(auto from name)_ | Crew slug. |
 | `--description` | `string` | | Description. |
-| `--color` | `string` | | Color palette ID (e.g. `blue`, `emerald`, `violet`). |
-| `--icon` | `string` | | Lucide icon name (e.g. `code`, `rocket`). |
-| `--memory-mb` | `int` | | Container memory limit in MB. |
-| `--cpus` | `float64` | | Container CPU limit. |
+| `--color` | `string` | | Hex color (e.g. `#3B82F6`). |
+| `--icon` | `string` | | Emoji icon. |
+| `--memory-mb` | `int` | `0` | Container memory limit in MB. |
+| `--cpus` | `float64` | `0` | Container CPU limit. |
 | `--ttl` | `int` | `0` | Auto-stop after idle hours (0 = never stop). |
 | `--network-mode` | `string` | | Network policy: `free` or `restricted`. |
 | `--allowed-domains` | `string` | | Comma-separated allowed domains for restricted mode. |
@@ -323,29 +323,44 @@ After changing runtime configuration, run `crewship crew rebuild` to invalidate 
 
 ## `crewship crew provision`
 
-Trigger devcontainer provisioning for a crew. Kicks off the same build pipeline the server runs when an agent first starts in a fresh workspace.
+Trigger devcontainer provisioning for a crew. Kicks off the same build pipeline the server runs when an agent first starts in a fresh workspace. Streams live build progress until the build completes or fails — pass `--no-watch` to fire-and-forget.
 
 ```bash
 crewship crew provision <slug-or-id>
+crewship crew provision <slug-or-id> --no-watch
 ```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--no-watch` | `bool` | `false` | Do not watch progress; return immediately after triggering. |
 
 ### `crewship crew provision status`
 
-Check provisioning status for a crew. Prints the current status, cached image tag, config hash, and resolved devcontainer config. Exit code is always `0` — branch on the `Status` field (`ready`, `building`, `failed`, `not-provisioned`) in downstream scripts rather than relying on the exit code.
+Check provisioning status for a crew. Prints the current status, cached image tag, config hash, and resolved devcontainer config. Pass `--watch` to stream live progress until the build completes. Exit code is always `0` — branch on the `Status` field (`ready`, `building`, `failed`, `not-provisioned`) in downstream scripts rather than relying on the exit code.
 
 ```bash
 crewship crew provision status <slug-or-id>
+crewship crew provision status <slug-or-id> --watch
 ```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--watch` | `bool` | `false` | Stream live progress until the build completes. |
 
 ---
 
 ## `crewship crew rebuild`
 
-Invalidate the crew's cached devcontainer image and re-provision. Use after changing `crewship crew config` values — `provision` alone will reuse the cached layer keyed by the old config hash.
+Invalidate the crew's cached devcontainer image and re-provision. Use after changing `crewship crew config` values — `provision` alone will reuse the cached layer keyed by the old config hash. Streams live progress unless `--no-watch` is passed.
 
 ```bash
 crewship crew rebuild <slug-or-id>
+crewship crew rebuild <slug-or-id> --no-watch
 ```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--no-watch` | `bool` | `false` | Do not watch progress; return immediately after triggering. |
 
 ---
 

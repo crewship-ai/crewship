@@ -404,8 +404,51 @@ These endpoints proxy requests through the crewshipd sidecar to the agent's cont
 | `GET /api/v1/agents/{agentId}/files` | GET | List files in agent workspace |
 | `GET /api/v1/agents/{agentId}/files/download?path=...` | GET | Download a file |
 | `PUT /api/v1/agents/{agentId}/files/save` | PUT | Save/upload a file |
+| `GET /api/v1/agents/{agentId}/container-files` | GET | List files inside the running container (see below) |
+| `GET /api/v1/agents/{agentId}/git-log` | GET | Recent git commits from the container workspace (see below) |
 | `GET /api/v1/agents/{agentId}/logs` | GET | Get agent logs |
 | `POST /api/v1/agents/{agentId}/stop` | POST | Stop a running agent |
+
+### Container Files
+
+```
+GET /api/v1/agents/{agentId}/container-files?subdir={path}
+```
+
+Lists files inside the agent's running container (as opposed to `/files`, which lists the persistent workspace mount). Proxied through crewshipd; the request is rejected before the IPC hop if the agent is not assigned to a crew. (`internal/api/proxy_files.go:319`)
+
+**Auth:** Session or CLI token + workspace membership
+
+**Query Parameters:**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `subdir` | string | Optional sub-path within the container's working directory (normalized to reject `..` traversal) |
+
+**Response:** `200 OK` -- JSON array of file entries (unwrapped from the IPC layer's `{files: [...]}` envelope). Returns `[]` when the sidecar response is unparseable or empty.
+
+| Status | Condition |
+|---|---|
+| `400` | `subdir` path is invalid (traversal or absolute) |
+| `404` | Agent not found, or agent not assigned to a crew |
+| `502` | Sidecar IPC call failed |
+
+### Git Log
+
+```
+GET /api/v1/agents/{agentId}/git-log
+```
+
+Fetches recent git commits from the agent's container workspace. Proxied through crewshipd; the agent's `slug` is forwarded as `agent_slug` so the sidecar can scope the log to that agent's directory inside the shared crew container. (`internal/api/proxy.go:295`)
+
+**Auth:** Session or CLI token + workspace membership
+
+**Response:** `200 OK` -- JSON array of commit entries (unwrapped from the IPC layer's `{commits: [...]}` envelope). Returns `[]` when the sidecar response is unparseable or empty.
+
+| Status | Condition |
+|---|---|
+| `404` | Agent not found, or agent not assigned to a crew |
+| `502` | Sidecar IPC call failed |
 
 ---
 

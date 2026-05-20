@@ -346,6 +346,7 @@
             "icon": "globe",
             "pages": [
               "api-reference/overview",
+              "api-reference/auth",
               "api-reference/workspaces",
               "api-reference/crews",
               "api-reference/agents",

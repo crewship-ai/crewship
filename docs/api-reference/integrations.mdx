@@ -53,9 +53,9 @@ GET /api/v1/integrations?workspace_id={workspaceId}
 | `workspace_id` | string | Workspace ID |
 | `name` | string | Internal name |
 | `display_name` | string | Human-readable name |
-| `transport` | string | Transport type (`stdio`, `sse`, `streamable-http`) |
-| `endpoint` | string? | Server endpoint URL (for SSE/HTTP transport) |
-| `command` | string? | Command to execute (for stdio transport) |
+| `transport` | string | Transport type (validated set: `streamable-http` or `stdio`) |
+| `endpoint` | string? | Server endpoint URL (required when transport is `streamable-http`) |
+| `command` | string? | Command to execute (required when transport is `stdio`) |
 | `args_json` | string? | JSON array of command arguments |
 | `env_json` | string? | JSON object of environment variables |
 | `config_json` | string? | Additional configuration JSON |
@@ -77,10 +77,10 @@ POST /api/v1/integrations?workspace_id={workspaceId}
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `name` | string | Yes | -- | Internal name |
-| `display_name` | string | Yes | -- | Display name |
-| `transport` | string | Yes | -- | Transport type |
-| `endpoint` | string | No | `null` | Server endpoint URL |
-| `command` | string | No | `null` | Command to execute |
+| `display_name` | string | No | `name` | Display name (defaults to `name` when omitted) |
+| `transport` | string | No | `"streamable-http"` | `streamable-http` or `stdio` |
+| `endpoint` | string | Conditional | `null` | Required when `transport` is `streamable-http` |
+| `command` | string | Conditional | `null` | Required when `transport` is `stdio` |
 | `args_json` | string | No | `null` | JSON array of arguments |
 | `env_json` | string | No | `null` | JSON object of env vars |
 | `config_json` | string | No | `null` | Additional config JSON |
@@ -97,7 +97,13 @@ POST /api/v1/integrations?workspace_id={workspaceId}
 }
 ```
 
-**Response:** `201 Created`
+**Response:** `201 Created` -- integration object (enabled defaults to `true`).
+
+| Status | Condition |
+|---|---|
+| `400` | Missing `name`, invalid `transport`, or `endpoint`/`command` missing for the chosen transport |
+| `403` | Insufficient role |
+| `409` | Integration with this name already exists |
 
 ### Get Workspace Integration
 
@@ -125,9 +131,19 @@ All fields optional: `display_name`, `transport`, `endpoint`, `command`, `args_j
 DELETE /api/v1/integrations/{integrationId}?workspace_id={workspaceId}
 ```
 
+Cascade-deletes agent bindings, crew-level overrides, and finally the workspace server, all in one transaction.
+
 **Auth:** `OWNER` or `ADMIN` role
 
-**Response:** `204 No Content`
+**Response:** `200 OK`
+
+```json
+{ "status": "deleted" }
+```
+
+| Status | Condition |
+|---|---|
+| `404` | Integration not found |
 
 ### Test Workspace Integration
 
@@ -135,9 +151,27 @@ DELETE /api/v1/integrations/{integrationId}?workspace_id={workspaceId}
 POST /api/v1/integrations/{integrationId}/test?workspace_id={workspaceId}
 ```
 
-Tests the MCP server connection.
+Tests the MCP server connection. For `stdio` transport the test is skipped (servers can only be probed inside a container at runtime); for `streamable-http` an MCP `initialize` handshake is attempted via an SSRF-safe HTTP client.
 
-**Response:** `200 OK` -- test results.
+**Response:** `200 OK`
+
+```json
+{
+  "status": "ok",
+  "message": "Connected to MCP server",
+  "server_info": { "name": "github-mcp", "version": "1.2.3" }
+}
+```
+
+| Field | Description |
+|---|---|
+| `status` | One of `ok`, `error`, `auth_required`, `skipped` |
+| `message` | Optional human-readable description |
+| `server_info` | Optional raw `initialize` response from the server |
+
+| Status | Condition |
+|---|---|
+| `404` | Integration not found |
 
 ---
 
@@ -169,7 +203,30 @@ GET /api/v1/crews/{crewId}/integrations?workspace_id={workspaceId}
 POST /api/v1/crews/{crewId}/integrations?workspace_id={workspaceId}
 ```
 
-**Response:** `201 Created`
+**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
+
+**Request Body:**
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `workspace_mcp_server_id` | string | No | `null` | Link to an existing workspace integration (must be in same workspace) |
+| `name` | string | Yes | -- | Internal name |
+| `display_name` | string | No | `name` | Display name |
+| `transport` | string | No | `"streamable-http"` | `streamable-http` or `stdio` |
+| `endpoint` | string | Conditional | `null` | Required when `transport` is `streamable-http` |
+| `command` | string | Conditional | `null` | Required when `transport` is `stdio` |
+| `args_json` | string | No | `null` | JSON array of arguments |
+| `env_json` | string | No | `null` | JSON object of env vars |
+| `config_json` | string | No | `null` | Additional config JSON |
+| `icon` | string | No | `null` | Display icon |
+
+**Response:** `201 Created` -- crew MCP server object.
+
+| Status | Condition |
+|---|---|
+| `400` | Missing `name`, invalid `transport`, missing endpoint/command for transport, or referenced workspace integration not in same workspace |
+| `404` | Crew not found |
+| `409` | Integration with this name already exists in this crew |
 
 ### Update Crew Integration
 
@@ -177,7 +234,16 @@ POST /api/v1/crews/{crewId}/integrations?workspace_id={workspaceId}
 PATCH /api/v1/crews/{crewId}/integrations/{integrationId}?workspace_id={workspaceId}
 ```
 
-**Response:** `200 OK`
+**Auth:** `OWNER` or `ADMIN` role
+
+All fields optional: `display_name`, `transport`, `endpoint`, `command`, `args_json`, `env_json`, `config_json`, `icon`, `enabled`. Changing `transport` re-validates against the merged final endpoint/command.
+
+**Response:** `200 OK` -- updated crew integration object.
+
+| Status | Condition |
+|---|---|
+| `400` | Invalid `transport`, or endpoint/command missing for new transport |
+| `404` | Crew integration not found |
 
 ### Delete Crew Integration
 
@@ -185,7 +251,19 @@ PATCH /api/v1/crews/{crewId}/integrations/{integrationId}?workspace_id={workspac
 DELETE /api/v1/crews/{crewId}/integrations/{integrationId}?workspace_id={workspaceId}
 ```
 
-**Response:** `204 No Content`
+Cascade-deletes agent bindings and any OAuth credentials that were auto-created for this integration (only when no other binding still references them).
+
+**Auth:** `OWNER` or `ADMIN` role
+
+**Response:** `200 OK`
+
+```json
+{ "status": "deleted" }
+```
+
+| Status | Condition |
+|---|---|
+| `404` | Crew integration not found |
 
 ### Test Crew Integration
 
@@ -193,7 +271,13 @@ DELETE /api/v1/crews/{crewId}/integrations/{integrationId}?workspace_id={workspa
 POST /api/v1/crews/{crewId}/integrations/{integrationId}/test?workspace_id={workspaceId}
 ```
 
-**Response:** `200 OK` -- test results.
+Same probe semantics as the workspace test endpoint.
+
+**Response:** `200 OK` -- `{ status, message?, server_info? }` (see Test Workspace Integration).
+
+| Status | Condition |
+|---|---|
+| `404` | Crew or integration not found |
 
 ---
 
@@ -215,7 +299,28 @@ GET /api/v1/agents/{agentId}/integrations?workspace_id={workspaceId}
 POST /api/v1/agents/{agentId}/integrations?workspace_id={workspaceId}
 ```
 
-**Response:** `201 Created`
+**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
+
+**Request Body:**
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `mcp_server_id` | string | Yes | -- | ID of the MCP server to bind |
+| `mcp_server_scope` | string | Yes | -- | `workspace` or `crew` |
+| `credential_id` | string | No | `null` | Workspace credential to attach for auth |
+| `cred_type` | string | No | `"bearer"` | `bearer`, `api_key`, or `basic` |
+| `cred_header` | string | No | `null` | Custom header name (used when `cred_type` is `api_key`) |
+| `env_var_name` | string | No | `null` | Env var name for stdio credential injection |
+| `enabled` | boolean | No | `true` | Whether the binding is active |
+| `config_override_json` | string | No | `null` | Per-binding config override JSON |
+
+**Response:** `201 Created` -- binding object.
+
+| Status | Condition |
+|---|---|
+| `400` | Missing/invalid `mcp_server_id`, `mcp_server_scope`, `cred_type`, or referenced integration/credential not in this workspace |
+| `404` | Agent not found |
+| `409` | Agent already has a binding for this integration |
 
 ### Update Agent Binding
 
@@ -223,7 +328,20 @@ POST /api/v1/agents/{agentId}/integrations?workspace_id={workspaceId}
 PATCH /api/v1/agents/{agentId}/integrations/{integrationId}?workspace_id={workspaceId}
 ```
 
+**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
+
+All fields optional: `credential_id` (empty string clears), `cred_type`, `cred_header`, `env_var_name` (empty string clears), `enabled`, `config_override_json`.
+
 **Response:** `200 OK`
+
+```json
+{ "status": "updated" }
+```
+
+| Status | Condition |
+|---|---|
+| `400` | Invalid `cred_type`, credential not in this workspace, or no fields to update |
+| `404` | Agent binding not found |
 
 ### Delete Agent Binding
 
@@ -231,7 +349,17 @@ PATCH /api/v1/agents/{agentId}/integrations/{integrationId}?workspace_id={worksp
 DELETE /api/v1/agents/{agentId}/integrations/{integrationId}?workspace_id={workspaceId}
 ```
 
-**Response:** `204 No Content`
+**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
+
+**Response:** `200 OK`
+
+```json
+{ "status": "deleted" }
+```
+
+| Status | Condition |
+|---|---|
+| `404` | Agent binding not found |
 
 ### Resolve Agent Integrations
 

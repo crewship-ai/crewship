@@ -75,7 +75,7 @@ crewship skill init <slug> [flags]
 | Flag | Default | Notes |
 |------|---|---|
 | `--category` | `CUSTOM` | One of `CODING DATA DEVOPS WRITING RESEARCH PM DESIGN SUPPORT SECURITY FINANCE OPS AUTOMATION SALES CUSTOM`. |
-| `--description` | _(empty)_ | One-line trigger; should start with `Use when...`, `Useful for...`, or `To <verb>...`. The scaffold leaves the frontmatter field blank if omitted, but the skill won't pass `crewship skill validate` until you fill it in. |
+| `--description` | _(empty)_ | One-line trigger; should start with `Use when...`, `Useful for...`, or `To <verb>...`. When omitted, the scaffold writes a `TODO:` placeholder into the frontmatter `description:` field — fill it in before `crewship skill import`, which validates the SKILL.md server-side. |
 | `--license` | `MIT` | SPDX identifier — must be on the allowlist below for `skill import` to accept it later. |
 | `--output` | `./<slug>/` | Output directory for `<dir>/SKILL.md`. |
 | `--force` | `false` | Overwrite an existing SKILL.md at the destination. |
