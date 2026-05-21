@@ -52,12 +52,21 @@ type Item struct {
 // Insert persists a new inbox row. INSERT OR IGNORE so the
 // (kind, source_id) unique index is the dedup key — the same source
 // firing twice (retried hook, replay) doesn't duplicate rows.
-// Best-effort: a SQL failure is logged and swallowed so the caller's
-// path stays intact. The inbox is a projection; the source table
-// remains the source of truth until phase 2 of the migration.
-func Insert(ctx context.Context, db *sql.DB, logger *slog.Logger, in Item) {
+//
+// Returns the SQL error (if any) so callers that want to surface
+// inbox-write failure (e.g. routine sweeps that would otherwise log a
+// false-success summary) can propagate it. The writer still logs on
+// failure so legacy callers that ignore the return value keep their
+// existing log surface intact.
+//
+// The inbox is a projection; the source table remains the source of
+// truth until phase 2 of the migration. Validation failures on the
+// envelope (nil db, empty workspace_id/kind/source_id) return nil
+// because they're caller bugs not transient SQL issues — callers can
+// guard themselves; we just silently no-op rather than panic.
+func Insert(ctx context.Context, db *sql.DB, logger *slog.Logger, in Item) error {
 	if db == nil || in.WorkspaceID == "" || in.Kind == "" || in.SourceID == "" {
-		return
+		return nil
 	}
 	if logger == nil {
 		logger = slog.Default()
@@ -98,7 +107,9 @@ func Insert(ctx context.Context, db *sql.DB, logger *slog.Logger, in Item) {
 	)
 	if err != nil {
 		logger.Warn("inbox insert", "error", err, "kind", in.Kind, "source_id", in.SourceID)
+		return err
 	}
+	return nil
 }
 
 // ResolveBySource flips an inbox item to state=resolved when the
