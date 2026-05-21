@@ -1,0 +1,218 @@
+---
+title: "Ephemeral agents — hire, ghost, rehire"
+description: "Operator playbook for the short-lived contractor-agent lifecycle: hire with a TTL, watch it ghost when the TTL elapses, rehire if the work isn't done."
+icon: "user-clock"
+---
+
+# Ephemeral agents — hire, ghost, rehire
+
+A Crewship crew can have **permanent** agents (the default — once created, they stay until soft-deleted) and **ephemeral** agents (hired with a TTL, ghost when the TTL elapses, rehirable if needed). The ephemeral lifecycle is for short-lived contractor work where you want a real audit trail of WHEN the agent was active without paying for it to sit in your roster forever.
+
+This page is the operator playbook for the four-state lifecycle: **hire → live → ghost → rehire** (or stay ghosted).
+
+## The states
+
+```
+                 hire                  TTL elapsed             rehire
+   (nothing)  ────────→  live  ──────────────────→  ghost  ────────────→  live
+                          │                                                  │
+                          └── status=PENDING_REVIEW (guided crews) ──────────┘
+```
+
+| State | DB encoding | What it means |
+|---|---|---|
+| **Permanent** | `ephemeral=0` | Default. Agent stays until soft-deleted via `DELETE /api/v1/agents/{id}`. |
+| **Live (ephemeral)** | `ephemeral=1, expires_at=<future>, expired_at IS NULL` | Counts against `crews.max_ephemeral_agents` quota. |
+| **Ghost** | `ephemeral=1, expires_at=<past>, expired_at IS NOT NULL` | TTL elapsed. Does NOT count against quota. Stays in the agents table for audit + rehire. |
+| **Pending review** | `status='PENDING_REVIEW'` | Guided-crew hire that hasn't been operator-approved yet. Chatbridge refuses to start the agent until status flips to `IDLE`. |
+
+The state machine derives from two columns rather than a single `lifecycle` enum because we wanted the schema to be queryable without an enum dance — `WHERE ephemeral=1 AND expired_at IS NULL` is the canonical "live ephemerals" query and a single integer comparison is faster than any enum string check. The trade-off (the state is reconstructed in the query layer) is documented as drift §10.5 in [PRD-AGENT-EVOLUTION-2026.md].
+
+## Hiring
+
+```bash
+crewship hire \
+  --crew on-call \
+  --template incident-responder \
+  --ttl 240 \
+  --reason "P1 incident #4582 needs sustained eyes-on"
+```
+
+| Flag | Purpose |
+|---|---|
+| `--crew` | Crew slug or ID to hire into. The agent is bound to this crew's MCP config, network policy, and autonomy_level. |
+| `--template` | Built-in agent template the hire is provisioned from. Defines the agent's role, system prompt skeleton, and CLI adapter. |
+| `--ttl` | Time-to-live in minutes. Clamped server-side to [30, 1440] (30 min minimum to avoid trivial-hire abuse, 24 hr maximum to enforce the "ephemeral" framing — for longer work, hire a permanent agent). Default 60. |
+| `--reason` | **Required.** Appended to `agents.hire_reason` as a chronological history (rehires also append, so the column reads as a narrative of the agent's lifecycle). |
+| `--parent-lead` | Optional — links the hire to the lead agent that initiated it (for `LEAD`-driven hires from inside a container via the sidecar `/spawn` endpoint). |
+
+The response depends on the crew's `autonomy_level`:
+
+- **strict** → `403 Forbidden` — ephemeral hire is rejected outright. Operator changes the crew to `guided` or higher before hiring.
+- **guided** → `202 Accepted` + a blocking inbox item. Agent row is created with `status='PENDING_REVIEW'`. Chatbridge will refuse to start the agent until operator approves the hire via the inbox.
+- **trusted** → `201 Created` + a non-blocking inbox notification. Agent is live immediately.
+- **full** → `201 Created` + journal-only logging.
+
+See [Autonomy + self-learning](/guides/autonomy-and-self-learning) for the autonomy-level matrix.
+
+### Approving a pending-review hire
+
+A `guided`-crew hire lands as `PENDING_REVIEW`. The inbox shows the hire request with an **Approve hire** button. Clicking it calls `POST /api/v1/agents/{agentId}/approve-hire` which:
+
+1. Flips `agents.status` from `PENDING_REVIEW` to `IDLE` (atomic UPDATE with WHERE guard so a concurrent fire / soft-delete returns 404 instead of silently writing nothing)
+2. Resolves the inbox row via `inbox.ResolveBySource`
+3. Writes a `agent.hire_approved` journal entry
+4. Broadcasts an `agent.ready` WebSocket event so the UI repaints the agent card from PENDING_REVIEW chip to a normal status badge
+
+The operator can also "fire" the pending agent by deleting it from the crew page — same path as deleting any agent. No separate "deny hire" endpoint exists today (tracked as PR-F follow-up); fire is the explicit reject path.
+
+## The live state
+
+A live ephemeral agent is functionally identical to a permanent agent — same chat surface, same memory tools, same skills. The differences:
+
+- It carries `ephemeral=1` so the agent card UI shows a small **TTL** badge with the remaining time
+- It counts against `crews.max_ephemeral_agents` (default 10 — configurable per crew via the policy panel)
+- A background sweeper checks every 5 minutes whether `expires_at < now()` and ghosts it if so
+
+The quota matters because Crewship runs each agent in its own container — letting an operator hire 1000 ephemerals in a panic would exhaust host memory. When the quota is reached, hire returns `429 Too Many Requests` with the live count + max in the response body, and the operator either raises `max_ephemeral_agents` for that crew (via `crewship policy set --max-ephemeral N`) or rehires a ghost rather than hiring fresh (rehires don't count — they reuse the existing row).
+
+## Ghosting
+
+The `internal/ephemeral/expiry.go` sweeper runs on a 5-minute ticker (default, configurable via `DefaultSweepInterval`):
+
+1. `SELECT id, crew_id, workspace_id FROM agents WHERE ephemeral=1 AND expired_at IS NULL AND deleted_at IS NULL AND expires_at < now() AND status != 'RUNNING'`
+2. For each matched row: `UPDATE agents SET expired_at = now() WHERE id = ?` (single-row UPDATE with the same WHERE guard so a concurrent rehire doesn't double-flip)
+3. Emit `agent.expired` WebSocket event on the workspace hub
+4. Append a journal entry per ghosting with the agent_id + crew_id + reason="ttl_elapsed"
+
+### TTL mid-mission grace
+
+The sweeper deliberately **skips agents with `status='RUNNING'`** — a mission in flight gets to finish even if its TTL elapsed mid-call. The agent ghosts on the NEXT sweep after it idles back to `IDLE`. This avoids the worst-case "agent was in the middle of a tool call, TTL elapsed, ghost flag set, agent's next response references a column that's gone" scenario.
+
+The trade-off is that a long-running ephemeral can outlive its TTL by up to one sweep interval. Operators who need stricter timing should provision a permanent agent and explicitly soft-delete it.
+
+### Ghost UI affordance
+
+A ghost agent appears in the agent canvas card list with:
+
+- **Opacity 60% + grayscale 40%** styling so it visually recedes from live agents
+- A **Ghost** status badge (slate background, ghost icon) replacing the usual `IDLE` / `RUNNING` chip
+- A hover-revealed **Rehire** button (top-right of the card on hover / focus-within) that opens the rehire dialog
+
+Ghosts are sorted to the bottom of the agent list (live agents first by `created_at DESC`, then ghosts by `expired_at DESC` — most-recently-ghosted ghost ranks above older ghosts). This matters because crews accumulate ghosts over time and the operator's eye should land on the live agents first.
+
+## Rehiring
+
+```bash
+crewship rehire <agent-slug-or-id> \
+  --ttl 120 \
+  --reason "incident #4582 stretched into a sustained-fire investigation"
+```
+
+| Flag | Purpose |
+|---|---|
+| `agent` (positional) | Slug or ID of the ghost (or live ephemeral — rehiring a live one extends TTL without ghosting first). |
+| `--ttl` | New TTL in minutes. Same [30, 1440] clamping. Resets `expires_at` to `now() + ttl`. |
+| `--reason` | **Required.** Appended to `hire_reason` history (so the column shows e.g. "initial hire for #4582 — extended for sustained-fire investigation"). |
+
+Effect on the DB row:
+
+- `expires_at` = `now() + ttl`
+- `expired_at` = `NULL` (un-ghost)
+- `hire_reason` += new line with timestamp + reason
+
+The row's `id`, `crew_id`, `slug`, `created_at`, and everything else stay unchanged — the agent's memory files (AGENT.md, PERSONA.md, lessons.md) are preserved across the ghost gap. A rehired agent picks up exactly where it left off, with full continuity.
+
+### Quota on rehire
+
+Rehiring a **ghost** does NOT count against the quota (the ghost row already exists; rehire just toggles `expired_at` to NULL). Rehiring a **live** ephemeral is free for the same reason. Hiring a fresh ephemeral when the quota is full returns 429 — operator either raises the quota or rehires a ghost rather than hiring fresh.
+
+The rehire endpoint includes the same policy gate as hire (`strict` rejects, `guided` returns 202 with PENDING_REVIEW, etc.). Re-promoting a strict-crew ghost back to live still requires operator approval.
+
+## LEAD-driven hire from inside a container
+
+A `LEAD`-mode agent in active orchestration can hire a sub-agent on demand by POSTing to the sidecar's `/spawn` endpoint:
+
+```bash
+# inside the agent container, via sidecar IPC
+curl -X POST -H "Content-Type: application/json" \
+  -d '{
+    "crew_id": "<this-crew-id>",
+    "template": "incident-responder",
+    "ttl_minutes": 120,
+    "reason": "LEAD escalation: needs another set of eyes on the regression"
+  }' \
+  http://localhost:9119/spawn
+```
+
+The sidecar proxies the request to `POST /api/v1/internal/agents/hire`, which:
+
+- Injects the `MANAGER` role into the request context (LEAD agents always hire as MANAGER, regardless of the LEAD's own role)
+- Routes through the same policy gate as the public hire endpoint (a `strict` crew rejects LEAD-driven hires too — autonomy_level is the security boundary, not RBAC)
+- Returns 201 / 202 / 403 / 429 with the same shape as the public endpoint
+
+The sidecar URL-encodes `workspace_id` before forwarding so reserved characters in operator-set workspace identifiers can't poison the query downstream. See `internal/sidecar/spawn.go`.
+
+## Sub-agent briefing — pass a curated context slice
+
+LEAD-driven hires often need to hand the sub-agent specific context — the mission so far, which files matter, what the LEAD has already tried. Rather than pass the LEAD's full conversation history (noisy + leaks every internal monologue), Crewship provides the `AgentBrief` primitive (`internal/orchestrator/agent_brief.go`):
+
+```go
+brief := orchestrator.AgentBrief{
+  Mission: "Reproduce regression filed in INC-4582; identify the commit that introduced it.",
+  SharedMemory: []orchestrator.SharedMemoryRef{
+    {Tier: "AGENT", Reason: "prior auth notes on this codebase"},
+    {Tier: "daily", Key: "2026-05-20", Reason: "yesterday's incident timeline"},
+  },
+  Constraints: []string{
+    "do not modify migration v107",
+    "ask before deploying",
+  },
+  ParentAgentID: lead.ID,
+}
+orchestrator.ApplyBrief(ctx, hiredAgent.ID, brief)
+```
+
+The brief lands on disk as `.memory/BRIEF.md` in the sub-agent's container, and `buildAgentMemoryBlock` prepends it to the `[AGENT MEMORY]` section before the sub-agent's first turn. The sub-agent sees the parent's mission + curated memory references + constraints; it does NOT see the parent's full chat history.
+
+Validation caps (defensive, not policy):
+
+- `Mission` ≤ 500 characters
+- `SharedMemory` ≤ 10 refs
+- `Constraints` ≤ 20 lines
+
+Briefs are idempotent — re-applying overwrites in place; the sub-agent always sees the latest brief on the next system-prompt assembly.
+
+## Per-crew quota
+
+`crews.max_ephemeral_agents` (default 10, range 0–100). UI input lives in the same **Autonomy & behavior** panel as the policy controls — placed there because the quota is logically a governance knob (it caps how many ephemeral spawns the agent fleet can issue before the operator notices).
+
+Setting `max=0` blocks all ephemeral hires for the crew (use this as a per-crew kill switch — strict-mode rejection is per-hire, max=0 is per-crew).
+
+## Common workflows
+
+### "Incident response with a 4-hour hard stop"
+
+```bash
+crewship hire --crew on-call --template incident-responder \
+  --ttl 240 --reason "P1 incident #4582"
+# ... agent investigates for ~4 hours, autocomma ghosts on TTL elapse
+# if mission isn't done, rehire for another window:
+crewship rehire incident-responder-... --ttl 120 \
+  --reason "incident stretched into sustained investigation"
+```
+
+### "Burst of background analyzers during a release week"
+
+Set the crew's `max_ephemeral_agents` to 20 for the release window, hire one ephemeral per service the analyzer should cover, let them all ghost on TTL elapse. After the release, lower `max_ephemeral_agents` back to 10.
+
+### "Ghost as cheap reference"
+
+Ghosting is free — the agent row stays in the DB. Operators sometimes deliberately let agents ghost rather than soft-delete them, so the agent's `hire_reason` history + memory files are queryable later. A future SAR ("show me every agent that mentioned my email") then has data to scan. Ghosts only become inert; they don't disappear.
+
+## Cross-references
+
+- [Autonomy + self-learning](/guides/autonomy-and-self-learning) — `autonomy_level` matrix that gates hire decisions
+- [Inbox guide](/guides/inbox) — operator workflow for approving guided-crew hires
+- [Agent memory](/guides/agent-memory) — memory files preserved across ghost/rehire
+- [Internal IPC](/api-reference/internal) — sidecar `/spawn` endpoint contract

@@ -85,6 +85,8 @@
               },
               "guides/mcp-multi-cli",
               "guides/keeper",
+              "guides/autonomy-and-self-learning",
+              "guides/ephemeral-agents",
               "guides/integrations",
               "guides/templates",
               {
@@ -142,6 +144,7 @@
               "security/encryption",
               "security/container-isolation",
               "security/audit",
+              "security/gdpr",
               "security/security-headers",
               "security/backup-instance-security"
             ]
