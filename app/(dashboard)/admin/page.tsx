@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import {
-  LayoutDashboard, Building, Users, Server, Shield, Database,
+  LayoutDashboard, Building, Users, Server, Shield, Database, ListTodo,
 } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useWorkspace } from "@/hooks/use-workspace"
@@ -17,6 +17,7 @@ import { KeeperTab } from "./tabs/keeper-tab"
 import { WorkspacesTab } from "./tabs/workspaces-tab"
 import { UsersTab } from "./tabs/users-tab"
 import { BackupsTab } from "./tabs/backups-tab"
+import { KeeperQueuePanel } from "@/components/features/admin/keeper-queue-panel"
 
 /**
  * Admin sidebar sections — ONLY real, wired tabs.
@@ -57,6 +58,7 @@ const sections: NavSection[] = [
     label: "Security",
     items: [
       { key: "security", label: "Keeper", icon: Shield },
+      { key: "reviews", label: "P2 reviews", icon: ListTodo },
     ],
   },
   {
@@ -226,6 +228,10 @@ export default function AdminPage() {
 
     if (tab === "backups") {
       return <BackupsTab workspaceId={workspaceId ?? undefined} />
+    }
+
+    if (tab === "reviews") {
+      return <KeeperQueuePanel workspaceId={workspaceId} />
     }
 
     if (tab === "security") {
