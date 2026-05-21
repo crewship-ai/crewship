@@ -34,16 +34,50 @@ func TestMigrateV102_KeeperPhase2(t *testing.T) {
 	defer db.Close()
 
 	migLogger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	if err := Migrate(context.Background(), db.DB, migLogger); err != nil {
-		t.Fatalf("Migrate: %v", err)
+	ctx := context.Background()
+
+	// Apply migrations up to (but NOT including) v102 so the
+	// preserves_pre_v102_row subcase below can seed the legacy
+	// keeper_requests shape against the pre-v102 table and then watch
+	// v102's ALTER ... RENAME + INSERT … SELECT actually rebuild the
+	// row. Running Migrate() unconditionally first would have already
+	// recreated the table empty, so the "preserves" assertion was
+	// only validating post-v102 insert/read.
+	if err := applyMigrationsUpTo(ctx, db.DB, 101, migLogger); err != nil {
+		t.Fatalf("applyMigrationsUpTo(101): %v", err)
 	}
 
-	// Common fixtures
+	// Common fixtures — landed on the v9 keeper_requests shape so the
+	// pre_v102_row subcase can INSERT before the recreate.
 	mustExec(t, db.DB, `INSERT INTO workspaces (id, name, slug) VALUES ('ws1', 'WS', 'ws1')`)
 	mustExec(t, db.DB, `INSERT INTO users (id, email, full_name) VALUES ('u1', 'a@b.c', 'A')`)
 	mustExec(t, db.DB, `INSERT INTO crews (id, workspace_id, name, slug) VALUES ('cr1', 'ws1', 'crew', 'crew')`)
 	mustExec(t, db.DB, `INSERT INTO agents (id, crew_id, workspace_id, name, slug) VALUES ('a1', 'cr1', 'ws1', 'agent', 'agent')`)
 	mustExec(t, db.DB, `INSERT INTO credentials (id, workspace_id, name, encrypted_value, security_level, created_by) VALUES ('c1', 'ws1', 'NPM_TOKEN', 'xx', 1, 'u1')`)
+
+	// Seed the legacy keeper_requests row BEFORE v102 lands so the
+	// recreate path (ALTER … RENAME → CREATE → INSERT … SELECT → DROP)
+	// is exercised end-to-end. Read-back happens inside the
+	// "preserves_pre_v102_row" subcase after Migrate is finalised.
+	mustExec(t, db.DB, `
+		INSERT INTO keeper_requests (
+			id, requesting_agent_id, requesting_crew_id, credential_id,
+			task_id, intent, decision, reason, risk_score,
+			created_at, decided_at, request_type, command, exit_code,
+			ollama_prompt, ollama_raw_response
+		) VALUES (
+			'req_full', 'a1', 'cr1', 'c1',
+			'task_x', 'Read deploy log', 'ALLOW', 'Justified', 3,
+			'2026-05-21T00:00:00Z', '2026-05-21T00:00:01Z',
+			'execute', 'cat deploy.log', 0,
+			'prompt body', 'raw response body'
+		)`)
+
+	// Now apply v102. The seeded row above must round-trip through the
+	// recreate dance unchanged.
+	if err := Migrate(ctx, db.DB, migLogger); err != nil {
+		t.Fatalf("Migrate (v102): %v", err)
+	}
 
 	cases := []struct {
 		name   string
@@ -96,22 +130,12 @@ func TestMigrateV102_KeeperPhase2(t *testing.T) {
 		{
 			name: "request_type/preserves_pre_v102_row",
 			assert: func(t *testing.T, db *sql.DB) {
-				// Seed a row carrying every v9-v11 column so the recreate
-				// dance is exercised end-to-end; readback verifies no field
-				// dropped or shifted during INSERT…SELECT.
-				mustExec(t, db, `
-					INSERT INTO keeper_requests (
-						id, requesting_agent_id, requesting_crew_id, credential_id,
-						task_id, intent, decision, reason, risk_score,
-						created_at, decided_at, request_type, command, exit_code,
-						ollama_prompt, ollama_raw_response
-					) VALUES (
-						'req_full', 'a1', 'cr1', 'c1',
-						'task_x', 'Read deploy log', 'ALLOW', 'Justified', 3,
-						'2026-05-21T00:00:00Z', '2026-05-21T00:00:01Z',
-						'execute', 'cat deploy.log', 0,
-						'prompt body', 'raw response body'
-					)`)
+				// 'req_full' was seeded BEFORE v102 ran (see test top),
+				// so this readback verifies the v102 ALTER…RENAME +
+				// INSERT…SELECT actually copied every column through
+				// the recreate. The seed-then-migrate sequence is the
+				// load-bearing assertion; the readback below is just
+				// the verification.
 				var (
 					decision, reason, reqType, command, prompt, rawResp string
 					riskScore, exitCode                                 int
