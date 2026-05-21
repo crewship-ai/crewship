@@ -574,6 +574,17 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 			opts = append(opts, goapi.WithHybridSearchProvider(apiWorkspaceProvider{reg: hybridRegistry}))
 		}
 
+		// PR-B F3 / PR-C F4: carry the auxiliary-model config into the
+		// router so (a) the /api/v1/system/aux-status diagnostic surface
+		// reports the resolved provider/model per slot, and (b) the
+		// Phase 2 evaluator construction below uses the same source of
+		// truth the operator sees in the UI. Config-driven aux slots
+		// are a follow-up (cfg.Auxiliary not yet wired); MVP defaults
+		// from llm.DefaultAuxiliaryModels (every slot on
+		// anthropic/claude-haiku-4-5) keep the surface useful immediately.
+		auxModels := llm.DefaultAuxiliaryModels()
+		opts = append(opts, goapi.WithAuxiliaryModels(auxModels))
+
 		apiRouter, err := goapi.NewRouter(deps.DB, cfg.Auth.JWTSecret, logger, opts...)
 		if err != nil {
 			logger.Error("failed to create API router", "error", err)
@@ -586,6 +597,31 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 			// reaches apiRouter. Both.
 			mux.Handle("/exposed/", apiRouter)
 			logger.Info("Go API routes mounted")
+
+			// PR-C F4 wire-up: construct the four Keeper Phase 2
+			// evaluators (skill_review / behavior / memory_health /
+			// negative_learning) from the aux-model config and hand
+			// them to the router. Each evaluator is built independently
+			// and per-slot init failures (e.g. missing ANTHROPIC_API_KEY)
+			// surface as warn lines + a nil evaluator — the matching
+			// endpoint then returns 503 so partial rollouts have a
+			// deterministic shape (graceful degradation, not crash on
+			// boot). See internal/server/keeper_phase2.go.
+			//
+			// Behavior evaluator additionally drives the sampled
+			// EventPostToolCall hook (PRD §6 F4.2). Install it as the
+			// process-wide singleton AFTER constructing it so the
+			// orchestrator's tappedHandler can pick it up via
+			// behaviorhook.Get() on the hot path. nil evaluator → hook
+			// no-ops (Hook.MaybeEvaluate guards), so absence is safe.
+			evals := buildPhase2Evaluators(auxModels, s.journalWriter, deps.DB, logger)
+			apiRouter.SetKeeperPhase2Evaluators(
+				evals.skillReview,
+				evals.behavior,
+				evals.memoryHealth,
+				evals.negative,
+			)
+			registerBehaviorHook(evals.behavior, apiRouter.PolicyResolver(), logger)
 
 			// Pipeline AgentRunner is wired in cmd_start.go after
 			// the chatbridge.ChatResolver is built — the runner
