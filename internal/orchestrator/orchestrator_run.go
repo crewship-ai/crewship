@@ -791,17 +791,33 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 							payload["input"] = in
 						}
 					}
-					// Fire-and-forget. The observer's own sampling +
-					// cost guards keep the LLM budget bounded; no
-					// retry / backpressure here on purpose.
-					go obs.Observe(ToolCallObservation{
-						WorkspaceID: req.WorkspaceID,
-						CrewID:      req.CrewID,
-						AgentID:     req.AgentID,
-						MissionID:   req.MissionID,
-						ToolName:    toolName,
-						Payload:     payload,
-					})
+					// Bounded fan-out: try to acquire a semaphore token
+					// before spawning the Observe goroutine. Non-blocking
+					// claim → on overflow (postToolCallSemCap concurrent
+					// observations in flight) we drop this event rather
+					// than spawn yet another goroutine. The observer's
+					// sampling already discards most calls, so a dropped
+					// overflow is statistically equivalent to one that
+					// was sampled out; the alternative (unbounded
+					// goroutines piling up on Haiku latency under a tool
+					// storm) is strictly worse.
+					select {
+					case o.postToolCallSem <- struct{}{}:
+						go func() {
+							defer func() { <-o.postToolCallSem }()
+							obs.Observe(ToolCallObservation{
+								WorkspaceID: req.WorkspaceID,
+								CrewID:      req.CrewID,
+								AgentID:     req.AgentID,
+								MissionID:   req.MissionID,
+								ToolName:    toolName,
+								Payload:     payload,
+							})
+						}()
+					default:
+						o.logger.Debug("post_tool_call: observer saturated, dropping event",
+							"agent_id", req.AgentID, "tool", toolName)
+					}
 				}
 			}
 		}

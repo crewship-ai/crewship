@@ -218,6 +218,16 @@ type Orchestrator struct {
 	// the getter so a server without behaviorhook installed (e.g. dev
 	// builds without ANTHROPIC_API_KEY) just no-ops on the hot path.
 	postToolCallObs PostToolCallObserver
+	// postToolCallSem is a bounded semaphore (channel as token bucket)
+	// that caps in-flight Observe goroutines. Without this, a chatty
+	// tool-call stream could fan out one goroutine per call (LLM
+	// latency ~8s × call rate) and pile up before the observer's own
+	// sampling gate fires. Initialised in New(); buffered to
+	// postToolCallSemCap. Non-blocking send → drop policy is correct
+	// here: the observer's sampling means we're already discarding
+	// most events by design, and dropping the overflow is preferable
+	// to back-pressuring the agent's tool-result loop.
+	postToolCallSem chan struct{}
 	// workspaceMemory resolves cross-crew memory for a workspace into a
 	// [WORKSPACE MEMORY] system-prompt block. Nil-safe — when no
 	// provider is wired (default), buildWorkspaceMemoryBlock returns
@@ -597,6 +607,15 @@ func truncateCmd(argv []string, n int) string {
 }
 
 // New creates an Orchestrator with the given container and state providers.
+// postToolCallSemCap is the max number of concurrent behavior-monitor
+// observations in flight. Sized for the worst case where every active
+// crew has an agent firing tool calls in lockstep: 64 should comfortably
+// cover the realistic crew count on a single instance while keeping the
+// goroutine ceiling bounded. Overflow drops; the observer's sampling
+// already reduces the effective rate so dropped events are statistically
+// indistinguishable from un-sampled ones.
+const postToolCallSemCap = 64
+
 func New(
 	container provider.ContainerProvider,
 	state provider.StateProvider,
@@ -614,6 +633,7 @@ func New(
 		snapshotHashCache: make(map[string]string),
 		snapshotPending:   make(map[string]string),
 		snapshotInFlight:  make(map[string]*sync.Mutex),
+		postToolCallSem:   make(chan struct{}, postToolCallSemCap),
 	}
 }
 
