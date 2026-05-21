@@ -293,6 +293,14 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 			case r.Method == http.MethodPost && r.URL.Path == "/memory/reindex":
 				s.handleMemoryReindex(w, r)
 				return
+			case r.Method == http.MethodPost && r.URL.Path == "/mcp/memory":
+				// PR-A F1: in-container MCP server exposing the four memory
+				// tools (read/write/search/append_daily) via JSON-RPC 2.0.
+				// Adapters (Claude/Codex/Gemini/OpenCode/Droid) auto-inject
+				// a crewship-memory server entry pointing here so the model
+				// gets native function calling for memory without curl gymnastics.
+				s.handleMemoryMCP(w, r)
+				return
 			case r.Method == http.MethodPost && r.URL.Path == "/assign":
 				s.handleAssign(w, r)
 				return

@@ -603,12 +603,33 @@ func TestWriteMCPCodex_GenericHeader(t *testing.T) {
 	}
 }
 
-// TestWriteMCP_EmptyConfigSilent — when there are no MCP servers, writers
-// must early-return without writing anything (avoid clobbering or creating
-// stale empty configs).
-func TestWriteMCP_EmptyConfigSilent(t *testing.T) {
+// TestWriteMCP_EmptyConfigSilent_CursorOnly — Cursor must remain silent
+// when no MCP servers are configured because SupportsMCP() returns false
+// (its writer never injects memory MCP — see writeMCPCursor doc). The
+// other MCP-capable adapters now ALWAYS write at least the crewship-memory
+// server (PR-A F1 invariant): every supported CLI gets native memory.*
+// tool calls regardless of crew-level MCP config. The drift guard is
+// TestWriteMCP_EmptyConfigEmitsMemoryMCP below.
+func TestWriteMCP_EmptyConfigSilent_CursorOnly(t *testing.T) {
+	cap := &captureContainer{}
+	req := AgentRunRequest{AgentSlug: "agent-x"} // no MCP sources
+	if err := writeMCPCursor(context.Background(), cap, "container-1", req, "/output/agent-x", slog.Default()); err != nil {
+		t.Errorf("cursor empty-config writer error: %v", err)
+	}
+	if len(cap.calls) != 0 {
+		t.Errorf("cursor writer should be silent on empty config (SupportsMCP=false), but wrote %d files: %+v", len(cap.calls), cap.calls)
+	}
+}
+
+// TestWriteMCP_EmptyConfigEmitsMemoryMCP — PR-A F1 invariant. The four
+// MCP-capable non-Claude adapters (Codex/Gemini/OpenCode/Droid) must
+// always emit at least the crewship-memory server entry so the model
+// gets native memory.read/write/search/append_daily tool calls even
+// when the operator declared no other MCP servers. Drift here means
+// a "fresh" agent silently loses memory tools — a regression the PR-A
+// PRD explicitly forbids.
+func TestWriteMCP_EmptyConfigEmitsMemoryMCP(t *testing.T) {
 	writers := map[string]func(context.Context, provider.ContainerProvider, string, AgentRunRequest, string, *slog.Logger) error{
-		"cursor":   writeMCPCursor,
 		"droid":    writeMCPDroid,
 		"gemini":   writeMCPGemini,
 		"opencode": writeMCPOpenCode,
@@ -617,12 +638,23 @@ func TestWriteMCP_EmptyConfigSilent(t *testing.T) {
 	for name, w := range writers {
 		t.Run(name, func(t *testing.T) {
 			cap := &captureContainer{}
-			req := AgentRunRequest{AgentSlug: "agent-x"} // no MCP sources
+			req := AgentRunRequest{AgentSlug: "agent-x"}
 			if err := w(context.Background(), cap, "container-1", req, "/output/agent-x", slog.Default()); err != nil {
-				t.Errorf("empty-config writer error: %v", err)
+				t.Fatalf("%s: writer error: %v", name, err)
 			}
-			if len(cap.calls) != 0 {
-				t.Errorf("%s: writer should be silent on empty config, but wrote %d files: %+v", name, len(cap.calls), cap.calls)
+			if len(cap.calls) == 0 {
+				t.Fatalf("%s: writer should emit at least the crewship-memory entry; wrote nothing", name)
+			}
+			// Body must mention crewship-memory + the sidecar /mcp/memory URL.
+			combined := ""
+			for _, c := range cap.calls {
+				combined += c.body
+			}
+			if !strings.Contains(combined, "crewship-memory") {
+				t.Errorf("%s: writer output missing crewship-memory entry; body=%s", name, combined)
+			}
+			if !strings.Contains(combined, "/mcp/memory") {
+				t.Errorf("%s: writer output missing /mcp/memory URL; body=%s", name, combined)
 			}
 		})
 	}

@@ -92,12 +92,29 @@ func setupMCPConfig(
 	}
 
 	if mcpJSON == "" {
-		if !hadMCPInput {
-			return nil
-		}
-		// MCP servers were configured but all got filtered out (e.g. npx unavailable).
-		// Write an empty config so --mcp-config doesn't point at a missing file.
+		// No user/crew MCP input AND no resolved bindings: start from an
+		// empty document so the memory injection step below has something
+		// to add to. Pre-PR-A this early-returned when !hadMCPInput, but
+		// PR-A F1 needs every Claude run to land at least the
+		// crewship-memory server so the model gets native memory.* tool
+		// calls regardless of whether the operator wired any other MCP
+		// servers — short-circuiting here would silently skip the
+		// guaranteed-on memory surface.
 		mcpJSON = `{"mcpServers":{}}`
+		_ = hadMCPInput
+	}
+
+	// PR-A F1: auto-inject the sidecar-hosted memory MCP server into the
+	// final Claude .mcp.json. Safe even when the operator declared
+	// crewship-memory themselves — injectMemoryMCPIntoClaudeJSON is a
+	// no-op in that case (the user entry wins, see injectMemoryMCP).
+	if injected, err := injectMemoryMCPIntoClaudeJSON(mcpJSON); err == nil {
+		mcpJSON = injected
+	} else if logger != nil {
+		// Don't fail the whole run — the model can still operate without
+		// memory tools; just log so an operator inspecting startup sees the
+		// degradation.
+		logger.Warn("memory MCP injection failed; agent will have no memory tools", "error", err)
 	}
 
 	homeDir := fmt.Sprintf("/crew/agents/%s", agentSlug)

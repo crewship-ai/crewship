@@ -64,7 +64,12 @@ func TestGeminiAdapter_SetupSystemPrompt_AllWritesFail_WrapsWithAdapterName(t *t
 	}
 }
 
-func TestGeminiAdapter_WriteMCPConfig_EmptyMCP_ShortCircuitsToNil(t *testing.T) {
+func TestGeminiAdapter_WriteMCPConfig_EmptyMCP_StillEmitsMemoryMCP(t *testing.T) {
+	// PR-A F1 changed the invariant: empty crew/agent MCP config still
+	// writes one file (.gemini/settings.json with the crewship-memory
+	// entry) so the model gets native memory.* tool calls regardless of
+	// operator configuration. Pre-PR-A this short-circuited to zero
+	// Exec calls; pinning the new behaviour prevents regressions.
 	fake := &adapterTestContainer{}
 	a := geminiAdapter{}
 	err := a.WriteMCPConfig(
@@ -73,8 +78,13 @@ func TestGeminiAdapter_WriteMCPConfig_EmptyMCP_ShortCircuitsToNil(t *testing.T) 
 	if err != nil {
 		t.Errorf("WriteMCPConfig on empty MCP = %v, want nil", err)
 	}
-	if fake.execCalls != 0 {
-		t.Errorf("empty MCP triggered %d Exec calls; expected 0", fake.execCalls)
+	if fake.execCalls == 0 {
+		t.Fatalf("empty MCP triggered 0 Exec calls; expected ≥1 (memory MCP auto-injection)")
+	}
+	script := findScriptForPath(t, fake.execScripts, ".gemini/settings.json")
+	body := decodeBase64FromShellScript(t, script)
+	if !strings.Contains(body, "crewship-memory") || !strings.Contains(body, "/mcp/memory") {
+		t.Errorf("gemini empty-MCP body missing crewship-memory/mcp/memory; body=%s", body)
 	}
 }
 
@@ -164,7 +174,9 @@ func TestDroidAdapter_SetupSystemPrompt_AllWritesFail_WrapsWithAdapterName(t *te
 	}
 }
 
-func TestDroidAdapter_WriteMCPConfig_EmptyMCP_ShortCircuitsToNil(t *testing.T) {
+func TestDroidAdapter_WriteMCPConfig_EmptyMCP_StillEmitsMemoryMCP(t *testing.T) {
+	// Same PR-A F1 invariant as gemini: empty MCP config still writes
+	// .factory/mcp.json with the crewship-memory entry.
 	fake := &adapterTestContainer{}
 	a := droidAdapter{}
 	err := a.WriteMCPConfig(
@@ -173,8 +185,13 @@ func TestDroidAdapter_WriteMCPConfig_EmptyMCP_ShortCircuitsToNil(t *testing.T) {
 	if err != nil {
 		t.Errorf("err = %v, want nil", err)
 	}
-	if fake.execCalls != 0 {
-		t.Errorf("empty MCP triggered %d Exec calls; expected 0", fake.execCalls)
+	if fake.execCalls == 0 {
+		t.Fatalf("empty MCP triggered 0 Exec calls; expected ≥1 (memory MCP auto-injection)")
+	}
+	script := findScriptForPath(t, fake.execScripts, ".factory/mcp.json")
+	body := decodeBase64FromShellScript(t, script)
+	if !strings.Contains(body, "crewship-memory") || !strings.Contains(body, "/mcp/memory") {
+		t.Errorf("droid empty-MCP body missing crewship-memory/mcp/memory; body=%s", body)
 	}
 }
 

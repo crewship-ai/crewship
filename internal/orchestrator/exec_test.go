@@ -832,16 +832,30 @@ func TestBuildCLICommand_WithMCP(t *testing.T) {
 	}
 }
 
-func TestBuildCLICommand_WithoutMCP(t *testing.T) {
+func TestBuildCLICommand_WithoutMCP_StillSetsMCPConfig(t *testing.T) {
+	// PR-A F1 changed the invariant: CLAUDE_CODE always passes
+	// --mcp-config because setupMCPConfig now auto-injects the
+	// sidecar-hosted crewship-memory server even when the operator
+	// declared no other MCP sources. Without this, the model would
+	// silently lose the four memory.* tool calls on every fresh-deploy
+	// agent that hasn't been wired with an MCP server.
 	req := AgentRunRequest{
 		CLIAdapter:  "CLAUDE_CODE",
+		AgentSlug:   "alpha",
 		UserMessage: "hello",
 	}
 	cmd := BuildCLICommand(req)
-	for _, arg := range cmd {
-		if arg == "--mcp-config" {
-			t.Error("--mcp-config should not be present when no MCP servers")
+	found := false
+	for i, arg := range cmd {
+		if arg == "--mcp-config" && i+1 < len(cmd) {
+			found = true
+			if !strings.Contains(cmd[i+1], ".mcp.json") {
+				t.Errorf("expected .mcp.json file path, got: %s", cmd[i+1])
+			}
 		}
+	}
+	if !found {
+		t.Error("--mcp-config should be present even without operator MCP servers (memory MCP always wired)")
 	}
 }
 
