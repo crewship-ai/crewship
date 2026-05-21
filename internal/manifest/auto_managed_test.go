@@ -344,3 +344,78 @@ func TestExpandAutoCredentials_TolerantOfMalformedPrior(t *testing.T) {
 		t.Errorf("expected fresh 64-char value, got %d", len(planned[0].Value))
 	}
 }
+
+// TestExpandAutoCredentials_OperatorPinnedEnvWins is the regression
+// for the C-test bug: when an operator writes
+// `services[0].env.POSTGRES_PASSWORD: my-literal`, the sugar layer
+// MUST NOT overwrite that literal with an auto-generated value, mint
+// a credential row, or append the env_ref to agents. The schema
+// docstring on ResolveEnv explicitly says "operator values always
+// win on key collision," but pre-fix expandAutoCredentialsInCrewSpec
+// did the inverse: it ran ResolveEnv (operator overlay correct),
+// then unconditionally re-wrote svc.Env[inject_as_env]=<generated>
+// at the end of each auto-cred loop iteration — clobbering the very
+// override it had just preserved.
+func TestExpandAutoCredentials_OperatorPinnedEnvWins(t *testing.T) {
+	const literal = "operator-chose-this-value-explicitly"
+	spec := CrewSpec{
+		Services: []Service{
+			{
+				Name:  "postgres",
+				Image: "postgres:16-alpine",
+				Env:   map[string]string{"POSTGRES_PASSWORD": literal},
+			},
+		},
+		Agents: []Agent{
+			{Slug: "lead", Name: "Lead", AgentRole: "LEAD"},
+		},
+	}
+	planned, err := expandAutoCredentialsInCrewSpec(&spec, "")
+	if err != nil {
+		t.Fatalf("expand: %v", err)
+	}
+	if len(planned) != 0 {
+		t.Errorf("operator-pinned key must not produce a planned credential row; got %+v", planned)
+	}
+	if got := spec.Services[0].Env["POSTGRES_PASSWORD"]; got != literal {
+		t.Errorf("operator literal must survive expansion; got %q (len=%d), want %q", got, len(got), literal)
+	}
+	if containsString(spec.Agents[0].EnvRefs, "POSTGRES_PASSWORD") {
+		t.Errorf("operator-pinned key must not auto-append to agent env_refs; got %+v", spec.Agents[0].EnvRefs)
+	}
+	// Sugar's *other* defaults (the ones the operator did NOT pin)
+	// still apply — POSTGRES_USER must land via the catalog default,
+	// otherwise we've over-corrected and broken the docstring's
+	// "operator + catalog merge" contract for non-collision keys.
+	if got := spec.Services[0].Env["POSTGRES_USER"]; got != "postgres" {
+		t.Errorf("non-pinned catalog default must still apply; POSTGRES_USER=%q", got)
+	}
+}
+
+// TestExpandAutoCredentials_OperatorPinnedEmptyStringIgnored makes
+// the precedence rule precise: an empty-string operator value is
+// treated as "not pinned" (fall through to sugar). Otherwise a
+// half-edited manifest with `POSTGRES_PASSWORD: ""` would
+// silently nuke the auto-credential path.
+func TestExpandAutoCredentials_OperatorPinnedEmptyStringIgnored(t *testing.T) {
+	spec := CrewSpec{
+		Services: []Service{
+			{
+				Name:  "postgres",
+				Image: "postgres:16-alpine",
+				Env:   map[string]string{"POSTGRES_PASSWORD": ""},
+			},
+		},
+	}
+	planned, err := expandAutoCredentialsInCrewSpec(&spec, "")
+	if err != nil {
+		t.Fatalf("expand: %v", err)
+	}
+	if len(planned) != 1 || planned[0].Name != "POSTGRES_PASSWORD" {
+		t.Fatalf("empty-string operator value should fall through to sugar; got %+v", planned)
+	}
+	got := spec.Services[0].Env["POSTGRES_PASSWORD"]
+	if len(got) != 64 {
+		t.Errorf("expected 64-char generated value, got %q (len=%d)", got, len(got))
+	}
+}

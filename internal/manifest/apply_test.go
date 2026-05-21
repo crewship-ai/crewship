@@ -29,6 +29,12 @@ type fakeAPIClient struct {
 	agentSkillBindings map[string][]map[string]any // agentID → bindings
 	agentCredBindings  map[string][]map[string]any
 
+	// Error-injection knob: when non-zero, GET /api/v1/credentials
+	// returns this status code with an empty body. Tests use it to
+	// simulate "state-read failure during planning" without standing
+	// up a full faulty HTTP transport.
+	credentialsListStatus int
+
 	Calls []fakeCall
 }
 
@@ -84,6 +90,9 @@ func (f *fakeAPIClient) Get(_ context.Context, path string) (*http.Response, err
 		}
 		return resp(200, out), nil
 	case path == "/api/v1/credentials":
+		if f.credentialsListStatus != 0 {
+			return resp(f.credentialsListStatus, map[string]string{"error": "injected"}), nil
+		}
 		var out []map[string]any
 		for _, c := range f.credsByName {
 			out = append(out, c)

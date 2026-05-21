@@ -175,12 +175,16 @@ func buildCredFileScript(creds []Credential, secretsAgentDir string) (string, in
 	}
 
 	// Pre-create the ssh/ and certs/ subdirectories with restrictive
-	// perms before any file write, so an unprivileged process can't
-	// race in and create the dir with a wider mode. mkdir -p is
-	// idempotent — safe to run unconditionally.
+	// perms before any file write. The script is exec'd as UID 1001
+	// (matching the secretsAgentDir owner that orchestrator_run.go
+	// mkdir'd before us), so file ownership lands on 1001:1001
+	// automatically and we don't need chown. Earlier the script ran
+	// as root and chown'd everything — that path fails silently in
+	// production containers, which run with CapDrop:ALL and so
+	// lack CAP_CHOWN + CAP_DAC_OVERRIDE; root inside such a container
+	// can't write to a 1001-owned dir nor change ownership at all.
 	scriptParts := []string{
 		fmt.Sprintf("mkdir -p %s/ssh %s/certs", secretsAgentDir, secretsAgentDir),
-		fmt.Sprintf("chown 1001:1001 %s/ssh %s/certs", secretsAgentDir, secretsAgentDir),
 		fmt.Sprintf("chmod 0700 %s/ssh %s/certs", secretsAgentDir, secretsAgentDir),
 	}
 
@@ -191,7 +195,6 @@ func buildCredFileScript(creds []Credential, secretsAgentDir string) (string, in
 		valB64 := base64.StdEncoding.EncodeToString([]byte(s.Value))
 		scriptParts = append(scriptParts,
 			fmt.Sprintf("echo '%s' | base64 -d > %s", valB64, s.Path),
-			fmt.Sprintf("chown 1001:1001 %s", s.Path),
 			fmt.Sprintf("chmod %s %s", s.Mode, s.Path),
 		)
 	}
@@ -204,11 +207,13 @@ func buildCredFileScript(creds []Credential, secretsAgentDir string) (string, in
 	envPath := secretsAgentDir + "/.env"
 	scriptParts = append(scriptParts,
 		fmt.Sprintf("echo '%s' | base64 -d > %s", envB64, envPath),
-		fmt.Sprintf("chown 1001:1001 %s", envPath),
 		fmt.Sprintf("chmod 0400 %s", envPath),
-		// Chown the secrets dir itself (not recursively) so sibling
-		// agents on the same UID can't list each other's secret dirs.
-		fmt.Sprintf("chown 1001:1001 %s", secretsAgentDir),
+		// Lock down the parent dir to 0700 so a future per-agent UID
+		// layout can't list its sibling's contents. On the current
+		// shared-UID setup (all agents run as 1001) this is a noop
+		// but mirrors the principle-of-least-privilege intent the
+		// pre-fix chown was trying to encode.
+		fmt.Sprintf("chmod 0700 %s", secretsAgentDir),
 	)
 
 	return strings.Join(scriptParts, " && "), len(specs), nil
@@ -216,8 +221,33 @@ func buildCredFileScript(creds []Credential, secretsAgentDir string) (string, in
 
 // writeCredentialFiles writes file-mountable credentials into the
 // agent's secrets directory. Thin wrapper around buildCredFileScript
-// that runs the resulting script as root (UID 0) inside the container,
-// because only root can chown to the agent's UID 1001.
+// that runs the resulting script as UID 1001 — the same UID that
+// owns secretsAgentDir from the orchestrator_run.go mkdir pass.
+//
+// Earlier the script ran as UID 0 with chown lines, on the assumption
+// that "root can do anything". That assumption is false inside Crewship's
+// runtime containers: they're launched with CapDrop:["ALL"] plus
+// ReadonlyRootfs and no-new-privileges, so root-without-capabilities
+// can neither write to a 1001-owned dir (no CAP_DAC_OVERRIDE) nor
+// chown any file (no CAP_CHOWN). The exec succeeded at the docker API
+// level (returned no Go error), `io.Copy` drained an empty stdout, and
+// we'd log "credential files written" while /secrets/<agent>/ stayed
+// empty. Symptom in the wild: SPEC-4 sugar credentials showed up in
+// agent_credentials but never reached the agent runtime, so any
+// downstream code reading /secrets/<agent>/.env (or the matching
+// per-credential file) saw nothing.
+//
+// Two changes close the gap:
+//
+//  1. Run as UID 1001 so the writes land via the owner-permission path
+//     (no capability gymnastics needed). buildCredFileScript no longer
+//     emits chown lines, which were the only ops requiring root.
+//  2. After Exec returns, call ExecInspect and surface non-zero exit
+//     codes as errors. Previously the orchestrator silently treated
+//     "exec attached" as "exec succeeded" — the new check makes a
+//     real failure (permission, disk full, sh parse error) bubble
+//     up to the caller's warn-and-continue path instead of writing
+//     a false-success log entry.
 //
 // Per-type behaviour is documented on buildCredFileScript. The
 // secretsSharedDir parameter is unused today but retained on the
@@ -243,7 +273,7 @@ func writeCredentialFiles(
 	cfg := provider.ExecConfig{
 		ContainerID: containerID,
 		Cmd:         []string{"sh", "-c", script},
-		User:        "0:0",
+		User:        "1001:1001",
 	}
 
 	result, err := ctr.Exec(ctx, cfg)
@@ -252,6 +282,21 @@ func writeCredentialFiles(
 	}
 	io.Copy(io.Discard, result.Reader)
 	result.Reader.Close()
+
+	// Reading the stream to EOF means docker has closed the exec
+	// pipe, which in turn means the process has exited and
+	// ExecInspect will report the final exit code without racing.
+	running, exitCode, inspectErr := ctr.ExecInspect(ctx, result.ExecID)
+	if inspectErr != nil {
+		return fmt.Errorf("inspect credential-file exec: %w", inspectErr)
+	}
+	if running {
+		return fmt.Errorf("credential-file exec %s reported still running after EOF", result.ExecID)
+	}
+	if exitCode != 0 {
+		return fmt.Errorf("credential-file script exited %d (agent_slug=%s, container=%s)",
+			exitCode, agentSlug, containerID)
+	}
 
 	logger.Info("credential files written",
 		"agent_slug", agentSlug,

@@ -513,7 +513,9 @@ func (pb *planBuilder) planCrew(ctx context.Context, meta Metadata, spec *CrewSp
 	// attribution and the credential row's `created_by_actor_id`.
 	// Idempotent: if a row with the same name+workspace already
 	// exists with provider=AUTO_MANAGED, the closure no-ops.
-	pb.planAutoManagedCredentials(slug, plannedAutoCreds)
+	if err := pb.planAutoManagedCredentials(ctx, slug, plannedAutoCreds); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -539,17 +541,53 @@ func (pb *planBuilder) planCrew(ctx context.Context, meta Metadata, spec *CrewSp
 //
 // Kind is "credential" so these items rank with normal credentials
 // (well before agents that env_ref them).
-func (pb *planBuilder) planAutoManagedCredentials(crewSlug string, planned []plannedAutoCredential) {
+func (pb *planBuilder) planAutoManagedCredentials(ctx context.Context, crewSlug string, planned []plannedAutoCredential) error {
 	for i := range planned {
 		ac := planned[i] // local capture; closure must not share loop var
-		pb.appendItem(ActionCreate, "credential",
-			fmt.Sprintf("%s (auto-managed for %s/%s)", ac.Name, crewSlug, ac.ProvisionedForService),
+		provServiceTag := crewSlug + "/" + ac.ProvisionedForService
+		summary := fmt.Sprintf("%s (auto-managed for %s/%s)", ac.Name, crewSlug, ac.ProvisionedForService)
+
+		// Plan-time prediction. A re-apply against a workspace that
+		// already carries the matching auto-managed credential is a
+		// no-op — same name, same provider, same provisioned_for_service
+		// tag, same value (expandAutoCredentialsInCrewSpec reused the
+		// prior value via reuseOrGenerate). Reporting that as
+		// "+ credential" + "1 created" was misleading: the row count
+		// in the plan footer never matched what actually changed in
+		// the DB. Look up the workspace's current credentials so the
+		// plan output matches reality.
+		//
+		// Errors from FindCredentialByName propagate up — pre-CodeRabbit
+		// this swallowed the err and treated the lookup as "no existing
+		// credential", which meant a transient server-down or network
+		// failure during planning would silently flip every auto-managed
+		// row to ActionCreate. Apply would then start, hit the closure's
+		// repeat lookup, and either succeed (confusingly contradicting
+		// the plan) or fail mid-execution. Surfacing the read error at
+		// plan time keeps the contract that BuildPlan is "see the whole
+		// shape before any mutation runs".
+		//
+		// The closure below still runs the same provenance check —
+		// it remains load-bearing as a TOCTOU defence and as the
+		// authoritative path that returns nil-or-error.
+		predicted := ActionCreate
+		existing, err := pb.client.FindCredentialByName(ctx, ac.Name)
+		if err != nil {
+			return fmt.Errorf("plan auto-managed %s: lookup existing: %w", ac.Name, err)
+		}
+		if existing != nil &&
+			existing.Provider == "AUTO_MANAGED" &&
+			existing.ProvisionedForService != nil &&
+			*existing.ProvisionedForService == provServiceTag {
+			predicted = ActionUnchanged
+		}
+
+		pb.appendItem(predicted, "credential", summary,
 			func(ctx context.Context, client *Client, opts Options) error {
 				existing, err := client.FindCredentialByName(ctx, ac.Name)
 				if err != nil {
 					return fmt.Errorf("auto-managed %s: lookup existing: %w", ac.Name, err)
 				}
-				provServiceTag := crewSlug + "/" + ac.ProvisionedForService
 				if existing != nil {
 					// The plan-time check in planCrew already rejects
 					// cross-crew collisions, but TOCTOU between plan
@@ -596,6 +634,7 @@ func (pb *planBuilder) planAutoManagedCredentials(crewSlug string, planned []pla
 				return nil
 			})
 	}
+	return nil
 }
 
 // planCrewChildren emits plan items for MCP servers + agents + their
@@ -878,6 +917,18 @@ func applyAgentRefs(ctx context.Context, c *Client, agentID string, a *Agent, ws
 // fields don't match the existing crew. Only fields the manifest
 // can drive are compared — server-managed fields (created_at,
 // cached_image, etc.) are excluded.
+//
+// Historical note: services_json + container limits + network policy
+// used to be missing from this comparison. The symptom: an operator
+// would edit a manifest (add a sidecar, change cpus, scope the
+// network), re-apply, and see "0 updated" while the server still ran
+// the old config. With services_json in particular, the SPEC-4 sugar
+// auto-credential rotation never propagated because the patch wasn't
+// sent at all — the server's UpdateCrew handler is the place that
+// invalidates `cached_image` on services_json drift, so a missing
+// PATCH meant a stale agent runtime forever. The field set below is
+// the subset of CrewResponse that buildCrewBody actually drives;
+// anything new added to buildCrewBody must be mirrored here.
 func crewBodyDiffers(existing *CrewResponse, body map[string]any) bool {
 	if v, ok := body["name"].(string); ok && v != existing.Name {
 		return true
@@ -900,7 +951,59 @@ func crewBodyDiffers(existing *CrewResponse, body map[string]any) bool {
 	if v, ok := body["mise_config"].(string); ok && deref(existing.MiseConfig) != v {
 		return true
 	}
+	if v, ok := body["services_json"].(string); ok && deref(existing.ServicesJSON) != v {
+		return true
+	}
+	// Container shape and network policy. nil-deref for *int / *float64
+	// returns the zero value, which is fine: if the manifest is silent
+	// (no devcontainer block at all) buildCrewBody doesn't set these
+	// keys, so the map lookup fails and we skip the check.
+	if v, ok := body["container_memory_mb"].(int); ok && derefInt(existing.ContainerMemoryMB) != v {
+		return true
+	}
+	if v, ok := body["container_cpus"].(float64); ok && derefFloat(existing.ContainerCPUs) != v {
+		return true
+	}
+	if v, ok := body["container_ttl_hours"].(int); ok && derefInt(existing.ContainerTTLHours) != v {
+		return true
+	}
+	if v, ok := body["network_mode"].(string); ok && deref(existing.NetworkMode) != v {
+		return true
+	}
+	if v, ok := body["allowed_domains"].([]string); ok && !stringSliceEq(existing.AllowedDomains, v) {
+		return true
+	}
 	return false
+}
+
+// derefInt / derefFloat / stringSliceEq are the small helpers
+// crewBodyDiffers needs but the deref helper above only handles
+// *string. Kept package-private so they don't pollute the public
+// surface; collocated with their only caller.
+func derefInt(p *int) int {
+	if p == nil {
+		return 0
+	}
+	return *p
+}
+
+func derefFloat(p *float64) float64 {
+	if p == nil {
+		return 0
+	}
+	return *p
+}
+
+func stringSliceEq(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func agentBodyDiffers(existing *AgentResponse, a *Agent) bool {
