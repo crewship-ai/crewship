@@ -16,6 +16,10 @@ import (
 // pre-v101 insert shapes still succeed (additive migration must not
 // break legacy callers — every existing crew insert in tests omits
 // these columns and must continue to work).
+//
+// Originally numbered v98 during PR-B development; renumbered to v99
+// after SPEC-4 took v98; bumped again to v101 after main landed v99
+// (cli_token_tiers) + v100 (rbac_extensions) ahead of this branch.
 func TestMigrateV101_Autonomy(t *testing.T) {
 	dir := t.TempDir()
 	db, err := Open("file:" + filepath.Join(dir, "v101.db"))
