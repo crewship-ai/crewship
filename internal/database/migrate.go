@@ -1336,6 +1336,18 @@ END;
 	// landed v99 (cli_token_tiers) + v100 (rbac_extensions).
 	// See migrate_consts_v101_autonomy.go.
 	{version: 101, name: "autonomy", sql: migrationAutonomy},
+
+	// Ephemeral agent lifecycle (PRD §6 F5 / PR-D): five additive
+	// columns on agents (ephemeral / expires_at / expired_at /
+	// parent_lead_id / hire_reason) + per-crew quota
+	// (crews.max_ephemeral_agents). Powers the hire / ghost / rehire
+	// triple — see migrate_consts_v102_ephemeral_agents.go for the
+	// column-by-column rationale.
+	//
+	// Originally drafted as v100 on this branch; bumped to v102 on
+	// rebase after main landed v99 (cli_token_tiers), v100
+	// (rbac_extensions), and v101 (autonomy).
+	{version: 102, name: "ephemeral_agents", sql: migrationEphemeralAgents},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the
