@@ -1311,6 +1311,13 @@ END;
 	// tier='STANDARD' with NULL expires_at — full backwards compat.
 	// See migrate_consts_v98_cli_token_tiers.go.
 	{version: 98, name: "cli_token_tiers", sql: migrationCLITokenTiers},
+
+	// RBAC extensions (Patch M): per-crew role override on
+	// crew_members, per-agent owner on agents, optional scope list
+	// on cli_tokens. Additive — every change has NULL/default that
+	// preserves pre-v99 behaviour for existing rows. See
+	// migrate_consts_v99_rbac_extensions.go for the rationale.
+	{version: 99, name: "rbac_extensions", sql: migrationRBACExtensions},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the
