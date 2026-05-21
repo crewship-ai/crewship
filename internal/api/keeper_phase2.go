@@ -50,9 +50,33 @@ import (
 	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/keeper"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
+	"github.com/crewship-ai/crewship/internal/lookout"
 	"github.com/crewship-ai/crewship/internal/policy"
 	"github.com/crewship-ai/crewship/internal/skills"
 )
+
+// scopeKeeperRequest attaches a lookout.Scope to ctx so the keeper
+// LLM call through paymaster middleware can attribute cost (and not
+// fail with "paymaster: workspace_id required"). The F4 endpoints are
+// internal-auth POSTs invoked by the platform itself (scheduler
+// routines, behavior hook), so the inbound HTTP layer doesn't attach
+// the request scope the way operator-facing routes do — we attach it
+// explicitly here, mirroring the pattern in pipeline/runner_llm.go.
+//
+// agentID may be empty (skill_review fans out across crew agents; the
+// scope still bills the crew). Empty WorkspaceID returns ctx unchanged
+// so caller-side validation (which already rejects empty workspace_id
+// at the body layer) is the single source of truth for that error.
+func scopeKeeperRequest(ctx context.Context, workspaceID, crewID, agentID string) context.Context {
+	if workspaceID == "" {
+		return ctx
+	}
+	return lookout.WithScope(ctx, lookout.Scope{
+		WorkspaceID: workspaceID,
+		CrewID:      crewID,
+		AgentID:     agentID,
+	})
+}
 
 // KeeperPhase2Handler is the HTTP surface for the four F4 endpoints.
 type KeeperPhase2Handler struct {
@@ -248,7 +272,8 @@ func (h *KeeperPhase2Handler) HandleSkillReview(w http.ResponseWriter, r *http.R
 		Stats:           body.Stats,
 		FailureSnippets: body.FailureSnippets,
 	}
-	res, err := h.skillEval.Evaluate(r.Context(), req)
+	ctx := scopeKeeperRequest(r.Context(), body.WorkspaceID, body.CrewID, "")
+	res, err := h.skillEval.Evaluate(ctx, req)
 	if err != nil {
 		h.logger.Error("keeper_phase2: skill_review eval failed", "error", err)
 		replyError(w, http.StatusInternalServerError, "evaluator error")
@@ -331,7 +356,8 @@ func (h *KeeperPhase2Handler) HandleBehavior(w http.ResponseWriter, r *http.Requ
 
 	pol := h.resolvePolicySafe(r.Context(), body.CrewID)
 
-	res, err := h.behaviorEval.Evaluate(r.Context(), gatekeeper.BehaviorReviewRequest{
+	ctx := scopeKeeperRequest(r.Context(), body.WorkspaceID, body.CrewID, body.AgentID)
+	res, err := h.behaviorEval.Evaluate(ctx, gatekeeper.BehaviorReviewRequest{
 		WorkspaceID:     body.WorkspaceID,
 		CrewID:          body.CrewID,
 		AgentName:       body.AgentName,
@@ -440,7 +466,9 @@ func (h *KeeperPhase2Handler) HandleMemoryHealth(w http.ResponseWriter, r *http.
 
 	pol := h.resolvePolicySafe(r.Context(), body.CrewID)
 
-	res, err := h.memHealthEval.Evaluate(r.Context(), gatekeeper.MemoryHealthRequest{
+	// memHealth body has no AgentID — health snapshot is crew-scoped.
+	ctx := scopeKeeperRequest(r.Context(), body.WorkspaceID, body.CrewID, "")
+	res, err := h.memHealthEval.Evaluate(ctx, gatekeeper.MemoryHealthRequest{
 		WorkspaceID:        body.WorkspaceID,
 		CrewID:             body.CrewID,
 		AgentName:          body.AgentName,
@@ -533,7 +561,8 @@ func (h *KeeperPhase2Handler) HandleNegativeLearning(w http.ResponseWriter, r *h
 
 	pol := h.resolvePolicySafe(r.Context(), body.CrewID)
 
-	res, err := h.negativeEval.Evaluate(r.Context(), gatekeeper.NegativeLearningRequest{
+	ctx := scopeKeeperRequest(r.Context(), body.WorkspaceID, body.CrewID, body.AgentID)
+	res, err := h.negativeEval.Evaluate(ctx, gatekeeper.NegativeLearningRequest{
 		WorkspaceID:    body.WorkspaceID,
 		CrewID:         body.CrewID,
 		AgentName:      body.AgentName,
