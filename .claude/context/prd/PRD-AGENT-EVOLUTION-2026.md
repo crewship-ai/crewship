@@ -164,7 +164,7 @@ Pavel explicitly requested: "natvrdo to nastav a tečka — zamysli se nad dalš
 
 **Where:** `internal/keeper/gatekeeper/gatekeeper.go:77` (`if model == "" { model = "phi3:mini" }`).
 **Why:** Pavel: "MVP = Haiku, local models Phase 2". `phi3:mini` is silent degradation when Ollama is unavailable; better is loud error.
-**Action:** Remove default. New behavior: if no model configured, return `error: keeper aux model not configured (CREWSHIP_AUX_KEEPER_MODEL)` and refuse to start.
+**Action:** Remove default. New behavior: if no model configured, return `error: keeper.enabled=true but keeper.model is empty; set cfg.keeper.model or KEEPER_MODEL env (F3 in PR-B will introduce cfg.auxiliary.keeper.model)` and refuse to start. (PRD originally drafted with the speculative `CREWSHIP_AUX_KEEPER_MODEL` name; the actually-shipped variable is `KEEPER_MODEL` matching the existing `applyEnvOverrides` reader in `internal/config/config.go`.)
 
 ### Z.3 — Deprecate `agents.system_prompt` column (lighter scope in PR-Z)
 

@@ -254,6 +254,18 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 	// surface, escalations died silently. F4 endpoints in PR-C reuse the
 	// same inbox.Insert plumbing for skill-review / behavior / memory-
 	// health / negative-learning escalations.
+	//
+	// inbox.Insert is intentionally fire-and-forget (see writer.go doc:
+	// "Best-effort: a SQL failure is logged and swallowed so the caller's
+	// path stays intact. The inbox is a projection; the source table
+	// remains the source of truth"). The escalation itself is already
+	// persisted to keeper_requests (line 211 above) and journal (line 226)
+	// — if the inbox projection write fails the operator misses the bell
+	// badge but the data exists and can be re-projected by a backfill.
+	// Failing the keeper /request response on a projection error would
+	// flip the agent's credential request semantics from "ESCALATE
+	// pending operator" to "transient transport error → retry" which is
+	// the wrong recovery for the same outcome.
 	if gkResp.Decision == string(keeper.DecisionEscalate) {
 		inbox.Insert(r.Context(), h.db, h.logger, inbox.Item{
 			WorkspaceID: body.WorkspaceID,
