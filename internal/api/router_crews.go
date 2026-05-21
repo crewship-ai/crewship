@@ -171,11 +171,13 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.mux.Handle("GET /api/v1/agent-load", authed(wsCtx(http.HandlerFunc(agents.Load))))
 	r.mux.Handle("GET /api/v1/agents", authed(wsCtx(http.HandlerFunc(agents.List))))
 	r.mux.Handle("POST /api/v1/agents", authed(wsCtx(http.HandlerFunc(agents.Create))))
-	// PR-D F5 ephemeral lifecycle endpoint. Hire creates a new
-	// short-lived agent gated by the per-crew autonomy policy. The
-	// companion Rehire endpoint is wired in PR-D.3 alongside the
-	// soft-delete list-query reorder.
+	// PR-D F5 ephemeral lifecycle endpoints. Hire creates a new
+	// short-lived agent gated by the per-crew autonomy policy.
+	// Rehire resets the TTL on an existing ephemeral (typically a
+	// ghost) so the operator can extend a hire without losing the
+	// agent's memory continuity.
 	r.mux.Handle("POST /api/v1/agents/hire", authed(wsCtx(http.HandlerFunc(agents.Hire))))
+	r.mux.Handle("POST /api/v1/agents/{agentId}/rehire", authed(wsCtx(http.HandlerFunc(agents.Rehire))))
 	r.mux.Handle("GET /api/v1/agents/{agentId}", authed(wsCtx(http.HandlerFunc(agents.Get))))
 	r.mux.Handle("PATCH /api/v1/agents/{agentId}", authed(wsCtx(http.HandlerFunc(agents.Update))))
 	r.mux.Handle("DELETE /api/v1/agents/{agentId}", authed(wsCtx(http.HandlerFunc(agents.Delete))))

@@ -491,6 +491,245 @@ func hireInboxBody(reason, templateSlug string, ttlMin int, model string) string
 		templateSlug, modelLine, ttlMin, reason)
 }
 
+// rehireRequest is the POST /api/v1/agents/{agentId}/rehire body. The
+// agent id is in the path; only the lifecycle bits (new TTL + reason)
+// land in the body. Reason is required for the same audit-trail reason
+// as Hire — a rehire without a reason loses why the operator extended.
+type rehireRequest struct {
+	TTLMinutes int    `json:"ttl_minutes"`
+	Reason     string `json:"reason"`
+}
+
+// Rehire resets the lifecycle on an existing ephemeral agent: clears
+// expired_at (the agent stops being a ghost), pushes expires_at
+// forward by ttl_minutes, and appends a new reason line to
+// hire_reason so the audit history accumulates instead of being
+// overwritten.
+//
+// The container is NOT rebuilt by this handler — Crewship's container
+// provider tier (Docker/K8s) is the runtime layer; we only flip DB
+// state and emit a "container needs recycle" hint via the WS broadcast.
+// The chatbridge auto-provisions a fresh container on the next message
+// the way it does for any restarted agent.
+//
+// Returns:
+//
+//	200 OK     — rehire succeeded, agent is live again
+//	403       — RBAC reject (MEMBER/VIEWER) or policy reject (strict)
+//	404       — agent not found in workspace, or not ephemeral
+//	500       — DB error
+func (h *AgentHandler) Rehire(w http.ResponseWriter, r *http.Request) {
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	role := RoleFromContext(r.Context())
+	agentID := r.PathValue("agentId")
+
+	if !canRole(role, "create") {
+		replyError(w, http.StatusForbidden, "Forbidden")
+		return
+	}
+	if agentID == "" {
+		replyError(w, http.StatusBadRequest, "agentId is required")
+		return
+	}
+
+	var req rehireRequest
+	if err := readJSON(r, &req); err != nil {
+		replyError(w, http.StatusBadRequest, "Invalid JSON body")
+		return
+	}
+	if strings.TrimSpace(req.Reason) == "" {
+		replyError(w, http.StatusBadRequest, "reason is required (history trail)")
+		return
+	}
+
+	ttlMin := req.TTLMinutes
+	if ttlMin <= 0 {
+		ttlMin = defaultHireTTLMinutes
+	}
+	if ttlMin > maxHireTTLMinutes {
+		ttlMin = maxHireTTLMinutes
+	}
+
+	// 1. Load the existing row + scope check. Soft-deleted agents are
+	// 404'd; permanent (ephemeral=0) agents are 404'd too — rehire is
+	// semantically nonsensical on those and we don't want a typo'd id
+	// to silently flip a permanent agent into the ephemeral lifecycle.
+	var (
+		crewID        string
+		isEphemeral   int
+		oldExpiresAt  sql.NullString
+		oldExpiredAt  sql.NullString
+		oldHireReason sql.NullString
+		oldName       string
+	)
+	err := h.db.QueryRowContext(r.Context(), `
+		SELECT COALESCE(crew_id, ''), ephemeral, expires_at, expired_at,
+		       COALESCE(hire_reason, ''), name
+		FROM agents
+		WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
+		agentID, workspaceID).
+		Scan(&crewID, &isEphemeral, &oldExpiresAt, &oldExpiredAt, &oldHireReason, &oldName)
+	if errors.Is(err, sql.ErrNoRows) {
+		replyError(w, http.StatusNotFound, "Agent not found")
+		return
+	}
+	if err != nil {
+		h.logger.Error("rehire: load agent", "error", err, "agent_id", agentID)
+		replyError(w, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	if isEphemeral != 1 {
+		replyError(w, http.StatusBadRequest, "Agent is not ephemeral; rehire is only valid for ephemeral agents")
+		return
+	}
+
+	// 2. Policy gate (mirrors Hire). Strict crews cannot rehire either
+	// — the rejection reason is the same: ephemeral activity is
+	// disallowed on this crew. Reuses ActionEphemeralSpawn so the
+	// matrix stays single-source-of-truth.
+	autonomyLevel := policy.AutonomyGuided
+	decision := policy.DecisionInboxApprove
+	if h.policyResolver != nil && crewID != "" {
+		pol, perr := h.policyResolver.Resolve(r.Context(), crewID)
+		if perr != nil {
+			h.logger.Error("rehire: resolve policy", "crew_id", crewID, "error", perr)
+			replyError(w, http.StatusInternalServerError, "Internal server error")
+			return
+		}
+		decision = pol.DecideAction(policy.ActionEphemeralSpawn)
+		autonomyLevel = pol.AutonomyLevel
+	}
+	if decision == policy.DecisionRejected {
+		writeJSON(w, http.StatusForbidden, map[string]string{
+			"error":          "Ephemeral rehire rejected by policy",
+			"reason":         "autonomy_level=" + string(autonomyLevel) + " forbids ephemeral_spawn",
+			"crew_id":        crewID,
+			"autonomy_level": string(autonomyLevel),
+		})
+		return
+	}
+
+	// 3. Quota check: a rehire is only "free" if the agent is
+	// currently a ghost (was already counted as not-live). A rehire
+	// of a still-live ephemeral (operator extends TTL before it
+	// ghosts) doesn't add a slot — same row, same count. Either way
+	// the post-rehire state must respect max_ephemeral_agents.
+	wasGhost := oldExpiredAt.Valid && oldExpiredAt.String != ""
+	if wasGhost && crewID != "" {
+		var liveCount, maxAgents int
+		if err := h.db.QueryRowContext(r.Context(),
+			`SELECT max_ephemeral_agents FROM crews WHERE id = ?`,
+			crewID).Scan(&maxAgents); err != nil {
+			h.logger.Error("rehire: load crew quota", "crew_id", crewID, "error", err)
+			replyError(w, http.StatusInternalServerError, "Internal server error")
+			return
+		}
+		if err := h.db.QueryRowContext(r.Context(), `
+			SELECT COUNT(*) FROM agents
+			WHERE crew_id = ? AND ephemeral = 1
+			  AND expired_at IS NULL AND deleted_at IS NULL`,
+			crewID).Scan(&liveCount); err != nil {
+			h.logger.Error("rehire: count live", "crew_id", crewID, "error", err)
+			replyError(w, http.StatusInternalServerError, "Internal server error")
+			return
+		}
+		if liveCount >= maxAgents {
+			writeJSON(w, http.StatusTooManyRequests, map[string]any{
+				"error":   "Ephemeral quota reached",
+				"reason":  fmt.Sprintf("crew has %d live ephemerals (max %d); raise crews.max_ephemeral_agents to rehire", liveCount, maxAgents),
+				"crew_id": crewID,
+				"live":    liveCount,
+				"max":     maxAgents,
+			})
+			return
+		}
+	}
+
+	// 4. Compute new state. expires_at = now + ttl; expired_at = NULL
+	// (un-ghost); hire_reason appended with new timestamp so the
+	// column reads as a chronological history (see
+	// buildInitialReason).
+	now := time.Now().UTC()
+	newExpiresAt := now.Add(time.Duration(ttlMin) * time.Minute).Format(time.RFC3339)
+	nowStr := now.Format(time.RFC3339)
+	newReason := appendRehireReason(oldHireReason.String, req.Reason, nowStr)
+
+	_, err = h.db.ExecContext(r.Context(), `
+		UPDATE agents
+		SET expires_at = ?, expired_at = NULL, hire_reason = ?, updated_at = ?
+		WHERE id = ? AND workspace_id = ?`,
+		newExpiresAt, newReason, nowStr, agentID, workspaceID)
+	if err != nil {
+		h.logger.Error("rehire: update agent", "error", err, "agent_id", agentID)
+		replyError(w, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+
+	user := UserFromContext(r.Context())
+	userID := ""
+	if user != nil {
+		userID = user.ID
+	}
+
+	priorExpiredAt := ""
+	if oldExpiredAt.Valid {
+		priorExpiredAt = oldExpiredAt.String
+	}
+	WriteAuditLog(r.Context(), h.db, h.journal, "agent.rehired", "AGENT", agentID, userID, workspaceID, map[string]interface{}{
+		"reason":           req.Reason,
+		"ttl_minutes":      ttlMin,
+		"prior_expired_at": priorExpiredAt,
+		"new_expires_at":   newExpiresAt,
+		"was_ghost":        wasGhost,
+		"crew_id":          crewID,
+		"decision":         string(decision),
+		"autonomy_level":   string(autonomyLevel),
+	})
+
+	h.broadcastAgentEvent("agent.rehired", workspaceID, map[string]string{
+		"id":         agentID,
+		"crew_id":    crewID,
+		"name":       oldName,
+		"expires_at": newExpiresAt,
+	})
+
+	crewIDOut := crewID
+	expiresOut := newExpiresAt
+	reasonOut := newReason
+	writeJSON(w, http.StatusOK, hireResponse{
+		ID:          agentID,
+		CrewID:      &crewIDOut,
+		WorkspaceID: workspaceID,
+		Slug:        "", // not re-derived; caller can GET to refresh
+		Name:        oldName,
+		Status:      "IDLE",
+		Ephemeral:   true,
+		ExpiresAt:   &expiresOut,
+		ExpiredAt:   nil,
+		HireReason:  &reasonOut,
+		Decision:    string(decision),
+	})
+}
+
+// appendRehireReason appends a new rehire reason line to an existing
+// hire_reason history. Format matches buildInitialReason so the column
+// stays consistently parseable:
+//
+//	[2026-05-21T11:00:00Z] hire: ship the docs site
+//	[2026-05-22T09:00:00Z] rehire: docs need another pass
+//
+// Empty prior history (column was NULL or never written) falls back to
+// a "rehire:" line on its own — better than treating it as a hire,
+// which would mis-attribute the original audit trail.
+func appendRehireReason(prior, reason, ts string) string {
+	line := fmt.Sprintf("[%s] rehire: %s", ts, strings.TrimSpace(reason))
+	prior = strings.TrimRight(prior, "\n")
+	if prior == "" {
+		return line
+	}
+	return prior + "\n" + line
+}
+
 // writeInboxItem inserts an inbox_items row tagged for hire review.
 // kind='waitpoint' on blocking; kind='message' on non-blocking
 // (informational). Both share source_id=agent_id so the existing inbox

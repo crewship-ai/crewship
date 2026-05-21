@@ -41,17 +41,33 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 	var rows *sql.Rows
 	var err error
 
-	// a.id DESC is the pagination tiebreaker: created_at is stored with
-	// second precision, so ties on busy workspaces are realistic. Without a
-	// unique secondary sort key, LIMIT/OFFSET windows can drop or duplicate
-	// rows between pages when the tied rows straddle a page boundary.
+	// PR-D F5 order: live agents (expired_at IS NULL) come first;
+	// ghosts (expired_at IS NOT NULL) fall to the end of the list.
+	// Within each band we sort by COALESCE(expired_at, created_at)
+	// DESC so:
+	//
+	//   * live agents are ordered by creation recency (matches the
+	//     pre-F5 behaviour for callers that don't have ghosts yet),
+	//   * ghosts are ordered by *when they ghosted* (recency of
+	//     death) — operators rehiring will go for the most recent
+	//     ghost first; a 3-month-old ghost shouldn't out-rank
+	//     yesterday's because it was created earlier.
+	//
+	// a.id DESC remains the unique tiebreaker so LIMIT/OFFSET
+	// windows on second-precision created_at can't drop/duplicate
+	// rows on busy workspaces.
+	const orderBy = ` ORDER BY
+		CASE WHEN a.expired_at IS NULL THEN 0 ELSE 1 END,
+		COALESCE(a.expired_at, a.created_at) DESC,
+		a.id DESC
+		LIMIT ? OFFSET ?`
 	if crewID != "" {
 		rows, err = h.db.QueryContext(r.Context(),
-			listQuery+" AND a.crew_id = ? ORDER BY a.created_at DESC, a.id DESC LIMIT ? OFFSET ?",
+			listQuery+" AND a.crew_id = ?"+orderBy,
 			workspaceID, crewID, limit, offset)
 	} else {
 		rows, err = h.db.QueryContext(r.Context(),
-			listQuery+" ORDER BY a.created_at DESC, a.id DESC LIMIT ? OFFSET ?",
+			listQuery+orderBy,
 			workspaceID, limit, offset)
 	}
 
