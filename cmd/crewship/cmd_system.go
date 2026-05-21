@@ -347,6 +347,102 @@ welcome banner is still showing.`,
 	},
 }
 
+// systemAuxStatusCmd renders the PR-B F3 auxiliary-model assignment
+// reported by GET /api/v1/system/aux-status. Same diagnostic surface
+// the future web UI badge in Settings → Models will read — exposing
+// it through the CLI first means operators can confirm a YAML
+// override landed before the next eval call has a chance to silently
+// fall back to cfg.auxiliary.fallback.
+//
+// Output formats:
+//   - table (default): {SLOT, PROVIDER, MODEL, TIMEOUT, SOURCE}
+//   - json / yaml: pass-through of the API envelope so jq/yq pipelines work
+//
+// Source column values: "explicit" (slot was configured directly),
+// "fallback" (slot was empty so cfg.Fallback was used), "unconfigured"
+// (neither path resolved — operator misconfiguration).
+var systemAuxStatusCmd = &cobra.Command{
+	Use:   "aux-status",
+	Short: "Show auxiliary model assignment per slot (PR-B F3)",
+	Long: `Show the resolved provider, model, timeout and source for every
+auxiliary-model slot (Curator, Keeper, Behavior, MemoryHealth, Negative).
+
+The source column distinguishes how each slot was resolved:
+  explicit     — cfg.auxiliary.<slot> was set directly
+  fallback     — cfg.auxiliary.<slot> was empty; cfg.auxiliary.fallback used
+  unconfigured — neither the slot nor fallback had a provider (operator gap)
+
+Examples:
+  crewship system aux-status
+  crewship system aux-status --format json | jq '.slots[] | select(.source=="fallback")'
+  crewship system aux-status --format yaml`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+
+		client := newAPIClient()
+		client.WorkspaceID = ""
+
+		resp, err := client.Get("/api/v1/system/aux-status")
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+
+		var body struct {
+			Slots []struct {
+				Slot      string `json:"slot"`
+				Provider  string `json:"provider"`
+				Model     string `json:"model"`
+				TimeoutMS int64  `json:"timeout_ms"`
+				Source    string `json:"source"`
+			} `json:"slots"`
+		}
+		if err := cli.ReadJSON(resp, &body); err != nil {
+			return err
+		}
+
+		headers := []string{"SLOT", "PROVIDER", "MODEL", "TIMEOUT", "SOURCE"}
+		rows := make([][]string, 0, len(body.Slots))
+		for _, s := range body.Slots {
+			timeout := "—"
+			if s.TimeoutMS > 0 {
+				// Render in seconds when ≥1s, else ms — keeps the
+				// column human-readable across the 3s–30s span the
+				// MVP defaults use without forcing operators to
+				// mental-arithmetic milliseconds for the common case.
+				if s.TimeoutMS >= 1000 {
+					timeout = fmt.Sprintf("%.1fs", float64(s.TimeoutMS)/1000.0)
+				} else {
+					timeout = fmt.Sprintf("%dms", s.TimeoutMS)
+				}
+			}
+			rows = append(rows, []string{
+				s.Slot,
+				dashIfEmpty(s.Provider),
+				dashIfEmpty(s.Model),
+				timeout,
+				s.Source,
+			})
+		}
+
+		return newFormatter().Auto(body, headers, rows)
+	},
+}
+
+// dashIfEmpty returns "—" for empty strings so the table column
+// renders cleanly when a slot is unconfigured. Trivial helper, but
+// inlining at each call site obscured the intent.
+func dashIfEmpty(s string) string {
+	if s == "" {
+		return "—"
+	}
+	return s
+}
+
 func init() {
 	systemOnboardingSetupCmd.Flags().String("crew", "", "Crew name to create (required)")
 	systemOnboardingSetupCmd.Flags().String("agent", "", "First agent name in the crew (required)")
@@ -365,4 +461,5 @@ func init() {
 	systemCmd.AddCommand(systemKeeperCmd)
 	systemCmd.AddCommand(systemStatsCmd)
 	systemCmd.AddCommand(systemOnboardingCmd)
+	systemCmd.AddCommand(systemAuxStatusCmd)
 }
