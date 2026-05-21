@@ -32,7 +32,8 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 			a.mcp_config_json,
 			a.created_at, a.updated_at,
 			a.created_by_user_id,
-			c.name, c.slug, c.color, c.avatar_style
+			c.name, c.slug, c.color, c.avatar_style,
+			a.ephemeral, a.expires_at, a.expired_at, a.parent_lead_id, a.hire_reason
 		FROM agents a
 		LEFT JOIN crews c ON c.id = a.crew_id
 		WHERE a.workspace_id = ? AND a.deleted_at IS NULL
@@ -81,7 +82,7 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 	result := make([]agentResponse, 0, capacityHint(limit))
 	for rows.Next() {
 		var a agentResponse
-		var memEnabled, schedEnabled int
+		var memEnabled, schedEnabled, ephemeral int
 		var crewName, crewSlug, crewColor, crewAvatarStyle *string
 		var createdByUserID sql.NullString
 		if err := rows.Scan(&a.ID, &a.CrewID, &a.WorkspaceID, &a.Name, &a.Slug,
@@ -92,7 +93,8 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 			&a.MCPConfigJSON,
 			&a.CreatedAt, &a.UpdatedAt,
 			&createdByUserID,
-			&crewName, &crewSlug, &crewColor, &crewAvatarStyle); err != nil {
+			&crewName, &crewSlug, &crewColor, &crewAvatarStyle,
+			&ephemeral, &a.ExpiresAt, &a.ExpiredAt, &a.ParentLeadID, &a.HireReason); err != nil {
 			h.logger.Error("scan agent", "error", err)
 			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return
@@ -102,6 +104,7 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 		if createdByUserID.Valid {
 			a.CreatedByUserID = createdByUserID.String
 		}
+		a.Ephemeral = ephemeral == 1
 		if crewName != nil {
 			a.Crew = &agentCrewInfo{Name: *crewName, Slug: *crewSlug, Color: crewColor, AvatarStyle: crewAvatarStyle}
 		}
@@ -190,6 +193,7 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 	var memEnabled, schedEnabled int
 	var crewName, crewSlug, crewColor, crewAvatarStyle *string
 	var createdByUserID sql.NullString
+	var ephemeral int
 	err := h.db.QueryRowContext(r.Context(), `
 		SELECT a.id, a.crew_id, a.workspace_id, a.name, a.slug, a.description, a.role_title,
 			a.agent_role, a.lead_mode, a.status, a.cli_adapter, a.llm_provider, a.llm_model,
@@ -202,7 +206,8 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 			c.name, c.slug, c.color, c.avatar_style,
 			(SELECT COUNT(*) FROM agent_skills WHERE agent_id = a.id),
 			(SELECT COUNT(*) FROM agent_credentials WHERE agent_id = a.id),
-			(SELECT COUNT(*) FROM chats WHERE agent_id = a.id)
+			(SELECT COUNT(*) FROM chats WHERE agent_id = a.id),
+			a.ephemeral, a.expires_at, a.expired_at, a.parent_lead_id, a.hire_reason
 		FROM agents a
 		LEFT JOIN crews c ON c.id = a.crew_id
 		WHERE a.id = ? AND a.workspace_id = ? AND a.deleted_at IS NULL
@@ -215,7 +220,8 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 		&a.CreatedAt, &a.UpdatedAt,
 		&createdByUserID,
 		&crewName, &crewSlug, &crewColor, &crewAvatarStyle,
-		&a.Count.Skills, &a.Count.Credentials, &a.Count.Chats)
+		&a.Count.Skills, &a.Count.Credentials, &a.Count.Chats,
+		&ephemeral, &a.ExpiresAt, &a.ExpiredAt, &a.ParentLeadID, &a.HireReason)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			replyError(w, http.StatusNotFound, "Agent not found")
@@ -230,6 +236,7 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 	if createdByUserID.Valid {
 		a.CreatedByUserID = createdByUserID.String
 	}
+	a.Ephemeral = ephemeral == 1
 	if crewName != nil {
 		a.Crew = &agentCrewInfo{Name: *crewName, Slug: *crewSlug, Color: crewColor, AvatarStyle: crewAvatarStyle}
 	}

@@ -263,6 +263,14 @@ type agentResponse struct {
 	// the v100 migration (legacy rows have NULL created_by_user_id);
 	// the JSON `omitempty` keeps such responses untouched.
 	CreatedByUserID string `json:"created_by_user_id,omitempty"`
+	// PR-D F5 ephemeral lifecycle fields. Permanent agents serialize
+	// ephemeral=false with the rest as null; the UI ghost path
+	// keys off Ephemeral=true + ExpiredAt!=nil.
+	Ephemeral    bool    `json:"ephemeral"`
+	ExpiresAt    *string `json:"expires_at"`
+	ExpiredAt    *string `json:"expired_at"`
+	ParentLeadID *string `json:"parent_lead_id"`
+	HireReason   *string `json:"hire_reason"`
 }
 
 // List returns all non-deleted agents in the workspace with their crew and count metadata.

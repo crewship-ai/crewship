@@ -2,9 +2,10 @@
 
 import { memo } from "react"
 import Link from "next/link"
-import { Cpu, Key, Clock, AlertCircle, Pause, User } from "lucide-react"
+import { Cpu, Key, Clock, AlertCircle, Pause, Ghost, RotateCcw, User } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 import { getCrewDotColor } from "@/lib/entities"
@@ -60,6 +61,12 @@ interface AgentData {
    *  shapes and falls back to just the id when the full record isn't
    *  provided. */
   owner?: AgentOwner | null
+  // PR-D F5 ephemeral lifecycle. Server returns these from the list
+  // query; absent for permanent agents. expired_at non-null is the
+  // canonical "ghost" signal.
+  ephemeral?: boolean
+  expires_at?: string | null
+  expired_at?: string | null
 }
 
 const statusConfig: Record<string, { label: string; className: string; icon?: React.ElementType }> = {
@@ -81,16 +88,42 @@ const statusConfig: Record<string, { label: string; className: string; icon?: Re
     className: "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-400",
     icon: Pause,
   },
+  // PR-D F5: synthesized client-side from agent.expired_at; the
+  // server status column itself stays IDLE/RUNNING/etc. We surface
+  // it as a first-class badge variant so the card root + status
+  // pill stay in lockstep without two different code paths.
+  EXPIRED: {
+    label: "Expired",
+    className: "bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-400",
+    icon: Ghost,
+  },
 }
 
 export const AgentCard = memo(function AgentCard({ agent }: { agent: AgentData }) {
-  const status = statusConfig[agent.status] ?? statusConfig.IDLE
+  // PR-D F5: a non-null expired_at is the canonical ghost signal,
+  // regardless of the underlying status column (an agent that ghosted
+  // mid-run still has status=RUNNING on the row until the next
+  // status flip). When ghosted, override the status pill with the
+  // synthetic EXPIRED variant and dim the card root.
+  const isGhost = Boolean(agent.expired_at)
+  const status = isGhost ? statusConfig.EXPIRED : (statusConfig[agent.status] ?? statusConfig.IDLE)
   const StatusIcon = status.icon
+  const ghostLabel = isGhost && agent.expired_at
+    ? `Expired · ${timeAgo(agent.expired_at)}`
+    : status.label
 
   return (
     <Link
       href={`/crews/agents/${agent.id}`}
-      className="rounded-[var(--radius)] focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 outline-none"
+      data-expired={isGhost ? "true" : undefined}
+      className={cn(
+        "group relative block rounded-[var(--radius)] focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 outline-none",
+        // Visual signal that the agent is in ghost state — drop
+        // opacity + desaturate. The rehire affordance below appears
+        // on hover so the card isn't crowded for cards the operator
+        // is just scrolling past.
+        isGhost && "opacity-60 grayscale-[0.4] hover:opacity-90 hover:grayscale-0 transition-[opacity,filter] duration-150",
+      )}
     >
       <Card className="hover:border-primary/50 hover:bg-accent/30 hover:shadow-md transition-all duration-150 cursor-pointer h-full border-border/80 shadow-md">
         <CardContent className="p-4 sm:p-5">
@@ -104,14 +137,14 @@ export const AgentCard = memo(function AgentCard({ agent }: { agent: AgentData }
               <div className="flex items-center justify-between gap-2">
                 <h3 className="text-body font-semibold truncate">{agent.name}</h3>
                 <Badge variant="secondary" className={`text-micro shrink-0 gap-1.5 ${status.className}`}>
-                  {agent.status === "RUNNING" && (
+                  {!isGhost && agent.status === "RUNNING" && (
                     <span className="relative flex h-1.5 w-1.5">
                       <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
                       <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500" />
                     </span>
                   )}
                   {StatusIcon && <StatusIcon className="h-3 w-3" />}
-                  {status.label}
+                  {ghostLabel}
                 </Badge>
               </div>
               <p className="text-label text-muted-foreground mt-0.5">
@@ -119,6 +152,35 @@ export const AgentCard = memo(function AgentCard({ agent }: { agent: AgentData }
               </p>
             </div>
           </div>
+
+          {/* Rehire affordance: visible on hover for ghosts. The
+              click stops propagation so the parent Link doesn't
+              navigate to the agent detail page; the consumer hook
+              wires the actual POST /api/v1/agents/{id}/rehire call
+              against the agent's id. We render a button (not Link)
+              because rehire is an action, not navigation. */}
+          {isGhost && (
+            <div className="absolute right-3 top-3 opacity-0 group-hover:opacity-100 transition-opacity">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  // The actual rehire dispatch is owned by the page
+                  // that renders the card (it has the workspace +
+                  // mutator context). We surface the intent via a
+                  // standard DOM event the page can listen for.
+                  window.dispatchEvent(new CustomEvent("agent.rehire.request", {
+                    detail: { agentId: agent.id, agentName: agent.name },
+                  }))
+                }}
+              >
+                <RotateCcw className="h-3 w-3 mr-1" />
+                Rehire
+              </Button>
+            </div>
+          )}
 
           <div className="mt-3 flex items-center gap-2 flex-wrap">
             {agent.crew && (
