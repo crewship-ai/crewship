@@ -16,8 +16,12 @@ import (
 	"github.com/crewship-ai/crewship/internal/cli"
 )
 
+// NOTE: these tests intentionally do NOT call t.Parallel(). The
+// RunE tests below mutate hireCmd/rehireCmd flags as part of their
+// setup (via .Flags().Set/.Cleanup); running structure-vs-RunE
+// pairs in parallel would race on the shared cobra.Command, so
+// the whole file stays serial.
 func TestHireCmdStructure(t *testing.T) {
-	t.Parallel()
 	if hireCmd.Use != "hire" {
 		t.Errorf("hire Use = %q, want hire", hireCmd.Use)
 	}
@@ -32,7 +36,6 @@ func TestHireCmdStructure(t *testing.T) {
 }
 
 func TestRehireCmdStructure(t *testing.T) {
-	t.Parallel()
 	if rehireCmd.Use != "rehire <agent-slug-or-id>" {
 		t.Errorf("rehire Use = %q, want \"rehire <agent-slug-or-id>\"", rehireCmd.Use)
 	}
