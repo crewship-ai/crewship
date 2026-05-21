@@ -147,11 +147,17 @@ type Router struct {
 	negativeEval    *gatekeeper.NegativeLearningEvaluator
 }
 
-// SetKeeperPhase2Evaluators wires the four F4 evaluators. Any may be
-// nil; the corresponding endpoint returns 503 ("not configured")
-// until wired. Call once during server bootstrap, before
-// registerInternalRoutes runs — the route handler captures the
-// evaluator pointers at construction time, not per-request.
+// SetKeeperPhase2Evaluators is the legacy post-construction setter.
+//
+// DEPRECATED: call WithKeeperPhase2Evaluators as a RouterOption on
+// NewRouter instead. registerInternalRoutes constructs
+// NewKeeperPhase2Handler captures these evaluator pointers BY VALUE at
+// route registration time. Calling this setter AFTER NewRouter has
+// returned writes to Router fields the live handler has already
+// snapshotted as nil — the endpoint then 503s forever for the rest of
+// the process lifetime. Kept on the type for backward compatibility
+// with tests that build a Router stepwise; production callers must
+// pass the option.
 func (r *Router) SetKeeperPhase2Evaluators(
 	skillReview *gatekeeper.SkillReviewEvaluator,
 	behavior *gatekeeper.BehaviorEvaluator,

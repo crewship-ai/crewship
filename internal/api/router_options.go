@@ -272,6 +272,33 @@ func WithAuxiliaryModels(cfg llm.AuxiliaryModels) RouterOption {
 	}
 }
 
+// WithKeeperPhase2Evaluators wires the four PR-C F4 evaluators
+// (skill_review / behavior / memory_health / negative_learning) at
+// construction time, BEFORE registerInternalRoutes runs. Any of the
+// four may be nil — the matching endpoint returns 503 ("not
+// configured") so partial rollouts have a deterministic surface.
+//
+// Why an option (not a post-construction setter): NewKeeperPhase2Handler
+// captures the evaluator pointers by value at route-registration time.
+// Calling SetKeeperPhase2Evaluators AFTER NewRouter writes to Router
+// fields the handler instance has already snapshotted, so the live
+// handlers continue to see nil and return 503 forever. The option path
+// guarantees the assignments land before the handler's constructor
+// reads them.
+func WithKeeperPhase2Evaluators(
+	skillReview *gatekeeper.SkillReviewEvaluator,
+	behavior *gatekeeper.BehaviorEvaluator,
+	memoryHealth *gatekeeper.MemoryHealthEvaluator,
+	negative *gatekeeper.NegativeLearningEvaluator,
+) RouterOption {
+	return func(r *Router) {
+		r.skillReviewEval = skillReview
+		r.behaviorEval = behavior
+		r.memHealthEval = memoryHealth
+		r.negativeEval = negative
+	}
+}
+
 // ServeHTTP dispatches incoming requests to the registered route handlers.
 // It applies security headers to all responses and per-IP rate limiting:
 // stricter limits on auth endpoints, general limits on public API,

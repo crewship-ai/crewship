@@ -53,6 +53,14 @@ func kp2DB(t *testing.T) (*sql.DB, *policy.Resolver) {
 	if _, err := d.DB.Exec(`INSERT INTO crews (id, workspace_id, name, slug, autonomy_level, behavior_mode) VALUES ('cr1', 'ws1', 'Ops', 'ops', 'guided', 'warn')`); err != nil {
 		t.Fatal(err)
 	}
+	// Seed an agent so handlers that record keeper_requests with a
+	// requesting_agent_id ("a1" in the body fixtures) don't trip the FK
+	// after the recordKeeperRequest persistence-failure fix landed. The
+	// previous code swallowed insert errors; tests now must seed
+	// referenced rows.
+	if _, err := d.DB.Exec(`INSERT INTO agents (id, crew_id, workspace_id, name, slug) VALUES ('a1', 'cr1', 'ws1', 'Worker', 'worker')`); err != nil {
+		t.Fatal(err)
+	}
 	return d.DB, policy.NewResolver(d.DB)
 }
 

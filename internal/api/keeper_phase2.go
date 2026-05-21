@@ -37,7 +37,9 @@ package api
 
 import (
 	"context"
+	crand "crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -124,19 +126,25 @@ func (h *KeeperPhase2Handler) resolvePolicySafe(ctx context.Context, crewID stri
 }
 
 // recordKeeperRequest is the shared INSERT into keeper_requests for
-// every Phase 2 endpoint. Returns the generated request_id so handlers
-// can use it as the inbox source_id (idempotent dedup at the inbox
-// layer).
+// every Phase 2 endpoint. Returns the generated request_id alongside
+// any persistence error so handlers can fail-fast (HTTP 500) instead
+// of replying 200 with an inbox row pointing at a request that was
+// never recorded — silent audit loss is a worse failure mode than a
+// surfaced 500.
 func (h *KeeperPhase2Handler) recordKeeperRequest(
 	ctx context.Context,
 	reqType keeper.RequestType,
 	agentID, crewID, intent, decision, reason string,
 	risk int,
 	prompt, raw string,
-) string {
-	id := "kpr_" + shortPrefix(reqType) + "_" + randHexID()
+) (string, error) {
+	suffix, err := randHexID()
+	if err != nil {
+		return "", fmt.Errorf("keeper_phase2: generate request id: %w", err)
+	}
+	id := "kpr_" + shortPrefix(reqType) + "_" + suffix
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	_, err := h.db.ExecContext(ctx, `
+	if _, err := h.db.ExecContext(ctx, `
 		INSERT INTO keeper_requests (
 			id, requesting_agent_id, requesting_crew_id, credential_id,
 			intent, decision, reason, risk_score, created_at, decided_at,
@@ -145,12 +153,10 @@ func (h *KeeperPhase2Handler) recordKeeperRequest(
 		id, nullIfEmpty(agentID), nullIfEmpty(crewID), nullIfEmpty(""),
 		intent, nullIfEmpty(decision), nullIfEmpty(reason), risk, now, now,
 		string(reqType), nullIfEmpty(prompt), nullIfEmpty(raw),
-	)
-	if err != nil {
-		h.logger.Warn("keeper_phase2: insert keeper_requests failed",
-			"request_type", reqType, "error", err)
+	); err != nil {
+		return "", fmt.Errorf("keeper_phase2: insert keeper_requests (%s): %w", reqType, err)
 	}
-	return id
+	return id, nil
 }
 
 // shortPrefix returns a 3-char abbreviation for keeper_requests.id
@@ -169,17 +175,18 @@ func shortPrefix(rt keeper.RequestType) string {
 	return "kp2"
 }
 
-// randHexID is a small local helper. 12 hex chars is plenty for an
-// id that's already namespaced by request_type prefix; mirrors
-// internal/consolidate/health.go's randomHex.
-func randHexID() string {
-	const hexdigits = "0123456789abcdef"
-	now := time.Now().UnixNano()
-	b := make([]byte, 12)
-	for i := range b {
-		b[i] = hexdigits[int(now>>(i*4))&0xf]
+// randHexID returns 12 hex chars of CSPRNG output for the suffix of a
+// keeper_requests.id. The previous time-derived implementation (UnixNano
+// >> 4-bit-shifts) could collide between two requests landing in the
+// same nanosecond — paired with the insert-failure-swallow bug above
+// that yielded silent audit loss. crypto/rand keeps the per-prefix id
+// space large enough that collision is not a realistic concern.
+func randHexID() (string, error) {
+	b := make([]byte, 6) // 12 hex chars
+	if _, err := crand.Read(b); err != nil {
+		return "", err
 	}
-	return string(b)
+	return hex.EncodeToString(b), nil
 }
 
 // ----- F4.1: skill-review -----
@@ -247,12 +254,17 @@ func (h *KeeperPhase2Handler) HandleSkillReview(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	reqID := h.recordKeeperRequest(r.Context(), keeper.RequestTypeSkillReview,
+	reqID, recErr := h.recordKeeperRequest(r.Context(), keeper.RequestTypeSkillReview,
 		"", body.CrewID, "F4.1 skill review for "+body.SkillName,
 		string(res.Decision), res.Reason, res.RiskScore, res.Prompt, res.RawLLMResponse)
+	if recErr != nil {
+		h.logger.Error("keeper_phase2: skill_review record failed", "error", recErr)
+		replyError(w, http.StatusInternalServerError, "persistence error")
+		return
+	}
 
 	if res.Decision == keeper.DecisionEscalate || res.Decision == keeper.DecisionDeny {
-		inbox.Insert(r.Context(), h.db, h.logger, inbox.Item{
+		_ = inbox.Insert(r.Context(), h.db, h.logger, inbox.Item{
 			WorkspaceID: body.WorkspaceID,
 			Kind:        inbox.KindEscalation,
 			SourceID:    reqID,
@@ -335,15 +347,20 @@ func (h *KeeperPhase2Handler) HandleBehavior(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	reqID := h.recordKeeperRequest(r.Context(), keeper.RequestTypeBehavior,
+	reqID, recErr := h.recordKeeperRequest(r.Context(), keeper.RequestTypeBehavior,
 		body.AgentID, body.CrewID, "F4.2 behavior check on "+body.ToolName,
 		string(res.Decision), res.Reason, res.RiskScore, res.Prompt, res.RawLLMResponse)
+	if recErr != nil {
+		h.logger.Error("keeper_phase2: behavior record failed", "error", recErr)
+		replyError(w, http.StatusInternalServerError, "persistence error")
+		return
+	}
 
 	// Write to inbox when the PolicyDecision says inbox / block_inbox.
 	switch res.PolicyDecision {
 	case policy.DecisionInboxApprove, policy.DecisionAutoLogInbox,
 		policy.DecisionBlockInbox:
-		inbox.Insert(r.Context(), h.db, h.logger, inbox.Item{
+		_ = inbox.Insert(r.Context(), h.db, h.logger, inbox.Item{
 			WorkspaceID: body.WorkspaceID,
 			Kind:        inbox.KindEscalation,
 			SourceID:    reqID,
@@ -440,12 +457,17 @@ func (h *KeeperPhase2Handler) HandleMemoryHealth(w http.ResponseWriter, r *http.
 		return
 	}
 
-	reqID := h.recordKeeperRequest(r.Context(), keeper.RequestTypeMemoryHealth,
+	reqID, recErr := h.recordKeeperRequest(r.Context(), keeper.RequestTypeMemoryHealth,
 		"", body.CrewID, "F4.3 daily memory health sweep",
 		string(res.Decision), res.Reason, res.RiskScore, res.Prompt, res.RawLLMResponse)
+	if recErr != nil {
+		h.logger.Error("keeper_phase2: memory_health record failed", "error", recErr)
+		replyError(w, http.StatusInternalServerError, "persistence error")
+		return
+	}
 
 	if res.Decision == keeper.DecisionEscalate {
-		inbox.Insert(r.Context(), h.db, h.logger, inbox.Item{
+		_ = inbox.Insert(r.Context(), h.db, h.logger, inbox.Item{
 			WorkspaceID: body.WorkspaceID,
 			Kind:        inbox.KindEscalation,
 			SourceID:    reqID,
@@ -527,9 +549,14 @@ func (h *KeeperPhase2Handler) HandleNegativeLearning(w http.ResponseWriter, r *h
 		return
 	}
 
-	reqID := h.recordKeeperRequest(r.Context(), keeper.RequestTypeNegativeLearning,
+	reqID, recErr := h.recordKeeperRequest(r.Context(), keeper.RequestTypeNegativeLearning,
 		body.AgentID, body.CrewID, "F4.4 negative learning from "+body.Trigger,
 		string(res.Decision), res.Reason, res.RiskScore, res.Prompt, res.RawLLMResponse)
+	if recErr != nil {
+		h.logger.Error("keeper_phase2: negative_learning record failed", "error", recErr)
+		replyError(w, http.StatusInternalServerError, "persistence error")
+		return
+	}
 
 	// ALLOW writes to lessons.md via consolidate.WriteLesson. This is
 	// the F4.4 → Z.7 hand-off — the integration test in
@@ -548,13 +575,20 @@ func (h *KeeperPhase2Handler) HandleNegativeLearning(w http.ResponseWriter, r *h
 		}
 	}
 
-	if res.Decision == keeper.DecisionEscalate {
-		inbox.Insert(r.Context(), h.db, h.logger, inbox.Item{
+	// Surface BOTH ESCALATE and DENY to the operator inbox. DENY here
+	// means the Curator dropped the failure signal as transient/noise;
+	// without an inbox row the operator never sees that a failure event
+	// landed at the negative-learning surface at all — silently
+	// disappearing failure feedback is the opposite of audit-friendly.
+	// (ALLOW writes a lessons.md row instead; that's the user-visible
+	// surface for the success path.)
+	if res.Decision == keeper.DecisionEscalate || res.Decision == keeper.DecisionDeny {
+		_ = inbox.Insert(r.Context(), h.db, h.logger, inbox.Item{
 			WorkspaceID: body.WorkspaceID,
 			Kind:        inbox.KindEscalation,
 			SourceID:    reqID,
 			TargetRole:  "MANAGER",
-			Title:       fmt.Sprintf("Negative learning escalation: %s (%s)", body.AgentName, body.Trigger),
+			Title:       fmt.Sprintf("Negative learning %s: %s (%s)", res.Decision, body.AgentName, body.Trigger),
 			BodyMD:      res.Reason,
 			SenderType:  "system",
 			SenderID:    "keeper_negative_learning",
@@ -567,6 +601,7 @@ func (h *KeeperPhase2Handler) HandleNegativeLearning(w http.ResponseWriter, r *h
 				"agent_id":     body.AgentID,
 				"trigger":      body.Trigger,
 				"tool_name":    body.ToolName,
+				"decision":     string(res.Decision),
 			},
 		})
 	}
