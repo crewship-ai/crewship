@@ -1,6 +1,6 @@
 # PRD — Agent Evolution: Learning, Governance, Identity & Lifecycle
 
-**Status:** draft v3 (post-PR-Z hard reset, pre-PR-A feature work)
+**Status:** v4 — all 7 stack PRs merged (2026-05-21). PRs #458 (Z), #466 (A foundation), #461 (B), #468 (A.4/5 adapter wiring), #470 (C), #469 (D), #471 (E). Migration sequence v100…v105 sequential on `main`. Tier-2 follow-ups documented in §6.1.
 **Owner:** Pavel
 **Scope:** internal design notes — see implementation PRs PR-Z / PR-A / PR-B / PR-C / PR-D / PR-E for the shipping artifacts
 
@@ -334,16 +334,50 @@ Internal:
 - `internal/orchestrator/memory.go` — boot-time snapshot assembly
 - `internal/secrets/bootstrap.go` — zero-friction secrets generation
 
-Crewship PRs that shape this work:
+Crewship PRs that shape this work — final landed state on main:
 
 - PR #454 — declarative manifest layer (CrewTemplate / Recipe / Connector kinds)
 - PR #456 — auto-managed sidecar credentials (T1 tier)
-- PR-Z — hard reset (this PR)
-- PR-A — F1 native memory tools
-- PR-B — F2 autonomy slider + F3 aux model
-- PR-C — F4 Keeper Phase 2 (consumes Z.7 lesson writer)
-- PR-D — F5 ephemeral lifecycle
-- PR-E — F6 PERSONA + peer cards + GDPR
+- PR #458 (PR-Z) — ✅ MERGED 2026-05-21 — hard reset (7 cleanup items, Z.6 voided)
+- PR #466 (PR-A foundation) — ✅ MERGED 2026-05-21 — F1 native memory dispatcher + scanner + cap mirror
+- PR #461 (PR-B) — ✅ MERGED 2026-05-21 — F2 autonomy slider + F3 aux model slot — migration v101
+- PR #468 (PR-A.4/5) — ✅ MERGED 2026-05-21 — F1.4/F1.5 adapter MCP wiring across 5 adapters (CURSOR deferred — upstream `--print` MCP bug)
+- PR #470 (PR-C) — ✅ MERGED 2026-05-21 — F4 Keeper Phase 2 (4 evaluators + bootstrap + scheduler + behaviorhook) — migration v102
+- PR #469 (PR-D) — ✅ MERGED 2026-05-21 — F5 ephemeral hire/rehire + ghost UI + pending-review gate + sweeper grace — migration v103
+- PR #471 (PR-E) — ✅ MERGED 2026-05-21 — F6 PERSONA two-layer + peer cards + GDPR + 4-subtab Memory UI — migrations v104 + v105
+
+## 6.1. Tier-2 follow-ups (PR-F — not blockers, deferred refinements)
+
+These are intentionally deferred — the v1 layer is complete, these
+sharpen edges:
+
+1. **F3** `cfg.Auxiliary` YAML override — bootstrap currently uses
+   `llm.DefaultAuxiliaryModels()` only; operators can't pin a
+   specific Haiku version per workspace yet.
+2. **F4.2** synchronous BLOCK CLI interrupt — current implementation
+   logs + journals + writes inbox; in-flight CLI continues to the
+   next tool call before stopping. Full sync interrupt requires
+   orchestrator stdin refactor.
+3. **F5** `last_activity_at` column for finer sweeper grace — current
+   `status != RUNNING` guard works but doesn't catch RUNNING-then-idle
+   cases inside the 5-min sweep window.
+4. **F5** Inbox approve-hire UI button — backend endpoint
+   `POST /api/v1/agents/{id}/approve-hire` is live; the inbox UI
+   still routes operators to terminal `curl` invocation.
+5. **F6** aux-LLM peer card extractor — currently `NoopExtractor`;
+   real LLM extraction lives behind the PR-B F3 aux slot, just
+   needs wire-up + prompt design.
+6. **F6** operator-editable AGENT.md / CREW.md — Memory tab currently
+   shows them read-only because `internal/memory/writer_caps.go`
+   restricts writes to agent runtime. Operator-edit needs a new
+   gated endpoint.
+7. **F1.6** CURSOR_CLI adapter MCP wiring — gated on upstream Cursor
+   fix; `cursor-agent --print` ignores `mcpServers`. Crewship's
+   adapter declares `SupportsMCP() returns false` to avoid showing
+   operators tool affordances that won't fire.
+8. **F1** FTS5 plumb-through for `memory.search` — substring MVP
+   shipped; FTS5 index already exists in `internal/memory/index.go`,
+   just needs dispatcher swap.
 
 ## 7. Open questions
 
