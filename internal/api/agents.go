@@ -205,19 +205,19 @@ type agentCounts struct {
 }
 
 type agentResponse struct {
-	ID              string         `json:"id"`
-	CrewID          *string        `json:"crew_id"`
-	WorkspaceID     string         `json:"workspace_id"`
-	Name            string         `json:"name"`
-	Slug            string         `json:"slug"`
-	Description     *string        `json:"description"`
-	RoleTitle       *string        `json:"role_title"`
-	AgentRole       string         `json:"agent_role"`
-	LeadMode        *string        `json:"lead_mode"`
-	Status          string         `json:"status"`
-	CLIAdapter      string         `json:"cli_adapter"`
-	LLMProvider     *string        `json:"llm_provider"`
-	LLMModel        *string        `json:"llm_model"`
+	ID          string  `json:"id"`
+	CrewID      *string `json:"crew_id"`
+	WorkspaceID string  `json:"workspace_id"`
+	Name        string  `json:"name"`
+	Slug        string  `json:"slug"`
+	Description *string `json:"description"`
+	RoleTitle   *string `json:"role_title"`
+	AgentRole   string  `json:"agent_role"`
+	LeadMode    *string `json:"lead_mode"`
+	Status      string  `json:"status"`
+	CLIAdapter  string  `json:"cli_adapter"`
+	LLMProvider *string `json:"llm_provider"`
+	LLMModel    *string `json:"llm_model"`
 	// Deprecated: PR-Z Z.3 marked agents.system_prompt for removal.
 	// PR-E replaces it with the PERSONA.md memory tier (per-agent with
 	// crew-level default). New write paths should target PERSONA via the

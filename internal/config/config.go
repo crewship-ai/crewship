@@ -299,8 +299,11 @@ func (c *Config) Validate() error {
 	// PR-Z Z.2: silent phi3:mini fallback removed. An enabled Keeper must
 	// have an explicit model configured; loud config error beats silent
 	// degradation that masked mis-configurations in earlier builds.
-	if c.Keeper.Enabled && c.Keeper.Model == "" {
-		return fmt.Errorf("keeper.enabled=true but keeper.model is empty; set cfg.keeper.model or CREWSHIP_KEEPER_MODEL (F3 in PR-B will introduce cfg.auxiliary.keeper.model)")
+	// Trim before the emptiness check so whitespace-only YAML values
+	// ("model: ' '") don't pass validation and then fail at runtime
+	// when the provider gets handed a blank string.
+	if c.Keeper.Enabled && strings.TrimSpace(c.Keeper.Model) == "" {
+		return fmt.Errorf("keeper.enabled=true but keeper.model is empty; set cfg.keeper.model or KEEPER_MODEL env (F3 in PR-B will introduce cfg.auxiliary.keeper.model)")
 	}
 	return nil
 }

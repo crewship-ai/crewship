@@ -412,7 +412,6 @@ func buildMemoryInstructions(today string) string {
 	return rendered
 }
 
-
 // renderMemoryInstructions formats the template. Kept separate from the
 // cached accessor so tests can exercise the raw template when needed.
 func renderMemoryInstructions(today string) string {

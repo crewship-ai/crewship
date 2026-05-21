@@ -111,7 +111,10 @@ func TestWriteLesson_IdempotentByID(t *testing.T) {
 			t.Fatalf("attempt %d failed: %v", i, err)
 		}
 	}
-	data, _ := os.ReadFile(filepath.Join(dir, "lessons.md"))
+	data, err := os.ReadFile(filepath.Join(dir, "lessons.md"))
+	if err != nil {
+		t.Fatalf("read lessons.md: %v", err)
+	}
 	body := string(data)
 	count := strings.Count(body, "id: ent_dup")
 	if count != 1 {

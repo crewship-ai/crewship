@@ -211,13 +211,13 @@ func (c *Client) DeleteCrew(ctx context.Context, crewID string) error {
 // ---------- agents ----------
 
 type AgentResponse struct {
-	ID             string  `json:"id"`
-	WorkspaceID    string  `json:"workspace_id"`
-	CrewID         *string `json:"crew_id"`
-	Name           string  `json:"name"`
-	Slug           string  `json:"slug"`
-	AgentRole      string  `json:"agent_role"`
-	CLIAdapter     string  `json:"cli_adapter"`
+	ID          string  `json:"id"`
+	WorkspaceID string  `json:"workspace_id"`
+	CrewID      *string `json:"crew_id"`
+	Name        string  `json:"name"`
+	Slug        string  `json:"slug"`
+	AgentRole   string  `json:"agent_role"`
+	CLIAdapter  string  `json:"cli_adapter"`
 	// Deprecated: PR-Z Z.3 — manifest agents.prompt → DB system_prompt is
 	// being superseded by PERSONA.md (PR-E). Manifest schemas will gain
 	// a `persona:` field then; legacy `prompt:` keeps working until the

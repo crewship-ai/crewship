@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -290,6 +291,23 @@ func TestValidationKeeperEnabledRequiresModel(t *testing.T) {
 	err := cfg.Validate()
 	if err == nil {
 		t.Fatal("expected error when keeper.enabled=true and keeper.model is empty")
+	}
+}
+
+// TestValidationKeeperEnabledRejectsWhitespaceModel covers the
+// CodeRabbit-flagged case: prior to this guard a YAML value of
+// `model: " "` (whitespace-only) passed the == "" check and then
+// failed at runtime when the provider got handed a blank string.
+func TestValidationKeeperEnabledRejectsWhitespaceModel(t *testing.T) {
+	for _, v := range []string{" ", "\t", "\n", "   "} {
+		t.Run(fmt.Sprintf("whitespace=%q", v), func(t *testing.T) {
+			cfg := Default()
+			cfg.Keeper.Enabled = true
+			cfg.Keeper.Model = v
+			if err := cfg.Validate(); err == nil {
+				t.Errorf("expected error for whitespace-only model %q", v)
+			}
+		})
 	}
 }
 
