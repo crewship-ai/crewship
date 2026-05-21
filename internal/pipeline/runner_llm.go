@@ -264,7 +264,7 @@ func (r *LLMRunner) resolveAgentSystemPrompt(ctx context.Context, crewID, slug s
 		id     string
 	)
 	err = r.db.QueryRowContext(ctx, `
-SELECT a.id, a.system_prompt
+SELECT a.id, a.system_prompt_legacy
 FROM agents a
 WHERE a.crew_id = ?
   AND a.slug = ?

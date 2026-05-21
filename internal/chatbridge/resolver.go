@@ -74,6 +74,12 @@ type chatResolveResponse struct {
 	CrewMCPConfigJSON  string                   `json:"crew_mcp_config_json"`
 	AgentMCPConfigJSON string                   `json:"agent_mcp_config_json"`
 	InstalledSkills    []installedSkillEntry    `json:"installed_skills,omitempty"`
+
+	// PR-E F6 — opener identity + role title for PERSONA / peer
+	// card injection. Resolver populates from chats.created_by and
+	// agents.role_title; empty for non-chat resolves.
+	OpenedByUserID string `json:"opened_by_user_id,omitempty"`
+	RoleTitle      string `json:"role_title,omitempty"`
 }
 
 // installedSkillEntry mirrors internal/api.installedSkillResponse.
@@ -527,6 +533,8 @@ func (r *IPCResolver) resolve(ctx context.Context, resolveURL string) (*ChatInfo
 		CrewMCPConfigJSON:  data.CrewMCPConfigJSON,
 		AgentMCPConfigJSON: data.AgentMCPConfigJSON,
 		InstalledSkills:    convertInstalledSkills(data.InstalledSkills),
+		OpenedByUserID:     data.OpenedByUserID,
+		RoleTitle:          data.RoleTitle,
 	}, nil
 }
 

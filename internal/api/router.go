@@ -84,6 +84,12 @@ type Router struct {
 	journal                journal.Emitter     // Crew Journal emitter; nil → emits become no-ops so dev builds without the server-level wiring still work
 	consolidator           *consolidate.Consolidator
 	consolidateMemoryRoot  string
+	// outputBasePath is the host-side root that the container
+	// provider bind-mounts. PR-E F6 uses this to resolve per-agent
+	// and per-crew PERSONA + peers/ paths without going through the
+	// container. Empty → persona / peers endpoints respond 503
+	// "storage not configured" rather than 404.
+	outputBasePath string
 	// memoryVersionsBlobRoot is the v90 content-addressed blob
 	// directory ApproveProposal records under. Empty disables
 	// versioning on approve (the approve still succeeds; the

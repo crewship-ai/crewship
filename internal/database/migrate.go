@@ -1351,10 +1351,26 @@ END;
 	// (crews.max_ephemeral_agents). Powers the hire / ghost / rehire
 	// triple — see migrate_consts_v103_ephemeral_agents.go for the
 	// column-by-column rationale.
-	//
-	// Originally drafted as v100 on this branch; bumped to v103 on
-	// rebase after main landed v99/v100/v101 + PR-C's v102.
 	{version: 103, name: "ephemeral_agents", sql: migrationEphemeralAgents},
+
+	// PR-E F6 (PRD §6 F6) — PERSONA + per-user peer cards + GDPR.
+	// v104 lands two related schema changes (rename + tier widen)
+	// that must apply together: PERSONA.md content flows from
+	// agents.system_prompt → system_prompt_legacy on first write,
+	// AND the memory_versions audit table must accept the new
+	// 'persona' / 'peer' tiers so the very first PERSONA write is
+	// recordable. See migrate_consts_v104_persona_rename.go.
+	// Originally numbered v102 on this branch; renumbered to v104 on
+	// rebase after main landed PR-C's v102 + PR-D's v103.
+	{version: 104, name: "persona_rename", sql: migrationPersonaRename},
+
+	// v105: GDPR primitives for per-user peer cards. user_peer_
+	// consent gates the writer, peer_cards is the disk-mirror index
+	// that powers list/delete endpoints, peer_card_audit records
+	// every write/read/delete keyed by data subject for SAR
+	// fulfilment. See migrate_consts_v105_peer_consent.go.
+	// Renumbered from v103 on rebase past PR-D's v103.
+	{version: 105, name: "peer_consent", sql: migrationPeerConsent},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

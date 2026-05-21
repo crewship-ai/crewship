@@ -114,9 +114,20 @@ func (o *Orchestrator) buildMemoryContext(ctx context.Context, req AgentRunReque
 	agentBudget := remaining - workspaceUsed
 	agentBlock := o.buildAgentMemoryBlock(ctx, req, agentBudget, today)
 
-	// If no memory files at all, return just instructions
+	// If no memory files at all, the PERSONA + peer card blocks are
+	// still relevant — a fresh agent with no AGENT.md still has an
+	// identity and may have a known opener. Render them ahead of
+	// the instructions block.
 	if agentBlock == "" && crewBlock == "" && pinsBlock == "" && workspaceBlock == "" {
-		return buildMemoryInstructions(today)
+		var early strings.Builder
+		if pb := o.buildPersonaBlock(ctx, req); pb != "" {
+			early.WriteString(pb)
+		}
+		if pc := o.buildPeerCardBlock(ctx, req); pc != "" {
+			early.WriteString(pc)
+		}
+		early.WriteString(buildMemoryInstructions(today))
+		return early.String()
 	}
 
 	var b strings.Builder
@@ -131,6 +142,20 @@ func (o *Orchestrator) buildMemoryContext(ctx context.Context, req AgentRunReque
 	}
 	if pinsBlock != "" {
 		b.WriteString(pinsBlock)
+	}
+	// PR-E F6: PERSONA (crew → agent layered) and per-opener peer card.
+	// PERSONA is small (≤1.5 KB) and always-relevant — emit unbudgeted
+	// so it never gets truncated, and place it BEFORE the memory
+	// instructions block so the model reads its identity hint before
+	// the writing rules. The peer card is similarly small and only
+	// fires when a session opener is known (chat created_by). Both
+	// blocks are framed identically so the prompt parser sees a
+	// consistent shape.
+	if personaBlock := o.buildPersonaBlock(ctx, req); personaBlock != "" {
+		b.WriteString(personaBlock)
+	}
+	if peerBlock := o.buildPeerCardBlock(ctx, req); peerBlock != "" {
+		b.WriteString(peerBlock)
 	}
 	b.WriteString(buildMemoryInstructions(today))
 	// PR-Z Z.1: the curl-based [MEMORY TOOLS] block that used to be

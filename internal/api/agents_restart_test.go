@@ -74,7 +74,7 @@ func TestRestartCrewAgents_RealDocker(t *testing.T) {
 	// Two agents in this crew so the response counter is non-trivial.
 	for _, agentID := range []string{"agent-r1", "agent-r2"} {
 		if _, err := db.Exec(
-			`INSERT INTO agents (id, workspace_id, crew_id, name, slug, system_prompt, agent_role)
+			`INSERT INTO agents (id, workspace_id, crew_id, name, slug, system_prompt_legacy, agent_role)
 			 VALUES (?, ?, ?, ?, ?, '', 'AGENT')`,
 			agentID, wsID, crewID, agentID, agentID,
 		); err != nil {

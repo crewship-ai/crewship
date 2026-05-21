@@ -107,6 +107,18 @@ type installedSkillResponse struct {
 // -----------------------------------------------------------------------------
 
 func (h *InternalHandler) resolveAgentConfig(w http.ResponseWriter, r *http.Request, agentID string) {
+	// Agent-only entry point — no chat opener known. PR-E F6: empty
+	// opener means the response won't include a peer card hint and
+	// the orchestrator will skip the [PEER CONTEXT] block.
+	h.resolveAgentConfigWithOpener(w, r, agentID, "")
+}
+
+// resolveAgentConfigWithOpener is the chat-aware sibling that
+// surfaces the opener_user_id into the response so the orchestrator
+// can inject exactly one peer card (the opener's) at session start.
+// Called from ResolveChat which knows the (chat → created_by)
+// linkage; everyone else uses the zero-arg path.
+func (h *InternalHandler) resolveAgentConfigWithOpener(w http.ResponseWriter, r *http.Request, agentID, openedByUserID string) {
 	data, err := h.loadAgentData(r, agentID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -254,6 +266,16 @@ func (h *InternalHandler) resolveAgentConfig(w http.ResponseWriter, r *http.Requ
 		"agent_mcp_config_json": data.agentMCPConfigJSON.String,
 		"installed_skills":      installedSkills,
 	}
+	// PR-E F6 — opener identity + role title for the orchestrator's
+	// PERSONA / peer card injection. opener is "" for agent-only
+	// resolves (no chat in play); role_title is "" when the agent
+	// row has no role_title (rare).
+	if openedByUserID != "" {
+		resp["opened_by_user_id"] = openedByUserID
+	}
+	if data.roleTitle.Valid && data.roleTitle.String != "" {
+		resp["role_title"] = data.roleTitle.String
+	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -265,7 +287,11 @@ func (h *InternalHandler) resolveAgentConfig(w http.ResponseWriter, r *http.Requ
 func (h *InternalHandler) loadAgentData(r *http.Request, agentID string) (*agentConfigData, error) {
 	d := &agentConfigData{agentID: agentID}
 	err := h.db.QueryRowContext(r.Context(), `
+<<<<<<< HEAD
+		SELECT a.slug, a.name, a.role_title, a.agent_role, a.cli_adapter, a.system_prompt_legacy,
+=======
 		SELECT a.slug, a.name, a.status, a.role_title, a.agent_role, a.cli_adapter, a.system_prompt,
+>>>>>>> origin/main
 			a.tool_profile, a.timeout_seconds, a.memory_enabled,
 			c2.id, c2.slug, c2.name, a.workspace_id, a.llm_model,
 			c2.network_mode, c2.allowed_domains,

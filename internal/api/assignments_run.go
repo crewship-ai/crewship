@@ -94,7 +94,7 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// Look up the target agent by slug + crew_id
 	var target targetAgentInfo
 	err = h.db.QueryRowContext(r.Context(), `
-		SELECT a.id, a.slug, a.name, COALESCE(a.role_title,''), COALESCE(a.system_prompt,''),
+		SELECT a.id, a.slug, a.name, COALESCE(a.role_title,''), COALESCE(a.system_prompt_legacy,''),
 		       a.cli_adapter, COALESCE(a.llm_model,''), a.tool_profile, a.timeout_seconds, a.memory_enabled, c.slug
 		FROM agents a
 		JOIN crews c ON c.id = a.crew_id

@@ -96,7 +96,8 @@
                   "guides/episodic-memory",
                   "guides/consolidate",
                   "guides/memory-observability",
-                  "guides/llm-middleware"
+                  "guides/llm-middleware",
+                  "guides/encryption-at-rest"
                 ]
               },
               {

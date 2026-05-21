@@ -51,8 +51,18 @@ func (h *InternalHandler) CreateChat(w http.ResponseWriter, r *http.Request) {
 func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 	chatID := r.PathValue("chatId")
 
-	var agentID string
-	err := h.db.QueryRowContext(r.Context(), "SELECT agent_id FROM chats WHERE id = ?", chatID).Scan(&agentID)
+	// PR-E F6: along with agent_id we read created_by so the resolver
+	// can inject the right peer card at session start. created_by is
+	// NULL for system-initiated chats (routine dispatch) — empty
+	// OpenedByUserID downstream means "no peer card injection",
+	// which is what we want for non-human-opened sessions.
+	var (
+		agentID  string
+		openedBy sql.NullString
+	)
+	err := h.db.QueryRowContext(r.Context(),
+		"SELECT agent_id, created_by FROM chats WHERE id = ?",
+		chatID).Scan(&agentID, &openedBy)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			replyError(w, http.StatusNotFound, "Chat not found")
@@ -63,7 +73,7 @@ func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.resolveAgentConfig(w, r, agentID)
+	h.resolveAgentConfigWithOpener(w, r, agentID, openedBy.String)
 }
 
 // ResolveAgent returns the full configuration for a given agent ID.

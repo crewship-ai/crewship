@@ -3,6 +3,7 @@
 import {
   User, Building, Users,
   Box, Link2, Activity,
+  Shield,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { LucideIcon } from "lucide-react"
@@ -25,6 +26,7 @@ const sections: NavSection[] = [
     label: "Account",
     items: [
       { key: "profile", label: "Profile", icon: User },
+      { key: "privacy", label: "Privacy", icon: Shield },
     ],
   },
   {
