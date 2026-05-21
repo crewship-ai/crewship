@@ -32,18 +32,25 @@ func TestBuildMemoryContext_NoCurlToolsBlock_PostZ1(t *testing.T) {
 	}
 	out := o.buildMemoryContext(context.Background(), req, 0)
 
-	for _, banned := range []string{
-		"[MEMORY TOOLS]",
-		"[END MEMORY TOOLS]",
-		"127.0.0.1:9119",
-		"localhost:9119",
-		"/memory/search",
-		"/memory/read",
-		"/memory/write",
-	} {
-		if strings.Contains(out, banned) {
-			t.Errorf("PR-Z Z.1: %q must not appear in memory context after curl tools block removal", banned)
-		}
+	cases := []struct {
+		name   string
+		banned string
+	}{
+		{name: "start marker", banned: "[MEMORY TOOLS]"},
+		{name: "end marker", banned: "[END MEMORY TOOLS]"},
+		{name: "loopback ip endpoint", banned: "127.0.0.1:9119"},
+		{name: "localhost endpoint", banned: "localhost:9119"},
+		{name: "search route", banned: "/memory/search"},
+		{name: "read route", banned: "/memory/read"},
+		{name: "write route", banned: "/memory/write"},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			if strings.Contains(out, tc.banned) {
+				t.Errorf("PR-Z Z.1: %q must not appear in memory context after curl tools block removal", tc.banned)
+			}
+		})
 	}
 
 	// [MEMORY INSTRUCTIONS] block (the higher-level "you have memory"

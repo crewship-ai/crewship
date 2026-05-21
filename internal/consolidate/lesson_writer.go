@@ -100,7 +100,7 @@ var validLessonSources = map[LessonSource]struct{}{
 // validLessonSources AND the consumers that switch on the value.
 func WriteLesson(ctx context.Context, agentMemoryDir string, entry LessonEntry) error {
 	if err := ctx.Err(); err != nil {
-		return err
+		return fmt.Errorf("lesson: write cancelled: %w", err)
 	}
 	if strings.TrimSpace(entry.ID) == "" {
 		return errors.New("lesson: id is required (idempotency key)")
@@ -124,7 +124,7 @@ func WriteLesson(ctx context.Context, agentMemoryDir string, entry LessonEntry) 
 		return fmt.Errorf("lesson: mkdir %s: %w", agentMemoryDir, err)
 	}
 	if err := ctx.Err(); err != nil {
-		return err
+		return fmt.Errorf("lesson: write cancelled before lock: %w", err)
 	}
 	path := filepath.Join(agentMemoryDir, lessonsFilename)
 
@@ -135,7 +135,7 @@ func WriteLesson(ctx context.Context, agentMemoryDir string, entry LessonEntry) 
 	defer func() { _ = lk.Unlock() }()
 
 	if err := ctx.Err(); err != nil {
-		return err
+		return fmt.Errorf("lesson: write cancelled after lock: %w", err)
 	}
 	current, err := loadLessonsLocked(ctx, path)
 	if err != nil {
@@ -169,7 +169,7 @@ func WriteLesson(ctx context.Context, agentMemoryDir string, entry LessonEntry) 
 // caller bug behind an empty result.
 func ReadLessons(ctx context.Context, agentMemoryDir string, kind LessonKind) ([]LessonEntry, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("lesson: read cancelled: %w", err)
 	}
 	if kind != "" {
 		if _, ok := validLessonKinds[kind]; !ok {
@@ -208,7 +208,7 @@ func ReadLessons(ctx context.Context, agentMemoryDir string, kind LessonKind) ([
 // inside yaml.Unmarshal would be ceremony without benefit.
 func loadLessonsLocked(ctx context.Context, path string) (lessonFile, error) {
 	if err := ctx.Err(); err != nil {
-		return lessonFile{}, err
+		return lessonFile{}, fmt.Errorf("lesson: load cancelled: %w", err)
 	}
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -233,7 +233,7 @@ func loadLessonsLocked(ctx context.Context, path string) (lessonFile, error) {
 // would only add noise.
 func saveLessonsLocked(ctx context.Context, path string, f lessonFile) error {
 	if err := ctx.Err(); err != nil {
-		return err
+		return fmt.Errorf("lesson: save cancelled: %w", err)
 	}
 	data, err := yaml.Marshal(f)
 	if err != nil {

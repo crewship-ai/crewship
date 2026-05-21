@@ -225,3 +225,64 @@ func TestReadLessons_FiltersByKind(t *testing.T) {
 		t.Errorf("expected 3 total lessons with empty filter, got %d", len(all))
 	}
 }
+
+// TestWriteLesson_NormalizesZeroCapturedAtToNow asserts the writer
+// fills in CapturedAt = time.Now().UTC() when the caller passes a
+// zero time. Producers that don't care about timestamping (manual
+// imports, replay tooling) shouldn't have to remember to set it, and
+// a zero time on disk would sort to the epoch and break date-range
+// readers downstream.
+func TestWriteLesson_NormalizesZeroCapturedAtToNow(t *testing.T) {
+	dir := t.TempDir()
+	entry := LessonEntry{
+		ID:     "ent_ts_zero",
+		Kind:   LessonKindPositive,
+		Source: LessonSourceManual,
+		Rule:   "captured-at zero must default to now",
+		// CapturedAt deliberately omitted
+	}
+	if err := WriteLesson(context.Background(), dir, entry); err != nil {
+		t.Fatalf("WriteLesson failed: %v", err)
+	}
+	entries, err := ReadLessons(context.Background(), dir, "")
+	if err != nil {
+		t.Fatalf("ReadLessons failed: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+	if entries[0].CapturedAt.IsZero() {
+		t.Fatalf("expected CapturedAt to be normalized to now, got zero time")
+	}
+	if delta := time.Since(entries[0].CapturedAt); delta > 5*time.Second || delta < -5*time.Second {
+		t.Errorf("expected CapturedAt within ~5s of now, got delta=%s (CapturedAt=%s)", delta, entries[0].CapturedAt)
+	}
+}
+
+// TestWriteLesson_ConvertsNonUTCCapturedAtToUTC asserts the writer
+// rewrites a caller-supplied CapturedAt into UTC. Persisting wall-clock
+// times in mixed zones would break sort + dedup downstream and force
+// every reader to re-normalize; pin the zone at the boundary instead.
+func TestWriteLesson_ConvertsNonUTCCapturedAtToUTC(t *testing.T) {
+	dir := t.TempDir()
+	entry := LessonEntry{
+		ID:         "ent_ts_cet",
+		Kind:       LessonKindPositive,
+		CapturedAt: time.Date(2026, 5, 21, 12, 0, 0, 0, time.FixedZone("CET", 2*3600)),
+		Source:     LessonSourceManual,
+		Rule:       "non-UTC zones must be converted to UTC on write",
+	}
+	if err := WriteLesson(context.Background(), dir, entry); err != nil {
+		t.Fatalf("WriteLesson failed: %v", err)
+	}
+	entries, err := ReadLessons(context.Background(), dir, "")
+	if err != nil {
+		t.Fatalf("ReadLessons failed: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+	if entries[0].CapturedAt.Location() != time.UTC {
+		t.Errorf("expected CapturedAt location UTC, got %s (value=%s)", entries[0].CapturedAt.Location(), entries[0].CapturedAt)
+	}
+}
