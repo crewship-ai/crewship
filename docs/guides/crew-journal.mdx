@@ -134,9 +134,9 @@ consolidate/compact.go`) excludes `permanent` from the 30-day rollup
 via a `WHERE priority != 'permanent'` clause, so deliberately-pinned
 knowledge survives the life of the DB.
 
-Inspired by OpenClaw Auto-Dream's `⚠️ PERMANENT / 🔥 HIGH / 📌 PIN`
-markers — the semantics are deliberately close so a reader who knows
-one system can reason about the other.
+The three-level priority scheme (`permanent` / `high` / `pin`) is
+deliberately small so operator intent is unambiguous and the
+consolidator can act on a single field.
 
 ## Writing
 

@@ -10,7 +10,7 @@ func TestDefaultSignalWeights_SumToOne(t *testing.T) {
 	w := DefaultSignalWeights()
 	sum := w.Sum()
 	if math.Abs(sum-1.0) > 1e-9 {
-		t.Errorf("default weights sum = %v, want 1.0 (OpenClaw spec)", sum)
+		t.Errorf("default weights sum = %v, want 1.0", sum)
 	}
 }
 
@@ -236,12 +236,12 @@ func TestNormaliseQuery_Trimming(t *testing.T) {
 	}
 }
 
-// TestComputeScore_OpenClawSpec_ExampleCandidate locks the published
-// scoring example into the test suite. From OpenClaw's docs:
-// "a candidate with strong frequency + diversity but a stale
-// last-seen scores around 0.62 — well under MinScore=0.80." This
-// asserts we match the spec's expected ballpark.
-func TestComputeScore_OpenClawSpec_StaleStrongFreq(t *testing.T) {
+// TestComputeScore_StaleStrongFreq pins the worked example: a
+// candidate with strong frequency + diversity but a stale last-seen
+// scores around 0.62, well under MinScore=0.80. Asserts the
+// composite calculation matches the expected ballpark so a future
+// weight tweak can't silently shift this row over the threshold.
+func TestComputeScore_StaleStrongFreq(t *testing.T) {
 	now := time.Date(2026, 5, 17, 0, 0, 0, 0, time.UTC)
 	m := CandidateMetrics{
 		RawRelevance:       0.7,

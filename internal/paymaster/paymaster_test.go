@@ -659,9 +659,9 @@ func TestRecordFlatRateNullsCost(t *testing.T) {
 	}
 }
 
-// TestRecordMeteredSnapshotsRateCard is the Langfuse-pattern check: the
-// v62 ratecard columns are populated at write time so a future pricing.go
-// change can't retroactively rewrite history.
+// TestRecordMeteredSnapshotsRateCard pins the rate-card snapshotting
+// invariant: the v62 ratecard columns are populated at write time so a
+// future pricing.go change can't retroactively rewrite history.
 func TestRecordMeteredSnapshotsRateCard(t *testing.T) {
 	db := openTestDB(t)
 	em := &fakeEmitter{}

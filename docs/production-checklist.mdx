@@ -91,21 +91,28 @@ The questions are:
 
 Crewship is **6 of 6 by default** — every requirement is there in the open-source release. v0.1 ships as fully Apache-2.0 with no enterprise tier gating; the marketplace and federation features are on the v0.2 roadmap.
 
-## How other stacks compare
+## What Crewship provides out of the box
 
-This is a neutral feature comparison, not a marketing claim. Any of these stacks can be wrapped with custom code to add what they're missing — the question is what you get *out of the box* without writing your own governance layer.
+The full production checklist comes covered without writing custom
+glue code:
 
-| Requirement | Crewship | LangChain | CrewAI | Claude Code (subagents) |
-|---|:---:|:---:|:---:|:---:|
-| Cost budgets | ✅ | ⚠️ callbacks only | ❌ | ❌ |
-| Approval gates | ✅ | ⚠️ HITL helpers | ❌ | ❌ |
-| Eval + regression | ✅ | ⚠️ LangSmith (cloud, paid) | ❌ | ❌ |
-| Audit log | ✅ | ⚠️ tracing (cloud) | ⚠️ logs only | ⚠️ session logs |
-| Secrets vault | ✅ | ❌ env vars | ❌ env vars | ❌ env vars |
-| Container isolation | ✅ | ❌ in-process | ❌ in-process | ⚠️ Anthropic-managed |
-| Self-hosted by default | ✅ | ✅ | ✅ | ❌ |
-
-**Legend:** ✅ covered out of the box · ⚠️ partial / requires extra integration / cloud-paid · ❌ not provided
+- **Cost budgets** with hard caps and per-step rate cards; both
+  enforced at dispatch time
+- **Approval gates** (HITL) wired into the Inbox, Activity canvas,
+  and Routines `wait` step kinds — operator decision rounds through
+  to the agent's next message
+- **Eval + regression** via `crewship routine bench` (statistical
+  pass-rate, cost stats, latency distribution) plus an eval suite
+  for the agents themselves
+- **Audit log** for every credential, gate, and significant agent
+  action — append-only, queryable from the CLI and the journal
+- **Secrets vault** with row-level encryption, RBAC-gated reveal,
+  per-agent file mount, and AUTO_MANAGED sidecar credentials
+- **Container isolation** — one Docker container per crew, sidecar
+  UID 1002 vs agent UID 1001 boundary, internal network, optional
+  persistent volumes, AGE-encrypted backup
+- **Self-hosted by default** — Apache-2.0, no enterprise tier
+  gating, marketplace and federation features on the v0.2 roadmap
 
 ## Why this checklist matters
 

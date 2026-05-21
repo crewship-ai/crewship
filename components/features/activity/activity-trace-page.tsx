@@ -166,7 +166,7 @@ export function ActivityTracePage() {
   //   ←/→   — navigate between adjacent runs in the rail
   // We bind on window so the user doesn't have to focus a specific
   // element first; matches the keyboard expectation of canvas-first
-  // tools (Trigger.dev, Linear, etc.).
+  // navigation surfaces.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       // Don't hijack typing in the rail's search field or any other

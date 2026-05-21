@@ -270,8 +270,9 @@ function TraceStepNodeBase({ data }: NodeProps) {
 }
 
 // WaitpointActions — inline Approve/Deny on a paused wait step.
-// Trigger.dev's ReviewNode pattern: the canvas IS the resolution
-// surface, no need to bounce to /inbox for the common case.
+// Canvas-as-resolution-surface pattern: the canvas IS the place
+// to resolve the gate, no need to bounce to /inbox for the common
+// case.
 //
 // We stop event propagation on the buttons because React Flow's
 // onNodeClick fires on any click within the node — without stopping,

@@ -18,8 +18,8 @@ import (
 // "do not call tools", we degrade gracefully into a verbose preview.
 //
 // The wording is deliberately concrete:
-//   - "step-by-step plan" — Aider-style architect output
-//   - "files you would touch" — Cline-style preview
+//   - "step-by-step plan" — architect-style output
+//   - "files you would touch" — preview-only signal
 //   - "do NOT execute any tool" — explicit guard against tool-use
 //   - "end with: PLAN READY" — terminator the user / shell can grep
 const planSystemPrefix = `[plan-mode] You are in PLAN mode. Do NOT call any tools, do NOT modify files, do NOT run code. Output ONLY:

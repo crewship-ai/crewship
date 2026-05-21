@@ -35,10 +35,10 @@ var safeSlugRe = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,127}$`)
 //	.factory/skills/<slug>/SKILL.md    (Factory Droid)
 //	.cursor/rules/<slug>.mdc           (Cursor — flat .mdc file, same body)
 //
-// Gemini CLI's TOML extension format and Aider/Continue's bespoke
-// mechanisms are out of scope for this pass; their adapters fall back
-// to the [SKILLS AVAILABLE] block already injected into the system
-// prompt via writeCanonicalMemoryFiles.
+// Gemini CLI's TOML extension format and other adapters' bespoke
+// skill mechanisms are out of scope for this pass; their adapters
+// fall back to the [SKILLS AVAILABLE] block already injected into
+// the system prompt via writeCanonicalMemoryFiles.
 //
 // Best-effort like writeCanonicalMemoryFiles: a single skill or path
 // failing logs a warning but does not abort. The caller is one of the

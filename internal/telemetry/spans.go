@@ -13,9 +13,9 @@ import (
 // Conventions (gen_ai.*) and Crewship-specific keys (crewship.*).
 //
 // The gen_ai.* keys must stay verbatim as defined in
-// https://opentelemetry.io/docs/specs/semconv/gen-ai/ so downstream
-// collectors (LangFuse, Datadog LLM Observability, Honeycomb LLM views)
-// pick them up without per-vendor mapping. We don't use the typed helpers
+// https://opentelemetry.io/docs/specs/semconv/gen-ai/ so any
+// OTel-compatible collector picks them up without per-vendor
+// mapping. We don't use the typed helpers
 // from otel semconv because the GenAI semconv isn't stable in the go
 // bindings yet (v1.34 of the module we depend on still marks those keys
 // experimental). Hardcoding the string keys here is the official path

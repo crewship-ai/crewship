@@ -1,6 +1,6 @@
-// Percentile heatmap — Langfuse pattern. Color the border of each
-// node by where its cost or duration sits relative to its siblings,
-// so the slow / expensive step jumps out without reading numbers.
+// Percentile heatmap. Color the border of each node by where its
+// cost or duration sits relative to its siblings, so the slow /
+// expensive step jumps out without reading numbers.
 //
 // We compute percentiles over the SIBLING SET (other steps in the
 // same run). v2 might compute across all runs of the same pipeline —

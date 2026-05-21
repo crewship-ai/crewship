@@ -355,12 +355,11 @@ CREATE INDEX IF NOT EXISTS idx_eval_runs_ws_created ON eval_runs(workspace_id, c
 CREATE INDEX IF NOT EXISTS idx_eval_runs_kind ON eval_runs(kind, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_eval_runs_mission ON eval_runs(mission_id, created_at DESC) WHERE mission_id IS NOT NULL;
 `},
-	// Memory uplift inspired by OpenClaw Auto-Dream (importance scoring,
-	// forgetting via access patterns) and Self-Evolve (reward signal from
-	// HITL outcomes feeding gate auto-tuning). Three shape changes and
-	// one new table, all narrow additions with backwards-compatible
-	// defaults so rolling back to migration 53 leaves the new columns
-	// as orphans the old code simply ignores.
+	// Memory uplift: importance scoring, forgetting via access patterns,
+	// and a reward signal from HITL outcomes feeding gate auto-tuning.
+	// Three shape changes and one new table, all narrow additions with
+	// backwards-compatible defaults so rolling back to migration 53
+	// leaves the new columns as orphans the old code simply ignores.
 	//
 	// - journal_entries.priority: user-facing importance marker. 'normal'
 	//   is the default; 'permanent' is never compacted, 'high' boosts
@@ -707,8 +706,8 @@ DROP TABLE agent_runs;
 	// Subscription-aware paymaster: distinguishes API-key calls (where we can
 	// price per token) from OAuth/subscription calls (flat-rate, opaque). Adds
 	// rate-card snapshot columns so historical rows survive future rate-card
-	// changes (Langfuse pattern), and a confidence column so the UI can label
-	// every cost figure with its provenance (Helicone pattern).
+	// changes, and a confidence column so the UI can label every cost figure
+	// with its provenance.
 	// Renumbered from v60 to v62 after PR #234 took 60+61 for the unified
 	// journal Phase D + drop_agent_runs migrations.
 	{version: 62, name: "add_paymaster_billing_modes", sql: migrationAddPaymasterBillingModes},

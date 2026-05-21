@@ -51,16 +51,21 @@ If a customer genuinely needs `--auto high`, add a new `tool_profile` value (e.g
 
 ## Adapters that are deliberately NOT supported
 
-`BuildCLICommand` skips several CLIs that would superficially fit. The reasoning:
+`BuildCLICommand` only ships adapters for CLI agents that meet four
+criteria:
 
-| CLI | Why skipped |
-|---|---|
-| **Aider** | Pair-programming UX — designed around interactive turns, not single-shot exec. Wrapping it as headless drops most of what makes it good. |
-| **GitHub Copilot CLI** | Microsoft removed the `--stdio` flag without deprecation on 2026-01-14, breaking every wrapper. Waiting for the surface to stabilise. |
-| **Cody CLI** | IDE-tied — Sourcegraph deprecates the standalone CLI in favour of the editor extension. |
-| **Replit Agent** | Browser-only; no headless binary. |
+- **Stable headless / `--exec` surface** — single-shot invocation
+  with deterministic stdout, no interactive REPL requirement
+- **Settled flag set** — no recent breaking changes to the
+  command-line API
+- **Self-contained binary** — no IDE extension or browser harness
+  required at runtime
+- **Documented function-calling or MCP support** — necessary for
+  the memory + skill primitives to wire in
 
-Adding any of these is a one-line change once the upstream surface is stable. Track the conversation in the project's GitHub issues before opening a PR.
+CLI agents that don't meet all four are skipped today. Adding a new
+adapter is a one-line change once the upstream surface stabilises;
+open a GitHub issue to discuss before opening a PR.
 
 ## How the adapter signals the sidecar
 

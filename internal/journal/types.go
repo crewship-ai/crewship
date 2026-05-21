@@ -284,11 +284,12 @@ const (
 )
 
 // Priority is a user-facing importance marker orthogonal to Severity.
-// Severity answers "how alarming is this?" — Priority answers "how long
-// should we remember it and how prominently should it surface at recall
-// time?". Inspired by OpenClaw Auto-Dream's ⚠️ PERMANENT / 🔥 HIGH /
-// 📌 PIN markers: operators and lead agents annotate entries so the
-// consolidator and compactor can make smarter keep/drop decisions.
+// Severity answers "how alarming is this?" — Priority answers "how
+// long should we remember it and how prominently should it surface
+// at recall time?". Three explicit markers (`permanent` / `high` /
+// `pin`) plus the default let operators and lead agents annotate
+// entries so the consolidator and compactor can make smarter
+// keep/drop decisions.
 //
 // The enum is deliberately small. 'normal' is the implicit default for
 // every emit (DB column defaults to 'normal' too) so the vast majority

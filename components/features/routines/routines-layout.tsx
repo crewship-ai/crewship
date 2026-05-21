@@ -31,8 +31,8 @@ import type { Mission } from "@/lib/types/mission"
 // Graph + Timeline + Activity moved to /activity, which is now the
 // single live observability surface for the whole workspace. This
 // page stays focused on the asset-management story (catalog +
-// triggers + health), matching how Trigger.dev/Inngest/Dagster
-// separate definitions from runs.
+// triggers + health), separating workflow definitions from runs the
+// way most operator-facing workflow tools do.
 
 const ROUTINES_TABS = [
   { id: "list" as const, label: "List", icon: ScrollText },

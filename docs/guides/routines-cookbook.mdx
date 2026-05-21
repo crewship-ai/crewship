@@ -260,7 +260,7 @@ Without `project_title`, the LLM step would see the entire JSON response (often 
 
 ## Recipe 5 — Idempotent routine with concurrency key
 
-**Goal**: a webhook-triggered routine that should never double-execute on retransmission. This is the Trigger.dev / Stripe webhook model — pair an idempotency key with a concurrency limit so retries are safe and a burst of duplicate events doesn't fan out to N parallel executions.
+**Goal**: a webhook-triggered routine that should never double-execute on retransmission. The pattern follows the standard webhook idempotency model — pair an idempotency key with a concurrency limit so retries are safe and a burst of duplicate events doesn't fan out to N parallel executions.
 
 ```json
 {

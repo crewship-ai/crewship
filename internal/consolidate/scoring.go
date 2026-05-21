@@ -6,9 +6,8 @@ import (
 	"time"
 )
 
-// Six-signal scoring adapted from OpenClaw's publicly-specified
-// Dreaming algorithm (docs.openclaw.ai/concepts/dreaming, v2026.4.5).
-// The weights below match the published spec verbatim:
+// Six-signal scoring for promotion of candidate rules from session
+// memory into the canonical store. The weights:
 //
 //	Relevance           0.30
 //	Frequency           0.24
@@ -25,20 +24,16 @@ import (
 //	recall_count   >= 3   (rule referenced/recalled in ≥3 distinct retrievals)
 //	unique_queries >= 3   (matched ≥3 distinct query strings)
 //
-// Picking up OpenClaw's algorithm rather than inventing our own is
-// deliberate: it's the only publicly-specified scoring in the field
-// (Anthropic's "Dreaming" is marketing; Hermes' self-evolution
-// targets skills, not rules) and adopting with attribution gives us
-// a credibility-bound baseline auditors can verify. Tuning the
-// weights or thresholds is something we earn the right to do AFTER
-// we have production data showing OpenClaw's defaults underperform
-// on Crewship's coding-agent workload.
+// All three must pass — the recall + unique-query gates filter out
+// high-score one-off candidates that the LLM merely felt confident
+// about. Weights and thresholds are configurable; the defaults below
+// are a documented starting baseline, revisitable once production
+// telemetry surfaces what to tune.
 
 // SignalWeights captures the six weights as a struct so callers can
 // override for experimentation (paired with the runner option). Use
-// DefaultSignalWeights for the published OpenClaw values; bespoke
-// weights MUST sum to ~1.0 (NormalisedWeights enforces this on
-// construction).
+// DefaultSignalWeights for the documented baseline; bespoke weights
+// MUST sum to ~1.0 (NormalisedWeights enforces this on construction).
 type SignalWeights struct {
 	Relevance          float64
 	Frequency          float64
@@ -48,8 +43,8 @@ type SignalWeights struct {
 	ConceptualRichness float64
 }
 
-// DefaultSignalWeights returns the published OpenClaw weights. Sum
-// is exactly 1.00 by spec.
+// DefaultSignalWeights returns the documented baseline weights. Sum
+// is exactly 1.00.
 func DefaultSignalWeights() SignalWeights {
 	return SignalWeights{
 		Relevance:          0.30,
@@ -80,7 +75,7 @@ type PromotionThresholds struct {
 	MinUniqueQueries int
 }
 
-// DefaultThresholds returns the published OpenClaw gating constants.
+// DefaultThresholds returns the documented baseline gating constants.
 func DefaultThresholds() PromotionThresholds {
 	return PromotionThresholds{
 		MinScore:         0.80,
@@ -158,7 +153,7 @@ type CandidateMetrics struct {
 // composite + the promotion decision. All math is documented in the
 // helper functions; the composite is plain dot-product.
 //
-// Decision rule (matches OpenClaw's published gates):
+// Decision rule:
 //
 //	promoted == score >= thresh.MinScore
 //	         && recallCount >= thresh.MinRecallCount

@@ -9,8 +9,8 @@ import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 
 // RoutineCreateDialog — UI authoring flow for new routines. Two-step
-// pattern mirrors what Trigger.dev does for tasks (write code, then
-// test) but compressed into one dialog: enter DSL → Test & Save.
+// pattern (write definition, then test) is compressed into one
+// dialog: enter DSL → Test & Save.
 //
 // The save endpoint (POST /api/v1/workspaces/{ws}/pipelines/save)
 // requires a fresh passing test_run. We run /test_run locally inside
