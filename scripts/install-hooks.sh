@@ -26,6 +26,24 @@ cat > "$HOOK" <<'EOF'
 # crewship-pre-commit-v1
 set -euo pipefail
 
+# Sentinel: reject leaked git merge-conflict markers in staged files.
+# Background (2026-05-21 incident): a literal `<<<<<<<` / `=======` /
+# `>>>>>>>` block landed inside a Go raw-string SQL query and shipped
+# to main — Go raw strings don't parse their content so go vet /
+# golangci-lint / gosec all stayed green, but SQLite exploded at
+# runtime. Catching at commit time keeps the local loop tight; CI
+# has a mirror sentinel (.github/workflows/ci.yml).
+STAGED=$(git diff --cached --name-only --diff-filter=ACMR | \
+  grep -E '\.(go|ts|tsx|mdx|md|yaml|yml|sql|json|py|sh)$|^Dockerfile' || true)
+if [ -n "$STAGED" ]; then
+  if echo "$STAGED" | xargs -r grep -lE '^(<<<<<<< |=======$|>>>>>>> )' 2>/dev/null; then
+    echo ""
+    echo "✗ Staged files contain unresolved git merge-conflict markers — commit blocked"
+    echo "  Resolve the conflict, re-stage, and retry."
+    exit 1
+  fi
+fi
+
 # Secret scan on staged changes
 if command -v gitleaks >/dev/null 2>&1; then
   gitleaks protect --staged --no-banner --redact || {

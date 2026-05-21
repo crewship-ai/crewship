@@ -53,6 +53,49 @@ env:
   GO_VERSION: "1.26"
 
 jobs:
+  # ── Sentinel: reject leaked git merge-conflict markers ──
+  #
+  # Background (2026-05-21 incident): a literal `<<<<<<<` / `=======` /
+  # `>>>>>>>` block landed inside a Go raw-string SQL query in
+  # `internal/api/agent_config.go` and propagated to `main`. Go raw
+  # strings don't parse their content so `go vet` / `golangci-lint` /
+  # `gosec` all stayed green; the bug only surfaced as a runtime SQLite
+  # "syntax error" on every `crewship ask` chat-resolve call. External
+  # auditor caught it. This sentinel runs FIRST so a leaked marker fails
+  # the whole CI pipeline immediately — cheaper signal than waiting for
+  # downstream build / test / lint to maybe-find-it-maybe-not.
+  #
+  # Extension list is intentionally wide: Go raw strings, TS template
+  # literals, MDX prose, YAML / JSON / SQL fixtures, shell scripts, and
+  # Dockerfiles can all hide a marker that the language compiler /
+  # parser accepts as valid syntax. If a new file extension lands in
+  # the repo that could host an unparsed marker, extend this list.
+  merge-conflict-markers:
+    name: Reject leaked merge markers
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - name: Sentinel grep
+        run: |
+          set -euo pipefail
+          # Pattern: line-anchored marker tokens. Anchored to start-of-
+          # line so a literal `<<<<<<<` written deliberately in prose
+          # (e.g. a doc page explaining merge conflicts) doesn't trip
+          # the check unless it sits at column 0 like a real marker.
+          if git grep -nE '^(<<<<<<< |=======$|>>>>>>> )' -- \
+              ':!*.bak' \
+              '*.go' '*.ts' '*.tsx' '*.mdx' '*.md' \
+              '*.yaml' '*.yml' '*.sql' '*.json' '*.py' '*.sh' \
+              'Dockerfile' 'Dockerfile.*'; then
+            echo ""
+            echo "✗ Found one or more leaked git merge-conflict markers."
+            echo "  Open the file(s) above, resolve the conflict, stage the result, and commit."
+            echo "  (If the literal string is intentional — e.g. inside a doc explaining merge conflicts — move it off column 0 or wrap it in a code fence with leading whitespace.)"
+            exit 1
+          fi
+          echo "✓ No leaked merge-conflict markers found."
+
   # ── Frontend: lint, typecheck, build ──
   frontend:
     name: Frontend
