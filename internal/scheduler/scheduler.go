@@ -143,6 +143,17 @@ func (s *Scheduler) RegisterPlatformRoutine(name, cronExpr string, fn func(ctx c
 		return fmt.Errorf("scheduler: invalid cron %q for platform routine %q: %w", cronExpr, name, err)
 	}
 	_, err := s.c.AddFunc(cronExpr, func() {
+		// robfig/cron/v3 does NOT recover panics by default (unlike v2):
+		// any panic inside fn would crash the entire process, taking
+		// down the API server with it and breaking the "future sweeps
+		// continue" guarantee. Wrap each fire so a faulty routine
+		// degrades to a logged error rather than a hard kill.
+		defer func() {
+			if r := recover(); r != nil {
+				s.logger.Error("platform routine panicked",
+					"name", name, "cron", cronExpr, "panic", r)
+			}
+		}()
 		// Per-fire ctx tied to the scheduler lifecycle so Stop() cancels
 		// in-flight sweeps. 30-minute hard cap matches the upper bound
 		// for a full skill-catalog sweep on an instance with thousands
