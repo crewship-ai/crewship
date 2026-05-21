@@ -467,6 +467,27 @@ the auditor's 2026-05-21 findings list:
 - ⏳ **PR-F27** — assert `memory.LoadPersona` succeeds before
    asserting content in `agent_persona_test.go:287` (catches
    silent storage regression in the OFF-path test).
+- ⏳ **PR-F28** — boot-time SQL prepare validation across all raw-
+   string queries in `internal/api/`. Origin (2026-05-21 incident):
+   a leaked git merge-conflict marker inside a Go raw-string SQL
+   query in `loadAgentData` (PR #475 hot-fix) shipped to main
+   because Go raw strings don't parse their content (so go vet /
+   golangci-lint / gosec all stayed green) and the bug only
+   surfaced as a runtime SQLite "syntax error" on first chat
+   resolve. A central `prepareAll()` at server startup would have
+   caught it before the first request. Estimated scope: ~30
+   queries enumerated, single registry, ~150 LOC + tests.
+- ⏳ **PR-F29** — one-time admin audit on `main` branch protection:
+   require the new `merge-conflict-markers` CI job in the protected
+   status checks, disable force-push, disable allow-merge-with-
+   conflicts (GitHub default permits merges with markers in the
+   diff if the protection rules don't explicitly forbid).
+- ⏳ **PR-F30** — chat-resolve end-to-end smoke test in
+   `.github/workflows/nightly-smoke.yml`: bootstrap fresh
+   instance + `crewship apply` minimal crew/agent + `crewship ask`
+   and assert 200. Would have caught the PR #475 bug in CI even
+   without the marker sentinel — defense in depth for the next
+   shape of bug that the marker grep wouldn't catch.
 
 ## 7. Open questions
 
