@@ -109,6 +109,13 @@ export function AuxStatusSection() {
       {err && (
         <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4 text-sm text-red-300">{err}</div>
       )}
+      {!loading && !err && slots.length === 0 && (
+        <div className="rounded-xl border border-white/8 bg-card p-4 text-sm text-muted-foreground">
+          No auxiliary slots configured. The keeper will refuse F4 endpoints with 503 until
+          at least one slot is reachable (set <code className="text-[10px]">ANTHROPIC_API_KEY</code> and
+          restart, or wire an explicit override in <code className="text-[10px]">crewship.yaml</code>).
+        </div>
+      )}
       {!loading && !err && slots.length > 0 && (
         <div className="rounded-xl border border-white/8 bg-card divide-y divide-white/5">
           {slots.map((s) => (

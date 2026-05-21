@@ -178,12 +178,16 @@ func (h *LearningHandler) Patch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Log fact-of-flip only; never the free-form reason text — it can
+	// contain operator-entered PII / business context and centralized
+	// logs are a different trust boundary than the DB audit row. The
+	// reason is still persisted on the agents row above for audit.
 	h.logger.Info("self_learning flipped",
 		"agent_id", agentID,
 		"workspace_id", wsID,
 		"enabled", body.Enabled,
 		"by_user_id", user.ID,
-		"reason", body.Reason,
+		"reason_len", len(body.Reason),
 	)
 
 	setBy := user.ID

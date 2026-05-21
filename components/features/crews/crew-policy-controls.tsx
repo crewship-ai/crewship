@@ -1,8 +1,9 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
 import { AlertTriangle, Loader2 } from "lucide-react"
+import { useAbilities } from "@/hooks/use-abilities"
 import { cn } from "@/lib/utils"
 
 // PR-G F2/F4.2 UI surface — per-crew policy controls.
@@ -96,7 +97,16 @@ export interface CrewPolicyControlsProps {
 // per surface.
 const MAX_EPHEMERAL_AGENTS_CEILING = 100
 
-export function CrewPolicyControls({ crewId, workspaceId, canEdit = true }: CrewPolicyControlsProps) {
+export function CrewPolicyControls({ crewId, workspaceId, canEdit }: CrewPolicyControlsProps) {
+  // Server-side authority on RBAC; UI just mirrors so non-admins see
+  // controls disabled rather than failing only at save time with 403.
+  // If the caller explicitly passes canEdit, honor it (lets parents
+  // override in admin overlays); otherwise derive from CASL abilities.
+  const { abilities } = useAbilities()
+  const effectiveCanEdit = useMemo(() => {
+    if (typeof canEdit === "boolean") return canEdit
+    return abilities.can("update", "Crew")
+  }, [canEdit, abilities])
   const [policy, setPolicy] = useState<PolicyResponse | null>(null)
   // max_ephemeral_agents lives on the crew row (not the policy table),
   // so we fetch it separately from GET /crews/{id} and PATCH it via
@@ -192,36 +202,15 @@ export function CrewPolicyControls({ crewId, workspaceId, canEdit = true }: Crew
       // Two writes when both surfaces are dirty: the policy table
       // owns autonomy + behavior_mode + reason (audit trail), while
       // max_ephemeral_agents is a column on the crew row. We do them
-      // sequentially so a policy 403 doesn't silently apply the quota
-      // change — operator sees one failure cleanly. Quota first
-      // because it's the cheaper rollback if policy then fails.
-      if (quotaDirty && parsedQuota.value !== null) {
-        const qRes = await fetch(`/api/v1/crews/${crewId}`, {
-          method: "PATCH",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Workspace-ID": workspaceId,
-          },
-          body: JSON.stringify({ max_ephemeral_agents: parsedQuota.value }),
-        })
-        if (!qRes.ok) {
-          let msg = `HTTP ${qRes.status}`
-          try {
-            const errBody = (await qRes.json()) as { error?: string }
-            if (errBody.error) msg = errBody.error
-          } catch {
-            /* keep status-only message */
-          }
-          toast.error(`Failed to update quota: ${msg}`)
-          return
-        }
-        const crewBody = (await qRes.json()) as { max_ephemeral_agents?: number }
-        if (typeof crewBody.max_ephemeral_agents === "number") {
-          setMaxEphemeral(crewBody.max_ephemeral_agents)
-        }
-        setPendingMaxEphemeral(null)
-      }
-
+      // sequentially in POLICY-FIRST order: a failed policy update
+      // (RBAC / validation) aborts the save without touching the quota
+      // column, so the operator sees one clean failure with no partial
+      // state. If quota then fails after policy succeeded, the toast
+      // explicitly tells the operator which half landed — see the
+      // catch branch at the bottom of this try block. Atomic
+      // cross-table writes would need a server-side transaction; for
+      // now this ordering keeps the dangerous failure mode (silent
+      // partial governance change) off the table.
       if (policyFieldDirty) {
         const res = await fetch(`/api/v1/crews/${crewId}/policy`, {
           method: "PUT",
@@ -251,8 +240,46 @@ export function CrewPolicyControls({ crewId, workspaceId, canEdit = true }: Crew
         setPendingAutonomy(null)
         setPendingBehavior(null)
       }
+
+      if (quotaDirty && parsedQuota.value !== null) {
+        const qRes = await fetch(`/api/v1/crews/${crewId}`, {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Workspace-ID": workspaceId,
+          },
+          body: JSON.stringify({ max_ephemeral_agents: parsedQuota.value }),
+        })
+        if (!qRes.ok) {
+          let msg = `HTTP ${qRes.status}`
+          try {
+            const errBody = (await qRes.json()) as { error?: string }
+            if (errBody.error) msg = errBody.error
+          } catch {
+            /* keep status-only message */
+          }
+          if (policyFieldDirty) {
+            toast.error(`Policy saved, but quota update failed: ${msg}. Quota left at previous value; re-try the quota change in isolation.`)
+          } else {
+            toast.error(`Failed to update quota: ${msg}`)
+          }
+          return
+        }
+        const crewBody = (await qRes.json()) as { max_ephemeral_agents?: number }
+        if (typeof crewBody.max_ephemeral_agents === "number") {
+          setMaxEphemeral(crewBody.max_ephemeral_agents)
+        }
+        setPendingMaxEphemeral(null)
+      }
+
       setReason("")
-      toast.success("Policy updated")
+      toast.success(
+        policyFieldDirty && quotaDirty
+          ? "Policy + quota updated"
+          : policyFieldDirty
+            ? "Policy updated"
+            : "Quota updated",
+      )
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to update policy")
     } finally {
@@ -284,14 +311,14 @@ export function CrewPolicyControls({ crewId, workspaceId, canEdit = true }: Crew
             <button
               key={opt.value}
               type="button"
-              disabled={!canEdit || saving}
+              disabled={!effectiveCanEdit || saving}
               onClick={() => setPendingAutonomy(opt.value)}
               className={cn(
                 "text-left rounded-lg border px-3 py-2 transition-colors",
                 targetAutonomy === opt.value
                   ? "border-primary/60 bg-primary/10"
                   : "border-white/10 hover:bg-white/5",
-                (!canEdit || saving) && "opacity-50 cursor-not-allowed",
+                (!effectiveCanEdit || saving) && "opacity-50 cursor-not-allowed",
               )}
               aria-pressed={targetAutonomy === opt.value}
               data-testid={`autonomy-${opt.value}`}
@@ -312,14 +339,14 @@ export function CrewPolicyControls({ crewId, workspaceId, canEdit = true }: Crew
               <button
                 key={opt.value}
                 type="button"
-                disabled={!canEdit || saving || disabledByCombination}
+                disabled={!effectiveCanEdit || saving || disabledByCombination}
                 onClick={() => setPendingBehavior(opt.value)}
                 className={cn(
                   "text-left rounded-lg border px-3 py-2 transition-colors",
                   targetBehavior === opt.value && !disabledByCombination
                     ? "border-primary/60 bg-primary/10"
                     : "border-white/10 hover:bg-white/5",
-                  (!canEdit || saving || disabledByCombination) && "opacity-50 cursor-not-allowed",
+                  (!effectiveCanEdit || saving || disabledByCombination) && "opacity-50 cursor-not-allowed",
                 )}
                 aria-pressed={targetBehavior === opt.value}
                 title={disabledByCombination ? "block + full autonomy is contradictory and rejected server-side" : undefined}
@@ -350,21 +377,27 @@ export function CrewPolicyControls({ crewId, workspaceId, canEdit = true }: Crew
           but it caps the hire flow which is governance-adjacent. Placed
           below the policy controls so the cancel/save bar covers both. */}
       <div>
-        <div className="text-xs uppercase tracking-wider text-muted-foreground mb-2">Ephemeral agent quota</div>
+        <label
+          htmlFor={`max-ephemeral-${crewId}`}
+          className="block text-xs uppercase tracking-wider text-muted-foreground mb-2"
+        >
+          Ephemeral agent quota
+        </label>
         <div className="flex items-center gap-3">
           <input
+            id={`max-ephemeral-${crewId}`}
             type="number"
             inputMode="numeric"
             min={0}
             max={MAX_EPHEMERAL_AGENTS_CEILING}
             step={1}
-            disabled={!canEdit || saving || maxEphemeral === null}
+            disabled={!effectiveCanEdit || saving || maxEphemeral === null}
             value={pendingMaxEphemeral ?? (maxEphemeral !== null ? String(maxEphemeral) : "")}
             onChange={(e) => setPendingMaxEphemeral(e.target.value)}
             className={cn(
               "w-24 rounded border bg-background px-2 py-1.5 text-sm focus:outline-none",
               quotaInvalid ? "border-red-500/50 focus:border-red-500/70" : "border-white/10 focus:border-primary/50",
-              (!canEdit || saving) && "opacity-50 cursor-not-allowed",
+              (!effectiveCanEdit || saving) && "opacity-50 cursor-not-allowed",
             )}
             aria-invalid={quotaInvalid}
             aria-describedby="ephemeral-quota-help"
@@ -386,10 +419,14 @@ export function CrewPolicyControls({ crewId, workspaceId, canEdit = true }: Crew
 
       {(dirty || reason !== "") && (
         <div className="space-y-2 pt-2 border-t border-white/5">
-          <label className="block text-xs uppercase tracking-wider text-muted-foreground">
+          <label
+            htmlFor={`crew-policy-reason-${crewId}`}
+            className="block text-xs uppercase tracking-wider text-muted-foreground"
+          >
             Reason {policyFieldDirty ? "(required, audit trail)" : "(optional — quota-only change)"}
           </label>
           <input
+            id={`crew-policy-reason-${crewId}`}
             type="text"
             value={reason}
             onChange={(e) => setReason(e.target.value)}

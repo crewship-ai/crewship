@@ -457,7 +457,11 @@ func (h *PersonaHandler) SuggestAgentPersona(w http.ResponseWriter, r *http.Requ
 		// distinguish "demoted by per-agent override" from "policy
 		// said inbox in the first place".
 		if gateDemoted {
-			_ = inbox.Insert(r.Context(), h.db, h.logger, inbox.Item{
+			// If the inbox enqueue fails the proposal is invisible to
+			// the operator AND we already told the agent its suggestion
+			// is pending — that's a silent governance hole, surface it
+			// as 500 so the agent retries / operator notices.
+			if err := inbox.Insert(r.Context(), h.db, h.logger, inbox.Item{
 				WorkspaceID: WorkspaceIDFromContext(r.Context()),
 				Kind:        inbox.KindEscalation,
 				SourceID:    auditID,
@@ -481,7 +485,12 @@ func (h *PersonaHandler) SuggestAgentPersona(w http.ResponseWriter, r *http.Requ
 					"rationale":          body.Rationale,
 					"self_learning_gate": "off",
 				},
-			})
+			}); err != nil {
+				h.logger.Error("persona.suggest: enqueue gated proposal failed",
+					"audit_id", auditID, "agent_id", agentID, "error", err)
+				replyError(w, http.StatusInternalServerError, "failed to queue persona proposal for approval")
+				return
+			}
 		}
 		resp["applied"] = false
 		resp["pending"] = true

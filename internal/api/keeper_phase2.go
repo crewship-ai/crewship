@@ -634,7 +634,11 @@ func (h *KeeperPhase2Handler) HandleNegativeLearning(w http.ResponseWriter, r *h
 		// operator can approve the proposed lesson before it lands on
 		// the agent's lessons.md. Payload carries the full lesson
 		// proposal so the approve handler has everything it needs.
-		_ = inbox.Insert(r.Context(), h.db, h.logger, inbox.Item{
+		// Insert failures MUST surface — silently swallowing here
+		// would lose the proposal entirely (lessons.md isn't written
+		// AND no inbox item exists) while the handler returns 200,
+		// which is the worst failure mode.
+		if err := inbox.Insert(r.Context(), h.db, h.logger, inbox.Item{
 			WorkspaceID: body.WorkspaceID,
 			Kind:        inbox.KindEscalation,
 			SourceID:    reqID,
@@ -658,7 +662,12 @@ func (h *KeeperPhase2Handler) HandleNegativeLearning(w http.ResponseWriter, r *h
 				"lesson_source":      string(res.Proposal.Source),
 				"self_learning_gate": "off",
 			},
-		})
+		}); err != nil {
+			h.logger.Error("keeper_phase2: enqueue gated lesson proposal failed",
+				"request_id", reqID, "agent_id", body.AgentID, "error", err)
+			replyError(w, http.StatusInternalServerError, "failed to queue lesson proposal for approval")
+			return
+		}
 	}
 
 	// Surface BOTH ESCALATE and DENY to the operator inbox. DENY here

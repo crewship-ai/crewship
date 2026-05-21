@@ -1,9 +1,10 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
 import { Loader2, Sparkles } from "lucide-react"
 import { Switch } from "@/components/ui/switch"
+import { useAbilities } from "@/hooks/use-abilities"
 
 // PR-G F4.1 UX — per-agent self-learning toggle.
 //
@@ -34,7 +35,17 @@ export interface AgentLearningToggleProps {
   canEdit?: boolean
 }
 
-export function AgentLearningToggle({ agentId, workspaceId, canEdit = true }: AgentLearningToggleProps) {
+export function AgentLearningToggle({ agentId, workspaceId, canEdit }: AgentLearningToggleProps) {
+  // Mirrors the CrewPolicyControls pattern: if caller passes canEdit
+  // explicitly we honor it (lets admin overlays override), otherwise
+  // derive from CASL abilities. Self-learning is ADMIN+ on the server
+  // so it lines up with `manage`/`update` on Agent. Server is still
+  // authoritative — UI greying is a UX hint, not a security boundary.
+  const { abilities } = useAbilities()
+  const effectiveCanEdit = useMemo(() => {
+    if (typeof canEdit === "boolean") return canEdit
+    return abilities.can("manage", "Agent") || abilities.can("update", "Agent")
+  }, [canEdit, abilities])
   const [state, setState] = useState<LearningResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
@@ -139,7 +150,7 @@ export function AgentLearningToggle({ agentId, workspaceId, canEdit = true }: Ag
         <Switch
           checked={target}
           onCheckedChange={(checked) => setPendingEnabled(checked)}
-          disabled={!canEdit || saving}
+          disabled={!effectiveCanEdit || saving}
           data-testid="agent-learning-switch"
           aria-label="Toggle self-improving mode"
         />
@@ -147,10 +158,14 @@ export function AgentLearningToggle({ agentId, workspaceId, canEdit = true }: Ag
 
       {dirty && (
         <div className="space-y-2 pt-2 border-t border-white/5">
-          <label className="block text-xs uppercase tracking-wider text-muted-foreground">
+          <label
+            htmlFor={`agent-learning-reason-${agentId}`}
+            className="block text-xs uppercase tracking-wider text-muted-foreground"
+          >
             Reason (required)
           </label>
           <input
+            id={`agent-learning-reason-${agentId}`}
             type="text"
             value={reason}
             onChange={(e) => setReason(e.target.value)}
