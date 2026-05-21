@@ -136,13 +136,23 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 				UserAgent:  r.Header.Get("User-Agent"),
 				Path:       r.URL.Path,
 			}
-			userID, email, name, err := ValidateCLIToken(r.Context(), m.db, token, audit)
+			// Patch M2: validate full result so we get the token's
+			// scope set into the request context. Handler-side
+			// canScope checks read it from there.
+			res, err := ValidateCLITokenFull(r.Context(), m.db, token, audit)
 			if err != nil {
 				m.logger.Debug("CLI token auth failed", "error", err)
 				writeAuthError(w, http.StatusUnauthorized, reasonSessionInvalid)
 				return
 			}
-			user = &AuthUser{ID: userID, Email: email, Name: name}
+			user = &AuthUser{ID: res.UserID, Email: res.Email, Name: res.Name}
+			if res.Scopes != nil {
+				// Stash the scope set; later RequireAuth ctx mutation
+				// merges it with the user context. Storing as the
+				// concrete stringSet keeps canScope's lookup O(1).
+				ctx := context.WithValue(r.Context(), ctxTokenScopes, res.Scopes)
+				r = r.WithContext(ctx)
+			}
 		} else {
 			claims, err := m.validator.ValidateAccess(token)
 			if err != nil {

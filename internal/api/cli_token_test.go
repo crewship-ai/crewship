@@ -560,6 +560,104 @@ func TestValidateCLIToken_ExpiredTokenRefused(t *testing.T) {
 	}
 }
 
+// TestCLITokenCreate_Scopes_Validated pins Patch M2's scope path:
+// unknown scope → 400; over-privileged scope (MEMBER asks for
+// agents:write) → 403 naming the scope; OWNER-issued scoped token
+// → 200 with the scopes echoed back in the response.
+func TestCLITokenCreate_Scopes_Validated(t *testing.T) {
+	t.Parallel()
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	t.Run("unknown_scope_rejected_400", func(t *testing.T) {
+		db := setupTestDB(t)
+		h := NewCLITokenHandler(db, logger)
+		userID := seedTestUser(t, db)
+		seedTestWorkspace(t, db, userID)
+		body, _ := json.Marshal(map[string]any{
+			"name":   "t",
+			"scopes": []string{"agents:flyToTheMoon"},
+		})
+		req := httptest.NewRequest("POST", "/", bytes.NewReader(body))
+		req = req.WithContext(withUser(req.Context(), &AuthUser{ID: userID}))
+		rr := httptest.NewRecorder()
+		h.Create(rr, req)
+		if rr.Code != http.StatusBadRequest {
+			t.Errorf("status = %d, want 400 for unknown scope; body=%s", rr.Code, rr.Body.String())
+		}
+		if !strings.Contains(rr.Body.String(), "agents:flyToTheMoon") {
+			t.Errorf("error must name the offending scope; got %s", rr.Body.String())
+		}
+	})
+
+	t.Run("over_privileged_scope_rejected_403_with_named_scope", func(t *testing.T) {
+		// Seed a user as MEMBER (not MANAGER), then ask for agents:write
+		// which requires MANAGER+. The role-vs-scope gate fires.
+		db := setupTestDB(t)
+		h := NewCLITokenHandler(db, logger)
+		const u = "u-member"
+		execOrFatal(t, db, `INSERT INTO users (id, email, full_name) VALUES (?, 'm@x', 'M')`, u)
+		execOrFatal(t, db, `INSERT INTO workspaces (id, name, slug) VALUES ('w-mem', 'W', 'w-mem')`)
+		execOrFatal(t, db, `INSERT INTO workspace_members (id, workspace_id, user_id, role) VALUES ('wm-mem', 'w-mem', ?, 'MEMBER')`, u)
+
+		body, _ := json.Marshal(map[string]any{
+			"name":   "t",
+			"scopes": []string{"agents:write"},
+		})
+		req := httptest.NewRequest("POST", "/", bytes.NewReader(body))
+		req = req.WithContext(withUser(req.Context(), &AuthUser{ID: u}))
+		rr := httptest.NewRecorder()
+		h.Create(rr, req)
+		if rr.Code != http.StatusForbidden {
+			t.Errorf("status = %d, want 403 for over-privileged scope", rr.Code)
+		}
+		if !strings.Contains(rr.Body.String(), "agents:write") {
+			t.Errorf("403 body must name the offending scope; got %s", rr.Body.String())
+		}
+	})
+
+	t.Run("owner_can_issue_scoped_token", func(t *testing.T) {
+		db := setupTestDB(t)
+		h := NewCLITokenHandler(db, logger)
+		userID := seedTestUser(t, db)
+		seedTestWorkspace(t, db, userID) // makes userID OWNER
+		body, _ := json.Marshal(map[string]any{
+			"name":   "ci-bot",
+			"scopes": []string{"agents:read", "agents:run"},
+		})
+		req := httptest.NewRequest("POST", "/", bytes.NewReader(body))
+		req = req.WithContext(withUser(req.Context(), &AuthUser{ID: userID}))
+		rr := httptest.NewRecorder()
+		h.Create(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, body=%s", rr.Code, rr.Body.String())
+		}
+		var resp struct {
+			Scopes []string `json:"scopes"`
+		}
+		json.Unmarshal(rr.Body.Bytes(), &resp)
+		if len(resp.Scopes) != 2 {
+			t.Errorf("expected 2 scopes echoed back, got %v", resp.Scopes)
+		}
+	})
+
+	t.Run("unscoped_token_path_unchanged", func(t *testing.T) {
+		db := setupTestDB(t)
+		h := NewCLITokenHandler(db, logger)
+		userID := seedTestUser(t, db)
+		// Deliberately no seedTestWorkspace — pre-M2 the test "create a
+		// basic token" never required workspace membership. M2 must
+		// not regress that path; unscoped tokens skip the role lookup.
+		body, _ := json.Marshal(map[string]any{"name": "basic"})
+		req := httptest.NewRequest("POST", "/", bytes.NewReader(body))
+		req = req.WithContext(withUser(req.Context(), &AuthUser{ID: userID}))
+		rr := httptest.NewRecorder()
+		h.Create(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Errorf("unscoped path broke: status = %d, body=%s", rr.Code, rr.Body.String())
+		}
+	})
+}
+
 // TestIsCLIToken_AcceptsBothTiers proves the prefix matcher returns
 // true for either tier so the middleware token-dispatch keeps working
 // without per-tier branches at the AuthMiddleware layer.
