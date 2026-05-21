@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { Loader2, RefreshCw } from "lucide-react"
+import { Button } from "@/components/ui/button"
 
 // PR-G F3 UI surface — auxiliary model slot diagnostic panel.
 //
@@ -81,17 +82,19 @@ export function AuxStatusSection() {
     <section className="space-y-3">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold">Auxiliary models</h2>
-        <button
+        <Button
           type="button"
+          variant="outline"
+          size="sm"
           onClick={() => void load()}
           disabled={loading}
-          className="text-xs px-2 py-1 rounded border border-white/10 hover:bg-white/5 flex items-center gap-1.5 disabled:opacity-50"
+          className="text-xs h-7"
           title="Re-read aux-status from the server"
           data-testid="aux-status-refresh"
         >
-          <RefreshCw className={loading ? "h-3 w-3 animate-spin" : "h-3 w-3"} />
+          <RefreshCw className={loading ? "h-3 w-3 mr-1.5 animate-spin" : "h-3 w-3 mr-1.5"} />
           Refresh
-        </button>
+        </Button>
       </div>
       <p className="text-xs text-muted-foreground -mt-1">
         Each slot is the cheap / fast model the keeper invokes for that subsystem (PRD §6 F3).

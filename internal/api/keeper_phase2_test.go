@@ -222,6 +222,7 @@ func TestKeeperPhase2_NegativeLearning_AllowWritesLesson_WhenSelfLearningON(t *t
 	}
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPost, "/api/v1/internal/keeper/negative-learning", mustJSON(t, body))
+	r = r.WithContext(context.WithValue(r.Context(), ctxWorkspaceID, body.WorkspaceID))
 	h.HandleNegativeLearning(w, r)
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
@@ -277,6 +278,7 @@ func TestKeeperPhase2_NegativeLearning_AllowQueuesInbox_WhenSelfLearningOFF(t *t
 	}
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPost, "/api/v1/internal/keeper/negative-learning", mustJSON(t, body))
+	r = r.WithContext(context.WithValue(r.Context(), ctxWorkspaceID, body.WorkspaceID))
 	h.HandleNegativeLearning(w, r)
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
@@ -372,6 +374,45 @@ func TestKeeperPhase2_NegativeLearning_RejectsBodyWorkspaceMismatch(t *testing.T
 		t.Errorf("error body should explain the mismatch; got %s", w.Body.String())
 	}
 	// And: no keeper_requests row should have landed (handler aborted before persist).
+	var n int
+	_ = db.QueryRow(`SELECT COUNT(*) FROM keeper_requests`).Scan(&n)
+	if n != 0 {
+		t.Errorf("keeper_requests should be empty after rejected request; got %d rows", n)
+	}
+}
+
+// TestKeeperPhase2_NegativeLearning_RejectsEmptyCtxWorkspace pins the
+// round-8 hardening on assertBodyWorkspaceMatchesCtx: a request with
+// no ctx workspace_id (because internalWsCtx middleware didn't run,
+// or a future middleware-chain change drops it) must be REJECTED,
+// not silently let through. Earlier behaviour returned true on
+// empty ctxWS — that defeated the cross-tenant guard whenever the
+// middleware assumption failed. CodeRabbit round-8 catch.
+func TestKeeperPhase2_NegativeLearning_RejectsEmptyCtxWorkspace(t *testing.T) {
+	db, pr := kp2DB(t)
+	p := &kp2Provider{content: `{"decision":"ALLOW","reason":"ok","risk":1}`}
+	gk := gatekeeper.New(p, "claude-haiku-4-5", kp2Logger())
+	ev := gatekeeper.NewNegativeLearningEvaluator(gk, kp2Logger())
+	h := NewKeeperPhase2Handler(db, "tok", pr, nil, nil, nil, ev, kp2Logger())
+
+	body := negativeLearningBody{
+		WorkspaceID: "ws1", CrewID: "cr1", AgentID: "a1",
+		AgentName: "Worker", CrewName: "Ops",
+		Trigger: "run_failed", FailureSnippet: "x",
+	}
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/internal/keeper/negative-learning", mustJSON(t, body))
+	// NB: NOT setting ctxWorkspaceID — simulates a misrouted handler
+	// or a missing-middleware scenario. The guard should refuse to
+	// process the request rather than fall back to body.WorkspaceID.
+
+	h.HandleNegativeLearning(w, r)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d body=%s; want 400 when ctx workspace missing", w.Code, w.Body.String())
+	}
+	if !bytes.Contains(w.Body.Bytes(), []byte("missing workspace_id")) {
+		t.Errorf("error must explain missing ctx workspace; got %s", w.Body.String())
+	}
 	var n int
 	_ = db.QueryRow(`SELECT COUNT(*) FROM keeper_requests`).Scan(&n)
 	if n != 0 {

@@ -111,7 +111,7 @@ func ToolSchemas() map[string]ToolSchema {
 		},
 		"memory.write": {
 			Name: "memory.write",
-			Description: "Persist content to an agent memory file. Use mode='replace' when reorganizing; " +
+			Description: "Persist content to an agent memory file (the lessons tier is intentionally NOT writable through this surface — lessons land via the F4.4 negative-learning evaluator which enforces schema + idempotency + locking). Use mode='replace' when reorganizing; " +
 				"mode='append' to add new entries. Cap-aware: returns a warning at 80% of cap and a hard " +
 				"error at 100% of cap so you must self-curate (drop older entries, summarize) before retrying.",
 			InputSchema: json.RawMessage(`{
@@ -119,7 +119,7 @@ func ToolSchemas() map[string]ToolSchema {
 				"properties": {
 					"tier": {
 						"type": "string",
-						"enum": ["AGENT", "CREW", "PERSONA", "pins", "daily", "peers", "lessons"]
+						"enum": ["AGENT", "CREW", "PERSONA", "pins", "daily", "peers"]
 					},
 					"key": {
 						"type": "string",

@@ -186,11 +186,39 @@ export const KeeperQueuePanel = React.memo(function KeeperQueuePanel({
         </Button>
       </div>
 
-      {/* ── Sub-tabs ── */}
+      {/* ── Sub-tabs ──
+          Keyboard nav per WAI-ARIA tabs pattern:
+            ArrowLeft / ArrowRight cycle tabs
+            Home jumps to first; End jumps to last
+            Roving tabIndex — only the active tab is in the tab order;
+              the others get -1 so Tab steps over the group, and arrow
+              keys move within the group once focus is in it. */}
       <div
         role="tablist"
         aria-label="Keeper Phase 2 review types"
         className="flex gap-1 border-b border-border/60"
+        onKeyDown={(e) => {
+          if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) return
+          e.preventDefault()
+          const i = SUBTABS.findIndex((t) => t.key === active)
+          let next = i
+          if (e.key === "ArrowLeft") next = (i - 1 + SUBTABS.length) % SUBTABS.length
+          if (e.key === "ArrowRight") next = (i + 1) % SUBTABS.length
+          if (e.key === "Home") next = 0
+          if (e.key === "End") next = SUBTABS.length - 1
+          const nextKey = SUBTABS[next].key
+          setActive(nextKey)
+          // Move DOM focus to the newly-activated tab so the visual +
+          // a11y states stay in sync. Tabs are queried by data-tab-key
+          // (added below) — using id would risk clashing with other
+          // panels on the same page.
+          requestAnimationFrame(() => {
+            const target = e.currentTarget.querySelector<HTMLButtonElement>(
+              `[data-tab-key="${nextKey}"]`,
+            )
+            target?.focus()
+          })
+        }}
       >
         {SUBTABS.map((tab) => {
           const Icon = tab.icon
@@ -202,6 +230,8 @@ export const KeeperQueuePanel = React.memo(function KeeperQueuePanel({
               role="tab"
               aria-selected={isActive}
               aria-controls={`p2-panel-${tab.key}`}
+              data-tab-key={tab.key}
+              tabIndex={isActive ? 0 : -1}
               onClick={() => setActive(tab.key)}
               className={cn(
                 "inline-flex items-center gap-1.5 px-3 py-2 text-xs border-b-2 -mb-px transition-colors",

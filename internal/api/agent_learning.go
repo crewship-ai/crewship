@@ -50,11 +50,20 @@ type learningResponse struct {
 	Reason      *string `json:"reason,omitempty"`
 }
 
-// learningUpdateBody is the PATCH payload. enabled is required;
-// reason is required because every flip is audit-relevant and we
-// don't want a row with "set by X at Y for ”".
+// learningUpdateBody is the PATCH payload. Both fields are required:
+// reason because every flip is audit-relevant (no row with "set by
+// X at Y for ”"), and enabled because the client must be explicit
+// about which direction it's flipping the flag.
+//
+// Enabled is a *bool, not a plain bool, so the handler can
+// distinguish "field missing or null" (reject as 400) from
+// "field explicitly false" (turn self-learning OFF). With a plain
+// bool, an operator PATCH like {"reason":"trim audit noise"} would
+// decode as Enabled=false and silently disable self-learning —
+// CodeRabbit round-8 catch. Same pattern as v107 reason CHECK:
+// audit-critical fields must be explicit.
 type learningUpdateBody struct {
-	Enabled bool   `json:"enabled"`
+	Enabled *bool  `json:"enabled"`
 	Reason  string `json:"reason"`
 }
 
@@ -136,6 +145,10 @@ func (h *LearningHandler) Patch(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusBadRequest, "reason is required (audit trail)")
 		return
 	}
+	if body.Enabled == nil {
+		replyError(w, http.StatusBadRequest, "enabled is required (true or false; omitting it would silently disable self-learning on a payload that only meant to update reason)")
+		return
+	}
 
 	user := UserFromContext(r.Context())
 	if user == nil {
@@ -144,7 +157,7 @@ func (h *LearningHandler) Patch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	enabled := 0
-	if body.Enabled {
+	if *body.Enabled {
 		enabled = 1
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -185,7 +198,7 @@ func (h *LearningHandler) Patch(w http.ResponseWriter, r *http.Request) {
 	h.logger.Info("self_learning flipped",
 		"agent_id", agentID,
 		"workspace_id", wsID,
-		"enabled", body.Enabled,
+		"enabled", *body.Enabled,
 		"by_user_id", user.ID,
 		"reason_len", len(body.Reason),
 	)
@@ -195,7 +208,7 @@ func (h *LearningHandler) Patch(w http.ResponseWriter, r *http.Request) {
 	reason := body.Reason
 	writeJSON(w, http.StatusOK, learningResponse{
 		AgentID:     agentID,
-		Enabled:     body.Enabled,
+		Enabled:     *body.Enabled,
 		SetByUserID: &setBy,
 		SetAt:       &setAt,
 		Reason:      &reason,

@@ -427,7 +427,7 @@ the auditor's 2026-05-21 findings list:
      shipped + LocalDispatcher ref impl + tests; existing call sites
      still use `*Dispatcher` directly; PR-F17 lifts them)
 - ⏳ Provider reference impl — external HTTP-backed memory store with vector recall (PR-F18)
-- ⏳ LoCoMo / LongMemEval reproducer + published baseline (PR-F19)
+- ⏳ Long-memory evaluation reproducer + published baseline (PR-F19) — externally-recognized benchmark suite for long-context memory recall + retention; reproducer harness ships with fixture corpora so operators can re-score against their own deployment
 - ⏳ Skill→Memory bridge (MEMORY-ROADMAP §8.2; PR-F20)
 - ⏳ Bitemporal `valid_from` / `valid_to` (PR-F21)
 
@@ -488,6 +488,30 @@ the auditor's 2026-05-21 findings list:
    and assert 200. Would have caught the PR #475 bug in CI even
    without the marker sentinel — defense in depth for the next
    shape of bug that the marker grep wouldn't catch.
+- ⏳ **PR-F31** — atomic transaction wrapping the F6 persona-suggest
+   gate-demoted path (`agent_persona.go::SuggestAgentPersona`).
+   Today `audit_logs` INSERT + `inbox.Insert` are two separate
+   writes; if the second fails after the first succeeds, the
+   handler returns 500 with a proposal row that the operator can
+   never see, and a retry creates a duplicate. Either wrap both in
+   a transaction, or write a compensating DELETE of the audit row
+   on enqueue failure. CodeRabbit round-8 catch.
+- ⏳ **PR-F32** — backfill `data_subject_id` on pre-v107 rows in
+   `memory_versions` and `inbox_items`. The migration only adds
+   the columns + indexes; existing rows from before the upgrade
+   stay `NULL` and miss the GDPR cascade. Add an idempotent
+   backfill that scans the legacy rows where the subject can be
+   derived (peer card path / payload_json hint) and stamps the
+   FK in place. Auditor flagged as "this only fixes future
+   writes" — fair. CodeRabbit round-8 catch.
+- ⏳ **PR-F33** — move ARIA name + readonly state from the
+   markdown editor mount `<div>` onto CodeMirror 6's actual
+   contenteditable element via `EditorView.contentAttributes`
+   wrapped in a `Compartment`. Today the parent div carries
+   `role="textbox" aria-label=…` but CM6's focusable element is
+   the generated editable inside, so screen readers announce
+   the textbox by its own (missing) ARIA properties not the
+   parent's. CodeRabbit round-8 catch.
 
 ## 7. Open questions
 

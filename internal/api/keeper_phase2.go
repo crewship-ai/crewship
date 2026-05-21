@@ -68,9 +68,23 @@ import (
 //
 // Returns false (and writes the error response) when the values
 // disagree — caller should immediately `return`.
+//
+// SECURITY round-8: a missing ctx workspace MUST be rejected, not
+// treated as "no check needed". The original round-3 helper
+// returned true when ctxWS=="" on the theory that the middleware
+// would have ensured one — but that's the very assumption the
+// gate is supposed to defend, so the fallback was a hole. If
+// internalWsCtx didn't run (because of a misrouted handler, a
+// future change to the middleware chain, or a bug), this helper
+// would silently let body.workspace_id through. Now we fail loud:
+// no ctx workspace, no gate, no operation.
 func assertBodyWorkspaceMatchesCtx(w http.ResponseWriter, r *http.Request, bodyWS string) bool {
 	ctxWS := WorkspaceIDFromContext(r.Context())
-	if ctxWS == "" || ctxWS == bodyWS {
+	if ctxWS == "" {
+		replyError(w, http.StatusBadRequest, "request context is missing workspace_id; internal-auth handler reached without internalWsCtx middleware")
+		return false
+	}
+	if ctxWS == bodyWS {
 		return true
 	}
 	replyError(w, http.StatusBadRequest, "workspace_id in body must match workspace_id from request context")

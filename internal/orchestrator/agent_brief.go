@@ -265,13 +265,17 @@ func (o *Orchestrator) ApplyBrief(ctx context.Context, agentSlug, containerID st
 	// args/env writer in orchestrator_exec_env.go already uses —
 	// the brief body can contain quotes, backticks, $-substitutions,
 	// or anything else a parent agent decides to put in the Mission.
-	script := fmt.Sprintf(
-		"mkdir -p '%s' && printf '%%s' '%s' | base64 -d > '%s'",
-		dir, encoded, target,
-	)
+	//
+	// SECURITY round-8: script is now a CONSTANT and the variable
+	// values (dir, encoded, target) are passed as positional args
+	// $1/$2/$3. An earlier version interpolated them into the script
+	// string via fmt.Sprintf which would let a single-quote in the
+	// path break out of the intended command — e.g. a crew slug
+	// containing `'; rm -rf /tmp; '` would inject. CodeRabbit catch.
+	const script = `mkdir -p "$1" && printf '%s' "$2" | base64 -d > "$3"`
 	res, err := o.container.Exec(ctx, provider.ExecConfig{
 		ContainerID: containerID,
-		Cmd:         []string{"sh", "-c", script},
+		Cmd:         []string{"sh", "-c", script, "apply_brief", dir, encoded, target},
 		User:        "1001:1001",
 	})
 	if err != nil {
