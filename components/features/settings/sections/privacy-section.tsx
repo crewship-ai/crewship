@@ -55,11 +55,16 @@ export function PrivacySection({ workspaceId }: { workspaceId: string }) {
         fetch("/api/v1/users/me/peer-consent", { headers }),
         fetch("/api/v1/users/me/peer-cards", { headers }),
       ])
-      if (c.ok) setConsent(await c.json())
-      if (p.ok) {
-        const data = await p.json()
-        setCards(data.peers || [])
-      }
+      // Fail fast on non-2xx so the UI never presents stale consent
+      // state as if it were the operator's actual choice. Both routes
+      // are required for the screen to be coherent — partial failure
+      // would mislead a user into thinking opt-out flipped when it
+      // actually didn't.
+      if (!c.ok) throw new Error(`load consent failed: ${c.status}`)
+      if (!p.ok) throw new Error(`load peer cards failed: ${p.status}`)
+      setConsent(await c.json())
+      const data = await p.json()
+      setCards(data.peers || [])
     } catch (e) {
       setErr((e as Error).message)
     } finally {
@@ -74,13 +79,17 @@ export function PrivacySection({ workspaceId }: { workspaceId: string }) {
   const flipConsent = useCallback(
     async (optOut: boolean) => {
       setActing(true)
+      setErr(null)
       try {
-        await fetch("/api/v1/users/me/peer-consent", {
+        const r = await fetch("/api/v1/users/me/peer-consent", {
           method: "PUT",
           headers: { "Content-Type": "application/json", "X-Workspace-ID": workspaceId },
           body: JSON.stringify({ opted_out: optOut }),
         })
+        if (!r.ok) throw new Error(`update consent failed: ${r.status}`)
         await load()
+      } catch (e) {
+        setErr((e as Error).message)
       } finally {
         setActing(false)
       }
@@ -91,12 +100,16 @@ export function PrivacySection({ workspaceId }: { workspaceId: string }) {
   const deleteAll = useCallback(async () => {
     if (!confirm("Delete every peer card about you across every agent in this workspace?")) return
     setActing(true)
+    setErr(null)
     try {
-      await fetch("/api/v1/users/me/peer-cards", {
+      const r = await fetch("/api/v1/users/me/peer-cards", {
         method: "DELETE",
         headers: { "X-Workspace-ID": workspaceId },
       })
+      if (!r.ok) throw new Error(`delete peer cards failed: ${r.status}`)
       await load()
+    } catch (e) {
+      setErr((e as Error).message)
     } finally {
       setActing(false)
     }

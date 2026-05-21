@@ -234,7 +234,9 @@ var personaCrewCmd = &cobra.Command{
 			return nil
 		case "edit":
 			var current personaResponse
-			_ = getJSON(client, path, &current)
+			if err := getJSON(client, path, &current); err != nil {
+				return err
+			}
 			edited, err := openInEditor(current.Content, ".md")
 			if err != nil {
 				return err
@@ -355,7 +357,15 @@ func openInEditor(seed, ext string) (string, error) {
 	if editor == "" {
 		editor = "vi"
 	}
-	c := exec.Command(editor, tmp.Name())
+	// Tokenise $EDITOR so values like "code --wait" or "vim -c set ft=md"
+	// (which include flags) reach the right argv. exec.Command(editor, …)
+	// would treat the whole string as the executable name and fail.
+	parts := strings.Fields(editor)
+	if len(parts) == 0 {
+		return "", fmt.Errorf("EDITOR is set but empty after trim/split")
+	}
+	editorArgs := append(parts[1:], tmp.Name())
+	c := exec.Command(parts[0], editorArgs...)
 	c.Stdin = os.Stdin
 	c.Stdout = os.Stdout
 	c.Stderr = os.Stderr

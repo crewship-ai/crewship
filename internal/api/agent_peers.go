@@ -64,9 +64,19 @@ func (h *PeerCardHandler) agentPeerDir(crewID, agentSlug string) memory.PeerPath
 	}
 }
 
+// errAgentHasNoCrew is returned when a peer-card operation targets
+// an agent that has no crew_id. Peer cards live under
+// .../crews/{crewID}/agents/{slug}/.memory/peers/ — without a crew
+// segment the path collapses to .../crews//agents/{slug}/.memory/,
+// which collides across workspaces for the same slug. Solo agents
+// don't carry peer cards in this PR; the routine writer skips them
+// the same way (via the same crew_id IS NOT NULL filter).
+var errAgentHasNoCrew = fmt.Errorf("agent has no crew (peer cards require crew-scoped path)")
+
 // resolveAgent returns (workspace_id-validated) crew_id + slug for
 // an agent or sql.ErrNoRows when the agent doesn't exist or belongs
-// to another workspace.
+// to another workspace. Returns errAgentHasNoCrew if the agent has
+// no crew_id (handlers map this to 409 Conflict).
 func (h *PeerCardHandler) resolveAgent(r *http.Request, agentID string) (crewID, slug string, err error) {
 	wsID := WorkspaceIDFromContext(r.Context())
 	if wsID == "" {
@@ -77,7 +87,13 @@ func (h *PeerCardHandler) resolveAgent(r *http.Request, agentID string) (crewID,
 		SELECT crew_id, slug FROM agents
 		WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL
 	`, agentID, wsID).Scan(&cid, &slug)
-	return cid.String, slug, err
+	if err != nil {
+		return "", slug, err
+	}
+	if !cid.Valid || cid.String == "" {
+		return "", slug, errAgentHasNoCrew
+	}
+	return cid.String, slug, nil
 }
 
 // ListAgentPeers returns the index of cards for an agent — DB rows
@@ -99,6 +115,10 @@ func (h *PeerCardHandler) ListAgentPeers(w http.ResponseWriter, r *http.Request)
 	if _, _, err := h.resolveAgent(r, agentID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			replyError(w, http.StatusNotFound, "agent not found")
+			return
+		}
+		if errors.Is(err, errAgentHasNoCrew) {
+			replyError(w, http.StatusConflict, err.Error())
 			return
 		}
 		replyError(w, http.StatusInternalServerError, err.Error())
@@ -151,6 +171,10 @@ func (h *PeerCardHandler) GetAgentPeer(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			replyError(w, http.StatusNotFound, "agent not found")
+			return
+		}
+		if errors.Is(err, errAgentHasNoCrew) {
+			replyError(w, http.StatusConflict, err.Error())
 			return
 		}
 		replyError(w, http.StatusInternalServerError, err.Error())
@@ -211,6 +235,10 @@ func (h *PeerCardHandler) DeleteAgentPeer(w http.ResponseWriter, r *http.Request
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			replyError(w, http.StatusNotFound, "agent not found")
+			return
+		}
+		if errors.Is(err, errAgentHasNoCrew) {
+			replyError(w, http.StatusConflict, err.Error())
 			return
 		}
 		replyError(w, http.StatusInternalServerError, err.Error())

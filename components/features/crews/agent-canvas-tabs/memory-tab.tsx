@@ -503,12 +503,19 @@ function PersonaPanel({
   const reset = useCallback(async () => {
     if (!confirm("Reset agent PERSONA.md? The crew default + synthesized fallback will be used.")) return
     setSaving(true)
+    setErr(null)
     try {
-      await fetch(`/api/v1/agents/${encodeURIComponent(agentId)}/persona`, {
+      const r = await fetch(`/api/v1/agents/${encodeURIComponent(agentId)}/persona`, {
         method: "DELETE",
         headers: { "X-Workspace-ID": workspaceId },
       })
+      if (!r.ok) {
+        setErr(`reset failed: ${r.status} ${await r.text()}`)
+        return
+      }
       await load()
+    } catch (e) {
+      setErr((e as Error).message)
     } finally {
       setSaving(false)
     }
@@ -610,10 +617,14 @@ function PeersPanel({ agentId, workspaceId }: { agentId: string; workspaceId: st
   const deleteCard = useCallback(
     async (userID: string) => {
       if (!confirm("Delete this peer card? The next routine sweep may rebuild it.")) return
-      await fetch(`/api/v1/agents/${encodeURIComponent(agentId)}/peers/${encodeURIComponent(userID)}`, {
+      const r = await fetch(`/api/v1/agents/${encodeURIComponent(agentId)}/peers/${encodeURIComponent(userID)}`, {
         method: "DELETE",
         headers: { "X-Workspace-ID": workspaceId },
       })
+      if (!r.ok) {
+        setErr(`delete peer failed: ${r.status}`)
+        return
+      }
       setActive(null)
       await load()
     },
@@ -632,20 +643,27 @@ function PeersPanel({ agentId, workspaceId }: { agentId: string; workspaceId: st
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
       <ul className="space-y-2">
-        {peers.map((p) => (
-          <li
-            key={p.id}
-            onClick={() => loadDetail(p.user_id)}
-            className={`cursor-pointer rounded border border-white/10 px-3 py-2 text-sm hover:bg-white/5 ${
-              active?.user_id === p.user_id ? "border-emerald-500/40 bg-emerald-500/5" : ""
-            }`}
-          >
-            <div className="font-medium">{p.user_id}</div>
-            <div className="text-xs text-muted-foreground">
-              {p.bytes} B · slug {p.user_slug} · updated {p.updated_at}
-            </div>
-          </li>
-        ))}
+        {peers.map((p) => {
+          const isActive = active?.user_id === p.user_id
+          return (
+            <li key={p.id}>
+              <button
+                type="button"
+                onClick={() => loadDetail(p.user_id)}
+                aria-pressed={isActive}
+                aria-label={`Open peer card for ${p.user_id}`}
+                className={`w-full text-left cursor-pointer rounded border border-white/10 px-3 py-2 text-sm hover:bg-white/5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-emerald-500/60 ${
+                  isActive ? "border-emerald-500/40 bg-emerald-500/5" : ""
+                }`}
+              >
+                <div className="font-medium">{p.user_id}</div>
+                <div className="text-xs text-muted-foreground">
+                  {p.bytes} B · slug {p.user_slug} · updated {p.updated_at}
+                </div>
+              </button>
+            </li>
+          )
+        })}
       </ul>
 
       <div className="rounded border border-white/10 p-3">

@@ -26,12 +26,13 @@ func TestUserSlug_WorkspaceIsolation(t *testing.T) {
 }
 
 // Boundary-confusion defence — the null separator means
-// ("u1ws2", "") and ("u1", "ws2") never collide. Without the
+// ("u1u2", "ws") and ("u1", "u2ws") never collide. Without the
 // separator, the simple concat would hash the same byte sequence
-// for both.
+// for both. Verified with two non-empty workspace IDs so the
+// empty-input guard doesn't short-circuit the comparison.
 func TestUserSlug_BoundaryConfusion(t *testing.T) {
-	a := UserSlug("u1", "ws2")
-	b := UserSlug("u1ws2", "")
+	a := UserSlug("u1u2", "ws")
+	b := UserSlug("u1", "u2ws")
 	if a == b {
 		t.Errorf("boundary collision: %q == %q", a, b)
 	}
@@ -40,6 +41,16 @@ func TestUserSlug_BoundaryConfusion(t *testing.T) {
 func TestUserSlug_EmptyUser(t *testing.T) {
 	if got := UserSlug("", "ws"); got != "" {
 		t.Errorf("expected empty slug for empty user; got %q", got)
+	}
+}
+
+// Cross-workspace isolation only holds when workspaceID is provided —
+// an empty workspaceID would silently collapse every workspace onto
+// the same slug for the same user, defeating the design. Fail closed
+// (return "") instead.
+func TestUserSlug_EmptyWorkspace(t *testing.T) {
+	if got := UserSlug("u1", ""); got != "" {
+		t.Errorf("expected empty slug for empty workspaceID; got %q", got)
 	}
 }
 

@@ -66,8 +66,14 @@ const PeerCapBytes = capPeerBytes
 // path use — keep this as the single source of truth so a future
 // algorithm change (e.g. moving to a per-workspace HMAC) only
 // touches one site.
+//
+// Both userID AND workspaceID are required: the workspace is what
+// gives the slug per-workspace isolation, so calling with an empty
+// workspaceID would silently collapse every workspace onto the same
+// slug for the same user (defeats the purpose of the design). Empty
+// inputs return "" so callers can fail closed.
 func UserSlug(userID, workspaceID string) string {
-	if userID == "" {
+	if userID == "" || workspaceID == "" {
 		return ""
 	}
 	h := sha256.New()

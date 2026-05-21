@@ -134,11 +134,14 @@ func (h *UserPeerPrivacyHandler) PutConsent(w http.ResponseWriter, r *http.Reque
 	})
 
 	purged := 0
-	if body.OptedOut && h.outputBasePath != "" {
+	if body.OptedOut {
 		// Walk every card for this user in this workspace and
-		// purge on-disk + DB + audit. Bounded query — peer_cards
-		// is indexed on (user_id, workspace_id) so this is O(N)
-		// in the user's card count, not the workspace's.
+		// purge DB rows + audit unconditionally; on-disk delete is
+		// best-effort and only runs when outputBasePath is set.
+		// Gating the DB purge on storage config would leave stale
+		// peer_cards rows after opt-out — that's a GDPR bug.
+		// Bounded query — peer_cards is indexed on (user_id,
+		// workspace_id) so this is O(N) in the user's card count.
 		purged = h.purgeUserCards(r, userID, wsID)
 	}
 
@@ -184,13 +187,22 @@ func (h *UserPeerPrivacyHandler) purgeUserCards(r *http.Request, userID, wsID st
 	_ = rows.Close()
 	purged := 0
 	for _, t := range work {
-		paths := memory.PeerPaths{
-			AgentDir: filepath.Join(h.outputBasePath, "crews", t.crewID, "agents", t.agentSlug, ".memory"),
-		}
-		if err := memory.DeletePeerCardBySlug(paths, t.slug); err != nil {
-			h.logger.Warn("opt-out file delete failed",
-				"agent_id", t.agentID, "user_id", userID, "err", err)
-			continue
+		// On-disk delete is best-effort: only attempt when a base
+		// path is configured AND the agent actually has a crew_id
+		// (solo agents don't carry peer cards). DB delete + audit
+		// happen unconditionally so opt-out / SAR-delete are
+		// honoured even when the deployment has no storage path
+		// configured (e.g. fresh install before first start).
+		if h.outputBasePath != "" && t.crewID != "" {
+			paths := memory.PeerPaths{
+				AgentDir: filepath.Join(h.outputBasePath, "crews", t.crewID, "agents", t.agentSlug, ".memory"),
+			}
+			if err := memory.DeletePeerCardBySlug(paths, t.slug); err != nil {
+				h.logger.Warn("opt-out file delete failed",
+					"agent_id", t.agentID, "user_id", userID, "err", err)
+				// fall through — DB row still gets removed so SAR
+				// "show me what you have" returns nothing.
+			}
 		}
 		if _, err := h.db.ExecContext(r.Context(), `
 			DELETE FROM peer_cards WHERE id = ?

@@ -238,7 +238,27 @@ func BackfillFromLegacy(p PersonaPaths, legacy string) (wrote bool, err error) {
 	if trimmed == "" {
 		return false, nil
 	}
-	existing, rerr := readPersonaFile(p.AgentPath())
+	// Atomic check-and-write: hold the same lock WritePersona uses
+	// across the existence check + write so a concurrent operator
+	// edit between the read and the write isn't silently clobbered.
+	// Without this, two goroutines (e.g. orchestrator startup +
+	// migration sweep) can both observe an empty file and race to
+	// write different content, with the later writer winning
+	// non-deterministically.
+	if p.AgentDir == "" {
+		return false, errors.New("persona backfill: AgentDir required")
+	}
+	path := p.AgentPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return false, fmt.Errorf("persona backfill: mkdir: %w", err)
+	}
+	lk := NewFileLock(path + ".lock")
+	if err := lk.Lock(); err != nil {
+		return false, fmt.Errorf("persona backfill: lock: %w", err)
+	}
+	defer func() { _ = lk.Unlock() }()
+
+	existing, rerr := readPersonaFile(path)
 	if rerr != nil {
 		return false, fmt.Errorf("persona backfill: %w", rerr)
 	}
@@ -254,8 +274,11 @@ func BackfillFromLegacy(p PersonaPaths, legacy string) (wrote bool, err error) {
 	if len(body) > PersonaCapBytes {
 		body = body[:PersonaCapBytes]
 	}
-	if err := WritePersona(p, PersonaAgent, body); err != nil {
-		return false, err
+	// Inline write under the held lock — calling WritePersona would
+	// try to re-acquire the same flock and deadlock (or fail-fast
+	// with EAGAIN, depending on FileLock semantics).
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		return false, fmt.Errorf("persona backfill: write: %w", err)
 	}
 	return true, nil
 }

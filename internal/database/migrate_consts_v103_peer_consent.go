@@ -69,7 +69,7 @@ CREATE INDEX IF NOT EXISTS idx_peer_cards_agent
 CREATE TABLE IF NOT EXISTS peer_card_audit (
     id              TEXT PRIMARY KEY,
     workspace_id    TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-    actor_user_id   TEXT REFERENCES users(id),
+    actor_user_id   TEXT REFERENCES users(id) ON DELETE SET NULL,
     actor_kind      TEXT NOT NULL CHECK (actor_kind IN ('user','agent','system')),
     action          TEXT NOT NULL CHECK (action IN ('write','read','delete','opt_out','opt_in')),
     target_user_id  TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,

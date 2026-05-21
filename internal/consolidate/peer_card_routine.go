@@ -77,7 +77,8 @@ type PeerSyncSummary struct {
 	Writes        int
 	SkippedThresh int
 	SkippedEmpty  int
-	PurgedOptOut  int
+	SkippedOptOut int // user opted out but had no card to purge
+	PurgedOptOut  int // user opted out AND we deleted an existing card
 	Errors        int
 }
 
@@ -104,7 +105,8 @@ func RunPeerCardSync(
 
 	cands, err := loadPeerCandidates(ctx, db, workspaceID, opts.LookbackWindow)
 	if err != nil {
-		return PeerSyncSummary{WorkspaceID: workspaceID}, err
+		return PeerSyncSummary{WorkspaceID: workspaceID},
+			fmt.Errorf("run peer card sync: load candidates for workspace %s: %w", workspaceID, err)
 	}
 	sum := PeerSyncSummary{WorkspaceID: workspaceID, Candidates: len(cands)}
 	now := time.Now()
@@ -120,19 +122,31 @@ func RunPeerCardSync(
 			continue
 		}
 		out := SyncPeerCard(ctx, db, logger, opts.Threshold, cand.PeerCandidate, content, paths, now)
+		// Any outcome with a non-nil Err is a failure — including
+		// consent-probe failures that surface as Action="skip_opt_out".
+		// Counting them in sum.Errors keeps the routine summary
+		// honest; otherwise transient DB hiccups disappear from
+		// metrics.
+		if out.Err != nil {
+			sum.Errors++
+			logger.Warn("peer card sync candidate failed",
+				"agent_id", cand.AgentID, "user_id", cand.UserID,
+				"action", out.Action, "err", out.Err)
+			continue
+		}
 		switch out.Action {
 		case "write":
-			if out.Err != nil {
-				sum.Errors++
-				logger.Warn("peer card write failed",
-					"agent_id", cand.AgentID, "user_id", cand.UserID, "err", out.Err)
-			} else {
-				sum.Writes++
-			}
+			sum.Writes++
 		case "skip_threshold":
 			sum.SkippedThresh++
 		case "skip_empty_content":
 			sum.SkippedEmpty++
+		case "skip_opt_out":
+			// Clean opt-out skip (no error). Tracked separately from
+			// purge events so metrics can distinguish "user is opted
+			// out, nothing to do" from "user opted out and we just
+			// deleted their card".
+			sum.SkippedOptOut++
 		case "delete_opt_out":
 			sum.PurgedOptOut++
 		}
@@ -189,7 +203,7 @@ func loadPeerCandidates(ctx context.Context, db *sql.DB, workspaceID string, loo
 			firstSeen, lastSeen        string
 		)
 		if err := rows.Scan(&agentID, &agentSlug, &crewID, &userID, &msgCount, &firstSeen, &lastSeen); err != nil {
-			continue
+			return nil, fmt.Errorf("scan peer candidate (workspace %s): %w", workspaceID, err)
 		}
 		dur := parseSessionDuration(firstSeen, lastSeen)
 		out = append(out, internalPeerCandidate{
@@ -203,6 +217,9 @@ func loadPeerCandidates(ctx context.Context, db *sql.DB, workspaceID string, loo
 			},
 			crewID: crewID.String,
 		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate peer candidates (workspace %s): %w", workspaceID, err)
 	}
 	return out, nil
 }

@@ -141,15 +141,23 @@ func SyncPeerCard(
 		// Purge any existing card. Opt-out is a hard stop, not a
 		// "we'll get to it eventually" — keeping a card around
 		// after the user opted out is a GDPR violation by itself.
+		// Propagate file + DB errors so the routine summary counts
+		// these as failures (otherwise GDPR purge looks complete
+		// when disk/DB cleanup actually failed).
 		if err := memory.DeletePeerCard(paths, cand.UserID, cand.WorkspaceID); err != nil {
-			logger.Warn("peer card opt-out delete failed",
-				"agent_id", cand.AgentID, "err", err)
+			out.Action = "delete_opt_out"
+			out.Err = fmt.Errorf("delete peer card on opt-out: %w", err)
+			return out
 		}
 		// Remove the index row too; the disk-mirror should match.
-		_, _ = db.ExecContext(ctx, `
+		if _, err := db.ExecContext(ctx, `
 			DELETE FROM peer_cards
 			WHERE agent_id = ? AND user_slug = ?
-		`, cand.AgentID, slug)
+		`, cand.AgentID, slug); err != nil {
+			out.Action = "delete_opt_out"
+			out.Err = fmt.Errorf("delete peer_cards index on opt-out: %w", err)
+			return out
+		}
 		recordAudit(ctx, db, logger, peerAuditRow{
 			workspaceID:  cand.WorkspaceID,
 			actorKind:    "system",
@@ -200,8 +208,13 @@ func SyncPeerCard(
 		paths.CardPath(slug), len(content),
 		now.UTC().Format(time.RFC3339Nano),
 		now.UTC().Format(time.RFC3339Nano)); err != nil {
-		logger.Warn("peer_cards upsert failed",
-			"agent_id", cand.AgentID, "err", err)
+		// Propagate the upsert failure — the disk file is now ahead
+		// of the index, which the next routine sweep can re-sync,
+		// but reporting "write" success here would hide the drift
+		// from monitoring + the routine summary.
+		out.Action = "write"
+		out.Err = fmt.Errorf("peer_cards upsert: %w", err)
+		return out
 	}
 	recordAudit(ctx, db, logger, peerAuditRow{
 		workspaceID:  cand.WorkspaceID,

@@ -124,17 +124,40 @@ helper, or use `pam_ecryptfs` to mount on first login.
 
 ## Verifying
 
-After setup, do two sanity checks before declaring success:
+After setup, do two sanity checks before declaring success. The
+commands differ between Option A (LUKS, block-device) and Option B
+(eCryptfs, filesystem overlay) because there's no `/dev/mapper/...`
+device under eCryptfs — the encryption happens in the filesystem
+layer over a regular directory.
+
+### Verify LUKS (Option A)
 
 ```bash
-# 1. Unmount, then 'cat' a memory file at the underlying device.
-#    The bytes should be unreadable.
+# 1. Unmount, then read the underlying block device.
+#    The bytes should be unreadable ciphertext.
 sudo umount /var/lib/crewship
 sudo cat /dev/mapper/crewship-data | head -c 200 | xxd
 
 # 2. Remount + read via crewship; the plaintext should be
 #    visible (we're testing the mount, not the encryption).
 sudo mount /dev/mapper/crewship-data /var/lib/crewship
+cat /var/lib/crewship/output/crews/*/agents/*/.memory/PERSONA.md
+```
+
+### Verify eCryptfs (Option B)
+
+```bash
+# 1. Unmount the encrypted overlay. The underlying directory
+#    should show encrypted filenames (ECRYPTFS_FNEK_ENCRYPTED.*)
+#    and unreadable content.
+sudo umount /var/lib/crewship
+sudo ls -la /var/lib/crewship
+sudo cat /var/lib/crewship/ECRYPTFS_FNEK_ENCRYPTED.* 2>/dev/null \
+    | head -c 200 | xxd
+
+# 2. Remount with the same passphrase you set up with and read
+#    via crewship; the plaintext should be visible.
+sudo mount -t ecryptfs /var/lib/crewship /var/lib/crewship
 cat /var/lib/crewship/output/crews/*/agents/*/.memory/PERSONA.md
 ```
 

@@ -98,13 +98,32 @@ func (h *PersonaHandler) resolveAgentPaths(r *http.Request, agentID string) (mem
 	if err != nil {
 		return memory.PersonaPaths{}, "", "", "", "", err
 	}
-	paths := memory.PersonaPaths{
-		AgentDir: filepath.Join(h.agentMemoryDir(crewID.String, slug)),
+	// Solo agents (crew_id IS NULL) still get a persona, but they can't
+	// share the .../crews// prefix — that segment would be empty, so
+	// two workspaces with the same slug would collide on disk for the
+	// same host bind-mount root. Use a workspace-scoped fallback
+	// (.../solo/{workspace_id}/agents/{slug}/.memory) so each workspace
+	// owns a disjoint subtree.
+	var agentDir string
+	if crewID.Valid && crewID.String != "" {
+		agentDir = h.agentMemoryDir(crewID.String, slug)
+	} else {
+		agentDir = h.soloAgentMemoryDir(wsID, slug)
 	}
+	paths := memory.PersonaPaths{AgentDir: agentDir}
 	if crewID.Valid && crewID.String != "" {
 		paths.CrewDir = h.crewSharedMemoryDir(crewID.String)
 	}
 	return paths, crewID.String, slug, agentRole.String, roleTitle.String, nil
+}
+
+// soloAgentMemoryDir is the per-workspace fallback for agents that
+// don't belong to a crew. crew_id IS NULL would collapse to
+// .../crews//agents/{slug}/.memory and collide across workspaces;
+// using workspace_id keeps every solo agent's memory in its own
+// subtree.
+func (h *PersonaHandler) soloAgentMemoryDir(workspaceID, slug string) string {
+	return filepath.Join(h.outputBasePath, "solo", workspaceID, "agents", slug, ".memory")
 }
 
 // agentMemoryDir + crewSharedMemoryDir mirror the bind-mount layout
@@ -189,7 +208,11 @@ func (h *PersonaHandler) PutAgentPersona(w http.ResponseWriter, r *http.Request)
 			replyError(w, http.StatusRequestEntityTooLarge, err.Error())
 			return
 		}
-		replyError(w, http.StatusBadRequest, err.Error())
+		// Other WritePersona failures are storage/IO problems (mkdir,
+		// write, fsync) — 500, not 400. Reporting them as 400 hides
+		// real outages from monitoring.
+		h.logger.Warn("write agent persona failed", "agent_id", agentID, "err", err)
+		replyError(w, http.StatusInternalServerError, "write persona")
 		return
 	}
 	h.recordVersion(r, agentID, "agent", paths.AgentPath(), body.Content)
@@ -528,7 +551,10 @@ func (h *PersonaHandler) PutCrewPersona(w http.ResponseWriter, r *http.Request) 
 			replyError(w, http.StatusRequestEntityTooLarge, err.Error())
 			return
 		}
-		replyError(w, http.StatusBadRequest, err.Error())
+		// Storage/IO failures = 500. See PutAgentPersona above for the
+		// same rationale (hides real outages from monitoring otherwise).
+		h.logger.Warn("write crew persona failed", "crew_id", crewID, "err", err)
+		replyError(w, http.StatusInternalServerError, "write persona")
 		return
 	}
 	h.recordCrewVersion(r, crewID, paths.CrewPath(), body.Content)
