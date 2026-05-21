@@ -95,6 +95,7 @@
                 "expanded": false,
                 "pages": [
                   "guides/agent-memory",
+                  "guides/memory-provider",
                   "guides/episodic-memory",
                   "guides/consolidate",
                   "guides/memory-observability",
