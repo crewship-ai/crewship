@@ -90,29 +90,59 @@ export interface CrewPolicyControlsProps {
   canEdit?: boolean
 }
 
+// MAX_EPHEMERAL_AGENTS_CEILING mirrors the server-side cap in
+// crews_update.go (also enforced as SQL CHECK >= 0). Keeping the
+// constant local so a future bump only requires touching one place
+// per surface.
+const MAX_EPHEMERAL_AGENTS_CEILING = 100
+
 export function CrewPolicyControls({ crewId, workspaceId, canEdit = true }: CrewPolicyControlsProps) {
   const [policy, setPolicy] = useState<PolicyResponse | null>(null)
+  // max_ephemeral_agents lives on the crew row (not the policy table),
+  // so we fetch it separately from GET /crews/{id} and PATCH it via
+  // the generic crew PATCH endpoint. Kept on this panel rather than
+  // a third settings card because it's logically a "governance" knob —
+  // it caps how many hires the policy.DecisionAutoHire branch can
+  // create before the quota guard fires.
+  const [maxEphemeral, setMaxEphemeral] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   // Pending state for "I clicked an option but haven't confirmed with a reason yet"
   const [pendingAutonomy, setPendingAutonomy] = useState<AutonomyLevel | null>(null)
   const [pendingBehavior, setPendingBehavior] = useState<BehaviorMode | null>(null)
+  // Stored as a string so the input can hold a transient empty value
+  // while the operator is mid-edit without being forced to 0.
+  const [pendingMaxEphemeral, setPendingMaxEphemeral] = useState<string | null>(null)
   const [reason, setReason] = useState("")
 
   const load = useCallback(async () => {
     setLoading(true)
     setErr(null)
     try {
-      const res = await fetch(`/api/v1/crews/${crewId}/policy`, {
-        headers: { "X-Workspace-ID": workspaceId },
-      })
-      if (!res.ok) {
-        setErr(`Failed to load policy (HTTP ${res.status})`)
+      // Parallel fetches — policy and crew metadata are independent;
+      // failing one shouldn't block the other from rendering.
+      const [policyRes, crewRes] = await Promise.all([
+        fetch(`/api/v1/crews/${crewId}/policy`, {
+          headers: { "X-Workspace-ID": workspaceId },
+        }),
+        fetch(`/api/v1/crews/${crewId}`, {
+          headers: { "X-Workspace-ID": workspaceId },
+        }),
+      ])
+      if (!policyRes.ok) {
+        setErr(`Failed to load policy (HTTP ${policyRes.status})`)
         return
       }
-      const body = (await res.json()) as PolicyResponse
+      const body = (await policyRes.json()) as PolicyResponse
       setPolicy(body)
+      if (crewRes.ok) {
+        const crewBody = (await crewRes.json()) as { max_ephemeral_agents?: number }
+        // Fall back to the server-side default (10) if the field
+        // somehow isn't on the response — keeps the input deterministic
+        // even against an older backend version.
+        setMaxEphemeral(typeof crewBody.max_ephemeral_agents === "number" ? crewBody.max_ephemeral_agents : 10)
+      }
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Failed to load policy")
     } finally {
@@ -127,44 +157,100 @@ export function CrewPolicyControls({ crewId, workspaceId, canEdit = true }: Crew
   const targetAutonomy = pendingAutonomy ?? policy?.autonomy_level ?? "guided"
   const targetBehavior = pendingBehavior ?? policy?.behavior_mode ?? "warn"
   const forbiddenCombination = targetAutonomy === "full" && targetBehavior === "block"
-  const dirty = (pendingAutonomy !== null && pendingAutonomy !== policy?.autonomy_level)
+
+  // Parse the pending quota value into a validated number (or null if
+  // unchanged). Done here once so dirty/save/error messaging stay in sync.
+  const parsedQuota = (() => {
+    if (pendingMaxEphemeral === null) return { value: null as number | null, valid: true }
+    const trimmed = pendingMaxEphemeral.trim()
+    if (trimmed === "") return { value: null as number | null, valid: false }
+    if (!/^\d+$/.test(trimmed)) return { value: null as number | null, valid: false }
+    const n = parseInt(trimmed, 10)
+    if (!Number.isFinite(n) || n < 0 || n > MAX_EPHEMERAL_AGENTS_CEILING) {
+      return { value: null as number | null, valid: false }
+    }
+    return { value: n, valid: true }
+  })()
+  const quotaDirty = parsedQuota.value !== null && parsedQuota.value !== maxEphemeral
+  const quotaInvalid = pendingMaxEphemeral !== null && !parsedQuota.valid
+
+  const policyFieldDirty = (pendingAutonomy !== null && pendingAutonomy !== policy?.autonomy_level)
     || (pendingBehavior !== null && pendingBehavior !== policy?.behavior_mode)
+  const dirty = policyFieldDirty || quotaDirty
 
   const save = useCallback(async () => {
-    if (!policy || forbiddenCombination) return
-    if (reason.trim() === "") {
+    if (!policy || forbiddenCombination || quotaInvalid) return
+    // Reason is required only when the policy table is being mutated
+    // (audit trail lives there); a pure quota bump is a column edit on
+    // the crew row and doesn't need an explainer per PRD §6 F2.
+    if (policyFieldDirty && reason.trim() === "") {
       toast.error("Reason is required (audit trail)")
       return
     }
     setSaving(true)
     try {
-      const res = await fetch(`/api/v1/crews/${crewId}/policy`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Workspace-ID": workspaceId,
-        },
-        body: JSON.stringify({
-          autonomy_level: targetAutonomy,
-          behavior_mode: targetBehavior,
-          reason: reason.trim(),
-        }),
-      })
-      if (!res.ok) {
-        let msg = `HTTP ${res.status}`
-        try {
-          const err = (await res.json()) as { error?: string }
-          if (err.error) msg = err.error
-        } catch {
-          /* keep status-only message */
+      // Two writes when both surfaces are dirty: the policy table
+      // owns autonomy + behavior_mode + reason (audit trail), while
+      // max_ephemeral_agents is a column on the crew row. We do them
+      // sequentially so a policy 403 doesn't silently apply the quota
+      // change — operator sees one failure cleanly. Quota first
+      // because it's the cheaper rollback if policy then fails.
+      if (quotaDirty && parsedQuota.value !== null) {
+        const qRes = await fetch(`/api/v1/crews/${crewId}`, {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Workspace-ID": workspaceId,
+          },
+          body: JSON.stringify({ max_ephemeral_agents: parsedQuota.value }),
+        })
+        if (!qRes.ok) {
+          let msg = `HTTP ${qRes.status}`
+          try {
+            const errBody = (await qRes.json()) as { error?: string }
+            if (errBody.error) msg = errBody.error
+          } catch {
+            /* keep status-only message */
+          }
+          toast.error(`Failed to update quota: ${msg}`)
+          return
         }
-        toast.error(`Failed to update policy: ${msg}`)
-        return
+        const crewBody = (await qRes.json()) as { max_ephemeral_agents?: number }
+        if (typeof crewBody.max_ephemeral_agents === "number") {
+          setMaxEphemeral(crewBody.max_ephemeral_agents)
+        }
+        setPendingMaxEphemeral(null)
       }
-      const body = (await res.json()) as PolicyResponse
-      setPolicy(body)
-      setPendingAutonomy(null)
-      setPendingBehavior(null)
+
+      if (policyFieldDirty) {
+        const res = await fetch(`/api/v1/crews/${crewId}/policy`, {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Workspace-ID": workspaceId,
+          },
+          body: JSON.stringify({
+            autonomy_level: targetAutonomy,
+            behavior_mode: targetBehavior,
+            reason: reason.trim(),
+          }),
+        })
+        if (!res.ok) {
+          let msg = `HTTP ${res.status}`
+          try {
+            const err = (await res.json()) as { error?: string }
+            if (err.error) msg = err.error
+          } catch {
+            /* keep status-only message */
+          }
+          toast.error(`Failed to update policy: ${msg}`)
+          return
+        }
+        const body = (await res.json()) as PolicyResponse
+        setPolicy(body)
+        setPendingAutonomy(null)
+        setPendingBehavior(null)
+      }
       setReason("")
       toast.success("Policy updated")
     } catch (e) {
@@ -172,7 +258,7 @@ export function CrewPolicyControls({ crewId, workspaceId, canEdit = true }: Crew
     } finally {
       setSaving(false)
     }
-  }, [crewId, workspaceId, policy, targetAutonomy, targetBehavior, reason, forbiddenCombination])
+  }, [crewId, workspaceId, policy, targetAutonomy, targetBehavior, reason, forbiddenCombination, quotaDirty, quotaInvalid, parsedQuota.value, policyFieldDirty])
 
   if (loading) {
     return (
@@ -260,10 +346,48 @@ export function CrewPolicyControls({ crewId, workspaceId, canEdit = true }: Crew
         </div>
       )}
 
+      {/* Ephemeral quota — lives on the crew row, not the policy table,
+          but it caps the hire flow which is governance-adjacent. Placed
+          below the policy controls so the cancel/save bar covers both. */}
+      <div>
+        <div className="text-xs uppercase tracking-wider text-muted-foreground mb-2">Ephemeral agent quota</div>
+        <div className="flex items-center gap-3">
+          <input
+            type="number"
+            inputMode="numeric"
+            min={0}
+            max={MAX_EPHEMERAL_AGENTS_CEILING}
+            step={1}
+            disabled={!canEdit || saving || maxEphemeral === null}
+            value={pendingMaxEphemeral ?? (maxEphemeral !== null ? String(maxEphemeral) : "")}
+            onChange={(e) => setPendingMaxEphemeral(e.target.value)}
+            className={cn(
+              "w-24 rounded border bg-background px-2 py-1.5 text-sm focus:outline-none",
+              quotaInvalid ? "border-red-500/50 focus:border-red-500/70" : "border-white/10 focus:border-primary/50",
+              (!canEdit || saving) && "opacity-50 cursor-not-allowed",
+            )}
+            aria-invalid={quotaInvalid}
+            aria-describedby="ephemeral-quota-help"
+            data-testid="max-ephemeral-agents-input"
+          />
+          <div id="ephemeral-quota-help" className="text-[11px] text-muted-foreground flex-1">
+            Hard cap on concurrent ephemeral (hired) agents this crew can have. Ghosts don&rsquo;t count.
+            <span className="block text-muted-foreground/60 mt-0.5">
+              Integer 0-{MAX_EPHEMERAL_AGENTS_CEILING}; default 10.
+            </span>
+          </div>
+        </div>
+        {quotaInvalid && (
+          <div className="mt-1.5 text-[11px] text-red-300">
+            Must be a whole number between 0 and {MAX_EPHEMERAL_AGENTS_CEILING}.
+          </div>
+        )}
+      </div>
+
       {(dirty || reason !== "") && (
         <div className="space-y-2 pt-2 border-t border-white/5">
           <label className="block text-xs uppercase tracking-wider text-muted-foreground">
-            Reason (required, audit trail)
+            Reason {policyFieldDirty ? "(required, audit trail)" : "(optional — quota-only change)"}
           </label>
           <input
             type="text"
@@ -277,7 +401,7 @@ export function CrewPolicyControls({ crewId, workspaceId, canEdit = true }: Crew
             <button
               type="button"
               onClick={() => { void save() }}
-              disabled={!dirty || forbiddenCombination || reason.trim() === "" || saving}
+              disabled={!dirty || forbiddenCombination || quotaInvalid || (policyFieldDirty && reason.trim() === "") || saving}
               className={cn(
                 "text-xs px-3 py-1.5 rounded border transition-colors",
                 "bg-primary/20 border-primary/40 text-primary hover:bg-primary/30",
@@ -291,6 +415,7 @@ export function CrewPolicyControls({ crewId, workspaceId, canEdit = true }: Crew
               onClick={() => {
                 setPendingAutonomy(null)
                 setPendingBehavior(null)
+                setPendingMaxEphemeral(null)
                 setReason("")
               }}
               disabled={saving}
