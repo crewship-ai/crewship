@@ -9,7 +9,98 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
-(empty — next version's entries go here)
+### Security
+
+- **Cross-tenant scoping on Keeper Phase 2 internal endpoints.** The four
+  `/api/v1/internal/keeper/*` handlers (skill-review, behavior,
+  memory-health, negative-learning) now (a) include `workspace_id` in
+  the `self_learning_enabled` lookup WHERE clause and (b) reject any
+  request where the body `workspace_id` disagrees with the request
+  context `workspace_id` set by `internalWsCtx`. Pre-fix an internal-
+  auth caller could pass an `agent_id` from workspace A while claiming
+  workspace B in the body and read the gate flag — asymmetric cross-
+  tenant bypass. The symmetric case (caller picks one workspace
+  consistently across query + body) remains open until the `X-Internal-
+  Token` is bound to a workspace (tracked as PR-F24); see
+  `docs/api-reference/internal.mdx` for the explicit "known exception"
+  block on this route family.
+
+- **Lessons memory tier hardened against agent-author writes.** The
+  generic `memory.write(tier="lessons", …)` dispatcher path returned
+  cap=0 and bypassed every governance layer the F4.4 evaluator path
+  enforces (schema validation, idempotency by ID, atomic-rename,
+  flock). Agent-author writes to the lessons tier are now rejected
+  with an error that points at the F4.4 negative-learning endpoint as
+  the supported entry point. Tombstone test
+  `TestDispatch_Write_LessonsTier_Rejected` pins the contract.
+
+### Added
+
+- **PR-G / PR-F UI surface.** Three React panels expose previously
+  backend-only governance toggles: `CrewPolicyControls`
+  (`autonomy_level` × `behavior_mode` × `max_ephemeral_agents`),
+  `AgentLearningToggle` (per-agent `self_learning_enabled` flag from
+  migration v106), `AuxStatusSection` (read-only diagnostic of the
+  five auxiliary model slots). Plus four keeper P2 review queue
+  sub-tabs in the admin panel, a GDPR admin export/delete panel,
+  inbox approve-hire button, and codemirror markdown editor for the
+  agent memory tab.
+
+- **Migration v106 — per-agent `self_learning_enabled` flag** with the
+  standard audit triple. Consumed by the F4.4 negative-learning and
+  F6 persona-suggest ALLOW paths: when the flag is OFF, the proposal
+  queues a blocking inbox row with the full proposal payload instead
+  of auto-applying.
+
+- **Migration v107 — GDPR cascade primitives.** `data_subject_id`
+  columns on `memory_versions` and `inbox_items`, plus the
+  `gdpr_actions` audit table. New `DELETE /api/v1/admin/users/{id}/data`
+  cascade endpoint + `GET` Art. 15 export bundle. Idempotent — each
+  invocation lands a new `gdpr_actions` row.
+
+- **`MemoryProvider` interface and `LocalDispatcher` reference impl**
+  for future pluggable memory backends. Additive — existing production
+  call sites still route through the built-in dispatcher; swap lands
+  as PR-F17.
+
+- **`AgentBrief` sub-agent briefing primitive.** Replaces the
+  all-or-nothing `SkipConvHistory` boolean with a curated `Mission` +
+  `SharedMemory` + `Constraints` slice written to the child's
+  `BRIEF.md`; picked up by the orchestrator's prompt assembly.
+
+### Changed
+
+- **Frontend RBAC mirrors backend.** `AgentLearningToggle` derives
+  `canEdit` from `abilities.can("manage", "Agent")` (matching the
+  backend PATCH permission gate); `CrewPolicyControls` mirrors via
+  `abilities.can("update", "Crew")`. Update-only users see the
+  toggle disabled instead of hitting 403 at save time.
+
+- **`Promise.all` → `Promise.allSettled`** in `CrewPolicyControls.load`
+  so a quota-fetch network error doesn't poison the required policy
+  fetch.
+
+### Fixed
+
+- **Inbox `fetch()` network-error handling.** Both `wrap("approved")`
+  (approve-hire) and `wrap("retried")` (routine retry) in
+  `inbox-list.tsx` now wrap `await fetch(…)` in `try`/`catch`. Pre-
+  fix, an offline / DNS / CORS preflight failure cleared the busy
+  state with no user toast (silent success).
+
+- **Free-form `reason` text scrubbed from app logs.** The
+  `agent_learning` PATCH handler logged the operator-entered reason
+  verbatim; switched to `reason_len` so centralized logs no longer
+  collect PII / business context that's already on the DB audit row.
+
+- **Inbox enqueue failures surface as 500.** The `self_learning=OFF`
+  gate path in both the F4.4 negative-learning handler and the F6
+  persona-suggest handler was swallowing `inbox.Insert` errors,
+  returning 200 with neither lesson nor inbox row.
+
+- **CI build break from a leaked merge-conflict marker** in
+  `internal/api/agent_config.go` (PR-D `agent.status` + PR-E
+  `system_prompt_legacy` collision during parallel-agent push churn).
 
 ## [0.1.0-beta.4] — 2026-05-19
 

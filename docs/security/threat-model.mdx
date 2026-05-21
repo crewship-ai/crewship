@@ -219,6 +219,54 @@ describes the **current implementation**, with these gaps:
   matter for their environment; there is no "secure by default"
   policy yet.
 
+## Tenant isolation on internal-auth handlers
+
+`/api/v1/internal/*` routes authenticate via `X-Internal-Token` rather
+than per-user JWTs. The token authenticates the caller as "the
+sidecar" but is NOT bound to a specific workspace in the current
+implementation — the `internalWsCtx` middleware reads `?workspace_id`
+from the query string and trusts whatever value is passed.
+
+For most internal routes, the IPC layer projects `IPCConfig.workspace_id`
+from the orchestrator's sidecar contract before the request leaves the
+container, so a captured token can't be aimed at another workspace
+even with crafted query parameters. This invariant is the basis of
+the claim in `docs/api-reference/internal.mdx`.
+
+### Known exception — Keeper Phase 2 family
+
+The `/api/v1/internal/keeper/{skill-review,behavior,memory-health,
+negative-learning}` handlers (PR-C / PRD §6 F4) read `body.workspace_id`
+from the JSON payload alongside `ctx.workspace_id` from the middleware.
+Asymmetric forgery (caller passes workspace A in query, claims
+workspace B in body) is **rejected** by the
+`assertBodyWorkspaceMatchesCtx` helper in `internal/api/keeper_phase2.go`,
+which compares both values and returns 400 on mismatch.
+
+Symmetric forgery — caller picks one workspace consistently across
+both query and body — is **not yet closed**. It would require binding
+the `X-Internal-Token` to a workspace at issue time and validating
+that binding in `internalWsCtx`. Tracked as `PR-F24` in
+PRD-AGENT-EVOLUTION-2026.md §6.1. A second path (`PR-F25`) eliminates
+`body.workspace_id` from these four handlers and derives workspace
+from context only, restoring the original invariant. Either close
+retires this "Known exception".
+
+### Hardening surface — what's locked vs. what's tracked
+
+| Surface | Status |
+|---|---|
+| `self_learning_enabled` cross-tenant lookup | ✅ closed asymmetric — `workspace_id` in WHERE clause |
+| F4 handler body / ctx workspace consistency | ✅ closed — `assertBodyWorkspaceMatchesCtx` |
+| F4 handler body / ctx workspace symmetric forgery | ⏳ PR-F24 (token-to-workspace binding) |
+| F4 handler body-workspace drop | ⏳ PR-F25 (eliminate body workspace param) |
+| Lessons memory tier agent-author write | ✅ closed — dispatcher rejects `tier="lessons"` |
+| Memory file injection scan (READ path) | ✅ — 9 rules + 14 unicode codepoints |
+| Memory scanner v2 (base64 / homoglyph / URL exfil) | ✅ shipped — PR-F4 |
+| Memory scanner — tool-result path | ✅ partial — Claude `tool_result` wired; per-adapter sweep is PR-F4 follow-up |
+| GDPR cascade (Art. 17) | ✅ shipped — migration v107 + `DELETE /api/v1/admin/users/{id}/data` |
+| GDPR export (Art. 15) | ✅ shipped — `GET /api/v1/admin/users/{id}/data` |
+
 ## Reporting issues
 
 Security issues go to
