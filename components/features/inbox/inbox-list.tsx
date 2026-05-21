@@ -159,6 +159,12 @@ export function InboxList() {
                   refresh()
                 }}
                 onMarkUnread={() => patch(selected.id, "unread")}
+                // onRefresh lets source-managed actions (e.g. PR-D
+                // approve-hire, which resolves the inbox row server-
+                // side via inbox.ResolveBySource) repaint the list
+                // without going through the inbox PATCH (which 409s
+                // on kind=waitpoint for any state other than 'read').
+                onRefresh={refresh}
               />
             </motion.div>
           ) : (
@@ -234,10 +240,12 @@ function InboxDetail({
   item,
   onResolve,
   onMarkUnread,
+  onRefresh,
 }: {
   item: InboxItem
   onResolve: (action: string) => void | Promise<void>
   onMarkUnread: () => void
+  onRefresh: () => void | Promise<void>
 }) {
   const meta = KIND_META[item.kind]
   const Icon = meta.icon
@@ -282,7 +290,7 @@ function InboxDetail({
 
       {/* Kind-specific actions */}
       <div className="px-6 py-4">
-        <KindActions item={item} onResolve={onResolve} disabled={isResolved} />
+        <KindActions item={item} onResolve={onResolve} onRefresh={onRefresh} disabled={isResolved} />
       </div>
 
       {/* Rich run progress for waitpoints — fetches the underlying
@@ -338,10 +346,12 @@ function InboxDetail({
 function KindActions({
   item,
   onResolve,
+  onRefresh,
   disabled,
 }: {
   item: InboxItem
   onResolve: (action: string) => void | Promise<void>
+  onRefresh: () => void | Promise<void>
   disabled: boolean
 }) {
   const [busy, setBusy] = useState<string | null>(null)
@@ -355,7 +365,61 @@ function KindActions({
   }
 
   switch (item.kind) {
-    case "waitpoint":
+    case "waitpoint": {
+      // PR-D hire waitpoints share the inbox kind='waitpoint' shape
+      // but live on a different source: source_id is an agent_id, not
+      // a pipeline_waitpoints token, and the approve endpoint is
+      // /agents/{id}/approve-hire (which resolves the inbox row
+      // server-side via inbox.ResolveBySource). The generic
+      // waitpointDecide() helper would 404 against the pipeline
+      // waitpoints route for these. Disambiguated by payload.kind,
+      // which writeInboxItem sets to "hire" for both blocking and
+      // non-blocking hire surfaces (blocking lands as kind=waitpoint).
+      if (item.payload?.kind === "hire") {
+        return (
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              disabled={disabled || busy !== null}
+              onClick={() =>
+                wrap("approved", async () => {
+                  const res = await fetch(
+                    `/api/v1/agents/${encodeURIComponent(item.source_id)}/approve-hire`,
+                    {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                    },
+                  )
+                  if (!res.ok) {
+                    const body = (await res.json().catch(() => null)) as
+                      | { error?: string; reason?: string }
+                      | null
+                    toast.error(body?.error ?? `Approve failed (${res.status})`)
+                    return
+                  }
+                  // Server already flipped the agent IDLE and
+                  // resolved the inbox row via inbox.ResolveBySource
+                  // — refresh() repaints the list (the inbox PATCH
+                  // path would 409 on kind=waitpoint here).
+                  toast.success("Hire approved — agent is live")
+                  await onRefresh()
+                })
+              }
+              className="gap-1.5 bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30"
+            >
+              <CheckCircle2 className="h-3 w-3" />
+              {busy === "approved" ? "Approving…" : "Approve hire"}
+            </Button>
+            {/* No deny counterpart exists for approve-hire yet — the
+                PENDING_REVIEW agent stays put until the operator fires
+                it from the crew. Surface that explicitly so the
+                missing button doesn't read as broken UI. */}
+            <span className="text-[11px] text-muted-foreground">
+              To deny, fire the agent from its crew page.
+            </span>
+          </div>
+        )
+      }
       // Both Approve and Deny hit the same /approve endpoint —
       // the body's `approved` boolean is what disambiguates. An empty
       // body decoded to approved=false because Go's JSON unmarshal
@@ -408,6 +472,7 @@ function KindActions({
           </Button>
         </div>
       )
+    }
     case "escalation":
       return (
         <Button
