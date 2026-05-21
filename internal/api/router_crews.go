@@ -198,6 +198,22 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.mux.Handle("PUT /api/v1/crews/{crewId}/persona", authed(wsCtx(http.HandlerFunc(persona.PutCrewPersona))))
 	r.mux.Handle("DELETE /api/v1/crews/{crewId}/persona", authed(wsCtx(http.HandlerFunc(persona.DeleteCrewPersona))))
 
+	// PR-E F6 — Peer card endpoints (per-agent operator view).
+	peers := NewPeerCardHandler(r.db, r.logger, r.outputBasePath)
+	r.mux.Handle("GET /api/v1/agents/{agentId}/peers", authed(wsCtx(http.HandlerFunc(peers.ListAgentPeers))))
+	r.mux.Handle("GET /api/v1/agents/{agentId}/peers/{userId}", authed(wsCtx(http.HandlerFunc(peers.GetAgentPeer))))
+	r.mux.Handle("DELETE /api/v1/agents/{agentId}/peers/{userId}", authed(wsCtx(http.HandlerFunc(peers.DeleteAgentPeer))))
+
+	// PR-E F6 — GDPR primitives. User-facing /users/me/* — every
+	// authenticated user can act on their own peer cards without
+	// needing workspace-admin. Cross-user / admin-driven deletion
+	// lives behind /admin/users/{id}/data in Phase 2.
+	privacy := NewUserPeerPrivacyHandler(r.db, r.logger, r.outputBasePath)
+	r.mux.Handle("GET /api/v1/users/me/peer-consent", authed(wsCtx(http.HandlerFunc(privacy.GetConsent))))
+	r.mux.Handle("PUT /api/v1/users/me/peer-consent", authed(wsCtx(http.HandlerFunc(privacy.PutConsent))))
+	r.mux.Handle("GET /api/v1/users/me/peer-cards", authed(wsCtx(http.HandlerFunc(privacy.GetMyCards))))
+	r.mux.Handle("DELETE /api/v1/users/me/peer-cards", authed(wsCtx(http.HandlerFunc(privacy.DeleteMyCards))))
+
 	// Credentials (require workspace context + manage role for create)
 	r.mux.Handle("GET /api/v1/credentials", authed(wsCtx(http.HandlerFunc(creds.List))))
 	r.mux.Handle("POST /api/v1/credentials", authed(wsCtx(http.HandlerFunc(creds.Create))))
