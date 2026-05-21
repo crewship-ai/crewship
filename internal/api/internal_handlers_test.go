@@ -343,6 +343,9 @@ func TestInternalListCredentials(t *testing.T) {
 
 	h := NewInternalHandler(db, "tok", testLogger())
 
+	// Default call: no include_values flag → access_token MUST be omitted
+	// from the response. This is the post-Patch-A contract: LEAD agents
+	// reaching `/credentials` via the sidecar proxy must only see metadata.
 	req := httptest.NewRequest(http.MethodGet, "/?workspace_id="+wsID, nil)
 	w := httptest.NewRecorder()
 	h.ListCredentials(w, req)
@@ -357,8 +360,35 @@ func TestInternalListCredentials(t *testing.T) {
 	if len(creds) != 1 {
 		t.Fatalf("expected 1 cred, got %d", len(creds))
 	}
-	if creds[0]["access_token"] != "secret-value" {
-		t.Errorf("expected decrypted token, got %v", creds[0]["access_token"])
+	if _, present := creds[0]["access_token"]; present {
+		t.Errorf("access_token must be absent on default (no include_values) call; got %v", creds[0]["access_token"])
+	}
+	// Metadata fields the LEAD discovery flow still needs.
+	if creds[0]["id"] != "c1" || creds[0]["name"] != "k" || creds[0]["provider"] != "ANTHROPIC" {
+		t.Errorf("expected metadata id=c1 name=k provider=ANTHROPIC, got %+v", creds[0])
+	}
+
+	// include_values=true from loopback (httptest's default RemoteAddr is
+	// 192.0.2.1, NOT loopback — so opt-in must also be REFUSED here).
+	reqNonLoop := httptest.NewRequest(http.MethodGet, "/?workspace_id="+wsID+"&include_values=true", nil)
+	wNonLoop := httptest.NewRecorder()
+	h.ListCredentials(wNonLoop, reqNonLoop)
+	var credsNonLoop []map[string]interface{}
+	json.Unmarshal(wNonLoop.Body.Bytes(), &credsNonLoop)
+	if _, present := credsNonLoop[0]["access_token"]; present {
+		t.Errorf("non-loopback caller must NOT receive access_token even with include_values=true; got %v", credsNonLoop[0]["access_token"])
+	}
+
+	// include_values=true from loopback: the LLM proxy hairpin path. Now
+	// access_token is returned. RemoteAddr is set manually to 127.0.0.1.
+	reqLoop := httptest.NewRequest(http.MethodGet, "/?workspace_id="+wsID+"&include_values=true", nil)
+	reqLoop.RemoteAddr = "127.0.0.1:54321"
+	wLoop := httptest.NewRecorder()
+	h.ListCredentials(wLoop, reqLoop)
+	var credsLoop []map[string]interface{}
+	json.Unmarshal(wLoop.Body.Bytes(), &credsLoop)
+	if credsLoop[0]["access_token"] != "secret-value" {
+		t.Errorf("loopback + include_values=true must return decrypted token, got %v", credsLoop[0]["access_token"])
 	}
 
 	// Provider filter excludes the only cred

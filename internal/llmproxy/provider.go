@@ -208,7 +208,12 @@ func (ts *TokenSyncer) SyncNow(ctx context.Context) error {
 }
 
 func (ts *TokenSyncer) sync(ctx context.Context) error {
-	url := ts.nextjsURL + "/api/v1/internal/credentials"
+	// include_values=true is the opt-in the post-Patch-A handler requires
+	// before emitting plaintext access_token / refresh_token. The TokenSyncer
+	// is in-process (same binary as crewshipd) so the request lands on
+	// loopback and the server-side check passes; any caller from outside
+	// loopback gets metadata only even with the flag set.
+	url := ts.nextjsURL + "/api/v1/internal/credentials?include_values=true"
 
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
