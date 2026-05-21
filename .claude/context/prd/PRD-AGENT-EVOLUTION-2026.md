@@ -55,7 +55,9 @@ F1  Native memory tools (6 adapters)       ← memory layer
 
 ## 4. PR-Z — hard reset (pre-launch cleanup)
 
-Eight items, lands before PR-A so the new feature work sits on a clean
+Originally drafted as eight items; Z.6 was voided during implementation
+as an audit error (see Z.6 entry below), so seven items actually land.
+PR-Z merges before PR-A so the new feature work sits on a clean
 foundation instead of layering over old workarounds.
 
 ### Z.1 — Delete curl-based memory instructions
