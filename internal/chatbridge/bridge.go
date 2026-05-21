@@ -82,6 +82,14 @@ type ChatInfo struct {
 	AgentMCPConfigJSON string
 	PreferredLanguage  string
 	InstalledSkills    []orchestrator.SkillBundle
+
+	// PR-E F6 — opener identity for per-user peer card injection.
+	// Sourced from chats.created_by by the resolver. Empty for
+	// non-chat invocations (routine dispatch). RoleTitle is the
+	// human-facing title used as the DefaultPersona seed when both
+	// PERSONA layers are empty.
+	OpenedByUserID string
+	RoleTitle      string
 }
 
 // ProvisioningEnqueueResult mirrors api.EnqueueResult shape locally so the
@@ -506,6 +514,8 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		AgentMCPConfigJSON: info.AgentMCPConfigJSON,
 		PreferredLanguage:  info.PreferredLanguage,
 		Skills:             info.InstalledSkills,
+		OpenedByUserID:     info.OpenedByUserID,
+		RoleTitle:          info.RoleTitle,
 	}
 
 	// Only show "Starting agent..." on cold start (first message, container freshly created).
