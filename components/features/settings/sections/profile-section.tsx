@@ -4,16 +4,21 @@ import { useCallback, useEffect, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
 import {
   LogOut, Copy, Check, Key, Plus, Trash2, Clock, Loader2,
-  Terminal, Eye, EyeOff, AlertTriangle,
+  Terminal, Eye, EyeOff, AlertTriangle, Shield,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select"
+import { Checkbox } from "@/components/ui/checkbox"
 import { cn } from "@/lib/utils"
 import { SettingsCard, SettingsRow, SettingsEmpty } from "../shared"
 
@@ -86,7 +91,53 @@ interface CLIToken {
   created_at: string
   last_used_at?: string
   revoked_at?: string
+  // Patch J/K + M2 fields. Older API versions omit these; UI handles
+  // both shapes — undefined tier renders as STANDARD, undefined
+  // scopes means "unrestricted", undefined expires_at means "no
+  // expiry".
+  tier?: "STANDARD" | "ADMIN"
+  scopes?: string[]
+  expires_at?: string
 }
+
+// All scope strings the backend's knownScopes allowlist accepts.
+// Keep in sync with internal/api/cli_token.go knownScopes — that's
+// the source of truth at issue time, the UI just mirrors the list
+// so users can pick from a menu instead of typing strings.
+//
+// Grouped by resource for the dialog's three-column layout. Each
+// group's "*" wildcard is the top-of-group selector; selecting it
+// disables the per-action checkboxes (the user has chosen "all
+// actions on this resource").
+const SCOPE_GROUPS: Array<{ resource: string; actions: string[] }> = [
+  { resource: "agents", actions: ["read", "write", "run"] },
+  { resource: "crews", actions: ["read", "write"] },
+  { resource: "credentials", actions: ["read", "write"] },
+  { resource: "skills", actions: ["read", "write"] },
+  { resource: "webhooks", actions: ["read", "write"] },
+  { resource: "workspace", actions: ["read", "admin"] },
+]
+
+// Token-tier visual marker. Distinct colour from workspace-role so
+// a glance can't confuse "OWNER role on the workspace" with "ADMIN
+// tier on this token". Admin tier uses a warning-tinted style to
+// reinforce the "more dangerous, shorter lifetime" contract.
+const tierCls: Record<string, string> = {
+  STANDARD: "bg-muted text-muted-foreground border-border",
+  ADMIN: "bg-destructive/10 text-destructive border-destructive/40",
+}
+
+// Expiry presets — labels the user picks, mapped to seconds the
+// API accepts. 0 means "no expiry" (only valid for STANDARD); ADMIN
+// tier silently rounds up to the 60s floor if 0 is sent.
+const EXPIRY_PRESETS: Array<{ label: string; value: number }> = [
+  { label: "1 hour", value: 60 * 60 },
+  { label: "24 hours", value: 24 * 60 * 60 },
+  { label: "7 days", value: 7 * 24 * 60 * 60 },
+  { label: "30 days", value: 30 * 24 * 60 * 60 },
+  { label: "90 days", value: 90 * 24 * 60 * 60 },
+  { label: "Never", value: 0 },
+]
 
 // ── Props ───────────────────────────────────────────────────────────
 
@@ -114,11 +165,26 @@ export function ProfileSection({
   const [creating, setCreating] = useState(false)
   const [tokenName, setTokenName] = useState("")
   const [showCreateForm, setShowCreateForm] = useState(false)
-  const [newToken, setNewToken] = useState<{ token: string; name: string } | null>(null)
+  const [newToken, setNewToken] = useState<{ token: string; name: string; tier: string } | null>(null)
   const [tokenCopied, setTokenCopied] = useState(false)
   const [tokenVisible, setTokenVisible] = useState(false)
   const [revokeTarget, setRevokeTarget] = useState<CLIToken | null>(null)
   const [revoking, setRevoking] = useState(false)
+  const [createError, setCreateError] = useState<string | null>(null)
+
+  // Patch J/K + M2: tier + scopes + expiry form state.
+  //
+  // Default tier='STANDARD' because the dialog opens for everyone;
+  // OWNER-only ADMIN tier is gated server-side, and selecting it
+  // when the caller isn't OWNER returns 403 with a clear "ADMIN
+  // tier requires OWNER role" message that we surface inline.
+  //
+  // Default expiry='Never' for STANDARD (matches GitHub PAT
+  // default), but the form auto-switches to 24h when the user
+  // flips tier to ADMIN (since ADMIN requires non-zero expiry).
+  const [tokenTier, setTokenTier] = useState<"STANDARD" | "ADMIN">("STANDARD")
+  const [tokenExpirySeconds, setTokenExpirySeconds] = useState<number>(0)
+  const [tokenScopes, setTokenScopes] = useState<Set<string>>(new Set())
 
   const fetchTokens = useCallback(async () => {
     try {
@@ -133,20 +199,53 @@ export function ProfileSection({
   async function handleCreateToken() {
     if (!tokenName.trim()) return
     setCreating(true)
+    setCreateError(null)
     try {
+      // Body shape matches createTokenRequest in internal/api/cli_token.go.
+      // Omit fields the backend treats as defaults — empty scopes is
+      // unrestricted (no scope-vs-role check fires), expires_in_seconds=0
+      // is "default" (no expiry for STANDARD, 24h for ADMIN).
+      const body: Record<string, unknown> = { name: tokenName.trim() }
+      if (tokenTier === "ADMIN") body.tier = "ADMIN"
+      if (tokenScopes.size > 0) body.scopes = Array.from(tokenScopes)
+      if (tokenExpirySeconds > 0) body.expires_in_seconds = tokenExpirySeconds
+
       const res = await fetch("/api/v1/auth/cli-token", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: tokenName.trim() }),
+        body: JSON.stringify(body),
       })
       if (res.ok) {
         const data = await res.json()
-        setNewToken({ token: data.token, name: data.name })
-        setTokenName(""); setShowCreateForm(false); setTokenVisible(false); setTokenCopied(false)
+        setNewToken({ token: data.token, name: data.name, tier: data.tier ?? "STANDARD" })
+        setTokenName("")
+        setTokenTier("STANDARD")
+        setTokenExpirySeconds(0)
+        setTokenScopes(new Set())
+        setShowCreateForm(false)
+        setTokenVisible(false)
+        setTokenCopied(false)
         fetchTokens()
+      } else {
+        // Surface backend error messages (unknown scope, scope-exceeds-
+        // role, OWNER-only ADMIN, missing HMAC key) so the user sees
+        // why instead of a silent fail.
+        const errBody = await res.json().catch(() => ({}))
+        setCreateError(errBody.error ?? `Request failed (${res.status})`)
       }
-    } catch { /* ignore */ }
+    } catch (e) {
+      setCreateError(e instanceof Error ? e.message : "Network error")
+    }
     finally { setCreating(false) }
   }
+
+  // Auto-pick 24h expiry when tier flips to ADMIN. The backend
+  // requires non-zero expiry for ADMIN; defaulting to 24h matches
+  // adminTokenDefaultLifetime in cli_token.go.
+  useEffect(() => {
+    if (tokenTier === "ADMIN" && tokenExpirySeconds === 0) {
+      setTokenExpirySeconds(24 * 60 * 60)
+    }
+  }, [tokenTier, tokenExpirySeconds])
 
   async function handleRevoke() {
     if (!revokeTarget) return
@@ -248,8 +347,23 @@ export function ProfileSection({
                   <Key className="h-3 w-3 text-primary" />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <h4 className="text-xs font-semibold text-foreground">Token created</h4>
-                  <p className="text-[11px] text-muted-foreground">Copy now — it won&apos;t be shown again.</p>
+                  <h4 className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                    Token created
+                    {newToken.tier && (
+                      <Badge
+                        variant="outline"
+                        className={cn("text-[9px] font-medium px-1.5 py-0 leading-none h-4", tierCls[newToken.tier])}
+                      >
+                        {newToken.tier === "ADMIN" && <Shield className="h-2.5 w-2.5 mr-0.5" />}
+                        {newToken.tier}
+                      </Badge>
+                    )}
+                  </h4>
+                  <p className="text-[11px] text-muted-foreground">
+                    {newToken.tier === "ADMIN"
+                      ? "Admin-tier token — short-lived (≤7d), per-use audited. Treat as a single-use disposable."
+                      : "Copy now — it won’t be shown again."}
+                  </p>
                 </div>
                 <Button variant="ghost" size="sm" className="h-6 text-[10px] text-muted-foreground" onClick={() => setNewToken(null)}>Dismiss</Button>
               </div>
@@ -286,22 +400,173 @@ export function ProfileSection({
           )
         }
       >
-        {/* Create form */}
+        {/* Create form — full token issuance dialog with tier, scopes,
+            expiry. Animates open inline rather than via modal so the
+            generated token reveal (below) sits next to the form. */}
         <AnimatePresence>
           {showCreateForm && (
             <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
-              <div className="px-4 py-2.5 border-b border-border/40 flex items-center gap-2">
-                <Input
-                  value={tokenName} onChange={(e) => setTokenName(e.target.value)}
-                  placeholder="Token name, e.g. MacBook Pro"
-                  className="h-7 flex-1 text-xs"
-                  onKeyDown={(e) => e.key === "Enter" && handleCreateToken()}
-                  autoFocus
-                />
-                <Button size="sm" className="h-7 px-2.5 text-xs gap-1" onClick={handleCreateToken} disabled={creating || !tokenName.trim()}>
-                  {creating && <Loader2 className="h-3 w-3 animate-spin" />}Create
-                </Button>
-                <Button variant="ghost" size="sm" className="h-7 px-2 text-xs text-muted-foreground" onClick={() => { setShowCreateForm(false); setTokenName("") }}>Cancel</Button>
+              <div className="px-4 py-4 border-b border-border/40 space-y-3">
+                {/* Name */}
+                <div className="space-y-1">
+                  <Label htmlFor="token-name" className="text-[11px]">Token name</Label>
+                  <Input
+                    id="token-name"
+                    value={tokenName} onChange={(e) => setTokenName(e.target.value)}
+                    placeholder="e.g. MacBook Pro, ci-deploy-bot"
+                    className="h-8 text-xs"
+                    onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleCreateToken()}
+                    autoFocus
+                  />
+                </div>
+
+                {/* Tier + expiry on one row — both are short-list selects */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label className="text-[11px] flex items-center gap-1.5">
+                      Tier
+                      <TooltipProvider delayDuration={0}>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span className="cursor-help text-muted-foreground">ⓘ</span>
+                          </TooltipTrigger>
+                          <TooltipContent side="top" className="max-w-xs text-[11px]">
+                            <strong>STANDARD</strong> is the normal CLI token — your full
+                            workspace role. <strong>ADMIN</strong> is HMAC-keyed,
+                            short-lived (≤7d), per-use audited; OWNER role required to
+                            issue.
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    </Label>
+                    <Select value={tokenTier} onValueChange={(v) => setTokenTier(v as "STANDARD" | "ADMIN")}>
+                      <SelectTrigger className="h-8 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="STANDARD" className="text-xs">Standard</SelectItem>
+                        <SelectItem value="ADMIN" className="text-xs">
+                          <span className="flex items-center gap-1.5">
+                            <Shield className="h-3 w-3 text-destructive" />
+                            Admin (OWNER only)
+                          </span>
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <Label className="text-[11px]">Expires</Label>
+                    <Select
+                      value={String(tokenExpirySeconds)}
+                      onValueChange={(v) => setTokenExpirySeconds(Number(v))}
+                    >
+                      <SelectTrigger className="h-8 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {EXPIRY_PRESETS
+                          // ADMIN can't choose Never — backend rejects with 400.
+                          .filter((p) => tokenTier !== "ADMIN" || p.value !== 0)
+                          // ADMIN can't exceed 7d ceiling.
+                          .filter((p) => tokenTier !== "ADMIN" || p.value <= 7 * 24 * 60 * 60)
+                          .map((p) => (
+                            <SelectItem key={p.value} value={String(p.value)} className="text-xs">
+                              {p.label}
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                {/* Scopes — three-column grid of checkboxes grouped by resource.
+                    Empty selection = unrestricted (full role inherited).
+                    Selecting <resource>:* implicitly grants every action under
+                    that resource; the per-action checkboxes stay enabled so the
+                    user can mix-and-match (backend's canScope handles both shapes). */}
+                <div className="space-y-1.5">
+                  <Label className="text-[11px] flex items-center justify-between">
+                    <span>Scopes {tokenScopes.size > 0 && <span className="text-muted-foreground">({tokenScopes.size} selected)</span>}</span>
+                    {tokenScopes.size > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setTokenScopes(new Set())}
+                        className="text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </Label>
+                  <p className="text-[10px] text-muted-foreground">
+                    Leave empty for unrestricted token (full role permissions).
+                    Pick scopes to narrow — e.g. <code className="font-mono">agents:run</code> for a CI runner that only spawns agents.
+                  </p>
+                  <div className="grid grid-cols-3 gap-x-3 gap-y-1.5 border border-border/40 rounded-md p-2.5 bg-muted/20">
+                    {SCOPE_GROUPS.map((group) => (
+                      <div key={group.resource} className="space-y-1">
+                        <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">
+                          {group.resource}
+                        </div>
+                        <label className="flex items-center gap-1.5 text-[11px] cursor-pointer">
+                          <Checkbox
+                            checked={tokenScopes.has(`${group.resource}:*`)}
+                            onCheckedChange={(checked) => {
+                              const next = new Set(tokenScopes)
+                              const wild = `${group.resource}:*`
+                              if (checked) next.add(wild)
+                              else next.delete(wild)
+                              setTokenScopes(next)
+                            }}
+                            className="h-3 w-3"
+                          />
+                          <span className="font-mono text-[10px]">*</span>
+                          <span className="text-muted-foreground text-[10px]">(all)</span>
+                        </label>
+                        {group.actions.map((action) => {
+                          const scope = `${group.resource}:${action}`
+                          return (
+                            <label key={scope} className="flex items-center gap-1.5 text-[11px] cursor-pointer">
+                              <Checkbox
+                                checked={tokenScopes.has(scope)}
+                                onCheckedChange={(checked) => {
+                                  const next = new Set(tokenScopes)
+                                  if (checked) next.add(scope)
+                                  else next.delete(scope)
+                                  setTokenScopes(next)
+                                }}
+                                className="h-3 w-3"
+                              />
+                              <span className="font-mono text-[10px]">{action}</span>
+                            </label>
+                          )
+                        })}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Inline error from backend (unknown scope, OWNER-only, etc.) */}
+                {createError && (
+                  <div className="text-[11px] text-destructive bg-destructive/10 border border-destructive/30 rounded-md px-2.5 py-1.5 flex items-start gap-1.5">
+                    <AlertTriangle className="h-3 w-3 mt-0.5 shrink-0" />
+                    <span>{createError}</span>
+                  </div>
+                )}
+
+                <div className="flex items-center justify-end gap-2 pt-1">
+                  <Button variant="ghost" size="sm" className="h-7 px-2 text-xs text-muted-foreground" onClick={() => {
+                    setShowCreateForm(false)
+                    setTokenName("")
+                    setTokenTier("STANDARD")
+                    setTokenExpirySeconds(0)
+                    setTokenScopes(new Set())
+                    setCreateError(null)
+                  }}>Cancel</Button>
+                  <Button size="sm" className="h-7 px-3 text-xs gap-1" onClick={handleCreateToken} disabled={creating || !tokenName.trim()}>
+                    {creating && <Loader2 className="h-3 w-3 animate-spin" />}Create token
+                  </Button>
+                </div>
               </div>
             </motion.div>
           )}
@@ -316,29 +581,7 @@ export function ProfileSection({
           <SettingsEmpty>No tokens yet</SettingsEmpty>
         ) : (
           <>
-            {activeTokens.map((token) => (
-              <SettingsRow key={token.id} label={token.name}>
-                <span className="text-[10px] text-muted-foreground font-mono flex items-center gap-1">
-                  <Clock className="h-2.5 w-2.5" />{timeAgo(token.created_at)}
-                </span>
-                {token.last_used_at && (
-                  <span className="text-[10px] text-muted-foreground font-mono hidden sm:inline">
-                    used {timeAgo(token.last_used_at)}
-                  </span>
-                )}
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shrink-0" />
-                <TooltipProvider delayDuration={0}>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive hover:bg-destructive/10" onClick={() => setRevokeTarget(token)}>
-                        <Trash2 className="h-3 w-3" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="left" className="text-[11px]">Revoke</TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              </SettingsRow>
-            ))}
+            {activeTokens.map((token) => <TokenListItem key={token.id} token={token} onRevoke={() => setRevokeTarget(token)} />)}
             {revokedTokens.map((token) => (
               <div key={token.id} className="flex items-center justify-between px-4 py-2 border-b border-border/40 last:border-b-0 opacity-40">
                 <span className="text-xs text-muted-foreground line-through">{token.name}</span>
@@ -368,6 +611,102 @@ export function ProfileSection({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+    </div>
+  )
+}
+
+// ── TokenListItem ─────────────────────────────────────────────────────
+//
+// Renders a single active CLI token row with the full v99/M2 picture:
+// tier badge (visual differentiator between STANDARD and the more-
+// dangerous ADMIN), scope pill chips (so the user remembers what the
+// token can do without opening DB), and an expires countdown that
+// turns destructive-red when ≤24h remain. Pre-M2 tokens (no tier in
+// the response) render exactly like STANDARD/unrestricted so the
+// list stays backwards-compatible with older API versions.
+//
+// Lives inside profile-section.tsx (not a separate file) so the
+// shared hooks (useTimeUntil, timeAgo) and styling primitives stay
+// co-located — moving it out would require a public types module
+// that nothing else in the tree needs yet.
+function TokenListItem({
+  token,
+  onRevoke,
+}: {
+  token: CLIToken
+  onRevoke: () => void
+}) {
+  const expiresIn = useTimeUntil(token.expires_at)
+  const tier = token.tier ?? "STANDARD"
+  const scopes = token.scopes ?? []
+
+  // ≤24h = visual warning; ≤0 = already expired (validator will
+  // refuse on next use but the row may not have been auto-revoked
+  // yet, so the UI still flags it).
+  const expiresDestructive = token.expires_at
+    ? new Date(token.expires_at).getTime() - Date.now() <= 24 * 60 * 60 * 1000
+    : false
+
+  return (
+    <div className="px-4 py-2.5 border-b border-border/40 last:border-b-0 space-y-1.5">
+      <div className="flex items-center gap-2">
+        <span className="text-xs font-medium text-foreground truncate">{token.name}</span>
+        <Badge
+          variant="outline"
+          className={cn("text-[9px] font-medium px-1.5 py-0 leading-none h-4", tierCls[tier])}
+        >
+          {tier === "ADMIN" && <Shield className="h-2.5 w-2.5 mr-0.5" />}
+          {tier}
+        </Badge>
+        <div className="flex-1" />
+        <span className="text-[10px] text-muted-foreground font-mono flex items-center gap-1 shrink-0">
+          <Clock className="h-2.5 w-2.5" />{timeAgo(token.created_at)}
+        </span>
+        {token.last_used_at && (
+          <span className="text-[10px] text-muted-foreground font-mono hidden sm:inline shrink-0">
+            used {timeAgo(token.last_used_at)}
+          </span>
+        )}
+        <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shrink-0" />
+        <TooltipProvider delayDuration={0}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive hover:bg-destructive/10" onClick={onRevoke}>
+                <Trash2 className="h-3 w-3" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="left" className="text-[11px]">Revoke</TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      </div>
+
+      {/* Scope pills + expiry — second line, only when there's
+          actually something to show. Empty scopes + no expiry =
+          token inherits full role and lives forever; no need to
+          stamp empty pills there. */}
+      {(scopes.length > 0 || token.expires_at) && (
+        <div className="flex items-center gap-1.5 flex-wrap pl-0.5">
+          {scopes.map((s) => (
+            <span
+              key={s}
+              className="text-[9px] font-mono bg-muted text-muted-foreground border border-border/60 rounded-sm px-1 py-0 leading-tight"
+            >
+              {s}
+            </span>
+          ))}
+          {token.expires_at && expiresIn && (
+            <span
+              className={cn(
+                "text-[9px] font-mono flex items-center gap-0.5",
+                expiresDestructive ? "text-destructive" : "text-muted-foreground"
+              )}
+            >
+              <Clock className="h-2 w-2" />
+              expires {expiresIn === "Expired" ? "now" : `in ${expiresIn}`}
+            </span>
+          )}
+        </div>
+      )}
     </div>
   )
 }
