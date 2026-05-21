@@ -59,12 +59,16 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
 	user := UserFromContext(r.Context())
+	callerUserID := ""
+	if user != nil {
+		callerUserID = user.ID
+	}
 
 	// MANAGER tier can create credentials — the FE CASL ability mirrors
 	// this. "manage" was historically too tight (OWNER+ADMIN only) and
 	// caused 403s for the Add flow even though the button rendered.
-	if !canRole(role, "create") {
-		replyError(w, http.StatusForbidden, "Forbidden")
+	if !requireRoleOrForbid(w, h.logger, callerUserID, role,
+		"credential.create", "workspace:"+WorkspaceIDFromContext(r.Context()), "create") {
 		return
 	}
 	// Defence in depth: authed middleware should always populate user,

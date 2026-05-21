@@ -247,6 +247,12 @@ var ctxTokenScopes = contextKey("token_scopes")
 // generic 403s. The wire body stays minimal — the caller only
 // needs to know the request was refused; the reason audit lives
 // server-side.
+//
+// Pre-M4 deny paths used a mix of `replyError(w, 403, "Forbidden")`
+// and inline logger.Warn calls with inconsistent field names. M4
+// standardises on the (subject_user_id, role, action, resource)
+// quartet so log queries / SIEM rules can rely on a single shape
+// across every RBAC gate in the codebase.
 func replyForbidden(w http.ResponseWriter, logger interface {
 	Warn(msg string, args ...any)
 }, callerUserID, callerRole, action, resource string) {
@@ -259,4 +265,32 @@ func replyForbidden(w http.ResponseWriter, logger interface {
 		)
 	}
 	replyError(w, http.StatusForbidden, "Forbidden")
+}
+
+// requireRoleOrForbid is a convenience wrapper that combines the
+// pre-M4 canRole gate with the M4 audit emit. Saves the four-line
+// boilerplate every handler used to write:
+//
+//   if !canRole(role, "create") {
+//       replyError(w, http.StatusForbidden, "Forbidden")
+//       return
+//   }
+//
+// becomes:
+//
+//   if !requireRoleOrForbid(w, h.logger, callerID, role, "create", "agent.update", "agent:"+id) {
+//       return
+//   }
+//
+// Returns true on success so the caller can early-return on false.
+// Picks the FIRST failing action for the audit so the line names
+// the concrete missing privilege rather than a vague "or".
+func requireRoleOrForbid(w http.ResponseWriter, logger interface {
+	Warn(msg string, args ...any)
+}, callerUserID, callerRole, action, resource string, requiredActions ...string) bool {
+	if canRole(callerRole, requiredActions...) {
+		return true
+	}
+	replyForbidden(w, logger, callerUserID, callerRole, action, resource)
+	return false
 }

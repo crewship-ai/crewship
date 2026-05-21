@@ -210,9 +210,18 @@ func (h *CredentialHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	credID := r.PathValue("credentialId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
+	user := UserFromContext(r.Context())
+	callerUserID := ""
+	if user != nil {
+		callerUserID = user.ID
+	}
 
-	if !canRole(role, "manage") {
-		replyError(w, http.StatusForbidden, "Forbidden")
+	// Patch M4: structured 403 — audit-friendly WARN with
+	// subject/action/resource so an operator chasing "why did Alice
+	// get a 403?" doesn't have to grep a wall of generic Forbidden
+	// lines. Behaviour identical (canRole "manage" = OWNER/ADMIN).
+	if !requireRoleOrForbid(w, h.logger, callerUserID, role,
+		"credential.delete", "credential:"+credID, "manage") {
 		return
 	}
 
@@ -242,11 +251,7 @@ func (h *CredentialHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	// this and when" after the row is soft-deleted. credential_audit
 	// rows survive soft-delete (no FK cascade), so the historical
 	// record is preserved.
-	user := UserFromContext(r.Context())
-	var deletedBy string
-	if user != nil {
-		deletedBy = user.ID
-	}
+	deletedBy := callerUserID
 	if recErr := RecordCredentialEvent(r.Context(), h.db, h.logger, credID, AuditEventRevoke, "", clientIP(r),
 		map[string]any{"deleted_by": deletedBy, "soft_delete": true}); recErr != nil {
 		h.logger.Warn("record REVOKE audit event", "error", recErr, "credential_id", credID)
