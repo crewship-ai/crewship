@@ -214,12 +214,13 @@ func (p Policy) DecideBehaviorDeny() Decision {
 	case AutonomyTrusted:
 		return DecisionBlockJournal
 	}
-	// AutonomyFull × BehaviorBlock is forbidden — Validate catches
-	// this at the API boundary. Defensive default if it somehow
-	// reaches here: behave like warn-mode full (auto journal) so we
-	// don't surprise-block an agent the operator marked as fully
-	// trusted.
-	return DecisionAutoJournal
+	// AutonomyFull × BehaviorBlock is forbidden — Validate catches this
+	// at the API boundary. Defensive default if validation was bypassed
+	// (manual SQL fix-up, schema drift): fail closed with the strictest
+	// block decision. The "surprise block on a fully-trusted agent" risk
+	// is acceptable; the "silently let an agent through that an operator
+	// thought was blocked" risk is not.
+	return DecisionBlockInbox
 }
 
 var validAutonomyLevels = map[AutonomyLevel]struct{}{

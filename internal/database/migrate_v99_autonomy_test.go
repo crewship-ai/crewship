@@ -152,6 +152,9 @@ func TestMigrateV99_Autonomy(t *testing.T) {
 				if !user.Valid || user.String != "u_audit" {
 					t.Errorf("autonomy_set_by_user_id = %v, want 'u_audit'", user)
 				}
+				if !at.Valid || at.String != "2026-05-21T00:00:00Z" {
+					t.Errorf("autonomy_set_at = %v, want 2026-05-21T00:00:00Z", at)
+				}
 				if !reason.Valid || reason.String != "engineering crew uplift" {
 					t.Errorf("autonomy_reason = %v, want 'engineering crew uplift'", reason)
 				}

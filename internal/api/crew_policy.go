@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -79,7 +80,13 @@ func (h *CrewPolicyHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	workspaceID := WorkspaceIDFromContext(r.Context())
-	if !h.crewBelongsToWorkspace(r, crewID, workspaceID) {
+	found, err := h.crewBelongsToWorkspace(r.Context(), crewID, workspaceID)
+	if err != nil {
+		h.logger.Error("policy.Get: crew lookup", "crew_id", crewID, "error", err)
+		replyError(w, http.StatusInternalServerError, "lookup crew")
+		return
+	}
+	if !found {
 		replyError(w, http.StatusNotFound, "crew not found")
 		return
 	}
@@ -104,10 +111,6 @@ func (h *CrewPolicyHandler) Put(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	workspaceID := WorkspaceIDFromContext(r.Context())
-	if !h.crewBelongsToWorkspace(r, crewID, workspaceID) {
-		replyError(w, http.StatusNotFound, "crew not found")
-		return
-	}
 
 	var body crewPolicyUpdateBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -142,20 +145,29 @@ func (h *CrewPolicyHandler) Put(w http.ResponseWriter, r *http.Request) {
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	if _, err := h.db.ExecContext(r.Context(),
+	// Scope the UPDATE itself to workspace + deleted_at IS NULL so a
+	// row deleted (or never owned by this workspace) between a prior
+	// check and the write cannot slip through. RowsAffected == 0 is
+	// the canonical "no such crew in this workspace" signal.
+	res, err := h.db.ExecContext(r.Context(),
 		`UPDATE crews
 		    SET autonomy_level = ?,
 		        behavior_mode = ?,
 		        autonomy_set_by_user_id = ?,
 		        autonomy_set_at = ?,
 		        autonomy_reason = ?
-		  WHERE id = ?`,
+		  WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
 		body.AutonomyLevel, body.BehaviorMode,
 		nullIfEmpty(userID), now, nullIfEmpty(body.Reason),
-		crewID,
-	); err != nil {
+		crewID, workspaceID,
+	)
+	if err != nil {
 		h.logger.Error("policy.Put: update", "crew_id", crewID, "error", err)
 		replyError(w, http.StatusInternalServerError, "update policy")
+		return
+	}
+	if rows, _ := res.RowsAffected(); rows == 0 {
+		replyError(w, http.StatusNotFound, "crew not found")
 		return
 	}
 
@@ -220,8 +232,9 @@ func (h *CrewPolicyHandler) List(w http.ResponseWriter, r *http.Request) {
 			setBy, setAt, reason sql.NullString
 		)
 		if err := rows.Scan(&id, &lvl, &mode, &setBy, &setAt, &reason); err != nil {
-			h.logger.Warn("policy.List: scan", "error", err)
-			continue
+			h.logger.Error("policy.List: scan", "error", err)
+			replyError(w, http.StatusInternalServerError, "list policies")
+			return
 		}
 		out = append(out, crewPolicyResponse{
 			CrewID:        id,
@@ -232,22 +245,30 @@ func (h *CrewPolicyHandler) List(w http.ResponseWriter, r *http.Request) {
 			Reason:        reason.String,
 		})
 	}
+	if err := rows.Err(); err != nil {
+		h.logger.Error("policy.List: rows.Err", "error", err)
+		replyError(w, http.StatusInternalServerError, "list policies")
+		return
+	}
 	writeJSON(w, http.StatusOK, out)
 }
 
-func (h *CrewPolicyHandler) crewBelongsToWorkspace(r *http.Request, crewID, workspaceID string) bool {
+// crewBelongsToWorkspace returns (true, nil) when the crew exists and
+// belongs to workspaceID, (false, nil) for sql.ErrNoRows, and (_, err)
+// on any other DB failure. Callers must distinguish the two — folding
+// a DB outage into "not found" hides real incidents behind a 404.
+func (h *CrewPolicyHandler) crewBelongsToWorkspace(ctx context.Context, crewID, workspaceID string) (bool, error) {
 	var got string
-	err := h.db.QueryRowContext(r.Context(),
+	err := h.db.QueryRowContext(ctx,
 		`SELECT id FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
 		crewID, workspaceID).Scan(&got)
 	if errors.Is(err, sql.ErrNoRows) {
-		return false
+		return false, nil
 	}
 	if err != nil {
-		h.logger.Error("policy: crew lookup", "crew_id", crewID, "error", err)
-		return false
+		return false, err
 	}
-	return true
+	return true, nil
 }
 
 func marshalPolicy(p policy.Policy) crewPolicyResponse {

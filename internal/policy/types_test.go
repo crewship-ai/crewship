@@ -150,3 +150,17 @@ func TestPolicy_Validate_RejectsBogusEnums(t *testing.T) {
 		t.Error("expected error for bogus behavior_mode")
 	}
 }
+
+// TestPolicy_DecideBehaviorDeny_FullBlock_FailsClosed locks the
+// defensive contract: the (full × block) combination is forbidden by
+// Validate, but if validation is bypassed (manual SQL fix-up, schema
+// drift) DecideBehaviorDeny must return the strictest block decision
+// rather than silently relaxing to journal-only. "Silently let an
+// agent through that the operator thought was blocked" is the failure
+// mode we will not ship.
+func TestPolicy_DecideBehaviorDeny_FullBlock_FailsClosed(t *testing.T) {
+	p := Policy{AutonomyLevel: AutonomyFull, BehaviorMode: BehaviorBlock}
+	if got := p.DecideBehaviorDeny(); got != DecisionBlockInbox {
+		t.Errorf("full × block (bypassed validation): got %s, want %s (fail closed)", got, DecisionBlockInbox)
+	}
+}
