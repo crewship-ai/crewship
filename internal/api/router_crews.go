@@ -178,6 +178,11 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	// agent's memory continuity.
 	r.mux.Handle("POST /api/v1/agents/hire", authed(wsCtx(http.HandlerFunc(agents.Hire))))
 	r.mux.Handle("POST /api/v1/agents/{agentId}/rehire", authed(wsCtx(http.HandlerFunc(agents.Rehire))))
+	// Approve-hire flips a guided-autonomy ephemeral from
+	// PENDING_REVIEW to IDLE, releasing the chatbridge guard so the
+	// agent can serve messages. Paired with the blocking inbox
+	// waitpoint written by Hire when policy returns InboxApprove.
+	r.mux.Handle("POST /api/v1/agents/{agentId}/approve-hire", authed(wsCtx(http.HandlerFunc(agents.ApproveHire))))
 	r.mux.Handle("GET /api/v1/agents/{agentId}", authed(wsCtx(http.HandlerFunc(agents.Get))))
 	r.mux.Handle("PATCH /api/v1/agents/{agentId}", authed(wsCtx(http.HandlerFunc(agents.Update))))
 	r.mux.Handle("DELETE /api/v1/agents/{agentId}", authed(wsCtx(http.HandlerFunc(agents.Delete))))
