@@ -293,6 +293,14 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 			case r.Method == http.MethodPost && r.URL.Path == "/memory/reindex":
 				s.handleMemoryReindex(w, r)
 				return
+			case r.Method == http.MethodPost && r.URL.Path == "/mcp/memory":
+				// PR-A F1: in-container MCP server exposing the four memory
+				// tools (read/write/search/append_daily) via JSON-RPC 2.0.
+				// Adapters (Claude/Codex/Gemini/OpenCode/Droid) auto-inject
+				// a crewship-memory server entry pointing here so the model
+				// gets native function calling for memory without curl gymnastics.
+				s.handleMemoryMCP(w, r)
+				return
 			case r.Method == http.MethodPost && r.URL.Path == "/assign":
 				s.handleAssign(w, r)
 				return
@@ -340,6 +348,12 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 				return
 			case r.Method == http.MethodPost && r.URL.Path == "/agent/create":
 				s.handleCreateAgent(w, r)
+				return
+			// PR-D F5: LEAD-initiated ephemeral hire. Proxies to
+			// /api/v1/internal/agents/hire on crewshipd, which
+			// applies the crew autonomy_level gate.
+			case r.Method == http.MethodPost && r.URL.Path == "/spawn":
+				s.handleSpawn(w, r)
 				return
 			case r.Method == http.MethodGet && r.URL.Path == "/credentials":
 				s.handleListCredentials(w, r)

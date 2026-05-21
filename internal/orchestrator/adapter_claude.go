@@ -72,10 +72,13 @@ func (claudeCodeAdapter) BuildCommand(req AgentRunRequest) []string {
 	// burn budget indefinitely.
 	cmd = append(cmd, "--max-turns", "50")
 	// MCP servers are read from /crew/agents/<slug>/.mcp.json — written by
-	// WriteMCPConfig before exec when any MCP source is non-empty.
-	if len(req.MCPServers) > 0 || req.CrewMCPConfigJSON != "" || req.AgentMCPConfigJSON != "" {
-		cmd = append(cmd, "--mcp-config", fmt.Sprintf("/crew/agents/%s/.mcp.json", req.AgentSlug))
-	}
+	// WriteMCPConfig. PR-A F1: the crewship-memory MCP server is now always
+	// injected by setupMCPConfig regardless of whether the user/crew
+	// declared any other MCP source, so --mcp-config is always set to give
+	// the model native memory.read / write / search / append_daily tool
+	// calls. Pre-PR-A we gated this on a non-empty MCP source list, which
+	// would have stranded memory tools for agents with no other MCP servers.
+	cmd = append(cmd, "--mcp-config", fmt.Sprintf("/crew/agents/%s/.mcp.json", req.AgentSlug))
 	// `--` separator stops Claude Code from re-parsing user message tokens
 	// that happen to start with `-` as flags.
 	cmd = append(cmd, "--", req.UserMessage)

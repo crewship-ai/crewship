@@ -123,7 +123,7 @@ function-calling schemas:
 
 - `memory.read(scope)` — read AGENT / CREW / PERSONA / pins / daily / peers / lessons
 - `memory.write(scope, content, mode)` — write or replace
-- `memory.search(query, scope)` — substring + FTS5 search
+- `memory.search(query, scope)` — substring-only (FTS5 deferred; see §7 open question)
 - `memory.append_daily(content)` — daily journal append
 
 Per-CLI wiring forwards the schemas — one MCP descriptor for CLAUDE_CODE,
@@ -271,14 +271,30 @@ mission, ghost when done) and burn-after-use agents have no surface.
 
 #### Solution
 
-Three states on `agents.lifecycle`:
+PR-D ships the ephemeral lifecycle as two columns on `agents`,
+not the originally-drafted `lifecycle` enum:
 
-- `permanent` (default; existing behavior)
-- `ephemeral` (auto-archive after N days idle or M missions complete)
-- `ghosted` (operator-killed; preserved for audit, can't dispatch)
+- `ephemeral` (BOOLEAN, default 0). 1 means the row participates in
+  the hire/rehire/sweep mechanics; 0 means the row is permanent and
+  the sweeper ignores it.
+- `expires_at` (TEXT RFC3339, nullable). When `ephemeral=1`, the
+  sweeper compares this to `now` to decide if the row should ghost.
+- `expired_at` (TEXT RFC3339, nullable). Stamped by the sweeper when
+  the row actually ghosts; the canonical "this agent is a ghost"
+  signal. Rehire clears it back to NULL.
+
+So the three lifecycle states map to column shapes, not an enum:
+
+- **permanent**: `ephemeral=0` (default; existing behavior).
+- **ephemeral live**: `ephemeral=1`, `expired_at IS NULL`.
+- **ghosted**: `ephemeral=1`, `expired_at IS NOT NULL`. Auto-set by
+  the EphemeralExpiry sweeper when `expires_at < now` and the agent
+  is not RUNNING (mid-mission grace). Operator-killed ghosts share
+  the same shape; the audit log distinguishes the two.
 
 Plus a `hire`/`rehire` CLI pair that re-activates a ghosted agent
-without losing its conversation history.
+without losing its conversation history. `rehire` clears
+`expired_at` and pushes `expires_at` forward.
 
 ### F6 — PERSONA.md + per-user peer cards + GDPR (Layer 3)
 

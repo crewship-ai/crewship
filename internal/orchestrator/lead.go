@@ -80,6 +80,25 @@ CROSS-CREW MISSIONS:
 Mission tasks can reference agents from connected crews.
 The system auto-routes assignments to the correct crew container.
 Crew connections must be established by workspace admins before use.
+
+EPHEMERAL CONTRACTORS (PR-D F5 — when crew autonomy_level is trusted/full):
+You can spawn a short-lived "contractor" agent for a single task.
+Use this when:
+  * The work needs a specialist (template) you don't currently have
+  * The work is bounded — give it a TTL and it auto-ghosts when done
+  * Spinning up a permanent agent would be overkill
+Do NOT use this for ongoing work — hire a permanent agent instead.
+
+  curl -s -X POST http://localhost:9119/spawn \
+    -H "Content-Type: application/json" \
+    -d '{"crew_slug":"<your-crew>","template_slug":"<from /crew-templates>",
+         "model":"claude-haiku-4-5","ttl_minutes":60,
+         "reason":"<one-sentence justification>"}'
+
+Response includes the new agent_id; assign it work via /assign as usual.
+Strict crews REJECT this call (autonomy_level=strict forbids ephemeral_spawn).
+Guided crews block until an operator approves the hire in their inbox.
+Trusted/full crews auto-spawn and log to the audit feed.
 [END CREW CONTEXT]`
 
 // BuildLeadContext formats a [CREW CONTEXT] block for the lead agent's system prompt.

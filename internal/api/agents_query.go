@@ -32,7 +32,8 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 			a.mcp_config_json,
 			a.created_at, a.updated_at,
 			a.created_by_user_id,
-			c.name, c.slug, c.color, c.avatar_style
+			c.name, c.slug, c.color, c.avatar_style,
+			a.ephemeral, a.expires_at, a.expired_at, a.parent_lead_id, a.hire_reason
 		FROM agents a
 		LEFT JOIN crews c ON c.id = a.crew_id
 		WHERE a.workspace_id = ? AND a.deleted_at IS NULL
@@ -41,17 +42,33 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 	var rows *sql.Rows
 	var err error
 
-	// a.id DESC is the pagination tiebreaker: created_at is stored with
-	// second precision, so ties on busy workspaces are realistic. Without a
-	// unique secondary sort key, LIMIT/OFFSET windows can drop or duplicate
-	// rows between pages when the tied rows straddle a page boundary.
+	// PR-D F5 order: live agents (expired_at IS NULL) come first;
+	// ghosts (expired_at IS NOT NULL) fall to the end of the list.
+	// Within each band we sort by COALESCE(expired_at, created_at)
+	// DESC so:
+	//
+	//   * live agents are ordered by creation recency (matches the
+	//     pre-F5 behaviour for callers that don't have ghosts yet),
+	//   * ghosts are ordered by *when they ghosted* (recency of
+	//     death) — operators rehiring will go for the most recent
+	//     ghost first; a 3-month-old ghost shouldn't out-rank
+	//     yesterday's because it was created earlier.
+	//
+	// a.id DESC remains the unique tiebreaker so LIMIT/OFFSET
+	// windows on second-precision created_at can't drop/duplicate
+	// rows on busy workspaces.
+	const orderBy = ` ORDER BY
+		CASE WHEN a.expired_at IS NULL THEN 0 ELSE 1 END,
+		COALESCE(a.expired_at, a.created_at) DESC,
+		a.id DESC
+		LIMIT ? OFFSET ?`
 	if crewID != "" {
 		rows, err = h.db.QueryContext(r.Context(),
-			listQuery+" AND a.crew_id = ? ORDER BY a.created_at DESC, a.id DESC LIMIT ? OFFSET ?",
+			listQuery+" AND a.crew_id = ?"+orderBy,
 			workspaceID, crewID, limit, offset)
 	} else {
 		rows, err = h.db.QueryContext(r.Context(),
-			listQuery+" ORDER BY a.created_at DESC, a.id DESC LIMIT ? OFFSET ?",
+			listQuery+orderBy,
 			workspaceID, limit, offset)
 	}
 
@@ -65,7 +82,7 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 	result := make([]agentResponse, 0, capacityHint(limit))
 	for rows.Next() {
 		var a agentResponse
-		var memEnabled, schedEnabled int
+		var memEnabled, schedEnabled, ephemeral int
 		var crewName, crewSlug, crewColor, crewAvatarStyle *string
 		var createdByUserID sql.NullString
 		if err := rows.Scan(&a.ID, &a.CrewID, &a.WorkspaceID, &a.Name, &a.Slug,
@@ -76,7 +93,8 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 			&a.MCPConfigJSON,
 			&a.CreatedAt, &a.UpdatedAt,
 			&createdByUserID,
-			&crewName, &crewSlug, &crewColor, &crewAvatarStyle); err != nil {
+			&crewName, &crewSlug, &crewColor, &crewAvatarStyle,
+			&ephemeral, &a.ExpiresAt, &a.ExpiredAt, &a.ParentLeadID, &a.HireReason); err != nil {
 			h.logger.Error("scan agent", "error", err)
 			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return
@@ -86,6 +104,7 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 		if createdByUserID.Valid {
 			a.CreatedByUserID = createdByUserID.String
 		}
+		a.Ephemeral = ephemeral == 1
 		if crewName != nil {
 			a.Crew = &agentCrewInfo{Name: *crewName, Slug: *crewSlug, Color: crewColor, AvatarStyle: crewAvatarStyle}
 		}
@@ -174,6 +193,7 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 	var memEnabled, schedEnabled int
 	var crewName, crewSlug, crewColor, crewAvatarStyle *string
 	var createdByUserID sql.NullString
+	var ephemeral int
 	err := h.db.QueryRowContext(r.Context(), `
 		SELECT a.id, a.crew_id, a.workspace_id, a.name, a.slug, a.description, a.role_title,
 			a.agent_role, a.lead_mode, a.status, a.cli_adapter, a.llm_provider, a.llm_model,
@@ -186,7 +206,8 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 			c.name, c.slug, c.color, c.avatar_style,
 			(SELECT COUNT(*) FROM agent_skills WHERE agent_id = a.id),
 			(SELECT COUNT(*) FROM agent_credentials WHERE agent_id = a.id),
-			(SELECT COUNT(*) FROM chats WHERE agent_id = a.id)
+			(SELECT COUNT(*) FROM chats WHERE agent_id = a.id),
+			a.ephemeral, a.expires_at, a.expired_at, a.parent_lead_id, a.hire_reason
 		FROM agents a
 		LEFT JOIN crews c ON c.id = a.crew_id
 		WHERE a.id = ? AND a.workspace_id = ? AND a.deleted_at IS NULL
@@ -199,7 +220,8 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 		&a.CreatedAt, &a.UpdatedAt,
 		&createdByUserID,
 		&crewName, &crewSlug, &crewColor, &crewAvatarStyle,
-		&a.Count.Skills, &a.Count.Credentials, &a.Count.Chats)
+		&a.Count.Skills, &a.Count.Credentials, &a.Count.Chats,
+		&ephemeral, &a.ExpiresAt, &a.ExpiredAt, &a.ParentLeadID, &a.HireReason)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			replyError(w, http.StatusNotFound, "Agent not found")
@@ -214,6 +236,7 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 	if createdByUserID.Valid {
 		a.CreatedByUserID = createdByUserID.String
 	}
+	a.Ephemeral = ephemeral == 1
 	if crewName != nil {
 		a.Crew = &agentCrewInfo{Name: *crewName, Slug: *crewSlug, Color: crewColor, AvatarStyle: crewAvatarStyle}
 	}

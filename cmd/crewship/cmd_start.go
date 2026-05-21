@@ -313,6 +313,14 @@ var startCmd = &cobra.Command{
 				if apiRouter := srv.APIRouter(); apiRouter != nil {
 					apiRouter.SetScheduler(sched)
 				}
+				// PR-C F4: register the two daily Keeper Phase 2 sweeps
+				// (skill_review F4.1, memory_health_check F4.3) on the
+				// same cron engine. Each routine is independent — a
+				// missing evaluator (e.g. ANTHROPIC_API_KEY not set
+				// during server bootstrap) results in the matching
+				// routine being skipped with an info log, never a hard
+				// failure that would defer the rest of startup.
+				srv.RegisterKeeperRoutines(sched)
 			}
 		}
 

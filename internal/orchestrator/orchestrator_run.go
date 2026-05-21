@@ -754,6 +754,73 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 				responseBuf.WriteString(event.Content[:remaining])
 			}
 		}
+		// PR-C F4.2: invoke the sampled behavior monitor on every
+		// tool_call event. The hook's MaybeEvaluate is the sampling
+		// gate — most calls return (nil, false) without firing the
+		// LLM. When sampled, the evaluator runs against the configured
+		// Behavior aux slot and returns a BlockedError on a DENY in
+		// block mode + strict/guided. We dispatch via the narrow
+		// PostToolCallObserver setter so this package stays decoupled
+		// from internal/keeper/* (a nil observer is the test/dev
+		// default and a no-op on the hot path).
+		//
+		// The call runs in a goroutine because:
+		//   (a) the underlying LLM call is up to ~8s on Haiku
+		//       (PRD §6 F3 default timeout) and we must not block
+		//       the agent's tool-call → tool-result loop on it;
+		//   (b) BlockedError handling for past tool calls is a
+		//       journal/inbox write, not a synchronous interrupt —
+		//       MVP scope per PRD §6 F4.2 "warn mode never blocks";
+		//   (c) the platform hook is sampled, not per-call, so a
+		//       goroutine per sampled call is bounded by the sample
+		//       rate (default every 5th).
+		if event.Type == "tool_call" {
+			if obs := o.getPostToolCallObserver(); obs != nil {
+				toolName := event.Content
+				if toolName == "" {
+					if m, ok := event.Metadata.(map[string]interface{}); ok {
+						if tn, ok := m["tool_name"].(string); ok {
+							toolName = tn
+						}
+					}
+				}
+				if toolName != "" {
+					payload := map[string]any{}
+					if m, ok := event.Metadata.(map[string]interface{}); ok {
+						if in, ok := m["input"]; ok {
+							payload["input"] = in
+						}
+					}
+					// Bounded fan-out: try to acquire a semaphore token
+					// before spawning the Observe goroutine. Non-blocking
+					// claim → on overflow (postToolCallSemCap concurrent
+					// observations in flight) we drop this event rather
+					// than spawn yet another goroutine. The observer's
+					// sampling already discards most calls, so a dropped
+					// overflow is statistically equivalent to one that
+					// was sampled out; the alternative (unbounded
+					// goroutines piling up on Haiku latency under a tool
+					// storm) is strictly worse.
+					select {
+					case o.postToolCallSem <- struct{}{}:
+						go func() {
+							defer func() { <-o.postToolCallSem }()
+							obs.Observe(ToolCallObservation{
+								WorkspaceID: req.WorkspaceID,
+								CrewID:      req.CrewID,
+								AgentID:     req.AgentID,
+								MissionID:   req.MissionID,
+								ToolName:    toolName,
+								Payload:     payload,
+							})
+						}()
+					default:
+						o.logger.Debug("post_tool_call: observer saturated, dropping event",
+							"agent_id", req.AgentID, "tool", toolName)
+					}
+				}
+			}
+		}
 		if scrubHandler != nil {
 			scrubHandler(event)
 		}

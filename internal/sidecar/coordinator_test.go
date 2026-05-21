@@ -83,6 +83,19 @@ func coordHandlerCases() []coordHandlerCase {
 			wantQuery:  "workspace_id=ws-1",
 			wantMethod: http.MethodPost,
 		},
+		{
+			// PR-D F5: LEAD-driven ephemeral hire round-trip.
+			// Sidecar /spawn must forward to the internal hire
+			// endpoint with workspace_id attached; the public
+			// AgentHandler.Hire pipeline runs on the other side.
+			name:       "Spawn",
+			handler:    func(s *Server) http.HandlerFunc { return s.handleSpawn },
+			method:     http.MethodPost,
+			body:       `{"crew_slug":"docs","template_slug":"writer","reason":"ship section 7","ttl_minutes":60}`,
+			wantPath:   "/api/v1/internal/agents/hire",
+			wantQuery:  "workspace_id=ws-1",
+			wantMethod: http.MethodPost,
+		},
 	}
 }
 

@@ -44,6 +44,7 @@ type chatResolveResponse struct {
 	AgentID            string                   `json:"agent_id"`
 	AgentSlug          string                   `json:"agent_slug"`
 	AgentRole          string                   `json:"agent_role"`
+	AgentStatus        string                   `json:"agent_status"`
 	CrewID             string                   `json:"crew_id"`
 	CrewSlug           string                   `json:"crew_slug"`
 	ContainerID        string                   `json:"container_id"`
@@ -501,6 +502,7 @@ func (r *IPCResolver) resolve(ctx context.Context, resolveURL string) (*ChatInfo
 		AgentID:            data.AgentID,
 		AgentSlug:          data.AgentSlug,
 		AgentRole:          data.AgentRole,
+		AgentStatus:        data.AgentStatus,
 		CrewID:             data.CrewID,
 		CrewSlug:           data.CrewSlug,
 		ContainerID:        data.ContainerID,

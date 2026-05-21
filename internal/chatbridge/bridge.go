@@ -20,6 +20,14 @@ import (
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
+// AgentStatusPendingReview is the agents.status sentinel set by the
+// hire endpoint when the per-crew autonomy policy returns
+// DecisionInboxApprove (guided autonomy). The chatbridge refuses to
+// start an agent in this state until the approve-hire endpoint flips
+// it back to IDLE. Lives in chatbridge instead of api to avoid a
+// circular import (api → chatbridge → api).
+const AgentStatusPendingReview = "PENDING_REVIEW"
+
 // ChatResolver provides the data layer for the chat bridge, resolving chat
 // sessions to agent configurations and managing run lifecycle records.
 type ChatResolver interface {
@@ -36,9 +44,15 @@ type ChatResolver interface {
 // ChatInfo holds the resolved configuration for a chat session, including
 // agent identity, crew context, credentials, and resource settings.
 type ChatInfo struct {
-	AgentID            string
-	AgentSlug          string
-	AgentRole          string
+	AgentID   string
+	AgentSlug string
+	AgentRole string
+	// AgentStatus is the agents.status column at resolve time. Used by
+	// the bridge to refuse to start an agent that's PENDING_REVIEW
+	// (guided-autonomy hire waiting on operator approval). Empty when
+	// the resolver doesn't surface status (legacy paths default to
+	// permissive — only PENDING_REVIEW is treated as blocking).
+	AgentStatus        string
 	CrewID             string
 	CrewSlug           string
 	ContainerID        string
@@ -242,6 +256,26 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		return fmt.Errorf("resolve chat: %w", err)
 	}
 	b.logger.Debug("chat resolved", "agent_id", info.AgentID, "crew_id", info.CrewID)
+
+	// PR-D F5: refuse to start an agent whose hire is still awaiting
+	// operator approval (guided autonomy lands the row with
+	// status='PENDING_REVIEW'). The agent_config resolver surfaces the
+	// status; if it's the pending-review sentinel we short-circuit
+	// before any container provisioning side-effect runs. The operator
+	// must POST /api/v1/agents/{id}/approve-hire to flip the row to
+	// IDLE, after which the next message proceeds normally.
+	if info.AgentStatus == AgentStatusPendingReview {
+		msg := "Agent hire is awaiting operator approval — once approved on the inbox, send your message again."
+		streamFn(ws.ChatEvent{
+			Type:    "error",
+			Content: msg,
+			Metadata: map[string]any{
+				"reason":   "pending_review",
+				"agent_id": info.AgentID,
+			},
+		})
+		return fmt.Errorf("agent %s pending review: hire not approved", info.AgentID)
+	}
 
 	containerKey := info.CrewID
 

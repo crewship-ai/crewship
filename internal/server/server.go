@@ -35,6 +35,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider"
 	dockerprovider "github.com/crewship-ai/crewship/internal/provider/docker"
+	"github.com/crewship-ai/crewship/internal/scheduler"
 	"github.com/crewship-ai/crewship/internal/telemetry"
 	"github.com/crewship-ai/crewship/internal/terminal"
 	"github.com/crewship-ai/crewship/internal/ws"
@@ -96,6 +97,14 @@ type Server struct {
 	// — otherwise a late filesystem event could try to emit through a
 	// draining/closed writer.
 	fileJournalPtr atomic.Pointer[journal.Writer]
+
+	// keeperPhase2 holds the four PR-C F4 evaluators after server bootstrap.
+	// Stashed on Server so the scheduler bootstrap in cmd_start.go can wire
+	// the daily SkillReview + MemoryHealthCheck sweeps via
+	// Server.RegisterKeeperRoutines(sched). Fields are private — callers
+	// should always go through RegisterKeeperRoutines so the evaluator
+	// nil-checks stay in one place.
+	keeperPhase2 phase2Evaluators
 }
 
 // Deps holds the external dependencies injected into the server at startup.
@@ -578,6 +587,39 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 			opts = append(opts, goapi.WithHybridSearchProvider(apiWorkspaceProvider{reg: hybridRegistry}))
 		}
 
+		// PR-B F3 / PR-C F4: carry the auxiliary-model config into the
+		// router so (a) the /api/v1/system/aux-status diagnostic surface
+		// reports the resolved provider/model per slot, and (b) the
+		// Phase 2 evaluator construction below uses the same source of
+		// truth the operator sees in the UI. Config-driven aux slots
+		// are a follow-up (cfg.Auxiliary not yet wired); MVP defaults
+		// from llm.DefaultAuxiliaryModels (every slot on
+		// anthropic/claude-haiku-4-5) keep the surface useful immediately.
+		auxModels := llm.DefaultAuxiliaryModels()
+		opts = append(opts, goapi.WithAuxiliaryModels(auxModels))
+
+		// PR-C F4 wire-up: construct the four Keeper Phase 2 evaluators
+		// (skill_review / behavior / memory_health / negative_learning)
+		// from the aux-model config and pass them to NewRouter as an
+		// option BEFORE registerInternalRoutes runs. The handler
+		// constructor captures evaluator pointers by value at route
+		// registration time — calling SetKeeperPhase2Evaluators AFTER
+		// NewRouter would leave the live handler holding nil, with the
+		// endpoints permanently 503-ing.
+		//
+		// Each evaluator is built independently; per-slot init failures
+		// (e.g. missing ANTHROPIC_API_KEY) surface as warn lines + a nil
+		// evaluator — the matching endpoint then returns 503 so partial
+		// rollouts have a deterministic shape (graceful degradation, not
+		// crash on boot). See internal/server/keeper_phase2.go.
+		evals := buildPhase2Evaluators(auxModels, s.journalWriter, deps.DB, logger)
+		opts = append(opts, goapi.WithKeeperPhase2Evaluators(
+			evals.skillReview,
+			evals.behavior,
+			evals.memoryHealth,
+			evals.negative,
+		))
+
 		apiRouter, err := goapi.NewRouter(deps.DB, cfg.Auth.JWTSecret, logger, opts...)
 		if err != nil {
 			logger.Error("failed to create API router", "error", err)
@@ -590,6 +632,29 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 			// reaches apiRouter. Both.
 			mux.Handle("/exposed/", apiRouter)
 			logger.Info("Go API routes mounted")
+
+			// Behavior evaluator additionally drives the sampled
+			// EventPostToolCall hook (PRD §6 F4.2). Install it as the
+			// process-wide singleton AFTER the router is up so the
+			// orchestrator's tappedHandler can pick it up via
+			// behaviorhook.Get() on the hot path. nil evaluator → hook
+			// no-ops (Hook.MaybeEvaluate guards), so absence is safe.
+			registerBehaviorHook(evals.behavior, apiRouter.PolicyResolver(), logger)
+			// Stash the evaluators so cmd_start.go can register the daily
+			// SkillReview + MemoryHealthCheck cron routines via
+			// Server.RegisterKeeperRoutines once the scheduler is up.
+			s.keeperPhase2 = evals
+
+			// PR-C F4.2 hot-path: wire the orchestrator's
+			// PostToolCallObserver to behaviorhook.Get() so every tool
+			// call event flows through the sampling gate. The adapter
+			// itself is nil-safe (no-op when behaviorhook isn't
+			// installed) but skipping the wire when the evaluator was
+			// dropped during bootstrap keeps the boot logs honest.
+			if evals.behavior != nil {
+				orch.SetPostToolCallObserver(newPostToolCallObserver(logger, s.journalWriter))
+				logger.Info("keeper: orchestrator tool-call observer wired to behaviorhook")
+			}
 
 			// Pipeline AgentRunner is wired in cmd_start.go after
 			// the chatbridge.ChatResolver is built — the runner
@@ -824,6 +889,31 @@ func (s *Server) WSHub() *ws.Hub {
 // (test-only path) — callers must nil-check.
 func (s *Server) JournalWriter() *journal.Writer {
 	return s.journalWriter
+}
+
+// RegisterKeeperRoutines wires the daily PR-C F4 sweeps (SkillReview F4.1
+// and MemoryHealthCheck F4.3) into the supplied scheduler. Called from
+// cmd_start.go AFTER scheduler.Start so the cron engine is already
+// running. Per-routine registration is independent: an evaluator that
+// failed to build during server bootstrap (e.g. missing ANTHROPIC_API_KEY)
+// results in the matching routine being skipped — operators see the skip
+// in the boot logs alongside the evaluator-build warning.
+//
+// No-op (with log) when sched is nil or the DB isn't available.
+func (s *Server) RegisterKeeperRoutines(sched *scheduler.Scheduler) {
+	if sched == nil || s.db == nil {
+		s.logger.Info("keeper: routines NOT registered (scheduler or DB unavailable)")
+		return
+	}
+	skillReg, memReg := registerKeeperPhase2Routines(
+		sched,
+		s.db,
+		s.keeperPhase2.skillReview,
+		s.keeperPhase2.memoryHealth,
+		s.logger,
+	)
+	s.logger.Info("keeper: phase 2 routines registered",
+		"skill_review", skillReg, "memory_health_check", memReg)
 }
 
 // Start launches the HTTP server, IPC listener, WebSocket hub, scheduler,

@@ -222,6 +222,21 @@ type Orchestrator struct {
 	episodicRecall EpisodicRecaller
 	presence       PresenceTracker
 	memoryMetrics  MemoryMetricsReader
+	// postToolCallObs is the optional PR-C F4.2 behavior monitor hook.
+	// Wired from server.New via SetPostToolCallObserver; nil-safe via
+	// the getter so a server without behaviorhook installed (e.g. dev
+	// builds without ANTHROPIC_API_KEY) just no-ops on the hot path.
+	postToolCallObs PostToolCallObserver
+	// postToolCallSem is a bounded semaphore (channel as token bucket)
+	// that caps in-flight Observe goroutines. Without this, a chatty
+	// tool-call stream could fan out one goroutine per call (LLM
+	// latency ~8s × call rate) and pile up before the observer's own
+	// sampling gate fires. Initialised in New(); buffered to
+	// postToolCallSemCap. Non-blocking send → drop policy is correct
+	// here: the observer's sampling means we're already discarding
+	// most events by design, and dropping the overflow is preferable
+	// to back-pressuring the agent's tool-result loop.
+	postToolCallSem chan struct{}
 	// workspaceMemory resolves cross-crew memory for a workspace into a
 	// [WORKSPACE MEMORY] system-prompt block. Nil-safe — when no
 	// provider is wired (default), buildWorkspaceMemoryBlock returns
@@ -251,6 +266,38 @@ const episodicUnreachableLogInterval = 10 * time.Minute
 // this to the full hooks.Dispatch signature.
 type HookDispatcher interface {
 	Dispatch(ctx context.Context, event string, eventCtx HookEventContext) error
+}
+
+// PostToolCallObserver is the narrow interface the orchestrator uses to
+// notify the PR-C F4.2 behavior monitor of each tool_call event. The
+// adapter in server/ (post_tool_call_adapter.go) forwards to
+// behaviorhook.Get().MaybeEvaluate — the hook itself owns sampling, LLM
+// budget, and the decision-to-journal/inbox mapping. The orchestrator's
+// job is just to invoke it on the hot path.
+//
+// Decoupled via a narrow interface (rather than direct import of
+// internal/keeper/behaviorhook) so this package stays free of keeper
+// dependencies — the dependency direction is one-way: server → keeper.
+type PostToolCallObserver interface {
+	// Observe is called synchronously from the orchestrator's tool_call
+	// handler. Implementations MUST be cheap or asynchronous — the
+	// orchestrator already calls Observe from a goroutine but
+	// implementations should still treat the call as best-effort. Errors
+	// are not returned (logged inside the observer).
+	Observe(ToolCallObservation)
+}
+
+// ToolCallObservation carries the EventPostToolCall payload across the
+// narrow PostToolCallObserver interface. Fields mirror hooks.EventContext
+// but stay in orchestrator's vocabulary so we don't pull internal/hooks
+// types into this package's exported surface.
+type ToolCallObservation struct {
+	WorkspaceID string
+	CrewID      string
+	AgentID     string
+	MissionID   string
+	ToolName    string
+	Payload     map[string]any
 }
 
 // HookEventContext mirrors hooks.EventContext in a narrow form so
@@ -452,6 +499,22 @@ func (o *Orchestrator) getEpisodicRecall() EpisodicRecaller {
 	return o.episodicRecall // nil allowed; caller checks
 }
 
+// SetPostToolCallObserver wires the PR-C F4.2 behavior monitor onto the
+// orchestrator hot path. nil is accepted and treated as "no observer
+// configured" — the tappedHandler tool_call branch just no-ops when
+// getPostToolCallObserver returns nil.
+func (o *Orchestrator) SetPostToolCallObserver(obs PostToolCallObserver) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.postToolCallObs = obs
+}
+
+func (o *Orchestrator) getPostToolCallObserver() PostToolCallObserver {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	return o.postToolCallObs // nil allowed; caller guards
+}
+
 type noopHooks struct{}
 
 func (noopHooks) Dispatch(_ context.Context, _ string, _ HookEventContext) error { return nil }
@@ -553,6 +616,15 @@ func truncateCmd(argv []string, n int) string {
 }
 
 // New creates an Orchestrator with the given container and state providers.
+// postToolCallSemCap is the max number of concurrent behavior-monitor
+// observations in flight. Sized for the worst case where every active
+// crew has an agent firing tool calls in lockstep: 64 should comfortably
+// cover the realistic crew count on a single instance while keeping the
+// goroutine ceiling bounded. Overflow drops; the observer's sampling
+// already reduces the effective rate so dropped events are statistically
+// indistinguishable from un-sampled ones.
+const postToolCallSemCap = 64
+
 func New(
 	container provider.ContainerProvider,
 	state provider.StateProvider,
@@ -570,6 +642,7 @@ func New(
 		snapshotHashCache: make(map[string]string),
 		snapshotPending:   make(map[string]string),
 		snapshotInFlight:  make(map[string]*sync.Mutex),
+		postToolCallSem:   make(chan struct{}, postToolCallSemCap),
 	}
 }
 

@@ -211,6 +211,61 @@ func TestHandleChatMessageRunAgentError(t *testing.T) {
 	}
 }
 
+// TestHandleChatMessage_RefusesPendingReviewAgent asserts the
+// chatbridge refuses to start an ephemeral agent whose hire is still
+// awaiting operator approval. The PR-D F5 guided-autonomy flow
+// inserts the agent row with status='PENDING_REVIEW'; the resolver
+// surfaces that status; the bridge must short-circuit BEFORE any
+// container provisioning side-effect runs.
+//
+// Without this guard, the 202 from /hire would race the first WS
+// message and the container would spin up before the operator
+// clicked Approve — collapsing "guided" into a non-blocking
+// auto-log.
+func TestHandleChatMessage_RefusesPendingReviewAgent(t *testing.T) {
+	resolver := &mockResolver{
+		info: &ChatInfo{
+			AgentID:     "agent-pending",
+			AgentSlug:   "pending-agent",
+			AgentStatus: AgentStatusPendingReview,
+			CrewID:      "crew-1",
+			CrewSlug:    "test-crew",
+			CLIAdapter:  "CLAUDE_CODE",
+			ToolProfile: "CODING",
+			TimeoutSecs: 30,
+		},
+	}
+	b, _ := testBridge(t, resolver)
+
+	var events []ws.ChatEvent
+	streamFn := func(e ws.ChatEvent) { events = append(events, e) }
+
+	err := b.HandleChatMessage(context.Background(), "user-1", "sess-1", "hello", streamFn)
+	if err == nil {
+		t.Fatal("expected error on PENDING_REVIEW agent")
+	}
+	if !strings.Contains(err.Error(), "pending review") {
+		t.Errorf("error = %v, want contains 'pending review'", err)
+	}
+
+	// Exactly one 'error' event with reason=pending_review must have
+	// been streamed before the bridge returned. No status/thinking
+	// events should leak — the container must not have been touched.
+	if len(events) != 1 {
+		t.Fatalf("events = %d, want 1 (just the pending-review error)", len(events))
+	}
+	if events[0].Type != "error" {
+		t.Errorf("event type = %q, want error", events[0].Type)
+	}
+	md, _ := events[0].Metadata.(map[string]any)
+	if md == nil {
+		t.Fatalf("event metadata = %T, want map[string]any", events[0].Metadata)
+	}
+	if reason, _ := md["reason"].(string); reason != "pending_review" {
+		t.Errorf("event metadata.reason = %q, want pending_review", reason)
+	}
+}
+
 func TestHandleChatMessagePersistsUserMessage(t *testing.T) {
 	// Resolve failure should NOT persist the user message — we fail-fast
 	// before polluting conversation history with prompts that never ran.
