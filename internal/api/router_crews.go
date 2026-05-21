@@ -38,6 +38,11 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 		agents.SetScheduler(r.scheduleUpdater)
 	}
 	agents.SetJournal(r.Journal())
+	// PR-D F5: wire the shared per-crew autonomy resolver so the Hire
+	// / Rehire handlers gate ephemeral spawn per crew policy. Same
+	// instance the policies handler uses below — flipping policy via
+	// PUT invalidates it for everyone, including the hire path.
+	agents.SetPolicyResolver(r.PolicyResolver())
 
 	if r.license != nil {
 		ws.SetLicense(r.license)
@@ -166,6 +171,11 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.mux.Handle("GET /api/v1/agent-load", authed(wsCtx(http.HandlerFunc(agents.Load))))
 	r.mux.Handle("GET /api/v1/agents", authed(wsCtx(http.HandlerFunc(agents.List))))
 	r.mux.Handle("POST /api/v1/agents", authed(wsCtx(http.HandlerFunc(agents.Create))))
+	// PR-D F5 ephemeral lifecycle endpoint. Hire creates a new
+	// short-lived agent gated by the per-crew autonomy policy. The
+	// companion Rehire endpoint is wired in PR-D.3 alongside the
+	// soft-delete list-query reorder.
+	r.mux.Handle("POST /api/v1/agents/hire", authed(wsCtx(http.HandlerFunc(agents.Hire))))
 	r.mux.Handle("GET /api/v1/agents/{agentId}", authed(wsCtx(http.HandlerFunc(agents.Get))))
 	r.mux.Handle("PATCH /api/v1/agents/{agentId}", authed(wsCtx(http.HandlerFunc(agents.Update))))
 	r.mux.Handle("DELETE /api/v1/agents/{agentId}", authed(wsCtx(http.HandlerFunc(agents.Delete))))

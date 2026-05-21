@@ -9,6 +9,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/license"
+	"github.com/crewship-ai/crewship/internal/policy"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
@@ -26,6 +27,12 @@ type AgentHandler struct {
 	license         *license.License
 	scheduleUpdater ScheduleUpdater
 	journal         journal.Emitter
+	// policyResolver gates the PR-D F5 ephemeral hire/rehire flow.
+	// Nil-safe: the Hire handler falls back to the documented safe
+	// default (guided → DecisionInboxApprove) when the router hasn't
+	// wired one yet, so tests built with the legacy 2-arg
+	// NewAgentHandler keep compiling.
+	policyResolver *policy.Resolver
 }
 
 // NewAgentHandler creates an AgentHandler with the given database and logger.
@@ -59,6 +66,14 @@ func (h *AgentHandler) SetLicense(lic *license.License) { h.license = lic }
 
 // SetScheduler attaches a ScheduleUpdater for live-updating agent cron schedules.
 func (h *AgentHandler) SetScheduler(su ScheduleUpdater) { h.scheduleUpdater = su }
+
+// SetPolicyResolver wires the shared per-crew autonomy resolver
+// (PR-B F2) so the Hire / Rehire handlers can gate ephemeral spawn
+// per the crew's autonomy_level. Nil is allowed — handlers fall
+// back to the documented safe default (guided ⇒ inbox_approve)
+// when the resolver isn't wired, which matches the v100 column
+// default the DB ships with.
+func (h *AgentHandler) SetPolicyResolver(r *policy.Resolver) { h.policyResolver = r }
 
 // CrewsStatus returns lightweight agent counts by status for the toolbar.
 //
