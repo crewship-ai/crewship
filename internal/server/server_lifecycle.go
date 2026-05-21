@@ -21,12 +21,14 @@ import (
 	"github.com/crewship-ai/crewship/internal/consolidate"
 	"github.com/crewship-ai/crewship/internal/conversation"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
+	"github.com/crewship-ai/crewship/internal/ephemeral"
 	"github.com/crewship-ai/crewship/internal/harbormaster"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/memory"
 	"github.com/crewship-ai/crewship/internal/presence"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/scrubber"
+	"github.com/crewship-ai/crewship/internal/ws"
 )
 
 // Server is the main crewship process, wiring together the HTTP server, IPC
@@ -92,6 +94,15 @@ func (s *Server) Start(ctx context.Context) error {
 		// approvals to 'timeout' status so blocked agents unstick
 		// deterministically even if the UI is down.
 		go harbormaster.StartTimeoutSweeper(ctx, s.db, s.journalWriter, 30*time.Second)
+
+		// PR-D F5 ephemeral-agent expiry sweeper: every 5 min, flip
+		// expired_at on rows whose TTL has elapsed so they enter
+		// "ghost" state. DB row stays — only runtime is recycled by
+		// the container provider's own GC. Broadcaster surfaces
+		// agent.expired over the WS hub so the UI grays the card
+		// immediately instead of waiting for the next list poll.
+		ephemeralBcast := ephemeralHubAdapter{hub: s.wsHub}
+		ephemeral.StartExpirySweeper(ctx, s.db, s.journalWriter, ephemeralBcast, ephemeral.DefaultSweepInterval, s.logger)
 
 		// Crow's Nest port scanner: every 10s, diff the ACTIVE set of
 		// port_exposures rows and emit network.port_opened /
@@ -542,4 +553,23 @@ func (s *Server) rehydrateContainers(ctx context.Context) {
 	if registered > 0 {
 		s.logger.Info("rehydrated existing crew containers", "count", registered)
 	}
+}
+
+// ephemeralHubAdapter satisfies internal/ephemeral.Broadcaster. The
+// sweeper depends on a tiny interface so the package doesn't import
+// internal/ws (which would drag the WS dependency into a pure DB
+// sweeper); the adapter lives in the server package where ws is
+// already wired.
+type ephemeralHubAdapter struct {
+	hub *ws.Hub
+}
+
+// BroadcastWorkspaceEvent forwards to ws.Hub.BroadcastWorkspace. Nil
+// hub is a no-op so the sweeper still runs in test/headless harnesses
+// where the WS layer isn't constructed.
+func (e ephemeralHubAdapter) BroadcastWorkspaceEvent(wsID, eventType string, payload map[string]string) {
+	if e.hub == nil {
+		return
+	}
+	e.hub.BroadcastWorkspace(wsID, eventType, payload)
 }
