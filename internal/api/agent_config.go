@@ -20,6 +20,7 @@ type agentConfigData struct {
 	agentID       string
 	agentSlug     string
 	agentName     string
+	agentStatus   string
 	roleTitle     sql.NullString
 	agentRole     sql.NullString
 	cliAdapter    string
@@ -224,6 +225,7 @@ func (h *InternalHandler) resolveAgentConfig(w http.ResponseWriter, r *http.Requ
 		"agent_id":              agentID,
 		"agent_slug":            data.agentSlug,
 		"agent_role":            roleStr,
+		"agent_status":          data.agentStatus,
 		"crew_id":               crewIDStr,
 		"crew_slug":             crewSlugStr,
 		"container_id":          "",
@@ -263,7 +265,7 @@ func (h *InternalHandler) resolveAgentConfig(w http.ResponseWriter, r *http.Requ
 func (h *InternalHandler) loadAgentData(r *http.Request, agentID string) (*agentConfigData, error) {
 	d := &agentConfigData{agentID: agentID}
 	err := h.db.QueryRowContext(r.Context(), `
-		SELECT a.slug, a.name, a.role_title, a.agent_role, a.cli_adapter, a.system_prompt,
+		SELECT a.slug, a.name, a.status, a.role_title, a.agent_role, a.cli_adapter, a.system_prompt,
 			a.tool_profile, a.timeout_seconds, a.memory_enabled,
 			c2.id, c2.slug, c2.name, a.workspace_id, a.llm_model,
 			c2.network_mode, c2.allowed_domains,
@@ -274,7 +276,7 @@ func (h *InternalHandler) loadAgentData(r *http.Request, agentID string) (*agent
 		FROM agents a
 		LEFT JOIN crews c2 ON c2.id = a.crew_id
 		WHERE a.id = ?
-	`, agentID).Scan(&d.agentSlug, &d.agentName, &d.roleTitle, &d.agentRole, &d.cliAdapter, &d.systemPrompt,
+	`, agentID).Scan(&d.agentSlug, &d.agentName, &d.agentStatus, &d.roleTitle, &d.agentRole, &d.cliAdapter, &d.systemPrompt,
 		&d.toolProfile, &d.timeoutSecs, &d.memoryEnabled,
 		&d.crewID, &d.crewSlug, &d.crewName, &d.wsID, &d.llmModel,
 		&d.crewNetworkMode, &d.crewAllowedDomains,
