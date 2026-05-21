@@ -209,6 +209,15 @@ func (h *NextAuthHandler) Session(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// callbackCredentialsMaxBodyBytes caps the auth POST body. An email
+// (max 254 chars per RFC), a password (typically < 128 chars), a
+// csrfToken (~64 chars), and a callbackUrl (~2 KB max in practice) fit
+// comfortably in 16 KiB. Anything larger is malformed or hostile -- an
+// unbounded `r.ParseForm()` against application/x-www-form-urlencoded
+// reads the full body into memory and would otherwise let a single
+// client DoS the auth endpoint with a multi-megabyte POST.
+const callbackCredentialsMaxBodyBytes = 16 * 1024
+
 // CallbackCredentials handles login (POST /api/auth/callback/credentials)
 func (h *NextAuthHandler) CallbackCredentials(w http.ResponseWriter, r *http.Request) {
 	csrfCookie, _ := r.Cookie(h.csrfCookieName(r))
@@ -216,6 +225,12 @@ func (h *NextAuthHandler) CallbackCredentials(w http.ResponseWriter, r *http.Req
 		replyError(w, http.StatusForbidden, "Missing CSRF token")
 		return
 	}
+
+	// Bound the body BEFORE any parse. Both the JSON branch (readJSON's
+	// own 1 MB cap) and the form branch (previously unbounded) read
+	// through this wrapped Body; MaxBytesReader makes the unbounded
+	// ParseForm() path safe.
+	r.Body = http.MaxBytesReader(w, r.Body, callbackCredentialsMaxBodyBytes)
 
 	isJSON := strings.Contains(r.Header.Get("Content-Type"), "json")
 
@@ -236,7 +251,13 @@ func (h *NextAuthHandler) CallbackCredentials(w http.ResponseWriter, r *http.Req
 			csrfToken = v
 		}
 	} else {
-		r.ParseForm()
+		if err := r.ParseForm(); err != nil {
+			// ParseForm returns the MaxBytesReader overflow error when
+			// the body exceeds the cap; same shape as other malformed
+			// requests so we don't enumerate the rejection reason.
+			replyError(w, http.StatusBadRequest, "Invalid request")
+			return
+		}
 		email = r.FormValue("email")
 		password = r.FormValue("password")
 		csrfToken = r.FormValue("csrfToken")
