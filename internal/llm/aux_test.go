@@ -90,3 +90,40 @@ func TestResolveAux_UnknownSlot_ReturnsError(t *testing.T) {
 		t.Error("expected error for unknown slot 'bogus'")
 	}
 }
+
+// TestResolveAux_ExplicitSlot_BorrowsFallbackTimeout: an operator who
+// sets provider+model on a slot but forgets the timeout shouldn't get
+// a deadline-less LLM call. The resolver borrows Fallback.Timeout
+// when present, else falls back to a 30s hard default.
+func TestResolveAux_ExplicitSlot_BorrowsFallbackTimeout(t *testing.T) {
+	t.Run("fallback timeout present", func(t *testing.T) {
+		cfg := AuxiliaryModels{
+			Keeper:   AuxModel{Provider: "ollama", Model: "phi3:medium"}, // no Timeout
+			Fallback: AuxModel{Provider: "anthropic", Model: "claude-haiku-4-5", Timeout: 7 * time.Second},
+		}
+		got, err := ResolveAux(cfg, SlotKeeper)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Provider != "ollama" || got.Model != "phi3:medium" {
+			t.Errorf("got %+v, want ollama/phi3:medium (explicit slot wins)", got)
+		}
+		if got.Timeout != 7*time.Second {
+			t.Errorf("Timeout = %v, want 7s (borrowed from Fallback)", got.Timeout)
+		}
+	})
+
+	t.Run("no fallback timeout: hard default", func(t *testing.T) {
+		cfg := AuxiliaryModels{
+			Keeper: AuxModel{Provider: "ollama", Model: "phi3:medium"}, // no Timeout
+			// Fallback empty/zero
+		}
+		got, err := ResolveAux(cfg, SlotKeeper)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Timeout != 30*time.Second {
+			t.Errorf("Timeout = %v, want 30s (hard default)", got.Timeout)
+		}
+	})
+}

@@ -87,6 +87,19 @@ func ResolveAux(cfg AuxiliaryModels, slot Slot) (AuxModel, error) {
 		return AuxModel{}, fmt.Errorf("llm: unknown aux slot %q", slot)
 	}
 	if picked.Provider != "" {
+		// Explicit slot wins, but a missing Timeout would let the
+		// caller's LLM call run without a deadline (an operator
+		// forgetting `timeout:` in YAML shouldn't translate to "no
+		// budget at all"). Borrow from Fallback if it has one, else
+		// fall back to a sane hard default matching the longest
+		// per-slot default in DefaultAuxiliaryModels.
+		if picked.Timeout <= 0 {
+			if cfg.Fallback.Timeout > 0 {
+				picked.Timeout = cfg.Fallback.Timeout
+			} else {
+				picked.Timeout = 30 * time.Second
+			}
+		}
 		return picked, nil
 	}
 	if cfg.Fallback.Provider != "" {

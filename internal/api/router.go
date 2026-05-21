@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/auth/sessions"
@@ -117,18 +118,23 @@ type Router struct {
 	// handlers can invalidate the cache (otherwise subsystems would
 	// see stale values for up to the 10s TTL after an operator flip).
 	// PR-C / PR-D / PR-E consumers will read through this same
-	// instance.
-	policyResolver *policy.Resolver
+	// instance. policyResolverOnce serialises lazy init — concurrent
+	// HTTP handlers calling PolicyResolver() at startup would
+	// otherwise race on the field and risk constructing two resolvers
+	// (and Invalidate hitting the wrong cache).
+	policyResolver     *policy.Resolver
+	policyResolverOnce sync.Once
 }
 
 // PolicyResolver returns (lazily constructs) the shared per-crew
 // policy resolver. Callers should always go through this rather
 // than constructing their own — sharing the cache is what makes
-// Invalidate work end-to-end.
+// Invalidate work end-to-end. sync.Once guarantees a single
+// resolver instance even under concurrent first-call races.
 func (r *Router) PolicyResolver() *policy.Resolver {
-	if r.policyResolver == nil {
+	r.policyResolverOnce.Do(func() {
 		r.policyResolver = policy.NewResolver(r.db)
-	}
+	})
 	return r.policyResolver
 }
 
