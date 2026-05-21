@@ -2,9 +2,10 @@
 
 import { memo } from "react"
 import Link from "next/link"
-import { Cpu, Key, Clock, AlertCircle, Pause } from "lucide-react"
+import { Cpu, Key, Clock, AlertCircle, Pause, User } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 import { getCrewDotColor } from "@/lib/entities"
 import { timeAgo } from "@/lib/time"
@@ -26,6 +27,13 @@ interface AgentCount {
   chats: number
 }
 
+interface AgentOwner {
+  /** User id; matches users.id in the backend. */
+  id: string
+  email: string
+  full_name: string | null
+}
+
 interface AgentData {
   id: string
   name: string
@@ -42,6 +50,16 @@ interface AgentData {
   crew: AgentCrew | null
   _count: AgentCount
   last_active_at?: string | null
+  /** Patch M3 — the user who originally created this agent. Determines
+   *  who (besides workspace OWNER/ADMIN) can edit or delete the agent
+   *  per canEditAgent. Pre-M3 agents have null owner; the gate then
+   *  degrades to workspace-role-only for those. */
+  created_by_user_id?: string | null
+  /** Resolved owner profile when the agent list response includes it.
+   *  The list endpoint may or may not join users — UI accepts both
+   *  shapes and falls back to just the id when the full record isn't
+   *  provided. */
+  owner?: AgentOwner | null
 }
 
 const statusConfig: Record<string, { label: string; className: string; icon?: React.ElementType }> = {
@@ -142,7 +160,7 @@ export const AgentCard = memo(function AgentCard({ agent }: { agent: AgentData }
             })()}
           </div>
 
-          <div className="mt-3 pt-3 border-t flex items-center gap-4 text-label text-muted-foreground">
+          <div className="mt-3 pt-3 border-t flex items-center gap-4 text-label text-muted-foreground flex-wrap">
             <span className="flex items-center gap-1">
               <Cpu className="h-3 w-3" />
               {agent._count?.skills ?? 0} skills
@@ -155,6 +173,36 @@ export const AgentCard = memo(function AgentCard({ agent }: { agent: AgentData }
               <Clock className="h-3 w-3" />
               {agent.last_active_at ? timeAgo(agent.last_active_at) : "no activity"}
             </span>
+            {/* Patch F4 — owner badge. The created_by_user_id stamps who
+                made this agent; the canEditAgent gate then lets that user
+                edit/delete it from MANAGER role without blanket rights
+                over peer agents. Showing the owner in the card lets a
+                team scanning the list answer "who maintains this one"
+                without diving into agent detail / audit log. Falls back
+                to just the user id when the list endpoint didn't join
+                users (some legacy code paths return only the id). */}
+            {(agent.owner || agent.created_by_user_id) && (
+              <TooltipProvider delayDuration={300}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="flex items-center gap-1 hover:text-foreground transition-colors cursor-help">
+                      <User className="h-3 w-3" />
+                      {agent.owner
+                        ? agent.owner.full_name ?? agent.owner.email
+                        : `${(agent.created_by_user_id ?? "").slice(0, 8)}…`}
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" className="text-[11px] max-w-xs">
+                    Created by{" "}
+                    {agent.owner
+                      ? `${agent.owner.full_name ?? agent.owner.email} (${agent.owner.email})`
+                      : `user ${agent.created_by_user_id}`}
+                    . They can edit and delete this agent without workspace
+                    ADMIN role, per the per-agent ownership gate.
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            )}
           </div>
         </CardContent>
       </Card>
