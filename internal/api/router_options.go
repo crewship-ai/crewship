@@ -223,6 +223,18 @@ func WithConsolidateMemoryRoot(path string) RouterOption {
 	}
 }
 
+// WithOutputBasePath sets the host-side output root the container
+// provider bind-mounts (i.e. cfg.Storage.BasePath). PR-E F6
+// PersonaHandler + PeerHandler use this to resolve per-agent and
+// per-crew memory paths without going through the container exec
+// path. Should mirror the cfg.Storage.BasePath the docker provider
+// is started with.
+func WithOutputBasePath(path string) RouterOption {
+	return func(r *Router) {
+		r.outputBasePath = path
+	}
+}
+
 // WithMemoryVersionsBlobRoot sets the content-addressed blob root the
 // v90 memory_versions audit trail writes under. Forwarded to the
 // ProposedHandler so ApproveProposal records a row + blob on every

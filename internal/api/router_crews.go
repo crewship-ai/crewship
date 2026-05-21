@@ -184,6 +184,20 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.mux.Handle("POST /api/v1/agents/{agentId}/chats", authed(wsCtx(http.HandlerFunc(agents.CreateChat))))
 	r.mux.Handle("GET /api/v1/agents/{agentId}/runs", authed(wsCtx(http.HandlerFunc(agents.ListRuns))))
 
+	// PR-E F6 — PERSONA endpoints (agent + crew flavors). Persona
+	// handler shares the same policy resolver the routine + autonomy
+	// surfaces use so the suggest endpoint stays consistent with
+	// other agent-initiated actions.
+	persona := NewPersonaHandler(r.db, r.logger, r.outputBasePath, r.PolicyResolver())
+	r.mux.Handle("GET /api/v1/agents/{agentId}/persona", authed(wsCtx(http.HandlerFunc(persona.GetAgentPersona))))
+	r.mux.Handle("PUT /api/v1/agents/{agentId}/persona", authed(wsCtx(http.HandlerFunc(persona.PutAgentPersona))))
+	r.mux.Handle("DELETE /api/v1/agents/{agentId}/persona", authed(wsCtx(http.HandlerFunc(persona.DeleteAgentPersona))))
+	r.mux.Handle("GET /api/v1/agents/{agentId}/persona/history", authed(wsCtx(http.HandlerFunc(persona.GetAgentPersonaHistory))))
+	r.mux.Handle("POST /api/v1/agents/{agentId}/persona/suggest", authed(wsCtx(http.HandlerFunc(persona.SuggestAgentPersona))))
+	r.mux.Handle("GET /api/v1/crews/{crewId}/persona", authed(wsCtx(http.HandlerFunc(persona.GetCrewPersona))))
+	r.mux.Handle("PUT /api/v1/crews/{crewId}/persona", authed(wsCtx(http.HandlerFunc(persona.PutCrewPersona))))
+	r.mux.Handle("DELETE /api/v1/crews/{crewId}/persona", authed(wsCtx(http.HandlerFunc(persona.DeleteCrewPersona))))
+
 	// Credentials (require workspace context + manage role for create)
 	r.mux.Handle("GET /api/v1/credentials", authed(wsCtx(http.HandlerFunc(creds.List))))
 	r.mux.Handle("POST /api/v1/credentials", authed(wsCtx(http.HandlerFunc(creds.Create))))
