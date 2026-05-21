@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestCLITokenCreate(t *testing.T) {
@@ -147,13 +148,17 @@ func TestCLITokenRevoke(t *testing.T) {
 		t.Fatalf("revoke status = %d, body = %s", revokeRR.Code, revokeRR.Body.String())
 	}
 
-	// Validate should fail after revoke
+	// Validate should fail after revoke. Post-Patch-J the validator
+	// collapses all failure reasons (revoked / expired / not-found /
+	// tier-mismatch) into a single "invalid CLI token" so a caller
+	// cannot oracle which condition fired. Specifics go to the logger
+	// for operator audit.
 	_, _, _, err := ValidateCLIToken(db, created.Token)
 	if err == nil {
 		t.Error("expected error for revoked token")
 	}
-	if !strings.Contains(err.Error(), "revoked") {
-		t.Errorf("error = %q, want to contain 'revoked'", err.Error())
+	if err != nil && !strings.Contains(err.Error(), "invalid CLI token") {
+		t.Errorf("error = %q, want generic 'invalid CLI token'", err.Error())
 	}
 }
 
@@ -372,6 +377,203 @@ func TestCLITokenRevoke_OtherUserCannotRevoke(t *testing.T) {
 	}
 }
 
+// TestCLITokenCreate_AdminTier_RequiresOwnerRole pins Patch J: a
+// caller who isn't OWNER of any workspace cannot mint an ADMIN-tier
+// token regardless of whether the HMAC key is configured.
+func TestCLITokenCreate_AdminTier_RequiresOwnerRole(t *testing.T) {
+	t.Setenv("CREWSHIP_ADMIN_TOKEN_HMAC_KEY",
+		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa") // 32 bytes hex
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db) // seedTestUser does NOT make them OWNER of anything
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	h := NewCLITokenHandler(db, logger)
+
+	body, _ := json.Marshal(map[string]any{"name": "ops", "tier": "ADMIN"})
+	req := httptest.NewRequest("POST", "/api/v1/cli-tokens", bytes.NewReader(body))
+	req = req.WithContext(withUser(req.Context(), &AuthUser{ID: userID}))
+	rr := httptest.NewRecorder()
+	h.Create(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("non-OWNER ADMIN issuance status = %d, want 403; body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestCLITokenCreate_AdminTier_RequiresHMACKey pins Patch J: an OWNER
+// who tries to mint an ADMIN token gets 503 when the server-side HMAC
+// key isn't configured (so a misdeployed instance returns a clear
+// "fix your env" instead of silently falling back to SHA-256 and
+// collapsing the two tiers into one).
+func TestCLITokenCreate_AdminTier_RequiresHMACKey(t *testing.T) {
+	t.Setenv("CREWSHIP_ADMIN_TOKEN_HMAC_KEY", "") // explicitly unset
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID) // user becomes OWNER via seedTestWorkspace
+	_ = wsID
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	h := NewCLITokenHandler(db, logger)
+
+	body, _ := json.Marshal(map[string]any{"name": "ops", "tier": "ADMIN"})
+	req := httptest.NewRequest("POST", "/api/v1/cli-tokens", bytes.NewReader(body))
+	req = req.WithContext(withUser(req.Context(), &AuthUser{ID: userID}))
+	rr := httptest.NewRecorder()
+	h.Create(rr, req)
+
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Errorf("missing HMAC key status = %d, want 503; body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "CREWSHIP_ADMIN_TOKEN_HMAC_KEY") {
+		t.Errorf("error body should name the env var; got %s", rr.Body.String())
+	}
+}
+
+// TestCLITokenCreate_AdminTier_HappyPath issues an ADMIN token end to
+// end: OWNER user, HMAC key configured, default expiry (24h),
+// validates back through ValidateCLIToken.
+func TestCLITokenCreate_AdminTier_HappyPath(t *testing.T) {
+	t.Setenv("CREWSHIP_ADMIN_TOKEN_HMAC_KEY",
+		"deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	seedTestWorkspace(t, db, userID)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	h := NewCLITokenHandler(db, logger)
+
+	body, _ := json.Marshal(map[string]any{"name": "ops", "tier": "ADMIN"})
+	req := httptest.NewRequest("POST", "/api/v1/cli-tokens", bytes.NewReader(body))
+	req = req.WithContext(withUser(req.Context(), &AuthUser{ID: userID, Email: "u@e.com", Name: "U"}))
+	rr := httptest.NewRecorder()
+	h.Create(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+
+	var resp struct {
+		Token     string `json:"token"`
+		Tier      string `json:"tier"`
+		ExpiresAt string `json:"expires_at"`
+	}
+	json.Unmarshal(rr.Body.Bytes(), &resp)
+	if !strings.HasPrefix(resp.Token, "crewship_admin_") {
+		t.Errorf("expected crewship_admin_ prefix, got %q", resp.Token)
+	}
+	if resp.Tier != "ADMIN" {
+		t.Errorf("tier = %q, want ADMIN", resp.Tier)
+	}
+	if resp.ExpiresAt == "" {
+		t.Errorf("ADMIN response must include expires_at")
+	}
+
+	uid, email, _, vErr := ValidateCLIToken(db, resp.Token)
+	if vErr != nil {
+		t.Fatalf("ValidateCLIToken: %v", vErr)
+	}
+	if uid != userID {
+		t.Errorf("validated user_id = %q, want %q", uid, userID)
+	}
+	if email == "" {
+		t.Errorf("validated email must not be empty")
+	}
+}
+
+// TestCLITokenCreate_AdminTier_CapsExpiryAt7Days proves the handler
+// clamps a hostile "expires_in_seconds: 99999999" down to the 7-day
+// ceiling instead of issuing a 3-year-lived ADMIN token.
+func TestCLITokenCreate_AdminTier_CapsExpiryAt7Days(t *testing.T) {
+	t.Setenv("CREWSHIP_ADMIN_TOKEN_HMAC_KEY",
+		"deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	seedTestWorkspace(t, db, userID)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	h := NewCLITokenHandler(db, logger)
+
+	body, _ := json.Marshal(map[string]any{
+		"name":               "ops",
+		"tier":               "ADMIN",
+		"expires_in_seconds": 99999999, // 3+ years
+	})
+	req := httptest.NewRequest("POST", "/api/v1/cli-tokens", bytes.NewReader(body))
+	req = req.WithContext(withUser(req.Context(), &AuthUser{ID: userID}))
+	rr := httptest.NewRecorder()
+	h.Create(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d", rr.Code)
+	}
+	var resp struct {
+		ExpiresAt string `json:"expires_at"`
+	}
+	json.Unmarshal(rr.Body.Bytes(), &resp)
+
+	expiresAt, _ := time.Parse(time.RFC3339, resp.ExpiresAt)
+	maxAllowed := time.Now().Add(7*24*time.Hour + time.Minute) // 1 min jitter for test wall-clock
+	if expiresAt.After(maxAllowed) {
+		t.Errorf("expires_at = %s exceeds 7-day cap (max %s)", expiresAt, maxAllowed)
+	}
+}
+
+// TestValidateCLIToken_ExpiredTokenRefused — STANDARD or ADMIN, an
+// expired token comes back from the validator as the same generic
+// "invalid CLI token" the caller would see for revoked / not-found.
+func TestValidateCLIToken_ExpiredTokenRefused(t *testing.T) {
+	t.Setenv("CREWSHIP_ADMIN_TOKEN_HMAC_KEY",
+		"deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	seedTestWorkspace(t, db, userID)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	h := NewCLITokenHandler(db, logger)
+
+	// 60-second TTL (minimum allowed) — we'll then manually backdate
+	// expires_at to put it in the past.
+	body, _ := json.Marshal(map[string]any{
+		"name":               "soon-to-expire",
+		"tier":               "ADMIN",
+		"expires_in_seconds": 60,
+	})
+	req := httptest.NewRequest("POST", "/api/v1/cli-tokens", bytes.NewReader(body))
+	req = req.WithContext(withUser(req.Context(), &AuthUser{ID: userID}))
+	rr := httptest.NewRecorder()
+	h.Create(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("create status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	var resp struct {
+		Token string `json:"token"`
+		ID    string `json:"id"`
+	}
+	json.Unmarshal(rr.Body.Bytes(), &resp)
+
+	// Backdate expires_at into the past.
+	pastTS := time.Now().Add(-time.Hour).UTC().Format(time.RFC3339)
+	if _, err := db.Exec(`UPDATE cli_tokens SET expires_at = ? WHERE id = ?`, pastTS, resp.ID); err != nil {
+		t.Fatalf("backdate: %v", err)
+	}
+
+	_, _, _, vErr := ValidateCLIToken(db, resp.Token)
+	if vErr == nil {
+		t.Errorf("expected expired token to be rejected")
+	}
+	if vErr != nil && !strings.Contains(vErr.Error(), "invalid CLI token") {
+		t.Errorf("expired token error = %q, want generic 'invalid CLI token'", vErr.Error())
+	}
+}
+
+// TestIsCLIToken_AcceptsBothTiers proves the prefix matcher returns
+// true for either tier so the middleware token-dispatch keeps working
+// without per-tier branches at the AuthMiddleware layer.
+func TestIsCLIToken_AcceptsBothTiers(t *testing.T) {
+	if !IsCLIToken("crewship_cli_abc") {
+		t.Error("standard prefix should match")
+	}
+	if !IsCLIToken("crewship_admin_abc") {
+		t.Error("admin prefix should match")
+	}
+	if IsCLIToken("not_a_token") {
+		t.Error("non-token must not match")
+	}
+}
+
 func TestCLITokenCreate_TokenIsRandomAndUnique(t *testing.T) {
 	db := setupTestDB(t)
 	userID := seedTestUser(t, db)
@@ -393,9 +595,10 @@ func TestCLITokenCreate_TokenIsRandomAndUnique(t *testing.T) {
 			t.Errorf("duplicate token generated: %q", resp.Token)
 		}
 		tokens[resp.Token] = true
-		// 13 (prefix) + 40 (hex) = 53
-		if len(resp.Token) != 53 {
-			t.Errorf("token length = %d, want 53", len(resp.Token))
+		// Post-Patch-J: 32 random bytes hex-encoded = 64 chars.
+		// 13 (prefix "crewship_cli_") + 64 (hex) = 77.
+		if len(resp.Token) != 77 {
+			t.Errorf("token length = %d, want 77 (prefix 13 + 64-char hex of 32-byte random)", len(resp.Token))
 		}
 	}
 }

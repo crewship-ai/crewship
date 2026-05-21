@@ -1304,6 +1304,13 @@ END;
 	// See migrate_consts_v97_eval_runs_online.go.
 	// (Renumbered from v96 to v97 on rebase for the same reason.)
 	{version: 97, name: "eval_runs_online", sql: migrationEvalRunsOnline},
+
+	// Two-tier CLI tokens (Patch J): adds `tier` ('STANDARD' | 'ADMIN')
+	// and `expires_at` to cli_tokens, plus a cli_token_uses audit
+	// table for ADMIN tier per-use logging. Existing rows backfill to
+	// tier='STANDARD' with NULL expires_at — full backwards compat.
+	// See migrate_consts_v98_cli_token_tiers.go.
+	{version: 98, name: "cli_token_tiers", sql: migrationCLITokenTiers},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the
