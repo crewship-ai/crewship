@@ -1,6 +1,6 @@
 package database
 
-// migrationEphemeralAgents (v102) adds the ephemeral-agent lifecycle
+// migrationEphemeralAgents (v103) adds the ephemeral-agent lifecycle
 // surface introduced in PRD §6 F5 (PR-D). Five net-new columns on
 // agents + one on crews, all additive so legacy inserts continue to
 // work unchanged.

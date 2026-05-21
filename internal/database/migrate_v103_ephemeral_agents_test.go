@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-// TestMigrateV102_EphemeralAgents asserts the PR-D ephemeral lifecycle
+// TestMigrateV103_EphemeralAgents asserts the PR-D ephemeral lifecycle
 // surface lands additively: every new column on agents + the per-crew
 // quota on crews exist with the documented defaults, CHECK constraints
 // reject invalid values, and pre-v100 insert shapes still succeed (the
@@ -23,9 +23,9 @@ import (
 // specifically that expired_at can be set independently of deleted_at
 // and that the partial index excludes already-expired rows from the
 // sweeper's hot scan.
-func TestMigrateV102_EphemeralAgents(t *testing.T) {
+func TestMigrateV103_EphemeralAgents(t *testing.T) {
 	dir := t.TempDir()
-	db, err := Open("file:" + filepath.Join(dir, "v102.db"))
+	db, err := Open("file:" + filepath.Join(dir, "v103.db"))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestMigrateV102_EphemeralAgents(t *testing.T) {
 			name: "legacy_agent_insert_without_ephemeral_columns_works",
 			assert: func(t *testing.T, db *sql.DB) {
 				// The whole point of additive defaults: existing agent
-				// inserts that don't mention any of the v102 columns
+				// inserts that don't mention any of the v103 columns
 				// must continue to land — ephemeral=0 + nulls everywhere
 				// else kicks in automatically.
 				mustExec(t, db, `INSERT INTO agents (id, crew_id, workspace_id, name, slug)

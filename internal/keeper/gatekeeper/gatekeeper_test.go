@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/keeper"
@@ -221,6 +222,131 @@ func TestGatekeeper_NormalisesDecisionCase(t *testing.T) {
 	}
 	if resp.Decision != string(keeper.DecisionAllow) {
 		t.Errorf("expected normalised ALLOW, got %s", resp.Decision)
+	}
+}
+
+// TestGatekeeper_BuildPromptSwitchesOnRequestType pins the C.2
+// refactor: each F4.x RequestType produces a distinctly-shaped prompt
+// (we assert on a header substring unique to that template). Regress
+// here if a future change drops the type-aware switch and collapses
+// back to a single template.
+func TestGatekeeper_BuildPromptSwitchesOnRequestType(t *testing.T) {
+	tests := []struct {
+		name        string
+		req         gatekeeper.EvalRequest
+		wantSubstr  string
+		wantUnique  string // substring expected only in this template
+		shouldOmit  []string
+		setInputs   func(*gatekeeper.EvalRequest)
+		llmResponse string
+	}{
+		{
+			name: "access default — original prompt",
+			req: gatekeeper.EvalRequest{
+				Request:        keeper.Request{Intent: "need npm token to publish"},
+				SecurityLevel:  keeper.SecurityLevelL2,
+				CredentialName: "npm-token",
+				AgentName:      "DevBot",
+				CrewName:       "Dev",
+			},
+			wantSubstr:  "security gatekeeper for AI agent credential access",
+			wantUnique:  "credential access",
+			llmResponse: `{"decision":"ALLOW","reason":"ok","risk":2}`,
+		},
+		{
+			name: "skill_review — Curator template",
+			req: gatekeeper.EvalRequest{
+				Request:        keeper.Request{Intent: "audit my-skill"},
+				SecurityLevel:  keeper.SecurityLevelL1,
+				CredentialName: "n/a",
+				AgentName:      "Reviewer",
+				CrewName:       "Dev",
+				RequestType:    keeper.RequestTypeSkillReview,
+				SkillReview: &gatekeeper.SkillReviewInput{
+					SkillID:        "sk1",
+					SkillName:      "my-skill",
+					LifecycleState: "active",
+					AssignedAgents: []string{"agent-a", "agent-b"},
+					Stats:          gatekeeper.SkillStats{InvocationCount: 4, ErrorCount: 1, LookbackDays: 30},
+				},
+			},
+			wantSubstr:  "Curator",
+			wantUnique:  "SKILL UNDER REVIEW",
+			llmResponse: `{"decision":"ALLOW","reason":"in active use","risk":2}`,
+		},
+		{
+			name: "behavior — Behavior Monitor template",
+			req: gatekeeper.EvalRequest{
+				Request:        keeper.Request{Intent: "post-tool-call check"},
+				SecurityLevel:  keeper.SecurityLevelL1,
+				CredentialName: "n/a",
+				AgentName:      "Worker",
+				CrewName:       "Ops",
+				RequestType:    keeper.RequestTypeBehavior,
+				Behavior: &gatekeeper.BehaviorInput{
+					ToolName:        "shell_exec",
+					ToolArgsSnippet: `{"cmd":"ls"}`,
+					BehaviorMode:    "warn",
+					RecentToolCalls: []string{"shell_exec", "shell_exec", "shell_exec"},
+				},
+			},
+			wantSubstr:  "Behavior Monitor",
+			wantUnique:  "Behavior mode:",
+			llmResponse: `{"decision":"ALLOW","reason":"normal","risk":1}`,
+		},
+		{
+			name: "memory_health — Memory Health Auditor template",
+			req: gatekeeper.EvalRequest{
+				Request:        keeper.Request{Intent: "daily sweep"},
+				SecurityLevel:  keeper.SecurityLevelL1,
+				CredentialName: "n/a",
+				AgentName:      "Auditor",
+				CrewName:       "Ops",
+				RequestType:    keeper.RequestTypeMemoryHealth,
+				MemoryHealth: &gatekeeper.MemoryHealthInput{
+					AgentMDBytes: 2048, PersonaMDBytes: 800, CrewMDBytes: 3500,
+					StalestEntryDays: 12, RecallToWriteRatio: 0.42, ContradictionCount: 0,
+				},
+			},
+			wantSubstr:  "Memory Health Auditor",
+			wantUnique:  "MEMORY SNAPSHOT",
+			llmResponse: `{"decision":"ALLOW","reason":"healthy","risk":1}`,
+		},
+		{
+			name: "negative_learning — Negative Learning Evaluator template",
+			req: gatekeeper.EvalRequest{
+				Request:        keeper.Request{Intent: "run failed"},
+				SecurityLevel:  keeper.SecurityLevelL1,
+				CredentialName: "n/a",
+				AgentName:      "Loser",
+				CrewName:       "Ops",
+				RequestType:    keeper.RequestTypeNegativeLearning,
+				NegativeLesson: &gatekeeper.NegativeLearningInput{
+					TriggerKind:    "run_failed",
+					FailureSnippet: "deploy.sh exited 1",
+				},
+			},
+			wantSubstr:  "Negative Learning Evaluator",
+			wantUnique:  "FAILURE EVENT",
+			llmResponse: `{"decision":"DENY","reason":"transient","risk":3}`,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			p := &mockProvider{content: tc.llmResponse}
+			g := gatekeeper.New(p, "phi3:mini", newTestLogger())
+			if _, err := g.Evaluate(context.Background(), tc.req); err != nil {
+				t.Fatalf("Evaluate: %v", err)
+			}
+			if p.capturedPrompt == "" {
+				t.Fatal("no prompt captured (provider not called?)")
+			}
+			for _, want := range []string{tc.wantSubstr, tc.wantUnique} {
+				if !strings.Contains(p.capturedPrompt, want) {
+					t.Errorf("prompt missing %q\n---\n%s\n---", want, p.capturedPrompt)
+				}
+			}
+		})
 	}
 }
 

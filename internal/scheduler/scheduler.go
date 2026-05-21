@@ -118,6 +118,61 @@ func (s *Scheduler) Stop() {
 	s.logger.Info("scheduler stopped")
 }
 
+// RegisterPlatformRoutine attaches a non-agent cron job — the cadence for
+// Keeper Phase 2 sweeps (skill_review F4.1, memory_health_check F4.3) plus
+// any future platform-level scheduled work. The fn runs on its own
+// goroutine each time the cron fires; it MUST honour the supplied ctx
+// (derived from the scheduler's lifecycle ctx) so Stop() can drain.
+//
+// Errors during fn are logged but never propagated — cron does not retry
+// on failure, and a broken sweep should not stop subsequent sweeps. The
+// caller is responsible for emitting journal entries for visibility.
+//
+// Returns an error only if the cron expression itself doesn't parse; a
+// successful registration is permanent for the scheduler's lifetime
+// (there's no platform-routine unregister surface today — these are wired
+// once at boot from server bootstrap).
+//
+// `name` is logged on every fire for grep-ability; pass the
+// routines.RoutineKind string ("skill_review", "memory_health_check").
+func (s *Scheduler) RegisterPlatformRoutine(name, cronExpr string, fn func(ctx context.Context)) error {
+	if fn == nil {
+		return fmt.Errorf("scheduler: RegisterPlatformRoutine requires non-nil fn")
+	}
+	if _, err := s.parser.Parse(cronExpr); err != nil {
+		return fmt.Errorf("scheduler: invalid cron %q for platform routine %q: %w", cronExpr, name, err)
+	}
+	_, err := s.c.AddFunc(cronExpr, func() {
+		// robfig/cron/v3 does NOT recover panics by default (unlike v2):
+		// any panic inside fn would crash the entire process, taking
+		// down the API server with it and breaking the "future sweeps
+		// continue" guarantee. Wrap each fire so a faulty routine
+		// degrades to a logged error rather than a hard kill.
+		defer func() {
+			if r := recover(); r != nil {
+				s.logger.Error("platform routine panicked",
+					"name", name, "cron", cronExpr, "panic", r)
+			}
+		}()
+		// Per-fire ctx tied to the scheduler lifecycle so Stop() cancels
+		// in-flight sweeps. 30-minute hard cap matches the upper bound
+		// for a full skill-catalog sweep on an instance with thousands
+		// of skills (each evaluator call ~5s × Haiku latency, but we
+		// stream serially to keep the LLM token budget bounded —
+		// parallelism would burn cost without a clear win for a daily
+		// audit-not-gate workload).
+		jobCtx, cancel := context.WithTimeout(s.ctx, 30*time.Minute)
+		defer cancel()
+		s.logger.Info("platform routine fired", "name", name, "cron", cronExpr)
+		fn(jobCtx)
+	})
+	if err != nil {
+		return fmt.Errorf("scheduler: register platform routine %q: %w", name, err)
+	}
+	s.logger.Info("platform routine registered", "name", name, "cron", cronExpr)
+	return nil
+}
+
 func (s *Scheduler) loadSchedules(ctx context.Context) error {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT a.id, a.slug, a.name, COALESCE(a.crew_id, ''), COALESCE(c.slug, ''),
