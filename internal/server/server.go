@@ -636,6 +636,17 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 			// Server.RegisterKeeperRoutines once the scheduler is up.
 			s.keeperPhase2 = evals
 
+			// PR-C F4.2 hot-path: wire the orchestrator's
+			// PostToolCallObserver to behaviorhook.Get() so every tool
+			// call event flows through the sampling gate. The adapter
+			// itself is nil-safe (no-op when behaviorhook isn't
+			// installed) but skipping the wire when the evaluator was
+			// dropped during bootstrap keeps the boot logs honest.
+			if evals.behavior != nil {
+				orch.SetPostToolCallObserver(newPostToolCallObserver(logger, s.journalWriter))
+				logger.Info("keeper: orchestrator tool-call observer wired to behaviorhook")
+			}
+
 			// Pipeline AgentRunner is wired in cmd_start.go after
 			// the chatbridge.ChatResolver is built — the runner
 			// needs the resolver + IPC base URL to look up agent

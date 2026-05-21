@@ -213,6 +213,11 @@ type Orchestrator struct {
 	episodicRecall EpisodicRecaller
 	presence       PresenceTracker
 	memoryMetrics  MemoryMetricsReader
+	// postToolCallObs is the optional PR-C F4.2 behavior monitor hook.
+	// Wired from server.New via SetPostToolCallObserver; nil-safe via
+	// the getter so a server without behaviorhook installed (e.g. dev
+	// builds without ANTHROPIC_API_KEY) just no-ops on the hot path.
+	postToolCallObs PostToolCallObserver
 	// workspaceMemory resolves cross-crew memory for a workspace into a
 	// [WORKSPACE MEMORY] system-prompt block. Nil-safe — when no
 	// provider is wired (default), buildWorkspaceMemoryBlock returns
@@ -242,6 +247,38 @@ const episodicUnreachableLogInterval = 10 * time.Minute
 // this to the full hooks.Dispatch signature.
 type HookDispatcher interface {
 	Dispatch(ctx context.Context, event string, eventCtx HookEventContext) error
+}
+
+// PostToolCallObserver is the narrow interface the orchestrator uses to
+// notify the PR-C F4.2 behavior monitor of each tool_call event. The
+// adapter in server/ (post_tool_call_adapter.go) forwards to
+// behaviorhook.Get().MaybeEvaluate — the hook itself owns sampling, LLM
+// budget, and the decision-to-journal/inbox mapping. The orchestrator's
+// job is just to invoke it on the hot path.
+//
+// Decoupled via a narrow interface (rather than direct import of
+// internal/keeper/behaviorhook) so this package stays free of keeper
+// dependencies — the dependency direction is one-way: server → keeper.
+type PostToolCallObserver interface {
+	// Observe is called synchronously from the orchestrator's tool_call
+	// handler. Implementations MUST be cheap or asynchronous — the
+	// orchestrator already calls Observe from a goroutine but
+	// implementations should still treat the call as best-effort. Errors
+	// are not returned (logged inside the observer).
+	Observe(ToolCallObservation)
+}
+
+// ToolCallObservation carries the EventPostToolCall payload across the
+// narrow PostToolCallObserver interface. Fields mirror hooks.EventContext
+// but stay in orchestrator's vocabulary so we don't pull internal/hooks
+// types into this package's exported surface.
+type ToolCallObservation struct {
+	WorkspaceID string
+	CrewID      string
+	AgentID     string
+	MissionID   string
+	ToolName    string
+	Payload     map[string]any
 }
 
 // HookEventContext mirrors hooks.EventContext in a narrow form so
@@ -441,6 +478,22 @@ func (o *Orchestrator) getEpisodicRecall() EpisodicRecaller {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 	return o.episodicRecall // nil allowed; caller checks
+}
+
+// SetPostToolCallObserver wires the PR-C F4.2 behavior monitor onto the
+// orchestrator hot path. nil is accepted and treated as "no observer
+// configured" — the tappedHandler tool_call branch just no-ops when
+// getPostToolCallObserver returns nil.
+func (o *Orchestrator) SetPostToolCallObserver(obs PostToolCallObserver) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.postToolCallObs = obs
+}
+
+func (o *Orchestrator) getPostToolCallObserver() PostToolCallObserver {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	return o.postToolCallObs // nil allowed; caller guards
 }
 
 type noopHooks struct{}
