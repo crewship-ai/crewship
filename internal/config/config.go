@@ -206,7 +206,11 @@ func Default() *Config {
 		Keeper: KeeperConfig{
 			Enabled:   false,
 			OllamaURL: "http://localhost:11434",
-			Model:     "phi3:mini",
+			// PR-Z Z.2: no default model. Operator must set cfg.keeper.model
+			// (or the KEEPER_MODEL env var — see applyEnvOverrides below)
+			// explicitly when enabling Keeper. F3 (PR-B) replaces this with
+			// cfg.auxiliary.keeper.model defaulting to claude-haiku-4-5.
+			Model: "",
 		},
 	}
 }
@@ -291,6 +295,19 @@ func (c *Config) Validate() error {
 	}
 	if c.Auth.NextjsURL == "" {
 		return fmt.Errorf("auth.nextjs_url is required (set CREWSHIP_NEXTJS_URL)")
+	}
+	// PR-Z Z.2: silent phi3:mini fallback removed. An enabled Keeper must
+	// have an explicit model configured; loud config error beats silent
+	// degradation that masked mis-configurations in earlier builds.
+	// Normalize (not just check) so whitespace-only YAML values
+	// ("model: ' '") fail validation AND padded values
+	// ("model: ' claude-haiku-4-5 '") don't reach the provider with
+	// leading/trailing spaces and silently fail model resolution.
+	if c.Keeper.Enabled {
+		c.Keeper.Model = strings.TrimSpace(c.Keeper.Model)
+		if c.Keeper.Model == "" {
+			return fmt.Errorf("keeper.enabled=true but keeper.model is empty; set cfg.keeper.model or KEEPER_MODEL env (F3 in PR-B will introduce cfg.auxiliary.keeper.model)")
+		}
 	}
 	return nil
 }

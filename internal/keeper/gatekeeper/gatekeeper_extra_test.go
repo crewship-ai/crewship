@@ -358,16 +358,17 @@ func TestGatekeeper_NoConvHistory_NoBackgroundBlockInPrompt(t *testing.T) {
 	}
 }
 
-// TestGatekeeper_DefaultsModelWhenEmpty verifies New("") falls back to
-// "phi3:mini" so the upstream call doesn't ship an empty model name.
-// Invariant: a misconfigured caller must not produce a request the
-// provider will reject for an empty Model field.
-func TestGatekeeper_DefaultsModelWhenEmpty(t *testing.T) {
+// TestGatekeeper_PassesExplicitModelToProvider replaces the deleted
+// TestGatekeeper_DefaultsModelWhenEmpty. PR-Z Z.2 removed the silent
+// phi3:mini fallback in gatekeeper.New; the model string is now passed
+// through verbatim to the provider, and validation that it's non-empty
+// is enforced at config load (see internal/config TestValidationKeeper*).
+func TestGatekeeper_PassesExplicitModelToProvider(t *testing.T) {
 	p := &modelCapturingProvider{
 		content: `{"decision":"DENY","reason":"ok","risk":5}`,
 	}
-	// Empty model string — Gatekeeper must default it.
-	g := gatekeeper.New(p, "", newTestLogger())
+	const explicitModel = "claude-haiku-4-5"
+	g := gatekeeper.New(p, explicitModel, newTestLogger())
 
 	req := gatekeeper.EvalRequest{
 		Request: keeper.Request{
@@ -381,11 +382,8 @@ func TestGatekeeper_DefaultsModelWhenEmpty(t *testing.T) {
 	if _, err := g.Evaluate(context.Background(), req); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if p.capturedReq.Model == "" {
-		t.Error("Gatekeeper sent empty Model to provider; New(...) must default it")
-	}
-	if p.capturedReq.Model != "phi3:mini" {
-		t.Errorf("expected default model 'phi3:mini', got %q", p.capturedReq.Model)
+	if p.capturedReq.Model != explicitModel {
+		t.Errorf("expected model %q passed through to provider, got %q", explicitModel, p.capturedReq.Model)
 	}
 }
 

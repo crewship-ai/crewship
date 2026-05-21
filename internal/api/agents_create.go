@@ -12,16 +12,20 @@ import (
 )
 
 type createAgentRequest struct {
-	Name           string  `json:"name"`
-	Slug           string  `json:"slug"`
-	CrewID         *string `json:"crew_id"`
-	Description    *string `json:"description"`
-	RoleTitle      *string `json:"role_title"`
-	AgentRole      string  `json:"agent_role"`
-	LeadMode       *string `json:"lead_mode"`
-	CLIAdapter     string  `json:"cli_adapter"`
-	LLMProvider    *string `json:"llm_provider"`
-	LLMModel       *string `json:"llm_model"`
+	Name        string  `json:"name"`
+	Slug        string  `json:"slug"`
+	CrewID      *string `json:"crew_id"`
+	Description *string `json:"description"`
+	RoleTitle   *string `json:"role_title"`
+	AgentRole   string  `json:"agent_role"`
+	LeadMode    *string `json:"lead_mode"`
+	CLIAdapter  string  `json:"cli_adapter"`
+	LLMProvider *string `json:"llm_provider"`
+	LLMModel    *string `json:"llm_model"`
+	// Deprecated: see agentResponse.SystemPrompt in agents.go — PR-Z
+	// Z.3 / PR-E migrate this to the PERSONA.md memory tier. Accepted
+	// in create requests for now; new clients should set PERSONA via
+	// memory.write once F1 ships.
 	SystemPrompt   *string `json:"system_prompt"`
 	AvatarSeed     *string `json:"avatar_seed"`
 	AvatarStyle    *string `json:"avatar_style"`

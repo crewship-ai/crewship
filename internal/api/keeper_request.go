@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/keeper"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
@@ -245,6 +246,52 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 		Refs: map[string]any{"keeper_request_id": reqID, "credential_id": body.CredentialID},
 	}); jerr != nil {
 		h.logger.Warn("keeper: journal emit decision failed", "error", jerr, "request_id", reqID)
+	}
+
+	// PR-Z Z.4: ESCALATE decisions land in the inbox as blocking items so
+	// operators see them in the bell badge / unified feed. Prior to Z.4
+	// ESCALATE only emitted to the journal — operators had no actionable
+	// surface, escalations died silently. F4 endpoints in PR-C reuse the
+	// same inbox.Insert plumbing for skill-review / behavior / memory-
+	// health / negative-learning escalations.
+	//
+	// inbox.Insert is intentionally fire-and-forget (see writer.go doc:
+	// "Best-effort: a SQL failure is logged and swallowed so the caller's
+	// path stays intact. The inbox is a projection; the source table
+	// remains the source of truth"). The escalation itself is already
+	// persisted to keeper_requests (line 211 above) and journal (line 226)
+	// — if the inbox projection write fails the operator misses the bell
+	// badge but the data exists and can be re-projected by a backfill.
+	// Failing the keeper /request response on a projection error would
+	// flip the agent's credential request semantics from "ESCALATE
+	// pending operator" to "transient transport error → retry" which is
+	// the wrong recovery for the same outcome.
+	if gkResp.Decision == string(keeper.DecisionEscalate) {
+		inbox.Insert(r.Context(), h.db, h.logger, inbox.Item{
+			WorkspaceID: body.WorkspaceID,
+			Kind:        inbox.KindEscalation,
+			SourceID:    reqID,
+			TargetRole:  "MANAGER",
+			Title:       fmt.Sprintf("Keeper escalation: %s requested %s (risk %d)", agentName, credName, gkResp.RiskScore),
+			BodyMD:      gkResp.Reason,
+			SenderType:  "system",
+			SenderID:    "keeper",
+			SenderName:  "Keeper",
+			Priority:    "high",
+			Blocking:    true,
+			Payload: map[string]interface{}{
+				"request_id":      reqID,
+				"request_type":    "access",
+				"agent_id":        body.RequestingAgentID,
+				"agent_name":      agentName,
+				"credential_id":   body.CredentialID,
+				"credential_name": credName,
+				"security_level":  secLevel,
+				"intent":          body.Intent,
+				"reason":          gkResp.Reason,
+				"risk_score":      gkResp.RiskScore,
+			},
+		})
 	}
 
 	h.logger.Info("keeper: decision",
