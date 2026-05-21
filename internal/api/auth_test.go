@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -161,7 +162,7 @@ func TestAuthBootstrap_Success(t *testing.T) {
 	// the request. In production this happens at server startup against
 	// an empty users table; here we drive it explicitly. Grab the token
 	// out via the test-only accessor before it's consumed.
-	if err := h.MaybeGenerateSetupToken(context.Background()); err != nil {
+	if err := h.MaybeGenerateSetupToken(context.Background(), ""); err != nil {
 		t.Fatalf("arm setup token: %v", err)
 	}
 	tok := h.peekSetupTokenForTest()
@@ -229,7 +230,7 @@ func TestAuthBootstrap_LeavesOnboardingPending(t *testing.T) {
 	v := newTestJWTValidator(t)
 	h := NewAuthHandler(db, logger, v, sessions.NewDBStore(db), false)
 
-	if err := h.MaybeGenerateSetupToken(context.Background()); err != nil {
+	if err := h.MaybeGenerateSetupToken(context.Background(), ""); err != nil {
 		t.Fatalf("arm: %v", err)
 	}
 	tok := h.peekSetupTokenForTest()
@@ -263,7 +264,7 @@ func TestAuthBootstrap_AlreadyInitialized(t *testing.T) {
 	// Bootstrap on a non-empty DB: no token is armed (MaybeGenerateSetupToken
 	// noops when count > 0), so the gate refuses without ever reaching the
 	// in-tx COUNT check. Same 403 from the caller's POV.
-	if err := h.MaybeGenerateSetupToken(context.Background()); err != nil {
+	if err := h.MaybeGenerateSetupToken(context.Background(), ""); err != nil {
 		t.Fatalf("arm: %v", err)
 	}
 	if h.peekSetupTokenForTest() != "" {
@@ -279,6 +280,87 @@ func TestAuthBootstrap_AlreadyInitialized(t *testing.T) {
 	}
 }
 
+// TestAuthBootstrap_SetupTokenFileMirror pins Patch L2: when a data
+// dir is configured, MaybeGenerateSetupToken also writes the token to
+// <dataDir>/initial_setup_token (mode 0600, GitLab-style). On
+// successful bootstrap the file is auto-deleted so a later operator
+// who SSH's in can tell the bootstrap moment has passed.
+func TestAuthBootstrap_SetupTokenFileMirror(t *testing.T) {
+	t.Parallel()
+	dataDir := t.TempDir()
+
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	v := newTestJWTValidator(t)
+	h := NewAuthHandler(db, logger, v, sessions.NewDBStore(db), false)
+
+	if err := h.MaybeGenerateSetupToken(context.Background(), dataDir); err != nil {
+		t.Fatalf("arm: %v", err)
+	}
+	path := filepath.Join(dataDir, "initial_setup_token")
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("file should exist at %s: %v", path, err)
+	}
+	if mode := info.Mode().Perm(); mode != 0o600 {
+		t.Errorf("file mode = %o, want 0600 (owner-only read)", mode)
+	}
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if !strings.Contains(string(contents), h.peekSetupTokenForTest()) {
+		t.Errorf("file must contain the live token; got %q", string(contents))
+	}
+	if !strings.Contains(string(contents), "DO NOT") {
+		t.Errorf("file must include the 'one-shot' warning header")
+	}
+
+	// Successful bootstrap auto-deletes the file.
+	body := bytes.NewBufferString(`{"full_name":"Admin","email":"a@b.com","password":"longenough"}`)
+	req := httptest.NewRequest("POST", "/api/v1/auth/bootstrap", body)
+	req.Header.Set("X-Setup-Token", h.peekSetupTokenForTest())
+	rr := httptest.NewRecorder()
+	h.Bootstrap(rr, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("bootstrap status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("file must be auto-removed after successful bootstrap; stat err = %v", err)
+	}
+}
+
+// TestMaybeGenerateSetupToken_RemovesStaleFileOnAlreadyInitDB —
+// if a previous run crashed between writing the file and bootstrap,
+// the next process start (with users already in DB from some other
+// path — operator-seeded, restored backup, etc.) MUST purge the stale
+// file. A leaked token + a misleading file would compound the worst
+// case into "operator thinks they need to use the file, sees 403,
+// loses trust".
+func TestMaybeGenerateSetupToken_RemovesStaleFileOnAlreadyInitDB(t *testing.T) {
+	t.Parallel()
+	dataDir := t.TempDir()
+
+	// Plant a stale token file as if a previous crash left it behind.
+	stalePath := filepath.Join(dataDir, "initial_setup_token")
+	if err := os.WriteFile(stalePath, []byte("stale-token-from-prior-crash"), 0o600); err != nil {
+		t.Fatalf("plant: %v", err)
+	}
+
+	db := setupTestDB(t)
+	seedTestUser(t, db) // DB is non-empty when this run starts
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	v := newTestJWTValidator(t)
+	h := NewAuthHandler(db, logger, v, sessions.NewDBStore(db), false)
+
+	if err := h.MaybeGenerateSetupToken(context.Background(), dataDir); err != nil {
+		t.Fatalf("arm: %v", err)
+	}
+	if _, err := os.Stat(stalePath); !os.IsNotExist(err) {
+		t.Errorf("stale file should be purged; stat err = %v", err)
+	}
+}
+
 // TestAuthBootstrap_SetupTokenRequired pins the Patch C contract: even when
 // the database is empty, a Bootstrap call with no X-Setup-Token header gets
 // 403. This is the deploy-race defense — the operator who started the
@@ -290,7 +372,7 @@ func TestAuthBootstrap_SetupTokenRequired(t *testing.T) {
 	v := newTestJWTValidator(t)
 	h := NewAuthHandler(db, logger, v, sessions.NewDBStore(db), false)
 
-	if err := h.MaybeGenerateSetupToken(context.Background()); err != nil {
+	if err := h.MaybeGenerateSetupToken(context.Background(), ""); err != nil {
 		t.Fatalf("arm: %v", err)
 	}
 	if h.peekSetupTokenForTest() == "" {
@@ -335,7 +417,7 @@ func TestAuthBootstrap_SetupTokenIsOneShot(t *testing.T) {
 	v := newTestJWTValidator(t)
 	h := NewAuthHandler(db, logger, v, sessions.NewDBStore(db), false)
 
-	if err := h.MaybeGenerateSetupToken(context.Background()); err != nil {
+	if err := h.MaybeGenerateSetupToken(context.Background(), ""); err != nil {
 		t.Fatalf("arm: %v", err)
 	}
 	tok := h.peekSetupTokenForTest()
@@ -389,7 +471,7 @@ func TestAuthBootstrap_Validation(t *testing.T) {
 			// on success; validation errors leave it armed, but we don't
 			// want to share token state between cases either way).
 			h := NewAuthHandler(db, logger, v, sessions.NewDBStore(db), false)
-			if err := h.MaybeGenerateSetupToken(context.Background()); err != nil {
+			if err := h.MaybeGenerateSetupToken(context.Background(), ""); err != nil {
 				t.Fatalf("arm: %v", err)
 			}
 			req := httptest.NewRequest("POST", "/api/v1/auth/bootstrap", strings.NewReader(tt.body))

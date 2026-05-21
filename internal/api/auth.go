@@ -7,8 +7,11 @@ import (
 	"crypto/subtle"
 	"database/sql"
 	"encoding/hex"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -35,8 +38,19 @@ type AuthHandler struct {
 	// All other states (DB already initialized, server restart after
 	// bootstrap) leave setupToken == "" which makes Bootstrap unconditionally
 	// refuse — no rate-limit-bypass to win the race.
-	setupTokenMu sync.Mutex
-	setupToken   string
+	//
+	// setupTokenPath is the on-disk mirror (GitLab `initial_root_password`
+	// convention): the token is also written to a 0600 file under the data
+	// directory so the operator can `cat` it from their SSH session instead
+	// of trawling journald. Auto-deleted on successful consumption AND on
+	// process restart after a successful bootstrap (the file is checked at
+	// arm time; if the users table is non-empty, any leftover file gets
+	// purged). Empty when MaybeGenerateSetupToken wasn't called with a
+	// data dir, in which case the in-memory token still works — the file
+	// is a UX add-on, not the source of truth.
+	setupTokenMu   sync.Mutex
+	setupToken     string
+	setupTokenPath string
 }
 
 // NewAuthHandler creates an AuthHandler with the given dependencies and signup configuration.
@@ -45,21 +59,39 @@ func NewAuthHandler(db *sql.DB, logger *slog.Logger, validator *auth.JWTValidato
 	return &AuthHandler{db: db, logger: logger, validator: validator, sessions: sessionsStore, allowSignup: allowSignup}
 }
 
+// initialSetupTokenFilename mirrors the GitLab `initial_root_password`
+// convention. Written under the configured data dir at mode 0600 with
+// owner-only access; auto-deleted on first successful bootstrap. The
+// content is just the token with a one-line header so a sysadmin who
+// `cat`s the file sees what it's for and that it's one-shot.
+const initialSetupTokenFilename = "initial_setup_token"
+
 // MaybeGenerateSetupToken inspects the users table at startup. When it is
-// empty, generates a one-shot setup token, stores it in memory, and logs it
-// at WARN so the operator running the binary can see it once. The next
-// caller of /api/v1/bootstrap must echo this token as X-Setup-Token or
-// the request is refused.
+// empty, generates a one-shot setup token, stores it in memory, writes a
+// mirror copy to <dataDir>/initial_setup_token (mode 0600), and logs it
+// at WARN. The next caller of /api/v1/bootstrap must echo this token as
+// X-Setup-Token or the request is refused.
 //
-// Closes the deploy race where any LAN-reachable scanner could race the
-// legitimate operator to be the first POST on an empty DB and walk away
-// with an OWNER CLI token. The token never touches disk and is consumed
-// in-memory on first successful bootstrap.
+// Convention follows GitLab's initial_root_password / Gitea's
+// installer-token model: operator either pulls the token from the
+// process log (journald, systemd, Docker logs) OR reads the file via
+// SSH. Both paths reveal the same value; the file is the more
+// ergonomic of the two for cloud-VM deployments where journald can be
+// noisy. On successful bootstrap the in-memory token is zeroed AND the
+// file is removed.
+//
+// dataDir mirrors the directory the secrets package uses; pass "" to
+// keep the token in memory only (handler-only tests, embedded modes).
+//
+// When the users table is already non-empty, this also REMOVES any
+// leftover initial_setup_token file from a previous incomplete
+// bootstrap — keeps the on-disk state honest after the admin row
+// finally lands via /signup, password reset, or an out-of-band write.
 //
 // Called from server.New after the DB is wired and before the HTTP server
 // starts accepting traffic. Safe to call concurrently; only the first
 // invocation observing an empty DB generates a token.
-func (h *AuthHandler) MaybeGenerateSetupToken(ctx context.Context) error {
+func (h *AuthHandler) MaybeGenerateSetupToken(ctx context.Context, dataDir string) error {
 	h.setupTokenMu.Lock()
 	defer h.setupTokenMu.Unlock()
 	if h.setupToken != "" {
@@ -70,8 +102,18 @@ func (h *AuthHandler) MaybeGenerateSetupToken(ctx context.Context) error {
 		return err
 	}
 	if count > 0 {
-		// Already bootstrapped — no token needed. Bootstrap handler will
-		// reject all attempts via the in-tx count check.
+		// Already bootstrapped — purge any leftover file from a
+		// previous run that crashed between writing the file and the
+		// first /bootstrap call. Leaving it on disk would be a stale
+		// token + a misleading UX cue. Best-effort: a missing file is
+		// fine, anything else gets logged but doesn't fail startup.
+		if dataDir != "" {
+			path := filepath.Join(dataDir, initialSetupTokenFilename)
+			if rmErr := os.Remove(path); rmErr != nil && !os.IsNotExist(rmErr) {
+				h.logger.Warn("could not remove stale setup-token file",
+					"path", path, "error", rmErr)
+			}
+		}
 		return nil
 	}
 	buf := make([]byte, 32)
@@ -79,6 +121,38 @@ func (h *AuthHandler) MaybeGenerateSetupToken(ctx context.Context) error {
 		return err
 	}
 	h.setupToken = hex.EncodeToString(buf)
+
+	// Mirror to disk if a data dir is configured. We deliberately
+	// don't fail the arm step on a write error — the in-memory token
+	// is the source of truth, and an operator who can read journald
+	// still gets a working bootstrap. The warning makes the partial
+	// state visible.
+	if dataDir != "" {
+		if err := os.MkdirAll(dataDir, 0o700); err != nil {
+			h.logger.Warn("could not create data dir for setup-token file",
+				"path", dataDir, "error", err)
+		} else {
+			path := filepath.Join(dataDir, initialSetupTokenFilename)
+			content := fmt.Sprintf(
+				"# crewship: one-shot bootstrap token — DO NOT COMMIT, DO NOT SHARE\n"+
+					"# Use ONCE as X-Setup-Token header on POST /api/v1/bootstrap.\n"+
+					"# Auto-deleted on first successful bootstrap.\n"+
+					"#\n"+
+					"%s\n",
+				h.setupToken)
+			// 0600 — owner-only read, no group, no other. Same mode as
+			// secrets.env. The file lives next to it so an operator
+			// who tightened access on the data dir already covers this.
+			if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+				h.logger.Warn("could not persist setup-token file",
+					"path", path, "error", err,
+					"fallback", "operator must read token from process log instead")
+			} else {
+				h.setupTokenPath = path
+			}
+		}
+	}
+
 	// Triple-log: stderr + slog WARN + on its own line so even a busy
 	// startup log isn't likely to swallow it. The operator has to see this.
 	bannerLine := strings.Repeat("=", 72)
@@ -86,6 +160,9 @@ func (h *AuthHandler) MaybeGenerateSetupToken(ctx context.Context) error {
 	h.logger.Warn("BOOTSTRAP REQUIRED — first /api/v1/bootstrap call must carry this token")
 	h.logger.Warn("Send it in the X-Setup-Token header. It is shown ONCE and one-shot.")
 	h.logger.Warn("CREWSHIP_BOOTSTRAP_TOKEN", "token", h.setupToken)
+	if h.setupTokenPath != "" {
+		h.logger.Warn("Also written to file (mode 0600)", "path", h.setupTokenPath)
+	}
 	h.logger.Warn(bannerLine)
 	return nil
 }
@@ -94,6 +171,13 @@ func (h *AuthHandler) MaybeGenerateSetupToken(ctx context.Context) error {
 // setup token AND zeroes the token so it can only be used once. Constant-time
 // comparison + length pad to defeat timing oracles. Returns false (with no
 // mutation) when no token is currently armed.
+//
+// On a successful match the on-disk mirror file (if any) is also
+// removed — the bootstrap moment is the only legitimate read of the
+// file. Removal is best-effort: a missing or unreachable file logs
+// at WARN but does not undo the in-memory consume (the operator who
+// got the bootstrap response back doesn't care that we couldn't
+// rm the file; the bootstrap already succeeded).
 func (h *AuthHandler) consumeSetupToken(provided string) bool {
 	h.setupTokenMu.Lock()
 	defer h.setupTokenMu.Unlock()
@@ -113,6 +197,14 @@ func (h *AuthHandler) consumeSetupToken(provided string) bool {
 	// One-shot: zero the in-memory copy so a leaked log line can't be
 	// replayed against a future restart that re-armed the token.
 	h.setupToken = ""
+	if h.setupTokenPath != "" {
+		if rmErr := os.Remove(h.setupTokenPath); rmErr != nil && !os.IsNotExist(rmErr) {
+			h.logger.Warn("could not remove consumed setup-token file",
+				"path", h.setupTokenPath, "error", rmErr,
+				"mitigation", "operator should `rm` the file manually")
+		}
+		h.setupTokenPath = ""
+	}
 	return true
 }
 

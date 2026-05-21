@@ -619,10 +619,17 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 				// when no token is armed, so timeout = fail-closed.
 				// defer cancel so a panic between the WithTimeout and
 				// MaybeGenerateSetupToken doesn't leak the context.
+				//
+				// cfg.Storage.BasePath = the server-owned data dir
+				// (mode 0700, where /workspace, /output etc. live). The
+				// initial_setup_token file lands there at mode 0600 —
+				// GitLab-style `initial_root_password` UX so the
+				// operator can `cat` it via SSH instead of trawling
+				// journald.
 				func() {
 					armCtx, armCancel := context.WithTimeout(context.Background(), 5*time.Second)
 					defer armCancel()
-					if err := authH.MaybeGenerateSetupToken(armCtx); err != nil {
+					if err := authH.MaybeGenerateSetupToken(armCtx, cfg.Storage.BasePath); err != nil {
 						logger.Error("bootstrap: setup token arm failed",
 							"error", err,
 							"impact", "POST /api/v1/bootstrap will refuse until DB is reachable or a row is added manually")
