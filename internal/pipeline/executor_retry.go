@@ -44,7 +44,7 @@ func (e *Executor) runStepWithRetry(
 	maxAttempts := rp.MaxAttempts
 	if maxAttempts > 10 {
 		// Cap to keep a runaway retry from monopolising the run
-		// budget. Trigger.dev defaults max=10; we follow.
+		// budget. 10 attempts is the conventional ceiling.
 		maxAttempts = 10
 	}
 	initialDelay := time.Duration(rp.InitialDelayMs) * time.Millisecond
@@ -79,10 +79,11 @@ func (e *Executor) runStepWithRetry(
 		emit.emitStepRetry(ctx, step, attempt, err.Error(), delay)
 		// Full jitter: actual sleep is uniform in [0, delay). Without
 		// jitter, N agents that hit the same upstream 429/5xx all
-		// retry in lockstep and stampede the recovery moment. AWS
-		// blogged the canonical analysis; Trigger.dev/Stripe follow
-		// the same pattern. We keep the deterministic upper bound
-		// for tests by floor'ing very small delays.
+		// retry in lockstep and stampede the recovery moment. The
+		// AWS Architecture Blog post on "Exponential Backoff And
+		// Jitter" documents the canonical analysis. We keep the
+		// deterministic upper bound for tests by floor'ing very
+		// small delays.
 		actualDelay := delay
 		if delay > 50*time.Millisecond {
 			actualDelay = time.Duration(mathrand.Int64N(int64(delay)))

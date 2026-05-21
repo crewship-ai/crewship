@@ -191,8 +191,7 @@ func Recall(ctx context.Context, db *sql.DB, emb Embedder, q Query) ([]Hit, erro
 // "IGNORE PREVIOUS INSTRUCTIONS" payload without anyone realising.
 // The wrapper instructs the model to treat everything inside as hints
 // that can be overridden by the current task, not as authoritative
-// instructions. Inspired by Hermes Agent's sanitize_context() and
-// Self-Evolve's <self-evolve-memories>...(untrusted metadata)...
+// instructions.
 func RenderInjection(hits []Hit, maxChars int) string {
 	if maxChars <= 0 {
 		maxChars = 2000

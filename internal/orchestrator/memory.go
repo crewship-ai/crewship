@@ -168,10 +168,9 @@ const nudgeThreshold = 60
 // since the last memory.updated emit and, above a threshold,
 // injects a one-line nudge. The agent is NOT forced to write
 // anything — the nudge is a passive suggestion, not a tool call.
-// Inspired by Hermes Agent's "agent-curated memory with periodic
-// nudges" but scoped to our read-only side (we don't have an
-// in-session trigger point, so the nudge lands at the next run's
-// system prompt assembly).
+// The agent-curated memory model with periodic nudges fits our
+// read-only side: we don't have an in-session trigger point, so
+// the nudge lands at the next run's system prompt assembly.
 func (o *Orchestrator) buildNudgeBlock(ctx context.Context, req AgentRunRequest) string {
 	if req.AgentID == "" || req.WorkspaceID == "" {
 		return ""

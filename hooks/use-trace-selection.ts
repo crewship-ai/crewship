@@ -7,8 +7,8 @@ import { useRouter, useSearchParams, usePathname } from "next/navigation"
 // canvas focused on" and "which step is the side panel focused on".
 //
 // State lives in the URL so a copied link reproduces the exact view
-// the user is looking at (`/activity?run=prn_X&step=fetch`). This
-// matches the Trigger.dev / Temporal pattern: trace IDs are linkable.
+// the user is looking at (`/activity?run=prn_X&step=fetch`). Trace
+// IDs are linkable as a first-class deep-link surface.
 export function useTraceSelection() {
   const router = useRouter()
   const pathname = usePathname()

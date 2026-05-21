@@ -19,9 +19,9 @@ import (
 // literal substring shows up with low cosine when the query is
 // "what went wrong in deploy-42"), and pure BM25 misses semantic
 // paraphrases ("rollback failed" vs "reverting didn't work"). RRF is
-// parameter-free and the current default in production RAG stacks
-// (Langchain Cohere, Weaviate, Qdrant) — cheap to implement, proven
-// to lift recall quality by ~20% over either lane alone.
+// parameter-free and the current default in production RAG stacks —
+// cheap to implement, proven to lift recall quality by ~20% over
+// either lane alone.
 //
 // This function is safe to call as a drop-in for Recall. If the FTS5
 // virtual table is missing (pre-migration-55 DB), the BM25 lane

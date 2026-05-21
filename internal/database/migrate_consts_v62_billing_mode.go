@@ -19,8 +19,8 @@ package database
 //     populated for metered API-key calls (sidecar parses anthropic-ratelimit-*
 //     and x-ratelimit-* headers from upstream responses)
 //   - subscription_plan: human label for flat-rate rows ("Anthropic Max 20×")
-//   - rate_*_per_m: rate-card snapshot at write time (Langfuse pattern). Lets
-//     pricing.go change without retroactively rewriting historical $ figures.
+//   - rate_*_per_m: rate-card snapshot at write time. Lets pricing.go
+//     change without retroactively rewriting historical $ figures.
 //   - cost_confidence: 'precise' (provider returned usage) | 'estimate' (we
 //     approximated from request body length) | 'unknown' (flat-rate, no $).
 //     UI shows a badge per row — no number is ever rendered without provenance.

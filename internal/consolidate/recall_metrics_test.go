@@ -73,9 +73,9 @@ func TestLoadRecallMetrics_OneSearchOneEvidenceMatches(t *testing.T) {
 
 // TestLoadRecallMetrics_DistinctQueryCount asserts that two searches
 // with the same query string count as ONE unique query, but TWO
-// distinct events for the recall counter. Mirrors the OpenClaw
-// definition: recall = how often the rule surfaced; unique = how
-// diverse the surfacing contexts were.
+// distinct events for the recall counter. The semantic split:
+// recall = how often the rule surfaced; unique = how diverse the
+// surfacing contexts were.
 func TestLoadRecallMetrics_DistinctQueryCount(t *testing.T) {
 	db := openDB(t)
 	defer db.Close()

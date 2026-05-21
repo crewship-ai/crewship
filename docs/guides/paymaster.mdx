@@ -42,16 +42,16 @@ CREATE TABLE cost_ledger (
   quota_window          TEXT,             -- 'requests_per_min' | 'tokens_per_min' | 'input_tokens_per_min' | 'output_tokens_per_min' (most-restrictive)
   -- [v62] Display label for flat-rate rows. NULL for metered.
   subscription_plan     TEXT,
-  -- [v62] Rate-card snapshot at write time (Langfuse pattern). A future
-  -- pricing.go change cannot retroactively rewrite history.
+  -- [v62] Rate-card snapshot at write time. A future pricing.go
+  -- change cannot retroactively rewrite history.
   -- Stored as plain REAL (nullable, no DEFAULT); the writer always
   -- supplies a non-NULL value so the column is effectively populated.
   rate_input_per_m      REAL,
   rate_output_per_m     REAL,
   rate_cached_in_per_m  REAL,
   rate_cache_write_per_m REAL NOT NULL DEFAULT 0,
-  -- [v62] Provenance label per row (Helicone pattern). UI never renders a
-  -- $ figure without telling the operator how trustworthy it is.
+  -- [v62] Provenance label per row. UI never renders a $ figure
+  -- without telling the operator how trustworthy it is.
   cost_confidence       TEXT NOT NULL DEFAULT 'estimate'
 );
 
@@ -172,7 +172,7 @@ The 10% discount for Anthropic cache reads (a `claude-haiku-4-5` cache read bill
 
 A regression earlier in this PR's history shipped the parser without consuming the cache fields — every workspace recorded zero cached tokens and the discount never triggered. The `cost_ledger.cached_input_tokens` column has been present since v62 but was effectively dead until this wiring landed.
 
-## Rate-card snapshotting (Langfuse pattern)
+## Rate-card snapshotting
 
 Every metered row writes the `rate_*_per_m` columns from `RateCard(provider, model)` at the moment of write. When `pricing.go` is later edited (a provider repriced, a new model was added), historical rollups stay consistent: the old row continues to imply its old rate. New rollup queries can either trust `cost_usd` directly or recompute from `rate_*_per_m * tokens` to verify nothing has drifted.
 

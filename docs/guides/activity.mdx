@@ -140,7 +140,7 @@ The status logic lives in `buildTraceGraph` (`lib/trace/build-trace-graph.ts`) s
 
 The killer feature: when a routine hits a `wait` step of `kind: approval` (a Harbormaster gate), the corresponding node renders **Approve** and **Deny** buttons in its body. Click Approve, the run resumes, the node flips from `waiting` to `success`, and the next step starts — all without leaving the canvas.
 
-This is the canvas-as-resolution-surface pattern (Trigger.dev's ReviewNode shape). The same `waitpointDecide` helper (`lib/api/waitpoints.ts`) backs both this inline button and the Inbox's detail-pane Approve button, so the two surfaces stay in lock-step. Approving from one tab clears the badge on the other within the realtime round-trip.
+This is the canvas-as-resolution-surface pattern. The same `waitpointDecide` helper (`lib/api/waitpoints.ts`) backs both this inline button and the Inbox's detail-pane Approve button, so the two surfaces stay in lock-step. Approving from one tab clears the badge on the other within the realtime round-trip.
 
 <Warning>
 Clicks on Approve/Deny `stopPropagation()` to prevent React Flow's `onNodeClick` from also selecting the step — without the guard, pressing Approve would also pop the detail panel. The pattern is intentional and worth knowing if you fork the trace node.

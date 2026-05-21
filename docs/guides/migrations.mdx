@@ -66,7 +66,7 @@ The five new entry types (`run.started`, `run.completed`, `run.failed`, `run.can
   PR #232 originally numbered this migration v60. The merge with PR #234 (which had taken v60 + v61 for the unified journal) renumbered it to v62 — see the `Renumbered from v60 to v62` comment in `migrate.go`. Documentation that pre-dates the merge may still mention v60; the canonical number is **v62**.
 </Note>
 
-After v62, `cost_ledger` distinguishes metered API-key calls from flat-rate subscription calls and snapshots the rate card per row (Langfuse pattern). See [Paymaster](/guides/paymaster).
+After v62, `cost_ledger` distinguishes metered API-key calls from flat-rate subscription calls and snapshots the rate card per row. See [Paymaster](/guides/paymaster).
 
 ## How to read this in operation
 

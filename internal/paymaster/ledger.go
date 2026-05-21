@@ -34,8 +34,8 @@ const tsLayout = "2006-01-02T15:04:05.000Z"
 //     as audit ("this credential was used at this timestamp by this agent").
 //     A `cost.incurred` journal entry is suppressed because no $ was incurred.
 //   - BillingMetered (default) snapshots the rate card at write time so a
-//     later pricing.go change can't rewrite history (Langfuse pattern). When
-//     CostUSD is zero on input, Estimate fills it from the same snapshot.
+//     later pricing.go change can't rewrite history. When CostUSD is zero
+//     on input, Estimate fills it from the same snapshot.
 func Record(ctx context.Context, db *sql.DB, j journal.Emitter, c Call) (CostRecord, error) {
 	if db == nil {
 		// nil db is an infrastructure bug, not a user-input fault — keep it
@@ -115,7 +115,8 @@ func Record(ctx context.Context, db *sql.DB, j journal.Emitter, c Call) (CostRec
 		// Rate snapshot: always write the actual lookup result. Zero is
 		// honest for ollama/local (free) and for unknown-provider lookups
 		// (we couldn't price); NULL would erase that distinction. Per
-		// CodeRabbit on this column being a Langfuse-pattern audit field.
+		// review, this column is an audit field — every row records the
+		// rate it was priced against.
 		rate.InputPerM,
 		rate.OutputPerM,
 		rate.CachedInputPerM,

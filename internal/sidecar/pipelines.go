@@ -207,8 +207,8 @@ func (s *Server) handlePipelinesRun(w http.ResponseWriter, r *http.Request, slug
 
 // handlePipelinesDryRun is the explicit dry-run endpoint. The
 // /pipelines/{slug}/run endpoint also accepts dry_run=true in body,
-// but a dedicated path matches the HTTP verb shape Trigger.dev /
-// Ansible / GitHub Actions all expose so agents can guess it.
+// but a dedicated path matches the standard "dry-run as a separate
+// verb" convention so agents can guess the URL.
 //
 // POST /pipelines/{slug}/dry_run
 func (s *Server) handlePipelinesDryRun(w http.ResponseWriter, r *http.Request, slug string) {
