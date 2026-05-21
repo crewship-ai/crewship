@@ -48,6 +48,10 @@ func TestRequireInternal(t *testing.T) {
 			wrapped := h.requireInternal(downstream)
 
 			req := httptest.NewRequest(http.MethodGet, "/x", nil)
+			// Pin RemoteAddr to loopback so the post-Patch-B network gate
+			// passes. The token-comparison branch is what these cases
+			// actually exercise.
+			req.RemoteAddr = "127.0.0.1:1234"
 			if tc.provided != "" {
 				req.Header.Set("X-Internal-Token", tc.provided)
 			}
@@ -58,6 +62,100 @@ func TestRequireInternal(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestRequireInternal_NetworkGate pins the Patch B contract: requests from
+// outside loopback / RFC1918 are 404'd before the token compare runs (so a
+// public scanner can't even oracle the endpoint's existence). The opt-out
+// env var CREWSHIP_INTERNAL_ALLOW_ANY=true reverts to token-only.
+func TestRequireInternal_NetworkGate(t *testing.T) {
+	// NOT t.Parallel — flips os.Setenv and we don't want races.
+	h := NewInternalHandler(nil, "tok", testLogger())
+	downstream := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	t.Run("loopback_ipv4_passes_gate", func(t *testing.T) {
+		t.Setenv("CREWSHIP_INTERNAL_ALLOW_ANY", "")
+		wrapped := h.requireInternal(downstream)
+		req := httptest.NewRequest(http.MethodGet, "/x", nil)
+		req.RemoteAddr = "127.0.0.1:9999"
+		req.Header.Set("X-Internal-Token", "tok")
+		rr := httptest.NewRecorder()
+		wrapped.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Errorf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+		}
+	})
+
+	t.Run("loopback_ipv6_passes_gate", func(t *testing.T) {
+		t.Setenv("CREWSHIP_INTERNAL_ALLOW_ANY", "")
+		wrapped := h.requireInternal(downstream)
+		req := httptest.NewRequest(http.MethodGet, "/x", nil)
+		req.RemoteAddr = "[::1]:9999"
+		req.Header.Set("X-Internal-Token", "tok")
+		rr := httptest.NewRecorder()
+		wrapped.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Errorf("status = %d, want 200", rr.Code)
+		}
+	})
+
+	t.Run("docker_bridge_rfc1918_passes_gate", func(t *testing.T) {
+		t.Setenv("CREWSHIP_INTERNAL_ALLOW_ANY", "")
+		wrapped := h.requireInternal(downstream)
+		// 172.17.0.x is the default Docker bridge subnet on Linux.
+		req := httptest.NewRequest(http.MethodGet, "/x", nil)
+		req.RemoteAddr = "172.17.0.5:54321"
+		req.Header.Set("X-Internal-Token", "tok")
+		rr := httptest.NewRecorder()
+		wrapped.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Errorf("status = %d, want 200", rr.Code)
+		}
+	})
+
+	t.Run("public_ip_rejected_with_404_pre_token_compare", func(t *testing.T) {
+		t.Setenv("CREWSHIP_INTERNAL_ALLOW_ANY", "")
+		wrapped := h.requireInternal(downstream)
+		req := httptest.NewRequest(http.MethodGet, "/x", nil)
+		req.RemoteAddr = "8.8.8.8:54321"
+		// Send the CORRECT token to prove the network gate fires first —
+		// otherwise this would 403 from the token path.
+		req.Header.Set("X-Internal-Token", "tok")
+		rr := httptest.NewRecorder()
+		wrapped.ServeHTTP(rr, req)
+		if rr.Code != http.StatusNotFound {
+			t.Errorf("status = %d, want 404 (network gate must precede token compare)", rr.Code)
+		}
+	})
+
+	t.Run("allow_any_env_lets_public_ip_reach_token_compare", func(t *testing.T) {
+		t.Setenv("CREWSHIP_INTERNAL_ALLOW_ANY", "true")
+		wrapped := h.requireInternal(downstream)
+		req := httptest.NewRequest(http.MethodGet, "/x", nil)
+		req.RemoteAddr = "8.8.8.8:54321"
+		req.Header.Set("X-Internal-Token", "tok")
+		rr := httptest.NewRecorder()
+		wrapped.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Errorf("with CREWSHIP_INTERNAL_ALLOW_ANY=true and correct token, status = %d, want 200",
+				rr.Code)
+		}
+	})
+
+	t.Run("malformed_remote_addr_rejected", func(t *testing.T) {
+		t.Setenv("CREWSHIP_INTERNAL_ALLOW_ANY", "")
+		wrapped := h.requireInternal(downstream)
+		req := httptest.NewRequest(http.MethodGet, "/x", nil)
+		req.RemoteAddr = "not-an-ip"
+		req.Header.Set("X-Internal-Token", "tok")
+		rr := httptest.NewRecorder()
+		wrapped.ServeHTTP(rr, req)
+		if rr.Code != http.StatusNotFound {
+			t.Errorf("status = %d, want 404 for unparseable RemoteAddr", rr.Code)
+		}
+	})
 }
 
 // Sanity-check: ensure the constant-time comparison itself is exercised.
