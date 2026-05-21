@@ -193,6 +193,14 @@ func (c *Client) Patch(path string, body interface{}) (*http.Response, error) {
 	return c.Do("PATCH", path, body)
 }
 
+// Put sends an HTTP PUT request to the given API path with a JSON body.
+// Used by full-replacement endpoints like the PR-B per-crew policy PUT
+// (PATCH semantics don't apply — every field gets written as an atomic
+// snapshot of the new policy + audit triple).
+func (c *Client) Put(path string, body interface{}) (*http.Response, error) {
+	return c.Do("PUT", path, body)
+}
+
 // Delete sends an HTTP DELETE request to the given API path.
 func (c *Client) Delete(path string) (*http.Response, error) {
 	return c.Do("DELETE", path, nil)
