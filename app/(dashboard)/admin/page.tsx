@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import {
-  LayoutDashboard, Building, Users, Server, Shield, Database, ListTodo,
+  LayoutDashboard, Building, Users, Server, Shield, Database, ListTodo, FileLock,
 } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useWorkspace } from "@/hooks/use-workspace"
@@ -18,6 +18,7 @@ import { WorkspacesTab } from "./tabs/workspaces-tab"
 import { UsersTab } from "./tabs/users-tab"
 import { BackupsTab } from "./tabs/backups-tab"
 import { KeeperQueuePanel } from "@/components/features/admin/keeper-queue-panel"
+import { GdprActionsPanel } from "@/components/features/admin/gdpr-actions-panel"
 
 /**
  * Admin sidebar sections — ONLY real, wired tabs.
@@ -46,6 +47,7 @@ const sections: NavSection[] = [
     items: [
       { key: "workspaces", label: "Workspaces", icon: Building },
       { key: "users", label: "Users", icon: Users },
+      { key: "gdpr", label: "GDPR actions", icon: FileLock },
     ],
   },
   {
@@ -232,6 +234,10 @@ export default function AdminPage() {
 
     if (tab === "reviews") {
       return <KeeperQueuePanel workspaceId={workspaceId} />
+    }
+
+    if (tab === "gdpr") {
+      return <GdprActionsPanel users={users} />
     }
 
     if (tab === "security") {
