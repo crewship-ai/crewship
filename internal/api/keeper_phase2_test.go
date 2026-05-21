@@ -194,12 +194,18 @@ func TestKeeperPhase2_NotConfigured_Returns503(t *testing.T) {
 	}
 }
 
-// TestKeeperPhase2_NegativeLearning_AllowWritesLesson pins the
-// integration handler-side: POST → evaluator ALLOW → lessons.md
-// gains a kind=negative entry under the supplied agent_memory_dir.
-func TestKeeperPhase2_NegativeLearning_AllowWritesLesson(t *testing.T) {
+// TestKeeperPhase2_NegativeLearning_AllowWritesLesson_WhenSelfLearningON
+// pins the F4.1 UX gate added in PR-G: ALLOW from the evaluator writes
+// the lesson immediately ONLY when the agent has self_learning=1.
+func TestKeeperPhase2_NegativeLearning_AllowWritesLesson_WhenSelfLearningON(t *testing.T) {
 	db, pr := kp2DB(t)
 	tmp := t.TempDir()
+
+	// kp2DB seeds agent a1 with self_learning_enabled=0 (default).
+	// Flip it ON for this test.
+	if _, err := db.Exec(`UPDATE agents SET self_learning_enabled = 1 WHERE id = 'a1'`); err != nil {
+		t.Fatalf("flip self_learning ON: %v", err)
+	}
 
 	p := &kp2Provider{content: `{"decision":"ALLOW","reason":"check env vars","risk":3}`}
 	gk := gatekeeper.New(p, "claude-haiku-4-5", kp2Logger())
@@ -228,6 +234,87 @@ func TestKeeperPhase2_NegativeLearning_AllowWritesLesson(t *testing.T) {
 	}
 	if !bytes.Contains(data, []byte("kind: negative")) {
 		t.Errorf("lessons.md missing 'kind: negative' line\n---\n%s\n---", string(data))
+	}
+}
+
+// TestKeeperPhase2_NegativeLearning_AllowQueuesInbox_WhenSelfLearningOFF
+// pins the inverse of the previous test: same ALLOW signal from the
+// evaluator, but self_learning=0 (the safe default) means we DON'T
+// touch the agent's lessons.md. Instead a blocking inbox row is queued
+// so the operator can approve the proposed lesson before it lands.
+//
+// This is the gate that gives the per-agent self-learning UI toggle
+// (PR-G AgentLearningToggle) an actual functional consequence — the
+// auditor's #1 anti-pattern would be a UI toggle with no downstream
+// effect, so this test exists to prevent that regression specifically.
+func TestKeeperPhase2_NegativeLearning_AllowQueuesInbox_WhenSelfLearningOFF(t *testing.T) {
+	db, pr := kp2DB(t)
+	tmp := t.TempDir()
+
+	// kp2DB seeds agent a1 with self_learning_enabled=0 — exactly the
+	// state we want to assert against. Confirm rather than assume so a
+	// future change to the seed doesn't silently break the contract.
+	var got int
+	if err := db.QueryRow(`SELECT self_learning_enabled FROM agents WHERE id = 'a1'`).Scan(&got); err != nil {
+		t.Fatalf("read self_learning: %v", err)
+	}
+	if got != 0 {
+		t.Fatalf("seed assumption broken: agent a1 self_learning=%d, want 0", got)
+	}
+
+	p := &kp2Provider{content: `{"decision":"ALLOW","reason":"missing env vars","risk":3}`}
+	gk := gatekeeper.New(p, "claude-haiku-4-5", kp2Logger())
+	ev := gatekeeper.NewNegativeLearningEvaluator(gk, kp2Logger())
+
+	h := NewKeeperPhase2Handler(db, "tok", pr, nil, nil, nil, ev, kp2Logger())
+
+	body := negativeLearningBody{
+		WorkspaceID: "ws1", CrewID: "cr1",
+		AgentID: "a1", AgentName: "Loser", CrewName: "Ops",
+		AgentMemoryDir: tmp,
+		Trigger:        "run_failed",
+		FailureSnippet: "deploy.sh: missing DATABASE_URL",
+	}
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/internal/keeper/negative-learning", mustJSON(t, body))
+	h.HandleNegativeLearning(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
+	}
+
+	// lessons.md MUST NOT exist — the ALLOW was gated by self_learning=0.
+	if _, err := os.Stat(filepath.Join(tmp, "lessons.md")); err == nil {
+		raw, _ := os.ReadFile(filepath.Join(tmp, "lessons.md"))
+		t.Fatalf("lessons.md was written despite self_learning=0; content=%s", string(raw))
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("unexpected stat error: %v", err)
+	}
+
+	// A blocking inbox item must exist instead, carrying the lesson
+	// proposal as payload so the inbox-approve handler can land the
+	// lesson once the operator confirms.
+	var (
+		title    string
+		blocking int
+		payload  string
+	)
+	err := db.QueryRow(`
+		SELECT title, blocking, payload_json
+		FROM inbox_items
+		WHERE workspace_id = 'ws1' AND sender_id = 'keeper_negative_learning'
+		ORDER BY created_at DESC LIMIT 1`,
+	).Scan(&title, &blocking, &payload)
+	if err != nil {
+		t.Fatalf("inbox row not found: %v", err)
+	}
+	if blocking != 1 {
+		t.Errorf("inbox row not blocking; got blocking=%d", blocking)
+	}
+	if !bytes.Contains([]byte(payload), []byte(`"self_learning_gate":"off"`)) {
+		t.Errorf("inbox payload missing self_learning_gate=off marker: %s", payload)
+	}
+	if !bytes.Contains([]byte(payload), []byte(`"lesson_kind"`)) {
+		t.Errorf("inbox payload missing lesson_kind: %s", payload)
 	}
 }
 

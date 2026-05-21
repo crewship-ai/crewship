@@ -40,6 +40,7 @@ import (
 	crand "crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -558,10 +559,36 @@ func (h *KeeperPhase2Handler) HandleNegativeLearning(w http.ResponseWriter, r *h
 		return
 	}
 
-	// ALLOW writes to lessons.md via consolidate.WriteLesson. This is
-	// the F4.4 → Z.7 hand-off — the integration test in
-	// negative_learning_evaluator_test.go covers the round-trip.
+	// PR-G F4.1 UX — self_learning gate on the ALLOW path. The
+	// evaluator's WriteLesson=true says "this lesson is worth keeping",
+	// but whether it AUTO-applies vs queues operator approval depends
+	// on the per-agent self_learning_enabled flag (v106).
+	//
+	//   self_learning=1  → write the lesson now (current pre-PR-G behavior)
+	//   self_learning=0  → don't write; instead queue a blocking inbox
+	//                      item so the operator approves before the
+	//                      agent's lessons.md changes.
+	//
+	// AgentID is required to look up the flag. If body.AgentID is empty
+	// (legacy callers that haven't been updated), default to OFF —
+	// safer to require operator approval than silently auto-apply.
+	autoApplyLesson := false
 	if res.WriteLesson && body.AgentMemoryDir != "" {
+		if body.AgentID == "" {
+			h.logger.Warn("keeper_phase2: ALLOW lesson skipped (agent_id missing, can't resolve self_learning)",
+				"workspace_id", body.WorkspaceID)
+		} else {
+			enabled, err := h.loadSelfLearningEnabled(r.Context(), body.AgentID)
+			if err != nil {
+				h.logger.Warn("keeper_phase2: self_learning lookup failed; defaulting to OFF (require approval)",
+					"agent_id", body.AgentID, "error", err)
+				enabled = false
+			}
+			autoApplyLesson = enabled
+		}
+	}
+
+	if autoApplyLesson {
 		werr := consolidate.WriteLesson(r.Context(), body.AgentMemoryDir, consolidate.LessonEntry{
 			ID:          res.Proposal.ID,
 			Kind:        res.Proposal.Kind,
@@ -573,6 +600,36 @@ func (h *KeeperPhase2Handler) HandleNegativeLearning(w http.ResponseWriter, r *h
 			h.logger.Warn("keeper_phase2: WriteLesson failed (decision still recorded)",
 				"agent_memory_dir", body.AgentMemoryDir, "error", werr)
 		}
+	} else if res.WriteLesson && body.AgentMemoryDir != "" {
+		// ALLOW but self_learning OFF — queue blocking inbox so an
+		// operator can approve the proposed lesson before it lands on
+		// the agent's lessons.md. Payload carries the full lesson
+		// proposal so the approve handler has everything it needs.
+		_ = inbox.Insert(r.Context(), h.db, h.logger, inbox.Item{
+			WorkspaceID: body.WorkspaceID,
+			Kind:        inbox.KindEscalation,
+			SourceID:    reqID,
+			TargetRole:  "MANAGER",
+			Title:       fmt.Sprintf("Lesson proposal: %s (%s)", body.AgentName, body.Trigger),
+			BodyMD:      fmt.Sprintf("**Proposed lesson** (auto-apply blocked by self_learning=OFF):\n\n%s\n\n_Reason: %s_", res.Proposal.Rule, res.Reason),
+			SenderType:  "system",
+			SenderID:    "keeper_negative_learning",
+			SenderName:  "Negative Learning",
+			Priority:    "low",
+			Blocking:    true,
+			Payload: map[string]interface{}{
+				"request_id":         reqID,
+				"request_type":       string(keeper.RequestTypeNegativeLearning),
+				"agent_id":           body.AgentID,
+				"agent_memory_dir":   body.AgentMemoryDir,
+				"lesson_id":          res.Proposal.ID,
+				"lesson_kind":        string(res.Proposal.Kind),
+				"lesson_rule":        res.Proposal.Rule,
+				"lesson_context":     res.Proposal.Note,
+				"lesson_source":      string(res.Proposal.Source),
+				"self_learning_gate": "off",
+			},
+		})
 	}
 
 	// Surface BOTH ESCALATE and DENY to the operator inbox. DENY here
@@ -617,4 +674,29 @@ func (h *KeeperPhase2Handler) HandleNegativeLearning(w http.ResponseWriter, r *h
 		resp["lesson_id"] = res.Proposal.ID
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// loadSelfLearningEnabled reads agents.self_learning_enabled (v106) for
+// the given agent. Returns false if the agent doesn't exist (or has
+// the flag off). Used by the F4.4 negative_learning ALLOW path to
+// decide whether a proposed lesson auto-applies or queues for
+// operator approval. PR-G F4.1 UX gate.
+func (h *KeeperPhase2Handler) loadSelfLearningEnabled(ctx context.Context, agentID string) (bool, error) {
+	if agentID == "" {
+		return false, nil
+	}
+	var enabled int
+	err := h.db.QueryRowContext(ctx, `
+		SELECT self_learning_enabled
+		FROM agents
+		WHERE id = ? AND deleted_at IS NULL`,
+		agentID,
+	).Scan(&enabled)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return enabled == 1, nil
 }
