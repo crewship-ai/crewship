@@ -6,10 +6,21 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"fmt"
+	"regexp"
 	"strconv"
 	"sync/atomic"
 	"time"
 )
+
+// sqlIdentifierRe is the conservative SQLite identifier shape:
+// leading letter / underscore, then letters / digits / underscores.
+// Used to gate every string interpolated into DDL/PRAGMA contexts
+// where the SQL driver cannot parametrise the value (PRAGMA names
+// are not parameter-bindable). Today every caller of this validator
+// passes a constant from BackupTables, but pinning the contract here
+// keeps a future caller that forwards external input from opening a
+// SQL-injection vector by accident.
+var sqlIdentifierRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 // remapCounter is the monotonic counter portion of backup-generated
 // CUIDs. Kept package-local so it does not collide with the one in
@@ -93,7 +104,18 @@ type foreignKeyEdge struct {
 // care about. Used exclusively by RemapIDs so we do not have to
 // hard-code the schema here — a future migration that adds a new FK
 // will be picked up automatically.
+//
+// `PRAGMA foreign_key_list(<name>)` cannot be parametrised by the SQL
+// driver (PRAGMA names are not bindable placeholders), so the table
+// identifier is concatenated into the query string. Gate that with
+// sqlIdentifierRe so a future caller that forwards external input can
+// only inject through a name shaped like a real identifier; the
+// regex denies anything containing whitespace, quotes, semicolons,
+// or parentheses.
 func introspectForeignKeys(ctx context.Context, db *sql.DB, table string) ([]foreignKeyEdge, error) {
+	if !sqlIdentifierRe.MatchString(table) {
+		return nil, fmt.Errorf("backup: invalid table identifier %q", table)
+	}
 	rows, err := db.QueryContext(ctx, `PRAGMA foreign_key_list(`+table+`)`)
 	if err != nil {
 		return nil, fmt.Errorf("backup: foreign_key_list(%s): %w", table, err)
