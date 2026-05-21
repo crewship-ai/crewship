@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -335,16 +336,99 @@ func TestDispatch_AppendDaily_CreatesFileWithTimestamp(t *testing.T) {
 	}
 
 	// File should land at daily/YYYY-MM-DD.md under the agent dir.
+	// Filter to .md entries — the writer also drops a sibling .lock
+	// sentinel (audit_watcher already ignores .lock files; see
+	// writer.go for the convention).
 	dailyDir := filepath.Join(ctx.AgentMemoryDir, "daily")
 	entries, err := os.ReadDir(dailyDir)
 	if err != nil {
 		t.Fatalf("daily dir not created: %v", err)
 	}
-	if len(entries) != 1 {
-		t.Fatalf("expected exactly 1 daily file, got %d", len(entries))
+	var mdEntries []os.DirEntry
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".md") {
+			mdEntries = append(mdEntries, e)
+		}
 	}
-	if !strings.HasSuffix(entries[0].Name(), ".md") {
-		t.Errorf("daily file must be .md, got %q", entries[0].Name())
+	if len(mdEntries) != 1 {
+		t.Fatalf("expected exactly 1 daily .md file, got %d (all entries: %d)", len(mdEntries), len(entries))
+	}
+}
+
+// TestDispatch_Write_AppendCap_NoTOCTOU pins the cap invariant under
+// concurrent appends. Before the fix, two goroutines could both stat
+// the file (each seeing the same pre-existing size), both pass the
+// cap check, and then both write — pushing the file past the cap.
+// With the FileLock guarding the read-check-write window, at most
+// one goroutine's append fits under the cap; the other must be
+// rejected with IsError=true. The post-condition (file size <= cap)
+// must hold regardless of which goroutine wins the race.
+//
+// Run under -race to catch any lock regressions.
+func TestDispatch_Write_AppendCap_NoTOCTOU(t *testing.T) {
+	ctx := testAgentCtx(t)
+	// Pre-fill AGENT.md to 3000 B. cap is 4000. Each goroutine tries
+	// to append 1500 B — either append alone fits (3000+1500=4500
+	// exceeds cap, actually no: 3000+1500=4500 > 4000). So BOTH
+	// appends individually exceed cap. Lower pre-fill to give exactly
+	// one goroutine room: 2000 + 1500 = 3500 (under cap), but two
+	// stacked = 2000 + 1500 + 1500 = 5000 (over). Exactly the race
+	// window we're testing.
+	pre := strings.Repeat("x", 2000)
+	agentFile := filepath.Join(ctx.AgentMemoryDir, "AGENT.md")
+	if err := os.WriteFile(agentFile, []byte(pre), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Lockfile cleanup so a leaked sentinel doesn't outlive the test.
+	t.Cleanup(func() { _ = os.Remove(agentFile + ".lock") })
+
+	d := NewDispatcher(ctx)
+	payload := strings.Repeat("y", 1500)
+	args := json.RawMessage(`{"tier":"AGENT","content":"` + payload + `","mode":"append"}`)
+
+	var wg sync.WaitGroup
+	results := make([]ToolResult, 2)
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			res, err := d.Dispatch(context.Background(), ToolCall{
+				Name: "memory.write",
+				Args: args,
+			})
+			if err != nil {
+				t.Errorf("goroutine %d unexpected Go error: %v", i, err)
+				return
+			}
+			results[i] = res
+		}(i)
+	}
+	wg.Wait()
+
+	// Post-condition: file size never exceeds the cap, regardless of
+	// which goroutine won. cap is 4000 B; with 2000 pre-fill and two
+	// 1500 B appends, only one append can fit (2000+1500=3500). The
+	// other MUST have been rejected.
+	st, err := os.Stat(agentFile)
+	if err != nil {
+		t.Fatalf("stat after concurrent appends: %v", err)
+	}
+	if st.Size() > int64(capAgentBytes) {
+		t.Fatalf("TOCTOU race: file grew past cap. size=%d, cap=%d", st.Size(), capAgentBytes)
+	}
+
+	// Exactly one of the two writes must have been rejected. Anything
+	// else means either the lock didn't serialise (both succeeded) or
+	// the lock starved both (both rejected, which would also be a bug
+	// since one append fits).
+	rejected := 0
+	for _, r := range results {
+		if r.IsError {
+			rejected++
+		}
+	}
+	if rejected != 1 {
+		t.Fatalf("expected exactly 1 rejected append under concurrent cap pressure; got %d. results=%+v", rejected, results)
 	}
 }
 

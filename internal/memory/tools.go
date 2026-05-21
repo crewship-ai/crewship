@@ -275,8 +275,8 @@ func (d *Dispatcher) handleRead(_ context.Context, raw json.RawMessage) (ToolRes
 	return ToolResult{
 		Content: body,
 		Metadata: map[string]any{
-			"path":  path,
-			"bytes": len(data),
+			"source": tierSourceLabel(a.Tier, a.Key),
+			"bytes":  len(data),
 		},
 	}, nil
 }
@@ -314,40 +314,45 @@ func (d *Dispatcher) handleWrite(_ context.Context, raw json.RawMessage) (ToolRe
 		return ToolResult{IsError: true, Content: "memory.write: mkdir: " + err.Error()}, nil
 	}
 
+	// Serialise the read-modify-write window so two concurrent appends
+	// can't each pass the cap check against the same pre-existing size
+	// and then sequentially write past the cap. Same lock primitive
+	// the lesson writer uses (writer.go FileLock / flock).
+	lk := NewFileLock(path + ".lock")
+	if err := lk.Lock(); err != nil {
+		return ToolResult{IsError: true, Content: "memory.write: lock: " + err.Error()}, nil
+	}
+	defer func() { _ = lk.Unlock() }()
+
+	var data []byte
 	var existing int
 	if a.Mode == "append" {
-		if st, err := os.Stat(path); err == nil {
-			existing = int(st.Size())
+		old, err := os.ReadFile(path)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return ToolResult{IsError: true, Content: "memory.write: " + err.Error()}, nil
 		}
+		existing = len(old)
+		data = append(old, []byte(a.Content)...)
+	} else {
+		data = []byte(a.Content)
 	}
-	final := existing + len(a.Content)
-	if cap > 0 && final > cap {
+
+	if cap > 0 && len(data) > cap {
 		return ToolResult{
 			IsError: true,
 			Content: fmt.Sprintf(
 				"memory.write: cap exceeded for tier=%s. Final would be %d bytes; cap is %d. "+
 					"Use mode='replace' (shrinks the file) or drop older entries before retrying.",
-				a.Tier, final, cap),
+				a.Tier, len(data), cap),
 			Metadata: map[string]any{
 				"tier":           a.Tier,
 				"cap_bytes":      cap,
-				"projected_size": final,
+				"projected_size": len(data),
 				"current_size":   existing,
 			},
 		}, nil
 	}
 
-	var data []byte
-	if a.Mode == "append" {
-		if existing > 0 {
-			old, _ := os.ReadFile(path)
-			data = append(old, []byte(a.Content)...)
-		} else {
-			data = []byte(a.Content)
-		}
-	} else {
-		data = []byte(a.Content)
-	}
 	if err := os.WriteFile(path, data, 0o644); err != nil {
 		return ToolResult{IsError: true, Content: "memory.write: " + err.Error()}, nil
 	}
@@ -355,7 +360,7 @@ func (d *Dispatcher) handleWrite(_ context.Context, raw json.RawMessage) (ToolRe
 	res := ToolResult{
 		Content: fmt.Sprintf("ok: %d bytes written to %s", len(data), a.Tier),
 		Metadata: map[string]any{
-			"path":          path,
+			"source":        tierSourceLabel(a.Tier, a.Key),
 			"bytes_written": len(data),
 			"cap_bytes":     cap,
 			"cap_pct":       capPct(len(data), cap),
@@ -432,7 +437,7 @@ type appendDailyArgs struct {
 	Entry string `json:"entry"`
 }
 
-func (d *Dispatcher) handleAppendDaily(_ context.Context, raw json.RawMessage) (ToolResult, error) {
+func (d *Dispatcher) handleAppendDaily(ctx context.Context, raw json.RawMessage) (ToolResult, error) {
 	var a appendDailyArgs
 	if err := json.Unmarshal(raw, &a); err != nil {
 		return ToolResult{IsError: true, Content: "memory.append_daily: invalid args: " + err.Error()}, nil
@@ -449,7 +454,7 @@ func (d *Dispatcher) handleAppendDaily(_ context.Context, raw json.RawMessage) (
 		Content: line,
 		Mode:    "append",
 	})
-	return d.handleWrite(context.Background(), inner)
+	return d.handleWrite(ctx, inner)
 }
 
 func (d *Dispatcher) resolvePath(tier, key string) (string, error) {
