@@ -207,7 +207,7 @@ func (h *InternalHandler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 
 	_, err := h.db.ExecContext(r.Context(), `
 		INSERT INTO agents (id, workspace_id, crew_id, name, slug, description, role_title, agent_role,
-			cli_adapter, llm_provider, llm_model, tool_profile, system_prompt,
+			cli_adapter, llm_provider, llm_model, tool_profile, system_prompt_legacy,
 			timeout_seconds, memory_enabled, webhook_secret, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		agentID, wsID, body.CrewID, body.Name, body.Slug, body.Description,

@@ -58,7 +58,7 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 		"role_title": "role_title", "agent_role": "agent_role",
 		"lead_mode":   "lead_mode",
 		"cli_adapter": "cli_adapter", "llm_provider": "llm_provider",
-		"llm_model": "llm_model", "system_prompt": "system_prompt",
+		"llm_model": "llm_model", "system_prompt": "system_prompt_legacy",
 		"avatar_seed": "avatar_seed", "avatar_style": "avatar_style",
 		"timeout_seconds": "timeout_seconds", "tool_profile": "tool_profile",
 		"memory_enabled": "memory_enabled", "cli_tools": "cli_tools", "crew_id": "crew_id",

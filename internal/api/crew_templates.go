@@ -101,7 +101,7 @@ func deployCrewTemplate(ctx context.Context, db *sql.DB, logger *slog.Logger, j 
 
 		if _, err = tx.ExecContext(ctx, `
 			INSERT INTO agents (id, workspace_id, crew_id, name, slug, role_title, agent_role,
-				cli_adapter, llm_provider, llm_model, tool_profile, system_prompt,
+				cli_adapter, llm_provider, llm_model, tool_profile, system_prompt_legacy,
 				timeout_seconds, memory_enabled, webhook_secret, created_at, updated_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			agentID, wsID, crewID, a.Name, agentSlug, a.RoleTitle, a.AgentRole,

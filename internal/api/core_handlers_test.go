@@ -2169,7 +2169,7 @@ func TestResolveAgent_LeadAgentWithCrewMembers(t *testing.T) {
 	}
 
 	// Lead + member
-	_, err = db.Exec(`INSERT INTO agents (id, workspace_id, crew_id, name, slug, agent_role, status, cli_adapter, tool_profile, timeout_seconds, memory_enabled, system_prompt)
+	_, err = db.Exec(`INSERT INTO agents (id, workspace_id, crew_id, name, slug, agent_role, status, cli_adapter, tool_profile, timeout_seconds, memory_enabled, system_prompt_legacy)
 		VALUES ('agent-lead', ?, 'crew-res', 'Lead', 'lead', 'LEAD', 'IDLE', 'CLAUDE_CODE', 'CODING', 1800, 1, 'You are the lead.'),
 		       ('agent-mem', ?, 'crew-res', 'Mem', 'mem', 'AGENT', 'IDLE', 'CLAUDE_CODE', 'CODING', 1800, 0, 'You are a member.')`, wsID, wsID)
 	if err != nil {

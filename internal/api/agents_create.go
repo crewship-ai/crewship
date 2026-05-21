@@ -221,7 +221,7 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	_, err = h.db.ExecContext(r.Context(), `
 		INSERT INTO agents (id, crew_id, workspace_id, name, slug, description, role_title,
-			agent_role, lead_mode, status, cli_adapter, llm_provider, llm_model, system_prompt,
+			agent_role, lead_mode, status, cli_adapter, llm_provider, llm_model, system_prompt_legacy,
 			avatar_seed, avatar_style, timeout_seconds, tool_profile, memory_enabled,
 			created_by_user_id, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'IDLE', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,

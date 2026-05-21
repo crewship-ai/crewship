@@ -44,11 +44,11 @@ CREATE TABLE crews (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL);
 INSERT INTO crews (id, workspace_id) VALUES ('crew-a', 'ws1'), ('crew-b', 'ws1');
 
 CREATE TABLE agents (
-    id            TEXT PRIMARY KEY,
-    crew_id       TEXT NOT NULL,
-    slug          TEXT NOT NULL,
-    system_prompt TEXT,
-    deleted_at    TEXT
+    id                   TEXT PRIMARY KEY,
+    crew_id              TEXT NOT NULL,
+    slug                 TEXT NOT NULL,
+    system_prompt_legacy TEXT,
+    deleted_at           TEXT
 );
 
 CREATE TABLE credentials (
@@ -95,7 +95,7 @@ func insertAgent(t *testing.T, db *sql.DB, id, crewID, slug, systemPrompt string
 	if deleted {
 		delArg = "2024-01-01T00:00:00Z"
 	}
-	if _, err := db.Exec(`INSERT INTO agents (id, crew_id, slug, system_prompt, deleted_at)
+	if _, err := db.Exec(`INSERT INTO agents (id, crew_id, slug, system_prompt_legacy, deleted_at)
 		VALUES (?, ?, ?, ?, ?)`, id, crewID, slug, promptArg, delArg); err != nil {
 		t.Fatalf("insert agent %s: %v", id, err)
 	}
