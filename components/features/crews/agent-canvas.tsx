@@ -33,6 +33,7 @@ import { ActivityTab } from "./agent-canvas-tabs/activity-tab"
 import { OverviewTab } from "./agent-canvas-tabs/overview-tab"
 import { SettingsTab } from "./agent-canvas-tabs/settings-tab"
 import { SkillsTab } from "./agent-canvas-tabs/skills-tab"
+import { MemoryTab } from "./agent-canvas-tabs/memory-tab"
 import { WorkspaceTab } from "./agent-canvas-tabs/workspace-tab"
 import type {
   AgentRecord,
@@ -44,12 +45,13 @@ import type {
 
 export type { ChatRow, RunRow, AgentSkillRow, AgentCredRow, PeerMessageRow } from "./agent-canvas-tabs/types"
 
-type AgentTab = "overview" | "workspace" | "skills" | "activity" | "settings"
+type AgentTab = "overview" | "workspace" | "skills" | "memory" | "activity" | "settings"
 
 const TABS: Array<{ id: AgentTab; label: string }> = [
   { id: "overview", label: "Overview" },
   { id: "workspace", label: "Workspace" },
   { id: "skills", label: "Skills & Tools" },
+  { id: "memory", label: "Memory" },
   { id: "activity", label: "Activity" },
   { id: "settings", label: "Settings" },
 ]
@@ -408,6 +410,15 @@ export function AgentCanvas({
           agentSlug={agent.slug}
           workspaceId={workspaceId}
           onAgentChanged={onAgentChanged}
+        />
+      )}
+
+      {tab === "memory" && (
+        <MemoryTab
+          agentId={agent.id}
+          agentSlug={agent.slug}
+          crewId={agent.crew_id ?? undefined}
+          workspaceId={workspaceId}
         />
       )}
 
