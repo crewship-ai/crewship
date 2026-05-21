@@ -431,6 +431,43 @@ the auditor's 2026-05-21 findings list:
 - ⏳ Skill→Memory bridge (MEMORY-ROADMAP §8.2; PR-F20)
 - ⏳ Bitemporal `valid_from` / `valid_to` (PR-F21)
 
+**Round-2 / Round-3 post-audit hardening (added 2026-05-21):**
+- ✅ Lessons memory tier security tombstone — dispatcher write path
+   rejects `tier="lessons"`; consolidate.WriteLesson stays single
+   writer with schema + flock + idempotency. Closes the auditor's
+   #4 finding ("`capForTier("lessons")` returns 0 = persistence
+   attack vector").
+- ✅ Cross-tenant `loadSelfLearningEnabled` scoping — workspace_id
+   added to WHERE clause + `assertBodyWorkspaceMatchesCtx` on all
+   four F4 handlers rejects asymmetric body/ctx mismatch with 400.
+   Closes the asymmetric-bypass case; symmetric remains for PR-F24.
+- ✅ Frontend RBAC mirrors backend — `AgentLearningToggle` uses
+   `abilities.can("manage", "Agent")` (matching server PATCH
+   permission); update-only users see toggle disabled instead of
+   403 at save.
+- ✅ `Promise.allSettled` for independent fetches in
+   `CrewPolicyControls.load` so a quota-fetch network error doesn't
+   poison the required policy-fetch render.
+- ✅ Inbox `fetch()` try/catch on BOTH the approve-hire (wrap
+   "approved") and routine-retry (wrap "retried") paths. Network
+   failure now surfaces a toast; pre-fix it cleared busy state with
+   no user feedback (silent success). Class-of-bugs sweep
+   (grep `await fetch` confirmed both call sites wrapped).
+
+**Tier-3 deferred (open as GitHub issues for tracking):**
+- ⏳ **PR-F24** — bind `X-Internal-Token` to a specific workspace in
+   `internalWsCtx` middleware (closes symmetric cross-tenant case).
+- ⏳ **PR-F25** — drop `body.workspace_id` from F4 handlers; derive
+   exclusively from ctx (restores the invariant
+   `docs/api-reference/internal.mdx:23` originally claimed).
+- ⏳ **PR-F26** — replace native `<input>` / `<button>` in
+   `agent-learning-toggle.tsx` with shadcn `Input` / `Button`
+   primitives (consistency pass across all governance toggle
+   surfaces).
+- ⏳ **PR-F27** — assert `memory.LoadPersona` succeeds before
+   asserting content in `agent_persona_test.go:287` (catches
+   silent storage regression in the OFF-path test).
+
 ## 7. Open questions
 
 - F1: should `memory.search` use FTS5 from day one or substring-only
