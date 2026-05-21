@@ -512,14 +512,25 @@ function KindActions({
                   await onResolve("cancelled")
                   return
                 }
-                const res = await fetch(
-                  `/api/v1/workspaces/${encodeURIComponent(item.workspace_id)}/pipelines/${encodeURIComponent(slug)}/run`,
-                  {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ inputs, triggered_via: "manual" }),
-                  },
-                )
+                // Same try/catch pattern as approve-hire above: fetch()
+                // rejects on network failure (offline, DNS, CORS); the
+                // wrap() helper clears busy state on return, so without
+                // explicit error handling the user sees no toast and
+                // the retry appears to silently succeed.
+                let res: Response
+                try {
+                  res = await fetch(
+                    `/api/v1/workspaces/${encodeURIComponent(item.workspace_id)}/pipelines/${encodeURIComponent(slug)}/run`,
+                    {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ inputs, triggered_via: "manual" }),
+                    },
+                  )
+                } catch (e) {
+                  toast.error(e instanceof Error ? `Retry failed: ${e.message}` : "Retry failed (network error)")
+                  return
+                }
                 if (!res.ok) {
                   const body = await res.json().catch(() => null)
                   toast.error(body?.error ?? "Retry failed")

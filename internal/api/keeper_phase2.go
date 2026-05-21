@@ -55,6 +55,28 @@ import (
 	"github.com/crewship-ai/crewship/internal/skills"
 )
 
+// assertBodyWorkspaceMatchesCtx (audit round 3 defense) rejects F4
+// requests where the body workspace_id doesn't match the request
+// context workspace_id. The X-Internal-Token auth path doesn't bind
+// the token to a workspace, so both values are caller-controlled —
+// but enforcing consistency closes the asymmetric-bypass vector
+// where a caller could pass workspace A in the query (which feeds
+// policy resolution + paymaster scope) while passing workspace B in
+// the body (which fed the self_learning gate lookup before this
+// fix). Symmetric bypass (caller picks one workspace consistently)
+// still requires PR-F24 token-to-workspace binding to close.
+//
+// Returns false (and writes the error response) when the values
+// disagree — caller should immediately `return`.
+func assertBodyWorkspaceMatchesCtx(w http.ResponseWriter, r *http.Request, bodyWS string) bool {
+	ctxWS := WorkspaceIDFromContext(r.Context())
+	if ctxWS == "" || ctxWS == bodyWS {
+		return true
+	}
+	replyError(w, http.StatusBadRequest, "workspace_id in body must match workspace_id from request context")
+	return false
+}
+
 // scopeKeeperRequest attaches a lookout.Scope to ctx so the keeper
 // LLM call through paymaster middleware can attribute cost (and not
 // fail with "paymaster: workspace_id required"). The F4 endpoints are
@@ -245,6 +267,9 @@ func (h *KeeperPhase2Handler) HandleSkillReview(w http.ResponseWriter, r *http.R
 		replyError(w, http.StatusBadRequest, "workspace_id and skill_id required")
 		return
 	}
+	if !assertBodyWorkspaceMatchesCtx(w, r, body.WorkspaceID) {
+		return
+	}
 
 	pol := h.resolvePolicySafe(r.Context(), body.CrewID)
 
@@ -351,6 +376,9 @@ func (h *KeeperPhase2Handler) HandleBehavior(w http.ResponseWriter, r *http.Requ
 	}
 	if body.WorkspaceID == "" || body.CrewID == "" || body.ToolName == "" {
 		replyError(w, http.StatusBadRequest, "workspace_id, crew_id, tool_name required")
+		return
+	}
+	if !assertBodyWorkspaceMatchesCtx(w, r, body.WorkspaceID) {
 		return
 	}
 
@@ -463,6 +491,9 @@ func (h *KeeperPhase2Handler) HandleMemoryHealth(w http.ResponseWriter, r *http.
 		replyError(w, http.StatusBadRequest, "workspace_id required")
 		return
 	}
+	if !assertBodyWorkspaceMatchesCtx(w, r, body.WorkspaceID) {
+		return
+	}
 
 	pol := h.resolvePolicySafe(r.Context(), body.CrewID)
 
@@ -556,6 +587,9 @@ func (h *KeeperPhase2Handler) HandleNegativeLearning(w http.ResponseWriter, r *h
 	}
 	if body.WorkspaceID == "" || body.Trigger == "" || body.FailureSnippet == "" {
 		replyError(w, http.StatusBadRequest, "workspace_id, trigger, failure_snippet required")
+		return
+	}
+	if !assertBodyWorkspaceMatchesCtx(w, r, body.WorkspaceID) {
 		return
 	}
 
@@ -727,12 +761,21 @@ func (h *KeeperPhase2Handler) HandleNegativeLearning(w http.ResponseWriter, r *h
 // Package-level (not a method) so both handlers can call it without
 // dragging a *KeeperPhase2Handler into the persona surface. PR-G F4.1 UX gate.
 //
-// SECURITY: workspace_id is part of the WHERE clause to prevent cross-
-// tenant gate bypass. Without it, an internal-auth caller could pass
-// an agent_id from another workspace and have its self_learning flag
-// read — opens a tenant-isolation hole. Empty workspaceID still
-// returns false (safe default) but logs nothing because the caller's
-// own validation should have rejected the empty value upstream.
+// SECURITY (defense in depth, partial close — see PR-F24 for full):
+// workspace_id is part of the WHERE clause so a lookup with an
+// agent_id from workspace A and a workspace_id of B returns no row
+// (the row's workspace_id IS A, not B). This closes the asymmetric
+// case where the caller passes inconsistent workspace identifiers
+// across the request surface. It does NOT close the symmetric case
+// where a caller consistently passes the same target workspace in
+// both query + body — that requires binding the X-Internal-Token to
+// a workspace, which is tracked as PR-F24 (token-to-workspace
+// binding) in PRD §10. The F4 handlers add a layered defense via
+// assertBodyWorkspaceMatchesCtx so body.WorkspaceID can't disagree
+// with ctx.WorkspaceID even from the same trusted caller.
+//
+// Empty workspaceID returns false (safe default) — the caller's own
+// validation should have rejected the empty value upstream.
 func loadSelfLearningEnabled(ctx context.Context, db *sql.DB, workspaceID, agentID string) (bool, error) {
 	if db == nil || agentID == "" || workspaceID == "" {
 		return false, nil

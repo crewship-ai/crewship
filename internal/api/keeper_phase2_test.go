@@ -326,3 +326,55 @@ func mustJSON(t *testing.T, v any) *bytes.Buffer {
 	}
 	return bytes.NewBuffer(b)
 }
+
+// TestKeeperPhase2_NegativeLearning_RejectsBodyWorkspaceMismatch pins
+// the audit-round-3 defense: when the body's workspace_id doesn't
+// match the request context's workspace_id, the handler rejects with
+// 400 BEFORE evaluating anything. The asymmetric-bypass vector
+// (caller passes workspace A in query, claims workspace B in body)
+// is the one this fix closes; the symmetric case (caller picks one
+// workspace consistently) still requires PR-F24 token-to-workspace
+// binding to close fully.
+//
+// If this test fails the cross-tenant gate is half-open again —
+// don't loosen without the upstream binding landing first.
+func TestKeeperPhase2_NegativeLearning_RejectsBodyWorkspaceMismatch(t *testing.T) {
+	db, pr := kp2DB(t)
+	tmp := t.TempDir()
+
+	p := &kp2Provider{content: `{"decision":"ALLOW","reason":"ok","risk":1}`}
+	gk := gatekeeper.New(p, "claude-haiku-4-5", kp2Logger())
+	ev := gatekeeper.NewNegativeLearningEvaluator(gk, kp2Logger())
+	h := NewKeeperPhase2Handler(db, "tok", pr, nil, nil, nil, ev, kp2Logger())
+
+	body := negativeLearningBody{
+		WorkspaceID:    "ws_attacker",
+		CrewID:         "cr1",
+		AgentID:        "a1",
+		AgentName:      "Worker",
+		CrewName:       "Ops",
+		AgentMemoryDir: tmp,
+		Trigger:        "run_failed",
+		FailureSnippet: "x",
+	}
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/internal/keeper/negative-learning", mustJSON(t, body))
+	// Simulate internalWsCtx middleware having put a DIFFERENT
+	// workspace_id in ctx (e.g. caller passed ?workspace_id=ws1 in
+	// query but body.workspace_id="ws_attacker").
+	r = r.WithContext(context.WithValue(r.Context(), ctxWorkspaceID, "ws1"))
+
+	h.HandleNegativeLearning(w, r)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d body=%s; want 400 (workspace mismatch should be rejected)", w.Code, w.Body.String())
+	}
+	if !bytes.Contains(w.Body.Bytes(), []byte("workspace_id in body must match")) {
+		t.Errorf("error body should explain the mismatch; got %s", w.Body.String())
+	}
+	// And: no keeper_requests row should have landed (handler aborted before persist).
+	var n int
+	_ = db.QueryRow(`SELECT COUNT(*) FROM keeper_requests`).Scan(&n)
+	if n != 0 {
+		t.Errorf("keeper_requests should be empty after rejected request; got %d rows", n)
+	}
+}
