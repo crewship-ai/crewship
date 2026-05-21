@@ -1319,6 +1319,25 @@ END;
 	// after SPEC-4 took v98 for credential_attribution.
 	// See migrate_consts_v99_autonomy.go.
 	{version: 99, name: "autonomy", sql: migrationAutonomy},
+
+	// PR-E F6 (PRD §6 F6) — PERSONA + per-user peer cards + GDPR.
+	// v102 lands two related schema changes (rename + tier widen)
+	// that must apply together: PERSONA.md content flows from
+	// agents.system_prompt → system_prompt_legacy on first write,
+	// AND the memory_versions audit table must accept the new
+	// 'persona' / 'peer' tiers so the very first PERSONA write is
+	// recordable. See migrate_consts_v102_persona_rename.go.
+	// Numbered v102 (not v100) to leave room for PR-C (v100, keeper
+	// Phase 2 lifecycle) and PR-D (v101, ephemeral agents) which
+	// land in parallel. If those PRs slip, renumber on rebase.
+	{version: 102, name: "persona_rename", sql: migrationPersonaRename},
+
+	// v103: GDPR primitives for per-user peer cards. user_peer_
+	// consent gates the writer, peer_cards is the disk-mirror index
+	// that powers list/delete endpoints, peer_card_audit records
+	// every write/read/delete keyed by data subject for SAR
+	// fulfilment. See migrate_consts_v103_peer_consent.go.
+	{version: 103, name: "peer_consent", sql: migrationPeerConsent},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

@@ -229,7 +229,7 @@ func (h *AssignmentHandler) Get(w http.ResponseWriter, r *http.Request) {
 func (h *AssignmentHandler) DispatchAssignment(ctx context.Context, req orchestrator.DispatchRequest) error {
 	var target targetAgentInfo
 	err := h.db.QueryRowContext(ctx, `
-		SELECT a.id, a.slug, a.name, COALESCE(a.role_title,''), COALESCE(a.system_prompt,''),
+		SELECT a.id, a.slug, a.name, COALESCE(a.role_title,''), COALESCE(a.system_prompt_legacy,''),
 		       a.cli_adapter, COALESCE(a.llm_model,''), a.tool_profile, a.timeout_seconds, a.memory_enabled, c.slug
 		FROM agents a
 		JOIN crews c ON c.id = a.crew_id

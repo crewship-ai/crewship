@@ -43,7 +43,7 @@ func TestResolveChat_MemoryEnabled(t *testing.T) {
 	}
 
 	_, err = db.ExecContext(context.Background(),
-		`INSERT INTO agents (id, crew_id, workspace_id, name, slug, memory_enabled, system_prompt)
+		`INSERT INTO agents (id, crew_id, workspace_id, name, slug, memory_enabled, system_prompt_legacy)
 		VALUES ('agent1', 'crew1', ?, 'Test Agent', 'test-agent', 1, 'You are helpful.')`, wsID)
 	if err != nil {
 		t.Fatalf("insert agent: %v", err)

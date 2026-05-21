@@ -51,7 +51,7 @@ func (h *AssignmentHandler) dispatchByID(ctx context.Context, assignmentID strin
 	var target targetAgentInfo
 	var crewID string
 	err = h.db.QueryRowContext(ctx, `
-		SELECT a.id, a.slug, a.name, COALESCE(a.role_title,''), COALESCE(a.system_prompt,''),
+		SELECT a.id, a.slug, a.name, COALESCE(a.role_title,''), COALESCE(a.system_prompt_legacy,''),
 		       a.cli_adapter, COALESCE(a.llm_model,''), a.tool_profile, a.timeout_seconds,
 		       a.memory_enabled, c.slug, c.id
 		FROM agents a

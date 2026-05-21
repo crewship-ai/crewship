@@ -263,7 +263,7 @@ func (h *InternalHandler) resolveAgentConfig(w http.ResponseWriter, r *http.Requ
 func (h *InternalHandler) loadAgentData(r *http.Request, agentID string) (*agentConfigData, error) {
 	d := &agentConfigData{agentID: agentID}
 	err := h.db.QueryRowContext(r.Context(), `
-		SELECT a.slug, a.name, a.role_title, a.agent_role, a.cli_adapter, a.system_prompt,
+		SELECT a.slug, a.name, a.role_title, a.agent_role, a.cli_adapter, a.system_prompt_legacy,
 			a.tool_profile, a.timeout_seconds, a.memory_enabled,
 			c2.id, c2.slug, c2.name, a.workspace_id, a.llm_model,
 			c2.network_mode, c2.allowed_domains,

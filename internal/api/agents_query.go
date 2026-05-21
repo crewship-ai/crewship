@@ -26,7 +26,7 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 	const listQuery = `
 		SELECT a.id, a.crew_id, a.workspace_id, a.name, a.slug, a.description, a.role_title,
 			a.agent_role, a.lead_mode, a.status, a.cli_adapter, a.llm_provider, a.llm_model,
-			a.system_prompt, a.avatar_seed, a.avatar_style, a.timeout_seconds,
+			a.system_prompt_legacy, a.avatar_seed, a.avatar_style, a.timeout_seconds,
 			a.tool_profile, a.memory_enabled, a.cli_tools,
 			a.schedule_cron, a.schedule_prompt, a.schedule_enabled, a.schedule_last_run, a.schedule_next_run,
 			a.mcp_config_json,
@@ -170,7 +170,7 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 	err := h.db.QueryRowContext(r.Context(), `
 		SELECT a.id, a.crew_id, a.workspace_id, a.name, a.slug, a.description, a.role_title,
 			a.agent_role, a.lead_mode, a.status, a.cli_adapter, a.llm_provider, a.llm_model,
-			a.system_prompt, a.avatar_seed, a.avatar_style, a.timeout_seconds,
+			a.system_prompt_legacy, a.avatar_seed, a.avatar_style, a.timeout_seconds,
 			a.tool_profile, a.memory_enabled, a.cli_tools,
 			a.schedule_cron, a.schedule_prompt, a.schedule_enabled, a.schedule_last_run, a.schedule_next_run,
 			a.mcp_config_json,
