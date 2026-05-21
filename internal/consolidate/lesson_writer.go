@@ -141,18 +141,25 @@ func WriteLesson(ctx context.Context, agentMemoryDir string, entry LessonEntry) 
 	if err != nil {
 		return err
 	}
-	// Idempotency: drop existing entry with same ID (last write wins
-	// on content), then append. Replace-on-same-ID lets a corrected
-	// rule body overwrite an earlier draft without leaving the stale
-	// version on disk.
+	// Idempotency: replace existing entry with same ID in place (last
+	// write wins on content). Replace-on-same-ID lets a corrected rule
+	// body overwrite an earlier draft without leaving the stale
+	// version on disk. Replacing in place (not drop + append) keeps
+	// retries order-stable on disk — a re-run of an older ID does not
+	// reshuffle it to the tail.
 	out := lessonFile{Entries: make([]LessonEntry, 0, len(current.Entries)+1)}
+	replaced := false
 	for _, e := range current.Entries {
 		if e.ID == entry.ID {
+			out.Entries = append(out.Entries, entry)
+			replaced = true
 			continue
 		}
 		out.Entries = append(out.Entries, e)
 	}
-	out.Entries = append(out.Entries, entry)
+	if !replaced {
+		out.Entries = append(out.Entries, entry)
+	}
 
 	return saveLessonsLocked(ctx, path, out)
 }

@@ -122,6 +122,53 @@ func TestWriteLesson_IdempotentByID(t *testing.T) {
 	}
 }
 
+// TestWriteLesson_RewriteSameIDPreservesOrder guards the idempotency
+// path: re-writing an existing ID must replace its row in place, not
+// drop-and-append to the tail. A retry of an older lesson must not
+// reshuffle persisted order — operators reading lessons.md (and
+// downstream readers that surface "most recent N") expect the on-disk
+// sequence to track capture order, not retry order.
+func TestWriteLesson_RewriteSameIDPreservesOrder(t *testing.T) {
+	dir := t.TempDir()
+	a := LessonEntry{
+		ID: "ent_a", Kind: LessonKindPositive,
+		CapturedAt: time.Date(2026, 5, 20, 10, 0, 0, 0, time.UTC),
+		Source:     LessonSourceManual, Rule: "lesson A",
+	}
+	b := LessonEntry{
+		ID: "ent_b", Kind: LessonKindPositive,
+		CapturedAt: time.Date(2026, 5, 20, 11, 0, 0, 0, time.UTC),
+		Source:     LessonSourceManual, Rule: "lesson B",
+	}
+	if err := WriteLesson(context.Background(), dir, a); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteLesson(context.Background(), dir, b); err != nil {
+		t.Fatal(err)
+	}
+
+	aRetry := a
+	aRetry.Rule = "lesson A (corrected body)"
+	if err := WriteLesson(context.Background(), dir, aRetry); err != nil {
+		t.Fatal(err)
+	}
+
+	entries, err := ReadLessons(context.Background(), dir, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(entries))
+	}
+	if entries[0].ID != "ent_a" || entries[1].ID != "ent_b" {
+		t.Errorf("retry of ent_a must keep order [ent_a, ent_b]; got [%s, %s]",
+			entries[0].ID, entries[1].ID)
+	}
+	if entries[0].Rule != "lesson A (corrected body)" {
+		t.Errorf("retried row should carry replacement body; got %q", entries[0].Rule)
+	}
+}
+
 // TestWriteLesson_RejectsInvalidInputs blocks bad writes at the
 // boundary so consumers can't accidentally land entries that
 // downstream readers would silently skip / dedup. Table-driven so
