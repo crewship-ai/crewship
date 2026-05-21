@@ -87,14 +87,19 @@ func newTestValidator(t *testing.T) *auth.JWTValidator {
 }
 
 // dialTerminal wires the Handler behind an httptest server and returns a live
-// websocket conn for the test to drive.
+// websocket conn for the test to drive. The X-Crewship-Client header echoes
+// what production CLI clients are expected to send after Patch I (the
+// CheckOrigin gate refuses Origin-less upgrades unless the header is set, so
+// tests have to opt in to the same contract).
 func dialTerminal(t *testing.T, h *Handler) *websocket.Conn {
 	t.Helper()
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
 
 	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	header := http.Header{}
+	header.Set("X-Crewship-Client", "test")
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, header)
 	if err != nil {
 		t.Fatalf("ws dial: %v", err)
 	}
@@ -278,6 +283,134 @@ func TestServeHTTP_AccessDeniedForNonMember(t *testing.T) {
 	}
 }
 
+// TestCheckOrigin_RejectsOriginlessClientWithoutHeader pins Patch I:
+// non-browser clients (curl, Python scripts, etc.) historically passed
+// CheckOrigin just by omitting the Origin header. After Patch I they
+// must also send X-Crewship-Client. This blocks the simplest CSRF-style
+// CLI scripts from upgrading to a terminal without identifying as the
+// crewship CLI. We probe the upgrader.Upgrade path directly (instead of
+// going through ServeHTTP) so the validator-nil shortcut doesn't preempt
+// the gate we care about.
+func TestCheckOrigin_RejectsOriginlessClientWithoutHeader(t *testing.T) {
+	t.Parallel()
+	h := New(&mockContainer{}, nil, nil, silentLogger())
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, err := h.upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		c.Close()
+	}))
+	defer srv.Close()
+
+	// No Origin, no X-Crewship-Client → must be refused at upgrade time.
+	conn, resp, err := websocket.DefaultDialer.Dial(
+		"ws"+strings.TrimPrefix(srv.URL, "http"),
+		nil,
+	)
+	if err == nil {
+		conn.Close()
+		t.Fatalf("expected refusal, got accepted upgrade")
+	}
+	if resp == nil || resp.StatusCode != http.StatusForbidden {
+		var status int
+		if resp != nil {
+			status = resp.StatusCode
+		}
+		t.Errorf("expected 403 on Origin-less upgrade without X-Crewship-Client; status=%d err=%v",
+			status, err)
+	}
+}
+
+// TestCheckOrigin_AcceptsOriginlessClientWithHeader proves the CLI path
+// still works after Patch I: a script (no Origin) that sets the
+// X-Crewship-Client header must be allowed through the gate. (Bearer
+// token auth still happens post-upgrade in the init message; this test
+// only exercises CheckOrigin.)
+func TestCheckOrigin_AcceptsOriginlessClientWithHeader(t *testing.T) {
+	t.Parallel()
+	h := New(&mockContainer{}, nil, nil, silentLogger())
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, err := h.upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		c.Close()
+	}))
+	defer srv.Close()
+
+	header := http.Header{}
+	header.Set("X-Crewship-Client", "test")
+	conn, _, err := websocket.DefaultDialer.Dial(
+		"ws"+strings.TrimPrefix(srv.URL, "http"),
+		header,
+	)
+	if err != nil {
+		t.Fatalf("expected upgrade to succeed with X-Crewship-Client header, got %v", err)
+	}
+	conn.Close()
+}
+
+// TestCheckOrigin_BrowserSameOriginAllowed proves the browser path still
+// works after Patch I: Origin equal to scheme://host → accepted.
+func TestCheckOrigin_BrowserSameOriginAllowed(t *testing.T) {
+	t.Parallel()
+	h := New(&mockContainer{}, nil, nil, silentLogger())
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, err := h.upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		c.Close()
+	}))
+	defer srv.Close()
+
+	header := http.Header{}
+	header.Set("Origin", strings.TrimSuffix(srv.URL, ""))
+	conn, _, err := websocket.DefaultDialer.Dial(
+		"ws"+strings.TrimPrefix(srv.URL, "http"),
+		header,
+	)
+	if err != nil {
+		t.Fatalf("expected upgrade to succeed with same-origin header, got %v", err)
+	}
+	conn.Close()
+}
+
+// TestCheckOrigin_BrowserCrossOriginRejected proves cross-origin browser
+// upgrades are refused — defends against a malicious page in the user's
+// browser triggering /ws/terminal against the crewship origin.
+func TestCheckOrigin_BrowserCrossOriginRejected(t *testing.T) {
+	t.Parallel()
+	h := New(&mockContainer{}, nil, nil, silentLogger())
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, err := h.upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		c.Close()
+	}))
+	defer srv.Close()
+
+	header := http.Header{}
+	header.Set("Origin", "https://attacker.example.com")
+	conn, resp, err := websocket.DefaultDialer.Dial(
+		"ws"+strings.TrimPrefix(srv.URL, "http"),
+		header,
+	)
+	if err == nil {
+		conn.Close()
+		t.Fatalf("expected cross-origin refusal, got accepted upgrade")
+	}
+	if resp == nil || resp.StatusCode != http.StatusForbidden {
+		var status int
+		if resp != nil {
+			status = resp.StatusCode
+		}
+		t.Errorf("expected 403 on cross-origin upgrade; status=%d err=%v", status, err)
+	}
+}
+
 // TestVerifyAccess_NoDBFailsClosed pins Patch F: a nil db is a config
 // bug, not "dev mode". The handler must refuse the terminal session
 // rather than silently letting any valid JWT open a shell. Production's
@@ -374,7 +507,9 @@ func TestWriteError_AndWriteInfo(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(srv.URL, "http"), nil)
+	dialHeader := http.Header{}
+	dialHeader.Set("X-Crewship-Client", "test")
+	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(srv.URL, "http"), dialHeader)
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}

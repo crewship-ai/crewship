@@ -71,11 +71,27 @@ func New(container provider.ContainerProvider, validator *auth.JWTValidator, db 
 			WriteBufferSize: 4096,
 			CheckOrigin: func(r *http.Request) bool {
 				origin := r.Header.Get("Origin")
-				if origin == "" {
-					return true // non-browser clients
+				if origin != "" {
+					// Browser case: Origin must match Host (same-origin
+					// only). Cross-origin browser JS that crafts a WS
+					// handshake will still carry the originating page's
+					// scheme://host as Origin per the WS spec, so a strict
+					// equality check defeats CSRF-style cross-site
+					// upgrades.
+					host := r.Host
+					return origin == "http://"+host || origin == "https://"+host
 				}
-				host := r.Host
-				return origin == "http://"+host || origin == "https://"+host
+				// Non-browser clients (CLI / scripts) routinely omit
+				// Origin. Pre-Patch-I this was an unconditional allow —
+				// any caller that could reach /ws/terminal could pass
+				// the CheckOrigin gate just by not setting the header.
+				// Now require the explicit X-Crewship-Client header so
+				// the caller has to know our protocol, not just stumble
+				// into it. Bearer-token auth still happens in the post-
+				// upgrade init message so this only adds a CSRF-style
+				// gate; legitimate CLI clients (crewship cmd) set the
+				// header in cmd_terminal.go.
+				return r.Header.Get("X-Crewship-Client") != ""
 			},
 		},
 	}
