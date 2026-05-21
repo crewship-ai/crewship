@@ -21,6 +21,7 @@ import (
 	api "github.com/crewship-ai/crewship/internal/api"
 	"github.com/crewship-ai/crewship/internal/chatbridge"
 	"github.com/crewship-ai/crewship/internal/config"
+	"github.com/crewship-ai/crewship/internal/consolidate"
 	"github.com/crewship-ai/crewship/internal/crashreport"
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/license"
@@ -568,6 +569,29 @@ var startCmd = &cobra.Command{
 			defer func() {
 				close(rotationStop)
 				rotationWg.Wait()
+			}()
+		}
+
+		// PR-E F6 — PeerCardSync routine. Walks every workspace once
+		// per day at ~04:00 UTC (offset chosen to avoid colliding
+		// with EphemeralExpiry, which lands at ~03:00 in PR-D), runs
+		// the per-(agent, user) eligibility tree, and writes / purges
+		// peer cards on disk under cfg.Storage.BasePath. Without this
+		// worker, peer cards would never be generated and F6 ("agent
+		// reacts differently to different operators") is paper-only.
+		// Extractor defaults to NoopExtractor — production wiring of
+		// the aux-LLM-driven extractor lands in PR-F.
+		if deps.DB != nil {
+			peerStop := make(chan struct{})
+			var peerWg sync.WaitGroup
+			consolidate.StartPeerCardSyncWorker(
+				deps.DB, logger,
+				consolidate.PeerCardWorkerConfig{BasePath: cfg.Storage.BasePath},
+				peerStop, &peerWg,
+			)
+			defer func() {
+				close(peerStop)
+				peerWg.Wait()
 			}()
 		}
 
