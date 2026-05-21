@@ -243,8 +243,11 @@ func (h *CliPairHandler) Redeem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Mint the CLI token — same shape as the bootstrap path.
-	tokenBytes := make([]byte, 20)
+	// Mint the CLI token — same shape as the bootstrap path. 32 bytes
+	// = 256-bit entropy, matching CLITokenHandler.Create (Patch J) and
+	// the Bootstrap path (Patch M6). Pre-M6 this minted 20-byte
+	// tokens, an inconsistency the dev1 8084 A/B run surfaced.
+	tokenBytes := make([]byte, 32)
 	if _, err := rand.Read(tokenBytes); err != nil {
 		h.logger.Error("cli pair redeem: rand", "error", err)
 		replyError(w, http.StatusInternalServerError, "Internal server error")
@@ -283,8 +286,8 @@ func (h *CliPairHandler) Redeem(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if _, err := tx.ExecContext(r.Context(), `
-		INSERT INTO cli_tokens (id, user_id, name, token_hash, created_at)
-		VALUES (?, ?, ?, ?, ?)`,
+		INSERT INTO cli_tokens (id, user_id, name, token_hash, tier, created_at)
+		VALUES (?, ?, ?, ?, 'STANDARD', ?)`,
 		tokenID, userID, tokenName, tokenHashHex, now); err != nil {
 		h.logger.Error("cli pair redeem: insert cli_token", "error", err)
 		replyError(w, http.StatusInternalServerError, "Internal server error")

@@ -31,6 +31,7 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 			a.schedule_cron, a.schedule_prompt, a.schedule_enabled, a.schedule_last_run, a.schedule_next_run,
 			a.mcp_config_json,
 			a.created_at, a.updated_at,
+			a.created_by_user_id,
 			c.name, c.slug, c.color, c.avatar_style
 		FROM agents a
 		LEFT JOIN crews c ON c.id = a.crew_id
@@ -66,6 +67,7 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 		var a agentResponse
 		var memEnabled, schedEnabled int
 		var crewName, crewSlug, crewColor, crewAvatarStyle *string
+		var createdByUserID sql.NullString
 		if err := rows.Scan(&a.ID, &a.CrewID, &a.WorkspaceID, &a.Name, &a.Slug,
 			&a.Description, &a.RoleTitle, &a.AgentRole, &a.LeadMode, &a.Status, &a.CLIAdapter,
 			&a.LLMProvider, &a.LLMModel, &a.SystemPrompt, &a.AvatarSeed, &a.AvatarStyle,
@@ -73,6 +75,7 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 			&a.ScheduleCron, &a.SchedulePrompt, &schedEnabled, &a.ScheduleLastRun, &a.ScheduleNextRun,
 			&a.MCPConfigJSON,
 			&a.CreatedAt, &a.UpdatedAt,
+			&createdByUserID,
 			&crewName, &crewSlug, &crewColor, &crewAvatarStyle); err != nil {
 			h.logger.Error("scan agent", "error", err)
 			replyError(w, http.StatusInternalServerError, "Internal server error")
@@ -80,6 +83,9 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 		}
 		a.MemoryEnabled = memEnabled == 1
 		a.ScheduleEnabled = schedEnabled == 1
+		if createdByUserID.Valid {
+			a.CreatedByUserID = createdByUserID.String
+		}
 		if crewName != nil {
 			a.Crew = &agentCrewInfo{Name: *crewName, Slug: *crewSlug, Color: crewColor, AvatarStyle: crewAvatarStyle}
 		}
@@ -167,6 +173,7 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 	var a agentResponse
 	var memEnabled, schedEnabled int
 	var crewName, crewSlug, crewColor, crewAvatarStyle *string
+	var createdByUserID sql.NullString
 	err := h.db.QueryRowContext(r.Context(), `
 		SELECT a.id, a.crew_id, a.workspace_id, a.name, a.slug, a.description, a.role_title,
 			a.agent_role, a.lead_mode, a.status, a.cli_adapter, a.llm_provider, a.llm_model,
@@ -175,6 +182,7 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 			a.schedule_cron, a.schedule_prompt, a.schedule_enabled, a.schedule_last_run, a.schedule_next_run,
 			a.mcp_config_json,
 			a.created_at, a.updated_at,
+			a.created_by_user_id,
 			c.name, c.slug, c.color, c.avatar_style,
 			(SELECT COUNT(*) FROM agent_skills WHERE agent_id = a.id),
 			(SELECT COUNT(*) FROM agent_credentials WHERE agent_id = a.id),
@@ -189,6 +197,7 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 		&a.ScheduleCron, &a.SchedulePrompt, &schedEnabled, &a.ScheduleLastRun, &a.ScheduleNextRun,
 		&a.MCPConfigJSON,
 		&a.CreatedAt, &a.UpdatedAt,
+		&createdByUserID,
 		&crewName, &crewSlug, &crewColor, &crewAvatarStyle,
 		&a.Count.Skills, &a.Count.Credentials, &a.Count.Chats)
 	if err != nil {
@@ -202,6 +211,9 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 	a.MemoryEnabled = memEnabled == 1
 	a.ScheduleEnabled = schedEnabled == 1
+	if createdByUserID.Valid {
+		a.CreatedByUserID = createdByUserID.String
+	}
 	if crewName != nil {
 		a.Crew = &agentCrewInfo{Name: *crewName, Slug: *crewSlug, Color: crewColor, AvatarStyle: crewAvatarStyle}
 	}

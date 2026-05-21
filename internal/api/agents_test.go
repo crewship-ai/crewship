@@ -215,3 +215,116 @@ func TestUpdateAgent_DisallowedFields_DocumentedHere(t *testing.T) {
 		t.Fatal("disallowed list must be non-empty")
 	}
 }
+
+// TestCreateAgent_PerCrewElevation pins Patch M5: a workspace MEMBER
+// who has been promoted to MANAGER inside a specific crew (via
+// crew_members.role from Patch M1) must be able to POST an agent
+// targeting that crew. Without M5 the Create handler read only
+// RoleFromContext (workspace MEMBER) and returned 403.
+//
+// Scenarios:
+//   - workspace MEMBER, no crew membership → 403 (control)
+//   - workspace MEMBER, crew_id WITHOUT crew elevation → 403
+//   - workspace MEMBER, crew_id WITH crew MANAGER elevation → 201
+//   - workspace OWNER (any crew or no crew) → 201 (unchanged baseline)
+func TestCreateAgent_PerCrewElevation(t *testing.T) {
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	ownerID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, ownerID) // makes ownerID OWNER
+
+	// Second user as workspace MEMBER.
+	const memberID = "user-member"
+	execOrFatal(t, db, `INSERT INTO users (id, email, full_name) VALUES (?, 'm@x', 'M')`, memberID)
+	execOrFatal(t, db, `INSERT INTO workspace_members (id, workspace_id, user_id, role) VALUES ('wm-m', ?, ?, 'MEMBER')`, wsID, memberID)
+
+	const crewID = "crew-m5"
+	execOrFatal(t, db, `INSERT INTO crews (id, workspace_id, name, slug) VALUES (?, ?, 'Devs', 'devs')`, crewID, wsID)
+
+	h := NewAgentHandler(db, logger)
+
+	postAgent := func(t *testing.T, userID, role string, crewIDPtr *string, slug string) int {
+		t.Helper()
+		body := map[string]any{
+			"name":       "Agent " + slug,
+			"slug":       slug,
+			"agent_role": "AGENT",
+		}
+		if crewIDPtr != nil {
+			body["crew_id"] = *crewIDPtr
+		}
+		buf, _ := json.Marshal(body)
+		req := httptest.NewRequest("POST", "/api/v1/agents?workspace_id="+wsID, bytes.NewReader(buf))
+		ctx := withUser(req.Context(), &AuthUser{ID: userID})
+		ctx = withWorkspace(ctx, wsID, role)
+		req = req.WithContext(ctx)
+		rr := httptest.NewRecorder()
+		h.Create(rr, req)
+		return rr.Code
+	}
+
+	t.Run("member_no_crew_id_403", func(t *testing.T) {
+		got := postAgent(t, memberID, "MEMBER", nil, "no-crew-attempt")
+		if got != http.StatusForbidden {
+			t.Errorf("status = %d, want 403; workspace MEMBER without crew_id must be refused", got)
+		}
+	})
+
+	t.Run("member_crew_id_no_elevation_403", func(t *testing.T) {
+		// MEMBER who isn't a crew member at all — CrewRoleFromDB
+		// returns "" (no row in the workspace_members+crews join),
+		// effective role stays workspace MEMBER, canRole denies.
+		crewIDCopy := crewID
+		got := postAgent(t, memberID, "MEMBER", &crewIDCopy, "no-elevation-attempt")
+		if got != http.StatusForbidden {
+			t.Errorf("status = %d, want 403; MEMBER without crew elevation must be refused even with crew_id", got)
+		}
+	})
+
+	t.Run("member_with_crew_manager_role_201", func(t *testing.T) {
+		// Promote the MEMBER to MANAGER inside the crew. effectiveRole
+		// should now return MANAGER and create should succeed.
+		execOrFatal(t, db, `INSERT INTO crew_members (id, crew_id, user_id, role) VALUES ('cm-m5', ?, ?, 'MANAGER')`, crewID, memberID)
+		crewIDCopy := crewID
+		got := postAgent(t, memberID, "MEMBER", &crewIDCopy, "elevated-via-crew")
+		if got != http.StatusCreated {
+			t.Errorf("status = %d, want 201; MEMBER with per-crew MANAGER role must succeed", got)
+		}
+
+		// Verify the agent was tagged with the creator (Patch M3
+		// composition: M5 elevation lets the create through, M3 stamps
+		// the row so future edits gate against this user). Scan error
+		// surfaces as Fatal — a missing row would otherwise compare ""
+		// to memberID and report the assertion failure with no
+		// breadcrumb back to "the SELECT never returned anything".
+		var createdBy string
+		if err := db.QueryRow("SELECT created_by_user_id FROM agents WHERE slug = ?", "elevated-via-crew").Scan(&createdBy); err != nil {
+			t.Fatalf("query created_by_user_id: %v", err)
+		}
+		if createdBy != memberID {
+			t.Errorf("created_by_user_id = %q, want %q (M3 ownership stamp)", createdBy, memberID)
+		}
+	})
+
+	t.Run("owner_unchanged_baseline_201", func(t *testing.T) {
+		crewIDCopy := crewID
+		got := postAgent(t, ownerID, "OWNER", &crewIDCopy, "owner-baseline")
+		if got != http.StatusCreated {
+			t.Errorf("status = %d, want 201; OWNER baseline must still succeed", got)
+		}
+	})
+
+	t.Run("manager_no_crew_id_201", func(t *testing.T) {
+		// Workspace MANAGER with no crew_id — falls back to workspace
+		// role (MANAGER), canRole("create") = true → success. Pins
+		// that M5 didn't break the no-crew path.
+		const mgrID = "user-mgr"
+		execOrFatal(t, db, `INSERT INTO users (id, email, full_name) VALUES (?, 'mgr@x', 'Mgr')`, mgrID)
+		execOrFatal(t, db, `INSERT INTO workspace_members (id, workspace_id, user_id, role) VALUES ('wm-mgr', ?, ?, 'MANAGER')`, wsID, mgrID)
+		got := postAgent(t, mgrID, "MANAGER", nil, "no-crew-manager")
+		if got != http.StatusCreated {
+			t.Errorf("status = %d, want 201; workspace MANAGER without crew_id must still succeed", got)
+		}
+	})
+}

@@ -522,8 +522,14 @@ func (h *AuthHandler) Bootstrap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Generate CLI token for immediate CLI access
-	tokenBytes := make([]byte, 20)
+	// Generate CLI token for immediate CLI access. 32 bytes = 256-bit
+	// entropy, matching CLITokenHandler.Create (Patch J). Pre-M6 this
+	// path minted 20-byte (160-bit) tokens — a live-test inconsistency
+	// caught by the A/B run against dev1 8084. Bootstrap is a single
+	// one-shot operation and the issued token is the FIRST admin
+	// credential on a new install, so entropy parity with the rest of
+	// the token surface is the right default.
+	tokenBytes := make([]byte, 32)
 	if _, err := rand.Read(tokenBytes); err != nil {
 		h.logger.Error("bootstrap: generate token", "error", err)
 		replyError(w, http.StatusInternalServerError, "Internal server error")
@@ -534,8 +540,14 @@ func (h *AuthHandler) Bootstrap(w http.ResponseWriter, r *http.Request) {
 	tokenHashHex := hex.EncodeToString(tokenHash[:])
 	tokenID := generateCUID()
 
+	// Bootstrap tokens explicitly tier='STANDARD' — the bootstrap
+	// admin lands as workspace OWNER and can mint themselves an
+	// ADMIN-tier token afterward via /api/v1/auth/cli-token. We
+	// don't auto-issue an admin token here because the bootstrap
+	// flow is unauthenticated up to this point; the user hasn't
+	// agreed to any 7-day expiry contract yet.
 	_, err = tx.ExecContext(r.Context(),
-		"INSERT INTO cli_tokens (id, user_id, name, token_hash, created_at) VALUES (?, ?, ?, ?, ?)",
+		"INSERT INTO cli_tokens (id, user_id, name, token_hash, tier, created_at) VALUES (?, ?, ?, ?, 'STANDARD', ?)",
 		tokenID, userID, "bootstrap", tokenHashHex, now)
 	if err != nil {
 		h.logger.Error("bootstrap: insert cli_token", "error", err)

@@ -239,6 +239,15 @@ type agentResponse struct {
 	UpdatedAt       string         `json:"updated_at"`
 	Crew            *agentCrewInfo `json:"crew"`
 	Count           agentCounts    `json:"_count"`
+	// Patch M3 — surfaces the agent's creator to the UI. The
+	// per-agent edit gate (canEditAgent) lets the user identified
+	// here edit/delete the agent without workspace ADMIN role; the
+	// AgentCard in the frontend renders an "Owner" badge so a team
+	// scanning the list can answer "who maintains this one" without
+	// diving into agent detail. Empty string when the agent predates
+	// the v100 migration (legacy rows have NULL created_by_user_id);
+	// the JSON `omitempty` keeps such responses untouched.
+	CreatedByUserID string `json:"created_by_user_id,omitempty"`
 }
 
 // List returns all non-deleted agents in the workspace with their crew and count metadata.

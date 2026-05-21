@@ -40,15 +40,50 @@ type createAgentRequest struct {
 func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
-
-	if !canRole(role, "create") {
-		replyError(w, http.StatusForbidden, "Forbidden")
-		return
+	user := UserFromContext(r.Context())
+	callerUserID := ""
+	if user != nil {
+		callerUserID = user.ID
 	}
 
 	var req createAgentRequest
 	if err := readJSON(r, &req); err != nil {
 		replyError(w, http.StatusBadRequest, "Invalid JSON body")
+		return
+	}
+
+	// Patch M5: per-crew role elevation gate. The pre-M5 check was just
+	// canRole(role, "create") which read the workspace role from
+	// RoleFromContext — a workspace MEMBER promoted to MANAGER inside a
+	// specific crew (via crew_members.role from Patch M1) would still
+	// see 403 here because the elevation was data-layer only.
+	//
+	// Now: when the request includes a crew_id, compute the effective
+	// role against THAT crew (max of workspace role + per-crew role)
+	// and gate on it. When no crew_id is given, fall back to the
+	// workspace role only — crewless agents stay workspace-admin
+	// concerns. Same semantics as canEditAgent (Patch M3) which
+	// already composed M1 + workspace role; M5 brings Create to
+	// parity with Update/Delete.
+	effective := role
+	if req.CrewID != nil && *req.CrewID != "" {
+		crewRole, crewErr := CrewRoleFromDB(r.Context(), h.db, callerUserID, *req.CrewID)
+		if crewErr != nil {
+			h.logger.Error("agent.create: crew role lookup", "error", crewErr,
+				"crew_id", *req.CrewID, "user_id", callerUserID)
+			replyError(w, http.StatusInternalServerError, "Internal server error")
+			return
+		}
+		// CrewRoleFromDB returns "" when the user isn't a member of
+		// the crew's workspace. Don't let that "" leak through and
+		// outrank a real workspace role — fall back to workspace.
+		if crewRole != "" {
+			effective = crewRole
+		}
+	}
+	if !canRole(effective, "create") {
+		replyForbidden(w, h.logger, callerUserID, effective,
+			"agent.create", "workspace:"+workspaceID)
 		return
 	}
 
@@ -179,10 +214,9 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// over peers' agents. NULL when called from a code path that
 	// doesn't carry a user (legacy internal flows); the gate then
 	// degrades to workspace-role-only for that agent.
-	user := UserFromContext(r.Context())
 	var createdByUserID sql.NullString
-	if user != nil && user.ID != "" {
-		createdByUserID = sql.NullString{String: user.ID, Valid: true}
+	if callerUserID != "" {
+		createdByUserID = sql.NullString{String: callerUserID, Valid: true}
 	}
 
 	_, err = h.db.ExecContext(r.Context(), `
@@ -201,11 +235,7 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID := ""
-	if user != nil {
-		userID = user.ID
-	}
-	WriteAuditLog(r.Context(), h.db, h.journal, "create", "AGENT", agentID, userID, workspaceID, map[string]interface{}{
+	WriteAuditLog(r.Context(), h.db, h.journal, "create", "AGENT", agentID, callerUserID, workspaceID, map[string]interface{}{
 		"name": req.Name, "slug": req.Slug, "cli_adapter": req.CLIAdapter,
 	})
 
