@@ -59,24 +59,11 @@ func CrewRoleFromDB(ctx context.Context, db *sql.DB, userID, crewID string) (str
 	return effectiveRole(workspaceRole, override), nil
 }
 
-// canRoleForCrew is the crew-scoped equivalent of canRole. It looks
-// up the effective role (workspace OR per-crew, whichever is higher)
-// for the user against the given crew, then runs the same canRole
-// check on it. Returns false on any DB error so a misconfigured
-// query path can't accidentally grant access.
-//
-// Handler call shape:
-//
-//   ok, err := canRoleForCrew(r.Context(), h.db, userID, crewID, "manage")
-//   if err != nil { replyError(w, 500, "internal"); return }
-//   if !ok { replyForbidden(w, ...); return }
-func canRoleForCrew(ctx context.Context, db *sql.DB, userID, crewID string, actions ...string) (bool, error) {
-	role, err := CrewRoleFromDB(ctx, db, userID, crewID)
-	if err != nil {
-		return false, err
-	}
-	return canRole(role, actions...), nil
-}
+// (canRoleForCrew helper deferred — was drafted as a wrapper around
+// CrewRoleFromDB + canRole but no in-tree handler calls it yet, so
+// landing it now would trip `unused` linter. canEditAgent already
+// uses CrewRoleFromDB directly; the next per-crew handler that
+// needs the same pattern will introduce the helper for real.)
 
 // TokenScopesFromContext returns the scope list attached to the
 // caller's CLI token, if any. Empty slice means "no scope
@@ -271,16 +258,16 @@ func replyForbidden(w http.ResponseWriter, logger interface {
 // pre-M4 canRole gate with the M4 audit emit. Saves the four-line
 // boilerplate every handler used to write:
 //
-//   if !canRole(role, "create") {
-//       replyError(w, http.StatusForbidden, "Forbidden")
-//       return
-//   }
+//	if !canRole(role, "create") {
+//	    replyError(w, http.StatusForbidden, "Forbidden")
+//	    return
+//	}
 //
 // becomes:
 //
-//   if !requireRoleOrForbid(w, h.logger, callerID, role, "create", "agent.update", "agent:"+id) {
-//       return
-//   }
+//	if !requireRoleOrForbid(w, h.logger, callerID, role, "create", "agent.update", "agent:"+id) {
+//	    return
+//	}
 //
 // Returns true on success so the caller can early-return on false.
 // Picks the FIRST failing action for the audit so the line names
