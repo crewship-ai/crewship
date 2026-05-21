@@ -216,9 +216,27 @@ func (h *AgentHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
+	user := UserFromContext(r.Context())
+	callerUserID := ""
+	if user != nil {
+		callerUserID = user.ID
+	}
 
-	if !canRole(role, "manage") {
-		replyError(w, http.StatusForbidden, "Forbidden")
+	// Patch M3: agent delete uses the same per-agent owner gate as
+	// update. OWNER/ADMIN delete anything; MANAGER deletes agents
+	// they created OR agents in crews where they hold per-crew
+	// ADMIN/OWNER. Pre-M3 the gate was canRole(manage) — workspace
+	// ADMIN/OWNER only — which prevented MANAGER from cleaning up
+	// their own throwaway agents.
+	ok, err := canEditAgent(r.Context(), h.db, callerUserID, role, agentID)
+	if err != nil {
+		h.logger.Error("agent delete gate query failed", "agent_id", agentID, "error", err)
+		replyError(w, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	if !ok {
+		replyForbidden(w, h.logger, callerUserID, role,
+			"agent.delete", "agent:"+agentID)
 		return
 	}
 
@@ -237,7 +255,6 @@ func (h *AgentHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user := UserFromContext(r.Context())
 	userID := ""
 	if user != nil {
 		userID = user.ID

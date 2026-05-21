@@ -199,3 +199,103 @@ func (s *stubWarnLogger) Warn(msg string, args ...any) {
 		s.onWarn(msg, args...)
 	}
 }
+
+// TestCanEditAgent_OwnerAndAdminAllowed pins Patch M3 short-circuits:
+// OWNER/ADMIN workspace role passes regardless of agent ownership.
+// Avoids any DB hit so the existing handler hot path stays cheap.
+func TestCanEditAgent_OwnerAndAdminAllowed(t *testing.T) {
+	t.Parallel()
+	for _, role := range []string{"OWNER", "ADMIN"} {
+		ok, err := canEditAgent(context.Background(), nil, "any-user", role, "any-agent")
+		if err != nil {
+			t.Errorf("role=%s: unexpected error %v", role, err)
+		}
+		if !ok {
+			t.Errorf("role=%s: gate must allow without DB lookup", role)
+		}
+	}
+}
+
+// TestCanEditAgent_MemberAndViewerDenied — short-circuit refuse
+// before any DB hit; MEMBER/VIEWER never edit agents.
+func TestCanEditAgent_MemberAndViewerDenied(t *testing.T) {
+	t.Parallel()
+	for _, role := range []string{"MEMBER", "VIEWER", ""} {
+		ok, err := canEditAgent(context.Background(), nil, "any-user", role, "any-agent")
+		if err != nil {
+			t.Errorf("role=%s: unexpected error %v", role, err)
+		}
+		if ok {
+			t.Errorf("role=%s: gate must refuse", role)
+		}
+	}
+}
+
+// TestCanEditAgent_ManagerEditsOwnAgent — MANAGER who created the
+// agent passes the gate. The query reads created_by_user_id off the
+// agent row.
+func TestCanEditAgent_ManagerEditsOwnAgent(t *testing.T) {
+	t.Parallel()
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	execOrFatal(t, db, `INSERT INTO agents (id, workspace_id, name, slug, created_by_user_id) VALUES ('a1', ?, 'A', 'a-slug', ?)`, wsID, userID)
+
+	ok, err := canEditAgent(context.Background(), db, userID, "MANAGER", "a1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !ok {
+		t.Error("MANAGER creator must edit own agent")
+	}
+}
+
+// TestCanEditAgent_ManagerCannotEditPeerAgent — MANAGER who didn't
+// create the agent AND doesn't have per-crew elevation gets refused.
+// This is the core Patch M3 invariant: blanket MANAGER-on-workspace
+// no longer means "edit every agent".
+func TestCanEditAgent_ManagerCannotEditPeerAgent(t *testing.T) {
+	t.Parallel()
+	db := setupTestDB(t)
+	owner := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, owner)
+	// Second user as workspace MANAGER (added directly, no crew elevation).
+	const u2 = "user-2-peer"
+	execOrFatal(t, db, `INSERT INTO users (id, email, full_name) VALUES (?, 'u2@x', 'U2')`, u2)
+	execOrFatal(t, db, `INSERT INTO workspace_members (id, workspace_id, user_id, role) VALUES ('wm2', ?, ?, 'MANAGER')`, wsID, u2)
+	// Agent created by owner (not u2).
+	execOrFatal(t, db, `INSERT INTO agents (id, workspace_id, name, slug, created_by_user_id) VALUES ('a1', ?, 'A', 'a-slug', ?)`, wsID, owner)
+
+	ok, err := canEditAgent(context.Background(), db, u2, "MANAGER", "a1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ok {
+		t.Error("MANAGER must NOT edit a peer's agent without ownership or crew elevation")
+	}
+}
+
+// TestCanEditAgent_ManagerEditsViaCrewElevation — MANAGER who didn't
+// create the agent but is ADMIN at the per-crew level passes.
+func TestCanEditAgent_ManagerEditsViaCrewElevation(t *testing.T) {
+	t.Parallel()
+	db := setupTestDB(t)
+	owner := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, owner)
+	const u2 = "user-2-elevated"
+	execOrFatal(t, db, `INSERT INTO users (id, email, full_name) VALUES (?, 'u2@x', 'U2')`, u2)
+	execOrFatal(t, db, `INSERT INTO workspace_members (id, workspace_id, user_id, role) VALUES ('wm2', ?, ?, 'MANAGER')`, wsID, u2)
+	execOrFatal(t, db, `INSERT INTO crews (id, workspace_id, name, slug) VALUES ('c1', ?, 'Crew', 'c1')`, wsID)
+	// u2 is ADMIN inside crew c1 (per-crew elevation).
+	execOrFatal(t, db, `INSERT INTO crew_members (id, crew_id, user_id, role) VALUES ('cm2', 'c1', ?, 'ADMIN')`, u2)
+	// Agent owned by someone else, but in crew c1 where u2 is ADMIN.
+	execOrFatal(t, db, `INSERT INTO agents (id, workspace_id, crew_id, name, slug, created_by_user_id) VALUES ('a1', ?, 'c1', 'A', 'a-slug', ?)`, wsID, owner)
+
+	ok, err := canEditAgent(context.Background(), db, u2, "MANAGER", "a1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !ok {
+		t.Error("MANAGER with per-crew ADMIN role must edit peer agent in that crew")
+	}
+}
