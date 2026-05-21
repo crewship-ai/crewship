@@ -16,6 +16,7 @@ import "net/http"
 //	GET /api/v1/system/version       (auth)
 //	GET /api/v1/system/license       (auth)
 //	GET /api/v1/system/keeper        (auth)
+//	GET /api/v1/system/aux-status    (auth — PR-B F3 diagnostic)
 func (r *Router) registerSystemRoutes() {
 	authed := r.authMw.RequireAuth
 
@@ -59,4 +60,12 @@ func (r *Router) registerSystemRoutes() {
 	// Keeper status (auth required)
 	keeperStatus := NewKeeperStatusHandler(r.db, r.keeperConfig, r.keeperGK, r.logger)
 	r.mux.Handle("GET /api/v1/system/keeper", authed(http.HandlerFunc(keeperStatus.Status)))
+
+	// PR-B F3 aux-status (auth required). Diagnostic read of the
+	// resolved provider/model/timeout per Slot. Pulls config through
+	// AuxModels() so test/dev builds that didn't wire
+	// WithAuxiliaryModels still see the MVP defaults rather than
+	// 5 empty rows.
+	auxStatus := NewAuxStatusHandler(r.AuxModels(), r.logger)
+	r.mux.Handle("GET /api/v1/system/aux-status", authed(http.HandlerFunc(auxStatus.Status)))
 }

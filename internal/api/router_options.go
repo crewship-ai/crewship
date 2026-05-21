@@ -13,6 +13,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
 	"github.com/crewship-ai/crewship/internal/license"
+	"github.com/crewship-ai/crewship/internal/llm"
 	"github.com/crewship-ai/crewship/internal/logcollector"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider"
@@ -252,6 +253,22 @@ func WithHybridSearchEmbedder(e episodic.Embedder) RouterOption {
 func WithHybridSearchProvider(p WorkspaceMemoryProvider) RouterOption {
 	return func(r *Router) {
 		r.hybridSearchProvider = p
+	}
+}
+
+// WithAuxiliaryModels carries the PR-B F3 per-slot aux-model
+// assignment into the Router so the system aux-status endpoint and
+// future PR-C evaluators can resolve the right provider/model/timeout
+// for each subsystem. The auxModelsSet flag is what AuxModels()
+// inspects to decide whether to return the wired config or the
+// llm.DefaultAuxiliaryModels MVP fallback — passing a deliberately
+// empty AuxiliaryModels{} therefore still counts as "configured" and
+// will surface as "unconfigured" rows in the status response (which
+// is the loud-error behaviour PR-Z Z.2 calls for).
+func WithAuxiliaryModels(cfg llm.AuxiliaryModels) RouterOption {
+	return func(r *Router) {
+		r.auxModels = cfg
+		r.auxModelsSet = true
 	}
 }
 

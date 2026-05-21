@@ -20,6 +20,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
 	"github.com/crewship-ai/crewship/internal/license"
+	"github.com/crewship-ai/crewship/internal/llm"
 	"github.com/crewship-ai/crewship/internal/logcollector"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/policy"
@@ -124,6 +125,15 @@ type Router struct {
 	// (and Invalidate hitting the wrong cache).
 	policyResolver     *policy.Resolver
 	policyResolverOnce sync.Once
+
+	// auxModels carries the PR-B F3 auxiliary-model assignment per
+	// slot. Read by the system aux-status endpoint (and future PR-C
+	// evaluators) to look up the resolved provider/model/timeout for
+	// each subsystem. Unset → AuxModels() falls back to
+	// llm.DefaultAuxiliaryModels so the diagnostic surface stays
+	// useful in dev / test builds that haven't wired explicit config.
+	auxModels    llm.AuxiliaryModels
+	auxModelsSet bool
 }
 
 // PolicyResolver returns (lazily constructs) the shared per-crew
@@ -136,6 +146,21 @@ func (r *Router) PolicyResolver() *policy.Resolver {
 		r.policyResolver = policy.NewResolver(r.db)
 	})
 	return r.policyResolver
+}
+
+// AuxModels returns the wired PR-B F3 auxiliary-model config, or
+// llm.DefaultAuxiliaryModels() when WithAuxiliaryModels was not
+// passed. Callers should always go through this rather than reading
+// r.auxModels directly — the default fallback keeps the aux-status
+// endpoint useful in test/dev builds and prevents PR-C evaluators
+// from blowing up on a zero-valued struct (every Provider would be
+// "" → ResolveAux would error). Production wires the real config via
+// WithAuxiliaryModels.
+func (r *Router) AuxModels() llm.AuxiliaryModels {
+	if !r.auxModelsSet {
+		return llm.DefaultAuxiliaryModels()
+	}
+	return r.auxModels
 }
 
 // SetVersion records the binary version for the version-info endpoint.
