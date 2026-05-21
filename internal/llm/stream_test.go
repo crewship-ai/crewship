@@ -286,17 +286,26 @@ func TestAnthropicComplete_ErrorStatuses(t *testing.T) {
 
 func TestOpenAIComplete_ErrorStatuses(t *testing.T) {
 	t.Parallel()
+	// Non-retryable statuses surface via checkOpenAIStatus -- the friendly
+	// translation. Retryable statuses (429/500/503/529) go through
+	// doWithRetry's three attempts and surface wrapped as "max retries
+	// exceeded: OpenAI API returned <code>: <body>". Both shapes need to
+	// stay identifiable by operators, so the test pins them explicitly.
 	cases := []struct {
-		code    int
-		wantMsg string
+		code       int
+		wantMsg    string
+		retryable  bool
 	}{
-		{http.StatusUnauthorized, "invalid OpenAI API key"},
-		{http.StatusTooManyRequests, "OpenAI rate limit exceeded"},
-		{http.StatusInternalServerError, "OpenAI API returned 500"},
+		{http.StatusUnauthorized, "invalid OpenAI API key", false},
+		{http.StatusTooManyRequests, "OpenAI API returned 429", true},
+		{http.StatusInternalServerError, "OpenAI API returned 500", true},
 	}
 	for _, tc := range cases {
 		t.Run(http.StatusText(tc.code), func(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				// Retry-After: 0 keeps the test fast for retryable codes by
+				// skipping the exponential backoff sleep entirely.
+				w.Header().Set("Retry-After", "0")
 				w.WriteHeader(tc.code)
 				_, _ = w.Write([]byte("err"))
 			}))
@@ -311,6 +320,9 @@ func TestOpenAIComplete_ErrorStatuses(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), tc.wantMsg) {
 				t.Errorf("got %q, want substring %q", err.Error(), tc.wantMsg)
+			}
+			if tc.retryable && !strings.Contains(err.Error(), "max retries exceeded") {
+				t.Errorf("retryable status %d should surface as 'max retries exceeded': %q", tc.code, err.Error())
 			}
 		})
 	}
@@ -360,6 +372,48 @@ func TestAnthropic_RetriesOnRateLimit(t *testing.T) {
 	p := newTestAnthropic("k", srv)
 	resp, err := p.Complete(context.Background(), Request{
 		Model:    "m",
+		Messages: []Message{{Role: RoleUser, Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("expected eventual success, got %v", err)
+	}
+	if resp.Content != "Recovered" {
+		t.Errorf("content = %q", resp.Content)
+	}
+	if attempts < 2 {
+		t.Errorf("expected ≥2 attempts, got %d", attempts)
+	}
+}
+
+// TestOpenAI_RetriesOnRateLimit pins the OpenAI doWithRetry mirror. Same
+// shape as the Anthropic version above -- first call returns 429, second
+// recovers with a normal completion. Without the retry, the orchestrator's
+// own retry layer would re-issue the request and the 429 would surface as
+// an immediate error; this asserts the LLM client smooths transient
+// rate-limit responses before they reach the caller.
+func TestOpenAI_RetriesOnRateLimit(t *testing.T) {
+	t.Parallel()
+	var attempts int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if attempts == 1 {
+			w.Header().Set("Retry-After", "0")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte("rate limited"))
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":      "cmpl_x",
+			"object":  "chat.completion",
+			"choices": []map[string]any{{"message": map[string]any{"role": "assistant", "content": "Recovered"}, "finish_reason": "stop"}},
+			"usage":   map[string]int{"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+		})
+	}))
+	defer srv.Close()
+
+	p := NewOpenAIWithBaseURL("k", srv.URL+"/v1/chat/completions")
+	resp, err := p.Complete(context.Background(), Request{
+		Model:    "gpt-4o-mini",
 		Messages: []Message{{Role: RoleUser, Content: "hi"}},
 	})
 	if err != nil {
