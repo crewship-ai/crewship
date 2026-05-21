@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 
@@ -50,6 +51,21 @@ func TestRateLimiter_BlocksOverLimit(t *testing.T) {
 	handler.ServeHTTP(rec, req)
 	assert.Equal(t, http.StatusTooManyRequests, rec.Code)
 	assert.Equal(t, "60", rec.Header().Get("Retry-After"))
+	// X-RateLimit-* trio (de-facto convention, audit M8). Clients use
+	// these to back off intelligently rather than retry blindly.
+	assert.Equal(t, "5", rec.Header().Get("X-RateLimit-Limit"),
+		"X-RateLimit-Limit should reflect the burst capacity")
+	assert.Equal(t, "0", rec.Header().Get("X-RateLimit-Remaining"),
+		"X-RateLimit-Remaining must be 0 when limiter blocks")
+	// X-RateLimit-Reset is a unix timestamp; just assert it parses and
+	// lands in a plausible future window (now + Retry-After ± 5s).
+	resetStr := rec.Header().Get("X-RateLimit-Reset")
+	require.NotEmpty(t, resetStr, "X-RateLimit-Reset header must be present")
+	reset, err := strconv.ParseInt(resetStr, 10, 64)
+	require.NoError(t, err, "X-RateLimit-Reset must be a parseable unix timestamp")
+	delta := reset - time.Now().Unix()
+	assert.GreaterOrEqual(t, delta, int64(55), "Reset should be ~60s in the future")
+	assert.LessOrEqual(t, delta, int64(65), "Reset should be ~60s in the future")
 }
 
 func TestRateLimiter_SeparateIPsIndependent(t *testing.T) {

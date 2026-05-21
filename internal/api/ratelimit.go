@@ -189,6 +189,14 @@ func (rl *RateLimiter) cleanup() {
 // Middleware returns an http.Handler that rate-limits requests by client IP.
 // When the limit is exceeded, it responds with 429 Too Many Requests.
 // When CREWSHIP_RATELIMIT_DISABLED is set the middleware is a no-op.
+//
+// On a 429 we set the de-facto X-RateLimit-* trio plus the RFC 6585
+// Retry-After header so HTTP clients (browsers, SDKs, curl scripts)
+// can self-throttle instead of hammering the bucket. Previously only
+// Retry-After was set, which left well-behaved consumers without the
+// budget context they need to back off intelligently. Values are
+// derived from the limiter's own state, not hard-coded -- the burst
+// is the cap and Tokens() is the live remaining count.
 func (rl *RateLimiter) Middleware(next http.Handler) http.Handler {
 	if rateLimitDisabled {
 		return next
@@ -198,6 +206,9 @@ func (rl *RateLimiter) Middleware(next http.Handler) http.Handler {
 		limiter := rl.getLimiter(ip)
 		if !limiter.Allow() {
 			w.Header().Set("Retry-After", "60")
+			w.Header().Set("X-RateLimit-Limit", strconv.Itoa(rl.burst))
+			w.Header().Set("X-RateLimit-Remaining", "0")
+			w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(time.Now().Add(60*time.Second).Unix(), 10))
 			writeJSON(w, http.StatusTooManyRequests, map[string]string{
 				"error": "Too many requests",
 			})
