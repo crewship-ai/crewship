@@ -185,7 +185,13 @@ func (e *BehaviorEvaluator) Evaluate(ctx context.Context, req BehaviorReviewRequ
 	// agent's tool calls — the operator gets a non-blocking inbox
 	// item instead. Distinct from a genuine ESCALATE from the LLM,
 	// which CAN block in block × strict/guided per the matrix above.
+	//
+	// Decision MUST be forced to ESCALATE here too: classifyBehaviorDecision
+	// returns BehaviorEscalate when isLLMFailureDeny(resp.Reason) is true,
+	// but defense-in-depth so a future divergence between the two checks
+	// can never leak a DENY through the fail-soft branch.
 	if isLLMFailureDeny(resp.Reason) {
+		out.Decision = BehaviorEscalate
 		out.PolicyDecision = policy.DecisionAutoLogInbox
 		out.ShouldBlock = false
 		return out, nil
@@ -201,7 +207,7 @@ func (e *BehaviorEvaluator) Evaluate(ctx context.Context, req BehaviorReviewRequ
 // Gatekeeper normalises non-ALLOW/DENY/ESCALATE values to DENY (its
 // closed set) — we widen WARN back here by scanning the raw response
 // before falling through to the normalised value.
-func classifyBehaviorDecision(normalised, _, raw string) BehaviorDecision {
+func classifyBehaviorDecision(normalised, reason, raw string) BehaviorDecision {
 	low := strings.ToUpper(raw)
 	switch {
 	case strings.Contains(low, `"WARN"`) || strings.Contains(low, `"WARN" `) || strings.Contains(low, `: "WARN"`):
@@ -216,7 +222,13 @@ func classifyBehaviorDecision(normalised, _, raw string) BehaviorDecision {
 		// Distinguish "LLM genuinely picked DENY" from "LLM failed and
 		// Gatekeeper fell back to DENY". The latter widens to ESCALATE
 		// (same fail-soft principle as F4.1).
-		if isLLMFailureDeny(raw) || isUnknownDecisionInRaw(raw) || raw == "" {
+		//
+		// isLLMFailureDeny is keyed by the Gatekeeper's fallback Reason
+		// constants ("Keeper LLM unavailable" etc.), so pass `reason` —
+		// not the raw LLM response (which on infra failure is empty).
+		// isUnknownDecisionInRaw stays keyed by raw because that's where
+		// a hallucinated decision verb would appear.
+		if isLLMFailureDeny(reason) || isUnknownDecisionInRaw(raw) || raw == "" {
 			return BehaviorEscalate
 		}
 		return BehaviorDeny

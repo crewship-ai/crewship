@@ -209,22 +209,27 @@ func isLLMFailureDeny(reason string) bool {
 // audit path widens them to ESCALATE so a hallucinated decision verb
 // doesn't silently unverify a skill.
 //
-// Implemented as a lightweight substring check on the raw response
-// rather than a re-parse — avoids re-introducing the dependency on
-// the JSON decode + adds defense against the LLM emitting decorated
-// values like "decision: \"PROBABLY ALLOW\"" which the underlying
-// parser would normalise to DENY too.
+// Implemented by re-parsing the JSON envelope and comparing the
+// `decision` field exactly (case-insensitive) against the closed set.
+// A previous substring-based variant matched any occurrence of "ALLOW"
+// in the raw text (e.g. inside a "reason" sentence like "do not allow"),
+// which let payloads like {"decision":"MAYBE","reason":"do not allow"}
+// slip through as "known" and quietly unverify skills. Parsing keeps
+// the audit-path fail-soft semantics tight: any of (a) unparseable raw,
+// (b) decision field missing, (c) decision not in the closed set →
+// caller widens DENY → ESCALATE.
 func isUnknownDecisionInRaw(raw string) bool {
 	if raw == "" {
 		return false
 	}
-	low := strings.ToUpper(raw)
-	// If any of the three valid verbs appear in the raw response, treat
-	// the DENY as honest (the LLM actually picked DENY). Only widen
-	// when none of the three are present.
-	return !strings.Contains(low, "ALLOW") &&
-		!strings.Contains(low, "DENY") &&
-		!strings.Contains(low, "ESCALATE")
+	resp, err := parseResponse(raw)
+	if err != nil {
+		return true
+	}
+	dec := strings.ToUpper(strings.TrimSpace(resp.Decision))
+	return dec != string(keeper.DecisionAllow) &&
+		dec != string(keeper.DecisionDeny) &&
+		dec != string(keeper.DecisionEscalate)
 }
 
 // ensure llm.Provider import isn't dropped if future tests stub it

@@ -114,6 +114,14 @@ func (e *NegativeLearningEvaluator) Evaluate(ctx context.Context, req NegativeLe
 	if e.gk == nil {
 		return NegativeLearningResult{}, fmt.Errorf("negative_learning_evaluator: nil gatekeeper")
 	}
+	if strings.TrimSpace(req.WorkspaceID) == "" {
+		// Workspace scoping is load-bearing for downstream lesson_writer
+		// (AgentMemoryDir is workspace-relative) and the keeper_requests
+		// row carries the workspace via the request envelope. Reject at
+		// the evaluator boundary so direct callers can't bypass the API
+		// handler's body validation and proceed with an invalid context.
+		return NegativeLearningResult{}, fmt.Errorf("negative_learning_evaluator: empty workspace_id")
+	}
 	if !validNegativeTrigger(req.Trigger) {
 		return NegativeLearningResult{}, fmt.Errorf("negative_learning_evaluator: invalid trigger %q", req.Trigger)
 	}

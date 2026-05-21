@@ -171,6 +171,21 @@ func New(provider llm.Provider, model string, logger *slog.Logger) *Gatekeeper {
 // L1 auto-allow. Single-char or trivially-short intents are not meaningful enough.
 const minIntentLength = 10
 
+// effectiveRequestType returns the canonical RequestType for an
+// EvalRequest. Callers may set it on the hoisted EvalRequest.RequestType
+// field (the F4.x evaluators do) or on the nested Request.RequestType
+// (older access-flow callers populate the wire keeper.Request struct
+// directly). Without picking one canonical source, fast-path logic and
+// buildPrompt's template switch could disagree: a request that set only
+// Request.RequestType would skip its own F4 template and re-enter the
+// L1 auto-allow shortcut.
+func effectiveRequestType(req EvalRequest) keeper.RequestType {
+	if req.RequestType != "" {
+		return req.RequestType
+	}
+	return req.Request.RequestType
+}
+
 // Evaluate submits the request to the Keeper LLM and returns a structured decision.
 // For L1 credentials with a sufficiently descriptive intent, it short-circuits to ALLOW.
 func (g *Gatekeeper) Evaluate(ctx context.Context, req EvalRequest) (keeper.GatekeeperResponse, error) {
@@ -186,9 +201,12 @@ func (g *Gatekeeper) Evaluate(ctx context.Context, req EvalRequest) (keeper.Gate
 	// flow (RequestType empty or "access"). F4.x request types
 	// (skill_review, behavior, memory_health, negative_learning) carry
 	// SecurityLevelL1 as a placeholder — they aren't credential reads
-	// and their decision pipeline must always reach the LLM.
+	// and their decision pipeline must always reach the LLM. Resolve via
+	// effectiveRequestType so a caller that only set Request.RequestType
+	// still skips the access shortcut.
+	rt := effectiveRequestType(req)
 	intent := strings.TrimSpace(req.Request.Intent)
-	isAccessFlow := req.RequestType == "" || req.RequestType == keeper.RequestTypeAccess
+	isAccessFlow := rt == "" || rt == keeper.RequestTypeAccess
 	if isAccessFlow &&
 		req.Command == "" &&
 		req.SecurityLevel == keeper.SecurityLevelL1 &&
@@ -297,7 +315,7 @@ func truncateForAudit(s string) string {
 // ({"decision":..., "reason":..., "risk":...}) so parseResponse can
 // stay format-agnostic.
 func (g *Gatekeeper) buildPrompt(req EvalRequest) string {
-	switch req.RequestType {
+	switch effectiveRequestType(req) {
 	case keeper.RequestTypeSkillReview:
 		return g.buildSkillReviewPrompt(req)
 	case keeper.RequestTypeBehavior:
