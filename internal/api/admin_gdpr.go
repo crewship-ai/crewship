@@ -274,6 +274,10 @@ func (h *AdminGDPRHandler) DeleteUserData(w http.ResponseWriter, r *http.Request
 			}
 			cards = append(cards, c)
 		}
+		if iterErr := cardRows.Err(); iterErr != nil {
+			h.logger.Warn("gdpr delete: peer_cards iteration error",
+				"action_id", actionID, "err", iterErr)
+		}
 		_ = cardRows.Close()
 		for _, c := range cards {
 			// On-disk file delete is best-effort. The DB row
@@ -466,6 +470,10 @@ func (h *AdminGDPRHandler) ExportUserData(w http.ResponseWriter, r *http.Request
 			}
 			bundle.PeerCards = append(bundle.PeerCards, e)
 		}
+		if iterErr := pcRows.Err(); iterErr != nil {
+			h.logger.Warn("gdpr export: peer_cards iteration error",
+				"action_id", actionID, "err", iterErr)
+		}
 		_ = pcRows.Close()
 		scope.PeerCards = len(bundle.PeerCards)
 	}
@@ -493,6 +501,10 @@ func (h *AdminGDPRHandler) ExportUserData(w http.ResponseWriter, r *http.Request
 			}
 			bundle.MemoryVersion = append(bundle.MemoryVersion, e)
 		}
+		if iterErr := mvRows.Err(); iterErr != nil {
+			h.logger.Warn("gdpr export: memory_versions iteration error",
+				"action_id", actionID, "err", iterErr)
+		}
 		_ = mvRows.Close()
 		scope.MemoryVersions = len(bundle.MemoryVersion)
 	}
@@ -519,6 +531,10 @@ func (h *AdminGDPRHandler) ExportUserData(w http.ResponseWriter, r *http.Request
 				continue
 			}
 			bundle.InboxItems = append(bundle.InboxItems, e)
+		}
+		if iterErr := ibRows.Err(); iterErr != nil {
+			h.logger.Warn("gdpr export: inbox_items iteration error",
+				"action_id", actionID, "err", iterErr)
 		}
 		_ = ibRows.Close()
 		scope.InboxItems = len(bundle.InboxItems)

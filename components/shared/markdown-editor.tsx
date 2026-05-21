@@ -39,6 +39,13 @@ export interface MarkdownEditorProps {
   autoFocus?: boolean
   minHeight?: string
   className?: string
+  /**
+   * Accessible name for the editor textbox. Defaults to "Markdown
+   * editor" so the underlying contenteditable always has a name
+   * — screen readers would otherwise announce an unnamed textbox.
+   * Callers SHOULD pass a more specific value (e.g. "PERSONA.md
+   * editor") when the surface has a known semantic.
+   */
   ariaLabel?: string
 }
 
@@ -49,7 +56,7 @@ export function MarkdownEditor({
   autoFocus,
   minHeight = "10rem",
   className,
-  ariaLabel,
+  ariaLabel = "Markdown editor",
 }: MarkdownEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)

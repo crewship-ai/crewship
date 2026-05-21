@@ -12,20 +12,21 @@ import (
 )
 
 // Provider is the pluggable memory backend interface introduced to
-// open Crewship to alternative memory stores (Mem0, Letta, Honcho)
-// while keeping the on-disk default as the v1 implementation. Every
-// method MUST be safe to call from concurrent goroutines.
+// open Crewship to alternative external memory stores while keeping
+// the on-disk default as the v1 implementation. Every method MUST be
+// safe to call from concurrent goroutines.
 //
 // Phase 1 (this PR): interface + the LocalDispatcher adapter that
-// wraps the existing tools.go path. Reference impls for external
-// providers (Mem0, Letta) land in PR-F6+.
+// wraps the existing tools.go path. External-provider reference
+// implementations (HTTP-backed long-term memory stores, vector
+// recall services, conversation-history platforms) land in PR-F18+.
 //
 // Auditor framing (PR-F3): "the sidecar /mcp/memory is the right
 // place but the contract is missing." Today every external store
 // would have to fork the dispatcher to integrate. Provider lets a
-// future Mem0Provider / LettaProvider / HonchoProvider slot in
-// behind the same wire surface the orchestrator and sidecar already
-// speak, without touching call sites.
+// future HTTP-backed or vector-recall implementation slot in behind
+// the same wire surface the orchestrator and sidecar already speak,
+// without touching call sites.
 //
 // Wiring posture for this PR is additive only — the existing
 // Dispatcher remains the production path; LocalDispatcher proves
@@ -167,7 +168,7 @@ type HealthStatus struct {
 // LocalDispatcher is the reference impl that lets us land the
 // Provider abstraction without a risky cutover. PR-F6+ will lift
 // orchestrator/sidecar call sites to Provider once the second impl
-// (Mem0Provider) is ready to choose between.
+// (an HTTP-backed external store) is ready to choose between.
 type LocalDispatcher struct {
 	d *Dispatcher
 }
@@ -205,8 +206,18 @@ func (l *LocalDispatcher) Retain(ctx context.Context, req RetainRequest) (Retain
 	id := tierSourceLabel(req.Tier, req.Key)
 	bytes := 0
 	if res.Metadata != nil {
-		if v, ok := res.Metadata["bytes_written"].(int); ok {
+		// Numeric metadata values may arrive as either int (in-process
+		// dispatcher path) or float64 (round-tripped through JSON via
+		// the sidecar MCP path). Accept both — a single type assertion
+		// to int would silently fail in the JSON case and leave the
+		// caller with bytes=0 (auditor catch, 2026-05-21).
+		switch v := res.Metadata["bytes_written"].(type) {
+		case int:
 			bytes = v
+		case int64:
+			bytes = int(v)
+		case float64:
+			bytes = int(v)
 		}
 	}
 	return RetainResult{ID: id, Bytes: bytes}, nil

@@ -118,7 +118,16 @@ CREATE TABLE IF NOT EXISTS gdpr_actions (
     status          TEXT NOT NULL DEFAULT 'in_progress'
                        CHECK (status IN ('in_progress','completed','failed')),
     error           TEXT,
-    reason          TEXT
+    reason          TEXT,
+    -- Belt-and-suspenders for the GDPR audit contract: API path
+    -- already rejects a delete without a reason at the handler
+    -- layer, but the column-level CHECK keeps the invariant alive
+    -- even if a future caller bypasses the handler (admin SQL,
+    -- another internal-auth route, partial revert). 'export' and
+    -- 'view' actions don't require a reason — operators frequently
+    -- run them as routine SAR servicing — only 'delete' needs the
+    -- justification on file.
+    CHECK (action <> 'delete' OR (reason IS NOT NULL AND reason <> ''))
 );
 
 CREATE INDEX IF NOT EXISTS idx_gdpr_actions_subject

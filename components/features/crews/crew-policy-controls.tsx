@@ -105,7 +105,12 @@ export function CrewPolicyControls({ crewId, workspaceId, canEdit }: CrewPolicyC
   const { abilities } = useAbilities()
   const effectiveCanEdit = useMemo(() => {
     if (typeof canEdit === "boolean") return canEdit
-    return abilities.can("update", "Crew")
+    // Backend PUT /api/v1/crews/{crewId}/policy requires ADMIN+
+    // (canRole "manage"). Broader "update" permission would enable
+    // the controls for a user who'll then bounce off a 403 at save
+    // time. Server is still authoritative — UI greying is a UX hint
+    // not a security boundary (auditor catch round 4).
+    return abilities.can("manage", "Crew")
   }, [canEdit, abilities])
   const [policy, setPolicy] = useState<PolicyResponse | null>(null)
   // max_ephemeral_agents lives on the crew row (not the policy table),

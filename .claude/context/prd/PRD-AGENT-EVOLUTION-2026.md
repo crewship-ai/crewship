@@ -426,7 +426,7 @@ the auditor's 2026-05-21 findings list:
 - ⏳ Provider interface swap at production call sites (interface
      shipped + LocalDispatcher ref impl + tests; existing call sites
      still use `*Dispatcher` directly; PR-F17 lifts them)
-- ⏳ Provider reference impl for Mem0 / Letta shape (PR-F18)
+- ⏳ Provider reference impl — external HTTP-backed memory store with vector recall (PR-F18)
 - ⏳ LoCoMo / LongMemEval reproducer + published baseline (PR-F19)
 - ⏳ Skill→Memory bridge (MEMORY-ROADMAP §8.2; PR-F20)
 - ⏳ Bitemporal `valid_from` / `valid_to` (PR-F21)

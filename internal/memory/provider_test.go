@@ -11,11 +11,11 @@ import (
 // TestLocalDispatcher_Retain_PersistsToDisk asserts that a Retain
 // through the Provider interface writes the same bytes the legacy
 // dispatcher would have written via memory.write. The on-disk file
-// is the contract: any provider implementation MUST leave the
-// content readable by the existing dispatcher (so a future operator
-// `crewship memory cat AGENT.md` still works after a Mem0 round
-// trip — well, modulo that Mem0 wouldn't write to disk; but the
-// LocalDispatcher must.)
+// is the contract: the local-disk provider implementation MUST leave
+// the content readable by the existing dispatcher (so the operator's
+// `crewship memory cat AGENT.md` keeps working). External providers
+// that don't persist to disk will satisfy the contract through their
+// own Recall instead — this test only covers the LocalDispatcher.
 func TestLocalDispatcher_Retain_PersistsToDisk(t *testing.T) {
 	ac := testAgentCtx(t)
 	p := NewLocalDispatcher(ac)
