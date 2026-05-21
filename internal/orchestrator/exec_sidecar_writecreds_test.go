@@ -123,6 +123,70 @@ func TestWriteCredentialFiles_ScriptOmitsChown(t *testing.T) {
 	}
 }
 
+// TestWriteCredentialFiles_ScriptRemovesPathBeforeWrite locks down
+// the TOCTOU defence: each `echo … > path` redirect must be preceded
+// by an `rm -f path` so a symlink planted by the previous agent
+// session (warm container restart, same UID 1001) can't redirect
+// the write to a 1001-writable target like /crew/shared/.memory/X
+// or /output/<other-agent>/Y.
+//
+// The script is one `sh -c` string with `&&` between steps, so
+// "preceded" means the rm-f literal appears at an earlier substring
+// index than the matching `> path` literal. We assert both:
+//
+//  1. an `rm -f /secrets/agent-a/<envvar>` clause exists for every
+//     credential file path the writer plans to create
+//  2. that rm-f clause appears in the script before the `>`-redirect
+//     that follows-or-creates that same path
+//
+// If either invariant breaks, a regression on the symlink TOCTOU is
+// silently re-introduced — the writer behaves the same on a clean
+// dir but corrupts attacker-chosen files on a warm restart. Locking
+// the script structure here keeps the security property visible.
+func TestWriteCredentialFiles_ScriptRemovesPathBeforeWrite(t *testing.T) {
+	t.Parallel()
+	fake := &credExecFake{}
+	creds := []Credential{
+		{ID: "c1", EnvVarName: "GH_TOKEN", PlainValue: "ghp_abc", Type: "CLI_TOKEN"},
+		{ID: "c2", EnvVarName: "GITHUB_SSH", PlainValue: "key", Type: "SSH_KEY"},
+		{ID: "c3", EnvVarName: "VAULT_USER", PlainValue: "pw", Type: "USERPASS", Username: "alice"},
+	}
+	if err := writeCredentialFiles(context.Background(), fake, "ctr-x", "agent-a", creds,
+		"/secrets/agent-a", "/secrets/shared", quietCredLogger()); err != nil {
+		t.Fatalf("writeCredentialFiles: %v", err)
+	}
+
+	// Every path the writer plans to create. Order is intentional —
+	// matches the dispatch order in buildCredFileScript so the
+	// before-relation we assert below is well defined.
+	expectedPaths := []string{
+		"/secrets/agent-a/GH_TOKEN",
+		"/secrets/agent-a/ssh/GITHUB_SSH",
+		"/secrets/agent-a/VAULT_USER_USERNAME",
+		"/secrets/agent-a/VAULT_USER_PASSWORD",
+		"/secrets/agent-a/.env",
+	}
+	for _, p := range expectedPaths {
+		rmTok := "rm -f " + p
+		writeTok := "> " + p
+		rmIdx := strings.Index(fake.scriptSeen, rmTok)
+		writeIdx := strings.Index(fake.scriptSeen, writeTok)
+		if rmIdx < 0 {
+			t.Errorf("missing TOCTOU guard for %q — script must contain %q before the redirect; got script:\n%s",
+				p, rmTok, fake.scriptSeen)
+			continue
+		}
+		if writeIdx < 0 {
+			t.Errorf("write to %q missing from script entirely; got:\n%s", p, fake.scriptSeen)
+			continue
+		}
+		if rmIdx > writeIdx {
+			t.Errorf("rm-f for %q happens AFTER the redirect (rmIdx=%d, writeIdx=%d) — symlink window stays open. Script:\n%s",
+				p, rmIdx, writeIdx, fake.scriptSeen)
+		}
+	}
+}
+
 // TestWriteCredentialFiles_NonZeroExitErrors is the load-bearing one.
 // Pre-fix the orchestrator treated `Exec returned no Go error` as
 // "the script succeeded" — which masked the permission-denied
