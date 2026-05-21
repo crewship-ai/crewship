@@ -252,8 +252,14 @@ func (o *Orchestrator) buildAgentMemoryBlock(ctx context.Context, req AgentRunRe
 	}
 	yesterdayLog, _ := o.readContainerFile(readCtx, req.ContainerID, path.Join(memoryDir, "daily", yesterday+".md"))
 	todayLog, _ := o.readContainerFile(readCtx, req.ContainerID, path.Join(memoryDir, "daily", today+".md"))
+	// PR-F7: BRIEF.md is written by a parent LEAD via ApplyBrief when
+	// it hires / assigns a sub-agent. Read it alongside AGENT.md so
+	// the curated brief surfaces on the sub-agent's first turn. Empty
+	// for unbriefed agents — no impact on the existing path.
+	briefMD, _ := o.readContainerFile(readCtx, req.ContainerID, path.Join(memoryDir, "BRIEF.md"))
 
 	sections := []memorySection{
+		{"BRIEF.md (parent-issued brief)", briefMD},
 		{"AGENT.md (long-term memory)", agentMD},
 		{fmt.Sprintf("Daily log: %s (yesterday)", yesterday), yesterdayLog},
 		{fmt.Sprintf("Daily log: %s (today)", today), todayLog},
