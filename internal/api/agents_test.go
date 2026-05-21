@@ -294,9 +294,14 @@ func TestCreateAgent_PerCrewElevation(t *testing.T) {
 
 		// Verify the agent was tagged with the creator (Patch M3
 		// composition: M5 elevation lets the create through, M3 stamps
-		// the row so future edits gate against this user).
+		// the row so future edits gate against this user). Scan error
+		// surfaces as Fatal — a missing row would otherwise compare ""
+		// to memberID and report the assertion failure with no
+		// breadcrumb back to "the SELECT never returned anything".
 		var createdBy string
-		_ = db.QueryRow("SELECT created_by_user_id FROM agents WHERE slug = ?", "elevated-via-crew").Scan(&createdBy)
+		if err := db.QueryRow("SELECT created_by_user_id FROM agents WHERE slug = ?", "elevated-via-crew").Scan(&createdBy); err != nil {
+			t.Fatalf("query created_by_user_id: %v", err)
+		}
 		if createdBy != memberID {
 			t.Errorf("created_by_user_id = %q, want %q (M3 ownership stamp)", createdBy, memberID)
 		}

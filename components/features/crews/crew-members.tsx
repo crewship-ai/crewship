@@ -185,7 +185,7 @@ export function CrewMembers({ members, crewId, workspaceId, canEdit, onMembersCh
                 {members.map((member) => {
                   const isEditing = editingId === member.id
                   return (
-                    <TableRow key={member.id}>
+                    <TableRow key={member.id} className="group">
                       <TableCell className="text-body font-medium">
                         {member.user.full_name ?? "—"}
                       </TableCell>
@@ -256,9 +256,10 @@ export function CrewMembers({ members, crewId, workspaceId, canEdit, onMembersCh
                               <Button
                                 variant="ghost"
                                 size="icon"
-                                className="h-6 w-6 text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity"
+                                className="h-6 w-6 text-muted-foreground hover:text-foreground opacity-60 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
                                 onClick={() => startEdit(member)}
                                 title="Edit per-crew role"
+                                aria-label="Edit per-crew role"
                               >
                                 <Pencil className="h-3 w-3" />
                               </Button>
@@ -271,25 +272,16 @@ export function CrewMembers({ members, crewId, workspaceId, canEdit, onMembersCh
                       </TableCell>
                       {canEdit && (
                         <TableCell>
-                          {/* Render edit button on hover via the always-mounted
-                              pencil above; this column hosts only the remove
-                              action so the destructive action stays distinct.
-                              When inline editing is active the Remove button
-                              is hidden to avoid two competing actions on the
-                              same row. */}
+                          {/* Actions column: Remove only. The role edit
+                              affordance lives next to the role badge above
+                              (always-visible pencil at opacity-60, full
+                              opacity on hover / focus) so users with and
+                              without an existing role override see the same
+                              control. Hiding Remove during inline edit
+                              avoids two competing destructive actions on
+                              the same row. */}
                           {!isEditing && (
                             <div className="flex items-center gap-1">
-                              {!member.role && (
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-7 text-xs text-muted-foreground hover:text-foreground"
-                                  onClick={() => startEdit(member)}
-                                  title="Set per-crew role"
-                                >
-                                  <Pencil className="h-3 w-3" />
-                                </Button>
-                              )}
                               <AlertDialog>
                                 <AlertDialogTrigger asChild>
                                   <Button

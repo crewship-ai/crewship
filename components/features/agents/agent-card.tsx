@@ -185,7 +185,20 @@ export const AgentCard = memo(function AgentCard({ agent }: { agent: AgentData }
               <TooltipProvider delayDuration={300}>
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <span className="flex items-center gap-1 hover:text-foreground transition-colors cursor-help">
+                    {/* tabIndex=0 + aria-label so keyboard users can focus the
+                        owner badge and the tooltip opens on Tab/focus, not only
+                        on mouse hover. The label echoes the tooltip body so
+                        screen-readers announce ownership even when the visual
+                        tooltip isn't rendered (touch / SR-only contexts). */}
+                    <span
+                      tabIndex={0}
+                      aria-label={`Agent owner: ${
+                        agent.owner
+                          ? agent.owner.full_name ?? agent.owner.email
+                          : agent.created_by_user_id
+                      }`}
+                      className="flex items-center gap-1 hover:text-foreground focus-visible:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded-sm transition-colors cursor-help"
+                    >
                       <User className="h-3 w-3" />
                       {agent.owner
                         ? agent.owner.full_name ?? agent.owner.email
