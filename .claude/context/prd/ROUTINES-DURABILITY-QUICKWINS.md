@@ -135,6 +135,6 @@ parser logic in `triggerAction`, which mirrors
 - No new CLI subcommands (one existing one — `dry-run` — gets its decode fixed)
 - No agent-facing behaviour changes (sidecar pipelines.go untouched)
 
-The blast radius is intentionally small. Three bug fixes + two new
+The blast radius is intentionally small. Two bug fixes + two new
 render surfaces over data the server already emits. Anything bigger
 lands in its own PR.

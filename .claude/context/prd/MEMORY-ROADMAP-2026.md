@@ -24,7 +24,7 @@ durable consolidation.
 - Workspace-tier memory wired into prompt assembly with its own budget slice
 - Versioned memory rows with full audit trail (EU AI Act Article 14 alignment)
 - Mid-session memory tools so the agent calls memory.read / write / search instead of relying on the boot snapshot
-- Hybrid retrieval (BM25 + dense + RRF fusion) so the search surface scales past keyword-only
+- Hybrid retrieval (BM25 + dense + RRF fusion) so the search surface scales past keyword-only — substring search ships in PR #3, FTS5 swap is the follow-up
 - Write-time verifier guarding against poisoned content reaching the model
 
 ## 3. Non-goals (explicit cuts)
@@ -45,7 +45,7 @@ durable consolidation.
 
 ## 5. Roadmap overview
 
-```
+```text
 #4  Research-grade consolidation (six-signal scoring, sleep-time)     [deferred]
 #3  Smart memory (mid-session tools + hybrid retrieval + verifier)    [in flight]
 #2  Close the loop (HITL + workspace tier + versioning)               [merged]
@@ -157,9 +157,10 @@ catalog with attribution to the originating memory row.
 
 ## 10. Open questions
 
-- PR #3: should `memory.search` use FTS5 from day one or substring-only
-  with FTS5 deferred? Current plan: substring MVP, FTS5 swap is a
-  contained later change in PR-A.
+- PR #3 phasing (resolved): `memory.search` ships substring-only as
+  the PR #3 acceptance criterion; FTS5 + dense + RRF fusion lands in
+  the contained PR-A follow-up. Goal §2 lists the fully-fused
+  surface so the roadmap horizon stays visible.
 - PR #4: aux-model slot for the consolidator is in PRD-AGENT-EVOLUTION
   PR-B as F3. Need to confirm the routing point won't conflict.
 
