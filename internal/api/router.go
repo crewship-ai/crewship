@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/auth/sessions"
@@ -19,8 +20,10 @@ import (
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
 	"github.com/crewship-ai/crewship/internal/license"
+	"github.com/crewship-ai/crewship/internal/llm"
 	"github.com/crewship-ai/crewship/internal/logcollector"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
+	"github.com/crewship-ai/crewship/internal/policy"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/ws"
 	dockerclient "github.com/docker/docker/client"
@@ -110,6 +113,54 @@ type Router struct {
 	// or "dev" for local builds). Surfaced on GET /api/v1/system/version
 	// so the web UI can render an "update available" banner.
 	version string
+
+	// policyResolver is the shared per-crew autonomy + behavior_mode
+	// resolver introduced by PR-B F2. Carried on Router so PATCH
+	// handlers can invalidate the cache (otherwise subsystems would
+	// see stale values for up to the 10s TTL after an operator flip).
+	// PR-C / PR-D / PR-E consumers will read through this same
+	// instance. policyResolverOnce serialises lazy init — concurrent
+	// HTTP handlers calling PolicyResolver() at startup would
+	// otherwise race on the field and risk constructing two resolvers
+	// (and Invalidate hitting the wrong cache).
+	policyResolver     *policy.Resolver
+	policyResolverOnce sync.Once
+
+	// auxModels carries the PR-B F3 auxiliary-model assignment per
+	// slot. Read by the system aux-status endpoint (and future PR-C
+	// evaluators) to look up the resolved provider/model/timeout for
+	// each subsystem. Unset → AuxModels() falls back to
+	// llm.DefaultAuxiliaryModels so the diagnostic surface stays
+	// useful in dev / test builds that haven't wired explicit config.
+	auxModels    llm.AuxiliaryModels
+	auxModelsSet bool
+}
+
+// PolicyResolver returns (lazily constructs) the shared per-crew
+// policy resolver. Callers should always go through this rather
+// than constructing their own — sharing the cache is what makes
+// Invalidate work end-to-end. sync.Once guarantees a single
+// resolver instance even under concurrent first-call races.
+func (r *Router) PolicyResolver() *policy.Resolver {
+	r.policyResolverOnce.Do(func() {
+		r.policyResolver = policy.NewResolver(r.db)
+	})
+	return r.policyResolver
+}
+
+// AuxModels returns the wired PR-B F3 auxiliary-model config, or
+// llm.DefaultAuxiliaryModels() when WithAuxiliaryModels was not
+// passed. Callers should always go through this rather than reading
+// r.auxModels directly — the default fallback keeps the aux-status
+// endpoint useful in test/dev builds and prevents PR-C evaluators
+// from blowing up on a zero-valued struct (every Provider would be
+// "" → ResolveAux would error). Production wires the real config via
+// WithAuxiliaryModels.
+func (r *Router) AuxModels() llm.AuxiliaryModels {
+	if !r.auxModelsSet {
+		return llm.DefaultAuxiliaryModels()
+	}
+	return r.auxModels
 }
 
 // SetVersion records the binary version for the version-info endpoint.

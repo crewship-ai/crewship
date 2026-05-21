@@ -1328,6 +1328,14 @@ END;
 	// v99 to v100 in the same renumber pass as cli_token_tiers.
 	// See migrate_consts_v100_rbac_extensions.go.
 	{version: 100, name: "rbac_extensions", sql: migrationRBACExtensions},
+
+	// Per-crew autonomy policy (PRD §6 F2 / PR-B): autonomy_level
+	// + behavior_mode + audit triple. Net-new columns with column-
+	// level CHECK constraints; no recreate dance. Originally drafted
+	// as v98 / v99 in earlier rebases; bumped to v101 after main
+	// landed v99 (cli_token_tiers) + v100 (rbac_extensions).
+	// See migrate_consts_v101_autonomy.go.
+	{version: 101, name: "autonomy", sql: migrationAutonomy},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

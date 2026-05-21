@@ -109,6 +109,7 @@ func init() {
 	rootCmd.AddCommand(exposeCmd)
 	rootCmd.AddCommand(templateCmd)
 	rootCmd.AddCommand(systemCmd)
+	rootCmd.AddCommand(policyCmd)
 	rootCmd.AddCommand(issueCmd)
 	rootCmd.AddCommand(projectCmd)
 	rootCmd.AddCommand(seedCmd)
