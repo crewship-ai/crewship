@@ -74,7 +74,7 @@ func TestPolicy_DecideAction_Matrix(t *testing.T) {
 
 // TestPolicy_DecideBehavior_WarnMode in warn mode every level treats
 // the DENY decision as a non-blocking inbox notification — the
-// agent's action proceeds. Hermes-aligned default.
+// agent's action proceeds. This is the default behavior mode.
 func TestPolicy_DecideBehavior_WarnMode(t *testing.T) {
 	for _, lvl := range []AutonomyLevel{AutonomyStrict, AutonomyGuided, AutonomyTrusted, AutonomyFull} {
 		t.Run(string(lvl), func(t *testing.T) {
