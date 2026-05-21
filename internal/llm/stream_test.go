@@ -292,9 +292,9 @@ func TestOpenAIComplete_ErrorStatuses(t *testing.T) {
 	// exceeded: OpenAI API returned <code>: <body>". Both shapes need to
 	// stay identifiable by operators, so the test pins them explicitly.
 	cases := []struct {
-		code       int
-		wantMsg    string
-		retryable  bool
+		code      int
+		wantMsg   string
+		retryable bool
 	}{
 		{http.StatusUnauthorized, "invalid OpenAI API key", false},
 		{http.StatusTooManyRequests, "OpenAI API returned 429", true},
