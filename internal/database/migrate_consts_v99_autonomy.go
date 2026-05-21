@@ -1,6 +1,6 @@
 package database
 
-// migrationAutonomy (v98) adds the per-crew autonomy policy surface
+// migrationAutonomy (v99) adds the per-crew autonomy policy surface
 // introduced in PRD §6 F2 (PR-B). Two enum columns gate every
 // downstream HITL decision (memory writes, skill creation, persona
 // suggestions, behavior monitor escalations, ephemeral spawn):

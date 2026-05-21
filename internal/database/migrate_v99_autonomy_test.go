@@ -10,15 +10,18 @@ import (
 	"testing"
 )
 
-// TestMigrateV98_Autonomy asserts the per-crew autonomy policy
+// TestMigrateV99_Autonomy asserts the per-crew autonomy policy
 // surface lands cleanly: every new column exists with the documented
 // type / default, CHECK constraints reject bogus enum values, and
-// pre-v98 insert shapes still succeed (additive migration must not
+// pre-v99 insert shapes still succeed (additive migration must not
 // break legacy callers — every existing crew insert in tests omits
 // these columns and must continue to work).
-func TestMigrateV98_Autonomy(t *testing.T) {
+//
+// Originally numbered v98 during PR-B development; renumbered to v99
+// on rebase after SPEC-4 (#456) took v98 for credential_attribution.
+func TestMigrateV99_Autonomy(t *testing.T) {
 	dir := t.TempDir()
-	db, err := Open("file:" + filepath.Join(dir, "v98.db"))
+	db, err := Open("file:" + filepath.Join(dir, "v99.db"))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
