@@ -43,7 +43,7 @@ ship as one coherent product story, not seven scattered patches.
 Six layers, each independently mergeable. Earlier layers do not depend
 on later ones; later layers consume earlier primitives.
 
-```
+```text
 F6  PERSONA.md + peer cards + GDPR        ← identity layer
 F5  Ephemeral agent lifecycle              ← roster layer
 F4  Keeper Phase 2 (4 new request types)   ← governance layer
