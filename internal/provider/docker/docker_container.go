@@ -375,7 +375,16 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	// Build base HostConfig. Privileged features (DinD etc.) require
 	// dropping the default no-new-privileges and relaxing capability drops.
 	securityOpt := []string{"no-new-privileges"}
-	capAdd := []string{"NET_RAW"}
+	// NET_RAW used to be added unconditionally — it lets a process open
+	// AF_PACKET sockets, which is a DNS-tunneling exfil primitive (carry
+	// stolen secrets out via base64-encoded subdomain lookups against an
+	// attacker DNS server, even when the egress allowlist blocks every
+	// other domain). Removed from the default set; features that
+	// genuinely need ICMP / raw sockets (network debugging utilities)
+	// can opt in via team.CapAdd, which the devcontainer features parser
+	// restricts to an explicit allowlist (NET_BIND_SERVICE today; add
+	// NET_RAW to the allowlist there if a real use case appears).
+	capAdd := []string{}
 	readonlyRoot := true
 	if team.Privileged {
 		// Privileged mode implies the security restrictions we normally
