@@ -285,6 +285,84 @@ func TestStartExpirySweeper_RunsOnTick(t *testing.T) {
 	t.Fatal("sweeper did not ghost due row within 250ms")
 }
 
+// TestSweep_SkipsRunningAgent verifies the mid-mission grace contract:
+// an ephemeral agent whose TTL fires while status='RUNNING' is NOT
+// ghosted on this sweep tick. The expires_at column stays in place
+// (the scheduling intent is preserved); only the expired_at flip
+// waits until the next sweep after the agent naturally idles out.
+// Without this guard the sweeper would yank the container while the
+// chatbridge was still streaming, surfacing as a "ghost mid-mission"
+// anomaly in the journal.
+func TestSweep_SkipsRunningAgent(t *testing.T) {
+	db := setupTestDB(t)
+	wsID, crewID := seedWorkspaceAndCrew(t, db)
+
+	// Seed two ephemeral rows, both past their TTL. One is IDLE
+	// (must ghost), the other is RUNNING (must NOT ghost — mid
+	// mission grace).
+	seedEphemeral(t, db, wsID, crewID, "idle-due", "2026-06-01T11:00:00Z", nil)
+	seedEphemeral(t, db, wsID, crewID, "running-due", "2026-06-01T11:00:00Z", nil)
+	if _, err := db.Exec(`UPDATE agents SET status = 'RUNNING' WHERE id = ?`, "running-due"); err != nil {
+		t.Fatalf("set running: %v", err)
+	}
+
+	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	rec := &recordingBroadcaster{}
+	n, err := SweepExpiredAgents(context.Background(), db, nil, rec, func() time.Time { return now })
+	if err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("ghosted = %d, want 1 (idle-due only)", n)
+	}
+
+	// idle-due must be ghosted; running-due must NOT be.
+	var idleExpired, runningExpired sql.NullString
+	_ = db.QueryRow(`SELECT expired_at FROM agents WHERE id = ?`, "idle-due").Scan(&idleExpired)
+	_ = db.QueryRow(`SELECT expired_at FROM agents WHERE id = ?`, "running-due").Scan(&runningExpired)
+
+	if !idleExpired.Valid {
+		t.Error("idle-due agent: expired_at NULL, want set")
+	}
+	if runningExpired.Valid {
+		t.Errorf("running-due agent: expired_at=%v, want NULL (mid-mission grace)", runningExpired.String)
+	}
+
+	// The RUNNING row's expires_at MUST still be the past timestamp
+	// — scheduling intent is preserved; only the flag flip waits.
+	var expiresAt string
+	_ = db.QueryRow(`SELECT expires_at FROM agents WHERE id = ?`, "running-due").Scan(&expiresAt)
+	if expiresAt != "2026-06-01T11:00:00Z" {
+		t.Errorf("running-due expires_at = %q, want unchanged 2026-06-01T11:00:00Z", expiresAt)
+	}
+
+	// Exactly one event — for idle-due. running-due must not show up.
+	events := rec.Events()
+	if len(events) != 1 {
+		t.Fatalf("events = %d, want 1", len(events))
+	}
+	if events[0]["id"] != "idle-due" {
+		t.Errorf("event id = %q, want idle-due", events[0]["id"])
+	}
+
+	// Second sweep, now with the RUNNING agent flipped to IDLE
+	// (mission complete) — it should ghost on this pass.
+	if _, err := db.Exec(`UPDATE agents SET status = 'IDLE' WHERE id = ?`, "running-due"); err != nil {
+		t.Fatalf("idle running-due: %v", err)
+	}
+	n, err = SweepExpiredAgents(context.Background(), db, nil, nil, func() time.Time { return now })
+	if err != nil {
+		t.Fatalf("second sweep: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("second sweep ghosted = %d, want 1", n)
+	}
+	_ = db.QueryRow(`SELECT expired_at FROM agents WHERE id = ?`, "running-due").Scan(&runningExpired)
+	if !runningExpired.Valid {
+		t.Error("running-due agent (now idle): expired_at NULL after second sweep, want set")
+	}
+}
+
 func TestStartExpirySweeper_StopsOnContextCancel(t *testing.T) {
 	db := setupTestDB(t)
 	ctx, cancel := context.WithCancel(context.Background())

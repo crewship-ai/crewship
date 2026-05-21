@@ -84,8 +84,22 @@ func SweepExpiredAgents(ctx context.Context, db *sql.DB, j journal.Emitter, b Br
 	// can emit a journal entry with correct workspace/crew context.
 	// The `expires_at < ?` predicate is index-backed by
 	// idx_agent_expires_at (partial index over WHERE expires_at IS
-	// NOT NULL AND expired_at IS NULL — see v100 migration), so
+	// NOT NULL AND expired_at IS NULL — see v102 migration), so
 	// this scan touches only the rows actually due.
+	//
+	// PR-D F5 mid-mission grace: status='RUNNING' rows are
+	// deliberately excluded. The contract is best-effort TTL — an
+	// actively-running ephemeral gets a grace period through its
+	// current message so we don't yank the container out from under
+	// an in-flight tool call or partial response. The agent
+	// naturally transitions RUNNING → IDLE when the message
+	// completes; the next sweep tick (≤ DefaultSweepInterval) picks
+	// the now-idle ghost up. expires_at is unchanged so the
+	// scheduling intent is preserved; only the expired_at flip
+	// waits. Without this guard the sweeper would ghost a
+	// container that the chatbridge is still streaming from, which
+	// surfaces as a "ghost mid-mission" anomaly in the journal
+	// (CodeRabbit audit catch, 2026-05-21).
 	const selectSQL = `
 		SELECT id, workspace_id, COALESCE(crew_id, ''), name,
 		       COALESCE(parent_lead_id, ''), expires_at
@@ -93,6 +107,7 @@ func SweepExpiredAgents(ctx context.Context, db *sql.DB, j journal.Emitter, b Br
 		WHERE ephemeral = 1
 		  AND expired_at IS NULL
 		  AND deleted_at IS NULL
+		  AND status != 'RUNNING'
 		  AND expires_at IS NOT NULL
 		  AND expires_at < ?`
 	rows, err := db.QueryContext(ctx, selectSQL, nowStr)
@@ -136,6 +151,7 @@ func SweepExpiredAgents(ctx context.Context, db *sql.DB, j journal.Emitter, b Br
 			  AND ephemeral = 1
 			  AND expired_at IS NULL
 			  AND deleted_at IS NULL
+			  AND status != 'RUNNING'
 			  AND expires_at IS NOT NULL
 			  AND expires_at < ?`,
 			nowStr, nowStr, d.id, nowStr)
