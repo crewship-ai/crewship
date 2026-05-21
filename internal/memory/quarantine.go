@@ -29,9 +29,8 @@ type rule struct {
 }
 
 // invisible unicode characters used to smuggle hidden text inside
-// otherwise-innocent content. Set mirrors the Hermes Agent
-// _CONTEXT_INVISIBLE_CHARS list (zero-width spaces, BIDI overrides,
-// directional isolates). Numeric literals are used instead of the
+// otherwise-innocent content: zero-width spaces, BIDI overrides,
+// and directional isolates. Numeric literals are used instead of the
 // glyphs themselves so the source file itself stays free of invisible
 // codepoints — without this, gofmt or a stray BOM in the source
 // breaks the build (and the file's own contents would trip

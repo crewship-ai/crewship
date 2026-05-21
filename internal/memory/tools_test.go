@@ -240,10 +240,10 @@ func TestDispatch_Write_AppendMode(t *testing.T) {
 	}
 }
 
-// TestDispatch_Write_AppendOverCap_HardError is the Hermes-aligned
-// "cap forces curation" contract. When an append would exceed the
-// tier cap, the writer rejects with a structured error including
-// current size + cap so the agent can self-prune and retry.
+// TestDispatch_Write_AppendOverCap_HardError pins the "cap forces
+// curation" contract. When an append would exceed the tier cap, the
+// writer rejects with a structured error including current size + cap
+// so the agent can self-prune and retry.
 func TestDispatch_Write_AppendOverCap_HardError(t *testing.T) {
 	ctx := testAgentCtx(t)
 	// Pre-fill AGENT.md to near the 4000 B cap
