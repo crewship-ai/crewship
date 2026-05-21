@@ -308,6 +308,27 @@ func (d *Dispatcher) handleWrite(ctx context.Context, raw json.RawMessage) (Tool
 	if _, ok := validTiers[a.Tier]; !ok {
 		return ToolResult{IsError: true, Content: fmt.Sprintf("memory.write: unknown tier %q", a.Tier)}, nil
 	}
+	// Security gate: lessons tier MUST flow through
+	// consolidate.WriteLesson (PR-Z Z.7 + F4.4) which enforces YAML
+	// schema, idempotency-by-ID, atomic-rename, and flock. Allowing
+	// the raw dispatcher write here would let an agent (a) bypass
+	// cap validation because capForTier("lessons") returns 0
+	// = "no cap", (b) bypass the kind/source closed-enum guard so
+	// downstream filters silently drop entries, (c) bypass the
+	// idempotency key and accumulate duplicates, and (d) corrupt
+	// the file with freeform text ReadLessons cannot parse. The
+	// right surface is the F4.4 negative-learning endpoint, which
+	// routes through WriteLesson with the policy + self_learning
+	// gates intact. Auditor flagged this as a persistence attack
+	// vector in the 2026-05-21 pre-launch audit; the tombstone
+	// stays here until any agent-author surface needs lessons
+	// writes (none does today; consolidator is the only writer).
+	if a.Tier == "lessons" {
+		return ToolResult{
+			IsError: true,
+			Content: "memory.write: lessons tier is read-only via this surface; submit a lesson through the F4.4 negative-learning evaluator (consolidate.WriteLesson enforces schema + idempotency + locking that this dispatcher does not).",
+		}, nil
+	}
 	if a.Mode != "replace" && a.Mode != "append" {
 		return ToolResult{IsError: true, Content: "memory.write: mode must be 'replace' or 'append'"}, nil
 	}

@@ -1,6 +1,18 @@
 # PRD — Agent Evolution: Learning, Governance, Identity & Lifecycle
 
-**Status:** v4 — all 7 stack PRs merged (2026-05-21). PRs #458 (Z), #466 (A foundation), #461 (B), #468 (A.4/5 adapter wiring), #470 (C), #469 (D), #471 (E). Migration sequence v100…v105 sequential on `main`. Tier-2 follow-ups documented in §6.1.
+**Status:** v3 + decision log §10 (the v4 retro-fit revert).
+This PRD remains the **statement of intent**, not a status report.
+The earlier "v4 — all 7 stack PRs merged" revision (commit `425cadf6`,
+2026-05-21) was reverted because it bent the spec to match what the
+code actually shipped — F1 search, F5 schema, F4 routing, and the
+CLI grammar were all silently aligned with shipped behavior in the
+v4 pass, which obscured drift instead of recording it. The §10
+decision log enumerates every drift between the originally stated
+behavior and what shipped, marked DRIFT / DEFERRED / PLACEHOLDER so a
+future reader (or auditor) can see exactly where intent and code
+diverged and why. Ship state of each PR is tracked in the PR
+descriptions on GitHub (PRs #458, #466, #461, #468, #470, #469, #471
+plus the in-flight PR-G/PR-F roll-up at #472), not here.
 **Owner:** Pavel
 **Scope:** internal design notes — see implementation PRs PR-Z / PR-A / PR-B / PR-C / PR-D / PR-E for the shipping artifacts
 
@@ -346,38 +358,78 @@ Crewship PRs that shape this work — final landed state on main:
 - PR #469 (PR-D) — ✅ MERGED 2026-05-21 — F5 ephemeral hire/rehire + ghost UI + pending-review gate + sweeper grace — migration v103
 - PR #471 (PR-E) — ✅ MERGED 2026-05-21 — F6 PERSONA two-layer + peer cards + GDPR + 4-subtab Memory UI — migrations v104 + v105
 
-## 6.1. Tier-2 follow-ups (PR-F — not blockers, deferred refinements)
+## 6.1. Tier-2 follow-ups (PR-F roll-up — partial ship, partial deferred)
 
-These are intentionally deferred — the v1 layer is complete, these
-sharpen edges:
+PR-G/PR-F #472 (in-flight) addresses items 1, 4, 5, 6, 7 below. Items
+still deferred after PR-F merge are marked DEFERRED with a target PR.
 
-1. **F3** `cfg.Auxiliary` YAML override — bootstrap currently uses
-   `llm.DefaultAuxiliaryModels()` only; operators can't pin a
-   specific Haiku version per workspace yet.
-2. **F4.2** synchronous BLOCK CLI interrupt — current implementation
-   logs + journals + writes inbox; in-flight CLI continues to the
-   next tool call before stopping. Full sync interrupt requires
-   orchestrator stdin refactor.
-3. **F5** `last_activity_at` column for finer sweeper grace — current
-   `status != RUNNING` guard works but doesn't catch RUNNING-then-idle
-   cases inside the 5-min sweep window.
-4. **F5** Inbox approve-hire UI button — backend endpoint
-   `POST /api/v1/agents/{id}/approve-hire` is live; the inbox UI
-   still routes operators to terminal `curl` invocation.
-5. **F6** aux-LLM peer card extractor — currently `NoopExtractor`;
-   real LLM extraction lives behind the PR-B F3 aux slot, just
-   needs wire-up + prompt design.
-6. **F6** operator-editable AGENT.md / CREW.md — Memory tab currently
-   shows them read-only because `internal/memory/writer_caps.go`
-   restricts writes to agent runtime. Operator-edit needs a new
-   gated endpoint.
-7. **F1.6** CURSOR_CLI adapter MCP wiring — gated on upstream Cursor
-   fix; `cursor-agent --print` ignores `mcpServers`. Crewship's
-   adapter declares `SupportsMCP() returns false` to avoid showing
-   operators tool affordances that won't fire.
-8. **F1** FTS5 plumb-through for `memory.search` — substring MVP
-   shipped; FTS5 index already exists in `internal/memory/index.go`,
-   just needs dispatcher swap.
+1. **F3** `cfg.Auxiliary` YAML override — DEFERRED (PR-F11). Bootstrap
+   uses `llm.DefaultAuxiliaryModels()`; per-workspace override path
+   isn't wired. Aux-status UI is read-only diagnostic only.
+2. **F4.2** synchronous BLOCK CLI interrupt — DEFERRED (PR-F12). Today
+   logs + journals + inbox; in-flight CLI runs to next tool call.
+3. **F5** `last_activity_at` column for finer sweeper grace — DEFERRED
+   (PR-F13). Current `status != RUNNING` guard works for the common
+   case but doesn't catch RUNNING-then-idle inside the 5-min window.
+4. **F5** Inbox approve-hire UI button — ✅ SHIPPED in PR-F #472
+   (`components/features/inbox/inbox-list.tsx` waitpoint branch).
+5. **F6** aux-LLM peer card extractor — DEFERRED (PR-F14). Today
+   `NoopExtractor`; peer cards have empty bodies until aux LLM
+   extractor wires through the PR-B F3 aux slot.
+6. **F6** operator-editable AGENT.md / CREW.md — PLACEHOLDER. The
+   codemirror markdown editor shipped in PR-F (Task C) renders
+   AGENT.md / CREW.md but they remain read-only because
+   `internal/memory/writer_caps.go` restricts writes to the agent
+   runtime. Operator-edit needs a new gated endpoint.
+7. **F1.6** CURSOR_CLI adapter MCP wiring — BLOCKED-UPSTREAM.
+   `cursor-agent --print` ignores `mcpServers`; adapter declares
+   `SupportsMCP() returns false`. Tracking the upstream fix.
+8. **F1** FTS5 plumb-through for `memory.search` — DEFERRED-WITH-
+   TOMBSTONE (PR-F5 marked the dead-code path; PR-F15 will wire it
+   end-to-end). See `internal/memory/hybrid.go` file header +
+   `internal/memory/hybrid_dead_code_test.go` for the AST sentinel.
+
+## 6.2. PR-F #472 ship state (post-audit roll-up)
+
+This PR consolidates the post-audit remediation. Verified against
+the auditor's 2026-05-21 findings list:
+
+**SHIPPED** in PR-F #472:
+- ✅ Migration v107 — `data_subject_id` columns + `gdpr_actions` audit table
+- ✅ Admin GDPR cascade: `DELETE /api/v1/admin/users/{userId}/data` + EXPORT
+- ✅ Scanner v2: base64 deobfuscation + Cyrillic/Greek homoglyph fold +
+     URL exfil patterns + tool-return scan path (MINJA defense)
+- ✅ MemoryProvider interface + LocalDispatcher reference impl
+- ✅ AgentBrief sub-agent briefing primitive + BRIEF.md wire-up
+- ✅ Lessons tier security tombstone — agent-author write path rejected
+- ✅ Hybrid search tombstone + AST sentinel test
+- ✅ F4.1-4 keeper queue UIs in admin panel (4 sub-tabs)
+- ✅ GDPR admin UI panel (export + cascade delete)
+- ✅ Codemirror markdown editor in memory tab (PERSONA writable;
+     AGENT.md / CREW.md highlighted but read-only)
+- ✅ Self_learning gate consumed by F4.4 negative_learning + F6
+     persona_suggest paths (per-agent override of crew autonomy)
+- ✅ Paymaster scope attachment fix in F4 evaluator handlers
+- ✅ 10 CodeRabbit round-N fixes (a11y labels, RBAC mirror, error
+     handling, log scrubbing)
+
+**STILL DEFERRED** after PR-F #472 merge:
+- ⏳ Lessons.md content-scan in GDPR cascade (warning logged; manual
+     review required per data_subject_id mention)
+- ⏳ memory_versions blob orphan GC (rows deleted; blobs left on
+     disk — needs separate sweep; PR-F16 target)
+- ⏳ Hybrid search dispatcher wire-up (engine reachable from HTTP
+     surface today, not from agent tools; PR-F15)
+- ⏳ Per-adapter tool-return scan paths beyond Claude `tool_result`
+     blocks (PR-F4 ships "scan path 1"; scan path 2 enumerates the
+     other adapters)
+- ⏳ Provider interface swap at production call sites (interface
+     shipped + LocalDispatcher ref impl + tests; existing call sites
+     still use `*Dispatcher` directly; PR-F17 lifts them)
+- ⏳ Provider reference impl for Mem0 / Letta shape (PR-F18)
+- ⏳ LoCoMo / LongMemEval reproducer + published baseline (PR-F19)
+- ⏳ Skill→Memory bridge (MEMORY-ROADMAP §8.2; PR-F20)
+- ⏳ Bitemporal `valid_from` / `valid_to` (PR-F21)
 
 ## 7. Open questions
 
@@ -393,3 +445,187 @@ sharpen edges:
   in PR-D scoping.
 - F6: GDPR export format — JSON or markdown bundle? Pavel preference
   is markdown; revisit if a customer needs JSON for processing.
+
+## 10. Decision log — drift between stated intent and shipped code
+
+Added 2026-05-21 as part of the v4 retro-fit revert. Every drift the
+implementation introduced versus the v3 PRD is recorded here so a
+future reader (or external auditor) can see exactly where intent and
+shipped behavior diverged, when, and why. Do NOT silently re-align
+this PRD to the code — record the drift instead.
+
+### 10.1 F1 `memory.search` — substring-only, FTS5 deferred
+
+**v3 PRD said:** "substring + FTS5 search."
+
+**Code shipped:** substring-only via `tools.go::handleSearch`. The
+FTS5 engine (`internal/memory/hybrid.go` + `engine.go` + `index.go`)
+shipped alongside but is unwired from the agent tool surface.
+
+**Why:** Wiring the engine through the dispatcher constructor +
+sidecar handoff was estimated at ~150 LOC across signatures + test
+fixtures, beyond the PR-A foundation scope. The engine is reachable
+from `internal/api/memory_hybrid_search_handler.go` (operator API
+path), just not from the agent's `memory.search` tool.
+
+**Tombstone:** `internal/memory/hybrid.go` file header +
+`internal/memory/hybrid_dead_code_test.go` (AST sentinel that fails
+if `HybridSearch` enters the `handleSearch` call graph — flipping the
+test green is the wire-up signal). Target: PR-F15.
+
+### 10.2 F2 CLI — `crewship policy` vs original `crewship crew update`
+
+**v3 PRD said:** `crewship crew update <slug> --autonomy 2 --reason X`.
+
+**Code shipped:** `crewship policy get/set/list` as a sub-noun, with
+`autonomy_level` accepting the string enum `strict|guided|trusted|full`
+(not integer 0..3).
+
+**Why:** The crew-update surface already carries many flags; adding
+governance to it was bundling concerns. The policy sub-noun is also
+easier to extend (PR-B added `behavior_mode`, PR-G added
+`max_ephemeral_agents` to the same panel). String enum was chosen
+over integer to make raw `crews` table inspection self-documenting.
+
+**Cost:** Operators reading the v3 PRD literally get `command not
+found`. The v4 retro-fit silently rewrote the PRD to match; this
+decision log restores the original intent and explains the trade.
+
+### 10.3 F2 schema — `autonomy_level TEXT enum` vs `integer 0..3`
+
+**v3 PRD said:** `crews.autonomy_level INTEGER 0..3`.
+
+**Code shipped:** `TEXT NOT NULL DEFAULT 'guided' CHECK(autonomy_level
+IN ('strict','guided','trusted','full'))`.
+
+**Why:** Same string-vs-integer reasoning as 10.2. Integer ordering
+also implies the levels are linearly more-permissive, which isn't
+quite true (`full` + `block` is forbidden — not on the integer scale).
+String enum forces consumers to use closed-set switch statements.
+
+### 10.4 F4 endpoint URLs — `/api/v1/internal/keeper/*` vs public `/keeper/*`
+
+**v3 PRD said:** `POST /api/v1/keeper/skill-review` (etc, four
+endpoints).
+
+**Code shipped:** All four under `/api/v1/internal/keeper/*` with
+`internalAuth` middleware (X-Internal-Token).
+
+**Why:** F4 endpoints are platform-triggered, not operator-triggered:
+the scheduler routines + behavior hook are the callers. A public path
+would invite operators to call them ad-hoc, which is OK but creates
+the wrong default — the routine cron has the right context (workspace
+sweep, full skill catalog) that an ad-hoc operator call misses.
+Internal-token auth also keeps the surface off the operator's mental
+model.
+
+**Cost:** Operator can't curl `/api/v1/keeper/skill-review` per v3
+PRD's literal URL. The admin UI panels in PR-F2 surface the
+`keeper_requests` rows the internal endpoint produces, which is the
+operator-facing path.
+
+### 10.5 F5 schema — two columns vs three-state enum
+
+**v3 PRD said:** "Three states on `agents.lifecycle`."
+
+**Code shipped:** Two columns — `ephemeral BOOLEAN` (yes/no) +
+`expired_at TEXT` (null/timestamp). The state machine derives:
+`(ephemeral=0)` = permanent; `(ephemeral=1, expired_at IS NULL)` =
+live; `(ephemeral=1, expired_at NOT NULL)` = ghost.
+
+**Why:** The third state (archived) was conflated with deleted_at
+soft-delete in the schema review; carrying it as a separate column
+would have created two ways to express the same "agent isn't usable"
+intent. Today: archived = `deleted_at NOT NULL` (existing pattern);
+ghost = derived from `expired_at`. The lifecycle enum is reconstructed
+in the query layer.
+
+**Cost:** Any consumer reading the v3 PRD literal "lifecycle column"
+gets `column not found`. Migration v103 carries the doc comment
+explaining the two-column choice.
+
+### 10.6 F4.4 lessons routing — WriteLesson only, not direct dispatcher
+
+**v3 PRD said implicitly:** generic write path includes lessons.
+
+**Code shipped:** lessons tier is **rejected** in `tools.go::
+handleWrite` (2026-05-21 hardening). The only path to write a lesson
+is through `consolidate.WriteLesson` via the F4.4 negative-learning
+endpoint, which enforces schema + idempotency + flock that the raw
+dispatcher does not.
+
+**Why:** Auditor flagged `capForTier("lessons")` returning 0 as a
+persistence attack vector. The agent could call
+`memory.write(tier="lessons", content="<freeform>", mode="replace")`
+and corrupt the schema, accumulate duplicate entries, or persist
+attack content past the next agent restart.
+
+**Cost:** None — no production caller writes lessons through the
+dispatcher path. The consolidator is the only writer.
+
+### 10.7 F6 admin GDPR cascade — shipped in PR-F #472 (was missing pre-audit)
+
+**v3 PRD said:** `DELETE /api/v1/admin/users/{id}/data` cascades to
+memory + peer cards + audit.
+
+**Pre-audit code:** Did not exist. Only self-service
+`DELETE /api/v1/users/me/peer-cards` was shipped. Auditor flagged
+this as the #1 EU release blocker.
+
+**PR-F #472 ships:** Migration v107 (`data_subject_id` columns +
+`gdpr_actions` audit table), `DELETE /api/v1/admin/users/{userId}/
+data` (cascade) + `GET /api/v1/admin/users/{userId}/data` (Art. 15
+export). Admin UI panel in `components/features/admin/gdpr-actions-
+panel.tsx`. Idempotent; each invocation creates a `gdpr_actions` row.
+
+**Still deferred:** lessons.md content-scan (warning logged, manual
+review required); memory_versions blob orphan GC on disk.
+
+### 10.8 F6 PERSONA suggest CLI — placeholder, not shipped
+
+**v3 PRD said:** `crewship persona suggest-from-inbox` operator-facing
+command.
+
+**Code shipped:** Command exists but errors gracefully ("not
+implemented in this build"). Per-agent `self_learning` gate (PR-G)
+provides the operator-approval flow at the API + UI level; CLI
+parity is PR-F22 scope.
+
+### 10.9 F6 memory editor — codemirror highlighting, write still backend-gated
+
+**v3 PRD said:** "Memory tab UI editor for AGENT.md / CREW.md."
+
+**Code shipped:** PR-F (Task C) replaces the textarea with the
+shared `components/shared/markdown-editor.tsx` codemirror wrapper for
+syntax highlighting. PERSONA tier is writable through this editor;
+AGENT.md / CREW.md render with highlighting but are read-only because
+`internal/memory/writer_caps.go` restricts writes to the agent
+runtime (operator-edit needs a new gated endpoint — PR-F23).
+
+**Cost:** Operator sees the AGENT.md / CREW.md content nicely
+rendered but can't edit. Compromise between "expose the data
+transparently" and "don't let operator edits drift from what the
+agent thinks is true."
+
+### 10.10 PRD process drift — v4 retro-fit was wrong (this revert)
+
+**What happened:** Commit `425cadf6` rewrote the PRD header to say
+"v4 — all 7 stack PRs merged" and quietly aligned several feature
+descriptions to match what shipped (F1 search wording, F5 schema
+wording, CLI naming notes). The retro-fit produced a document that
+looked complete but recorded zero drift — exactly the opposite of
+what a PRD is for.
+
+**Why it was wrong:** A PRD is the **statement of intent**. When code
+diverges from intent, the right move is to log the divergence (so a
+future reader can audit it) — not to revise the intent to match the
+code (which makes the audit impossible).
+
+**The fix:** This decision log (§10) reverts the v4 retro-fit by
+restoring the v3 phrasing throughout the spec body and recording
+every drift here, with the WHY. Future PRD revisions append to this
+log; they do not silently overwrite earlier statements.
+
+**Cost recorded:** PR-G #472 commit `425cadf6` is the cardinal sin.
+The fix is procedural, not technical — discipline carried by this
+log file.
