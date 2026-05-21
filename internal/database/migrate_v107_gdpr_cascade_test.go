@@ -83,18 +83,25 @@ func TestMigrateV107_GDPRCascadeSchema(t *testing.T) {
 	}
 
 	// gdpr_actions: accepts every documented action value.
+	// 'delete' requires a non-empty trimmed reason (audit-round-6
+	// CHECK constraint added 2026-05-21). 'export' and 'view' do
+	// not — operators routinely run them as routine SAR servicing.
 	for _, action := range []string{"export", "delete", "view"} {
+		reason := ""
+		if action == "delete" {
+			reason = "test fixture: reason satisfies the delete-CHECK contract"
+		}
 		if _, err := db.Exec(`INSERT INTO gdpr_actions
-			(id, workspace_id, data_subject_id, actor_user_id, action, status)
-			VALUES (?, 'ws1', 'u1', 'admin1', ?, 'in_progress')`,
-			"ga-"+action, action); err != nil {
+			(id, workspace_id, data_subject_id, actor_user_id, action, status, reason)
+			VALUES (?, 'ws1', 'u1', 'admin1', ?, 'in_progress', ?)`,
+			"ga-"+action, action, reason); err != nil {
 			t.Errorf("gdpr_actions action=%q: %v", action, err)
 		}
 	}
 	for _, status := range []string{"completed", "failed"} {
 		if _, err := db.Exec(`INSERT INTO gdpr_actions
-			(id, workspace_id, data_subject_id, actor_user_id, action, status)
-			VALUES (?, 'ws1', 'u1', 'admin1', 'delete', ?)`,
+			(id, workspace_id, data_subject_id, actor_user_id, action, status, reason)
+			VALUES (?, 'ws1', 'u1', 'admin1', 'delete', ?, 'test fixture')`,
 			"ga-status-"+status, status); err != nil {
 			t.Errorf("gdpr_actions status=%q: %v", status, err)
 		}
@@ -108,9 +115,21 @@ func TestMigrateV107_GDPRCascadeSchema(t *testing.T) {
 	}
 	// Negative: bogus status rejected.
 	if _, err := db.Exec(`INSERT INTO gdpr_actions
-		(id, workspace_id, data_subject_id, actor_user_id, action, status)
-		VALUES ('ga-bogus2','ws1','u1','admin1','delete','exploded')`); err == nil {
+		(id, workspace_id, data_subject_id, actor_user_id, action, status, reason)
+		VALUES ('ga-bogus2','ws1','u1','admin1','delete','exploded','x')`); err == nil {
 		t.Errorf("expected CHECK violation on status='exploded'")
+	}
+	// Negative: delete WITHOUT reason rejected by the round-6 CHECK.
+	if _, err := db.Exec(`INSERT INTO gdpr_actions
+		(id, workspace_id, data_subject_id, actor_user_id, action)
+		VALUES ('ga-noreason','ws1','u1','admin1','delete')`); err == nil {
+		t.Errorf("expected CHECK violation on action='delete' with NULL reason")
+	}
+	// Negative: delete with whitespace-only reason rejected.
+	if _, err := db.Exec(`INSERT INTO gdpr_actions
+		(id, workspace_id, data_subject_id, actor_user_id, action, reason)
+		VALUES ('ga-blankreason','ws1','u1','admin1','delete','   ')`); err == nil {
+		t.Errorf("expected CHECK violation on action='delete' with whitespace-only reason")
 	}
 
 	// Subject lookup hits idx_gdpr_actions_subject.

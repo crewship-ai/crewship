@@ -127,7 +127,16 @@ CREATE TABLE IF NOT EXISTS gdpr_actions (
     -- 'view' actions don't require a reason — operators frequently
     -- run them as routine SAR servicing — only 'delete' needs the
     -- justification on file.
-    CHECK (action <> 'delete' OR (reason IS NOT NULL AND reason <> ''))
+    -- length(trim(reason)) > 0 instead of a simple non-empty check
+    -- so a payload of pure whitespace does not satisfy the delete
+    -- contract — an operator typing whitespace into the reason
+    -- field is functionally the same as leaving it blank, and the
+    -- audit row would be useless during a regulator review.
+    -- CodeRabbit round-6 catch.
+    CHECK (
+      action <> 'delete'
+      OR (reason IS NOT NULL AND length(trim(reason)) > 0)
+    )
 );
 
 CREATE INDEX IF NOT EXISTS idx_gdpr_actions_subject

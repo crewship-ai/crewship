@@ -33,15 +33,32 @@ set -euo pipefail
 # golangci-lint / gosec all stayed green, but SQLite exploded at
 # runtime. Catching at commit time keeps the local loop tight; CI
 # has a mirror sentinel (.github/workflows/ci.yml).
-STAGED=$(git diff --cached --name-only --diff-filter=ACMR | \
-  grep -E '\.(go|ts|tsx|mdx|md|yaml|yml|sql|json|py|sh)$|^Dockerfile' || true)
-if [ -n "$STAGED" ]; then
-  if echo "$STAGED" | xargs -r grep -lE '^(<<<<<<< |=======$|>>>>>>> )' 2>/dev/null; then
-    echo ""
-    echo "✗ Staged files contain unresolved git merge-conflict markers — commit blocked"
-    echo "  Resolve the conflict, re-stage, and retry."
-    exit 1
+# NUL-delimited paths so filenames with spaces / newlines don't break
+# the pipeline, and `git show :path` reads the STAGED blob content
+# rather than the working-tree file. Without this, an operator who
+# resolved a conflict in their editor but left the marker text in
+# the working tree (and only staged the clean version) would still
+# trip the working-tree grep — false positive. Conversely, a marker
+# in the staged blob but not in the working tree would slip past —
+# false negative. CodeRabbit round-6 catch.
+STAGED_HIT=0
+while IFS= read -r -d '' path; do
+  case "$path" in
+    *.go|*.ts|*.tsx|*.mdx|*.md|*.yaml|*.yml|*.sql|*.json|*.py|*.sh|Dockerfile|Dockerfile.*) ;;
+    *) continue ;;
+  esac
+  if git show ":$path" 2>/dev/null | grep -qE '^(<<<<<<< |=======$|>>>>>>> )'; then
+    if [ "$STAGED_HIT" -eq 0 ]; then
+      echo ""
+      echo "✗ Staged files contain unresolved git merge-conflict markers — commit blocked"
+      STAGED_HIT=1
+    fi
+    echo "  • $path"
   fi
+done < <(git diff --cached --name-only --diff-filter=ACMR -z)
+if [ "$STAGED_HIT" -ne 0 ]; then
+  echo "  Resolve the conflict, re-stage, and retry."
+  exit 1
 fi
 
 # Secret scan on staged changes
