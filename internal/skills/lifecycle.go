@@ -1,5 +1,5 @@
 // Package skills holds the skill registry primitives. This file
-// implements the lifecycle state machine landed by migration v100
+// implements the lifecycle state machine landed by migration v102
 // (PRD §6 F4.1).
 //
 // The lifecycle is orthogonal to the pre-existing `verification`
@@ -36,7 +36,7 @@ import (
 
 // LifecycleState mirrors the CHECK-constrained values in skills.
 // lifecycle_state. Closed set — adding a value here requires
-// extending both migration v100's CHECK constraint AND the
+// extending both migration v102's CHECK constraint AND the
 // EvaluateTransition switch below.
 type LifecycleState string
 
@@ -73,7 +73,7 @@ const StaleAfter = 30 * 24 * time.Hour
 const ArchiveAfter = 90 * 24 * time.Hour
 
 // validLifecycleStates is the closed set used to validate inputs
-// crossing the API/CLI boundary. Mirrors the migration v100 CHECK.
+// crossing the API/CLI boundary. Mirrors the migration v102 CHECK.
 var validLifecycleStates = map[LifecycleState]struct{}{
 	LifecycleActive:     {},
 	LifecycleStale:      {},
@@ -212,7 +212,7 @@ func stalingReason(neverUsed bool, age time.Duration) string {
 
 func archivingReason(neverUsed bool, age time.Duration) string {
 	if neverUsed {
-		return "archived: never used since import; >90d since stale-marker"
+		return "archived: never used since import; >90d inactive"
 	}
 	return fmt.Sprintf("archived: unused %dd (>90d) and no active assignments", int(age.Hours()/24))
 }
