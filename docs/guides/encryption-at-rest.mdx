@@ -1,0 +1,174 @@
+---
+title: "Encryption at rest"
+description: "Operator-side setup for encrypting agent memory directories (PERSONA.md, peer cards, AGENT.md) with LUKS or eCryptfs. GDPR baseline for EU-region installs."
+icon: "shield"
+---
+
+# Encryption at rest
+
+Crewship stores per-agent memory on the host filesystem — under
+`$CREWSHIP_DATA_DIR/output/crews/{crewID}/agents/{slug}/.memory/`
+— as plaintext markdown plus a SQLite database next to it. That's
+the right default for ergonomics (operators can grep, back up,
+edit), but it leaves the operator on the hook for at-rest
+encryption when the deployment carries PII.
+
+PR-E F6 (PERSONA.md + per-user peer cards) deliberately keeps the
+encryption layer out of the application — application-layer
+encryption of small markdown files would bloat the codebase, add a
+key-management problem, and break the "operators can grep their
+own data" affordance. Instead we recommend filesystem-layer
+encryption configured at deployment time. Two production-proven
+options are documented below.
+
+## Threat model
+
+The encryption-at-rest layer protects against ONE thing: a host
+disk leaving the data centre (stolen drive, decommissioned VM,
+unmounted backup tape) with the data unrecoverable to whoever
+finds it. It does NOT protect against:
+
+- A live Crewship process being compromised (the encryption keys
+  are in RAM by definition).
+- An operator with shell access to the host (the mount is
+  transparent once unlocked).
+- An attacker who can mount the volume via `crewshipd` itself
+  (the bind mount sees plaintext).
+- A backup tool that copies the unmounted/unlocked filesystem
+  (it sees plaintext too).
+
+For those threats, layered controls (auth, RBAC, container
+isolation, audit logging) carry the load. Encryption-at-rest is
+the "if the disk walks off" insurance.
+
+## When you should turn this on
+
+- **Always** for production deployments handling EU customer data
+  (GDPR Article 32 baseline). The default for new EU-region
+  installs is encryption-on, configured at provisioning time.
+- **Strongly recommended** for any deployment carrying customer
+  PII in agent memory (`AGENT.md` content, peer cards naming
+  specific operators).
+- **Optional** for single-operator local development setups where
+  the laptop disk is already FileVault / BitLocker / LUKS
+  encrypted at the OS layer.
+
+## Option A — LUKS (block-level, recommended for new hosts)
+
+LUKS is the canonical Linux block-encryption layer. Configure it
+on the disk hosting `$CREWSHIP_DATA_DIR` BEFORE the first
+crewship process starts; migrating an existing plaintext volume
+in place is possible but slow and risky.
+
+### One-time setup
+
+```bash
+# 1. Pick a device. For a dedicated data disk:
+DEV=/dev/sdb1
+
+# 2. Initialise LUKS with a passphrase (or use --key-file for
+#    unattended boot; key management is your call).
+sudo cryptsetup luksFormat --type=luks2 \
+  --cipher=aes-xts-plain64 --key-size=512 \
+  --hash=sha256 --pbkdf=argon2id \
+  "$DEV"
+
+# 3. Open + mount.
+sudo cryptsetup open "$DEV" crewship-data
+sudo mkfs.ext4 /dev/mapper/crewship-data
+sudo mkdir -p /var/lib/crewship
+sudo mount /dev/mapper/crewship-data /var/lib/crewship
+
+# 4. Tell crewship to use this mount.
+export CREWSHIP_DATA_DIR=/var/lib/crewship
+```
+
+### Boot-time unlock
+
+For unattended boot, add an entry to `/etc/crypttab`:
+
+```
+crewship-data UUID=<from-blkid> /etc/crewship.key luks
+```
+
+The keyfile lives outside the LUKS volume (typically a separate
+ramdisk, a TPM-sealed file, or a remote secrets fetch). NEVER
+store the keyfile on the same disk you're trying to encrypt —
+defeats the purpose.
+
+## Option B — eCryptfs (per-directory, for existing hosts)
+
+eCryptfs encrypts at the filesystem layer above an existing
+mount, useful when you can't (or don't want to) reformat the
+underlying volume. Slower than LUKS for large workloads but
+trivial to layer onto an existing crewship install.
+
+```bash
+# 1. Install eCryptfs userland tools.
+sudo apt install ecryptfs-utils       # Debian/Ubuntu
+sudo dnf install ecryptfs-utils       # Fedora/RHEL
+
+# 2. Mount the existing memory dir on top of itself.
+sudo mount -t ecryptfs \
+  /var/lib/crewship /var/lib/crewship
+
+# Choose AES-256, key-bytes=32, plaintext-passthrough=n,
+# filename-encryption=y on the prompts. Stash the mount
+# signature so the same key reattaches on reboot.
+```
+
+### Boot-time mount
+
+Add an `/etc/fstab` entry referencing the eCryptfs auto-mount
+helper, or use `pam_ecryptfs` to mount on first login.
+
+## Verifying
+
+After setup, do two sanity checks before declaring success:
+
+```bash
+# 1. Unmount, then 'cat' a memory file at the underlying device.
+#    The bytes should be unreadable.
+sudo umount /var/lib/crewship
+sudo cat /dev/mapper/crewship-data | head -c 200 | xxd
+
+# 2. Remount + read via crewship; the plaintext should be
+#    visible (we're testing the mount, not the encryption).
+sudo mount /dev/mapper/crewship-data /var/lib/crewship
+cat /var/lib/crewship/output/crews/*/agents/*/.memory/PERSONA.md
+```
+
+## Backups
+
+Backups taken via `crewship backup create` read the volume while
+it's unlocked, so the resulting tarball is plaintext. If you
+need at-rest protection for the backup itself, run the tarball
+through GPG / age before storing it off-host:
+
+```bash
+crewship backup create --output /tmp/snap.tar
+gpg --symmetric --cipher-algo AES256 /tmp/snap.tar
+shred -u /tmp/snap.tar
+```
+
+Or, more sustainably, point the backup tool at a separate
+encrypted mount.
+
+## Application-layer encryption (deliberately out of scope)
+
+PRs that add per-row encryption inside `crewshipd` for these
+small markdown files have come up and been rejected. The
+trade-off ratio doesn't work:
+
+- Cost: a key-management surface, a per-row encrypt/decrypt path,
+  a migration story for existing plaintext, broken `grep` /
+  `crewship memory search` ergonomics.
+- Benefit: marginal over filesystem encryption for the dominant
+  threat (lost disk), zero benefit for the other threats already
+  enumerated above.
+
+If your compliance posture genuinely requires application-layer
+encryption (e.g. you legitimately can't trust the host operator),
+the right escape hatch is a sidecar HSM-backed envelope encryption
+service that the application calls per-file — but that's a Phase 2
+roadmap item, not the F6 baseline.
