@@ -276,53 +276,85 @@ func (p *sqlSkillPersister) SetLifecycle(ctx context.Context, skillID string, ne
 
 func (p *sqlSkillPersister) WriteInboxItem(ctx context.Context, skillID, reason string, blocking bool) error {
 	// The skills table is workspace-global so there's no skill→workspace
-	// FK. Inbox items require a workspace_id; for catalog-level audits
-	// the convention is to write the item to every workspace's inbox
-	// would be O(workspaces × skills) — too noisy. Instead we write a
-	// single SYSTEM-scoped row using an empty target so it surfaces in
-	// the unfiltered inbox surface; future work: scope to workspaces
-	// that actually have the skill assigned (SELECT DISTINCT workspace_id
-	// FROM agent_skills JOIN agents WHERE skill_id=?).
+	// FK. Inbox items require a workspace_id; a previous revision wrote
+	// to the FIRST matching workspace only (LIMIT 1), which dropped
+	// notifications for every other workspace using the same skill —
+	// the catalog-level "unverify" signal silently became a single-
+	// workspace event.
 	//
-	// Empty workspace_id makes inbox.Insert no-op (defensive guard), so
-	// for MVP we look up the first workspace that has the skill assigned
-	// and write there. If no agent has the skill, we skip (a stale audit
-	// row in the void).
-	var workspaceID string
-	err := p.db.QueryRowContext(ctx, `
-		SELECT a.workspace_id
+	// Fan out instead: SELECT DISTINCT each workspace that has at least
+	// one enabled assignment of the skill on a live agent, then write
+	// one inbox row per workspace. The dedup key (source_id =
+	// "skill_review_"+skillID) is workspace-scoped at the inbox layer,
+	// so re-runs on the same day collapse on the existing row.
+	//
+	// If no workspace has the skill assigned we skip silently (a stale
+	// audit row in the void); the next assignment re-triggers on the
+	// following daily sweep.
+	rows, err := p.db.QueryContext(ctx, `
+		SELECT DISTINCT a.workspace_id
 		  FROM agent_skills sk
 		  JOIN agents a ON a.id = sk.agent_id
-		 WHERE sk.skill_id = ? AND sk.enabled = 1 AND a.deleted_at IS NULL
-		 LIMIT 1`, skillID).Scan(&workspaceID)
-	if err == sql.ErrNoRows || workspaceID == "" {
-		// No assigned workspace — skip silently. The next assignment
-		// will re-trigger the sweep on the following day.
+		 WHERE sk.skill_id = ? AND sk.enabled = 1 AND a.deleted_at IS NULL`, skillID)
+	if err != nil {
+		return fmt.Errorf("lookup skill workspaces: %w", err)
+	}
+	defer rows.Close()
+
+	var workspaceIDs []string
+	for rows.Next() {
+		var ws string
+		if err := rows.Scan(&ws); err != nil {
+			return fmt.Errorf("scan workspace_id: %w", err)
+		}
+		if ws == "" {
+			continue
+		}
+		workspaceIDs = append(workspaceIDs, ws)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate workspaces: %w", err)
+	}
+	if len(workspaceIDs) == 0 {
 		return nil
 	}
-	if err != nil {
-		return fmt.Errorf("lookup skill workspace: %w", err)
-	}
 
-	inbox.Insert(ctx, p.db, p.logger, inbox.Item{
-		WorkspaceID: workspaceID,
-		Kind:        inbox.KindEscalation,
-		SourceID:    "skill_review_" + skillID,
-		TargetRole:  "MANAGER",
-		Title:       "Skill review: " + skillID,
-		BodyMD:      reason,
-		SenderType:  "system",
-		SenderID:    "keeper_skill_review_routine",
-		SenderName:  "Skill Curator",
-		Priority:    "medium",
-		Blocking:    blocking,
-		Payload: map[string]interface{}{
-			"skill_id": skillID,
-			"reason":   reason,
-			"source":   "routine",
-		},
-	})
-	return nil
+	var firstErr error
+	for _, workspaceID := range workspaceIDs {
+		// Scope source_id by workspace because the inbox unique index
+		// is (kind, source_id) GLOBAL (not per-workspace). Without the
+		// workspace suffix the second workspace's INSERT OR IGNORE
+		// would dedup against the first workspace's row — defeating
+		// the whole point of the fanout.
+		if err := inbox.Insert(ctx, p.db, p.logger, inbox.Item{
+			WorkspaceID: workspaceID,
+			Kind:        inbox.KindEscalation,
+			SourceID:    "skill_review_" + skillID + "_" + workspaceID,
+			TargetRole:  "MANAGER",
+			Title:       "Skill review: " + skillID,
+			BodyMD:      reason,
+			SenderType:  "system",
+			SenderID:    "keeper_skill_review_routine",
+			SenderName:  "Skill Curator",
+			Priority:    "medium",
+			Blocking:    blocking,
+			Payload: map[string]interface{}{
+				"skill_id": skillID,
+				"reason":   reason,
+				"source":   "routine",
+			},
+		}); err != nil {
+			// Log per-workspace and keep going — one workspace's
+			// inbox being unavailable shouldn't drop notifications for
+			// every other workspace.
+			p.logger.Error("keeper.skill_review: inbox insert failed",
+				"workspace_id", workspaceID, "skill_id", skillID, "error", err)
+			if firstErr == nil {
+				firstErr = err
+			}
+		}
+	}
+	return firstErr
 }
 
 // ---- F4.3 memory_health_check sweep ----
@@ -438,9 +470,13 @@ func (p *sqlMemoryHealthPersister) TriggerConsolidation(ctx context.Context, wor
 	// require threading it through registerKeeperPhase2Routines; the
 	// 6-hourly consolidator runner already sweeps on its own cadence, so
 	// the routine's role is just "tell the operator this crew needs it".
+	//
+	// Propagate inbox.Insert errors so the sweep summary reflects real
+	// failure counts instead of falsely reporting success when the inbox
+	// write fails.
 	p.logger.Info("keeper.memory_health_check: auto-consolidation triggered",
 		"workspace_id", workspaceID, "crew_id", crewID, "reason", reason)
-	inbox.Insert(ctx, p.db, p.logger, inbox.Item{
+	if err := inbox.Insert(ctx, p.db, p.logger, inbox.Item{
 		WorkspaceID: workspaceID,
 		Kind:        inbox.KindMemoryConsolidation,
 		SourceID:    "memory_health_" + crewID + "_" + time.Now().UTC().Format("20060102"),
@@ -457,12 +493,14 @@ func (p *sqlMemoryHealthPersister) TriggerConsolidation(ctx context.Context, wor
 			"reason":  reason,
 			"source":  "routine",
 		},
-	})
+	}); err != nil {
+		return fmt.Errorf("inbox insert (consolidation): %w", err)
+	}
 	return nil
 }
 
 func (p *sqlMemoryHealthPersister) WriteInboxItem(ctx context.Context, workspaceID, crewID, reason string, blocking bool) error {
-	inbox.Insert(ctx, p.db, p.logger, inbox.Item{
+	if err := inbox.Insert(ctx, p.db, p.logger, inbox.Item{
 		WorkspaceID: workspaceID,
 		Kind:        inbox.KindEscalation,
 		SourceID:    "memory_health_escalate_" + crewID + "_" + time.Now().UTC().Format("20060102"),
@@ -479,6 +517,8 @@ func (p *sqlMemoryHealthPersister) WriteInboxItem(ctx context.Context, workspace
 			"reason":  reason,
 			"source":  "routine",
 		},
-	})
+	}); err != nil {
+		return fmt.Errorf("inbox insert (memory_health escalate): %w", err)
+	}
 	return nil
 }

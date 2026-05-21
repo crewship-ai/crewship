@@ -594,6 +594,28 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 		auxModels := llm.DefaultAuxiliaryModels()
 		opts = append(opts, goapi.WithAuxiliaryModels(auxModels))
 
+		// PR-C F4 wire-up: construct the four Keeper Phase 2 evaluators
+		// (skill_review / behavior / memory_health / negative_learning)
+		// from the aux-model config and pass them to NewRouter as an
+		// option BEFORE registerInternalRoutes runs. The handler
+		// constructor captures evaluator pointers by value at route
+		// registration time — calling SetKeeperPhase2Evaluators AFTER
+		// NewRouter would leave the live handler holding nil, with the
+		// endpoints permanently 503-ing.
+		//
+		// Each evaluator is built independently; per-slot init failures
+		// (e.g. missing ANTHROPIC_API_KEY) surface as warn lines + a nil
+		// evaluator — the matching endpoint then returns 503 so partial
+		// rollouts have a deterministic shape (graceful degradation, not
+		// crash on boot). See internal/server/keeper_phase2.go.
+		evals := buildPhase2Evaluators(auxModels, s.journalWriter, deps.DB, logger)
+		opts = append(opts, goapi.WithKeeperPhase2Evaluators(
+			evals.skillReview,
+			evals.behavior,
+			evals.memoryHealth,
+			evals.negative,
+		))
+
 		apiRouter, err := goapi.NewRouter(deps.DB, cfg.Auth.JWTSecret, logger, opts...)
 		if err != nil {
 			logger.Error("failed to create API router", "error", err)
@@ -607,29 +629,12 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 			mux.Handle("/exposed/", apiRouter)
 			logger.Info("Go API routes mounted")
 
-			// PR-C F4 wire-up: construct the four Keeper Phase 2
-			// evaluators (skill_review / behavior / memory_health /
-			// negative_learning) from the aux-model config and hand
-			// them to the router. Each evaluator is built independently
-			// and per-slot init failures (e.g. missing ANTHROPIC_API_KEY)
-			// surface as warn lines + a nil evaluator — the matching
-			// endpoint then returns 503 so partial rollouts have a
-			// deterministic shape (graceful degradation, not crash on
-			// boot). See internal/server/keeper_phase2.go.
-			//
 			// Behavior evaluator additionally drives the sampled
 			// EventPostToolCall hook (PRD §6 F4.2). Install it as the
-			// process-wide singleton AFTER constructing it so the
+			// process-wide singleton AFTER the router is up so the
 			// orchestrator's tappedHandler can pick it up via
 			// behaviorhook.Get() on the hot path. nil evaluator → hook
 			// no-ops (Hook.MaybeEvaluate guards), so absence is safe.
-			evals := buildPhase2Evaluators(auxModels, s.journalWriter, deps.DB, logger)
-			apiRouter.SetKeeperPhase2Evaluators(
-				evals.skillReview,
-				evals.behavior,
-				evals.memoryHealth,
-				evals.negative,
-			)
 			registerBehaviorHook(evals.behavior, apiRouter.PolicyResolver(), logger)
 			// Stash the evaluators so cmd_start.go can register the daily
 			// SkillReview + MemoryHealthCheck cron routines via
