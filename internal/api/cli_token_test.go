@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -94,7 +95,7 @@ func TestCLITokenValidate(t *testing.T) {
 	json.Unmarshal(createRR.Body.Bytes(), &created)
 
 	// Validate via DB function
-	gotUserID, gotEmail, _, err := ValidateCLIToken(db, created.Token)
+	gotUserID, gotEmail, _, err := ValidateCLIToken(context.Background(), db, created.Token, ValidateAuditContext{})
 	if err != nil {
 		t.Fatalf("ValidateCLIToken() error: %v", err)
 	}
@@ -109,7 +110,7 @@ func TestCLITokenValidate(t *testing.T) {
 func TestCLITokenValidateInvalid(t *testing.T) {
 	db := setupTestDB(t)
 
-	_, _, _, err := ValidateCLIToken(db, "crewship_cli_nonexistent_token_0000")
+	_, _, _, err := ValidateCLIToken(context.Background(), db, "crewship_cli_nonexistent_token_0000", ValidateAuditContext{})
 	if err == nil {
 		t.Error("expected error for invalid token")
 	}
@@ -153,7 +154,7 @@ func TestCLITokenRevoke(t *testing.T) {
 	// tier-mismatch) into a single "invalid CLI token" so a caller
 	// cannot oracle which condition fired. Specifics go to the logger
 	// for operator audit.
-	_, _, _, err := ValidateCLIToken(db, created.Token)
+	_, _, _, err := ValidateCLIToken(context.Background(), db, created.Token, ValidateAuditContext{})
 	if err == nil {
 		t.Error("expected error for revoked token")
 	}
@@ -464,7 +465,7 @@ func TestCLITokenCreate_AdminTier_HappyPath(t *testing.T) {
 		t.Errorf("ADMIN response must include expires_at")
 	}
 
-	uid, email, _, vErr := ValidateCLIToken(db, resp.Token)
+	uid, email, _, vErr := ValidateCLIToken(context.Background(), db, resp.Token, ValidateAuditContext{})
 	if vErr != nil {
 		t.Fatalf("ValidateCLIToken: %v", vErr)
 	}
@@ -550,7 +551,7 @@ func TestValidateCLIToken_ExpiredTokenRefused(t *testing.T) {
 		t.Fatalf("backdate: %v", err)
 	}
 
-	_, _, _, vErr := ValidateCLIToken(db, resp.Token)
+	_, _, _, vErr := ValidateCLIToken(context.Background(), db, resp.Token, ValidateAuditContext{})
 	if vErr == nil {
 		t.Errorf("expected expired token to be rejected")
 	}

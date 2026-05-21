@@ -127,7 +127,16 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 		var user *AuthUser
 
 		if IsCLIToken(token) {
-			userID, email, name, err := ValidateCLIToken(m.db, token)
+			// Pass the request ctx so the SELECT lookup respects the
+			// caller's deadline; the audit metadata feeds the per-use
+			// row written for ADMIN tokens so an incident responder
+			// can answer "what did this admin token touch from where".
+			audit := ValidateAuditContext{
+				RemoteAddr: r.RemoteAddr,
+				UserAgent:  r.Header.Get("User-Agent"),
+				Path:       r.URL.Path,
+			}
+			userID, email, name, err := ValidateCLIToken(r.Context(), m.db, token, audit)
 			if err != nil {
 				m.logger.Debug("CLI token auth failed", "error", err)
 				writeAuthError(w, http.StatusUnauthorized, reasonSessionInvalid)

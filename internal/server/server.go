@@ -617,13 +617,17 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 				// 5s budget for the empty-DB probe so a wedged SQLite
 				// can't block server boot. The handler refuses bootstrap
 				// when no token is armed, so timeout = fail-closed.
-				armCtx, armCancel := context.WithTimeout(context.Background(), 5*time.Second)
-				if err := authH.MaybeGenerateSetupToken(armCtx); err != nil {
-					logger.Error("bootstrap: setup token arm failed",
-						"error", err,
-						"impact", "POST /api/v1/bootstrap will refuse until DB is reachable or a row is added manually")
-				}
-				armCancel()
+				// defer cancel so a panic between the WithTimeout and
+				// MaybeGenerateSetupToken doesn't leak the context.
+				func() {
+					armCtx, armCancel := context.WithTimeout(context.Background(), 5*time.Second)
+					defer armCancel()
+					if err := authH.MaybeGenerateSetupToken(armCtx); err != nil {
+						logger.Error("bootstrap: setup token arm failed",
+							"error", err,
+							"impact", "POST /api/v1/bootstrap will refuse until DB is reachable or a row is added manually")
+					}
+				}()
 			}
 		}
 		// Static UI: wrap mux with SPA handler to avoid ServeMux redirect issues

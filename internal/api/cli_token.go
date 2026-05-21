@@ -19,6 +19,7 @@ package api
 // simple.
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -265,12 +266,7 @@ func (h *CLITokenHandler) Create(w http.ResponseWriter, r *http.Request) {
 // itself is user-scoped — so we treat "owner of at least one
 // workspace" as the issuance gate. A SUPER_ADMIN platform role check
 // would slot in here if/when the platform gains one.
-func userIsWorkspaceOwner(ctx interface {
-	Deadline() (time.Time, bool)
-	Done() <-chan struct{}
-	Err() error
-	Value(any) any
-}, db *sql.DB, userID string) bool {
+func userIsWorkspaceOwner(ctx context.Context, db *sql.DB, userID string) bool {
 	var count int
 	err := db.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM workspace_members WHERE user_id = ? AND role = 'OWNER'`,
@@ -397,7 +393,7 @@ func IsCLIToken(token string) bool {
 // "invalid CLI token" for all non-success paths; specific reasons go
 // to the logger so an operator can audit without leaking them to the
 // caller.
-func ValidateCLIToken(db *sql.DB, token string) (string, string, string, error) {
+func ValidateCLIToken(ctx context.Context, db *sql.DB, token string, audit ValidateAuditContext) (string, string, string, error) {
 	var (
 		tokenHash    string
 		expectedTier string
@@ -422,7 +418,7 @@ func ValidateCLIToken(db *sql.DB, token string) (string, string, string, error) 
 		expiresAt, revokedAt        sql.NullString
 		tokenID                     string
 	)
-	err := db.QueryRow(`
+	err := db.QueryRowContext(ctx, `
 		SELECT ct.id, ct.user_id, u.email, u.full_name, ct.tier, ct.expires_at, ct.revoked_at
 		FROM cli_tokens ct
 		JOIN users u ON u.id = ct.user_id
@@ -455,23 +451,65 @@ func ValidateCLIToken(db *sql.DB, token string) (string, string, string, error) 
 	}
 
 	// last_used_at debounce (STANDARD), per-use audit (ADMIN).
-	// Both async-best-effort so a slow DB write doesn't bottleneck
-	// the API call.
-	go func(id, tier string) {
+	// Background-only goroutine that gets its OWN 5s context derived
+	// from context.Background, not the caller's ctx — the audit work
+	// must survive a caller deadline because the actual API call has
+	// already accepted the token. We mirror the caller's ctx only for
+	// the synchronous SELECT above (where caller deadline = "is this
+	// a useful auth result still" is meaningful). 5s bounds a wedged
+	// SQLite without leaking unbounded goroutines.
+	go func(id, tier string, a ValidateAuditContext) {
+		bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
 		nowStr := time.Now().UTC().Format(time.RFC3339)
-		if _, ierr := db.Exec("UPDATE cli_tokens SET last_used_at = ? WHERE id = ?", nowStr, id); ierr != nil {
+		if _, ierr := db.ExecContext(bgCtx,
+			"UPDATE cli_tokens SET last_used_at = ? WHERE id = ?", nowStr, id); ierr != nil {
 			// Async, best-effort — silent. The operator wouldn't see a
 			// returned error here even if we propagated it.
 			_ = ierr
 		}
 		if tier == "ADMIN" {
 			useID := generateCUID()
-			_, _ = db.Exec(
-				`INSERT INTO cli_token_uses (id, token_id, used_at) VALUES (?, ?, ?)`,
+			// Audit row carries the caller's RemoteAddr + UA + path so
+			// an incident-response query "what did this admin token
+			// touch in the last hour" returns rows with actual signal,
+			// not just timestamps. ValidateAuditContext lets a caller
+			// that legitimately doesn't have a request handy (tests,
+			// CLI tools driving validation) pass the zero value and
+			// the row still inserts.
+			_, _ = db.ExecContext(bgCtx,
+				`INSERT INTO cli_token_uses (id, token_id, used_at, remote_addr, user_agent, path)
+				 VALUES (?, ?, ?, ?, ?, ?)`,
 				useID, id, nowStr,
+				nullIfBlank(a.RemoteAddr),
+				nullIfBlank(a.UserAgent),
+				nullIfBlank(a.Path),
 			)
 		}
-	}(tokenID, dbTier)
+	}(tokenID, dbTier, audit)
 
 	return userID, email, name, nil
+}
+
+// ValidateAuditContext carries the request metadata an admin-tier
+// validation should attach to its cli_token_uses row. Callers that
+// don't have an HTTP request in hand (CLI commands, tests) pass the
+// zero value; the audit insert handles empty fields by writing NULL
+// rather than empty strings so queries can distinguish "we didn't
+// know" from "the value was the empty string".
+type ValidateAuditContext struct {
+	RemoteAddr string
+	UserAgent  string
+	Path       string
+}
+
+// nullIfBlank returns a sql.NullString that's NOT valid when the
+// input is empty / whitespace. Used by the admin-tier audit insert
+// so missing fields land as NULL instead of empty TEXT, which a
+// future analyst can distinguish via SQL `IS NULL`.
+func nullIfBlank(s string) sql.NullString {
+	if strings.TrimSpace(s) == "" {
+		return sql.NullString{}
+	}
+	return sql.NullString{String: s, Valid: true}
 }
