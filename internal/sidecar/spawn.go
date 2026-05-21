@@ -30,6 +30,7 @@ package sidecar
 
 import (
 	"net/http"
+	"net/url"
 )
 
 // handleSpawn proxies POST /spawn to the crewshipd internal hire
@@ -44,5 +45,11 @@ func (s *Server) handleSpawn(w http.ResponseWriter, r *http.Request) {
 		writeJSONResponse(w, http.StatusServiceUnavailable, map[string]string{"error": "IPC not configured"})
 		return
 	}
-	s.proxyToAPI(w, r, http.MethodPost, "/api/v1/internal/agents/hire?workspace_id="+s.ipc.WorkspaceID)
+	// URL-encode workspace_id so reserved characters (&, ?, =, #) in
+	// an operator-set workspace identifier can't poison query parsing
+	// downstream. url.Values is more defensive than naked string
+	// concat against operator-controlled input.
+	q := url.Values{}
+	q.Set("workspace_id", s.ipc.WorkspaceID)
+	s.proxyToAPI(w, r, http.MethodPost, "/api/v1/internal/agents/hire?"+q.Encode())
 }

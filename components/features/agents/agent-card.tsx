@@ -167,9 +167,23 @@ export const AgentCard = memo(function AgentCard({ agent }: { agent: AgentData }
             <div className="mt-3 flex items-center gap-2 flex-wrap">
               {agent.crew && (
                 <Badge variant="outline" className="text-micro gap-1">
+                  {/*
+                    Crew dot color is operator-defined (palette ID or
+                    raw hex), so it can't be a static Tailwind class.
+                    Inject the value via a scoped CSS custom property
+                    and consume it through a Tailwind arbitrary-value
+                    utility — keeps the className side static (JIT
+                    detects bg-[var(--crew-dot)]) while the actual
+                    color is data-driven. Better than a raw style
+                    attribute because the design token is named.
+                  */}
                   <span
-                    className="h-2 w-2 rounded-full shrink-0"
-                    style={{ backgroundColor: getCrewDotColor(agent.crew.color) }}
+                    className="h-2 w-2 rounded-full shrink-0 bg-[var(--crew-dot)]"
+                    style={
+                      {
+                        "--crew-dot": getCrewDotColor(agent.crew.color),
+                      } as React.CSSProperties
+                    }
                   />
                   {agent.crew.name}
                 </Badge>

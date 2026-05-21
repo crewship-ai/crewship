@@ -694,7 +694,13 @@ func (h *AgentHandler) Rehire(w http.ResponseWriter, r *http.Request) {
 	// already counted as not-live). A rehire of a still-live
 	// ephemeral (operator extends TTL before it ghosts) doesn't add
 	// a slot — same row, same count.
-	wasGhost := oldExpiredAt.Valid && oldExpiredAt.String != ""
+	//
+	// CRITICAL: wasGhost is computed INSIDE the tx (below) because a
+	// concurrent rehire from another caller can flip expired_at to
+	// NULL between the load on line 634 and the BEGIN IMMEDIATE here.
+	// Using the pre-tx oldExpiredAt would still treat this request as
+	// a ghost rehire — running the quota gate — even though the row
+	// is already live, producing a spurious 429.
 
 	// 4. Compute new state. expires_at = now + ttl; expired_at = NULL
 	// (un-ghost); hire_reason appended with new timestamp so the
@@ -712,6 +718,29 @@ func (h *AgentHandler) Rehire(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer func() { _ = tx.Rollback() }()
+
+	// Recompute ghost/live state inside the transaction to close the
+	// TOCTOU window described above. If a concurrent rehire flipped
+	// expired_at to NULL after our pre-tx load, we now see the live
+	// state and skip the quota path.
+	var currentExpiredAt sql.NullString
+	if err := tx.QueryRowContext(r.Context(), `
+		SELECT expired_at
+		FROM agents
+		WHERE id = ? AND workspace_id = ? AND ephemeral = 1 AND deleted_at IS NULL`,
+		agentID, workspaceID,
+	).Scan(&currentExpiredAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			// Concurrent soft-delete after the pre-tx load. Race-safe
+			// 404 — the caller's view is no longer valid.
+			replyError(w, http.StatusNotFound, "Agent not found")
+			return
+		}
+		h.logger.Error("rehire: reload lifecycle state in tx", "error", err, "agent_id", agentID)
+		replyError(w, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	wasGhost := currentExpiredAt.Valid && currentExpiredAt.String != ""
 
 	if wasGhost && crewID != "" {
 		var liveCount, maxAgents int
