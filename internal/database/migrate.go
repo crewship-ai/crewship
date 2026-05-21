@@ -1379,6 +1379,16 @@ END;
 	// to the crew's autonomy_level — strict crews can't self-learn.
 	// See migrate_consts_v106_self_learning.go.
 	{version: 106, name: "self_learning", sql: migrationSelfLearning},
+
+	// v107 (PR-F F6): GDPR cascade primitives. Adds data_subject_id
+	// pointer columns to memory_versions + inbox_items (peer_cards
+	// already has user_id from v105) so the admin SAR endpoints can
+	// enumerate everything we hold about a single user, and the
+	// gdpr_actions audit table that records every Art. 15 (access)
+	// or Art. 17 (erasure) invocation. keeper_requests intentionally
+	// excluded — its rows are agent/crew/credential scoped, no user-
+	// attributable content. See migrate_consts_v107_gdpr_cascade.go.
+	{version: 107, name: "gdpr_cascade", sql: migrationGDPRCascade},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the
