@@ -3,7 +3,7 @@
 import {
   User, Building, Users,
   Box, Link2, Activity,
-  Shield,
+  Shield, Cpu,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { LucideIcon } from "lucide-react"
@@ -34,6 +34,7 @@ const sections: NavSection[] = [
     items: [
       { key: "general", label: "General", icon: Building },
       { key: "crews", label: "Crews & Containers", icon: Box },
+      { key: "aux-models", label: "Auxiliary Models", icon: Cpu },
       { key: "connections", label: "Connections", icon: Link2 },
       { key: "members", label: "Members", icon: Users },
       { key: "audit", label: "Audit Log", icon: Activity },

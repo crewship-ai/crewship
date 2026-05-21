@@ -8,6 +8,7 @@ import { CrewContainerConfig } from "@/components/features/crews/crew-container-
 import { CrewNetworkPolicy } from "@/components/features/crews/crew-network-policy"
 import { CrewMCPConfig } from "@/components/features/crews/crew-mcp-config"
 import { CrewEscalations } from "@/components/features/crews/crew-escalations"
+import { CrewPolicyControls } from "@/components/features/crews/crew-policy-controls"
 import { AVATAR_STYLES } from "@/lib/agent-avatar"
 import { cn } from "@/lib/utils"
 
@@ -94,6 +95,19 @@ export function SettingsTab({
             </div>
           </Row>
         </div>
+      </section>
+
+      {/* Policy — PR-G F2 / F4.2 surface. Lives between Profile and Runtime
+          because policy decisions (autonomy, behavior_mode) govern every
+          subsequent downstream behaviour (HITL, hire, behavior monitor).
+          Read-visible to all members; only ADMIN+ can flip server-side. */}
+      <section className="space-y-3">
+        <h2 className="text-lg font-semibold">Autonomy &amp; behavior</h2>
+        <p className="text-xs text-muted-foreground -mt-1">
+          Governs how this crew&rsquo;s agents request operator approval and how the behavior
+          monitor responds to anti-patterns. (PRD §6 F2 / F4.2)
+        </p>
+        <CrewPolicyControls crewId={crew.id} workspaceId={workspaceId} />
       </section>
 
       {/* Runtime &amp; security — collapsibles per wireframe spec */}
