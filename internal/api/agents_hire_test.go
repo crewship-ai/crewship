@@ -161,6 +161,73 @@ func TestHire_GuidedRequiresInboxApproval(t *testing.T) {
 	}
 }
 
+// TestHire_Guided_CreatesAgentInPendingReviewStatus asserts the
+// PENDING_REVIEW status sentinel is written to the agents row when
+// the policy returns InboxApprove. This is what actually blocks the
+// chatbridge — without it, the inbox waitpoint is purely
+// informational and the agent would serve messages the instant after
+// the 202 lands.
+func TestHire_Guided_CreatesAgentInPendingReviewStatus(t *testing.T) {
+	db := setupTestDB(t)
+	userID, wsID, crewID := seedHireCrew(t, db, "guided", 5)
+	h := newHireHandler(t, db)
+
+	rr := postHire(t, h, userID, wsID, "MANAGER", map[string]any{
+		"crew_id":       crewID,
+		"template_slug": "docs-writer",
+		"reason":        "blocked until approve",
+	})
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202; body: %s", rr.Code, rr.Body.String())
+	}
+	var resp hireResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.Status != "PENDING_REVIEW" {
+		t.Errorf("response status = %q, want PENDING_REVIEW", resp.Status)
+	}
+
+	// Source of truth is the DB row, not the response shape — assert
+	// the column directly.
+	var status string
+	if err := db.QueryRow(`SELECT status FROM agents WHERE id = ?`, resp.ID).Scan(&status); err != nil {
+		t.Fatalf("verify status: %v", err)
+	}
+	if status != "PENDING_REVIEW" {
+		t.Errorf("agents.status = %q, want PENDING_REVIEW", status)
+	}
+}
+
+// TestHire_Trusted_CreatesAgentInIdleStatus asserts non-guided
+// hires (trusted, full) keep the legacy IDLE status — the
+// PENDING_REVIEW sentinel must be scoped to InboxApprove only,
+// otherwise the chatbridge would refuse to start any ephemeral
+// regardless of policy.
+func TestHire_Trusted_CreatesAgentInIdleStatus(t *testing.T) {
+	db := setupTestDB(t)
+	userID, wsID, crewID := seedHireCrew(t, db, "trusted", 5)
+	h := newHireHandler(t, db)
+
+	rr := postHire(t, h, userID, wsID, "MANAGER", map[string]any{
+		"crew_id":       crewID,
+		"template_slug": "docs-writer",
+		"reason":        "should start immediately",
+	})
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body: %s", rr.Code, rr.Body.String())
+	}
+	var resp hireResponse
+	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
+	var status string
+	if err := db.QueryRow(`SELECT status FROM agents WHERE id = ?`, resp.ID).Scan(&status); err != nil {
+		t.Fatalf("verify status: %v", err)
+	}
+	if status != "IDLE" {
+		t.Errorf("agents.status = %q, want IDLE on trusted hire", status)
+	}
+}
+
 func TestHire_StrictRejected(t *testing.T) {
 	db := setupTestDB(t)
 	userID, wsID, crewID := seedHireCrew(t, db, "strict", 5)

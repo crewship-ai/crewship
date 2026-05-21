@@ -288,8 +288,23 @@ func (h *AgentHandler) Hire(w http.ResponseWriter, r *http.Request) {
 	hireReason := buildInitialReason(req.Reason, createdAt)
 
 	// MEMBER role for the row itself — ephemerals never act as a LEAD
-	// in their parent crew. Status starts IDLE; the first chat message
-	// transitions it to RUNNING.
+	// in their parent crew.
+	//
+	// Initial status depends on the policy decision:
+	//   - DecisionInboxApprove (guided): status='PENDING_REVIEW'. The
+	//     chatbridge refuses to start an agent in this state until the
+	//     approve-hire endpoint flips it to IDLE. This is what
+	//     actually makes "guided" a blocking gate — without the
+	//     status sentinel, a client could WS-message the agent the
+	//     instant after the 202 lands and the container would spin up
+	//     before the operator clicked Approve.
+	//   - Everything else: status='IDLE'. First chat message
+	//     transitions to RUNNING the same way permanent agents do.
+	initialStatus := "IDLE"
+	if decision == policy.DecisionInboxApprove {
+		initialStatus = "PENDING_REVIEW"
+	}
+
 	llmProvider := provideForModel(model)
 	var llmProviderArg *string
 	if llmProvider != "" {
@@ -306,11 +321,11 @@ func (h *AgentHandler) Hire(w http.ResponseWriter, r *http.Request) {
 			cli_adapter, llm_provider, llm_model, tool_profile, memory_enabled,
 			ephemeral, expires_at, parent_lead_id, hire_reason,
 			created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, 'AGENT', 'IDLE',
+		VALUES (?, ?, ?, ?, ?, 'AGENT', ?,
 		        'CLAUDE_CODE', ?, ?, 'CODING', 1,
 		        1, ?, ?, ?,
 		        ?, ?)`,
-		agentID, crewID, workspaceID, name, slug,
+		agentID, crewID, workspaceID, name, slug, initialStatus,
 		llmProviderArg, llmModelArg,
 		expiresAt, parentLeadID, hireReason,
 		createdAt, createdAt,
@@ -390,7 +405,7 @@ func (h *AgentHandler) Hire(w http.ResponseWriter, r *http.Request) {
 		WorkspaceID:   workspaceID,
 		Slug:          slug,
 		Name:          name,
-		Status:        "IDLE",
+		Status:        initialStatus,
 		Ephemeral:     true,
 		ExpiresAt:     &expiresOut,
 		ExpiredAt:     nil,
