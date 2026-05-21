@@ -121,7 +121,7 @@ func TokenScopesFromContext(ctx context.Context) []string {
 func canScope(ctx context.Context, requested string) bool {
 	scopes := ctx.Value(ctxTokenScopes)
 	if scopes == nil {
-		return true // JWT-authed or pre-v99 token — no restriction
+		return true // JWT-authed or pre-v100 token — no restriction
 	}
 	set, ok := scopes.(stringSet)
 	if !ok || len(set) == 0 {
@@ -207,7 +207,7 @@ type stringSet map[string]struct{}
 // parseScopes parses a JSON array string from the cli_tokens.scopes
 // column into a normalised stringSet. Empty input (NULL column),
 // invalid JSON, or non-array shapes all return nil — the caller
-// then treats the token as "unrestricted" (pre-v99 behaviour). The
+// then treats the token as "unrestricted" (pre-v100 behaviour). The
 // shape is validated at issue time, so a value that fails to parse
 // at validation time indicates DB corruption, not an attack — but
 // returning nil here keeps the auth path moving so a corrupt scope

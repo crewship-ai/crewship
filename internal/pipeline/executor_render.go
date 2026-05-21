@@ -66,8 +66,8 @@ func evalIfCondition(rendered string) bool {
 // is asking the platform to serialise runs per tenant. If account_id is
 // missing, returning empty key (no gate) would silently allow unlimited
 // parallelism — a Denial-of-Self via unintended fan-out. The fail-fast
-// here matches Trigger.dev's behaviour: a queue/concurrencyKey with no
-// resolved value is a config error, not "no gate."
+// here treats an unresolved-empty concurrency key as a config error,
+// not "no gate."
 func renderConcurrencyKey(_ context.Context, template string, inputs map[string]any) (string, bool, error) {
 	if template == "" {
 		return "", false, nil

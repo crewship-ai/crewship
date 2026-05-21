@@ -186,10 +186,10 @@ func truncateString(s string, n int) string {
 }
 
 // journalPriorityCmd marks a journal entry with one of the four
-// priority values. Inspired by OpenClaw Auto-Dream's ⚠️ PERMANENT /
-// 🔥 HIGH / 📌 PIN markers — operators annotate entries they want
-// surfaced prominently in recall or never compacted. Requires OWNER
-// or ADMIN on the caller's workspace.
+// priority values (permanent / high / pin / normal) — operators
+// annotate entries they want surfaced prominently in recall or
+// never compacted. Requires OWNER or ADMIN on the caller's
+// workspace.
 var journalPriorityCmd = &cobra.Command{
 	Use:   "priority <entry-id>",
 	Short: "Mark a journal entry with a priority (permanent/high/pin/normal)",

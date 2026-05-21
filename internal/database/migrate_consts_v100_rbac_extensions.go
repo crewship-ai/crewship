@@ -1,6 +1,6 @@
 package database
 
-// migrationRBACExtensions (v99) widens the RBAC surface beyond the
+// migrationRBACExtensions (v100) widens the RBAC surface beyond the
 // flat workspace_members.role model. The pre-v99 system gave every
 // MANAGER+ workspace member full read/write across every crew, every
 // agent, every credential — which is the right starting point for a
@@ -21,7 +21,7 @@ package database
 // Schema changes:
 //
 //   - crew_members.role: per-crew role override. NULL = inherit
-//     workspace role (the pre-v99 behaviour). Non-NULL value can
+//     workspace role (the pre-v100 behaviour). Non-NULL value can
 //     only ELEVATE the workspace role, never drop below it — the
 //     effective-role helper takes max(workspace, crew). The check
 //     constraint pins the allowed values to the same set
@@ -37,7 +37,7 @@ package database
 //
 //   - cli_tokens.scopes: JSON array of scope strings the token is
 //     restricted to. NULL = unrestricted (token carries the user's
-//     full workspace role, pre-v99 behaviour). A list narrows the
+//     full workspace role, pre-v100 behaviour). A list narrows the
 //     token to a subset. Server-side validation enforces that
 //     requested scopes ≤ user's max permissions at issue time;
 //     a downgrade of the user's role after issue cannot grant the

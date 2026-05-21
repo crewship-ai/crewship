@@ -241,8 +241,8 @@ Every returned hit gets `MarkReferenced` which increments the
 reference counter so the next DecayAndReinforce lifts frequently-
 hit memories.
 
-This is a direct port of OpenClaw Auto-Dream's importance formula,
-adapted to Crewship's entry-type catalog and multi-tenant model.
+The formula combines base value, recency decay, and reference-count
+reinforcement to keep durable signal ranking well even as it ages.
 Effect: a six-month-old peer.escalation keeps ranking well after
 one recall per week, while a stale low-value info entry falls off.
 
@@ -260,8 +260,10 @@ Same treatment applies to the orchestrator's `buildMemoryContext`
 blocks (AGENT.md / CREW.md) — both surfaces are agent-authored and
 therefore both should be read by the model as hints.
 
-Patterns borrowed from Hermes Agent's `sanitize_context()` and
-Self-Evolve's `<self-evolve-memories>…(untrusted metadata)…`.
+The wrapper follows the "treat all recalled content as untrusted
+hints" pattern: anything inside a `<recalled-memory>` block is
+guidance the current task can override, never authoritative
+instruction.
 
 ## Embedder
 

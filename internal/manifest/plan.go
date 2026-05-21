@@ -366,11 +366,60 @@ func (pb *planBuilder) planCrew(ctx context.Context, meta Metadata, spec *CrewSp
 		return err
 	}
 
-	crewBody, err := buildCrewBody(name, slug, spec)
+	// Auto-managed sidecar credentials: expand IN-PLACE on a deep
+	// enough copy that we don't mutate the caller's manifest. The
+	// expansion writes generated values into the services' Env map
+	// and appends credential names to every agent's env_refs in the
+	// crew. On a re-apply, the existing services_json carries the
+	// previously-generated values; passing it in lets expand reuse
+	// them so the credential row and the sidecar env stay in lockstep
+	// across consecutive applies.
+	specCopy := deepCopyCrewSpec(spec)
+	var existingServicesJSON string
+	if existing != nil && existing.ServicesJSON != nil {
+		existingServicesJSON = *existing.ServicesJSON
+	}
+	plannedAutoCreds, err := expandAutoCredentialsInCrewSpec(&specCopy, existingServicesJSON)
+	if err != nil {
+		return fmt.Errorf("crew %q: auto-managed credentials: %w", slug, err)
+	}
+
+	// Cross-crew collision check: a workspace-scoped credential
+	// already exists under one of our planned names. Two outcomes
+	// matter — if the existing row IS the same auto-managed
+	// (matching provisioned_for_service tag), we no-op later via
+	// idempotency. If it's a different crew's auto-managed row, or
+	// an operator's manual credential, that's a real conflict and
+	// the operator has to rename.
+	for i := range plannedAutoCreds {
+		ac := &plannedAutoCreds[i]
+		existingCred, lookErr := pb.client.FindCredentialByName(ctx, ac.Name)
+		if lookErr != nil {
+			return fmt.Errorf("crew %q: lookup credential %q: %w", slug, ac.Name, lookErr)
+		}
+		if existingCred == nil {
+			continue
+		}
+		wantTag := slug + "/" + ac.ProvisionedForService
+		if existingCred.Provider == "AUTO_MANAGED" &&
+			existingCred.ProvisionedForService != nil &&
+			*existingCred.ProvisionedForService == wantTag {
+			continue // same crew, same service — re-apply idempotency handles it
+		}
+		owner := "operator-managed"
+		if existingCred.Provider == "AUTO_MANAGED" && existingCred.ProvisionedForService != nil {
+			owner = "auto-managed for " + *existingCred.ProvisionedForService
+		}
+		return fmt.Errorf(
+			"crew %q: auto_credential %q clashes with an existing workspace credential (%s); "+
+				"rename the auto_credential (e.g. %s_%s) to keep workspace names unique",
+			slug, ac.Name, owner, ac.Name, strings.ToUpper(strings.ReplaceAll(slug, "-", "_")))
+	}
+
+	crewBody, err := buildCrewBody(name, slug, &specCopy)
 	if err != nil {
 		return fmt.Errorf("crew %q: %w", slug, err)
 	}
-	specCopy := *spec
 	var crewIDForChildren string
 
 	switch {
@@ -454,7 +503,138 @@ func (pb *planBuilder) planCrew(ctx context.Context, meta Metadata, spec *CrewSp
 	// "exec deferred" wrapper that resolves the ID at apply time by
 	// re-fetching the crew list (the cache is invalidated by the
 	// create).
-	return pb.planCrewChildren(ctx, slug, crewIDForChildren, &specCopy, wsCreds, wsSkills)
+	if err := pb.planCrewChildren(ctx, slug, crewIDForChildren, &specCopy, wsCreds, wsSkills); err != nil {
+		return err
+	}
+
+	// Auto-managed sidecar credentials (v98). One plan item per
+	// (service, auto-credential) tuple. Each runs AFTER the crew +
+	// agents are created so the closure can pin the LEAD agent for
+	// attribution and the credential row's `created_by_actor_id`.
+	// Idempotent: if a row with the same name+workspace already
+	// exists with provider=AUTO_MANAGED, the closure no-ops.
+	if err := pb.planAutoManagedCredentials(ctx, slug, plannedAutoCreds); err != nil {
+		return err
+	}
+	return nil
+}
+
+// planAutoManagedCredentials emits one plan item per generated
+// auto-credential. The closure that runs at apply time:
+//
+//  1. Checks workspace credentials for an existing AUTO_MANAGED row
+//     with the same name; on match, no-ops (re-apply idempotency).
+//  2. POSTs a fresh credential with provider=AUTO_MANAGED, status=
+//     ACTIVE, created_by_actor_type='system' (v98 MVP), and
+//     provisioned_for_service=<crew>/<service>.
+//
+// Attribution is intentionally 'system' (not 'agent') for v98. The
+// row's provisioned_for_service tag is the load-bearing audit signal
+// — UI surfaces "Auto-managed for <crew>/<service>" from it, and a
+// follow-up patch can hydrate the attributed agent once the
+// rank-ordering chicken-and-egg with agent creation is resolved.
+// See SPEC-4 §"Two-phase attribution" for the deferred design.
+//
+// Plan output renders one row per credential ("create credential
+// POSTGRES_PASSWORD for uo-outlands/postgres"). The generated value
+// is intentionally NOT in that string — captured inside the closure.
+//
+// Kind is "credential" so these items rank with normal credentials
+// (well before agents that env_ref them).
+func (pb *planBuilder) planAutoManagedCredentials(ctx context.Context, crewSlug string, planned []plannedAutoCredential) error {
+	for i := range planned {
+		ac := planned[i] // local capture; closure must not share loop var
+		provServiceTag := crewSlug + "/" + ac.ProvisionedForService
+		summary := fmt.Sprintf("%s (auto-managed for %s/%s)", ac.Name, crewSlug, ac.ProvisionedForService)
+
+		// Plan-time prediction. A re-apply against a workspace that
+		// already carries the matching auto-managed credential is a
+		// no-op — same name, same provider, same provisioned_for_service
+		// tag, same value (expandAutoCredentialsInCrewSpec reused the
+		// prior value via reuseOrGenerate). Reporting that as
+		// "+ credential" + "1 created" was misleading: the row count
+		// in the plan footer never matched what actually changed in
+		// the DB. Look up the workspace's current credentials so the
+		// plan output matches reality.
+		//
+		// Errors from FindCredentialByName propagate up — pre-CodeRabbit
+		// this swallowed the err and treated the lookup as "no existing
+		// credential", which meant a transient server-down or network
+		// failure during planning would silently flip every auto-managed
+		// row to ActionCreate. Apply would then start, hit the closure's
+		// repeat lookup, and either succeed (confusingly contradicting
+		// the plan) or fail mid-execution. Surfacing the read error at
+		// plan time keeps the contract that BuildPlan is "see the whole
+		// shape before any mutation runs".
+		//
+		// The closure below still runs the same provenance check —
+		// it remains load-bearing as a TOCTOU defence and as the
+		// authoritative path that returns nil-or-error.
+		predicted := ActionCreate
+		existing, err := pb.client.FindCredentialByName(ctx, ac.Name)
+		if err != nil {
+			return fmt.Errorf("plan auto-managed %s: lookup existing: %w", ac.Name, err)
+		}
+		if existing != nil &&
+			existing.Provider == "AUTO_MANAGED" &&
+			existing.ProvisionedForService != nil &&
+			*existing.ProvisionedForService == provServiceTag {
+			predicted = ActionUnchanged
+		}
+
+		pb.appendItem(predicted, "credential", summary,
+			func(ctx context.Context, client *Client, opts Options) error {
+				existing, err := client.FindCredentialByName(ctx, ac.Name)
+				if err != nil {
+					return fmt.Errorf("auto-managed %s: lookup existing: %w", ac.Name, err)
+				}
+				if existing != nil {
+					// The plan-time check in planCrew already rejects
+					// cross-crew collisions, but TOCTOU between plan
+					// and exec is real: another apply, a UI mutate,
+					// or a race in CI could materialise a colliding
+					// row in the meantime. Re-check provenance here
+					// — same tag is idempotent, anything else is a
+					// real conflict the dispatch must not paper over.
+					if existing.Provider == "AUTO_MANAGED" &&
+						existing.ProvisionedForService != nil &&
+						*existing.ProvisionedForService == provServiceTag {
+						return nil
+					}
+					if existing.Provider == "AUTO_MANAGED" {
+						otherTag := "(no provisioned_for_service)"
+						if existing.ProvisionedForService != nil {
+							otherTag = *existing.ProvisionedForService
+						}
+						return fmt.Errorf(
+							"auto-managed %s: name collides with another AUTO_MANAGED credential bound to %s; "+
+								"workspace credential names must be unique per service",
+							ac.Name, otherTag)
+					}
+					return fmt.Errorf(
+						"auto-managed %s: credential already exists with provider=%s; "+
+							"delete it manually or rename the auto-credential to resolve the conflict",
+						ac.Name, existing.Provider)
+				}
+				body := map[string]any{
+					"name":                    ac.Name,
+					"value":                   ac.Value,
+					"type":                    "GENERIC_SECRET",
+					"provider":                "AUTO_MANAGED",
+					"scope":                   "WORKSPACE",
+					"created_by_actor_type":   "system",
+					"provisioned_for_service": provServiceTag,
+				}
+				if ac.Description != "" {
+					body["description"] = ac.Description
+				}
+				if _, err := client.CreateCredential(ctx, body); err != nil {
+					return fmt.Errorf("auto-managed %s: create: %w", ac.Name, err)
+				}
+				return nil
+			})
+	}
+	return nil
 }
 
 // planCrewChildren emits plan items for MCP servers + agents + their
@@ -737,6 +917,18 @@ func applyAgentRefs(ctx context.Context, c *Client, agentID string, a *Agent, ws
 // fields don't match the existing crew. Only fields the manifest
 // can drive are compared — server-managed fields (created_at,
 // cached_image, etc.) are excluded.
+//
+// Historical note: services_json + container limits + network policy
+// used to be missing from this comparison. The symptom: an operator
+// would edit a manifest (add a sidecar, change cpus, scope the
+// network), re-apply, and see "0 updated" while the server still ran
+// the old config. With services_json in particular, the SPEC-4 sugar
+// auto-credential rotation never propagated because the patch wasn't
+// sent at all — the server's UpdateCrew handler is the place that
+// invalidates `cached_image` on services_json drift, so a missing
+// PATCH meant a stale agent runtime forever. The field set below is
+// the subset of CrewResponse that buildCrewBody actually drives;
+// anything new added to buildCrewBody must be mirrored here.
 func crewBodyDiffers(existing *CrewResponse, body map[string]any) bool {
 	if v, ok := body["name"].(string); ok && v != existing.Name {
 		return true
@@ -759,7 +951,59 @@ func crewBodyDiffers(existing *CrewResponse, body map[string]any) bool {
 	if v, ok := body["mise_config"].(string); ok && deref(existing.MiseConfig) != v {
 		return true
 	}
+	if v, ok := body["services_json"].(string); ok && deref(existing.ServicesJSON) != v {
+		return true
+	}
+	// Container shape and network policy. nil-deref for *int / *float64
+	// returns the zero value, which is fine: if the manifest is silent
+	// (no devcontainer block at all) buildCrewBody doesn't set these
+	// keys, so the map lookup fails and we skip the check.
+	if v, ok := body["container_memory_mb"].(int); ok && derefInt(existing.ContainerMemoryMB) != v {
+		return true
+	}
+	if v, ok := body["container_cpus"].(float64); ok && derefFloat(existing.ContainerCPUs) != v {
+		return true
+	}
+	if v, ok := body["container_ttl_hours"].(int); ok && derefInt(existing.ContainerTTLHours) != v {
+		return true
+	}
+	if v, ok := body["network_mode"].(string); ok && deref(existing.NetworkMode) != v {
+		return true
+	}
+	if v, ok := body["allowed_domains"].([]string); ok && !stringSliceEq(existing.AllowedDomains, v) {
+		return true
+	}
 	return false
+}
+
+// derefInt / derefFloat / stringSliceEq are the small helpers
+// crewBodyDiffers needs but the deref helper above only handles
+// *string. Kept package-private so they don't pollute the public
+// surface; collocated with their only caller.
+func derefInt(p *int) int {
+	if p == nil {
+		return 0
+	}
+	return *p
+}
+
+func derefFloat(p *float64) float64 {
+	if p == nil {
+		return 0
+	}
+	return *p
+}
+
+func stringSliceEq(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func agentBodyDiffers(existing *AgentResponse, a *Agent) bool {

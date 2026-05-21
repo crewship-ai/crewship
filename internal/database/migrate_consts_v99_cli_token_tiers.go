@@ -1,13 +1,13 @@
 package database
 
-// migrationCLITokenTiers (v98) introduces a two-tier CLI token system.
+// migrationCLITokenTiers (v99) introduces a two-tier CLI token system.
 //
-// Pre-v98 every cli_tokens row was a single tier: a SHA-256 hash of a
+// Pre-v99 every cli_tokens row was a single tier: a SHA-256 hash of a
 // 20-byte random secret prefixed with "crewship_cli_". No expiry, no
 // scope, no admin distinction, no per-use audit beyond the async
 // last_used_at update.
 //
-// v98 adds:
+// v99 adds:
 //
 //   - `tier`: 'STANDARD' (default, existing rows backfilled to this) or
 //     'ADMIN'. ADMIN-tier tokens carry the "crewship_admin_" prefix and

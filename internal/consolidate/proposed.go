@@ -89,8 +89,8 @@ func (c *Consolidator) writeProposal(
 		_ = os.Remove(proposalPath)
 		return ConsolidationResult{EntriesScanned: entriesScanned}, fmt.Errorf("marshal proposal evidence: %w", err)
 	}
-	// Score every candidate rule with the OpenClaw six-signal model
-	// at proposal-creation time. The blob is keyed by rule index so
+	// Score every candidate rule with the six-signal model at
+	// proposal-creation time. The blob is keyed by rule index so
 	// the explain endpoint can render per-rule signal breakdowns
 	// without re-running the scorer. CandidateMetrics fields are
 	// best-effort: today we pass RawRelevance from LearnedRule

@@ -65,10 +65,15 @@ func TestBuildCredFileScript_PerType(t *testing.T) {
 			creds: []Credential{
 				{EnvVarName: "GH_TOKEN", PlainValue: "ghp_xxx", Type: "CLI_TOKEN"},
 			},
+			// chown assertions removed: the script now runs as
+			// UID 1001 (owner of secretsAgentDir) instead of root,
+			// so file ownership lands on 1001:1001 by virtue of
+			// being created by 1001. See the cap-bug fix for the
+			// full why; the regression tests in
+			// exec_sidecar_writecreds_test.go pin both halves.
 			wantSubs: []string{
 				"/secrets/agent-a/GH_TOKEN",
 				"chmod 0400 /secrets/agent-a/GH_TOKEN",
-				"chown 1001:1001 /secrets/agent-a/GH_TOKEN",
 			},
 			wantEnv: []string{"GH_TOKEN=/secrets/agent-a/GH_TOKEN"},
 		},

@@ -29,10 +29,10 @@ type Importance float64
 //   - an eval.regression_detected at severity=error: 0.95
 //   - anything marked PriorityPermanent: clamped up to 0.95 minimum
 //
-// Inspired by OpenClaw Auto-Dream's `(base × recency × references) / 8.0`
-// but adapted to Crewship's entry-type catalog and multi-tenant model:
-// we compute base here, then DecayAndReinforce folds in recency +
-// reference counts as a nightly update.
+// The formula combines a per-type base value with recency decay and
+// reference-count reinforcement: we compute base here, then
+// DecayAndReinforce folds in recency + reference counts as a nightly
+// update.
 func BaseImportance(t journal.EntryType, sev journal.Severity, prio journal.Priority) Importance {
 	score := 0.5
 

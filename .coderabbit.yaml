@@ -120,6 +120,29 @@ reviews:
   # PATH INSTRUCTIONS
   # ─────────────────────────────────────────────────────────────────────────────
   path_instructions:
+    - path: "**/*.{go,ts,tsx,md,mdx,yaml,yml,json}"
+      instructions: |
+        Flag any mention of named external AI / agent / workflow
+        products (Trigger.dev, Hermes, Hermes Agent, NousResearch,
+        OpenClaw, Letta, LangChain, LangGraph, LangSmith, Langfuse,
+        CrewAI, AutoGen, Inngest, Temporal, Cognition, Devin,
+        Sweep, Aider, Cody, Replit Agent, Copilot Memory, Helicone,
+        Honcho, Mem0, Vellum, Datadog LLM, Phoenix) in code
+        comments, doc files, PR titles, or PR descriptions.
+        Crewship is original product; framing work as
+        "Inspired by X" / "X-style" / "X parity" / "matches X spec"
+        bakes a discoverable competitive narrative into a public
+        repo. Suggest neutral pattern-based language instead
+        (e.g. "the cap-then-warn pattern", "DNS-label-safe
+        segment shape", "per-tenant idempotency-key model").
+        Exceptions: actual upstream dependencies (Anthropic,
+        OpenAI, Google AI, OpenTelemetry, Docker, devcontainer
+        spec, Stripe webhook idempotency conventions, MCP);
+        first-party CLI adapter names the codebase implements
+        (CLAUDE_CODE, CODEX_CLI, GEMINI_CLI, OPENCODE, CURSOR_CLI,
+        FACTORY_DROID); recognised standards (BM25, RRF, OTel
+        GenAI semconv). When in doubt, flag it.
+
     - path: "app/api/**"
       instructions: |
         Review API routes with security focus:

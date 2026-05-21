@@ -50,8 +50,8 @@ EXPOSE PORT (show a running server to the user):
 //   - CURSOR_CLI    — Cursor's `cursor-agent` headless mode
 //   - FACTORY_DROID — Factory's `droid exec` autonomous runs
 //
-// Aider, Copilot CLI, Cody CLI, Replit Agent are intentionally NOT here:
-// either too pair-programming-shaped, IDE-tied, browser-only, or shipping
+// Other CLI agents are intentionally NOT here today: either too
+// pair-programming-shaped, IDE-tied, browser-only, or shipping
 // breaking changes too aggressively to integrate cleanly right now.
 func BuildCLICommand(req AgentRunRequest) []string {
 	return getAdapter(req.CLIAdapter).BuildCommand(req)

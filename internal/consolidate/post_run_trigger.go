@@ -12,9 +12,8 @@ import (
 // PostRunTrigger fires the consolidator opportunistically when an
 // agent run completes, debouncing per (workspace, crew) so a chatty
 // crew producing many short runs doesn't queue up a consolidation
-// dogpile. The literature signal: Letta's sleep-time agents +
-// OpenClaw Dreaming both fire on idle, not just on cron — running
-// the heavy LLM extraction pass while the agent is *between* tasks
+// dogpile. Idle-time firing rather than cron-only — running the
+// heavy LLM extraction pass while the agent is *between* tasks
 // (rather than waiting for the next 6h cron tick) tightens the loop
 // from "your rule shows up tomorrow" to "next conversation has it".
 //

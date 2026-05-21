@@ -172,20 +172,20 @@ func TestConsolidate_ComputeScore_ZeroValueMetrics_AllSignalsZero(t *testing.T) 
 	}
 }
 
-// TestConsolidate_DefaultThresholds_MatchSpec pins the OpenClaw
-// spec constants in place. If a future PR retunes these silently the
+// TestConsolidate_DefaultThresholds pins the documented baseline
+// constants in place. If a future PR retunes these silently the
 // promotion gate's behaviour drifts; the test forces an explicit
-// "yes, we are intentionally changing the spec" decision.
-func TestConsolidate_DefaultThresholds_MatchSpec(t *testing.T) {
+// "yes, we are intentionally changing the baseline" decision.
+func TestConsolidate_DefaultThresholds(t *testing.T) {
 	got := DefaultThresholds()
 	if got.MinScore != 0.80 {
-		t.Errorf("MinScore = %v, want 0.80 (OpenClaw spec)", got.MinScore)
+		t.Errorf("MinScore = %v, want 0.80 (baseline)", got.MinScore)
 	}
 	if got.MinRecallCount != 3 {
-		t.Errorf("MinRecallCount = %d, want 3 (OpenClaw spec)", got.MinRecallCount)
+		t.Errorf("MinRecallCount = %d, want 3 (baseline)", got.MinRecallCount)
 	}
 	if got.MinUniqueQueries != 3 {
-		t.Errorf("MinUniqueQueries = %d, want 3 (OpenClaw spec)", got.MinUniqueQueries)
+		t.Errorf("MinUniqueQueries = %d, want 3 (baseline)", got.MinUniqueQueries)
 	}
 }
 

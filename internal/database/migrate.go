@@ -355,12 +355,11 @@ CREATE INDEX IF NOT EXISTS idx_eval_runs_ws_created ON eval_runs(workspace_id, c
 CREATE INDEX IF NOT EXISTS idx_eval_runs_kind ON eval_runs(kind, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_eval_runs_mission ON eval_runs(mission_id, created_at DESC) WHERE mission_id IS NOT NULL;
 `},
-	// Memory uplift inspired by OpenClaw Auto-Dream (importance scoring,
-	// forgetting via access patterns) and Self-Evolve (reward signal from
-	// HITL outcomes feeding gate auto-tuning). Three shape changes and
-	// one new table, all narrow additions with backwards-compatible
-	// defaults so rolling back to migration 53 leaves the new columns
-	// as orphans the old code simply ignores.
+	// Memory uplift: importance scoring, forgetting via access patterns,
+	// and a reward signal from HITL outcomes feeding gate auto-tuning.
+	// Three shape changes and one new table, all narrow additions with
+	// backwards-compatible defaults so rolling back to migration 53
+	// leaves the new columns as orphans the old code simply ignores.
 	//
 	// - journal_entries.priority: user-facing importance marker. 'normal'
 	//   is the default; 'permanent' is never compacted, 'high' boosts
@@ -707,8 +706,8 @@ DROP TABLE agent_runs;
 	// Subscription-aware paymaster: distinguishes API-key calls (where we can
 	// price per token) from OAuth/subscription calls (flat-rate, opaque). Adds
 	// rate-card snapshot columns so historical rows survive future rate-card
-	// changes (Langfuse pattern), and a confidence column so the UI can label
-	// every cost figure with its provenance (Helicone pattern).
+	// changes, and a confidence column so the UI can label every cost figure
+	// with its provenance.
 	// Renumbered from v60 to v62 after PR #234 took 60+61 for the unified
 	// journal Phase D + drop_agent_runs migrations.
 	{version: 62, name: "add_paymaster_billing_modes", sql: migrationAddPaymasterBillingModes},
@@ -1305,19 +1304,30 @@ END;
 	// (Renumbered from v96 to v97 on rebase for the same reason.)
 	{version: 97, name: "eval_runs_online", sql: migrationEvalRunsOnline},
 
+	// Credential attribution: who created the row + what sidecar
+	// service (if any) it belongs to. Backfills as 'user' for every
+	// pre-v98 credential, so behaviour is unchanged until the apply
+	// dispatch starts tagging AUTO_MANAGED rows with 'agent'.
+	// See migrate_consts_v98_credential_attribution.go. (Landed on
+	// main as PR #460 while this branch was open.)
+	{version: 98, name: "credential_attribution", sql: migrationAddCredentialAttribution},
+
 	// Two-tier CLI tokens (Patch J): adds `tier` ('STANDARD' | 'ADMIN')
 	// and `expires_at` to cli_tokens, plus a cli_token_uses audit
 	// table for ADMIN tier per-use logging. Existing rows backfill to
 	// tier='STANDARD' with NULL expires_at — full backwards compat.
-	// See migrate_consts_v98_cli_token_tiers.go.
-	{version: 98, name: "cli_token_tiers", sql: migrationCLITokenTiers},
+	// Originally drafted as v98 on this branch; rebased to v99 when
+	// PR #460 landed credential_attribution as v98 on main.
+	// See migrate_consts_v99_cli_token_tiers.go.
+	{version: 99, name: "cli_token_tiers", sql: migrationCLITokenTiers},
 
 	// RBAC extensions (Patch M): per-crew role override on
 	// crew_members, per-agent owner on agents, optional scope list
 	// on cli_tokens. Additive — every change has NULL/default that
-	// preserves pre-v99 behaviour for existing rows. See
-	// migrate_consts_v99_rbac_extensions.go for the rationale.
-	{version: 99, name: "rbac_extensions", sql: migrationRBACExtensions},
+	// preserves pre-v100 behaviour for existing rows. Rebased from
+	// v99 to v100 in the same renumber pass as cli_token_tiers.
+	// See migrate_consts_v100_rbac_extensions.go.
+	{version: 100, name: "rbac_extensions", sql: migrationRBACExtensions},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

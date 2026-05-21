@@ -122,8 +122,8 @@ func Estimate(provider, model string, inTok, outTok, cachedIn, cacheCreate int64
 
 // RateCard returns the per-million rates that Estimate would use for the
 // given (provider, model) tuple. Snapshotting these onto the ledger row at
-// write time (Langfuse pattern) means a later rate-card change doesn't
-// retroactively alter historical cost rollups — what was billed stays billed.
+// write time means a later rate-card change doesn't retroactively alter
+// historical cost rollups — what was billed stays billed.
 func RateCard(provider, model string) modelPrice {
 	return lookupPrice(provider, model)
 }

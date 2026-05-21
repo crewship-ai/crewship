@@ -44,9 +44,8 @@ was skipped — this tag bundles everything from beta.2 → beta.4 on `main`.
     is provisioned (Claude Code CLI tokens don't go through this path).
   - **OTel routine spans:** `routine.run` / `routine.step` /
     `agent.invoke` / `llm.call` spans emit when `OTEL_EXPORTER_OTLP_ENDPOINT`
-    is set; collector wire-up is operator's choice (Langfuse, Phoenix,
-    Datadog LLM Observability all consume the GenAI semconv format
-    natively).
+    is set; collector wire-up is operator's choice — any OTel-compatible
+    backend consumes the GenAI semconv format natively.
   - **Per-routine input-guard action policy:** DSL
     `guardrails.input.prompt_injection.action: block | sanitize | log`
     only fires for routines that opt in.
@@ -336,7 +335,7 @@ Tests: 8 schema-gate cases, 9 tier-override sub-cases, 10 eval-CLI helper tests,
 
 ### Added — Routines (PR #281 + #282)
 
-Routines are AI-authored, workspace-scoped declarative workflow recipes — the substrate that replaces fragmented Ansible / Terraform / Airflow / n8n / Zapier / cron / Slack-bot / SOP stacks with one declarative recipe layer that any crew can invoke. Authored once (preferably by a smart model) and executed many times by the cheaper runtime tier.
+Routines are AI-authored, workspace-scoped declarative workflow recipes — one declarative layer that any crew can invoke for what previously required a patchwork of infra-as-code scripts, scheduled jobs, cron entries, chat-bot triggers, and ad-hoc shell SOPs. Authored once (preferably by a smart model) and executed many times by the cheaper runtime tier.
 
 User-facing label is **Routine**; backend identifiers (`pipelines` table, `internal/pipeline` package, `/api/v1/.../pipelines/...` HTTP routes) remain unchanged for backwards compat. Three-layer architecture: **Routine** (atomic) → **Recipe** (Marketplace template, future) → **Cyclic Issue** (recurring user issue, future).
 

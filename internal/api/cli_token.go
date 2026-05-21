@@ -37,7 +37,7 @@ import (
 
 const (
 	// cliTokenStandardPrefix marks the regular per-user CLI token. The
-	// pre-v98 prefix; existing tokens continue to validate after the
+	// pre-v99 prefix; existing tokens continue to validate after the
 	// migration (their rows backfill to tier='STANDARD').
 	cliTokenStandardPrefix = "crewship_cli_"
 
@@ -546,7 +546,7 @@ type ValidateCLITokenResult struct {
 	UserID string
 	Email  string
 	Name   string
-	Scopes stringSet // nil = unrestricted token (pre-v99 or no scopes set)
+	Scopes stringSet // nil = unrestricted token (pre-v100 or no scopes set)
 }
 
 // ValidateCLITokenFull is the post-Patch-M2 entrypoint that also

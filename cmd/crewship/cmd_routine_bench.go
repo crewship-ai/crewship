@@ -12,9 +12,9 @@ import (
 )
 
 // routineBenchCmd characterises a single routine's stability under
-// repeated invocation. Trigger.dev-style "is this task production-
-// ready?" smoke: run N times with the same inputs, report pass-rate,
-// cost variance, and latency p50/p95/max so an operator can decide
+// repeated invocation. Statistical "is this task production-ready?"
+// smoke: run N times with the same inputs, report pass-rate, cost
+// variance, and latency p50/p95/max so an operator can decide
 // whether to pin the routine to its current tier or escalate.
 //
 // Distinct from `eval scenarios` (matrix across many routines × tiers)
