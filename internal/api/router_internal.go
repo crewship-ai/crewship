@@ -124,6 +124,23 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 	r.mux.Handle("GET /api/v1/internal/keeper/request/{requestId}", internalAuth(http.HandlerFunc(keeperH.GetRequest)))
 	r.mux.Handle("POST /api/v1/internal/keeper/execute", internalAuth(http.HandlerFunc(keeperH.HandleExecute)))
 
+	// Keeper Phase 2 (PR-C / PRD §6 F4). The four endpoints below are
+	// always registered so callers get a deterministic 503 ("evaluator
+	// not configured") instead of a 404 when the aux-LLM wiring is
+	// partial — easier to debug than missing route surface.
+	// Evaluators are nil until the server bootstrap wires them via
+	// Router.SetKeeperPhase2Evaluators (follow-up wire-up commit on
+	// the server-startup side).
+	kp2 := NewKeeperPhase2Handler(
+		r.db, r.internalToken, r.PolicyResolver(),
+		r.skillReviewEval, r.behaviorEval, r.memHealthEval, r.negativeEval,
+		r.logger,
+	)
+	r.mux.Handle("POST /api/v1/internal/keeper/skill-review", internalAuth(http.HandlerFunc(kp2.HandleSkillReview)))
+	r.mux.Handle("POST /api/v1/internal/keeper/behavior", internalAuth(http.HandlerFunc(kp2.HandleBehavior)))
+	r.mux.Handle("POST /api/v1/internal/keeper/memory-health", internalAuth(http.HandlerFunc(kp2.HandleMemoryHealth)))
+	r.mux.Handle("POST /api/v1/internal/keeper/negative-learning", internalAuth(http.HandlerFunc(kp2.HandleNegativeLearning)))
+
 	// Sidecar IPC — the agent-initiated port-expose request flow.
 	// PortExposeHandler instance comes from registerOrchestrationRoutes
 	// so the public capability + revoke endpoints share its registry

@@ -51,11 +51,20 @@ const migrationKeeperPhase2 = `
 -- SQLite has no ALTER TABLE ADD CONSTRAINT.
 ALTER TABLE keeper_requests RENAME TO keeper_requests_pre_v102;
 
+-- requesting_agent_id, requesting_crew_id, credential_id all relax
+-- to NULLable as part of the v100 recreate. The original v9 schema
+-- required them because every row was a credential-access request;
+-- F4 introduces request types (skill_review / behavior /
+-- memory_health / negative_learning) where the agent + crew + cred
+-- triple isn't meaningful (a daily routine sweep doesn't act on
+-- behalf of a single agent; a memory-health check doesn't touch
+-- a credential). Existing access/execute callers always populate
+-- these so the relaxation is invisible to them.
 CREATE TABLE keeper_requests (
     id TEXT PRIMARY KEY,
-    requesting_agent_id TEXT NOT NULL REFERENCES agents(id),
-    requesting_crew_id TEXT NOT NULL,
-    credential_id TEXT NOT NULL REFERENCES credentials(id),
+    requesting_agent_id TEXT REFERENCES agents(id),
+    requesting_crew_id TEXT,
+    credential_id TEXT REFERENCES credentials(id),
     task_id TEXT,
     intent TEXT NOT NULL,
     decision TEXT,

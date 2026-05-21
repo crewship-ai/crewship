@@ -134,6 +134,34 @@ type Router struct {
 	// useful in dev / test builds that haven't wired explicit config.
 	auxModels    llm.AuxiliaryModels
 	auxModelsSet bool
+
+	// Keeper Phase 2 (PR-C / PRD §6 F4) evaluators. Optional — the
+	// router_internal route registration passes whichever are non-nil
+	// to NewKeeperPhase2Handler; the handler returns 503 for nil
+	// evaluators so partial rollouts have a deterministic surface.
+	// Wired via SetKeeperPhase2Evaluators from the server bootstrap
+	// where the aux-LLM providers (PR-B F3) get resolved.
+	skillReviewEval *gatekeeper.SkillReviewEvaluator
+	behaviorEval    *gatekeeper.BehaviorEvaluator
+	memHealthEval   *gatekeeper.MemoryHealthEvaluator
+	negativeEval    *gatekeeper.NegativeLearningEvaluator
+}
+
+// SetKeeperPhase2Evaluators wires the four F4 evaluators. Any may be
+// nil; the corresponding endpoint returns 503 ("not configured")
+// until wired. Call once during server bootstrap, before
+// registerInternalRoutes runs — the route handler captures the
+// evaluator pointers at construction time, not per-request.
+func (r *Router) SetKeeperPhase2Evaluators(
+	skillReview *gatekeeper.SkillReviewEvaluator,
+	behavior *gatekeeper.BehaviorEvaluator,
+	memoryHealth *gatekeeper.MemoryHealthEvaluator,
+	negative *gatekeeper.NegativeLearningEvaluator,
+) {
+	r.skillReviewEval = skillReview
+	r.behaviorEval = behavior
+	r.memHealthEval = memoryHealth
+	r.negativeEval = negative
 }
 
 // PolicyResolver returns (lazily constructs) the shared per-crew
