@@ -1,3 +1,28 @@
+// Package memory — hybrid.go status (PR-F5 tombstone)
+//
+// HybridSearch ships and is wired into the HTTP / sidecar layers:
+//
+//   - internal/api/memory_hybrid_search_handler.go exposes it at
+//     POST /api/v1/memory/search/hybrid (FTS5 BM25 markdown + episodic
+//     vec+BM25 RRF-merged); see also internal/api/router_options.go
+//     WithHybridSearchEmbedder / WithHybridSearchProvider for the
+//     external-construction seam used by cmd/server bootstrap.
+//   - internal/sidecar/memory.go forwards from the in-container memory
+//     MCP at /memory/search-hybrid → the API handler above.
+//
+// What's NOT wired (intentional dead code from the in-process
+// dispatcher's POV): internal/memory/tools.go::handleSearch. The
+// tool-call surface the model sees as "memory.search" runs a substring
+// scan over candidate files and does NOT call HybridSearch — the
+// dispatcher would need a *memory.Engine + *sql.DB + episodic.Embedder
+// threaded through AgentContext or NewDispatcher, which is >30 LOC
+// of plumbing across constructor signatures, sidecar handoff, and
+// test fixtures. Deferred to PR-F5.
+//
+// Sentinel: TestHybridSearch_NotYetWiredToDispatcher in
+// hybrid_dead_code_test.go fails if HybridSearch starts appearing in
+// the handleSearch call graph — at that point flip the test and
+// remove this header so the comment doesn't lie about what ships.
 package memory
 
 import (

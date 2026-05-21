@@ -419,6 +419,19 @@ type searchArgs struct {
 // for keyword + semantic recall; the present implementation keeps
 // the wire contract stable while we get adapter wiring landed.
 //
+// TODO(PR-F5): wire memory.HybridSearch (FTS5 BM25 + episodic vec+BM25
+// via RRF) into this dispatcher path. The HybridSearch primitive ships
+// today (internal/memory/hybrid.go) and is reachable via the
+// /api/v1/memory/search/hybrid HTTP handler + the sidecar's
+// /memory/search-hybrid forwarder — see internal/api/
+// memory_hybrid_search_handler.go and internal/sidecar/memory.go. The
+// HOLE is the in-process tool dispatcher (this function), which would
+// need a *memory.Engine + *sql.DB + episodic.Embedder threaded through
+// AgentContext or NewDispatcher to call HybridSearch. That's >30 LOC of
+// wiring (constructor changes, sidecar handoff plumbing, test fixture
+// rework) and out of PR-F4 scope. Tombstoned in hybrid.go +
+// hybrid_dead_code_test.go; flip the sentinel when the wiring lands.
+//
 // Two security properties on the result envelope:
 //   - Hits carry the tier-label `source` (e.g. "AGENT.md",
 //     "daily/2026-05-21.md"), not the absolute container path —
