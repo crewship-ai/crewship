@@ -50,6 +50,15 @@ type AgentRunRequest struct {
 	AgentMCPConfigJSON string            // Raw agent .mcp.json additions
 	PreferredLanguage  string            // Workspace language (e.g. "Czech", "English")
 	Skills             []SkillBundle     // Installed skills, written to per-CLI discovery paths in addition to the [SKILLS AVAILABLE] system-prompt block
+
+	// PR-E F6 — PERSONA + per-user peer card injection. RoleTitle
+	// seeds the DefaultPersona fallback when both PERSONA layers
+	// are empty so the system prompt always has at least a one-line
+	// role identifier. OpenedByUserID is the chat opener (chats.
+	// created_by); empty for non-chat runs (routine dispatch,
+	// system jobs), in which case no peer card is injected.
+	RoleTitle      string
+	OpenedByUserID string
 }
 
 // SkillBundle is a single agent-installed skill rendered as a SKILL.md
