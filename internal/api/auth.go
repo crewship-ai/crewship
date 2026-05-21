@@ -4,12 +4,14 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"database/sql"
 	"encoding/hex"
 	"log/slog"
 	"net/http"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -25,12 +27,93 @@ type AuthHandler struct {
 	validator   *auth.JWTValidator
 	sessions    sessions.Store
 	allowSignup bool
+
+	// setupTokenMu guards setupToken. The token is created once at startup
+	// when the users table is empty, logged to stderr, and consumed exactly
+	// once by the first /bootstrap caller who passes it back via the
+	// X-Setup-Token header. After consumption it is zeroed in memory.
+	// All other states (DB already initialized, server restart after
+	// bootstrap) leave setupToken == "" which makes Bootstrap unconditionally
+	// refuse — no rate-limit-bypass to win the race.
+	setupTokenMu sync.Mutex
+	setupToken   string
 }
 
 // NewAuthHandler creates an AuthHandler with the given dependencies and signup configuration.
 // sessionsStore must back user_sessions (migration v63).
 func NewAuthHandler(db *sql.DB, logger *slog.Logger, validator *auth.JWTValidator, sessionsStore sessions.Store, allowSignup bool) *AuthHandler {
 	return &AuthHandler{db: db, logger: logger, validator: validator, sessions: sessionsStore, allowSignup: allowSignup}
+}
+
+// MaybeGenerateSetupToken inspects the users table at startup. When it is
+// empty, generates a one-shot setup token, stores it in memory, and logs it
+// at WARN so the operator running the binary can see it once. The next
+// caller of /api/v1/bootstrap must echo this token as X-Setup-Token or
+// the request is refused.
+//
+// Closes the deploy race where any LAN-reachable scanner could race the
+// legitimate operator to be the first POST on an empty DB and walk away
+// with an OWNER CLI token. The token never touches disk and is consumed
+// in-memory on first successful bootstrap.
+//
+// Called from server.New after the DB is wired and before the HTTP server
+// starts accepting traffic. Safe to call concurrently; only the first
+// invocation observing an empty DB generates a token.
+func (h *AuthHandler) MaybeGenerateSetupToken(ctx context.Context) error {
+	h.setupTokenMu.Lock()
+	defer h.setupTokenMu.Unlock()
+	if h.setupToken != "" {
+		return nil
+	}
+	var count int
+	if err := h.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM users").Scan(&count); err != nil {
+		return err
+	}
+	if count > 0 {
+		// Already bootstrapped — no token needed. Bootstrap handler will
+		// reject all attempts via the in-tx count check.
+		return nil
+	}
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return err
+	}
+	h.setupToken = hex.EncodeToString(buf)
+	// Triple-log: stderr + slog WARN + on its own line so even a busy
+	// startup log isn't likely to swallow it. The operator has to see this.
+	bannerLine := strings.Repeat("=", 72)
+	h.logger.Warn(bannerLine)
+	h.logger.Warn("BOOTSTRAP REQUIRED — first /api/v1/bootstrap call must carry this token")
+	h.logger.Warn("Send it in the X-Setup-Token header. It is shown ONCE and one-shot.")
+	h.logger.Warn("CREWSHIP_BOOTSTRAP_TOKEN", "token", h.setupToken)
+	h.logger.Warn(bannerLine)
+	return nil
+}
+
+// consumeSetupToken returns true if the provided token matches the in-memory
+// setup token AND zeroes the token so it can only be used once. Constant-time
+// comparison + length pad to defeat timing oracles. Returns false (with no
+// mutation) when no token is currently armed.
+func (h *AuthHandler) consumeSetupToken(provided string) bool {
+	h.setupTokenMu.Lock()
+	defer h.setupTokenMu.Unlock()
+	if h.setupToken == "" {
+		return false
+	}
+	expected := h.setupToken
+	actual := provided
+	// Equalise lengths so the compare runs constant-time across the
+	// short/empty-input cases.
+	if len(actual) != len(expected) {
+		actual = strings.Repeat("\x00", len(expected))
+	}
+	if subtle.ConstantTimeCompare([]byte(actual), []byte(expected)) != 1 {
+		return false
+	}
+	// One-shot: zero the in-memory copy so a leaked log line can't be
+	// replayed against a future restart that re-armed the token.
+	h.setupToken = ""
+	return true
 }
 
 // setSessionCookies creates a fresh user_sessions row and writes the
@@ -229,8 +312,34 @@ func (h *AuthHandler) cleanupOrphanedSignup(userID, workspaceID string) {
 }
 
 // Bootstrap creates the first admin user on an empty database.
-// This endpoint is unauthenticated but only works when no users exist.
+//
+// This endpoint is unauthenticated but gated by a one-shot setup token
+// generated at process startup whenever the users table is empty
+// (see MaybeGenerateSetupToken). The token is logged to stderr ONCE
+// and must be echoed back in the X-Setup-Token header on first call.
+//
+// Without the gate, any process that reached the public listener could
+// race the legitimate operator to be the first POST on an empty DB and
+// walk away with an OWNER + CLI token. The deploy race was demonstrated
+// against dev1 during the 2026-05-21 audit.
 func (h *AuthHandler) Bootstrap(w http.ResponseWriter, r *http.Request) {
+	// Setup-token gate first. We deliberately validate it BEFORE input
+	// parsing so an attacker scanning for the endpoint can't even
+	// fingerprint validation errors without already holding the token.
+	provided := strings.TrimSpace(r.Header.Get("X-Setup-Token"))
+	if !h.consumeSetupToken(provided) {
+		h.logger.Warn("bootstrap: setup token check failed",
+			"remote_addr", r.RemoteAddr,
+			"token_present", provided != "",
+			"user_agent", r.Header.Get("User-Agent"))
+		// 403 mirrors the post-bootstrap "Already initialized" message —
+		// from the caller's perspective the bootstrap path is simply
+		// closed. We do not distinguish "wrong token" from "no token
+		// armed" to avoid leaking whether the server is mid-deploy.
+		replyError(w, http.StatusForbidden, "Bootstrap closed — setup token required")
+		return
+	}
+
 	var req signupRequest
 	if err := readJSON(r, &req); err != nil {
 		replyError(w, http.StatusBadRequest, "Invalid JSON body")

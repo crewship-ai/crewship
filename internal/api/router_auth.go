@@ -25,7 +25,12 @@ func (r *Router) registerAuthRoutes() {
 	r.mux.Handle("POST /api/v1/onboarding/setup", authed(http.HandlerFunc(onboarding.Setup)))
 
 	// Auth (no auth required)
+	// Stash the handler on the Router so server.New can arm the bootstrap
+	// setup token (Patch C) against the same instance the mux dispatches
+	// to. /api/v1/bootstrap is the deploy-race vector — the token gate on
+	// that handler is the single point of defence.
 	authH := NewAuthHandler(r.db, r.logger, r.authMw.validator, r.sessionsStore, r.allowSignup)
+	r.authHandler = authH
 	r.mux.HandleFunc("POST /api/v1/bootstrap", authH.Bootstrap)
 	r.mux.HandleFunc("POST /api/v1/auth/signup", authH.Signup)
 	r.mux.Handle("GET /api/v1/ws-token", authed(http.HandlerFunc(authH.WsToken)))

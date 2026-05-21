@@ -599,6 +599,32 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 			if apiRouter.PipelinesHandler != nil && s.journalWriter != nil {
 				apiRouter.PipelinesHandler.SetJournal(s.journalWriter)
 			}
+
+			// Arm the bootstrap setup token (Patch C). When the users
+			// table is empty at process start, generate a one-shot
+			// X-Setup-Token and log it once — the next /api/v1/bootstrap
+			// caller must echo it back. Closes the deploy-race vector
+			// where any LAN-reachable scanner could race the operator
+			// to be the first POST on an empty DB and grab OWNER + CLI
+			// token (demonstrated against dev1 during 2026-05-21 audit).
+			//
+			// Best-effort: a DB error here is logged but doesn't block
+			// startup. The handler refuses Bootstrap when no token is
+			// armed, so the worst case is "operator can't bootstrap
+			// without fixing the DB" — strictly safer than a silent
+			// open window.
+			if authH := apiRouter.AuthHandler(); authH != nil {
+				// 5s budget for the empty-DB probe so a wedged SQLite
+				// can't block server boot. The handler refuses bootstrap
+				// when no token is armed, so timeout = fail-closed.
+				armCtx, armCancel := context.WithTimeout(context.Background(), 5*time.Second)
+				if err := authH.MaybeGenerateSetupToken(armCtx); err != nil {
+					logger.Error("bootstrap: setup token arm failed",
+						"error", err,
+						"impact", "POST /api/v1/bootstrap will refuse until DB is reachable or a row is added manually")
+				}
+				armCancel()
+			}
 		}
 		// Static UI: wrap mux with SPA handler to avoid ServeMux redirect issues
 		if deps.WebFS != nil {
