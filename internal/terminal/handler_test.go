@@ -278,11 +278,21 @@ func TestServeHTTP_AccessDeniedForNonMember(t *testing.T) {
 	}
 }
 
-func TestVerifyAccess_NoDBAllows(t *testing.T) {
+// TestVerifyAccess_NoDBFailsClosed pins Patch F: a nil db is a config
+// bug, not "dev mode". The handler must refuse the terminal session
+// rather than silently letting any valid JWT open a shell. Production's
+// server.New panics on deps.DB == nil so this branch is unreachable
+// there, but we still want it as a belt-and-braces guard against a
+// future test fixture wiring a handler with no db.
+func TestVerifyAccess_NoDBFailsClosed(t *testing.T) {
 	t.Parallel()
 	h := &Handler{logger: silentLogger()}
-	if err := h.verifyAccess(context.Background(), "any", "crew"); err != nil {
-		t.Errorf("expected nil with no DB, got %v", err)
+	err := h.verifyAccess(context.Background(), "any", "crew")
+	if err == nil {
+		t.Errorf("expected error with no DB (fail-closed), got nil")
+	}
+	if err != nil && !strings.Contains(err.Error(), "not configured") {
+		t.Errorf("error should mention misconfiguration; got %v", err)
 	}
 }
 

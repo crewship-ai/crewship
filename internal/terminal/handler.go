@@ -396,9 +396,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // verifyAccess checks that the user belongs to the workspace that owns the crew
 // and has at least MEMBER role (VIEWER cannot use terminal).
+//
+// Fail-closed: a nil h.db is a configuration bug, not a "dev mode" shortcut.
+// The pre-Patch-F branch returned nil on nil db so any valid JWT could open
+// /ws/terminal against any crew — which would silently fire in production
+// if server.New ever stops panicking on deps.DB == nil for any reason.
+// The production constructor still panics on missing deps.DB, so this is
+// strictly belt-and-braces.
 func (h *Handler) verifyAccess(ctx context.Context, userID, crewID string) error {
 	if h.db == nil {
-		return nil // no DB = no auth check (dev mode)
+		return fmt.Errorf("terminal: access verification not configured (db is nil)")
 	}
 	var role string
 	err := h.db.QueryRowContext(ctx, `
