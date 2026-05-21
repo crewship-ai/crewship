@@ -616,43 +616,48 @@ func ValidateCLITokenFull(ctx context.Context, db *sql.DB, token string, audit V
 		scopes = parseScopes(scopesRaw.String)
 	}
 
-	// last_used_at debounce (STANDARD), per-use audit (ADMIN).
-	// Background-only goroutine that gets its OWN 5s context derived
-	// from context.Background, not the caller's ctx — the audit work
-	// must survive a caller deadline because the actual API call has
-	// already accepted the token. We mirror the caller's ctx only for
-	// the synchronous SELECT above (where caller deadline = "is this
-	// a useful auth result still" is meaningful). 5s bounds a wedged
-	// SQLite without leaking unbounded goroutines.
-	go func(id, tier string, a ValidateAuditContext) {
+	nowStr := time.Now().UTC().Format(time.RFC3339)
+
+	// ADMIN audit is SYNCHRONOUS — the PR description promises a
+	// per-use trail an incident responder can rely on, so the row
+	// must hit disk before we tell the caller the token validated.
+	// Cost is one extra ExecContext on the auth hot path, only for
+	// crewship_admin_* tokens which are rare by design (OWNER-only
+	// issuance, max 7d lifetime). Failure of the audit insert is
+	// fatal to the auth result — we'd rather 500 the caller than
+	// silently grant access without a trail.
+	//
+	// Best-effort path stays for last_used_at, which is just a UX
+	// breadcrumb on the settings page; missing one update because
+	// SQLite was momentarily wedged is acceptable, missing an audit
+	// row for an ADMIN action is not.
+	if dbTier == "ADMIN" {
+		useID := generateCUID()
+		if _, auditErr := db.ExecContext(ctx,
+			`INSERT INTO cli_token_uses (id, token_id, used_at, remote_addr, user_agent, path)
+			 VALUES (?, ?, ?, ?, ?, ?)`,
+			useID, tokenID, nowStr,
+			nullIfBlank(audit.RemoteAddr),
+			nullIfBlank(audit.UserAgent),
+			nullIfBlank(audit.Path),
+		); auditErr != nil {
+			return ValidateCLITokenResult{}, fmt.Errorf("audit insert: %w", auditErr)
+		}
+	}
+
+	// last_used_at update stays fire-and-forget. Background ctx so
+	// the update survives the caller's deadline (auth has already
+	// been accepted); 5s bounds a wedged SQLite without leaking
+	// unbounded goroutines.
+	go func(id string) {
 		bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		nowStr := time.Now().UTC().Format(time.RFC3339)
 		if _, ierr := db.ExecContext(bgCtx,
 			"UPDATE cli_tokens SET last_used_at = ? WHERE id = ?", nowStr, id); ierr != nil {
-			// Async, best-effort — silent. The operator wouldn't see a
-			// returned error here even if we propagated it.
+			// Best-effort. Silent — operator wouldn't act on this.
 			_ = ierr
 		}
-		if tier == "ADMIN" {
-			useID := generateCUID()
-			// Audit row carries the caller's RemoteAddr + UA + path so
-			// an incident-response query "what did this admin token
-			// touch in the last hour" returns rows with actual signal,
-			// not just timestamps. ValidateAuditContext lets a caller
-			// that legitimately doesn't have a request handy (tests,
-			// CLI tools driving validation) pass the zero value and
-			// the row still inserts.
-			_, _ = db.ExecContext(bgCtx,
-				`INSERT INTO cli_token_uses (id, token_id, used_at, remote_addr, user_agent, path)
-				 VALUES (?, ?, ?, ?, ?, ?)`,
-				useID, id, nowStr,
-				nullIfBlank(a.RemoteAddr),
-				nullIfBlank(a.UserAgent),
-				nullIfBlank(a.Path),
-			)
-		}
-	}(tokenID, dbTier, audit)
+	}(tokenID)
 
 	return ValidateCLITokenResult{
 		UserID: userID,

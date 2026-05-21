@@ -218,6 +218,14 @@ func parseScopes(jsonValue string) stringSet {
 			set[s] = struct{}{}
 		}
 	}
+	// Empty after trim (input was ["", " "] etc.) — return nil so
+	// canScope treats the token as pre-v100 unrestricted instead of
+	// "explicitly no scopes = deny everything". Matches the
+	// jsonValue=="[]" early-return above and keeps the fail-safe
+	// behaviour consistent across both no-entries paths.
+	if len(set) == 0 {
+		return nil
+	}
 	return set
 }
 
