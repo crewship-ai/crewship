@@ -5,7 +5,7 @@
 **Stage:** Beta MVP. **No pricing/tier gating in this PRD.** Everything below ships in single-tier MVP. Tier extraction happens post-beta in a separate licensing pass.
 **Why now:** Hermes Agent (Nous Research) reached 159k★ on a self-improvement narrative we partially compete with. Crewship has stronger primitives in some axes (multi-CLI adapters, sidecar credential isolation, RBAC, manifest declarative deploys) but materially weaker in four axes that compound: agent memory ergonomics, skill self-authorship, behavior governance, and dynamic team scaling. This PRD unifies the response into a layered stack — not seven scattered features — so they ship as one coherent product story.
 
-> **Czech summary (pro Pavla):** PRD v2 (po kritické revizi). Vyhozeno: frozen-snapshot, pre-LLM heuristic, agent-self-edit PERSONA, memory shim, `crewship learn`, pricing tiers. Přidáno: **PR-Z hard reset** (8 cleanup items před PR-A), **Routines + Kanban reuse** místo paralelního scheduleru, **dual-mode behavior monitor** (warn default, block opt-in), **GDPR primitiva v Phase 1**, **explicit 2-mode positioning** (governance + opt-in self-learning přes autonomy slider). Plán: **6 stacked PRs** (Z, A, B, C, D, E), strict bottom-up.
+> **Czech summary (pro Pavla):** PRD v2 (po kritické revizi). Vyhozeno: frozen-snapshot, pre-LLM heuristic, agent-self-edit PERSONA, memory shim, `crewship learn`, pricing tiers. Přidáno: **PR-Z hard reset** (původně 8 cleanup items, Z.6 voided během implementace → reálně 7 aktivních; viz §5), **Routines + Kanban reuse** místo paralelního scheduleru, **dual-mode behavior monitor** (warn default, block opt-in), **GDPR primitiva v Phase 1**, **explicit 2-mode positioning** (governance + opt-in self-learning přes autonomy slider). Plán: **6 stacked PRs** (Z, A, B, C, D, E), strict bottom-up.
 
 ---
 
@@ -75,7 +75,7 @@ These are permanent moats — none of this PRD's features may erode them:
 5. **Ephemeral agents** — lead/operator can hire short-lived helper with `crewship hire`. UI shows expired agents as greyed-out ghost cards with `Rehire`. Logs and memory persist forever.
 6. **Per-user peer cards** with **GDPR primitives** (opt-out, view, delete, encryption at rest) shipped Phase 1.
 7. **PERSONA.md** as third memory tier — per-agent with crew-level default. **Operator-edited in Phase 1**, agent can suggest changes via existing inbox proposal flow.
-8. **PR-Z hard reset** before any feature work: 8 cleanup items removing ~600 LOC of dead/redundant code and unifying overlapping primitives.
+8. **PR-Z hard reset** before any feature work: 7 active cleanup items (originally planned 8; Z.6 voided during implementation as audit error — see §5) removing ~550 LOC of dead/redundant code and unifying overlapping primitives.
 
 ### Non-goals (Phase 1)
 
@@ -1005,7 +1005,7 @@ Strict bottom-up. Each PR independently mergeable and reviewable.
 
 Items per §5. Single PR with one commit per cleanup item for review clarity.
 
-**Acceptance:** All 8 cleanup items merged. `go vet ./...` clean. No tests removed (all existing tests pass with cleaned-up paths).
+**Acceptance:** All 7 active cleanup items merged (Z.6 voided during implementation — see §5 Z.6 entry). `go vet ./...` clean. No tests removed (all existing tests pass with cleaned-up paths).
 
 ### PR-A: F1 — Native memory tools (Layer 1 foundation)
 
@@ -1458,7 +1458,7 @@ After v1 review, narrowed to 4 (was 8):
 ## Changelog
 
 **v2 (2026-05-20, post-critical-review):**
-- Added PR-Z (hard reset, 8 items, Layer 0)
+- Added PR-Z (hard reset, originally 8 items; Z.6 voided during implementation as audit error → 7 active; see §5 Z.6 entry)
 - Removed: frozen-snapshot pattern, pre-LLM heuristic, agent-self-edit PERSONA, memory_20250818 shim, `crewship learn`, tier/pricing section
 - Reframed F4.2 behavior monitor as **dual-mode** (warn default, block opt-in via `crew.behavior_mode`)
 - Reframed F6 PERSONA as **operator-edited with agent-suggest-via-inbox** (Phase 1 simplification)
