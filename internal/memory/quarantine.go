@@ -171,13 +171,16 @@ func Quarantine(agentMemoryDir, sourcePath, original string, hit *ScanHit) (plac
 
 	// Wrap original with frontmatter recording category + source so
 	// operator triage tooling can route the alert without re-running
-	// the scan.
+	// the scan. Every interpolated field is run through %q so a
+	// control character / newline / quote in sourcePath or scanner
+	// metadata can't break out of its YAML value and corrupt the
+	// frontmatter (and by extension the model-visible placeholder).
 	header := fmt.Sprintf(`---
-quarantined_at: %s
-category: %s
-pattern: %s
-source: %s
-sha256: %s
+quarantined_at: %q
+category: %q
+pattern: %q
+source: %q
+sha256: %q
 ---
 
 `,
@@ -189,7 +192,7 @@ sha256: %s
 	}
 
 	placeholder = fmt.Sprintf(
-		"[BLOCKED: %s pattern %q detected in %s. "+
+		"[BLOCKED: %q pattern %q detected in %q. "+
 			"Original content quarantined to .quarantine/%s.md for operator review. "+
 			"This placeholder is a safe substitute; the poisoned content was never returned to you.]",
 		hit.Category, hit.Pattern, sourcePath, sha,

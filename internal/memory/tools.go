@@ -224,7 +224,10 @@ type readArgs struct {
 	Key  string `json:"key"`
 }
 
-func (d *Dispatcher) handleRead(_ context.Context, raw json.RawMessage) (ToolResult, error) {
+func (d *Dispatcher) handleRead(ctx context.Context, raw json.RawMessage) (ToolResult, error) {
+	if err := ctx.Err(); err != nil {
+		return ToolResult{IsError: true, Content: "memory.read: cancelled: " + err.Error()}, nil
+	}
 	var a readArgs
 	if err := json.Unmarshal(raw, &a); err != nil {
 		return ToolResult{IsError: true, Content: "memory.read: invalid args: " + err.Error()}, nil
@@ -235,6 +238,12 @@ func (d *Dispatcher) handleRead(_ context.Context, raw json.RawMessage) (ToolRes
 	path, err := d.resolvePath(a.Tier, a.Key)
 	if err != nil {
 		return ToolResult{IsError: true, Content: "memory.read: " + err.Error()}, nil
+	}
+	if err := d.assertMemoryFile(path); err != nil {
+		return ToolResult{IsError: true, Content: "memory.read: " + err.Error()}, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return ToolResult{IsError: true, Content: "memory.read: cancelled: " + err.Error()}, nil
 	}
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -288,7 +297,10 @@ type writeArgs struct {
 	Mode    string `json:"mode"`
 }
 
-func (d *Dispatcher) handleWrite(_ context.Context, raw json.RawMessage) (ToolResult, error) {
+func (d *Dispatcher) handleWrite(ctx context.Context, raw json.RawMessage) (ToolResult, error) {
+	if err := ctx.Err(); err != nil {
+		return ToolResult{IsError: true, Content: "memory.write: cancelled: " + err.Error()}, nil
+	}
 	var a writeArgs
 	if err := json.Unmarshal(raw, &a); err != nil {
 		return ToolResult{IsError: true, Content: "memory.write: invalid args: " + err.Error()}, nil
@@ -313,6 +325,16 @@ func (d *Dispatcher) handleWrite(_ context.Context, raw json.RawMessage) (ToolRe
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return ToolResult{IsError: true, Content: "memory.write: mkdir: " + err.Error()}, nil
 	}
+	// Reject if the resolved path is a symlink or escapes the memory
+	// roots — guards against a pre-existing AGENT.md / daily/*.md
+	// symlink that would otherwise let os.WriteFile overwrite an
+	// arbitrary path the process can reach.
+	if err := d.assertMemoryFile(path); err != nil {
+		return ToolResult{IsError: true, Content: "memory.write: " + err.Error()}, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return ToolResult{IsError: true, Content: "memory.write: cancelled: " + err.Error()}, nil
+	}
 
 	// Serialise the read-modify-write window so two concurrent appends
 	// can't each pass the cap check against the same pre-existing size
@@ -323,6 +345,16 @@ func (d *Dispatcher) handleWrite(_ context.Context, raw json.RawMessage) (ToolRe
 		return ToolResult{IsError: true, Content: "memory.write: lock: " + err.Error()}, nil
 	}
 	defer func() { _ = lk.Unlock() }()
+
+	if err := ctx.Err(); err != nil {
+		return ToolResult{IsError: true, Content: "memory.write: cancelled: " + err.Error()}, nil
+	}
+	// Re-check symlink containment after acquiring the lock — a writer
+	// could have raced us between resolvePath and Lock() to swap the
+	// file for a symlink. The lock now serialises further races.
+	if err := d.assertMemoryFile(path); err != nil {
+		return ToolResult{IsError: true, Content: "memory.write: " + err.Error()}, nil
+	}
 
 	var data []byte
 	var existing int
@@ -595,9 +627,75 @@ func capPct(size, c int) int {
 	return (size * 100) / c
 }
 
+// assertMemoryFile rejects two attack surfaces against a candidate
+// path:
+//
+//  1. Symlinks. `os.ReadFile` / `os.WriteFile` follow them, so an
+//     `AGENT.md` symlink pre-planted inside `.memory` could read or
+//     overwrite an arbitrary host path. `os.Lstat` + ModeSymlink
+//     check refuses the file before the read/write syscall.
+//  2. Path escape. Even without a symlink, a resolvePath bug or a
+//     future tier addition could route outside the configured
+//     memory roots. filepath.EvalSymlinks on the parent directory
+//     normalises any traversal, then a Rel containment check
+//     pins the final path inside AgentMemoryDir or CrewMemoryDir.
+//
+// A non-existent file is fine — handleRead returns empty content
+// and handleWrite is about to create it. Only existing symlinks or
+// out-of-root paths get rejected.
+func (d *Dispatcher) assertMemoryFile(path string) error {
+	if info, err := os.Lstat(path); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("refusing symlinked memory entry: %s", filepath.Base(path))
+		}
+	}
+	// Verify containment using a canonicalised parent. EvalSymlinks
+	// on the final component would fail for not-yet-created files,
+	// so we resolve the parent directory and recombine.
+	parent := filepath.Dir(path)
+	canonParent, err := filepath.EvalSymlinks(parent)
+	if err != nil {
+		// Parent must exist (we MkdirAll before calling). Anything
+		// else is a fail-closed signal.
+		return fmt.Errorf("canonicalise parent: %w", err)
+	}
+	canon := filepath.Join(canonParent, filepath.Base(path))
+	if d.isInsideMemoryRoot(canon) {
+		return nil
+	}
+	return fmt.Errorf("path escapes memory root: %s", filepath.Base(path))
+}
+
+// isInsideMemoryRoot returns true when canon resolves under either of
+// the dispatcher's configured roots. Caller must pass a path already
+// run through EvalSymlinks (on the parent) so Rel works against the
+// canonical form, not a traversed one.
+func (d *Dispatcher) isInsideMemoryRoot(canon string) bool {
+	for _, root := range []string{d.ctx.AgentMemoryDir, d.ctx.CrewMemoryDir} {
+		if root == "" {
+			continue
+		}
+		canonRoot, err := filepath.EvalSymlinks(root)
+		if err != nil {
+			continue
+		}
+		rel, err := filepath.Rel(canonRoot, canon)
+		if err != nil {
+			continue
+		}
+		if rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
+}
+
 func (d *Dispatcher) candidateFiles(tier string) []string {
 	var paths []string
 	addIfExists := func(p string) {
+		if d.assertMemoryFile(p) != nil {
+			return
+		}
 		if _, err := os.Stat(p); err == nil {
 			paths = append(paths, p)
 		}
@@ -609,7 +707,11 @@ func (d *Dispatcher) candidateFiles(tier string) []string {
 		}
 		for _, e := range entries {
 			if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") {
-				paths = append(paths, filepath.Join(dir, e.Name()))
+				p := filepath.Join(dir, e.Name())
+				if d.assertMemoryFile(p) != nil {
+					continue
+				}
+				paths = append(paths, p)
 			}
 		}
 	}

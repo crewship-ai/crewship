@@ -319,6 +319,77 @@ func TestDispatch_Search_LimitClampedTo20(t *testing.T) {
 	}
 }
 
+// TestDispatch_Read_RejectsSymlink guards against a pre-existing
+// AGENT.md symlink pointing outside .memory. Without the assertion,
+// os.ReadFile follows the link and exposes whatever the process can
+// access (e.g. /etc/passwd, host secrets). The dispatcher must refuse
+// the file at the boundary so a poisoned write that landed a symlink
+// can't be turned into a read primitive.
+func TestDispatch_Read_RejectsSymlink(t *testing.T) {
+	actx := testAgentCtx(t)
+	d := NewDispatcher(actx)
+
+	// Drop a target outside the memory root, then symlink AGENT.md to it.
+	outside := filepath.Join(filepath.Dir(actx.AgentMemoryDir), "..", "outside.txt")
+	if err := os.WriteFile(outside, []byte("SECRET\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	agentMD := filepath.Join(actx.AgentMemoryDir, "AGENT.md")
+	if err := os.Symlink(outside, agentMD); err != nil {
+		t.Fatalf("symlink setup failed: %v", err)
+	}
+
+	res, err := d.Dispatch(context.Background(), ToolCall{
+		Name: "memory.read",
+		Args: json.RawMessage(`{"tier":"AGENT"}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.IsError {
+		t.Fatalf("symlinked AGENT.md must yield IsError=true; got: %s", res.Content)
+	}
+	if strings.Contains(res.Content, "SECRET") {
+		t.Errorf("symlink target content leaked into result: %s", res.Content)
+	}
+}
+
+// TestDispatch_Write_RejectsSymlink mirrors the read-path symlink
+// guard for writes. Without it, a pre-existing AGENT.md symlink lets
+// the model's `memory.write` overwrite an arbitrary host path that
+// the container process can reach.
+func TestDispatch_Write_RejectsSymlink(t *testing.T) {
+	actx := testAgentCtx(t)
+	d := NewDispatcher(actx)
+
+	outside := filepath.Join(filepath.Dir(actx.AgentMemoryDir), "..", "victim.txt")
+	if err := os.WriteFile(outside, []byte("original\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	agentMD := filepath.Join(actx.AgentMemoryDir, "AGENT.md")
+	if err := os.Symlink(outside, agentMD); err != nil {
+		t.Fatalf("symlink setup failed: %v", err)
+	}
+
+	res, err := d.Dispatch(context.Background(), ToolCall{
+		Name: "memory.write",
+		Args: json.RawMessage(`{"tier":"AGENT","content":"PWND\n","mode":"replace"}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.IsError {
+		t.Fatalf("symlinked AGENT.md must reject write; got: %s", res.Content)
+	}
+	victim, err := os.ReadFile(outside)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(victim) != "original\n" {
+		t.Errorf("write through symlink leaked: victim=%q", victim)
+	}
+}
+
 // TestDispatch_Search_DoesNotLeakAbsolutePaths pins the contract that
 // search hits never disclose the container filesystem layout. The
 // model sees a `source` like "AGENT.md" / "daily/2026-05-21.md", not
