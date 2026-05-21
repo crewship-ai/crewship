@@ -192,7 +192,9 @@ func TestGDPRCascade_IsIdempotent(t *testing.T) {
 			InboxItems     int `json:"inbox_items"`
 		} `json:"scope"`
 	}
-	_ = json.Unmarshal(rec2.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rec2.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode second delete response: %v body=%s", err, rec2.Body.String())
+	}
 	if got := resp.Scope.PeerCards + resp.Scope.MemoryVersions + resp.Scope.InboxItems; got != 0 {
 		t.Errorf("second delete scope sum = %d, want 0 (idempotent)", got)
 	}

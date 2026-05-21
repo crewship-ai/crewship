@@ -76,6 +76,8 @@ jobs:
     timeout-minutes: 2
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
       - name: Sentinel grep
         run: |
           set -euo pipefail
@@ -98,11 +100,14 @@ jobs:
 
   # ── Frontend: lint, typecheck, build ──
   frontend:
+    needs: [merge-conflict-markers]
     name: Frontend
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
 
       - uses: ./.github/actions/setup-node-pnpm
         with:
@@ -143,11 +148,14 @@ jobs:
 
   # ── Frontend tests (Vitest) ──
   frontend-test:
+    needs: [merge-conflict-markers]
     name: Frontend Test
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
 
       - uses: ./.github/actions/setup-node-pnpm
         with:
@@ -159,6 +167,7 @@ jobs:
 
   # ── Go: vet, build, test ──
   go:
+    needs: [merge-conflict-markers]
     name: Go
     runs-on: ubuntu-latest
     # 15 min: GitHub-hosted ubuntu-latest setup-go is consistently
@@ -170,6 +179,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
 
       - uses: ./.github/actions/setup-go-embed
         with:
@@ -186,6 +197,7 @@ jobs:
 
   # ── Go lint: golangci-lint ──
   go-lint:
+    needs: [merge-conflict-markers]
     name: Go Lint
     runs-on: ubuntu-latest
     # 15 min: same calculus as the Go job above. golangci-lint
@@ -196,6 +208,8 @@ jobs:
       GOLANGCI_VERSION: v2.1.6
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
 
       - uses: ./.github/actions/setup-go-embed
         with:
@@ -234,6 +248,7 @@ jobs:
   # compile errors; embed-path regressions are rare enough that post-merge
   # detection is acceptable for the budget.
   binary:
+    needs: [merge-conflict-markers]
     name: Binary Build
     runs-on: ubuntu-latest
     # 15 min: ubuntu-latest setup-go is consistent enough that 10
@@ -244,6 +259,8 @@ jobs:
     if: github.event_name == 'push'
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
 
       - uses: ./.github/actions/setup-go-embed
         with:

@@ -101,8 +101,14 @@ export const KeeperQueuePanel = React.memo(function KeeperQueuePanel({
   const [err, setErr] = useState<string | null>(null)
   const [selected, setSelected] = useState<KeeperLogEntry | null>(null)
 
-  const fetchEntries = useCallback(async () => {
-    if (!workspaceId) return
+  const fetchEntries = useCallback(async (signal?: AbortSignal) => {
+    if (!workspaceId) {
+      // Clear stale data from a previous workspace so the operator
+      // never sees rows from workspace A after switching to B.
+      setEntries([])
+      setSelected(null)
+      return
+    }
     setLoading(true)
     setErr(null)
     try {
@@ -110,22 +116,31 @@ export const KeeperQueuePanel = React.memo(function KeeperQueuePanel({
       // payload. Server caps at 200 (keeper_log.go).
       const r = await fetch(
         `/api/v1/admin/keeper/requests?workspace_id=${encodeURIComponent(workspaceId)}&limit=200`,
+        { signal },
       )
       if (!r.ok) {
         setErr(`Failed to load keeper requests (${r.status})`)
         return
       }
       const data = (await r.json()) as KeeperLogEntry[]
+      if (signal?.aborted) return
       setEntries(Array.isArray(data) ? data : [])
     } catch (e) {
+      // Aborts are expected when workspaceId changes mid-flight.
+      if (e instanceof DOMException && e.name === "AbortError") return
       setErr((e as Error).message)
     } finally {
-      setLoading(false)
+      if (!signal?.aborted) setLoading(false)
     }
   }, [workspaceId])
 
   useEffect(() => {
-    fetchEntries()
+    // Abort in-flight request when workspaceId changes — without this,
+    // a late response from workspace A could overwrite the state for
+    // workspace B and the operator sees the wrong tenant's data.
+    const controller = new AbortController()
+    void fetchEntries(controller.signal)
+    return () => controller.abort()
   }, [fetchEntries])
 
   const byType = useMemo(() => {
@@ -163,7 +178,7 @@ export const KeeperQueuePanel = React.memo(function KeeperQueuePanel({
           variant="outline"
           size="sm"
           className="h-7 px-2.5 text-xs"
-          onClick={fetchEntries}
+          onClick={() => { void fetchEntries() }}
           disabled={loading || !workspaceId}
         >
           <RefreshCw className={cn("mr-1.5 h-3 w-3", loading && "animate-spin")} />

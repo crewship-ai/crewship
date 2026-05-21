@@ -32,7 +32,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
 import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialog, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import {
@@ -274,10 +274,24 @@ export const GdprActionsPanel = React.memo(function GdprActionsPanel({
                 border={false}
                 className="!px-0 !py-0"
               >
-                <AlertDialog open={confirmOpen} onOpenChange={(open) => {
-                  setConfirmOpen(open)
-                  if (!open) { setReason(""); setConfirmed(false) }
-                }}>
+                <AlertDialog
+                  open={confirmOpen}
+                  onOpenChange={(open) => {
+                    // Don't clear reason/confirmed while the delete is
+                    // in flight or while we're STILL open — only on a
+                    // deliberate close by Cancel button. Otherwise a
+                    // failed POST would wipe the operator's input on
+                    // dialog auto-close and force re-entry (auditor
+                    // catch round 6 — AlertDialogAction closes
+                    // immediately on click which conflicted with this
+                    // handler clearing state).
+                    setConfirmOpen(open)
+                    if (!open && busy !== "delete") {
+                      setReason("")
+                      setConfirmed(false)
+                    }
+                  }}
+                >
                   <Button
                     size="sm"
                     variant="destructive"
@@ -334,13 +348,25 @@ export const GdprActionsPanel = React.memo(function GdprActionsPanel({
                       <AlertDialogCancel disabled={busy === "delete"}>
                         Cancel
                       </AlertDialogCancel>
-                      <AlertDialogAction
-                        onClick={handleDelete}
+                      {/*
+                        Plain <Button> on purpose, NOT AlertDialogAction.
+                        Radix AlertDialogAction calls setOpen(false) on
+                        click which closes the dialog immediately — the
+                        async DELETE then resolves AFTER the dialog is
+                        gone, and the onOpenChange handler above would
+                        already have wiped reason + confirmed on a
+                        failure path. handleDelete itself controls when
+                        the dialog closes (only on success, after the
+                        server confirms the cascade landed).
+                      */}
+                      <Button
+                        type="button"
+                        onClick={() => { void handleDelete() }}
                         disabled={busy === "delete" || !reason.trim() || !confirmed}
-                        className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                        variant="destructive"
                       >
                         {busy === "delete" ? "Deleting…" : "Delete permanently"}
-                      </AlertDialogAction>
+                      </Button>
                     </AlertDialogFooter>
                   </AlertDialogContent>
                 </AlertDialog>

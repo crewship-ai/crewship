@@ -542,10 +542,20 @@ func (h *AdminGDPRHandler) ExportUserData(w http.ResponseWriter, r *http.Request
 
 	h.finalizeGDPRAction(r.Context(), actionID, scope, firstErr)
 
-	if firstErr != nil && len(bundle.PeerCards)+len(bundle.MemoryVersion)+len(bundle.InboxItems) == 0 {
-		// Nothing read AND a SELECT failed → 500 so the operator
-		// retries rather than handing the user an empty bundle
-		// that looks like "we have no data on you".
+	if firstErr != nil {
+		// ANY query failure → 500. Auditor catch: previously we
+		// returned 200 + the partial bundle if at least one table
+		// had data, on the theory "give the operator something."
+		// For a GDPR Article 15 access request that's the worst
+		// failure mode — the operator hands the data subject an
+		// incomplete export that LOOKS authoritative, and the
+		// missing rows from a failed table query stay missing
+		// until the subject notices. Better to return 500 and
+		// have the operator retry / investigate than to silently
+		// ship an incomplete answer to a regulatory request.
+		// The action_id is still recorded in gdpr_actions with
+		// status='failed' via finalizeGDPRAction above, so the
+		// audit trail of the attempt is preserved.
 		replyError(w, http.StatusInternalServerError, "export failed: "+firstErr.Error())
 		return
 	}

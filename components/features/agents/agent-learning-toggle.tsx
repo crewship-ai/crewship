@@ -56,28 +56,41 @@ export function AgentLearningToggle({ agentId, workspaceId, canEdit }: AgentLear
   const [pendingEnabled, setPendingEnabled] = useState<boolean | null>(null)
   const [reason, setReason] = useState("")
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (signal?: AbortSignal) => {
     setLoading(true)
     setErr(null)
     try {
       const res = await fetch(`/api/v1/agents/${agentId}/learning`, {
         headers: { "X-Workspace-ID": workspaceId },
+        signal,
       })
       if (!res.ok) {
         setErr(`Failed to load (HTTP ${res.status})`)
         return
       }
       const body = (await res.json()) as LearningResponse
+      if (signal?.aborted) return
       setState(body)
     } catch (e) {
+      // Ignore aborts — they happen by design when agentId / workspaceId
+      // change while a previous request is still in flight (stale-
+      // response guard).
+      if (e instanceof DOMException && e.name === "AbortError") return
       setErr(e instanceof Error ? e.message : "Failed to load")
     } finally {
-      setLoading(false)
+      if (!signal?.aborted) setLoading(false)
     }
   }, [agentId, workspaceId])
 
   useEffect(() => {
-    void load()
+    // AbortController per effect run: if agentId / workspaceId change
+    // before the previous fetch resolves, abort it so its setState
+    // doesn't overwrite the new identifier's state. Without this, a
+    // slow first request can land AFTER the second response and the
+    // operator sees the wrong agent's flag.
+    const controller = new AbortController()
+    void load(controller.signal)
+    return () => controller.abort()
   }, [load])
 
   const currentEnabled = state?.enabled ?? false
