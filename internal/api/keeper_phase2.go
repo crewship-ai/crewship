@@ -578,7 +578,7 @@ func (h *KeeperPhase2Handler) HandleNegativeLearning(w http.ResponseWriter, r *h
 			h.logger.Warn("keeper_phase2: ALLOW lesson skipped (agent_id missing, can't resolve self_learning)",
 				"workspace_id", body.WorkspaceID)
 		} else {
-			enabled, err := h.loadSelfLearningEnabled(r.Context(), body.AgentID)
+			enabled, err := loadSelfLearningEnabled(r.Context(), h.db, body.AgentID)
 			if err != nil {
 				h.logger.Warn("keeper_phase2: self_learning lookup failed; defaulting to OFF (require approval)",
 					"agent_id", body.AgentID, "error", err)
@@ -678,15 +678,22 @@ func (h *KeeperPhase2Handler) HandleNegativeLearning(w http.ResponseWriter, r *h
 
 // loadSelfLearningEnabled reads agents.self_learning_enabled (v106) for
 // the given agent. Returns false if the agent doesn't exist (or has
-// the flag off). Used by the F4.4 negative_learning ALLOW path to
-// decide whether a proposed lesson auto-applies or queues for
-// operator approval. PR-G F4.1 UX gate.
-func (h *KeeperPhase2Handler) loadSelfLearningEnabled(ctx context.Context, agentID string) (bool, error) {
-	if agentID == "" {
+// the flag off). Used by:
+//
+//   - F4.4 negative_learning ALLOW path (HandleNegativeLearning) — decides
+//     whether a proposed lesson auto-applies or queues for operator approval.
+//   - F6 persona_suggest auto-apply path (SuggestAgentPersona) — demotes
+//     auto-apply to inbox approval when an agent's flag is off, even on a
+//     crew autonomy level that would normally bypass the inbox.
+//
+// Package-level (not a method) so both handlers can call it without
+// dragging a *KeeperPhase2Handler into the persona surface. PR-G F4.1 UX gate.
+func loadSelfLearningEnabled(ctx context.Context, db *sql.DB, agentID string) (bool, error) {
+	if db == nil || agentID == "" {
 		return false, nil
 	}
 	var enabled int
-	err := h.db.QueryRowContext(ctx, `
+	err := db.QueryRowContext(ctx, `
 		SELECT self_learning_enabled
 		FROM agents
 		WHERE id = ? AND deleted_at IS NULL`,
