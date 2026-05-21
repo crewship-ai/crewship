@@ -96,6 +96,7 @@
                 "pages": [
                   "guides/agent-memory",
                   "guides/memory-provider",
+                  "guides/agent-brief",
                   "guides/episodic-memory",
                   "guides/consolidate",
                   "guides/memory-observability",
