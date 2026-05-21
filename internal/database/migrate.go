@@ -1371,6 +1371,14 @@ END;
 	// fulfilment. See migrate_consts_v105_peer_consent.go.
 	// Renumbered from v103 on rebase past PR-D's v103.
 	{version: 105, name: "peer_consent", sql: migrationPeerConsent},
+
+	// v106: per-agent self-learning posture (PR-G F4.1 UX). When
+	// flipped on the keeper evaluators may auto-promote ALLOW
+	// proposals (skill activate, lesson land) without an inbox
+	// approval; OFF keeps governance-first behavior. Still subordinate
+	// to the crew's autonomy_level — strict crews can't self-learn.
+	// See migrate_consts_v106_self_learning.go.
+	{version: 106, name: "self_learning", sql: migrationSelfLearning},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the
