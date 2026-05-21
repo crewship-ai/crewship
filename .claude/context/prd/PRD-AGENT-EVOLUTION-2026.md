@@ -97,7 +97,7 @@ These are permanent moats — none of this PRD's features may erode them:
 
 ## 4. Architecture overview
 
-```
+```text
 ┌──────────────────────────────────────────────────────────────────────────┐
 │                       Layer 4 — Lifecycle                                │
 │  Ephemeral agent records (DB: agents.ephemeral / .expires_at /           │
@@ -260,7 +260,7 @@ avoids a half-migrated intermediate state on the trunk.
 
 Today the orchestrator injects 22 lines into the system prompt telling the agent how to curl the sidecar:
 
-```
+```bash
 You can read/search/write memory by calling these HTTP endpoints from your shell:
   curl -s http://localhost:9119/memory/AGENT.md
   curl -s -X POST http://localhost:9119/memory/search -d '{"q":"..."}'
@@ -685,7 +685,7 @@ Writer in `internal/consolidate/lesson_writer.go` (unified writer for all source
 
 `components/features/skills/skills-browser.tsx:112-118` — add `review` tab (admin+). Inside, **Kanban board** using `@dnd-kit/*` (already in deps) with 4 columns:
 
-```
+```text
 ┌─ Active (87) ─┐ ┌─ Stale (12) ─┐ ┌─ Archived (3) ─┐ ┌─ Deprecated (1) ─┐
 │ ┌──────────┐ │ │ ┌──────────┐ │ │ ┌──────────┐ │ │ ┌─────────────┐ │
 │ │pdf-extr. │ │ │ │csv-parse │ │ │ │legacy-zip│ │ │ │broken-thing │ │
@@ -702,7 +702,7 @@ Drag-drop between columns triggers `/keeper/skill-review` with appropriate scope
 
 `components/features/crews/agent-canvas-cards.tsx` adds `LessonsLearnedCard`. Filters lessons.md entries by `kind`, shows mix of positive + negative:
 
-```
+```text
 ┌─ What Doc learned ────────────────────────────────┐
 │ ✓ Always run `pnpm test:watch` before commit      │
 │    learned 3d ago — 4 snapshot regressions caught │
@@ -801,7 +801,7 @@ Quota per crew: `crews.max_ephemeral_agents INTEGER DEFAULT 10`. Hire returns 42
 
 **`crewship hire`**
 
-```
+```bash
 crewship hire --crew engineering --template qa-helper-v2 \
               --model claude-haiku-4-5 --ttl 24h \
               --reason "triage 12 backlog issues"
@@ -820,7 +820,7 @@ Aliases: `spawn`, `agent-spawn`.
 
 **`crewship rehire <agent-slug-or-id>`**
 
-```
+```bash
 crewship rehire qa-hotfix-temp --ttl 12h --reason "second pass on issues 7-12"
 ```
 
@@ -864,7 +864,7 @@ Loading order at session start: crew PERSONA → agent PERSONA (if exists, repla
 - Inbound prompt-injection scan applies (same as F1)
 
 Default seed (analog of Hermes `default_soul.py:3`, but Crewship-flavored):
-```
+```markdown
 # Persona
 
 You are {{agent_name}}, a member of {{crew_name}} in the {{workspace_name}} workspace.
@@ -951,7 +951,7 @@ Same subcommands but operates on crew-level PERSONA.
 #### UI
 
 New `Memory` tab in `agent-canvas.tsx:49-55`:
-```
+```typescript
 TABS = [Overview, Workspace, **Memory** (NEW), Skills & Tools, Activity, Settings]
 ```
 
@@ -963,7 +963,7 @@ Inside Memory tab, sub-tabs via `components/ui/tab-bar.tsx`:
 
 Peers sub-tab:
 
-```
+```text
 ┌─ What Doc knows about each teammate ──────────────┐
 │  ┌───────────┐ ┌───────────┐ ┌───────────┐       │
 │  │ ▒ Pavel   │ │ ▒ Ivana   │ │ ▒ Pepa    │  + new│
@@ -976,7 +976,7 @@ Peers sub-tab:
 
 User Privacy section (under Profile):
 
-```
+```text
 ┌─ Privacy: Agent memory about you ─────────────────┐
 │  ☐ Opt out of peer cards (agents will not learn   │
 │    about you across sessions)                     │
@@ -1166,10 +1166,14 @@ All new server state via TanStack React Query (already at 5.100.10). Legacy `fet
 ## 10. Data model changes (consolidated)
 
 ```sql
--- PR-Z: Hard reset migrations
-ALTER TABLE agents RENAME COLUMN system_prompt TO system_prompt_legacy;
--- (lessons.md unification is filesystem-level, no DB schema change)
--- (ESCALATE→inbox fix is code-level)
+-- PR-Z: 0 DB migrations land in PR-Z.
+--   - Z.3 (system_prompt → system_prompt_legacy rename) was descoped from
+--     PR-Z during implementation; it lands in PR-E alongside the PERSONA.md
+--     migration so consumers can be updated in lockstep.
+--   - Z.7 (learned-*.md → lessons.md) is filesystem-level; the writer
+--     primitive ships in PR-Z, but the consolidator + approve.go call-
+--     site swap happens in PR-C alongside F4.4 wire-up.
+--   - Z.4 (ESCALATE → inbox) is code-level only.
 
 -- PR-B (F2): Per-crew autonomy
 ALTER TABLE crews ADD COLUMN autonomy_level TEXT NOT NULL DEFAULT 'guided'
