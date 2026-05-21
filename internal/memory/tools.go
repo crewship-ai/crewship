@@ -386,7 +386,23 @@ type searchArgs struct {
 // Z.1. A follow-up commit will plumb this through the FTS5 engine
 // for keyword + semantic recall; the present implementation keeps
 // the wire contract stable while we get adapter wiring landed.
-func (d *Dispatcher) handleSearch(_ context.Context, raw json.RawMessage) (ToolResult, error) {
+//
+// Two security properties on the result envelope:
+//   - Hits carry the tier-label `source` (e.g. "AGENT.md",
+//     "daily/2026-05-21.md"), not the absolute container path —
+//     leaking `/output/agent_xxx/.memory/...` discloses the bind-
+//     mount layout and is symmetric to the read/write metadata fix.
+//   - Each candidate file is run through ScanContent BEFORE its
+//     lines feed the substring match. Injection-positive files are
+//     quarantined and surfaced in a separate `quarantined` array
+//     instead of contributing raw snippets to `hits`. This keeps
+//     search consistent with the read-path fail-closed contract —
+//     a poisoned file can never return its payload to the model
+//     via the search tool.
+func (d *Dispatcher) handleSearch(ctx context.Context, raw json.RawMessage) (ToolResult, error) {
+	if err := ctx.Err(); err != nil {
+		return ToolResult{IsError: true, Content: "memory.search: cancelled: " + err.Error()}, nil
+	}
 	var a searchArgs
 	if err := json.Unmarshal(raw, &a); err != nil {
 		return ToolResult{IsError: true, Content: "memory.search: invalid args: " + err.Error()}, nil
@@ -405,20 +421,56 @@ func (d *Dispatcher) handleSearch(_ context.Context, raw json.RawMessage) (ToolR
 
 	files := d.candidateFiles(a.Tier)
 	type hit struct {
-		Path    string `json:"path"`
+		Source  string `json:"source"`
 		Snippet string `json:"snippet"`
 		Line    int    `json:"line"`
 	}
+	type quarantineNote struct {
+		Source      string `json:"source"`
+		Category    string `json:"quarantine_category"`
+		Pattern     string `json:"quarantine_pattern"`
+		SHA256      string `json:"quarantine_sha256"`
+		Placeholder string `json:"placeholder"`
+	}
 	hits := make([]hit, 0, a.Limit)
+	var quarantined []quarantineNote
 	needle := strings.ToLower(a.Q)
 	for _, p := range files {
+		if err := ctx.Err(); err != nil {
+			return ToolResult{IsError: true, Content: "memory.search: cancelled: " + err.Error()}, nil
+		}
 		data, err := os.ReadFile(p)
 		if err != nil {
 			continue
 		}
-		for i, line := range strings.Split(string(data), "\n") {
+		body := string(data)
+		label := d.pathToSourceLabel(p)
+		// Fail-closed: a scan hit on the file means none of its lines
+		// can flow into `hits`. Quarantine the content and record a
+		// placeholder in the response instead — symmetric with the
+		// read path.
+		if scanHit := ScanContent(body); scanHit != nil {
+			placeholder, sha, qerr := Quarantine(d.ctx.AgentMemoryDir, label, body, scanHit)
+			if qerr != nil {
+				// Quarantine write failed: still suppress hits from
+				// this file. Record minimal note without payload.
+				quarantined = append(quarantined, quarantineNote{
+					Source: label, Category: scanHit.Category, Pattern: scanHit.Pattern,
+				})
+				continue
+			}
+			quarantined = append(quarantined, quarantineNote{
+				Source:      label,
+				Category:    scanHit.Category,
+				Pattern:     scanHit.Pattern,
+				SHA256:      sha,
+				Placeholder: placeholder,
+			})
+			continue
+		}
+		for i, line := range strings.Split(body, "\n") {
 			if strings.Contains(strings.ToLower(line), needle) {
-				hits = append(hits, hit{Path: p, Snippet: line, Line: i + 1})
+				hits = append(hits, hit{Source: label, Snippet: line, Line: i + 1})
 				if len(hits) >= a.Limit {
 					break
 				}
@@ -429,8 +481,30 @@ func (d *Dispatcher) handleSearch(_ context.Context, raw json.RawMessage) (ToolR
 		}
 	}
 
-	body, _ := json.MarshalIndent(map[string]any{"hits": hits, "query": a.Q}, "", "  ")
+	envelope := map[string]any{"hits": hits, "query": a.Q}
+	if len(quarantined) > 0 {
+		envelope["quarantined"] = quarantined
+	}
+	body, _ := json.MarshalIndent(envelope, "", "  ")
 	return ToolResult{Content: string(body)}, nil
+}
+
+// pathToSourceLabel maps an absolute candidateFiles path back to the
+// tier+key label exposed to the model. Mirrors candidateFiles' own
+// path construction in reverse so search hits never carry absolute
+// bind-mount paths (which would disclose container/host topology).
+func (d *Dispatcher) pathToSourceLabel(p string) string {
+	if d.ctx.AgentMemoryDir != "" {
+		if rel, err := filepath.Rel(d.ctx.AgentMemoryDir, p); err == nil && !strings.HasPrefix(rel, "..") {
+			return filepath.ToSlash(rel)
+		}
+	}
+	if d.ctx.CrewMemoryDir != "" {
+		if rel, err := filepath.Rel(d.ctx.CrewMemoryDir, p); err == nil && !strings.HasPrefix(rel, "..") {
+			return filepath.ToSlash(rel)
+		}
+	}
+	return filepath.Base(p)
 }
 
 type appendDailyArgs struct {
