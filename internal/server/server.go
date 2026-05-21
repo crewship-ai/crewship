@@ -35,6 +35,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider"
 	dockerprovider "github.com/crewship-ai/crewship/internal/provider/docker"
+	"github.com/crewship-ai/crewship/internal/scheduler"
 	"github.com/crewship-ai/crewship/internal/telemetry"
 	"github.com/crewship-ai/crewship/internal/terminal"
 	"github.com/crewship-ai/crewship/internal/ws"
@@ -96,6 +97,14 @@ type Server struct {
 	// — otherwise a late filesystem event could try to emit through a
 	// draining/closed writer.
 	fileJournalPtr atomic.Pointer[journal.Writer]
+
+	// keeperPhase2 holds the four PR-C F4 evaluators after server bootstrap.
+	// Stashed on Server so the scheduler bootstrap in cmd_start.go can wire
+	// the daily SkillReview + MemoryHealthCheck sweeps via
+	// Server.RegisterKeeperRoutines(sched). Fields are private — callers
+	// should always go through RegisterKeeperRoutines so the evaluator
+	// nil-checks stay in one place.
+	keeperPhase2 phase2Evaluators
 }
 
 // Deps holds the external dependencies injected into the server at startup.
@@ -622,6 +631,10 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 				evals.negative,
 			)
 			registerBehaviorHook(evals.behavior, apiRouter.PolicyResolver(), logger)
+			// Stash the evaluators so cmd_start.go can register the daily
+			// SkillReview + MemoryHealthCheck cron routines via
+			// Server.RegisterKeeperRoutines once the scheduler is up.
+			s.keeperPhase2 = evals
 
 			// Pipeline AgentRunner is wired in cmd_start.go after
 			// the chatbridge.ChatResolver is built — the runner
@@ -856,6 +869,31 @@ func (s *Server) WSHub() *ws.Hub {
 // (test-only path) — callers must nil-check.
 func (s *Server) JournalWriter() *journal.Writer {
 	return s.journalWriter
+}
+
+// RegisterKeeperRoutines wires the daily PR-C F4 sweeps (SkillReview F4.1
+// and MemoryHealthCheck F4.3) into the supplied scheduler. Called from
+// cmd_start.go AFTER scheduler.Start so the cron engine is already
+// running. Per-routine registration is independent: an evaluator that
+// failed to build during server bootstrap (e.g. missing ANTHROPIC_API_KEY)
+// results in the matching routine being skipped — operators see the skip
+// in the boot logs alongside the evaluator-build warning.
+//
+// No-op (with log) when sched is nil or the DB isn't available.
+func (s *Server) RegisterKeeperRoutines(sched *scheduler.Scheduler) {
+	if sched == nil || s.db == nil {
+		s.logger.Info("keeper: routines NOT registered (scheduler or DB unavailable)")
+		return
+	}
+	skillReg, memReg := registerKeeperPhase2Routines(
+		sched,
+		s.db,
+		s.keeperPhase2.skillReview,
+		s.keeperPhase2.memoryHealth,
+		s.logger,
+	)
+	s.logger.Info("keeper: phase 2 routines registered",
+		"skill_review", skillReg, "memory_health_check", memReg)
 }
 
 // Start launches the HTTP server, IPC listener, WebSocket hub, scheduler,
