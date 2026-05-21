@@ -260,8 +260,23 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 	// both regular HTTP requests (with absolute URLs) and CONNECT tunnels.
 	// We intercept only localhost requests to specific paths.
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Memory and assignment API routes are only accessible from localhost
-		if isLocalhost(r.Host) || isLocalhost(r.URL.Host) {
+		// Sidecar control-plane endpoints only fire when BOTH the
+		// Host header parses as localhost AND the underlying TCP
+		// connection actually came from a loopback IP. Pre-Patch-E
+		// the gate only checked r.Host, which an attacker on the same
+		// crew bridge could spoof:
+		//
+		//   curl --resolve localhost:9119:172.18.0.5 \
+		//        http://localhost:9119/credentials
+		//
+		// Host header = "localhost:9119" → isLocalhost passed; TCP
+		// connection went to 172.18.0.5 (a peer crew's sidecar) and
+		// the agent over there happily handled it. The RemoteAddr
+		// check defeats that — host.docker.internal hairpin from the
+		// agent's own container still lands on 127.0.0.1 because the
+		// sidecar listens on that loopback port inside its own
+		// container's network namespace.
+		if (isLocalhost(r.Host) || isLocalhost(r.URL.Host)) && remoteIsLoopback(r) {
 			switch {
 			case r.Method == http.MethodPost && r.URL.Path == "/memory/search":
 				s.handleMemorySearch(w, r)

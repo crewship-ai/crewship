@@ -475,3 +475,52 @@ func TestStripCredentialValues_GarbagePassthrough(t *testing.T) {
 		t.Errorf("garbage input was modified: got %q, want %q", string(out), string(in))
 	}
 }
+
+// TestBuildHandler_CrossCrewBypassRejected pins Patch E: an attacker on
+// the shared crew bridge who reaches a peer sidecar's TCP port and spoofs
+// `Host: localhost:9119` via curl --resolve must NOT hit /credentials —
+// the underlying TCP source IP gates the control plane independently.
+//
+// The pre-Patch-E gate was `isLocalhost(r.Host)` only, which a peer
+// agent on the same Docker bridge could pass with a spoofed Host header.
+// Post-Patch-E both have to agree: Host header parses as localhost AND
+// RemoteAddr is loopback.
+func TestBuildHandler_CrossCrewBypassRejected(t *testing.T) {
+	// Mock upstream that should NEVER be called (test fails if it is).
+	mockHit := false
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mockHit = true
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`[]`))
+	}))
+	defer mock.Close()
+
+	srv := newQueryServer(t, &IPCConfig{
+		BaseURL:     mock.URL,
+		Token:       "tok",
+		WorkspaceID: "ws-1",
+	}, nil)
+	handler := srv.buildHandler(srv.proxy)
+
+	// Attacker request: Host header spoofed to localhost, but the TCP
+	// source is a Docker bridge IP (172.18.0.5) — i.e. a peer crew's
+	// agent reaching across the shared bridge.
+	req := httptest.NewRequest(http.MethodGet, "http://localhost:9119/credentials", nil)
+	req.Host = "localhost:9119"
+	req.RemoteAddr = "172.18.0.5:54321"
+
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	// The request falls through to the forward proxy because the
+	// control-plane gate refused it. The proxy then 403s on the
+	// non-allowed domain (or 502s trying to reach it) — either way the
+	// /credentials handler never ran and upstream crewshipd was not
+	// contacted.
+	if mockHit {
+		t.Fatalf("PATCH-E REGRESSION: peer-crew curl --resolve reached /credentials handler")
+	}
+	if w.Code == http.StatusOK {
+		t.Errorf("expected refusal status, got 200")
+	}
+}

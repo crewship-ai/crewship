@@ -261,6 +261,12 @@ func TestBuildHandler_MemoryRouting(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest(tt.method, "http://"+tt.host+tt.path, nil)
 			req.Host = tt.host
+			// Post-Patch-E: control-plane routes also require the
+			// underlying TCP source to be loopback. httptest's default
+			// RemoteAddr is 192.0.2.1 which would now fall through to
+			// the forward proxy. Pin to 127.0.0.1 — same machine the
+			// real agent process talks from inside its own container.
+			req.RemoteAddr = "127.0.0.1:50000"
 			w := httptest.NewRecorder()
 
 			handler.ServeHTTP(w, req)
