@@ -131,8 +131,14 @@ export function CrewPolicyControls({ crewId, workspaceId, canEdit }: CrewPolicyC
     setErr(null)
     try {
       // Parallel fetches — policy and crew metadata are independent;
-      // failing one shouldn't block the other from rendering.
-      const [policyRes, crewRes] = await Promise.all([
+      // a network error on one MUST NOT prevent the other from
+      // rendering. Promise.all rejects both on first failure, which
+      // would drop us into the global error path and hide a successful
+      // policy load — switched to allSettled so each fetch is judged
+      // on its own merit. Policy is the required surface (we error out
+      // if it failed); quota silently defaults to 10 if its fetch
+      // tripped, matching the server-side default.
+      const [policyResult, crewResult] = await Promise.allSettled([
         fetch(`/api/v1/crews/${crewId}/policy`, {
           headers: { "X-Workspace-ID": workspaceId },
         }),
@@ -140,18 +146,23 @@ export function CrewPolicyControls({ crewId, workspaceId, canEdit }: CrewPolicyC
           headers: { "X-Workspace-ID": workspaceId },
         }),
       ])
-      if (!policyRes.ok) {
-        setErr(`Failed to load policy (HTTP ${policyRes.status})`)
+      if (policyResult.status === "rejected") {
+        setErr(policyResult.reason instanceof Error ? policyResult.reason.message : "Failed to load policy")
         return
       }
-      const body = (await policyRes.json()) as PolicyResponse
+      if (!policyResult.value.ok) {
+        setErr(`Failed to load policy (HTTP ${policyResult.value.status})`)
+        return
+      }
+      const body = (await policyResult.value.json()) as PolicyResponse
       setPolicy(body)
-      if (crewRes.ok) {
-        const crewBody = (await crewRes.json()) as { max_ephemeral_agents?: number }
-        // Fall back to the server-side default (10) if the field
-        // somehow isn't on the response — keeps the input deterministic
-        // even against an older backend version.
+      if (crewResult.status === "fulfilled" && crewResult.value.ok) {
+        const crewBody = (await crewResult.value.json()) as { max_ephemeral_agents?: number }
         setMaxEphemeral(typeof crewBody.max_ephemeral_agents === "number" ? crewBody.max_ephemeral_agents : 10)
+      } else {
+        // Quota fetch failed (network or non-2xx); fall back to the
+        // server-side default rather than blocking policy panel render.
+        setMaxEphemeral(10)
       }
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Failed to load policy")

@@ -383,13 +383,22 @@ function KindActions({
               disabled={disabled || busy !== null}
               onClick={() =>
                 wrap("approved", async () => {
-                  const res = await fetch(
-                    `/api/v1/agents/${encodeURIComponent(item.source_id)}/approve-hire`,
-                    {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                    },
-                  )
+                  // fetch() rejects on network failure (offline, DNS,
+                  // CORS preflight). Without try/catch the user sees
+                  // no toast and the action looks like silent success.
+                  let res: Response
+                  try {
+                    res = await fetch(
+                      `/api/v1/agents/${encodeURIComponent(item.source_id)}/approve-hire`,
+                      {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                      },
+                    )
+                  } catch (e) {
+                    toast.error(e instanceof Error ? `Approve failed: ${e.message}` : "Approve failed (network error)")
+                    return
+                  }
                   if (!res.ok) {
                     const body = (await res.json().catch(() => null)) as
                       | { error?: string; reason?: string }
@@ -397,10 +406,6 @@ function KindActions({
                     toast.error(body?.error ?? `Approve failed (${res.status})`)
                     return
                   }
-                  // Server already flipped the agent IDLE and
-                  // resolved the inbox row via inbox.ResolveBySource
-                  // — refresh() repaints the list (the inbox PATCH
-                  // path would 409 on kind=waitpoint here).
                   toast.success("Hire approved — agent is live")
                   await onRefresh()
                 })

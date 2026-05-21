@@ -607,7 +607,7 @@ func (h *KeeperPhase2Handler) HandleNegativeLearning(w http.ResponseWriter, r *h
 			h.logger.Warn("keeper_phase2: ALLOW lesson skipped (agent_id missing, can't resolve self_learning)",
 				"workspace_id", body.WorkspaceID)
 		} else {
-			enabled, err := loadSelfLearningEnabled(r.Context(), h.db, body.AgentID)
+			enabled, err := loadSelfLearningEnabled(r.Context(), h.db, body.WorkspaceID, body.AgentID)
 			if err != nil {
 				h.logger.Warn("keeper_phase2: self_learning lookup failed; defaulting to OFF (require approval)",
 					"agent_id", body.AgentID, "error", err)
@@ -726,16 +726,23 @@ func (h *KeeperPhase2Handler) HandleNegativeLearning(w http.ResponseWriter, r *h
 //
 // Package-level (not a method) so both handlers can call it without
 // dragging a *KeeperPhase2Handler into the persona surface. PR-G F4.1 UX gate.
-func loadSelfLearningEnabled(ctx context.Context, db *sql.DB, agentID string) (bool, error) {
-	if db == nil || agentID == "" {
+//
+// SECURITY: workspace_id is part of the WHERE clause to prevent cross-
+// tenant gate bypass. Without it, an internal-auth caller could pass
+// an agent_id from another workspace and have its self_learning flag
+// read — opens a tenant-isolation hole. Empty workspaceID still
+// returns false (safe default) but logs nothing because the caller's
+// own validation should have rejected the empty value upstream.
+func loadSelfLearningEnabled(ctx context.Context, db *sql.DB, workspaceID, agentID string) (bool, error) {
+	if db == nil || agentID == "" || workspaceID == "" {
 		return false, nil
 	}
 	var enabled int
 	err := db.QueryRowContext(ctx, `
 		SELECT self_learning_enabled
 		FROM agents
-		WHERE id = ? AND deleted_at IS NULL`,
-		agentID,
+		WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
+		agentID, workspaceID,
 	).Scan(&enabled)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil

@@ -379,7 +379,7 @@ func (h *PersonaHandler) SuggestAgentPersona(w http.ResponseWriter, r *http.Requ
 	// mode than a false-positive operator review.
 	gateDemoted := false
 	if isPersonaAutoApply(decision) {
-		enabled, lerr := loadSelfLearningEnabled(r.Context(), h.db, agentID)
+		enabled, lerr := loadSelfLearningEnabled(r.Context(), h.db, WorkspaceIDFromContext(r.Context()), agentID)
 		if lerr != nil {
 			h.logger.Warn("persona suggest: self_learning lookup failed; defaulting to OFF",
 				"agent_id", agentID, "err", lerr)

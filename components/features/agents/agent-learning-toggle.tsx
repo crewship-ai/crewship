@@ -44,7 +44,10 @@ export function AgentLearningToggle({ agentId, workspaceId, canEdit }: AgentLear
   const { abilities } = useAbilities()
   const effectiveCanEdit = useMemo(() => {
     if (typeof canEdit === "boolean") return canEdit
-    return abilities.can("manage", "Agent") || abilities.can("update", "Agent")
+    // Backend PATCH requires canRole("manage") — mirror exactly so the
+    // UI doesn't enable the toggle for a user who'll then bounce off
+    // 403 at save time. Broader "update" permission is insufficient.
+    return abilities.can("manage", "Agent")
   }, [canEdit, abilities])
   const [state, setState] = useState<LearningResponse | null>(null)
   const [loading, setLoading] = useState(true)
