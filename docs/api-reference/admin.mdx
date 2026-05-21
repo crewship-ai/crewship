@@ -423,6 +423,181 @@ Returns the Keeper access request audit log -- every credential access and comma
 | `ollama_raw_response` | `string?` | Raw LLM response text |
 | `created_at` | `string` | ISO 8601 request timestamp |
 | `decided_at` | `string?` | ISO 8601 decision timestamp |
+| `request_type` | `string` | One of `credential` / `execute` / `skill_review` / `behavior` / `memory_health` / `negative_learning` (see Keeper Phase 2 below) |
+
+<Note>
+  Phase 2 request types (`skill_review`, `behavior`, `memory_health`, `negative_learning`) populate the same audit log surface as Phase 1 (`credential`, `execute`) with the same shape. The `intent` column carries the F4 evaluator's structured summary instead of a free-form access reason; the `ollama_prompt` + `ollama_raw_response` capture the LLM evaluation round-trip. Filter by `request_type` to slice the log into per-evaluator views.
+</Note>
+
+## Keeper Phase 2 — F4 evaluators
+
+Phase 2 endpoints are **internal-auth** (X-Internal-Token) — they're invoked by the platform itself (scheduler routines + the post-tool-call hook), not by operators directly. The admin-facing surface is the `/api/v1/admin/keeper/requests` log above, plus the per-type filters in the admin UI's "Keeper P2 reviews" panel (PR-F2).
+
+If an operator needs to trigger an evaluator ad-hoc (debugging, manual re-evaluation), the routes are reachable via the internal token. The expected production path is automated: routines fire on cron, the behavior hook fires on tool-call sampling.
+
+### POST /api/v1/internal/keeper/skill-review
+
+**F4.1 — periodic skill audit.** Cron-fires daily 03:00 UTC per `Scheduler.RegisterPlatformRoutine`. The evaluator reads each `skills` row + `skill_invocations` history, asks the F3 `Curator` aux model whether the skill should stay `active`, transition to `stale` (no recent invocations), or be `archived` (failures dominating). DENY decisions write a blocking inbox row; ALLOW updates `skills.lifecycle_state` in place.
+
+**Request body:**
+
+```json
+{
+  "workspace_id": "ws_…",
+  "crew_id": "crw_…",
+  "skill_id": "skl_…",
+  "skill_name": "rotate-anthropic-keys",
+  "skill_description": "Rotate the Anthropic API key quarterly",
+  "lifecycle_state": "active",
+  "last_used_at": "2026-05-15T08:00:00Z",
+  "assignments": 3,
+  "assigned_agents": ["agt_…", "agt_…"],
+  "stats": { "invocations_30d": 4, "failures_30d": 0 },
+  "failure_snippets": []
+}
+```
+
+| Field | Required | Notes |
+|---|---|---|
+| `workspace_id` | yes | MUST match the request context `workspace_id` (see [Internal IPC](/api-reference/internal#tenant-isolation-on-internal-auth-handlers)). |
+| `crew_id` | yes | Used for per-crew policy resolution. |
+| `skill_id` | yes | The skill being reviewed. |
+| `skill_name`, `skill_description`, `lifecycle_state` | yes | Current state snapshot the LLM evaluates. |
+| `last_used_at` | optional | RFC3339; empty = "never". |
+| `assignments`, `assigned_agents` | optional | Fan-out context for ESCALATE → inbox routing. |
+| `stats` | optional | 30-day invocation + failure counts. |
+| `failure_snippets` | optional | Up to 3 most-recent failure excerpts (truncated). |
+
+**Response:**
+
+```json
+{
+  "request_id": "kpr_skr_a3f8e2…",
+  "decision": "ALLOW",
+  "reason": "Skill still actively used (4 invocations in 30d, 0 failures)",
+  "risk_score": 1,
+  "verify_after_decide": true,
+  "unverify_after_decide": false,
+  "proposed_lifecycle": "active"
+}
+```
+
+DENY routes a blocking `inbox_items` row to the assigned agents' workspace (per `assigned_agents` fan-out). ESCALATE routes a `MANAGER`-targeted blocking row.
+
+### POST /api/v1/internal/keeper/behavior
+
+**F4.2 — post-tool-call behavior monitor.** Fires from `behaviorhook.MaybeEvaluate` (orchestrator `EventPostToolCall` event), sampled at the per-crew rate (default 1-in-5). The evaluator reads the `(tool_name, tool_args_snippet, current crew behavior_mode)` triple and returns ALLOW / DENY / ESCALATE.
+
+`behavior_mode=warn` (default): DENY → non-blocking inbox; agent's NEXT tool call proceeds. `behavior_mode=block`: DENY → blocking inbox + `ShouldBlock=true` in the response so the orchestrator interrupts the agent's next call. Forbidden combination `(autonomy=full + behavior_mode=block)` rejected at API + DB layer.
+
+**Request body:**
+
+```json
+{
+  "workspace_id": "ws_…",
+  "crew_id": "crw_…",
+  "agent_id": "agt_…",
+  "agent_name": "Anna",
+  "crew_name": "Ops",
+  "tool_name": "shell_exec",
+  "tool_args_snippet": "{\"cmd\":\"rm -rf node_modules\"}"
+}
+```
+
+**Response:**
+
+```json
+{
+  "request_id": "kpr_bhv_b71e9c…",
+  "decision": "DENY",
+  "reason": "Destructive command without scoped path; recommend restricting to a specific directory",
+  "risk_score": 7,
+  "should_block": true
+}
+```
+
+### POST /api/v1/internal/keeper/memory-health
+
+**F4.3 — periodic memory consolidation review.** Cron-fires daily 03:30 UTC. The evaluator consumes `consolidate.HealthSnapshot` (reachability ratio, staleness days, refute count from `memory_relations`) and decides whether to auto-trigger a consolidation routine.
+
+**Request body:**
+
+```json
+{
+  "workspace_id": "ws_…",
+  "crew_id": "crw_…",
+  "crew_name": "Ops",
+  "agent_name": "Anna",
+  "snapshot": { "reachability_pct": 0.87, "stalest_entry_days": 412, "contradiction_count": 3 },
+  "agent_md_bytes": 2840,
+  "persona_md_bytes": 1120
+}
+```
+
+**Response:**
+
+```json
+{
+  "request_id": "kpr_mhc_c83a4b…",
+  "decision": "DENY",
+  "reason": "412-day stalest entry + 3 contradictions; consolidator recommended",
+  "risk_score": 6,
+  "auto_consolidate": true,
+  "overall_score": 38
+}
+```
+
+`auto_consolidate=true` triggers `consolidator.Run` for the workspace; ESCALATE writes a blocking inbox row instead.
+
+### POST /api/v1/internal/keeper/negative-learning
+
+**F4.4 — failure-event lesson capture.** Fires after a guardrail trip, run failure, or explicit operator "log this lesson" action. The evaluator decides whether the failure is worth a `kind=negative` lesson in the agent's `lessons.md`. ALLOW writes through `consolidate.WriteLesson` (PR-Z Z.7) which enforces YAML schema + idempotency by ID + flock + atomic-rename.
+
+**Self-learning gate:** ALLOW auto-applies only when the agent has `self_learning_enabled = 1` (migration v106). With `self_learning_enabled = 0` (default), ALLOW queues a blocking inbox row with the full lesson proposal in `payload_json` and the marker `"self_learning_gate": "off"` so the UI can distinguish the gate-demoted path. See [Autonomy + self-learning](/guides/autonomy-and-self-learning).
+
+**Trigger kinds:** `run_failed`, `guardrail_warn`, `guardrail_error`, `keeper_execute_deny`.
+
+**Request body:**
+
+```json
+{
+  "workspace_id": "ws_…",
+  "crew_id": "crw_…",
+  "agent_id": "agt_…",
+  "agent_name": "Anna",
+  "crew_name": "Ops",
+  "agent_memory_dir": "/output/agt_…/.memory",
+  "trigger": "run_failed",
+  "tool_name": "shell_exec",
+  "failure_snippet": "deploy.sh: missing DATABASE_URL",
+  "prior_lesson": ""
+}
+```
+
+| Field | Notes |
+|---|---|
+| `agent_memory_dir` | Container-side path where `lessons.md` lives; the consolidate writer mkdir-p's as needed. |
+| `trigger` | One of the four kinds above. |
+| `prior_lesson` | Optional dup-suppression: if non-empty, the evaluator gets it as "the agent already knows X" context and is less likely to ALLOW a near-duplicate. |
+
+**Response:**
+
+```json
+{
+  "request_id": "kpr_neg_d94f5a…",
+  "decision": "ALLOW",
+  "reason": "Recurring deploy-env mistake worth a permanent lesson",
+  "risk_score": 4,
+  "write_lesson": true,
+  "lesson_id": "les_abc123…"
+}
+```
+
+When `self_learning_enabled = 0` the response still says `write_lesson: true` (the evaluator's intent), but no lesson lands on disk — the operator must approve via inbox. Check `gdpr_actions`-style audit via `GET /api/v1/admin/keeper/requests?request_type=negative_learning`.
+
+### Cross-tenant guard
+
+All four endpoints assert `body.workspace_id == ctx.workspace_id` via `assertBodyWorkspaceMatchesCtx` before any evaluator runs. Asymmetric forgery (query=A, body=B) returns `400 Bad Request`. Empty ctx workspace also returns 400 — the gate refuses to operate without the middleware that's supposed to set it. Symmetric forgery (caller picks one workspace consistently) requires PR-F24 token-to-workspace binding to close fully. See [Internal IPC — Tenant isolation](/api-reference/internal#tenant-isolation-on-internal-auth-handlers).
 
 ## System
 
