@@ -33,10 +33,16 @@ type memoryMCPRequest struct {
 // Result OR Error is populated, never both.
 type memoryMCPResponse struct {
 	JSONRPC string             `json:"jsonrpc"`
-	ID      json.RawMessage    `json:"id,omitempty"`
+	ID      json.RawMessage    `json:"id"`
 	Result  json.RawMessage    `json:"result,omitempty"`
 	Error   *memoryMCPRPCError `json:"error,omitempty"`
 }
+
+// mcpNullID is the canonical "id: null" payload required by JSON-RPC 2.0
+// when the server cannot determine the request id (parse error, invalid
+// envelope). Without this constant, ID was previously emitted with
+// `omitempty` which produced `{}` and tripped strict clients.
+var mcpNullID = json.RawMessage("null")
 
 type memoryMCPRPCError struct {
 	Code    int    `json:"code"`
@@ -85,6 +91,7 @@ func (s *Server) handleMemoryMCP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeJSONResponse(w, http.StatusBadRequest, memoryMCPResponse{
 			JSONRPC: "2.0",
+			ID:      mcpNullID,
 			Error:   &memoryMCPRPCError{Code: -32700, Message: "parse error: " + err.Error()},
 		})
 		return
@@ -93,14 +100,19 @@ func (s *Server) handleMemoryMCP(w http.ResponseWriter, r *http.Request) {
 	if err := json.Unmarshal(raw, &req); err != nil {
 		writeJSONResponse(w, http.StatusBadRequest, memoryMCPResponse{
 			JSONRPC: "2.0",
+			ID:      mcpNullID,
 			Error:   &memoryMCPRPCError{Code: -32700, Message: "invalid JSON: " + err.Error()},
 		})
 		return
 	}
 	if req.JSONRPC != "2.0" {
+		id := req.ID
+		if len(id) == 0 {
+			id = mcpNullID
+		}
 		writeJSONResponse(w, http.StatusBadRequest, memoryMCPResponse{
 			JSONRPC: "2.0",
-			ID:      req.ID,
+			ID:      id,
 			Error:   &memoryMCPRPCError{Code: -32600, Message: "jsonrpc must be \"2.0\""},
 		})
 		return

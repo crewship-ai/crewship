@@ -47,13 +47,20 @@ func TestMemoryMCP_ToolsList_ReturnsFourMemoryTools(t *testing.T) {
 		t.Fatalf("tools count = %d, want 4 (memory.read/write/search/append_daily). got=%+v",
 			len(resp.Result.Tools), resp.Result.Tools)
 	}
-	got := map[string]bool{}
+	// Assert exact deterministic order (not just set membership) — the
+	// endpoint contract promises stable order so adapter wiring tests +
+	// any model that caches tool indices can rely on it.
+	got := make([]string, 0, len(resp.Result.Tools))
 	for _, tt := range resp.Result.Tools {
-		got[tt.Name] = true
+		got = append(got, tt.Name)
 	}
-	for _, want := range []string{"memory.read", "memory.write", "memory.search", "memory.append_daily"} {
-		if !got[want] {
-			t.Errorf("tools/list missing %q (got=%v)", want, got)
+	want := []string{"memory.read", "memory.write", "memory.search", "memory.append_daily"}
+	if len(got) != len(want) {
+		t.Fatalf("tools/list length mismatch: got=%v want=%v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("tools/list order mismatch at index %d: got=%v want=%v", i, got, want)
 		}
 	}
 }
