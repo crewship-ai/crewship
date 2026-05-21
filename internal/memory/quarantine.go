@@ -75,7 +75,7 @@ var scannerRules = []rule{
 	{
 		category: "prompt_injection",
 		name:     "html_ignore_comment",
-		re:       regexp.MustCompile(`(?i)<!--[^>]*\bignore\b[^>]*-->`),
+		re:       regexp.MustCompile(`(?is)<!--.*?\bignore\b.*?-->`),
 	},
 	{
 		category: "exfiltration",
