@@ -13,7 +13,7 @@ package database
 //
 //   - behavior_mode: how F4.2 behavior monitor responds to anti-patterns
 //     warn      DENY decisions treated as WARN (non-blocking inbox);
-//     the agent's action proceeds. Default — Hermes-aligned.
+//     the agent's action proceeds. Default.
 //     block     DENY decisions throw BlockedError in the hook handler;
 //     next tool call interrupted. Opt-in.
 //

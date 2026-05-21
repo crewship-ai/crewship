@@ -54,9 +54,9 @@ type BehaviorMode string
 
 const (
 	// BehaviorWarn: DENY decisions land as non-blocking inbox
-	// notifications; the agent's action proceeds. Default, Hermes-
-	// aligned — let the model see warnings and self-correct rather
-	// than block on heuristic false-positives.
+	// notifications; the agent's action proceeds. Default — let
+	// the model see warnings and self-correct rather than block on
+	// heuristic false-positives.
 	BehaviorWarn BehaviorMode = "warn"
 	// BehaviorBlock: DENY throws BlockedError in the hook handler;
 	// next tool call interrupted. Opt-in for crews that have built
