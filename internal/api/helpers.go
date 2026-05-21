@@ -334,6 +334,39 @@ func (u *updateBuilder) Empty() bool {
 // Empty role is rejected for every action — defense-in-depth against an auth
 // middleware bypass that would otherwise let unauthenticated callers through
 // the read tier.
+// roleRank orders the workspace roles so we can compute "max" between a
+// user's workspace role and any per-crew override. Pre-Patch-M1 the
+// workspace role was the only source; v99 added crew_members.role as
+// an opt-in elevation per crew (a MANAGER workspace member can be
+// promoted to ADMIN inside a specific crew, but NEVER demoted below
+// the workspace floor). Unknown / empty roles rank 0 so a missing
+// value never accidentally outranks a real one.
+//
+// The list is hard-coded rather than computed because the role set is
+// a hard product surface — adding a role is a deliberate change, not
+// data the runtime should infer.
+var roleRank = map[string]int{
+	"VIEWER":  1,
+	"MEMBER":  2,
+	"MANAGER": 3,
+	"ADMIN":   4,
+	"OWNER":   5,
+}
+
+// effectiveRole returns the higher-ranked of two roles, treating empty
+// or unknown as the lowest (0). Used by the crew-scoped permission
+// helpers so a workspace MANAGER who has been promoted to ADMIN inside
+// a particular crew passes the crew-scoped admin gate, while their
+// workspace role still gates workspace-wide endpoints. Per-crew role
+// can never DROP below the workspace floor — that's enforced by
+// taking max here, not min.
+func effectiveRole(workspaceRole, crewRole string) string {
+	if roleRank[crewRole] > roleRank[workspaceRole] {
+		return crewRole
+	}
+	return workspaceRole
+}
+
 func canRole(role string, actions ...string) bool {
 	if role == "" {
 		return false

@@ -68,6 +68,19 @@ var managed = []managedSecret{
 		Bytes:    32,
 		Validate: validateMinLen(32),
 	},
+	{
+		// HMAC key for ADMIN-tier CLI tokens (Patch J). Separate from
+		// ENCRYPTION_KEY so a DB dump alone cannot offline-crack admin
+		// tokens — an attacker needs both the DB row and this env
+		// value. Auto-generated on first boot and persisted to
+		// secrets.env (mode 0600) like the others, so the ADMIN tier
+		// is enabled out of the box; operators who deploy via systemd
+		// EnvironmentFile / Kubernetes secrets can override the same
+		// way they override ENCRYPTION_KEY.
+		EnvVar:   "CREWSHIP_ADMIN_TOKEN_HMAC_KEY",
+		Bytes:    32,
+		Validate: validateHex32,
+	},
 }
 
 func validateHex32(v string) error {

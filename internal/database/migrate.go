@@ -1308,8 +1308,26 @@ END;
 	// service (if any) it belongs to. Backfills as 'user' for every
 	// pre-v98 credential, so behaviour is unchanged until the apply
 	// dispatch starts tagging AUTO_MANAGED rows with 'agent'.
-	// See migrate_consts_v98_credential_attribution.go.
+	// See migrate_consts_v98_credential_attribution.go. (Landed on
+	// main as PR #460 while this branch was open.)
 	{version: 98, name: "credential_attribution", sql: migrationAddCredentialAttribution},
+
+	// Two-tier CLI tokens (Patch J): adds `tier` ('STANDARD' | 'ADMIN')
+	// and `expires_at` to cli_tokens, plus a cli_token_uses audit
+	// table for ADMIN tier per-use logging. Existing rows backfill to
+	// tier='STANDARD' with NULL expires_at — full backwards compat.
+	// Originally drafted as v98 on this branch; rebased to v99 when
+	// PR #460 landed credential_attribution as v98 on main.
+	// See migrate_consts_v99_cli_token_tiers.go.
+	{version: 99, name: "cli_token_tiers", sql: migrationCLITokenTiers},
+
+	// RBAC extensions (Patch M): per-crew role override on
+	// crew_members, per-agent owner on agents, optional scope list
+	// on cli_tokens. Additive — every change has NULL/default that
+	// preserves pre-v100 behaviour for existing rows. Rebased from
+	// v99 to v100 in the same renumber pass as cli_token_tiers.
+	// See migrate_consts_v100_rbac_extensions.go.
+	{version: 100, name: "rbac_extensions", sql: migrationRBACExtensions},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

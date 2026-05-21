@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"time"
 
@@ -79,11 +80,33 @@ func maybeRecordSidecarUse(ctx context.Context, db *sql.DB, logger *slog.Logger,
 	}
 }
 
-// ListCredentials returns active credentials for the sidecar, with decrypted values.
-// GET /api/v1/internal/credentials — called by sidecar to inject secrets into agent environments.
+// ListCredentials returns active credentials for the sidecar.
+// GET /api/v1/internal/credentials — called by sidecar to discover what's available.
+//
+// By default the response contains ONLY metadata (id, name, type, provider,
+// status). Plaintext `access_token` / `refresh_token` are emitted ONLY when the
+// caller passes `?include_values=true` AND the request arrived over a loopback
+// connection (the in-process LLM proxy hairpin in internal/llmproxy uses this).
+//
+// Why the split: previously this endpoint always returned decrypted tokens,
+// which meant any process inside an agent container could pull plaintext LLM
+// credentials by calling the sidecar's `/credentials` proxy — the sidecar
+// attaches X-Internal-Token automatically, so the agent rode the sidecar's
+// trust straight to plaintext sk-ant-* / sk-* values. The sidecar already has
+// the credentials it needs from its stdin boot payload (see
+// orchestrator/exec_sidecar.go), so LEAD agents discovering credentials only
+// need metadata. The opt-in keeps the LLM proxy's TokenSyncer working
+// unchanged on the same endpoint.
 func (h *InternalHandler) ListCredentials(w http.ResponseWriter, r *http.Request) {
 	workspaceID := r.URL.Query().Get("workspace_id")
 	provider := r.URL.Query().Get("provider")
+
+	includeValues := r.URL.Query().Get("include_values") == "true"
+	if includeValues && !requestIsLoopback(r) {
+		h.logger.Warn("internal credentials: include_values=true rejected from non-loopback caller",
+			"remote_addr", r.RemoteAddr, "workspace_id", workspaceID)
+		includeValues = false
+	}
 
 	query := `SELECT id, workspace_id, name, type, provider, encrypted_value,
 		encrypted_refresh_token, token_expires_at, account_label, account_email, status
@@ -110,14 +133,18 @@ func (h *InternalHandler) ListCredentials(w http.ResponseWriter, r *http.Request
 	}
 	defer rows.Close()
 
+	// Pointer fields so the JSON encoder omits them entirely when the caller
+	// is not entitled to plaintext (default sidecar path). Empty-string would
+	// still surface the key and risk a JS consumer treating "" as "present
+	// but empty" instead of "withheld".
 	type credResult struct {
 		ID           string  `json:"id"`
 		WorkspaceID  string  `json:"workspace_id"`
 		Name         string  `json:"name"`
 		Type         string  `json:"type"`
 		Provider     string  `json:"provider"`
-		AccessToken  string  `json:"access_token"`
-		RefreshToken *string `json:"refresh_token"`
+		AccessToken  *string `json:"access_token,omitempty"`
+		RefreshToken *string `json:"refresh_token,omitempty"`
 		TokenExpires *string `json:"token_expires_at"`
 		AccountLabel *string `json:"account_label"`
 		Status       string  `json:"status"`
@@ -134,25 +161,27 @@ func (h *InternalHandler) ListCredentials(w http.ResponseWriter, r *http.Request
 			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		}
-		decrypted, err := encryption.Decrypt(encValue)
-		if err != nil {
-			h.logger.Error("decrypt credential", "id", c.ID, "error", err)
-			continue
-		}
-		c.AccessToken = decrypted
-		if encRefresh.Valid {
-			rt, err := encryption.Decrypt(encRefresh.String)
-			if err != nil {
-				h.logger.Debug("decrypt refresh token", "id", c.ID, "error", err)
-			} else {
-				c.RefreshToken = &rt
+		if includeValues {
+			decrypted, derr := encryption.Decrypt(encValue)
+			if derr != nil {
+				h.logger.Error("decrypt credential", "id", c.ID, "error", derr)
+				continue
 			}
+			c.AccessToken = &decrypted
+			if encRefresh.Valid {
+				rt, rerr := encryption.Decrypt(encRefresh.String)
+				if rerr != nil {
+					h.logger.Debug("decrypt refresh token", "id", c.ID, "error", rerr)
+				} else {
+					c.RefreshToken = &rt
+				}
+			}
+			// Best-effort USE audit. Empty IP is fine — internal callers are
+			// the sidecar (loopback) and the IP would always be 127.0.0.1
+			// which is no signal. Debounced to one row per credential per
+			// minute so a busy sidecar doesn't flood the timeline.
+			maybeRecordSidecarUse(r.Context(), h.db, h.logger, c.ID, "")
 		}
-		// Best-effort USE audit. Empty IP is fine — internal callers are
-		// the sidecar (loopback) and the IP would always be 127.0.0.1
-		// which is no signal. Debounced to one row per credential per
-		// minute so a busy sidecar doesn't flood the timeline.
-		maybeRecordSidecarUse(r.Context(), h.db, h.logger, c.ID, "")
 		result = append(result, c)
 	}
 	if err := rows.Err(); err != nil {
@@ -164,6 +193,20 @@ func (h *InternalHandler) ListCredentials(w http.ResponseWriter, r *http.Request
 		result = []credResult{}
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+// requestIsLoopback returns true when the request arrived from 127.0.0.0/8
+// or ::1. Used by ListCredentials to gate the `include_values=true` opt-in to
+// in-process callers (the LLM proxy TokenSyncer) only. Non-loopback callers
+// (a sidecar reaching crewshipd via host.docker.internal, for example) get
+// metadata-only regardless of the flag.
+func requestIsLoopback(r *http.Request) bool {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // UpdateCredentialStatus updates the health status of a credential after the sidecar validates it.

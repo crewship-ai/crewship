@@ -363,3 +363,164 @@ func TestProxyToAPI_UpstreamUnreachable(t *testing.T) {
 type errReader struct{}
 
 func (errReader) Read(p []byte) (int, error) { return 0, errors.New("synthetic read error") }
+
+// TestHandleListCredentials_StripsAccessTokenFromAgentResponse pins Patch D:
+// even if crewshipd regresses and emits plaintext access_token /
+// refresh_token / etc., the sidecar's /credentials proxy must hide them
+// before the agent process inside the container sees the response.
+func TestHandleListCredentials_StripsAccessTokenFromAgentResponse(t *testing.T) {
+	// Mock crewshipd that emits a list response WITH plaintext token
+	// fields — the scenario Patch D defends against.
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		// Includes every banned key + some safe metadata fields. The
+		// scrubber must remove only the banned ones.
+		w.Write([]byte(`[
+			{
+				"id": "cred-1",
+				"name": "anthropic-prod",
+				"type": "API_KEY",
+				"provider": "ANTHROPIC",
+				"status": "ACTIVE",
+				"access_token": "sk-ant-LEAK-1234567890",
+				"refresh_token": "rt-LEAK-abcdef",
+				"encrypted_value": "v1:should-not-leave-host",
+				"token": "another-leak",
+				"secret": "yet-another-leak"
+			},
+			{
+				"id": "cred-2",
+				"name": "openai-prod",
+				"type": "API_KEY",
+				"provider": "OPENAI",
+				"status": "ACTIVE",
+				"plain_value": "sk-PLAIN-9876"
+			}
+		]`))
+	}))
+	defer mock.Close()
+
+	srv := newQueryServer(t, &IPCConfig{
+		BaseURL:     mock.URL,
+		Token:       "tok",
+		WorkspaceID: "ws-1",
+	}, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/credentials", nil)
+	w := httptest.NewRecorder()
+	srv.handleListCredentials(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	body := w.Body.String()
+
+	// Every banned literal MUST be gone.
+	bannedLiterals := []string{
+		"sk-ant-LEAK-1234567890",
+		"rt-LEAK-abcdef",
+		"v1:should-not-leave-host",
+		"another-leak",
+		"yet-another-leak",
+		"sk-PLAIN-9876",
+		`"access_token"`,
+		`"refresh_token"`,
+		`"encrypted_value"`,
+		`"token"`,
+		`"secret"`,
+		`"plain_value"`,
+	}
+	for _, lit := range bannedLiterals {
+		if strings.Contains(body, lit) {
+			t.Errorf("response leaks %q to agent\nbody: %s", lit, body)
+		}
+	}
+
+	// Metadata fields the LEAD discovery flow legitimately needs MUST
+	// survive — id / name / provider / type / status.
+	keptLiterals := []string{`"cred-1"`, `"anthropic-prod"`, `"ANTHROPIC"`, `"ACTIVE"`, `"cred-2"`, `"openai-prod"`}
+	for _, lit := range keptLiterals {
+		if !strings.Contains(body, lit) {
+			t.Errorf("response missing required metadata %q\nbody: %s", lit, body)
+		}
+	}
+}
+
+// TestStripCredentialValues_ObjectShape covers non-array crewshipd response
+// shapes (error envelopes, single-object responses) so the scrubber never
+// blindly passes through and assumes "this is JSON I don't recognise, must
+// be safe". It still scrubs banned keys inside an object.
+func TestStripCredentialValues_ObjectShape(t *testing.T) {
+	// Object shape with a banned key at the top level.
+	in := []byte(`{"id":"x","access_token":"LEAK","extra":{"refresh_token":"LEAK2"}}`)
+	out := stripCredentialValues(in)
+	s := string(out)
+	if strings.Contains(s, "LEAK") {
+		t.Errorf("object-shape scrubber leaked: %s", s)
+	}
+	if !strings.Contains(s, `"id":"x"`) {
+		t.Errorf("object-shape scrubber dropped legitimate field: %s", s)
+	}
+}
+
+// TestStripCredentialValues_GarbagePassthrough — non-JSON or malformed
+// JSON should pass through unchanged. The sidecar would have already
+// returned a 502 for those cases via the upstream-decode branch in
+// proxyToAPIFiltered, but the scrubber itself must be a safe no-op.
+func TestStripCredentialValues_GarbagePassthrough(t *testing.T) {
+	in := []byte(`<not-json>`)
+	out := stripCredentialValues(in)
+	if string(out) != string(in) {
+		t.Errorf("garbage input was modified: got %q, want %q", string(out), string(in))
+	}
+}
+
+// TestBuildHandler_CrossCrewBypassRejected pins Patch E: an attacker on
+// the shared crew bridge who reaches a peer sidecar's TCP port and spoofs
+// `Host: localhost:9119` via curl --resolve must NOT hit /credentials —
+// the underlying TCP source IP gates the control plane independently.
+//
+// The pre-Patch-E gate was `isLocalhost(r.Host)` only, which a peer
+// agent on the same Docker bridge could pass with a spoofed Host header.
+// Post-Patch-E both have to agree: Host header parses as localhost AND
+// RemoteAddr is loopback.
+func TestBuildHandler_CrossCrewBypassRejected(t *testing.T) {
+	// Mock upstream that should NEVER be called (test fails if it is).
+	mockHit := false
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mockHit = true
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`[]`))
+	}))
+	defer mock.Close()
+
+	srv := newQueryServer(t, &IPCConfig{
+		BaseURL:     mock.URL,
+		Token:       "tok",
+		WorkspaceID: "ws-1",
+	}, nil)
+	handler := srv.buildHandler(srv.proxy)
+
+	// Attacker request: Host header spoofed to localhost, but the TCP
+	// source is a Docker bridge IP (172.18.0.5) — i.e. a peer crew's
+	// agent reaching across the shared bridge.
+	req := httptest.NewRequest(http.MethodGet, "http://localhost:9119/credentials", nil)
+	req.Host = "localhost:9119"
+	req.RemoteAddr = "172.18.0.5:54321"
+
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	// The request falls through to the forward proxy because the
+	// control-plane gate refused it. The proxy then 403s on the
+	// non-allowed domain (or 502s trying to reach it) — either way the
+	// /credentials handler never ran and upstream crewshipd was not
+	// contacted.
+	if mockHit {
+		t.Fatalf("PATCH-E REGRESSION: peer-crew curl --resolve reached /credentials handler")
+	}
+	if w.Code == http.StatusOK {
+		t.Errorf("expected refusal status, got 200")
+	}
+}

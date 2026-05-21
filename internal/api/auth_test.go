@@ -2,17 +2,29 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/auth/sessions"
 )
+
+// peekSetupTokenForTest exposes the in-memory setup token to tests in this
+// package. Production code never reads the token back out — it's logged
+// once and consumed by the bootstrap handler. Tests need the value to
+// echo back via the X-Setup-Token header.
+func (h *AuthHandler) peekSetupTokenForTest() string {
+	h.setupTokenMu.Lock()
+	defer h.setupTokenMu.Unlock()
+	return h.setupToken
+}
 
 func newTestJWTValidator(t *testing.T) *auth.JWTValidator {
 	t.Helper()
@@ -146,8 +158,21 @@ func TestAuthBootstrap_Success(t *testing.T) {
 	v := newTestJWTValidator(t)
 	h := NewAuthHandler(db, logger, v, sessions.NewDBStore(db), false)
 
+	// Arm the setup token (post-Patch-C) so the Bootstrap gate accepts
+	// the request. In production this happens at server startup against
+	// an empty users table; here we drive it explicitly. Grab the token
+	// out via the test-only accessor before it's consumed.
+	if err := h.MaybeGenerateSetupToken(context.Background(), ""); err != nil {
+		t.Fatalf("arm setup token: %v", err)
+	}
+	tok := h.peekSetupTokenForTest()
+	if tok == "" {
+		t.Fatalf("expected setup token to be armed on empty DB")
+	}
+
 	body := bytes.NewBufferString(`{"full_name":"Admin User","email":"admin@example.com","password":"longenough"}`)
 	req := httptest.NewRequest("POST", "/api/v1/auth/bootstrap", body)
+	req.Header.Set("X-Setup-Token", tok)
 	rr := httptest.NewRecorder()
 	h.Bootstrap(rr, req)
 	if rr.Code != http.StatusCreated {
@@ -158,9 +183,9 @@ func TestAuthBootstrap_Success(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	tok, _ := resp["cli_token"].(string)
-	if !strings.HasPrefix(tok, "crewship_cli_") {
-		t.Errorf("cli_token = %q, want crewship_cli_*", tok)
+	cliTok, _ := resp["cli_token"].(string)
+	if !strings.HasPrefix(cliTok, "crewship_cli_") {
+		t.Errorf("cli_token = %q, want crewship_cli_*", cliTok)
 	}
 
 	// Bootstrap sets session cookies inline (since 2026-05-13) so a
@@ -205,8 +230,13 @@ func TestAuthBootstrap_LeavesOnboardingPending(t *testing.T) {
 	v := newTestJWTValidator(t)
 	h := NewAuthHandler(db, logger, v, sessions.NewDBStore(db), false)
 
+	if err := h.MaybeGenerateSetupToken(context.Background(), ""); err != nil {
+		t.Fatalf("arm: %v", err)
+	}
+	tok := h.peekSetupTokenForTest()
 	body := bytes.NewBufferString(`{"full_name":"Admin User","email":"admin@example.com","password":"longenough"}`)
 	req := httptest.NewRequest("POST", "/api/v1/auth/bootstrap", body)
+	req.Header.Set("X-Setup-Token", tok)
 	rr := httptest.NewRecorder()
 	h.Bootstrap(rr, req)
 	if rr.Code != http.StatusCreated {
@@ -231,6 +261,16 @@ func TestAuthBootstrap_AlreadyInitialized(t *testing.T) {
 	v := newTestJWTValidator(t)
 	h := NewAuthHandler(db, logger, v, sessions.NewDBStore(db), false)
 
+	// Bootstrap on a non-empty DB: no token is armed (MaybeGenerateSetupToken
+	// noops when count > 0), so the gate refuses without ever reaching the
+	// in-tx COUNT check. Same 403 from the caller's POV.
+	if err := h.MaybeGenerateSetupToken(context.Background(), ""); err != nil {
+		t.Fatalf("arm: %v", err)
+	}
+	if h.peekSetupTokenForTest() != "" {
+		t.Fatalf("setup token should NOT be armed when users already exist")
+	}
+
 	body := bytes.NewBufferString(`{"full_name":"Admin","email":"admin@example.com","password":"longenough"}`)
 	req := httptest.NewRequest("POST", "/api/v1/auth/bootstrap", body)
 	rr := httptest.NewRecorder()
@@ -240,12 +280,179 @@ func TestAuthBootstrap_AlreadyInitialized(t *testing.T) {
 	}
 }
 
-func TestAuthBootstrap_Validation(t *testing.T) {
+// TestAuthBootstrap_SetupTokenFileMirror pins Patch L2: when a data
+// dir is configured, MaybeGenerateSetupToken also writes the token to
+// <dataDir>/initial_setup_token (mode 0600, GitLab-style). On
+// successful bootstrap the file is auto-deleted so a later operator
+// who SSH's in can tell the bootstrap moment has passed.
+func TestAuthBootstrap_SetupTokenFileMirror(t *testing.T) {
+	t.Parallel()
+	dataDir := t.TempDir()
+
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	v := newTestJWTValidator(t)
+	h := NewAuthHandler(db, logger, v, sessions.NewDBStore(db), false)
+
+	if err := h.MaybeGenerateSetupToken(context.Background(), dataDir); err != nil {
+		t.Fatalf("arm: %v", err)
+	}
+	path := filepath.Join(dataDir, "initial_setup_token")
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("file should exist at %s: %v", path, err)
+	}
+	if mode := info.Mode().Perm(); mode != 0o600 {
+		t.Errorf("file mode = %o, want 0600 (owner-only read)", mode)
+	}
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if !strings.Contains(string(contents), h.peekSetupTokenForTest()) {
+		t.Errorf("file must contain the live token; got %q", string(contents))
+	}
+	if !strings.Contains(string(contents), "DO NOT") {
+		t.Errorf("file must include the 'one-shot' warning header")
+	}
+
+	// Successful bootstrap auto-deletes the file.
+	body := bytes.NewBufferString(`{"full_name":"Admin","email":"a@b.com","password":"longenough"}`)
+	req := httptest.NewRequest("POST", "/api/v1/auth/bootstrap", body)
+	req.Header.Set("X-Setup-Token", h.peekSetupTokenForTest())
+	rr := httptest.NewRecorder()
+	h.Bootstrap(rr, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("bootstrap status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("file must be auto-removed after successful bootstrap; stat err = %v", err)
+	}
+}
+
+// TestMaybeGenerateSetupToken_RemovesStaleFileOnAlreadyInitDB —
+// if a previous run crashed between writing the file and bootstrap,
+// the next process start (with users already in DB from some other
+// path — operator-seeded, restored backup, etc.) MUST purge the stale
+// file. A leaked token + a misleading file would compound the worst
+// case into "operator thinks they need to use the file, sees 403,
+// loses trust".
+func TestMaybeGenerateSetupToken_RemovesStaleFileOnAlreadyInitDB(t *testing.T) {
+	t.Parallel()
+	dataDir := t.TempDir()
+
+	// Plant a stale token file as if a previous crash left it behind.
+	stalePath := filepath.Join(dataDir, "initial_setup_token")
+	if err := os.WriteFile(stalePath, []byte("stale-token-from-prior-crash"), 0o600); err != nil {
+		t.Fatalf("plant: %v", err)
+	}
+
+	db := setupTestDB(t)
+	seedTestUser(t, db) // DB is non-empty when this run starts
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	v := newTestJWTValidator(t)
+	h := NewAuthHandler(db, logger, v, sessions.NewDBStore(db), false)
+
+	if err := h.MaybeGenerateSetupToken(context.Background(), dataDir); err != nil {
+		t.Fatalf("arm: %v", err)
+	}
+	if _, err := os.Stat(stalePath); !os.IsNotExist(err) {
+		t.Errorf("stale file should be purged; stat err = %v", err)
+	}
+}
+
+// TestAuthBootstrap_SetupTokenRequired pins the Patch C contract: even when
+// the database is empty, a Bootstrap call with no X-Setup-Token header gets
+// 403. This is the deploy-race defense — the operator who started the
+// binary has the token from stderr; a LAN scanner does not.
+func TestAuthBootstrap_SetupTokenRequired(t *testing.T) {
 	t.Parallel()
 	db := setupTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	v := newTestJWTValidator(t)
 	h := NewAuthHandler(db, logger, v, sessions.NewDBStore(db), false)
+
+	if err := h.MaybeGenerateSetupToken(context.Background(), ""); err != nil {
+		t.Fatalf("arm: %v", err)
+	}
+	if h.peekSetupTokenForTest() == "" {
+		t.Fatalf("token must be armed on empty DB")
+	}
+
+	t.Run("no_header_refused", func(t *testing.T) {
+		body := bytes.NewBufferString(`{"full_name":"Admin","email":"a@b.com","password":"longenough"}`)
+		req := httptest.NewRequest("POST", "/api/v1/auth/bootstrap", body)
+		rr := httptest.NewRecorder()
+		h.Bootstrap(rr, req)
+		if rr.Code != http.StatusForbidden {
+			t.Errorf("no token → status=%d, want 403", rr.Code)
+		}
+	})
+
+	t.Run("wrong_token_refused", func(t *testing.T) {
+		body := bytes.NewBufferString(`{"full_name":"Admin","email":"a@b.com","password":"longenough"}`)
+		req := httptest.NewRequest("POST", "/api/v1/auth/bootstrap", body)
+		req.Header.Set("X-Setup-Token", "not-the-real-token")
+		rr := httptest.NewRecorder()
+		h.Bootstrap(rr, req)
+		if rr.Code != http.StatusForbidden {
+			t.Errorf("wrong token → status=%d, want 403", rr.Code)
+		}
+		// After wrong-token failure, the real token must still be armed
+		// (no mutation on mismatch).
+		if h.peekSetupTokenForTest() == "" {
+			t.Errorf("real token must remain armed after wrong-token attempt")
+		}
+	})
+}
+
+// TestAuthBootstrap_SetupTokenIsOneShot — a successful bootstrap consumes
+// the token; a second call with the same token must be refused even if the
+// users table is somehow rolled back (paranoia: defence vs. accidental
+// re-arm via process restart against a half-rolled-back DB).
+func TestAuthBootstrap_SetupTokenIsOneShot(t *testing.T) {
+	t.Parallel()
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	v := newTestJWTValidator(t)
+	h := NewAuthHandler(db, logger, v, sessions.NewDBStore(db), false)
+
+	if err := h.MaybeGenerateSetupToken(context.Background(), ""); err != nil {
+		t.Fatalf("arm: %v", err)
+	}
+	tok := h.peekSetupTokenForTest()
+
+	// First call with the right token: success.
+	body1 := bytes.NewBufferString(`{"full_name":"Admin","email":"a@b.com","password":"longenough"}`)
+	req1 := httptest.NewRequest("POST", "/api/v1/auth/bootstrap", body1)
+	req1.Header.Set("X-Setup-Token", tok)
+	rr1 := httptest.NewRecorder()
+	h.Bootstrap(rr1, req1)
+	if rr1.Code != http.StatusCreated {
+		t.Fatalf("first call status = %d, want 201, body=%s", rr1.Code, rr1.Body.String())
+	}
+	// Token must be cleared in memory.
+	if h.peekSetupTokenForTest() != "" {
+		t.Errorf("setup token must be cleared after successful bootstrap")
+	}
+
+	// Second call with the same token (now consumed): 403, regardless of
+	// the fact that the user already exists.
+	body2 := bytes.NewBufferString(`{"full_name":"Admin2","email":"a2@b.com","password":"longenough"}`)
+	req2 := httptest.NewRequest("POST", "/api/v1/auth/bootstrap", body2)
+	req2.Header.Set("X-Setup-Token", tok)
+	rr2 := httptest.NewRecorder()
+	h.Bootstrap(rr2, req2)
+	if rr2.Code != http.StatusForbidden {
+		t.Errorf("replay status = %d, want 403", rr2.Code)
+	}
+}
+
+func TestAuthBootstrap_Validation(t *testing.T) {
+	t.Parallel()
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	v := newTestJWTValidator(t)
 
 	tests := []struct {
 		name string
@@ -259,11 +466,20 @@ func TestAuthBootstrap_Validation(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Each subtest gets its own handler so the one-shot token isn't
+			// consumed across iterations (it's intentionally consumed only
+			// on success; validation errors leave it armed, but we don't
+			// want to share token state between cases either way).
+			h := NewAuthHandler(db, logger, v, sessions.NewDBStore(db), false)
+			if err := h.MaybeGenerateSetupToken(context.Background(), ""); err != nil {
+				t.Fatalf("arm: %v", err)
+			}
 			req := httptest.NewRequest("POST", "/api/v1/auth/bootstrap", strings.NewReader(tt.body))
+			req.Header.Set("X-Setup-Token", h.peekSetupTokenForTest())
 			rr := httptest.NewRecorder()
 			h.Bootstrap(rr, req)
 			if rr.Code != tt.want {
-				t.Errorf("status = %d, want %d", rr.Code, tt.want)
+				t.Errorf("status = %d, want %d, body=%s", rr.Code, tt.want, rr.Body.String())
 			}
 		})
 	}

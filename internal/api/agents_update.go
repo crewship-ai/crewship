@@ -14,9 +14,25 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
+	user := UserFromContext(r.Context())
+	callerUserID := ""
+	if user != nil {
+		callerUserID = user.ID
+	}
 
-	if !canRole(role, "create") {
-		replyError(w, http.StatusForbidden, "Forbidden")
+	// Patch M3: per-agent owner gate. OWNER/ADMIN edit anything;
+	// MANAGER edits agents they created OR agents inside crews
+	// where they hold ADMIN/OWNER role override (per-crew elevation
+	// from Patch M1). MEMBER/VIEWER refused.
+	ok, err := canEditAgent(r.Context(), h.db, callerUserID, role, agentID)
+	if err != nil {
+		h.logger.Error("agent edit gate query failed", "agent_id", agentID, "error", err)
+		replyError(w, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	if !ok {
+		replyForbidden(w, h.logger, callerUserID, role,
+			"agent.update", "agent:"+agentID)
 		return
 	}
 
@@ -204,11 +220,7 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user := UserFromContext(r.Context())
-	userID := ""
-	if user != nil {
-		userID = user.ID
-	}
+	userID := callerUserID
 	changes := make(map[string]interface{})
 	for jsonKey := range allowed {
 		if val, ok := body[jsonKey]; ok {

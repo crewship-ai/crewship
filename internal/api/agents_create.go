@@ -170,23 +170,33 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		leadMode = &defaultMode
 	}
 
+	// Patch M3: stamp created_by_user_id so the per-agent edit gate
+	// can let a MANAGER edit agents they made without blanket rights
+	// over peers' agents. NULL when called from a code path that
+	// doesn't carry a user (legacy internal flows); the gate then
+	// degrades to workspace-role-only for that agent.
+	user := UserFromContext(r.Context())
+	var createdByUserID sql.NullString
+	if user != nil && user.ID != "" {
+		createdByUserID = sql.NullString{String: user.ID, Valid: true}
+	}
+
 	_, err = h.db.ExecContext(r.Context(), `
 		INSERT INTO agents (id, crew_id, workspace_id, name, slug, description, role_title,
 			agent_role, lead_mode, status, cli_adapter, llm_provider, llm_model, system_prompt,
 			avatar_seed, avatar_style, timeout_seconds, tool_profile, memory_enabled,
-			created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'IDLE', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			created_by_user_id, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'IDLE', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		agentID, req.CrewID, workspaceID, req.Name, req.Slug, req.Description, req.RoleTitle,
 		req.AgentRole, leadMode, req.CLIAdapter, req.LLMProvider, req.LLMModel, req.SystemPrompt,
 		req.AvatarSeed, req.AvatarStyle, req.TimeoutSeconds, req.ToolProfile, memEnabled,
-		now, now)
+		createdByUserID, now, now)
 	if err != nil {
 		h.logger.Error("insert agent", "error", err)
 		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
-	user := UserFromContext(r.Context())
 	userID := ""
 	if user != nil {
 		userID = user.ID

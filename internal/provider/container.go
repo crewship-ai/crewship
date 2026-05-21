@@ -44,6 +44,17 @@ type CrewConfig struct {
 	// list does not invalidate the cached image.
 	PostStartCommands []string
 
+	// InitHookEnabled opts the crew into auto-executing /crew/init.sh on every
+	// container start. /crew is a persistent bind mount on the host, so an
+	// agent (UID 1001) with write access can stash a script there that will
+	// run as 1001 on every restart — a persistence backdoor that survives
+	// docker rm -f, crew restart, even sidecar reinstall. Default false:
+	// the soft-promotion path now requires explicit operator opt-in per
+	// crew via the manifest. Operators who do flip the bit accept the
+	// trust model that everything in /crew/init.sh is code they wrote
+	// or audited.
+	InitHookEnabled bool
+
 	// Services are sidecar containers (Redis, Postgres, etc.) the
 	// provider should start alongside the crew's runtime, on the
 	// same network, so the agent can reach them by Service.Name.

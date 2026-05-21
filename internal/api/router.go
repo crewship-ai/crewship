@@ -99,6 +99,13 @@ type Router struct {
 	// initialised, so two-phase wiring is the cheapest fix.
 	PipelinesHandler *PipelineHandler
 
+	// authHandler is the live AuthHandler created during route
+	// registration. Stored on the Router so server.New can call
+	// MaybeGenerateSetupToken (Patch C) on the same instance that
+	// /api/v1/bootstrap actually dispatches to — otherwise the armed
+	// token lives on a handler the dispatcher never reaches.
+	authHandler *AuthHandler
+
 	// version is the ldflags-injected binary version (e.g. "v0.1.0-beta.1"
 	// or "dev" for local builds). Surfaced on GET /api/v1/system/version
 	// so the web UI can render an "update available" banner.
@@ -118,6 +125,14 @@ func (r *Router) SetVersion(v string) {
 // when registerRoutes hasn't run yet (e.g. tests that build a Router by hand).
 func (r *Router) Provisioning() *ProvisioningHandler {
 	return r.provisioning
+}
+
+// AuthHandler returns the registered AuthHandler so server startup code can
+// call MaybeGenerateSetupToken on the same instance the /api/v1/bootstrap
+// route dispatches to. Returns nil when registerAuthRoutes hasn't run yet
+// (handler-only tests that build a Router by hand).
+func (r *Router) AuthHandler() *AuthHandler {
+	return r.authHandler
 }
 
 // Journal returns the journal emitter or a no-op if unset. Handlers should

@@ -59,12 +59,88 @@ func (s *Server) handleListCrewConnections(w http.ResponseWriter, r *http.Reques
 
 // handleListCredentials proxies GET /credentials to the crewshipd internal API.
 // Used by AGENT and LEAD agents to discover available credentials for assignment.
+//
+// Post-Patch-A crewshipd already returns metadata only by default, but we
+// also strip any access_token / refresh_token that survives a future
+// crewshipd regression — defense in depth: an agent inside the container
+// never sees plaintext via this path even if the upstream handler
+// accidentally re-introduces the field. The sidecar's stdin boot payload
+// (orchestrator/exec_sidecar.go) is the ONLY supply line for cleartext
+// values, and that path goes straight to the credStore — never to the
+// agent over HTTP.
 func (s *Server) handleListCredentials(w http.ResponseWriter, r *http.Request) {
 	if s.ipc == nil {
 		writeJSONResponse(w, http.StatusServiceUnavailable, map[string]string{"error": "IPC not configured"})
 		return
 	}
-	s.proxyToAPI(w, r, http.MethodGet, "/api/v1/internal/credentials?workspace_id="+s.ipc.WorkspaceID)
+	s.proxyToAPIFiltered(
+		w, r,
+		http.MethodGet,
+		"/api/v1/internal/credentials?workspace_id="+s.ipc.WorkspaceID,
+		stripCredentialValues,
+	)
+}
+
+// stripCredentialValues removes plaintext token fields from a credentials
+// list response before it goes back to the agent. Operates on a generic
+// []map[string]any so a future crewshipd schema change that adds new
+// secret-looking fields doesn't silently bypass the filter.
+//
+// Fields scrubbed (case-sensitive, JSON tag names): access_token,
+// refresh_token, encrypted_value, encrypted_refresh_token, token,
+// secret. Both top-level and nested under arbitrary maps.
+func stripCredentialValues(raw json.RawMessage) json.RawMessage {
+	// Try array shape first (the canonical /credentials response).
+	var arr []map[string]any
+	if err := json.Unmarshal(raw, &arr); err == nil {
+		for _, row := range arr {
+			scrubSecretKeys(row)
+		}
+		out, _ := json.Marshal(arr)
+		return out
+	}
+	// Fall through: try object shape (error envelopes etc.). If we can't
+	// parse it at all, pass it through unchanged — wrapper errors carry
+	// no credential data.
+	var obj map[string]any
+	if err := json.Unmarshal(raw, &obj); err == nil {
+		scrubSecretKeys(obj)
+		out, _ := json.Marshal(obj)
+		return out
+	}
+	return raw
+}
+
+// secretKeyDenylist is the closed set of JSON keys the sidecar will refuse
+// to relay back to the agent. Conservative — agent-visible metadata
+// (id, name, type, provider, status, created_at, etc.) is NOT in the list.
+var secretKeyDenylist = map[string]struct{}{
+	"access_token":            {},
+	"refresh_token":           {},
+	"encrypted_value":         {},
+	"encrypted_refresh_token": {},
+	"token":                   {},
+	"secret":                  {},
+	"plain_value":             {},
+}
+
+func scrubSecretKeys(m map[string]any) {
+	for k, v := range m {
+		if _, banned := secretKeyDenylist[k]; banned {
+			delete(m, k)
+			continue
+		}
+		switch nested := v.(type) {
+		case map[string]any:
+			scrubSecretKeys(nested)
+		case []any:
+			for _, item := range nested {
+				if im, ok := item.(map[string]any); ok {
+					scrubSecretKeys(im)
+				}
+			}
+		}
+	}
 }
 
 // handleAssignAgentCredential proxies POST /agent-credentials to the crewshipd internal API.
@@ -109,6 +185,19 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 
 // proxyToAPI is a generic helper that proxies a request to the crewshipd internal API.
 func (s *Server) proxyToAPI(w http.ResponseWriter, r *http.Request, method, path string) {
+	s.proxyToAPIFiltered(w, r, method, path, nil)
+}
+
+// proxyToAPIFiltered is the same as proxyToAPI but applies a transform to
+// the response body before relaying it back to the agent. Used by
+// handleListCredentials to strip plaintext token fields even if a future
+// crewshipd handler regresses and emits them.
+func (s *Server) proxyToAPIFiltered(
+	w http.ResponseWriter,
+	r *http.Request,
+	method, path string,
+	transform func(json.RawMessage) json.RawMessage,
+) {
 	if s.ipc == nil {
 		writeJSONResponse(w, http.StatusServiceUnavailable, map[string]string{"error": "IPC not configured"})
 		return
@@ -157,6 +246,10 @@ func (s *Server) proxyToAPI(w http.ResponseWriter, r *http.Request, method, path
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		writeJSONResponse(w, http.StatusBadGateway, map[string]string{"error": "invalid response"})
 		return
+	}
+
+	if transform != nil {
+		result = transform(result)
 	}
 
 	w.Header().Set("Content-Type", "application/json")

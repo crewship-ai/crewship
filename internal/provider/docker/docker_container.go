@@ -405,7 +405,16 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	// Build base HostConfig. Privileged features (DinD etc.) require
 	// dropping the default no-new-privileges and relaxing capability drops.
 	securityOpt := []string{"no-new-privileges"}
-	capAdd := []string{"NET_RAW"}
+	// NET_RAW used to be added unconditionally — it lets a process open
+	// AF_PACKET sockets, which is a DNS-tunneling exfil primitive (carry
+	// stolen secrets out via base64-encoded subdomain lookups against an
+	// attacker DNS server, even when the egress allowlist blocks every
+	// other domain). Removed from the default set; features that
+	// genuinely need ICMP / raw sockets (network debugging utilities)
+	// can opt in via team.CapAdd, which the devcontainer features parser
+	// restricts to an explicit allowlist (NET_BIND_SERVICE today; add
+	// NET_RAW to the allowlist there if a real use case appears).
+	capAdd := []string{}
 	readonlyRoot := true
 	if team.Privileged {
 		// Privileged mode implies the security restrictions we normally
@@ -514,22 +523,32 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 		}
 	}
 
-	// Run postStartCommand hooks. We always inject one universal hook FIRST:
-	// `/crew/init.sh` if it exists is executed as the agent user. This is the
-	// "soft promotion" path — agents can persist runtime customizations
-	// (e.g. `pip install --user foo`, env exports, repo clones into /crew)
-	// across container restarts without touching devcontainer.json.
+	// Run postStartCommand hooks. The `/crew/init.sh` soft-promotion path
+	// is OPT-IN per crew (team.InitHookEnabled). When disabled (default),
+	// the auto-exec is skipped entirely — even a present and executable
+	// init.sh script is ignored. When enabled, it runs FIRST as UID 1001.
 	//
-	// Why a fixed convention rather than a config flag:
-	//   - /crew is one of the three persisted volumes, so the file survives
-	//     a force-remove + recreate (which is exactly what Restart agents does).
-	//   - The check `[ -x ... ]` keeps it harmless when the file is missing
-	//     and `; true` ensures a failing init.sh doesn't block the rest of
-	//     the post-start chain (feature/root-level hooks).
-	//   - Running as 1001:1001 means no apt — agents have to use --user
-	//     installs, which is the right default (apt installs would still
-	//     not survive recreate anyway, since they touch /usr).
-	hooks := []string{"[ -x /crew/init.sh ] && /crew/init.sh; true"}
+	// Why opt-in: /crew/init.sh sits on a persistent bind mount on the
+	// host that survives container removal, sidecar reinstall, and
+	// docker rm -f. An agent with write access to /crew (which every
+	// agent has — it's the legitimate shared workspace) could stash a
+	// reverse-shell or exfil command there, and the next operator restart
+	// would auto-execute it as 1001. The default no-exec policy removes
+	// this persistence vector; operators who want the soft-promotion
+	// behaviour set init_hook_enabled=true on the crew manifest, which
+	// is a deliberate trust statement that everything in init.sh is
+	// code they wrote or audited.
+	var hooks []string
+	if team.InitHookEnabled {
+		hooks = append(hooks, "[ -x /crew/init.sh ] && /crew/init.sh; true")
+	} else {
+		// Log a one-line breadcrumb when a script exists but the hook is
+		// disabled — helps an operator who recently flipped the flag off
+		// understand why their script stopped running. The exec just
+		// stats the file; no execution.
+		hooks = append(hooks,
+			`if [ -e /crew/init.sh ]; then echo "crewship: /crew/init.sh present but init_hook_enabled=false on crew config — skipping execution" >&2; fi`)
+	}
 	hooks = append(hooks, team.PostStartCommands...)
 	p.runPostStartCommands(ctx, resp.ID, hooks)
 

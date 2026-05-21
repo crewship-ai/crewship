@@ -48,6 +48,10 @@ func TestRequireInternal(t *testing.T) {
 			wrapped := h.requireInternal(downstream)
 
 			req := httptest.NewRequest(http.MethodGet, "/x", nil)
+			// Pin RemoteAddr to loopback so the post-Patch-B network gate
+			// passes. The token-comparison branch is what these cases
+			// actually exercise.
+			req.RemoteAddr = "127.0.0.1:1234"
 			if tc.provided != "" {
 				req.Header.Set("X-Internal-Token", tc.provided)
 			}
@@ -58,6 +62,100 @@ func TestRequireInternal(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestRequireInternal_NetworkGate pins the Patch B contract: requests from
+// outside loopback / RFC1918 are 404'd before the token compare runs (so a
+// public scanner can't even oracle the endpoint's existence). The opt-out
+// env var CREWSHIP_INTERNAL_ALLOW_ANY=true reverts to token-only.
+func TestRequireInternal_NetworkGate(t *testing.T) {
+	// NOT t.Parallel — flips os.Setenv and we don't want races.
+	h := NewInternalHandler(nil, "tok", testLogger())
+	downstream := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	t.Run("loopback_ipv4_passes_gate", func(t *testing.T) {
+		t.Setenv("CREWSHIP_INTERNAL_ALLOW_ANY", "")
+		wrapped := h.requireInternal(downstream)
+		req := httptest.NewRequest(http.MethodGet, "/x", nil)
+		req.RemoteAddr = "127.0.0.1:9999"
+		req.Header.Set("X-Internal-Token", "tok")
+		rr := httptest.NewRecorder()
+		wrapped.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Errorf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+		}
+	})
+
+	t.Run("loopback_ipv6_passes_gate", func(t *testing.T) {
+		t.Setenv("CREWSHIP_INTERNAL_ALLOW_ANY", "")
+		wrapped := h.requireInternal(downstream)
+		req := httptest.NewRequest(http.MethodGet, "/x", nil)
+		req.RemoteAddr = "[::1]:9999"
+		req.Header.Set("X-Internal-Token", "tok")
+		rr := httptest.NewRecorder()
+		wrapped.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Errorf("status = %d, want 200", rr.Code)
+		}
+	})
+
+	t.Run("docker_bridge_rfc1918_passes_gate", func(t *testing.T) {
+		t.Setenv("CREWSHIP_INTERNAL_ALLOW_ANY", "")
+		wrapped := h.requireInternal(downstream)
+		// 172.17.0.x is the default Docker bridge subnet on Linux.
+		req := httptest.NewRequest(http.MethodGet, "/x", nil)
+		req.RemoteAddr = "172.17.0.5:54321"
+		req.Header.Set("X-Internal-Token", "tok")
+		rr := httptest.NewRecorder()
+		wrapped.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Errorf("status = %d, want 200", rr.Code)
+		}
+	})
+
+	t.Run("public_ip_rejected_with_404_pre_token_compare", func(t *testing.T) {
+		t.Setenv("CREWSHIP_INTERNAL_ALLOW_ANY", "")
+		wrapped := h.requireInternal(downstream)
+		req := httptest.NewRequest(http.MethodGet, "/x", nil)
+		req.RemoteAddr = "8.8.8.8:54321"
+		// Send the CORRECT token to prove the network gate fires first —
+		// otherwise this would 403 from the token path.
+		req.Header.Set("X-Internal-Token", "tok")
+		rr := httptest.NewRecorder()
+		wrapped.ServeHTTP(rr, req)
+		if rr.Code != http.StatusNotFound {
+			t.Errorf("status = %d, want 404 (network gate must precede token compare)", rr.Code)
+		}
+	})
+
+	t.Run("allow_any_env_lets_public_ip_reach_token_compare", func(t *testing.T) {
+		t.Setenv("CREWSHIP_INTERNAL_ALLOW_ANY", "true")
+		wrapped := h.requireInternal(downstream)
+		req := httptest.NewRequest(http.MethodGet, "/x", nil)
+		req.RemoteAddr = "8.8.8.8:54321"
+		req.Header.Set("X-Internal-Token", "tok")
+		rr := httptest.NewRecorder()
+		wrapped.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Errorf("with CREWSHIP_INTERNAL_ALLOW_ANY=true and correct token, status = %d, want 200",
+				rr.Code)
+		}
+	})
+
+	t.Run("malformed_remote_addr_rejected", func(t *testing.T) {
+		t.Setenv("CREWSHIP_INTERNAL_ALLOW_ANY", "")
+		wrapped := h.requireInternal(downstream)
+		req := httptest.NewRequest(http.MethodGet, "/x", nil)
+		req.RemoteAddr = "not-an-ip"
+		req.Header.Set("X-Internal-Token", "tok")
+		rr := httptest.NewRecorder()
+		wrapped.ServeHTTP(rr, req)
+		if rr.Code != http.StatusNotFound {
+			t.Errorf("status = %d, want 404 for unparseable RemoteAddr", rr.Code)
+		}
+	})
 }
 
 // Sanity-check: ensure the constant-time comparison itself is exercised.
@@ -343,6 +441,9 @@ func TestInternalListCredentials(t *testing.T) {
 
 	h := NewInternalHandler(db, "tok", testLogger())
 
+	// Default call: no include_values flag → access_token MUST be omitted
+	// from the response. This is the post-Patch-A contract: LEAD agents
+	// reaching `/credentials` via the sidecar proxy must only see metadata.
 	req := httptest.NewRequest(http.MethodGet, "/?workspace_id="+wsID, nil)
 	w := httptest.NewRecorder()
 	h.ListCredentials(w, req)
@@ -357,8 +458,35 @@ func TestInternalListCredentials(t *testing.T) {
 	if len(creds) != 1 {
 		t.Fatalf("expected 1 cred, got %d", len(creds))
 	}
-	if creds[0]["access_token"] != "secret-value" {
-		t.Errorf("expected decrypted token, got %v", creds[0]["access_token"])
+	if _, present := creds[0]["access_token"]; present {
+		t.Errorf("access_token must be absent on default (no include_values) call; got %v", creds[0]["access_token"])
+	}
+	// Metadata fields the LEAD discovery flow still needs.
+	if creds[0]["id"] != "c1" || creds[0]["name"] != "k" || creds[0]["provider"] != "ANTHROPIC" {
+		t.Errorf("expected metadata id=c1 name=k provider=ANTHROPIC, got %+v", creds[0])
+	}
+
+	// include_values=true from loopback (httptest's default RemoteAddr is
+	// 192.0.2.1, NOT loopback — so opt-in must also be REFUSED here).
+	reqNonLoop := httptest.NewRequest(http.MethodGet, "/?workspace_id="+wsID+"&include_values=true", nil)
+	wNonLoop := httptest.NewRecorder()
+	h.ListCredentials(wNonLoop, reqNonLoop)
+	var credsNonLoop []map[string]interface{}
+	json.Unmarshal(wNonLoop.Body.Bytes(), &credsNonLoop)
+	if _, present := credsNonLoop[0]["access_token"]; present {
+		t.Errorf("non-loopback caller must NOT receive access_token even with include_values=true; got %v", credsNonLoop[0]["access_token"])
+	}
+
+	// include_values=true from loopback: the LLM proxy hairpin path. Now
+	// access_token is returned. RemoteAddr is set manually to 127.0.0.1.
+	reqLoop := httptest.NewRequest(http.MethodGet, "/?workspace_id="+wsID+"&include_values=true", nil)
+	reqLoop.RemoteAddr = "127.0.0.1:54321"
+	wLoop := httptest.NewRecorder()
+	h.ListCredentials(wLoop, reqLoop)
+	var credsLoop []map[string]interface{}
+	json.Unmarshal(wLoop.Body.Bytes(), &credsLoop)
+	if credsLoop[0]["access_token"] != "secret-value" {
+		t.Errorf("loopback + include_values=true must return decrypted token, got %v", credsLoop[0]["access_token"])
 	}
 
 	// Provider filter excludes the only cred

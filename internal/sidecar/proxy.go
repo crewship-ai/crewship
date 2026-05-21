@@ -457,6 +457,20 @@ func transfer(dst io.WriteCloser, src io.ReadCloser) {
 	io.Copy(dst, src)
 }
 
+// remoteIsLoopback reports whether the request's underlying TCP source
+// IP is a loopback address. Distinct from isLocalhost, which only
+// inspects the Host header — the Host header is attacker-controllable
+// via --resolve tricks when crew bridges aren't network-isolated.
+// Sidecar control-plane handlers must gate on BOTH so a peer crew's
+// agent can't hit /credentials over the shared bridge.
+func remoteIsLoopback(r *http.Request) bool {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	return isLoopbackIP(host)
+}
+
 func isLocalhost(host string) bool {
 	h := host
 	// Handle IPv6 bracket notation [::1]:port

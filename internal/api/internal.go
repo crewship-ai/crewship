@@ -5,12 +5,57 @@ import (
 	"crypto/subtle"
 	"database/sql"
 	"log/slog"
+	"net"
 	"net/http"
+	"os"
 	"sync/atomic"
 
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
+
+// privateNetCIDRs lists the address ranges the internal API will accept
+// connections from when CREWSHIP_INTERNAL_ALLOW_ANY is unset. The list
+// covers IPv4 RFC1918 (where Docker bridge subnets and on-prem LANs live)
+// plus IPv6 ULA and link-local. Loopback is handled separately via
+// IP.IsLoopback so we don't have to list 127.0.0.0/8 and ::1 twice.
+//
+// Parsing happens once at init — these literals are baked in, so a
+// startup-time MustParseCIDR would only panic on developer typos, which
+// is exactly the behaviour we want. No runtime config knob lives in
+// here; operators flip CREWSHIP_INTERNAL_ALLOW_ANY=true to bypass.
+var privateNetCIDRs = func() []*net.IPNet {
+	cidrs := []string{
+		"10.0.0.0/8",
+		"172.16.0.0/12",
+		"192.168.0.0/16",
+		"169.254.0.0/16", // link-local (Docker on macOS sometimes routes via)
+		"fc00::/7",       // IPv6 ULA
+		"fe80::/10",      // IPv6 link-local
+	}
+	nets := make([]*net.IPNet, 0, len(cidrs))
+	for _, c := range cidrs {
+		_, n, err := net.ParseCIDR(c)
+		if err != nil {
+			panic("internal API: invalid private CIDR " + c + ": " + err.Error())
+		}
+		nets = append(nets, n)
+	}
+	return nets
+}()
+
+// ipInPrivateNet reports whether ip falls in any of the RFC1918-ish
+// ranges we treat as "may legitimately reach the internal API".
+// Loopback is not checked here — the caller handles that bucket
+// separately so the audit-log message can distinguish them.
+func ipInPrivateNet(ip net.IP) bool {
+	for _, n := range privateNetCIDRs {
+		if n.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
 
 type mcpCredEntry struct {
 	ID       string `json:"id"`
@@ -86,7 +131,38 @@ func (h *InternalHandler) requireInternal(next http.Handler) http.Handler {
 	if h.internalToken == "" {
 		h.logger.Error("internal token is empty -- all internal API calls will be rejected")
 	}
+	// Resolve the allow-any kill-switch once per handler build so we don't
+	// touch os.Getenv on every request. Set to true ONLY when crewshipd is
+	// deployed behind a trusted reverse proxy on a public interface and
+	// the operator has accepted that X-Internal-Token is the sole guard.
+	allowAny := os.Getenv("CREWSHIP_INTERNAL_ALLOW_ANY") == "true"
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Network gate first: refuse the request before constant-time
+		// token compare so a public scanner can't even use this endpoint
+		// to oracle the token's presence. Loopback always allowed (in-
+		// process self-calls + operator SSH tunnel); private nets allowed
+		// because Docker bridge IPs (172.x.x.x) and on-prem LANs land here.
+		// CREWSHIP_INTERNAL_ALLOW_ANY=true bypasses entirely for setups
+		// where a reverse proxy strips/spoofs RemoteAddr.
+		if !allowAny {
+			host, _, splitErr := net.SplitHostPort(r.RemoteAddr)
+			if splitErr != nil {
+				host = r.RemoteAddr
+			}
+			ip := net.ParseIP(host)
+			if ip == nil || (!ip.IsLoopback() && !ipInPrivateNet(ip)) {
+				h.logger.Warn("internal API access from non-internal IP — refused",
+					"path", r.URL.Path,
+					"remote_addr", r.RemoteAddr,
+					"user_agent", r.Header.Get("User-Agent"))
+				// 404 instead of 403 to avoid confirming the endpoint
+				// exists to a public scanner. Legitimate callers see
+				// this only when misconfigured.
+				replyError(w, http.StatusNotFound, "Not Found")
+				return
+			}
+		}
+
 		token := r.Header.Get("X-Internal-Token")
 		// Always run constant-time comparison to avoid timing sidechannels.
 		// Pad empty strings to a fixed sentinel so the comparison still runs
