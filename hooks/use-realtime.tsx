@@ -21,6 +21,13 @@ export type RealtimeEventType =
   | "agent.created"
   | "agent.updated"
   | "agent.deleted"
+  // PR-D F5 ephemeral lifecycle events. Distinct from agent.created
+  // because the dashboard renders ephemerals differently (TTL badge,
+  // ghost state, rehire affordance) and needs to know which axis of
+  // change to refresh.
+  | "agent.hired"
+  | "agent.expired"
+  | "agent.rehired"
   | "assignment.updated"
   // Per-assignment lifecycle events introduced for the per-crew
   // admission queue (PR #396 — Phase 1B of the queue mechanism).
@@ -77,6 +84,9 @@ interface RealtimeContextValue {
 const VALID_REALTIME_TYPES: Set<string> = new Set([
   "run.started", "run.completed", "run.failed",
   "agent.status", "agent.created", "agent.updated", "agent.deleted",
+  // PR-D F5 ephemeral lifecycle. Without these in the allowlist the
+  // ghost UI never updates without a manual page refresh.
+  "agent.hired", "agent.expired", "agent.rehired",
   "assignment.updated", "assignment_queued", "assignment_unqueued",
   "escalation.created",
   "escalation.resolved", "mission.updated", "task.updated",

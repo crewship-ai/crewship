@@ -1341,11 +1341,20 @@ END;
 	// type to a CHECK-constrained enum admitting four new kinds
 	// (skill_review, behavior, memory_health, negative_learning) and
 	// lands the skills lifecycle columns + skill_invocations audit
-	// table the F4.1 evaluator consumes. Originally drafted as v100 on
-	// this branch; bumped to v102 after main landed v100 (rbac_extensions)
-	// and v101 (autonomy renumber).
+	// table the F4.1 evaluator consumes.
 	// See migrate_consts_v102_keeper_phase2.go.
 	{version: 102, name: "keeper_phase2", sql: migrationKeeperPhase2},
+
+	// Ephemeral agent lifecycle (PRD §6 F5 / PR-D): five additive
+	// columns on agents (ephemeral / expires_at / expired_at /
+	// parent_lead_id / hire_reason) + per-crew quota
+	// (crews.max_ephemeral_agents). Powers the hire / ghost / rehire
+	// triple — see migrate_consts_v103_ephemeral_agents.go for the
+	// column-by-column rationale.
+	//
+	// Originally drafted as v100 on this branch; bumped to v103 on
+	// rebase after main landed v99/v100/v101 + PR-C's v102.
+	{version: 103, name: "ephemeral_agents", sql: migrationEphemeralAgents},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

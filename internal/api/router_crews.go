@@ -38,6 +38,11 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 		agents.SetScheduler(r.scheduleUpdater)
 	}
 	agents.SetJournal(r.Journal())
+	// PR-D F5: wire the shared per-crew autonomy resolver so the Hire
+	// / Rehire handlers gate ephemeral spawn per crew policy. Same
+	// instance the policies handler uses below — flipping policy via
+	// PUT invalidates it for everyone, including the hire path.
+	agents.SetPolicyResolver(r.PolicyResolver())
 
 	if r.license != nil {
 		ws.SetLicense(r.license)
@@ -166,6 +171,18 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.mux.Handle("GET /api/v1/agent-load", authed(wsCtx(http.HandlerFunc(agents.Load))))
 	r.mux.Handle("GET /api/v1/agents", authed(wsCtx(http.HandlerFunc(agents.List))))
 	r.mux.Handle("POST /api/v1/agents", authed(wsCtx(http.HandlerFunc(agents.Create))))
+	// PR-D F5 ephemeral lifecycle endpoints. Hire creates a new
+	// short-lived agent gated by the per-crew autonomy policy.
+	// Rehire resets the TTL on an existing ephemeral (typically a
+	// ghost) so the operator can extend a hire without losing the
+	// agent's memory continuity.
+	r.mux.Handle("POST /api/v1/agents/hire", authed(wsCtx(http.HandlerFunc(agents.Hire))))
+	r.mux.Handle("POST /api/v1/agents/{agentId}/rehire", authed(wsCtx(http.HandlerFunc(agents.Rehire))))
+	// Approve-hire flips a guided-autonomy ephemeral from
+	// PENDING_REVIEW to IDLE, releasing the chatbridge guard so the
+	// agent can serve messages. Paired with the blocking inbox
+	// waitpoint written by Hire when policy returns InboxApprove.
+	r.mux.Handle("POST /api/v1/agents/{agentId}/approve-hire", authed(wsCtx(http.HandlerFunc(agents.ApproveHire))))
 	r.mux.Handle("GET /api/v1/agents/{agentId}", authed(wsCtx(http.HandlerFunc(agents.Get))))
 	r.mux.Handle("PATCH /api/v1/agents/{agentId}", authed(wsCtx(http.HandlerFunc(agents.Update))))
 	r.mux.Handle("DELETE /api/v1/agents/{agentId}", authed(wsCtx(http.HandlerFunc(agents.Delete))))

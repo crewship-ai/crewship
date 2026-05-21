@@ -52,6 +52,15 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 	r.mux.Handle("GET /api/v1/internal/crews", internalAuth(http.HandlerFunc(internal.ListCrews)))
 	r.mux.Handle("POST /api/v1/internal/crews", internalAuth(http.HandlerFunc(internal.CreateCrew)))
 	r.mux.Handle("POST /api/v1/internal/agents", internalAuth(http.HandlerFunc(internal.CreateAgent)))
+	// PR-D F5: LEAD-initiated ephemeral hire. Sidecar /spawn proxies
+	// here; the adapter injects workspace + MANAGER role into the
+	// context so the public Hire handler's RBAC + policy gate path
+	// runs unchanged. nil-safe when agentHandler isn't wired (early
+	// init / test routers); the adapter returns 500 in that case.
+	if r.agentHandler != nil {
+		hireAdapter := NewHireInternalAdapter(r.agentHandler)
+		r.mux.Handle("POST /api/v1/internal/agents/hire", internalAuth(http.HandlerFunc(hireAdapter.Hire)))
+	}
 	r.mux.Handle("GET /api/v1/internal/crew-connections", internalAuth(http.HandlerFunc(internal.ListCrewConnections)))
 	r.mux.Handle("POST /api/v1/internal/mcp-tool-calls", internalAuth(http.HandlerFunc(internal.RecordMCPToolCall)))
 	// Sidecar-emitted Crow's Nest journal events (network.egress, file.written).

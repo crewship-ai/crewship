@@ -349,6 +349,12 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 			case r.Method == http.MethodPost && r.URL.Path == "/agent/create":
 				s.handleCreateAgent(w, r)
 				return
+			// PR-D F5: LEAD-initiated ephemeral hire. Proxies to
+			// /api/v1/internal/agents/hire on crewshipd, which
+			// applies the crew autonomy_level gate.
+			case r.Method == http.MethodPost && r.URL.Path == "/spawn":
+				s.handleSpawn(w, r)
+				return
 			case r.Method == http.MethodGet && r.URL.Path == "/credentials":
 				s.handleListCredentials(w, r)
 				return
