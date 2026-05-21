@@ -150,10 +150,12 @@ func TestOpencodeAdapter_SetupSystemPrompt_PartialFailure_NoAdapterError(t *test
 
 // ---- WriteMCPConfig ----
 
-func TestOpencodeAdapter_WriteMCPConfig_EmptyMCP_ShortCircuitsToNil(t *testing.T) {
-	// normaliseMCPInputs returns (nil, nil) when there are no MCP
-	// sources. writeMCPOpenCode early-returns; the adapter wrapper
-	// must return nil (NOT a wrapped non-nil error).
+func TestOpencodeAdapter_WriteMCPConfig_EmptyMCP_StillEmitsMemoryMCP(t *testing.T) {
+	// PR-A F1 invariant: empty crew/agent MCP config still writes
+	// opencode.json with the crewship-memory entry so the model gets
+	// native memory.* tool calls regardless of operator MCP config.
+	// Pre-PR-A this short-circuited to zero Exec calls — pin the new
+	// behaviour so a future refactor cannot silently drop memory tools.
 	fake := &adapterTestContainer{}
 	err := opencodeAdapter{}.WriteMCPConfig(
 		context.Background(), fake, "ct-mcp", AgentRunRequest{}, "/work", quietAdapterLogger(),
@@ -161,8 +163,13 @@ func TestOpencodeAdapter_WriteMCPConfig_EmptyMCP_ShortCircuitsToNil(t *testing.T
 	if err != nil {
 		t.Errorf("WriteMCPConfig on empty MCP = %v, want nil", err)
 	}
-	if fake.execCalls != 0 {
-		t.Errorf("empty MCP triggered %d Exec calls; expected 0 (short-circuit)", fake.execCalls)
+	if fake.execCalls == 0 {
+		t.Fatalf("empty MCP triggered 0 Exec calls; expected ≥1 (memory MCP auto-injection)")
+	}
+	script := findScriptForPath(t, fake.execScripts, "opencode.json")
+	body := decodeBase64FromShellScript(t, script)
+	if !strings.Contains(body, "crewship-memory") || !strings.Contains(body, "/mcp/memory") {
+		t.Errorf("opencode empty-MCP body missing crewship-memory/mcp/memory; body=%s", body)
 	}
 }
 
