@@ -14,6 +14,7 @@ import { useIsMobile } from "@/hooks/use-mobile"
 import { useAppStore } from "@/lib/store"
 import { SettingsNav } from "./settings-nav"
 import { ProfileSection } from "./sections/profile-section"
+import { PrivacySection } from "./sections/privacy-section"
 import { GeneralSection } from "./sections/general-section"
 import { MembersSection } from "./sections/members-section"
 import { CrewsContainersSection } from "./sections/crews-containers-section"
@@ -38,6 +39,7 @@ interface Member {
 // Section titles for the content area header
 const sectionTitles: Record<string, { title: string; description?: string }> = {
   profile: { title: "Profile", description: "Your account details" },
+  privacy: { title: "Privacy", description: "Agent memory about you (peer cards, opt-out, deletion)" },
   general: { title: "General", description: "Workspace identity, usage and settings" },
   crews: { title: "Crews & Containers", description: "Manage crews, resources and network policies" },
   connections: { title: "Connections", description: "Cross-crew communication links" },
@@ -145,6 +147,9 @@ export function SettingsLayout() {
           onSignOut={() => signOut().then(() => { window.location.href = "/login" })}
         />
       )
+    }
+    if (activeTab === "privacy" && workspaceId) {
+      return <PrivacySection workspaceId={workspaceId} />
     }
     if (activeTab === "crews" && workspaceId) {
       return <CrewsContainersSection workspaceId={workspaceId} />
