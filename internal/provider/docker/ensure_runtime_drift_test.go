@@ -227,27 +227,38 @@ func TestEnsureCrewRuntime_RecreatesOnImageDrift(t *testing.T) {
 	}
 
 	snap := calls.snapshot()
-	// Two distinct things must have happened: the stale container ID
-	// was removed AND a new one was created. Stop is best-effort
-	// (the existing code ignores its error), so we only require
-	// remove + create to appear in order — stop may be absent if the
-	// fake daemon returned 204 quickly enough that the test missed
-	// recording it. Don't make the test brittle on that detail.
-	sawRemove := false
+	// Three things must hold:
+	//   1. the stale container ID was removed,
+	//   2. a fresh one was created,
+	//   3. (1) happened BEFORE (2).
+	// Presence alone (the pre-CodeRabbit assertion) was too loose:
+	// a regression that called ContainerCreate first and then
+	// ContainerRemove on the stale ID would still satisfy it,
+	// leaving Docker briefly with two containers under the same
+	// name (one of which the daemon would have rejected, but that
+	// rejection happens at a different layer the test doesn't see).
+	// Stop is still best-effort — the production code ignores its
+	// error — so we don't require it in the ordering check, only
+	// remove + create.
+	removeIdx := -1
 	createIdx := -1
 	for i, c := range snap {
-		if strings.HasPrefix(c, "remove ") && strings.Contains(c, "stale-cid") {
-			sawRemove = true
+		if removeIdx == -1 && strings.HasPrefix(c, "remove ") && strings.Contains(c, "stale-cid") {
+			removeIdx = i
 		}
-		if c == "create" {
+		if createIdx == -1 && c == "create" {
 			createIdx = i
 		}
 	}
-	if !sawRemove {
-		t.Errorf("expected the stale container to be removed before create; got call log: %v", snap)
+	if removeIdx < 0 {
+		t.Errorf("expected the stale container to be removed; got call log: %v", snap)
 	}
 	if createIdx < 0 {
 		t.Errorf("expected a ContainerCreate after the remove; got call log: %v", snap)
+	}
+	if removeIdx >= 0 && createIdx >= 0 && removeIdx > createIdx {
+		t.Errorf("remove (idx=%d) must happen before create (idx=%d); got call log: %v",
+			removeIdx, createIdx, snap)
 	}
 }
 

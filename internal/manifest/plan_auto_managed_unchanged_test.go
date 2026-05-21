@@ -79,6 +79,57 @@ spec:
 	}
 }
 
+// TestPlanAutoManagedCredentials_PropagatesListCredentialsError is
+// the CodeRabbit-flagged regression: when the workspace state-read
+// fails during planning, the predicted action must NOT silently
+// default to ActionCreate. The previous implementation swallowed
+// the err and proceeded — which meant a transient server-down or
+// network glitch would mislead the plan output for every
+// auto-managed credential, then apply would start executing and
+// either confusingly succeed (if the next lookup worked) or fail
+// mid-stream (if it kept failing). Surfacing the error at plan
+// time keeps BuildPlan's "see the whole shape before any mutation
+// runs" contract intact.
+func TestPlanAutoManagedCredentials_PropagatesListCredentialsError(t *testing.T) {
+	body := []byte(`
+apiVersion: crewship/v1
+kind: Crew
+metadata: {name: T, slug: t}
+spec:
+  services:
+    - {name: postgres, image: postgres:16-alpine}
+  agents:
+    - {slug: a, name: A, agent_role: LEAD, prompt: x}
+`)
+	b, loadErr := Load(body)
+	if loadErr != nil {
+		t.Fatalf("Load: %v", loadErr)
+	}
+
+	fake := newFakeAPI(t)
+	// Inject a 500 on the credentials list path. The Client's
+	// fetchBody surfaces non-2xx as an error, which is what every
+	// FindCredentialByName caller in BuildPlan must propagate.
+	fake.credentialsListStatus = 500
+
+	client := NewClient(fake)
+	_, err := BuildPlan(context.Background(), client, b, Options{Mode: ApplyUpsert})
+	if err == nil {
+		t.Fatal("BuildPlan must surface state-read failures from planning; got nil error")
+	}
+	// In practice the cross-crew collision check in planCrew fires
+	// first and shrouds the err in "crew %q: lookup credential ...",
+	// but the planAutoManagedCredentials prediction is the
+	// belt-and-suspenders second layer — both wrap the same
+	// underlying API error with the credential name. Asserting on
+	// the credential name (not on a specific layer's wrapping)
+	// keeps the test stable if planCrew's pre-check is later
+	// refactored away.
+	if !strings.Contains(err.Error(), "POSTGRES_PASSWORD") {
+		t.Errorf("error should identify the credential whose lookup failed; got %v", err)
+	}
+}
+
 // TestPlanAutoManagedCredentials_CreateOnFirstApply is the matching
 // positive case: an empty workspace must still plan ActionCreate
 // for a brand-new auto-managed credential. Pins the no-regression

@@ -513,7 +513,9 @@ func (pb *planBuilder) planCrew(ctx context.Context, meta Metadata, spec *CrewSp
 	// attribution and the credential row's `created_by_actor_id`.
 	// Idempotent: if a row with the same name+workspace already
 	// exists with provider=AUTO_MANAGED, the closure no-ops.
-	pb.planAutoManagedCredentials(ctx, slug, plannedAutoCreds)
+	if err := pb.planAutoManagedCredentials(ctx, slug, plannedAutoCreds); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -539,7 +541,7 @@ func (pb *planBuilder) planCrew(ctx context.Context, meta Metadata, spec *CrewSp
 //
 // Kind is "credential" so these items rank with normal credentials
 // (well before agents that env_ref them).
-func (pb *planBuilder) planAutoManagedCredentials(ctx context.Context, crewSlug string, planned []plannedAutoCredential) {
+func (pb *planBuilder) planAutoManagedCredentials(ctx context.Context, crewSlug string, planned []plannedAutoCredential) error {
 	for i := range planned {
 		ac := planned[i] // local capture; closure must not share loop var
 		provServiceTag := crewSlug + "/" + ac.ProvisionedForService
@@ -555,12 +557,25 @@ func (pb *planBuilder) planAutoManagedCredentials(ctx context.Context, crewSlug 
 		// the DB. Look up the workspace's current credentials so the
 		// plan output matches reality.
 		//
+		// Errors from FindCredentialByName propagate up — pre-CodeRabbit
+		// this swallowed the err and treated the lookup as "no existing
+		// credential", which meant a transient server-down or network
+		// failure during planning would silently flip every auto-managed
+		// row to ActionCreate. Apply would then start, hit the closure's
+		// repeat lookup, and either succeed (confusingly contradicting
+		// the plan) or fail mid-execution. Surfacing the read error at
+		// plan time keeps the contract that BuildPlan is "see the whole
+		// shape before any mutation runs".
+		//
 		// The closure below still runs the same provenance check —
 		// it remains load-bearing as a TOCTOU defence and as the
 		// authoritative path that returns nil-or-error.
 		predicted := ActionCreate
-		if existing, err := pb.client.FindCredentialByName(ctx, ac.Name); err == nil &&
-			existing != nil &&
+		existing, err := pb.client.FindCredentialByName(ctx, ac.Name)
+		if err != nil {
+			return fmt.Errorf("plan auto-managed %s: lookup existing: %w", ac.Name, err)
+		}
+		if existing != nil &&
 			existing.Provider == "AUTO_MANAGED" &&
 			existing.ProvisionedForService != nil &&
 			*existing.ProvisionedForService == provServiceTag {
@@ -619,6 +634,7 @@ func (pb *planBuilder) planAutoManagedCredentials(ctx context.Context, crewSlug 
 				return nil
 			})
 	}
+	return nil
 }
 
 // planCrewChildren emits plan items for MCP servers + agents + their

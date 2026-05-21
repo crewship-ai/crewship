@@ -603,9 +603,9 @@ cmd_nuke() {
   if [[ -x "$docker_cmd" ]] || command -v docker &>/dev/null; then
     local prefix="crewship${S}-"
     local containers
-    containers=$($docker_cmd ps -a --filter "name=${prefix}" --format '{{.ID}}' 2>/dev/null || true)
+    containers=$("$docker_cmd" ps -a --filter "name=${prefix}" --format '{{.ID}}' 2>/dev/null || true)
     if [[ -n "$containers" ]]; then
-      echo "$containers" | xargs $docker_cmd rm -f 2>/dev/null || true
+      echo "$containers" | xargs "$docker_cmd" rm -f 2>/dev/null || true
       ok "Containers removed"
     else
       ok "No containers to remove"
@@ -614,9 +614,9 @@ cmd_nuke() {
     # Volumes: same prefix filter. xargs -r so an empty list is a noop
     # instead of a no-args `docker volume rm` (which errors loudly).
     local volumes
-    volumes=$($docker_cmd volume ls --filter "name=${prefix}" --format '{{.Name}}' 2>/dev/null || true)
+    volumes=$("$docker_cmd" volume ls --filter "name=${prefix}" --format '{{.Name}}' 2>/dev/null || true)
     if [[ -n "$volumes" ]]; then
-      echo "$volumes" | xargs $docker_cmd volume rm 2>/dev/null || true
+      echo "$volumes" | xargs "$docker_cmd" volume rm 2>/dev/null || true
       ok "Volumes removed"
     else
       ok "No volumes to remove"
