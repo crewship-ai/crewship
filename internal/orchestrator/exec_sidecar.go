@@ -183,6 +183,23 @@ func buildCredFileScript(creds []Credential, secretsAgentDir string) (string, in
 	// production containers, which run with CapDrop:ALL and so
 	// lack CAP_CHOWN + CAP_DAC_OVERRIDE; root inside such a container
 	// can't write to a 1001-owned dir nor change ownership at all.
+	//
+	// TOCTOU defence on warm container restart: an agent process from
+	// the previous session and the credential writer here both run as
+	// UID 1001, which means the agent can plant a symlink inside
+	// /secrets/<slug>/ pointing at any other 1001-writable path
+	// (/crew/shared/.memory/..., /output/<other-agent>/...) and then
+	// `echo … > path` follows that symlink, corrupting the linked
+	// target with credential cleartext or, more usefully to the
+	// attacker, with an empty .env that disables the next agent's
+	// credential map. Each write therefore opens with `rm -f path`
+	// first — the unlink removes the planted symlink (UID 1001 owns
+	// the parent dir, so unlink succeeds regardless of the symlink's
+	// target), and the subsequent shell redirect creates a fresh
+	// regular file at the intended path. The two-step pattern is
+	// safer than relying on `set -o noclobber` because that flag
+	// makes the script fail on legitimate re-runs (re-apply of a
+	// rotated credential), while rm-then-write is idempotent.
 	scriptParts := []string{
 		fmt.Sprintf("mkdir -p %s/ssh %s/certs", secretsAgentDir, secretsAgentDir),
 		fmt.Sprintf("chmod 0700 %s/ssh %s/certs", secretsAgentDir, secretsAgentDir),
@@ -191,9 +208,13 @@ func buildCredFileScript(creds []Credential, secretsAgentDir string) (string, in
 	for _, s := range specs {
 		// base64 round-trip prevents any shell interpretation of the
 		// secret value — newlines in PEM bodies, single-quotes in
-		// passwords, etc. all pass through opaquely.
+		// passwords, etc. all pass through opaquely. The leading
+		// `rm -f` neutralises any pre-planted symlink (see TOCTOU
+		// note on the script-parts block above) before the redirect
+		// follows-or-creates.
 		valB64 := base64.StdEncoding.EncodeToString([]byte(s.Value))
 		scriptParts = append(scriptParts,
+			fmt.Sprintf("rm -f %s", s.Path),
 			fmt.Sprintf("echo '%s' | base64 -d > %s", valB64, s.Path),
 			fmt.Sprintf("chmod %s %s", s.Mode, s.Path),
 		)
@@ -201,11 +222,13 @@ func buildCredFileScript(creds []Credential, secretsAgentDir string) (string, in
 
 	// .env maps each env var to its file path (never the raw value), so
 	// nothing sensitive ends up in /proc/<pid>/environ if the agent
-	// spawns subprocesses that inherit the env block.
+	// spawns subprocesses that inherit the env block. Same `rm -f`
+	// guard as the per-spec writes above.
 	envContent := strings.Join(envLines, "\n") + "\n"
 	envB64 := base64.StdEncoding.EncodeToString([]byte(envContent))
 	envPath := secretsAgentDir + "/.env"
 	scriptParts = append(scriptParts,
+		fmt.Sprintf("rm -f %s", envPath),
 		fmt.Sprintf("echo '%s' | base64 -d > %s", envB64, envPath),
 		fmt.Sprintf("chmod 0400 %s", envPath),
 		// Lock down the parent dir to 0700 so a future per-agent UID
