@@ -296,6 +296,7 @@
             "expanded": false,
             "pages": [
               "cli/approvals",
+              "cli/policy",
               "cli/hooks",
               "cli/checkpoint"
             ]

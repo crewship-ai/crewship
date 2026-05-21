@@ -20,6 +20,7 @@ crewship system <subcommand>
 | `keeper` | Show Keeper security system status |
 | `stats` | Show admin stats (workspaces, users, agents, running) |
 | `onboarding` | Show onboarding status for the current user |
+| `aux-status` | Show auxiliary model assignment per slot (PR-B F3) |
 
 ---
 
@@ -68,6 +69,39 @@ Show onboarding status for the current user. Output is always JSON.
 ```bash
 crewship system onboarding
 ```
+
+---
+
+## `crewship system aux-status`
+
+Show the resolved provider, model, timeout and source for every auxiliary-model slot (Curator, Keeper, Behavior, MemoryHealth, Negative). PR-B F3 introduced this diagnostic surface so operators can confirm `cfg.auxiliary.*` overrides actually landed before the first eval call falls back silently.
+
+```bash
+crewship system aux-status
+crewship system aux-status --format json | jq '.slots[] | select(.source=="fallback")'
+crewship system aux-status --format yaml
+```
+
+**Source column values:**
+
+| Source | Meaning |
+|---|---|
+| `explicit` | `cfg.auxiliary.<slot>` was set directly. |
+| `fallback` | The slot was empty; `cfg.auxiliary.fallback` was used instead. |
+| `unconfigured` | Neither the slot nor fallback had a provider — operator gap. |
+
+Sample output (defaults are five slots on `anthropic/claude-haiku-4-5`):
+
+```
+SLOT          PROVIDER   MODEL              TIMEOUT  SOURCE
+curator       anthropic  claude-haiku-4-5   30.0s    explicit
+keeper        anthropic  claude-haiku-4-5   5.0s     explicit
+behavior      anthropic  claude-haiku-4-5   8.0s     explicit
+memory_health anthropic  claude-haiku-4-5   15.0s    explicit
+negative      anthropic  claude-haiku-4-5   5.0s     explicit
+```
+
+The timeout column renders in seconds when >=1s and milliseconds below that, so the 3-30s span the MVP defaults use stays readable without mental math.
 
 ## See also
 

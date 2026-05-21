@@ -1,0 +1,143 @@
+---
+title: "Policy Commands"
+description: "Manage per-crew autonomy and behavior-mode policy (PR-B F2)."
+icon: "shield-check"
+---
+
+# crewship policy
+
+Manage per-crew autonomy and behavior-mode policy.
+
+Each crew carries an `autonomy_level` (`strict` | `guided` | `trusted` | `full`) and a `behavior_mode` (`warn` | `block`) that together drive every HITL decision the orchestrator makes — memory writes, skill creation, behavior-monitor escalations, ephemeral spawns. The dial lives in `crews.autonomy_level` / `crews.behavior_mode` (v98 migration) and is consumed by every PR-B / PR-C subsystem via the shared `policy.Resolver`.
+
+```bash
+crewship policy <subcommand> [flags]
+```
+
+## Subcommands
+
+| Command | Description |
+|---|---|
+| `get` | Show the current policy for one crew, including the audit triple (who set it, when, optional reason). |
+| `set` | Update a crew's policy. Loose transitions (any → `trusted`/`full`) confirm unless `--yes`; `--level full` requires `--reason`. |
+| `list` | Show every crew's policy in the current workspace. |
+
+---
+
+## Levels and modes
+
+**Autonomy levels** (closed set):
+
+| Level | Behaviour |
+|---|---|
+| `strict` | Every governable action needs operator approval. Use for production / compliance-sensitive crews. |
+| `guided` | Read-only actions auto-execute; writes need approval. Default for new crews. |
+| `trusted` | Most actions auto-execute; writes log to inbox for after-the-fact review. |
+| `full` | Autonomous; journal-only logging. Opt-in for power-team workflows. Requires `--reason`. |
+
+**Behavior modes** (closed set):
+
+| Mode | Behaviour |
+|---|---|
+| `warn` | F4.2 `DENY` decisions land as non-blocking inbox notifications; the agent's action proceeds. Default. |
+| `block` | F4.2 `DENY` aborts the next tool call. Opt-in once behavior-monitor confidence is built. |
+
+The combination `autonomy_level=full` with `behavior_mode=block` is rejected by the API (opt-in trust paired with opt-in restriction is incoherent).
+
+---
+
+## `crewship policy get`
+
+Fetch the current policy + audit triple for one crew.
+
+```bash
+crewship policy get --crew engineering
+crewship policy get --crew engineering --format json | jq .reason
+```
+
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--crew` | `string` | | Crew slug or CUID (required). |
+
+Sample output:
+
+```
+CREW:      crew-eng
+AUTONOMY:  guided
+BEHAVIOR:  warn
+SET BY:    user_01HXYZABCDEF
+SET AT:    2026-05-21T10:00:00Z
+REASON:    —
+```
+
+`--format json` and `--format yaml` pass the wire object through verbatim so jq/yq pipelines see the canonical field names (`crew_id`, `autonomy_level`, `behavior_mode`, `set_by_user_id`, `set_at`, `reason`).
+
+---
+
+## `crewship policy set`
+
+Update a crew's policy. Atomic single `PUT`; on success the shared resolver cache is invalidated server-side so downstream subsystems (memory write gating, skill creation HITL, behavior monitor, ephemeral spawn) see the new state immediately rather than waiting for the 10s TTL.
+
+```bash
+crewship policy set --crew engineering --level trusted
+crewship policy set --crew prod-ops --level full --behavior warn \
+  --reason "Friday production freeze — operator on call" --yes
+crewship policy set --crew sandbox --level strict --behavior block
+```
+
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--crew` | `string` | | Crew slug or CUID (required). |
+| `--level` | `string` | | Autonomy level (required). One of `strict`, `guided`, `trusted`, `full`. |
+| `--behavior` | `string` | `warn` | Behavior mode. One of `warn`, `block`. |
+| `--reason` | `string` | | Operator-supplied reason. Required when `--level=full`. |
+| `--yes` | `bool` | `false` | Skip the loose-transition confirmation prompt. |
+
+**Validation order:**
+
+1. `--crew`, `--level` presence checks (no round-trip on missing flags).
+2. Enum check for `--level` and `--behavior` — invalid values reject locally with a friendly error rather than letting the API return `400`.
+3. `--reason` requirement for `--level=full` — matches the same rule the API enforces, but failing fast here keeps the network out of the loop on operator typos.
+4. Loose-transition confirmation (any → `trusted` or `full`) unless `--yes`.
+
+Sample output:
+
+```
+✓ Policy updated for crew crew-eng: trusted / warn
+```
+
+---
+
+## `crewship policy list`
+
+Show every crew's policy in the current workspace, sorted by crew name (case-insensitive). Useful for fleet-wide audits and for spotting crews still on the default `guided`/`warn` pair.
+
+```bash
+crewship policy list
+crewship policy list --format json
+crewship policy list --format yaml
+```
+
+Sample output:
+
+```
+CREW          ID        AUTONOMY  BEHAVIOR  SET AT                REASON
+Engineering   crew-eng  guided    warn      —                     —
+Quality       crew-qa   strict    block     2026-05-20T00:00:00Z  Compliance hold
+```
+
+The `CREW` column is enriched from `/api/v1/crews` because the policy API only returns `crew_id`; sorting on a CUID would be stable but useless to a human reader. If the crew-name fetch fails, the column falls back to `—` and the list still renders — the policies themselves are usable without the friendly name.
+
+## Errors
+
+| Exit | Meaning |
+|---|---|
+| 400 | Invalid level/behavior combination, or `--reason` missing for `--level=full`. |
+| 401 | Not authenticated. Run `crewship login`. |
+| 404 | Crew slug/ID not found in this workspace. |
+
+## Related
+
+- [PR-B F2 PRD section](https://github.com/crewship-ai/crewship/blob/main/.claude/context/prd/PRD-AGENT-EVOLUTION-2026.md) — autonomy slider design rationale.
+- [`crewship system aux-status`](/cli/system) — diagnostic surface for the parallel PR-B F3 auxiliary-model assignment.
+- [`crewship approvals`](/cli/approvals) — inspect the inbox items the autonomy dial routes through.
