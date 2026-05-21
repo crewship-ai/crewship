@@ -104,7 +104,9 @@ func TestApproveHire_FlipsPendingReviewToIdle(t *testing.T) {
 
 	// Response body should echo the new state.
 	var body map[string]any
-	_ = json.Unmarshal(rr.Body.Bytes(), &body)
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v; body: %s", err, rr.Body.String())
+	}
 	if body["status"] != "IDLE" {
 		t.Errorf("body.status = %v, want IDLE", body["status"])
 	}
@@ -181,7 +183,9 @@ func TestApproveHire_RequiresManagerOrAbove(t *testing.T) {
 	// Row must still be PENDING_REVIEW — the 403 must not have
 	// silently flipped anything.
 	var status string
-	_ = db.QueryRow(`SELECT status FROM agents WHERE id = ?`, "a-rbac").Scan(&status)
+	if err := db.QueryRow(`SELECT status FROM agents WHERE id = ?`, "a-rbac").Scan(&status); err != nil {
+		t.Fatalf("verify status after RBAC reject: %v", err)
+	}
 	if status != "PENDING_REVIEW" {
 		t.Errorf("status after 403 = %q, want PENDING_REVIEW (no side-effect)", status)
 	}

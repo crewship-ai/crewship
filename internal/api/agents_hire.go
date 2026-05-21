@@ -248,34 +248,24 @@ func (h *AgentHandler) Hire(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 5. Per-crew quota. Counts only LIVE ephemerals (ghosts are
-	// preserved for audit and DO NOT consume a slot). Run after the
-	// policy gate so a strict-rejected request never touches the
-	// quota counter — keeps the 429 surface honest about the budget.
-	var liveCount int
-	if err := h.db.QueryRowContext(r.Context(), `
-		SELECT COUNT(*) FROM agents
-		WHERE crew_id = ? AND ephemeral = 1
-		  AND expired_at IS NULL AND deleted_at IS NULL`,
-		crewID).Scan(&liveCount); err != nil {
-		h.logger.Error("hire: count live ephemerals", "crew_id", crewID, "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
-		return
-	}
-	if liveCount >= maxAgents {
-		writeJSON(w, http.StatusTooManyRequests, map[string]any{
-			"error":   "Ephemeral quota reached",
-			"reason":  fmt.Sprintf("crew has %d live ephemerals (max %d); rehire a ghost or raise crews.max_ephemeral_agents", liveCount, maxAgents),
-			"crew_id": crewID,
-			"live":    liveCount,
-			"max":     maxAgents,
-		})
-		return
-	}
+	// 5. Per-crew quota + insert, wrapped in a single BEGIN IMMEDIATE
+	// transaction so a concurrent hire on the same crew cannot
+	// oversubscribe max_ephemeral_agents. Without the lock, the
+	// COUNT(*) + INSERT are separate operations: two simultaneous
+	// hires at the quota boundary each see (liveCount == max-1) and
+	// each commit a row, pushing the crew to (max+1).
+	//
+	// Counts only LIVE ephemerals (ghosts are preserved for audit
+	// and DO NOT consume a slot). Run after the policy gate so a
+	// strict-rejected request never touches the quota counter —
+	// keeps the 429 surface honest about the budget.
+	//
+	// sql.LevelSerializable → BEGIN IMMEDIATE on modernc.org/sqlite
+	// (same idiom used by internal/backup/lock.go +
+	// internal/api/memory_config_handler.go).
 
-	// 6. Insert the agent row. We compute expires_at now (rather than
-	// at first-message time) so the EphemeralExpiry sweeper has
-	// something to sort on even before the agent gets used.
+	// 6. Compute row identity + lifecycle stamps outside the tx so
+	// these are stable across a retry (if a future caller adds one).
 	now := time.Now().UTC()
 	agentID := generateCUID()
 	slug := buildEphemeralSlug(req.TemplateSlug, agentID)
@@ -315,7 +305,36 @@ func (h *AgentHandler) Hire(w http.ResponseWriter, r *http.Request) {
 		llmModelArg = &model
 	}
 
-	_, err = h.db.ExecContext(r.Context(), `
+	tx, err := h.db.BeginTx(r.Context(), &sql.TxOptions{Isolation: sql.LevelSerializable})
+	if err != nil {
+		h.logger.Error("hire: begin tx", "error", err)
+		replyError(w, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var liveCount int
+	if err := tx.QueryRowContext(r.Context(), `
+		SELECT COUNT(*) FROM agents
+		WHERE crew_id = ? AND ephemeral = 1
+		  AND expired_at IS NULL AND deleted_at IS NULL`,
+		crewID).Scan(&liveCount); err != nil {
+		h.logger.Error("hire: count live ephemerals", "crew_id", crewID, "error", err)
+		replyError(w, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	if liveCount >= maxAgents {
+		writeJSON(w, http.StatusTooManyRequests, map[string]any{
+			"error":   "Ephemeral quota reached",
+			"reason":  fmt.Sprintf("crew has %d live ephemerals (max %d); rehire a ghost or raise crews.max_ephemeral_agents", liveCount, maxAgents),
+			"crew_id": crewID,
+			"live":    liveCount,
+			"max":     maxAgents,
+		})
+		return
+	}
+
+	if _, err = tx.ExecContext(r.Context(), `
 		INSERT INTO agents (
 			id, crew_id, workspace_id, name, slug, agent_role, status,
 			cli_adapter, llm_provider, llm_model, tool_profile, memory_enabled,
@@ -329,9 +348,13 @@ func (h *AgentHandler) Hire(w http.ResponseWriter, r *http.Request) {
 		llmProviderArg, llmModelArg,
 		expiresAt, parentLeadID, hireReason,
 		createdAt, createdAt,
-	)
-	if err != nil {
+	); err != nil {
 		h.logger.Error("hire: insert agent", "error", err)
+		replyError(w, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		h.logger.Error("hire: commit tx", "error", err)
 		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
@@ -348,23 +371,48 @@ func (h *AgentHandler) Hire(w http.ResponseWriter, r *http.Request) {
 	httpStatus := http.StatusCreated
 	switch decision {
 	case policy.DecisionInboxApprove:
-		// Blocking inbox item — the agent row exists but is held in
-		// IDLE; the inbox approve handler (PR-D follow-up) will flip
-		// it to RUNNING. For now the row carries the pending mark so
-		// the dashboard can render "awaiting approval".
+		// Blocking inbox item — the agent row exists in
+		// PENDING_REVIEW; the approve-hire handler is the ONLY path
+		// to flip it to IDLE. The inbox waitpoint is what surfaces
+		// the approve button to the operator, so if the write fails
+		// the agent is bricked (status=PENDING_REVIEW with no
+		// inbox row to act on). Fail the request loudly so the
+		// caller can retry — the deferred Rollback above already
+		// undid the agent INSERT.
 		inboxID = generateCUID()
-		_ = h.writeInboxItem(r, inboxID, workspaceID, agentID, crewID, name,
+		if err := h.writeInboxItem(r, inboxID, workspaceID, agentID, crewID, name,
 			"hire", hireInboxTitle(name, ttlMin), hireInboxBody(req.Reason, req.TemplateSlug, ttlMin, model),
-			userID, true)
+			userID, true); err != nil {
+			h.logger.Error("hire: required inbox waitpoint write failed",
+				"error", err, "agent_id", agentID, "inbox_id", inboxID)
+			// Roll back the agent row so the caller's retry doesn't
+			// trip the UNIQUE(workspace_id, slug) constraint and so
+			// quota stays consistent. The tx was already committed
+			// above, so issue a compensating DELETE here.
+			if _, derr := h.db.ExecContext(r.Context(),
+				`DELETE FROM agents WHERE id = ? AND workspace_id = ?`,
+				agentID, workspaceID); derr != nil {
+				h.logger.Error("hire: compensating delete after inbox failure",
+					"error", derr, "agent_id", agentID)
+			}
+			replyError(w, http.StatusInternalServerError, "Internal server error")
+			return
+		}
 		pendingReview = true
 		httpStatus = http.StatusAccepted
 	case policy.DecisionAutoLogInbox:
 		// Non-blocking inbox visibility entry. The agent is already
 		// live; we're just letting the operator audit after the fact.
+		// A failed inbox write here is a missed audit row, not a
+		// bricked agent — log and continue.
 		inboxID = generateCUID()
-		_ = h.writeInboxItem(r, inboxID, workspaceID, agentID, crewID, name,
+		if err := h.writeInboxItem(r, inboxID, workspaceID, agentID, crewID, name,
 			"hire", hireInboxTitle(name, ttlMin), hireInboxBody(req.Reason, req.TemplateSlug, ttlMin, model),
-			userID, false)
+			userID, false); err != nil {
+			h.logger.Warn("hire: non-blocking inbox write failed",
+				"error", err, "agent_id", agentID)
+			inboxID = ""
+		}
 	case policy.DecisionAutoLogJournal, policy.DecisionAutoJournal:
 		// journal-only; the WriteAuditLog below covers it. No inbox
 		// noise per PRD §6 F5 (trusted/full crews don't want a hire
@@ -569,6 +617,11 @@ func (h *AgentHandler) Rehire(w http.ResponseWriter, r *http.Request) {
 	// 404'd; permanent (ephemeral=0) agents are 404'd too — rehire is
 	// semantically nonsensical on those and we don't want a typo'd id
 	// to silently flip a permanent agent into the ephemeral lifecycle.
+	//
+	// We also read the persisted status so the response can echo it
+	// back accurately. Hardcoding "IDLE" here misreports a row that's
+	// mid-mission (status=RUNNING) at the moment the operator extends
+	// the TTL.
 	var (
 		crewID        string
 		isEphemeral   int
@@ -576,14 +629,15 @@ func (h *AgentHandler) Rehire(w http.ResponseWriter, r *http.Request) {
 		oldExpiredAt  sql.NullString
 		oldHireReason sql.NullString
 		oldName       string
+		oldStatus     string
 	)
 	err := h.db.QueryRowContext(r.Context(), `
 		SELECT COALESCE(crew_id, ''), ephemeral, expires_at, expired_at,
-		       COALESCE(hire_reason, ''), name
+		       COALESCE(hire_reason, ''), name, status
 		FROM agents
 		WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
 		agentID, workspaceID).
-		Scan(&crewID, &isEphemeral, &oldExpiresAt, &oldExpiredAt, &oldHireReason, &oldName)
+		Scan(&crewID, &isEphemeral, &oldExpiresAt, &oldExpiredAt, &oldHireReason, &oldName, &oldStatus)
 	if errors.Is(err, sql.ErrNoRows) {
 		replyError(w, http.StatusNotFound, "Agent not found")
 		return
@@ -594,7 +648,12 @@ func (h *AgentHandler) Rehire(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if isEphemeral != 1 {
-		replyError(w, http.StatusBadRequest, "Agent is not ephemeral; rehire is only valid for ephemeral agents")
+		// Contract: 404 "not found or not ephemeral". Returning 400
+		// here would imply a client error to fix, but the agent
+		// fundamentally cannot be rehired regardless of request
+		// shape — same 404 surface as the sql.ErrNoRows branch above
+		// keeps caller logic uniform.
+		replyError(w, http.StatusNotFound, "Agent not found or not ephemeral")
 		return
 	}
 
@@ -624,22 +683,46 @@ func (h *AgentHandler) Rehire(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 3. Quota check: a rehire is only "free" if the agent is
-	// currently a ghost (was already counted as not-live). A rehire
-	// of a still-live ephemeral (operator extends TTL before it
-	// ghosts) doesn't add a slot — same row, same count. Either way
-	// the post-rehire state must respect max_ephemeral_agents.
+	// 3. Quota check + UPDATE wrapped in BEGIN IMMEDIATE so two
+	// concurrent rehires of distinct ghosts on the same crew can't
+	// both pass the quota gate before either runs the UPDATE. Same
+	// rationale as the Hire path: COUNT(*) + UPDATE are separate
+	// statements without the tx, leaving a TOCTOU window at the
+	// quota boundary.
+	//
+	// A rehire is only "free" if the agent is currently a ghost (was
+	// already counted as not-live). A rehire of a still-live
+	// ephemeral (operator extends TTL before it ghosts) doesn't add
+	// a slot — same row, same count.
 	wasGhost := oldExpiredAt.Valid && oldExpiredAt.String != ""
+
+	// 4. Compute new state. expires_at = now + ttl; expired_at = NULL
+	// (un-ghost); hire_reason appended with new timestamp so the
+	// column reads as a chronological history (see
+	// buildInitialReason).
+	now := time.Now().UTC()
+	newExpiresAt := now.Add(time.Duration(ttlMin) * time.Minute).Format(time.RFC3339)
+	nowStr := now.Format(time.RFC3339)
+	newReason := appendRehireReason(oldHireReason.String, req.Reason, nowStr)
+
+	tx, err := h.db.BeginTx(r.Context(), &sql.TxOptions{Isolation: sql.LevelSerializable})
+	if err != nil {
+		h.logger.Error("rehire: begin tx", "error", err, "agent_id", agentID)
+		replyError(w, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	defer func() { _ = tx.Rollback() }()
+
 	if wasGhost && crewID != "" {
 		var liveCount, maxAgents int
-		if err := h.db.QueryRowContext(r.Context(),
+		if err := tx.QueryRowContext(r.Context(),
 			`SELECT max_ephemeral_agents FROM crews WHERE id = ?`,
 			crewID).Scan(&maxAgents); err != nil {
 			h.logger.Error("rehire: load crew quota", "crew_id", crewID, "error", err)
 			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		}
-		if err := h.db.QueryRowContext(r.Context(), `
+		if err := tx.QueryRowContext(r.Context(), `
 			SELECT COUNT(*) FROM agents
 			WHERE crew_id = ? AND ephemeral = 1
 			  AND expired_at IS NULL AND deleted_at IS NULL`,
@@ -660,22 +743,17 @@ func (h *AgentHandler) Rehire(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 4. Compute new state. expires_at = now + ttl; expired_at = NULL
-	// (un-ghost); hire_reason appended with new timestamp so the
-	// column reads as a chronological history (see
-	// buildInitialReason).
-	now := time.Now().UTC()
-	newExpiresAt := now.Add(time.Duration(ttlMin) * time.Minute).Format(time.RFC3339)
-	nowStr := now.Format(time.RFC3339)
-	newReason := appendRehireReason(oldHireReason.String, req.Reason, nowStr)
-
-	_, err = h.db.ExecContext(r.Context(), `
+	if _, err = tx.ExecContext(r.Context(), `
 		UPDATE agents
 		SET expires_at = ?, expired_at = NULL, hire_reason = ?, updated_at = ?
 		WHERE id = ? AND workspace_id = ?`,
-		newExpiresAt, newReason, nowStr, agentID, workspaceID)
-	if err != nil {
+		newExpiresAt, newReason, nowStr, agentID, workspaceID); err != nil {
 		h.logger.Error("rehire: update agent", "error", err, "agent_id", agentID)
+		replyError(w, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		h.logger.Error("rehire: commit tx", "error", err, "agent_id", agentID)
 		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
@@ -717,12 +795,15 @@ func (h *AgentHandler) Rehire(w http.ResponseWriter, r *http.Request) {
 		WorkspaceID: workspaceID,
 		Slug:        "", // not re-derived; caller can GET to refresh
 		Name:        oldName,
-		Status:      "IDLE",
-		Ephemeral:   true,
-		ExpiresAt:   &expiresOut,
-		ExpiredAt:   nil,
-		HireReason:  &reasonOut,
-		Decision:    string(decision),
+		// Echo the persisted status; rehire does not touch the
+		// status column, so a row that was RUNNING when the operator
+		// extended its TTL stays RUNNING in the response.
+		Status:     oldStatus,
+		Ephemeral:  true,
+		ExpiresAt:  &expiresOut,
+		ExpiredAt:  nil,
+		HireReason: &reasonOut,
+		Decision:   string(decision),
 	})
 }
 

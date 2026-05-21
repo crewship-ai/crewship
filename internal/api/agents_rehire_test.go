@@ -40,7 +40,10 @@ func seedEphemeralAgent(t *testing.T, db *sql.DB, wsID, crewID, slug string, exp
 
 func postRehire(t *testing.T, h *AgentHandler, userID, wsID, role, agentID string, body any) *httptest.ResponseRecorder {
 	t.Helper()
-	b, _ := json.Marshal(body)
+	b, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal rehire body: %v", err)
+	}
 	req := httptest.NewRequest("POST", "/api/v1/agents/"+agentID+"/rehire", bytes.NewReader(b))
 	req.SetPathValue("agentId", agentID)
 	req.Header.Set("Content-Type", "application/json")
@@ -119,7 +122,9 @@ func TestRehire_AppendsHistoryWithNewline(t *testing.T) {
 	// Rehire a second time so we exercise the multi-line append path.
 	// Each rehire moves expired_at back to NULL so the seed-then-rehire
 	// loop below mimics the "rehire a still-live ephemeral" case.
-	_, _ = db.Exec(`UPDATE agents SET expired_at = ? WHERE id = ?`, past, agentID)
+	if _, err := db.Exec(`UPDATE agents SET expired_at = ? WHERE id = ?`, past, agentID); err != nil {
+		t.Fatalf("force ghost before second rehire: %v", err)
+	}
 	rr2 := postRehire(t, h, userID, wsID, "MANAGER", agentID, map[string]any{
 		"ttl_minutes": 30,
 		"reason":      "extend twice",
@@ -129,7 +134,9 @@ func TestRehire_AppendsHistoryWithNewline(t *testing.T) {
 	}
 
 	var reason sql.NullString
-	_ = db.QueryRow(`SELECT hire_reason FROM agents WHERE id = ?`, agentID).Scan(&reason)
+	if err := db.QueryRow(`SELECT hire_reason FROM agents WHERE id = ?`, agentID).Scan(&reason); err != nil {
+		t.Fatalf("verify hire_reason: %v", err)
+	}
 	if want := "[2024-01-01T00:00:00Z] hire: original"; !strings.Contains(reason.String, want) {
 		t.Errorf("missing initial: %q", reason.String)
 	}
@@ -164,8 +171,11 @@ func TestRehire_NonEphemeralRejected(t *testing.T) {
 		"ttl_minutes": 30,
 		"reason":      "should reject",
 	})
-	if rr.Code != 400 {
-		t.Fatalf("status = %d, want 400; body: %s", rr.Code, rr.Body.String())
+	// Contract: non-ephemeral collapses with "agent not found" into a
+	// single 404 surface — caller logic stays uniform regardless of
+	// whether the id is unknown or just permanent.
+	if rr.Code != 404 {
+		t.Fatalf("status = %d, want 404; body: %s", rr.Code, rr.Body.String())
 	}
 }
 
@@ -187,7 +197,9 @@ func TestRehire_StrictPolicyRejected(t *testing.T) {
 
 	// State must be untouched on policy reject — no partial flip.
 	var expiredAt sql.NullString
-	_ = db.QueryRow(`SELECT expired_at FROM agents WHERE id = ?`, agentID).Scan(&expiredAt)
+	if err := db.QueryRow(`SELECT expired_at FROM agents WHERE id = ?`, agentID).Scan(&expiredAt); err != nil {
+		t.Fatalf("verify expired_at after strict reject: %v", err)
+	}
 	if !expiredAt.Valid || expiredAt.String != past {
 		t.Errorf("expired_at flipped to %v on rejected rehire; want untouched %q", expiredAt, past)
 	}
