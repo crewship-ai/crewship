@@ -137,7 +137,9 @@ func TestSweep_GhostsOnlyExpiredAndEphemeralAgents(t *testing.T) {
 	}
 	for _, tc := range cases {
 		var expiredAt sql.NullString
-		_ = db.QueryRow(`SELECT expired_at FROM agents WHERE id = ?`, tc.id).Scan(&expiredAt)
+		if err := db.QueryRow(`SELECT expired_at FROM agents WHERE id = ?`, tc.id).Scan(&expiredAt); err != nil {
+			t.Fatalf("query expired_at for %s: %v", tc.id, err)
+		}
 		if expiredAt.Valid != tc.wantGhosted {
 			t.Errorf("agent %s: expired_at.Valid=%v, want %v", tc.id, expiredAt.Valid, tc.wantGhosted)
 		}
@@ -205,7 +207,9 @@ func TestSweep_RehiredRowSkippedByGuard(t *testing.T) {
 	}
 
 	var expiredAt sql.NullString
-	_ = db.QueryRow(`SELECT expired_at FROM agents WHERE id = ?`, "rehired").Scan(&expiredAt)
+	if err := db.QueryRow(`SELECT expired_at FROM agents WHERE id = ?`, "rehired").Scan(&expiredAt); err != nil {
+		t.Fatalf("query expired_at for rehired: %v", err)
+	}
 	if expiredAt.Valid {
 		t.Errorf("rehired agent ghosted; expired_at = %v", expiredAt)
 	}
@@ -270,19 +274,24 @@ func TestStartExpirySweeper_RunsOnTick(t *testing.T) {
 	defer cancel()
 	StartExpirySweeper(ctx, db, nil, nil, 25*time.Millisecond, logger)
 
-	// Wait up to ~250ms (10 ticks) for the sweeper to flip the row.
-	// A regression that broke the goroutine would never flip; we
-	// don't sleep longer than necessary on the happy path.
-	deadline := time.Now().Add(250 * time.Millisecond)
+	// Wait up to ~2s for the sweeper to flip the row. The happy
+	// path returns the moment expired_at is set, so a healthy CI
+	// run still finishes in tens of milliseconds. The wide
+	// deadline only kicks in on a loaded runner where the
+	// goroutine scheduler is starved — without it, this test
+	// flaked under contention for reasons unrelated to behavior.
+	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		var expiredAt sql.NullString
-		_ = db.QueryRow(`SELECT expired_at FROM agents WHERE id = 'due-tick'`).Scan(&expiredAt)
+		if err := db.QueryRow(`SELECT expired_at FROM agents WHERE id = 'due-tick'`).Scan(&expiredAt); err != nil {
+			t.Fatalf("query expired_at for due-tick: %v", err)
+		}
 		if expiredAt.Valid {
 			return // success
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatal("sweeper did not ghost due row within 250ms")
+	t.Fatal("sweeper did not ghost due row within 2s")
 }
 
 // TestSweep_SkipsRunningAgent verifies the mid-mission grace contract:
@@ -318,8 +327,12 @@ func TestSweep_SkipsRunningAgent(t *testing.T) {
 
 	// idle-due must be ghosted; running-due must NOT be.
 	var idleExpired, runningExpired sql.NullString
-	_ = db.QueryRow(`SELECT expired_at FROM agents WHERE id = ?`, "idle-due").Scan(&idleExpired)
-	_ = db.QueryRow(`SELECT expired_at FROM agents WHERE id = ?`, "running-due").Scan(&runningExpired)
+	if err := db.QueryRow(`SELECT expired_at FROM agents WHERE id = ?`, "idle-due").Scan(&idleExpired); err != nil {
+		t.Fatalf("query expired_at for idle-due: %v", err)
+	}
+	if err := db.QueryRow(`SELECT expired_at FROM agents WHERE id = ?`, "running-due").Scan(&runningExpired); err != nil {
+		t.Fatalf("query expired_at for running-due: %v", err)
+	}
 
 	if !idleExpired.Valid {
 		t.Error("idle-due agent: expired_at NULL, want set")
@@ -331,7 +344,9 @@ func TestSweep_SkipsRunningAgent(t *testing.T) {
 	// The RUNNING row's expires_at MUST still be the past timestamp
 	// — scheduling intent is preserved; only the flag flip waits.
 	var expiresAt string
-	_ = db.QueryRow(`SELECT expires_at FROM agents WHERE id = ?`, "running-due").Scan(&expiresAt)
+	if err := db.QueryRow(`SELECT expires_at FROM agents WHERE id = ?`, "running-due").Scan(&expiresAt); err != nil {
+		t.Fatalf("query expires_at for running-due: %v", err)
+	}
 	if expiresAt != "2026-06-01T11:00:00Z" {
 		t.Errorf("running-due expires_at = %q, want unchanged 2026-06-01T11:00:00Z", expiresAt)
 	}
@@ -357,7 +372,9 @@ func TestSweep_SkipsRunningAgent(t *testing.T) {
 	if n != 1 {
 		t.Errorf("second sweep ghosted = %d, want 1", n)
 	}
-	_ = db.QueryRow(`SELECT expired_at FROM agents WHERE id = ?`, "running-due").Scan(&runningExpired)
+	if err := db.QueryRow(`SELECT expired_at FROM agents WHERE id = ?`, "running-due").Scan(&runningExpired); err != nil {
+		t.Fatalf("query expired_at after second sweep: %v", err)
+	}
 	if !runningExpired.Valid {
 		t.Error("running-due agent (now idle): expired_at NULL after second sweep, want set")
 	}
