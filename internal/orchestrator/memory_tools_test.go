@@ -36,6 +36,7 @@ func TestBuildMemoryContext_NoCurlToolsBlock_PostZ1(t *testing.T) {
 		"[MEMORY TOOLS]",
 		"[END MEMORY TOOLS]",
 		"127.0.0.1:9119",
+		"localhost:9119",
 		"/memory/search",
 		"/memory/read",
 		"/memory/write",
