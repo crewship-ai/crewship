@@ -1336,6 +1336,16 @@ END;
 	// landed v99 (cli_token_tiers) + v100 (rbac_extensions).
 	// See migrate_consts_v101_autonomy.go.
 	{version: 101, name: "autonomy", sql: migrationAutonomy},
+
+	// Keeper Phase 2 (PRD §6 F4 / PR-C): widens keeper_requests.request_
+	// type to a CHECK-constrained enum admitting four new kinds
+	// (skill_review, behavior, memory_health, negative_learning) and
+	// lands the skills lifecycle columns + skill_invocations audit
+	// table the F4.1 evaluator consumes. Originally drafted as v100 on
+	// this branch; bumped to v102 after main landed v100 (rbac_extensions)
+	// and v101 (autonomy renumber).
+	// See migrate_consts_v102_keeper_phase2.go.
+	{version: 102, name: "keeper_phase2", sql: migrationKeeperPhase2},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the
