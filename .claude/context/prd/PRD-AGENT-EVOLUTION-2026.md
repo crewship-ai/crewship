@@ -158,7 +158,7 @@ Pavel explicitly requested: "natvrdo to nastav a tečka — zamysli se nad dalš
 
 **Where:** `internal/orchestrator/memory.go:453-475` (22 lines of system prompt boilerplate telling agent to curl sidecar).
 **Why:** Replaced wholesale by F1 native memory tools. Keeping it during transition would mean agents see both, get confused.
-**Action:** Delete after PR-A merges. Hard cut, no fallback. Since PR-Z lands first and PR-A follows immediately, the gap is hours, not days.
+**Action:** Removed in PR-Z (this PR). PR-A then wires native function-calling tools per adapter. Documented hard-reset window: between PR-Z merge and PR-A adapter wiring, agents have only the boot-time memory snapshot for mid-session recall (boot snapshot itself is untouched by Z.1). This is the intentional transition.
 
 ### Z.2 — Remove `phi3:mini` Keeper fallback
 
@@ -242,10 +242,10 @@ avoids a half-migrated intermediate state on the trunk.
 ### Cumulative impact of PR-Z
 
 - ~550 LOC removed (Z.6 voided saved ~50)
-- 1 migration (`system_prompt` → `system_prompt_legacy` rename)
-- 1 migration (learned files → lessons.md)
+- 0 DB migrations land in PR-Z (Z.3's `system_prompt → system_prompt_legacy` rename and Z.7's `learned-*.md → lessons.md` consolidator+approve swap were both descoped during implementation — see each item for the lighter PR-Z scope and the deferred PR target; PR-E for Z.3 alongside PERSONA migration, PR-C for Z.7 alongside F4.4 wire-up)
 - Inbox flow correctness fix (Z.4)
-- Removes 3 config flags / dead fields (Z.2, Z.5, Z.7) — Z.6 voided
+- Removes 3 dead fields / silent defaults (Z.2, Z.5) + lands Go-level deprecation tags for Z.3
+- Ships unified `lessons.md` writer primitive (Z.7) ready for PR-C consumers; existing `learned-*.md` flow untouched
 - Foundation for clean PR-A (no transitional double-handling needed)
 
 ---

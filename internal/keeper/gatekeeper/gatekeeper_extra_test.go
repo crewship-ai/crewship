@@ -358,10 +358,6 @@ func TestGatekeeper_NoConvHistory_NoBackgroundBlockInPrompt(t *testing.T) {
 	}
 }
 
-// TestGatekeeper_DefaultsModelWhenEmpty verifies New("") falls back to
-// "phi3:mini" so the upstream call doesn't ship an empty model name.
-// Invariant: a misconfigured caller must not produce a request the
-// provider will reject for an empty Model field.
 // TestGatekeeper_PassesExplicitModelToProvider replaces the deleted
 // TestGatekeeper_DefaultsModelWhenEmpty. PR-Z Z.2 removed the silent
 // phi3:mini fallback in gatekeeper.New; the model string is now passed

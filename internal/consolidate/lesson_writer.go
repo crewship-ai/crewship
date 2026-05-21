@@ -99,6 +99,9 @@ var validLessonSources = map[LessonSource]struct{}{
 // them requires a coordinated bump of validLessonKinds /
 // validLessonSources AND the consumers that switch on the value.
 func WriteLesson(ctx context.Context, agentMemoryDir string, entry LessonEntry) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if strings.TrimSpace(entry.ID) == "" {
 		return errors.New("lesson: id is required (idempotency key)")
 	}
@@ -120,6 +123,9 @@ func WriteLesson(ctx context.Context, agentMemoryDir string, entry LessonEntry) 
 	if err := os.MkdirAll(agentMemoryDir, 0o755); err != nil {
 		return fmt.Errorf("lesson: mkdir %s: %w", agentMemoryDir, err)
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	path := filepath.Join(agentMemoryDir, lessonsFilename)
 
 	lk := memory.NewFileLock(path + ".lock")
@@ -128,7 +134,10 @@ func WriteLesson(ctx context.Context, agentMemoryDir string, entry LessonEntry) 
 	}
 	defer func() { _ = lk.Unlock() }()
 
-	current, err := loadLessonsLocked(path)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	current, err := loadLessonsLocked(ctx, path)
 	if err != nil {
 		return err
 	}
@@ -145,16 +154,37 @@ func WriteLesson(ctx context.Context, agentMemoryDir string, entry LessonEntry) 
 	}
 	out.Entries = append(out.Entries, entry)
 
-	return saveLessonsLocked(path, out)
+	return saveLessonsLocked(ctx, path, out)
 }
 
 // ReadLessons returns entries from {agentMemoryDir}/lessons.md.
 // If kind is the empty string, all entries are returned; otherwise only
 // entries matching kind are returned. Missing file returns nil + nil
 // (a fresh agent with no lessons is not an error).
+//
+// Acquires the same flock that WriteLesson uses so a concurrent write
+// in flight doesn't return a half-written / unmarshal-failing file.
+// Unknown kind values are rejected at the boundary rather than
+// silently returning zero matches — a typo would otherwise hide a
+// caller bug behind an empty result.
 func ReadLessons(ctx context.Context, agentMemoryDir string, kind LessonKind) ([]LessonEntry, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if kind != "" {
+		if _, ok := validLessonKinds[kind]; !ok {
+			return nil, fmt.Errorf("lesson: invalid kind filter %q (must be positive | negative | neutral, or empty for all)", kind)
+		}
+	}
 	path := filepath.Join(agentMemoryDir, lessonsFilename)
-	file, err := loadLessonsLocked(path)
+
+	lk := memory.NewFileLock(path + ".lock")
+	if err := lk.Lock(); err != nil {
+		return nil, fmt.Errorf("lesson: lock %s: %w", path, err)
+	}
+	defer func() { _ = lk.Unlock() }()
+
+	file, err := loadLessonsLocked(ctx, path)
 	if err != nil {
 		return nil, err
 	}
@@ -173,8 +203,13 @@ func ReadLessons(ctx context.Context, agentMemoryDir string, kind LessonKind) ([
 // loadLessonsLocked reads + parses the file. Caller must hold the
 // flock (or the file must be otherwise quiesced). Missing file is
 // returned as an empty lessonFile (not an error) so first-write paths
-// don't have to branch.
-func loadLessonsLocked(path string) (lessonFile, error) {
+// don't have to branch. ctx is checked once at entry — the parse
+// itself is fast enough that a finer-grained cancellation check
+// inside yaml.Unmarshal would be ceremony without benefit.
+func loadLessonsLocked(ctx context.Context, path string) (lessonFile, error) {
+	if err := ctx.Err(); err != nil {
+		return lessonFile{}, err
+	}
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return lessonFile{}, nil
@@ -193,8 +228,13 @@ func loadLessonsLocked(path string) (lessonFile, error) {
 }
 
 // saveLessonsLocked writes the file atomically (write to temp +
-// rename). Caller must hold the flock.
-func saveLessonsLocked(path string, f lessonFile) error {
+// rename). Caller must hold the flock. ctx is checked once at entry
+// — the marshal+rename is fast enough that finer-grained cancellation
+// would only add noise.
+func saveLessonsLocked(ctx context.Context, path string, f lessonFile) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	data, err := yaml.Marshal(f)
 	if err != nil {
 		return fmt.Errorf("lesson: marshal: %w", err)

@@ -122,51 +122,65 @@ func TestWriteLesson_IdempotentByID(t *testing.T) {
 	}
 }
 
-// TestWriteLesson_RejectsInvalidKind blocks bad-kind writes at the
-// boundary so consumers can't accidentally write `kind: bogus` and
-// have downstream filters silently exclude them.
-func TestWriteLesson_RejectsInvalidKind(t *testing.T) {
-	dir := t.TempDir()
-	bad := LessonEntry{
-		ID:         "ent_x",
-		Kind:       "bogus",
-		CapturedAt: time.Now().UTC(),
-		Source:     LessonSourceManual,
-		Rule:       "shouldn't land",
+// TestWriteLesson_RejectsInvalidInputs blocks bad writes at the
+// boundary so consumers can't accidentally land entries that
+// downstream readers would silently skip / dedup. Table-driven so
+// future validation rules (e.g. invalid source enum, rule too long)
+// just append a row rather than copy a whole test.
+func TestWriteLesson_RejectsInvalidInputs(t *testing.T) {
+	now := time.Now().UTC()
+	cases := []struct {
+		name  string
+		entry LessonEntry
+	}{
+		{
+			name: "invalid_kind",
+			entry: LessonEntry{
+				ID: "ent_x", Kind: "bogus", CapturedAt: now,
+				Source: LessonSourceManual, Rule: "shouldn't land",
+			},
+		},
+		{
+			name: "empty_id",
+			entry: LessonEntry{
+				Kind: LessonKindPositive, CapturedAt: now,
+				Source: LessonSourceManual, Rule: "needs id",
+			},
+		},
+		{
+			name: "empty_rule",
+			entry: LessonEntry{
+				ID: "ent_y", Kind: LessonKindPositive, CapturedAt: now,
+				Source: LessonSourceManual, Rule: "",
+			},
+		},
+		{
+			name: "invalid_source",
+			entry: LessonEntry{
+				ID: "ent_z", Kind: LessonKindPositive, CapturedAt: now,
+				Source: "definitely_not_a_valid_source", Rule: "rejected",
+			},
+		},
 	}
-	if err := WriteLesson(context.Background(), dir, bad); err == nil {
-		t.Fatal("expected error for invalid kind 'bogus'")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := WriteLesson(context.Background(), dir, tc.entry); err == nil {
+				t.Fatalf("expected error for %s, got nil", tc.name)
+			}
+		})
 	}
 }
 
-// TestWriteLesson_RejectsEmptyID blocks empty-ID writes — ID is the
-// idempotency key; without it the dedup contract collapses.
-func TestWriteLesson_RejectsEmptyID(t *testing.T) {
+// TestReadLessons_RejectsInvalidKindFilter — after the duplicate
+// CodeRabbit finding, ReadLessons now validates kind at the boundary
+// rather than silently returning zero matches. A typo'd kind filter
+// should surface as a structured error, not look like an empty
+// lessons file.
+func TestReadLessons_RejectsInvalidKindFilter(t *testing.T) {
 	dir := t.TempDir()
-	bad := LessonEntry{
-		Kind:       LessonKindPositive,
-		CapturedAt: time.Now().UTC(),
-		Source:     LessonSourceManual,
-		Rule:       "needs id",
-	}
-	if err := WriteLesson(context.Background(), dir, bad); err == nil {
-		t.Fatal("expected error for empty ID")
-	}
-}
-
-// TestWriteLesson_RejectsEmptyRule blocks empty-rule writes — a
-// lesson with no rule body is noise.
-func TestWriteLesson_RejectsEmptyRule(t *testing.T) {
-	dir := t.TempDir()
-	bad := LessonEntry{
-		ID:         "ent_y",
-		Kind:       LessonKindPositive,
-		CapturedAt: time.Now().UTC(),
-		Source:     LessonSourceManual,
-		Rule:       "",
-	}
-	if err := WriteLesson(context.Background(), dir, bad); err == nil {
-		t.Fatal("expected error for empty rule")
+	if _, err := ReadLessons(context.Background(), dir, "bogus"); err == nil {
+		t.Fatal("expected error for invalid kind filter 'bogus'")
 	}
 }
 

@@ -419,17 +419,22 @@ func TestKeeper_EscalateDecision_CreatesInboxItem(t *testing.T) {
 	}
 
 	var (
-		inboxKind      string
-		inboxBlocking  int
-		inboxWorkspace string
-		inboxState     string
+		inboxKind       string
+		inboxBlocking   int
+		inboxWorkspace  string
+		inboxState      string
+		inboxTargetRole sql.NullString
+		inboxPriority   string
+		inboxBody       sql.NullString
 	)
 	err := db.QueryRowContext(context.Background(), `
-		SELECT kind, blocking, workspace_id, state
+		SELECT kind, blocking, workspace_id, state,
+		       target_role, priority, body_md
 		FROM inbox_items
 		WHERE kind = 'escalation' AND source_id = ?`,
 		result.RequestID,
-	).Scan(&inboxKind, &inboxBlocking, &inboxWorkspace, &inboxState)
+	).Scan(&inboxKind, &inboxBlocking, &inboxWorkspace, &inboxState,
+		&inboxTargetRole, &inboxPriority, &inboxBody)
 	if err != nil {
 		t.Fatalf("expected inbox_items row for ESCALATE request_id=%s: %v", result.RequestID, err)
 	}
@@ -444,6 +449,19 @@ func TestKeeper_EscalateDecision_CreatesInboxItem(t *testing.T) {
 	}
 	if inboxState != "unread" {
 		t.Errorf("expected initial state=unread, got %q", inboxState)
+	}
+	// Lock the rest of the inbox contract so a future refactor can't
+	// silently drop routing metadata that operators rely on for
+	// triage. CodeRabbit caught these missing assertions on the first
+	// review pass.
+	if !inboxTargetRole.Valid || inboxTargetRole.String != "MANAGER" {
+		t.Errorf("expected target_role=MANAGER, got %v", inboxTargetRole)
+	}
+	if inboxPriority != "high" {
+		t.Errorf("expected priority=high (ESCALATE is operator-blocking), got %q", inboxPriority)
+	}
+	if !inboxBody.Valid || inboxBody.String != gk.resp.Reason {
+		t.Errorf("expected body_md to propagate gatekeeper reason %q, got %v", gk.resp.Reason, inboxBody)
 	}
 }
 

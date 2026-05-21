@@ -207,9 +207,9 @@ func Default() *Config {
 			Enabled:   false,
 			OllamaURL: "http://localhost:11434",
 			// PR-Z Z.2: no default model. Operator must set cfg.keeper.model
-			// (or CREWSHIP_KEEPER_MODEL) explicitly when enabling Keeper.
-			// F3 (PR-B) replaces this with cfg.auxiliary.keeper.model
-			// defaulting to claude-haiku-4-5.
+			// (or the KEEPER_MODEL env var — see applyEnvOverrides below)
+			// explicitly when enabling Keeper. F3 (PR-B) replaces this with
+			// cfg.auxiliary.keeper.model defaulting to claude-haiku-4-5.
 			Model: "",
 		},
 	}
