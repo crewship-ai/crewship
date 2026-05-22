@@ -106,3 +106,21 @@ updates:
       - "docker"
     commit-message:
       prefix: "chore(deps)"
+
+  # docker/docker-compose.yml pins postgres:18-alpine on a floating tag.
+  # Dependabot's docker-compose ecosystem (separate from `docker` for
+  # Dockerfiles) surfaces patch / minor releases of every image
+  # referenced from a compose file in this directory.
+  - package-ecosystem: "docker-compose"
+    directory: "/docker"
+    target-branch: "main"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 3
+    labels:
+      - "dependencies"
+      - "docker"
+    commit-message:
+      prefix: "chore(deps)"
