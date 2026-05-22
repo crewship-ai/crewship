@@ -56,7 +56,11 @@ func (h *GoogleAuthHandler) Redirect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	b := make([]byte, 16)
+	// 32 bytes = 256 bits — leaves a 2x margin over the NIST 128-bit
+	// minimum for a CSRF nonce, since this state token is the only
+	// thing protecting the OAuth callback from being forged across
+	// origins. Audit M22 mitigation.
+	b := make([]byte, 32)
 	_, _ = rand.Read(b)
 	state := base64.URLEncoding.EncodeToString(b)
 

@@ -408,7 +408,13 @@ func scanSession(r rowScanner) (*Session, error) {
 }
 
 func newSessionID() (string, error) {
-	var b [8]byte
+	// 32 bytes = 256 bits. The previous 8-byte (64-bit) ID was below
+	// the NIST 128-bit minimum for session identifiers: birthday-bound
+	// guessing a live session in a busy deployment is plausible (2^32
+	// ≈ 4B sessions ⇒ collision near 65k live sessions). 256-bit
+	// puts the collision floor astronomically out of reach. The DB
+	// column is TEXT so no migration is needed. Audit M22.
+	var b [32]byte
 	if _, err := rand.Read(b[:]); err != nil {
 		return "", err
 	}
