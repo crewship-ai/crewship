@@ -205,6 +205,12 @@ func TestBuildEthosBlock(t *testing.T) {
 			if !strings.Contains(got, tc.wantText) {
 				t.Errorf("missing text %q in %q", tc.wantText, got)
 			}
+			// Refusal-hygiene line must be present in every role -- audit wave5/a5-2
+			// observed both LEAD and AGENT agents leaking tools/dirs/siblings in
+			// refusals regardless of the agent's own system_prompt.
+			if !strings.Contains(got, "do not enumerate") {
+				t.Errorf("missing refusal-hygiene constraint in ETHOS block for role %q: %q", tc.role, got)
+			}
 		})
 	}
 }
