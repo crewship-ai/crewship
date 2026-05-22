@@ -7,7 +7,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -49,13 +51,9 @@ func (o *OpenAI) Complete(ctx context.Context, req Request) (*Response, error) {
 	if err != nil {
 		return nil, err
 	}
-	httpReq, err := o.newHTTPRequest(ctx, body)
+	resp, err := o.doWithRetry(ctx, body)
 	if err != nil {
 		return nil, err
-	}
-	resp, err := o.client.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("openai http: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -76,13 +74,9 @@ func (o *OpenAI) Stream(ctx context.Context, req Request, handler func(StreamEve
 	if err != nil {
 		return nil, err
 	}
-	httpReq, err := o.newHTTPRequest(ctx, body)
+	resp, err := o.doWithRetry(ctx, body)
 	if err != nil {
 		return nil, err
-	}
-	resp, err := o.client.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("openai http: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -91,6 +85,62 @@ func (o *OpenAI) Stream(ctx context.Context, req Request, handler func(StreamEve
 	}
 
 	return o.parseSSEStream(resp.Body, handler)
+}
+
+// doWithRetry executes an HTTP request with exponential backoff retry on transient errors.
+// Mirrors Anthropic.doWithRetry: max 3 attempts, 1s/2s/4s exponential backoff with jitter,
+// Retry-After honoured. Uses the same retryableStatusCodes (429/500/503/529) shared with
+// the Anthropic provider so policy stays consistent across LLM backends. Without this the
+// caller saw raw 429/503 from the upstream the moment OpenAI rate-limited a burst -- which
+// the orchestrator's own retry layer would then duplicate, amplifying spikes.
+func (o *OpenAI) doWithRetry(ctx context.Context, body []byte) (*http.Response, error) {
+	const maxRetries = 3
+	baseDelay := time.Second
+	var retryAfter time.Duration
+
+	var lastErr error
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		httpReq, err := o.newHTTPRequest(ctx, body)
+		if err != nil {
+			return nil, err
+		}
+
+		resp, err := o.client.Do(httpReq)
+		if err != nil {
+			lastErr = fmt.Errorf("openai http: %w", err)
+			if ctx.Err() != nil {
+				return nil, lastErr
+			}
+			// Network error -- retry
+		} else if !retryableStatusCodes[resp.StatusCode] {
+			return resp, nil // Success or non-retryable error
+		} else {
+			respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+			resp.Body.Close()
+			lastErr = fmt.Errorf("OpenAI API returned %d: %s", resp.StatusCode, respBody)
+
+			if ra := resp.Header.Get("Retry-After"); ra != "" {
+				if secs, err := strconv.Atoi(ra); err == nil && secs > 0 {
+					retryAfter = time.Duration(secs) * time.Second
+				}
+			}
+		}
+
+		if attempt < maxRetries-1 {
+			delay := baseDelay * (1 << attempt) // 1s, 2s, 4s
+			if retryAfter > delay {
+				delay = retryAfter
+			}
+			retryAfter = 0
+			jitter := time.Duration(rand.Int63n(int64(delay / 4)))
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(delay + jitter):
+			}
+		}
+	}
+	return nil, fmt.Errorf("openai: max retries exceeded: %w", lastErr)
 }
 
 func (o *OpenAI) newHTTPRequest(ctx context.Context, body []byte) (*http.Request, error) {
