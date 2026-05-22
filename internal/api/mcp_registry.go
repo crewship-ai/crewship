@@ -97,7 +97,13 @@ type registryListResponse struct {
 // --- Sync function ---
 
 const (
-	mcpRegistryPageSize = 200
+	// Upstream registry caps `limit` at 100 — a 200 request comes back
+	// as HTTP 422 `expected number <= 100`. Pre-fix the daemon retried
+	// the same too-large request four times then gave up, leaving the
+	// MCP catalog permanently empty on every fresh install. Discovered
+	// when the verbose-422 logging from this PR finally surfaced the
+	// registry's actual rejection text. (Issue #540 root cause.)
+	mcpRegistryPageSize = 100
 	mcpRegistryMaxPages = 200 // hard ceiling to avoid runaway loops on broken cursors
 )
 
