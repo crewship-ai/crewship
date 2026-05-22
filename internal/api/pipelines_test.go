@@ -326,7 +326,10 @@ func TestPipelinesAPI_Delete_SoftDeletes(t *testing.T) {
 	defer db.Close()
 	seedSmokePipeline(t, db, "doomed")
 	h := NewPipelineHandler(db, slog.Default(), nil, nil)
-	req := withWorkspaceCtx(httptest.NewRequest("DELETE", "/x", nil), "ws_smoke")
+	// canRole(role, "delete") gate added per audit M2-promoted -- the
+	// happy-path needs OWNER (or any role that satisfies "delete":
+	// OWNER, ADMIN).
+	req := withWorkspaceUser(httptest.NewRequest("DELETE", "/x", nil), "u1", "ws_smoke", "OWNER")
 	req.SetPathValue("slug", "doomed")
 	w := httptest.NewRecorder()
 	h.Delete(w, req)
@@ -334,12 +337,29 @@ func TestPipelinesAPI_Delete_SoftDeletes(t *testing.T) {
 		t.Errorf("expected 204, got %d", w.Code)
 	}
 	// After delete, list should be empty.
-	listReq := withWorkspaceCtx(httptest.NewRequest("GET", "/x", nil), "ws_smoke")
+	listReq := withWorkspaceUser(httptest.NewRequest("GET", "/x", nil), "u1", "ws_smoke", "OWNER")
 	listW := httptest.NewRecorder()
 	h.List(listW, listReq)
 	body, _ := io.ReadAll(listW.Body)
 	if !bytes.Contains(body, []byte("[]")) {
 		t.Errorf("list after delete should be empty array, got %s", body)
+	}
+}
+
+// TestPipelinesAPI_Delete_MEMBER_Forbidden pins the audit M2-promoted
+// fix: a MEMBER may not Delete a pipeline. LIVE-verified A13.2 chain
+// finding root cause.
+func TestPipelinesAPI_Delete_MEMBER_Forbidden(t *testing.T) {
+	db := openSmokeDB(t)
+	defer db.Close()
+	seedSmokePipeline(t, db, "doomed-member")
+	h := NewPipelineHandler(db, slog.Default(), nil, nil)
+	req := withWorkspaceUser(httptest.NewRequest("DELETE", "/x", nil), "u1", "ws_smoke", "MEMBER")
+	req.SetPathValue("slug", "doomed-member")
+	w := httptest.NewRecorder()
+	h.Delete(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Errorf("MEMBER status = %d, want 403", w.Code)
 	}
 }
 

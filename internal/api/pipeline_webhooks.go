@@ -89,6 +89,15 @@ func (h *PipelineHandler) CreateWebhook(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	workspaceID := WorkspaceIDFromContext(r.Context())
+	// Audit M2-promoted + chain finding root cause: a MEMBER could
+	// create a webhook → the resulting public URL bypassed every
+	// auth surface on the dispatch side. Gating CreateWebhook on
+	// "create" closes the chain at its source.
+	role := RoleFromContext(r.Context())
+	if !canRole(role, "create") {
+		replyError(w, http.StatusForbidden, "Forbidden")
+		return
+	}
 
 	var body webhookRequestBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -162,6 +171,12 @@ func (h *PipelineHandler) DeleteWebhook(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	workspaceID := WorkspaceIDFromContext(r.Context())
+	// Audit M2-promoted: delete a public-URL trigger -- delete tier.
+	role := RoleFromContext(r.Context())
+	if !canRole(role, "delete") {
+		replyError(w, http.StatusForbidden, "Forbidden")
+		return
+	}
 	webhookID := r.PathValue("webhookId")
 	if webhookID == "" {
 		replyError(w, http.StatusBadRequest, "webhookId required")
