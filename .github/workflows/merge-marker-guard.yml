@@ -78,7 +78,7 @@ jobs:
           mapfile -t changed < <(git diff --name-only --diff-filter=AM "$BASE"...HEAD -- \
               '*.go' '*.ts' '*.tsx' '*.js' '*.jsx' '*.py' \
               '*.sql' '*.yml' '*.yaml' '*.toml' '*.json' \
-              '*.md' '*.sh' 'Dockerfile' '*.Dockerfile')
+              '*.md' '*.mdx' '*.sh' 'Dockerfile' '*.Dockerfile')
           if [ "${#changed[@]}" -eq 0 ]; then
             echo "No relevant files changed in this diff."
             exit 0
