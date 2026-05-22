@@ -145,10 +145,21 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 		r.skillReviewEval, r.behaviorEval, r.memHealthEval, r.negativeEval,
 		r.logger,
 	)
-	r.mux.Handle("POST /api/v1/internal/keeper/skill-review", internalAuth(http.HandlerFunc(kp2.HandleSkillReview)))
-	r.mux.Handle("POST /api/v1/internal/keeper/behavior", internalAuth(http.HandlerFunc(kp2.HandleBehavior)))
-	r.mux.Handle("POST /api/v1/internal/keeper/memory-health", internalAuth(http.HandlerFunc(kp2.HandleMemoryHealth)))
-	r.mux.Handle("POST /api/v1/internal/keeper/negative-learning", internalAuth(http.HandlerFunc(kp2.HandleNegativeLearning)))
+	// F4 Keeper Phase 2 endpoints — wrapped in BOTH internalAuth (sidecar
+	// token gate) AND internalWsCtx (puts ?workspace_id= into request
+	// context). Handlers depend on the context value to run
+	// assertBodyWorkspaceMatchesCtx, the cross-tenant defense for the
+	// case "internal-auth caller submits body.workspace_id for a tenant
+	// they shouldn't be able to touch." Without internalWsCtx the gate
+	// fires fail-closed on every call ("request context is missing
+	// workspace_id") — the dead-code state that the round-8 fail-closed-
+	// on-empty rewrite was supposed to alert on, except no operator was
+	// hitting these routes (they're sidecar-only). Caught live on dev1
+	// 2026-05-22 during the cross-tenant probe step of memory A/B audit.
+	r.mux.Handle("POST /api/v1/internal/keeper/skill-review", internalAuth(internalWsCtx(http.HandlerFunc(kp2.HandleSkillReview))))
+	r.mux.Handle("POST /api/v1/internal/keeper/behavior", internalAuth(internalWsCtx(http.HandlerFunc(kp2.HandleBehavior))))
+	r.mux.Handle("POST /api/v1/internal/keeper/memory-health", internalAuth(internalWsCtx(http.HandlerFunc(kp2.HandleMemoryHealth))))
+	r.mux.Handle("POST /api/v1/internal/keeper/negative-learning", internalAuth(internalWsCtx(http.HandlerFunc(kp2.HandleNegativeLearning))))
 
 	// Sidecar IPC — the agent-initiated port-expose request flow.
 	// PortExposeHandler instance comes from registerOrchestrationRoutes
