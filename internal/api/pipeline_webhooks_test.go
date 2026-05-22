@@ -192,6 +192,58 @@ func TestPipelineWebhooks_Create_HappyPath_Returns201WithSecret(t *testing.T) {
 	}
 }
 
+// TestPipelineWebhooks_Create_EmptySecret_AutoGenerates pins audit M2:
+// a CreateWebhook request that omits signing_secret used to silently
+// land an unsigned webhook (pipeline.Webhook.Verify short-circuits to
+// nil for empty SigningSecret), letting anyone who learned the
+// webhook URL forge requests. The handler must now mint a secret
+// server-side and surface it once in the create response so the
+// caller can configure their sender.
+func TestPipelineWebhooks_Create_EmptySecret_AutoGenerates(t *testing.T) {
+	h, db, userID, wsID := webhookHandlerRig(t)
+	seedWebhookPipeline(t, db, wsID, "pln_b", "auto-secret")
+
+	body := `{
+		"target_pipeline_slug": "auto-secret"
+	}`
+	req := withWorkspaceUser(
+		httptest.NewRequest("POST", "/api/v1/workspaces/"+wsID+"/pipeline-webhooks",
+			strings.NewReader(body)),
+		userID, wsID, "OWNER",
+	)
+	rr := httptest.NewRecorder()
+	h.CreateWebhook(rr, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", rr.Code, rr.Body.String())
+	}
+
+	var resp webhookResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	// 32 bytes hex-encoded = 64 chars.
+	if len(resp.SigningSecret) != 64 {
+		t.Errorf("auto-generated secret length = %d, want 64 hex chars", len(resp.SigningSecret))
+	}
+	if !resp.SigningSecretSet {
+		t.Errorf("signing_secret_set flag must be true on auto-generate path")
+	}
+	// Sanity: two independent creates produce different secrets.
+	seedWebhookPipeline(t, db, wsID, "pln_c", "auto-secret-2")
+	req2 := withWorkspaceUser(
+		httptest.NewRequest("POST", "/api/v1/workspaces/"+wsID+"/pipeline-webhooks",
+			strings.NewReader(`{"target_pipeline_slug":"auto-secret-2"}`)),
+		userID, wsID, "OWNER",
+	)
+	rr2 := httptest.NewRecorder()
+	h.CreateWebhook(rr2, req2)
+	var resp2 webhookResponse
+	_ = json.Unmarshal(rr2.Body.Bytes(), &resp2)
+	if resp2.SigningSecret == resp.SigningSecret {
+		t.Errorf("two auto-generated secrets collided: both = %q", resp.SigningSecret)
+	}
+}
+
 // ── ListWebhooks ────────────────────────────────────────────────────────
 
 // TestPipelineWebhooks_List_NoBackend_Returns503 — without the store

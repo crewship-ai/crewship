@@ -1,8 +1,11 @@
 package api
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -10,6 +13,20 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/pipeline"
 )
+
+// generateWebhookSigningSecret returns 32 bytes of urandom encoded as
+// 64 hex chars -- the canonical shape downstream code expects when it
+// HMAC-signs incoming webhook bodies. Used by CreateWebhook when the
+// caller submitted an empty signing_secret: opting out of HMAC was
+// possible on the old path and silently let an attacker who learned
+// the webhook URL forge requests. Audit M2.
+func generateWebhookSigningSecret() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("webhook signing secret: %w", err)
+	}
+	return hex.EncodeToString(b), nil
+}
 
 // webhookResponse is the wire shape returned by webhook list/get/save.
 // The token surfaces in CRUD responses so the UI can show the user
@@ -105,12 +122,32 @@ func (h *PipelineHandler) CreateWebhook(w http.ResponseWriter, r *http.Request) 
 	if body.Enabled != nil {
 		enabled = *body.Enabled
 	}
+
+	// Force HMAC signing on every webhook -- if the caller didn't
+	// supply a secret, mint a 32-byte hex one server-side. The legacy
+	// path accepted empty here and pipeline.Webhook.Verify silently
+	// returned nil for empty SigningSecret (see pipeline/webhooks.go:222),
+	// which meant any unsigned POST to the public webhook URL passed
+	// the verification step. The create response surfaces the secret
+	// once (Stripe/GitHub pattern below) so callers can configure
+	// their sender even when they don't pre-generate. Audit M2.
+	signingSecret := body.SigningSecret
+	if signingSecret == "" {
+		gen, err := generateWebhookSigningSecret()
+		if err != nil {
+			h.logger.Error("create pipeline webhook: generate signing secret", "error", err)
+			replyError(w, http.StatusInternalServerError, "failed to create webhook")
+			return
+		}
+		signingSecret = gen
+	}
+
 	in := pipeline.SaveWebhookInput{
 		WorkspaceID:           workspaceID,
 		Name:                  defaultIfBlank(body.Name, slug),
 		TargetPipelineID:      pipelineID,
 		TargetPipelineVersion: body.TargetPipelineVersion,
-		SigningSecret:         body.SigningSecret,
+		SigningSecret:         signingSecret,
 		InputsTemplate:        body.InputsTemplate,
 		Enabled:               enabled,
 		RateLimitPerMin:       body.RateLimitPerMin,
