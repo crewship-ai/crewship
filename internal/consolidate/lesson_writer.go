@@ -152,13 +152,32 @@ func writeLessonToDir(ctx context.Context, lessonsDir string, entry LessonEntry)
 		entry.CapturedAt = entry.CapturedAt.UTC()
 	}
 
-	if err := os.MkdirAll(lessonsDir, 0o755); err != nil {
-		return fmt.Errorf("lesson: mkdir %s: %w", lessonsDir, err)
+	// Reject path expressions that would resolve outside the intended
+	// memory dir. The two production callers (F4.4 evaluator via
+	// WriteLesson, F4.5 mission outcomes hook via WriteCrewLesson)
+	// build the dir from operator config + internal IDs, so a "../"
+	// sequence can only land here through a corrupted DB row or a
+	// future caller that hasn't audited its input. Catching it at
+	// this single chokepoint covers both surfaces in one place.
+	//
+	// filepath.Clean alone won't reject — it would just resolve "../"
+	// and silently land the lesson in a sibling dir. We explicitly
+	// check the cleaned value for any "../" segment instead.
+	cleaned := filepath.Clean(lessonsDir)
+	if cleaned == "." || cleaned == "/" || cleaned == "" {
+		return fmt.Errorf("lesson: invalid lessons dir %q", lessonsDir)
+	}
+	if strings.Contains(cleaned, "..") {
+		return fmt.Errorf("lesson: lessons dir %q escapes via ..", lessonsDir)
+	}
+
+	if err := os.MkdirAll(cleaned, 0o755); err != nil {
+		return fmt.Errorf("lesson: mkdir %s: %w", cleaned, err)
 	}
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("lesson: write cancelled before lock: %w", err)
 	}
-	path := filepath.Join(lessonsDir, lessonsFilename)
+	path := filepath.Join(cleaned, lessonsFilename)
 
 	lk := memory.NewFileLock(path + ".lock")
 	if err := lk.Lock(); err != nil {

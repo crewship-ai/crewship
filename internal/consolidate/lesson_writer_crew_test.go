@@ -176,6 +176,40 @@ func TestWriteCrewLesson_RejectsInvalidInputs(t *testing.T) {
 	}
 }
 
+// TestWriteCrewLesson_RejectsPathTraversal — boundary defense:
+// reject empty / root / "." / "./" inputs, and any relative path
+// that filepath.Clean cannot collapse without leaving a ".." segment.
+//
+// Note on scope: this test pins the writer-layer guards only. Absolute
+// paths whose ".." segments cleanly resolve (e.g. /a/b/../c → /a/c)
+// are NOT rejected here — that's by design, because Clean has already
+// turned them into a safe absolute path. The mission-outcome hook's
+// safeIDPattern (in internal/api) is what prevents a hostile or
+// corrupted crew_id from contributing the ".." in the first place.
+func TestWriteCrewLesson_RejectsPathTraversal(t *testing.T) {
+	now := time.Now().UTC()
+	good := LessonEntry{
+		ID: "ok", Kind: LessonKindPositive, CapturedAt: now,
+		Source: LessonSourceMissionOutcome, Rule: "rule",
+	}
+	cases := []struct {
+		name string
+		dir  string
+	}{
+		{"empty_dir", ""},
+		{"root_dir", "/"},
+		{"dot_dir", "."},
+		{"relative_dotdot_unclean", "../escaped/.memory"}, // Clean leaves ".."
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := WriteCrewLesson(context.Background(), tc.dir, good); err == nil {
+				t.Fatalf("expected error for %s (dir=%q), got nil", tc.name, tc.dir)
+			}
+		})
+	}
+}
+
 // TestWriteCrewLesson_IsolatedFromAgentLessons — writes to the crew
 // shared dir must not bleed into per-agent dirs and vice-versa.
 // Sibling paths under the same root must keep separate lessons.md

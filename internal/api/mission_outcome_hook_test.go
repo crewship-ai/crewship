@@ -15,23 +15,34 @@ import (
 	"time"
 )
 
-// waitForCrewLesson polls until the crew lessons.md file appears or
-// the deadline expires. The mission-outcome hook fires asynchronously
-// in a detached goroutine (emitMissionOutcomeLessonAsync) so a fixed
-// time.Sleep would either be too short (flake under load) or too long
-// (slow tests). Polling at 25ms intervals keeps the happy path well
-// under 100ms while giving a slow CI runner up to 3s before failing.
-func waitForCrewLesson(t *testing.T, storagePath, crewID string) string {
+// waitForCrewLesson polls until the crew lessons.md file appears
+// AND contains the supplied "mustContain" substring, or the deadline
+// expires. The mission-outcome hook fires asynchronously in a detached
+// goroutine (emitMissionOutcomeLessonAsync), so a fixed time.Sleep
+// would either be too short (flake under load) or too long (slow
+// tests). Polling at 25ms intervals keeps the happy path well under
+// 100ms while giving a slow CI runner up to 3s before failing.
+//
+// The mustContain argument lets callers wait for a SPECIFIC write
+// (e.g. "kind: neutral" after a retransition). Without it, a test
+// that fires two writes could race: see lessons.md created by the
+// first write, assert on stale content, then a still-in-flight
+// second write leaves stray .lock/.tmp files that break t.Cleanup's
+// RemoveAll with "directory not empty".
+func waitForCrewLesson(t *testing.T, storagePath, crewID, mustContain string) string {
 	t.Helper()
 	path := filepath.Join(storagePath, "crews", crewID, "shared", ".memory", "lessons.md")
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
 		if data, err := os.ReadFile(path); err == nil && len(data) > 0 {
-			return string(data)
+			body := string(data)
+			if mustContain == "" || strings.Contains(body, mustContain) {
+				return body
+			}
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
-	t.Fatalf("crew lessons.md did not appear at %s within 3s", path)
+	t.Fatalf("crew lessons.md @ %s did not contain %q within 3s", path, mustContain)
 	return ""
 }
 
@@ -83,7 +94,7 @@ func TestMissionUpdate_TerminalTransitionEmitsCrewLesson(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
 	}
 
-	body2 := waitForCrewLesson(t, storagePath, crewID)
+	body2 := waitForCrewLesson(t, storagePath, crewID, "id: mission_outcome_m_outcome_ok")
 	for _, want := range []string{
 		"id: mission_outcome_m_outcome_ok",
 		"kind: positive",
@@ -138,7 +149,8 @@ func TestMissionUpdate_TerminalRetransitionIsIdempotent(t *testing.T) {
 	}
 
 	doPatch("FAILED")
-	waitForCrewLesson(t, storagePath, crewID)
+	// Wait for the FIRST write to land with the negative kind.
+	waitForCrewLesson(t, storagePath, crewID, "kind: negative")
 
 	// FAILED is not in the transitions table outbound — but the issue-
 	// tracker statuses do allow FAILED→BACKLOG→TODO→IN_PROGRESS→…
@@ -148,9 +160,13 @@ func TestMissionUpdate_TerminalRetransitionIsIdempotent(t *testing.T) {
 	}
 	doPatch("CANCELLED")
 
-	// After both terminal writes, exactly one entry on disk because
-	// the lesson ID is anchored to the mission ID, not the status.
-	body := waitForCrewLesson(t, storagePath, crewID)
+	// Wait for the SECOND write to flip kind to neutral (replace-in-
+	// place). Polling for the specific terminal-state marker guarantees
+	// both goroutines have settled before assertions + t.Cleanup; an
+	// existence-only poll could see the first write and return while
+	// the second write is still racing, leaking .lock files into the
+	// temp dir and breaking RemoveAll.
+	body := waitForCrewLesson(t, storagePath, crewID, "kind: neutral")
 	count := strings.Count(body, "id: mission_outcome_m_outcome_idem")
 	if count != 1 {
 		t.Errorf("expected exactly 1 entry for the same mission across retransitions, got %d:\n%s", count, body)

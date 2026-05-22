@@ -5,10 +5,23 @@ import (
 	"database/sql"
 	"log/slog"
 	"path/filepath"
+	"regexp"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/consolidate"
 )
+
+// safeIDPattern guards the crew_id segment we append to storagePath
+// before MkdirAll. CUIDs (generateCUID) are guaranteed lowercase
+// alphanumeric — no separators, no dot-prefixed segments — so a
+// non-matching value can only arrive from a corrupted DB row or
+// (theoretically) a future ID scheme. Rejecting at the path boundary
+// keeps CodeQL's path-injection taint check happy AND adds genuine
+// defense-in-depth: any future bug that lands a "../" sequence in a
+// crew_id column would otherwise resolve outside storagePath. The
+// 64-byte cap is generous (real CUIDs are 25 chars) but tight enough
+// that a pathological row can't blow the OS PATH_MAX.
+var safeIDPattern = regexp.MustCompile(`^[a-z0-9_-]{1,64}$`)
 
 // emitMissionOutcomeLessonAsync is the F4.5 mission-outcomes-to-crew-
 // memory hook called from terminal-state mutation paths in
@@ -84,6 +97,17 @@ func emitMissionOutcomeLessonAsync(
 		if !crewID.Valid || crewID.String == "" {
 			logger.Debug("mission outcome hook: mission has no crew_id",
 				"mission_id", missionID)
+			return
+		}
+		// Belt-and-suspenders: the crew_id column is populated by API
+		// paths that always call generateCUID(), so a value with a "/"
+		// or ".." can't reach this row through normal flows. Validating
+		// anyway keeps the path-construction below provably safe and
+		// makes static analyzers (CodeQL go/path-injection) happy
+		// without `//nolint` annotations.
+		if !safeIDPattern.MatchString(crewID.String) {
+			logger.Warn("mission outcome hook: rejecting crew_id with unsafe characters",
+				"mission_id", missionID, "crew_id_len", len(crewID.String))
 			return
 		}
 
