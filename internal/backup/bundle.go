@@ -25,6 +25,33 @@ const (
 	manifestFileName  = "MANIFEST.json"
 	restoreReadmeName = "RESTORE.md"
 	payloadFileName   = "payload"
+
+	// Per-entry caps for io.ReadAll on attacker-controllable tar
+	// content during restore / inspect. The tar header carries the
+	// claimed size; io.ReadAll allocates that much memory before
+	// reading the entry. Without these wrappers a malicious bundle
+	// can hdr.Size = 10 GB and crash the restorer.
+	//
+	// Devcontainer feature blobs (devcontainer.json + mise.toml) are
+	// kilobyte-scale; 5 MB leaves plenty of headroom and denies the
+	// allocation bomb.
+	maxBackupDevcontainerEntryBytes int64 = 5 << 20 // 5 MB
+
+	// Manifest is JSON describing the bundle; ours run < 64 KB in
+	// practice. 4 MB is the safety margin for forwards-compatible
+	// schema additions while still bounded.
+	maxBackupManifestBytes int64 = 4 << 20 // 4 MB
+
+	// DB dump JSON is the largest legitimate entry — a sqlite dump
+	// of a busy workspace. 500 MB is generous for the dump shape we
+	// emit today; if a real workspace exceeds it, the bound is the
+	// signal to switch dump format, not to lift the cap.
+	maxBackupDBDumpBytes int64 = 500 << 20 // 500 MB
+
+	// Canary file written by selftest's CopyFromContainer round-trip.
+	// 1 KB is more than the canary ever needs; if a malicious tar
+	// claims 10 GB for the canary, we want to drop it fast.
+	maxBackupCanaryBytes int64 = 1 << 10 // 1 KB
 )
 
 // RestoreReadmeContent is the canonical copy that every bundle ships
@@ -179,7 +206,10 @@ func ReadBundleStream(src io.Reader) (*Manifest, io.Reader, func() error, error)
 		}
 		switch hdr.Name {
 		case manifestFileName:
-			data, err := io.ReadAll(tr)
+			// Bound the read: a malicious bundle can claim hdr.Size = 10 GB
+			// and io.ReadAll would allocate it before we ever validate the
+			// manifest shape. PR #493 follow-up: backup-side tar-bomb cap.
+			data, err := io.ReadAll(io.LimitReader(tr, maxBackupManifestBytes))
 			if err != nil {
 				_ = tr.Close()
 				return nil, nil, nil, fmt.Errorf("backup: read manifest: %w", err)
@@ -348,7 +378,9 @@ func ReadBundle(src io.Reader) (*Manifest, io.Reader, error) {
 		}
 		switch hdr.Name {
 		case manifestFileName:
-			data, err := io.ReadAll(tr)
+			// PR #493 follow-up: bound manifest read so a 10 GB hdr.Size
+			// can't OOM the inspector before we validate shape.
+			data, err := io.ReadAll(io.LimitReader(tr, maxBackupManifestBytes))
 			if err != nil {
 				return nil, nil, fmt.Errorf("backup: read manifest: %w", err)
 			}
