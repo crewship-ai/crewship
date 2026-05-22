@@ -69,3 +69,40 @@ updates:
       - "ci/cd"
     commit-message:
       prefix: "chore(ci)"
+
+  # Docker base images
+  # The root Dockerfile (node:24-alpine + golang:1.26-alpine + alpine:3.23
+  # multi-stage) and docker/crewship-sandbox (debian:bookworm-slim) all
+  # use floating tags. Audit M15 flagged that this lets a published patch
+  # release of the base sit unreviewed in CI forever -- Dependabot
+  # surfaces those bumps as PRs so the maintainer sees them.
+  #
+  # Each Dockerfile directory needs its own entry; Dependabot doesn't walk
+  # the repo. Add a new one here when a Dockerfile lands at a new path.
+  - package-ecosystem: "docker"
+    directory: "/"
+    target-branch: "main"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 3
+    labels:
+      - "dependencies"
+      - "docker"
+    commit-message:
+      prefix: "chore(deps)"
+
+  - package-ecosystem: "docker"
+    directory: "/docker/crewship-sandbox"
+    target-branch: "main"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 3
+    labels:
+      - "dependencies"
+      - "docker"
+    commit-message:
+      prefix: "chore(deps)"
