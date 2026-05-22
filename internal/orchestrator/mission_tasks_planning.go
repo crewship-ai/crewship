@@ -247,10 +247,13 @@ func (e *MissionEngine) dispatchLeadPlanning(ctx context.Context, ms *missionSta
 		Title:     title.String,
 	})
 
-	// Dispatch as LEAD (with sidecar and crew context)
+	// Dispatch as LEAD (with sidecar and crew context).
+	// Audit #481 follow-up: WithoutCancel keeps the planner's trace
+	// span + auth values; the goroutine outlives the parent context.
+	dispatchCtx := context.WithoutCancel(ctx)
 	if e.dispatcher != nil {
 		go func() {
-			dispatchErr := e.dispatcher.DispatchAssignment(context.Background(), DispatchRequest{
+			dispatchErr := e.dispatcher.DispatchAssignment(dispatchCtx, DispatchRequest{
 				AssignmentID: assignmentID,
 				AgentID:      ms.LeadAgentID,
 				AgentSlug:    agentSlug,

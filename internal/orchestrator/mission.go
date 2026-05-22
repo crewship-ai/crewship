@@ -272,12 +272,18 @@ func (e *MissionEngine) runMissionLoop(ctx context.Context, ms *missionState) {
 		if ctx.Err() == context.DeadlineExceeded {
 			e.logger.Warn("mission timed out", "mission_id", ms.ID)
 			now := time.Now().UTC().Format(time.RFC3339)
+			// Audit #481 follow-up: parent ctx is cancelled (that's
+			// why we're in this branch). Use WithoutCancel to keep the
+			// OTel trace span + auth values flowing -- the cleanup
+			// write should land in the same trace as the timed-out
+			// mission, not show up as an orphaned root span.
+			cleanCtx := context.WithoutCancel(ctx)
 			// Fail any AWAITING_APPROVAL tasks that were never resolved.
-			e.db.ExecContext(context.Background(),
+			e.db.ExecContext(cleanCtx,
 				`UPDATE mission_tasks SET status = 'FAILED', error_message = 'mission timed out', updated_at = ?, completed_at = ?
 				 WHERE mission_id = ? AND status = 'AWAITING_APPROVAL'`,
 				now, now, ms.ID)
-			e.db.ExecContext(context.Background(),
+			e.db.ExecContext(cleanCtx,
 				`UPDATE missions SET status = 'FAILED', updated_at = ?, completed_at = ? WHERE id = ? AND status = 'IN_PROGRESS'`,
 				now, now, ms.ID)
 			e.broadcastMissionStatus(ms, "FAILED")
@@ -345,7 +351,13 @@ func (e *MissionEngine) runMissionLoop(ctx context.Context, ms *missionState) {
 				e.logger.Error("deadlock detected — all tasks BLOCKED with no progress possible",
 					"mission_id", ms.ID)
 				now := time.Now().UTC().Format(time.RFC3339)
-				e.db.ExecContext(context.Background(),
+				// Audit #481 follow-up: ctx is still live here (we're
+				// inside the active loop tick) but the FAILED write
+				// must NOT be cancelled by an inbound shutdown -- the
+				// deadlock annotation belongs in the record even if
+				// the engine is going down. WithoutCancel keeps trace
+				// continuity while shedding cancellation.
+				e.db.ExecContext(context.WithoutCancel(ctx),
 					`UPDATE missions SET status = 'FAILED', updated_at = ?, completed_at = ? WHERE id = ? AND status = 'IN_PROGRESS'`,
 					now, now, ms.ID)
 				e.broadcastMissionStatus(ms, "FAILED")
