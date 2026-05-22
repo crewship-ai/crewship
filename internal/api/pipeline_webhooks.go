@@ -228,14 +228,19 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// HMAC verification before rate limiting — invalid signatures
-	// shouldn't even consume rate-limit slots.
-	if wh.SigningSecret != "" {
-		sig := r.Header.Get("X-Crewship-Signature")
-		if !wh.ValidateSignature(body, sig) {
-			replyError(w, http.StatusUnauthorized, "signature mismatch")
-			return
-		}
+	// HMAC verification before rate limiting -- invalid signatures
+	// shouldn't even consume rate-limit slots. Required (not optional):
+	// ValidateSignature returns false when the webhook row has an
+	// empty SigningSecret, so a legacy row (predates audit #490's
+	// auto-generation, or a DB write that bypassed the HTTP create
+	// handler) cannot dispatch with an unsigned body. Same 401 +
+	// "signature mismatch" response shape for both "wrong sig" and
+	// "no secret on this row" so an attacker can't enumerate which
+	// is which.
+	sig := r.Header.Get("X-Crewship-Signature")
+	if !wh.ValidateSignature(body, sig) {
+		replyError(w, http.StatusUnauthorized, "signature mismatch")
+		return
 	}
 
 	if !pipeline.AllowWebhookFire(wh.Token, wh.RateLimitPerMin) {
