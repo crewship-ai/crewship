@@ -1,10 +1,71 @@
+# Build context allowlist-by-denial. Anything Docker sees here ends
+# up baked into image layers OR bloats the build context upload. The
+# rule of thumb is: nothing under 100 MB should land in the build
+# context unless the multi-stage Dockerfile is going to copy it.
+
+# Vendored deps + framework caches — pulled fresh in the build stage.
 node_modules
 .next
+web/out
+web/.next
+.pnpm-store
+
+# Source-control + IDE noise.
 .git
+.gitignore
 .claude
+.vscode
+.idea
+.DS_Store
+
+# Docs — README is the one exception so /healthz hint endpoints can
+# reference it.
 *.md
 !README.md
+
+# Local-only secrets / env. Building must NEVER capture these.
 .env*
+
+# Local docker-compose files. The production Dockerfile is the only
+# thing the build stage cares about; compose YAMLs would just inflate
+# the build context.
 docker/docker-compose*.yml
 docker/crewshipd
+
+# Multi-instance dev tree (crewship_1/, crewship_2/, ...).
 crewship_*
+
+# Audit artefacts (raw tool outputs, payload corpora, iteration reports)
+# — multi-megabyte tree that has nothing to do with the runtime image.
+# Audit M16 specifically flagged this leak.
+audit
+tmp
+
+# Compiled local binaries + SQLite snapshots from `go run` /
+# `dev.sh seed`. The Docker build produces its own binary in a
+# distroless / alpine stage; the host's binary would only shadow it.
+crewship
+crewship.db
+crewship.db-*
+
+# Test + profile + coverage artefacts. Generated locally, never
+# needed inside the image. `*.out` is intentionally not used as a
+# global denial because it's too broad (some tooling produces .out
+# files that are checked in); coverage.out is the only one we ship
+# from go test, and `coverage.*` covers the variants.
+*.test
+*.prof
+coverage.out
+coverage.*
+*.log
+
+# Editor swap files.
+*.swp
+*.swo
+
+# TypeScript build cache.
+*.tsbuildinfo
+
+# E2E run artefacts.
+e2e/test-results
+e2e/playwright-report
