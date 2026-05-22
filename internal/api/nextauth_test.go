@@ -200,6 +200,34 @@ func TestNextAuth_CallbackCredentials_BadCSRFMatch(t *testing.T) {
 	}
 }
 
+// TestNextAuth_CallbackCredentials_OversizeBody asserts the body cap
+// rejects a >16 KiB POST. Previously r.ParseForm() ran unbounded against
+// the request body, letting a single client allocate arbitrary memory
+// per request -- an easy DoS lever on a public auth endpoint. The fix
+// (http.MaxBytesReader on r.Body) surfaces as a ParseForm() error, which
+// the handler maps to 400 "Invalid request". Both branches of the
+// handler (form and JSON) read through the same capped Body, so a
+// single test on either path verifies the bound.
+func TestNextAuth_CallbackCredentials_OversizeBody(t *testing.T) {
+	t.Parallel()
+	h, _ := newNextAuthHandler(t)
+	// 16 KiB + 1 byte of urlencoded data exceeds the cap defined by
+	// callbackCredentialsMaxBodyBytes. The body is otherwise valid
+	// form syntax so only the size triggers the rejection.
+	body := "email=" + strings.Repeat("x", callbackCredentialsMaxBodyBytes+1)
+	req := httptest.NewRequest("POST", "/api/auth/callback/credentials", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	// CSRF cookie must be present to pass the early-return cookie check
+	// (the body cap runs after the cookie presence check, before the
+	// token-value comparison).
+	req.AddCookie(&http.Cookie{Name: "authjs.csrf-token", Value: "csrf-x"})
+	rr := httptest.NewRecorder()
+	h.CallbackCredentials(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400 (body exceeded MaxBytesReader cap)", rr.Code)
+	}
+}
+
 func TestNextAuth_CallbackCredentials_EmptyCreds_JSON(t *testing.T) {
 	t.Parallel()
 	h, _ := newNextAuthHandler(t)
