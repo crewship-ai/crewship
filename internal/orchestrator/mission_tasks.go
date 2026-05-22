@@ -443,10 +443,16 @@ func (e *MissionEngine) scheduleTask(ctx context.Context, ms *missionState, task
 		e.logger.Warn("link assignment to task", "task_id", task.ID, "error", err)
 	}
 
-	// Dispatch the assignment to the correct crew's container
+	// Dispatch the assignment to the correct crew's container.
+	// Audit #481 follow-up: WithoutCancel preserves the scheduler's
+	// OTel trace + auth values so the dispatched assignment surfaces
+	// under the same trace ID, while the parent request's
+	// cancellation does not propagate (the scheduler tick has
+	// returned to its loop before this goroutine runs).
+	dispatchCtx := context.WithoutCancel(ctx)
 	if e.dispatcher != nil {
 		go func() {
-			dispatchErr := e.dispatcher.DispatchAssignment(context.Background(), DispatchRequest{
+			dispatchErr := e.dispatcher.DispatchAssignment(dispatchCtx, DispatchRequest{
 				AssignmentID: assignmentID,
 				AgentID:      *task.AssignedAgentID,
 				AgentSlug:    agentSlug,
@@ -463,8 +469,11 @@ func (e *MissionEngine) scheduleTask(ctx context.Context, ms *missionState, task
 					"assignment_id", assignmentID,
 					"error", dispatchErr,
 				)
-				// Use Background ctx — parent ctx may be cancelled by the time this goroutine runs
-				e.updateTaskStatus(context.Background(), ms, task.ID, "FAILED", dispatchErr.Error())
+				// Audit #481 follow-up: was context.Background() with
+				// a comment about parent-ctx cancellation. dispatchCtx
+				// (WithoutCancel above) keeps trace + auth values;
+				// cancellation is shed regardless.
+				e.updateTaskStatus(dispatchCtx, ms, task.ID, "FAILED", dispatchErr.Error())
 			}
 		}()
 	}
