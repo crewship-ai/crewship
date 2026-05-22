@@ -429,11 +429,23 @@ func (p *Provider) ensureVolume(ctx context.Context, name string) error {
 		// host Mountpoint is e.g. /var/lib/docker/volumes/<name>/_data
 		// and points at a real directory. If it's gone, this volume
 		// will misbehave at next mount; rebuild it before continuing.
+		//
+		// `os.Stat` from a non-root daemon can return EACCES because
+		// /var/lib/docker/volumes is typically root-owned 0700. EACCES
+		// means "I can't see inside, but the directory exists" — that's
+		// fine, Docker itself can still mount it, so we treat it as
+		// healthy. Only ENOENT means the backing _data is genuinely
+		// gone and we need to rebuild.
 		if existing.Mountpoint != "" {
 			if _, statErr := os.Stat(existing.Mountpoint); statErr == nil {
 				return nil
 			} else if !os.IsNotExist(statErr) {
-				return fmt.Errorf("volume %s mountpoint stat: %w", name, statErr)
+				// Other stat errors (EACCES, EIO) — assume volume is
+				// healthy because we lack the perms to disprove it.
+				// Misclassifying a corrupt volume as healthy is the
+				// safer error mode here; ContainerCreate will surface
+				// the real symptom when the mount actually fails.
+				return nil
 			}
 			p.logger.Warn("docker volume mountpoint missing on disk; recreating",
 				"volume", name, "mountpoint", existing.Mountpoint)
