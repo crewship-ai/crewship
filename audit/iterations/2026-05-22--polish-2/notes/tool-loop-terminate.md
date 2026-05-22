@@ -47,7 +47,7 @@ sees the data, the run is over.
 To make the signal load-bearing, it has to move upstream into the
 step-processing path:
 
-```
+```text
 adapter_*.go (parses CLI events)
     ↓
 parser_*.go (normalises into TrajectoryStep)
