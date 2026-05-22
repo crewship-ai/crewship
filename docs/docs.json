@@ -303,6 +303,7 @@
             "pages": [
               "cli/approvals",
               "cli/policy",
+              "cli/hire",
               "cli/hooks",
               "cli/checkpoint"
             ]
