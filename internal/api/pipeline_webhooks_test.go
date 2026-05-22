@@ -600,23 +600,34 @@ func TestPipelineWebhooks_Fire_ValidSignature_Accepts202(t *testing.T) {
 	}
 }
 
-// TestPipelineWebhooks_Fire_NoSignatureRequired_AcceptsAnyBody — when
-// signing_secret is empty the webhook skips HMAC entirely. A naked
-// request body must still produce 202. Without this test a refactor
-// that always required signatures would break every Stripe-style sender
-// without one.
-func TestPipelineWebhooks_Fire_NoSignatureRequired_AcceptsAnyBody(t *testing.T) {
+// TestPipelineWebhooks_Fire_EmptySecretRowRejected pins the audit chain
+// finding (A13.2 + A17.2) fix: a webhook row with empty signing_secret
+// must return 401 on dispatch even though such rows can no longer be
+// minted via CreateWebhook (audit #490 auto-generates). Legacy rows
+// pre-dating #490, or any row inserted via a path that bypassed the
+// HTTP handler, hit this guard and refuse to fire until the secret is
+// (re-)set.
+//
+// The previous behaviour was the opposite -- "no secret → pass" --
+// which was the dispatch-side half of the audit chain finding.
+func TestPipelineWebhooks_Fire_EmptySecretRowRejected(t *testing.T) {
 	h, db, _, wsID := webhookHandlerRig(t)
 	h.SetRunner(&stubRunner{output: "ok"})
 	seedWebhookPipeline(t, db, wsID, "pln_a", "ours")
 	wh := seedWebhookRow(t, db, wsID, "pln_a", "" /* no secret */, true)
 
 	req := httptest.NewRequest("POST", "/api/v1/webhooks/"+wh.Token,
-		strings.NewReader(`anything goes`)) // not even valid JSON
+		strings.NewReader(`anything goes`))
 	req.SetPathValue("token", wh.Token)
 	rr := httptest.NewRecorder()
 	h.FireWebhook(rr, req)
-	if rr.Code != http.StatusAccepted {
-		t.Fatalf("status = %d, want 202; body=%s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401 (empty-secret row must not dispatch); body=%s", rr.Code, rr.Body.String())
+	}
+	// Response shape matches the "wrong-signature" case so an attacker
+	// cannot enumerate which webhooks have an empty secret vs. which
+	// just got a wrong signature.
+	if !strings.Contains(rr.Body.String(), "signature mismatch") {
+		t.Errorf("expected unified 'signature mismatch' body, got %q", rr.Body.String())
 	}
 }
