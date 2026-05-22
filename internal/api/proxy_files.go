@@ -14,6 +14,19 @@ func (h *ProxyHandler) AgentFiles(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
 
+	// Audit M13: every read of agent artefacts must require at least
+	// the "read" capability. Without the gate any authenticated
+	// workspace member -- including the VIEWER role used for guests --
+	// can list and download agent files / logs, which the role matrix
+	// elsewhere in this package treats as a privileged surface. Empty
+	// role is denied by canRole, so this also fails closed when a
+	// middleware regression strips the role from the context.
+	role := RoleFromContext(r.Context())
+	if !canRole(role, "read") {
+		replyError(w, http.StatusForbidden, "Forbidden")
+		return
+	}
+
 	var slug, crewID sql.NullString
 	err := h.db.QueryRowContext(r.Context(),
 		"SELECT slug, crew_id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
@@ -68,6 +81,13 @@ func (h *ProxyHandler) AgentFileDownload(w http.ResponseWriter, r *http.Request)
 	agentID := r.PathValue("agentId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	filePath := r.URL.Query().Get("path")
+
+	// Same role gate as AgentFiles -- see audit M13 commentary there.
+	role := RoleFromContext(r.Context())
+	if !canRole(role, "read") {
+		replyError(w, http.StatusForbidden, "Forbidden")
+		return
+	}
 
 	if filePath == "" {
 		replyError(w, http.StatusBadRequest, "path parameter required")

@@ -28,6 +28,49 @@ func newProxyHandlerWithCrewWorkspace(t *testing.T, socketPath string) (*ProxyHa
 	return h, userID, wsID, "crew-pf"
 }
 
+// ---- AgentFiles / AgentFileDownload / AgentLogs role gate (audit M13) ----
+
+// These three read handlers previously did NOT gate on role -- workspace
+// membership alone was enough. canRole("", "read") returns false so the
+// gate fails closed against auth-middleware-bypass scenarios where a
+// request lands with an empty role.
+
+func TestAgentFiles_EmptyRole_Forbidden(t *testing.T) {
+	h, userID, wsID, _ := newProxyHandlerWithCrewWorkspace(t, "/tmp/no-such-socket")
+	req := httptest.NewRequest("GET", "/x", nil)
+	req.SetPathValue("agentId", "ag-fake")
+	req = withWorkspaceUser(req, userID, wsID, "")
+	rr := httptest.NewRecorder()
+	h.AgentFiles(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("AgentFiles empty-role status = %d, want 403", rr.Code)
+	}
+}
+
+func TestAgentFileDownload_EmptyRole_Forbidden(t *testing.T) {
+	h, userID, wsID, _ := newProxyHandlerWithCrewWorkspace(t, "/tmp/no-such-socket")
+	req := httptest.NewRequest("GET", "/x?path=foo", nil)
+	req.SetPathValue("agentId", "ag-fake")
+	req = withWorkspaceUser(req, userID, wsID, "")
+	rr := httptest.NewRecorder()
+	h.AgentFileDownload(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("AgentFileDownload empty-role status = %d, want 403", rr.Code)
+	}
+}
+
+func TestAgentLogs_EmptyRole_Forbidden(t *testing.T) {
+	h, userID, wsID, _ := newProxyHandlerWithCrewWorkspace(t, "/tmp/no-such-socket")
+	req := httptest.NewRequest("GET", "/x", nil)
+	req.SetPathValue("agentId", "ag-fake")
+	req = withWorkspaceUser(req, userID, wsID, "")
+	rr := httptest.NewRecorder()
+	h.AgentLogs(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("AgentLogs empty-role status = %d, want 403", rr.Code)
+	}
+}
+
 // ---- CrewFileSave ----
 
 func TestCrewFileSave_VIEWER_Forbidden(t *testing.T) {

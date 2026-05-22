@@ -166,6 +166,16 @@ func (h *ProxyHandler) AgentLogs(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
 
+	// Audit M13: agent logs are sensitive (may contain prompts,
+	// partial responses, secrets that escaped lookout.Redact). Gate
+	// on "read" so an empty / VIEWER role can't tail another tenant's
+	// agent traffic.
+	role := RoleFromContext(r.Context())
+	if !canRole(role, "read") {
+		replyError(w, http.StatusForbidden, "Forbidden")
+		return
+	}
+
 	limitInt, offsetInt := parsePagination(r, 100, 500)
 	offset := strconv.Itoa(offsetInt)
 	limit := strconv.Itoa(limitInt)
