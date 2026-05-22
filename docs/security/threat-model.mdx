@@ -189,6 +189,50 @@ Memory files are normally agent-authored, but external ingestion paths can land 
 
 `internal/memory/quarantine.go` is the scanner. It runs on every memory READ (before the content reaches `buildAgentMemoryBlock`) AND on tool-call return values (before the result lands back in the agent's context — the MINJA query-time-injection defence). A hit replaces the matched content with a `[BLOCKED]` placeholder + writes the original to `.quarantine/{sha256}.md` for operator triage.
 
+### Flow
+
+```mermaid
+flowchart TD
+    src[/"Content source<br/>(memory file read OR tool_result return)"/]
+    src --> scan{"ScanContent()<br/>internal/memory/quarantine.go"}
+
+    scan -->|"Step 1: cheap"| u{"Invisible-unicode<br/>14 codepoints<br/>(ZWSP/BIDI/BOM)"}
+    u -->|hit| hit
+    u -->|miss| ascii{"Pure ASCII<br/>fast path?"}
+
+    ascii -->|"yes — skip homoglyph"| rules
+    ascii -->|"no — NFKD + fold"| rules
+
+    rules{"Step 2: 9 regex rules<br/>+ URL exfil + persistence"}
+    rules -->|hit| hit
+    rules -->|miss| b64{"Step 3: base64 blocks ≥ 60 chars?"}
+
+    b64 -->|"decode + 50% printable<br/>+ re-run rules"| dec{"Decoded matches a rule?"}
+    dec -->|yes| hit
+    dec -->|no| clean[/"Clean — return to caller<br/>verbatim"/]
+    b64 -->|"no candidate blocks"| clean
+
+    hit[/"ScanHit{category, pattern}"/]
+    hit --> q{"Quarantine()<br/>writes .quarantine/{sha}.md<br/>+ frontmatter"}
+
+    q -->|"write OK"| ph["Return [BLOCKED:...]<br/>placeholder to model<br/>+ journal memory.scan.hit"]
+    q -->|"write FAIL<br/>(disk full / perms)"| err["Return IsError=true<br/>FAIL-CLOSED — model never sees<br/>poisoned content"]
+
+    classDef hit fill:#fbb,stroke:#d44
+    classDef clean fill:#bfb,stroke:#4d4
+    classDef err fill:#fb6,stroke:#d80
+    class hit,ph hit
+    class clean clean
+    class err err
+```
+
+**Reading the flow:**
+
+- The scanner runs in three stages from cheapest (unicode codepoint scan) to most expensive (base64 decode + re-scan). Most content fails fast at step 1 or 2; the base64 path only fires on content that LOOKS like it might be hiding an encoded payload.
+- The homoglyph fold (`Cyrillic ј → Latin j`, etc.) is folded into the regex pass — it's not a separate step. Pure-ASCII content skips the NFKD normalisation entirely so the operator-typed CREW.md doesn't pay the homoglyph tax.
+- Quarantine write failures **fail closed**: the model gets an `IsError=true` tool result rather than the poisoned content. A half-working scanner is worse than no scanner if it leaks on the failure path.
+- Idempotency: same content → same SHA → same `.quarantine/{sha}.md` filename, overwritten in place. Reading a poisoned file twice doesn't accumulate duplicate quarantine copies.
+
 ### Rule families (current — PR-F4 v2)
 
 **Invisible-unicode codepoints (14)** — zero-width spaces (ZWSP, ZWNJ, ZWJ), BIDI overrides (LRM/RLM/LRE/RLE/LRO/RLO), directional isolates (LRI/RLI/FSI/PDI), and the byte-order mark. Source-file numeric literals so the rule file itself stays free of the codepoints it scans for. Cheap check; runs first.
