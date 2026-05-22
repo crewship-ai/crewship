@@ -206,6 +206,12 @@ func (h *ProxyHandler) AgentFileSave(w http.ResponseWriter, r *http.Request) {
 func (h *ProxyHandler) CrewFiles(w http.ResponseWriter, r *http.Request) {
 	crewID := r.PathValue("crewId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
+	// Audit #495 follow-up: read-tier gate -- the existing
+	// crewExists check tests workspace scope but not role.
+	if !canRole(RoleFromContext(r.Context()), "read") {
+		replyError(w, http.StatusForbidden, "Forbidden")
+		return
+	}
 	found, err := crewExists(r.Context(), h.db, crewID, workspaceID)
 	if err != nil {
 		h.logger.Error("crew exists check", "error", err)
@@ -254,6 +260,11 @@ func (h *ProxyHandler) CrewFiles(w http.ResponseWriter, r *http.Request) {
 func (h *ProxyHandler) CrewFileDownload(w http.ResponseWriter, r *http.Request) {
 	crewID := r.PathValue("crewId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
+	// Audit #495 follow-up: read-tier gate.
+	if !canRole(RoleFromContext(r.Context()), "read") {
+		replyError(w, http.StatusForbidden, "Forbidden")
+		return
+	}
 	filePath := r.URL.Query().Get("path")
 	if filePath == "" {
 		replyError(w, http.StatusBadRequest, "path parameter required")
@@ -339,6 +350,11 @@ func (h *ProxyHandler) CrewFileSave(w http.ResponseWriter, r *http.Request) {
 func (h *ProxyHandler) AgentContainerFiles(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
+	// Audit #495 follow-up: read-tier gate.
+	if !canRole(RoleFromContext(r.Context()), "read") {
+		replyError(w, http.StatusForbidden, "Forbidden")
+		return
+	}
 
 	var crewID sql.NullString
 	err := h.db.QueryRowContext(r.Context(),
