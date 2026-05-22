@@ -77,6 +77,9 @@ func (h *IssueHandler) Review(w http.ResponseWriter, r *http.Request) {
 		// Activity
 		h.logActivity(r.Context(), missionID, "user", user.ID, "review_approved", commentBody)
 
+		// F4.5 mission outcomes → crew memory.
+		emitMissionOutcomeLessonAsync(r.Context(), h.db, h.storagePath, missionID, "DONE", h.logger)
+
 	} else {
 		// request_changes → TODO
 		ub := newUpdate()
@@ -341,6 +344,9 @@ func (h *IssueHandler) Stop(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.broadcastIssueEvent(wsID, "issue.updated", map[string]string{"id": missionID, "identifier": ident, "status": "CANCELLED"})
+
+	// F4.5 mission outcomes → crew memory. CANCELLED maps to neutral.
+	emitMissionOutcomeLessonAsync(r.Context(), h.db, h.storagePath, missionID, "CANCELLED", h.logger)
 
 	h.logger.Info("issue stopped", "identifier", ident)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "CANCELLED", "identifier": ident})

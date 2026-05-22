@@ -1389,6 +1389,7 @@ END;
 	// excluded — its rows are agent/crew/credential scoped, no user-
 	// attributable content. See migrate_consts_v107_gdpr_cascade.go.
 	{version: 107, name: "gdpr_cascade", sql: migrationGDPRCascade},
+	{version: 108, name: "mission_provenance", sql: migrationMissionProvenance},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

@@ -51,6 +51,7 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 		}
 	}
 	missions := NewMissionHandler(r.db, r.hub, missionEngineForPublic, r.logger)
+	missions.SetStoragePath(r.storagePath)
 	r.mux.Handle("GET /api/v1/missions", authed(wsCtx(http.HandlerFunc(missions.ListAll))))
 	r.mux.Handle("GET /api/v1/mission-metrics", authed(wsCtx(http.HandlerFunc(missions.Metrics))))
 	metricsH := NewMetricsHandler(r.db, r.logger)
@@ -74,6 +75,7 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	}
 	issues := NewIssueHandler(r.db, r.hub, issueStarter, r.logger)
 	issues.SetJournal(r.Journal())
+	issues.SetStoragePath(r.storagePath)
 	r.mux.Handle("GET /api/v1/issues", authed(wsCtx(http.HandlerFunc(issues.List))))
 	r.mux.Handle("GET /api/v1/issues/{identifier}", authed(wsCtx(http.HandlerFunc(issues.GetByIdentifier))))
 	r.mux.Handle("POST /api/v1/crews/{crewId}/issues", authed(wsCtx(http.HandlerFunc(issues.Create))))
