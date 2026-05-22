@@ -61,7 +61,7 @@ var personaViewCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		agentID, err := resolveAgentIDBySlug(client, args[0])
+		agentID, err := resolveAgentID(client, args[0])
 		if err != nil {
 			return err
 		}
@@ -83,7 +83,7 @@ var personaEditCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		agentID, err := resolveAgentIDBySlug(client, args[0])
+		agentID, err := resolveAgentID(client, args[0])
 		if err != nil {
 			return err
 		}
@@ -126,7 +126,7 @@ var personaResetCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		agentID, err := resolveAgentIDBySlug(client, args[0])
+		agentID, err := resolveAgentID(client, args[0])
 		if err != nil {
 			return err
 		}
@@ -147,7 +147,7 @@ var personaHistoryCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		agentID, err := resolveAgentIDBySlug(client, args[0])
+		agentID, err := resolveAgentID(client, args[0])
 		if err != nil {
 			return err
 		}
@@ -219,7 +219,7 @@ var personaCrewCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		crewID, err := resolveCrewIDBySlug(client, slug)
+		crewID, err := resolveCrewID(client, slug)
 		if err != nil {
 			return err
 		}
@@ -292,46 +292,6 @@ func putJSON(client *cli.Client, path string, body any, out any) error {
 		return nil
 	}
 	return cli.ReadJSON(resp, out)
-}
-
-// resolveAgentIDBySlug looks up an agent by slug in the active
-// workspace via GET /api/v1/agents and matching by slug client-side.
-// CLI surface is slug-based; the API surface is ID-based; this is
-// the bridge.
-func resolveAgentIDBySlug(client *cli.Client, slug string) (string, error) {
-	var resp struct {
-		Agents []struct {
-			ID   string `json:"id"`
-			Slug string `json:"slug"`
-		} `json:"agents"`
-	}
-	if err := getJSON(client, "/api/v1/agents", &resp); err != nil {
-		return "", err
-	}
-	for _, a := range resp.Agents {
-		if a.Slug == slug {
-			return a.ID, nil
-		}
-	}
-	return "", fmt.Errorf("agent slug %q not found in active workspace", slug)
-}
-
-func resolveCrewIDBySlug(client *cli.Client, slug string) (string, error) {
-	var resp struct {
-		Crews []struct {
-			ID   string `json:"id"`
-			Slug string `json:"slug"`
-		} `json:"crews"`
-	}
-	if err := getJSON(client, "/api/v1/crews", &resp); err != nil {
-		return "", err
-	}
-	for _, c := range resp.Crews {
-		if c.Slug == slug {
-			return c.ID, nil
-		}
-	}
-	return "", fmt.Errorf("crew slug %q not found in active workspace", slug)
 }
 
 // openInEditor writes seed to a temp file with the given extension,
