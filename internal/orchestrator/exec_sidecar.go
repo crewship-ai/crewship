@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -512,20 +513,44 @@ func startSidecar(
 		if memoryCfg.CrewMemoryPath != "" {
 			paths = append(paths, memoryCfg.CrewMemoryPath)
 		}
-		prepScript := "set -e\n"
+		// Per-path subshell `|| true` so a failure on one path (e.g.
+		// the agent BasePath) doesn't block prep on the next (the crew
+		// shared CrewMemoryPath). `mkdir -p -- "..."` quotes the path
+		// so unusual characters can't break the script — paths today
+		// come from server config but defensive quoting is cheap.
+		var prepScript strings.Builder
 		for _, p := range paths {
-			prepScript += fmt.Sprintf("mkdir -p %s\nchown -R 1001:1002 %s\nchmod -R u+rwX,g+rwXs %s\n", p, p, p)
+			fmt.Fprintf(&prepScript,
+				`(mkdir -p -- "%s" && chown -R 1001:1002 -- "%s" && chmod -R u+rwX,g+rwXs -- "%s") || true`+"\n",
+				p, p, p)
 		}
 		prepCfg := provider.ExecConfig{
 			ContainerID: containerID,
-			Cmd:         []string{"sh", "-c", prepScript},
+			Cmd:         []string{"sh", "-c", prepScript.String()},
 			User:        "0:0",
 		}
-		if prepResult, prepErr := container.Exec(ctx, prepCfg); prepErr != nil {
-			logger.Warn("memory dir perms prep failed (sidecar will boot anyway)", "error", prepErr)
-		} else if prepResult != nil && prepResult.Reader != nil {
-			_, _ = io.Copy(io.Discard, prepResult.Reader)
-			_ = prepResult.Reader.Close()
+		prepResult, prepErr := container.Exec(ctx, prepCfg)
+		if prepErr != nil {
+			logger.Warn("memory dir perms prep exec failed (sidecar will boot anyway)", "error", prepErr)
+		} else {
+			// Drain the reader first so the docker stream closes, then
+			// inspect for a non-zero exit. `|| true` per path keeps the
+			// script exit at 0 in normal partial-failure cases; a
+			// non-zero here means a deeper docker-exec failure worth
+			// surfacing (shell missing, sh -c rejected, etc.).
+			var prepOut bytes.Buffer
+			if prepResult != nil && prepResult.Reader != nil {
+				_, _ = io.Copy(&prepOut, prepResult.Reader)
+				_ = prepResult.Reader.Close()
+			}
+			if prepResult != nil && prepResult.ExecID != "" {
+				if _, code, ierr := container.ExecInspect(ctx, prepResult.ExecID); ierr != nil {
+					logger.Debug("memory dir prep inspect failed", "error", ierr)
+				} else if code != 0 {
+					logger.Warn("memory dir perms prep exited non-zero (sidecar will boot anyway)",
+						"exit_code", code, "output", strings.TrimSpace(prepOut.String()))
+				}
+			}
 		}
 	}
 
