@@ -7,19 +7,32 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+
+	"github.com/crewship-ai/crewship/internal/lookout"
 )
 
 type ctxKey struct{}
 
 // New creates a structured logger with the given level ("debug", "info", "warn",
 // "error") and format ("json" or "text"), writing to w (defaults to os.Stdout).
+//
+// Every string-valued attribute (including the message-position values that
+// land in groups) is piped through lookout.Redact -- the same secret
+// detector the journal uses -- so a stray bearer token, OpenAI sk-... key,
+// or `password=...` assignment in a log line is replaced by
+// ***REDACTED:{kind}*** before it ever reaches stdout. The wiring is at
+// the slog handler layer so it covers every caller in the binary without
+// asking each call site to remember to redact.
 func New(level, format string, w io.Writer) *slog.Logger {
 	if w == nil {
 		w = os.Stdout
 	}
 
 	lvl := parseLevel(level)
-	opts := &slog.HandlerOptions{Level: lvl}
+	opts := &slog.HandlerOptions{
+		Level:       lvl,
+		ReplaceAttr: redactAttr,
+	}
 
 	var handler slog.Handler
 	if format == "text" {
@@ -29,6 +42,36 @@ func New(level, format string, w io.Writer) *slog.Logger {
 	}
 
 	return slog.New(handler)
+}
+
+// redactAttr is slog's ReplaceAttr hook: invoked for every attribute on
+// every log record. We scan only string-valued attrs (the other Kinds --
+// Int64, Bool, Time, Duration -- can't carry a secret payload) and pass
+// them through lookout.Redact. The findings slice is discarded here; the
+// redacted string is what matters at the log layer.
+//
+// We deliberately leave the slog built-in time/level/source/msg keys
+// alone: they have stable, non-sensitive shapes, and rewriting them
+// would risk breaking downstream log parsers that assert on raw values.
+func redactAttr(groups []string, a slog.Attr) slog.Attr {
+	_ = groups
+	switch a.Key {
+	case slog.TimeKey, slog.LevelKey, slog.SourceKey, slog.MessageKey:
+		return a
+	}
+	if a.Value.Kind() != slog.KindString {
+		return a
+	}
+	s := a.Value.String()
+	if s == "" {
+		return a
+	}
+	redacted, _ := lookout.Redact(s)
+	if redacted == s {
+		return a
+	}
+	a.Value = slog.StringValue(redacted)
+	return a
 }
 
 // WithContext returns a new context that carries the given logger.

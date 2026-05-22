@@ -73,6 +73,40 @@ func TestFromContextDefault(t *testing.T) {
 	}
 }
 
+// TestRedactionPipesThroughLookout pins the audit M18 wiring: every
+// string-valued attribute is scanned by lookout.Redact, so a stray
+// bearer token, sk-..., or password=... in a log line is replaced by
+// ***REDACTED:{kind}*** before it reaches stdout. Non-string attrs and
+// built-in keys (time, level, msg) are not rewritten.
+func TestRedactionPipesThroughLookout(t *testing.T) {
+	var buf bytes.Buffer
+	logger := New("info", "json", &buf)
+
+	// A bearer token in an attribute value -- the canonical leak shape.
+	logger.Info("upstream call failed",
+		"endpoint", "https://api.example.com",
+		"auth_header", "Bearer abc123def456ghi789jkl012mno345",
+	)
+
+	out := buf.String()
+	// The redacted marker must be present and the raw token must NOT.
+	if !strings.Contains(out, "***REDACTED") {
+		t.Errorf("expected ***REDACTED marker in log output, got: %s", out)
+	}
+	if strings.Contains(out, "abc123def456ghi789jkl012mno345") {
+		t.Errorf("raw bearer token leaked into log output: %s", out)
+	}
+	// Non-sensitive attributes pass through unchanged.
+	if !strings.Contains(out, "https://api.example.com") {
+		t.Errorf("benign endpoint attribute should pass through unchanged: %s", out)
+	}
+	// Built-in slog keys (msg, level, time) must remain in their canonical
+	// shapes so downstream parsers don't break.
+	if !strings.Contains(out, `"msg":"upstream call failed"`) {
+		t.Errorf("msg key should not be rewritten: %s", out)
+	}
+}
+
 // TestParseLevelAccepts verifies common case/spelling variants resolve to
 // the level the operator obviously meant. Without this, CREWSHIP_LOG_LEVEL
 // values like "WARN", "warning", or "fatal" silently downgrade to info,
