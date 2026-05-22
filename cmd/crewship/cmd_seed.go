@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -46,9 +48,87 @@ func init() {
 	seedCmd.Flags().Int("provision-timeout", 900, "Per-crew provisioning timeout (seconds)")
 	seedCmd.Flags().Bool("wait-provision", false, "Block until all crews finish provisioning (default: fire-and-forget, seed returns while provisioning runs in the background)")
 	seedCmd.Flags().Bool("test-backup", false, "After seeding, run a backup/restore round-trip self-test on one crew (implies --wait-provision)")
+	seedCmd.Flags().Bool("with-memory", false, "Pre-seed agent memory tiers (AGENT.md / CREW.md / PERSONA.md / pins.md / daily/{date}.md / learned.md) for the demo workspace; useful for memory-recall demos and live GDPR/RBAC tests")
+	seedCmd.Flags().Bool("with-users", false, "Add four extra users (ADMIN, MANAGER, MEMBER, VIEWER) to the workspace for RBAC matrix testing; requires CREWSHIP_ALLOW_SIGNUP=true on the server")
+}
+
+// loadDotEnvLocal seeds os.Getenv with values from .env.local in the
+// current working directory, but ONLY for keys that aren't already in
+// the process environment. This makes `crewship seed` work the same
+// way whether invoked via `dev.sh seed` (which exports the file) or
+// directly as `crewship seed` from a fresh shell, where SEED_*
+// (provider keys), CREWSHIP_PORT (instance offset), and
+// CREWSHIP_STORAGE_BASE_PATH (where the daemon keeps crew
+// filesystems) would otherwise be empty — leaving credentials marked
+// EXPIRED at sidecar validation time, the CLI hitting the wrong port,
+// or memory files landing in ~/.crewship/ where the daemon can't see
+// them.
+//
+// We deliberately do NOT overwrite existing env values — operators
+// who run `SEED_ANTHROPIC_API_KEY=… crewship seed` get to override
+// whatever's in .env.local without editing the file.
+//
+// After file parsing, derive CREWSHIP_SERVER from CREWSHIP_PORT
+// (multi-instance dev.sh puts each instance on 8080+N). Without this,
+// the CLI default `--server http://localhost:8080` lands on whichever
+// instance happens to be on the base port — almost never the one the
+// operator just configured — and bootstrap loops on a 403 that looks
+// like "your token is wrong" but is really "wrong server."
+//
+// Missing file is non-fatal: returns silently, seed continues with
+// whatever env is set. Malformed lines (no `=`) are skipped.
+func loadDotEnvLocal() {
+	f, err := os.Open(".env.local")
+	if err != nil {
+		// no file — still try CREWSHIP_PORT → CREWSHIP_SERVER bridge
+		bridgeServerFromPort()
+		return
+	}
+	defer f.Close()
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		idx := strings.IndexByte(line, '=')
+		if idx <= 0 {
+			continue
+		}
+		key := strings.TrimSpace(line[:idx])
+		val := strings.TrimSpace(line[idx+1:])
+		// strip optional surrounding quotes (single or double)
+		if len(val) >= 2 && (val[0] == '"' || val[0] == '\'') && val[len(val)-1] == val[0] {
+			val = val[1 : len(val)-1]
+		}
+		if _, alreadySet := os.LookupEnv(key); alreadySet {
+			continue
+		}
+		_ = os.Setenv(key, val)
+	}
+	if err := scanner.Err(); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed reading .env.local: %v\n", err)
+	}
+	bridgeServerFromPort()
+}
+
+// bridgeServerFromPort fills in CREWSHIP_SERVER from CREWSHIP_PORT
+// when the operator only set the port (the common multi-instance dev
+// pattern). This keeps the CLI honest about which daemon to talk to
+// instead of silently defaulting to :8080.
+func bridgeServerFromPort() {
+	if os.Getenv("CREWSHIP_SERVER") != "" {
+		return
+	}
+	port := os.Getenv("CREWSHIP_PORT")
+	if port == "" {
+		return
+	}
+	_ = os.Setenv("CREWSHIP_SERVER", "http://127.0.0.1:"+port)
 }
 
 func runSeed(cmd *cobra.Command, args []string) error {
+	loadDotEnvLocal()
 	ctx := cmd.Context()
 	nuke, _ := cmd.Flags().GetBool("nuke")
 	skipIssues, _ := cmd.Flags().GetBool("skip-issues")
@@ -58,6 +138,8 @@ func runSeed(cmd *cobra.Command, args []string) error {
 	provisionTimeoutSec, _ := cmd.Flags().GetInt("provision-timeout")
 	waitProvision, _ := cmd.Flags().GetBool("wait-provision")
 	testBackup, _ := cmd.Flags().GetBool("test-backup")
+	withMemory, _ := cmd.Flags().GetBool("with-memory")
+	withUsers, _ := cmd.Flags().GetBool("with-users")
 	// Smoke test + test-backup both need a provisioned, running container
 	// to do anything useful, so they implicitly force --wait-provision.
 	if smokeTest || testBackup {
@@ -86,6 +168,20 @@ func runSeed(cmd *cobra.Command, args []string) error {
 		}
 		if err := seedNuke(ctx, client); err != nil {
 			return err
+		}
+	}
+
+	// ── Phase 1b: RBAC fixture users (optional) ──
+	// Runs BEFORE crews so the seeded admin/manager/member/viewer
+	// exist as workspace members before crew creation lands; that way
+	// crew-detail panels and member queries already show the full
+	// roster when the operator first opens the UI.
+	if withUsers {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := seedRBACUsers(ctx, client); err != nil {
+			fmt.Fprintf(os.Stderr, "RBAC user seeding hit an error (continuing): %v\n", err)
 		}
 	}
 
@@ -139,6 +235,20 @@ func runSeed(cmd *cobra.Command, args []string) error {
 	agentIDs, err := seedAgents(ctx, client, crewIDs)
 	if err != nil {
 		return err
+	}
+
+	// ── Phase 3b: Agent memory tiers (optional) ──
+	// Runs AFTER agents are created so we can resolve each agent's
+	// crew_id from the API. Failure here is non-fatal — the rest of
+	// the seed still produces a usable workspace; agents just won't
+	// have boot-time memory context until they write some.
+	if withMemory {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := seedAgentMemory(ctx, client, crewIDs); err != nil {
+			fmt.Fprintf(os.Stderr, "Memory seeding hit an error (continuing): %v\n", err)
+		}
 	}
 
 	// ── Phase 4–5: Skills + Assignments ──
@@ -314,8 +424,17 @@ func seedBootstrap(ctx context.Context, password string) (*cli.Client, string, e
 	// Try bootstrap (works only on empty DB). Bind ctx so Ctrl-C can
 	// interrupt the in-flight HTTP call instead of blocking on the
 	// 30 s client timeout.
-	unauthClient := cli.NewClient(server, "", "").WithContext(ctx)
-	resp, err := unauthClient.Post("/api/v1/bootstrap", map[string]string{
+	//
+	// Fresh deployments arm a one-shot setup token at boot (GitLab
+	// `initial_root_password` convention). The token lives at
+	// <data_dir>/initial_setup_token with a comment header — read
+	// it and forward in X-Setup-Token so the bootstrap call doesn't
+	// bounce off the 403 gate.
+	setupToken := readSetupTokenFile()
+	if setupToken != "" {
+		fmt.Fprintln(os.Stderr, "  Found initial_setup_token — sending as X-Setup-Token header")
+	}
+	resp, err := postBootstrap(ctx, server, setupToken, map[string]string{
 		"email":     "demo@crewship.ai",
 		"full_name": "Demo User",
 		"password":  password,
@@ -355,7 +474,15 @@ func seedBootstrap(ctx context.Context, password string) (*cli.Client, string, e
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		bodyStr := strings.TrimSpace(string(bodyBytes))
-		if !strings.Contains(strings.ToLower(bodyStr), "already initialized") {
+		// Fall through to auth for two server-side messages:
+		//   "already initialized" — admin row exists, normal post-bootstrap state
+		//   "bootstrap closed"    — setup token was armed but already consumed
+		// Both indicate the operator should already hold a CLI token (saved by
+		// the earlier bootstrap that consumed the token); requireAuth picks
+		// it up. Without the second match, a re-run of `crewship seed` after
+		// a successful initial bootstrap dies on this exact message.
+		lower := strings.ToLower(bodyStr)
+		if !strings.Contains(lower, "already initialized") && !strings.Contains(lower, "bootstrap closed") {
 			return nil, "", fmt.Errorf("bootstrap failed: HTTP %d: %s", resp.StatusCode, bodyStr)
 		}
 	} else {
@@ -472,4 +599,71 @@ func resolveByName(client *cli.Client, listPath, name string) (string, error) {
 func readBody(resp *http.Response) ([]byte, error) {
 	defer resp.Body.Close()
 	return io.ReadAll(resp.Body)
+}
+
+// readSetupTokenFile returns the bootstrap token written by the daemon
+// at first start (when the users table is empty). Returns "" when the
+// file doesn't exist (already-bootstrapped state) or has no value
+// line. The file format is:
+//
+//	# crewship: one-shot bootstrap token — DO NOT COMMIT, DO NOT SHARE
+//	# Use ONCE as X-Setup-Token header on POST /api/v1/bootstrap.
+//	# Auto-deleted on first successful bootstrap.
+//	#
+//	<64-hex-char token>
+//
+// We honour CREWSHIP_STORAGE_BASE_PATH (set by dev.sh per-instance) so
+// the seed CLI finds the token even when invoked alongside an unusual
+// data dir; falls back to ~/.crewship for one-host deployments.
+func readSetupTokenFile() string {
+	candidates := []string{}
+	if base := os.Getenv("CREWSHIP_STORAGE_BASE_PATH"); base != "" {
+		candidates = append(candidates, base+"/initial_setup_token")
+	}
+	if h, err := os.UserHomeDir(); err == nil {
+		candidates = append(candidates, h+"/.crewship/initial_setup_token")
+	}
+	for _, p := range candidates {
+		f, err := os.Open(p)
+		if err != nil {
+			continue
+		}
+		defer f.Close()
+		scanner := bufio.NewScanner(f)
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			return line
+		}
+		if err := scanner.Err(); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed reading %s: %v\n", p, err)
+		}
+	}
+	return ""
+}
+
+// postBootstrap issues the bootstrap POST with the optional X-Setup-
+// Token header. Returns the raw *http.Response so the caller can
+// inspect StatusCode + body the same way it did before this helper.
+//
+// We don't go through cli.Client because that struct doesn't expose
+// a "headers" hook and bootstrap is the one path where we need to
+// attach a one-shot operational header before any auth flow.
+func postBootstrap(ctx context.Context, server, setupToken string, body map[string]string) (*http.Response, error) {
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, "POST", server+"/api/v1/bootstrap", bytes.NewReader(buf))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if setupToken != "" {
+		req.Header.Set("X-Setup-Token", setupToken)
+	}
+	client := &http.Client{Timeout: 30 * time.Second}
+	return client.Do(req)
 }

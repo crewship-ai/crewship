@@ -201,14 +201,31 @@ func NewServer(cfg ServerConfig) *Server {
 	})
 	s.proxy = proxy
 
-	// Initialize memory engine if configured
+	// Initialize memory engine if configured.
+	//
+	// agentMemoryBase / crewMemoryBase MUST be set whenever the
+	// orchestrator hands us a BasePath, even if memory.New() (the
+	// FTS5 indexer) fails. The dispatcher's path validator
+	// (internal/memory/tools.go isInsideMemoryRoot) reads only the
+	// base-path strings, and a single bad FTS5 init would otherwise
+	// silently disable memory.read / memory.write / memory.search
+	// while the boot context (AGENT.md / CREW.md / PERSONA.md baked
+	// into the system prompt) keeps working — splitting the agent's
+	// experience into "Q1-style boot recall works, mid-session tools
+	// silently 'path escapes memory root'." Caught live on dev1
+	// 2026-05-22 during A/B memory testing.
+	//
+	// Path resolution and FTS indexing are independent surfaces:
+	// validator reads strings, indexer reads SQLite. Either can
+	// degrade without taking the other down.
 	if cfg.Memory != nil && cfg.Memory.Enabled && cfg.Memory.BasePath != "" {
+		s.agentMemoryBase = cfg.Memory.BasePath
 		engine, err := memory.New(cfg.Memory.BasePath, memory.DefaultConfig())
 		if err != nil {
-			cfg.Logger.Error("failed to init memory engine", "error", err, "path", cfg.Memory.BasePath)
+			cfg.Logger.Error("failed to init memory engine (path-based memory tools still functional; FTS5 search disabled)",
+				"error", err, "path", cfg.Memory.BasePath)
 		} else {
 			s.memoryEngine = engine
-			s.agentMemoryBase = cfg.Memory.BasePath
 			// Index existing memory files on startup
 			if err := engine.Reindex(); err != nil {
 				cfg.Logger.Warn("initial memory reindex failed", "error", err)
@@ -219,16 +236,17 @@ func NewServer(cfg ServerConfig) *Server {
 		// Initialize crew shared memory engine for lead agents only.
 		// The lead sidecar owns the crew FTS5 index — single writer, zero contention.
 		if cfg.Memory.AgentRole == "lead" && cfg.Memory.CrewMemoryPath != "" {
+			s.crewMemoryBase = cfg.Memory.CrewMemoryPath
 			// Ensure crew memory directory exists (may not on first run)
 			if err := os.MkdirAll(cfg.Memory.CrewMemoryPath, 0o755); err != nil {
 				cfg.Logger.Error("failed to create crew memory dir", "error", err, "path", cfg.Memory.CrewMemoryPath)
 			}
 			crewEngine, err := memory.New(cfg.Memory.CrewMemoryPath, memory.DefaultConfig())
 			if err != nil {
-				cfg.Logger.Error("failed to init crew memory engine", "error", err, "path", cfg.Memory.CrewMemoryPath)
+				cfg.Logger.Error("failed to init crew memory engine (path-based crew memory tools still functional)",
+					"error", err, "path", cfg.Memory.CrewMemoryPath)
 			} else {
 				s.crewMemoryEngine = crewEngine
-				s.crewMemoryBase = cfg.Memory.CrewMemoryPath
 				if err := crewEngine.Reindex(); err != nil {
 					cfg.Logger.Warn("initial crew memory reindex failed", "error", err)
 				}
