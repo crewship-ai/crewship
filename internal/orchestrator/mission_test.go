@@ -397,16 +397,33 @@ func TestProgressWriter(t *testing.T) {
 // different goroutine than DispatchAssignment's append. `time.Sleep`
 // in the test gives the dispatcher time to run but doesn't establish
 // a happens-before edge — the race detector flags both accesses.
+//
+// The captured ctx slice is what powers TestScheduleTask_CtxPropagation
+// (#481 / #505 follow-up regression): asserts that
+// context.WithoutCancel(parent) reached the dispatcher with parent's
+// values intact AND that parent cancellation did NOT propagate.
 type mockDispatcher struct {
 	mu         sync.Mutex
 	dispatched []DispatchRequest
+	gotCtx     []context.Context
 }
 
-func (m *mockDispatcher) DispatchAssignment(_ context.Context, req DispatchRequest) error {
+func (m *mockDispatcher) DispatchAssignment(ctx context.Context, req DispatchRequest) error {
 	m.mu.Lock()
 	m.dispatched = append(m.dispatched, req)
+	m.gotCtx = append(m.gotCtx, ctx)
 	m.mu.Unlock()
 	return nil
+}
+
+// snapshotCtx returns the contexts the dispatcher received. Same mutex
+// discipline as snapshot().
+func (m *mockDispatcher) snapshotCtx() []context.Context {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]context.Context, len(m.gotCtx))
+	copy(out, m.gotCtx)
+	return out
 }
 
 func (m *mockDispatcher) snapshot() []DispatchRequest {
@@ -930,5 +947,118 @@ func TestCheckApprovalGate_AutoApproveOverridesFlag(t *testing.T) {
 	status := engine.checkApprovalGate(context.Background(), "t-override", missionID)
 	if status != "COMPLETED" {
 		t.Errorf("expected auto-approve to override flag, got %s", status)
+	}
+}
+
+// testCtxKeyType is a private key type so the regression test can put
+// a value on a parent ctx without conflicting with any production
+// ctx key. Pattern matches Go's context.Value reference semantics.
+type testCtxKeyType struct{}
+
+var testCtxKey = testCtxKeyType{}
+
+// TestScheduleTask_CtxPropagation pins the audit #481 / #505
+// regression: when scheduleTask is called with a parent ctx that
+// carries values AND is later cancelled, the dispatcher MUST receive
+// a ctx that
+//
+//   1. carries the parent's values (so the trace span / auth values
+//      flow through), AND
+//   2. is NOT cancelled (so the in-flight DispatchAssignment isn't
+//      torn down when the request handler returns).
+//
+// The previous behaviour used context.Background() in five sites
+// across mission.go / mission_tasks.go / mission_tasks_planning.go
+// which satisfied (2) but failed (1) -- the trace span was orphaned,
+// every mission-engine span showed up as a root in the telemetry.
+// PR #505 switched all five to context.WithoutCancel(ctx); this test
+// is the regression gate against a future revert.
+func TestScheduleTask_CtxPropagation(t *testing.T) {
+	db := setupTestDB(t)
+
+	wsID := "ws-ctx"
+	crewID := "crew-ctx"
+	leadID := "agent-lead-ctx"
+	agentID := "agent-ctx"
+	missionID := "mission-ctx"
+
+	db.Exec(`INSERT INTO workspaces (id, name, slug) VALUES (?, 'WS', 'ws')`, wsID)
+	db.Exec(`INSERT INTO crews (id, workspace_id, name, slug) VALUES (?, ?, 'Crew', 'crew-ctx')`, crewID, wsID)
+	db.Exec(`INSERT INTO agents (id, workspace_id, crew_id, name, slug, agent_role) VALUES (?, ?, ?, 'Lead', 'lead', 'LEAD')`, leadID, wsID, crewID)
+	db.Exec(`INSERT INTO agents (id, workspace_id, crew_id, name, slug, agent_role) VALUES (?, ?, ?, 'Worker', 'worker', 'AGENT')`, agentID, wsID, crewID)
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	db.Exec(`INSERT INTO missions (id, workspace_id, crew_id, lead_agent_id, trace_id, title, status, created_at, updated_at)
+		VALUES (?, ?, ?, ?, 'trace-ctx', 'Ctx Mission', 'IN_PROGRESS', ?, ?)`,
+		missionID, wsID, crewID, leadID, now, now)
+	db.Exec(`INSERT INTO mission_tasks (id, mission_id, assigned_agent_id, title, status, task_order, depends_on, created_at, updated_at)
+		VALUES ('t-ctx', ?, ?, 'Task', 'PENDING', 1, '[]', ?, ?)`,
+		missionID, agentID, now, now)
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	engine := NewMissionEngine(db, nil, nil, logger)
+	disp := &mockDispatcher{}
+	engine.SetDispatcher(disp)
+
+	ms := &missionState{
+		ID:          missionID,
+		CrewID:      crewID,
+		CrewSlug:    "crew-ctx",
+		LeadAgentID: leadID,
+		TraceID:     "trace-ctx",
+		WorkspaceID: wsID,
+	}
+	task := TaskInfo{
+		ID:              "t-ctx",
+		MissionID:       missionID,
+		AssignedAgentID: &agentID,
+		Title:           "Task",
+		Status:          "PENDING",
+	}
+
+	// Parent ctx with a sentinel value + a cancel func we'll fire
+	// BEFORE the dispatcher goroutine has a chance to inspect it.
+	const sentinel = "trace-span-id-42"
+	parent, cancel := context.WithCancel(context.WithValue(context.Background(), testCtxKey, sentinel))
+
+	if err := engine.scheduleTask(parent, ms, task, nil); err != nil {
+		t.Fatalf("scheduleTask failed: %v", err)
+	}
+
+	// Cancel the parent before the dispatcher goroutine inspects its
+	// ctx. The contract: the dispatcher's received ctx must STILL
+	// be alive (cancellation didn't propagate) and STILL carry the
+	// sentinel value.
+	cancel()
+
+	// Bounded wait for the goroutine to land.
+	deadline := time.Now().Add(2 * time.Second)
+	var ctxs []context.Context
+	for {
+		ctxs = disp.snapshotCtx()
+		if len(ctxs) == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("expected 1 dispatch within 2s, got %d", len(ctxs))
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	got := ctxs[0]
+
+	// (1) Value propagation: dispatcher must see the parent's
+	// sentinel value. If a future refactor reverts to
+	// context.Background(), this fails (Background carries no
+	// values).
+	if v, _ := got.Value(testCtxKey).(string); v != sentinel {
+		t.Errorf("dispatcher ctx missing parent's trace value: got %q, want %q", v, sentinel)
+	}
+
+	// (2) Cancellation does NOT propagate: parent is cancelled but
+	// dispatcher's ctx remains alive. If a future refactor drops
+	// the WithoutCancel wrap, this fails (the cancel propagates).
+	if err := got.Err(); err != nil {
+		t.Errorf("dispatcher ctx prematurely cancelled: %v (parent was cancelled but cancellation must not propagate)", err)
 	}
 }
