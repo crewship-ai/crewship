@@ -437,7 +437,12 @@ func (h *PersonaHandler) SuggestAgentPersona(w http.ResponseWriter, r *http.Requ
 			meta["self_learning_gate"] = "off"
 		}
 		metaBytes, _ := json.Marshal(meta)
-		auditID := newAuditID()
+		auditID, idErr := newAuditID()
+		if idErr != nil {
+			h.logger.Error("persona suggest: audit id generation failed", "err", idErr)
+			replyError(w, http.StatusInternalServerError, "audit id generation failed")
+			return
+		}
 		_, err := h.db.ExecContext(r.Context(), `
 			INSERT INTO audit_logs (id, workspace_id, action, entity_type, entity_id, metadata, created_at)
 			VALUES (?, ?, 'persona.suggest_pending', 'agent', ?, ?, ?)
@@ -519,10 +524,20 @@ func isPersonaAutoApply(d policy.Decision) bool {
 // projection). The previous `lower(hex(randomblob(16)))` inline form
 // generated the id inside SQL, where we couldn't read it back without
 // a follow-up SELECT.
-func newAuditID() string {
+func newAuditID() (string, error) {
 	b := make([]byte, 16)
-	_, _ = crand.Read(b)
-	return hex.EncodeToString(b)
+	if _, err := crand.Read(b); err != nil {
+		// crand.Read is documented to never partial-read, but it can
+		// fail under exotic conditions (FIPS-mode kernel CSPRNG
+		// init race, /dev/urandom unavailable). If we swallowed the
+		// error the audit_log row gets the zero-bytes-hex ID and
+		// every subsequent suggest_pending proposal in the same
+		// process collides on the same key — duplicate primary-key
+		// inserts mask the original write entirely. Propagate so
+		// the caller can 500 + log.
+		return "", fmt.Errorf("generate audit id: %w", err)
+	}
+	return hex.EncodeToString(b), nil
 }
 
 // recordVersion writes a memory_versions row for the persona change

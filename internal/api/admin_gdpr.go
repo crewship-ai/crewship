@@ -270,6 +270,18 @@ func (h *AdminGDPRHandler) DeleteUserData(w http.ResponseWriter, r *http.Request
 		for cardRows.Next() {
 			var c cardRow
 			if scanErr := cardRows.Scan(&c.cardID, &c.agentID, &c.slug, &c.agentSlug, &c.crewID); scanErr != nil {
+				// Don't silently `continue` past a Scan failure in a
+				// GDPR cascade — a malformed row would otherwise drop
+				// past the delete loop entirely, leaving the data on
+				// disk while the subject's SAR ticket says "deleted".
+				// Propagate via firstErr so the handler returns 500
+				// and the operator retries with the underlying schema
+				// drift fixed. CodeRabbit round-9 catch.
+				h.logger.Error("gdpr delete: peer_cards scan failed",
+					"action_id", actionID, "err", scanErr)
+				if firstErr == nil {
+					firstErr = scanErr
+				}
 				continue
 			}
 			cards = append(cards, c)
@@ -466,6 +478,11 @@ func (h *AdminGDPRHandler) ExportUserData(w http.ResponseWriter, r *http.Request
 			var e exportPeerCard
 			if scanErr := pcRows.Scan(&e.ID, &e.AgentID, &e.UserSlug, &e.Path,
 				&e.Bytes, &e.CreatedAt, &e.UpdatedAt); scanErr != nil {
+				h.logger.Error("gdpr export: peer_cards scan failed",
+					"action_id", actionID, "err", scanErr)
+				if firstErr == nil {
+					firstErr = scanErr
+				}
 				continue
 			}
 			bundle.PeerCards = append(bundle.PeerCards, e)
@@ -497,6 +514,11 @@ func (h *AdminGDPRHandler) ExportUserData(w http.ResponseWriter, r *http.Request
 			var e exportMemoryVersion
 			if scanErr := mvRows.Scan(&e.ID, &e.Path, &e.Tier, &e.SHA256,
 				&e.Bytes, &e.WrittenAt, &e.WrittenBy, &e.PayloadRef); scanErr != nil {
+				h.logger.Error("gdpr export: memory_versions scan failed",
+					"action_id", actionID, "err", scanErr)
+				if firstErr == nil {
+					firstErr = scanErr
+				}
 				continue
 			}
 			bundle.MemoryVersion = append(bundle.MemoryVersion, e)
@@ -528,6 +550,11 @@ func (h *AdminGDPRHandler) ExportUserData(w http.ResponseWriter, r *http.Request
 			var e exportInboxItem
 			if scanErr := ibRows.Scan(&e.ID, &e.Kind, &e.SourceID, &e.Title,
 				&e.BodyMD, &e.State, &e.PayloadJSON, &e.CreatedAt); scanErr != nil {
+				h.logger.Error("gdpr export: inbox_items scan failed",
+					"action_id", actionID, "err", scanErr)
+				if firstErr == nil {
+					firstErr = scanErr
+				}
 				continue
 			}
 			bundle.InboxItems = append(bundle.InboxItems, e)

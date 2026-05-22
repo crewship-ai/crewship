@@ -287,8 +287,19 @@ func (l *LocalDispatcher) Forget(ctx context.Context, req ForgetRequest) (Forget
 	if l == nil || l.d == nil {
 		return ForgetResult{}, errors.New("local dispatcher: not initialized")
 	}
+	// Exactly-one-selector contract: the doc on ForgetRequest says the
+	// caller picks per-id (ID set, DataSubjectID empty) OR cascade
+	// (DataSubjectID set, ID empty), never both. Earlier code accepted
+	// both and silently proceeded with the ID branch, leaving a
+	// cascade-intent silently downgraded to a single-row delete —
+	// auditable governance hole. Now we reject the both-set case
+	// explicitly so a malformed caller fails loud. CodeRabbit
+	// round-9 catch.
 	if req.ID == "" && req.DataSubjectID == "" {
-		return ForgetResult{}, errors.New("forget: must set ID or DataSubjectID")
+		return ForgetResult{}, errors.New("forget: must set exactly one of ID or DataSubjectID")
+	}
+	if req.ID != "" && req.DataSubjectID != "" {
+		return ForgetResult{}, errors.New("forget: must set exactly one of ID or DataSubjectID, not both (mixing per-id and cascade selectors is ambiguous)")
 	}
 	if req.ID == "" && req.DataSubjectID != "" {
 		return ForgetResult{}, errors.New("forget: DataSubjectID cascade not implemented in local provider; use the PR-F1 API endpoint")
