@@ -413,8 +413,35 @@ func (p *Provider) buildMounts(slug, workspacePath, outputPath, crewPath, secret
 	return mounts, nil
 }
 
-// ensureVolume creates a Docker named volume if it doesn't already exist.
+// ensureVolume creates a Docker named volume if it doesn't already
+// exist. If Docker's metadata claims the volume exists but its on-disk
+// Mountpoint is missing (e.g. operator wiped /var/lib/docker/volumes/X
+// while the daemon kept the metadata, or a partial-cleanup race),
+// ContainerCreate later fails with "failed to populate volume: error
+// evaluating symlinks from mount source …: no such file or directory"
+// and VolumeCreate is a no-op because Docker thinks it's fine. Detect
+// that state by inspecting the Mountpoint, force-remove, then recreate.
+// (Issue #536.)
 func (p *Provider) ensureVolume(ctx context.Context, name string) error {
+	if existing, err := p.client.VolumeInspect(ctx, name); err == nil {
+		// Docker tracks the volume. Confirm the backing directory
+		// actually exists before trusting the metadata — on a healthy
+		// host Mountpoint is e.g. /var/lib/docker/volumes/<name>/_data
+		// and points at a real directory. If it's gone, this volume
+		// will misbehave at next mount; rebuild it before continuing.
+		if existing.Mountpoint != "" {
+			if _, statErr := os.Stat(existing.Mountpoint); statErr == nil {
+				return nil
+			} else if !os.IsNotExist(statErr) {
+				return fmt.Errorf("volume %s mountpoint stat: %w", name, statErr)
+			}
+			p.logger.Warn("docker volume mountpoint missing on disk; recreating",
+				"volume", name, "mountpoint", existing.Mountpoint)
+			if rmErr := p.client.VolumeRemove(ctx, name, true); rmErr != nil {
+				return fmt.Errorf("volume remove (mountpoint vanished) %s: %w", name, rmErr)
+			}
+		}
+	}
 	_, err := p.client.VolumeCreate(ctx, volume.CreateOptions{
 		Name: name,
 		Labels: map[string]string{

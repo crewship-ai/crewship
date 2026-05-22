@@ -418,7 +418,13 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	r.mux.Handle("GET /api/v1/agents/{agentId}/git-log", authed(wsCtx(http.HandlerFunc(proxy.AgentGitLog))))
 	r.mux.Handle("GET /api/v1/agents/{agentId}/logs", authed(wsCtx(http.HandlerFunc(proxy.AgentLogs))))
 	r.mux.Handle("POST /api/v1/agents/{agentId}/stop", authed(wsCtx(http.HandlerFunc(proxy.AgentStop))))
-	r.mux.Handle("GET /api/v1/chats/{chatId}/messages", authed(http.HandlerFunc(proxy.ChatMessages)))
+	// wsCtx is required because ChatMessages runs canRole(RoleFromContext)
+	// for the workspace's read-tier gate (audit #495 follow-up). Without
+	// wsCtx the role context value is empty, the gate fail-closes, and
+	// every authenticated user — including OWNER — gets 403. Caught live
+	// on 2026-05-22 audit (issue #539); sibling POST route at line 412
+	// already wraps the full chain.
+	r.mux.Handle("GET /api/v1/chats/{chatId}/messages", authed(wsCtx(http.HandlerFunc(proxy.ChatMessages))))
 
 	// Assignment routes (internal auth, called by sidecar on behalf of lead agents).
 	// AssignmentHandler is constructed here so the public list endpoint
@@ -509,14 +515,28 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 
 	// Webhooks (public, HMAC-secret protected)
 	if r.orch != nil && r.keeperContainer != nil && r.logWriter != nil && r.internalToken != "" {
-		// Use IPC resolver to talk to our own internal endpoints
-		baseURL := r.internalBaseURL
+		// Pick the URL that's actually reachable from inside *this* process.
+		// internalLoopbackURL (127.0.0.1:<port>) is the right pick when
+		// the daemon is calling its own internal API: container-facing
+		// internalBaseURL like host.docker.internal:<port> resolves via
+		// /etc/hosts on the host and can land at the wrong machine on
+		// multi-host lab nets — that's exactly how issue #535 manifested
+		// on dev1 (host.docker.internal resolved to a different VM).
+		// Fall back to internalBaseURL only when the loopback URL wasn't
+		// plumbed in. No more silent `http://localhost:8080` fallback:
+		// the magic value masked multi-instance setups for a long time
+		// (#538), so we fail fast at boot instead.
+		baseURL := r.internalLoopbackURL
 		if baseURL == "" {
-			baseURL = "http://localhost:8080"
+			baseURL = r.internalBaseURL
 		}
-		resolver := chatbridge.NewIPCResolver(baseURL, r.internalToken, r.logger)
-		wh := NewWebhookHandler(r.db, r.logger, resolver, r.orch, r.hub, r.keeperContainer, r.logWriter)
-		r.mux.Handle("POST /api/v1/webhooks/{crewId}/{agentId}/trigger", http.HandlerFunc(wh.ServeHTTP))
+		if baseURL == "" {
+			r.logger.Error("cannot wire agent-webhook route: neither internalLoopbackURL nor internalBaseURL is set (#538)")
+		} else {
+			resolver := chatbridge.NewIPCResolver(baseURL, r.internalToken, r.logger)
+			wh := NewWebhookHandler(r.db, r.logger, resolver, r.orch, r.hub, r.keeperContainer, r.logWriter)
+			r.mux.Handle("POST /api/v1/webhooks/{crewId}/{agentId}/trigger", http.HandlerFunc(wh.ServeHTTP))
+		}
 	}
 
 	return orchestrationHandlers{

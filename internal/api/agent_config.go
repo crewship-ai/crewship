@@ -349,9 +349,15 @@ func (h *InternalHandler) loadAgentSystemPrompt(r *http.Request, data *agentConf
 	}
 	promptParts = append(promptParts, strings.Join(identityLines, "\n"))
 
-	// [PERSONA] section -- user-defined system prompt
+	// User-defined system prompt — labelled distinctly from the
+	// orchestrator's [PERSONA] block (memory_persona.buildPersonaBlock)
+	// so the two don't both appear as `[PERSONA]` in the assembled
+	// system prompt. Pre-fix the operator's agents.system_prompt and
+	// the layered persona from .memory/PERSONA.md both used the
+	// `[PERSONA]` header, producing two duplicate-looking blocks per
+	// turn and wasting tokens. (Issue #542.)
 	if data.systemPrompt.Valid && data.systemPrompt.String != "" {
-		promptParts = append(promptParts, "[PERSONA]\n"+data.systemPrompt.String)
+		promptParts = append(promptParts, "[CUSTOM SYSTEM PROMPT]\n"+data.systemPrompt.String)
 	}
 
 	// [SKILLS AVAILABLE] section

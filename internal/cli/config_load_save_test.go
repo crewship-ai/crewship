@@ -33,6 +33,7 @@ func TestDefaultConfigDir_PointsAtHomeCrewship(t *testing.T) {
 func TestDefaultConfigPath_AppendsConfigFile(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
+	t.Setenv("CREWSHIP_CONFIG", "")
 
 	got, err := DefaultConfigPath()
 	if err != nil {
@@ -41,6 +42,26 @@ func TestDefaultConfigPath_AppendsConfigFile(t *testing.T) {
 	want := filepath.Join(tmp, ".crewship", "cli-config.yaml")
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+// TestDefaultConfigPath_CREWSHIP_CONFIG_OverridesHome pins issue #544.
+// On a multi-instance dev VM, running `crewship login` against instance
+// 2 used to clobber `~/.crewship/cli-config.yaml` for every parallel
+// session on the same Linux user. With CREWSHIP_CONFIG set, that file
+// is pinned per-instance so the sessions stay isolated.
+func TestDefaultConfigPath_CREWSHIP_CONFIG_OverridesHome(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	override := filepath.Join(tmp, "instance-2.yaml")
+	t.Setenv("CREWSHIP_CONFIG", override)
+
+	got, err := DefaultConfigPath()
+	if err != nil {
+		t.Fatalf("DefaultConfigPath: %v", err)
+	}
+	if got != override {
+		t.Errorf("CREWSHIP_CONFIG ignored: got %q, want %q", got, override)
 	}
 }
 

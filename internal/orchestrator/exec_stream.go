@@ -166,6 +166,27 @@ func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecRe
 		o.logger.Debug("scanner error", "error", err, "agent_id", req.AgentID)
 	}
 
+	// Diagnostic Warn when an agent run ends without producing any
+	// output. The cause is usually one of:
+	//   - prompt-budget pressure on a small model (system prompt size
+	//     plus history pushed the assistant response to 0 tokens)
+	//   - a safety refusal that the adapter swallowed without surfacing
+	//   - the agent CLI binary exited cleanly with no stdout
+	// We can't auto-classify the case here, but logging the prompt size
+	// + adapter alongside agent_id gives the operator the correlation
+	// signal they need when triaging issue-#545 reports. The journal
+	// emit below carries the full stdout+stderr capture (which will be
+	// empty in this case too) so a post-mortem has both signals.
+	if totalBytes == 0 && ctx.Err() == nil {
+		o.logger.Warn("agent run produced no stdout (#545)",
+			"agent_id", req.AgentID,
+			"agent_slug", req.AgentSlug,
+			"agent_role", req.AgentRole,
+			"adapter", req.CLIAdapter,
+			"system_prompt_bytes", len(req.SystemPrompt),
+		)
+	}
+
 	// End-of-stream Crow's Nest emit. We run unconditionally (even when
 	// totalBytes is 0) because an empty-output run is still interesting for
 	// debugging — the UI can render "agent produced no stdout" explicitly

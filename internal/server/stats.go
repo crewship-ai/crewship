@@ -193,7 +193,15 @@ func (sc *StatsCollector) poll(ctx context.Context) {
 			defer cancel()
 			metrics, err := sc.container.ContainerStats(pollCtx, tc.ContainerID)
 			if err != nil {
-				// Don't unregister on transient errors — just skip this cycle
+				// Transient errors (docker daemon hiccup, single timeout)
+				// just skip this cycle and try again next tick. Permanent
+				// errors — the container was removed or stopped for good —
+				// must drop the entry from the tracked set, otherwise the
+				// stats loop and the listening-port scanner keep logging
+				// 15-sec-cadence "no such container" forever (#534).
+				if containerGone(err) {
+					sc.Unregister(tc.ContainerID)
+				}
 				return
 			}
 			sc.latestMu.Lock()

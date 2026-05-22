@@ -375,6 +375,16 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if val, ok := envBool("CREWSHIP_SIDECAR_ENABLED"); ok {
 		cfg.Container.SidecarEnabled = val
+	} else if cfg.Container.SidecarBinaryPath != "" {
+		// Auto-enable when a sidecar binary is configured / autodetected,
+		// unless the operator explicitly opted out via the env var above.
+		// Pre-fix the default was `false` even with the binary mounted in,
+		// so the orchestrator's startSidecar call was skipped, every
+		// MCP-memory tool hit ECONNREFUSED on the agent side, and the
+		// "expose-port" sidecar surface documented in every system prompt
+		// was dead. Caught live on 2026-05-22 audit (issue #541). Mirrors
+		// the KEEPER_OLLAMA_URL → Keeper.Enabled auto-derivation above.
+		cfg.Container.SidecarEnabled = true
 	}
 	if v := os.Getenv("CREWSHIP_SIDECAR_PATH"); v != "" {
 		cfg.Container.SidecarBinaryPath = v

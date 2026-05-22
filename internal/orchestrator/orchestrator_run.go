@@ -345,6 +345,17 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	ipcToken := o.ipcToken
 	o.mu.RUnlock()
 
+	if !sidecarEnabled && !req.SkipSidecar {
+		// Visible signal that the sidecar is OFF at runtime — pre-fix the
+		// orchestrator silently skipped startSidecar and the operator only
+		// noticed at first MCP tool call (ECONNREFUSED on 9119). With the
+		// config-side auto-enable in place this branch is reserved for
+		// CREWSHIP_SIDECAR_ENABLED=false; surface it so operators don't
+		// chase phantom "memory tools broken" reports.
+		o.logger.Warn("sidecar disabled — MCP memory tools and expose-port will be unreachable from agent",
+			"agent_id", req.AgentID, "container_id", req.ContainerID)
+	}
+
 	var env []string
 	if sidecarEnabled {
 		env = BuildEnvVarsSidecar(req, keeperEnabled)

@@ -40,6 +40,61 @@ func TestWebhookSuccess(t *testing.T) {
 	if w.Code != http.StatusAccepted {
 		t.Fatalf("expected 202, got %d: %s", w.Code, w.Body.String())
 	}
+	if got := w.Header().Get("Deprecation"); got == "" {
+		t.Errorf("X-Webhook-Secret path should emit Deprecation header on success; got none")
+	}
+}
+
+// TestWebhookHMAC_Accepts pins issue #537's HMAC fix: a request signed
+// with X-Signature = hex(HMAC-SHA256(body, secret)) must succeed even
+// when no X-Webhook-Secret header is present, and must not emit the
+// deprecation header (the HMAC path is the new contract, not the
+// fallback).
+func TestWebhookHMAC_Accepts(t *testing.T) {
+	const secret = "shared-secret-xyz"
+	h := testHandler(secret)
+	body := []byte(`{"event":"alert","source":"grafana"}`)
+
+	req := httptest.NewRequest("POST", "/api/v1/webhooks/team-1/agent-1/trigger", bytes.NewReader(body))
+	req.SetPathValue("crewId", "crew-1")
+	req.SetPathValue("agentId", "agent-1")
+	req.Header.Set("X-Signature", ComputeHMAC(body, secret))
+	req.Header.Set("Content-Type", "application/json")
+
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("HMAC-signed request rejected: status=%d body=%s", w.Code, w.Body.String())
+	}
+	if got := w.Header().Get("Deprecation"); got != "" {
+		t.Errorf("HMAC path should not emit Deprecation header; got %q", got)
+	}
+}
+
+// TestWebhookHMAC_RejectsTamperedBody guarantees the X-Signature path
+// blocks a request whose body was modified after signing — that's the
+// whole point of moving to HMAC over plain shared-secret comparison
+// (#537). A future regression that drops the body-vs-signature check
+// would let this test pass through.
+func TestWebhookHMAC_RejectsTamperedBody(t *testing.T) {
+	const secret = "shared-secret-xyz"
+	h := testHandler(secret)
+	signedBody := []byte(`{"event":"alert"}`)
+	sentBody := []byte(`{"event":"evil"}`)
+
+	req := httptest.NewRequest("POST", "/api/v1/webhooks/team-1/agent-1/trigger", bytes.NewReader(sentBody))
+	req.SetPathValue("crewId", "crew-1")
+	req.SetPathValue("agentId", "agent-1")
+	req.Header.Set("X-Signature", ComputeHMAC(signedBody, secret))
+	req.Header.Set("Content-Type", "application/json")
+
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("tampered body got %d, want 401", w.Code)
+	}
 }
 
 func TestWebhookMissingSecret(t *testing.T) {

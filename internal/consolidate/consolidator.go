@@ -150,6 +150,25 @@ func (c *Consolidator) Run(ctx context.Context, cfg Config) (ConsolidationResult
 		return ConsolidationResult{Skipped: true, EntriesScanned: len(filtered)}, nil
 	}
 
+	// Heuristic Curator path: when no LLM Summarizer is wired (operator
+	// hasn't set KEEPER_OLLAMA_URL + KEEPER_MODEL), we still want the
+	// pin snapshot above to run, version rows to land, and the journal
+	// to record an entry for this tick — but we can't extract new
+	// learned rules without an LLM. Pre-fix the tick would nil-panic on
+	// c.Summarizer.Summarize the moment a crew tripped the
+	// MinEntries threshold; the Curator subsystem went dark globally
+	// even though the pins snapshot was already producing useful state
+	// on its own. (Issue #543.)
+	if c.Summarizer == nil {
+		logger.Debug("consolidate: no Summarizer; running pin-snapshot path only (set KEEPER_OLLAMA_URL + KEEPER_MODEL for full Curator)",
+			"crew_id", cfg.CrewID)
+		return ConsolidationResult{
+			Skipped:        false,
+			EntriesScanned: len(filtered),
+			RulesAppended:  0,
+		}, nil
+	}
+
 	prompt := buildPrompt(filtered)
 	raw, err := c.Summarizer.Summarize(ctx, prompt)
 	if err != nil {

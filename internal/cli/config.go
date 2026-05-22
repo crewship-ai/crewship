@@ -38,8 +38,23 @@ func DefaultConfigDir() (string, error) {
 	return filepath.Join(home, ".crewship"), nil
 }
 
-// DefaultConfigPath returns the path to ~/.crewship/cli-config.yaml.
+// DefaultConfigPath returns the path to the CLI config file.
+//
+// $CREWSHIP_CONFIG, when set, points directly at the file the CLI
+// should load/save. This is the multi-instance escape hatch from issue
+// #544 — without it, parallel work on /opt/crewship_1 and
+// /opt/crewship_2 silently clobbers each other's ~/.crewship/cli-
+// config.yaml (same user account on the dev VM) and the other
+// instance starts returning `session_invalid` for tokens that were
+// minted against a different bootstrap. Setting CREWSHIP_CONFIG=
+// /opt/crewship_2/.cli-config.yaml in that instance's shell pins
+// the file to a per-instance path so the two sessions stay isolated.
+// Falls back to ~/.crewship/cli-config.yaml otherwise so single-
+// instance setups stay byte-identical.
 func DefaultConfigPath() (string, error) {
+	if v := os.Getenv("CREWSHIP_CONFIG"); v != "" {
+		return v, nil
+	}
 	dir, err := DefaultConfigDir()
 	if err != nil {
 		return "", err

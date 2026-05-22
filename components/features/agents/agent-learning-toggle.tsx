@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
 import { Loader2, Sparkles } from "lucide-react"
 import { Switch } from "@/components/ui/switch"
+import { Input } from "@/components/ui/input"
+import { Button } from "@/components/ui/button"
 import { useAbilities } from "@/hooks/use-abilities"
 
 // PR-G F4.1 UX — per-agent self-learning toggle.
@@ -180,35 +182,35 @@ export function AgentLearningToggle({ agentId, workspaceId, canEdit }: AgentLear
           >
             Reason (required)
           </label>
-          <input
+          <Input
             id={`agent-learning-reason-${agentId}`}
             type="text"
             value={reason}
             onChange={(e) => setReason(e.target.value)}
             placeholder={pendingEnabled ? "why grant autonomy to this agent?" : "why revoke autonomy?"}
-            className="w-full rounded border border-white/10 bg-background px-2 py-1.5 text-sm focus:outline-none focus:border-primary/50"
             disabled={saving}
           />
           <div className="flex items-center gap-2">
-            <button
+            <Button
               type="button"
+              size="sm"
               onClick={() => { void save() }}
               disabled={reason.trim() === "" || saving}
-              className="text-xs px-3 py-1.5 rounded border bg-primary/20 border-primary/40 text-primary hover:bg-primary/30 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {saving ? "Saving…" : "Confirm"}
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
+              size="sm"
+              variant="ghost"
               onClick={() => {
                 setPendingEnabled(null)
                 setReason("")
               }}
               disabled={saving}
-              className="text-xs px-3 py-1.5 rounded border border-white/10 hover:bg-white/5"
             >
               Cancel
-            </button>
+            </Button>
           </div>
         </div>
       )}

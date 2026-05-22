@@ -57,9 +57,28 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Two auth shapes accepted (in order of preference):
+	//
+	//   X-Signature        hex HMAC-SHA256 of the raw body using the agent's
+	//                      shared secret as the HMAC key. This is the same
+	//                      shape the pipeline-webhook route uses, and it's
+	//                      the model issue #537 wants the agent route to
+	//                      converge on — body integrity is covered and a
+	//                      leaked log-line capture of the header is useless
+	//                      without the body it signed.
+	//
+	//   X-Webhook-Secret   plaintext shared secret. Pre-HMAC contract;
+	//                      kept for one release as a deprecation window so
+	//                      external systems already firing webhooks don't
+	//                      break at upgrade. Emits a Deprecation response
+	//                      header so callers can see they're on the old
+	//                      shape. After the deprecation window we'll
+	//                      remove this branch and the plain secret will
+	//                      get rejected.
+	providedSig := r.Header.Get("X-Signature")
 	providedSecret := r.Header.Get("X-Webhook-Secret")
-	if providedSecret == "" {
-		h.logger.Warn("webhook missing secret", "crew_id", crewID, "agent_id", agentID)
+	if providedSig == "" && providedSecret == "" {
+		h.logger.Warn("webhook missing signature/secret", "crew_id", crewID, "agent_id", agentID)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -71,16 +90,30 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !ValidateSecret(providedSecret, expectedSecret) {
-		h.logger.Warn("webhook invalid secret", "crew_id", crewID, "agent_id", agentID)
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-
 	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20)) // 1MB limit
 	if err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
+	}
+
+	// Auth check after body read so HMAC validation has the bytes it signs.
+	switch {
+	case providedSig != "":
+		if !ValidateHMAC(body, providedSig, expectedSecret) {
+			h.logger.Warn("webhook invalid HMAC signature", "crew_id", crewID, "agent_id", agentID)
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+	case providedSecret != "":
+		if !ValidateSecret(providedSecret, expectedSecret) {
+			h.logger.Warn("webhook invalid secret", "crew_id", crewID, "agent_id", agentID)
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Deprecation", `version="X-Webhook-Secret"`)
+		w.Header().Set("Sunset", "Wed, 31 Dec 2026 23:59:59 GMT")
+		h.logger.Warn("webhook accepted on deprecated X-Webhook-Secret path; migrate to X-Signature (HMAC-SHA256 of body)",
+			"crew_id", crewID, "agent_id", agentID)
 	}
 
 	var payload WebhookPayload

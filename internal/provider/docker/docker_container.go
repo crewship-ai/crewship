@@ -277,6 +277,21 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 		for _, dir := range allDirs {
 			chownCmd += " /mnt" + dir
 		}
+		// .memory subtrees need a different ownership story than the
+		// rest of the bind mount: the sidecar process (UID 1002) owns
+		// the FTS5 SQLite index, while the agent process (UID 1001)
+		// also reads/writes plaintext markdown files in the same tree
+		// via shell tools. After the broad `chown -R 1001:1001` above
+		// the sidecar can't open index.sqlite and the dispatcher path
+		// validator (which by design refuses to fall through on a
+		// missing base path) silently disables every memory tool with
+		// `SQLITE_CANTOPEN (14)`. Flip .memory directories to group
+		// 1002 with setgid + g+rwx so both UIDs can write, and new
+		// files inherit the sidecar group. (Issue #530, paired with
+		// the sidecar-side MkdirAll fix.)
+		chownCmd += ` && find /mnt` + crewPath + ` -name .memory -type d -exec chgrp -R 1002 {} +`
+		chownCmd += ` ; find /mnt` + crewPath + ` -name .memory -type d -exec chmod 2775 {} +`
+		chownCmd += ` ; find /mnt` + crewPath + ` -path '*/.memory/*' -type f -exec chmod g+rw {} +`
 		var mounts []mount.Mount
 		for _, dir := range allDirs {
 			mounts = append(mounts, mount.Mount{Type: mount.TypeBind, Source: dir, Target: "/mnt" + dir})
