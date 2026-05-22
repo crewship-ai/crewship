@@ -490,6 +490,45 @@ func startSidecar(
 		return fmt.Errorf("marshal sidecar input: %w", err)
 	}
 
+	// Prepare memory directories with shared-write perms BEFORE launching
+	// the sidecar (UID 1002). The agent home `/crew/agents/{slug}` and the
+	// crew share `/crew/shared` are bind-mounted at chown 1001:1001 mode
+	// 0755 by the docker init container — the sidecar can't MkdirAll into
+	// either path because group/other lack write, and any pre-existing
+	// `.memory` subdir inherits the same restrictive perms.
+	//
+	// Run a one-shot root exec that:
+	//   * pre-creates the per-agent and crew-shared `.memory` directories
+	//   * chowns them to user=1001 (agent) group=1002 (sidecar)
+	//   * applies setgid + g+rwx so new files/dirs inherit group 1002 with
+	//     the container entrypoint's umask 0002 making them g+rw
+	//
+	// Both UIDs can then read+write the FTS5 SQLite index and plaintext
+	// markdown tier files (#530). Best-effort: failures are logged but
+	// don't block sidecar startup — without these perms the path-validator
+	// fallback path still works for boot-context recall.
+	if memoryCfg != nil && memoryCfg.Enabled && memoryCfg.BasePath != "" {
+		paths := []string{memoryCfg.BasePath}
+		if memoryCfg.CrewMemoryPath != "" {
+			paths = append(paths, memoryCfg.CrewMemoryPath)
+		}
+		prepScript := "set -e\n"
+		for _, p := range paths {
+			prepScript += fmt.Sprintf("mkdir -p %s\nchown -R 1001:1002 %s\nchmod -R u+rwX,g+rwXs %s\n", p, p, p)
+		}
+		prepCfg := provider.ExecConfig{
+			ContainerID: containerID,
+			Cmd:         []string{"sh", "-c", prepScript},
+			User:        "0:0",
+		}
+		if prepResult, prepErr := container.Exec(ctx, prepCfg); prepErr != nil {
+			logger.Warn("memory dir perms prep failed (sidecar will boot anyway)", "error", prepErr)
+		} else if prepResult != nil && prepResult.Reader != nil {
+			_, _ = io.Copy(io.Discard, prepResult.Reader)
+			_ = prepResult.Reader.Close()
+		}
+	}
+
 	// SECURITY: Base64-encode the credentials JSON to prevent shell injection.
 	// Raw JSON piped through `echo '...'` is vulnerable to shell metacharacter
 	// injection if a credential token contains single quotes or other shell chars.
