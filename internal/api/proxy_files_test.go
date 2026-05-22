@@ -30,44 +30,35 @@ func newProxyHandlerWithCrewWorkspace(t *testing.T, socketPath string) (*ProxyHa
 
 // ---- AgentFiles / AgentFileDownload / AgentLogs role gate (audit M13) ----
 
-// These three read handlers previously did NOT gate on role -- workspace
-// membership alone was enough. canRole("", "read") returns false so the
-// gate fails closed against auth-middleware-bypass scenarios where a
-// request lands with an empty role.
-
-func TestAgentFiles_EmptyRole_Forbidden(t *testing.T) {
+// TestAgentReadHandlers_EmptyRole_Forbidden pins the audit M13 role-gate
+// contract for the three sibling read handlers. canRole("", "read")
+// returns false so the gate fails closed against auth-middleware-bypass
+// scenarios where a request lands with an empty role. Table-driven so a
+// per-handler regression (one site reverted, two still gated) surfaces
+// as the specific subtest failure (CodeRabbit #495 nitpick).
+func TestAgentReadHandlers_EmptyRole_Forbidden(t *testing.T) {
 	h, userID, wsID, _ := newProxyHandlerWithCrewWorkspace(t, "/tmp/no-such-socket")
-	req := httptest.NewRequest("GET", "/x", nil)
-	req.SetPathValue("agentId", "ag-fake")
-	req = withWorkspaceUser(req, userID, wsID, "")
-	rr := httptest.NewRecorder()
-	h.AgentFiles(rr, req)
-	if rr.Code != http.StatusForbidden {
-		t.Errorf("AgentFiles empty-role status = %d, want 403", rr.Code)
+
+	cases := []struct {
+		name    string
+		path    string
+		handler func(http.ResponseWriter, *http.Request)
+	}{
+		{"AgentFiles", "/x", h.AgentFiles},
+		{"AgentFileDownload", "/x?path=foo", h.AgentFileDownload},
+		{"AgentLogs", "/x", h.AgentLogs},
 	}
-}
-
-func TestAgentFileDownload_EmptyRole_Forbidden(t *testing.T) {
-	h, userID, wsID, _ := newProxyHandlerWithCrewWorkspace(t, "/tmp/no-such-socket")
-	req := httptest.NewRequest("GET", "/x?path=foo", nil)
-	req.SetPathValue("agentId", "ag-fake")
-	req = withWorkspaceUser(req, userID, wsID, "")
-	rr := httptest.NewRecorder()
-	h.AgentFileDownload(rr, req)
-	if rr.Code != http.StatusForbidden {
-		t.Errorf("AgentFileDownload empty-role status = %d, want 403", rr.Code)
-	}
-}
-
-func TestAgentLogs_EmptyRole_Forbidden(t *testing.T) {
-	h, userID, wsID, _ := newProxyHandlerWithCrewWorkspace(t, "/tmp/no-such-socket")
-	req := httptest.NewRequest("GET", "/x", nil)
-	req.SetPathValue("agentId", "ag-fake")
-	req = withWorkspaceUser(req, userID, wsID, "")
-	rr := httptest.NewRecorder()
-	h.AgentLogs(rr, req)
-	if rr.Code != http.StatusForbidden {
-		t.Errorf("AgentLogs empty-role status = %d, want 403", rr.Code)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", tc.path, nil)
+			req.SetPathValue("agentId", "ag-fake")
+			req = withWorkspaceUser(req, userID, wsID, "")
+			rr := httptest.NewRecorder()
+			tc.handler(rr, req)
+			if rr.Code != http.StatusForbidden {
+				t.Errorf("%s empty-role status = %d, want 403", tc.name, rr.Code)
+			}
+		})
 	}
 }
 
