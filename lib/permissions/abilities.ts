@@ -1,4 +1,4 @@
-import { AbilityBuilder, PureAbility } from "@casl/ability"
+import { AbilityBuilder, Ability } from "@casl/ability"
 import type { OrgRole } from "@/lib/generated/prisma/client"
 
 type Actions = "create" | "read" | "update" | "delete" | "manage"
@@ -13,7 +13,7 @@ type Subjects =
   | "all"
 
 /** CASL ability type parameterized with Crewship actions and subjects. */
-export type AppAbility = PureAbility<[Actions, Subjects]>
+export type AppAbility = Ability<[Actions, Subjects]>
 
 /**
  * Build a CASL ability set for a given workspace role.
@@ -21,7 +21,7 @@ export type AppAbility = PureAbility<[Actions, Subjects]>
  * MEMBER/VIEWER have read-only access.
  */
 export function defineAbilitiesFor(role: OrgRole): AppAbility {
-  const { can, build } = new AbilityBuilder<AppAbility>(PureAbility)
+  const { can, build } = new AbilityBuilder<AppAbility>(Ability)
 
   switch (role) {
     case "OWNER":
