@@ -534,7 +534,7 @@ func (h *PipelineHandler) ApproveWaitpoint(w http.ResponseWriter, r *http.Reques
 			replyError(w, http.StatusConflict, err.Error())
 			return
 		}
-		h.logger.Error("waitpoint complete", "error", err, "token", token)
+		h.logger.Error("waitpoint complete", "error", err, "token", tokenFingerprint(token))
 		replyError(w, http.StatusInternalServerError, "Failed to complete waitpoint")
 		return
 	}
