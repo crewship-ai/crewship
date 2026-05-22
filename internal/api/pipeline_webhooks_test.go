@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
@@ -225,10 +226,24 @@ func TestPipelineWebhooks_Create_EmptySecret_AutoGenerates(t *testing.T) {
 	if len(resp.SigningSecret) != 64 {
 		t.Errorf("auto-generated secret length = %d, want 64 hex chars", len(resp.SigningSecret))
 	}
+	// Hex-decode to bytes — guards against a 64-char non-hex value
+	// (eg. base64-shaped) slipping through length-only assertion.
+	rawSecret, err := hex.DecodeString(resp.SigningSecret)
+	if err != nil {
+		t.Fatalf("auto-generated secret is not valid hex: %v (value=%q)", err, resp.SigningSecret)
+	}
+	if len(rawSecret) != 32 {
+		t.Errorf("auto-generated secret decoded length = %d bytes, want 32", len(rawSecret))
+	}
 	if !resp.SigningSecretSet {
 		t.Errorf("signing_secret_set flag must be true on auto-generate path")
 	}
 	// Sanity: two independent creates produce different secrets.
+	// CodeRabbit #490 hardening: assert the second response is itself
+	// a successful create with valid JSON + valid hex BEFORE comparing,
+	// otherwise a failed second request (5xx, malformed JSON) would
+	// produce an empty resp2.SigningSecret that trivially differs
+	// from the first value and falsely pass the collision check.
 	seedWebhookPipeline(t, db, wsID, "pln_c", "auto-secret-2")
 	req2 := withWorkspaceUser(
 		httptest.NewRequest("POST", "/api/v1/workspaces/"+wsID+"/pipeline-webhooks",
@@ -237,10 +252,19 @@ func TestPipelineWebhooks_Create_EmptySecret_AutoGenerates(t *testing.T) {
 	)
 	rr2 := httptest.NewRecorder()
 	h.CreateWebhook(rr2, req2)
+	if rr2.Code != http.StatusCreated {
+		t.Fatalf("second create status = %d, want 201; body=%s", rr2.Code, rr2.Body.String())
+	}
 	var resp2 webhookResponse
-	_ = json.Unmarshal(rr2.Body.Bytes(), &resp2)
-	if resp2.SigningSecret == resp.SigningSecret {
-		t.Errorf("two auto-generated secrets collided: both = %q", resp.SigningSecret)
+	if err := json.Unmarshal(rr2.Body.Bytes(), &resp2); err != nil {
+		t.Fatalf("second decode: %v", err)
+	}
+	rawSecret2, err := hex.DecodeString(resp2.SigningSecret)
+	if err != nil {
+		t.Fatalf("second auto-generated secret is not valid hex: %v (value=%q)", err, resp2.SigningSecret)
+	}
+	if bytes.Equal(rawSecret, rawSecret2) {
+		t.Errorf("two auto-generated secrets collided: both decode to %x", rawSecret)
 	}
 }
 
