@@ -2,7 +2,9 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -15,6 +17,28 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/ws"
 )
+
+// tokenFingerprint returns a short, non-reversible identifier safe to
+// log in place of a raw token: a 6-char value prefix joined by ".." to
+// the first 8 hex chars of the SHA-256 of the full value. ~16 chars
+// total so log lines stay scannable. The prefix lets an operator
+// visually correlate two log lines for the same token without exposing
+// enough to authenticate; the SHA suffix guarantees collision
+// resistance even for short prefixes.
+//
+// Empty string maps to the literal "<empty>" so an unset/cleared token
+// is still distinguishable from the absence of the field in the log.
+func tokenFingerprint(s string) string {
+	if s == "" {
+		return "<empty>"
+	}
+	sum := sha256.Sum256([]byte(s))
+	prefix := s
+	if len(prefix) > 6 {
+		prefix = prefix[:6]
+	}
+	return prefix + ".." + hex.EncodeToString(sum[:4])
+}
 
 // broadcastChannelEvent is an api-package shortcut to hub.BroadcastChannel.
 // No-op if hub is nil (e.g. when the API is initialized without a WebSocket hub

@@ -180,7 +180,7 @@ func (r *PortExposeRegistry) LoadFromDB(ctx context.Context) error {
 			UPDATE port_exposures SET status = 'EXPIRED'
 			WHERE token = ? AND status = 'ACTIVE'
 		`, tok); err != nil {
-			r.logger.Warn("port expose registry: expire stale on load", "token", tok, "error", err)
+			r.logger.Warn("port expose registry: expire stale on load", "token", tokenFingerprint(tok), "error", err)
 		}
 	}
 

@@ -11,6 +11,42 @@ import (
 // PR #130: `limit > maxLimit` used to fall through the same branch as
 // `limit <= 0` and get reset to defaultLimit, which silently shifted the
 // pagination window instead of clamping to maxLimit as the godoc promised.
+// TestTokenFingerprint pins the contract used by every call site that
+// replaced a raw "token" log field (audit M19): non-reversible, short
+// enough to scan, but stable so two log lines for the same token
+// correlate visually.
+func TestTokenFingerprint(t *testing.T) {
+	// Determinism — same input, same output.
+	a := tokenFingerprint("hunter2-deadbeef-cafef00d")
+	b := tokenFingerprint("hunter2-deadbeef-cafef00d")
+	assert.Equal(t, a, b, "fingerprint must be deterministic")
+
+	// Different inputs produce different fingerprints. Both share the
+	// same first 6 chars by construction, so the SHA tail is what
+	// makes them distinguishable.
+	c := tokenFingerprint("hunter2-different-tail")
+	assert.NotEqual(t, a, c, "different tokens must fingerprint differently")
+
+	// Empty maps to a sentinel so an unset field stays distinguishable
+	// from a missing log key.
+	assert.Equal(t, "<empty>", tokenFingerprint(""))
+
+	// Shape: 6-char prefix + ".." + 8 hex chars = 16 chars total.
+	// Operators eyeballing two log lines should pick up the prefix
+	// match instantly without the line getting cluttered.
+	assert.Len(t, a, 16)
+	assert.Equal(t, "hunter", a[:6], "prefix must be the first 6 chars of the value")
+	assert.Equal(t, "..", a[6:8])
+
+	// Non-reversibility: SHA tail never contains the raw value tail.
+	assert.NotContains(t, a, "cafef00d", "fingerprint must not leak the value tail")
+
+	// Short values: the prefix is the whole value when len <= 6.
+	short := tokenFingerprint("abc")
+	assert.Equal(t, "abc", short[:3])
+	assert.Equal(t, "..", short[3:5])
+}
+
 func TestParsePagination_Clamping(t *testing.T) {
 	cases := []struct {
 		name                   string
