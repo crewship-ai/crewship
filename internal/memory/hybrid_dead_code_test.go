@@ -92,8 +92,20 @@ Call sites found: %v`, hits)
 	// be the implementation (not a delegation stub). If someone
 	// deletes substring search entirely without wiring HybridSearch,
 	// this check catches it before runtime.
-	bodyText := string(src)
-	if !strings.Contains(bodyText, "strings.Contains(strings.ToLower(line), needle)") {
+	//
+	// Scope the substring scan to handleSearch's body BYTES (not all
+	// of tools.go) so a future helper or test fixture elsewhere in
+	// the file that happens to use the same `strings.Contains(...)`
+	// pattern doesn't accidentally satisfy this sentinel while the
+	// real handleSearch implementation drifted. CodeRabbit round-10
+	// catch.
+	startOffset := fset.Position(handleSearchBody.Pos()).Offset
+	endOffset := fset.Position(handleSearchBody.End()).Offset
+	if startOffset < 0 || endOffset > len(src) || startOffset >= endOffset {
+		t.Fatalf("handleSearch body offsets out of range: [%d, %d) in src len %d", startOffset, endOffset, len(src))
+	}
+	handleSearchBodyText := string(src[startOffset:endOffset])
+	if !strings.Contains(handleSearchBodyText, "strings.Contains(strings.ToLower(line), needle)") {
 		t.Errorf("handleSearch substring scan signature missing — search path may be in mid-refactor. Re-confirm dispatcher search behaviour and update this sentinel.")
 	}
 }

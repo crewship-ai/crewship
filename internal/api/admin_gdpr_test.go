@@ -330,6 +330,9 @@ func TestGDPRDelete_RequiresReason(t *testing.T) {
 	r.seedAll(t)
 	rec = httptest.NewRecorder()
 	r.h.DeleteUserData(rec, r.adminReq(t, http.MethodDelete, `{}`, r.targetID, "ADMIN"))
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("empty body: status = %d, want 400", rec.Code)
+	}
 
 	var cnt int
 	_ = r.db.QueryRow(`SELECT COUNT(*) FROM peer_cards

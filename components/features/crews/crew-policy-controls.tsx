@@ -416,10 +416,10 @@ export function CrewPolicyControls({ crewId, workspaceId, canEdit }: CrewPolicyC
               (!effectiveCanEdit || saving) && "opacity-50 cursor-not-allowed",
             )}
             aria-invalid={quotaInvalid}
-            aria-describedby="ephemeral-quota-help"
+            aria-describedby={`ephemeral-quota-help-${crewId}`}
             data-testid="max-ephemeral-agents-input"
           />
-          <div id="ephemeral-quota-help" className="text-[11px] text-muted-foreground flex-1">
+          <div id={`ephemeral-quota-help-${crewId}`} className="text-[11px] text-muted-foreground flex-1">
             Hard cap on concurrent ephemeral (hired) agents this crew can have. Ghosts don&rsquo;t count.
             <span className="block text-muted-foreground/60 mt-0.5">
               Integer 0-{MAX_EPHEMERAL_AGENTS_CEILING}; default 10.

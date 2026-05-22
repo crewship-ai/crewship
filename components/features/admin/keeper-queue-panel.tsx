@@ -104,9 +104,15 @@ export const KeeperQueuePanel = React.memo(function KeeperQueuePanel({
   const fetchEntries = useCallback(async (signal?: AbortSignal) => {
     if (!workspaceId) {
       // Clear stale data from a previous workspace so the operator
-      // never sees rows from workspace A after switching to B.
+      // never sees rows from workspace A after switching to B. Also
+      // reset `loading` to false — without it, if the previous
+      // workspaceId fetch was aborted (which intentionally skips the
+      // setLoading(false) in the finally clause), and this call hits
+      // the early-return here, the spinner stays visible forever.
+      // CodeRabbit round-10 catch.
       setEntries([])
       setSelected(null)
+      setLoading(false)
       return
     }
     setLoading(true)

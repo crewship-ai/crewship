@@ -6,7 +6,7 @@ icon: "shield-alert"
 
 # Threat Model
 
-Crewship's security posture rests on four layers that compose into a
+Crewship's security posture rests on five layers that compose into a
 defense-in-depth model. Each layer assumes the layer above it can
 fail. This page is the 1-page summary; deep-dive links for each layer
 are at the bottom.
@@ -283,8 +283,6 @@ Idempotent on content: the same poisoned body quarantined twice reuses the same 
 ### Fail-closed posture
 
 Quarantine WRITE failure (disk full, container permission drop) returns `IsError=true` from the scanner — the poisoned content is NOT returned to the model. The agent sees a tool error instead. This is the right default: a half-working scanner is worse than no scanner if it lets content through on the failure path.
-
-## Tenant isolation on internal-auth handlers
 
 ## What this composition does and does not protect against
 

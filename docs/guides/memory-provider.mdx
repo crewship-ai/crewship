@@ -71,21 +71,22 @@ The returned `ID` is the canonical handle for `Forget(byID)`. For `LocalDispatch
 type RecallRequest struct {
     WorkspaceID string
     AgentID     string // optional: limit to a single agent's tiers
+    CrewID      string // optional: limit to crew-shared tiers
     Tier        string // optional: empty = all accessible tiers
     Query       string // search text
     Limit       int    // advisory; provider SHOULD cap at 20
 }
 
 type RecallResult struct {
-    Hits []RecallHit
+    Hits        []RecallSnippet `json:"hits"`        // always present (may be empty)
+    Quarantined []string        `json:"quarantined,omitempty"` // file labels the scanner rejected; surface to operator UI but NEVER feed back to the model
 }
 
-type RecallHit struct {
-    ID       string // canonical id (same shape as Retain returns)
-    Tier     string
-    Snippet  string // matched excerpt
-    Score    float64 // 0..1; provider-specific ranking
-    Metadata map[string]any // optional per-hit metadata
+type RecallSnippet struct {
+    Source  string  `json:"source"`            // tier-relative label (NEVER an absolute filesystem path)
+    Snippet string  `json:"snippet"`
+    Line    int     `json:"line,omitempty"`
+    Score   float64 `json:"score,omitempty"`   // 0..1; provider-specific (local impl returns 1.0 always)
 }
 ```
 
@@ -94,51 +95,51 @@ Design notes:
 - **`Tier` empty means "all accessible tiers"** — providers iterate the tiers the caller's `AgentID` can read.
 - **`Limit` is advisory.** Providers SHOULD return fewer than `Limit` when the corpus is small; they SHOULD cap at 20 to match the dispatcher's existing JSON Schema (the model has been trained on the cap).
 - **`Score` is 0..1 and provider-specific.** Local impl returns 1.0 for substring hits (no ranking signal). Vector providers return cosine similarity. BM25 providers return rescaled BM25. Don't compare scores across providers.
-- **`Snippet`** is the matched excerpt the model sees in the tool result. Keep it short (≤500 chars) — the model has the `ID` if it wants to fetch the full content via `memory.read`.
+- **`Snippet`** is the matched excerpt the model sees in the tool result. Keep it short (≤500 chars) — the model has the `Source` if it wants to fetch the full content via `memory.read`.
+- **`Source` is the tier-relative label**, never an absolute filesystem path (leaking bind-mount layout to the model is a small but real info-disclosure surface — see `tools.go::pathToSourceLabel` for the canonicalisation contract).
+- **`Quarantined` is for files the inbound prompt-injection scanner rejected** ([Layer 5 — memory prompt-injection scanner](/security/threat-model#layer-5--memory-prompt-injection-scanner)). Surface these in the operator UI but NEVER feed them back to the model — the model would re-read poisoned content into its context.
 
 ### `Forget` — delete
 
 ```go
 type ForgetRequest struct {
-    WorkspaceID    string
-    AgentID        string // optional: scope to one agent's items
-    DataSubjectID  string // optional: GDPR cascade selector
-    IDs            []string // explicit per-id deletion
-    // Mutually-exclusive selectors:
-    //   - IDs non-empty + DataSubjectID empty = per-id delete
-    //   - DataSubjectID non-empty + IDs empty = cascade delete for SAR
-    //   - both empty = error (no-op deletes are caller bugs)
+    WorkspaceID   string
+    ID            string // canonical id from RetainResult (per-item)
+    DataSubjectID string // GDPR cascade selector (per-subject)
+    // Exactly one of ID / DataSubjectID MUST be non-empty:
+    //   - ID set, DataSubjectID empty  = per-id delete
+    //   - DataSubjectID set, ID empty  = cascade delete for SAR
+    //   - both empty                    = error (no-op deletes are caller bugs)
+    //   - both set                      = error (intent ambiguity)
 }
 
 type ForgetResult struct {
-    DeletedCount int
+    Removed int // canonical count for the caller's audit log; 0 + nil error = no-op (re-issued DELETE for an already-deleted item is fine)
 }
 ```
 
 Design notes:
 
-- **Two selectors, mutually exclusive.** `IDs` is for the operator-driven "delete this specific row" path. `DataSubjectID` is the GDPR Article 17 cascade path (PR-F1). Mixing them is rejected — the caller knows which they want.
-- **`AgentID` narrows further.** Useful for "delete the agent's lessons.md entries about this user" — combine with `DataSubjectID` to scope the cascade to one agent. Empty `AgentID` cascades workspace-wide.
-- **The on-disk LocalDispatcher rejects `DataSubjectID`** with `ErrCascadeNotSupported` because the on-disk tier doesn't carry `data_subject_id` foreign keys. GDPR cascade goes through the SQL handler (`internal/api/admin_gdpr.go`) which queries the cascade-aware tables directly. This is documented behaviour — local-disk providers should return the same error.
-- **`DeletedCount` reports rows actually removed.** Already-absent rows count as 0 (per-id) or contribute to the total based on what the provider actually touched.
+- **Two selectors, mutually exclusive.** `ID` is for the operator-driven "delete this specific row" path. `DataSubjectID` is the GDPR Article 17 cascade path (PR-F1). Mixing them is rejected — the caller knows which they want, and round-9 hardening rejects the both-set case explicitly with a "must set exactly one" error.
+- **The on-disk LocalDispatcher rejects `DataSubjectID`** with an explicit "cascade not implemented in local provider; use the PR-F1 API endpoint" error because the on-disk tier doesn't carry `data_subject_id` foreign keys. GDPR cascade goes through the SQL handler (`internal/api/admin_gdpr.go`) which queries the cascade-aware tables directly. This is documented behaviour — local-disk providers should return the same error.
+- **`Removed` reports items actually removed.** Already-absent items count as 0 (per-id) or contribute to the total based on what the provider actually touched. Re-issued DELETE for an already-deleted item returns `Removed: 0, error: nil` (no-op semantics, not a failure).
 
 ### `Health` — liveness check
 
 ```go
 type HealthStatus struct {
-    OK       bool
-    Provider string // free-form identifier
-    Detail   string // human-readable explanation when OK=false
-    LatencyMs int   // time the check took
+    OK        bool      `json:"ok"`
+    Message   string    `json:"message,omitempty"`     // human-readable when OK=false
+    CheckedAt time.Time `json:"checked_at"`            // server-side timestamp of the check
 }
 ```
 
 Design notes:
 
-- **Health MUST return promptly** — under 200ms for local, under 1000ms for remote. A stuck Health() blocks the operator's aux-status panel render. Implementations SHOULD use a hard deadline (`context.WithTimeout(ctx, 1*time.Second)` internally) and return `OK=false, Detail="health check timeout"` rather than block.
-- **`Provider` is a free-form identifier** the operator sees on the panel — `"local-dispatcher"`, `"http://memory.internal:9090"`, `"vector-store-prod"`. Pick something stable.
-- **`Detail` is for failure context only.** On `OK=true`, leave it empty. On `OK=false`, give enough text for the operator to triage ("connection refused", "auth expired", "503 from upstream").
-- **`LatencyMs` is the check duration**, useful for the panel to highlight degraded backends before they fail outright.
+- **Health MUST return promptly** — under 200ms for local, under 1000ms for remote. A stuck Health() blocks the operator's aux-status panel render. Implementations SHOULD use a hard deadline (`context.WithTimeout(ctx, 1*time.Second)` internally) and return `OK=false, Message="health check timeout"` rather than block.
+- **`Message` is for failure context only.** On `OK=true`, leave it empty. On `OK=false`, give enough text for the operator to triage ("connection refused", "auth expired", "503 from upstream").
+- **`CheckedAt`** lets the panel show "last successful check N seconds ago" without piggy-backing on the framework's clock — each provider stamps its own observation time.
+- A provider identifier (e.g. `"local-dispatcher"`, `"http://memory.internal:9090"`) lives in the workspace's provider config, NOT on the HealthStatus — the panel knows which provider it's asking about.
 
 ## Reference implementation — `LocalDispatcher`
 

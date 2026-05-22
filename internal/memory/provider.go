@@ -183,9 +183,39 @@ func NewLocalDispatcher(ac AgentContext) *LocalDispatcher {
 // Retain delegates to the underlying memory.write handler. Returns
 // the resolved tier source label as ID so a follow-up Forget(byID)
 // can resolve it back to a path without state.
+// validateScope rejects requests whose WorkspaceID / AgentID / CrewID
+// disagree with the AgentContext the LocalDispatcher was bound to at
+// construction time. Without this guard, a caller that builds a
+// request for workspace B against a dispatcher bound to workspace A
+// would have its scope silently ignored — the dispatcher writes to
+// A regardless. CodeRabbit round-10 catch: fail loud on caller-scope
+// mismatch so the bug surfaces at the source row, not as silent
+// data routed to the wrong tenant.
+//
+// Empty request fields are treated as "no override", matching the
+// caller-may-omit contract on RetainRequest / RecallRequest /
+// ForgetRequest. A future provider impl that actually multiplexes
+// workspaces would route on these fields instead of validating.
+func (l *LocalDispatcher) validateScope(reqWorkspaceID, reqAgentID, reqCrewID string) error {
+	bound := l.d.ctx
+	if reqWorkspaceID != "" && bound.WorkspaceID != "" && reqWorkspaceID != bound.WorkspaceID {
+		return fmt.Errorf("local dispatcher: workspace mismatch — request scope=%q, dispatcher bound to %q", reqWorkspaceID, bound.WorkspaceID)
+	}
+	if reqAgentID != "" && bound.AgentID != "" && reqAgentID != bound.AgentID {
+		return fmt.Errorf("local dispatcher: agent mismatch — request scope=%q, dispatcher bound to %q", reqAgentID, bound.AgentID)
+	}
+	if reqCrewID != "" && bound.CrewID != "" && reqCrewID != bound.CrewID {
+		return fmt.Errorf("local dispatcher: crew mismatch — request scope=%q, dispatcher bound to %q", reqCrewID, bound.CrewID)
+	}
+	return nil
+}
+
 func (l *LocalDispatcher) Retain(ctx context.Context, req RetainRequest) (RetainResult, error) {
 	if l == nil || l.d == nil {
 		return RetainResult{}, errors.New("local dispatcher: not initialized")
+	}
+	if err := l.validateScope(req.WorkspaceID, req.AgentID, req.CrewID); err != nil {
+		return RetainResult{}, err
 	}
 	args, err := json.Marshal(writeArgs{
 		Tier:    req.Tier,
@@ -229,6 +259,9 @@ func (l *LocalDispatcher) Retain(ctx context.Context, req RetainRequest) (Retain
 func (l *LocalDispatcher) Recall(ctx context.Context, req RecallRequest) (RecallResult, error) {
 	if l == nil || l.d == nil {
 		return RecallResult{}, errors.New("local dispatcher: not initialized")
+	}
+	if err := l.validateScope(req.WorkspaceID, req.AgentID, ""); err != nil {
+		return RecallResult{}, err
 	}
 	args, err := json.Marshal(searchArgs{
 		Q:     req.Query,
@@ -286,6 +319,9 @@ func (l *LocalDispatcher) Recall(ctx context.Context, req RecallRequest) (Recall
 func (l *LocalDispatcher) Forget(ctx context.Context, req ForgetRequest) (ForgetResult, error) {
 	if l == nil || l.d == nil {
 		return ForgetResult{}, errors.New("local dispatcher: not initialized")
+	}
+	if err := l.validateScope(req.WorkspaceID, "", ""); err != nil {
+		return ForgetResult{}, err
 	}
 	// Exactly-one-selector contract: the doc on ForgetRequest says the
 	// caller picks per-id (ID set, DataSubjectID empty) OR cascade

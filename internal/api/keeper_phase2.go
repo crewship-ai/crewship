@@ -805,7 +805,7 @@ func loadSelfLearningEnabled(ctx context.Context, db *sql.DB, workspaceID, agent
 		return false, nil
 	}
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("keeper_phase2: load self_learning_enabled (agent=%s, workspace=%s): %w", agentID, workspaceID, err)
 	}
 	return enabled == 1, nil
 }
