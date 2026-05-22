@@ -126,6 +126,16 @@ func (b *AgentBrief) Validate() error {
 		if ref.Reason == "" {
 			return fmt.Errorf("agent_brief: SharedMemory[%d].Reason is required (operator audit)", i)
 		}
+		// Multi-file tiers (daily, peers) name a specific file via Key
+		// — without one, the reference is ambiguous ("which daily?
+		// which peer?") and the dispatcher would return the wrong
+		// content. The doc comment on SharedMemoryRef already says
+		// Key is required for these tiers; enforce it here so a
+		// caller that forgets Key gets a clear validation error
+		// instead of a runtime mis-resolve. CodeRabbit round-11 catch.
+		if (ref.Tier == "daily" || ref.Tier == "peers") && ref.Key == "" {
+			return fmt.Errorf("agent_brief: SharedMemory[%d].Key is required for tier %q (multi-file tier)", i, ref.Tier)
+		}
 	}
 	for i, line := range b.Constraints {
 		if strings.TrimSpace(line) == "" {

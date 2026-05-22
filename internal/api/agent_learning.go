@@ -36,8 +36,15 @@ type LearningHandler struct {
 }
 
 // NewLearningHandler constructs the handler. Logger must be non-nil;
-// the handler logs every flip for compliance audit.
+// the handler logs every flip for compliance audit. Falling back to
+// slog.Default() instead of panicking lets the handler keep serving
+// while emitting a one-time WARN — preferable to a 500 storm on a
+// caller wiring mistake (CodeRabbit round-11 catch).
 func NewLearningHandler(db *sql.DB, logger *slog.Logger) *LearningHandler {
+	if logger == nil {
+		logger = slog.Default()
+		logger.Warn("agent_learning: nil logger passed to NewLearningHandler — falling back to slog.Default(); compliance audit trail will land in the default sink")
+	}
 	return &LearningHandler{db: db, logger: logger}
 }
 

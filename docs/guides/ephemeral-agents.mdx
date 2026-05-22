@@ -196,7 +196,7 @@ Setting `max=0` blocks all ephemeral hires for the crew (use this as a per-crew 
 ```bash
 crewship hire --crew on-call --template incident-responder \
   --ttl 240 --reason "P1 incident #4582"
-# ... agent investigates for ~4 hours, autocomma ghosts on TTL elapse
+# ... agent investigates for ~4 hours, auto-ghosts on TTL elapse
 # if mission isn't done, rehire for another window:
 crewship rehire incident-responder-... --ttl 120 \
   --reason "incident stretched into sustained investigation"

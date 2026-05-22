@@ -260,7 +260,7 @@ func (l *LocalDispatcher) Recall(ctx context.Context, req RecallRequest) (Recall
 	if l == nil || l.d == nil {
 		return RecallResult{}, errors.New("local dispatcher: not initialized")
 	}
-	if err := l.validateScope(req.WorkspaceID, req.AgentID, ""); err != nil {
+	if err := l.validateScope(req.WorkspaceID, req.AgentID, req.CrewID); err != nil {
 		return RecallResult{}, err
 	}
 	args, err := json.Marshal(searchArgs{

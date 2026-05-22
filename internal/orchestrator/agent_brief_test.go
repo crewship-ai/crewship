@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -159,12 +160,13 @@ func TestAgentBrief_JSON_RoundTrip(t *testing.T) {
 // capture the exec call (mkdir + base64 write) and decode the
 // payload to verify byte-equivalence.
 func TestApplyBrief_WritesBriefMDToAgentDir(t *testing.T) {
-	var capturedScript string
+	var capturedCmd []string
 	mc := &mockContainer{}
 	mc.execFn = func(cfg provider.ExecConfig) (*provider.ExecResult, error) {
-		if len(cfg.Cmd) >= 3 && cfg.Cmd[0] == "sh" && cfg.Cmd[1] == "-c" {
-			capturedScript = cfg.Cmd[2]
-		}
+		// Capture the full Cmd slice — args[4..6] are
+		// (dir, base64-encoded-body, target) per ApplyBrief's
+		// positional-arg layout (see agent_brief.go script comment).
+		capturedCmd = append(capturedCmd[:0], cfg.Cmd...)
 		return &provider.ExecResult{
 			ExecID: "ok",
 			Reader: io.NopCloser(strings.NewReader("")),
@@ -178,17 +180,41 @@ func TestApplyBrief_WritesBriefMDToAgentDir(t *testing.T) {
 	if err := o.ApplyBrief(context.Background(), "alpha-agent", "c1", brief); err != nil {
 		t.Fatalf("ApplyBrief: %v", err)
 	}
-	if !strings.Contains(capturedScript, "/crew/agents/alpha-agent/.memory/BRIEF.md") {
-		t.Errorf("expected BRIEF.md target path in script, got %q", capturedScript)
+	// Shape: sh -c <script> apply_brief <dir> <encoded> <target>
+	if len(capturedCmd) != 7 {
+		t.Fatalf("expected 7-element cmd (sh -c script $0 dir encoded target), got %d: %q", len(capturedCmd), capturedCmd)
 	}
-	if !strings.Contains(capturedScript, "mkdir -p '/crew/agents/alpha-agent/.memory'") {
-		t.Errorf("expected mkdir -p for .memory dir, got %q", capturedScript)
+	if capturedCmd[0] != "sh" || capturedCmd[1] != "-c" {
+		t.Fatalf("expected sh -c invocation, got %q %q", capturedCmd[0], capturedCmd[1])
 	}
-	// Decoding the base64 payload from the captured script is the
-	// real assertion — confirms the body that lands on disk is
-	// exactly what Render() produced.
-	if !strings.Contains(capturedScript, "base64 -d") {
-		t.Fatalf("expected base64 -d in script, got %q", capturedScript)
+	script := capturedCmd[2]
+	if !strings.Contains(script, "base64 -d") {
+		t.Errorf("expected base64 -d in script, got %q", script)
+	}
+	dir := capturedCmd[4]
+	encoded := capturedCmd[5]
+	target := capturedCmd[6]
+	if dir != "/crew/agents/alpha-agent/.memory" {
+		t.Errorf("dir arg: got %q, want /crew/agents/alpha-agent/.memory", dir)
+	}
+	if target != "/crew/agents/alpha-agent/.memory/BRIEF.md" {
+		t.Errorf("target arg: got %q, want .../BRIEF.md", target)
+	}
+	// Real assertion (the one the prior version of this test promised
+	// in its comment but never actually performed): decode the base64
+	// payload that lands on disk and confirm byte-equivalence with
+	// what Render() produced. Without this, a regression that
+	// silently changed Render output (e.g. lost the constraints
+	// section) would pass the test as long as `base64 -d` survived
+	// in the script string. CodeRabbit round-11 catch.
+	decoded, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		t.Fatalf("decode base64 payload: %v (encoded=%q)", err, encoded)
+	}
+	expected := brief.Render()
+	if string(decoded) != expected {
+		t.Errorf("on-disk body diverges from Render():\n--- got (%d bytes) ---\n%s\n--- want (%d bytes) ---\n%s",
+			len(decoded), string(decoded), len(expected), expected)
 	}
 }
 

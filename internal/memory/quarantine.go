@@ -312,8 +312,25 @@ func foldHomoglyphs(body string) string {
 // closes that gap while staying conservative — we only flag when the
 // DECODED text matches an existing rule, so we don't randomly
 // quarantine every PEM key or JWT.
+// base64ScanMaxBlocks caps how many base64-like runs the scanner
+// will attempt to decode per body. Without it, a body containing
+// thousands of long base64-shaped tokens (e.g. an embedded keystore
+// dump, a fixture file pasted into a memory write, or a malicious
+// agent intentionally trying to exhaust the scanner) forces O(N)
+// decode work where N is unbounded. 256 blocks comfortably covers
+// any realistic legitimate payload (a long PR description rarely
+// contains more than a handful of base64 strings) and bounds the
+// worst-case scanner CPU at ~256 × ~64KB decode = ~16MB peak —
+// well below the scanner's existing body-size cap.
+// CodeRabbit round-11 catch.
+const base64ScanMaxBlocks = 256
+
 func scanBase64Obfuscation(body string) *ScanHit {
-	for _, match := range base64Block.FindAllString(body, -1) {
+	matches := base64Block.FindAllString(body, -1)
+	if len(matches) > base64ScanMaxBlocks {
+		matches = matches[:base64ScanMaxBlocks]
+	}
+	for _, match := range matches {
 		// Strict StdEncoding; ignore decode errors (most random
 		// long base64-shaped strings won't decode cleanly).
 		decoded, err := base64.StdEncoding.DecodeString(match)

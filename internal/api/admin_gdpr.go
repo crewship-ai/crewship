@@ -287,8 +287,17 @@ func (h *AdminGDPRHandler) DeleteUserData(w http.ResponseWriter, r *http.Request
 			cards = append(cards, c)
 		}
 		if iterErr := cardRows.Err(); iterErr != nil {
-			h.logger.Warn("gdpr delete: peer_cards iteration error",
+			// Iteration errors aren't just observability noise — if the
+			// underlying scan was interrupted (network blip on the SQLite
+			// page cache, fs error mid-read), we silently delete only
+			// the rows we DID see, and the rest survives. Propagate via
+			// firstErr so the handler returns 500 and the operator
+			// retries the SAR call. CodeRabbit round-11 catch.
+			h.logger.Error("gdpr delete: peer_cards iteration error",
 				"action_id", actionID, "err", iterErr)
+			if firstErr == nil {
+				firstErr = iterErr
+			}
 		}
 		_ = cardRows.Close()
 		for _, c := range cards {

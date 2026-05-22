@@ -65,8 +65,22 @@ export function AuxStatusSection() {
         setErr(`Failed (HTTP ${res.status})`)
         return
       }
-      const body = (await res.json()) as AuxStatusResponse
-      setSlots(body.slots)
+      const body = (await res.json()) as unknown
+      // Unchecked `as AuxStatusResponse` could push `undefined` or a
+      // non-array into setSlots, which then explodes on the
+      // `slots.map(...)` render path with "x.map is not a function".
+      // Validate the shape at the boundary so a backend regression or
+      // hostile response surfaces as a friendly error string instead
+      // of a React crash. CodeRabbit round-11 catch.
+      if (
+        !body ||
+        typeof body !== "object" ||
+        !Array.isArray((body as { slots?: unknown }).slots)
+      ) {
+        setErr("Unexpected response shape from /api/v1/system/aux-status")
+        return
+      }
+      setSlots((body as AuxStatusResponse).slots)
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Failed to load")
     } finally {

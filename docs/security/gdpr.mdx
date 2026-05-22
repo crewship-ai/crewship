@@ -36,7 +36,7 @@ curl -X GET \
   > sar-export-$USER_ID-$(date +%Y%m%d).json
 ```
 
-The response is a single JSON bundle containing every row from the four tables that carry `data_subject_id`:
+The response is a single JSON bundle containing every row from the four tables that carry `data_subject_id` (the three data tables below plus `gdpr_actions`, the audit history — see "What's NOT in the export" for the boundary):
 
 ```json
 {
@@ -45,11 +45,13 @@ The response is a single JSON bundle containing every row from the four tables t
   "scope": {
     "peer_cards": 23,
     "memory_versions": 117,
-    "inbox_items": 4
+    "inbox_items": 4,
+    "gdpr_actions": 2
   },
   "peer_cards": [ {...}, {...} ],
   "memory_versions": [ {...}, {...} ],
-  "inbox_items": [ {...}, {...} ]
+  "inbox_items": [ {...}, {...} ],
+  "gdpr_actions": [ {...}, {...} ]
 }
 ```
 
