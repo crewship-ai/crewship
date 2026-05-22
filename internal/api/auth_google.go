@@ -60,8 +60,18 @@ func (h *GoogleAuthHandler) Redirect(w http.ResponseWriter, r *http.Request) {
 	// minimum for a CSRF nonce, since this state token is the only
 	// thing protecting the OAuth callback from being forged across
 	// origins. Audit M22 mitigation.
+	//
+	// crypto/rand failures are rare but not impossible (kernel entropy
+	// pool exhaustion, syscall denial under seccomp). Ignoring the
+	// error would leave `b` zero-filled and produce a constant,
+	// predictable state token — an attacker who guessed the all-zero
+	// shape could forge the OAuth callback. Fail-closed with 500.
 	b := make([]byte, 32)
-	_, _ = rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		h.logger.Error("oauth state random read", "error", err)
+		replyError(w, http.StatusInternalServerError, "Internal server error")
+		return
+	}
 	state := base64.URLEncoding.EncodeToString(b)
 
 	// Store state in DB for CSRF protection (single-use, validated on callback)
@@ -230,9 +240,13 @@ func (h *GoogleAuthHandler) findOrCreateUser(r *http.Request, info googleUserInf
 	var userID string
 	err = h.db.QueryRowContext(ctx, `SELECT id FROM users WHERE email = ?`, info.Email).Scan(&userID)
 	if err == sql.ErrNoRows {
-		// Create new user
+		// Create new user. rand.Read failure here would produce a
+		// zero-filled hex ID and collide with any prior user that
+		// hit the same failure -- fail-closed instead.
 		b := make([]byte, 16)
-		_, _ = rand.Read(b)
+		if _, rerr := rand.Read(b); rerr != nil {
+			return "", fmt.Errorf("generate user id: %w", rerr)
+		}
 		userID = hex.EncodeToString(b)
 		_, err = h.db.ExecContext(ctx,
 			`INSERT INTO users (id, email, full_name, avatar_url, email_verified, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -244,9 +258,12 @@ func (h *GoogleAuthHandler) findOrCreateUser(r *http.Request, info googleUserInf
 		return "", fmt.Errorf("check user: %w", err)
 	}
 
-	// Link Google account
+	// Link Google account. Same fail-closed contract as the user-id
+	// path: zero-filled accID would collide on the accounts table.
 	accID := make([]byte, 16)
-	_, _ = rand.Read(accID)
+	if _, rerr := rand.Read(accID); rerr != nil {
+		return "", fmt.Errorf("generate account id: %w", rerr)
+	}
 	_, err = h.db.ExecContext(ctx,
 		`INSERT INTO accounts (id, userId, type, provider, providerAccountId, access_token, refresh_token, expires_at, token_type, scope) VALUES (?, ?, 'oauth', 'google', ?, ?, ?, ?, ?, ?)`,
 		hex.EncodeToString(accID), userID, info.Sub, token.AccessToken, token.RefreshToken, token.Expiry.Unix(), token.TokenType, "openid email profile")
