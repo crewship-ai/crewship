@@ -11,6 +11,8 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -46,7 +48,15 @@ func NewNextAuthHandler(db *sql.DB, logger *slog.Logger, validator *auth.JWTVali
 }
 
 func (h *NextAuthHandler) csrfCookieName(r *http.Request) string {
-	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
+	// Single HTTPS-detection source: isHTTPS so that
+	// CREWSHIP_FORCE_SECURE_COOKIES (audit M27) flips both the
+	// __Host- name prefix and the Secure flag together. Without
+	// this, an operator who enables the flag behind a misconfigured
+	// proxy would get Secure=true cookies but a non-__Host- name --
+	// the flag's mismatched, browser still accepts the cookie, but
+	// the __Host- contract (Secure + Path=/ + same-host) isn't
+	// asserted at the name layer.
+	if isHTTPS(r) {
 		return "__Host-authjs.csrf-token"
 	}
 	return "authjs.csrf-token"
@@ -112,7 +122,32 @@ func setAuthCookies(w http.ResponseWriter, r *http.Request, access, refresh stri
 	})
 }
 
+// forceSecureCookies, when true, makes isHTTPS unconditionally return
+// true so every auth cookie minted by this package carries the Secure
+// flag regardless of request headers. Read once from
+// CREWSHIP_FORCE_SECURE_COOKIES at process start; the audit's M27
+// concern is the misconfigured-reverse-proxy case where
+// X-Forwarded-Proto is dropped and Secure ends up false even though
+// the edge connection is HTTPS, letting an MITM downgrade to HTTP and
+// capture the cookie. Operators behind any HTTPS-terminating proxy
+// should set this; the default (false) preserves the dev-shell
+// behaviour where requests are plain HTTP and Secure=true would make
+// the browser drop the cookie.
+var forceSecureCookies = parseBoolEnv("CREWSHIP_FORCE_SECURE_COOKIES")
+
+func parseBoolEnv(name string) bool {
+	v, ok := os.LookupEnv(name)
+	if !ok {
+		return false
+	}
+	b, err := strconv.ParseBool(strings.TrimSpace(v))
+	return err == nil && b
+}
+
 func isHTTPS(r *http.Request) bool {
+	if forceSecureCookies {
+		return true
+	}
 	return r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
 }
 
