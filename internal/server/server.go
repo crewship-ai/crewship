@@ -444,6 +444,13 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 		opts = append(opts, goapi.WithSocketPath(cfg.IPC.SocketPath))
 		opts = append(opts, goapi.WithInternalToken(cfg.Auth.InternalToken))
 		opts = append(opts, goapi.WithInternalBaseURL(ipcBase))
+		// Loopback URL is the variant the daemon dials when calling
+		// its own internal API (webhook resolver). Always 127.0.0.1
+		// regardless of which host name the container needs to reach
+		// us at — issue #535 was caused by the webhook resolver
+		// dialing the container-facing host.docker.internal value and
+		// landing on the wrong machine via /etc/hosts.
+		opts = append(opts, goapi.WithInternalLoopbackURL(fmt.Sprintf("http://127.0.0.1:%d", cfg.Server.Port)))
 		// Port-expose capability URLs hand an externally reachable origin
 		// back to the agent. CREWSHIP_PUBLIC_URL must be set to the host a
 		// user's browser can actually reach (e.g. http://crewship.example.com:8080).

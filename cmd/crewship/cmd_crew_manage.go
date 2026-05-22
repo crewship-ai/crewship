@@ -50,6 +50,44 @@ func sanitizeTerminal(s string) string {
 	}, s)
 }
 
+// deriveSlugFromName makes a best-effort kebab-case slug from a human
+// name when the operator omitted --slug. The server's slug validator is
+// `^[a-z0-9][a-z0-9_-]*$` length 2-50 (helpers.go:validSlugFormat);
+// emoji / accented / cyrillic letters from a name like "Engineering 🛠"
+// must be stripped before the slug ever reaches the wire. Returns ""
+// when no valid first character can be derived (caller falls back to
+// requiring --slug explicitly).
+func deriveSlugFromName(name string) string {
+	s := strings.ToLower(strings.TrimSpace(name))
+	var b strings.Builder
+	prevHyphen := true // suppress leading hyphen
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+			prevHyphen = false
+		case r == '_':
+			b.WriteRune('_')
+			prevHyphen = false
+		case r == '-' || r == ' ' || r == '\t' || r == '/' || r == '.':
+			if !prevHyphen {
+				b.WriteRune('-')
+				prevHyphen = true
+			}
+		default:
+			// strip other characters (emoji, accented letters, punctuation)
+		}
+	}
+	out := strings.Trim(b.String(), "-_")
+	if out == "" {
+		return ""
+	}
+	if len(out) > 50 {
+		out = strings.TrimRight(out[:50], "-_")
+	}
+	return out
+}
+
 var crewCreateCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Create a new crew",
@@ -68,8 +106,17 @@ var crewCreateCmd = &cobra.Command{
 		}
 
 		body := map[string]interface{}{"name": name}
-		if v, _ := flags.GetString("slug"); v != "" {
-			body["slug"] = v
+		slug, _ := flags.GetString("slug")
+		if slug == "" {
+			// Auto-derive from name when omitted — the --slug flag's help
+			// text promises this ("auto from name") but pre-fix the
+			// derivation never ran, so `--name Engineering` reached the
+			// server with slug="" and the slug-length validator returned
+			// 400 "slug must be 2-50 characters". (Issue #533.)
+			slug = deriveSlugFromName(name)
+		}
+		if slug != "" {
+			body["slug"] = slug
 		}
 		if v, _ := flags.GetString("description"); v != "" {
 			body["description"] = v

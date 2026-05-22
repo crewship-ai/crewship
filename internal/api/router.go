@@ -54,6 +54,13 @@ type Router struct {
 	socketPath             string
 	internalToken          string
 	internalBaseURL        string
+	// internalLoopbackURL is for in-daemon HTTP calls (e.g. the webhook
+	// secret resolver) that hit our own internal API. internalBaseURL is
+	// designed for containers (host.docker.internal:<port>) and dialing
+	// it from the daemon depends on the host's /etc/hosts mapping —
+	// fragile on multi-host lab networks. Use the loopback variant
+	// (typically 127.0.0.1:<port>) instead when set. (Issue #535.)
+	internalLoopbackURL string
 	hub                    *ws.Hub
 	orch                   *orchestrator.Orchestrator
 	keeperGK               gatekeeper.Evaluator

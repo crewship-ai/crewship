@@ -187,7 +187,10 @@ func TestPersona_SuggestEnqueuesAtGuidedAutonomy(t *testing.T) {
 
 	// The on-disk persona MUST stay unwritten.
 	paths := memory.PersonaPaths{AgentDir: filepath.Join(r.output, "crews", r.crewID, "agents", "alice", ".memory")}
-	resolved, _ := memory.LoadPersona(paths)
+	resolved, err := memory.LoadPersona(paths)
+	if err != nil {
+		t.Fatalf("LoadPersona: %v", err)
+	}
 	if resolved.Content != "" {
 		t.Errorf("suggest at guided MUST NOT write persona; got %q", resolved.Content)
 	}
@@ -233,7 +236,10 @@ func TestPersona_SuggestAutoAppliesAtFullAutonomy(t *testing.T) {
 
 	// On-disk persona MUST be written.
 	paths := memory.PersonaPaths{AgentDir: filepath.Join(r.output, "crews", r.crewID, "agents", "alice", ".memory")}
-	resolved, _ := memory.LoadPersona(paths)
+	resolved, err := memory.LoadPersona(paths)
+	if err != nil {
+		t.Fatalf("LoadPersona: %v", err)
+	}
 	if !strings.Contains(resolved.Content, "autonomous") {
 		t.Errorf("expected persona to land at full autonomy; got %q", resolved.Content)
 	}
@@ -281,7 +287,10 @@ func TestSuggestPersona_AutoApplies_WhenSelfLearningON(t *testing.T) {
 
 	// PERSONA.md must exist on disk.
 	paths := memory.PersonaPaths{AgentDir: filepath.Join(r.output, "crews", r.crewID, "agents", "alice", ".memory")}
-	resolved, _ := memory.LoadPersona(paths)
+	resolved, err := memory.LoadPersona(paths)
+	if err != nil {
+		t.Fatalf("LoadPersona: %v", err)
+	}
 	if !strings.Contains(resolved.Content, "Self-learning ON") {
 		t.Errorf("expected persona to land at full+self_learning=1; got %q", resolved.Content)
 	}
@@ -349,7 +358,10 @@ func TestSuggestPersona_QueuesInbox_WhenSelfLearningOFF(t *testing.T) {
 
 	// PERSONA.md MUST NOT exist on disk.
 	paths := memory.PersonaPaths{AgentDir: filepath.Join(r.output, "crews", r.crewID, "agents", "alice", ".memory")}
-	resolved, _ := memory.LoadPersona(paths)
+	resolved, err := memory.LoadPersona(paths)
+	if err != nil {
+		t.Fatalf("LoadPersona: %v", err)
+	}
 	if resolved.Content != "" {
 		t.Fatalf("PERSONA.md written despite self_learning=0; got %q", resolved.Content)
 	}
@@ -369,7 +381,7 @@ func TestSuggestPersona_QueuesInbox_WhenSelfLearningOFF(t *testing.T) {
 		payload  string
 		title    string
 	)
-	err := r.h.db.QueryRow(`
+	err = r.h.db.QueryRow(`
 		SELECT title, blocking, payload_json
 		FROM inbox_items
 		WHERE workspace_id = ? AND sender_id = ?

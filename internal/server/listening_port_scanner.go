@@ -91,6 +91,24 @@ func runListeningPortScanner(
 			}
 			ports, err := scanContainerListeningPorts(ctx, ctr, tc.ContainerID, logger)
 			if err != nil {
+				// Container gone permanently (operator force-removed,
+				// crashed, or daemon restarted into orphan tracking)?
+				// Drop it from the tracked set so neither scanner spends
+				// another 15-sec cycle hammering Docker for an ID that
+				// will never come back. Also emit synthetic port_closed
+				// entries for whatever was last seen so the timeline
+				// closes cleanly rather than dangling. (#534)
+				if containerGone(err) {
+					logger.Info("listening-port scan dropping vanished container",
+						"container_id", tc.ContainerID, "err", err)
+					stats.Unregister(tc.ContainerID)
+					for k, v := range prev {
+						if k.ContainerID == tc.ContainerID {
+							emitListeningPortEvent(ctx, j, journal.EntryNetworkPortClose, k, v)
+						}
+					}
+					continue
+				}
 				// Container may have been removed mid-cycle, paused, or
 				// /proc unreadable — debug-level, scanner moves on.
 				logger.Debug("listening-port scan failed", "container_id", tc.ContainerID, "err", err)

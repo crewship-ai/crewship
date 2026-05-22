@@ -220,6 +220,17 @@ func NewServer(cfg ServerConfig) *Server {
 	// degrade without taking the other down.
 	if cfg.Memory != nil && cfg.Memory.Enabled && cfg.Memory.BasePath != "" {
 		s.agentMemoryBase = cfg.Memory.BasePath
+		// Ensure the base directory exists before SQLite tries to open
+		// {basePath}/index.sqlite — on a freshly provisioned crew the
+		// `.memory` directory hasn't been created by anything else yet,
+		// and SQLite errors `SQLITE_CANTOPEN (14)` rather than auto-
+		// creating parent paths. (Mirrors the existing CrewMemoryPath
+		// branch below.) Without this, memory-enabled crews that were
+		// never seeded with `--with-memory` permanently lose mid-session
+		// tools on first boot. (Issue #530.)
+		if err := os.MkdirAll(cfg.Memory.BasePath, 0o755); err != nil {
+			cfg.Logger.Error("failed to create agent memory dir", "error", err, "path", cfg.Memory.BasePath)
+		}
 		engine, err := memory.New(cfg.Memory.BasePath, memory.DefaultConfig())
 		if err != nil {
 			cfg.Logger.Error("failed to init memory engine (path-based memory tools still functional; FTS5 search disabled)",

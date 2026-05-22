@@ -178,8 +178,15 @@ func SyncMCPRegistry(ctx context.Context, db *sql.DB, logger *slog.Logger) error
 		}
 
 		if resp.StatusCode != http.StatusOK {
+			// Capture a small slice of the response body so the daily-retry
+			// log line carries the upstream error message instead of just
+			// "HTTP 422" — pre-fix the operator only saw the bare status
+			// code and had to curl the registry by hand to find out what
+			// the schema mismatch was. (Issue #540.)
+			snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 			resp.Body.Close()
-			return fmt.Errorf("registry returned HTTP %d", resp.StatusCode)
+			return fmt.Errorf("registry returned HTTP %d for %s: %s",
+				resp.StatusCode, pageURL, strings.TrimSpace(string(snippet)))
 		}
 
 		body, err := io.ReadAll(io.LimitReader(resp.Body, 50<<20))

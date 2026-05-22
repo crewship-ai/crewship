@@ -44,6 +44,19 @@ func WithInternalBaseURL(url string) RouterOption {
 	}
 }
 
+// WithInternalLoopbackURL sets the URL the daemon dials when making
+// HTTP calls to its own internal-auth API (e.g. the webhook secret
+// resolver). It MUST be loopback-style (127.0.0.1:<port> or
+// localhost:<port>) rather than the container-facing
+// host.docker.internal value used for sidecar→daemon IPC — dialing
+// host.docker.internal from inside the daemon process depends on host
+// /etc/hosts and breaks on multi-host lab networks (issue #535).
+func WithInternalLoopbackURL(url string) RouterOption {
+	return func(r *Router) {
+		r.internalLoopbackURL = url
+	}
+}
+
 // WithPortExposePublicURL sets the base URL used when handing capability URLs
 // back to agents for exposed container ports. Should be the externally
 // reachable origin of this crewshipd (e.g. "http://crewship.example.com:8080").
