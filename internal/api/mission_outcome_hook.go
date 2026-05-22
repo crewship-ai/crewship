@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/consolidate"
@@ -111,10 +112,21 @@ func emitMissionOutcomeLessonAsync(
 			return
 		}
 
+		// Prefer the stored completed_at when it parses; only fall back
+		// to time.Now() when the column is NULL/empty. Silently
+		// rewriting a present-but-unparseable value would drift the
+		// lesson's captured_at to hook execution time and could
+		// reorder outcomes on retries. Multi-layout parser handles
+		// the legacy `datetime('now')` shape (SQLite's space-
+		// separated form without 'T' and without timezone) alongside
+		// the modern RFC3339 writes.
 		completedTime := time.Now().UTC()
 		if completedAt.Valid && completedAt.String != "" {
-			if t, parseErr := time.Parse(time.RFC3339, completedAt.String); parseErr == nil {
-				completedTime = t.UTC()
+			if t, ok := parseStoredTimestamp(completedAt.String); ok {
+				completedTime = t
+			} else {
+				logger.Debug("mission outcome hook: unparseable completed_at, using time.Now()",
+					"mission_id", missionID, "raw", completedAt.String)
 			}
 		}
 
@@ -138,14 +150,49 @@ func emitMissionOutcomeLessonAsync(
 	}()
 }
 
+// parseStoredTimestamp accepts both RFC3339 (modern writes via
+// time.Now().UTC().Format(time.RFC3339)) and SQLite's
+// datetime('now')-shape ("2026-05-22 17:12:12") that v1-era migrations
+// baked in as DEFAULT. Tries layouts in order of expected frequency;
+// returns (time, true) on first hit, (zero, false) on no match.
+//
+// The legacy shape matters because some pre-v44 rows wrote completed_at
+// via datetime('now') directly; recent terminal-state code paths use
+// RFC3339, but a row aged out of an old DB could still carry the
+// older form. See project_timestamp_defaults_followup.md note for the
+// broader DEFAULT-format cleanup.
+func parseStoredTimestamp(raw string) (time.Time, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return time.Time{}, false
+	}
+	for _, layout := range []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02 15:04:05",     // sqlite datetime('now') default
+		"2006-01-02 15:04:05.999", // sqlite datetime('now','subsec')
+		"2006-01-02T15:04:05",     // RFC3339 minus zone
+	} {
+		if t, err := time.Parse(layout, raw); err == nil {
+			return t.UTC(), true
+		}
+	}
+	return time.Time{}, false
+}
+
 // terminalStatusToLessonKindLocal mirrors consolidate.terminalStatusToLessonKind
 // at the API boundary so the goroutine spawn can be skipped without
 // crossing the package import path for a no-op decision. Keep in
 // sync with the consolidate-package switch — both files reference
 // the same documented terminal set (COMPLETED / DONE / FAILED /
 // CANCELLED).
+//
+// Status is upper-cased + trimmed before matching so case-drift
+// (a future caller passing "completed" or " COMPLETED ") still
+// fires the hook. The consolidate-package switch already normalizes
+// the same way for the same reason.
 func terminalStatusToLessonKindLocal(status string) (string, bool) {
-	switch status {
+	switch strings.ToUpper(strings.TrimSpace(status)) {
 	case "COMPLETED", "DONE":
 		return "positive", true
 	case "FAILED":

@@ -3,10 +3,20 @@ package orchestrator
 import (
 	"context"
 	"log/slog"
+	"os"
 	"strings"
 	"testing"
 	"time"
 )
+
+// memOutcomesTestLogger returns a test-scoped logger at WARN level
+// matching the repo-wide convention for non-noisy test output. Using
+// slog.Default() inside tests pulls in process-global state that's
+// awkward to assert against; a local logger keeps these tests
+// isolated and silent on the happy path.
+func memOutcomesTestLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+}
 
 // lessonsFixtureYAML is a hand-written lessons.md that mirrors the
 // format consolidate.WriteCrewLesson actually emits. We use raw YAML
@@ -49,7 +59,7 @@ func TestBuildMemoryContext_LEAD_SeesCrewOutcomes(t *testing.T) {
 		"/crew/shared/.memory/lessons.md":             lessonsFixtureYAML,
 	})
 
-	o := New(mc, newMemState(), slog.Default())
+	o := New(mc, newMemState(), memOutcomesTestLogger())
 	req := AgentRunRequest{
 		AgentSlug:     "eva",
 		ContainerID:   "c-lead",
@@ -89,7 +99,7 @@ func TestBuildMemoryContext_NonLEAD_NoCrewOutcomes(t *testing.T) {
 		"/crew/shared/.memory/lessons.md":             lessonsFixtureYAML,
 	})
 
-	o := New(mc, newMemState(), slog.Default())
+	o := New(mc, newMemState(), memOutcomesTestLogger())
 	req := AgentRunRequest{
 		AgentSlug:     "daniel",
 		ContainerID:   "c-agent",
@@ -125,7 +135,7 @@ func TestBuildMemoryContext_LEAD_NoLessonsFile(t *testing.T) {
 		// NO lessons.md
 	})
 
-	o := New(mc, newMemState(), slog.Default())
+	o := New(mc, newMemState(), memOutcomesTestLogger())
 	req := AgentRunRequest{
 		AgentSlug:     "lead",
 		ContainerID:   "c-lead",
@@ -176,7 +186,7 @@ func TestBuildMemoryContext_LEAD_OutcomesFiltersToMissionOutcomeSource(t *testin
 		"/crew/shared/.memory/lessons.md": mixedLessons,
 	})
 
-	o := New(mc, newMemState(), slog.Default())
+	o := New(mc, newMemState(), memOutcomesTestLogger())
 	req := AgentRunRequest{
 		AgentSlug:     "eva",
 		ContainerID:   "c-lead",

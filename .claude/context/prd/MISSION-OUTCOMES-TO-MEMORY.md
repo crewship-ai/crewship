@@ -143,7 +143,7 @@ also read `lessons.md` (the new shared one), filter to the most
 recent N entries (default 10), and append a `[CREW OUTCOMES]` block
 within the existing CREW SHARED MEMORY budget.
 
-```
+```text
 [CREW SHARED MEMORY]
 --- CREW.md (crew-wide knowledge) ---
 <existing content>
@@ -230,24 +230,28 @@ crewship ask --agent eva 'What did your crew complete recently?'
 | Migration on already-deployed DBs | Pure ADD COLUMN, nullable, no backfill — safe to roll out hot |
 | Mission deleted before hook fires | Hook reads row before write; missing row is a no-op + log |
 
-## 8. Hermes-parity framing
+## 8. Curator pattern framing
 
-This PR closes a Hermes-equivalent gap. The reference impl has a
-7-day Curator that periodically reads completed conversations and
-distills durable learnings into shared memory. Crewship's approach
-differs in two ways the PRD treats as Crewship-native rather than
-gaps:
+A common pattern in long-running agent memory systems is a "curator"
+loop that periodically reads completed sessions and distils durable
+learnings into shared memory. Crewship's mission-outcome hook lands
+the same load-bearing primitive — durable, shared, lesson-shaped
+knowledge — but via two pattern choices that diverge from the typical
+scheduled-curator shape:
 
 1. **Event-driven, not time-triggered.** Mission completion is a
    structured event; we don't need to wait for a nightly sweep to
-   surface it. The lesson lands at the moment of transition.
-2. **Operator-validated outcomes only.** The Hermes Curator grades
-   "did this conversation go well" based on signals — Crewship's
-   mission status is already operator-affirmed (or routine-confirmed).
-   No LLM grading needed; the status IS the signal.
+   surface it. The lesson lands at the moment of transition, so the
+   LEAD's next boot prompt already includes the freshest signal.
+2. **Operator-validated outcomes, not model-graded.** Scheduled
+   curators typically rely on the model itself to grade "did this
+   session go well." Crewship's mission status is already
+   operator-affirmed (or routine-confirmed) before the hook fires —
+   the status IS the signal. No grader prompt, no aux-model call.
 
-The non-goal "no LLM-graded summaries" is what keeps this PR small
-and the lesson body deterministic.
+The non-goal "no LLM-graded summaries" keeps this PR small and the
+lesson body deterministic. A future PR can layer an aux-model
+rewrite on top without changing the event-driven pipeline.
 
 ## 9. Open questions deferred to follow-up
 

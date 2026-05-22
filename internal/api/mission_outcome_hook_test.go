@@ -299,6 +299,81 @@ func TestEmitMissionOutcomeLessonAsync_MissingMissionRow(t *testing.T) {
 	}
 }
 
+// TestTerminalStatusToLessonKindLocal_NormalizesCase verifies the
+// case+whitespace normalization that CodeRabbit flagged in review.
+// A future caller passing "completed" or " COMPLETED " must still
+// be treated as terminal so the hook fires — without normalization
+// these would silently skip.
+func TestTerminalStatusToLessonKindLocal_NormalizesCase(t *testing.T) {
+	cases := []struct {
+		in          string
+		wantKind    string
+		wantTermina bool
+	}{
+		{"COMPLETED", "positive", true},
+		{"completed", "positive", true},
+		{" COMPLETED ", "positive", true},
+		{"DONE", "positive", true},
+		{"done", "positive", true},
+		{"FAILED", "negative", true},
+		{"failed", "negative", true},
+		{"CANCELLED", "neutral", true},
+		{"cancelled", "neutral", true},
+		{"  CANCELLED\t", "neutral", true},
+		{"IN_PROGRESS", "", false},
+		{"in_progress", "", false},
+		{"", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.in, func(t *testing.T) {
+			kind, terminal := terminalStatusToLessonKindLocal(tc.in)
+			if terminal != tc.wantTermina {
+				t.Errorf("terminal flag: got %v, want %v", terminal, tc.wantTermina)
+			}
+			if kind != tc.wantKind {
+				t.Errorf("kind: got %q, want %q", kind, tc.wantKind)
+			}
+		})
+	}
+}
+
+// TestParseStoredTimestamp_HandlesLegacyAndModernShapes pins the
+// multi-layout parser. The mission row's completed_at can carry
+// either modern RFC3339 (written by current code paths) or the
+// SQLite datetime('now') shape ("2026-05-22 17:12:12") from older
+// DEFAULT rows. Both must parse so the lesson's captured_at preserves
+// the original transition time instead of silently rewriting to
+// hook-execution time.
+func TestParseStoredTimestamp_HandlesLegacyAndModernShapes(t *testing.T) {
+	cases := []struct {
+		name  string
+		raw   string
+		valid bool
+	}{
+		{"rfc3339_utc", "2026-05-22T17:12:12Z", true},
+		{"rfc3339_offset", "2026-05-22T19:12:12+02:00", true},
+		{"rfc3339_nano", "2026-05-22T17:12:12.123456789Z", true},
+		{"sqlite_default", "2026-05-22 17:12:12", true},
+		{"sqlite_subsec", "2026-05-22 17:12:12.123", true},
+		{"rfc3339_no_zone", "2026-05-22T17:12:12", true},
+		{"trim_whitespace", "  2026-05-22T17:12:12Z\t", true},
+		{"empty", "", false},
+		{"garbage", "not a timestamp", false},
+		{"date_only", "2026-05-22", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ts, ok := parseStoredTimestamp(tc.raw)
+			if ok != tc.valid {
+				t.Errorf("parse %q: got ok=%v, want %v", tc.raw, ok, tc.valid)
+			}
+			if ok && ts.Location() != time.UTC {
+				t.Errorf("parse %q: result not in UTC: %v", tc.raw, ts.Location())
+			}
+		})
+	}
+}
+
 // Ensure the test file actually uses the sql.DB import via setupTestDB
 // in case the lint-cleanup pass removes "database/sql".
 var _ = (*sql.DB)(nil)
