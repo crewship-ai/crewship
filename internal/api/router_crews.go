@@ -216,6 +216,15 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.mux.Handle("PUT /api/v1/crews/{crewId}/persona", authed(wsCtx(http.HandlerFunc(persona.PutCrewPersona))))
 	r.mux.Handle("DELETE /api/v1/crews/{crewId}/persona", authed(wsCtx(http.HandlerFunc(persona.DeleteCrewPersona))))
 
+	// PR-G F4.1 UX — per-agent self-learning posture (v106). Flag
+	// governs whether keeper evaluator ALLOW decisions auto-apply
+	// (lessons land, skills activate) or queue an inbox item. PATCH
+	// requires ADMIN+ because flipping this weakens the inbox
+	// approval contract that protects production agents.
+	learning := NewLearningHandler(r.db, r.logger)
+	r.mux.Handle("GET /api/v1/agents/{agentId}/learning", authed(wsCtx(http.HandlerFunc(learning.Get))))
+	r.mux.Handle("PATCH /api/v1/agents/{agentId}/learning", authed(wsCtx(http.HandlerFunc(learning.Patch))))
+
 	// PR-E F6 — Peer card endpoints (per-agent operator view).
 	peers := NewPeerCardHandler(r.db, r.logger, r.outputBasePath)
 	r.mux.Handle("GET /api/v1/agents/{agentId}/peers", authed(wsCtx(http.HandlerFunc(peers.ListAgentPeers))))

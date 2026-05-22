@@ -40,6 +40,7 @@ import (
 	crand "crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -49,9 +50,69 @@ import (
 	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/keeper"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
+	"github.com/crewship-ai/crewship/internal/lookout"
 	"github.com/crewship-ai/crewship/internal/policy"
 	"github.com/crewship-ai/crewship/internal/skills"
 )
+
+// assertBodyWorkspaceMatchesCtx (audit round 3 defense) rejects F4
+// requests where the body workspace_id doesn't match the request
+// context workspace_id. The X-Internal-Token auth path doesn't bind
+// the token to a workspace, so both values are caller-controlled —
+// but enforcing consistency closes the asymmetric-bypass vector
+// where a caller could pass workspace A in the query (which feeds
+// policy resolution + paymaster scope) while passing workspace B in
+// the body (which fed the self_learning gate lookup before this
+// fix). Symmetric bypass (caller picks one workspace consistently)
+// still requires PR-F24 token-to-workspace binding to close.
+//
+// Returns false (and writes the error response) when the values
+// disagree — caller should immediately `return`.
+//
+// SECURITY round-8: a missing ctx workspace MUST be rejected, not
+// treated as "no check needed". The original round-3 helper
+// returned true when ctxWS=="" on the theory that the middleware
+// would have ensured one — but that's the very assumption the
+// gate is supposed to defend, so the fallback was a hole. If
+// internalWsCtx didn't run (because of a misrouted handler, a
+// future change to the middleware chain, or a bug), this helper
+// would silently let body.workspace_id through. Now we fail loud:
+// no ctx workspace, no gate, no operation.
+func assertBodyWorkspaceMatchesCtx(w http.ResponseWriter, r *http.Request, bodyWS string) bool {
+	ctxWS := WorkspaceIDFromContext(r.Context())
+	if ctxWS == "" {
+		replyError(w, http.StatusBadRequest, "request context is missing workspace_id; internal-auth handler reached without internalWsCtx middleware")
+		return false
+	}
+	if ctxWS == bodyWS {
+		return true
+	}
+	replyError(w, http.StatusBadRequest, "workspace_id in body must match workspace_id from request context")
+	return false
+}
+
+// scopeKeeperRequest attaches a lookout.Scope to ctx so the keeper
+// LLM call through paymaster middleware can attribute cost (and not
+// fail with "paymaster: workspace_id required"). The F4 endpoints are
+// internal-auth POSTs invoked by the platform itself (scheduler
+// routines, behavior hook), so the inbound HTTP layer doesn't attach
+// the request scope the way operator-facing routes do — we attach it
+// explicitly here, mirroring the pattern in pipeline/runner_llm.go.
+//
+// agentID may be empty (skill_review fans out across crew agents; the
+// scope still bills the crew). Empty WorkspaceID returns ctx unchanged
+// so caller-side validation (which already rejects empty workspace_id
+// at the body layer) is the single source of truth for that error.
+func scopeKeeperRequest(ctx context.Context, workspaceID, crewID, agentID string) context.Context {
+	if workspaceID == "" {
+		return ctx
+	}
+	return lookout.WithScope(ctx, lookout.Scope{
+		WorkspaceID: workspaceID,
+		CrewID:      crewID,
+		AgentID:     agentID,
+	})
+}
 
 // KeeperPhase2Handler is the HTTP surface for the four F4 endpoints.
 type KeeperPhase2Handler struct {
@@ -220,6 +281,9 @@ func (h *KeeperPhase2Handler) HandleSkillReview(w http.ResponseWriter, r *http.R
 		replyError(w, http.StatusBadRequest, "workspace_id and skill_id required")
 		return
 	}
+	if !assertBodyWorkspaceMatchesCtx(w, r, body.WorkspaceID) {
+		return
+	}
 
 	pol := h.resolvePolicySafe(r.Context(), body.CrewID)
 
@@ -247,7 +311,8 @@ func (h *KeeperPhase2Handler) HandleSkillReview(w http.ResponseWriter, r *http.R
 		Stats:           body.Stats,
 		FailureSnippets: body.FailureSnippets,
 	}
-	res, err := h.skillEval.Evaluate(r.Context(), req)
+	ctx := scopeKeeperRequest(r.Context(), body.WorkspaceID, body.CrewID, "")
+	res, err := h.skillEval.Evaluate(ctx, req)
 	if err != nil {
 		h.logger.Error("keeper_phase2: skill_review eval failed", "error", err)
 		replyError(w, http.StatusInternalServerError, "evaluator error")
@@ -327,10 +392,14 @@ func (h *KeeperPhase2Handler) HandleBehavior(w http.ResponseWriter, r *http.Requ
 		replyError(w, http.StatusBadRequest, "workspace_id, crew_id, tool_name required")
 		return
 	}
+	if !assertBodyWorkspaceMatchesCtx(w, r, body.WorkspaceID) {
+		return
+	}
 
 	pol := h.resolvePolicySafe(r.Context(), body.CrewID)
 
-	res, err := h.behaviorEval.Evaluate(r.Context(), gatekeeper.BehaviorReviewRequest{
+	ctx := scopeKeeperRequest(r.Context(), body.WorkspaceID, body.CrewID, body.AgentID)
+	res, err := h.behaviorEval.Evaluate(ctx, gatekeeper.BehaviorReviewRequest{
 		WorkspaceID:     body.WorkspaceID,
 		CrewID:          body.CrewID,
 		AgentName:       body.AgentName,
@@ -436,10 +505,15 @@ func (h *KeeperPhase2Handler) HandleMemoryHealth(w http.ResponseWriter, r *http.
 		replyError(w, http.StatusBadRequest, "workspace_id required")
 		return
 	}
+	if !assertBodyWorkspaceMatchesCtx(w, r, body.WorkspaceID) {
+		return
+	}
 
 	pol := h.resolvePolicySafe(r.Context(), body.CrewID)
 
-	res, err := h.memHealthEval.Evaluate(r.Context(), gatekeeper.MemoryHealthRequest{
+	// memHealth body has no AgentID — health snapshot is crew-scoped.
+	ctx := scopeKeeperRequest(r.Context(), body.WorkspaceID, body.CrewID, "")
+	res, err := h.memHealthEval.Evaluate(ctx, gatekeeper.MemoryHealthRequest{
 		WorkspaceID:        body.WorkspaceID,
 		CrewID:             body.CrewID,
 		AgentName:          body.AgentName,
@@ -529,10 +603,14 @@ func (h *KeeperPhase2Handler) HandleNegativeLearning(w http.ResponseWriter, r *h
 		replyError(w, http.StatusBadRequest, "workspace_id, trigger, failure_snippet required")
 		return
 	}
+	if !assertBodyWorkspaceMatchesCtx(w, r, body.WorkspaceID) {
+		return
+	}
 
 	pol := h.resolvePolicySafe(r.Context(), body.CrewID)
 
-	res, err := h.negativeEval.Evaluate(r.Context(), gatekeeper.NegativeLearningRequest{
+	ctx := scopeKeeperRequest(r.Context(), body.WorkspaceID, body.CrewID, body.AgentID)
+	res, err := h.negativeEval.Evaluate(ctx, gatekeeper.NegativeLearningRequest{
 		WorkspaceID:    body.WorkspaceID,
 		CrewID:         body.CrewID,
 		AgentName:      body.AgentName,
@@ -558,10 +636,36 @@ func (h *KeeperPhase2Handler) HandleNegativeLearning(w http.ResponseWriter, r *h
 		return
 	}
 
-	// ALLOW writes to lessons.md via consolidate.WriteLesson. This is
-	// the F4.4 → Z.7 hand-off — the integration test in
-	// negative_learning_evaluator_test.go covers the round-trip.
+	// PR-G F4.1 UX — self_learning gate on the ALLOW path. The
+	// evaluator's WriteLesson=true says "this lesson is worth keeping",
+	// but whether it AUTO-applies vs queues operator approval depends
+	// on the per-agent self_learning_enabled flag (v106).
+	//
+	//   self_learning=1  → write the lesson now (current pre-PR-G behavior)
+	//   self_learning=0  → don't write; instead queue a blocking inbox
+	//                      item so the operator approves before the
+	//                      agent's lessons.md changes.
+	//
+	// AgentID is required to look up the flag. If body.AgentID is empty
+	// (legacy callers that haven't been updated), default to OFF —
+	// safer to require operator approval than silently auto-apply.
+	autoApplyLesson := false
 	if res.WriteLesson && body.AgentMemoryDir != "" {
+		if body.AgentID == "" {
+			h.logger.Warn("keeper_phase2: ALLOW lesson skipped (agent_id missing, can't resolve self_learning)",
+				"workspace_id", body.WorkspaceID)
+		} else {
+			enabled, err := loadSelfLearningEnabled(r.Context(), h.db, body.WorkspaceID, body.AgentID)
+			if err != nil {
+				h.logger.Warn("keeper_phase2: self_learning lookup failed; defaulting to OFF (require approval)",
+					"agent_id", body.AgentID, "error", err)
+				enabled = false
+			}
+			autoApplyLesson = enabled
+		}
+	}
+
+	if autoApplyLesson {
 		werr := consolidate.WriteLesson(r.Context(), body.AgentMemoryDir, consolidate.LessonEntry{
 			ID:          res.Proposal.ID,
 			Kind:        res.Proposal.Kind,
@@ -572,6 +676,45 @@ func (h *KeeperPhase2Handler) HandleNegativeLearning(w http.ResponseWriter, r *h
 		if werr != nil {
 			h.logger.Warn("keeper_phase2: WriteLesson failed (decision still recorded)",
 				"agent_memory_dir", body.AgentMemoryDir, "error", werr)
+		}
+	} else if res.WriteLesson && body.AgentMemoryDir != "" {
+		// ALLOW but self_learning OFF — queue blocking inbox so an
+		// operator can approve the proposed lesson before it lands on
+		// the agent's lessons.md. Payload carries the full lesson
+		// proposal so the approve handler has everything it needs.
+		// Insert failures MUST surface — silently swallowing here
+		// would lose the proposal entirely (lessons.md isn't written
+		// AND no inbox item exists) while the handler returns 200,
+		// which is the worst failure mode.
+		if err := inbox.Insert(r.Context(), h.db, h.logger, inbox.Item{
+			WorkspaceID: body.WorkspaceID,
+			Kind:        inbox.KindEscalation,
+			SourceID:    reqID,
+			TargetRole:  "MANAGER",
+			Title:       fmt.Sprintf("Lesson proposal: %s (%s)", body.AgentName, body.Trigger),
+			BodyMD:      fmt.Sprintf("**Proposed lesson** (auto-apply blocked by self_learning=OFF):\n\n%s\n\n_Reason: %s_", res.Proposal.Rule, res.Reason),
+			SenderType:  "system",
+			SenderID:    "keeper_negative_learning",
+			SenderName:  "Negative Learning",
+			Priority:    "low",
+			Blocking:    true,
+			Payload: map[string]interface{}{
+				"request_id":         reqID,
+				"request_type":       string(keeper.RequestTypeNegativeLearning),
+				"agent_id":           body.AgentID,
+				"agent_memory_dir":   body.AgentMemoryDir,
+				"lesson_id":          res.Proposal.ID,
+				"lesson_kind":        string(res.Proposal.Kind),
+				"lesson_rule":        res.Proposal.Rule,
+				"lesson_context":     res.Proposal.Note,
+				"lesson_source":      string(res.Proposal.Source),
+				"self_learning_gate": "off",
+			},
+		}); err != nil {
+			h.logger.Error("keeper_phase2: enqueue gated lesson proposal failed",
+				"request_id", reqID, "agent_id", body.AgentID, "error", err)
+			replyError(w, http.StatusInternalServerError, "failed to queue lesson proposal for approval")
+			return
 		}
 	}
 
@@ -617,4 +760,52 @@ func (h *KeeperPhase2Handler) HandleNegativeLearning(w http.ResponseWriter, r *h
 		resp["lesson_id"] = res.Proposal.ID
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// loadSelfLearningEnabled reads agents.self_learning_enabled (v106) for
+// the given agent. Returns false if the agent doesn't exist (or has
+// the flag off). Used by:
+//
+//   - F4.4 negative_learning ALLOW path (HandleNegativeLearning) — decides
+//     whether a proposed lesson auto-applies or queues for operator approval.
+//   - F6 persona_suggest auto-apply path (SuggestAgentPersona) — demotes
+//     auto-apply to inbox approval when an agent's flag is off, even on a
+//     crew autonomy level that would normally bypass the inbox.
+//
+// Package-level (not a method) so both handlers can call it without
+// dragging a *KeeperPhase2Handler into the persona surface. PR-G F4.1 UX gate.
+//
+// SECURITY (defense in depth, partial close — see PR-F24 for full):
+// workspace_id is part of the WHERE clause so a lookup with an
+// agent_id from workspace A and a workspace_id of B returns no row
+// (the row's workspace_id IS A, not B). This closes the asymmetric
+// case where the caller passes inconsistent workspace identifiers
+// across the request surface. It does NOT close the symmetric case
+// where a caller consistently passes the same target workspace in
+// both query + body — that requires binding the X-Internal-Token to
+// a workspace, which is tracked as PR-F24 (token-to-workspace
+// binding) in PRD §10. The F4 handlers add a layered defense via
+// assertBodyWorkspaceMatchesCtx so body.WorkspaceID can't disagree
+// with ctx.WorkspaceID even from the same trusted caller.
+//
+// Empty workspaceID returns false (safe default) — the caller's own
+// validation should have rejected the empty value upstream.
+func loadSelfLearningEnabled(ctx context.Context, db *sql.DB, workspaceID, agentID string) (bool, error) {
+	if db == nil || agentID == "" || workspaceID == "" {
+		return false, nil
+	}
+	var enabled int
+	err := db.QueryRowContext(ctx, `
+		SELECT self_learning_enabled
+		FROM agents
+		WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
+		agentID, workspaceID,
+	).Scan(&enabled)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("keeper_phase2: load self_learning_enabled (agent=%s, workspace=%s): %w", agentID, workspaceID, err)
+	}
+	return enabled == 1, nil
 }

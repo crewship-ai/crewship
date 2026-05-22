@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/memory"
 	"github.com/crewship-ai/crewship/internal/provider"
 )
 
@@ -204,14 +205,53 @@ func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecRe
 }
 
 // emitToolResultBlock sends a tool_result event for the given content block.
+//
+// PR-F4 — tool-return scan (MINJA-style query-time injection defence):
+// tool results that flow back into the agent are an unsanitised inbound
+// surface — a poisoned web fetch, shell exec, or MCP server response can
+// embed prompt-injection text that the model would treat as a system
+// instruction on the next turn. We run the same scanner the memory.read
+// path uses; on a hit, we replace the block text with a [BLOCKED ...]
+// placeholder and tag the event metadata so journal/UI can render the
+// quarantine state.
+//
+// Scope (this is "scan path 1" — Claude assistant/tool_result blocks
+// routed through this helper). Per-adapter tool_result emission in
+// parser_codex.go / parser_gemini.go / parser_droid.go / parser_cursor.go
+// / parser_opencode.go emits directly without going through this
+// function — "scan path 2" will wrap those once the seam consolidates
+// (tracked separately, see PR-F4 roadmap).
+//
+// Quarantine to disk is intentionally NOT attempted here: tool results
+// are ephemeral (no canonical on-disk source path), and the orchestrator
+// doesn't have an AgentContext handle in this scope. The placeholder is
+// what matters — the poisoned text never reaches the model. Downstream
+// journal emission carries the scan category + pattern via the event
+// metadata.
 func emitToolResultBlock(block contentBlock, handler EventHandler) {
 	meta := map[string]interface{}{}
 	if block.ToolUseID != "" {
 		meta["tool_use_id"] = block.ToolUseID
 	}
+	content := block.Text
+	if hit := memory.ScanContent(content); hit != nil {
+		// Replace the poisoned text with a safe placeholder. Mention
+		// category + pattern so the model knows why the tool result
+		// was redacted (matches the read-path UX).
+		content = fmt.Sprintf(
+			"[BLOCKED: tool_result scan hit category=%s pattern=%s. "+
+				"Original tool output was suppressed because it contained "+
+				"a prompt-injection or exfiltration signature. "+
+				"This placeholder is a safe substitute.]",
+			hit.Category, hit.Pattern,
+		)
+		meta["scan_quarantined"] = true
+		meta["scan_category"] = hit.Category
+		meta["scan_pattern"] = hit.Pattern
+	}
 	handler(AgentEvent{
 		Type:      "tool_result",
-		Content:   block.Text,
+		Content:   content,
 		Metadata:  meta,
 		Timestamp: time.Now(),
 	})

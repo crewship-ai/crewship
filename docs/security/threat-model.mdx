@@ -6,7 +6,7 @@ icon: "shield-alert"
 
 # Threat Model
 
-Crewship's security posture rests on four layers that compose into a
+Crewship's security posture rests on five layers that compose into a
 defense-in-depth model. Each layer assumes the layer above it can
 fail. This page is the 1-page summary; deep-dive links for each layer
 are at the bottom.
@@ -183,6 +183,107 @@ why the policy held the line.
 
 Detail: [Keeper guide](/guides/keeper).
 
+## Layer 5 — Memory prompt-injection scanner
+
+Memory files are normally agent-authored, but external ingestion paths can land poisoned content: an operator manually edits CREW.md, a crew-shared file lands via PR review, a peer card from a past session gets surfaced, a future skill import pulls remote content. Any of those can carry instructions the agent treats as authoritative if no defence runs between the file and the system prompt.
+
+`internal/memory/quarantine.go` is the scanner. It runs on every memory READ (before the content reaches `buildAgentMemoryBlock`) AND on tool-call return values (before the result lands back in the agent's context — the MINJA query-time-injection defence). A hit replaces the matched content with a `[BLOCKED]` placeholder + writes the original to `.quarantine/{sha256}.md` for operator triage.
+
+### Flow
+
+```mermaid
+flowchart TD
+    src[/"Content source<br/>(memory file read OR tool_result return)"/]
+    src --> scan{"ScanContent()<br/>internal/memory/quarantine.go"}
+
+    scan -->|"Step 1: cheap"| u{"Invisible-unicode<br/>14 codepoints<br/>(ZWSP/BIDI/BOM)"}
+    u -->|hit| hit
+    u -->|miss| ascii{"Pure ASCII<br/>fast path?"}
+
+    ascii -->|"yes — skip homoglyph"| rules
+    ascii -->|"no — NFKD + fold"| rules
+
+    rules{"Step 2: 9 regex rules<br/>+ URL exfil + persistence"}
+    rules -->|hit| hit
+    rules -->|miss| b64{"Step 3: base64 blocks ≥ 60 chars?"}
+
+    b64 -->|"decode + 50% printable<br/>+ re-run rules"| dec{"Decoded matches a rule?"}
+    dec -->|yes| hit
+    dec -->|no| clean[/"Clean — return to caller<br/>verbatim"/]
+    b64 -->|"no candidate blocks"| clean
+
+    hit[/"ScanHit{category, pattern}"/]
+    hit --> q{"Quarantine()<br/>writes .quarantine/{sha}.md<br/>+ frontmatter"}
+
+    q -->|"write OK"| ph["Return [BLOCKED:...]<br/>placeholder to model<br/>+ journal memory.scan.hit"]
+    q -->|"write FAIL<br/>(disk full / perms)"| err["Return IsError=true<br/>FAIL-CLOSED — model never sees<br/>poisoned content"]
+
+    classDef hit fill:#fbb,stroke:#d44
+    classDef clean fill:#bfb,stroke:#4d4
+    classDef err fill:#fb6,stroke:#d80
+    class hit,ph hit
+    class clean clean
+    class err err
+```
+
+**Reading the flow:**
+
+- The scanner runs in three stages from cheapest (unicode codepoint scan) to most expensive (base64 decode + re-scan). Most content fails fast at step 1 or 2; the base64 path only fires on content that LOOKS like it might be hiding an encoded payload.
+- The homoglyph fold (`Cyrillic ј → Latin j`, etc.) is folded into the regex pass — it's not a separate step. Pure-ASCII content skips the NFKD normalisation entirely so the operator-typed CREW.md doesn't pay the homoglyph tax.
+- Quarantine write failures **fail closed**: the model gets an `IsError=true` tool result rather than the poisoned content. A half-working scanner is worse than no scanner if it leaks on the failure path.
+- Idempotency: same content → same SHA → same `.quarantine/{sha}.md` filename, overwritten in place. Reading a poisoned file twice doesn't accumulate duplicate quarantine copies.
+
+### Rule families (current — PR-F4 v2)
+
+**Invisible-unicode codepoints (14)** — zero-width spaces (ZWSP, ZWNJ, ZWJ), BIDI overrides (LRM/RLM/LRE/RLE/LRO/RLO), directional isolates (LRI/RLI/FSI/PDI), and the byte-order mark. Source-file numeric literals so the rule file itself stays free of the codepoints it scans for. Cheap check; runs first.
+
+**Prompt-injection regex (9 rules, line-anchored, case-insensitive)** — `ignore previous|all|prior instructions`, `you are now DAN|<role>`, `disregard rules|instructions|the above|system|previous`, `<!-- ignore ... -->` HTML smuggling, plus the five exfiltration / persistence patterns below.
+
+**Exfiltration patterns** — `curl $TOKEN/...`, `cat .env | nc|curl|...`, `aws s3 cp ... .ssh/...|id_rsa`, plus the round-PR-F4 **URL exfil rules** (`https?://...?<param>=$TOKEN|API_KEY|SECRET|...` and `https?://.../$TOKEN|...`). The URL rules catch the "send to attacker.com/?data=$ENV" pattern beyond the existing curl-only rules.
+
+**Persistence patterns** — `>> ~/.ssh/authorized_keys`, `| crontab -` from stdin.
+
+**Base64 deobfuscation (PR-F4)** — for every base64-shaped block ≥ 60 chars in the content, attempt decode; if the decoded text matches any of the existing rules above, flag with category `base64_obfuscation` and pattern `<rule>_base64`. False-positive guard: a 50% printable-character threshold on the decoded payload, so lorem-ipsum-shaped base64 (e.g. binary blobs in test fixtures) doesn't trip the gate. JWT-shape payloads are explicitly tested as benign.
+
+**Homoglyph fold (PR-F4)** — NFKD normalise the body, then apply a 16-codepoint Cyrillic/Greek → Latin look-alike fold (`іgnore` → `ignore`, `dіsregard` → `disregard`, etc.), and re-run the prompt-injection regex against the normalised version. Hits report `<rule>_homoglyph`. Cost: two regex passes instead of one; the fast path skips pure-ASCII content entirely so the cost only fires on suspicious input.
+
+**Tool-return scan path (PR-F4 "scan path 1")** — the orchestrator's `emitToolResultBlock` (`internal/orchestrator/exec_mcp.go`) wraps incoming Claude `tool_result` blocks through `ScanContent` before forwarding to the agent. A hit replaces the result body with the `[BLOCKED]` placeholder + writes the original to the agent's `.quarantine/`. This is the MINJA defence: an agent that called a search tool can't have the search result inject "ignore previous instructions" into its own context.
+
+**Per-adapter sweep (PR-F4 follow-up)** — the wire-up above covers Claude's `tool_result` shape. The Codex / Gemini / OpenCode / Factory Droid adapters parse tool results differently; each needs its own scan-site. Tracked separately so a missing adapter isn't a silent bypass.
+
+### What the scanner does NOT catch (yet)
+
+The list is honest:
+
+- **Cross-language homoglyph beyond Cyrillic/Greek** — Hebrew, Armenian, Mathematical Alphanumeric Symbols block. Low priority because the existing rules target English-language injection patterns and the homoglyph fold table only needs to cover what attackers can substitute for ASCII letters in the existing rule set. Extensions are additive.
+- **Multi-step prompt injection** — content that's benign on its own but builds an instruction when combined with the next read. Out of scope; the scanner is single-pass per file.
+- **Adversarial LLM output mimicking benign content** — content that says "PROCEED" to a downstream agent's heuristic check. That's a Layer 4 (Keeper) defence, not Layer 5.
+- **Content the agent SELF-AUTHORED that's later read by another agent** — peer cards are a real attack surface here. The peer-card writer caps content to 1500 B + the GDPR cascade can purge cards, but a malicious agent writing instructions into a peer card today bypasses the inbound-only scan because peer cards are written authoritatively. Tracked as PR-F follow-up: extend ScanContent to peer-card WRITE path.
+- **Inbound content above the per-tier byte cap** — caps are 4000 / 4000 / 1500 / 8000 / 30000 / 1500 / no-cap (lessons) bytes per tier. The scanner runs on whatever fits within the cap; content truncated by cap before reaching the scanner is benignly cut off.
+
+### Quarantine response — what an operator sees
+
+When a hit fires, the agent's tool result / file read gets the `[BLOCKED]` placeholder verbatim:
+
+```
+[BLOCKED: "prompt_injection" pattern "ignore_previous_instructions"
+detected in "daily/2026-05-21.md". Original content quarantined to
+.quarantine/a3f8e2c1...md for operator review. This placeholder
+is a safe substitute; the poisoned content was never returned to you.]
+```
+
+The operator's view:
+
+1. `.quarantine/{sha256}.md` lands on disk inside the agent's container — content + YAML frontmatter (category / pattern / source path / SHA) so triage tooling can route without re-running the scan
+2. A journal entry fires (`entry_type = memory.scan.hit`) with the same triple
+3. The agent's next tool result includes the placeholder so the model can see SOMETHING happened (it can ask the operator about it instead of looping on "why is this file empty")
+
+Idempotent on content: the same poisoned body quarantined twice reuses the same SHA-keyed filename and overwrites in place. The inbound scan runs on every read, so without this every read of a poisoned file would accumulate duplicate quarantine copies.
+
+### Fail-closed posture
+
+Quarantine WRITE failure (disk full, container permission drop) returns `IsError=true` from the scanner — the poisoned content is NOT returned to the model. The agent sees a tool error instead. This is the right default: a half-working scanner is worse than no scanner if it lets content through on the failure path.
+
 ## What this composition does and does not protect against
 
 | Threat | Layer that handles it |
@@ -218,6 +319,54 @@ describes the **current implementation**, with these gaps:
 - **Keeper rulesets ship empty.** Operators write the rules that
   matter for their environment; there is no "secure by default"
   policy yet.
+
+## Tenant isolation on internal-auth handlers
+
+`/api/v1/internal/*` routes authenticate via `X-Internal-Token` rather
+than per-user JWTs. The token authenticates the caller as "the
+sidecar" but is NOT bound to a specific workspace in the current
+implementation — the `internalWsCtx` middleware reads `?workspace_id`
+from the query string and trusts whatever value is passed.
+
+For most internal routes, the IPC layer projects `IPCConfig.workspace_id`
+from the orchestrator's sidecar contract before the request leaves the
+container, so a captured token can't be aimed at another workspace
+even with crafted query parameters. This invariant is the basis of
+the claim in `docs/api-reference/internal.mdx`.
+
+### Known exception — Keeper Phase 2 family
+
+The `/api/v1/internal/keeper/{skill-review,behavior,memory-health,
+negative-learning}` handlers (PR-C / PRD §6 F4) read `body.workspace_id`
+from the JSON payload alongside `ctx.workspace_id` from the middleware.
+Asymmetric forgery (caller passes workspace A in query, claims
+workspace B in body) is **rejected** by the
+`assertBodyWorkspaceMatchesCtx` helper in `internal/api/keeper_phase2.go`,
+which compares both values and returns 400 on mismatch.
+
+Symmetric forgery — caller picks one workspace consistently across
+both query and body — is **not yet closed**. It would require binding
+the `X-Internal-Token` to a workspace at issue time and validating
+that binding in `internalWsCtx`. Tracked as `PR-F24` in
+PRD-AGENT-EVOLUTION-2026.md §6.1. A second path (`PR-F25`) eliminates
+`body.workspace_id` from these four handlers and derives workspace
+from context only, restoring the original invariant. Either close
+retires this "Known exception".
+
+### Hardening surface — what's locked vs. what's tracked
+
+| Surface | Status |
+|---|---|
+| `self_learning_enabled` cross-tenant lookup | ✅ closed asymmetric — `workspace_id` in WHERE clause |
+| F4 handler body / ctx workspace consistency | ✅ closed — `assertBodyWorkspaceMatchesCtx` |
+| F4 handler body / ctx workspace symmetric forgery | ⏳ PR-F24 (token-to-workspace binding) |
+| F4 handler body-workspace drop | ⏳ PR-F25 (eliminate body workspace param) |
+| Lessons memory tier agent-author write | ✅ closed — dispatcher rejects `tier="lessons"` |
+| Memory file injection scan (READ path) | ✅ — 9 rules + 14 unicode codepoints |
+| Memory scanner v2 (base64 / homoglyph / URL exfil) | ✅ shipped — PR-F4 |
+| Memory scanner — tool-result path | ✅ partial — Claude `tool_result` wired; per-adapter sweep is PR-F4 follow-up |
+| GDPR cascade (Art. 17) | ✅ shipped — migration v107 + `DELETE /api/v1/admin/users/{id}/data` |
+| GDPR export (Art. 15) | ✅ shipped — `GET /api/v1/admin/users/{id}/data` |
 
 ## Reporting issues
 

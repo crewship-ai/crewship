@@ -1,0 +1,241 @@
+---
+title: "Memory Provider interface"
+description: "How to add a new memory backend (HTTP-backed external store, vector recall service, conversation-history platform) to Crewship without forking the dispatcher."
+icon: "puzzle-piece"
+---
+
+# Memory Provider interface
+
+`Provider` (`internal/memory/provider.go`) is the formal contract for pluggable memory backends. Today Crewship ships one implementation — `LocalDispatcher`, which wraps the on-disk dispatcher behind the interface. The interface exists so a future HTTP-backed external store can slot into the same wire surface the orchestrator and sidecar already speak, without touching agent call sites.
+
+This page is for **developers building a new provider**. Operators looking for how the on-disk default behaves should read [Agent memory](/guides/agent-memory) instead.
+
+## Why a formal interface
+
+Before the interface, every external memory backend would have to fork `internal/memory/dispatcher.go` and re-wire the four tool handlers (`memory.read` / `memory.write` / `memory.search` / `memory.append_daily`) against its own SDK. The dispatcher then becomes the integration boundary instead of a clean contract.
+
+`Provider` flips that:
+
+- The dispatcher remains the on-disk path (call sites unchanged)
+- New backends implement four methods (`Retain` / `Recall` / `Forget` / `Health`) against the interface
+- The orchestrator picks a Provider at boot from config — no per-call branching needed
+- Tests can stub the interface without spinning up a real backend
+
+The interface is **additive only** in PR-F: `LocalDispatcher` proves the shape fits the existing dispatcher logic, but production call sites still route through `*Dispatcher` directly. The swap to provider-routed call sites lands as PR-F17 once the second implementation (PR-F18) is ready to switch between.
+
+## The four methods
+
+```go
+type Provider interface {
+    Retain(ctx, RetainRequest) (RetainResult, error)
+    Recall(ctx, RecallRequest) (RecallResult, error)
+    Forget(ctx, ForgetRequest) (ForgetResult, error)
+    Health(ctx) HealthStatus
+}
+```
+
+Every method MUST be safe to call from concurrent goroutines.
+
+### `Retain` — persist content
+
+```go
+type RetainRequest struct {
+    WorkspaceID string
+    AgentID     string // optional
+    CrewID      string // optional
+    Tier        string // AGENT | CREW | PERSONA | pins | daily | peers | lessons
+    Key         string // tier-specific (date for daily, slug for peers)
+    Content     string // UTF-8 body
+    Mode        string // "replace" | "append"
+}
+
+type RetainResult struct {
+    ID    string // canonical handle for later Forget(byID)
+    Bytes int    // size persisted (useful for cap-aware callers)
+}
+```
+
+Design notes:
+
+- **Flat struct, no nested option bags.** New fields require deciding which bag they live in; flat ages better.
+- **`Mode` is required, no default.** A "default mode" hides intent at the wire — when the operator inspects logs they should see exactly what was requested. Local impl returns an error for an empty mode; remote impls should too.
+- **`Tier` is the closed enum from the dispatcher.** Adding a tier requires extending `validTiers` in `tools.go` AND every provider that switches on tier — a tier nobody implements is worse than a tier nobody declares.
+- **`Key` is tier-specific.** Required for `daily` (date) and `peers` (user slug); ignored elsewhere. Providers validate at the boundary; the local impl errors on missing key for these tiers.
+- **`Content` is plain UTF-8.** Binary payloads use the existing blob-store path, not the memory dispatcher.
+
+The returned `ID` is the canonical handle for `Forget(byID)`. For `LocalDispatcher` the ID is the tier-relative source label (e.g. `"AGENT.md"`, `"daily/2026-05-21.md"`) — stable across reads on the same disk, and the same shape the model sees in `memory.read` metadata. Remote providers should pick whatever stable id their backend uses (a row id, a content-hash, a path).
+
+### `Recall` — search snippets
+
+```go
+type RecallRequest struct {
+    WorkspaceID string
+    AgentID     string // optional: limit to a single agent's tiers
+    CrewID      string // optional: limit to crew-shared tiers
+    Tier        string // optional: empty = all accessible tiers
+    Query       string // search text
+    Limit       int    // advisory; provider SHOULD cap at 20
+}
+
+type RecallResult struct {
+    Hits        []RecallSnippet `json:"hits"`        // always present (may be empty)
+    Quarantined []string        `json:"quarantined,omitempty"` // file labels the scanner rejected; surface to operator UI but NEVER feed back to the model
+}
+
+type RecallSnippet struct {
+    Source  string  `json:"source"`            // tier-relative label (NEVER an absolute filesystem path)
+    Snippet string  `json:"snippet"`
+    Line    int     `json:"line,omitempty"`
+    Score   float64 `json:"score,omitempty"`   // 0..1; provider-specific (local impl returns 1.0 always)
+}
+```
+
+Design notes:
+
+- **`Tier` empty means "all accessible tiers"** — providers iterate the tiers the caller's `AgentID` can read.
+- **`Limit` is advisory.** Providers SHOULD return fewer than `Limit` when the corpus is small; they SHOULD cap at 20 to match the dispatcher's existing JSON Schema (the model has been trained on the cap).
+- **`Score` is 0..1 and provider-specific.** Local impl returns 1.0 for substring hits (no ranking signal). Vector providers return cosine similarity. BM25 providers return rescaled BM25. Don't compare scores across providers.
+- **`Snippet`** is the matched excerpt the model sees in the tool result. Keep it short (≤500 chars) — the model has the `Source` if it wants to fetch the full content via `memory.read`.
+- **`Source` is the tier-relative label**, never an absolute filesystem path (leaking bind-mount layout to the model is a small but real info-disclosure surface — see `tools.go::pathToSourceLabel` for the canonicalisation contract).
+- **`Quarantined` is for files the inbound prompt-injection scanner rejected** ([Layer 5 — memory prompt-injection scanner](/security/threat-model#layer-5--memory-prompt-injection-scanner)). Surface these in the operator UI but NEVER feed them back to the model — the model would re-read poisoned content into its context.
+
+### `Forget` — delete
+
+```go
+type ForgetRequest struct {
+    WorkspaceID   string
+    ID            string // canonical id from RetainResult (per-item)
+    DataSubjectID string // GDPR cascade selector (per-subject)
+    // Exactly one of ID / DataSubjectID MUST be non-empty:
+    //   - ID set, DataSubjectID empty  = per-id delete
+    //   - DataSubjectID set, ID empty  = cascade delete for SAR
+    //   - both empty                    = error (no-op deletes are caller bugs)
+    //   - both set                      = error (intent ambiguity)
+}
+
+type ForgetResult struct {
+    Removed int // canonical count for the caller's audit log; 0 + nil error = no-op (re-issued DELETE for an already-deleted item is fine)
+}
+```
+
+Design notes:
+
+- **Two selectors, mutually exclusive.** `ID` is for the operator-driven "delete this specific row" path. `DataSubjectID` is the GDPR Article 17 cascade path (PR-F1). Mixing them is rejected — the caller knows which they want, and round-9 hardening rejects the both-set case explicitly with a "must set exactly one" error.
+- **The on-disk LocalDispatcher rejects `DataSubjectID`** with an explicit "cascade not implemented in local provider; use the PR-F1 API endpoint" error because the on-disk tier doesn't carry `data_subject_id` foreign keys. GDPR cascade goes through the SQL handler (`internal/api/admin_gdpr.go`) which queries the cascade-aware tables directly. This is documented behaviour — local-disk providers should return the same error.
+- **`Removed` reports items actually removed.** Already-absent items count as 0 (per-id) or contribute to the total based on what the provider actually touched. Re-issued DELETE for an already-deleted item returns `Removed: 0, error: nil` (no-op semantics, not a failure).
+
+### `Health` — liveness check
+
+```go
+type HealthStatus struct {
+    OK        bool      `json:"ok"`
+    Message   string    `json:"message,omitempty"`     // human-readable when OK=false
+    CheckedAt time.Time `json:"checked_at"`            // server-side timestamp of the check
+}
+```
+
+Design notes:
+
+- **Health MUST return promptly** — under 200ms for local, under 1000ms for remote. A stuck Health() blocks the operator's aux-status panel render. Implementations SHOULD use a hard deadline (`context.WithTimeout(ctx, 1*time.Second)` internally) and return `OK=false, Message="health check timeout"` rather than block.
+- **`Message` is for failure context only.** On `OK=true`, leave it empty. On `OK=false`, give enough text for the operator to triage ("connection refused", "auth expired", "503 from upstream").
+- **`CheckedAt`** lets the panel show "last successful check N seconds ago" without piggy-backing on the framework's clock — each provider stamps its own observation time.
+- A provider identifier (e.g. `"local-dispatcher"`, `"http://memory.internal:9090"`) lives in the workspace's provider config, NOT on the HealthStatus — the panel knows which provider it's asking about.
+
+## Reference implementation — `LocalDispatcher`
+
+`internal/memory/provider.go` ships `LocalDispatcher`, the on-disk wrapper:
+
+```go
+type LocalDispatcher struct {
+    d *Dispatcher // the existing on-disk dispatcher from tools.go
+}
+
+func NewLocalDispatcher(ac AgentContext) *LocalDispatcher {
+    return &LocalDispatcher{d: NewDispatcher(ac)}
+}
+```
+
+The dispatcher does all the work — `LocalDispatcher` just translates Provider requests into `ToolCall` invocations and back into typed results. Look at `TestLocalDispatcher_Retain_PersistsToDisk` etc. for shape examples.
+
+The wrapper exists for two reasons:
+
+1. **It proves the Provider interface fits the existing dispatcher logic** without forcing a rewrite — if the on-disk impl didn't fit, we'd need to widen the interface
+2. **It gives tests a stub seam** — code that depends on `Provider` can use `LocalDispatcher` in unit tests without spinning up a remote backend, and remote-provider tests can use the same dispatcher fixtures the local one uses
+
+## Building a new provider
+
+Step-by-step for a new HTTP-backed external store:
+
+### 1. Define the type
+
+```go
+// internal/memory/providers/foo/provider.go
+package fooprovider
+
+type Provider struct {
+    httpClient *http.Client
+    baseURL    string
+    apiKey     string
+}
+
+func New(cfg Config) (*Provider, error) {
+    // validate cfg, return error on bad config
+}
+```
+
+### 2. Implement the four methods
+
+Each method translates between the Provider wire shape and the upstream API. Be defensive about upstream:
+
+- Wrap upstream errors so callers can `errors.Is(err, ErrUpstreamTimeout)` — don't leak raw HTTP error strings
+- Implement timeouts via the passed `ctx`; don't trust upstream to time out cooperatively
+- Return `OK=false` from `Health` rather than panicking on a network blip — the operator can see the panel and react
+
+### 3. Wire into the bootstrap
+
+The orchestrator picks a Provider at boot based on config. For a new provider, add:
+
+- `crewship.yaml` config block (e.g. `memory.provider: foo` + `memory.foo.url:` etc.)
+- A factory in the bootstrap that constructs the provider from config
+- A test that exercises Retain → Recall → Forget round-trip against a mock upstream
+
+### 4. Run the parity test suite
+
+Crewship will ship a provider-parity test suite (PR-F17 deliverable) — every provider runs the same fixture suite and must produce equivalent results for the same input. Until then, mirror the tests in `internal/memory/provider_test.go` and verify your provider passes them all (substituting your upstream URL for the on-disk path).
+
+### 5. Document the operator-facing behaviour
+
+A new provider needs:
+
+- A line in [Agent memory](/guides/agent-memory) under "Backends" naming the new option
+- A config block reference in [Configuration → Providers](/configuration/providers)
+- A threat-model note if the provider changes any tenant-isolation or data-locality property
+
+## Versioning
+
+The interface is **append-only**. New methods, new fields on existing request/result structs, new error types — all OK provided existing implementations keep compiling and behaving the same for inputs that don't carry the new field.
+
+**Breaking changes** (renaming methods, removing fields, changing the meaning of an existing parameter) require a major version bump on the interface AND a parallel old-shape interface for backwards compatibility during the transition. The bar for breaking is high — every external provider has to be updated in lockstep.
+
+The opposite trap is "let's just add a `*Options` bag and stuff new flags in there." Don't. The interface owns the contract, not the option struct — a new flag in `*Options` is the same breaking surface as a new method, except harder to spot in code review.
+
+## When NOT to add a provider
+
+A new provider is the right answer when:
+
+- The data needs to live in a backend that has its own SLA, security perimeter, or query model (vector recall, conversation history, GDPR-tagged enterprise store)
+- The operator already runs that backend for other reasons and wants Crewship's agents to share it
+
+A new provider is the WRONG answer when:
+
+- You want to add a new memory tier alongside AGENT / CREW / PERSONA / etc. — that's a `validTiers` extension in the dispatcher, not a provider
+- You want to add a new memory tool alongside `memory.read` / `memory.write` / etc. — that's a `ToolSchemas` addition in the dispatcher
+- You want the local backend to behave slightly differently — that's a fork of `LocalDispatcher` not a new provider
+
+## Cross-references
+
+- `internal/memory/provider.go` — the interface + reference impl
+- `internal/memory/provider_test.go` — the test suite shape
+- [Agent memory](/guides/agent-memory) — operator-facing memory model
+- [Configuration → Providers](/configuration/providers) — where providers get wired
+- [GDPR cascade](/security/gdpr) — how `Forget` interacts with Article 17

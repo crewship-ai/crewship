@@ -111,7 +111,7 @@ func ToolSchemas() map[string]ToolSchema {
 		},
 		"memory.write": {
 			Name: "memory.write",
-			Description: "Persist content to an agent memory file. Use mode='replace' when reorganizing; " +
+			Description: "Persist content to an agent memory file (the lessons tier is intentionally NOT writable through this surface — lessons land via the F4.4 negative-learning evaluator which enforces schema + idempotency + locking). Use mode='replace' when reorganizing; " +
 				"mode='append' to add new entries. Cap-aware: returns a warning at 80% of cap and a hard " +
 				"error at 100% of cap so you must self-curate (drop older entries, summarize) before retrying.",
 			InputSchema: json.RawMessage(`{
@@ -119,7 +119,7 @@ func ToolSchemas() map[string]ToolSchema {
 				"properties": {
 					"tier": {
 						"type": "string",
-						"enum": ["AGENT", "CREW", "PERSONA", "pins", "daily", "peers", "lessons"]
+						"enum": ["AGENT", "CREW", "PERSONA", "pins", "daily", "peers"]
 					},
 					"key": {
 						"type": "string",
@@ -308,6 +308,27 @@ func (d *Dispatcher) handleWrite(ctx context.Context, raw json.RawMessage) (Tool
 	if _, ok := validTiers[a.Tier]; !ok {
 		return ToolResult{IsError: true, Content: fmt.Sprintf("memory.write: unknown tier %q", a.Tier)}, nil
 	}
+	// Security gate: lessons tier MUST flow through
+	// consolidate.WriteLesson (PR-Z Z.7 + F4.4) which enforces YAML
+	// schema, idempotency-by-ID, atomic-rename, and flock. Allowing
+	// the raw dispatcher write here would let an agent (a) bypass
+	// cap validation because capForTier("lessons") returns 0
+	// = "no cap", (b) bypass the kind/source closed-enum guard so
+	// downstream filters silently drop entries, (c) bypass the
+	// idempotency key and accumulate duplicates, and (d) corrupt
+	// the file with freeform text ReadLessons cannot parse. The
+	// right surface is the F4.4 negative-learning endpoint, which
+	// routes through WriteLesson with the policy + self_learning
+	// gates intact. Auditor flagged this as a persistence attack
+	// vector in the 2026-05-21 pre-launch audit; the tombstone
+	// stays here until any agent-author surface needs lessons
+	// writes (none does today; consolidator is the only writer).
+	if a.Tier == "lessons" {
+		return ToolResult{
+			IsError: true,
+			Content: "memory.write: lessons tier is read-only via this surface; submit a lesson through the F4.4 negative-learning evaluator (consolidate.WriteLesson enforces schema + idempotency + locking that this dispatcher does not).",
+		}, nil
+	}
 	if a.Mode != "replace" && a.Mode != "append" {
 		return ToolResult{IsError: true, Content: "memory.write: mode must be 'replace' or 'append'"}, nil
 	}
@@ -470,6 +491,19 @@ type searchArgs struct {
 // Z.1. A follow-up commit will plumb this through the FTS5 engine
 // for keyword + semantic recall; the present implementation keeps
 // the wire contract stable while we get adapter wiring landed.
+//
+// TODO(PR-F5): wire memory.HybridSearch (FTS5 BM25 + episodic vec+BM25
+// via RRF) into this dispatcher path. The HybridSearch primitive ships
+// today (internal/memory/hybrid.go) and is reachable via the
+// /api/v1/memory/search/hybrid HTTP handler + the sidecar's
+// /memory/search-hybrid forwarder — see internal/api/
+// memory_hybrid_search_handler.go and internal/sidecar/memory.go. The
+// HOLE is the in-process tool dispatcher (this function), which would
+// need a *memory.Engine + *sql.DB + episodic.Embedder threaded through
+// AgentContext or NewDispatcher to call HybridSearch. That's >30 LOC of
+// wiring (constructor changes, sidecar handoff plumbing, test fixture
+// rework) and out of PR-F4 scope. Tombstoned in hybrid.go +
+// hybrid_dead_code_test.go; flip the sentinel when the wiring lands.
 //
 // Two security properties on the result envelope:
 //   - Hits carry the tier-label `source` (e.g. "AGENT.md",

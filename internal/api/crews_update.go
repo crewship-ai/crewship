@@ -35,6 +35,12 @@ type updateCrewRequest struct {
 	DevcontainerConfig *string   `json:"devcontainer_config"`
 	MiseConfig         *string   `json:"mise_config"`
 	ServicesJSON       *string   `json:"services_json"`
+	// MaxEphemeralAgents is the hire-flow quota (see v103 migration
+	// + agents_hire.go). PR-G surfaces this on the policy panel so
+	// operators can raise/lower the cap without dropping to the CLI.
+	// Server-side CHECK(>=0) already exists; we also reject anything
+	// above 100 here as a sanity cap (no legit reason to over-quota).
+	MaxEphemeralAgents *int `json:"max_ephemeral_agents"`
 }
 
 // List returns all non-deleted crews in the workspace with member and agent counts.
@@ -181,6 +187,18 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		} else {
 			ub.Set("container_ttl_hours", *req.ContainerTTLHours)
 		}
+	}
+	if req.MaxEphemeralAgents != nil {
+		// Server-side CHECK already enforces >= 0; the 100 ceiling is a
+		// product sanity bound (typical crews run 1-20 ephemerals; a
+		// four-digit quota is almost certainly a typo). Reject early
+		// with an honest 400 instead of letting the CHECK fire a
+		// 500-shaped error.
+		if *req.MaxEphemeralAgents < 0 || *req.MaxEphemeralAgents > 100 {
+			replyError(w, http.StatusBadRequest, "max_ephemeral_agents must be between 0 and 100")
+			return
+		}
+		ub.Set("max_ephemeral_agents", *req.MaxEphemeralAgents)
 	}
 	if req.MCPConfigJSON != nil {
 		if *req.MCPConfigJSON != "" {
@@ -344,6 +362,7 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 			c.container_memory_mb, c.container_cpus, c.container_ttl_hours, c.network_mode, c.allowed_domains,
 			c.mcp_config_json, c.escalation_config,
 			c.runtime_image, c.devcontainer_config, c.mise_config, c.cached_image, c.config_hash,
+			c.max_ephemeral_agents,
 			c.created_at, c.updated_at,
 			(SELECT COUNT(*) FROM agents WHERE crew_id = c.id AND deleted_at IS NULL) AS agent_count,
 			(SELECT COUNT(*) FROM crew_members WHERE crew_id = c.id) AS member_count
@@ -354,6 +373,7 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		&c.ContainerTTLHours, &c.NetworkMode, &updatedDomainsJSON,
 		&c.MCPConfigJSON, &c.EscalationConfig,
 		&c.RuntimeImage, &c.DevcontainerConfig, &c.MiseConfig, &c.CachedImage, &c.ConfigHash,
+		&c.MaxEphemeralAgents,
 		&c.CreatedAt, &c.UpdatedAt, &c.Count.Agents, &c.Count.Members)
 	if err != nil {
 		h.logger.Error("get crew after update", "error", err)

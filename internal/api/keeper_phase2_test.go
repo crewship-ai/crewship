@@ -83,6 +83,7 @@ func TestKeeperPhase2_SkillReview_AllowPersists(t *testing.T) {
 	}
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPost, "/api/v1/internal/keeper/skill-review", mustJSON(t, body))
+	r = r.WithContext(context.WithValue(r.Context(), ctxWorkspaceID, body.WorkspaceID))
 	h.HandleSkillReview(w, r)
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
@@ -141,6 +142,7 @@ func TestKeeperPhase2_Behavior_BlockMode_EscalatesAndInboxes(t *testing.T) {
 	}
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPost, "/api/v1/internal/keeper/behavior", mustJSON(t, body))
+	r = r.WithContext(context.WithValue(r.Context(), ctxWorkspaceID, body.WorkspaceID))
 	h.HandleBehavior(w, r)
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
@@ -194,12 +196,18 @@ func TestKeeperPhase2_NotConfigured_Returns503(t *testing.T) {
 	}
 }
 
-// TestKeeperPhase2_NegativeLearning_AllowWritesLesson pins the
-// integration handler-side: POST → evaluator ALLOW → lessons.md
-// gains a kind=negative entry under the supplied agent_memory_dir.
-func TestKeeperPhase2_NegativeLearning_AllowWritesLesson(t *testing.T) {
+// TestKeeperPhase2_NegativeLearning_AllowWritesLesson_WhenSelfLearningON
+// pins the F4.1 UX gate added in PR-G: ALLOW from the evaluator writes
+// the lesson immediately ONLY when the agent has self_learning=1.
+func TestKeeperPhase2_NegativeLearning_AllowWritesLesson_WhenSelfLearningON(t *testing.T) {
 	db, pr := kp2DB(t)
 	tmp := t.TempDir()
+
+	// kp2DB seeds agent a1 with self_learning_enabled=0 (default).
+	// Flip it ON for this test.
+	if _, err := db.Exec(`UPDATE agents SET self_learning_enabled = 1 WHERE id = 'a1'`); err != nil {
+		t.Fatalf("flip self_learning ON: %v", err)
+	}
 
 	p := &kp2Provider{content: `{"decision":"ALLOW","reason":"check env vars","risk":3}`}
 	gk := gatekeeper.New(p, "claude-haiku-4-5", kp2Logger())
@@ -216,6 +224,7 @@ func TestKeeperPhase2_NegativeLearning_AllowWritesLesson(t *testing.T) {
 	}
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPost, "/api/v1/internal/keeper/negative-learning", mustJSON(t, body))
+	r = r.WithContext(context.WithValue(r.Context(), ctxWorkspaceID, body.WorkspaceID))
 	h.HandleNegativeLearning(w, r)
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
@@ -231,6 +240,88 @@ func TestKeeperPhase2_NegativeLearning_AllowWritesLesson(t *testing.T) {
 	}
 }
 
+// TestKeeperPhase2_NegativeLearning_AllowQueuesInbox_WhenSelfLearningOFF
+// pins the inverse of the previous test: same ALLOW signal from the
+// evaluator, but self_learning=0 (the safe default) means we DON'T
+// touch the agent's lessons.md. Instead a blocking inbox row is queued
+// so the operator can approve the proposed lesson before it lands.
+//
+// This is the gate that gives the per-agent self-learning UI toggle
+// (PR-G AgentLearningToggle) an actual functional consequence — the
+// auditor's #1 anti-pattern would be a UI toggle with no downstream
+// effect, so this test exists to prevent that regression specifically.
+func TestKeeperPhase2_NegativeLearning_AllowQueuesInbox_WhenSelfLearningOFF(t *testing.T) {
+	db, pr := kp2DB(t)
+	tmp := t.TempDir()
+
+	// kp2DB seeds agent a1 with self_learning_enabled=0 — exactly the
+	// state we want to assert against. Confirm rather than assume so a
+	// future change to the seed doesn't silently break the contract.
+	var got int
+	if err := db.QueryRow(`SELECT self_learning_enabled FROM agents WHERE id = 'a1'`).Scan(&got); err != nil {
+		t.Fatalf("read self_learning: %v", err)
+	}
+	if got != 0 {
+		t.Fatalf("seed assumption broken: agent a1 self_learning=%d, want 0", got)
+	}
+
+	p := &kp2Provider{content: `{"decision":"ALLOW","reason":"missing env vars","risk":3}`}
+	gk := gatekeeper.New(p, "claude-haiku-4-5", kp2Logger())
+	ev := gatekeeper.NewNegativeLearningEvaluator(gk, kp2Logger())
+
+	h := NewKeeperPhase2Handler(db, "tok", pr, nil, nil, nil, ev, kp2Logger())
+
+	body := negativeLearningBody{
+		WorkspaceID: "ws1", CrewID: "cr1",
+		AgentID: "a1", AgentName: "Loser", CrewName: "Ops",
+		AgentMemoryDir: tmp,
+		Trigger:        "run_failed",
+		FailureSnippet: "deploy.sh: missing DATABASE_URL",
+	}
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/internal/keeper/negative-learning", mustJSON(t, body))
+	r = r.WithContext(context.WithValue(r.Context(), ctxWorkspaceID, body.WorkspaceID))
+	h.HandleNegativeLearning(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
+	}
+
+	// lessons.md MUST NOT exist — the ALLOW was gated by self_learning=0.
+	if _, err := os.Stat(filepath.Join(tmp, "lessons.md")); err == nil {
+		raw, _ := os.ReadFile(filepath.Join(tmp, "lessons.md"))
+		t.Fatalf("lessons.md was written despite self_learning=0; content=%s", string(raw))
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("unexpected stat error: %v", err)
+	}
+
+	// A blocking inbox item must exist instead, carrying the lesson
+	// proposal as payload so the inbox-approve handler can land the
+	// lesson once the operator confirms.
+	var (
+		title    string
+		blocking int
+		payload  string
+	)
+	err := db.QueryRow(`
+		SELECT title, blocking, payload_json
+		FROM inbox_items
+		WHERE workspace_id = 'ws1' AND sender_id = 'keeper_negative_learning'
+		ORDER BY created_at DESC LIMIT 1`,
+	).Scan(&title, &blocking, &payload)
+	if err != nil {
+		t.Fatalf("inbox row not found: %v", err)
+	}
+	if blocking != 1 {
+		t.Errorf("inbox row not blocking; got blocking=%d", blocking)
+	}
+	if !bytes.Contains([]byte(payload), []byte(`"self_learning_gate":"off"`)) {
+		t.Errorf("inbox payload missing self_learning_gate=off marker: %s", payload)
+	}
+	if !bytes.Contains([]byte(payload), []byte(`"lesson_kind"`)) {
+		t.Errorf("inbox payload missing lesson_kind: %s", payload)
+	}
+}
+
 func mustJSON(t *testing.T, v any) *bytes.Buffer {
 	t.Helper()
 	b, err := json.Marshal(v)
@@ -238,4 +329,95 @@ func mustJSON(t *testing.T, v any) *bytes.Buffer {
 		t.Fatalf("marshal: %v", err)
 	}
 	return bytes.NewBuffer(b)
+}
+
+// TestKeeperPhase2_NegativeLearning_RejectsBodyWorkspaceMismatch pins
+// the audit-round-3 defense: when the body's workspace_id doesn't
+// match the request context's workspace_id, the handler rejects with
+// 400 BEFORE evaluating anything. The asymmetric-bypass vector
+// (caller passes workspace A in query, claims workspace B in body)
+// is the one this fix closes; the symmetric case (caller picks one
+// workspace consistently) still requires PR-F24 token-to-workspace
+// binding to close fully.
+//
+// If this test fails the cross-tenant gate is half-open again —
+// don't loosen without the upstream binding landing first.
+func TestKeeperPhase2_NegativeLearning_RejectsBodyWorkspaceMismatch(t *testing.T) {
+	db, pr := kp2DB(t)
+	tmp := t.TempDir()
+
+	p := &kp2Provider{content: `{"decision":"ALLOW","reason":"ok","risk":1}`}
+	gk := gatekeeper.New(p, "claude-haiku-4-5", kp2Logger())
+	ev := gatekeeper.NewNegativeLearningEvaluator(gk, kp2Logger())
+	h := NewKeeperPhase2Handler(db, "tok", pr, nil, nil, nil, ev, kp2Logger())
+
+	body := negativeLearningBody{
+		WorkspaceID:    "ws_attacker",
+		CrewID:         "cr1",
+		AgentID:        "a1",
+		AgentName:      "Worker",
+		CrewName:       "Ops",
+		AgentMemoryDir: tmp,
+		Trigger:        "run_failed",
+		FailureSnippet: "x",
+	}
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/internal/keeper/negative-learning", mustJSON(t, body))
+	// Simulate internalWsCtx middleware having put a DIFFERENT
+	// workspace_id in ctx (e.g. caller passed ?workspace_id=ws1 in
+	// query but body.workspace_id="ws_attacker").
+	r = r.WithContext(context.WithValue(r.Context(), ctxWorkspaceID, "ws1"))
+
+	h.HandleNegativeLearning(w, r)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d body=%s; want 400 (workspace mismatch should be rejected)", w.Code, w.Body.String())
+	}
+	if !bytes.Contains(w.Body.Bytes(), []byte("workspace_id in body must match")) {
+		t.Errorf("error body should explain the mismatch; got %s", w.Body.String())
+	}
+	// And: no keeper_requests row should have landed (handler aborted before persist).
+	var n int
+	_ = db.QueryRow(`SELECT COUNT(*) FROM keeper_requests`).Scan(&n)
+	if n != 0 {
+		t.Errorf("keeper_requests should be empty after rejected request; got %d rows", n)
+	}
+}
+
+// TestKeeperPhase2_NegativeLearning_RejectsEmptyCtxWorkspace pins the
+// round-8 hardening on assertBodyWorkspaceMatchesCtx: a request with
+// no ctx workspace_id (because internalWsCtx middleware didn't run,
+// or a future middleware-chain change drops it) must be REJECTED,
+// not silently let through. Earlier behaviour returned true on
+// empty ctxWS — that defeated the cross-tenant guard whenever the
+// middleware assumption failed. CodeRabbit round-8 catch.
+func TestKeeperPhase2_NegativeLearning_RejectsEmptyCtxWorkspace(t *testing.T) {
+	db, pr := kp2DB(t)
+	p := &kp2Provider{content: `{"decision":"ALLOW","reason":"ok","risk":1}`}
+	gk := gatekeeper.New(p, "claude-haiku-4-5", kp2Logger())
+	ev := gatekeeper.NewNegativeLearningEvaluator(gk, kp2Logger())
+	h := NewKeeperPhase2Handler(db, "tok", pr, nil, nil, nil, ev, kp2Logger())
+
+	body := negativeLearningBody{
+		WorkspaceID: "ws1", CrewID: "cr1", AgentID: "a1",
+		AgentName: "Worker", CrewName: "Ops",
+		Trigger: "run_failed", FailureSnippet: "x",
+	}
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/internal/keeper/negative-learning", mustJSON(t, body))
+	// NB: NOT setting ctxWorkspaceID — simulates a misrouted handler
+	// or a missing-middleware scenario. The guard should refuse to
+	// process the request rather than fall back to body.WorkspaceID.
+
+	h.HandleNegativeLearning(w, r)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d body=%s; want 400 when ctx workspace missing", w.Code, w.Body.String())
+	}
+	if !bytes.Contains(w.Body.Bytes(), []byte("missing workspace_id")) {
+		t.Errorf("error must explain missing ctx workspace; got %s", w.Body.String())
+	}
+	var n int
+	_ = db.QueryRow(`SELECT COUNT(*) FROM keeper_requests`).Scan(&n)
+	if n != 0 {
+		t.Errorf("keeper_requests should be empty after rejected request; got %d rows", n)
+	}
 }

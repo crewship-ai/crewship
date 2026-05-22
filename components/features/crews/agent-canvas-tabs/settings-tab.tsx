@@ -2,6 +2,7 @@
 
 import { MoreHorizontal } from "lucide-react"
 import { SystemPromptEditor } from "@/components/features/crews/system-prompt-editor"
+import { AgentLearningToggle } from "@/components/features/agents/agent-learning-toggle"
 
 import { AdvancedSection } from "./advanced-section"
 import { RuntimeSection } from "./runtime-section"
@@ -38,6 +39,14 @@ export function SettingsTab({
         onSave={(v) => patch({ system_prompt: v })}
         updatedHint={`updated ${new Date(agent.updated_at).toLocaleDateString()}`}
       />
+
+      {/* Self-learning — PR-G F4.1 UX. Per-agent posture, orthogonal
+          to the crew's autonomy_level. Whole panel renders OFF by
+          default; flipping ON requires a reason. */}
+      <section className="space-y-3">
+        <h2 className="text-lg font-semibold">Learning posture</h2>
+        <AgentLearningToggle agentId={agent.id} workspaceId={agent.workspace_id} />
+      </section>
 
       {/* Runtime — provider chips + rich model dropdown */}
       <section className="space-y-3">

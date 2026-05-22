@@ -23,6 +23,7 @@ func (h *CrewHandler) List(w http.ResponseWriter, r *http.Request) {
 			c.container_memory_mb, c.container_cpus, c.container_ttl_hours, c.network_mode, c.allowed_domains,
 			c.mcp_config_json, c.escalation_config,
 			c.runtime_image, c.devcontainer_config, c.mise_config, c.services_json, c.cached_image, c.config_hash,
+			c.max_ephemeral_agents,
 			c.created_at, c.updated_at,
 			(SELECT COUNT(*) FROM agents WHERE crew_id = c.id AND deleted_at IS NULL) AS agent_count,
 			(SELECT COUNT(*) FROM crew_members WHERE crew_id = c.id) AS member_count
@@ -50,6 +51,7 @@ func (h *CrewHandler) List(w http.ResponseWriter, r *http.Request) {
 			&c.ContainerTTLHours, &c.NetworkMode, &allowedDomainsJSON,
 			&c.MCPConfigJSON, &c.EscalationConfig,
 			&c.RuntimeImage, &c.DevcontainerConfig, &c.MiseConfig, &c.ServicesJSON, &c.CachedImage, &c.ConfigHash,
+			&c.MaxEphemeralAgents,
 			&c.CreatedAt, &c.UpdatedAt, &c.Count.Agents, &c.Count.Members); err != nil {
 			h.logger.Error("scan crew", "error", err)
 			replyError(w, http.StatusInternalServerError, "Internal server error")
@@ -90,6 +92,7 @@ func (h *CrewHandler) Get(w http.ResponseWriter, r *http.Request) {
 			c.container_memory_mb, c.container_cpus, c.container_ttl_hours, c.network_mode, c.allowed_domains,
 			c.mcp_config_json, c.escalation_config, c.issue_prefix,
 			c.runtime_image, c.devcontainer_config, c.mise_config, c.services_json, c.cached_image, c.config_hash,
+			c.max_ephemeral_agents,
 			c.created_at, c.updated_at,
 			(SELECT COUNT(*) FROM agents WHERE crew_id = c.id AND deleted_at IS NULL) AS agent_count,
 			(SELECT COUNT(*) FROM crew_members WHERE crew_id = c.id) AS member_count
@@ -100,6 +103,7 @@ func (h *CrewHandler) Get(w http.ResponseWriter, r *http.Request) {
 		&c.ContainerTTLHours, &c.NetworkMode, &allowedDomainsJSON,
 		&c.MCPConfigJSON, &c.EscalationConfig, &c.IssuePrefix,
 		&c.RuntimeImage, &c.DevcontainerConfig, &c.MiseConfig, &c.ServicesJSON, &c.CachedImage, &c.ConfigHash,
+		&c.MaxEphemeralAgents,
 		&c.CreatedAt, &c.UpdatedAt, &c.Count.Agents, &c.Count.Members)
 	if err != nil {
 		if err == sql.ErrNoRows {

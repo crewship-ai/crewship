@@ -20,6 +20,7 @@ import { MembersSection } from "./sections/members-section"
 import { CrewsContainersSection } from "./sections/crews-containers-section"
 import { ConnectionsSection } from "./sections/connections-section"
 import { CrewAuditSection } from "./sections/crew-audit-section"
+import { AuxStatusSection } from "./sections/aux-status-section"
 
 interface Org {
   id: string
@@ -42,6 +43,7 @@ const sectionTitles: Record<string, { title: string; description?: string }> = {
   privacy: { title: "Privacy", description: "Agent memory about you (peer cards, opt-out, deletion)" },
   general: { title: "General", description: "Workspace identity, usage and settings" },
   crews: { title: "Crews & Containers", description: "Manage crews, resources and network policies" },
+  "aux-models": { title: "Auxiliary Models", description: "Cheap fast models that power keeper evaluators (PRD §6 F3)" },
   connections: { title: "Connections", description: "Cross-crew communication links" },
   members: { title: "Members", description: "Team members and permissions" },
   audit: { title: "Audit Log", description: "Track workspace activity" },
@@ -153,6 +155,9 @@ export function SettingsLayout() {
     }
     if (activeTab === "crews" && workspaceId) {
       return <CrewsContainersSection workspaceId={workspaceId} />
+    }
+    if (activeTab === "aux-models") {
+      return <AuxStatusSection />
     }
     if (activeTab === "connections" && workspaceId) {
       return <ConnectionsSection workspaceId={workspaceId} />

@@ -20,7 +20,9 @@ X-Internal-Token: <token>
 
 The token is generated at server startup if `CREWSHIP_INTERNAL_TOKEN` is not set in the environment. For multi-host deployments, set it explicitly on every host so a sidecar restart on host A doesn't suddenly fail when its request lands on host B.
 
-Workspace / crew / agent / mission scope is **not** taken from request bodies. The IPC layer reads it from the sidecar's `IPCConfig` (set by the orchestrator at exec time and pinned to the container) and projects it onto the request. An agent that captured the token still cannot forge cross-tenant attribution because the auth context overrides whatever they put in the body.
+Workspace / crew / agent / mission scope is **not** taken from request bodies (with one documented exception, see the next paragraph). The IPC layer reads it from the sidecar's `IPCConfig` (set by the orchestrator at exec time and pinned to the container) and projects it onto the request. An agent that captured the token still cannot forge cross-tenant attribution because the auth context overrides whatever they put in the body.
+
+**Known exception (tracked as PR-F24 / PR-F25):** the `/api/v1/internal/keeper/*` family (skill-review, behavior, memory-health, negative-learning) currently reads `body.workspace_id` AND `ctx.workspace_id` (the latter set by the `internalWsCtx` middleware from the `?workspace_id` query parameter). The handlers enforce `body.workspace_id == ctx.workspace_id` via the `assertBodyWorkspaceMatchesCtx` helper in `internal/api/keeper_phase2.go` so asymmetric forgery is rejected at the handler boundary, but the symmetric case (caller picks one workspace consistently across query + body) is only closed once the `X-Internal-Token` itself is bound to a workspace by `internalWsCtx`. Tracking the token-to-workspace binding refactor as `PR-F24` and the body-workspace-drop architectural cleanup as `PR-F25` — see PRD-AGENT-EVOLUTION-2026.md §6.1.
 
 ## Route catalog
 

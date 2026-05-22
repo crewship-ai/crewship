@@ -1,0 +1,241 @@
+---
+title: "GDPR — Article 15 access + Article 17 cascade"
+description: "Operator playbook for honouring subject access requests (SAR) and right-to-be-forgotten (RTBF) using the admin GDPR endpoints + audit table."
+icon: "scale-balanced"
+---
+
+# GDPR — Article 15 access + Article 17 cascade
+
+Crewship stores agent-authored content (peer cards, memory snapshots, inbox items) that may include personal data about end users. EU operators have an obligation under
+[GDPR Article 15](https://gdpr.eu/article-15-right-of-access/) (Right of Access) and
+[Article 17](https://gdpr.eu/article-17-right-to-be-forgotten/) (Right to be Forgotten) to produce that data on request and to delete it on demand.
+
+This page is the **operator playbook** for both flows. It covers the two
+admin endpoints, the audit table that records every action, the
+idempotency contract, and the parts of the cascade that intentionally
+remain manual for the operator's judgement.
+
+## Two endpoints, one audit table
+
+| Action | Endpoint | RBAC | Records to `gdpr_actions` |
+|---|---|---|---|
+| **Export** (Article 15) | `GET /api/v1/admin/users/{userId}/data` | `manage` (ADMIN+) | `action='export'`, no reason required |
+| **Delete cascade** (Article 17) | `DELETE /api/v1/admin/users/{userId}/data` | `manage` (ADMIN+) | `action='delete'`, **reason required** (non-empty after trim) |
+
+The `gdpr_actions` audit table is the canonical record of every Article 15 / 17 attempt — successful or failed — keyed by `(workspace_id, data_subject_id)` for fast SAR query lookup. Each invocation creates a new row even when repeated against the same subject, so the audit trail captures the full history of how the workspace handled that subject.
+
+## Article 15 — exporting a subject's data
+
+A data subject contacts the operator (typically via support email or a privacy portal) requesting a copy of all personal data held about them. The operator finds the subject's `user_id` in the workspace identity store, then:
+
+```bash
+curl -X GET \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "X-Workspace-ID: $WORKSPACE_ID" \
+  "https://$CREWSHIP_HOST/api/v1/admin/users/$USER_ID/data" \
+  > sar-export-$USER_ID-$(date +%Y%m%d).json
+```
+
+The response is a single JSON bundle containing every row from the four tables that carry `data_subject_id` (the three data tables below plus `gdpr_actions`, the audit history — see "What's NOT in the export" for the boundary):
+
+```json
+{
+  "subject_user_id": "usr_…",
+  "exported_at": "2026-05-21T18:42:11Z",
+  "scope": {
+    "peer_cards": 23,
+    "memory_versions": 117,
+    "inbox_items": 4,
+    "gdpr_actions": 2
+  },
+  "peer_cards": [ {...}, {...} ],
+  "memory_versions": [ {...}, {...} ],
+  "inbox_items": [ {...}, {...} ],
+  "gdpr_actions": [ {...}, {...} ]
+}
+```
+
+The handler returns **`500 Internal Server Error` on ANY query failure** — even if a partial bundle was assembled from successful queries — to prevent an incomplete export from being handed to the subject as if it were authoritative. The audit row is still written with `status='failed'` so the attempt is recorded; the operator retries after investigating the underlying failure.
+
+The export is the **canonical artefact** the operator hands the subject. The format is JSON because it's machine-readable for downstream redaction tooling; the operator is responsible for translating it into whatever the subject requested (PDF, CSV, etc.) if a specific format was named.
+
+### What's NOT in the export
+
+The export only covers tables that carry a `data_subject_id` foreign key:
+
+- `peer_cards` — agent-authored peer cards mentioning the subject
+- `memory_versions` — versioned memory blobs the agent wrote about the subject
+- `inbox_items` — inbox rows whose payload references the subject (e.g. persona-suggestion proposals about the subject)
+- `gdpr_actions` — the audit history itself (always included)
+
+Content the operator may also need to surface manually:
+
+- **`lessons.md` entries** that mention the subject by `user_slug` — agents append to a per-crew lessons file with free-form text; the cascade logs a warning naming the subject when its slug is found in any `lessons.md` but does not modify the file. Operators are responsible for redacting if the lesson text contains personal data. See [Lessons memory tier](/guides/agent-memory#lessons-tier).
+- **Chat conversation history** — the `chats` table is workspace-scoped not subject-scoped; if the subject's user_id is `user_id` on a chat row, the operator filters those rows separately. Covered by [Chat sessions retention](/guides/chat-sessions#retention).
+- **Audit logs from `internal/journal`** — operator-facing operations the subject performed are tracked in the journal; the operator queries by `actor_user_id` rather than `data_subject_id` because the journal is for *what the operator did*, not *what was done to a subject*.
+
+## Article 17 — cascade delete
+
+A data subject requests deletion of all personal data ("right to be forgotten"). The operator runs:
+
+```bash
+curl -X DELETE \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "X-Workspace-ID: $WORKSPACE_ID" \
+  -H "Content-Type: application/json" \
+  -d '{"reason": "GDPR SAR ticket #1234 from data-subject"}' \
+  "https://$CREWSHIP_HOST/api/v1/admin/users/$USER_ID/data"
+```
+
+**`reason` is REQUIRED.** The handler rejects an empty or whitespace-only reason with `400 Bad Request`, and the underlying `gdpr_actions` CHECK constraint rejects the same at the DB layer (defense-in-depth — even a future admin SQL bypass that skips the handler can't land an unjustified delete row). Whitespace-only reasons like `"   "` or `"\n"` are also rejected because they're functionally blank for audit purposes.
+
+### What the cascade touches
+
+| Layer | Scope | Behaviour |
+|---|---|---|
+| `peer_cards` (DB) | rows WHERE `data_subject_id = $USER_ID` | Hard delete |
+| `peer_cards` (disk files) | corresponding `peer-card-{user_slug}.md` files in each agent's `.memory/` | Best-effort — `outputBasePath` must be configured + filesystem writable. Failures logged but do not block DB delete. |
+| `memory_versions` (DB) | rows WHERE `data_subject_id = $USER_ID` | Hard delete |
+| `memory_versions` (blob store) | content-addressed blobs deduplicated across the workspace | **NOT** auto-deleted in v107 — rows go but blobs left for cross-tenant dedup safety; tracked as PR-F16 for a separate orphan-GC sweep |
+| `inbox_items` (DB) | rows WHERE `data_subject_id = $USER_ID` | Hard delete |
+| `keeper_requests` | All rows | **Excluded** — these record sidecar decisions and don't carry user-attributable content beyond the agent_id |
+| `lessons.md` content scan | Per-crew lessons files | **Manual** — the handler logs a warning naming the subject when it finds the user_slug in any lessons.md; operator decides whether to edit the file by hand |
+| `chats` | All rows owned by subject | **NOT** auto-deleted — operator runs a separate query if the data subject was also a Crewship user; see [Chat sessions retention](/guides/chat-sessions#retention) |
+
+The response confirms what landed:
+
+```json
+{
+  "action_id": "gdpr_act_…",
+  "rows_deleted": {
+    "peer_cards": 23,
+    "memory_versions": 117,
+    "inbox_items": 4
+  },
+  "warnings": [
+    "lessons.md mentions user_slug=pavel_advine — manual review required"
+  ]
+}
+```
+
+### Idempotency
+
+Running the cascade twice for the same subject is **safe**:
+
+- Already-deleted rows are silently skipped (cascade is row-set based, not snapshot-based)
+- Each invocation creates a new `gdpr_actions` row, so the audit trail records BOTH attempts (operators sometimes re-run a cascade weeks after the first attempt to verify completeness — both runs land in the audit)
+- The `action_id` returned in the response is the audit row id, not a transaction id — quoting it back to the operator's ticketing system gives a stable handle
+
+This matters because regulators sometimes ask "did you delete this subject's data on 2026-03-14 AND again on 2026-04-02 in response to two separate confirmation requests?" — the answer comes from `SELECT * FROM gdpr_actions WHERE data_subject_id = ? AND action = 'delete' ORDER BY initiated_at` and shows both runs without ambiguity.
+
+## Verifying a cascade landed
+
+After running the cascade, the operator verifies completeness by re-running the export:
+
+```bash
+curl -X GET \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "X-Workspace-ID: $WORKSPACE_ID" \
+  "https://$CREWSHIP_HOST/api/v1/admin/users/$USER_ID/data"
+```
+
+A successful cascade returns:
+
+```json
+{
+  "subject_user_id": "usr_…",
+  "exported_at": "2026-05-21T18:45:30Z",
+  "scope": {"peer_cards": 0, "memory_versions": 0, "inbox_items": 0},
+  "peer_cards": [],
+  "memory_versions": [],
+  "inbox_items": []
+}
+```
+
+…with all `scope` counts at zero. If any non-zero remains, the cascade either had a partial failure (check the previous `gdpr_actions` row's `status` and `error` columns) or there's data without a `data_subject_id` foreign key that won't be reached by the cascade (escalate to engineering — likely a column added since the v107 migration).
+
+## Audit table reference
+
+`gdpr_actions` schema (added in migration v107):
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `TEXT PRIMARY KEY` | `gdpr_act_` + cuid suffix |
+| `workspace_id` | `TEXT NOT NULL REFERENCES workspaces(id)` | Cascade to workspace delete |
+| `data_subject_id` | `TEXT NOT NULL` | The user being acted on |
+| `actor_user_id` | `TEXT NOT NULL` | The admin who initiated |
+| `action` | `TEXT NOT NULL` CHECK IN `('export','delete','view')` | |
+| `scope_json` | `TEXT` | Per-table counts for delete; per-table row count for export |
+| `initiated_at` | `TEXT NOT NULL` | RFC3339 |
+| `completed_at` | `TEXT` | NULL while in progress |
+| `status` | `TEXT NOT NULL` CHECK IN `('in_progress','completed','failed')` | Defaults to `in_progress` |
+| `error` | `TEXT` | Populated on `status='failed'` |
+| `reason` | `TEXT` | **Required for `action='delete'`** via column-level CHECK |
+
+Indexes:
+
+- `idx_gdpr_actions_subject (workspace_id, data_subject_id)` — fast SAR lookup
+- `idx_gdpr_actions_initiated (initiated_at)` — chronological browse
+
+### Querying the audit
+
+Every Article 15 + Article 17 attempt for a subject:
+
+```sql
+SELECT id, action, status, initiated_at, completed_at, actor_user_id, reason
+FROM gdpr_actions
+WHERE workspace_id = ? AND data_subject_id = ?
+ORDER BY initiated_at DESC;
+```
+
+All cascade deletes performed by an admin in the last 90 days:
+
+```sql
+SELECT g.id, g.data_subject_id, g.initiated_at, g.completed_at, g.reason
+FROM gdpr_actions g
+WHERE g.workspace_id = ?
+  AND g.action = 'delete'
+  AND g.actor_user_id = ?
+  AND g.initiated_at > datetime('now','-90 days')
+ORDER BY g.initiated_at DESC;
+```
+
+Failed exports the operator should retry:
+
+```sql
+SELECT id, data_subject_id, initiated_at, error
+FROM gdpr_actions
+WHERE workspace_id = ?
+  AND action = 'export'
+  AND status = 'failed'
+ORDER BY initiated_at DESC;
+```
+
+## UI surface
+
+The `GET` and `DELETE` endpoints are reachable from the workspace
+**Settings → GDPR Actions** panel (Settings → Admin → GDPR Actions for
+operators who haven't reorganised the nav). The UI:
+
+1. Lets the admin search a user by email or paste a `user_id`
+2. Exposes two buttons — **Export user data (JSON)** + **Delete user data (cascade)**
+3. The delete button opens a confirmation dialog with a required reason field + an "I understand this is irreversible" checkbox
+4. The dialog stays open during the async DELETE (no auto-close) — a failed call surfaces the error toast without wiping the operator's input, so they can retry without re-typing
+
+The reason field is the same one that lands in `gdpr_actions.reason` — operators are encouraged to paste their ticketing system's identifier ("SAR ticket #1234") rather than free-form text, so the audit query reads naturally.
+
+## What's NOT exposed
+
+Crewship intentionally does NOT provide:
+
+- **A self-service deletion endpoint** for end users — Article 17 requests are mediated by the operator because the cascade affects content the operator owns (agent decisions, audit records that have to survive operator's own retention obligations)
+- **A bulk delete endpoint** ("delete every user matching this filter") — every cascade is one subject at a time, by design, because each `gdpr_actions` row needs a justification specific to that subject
+- **Auto-deletion on user account close** — closing a Crewship user account doesn't trigger Article 17 (the user might have other obligations to a different workspace tenant within the same Crewship instance); the explicit cascade endpoint is the only path
+
+## Cross-references
+
+- [Threat model — Tenant isolation on internal-auth handlers](/security/threat-model#tenant-isolation-on-internal-auth-handlers) — how the GDPR cascade endpoints fit into Crewship's tenant-isolation surface area
+- [Audit logging](/security/audit) — broader audit log shape; `gdpr_actions` is a specialized table for the GDPR cascade subset
+- [Encryption at rest](/security/encryption) — operator-side encryption that protects `gdpr_actions` rows in backups + filesystem snapshots
+- [Agent memory — peer cards](/guides/agent-memory#peer-cards) — how peer cards get created and what `data_subject_id` they end up with
+- [Admin API](/api-reference/admin) — schemas for the two endpoints

@@ -138,8 +138,83 @@ Before the IA refactor, the same signals were scattered across:
 
 The Inbox folds all four into one feed. `/approvals` still exists for the workspace-admin "show me every pending waitpoint workspace-wide, including ones not targeted at me" use case, but the daily-driver surface is `/inbox`.
 
+## Approving an ephemeral hire
+
+When an operator (or a LEAD agent via the sidecar `/spawn` endpoint) runs `crewship hire` against a `guided`-autonomy crew, the agent row is created with `status='PENDING_REVIEW'` instead of `IDLE`. The chatbridge **refuses to start the agent** in this state — see [`internal/chatbridge/bridge.go`](https://github.com/crewship-ai/crewship/blob/main/internal/chatbridge/bridge.go). A `waitpoint`-kind inbox row lands at the same time so the operator has one place to approve.
+
+The row in the inbox UI:
+
+```
+┌─ Inbox · Pending ─────────────────────────────────────┐
+│ ⏳ Hire pending review                                 │
+│    incident-responder-a3f8 hired into on-call         │
+│    "P1 incident #4582 needs sustained eyes-on"        │
+│    [Approve hire]    "To deny, fire the agent from   │
+│                       its crew page."                 │
+└───────────────────────────────────────────────────────┘
+```
+
+The **Approve hire** button calls `POST /api/v1/agents/{agentId}/approve-hire`. The handler does four things atomically:
+
+1. `UPDATE agents SET status='IDLE' WHERE id=? AND status='PENDING_REVIEW'` — guarded WHERE so a concurrent fire/soft-delete returns 404 rather than silently writing nothing
+2. `inbox.ResolveBySource` — flips this inbox row to `resolved` so it doesn't reappear
+3. Journal entry `agent.hire_approved` with the actor's user_id
+4. WebSocket broadcast `agent.ready` so the agent canvas + crew roster repaint instantly
+
+There's intentionally **no Deny button** today. To deny a pending hire, the operator opens the crew page and fires the agent (`DELETE /api/v1/agents/{id}`) — same path as deleting any agent. Two reasons:
+
+- Avoids a second backend code path with its own audit semantics for the same effect
+- Forces the operator to look at the crew context before rejecting (a "deny" button in the inbox is easy to click mid-coffee; firing requires opening the crew and seeing what's there)
+
+A symmetric "Deny" button is tracked as a UX follow-up — see [`gh issue list --label needs-design`](https://github.com/crewship-ai/crewship/labels/needs-design).
+
+### Network-failure handling
+
+The Approve button's `fetch()` is wrapped in `try`/`catch`. An offline / DNS / CORS preflight failure surfaces a toast (`Approve failed: <network error>`) instead of silently clearing the busy state — operator knows immediately that the request didn't land and can retry without re-typing the action. Same pattern is applied to the retry-routine button (`wrap("retried")`).
+
+## Keeper Phase 2 inbox rows
+
+The four F4 evaluators route every DENY or ESCALATE decision to the inbox (PR-C). Each row shows:
+
+- The evaluator type (Skill Review / Behavior / Memory Health / Negative Learning) in the header
+- The proposed action ("Recommend archiving skill X", "Block tool_name=shell_exec", "Auto-consolidate workspace memory", "Land lesson 'check env vars before deploy'")
+- A risk score badge (0-10 colour-coded)
+- An expanded section with the LLM's full rationale (`reason`) and the agent / crew context
+
+Operators see the row, decide, and click **Approve** or **Reject**:
+
+- **Approve** lands the proposed action and writes a `keeper.approval` journal entry
+- **Reject** discards the proposal and writes a `keeper.rejection` journal entry; the evaluator gets the rejection as a `prior_lesson` hint on its next run for the same context (dup-suppression — see [F4.4 negative-learning](/api-reference/admin#post-apiv1internalkeepernegative-learning))
+
+For the full operator workflow on these rows — when to approve, what to investigate, how to override an evaluator — see [Keeper Reviews panel](/guides/keeper-reviews-panel) which is the dedicated triage surface (the inbox shows individual rows; the panel shows the queue).
+
+## Self-learning gated proposals
+
+When an agent has `self_learning_enabled=0` (the default), the F4.4 negative-learning evaluator's ALLOW path and the F6 persona-suggest gate-demoted path BOTH route through the inbox as blocking rows. The marker `"self_learning_gate": "off"` in the row's `payload_json` distinguishes these from policy-routed inbox rows.
+
+The row presents the proposed change verbatim:
+
+```
+┌─ Inbox · Pending ─────────────────────────────────────┐
+│ 💡 Lesson proposal (gated by self_learning=OFF)        │
+│    Anna proposes: "Always check DATABASE_URL is set   │
+│                    before deploy.sh"                  │
+│    Kind: negative · Source: negative_learning         │
+│    Reason: "Recurring deploy-env mistake worth a      │
+│             permanent lesson"                         │
+│    [Approve lesson]   [Reject]                        │
+└───────────────────────────────────────────────────────┘
+```
+
+Approval lands the lesson into the agent's `lessons.md` via `consolidate.WriteLesson` (PR-Z Z.7) — the same writer the auto-apply path uses, with the same schema + idempotency + flock contract. Rejection discards the proposal and records the dismissal so the same lesson doesn't re-propose on the next failure.
+
+Operators who don't want to gate every proposal can flip `self_learning_enabled=1` on the agent via the **Agent canvas → Settings → Learning posture** panel. See [Autonomy + self-learning](/guides/autonomy-and-self-learning) for the full posture-vs-policy semantics.
+
 ## What's next
 
 - [Routines](/guides/routines) — the workflow recipes whose `wait` steps create waitpoints
 - [Harbormaster](/guides/harbormaster) — the approval-gate framing for high-risk actions
 - [Activity](/guides/activity) — the live trace view where inline Approve/Deny on a paused step does the same thing as the Inbox's Approve button
+- [Ephemeral agents](/guides/ephemeral-agents) — the hire/rehire lifecycle that creates the `pending-review` inbox rows
+- [Keeper Reviews panel](/guides/keeper-reviews-panel) — the dedicated triage surface for F4 evaluator decisions
+- [Autonomy + self-learning](/guides/autonomy-and-self-learning) — the per-agent flag that gates F4.4 + F6 proposals through this inbox

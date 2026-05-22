@@ -85,6 +85,9 @@
               },
               "guides/mcp-multi-cli",
               "guides/keeper",
+              "guides/autonomy-and-self-learning",
+              "guides/keeper-reviews-panel",
+              "guides/ephemeral-agents",
               "guides/integrations",
               "guides/templates",
               {
@@ -93,6 +96,8 @@
                 "expanded": false,
                 "pages": [
                   "guides/agent-memory",
+                  "guides/memory-provider",
+                  "guides/agent-brief",
                   "guides/episodic-memory",
                   "guides/consolidate",
                   "guides/memory-observability",
@@ -142,6 +147,7 @@
               "security/encryption",
               "security/container-isolation",
               "security/audit",
+              "security/gdpr",
               "security/security-headers",
               "security/backup-instance-security"
             ]
@@ -298,6 +304,7 @@
             "pages": [
               "cli/approvals",
               "cli/policy",
+              "cli/hire",
               "cli/hooks",
               "cli/checkpoint"
             ]

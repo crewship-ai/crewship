@@ -31,6 +31,7 @@
 // because it's the only operator-writeable tier.
 
 import { useCallback, useEffect, useMemo, useState } from "react"
+import { MarkdownEditor } from "@/components/shared/markdown-editor"
 
 // Char caps — must match server-side enforcement.
 //   AGENT.md / CREW.md: 4000 B (PR-A F1)
@@ -225,15 +226,32 @@ function MemoryTierEditor({
         </header>
 
         {editing === null ? (
-          <pre className="rounded border border-white/10 bg-zinc-900/60 p-3 text-sm whitespace-pre-wrap min-h-[8rem]">
-            {content || "(empty)"}
-          </pre>
+          // Read-only display uses the same CodeMirror editor (with
+          // readOnly=true) so markdown syntax highlighting is visible
+          // to the operator even when they cannot edit. Empty content
+          // still gets the "(empty)" placeholder via a plain pre — the
+          // editor itself looks awkward at zero bytes.
+          content ? (
+            <MarkdownEditor
+              value={content}
+              onChange={() => { /* read-only */ }}
+              readOnly
+              minHeight="8rem"
+              ariaLabel={`${title} (read-only)`}
+            />
+          ) : (
+            <pre className="rounded border border-white/10 bg-zinc-900/60 p-3 text-sm whitespace-pre-wrap min-h-[8rem]">
+              (empty)
+            </pre>
+          )
         ) : (
           <div className="space-y-1">
-            <textarea
+            <MarkdownEditor
               value={editing}
-              onChange={(e) => setEditing(e.target.value)}
-              className="w-full min-h-[10rem] rounded border border-white/10 bg-zinc-900/60 p-3 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+              onChange={(next) => setEditing(next)}
+              minHeight="10rem"
+              autoFocus
+              ariaLabel={`${title} editor`}
             />
             <div className={`text-xs ${over ? "text-red-400" : "text-muted-foreground"}`}>
               {editingBytes}/{capBytes} B {over && "— over cap"}

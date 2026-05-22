@@ -32,6 +32,19 @@ func (r *Router) registerAdminRoutes() {
 	keeperLog := NewKeeperLogHandler(r.db, r.logger)
 	r.mux.Handle("GET /api/v1/admin/keeper/requests", authed(wsCtx(http.HandlerFunc(keeperLog.List))))
 
+	// PR-F F6: Admin GDPR cascade endpoints — Art. 15 access +
+	// Art. 17 erasure across the four cascadable tables
+	// (peer_cards, memory_versions, inbox_items; keeper_requests
+	// is intentionally excluded — see admin_gdpr.go header). Both
+	// routes require ADMIN+ in the current workspace; the handler
+	// enforces the role check internally so middleware stays
+	// uniform with the rest of /api/v1/admin/*. Every invocation
+	// writes a gdpr_actions audit row (v107) recording who acted
+	// on whom, scope, and operator-supplied reason.
+	gdprH := NewAdminGDPRHandler(r.db, r.logger, r.outputBasePath)
+	r.mux.Handle("GET /api/v1/admin/users/{userId}/data", authed(wsCtx(http.HandlerFunc(gdprH.ExportUserData))))
+	r.mux.Handle("DELETE /api/v1/admin/users/{userId}/data", authed(wsCtx(http.HandlerFunc(gdprH.DeleteUserData))))
+
 	// Memory stats — operator observability for the memory subsystem.
 	// Reads memory_versions directly; the audit watcher (Iter 1 of
 	// the memory-hardening series) keeps that table honest about

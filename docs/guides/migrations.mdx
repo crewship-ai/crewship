@@ -68,6 +68,47 @@ The five new entry types (`run.started`, `run.completed`, `run.failed`, `run.can
 
 After v62, `cost_ledger` distinguishes metered API-key calls from flat-rate subscription calls and snapshots the rate card per row. See [Paymaster](/guides/paymaster).
 
+## v63–v99 — gap (read `migrate.go` directly)
+
+Migrations between v63 and v99 covered routine maintenance, manifest layer expansion, credential vault iterations, eval-runs widening, and the CLI token tier refresh. Read `internal/database/migrate.go` directly — these are documented inline at the constant/comment level and don't compose into a single feature story worth a catalog entry. The Agent Evolution stack picks up at v100 below.
+
+## v100–v107 — Agent Evolution stack (PR-B → PR-G/PR-F)
+
+The Agent Evolution PRD ([§6 in `.claude/context/prd/PRD-AGENT-EVOLUTION-2026.md`](https://github.com/crewship-ai/crewship/blob/main/.claude/context/prd/PRD-AGENT-EVOLUTION-2026.md)) ships across 8 migrations. They are functionally orthogonal — operators upgrading from a pre-v100 build to v107 land all eight at once and the system end-state is correct; operators upgrading through intermediate versions also work because each migration is additive (no destructive renames after v104).
+
+| v | Name | Adds | PR |
+|---|---|---|---|
+| 100 | `rbac_extensions` | Extends the RBAC tables with the `manage_governance` capability bit used by PR-B's policy + PR-G's self-learning gates. Plus per-user audit triple (`set_by_user_id` / `set_at` / `reason`) consumed by every subsequent governance migration. | — |
+| 101 | `autonomy` | `crews.autonomy_level` (TEXT enum: `strict`\|`guided`\|`trusted`\|`full`, default `guided`) + `crews.behavior_mode` (TEXT: `warn`\|`block`, default `warn`) + audit triple. CHECK rejects the forbidden combination `(autonomy=full + behavior_mode=block)` at the DB layer; UI mirrors. | #461 (PR-B) |
+| 102 | `keeper_phase2` | Widens `keeper_requests.request_type` CHECK to admit four new kinds (`skill_review`, `behavior`, `memory_health`, `negative_learning`). Adds `skill_invocations` audit table + `skills.lifecycle_state` enum (`active`\|`stale`\|`archived`\|`deprecated`). | #470 (PR-C) |
+| 103 | `ephemeral_agents` | Five additive columns on `agents`: `ephemeral` (BOOL), `expires_at`, `expired_at`, `parent_lead_id`, `hire_reason`. Plus `crews.max_ephemeral_agents` (default 10) + a partial index `(expires_at)` for sweeper performance. | #469 (PR-D) |
+| 104 | `persona_rename` | The one destructive rename: `agents.system_prompt` → `agents.system_prompt_legacy`. Companion code in `internal/memory/persona.go::BackfillFromLegacy` drains the legacy value into `PERSONA.md` on first write per agent. | #471 (PR-E) |
+| 105 | `peer_consent` | GDPR primitives for per-user peer cards: `user_peer_consent` (opt-out), `peer_cards` (disk-mirror index), `peer_card_audit` (per-action audit keyed by data subject). | #471 (PR-E) |
+| 106 | `self_learning` | `agents.self_learning_enabled` (BOOL, default 0) + audit triple. Consumed by F4.4 negative-learning + F6 persona-suggest ALLOW paths — OFF queues a blocking inbox row, ON auto-applies. | #472 (PR-G) |
+| 107 | `gdpr_cascade` | `data_subject_id` foreign key on `memory_versions` + `inbox_items` (both nullable, partial indexes). New `gdpr_actions` audit table (Article 15 + Article 17 history per subject). CHECK requires non-empty `length(trim(reason))` when `action='delete'`. | #472 (PR-G/PR-F) |
+
+### Migration ordering notes
+
+v100–v107 landed across **multiple PRs in parallel** and several were renumbered during merge to avoid version collisions:
+
+- **PR-D `ephemeral_agents`** was originally drafted as v100 on its branch. Bumped to v102, then to v103 as PR-B (v101 autonomy) + PR-C (v102 keeper_phase2) merged ahead. Final landed number on `main` is **v103**.
+- **PR-E `persona_rename` + `peer_consent`** were originally v102 + v103 on their branch. Renumbered to v104 + v105 after PR-C and PR-D merged.
+- **PR-G `self_learning` + `gdpr_cascade`** were drafted as v106 + v107 and kept those numbers — by the time they merged, the renumber cascade was already settled.
+
+This renumber cascade is captured in PRD §10.5 (the "two columns vs lifecycle enum" decision log) and PRD §10.3 (the autonomy_level int→string drift). Read those entries to reconcile a doc reference that mentions an old version number.
+
+### Self-learning gate behaviour (v106)
+
+A common confusion: v106 only RECORDS the per-agent `self_learning_enabled` flag. The downstream consumers (`internal/api/keeper_phase2.go::HandleNegativeLearning`, `internal/api/agent_persona.go::SuggestAgentPersona`) read the flag at decision time, not at migration time. Flipping the flag mid-flight via the `PATCH /api/v1/agents/{id}/learning` endpoint takes effect on the NEXT evaluator run — no agent restart, no migration re-apply.
+
+The audit triple (`self_learning_set_by_user_id` / `self_learning_set_at` / `self_learning_reason`) is non-NULL on every flip. The API handler enforces non-empty reason; the column itself is NULLable so the v106 backfill (default 0 for existing rows) doesn't have to invent a fake actor.
+
+### GDPR cascade backfill gap (v107)
+
+v107 adds the `data_subject_id` columns but does **NOT** backfill them for pre-v107 rows. Existing `memory_versions` and `inbox_items` rows from before the upgrade stay `NULL` and miss the GDPR cascade. Tracked as PR-F32 — see PRD §6.1 for the deferred-but-tracked status. An operator upgrading from an older Crewship to a v107+ build should run the cascade against new SAR requests with full confidence, and treat historical data as "needs manual review" until PR-F32 lands.
+
+The `gdpr_actions` audit table is the canonical record. See [GDPR — Article 15 + Article 17](/security/gdpr) for the operator playbook.
+
 ## How to read this in operation
 
 When `crewshipd` starts, it logs each migration as it applies:

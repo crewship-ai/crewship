@@ -1,6 +1,7 @@
 package api
 
 import (
+	crand "crypto/rand"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -14,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/memory"
 	"github.com/crewship-ai/crewship/internal/policy"
 )
@@ -358,12 +360,46 @@ func (h *PersonaHandler) SuggestAgentPersona(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
+	// PR-G F4.1 UX — per-agent self_learning gate on the auto-apply
+	// path. The crew policy may say "auto-apply this persona suggestion"
+	// (full autonomy → DecisionAutoJournal), but a per-agent override
+	// can demand operator approval first. Even on a trusted/full crew,
+	// an agent with self_learning_enabled=0 should NOT silently mutate
+	// its own PERSONA.md.
+	//
+	//   self_learning=1 → keep the auto-apply decision (no change)
+	//   self_learning=0 → demote auto-apply to DecisionInboxApprove
+	//
+	// Reject / inbox decisions pass through unchanged — the gate only
+	// closes the silent-auto-apply path, it never opens one.
+	//
+	// Look up the flag once. On lookup error, default OFF (require
+	// approval) for the same reason as the F4.4 path: silently auto-
+	// applying when we couldn't verify the gate is the worse failure
+	// mode than a false-positive operator review.
+	gateDemoted := false
+	if isPersonaAutoApply(decision) {
+		enabled, lerr := loadSelfLearningEnabled(r.Context(), h.db, WorkspaceIDFromContext(r.Context()), agentID)
+		if lerr != nil {
+			h.logger.Warn("persona suggest: self_learning lookup failed; defaulting to OFF",
+				"agent_id", agentID, "err", lerr)
+			enabled = false
+		}
+		if !enabled {
+			decision = policy.DecisionInboxApprove
+			gateDemoted = true
+		}
+	}
+
 	resp := map[string]any{
 		"agent_id":  agentID,
 		"decision":  string(decision),
 		"bytes":     len(body.Content),
 		"rationale": body.Rationale,
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
+	}
+	if gateDemoted {
+		resp["self_learning_gate"] = "off"
 	}
 
 	switch decision {
@@ -397,22 +433,111 @@ func (h *PersonaHandler) SuggestAgentPersona(w http.ResponseWriter, r *http.Requ
 			"rationale": body.Rationale,
 			"bytes":     len(body.Content),
 		}
+		if gateDemoted {
+			meta["self_learning_gate"] = "off"
+		}
 		metaBytes, _ := json.Marshal(meta)
+		auditID, idErr := newAuditID()
+		if idErr != nil {
+			h.logger.Error("persona suggest: audit id generation failed", "err", idErr)
+			replyError(w, http.StatusInternalServerError, "audit id generation failed")
+			return
+		}
 		_, err := h.db.ExecContext(r.Context(), `
 			INSERT INTO audit_logs (id, workspace_id, action, entity_type, entity_id, metadata, created_at)
-			VALUES (lower(hex(randomblob(16))), ?, 'persona.suggest_pending', 'agent', ?, ?, ?)
-		`, WorkspaceIDFromContext(r.Context()), agentID, string(metaBytes),
+			VALUES (?, ?, 'persona.suggest_pending', 'agent', ?, ?, ?)
+		`, auditID, WorkspaceIDFromContext(r.Context()), agentID, string(metaBytes),
 			time.Now().UTC().Format(time.RFC3339))
 		if err != nil {
 			h.logger.Warn("persona suggestion enqueue failed", "err", err)
 			replyError(w, http.StatusInternalServerError, "enqueue proposal")
 			return
 		}
+		// When the gate demoted an auto-apply to inbox approval, also
+		// surface a blocking inbox_items row so the operator gets a
+		// first-class queue entry (not just an audit_logs row). The
+		// audit_logs row above remains the proposal record the
+		// approve-handler reads; the inbox row is the visibility
+		// surface. self_learning_gate=off in the payload lets the UI
+		// distinguish "demoted by per-agent override" from "policy
+		// said inbox in the first place".
+		if gateDemoted {
+			// If the inbox enqueue fails the proposal is invisible to
+			// the operator AND we already told the agent its suggestion
+			// is pending — that's a silent governance hole, surface it
+			// as 500 so the agent retries / operator notices.
+			if err := inbox.Insert(r.Context(), h.db, h.logger, inbox.Item{
+				WorkspaceID: WorkspaceIDFromContext(r.Context()),
+				Kind:        inbox.KindEscalation,
+				SourceID:    auditID,
+				TargetRole:  "MANAGER",
+				Title:       fmt.Sprintf("Persona proposal: %s (gated by self_learning=OFF)", agentID),
+				BodyMD: fmt.Sprintf(
+					"**Proposed PERSONA.md** (auto-apply blocked by self_learning=OFF):\n\n%s\n\n_Rationale: %s_",
+					body.Content, body.Rationale,
+				),
+				SenderType: "agent",
+				SenderID:   agentID,
+				SenderName: "Persona Suggest",
+				Priority:   "low",
+				Blocking:   true,
+				Payload: map[string]interface{}{
+					"audit_id":           auditID,
+					"agent_id":           agentID,
+					"crew_id":            crewID,
+					"action":             "persona.suggest_pending",
+					"bytes":              len(body.Content),
+					"rationale":          body.Rationale,
+					"self_learning_gate": "off",
+				},
+			}); err != nil {
+				h.logger.Error("persona.suggest: enqueue gated proposal failed",
+					"audit_id", auditID, "agent_id", agentID, "error", err)
+				replyError(w, http.StatusInternalServerError, "failed to queue persona proposal for approval")
+				return
+			}
+		}
 		resp["applied"] = false
 		resp["pending"] = true
 		writeJSON(w, http.StatusOK, resp)
 		return
 	}
+}
+
+// isPersonaAutoApply reports whether a policy Decision means "apply
+// the persona suggestion without operator review". Centralized so the
+// self_learning gate stays in one place — if the policy matrix ever
+// adds another auto-apply variant, only this predicate has to change.
+func isPersonaAutoApply(d policy.Decision) bool {
+	switch d {
+	case policy.DecisionAutoJournal,
+		policy.DecisionAutoLogJournal,
+		policy.DecisionAutoLogInbox:
+		return true
+	}
+	return false
+}
+
+// newAuditID returns a hex audit_logs.id. We need the id at call-site
+// so it can also become the inbox row's source_id (the audit row is
+// the authoritative proposal record; the inbox row is just the visibility
+// projection). The previous `lower(hex(randomblob(16)))` inline form
+// generated the id inside SQL, where we couldn't read it back without
+// a follow-up SELECT.
+func newAuditID() (string, error) {
+	b := make([]byte, 16)
+	if _, err := crand.Read(b); err != nil {
+		// crand.Read is documented to never partial-read, but it can
+		// fail under exotic conditions (FIPS-mode kernel CSPRNG
+		// init race, /dev/urandom unavailable). If we swallowed the
+		// error the audit_log row gets the zero-bytes-hex ID and
+		// every subsequent suggest_pending proposal in the same
+		// process collides on the same key — duplicate primary-key
+		// inserts mask the original write entirely. Propagate so
+		// the caller can 500 + log.
+		return "", fmt.Errorf("generate audit id: %w", err)
+	}
+	return hex.EncodeToString(b), nil
 }
 
 // recordVersion writes a memory_versions row for the persona change

@@ -1,0 +1,173 @@
+---
+title: "Autonomy + self-learning"
+description: "How the per-crew autonomy slider, per-crew behavior_mode, and per-agent self_learning_enabled flag compose into the day-to-day governance posture for an agent."
+icon: "sliders"
+---
+
+# Autonomy + self-learning
+
+Crewship has three orthogonal knobs that shape how often an operator gets involved in an agent's decisions:
+
+1. **`crews.autonomy_level`** — *per-crew* trust dial: `strict | guided | trusted | full`
+2. **`crews.behavior_mode`** — *per-crew* response posture for behavior-monitor anti-pattern hits: `warn | block`
+3. **`agents.self_learning_enabled`** — *per-agent* boolean: whether keeper-evaluator ALLOW decisions auto-apply or queue for operator approval
+
+This page explains what each knob actually changes downstream, how they compose, and the design choice behind keeping them orthogonal instead of bundling them into a single "trust level" enum.
+
+## Why three knobs, not one
+
+A naive design would expose a single per-crew dial — `crew.trust = low / med / high` — and have everything else derive from it. Crewship rejects that because operators in practice want:
+
+- A crew where every action needs approval BUT a specific senior agent in that crew can evolve on its own (operator-trusts-bot-A-not-bot-B)
+- A crew that auto-executes most things BUT blocks any anti-pattern hard (relaxed autonomy + strict behavior posture)
+- A crew that warns on anti-patterns but does NOT auto-promote lessons (governance-strict per-agent learning, relaxed at the crew level)
+
+A single dial can't express these. The three knobs decompose the trust decision into the dimensions it really has:
+
+- **What can the agent do without asking?** → `autonomy_level` (crew-wide)
+- **How does the system react when the agent does something the behavior monitor flags?** → `behavior_mode` (crew-wide; orthogonal to autonomy because warning vs blocking is a *response* policy not a *permission* policy)
+- **Can the agent update its own long-term posture without approval?** → `self_learning_enabled` (per-agent because long-term posture is per-agent)
+
+## `autonomy_level` — what an agent can do without asking
+
+Per-crew, four-state enum stored as `crews.autonomy_level` (migration v101). Default for new crews is `guided`.
+
+| Level | Memory writes | Skill assignment | Persona suggest | Ephemeral hire |
+|---|---|---|---|---|
+| `strict` | Inbox approve | Inbox approve | Inbox approve | **Rejected** |
+| `guided` | Inbox approve | Auto-log to journal | Inbox approve | Inbox approve |
+| `trusted` | Auto + non-blocking inbox | Auto-log to journal | Inbox approve | Auto-log to journal |
+| `full` | Auto + journal-only | Auto-log to journal | Auto + journal | Auto + journal |
+
+The matrix is the contract — extending it requires updating `internal/policy/types.go::DecideAction` AND the test matrix in `types_test.go` in lockstep, so silent drift becomes a test failure rather than a behavior change nobody notices.
+
+### Strict-mode use cases
+
+- Compliance-bound workspaces (financial services, healthcare, regulated build pipelines) where every agent action has to be operator-traceable to an explicit approval
+- New crews during onboarding where operators are still building the inbox approval reflex
+- Crews that act on production infrastructure — the cost of one bad call is high enough that the operator prefers the friction
+
+### Full-mode use cases
+
+- Power-team developer workflows where the operator pre-approves the crew's mandate and wants minimal friction
+- Background routine crews (nightly health checks, scheduled reports) where every action would otherwise generate noise the operator never reads
+- Crews with a narrow, well-understood mandate (e.g. "rotate API keys quarterly") where the autonomy_level matches the scope
+
+## `behavior_mode` — what happens when the monitor fires
+
+The F4.2 behavior monitor (Keeper Phase 2) samples tool calls per crew config and runs them through a `behavior_evaluator`. The evaluator returns `ALLOW | DENY | ESCALATE`. `behavior_mode` controls what `DENY` means:
+
+- **`warn`** (default) — `DENY` lands as a non-blocking inbox notification; the agent's tool call proceeds. The operator sees the warning and decides whether to tighten autonomy or update the agent's persona. Recommended for new crews — false positives don't break workflows.
+- **`block`** — `DENY` interrupts the agent's next tool call AND opens a blocking inbox approval. The operator has to confirm before the agent can proceed. Recommended for crews with established behavior-monitor confidence (the operator has seen the warn-mode signal pattern for weeks and is ready to trust DENY as a real signal).
+
+### Forbidden combination
+
+`autonomy=full + behavior_mode=block` is **rejected** at both the API layer and the database CHECK constraint. The combination is contradictory — `full` means "trust the agent to act on its own", `block` means "let the behavior monitor interrupt the agent" — and the UI `CrewPolicyControls` panel greys the `block` option with a tooltip when `autonomy=full` is selected so the operator can't even submit it. See `internal/policy/types.go::Validate` + `TestPolicy_DecideBehaviorDeny_FullBlock_FailsClosed` for the contract test.
+
+## `self_learning_enabled` — per-agent override on auto-apply
+
+Per-agent, boolean stored as `agents.self_learning_enabled` (migration v106) with the standard audit triple (`set_by_user_id` / `set_at` / `reason`). Default for new agents is `0` (OFF — governance-first).
+
+The flag gates the **ALLOW path** of two keeper evaluators:
+
+- **F4.4 negative-learning** — when the evaluator decides the agent should learn from a failure (writes a `kind=negative` row to `lessons.md`)
+- **F6 persona-suggest** — when the agent proposes an update to its own PERSONA.md
+
+For both:
+
+- `self_learning_enabled = 1` → ALLOW auto-applies (lesson lands, persona updates)
+- `self_learning_enabled = 0` → ALLOW queues a blocking inbox row with the full proposal payload; operator approves before the change lands
+
+The flag does **NOT** override the crew's `autonomy_level`. A strict crew + `self_learning=1` agent still routes proposals through inbox — `autonomy=strict` says "every action via inbox" regardless of which agent. The `self_learning` flag only relaxes the path when policy ALREADY returns an auto-apply decision (which only happens at `trusted` or `full`).
+
+### When to flip self_learning ON
+
+- A long-running maintainer agent in a `trusted` crew that you've watched for weeks and trust to refine its own persona
+- An agent whose persona drift has historically been benign (the operator has been approving every persona-suggest proposal anyway — the inbox approval is just noise)
+- An agent whose mandate is well-defined enough that even a wrong lesson auto-applied is recoverable without operator cost
+
+### When to keep self_learning OFF
+
+- New agents during onboarding (default — operators see what the agent proposes before it lands)
+- Agents that act on production data where a wrong lesson could compound across many future interactions
+- Compliance crews where every learning signal needs an operator's name attached
+
+## Composition — worked examples
+
+### Example 1: trusted crew + self_learning OFF agent
+
+Crew: `autonomy=trusted, behavior_mode=warn`
+Agent in crew: `self_learning_enabled=0`
+
+A tool call fires that the F4.2 behavior monitor flags as `DENY`. Because `behavior_mode=warn`, the DENY → non-blocking inbox + agent proceeds. Operator sees the warn later.
+
+Same agent later fails a task. The F4.4 negative-learning evaluator decides the failure is worth a `kind=negative` lesson. Crew autonomy is `trusted` → policy returns `auto_log_journal` (i.e. would auto-apply). BUT `self_learning_enabled=0` → demoted to blocking inbox. Operator reviews the proposed lesson, edits or approves.
+
+Result: agent acts freely day-to-day (autonomy=trusted), the operator sees anti-pattern signals as warnings (behavior=warn), and the operator gates lasting changes to the agent's posture (self_learning=0).
+
+### Example 2: full crew + self_learning ON agent (max autonomy)
+
+Crew: `autonomy=full, behavior_mode=warn`
+Agent in crew: `self_learning_enabled=1`
+
+Everything auto-applies — tool calls, lessons, persona suggestions. The behavior monitor still warns on anti-patterns (operator sees them in the inbox) but nothing blocks. Use for power-team workflows where the operator has explicitly pre-approved the agent's mandate.
+
+### Example 3: strict crew + self_learning ON agent
+
+Crew: `autonomy=strict, behavior_mode=block`
+Agent in crew: `self_learning_enabled=1`
+
+`self_learning=1` is a no-op here. `autonomy=strict` → every policy decision is `inbox_approve` regardless of evaluator decision. The agent can flip the self_learning flag on but it won't bypass the crew's strict posture. Useful for documenting intent (the operator believes the agent CAN be trusted to evolve, but the crew's compliance posture requires explicit approval anyway) without changing behavior.
+
+## Where to set them
+
+### `autonomy_level` + `behavior_mode` — per-crew settings
+
+UI: **Crew Canvas → Settings → Autonomy & behavior** panel. The panel:
+
+- Renders the four autonomy options as a 2×2 grid with descriptions
+- Greys out the forbidden combination (`block` option when `autonomy=full` is selected)
+- Requires a reason field whenever the policy values are dirty (audit trail)
+- Shows the last change timestamp + reason at the bottom
+
+CLI: `crewship policy get/set/list`
+
+```bash
+crewship policy set my-crew --autonomy trusted --behavior warn \
+  --reason "team has built confidence over Q2"
+```
+
+API: `GET/PUT /api/v1/crews/{crewId}/policy` (ADMIN+ for PUT)
+
+### `self_learning_enabled` — per-agent setting
+
+UI: **Agent Canvas → Settings → Learning posture** panel. A single switch with a one-paragraph explainer of what flipping it ON actually changes (so operators don't flip without understanding the consequence). Requires a reason field when dirty.
+
+CLI: not yet exposed — operator must use the API directly.
+
+API: `GET/PATCH /api/v1/agents/{agentId}/learning` (ADMIN+ for PATCH)
+
+## Audit history
+
+All three knobs land in audit tables:
+
+- `crews.autonomy_set_by_user_id / autonomy_set_at / autonomy_reason` — last policy change (single row, last-write-wins)
+- `agents.self_learning_set_by_user_id / self_learning_set_at / self_learning_reason` — last flag change
+- `keeper_requests` — every decision the evaluators make (request_type, decision, reason, prompt, raw LLM response)
+
+Query the keeper requests for a specific agent and date range:
+
+```sql
+SELECT request_type, decision, reason, decided_at
+FROM keeper_requests
+WHERE requesting_agent_id = ?
+  AND decided_at > datetime('now','-30 days')
+ORDER BY decided_at DESC;
+```
+
+## Cross-references
+
+- [Keeper guide](/guides/keeper) — what the keeper does and how to write Phase-1 access/execute rules
+- [Inbox guide](/guides/inbox) — operator workflow for approving the proposals these knobs route to inbox
+- [Agent memory](/guides/agent-memory) — the memory tiers `self_learning` gates writes to
+- [Threat model — Tenant isolation](/security/threat-model#tenant-isolation-on-internal-auth-handlers) — the F4 endpoints these knobs flow through

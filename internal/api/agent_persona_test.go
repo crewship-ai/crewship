@@ -195,11 +195,23 @@ func TestPersona_SuggestEnqueuesAtGuidedAutonomy(t *testing.T) {
 
 // Suggestion at full autonomy: policy returns auto_journal → persona
 // is written immediately and version row lands.
+//
+// PR-G F4.1 UX gate added a per-agent self_learning_enabled override
+// on top of the policy decision: even at full autonomy the persona is
+// NOT auto-applied unless the agent itself has self_learning=1. So
+// this test must flip BOTH the crew autonomy AND the agent flag —
+// see TestSuggestPersona_QueuesInbox_WhenSelfLearningOFF for the
+// inverse (full autonomy + self_learning=0 → demoted to inbox).
 func TestPersona_SuggestAutoAppliesAtFullAutonomy(t *testing.T) {
 	r := newPersonaTestRig(t)
 	// Flip the crew to full autonomy + journal-only behavior.
 	if _, err := r.h.db.Exec(`UPDATE crews SET autonomy_level='full' WHERE id=?`, r.crewID); err != nil {
 		t.Fatalf("set autonomy: %v", err)
+	}
+	// Flip self_learning ON so the PR-G gate doesn't demote the
+	// auto-apply decision back to inbox approval.
+	if _, err := r.h.db.Exec(`UPDATE agents SET self_learning_enabled = 1 WHERE id = ?`, r.agentID); err != nil {
+		t.Fatalf("flip self_learning ON: %v", err)
 	}
 	// Invalidate the resolver so the policy snapshot picks up the change.
 	if r.h.policyResolver != nil {
@@ -224,6 +236,157 @@ func TestPersona_SuggestAutoAppliesAtFullAutonomy(t *testing.T) {
 	resolved, _ := memory.LoadPersona(paths)
 	if !strings.Contains(resolved.Content, "autonomous") {
 		t.Errorf("expected persona to land at full autonomy; got %q", resolved.Content)
+	}
+}
+
+// TestSuggestPersona_AutoApplies_WhenSelfLearningON pins the PR-G F4.1
+// UX gate from the positive side: full autonomy crew + per-agent
+// self_learning=1 → auto-apply path runs end-to-end (PERSONA.md
+// mutated on disk, no blocking inbox row). Companion to
+// TestSuggestPersona_QueuesInbox_WhenSelfLearningOFF.
+//
+// Note on autonomy level: the policy matrix for ActionPersonaSuggest
+// only auto-applies at AutonomyFull (trusted still goes through
+// inbox_approve). We use "full" here so the gate has something to
+// gate; the per-agent override is what the test is asserting on, not
+// the autonomy level itself.
+func TestSuggestPersona_AutoApplies_WhenSelfLearningON(t *testing.T) {
+	r := newPersonaTestRig(t)
+	if _, err := r.h.db.Exec(`UPDATE crews SET autonomy_level='full' WHERE id=?`, r.crewID); err != nil {
+		t.Fatalf("set autonomy: %v", err)
+	}
+	if _, err := r.h.db.Exec(`UPDATE agents SET self_learning_enabled = 1 WHERE id = ?`, r.agentID); err != nil {
+		t.Fatalf("flip self_learning ON: %v", err)
+	}
+	if r.h.policyResolver != nil {
+		r.h.policyResolver.Invalidate(r.crewID)
+	}
+
+	rec := httptest.NewRecorder()
+	r.h.SuggestAgentPersona(rec, r.authedReq(t, http.MethodPost, "/", map[string]string{
+		"content":   "Self-learning ON — terse, no preamble.",
+		"rationale": "user feedback",
+	}))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("suggest: %d %s", rec.Code, rec.Body.String())
+	}
+	var got map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &got)
+	if got["applied"] != true {
+		t.Errorf("expected applied=true with self_learning=1; got %+v", got)
+	}
+	if _, ok := got["self_learning_gate"]; ok {
+		t.Errorf("expected NO self_learning_gate marker when gate didn't fire; got %+v", got)
+	}
+
+	// PERSONA.md must exist on disk.
+	paths := memory.PersonaPaths{AgentDir: filepath.Join(r.output, "crews", r.crewID, "agents", "alice", ".memory")}
+	resolved, _ := memory.LoadPersona(paths)
+	if !strings.Contains(resolved.Content, "Self-learning ON") {
+		t.Errorf("expected persona to land at full+self_learning=1; got %q", resolved.Content)
+	}
+
+	// No blocking inbox row was queued (no demotion happened).
+	var inboxCount int
+	if err := r.h.db.QueryRow(`
+		SELECT COUNT(*) FROM inbox_items
+		WHERE workspace_id = ? AND sender_id = ?`,
+		r.wsID, r.agentID,
+	).Scan(&inboxCount); err != nil {
+		t.Fatalf("count inbox: %v", err)
+	}
+	if inboxCount != 0 {
+		t.Errorf("expected 0 inbox rows on auto-apply path; got %d", inboxCount)
+	}
+}
+
+// TestSuggestPersona_QueuesInbox_WhenSelfLearningOFF pins the PR-G
+// F4.1 UX gate from the negative side: same crew autonomy (full) that
+// would normally auto-apply, but agent self_learning=0 demotes the
+// decision back to inbox approval. PERSONA.md MUST NOT be touched;
+// a blocking inbox_items row with self_learning_gate=off in the
+// payload must land instead.
+//
+// This is the regression guard for the per-agent toggle — the auditor
+// pattern "UI toggle with no functional downstream" is exactly what
+// this test prevents on the persona surface.
+func TestSuggestPersona_QueuesInbox_WhenSelfLearningOFF(t *testing.T) {
+	r := newPersonaTestRig(t)
+	if _, err := r.h.db.Exec(`UPDATE crews SET autonomy_level='full' WHERE id=?`, r.crewID); err != nil {
+		t.Fatalf("set autonomy: %v", err)
+	}
+	// Confirm seed: agent self_learning defaults to 0.
+	var sl int
+	if err := r.h.db.QueryRow(`SELECT self_learning_enabled FROM agents WHERE id=?`, r.agentID).Scan(&sl); err != nil {
+		t.Fatalf("read self_learning: %v", err)
+	}
+	if sl != 0 {
+		t.Fatalf("seed assumption broken: self_learning=%d, want 0", sl)
+	}
+	if r.h.policyResolver != nil {
+		r.h.policyResolver.Invalidate(r.crewID)
+	}
+
+	rec := httptest.NewRecorder()
+	r.h.SuggestAgentPersona(rec, r.authedReq(t, http.MethodPost, "/", map[string]string{
+		"content":   "Gate OFF — should not auto-apply.",
+		"rationale": "regression guard",
+	}))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("suggest: %d %s", rec.Code, rec.Body.String())
+	}
+	var got map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &got)
+	if got["applied"] != false || got["pending"] != true {
+		t.Errorf("expected applied=false pending=true after gate demotion; got %+v", got)
+	}
+	if got["decision"] != string(policy.DecisionInboxApprove) {
+		t.Errorf("expected decision demoted to inbox_approve; got %v", got["decision"])
+	}
+	if got["self_learning_gate"] != "off" {
+		t.Errorf("expected self_learning_gate=off marker on response; got %+v", got)
+	}
+
+	// PERSONA.md MUST NOT exist on disk.
+	paths := memory.PersonaPaths{AgentDir: filepath.Join(r.output, "crews", r.crewID, "agents", "alice", ".memory")}
+	resolved, _ := memory.LoadPersona(paths)
+	if resolved.Content != "" {
+		t.Fatalf("PERSONA.md written despite self_learning=0; got %q", resolved.Content)
+	}
+
+	// audit_logs row still landed (the proposal record).
+	var auditCnt int
+	if err := r.h.db.QueryRow(`SELECT COUNT(*) FROM audit_logs WHERE action='persona.suggest_pending'`).Scan(&auditCnt); err != nil {
+		t.Fatalf("count audit: %v", err)
+	}
+	if auditCnt != 1 {
+		t.Errorf("expected 1 audit row; got %d", auditCnt)
+	}
+
+	// Blocking inbox row landed with self_learning_gate=off marker.
+	var (
+		blocking int
+		payload  string
+		title    string
+	)
+	err := r.h.db.QueryRow(`
+		SELECT title, blocking, payload_json
+		FROM inbox_items
+		WHERE workspace_id = ? AND sender_id = ?
+		ORDER BY created_at DESC LIMIT 1`,
+		r.wsID, r.agentID,
+	).Scan(&title, &blocking, &payload)
+	if err != nil {
+		t.Fatalf("inbox row not found: %v", err)
+	}
+	if blocking != 1 {
+		t.Errorf("inbox row not blocking; got blocking=%d", blocking)
+	}
+	if !strings.Contains(payload, `"self_learning_gate":"off"`) {
+		t.Errorf("inbox payload missing self_learning_gate=off marker: %s", payload)
+	}
+	if !strings.Contains(title, "self_learning=OFF") {
+		t.Errorf("inbox title should mention gate; got %q", title)
 	}
 }
 

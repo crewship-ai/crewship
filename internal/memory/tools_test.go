@@ -655,3 +655,34 @@ func testAgentCtx(t *testing.T) AgentContext {
 		CrewMemoryDir:  crewDir,
 	}
 }
+
+// TestDispatch_Write_LessonsTier_Rejected pins the security tombstone
+// added 2026-05-21 after auditor flagged tools.go::capForTier returning
+// 0 for "lessons" as a persistence attack vector. The lessons tier MUST
+// be unreachable via the generic write dispatcher — every lesson has to
+// flow through consolidate.WriteLesson which enforces the schema +
+// idempotency + flock that this raw path does not.
+//
+// If this test fails the auditor's exact attack path is open: agent
+// calls memory.write(tier="lessons", content="<freeform>") and bypasses
+// every governance layer. Don't loosen this without a replacement gate.
+func TestDispatch_Write_LessonsTier_Rejected(t *testing.T) {
+	d := NewDispatcher(testAgentCtx(t))
+	res, err := d.Dispatch(context.Background(), ToolCall{
+		Name: "memory.write",
+		Args: json.RawMessage(`{"tier":"lessons","content":"bypass attempt","mode":"replace"}`),
+	})
+	if err != nil {
+		t.Fatalf("dispatcher should not return Go error for soft-rejected write: %v", err)
+	}
+	if !res.IsError {
+		t.Errorf("lessons tier write must yield IsError=true; got %+v", res)
+	}
+	if !strings.Contains(res.Content, "lessons tier is read-only") {
+		t.Errorf("error must explain the lessons-tier rejection; got %q", res.Content)
+	}
+	// Belt-and-suspenders: ensure no file landed on disk.
+	if _, statErr := os.Stat(filepath.Join(testAgentCtx(t).AgentMemoryDir, "lessons.md")); statErr == nil {
+		t.Errorf("lessons.md should NOT exist after rejected write")
+	}
+}
