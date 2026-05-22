@@ -85,6 +85,13 @@ func (h *PipelineHandler) CreateSchedule(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	workspaceID := WorkspaceIDFromContext(r.Context())
+	// Audit M2-promoted: creating a schedule fires the pipeline on cron
+	// — same blast radius as Save. Same gate.
+	role := RoleFromContext(r.Context())
+	if !canRole(role, "create") {
+		replyError(w, http.StatusForbidden, "Forbidden")
+		return
+	}
 
 	var body scheduleRequestBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -174,6 +181,14 @@ func (h *PipelineHandler) UpdateSchedule(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	workspaceID := WorkspaceIDFromContext(r.Context())
+	// Audit M2-promoted: edits to an active schedule shift firing
+	// behaviour / inputs — manage tier matches the post-promotion
+	// destructive-mutation contract.
+	role := RoleFromContext(r.Context())
+	if !canRole(role, "manage") {
+		replyError(w, http.StatusForbidden, "Forbidden")
+		return
+	}
 	scheduleID := r.PathValue("scheduleId")
 	if scheduleID == "" {
 		replyError(w, http.StatusBadRequest, "scheduleId required")
@@ -266,6 +281,12 @@ func (h *PipelineHandler) DeleteSchedule(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	workspaceID := WorkspaceIDFromContext(r.Context())
+	// Audit M2-promoted: stop a recurring fire trigger -- delete tier.
+	role := RoleFromContext(r.Context())
+	if !canRole(role, "delete") {
+		replyError(w, http.StatusForbidden, "Forbidden")
+		return
+	}
 	scheduleID := r.PathValue("scheduleId")
 	if scheduleID == "" {
 		replyError(w, http.StatusBadRequest, "scheduleId required")

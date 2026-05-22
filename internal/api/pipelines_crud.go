@@ -85,6 +85,16 @@ func (h *PipelineHandler) Get(w http.ResponseWriter, r *http.Request) {
 // DELETE /api/v1/workspaces/{workspaceId}/pipelines/{slug}
 func (h *PipelineHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
+	// Audit M2-promoted (HIGH): MEMBER must NOT delete pipelines.
+	// Sibling handlers (Save / Rollback / ImportPipeline) already
+	// gate on canRole(role, "delete"|"manage"|"create"); Delete was
+	// the gap LIVE-verified by A13.2 (MEMBER did MANAGER+ actions
+	// on 8/8 endpoints).
+	role := RoleFromContext(r.Context())
+	if !canRole(role, "delete") {
+		replyError(w, http.StatusForbidden, "Forbidden")
+		return
+	}
 	slug := r.PathValue("slug")
 	p, err := h.store.GetBySlug(r.Context(), workspaceID, slug)
 	if errors.Is(err, pipeline.ErrNotFound) {
@@ -192,6 +202,13 @@ func (h *PipelineHandler) ExportPipeline(w http.ResponseWriter, r *http.Request)
 // Body: <pipeline-bundle>  + { "author_crew_id": "..." }
 func (h *PipelineHandler) ImportPipeline(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
+	// Audit M2-promoted: importing a pipeline is the same effective
+	// privilege as Save (creates a new pipeline row). Same gate.
+	role := RoleFromContext(r.Context())
+	if !canRole(role, "create") {
+		replyError(w, http.StatusForbidden, "Forbidden")
+		return
+	}
 	var bundle struct {
 		Format   string `json:"format"`
 		Pipeline struct {
@@ -387,6 +404,14 @@ func (h *PipelineHandler) GetVersion(w http.ResponseWriter, r *http.Request) {
 // Body: { "version": N }
 func (h *PipelineHandler) Rollback(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
+	// Audit M2-promoted: rollback rewrites the active definition --
+	// destructive equivalent of an update. Manage tier matches Save's
+	// gating once promoted (see Save below for create-vs-update split).
+	role := RoleFromContext(r.Context())
+	if !canRole(role, "manage") {
+		replyError(w, http.StatusForbidden, "Forbidden")
+		return
+	}
 	slug := r.PathValue("slug")
 	var body struct {
 		Version int `json:"version"`

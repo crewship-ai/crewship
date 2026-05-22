@@ -31,6 +31,14 @@ func (h *PipelineHandler) CancelRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	workspaceID := WorkspaceIDFromContext(r.Context())
+	// Audit M2-promoted: cancelling another user's run is a manage-
+	// tier action -- otherwise a MEMBER can stop production
+	// pipelines that an OWNER/ADMIN kicked off.
+	role := RoleFromContext(r.Context())
+	if !canRole(role, "manage") {
+		replyError(w, http.StatusForbidden, "Forbidden")
+		return
+	}
 	runID := r.PathValue("runId")
 	if runID == "" {
 		replyError(w, http.StatusBadRequest, "runId required")
