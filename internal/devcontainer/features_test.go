@@ -4,9 +4,11 @@ import (
 	"archive/tar"
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -371,6 +373,49 @@ func TestExtractTarGz_Normal(t *testing.T) {
 	}
 	if string(data) != string(subContent) {
 		t.Errorf("subdir/meta.json content = %q, want %q", data, subContent)
+	}
+}
+
+// TestExtractTarGz_CumulativeBomb pins the M24 cumulative-size guard.
+// The per-entry 50 MB cap alone doesn't stop a tar that streams many
+// entries that each individually pass the per-file limit but together
+// blow past the 500 MB total cap. We use small entries here (each
+// 1 MB of zeros) and claim 600 MB total -- the guard must trip
+// before the extraction completes the 600th entry. The check fires
+// on the FIRST entry that would push the running total over the cap,
+// so we don't actually need to stream gigabytes.
+func TestExtractTarGz_CumulativeBomb(t *testing.T) {
+	destDir := t.TempDir()
+
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+
+	const oneMB = 1 << 20
+	chunk := bytes.Repeat([]byte{0}, oneMB)
+	// 500 entries × 1 MB lands exactly at the cap; the 501st must
+	// push over. We write 501 to confirm the rejection happens
+	// inside the loop, not after.
+	for i := 0; i < 501; i++ {
+		if err := tw.WriteHeader(&tar.Header{
+			Typeflag: tar.TypeReg,
+			Name:     fmt.Sprintf("entry-%04d.bin", i),
+			Mode:     0o644,
+			Size:     int64(oneMB),
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tw.Write(chunk); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tw.Close()
+
+	err := extractTarGz(&buf, destDir)
+	if err == nil {
+		t.Fatal("expected cumulative-size error, got nil")
+	}
+	if !strings.Contains(err.Error(), "cumulative size cap") {
+		t.Errorf("error = %v, want substring 'cumulative size cap'", err)
 	}
 }
 

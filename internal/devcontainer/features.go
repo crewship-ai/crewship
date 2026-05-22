@@ -381,6 +381,15 @@ func (d *FeatureDownloader) pull(ctx context.Context, ref, destDir string) error
 func extractTarGz(r io.Reader, destDir string) error {
 	tr := tar.NewReader(r)
 	cleanDest := filepath.Clean(destDir)
+	// maxTotalSize bounds the cumulative bytes written across all
+	// regular-file entries. The per-entry 50 MB cap (further down in
+	// the TypeReg branch) alone doesn't stop a tar bomb: 10 000
+	// entries × 49 MB each still extracts ~480 GB. Real devcontainer
+	// feature archives sit well under 100 MB; 500 MB leaves an
+	// order-of-magnitude headroom for legitimate growth while
+	// denying the unbounded write. Audit M24.
+	const maxTotalSize int64 = 500 << 20
+	var totalExtracted int64
 	for {
 		hdr, err := tr.Next()
 		if err == io.EOF {
@@ -425,6 +434,16 @@ func extractTarGz(r io.Reader, destDir string) error {
 			if hdr.Size > maxFileSize {
 				return fmt.Errorf("tar entry %q exceeds max size (%d > %d)", hdr.Name, hdr.Size, maxFileSize)
 			}
+			// Cumulative cap: refuse the archive if extracting this
+			// entry would push the total past maxTotalSize. We compare
+			// against the claimed hdr.Size here (the upper bound on
+			// what io.Copy will actually write below); a tar that
+			// claims small but streams huge is already bounded by the
+			// per-file io.LimitReader.
+			if totalExtracted+hdr.Size > maxTotalSize {
+				return fmt.Errorf("tar archive exceeds cumulative size cap (%d > %d) at entry %q",
+					totalExtracted+hdr.Size, maxTotalSize, hdr.Name)
+			}
 			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 				return err
 			}
@@ -436,11 +455,12 @@ func extractTarGz(r io.Reader, destDir string) error {
 			if err != nil {
 				return err
 			}
-			if _, err := io.Copy(f, io.LimitReader(tr, maxFileSize)); err != nil {
-				f.Close()
+			n, err := io.Copy(f, io.LimitReader(tr, maxFileSize))
+			f.Close()
+			if err != nil {
 				return err
 			}
-			f.Close()
+			totalExtracted += n
 		}
 	}
 	return nil
