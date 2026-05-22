@@ -24,7 +24,7 @@ Role-based access control gets a major overhaul:
 - **Per-crew role editor** inline on the crew membership table.
 - **Agent owner badges** on every agent card, with API exposure of the owner field.
 - **Token issuance dialog** now shows tier, scopes, and expiry; listing exposes the same fields. CLI bootstrap and pair-redeem tokens are now 256-bit.
-- **Per-agent ownership gates** on `agent.create`, `agent.update`, and `agent.delete`, plus per-crew role elevation honored at create time.
+- **Per-agent ownership gates** on agent create, update, and delete, plus per-crew role elevation honored at create time.
 - **Structured 403 responses** with denial audit logging.
 
 See [RBAC](/security/rbac).
@@ -46,16 +46,16 @@ See [RBAC](/security/rbac).
 
 ## Fixes
 
-- **Keeper cross-tenant defense.** The `internalWsCtx` context is now correctly wired onto F4 Keeper routes — previously the defense was unreachable.
-- **Sidecar memory startup.** The agent memory base directory is now set even when the FTS5 search engine fails to initialize, so agents stay usable in degraded mode.
+- **Keeper cross-tenant defense.** Workspace context is now correctly wired onto Keeper routes — previously the defense was unreachable.
+- **Sidecar memory startup.** The agent memory base directory is now set even when the full-text search engine fails to initialize, so agents stay usable in degraded mode.
 - **OAuth state and session IDs** bumped to 256-bit randomness. See [Auth](/guides/auth).
 - **Path-traversal hardening.** `..` segments are rejected before the router normalizes them; `/_next/*` directory autoindex is blocked; every ID interpolated into internal URLs is now path-escaped.
 - **Permission gates.** Agent files, downloads, and logs now require the `read` permission; nine pipeline mutating handlers are gated on per-role checks.
-- **Log redaction.** Raw token values are now logged via a fingerprint helper; the `lookout` redactor is wired through `slog` for structured logs.
-- **Webhook + payload limits.** The NextAuth credential callback body is now capped at 16 KiB.
-- **Backup integrity.** Table identifiers are validated before being interpolated into `PRAGMA` statements during foreign-key introspection. See [Backup](/guides/backup).
+- **Log redaction.** Raw token values are now logged as fingerprints instead of full tokens, and structured logs are routed through the Lookout redactor.
+- **Payload limits.** The auth credential callback body is now capped at 16 KiB to bound memory use on hostile clients.
+- **Backup integrity.** Table identifiers are validated before being used during foreign-key introspection. See [Backup](/guides/backup).
 - **Devcontainer safety.** Cumulative tar extraction is capped at 500 MB to prevent decompression-bomb scenarios. See [Devcontainers](/guides/devcontainers).
 - **ETHOS refusals** no longer leak tool, directory, or sibling-agent enumeration data in error messages.
-- **Orchestrator context propagation.** Request context is now correctly threaded into handler-spawned goroutines and five mission-engine sites that previously dropped it.
+- **Orchestrator context propagation.** Request context is now correctly threaded through background work spawned by handlers, including five mission-engine call sites that previously dropped it.
 
 </Update>
