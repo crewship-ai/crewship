@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // ScanHit describes a single positive scan match. Category is one of
@@ -28,51 +29,15 @@ type rule struct {
 	re       *regexp.Regexp
 }
 
-// invisible unicode characters used to smuggle hidden text inside
-// otherwise-innocent content: zero-width spaces, BIDI overrides,
-// directional isolates, math-invisible operators, and deprecated
-// formatting tags. Numeric literals are used instead of the glyphs
-// themselves so the source file itself stays free of invisible
-// codepoints — without this, gofmt or a stray BOM in the source
-// breaks the build (and the file's own contents would trip
-// every editor's "weird character" warning).
-//
-// The TAG block (U+E0001 + U+E0020-U+E007F) is matched as a range in
-// scanInvisibleUnicode rather than enumerated here; the block is
-// deprecated by Unicode 14.0 (the entire ASCII-mirror range has no
-// legitimate textual use) and 95+ literal entries would bloat the slice.
-var invisibleUnicodeRunes = []rune{
-	0x200B, // ZWSP zero-width space
-	0x200C, // ZWNJ zero-width non-joiner
-	0x200D, // ZWJ zero-width joiner
-	0x200E, // LRM left-to-right mark
-	0x200F, // RLM right-to-left mark
-	0x202A, // LRE left-to-right embedding
-	0x202B, // RLE right-to-left embedding
-	0x202D, // LRO left-to-right override
-	0x202E, // RLO right-to-left override
-	0x2066, // LRI left-to-right isolate
-	0x2067, // RLI right-to-left isolate
-	0x2068, // FSI first strong isolate
-	0x2069, // PDI pop directional isolate
-	0xFEFF, // BOM byte order mark
-
-	// Math-invisible operators — Cf class, format-only, no glyph.
-	// The audit (wave5/a5-1) found U+2060 inserted between letters
-	// of `Ignore` bypassed the `\bignore\b` regex because Go's
-	// regexp treats Cf as a non-word char *boundary*. Each of these
-	// has zero legitimate use in memory content.
-	0x2060, // WORD JOINER
-	0x2061, // FUNCTION APPLICATION
-	0x2062, // INVISIBLE TIMES
-	0x2063, // INVISIBLE SEPARATOR
-	0x2064, // INVISIBLE PLUS
-
-	// Other zero-width / filler codepoints that defeat word boundaries.
-	0x180E, // MONGOLIAN VOWEL SEPARATOR (deprecated by Unicode 6.3)
-	0x115F, // HANGUL CHOSEONG FILLER (renders as empty)
-	0x1160, // HANGUL JUNGSEONG FILLER (renders as empty)
-	0x3164, // HANGUL FILLER (renders as empty)
+// extraInvisibleRunes catches codepoints that defeat regex word
+// boundaries but are NOT in Unicode's Cf (Format) category — these
+// can't be caught by the unicode.Is(unicode.Cf, ch) class check in
+// scanInvisibleUnicode below. All three are Hangul fillers (Lo —
+// Letter, Other) that render as empty glyphs.
+var extraInvisibleRunes = map[rune]bool{
+	0x115F: true, // HANGUL CHOSEONG FILLER
+	0x1160: true, // HANGUL JUNGSEONG FILLER
+	0x3164: true, // HANGUL FILLER
 }
 
 // scannerRules is the curated rule set. Conservative by design:
@@ -152,22 +117,32 @@ func ScanContent(body string) *ScanHit {
 
 func scanInvisibleUnicode(body string) *ScanHit {
 	for _, ch := range body {
-		// TAG block (U+E0001, U+E0020-U+E007F) is deprecated by
-		// Unicode 14.0 — entire block has no legitimate textual use,
-		// so a range check is both safer and cheaper than enumerating
-		// 95+ entries. Any tag char inside content is evasion intent.
-		if ch == 0xE0001 || (ch >= 0xE0020 && ch <= 0xE007F) {
+		// Class-based detection: Unicode Cf (Format) covers every
+		// invisible-format codepoint that exists today and any added
+		// in future Unicode revisions -- zero-width spaces, BIDI
+		// overrides, directional isolates, math-invisible operators,
+		// the TAG block (U+E0001 + U+E0020-U+E007F), the deprecated
+		// Mongolian vowel separator, ARABIC LETTER MARK, SOFT HYPHEN,
+		// and the dozens of CodeRabbit/external review specifically
+		// called out: U+00AD, U+061C, U+E0001-U+E007F. Trade-off:
+		// this also catches legitimate Cf chars in benign Arabic /
+		// multilingual content (U+061C as a directionality hint,
+		// U+200E as an LRM in RTL passages). Memory content in this
+		// system is primarily English code / docs, so the false-
+		// positive risk is acceptable; the alternative is a curated
+		// list that perpetually lags new Unicode additions.
+		if unicode.Is(unicode.Cf, ch) {
 			return &ScanHit{
 				Category: "invisible_unicode",
 				Pattern:  fmt.Sprintf("U+%04X", ch),
 			}
 		}
-		for _, banned := range invisibleUnicodeRunes {
-			if ch == banned {
-				return &ScanHit{
-					Category: "invisible_unicode",
-					Pattern:  fmt.Sprintf("U+%04X", ch),
-				}
+		// Hangul fillers render as empty glyphs but are Lo (Letter,
+		// Other), not Cf -- they need an explicit allowlist.
+		if extraInvisibleRunes[ch] {
+			return &ScanHit{
+				Category: "invisible_unicode",
+				Pattern:  fmt.Sprintf("U+%04X", ch),
 			}
 		}
 	}

@@ -135,6 +135,20 @@ func TestScanContent_FormatClassEvasion(t *testing.T) {
 		{"tag_lang_e0001", 0xE0001},
 		{"tag_latin_a_e0041", 0xE0041},
 		{"tag_cancel_e007f", 0xE007F},
+		// External review (#477 follow-up): famous bypass vectors the
+		// previous curated list missed. All are Unicode Cf so the
+		// class-based unicode.Is(unicode.Cf, ch) check covers them
+		// automatically without needing the list to chase Unicode
+		// additions.
+		{"soft_hyphen_00ad", 0x00AD},
+		{"arabic_letter_mark_061c", 0x061C},
+		{"interlinear_annotation_anchor_fff9", 0xFFF9},
+		{"interlinear_annotation_terminator_fffb", 0xFFFB},
+		// NOTE: U+17B4 / U+17B5 (Khmer vowel inherent marks) are Mn
+		// (Mark, Nonspacing) not Cf -- they get caught by PR #472's
+		// homoglyph-fold Mn-drop path, not by the Cf class check here.
+		// Explicitly NOT in this list to keep this test focused on
+		// what THIS PR's scanner is responsible for.
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
