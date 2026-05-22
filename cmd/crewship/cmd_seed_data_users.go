@@ -86,23 +86,51 @@ func seedRBACUsers(ctx context.Context, client *cli.Client) error {
 			fmt.Fprintf(os.Stderr, "  X %s: signup request failed: %v\n", u.Email, err)
 			continue
 		}
+		var userID string
 		if resp.StatusCode == http.StatusConflict {
 			resp.Body.Close()
-			fmt.Fprintf(os.Stderr, "  ↻ %s: already exists, skipping signup\n", u.Email)
-			continue
-		}
-		if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
+			// Signup 409 = user already in users table. Falling through
+			// to role pinning keeps --with-users idempotent: the
+			// workspace_members row may still be missing from a prior
+			// half-failed seed, so we look up the user ID and re-try the
+			// member POST. If the member row also exists with the right
+			// role, AddMember returns 409 below and we treat it as a
+			// no-op; if the role drifted from the fixture we surface a
+			// warning (no PUT endpoint for member role exists today).
+			existingID, existingRole, lerr := findWorkspaceMemberByEmail(client, wsID, u.Email)
+			if lerr != nil {
+				fmt.Fprintf(os.Stderr, "  X %s: lookup after 409 failed: %v\n", u.Email, lerr)
+				continue
+			}
+			if existingID == "" {
+				fmt.Fprintf(os.Stderr, "  ↻ %s: in users table but not in this workspace and lookup endpoint can't see them; skip (re-run with --nuke for fresh state)\n", u.Email)
+				continue
+			}
+			userID = existingID
+			if existingRole != "" && !strings.EqualFold(existingRole, u.Role) {
+				fmt.Fprintf(os.Stderr, "  ! %s: existing workspace role %q ≠ fixture %q (no role-update endpoint; manual fix needed)\n", u.Email, existingRole, u.Role)
+				minted = append(minted, row{demoUser: u, UserID: userID})
+				continue
+			}
+			if strings.EqualFold(existingRole, u.Role) {
+				fmt.Fprintf(os.Stderr, "  ↻ %s: already in workspace with role %s; skipping\n", u.Email, u.Role)
+				minted = append(minted, row{demoUser: u, UserID: userID})
+				continue
+			}
+		} else if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
 			body, _ := readBody(resp)
 			fmt.Fprintf(os.Stderr, "  X %s: signup HTTP %d: %s\n", u.Email, resp.StatusCode, strings.TrimSpace(string(body)))
 			continue
-		}
-		var signup struct {
-			ID    string `json:"id"`
-			Email string `json:"email"`
-		}
-		if err := cli.ReadJSON(resp, &signup); err != nil {
-			fmt.Fprintf(os.Stderr, "  X %s: signup parse: %v\n", u.Email, err)
-			continue
+		} else {
+			var signup struct {
+				ID    string `json:"id"`
+				Email string `json:"email"`
+			}
+			if err := cli.ReadJSON(resp, &signup); err != nil {
+				fmt.Fprintf(os.Stderr, "  X %s: signup parse: %v\n", u.Email, err)
+				continue
+			}
+			userID = signup.ID
 		}
 
 		// Step 2: pin role via workspace_members. The bootstrap admin
@@ -110,17 +138,23 @@ func seedRBACUsers(ctx context.Context, client *cli.Client) error {
 		// even when the target role is ADMIN or higher.
 		mResp, err := client.Post(
 			fmt.Sprintf("/api/v1/workspaces/%s/members?workspace_id=%s", wsID, wsID),
-			map[string]interface{}{"user_id": signup.ID, "role": u.Role},
+			map[string]interface{}{"user_id": userID, "role": u.Role},
 		)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "  X %s: assign %s: %v\n", u.Email, u.Role, err)
+			continue
+		}
+		if mResp.StatusCode == http.StatusConflict {
+			mResp.Body.Close()
+			fmt.Fprintf(os.Stderr, "  ↻ %s: already in workspace; assumed role pinned earlier\n", u.Email)
+			minted = append(minted, row{demoUser: u, UserID: userID})
 			continue
 		}
 		if err := cli.CheckError(mResp); err != nil {
 			fmt.Fprintf(os.Stderr, "  X %s: assign %s: %v\n", u.Email, u.Role, err)
 			continue
 		}
-		minted = append(minted, row{demoUser: u, UserID: signup.ID})
+		minted = append(minted, row{demoUser: u, UserID: userID})
 	}
 
 	if len(minted) == 0 {
@@ -144,4 +178,41 @@ func seedRBACUsers(ctx context.Context, client *cli.Client) error {
 	fmt.Fprintln(os.Stderr, "    crewship login  # interactive prompt for email + password above")
 	fmt.Fprintln(os.Stderr, "")
 	return nil
+}
+
+// findWorkspaceMemberByEmail resolves an email to (userID, currentRole)
+// for users already in the current workspace's member roster. Used to
+// recover the user ID when signup returns 409 so the role-pinning step
+// can still verify the workspace_members row.
+//
+// Returns ("", "", nil) when the email isn't found in this workspace —
+// the user may exist in the global users table but not be a member here,
+// in which case the seed loop logs and skips them (the OWNER-only admin
+// endpoint we hit here can't see cross-workspace users).
+func findWorkspaceMemberByEmail(client *cli.Client, wsID, email string) (userID, role string, err error) {
+	resp, err := client.Get(fmt.Sprintf("/api/v1/admin/users?workspace_id=%s", wsID))
+	if err != nil {
+		return "", "", err
+	}
+	if err := cli.CheckError(resp); err != nil {
+		return "", "", err
+	}
+	var rows []struct {
+		ID    string  `json:"id"`
+		Email string  `json:"email"`
+		Role  *string `json:"role"`
+	}
+	if err := cli.ReadJSON(resp, &rows); err != nil {
+		return "", "", err
+	}
+	for _, r := range rows {
+		if strings.EqualFold(r.Email, email) {
+			cur := ""
+			if r.Role != nil {
+				cur = *r.Role
+			}
+			return r.ID, cur, nil
+		}
+	}
+	return "", "", nil
 }

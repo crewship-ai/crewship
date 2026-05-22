@@ -5,10 +5,28 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/cli"
 )
+
+// safePathSegment rejects values that could escape a filepath.Join base
+// (separators, traversal tokens, empty, or just ".") so server-provided
+// IDs and slugs can't write outside the per-crew memory root. The seed
+// fetches crew_id and agent slug from the API and writes to
+// {base}/crews/{crew_id}/agents/{slug}/.memory — if either segment
+// carried "..", a separator, or NUL the on-disk write would escape and
+// could clobber e.g. another crew's memory or files under the basePath.
+func safePathSegment(s string) (string, error) {
+	if s == "" || s == "." || s == ".." {
+		return "", fmt.Errorf("path segment %q is empty or traversal token", s)
+	}
+	if strings.ContainsAny(s, `/\`+"\x00") {
+		return "", fmt.Errorf("path segment %q contains separator or NUL", s)
+	}
+	return s, nil
+}
 
 // seedAgentMemory pre-populates the on-disk memory tiers for each seeded
 // agent so a fresh workspace has a realistic "month of context" backing
@@ -79,7 +97,11 @@ func seedAgentMemory(ctx context.Context, client *cli.Client, crewIDs map[string
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		sharedDir := filepath.Join(basePath, "crews", crewID, "shared", ".memory")
+		safeCrewID, err := safePathSegment(crewID)
+		if err != nil {
+			return fmt.Errorf("seedAgentMemory: invalid crew_id %q: %w", crewID, err)
+		}
+		sharedDir := filepath.Join(basePath, "crews", safeCrewID, "shared", ".memory")
 		if err := os.MkdirAll(sharedDir, 0o755); err != nil {
 			return fmt.Errorf("mkdir shared mem: %w", err)
 		}
@@ -100,7 +122,15 @@ func seedAgentMemory(ctx context.Context, client *cli.Client, crewIDs map[string
 		if a.CrewID == "" || crewSlugByID[a.CrewID] == "" {
 			continue
 		}
-		agentMemDir := filepath.Join(basePath, "crews", a.CrewID, "agents", a.Slug, ".memory")
+		safeCrewID, err := safePathSegment(a.CrewID)
+		if err != nil {
+			return fmt.Errorf("seedAgentMemory: invalid crew_id %q from agents API: %w", a.CrewID, err)
+		}
+		safeSlug, err := safePathSegment(a.Slug)
+		if err != nil {
+			return fmt.Errorf("seedAgentMemory: invalid agent slug %q from agents API: %w", a.Slug, err)
+		}
+		agentMemDir := filepath.Join(basePath, "crews", safeCrewID, "agents", safeSlug, ".memory")
 		dailyDir := filepath.Join(agentMemDir, "daily")
 		if err := os.MkdirAll(dailyDir, 0o755); err != nil {
 			return fmt.Errorf("mkdir agent mem: %w", err)
@@ -174,7 +204,7 @@ func demoCrewMD(crewSlug string) string {
 	return fmt.Sprintf(`# CREW.md — %s shared knowledge
 
 Crew slug: %s
-Mission: Demo crew seeded by ` + "`crewship seed --with-memory`" + `.
+Mission: Demo crew seeded by `+"`crewship seed --with-memory`"+`.
 
 ## Shared conventions
 - File-first markdown for all memory tiers.

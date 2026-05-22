@@ -106,6 +106,9 @@ func loadDotEnvLocal() {
 		}
 		_ = os.Setenv(key, val)
 	}
+	if err := scanner.Err(); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed reading .env.local: %v\n", err)
+	}
 	bridgeServerFromPort()
 }
 
@@ -633,6 +636,9 @@ func readSetupTokenFile() string {
 				continue
 			}
 			return line
+		}
+		if err := scanner.Err(); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed reading %s: %v\n", p, err)
 		}
 	}
 	return ""
