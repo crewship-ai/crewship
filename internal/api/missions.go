@@ -17,11 +17,27 @@ type MissionHandler struct {
 	hub           *ws.Hub
 	missionEngine *orchestrator.MissionEngine
 	logger        *slog.Logger
+	// storagePath is the host filesystem root that bind-mounts crew
+	// dirs into runtime containers. The F4.5 mission-outcomes-to-memory
+	// hook needs this to resolve {storagePath}/crews/{crew_id}/shared/.memory.
+	// Set via SetStoragePath after construction so existing test sites
+	// don't have to change their NewMissionHandler call shape.
+	storagePath string
 }
 
 // NewMissionHandler creates a MissionHandler with the given dependencies.
 func NewMissionHandler(db *sql.DB, hub *ws.Hub, me *orchestrator.MissionEngine, logger *slog.Logger) *MissionHandler {
 	return &MissionHandler{db: db, hub: hub, missionEngine: me, logger: logger}
+}
+
+// SetStoragePath wires the host storage root for the F4.5
+// mission-outcomes-to-crew-memory hook. Without it set, the hook
+// silently skips the lesson write — the status transition still
+// commits cleanly, so the API surface is unaffected by an unwired
+// storagePath. The router calls this during startup; existing tests
+// that don't care about the F4.5 hook can leave it unset.
+func (h *MissionHandler) SetStoragePath(p string) {
+	h.storagePath = p
 }
 
 type missionResponse struct {

@@ -271,6 +271,14 @@ func (o *Orchestrator) buildAgentMemoryBlock(ctx context.Context, req AgentRunRe
 // buildCrewMemoryBlock reads crew shared memory files and returns a formatted
 // block with [CREW SHARED MEMORY] markers. Returns empty string and 0 chars used
 // if no crew memory files exist.
+//
+// For LEAD-role agents this also surfaces a "Crew outcomes" section
+// derived from the crew-shared lessons.md (F4.5 mission outcomes).
+// AGENT-role members get the regular CREW.md + daily content; the
+// operational outcomes digest would burn tokens on every agent run
+// without delivering signal that's actionable at the agent tier.
+// Non-LEAD members can still pull the same data on demand via
+// memory.read tier=lessons if they need it mid-session.
 func (o *Orchestrator) buildCrewMemoryBlock(ctx context.Context, req AgentRunRequest, budget int, today string) (string, int) {
 	crewMemDir := "/crew/shared/.memory"
 
@@ -285,9 +293,31 @@ func (o *Orchestrator) buildCrewMemoryBlock(ctx context.Context, req AgentRunReq
 		{fmt.Sprintf("Crew daily: %s", today), crewDaily},
 	}
 
+	// LEAD-only F4.5 outcomes digest. Read lessons.md from the crew-
+	// shared dir, filter to source=mission_outcome (other sources are
+	// per-agent learning surfaced via the lessons tier separately),
+	// and render the most recent N as a section inside this block's
+	// existing budget.
+	if isLeadRole(req.AgentRole) {
+		lessonsBody, _ := o.readContainerFile(readCtx, req.ContainerID, path.Join(crewMemDir, "lessons.md"))
+		if outcomes := renderCrewOutcomes(lessonsBody, crewOutcomesMaxEntries); outcomes != "" {
+			sections = append(sections, memorySection{
+				label:   fmt.Sprintf("Crew outcomes (last %d, F4.5)", crewOutcomesMaxEntries),
+				content: outcomes,
+			})
+		}
+	}
+
 	block := assembleSections("[CREW SHARED MEMORY]", "[END CREW SHARED MEMORY]", sections, budget)
 	return block, len(block)
 }
+
+// crewOutcomesMaxEntries caps how many mission-outcome lessons the
+// LEAD boot context shows. 10 is large enough for a week of normal
+// crew activity and small enough that the section stays under ~1 KB
+// even when entry bodies are at the conservative end of typical
+// length (~80 chars rule + ~30 chars context).
+const crewOutcomesMaxEntries = 10
 
 // buildWorkspaceMemoryBlock asks the configured WorkspaceMemoryProvider
 // for content keyed on the run's workspace id and frames it as a

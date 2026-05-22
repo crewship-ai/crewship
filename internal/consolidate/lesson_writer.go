@@ -35,6 +35,7 @@ const (
 	LessonSourceNegativeLearning LessonSource = "negative_learning" // F4.4 evaluator (PR-C)
 	LessonSourceConsolidator     LessonSource = "consolidator"      // periodic memory sweep
 	LessonSourceUserFeedback     LessonSource = "user_feedback"     // explicit "remember this" capture
+	LessonSourceMissionOutcome   LessonSource = "mission_outcome"   // mission terminal-state hook (F4.5)
 )
 
 // LessonEntry is the wire shape of a single lessons.md row. Persisted
@@ -78,6 +79,7 @@ var validLessonSources = map[LessonSource]struct{}{
 	LessonSourceNegativeLearning: {},
 	LessonSourceConsolidator:     {},
 	LessonSourceUserFeedback:     {},
+	LessonSourceMissionOutcome:   {},
 }
 
 // WriteLesson appends entry to {agentMemoryDir}/lessons.md, creating
@@ -99,6 +101,36 @@ var validLessonSources = map[LessonSource]struct{}{
 // them requires a coordinated bump of validLessonKinds /
 // validLessonSources AND the consumers that switch on the value.
 func WriteLesson(ctx context.Context, agentMemoryDir string, entry LessonEntry) error {
+	return writeLessonToDir(ctx, agentMemoryDir, entry)
+}
+
+// WriteCrewLesson persists entry to {crewSharedMemoryDir}/lessons.md.
+// This is the crew-tier counterpart to WriteLesson — the F4.5 mission
+// outcomes hook calls into this writer so completed/failed missions
+// surface as durable institutional knowledge on the crew shared memory
+// surface (boot-context CREW SHARED MEMORY block, mid-session
+// memory.read tier=lessons via dispatcher follow-up).
+//
+// Contract is identical to WriteLesson: idempotent-by-ID, flock-
+// serialized, validated at the boundary, atomic temp+rename. The
+// only difference is the target directory — agent-private lessons.md
+// stays untouched, and the two paths cannot collide.
+//
+// Hook callers should pass {storage_root}/crews/{crew_id}/shared/.memory
+// (the host path that bind-mounts to /crew/shared/.memory inside the
+// runtime container).
+func WriteCrewLesson(ctx context.Context, crewSharedMemoryDir string, entry LessonEntry) error {
+	return writeLessonToDir(ctx, crewSharedMemoryDir, entry)
+}
+
+// writeLessonToDir is the shared implementation. WriteLesson and
+// WriteCrewLesson differ only in the directory they receive; sharing
+// the path-validation, lock acquisition, and idempotent-replace logic
+// keeps the two tiers byte-identical in format and behavior. If a
+// future tier (workspace, hub) wants a third lessons file, it adds a
+// third public wrapper here without re-implementing the locking
+// dance.
+func writeLessonToDir(ctx context.Context, lessonsDir string, entry LessonEntry) error {
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("lesson: write cancelled: %w", err)
 	}
@@ -120,13 +152,13 @@ func WriteLesson(ctx context.Context, agentMemoryDir string, entry LessonEntry) 
 		entry.CapturedAt = entry.CapturedAt.UTC()
 	}
 
-	if err := os.MkdirAll(agentMemoryDir, 0o755); err != nil {
-		return fmt.Errorf("lesson: mkdir %s: %w", agentMemoryDir, err)
+	if err := os.MkdirAll(lessonsDir, 0o755); err != nil {
+		return fmt.Errorf("lesson: mkdir %s: %w", lessonsDir, err)
 	}
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("lesson: write cancelled before lock: %w", err)
 	}
-	path := filepath.Join(agentMemoryDir, lessonsFilename)
+	path := filepath.Join(lessonsDir, lessonsFilename)
 
 	lk := memory.NewFileLock(path + ".lock")
 	if err := lk.Lock(); err != nil {

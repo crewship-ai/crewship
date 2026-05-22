@@ -25,11 +25,25 @@ type IssueHandler struct {
 	missionEngine MissionStarter
 	logger        *slog.Logger
 	journal       journal.Emitter
+	// storagePath powers the F4.5 mission-outcomes-to-crew-memory hook
+	// fired from the review-approve (→ DONE) and cancel (→ CANCELLED)
+	// paths in issue_handler_workflow.go. Set via SetStoragePath after
+	// construction; unset means the hook no-ops (status transition still
+	// works fine).
+	storagePath string
 }
 
 // NewIssueHandler creates a new IssueHandler.
 func NewIssueHandler(db *sql.DB, hub *ws.Hub, me MissionStarter, logger *slog.Logger) *IssueHandler {
 	return &IssueHandler{db: db, hub: hub, missionEngine: me, logger: logger, journal: noopEmitter{}}
+}
+
+// SetStoragePath wires the host storage root for the F4.5
+// mission-outcomes-to-crew-memory hook. See MissionHandler.SetStoragePath
+// for the same contract — handlers share the storage path because both
+// emit lessons against the same /crews/{crew_id}/shared/.memory tree.
+func (h *IssueHandler) SetStoragePath(p string) {
+	h.storagePath = p
 }
 
 // SetJournal wires a journal emitter after construction so the router can

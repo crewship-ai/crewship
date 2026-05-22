@@ -161,6 +161,12 @@ func (h *MissionHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 	now := time.Now().UTC().Format(time.RFC3339)
 
+	// committedTerminalStatus carries the terminal status (if any) past
+	// the tx commit so the F4.5 mission-outcomes-to-crew-memory hook can
+	// fire AFTER persistence — see emitMissionOutcomeLessonAsync. Empty
+	// means either no status change or a non-terminal transition.
+	var committedTerminalStatus string
+
 	// Validate status transition
 	if req.Status != nil {
 		newStatus := *req.Status
@@ -188,6 +194,9 @@ func (h *MissionHandler) Update(w http.ResponseWriter, r *http.Request) {
 			h.logger.Error("update mission status", "error", err)
 			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 			return
+		}
+		if _, terminal := terminalStatusToLessonKindLocal(newStatus); terminal {
+			committedTerminalStatus = newStatus
 		}
 	}
 
@@ -217,6 +226,14 @@ func (h *MissionHandler) Update(w http.ResponseWriter, r *http.Request) {
 		h.logger.Error("commit mission update", "error", err)
 		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 		return
+	}
+
+	// F4.5 mission outcomes → crew memory. Fires only when the
+	// transition was to a terminal state; the helper is a no-op
+	// otherwise. Runs in a detached goroutine so a slow filesystem
+	// can't stall this response (see emitMissionOutcomeLessonAsync).
+	if committedTerminalStatus != "" {
+		emitMissionOutcomeLessonAsync(r.Context(), h.db, h.storagePath, missionID, committedTerminalStatus, h.logger)
 	}
 
 	// Return updated mission
