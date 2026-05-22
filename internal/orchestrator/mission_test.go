@@ -962,10 +962,10 @@ var testCtxKey = testCtxKeyType{}
 // carries values AND is later cancelled, the dispatcher MUST receive
 // a ctx that
 //
-//   1. carries the parent's values (so the trace span / auth values
-//      flow through), AND
-//   2. is NOT cancelled (so the in-flight DispatchAssignment isn't
-//      torn down when the request handler returns).
+//  1. carries the parent's values (so the trace span / auth values
+//     flow through), AND
+//  2. is NOT cancelled (so the in-flight DispatchAssignment isn't
+//     torn down when the request handler returns).
 //
 // The previous behaviour used context.Background() in five sites
 // across mission.go / mission_tasks.go / mission_tasks_planning.go
