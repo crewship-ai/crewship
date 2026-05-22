@@ -56,7 +56,7 @@ services:
   # If you add a feature that needs another endpoint (BUILD, COMMIT, ...),
   # widen this list explicitly -- defaults deny.
   docker-socket-proxy:
-    image: tecnativa/docker-socket-proxy:0.3.0
+    image: tecnativa/docker-socket-proxy:v0.4.2
     container_name: crewship-docker-proxy
     restart: unless-stopped
     environment:
