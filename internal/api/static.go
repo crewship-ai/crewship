@@ -68,6 +68,24 @@ func StaticFileHandler(webFS fs.FS) http.Handler {
 		// long-lived cache is safe and avoids re-downloading the same
 		// JS/CSS on every navigation.
 		if strings.HasPrefix(path, "_next/") {
+			// Block directory listings. http.FileServer's default
+			// behaviour when the path resolves to a directory and has
+			// no index.html is to emit an HTML autoindex -- which on
+			// /_next/static/* enumerates every chunk filename + build
+			// ID. The chunk URLs themselves are already public (the
+			// HTML references them); the *listing* is what exposes the
+			// full deploy surface. Trailing slash is the canonical
+			// signal; the no-trailing-slash variant is caught by the
+			// pre-Stat below before FileServer's redirect normalises
+			// it. Audit M10.
+			if strings.HasSuffix(path, "/") {
+				http.NotFound(w, r)
+				return
+			}
+			if info, err := fs.Stat(webFS, path); err == nil && info.IsDir() {
+				http.NotFound(w, r)
+				return
+			}
 			if strings.HasPrefix(path, "_next/static/") {
 				w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 			}
