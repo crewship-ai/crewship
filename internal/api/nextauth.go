@@ -135,13 +135,23 @@ func setAuthCookies(w http.ResponseWriter, r *http.Request, access, refresh stri
 // the browser drop the cookie.
 var forceSecureCookies = parseBoolEnv("CREWSHIP_FORCE_SECURE_COOKIES")
 
+// parseBoolEnv reads a security-sensitive boolean env var. Treating any
+// parse error as `false` would silently downgrade a typo'd
+// CREWSHIP_FORCE_SECURE_COOKIES=ture into the insecure-cookie path the
+// flag is meant to close. Fail-fast at process start so the operator
+// sees the configuration error immediately and restarts with a valid
+// value, rather than discovering the regression weeks later when an
+// MITM captures a cookie that should have been Secure.
 func parseBoolEnv(name string) bool {
 	v, ok := os.LookupEnv(name)
 	if !ok {
 		return false
 	}
 	b, err := strconv.ParseBool(strings.TrimSpace(v))
-	return err == nil && b
+	if err != nil {
+		panic(fmt.Sprintf("%s: invalid boolean value %q (accepted: 1/0, t/f, true/false, T/F, TRUE/FALSE)", name, v))
+	}
+	return b
 }
 
 func isHTTPS(r *http.Request) bool {
