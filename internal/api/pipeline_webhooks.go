@@ -29,6 +29,35 @@ func generateWebhookSigningSecret() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
+// defaultWebhookRatePerMin floors the per-token rate at 10/sec when
+// the row has rate_limit_per_min <= 0. Audit A17.2 M1: the prior
+// behaviour was "limit=0 = unlimited" at the rate-limiter level, which
+// meant every webhook created without an explicit value (the default
+// when a sender just POSTs a CreateWebhook body without
+// rate_limit_per_min) had no flood defense. 600/min is generous for
+// every legitimate burst-shape we see in production (Stripe events,
+// GitHub push hooks, ngrok-style dev tunnels) while denying a signed
+// sender from replay-bursting at line-rate.
+//
+// Operators who genuinely want unlimited can set rate_limit_per_min to
+// a high explicit value (e.g. 100000); the floor only applies when the
+// row was zero / negative.
+const defaultWebhookRatePerMin = 600
+
+// reservedWebhookInputKeys lists the inputs map keys that are derived
+// directly from the request bytes (event payload, raw body, headers).
+// Audit A17.2 M2: an operator-defined inputs_template used to be able
+// to overwrite any key in the inputs map, including these three, which
+// turned the executor into a confused deputy -- a template like
+// {"event": "tampered"} would silently replace the real payload before
+// the pipeline DSL saw it. Templates may still add new keys; they
+// just can't override the request-derived ones.
+var reservedWebhookInputKeys = map[string]struct{}{
+	"event":   {},
+	"raw":     {},
+	"headers": {},
+}
+
 // webhookResponse is the wire shape returned by webhook list/get/save.
 // The token surfaces in CRUD responses so the UI can show the user
 // the public URL once on creation; thereafter the row sits in the
@@ -296,16 +325,39 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !pipeline.AllowWebhookFire(wh.Token, wh.RateLimitPerMin) {
+	// Audit A17.2 M1: a rate_limit_per_min of 0 (the default for
+	// rows created without an explicit value) used to mean
+	// "unlimited" in pipeline.AllowWebhookFire. That left every
+	// freshly-created webhook with no flood defense -- a signed
+	// sender could replay-burst at line-rate and the only guard was
+	// the per-run idempotency window. Floor at defaultWebhookRatePerMin
+	// (600/min ≈ 10/s) when the operator hasn't set a stricter
+	// limit; explicit non-zero values pass through unchanged so an
+	// operator who wants "unlimited" can still set a high cap
+	// (e.g. 100000) deliberately.
+	effectiveLimit := wh.RateLimitPerMin
+	if effectiveLimit <= 0 {
+		effectiveLimit = defaultWebhookRatePerMin
+	}
+	if !pipeline.AllowWebhookFire(wh.Token, effectiveLimit) {
 		w.Header().Set("Retry-After", "60")
 		replyError(w, http.StatusTooManyRequests, "rate limit exceeded")
 		return
 	}
 
 	// Build pipeline inputs. Default: pass body under "event" so the
-	// pipeline can reference {{ inputs.event }}. The
-	// inputs_template (if non-empty) is merged on top so a webhook
-	// can hand-shape the event into the pipeline's input schema.
+	// pipeline can reference {{ inputs.event }}. The inputs_template
+	// (if non-empty) is merged on top so a webhook can hand-shape
+	// the event into the pipeline's input schema.
+	//
+	// Audit A17.2 M2 (confused-deputy): the merge used to overwrite
+	// any key, including the canonical request-derived fields
+	// (event / raw / headers). An operator-defined template like
+	// {"event": "tampered"} would silently replace the actual
+	// payload bytes before the pipeline ever saw them. Reserve the
+	// three request-derived keys: if a template includes them,
+	// drop the template's value (request bytes win). The template
+	// is still useful for layering NEW keys onto the input shape.
 	inputs := map[string]any{
 		"event":   tryParseJSON(body),
 		"raw":     string(body),
@@ -315,6 +367,17 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 		var tmpl map[string]any
 		if err := json.Unmarshal([]byte(wh.InputsTemplateJSON), &tmpl); err == nil {
 			for k, v := range tmpl {
+				if _, reserved := reservedWebhookInputKeys[k]; reserved {
+					// Operator template tried to override a
+					// request-derived field. Log once + skip --
+					// don't fail the request (legacy templates
+					// in production might lean on the old shape;
+					// surface the warning so the operator can
+					// clean up).
+					h.logger.Warn("webhook inputs_template tried to override reserved key",
+						"webhook_id", wh.ID, "key", k)
+					continue
+				}
 				inputs[k] = v
 			}
 		}
