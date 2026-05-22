@@ -112,9 +112,15 @@ func (h *WebhookHandler) trigger(ctx context.Context, crewID, agentID string, pa
 		payload.Event, payload.Source, payload.Data)
 
 	// 6. Run agent (async)
+	// WithoutCancel preserves the request's OTel trace span + auth values so
+	// the async run remains observable, while shedding the request's
+	// cancellation -- the webhook library's handler returns to the caller
+	// before this goroutine finishes, and the request's ctx is cancelled
+	// once the response flushes. The `ctx` parameter is the request ctx
+	// threaded in from the webhook handler.
+	parentCtx := context.WithoutCancel(ctx)
 	go func() {
-		// Use a fresh context for the background run
-		runCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		runCtx, cancel := context.WithTimeout(parentCtx, 10*time.Minute)
 		defer cancel()
 
 		req := orchestrator.AgentRunRequest{

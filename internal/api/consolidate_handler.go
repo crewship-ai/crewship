@@ -180,18 +180,20 @@ func (h *ConsolidateHandler) Run(w http.ResponseWriter, r *http.Request) {
 	workerID := "csd_" + generateCUID()[:12]
 	h.emitTriggered(r.Context(), workspaceID, body.CrewID, actorID, workerID, "manual")
 
-	// Kick the run in the background. We don't cancel on request
-	// cancel — the caller has already received 202 and the worker
-	// should run to completion against its own ledger. Downstream
-	// handler tests pass a sync.WaitGroup via t.Cleanup when they
-	// need to observe the emit.
+	// Kick the run in the background. context.WithoutCancel preserves the
+	// request's OTel span + auth values so the worker remains observable +
+	// audited; we don't want the request's *cancellation* to propagate
+	// (the caller has already received 202 and the worker should run to
+	// completion against its own ledger). Downstream handler tests pass
+	// a sync.WaitGroup via t.Cleanup when they need to observe the emit.
+	parentCtx := context.WithoutCancel(r.Context())
 	go func() {
 		defer func() {
 			h.mu.Lock()
 			delete(h.running, workspaceID)
 			h.mu.Unlock()
 		}()
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		ctx, cancel := context.WithTimeout(parentCtx, 10*time.Minute)
 		defer cancel()
 		h.runOnce(ctx, workspaceID, body.CrewID, sinceDur, workerID)
 	}()
