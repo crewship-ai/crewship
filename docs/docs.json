@@ -394,6 +394,16 @@
             ]
           }
         ]
+      },
+      {
+        "tab": "Changelog",
+        "groups": [
+          {
+            "group": "Changelog",
+            "icon": "rss",
+            "pages": ["changelog/overview"]
+          }
+        ]
       }
     ]
   },
