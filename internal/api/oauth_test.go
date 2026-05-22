@@ -79,8 +79,8 @@ func TestGenerateOAuthState(t *testing.T) {
 	if a == b {
 		t.Error("state should be unique")
 	}
-	if len(a) != 32 {
-		t.Errorf("state length = %d, want 32 (16 bytes hex)", len(a))
+	if len(a) != 64 {
+		t.Errorf("state length = %d, want 64 (32 bytes hex)", len(a))
 	}
 }
 

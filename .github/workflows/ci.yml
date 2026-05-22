@@ -257,7 +257,6 @@ jobs:
   # compile errors; embed-path regressions are rare enough that post-merge
   # detection is acceptable for the budget.
   binary:
-    needs: [merge-conflict-markers]
     name: Binary Build
     runs-on: ubuntu-latest
     # 15 min: ubuntu-latest setup-go is consistent enough that 10
