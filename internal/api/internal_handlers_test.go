@@ -1311,15 +1311,37 @@ func TestProxyChatMessages_NewSession(t *testing.T) {
 	t.Parallel()
 	db := setupTestDB(t)
 	userID := seedTestUser(t, db)
-	seedTestWorkspace(t, db, userID)
+	wsID := seedTestWorkspace(t, db, userID)
 	h := NewProxyHandler(db, testLogger(), "/tmp/no-such-socket")
+	// Audit #495 follow-up adds canRole("read") gate to ChatMessages.
+	// Use withWorkspaceUser so the role is populated -- without it
+	// the gate falls through to 403 before any chat lookup.
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.SetPathValue("chatId", "missing-chat")
-	req = req.WithContext(withUser(req.Context(), &AuthUser{ID: userID}))
+	req = withWorkspaceUser(req, userID, wsID, "OWNER")
 	w := httptest.NewRecorder()
 	h.ChatMessages(w, req)
 	if w.Code != http.StatusOK {
 		t.Errorf("status = %d, want 200 (empty messages)", w.Code)
+	}
+}
+
+// TestProxyChatMessages_EmptyRole_Forbidden pins the audit #495
+// follow-up role-gate on ChatMessages -- an empty role must NOT
+// reach the chat lookup. Mirrors TestAgentReadHandlers_EmptyRole_Forbidden.
+func TestProxyChatMessages_EmptyRole_Forbidden(t *testing.T) {
+	t.Parallel()
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	h := NewProxyHandler(db, testLogger(), "/tmp/no-such-socket")
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.SetPathValue("chatId", "any")
+	req = withWorkspaceUser(req, userID, wsID, "")
+	w := httptest.NewRecorder()
+	h.ChatMessages(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Errorf("empty-role status = %d, want 403", w.Code)
 	}
 }
 

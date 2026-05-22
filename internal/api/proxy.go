@@ -166,6 +166,16 @@ func (h *ProxyHandler) AgentLogs(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
 
+	// Audit M13: agent logs are sensitive (may contain prompts,
+	// partial responses, secrets that escaped lookout.Redact). Gate
+	// on "read" so an empty / VIEWER role can't tail another tenant's
+	// agent traffic.
+	role := RoleFromContext(r.Context())
+	if !canRole(role, "read") {
+		replyError(w, http.StatusForbidden, "Forbidden")
+		return
+	}
+
 	limitInt, offsetInt := parsePagination(r, 100, 500)
 	offset := strconv.Itoa(offsetInt)
 	limit := strconv.Itoa(limitInt)
@@ -248,6 +258,13 @@ func (h *ProxyHandler) AgentStop(w http.ResponseWriter, r *http.Request) {
 func (h *ProxyHandler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 	chatID := r.PathValue("chatId")
 	user := UserFromContext(r.Context())
+	// Audit #495 follow-up: read-tier gate. The existing workspace_member
+	// lookup tests *membership* but not *role* -- canRole(role, "read")
+	// fails closed on empty / unmapped role.
+	if !canRole(RoleFromContext(r.Context()), "read") {
+		replyError(w, http.StatusForbidden, "Forbidden")
+		return
+	}
 
 	var chatWSID string
 	err := h.db.QueryRowContext(r.Context(),
@@ -295,6 +312,11 @@ func (h *ProxyHandler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 func (h *ProxyHandler) AgentGitLog(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
+	// Audit #495 follow-up: read-tier gate matches the AgentFiles trio.
+	if !canRole(RoleFromContext(r.Context()), "read") {
+		replyError(w, http.StatusForbidden, "Forbidden")
+		return
+	}
 
 	var slug, crewID sql.NullString
 	err := h.db.QueryRowContext(r.Context(),

@@ -28,6 +28,40 @@ func newProxyHandlerWithCrewWorkspace(t *testing.T, socketPath string) (*ProxyHa
 	return h, userID, wsID, "crew-pf"
 }
 
+// ---- AgentFiles / AgentFileDownload / AgentLogs role gate (audit M13) ----
+
+// TestAgentReadHandlers_EmptyRole_Forbidden pins the audit M13 role-gate
+// contract for the three sibling read handlers. canRole("", "read")
+// returns false so the gate fails closed against auth-middleware-bypass
+// scenarios where a request lands with an empty role. Table-driven so a
+// per-handler regression (one site reverted, two still gated) surfaces
+// as the specific subtest failure (CodeRabbit #495 nitpick).
+func TestAgentReadHandlers_EmptyRole_Forbidden(t *testing.T) {
+	h, userID, wsID, _ := newProxyHandlerWithCrewWorkspace(t, "/tmp/no-such-socket")
+
+	cases := []struct {
+		name    string
+		path    string
+		handler func(http.ResponseWriter, *http.Request)
+	}{
+		{"AgentFiles", "/x", h.AgentFiles},
+		{"AgentFileDownload", "/x?path=foo", h.AgentFileDownload},
+		{"AgentLogs", "/x", h.AgentLogs},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", tc.path, nil)
+			req.SetPathValue("agentId", "ag-fake")
+			req = withWorkspaceUser(req, userID, wsID, "")
+			rr := httptest.NewRecorder()
+			tc.handler(rr, req)
+			if rr.Code != http.StatusForbidden {
+				t.Errorf("%s empty-role status = %d, want 403", tc.name, rr.Code)
+			}
+		})
+	}
+}
+
 // ---- CrewFileSave ----
 
 func TestCrewFileSave_VIEWER_Forbidden(t *testing.T) {
