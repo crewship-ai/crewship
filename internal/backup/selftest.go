@@ -307,7 +307,10 @@ func readCanary(ctx context.Context, ops DockerOps, containerID, canaryPath, can
 		}
 		// Docker's CopyFromContainer returns entries with the basename.
 		if hdr.Name == canaryName || hdr.Name == "./"+canaryName {
-			return io.ReadAll(tr)
+			// PR #493 follow-up: canary is at most ~64 bytes in practice.
+			// 1 KiB cap rejects a malicious tar that claimed 10 GB for
+			// this entry before io.ReadAll allocates.
+			return io.ReadAll(io.LimitReader(tr, maxBackupCanaryBytes))
 		}
 	}
 }

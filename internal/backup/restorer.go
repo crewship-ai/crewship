@@ -272,7 +272,10 @@ func ExtractPayload(ctx context.Context, payload io.Reader) (*ExtractedPayload, 
 
 		switch {
 		case name == "db/dump.json":
-			data, err := io.ReadAll(tr)
+			// PR #493 follow-up: bound at maxBackupDBDumpBytes so an
+			// attacker-claimed hdr.Size of 10 GB can't OOM the restorer
+			// before UnmarshalDump even runs.
+			data, err := io.ReadAll(io.LimitReader(tr, maxBackupDBDumpBytes))
 			if err != nil {
 				return nil, err
 			}
@@ -288,7 +291,9 @@ func ExtractPayload(ctx context.Context, payload io.Reader) (*ExtractedPayload, 
 				continue
 			}
 			slug, file := parts[0], parts[1]
-			data, err := io.ReadAll(tr)
+			// PR #493 follow-up: devcontainer + mise blobs are < few KB;
+			// bound the read at 5 MB to deny tar-bomb allocations.
+			data, err := io.ReadAll(io.LimitReader(tr, maxBackupDevcontainerEntryBytes))
 			if err != nil {
 				return nil, err
 			}
