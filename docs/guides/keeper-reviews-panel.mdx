@@ -1,0 +1,188 @@
+---
+title: "Keeper Reviews — admin panel workflow"
+description: "Operator playbook for the Keeper Phase 2 reviews panel in the admin UI — triaging the four evaluator queues, investigating decisions, approving pending lesson proposals."
+icon: "shield-check"
+---
+
+# Keeper Reviews — admin panel workflow
+
+The **Admin → Keeper Reviews** panel surfaces every Keeper Phase 2 decision the platform has logged. Four sub-tabs correspond to the four F4 evaluators (PRD §6 F4.1–4.4); each row is one evaluator decision with the full LLM prompt + response retained for forensic inspection.
+
+This page is the **operator playbook** — how to read the panel, what to do with each row, when to override an evaluator decision. For the per-endpoint API reference see [Admin API → Keeper Phase 2](/api-reference/admin#keeper-phase-2--f4-evaluators); for the gate that controls auto-apply behaviour see [Autonomy + self-learning](/guides/autonomy-and-self-learning).
+
+## What the panel shows
+
+```
+┌─ Keeper Reviews ──────────────────────────────────────┐
+│ [Skill Review F4.1] [Behavior F4.2] [Memory Health   │
+│  F4.3] [Negative Learning F4.4]   ⟲ Refresh           │
+│                                                       │
+│ ─── Skill Review (3 pending) ──────────────────────── │
+│ Anna · ops · ALLOW · risk 2 · 2026-05-21 04:03        │
+│ → Skill still actively used (4 invocations in 30d…)   │
+│                                                       │
+│ Bob · ops · DENY · risk 7 · 2026-05-21 04:03          │
+│ → Failures dominating (3 of last 5); recommend stale  │
+│                                                       │
+│ Carol · qa · ESCALATE · risk 5 · 2026-05-21 04:03     │
+│ → Low usage + recent assignment; needs manager review │
+└───────────────────────────────────────────────────────┘
+```
+
+Backend reads from one source of truth — `GET /api/v1/admin/keeper/requests?limit=200` — and the panel filters client-side by `request_type`. The panel pulls a wide window (200 rows) so all four sub-tabs render from a single round-trip; if the workload outgrows that ceiling the server adds a `?request_type=` filter (currently not warranted).
+
+## The four sub-tabs
+
+### F4.1 Skill Review
+
+Cron-fires daily 03:00 UTC. Every skill in the workspace gets evaluated against:
+
+- `last_used_at` (when did any agent last invoke it)
+- `assignments` (how many agents have it assigned)
+- `stats.invocations_30d` + `stats.failures_30d`
+- `failure_snippets` (last 3 failure excerpts, if any)
+
+The evaluator returns one of:
+
+| Decision | What it means | Operator action |
+|---|---|---|
+| **ALLOW** | Skill is fine. Keeps `lifecycle_state='active'`, bumps the verify clock. | Nothing — review later if the rationale changes. |
+| **DENY** | Failures dominating, or no recent usage. Recommends `stale` (still callable but flagged) or `archived` (hidden from new assignments). Routes a blocking inbox row to the assigned agents' workspace. | Open the row, read the failure snippets, decide: confirm the lifecycle transition via inbox approve, or push back via inbox reject. |
+| **ESCALATE** | The LLM is uncertain — risk score is high but no clear DENY signal. Manager-targeted inbox row. | Read the LLM rationale, make the call. Often the right answer is "this is a manual call I should make based on context the LLM doesn't have." |
+
+### F4.2 Behavior
+
+Sampled post-tool-call. The orchestrator's `EventPostToolCall` hook fires on a per-crew rate (default 1-in-5) and runs the tool-call shape through the evaluator. Each row carries:
+
+- `tool_name` (`shell_exec`, `http_post`, `file_write`, etc.)
+- `tool_args_snippet` (truncated args — secrets scrubbed before storage)
+- `decision` + `risk_score`
+- `should_block` (true only when crew's `behavior_mode='block'` AND decision is DENY)
+
+For `behavior_mode='warn'` (the default) every DENY here is a **non-blocking** inbox notification — the agent's NEXT tool call proceeds. The operator's job is to skim the warns, spot patterns ("agent X keeps trying to call `rm -rf`"), and either:
+
+- Tighten the crew's autonomy_level (`crewship policy set --autonomy strict`)
+- Update the agent's PERSONA.md to explicitly forbid the pattern (operator-only edit)
+- Flip the crew to `behavior_mode='block'` once you trust the signal enough that interrupts are worth it
+
+### F4.3 Memory Health
+
+Cron-fires daily 03:30 UTC (30-min offset from skill review to avoid both LLM cron jobs hammering at the same wall-clock time). Each row carries a `HealthSnapshot`:
+
+- `reachability_pct` (what fraction of memory rows have at least one inbound reference)
+- `stalest_entry_days` (oldest unreferenced row's age)
+- `contradiction_count` (rows in `memory_relations` with `kind='refutes'`)
+
+Decision matrix:
+
+| Snapshot signal | Likely decision | Auto-action |
+|---|---|---|
+| Reachability > 80%, stalest < 90 days, 0 contradictions | ALLOW | None |
+| Reachability < 60% OR stalest > 365 days | DENY | `auto_consolidate=true` → triggers `consolidator.Run` for the workspace |
+| Mixed signals, contradictions > 0 | ESCALATE | Blocking inbox — operator reads which rows contradict each other and decides which is canonical |
+
+`auto_consolidate=true` runs the consolidator without operator approval — it's a maintenance action, not a policy decision. The journal records every consolidator run for postmortem.
+
+### F4.4 Negative Learning
+
+Fires after a guardrail trip, run failure, or explicit "log this lesson" trigger. Each row asks: should this failure produce a `kind='negative'` lesson in the agent's `lessons.md`?
+
+The decision interacts with **self_learning_enabled** (v106 — see [Autonomy + self-learning](/guides/autonomy-and-self-learning)):
+
+| Decision | self_learning=1 | self_learning=0 (default) |
+|---|---|---|
+| ALLOW | Lesson auto-applies. Row shows `decision=ALLOW`, `write_lesson=true`, `lesson_id=…`. Nothing for operator to do. | Lesson queued in inbox with `self_learning_gate=off` marker. Row still shows `decision=ALLOW`. Operator approves via inbox; lesson lands then. |
+| DENY | Lesson discarded ("Curator dropped the failure as transient/noise"). Blocking inbox row so operator can see signals that disappeared — auditable failure-feedback path. | Same. |
+| ESCALATE | Blocking inbox row for operator decision. | Same. |
+
+**Important UX trap to avoid:** an ALLOW row for an agent with `self_learning=0` will look like the lesson auto-applied (because the response says `write_lesson=true`). It DIDN'T — check the agent's `lessons.md` to confirm, and check the inbox for the pending approval. The audit-row's `payload_json` contains `"self_learning_gate": "off"` when this gate fired.
+
+## Row detail — what to read
+
+Click any row to open the detail sheet. Fields you'll care about:
+
+### Agent + crew context
+
+`agent_name`, `crew_name`, `agent_id` (linkable to the agent canvas), `crew_id` (linkable to the crew canvas). Helpful for "which agent / crew is generating most of these reviews" patterns.
+
+### Decision triple
+
+`decision` (ALLOW/DENY/ESCALATE) + `reason` (one-line LLM summary) + `risk_score` (1-10 integer the evaluator self-assessed). Risk above 7 is rare and worth investigating even when the decision is ALLOW — it usually means the LLM found context that's worth the operator seeing.
+
+### Full LLM round-trip
+
+`ollama_prompt` (full prompt the evaluator sent — includes the request body + the system prompt + any context the evaluator built) and `ollama_raw_response` (raw JSON the LLM returned, before the decision-parser normalised it). Both are stored verbatim so a postmortem can reconstruct exactly what the evaluator saw and what it answered.
+
+**Use these to debug "the LLM made the wrong call here" cases.** Common failure modes:
+
+- The prompt didn't include enough context — operator updates the evaluator's prompt template (engineering work)
+- The LLM mis-parsed the request — operator switches the F3 aux model slot to a stronger model temporarily
+- The decision-parser tripped on an edge case — operator files a bug against the F4 normaliser
+
+### Secrets handling
+
+The `tool_args_snippet` and `failure_snippet` fields pass through `redactSecrets()` (`app/(dashboard)/admin/utils.ts`) before render. API keys, OpenAI tokens, JWTs, `Authorization: Bearer …` headers etc. get replaced with `[REDACTED:type]` markers. If you see `[REDACTED:openai-key]` in a snippet, that's the panel doing its job — the underlying audit row also has the secret scrubbed (the scrubber from Layer 3 ran on ingestion).
+
+## Operator workflows
+
+### "Triaging the morning backlog"
+
+After overnight cron runs, the panel typically has 10–50 pending rows across the four tabs. Suggested sweep order:
+
+1. **F4.4 Negative Learning first** — these are blocking inbox rows that hold the agent's mission until you approve/reject. Anything that's been sitting > 12 hours is hurting the agent's velocity.
+2. **F4.1 Skill Review** — DENY rows recommend lifecycle transitions. Confirm or push back; the assigned agents will pick up the new state on next invocation.
+3. **F4.3 Memory Health** — ESCALATE rows need eyeball on the contradiction surface. ALLOW + auto_consolidate already ran without you; nothing to do.
+4. **F4.2 Behavior** — warn-mode rows are pattern-spotting; you don't action them individually, you look for repeated patterns and tighten policy.
+
+### "Why did Anna's skill get archived overnight?"
+
+1. Open Admin → Keeper Reviews → Skill Review
+2. Filter by `agent_name=Anna` (browser Cmd+F — the panel doesn't have search yet; tracked as a UI nice-to-have)
+3. Click the matching row
+4. Read `ollama_prompt` to see the stats the evaluator received
+5. Read `ollama_raw_response` to see the LLM's full rationale
+6. If the decision was wrong, revert by setting `lifecycle_state` back via SQL (no UI override yet — tracked as a UI follow-up) and either:
+   - Update the skill's failure-tolerance threshold in the evaluator prompt template (eng work)
+   - Add the skill to the per-crew skill protection list (`crewship skill protect <id>`) so future reviews can't archive it
+
+### "I think the behavior monitor is too noisy"
+
+Symptoms: every other row in F4.2 is DENY for the same `tool_name` and the agent's chat is unaffected (warn mode). The evaluator is over-firing.
+
+Fixes in order of preference:
+
+1. Update the agent's PERSONA.md to explain the legitimate use case for that tool — the next F4.2 evaluation reads the persona and is less likely to DENY
+2. Lower the F4.2 sampling rate for the crew (`crewship policy set --behavior-sample-rate 20` — every 20th call instead of 1-in-5)
+3. Switch the F3 `Behavior` aux slot to a stricter model that's less prone to false positives
+
+If symptoms persist, file an issue — the F4.2 prompt template may need a tightening pass.
+
+## Auto-refresh + filters
+
+The panel does NOT auto-refresh — the operator clicks **Refresh** to pull the latest 200 rows. This is intentional: F4 cron decisions land in bursts (daily 03:00 + 03:30 UTC) and a polling refresh would generate API noise without buying anything. The decision is reversible; if operators ask for live updates a 60-second polling refresh can land.
+
+Sub-tab counts are live within the 200-row window — switching tabs is instant (client-side filter). The count badge next to each sub-tab label reads the filtered row count.
+
+## Keyboard navigation
+
+The sub-tab strip is WAI-ARIA compliant:
+
+- `ArrowLeft` / `ArrowRight` cycle through the four tabs
+- `Home` jumps to the first tab; `End` jumps to the last
+- `Tab` from inside the panel exits to the next form control (roving `tabIndex`)
+- Active tab carries `aria-selected="true"` for screen readers
+
+## What's NOT in the panel (tracked follow-ups)
+
+- **Per-row override action** — currently no "force ALLOW" / "force DENY" button. Overrides go through SQL or via re-running the evaluator with adjusted inputs. UI override = future PR.
+- **Free-text search** — browser Cmd+F is the only search today. Server-side filtering would need `?request_type=&q=` API extension.
+- **Auto-refresh polling** — see above; deliberate.
+- **Bulk action** — no "approve all pending lesson proposals" — every approval is per-row by design (audit trail).
+- **Export** — no CSV download. Use `GET /api/v1/admin/keeper/requests?limit=200&offset=N` directly + `jq` for now.
+
+## Related
+
+- [Admin API → Keeper Phase 2](/api-reference/admin#keeper-phase-2--f4-evaluators) — per-endpoint reference for the four evaluator routes
+- [Autonomy + self-learning](/guides/autonomy-and-self-learning) — the policy + self_learning gates these decisions flow through
+- [Inbox guide](/guides/inbox) — where DENY + ESCALATE rows surface for operator approval
+- [Keeper guide](/guides/keeper) — Phase 1 (access/execute) decisions on the same panel
