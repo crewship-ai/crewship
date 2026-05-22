@@ -9,7 +9,7 @@
 # BuildKit (default on modern Docker; enable with DOCKER_BUILDKIT=1 on
 # old daemons) and the syntax directive above.
 
-FROM node:24-alpine AS frontend
+FROM node:26-alpine AS frontend
 RUN corepack enable pnpm
 WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
