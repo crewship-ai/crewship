@@ -1,0 +1,87 @@
+name: Merge Marker Guard
+
+# Catches the failure mode that landed an unresolved git conflict inside a
+# Go raw-string SQL query in agent_config.go (ADDENDUM iter-1.5 P0 finding).
+# The Go compiler accepts conflict markers inside raw strings as valid
+# string content, so the build passes; the bug only surfaces at runtime
+# when the query runs. gosec / semgrep / golangci-lint --enable-all all
+# missed it because none of them parse string-literal content for the
+# `<<<<<<< / ======= / >>>>>>>` pattern.
+#
+# This workflow is the explicit guard the audit asked for. It scans the
+# diff scope (not the full repo) so a known marker present on the base
+# branch -- ie. while PR #475 is open to fix the existing instance --
+# does NOT block unrelated PRs from merging. New markers in any newly
+# added or modified file fail fast with file:line context.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: merge-marker-guard-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scan:
+    name: Scan diff for unresolved merge markers
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      # fetch-depth: 0 so the diff base ref is locally resolvable.
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+
+      - name: Resolve diff base
+        id: base
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            # Diff vs the PR's target branch (typically main).
+            echo "ref=origin/$BASE_REF" >> "$GITHUB_OUTPUT"
+          else
+            # Push to main: diff vs the previous commit, so we catch the
+            # rare direct push that lands a marker outside the PR flow.
+            echo "ref=HEAD~1" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Scan changed files
+        env:
+          BASE: ${{ steps.base.outputs.ref }}
+        run: |
+          # The marker regex anchors at start-of-line. ^[<=>]{7}( |$) matches
+          # the canonical Git form: 7 chars of <, =, or > followed by either
+          # a space (with branch name, eg. "<<<<<<< HEAD") or end-of-line
+          # (the "=======" separator). Restricting to start-of-line and
+          # exactly 7 chars avoids false positives on legitimate string
+          # content (eg. "======================================" in
+          # markdown rulers, "<<<" in code comments).
+          #
+          # File globs limit the scan to types where markers are plausibly
+          # load-bearing AND syntactically valid string content (the case
+          # the audit caught). Add more globs if a future bug surfaces
+          # from a different file type.
+          mapfile -t changed < <(git diff --name-only --diff-filter=AM "$BASE"...HEAD -- \
+              '*.go' '*.ts' '*.tsx' '*.js' '*.jsx' '*.py' \
+              '*.sql' '*.yml' '*.yaml' '*.toml' '*.json' \
+              '*.md' '*.sh' 'Dockerfile' '*.Dockerfile')
+          if [ "${#changed[@]}" -eq 0 ]; then
+            echo "No relevant files changed in this diff."
+            exit 0
+          fi
+          if grep -nE '^[<=>]{7}( |$)' "${changed[@]}" ; then
+            echo ""
+            echo "::error::Unresolved git merge markers found in changed files."
+            echo "::error::These survive go build inside raw strings and only fail at runtime."
+            echo "::error::See ADDENDUM iter-1.5 P0 for the failure mode this guard prevents."
+            exit 1
+          fi
+          echo "No unresolved merge markers in ${#changed[@]} changed file(s)."
