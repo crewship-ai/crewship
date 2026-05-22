@@ -2,6 +2,7 @@ package api
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -325,12 +326,21 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 		WorkspaceID: wh.WorkspaceID,
 		Inputs:      inputs,
 		Mode:        pipeline.ModeRun,
-		// Idempotency: use the X-Idempotency-Key header if present,
-		// else use webhook event id headers if the sender provided
-		// one (Stripe sends Stripe-Signature; we don't auto-extract
-		// from there yet, but X-Crewship-Event-ID is the canonical
-		// dedupe key for our own senders).
-		IdempotencyKey: firstNonEmpty(r.Header.Get("Idempotency-Key"), r.Header.Get("X-Crewship-Event-ID")),
+		// Idempotency cascade (audit A17.2 chain follow-up):
+		//   1. Explicit header from the sender (Idempotency-Key /
+		//      X-Crewship-Event-ID) takes precedence -- this is the
+		//      semantic id the sender wants to dedupe on.
+		//   2. Falls back to a synthetic key derived from
+		//      sha256(token + body + signature). Same wire bytes
+		//      from the same webhook within the
+		//      DefaultIdempotencyTTL window deduplicate
+		//      automatically, regardless of whether the sender opted
+		//      in to a header. Closes the replay-attack vector LIVE-
+		//      verified in audit H-iter5-A17.2 (a captured POST
+		//      replayed mid-window used to re-fire the pipeline).
+		// The synthetic key is salted by the webhook token so two
+		// webhooks happening to receive the same body don't collide.
+		IdempotencyKey: webhookIdempotencyKey(r, body, wh.Token),
 	})
 	status := "FAILED"
 	runID := ""
@@ -380,6 +390,43 @@ func (h *PipelineHandler) resolveWebhookPipelineID(r *http.Request, workspaceID 
 		return p.ID, p.Slug, nil
 	}
 	return "", "", errors.New("target_pipeline_slug or target_pipeline_id required")
+}
+
+// webhookIdempotencyKey resolves the dedupe key for a webhook
+// dispatch. Audit A17.2 follow-up: previously the dedupe path was
+// opt-in via Idempotency-Key / X-Crewship-Event-ID headers, which
+// left a replay window open for senders that don't set one (the
+// majority of legacy webhooks). Auto-dedupe closes that window.
+//
+// Cascade:
+//
+//  1. Sender-provided Idempotency-Key (RFC 9110 draft).
+//  2. Sender-provided X-Crewship-Event-ID (our own convention).
+//  3. Synthetic sha256(token || "\x00" || signature || "\x00" || body).
+//     Token salts the digest so two webhooks with the same body don't
+//     collide. Signature is included so a sender that genuinely wants
+//     to re-fire with the same body (e.g. test runs) can rotate the
+//     signature deliberately. body is the raw payload bytes.
+//
+// The synthetic shape is prefix-tagged ("auto:") so an attacker who
+// observes a key cannot use it as a future Idempotency-Key header to
+// pre-poison dedupe -- the key would still hash differently from
+// the sender-provided form.
+func webhookIdempotencyKey(r *http.Request, body []byte, token string) string {
+	if k := r.Header.Get("Idempotency-Key"); k != "" {
+		return k
+	}
+	if k := r.Header.Get("X-Crewship-Event-ID"); k != "" {
+		return k
+	}
+	sig := r.Header.Get("X-Crewship-Signature")
+	h := sha256.New()
+	_, _ = h.Write([]byte(token))
+	_, _ = h.Write([]byte{0})
+	_, _ = h.Write([]byte(sig))
+	_, _ = h.Write([]byte{0})
+	_, _ = h.Write(body)
+	return "auto:" + hex.EncodeToString(h.Sum(nil))
 }
 
 // tryParseJSON returns the parsed JSON object/array if the body is

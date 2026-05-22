@@ -631,3 +631,77 @@ func TestPipelineWebhooks_Fire_EmptySecretRowRejected(t *testing.T) {
 		t.Errorf("expected unified 'signature mismatch' body, got %q", rr.Body.String())
 	}
 }
+
+// TestWebhookIdempotencyKey_Cascade pins the audit A17.2 follow-up
+// dedupe cascade: Idempotency-Key wins, then X-Crewship-Event-ID,
+// then a synthetic sha256(token||sig||body) fallback so senders
+// that never opted into a header still get replay protection.
+func TestWebhookIdempotencyKey_Cascade(t *testing.T) {
+	body := []byte(`{"event":"x"}`)
+	const token = "tok_test"
+
+	mkReq := func(headers map[string]string) *http.Request {
+		req := httptest.NewRequest("POST", "/x", strings.NewReader(string(body)))
+		for k, v := range headers {
+			req.Header.Set(k, v)
+		}
+		return req
+	}
+
+	t.Run("Idempotency-Key wins", func(t *testing.T) {
+		got := webhookIdempotencyKey(mkReq(map[string]string{
+			"Idempotency-Key":     "primary-key",
+			"X-Crewship-Event-ID": "fallback-event",
+		}), body, token)
+		if got != "primary-key" {
+			t.Errorf("got %q, want primary-key", got)
+		}
+	})
+
+	t.Run("X-Crewship-Event-ID fallback", func(t *testing.T) {
+		got := webhookIdempotencyKey(mkReq(map[string]string{
+			"X-Crewship-Event-ID": "event-42",
+		}), body, token)
+		if got != "event-42" {
+			t.Errorf("got %q, want event-42", got)
+		}
+	})
+
+	t.Run("synthetic fallback when no header", func(t *testing.T) {
+		got := webhookIdempotencyKey(mkReq(nil), body, token)
+		if !strings.HasPrefix(got, "auto:") {
+			t.Fatalf("synthetic key should be auto:-prefixed, got %q", got)
+		}
+		// Determinism: same wire bytes + same webhook = same key.
+		got2 := webhookIdempotencyKey(mkReq(nil), body, token)
+		if got != got2 {
+			t.Errorf("synthetic key not deterministic: %q vs %q", got, got2)
+		}
+	})
+
+	t.Run("synthetic salted by token", func(t *testing.T) {
+		a := webhookIdempotencyKey(mkReq(nil), body, "tok_a")
+		b := webhookIdempotencyKey(mkReq(nil), body, "tok_b")
+		if a == b {
+			t.Errorf("two webhooks with same body must NOT collide; both = %q", a)
+		}
+	})
+
+	t.Run("synthetic varies with signature", func(t *testing.T) {
+		// Senders that genuinely want a re-fire can rotate the
+		// signature header to bypass dedupe -- pin that contract.
+		a := webhookIdempotencyKey(mkReq(map[string]string{"X-Crewship-Signature": "sig-a"}), body, token)
+		b := webhookIdempotencyKey(mkReq(map[string]string{"X-Crewship-Signature": "sig-b"}), body, token)
+		if a == b {
+			t.Errorf("rotating signature should produce distinct synthetic keys; both = %q", a)
+		}
+	})
+
+	t.Run("synthetic varies with body", func(t *testing.T) {
+		a := webhookIdempotencyKey(mkReq(nil), []byte(`{"a":1}`), token)
+		b := webhookIdempotencyKey(mkReq(nil), []byte(`{"a":2}`), token)
+		if a == b {
+			t.Errorf("different bodies must produce different synthetic keys; both = %q", a)
+		}
+	})
+}
