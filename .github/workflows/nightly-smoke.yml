@@ -47,6 +47,13 @@ jobs:
       - name: Resolve and download nightly archive + checksums + signatures
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Route github expressions through env so the shell never
+          # interpolates them inline. CodeQL js/actions/code-injection
+          # flags ${{ github.* }} in run: blocks even though these
+          # values are not attacker-controllable in this workflow
+          # (PR title / branch name don't reach github.repository).
+          # Matches the pattern PR #483 landed in migration-lint.yml.
+          REPO: ${{ github.repository }}
         shell: bash
         run: |
           set -euo pipefail
@@ -58,7 +65,7 @@ jobs:
           # leave stale assets behind, and a glob+head silently
           # validates whichever sorted first. Fail loudly on >1 match.
           mapfile -t MATCHES < <(gh release view nightly \
-            --repo "${{ github.repository }}" \
+            --repo "$REPO" \
             --json assets \
             --jq '.assets[].name | select(test("linux_amd64\\.tar\\.gz$"))')
           if [ "${#MATCHES[@]}" -eq 0 ]; then
@@ -75,7 +82,7 @@ jobs:
           echo "Resolved archive: $ARCHIVE"
           echo "ARCHIVE=$ARCHIVE" >> "$GITHUB_ENV"
           gh release download nightly \
-            --repo "${{ github.repository }}" \
+            --repo "$REPO" \
             --pattern "$ARCHIVE" \
             --pattern 'checksums.txt' \
             --pattern 'checksums.txt.sig' \
@@ -88,12 +95,14 @@ jobs:
         # nightly publish didn't run sign-blob, or the bundle was
         # tampered with on GHCR / GitHub Releases. Either way, refuse
         # to trust the binary downstream.
+        env:
+          REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           cosign verify-blob \
             --certificate checksums.txt.pem \
             --signature checksums.txt.sig \
-            --certificate-identity-regexp 'https://github\.com/${{ github.repository }}/\.github/workflows/nightly\.yml@.*' \
+            --certificate-identity-regexp "https://github\\.com/$REPO/\\.github/workflows/nightly\\.yml@.*" \
             --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
             checksums.txt
 
@@ -218,14 +227,18 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Pull nightly image
+        env:
+          OWNER: ${{ github.repository_owner }}
         run: |
           set -euo pipefail
-          docker pull "ghcr.io/${{ github.repository_owner }}/crewship:nightly"
+          docker pull "ghcr.io/$OWNER/crewship:nightly"
 
       - name: Probe `crewship version` inside container
+        env:
+          OWNER: ${{ github.repository_owner }}
         run: |
           set -euo pipefail
-          OUT=$(docker run --rm "ghcr.io/${{ github.repository_owner }}/crewship:nightly" version)
+          OUT=$(docker run --rm "ghcr.io/$OWNER/crewship:nightly" version)
           echo "$OUT"
           if [ -z "$OUT" ] || echo "$OUT" | grep -qx "dev"; then
             echo "::error::container 'crewship version' missing or returned 'dev' sentinel"
