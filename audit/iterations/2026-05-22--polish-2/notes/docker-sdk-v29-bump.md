@@ -1,11 +1,27 @@
 # Design note — Docker SDK v28 → v29 upgrade for CVE chain
 
-**Status:** design only — major version bump with breaking-change risk
-across `internal/provider/docker/`. Out of scope for the loop without
-a dedicated session.
+**Status:** blocked — v29 not yet published to the Go module proxy.
+Major version bump with breaking-change risk across
+`internal/provider/docker/` once v29 lands.
 **Source:** `audit/iterations/2026-05-21--polish-1/REPORT.md` —
 "Docker SDK 5-CVE chain (CVE-2026-34040 has a v29.3.1 fix)".
 **Author:** audit-loop, 2026-05-22.
+
+## Blocker (2026-05-22 attempted bump)
+
+`go list -m -versions github.com/docker/docker` returned versions up
+to **v28.5.2+incompatible**. There is no v29.x available on the Go
+module proxy yet — even though the upstream moby/moby repository's
+release-29 branch has cut tags, those don't appear at the
+`github.com/docker/docker` import path that Crewship uses.
+
+Until the v29 line is published to the module proxy, this design
+note tracks the work but the bump itself cannot proceed. Re-attempt
+once `go get github.com/docker/docker@v29` resolves.
+
+In the meantime, Dependabot's `gomod` ecosystem (configured in
+`.github/dependabot.yml`) will surface the first v29 minor as a PR
+the moment it lands, so the bump won't sit unreviewed.
 
 ## Current state
 
