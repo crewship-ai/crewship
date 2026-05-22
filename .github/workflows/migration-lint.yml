@@ -54,11 +54,21 @@ jobs:
       # Determine the base ref to compare against. For PRs this is the merge
       # target (typically main); for push events on main there's nothing to
       # diff against, so we just run the in-tree invariants.
+      #
+      # github.event_name + github.base_ref pass through `env:` and are
+      # quoted in the shell -- direct ${{ ... }} interpolation into a shell
+      # script is a CodeQL js/actions/code-injection pattern (semgrep
+      # github-actions.security.run-shell-injection). The PR-target filter
+      # (`branches: [main]`) constrains base_ref today, but the principle
+      # is to never trust a Github expression as shell.
       - name: Resolve base ref
         id: base
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
         run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            echo "ref=origin/${{ github.base_ref }}" >> "$GITHUB_OUTPUT"
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            echo "ref=origin/$BASE_REF" >> "$GITHUB_OUTPUT"
           else
             echo "ref=" >> "$GITHUB_OUTPUT"
           fi
@@ -76,4 +86,6 @@ jobs:
       # base ref. Only meaningful for PRs.
       - name: Cross-branch lint (PR only)
         if: steps.base.outputs.ref != ''
-        run: go run ./scripts/lint-migrations "${{ steps.base.outputs.ref }}"
+        env:
+          BASE_REF: ${{ steps.base.outputs.ref }}
+        run: go run ./scripts/lint-migrations "$BASE_REF"

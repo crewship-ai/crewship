@@ -120,6 +120,47 @@ func TestStaticFileHandler_ExactFileWithExtension(t *testing.T) {
 	}
 }
 
+// nextStaticFS adds the _next/static/ tree shape to fakeFS so the M10
+// dir-autoindex regression has something to walk. The chunk filename
+// uses Next.js's canonical hashed shape so the assertion mirrors a real
+// production build.
+func nextStaticFS() fstest.MapFS {
+	fs := fakeFS()
+	fs["_next/static/chunks/main-abc123.js"] = &fstest.MapFile{Data: []byte("CHUNK_JS")}
+	fs["_next/static/css/styles-def456.css"] = &fstest.MapFile{Data: []byte("CHUNK_CSS")}
+	return fs
+}
+
+// TestStaticFileHandler_NextDirListingBlocked pins audit M10: requests
+// to a /_next/* directory must NOT return http.FileServer's default
+// HTML autoindex (which enumerates build IDs + chunk filenames).
+// Trailing-slash form is the canonical signal; the no-slash variant
+// is caught by the pre-Stat IsDir check before FileServer's redirect
+// runs.
+func TestStaticFileHandler_NextDirListingBlocked(t *testing.T) {
+	h := StaticFileHandler(nextStaticFS())
+
+	for _, path := range []string{
+		"/_next/static/",
+		"/_next/static/chunks/",
+		"/_next/static/chunks",
+		"/_next/",
+	} {
+		code, _ := get(t, h, path)
+		if code != http.StatusNotFound {
+			t.Errorf("%s → code=%d, want 404 (no autoindex)", path, code)
+		}
+	}
+
+	// Verifies the regression boundary: a real chunk file in the
+	// same tree still serves -- this is the legitimate cache-hit
+	// path that the autoindex defence must not break.
+	code, body := get(t, h, "/_next/static/chunks/main-abc123.js")
+	if code != http.StatusOK || body != "CHUNK_JS" {
+		t.Errorf("real chunk file: code=%d body=%q; want 200 CHUNK_JS", code, body)
+	}
+}
+
 // Regression: the bug that prompted the dynamic-route lookup was that
 // /chat/filip was falling through to root index.html and rendering the
 // dashboard instead of the chat page. Pin that explicitly so a future

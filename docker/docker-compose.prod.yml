@@ -23,24 +23,54 @@ services:
       CREWSHIP_STATE_PROVIDER: bbolt
       CREWSHIP_STORAGE_BASE_PATH: /var/lib/crewship
       CREWSHIP_LOG_PATH: /var/log/crewship
+      # All Docker API calls go through docker-socket-proxy (below), which
+      # filters them against an explicit allowlist. The proxy is the only
+      # process with raw /var/run/docker.sock access -- mounting the raw
+      # socket here would give this container full root on the host.
+      DOCKER_HOST: tcp://docker-socket-proxy:2375
     volumes:
       - crewship-data:/var/lib/crewship
       - crewship-logs:/var/log/crewship
       - crewship-db:/data
-      # V-08: Use a Docker socket proxy instead of mounting the raw Docker socket.
-      # See https://github.com/Tecnativa/docker-socket-proxy for setup.
-      # Raw mount (NOT recommended for production):
-      # - /var/run/docker.sock:/var/run/docker.sock:ro
-      - /var/run/docker.sock:/var/run/docker.sock:ro  # TODO: replace with socket proxy in production
     networks:
       - crewship-internal
       - crewship-agents
+    depends_on:
+      docker-socket-proxy:
+        condition: service_started
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/healthz"]
       interval: 10s
       timeout: 5s
       retries: 3
       start_period: 10s
+
+  # docker-socket-proxy: filters the Docker API surface that the crewship
+  # container can reach. Mounting /var/run/docker.sock into a container is
+  # functionally equivalent to giving that container root on the host --
+  # any process inside can spawn privileged containers, read every other
+  # container's filesystem, or escape via `docker run --privileged`. The
+  # proxy brokers a tcp API on the internal network and rejects (403)
+  # everything outside the allowlist below.
+  #
+  # If you add a feature that needs another endpoint (BUILD, COMMIT, ...),
+  # widen this list explicitly -- defaults deny.
+  docker-socket-proxy:
+    image: tecnativa/docker-socket-proxy:0.3.0
+    container_name: crewship-docker-proxy
+    restart: unless-stopped
+    environment:
+      CONTAINERS: 1  # ContainerList / Create / Remove / Inspect
+      EXEC: 1        # ContainerExec* (the sidecar provider runs commands inside sidecars)
+      IMAGES: 1      # ImagePull / Inspect during ContainerCreate
+      NETWORKS: 1    # NetworkList / Create (crew network provisioning)
+      VOLUMES: 1     # VolumeList / Create (per-crew bind mounts)
+      INFO: 1        # /info (version-negotiation prerequisite)
+      POST: 1        # required to allow non-GET requests through the proxy
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - crewship-internal
 
   # Uncomment for PostgreSQL mode:
   # postgres:

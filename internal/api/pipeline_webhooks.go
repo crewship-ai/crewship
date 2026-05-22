@@ -1,8 +1,12 @@
 package api
 
 import (
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -10,6 +14,20 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/pipeline"
 )
+
+// generateWebhookSigningSecret returns 32 bytes of urandom encoded as
+// 64 hex chars -- the canonical shape downstream code expects when it
+// HMAC-signs incoming webhook bodies. Used by CreateWebhook when the
+// caller submitted an empty signing_secret: opting out of HMAC was
+// possible on the old path and silently let an attacker who learned
+// the webhook URL forge requests. Audit M2.
+func generateWebhookSigningSecret() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("webhook signing secret: %w", err)
+	}
+	return hex.EncodeToString(b), nil
+}
 
 // webhookResponse is the wire shape returned by webhook list/get/save.
 // The token surfaces in CRUD responses so the UI can show the user
@@ -89,6 +107,15 @@ func (h *PipelineHandler) CreateWebhook(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	workspaceID := WorkspaceIDFromContext(r.Context())
+	// Audit M2-promoted + chain finding root cause: a MEMBER could
+	// create a webhook → the resulting public URL bypassed every
+	// auth surface on the dispatch side. Gating CreateWebhook on
+	// "create" closes the chain at its source.
+	role := RoleFromContext(r.Context())
+	if !canRole(role, "create") {
+		replyError(w, http.StatusForbidden, "Forbidden")
+		return
+	}
 
 	var body webhookRequestBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -105,12 +132,32 @@ func (h *PipelineHandler) CreateWebhook(w http.ResponseWriter, r *http.Request) 
 	if body.Enabled != nil {
 		enabled = *body.Enabled
 	}
+
+	// Force HMAC signing on every webhook -- if the caller didn't
+	// supply a secret, mint a 32-byte hex one server-side. The legacy
+	// path accepted empty here and pipeline.Webhook.Verify silently
+	// returned nil for empty SigningSecret (see pipeline/webhooks.go:222),
+	// which meant any unsigned POST to the public webhook URL passed
+	// the verification step. The create response surfaces the secret
+	// once (Stripe/GitHub pattern below) so callers can configure
+	// their sender even when they don't pre-generate. Audit M2.
+	signingSecret := body.SigningSecret
+	if signingSecret == "" {
+		gen, err := generateWebhookSigningSecret()
+		if err != nil {
+			h.logger.Error("create pipeline webhook: generate signing secret", "error", err)
+			replyError(w, http.StatusInternalServerError, "failed to create webhook")
+			return
+		}
+		signingSecret = gen
+	}
+
 	in := pipeline.SaveWebhookInput{
 		WorkspaceID:           workspaceID,
 		Name:                  defaultIfBlank(body.Name, slug),
 		TargetPipelineID:      pipelineID,
 		TargetPipelineVersion: body.TargetPipelineVersion,
-		SigningSecret:         body.SigningSecret,
+		SigningSecret:         signingSecret,
 		InputsTemplate:        body.InputsTemplate,
 		Enabled:               enabled,
 		RateLimitPerMin:       body.RateLimitPerMin,
@@ -162,6 +209,12 @@ func (h *PipelineHandler) DeleteWebhook(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	workspaceID := WorkspaceIDFromContext(r.Context())
+	// Audit M2-promoted: delete a public-URL trigger -- delete tier.
+	role := RoleFromContext(r.Context())
+	if !canRole(role, "delete") {
+		replyError(w, http.StatusForbidden, "Forbidden")
+		return
+	}
 	webhookID := r.PathValue("webhookId")
 	if webhookID == "" {
 		replyError(w, http.StatusBadRequest, "webhookId required")
@@ -228,14 +281,19 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// HMAC verification before rate limiting — invalid signatures
-	// shouldn't even consume rate-limit slots.
-	if wh.SigningSecret != "" {
-		sig := r.Header.Get("X-Crewship-Signature")
-		if !wh.ValidateSignature(body, sig) {
-			replyError(w, http.StatusUnauthorized, "signature mismatch")
-			return
-		}
+	// HMAC verification before rate limiting -- invalid signatures
+	// shouldn't even consume rate-limit slots. Required (not optional):
+	// ValidateSignature returns false when the webhook row has an
+	// empty SigningSecret, so a legacy row (predates audit #490's
+	// auto-generation, or a DB write that bypassed the HTTP create
+	// handler) cannot dispatch with an unsigned body. Same 401 +
+	// "signature mismatch" response shape for both "wrong sig" and
+	// "no secret on this row" so an attacker can't enumerate which
+	// is which.
+	sig := r.Header.Get("X-Crewship-Signature")
+	if !wh.ValidateSignature(body, sig) {
+		replyError(w, http.StatusUnauthorized, "signature mismatch")
+		return
 	}
 
 	if !pipeline.AllowWebhookFire(wh.Token, wh.RateLimitPerMin) {
@@ -268,12 +326,21 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 		WorkspaceID: wh.WorkspaceID,
 		Inputs:      inputs,
 		Mode:        pipeline.ModeRun,
-		// Idempotency: use the X-Idempotency-Key header if present,
-		// else use webhook event id headers if the sender provided
-		// one (Stripe sends Stripe-Signature; we don't auto-extract
-		// from there yet, but X-Crewship-Event-ID is the canonical
-		// dedupe key for our own senders).
-		IdempotencyKey: firstNonEmpty(r.Header.Get("Idempotency-Key"), r.Header.Get("X-Crewship-Event-ID")),
+		// Idempotency cascade (audit A17.2 chain follow-up):
+		//   1. Explicit header from the sender (Idempotency-Key /
+		//      X-Crewship-Event-ID) takes precedence -- this is the
+		//      semantic id the sender wants to dedupe on.
+		//   2. Falls back to a synthetic key derived from
+		//      sha256(token + body + signature). Same wire bytes
+		//      from the same webhook within the
+		//      DefaultIdempotencyTTL window deduplicate
+		//      automatically, regardless of whether the sender opted
+		//      in to a header. Closes the replay-attack vector LIVE-
+		//      verified in audit H-iter5-A17.2 (a captured POST
+		//      replayed mid-window used to re-fire the pipeline).
+		// The synthetic key is salted by the webhook token so two
+		// webhooks happening to receive the same body don't collide.
+		IdempotencyKey: webhookIdempotencyKey(r, body, wh.Token),
 	})
 	status := "FAILED"
 	runID := ""
@@ -323,6 +390,43 @@ func (h *PipelineHandler) resolveWebhookPipelineID(r *http.Request, workspaceID 
 		return p.ID, p.Slug, nil
 	}
 	return "", "", errors.New("target_pipeline_slug or target_pipeline_id required")
+}
+
+// webhookIdempotencyKey resolves the dedupe key for a webhook
+// dispatch. Audit A17.2 follow-up: previously the dedupe path was
+// opt-in via Idempotency-Key / X-Crewship-Event-ID headers, which
+// left a replay window open for senders that don't set one (the
+// majority of legacy webhooks). Auto-dedupe closes that window.
+//
+// Cascade:
+//
+//  1. Sender-provided Idempotency-Key (RFC 9110 draft).
+//  2. Sender-provided X-Crewship-Event-ID (our own convention).
+//  3. Synthetic sha256(token || "\x00" || signature || "\x00" || body).
+//     Token salts the digest so two webhooks with the same body don't
+//     collide. Signature is included so a sender that genuinely wants
+//     to re-fire with the same body (e.g. test runs) can rotate the
+//     signature deliberately. body is the raw payload bytes.
+//
+// The synthetic shape is prefix-tagged ("auto:") so an attacker who
+// observes a key cannot use it as a future Idempotency-Key header to
+// pre-poison dedupe -- the key would still hash differently from
+// the sender-provided form.
+func webhookIdempotencyKey(r *http.Request, body []byte, token string) string {
+	if k := r.Header.Get("Idempotency-Key"); k != "" {
+		return k
+	}
+	if k := r.Header.Get("X-Crewship-Event-ID"); k != "" {
+		return k
+	}
+	sig := r.Header.Get("X-Crewship-Signature")
+	h := sha256.New()
+	_, _ = h.Write([]byte(token))
+	_, _ = h.Write([]byte{0})
+	_, _ = h.Write([]byte(sig))
+	_, _ = h.Write([]byte{0})
+	_, _ = h.Write(body)
+	return "auto:" + hex.EncodeToString(h.Sum(nil))
 }
 
 // tryParseJSON returns the parsed JSON object/array if the body is

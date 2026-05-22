@@ -124,7 +124,7 @@ func (h *ProxyHandler) AgentDebug(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if resp, err := h.ipcGet(r.Context(), fmt.Sprintf("/agents/%s/status", agentID)); err == nil {
+	if resp, err := h.ipcGet(r.Context(), fmt.Sprintf("/agents/%s/status", url.PathEscape(agentID))); err == nil {
 		defer resp.Body.Close()
 		var data interface{}
 		if json.NewDecoder(resp.Body).Decode(&data) == nil {
@@ -134,7 +134,7 @@ func (h *ProxyHandler) AgentDebug(w http.ResponseWriter, r *http.Request) {
 		debug["runtime"] = map[string]string{"status": "unreachable"}
 	}
 
-	if resp, err := h.ipcGet(r.Context(), fmt.Sprintf("/debug/logs?limit=200&agent_id=%s", agentID)); err == nil {
+	if resp, err := h.ipcGet(r.Context(), fmt.Sprintf("/debug/logs?limit=200&agent_id=%s", url.QueryEscape(agentID))); err == nil {
 		defer resp.Body.Close()
 		var data map[string]interface{}
 		if json.NewDecoder(resp.Body).Decode(&data) == nil {
@@ -145,7 +145,7 @@ func (h *ProxyHandler) AgentDebug(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if crewID.Valid {
-		path := fmt.Sprintf("/agents/%s/logs?crew_id=%s&offset=0&limit=50", agentID, crewID.String)
+		path := fmt.Sprintf("/agents/%s/logs?crew_id=%s&offset=0&limit=50", url.PathEscape(agentID), url.QueryEscape(crewID.String))
 		if resp, err := h.ipcGet(r.Context(), path); err == nil {
 			defer resp.Body.Close()
 			var data map[string]interface{}
@@ -166,6 +166,16 @@ func (h *ProxyHandler) AgentLogs(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
 
+	// Audit M13: agent logs are sensitive (may contain prompts,
+	// partial responses, secrets that escaped lookout.Redact). Gate
+	// on "read" so an empty / VIEWER role can't tail another tenant's
+	// agent traffic.
+	role := RoleFromContext(r.Context())
+	if !canRole(role, "read") {
+		replyError(w, http.StatusForbidden, "Forbidden")
+		return
+	}
+
 	limitInt, offsetInt := parsePagination(r, 100, 500)
 	offset := strconv.Itoa(offsetInt)
 	limit := strconv.Itoa(limitInt)
@@ -184,7 +194,7 @@ func (h *ProxyHandler) AgentLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	path := fmt.Sprintf("/agents/%s/logs?crew_id=%s&offset=%s&limit=%s", slug, crewID.String, offset, limit)
+	path := fmt.Sprintf("/agents/%s/logs?crew_id=%s&offset=%s&limit=%s", url.PathEscape(slug), url.QueryEscape(crewID.String), offset, limit)
 	resp, err := h.ipcGet(r.Context(), path)
 	if err != nil {
 		writeJSON(w, http.StatusOK, []interface{}{})
@@ -225,7 +235,7 @@ func (h *ProxyHandler) AgentStop(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Try to stop via crewshipd (best effort)
-	h.ipcPost(r.Context(), fmt.Sprintf("/agents/%s/stop", agentID), nil)
+	h.ipcPost(r.Context(), fmt.Sprintf("/agents/%s/stop", url.PathEscape(agentID)), nil)
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	res, err := h.db.ExecContext(r.Context(),
@@ -248,6 +258,13 @@ func (h *ProxyHandler) AgentStop(w http.ResponseWriter, r *http.Request) {
 func (h *ProxyHandler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 	chatID := r.PathValue("chatId")
 	user := UserFromContext(r.Context())
+	// Audit #495 follow-up: read-tier gate. The existing workspace_member
+	// lookup tests *membership* but not *role* -- canRole(role, "read")
+	// fails closed on empty / unmapped role.
+	if !canRole(RoleFromContext(r.Context()), "read") {
+		replyError(w, http.StatusForbidden, "Forbidden")
+		return
+	}
 
 	var chatWSID string
 	err := h.db.QueryRowContext(r.Context(),
@@ -281,7 +298,7 @@ func (h *ProxyHandler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 		limit = 500
 	}
 
-	path := fmt.Sprintf("/chats/%s/messages?offset=%d&limit=%d", chatID, offset, limit)
+	path := fmt.Sprintf("/chats/%s/messages?offset=%d&limit=%d", url.PathEscape(chatID), offset, limit)
 	resp, err := h.ipcGet(r.Context(), path)
 	if err != nil {
 		replyError(w, http.StatusBadGateway, "Failed to fetch messages")
@@ -295,6 +312,11 @@ func (h *ProxyHandler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 func (h *ProxyHandler) AgentGitLog(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
+	// Audit #495 follow-up: read-tier gate matches the AgentFiles trio.
+	if !canRole(RoleFromContext(r.Context()), "read") {
+		replyError(w, http.StatusForbidden, "Forbidden")
+		return
+	}
 
 	var slug, crewID sql.NullString
 	err := h.db.QueryRowContext(r.Context(),
@@ -305,7 +327,7 @@ func (h *ProxyHandler) AgentGitLog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ipcPath := fmt.Sprintf("/crews/%s/git-log", crewID.String)
+	ipcPath := fmt.Sprintf("/crews/%s/git-log", url.PathEscape(crewID.String))
 	if slug.Valid {
 		ipcPath += "?agent_slug=" + url.QueryEscape(slug.String)
 	}

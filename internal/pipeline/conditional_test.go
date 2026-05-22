@@ -301,10 +301,19 @@ func TestWebhookStore_HMAC_Validates(t *testing.T) {
 	}
 }
 
-func TestWebhookStore_HMAC_NoSecretPasses(t *testing.T) {
+// TestWebhookStore_HMAC_NoSecretFails pins the audit chain-finding
+// (A13.2 + A17.2) fix: a webhook row with an empty SigningSecret
+// MUST fail signature validation. The legacy "no secret → pass"
+// short-circuit let any unsigned POST through on legacy rows that
+// predate the auto-generation in audit #490, or any DB write that
+// bypassed the HTTP CreateWebhook handler.
+func TestWebhookStore_HMAC_NoSecretFails(t *testing.T) {
 	w := &Webhook{SigningSecret: ""}
-	if !w.ValidateSignature([]byte("anything"), "") {
-		t.Errorf("expected pass when no secret configured")
+	if w.ValidateSignature([]byte("anything"), "") {
+		t.Errorf("empty SigningSecret must NOT pass validation (legacy short-circuit was a chain-finding vector)")
+	}
+	if w.ValidateSignature([]byte("anything"), "any-hex-here") {
+		t.Errorf("empty SigningSecret must NOT pass even with a provided signature header")
 	}
 }
 

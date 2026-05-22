@@ -92,6 +92,55 @@ func TestNextAuth_CSRF_HTTPS(t *testing.T) {
 	}
 }
 
+// TestNextAuth_isHTTPS_ForceSecureCookies pins audit M27: when the
+// CREWSHIP_FORCE_SECURE_COOKIES env var is set, isHTTPS must return
+// true regardless of request headers. This is the operator escape
+// hatch for the "HTTPS-terminating reverse proxy that doesn't set
+// X-Forwarded-Proto" case where the default detection wrongly
+// returns false and the cookie ships without Secure -- an MITM
+// downgrade to HTTP then captures it.
+//
+// Cannot run t.Parallel because forceSecureCookies is a
+// package-level var read at init; the test mutates it and restores
+// via t.Cleanup.
+func TestNextAuth_isHTTPS_ForceSecureCookies(t *testing.T) {
+	// Default (no override, no TLS, no XFP): plain HTTP request →
+	// isHTTPS=false.
+	plainReq := httptest.NewRequest("GET", "/api/auth/csrf", nil)
+	if isHTTPS(plainReq) {
+		t.Fatalf("baseline: plain HTTP request must be detected as non-HTTPS")
+	}
+
+	// With the override, the same plain HTTP request must be
+	// reported as HTTPS so downstream cookies get Secure=true.
+	prev := forceSecureCookies
+	forceSecureCookies = true
+	t.Cleanup(func() { forceSecureCookies = prev })
+
+	if !isHTTPS(plainReq) {
+		t.Errorf("forceSecureCookies=true must override request detection (plain HTTP req should report HTTPS)")
+	}
+
+	// End-to-end: CSRF handler under the override emits the __Host-
+	// cookie + Secure flag even though the request has neither TLS
+	// nor X-Forwarded-Proto.
+	h, _ := newNextAuthHandler(t)
+	rr := httptest.NewRecorder()
+	h.CSRF(rr, plainReq)
+	gotHost := false
+	for _, c := range rr.Result().Cookies() {
+		if c.Name == "__Host-authjs.csrf-token" {
+			gotHost = true
+			if !c.Secure {
+				t.Error("override path: expected Secure flag on __Host- cookie")
+			}
+		}
+	}
+	if !gotHost {
+		t.Error("override path: expected __Host- cookie name (csrfCookieName must consult isHTTPS)")
+	}
+}
+
 func TestNextAuth_Providers(t *testing.T) {
 	t.Parallel()
 	h, _ := newNextAuthHandler(t)
@@ -197,6 +246,34 @@ func TestNextAuth_CallbackCredentials_BadCSRFMatch(t *testing.T) {
 	h.CallbackCredentials(rr, req)
 	if rr.Code != http.StatusForbidden {
 		t.Errorf("status = %d, want 403", rr.Code)
+	}
+}
+
+// TestNextAuth_CallbackCredentials_OversizeBody asserts the body cap
+// rejects a >16 KiB POST. Previously r.ParseForm() ran unbounded against
+// the request body, letting a single client allocate arbitrary memory
+// per request -- an easy DoS lever on a public auth endpoint. The fix
+// (http.MaxBytesReader on r.Body) surfaces as a ParseForm() error, which
+// the handler maps to 400 "Invalid request". Both branches of the
+// handler (form and JSON) read through the same capped Body, so a
+// single test on either path verifies the bound.
+func TestNextAuth_CallbackCredentials_OversizeBody(t *testing.T) {
+	t.Parallel()
+	h, _ := newNextAuthHandler(t)
+	// 16 KiB + 1 byte of urlencoded data exceeds the cap defined by
+	// callbackCredentialsMaxBodyBytes. The body is otherwise valid
+	// form syntax so only the size triggers the rejection.
+	body := "email=" + strings.Repeat("x", callbackCredentialsMaxBodyBytes+1)
+	req := httptest.NewRequest("POST", "/api/auth/callback/credentials", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	// CSRF cookie must be present to pass the early-return cookie check
+	// (the body cap runs after the cookie presence check, before the
+	// token-value comparison).
+	req.AddCookie(&http.Cookie{Name: "authjs.csrf-token", Value: "csrf-x"})
+	rr := httptest.NewRecorder()
+	h.CallbackCredentials(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400 (body exceeded MaxBytesReader cap)", rr.Code)
 	}
 }
 

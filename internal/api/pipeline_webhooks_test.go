@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
@@ -189,6 +190,81 @@ func TestPipelineWebhooks_Create_HappyPath_Returns201WithSecret(t *testing.T) {
 	}
 	if !resp.SigningSecretSet {
 		t.Errorf("signing_secret_set flag should be true")
+	}
+}
+
+// TestPipelineWebhooks_Create_EmptySecret_AutoGenerates pins audit M2:
+// a CreateWebhook request that omits signing_secret used to silently
+// land an unsigned webhook (pipeline.Webhook.Verify short-circuits to
+// nil for empty SigningSecret), letting anyone who learned the
+// webhook URL forge requests. The handler must now mint a secret
+// server-side and surface it once in the create response so the
+// caller can configure their sender.
+func TestPipelineWebhooks_Create_EmptySecret_AutoGenerates(t *testing.T) {
+	h, db, userID, wsID := webhookHandlerRig(t)
+	seedWebhookPipeline(t, db, wsID, "pln_b", "auto-secret")
+
+	body := `{
+		"target_pipeline_slug": "auto-secret"
+	}`
+	req := withWorkspaceUser(
+		httptest.NewRequest("POST", "/api/v1/workspaces/"+wsID+"/pipeline-webhooks",
+			strings.NewReader(body)),
+		userID, wsID, "OWNER",
+	)
+	rr := httptest.NewRecorder()
+	h.CreateWebhook(rr, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", rr.Code, rr.Body.String())
+	}
+
+	var resp webhookResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	// 32 bytes hex-encoded = 64 chars.
+	if len(resp.SigningSecret) != 64 {
+		t.Errorf("auto-generated secret length = %d, want 64 hex chars", len(resp.SigningSecret))
+	}
+	// Hex-decode to bytes — guards against a 64-char non-hex value
+	// (eg. base64-shaped) slipping through length-only assertion.
+	rawSecret, err := hex.DecodeString(resp.SigningSecret)
+	if err != nil {
+		t.Fatalf("auto-generated secret is not valid hex: %v (value=%q)", err, resp.SigningSecret)
+	}
+	if len(rawSecret) != 32 {
+		t.Errorf("auto-generated secret decoded length = %d bytes, want 32", len(rawSecret))
+	}
+	if !resp.SigningSecretSet {
+		t.Errorf("signing_secret_set flag must be true on auto-generate path")
+	}
+	// Sanity: two independent creates produce different secrets.
+	// CodeRabbit #490 hardening: assert the second response is itself
+	// a successful create with valid JSON + valid hex BEFORE comparing,
+	// otherwise a failed second request (5xx, malformed JSON) would
+	// produce an empty resp2.SigningSecret that trivially differs
+	// from the first value and falsely pass the collision check.
+	seedWebhookPipeline(t, db, wsID, "pln_c", "auto-secret-2")
+	req2 := withWorkspaceUser(
+		httptest.NewRequest("POST", "/api/v1/workspaces/"+wsID+"/pipeline-webhooks",
+			strings.NewReader(`{"target_pipeline_slug":"auto-secret-2"}`)),
+		userID, wsID, "OWNER",
+	)
+	rr2 := httptest.NewRecorder()
+	h.CreateWebhook(rr2, req2)
+	if rr2.Code != http.StatusCreated {
+		t.Fatalf("second create status = %d, want 201; body=%s", rr2.Code, rr2.Body.String())
+	}
+	var resp2 webhookResponse
+	if err := json.Unmarshal(rr2.Body.Bytes(), &resp2); err != nil {
+		t.Fatalf("second decode: %v", err)
+	}
+	rawSecret2, err := hex.DecodeString(resp2.SigningSecret)
+	if err != nil {
+		t.Fatalf("second auto-generated secret is not valid hex: %v (value=%q)", err, resp2.SigningSecret)
+	}
+	if bytes.Equal(rawSecret, rawSecret2) {
+		t.Errorf("two auto-generated secrets collided: both decode to %x", rawSecret)
 	}
 }
 
@@ -524,23 +600,108 @@ func TestPipelineWebhooks_Fire_ValidSignature_Accepts202(t *testing.T) {
 	}
 }
 
-// TestPipelineWebhooks_Fire_NoSignatureRequired_AcceptsAnyBody — when
-// signing_secret is empty the webhook skips HMAC entirely. A naked
-// request body must still produce 202. Without this test a refactor
-// that always required signatures would break every Stripe-style sender
-// without one.
-func TestPipelineWebhooks_Fire_NoSignatureRequired_AcceptsAnyBody(t *testing.T) {
+// TestPipelineWebhooks_Fire_EmptySecretRowRejected pins the audit chain
+// finding (A13.2 + A17.2) fix: a webhook row with empty signing_secret
+// must return 401 on dispatch even though such rows can no longer be
+// minted via CreateWebhook (audit #490 auto-generates). Legacy rows
+// pre-dating #490, or any row inserted via a path that bypassed the
+// HTTP handler, hit this guard and refuse to fire until the secret is
+// (re-)set.
+//
+// The previous behaviour was the opposite -- "no secret → pass" --
+// which was the dispatch-side half of the audit chain finding.
+func TestPipelineWebhooks_Fire_EmptySecretRowRejected(t *testing.T) {
 	h, db, _, wsID := webhookHandlerRig(t)
 	h.SetRunner(&stubRunner{output: "ok"})
 	seedWebhookPipeline(t, db, wsID, "pln_a", "ours")
 	wh := seedWebhookRow(t, db, wsID, "pln_a", "" /* no secret */, true)
 
 	req := httptest.NewRequest("POST", "/api/v1/webhooks/"+wh.Token,
-		strings.NewReader(`anything goes`)) // not even valid JSON
+		strings.NewReader(`anything goes`))
 	req.SetPathValue("token", wh.Token)
 	rr := httptest.NewRecorder()
 	h.FireWebhook(rr, req)
-	if rr.Code != http.StatusAccepted {
-		t.Fatalf("status = %d, want 202; body=%s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401 (empty-secret row must not dispatch); body=%s", rr.Code, rr.Body.String())
 	}
+	// Response shape matches the "wrong-signature" case so an attacker
+	// cannot enumerate which webhooks have an empty secret vs. which
+	// just got a wrong signature.
+	if !strings.Contains(rr.Body.String(), "signature mismatch") {
+		t.Errorf("expected unified 'signature mismatch' body, got %q", rr.Body.String())
+	}
+}
+
+// TestWebhookIdempotencyKey_Cascade pins the audit A17.2 follow-up
+// dedupe cascade: Idempotency-Key wins, then X-Crewship-Event-ID,
+// then a synthetic sha256(token||sig||body) fallback so senders
+// that never opted into a header still get replay protection.
+func TestWebhookIdempotencyKey_Cascade(t *testing.T) {
+	body := []byte(`{"event":"x"}`)
+	const token = "tok_test"
+
+	mkReq := func(headers map[string]string) *http.Request {
+		req := httptest.NewRequest("POST", "/x", strings.NewReader(string(body)))
+		for k, v := range headers {
+			req.Header.Set(k, v)
+		}
+		return req
+	}
+
+	t.Run("Idempotency-Key wins", func(t *testing.T) {
+		got := webhookIdempotencyKey(mkReq(map[string]string{
+			"Idempotency-Key":     "primary-key",
+			"X-Crewship-Event-ID": "fallback-event",
+		}), body, token)
+		if got != "primary-key" {
+			t.Errorf("got %q, want primary-key", got)
+		}
+	})
+
+	t.Run("X-Crewship-Event-ID fallback", func(t *testing.T) {
+		got := webhookIdempotencyKey(mkReq(map[string]string{
+			"X-Crewship-Event-ID": "event-42",
+		}), body, token)
+		if got != "event-42" {
+			t.Errorf("got %q, want event-42", got)
+		}
+	})
+
+	t.Run("synthetic fallback when no header", func(t *testing.T) {
+		got := webhookIdempotencyKey(mkReq(nil), body, token)
+		if !strings.HasPrefix(got, "auto:") {
+			t.Fatalf("synthetic key should be auto:-prefixed, got %q", got)
+		}
+		// Determinism: same wire bytes + same webhook = same key.
+		got2 := webhookIdempotencyKey(mkReq(nil), body, token)
+		if got != got2 {
+			t.Errorf("synthetic key not deterministic: %q vs %q", got, got2)
+		}
+	})
+
+	t.Run("synthetic salted by token", func(t *testing.T) {
+		a := webhookIdempotencyKey(mkReq(nil), body, "tok_a")
+		b := webhookIdempotencyKey(mkReq(nil), body, "tok_b")
+		if a == b {
+			t.Errorf("two webhooks with same body must NOT collide; both = %q", a)
+		}
+	})
+
+	t.Run("synthetic varies with signature", func(t *testing.T) {
+		// Senders that genuinely want a re-fire can rotate the
+		// signature header to bypass dedupe -- pin that contract.
+		a := webhookIdempotencyKey(mkReq(map[string]string{"X-Crewship-Signature": "sig-a"}), body, token)
+		b := webhookIdempotencyKey(mkReq(map[string]string{"X-Crewship-Signature": "sig-b"}), body, token)
+		if a == b {
+			t.Errorf("rotating signature should produce distinct synthetic keys; both = %q", a)
+		}
+	})
+
+	t.Run("synthetic varies with body", func(t *testing.T) {
+		a := webhookIdempotencyKey(mkReq(nil), []byte(`{"a":1}`), token)
+		b := webhookIdempotencyKey(mkReq(nil), []byte(`{"a":2}`), token)
+		if a == b {
+			t.Errorf("different bodies must produce different synthetic keys; both = %q", a)
+		}
+	})
 }

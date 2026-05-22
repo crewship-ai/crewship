@@ -104,7 +104,10 @@ func (h *OAuthHandler) SetHub(hub *ws.Hub) { h.hub = hub }
 // oauthCredConfig holds the decrypted OAuth configuration for a credential.
 
 func generateOAuthState() (string, error) {
-	stateBytes := make([]byte, 16)
+	// 32 bytes = 256 bits. NIST recommends >=128 for CSRF nonces; we
+	// pad to 256 so the state token has a 2x margin against future
+	// crypto-analytic improvements. Audit M22.
+	stateBytes := make([]byte, 32)
 	if _, err := rand.Read(stateBytes); err != nil {
 		return "", err
 	}

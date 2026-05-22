@@ -116,7 +116,7 @@ func (h *ProxyHandler) AgentChatAttachment(w http.ResponseWriter, r *http.Reques
 		replyError(w, http.StatusBadRequest, "read upload body")
 		return
 	}
-	ipcPath := fmt.Sprintf("/crews/%s/files/save?path=%s", crewID.String, url.QueryEscape(fullPath))
+	ipcPath := fmt.Sprintf("/crews/%s/files/save?path=%s", url.PathEscape(crewID.String), url.QueryEscape(fullPath))
 	resp, err := h.ipcPut(r.Context(), ipcPath, bytes.NewReader(body))
 	if err != nil {
 		replyError(w, http.StatusBadGateway, "Failed to save attachment")

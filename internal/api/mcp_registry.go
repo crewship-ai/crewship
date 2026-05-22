@@ -607,8 +607,11 @@ func (h *MCPRegistryHandler) Sync(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Preserve OTel + auth context from the request while shedding its
+	// cancellation -- the 202 has already been flushed when this fires.
+	parentCtx := context.WithoutCancel(r.Context())
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		ctx, cancel := context.WithTimeout(parentCtx, 2*time.Minute)
 		defer cancel()
 		if err := SyncMCPRegistry(ctx, h.db, h.logger); err != nil {
 			h.logger.Error("manual MCP registry sync failed", "error", err)

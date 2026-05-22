@@ -3,6 +3,7 @@ package backup
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"testing"
 
 	_ "modernc.org/sqlite"
@@ -159,6 +160,36 @@ func TestRemapIDs_RewritesPKsAndFKs(t *testing.T) {
 	got, _ := chat["agent_id"].(string)
 	if got != newAgentIDs["Alice"] {
 		t.Errorf("chats.agent_id not rewritten: got %q want %q", got, newAgentIDs["Alice"])
+	}
+}
+
+// TestIntrospectForeignKeys_RejectsInvalidIdentifier pins the
+// sqlIdentifierRe gate added to head off PRAGMA injection if a
+// future caller forwards an external string. SQLite cannot
+// parametrise PRAGMA names, so the table identifier must be
+// validated before string concatenation.
+func TestIntrospectForeignKeys_RejectsInvalidIdentifier(t *testing.T) {
+	db := newRemapTestDB(t)
+	bad := []string{
+		"",                    // empty
+		"users; DROP TABLE x", // statement injection
+		"users)--",            // PRAGMA-close + comment
+		"`users`",             // backtick quoting
+		"123users",            // leading digit
+		"foo bar",             // whitespace
+		"foo\nbar",            // newline
+	}
+	for _, name := range bad {
+		_, err := introspectForeignKeys(context.Background(), db, name)
+		if err == nil {
+			t.Errorf("introspectForeignKeys(%q) should have errored", name)
+			continue
+		}
+		// Error must come from the identifier gate, not from SQLite
+		// having actually attempted to run the bogus PRAGMA.
+		if !strings.Contains(err.Error(), "invalid table identifier") {
+			t.Errorf("introspectForeignKeys(%q) error %v, expected 'invalid table identifier'", name, err)
+		}
 	}
 }
 

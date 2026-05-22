@@ -155,13 +155,29 @@ func (h *AuthHandler) MaybeGenerateSetupToken(ctx context.Context, dataDir strin
 
 	// Triple-log: stderr + slog WARN + on its own line so even a busy
 	// startup log isn't likely to swallow it. The operator has to see this.
+	//
+	// When a 0600 file was successfully written, the log carries only a
+	// fingerprint (prefix..sha[:8]) -- the operator reads the full value
+	// from the file. Logging the raw token here means anything that
+	// reads journald (log aggregators, ops dashboards, shoulder-surfers)
+	// silently captures bootstrap credentials.
+	//
+	// When the file write failed (setupTokenPath stayed empty), the
+	// fallback is to log the full token AND a loud warning -- the
+	// operator has no other way to obtain the value at that point.
 	bannerLine := strings.Repeat("=", 72)
 	h.logger.Warn(bannerLine)
 	h.logger.Warn("BOOTSTRAP REQUIRED — first /api/v1/bootstrap call must carry this token")
 	h.logger.Warn("Send it in the X-Setup-Token header. It is shown ONCE and one-shot.")
-	h.logger.Warn("CREWSHIP_BOOTSTRAP_TOKEN", "token", h.setupToken)
 	if h.setupTokenPath != "" {
+		h.logger.Warn("CREWSHIP_BOOTSTRAP_TOKEN", "fingerprint", tokenFingerprint(h.setupToken))
 		h.logger.Warn("Also written to file (mode 0600)", "path", h.setupTokenPath)
+	} else {
+		// File write failed (or no data dir configured). The log is the
+		// only channel left, so emit the full value -- and a loud
+		// warning that any log aggregator now holds bootstrap creds.
+		h.logger.Warn("CREWSHIP_BOOTSTRAP_TOKEN", "token", h.setupToken)
+		h.logger.Warn("WARNING: no setup-token file written; raw token is in this log -- rotate any aggregator that captured it after first bootstrap")
 	}
 	h.logger.Warn(bannerLine)
 	return nil

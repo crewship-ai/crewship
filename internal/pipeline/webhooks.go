@@ -215,12 +215,21 @@ WHERE id = ?`,
 // digest. Constant-time comparison so timing attacks can't
 // fingerprint valid prefixes.
 //
-// No-op pass when SigningSecret is empty — caller has opted out of
-// HMAC. The handler uses this to short-circuit unsigned webhooks
-// without paying the hash cost.
+// Returns false if SigningSecret is empty: every webhook MUST have
+// a secret to be dispatched. The previous behaviour "no-op pass on
+// empty SigningSecret" let any legacy row (created before audit #490
+// forced auto-generation, or persisted via a path that bypassed the
+// HTTP CreateWebhook handler) accept unsigned POSTs to its public
+// dispatch URL. Audit chain finding (A13.2 + A17.2): MEMBER creates
+// webhook → public URL fires pipeline → no auth.
 func (w *Webhook) ValidateSignature(body []byte, providedHex string) bool {
 	if w.SigningSecret == "" {
-		return true
+		// No secret on this row = no signature is verifiable. Treat
+		// the dispatch as unauthenticated rather than silently passing
+		// it. The webhook needs to be re-created (or have its secret
+		// rotated through whatever admin path lands) before it can
+		// fire again.
+		return false
 	}
 	if providedHex == "" {
 		return false

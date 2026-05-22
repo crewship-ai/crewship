@@ -238,7 +238,7 @@ func (s *Server) handleEscalate(w http.ResponseWriter, r *http.Request) {
 	waitCtx, waitCancel := context.WithTimeout(r.Context(), 300*time.Second)
 	defer waitCancel()
 
-	waitURL := fmt.Sprintf("%s/api/v1/internal/escalations/%s/wait", s.ipc.BaseURL, escalationID)
+	waitURL := fmt.Sprintf("%s/api/v1/internal/escalations/%s/wait", s.ipc.BaseURL, neturl.PathEscape(escalationID))
 	waitReq, err := http.NewRequestWithContext(waitCtx, http.MethodGet, waitURL, nil)
 	if err != nil {
 		// Return the create result if we can't build the wait request.

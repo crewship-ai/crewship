@@ -110,21 +110,24 @@ func (h *EvalHandler) Replay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Detach the goroutine from the request context: the HTTP handler
-	// returns 202 immediately, and the caller's context cancels the
-	// moment the response is flushed. We use a fresh context with a
-	// generous budget so the run can actually finish.
+	// Detach the goroutine from the request's cancellation: the HTTP
+	// handler returns 202 immediately, and the caller's context cancels
+	// the moment the response is flushed. context.WithoutCancel preserves
+	// the request's OTel span and auth values (so the async run remains
+	// observable + audited) while shedding cancellation so the work can
+	// finish.
 	//
 	// Terminal updateRun calls use a separate short-lived context so
 	// that if Replay finishes because the 10-minute worker deadline
 	// fired, the DB write recording that failure still has a live
 	// context — otherwise the row is stuck in "running" forever.
+	parentCtx := context.WithoutCancel(r.Context())
 	go func() {
-		workerCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		workerCtx, cancel := context.WithTimeout(parentCtx, 10*time.Minute)
 		defer cancel()
 
 		statusCtx := func() (context.Context, context.CancelFunc) {
-			return context.WithTimeout(context.Background(), 5*time.Second)
+			return context.WithTimeout(parentCtx, 5*time.Second)
 		}
 
 		sctx, scancel := statusCtx()
@@ -241,12 +244,13 @@ func (h *EvalHandler) Regression(w http.ResponseWriter, r *http.Request) {
 	// Same deadline decoupling as Replay — see comment there. Worker
 	// has 10 minutes, but each status write gets its own fresh 5s
 	// context so the terminal row write survives worker deadline hit.
+	parentCtx := context.WithoutCancel(r.Context())
 	go func() {
-		workerCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		workerCtx, cancel := context.WithTimeout(parentCtx, 10*time.Minute)
 		defer cancel()
 
 		statusCtx := func() (context.Context, context.CancelFunc) {
-			return context.WithTimeout(context.Background(), 5*time.Second)
+			return context.WithTimeout(parentCtx, 5*time.Second)
 		}
 
 		sctx, scancel := statusCtx()

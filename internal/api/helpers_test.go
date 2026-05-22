@@ -11,6 +11,57 @@ import (
 // PR #130: `limit > maxLimit` used to fall through the same branch as
 // `limit <= 0` and get reset to defaultLimit, which silently shifted the
 // pagination window instead of clamping to maxLimit as the godoc promised.
+// TestTokenFingerprint pins the contract used by every call site that
+// replaced a raw "token" log field (audit M19): non-reversible, short
+// enough to scan, but stable so two log lines for the same token
+// correlate visually. Table-driven so each contract dimension fails
+// independently when one regresses (CodeRabbit #486).
+func TestTokenFingerprint(t *testing.T) {
+	const fullValue = "hunter2-deadbeef-cafef00d"
+
+	t.Run("determinism", func(t *testing.T) {
+		t.Parallel()
+		a := tokenFingerprint(fullValue)
+		b := tokenFingerprint(fullValue)
+		assert.Equal(t, a, b, "fingerprint must be deterministic for the same input")
+	})
+
+	t.Run("different inputs differ", func(t *testing.T) {
+		t.Parallel()
+		// Both share the same first 6 chars by construction, so the
+		// SHA tail is what makes them distinguishable.
+		a := tokenFingerprint(fullValue)
+		c := tokenFingerprint("hunter2-different-tail")
+		assert.NotEqual(t, a, c, "different tokens must fingerprint differently")
+	})
+
+	t.Run("empty -> sentinel", func(t *testing.T) {
+		t.Parallel()
+		assert.Equal(t, "<empty>", tokenFingerprint(""))
+	})
+
+	t.Run("shape: 6-char prefix + .. + 8 hex chars = 16 total", func(t *testing.T) {
+		t.Parallel()
+		a := tokenFingerprint(fullValue)
+		assert.Len(t, a, 16)
+		assert.Equal(t, "hunter", a[:6], "prefix must be the first 6 chars of the value")
+		assert.Equal(t, "..", a[6:8])
+	})
+
+	t.Run("non-reversible: tail does not leak raw value tail", func(t *testing.T) {
+		t.Parallel()
+		a := tokenFingerprint(fullValue)
+		assert.NotContains(t, a, "cafef00d", "fingerprint must not leak the value tail")
+	})
+
+	t.Run("short value: prefix is the whole value when len <= 6", func(t *testing.T) {
+		t.Parallel()
+		short := tokenFingerprint("abc")
+		assert.Equal(t, "abc", short[:3])
+		assert.Equal(t, "..", short[3:5])
+	})
+}
+
 func TestParsePagination_Clamping(t *testing.T) {
 	cases := []struct {
 		name                   string

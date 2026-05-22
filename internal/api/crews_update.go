@@ -5,6 +5,7 @@ package api
 // Extracted from crews.go.
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -395,7 +396,13 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 	// warm container skips that path. Runs after response is sent
 	// to avoid SQLite lock contention.
 	if req.NetworkMode != nil || req.AllowedDomains != nil || req.ServicesJSON != nil {
-		go h.restartCrewContainer(crewID)
+		// WithoutCancel preserves the request's OTel span + auth values
+		// so the async IPC stop is observable, while shedding the
+		// request's cancellation -- the 200 has already been flushed.
+		// Mirrors the pattern used in webhook / eval / consolidate
+		// handler-spawned goroutines (audit PR #481).
+		ctx := context.WithoutCancel(r.Context())
+		go h.restartCrewContainer(ctx, crewID)
 	}
 }
 

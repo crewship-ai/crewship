@@ -390,6 +390,58 @@ func (d *Dispatcher) handleWrite(ctx context.Context, raw json.RawMessage) (Tool
 		data = []byte(a.Content)
 	}
 
+	// Audit A10.1 / P1-A: write-path scanner symmetry. handleRead has
+	// scanned every byte returned to the model since PR-A F1, but the
+	// write-path historically trusted the agent that called memory.write.
+	// That single-layer defence collapses in two scenarios the audit
+	// LIVE-verified:
+	//
+	//  1. Indirect injection -- an agent ingests poison via tool returns
+	//     (web fetch, file read, peer query) and persists the literal
+	//     bytes via memory.write. The next read trips the read-path
+	//     scanner, but the poison sits on disk in the meantime and is
+	//     visible to any other reader (audit_watcher, fts5 indexer,
+	//     operator viewing the file).
+	//
+	//  2. Confused-deputy -- a future code path reads memory files via
+	//     a route that bypasses the dispatcher (raw filesystem walk,
+	//     debug endpoint, backup roundtrip) and serves the poison.
+	//
+	// Scanning at the write step means poison never lands on disk in the
+	// first place. Same Quarantine helper as the read path -- the
+	// original payload lands under .quarantine/<sha>.md for operator
+	// review, the caller gets an IsError result with the category +
+	// pattern so the agent can see why the write was rejected and
+	// (hopefully) self-correct.
+	if hit := ScanContent(string(data)); hit != nil {
+		label := tierSourceLabel(a.Tier, a.Key)
+		_, sha, qerr := Quarantine(d.ctx.AgentMemoryDir, label, string(data), hit)
+		if qerr != nil {
+			// Quarantine write itself failed -- still refuse the
+			// memory.write so poison doesn't reach disk, surface the
+			// dual failure to the caller.
+			return ToolResult{
+				IsError: true,
+				Content: fmt.Sprintf("memory.write: scan hit %s/%s; quarantine also failed: %v", hit.Category, hit.Pattern, qerr),
+			}, nil
+		}
+		return ToolResult{
+			IsError: true,
+			Content: fmt.Sprintf("memory.write: rejected — scanner caught %s/%s. "+
+				"Original content moved to .quarantine/%s.md for operator review. "+
+				"Rewrite the content without the offending pattern before retrying.",
+				hit.Category, hit.Pattern, sha),
+			Metadata: map[string]any{
+				"quarantined":         true,
+				"quarantine_sha256":   sha,
+				"quarantine_category": hit.Category,
+				"quarantine_pattern":  hit.Pattern,
+				"source":              label,
+				"tier":                a.Tier,
+			},
+		}, nil
+	}
+
 	if cap > 0 && len(data) > cap {
 		return ToolResult{
 			IsError: true,

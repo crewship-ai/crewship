@@ -193,7 +193,16 @@ jobs:
         run: go build ./cmd/crewship
 
       - name: Go test
-        run: go test ./... -count=1
+        # -timeout 15m: the internal/api package suite has grown past
+        # the Go default 10m (PR-A native memory tools + PR-D ephemeral
+        # lifecycle + PR-E PERSONA all landed test fixtures). Three
+        # consecutive runs on 290b8606 hit the 10m panic on different
+        # tests (TestAuthGoogle_*, TestRequireWorkspace_*,
+        # TestSweepStuckQueued), indicating cumulative-time pressure
+        # rather than a single slow test. Job-level timeout-minutes:15
+        # already gives the runner enough wall-clock; this aligns the
+        # go test -timeout to match.
+        run: go test ./... -count=1 -timeout 15m
 
   # ── Go lint: golangci-lint ──
   go-lint:

@@ -14,6 +14,19 @@ func (h *ProxyHandler) AgentFiles(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
 
+	// Audit M13: every read of agent artefacts must require at least
+	// the "read" capability. Without the gate any authenticated
+	// workspace member -- including the VIEWER role used for guests --
+	// can list and download agent files / logs, which the role matrix
+	// elsewhere in this package treats as a privileged surface. Empty
+	// role is denied by canRole, so this also fails closed when a
+	// middleware regression strips the role from the context.
+	role := RoleFromContext(r.Context())
+	if !canRole(role, "read") {
+		replyError(w, http.StatusForbidden, "Forbidden")
+		return
+	}
+
 	var slug, crewID sql.NullString
 	err := h.db.QueryRowContext(r.Context(),
 		"SELECT slug, crew_id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
@@ -27,7 +40,7 @@ func (h *ProxyHandler) AgentFiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ipcPath := fmt.Sprintf("/crews/%s/files?agent_slug=%s", crewID.String, slug.String)
+	ipcPath := fmt.Sprintf("/crews/%s/files?agent_slug=%s", url.PathEscape(crewID.String), url.QueryEscape(slug.String))
 	if r.URL.Query().Get("recursive") == "true" {
 		ipcPath += "&recursive=true"
 	}
@@ -69,6 +82,13 @@ func (h *ProxyHandler) AgentFileDownload(w http.ResponseWriter, r *http.Request)
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	filePath := r.URL.Query().Get("path")
 
+	// Same role gate as AgentFiles -- see audit M13 commentary there.
+	role := RoleFromContext(r.Context())
+	if !canRole(role, "read") {
+		replyError(w, http.StatusForbidden, "Forbidden")
+		return
+	}
+
 	if filePath == "" {
 		replyError(w, http.StatusBadRequest, "path parameter required")
 		return
@@ -102,7 +122,7 @@ func (h *ProxyHandler) AgentFileDownload(w http.ResponseWriter, r *http.Request)
 		fullPath = prefix + cleanPath
 	}
 
-	ipcPath := fmt.Sprintf("/crews/%s/files/download?path=%s", crewID.String, url.QueryEscape(fullPath))
+	ipcPath := fmt.Sprintf("/crews/%s/files/download?path=%s", url.PathEscape(crewID.String), url.QueryEscape(fullPath))
 
 	resp, err := h.ipcGet(r.Context(), ipcPath)
 	if err != nil {
@@ -172,7 +192,7 @@ func (h *ProxyHandler) AgentFileSave(w http.ResponseWriter, r *http.Request) {
 		fullPath = prefix + cleanPath
 	}
 
-	ipcPath := fmt.Sprintf("/crews/%s/files/save?path=%s", crewID.String, url.QueryEscape(fullPath))
+	ipcPath := fmt.Sprintf("/crews/%s/files/save?path=%s", url.PathEscape(crewID.String), url.QueryEscape(fullPath))
 
 	resp, err := h.ipcPut(r.Context(), ipcPath, r.Body)
 	if err != nil {
@@ -186,6 +206,12 @@ func (h *ProxyHandler) AgentFileSave(w http.ResponseWriter, r *http.Request) {
 func (h *ProxyHandler) CrewFiles(w http.ResponseWriter, r *http.Request) {
 	crewID := r.PathValue("crewId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
+	// Audit #495 follow-up: read-tier gate -- the existing
+	// crewExists check tests workspace scope but not role.
+	if !canRole(RoleFromContext(r.Context()), "read") {
+		replyError(w, http.StatusForbidden, "Forbidden")
+		return
+	}
 	found, err := crewExists(r.Context(), h.db, crewID, workspaceID)
 	if err != nil {
 		h.logger.Error("crew exists check", "error", err)
@@ -196,7 +222,7 @@ func (h *ProxyHandler) CrewFiles(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusNotFound, "Crew not found")
 		return
 	}
-	ipcPath := fmt.Sprintf("/crews/%s/files", crewID)
+	ipcPath := fmt.Sprintf("/crews/%s/files", url.PathEscape(crewID))
 	sep := "?"
 	if agentSlug := r.URL.Query().Get("agent_slug"); agentSlug != "" {
 		ipcPath += sep + "agent_slug=" + url.QueryEscape(agentSlug)
@@ -234,6 +260,11 @@ func (h *ProxyHandler) CrewFiles(w http.ResponseWriter, r *http.Request) {
 func (h *ProxyHandler) CrewFileDownload(w http.ResponseWriter, r *http.Request) {
 	crewID := r.PathValue("crewId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
+	// Audit #495 follow-up: read-tier gate.
+	if !canRole(RoleFromContext(r.Context()), "read") {
+		replyError(w, http.StatusForbidden, "Forbidden")
+		return
+	}
 	filePath := r.URL.Query().Get("path")
 	if filePath == "" {
 		replyError(w, http.StatusBadRequest, "path parameter required")
@@ -254,7 +285,7 @@ func (h *ProxyHandler) CrewFileDownload(w http.ResponseWriter, r *http.Request) 
 		replyError(w, http.StatusBadRequest, "Invalid file path")
 		return
 	}
-	ipcPath := fmt.Sprintf("/crews/%s/files/download?path=%s", crewID, url.QueryEscape(cleanPath))
+	ipcPath := fmt.Sprintf("/crews/%s/files/download?path=%s", url.PathEscape(crewID), url.QueryEscape(cleanPath))
 	resp, err := h.ipcGet(r.Context(), ipcPath)
 	if err != nil {
 		replyError(w, http.StatusNotFound, "File not found")
@@ -305,7 +336,7 @@ func (h *ProxyHandler) CrewFileSave(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusBadRequest, "Invalid file path")
 		return
 	}
-	ipcPath := fmt.Sprintf("/crews/%s/files/save?path=%s", crewID, url.QueryEscape(cleanPath))
+	ipcPath := fmt.Sprintf("/crews/%s/files/save?path=%s", url.PathEscape(crewID), url.QueryEscape(cleanPath))
 	resp, err := h.ipcPut(r.Context(), ipcPath, r.Body)
 	if err != nil {
 		replyError(w, http.StatusBadGateway, "Failed to save file")
@@ -319,6 +350,11 @@ func (h *ProxyHandler) CrewFileSave(w http.ResponseWriter, r *http.Request) {
 func (h *ProxyHandler) AgentContainerFiles(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
+	// Audit #495 follow-up: read-tier gate.
+	if !canRole(RoleFromContext(r.Context()), "read") {
+		replyError(w, http.StatusForbidden, "Forbidden")
+		return
+	}
 
 	var crewID sql.NullString
 	err := h.db.QueryRowContext(r.Context(),
@@ -329,7 +365,7 @@ func (h *ProxyHandler) AgentContainerFiles(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	ipcPath := fmt.Sprintf("/crews/%s/container-files", crewID.String)
+	ipcPath := fmt.Sprintf("/crews/%s/container-files", url.PathEscape(crewID.String))
 	if subdir := r.URL.Query().Get("subdir"); subdir != "" {
 		cleanSub, ok := normalizeRequestPath(subdir)
 		if !ok {

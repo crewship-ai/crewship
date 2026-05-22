@@ -345,9 +345,32 @@ func (p *Provider) ensureSidecar(ctx context.Context, crewSlug string, svc *prov
 		cfg.Cmd = strslice.StrSlice(svc.Command)
 	}
 
+	// Audit H7 baseline hardening. Sidecars used to inherit Docker's
+	// default HostConfig (no SecurityOpt, no resource caps), which the
+	// audit flagged as a privilege-escalation + fork-bomb pivot path.
+	//
+	// What's safe across every common sidecar image (redis, postgres,
+	// mariadb, mongo, rabbitmq, nats, qdrant, chromadb, ollama):
+	//
+	//   - no-new-privileges: disables setuid binary privilege escalation
+	//     inside the container. No legitimate sidecar relies on setuid
+	//     post-startup.
+	//   - PidsLimit 512: caps process count per container. Generous (a
+	//     postgres + autovacuum + walwriter stack sits under 30; redis
+	//     under 5) while denying fork-bomb-style DoS.
+	//
+	// Capability dropping is intentionally NOT in this baseline -- some
+	// images still need CHOWN/SETUID for entrypoint user-switching, and
+	// the audit's design note (notes/sidecar-zero-hardening.md) calls
+	// for a separate per-image test matrix before tightening further.
+	pidsLimit := int64(512)
 	hostCfg := &container.HostConfig{
 		Mounts:        mounts,
 		RestartPolicy: container.RestartPolicy{Name: container.RestartPolicyOnFailure, MaximumRetryCount: 3},
+		SecurityOpt:   []string{"no-new-privileges:true"},
+		Resources: container.Resources{
+			PidsLimit: &pidsLimit,
+		},
 	}
 
 	// NetworkingConfig wires the sidecar to the crew bridge with a

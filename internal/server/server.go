@@ -717,6 +717,10 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 	if s.spaHandler != nil {
 		mainHandler = s.combinedHandler()
 	}
+	// Audit M11: reject `..` path segments before they reach ServeMux,
+	// which would otherwise 301-redirect with the resolved Location and
+	// leak the actual API surface to a probing attacker.
+	mainHandler = pathTraversalRejectMiddleware(mainHandler)
 	// V-10: Wrap with security headers middleware
 	mainHandler = securityHeadersMiddleware(mainHandler)
 	// Panic recovery is the OUTERMOST wrapper so it also catches panics

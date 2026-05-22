@@ -561,7 +561,7 @@ func TestCrewHandlerSetters(t *testing.T) {
 	h.SetLicense(nil)
 	h.SetSocketPath("/tmp/test.sock")
 	h.SetSocketPath("") // clear-path branch — also exercises restartCrewContainer no-op path
-	h.restartCrewContainer("crew-x")
+	h.restartCrewContainer(context.Background(), "crew-x")
 }
 
 // ---------------------------------------------------------------------------
