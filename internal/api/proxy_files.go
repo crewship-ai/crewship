@@ -40,7 +40,7 @@ func (h *ProxyHandler) AgentFiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ipcPath := fmt.Sprintf("/crews/%s/files?agent_slug=%s", crewID.String, slug.String)
+	ipcPath := fmt.Sprintf("/crews/%s/files?agent_slug=%s", url.PathEscape(crewID.String), url.QueryEscape(slug.String))
 	if r.URL.Query().Get("recursive") == "true" {
 		ipcPath += "&recursive=true"
 	}
@@ -122,7 +122,7 @@ func (h *ProxyHandler) AgentFileDownload(w http.ResponseWriter, r *http.Request)
 		fullPath = prefix + cleanPath
 	}
 
-	ipcPath := fmt.Sprintf("/crews/%s/files/download?path=%s", crewID.String, url.QueryEscape(fullPath))
+	ipcPath := fmt.Sprintf("/crews/%s/files/download?path=%s", url.PathEscape(crewID.String), url.QueryEscape(fullPath))
 
 	resp, err := h.ipcGet(r.Context(), ipcPath)
 	if err != nil {
@@ -192,7 +192,7 @@ func (h *ProxyHandler) AgentFileSave(w http.ResponseWriter, r *http.Request) {
 		fullPath = prefix + cleanPath
 	}
 
-	ipcPath := fmt.Sprintf("/crews/%s/files/save?path=%s", crewID.String, url.QueryEscape(fullPath))
+	ipcPath := fmt.Sprintf("/crews/%s/files/save?path=%s", url.PathEscape(crewID.String), url.QueryEscape(fullPath))
 
 	resp, err := h.ipcPut(r.Context(), ipcPath, r.Body)
 	if err != nil {
@@ -222,7 +222,7 @@ func (h *ProxyHandler) CrewFiles(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusNotFound, "Crew not found")
 		return
 	}
-	ipcPath := fmt.Sprintf("/crews/%s/files", crewID)
+	ipcPath := fmt.Sprintf("/crews/%s/files", url.PathEscape(crewID))
 	sep := "?"
 	if agentSlug := r.URL.Query().Get("agent_slug"); agentSlug != "" {
 		ipcPath += sep + "agent_slug=" + url.QueryEscape(agentSlug)
@@ -285,7 +285,7 @@ func (h *ProxyHandler) CrewFileDownload(w http.ResponseWriter, r *http.Request) 
 		replyError(w, http.StatusBadRequest, "Invalid file path")
 		return
 	}
-	ipcPath := fmt.Sprintf("/crews/%s/files/download?path=%s", crewID, url.QueryEscape(cleanPath))
+	ipcPath := fmt.Sprintf("/crews/%s/files/download?path=%s", url.PathEscape(crewID), url.QueryEscape(cleanPath))
 	resp, err := h.ipcGet(r.Context(), ipcPath)
 	if err != nil {
 		replyError(w, http.StatusNotFound, "File not found")
@@ -336,7 +336,7 @@ func (h *ProxyHandler) CrewFileSave(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusBadRequest, "Invalid file path")
 		return
 	}
-	ipcPath := fmt.Sprintf("/crews/%s/files/save?path=%s", crewID, url.QueryEscape(cleanPath))
+	ipcPath := fmt.Sprintf("/crews/%s/files/save?path=%s", url.PathEscape(crewID), url.QueryEscape(cleanPath))
 	resp, err := h.ipcPut(r.Context(), ipcPath, r.Body)
 	if err != nil {
 		replyError(w, http.StatusBadGateway, "Failed to save file")
@@ -365,7 +365,7 @@ func (h *ProxyHandler) AgentContainerFiles(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	ipcPath := fmt.Sprintf("/crews/%s/container-files", crewID.String)
+	ipcPath := fmt.Sprintf("/crews/%s/container-files", url.PathEscape(crewID.String))
 	if subdir := r.URL.Query().Get("subdir"); subdir != "" {
 		cleanSub, ok := normalizeRequestPath(subdir)
 		if !ok {

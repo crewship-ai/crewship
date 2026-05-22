@@ -81,8 +81,15 @@ func (h *CrewHandler) SetSocketPath(path string) { h.socketPath = path }
 
 // restartCrewContainer stops the crew container via IPC so it gets recreated
 // with the new network policy on the next agent run.
+//
+// The caller passes a context with WithoutCancel applied (the
+// request that triggered the restart has already returned 200, so
+// we don't want its cancellation to propagate here -- but we do
+// want its OTel span + auth values so the sidecar call is
+// observable and audited). 60-second timeout still applies via
+// the http.Client to bound the outbound call.
 
-func (h *CrewHandler) restartCrewContainer(crewID string) {
+func (h *CrewHandler) restartCrewContainer(ctx context.Context, crewID string) {
 	if h.socketPath == "" {
 		return
 	}
@@ -94,8 +101,8 @@ func (h *CrewHandler) restartCrewContainer(crewID string) {
 			},
 		},
 	}
-	url := fmt.Sprintf("http://crewshipd/crews/%s/container/stop", crewID)
-	req, err := http.NewRequest("POST", url, nil)
+	reqURL := fmt.Sprintf("http://crewshipd/crews/%s/container/stop", url.PathEscape(crewID))
+	req, err := http.NewRequestWithContext(ctx, "POST", reqURL, nil)
 	if err != nil {
 		h.logger.Warn("failed to build container stop request", "error", err)
 		return
