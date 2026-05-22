@@ -46,6 +46,8 @@ func init() {
 	seedCmd.Flags().Int("provision-timeout", 900, "Per-crew provisioning timeout (seconds)")
 	seedCmd.Flags().Bool("wait-provision", false, "Block until all crews finish provisioning (default: fire-and-forget, seed returns while provisioning runs in the background)")
 	seedCmd.Flags().Bool("test-backup", false, "After seeding, run a backup/restore round-trip self-test on one crew (implies --wait-provision)")
+	seedCmd.Flags().Bool("with-memory", false, "Pre-seed agent memory tiers (AGENT.md / CREW.md / PERSONA.md / pins.md / daily/{date}.md / learned.md) for the demo workspace; useful for memory-recall demos and live GDPR/RBAC tests")
+	seedCmd.Flags().Bool("with-users", false, "Add four extra users (ADMIN, MANAGER, MEMBER, VIEWER) to the workspace for RBAC matrix testing; requires CREWSHIP_ALLOW_SIGNUP=true on the server")
 }
 
 func runSeed(cmd *cobra.Command, args []string) error {
@@ -58,6 +60,8 @@ func runSeed(cmd *cobra.Command, args []string) error {
 	provisionTimeoutSec, _ := cmd.Flags().GetInt("provision-timeout")
 	waitProvision, _ := cmd.Flags().GetBool("wait-provision")
 	testBackup, _ := cmd.Flags().GetBool("test-backup")
+	withMemory, _ := cmd.Flags().GetBool("with-memory")
+	withUsers, _ := cmd.Flags().GetBool("with-users")
 	// Smoke test + test-backup both need a provisioned, running container
 	// to do anything useful, so they implicitly force --wait-provision.
 	if smokeTest || testBackup {
@@ -86,6 +90,20 @@ func runSeed(cmd *cobra.Command, args []string) error {
 		}
 		if err := seedNuke(ctx, client); err != nil {
 			return err
+		}
+	}
+
+	// ── Phase 1b: RBAC fixture users (optional) ──
+	// Runs BEFORE crews so the seeded admin/manager/member/viewer
+	// exist as workspace members before crew creation lands; that way
+	// crew-detail panels and member queries already show the full
+	// roster when the operator first opens the UI.
+	if withUsers {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := seedRBACUsers(ctx, client); err != nil {
+			fmt.Fprintf(os.Stderr, "RBAC user seeding hit an error (continuing): %v\n", err)
 		}
 	}
 
@@ -139,6 +157,20 @@ func runSeed(cmd *cobra.Command, args []string) error {
 	agentIDs, err := seedAgents(ctx, client, crewIDs)
 	if err != nil {
 		return err
+	}
+
+	// ── Phase 3b: Agent memory tiers (optional) ──
+	// Runs AFTER agents are created so we can resolve each agent's
+	// crew_id from the API. Failure here is non-fatal — the rest of
+	// the seed still produces a usable workspace; agents just won't
+	// have boot-time memory context until they write some.
+	if withMemory {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := seedAgentMemory(ctx, client, crewIDs); err != nil {
+			fmt.Fprintf(os.Stderr, "Memory seeding hit an error (continuing): %v\n", err)
+		}
 	}
 
 	// ── Phase 4–5: Skills + Assignments ──
