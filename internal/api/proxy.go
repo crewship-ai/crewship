@@ -124,7 +124,7 @@ func (h *ProxyHandler) AgentDebug(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if resp, err := h.ipcGet(r.Context(), fmt.Sprintf("/agents/%s/status", agentID)); err == nil {
+	if resp, err := h.ipcGet(r.Context(), fmt.Sprintf("/agents/%s/status", url.PathEscape(agentID))); err == nil {
 		defer resp.Body.Close()
 		var data interface{}
 		if json.NewDecoder(resp.Body).Decode(&data) == nil {
@@ -134,7 +134,7 @@ func (h *ProxyHandler) AgentDebug(w http.ResponseWriter, r *http.Request) {
 		debug["runtime"] = map[string]string{"status": "unreachable"}
 	}
 
-	if resp, err := h.ipcGet(r.Context(), fmt.Sprintf("/debug/logs?limit=200&agent_id=%s", agentID)); err == nil {
+	if resp, err := h.ipcGet(r.Context(), fmt.Sprintf("/debug/logs?limit=200&agent_id=%s", url.QueryEscape(agentID))); err == nil {
 		defer resp.Body.Close()
 		var data map[string]interface{}
 		if json.NewDecoder(resp.Body).Decode(&data) == nil {
@@ -145,7 +145,7 @@ func (h *ProxyHandler) AgentDebug(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if crewID.Valid {
-		path := fmt.Sprintf("/agents/%s/logs?crew_id=%s&offset=0&limit=50", agentID, crewID.String)
+		path := fmt.Sprintf("/agents/%s/logs?crew_id=%s&offset=0&limit=50", url.PathEscape(agentID), url.QueryEscape(crewID.String))
 		if resp, err := h.ipcGet(r.Context(), path); err == nil {
 			defer resp.Body.Close()
 			var data map[string]interface{}
@@ -184,7 +184,7 @@ func (h *ProxyHandler) AgentLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	path := fmt.Sprintf("/agents/%s/logs?crew_id=%s&offset=%s&limit=%s", slug, crewID.String, offset, limit)
+	path := fmt.Sprintf("/agents/%s/logs?crew_id=%s&offset=%s&limit=%s", url.PathEscape(slug), url.QueryEscape(crewID.String), offset, limit)
 	resp, err := h.ipcGet(r.Context(), path)
 	if err != nil {
 		writeJSON(w, http.StatusOK, []interface{}{})
@@ -225,7 +225,7 @@ func (h *ProxyHandler) AgentStop(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Try to stop via crewshipd (best effort)
-	h.ipcPost(r.Context(), fmt.Sprintf("/agents/%s/stop", agentID), nil)
+	h.ipcPost(r.Context(), fmt.Sprintf("/agents/%s/stop", url.PathEscape(agentID)), nil)
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	res, err := h.db.ExecContext(r.Context(),
@@ -281,7 +281,7 @@ func (h *ProxyHandler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 		limit = 500
 	}
 
-	path := fmt.Sprintf("/chats/%s/messages?offset=%d&limit=%d", chatID, offset, limit)
+	path := fmt.Sprintf("/chats/%s/messages?offset=%d&limit=%d", url.PathEscape(chatID), offset, limit)
 	resp, err := h.ipcGet(r.Context(), path)
 	if err != nil {
 		replyError(w, http.StatusBadGateway, "Failed to fetch messages")
@@ -305,7 +305,7 @@ func (h *ProxyHandler) AgentGitLog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ipcPath := fmt.Sprintf("/crews/%s/git-log", crewID.String)
+	ipcPath := fmt.Sprintf("/crews/%s/git-log", url.PathEscape(crewID.String))
 	if slug.Valid {
 		ipcPath += "?agent_slug=" + url.QueryEscape(slug.String)
 	}
