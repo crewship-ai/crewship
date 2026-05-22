@@ -34,9 +34,15 @@ jobs:
     timeout-minutes: 2
     steps:
       # fetch-depth: 0 so the diff base ref is locally resolvable.
+      # persist-credentials: false drops the GITHUB_TOKEN from the local
+      # git config -- this job only reads files, never pushes, so the
+      # token would only be a liability for any later step (or a future
+      # compromised third-party action) that re-runs git from the
+      # checked-out workspace.
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Resolve diff base
         id: base
