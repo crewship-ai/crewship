@@ -255,6 +255,17 @@ func (s *Server) Shutdown() error {
 	if s.telemetryShutdown != nil {
 		s.telemetryShutdown()
 	}
+	// Drain pprof in-flight requests (a curl pulling /debug/pprof/profile
+	// can be blocking for 30s by default). Noop when CREWSHIP_PPROF_ADDR
+	// was unset at startup.
+	if s.pprofShutdown != nil {
+		s.pprofShutdown()
+	}
+	// Flush any pyroscope-go push batches still in flight. Noop when
+	// CREWSHIP_PYROSCOPE_URL was unset.
+	if s.pyroscopeShutdown != nil {
+		s.pyroscopeShutdown()
+	}
 	// fileWatcher goroutines are closed via context cancellation (runCancel above);
 	// explicit Close() is a no-op but signals intent.
 	if s.fileWatcher != nil {

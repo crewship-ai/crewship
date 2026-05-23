@@ -74,6 +74,8 @@ type Server struct {
 	journalWriter     *journal.Writer
 	consolidator      *consolidate.Consolidator
 	telemetryShutdown func()
+	pprofShutdown     func()
+	pyroscopeShutdown func()
 	startedAt         time.Time
 	runCtx            context.Context
 	runCancel         context.CancelFunc
@@ -439,6 +441,38 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 			telemetry.RegisterJournalResolver()
 			if otelEndpoint != "" {
 				logger.Info("OTel GenAI telemetry enabled", "endpoint", otelEndpoint)
+			}
+		}
+
+		// Optional pprof endpoint on a private bind. Disabled unless
+		// CREWSHIP_PPROF_ADDR is set; recommended value 127.0.0.1:6060
+		// (loopback only). See internal/telemetry/pprof.go for the
+		// security rationale — pprof on the public surface is both an
+		// info leak and a DoS vector (a 30s CPU profile blocks the GC).
+		if pprofAddr := os.Getenv("CREWSHIP_PPROF_ADDR"); pprofAddr != "" {
+			if pprofShutdown, err := telemetry.StartPProfServer(pprofAddr, logger); err != nil {
+				logger.Warn("pprof endpoint failed to start", "addr", pprofAddr, "err", err)
+			} else {
+				s.pprofShutdown = pprofShutdown
+			}
+		}
+
+		// Optional Pyroscope continuous profiling push. Disabled unless
+		// CREWSHIP_PYROSCOPE_URL is set. When set, the binary ships
+		// CPU/heap/goroutine/alloc profiles to Pyroscope every 10 s
+		// tagged with slot=$CREWSHIP_PYROSCOPE_TAG_SLOT, so the Grafana
+		// flame-graph view can filter per dev slot.
+		//
+		// Distinction from pprof endpoint above: pprof is a PULL surface
+		// (operator samples on demand), Pyroscope is PUSH (continuous
+		// timeline). Both can run together — they share the same
+		// underlying runtime profilers, so the cost is one set of
+		// samplers regardless of which surface(s) are enabled.
+		if pyroscopeURL := os.Getenv("CREWSHIP_PYROSCOPE_URL"); pyroscopeURL != "" {
+			if stop, err := telemetry.StartPyroscopePush(context.Background(), pyroscopeURL, logger); err != nil {
+				logger.Warn("pyroscope push profiler failed to start", "url", telemetry.RedactURL(pyroscopeURL), "err", err)
+			} else {
+				s.pyroscopeShutdown = stop
 			}
 		}
 		opts = append(opts, goapi.WithSocketPath(cfg.IPC.SocketPath))
