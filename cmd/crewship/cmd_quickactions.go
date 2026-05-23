@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -72,11 +73,20 @@ Equivalent to running 'mission list --assignee=me' + 'approvals list
 			*into = body.Data
 			mu.Unlock()
 		}
-		wg.Add(3)
+		const fanout = 3
+		wg.Add(fanout)
 		go fetch("/api/v1/missions?assignee=me", &missions, "missions")
 		go fetch("/api/v1/approvals?status=pending&assignee=me", &approvals, "approvals")
 		go fetch("/api/v1/runs?actor=me&limit=10", &runs, "runs")
 		wg.Wait()
+		// Bail with a real error (and non-zero exit) when every fetch
+		// failed the same way with session_invalid — otherwise the
+		// rendered dashboard becomes indistinguishable from a healthy
+		// empty workspace and scripts can't detect the dead session.
+		// gh#555.
+		if len(errs) == fanout && allSessionInvalid(errs) {
+			return errSessionExpired()
+		}
 		return renderMe(missions, approvals, runs, errs)
 	},
 }
@@ -98,7 +108,8 @@ var todayCmd = &cobra.Command{
 			wg   sync.WaitGroup
 			errs []string
 		)
-		wg.Add(2)
+		const fanout = 2
+		wg.Add(fanout)
 		go func() {
 			defer wg.Done()
 			var body struct {
@@ -133,6 +144,9 @@ var todayCmd = &cobra.Command{
 			}
 		}()
 		wg.Wait()
+		if len(errs) == fanout && allSessionInvalid(errs) {
+			return errSessionExpired()
+		}
 		return renderToday(runs, cost, errs)
 	},
 }
@@ -177,11 +191,15 @@ var nowCmd = &cobra.Command{
 			*into = body.Data
 			mu.Unlock()
 		}
-		wg.Add(3)
+		const fanout = 3
+		wg.Add(fanout)
 		go fetchData("/api/v1/runs?status=RUNNING&limit=20", &runningRuns, "runs")
 		go fetchData("/api/v1/agents", &agents, "agents")
 		go fetchData("/api/v1/approvals?status=pending", &approvals, "approvals")
 		wg.Wait()
+		if len(errs) == fanout && allSessionInvalid(errs) {
+			return errSessionExpired()
+		}
 		return renderNow(runningRuns, agents, approvals, errs)
 	},
 }
@@ -289,6 +307,39 @@ func str(v any) string {
 		return s
 	}
 	return fmt.Sprintf("%v", v)
+}
+
+// allSessionInvalid reports whether every aggregated fetch in the
+// quick-action commands (now / me / today) failed with the same
+// "session expired" auth shape — i.e. all of them, none of them
+// partial. When that's the case the dashboard view becomes
+// indistinguishable from "all clear" (gh#555): zero missions, zero
+// runs, zero approvals reads the same as a healthy quiet workspace.
+// The fix is to bail with a clear re-login hint instead of rendering
+// an empty dashboard and exiting 0.
+//
+// Partial failure stays a soft `[partial]` warning so the user keeps
+// whatever data did succeed — that's the existing behaviour and
+// continues to be the right call when only one endpoint is unhappy.
+func allSessionInvalid(errs []string) bool {
+	if len(errs) == 0 {
+		return false
+	}
+	for _, e := range errs {
+		if !strings.Contains(e, "(401)") || !strings.Contains(e, "session_invalid") {
+			return false
+		}
+	}
+	return true
+}
+
+// errSessionExpired is the user-facing error returned when the auth
+// session is dead across every aggregated call. The remediation —
+// `crewship login` — is named in the message so scripts and humans
+// have a single, actionable next step. Exit code is non-zero via
+// Cobra's standard error path; that's the gh#555 fix.
+func errSessionExpired() error {
+	return fmt.Errorf("session expired — run `crewship login` to re-authenticate")
 }
 
 func init() {
