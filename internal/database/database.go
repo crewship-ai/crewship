@@ -48,11 +48,18 @@ func Open(databaseURL string) (*DB, error) {
 	if strings.Contains(path, "?") {
 		sep = "&"
 	}
+	// cache_size(-65536) = 64 MiB per-connection page cache. SetMaxOpenConns
+	// caps the pool at 5 (see below), so worst case is ~320 MiB resident —
+	// trivial against the VMs we target. 64 MiB keeps the hot working set of
+	// journal_entries + agents + missions resident through dashboard polls
+	// instead of round-tripping page reads from disk on every refresh.
+	// Bumping further (e.g. 256 MiB) buys diminishing returns unless the
+	// DB grows past ~500 MiB.
 	dsn := path + sep + "_pragma=busy_timeout(5000)" +
 		"&_pragma=journal_mode(WAL)" +
 		"&_pragma=synchronous(NORMAL)" +
 		"&_pragma=foreign_keys(ON)" +
-		"&_pragma=cache_size(-20000)" +
+		"&_pragma=cache_size(-65536)" +
 		"&_pragma=temp_store(MEMORY)" +
 		"&_pragma=mmap_size(268435456)" +
 		"&_txlock=immediate"
