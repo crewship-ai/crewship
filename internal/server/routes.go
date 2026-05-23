@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/api"
 	"github.com/crewship-ai/crewship/internal/llmproxy"
 )
 
@@ -110,8 +111,14 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 // When CREWSHIP_METRICS_TOKEN is unset, only loopback is permitted. The
 // previous behaviour ("anyone can read") survived only because no PoC had
 // chained the leak into something more impactful — see F-003.
+//
+// The loopback check evaluates the TRUE client IP via api.ExtractClientIP,
+// not the raw r.RemoteAddr — otherwise a same-host reverse proxy (Caddy /
+// nginx) silently turns every public request into a loopback hit and the
+// bypass exempts the whole internet. gh#553 closed that drift; the rate
+// limiter's trusted-proxy + right-to-left XFF rule is the shared truth.
 func metricsAuthorized(r *http.Request) bool {
-	if isLoopbackPeer(r.RemoteAddr) {
+	if isLoopbackPeer(api.ExtractClientIP(r)) {
 		return true
 	}
 	want := strings.TrimSpace(os.Getenv("CREWSHIP_METRICS_TOKEN"))
