@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -24,6 +25,42 @@ import (
 // ndjson is requested the run streams as line-delimited events so it
 // composes with jq / downstream tooling.
 var flagRootPrompt string
+
+// subcommandSlugRe matches the shape of every registered Crewship
+// subcommand: lowercase ASCII letter or digit start, then letters,
+// digits, or hyphens. We deliberately exclude underscores and slashes
+// because Crewship never uses them in command names.
+var subcommandSlugRe = regexp.MustCompile(`^[a-z][a-z0-9-]+$`)
+
+// looksLikeSubcommandTypo reports whether a single positional arg is
+// almost certainly a misspelled subcommand rather than a one-shot
+// question for the default agent.
+//
+// Rule: any single token whose shape matches a Crewship subcommand
+// slug (lowercase ASCII, digits, hyphens, 2-40 chars, no whitespace /
+// underscore / slash / leading digit / leading dash) is treated as a
+// typo. By the time we get here Cobra has already resolved real
+// subcommand names, so a slug-shaped input that reaches us is unknown
+// to Cobra — that's the typo signal. The escape hatch for "I really
+// do want to ask one word" is the explicit `-p "<word>"` flag.
+//
+// 40-char upper bound is generous enough for the longest plausibly-
+// typed nonsense (the audit reported `definitely-not-a-real-subcommand`
+// at 32 chars) without ever capturing a real free-form question, which
+// would always contain whitespace or punctuation by the time it's
+// 40 chars long.
+func looksLikeSubcommandTypo(arg string) bool {
+	// Whitespace? Definitely a sentence, not a slug.
+	if strings.ContainsAny(arg, " \t\n") {
+		return false
+	}
+	// Bounds: shorter than 2 chars is "a" / "x"; longer than 40 is
+	// past any registered command and past any single-word question.
+	if len(arg) < 2 || len(arg) > 40 {
+		return false
+	}
+	return subcommandSlugRe.MatchString(arg)
+}
 
 // runHeadlessAsk dispatches a top-level `-p "..."` invocation to the
 // same code-path as `crewship ask "..."`. Internally we re-execute the
@@ -99,6 +136,21 @@ func init() {
 		// would otherwise see a stale value from a previous run when
 		// the user typed `crewship "first"` followed by `crewship -p ""`.
 		prompt := flagRootPrompt
+
+		// Typo guard (gh#554): the headless-ask fallback used to fire
+		// for *any* unmatched positional, including bare subcommand
+		// typos like `crewship status` or `crewship lz`. Cobra resolves
+		// real subcommand names before RunE runs, so anything that
+		// reaches us here is unknown to Cobra. When the user did NOT
+		// opt into the ask path with -p AND the single positional looks
+		// like a subcommand slug, reject with an explicit
+		// "unknown command" instead of dispatching a real LLM run
+		// against the typo.
+		if prompt == "" && len(args) == 1 && looksLikeSubcommandTypo(args[0]) {
+			return fmt.Errorf("unknown command %q for %q; run %q to see available commands",
+				args[0], cmd.CommandPath(), cmd.CommandPath()+" --help")
+		}
+
 		if prompt == "" && len(args) > 0 {
 			prompt = strings.Join(args, " ")
 		}
