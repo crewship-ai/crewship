@@ -27,7 +27,8 @@ Example:
 		serverURL, _ := cmd.Flags().GetString("server")
 		email, _ := cmd.Flags().GetString("email")
 		name, _ := cmd.Flags().GetString("name")
-		password, _ := cmd.Flags().GetString("password")
+		passwordFlag, _ := cmd.Flags().GetString("password")
+		passwordStdin, _ := cmd.Flags().GetBool("password-stdin")
 
 		if serverURL == "" {
 			serverURL = "http://localhost:8080"
@@ -39,6 +40,10 @@ Example:
 			return fmt.Errorf("--name is required")
 		}
 
+		password, _, err := resolvePasswordInput(passwordFlag, passwordStdin, cmd.InOrStdin())
+		if err != nil {
+			return err
+		}
 		if password == "" {
 			fmt.Print("Password (min 8 chars): ")
 			passwordBytes, err := term.ReadPassword(int(syscall.Stdin))
@@ -92,5 +97,6 @@ func init() {
 	initCmd.Flags().String("server", "", "Crewship server URL (default http://localhost:8080)")
 	initCmd.Flags().String("email", "", "Admin email address (required)")
 	initCmd.Flags().String("name", "", "Admin full name (required)")
-	initCmd.Flags().String("password", "", "Admin password (prompted if omitted)")
+	initCmd.Flags().String("password", "", "Admin password (leaks to shell history; prefer --password-stdin in CI)")
+	initCmd.Flags().Bool("password-stdin", false, "Read admin password from stdin (preferred for CI / scripts — avoids argv leak)")
 }

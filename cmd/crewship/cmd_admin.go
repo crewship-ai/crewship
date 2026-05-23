@@ -68,7 +68,8 @@ var adminPromoteCmd = &cobra.Command{
 
 func init() {
 	adminResetPasswordCmd.Flags().String("email", "", "Email of the user to reset (required)")
-	adminResetPasswordCmd.Flags().String("password", "", "New password (if omitted, prompts interactively)")
+	adminResetPasswordCmd.Flags().String("password", "", "New password (leaks to shell history; prefer --password-stdin in CI)")
+	adminResetPasswordCmd.Flags().Bool("password-stdin", false, "Read new password from stdin (preferred for CI / scripts — avoids argv leak)")
 	_ = adminResetPasswordCmd.MarkFlagRequired("email")
 
 	adminPromoteCmd.Flags().String("email", "", "Email of the user to promote (required)")
@@ -113,10 +114,16 @@ func openAdminDB() (*database.DB, error) {
 
 func runAdminResetPassword(cmd *cobra.Command, _ []string) error {
 	email, _ := cmd.Flags().GetString("email")
-	password, _ := cmd.Flags().GetString("password")
+	passwordFlag, _ := cmd.Flags().GetString("password")
+	passwordStdin, _ := cmd.Flags().GetBool("password-stdin")
 	email = strings.ToLower(strings.TrimSpace(email))
 	if email == "" {
 		return errors.New("--email is required")
+	}
+
+	password, _, err := resolvePasswordInput(passwordFlag, passwordStdin, cmd.InOrStdin())
+	if err != nil {
+		return err
 	}
 
 	db, err := openAdminDB()
