@@ -10,7 +10,7 @@ import (
 // into the headless ask path".
 //
 // The rule: a single positional whose shape matches a Cobra subcommand
-// slug (lowercase ASCII, hyphens, 2-30 chars) is almost certainly a typo.
+// slug (lowercase ASCII, hyphens, 2-40 chars) is almost certainly a typo.
 // A real question that the user wants delivered to the default agent
 // contains punctuation or a capital letter, or is multi-word — none of
 // which the heuristic rejects.
@@ -49,10 +49,12 @@ func TestLooksLikeSubcommandTypo(t *testing.T) {
 		{"foo_bar", false, "contains underscore — not Crewship slug style"},
 	}
 	for _, tc := range cases {
-		got := looksLikeSubcommandTypo(tc.in)
-		if got != tc.want {
-			t.Errorf("looksLikeSubcommandTypo(%q) = %v, want %v (%s)", tc.in, got, tc.want, tc.why)
-		}
+		tc := tc // capture per-iteration for the subtest closure
+		t.Run(tc.why, func(t *testing.T) {
+			if got := looksLikeSubcommandTypo(tc.in); got != tc.want {
+				t.Errorf("looksLikeSubcommandTypo(%q) = %v, want %v", tc.in, got, tc.want)
+			}
+		})
 	}
 }
 
@@ -67,8 +69,11 @@ func TestLooksLikeSubcommandTypo(t *testing.T) {
 // anything network-touching.
 func TestRootHeadlessRejectsTypoSingleArg(t *testing.T) {
 	// flagRootPrompt is set by the -p flag binding; tests must clear it
-	// because Go test binaries reuse package globals across cases.
+	// because Go test binaries reuse package globals across cases. The
+	// defer guarantees cleanup even if rootCmd.RunE panics partway
+	// through (matches the pattern in TestRootHeadlessAllowsExplicitDashP*).
 	flagRootPrompt = ""
+	defer func() { flagRootPrompt = "" }()
 
 	err := rootCmd.RunE(rootCmd, []string{"status"})
 	if err == nil {
@@ -89,6 +94,7 @@ func TestRootHeadlessRejectsTypoSingleArg(t *testing.T) {
 // no auth), and that's the existing behaviour we're preserving.
 func TestRootHeadlessAllowsRealPrompt(t *testing.T) {
 	flagRootPrompt = ""
+	defer func() { flagRootPrompt = "" }()
 
 	err := rootCmd.RunE(rootCmd, []string{"what time is it"})
 	if err != nil && strings.Contains(err.Error(), "unknown command") {

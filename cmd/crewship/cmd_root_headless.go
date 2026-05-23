@@ -27,9 +27,10 @@ import (
 var flagRootPrompt string
 
 // subcommandSlugRe matches the shape of every registered Crewship
-// subcommand: lowercase ASCII letter or digit start, then letters,
-// digits, or hyphens. We deliberately exclude underscores and slashes
-// because Crewship never uses them in command names.
+// subcommand: lowercase ASCII letter start, then letters, digits, or
+// hyphens. We deliberately exclude underscores and slashes because
+// Crewship never uses them in command names, and we reject a leading
+// digit so things like "123" stay in the prompt path.
 var subcommandSlugRe = regexp.MustCompile(`^[a-z][a-z0-9-]+$`)
 
 // looksLikeSubcommandTypo reports whether a single positional arg is
