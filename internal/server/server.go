@@ -74,6 +74,7 @@ type Server struct {
 	journalWriter     *journal.Writer
 	consolidator      *consolidate.Consolidator
 	telemetryShutdown func()
+	pprofShutdown     func()
 	startedAt         time.Time
 	runCtx            context.Context
 	runCancel         context.CancelFunc
@@ -439,6 +440,19 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 			telemetry.RegisterJournalResolver()
 			if otelEndpoint != "" {
 				logger.Info("OTel GenAI telemetry enabled", "endpoint", otelEndpoint)
+			}
+		}
+
+		// Optional pprof endpoint on a private bind. Disabled unless
+		// CREWSHIP_PPROF_ADDR is set; recommended value 127.0.0.1:6060
+		// (loopback only). See internal/telemetry/pprof.go for the
+		// security rationale — pprof on the public surface is both an
+		// info leak and a DoS vector (a 30s CPU profile blocks the GC).
+		if pprofAddr := os.Getenv("CREWSHIP_PPROF_ADDR"); pprofAddr != "" {
+			if pprofShutdown, err := telemetry.StartPProfServer(pprofAddr, logger); err != nil {
+				logger.Warn("pprof endpoint failed to start", "addr", pprofAddr, "err", err)
+			} else {
+				s.pprofShutdown = pprofShutdown
 			}
 		}
 		opts = append(opts, goapi.WithSocketPath(cfg.IPC.SocketPath))
