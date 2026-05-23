@@ -1,25 +1,49 @@
 package telemetry
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"runtime"
+	"sync"
 
 	"github.com/grafana/pyroscope-go"
 )
 
-// StartPyroscopePush starts the pyroscope-go push profiler. When url
+// blockProfileRateNS is the default ns-resolution sampling rate for the
+// goroutine block profiler when pyroscope push is active. SetBlockProfile-
+// Rate semantics: "average one sample per N nanoseconds spent blocked"
+// — small N samples (almost) every block event, large N samples rarely.
+// 10 ms balances signal (real lock-contention shows up) against the
+// per-sample overhead of recording every sub-microsecond goroutine park.
+const blockProfileRateNS = 10_000_000
+
+// RedactURL strips any userinfo from a URL string so it's safe to put
+// in logs. Falls back to "<unparseable url>" if the input isn't a valid
+// URL — never returns the raw string with credentials intact.
+func RedactURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "<unparseable url>"
+	}
+	u.User = nil
+	return u.String()
+}
+
+// StartPyroscopePush starts the pyroscope-go push profiler. When pushURL
 // is empty the call is a no-op — this is the production default so a
-// binary without a Pyroscope endpoint configured stays fully runnable.
+// binary without a push endpoint configured stays fully runnable.
 //
 // When configured, the profiler ships CPU + heap + goroutines + alloc
-// profiles every 10 s to the Pyroscope server. Each sample carries
+// profiles every 10 s to the push server. Each sample carries
 // service.name=crewship + a host-level tag (slot, hostname) so the
-// Grafana flame-graph view can be filtered per slot.
+// flame-graph view can be filtered per slot.
 //
-// Returned stop closure stops the upload + flushes any in-flight
-// sample; defer it next to the OTel telemetry shutdown.
+// ctx drives lifecycle: when it's cancelled the profiler is stopped.
+// The returned stop closure does the same thing and is idempotent — it's
+// safe to call either, both, or neither.
 //
 // Env contract:
 //
@@ -29,8 +53,8 @@ import (
 // Distinction from net/http/pprof: StartPProfServer (pprof.go) opens
 // a pull endpoint a remote tool can sample on-demand. This pushes
 // the same profiles upstream on a schedule, no inbound socket needed.
-func StartPyroscopePush(url string, logger *slog.Logger) (stop func(), err error) {
-	if url == "" {
+func StartPyroscopePush(ctx context.Context, pushURL string, logger *slog.Logger) (stop func(), err error) {
+	if pushURL == "" {
 		return func() {}, nil
 	}
 	if logger == nil {
@@ -38,10 +62,10 @@ func StartPyroscopePush(url string, logger *slog.Logger) (stop func(), err error
 	}
 
 	// Enable mutex + block profiling so the flame graph can attribute
-	// "wait on a lock" time, not just "running CPU". Cheap on idle
-	// workloads (1/N sample rate), invisible noise on busy ones.
+	// "wait on a lock" time, not just "running CPU". The block-profile
+	// rate is in nanoseconds — see blockProfileRateNS for the rationale.
 	runtime.SetMutexProfileFraction(5)
-	runtime.SetBlockProfileRate(5)
+	runtime.SetBlockProfileRate(blockProfileRateNS)
 
 	hostname, _ := os.Hostname()
 	slot := os.Getenv("CREWSHIP_PYROSCOPE_TAG_SLOT")
@@ -51,7 +75,7 @@ func StartPyroscopePush(url string, logger *slog.Logger) (stop func(), err error
 
 	prof, err := pyroscope.Start(pyroscope.Config{
 		ApplicationName: "crewship",
-		ServerAddress:   url,
+		ServerAddress:   pushURL,
 		Logger:          pyroscopeLogger{l: logger},
 		Tags: map[string]string{
 			"slot":     slot,
@@ -74,11 +98,21 @@ func StartPyroscopePush(url string, logger *slog.Logger) (stop func(), err error
 		return nil, fmt.Errorf("pyroscope start: %w", err)
 	}
 
-	logger.Info("pyroscope push profiler started", "url", url, "slot", slot)
+	logger.Info("pyroscope push profiler started", "url", RedactURL(pushURL), "slot", slot)
 
-	return func() {
-		_ = prof.Stop()
-	}, nil
+	var once sync.Once
+	stopFn := func() {
+		once.Do(func() {
+			_ = prof.Stop()
+		})
+	}
+
+	go func() {
+		<-ctx.Done()
+		stopFn()
+	}()
+
+	return stopFn, nil
 }
 
 // pyroscopeLogger bridges Crewship's slog to the pyroscope-go logger

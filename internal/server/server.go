@@ -469,8 +469,8 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 		// underlying runtime profilers, so the cost is one set of
 		// samplers regardless of which surface(s) are enabled.
 		if pyroscopeURL := os.Getenv("CREWSHIP_PYROSCOPE_URL"); pyroscopeURL != "" {
-			if stop, err := telemetry.StartPyroscopePush(pyroscopeURL, logger); err != nil {
-				logger.Warn("pyroscope push profiler failed to start", "url", pyroscopeURL, "err", err)
+			if stop, err := telemetry.StartPyroscopePush(context.Background(), pyroscopeURL, logger); err != nil {
+				logger.Warn("pyroscope push profiler failed to start", "url", telemetry.RedactURL(pyroscopeURL), "err", err)
 			} else {
 				s.pyroscopeShutdown = stop
 			}

@@ -3,6 +3,7 @@ package telemetry
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -11,7 +12,7 @@ import (
 )
 
 // StartPProfServer starts an HTTP server exposing the standard Go runtime
-// profiling endpoints (pprof + expvar) on addr. The default Crewship
+// /debug/pprof/* endpoints on addr. The default Crewship
 // HTTP mux deliberately 404s /debug/pprof/* because exposing CPU profile
 // generation over a public surface is both an info leak and a denial-of-
 // service vector (a 30-second CPU profile blocks all other GC). Running
@@ -47,8 +48,11 @@ func StartPProfServer(addr string, logger *slog.Logger) (shutdown func(), err er
 	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
 	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
 
+	// Empty host (":6060") binds every interface; treat it as
+	// non-loopback for the warning so an unintended public exposure
+	// surfaces in logs at startup.
 	host, _, splitErr := net.SplitHostPort(addr)
-	if splitErr != nil || (host != "" && host != "127.0.0.1" && host != "::1" && host != "localhost") {
+	if splitErr != nil || host == "" || (host != "127.0.0.1" && host != "::1" && host != "localhost") {
 		logger.Warn("CREWSHIP_PPROF_ADDR is not a loopback bind — anyone reachable on this address can pull CPU/heap profiles and trigger DoS via /debug/pprof/profile",
 			"addr", addr,
 			"recommended", "127.0.0.1:6060")
@@ -62,7 +66,7 @@ func StartPProfServer(addr string, logger *slog.Logger) (shutdown func(), err er
 
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("listen pprof on %s: %w", addr, err)
 	}
 
 	go func() {
