@@ -155,11 +155,40 @@ func TestSecurityHeadersMiddleware(t *testing.T) {
 		{"X-Content-Type-Options", "nosniff"},
 		{"Referrer-Policy", "strict-origin-when-cross-origin"},
 		{"Permissions-Policy", "camera=(), microphone=(), geolocation=()"},
+		{"Strict-Transport-Security", "max-age=31536000; includeSubDomains"},
+		{"Cross-Origin-Embedder-Policy", "credentialless"},
+		{"Cross-Origin-Resource-Policy", "same-origin"},
 	}
 	for _, h := range headers {
 		got := rec.Header().Get(h.k)
 		if got != h.want {
 			t.Errorf("%s = %q, want %q", h.k, got, h.want)
+		}
+	}
+}
+
+// /exposed/* is the reverse-proxy path for port-exposed user apps —
+// the upstream owns its own policy. CSP was already carved out; the
+// HSTS/COEP/CORP headers added in PR #551 follow the same rule so we
+// don't credentialless-strip the upstream's no-cors fetches or clamp
+// resources it expects to be cross-origin embeddable.
+func TestSecurityHeadersMiddleware_ExposedSkipsIsolationHeaders(t *testing.T) {
+	t.Parallel()
+	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	wrapped := securityHeadersMiddleware(inner)
+	rec := httptest.NewRecorder()
+	wrapped.ServeHTTP(rec, httptest.NewRequest("GET", "/exposed/myapp/index.html", nil))
+
+	for _, h := range []string{
+		"Strict-Transport-Security",
+		"Cross-Origin-Embedder-Policy",
+		"Cross-Origin-Resource-Policy",
+		"Content-Security-Policy",
+	} {
+		if got := rec.Header().Get(h); got != "" {
+			t.Errorf("/exposed/* must not stamp %s, got %q", h, got)
 		}
 	}
 }

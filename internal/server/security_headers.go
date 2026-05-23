@@ -34,15 +34,47 @@ func securityHeadersMiddleware(next http.Handler) http.Handler {
 		//
 		// /exposed/ is the reverse-proxy path for port-exposed apps —
 		// the upstream may serve arbitrary HTML/JS that needs its own
-		// policy. We DON'T set CSP on those responses; if the upstream
-		// returns a CSP header it propagates as-is, and if not, the
-		// browser default applies. CodeRabbit flagged this in PR #236.
+		// policy. We DON'T set CSP, HSTS, COEP, or CORP on those
+		// responses; if the upstream returns these headers they
+		// propagate as-is, and if not the browser default applies.
+		// Stamping them would credentialless-strip the upstream's own
+		// no-cors fetches and same-origin-clamp resources it expects
+		// to be embeddable cross-origin — both behaviour changes the
+		// proxied app didn't opt into.
+		// CodeRabbit flagged the CSP case in PR #236; the COEP/CORP
+		// scoping landed alongside in PR #551 after re-review.
 		path := r.URL.Path
 		isExposed := strings.HasPrefix(path, "/exposed/")
 		isUI := !isExposed &&
 			!strings.HasPrefix(path, "/api/") &&
 			path != "/healthz" && path != "/readyz" &&
 			path != "/metrics" && path != "/ws" && path != "/ws/terminal"
+
+		if !isExposed {
+			// Audit 2026-05-23: ZAP flagged missing HSTS, COEP, CORP.
+			//
+			// HSTS: 1-year max-age + includeSubDomains. preload
+			// omitted on purpose — opting into Chrome's preload list
+			// is a one-way door (removal takes months) and requires
+			// every current and future subdomain to be HTTPS-only.
+			w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+
+			// COEP `credentialless` strips cookies from cross-origin
+			// no-cors requests so the page can opt into cross-origin
+			// isolation without breaking CDN images that lack CORP
+			// headers. `require-corp` would break any cross-origin
+			// subresource that does not explicitly send a CORP header
+			// — too aggressive for a SPA that may surface user-
+			// supplied avatar URLs or third-party badges.
+			w.Header().Set("Cross-Origin-Embedder-Policy", "credentialless")
+
+			// CORP: this origin's own resources should never be
+			// embedded from a different origin (no cross-origin
+			// <img>, <script>, <iframe> targeting our UI/API). Pairs
+			// with frame-ancestors 'none' in strict CSP + COOP above.
+			w.Header().Set("Cross-Origin-Resource-Policy", "same-origin")
+		}
+
 		switch {
 		case isExposed:
 			// Upstream owns its own policy; do not stamp.

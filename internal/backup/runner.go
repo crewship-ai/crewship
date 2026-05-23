@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"runtime/debug"
 	"sort"
@@ -363,10 +364,26 @@ func ensureAgentsIdle(ctx context.Context, db *sql.DB, target *WorkspaceTarget) 
 	return fmt.Errorf("%w: agent %q; abort the run or wait for it to finish", ErrAgentRunning, running)
 }
 
+// validSQLIdent matches a SQLite-safe identifier (letters, digits,
+// underscore; must start with a letter or underscore). Used to gate
+// table/column names that MUST be inlined into SQL (PRAGMA arguments
+// cannot be parameterized in SQLite). Anything outside this character
+// class would either be a typo or an injection attempt.
+var validSQLIdent = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
 // columnExists reports whether table.column is present in the current
 // DB. Used only by the agent-idle guard to cope with older schemas.
+//
+// SQLite PRAGMA arguments are not parameterizable, so `table` must be
+// concatenated into the query string. Defence: reject anything that is
+// not a bare identifier before it ever reaches SQL. All current callers
+// pass compile-time string literals; the validation is here to ensure
+// any future caller cannot escape the identifier shape.
 func columnExists(ctx context.Context, db *sql.DB, table, col string) (bool, error) {
-	rows, err := db.QueryContext(ctx, `PRAGMA table_info(`+table+`)`)
+	if !validSQLIdent.MatchString(table) {
+		return false, fmt.Errorf("backup: columnExists: invalid table identifier %q", table)
+	}
+	rows, err := db.QueryContext(ctx, `PRAGMA table_info(`+table+`)`) // nosemgrep: gosql-sqli — table validated above
 	if err != nil {
 		return false, err
 	}

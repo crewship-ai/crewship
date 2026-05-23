@@ -175,3 +175,58 @@ func TestStaticFileHandler_ChatSlugDoesNotFallBackToDashboard(t *testing.T) {
 		t.Fatal("/chat/filip should NOT serve root index.html — that's the bug we just fixed (dashboard rendered instead of chat)")
 	}
 }
+
+// Audit 2026-05-23 (ffuf finding): every dotfile / VCS / backup path was
+// resolving to HTTP 200 SPA fallback, drowning real endpoints in noise
+// and giving the illusion that paths like /.htpasswd "exist". 404 those.
+func TestStaticFileHandler_SensitivePathsReturn404(t *testing.T) {
+	h := StaticFileHandler(fakeFS())
+	cases := []string{
+		"/.htpasswd",
+		"/.htaccess",
+		"/.git/config",
+		"/.git",
+		"/.gitignore",
+		"/.env",
+		"/.env.local",
+		"/.ssh/id_rsa",
+		"/.bash_history",
+		"/.aws/credentials",
+		"/.DS_Store",
+		"/.svn/entries",
+		"/path/.git/HEAD",
+		"/index.html.bak",
+		"/config.old",
+		"/foo~",
+		"/config.tmp",
+		"/data.backup",
+		"/notes.sav",
+		// Regression: .well-known exempts only its own segment, so a
+		// nested sensitive segment still 404s (CodeRabbit PR #551).
+		"/.well-known/.git/config",
+		"/.well-known/.env",
+	}
+	for _, p := range cases {
+		t.Run(p, func(t *testing.T) {
+			code, _ := get(t, h, p)
+			if code != http.StatusNotFound {
+				t.Errorf("expected 404, got %d", code)
+			}
+		})
+	}
+}
+
+// .well-known/* (RFC 8615) is the documented exception — must still
+// reach the SPA fallback so e.g. acme-challenge / security.txt can be
+// served from the static export.
+func TestStaticFileHandler_WellKnownNotBlocked(t *testing.T) {
+	h := StaticFileHandler(fakeFS())
+	code, _ := get(t, h, "/.well-known/security.txt")
+	if code == http.StatusNotFound {
+		// .well-known/security.txt is not present in fakeFS, so SPA
+		// fallback serves index.html (200, body=ROOT). The point is
+		// we must NOT have been short-circuited to 404 by the
+		// dotfile guard.
+		t.Fatal(".well-known/* must not be blocked by sensitive-path guard")
+	}
+}

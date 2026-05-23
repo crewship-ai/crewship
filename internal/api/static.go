@@ -11,6 +11,44 @@ import (
 	"strings"
 )
 
+// sensitiveSPAFallbackBackupSuffixes are file extensions that strongly
+// suggest a backup/swap/editor artifact and should never resolve via the
+// SPA fallback. Real Next.js routes don't end with these.
+var sensitiveSPAFallbackBackupSuffixes = []string{".bak", ".old", ".orig", ".save", ".swp", ".tmp", ".backup", ".sav", "~"}
+
+// isSensitiveSPAFallbackPath reports whether a request path is one that
+// scanners commonly probe (dotfiles, VCS dirs, editor backups) and should
+// 404 rather than fall through to the SPA index. This stops content-
+// discovery fuzzers from drowning in 200 OK noise and prevents the
+// impression that paths like /.htpasswd or /.git/config "exist".
+//
+// `.well-known` is exempted at the segment level only (RFC 8615), not
+// for the whole path: /.well-known/.git/config is still blocked because
+// the nested `.git` segment is independently sensitive. Without this
+// scoping a future RFC 8615 deployment that nests user content under
+// .well-known would inherit a probe-friendly subtree by accident.
+func isSensitiveSPAFallbackPath(p string) bool {
+	p = strings.TrimPrefix(p, "/")
+	if p == "" {
+		return false
+	}
+	for _, seg := range strings.Split(p, "/") {
+		if seg == ".well-known" {
+			continue
+		}
+		if strings.HasPrefix(seg, ".") {
+			return true
+		}
+	}
+	low := strings.ToLower(p)
+	for _, suf := range sensitiveSPAFallbackBackupSuffixes {
+		if strings.HasSuffix(low, suf) {
+			return true
+		}
+	}
+	return false
+}
+
 // StaticFileHandler returns an HTTP handler that serves the Next.js static export from the given filesystem.
 // It handles .html extension resolution, directory indexes, and SPA client-side routing fallback.
 func StaticFileHandler(webFS fs.FS) http.Handler {
@@ -135,6 +173,16 @@ func StaticFileHandler(webFS fs.FS) http.Handler {
 					return
 				}
 			}
+		}
+
+		// Block sensitive paths (dotfiles, VCS dirs, editor backups) from
+		// falling through to SPA. ffuf/Nikto/etc. otherwise see HTTP 200
+		// for every probe, drowning real findings and leaking the illusion
+		// that paths like /.htpasswd or /.git/config exist. .well-known/*
+		// is preserved (RFC 8615).
+		if isSensitiveSPAFallbackPath(r.URL.Path) {
+			http.NotFound(w, r)
+			return
 		}
 
 		// SPA fallback: serve root index.html for client-side routing
