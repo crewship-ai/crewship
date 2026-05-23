@@ -1,9 +1,29 @@
 package main
 
 import (
+	"errors"
 	"strings"
 	"testing"
+
+	"github.com/spf13/cobra"
 )
+
+// stubAskCmdRunE replaces askCmd.RunE with a sentinel-returning no-op
+// for the duration of a test and restores the original on cleanup.
+// Used by the bypass tests below so they never reach the real ask
+// path (which mutates askCmd flags and may attempt network I/O).
+func stubAskCmdRunE(t *testing.T) {
+	t.Helper()
+	orig := askCmd.RunE
+	askCmd.RunE = func(_ *cobra.Command, _ []string) error {
+		return errors.New("stub: askCmd suppressed in test")
+	}
+	t.Cleanup(func() {
+		askCmd.RunE = orig
+		_ = askCmd.Flags().Set("quiet", "false")
+		flagRootPrompt = ""
+	})
+}
 
 // TestLooksLikeSubcommandTypo pins down the heuristic that distinguishes
 // "user typoed a subcommand name" from "user piped a single-word question
@@ -93,8 +113,8 @@ func TestRootHeadlessRejectsTypoSingleArg(t *testing.T) {
 // error; the downstream ask path will fail on its own (no default agent,
 // no auth), and that's the existing behaviour we're preserving.
 func TestRootHeadlessAllowsRealPrompt(t *testing.T) {
+	stubAskCmdRunE(t)
 	flagRootPrompt = ""
-	defer func() { flagRootPrompt = "" }()
 
 	err := rootCmd.RunE(rootCmd, []string{"what time is it"})
 	if err != nil && strings.Contains(err.Error(), "unknown command") {
@@ -106,8 +126,8 @@ func TestRootHeadlessAllowsRealPrompt(t *testing.T) {
 // explicit `-p <word>` is honored even when the value matches the slug
 // heuristic — they typed -p, they meant a one-shot ask.
 func TestRootHeadlessAllowsExplicitDashPSingleWord(t *testing.T) {
+	stubAskCmdRunE(t)
 	flagRootPrompt = "status"
-	defer func() { flagRootPrompt = "" }()
 
 	err := rootCmd.RunE(rootCmd, []string{})
 	if err != nil && strings.Contains(err.Error(), "unknown command") {
