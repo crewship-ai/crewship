@@ -2,6 +2,8 @@ module github.com/crewship-ai/crewship
 
 go 1.26
 
+toolchain go1.26.3
+
 require (
 	filippo.io/age v1.3.1
 	github.com/charmbracelet/bubbletea v1.3.10
