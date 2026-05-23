@@ -98,9 +98,24 @@ func TestStubServer_CallsFor(t *testing.T) {
 	s.OnPost("/api/v1/agents", JSONResponse(201, map[string]string{"id": "a1"}))
 	s.OnGet("/api/v1/agents", JSONResponse(200, []string{}))
 
-	_, _ = http.Post(s.URL()+"/api/v1/agents", "application/json", strings.NewReader(`{}`))
-	_, _ = http.Post(s.URL()+"/api/v1/agents", "application/json", strings.NewReader(`{}`))
-	_, _ = http.Get(s.URL() + "/api/v1/agents")
+	// Each call's body must be closed to avoid leaking the underlying
+	// connection back to the http transport pool — t.Parallel tests
+	// that re-use the same default transport will otherwise eventually
+	// run into "too many open files" on CI.
+	postOnce := func() {
+		resp, err := http.Post(s.URL()+"/api/v1/agents", "application/json", strings.NewReader(`{}`))
+		if err != nil {
+			t.Fatalf("POST: %v", err)
+		}
+		_ = resp.Body.Close()
+	}
+	postOnce()
+	postOnce()
+	resp, err := http.Get(s.URL() + "/api/v1/agents")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	_ = resp.Body.Close()
 
 	if got := len(s.CallsFor("POST", "/api/v1/agents")); got != 2 {
 		t.Errorf("CallsFor(POST) = %d, want 2", got)

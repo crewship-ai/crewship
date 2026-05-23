@@ -55,7 +55,9 @@ func BuildRetainRequest(opts ...RetainOpt) memory.RetainRequest {
 }
 
 // WithRetainWorkspace overrides the workspace id on a Retain fixture.
-func WithRetainWorkspace(id string) RetainOpt { return func(r *memory.RetainRequest) { r.WorkspaceID = id } }
+func WithRetainWorkspace(id string) RetainOpt {
+	return func(r *memory.RetainRequest) { r.WorkspaceID = id }
+}
 
 // WithRetainAgent overrides the agent id on a Retain fixture.
 func WithRetainAgent(id string) RetainOpt { return func(r *memory.RetainRequest) { r.AgentID = id } }

@@ -94,6 +94,23 @@ func TestCheckCLIConfigServerScheme(t *testing.T) {
 			wantStatus: "FAIL",
 			mustHave:   "malformed",
 		},
+		{
+			// Regression: prior to the empty-host fix, "http://:8080"
+			// parsed cleanly and isLoopbackHost("") returned true, so
+			// the audit silently PASS'd a misconfigured server. Now
+			// it must FAIL loudly with a "missing a host" message
+			// so the operator notices.
+			name:       "http://:8080 (empty host) → FAIL",
+			cfg:        &cli.CLIConfig{Server: "http://:8080"},
+			wantStatus: "FAIL",
+			mustHave:   "missing a host",
+		},
+		{
+			name:       "https://:443 (empty host) → FAIL",
+			cfg:        &cli.CLIConfig{Server: "https://:443"},
+			wantStatus: "FAIL",
+			mustHave:   "missing a host",
+		},
 	}
 	for _, tc := range cases {
 		tc := tc
@@ -130,7 +147,11 @@ func TestIsLoopbackHost(t *testing.T) {
 		{"127.0.0.1", true},
 		{"127.1.2.3", true}, // entire 127.0.0.0/8 is loopback
 		{"::1", true},
-		{"", true},
+		// Empty must NOT be loopback — a URL like "http://:8080" yields
+		// an empty hostname, and treating that as loopback would let
+		// a misconfigured server: silently pass the security audit.
+		// The caller must explicitly reject empty before asking this.
+		{"", false},
 		{"crewship.example.com", false},
 		{"192.168.1.1", false},
 		{"10.0.0.1", false},

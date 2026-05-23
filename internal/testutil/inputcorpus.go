@@ -80,17 +80,17 @@ func NullByteSamples() []string {
 // CVE-2021-42574 ("Trojan Source") is the famous example.
 func ZeroWidthSamples() []string {
 	return []string{
-		"\u200b",                       // ZERO WIDTH SPACE alone
-		"\u200c",                       // ZERO WIDTH NON-JOINER
-		"\u200d",                       // ZERO WIDTH JOINER
+		"\u200b", // ZERO WIDTH SPACE alone
+		"\u200c", // ZERO WIDTH NON-JOINER
+		"\u200d", // ZERO WIDTH JOINER
 		"hidden\u200bsuffix",
 		"adm\u200bin",
-		"\u202e",                       // RIGHT-TO-LEFT OVERRIDE
-		"\u202d",                       // LEFT-TO-RIGHT OVERRIDE
+		"\u202e", // RIGHT-TO-LEFT OVERRIDE
+		"\u202d", // LEFT-TO-RIGHT OVERRIDE
 		"safe\u202eevil",
-		"\u2060",                       // WORD JOINER
-		"adm\u00adin",                  // SOFT HYPHEN
-		"safe\ufeffsuffix",             // BOM mid-string (smuggling)
+		"\u2060",           // WORD JOINER
+		"adm\u00adin",      // SOFT HYPHEN
+		"safe\ufeffsuffix", // BOM mid-string (smuggling)
 	}
 }
 
@@ -189,13 +189,13 @@ func HTMLInjectionSamples() []string {
 // validators that should reject or NFKC-fold before comparison.
 func UnicodeHomoglyphSamples() []string {
 	return []string{
-		"\u0430dmin",                   // Cyrillic 'а' + "dmin"
-		"\u0440oot",                    // Cyrillic 'р' + "oot"
-		"syst\u0435m",                  // Cyrillic 'е' inside "system"
-		"\u03bfwner",                   // Greek omicron + "wner"
-		"\uff41dmin",                   // Full-width 'a' + "dmin"
-		"\U0001D44Edmin",               // Math italic 'a' + "dmin"
-		"r\u0430dmin",                  // mixed-script "radmin"
+		"\u0430dmin",     // Cyrillic 'а' + "dmin"
+		"\u0440oot",      // Cyrillic 'р' + "oot"
+		"syst\u0435m",    // Cyrillic 'е' inside "system"
+		"\u03bfwner",     // Greek omicron + "wner"
+		"\uff41dmin",     // Full-width 'a' + "dmin"
+		"\U0001D44Edmin", // Math italic 'a' + "dmin"
+		"r\u0430dmin",    // mixed-script "radmin"
 	}
 }
 

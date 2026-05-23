@@ -77,7 +77,15 @@ runner, a quarterly compliance script).`,
 			if status == "stale" || status == "unused" {
 				staleIDs = append(staleIDs, tok.ID)
 			}
-			rows = append(rows, []string{tok.ID[:12], tok.Name, created, lastUsed, status})
+			// Guard the 12-char truncation: a future server change
+			// could shorten the ID format, and the unchecked slice
+			// would panic before any test caught it. Cheap defence,
+			// no behaviour change for IDs already at the expected width.
+			displayID := tok.ID
+			if len(displayID) > 12 {
+				displayID = displayID[:12]
+			}
+			rows = append(rows, []string{displayID, tok.Name, created, lastUsed, status})
 		}
 		if err := f.Auto(result.Data, headers, rows); err != nil {
 			return err

@@ -110,11 +110,11 @@ func TestResolvePasswordInput(t *testing.T) {
 			wantSource: "flag",
 		},
 		{
-			name:    "both set is a configuration error",
-			flag:    "from-flag",
+			name:      "both set is a configuration error",
+			flag:      "from-flag",
 			stdinFlag: true,
-			stdin:   strings.NewReader("from-stdin\n"),
-			wantErr: "mutually exclusive",
+			stdin:     strings.NewReader("from-stdin\n"),
+			wantErr:   "mutually exclusive",
 		},
 		{
 			name:       "neither set returns empty (caller prompts)",

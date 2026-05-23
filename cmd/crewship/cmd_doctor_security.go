@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"runtime"
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/cli"
@@ -54,13 +55,27 @@ func checkCLIConfigServerScheme(cfg *cli.CLIConfig) checkResult {
 			detail: "no server configured (run 'crewship login --server …')",
 		}
 	}
-	u, err := url.Parse(cfg.Server)
+	raw := strings.TrimSpace(cfg.Server)
+	u, err := url.Parse(raw)
 	if err != nil {
 		return checkResult{
 			name:   "cli server scheme",
 			status: "FAIL",
-			detail: fmt.Sprintf("malformed server URL %q: %v", cfg.Server, err),
+			detail: fmt.Sprintf("malformed server URL %q: %v", raw, err),
 			hint:   "fix the 'server:' field in ~/.crewship/cli-config.yaml",
+		}
+	}
+	// An empty u.Hostname() can come from "http://:8080" or "http:///path"
+	// — neither targets a real host, and silently passing them as
+	// loopback would weaken this audit. Fail loudly so the misconfig
+	// surfaces at the doctor invocation, not as a confusing TCP error
+	// the first time the CLI actually issues a request.
+	if strings.TrimSpace(u.Hostname()) == "" {
+		return checkResult{
+			name:   "cli server scheme",
+			status: "FAIL",
+			detail: fmt.Sprintf("server URL %q is missing a host", raw),
+			hint:   "set 'server:' to a full URL like https://host[:port]",
 		}
 	}
 	scheme := strings.ToLower(u.Scheme)
@@ -103,9 +118,18 @@ func checkCLIConfigServerScheme(cfg *cli.CLIConfig) checkResult {
 // to a loopback address. We do NOT do a DNS lookup — a hostile resolver
 // pointing "localhost" at an external IP is a bigger problem than this
 // check can catch, and the lookup would silently fail on air-gapped CI.
+//
+// Empty host is NOT loopback. An empty value means the caller couldn't
+// parse a hostname from the URL ("http://:8080", "http:///path", etc.)
+// — treating it as loopback would let a misconfigured server: pass the
+// security audit silently. Callers should reject empty host BEFORE
+// asking this function.
 func isLoopbackHost(host string) bool {
 	host = strings.ToLower(strings.TrimSpace(host))
-	if host == "" || host == "localhost" {
+	if host == "" {
+		return false
+	}
+	if host == "localhost" {
 		return true
 	}
 	ip := net.ParseIP(host)
@@ -134,6 +158,18 @@ func isLoopbackHost(host string) bool {
 // existing data-dir-perm check has the same skip; this one mirrors it
 // for consistency.
 func checkCLIConfigPerms() checkResult {
+	// Per-doc-comment: file-mode bits don't map to unix r/w/x on
+	// Windows, so the check would produce misleading WARN/FAIL output
+	// there. Skip with INFO so the rest of doctor stays useful — same
+	// pattern the existing data-dir-perm check uses.
+	if runtime.GOOS == "windows" {
+		return checkResult{
+			name:   "cli config perms",
+			status: "INFO",
+			detail: "skipped (POSIX perm bits don't apply on Windows)",
+		}
+	}
+
 	path, err := cli.DefaultConfigPath()
 	if err != nil {
 		return checkResult{
