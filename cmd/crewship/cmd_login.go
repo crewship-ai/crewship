@@ -4,10 +4,14 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -44,6 +48,16 @@ or Settings → Pair CLI):
 	RunE: func(cmd *cobra.Command, args []string) error {
 		server := cli.ResolveServer(flagServer, cliCfg)
 
+		// Pre-flight transport-security check. Fail loud on a malformed
+		// URL or empty host BEFORE the bearer / password hits the wire
+		// against the wrong destination. Warn (don't block) on plaintext
+		// HTTP to a non-loopback host so the operator notices the
+		// cleartext exposure but isn't blocked from intentional choices
+		// (dev VM, internal LAN behind a VPN, etc.).
+		if err := preflightServerURL(cmd.ErrOrStderr(), server); err != nil {
+			return err
+		}
+
 		if loginPairFlag {
 			return loginWithPairing(server, loginCodeFlag, loginAdapterHint)
 		}
@@ -55,6 +69,76 @@ or Settings → Pair CLI):
 		}
 		return loginInteractive(server)
 	},
+}
+
+// preflightServerURL validates the --server URL right before login
+// dispatch. The check is intentionally CLI-local (not in
+// cli.NewClient) because NewClient is also used for non-credential
+// requests where the warning would be noise (e.g. whoami, list, get).
+// At login time the bearer / password is about to ride the
+// connection, so the audit pays for itself.
+//
+// Returns:
+//   - nil + no output         → URL is fine (https, loopback http)
+//   - nil + stderr warning    → plaintext HTTP to a non-loopback host
+//   - error                   → URL is structurally broken (block login)
+//
+// The classification mirrors checkCLIConfigServerScheme in
+// cmd_doctor_security.go; the two intentionally don't share a helper
+// because that file uses //go:build !clionly and cmd_login.go is
+// build-tag-free (CLI-only and full builds both need login). Ten
+// duplicated lines beats the build-tag reshuffle.
+func preflightServerURL(out io.Writer, serverURL string) error {
+	raw := strings.TrimSpace(serverURL)
+	if raw == "" {
+		return fmt.Errorf("--server is empty (set the URL flag or run 'crewship login --server https://…')")
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("invalid --server URL %q: %w", raw, err)
+	}
+	if strings.TrimSpace(u.Hostname()) == "" {
+		return fmt.Errorf("--server %q is missing a host (use https://host[:port])", raw)
+	}
+	scheme := strings.ToLower(u.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return fmt.Errorf("--server scheme %q is unsupported (use http or https)", u.Scheme)
+	}
+	if scheme == "https" {
+		return nil
+	}
+	// HTTP: loopback is fine (dev workflow), non-loopback gets the warning.
+	if loginIsLoopback(u.Hostname()) {
+		return nil
+	}
+	fmt.Fprintf(out, "%s⚠ %s is reached over plaintext HTTP%s — credentials are about to be sent in the clear.\n",
+		cli.Yellow, u.Host, cli.Reset)
+	fmt.Fprintln(out, "  Recommended: move the server behind TLS (Caddy / nginx + Let's Encrypt),")
+	fmt.Fprintln(out, "               or SSH-tunnel so the connection stays loopback.")
+	fmt.Fprintln(out, "  Proceeding anyway in 1 second — Ctrl-C to abort.")
+	// Brief sleep so the warning is visible even when subsequent prompts
+	// (Email:, Password:) immediately overwrite the terminal. 1 s is short
+	// enough not to annoy the scripted path; the user can still abort.
+	time.Sleep(1 * time.Second)
+	return nil
+}
+
+// loginIsLoopback mirrors isLoopbackHost from cmd_doctor_security.go.
+// Kept local because that file has a //go:build !clionly tag we don't
+// want to inherit on the login path (logging in is a CLI-only path).
+func loginIsLoopback(host string) bool {
+	host = strings.ToLower(strings.TrimSpace(host))
+	if host == "" {
+		return false
+	}
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback()
 }
 
 var logoutCmd = &cobra.Command{
