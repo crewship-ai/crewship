@@ -430,8 +430,13 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 		// OTel GenAI telemetry. Endpoint defaults to OTEL_EXPORTER_OTLP_ENDPOINT
 		// and silently degrades to a noop tracer when unset so local dev
 		// runs without an observability stack keep working.
+		// Service name resolves via CREWSHIP_SERVICE_NAME env (falls back to
+		// "crewshipd" for backwards compatibility with existing dashboards;
+		// new deployments should set the env explicitly to differentiate
+		// main API, sidecar, and EE per-tenant traces).
 		otelEndpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
-		if otelShutdown, err := telemetry.Init(context.Background(), otelEndpoint, "crewshipd"); err != nil {
+		serviceName := telemetry.ServiceNameFromEnv("crewshipd")
+		if otelShutdown, err := telemetry.Init(context.Background(), otelEndpoint, serviceName); err != nil {
 			logger.Warn("telemetry init failed, falling back to noop tracer", "err", err)
 		} else {
 			s.telemetryShutdown = otelShutdown
