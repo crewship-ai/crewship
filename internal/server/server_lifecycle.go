@@ -261,6 +261,11 @@ func (s *Server) Shutdown() error {
 	if s.pprofShutdown != nil {
 		s.pprofShutdown()
 	}
+	// Flush any pyroscope-go push batches still in flight. Noop when
+	// CREWSHIP_PYROSCOPE_URL was unset.
+	if s.pyroscopeShutdown != nil {
+		s.pyroscopeShutdown()
+	}
 	// fileWatcher goroutines are closed via context cancellation (runCancel above);
 	// explicit Close() is a no-op but signals intent.
 	if s.fileWatcher != nil {
