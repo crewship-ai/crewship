@@ -123,6 +123,13 @@ are deliberately left to the operator with actionable URLs in the output.`,
 		results = append(results, runCheckDataDirPerms())
 		runProbe(runCheckUpdateAvailable)
 
+		// CLI-side security audit: server URL scheme (plaintext token
+		// over non-loopback) and cli-config.yaml perms (token at-rest).
+		// Both are pure local-config checks — no network, fast — so we
+		// run them unconditionally on every doctor invocation.
+		results = append(results, runCheckCLIConfigServerScheme())
+		results = append(results, checkCLIConfigPerms())
+
 		for _, r := range results {
 			r.print()
 		}
