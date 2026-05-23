@@ -253,13 +253,19 @@ func TopSpenders(ctx context.Context, db *sql.DB, workspaceID string, limit int,
 		args = append(args, since.UTC().Format(tsLayout))
 	}
 
+	// LIMIT goes through a placeholder rather than fmt.Sprintf so the
+	// query string contains no caller-derived integers — even though
+	// `limit` is already clamped to [1,100] above, keeping the placeholder
+	// pattern means any future relaxation of the clamp cannot become an
+	// injection vector and silences semgrep gosql-sqli on this site.
 	q := fmt.Sprintf(`
 SELECT 'agent' AS kind, agent_id, SUM(cost_usd) AS cost, COUNT(*) AS calls
 FROM cost_ledger
 WHERE %s
 GROUP BY agent_id
 ORDER BY cost DESC
-LIMIT %d`, conds, limit)
+LIMIT ?`, conds)
+	args = append(args, limit)
 
 	rows, err := db.QueryContext(ctx, q, args...)
 	if err != nil {

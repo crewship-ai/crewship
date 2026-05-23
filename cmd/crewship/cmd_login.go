@@ -388,7 +388,11 @@ func loginInteractive(serverURL string) error {
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	if csrfCookie != "" {
-		httpReq.AddCookie(&http.Cookie{Name: "authjs.csrf-token", Value: csrfCookie})
+		// This is a CLIENT-side AddCookie on an outgoing http.Request, not a
+		// server-side Set-Cookie response. Secure/HttpOnly attributes are
+		// meaningful only on response cookies (browser enforces at storage
+		// time), so the missing flags are correct here.
+		httpReq.AddCookie(&http.Cookie{Name: "authjs.csrf-token", Value: csrfCookie}) // nosemgrep: cookie-missing-secure,cookie-missing-httponly
 	}
 
 	httpResp, err := client.HTTPClient.Do(httpReq)

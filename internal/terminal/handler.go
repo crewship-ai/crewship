@@ -105,7 +105,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Upgrade to WebSocket first (auth happens post-open to avoid token in URL).
-	ws, err := h.upgrader.Upgrade(w, r, nil)
+	// Origin/CSRF gate is enforced via h.upgrader.CheckOrigin (defined in New()
+	// above: same-origin equality for browsers, X-Crewship-Client header for CLI).
+	ws, err := h.upgrader.Upgrade(w, r, nil) // nosemgrep: websocket-missing-origin-check — CheckOrigin set on h.upgrader in New()
 	if err != nil {
 		h.logger.Error("terminal ws upgrade failed", "error", err)
 		return

@@ -25,6 +25,30 @@ func securityHeadersMiddleware(next http.Handler) http.Handler {
 		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
 		w.Header().Set("Cross-Origin-Opener-Policy", "same-origin")
 
+		// Audit 2026-05-23: ZAP flagged missing HSTS, COEP, CORP.
+		//
+		// HSTS: 1-year max-age + includeSubDomains. preload omitted on
+		// purpose — opting into Chrome's preload list is a one-way door
+		// (removal takes months) and requires every current and future
+		// subdomain to be HTTPS-only. Operators can add `preload` later.
+		w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+
+		// COEP `credentialless` is the safer of the two real isolation
+		// modes: it strips cookies from cross-origin no-cors requests so
+		// the page can opt into cross-origin isolation without breaking
+		// CDN images that lack CORP headers. `require-corp` would break
+		// any cross-origin subresource that does not explicitly send a
+		// CORP header — too aggressive for a SPA that may surface user-
+		// supplied avatar URLs or third-party badges. Re-tighten if/when
+		// SharedArrayBuffer is needed.
+		w.Header().Set("Cross-Origin-Embedder-Policy", "credentialless")
+
+		// CORP: this origin's own resources should never be embedded
+		// from a different origin (no cross-origin <img>, <script>,
+		// <iframe> targeting our UI/API). Pairs with frame-ancestors
+		// 'none' in the strict CSP and COOP same-origin above.
+		w.Header().Set("Cross-Origin-Resource-Policy", "same-origin")
+
 		// Audit M5: Content-Security-Policy. The SPA bundle from Next.js
 		// uses inline runtime hydration ('unsafe-inline' style, plus an
 		// inline boot script), so the UI policy is permissive on those

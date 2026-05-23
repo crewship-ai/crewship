@@ -155,6 +155,9 @@ func TestSecurityHeadersMiddleware(t *testing.T) {
 		{"X-Content-Type-Options", "nosniff"},
 		{"Referrer-Policy", "strict-origin-when-cross-origin"},
 		{"Permissions-Policy", "camera=(), microphone=(), geolocation=()"},
+		{"Strict-Transport-Security", "max-age=31536000; includeSubDomains"},
+		{"Cross-Origin-Embedder-Policy", "credentialless"},
+		{"Cross-Origin-Resource-Policy", "same-origin"},
 	}
 	for _, h := range headers {
 		got := rec.Header().Get(h.k)

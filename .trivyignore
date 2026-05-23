@@ -1,0 +1,16 @@
+# Trivy ignore list — vulnerabilities triaged as not-applicable.
+# Format: one CVE per line, optional `# reason` after.
+
+# --- github.com/docker/docker (Moby) daemon-side CVEs ---
+# Crewship imports docker/docker exclusively as an HTTP API CLIENT
+# (api/types, client, pkg/stdcopy stream demultiplexer). None of the
+# CVEs below execute in our process — they affect dockerd (the daemon)
+# running on the host. Mitigation = upgrade Docker Engine on hosts via
+# the OS package manager (apt/yum), not by bumping the Go module.
+#
+# Go module `github.com/docker/docker` v28.5.2+incompatible is the last
+# tagged Go-module release as of 2026-05-23; v29.x exists on GitHub but
+# is not yet published to the Go module proxy. Re-evaluate quarterly.
+CVE-2026-34040
+CVE-2026-41567
+CVE-2026-42306

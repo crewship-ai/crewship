@@ -89,7 +89,7 @@ func shellHandler(ctx context.Context, h Hook, ec EventContext) (Result, error) 
 	cctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(cctx, "sh", "-c", command)
+	cmd := exec.CommandContext(cctx, "sh", "-c", command) // nosemgrep: dangerous-exec-command — intentional; trust model documented above (hook config = owner-only, env sanitized, timeout bounded)
 	// Put the shell and every child it spawns in a fresh process group so
 	// context timeout can kill the whole subtree. Without Setpgid, Linux
 	// only sends SIGKILL to the immediate sh child and a grandchild
