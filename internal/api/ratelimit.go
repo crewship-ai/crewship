@@ -255,6 +255,16 @@ func extractIP(r *http.Request) string {
 	return hop
 }
 
+// ExtractClientIP is the public counterpart of extractIP. Other internal
+// packages need the same "honour XFF only behind a trusted proxy" rule
+// when they make IP-based authorization decisions — e.g. the /metrics
+// handler's loopback bypass (gh#553). Re-exporting the existing helper
+// keeps the trusted-proxy / right-to-left XFF logic in one place
+// instead of inviting near-duplicate copies that drift over time.
+func ExtractClientIP(r *http.Request) string {
+	return extractIP(r)
+}
+
 // clientIPFromXFF parses an X-Forwarded-For chain right to left, skips
 // any entry that is itself a trusted proxy, and returns the first IP
 // that isn't. Returns "" if no untrusted entry exists (which means the
