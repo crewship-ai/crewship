@@ -167,6 +167,32 @@ func TestSecurityHeadersMiddleware(t *testing.T) {
 	}
 }
 
+// /exposed/* is the reverse-proxy path for port-exposed user apps —
+// the upstream owns its own policy. CSP was already carved out; the
+// HSTS/COEP/CORP headers added in PR #551 follow the same rule so we
+// don't credentialless-strip the upstream's no-cors fetches or clamp
+// resources it expects to be cross-origin embeddable.
+func TestSecurityHeadersMiddleware_ExposedSkipsIsolationHeaders(t *testing.T) {
+	t.Parallel()
+	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	wrapped := securityHeadersMiddleware(inner)
+	rec := httptest.NewRecorder()
+	wrapped.ServeHTTP(rec, httptest.NewRequest("GET", "/exposed/myapp/index.html", nil))
+
+	for _, h := range []string{
+		"Strict-Transport-Security",
+		"Cross-Origin-Embedder-Policy",
+		"Cross-Origin-Resource-Policy",
+		"Content-Security-Policy",
+	} {
+		if got := rec.Header().Get(h); got != "" {
+			t.Errorf("/exposed/* must not stamp %s, got %q", h, got)
+		}
+	}
+}
+
 // TestCombinedHandler_RoutesAPIPathsToMux verifies that /api, /healthz,
 // /metrics, /ws are routed to the API mux while everything else falls through
 // to the SPA handler.

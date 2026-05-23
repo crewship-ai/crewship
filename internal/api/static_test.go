@@ -198,12 +198,21 @@ func TestStaticFileHandler_SensitivePathsReturn404(t *testing.T) {
 		"/index.html.bak",
 		"/config.old",
 		"/foo~",
+		"/config.tmp",
+		"/data.backup",
+		"/notes.sav",
+		// Regression: .well-known exempts only its own segment, so a
+		// nested sensitive segment still 404s (CodeRabbit PR #551).
+		"/.well-known/.git/config",
+		"/.well-known/.env",
 	}
 	for _, p := range cases {
-		code, _ := get(t, h, p)
-		if code != http.StatusNotFound {
-			t.Errorf("%s: expected 404, got %d", p, code)
-		}
+		t.Run(p, func(t *testing.T) {
+			code, _ := get(t, h, p)
+			if code != http.StatusNotFound {
+				t.Errorf("expected 404, got %d", code)
+			}
+		})
 	}
 }
 

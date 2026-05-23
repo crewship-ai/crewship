@@ -14,14 +14,19 @@ import (
 // sensitiveSPAFallbackBackupSuffixes are file extensions that strongly
 // suggest a backup/swap/editor artifact and should never resolve via the
 // SPA fallback. Real Next.js routes don't end with these.
-var sensitiveSPAFallbackBackupSuffixes = []string{".bak", ".old", ".orig", ".save", ".swp", "~"}
+var sensitiveSPAFallbackBackupSuffixes = []string{".bak", ".old", ".orig", ".save", ".swp", ".tmp", ".backup", ".sav", "~"}
 
 // isSensitiveSPAFallbackPath reports whether a request path is one that
 // scanners commonly probe (dotfiles, VCS dirs, editor backups) and should
 // 404 rather than fall through to the SPA index. This stops content-
 // discovery fuzzers from drowning in 200 OK noise and prevents the
-// impression that paths like /.htpasswd or /.git/config "exist". The
-// allowlist for `.well-known` preserves RFC 8615 compatibility.
+// impression that paths like /.htpasswd or /.git/config "exist".
+//
+// `.well-known` is exempted at the segment level only (RFC 8615), not
+// for the whole path: /.well-known/.git/config is still blocked because
+// the nested `.git` segment is independently sensitive. Without this
+// scoping a future RFC 8615 deployment that nests user content under
+// .well-known would inherit a probe-friendly subtree by accident.
 func isSensitiveSPAFallbackPath(p string) bool {
 	p = strings.TrimPrefix(p, "/")
 	if p == "" {
@@ -29,7 +34,7 @@ func isSensitiveSPAFallbackPath(p string) bool {
 	}
 	for _, seg := range strings.Split(p, "/") {
 		if seg == ".well-known" {
-			return false
+			continue
 		}
 		if strings.HasPrefix(seg, ".") {
 			return true
