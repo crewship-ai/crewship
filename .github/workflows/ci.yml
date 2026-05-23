@@ -50,7 +50,7 @@ permissions:
 env:
   NODE_VERSION: "22"
   PNPM_VERSION: "10"
-  GO_VERSION: "1.26"
+  GO_VERSION: "1.26.3"
 
 jobs:
   # ── Sentinel: reject leaked git merge-conflict markers ──
