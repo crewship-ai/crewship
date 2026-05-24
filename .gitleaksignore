@@ -17,3 +17,13 @@
 #     "APIs', 'bg-neutral-100" inside a Tailwind class concatenation.
 452b7e08804fc11d72e9a80311065c016fb5ac36:.claude/context/wireframes/07-agent-runs.html:generic-api-key:128
 452b7e08804fc11d72e9a80311065c016fb5ac36:.claude/context/wireframes/21-admin.html:generic-api-key:382
+
+# Redaction package test fixture — synthetic sk_live_ value used to
+# exercise Secret() masking on a Stripe-shaped input. The fixture was
+# already replaced with the neutral FAKEPREFIX_ prefix on HEAD (see
+# commit b6cd376a). This entry exists only because gitleaks scans
+# full branch history and still sees the original commit, which
+# would otherwise turn CI red on every PR built on top of this branch.
+# Not a real secret — Stripe key entropy is irrelevant to the test;
+# the redaction logic only looks at length.
+34996f8ccf97b62f182a8bb293c1b4ec44df2299:internal/cli/redact/redact_test.go:stripe-access-token:22
