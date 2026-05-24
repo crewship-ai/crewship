@@ -144,7 +144,32 @@ var logoutCmd = &cobra.Command{
 var whoamiCmd = &cobra.Command{
 	Use:   "whoami",
 	Short: "Display current user and workspace info",
+	Long: `Show who the CLI thinks it is — user email, configured server,
+active workspace + role, or a hint to pick one if no workspace is set.
+
+With --json, emits a structured object to stdout so CI scripts can
+parse instead of grep:
+
+  {
+    "user_email": "petra@example.com",   // omitted if the validate
+                                          // endpoint didn't return one
+    "server":     "https://crewship.acme.com",
+    "workspace":  {                       // omitted if none selected
+      "id":   "w_abc",
+      "name": "ACME Engineering",
+      "slug": "acme-engineering",
+      "role": "OWNER"
+    },
+    "workspaces_count": 3                 // total user has access to
+  }
+
+Same exit code contract as the human path: 0 on success, non-zero on
+auth/network failure. The /workspaces fetch is the load-bearing call;
+the /cli-token/validate side-call is best-effort (a session-cookie
+user has no CLI token to validate).`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		jsonOut, _ := cmd.Flags().GetBool("json")
+
 		if err := requireAuth(); err != nil {
 			return err
 		}
@@ -173,6 +198,7 @@ var whoamiCmd = &cobra.Command{
 		activeWS := cli.ResolveWorkspace(flagWorkspace, cliCfg)
 
 		// Try to get user info from CLI token validation
+		var userEmail string
 		validateResp, err := client.Get("/api/v1/auth/cli-token/validate")
 		if err == nil && validateResp.StatusCode == 200 {
 			var userInfo struct {
@@ -180,12 +206,19 @@ var whoamiCmd = &cobra.Command{
 				UserID    string `json:"user_id"`
 			}
 			if err := cli.ReadJSON(validateResp, &userInfo); err == nil {
-				fmt.Printf("%sUser:%s      %s\n", cli.Bold, cli.Reset, userInfo.UserEmail)
+				userEmail = userInfo.UserEmail
 			}
 		} else if validateResp != nil {
 			validateResp.Body.Close()
 		}
 
+		if jsonOut {
+			return emitWhoamiJSON(cmd.OutOrStdout(), userEmail, server, activeWS, workspaces)
+		}
+
+		if userEmail != "" {
+			fmt.Printf("%sUser:%s      %s\n", cli.Bold, cli.Reset, userEmail)
+		}
 		fmt.Printf("%sServer:%s    %s\n", cli.Bold, cli.Reset, server)
 
 		if activeWS != "" {
@@ -205,12 +238,68 @@ var whoamiCmd = &cobra.Command{
 	},
 }
 
+// whoamiWorkspaceJSON is the per-workspace payload in the --json
+// output. Mirrors the active workspace's id+name+slug+role; only
+// emitted when one is selected.
+type whoamiWorkspaceJSON struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Slug string `json:"slug"`
+	Role string `json:"role"`
+}
+
+// whoamiJSON is the --json output shape. Pointer fields are omitted
+// from the JSON when nil (omitempty) so a CI consumer can branch on
+// "is there a workspace?" with a single null check, and so the
+// no-cli-token case doesn't emit `"user_email": ""` that a strict
+// schema validator would reject.
+type whoamiJSON struct {
+	UserEmail       string               `json:"user_email,omitempty"`
+	Server          string               `json:"server"`
+	Workspace       *whoamiWorkspaceJSON `json:"workspace,omitempty"`
+	WorkspacesCount int                  `json:"workspaces_count"`
+}
+
+// emitWhoamiJSON writes the structured whoami payload. Pulled out as
+// a helper so the test can drive it with hand-built inputs instead
+// of standing up a fake HTTP server. workspaces is the raw list
+// returned by GET /api/v1/workspaces; activeWS is the slug-or-id
+// the CLI thinks is currently selected.
+func emitWhoamiJSON(out io.Writer, userEmail, server, activeWS string, workspaces []struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Slug string `json:"slug"`
+	Role string `json:"currentUserRole"`
+}) error {
+	payload := whoamiJSON{
+		UserEmail:       userEmail,
+		Server:          server,
+		WorkspacesCount: len(workspaces),
+	}
+	if activeWS != "" {
+		for _, ws := range workspaces {
+			if ws.Slug == activeWS || ws.ID == activeWS {
+				payload.Workspace = &whoamiWorkspaceJSON{
+					ID: ws.ID, Name: ws.Name, Slug: ws.Slug, Role: ws.Role,
+				}
+				break
+			}
+		}
+	}
+	if err := json.NewEncoder(out).Encode(payload); err != nil {
+		return fmt.Errorf("encode whoami output: %w", err)
+	}
+	return nil
+}
+
 func init() {
 	loginCmd.Flags().StringVar(&loginTokenFlag, "token", "", "API token for non-interactive login")
 	loginCmd.Flags().BoolVar(&loginGoogleFlag, "google", false, "Sign in via Google OAuth (browser flow, finishes in the web UI)")
 	loginCmd.Flags().BoolVar(&loginPairFlag, "pair", false, "Redeem a device-code shown in the browser (use with --code)")
 	loginCmd.Flags().StringVar(&loginCodeFlag, "code", "", "Pairing code from the browser (with --pair)")
 	loginCmd.Flags().StringVar(&loginAdapterHint, "adapter", "", "Optional adapter hint (telemetry): CLAUDE_CODE | GEMINI_CLI | CODEX_CLI | OPENCODE | CURSOR_CLI | FACTORY_DROID")
+
+	whoamiCmd.Flags().Bool("json", false, "Emit machine-readable JSON to stdout instead of human-readable text")
 }
 
 // loginWithPairing redeems a device-code shown in the browser
