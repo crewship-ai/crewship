@@ -318,12 +318,41 @@ func (pb *planBuilder) planNewKinds(ctx context.Context, b *Bundle) error {
 // WorkspaceContext for every declared document. Aggregating failures
 // up front means a manifest with a typo in 3 places reports all 3 —
 // no whack-a-mole.
+//
+// Also runs duplicate-slug detection per kind. Pre-this-addition,
+// two documents of the same kind with the same metadata.slug in one
+// bundle would both pass Validate(), then the second one would
+// silently overwrite the first at server apply (CREATE-OR-UPDATE
+// keyed on slug). Catch at validate time so the operator sees the
+// typo instead of a missing entity post-apply.
 func validateAllKinds(b *Bundle, wsCtx internalapi.WorkspaceContext) error {
 	var errs []string
 	check := func(slug string, err error) {
 		if err != nil {
 			errs = append(errs, fmt.Sprintf("  - %s: %s", slug, err.Error()))
 		}
+	}
+	// checkDups appends a "duplicate <kind> slug" entry to errs for
+	// any slug that appears more than once. Reports the first
+	// duplicate per kind to keep the failure list focused.
+	checkDups := func(kind string, slugs []string) {
+		seen := make(map[string]int, len(slugs))
+		for _, s := range slugs {
+			seen[s]++
+		}
+		for s, n := range seen {
+			if n > 1 {
+				errs = append(errs, fmt.Sprintf("  - duplicate %s slug %q appears %d times in this bundle", kind, s, n))
+			}
+		}
+	}
+	// Per-kind slug collection — type-safe, no reflection.
+	collect := func(getSlug func(i int) string, count int) []string {
+		out := make([]string, count)
+		for i := 0; i < count; i++ {
+			out[i] = getSlug(i)
+		}
+		return out
 	}
 	for i := range b.Projects {
 		check(b.Projects[i].Metadata.Slug, b.Projects[i].Validate(wsCtx))
@@ -382,6 +411,29 @@ func validateAllKinds(b *Bundle, wsCtx internalapi.WorkspaceContext) error {
 	for i := range b.Hooks {
 		check(b.Hooks[i].Metadata.Slug, b.Hooks[i].Validate(wsCtx))
 	}
+	// Duplicate-slug detection for the new top-level kinds + the
+	// other SPEC-2 surfaces. Skips legacy Documents (Crew bundles)
+	// which already have their own duplicate-slug check inside
+	// Bundle.Validate() (see validate.go:107).
+	checkDups("Project", collect(func(i int) string { return b.Projects[i].Metadata.Slug }, len(b.Projects)))
+	checkDups("Label", collect(func(i int) string { return b.Labels[i].Metadata.Slug }, len(b.Labels)))
+	checkDups("Skill", collect(func(i int) string { return b.Skills[i].Metadata.Slug }, len(b.Skills)))
+	checkDups("Crew", collect(func(i int) string { return b.Crews[i].Metadata.Slug }, len(b.Crews)))
+	checkDups("Agent", collect(func(i int) string { return b.Agents[i].Metadata.Slug }, len(b.Agents)))
+	checkDups("Integration", collect(func(i int) string { return b.Integrations[i].Metadata.Slug }, len(b.Integrations)))
+	checkDups("Issue", collect(func(i int) string { return b.Issues[i].Metadata.Slug }, len(b.Issues)))
+	checkDups("Milestone", collect(func(i int) string { return b.Milestones[i].Metadata.Slug }, len(b.Milestones)))
+	checkDups("WorkflowTemplate", collect(func(i int) string { return b.WorkflowTemplates[i].Metadata.Slug }, len(b.WorkflowTemplates)))
+	checkDups("TriageRule", collect(func(i int) string { return b.TriageRules[i].Metadata.Slug }, len(b.TriageRules)))
+	checkDups("RecurringIssue", collect(func(i int) string { return b.RecurringIssues[i].Metadata.Slug }, len(b.RecurringIssues)))
+	checkDups("SavedView", collect(func(i int) string { return b.SavedViews[i].Metadata.Slug }, len(b.SavedViews)))
+	checkDups("Routine", collect(func(i int) string { return b.Routines[i].Metadata.Slug }, len(b.Routines)))
+	checkDups("FeatureFlag", collect(func(i int) string { return b.FeatureFlags[i].Metadata.Slug }, len(b.FeatureFlags)))
+	checkDups("InstanceSetting", collect(func(i int) string { return b.InstanceSettings[i].Metadata.Slug }, len(b.InstanceSettings)))
+	checkDups("Recipe", collect(func(i int) string { return b.Recipes[i].Metadata.Slug }, len(b.Recipes)))
+	checkDups("CrewTemplate", collect(func(i int) string { return b.CrewTemplates[i].Metadata.Slug }, len(b.CrewTemplates)))
+	checkDups("Connector", collect(func(i int) string { return b.Connectors[i].Metadata.Slug }, len(b.Connectors)))
+	checkDups("Hook", collect(func(i int) string { return b.Hooks[i].Metadata.Slug }, len(b.Hooks)))
 	if len(errs) == 0 {
 		return nil
 	}
