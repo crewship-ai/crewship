@@ -31,11 +31,11 @@
 // predict it. The manifest's `metadata.slug` is therefore purely a
 // MANIFEST-SIDE idempotency key. It serves two purposes:
 //
-//   1. Cross-document FK references inside one bundle (a Project doc
-//      could one day reference a "must-do" issue slug; nothing does
-//      today, but the field stays for symmetry with every other kind).
-//   2. The plan-line and journal entry use the slug so re-applies
-//      produce stable, grep-able output.
+//  1. Cross-document FK references inside one bundle (a Project doc
+//     could one day reference a "must-do" issue slug; nothing does
+//     today, but the field stays for symmetry with every other kind).
+//  2. The plan-line and journal entry use the slug so re-applies
+//     produce stable, grep-able output.
 //
 // Drift detection matches a declared issue to a remote row by the
 // pair (crew_id, title). Title is the only stable user-authored

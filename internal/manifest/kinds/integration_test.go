@@ -36,20 +36,20 @@ type integrationFakeClient struct {
 	wsID string
 
 	// Fixtures the test seeds.
-	crews             map[string]integrationCrewStub // keyed by slug
-	workspaceServers  map[string]IntegrationRemote   // keyed by name (slug)
-	crewServers       map[string][]IntegrationRemote // keyed by crewID
-	createResponseID  string                         // returned by every POST
+	crews            map[string]integrationCrewStub // keyed by slug
+	workspaceServers map[string]IntegrationRemote   // keyed by name (slug)
+	crewServers      map[string][]IntegrationRemote // keyed by crewID
+	createResponseID string                         // returned by every POST
 
 	// Per-route status overrides — set to non-zero to force a specific
 	// code on the next matching call.
-	listWorkspaceStatus  int
-	listCrewIntStatus    int
-	listCrewsStatus      int
+	listWorkspaceStatus   int
+	listCrewIntStatus     int
+	listCrewsStatus       int
 	createWorkspaceStatus int
-	createCrewStatus     int
-	patchStatus          int
-	deleteStatus         int
+	createCrewStatus      int
+	patchStatus           int
+	deleteStatus          int
 
 	calls []integrationFakeCall
 }

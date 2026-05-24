@@ -215,6 +215,7 @@ func kindOrder(kind string, action Action) int {
 		// foundations first, automation last, hooks at the very end.
 		"Project":          10,
 		"Label":            10, // parallel to Project — neither depends on the other
+		"Skill":            10, // parallel — agents reference, but agents live in legacy bundle
 		"Milestone":        11, // depends on Project
 		"WorkflowTemplate": 12,
 		"FeatureFlag":      13,

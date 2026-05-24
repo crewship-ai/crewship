@@ -69,6 +69,25 @@ func (pb *planBuilder) planNewKinds(ctx context.Context, b *Bundle) error {
 		pb.appendKindItems(items)
 	}
 
+	// Phase 4.5: Skills (no FK deps; agents reference them but the
+	// agent docs run later in the legacy crew-bundle path). Placed
+	// after Label so the topological order matches: "foundations
+	// (Project/Label/Skill) before structure (Milestone, Routine,
+	// etc.) before bindings". A per-doc remote lookup so Plan can
+	// emit Update on metadata drift.
+	for i := range b.Skills {
+		doc := &b.Skills[i]
+		remote, err := kinds.LookupSkillRemoteBySlug(ctx, c, doc.Metadata.Slug)
+		if err != nil {
+			return fmt.Errorf("skill %q: lookup remote: %w", doc.Metadata.Slug, err)
+		}
+		items, err := doc.Plan(ctx, c, remote)
+		if err != nil {
+			return fmt.Errorf("skill %q: plan: %w", doc.Metadata.Slug, err)
+		}
+		pb.appendKindItems(items)
+	}
+
 	// Phase 5: Milestones (deps: Projects)
 	for i := range b.Milestones {
 		doc := &b.Milestones[i]
@@ -229,6 +248,9 @@ func validateAllKinds(b *Bundle, wsCtx internalapi.WorkspaceContext) error {
 	}
 	for i := range b.Labels {
 		check(b.Labels[i].Metadata.Slug, b.Labels[i].Validate(wsCtx))
+	}
+	for i := range b.Skills {
+		check(b.Skills[i].Metadata.Slug, b.Skills[i].Validate(wsCtx))
 	}
 	for i := range b.Milestones {
 		check(b.Milestones[i].Metadata.Slug, b.Milestones[i].Validate(wsCtx))

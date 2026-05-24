@@ -1028,4 +1028,3 @@ func jsonStringEqual(a, b string) bool {
 	}
 	return string(ab) == string(bb)
 }
-

@@ -57,6 +57,7 @@ const (
 	KindCrewTemplate     = "CrewTemplate"
 	KindConnector        = "Connector"
 	KindHook             = "Hook"
+	KindSkill            = "Skill"
 )
 
 // Document is the discriminated top-level shape. apiVersion + kind

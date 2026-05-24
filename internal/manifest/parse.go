@@ -94,7 +94,8 @@ func (b *Bundle) isEmpty() bool {
 		len(b.Recipes) == 0 &&
 		len(b.CrewTemplates) == 0 &&
 		len(b.Connectors) == 0 &&
-		len(b.Hooks) == 0
+		len(b.Hooks) == 0 &&
+		len(b.Skills) == 0
 }
 
 type Bundle struct {
@@ -120,6 +121,15 @@ type Bundle struct {
 	CrewTemplates     []kinds.CrewTemplateDocument
 	Connectors        []kinds.ConnectorDocument
 	Hooks             []kinds.HookDocument
+
+	// Skills are workspace-scoped SKILL.md documents authored
+	// declaratively via `kind: Skill`. NOT the same as the legacy
+	// nested Skills in a Crew/Workspace spec (those are an embedded
+	// shape with their own path-resolution and are kept on the
+	// existing Crew/Workspace document types). The new top-level
+	// kind plugs into the SPEC-2 dispatcher and survives apply
+	// without crossing through the legacy bundle parser.
+	Skills []kinds.SkillDocument
 }
 
 // LoadFile reads a manifest file and returns the parsed bundle with
@@ -290,10 +300,20 @@ func Load(data []byte) (*Bundle, error) {
 				return nil, fmt.Errorf("decode Hook document: %w", err)
 			}
 			out.Hooks = append(out.Hooks, doc)
+		case KindSkill:
+			var doc kinds.SkillDocument
+			if err := raw.Decode(&doc); err != nil {
+				return nil, fmt.Errorf("decode Skill document: %w", err)
+			}
+			// Inline body lands in spec.inline directly; path: bodies
+			// get pulled in below in resolveLocalReferences along with
+			// the legacy nested Skills. URL skills are deferred to
+			// apply-time so a validate-only pass stays offline.
+			out.Skills = append(out.Skills, doc)
 		case "":
-			return nil, errors.New("missing kind: (expected one of: Crew, Workspace, Project, Label, Milestone, WorkflowTemplate, TriageRule, RecurringIssue, SavedView, Routine, FeatureFlag, InstanceSetting, Recipe, CrewTemplate, Connector, Hook)")
+			return nil, errors.New("missing kind: (expected one of: Crew, Workspace, Project, Label, Milestone, WorkflowTemplate, TriageRule, RecurringIssue, SavedView, Routine, FeatureFlag, InstanceSetting, Recipe, CrewTemplate, Connector, Hook, Skill)")
 		default:
-			return nil, fmt.Errorf("unsupported kind %q (expected one of: Crew, Workspace, Project, Label, Milestone, WorkflowTemplate, TriageRule, RecurringIssue, SavedView, Routine, FeatureFlag, InstanceSetting, Recipe, CrewTemplate, Connector, Hook)", head.Kind)
+			return nil, fmt.Errorf("unsupported kind %q (expected one of: Crew, Workspace, Project, Label, Milestone, WorkflowTemplate, TriageRule, RecurringIssue, SavedView, Routine, FeatureFlag, InstanceSetting, Recipe, CrewTemplate, Connector, Hook, Skill)", head.Kind)
 		}
 	}
 
@@ -464,6 +484,37 @@ func (b *Bundle) resolveLocalReferences() error {
 				}
 			}
 		}
+	}
+
+	// Top-level `kind: Skill` documents (SPEC-2 shape, distinct from
+	// the legacy nested Skills above). Path bodies get pulled in via
+	// the kind's SetResolved hook so Validate stays offline. Inline
+	// bodies are decoded directly into spec.inline by the YAML
+	// dispatcher and don't need a separate resolution pass — we
+	// mirror them into resolved here so Plan can treat both source
+	// shapes uniformly, matching the SkillDocument contract.
+	for i := range b.Skills {
+		s := &b.Skills[i]
+		if s.Spec.Inline != "" {
+			s.SetResolved(s.Spec.Inline)
+			continue
+		}
+		if s.Spec.Path == "" {
+			// Empty path AND empty inline AND nil source URL is a
+			// Validate-time error; leave it for Validate to catch
+			// (here we'd otherwise emit a duplicate "missing source"
+			// message and confuse the failure phase reporting).
+			continue
+		}
+		abs, err := safeJoin(baseDir, s.Spec.Path)
+		if err != nil {
+			return fmt.Errorf("Skill %q: %w", s.Metadata.Slug, err)
+		}
+		body, err := readSkillFile(abs)
+		if err != nil {
+			return fmt.Errorf("Skill %q: read %s: %w", s.Metadata.Slug, s.Spec.Path, err)
+		}
+		s.SetResolved(body)
 	}
 	return nil
 }

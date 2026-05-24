@@ -48,14 +48,14 @@ type agentFakeClient struct {
 
 	// Per-route status overrides — set to non-zero to force a specific
 	// code on the next matching call.
-	postAgentsStatus       int
-	patchAgentStatus       int
-	postSkillBindStatus    int
-	postCredBindStatus     int
-	listAgentsStatus       int
-	listCrewsStatus        int
-	listSkillsStatus       int
-	listCredentialsStatus  int
+	postAgentsStatus      int
+	patchAgentStatus      int
+	postSkillBindStatus   int
+	postCredBindStatus    int
+	listAgentsStatus      int
+	listCrewsStatus       int
+	listSkillsStatus      int
+	listCredentialsStatus int
 
 	calls []agentFakeCall
 }
@@ -241,12 +241,12 @@ func agentSampleDoc() *AgentDocument {
 			Slug: "tomas",
 		},
 		Spec: AgentSpec{
-			CrewSlug:    "engineering",
-			RoleTitle:   "Technical Architect",
-			AgentRole:   "LEAD",
-			CLIAdapter:  "CLAUDE_CODE",
-			LLM:         LLMSpec{Provider: "ANTHROPIC", Model: "claude-haiku-4-5"},
-			ToolProfile: "FULL",
+			CrewSlug:       "engineering",
+			RoleTitle:      "Technical Architect",
+			AgentRole:      "LEAD",
+			CLIAdapter:     "CLAUDE_CODE",
+			LLM:            LLMSpec{Provider: "ANTHROPIC", Model: "claude-haiku-4-5"},
+			ToolProfile:    "FULL",
 			TimeoutSeconds: 3600,
 			MemoryEnabled:  &memOn,
 			Prompt:         "You are Tomas, the Technical Architect.",
@@ -589,7 +589,7 @@ func agentTestEqualsInt(v any, want int) bool {
 func TestAgent_Plan_UpdateDriftedField(t *testing.T) {
 	doc := agentSampleDoc()
 	doc.Spec.TimeoutSeconds = 7200
-	doc.Spec.Skills = nil  // no new bindings to drive Update purely on field diff
+	doc.Spec.Skills = nil // no new bindings to drive Update purely on field diff
 	doc.Spec.EnvRefs = nil
 
 	client := newAgentFake()

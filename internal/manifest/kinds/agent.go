@@ -511,11 +511,11 @@ func (d *AgentDocument) Plan(ctx context.Context, c internalapi.Client, remote *
 // timeout_seconds patch.
 func (d *AgentDocument) toCreateBody(crewID string) map[string]any {
 	body := map[string]any{
-		"name":        d.Metadata.Name,
-		"slug":        d.Metadata.Slug,
-		"crew_id":     crewID,
-		"agent_role":  d.Spec.AgentRole,
-		"cli_adapter": d.Spec.CLIAdapter,
+		"name":         d.Metadata.Name,
+		"slug":         d.Metadata.Slug,
+		"crew_id":      crewID,
+		"agent_role":   d.Spec.AgentRole,
+		"cli_adapter":  d.Spec.CLIAdapter,
 		"tool_profile": d.Spec.ToolProfile,
 	}
 	if d.Metadata.Description != "" {
