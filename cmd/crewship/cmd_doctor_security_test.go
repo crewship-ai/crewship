@@ -243,7 +243,7 @@ func TestCheckCLIConfigPerms_Missing(t *testing.T) {
 //   - broken mode + fixMode=true  → chmod runs, PASS, on-disk = 0600
 //   - already 0600 + fixMode=true → no-op, PASS, on-disk unchanged
 //   - broken mode + fixMode=false → WARN (no chmod), on-disk
-//                                    unchanged (regression guard)
+//     unchanged (regression guard)
 func TestCheckCLIConfigPerms_FixMode(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("file mode bits don't map cleanly on Windows")
