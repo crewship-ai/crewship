@@ -128,7 +128,7 @@ are deliberately left to the operator with actionable URLs in the output.`,
 		// Both are pure local-config checks — no network, fast — so we
 		// run them unconditionally on every doctor invocation.
 		results = append(results, runCheckCLIConfigServerScheme())
-		results = append(results, checkCLIConfigPerms())
+		results = append(results, checkCLIConfigPerms(fixMode))
 
 		for _, r := range results {
 			r.print()

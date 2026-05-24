@@ -207,7 +207,7 @@ func TestCheckCLIConfigPerms_Modes(t *testing.T) {
 			}
 			t.Setenv("CREWSHIP_CONFIG", path)
 
-			got := checkCLIConfigPerms()
+			got := checkCLIConfigPerms(false)
 			if got.status != tc.wantStatus {
 				t.Errorf("mode %#o: status = %q, want %q (detail=%q)",
 					tc.mode, got.status, tc.wantStatus, got.detail)
@@ -223,11 +223,105 @@ func TestCheckCLIConfigPerms_Missing(t *testing.T) {
 	dir := t.TempDir()
 	missing := filepath.Join(dir, "no-such-file.yaml")
 	t.Setenv("CREWSHIP_CONFIG", missing)
-	got := checkCLIConfigPerms()
+	got := checkCLIConfigPerms(false)
 	if got.status != "INFO" {
 		t.Errorf("missing file: status = %q, want INFO", got.status)
 	}
 	if !strings.Contains(got.detail, "no cli-config.yaml yet") {
 		t.Errorf("detail = %q, want hint about crewship login", got.detail)
+	}
+}
+
+// TestCheckCLIConfigPerms_FixMode exercises the --fix code path:
+// a broken-mode file (0644) gets chmod'd to 0600 and the result
+// flips from WARN to PASS. Verifies BOTH the returned status and
+// the actual on-disk mode after the call — the latter pins the
+// behaviour against a future refactor that might return PASS
+// without actually changing anything.
+//
+// Three sub-cases cover the matrix:
+//   - broken mode + fixMode=true  → chmod runs, PASS, on-disk = 0600
+//   - already 0600 + fixMode=true → no-op, PASS, on-disk unchanged
+//   - broken mode + fixMode=false → WARN (no chmod), on-disk
+//                                    unchanged (regression guard)
+func TestCheckCLIConfigPerms_FixMode(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("file mode bits don't map cleanly on Windows")
+	}
+
+	cases := []struct {
+		name        string
+		startMode   os.FileMode
+		fixMode     bool
+		wantStatus  string
+		wantOnDisk  os.FileMode
+		mustContain string // substring in detail/hint
+	}{
+		{
+			name:        "broken 0644 + --fix → PASS, chmod'd to 0600",
+			startMode:   0o644,
+			fixMode:     true,
+			wantStatus:  "PASS",
+			wantOnDisk:  0o600,
+			mustContain: "fixed via --fix",
+		},
+		{
+			name:        "broken 0666 + --fix → PASS, chmod'd to 0600",
+			startMode:   0o666,
+			fixMode:     true,
+			wantStatus:  "PASS",
+			wantOnDisk:  0o600,
+			mustContain: "fixed via --fix",
+		},
+		{
+			name:        "already 0600 + --fix → no-op PASS",
+			startMode:   0o600,
+			fixMode:     true,
+			wantStatus:  "PASS",
+			wantOnDisk:  0o600,
+			mustContain: "0600",
+		},
+		{
+			name:        "broken 0644 + no --fix → WARN, on-disk unchanged",
+			startMode:   0o644,
+			fixMode:     false,
+			wantStatus:  "WARN",
+			wantOnDisk:  0o644,
+			mustContain: "or re-run with --fix to repair",
+		},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "cli-config.yaml")
+			if err := os.WriteFile(path, []byte("server: http://localhost:8080\n"), 0o600); err != nil {
+				t.Fatalf("seed: %v", err)
+			}
+			if err := os.Chmod(path, tc.startMode); err != nil {
+				t.Fatalf("chmod: %v", err)
+			}
+			t.Setenv("CREWSHIP_CONFIG", path)
+
+			got := checkCLIConfigPerms(tc.fixMode)
+			if got.status != tc.wantStatus {
+				t.Errorf("status = %q, want %q (detail=%q hint=%q)",
+					got.status, tc.wantStatus, got.detail, got.hint)
+			}
+			combined := got.detail + " " + got.hint
+			if !strings.Contains(combined, tc.mustContain) {
+				t.Errorf("expected detail/hint to contain %q, got detail=%q hint=%q",
+					tc.mustContain, got.detail, got.hint)
+			}
+			info, err := os.Stat(path)
+			if err != nil {
+				t.Fatalf("post-fix stat: %v", err)
+			}
+			if got := info.Mode().Perm(); got != tc.wantOnDisk {
+				t.Errorf("on-disk mode = %#o, want %#o (chmod %s)",
+					got, tc.wantOnDisk,
+					map[bool]string{true: "should have run", false: "should NOT have run"}[tc.fixMode])
+			}
+		})
 	}
 }

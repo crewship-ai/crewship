@@ -119,16 +119,22 @@ func checkCLIConfigServerScheme(cfg *cli.CLIConfig) checkResult {
 //     detail so the operator knows what to chmod
 //   - FAIL when the path can't be resolved at all (HOMEDIR broken)
 //
-// We intentionally only warn (not fail) on permissive mode: the user
-// is the only one who can fix it, the file contents are still valid,
-// and a WARN on every doctor invocation is the kind of nag that
-// motivates the chmod without blocking unrelated workflows.
+// Without --fix the check WARNs (not FAILs) on permissive mode: the
+// user is the only one who can chmod it, the file contents are still
+// valid, and a WARN on every doctor invocation is the nag that
+// motivates the fix without blocking unrelated workflows.
+//
+// With --fix the check ATTEMPTS chmod 0600 — same shape the existing
+// data-dir-perm check uses for its auto-mkdir, with the same
+// best-effort posture (a chmod failure downgrades to WARN with the
+// original hint, not FAIL, so a read-only mount or a syscall denial
+// doesn't break the rest of doctor).
 //
 // Windows is intentionally not covered — file modes on Windows do not
 // map to the unix r/w/x bits the way doctor describes them. The
 // existing data-dir-perm check has the same skip; this one mirrors it
 // for consistency.
-func checkCLIConfigPerms() checkResult {
+func checkCLIConfigPerms(fixMode bool) checkResult {
 	// Per-doc-comment: file-mode bits don't map to unix r/w/x on
 	// Windows, so the check would produce misleading WARN/FAIL output
 	// there. Skip with INFO so the rest of doctor stays useful — same
@@ -168,11 +174,33 @@ func checkCLIConfigPerms() checkResult {
 	// 0o077 covers all group + other bits. A clean 0600 file has
 	// mode & 0o077 == 0; anything broader trips the warn path.
 	if mode&0o077 != 0 {
+		if fixMode {
+			// Try to repair. The new mode is 0600 unconditionally —
+			// stricter (0400) might be intentional for a read-only
+			// token file, but the doctor's job is "is this safe?"
+			// not "what does the operator prefer?", and 0600 is the
+			// minimum that satisfies the check. Failure surfaces as
+			// WARN (not FAIL) so an unfixable filesystem doesn't
+			// break the rest of doctor.
+			if chmodErr := os.Chmod(path, 0o600); chmodErr != nil {
+				return checkResult{
+					name:   "cli config perms",
+					status: "WARN",
+					detail: fmt.Sprintf("%s has mode %#o; auto-fix failed: %v", path, mode, chmodErr),
+					hint:   fmt.Sprintf("chmod 0600 %s — the file contains your CLI bearer token", path),
+				}
+			}
+			return checkResult{
+				name:   "cli config perms",
+				status: "PASS",
+				detail: fmt.Sprintf("%s mode %#o → 0600 (fixed via --fix)", path, mode),
+			}
+		}
 		return checkResult{
 			name:   "cli config perms",
 			status: "WARN",
 			detail: fmt.Sprintf("%s has mode %#o (group/other bits set)", path, mode),
-			hint:   fmt.Sprintf("chmod 0600 %s — the file contains your CLI bearer token", path),
+			hint:   fmt.Sprintf("chmod 0600 %s — the file contains your CLI bearer token (or re-run with --fix to repair)", path),
 		}
 	}
 	return checkResult{
