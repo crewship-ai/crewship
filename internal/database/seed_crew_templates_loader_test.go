@@ -98,6 +98,25 @@ func TestLoadBuiltinCrewTemplates_ShapeIntegrity(t *testing.T) {
 			if a.SystemPrompt == "" {
 				t.Errorf("%s: agent %q missing system_prompt", d.Slug, a.Slug)
 			}
+			// Routing / model fields — empty values here would produce
+			// a template that the deploy handler accepts but the
+			// orchestrator can't actually instantiate (the agent_role
+			// row would land with empty CLI adapter / provider / model
+			// / tool profile). Earlier shape check only covered
+			// agent_role + system_prompt, which let routing drift
+			// through silently.
+			if a.CLIAdapter == "" {
+				t.Errorf("%s: agent %q missing cli_adapter", d.Slug, a.Slug)
+			}
+			if a.LLMProvider == "" {
+				t.Errorf("%s: agent %q missing llm_provider", d.Slug, a.Slug)
+			}
+			if a.LLMModel == "" {
+				t.Errorf("%s: agent %q missing llm_model", d.Slug, a.Slug)
+			}
+			if a.ToolProfile == "" {
+				t.Errorf("%s: agent %q missing tool_profile", d.Slug, a.Slug)
+			}
 			if a.AgentRole == "LEAD" {
 				seenLead = true
 			}

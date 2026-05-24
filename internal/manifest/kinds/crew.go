@@ -294,6 +294,13 @@ type CrewRemote struct {
 	DevcontainerConfig *string `json:"devcontainer_config"`
 	MiseConfig         *string `json:"mise_config"`
 	ServicesJSON       *string `json:"services_json"`
+	// ContainerMemoryMB / ContainerCPUs mirror the row columns the
+	// docker provider reads at run time. Required for diff in
+	// updatePatch — without them, every crew with declared
+	// devcontainer sizing stayed in ActionUpdate forever and
+	// emitted no-op PATCHes after convergence.
+	ContainerMemoryMB int     `json:"container_memory_mb"`
+	ContainerCPUs     float64 `json:"container_cpus"`
 }
 
 // ── Validate ─────────────────────────────────────────────────────────────
@@ -577,12 +584,20 @@ func (d *CrewDocument) createBody() (map[string]any, error) {
 			body["mise_config"] = cfg
 		}
 	}
-	if len(d.Spec.Services) > 0 {
-		cfg, err := d.servicesJSON()
-		if err != nil {
-			return nil, err
+	// Services: distinguish nil (omit on create → column NULL) from
+	// empty-but-declared (services: [] → store "[]" so the next
+	// updatePatch sees a clear empty and doesn't re-emit "[]" as
+	// a phantom change). Pre-fix only the non-empty list landed.
+	if d.Spec.Services != nil {
+		if len(d.Spec.Services) == 0 {
+			body["services_json"] = "[]"
+		} else {
+			cfg, err := d.servicesJSON()
+			if err != nil {
+				return nil, err
+			}
+			body["services_json"] = cfg
 		}
-		body["services_json"] = cfg
 	}
 	// memory_mb / cpus on the devcontainer block ALSO feed the crew
 	// row columns (container_memory_mb / container_cpus). The server
@@ -637,10 +652,15 @@ func (d *CrewDocument) updatePatch(remote *CrewRemote) (map[string]any, error) {
 		if want != "" && !jsonStringEqual(want, deref(remote.DevcontainerConfig)) {
 			patch["devcontainer_config"] = want
 		}
-		if d.Spec.Devcontainer.MemoryMB > 0 {
+		// Diff container sizing against the remote columns so a
+		// converged manifest stops emitting no-op patches. A value
+		// of 0 in the manifest means "operator didn't declare a
+		// limit" — leave the server value alone. Otherwise patch
+		// only when it actually changed.
+		if d.Spec.Devcontainer.MemoryMB > 0 && d.Spec.Devcontainer.MemoryMB != remote.ContainerMemoryMB {
 			patch["container_memory_mb"] = d.Spec.Devcontainer.MemoryMB
 		}
-		if d.Spec.Devcontainer.CPUs > 0 {
+		if d.Spec.Devcontainer.CPUs > 0 && d.Spec.Devcontainer.CPUs != remote.ContainerCPUs {
 			patch["container_cpus"] = d.Spec.Devcontainer.CPUs
 		}
 	}
@@ -653,13 +673,26 @@ func (d *CrewDocument) updatePatch(remote *CrewRemote) (map[string]any, error) {
 			patch["mise_config"] = want
 		}
 	}
-	if len(d.Spec.Services) > 0 {
-		want, err := d.servicesJSON()
-		if err != nil {
-			return nil, err
-		}
-		if !jsonStringEqual(want, deref(remote.ServicesJSON)) {
-			patch["services_json"] = want
+	// Services: distinguish nil (field absent → leave alone) from
+	// empty-but-declared (services: [] → clear remote sidecars).
+	// Pre-fix the `len > 0` guard skipped both cases, so a manifest
+	// that deleted every service left the old ones running.
+	if d.Spec.Services != nil {
+		if len(d.Spec.Services) == 0 {
+			// Empty array clears the column. server's update handler
+			// stores the literal "[]" string back; matching that
+			// here avoids re-emitting the patch on the next apply.
+			if !jsonStringEqual("[]", deref(remote.ServicesJSON)) {
+				patch["services_json"] = "[]"
+			}
+		} else {
+			want, err := d.servicesJSON()
+			if err != nil {
+				return nil, err
+			}
+			if !jsonStringEqual(want, deref(remote.ServicesJSON)) {
+				patch["services_json"] = want
+			}
 		}
 	}
 	return patch, nil

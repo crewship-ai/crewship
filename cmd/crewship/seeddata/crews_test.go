@@ -12,6 +12,14 @@ import (
 // easy to land an unbalanced quote that only surfaces when the JSON is
 // parsed deep inside the provisioner.
 func TestCrewDevcontainerConfigIsValidJSON(t *testing.T) {
+	// Guard against vacuous green: if Crews is somehow empty the
+	// for-loop runs zero subtests and the whole suite passes without
+	// asserting anything. mustLoadCrews() already panics on zero
+	// entries, but pinning the count here means a future loader
+	// change can't silently make this test a no-op either.
+	if len(Crews) == 0 {
+		t.Fatal("Crews is empty — loader regression or stale fixture")
+	}
 	for _, c := range Crews {
 		t.Run(c.Slug, func(t *testing.T) {
 			var parsed map[string]any
@@ -49,6 +57,9 @@ func TestCrewDevcontainerConfigIsValidJSON(t *testing.T) {
 // builtin/crews.yaml — the test sweeps every crew so divergence between
 // crews (a future YAML edit that touches only some of them) also surfaces.
 func TestPostCreateCommandInstallsAllFiveNewCLIs(t *testing.T) {
+	if len(Crews) == 0 {
+		t.Fatal("Crews is empty — loader regression or stale fixture")
+	}
 	expected := []string{
 		"@openai/codex",
 		"@google/gemini-cli",
@@ -72,6 +83,9 @@ func TestPostCreateCommandInstallsAllFiveNewCLIs(t *testing.T) {
 // CLIs may shell out to python3). Same per-crew sweep as the CLI install
 // test above.
 func TestPostCreateCommandInstallsContainerDeps(t *testing.T) {
+	if len(Crews) == 0 {
+		t.Fatal("Crews is empty — loader regression or stale fixture")
+	}
 	expected := []string{
 		"xdg-utils", // Droid Linux requirement
 		"ripgrep",   // Cursor safety net + faster grep tool
@@ -88,15 +102,27 @@ func TestPostCreateCommandInstallsContainerDeps(t *testing.T) {
 }
 
 // extractPostCreateCommand parses a crew's DevcontainerConfig JSON and
-// returns the postCreateCommand field as a string. Fails the test if the
-// JSON is malformed or the field is missing — both upstream errors that
-// the validJSON test above will report first, so failures here are rare.
+// returns the postCreateCommand field as a string. Fails the test if
+// the JSON is malformed, the field is missing, the field is a non-
+// string type, or the value is blank — pre-fix the helper silently
+// returned "" on the latter three cases, which the install-check
+// tests below would then quietly pass against an empty string.
 func extractPostCreateCommand(t *testing.T, c CrewDef) string {
 	t.Helper()
 	var parsed map[string]any
 	if err := json.Unmarshal([]byte(c.DevcontainerConfig), &parsed); err != nil {
 		t.Fatalf("%s: invalid devcontainer JSON: %v", c.Slug, err)
 	}
-	postCreate, _ := parsed["postCreateCommand"].(string)
+	raw, ok := parsed["postCreateCommand"]
+	if !ok {
+		t.Fatalf("%s: postCreateCommand missing from devcontainer JSON", c.Slug)
+	}
+	postCreate, ok := raw.(string)
+	if !ok {
+		t.Fatalf("%s: postCreateCommand is %T, want string", c.Slug, raw)
+	}
+	if strings.TrimSpace(postCreate) == "" {
+		t.Fatalf("%s: postCreateCommand is blank", c.Slug)
+	}
 	return postCreate
 }

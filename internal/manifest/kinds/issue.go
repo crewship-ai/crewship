@@ -363,6 +363,25 @@ func (d *IssueDocument) Validate(wsCtx internalapi.WorkspaceContext) error {
 		}
 	}
 
+	// Reject duplicate labels regardless of validator path. The
+	// server tolerates ["network","network"] on POST/PATCH by
+	// inserting two rows in the join table, which then surface as
+	// drift on every subsequent Plan (the server returns the
+	// distinct label set; we'd compare it against our duplicated
+	// declared set and decide an update is needed). Catching
+	// duplicates at validate time keeps the diff stable.
+	seenLabels := make(map[string]struct{}, len(d.Spec.Labels))
+	for _, lbl := range d.Spec.Labels {
+		key := strings.TrimSpace(lbl)
+		if key == "" {
+			continue // already rejected above
+		}
+		if _, dup := seenLabels[key]; dup {
+			return fmt.Errorf("issue %q: spec.labels contains duplicate %q", d.Metadata.Slug, key)
+		}
+		seenLabels[key] = struct{}{}
+	}
+
 	return nil
 }
 
@@ -988,32 +1007,51 @@ func issueListLabels(ctx context.Context, c internalapi.Client) ([]issueLabelStu
 // surface is the workspace endpoint with a query filter — see the
 // List handler in issue_handler_crud.go.
 func issueListForCrew(ctx context.Context, c internalapi.Client, crewID string) ([]IssueRemote, error) {
-	// limit=100 matches the server's max page size; if a single
-	// crew has more than 100 issues we'd silently truncate. The
-	// alternative (looped pagination) doubles complexity for a
-	// case that the manifest pipeline isn't expected to hit (a
-	// crew with 100+ declarative issues is a misuse). Documented;
-	// not implemented.
-	path := fmt.Sprintf("/api/v1/issues?crew_id=%s&limit=100", crewID)
-	resp, err := c.Get(ctx, path)
-	if err != nil {
-		return nil, fmt.Errorf("GET %s: %w", path, err)
+	// Paginate via the server's documented limit + offset on
+	// GET /api/v1/issues (parsePagination in issues_internal.go;
+	// max page size 100). Pre-fix: single page of 100 silently
+	// truncated, so lookup against a crew with >100 issues missed
+	// existing rows and planned duplicate creates. Page-size cap is
+	// the server's, not ours; we loop until a short page lands.
+	//
+	// A hard upper bound of 100 pages (= 10 000 issues per crew)
+	// fences off a pathological server that returns full pages
+	// forever — far above the manifest-pipeline working set, but
+	// finite.
+	const (
+		pageSize = 100
+		maxPages = 100
+	)
+	var all []IssueRemote
+	for page := 0; page < maxPages; page++ {
+		path := fmt.Sprintf("/api/v1/issues?crew_id=%s&limit=%d&offset=%d", crewID, pageSize, page*pageSize)
+		resp, err := c.Get(ctx, path)
+		if err != nil {
+			return nil, fmt.Errorf("GET %s: %w", path, err)
+		}
+		if err := issueCheckStatus(resp, "list issues for crew"); err != nil {
+			return nil, err
+		}
+		body, err := issueReadAll(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("read %s body: %w", path, err)
+		}
+		if len(body) == 0 {
+			break
+		}
+		var rows []IssueRemote
+		if err := json.Unmarshal(body, &rows); err != nil {
+			return nil, fmt.Errorf("decode %s: %w", path, err)
+		}
+		if len(rows) == 0 {
+			break
+		}
+		all = append(all, rows...)
+		if len(rows) < pageSize {
+			break
+		}
 	}
-	if err := issueCheckStatus(resp, "list issues for crew"); err != nil {
-		return nil, err
-	}
-	body, err := issueReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read %s body: %w", path, err)
-	}
-	if len(body) == 0 {
-		return nil, nil
-	}
-	var rows []IssueRemote
-	if err := json.Unmarshal(body, &rows); err != nil {
-		return nil, fmt.Errorf("decode %s: %w", path, err)
-	}
-	return rows, nil
+	return all, nil
 }
 
 // issueDerefOrEmpty unboxes a *string into its value or "" for nil.

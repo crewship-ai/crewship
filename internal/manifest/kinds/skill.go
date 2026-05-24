@@ -399,7 +399,24 @@ func (d *SkillDocument) Plan(_ context.Context, c internalapi.Client, remote *Sk
 		}}, nil
 	}
 
-	if !skillDocumentDiffers(d, remote) {
+	// `skillDocumentDiffers` only compares the four decoration fields
+	// (display_name, description, category, icon) — the server's
+	// SkillRemote shape doesn't carry the body content or a body
+	// hash, so the manifest layer can't tell whether a local
+	// inline/path/source change matches what's on the server. Pre-
+	// fix, a body-only edit returned Unchanged and never upserted,
+	// so the operator's `crewship apply` ran clean but the server
+	// kept the old body forever.
+	//
+	// Fix: when the user declared a body source at all (Inline,
+	// Path, or Source — Validate guarantees exactly one is set on a
+	// well-formed doc), emit Update so the /skills/import upsert
+	// runs. Cost: every apply with an unchanged body still POSTs.
+	// That's preferable to silently losing edits. A future
+	// optimisation can add a `body_hash` to SkillRemote and short-
+	// circuit here when the hashes match.
+	hasBodySource := d.Spec.Inline != "" || d.Spec.Path != "" || d.Spec.Source != ""
+	if !hasBodySource && !skillDocumentDiffers(d, remote) {
 		return []internalapi.PlanItem{{
 			Kind:        skillKindName,
 			Slug:        d.Metadata.Slug,

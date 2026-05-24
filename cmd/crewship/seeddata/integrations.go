@@ -50,6 +50,9 @@ func mustLoadIntegrations() []IntegrationDef {
 	if err := yaml.Unmarshal(data, &doc); err != nil {
 		panic(fmt.Sprintf("seeddata: parse builtin/integrations.yaml: %v", err))
 	}
+	if len(doc.Integrations) == 0 {
+		panic("seeddata: builtin/integrations.yaml decoded to zero integrations — schema drift?")
+	}
 	return doc.Integrations
 }
 

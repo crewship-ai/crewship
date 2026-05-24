@@ -54,6 +54,9 @@ func mustLoadSkills() []SkillDef {
 	if err := yaml.Unmarshal(data, &doc); err != nil {
 		panic(fmt.Sprintf("seeddata: parse builtin/skills.yaml: %v", err))
 	}
+	if len(doc.Skills) == 0 {
+		panic("seeddata: builtin/skills.yaml decoded to zero skills — schema drift?")
+	}
 	return doc.Skills
 }
 

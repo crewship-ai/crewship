@@ -63,6 +63,7 @@ func loadBuiltinCrewTemplates() ([]builtinCrewTemplateDoc, error) {
 		return nil, fmt.Errorf("read embedded builtin crew-templates dir: %w", err)
 	}
 	out := make([]builtinCrewTemplateDoc, 0, len(entries))
+	seenSlugs := make(map[string]string, len(entries)) // slug → originating filename
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".yaml") {
 			continue
@@ -75,13 +76,42 @@ func loadBuiltinCrewTemplates() ([]builtinCrewTemplateDoc, error) {
 		if err := yaml.Unmarshal(data, &doc); err != nil {
 			return nil, fmt.Errorf("parse embedded %s: %w", e.Name(), err)
 		}
+		// Full required-field validation — yaml.Unmarshal happily
+		// produces zero values on schema drift; the later
+		// SELECT-or-INSERT by slug would silently swallow a
+		// template that lost its Name or has a typo in a field.
 		if strings.TrimSpace(doc.Slug) == "" {
 			return nil, fmt.Errorf("embedded %s: slug is required", e.Name())
 		}
 		if strings.TrimSpace(doc.Name) == "" {
 			return nil, fmt.Errorf("embedded %s: name is required", e.Name())
 		}
+		if strings.TrimSpace(doc.Description) == "" {
+			return nil, fmt.Errorf("embedded %s: description is required", e.Name())
+		}
+		if strings.TrimSpace(doc.Icon) == "" {
+			return nil, fmt.Errorf("embedded %s: icon is required", e.Name())
+		}
+		if strings.TrimSpace(doc.Color) == "" {
+			return nil, fmt.Errorf("embedded %s: color is required", e.Name())
+		}
+		if strings.TrimSpace(doc.Category) == "" {
+			return nil, fmt.Errorf("embedded %s: category is required", e.Name())
+		}
+		if len(doc.Agents) == 0 {
+			return nil, fmt.Errorf("embedded %s: agents is required (zero agents)", e.Name())
+		}
+		// Duplicate-slug detection: SeedBuiltinCrewTemplates upserts
+		// by slug + is_builtin=1, so two YAML files with the same
+		// slug would silently collapse to one row.
+		if prior, ok := seenSlugs[doc.Slug]; ok {
+			return nil, fmt.Errorf("embedded %s: duplicate template slug %q (already in %s)", e.Name(), doc.Slug, prior)
+		}
+		seenSlugs[doc.Slug] = e.Name()
 		out = append(out, doc)
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("embedded builtin/crew-templates/: zero templates loaded — the directory must ship at least one .yaml file")
 	}
 	return out, nil
 }

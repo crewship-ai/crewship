@@ -40,5 +40,8 @@ func mustLoadAgents() []AgentDef {
 	if err := yaml.Unmarshal(data, &doc); err != nil {
 		panic(fmt.Sprintf("seeddata: parse builtin/agents.yaml: %v", err))
 	}
+	if len(doc.Agents) == 0 {
+		panic("seeddata: builtin/agents.yaml decoded to zero agents — schema drift?")
+	}
 	return doc.Agents
 }

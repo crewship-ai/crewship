@@ -625,6 +625,14 @@ func (d *IntegrationDocument) createBody() (map[string]any, error) {
 	if d.Spec.Icon != "" {
 		body["icon"] = d.Spec.Icon
 	}
+	// Honor spec.enabled at create time. Skipping this for the
+	// nil pointer (= field not declared) lets the server's default
+	// (enabled=true) apply; honoring it for non-nil means a manifest
+	// with explicit `enabled: false` lands disabled on first apply
+	// instead of converging only on a follow-up PATCH.
+	if d.Spec.Enabled != nil {
+		body["enabled"] = *d.Spec.Enabled
+	}
 	// Crew-scoped Create handler also accepts env_mapping as a
 	// distinct field per task spec — but the workspace handler
 	// silently drops it (readJSON tolerates extra keys). Sending it

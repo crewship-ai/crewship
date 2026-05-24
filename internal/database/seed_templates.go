@@ -62,6 +62,7 @@ func loadBuiltinWorkflowTemplates() ([]builtinTemplateDoc, error) {
 		return nil, fmt.Errorf("read embedded builtin templates dir: %w", err)
 	}
 	out := make([]builtinTemplateDoc, 0, len(entries))
+	seenNames := make(map[string]string, len(entries)) // name → originating filename
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".yaml") {
 			continue
@@ -74,10 +75,38 @@ func loadBuiltinWorkflowTemplates() ([]builtinTemplateDoc, error) {
 		if err := yaml.Unmarshal(data, &doc); err != nil {
 			return nil, fmt.Errorf("parse embedded %s: %w", e.Name(), err)
 		}
+		// Full required-field validation — yaml.Unmarshal happily
+		// produces zero values on schema drift (a YAML edit that
+		// renames `description` to `desc`, for instance), which the
+		// later name-based SELECT-or-INSERT would silently swallow.
 		if strings.TrimSpace(doc.Name) == "" {
 			return nil, fmt.Errorf("embedded %s: name is required", e.Name())
 		}
+		if strings.TrimSpace(doc.Description) == "" {
+			return nil, fmt.Errorf("embedded %s: description is required", e.Name())
+		}
+		if strings.TrimSpace(doc.Icon) == "" {
+			return nil, fmt.Errorf("embedded %s: icon is required", e.Name())
+		}
+		if strings.TrimSpace(doc.Color) == "" {
+			return nil, fmt.Errorf("embedded %s: color is required", e.Name())
+		}
+		if len(doc.Template.Steps) == 0 {
+			return nil, fmt.Errorf("embedded %s: template.steps is required (zero steps)", e.Name())
+		}
+		// Duplicate-name detection: SeedBuiltinTemplates upserts by
+		// (workspace_id, name, is_builtin=1), so two files with the
+		// same outer name would silently collapse to one row. Fail at
+		// load time so the bug surfaces at startup, not at first
+		// workspace creation.
+		if prior, ok := seenNames[doc.Name]; ok {
+			return nil, fmt.Errorf("embedded %s: duplicate template name %q (already in %s)", e.Name(), doc.Name, prior)
+		}
+		seenNames[doc.Name] = e.Name()
 		out = append(out, doc)
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("embedded builtin/workflow-templates/: zero templates loaded — the directory must ship at least one .yaml file")
 	}
 	return out, nil
 }

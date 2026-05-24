@@ -2,6 +2,7 @@ package seeddata
 
 import (
 	"fmt"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 
@@ -70,6 +71,24 @@ func mustLoadIssuesBundle() issuesBundle {
 	var doc issuesBundle
 	if err := yaml.Unmarshal(data, &doc); err != nil {
 		panic(fmt.Sprintf("seeddata: parse builtin/issues.yaml: %v", err))
+	}
+	// Schema-drift guard: a YAML edit that renames `labels:` /
+	// `projects:` / `issues:` would parse cleanly and leave every
+	// slice empty — silently disabling the demo data. Panic with
+	// names of the empty slices so the operator sees which key
+	// drifted.
+	var missing []string
+	if len(doc.Labels) == 0 {
+		missing = append(missing, "labels")
+	}
+	if len(doc.Projects) == 0 {
+		missing = append(missing, "projects")
+	}
+	if len(doc.Issues) == 0 {
+		missing = append(missing, "issues")
+	}
+	if len(missing) > 0 {
+		panic(fmt.Sprintf("seeddata: builtin/issues.yaml decoded to zero entries for: %s — schema drift?", strings.Join(missing, ", ")))
 	}
 	return doc
 }

@@ -462,15 +462,28 @@ func TestSkill_Plan_UpdateWhenDrifted(t *testing.T) {
 	}
 }
 
-// ── 5. Plan: Unchanged when fields match ──────────────────────────────────
-
-func TestSkill_Plan_UnchangedWhenMatches(t *testing.T) {
+// ── 5. Plan: body-declared docs always emit Update ───────────────────────
+//
+// Pre-fix this test asserted "Unchanged when metadata matches". That
+// was wrong: SkillRemote carries no body content or hash, so the
+// manifest layer can't tell whether an inline/path/source body has
+// changed. Returning Unchanged silently dropped body edits — the
+// operator's `crewship apply` ran clean while the server kept the
+// old body. The new behaviour emits Update whenever the doc declares
+// a body source, regardless of whether the metadata matches. Repeated
+// applies of an unchanged manifest now POST every time; loud over
+// silently-wrong. See the comment block in Plan() at the hasBodySource
+// branch.
+func TestSkill_Plan_BodyDeclared_AlwaysUpdate(t *testing.T) {
 	doc := makeSkillDoc()
 	if err := doc.Validate(internalapi.WorkspaceContext{}); err != nil {
 		t.Fatalf("Validate: %v", err)
 	}
 
 	client := newSkillFake()
+	// Metadata matches the doc exactly — pre-fix this triggered
+	// Unchanged. Now Update because the doc declares an inline
+	// body and we can't verify the server's stored body matches.
 	remote := &SkillRemote{
 		ID:          "sk_existing",
 		Name:        "Network Probe",
@@ -485,11 +498,11 @@ func TestSkill_Plan_UnchangedWhenMatches(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Plan: %v", err)
 	}
-	if len(items) != 1 || items[0].Action != internalapi.ActionUnchanged {
-		t.Fatalf("want single Unchanged, got %+v", items)
+	if len(items) != 1 || items[0].Action != internalapi.ActionUpdate {
+		t.Fatalf("want single Update (body declared), got %+v", items)
 	}
-	if items[0].Exec != nil {
-		t.Error("Unchanged items must have nil Exec")
+	if items[0].Exec == nil {
+		t.Error("Update item must have non-nil Exec")
 	}
 }
 

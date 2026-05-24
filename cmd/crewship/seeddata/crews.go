@@ -46,5 +46,12 @@ func mustLoadCrews() []CrewDef {
 	if err := yaml.Unmarshal(data, &doc); err != nil {
 		panic(fmt.Sprintf("seeddata: parse builtin/crews.yaml: %v", err))
 	}
+	// Fail fast if YAML schema drift (renamed top-level `crews:`
+	// key, malformed list) leaves doc.Crews empty. Silent zero
+	// would disable seeding without any error visible to the
+	// operator — the panic is louder.
+	if len(doc.Crews) == 0 {
+		panic("seeddata: builtin/crews.yaml decoded to zero crews — schema drift?")
+	}
 	return doc.Crews
 }
