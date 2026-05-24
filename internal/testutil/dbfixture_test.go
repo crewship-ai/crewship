@@ -55,7 +55,7 @@ func TestNewMemDBWithSchema_LoadsStatements(t *testing.T) {
 }
 
 // TestNewMemDBWithSchema_SkipsBlankStatements documents the
-// whitespace-tolerant contract — callers can pass `` or `   ` in
+// whitespace-tolerant contract — callers can pass “ or `   ` in
 // the variadic slice without it tripping the executor. Useful when
 // statements are built from a template + some conditional blocks
 // that may render empty.
