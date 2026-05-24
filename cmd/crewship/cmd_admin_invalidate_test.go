@@ -170,15 +170,22 @@ func TestAdminInvalidateSessions_NoActive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("update: %v", err)
 	}
-	got, _ := res.RowsAffected()
+	got, err := res.RowsAffected()
+	if err != nil {
+		t.Fatalf("rows affected: %v", err)
+	}
 	if got != 0 {
 		t.Errorf("revoked = %d, want 0 (user had no active sessions)", got)
 	}
 }
 
 // TestAdminInvalidateSessionsCmd_Wiring guards flag registration.
+// NOT parallel: this and TestAdminInvalidateSessionsCmd_EmailRequired
+// both mutate the shared adminInvalidateSessionsCmd cobra instance
+// (flag set + SetOut/SetErr); running in parallel races on shared
+// state. Serial cost is sub-millisecond; cheaper than the alternative
+// of deep-copying the command per-test.
 func TestAdminInvalidateSessionsCmd_Wiring(t *testing.T) {
-	t.Parallel()
 	if f := adminInvalidateSessionsCmd.Flags().Lookup("email"); f == nil {
 		t.Error("missing --email flag")
 	}
@@ -193,9 +200,11 @@ func TestAdminInvalidateSessionsCmd_Wiring(t *testing.T) {
 // validation. Cobra normally enforces required flags itself; this
 // test pins the behaviour so a refactor that drops MarkFlagRequired
 // surfaces in tests, not in production.
+//
+// NOT parallel: see TestAdminInvalidateSessionsCmd_Wiring comment.
 func TestAdminInvalidateSessionsCmd_EmailRequired(t *testing.T) {
-	t.Parallel()
-	// Reset email flag to empty (parallel tests may have set it).
+	// Reset email flag to empty (a sibling test or --count=N rerun
+	// may have set it).
 	_ = adminInvalidateSessionsCmd.Flags().Set("email", "")
 	buf := &bytes.Buffer{}
 	adminInvalidateSessionsCmd.SetOut(buf)
