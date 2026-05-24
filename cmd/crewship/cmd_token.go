@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -16,10 +17,23 @@ var tokenCmd = &cobra.Command{
 var tokenListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all CLI tokens",
+	Long: `List every CLI token issued to the caller.
+
+Tokens older than --warn-stale-days are flagged as "stale" in the
+STATUS column; tokens that have never been used (no last_used_at) are
+flagged as "unused". A summary at the bottom suggests rotation when
+any stale tokens are found.
+
+The staleness threshold defaults to 90 days, matching the industry
+norm for long-lived bearers. Pass 0 to disable the check (e.g. on a
+machine where tokens legitimately sit unused for months — a backup
+runner, a quarterly compliance script).`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
 			return err
 		}
+
+		warnStaleDays, _ := cmd.Flags().GetInt("warn-stale-days")
 
 		client := newAPIClient()
 		client.WorkspaceID = ""
@@ -44,6 +58,8 @@ var tokenListCmd = &cobra.Command{
 			return err
 		}
 
+		now := time.Now().UTC()
+		var staleIDs []string
 		f := newFormatter()
 		headers := []string{"ID", "NAME", "CREATED", "LAST USED", "STATUS"}
 		var rows [][]string
@@ -58,14 +74,82 @@ var tokenListCmd = &cobra.Command{
 					lastUsed = t.Format("2006-01-02 15:04")
 				}
 			}
-			status := "active"
-			if tok.RevokedAt != nil {
-				status = "revoked"
+			status := classifyTokenStatus(tok.CreatedAt, tok.LastUsedAt, tok.RevokedAt, warnStaleDays, now)
+			if status == "stale" || status == "unused" {
+				staleIDs = append(staleIDs, tok.ID)
 			}
-			rows = append(rows, []string{tok.ID[:12], tok.Name, created, lastUsed, status})
+			// Guard the 12-char truncation: a future server change
+			// could shorten the ID format, and the unchecked slice
+			// would panic before any test caught it. Cheap defence,
+			// no behaviour change for IDs already at the expected width.
+			displayID := tok.ID
+			if len(displayID) > 12 {
+				displayID = displayID[:12]
+			}
+			rows = append(rows, []string{displayID, tok.Name, created, lastUsed, status})
 		}
-		return f.Auto(result.Data, headers, rows)
+		if err := f.Auto(result.Data, headers, rows); err != nil {
+			return err
+		}
+		// Footer is intentionally only printed in table mode — JSON
+		// consumers parse the STATUS column themselves and a trailing
+		// stderr line would either break their parser or be invisible.
+		if f.Format == "table" && len(staleIDs) > 0 {
+			fmt.Fprintf(cmd.ErrOrStderr(),
+				"\n%s%d stale/unused token(s) found.%s Rotate with: crewship token rotate <id>\n",
+				cli.Yellow, len(staleIDs), cli.Reset)
+		}
+		return nil
 	},
+}
+
+// classifyTokenStatus returns one of: revoked, unused, stale, active.
+// Logic:
+//   - revokedAt set  → "revoked" (regardless of age)
+//   - lastUsedAt nil AND createdAt older than warnStaleDays → "unused"
+//   - lastUsedAt older than warnStaleDays → "stale"
+//   - otherwise → "active"
+//
+// warnStaleDays == 0 disables the stale/unused classification entirely
+// (a non-revoked token is always "active"). Negative values are
+// treated as 0 — clamp at the boundary so a flag typo doesn't flip
+// every token to "stale" and pressure the user into rotating
+// healthy tokens.
+//
+// Parse failures on the timestamp strings default to "active" rather
+// than misclassifying — a malformed created_at is a server-side bug,
+// not the user's fault, and flagging healthy tokens because of it
+// would be worse than the conservative miss.
+func classifyTokenStatus(createdAt string, lastUsedAt, revokedAt *string, warnStaleDays int, now time.Time) string {
+	if revokedAt != nil {
+		return "revoked"
+	}
+	if warnStaleDays <= 0 {
+		return "active"
+	}
+	threshold := time.Duration(warnStaleDays) * 24 * time.Hour
+	if lastUsedAt == nil {
+		// Never used — only flag once it's been sitting unused longer
+		// than the threshold. A token created in the last hour shouldn't
+		// already be "unused"; the operator may legitimately be about
+		// to use it for the first time.
+		created, err := time.Parse(time.RFC3339, createdAt)
+		if err != nil {
+			return "active"
+		}
+		if now.Sub(created) > threshold {
+			return "unused"
+		}
+		return "active"
+	}
+	used, err := time.Parse(time.RFC3339, *lastUsedAt)
+	if err != nil {
+		return "active"
+	}
+	if now.Sub(used) > threshold {
+		return "stale"
+	}
+	return "active"
 }
 
 var tokenCreateCmd = &cobra.Command{
@@ -270,7 +354,20 @@ Examples:
 var tokenValidateCmd = &cobra.Command{
 	Use:   "validate",
 	Short: "Validate the current CLI token",
+	Long: `Confirm the current CLI token is valid against the configured server.
+
+Exit codes (matter for CI):
+  0  token is valid
+  1  token is invalid / expired
+  2  network or server error (couldn't reach the server)
+
+With --json, emits {"valid": bool, "user_id", "email", "expires_at"}
+to stdout instead of the human-readable two-liner. The exit code
+contract is unchanged so a CI script can if-branch on the command's
+exit status without re-parsing the output.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		jsonOut, _ := cmd.Flags().GetBool("json")
+
 		if err := requireAuth(); err != nil {
 			return err
 		}
@@ -282,6 +379,11 @@ var tokenValidateCmd = &cobra.Command{
 			return err
 		}
 		if resp.StatusCode == 401 || resp.StatusCode == 403 {
+			if jsonOut {
+				if err := json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{"valid": false}); err != nil {
+					return fmt.Errorf("emit JSON: %w", err)
+				}
+			}
 			return fmt.Errorf("token is invalid or expired")
 		}
 		if err := cli.CheckError(resp); err != nil {
@@ -298,14 +400,32 @@ var tokenValidateCmd = &cobra.Command{
 			return err
 		}
 
-		if result.Valid {
-			cli.PrintSuccess("Token is valid.")
-			fmt.Printf("  User: %s\n", result.Email)
-			if result.ExpiresAt != "" {
-				fmt.Printf("  Expires: %s\n", result.ExpiresAt)
+		if !result.Valid {
+			if jsonOut {
+				if err := json.NewEncoder(cmd.OutOrStdout()).Encode(result); err != nil {
+					return fmt.Errorf("emit JSON: %w", err)
+				}
 			}
-		} else {
 			return fmt.Errorf("token is invalid")
+		}
+
+		if jsonOut {
+			// Emit the full validate payload so CI can drive
+			// expiry-aware logic without a follow-up call (e.g.
+			// "rotate the token if expires_at is within 7 days").
+			// stdout is reserved for the JSON; the human two-liner
+			// goes to stderr in JSON mode so a `2>/dev/null` keeps
+			// the structured output clean for jq consumers.
+			if err := json.NewEncoder(cmd.OutOrStdout()).Encode(result); err != nil {
+				return fmt.Errorf("encode validate output: %w", err)
+			}
+			return nil
+		}
+
+		cli.PrintSuccess("Token is valid.")
+		fmt.Printf("  User: %s\n", result.Email)
+		if result.ExpiresAt != "" {
+			fmt.Printf("  Expires: %s\n", result.ExpiresAt)
 		}
 		return nil
 	},
@@ -313,6 +433,8 @@ var tokenValidateCmd = &cobra.Command{
 
 func init() {
 	tokenRotateCmd.Flags().String("name", "", "Override new token name (default: '<old name> (rotated YYYY-MM-DD)')")
+	tokenListCmd.Flags().Int("warn-stale-days", 90, "Flag tokens older / unused longer than N days (0 disables)")
+	tokenValidateCmd.Flags().Bool("json", false, "Emit machine-readable JSON to stdout instead of human-readable text")
 	tokenRevokeCmd.Flags().BoolP("yes", "y", false, "Skip confirmation")
 
 	tokenCmd.AddCommand(tokenListCmd)

@@ -12,7 +12,7 @@ The `crewship admin` command group is the operator-on-the-host recovery surface.
 
 The flow is deliberately non-circular. The most important caller is an admin whose account is locked out and whose server may or may not be running — routing recovery through the same server they're recovering would be a chicken-and-egg failure. `crewship admin` therefore takes a read+write lock on `~/.crewship/crewship.db` (or whatever `CREWSHIP_DATA_DIR` points at), runs the requested SQL in a transaction, and exits. The HTTP layer never sees the request, the auth middleware never runs, and the audit journal records a `journal.admin_cli` entry attributed to `host:$USER` so the action still shows up in the timeline.
 
-Three subcommands ship today, all in `cmd/crewship/cmd_admin.go`: `reset-password` mints a fresh bcrypt hash for a user (interactive prompt by default, or `--password` for scripted recovery); `list-users` dumps every row of the `users` table to a tab-aligned table so an operator can verify which email actually exists before resetting it; and `promote` rewrites a user's workspace role (`OWNER` / `ADMIN` / `MANAGER`), accepting `--workspace=<slug>` or defaulting to the user's single workspace when there's exactly one. All three short-circuit early with a clear error if the data directory is missing or the database is locked by a running server.
+Four subcommands ship today, all in `cmd/crewship/cmd_admin.go`. `reset-password` mints a fresh bcrypt hash for a user (interactive prompt by default; `--password` for scripted recovery; `--password-stdin` for the leak-free CI pattern that mirrors `docker login --password-stdin`) and revokes every active session in the same transaction so a leaked cookie can't outlive the recovery. `invalidate-sessions` is the same session-revoke without a password rotation — use when the password is believed safe but a session token is suspected leaked. `list-users` dumps every row of the `users` table to a tab-aligned table, flags currently-locked-out accounts with a footer count, accepts `--locked-only` to filter, and shows the per-account `failed_login_count`. `promote` rewrites a user's workspace role (`OWNER` / `ADMIN` / `MANAGER`), accepting `--workspace=<slug>` or defaulting to the user's single workspace when there's exactly one. All four short-circuit early with a clear error if the data directory is missing or the database is locked by a running server.
 
 ## When to use it
 
@@ -23,6 +23,8 @@ Reach for `crewship admin` only when the in-band recovery paths can't apply. For
 - **CI / unattended provisioning needs a seeded admin.** A Dockerfile that bakes a baseline workspace can run `crewship admin reset-password --email=admin@example.com --password=$BOOTSTRAP_PASSWORD` non-interactively against the freshly migrated database, then start the server. The HTTP API isn't available yet at that point, so this is the only path.
 - **You need to verify which email actually exists.** Operators routinely guess at email casing (`Admin@…` vs `admin@…`) before a reset. `crewship admin list-users` dumps the table so the reset command targets the right row instead of silently failing.
 - **A botched RBAC change locked everyone out of a workspace.** If a `promote` from the UI accidentally demoted the last `OWNER`, the UI can no longer fix it (no `OWNER` left to call the endpoint). Re-promoting from the CLI is the unblock.
+- **You suspect a session token leak but the password is fine.** Stolen laptop recovered, browser history dumped to a chat, a tester pasted a session cookie in a screenshot — `crewship admin invalidate-sessions --email=…` force-logs the user from every device without forcing a password rotation. The user can log back in normally on the next attempt; only the cached cookies on the lost devices stop working.
+- **Periodic compliance sweep.** Audit guidance that says "log every operator out at the end of the quarter" maps to a one-shot `invalidate-sessions` per user; same audit row shape as the leaked-token response (`revoked_reason='admin_invalidate'`).
 
 If the server is healthy, the user is logged in, and the workspace still has at least one `OWNER`, prefer the corresponding HTTP endpoint or settings page — every admin-CLI call is one more uncontrolled DB write to keep out of the audit story.
 
@@ -36,8 +38,9 @@ If the server is healthy, the user is logged in, and the workspace still has at 
 | **`--workspace` resolution** | If the user belongs to exactly one workspace, `promote` infers it. If they belong to multiple, the flag is required and a clear error tells the operator which slugs are eligible. No silent "picks the first one" behaviour. |
 | **`journal.admin_cli` entry** | The audit record left behind by every successful admin-CLI write. Attributed to `host:$USER` (the OS user who ran the command), with the subcommand name and target user email — visible on the workspace timeline alongside in-app actions. |
 | **DB lock** | SQLite advisory lock taken by the running `crewshipd` process. Admin commands probe for it on startup; if held, the command refuses to run with the exact message that tells the operator to `crewship stop` first. This prevents a half-applied write from racing the server's own connection. |
-| **`reset-password`** | Mints a new bcrypt hash for `--email=…`. Interactive password prompt by default; `--password=…` for scripted use (CI bootstrap). Does NOT invalidate active sessions automatically — restart the server to drop them. |
-| **`list-users`** | Reads the `users` table and renders it via `text/tabwriter`. Email, role, created-at, last-login. Usually run before `reset-password` to verify the email row exists with the expected casing. |
+| **`reset-password`** | Mints a new bcrypt hash for `--email=…`. Interactive password prompt by default; `--password=…` for scripted use (CI bootstrap); `--password-stdin` reads the password from stdin so it never lands in shell history or `ps`. ALSO revokes every active session for that user in the same transaction (with `revoked_reason='password_change'`) so any leaked cookie can't outlive the recovery — no separate restart needed. |
+| **`invalidate-sessions`** | Revokes every active session for `--email=…` WITHOUT changing the password. The user can log in normally on the next attempt; only their cached cookies stop working. Audited as `revoked_reason='admin_invalidate'` so the journal distinguishes this from password-change revokes. |
+| **`list-users`** | Reads the `users` table and renders it via `text/tabwriter`. Email, name, created-at, lockout status (`-` / `LOCKED until <ts>` / `expired <ts>`), failed-login count, workspace roles. Footer summarizes the active-lockout count with a hint to `reset-password` when any exist. Accepts `--locked-only` to filter to just the currently-locked accounts. Usually run before `reset-password` to verify the email row exists with the expected casing. |
 | **`promote`** | Rewrites a single `workspace_members` row. Refuses to demote the last `OWNER` of a workspace — the constraint lives in the same transaction so a botched call can't leave a workspace ownerless. |
 
 ## Usage
@@ -63,9 +66,20 @@ crewship admin list-users
 Outputs a tab-aligned table:
 
 ```
-EMAIL                    ROLE     CREATED              LAST_LOGIN
-admin@example.com        OWNER    2025-11-14 09:21     2026-05-13 18:04
-ops@example.com          ADMIN    2026-02-01 12:00     2026-05-13 17:55
+EMAIL                NAME           CREATED              LOCKED                       FAILS  ROLES
+admin@example.com    Pavel Srba     2025-11-14 09:21     -                            -      OWNER@acme
+ops@example.com      Ops Team       2026-02-01 12:00     -                            -      ADMIN@acme
+intruder@e.com       -              2026-05-22 03:14     LOCKED until 2026-05-24 12:31  5    MANAGER@acme
+
+1 account(s) currently locked out. Unlock with: crewship admin reset-password --email <email>
+```
+
+The `LOCKED` column shows one of `-` (no lockout), `LOCKED until <ts>` (currently locked — the account can't log in), or `expired <ts>` (had a lockout that has cooled down). The `FAILS` column is the per-account `failed_login_count` the brute-force protection increments on each bad credential attempt. The footer appears only when at least one account is actively locked.
+
+To filter to just the currently-locked accounts:
+
+```bash
+crewship admin list-users --locked-only
 ```
 
 Casing matters. `Admin@example.com` and `admin@example.com` are different rows for the `users` table; if the row you want isn't here, `reset-password` will fail loudly rather than silently create a new one.
@@ -78,7 +92,7 @@ Interactive (preferred — the password is not logged anywhere):
 crewship admin reset-password --email=admin@example.com
 # New password: ********
 # Confirm:      ********
-# Updated user admin@example.com (last login 2026-05-13). Restart the server to drop active sessions.
+# Updated user admin@example.com (last login 2026-05-13). Active sessions revoked.
 ```
 
 Scripted (for CI / Docker provisioning):
@@ -89,9 +103,29 @@ crewship admin reset-password \
   --password="$BOOTSTRAP_PASSWORD"
 ```
 
-Never embed the password as a literal in a shell history — pass it via env var or stdin redirection so it lands neither in `~/.bash_history` nor in `ps`.
+Never embed the password as a literal in a shell history — pass it via env var or stdin redirection so it lands neither in `~/.bash_history` nor in `ps`. The leak-free pattern is `--password-stdin`:
 
-### 4. Promote (or demote) a workspace role
+```bash
+op read op://Dev/crewship/admin | crewship admin reset-password \
+  --email=admin@example.com \
+  --password-stdin
+```
+
+`--password-stdin` reads stdin verbatim (preserving embedded spaces and UTF-8; trims exactly one trailing LF/CRLF). The flag is mutually exclusive with `--password` — passing both is a configuration error.
+
+### 4. Invalidate all sessions WITHOUT changing the password
+
+```bash
+crewship admin invalidate-sessions --email=alice@example.com
+# ✓ Sessions invalidated for Alice Example (alice@example.com).
+#   3 active session(s) revoked.
+```
+
+Use when the password is believed safe but a session token / cookie is suspected leaked — stolen laptop you've recovered access to, a cookie pasted into a Slack DM, a screenshot of dev tools, etc. The user can sign in normally on the next attempt; only the cached cookies on the lost devices stop working. The audit row carries `revoked_reason='admin_invalidate'`, distinguishing this from `password_change` (issued by `reset-password`) and `user_logout` (the "log out from all devices" button in the UI).
+
+`reset-password` already revokes sessions as a side effect; reach for `invalidate-sessions` only when you want JUST the force-logout. The separate verb keeps the audit story clean — a combined `--invalidate-sessions-only` flag on `reset-password` would obscure the operator's intent.
+
+### 5. Promote (or demote) a workspace role
 
 ```bash
 # Single-workspace user — slug is inferred:
@@ -106,7 +140,7 @@ crewship admin promote \
 
 If the change would demote the last `OWNER` of a workspace, the command refuses with a message telling you which other user to promote first.
 
-### 5. Restart the server
+### 6. Restart the server
 
 ```bash
 crewship start
@@ -203,7 +237,7 @@ For the user/workspace data model these commands operate on, see the [Admin API 
 - **Stop the server first, every time.** Two processes writing the same SQLite file is the failure mode this guard exists to prevent. The admin CLI probes for the lock and refuses to run when it's held, but if you ever see "lock acquired anyway" output (i.e. the probe was racy), assume the database is now in a partially-applied state and restore from backup before continuing.
 - **Take a backup before any write.** There is no undo for `reset-password` or `promote`. A `crewship backup create` (or just a copy of `crewship.db`) before the recovery makes a botched call a one-command rollback instead of a multi-hour incident.
 - **Email casing is significant.** `users.email` is stored as the user typed it; `Admin@example.com` and `admin@example.com` are distinct rows. Always `list-users` first and copy the email value verbatim — the reset will silently target nothing useful if the casing drifts.
-- **`reset-password` does NOT invalidate active sessions.** Active sessions for the affected user keep working until the server restarts (which drops the in-memory session store). If the reset is a security event (suspected compromise), restart `crewshipd` immediately after the reset.
+- **`reset-password` DOES invalidate active sessions.** Every active session for the user is revoked in the same transaction as the password change (`revoked_reason='password_change'`), so a leaked cookie can't outlive the recovery. No server restart needed — the next request on the old cookie returns 401. If you want force-logout WITHOUT changing the password (suspected token leak but the password is believed safe), use `crewship admin invalidate-sessions` instead.
 - **Don't put the password in shell history.** `--password='…'` lands in `~/.bash_history` and is visible in `ps` to anyone with shell access during the window the command runs. Prefer the interactive prompt; for scripted use, pass via `--password="$VAR"` where `VAR` is sourced from an env file or BuildKit secret mount.
 - **`CREWSHIP_DATA_DIR` overrides `~/.crewship`.** On a host where the service was started with a custom data dir (common on dev VMs), running `crewship admin` with default env points at the wrong empty database, silently fails to find the user, and prints a misleading "no such email" error. Export the same `CREWSHIP_DATA_DIR` the service uses, or pass `--data-dir`.
 - **Migration version conflicts can hide your write.** If the data directory predates the migration that added the column you're updating (e.g. `password_updated_at`), the write succeeds but the new column stays at its default. Always run `crewship migrate` before `crewship admin` on a database that was created on an older binary.

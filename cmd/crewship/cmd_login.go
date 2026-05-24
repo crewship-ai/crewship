@@ -4,10 +4,13 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -44,6 +47,16 @@ or Settings → Pair CLI):
 	RunE: func(cmd *cobra.Command, args []string) error {
 		server := cli.ResolveServer(flagServer, cliCfg)
 
+		// Pre-flight transport-security check. Fail loud on a malformed
+		// URL or empty host BEFORE the bearer / password hits the wire
+		// against the wrong destination. Warn (don't block) on plaintext
+		// HTTP to a non-loopback host so the operator notices the
+		// cleartext exposure but isn't blocked from intentional choices
+		// (dev VM, internal LAN behind a VPN, etc.).
+		if err := preflightServerURL(cmd.ErrOrStderr(), server); err != nil {
+			return err
+		}
+
 		if loginPairFlag {
 			return loginWithPairing(server, loginCodeFlag, loginAdapterHint)
 		}
@@ -55,6 +68,60 @@ or Settings → Pair CLI):
 		}
 		return loginInteractive(server)
 	},
+}
+
+// preflightServerURL validates the --server URL right before login
+// dispatch. The check is intentionally CLI-local (not in
+// cli.NewClient) because NewClient is also used for non-credential
+// requests where the warning would be noise (e.g. whoami, list, get).
+// At login time the bearer / password is about to ride the
+// connection, so the audit pays for itself.
+//
+// Returns:
+//   - nil + no output         → URL is fine (https, loopback http)
+//   - nil + stderr warning    → plaintext HTTP to a non-loopback host
+//   - error                   → URL is structurally broken (block login)
+//
+// The classification mirrors checkCLIConfigServerScheme in
+// cmd_doctor_security.go; the shared loopback primitive (
+// isLoopbackHost) lives in cmd_url_classify.go (build-tag-free).
+// The top-level classification function isn't shared yet because
+// the doctor version returns a checkResult and the login version
+// has different sleep + warning UX — extracting the common shape
+// would obscure both call sites without saving meaningful LoC.
+func preflightServerURL(out io.Writer, serverURL string) error {
+	raw := strings.TrimSpace(serverURL)
+	if raw == "" {
+		return fmt.Errorf("--server is empty (set the URL flag or run 'crewship login --server https://…')")
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("invalid --server URL %q: %w", raw, err)
+	}
+	if strings.TrimSpace(u.Hostname()) == "" {
+		return fmt.Errorf("--server %q is missing a host (use https://host[:port])", raw)
+	}
+	scheme := strings.ToLower(u.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return fmt.Errorf("--server scheme %q is unsupported (use http or https)", u.Scheme)
+	}
+	if scheme == "https" {
+		return nil
+	}
+	// HTTP: loopback is fine (dev workflow), non-loopback gets the warning.
+	if isLoopbackHost(u.Hostname()) {
+		return nil
+	}
+	fmt.Fprintf(out, "%s⚠ %s is reached over plaintext HTTP%s — credentials are about to be sent in the clear.\n",
+		cli.Yellow, u.Host, cli.Reset)
+	fmt.Fprintln(out, "  Recommended: move the server behind TLS (Caddy / nginx + Let's Encrypt),")
+	fmt.Fprintln(out, "               or SSH-tunnel so the connection stays loopback.")
+	fmt.Fprintln(out, "  Proceeding anyway in 1 second — Ctrl-C to abort.")
+	// Brief sleep so the warning is visible even when subsequent prompts
+	// (Email:, Password:) immediately overwrite the terminal. 1 s is short
+	// enough not to annoy the scripted path; the user can still abort.
+	time.Sleep(1 * time.Second)
+	return nil
 }
 
 var logoutCmd = &cobra.Command{
@@ -77,7 +144,32 @@ var logoutCmd = &cobra.Command{
 var whoamiCmd = &cobra.Command{
 	Use:   "whoami",
 	Short: "Display current user and workspace info",
+	Long: `Show who the CLI thinks it is — user email, configured server,
+active workspace + role, or a hint to pick one if no workspace is set.
+
+With --json, emits a structured object to stdout so CI scripts can
+parse instead of grep:
+
+  {
+    "user_email": "petra@example.com",   // omitted if the validate
+                                          // endpoint didn't return one
+    "server":     "https://crewship.acme.com",
+    "workspace":  {                       // omitted if none selected
+      "id":   "w_abc",
+      "name": "ACME Engineering",
+      "slug": "acme-engineering",
+      "role": "OWNER"
+    },
+    "workspaces_count": 3                 // total user has access to
+  }
+
+Same exit code contract as the human path: 0 on success, non-zero on
+auth/network failure. The /workspaces fetch is the load-bearing call;
+the /cli-token/validate side-call is best-effort (a session-cookie
+user has no CLI token to validate).`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		jsonOut, _ := cmd.Flags().GetBool("json")
+
 		if err := requireAuth(); err != nil {
 			return err
 		}
@@ -106,6 +198,7 @@ var whoamiCmd = &cobra.Command{
 		activeWS := cli.ResolveWorkspace(flagWorkspace, cliCfg)
 
 		// Try to get user info from CLI token validation
+		var userEmail string
 		validateResp, err := client.Get("/api/v1/auth/cli-token/validate")
 		if err == nil && validateResp.StatusCode == 200 {
 			var userInfo struct {
@@ -113,12 +206,19 @@ var whoamiCmd = &cobra.Command{
 				UserID    string `json:"user_id"`
 			}
 			if err := cli.ReadJSON(validateResp, &userInfo); err == nil {
-				fmt.Printf("%sUser:%s      %s\n", cli.Bold, cli.Reset, userInfo.UserEmail)
+				userEmail = userInfo.UserEmail
 			}
 		} else if validateResp != nil {
 			validateResp.Body.Close()
 		}
 
+		if jsonOut {
+			return emitWhoamiJSON(cmd.OutOrStdout(), userEmail, server, activeWS, workspaces)
+		}
+
+		if userEmail != "" {
+			fmt.Printf("%sUser:%s      %s\n", cli.Bold, cli.Reset, userEmail)
+		}
 		fmt.Printf("%sServer:%s    %s\n", cli.Bold, cli.Reset, server)
 
 		if activeWS != "" {
@@ -138,12 +238,68 @@ var whoamiCmd = &cobra.Command{
 	},
 }
 
+// whoamiWorkspaceJSON is the per-workspace payload in the --json
+// output. Mirrors the active workspace's id+name+slug+role; only
+// emitted when one is selected.
+type whoamiWorkspaceJSON struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Slug string `json:"slug"`
+	Role string `json:"role"`
+}
+
+// whoamiJSON is the --json output shape. Pointer fields are omitted
+// from the JSON when nil (omitempty) so a CI consumer can branch on
+// "is there a workspace?" with a single null check, and so the
+// no-cli-token case doesn't emit `"user_email": ""` that a strict
+// schema validator would reject.
+type whoamiJSON struct {
+	UserEmail       string               `json:"user_email,omitempty"`
+	Server          string               `json:"server"`
+	Workspace       *whoamiWorkspaceJSON `json:"workspace,omitempty"`
+	WorkspacesCount int                  `json:"workspaces_count"`
+}
+
+// emitWhoamiJSON writes the structured whoami payload. Pulled out as
+// a helper so the test can drive it with hand-built inputs instead
+// of standing up a fake HTTP server. workspaces is the raw list
+// returned by GET /api/v1/workspaces; activeWS is the slug-or-id
+// the CLI thinks is currently selected.
+func emitWhoamiJSON(out io.Writer, userEmail, server, activeWS string, workspaces []struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Slug string `json:"slug"`
+	Role string `json:"currentUserRole"`
+}) error {
+	payload := whoamiJSON{
+		UserEmail:       userEmail,
+		Server:          server,
+		WorkspacesCount: len(workspaces),
+	}
+	if activeWS != "" {
+		for _, ws := range workspaces {
+			if ws.Slug == activeWS || ws.ID == activeWS {
+				payload.Workspace = &whoamiWorkspaceJSON{
+					ID: ws.ID, Name: ws.Name, Slug: ws.Slug, Role: ws.Role,
+				}
+				break
+			}
+		}
+	}
+	if err := json.NewEncoder(out).Encode(payload); err != nil {
+		return fmt.Errorf("encode whoami output: %w", err)
+	}
+	return nil
+}
+
 func init() {
 	loginCmd.Flags().StringVar(&loginTokenFlag, "token", "", "API token for non-interactive login")
 	loginCmd.Flags().BoolVar(&loginGoogleFlag, "google", false, "Sign in via Google OAuth (browser flow, finishes in the web UI)")
 	loginCmd.Flags().BoolVar(&loginPairFlag, "pair", false, "Redeem a device-code shown in the browser (use with --code)")
 	loginCmd.Flags().StringVar(&loginCodeFlag, "code", "", "Pairing code from the browser (with --pair)")
 	loginCmd.Flags().StringVar(&loginAdapterHint, "adapter", "", "Optional adapter hint (telemetry): CLAUDE_CODE | GEMINI_CLI | CODEX_CLI | OPENCODE | CURSOR_CLI | FACTORY_DROID")
+
+	whoamiCmd.Flags().Bool("json", false, "Emit machine-readable JSON to stdout instead of human-readable text")
 }
 
 // loginWithPairing redeems a device-code shown in the browser

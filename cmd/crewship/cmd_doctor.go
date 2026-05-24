@@ -5,7 +5,9 @@ package main
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/url"
 	"os"
@@ -73,9 +75,28 @@ write-perm on the data dir, and the NEXTAUTH_SECRET trap.
 Each check is PASS / WARN / FAIL with a hint for failures. --fix attempts
 only safe, reversible repairs (creating the missing data directory).
 Unsafe fixes (installing Docker, repairing networks, setting env vars)
-are deliberately left to the operator with actionable URLs in the output.`,
-	Run: func(cmd *cobra.Command, args []string) {
+are deliberately left to the operator with actionable URLs in the output.
+
+With --json, emits a structured object instead of the colored table:
+
+  {
+    "checks": [
+      {"name": "container runtime", "status": "PASS", "detail": "...", "hint": ""},
+      ...
+    ],
+    "failed":  0,
+    "warned":  0,
+    "version": "<crewship version>",
+    "os":      "<runtime.GOOS>",
+    "arch":    "<runtime.GOARCH>"
+  }
+
+The status enum is PASS / WARN / FAIL / INFO, identical to the human
+table. CI gates can branch on the top-level "failed" / "warned"
+counters or filter the per-check array.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
 		fixMode, _ := cmd.Flags().GetBool("fix")
+		jsonOut, _ := cmd.Flags().GetBool("json")
 		parentCtx := cmd.Context()
 		if parentCtx == nil {
 			parentCtx = context.Background()
@@ -92,12 +113,18 @@ are deliberately left to the operator with actionable URLs in the output.`,
 		// running before the result table scrolls past. Match width to the
 		// widest expected detail string (~64 chars) so terminals narrower
 		// than that wrap gracefully and wider ones don't waste real estate.
-		fmt.Println()
-		fmt.Printf("  %sCrewship doctor%s — environment check\n", cli.Bold, cli.Reset)
-		fmt.Printf("  %sbinary:%s  %s   %sos:%s %s/%s\n",
-			cli.Dim, cli.Reset, version,
-			cli.Dim, cli.Reset, runtime.GOOS, runtime.GOARCH)
-		fmt.Println()
+		//
+		// Suppressed in --json mode: stdout is reserved for the JSON
+		// payload there. The header survives if --json was forgotten;
+		// keeping it human-side only is a stronger contract.
+		if !jsonOut {
+			fmt.Println()
+			fmt.Printf("  %sCrewship doctor%s — environment check\n", cli.Bold, cli.Reset)
+			fmt.Printf("  %sbinary:%s  %s   %sos:%s %s/%s\n",
+				cli.Dim, cli.Reset, version,
+				cli.Dim, cli.Reset, runtime.GOOS, runtime.GOARCH)
+			fmt.Println()
+		}
 
 		results := make([]checkResult, 0, 12)
 		runProbe := func(fn func(context.Context) checkResult) {
@@ -123,9 +150,12 @@ are deliberately left to the operator with actionable URLs in the output.`,
 		results = append(results, runCheckDataDirPerms())
 		runProbe(runCheckUpdateAvailable)
 
-		for _, r := range results {
-			r.print()
-		}
+		// CLI-side security audit: server URL scheme (plaintext token
+		// over non-loopback) and cli-config.yaml perms (token at-rest).
+		// Both are pure local-config checks — no network, fast — so we
+		// run them unconditionally on every doctor invocation.
+		results = append(results, runCheckCLIConfigServerScheme())
+		results = append(results, checkCLIConfigPerms(fixMode))
 
 		var failed, warned int
 		for _, r := range results {
@@ -135,6 +165,17 @@ are deliberately left to the operator with actionable URLs in the output.`,
 			case "WARN":
 				warned++
 			}
+		}
+
+		if jsonOut {
+			// JSON mode: emit a single object on stdout, no human
+			// header/footer/per-check lines. The structure matches
+			// the contract documented in the command's Long.
+			return emitDoctorJSON(cmd.OutOrStdout(), results, failed, warned)
+		}
+
+		for _, r := range results {
+			r.print()
 		}
 		fmt.Println()
 		switch {
@@ -161,6 +202,7 @@ are deliberately left to the operator with actionable URLs in the output.`,
 			fmt.Printf("  %sCLI walkthrough:%s  https://docs.crewship.ai/guides/onboarding\n", cli.Dim, cli.Reset)
 		}
 		fmt.Println()
+		return nil
 	},
 }
 
@@ -886,4 +928,66 @@ func checkUpdateAvailable(ctx context.Context, currentVersion string, fn checkFu
 
 func init() {
 	doctorCmd.Flags().Bool("fix", false, "Attempt safe auto-repairs (e.g. create missing data directory)")
+	doctorCmd.Flags().Bool("json", false, "Emit machine-readable JSON to stdout instead of the colored human table")
+}
+
+// doctorCheckJSON is the per-check shape in the --json payload.
+// Mirrors checkResult but with JSON tags so the field names land in
+// snake_case (idiomatic for the CLI's JSON outputs everywhere else).
+// hint is omitempty so consumers can branch on its presence rather
+// than its emptiness.
+type doctorCheckJSON struct {
+	Name   string `json:"name"`
+	Status string `json:"status"`
+	Detail string `json:"detail"`
+	Hint   string `json:"hint,omitempty"`
+}
+
+// doctorJSON is the top-level --json output shape. failed + warned
+// are the canonical CI gate inputs; the per-check array is for
+// callers that need richer filtering.
+type doctorJSON struct {
+	Checks  []doctorCheckJSON `json:"checks"`
+	Failed  int               `json:"failed"`
+	Warned  int               `json:"warned"`
+	Version string            `json:"version"`
+	OS      string            `json:"os"`
+	Arch    string            `json:"arch"`
+}
+
+// emitDoctorJSON marshals the doctor result into the documented
+// --json shape and writes it to out. Pulled out as a helper so a
+// future test can drive it with hand-built results without standing
+// up the full check battery (which touches Docker, the data dir,
+// the network, and the DB).
+//
+// Returns the encode error so the cobra RunE handler can surface a
+// non-zero exit if stdout is closed mid-write (CI piping into a
+// killed reader) or json.Marshal balks on a non-marshalable field.
+// Silent failure here would let automation receive empty/truncated
+// JSON, miss the missing top-level fields, and miscount failures.
+func emitDoctorJSON(out io.Writer, results []checkResult, failed, warned int) error {
+	checks := make([]doctorCheckJSON, 0, len(results))
+	for _, r := range results {
+		checks = append(checks, doctorCheckJSON{
+			Name:   r.name,
+			Status: r.status,
+			Detail: r.detail,
+			Hint:   r.hint,
+		})
+	}
+	payload := doctorJSON{
+		Checks:  checks,
+		Failed:  failed,
+		Warned:  warned,
+		Version: version,
+		OS:      runtime.GOOS,
+		Arch:    runtime.GOARCH,
+	}
+	enc := json.NewEncoder(out)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(payload); err != nil {
+		return fmt.Errorf("emit doctor JSON: %w", err)
+	}
+	return nil
 }
