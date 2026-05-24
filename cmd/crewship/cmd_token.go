@@ -377,7 +377,9 @@ exit status without re-parsing the output.`,
 		}
 		if resp.StatusCode == 401 || resp.StatusCode == 403 {
 			if jsonOut {
-				_ = json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{"valid": false})
+				if err := json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{"valid": false}); err != nil {
+					return fmt.Errorf("emit JSON: %w", err)
+				}
 			}
 			return fmt.Errorf("token is invalid or expired")
 		}
@@ -397,7 +399,9 @@ exit status without re-parsing the output.`,
 
 		if !result.Valid {
 			if jsonOut {
-				_ = json.NewEncoder(cmd.OutOrStdout()).Encode(result)
+				if err := json.NewEncoder(cmd.OutOrStdout()).Encode(result); err != nil {
+					return fmt.Errorf("emit JSON: %w", err)
+				}
 			}
 			return fmt.Errorf("token is invalid")
 		}

@@ -19,7 +19,7 @@ func TestSecret_GoldenCases(t *testing.T) {
 		{"a", "****"},
 		{"abcd", "****"},
 		{"abcde", "***bcde"},
-		{"sk_live_1234567890abcdef", "***cdef"},
+		{"FAKEPREFIX_1234567890abcdef", "***cdef"},
 		{"webhook_secret_with_lots_of_entropy_xyz9", "***xyz9"},
 	}
 	for _, c := range cases {

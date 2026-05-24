@@ -55,7 +55,8 @@ func TestReadPasswordFromStdin(t *testing.T) {
 // TestReadPasswordFromStdin_HugePayloadAccepted confirms we do not
 // cap at the 4 KiB read-buffer size — a long passphrase or pasted
 // JWT-shaped credential must round-trip. bufio.Reader's buffer is the
-// READ chunk, not a total cap.
+// READ chunk, not a total cap. 16 KiB sits comfortably under the
+// 64 KiB hard cap below.
 func TestReadPasswordFromStdin_HugePayloadAccepted(t *testing.T) {
 	t.Parallel()
 	big := strings.Repeat("x", 16*1024) + "\n"
@@ -65,6 +66,43 @@ func TestReadPasswordFromStdin_HugePayloadAccepted(t *testing.T) {
 	}
 	if len(got) != 16*1024 {
 		t.Errorf("len = %d, want 16384", len(got))
+	}
+}
+
+// TestReadPasswordFromStdin_HardCapEnforced pins the 64 KiB hard
+// limit. A misdirected pipe (someone `cat`s a tarball into
+// `crewship init --password-stdin`) would otherwise force unbounded
+// memory growth before we noticed. We reject one byte over the cap
+// with a clear error rather than silently truncating — silent
+// truncation would let the caller construct a password the operator
+// did not intend.
+func TestReadPasswordFromStdin_HardCapEnforced(t *testing.T) {
+	t.Parallel()
+	tooBig := strings.Repeat("x", 64*1024+1)
+	_, err := readPasswordFromStdin(strings.NewReader(tooBig))
+	if err == nil {
+		t.Fatal("expected error for 64 KiB+1 input, got nil")
+	}
+	if !strings.Contains(err.Error(), "64-byte cap") &&
+		!strings.Contains(err.Error(), "65536-byte cap") &&
+		!strings.Contains(err.Error(), "exceeds") {
+		t.Errorf("err = %v, want cap-exceeded wording", err)
+	}
+}
+
+// TestReadPasswordFromStdin_ExactCapAccepted pins the boundary:
+// exactly 64 KiB is accepted (cap is exclusive of the +1 sentinel).
+// Catches an off-by-one regression that would reject a 65535-byte
+// passphrase + a trailing newline.
+func TestReadPasswordFromStdin_ExactCapAccepted(t *testing.T) {
+	t.Parallel()
+	atCap := strings.Repeat("x", 64*1024)
+	got, err := readPasswordFromStdin(strings.NewReader(atCap))
+	if err != nil {
+		t.Fatalf("unexpected error at exact cap: %v", err)
+	}
+	if len(got) != 64*1024 {
+		t.Errorf("len = %d, want 65536", len(got))
 	}
 }
 

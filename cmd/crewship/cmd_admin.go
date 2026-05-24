@@ -368,10 +368,18 @@ func runAdminInvalidateSessions(cmd *cobra.Command, _ []string) error {
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
+	// Filter on expires_at > now so the row count reported below
+	// matches what `crewship admin sessions list --active-only`
+	// considers active (revoked_at IS NULL AND expires_at > now).
+	// Already-expired rows are unreachable to clients anyway, so
+	// skipping them is purely a count/wording alignment, not a
+	// security regression.
 	res, err := db.ExecContext(ctx, `
 		UPDATE user_sessions
 		SET revoked_at = ?, revoked_reason = 'admin_invalidate'
-		WHERE user_id = ? AND revoked_at IS NULL`, now, userID)
+		WHERE user_id = ?
+		  AND revoked_at IS NULL
+		  AND datetime(expires_at) > datetime(?)`, now, userID, now)
 	if err != nil {
 		return fmt.Errorf("revoke sessions: %w", err)
 	}

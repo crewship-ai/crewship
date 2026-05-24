@@ -30,12 +30,18 @@ func readPasswordFromStdin(r io.Reader) (string, error) {
 	// bufio.Reader avoids a per-byte syscall hot path and gives us a
 	// generous default buffer. A "password" that overflows 64 KiB is
 	// almost certainly the wrong input (someone piped a tarball by
-	// mistake); io.ReadAll would still happily allocate megabytes
-	// before we noticed.
+	// mistake); io.LimitReader caps the alloc so a misdirected pipe
+	// can't force unbounded memory growth before we notice. The +1 on
+	// the limit lets us distinguish "exactly at cap" from "exceeded
+	// cap" without an extra read.
+	const maxPasswordBytes = 64 * 1024
 	buf := bufio.NewReaderSize(r, 4096)
-	data, err := io.ReadAll(buf)
+	data, err := io.ReadAll(io.LimitReader(buf, maxPasswordBytes+1))
 	if err != nil {
 		return "", fmt.Errorf("read password from stdin: %w", err)
+	}
+	if len(data) > maxPasswordBytes {
+		return "", fmt.Errorf("password from stdin exceeds %d-byte cap — refusing to treat input as a password", maxPasswordBytes)
 	}
 	// Strip exactly one trailing newline (LF or CRLF). Multiple
 	// trailing newlines might be intentional in a pathological case,
