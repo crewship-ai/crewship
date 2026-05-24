@@ -17,6 +17,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/term"
 
+	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/crewship-ai/crewship/internal/database"
 )
 
@@ -71,6 +72,8 @@ func init() {
 	adminResetPasswordCmd.Flags().String("password", "", "New password (leaks to shell history; prefer --password-stdin in CI)")
 	adminResetPasswordCmd.Flags().Bool("password-stdin", false, "Read new password from stdin (preferred for CI / scripts — avoids argv leak)")
 	_ = adminResetPasswordCmd.MarkFlagRequired("email")
+
+	adminListUsersCmd.Flags().Bool("locked-only", false, "Show only currently locked-out accounts (filter out healthy users)")
 
 	adminPromoteCmd.Flags().String("email", "", "Email of the user to promote (required)")
 	adminPromoteCmd.Flags().String("role", "", "Target role: OWNER | ADMIN | MANAGER (required)")
@@ -223,6 +226,8 @@ func runAdminResetPassword(cmd *cobra.Command, _ []string) error {
 }
 
 func runAdminListUsers(cmd *cobra.Command, _ []string) error {
+	lockedOnly, _ := cmd.Flags().GetBool("locked-only")
+
 	db, err := openAdminDB()
 	if err != nil {
 		return err
@@ -235,6 +240,7 @@ func runAdminListUsers(cmd *cobra.Command, _ []string) error {
 	rows, err := db.QueryContext(ctx, `
 		SELECT u.id, u.email, COALESCE(u.full_name, ''), u.created_at,
 		       COALESCE(u.locked_until, ''),
+		       COALESCE(u.failed_login_count, 0),
 		       COALESCE((
 		         SELECT GROUP_CONCAT(role || '@' || w.slug, ', ')
 		         FROM workspace_members wm
@@ -249,17 +255,23 @@ func runAdminListUsers(cmd *cobra.Command, _ []string) error {
 	defer rows.Close()
 
 	tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "EMAIL\tNAME\tCREATED\tLOCKED\tROLES")
+	fmt.Fprintln(tw, "EMAIL\tNAME\tCREATED\tLOCKED\tFAILS\tROLES")
 
-	count := 0
+	now := time.Now().UTC()
+	activeLockouts := 0
+	rendered := 0
 	for rows.Next() {
 		var id, email, name, created, locked, roles string
-		if err := rows.Scan(&id, &email, &name, &created, &locked, &roles); err != nil {
+		var failed int
+		if err := rows.Scan(&id, &email, &name, &created, &locked, &failed, &roles); err != nil {
 			return fmt.Errorf("scan user: %w", err)
 		}
-		lockedDisplay := "-"
-		if locked != "" {
-			lockedDisplay = locked
+		isActiveLockout, lockedDisplay := classifyLockoutStatus(locked, now)
+		if isActiveLockout {
+			activeLockouts++
+		}
+		if lockedOnly && !isActiveLockout {
+			continue
 		}
 		nameDisplay := name
 		if nameDisplay == "" {
@@ -269,8 +281,12 @@ func runAdminListUsers(cmd *cobra.Command, _ []string) error {
 		if rolesDisplay == "" {
 			rolesDisplay = "(no workspace)"
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", email, nameDisplay, created, lockedDisplay, rolesDisplay)
-		count++
+		failsDisplay := "-"
+		if failed > 0 {
+			failsDisplay = fmt.Sprintf("%d", failed)
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", email, nameDisplay, created, lockedDisplay, failsDisplay, rolesDisplay)
+		rendered++
 	}
 	if err := rows.Err(); err != nil {
 		return fmt.Errorf("iterate users: %w", err)
@@ -278,10 +294,63 @@ func runAdminListUsers(cmd *cobra.Command, _ []string) error {
 	if err := tw.Flush(); err != nil {
 		return err
 	}
-	if count == 0 {
-		fmt.Fprintln(cmd.OutOrStdout(), "(no users — run `crewship seed` or hit POST /api/v1/bootstrap)")
+	if rendered == 0 {
+		if lockedOnly {
+			fmt.Fprintln(cmd.OutOrStdout(), "(no currently locked-out users)")
+		} else {
+			fmt.Fprintln(cmd.OutOrStdout(), "(no users — run `crewship seed` or hit POST /api/v1/bootstrap)")
+		}
+	}
+	// Footer surfaces the lockout count even when not filtering, so an
+	// admin who runs `list-users` casually still notices the brute-force
+	// activity without needing to scan the LOCKED column visually.
+	if activeLockouts > 0 && !lockedOnly {
+		fmt.Fprintf(cmd.OutOrStdout(),
+			"\n%s%d account(s) currently locked out.%s Unlock with: crewship admin reset-password --email <email>\n",
+			cli.Yellow, activeLockouts, cli.Reset)
 	}
 	return nil
+}
+
+// classifyLockoutStatus inspects a `locked_until` cell from the users
+// table and decides whether the account is CURRENTLY locked (vs.
+// merely having a stale expired lockout still recorded). Returns:
+//
+//   - (true, "LOCKED until <ts>")     — locked_until is in the future
+//   - (false, "expired <ts>")          — locked_until is in the past
+//   - (false, "-")                     — locked_until is empty / null
+//   - (false, "<raw>")                 — locked_until is unparseable; raw
+//                                        passes through so the operator
+//                                        can still see what the DB holds
+//
+// Parse failure deliberately falls through to (false, raw) rather than
+// flagging as active — the alternative (claiming "currently locked")
+// would pressure the operator to reset-password on accounts whose
+// lockout timestamp is a server-side bug, not a real lockout.
+//
+// The function is pure (takes the raw string + a clock) so the test
+// can pin every branch without standing up a database.
+func classifyLockoutStatus(rawLockedUntil string, now time.Time) (bool, string) {
+	rawLockedUntil = strings.TrimSpace(rawLockedUntil)
+	if rawLockedUntil == "" {
+		return false, "-"
+	}
+	t, err := time.Parse(time.RFC3339, rawLockedUntil)
+	if err != nil {
+		// SQLite sometimes round-trips RFC3339 timestamps as
+		// "YYYY-MM-DD HH:MM:SS" (space separator). Try that as a
+		// secondary parse before giving up — same fallback the
+		// /forgot handler uses on the auth_recovery path.
+		t2, err2 := time.Parse("2006-01-02 15:04:05", rawLockedUntil)
+		if err2 != nil {
+			return false, rawLockedUntil
+		}
+		t = t2
+	}
+	if t.After(now) {
+		return true, "LOCKED until " + t.UTC().Format("2006-01-02 15:04")
+	}
+	return false, "expired " + t.UTC().Format("2006-01-02 15:04")
 }
 
 func runAdminPromote(cmd *cobra.Command, _ []string) error {
