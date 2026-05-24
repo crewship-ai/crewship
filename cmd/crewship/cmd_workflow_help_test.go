@@ -17,10 +17,20 @@ import (
 // a runtime panic in production.
 func TestWorkflowCreate_HelpDoesNotPanic(t *testing.T) {
 	// Help triggers the cobra flag-merge path that originally
-	// panicked. Capture output to avoid noise during tests.
+	// panicked. Capture output to avoid noise during tests, and
+	// snapshot the prior writers so a later test in this package
+	// doesn't inherit our buffer. workflowCreateCmd is package-
+	// global cobra state — SetOut/SetErr without restore bleeds
+	// across tests (CR finding on PR #585).
 	var buf bytes.Buffer
+	prevOut := workflowCreateCmd.OutOrStdout()
+	prevErr := workflowCreateCmd.ErrOrStderr()
 	workflowCreateCmd.SetOut(&buf)
 	workflowCreateCmd.SetErr(&buf)
+	t.Cleanup(func() {
+		workflowCreateCmd.SetOut(prevOut)
+		workflowCreateCmd.SetErr(prevErr)
+	})
 
 	defer func() {
 		if r := recover(); r != nil {
