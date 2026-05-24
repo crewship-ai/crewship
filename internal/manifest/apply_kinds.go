@@ -199,6 +199,65 @@ func (pb *planBuilder) planNewKinds(ctx context.Context, b *Bundle) error {
 		pb.appendKindItems(items)
 	}
 
+	// Phase 14.1: Crews (top-level, no nested-bundle shape). Must
+	// land before Agent/Integration so FK refs in agent/integration
+	// docs (`crew_slug:`) can resolve. Legacy bundle Crew (with
+	// nested agents/skills) is dispatched elsewhere via b.Documents.
+	for i := range b.Crews {
+		doc := &b.Crews[i]
+		remote, err := kinds.LookupCrewRemoteBySlug(ctx, c, doc.Metadata.Slug)
+		if err != nil {
+			return fmt.Errorf("crew %q: lookup remote: %w", doc.Metadata.Slug, err)
+		}
+		items, err := doc.Plan(ctx, c, remote)
+		if err != nil {
+			return fmt.Errorf("crew %q: plan: %w", doc.Metadata.Slug, err)
+		}
+		pb.appendKindItems(items)
+	}
+
+	// Phase 14.2: Agents (deps: Crew). Top-level kind only — agents
+	// nested inside a legacy Crew bundle still flow through
+	// b.Documents and the existing crew/workspace planner.
+	for i := range b.Agents {
+		doc := &b.Agents[i]
+		remote, err := kinds.LookupAgentRemoteBySlug(ctx, c, doc.Metadata.Slug)
+		if err != nil {
+			return fmt.Errorf("agent %q: lookup remote: %w", doc.Metadata.Slug, err)
+		}
+		items, err := doc.Plan(ctx, c, remote)
+		if err != nil {
+			return fmt.Errorf("agent %q: plan: %w", doc.Metadata.Slug, err)
+		}
+		pb.appendKindItems(items)
+	}
+
+	// Phase 14.3: Integrations (deps: Crew when spec.crew_slug set,
+	// otherwise workspace-scoped). LookupIntegrationRemoteBySlug
+	// takes the scope + crew_slug from the doc so a workspace-
+	// integration with the same slug as a crew-scoped one doesn't
+	// alias.
+	for i := range b.Integrations {
+		doc := &b.Integrations[i]
+		scope := doc.Spec.Scope
+		if scope == "" {
+			if doc.Spec.CrewSlug != "" {
+				scope = "crew"
+			} else {
+				scope = "workspace"
+			}
+		}
+		remote, err := kinds.LookupIntegrationRemoteBySlug(ctx, c, doc.Metadata.Slug, scope, doc.Spec.CrewSlug)
+		if err != nil {
+			return fmt.Errorf("integration %q: lookup remote: %w", doc.Metadata.Slug, err)
+		}
+		items, err := doc.Plan(ctx, c, remote)
+		if err != nil {
+			return fmt.Errorf("integration %q: plan: %w", doc.Metadata.Slug, err)
+		}
+		pb.appendKindItems(items)
+	}
+
 	// Phase 14.5: Issues (deps: Crew + optional Project / Agent / Labels).
 	// Crew-scoped — drift detection matches (crew_id, title) because
 	// the missions table has no slug column; the kind's
@@ -274,6 +333,15 @@ func validateAllKinds(b *Bundle, wsCtx internalapi.WorkspaceContext) error {
 	}
 	for i := range b.Skills {
 		check(b.Skills[i].Metadata.Slug, b.Skills[i].Validate(wsCtx))
+	}
+	for i := range b.Crews {
+		check(b.Crews[i].Metadata.Slug, b.Crews[i].Validate(wsCtx))
+	}
+	for i := range b.Agents {
+		check(b.Agents[i].Metadata.Slug, b.Agents[i].Validate(wsCtx))
+	}
+	for i := range b.Integrations {
+		check(b.Integrations[i].Metadata.Slug, b.Integrations[i].Validate(wsCtx))
 	}
 	for i := range b.Issues {
 		check(b.Issues[i].Metadata.Slug, b.Issues[i].Validate(wsCtx))

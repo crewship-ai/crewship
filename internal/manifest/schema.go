@@ -42,6 +42,8 @@ const APIVersion = "crewship/v1"
 // document types live under internal/manifest/kinds.
 const (
 	KindCrew             = "Crew"
+	KindAgent            = "Agent"
+	KindIntegration      = "Integration"
 	KindWorkspace        = "Workspace"
 	KindProject          = "Project"
 	KindLabel            = "Label"

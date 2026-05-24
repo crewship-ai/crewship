@@ -96,7 +96,10 @@ func (b *Bundle) isEmpty() bool {
 		len(b.Connectors) == 0 &&
 		len(b.Hooks) == 0 &&
 		len(b.Skills) == 0 &&
-		len(b.Issues) == 0
+		len(b.Issues) == 0 &&
+		len(b.Crews) == 0 &&
+		len(b.Agents) == 0 &&
+		len(b.Integrations) == 0
 }
 
 type Bundle struct {
@@ -131,6 +134,24 @@ type Bundle struct {
 	// kind plugs into the SPEC-2 dispatcher and survives apply
 	// without crossing through the legacy bundle parser.
 	Skills []kinds.SkillDocument
+
+	// Crews collected from top-level `kind: Crew` documents that do
+	// NOT carry a nested `spec.agents` (or skills/credentials/
+	// mcp_servers) block. Those still decode into Documents above as
+	// the legacy bundle shape. Disambiguation lives in the parse
+	// switch via a peek-at-spec probe — keeps backwards compat
+	// without bumping apiVersion.
+	Crews []kinds.CrewDocument
+
+	// Agents authored via `kind: Agent` (workspace-scoped top-level).
+	// Pure addition — agents previously only existed nested under a
+	// Crew bundle, so there's no legacy conflict.
+	Agents []kinds.AgentDocument
+
+	// Integrations authored via `kind: Integration` (workspace- or
+	// crew-scoped depending on spec.crew_slug). Pure addition for
+	// the same reason as Agents.
+	Integrations []kinds.IntegrationDocument
 
 	// Issues are crew-scoped tracker items authored via `kind: Issue`.
 	// Crew-scoped because the missions table is keyed by (crew_id,
@@ -216,11 +237,40 @@ func Load(data []byte) (*Bundle, error) {
 
 		switch head.Kind {
 		case KindCrew:
-			var doc Document
-			if err := raw.Decode(&doc); err != nil {
-				return nil, fmt.Errorf("decode Crew document: %w", err)
+			// Disambiguate legacy bundle (nested agents/skills/
+			// credentials/mcp_servers under spec) from the new top-
+			// level kind: Crew (just crew-row fields). Structural
+			// sniffing keeps existing YAML files working without
+			// requiring an apiVersion bump.
+			isLegacyBundle, err := crewSpecHasNestedSubresources(&raw)
+			if err != nil {
+				return nil, fmt.Errorf("probe Crew document: %w", err)
 			}
-			out.Documents = append(out.Documents, doc)
+			if isLegacyBundle {
+				var doc Document
+				if err := raw.Decode(&doc); err != nil {
+					return nil, fmt.Errorf("decode Crew bundle document: %w", err)
+				}
+				out.Documents = append(out.Documents, doc)
+			} else {
+				var doc kinds.CrewDocument
+				if err := raw.Decode(&doc); err != nil {
+					return nil, fmt.Errorf("decode top-level Crew document: %w", err)
+				}
+				out.Crews = append(out.Crews, doc)
+			}
+		case KindAgent:
+			var doc kinds.AgentDocument
+			if err := raw.Decode(&doc); err != nil {
+				return nil, fmt.Errorf("decode Agent document: %w", err)
+			}
+			out.Agents = append(out.Agents, doc)
+		case KindIntegration:
+			var doc kinds.IntegrationDocument
+			if err := raw.Decode(&doc); err != nil {
+				return nil, fmt.Errorf("decode Integration document: %w", err)
+			}
+			out.Integrations = append(out.Integrations, doc)
 		case KindWorkspace:
 			var doc WorkspaceDocument
 			if err := raw.Decode(&doc); err != nil {
@@ -328,9 +378,9 @@ func Load(data []byte) (*Bundle, error) {
 			}
 			out.Issues = append(out.Issues, doc)
 		case "":
-			return nil, errors.New("missing kind: (expected one of: Crew, Workspace, Project, Label, Milestone, WorkflowTemplate, TriageRule, RecurringIssue, SavedView, Routine, FeatureFlag, InstanceSetting, Recipe, CrewTemplate, Connector, Hook, Skill, Issue)")
+			return nil, errors.New("missing kind: (expected one of: Crew, Agent, Integration, Workspace, Project, Label, Milestone, WorkflowTemplate, TriageRule, RecurringIssue, SavedView, Routine, FeatureFlag, InstanceSetting, Recipe, CrewTemplate, Connector, Hook, Skill, Issue)")
 		default:
-			return nil, fmt.Errorf("unsupported kind %q (expected one of: Crew, Workspace, Project, Label, Milestone, WorkflowTemplate, TriageRule, RecurringIssue, SavedView, Routine, FeatureFlag, InstanceSetting, Recipe, CrewTemplate, Connector, Hook, Skill, Issue)", head.Kind)
+			return nil, fmt.Errorf("unsupported kind %q (expected one of: Crew, Agent, Integration, Workspace, Project, Label, Milestone, WorkflowTemplate, TriageRule, RecurringIssue, SavedView, Routine, FeatureFlag, InstanceSetting, Recipe, CrewTemplate, Connector, Hook, Skill, Issue)", head.Kind)
 		}
 	}
 
@@ -602,4 +652,59 @@ func safeJoin(base, rel string) (string, error) {
 		return "", fmt.Errorf("path escapes manifest directory: %q", rel)
 	}
 	return full, nil
+}
+
+// crewSpecHasNestedSubresources peeks at a `kind: Crew` document's
+// spec block to decide whether it's the legacy bundle shape (which
+// nests agents / skills / credentials / mcp_servers under spec) or
+// the new top-level CrewDocument shape (crew-row fields only).
+//
+// Returns true if ANY of the four legacy sub-resource keys is
+// present at all (including `agents: []`) — an explicit empty list
+// is treated as legacy intent: the operator started a bundle and
+// just hasn't populated it yet.
+//
+// Walks the yaml.Node tree directly rather than decoding into a
+// struct so we (a) don't reject unknown sibling keys the way a
+// strict struct decode would and (b) treat sequence/scalar values
+// uniformly — `agents: []` and `agents: [foo]` both signal "this
+// is a bundle".
+func crewSpecHasNestedSubresources(raw *yaml.Node) (bool, error) {
+	root := raw
+	if root.Kind == yaml.DocumentNode {
+		if len(root.Content) == 0 {
+			return false, nil
+		}
+		root = root.Content[0]
+	}
+	if root.Kind != yaml.MappingNode {
+		return false, fmt.Errorf("expected mapping at document root, got kind %d", root.Kind)
+	}
+	specNode := mappingValueByKey(root, "spec")
+	if specNode == nil || specNode.Kind != yaml.MappingNode {
+		return false, nil
+	}
+	for _, key := range []string{"agents", "skills", "credentials", "mcp_servers"} {
+		if mappingValueByKey(specNode, key) != nil {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// mappingValueByKey returns the value node for the given scalar key
+// in a YAML mapping node, or nil if absent. Mapping nodes store
+// key/value pairs as a flat slice of length 2N — pairs at indices
+// (0,1), (2,3), etc.
+func mappingValueByKey(m *yaml.Node, key string) *yaml.Node {
+	if m == nil || m.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		k := m.Content[i]
+		if k.Kind == yaml.ScalarNode && k.Value == key {
+			return m.Content[i+1]
+		}
+	}
+	return nil
 }
