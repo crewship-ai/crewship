@@ -4,7 +4,6 @@ package main
 
 import (
 	"fmt"
-	"net"
 	"net/url"
 	"os"
 	"runtime"
@@ -109,34 +108,6 @@ func checkCLIConfigServerScheme(cfg *cli.CLIConfig) checkResult {
 			detail: fmt.Sprintf("unsupported scheme %q (want http or https)", u.Scheme),
 		}
 	}
-}
-
-// isLoopbackHost returns true for hostnames the OS routes locally.
-// We accept literal IPs (127.0.0.1 / ::1) AND the conventional
-// "localhost" name, because `crewship login --server http://localhost:8080`
-// is the documented dev workflow and "localhost" almost always resolves
-// to a loopback address. We do NOT do a DNS lookup — a hostile resolver
-// pointing "localhost" at an external IP is a bigger problem than this
-// check can catch, and the lookup would silently fail on air-gapped CI.
-//
-// Empty host is NOT loopback. An empty value means the caller couldn't
-// parse a hostname from the URL ("http://:8080", "http:///path", etc.)
-// — treating it as loopback would let a misconfigured server: pass the
-// security audit silently. Callers should reject empty host BEFORE
-// asking this function.
-func isLoopbackHost(host string) bool {
-	host = strings.ToLower(strings.TrimSpace(host))
-	if host == "" {
-		return false
-	}
-	if host == "localhost" {
-		return true
-	}
-	ip := net.ParseIP(host)
-	if ip == nil {
-		return false
-	}
-	return ip.IsLoopback()
 }
 
 // checkCLIConfigPerms verifies cli-config.yaml exists at the default

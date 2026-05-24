@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -108,7 +107,7 @@ func preflightServerURL(out io.Writer, serverURL string) error {
 		return nil
 	}
 	// HTTP: loopback is fine (dev workflow), non-loopback gets the warning.
-	if loginIsLoopback(u.Hostname()) {
+	if isLoopbackHost(u.Hostname()) {
 		return nil
 	}
 	fmt.Fprintf(out, "%s⚠ %s is reached over plaintext HTTP%s — credentials are about to be sent in the clear.\n",
@@ -121,24 +120,6 @@ func preflightServerURL(out io.Writer, serverURL string) error {
 	// enough not to annoy the scripted path; the user can still abort.
 	time.Sleep(1 * time.Second)
 	return nil
-}
-
-// loginIsLoopback mirrors isLoopbackHost from cmd_doctor_security.go.
-// Kept local because that file has a //go:build !clionly tag we don't
-// want to inherit on the login path (logging in is a CLI-only path).
-func loginIsLoopback(host string) bool {
-	host = strings.ToLower(strings.TrimSpace(host))
-	if host == "" {
-		return false
-	}
-	if host == "localhost" {
-		return true
-	}
-	ip := net.ParseIP(host)
-	if ip == nil {
-		return false
-	}
-	return ip.IsLoopback()
 }
 
 var logoutCmd = &cobra.Command{

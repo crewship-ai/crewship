@@ -146,31 +146,11 @@ func TestPreflightServerURL(t *testing.T) {
 	}
 }
 
-func TestLoginIsLoopback(t *testing.T) {
-	t.Parallel()
-	// Lightweight mirror of the doctor isLoopbackHost matrix —
-	// keeps the two implementations from drifting silently.
-	cases := []struct {
-		host string
-		want bool
-	}{
-		{"", false}, // empty must NOT be loopback
-		{"localhost", true},
-		{"LocalHost", true},
-		{"127.0.0.1", true},
-		{"127.1.2.3", true},
-		{"::1", true},
-		{"crewship.example.com", false},
-		{"192.168.1.1", false},
-		{"::ffff:127.0.0.1", true},
-	}
-	for _, tc := range cases {
-		tc := tc
-		t.Run(tc.host, func(t *testing.T) {
-			t.Parallel()
-			if got := loginIsLoopback(tc.host); got != tc.want {
-				t.Errorf("loginIsLoopback(%q) = %v, want %v", tc.host, got, tc.want)
-			}
-		})
-	}
-}
+// The canonical isLoopbackHost matrix lives in
+// cmd_doctor_security_test.go:TestIsLoopbackHost — that test exercises
+// the full set including IPv6 loopback variants. Removing the
+// duplicate that used to mirror it here for the now-deleted
+// loginIsLoopback alias; the preflight implicitly exercises the
+// same helper through TestPreflightServerURL above, so a regression
+// in the loopback classification would still surface in this file's
+// "http localhost → silent pass" assertion.
