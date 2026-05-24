@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -350,7 +351,20 @@ Examples:
 var tokenValidateCmd = &cobra.Command{
 	Use:   "validate",
 	Short: "Validate the current CLI token",
+	Long: `Confirm the current CLI token is valid against the configured server.
+
+Exit codes (matter for CI):
+  0  token is valid
+  1  token is invalid / expired
+  2  network or server error (couldn't reach the server)
+
+With --json, emits {"valid": bool, "user_id", "email", "expires_at"}
+to stdout instead of the human-readable two-liner. The exit code
+contract is unchanged so a CI script can if-branch on the command's
+exit status without re-parsing the output.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		jsonOut, _ := cmd.Flags().GetBool("json")
+
 		if err := requireAuth(); err != nil {
 			return err
 		}
@@ -362,6 +376,9 @@ var tokenValidateCmd = &cobra.Command{
 			return err
 		}
 		if resp.StatusCode == 401 || resp.StatusCode == 403 {
+			if jsonOut {
+				_ = json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{"valid": false})
+			}
 			return fmt.Errorf("token is invalid or expired")
 		}
 		if err := cli.CheckError(resp); err != nil {
@@ -378,14 +395,30 @@ var tokenValidateCmd = &cobra.Command{
 			return err
 		}
 
-		if result.Valid {
-			cli.PrintSuccess("Token is valid.")
-			fmt.Printf("  User: %s\n", result.Email)
-			if result.ExpiresAt != "" {
-				fmt.Printf("  Expires: %s\n", result.ExpiresAt)
+		if !result.Valid {
+			if jsonOut {
+				_ = json.NewEncoder(cmd.OutOrStdout()).Encode(result)
 			}
-		} else {
 			return fmt.Errorf("token is invalid")
+		}
+
+		if jsonOut {
+			// Emit the full validate payload so CI can drive
+			// expiry-aware logic without a follow-up call (e.g.
+			// "rotate the token if expires_at is within 7 days").
+			// stdout is reserved for the JSON; the human two-liner
+			// goes to stderr in JSON mode so a `2>/dev/null` keeps
+			// the structured output clean for jq consumers.
+			if err := json.NewEncoder(cmd.OutOrStdout()).Encode(result); err != nil {
+				return fmt.Errorf("encode validate output: %w", err)
+			}
+			return nil
+		}
+
+		cli.PrintSuccess("Token is valid.")
+		fmt.Printf("  User: %s\n", result.Email)
+		if result.ExpiresAt != "" {
+			fmt.Printf("  Expires: %s\n", result.ExpiresAt)
 		}
 		return nil
 	},
@@ -394,6 +427,7 @@ var tokenValidateCmd = &cobra.Command{
 func init() {
 	tokenRotateCmd.Flags().String("name", "", "Override new token name (default: '<old name> (rotated YYYY-MM-DD)')")
 	tokenListCmd.Flags().Int("warn-stale-days", 90, "Flag tokens older / unused longer than N days (0 disables)")
+	tokenValidateCmd.Flags().Bool("json", false, "Emit machine-readable JSON to stdout instead of human-readable text")
 
 	tokenCmd.AddCommand(tokenListCmd)
 	tokenCmd.AddCommand(tokenCreateCmd)
