@@ -83,10 +83,12 @@ or Settings → Pair CLI):
 //   - error                   → URL is structurally broken (block login)
 //
 // The classification mirrors checkCLIConfigServerScheme in
-// cmd_doctor_security.go; the two intentionally don't share a helper
-// because that file uses //go:build !clionly and cmd_login.go is
-// build-tag-free (CLI-only and full builds both need login). Ten
-// duplicated lines beats the build-tag reshuffle.
+// cmd_doctor_security.go; the shared loopback primitive (
+// isLoopbackHost) lives in cmd_url_classify.go (build-tag-free).
+// The top-level classification function isn't shared yet because
+// the doctor version returns a checkResult and the login version
+// has different sleep + warning UX — extracting the common shape
+// would obscure both call sites without saving meaningful LoC.
 func preflightServerURL(out io.Writer, serverURL string) error {
 	raw := strings.TrimSpace(serverURL)
 	if raw == "" {
