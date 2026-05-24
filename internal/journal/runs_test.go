@@ -173,11 +173,20 @@ func TestRunStats(t *testing.T) {
 	w := NewWriter(db, quietLogger(), WriterOptions{FlushSize: 1})
 	defer w.Close()
 
+	// All four entries land at the SAME instant (`now`) instead of the
+	// previous `now - 30 min / 10 min / 5 min / 1 min` fan-out. The
+	// negative offsets used to cross midnight when CI happened to run
+	// during the first half-hour of UTC day, dropping r1 onto the
+	// previous day and making this test fail with "today: got 3 want 4".
+	// The assertions only care about per-day bucket counts, not the
+	// ordering of the four entries, so anchoring them to the same
+	// timestamp is the minimal fix that preserves the test's intent
+	// while making it midnight-boundary safe.
 	now := time.Now().UTC()
-	emitRun(t, w, "ws_test", "agent_a", "r1", "COMPLETED", "USER", now.Add(-30*time.Minute)) // today
-	emitRun(t, w, "ws_test", "agent_a", "r2", "FAILED", "USER", now.Add(-10*time.Minute))    // today, failed
-	emitRun(t, w, "ws_test", "agent_a", "r3", "TIMEOUT", "USER", now.Add(-5*time.Minute))    // today, timeout (counts as failed)
-	emitRun(t, w, "ws_test", "agent_a", "r4", "", "USER", now.Add(-1*time.Minute))           // running
+	emitRun(t, w, "ws_test", "agent_a", "r1", "COMPLETED", "USER", now)
+	emitRun(t, w, "ws_test", "agent_a", "r2", "FAILED", "USER", now)
+	emitRun(t, w, "ws_test", "agent_a", "r3", "TIMEOUT", "USER", now) // counts as failed too
+	emitRun(t, w, "ws_test", "agent_a", "r4", "", "USER", now)        // running (no terminal entry emitted)
 	_ = w.Flush(context.Background())
 	time.Sleep(50 * time.Millisecond)
 

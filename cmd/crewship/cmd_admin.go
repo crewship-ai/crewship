@@ -320,8 +320,8 @@ func runAdminListUsers(cmd *cobra.Command, _ []string) error {
 //   - (false, "expired <ts>")          — locked_until is in the past
 //   - (false, "-")                     — locked_until is empty / null
 //   - (false, "<raw>")                 — locked_until is unparseable; raw
-//                                        passes through so the operator
-//                                        can still see what the DB holds
+//     passes through so the operator
+//     can still see what the DB holds
 //
 // Parse failure deliberately falls through to (false, raw) rather than
 // flagging as active — the alternative (claiming "currently locked")
