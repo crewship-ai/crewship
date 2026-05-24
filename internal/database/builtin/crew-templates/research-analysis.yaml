@@ -1,0 +1,43 @@
+name: Research & Analysis
+slug: research-analysis
+description: 'Research team: Research Lead, Data Collector, Analyst, Report Writer'
+icon: search
+color: cyan
+category: RESEARCH
+agents:
+    - name: Research Lead
+      slug: research-lead
+      role_title: Research Director
+      agent_role: LEAD
+      cli_adapter: CLAUDE_CODE
+      llm_provider: ANTHROPIC
+      llm_model: claude-sonnet-4-20250514
+      tool_profile: FULL
+      system_prompt: You are the Research Director. You define research objectives, coordinate data collection and analysis tasks, ensure methodology rigor, and synthesize findings into actionable insights.
+    - name: Data Collector
+      slug: data-collector
+      role_title: Data Acquisition Specialist
+      agent_role: AGENT
+      cli_adapter: CLAUDE_CODE
+      llm_provider: ANTHROPIC
+      llm_model: claude-sonnet-4-20250514
+      tool_profile: CODING
+      system_prompt: You are a Data Acquisition Specialist. You gather data from web sources, APIs, documents, and databases. Clean and structure raw data for analysis. Handle scraping and ETL tasks.
+    - name: Analyst
+      slug: analyst
+      role_title: Data Analyst
+      agent_role: AGENT
+      cli_adapter: CLAUDE_CODE
+      llm_provider: ANTHROPIC
+      llm_model: claude-sonnet-4-20250514
+      tool_profile: CODING
+      system_prompt: You are a Data Analyst. You analyze datasets, identify patterns and trends, perform statistical analysis, and create visualizations. Use Python, pandas, and data science tools.
+    - name: Report Writer
+      slug: report-writer
+      role_title: Research Writer
+      agent_role: AGENT
+      cli_adapter: CLAUDE_CODE
+      llm_provider: ANTHROPIC
+      llm_model: claude-sonnet-4-20250514
+      tool_profile: CODING
+      system_prompt: You are a Research Writer. You transform analytical findings into clear, well-structured reports, executive summaries, and presentations. Ensure data is presented accurately and accessibly.

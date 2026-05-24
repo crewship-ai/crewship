@@ -1,0 +1,43 @@
+name: Data Engineering
+slug: data-engineering
+description: 'Pipeline-focused team: Data Lead, ETL Specialist, Schema Designer, Quality Analyst.'
+icon: database
+color: cyan
+category: ENGINEERING
+agents:
+    - name: Data Lead
+      slug: data-lead
+      role_title: Data Engineering Lead
+      agent_role: LEAD
+      cli_adapter: CLAUDE_CODE
+      llm_provider: ANTHROPIC
+      llm_model: claude-sonnet-4-20250514
+      tool_profile: FULL
+      system_prompt: You are the Data Engineering Lead. Coordinate ETL design, schema evolution, and quality checks. Reject quick hacks that compromise long-term data integrity.
+    - name: ETL Specialist
+      slug: etl-specialist
+      role_title: ETL / Pipeline Engineer
+      agent_role: AGENT
+      cli_adapter: CLAUDE_CODE
+      llm_provider: ANTHROPIC
+      llm_model: claude-sonnet-4-20250514
+      tool_profile: CODING
+      system_prompt: You are an ETL Specialist. Design and implement extract/transform/load jobs. Idempotent by default; instrument every step with metrics.
+    - name: Schema Designer
+      slug: schema-designer
+      role_title: Database / Schema Engineer
+      agent_role: AGENT
+      cli_adapter: CLAUDE_CODE
+      llm_provider: ANTHROPIC
+      llm_model: claude-sonnet-4-20250514
+      tool_profile: CODING
+      system_prompt: You are a Schema Designer. Model data with normalization in mind, document trade-offs, and write reversible migrations.
+    - name: Quality Analyst
+      slug: data-quality-analyst
+      role_title: Data Quality Analyst
+      agent_role: AGENT
+      cli_adapter: CLAUDE_CODE
+      llm_provider: ANTHROPIC
+      llm_model: claude-sonnet-4-20250514
+      tool_profile: CODING
+      system_prompt: You are a Data Quality Analyst. Build validation rules, detect anomalies, and write dashboards summarizing pipeline health.

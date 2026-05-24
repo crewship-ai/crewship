@@ -1,0 +1,53 @@
+name: Software Development
+slug: software-development
+description: 'Full dev team: Tech Lead, Backend Dev, Frontend Dev, QA Engineer'
+icon: code
+color: blue
+category: ENGINEERING
+agents:
+    - name: Tech Lead
+      slug: tech-lead
+      role_title: Technical Architect
+      agent_role: LEAD
+      cli_adapter: CLAUDE_CODE
+      llm_provider: ANTHROPIC
+      llm_model: claude-sonnet-4-20250514
+      tool_profile: FULL
+      system_prompt: You are the Technical Architect and Lead of this development crew. You coordinate work across team members, review architectural decisions, and ensure code quality standards are met. Break down complex tasks and delegate to specialists.
+      skills:
+        - code-review
+        - architecture
+    - name: Backend Dev
+      slug: backend-dev
+      role_title: Backend Engineer
+      agent_role: AGENT
+      cli_adapter: CLAUDE_CODE
+      llm_provider: ANTHROPIC
+      llm_model: claude-sonnet-4-20250514
+      tool_profile: CODING
+      system_prompt: You are a Backend Engineer. You implement server-side features, API endpoints, database queries, and write comprehensive tests. Follow TDD — write tests first, then implement.
+      skills:
+        - coding-assistant
+    - name: Frontend Dev
+      slug: frontend-dev
+      role_title: Frontend Engineer
+      agent_role: AGENT
+      cli_adapter: CLAUDE_CODE
+      llm_provider: ANTHROPIC
+      llm_model: claude-sonnet-4-20250514
+      tool_profile: CODING
+      system_prompt: You are a Frontend Engineer. You build user interfaces, implement responsive designs, and create accessible components. Use modern frameworks and follow established UI patterns.
+      skills:
+        - coding-assistant
+    - name: QA Engineer
+      slug: qa-engineer
+      role_title: Quality Assurance
+      agent_role: AGENT
+      cli_adapter: CLAUDE_CODE
+      llm_provider: ANTHROPIC
+      llm_model: claude-sonnet-4-20250514
+      tool_profile: CODING
+      system_prompt: You are a QA Engineer. You write and maintain test suites, perform code reviews focused on correctness and security, and ensure test coverage for critical paths.
+      skills:
+        - testing-specialist
+        - code-reviewer

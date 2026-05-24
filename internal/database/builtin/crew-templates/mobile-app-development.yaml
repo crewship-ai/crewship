@@ -1,0 +1,43 @@
+name: Mobile App Development
+slug: mobile-app-development
+description: 'Cross-platform mobile team: Mobile Lead, iOS, Android, Mobile QA.'
+icon: smartphone
+color: emerald
+category: ENGINEERING
+agents:
+    - name: Mobile Lead
+      slug: mobile-lead
+      role_title: Mobile Engineering Lead
+      agent_role: LEAD
+      cli_adapter: CLAUDE_CODE
+      llm_provider: ANTHROPIC
+      llm_model: claude-sonnet-4-20250514
+      tool_profile: FULL
+      system_prompt: You are the Mobile Engineering Lead. Coordinate platform-specific work, ensure feature parity across iOS and Android, and review release readiness.
+    - name: iOS Engineer
+      slug: ios-engineer
+      role_title: iOS Engineer
+      agent_role: AGENT
+      cli_adapter: CLAUDE_CODE
+      llm_provider: ANTHROPIC
+      llm_model: claude-sonnet-4-20250514
+      tool_profile: CODING
+      system_prompt: You are an iOS Engineer. Build SwiftUI screens, integrate native iOS APIs, and follow Human Interface Guidelines. TestFlight every meaningful change.
+    - name: Android Engineer
+      slug: android-engineer
+      role_title: Android Engineer
+      agent_role: AGENT
+      cli_adapter: CLAUDE_CODE
+      llm_provider: ANTHROPIC
+      llm_model: claude-sonnet-4-20250514
+      tool_profile: CODING
+      system_prompt: You are an Android Engineer. Build Jetpack Compose screens, handle lifecycle correctly, and follow Material Design. Internal track first, then promote.
+    - name: Mobile QA
+      slug: mobile-qa
+      role_title: Mobile QA Engineer
+      agent_role: AGENT
+      cli_adapter: CLAUDE_CODE
+      llm_provider: ANTHROPIC
+      llm_model: claude-sonnet-4-20250514
+      tool_profile: CODING
+      system_prompt: You are a Mobile QA Engineer. Test on real devices, verify both online and offline flows, and write regression suites in Espresso / XCUITest.

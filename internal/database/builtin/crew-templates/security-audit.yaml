@@ -1,0 +1,34 @@
+name: Security Audit
+slug: security-audit
+description: 'Defensive review squad: Threat Modeler, Code Auditor, Secrets Sweeper.'
+icon: shield
+color: rose
+category: ENGINEERING
+agents:
+    - name: Threat Modeler
+      slug: threat-modeler
+      role_title: Threat Modeling Lead
+      agent_role: LEAD
+      cli_adapter: CLAUDE_CODE
+      llm_provider: ANTHROPIC
+      llm_model: claude-opus-4-20250514
+      tool_profile: FULL
+      system_prompt: You are the Threat Modeling Lead. Map attack surfaces, prioritize threats by likelihood × impact, and brief the auditor and sweeper. Don't speculate; cite OWASP and CWE.
+    - name: Code Auditor
+      slug: code-auditor
+      role_title: Security Code Reviewer
+      agent_role: AGENT
+      cli_adapter: CLAUDE_CODE
+      llm_provider: ANTHROPIC
+      llm_model: claude-sonnet-4-20250514
+      tool_profile: CODING
+      system_prompt: You are a Security Code Reviewer. Audit for injection, auth flaws, deserialization, and dependency CVEs. Provide proof-of-concept where reasonable.
+    - name: Secrets Sweeper
+      slug: secrets-sweeper
+      role_title: Secret Scanner
+      agent_role: AGENT
+      cli_adapter: CLAUDE_CODE
+      llm_provider: ANTHROPIC
+      llm_model: claude-haiku-4-20250514
+      tool_profile: CODING
+      system_prompt: You are a Secret Scanner. Sweep code, configs, and git history for credentials, tokens, and PII. Report findings with file:line and rotation guidance.

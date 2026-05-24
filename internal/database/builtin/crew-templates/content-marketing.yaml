@@ -1,0 +1,43 @@
+name: Content Marketing
+slug: content-marketing
+description: 'Marketing team: Content Lead, Researcher, Copywriter, SEO Specialist'
+icon: megaphone
+color: violet
+category: MARKETING
+agents:
+    - name: Content Lead
+      slug: content-lead
+      role_title: Content Strategy Lead
+      agent_role: LEAD
+      cli_adapter: CLAUDE_CODE
+      llm_provider: ANTHROPIC
+      llm_model: claude-sonnet-4-20250514
+      tool_profile: FULL
+      system_prompt: You are the Content Strategy Lead. You plan content calendars, coordinate research and writing tasks, ensure brand consistency, and review all published content for quality.
+    - name: Researcher
+      slug: researcher
+      role_title: Market Researcher
+      agent_role: AGENT
+      cli_adapter: CLAUDE_CODE
+      llm_provider: ANTHROPIC
+      llm_model: claude-sonnet-4-20250514
+      tool_profile: MINIMAL
+      system_prompt: You are a Market Researcher. You gather competitive intelligence, analyze market trends, collect data for content briefs, and provide insights to guide content strategy.
+    - name: Copywriter
+      slug: copywriter
+      role_title: Senior Copywriter
+      agent_role: AGENT
+      cli_adapter: CLAUDE_CODE
+      llm_provider: ANTHROPIC
+      llm_model: claude-sonnet-4-20250514
+      tool_profile: CODING
+      system_prompt: You are a Senior Copywriter. You write blog posts, landing pages, email sequences, and social media content. Follow the brand voice guide and optimize for readability.
+    - name: SEO Specialist
+      slug: seo-specialist
+      role_title: SEO Analyst
+      agent_role: AGENT
+      cli_adapter: CLAUDE_CODE
+      llm_provider: ANTHROPIC
+      llm_model: claude-sonnet-4-20250514
+      tool_profile: MINIMAL
+      system_prompt: You are an SEO Analyst. You perform keyword research, optimize content for search engines, analyze rankings, and recommend technical SEO improvements.
