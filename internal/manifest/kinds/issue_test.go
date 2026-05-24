@@ -175,17 +175,6 @@ func (f *issueFakeClient) findCall(method, path string) *issueFakeCall {
 	return nil
 }
 
-// countCalls returns how many recorded calls match method+path.
-func (f *issueFakeClient) countCalls(method, path string) int {
-	n := 0
-	for _, c := range f.calls {
-		if c.Method == method && c.Path == path {
-			n++
-		}
-	}
-	return n
-}
-
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 func issueSampleDoc() *IssueDocument {

@@ -178,16 +178,6 @@ func (f *integrationFakeClient) findCall(method, path string) *integrationFakeCa
 	return nil
 }
 
-func (f *integrationFakeClient) countCalls(method, pathPrefix string) int {
-	n := 0
-	for _, c := range f.calls {
-		if c.Method == method && strings.HasPrefix(c.Path, pathPrefix) {
-			n++
-		}
-	}
-	return n
-}
-
 // ── Sample documents ────────────────────────────────────────────────────────
 
 // integrationSampleWorkspaceDoc returns a happy-path workspace-scoped
