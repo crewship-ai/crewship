@@ -199,6 +199,29 @@ func (pb *planBuilder) planNewKinds(ctx context.Context, b *Bundle) error {
 		pb.appendKindItems(items)
 	}
 
+	// Phase 14.5: Issues (deps: Crew + optional Project / Agent / Labels).
+	// Crew-scoped — drift detection matches (crew_id, title) because
+	// the missions table has no slug column; the kind's
+	// LookupIssueRemoteBySlug consumes the resolved title here.
+	// Title fallback (spec.title || metadata.name) is inlined to keep
+	// the kind's resolvedTitle helper unexported.
+	for i := range b.Issues {
+		doc := &b.Issues[i]
+		title := doc.Spec.Title
+		if title == "" {
+			title = doc.Metadata.Name
+		}
+		remote, err := kinds.LookupIssueRemoteBySlug(ctx, c, doc.Metadata.Slug, doc.Spec.CrewSlug, title)
+		if err != nil {
+			return fmt.Errorf("issue %q: lookup remote: %w", doc.Metadata.Slug, err)
+		}
+		items, err := doc.Plan(ctx, c, remote)
+		if err != nil {
+			return fmt.Errorf("issue %q: plan: %w", doc.Metadata.Slug, err)
+		}
+		pb.appendKindItems(items)
+	}
+
 	// Phase 15: TriageRules (deps: Projects, Labels, Crews)
 	for i := range b.TriageRules {
 		doc := &b.TriageRules[i]
@@ -251,6 +274,9 @@ func validateAllKinds(b *Bundle, wsCtx internalapi.WorkspaceContext) error {
 	}
 	for i := range b.Skills {
 		check(b.Skills[i].Metadata.Slug, b.Skills[i].Validate(wsCtx))
+	}
+	for i := range b.Issues {
+		check(b.Issues[i].Metadata.Slug, b.Issues[i].Validate(wsCtx))
 	}
 	for i := range b.Milestones {
 		check(b.Milestones[i].Metadata.Slug, b.Milestones[i].Validate(wsCtx))

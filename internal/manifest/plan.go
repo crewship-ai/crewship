@@ -227,6 +227,7 @@ func kindOrder(kind string, action Action) int {
 		"Schedule":         19, // nested under Routine
 		"Webhook":          19,
 		"RecurringIssue":   20, // depends on Project + Label + Crew
+		"Issue":            20, // depends on Crew + optional Project / Agent / Labels
 		"TriageRule":       21, // depends on Project + Label + Crew
 		"SavedView":        22, // depends on Label + Project
 		"Hook":             23, // toggles existing rows

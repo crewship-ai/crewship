@@ -95,7 +95,8 @@ func (b *Bundle) isEmpty() bool {
 		len(b.CrewTemplates) == 0 &&
 		len(b.Connectors) == 0 &&
 		len(b.Hooks) == 0 &&
-		len(b.Skills) == 0
+		len(b.Skills) == 0 &&
+		len(b.Issues) == 0
 }
 
 type Bundle struct {
@@ -130,6 +131,16 @@ type Bundle struct {
 	// kind plugs into the SPEC-2 dispatcher and survives apply
 	// without crossing through the legacy bundle parser.
 	Skills []kinds.SkillDocument
+
+	// Issues are crew-scoped tracker items authored via `kind: Issue`.
+	// Crew-scoped because the missions table is keyed by (crew_id,
+	// identifier) — the apply pipeline resolves crew_slug → crew_id
+	// against either the legacy CrewDocument bundle (b.Documents) or
+	// the future top-level Crew kind. FK validation against declared
+	// sibling crews happens in IssueDocument.Validate via
+	// wsCtx.HasCrew, with the matching SlugLookup populated by
+	// buildKindWorkspaceContext from the legacy bundle.
+	Issues []kinds.IssueDocument
 }
 
 // LoadFile reads a manifest file and returns the parsed bundle with
@@ -310,10 +321,16 @@ func Load(data []byte) (*Bundle, error) {
 			// the legacy nested Skills. URL skills are deferred to
 			// apply-time so a validate-only pass stays offline.
 			out.Skills = append(out.Skills, doc)
+		case KindIssue:
+			var doc kinds.IssueDocument
+			if err := raw.Decode(&doc); err != nil {
+				return nil, fmt.Errorf("decode Issue document: %w", err)
+			}
+			out.Issues = append(out.Issues, doc)
 		case "":
-			return nil, errors.New("missing kind: (expected one of: Crew, Workspace, Project, Label, Milestone, WorkflowTemplate, TriageRule, RecurringIssue, SavedView, Routine, FeatureFlag, InstanceSetting, Recipe, CrewTemplate, Connector, Hook, Skill)")
+			return nil, errors.New("missing kind: (expected one of: Crew, Workspace, Project, Label, Milestone, WorkflowTemplate, TriageRule, RecurringIssue, SavedView, Routine, FeatureFlag, InstanceSetting, Recipe, CrewTemplate, Connector, Hook, Skill, Issue)")
 		default:
-			return nil, fmt.Errorf("unsupported kind %q (expected one of: Crew, Workspace, Project, Label, Milestone, WorkflowTemplate, TriageRule, RecurringIssue, SavedView, Routine, FeatureFlag, InstanceSetting, Recipe, CrewTemplate, Connector, Hook, Skill)", head.Kind)
+			return nil, fmt.Errorf("unsupported kind %q (expected one of: Crew, Workspace, Project, Label, Milestone, WorkflowTemplate, TriageRule, RecurringIssue, SavedView, Routine, FeatureFlag, InstanceSetting, Recipe, CrewTemplate, Connector, Hook, Skill, Issue)", head.Kind)
 		}
 	}
 
