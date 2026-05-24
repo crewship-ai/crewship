@@ -103,6 +103,37 @@ password change.`,
 	RunE: runAdminInvalidateSessions,
 }
 
+// adminSessionsCmd groups the read surface for user_sessions. Splits
+// from the existing 'invalidate-sessions' top-level verb because
+// invalidate-sessions wants its own journal/log line — burying it
+// under a generic 'sessions' verb group would obscure the write
+// intent in the audit trail.
+var adminSessionsCmd = &cobra.Command{
+	Use:   "sessions",
+	Short: "Inspect user session state (forensic read of user_sessions)",
+}
+
+// adminSessionsListCmd is the forensic read for the user_sessions
+// table. Mirrors 'crewship session list' (user-scoped) but for
+// ARBITRARY users — admin-only via direct DB access. Column shape
+// matches the user-side command so an operator can switch between
+// the two surfaces without re-learning the table.
+var adminSessionsListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List every session for a user (forensic; admin-only)",
+	Long: `Dump every row in user_sessions for the user identified by --email.
+Use during incident response to answer "what does this user have
+active right now?" — paired with 'admin invalidate-sessions' for the
+revoke side.
+
+Default shows EVERY session (active, revoked, expired). Pass
+--active-only to filter to currently-valid rows (revoked_at IS NULL
+AND expires_at > now), which is what 'crewship session list' shows
+the user themselves. --limit caps output for users with hundreds of
+historic sessions; default 50 mirrors the journal_entries default.`,
+	RunE: runAdminSessionsList,
+}
+
 func init() {
 	adminResetPasswordCmd.Flags().String("email", "", "Email of the user to reset (required)")
 	adminResetPasswordCmd.Flags().String("password", "", "New password (leaks to shell history; prefer --password-stdin in CI)")
@@ -120,12 +151,184 @@ func init() {
 	adminInvalidateSessionsCmd.Flags().String("email", "", "Email of the user whose sessions should be revoked (required)")
 	_ = adminInvalidateSessionsCmd.MarkFlagRequired("email")
 
+	adminSessionsListCmd.Flags().String("email", "", "Email of the user whose sessions to list (required)")
+	adminSessionsListCmd.Flags().Bool("active-only", false, "Show only non-revoked, non-expired sessions")
+	adminSessionsListCmd.Flags().Int("limit", 50, "Cap on rows returned (default: 50)")
+	_ = adminSessionsListCmd.MarkFlagRequired("email")
+
 	adminCmd.AddCommand(adminResetPasswordCmd)
 	adminCmd.AddCommand(adminListUsersCmd)
 	adminCmd.AddCommand(adminPromoteCmd)
 	adminCmd.AddCommand(adminInvalidateSessionsCmd)
 
+	adminSessionsCmd.AddCommand(adminSessionsListCmd)
+	adminCmd.AddCommand(adminSessionsCmd)
+
 	rootCmd.AddCommand(adminCmd)
+}
+
+// runAdminSessionsList implements the forensic read of user_sessions
+// for a single user identified by email. Returns one row per session
+// in created_at-DESC order with a STATUS column derived from
+// revoked_at + expires_at via classifyAdminSessionRow.
+func runAdminSessionsList(cmd *cobra.Command, _ []string) error {
+	email, _ := cmd.Flags().GetString("email")
+	activeOnly, _ := cmd.Flags().GetBool("active-only")
+	limit, _ := cmd.Flags().GetInt("limit")
+	email = strings.ToLower(strings.TrimSpace(email))
+	if email == "" {
+		return errors.New("--email is required")
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+
+	db, err := openAdminDB()
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Resolve user first so a typo'd email returns a clear "no user
+	// with email X" instead of an empty result that an operator
+	// might read as "no sessions".
+	var userID, fullName string
+	err = db.QueryRowContext(ctx,
+		"SELECT id, COALESCE(full_name, '') FROM users WHERE email = ?", email).Scan(&userID, &fullName)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("no user with email %q", email)
+	}
+	if err != nil {
+		return fmt.Errorf("look up user: %w", err)
+	}
+
+	query := `
+		SELECT id, created_at, expires_at, last_used_at,
+		       COALESCE(revoked_at, ''), COALESCE(revoked_reason, ''),
+		       COALESCE(user_agent, ''), COALESCE(ip, '')
+		FROM user_sessions
+		WHERE user_id = ?
+		ORDER BY created_at DESC
+		LIMIT ?`
+	rows, err := db.QueryContext(ctx, query, userID, limit)
+	if err != nil {
+		return fmt.Errorf("list sessions: %w", err)
+	}
+	defer rows.Close()
+
+	now := time.Now().UTC()
+	tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "ID\tSTATUS\tCREATED\tLAST USED\tEXPIRES\tIP\tUA")
+
+	rendered := 0
+	hidden := 0
+	for rows.Next() {
+		var id, createdAt, expiresAt, lastUsedAt, revokedAt, revokedReason, userAgent, ip string
+		if err := rows.Scan(&id, &createdAt, &expiresAt, &lastUsedAt, &revokedAt, &revokedReason, &userAgent, &ip); err != nil {
+			return fmt.Errorf("scan session: %w", err)
+		}
+		status := classifyAdminSessionRow(revokedAt, expiresAt, now)
+		if activeOnly && status != "active" {
+			hidden++
+			continue
+		}
+		statusCell := status
+		if status == "revoked" && revokedReason != "" {
+			statusCell = "revoked:" + revokedReason
+		}
+		dispID := id
+		if len(dispID) > 16 {
+			dispID = dispID[:16]
+		}
+		dispIP := ip
+		if dispIP == "" {
+			dispIP = "-"
+		}
+		dispUA := userAgent
+		if dispUA == "" {
+			dispUA = "-"
+		}
+		if len(dispUA) > 32 {
+			dispUA = dispUA[:29] + "..."
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			dispID, statusCell, shortAdminTime(createdAt), shortAdminTime(lastUsedAt), shortAdminTime(expiresAt),
+			dispIP, dispUA)
+		rendered++
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate sessions: %w", err)
+	}
+	if err := tw.Flush(); err != nil {
+		return err
+	}
+
+	displayName := fullName
+	if displayName == "" {
+		displayName = email
+	}
+	if rendered == 0 {
+		if activeOnly {
+			fmt.Fprintf(cmd.OutOrStdout(), "(no active sessions for %s)\n", displayName)
+		} else {
+			fmt.Fprintf(cmd.OutOrStdout(), "(no sessions for %s)\n", displayName)
+		}
+	}
+	if activeOnly && hidden > 0 {
+		fmt.Fprintf(cmd.OutOrStdout(), "\n(%d revoked/expired session(s) hidden by --active-only)\n", hidden)
+	}
+	return nil
+}
+
+// classifyAdminSessionRow derives the STATUS cell from the raw
+// revoked_at + expires_at columns. Pure function so the unit test
+// can exercise every branch without an SQLite fixture.
+//
+// Boundary: an expires_at equal to `now` is "expired" (not active) —
+// the cookie is dead the instant the clock hits expiry. Mirrors the
+// session middleware's boundary check.
+func classifyAdminSessionRow(rawRevokedAt, rawExpiresAt string, now time.Time) string {
+	if strings.TrimSpace(rawRevokedAt) != "" {
+		return "revoked"
+	}
+	t, err := time.Parse(time.RFC3339, strings.TrimSpace(rawExpiresAt))
+	if err != nil {
+		// SQLite sometimes round-trips RFC3339 as "YYYY-MM-DD HH:MM:SS"
+		// (space separator). Same fallback the lockout classifier uses.
+		t2, err2 := time.Parse("2006-01-02 15:04:05", strings.TrimSpace(rawExpiresAt))
+		if err2 != nil {
+			// Unparseable expiry → treat as active rather than
+			// claiming "expired" on a server-side bug. Same
+			// conservative-miss posture as the lockout classifier.
+			return "active"
+		}
+		t = t2
+	}
+	if !t.After(now) {
+		return "expired"
+	}
+	return "active"
+}
+
+// shortAdminTime renders an RFC3339 / SQLite timestamp as
+// "YYYY-MM-DD HH:MM". Empty input → "-". Renamed from a more generic
+// "shortTime" to avoid colliding with potential same-named helpers in
+// sibling files.
+func shortAdminTime(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "-"
+	}
+	if t, err := time.Parse(time.RFC3339, raw); err == nil {
+		return t.UTC().Format("2006-01-02 15:04")
+	}
+	if t, err := time.Parse("2006-01-02 15:04:05", raw); err == nil {
+		return t.UTC().Format("2006-01-02 15:04")
+	}
+	return raw
 }
 
 // runAdminInvalidateSessions revokes every active session for the
