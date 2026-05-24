@@ -150,7 +150,9 @@ func TestStubServer_Reset(t *testing.T) {
 	s := NewStubServer()
 	defer s.Close()
 	s.OnGet("/x", JSONResponse(200, "ok"))
-	_, _ = http.Get(s.URL() + "/x")
+	if r, err := http.Get(s.URL() + "/x"); err == nil {
+		r.Body.Close()
+	}
 
 	s.Reset()
 	if got := len(s.Calls()); got != 0 {
@@ -172,7 +174,9 @@ func TestStubServer_ResetCallsKeepsRoutes(t *testing.T) {
 	s := NewStubServer()
 	defer s.Close()
 	s.OnGet("/x", JSONResponse(200, "ok"))
-	_, _ = http.Get(s.URL() + "/x")
+	if r, err := http.Get(s.URL() + "/x"); err == nil {
+		r.Body.Close()
+	}
 
 	s.ResetCalls()
 	if got := len(s.Calls()); got != 0 {

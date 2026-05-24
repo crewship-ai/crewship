@@ -138,8 +138,11 @@ func TestClassifyTokenStatus(t *testing.T) {
 // TestTokenListFlag_WarnStaleDays guards the flag wiring on the
 // command — a refactor that drops the flag would silently regress
 // the documented staleness check.
+//
+// NOT parallel: inspects the package-level tokenListCmd FlagSet,
+// which other tests in the package may mutate concurrently. Cost
+// of running serially is sub-millisecond.
 func TestTokenListFlag_WarnStaleDays(t *testing.T) {
-	t.Parallel()
 	f := tokenListCmd.Flags().Lookup("warn-stale-days")
 	if f == nil {
 		t.Fatal("crewship token list missing --warn-stale-days flag")

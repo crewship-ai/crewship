@@ -213,6 +213,17 @@ func TestAdminInvalidateSessionsCmd_Wiring(t *testing.T) {
 //
 // NOT parallel: see TestAdminInvalidateSessionsCmd_Wiring comment.
 func TestAdminInvalidateSessionsCmd_EmailRequired(t *testing.T) {
+	// Snapshot prior state so the next test in this file (or a
+	// later run via -count=N) doesn't inherit our mutations.
+	prevEmail, _ := adminInvalidateSessionsCmd.Flags().GetString("email")
+	prevOut := adminInvalidateSessionsCmd.OutOrStdout()
+	prevErr := adminInvalidateSessionsCmd.ErrOrStderr()
+	t.Cleanup(func() {
+		_ = adminInvalidateSessionsCmd.Flags().Set("email", prevEmail)
+		adminInvalidateSessionsCmd.SetOut(prevOut)
+		adminInvalidateSessionsCmd.SetErr(prevErr)
+	})
+
 	// Reset email flag to empty (a sibling test or --count=N rerun
 	// may have set it).
 	_ = adminInvalidateSessionsCmd.Flags().Set("email", "")

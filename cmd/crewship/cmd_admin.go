@@ -205,15 +205,32 @@ func runAdminSessionsList(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("look up user: %w", err)
 	}
 
+	// When --active-only is set, push the predicate INTO the SQL
+	// WHERE clause instead of filtering Go-side after the LIMIT.
+	// The previous Go-side filter could return zero active rows
+	// even when more existed deeper in the DB: imagine 100 sessions
+	// where the newest 50 are revoked and the next 50 are active —
+	// LIMIT 50 + Go-side filter sees zero actives. SQL-side
+	// filtering means LIMIT counts actual matches.
+	//
+	// Boundary on expires_at matches classifyAdminSessionRow:
+	// expires_at strictly greater than now (equality is "expired").
+	whereClause := "WHERE user_id = ?"
+	args := []any{userID}
+	if activeOnly {
+		whereClause += " AND revoked_at IS NULL AND datetime(expires_at) > datetime(?)"
+		args = append(args, time.Now().UTC().Format(time.RFC3339))
+	}
+	args = append(args, limit)
 	query := `
 		SELECT id, created_at, expires_at, COALESCE(last_used_at, ''),
 		       COALESCE(revoked_at, ''), COALESCE(revoked_reason, ''),
 		       COALESCE(user_agent, ''), COALESCE(ip, '')
 		FROM user_sessions
-		WHERE user_id = ?
+		` + whereClause + `
 		ORDER BY created_at DESC
 		LIMIT ?`
-	rows, err := db.QueryContext(ctx, query, userID, limit)
+	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("list sessions: %w", err)
 	}
