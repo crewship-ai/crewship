@@ -200,6 +200,9 @@ var tokenRevokeCmd = &cobra.Command{
 		if err := requireAuth(); err != nil {
 			return err
 		}
+		if err := confirmAction(cmd, fmt.Sprintf("Revoke CLI token %q? Anything still using it starts getting 401 immediately.", args[0])); err != nil {
+			return err
+		}
 
 		client := newAPIClient()
 		client.WorkspaceID = ""
@@ -432,6 +435,7 @@ func init() {
 	tokenRotateCmd.Flags().String("name", "", "Override new token name (default: '<old name> (rotated YYYY-MM-DD)')")
 	tokenListCmd.Flags().Int("warn-stale-days", 90, "Flag tokens older / unused longer than N days (0 disables)")
 	tokenValidateCmd.Flags().Bool("json", false, "Emit machine-readable JSON to stdout instead of human-readable text")
+	tokenRevokeCmd.Flags().BoolP("yes", "y", false, "Skip confirmation")
 
 	tokenCmd.AddCommand(tokenListCmd)
 	tokenCmd.AddCommand(tokenCreateCmd)

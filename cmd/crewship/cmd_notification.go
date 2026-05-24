@@ -196,6 +196,9 @@ var notificationDeleteCmd = &cobra.Command{
 		if err := requireAuth(); err != nil {
 			return err
 		}
+		if err := confirmAction(cmd, fmt.Sprintf("Delete notification %q?", args[0])); err != nil {
+			return err
+		}
 
 		client := newAPIClient()
 		resp, err := client.Delete("/api/v1/notifications/" + args[0])
@@ -215,6 +218,8 @@ var notificationDeleteCmd = &cobra.Command{
 func init() {
 	notificationListCmd.Flags().Bool("unread", false, "Only show unread notifications")
 	notificationListCmd.Flags().Int("limit", 0, "Limit number of notifications (default: server default)")
+
+	notificationDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation")
 
 	notificationCmd.AddCommand(notificationListCmd)
 	notificationCmd.AddCommand(notificationCountCmd)

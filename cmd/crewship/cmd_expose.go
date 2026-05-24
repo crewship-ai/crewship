@@ -118,6 +118,9 @@ var exposeRevokeCmd = &cobra.Command{
 		if crewSlug == "" {
 			return fmt.Errorf("--crew is required (crew slug or ID)")
 		}
+		if err := confirmAction(cmd, fmt.Sprintf("Revoke port exposure %q on crew %q?", args[0], crewSlug)); err != nil {
+			return err
+		}
 
 		client := newAPIClient()
 		crewID, err := resolveCrewID(client, crewSlug)
@@ -149,6 +152,7 @@ func init() {
 
 	exposeRevokeCmd.Flags().String("crew", "", "Crew slug or ID (required)")
 	exposeRevokeCmd.Flags().String("reason", "", "Optional human-readable reason recorded in audit")
+	exposeRevokeCmd.Flags().BoolP("yes", "y", false, "Skip confirmation")
 
 	exposeCmd.AddCommand(exposeListCmd)
 	exposeCmd.AddCommand(exposeRevokeCmd)
