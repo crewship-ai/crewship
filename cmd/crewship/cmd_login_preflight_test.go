@@ -31,11 +31,11 @@ func TestPreflightServerURL(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
-		name        string
-		server      string
-		wantErr     string // substring; empty means "no error"
-		wantStderr  string // substring; empty means "no output"
-		noOutputOK  bool   // true → stderr MUST be empty
+		name       string
+		server     string
+		wantErr    string // substring; empty means "no error"
+		wantStderr string // substring; empty means "no output"
+		noOutputOK bool   // true → stderr MUST be empty
 	}{
 		{
 			name:       "empty → error",
