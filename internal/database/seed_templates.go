@@ -4,104 +4,117 @@ import (
 	"context"
 	"crypto/rand"
 	"database/sql"
+	"embed"
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 type templateStep struct {
-	ID            string   `json:"id"`
-	Title         string   `json:"title"`
-	Description   string   `json:"description,omitempty"`
-	AgentRole     string   `json:"agent_role,omitempty"`
-	DependsOn     []string `json:"depends_on,omitempty"`
-	MaxIterations int      `json:"max_iterations,omitempty"`
-	LoopBackTo    string   `json:"loop_back_to,omitempty"`
+	ID            string   `json:"id"             yaml:"id"`
+	Title         string   `json:"title"          yaml:"title"`
+	Description   string   `json:"description,omitempty" yaml:"description,omitempty"`
+	AgentRole     string   `json:"agent_role,omitempty" yaml:"agent_role,omitempty"`
+	DependsOn     []string `json:"depends_on,omitempty" yaml:"depends_on,omitempty"`
+	MaxIterations int      `json:"max_iterations,omitempty" yaml:"max_iterations,omitempty"`
+	LoopBackTo    string   `json:"loop_back_to,omitempty" yaml:"loop_back_to,omitempty"`
 }
 
 type templateDef struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	Steps       []templateStep `json:"steps"`
+	Name        string         `json:"name"        yaml:"name"`
+	Description string         `json:"description" yaml:"description"`
+	Steps       []templateStep `json:"steps"       yaml:"steps"`
 }
 
-var builtinTemplates = []struct {
-	name        string
-	description string
-	icon        string
-	color       string
-	tmpl        templateDef
-}{
-	{
-		name: "sequential", description: "Tasks execute one after another in order",
-		icon: "arrow-right", color: "#3b82f6",
-		tmpl: templateDef{
-			Name: "sequential", Description: "Tasks execute one after another in order",
-			Steps: []templateStep{
-				{ID: "step-1", Title: "Step 1", AgentRole: "agent"},
-				{ID: "step-2", Title: "Step 2", AgentRole: "agent", DependsOn: []string{"step-1"}},
-				{ID: "step-3", Title: "Step 3", AgentRole: "agent", DependsOn: []string{"step-2"}},
-			},
-		},
-	},
-	{
-		name: "parallel", description: "All tasks run simultaneously, then results are aggregated",
-		icon: "git-branch", color: "#22c55e",
-		tmpl: templateDef{
-			Name: "parallel", Description: "All tasks run simultaneously, then results are aggregated",
-			Steps: []templateStep{
-				{ID: "task-a", Title: "Parallel Task A", AgentRole: "agent"},
-				{ID: "task-b", Title: "Parallel Task B", AgentRole: "agent"},
-				{ID: "task-c", Title: "Parallel Task C", AgentRole: "agent"},
-				{ID: "aggregate", Title: "Aggregate Results", AgentRole: "lead", DependsOn: []string{"task-a", "task-b", "task-c"}},
-			},
-		},
-	},
-	{
-		name: "dev-test-loop", description: "Developer writes code, tester reviews. On failure, loops back (max 3 iterations)",
-		icon: "repeat", color: "#f59e0b",
-		tmpl: templateDef{
-			Name: "dev-test-loop", Description: "Developer writes code, tester reviews. On failure, loops back to developer (max 3 iterations)",
-			Steps: []templateStep{
-				{ID: "develop", Title: "Implement feature", AgentRole: "developer", MaxIterations: 3},
-				{ID: "test", Title: "Test and review", AgentRole: "tester", DependsOn: []string{"develop"}, LoopBackTo: "develop", MaxIterations: 3},
-			},
-		},
-	},
-	{
-		name: "pipeline", description: "Sequential stage followed by parallel tasks, then final aggregation",
-		icon: "git-merge", color: "#8b5cf6",
-		tmpl: templateDef{
-			Name: "pipeline", Description: "Sequential stage followed by parallel tasks, then final aggregation",
-			Steps: []templateStep{
-				{ID: "prepare", Title: "Prepare", AgentRole: "agent"},
-				{ID: "work-a", Title: "Work Stream A", AgentRole: "agent", DependsOn: []string{"prepare"}},
-				{ID: "work-b", Title: "Work Stream B", AgentRole: "agent", DependsOn: []string{"prepare"}},
-				{ID: "finalize", Title: "Finalize", AgentRole: "lead", DependsOn: []string{"work-a", "work-b"}},
-			},
-		},
-	},
+// builtinTemplateDoc is the YAML envelope for each file under
+// builtin/workflow-templates/. The outer fields land directly on the
+// workflow_templates row; the inner `template` block is serialised
+// to JSON and stored in the template_json TEXT column.
+type builtinTemplateDoc struct {
+	Name        string      `yaml:"name"`
+	Description string      `yaml:"description"`
+	Icon        string      `yaml:"icon"`
+	Color       string      `yaml:"color"`
+	Template    templateDef `yaml:"template"`
+}
+
+//go:embed builtin/workflow-templates/*.yaml
+var builtinWorkflowFS embed.FS
+
+// loadBuiltinWorkflowTemplates parses every YAML file under the
+// embedded builtin/workflow-templates/ directory into one
+// builtinTemplateDoc per file. Pulled from embed.FS at process start
+// rather than hardcoded in a Go literal — same set of templates, but
+// authored as YAML so a non-Go contributor can add or tweak one
+// without touching the codebase.
+//
+// Returns the docs in lexicographic filename order so the seed pass
+// is deterministic (a CREATE OR IGNORE race would otherwise depend
+// on map iteration order — invisible until the day a new file lands
+// alphabetically before sequential.yaml).
+func loadBuiltinWorkflowTemplates() ([]builtinTemplateDoc, error) {
+	entries, err := builtinWorkflowFS.ReadDir("builtin/workflow-templates")
+	if err != nil {
+		return nil, fmt.Errorf("read embedded builtin templates dir: %w", err)
+	}
+	out := make([]builtinTemplateDoc, 0, len(entries))
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".yaml") {
+			continue
+		}
+		data, err := builtinWorkflowFS.ReadFile("builtin/workflow-templates/" + e.Name())
+		if err != nil {
+			return nil, fmt.Errorf("read embedded %s: %w", e.Name(), err)
+		}
+		var doc builtinTemplateDoc
+		if err := yaml.Unmarshal(data, &doc); err != nil {
+			return nil, fmt.Errorf("parse embedded %s: %w", e.Name(), err)
+		}
+		if strings.TrimSpace(doc.Name) == "" {
+			return nil, fmt.Errorf("embedded %s: name is required", e.Name())
+		}
+		out = append(out, doc)
+	}
+	return out, nil
 }
 
 // SeedBuiltinTemplates inserts the built-in workflow templates for a workspace
 // if they don't already exist. Called lazily on first template list access.
+//
+// Data source: embedded YAML files under builtin/workflow-templates/.
+// The previous Go-literal source moved to YAML in iter 29 of the
+// CLI hardening loop so the templates are editable without a code
+// change and visible to anyone browsing the repo without parsing Go
+// struct literals. Behaviour vs. the schema is unchanged — same
+// INSERT OR IGNORE row shape, same is_builtin=1 marker.
 func SeedBuiltinTemplates(ctx context.Context, db *sql.DB, workspaceID string, logger *slog.Logger) error {
-	for _, bt := range builtinTemplates {
+	templates, err := loadBuiltinWorkflowTemplates()
+	if err != nil {
+		// Fatal at the database layer rather than letting the caller
+		// receive a partially-seeded workspace — the embedded files
+		// ship with the binary, so a parse failure is a build-time
+		// bug, not a runtime data problem.
+		return fmt.Errorf("load builtin templates: %w", err)
+	}
+	for _, bt := range templates {
 		var exists bool
 		err := db.QueryRowContext(ctx,
 			`SELECT 1 FROM workflow_templates WHERE workspace_id = ? AND name = ? AND is_builtin = 1`,
-			workspaceID, bt.name).Scan(&exists)
+			workspaceID, bt.Name).Scan(&exists)
 		if err == nil {
 			continue // already exists
 		}
 		if err != sql.ErrNoRows {
-			return fmt.Errorf("check builtin template %s: %w", bt.name, err)
+			return fmt.Errorf("check builtin template %s: %w", bt.Name, err)
 		}
 
-		tmplJSON, err := json.Marshal(bt.tmpl)
+		tmplJSON, err := json.Marshal(bt.Template)
 		if err != nil {
-			return fmt.Errorf("marshal template %s: %w", bt.name, err)
+			return fmt.Errorf("marshal template %s: %w", bt.Name, err)
 		}
 
 		id := generateSeedID("wt")
@@ -109,8 +122,8 @@ func SeedBuiltinTemplates(ctx context.Context, db *sql.DB, workspaceID string, l
 		if _, err := db.ExecContext(ctx, `
 			INSERT OR IGNORE INTO workflow_templates (id, workspace_id, name, description, template_json, icon, color, is_builtin, created_at, updated_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
-			id, workspaceID, bt.name, bt.description, string(tmplJSON), bt.icon, bt.color, now, now); err != nil {
-			logger.Warn("failed to seed builtin template", "name", bt.name, "error", err)
+			id, workspaceID, bt.Name, bt.Description, string(tmplJSON), bt.Icon, bt.Color, now, now); err != nil {
+			logger.Warn("failed to seed builtin template", "name", bt.Name, "error", err)
 		}
 	}
 	return nil

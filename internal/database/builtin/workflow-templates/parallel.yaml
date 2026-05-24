@@ -1,0 +1,24 @@
+name: parallel
+description: All tasks run simultaneously, then results are aggregated
+icon: git-branch
+color: "#22c55e"
+template:
+  name: parallel
+  description: All tasks run simultaneously, then results are aggregated
+  steps:
+    - id: task-a
+      title: Parallel Task A
+      agent_role: agent
+    - id: task-b
+      title: Parallel Task B
+      agent_role: agent
+    - id: task-c
+      title: Parallel Task C
+      agent_role: agent
+    - id: aggregate
+      title: Aggregate Results
+      agent_role: lead
+      depends_on:
+        - task-a
+        - task-b
+        - task-c

@@ -1,0 +1,27 @@
+name: pipeline
+description: Sequential stage followed by parallel tasks, then final aggregation
+icon: git-merge
+color: "#8b5cf6"
+template:
+  name: pipeline
+  description: Sequential stage followed by parallel tasks, then final aggregation
+  steps:
+    - id: prepare
+      title: Prepare
+      agent_role: agent
+    - id: work-a
+      title: Work Stream A
+      agent_role: agent
+      depends_on:
+        - prepare
+    - id: work-b
+      title: Work Stream B
+      agent_role: agent
+      depends_on:
+        - prepare
+    - id: finalize
+      title: Finalize
+      agent_role: lead
+      depends_on:
+        - work-a
+        - work-b
