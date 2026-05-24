@@ -206,7 +206,7 @@ func runAdminSessionsList(cmd *cobra.Command, _ []string) error {
 	}
 
 	query := `
-		SELECT id, created_at, expires_at, last_used_at,
+		SELECT id, created_at, expires_at, COALESCE(last_used_at, ''),
 		       COALESCE(revoked_at, ''), COALESCE(revoked_reason, ''),
 		       COALESCE(user_agent, ''), COALESCE(ip, '')
 		FROM user_sessions

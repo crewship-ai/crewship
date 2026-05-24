@@ -140,7 +140,10 @@ func TestOversizeString_Length(t *testing.T) {
 	for _, tc := range cases {
 		tc := tc
 		t.Run("", func(t *testing.T) {
-			t.Parallel()
+			// Don't t.Parallel(): the 64 MiB clamp case allocates
+			// 64 MiB of "A". Running it concurrently with the other
+			// subtests can spike CI memory unnecessarily — the
+			// per-test cost is microseconds, so serial is fine.
 			got := OversizeString(tc.n)
 			if len(got) != tc.want {
 				t.Errorf("OversizeString(%d) len = %d, want %d", tc.n, len(got), tc.want)

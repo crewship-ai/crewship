@@ -170,6 +170,19 @@ func checkCLIConfigPerms(fixMode bool) checkResult {
 			detail: fmt.Sprintf("stat %s: %v", path, err),
 		}
 	}
+	// Guard against the path being a directory, named pipe, device,
+	// or anything other than a regular file. The mode.Perm() check
+	// below would still produce a number, and a --fix-mode chmod
+	// would happily apply 0600 to a directory — both deeply wrong
+	// for a config-file safety check.
+	if !info.Mode().IsRegular() {
+		return checkResult{
+			name:   "cli config perms",
+			status: "FAIL",
+			detail: fmt.Sprintf("%s exists but is not a regular file (mode %v)", path, info.Mode()),
+			hint:   fmt.Sprintf("remove or relocate %s, then re-run 'crewship login' to recreate it as a normal file", path),
+		}
+	}
 	mode := info.Mode().Perm()
 	// 0o077 covers all group + other bits. A clean 0600 file has
 	// mode & 0o077 == 0; anything broader trips the warn path.

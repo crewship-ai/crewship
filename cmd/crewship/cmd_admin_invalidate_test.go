@@ -36,6 +36,7 @@ func openInMemoryUsersDB(t *testing.T) *sql.DB {
 		`CREATE TABLE user_sessions (
 			id TEXT PRIMARY KEY,
 			user_id TEXT NOT NULL,
+			expires_at TEXT NOT NULL,
 			revoked_at TEXT,
 			revoked_reason TEXT,
 			created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -59,17 +60,26 @@ func seedUserWithSessions(t *testing.T, db *sql.DB, email string, activeN, revok
 		userID, email, "Test User"); err != nil {
 		t.Fatalf("seed user: %v", err)
 	}
+	// Active rows expire well in the future so the
+	// `datetime(expires_at) > datetime(now)` predicate in the
+	// invalidate UPDATE counts them.
+	farFuture := time.Now().UTC().Add(24 * time.Hour).Format(time.RFC3339)
 	for i := 0; i < activeN; i++ {
-		_, err := db.Exec(`INSERT INTO user_sessions (id, user_id) VALUES (?, ?)`,
-			"sess_"+email+"_active_"+strconv.Itoa(i), userID)
+		_, err := db.Exec(`INSERT INTO user_sessions (id, user_id, expires_at) VALUES (?, ?, ?)`,
+			"sess_"+email+"_active_"+strconv.Itoa(i), userID, farFuture)
 		if err != nil {
 			t.Fatalf("seed active session: %v", err)
 		}
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
+	// Revoked rows get a past expires_at — they're already revoked,
+	// so the expiry doesn't matter for the predicate, but setting a
+	// past value avoids ambiguity in any subsequent active-counting
+	// queries the test may add.
+	pastExpiry := time.Now().UTC().Add(-24 * time.Hour).Format(time.RFC3339)
 	for i := 0; i < revokedN; i++ {
-		_, err := db.Exec(`INSERT INTO user_sessions (id, user_id, revoked_at, revoked_reason) VALUES (?, ?, ?, 'user_logout')`,
-			"sess_"+email+"_revoked_"+strconv.Itoa(i), userID, now)
+		_, err := db.Exec(`INSERT INTO user_sessions (id, user_id, expires_at, revoked_at, revoked_reason) VALUES (?, ?, ?, ?, 'user_logout')`,
+			"sess_"+email+"_revoked_"+strconv.Itoa(i), userID, pastExpiry, now)
 		if err != nil {
 			t.Fatalf("seed revoked session: %v", err)
 		}
@@ -103,7 +113,7 @@ func TestAdminInvalidateSessions_SQLContract(t *testing.T) {
 	res, err := db.ExecContext(context.Background(), `
 		UPDATE user_sessions
 		SET revoked_at = ?, revoked_reason = 'admin_invalidate'
-		WHERE user_id = ? AND revoked_at IS NULL`, now, aliceID)
+		WHERE user_id = ? AND revoked_at IS NULL AND datetime(expires_at) > datetime(?)`, now, aliceID, now)
 	if err != nil {
 		t.Fatalf("update: %v", err)
 	}
@@ -166,7 +176,7 @@ func TestAdminInvalidateSessions_NoActive(t *testing.T) {
 	res, err := db.ExecContext(context.Background(), `
 		UPDATE user_sessions
 		SET revoked_at = ?, revoked_reason = 'admin_invalidate'
-		WHERE user_id = ? AND revoked_at IS NULL`, now, userID)
+		WHERE user_id = ? AND revoked_at IS NULL AND datetime(expires_at) > datetime(?)`, now, userID, now)
 	if err != nil {
 		t.Fatalf("update: %v", err)
 	}

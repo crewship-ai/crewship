@@ -94,7 +94,7 @@ With --json, emits a structured object instead of the colored table:
 The status enum is PASS / WARN / FAIL / INFO, identical to the human
 table. CI gates can branch on the top-level "failed" / "warned"
 counters or filter the per-check array.`,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		fixMode, _ := cmd.Flags().GetBool("fix")
 		jsonOut, _ := cmd.Flags().GetBool("json")
 		parentCtx := cmd.Context()
@@ -171,8 +171,7 @@ counters or filter the per-check array.`,
 			// JSON mode: emit a single object on stdout, no human
 			// header/footer/per-check lines. The structure matches
 			// the contract documented in the command's Long.
-			emitDoctorJSON(cmd.OutOrStdout(), results, failed, warned)
-			return
+			return emitDoctorJSON(cmd.OutOrStdout(), results, failed, warned)
 		}
 
 		for _, r := range results {
@@ -203,6 +202,7 @@ counters or filter the per-check array.`,
 			fmt.Printf("  %sCLI walkthrough:%s  https://docs.crewship.ai/guides/onboarding\n", cli.Dim, cli.Reset)
 		}
 		fmt.Println()
+		return nil
 	},
 }
 
@@ -960,7 +960,13 @@ type doctorJSON struct {
 // future test can drive it with hand-built results without standing
 // up the full check battery (which touches Docker, the data dir,
 // the network, and the DB).
-func emitDoctorJSON(out io.Writer, results []checkResult, failed, warned int) {
+//
+// Returns the encode error so the cobra RunE handler can surface a
+// non-zero exit if stdout is closed mid-write (CI piping into a
+// killed reader) or json.Marshal balks on a non-marshalable field.
+// Silent failure here would let automation receive empty/truncated
+// JSON, miss the missing top-level fields, and miscount failures.
+func emitDoctorJSON(out io.Writer, results []checkResult, failed, warned int) error {
 	checks := make([]doctorCheckJSON, 0, len(results))
 	for _, r := range results {
 		checks = append(checks, doctorCheckJSON{
@@ -980,9 +986,8 @@ func emitDoctorJSON(out io.Writer, results []checkResult, failed, warned int) {
 	}
 	enc := json.NewEncoder(out)
 	enc.SetIndent("", "  ")
-	// Encoder errors here are essentially unrecoverable (stdout is
-	// the standard output; if it's closed we have bigger problems).
-	// Best-effort emission — a future variant could add an error
-	// return if doctor ever moves to RunE.
-	_ = enc.Encode(payload)
+	if err := enc.Encode(payload); err != nil {
+		return fmt.Errorf("emit doctor JSON: %w", err)
+	}
+	return nil
 }
