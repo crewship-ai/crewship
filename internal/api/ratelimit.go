@@ -136,18 +136,40 @@ type RateLimiter struct {
 	visitors map[string]*ipLimiter
 	rps      rate.Limit // requests per second
 	burst    int
+	// stop signals cleanupLoop to exit. Closed by Close(); the loop
+	// selects on it alongside the ticker so tests that build a
+	// RateLimiter in a t.Run can drop the goroutine in t.Cleanup
+	// instead of leaking it for the whole test binary's lifetime.
+	stop chan struct{}
 }
 
 // NewRateLimiter creates a rate limiter that allows reqPerMin requests per
 // minute per IP, with a burst equal to reqPerMin (token bucket).
+//
+// The returned limiter spawns a background cleanup goroutine. Long-lived
+// callers (the server's router) can ignore the cleanup lifecycle — the
+// goroutine ends with the process. Test callers should defer Close() so
+// the per-test goroutine doesn't accumulate across `go test ./...`.
 func NewRateLimiter(reqPerMin int) *RateLimiter {
 	rl := &RateLimiter{
 		visitors: make(map[string]*ipLimiter),
 		rps:      rate.Limit(float64(reqPerMin) / 60.0),
 		burst:    reqPerMin,
+		stop:     make(chan struct{}),
 	}
 	go rl.cleanupLoop()
 	return rl
+}
+
+// Close stops the background cleanup goroutine. Idempotent (safe to
+// call multiple times — the second close is a no-op via recover).
+// The visitors map stays in place; Close only ends the background
+// sweep, not the rate-limit decisions in-flight.
+func (rl *RateLimiter) Close() {
+	defer func() {
+		_ = recover() // already-closed channel panics; treat as success
+	}()
+	close(rl.stop)
 }
 
 // getLimiter returns the rate limiter for the given IP, creating one if needed.
@@ -165,12 +187,21 @@ func (rl *RateLimiter) getLimiter(ip string) *rate.Limiter {
 	return v.limiter
 }
 
-// cleanupLoop removes stale entries every 3 minutes.
+// cleanupLoop removes stale entries every 3 minutes. Exits when
+// Close() is called — without it, every test that constructs a
+// RateLimiter leaks one goroutine until the binary exits, which
+// shows up as a 4-min `go test ./internal/api/` timeout once a
+// dozen tests have done so.
 func (rl *RateLimiter) cleanupLoop() {
 	ticker := time.NewTicker(3 * time.Minute)
 	defer ticker.Stop()
-	for range ticker.C {
-		rl.cleanup()
+	for {
+		select {
+		case <-ticker.C:
+			rl.cleanup()
+		case <-rl.stop:
+			return
+		}
 	}
 }
 
