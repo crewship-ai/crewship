@@ -110,6 +110,9 @@ return 401 — you'll need to log in again.`,
 		if err := requireAuth(); err != nil {
 			return err
 		}
+		if err := confirmAction(cmd, fmt.Sprintf("Revoke session %q? If it's your current one, the next request returns 401.", args[0])); err != nil {
+			return err
+		}
 		client := newAPIClient()
 		client.WorkspaceID = ""
 
@@ -143,6 +146,8 @@ return 401 — you'll need to log in again.`,
 }
 
 func init() {
+	sessionRevokeCmd.Flags().BoolP("yes", "y", false, "Skip confirmation")
+
 	sessionCmd.AddCommand(sessionListCmd)
 	sessionCmd.AddCommand(sessionRevokeCmd)
 }

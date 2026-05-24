@@ -175,6 +175,9 @@ var intgRemoveCmd = &cobra.Command{
 		if err := requireWorkspace(); err != nil {
 			return err
 		}
+		if err := confirmAction(cmd, fmt.Sprintf("Remove integration %q? Crews using it lose access immediately.", args[0])); err != nil {
+			return err
+		}
 		client := newAPIClient()
 		id, err := resolveIntegrationID(client, args[0])
 		if err != nil {
@@ -610,6 +613,8 @@ func registerIntegrationWorkspaceFlags() {
 }
 
 func init() {
+	intgRemoveCmd.Flags().BoolP("yes", "y", false, "Skip confirmation")
+
 	// Workspace-level subcommands
 	integrationCmd.AddCommand(intgListCmd)
 	integrationCmd.AddCommand(intgAddCmd)
