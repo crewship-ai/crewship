@@ -528,11 +528,14 @@ var pipelineDeleteCmd = &cobra.Command{
 	Use:   "delete <slug>",
 	Short: "Soft-delete a routine (hidden but row preserved for audit)",
 	Args:  cobra.ExactArgs(1),
-	RunE: func(_ *cobra.Command, args []string) error {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
 			return err
 		}
 		if err := requireWorkspace(); err != nil {
+			return err
+		}
+		if err := confirmAction(cmd, fmt.Sprintf("Delete routine %q?", args[0])); err != nil {
 			return err
 		}
 		client := newAPIClient()
@@ -666,6 +669,8 @@ func init() {
 	pipelineRunCmd.Flags().String("tier-override", "", "force every agent_run step onto a tier (trivial|fast|moderate|smart). Step-level model_override still wins. Empty = use authored complexity.")
 
 	pipelineDryRunCmd.Flags().String("inputs", "", "JSON inputs for the dry-run preview")
+
+	pipelineDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation")
 
 	pipelineCmd.AddCommand(pipelineListCmd)
 	pipelineCmd.AddCommand(pipelineGetCmd)
