@@ -67,6 +67,42 @@ var adminPromoteCmd = &cobra.Command{
 	RunE:  runAdminPromote,
 }
 
+// adminInvalidateSessionsCmd is the "force logout" surface for an
+// incident-response flow where a token / cookie is suspected leaked
+// but the password is NOT believed compromised. reset-password
+// already revokes sessions as a side effect; this command lets the
+// operator do JUST the revoke step so the user doesn't have to
+// rotate a perfectly-good password too.
+//
+// Use cases (operator runs from host SSH):
+//   - laptop stolen / recovered, want to kill any session that
+//     might still be cached on the device;
+//   - suspected token leak via Slack / browser history dump;
+//   - audit response — periodic "log everyone out of yesterday's
+//     sessions" sweep as part of a compliance ritual.
+//
+// This is intentionally a separate verb rather than a flag on
+// reset-password so the audit trail (journal entry + log line) makes
+// the intent obvious: "force logout, no password change". A combined
+// `--invalidate-sessions-only` flag on reset-password would be
+// surprising — reset-password is for password rotation.
+var adminInvalidateSessionsCmd = &cobra.Command{
+	Use:   "invalidate-sessions",
+	Short: "Revoke every active session for a user (no password change)",
+	Long: `Force-logout a user without touching their password. The user can
+still log in normally after this — they just need to re-authenticate
+on every device they were previously signed in on.
+
+Use when you suspect a session token / cookie leak but the password
+is believed safe. Mirrors the session-revoke side effect that
+'admin reset-password' performs, without forcing a password rotation.
+
+The operation is logged with reason='admin_invalidate' on each
+revoked session row so the audit trail distinguishes this from a
+password change.`,
+	RunE: runAdminInvalidateSessions,
+}
+
 func init() {
 	adminResetPasswordCmd.Flags().String("email", "", "Email of the user to reset (required)")
 	adminResetPasswordCmd.Flags().String("password", "", "New password (leaks to shell history; prefer --password-stdin in CI)")
@@ -81,11 +117,76 @@ func init() {
 	_ = adminPromoteCmd.MarkFlagRequired("email")
 	_ = adminPromoteCmd.MarkFlagRequired("role")
 
+	adminInvalidateSessionsCmd.Flags().String("email", "", "Email of the user whose sessions should be revoked (required)")
+	_ = adminInvalidateSessionsCmd.MarkFlagRequired("email")
+
 	adminCmd.AddCommand(adminResetPasswordCmd)
 	adminCmd.AddCommand(adminListUsersCmd)
 	adminCmd.AddCommand(adminPromoteCmd)
+	adminCmd.AddCommand(adminInvalidateSessionsCmd)
 
 	rootCmd.AddCommand(adminCmd)
+}
+
+// runAdminInvalidateSessions revokes every active session for the
+// user identified by --email. Returns the count of revoked sessions
+// for the success line; treats "user not found" as a loud error
+// (better than silent zero rows) and "user found but had no active
+// sessions" as success with a "0 active session(s)" message.
+//
+// The revoked_reason column is set to 'admin_invalidate' so a
+// later audit query can distinguish this from password-change
+// revokes ('password_change') and self-revokes (user clicked
+// "log out from all devices" in the UI, typically 'user_logout').
+func runAdminInvalidateSessions(cmd *cobra.Command, _ []string) error {
+	email, _ := cmd.Flags().GetString("email")
+	email = strings.ToLower(strings.TrimSpace(email))
+	if email == "" {
+		return errors.New("--email is required")
+	}
+
+	db, err := openAdminDB()
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	var userID, fullName string
+	err = db.QueryRowContext(ctx,
+		"SELECT id, COALESCE(full_name, '') FROM users WHERE email = ?", email).Scan(&userID, &fullName)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("no user with email %q", email)
+	}
+	if err != nil {
+		return fmt.Errorf("look up user: %w", err)
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	res, err := db.ExecContext(ctx, `
+		UPDATE user_sessions
+		SET revoked_at = ?, revoked_reason = 'admin_invalidate'
+		WHERE user_id = ? AND revoked_at IS NULL`, now, userID)
+	if err != nil {
+		return fmt.Errorf("revoke sessions: %w", err)
+	}
+	revoked, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("revoke sessions rows affected: %w", err)
+	}
+
+	displayName := fullName
+	if displayName == "" {
+		displayName = email
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "✓ Sessions invalidated for %s (%s).\n", displayName, email)
+	fmt.Fprintf(cmd.OutOrStdout(), "  %d active session(s) revoked.\n", revoked)
+	if revoked == 0 {
+		fmt.Fprintln(cmd.OutOrStdout(), "  (user had no active sessions — nothing to revoke)")
+	}
+	return nil
 }
 
 // openAdminDB opens the SQLite database directly, mirroring the
