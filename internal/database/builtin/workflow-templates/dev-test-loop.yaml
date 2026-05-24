@@ -1,0 +1,19 @@
+name: dev-test-loop
+description: Developer writes code, tester reviews. On failure, loops back (max 3 iterations)
+icon: repeat
+color: "#f59e0b"
+template:
+  name: dev-test-loop
+  description: Developer writes code, tester reviews. On failure, loops back to developer (max 3 iterations)
+  steps:
+    - id: develop
+      title: Implement feature
+      agent_role: developer
+      max_iterations: 3
+    - id: test
+      title: Test and review
+      agent_role: tester
+      depends_on:
+        - develop
+      loop_back_to: develop
+      max_iterations: 3

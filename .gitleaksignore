@@ -27,3 +27,18 @@
 # Not a real secret — Stripe key entropy is irrelevant to the test;
 # the redaction logic only looks at length.
 34996f8ccf97b62f182a8bb293c1b4ec44df2299:internal/cli/redact/redact_test.go:stripe-access-token:22
+
+# Audit notes accidentally committed in 7d57b511 (kill-seed-scripts
+# branch) and deleted in c0db46c4. The file was a captured snapshot
+# of leaked GitHub issues; the matched substrings are per-request
+# data from those issue bodies, not credentials:
+#   - line 1312: a Sec-WebSocket-Key header value. RFC 6455 requires
+#     the client to generate this per-handshake from random bytes,
+#     so the value is not a credential even before the issue was
+#     deleted.
+#   - line 1316: a /ws?token=… URL value from a session log; the
+#     underlying session was revoked when the source ended.
+# Entries here only because gitleaks scans full branch history,
+# even for files that no longer exist on HEAD.
+7d57b511af600f436f2d2a9dfb0ec12c7a546bc5:audit/leaked-issues-snapshot-2026-05-23.md:generic-api-key:1312
+7d57b511af600f436f2d2a9dfb0ec12c7a546bc5:audit/leaked-issues-snapshot-2026-05-23.md:generic-api-key:1316

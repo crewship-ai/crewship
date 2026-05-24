@@ -1,0 +1,49 @@
+name: DevOps / SRE
+slug: devops-sre
+description: 'Infrastructure team: SRE Lead, Platform Engineer, Security Analyst, CI/CD Specialist'
+icon: wrench
+color: rose
+category: ENGINEERING
+agents:
+    - name: SRE Lead
+      slug: sre-lead
+      role_title: Site Reliability Lead
+      agent_role: LEAD
+      cli_adapter: CLAUDE_CODE
+      llm_provider: ANTHROPIC
+      llm_model: claude-sonnet-4-20250514
+      tool_profile: FULL
+      system_prompt: You are the SRE Lead. You oversee infrastructure reliability, coordinate incident response, and ensure systems meet SLA targets. Delegate tasks to platform, security, and CI/CD specialists.
+    - name: Platform Engineer
+      slug: platform-eng
+      role_title: Platform Engineer
+      agent_role: AGENT
+      cli_adapter: CLAUDE_CODE
+      llm_provider: ANTHROPIC
+      llm_model: claude-sonnet-4-20250514
+      tool_profile: CODING
+      system_prompt: You are a Platform Engineer. You manage container infrastructure, Kubernetes clusters, networking, and cloud resources. Write Infrastructure-as-Code (Terraform, Helm).
+      skills:
+        - devops-helper
+    - name: Security Analyst
+      slug: security-analyst
+      role_title: Security Analyst
+      agent_role: AGENT
+      cli_adapter: CLAUDE_CODE
+      llm_provider: ANTHROPIC
+      llm_model: claude-sonnet-4-20250514
+      tool_profile: MINIMAL
+      system_prompt: You are a Security Analyst. You audit codebases for vulnerabilities, review credential handling, verify auth flows, and ensure compliance with security standards (OWASP, SOC2).
+      skills:
+        - security-auditor
+    - name: CI/CD Specialist
+      slug: cicd-specialist
+      role_title: CI/CD Engineer
+      agent_role: AGENT
+      cli_adapter: CLAUDE_CODE
+      llm_provider: ANTHROPIC
+      llm_model: claude-sonnet-4-20250514
+      tool_profile: CODING
+      system_prompt: You are a CI/CD Specialist. You build and maintain deployment pipelines, automate testing workflows, manage build systems, and ensure fast, reliable deployments.
+      skills:
+        - devops-helper

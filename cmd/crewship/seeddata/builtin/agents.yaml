@@ -1,0 +1,145 @@
+agents:
+    - name: Thomas
+      slug: tomas
+      crew_slug: engineering
+      role_title: Technical Architect
+      agent_role: LEAD
+      cli_adapter: CLAUDE_CODE
+      llm_provider: ANTHROPIC
+      llm_model: claude-haiku-4-5
+      tool_profile: FULL
+      timeout_seconds: 3600
+      memory_enabled: true
+      prompt_slug: tomas
+    - name: Viktor
+      slug: viktor
+      crew_slug: engineering
+      role_title: Backend Engineer
+      agent_role: AGENT
+      cli_adapter: CLAUDE_CODE
+      llm_provider: ANTHROPIC
+      llm_model: claude-haiku-4-5
+      tool_profile: CODING
+      timeout_seconds: 1800
+      memory_enabled: true
+      prompt_slug: viktor
+    - name: Nela
+      slug: nela
+      crew_slug: engineering
+      role_title: Frontend Engineer
+      agent_role: AGENT
+      cli_adapter: CLAUDE_CODE
+      llm_provider: ANTHROPIC
+      llm_model: claude-haiku-4-5
+      tool_profile: CODING
+      timeout_seconds: 1800
+      memory_enabled: true
+      prompt_slug: nela
+    - name: Martin
+      slug: martin
+      crew_slug: engineering
+      role_title: Infrastructure Engineer
+      agent_role: AGENT
+      cli_adapter: CLAUDE_CODE
+      llm_provider: ANTHROPIC
+      llm_model: claude-haiku-4-5
+      tool_profile: CODING
+      timeout_seconds: 2400
+      memory_enabled: true
+      prompt_slug: martin
+    - name: Eva
+      slug: eva
+      crew_slug: quality
+      role_title: Quality Director
+      agent_role: LEAD
+      cli_adapter: CLAUDE_CODE
+      llm_provider: ANTHROPIC
+      llm_model: claude-haiku-4-5
+      tool_profile: FULL
+      timeout_seconds: 3600
+      memory_enabled: true
+      prompt_slug: eva
+    - name: Daniel
+      slug: daniel
+      crew_slug: quality
+      role_title: Code Reviewer
+      agent_role: AGENT
+      cli_adapter: CLAUDE_CODE
+      llm_provider: ANTHROPIC
+      llm_model: claude-haiku-4-5
+      tool_profile: MINIMAL
+      timeout_seconds: 1800
+      memory_enabled: true
+      prompt_slug: daniel
+    - name: Petra
+      slug: petra
+      crew_slug: quality
+      role_title: Test Engineer
+      agent_role: AGENT
+      cli_adapter: CLAUDE_CODE
+      llm_provider: ANTHROPIC
+      llm_model: claude-haiku-4-5
+      tool_profile: CODING
+      timeout_seconds: 2400
+      memory_enabled: true
+      prompt_slug: petra
+    - name: Jakub
+      slug: jakub
+      crew_slug: quality
+      role_title: Security Analyst
+      agent_role: AGENT
+      cli_adapter: CLAUDE_CODE
+      llm_provider: ANTHROPIC
+      llm_model: claude-haiku-4-5
+      tool_profile: MINIMAL
+      timeout_seconds: 2400
+      memory_enabled: true
+      prompt_slug: jakub
+    - name: Oliver
+      slug: ondrej
+      crew_slug: devops
+      role_title: SRE Lead
+      agent_role: LEAD
+      cli_adapter: CLAUDE_CODE
+      llm_provider: ANTHROPIC
+      llm_model: claude-haiku-4-5
+      tool_profile: FULL
+      timeout_seconds: 3600
+      memory_enabled: true
+      prompt_slug: ondrej
+    - name: Radek
+      slug: radek
+      crew_slug: devops
+      role_title: Platform Engineer
+      agent_role: AGENT
+      cli_adapter: CLAUDE_CODE
+      llm_provider: ANTHROPIC
+      llm_model: claude-haiku-4-5
+      tool_profile: CODING
+      timeout_seconds: 2400
+      memory_enabled: true
+      prompt_slug: radek
+    - name: Lucy
+      slug: lucie
+      crew_slug: research
+      role_title: Research Director
+      agent_role: LEAD
+      cli_adapter: CLAUDE_CODE
+      llm_provider: ANTHROPIC
+      llm_model: claude-haiku-4-5
+      tool_profile: FULL
+      timeout_seconds: 3600
+      memory_enabled: true
+      prompt_slug: lucie
+    - name: Filip
+      slug: filip
+      crew_slug: research
+      role_title: Data Analyst
+      agent_role: AGENT
+      cli_adapter: CLAUDE_CODE
+      llm_provider: ANTHROPIC
+      llm_model: claude-haiku-4-5
+      tool_profile: CODING
+      timeout_seconds: 2400
+      memory_enabled: true
+      prompt_slug: filip

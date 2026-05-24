@@ -94,7 +94,12 @@ func (b *Bundle) isEmpty() bool {
 		len(b.Recipes) == 0 &&
 		len(b.CrewTemplates) == 0 &&
 		len(b.Connectors) == 0 &&
-		len(b.Hooks) == 0
+		len(b.Hooks) == 0 &&
+		len(b.Skills) == 0 &&
+		len(b.Issues) == 0 &&
+		len(b.Crews) == 0 &&
+		len(b.Agents) == 0 &&
+		len(b.Integrations) == 0
 }
 
 type Bundle struct {
@@ -120,6 +125,43 @@ type Bundle struct {
 	CrewTemplates     []kinds.CrewTemplateDocument
 	Connectors        []kinds.ConnectorDocument
 	Hooks             []kinds.HookDocument
+
+	// Skills are workspace-scoped SKILL.md documents authored
+	// declaratively via `kind: Skill`. NOT the same as the legacy
+	// nested Skills in a Crew/Workspace spec (those are an embedded
+	// shape with their own path-resolution and are kept on the
+	// existing Crew/Workspace document types). The new top-level
+	// kind plugs into the SPEC-2 dispatcher and survives apply
+	// without crossing through the legacy bundle parser.
+	Skills []kinds.SkillDocument
+
+	// Crews collected from top-level `kind: Crew` documents that do
+	// NOT carry a nested `spec.agents` (or skills/credentials/
+	// mcp_servers) block. Those still decode into Documents above as
+	// the legacy bundle shape. Disambiguation lives in the parse
+	// switch via a peek-at-spec probe — keeps backwards compat
+	// without bumping apiVersion.
+	Crews []kinds.CrewDocument
+
+	// Agents authored via `kind: Agent` (workspace-scoped top-level).
+	// Pure addition — agents previously only existed nested under a
+	// Crew bundle, so there's no legacy conflict.
+	Agents []kinds.AgentDocument
+
+	// Integrations authored via `kind: Integration` (workspace- or
+	// crew-scoped depending on spec.crew_slug). Pure addition for
+	// the same reason as Agents.
+	Integrations []kinds.IntegrationDocument
+
+	// Issues are crew-scoped tracker items authored via `kind: Issue`.
+	// Crew-scoped because the missions table is keyed by (crew_id,
+	// identifier) — the apply pipeline resolves crew_slug → crew_id
+	// against either the legacy CrewDocument bundle (b.Documents) or
+	// the future top-level Crew kind. FK validation against declared
+	// sibling crews happens in IssueDocument.Validate via
+	// wsCtx.HasCrew, with the matching SlugLookup populated by
+	// buildKindWorkspaceContext from the legacy bundle.
+	Issues []kinds.IssueDocument
 }
 
 // LoadFile reads a manifest file and returns the parsed bundle with
@@ -195,11 +237,40 @@ func Load(data []byte) (*Bundle, error) {
 
 		switch head.Kind {
 		case KindCrew:
-			var doc Document
-			if err := raw.Decode(&doc); err != nil {
-				return nil, fmt.Errorf("decode Crew document: %w", err)
+			// Disambiguate legacy bundle (nested agents/skills/
+			// credentials/mcp_servers under spec) from the new top-
+			// level kind: Crew (just crew-row fields). Structural
+			// sniffing keeps existing YAML files working without
+			// requiring an apiVersion bump.
+			isLegacyBundle, err := crewSpecHasNestedSubresources(&raw)
+			if err != nil {
+				return nil, fmt.Errorf("probe Crew document: %w", err)
 			}
-			out.Documents = append(out.Documents, doc)
+			if isLegacyBundle {
+				var doc Document
+				if err := raw.Decode(&doc); err != nil {
+					return nil, fmt.Errorf("decode Crew bundle document: %w", err)
+				}
+				out.Documents = append(out.Documents, doc)
+			} else {
+				var doc kinds.CrewDocument
+				if err := raw.Decode(&doc); err != nil {
+					return nil, fmt.Errorf("decode top-level Crew document: %w", err)
+				}
+				out.Crews = append(out.Crews, doc)
+			}
+		case KindAgent:
+			var doc kinds.AgentDocument
+			if err := raw.Decode(&doc); err != nil {
+				return nil, fmt.Errorf("decode Agent document: %w", err)
+			}
+			out.Agents = append(out.Agents, doc)
+		case KindIntegration:
+			var doc kinds.IntegrationDocument
+			if err := raw.Decode(&doc); err != nil {
+				return nil, fmt.Errorf("decode Integration document: %w", err)
+			}
+			out.Integrations = append(out.Integrations, doc)
 		case KindWorkspace:
 			var doc WorkspaceDocument
 			if err := raw.Decode(&doc); err != nil {
@@ -290,10 +361,26 @@ func Load(data []byte) (*Bundle, error) {
 				return nil, fmt.Errorf("decode Hook document: %w", err)
 			}
 			out.Hooks = append(out.Hooks, doc)
+		case KindSkill:
+			var doc kinds.SkillDocument
+			if err := raw.Decode(&doc); err != nil {
+				return nil, fmt.Errorf("decode Skill document: %w", err)
+			}
+			// Inline body lands in spec.inline directly; path: bodies
+			// get pulled in below in resolveLocalReferences along with
+			// the legacy nested Skills. URL skills are deferred to
+			// apply-time so a validate-only pass stays offline.
+			out.Skills = append(out.Skills, doc)
+		case KindIssue:
+			var doc kinds.IssueDocument
+			if err := raw.Decode(&doc); err != nil {
+				return nil, fmt.Errorf("decode Issue document: %w", err)
+			}
+			out.Issues = append(out.Issues, doc)
 		case "":
-			return nil, errors.New("missing kind: (expected one of: Crew, Workspace, Project, Label, Milestone, WorkflowTemplate, TriageRule, RecurringIssue, SavedView, Routine, FeatureFlag, InstanceSetting, Recipe, CrewTemplate, Connector, Hook)")
+			return nil, errors.New("missing kind: (expected one of: Crew, Agent, Integration, Workspace, Project, Label, Milestone, WorkflowTemplate, TriageRule, RecurringIssue, SavedView, Routine, FeatureFlag, InstanceSetting, Recipe, CrewTemplate, Connector, Hook, Skill, Issue)")
 		default:
-			return nil, fmt.Errorf("unsupported kind %q (expected one of: Crew, Workspace, Project, Label, Milestone, WorkflowTemplate, TriageRule, RecurringIssue, SavedView, Routine, FeatureFlag, InstanceSetting, Recipe, CrewTemplate, Connector, Hook)", head.Kind)
+			return nil, fmt.Errorf("unsupported kind %q (expected one of: Crew, Agent, Integration, Workspace, Project, Label, Milestone, WorkflowTemplate, TriageRule, RecurringIssue, SavedView, Routine, FeatureFlag, InstanceSetting, Recipe, CrewTemplate, Connector, Hook, Skill, Issue)", head.Kind)
 		}
 	}
 
@@ -465,6 +552,37 @@ func (b *Bundle) resolveLocalReferences() error {
 			}
 		}
 	}
+
+	// Top-level `kind: Skill` documents (SPEC-2 shape, distinct from
+	// the legacy nested Skills above). Path bodies get pulled in via
+	// the kind's SetResolved hook so Validate stays offline. Inline
+	// bodies are decoded directly into spec.inline by the YAML
+	// dispatcher and don't need a separate resolution pass — we
+	// mirror them into resolved here so Plan can treat both source
+	// shapes uniformly, matching the SkillDocument contract.
+	for i := range b.Skills {
+		s := &b.Skills[i]
+		if s.Spec.Inline != "" {
+			s.SetResolved(s.Spec.Inline)
+			continue
+		}
+		if s.Spec.Path == "" {
+			// Empty path AND empty inline AND nil source URL is a
+			// Validate-time error; leave it for Validate to catch
+			// (here we'd otherwise emit a duplicate "missing source"
+			// message and confuse the failure phase reporting).
+			continue
+		}
+		abs, err := safeJoin(baseDir, s.Spec.Path)
+		if err != nil {
+			return fmt.Errorf("Skill %q: %w", s.Metadata.Slug, err)
+		}
+		body, err := readSkillFile(abs)
+		if err != nil {
+			return fmt.Errorf("Skill %q: read %s: %w", s.Metadata.Slug, s.Spec.Path, err)
+		}
+		s.SetResolved(body)
+	}
 	return nil
 }
 
@@ -534,4 +652,59 @@ func safeJoin(base, rel string) (string, error) {
 		return "", fmt.Errorf("path escapes manifest directory: %q", rel)
 	}
 	return full, nil
+}
+
+// crewSpecHasNestedSubresources peeks at a `kind: Crew` document's
+// spec block to decide whether it's the legacy bundle shape (which
+// nests agents / skills / credentials / mcp_servers under spec) or
+// the new top-level CrewDocument shape (crew-row fields only).
+//
+// Returns true if ANY of the four legacy sub-resource keys is
+// present at all (including `agents: []`) — an explicit empty list
+// is treated as legacy intent: the operator started a bundle and
+// just hasn't populated it yet.
+//
+// Walks the yaml.Node tree directly rather than decoding into a
+// struct so we (a) don't reject unknown sibling keys the way a
+// strict struct decode would and (b) treat sequence/scalar values
+// uniformly — `agents: []` and `agents: [foo]` both signal "this
+// is a bundle".
+func crewSpecHasNestedSubresources(raw *yaml.Node) (bool, error) {
+	root := raw
+	if root.Kind == yaml.DocumentNode {
+		if len(root.Content) == 0 {
+			return false, nil
+		}
+		root = root.Content[0]
+	}
+	if root.Kind != yaml.MappingNode {
+		return false, fmt.Errorf("expected mapping at document root, got kind %d", root.Kind)
+	}
+	specNode := mappingValueByKey(root, "spec")
+	if specNode == nil || specNode.Kind != yaml.MappingNode {
+		return false, nil
+	}
+	for _, key := range []string{"agents", "skills", "credentials", "mcp_servers"} {
+		if mappingValueByKey(specNode, key) != nil {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// mappingValueByKey returns the value node for the given scalar key
+// in a YAML mapping node, or nil if absent. Mapping nodes store
+// key/value pairs as a flat slice of length 2N — pairs at indices
+// (0,1), (2,3), etc.
+func mappingValueByKey(m *yaml.Node, key string) *yaml.Node {
+	if m == nil || m.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		k := m.Content[i]
+		if k.Kind == yaml.ScalarNode && k.Value == key {
+			return m.Content[i+1]
+		}
+	}
+	return nil
 }

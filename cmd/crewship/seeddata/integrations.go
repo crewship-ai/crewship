@@ -1,20 +1,27 @@
 package seeddata
 
-import "os"
+import (
+	"fmt"
+	"os"
+
+	"gopkg.in/yaml.v3"
+)
 
 // IntegrationDef defines a crew-level MCP server integration.
 type IntegrationDef struct {
-	Name        string
-	DisplayName string
-	Transport   string
-	Endpoint    string // for streamable-http
-	Command     string // for stdio
-	ArgsJSON    string // for stdio
-	EnvJSON     string // for stdio
-	CrewSlug    string // which crew to attach to
+	Name        string `yaml:"name"`
+	DisplayName string `yaml:"display_name"`
+	Transport   string `yaml:"transport"`
+	Endpoint    string `yaml:"endpoint,omitempty"`  // for streamable-http
+	Command     string `yaml:"command,omitempty"`   // for stdio
+	ArgsJSON    string `yaml:"args_json,omitempty"` // for stdio
+	EnvJSON     string `yaml:"env_json,omitempty"`  // for stdio
+	CrewSlug    string `yaml:"crew_slug"`           // which crew to attach to
 }
 
 // OAuthCredentialDef defines an OAuth2 credential for an MCP integration.
+// Built at runtime from env vars (SEED_LINEAR_OAUTH_*, SEED_GOOGLE_OAUTH_*)
+// so it intentionally does NOT live in YAML — secrets must not be on disk.
 type OAuthCredentialDef struct {
 	IntegrationName   string
 	CredName          string
@@ -26,26 +33,40 @@ type OAuthCredentialDef struct {
 	AccessToken       string // from env var, may be empty
 }
 
-var Integrations = []IntegrationDef{
-	{
-		Name: "linear", DisplayName: "Linear", Transport: "streamable-http",
-		Endpoint: "https://mcp.linear.app/mcp", CrewSlug: "engineering",
-	},
-	{
-		Name: "google-workspace", DisplayName: "Google Workspace", Transport: "stdio",
-		Command:  "npx",
-		ArgsJSON: `["-y", "@anthropic-ai/google-workspace-mcp"]`,
-		EnvJSON:  `{"GOOGLE_ACCESS_TOKEN": ""}`,
-		CrewSlug: "engineering",
-	},
+// Integrations — the MCP integrations attached to demo crews.
+//
+// Loaded from builtin/integrations.yaml at init time. Migrated from a
+// Go-literal list in F2 step 6.
+var Integrations = mustLoadIntegrations()
+
+func mustLoadIntegrations() []IntegrationDef {
+	data, err := builtinFS.ReadFile("builtin/integrations.yaml")
+	if err != nil {
+		panic(fmt.Sprintf("seeddata: read builtin/integrations.yaml: %v", err))
+	}
+	var doc struct {
+		Integrations []IntegrationDef `yaml:"integrations"`
+	}
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		panic(fmt.Sprintf("seeddata: parse builtin/integrations.yaml: %v", err))
+	}
+	if len(doc.Integrations) == 0 {
+		panic("seeddata: builtin/integrations.yaml decoded to zero integrations — schema drift?")
+	}
+	return doc.Integrations
 }
 
 // AgentBindingSlugs lists which agent slugs should be bound to engineering
-// crew integrations.
+// crew integrations. Stays as a Go slice (not YAML) because it's a
+// relationship list, not a data catalogue.
 var AgentBindingSlugs = []string{"tomas", "viktor", "nela", "martin"}
 
 // ResolveOAuthCredentials returns OAuth credential definitions for MCP
-// integrations, based on available environment variables.
+// integrations, based on available environment variables. Stays in Go
+// because reading env vars at YAML-load time would either freeze the
+// values at startup (wrong for tests that mutate env) or require a
+// template layer. The few dozen lines of env-lookup are clearer than
+// either alternative.
 func ResolveOAuthCredentials() []OAuthCredentialDef {
 	var creds []OAuthCredentialDef
 

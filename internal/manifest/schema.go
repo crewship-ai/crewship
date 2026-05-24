@@ -42,6 +42,8 @@ const APIVersion = "crewship/v1"
 // document types live under internal/manifest/kinds.
 const (
 	KindCrew             = "Crew"
+	KindAgent            = "Agent"
+	KindIntegration      = "Integration"
 	KindWorkspace        = "Workspace"
 	KindProject          = "Project"
 	KindLabel            = "Label"
@@ -57,6 +59,8 @@ const (
 	KindCrewTemplate     = "CrewTemplate"
 	KindConnector        = "Connector"
 	KindHook             = "Hook"
+	KindSkill            = "Skill"
+	KindIssue            = "Issue"
 )
 
 // Document is the discriminated top-level shape. apiVersion + kind

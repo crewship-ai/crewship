@@ -1,100 +1,47 @@
 package seeddata
 
+import (
+	"fmt"
+
+	"gopkg.in/yaml.v3"
+)
+
 // AgentDef defines an agent to seed. PromptSlug is used to load the system
 // prompt from the embedded prompts/ directory.
 type AgentDef struct {
-	Name           string
-	Slug           string
-	CrewSlug       string
-	RoleTitle      string
-	AgentRole      string
-	CLIAdapter     string
-	LLMProvider    string
-	LLMModel       string
-	ToolProfile    string
-	TimeoutSeconds int
-	MemoryEnabled  bool
-	PromptSlug     string // matches prompts/{slug}.md
+	Name           string `yaml:"name"`
+	Slug           string `yaml:"slug"`
+	CrewSlug       string `yaml:"crew_slug"`
+	RoleTitle      string `yaml:"role_title"`
+	AgentRole      string `yaml:"agent_role"`
+	CLIAdapter     string `yaml:"cli_adapter"`
+	LLMProvider    string `yaml:"llm_provider"`
+	LLMModel       string `yaml:"llm_model"`
+	ToolProfile    string `yaml:"tool_profile"`
+	TimeoutSeconds int    `yaml:"timeout_seconds"`
+	MemoryEnabled  bool   `yaml:"memory_enabled"`
+	PromptSlug     string `yaml:"prompt_slug"` // matches prompts/{slug}.md
 }
 
-var Agents = []AgentDef{
-	// Engineering crew
-	{
-		Name: "Thomas", Slug: "tomas", CrewSlug: "engineering",
-		RoleTitle: "Technical Architect", AgentRole: "LEAD",
-		CLIAdapter: "CLAUDE_CODE", LLMProvider: "ANTHROPIC", LLMModel: "claude-haiku-4-5",
-		ToolProfile: "FULL", TimeoutSeconds: 3600, MemoryEnabled: true, PromptSlug: "tomas",
-	},
-	{
-		Name: "Viktor", Slug: "viktor", CrewSlug: "engineering",
-		RoleTitle: "Backend Engineer", AgentRole: "AGENT",
-		CLIAdapter: "CLAUDE_CODE", LLMProvider: "ANTHROPIC", LLMModel: "claude-haiku-4-5",
-		ToolProfile: "CODING", TimeoutSeconds: 1800, MemoryEnabled: true, PromptSlug: "viktor",
-	},
-	{
-		Name: "Nela", Slug: "nela", CrewSlug: "engineering",
-		RoleTitle: "Frontend Engineer", AgentRole: "AGENT",
-		CLIAdapter: "CLAUDE_CODE", LLMProvider: "ANTHROPIC", LLMModel: "claude-haiku-4-5",
-		ToolProfile: "CODING", TimeoutSeconds: 1800, MemoryEnabled: true, PromptSlug: "nela",
-	},
-	{
-		Name: "Martin", Slug: "martin", CrewSlug: "engineering",
-		RoleTitle: "Infrastructure Engineer", AgentRole: "AGENT",
-		CLIAdapter: "CLAUDE_CODE", LLMProvider: "ANTHROPIC", LLMModel: "claude-haiku-4-5",
-		ToolProfile: "CODING", TimeoutSeconds: 2400, MemoryEnabled: true, PromptSlug: "martin",
-	},
+// Agents — the 12 demo agents seeded into a fresh workspace.
+//
+// Loaded from builtin/agents.yaml at init time. Migrated from a Go-literal
+// list in F2 step 6.
+var Agents = mustLoadAgents()
 
-	// Quality crew
-	{
-		Name: "Eva", Slug: "eva", CrewSlug: "quality",
-		RoleTitle: "Quality Director", AgentRole: "LEAD",
-		CLIAdapter: "CLAUDE_CODE", LLMProvider: "ANTHROPIC", LLMModel: "claude-haiku-4-5",
-		ToolProfile: "FULL", TimeoutSeconds: 3600, MemoryEnabled: true, PromptSlug: "eva",
-	},
-	{
-		Name: "Daniel", Slug: "daniel", CrewSlug: "quality",
-		RoleTitle: "Code Reviewer", AgentRole: "AGENT",
-		CLIAdapter: "CLAUDE_CODE", LLMProvider: "ANTHROPIC", LLMModel: "claude-haiku-4-5",
-		ToolProfile: "MINIMAL", TimeoutSeconds: 1800, MemoryEnabled: true, PromptSlug: "daniel",
-	},
-	{
-		Name: "Petra", Slug: "petra", CrewSlug: "quality",
-		RoleTitle: "Test Engineer", AgentRole: "AGENT",
-		CLIAdapter: "CLAUDE_CODE", LLMProvider: "ANTHROPIC", LLMModel: "claude-haiku-4-5",
-		ToolProfile: "CODING", TimeoutSeconds: 2400, MemoryEnabled: true, PromptSlug: "petra",
-	},
-	{
-		Name: "Jakub", Slug: "jakub", CrewSlug: "quality",
-		RoleTitle: "Security Analyst", AgentRole: "AGENT",
-		CLIAdapter: "CLAUDE_CODE", LLMProvider: "ANTHROPIC", LLMModel: "claude-haiku-4-5",
-		ToolProfile: "MINIMAL", TimeoutSeconds: 2400, MemoryEnabled: true, PromptSlug: "jakub",
-	},
-
-	// DevOps crew
-	{
-		Name: "Oliver", Slug: "ondrej", CrewSlug: "devops",
-		RoleTitle: "SRE Lead", AgentRole: "LEAD",
-		CLIAdapter: "CLAUDE_CODE", LLMProvider: "ANTHROPIC", LLMModel: "claude-haiku-4-5",
-		ToolProfile: "FULL", TimeoutSeconds: 3600, MemoryEnabled: true, PromptSlug: "ondrej",
-	},
-	{
-		Name: "Radek", Slug: "radek", CrewSlug: "devops",
-		RoleTitle: "Platform Engineer", AgentRole: "AGENT",
-		CLIAdapter: "CLAUDE_CODE", LLMProvider: "ANTHROPIC", LLMModel: "claude-haiku-4-5",
-		ToolProfile: "CODING", TimeoutSeconds: 2400, MemoryEnabled: true, PromptSlug: "radek",
-	},
-
-	// Research crew
-	{
-		Name: "Lucy", Slug: "lucie", CrewSlug: "research",
-		RoleTitle: "Research Director", AgentRole: "LEAD",
-		CLIAdapter: "CLAUDE_CODE", LLMProvider: "ANTHROPIC", LLMModel: "claude-haiku-4-5",
-		ToolProfile: "FULL", TimeoutSeconds: 3600, MemoryEnabled: true, PromptSlug: "lucie",
-	},
-	{
-		Name: "Filip", Slug: "filip", CrewSlug: "research",
-		RoleTitle: "Data Analyst", AgentRole: "AGENT",
-		CLIAdapter: "CLAUDE_CODE", LLMProvider: "ANTHROPIC", LLMModel: "claude-haiku-4-5",
-		ToolProfile: "CODING", TimeoutSeconds: 2400, MemoryEnabled: true, PromptSlug: "filip",
-	},
+func mustLoadAgents() []AgentDef {
+	data, err := builtinFS.ReadFile("builtin/agents.yaml")
+	if err != nil {
+		panic(fmt.Sprintf("seeddata: read builtin/agents.yaml: %v", err))
+	}
+	var doc struct {
+		Agents []AgentDef `yaml:"agents"`
+	}
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		panic(fmt.Sprintf("seeddata: parse builtin/agents.yaml: %v", err))
+	}
+	if len(doc.Agents) == 0 {
+		panic("seeddata: builtin/agents.yaml decoded to zero agents — schema drift?")
+	}
+	return doc.Agents
 }

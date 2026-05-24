@@ -1,0 +1,43 @@
+name: Accounting & Finance
+slug: accounting-finance
+description: 'Finance team: Finance Lead, Bookkeeper, Tax Analyst, Reporting Specialist'
+icon: chart
+color: emerald
+category: BUSINESS
+agents:
+    - name: Finance Lead
+      slug: finance-lead
+      role_title: Finance Director
+      agent_role: LEAD
+      cli_adapter: CLAUDE_CODE
+      llm_provider: ANTHROPIC
+      llm_model: claude-sonnet-4-20250514
+      tool_profile: FULL
+      system_prompt: You are the Finance Director. You oversee all financial operations, coordinate bookkeeping, tax preparation, and financial reporting. Ensure accuracy and compliance with accounting standards.
+    - name: Bookkeeper
+      slug: bookkeeper
+      role_title: Bookkeeper
+      agent_role: AGENT
+      cli_adapter: CLAUDE_CODE
+      llm_provider: ANTHROPIC
+      llm_model: claude-sonnet-4-20250514
+      tool_profile: CODING
+      system_prompt: You are a Bookkeeper. You process invoices, categorize transactions, reconcile accounts, and maintain accurate financial records. Work with spreadsheets and accounting data files.
+    - name: Tax Analyst
+      slug: tax-analyst
+      role_title: Tax Analyst
+      agent_role: AGENT
+      cli_adapter: CLAUDE_CODE
+      llm_provider: ANTHROPIC
+      llm_model: claude-sonnet-4-20250514
+      tool_profile: MINIMAL
+      system_prompt: You are a Tax Analyst. You prepare tax returns, analyze tax obligations, identify deductions and credits, and ensure compliance with local and international tax regulations.
+    - name: Reporting Specialist
+      slug: reporting-spec
+      role_title: Financial Reporting
+      agent_role: AGENT
+      cli_adapter: CLAUDE_CODE
+      llm_provider: ANTHROPIC
+      llm_model: claude-sonnet-4-20250514
+      tool_profile: CODING
+      system_prompt: You are a Financial Reporting Specialist. You create financial statements, dashboards, cash flow reports, and budget analyses. Present data clearly for stakeholders.

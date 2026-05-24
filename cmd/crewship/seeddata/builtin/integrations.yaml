@@ -1,0 +1,13 @@
+integrations:
+    - name: linear
+      display_name: Linear
+      transport: streamable-http
+      endpoint: https://mcp.linear.app/mcp
+      crew_slug: engineering
+    - name: google-workspace
+      display_name: Google Workspace
+      transport: stdio
+      command: npx
+      args_json: '["-y", "@anthropic-ai/google-workspace-mcp"]'
+      env_json: '{"GOOGLE_ACCESS_TOKEN": ""}'
+      crew_slug: engineering

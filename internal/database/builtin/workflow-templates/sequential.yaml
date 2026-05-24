@@ -1,0 +1,33 @@
+# Built-in workflow template: sequential execution.
+#
+# Loaded into workflow_templates at first list access by
+# SeedBuiltinTemplates. The is_builtin=1 marker on the resulting row
+# is what tells the manifest export pipeline to skip these (so an
+# exported workspace bundle never tries to overwrite server-owned
+# rows).
+#
+# Schema mirrors templateDef in internal/database/seed_templates.go;
+# the loader uses yaml.Unmarshal against the same struct so a field
+# added here lands on disk without any Go code change.
+
+name: sequential
+description: Tasks execute one after another in order
+icon: arrow-right
+color: "#3b82f6"
+template:
+  name: sequential
+  description: Tasks execute one after another in order
+  steps:
+    - id: step-1
+      title: Step 1
+      agent_role: agent
+    - id: step-2
+      title: Step 2
+      agent_role: agent
+      depends_on:
+        - step-1
+    - id: step-3
+      title: Step 3
+      agent_role: agent
+      depends_on:
+        - step-2

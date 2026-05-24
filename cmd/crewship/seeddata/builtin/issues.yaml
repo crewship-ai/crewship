@@ -1,0 +1,248 @@
+issues:
+    - crew_slug: engineering
+      assignee: martin
+      title: Ping google.com 5 times and save results
+      description: |-
+        Run ping -c 5 google.com inside the container.
+        Save the full output to /tmp/ping-google.txt.
+        Report the average round-trip time in a summary.
+      priority: high
+      project: Network Probes
+    - crew_slug: engineering
+      assignee: martin
+      title: Check HTTP status of 5 popular websites
+      description: |-
+        Use curl to check the HTTP status code of these URLs:
+        - https://google.com
+        - https://github.com
+        - https://api.anthropic.com
+        - https://httpbin.org/status/200
+        - https://httpbin.org/status/404
+
+        Save results as a CSV file: /tmp/http-status.csv with columns: url,status_code,response_time_ms
+      priority: medium
+      project: Network Probes
+    - crew_slug: devops
+      assignee: radek
+      title: Trace DNS resolution for 3 domains
+      description: |-
+        Resolve these domains and save the results:
+        - api.anthropic.com
+        - github.com
+        - registry.npmjs.org
+
+        For each domain, record the IP addresses returned.
+        Save output to /tmp/dns-results.txt with format: domain -> ip1, ip2, ...
+      priority: medium
+      project: Network Probes
+    - crew_slug: devops
+      assignee: radek
+      title: Measure download speed with a 1MB test file
+      description: |-
+        Download a 1MB test file from https://httpbin.org/bytes/1048576 using curl.
+        Measure and report the download time and speed.
+        Save the timing info to /tmp/speed-test.txt.
+        Delete the downloaded file after measuring.
+      priority: low
+      project: Network Probes
+    - crew_slug: engineering
+      assignee: viktor
+      title: Create a directory tree with sample files
+      description: |-
+        Create the following directory structure under /tmp/demo-project/:
+          /tmp/demo-project/
+            README.md        (with project name and date)
+            src/
+              main.py        (simple hello world)
+              utils.py       (a helper function)
+            tests/
+              test_main.py   (a basic test)
+            data/
+              config.json    (sample config with 3 keys)
+
+        Verify all files exist and list the tree.
+      priority: high
+      project: File Operations
+    - crew_slug: engineering
+      assignee: nela
+      title: Generate a CSV report with random data
+      description: |-
+        Create a Python script that generates a CSV file with 50 rows of sample data.
+        Columns: id, name, email, score (random 0-100), status (active/inactive).
+        Save the script as /tmp/generate-data.py and run it.
+        Output CSV should be at /tmp/sample-data.csv.
+        Print the first 5 rows and a summary (total rows, average score).
+      priority: medium
+      project: File Operations
+    - crew_slug: quality
+      assignee: petra
+      title: Write a log parser that extracts errors
+      description: |-
+        Create a bash script /tmp/log-parser.sh that:
+        1. Generates a sample log file /tmp/app.log with 100 lines (mix of INFO, WARN, ERROR)
+        2. Extracts all ERROR lines into /tmp/errors.txt
+        3. Counts occurrences of each log level
+        4. Prints a summary: total lines, errors, warnings, info
+
+        Run the script and verify the output.
+      priority: medium
+      project: File Operations
+    - crew_slug: research
+      assignee: filip
+      title: Fetch and parse the Hacker News front page
+      description: |-
+        Use curl to download https://news.ycombinator.com/ (HTML).
+        Parse the response to extract the top 10 story titles.
+        Save to /tmp/hackernews-top10.txt with format:
+          1. Story title here
+          2. Another story
+          ...
+
+        Note: Use grep/sed/awk for parsing, no external libraries needed.
+      priority: high
+      project: Web Scraping
+    - crew_slug: research
+      assignee: filip
+      title: Fetch current weather data from wttr.in
+      description: |-
+        Use curl to fetch weather for Prague from wttr.in:
+          curl -s "wttr.in/Prague?format=j1"
+
+        Parse the JSON response and extract:
+        - Current temperature
+        - Weather description
+        - Wind speed
+        - Humidity
+
+        Save a human-readable summary to /tmp/weather-prague.txt
+      priority: medium
+      project: Web Scraping
+    - crew_slug: research
+      assignee: lucie
+      title: Download and analyze a public JSON API
+      description: |-
+        Fetch a list of users from https://jsonplaceholder.typicode.com/users
+        Parse the JSON and create a report /tmp/users-report.txt with:
+        - Total number of users
+        - List of all usernames and cities
+        - Users grouped by company name
+
+        Use curl + python3 or jq for parsing.
+      priority: low
+      project: Web Scraping
+    - crew_slug: engineering
+      assignee: viktor
+      title: Write a Python script that generates Fibonacci
+      description: |-
+        Create /tmp/fibonacci.py that:
+        1. Takes an argument N (default 20)
+        2. Prints the first N Fibonacci numbers
+        3. Calculates the golden ratio approximation from the last two numbers
+
+        Run it with N=20 and save output to /tmp/fibonacci-output.txt
+      priority: high
+      project: Script Factory
+    - crew_slug: engineering
+      assignee: nela
+      title: Create a bash system info collector
+      description: |-
+        Write /tmp/sysinfo.sh that collects and saves to /tmp/sysinfo.txt:
+        - Hostname and OS info (uname -a)
+        - Current date and uptime
+        - Disk usage (df -h)
+        - Memory usage (free -m or /proc/meminfo)
+        - Running processes count
+        - Network interfaces and IPs
+        - Environment variables count
+
+        Make it executable and run it.
+      priority: medium
+      project: Script Factory
+    - crew_slug: quality
+      assignee: daniel
+      title: Write and run a simple test suite in bash
+      description: |-
+        Create /tmp/test-suite.sh — a minimal test framework in bash.
+        Define at least 5 test cases:
+        1. Test that /tmp exists and is writable
+        2. Test that curl is available
+        3. Test that python3 is available
+        4. Test that DNS resolution works (nslookup google.com)
+        5. Test that /etc/hostname is readable
+
+        Output format: [PASS] or [FAIL] for each test, with a summary at the end.
+        Run the test suite and save results to /tmp/test-results.txt
+      priority: medium
+      project: Script Factory
+    - crew_slug: devops
+      assignee: ondrej
+      title: Inventory all installed tools in the container
+      description: |-
+        Check which common tools are available in the container:
+        curl, wget, python3, node, git, jq, sed, awk, grep, tar, gzip, ssh, ping, nslookup, dig
+
+        Save a report to /tmp/tool-inventory.txt with:
+        - Tool name, path, version (if available)
+        - Mark as AVAILABLE or MISSING
+
+        This helps us know what agents can use.
+      priority: low
+      project: System Info
+    - crew_slug: devops
+      assignee: jakub
+      title: Map container resource limits and environment
+      description: |-
+        Collect container environment info and save to /tmp/container-info.txt:
+        - CPU count (nproc)
+        - Memory total and available (/proc/meminfo)
+        - Disk space (df -h /)
+        - Container ID (hostname or /proc/1/cgroup)
+        - User ID and groups (id)
+        - Network interfaces (ip addr or ifconfig)
+        - Mounted filesystems (mount)
+        - Key environment variables (HOME, PATH, USER)
+      priority: low
+      project: System Info
+labels:
+    - name: Network
+      color: '#3B82F6'
+    - name: Filesystem
+      color: '#22C55E'
+    - name: Scripting
+      color: '#A855F7'
+    - name: Data
+      color: '#F97316'
+    - name: Monitoring
+      color: '#EAB308'
+    - name: Web
+      color: '#06B6D4'
+    - name: Automation
+      color: '#EC4899'
+    - name: Quick
+      color: '#6B7280'
+projects:
+    - name: Network Probes
+      color: '#3B82F6'
+      icon: wifi
+      status: in_progress
+      priority: high
+    - name: File Operations
+      color: '#22C55E'
+      icon: file-text
+      status: in_progress
+      priority: high
+    - name: Web Scraping
+      color: '#06B6D4'
+      icon: globe
+      status: in_progress
+      priority: medium
+    - name: Script Factory
+      color: '#A855F7'
+      icon: terminal
+      status: in_progress
+      priority: medium
+    - name: System Info
+      color: '#F97316'
+      icon: cpu
+      status: planned
+      priority: low

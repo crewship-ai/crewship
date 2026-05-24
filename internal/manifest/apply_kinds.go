@@ -69,6 +69,25 @@ func (pb *planBuilder) planNewKinds(ctx context.Context, b *Bundle) error {
 		pb.appendKindItems(items)
 	}
 
+	// Phase 4.5: Skills (no FK deps; agents reference them but the
+	// agent docs run later in the legacy crew-bundle path). Placed
+	// after Label so the topological order matches: "foundations
+	// (Project/Label/Skill) before structure (Milestone, Routine,
+	// etc.) before bindings". A per-doc remote lookup so Plan can
+	// emit Update on metadata drift.
+	for i := range b.Skills {
+		doc := &b.Skills[i]
+		remote, err := kinds.LookupSkillRemoteBySlug(ctx, c, doc.Metadata.Slug)
+		if err != nil {
+			return fmt.Errorf("skill %q: lookup remote: %w", doc.Metadata.Slug, err)
+		}
+		items, err := doc.Plan(ctx, c, remote)
+		if err != nil {
+			return fmt.Errorf("skill %q: plan: %w", doc.Metadata.Slug, err)
+		}
+		pb.appendKindItems(items)
+	}
+
 	// Phase 5: Milestones (deps: Projects)
 	for i := range b.Milestones {
 		doc := &b.Milestones[i]
@@ -180,6 +199,88 @@ func (pb *planBuilder) planNewKinds(ctx context.Context, b *Bundle) error {
 		pb.appendKindItems(items)
 	}
 
+	// Phase 14.1: Crews (top-level, no nested-bundle shape). Must
+	// land before Agent/Integration so FK refs in agent/integration
+	// docs (`crew_slug:`) can resolve. Legacy bundle Crew (with
+	// nested agents/skills) is dispatched elsewhere via b.Documents.
+	for i := range b.Crews {
+		doc := &b.Crews[i]
+		remote, err := kinds.LookupCrewRemoteBySlug(ctx, c, doc.Metadata.Slug)
+		if err != nil {
+			return fmt.Errorf("crew %q: lookup remote: %w", doc.Metadata.Slug, err)
+		}
+		items, err := doc.Plan(ctx, c, remote)
+		if err != nil {
+			return fmt.Errorf("crew %q: plan: %w", doc.Metadata.Slug, err)
+		}
+		pb.appendKindItems(items)
+	}
+
+	// Phase 14.2: Agents (deps: Crew). Top-level kind only — agents
+	// nested inside a legacy Crew bundle still flow through
+	// b.Documents and the existing crew/workspace planner.
+	for i := range b.Agents {
+		doc := &b.Agents[i]
+		remote, err := kinds.LookupAgentRemoteBySlug(ctx, c, doc.Metadata.Slug)
+		if err != nil {
+			return fmt.Errorf("agent %q: lookup remote: %w", doc.Metadata.Slug, err)
+		}
+		items, err := doc.Plan(ctx, c, remote)
+		if err != nil {
+			return fmt.Errorf("agent %q: plan: %w", doc.Metadata.Slug, err)
+		}
+		pb.appendKindItems(items)
+	}
+
+	// Phase 14.3: Integrations (deps: Crew when spec.crew_slug set,
+	// otherwise workspace-scoped). LookupIntegrationRemoteBySlug
+	// takes the scope + crew_slug from the doc so a workspace-
+	// integration with the same slug as a crew-scoped one doesn't
+	// alias.
+	for i := range b.Integrations {
+		doc := &b.Integrations[i]
+		scope := doc.Spec.Scope
+		if scope == "" {
+			if doc.Spec.CrewSlug != "" {
+				scope = "crew"
+			} else {
+				scope = "workspace"
+			}
+		}
+		remote, err := kinds.LookupIntegrationRemoteBySlug(ctx, c, doc.Metadata.Slug, scope, doc.Spec.CrewSlug)
+		if err != nil {
+			return fmt.Errorf("integration %q: lookup remote: %w", doc.Metadata.Slug, err)
+		}
+		items, err := doc.Plan(ctx, c, remote)
+		if err != nil {
+			return fmt.Errorf("integration %q: plan: %w", doc.Metadata.Slug, err)
+		}
+		pb.appendKindItems(items)
+	}
+
+	// Phase 14.5: Issues (deps: Crew + optional Project / Agent / Labels).
+	// Crew-scoped — drift detection matches (crew_id, title) because
+	// the missions table has no slug column; the kind's
+	// LookupIssueRemoteBySlug consumes the resolved title here.
+	// Title fallback (spec.title || metadata.name) is inlined to keep
+	// the kind's resolvedTitle helper unexported.
+	for i := range b.Issues {
+		doc := &b.Issues[i]
+		title := doc.Spec.Title
+		if title == "" {
+			title = doc.Metadata.Name
+		}
+		remote, err := kinds.LookupIssueRemoteBySlug(ctx, c, doc.Metadata.Slug, doc.Spec.CrewSlug, title)
+		if err != nil {
+			return fmt.Errorf("issue %q: lookup remote: %w", doc.Metadata.Slug, err)
+		}
+		items, err := doc.Plan(ctx, c, remote)
+		if err != nil {
+			return fmt.Errorf("issue %q: plan: %w", doc.Metadata.Slug, err)
+		}
+		pb.appendKindItems(items)
+	}
+
 	// Phase 15: TriageRules (deps: Projects, Labels, Crews)
 	for i := range b.TriageRules {
 		doc := &b.TriageRules[i]
@@ -229,6 +330,21 @@ func validateAllKinds(b *Bundle, wsCtx internalapi.WorkspaceContext) error {
 	}
 	for i := range b.Labels {
 		check(b.Labels[i].Metadata.Slug, b.Labels[i].Validate(wsCtx))
+	}
+	for i := range b.Skills {
+		check(b.Skills[i].Metadata.Slug, b.Skills[i].Validate(wsCtx))
+	}
+	for i := range b.Crews {
+		check(b.Crews[i].Metadata.Slug, b.Crews[i].Validate(wsCtx))
+	}
+	for i := range b.Agents {
+		check(b.Agents[i].Metadata.Slug, b.Agents[i].Validate(wsCtx))
+	}
+	for i := range b.Integrations {
+		check(b.Integrations[i].Metadata.Slug, b.Integrations[i].Validate(wsCtx))
+	}
+	for i := range b.Issues {
+		check(b.Issues[i].Metadata.Slug, b.Issues[i].Validate(wsCtx))
 	}
 	for i := range b.Milestones {
 		check(b.Milestones[i].Metadata.Slug, b.Milestones[i].Validate(wsCtx))

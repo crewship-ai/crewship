@@ -215,6 +215,7 @@ func kindOrder(kind string, action Action) int {
 		// foundations first, automation last, hooks at the very end.
 		"Project":          10,
 		"Label":            10, // parallel to Project — neither depends on the other
+		"Skill":            10, // parallel — agents reference, but agents live in legacy bundle
 		"Milestone":        11, // depends on Project
 		"WorkflowTemplate": 12,
 		"FeatureFlag":      13,
@@ -226,6 +227,7 @@ func kindOrder(kind string, action Action) int {
 		"Schedule":         19, // nested under Routine
 		"Webhook":          19,
 		"RecurringIssue":   20, // depends on Project + Label + Crew
+		"Issue":            20, // depends on Crew + optional Project / Agent / Labels
 		"TriageRule":       21, // depends on Project + Label + Crew
 		"SavedView":        22, // depends on Label + Project
 		"Hook":             23, // toggles existing rows
