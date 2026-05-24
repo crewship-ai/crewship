@@ -1,6 +1,9 @@
 package telemetry
 
-import "testing"
+import (
+	"os"
+	"testing"
+)
 
 // TestServiceNameFromEnv documents the three-step resolution explicitly:
 // env wins, fallback fills the gap, and "crewship" is the last-resort
@@ -54,14 +57,25 @@ func TestServiceNameFromEnv(t *testing.T) {
 
 // TestServiceNameFromEnv_UnsetEnv covers the case where the var has
 // never been set in the test environment at all (vs. set-but-empty).
-// t.Setenv("", "") would set it to empty; here we want truly absent.
+// t.Setenv("", "") sets the var to empty rather than removing it, so
+// it exercises a different code path (LookupEnv returns ok=true with
+// value=""). To actually test the "var absent" branch we have to
+// os.Unsetenv it ourselves, then restore the prior value in a manual
+// cleanup hook — t.Setenv has no "unset" mode.
 func TestServiceNameFromEnv_UnsetEnv(t *testing.T) {
-	t.Setenv(serviceNameEnv, "") // ensure clean state
-	// Unset explicitly via the same env name — t.Setenv with "" still
-	// leaves it set to empty string, which is what we want for this
-	// assertion: empty env should behave the same as missing env.
+	prev, hadPrev := os.LookupEnv(serviceNameEnv)
+	if err := os.Unsetenv(serviceNameEnv); err != nil {
+		t.Fatalf("unset %s: %v", serviceNameEnv, err)
+	}
+	t.Cleanup(func() {
+		if hadPrev {
+			_ = os.Setenv(serviceNameEnv, prev)
+			return
+		}
+		_ = os.Unsetenv(serviceNameEnv)
+	})
 	if got := ServiceNameFromEnv("crewship-test"); got != "crewship-test" {
-		t.Errorf("ServiceNameFromEnv with empty env = %q; want fallback %q",
+		t.Errorf("ServiceNameFromEnv with unset env = %q; want fallback %q",
 			got, "crewship-test")
 	}
 }
