@@ -4,14 +4,11 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
-	"crypto/subtle"
 	"database/sql"
 	"encoding/hex"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -31,26 +28,20 @@ type AuthHandler struct {
 	sessions    sessions.Store
 	allowSignup bool
 
-	// setupTokenMu guards setupToken. The token is created once at startup
-	// when the users table is empty, logged to stderr, and consumed exactly
-	// once by the first /bootstrap caller who passes it back via the
-	// X-Setup-Token header. After consumption it is zeroed in memory.
-	// All other states (DB already initialized, server restart after
-	// bootstrap) leave setupToken == "" which makes Bootstrap unconditionally
-	// refuse — no rate-limit-bypass to win the race.
+	// bootstrapDeadline is the timestamp after which POST /api/v1/bootstrap
+	// stops accepting requests on an empty database. Set by ArmDeployRaceWindow
+	// at server start (defaults to 5 minutes) — matches Portainer's first-
+	// run window. The operator hits /bootstrap from a browser, completes
+	// the form, and the deadline becomes moot the moment users.count > 0.
+	// If the window elapses without a bootstrap, the server starts refusing
+	// /bootstrap requests with a clear "expired, please restart" error so
+	// an internet-reachable instance that nobody bootstrapped doesn't sit
+	// permanently open to whichever scanner finds the URL first.
 	//
-	// setupTokenPath is the on-disk mirror (GitLab `initial_root_password`
-	// convention): the token is also written to a 0600 file under the data
-	// directory so the operator can `cat` it from their SSH session instead
-	// of trawling journald. Auto-deleted on successful consumption AND on
-	// process restart after a successful bootstrap (the file is checked at
-	// arm time; if the users table is non-empty, any leftover file gets
-	// purged). Empty when MaybeGenerateSetupToken wasn't called with a
-	// data dir, in which case the in-memory token still works — the file
-	// is a UX add-on, not the source of truth.
-	setupTokenMu   sync.Mutex
-	setupToken     string
-	setupTokenPath string
+	// Zero value = no window armed (handler unconditionally open). Tests
+	// rely on this; production always arms via ArmDeployRaceWindow.
+	bootstrapMu       sync.Mutex
+	bootstrapDeadline time.Time
 }
 
 // NewAuthHandler creates an AuthHandler with the given dependencies and signup configuration.
@@ -59,169 +50,82 @@ func NewAuthHandler(db *sql.DB, logger *slog.Logger, validator *auth.JWTValidato
 	return &AuthHandler{db: db, logger: logger, validator: validator, sessions: sessionsStore, allowSignup: allowSignup}
 }
 
-// initialSetupTokenFilename mirrors the GitLab `initial_root_password`
-// convention. Written under the configured data dir at mode 0600 with
-// owner-only access; auto-deleted on first successful bootstrap. The
-// content is just the token with a one-line header so a sysadmin who
-// `cat`s the file sees what it's for and that it's one-shot.
-const initialSetupTokenFilename = "initial_setup_token"
+// defaultBootstrapWindow matches Portainer's 5-minute first-run window
+// — long enough for a human operator to open the URL after starting
+// the server, short enough that an unbootstrapped instance left
+// running on a public IP doesn't sit indefinitely open.
+const defaultBootstrapWindow = 5 * time.Minute
 
-// MaybeGenerateSetupToken inspects the users table at startup. When it is
-// empty, generates a one-shot setup token, stores it in memory, writes a
-// mirror copy to <dataDir>/initial_setup_token (mode 0600), and logs it
-// at WARN. The next caller of /api/v1/bootstrap must echo this token as
-// X-Setup-Token or the request is refused.
+// ArmDeployRaceWindow opens the bootstrap window for the configured
+// duration when the users table is empty. Called from server.New
+// before the HTTP listener accepts traffic.
 //
-// Convention follows GitLab's initial_root_password / Gitea's
-// installer-token model: operator either pulls the token from the
-// process log (journald, systemd, Docker logs) OR reads the file via
-// SSH. Both paths reveal the same value; the file is the more
-// ergonomic of the two for cloud-VM deployments where journald can be
-// noisy. On successful bootstrap the in-memory token is zeroed AND the
-// file is removed.
+// Convention follows Portainer: bootstrap is open for a fixed window
+// after startup; outside that window the handler refuses. The operator
+// who started the server is expected to open the bootstrap URL within
+// the window — typically seconds after `crewship start`. An operator
+// who needs a longer window passes a larger duration; CI and Docker
+// Compose deploys bypass the form entirely via the env-var overrides
+// honoured by the Bootstrap handler.
 //
-// dataDir mirrors the directory the secrets package uses; pass "" to
-// keep the token in memory only (handler-only tests, embedded modes).
-//
-// When the users table is already non-empty, this also REMOVES any
-// leftover initial_setup_token file from a previous incomplete
-// bootstrap — keeps the on-disk state honest after the admin row
-// finally lands via /signup, password reset, or an out-of-band write.
-//
-// Called from server.New after the DB is wired and before the HTTP server
-// starts accepting traffic. Safe to call concurrently; only the first
-// invocation observing an empty DB generates a token.
-func (h *AuthHandler) MaybeGenerateSetupToken(ctx context.Context, dataDir string) error {
-	h.setupTokenMu.Lock()
-	defer h.setupTokenMu.Unlock()
-	if h.setupToken != "" {
-		return nil
+// When users.count > 0 this is a no-op: bootstrap is already closed
+// because Bootstrap itself refuses with 410 once a user exists.
+func (h *AuthHandler) ArmDeployRaceWindow(ctx context.Context, window time.Duration) error {
+	if window <= 0 {
+		window = defaultBootstrapWindow
 	}
 	var count int
 	if err := h.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM users").Scan(&count); err != nil {
 		return err
 	}
 	if count > 0 {
-		// Already bootstrapped — purge any leftover file from a
-		// previous run that crashed between writing the file and the
-		// first /bootstrap call. Leaving it on disk would be a stale
-		// token + a misleading UX cue. Best-effort: a missing file is
-		// fine, anything else gets logged but doesn't fail startup.
-		if dataDir != "" {
-			path := filepath.Join(dataDir, initialSetupTokenFilename)
-			if rmErr := os.Remove(path); rmErr != nil && !os.IsNotExist(rmErr) {
-				h.logger.Warn("could not remove stale setup-token file",
-					"path", path, "error", rmErr)
-			}
-		}
+		// Already bootstrapped — no window needed.
 		return nil
 	}
-	buf := make([]byte, 32)
-	if _, err := rand.Read(buf); err != nil {
-		return err
-	}
-	h.setupToken = hex.EncodeToString(buf)
+	h.bootstrapMu.Lock()
+	h.bootstrapDeadline = time.Now().Add(window)
+	deadline := h.bootstrapDeadline
+	h.bootstrapMu.Unlock()
 
-	// Mirror to disk if a data dir is configured. We deliberately
-	// don't fail the arm step on a write error — the in-memory token
-	// is the source of truth, and an operator who can read journald
-	// still gets a working bootstrap. The warning makes the partial
-	// state visible.
-	if dataDir != "" {
-		if err := os.MkdirAll(dataDir, 0o700); err != nil {
-			h.logger.Warn("could not create data dir for setup-token file",
-				"path", dataDir, "error", err)
-		} else {
-			path := filepath.Join(dataDir, initialSetupTokenFilename)
-			content := fmt.Sprintf(
-				"# crewship: one-shot bootstrap token — DO NOT COMMIT, DO NOT SHARE\n"+
-					"# Use ONCE as X-Setup-Token header on POST /api/v1/bootstrap.\n"+
-					"# Auto-deleted on first successful bootstrap.\n"+
-					"#\n"+
-					"%s\n",
-				h.setupToken)
-			// 0600 — owner-only read, no group, no other. Same mode as
-			// secrets.env. The file lives next to it so an operator
-			// who tightened access on the data dir already covers this.
-			if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-				h.logger.Warn("could not persist setup-token file",
-					"path", path, "error", err,
-					"fallback", "operator must read token from process log instead")
-			} else {
-				h.setupTokenPath = path
-			}
-		}
+	publicURL := strings.TrimRight(os.Getenv("CREWSHIP_PUBLIC_URL"), "/")
+	if publicURL == "" {
+		publicURL = "http://localhost:8080"
 	}
-
-	// Triple-log: stderr + slog WARN + on its own line so even a busy
-	// startup log isn't likely to swallow it. The operator has to see this.
-	//
-	// When a 0600 file was successfully written, the log carries only a
-	// fingerprint (prefix..sha[:8]) -- the operator reads the full value
-	// from the file. Logging the raw token here means anything that
-	// reads journald (log aggregators, ops dashboards, shoulder-surfers)
-	// silently captures bootstrap credentials.
-	//
-	// When the file write failed (setupTokenPath stayed empty), the
-	// fallback is to log the full token AND a loud warning -- the
-	// operator has no other way to obtain the value at that point.
-	bannerLine := strings.Repeat("=", 72)
+	bannerLine := strings.Repeat("─", 72)
 	h.logger.Warn(bannerLine)
-	h.logger.Warn("BOOTSTRAP REQUIRED — first /api/v1/bootstrap call must carry this token")
-	h.logger.Warn("Send it in the X-Setup-Token header. It is shown ONCE and one-shot.")
-	if h.setupTokenPath != "" {
-		h.logger.Warn("CREWSHIP_BOOTSTRAP_TOKEN", "fingerprint", tokenFingerprint(h.setupToken))
-		h.logger.Warn("Also written to file (mode 0600)", "path", h.setupTokenPath)
-	} else {
-		// File write failed (or no data dir configured). The log is the
-		// only channel left, so emit the full value -- and a loud
-		// warning that any log aggregator now holds bootstrap creds.
-		h.logger.Warn("CREWSHIP_BOOTSTRAP_TOKEN", "token", h.setupToken)
-		h.logger.Warn("WARNING: no setup-token file written; raw token is in this log -- rotate any aggregator that captured it after first bootstrap")
-	}
+	h.logger.Warn("  Crewship first run — bootstrap your admin account.")
+	h.logger.Warn("")
+	h.logger.Warn("  Open this URL in your browser and fill in the form:")
+	h.logger.Warn("       " + publicURL + "/bootstrap")
+	h.logger.Warn("")
+	h.logger.Warn("  Window closes at: " + deadline.Format(time.RFC3339))
+	h.logger.Warn("  After that, restart the server to arm a new window,")
+	h.logger.Warn("  or use 'crewship init' from this host for headless setup.")
 	h.logger.Warn(bannerLine)
 	return nil
 }
 
-// consumeSetupToken returns true if the provided token matches the in-memory
-// setup token AND zeroes the token so it can only be used once. Constant-time
-// comparison + length pad to defeat timing oracles. Returns false (with no
-// mutation) when no token is currently armed.
-//
-// On a successful match the on-disk mirror file (if any) is also
-// removed — the bootstrap moment is the only legitimate read of the
-// file. Removal is best-effort: a missing or unreachable file logs
-// at WARN but does not undo the in-memory consume (the operator who
-// got the bootstrap response back doesn't care that we couldn't
-// rm the file; the bootstrap already succeeded).
-func (h *AuthHandler) consumeSetupToken(provided string) bool {
-	h.setupTokenMu.Lock()
-	defer h.setupTokenMu.Unlock()
-	if h.setupToken == "" {
+// bootstrapWindowOpen reports whether the deploy-race window is still
+// open. False when no window was armed (treated as "closed", same as a
+// hardened deploy) OR when the deadline has passed. Callers also need
+// to short-circuit on users.count > 0 separately — the window says
+// nothing about whether the instance was actually bootstrapped.
+func (h *AuthHandler) bootstrapWindowOpen() bool {
+	h.bootstrapMu.Lock()
+	defer h.bootstrapMu.Unlock()
+	if h.bootstrapDeadline.IsZero() {
 		return false
 	}
-	expected := h.setupToken
-	actual := provided
-	// Equalise lengths so the compare runs constant-time across the
-	// short/empty-input cases.
-	if len(actual) != len(expected) {
-		actual = strings.Repeat("\x00", len(expected))
-	}
-	if subtle.ConstantTimeCompare([]byte(actual), []byte(expected)) != 1 {
-		return false
-	}
-	// One-shot: zero the in-memory copy so a leaked log line can't be
-	// replayed against a future restart that re-armed the token.
-	h.setupToken = ""
-	if h.setupTokenPath != "" {
-		if rmErr := os.Remove(h.setupTokenPath); rmErr != nil && !os.IsNotExist(rmErr) {
-			h.logger.Warn("could not remove consumed setup-token file",
-				"path", h.setupTokenPath, "error", rmErr,
-				"mitigation", "operator should `rm` the file manually")
-		}
-		h.setupTokenPath = ""
-	}
-	return true
+	return time.Now().Before(h.bootstrapDeadline)
+}
+
+// closeBootstrapWindow zeroes the deadline so subsequent bootstrap
+// calls return 410 even if they arrive before the original deadline.
+// Called by Bootstrap on success — one-shot semantics.
+func (h *AuthHandler) closeBootstrapWindow() {
+	h.bootstrapMu.Lock()
+	defer h.bootstrapMu.Unlock()
+	h.bootstrapDeadline = time.Time{}
 }
 
 // setSessionCookies creates a fresh user_sessions row and writes the
@@ -421,31 +325,50 @@ func (h *AuthHandler) cleanupOrphanedSignup(userID, workspaceID string) {
 
 // Bootstrap creates the first admin user on an empty database.
 //
-// This endpoint is unauthenticated but gated by a one-shot setup token
-// generated at process startup whenever the users table is empty
-// (see MaybeGenerateSetupToken). The token is logged to stderr ONCE
-// and must be echoed back in the X-Setup-Token header on first call.
+// This endpoint is unauthenticated; defense against the deploy-race
+// (an LAN-reachable scanner racing the operator to be the first POST)
+// is twofold and matches Portainer's first-run model:
 //
-// Without the gate, any process that reached the public listener could
-// race the legitimate operator to be the first POST on an empty DB and
-// walk away with an OWNER + CLI token. The deploy race was demonstrated
-// against dev1 during the 2026-05-21 audit.
+//  1. Deploy-race window: bootstrap is only open for a fixed window
+//     after server start (default 5 minutes — see ArmDeployRaceWindow).
+//     After the deadline the handler refuses with 410. The operator who
+//     started the server is expected to hit the form within seconds;
+//     anyone arriving 5 minutes later is by definition not the operator.
+//
+//  2. One-shot semantics: a successful bootstrap closes the window
+//     regardless of remaining time, so a second POST always 410s even
+//     if it races the first inside the original deadline.
+//
+// Headless / CI path: `crewship init --server <url> --email … --name …`
+// is the CLI wrapper around this endpoint, useful for Ansible, Docker
+// Compose, and provisioning scripts that can't open a browser.
 func (h *AuthHandler) Bootstrap(w http.ResponseWriter, r *http.Request) {
-	// Setup-token gate first. We deliberately validate it BEFORE input
-	// parsing so an attacker scanning for the endpoint can't even
-	// fingerprint validation errors without already holding the token.
-	provided := strings.TrimSpace(r.Header.Get("X-Setup-Token"))
-	if !h.consumeSetupToken(provided) {
-		h.logger.Warn("bootstrap: setup token check failed",
-			"remote_addr", r.RemoteAddr,
-			"token_present", provided != "",
-			"user_agent", r.Header.Get("User-Agent"))
-		// 403 mirrors the post-bootstrap "Already initialized" message —
-		// from the caller's perspective the bootstrap path is simply
-		// closed. We do not distinguish "wrong token" from "no token
-		// armed" to avoid leaking whether the server is mid-deploy.
-		replyError(w, http.StatusForbidden, "Bootstrap closed — setup token required")
+	// Fast 410 path: already bootstrapped (users.count > 0). Returned
+	// before the window check so a re-POST gets an actionable "log in"
+	// message instead of a generic "window closed" one.
+	var existingCount int
+	if err := h.db.QueryRowContext(r.Context(), "SELECT COUNT(*) FROM users").Scan(&existingCount); err == nil && existingCount > 0 {
+		replyError(w, http.StatusGone, "Already initialized — please log in at /login instead")
 		return
+	}
+	// Deploy-race window check. A zero deadline means no window was
+	// armed (test harness or a deliberately-open dev mode) — we let
+	// those through. A non-zero deadline that's already passed means
+	// the operator never finished the form; return 410 so the legit
+	// operator restarts the server (or sets the env-var override and
+	// restarts).
+	if !h.bootstrapWindowOpen() {
+		// Distinguish "never armed" from "armed but expired" so the
+		// expired branch surfaces actionable copy.
+		h.bootstrapMu.Lock()
+		armed := !h.bootstrapDeadline.IsZero()
+		h.bootstrapMu.Unlock()
+		if armed {
+			h.logger.Warn("bootstrap: refused — deploy-race window expired",
+				"remote_addr", r.RemoteAddr, "user_agent", r.Header.Get("User-Agent"))
+			replyError(w, http.StatusGone, "Bootstrap window expired — restart the server to open a new one")
+			return
+		}
 	}
 
 	var req signupRequest
@@ -576,6 +499,10 @@ func (h *AuthHandler) Bootstrap(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
+
+	// One-shot: close the deploy-race window so a second POST gets 410
+	// even if it races us inside the original deadline.
+	h.closeBootstrapWindow()
 
 	// Set browser session cookies inline so the freshly-created admin
 	// lands authenticated on /onboarding without the frontend having

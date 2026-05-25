@@ -95,16 +95,33 @@ For pinned versions, custom install directories, PostgreSQL mode, and air-gapped
   </Step>
 
   <Step title="Create the first admin user">
-    ```bash
-    crewship init \
-      --server http://localhost:8080 \
-      --email admin@example.com \
-      --name "Your Name"
-    ```
-    You will be prompted for a password (min 8 characters). This creates an admin user with OWNER role and returns a CLI token.
+    Two first-class ways — pick the one that matches your deploy:
+
+    <Tabs>
+      <Tab title="Browser">
+        1. Open **`http://localhost:8080`** — `/login` auto-redirects to `/bootstrap` on a fresh instance.
+        2. Fill in name + email + password (min 8 chars), click **Continue to workspace setup**.
+
+        That's it. n8n-style single form, no token to copy.
+
+        **Deploy-race safety.** Server arms a 5-minute window at startup (Portainer-style). The bootstrap endpoint refuses requests after the window closes — an unbootstrapped instance left running on the public internet doesn't sit indefinitely open for the first scanner. If you miss the window, restart `crewship start` to arm a new one.
+      </Tab>
+      <Tab title="CLI / headless / CI">
+        For Ansible, Terraform, GitOps, or any provisioning flow where launching a browser isn't an option:
+
+        ```bash
+        crewship init \
+          --server http://localhost:8080 \
+          --email admin@example.com \
+          --name "Your Name"
+        ```
+
+        Prompts for a password (or accept `--password-stdin` from a vault). `init` POSTs `/api/v1/bootstrap`, creates the admin row + default workspace + OWNER membership, and returns a CLI token your CI stashes for subsequent calls.
+      </Tab>
+    </Tabs>
 
     <Note>
-      The `init` command only works on an empty database (no existing users). The `--email` and `--name` flags are required.
+      **Need a longer first-run window?** The default 5-minute deploy-race window is short on purpose — long enough for a human operator who's already at the terminal, short enough that an unbootstrapped instance left on the public internet doesn't sit open forever. For unattended provisioning where the operator might not get to the form for hours, use the CLI / headless path above (`crewship init` works any time the database is empty).
     </Note>
   </Step>
 

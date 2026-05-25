@@ -729,25 +729,29 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 			// without fixing the DB" — strictly safer than a silent
 			// open window.
 			if authH := apiRouter.AuthHandler(); authH != nil {
-				// 5s budget for the empty-DB probe so a wedged SQLite
-				// can't block server boot. The handler refuses bootstrap
-				// when no token is armed, so timeout = fail-closed.
-				// defer cancel so a panic between the WithTimeout and
-				// MaybeGenerateSetupToken doesn't leak the context.
+				// Open the deploy-race bootstrap window. When the users
+				// table is empty at startup the Bootstrap handler stays
+				// open for the default duration (5 min — see
+				// defaultBootstrapWindow in auth.go), matching
+				// Portainer's first-run model. After the window
+				// elapses the handler refuses with 410 until the
+				// server is restarted. n8n-style form, no token to
+				// copy: the operator opens /bootstrap, fills in name +
+				// email + password, hits Continue.
 				//
-				// cfg.Storage.BasePath = the server-owned data dir
-				// (mode 0700, where /workspace, /output etc. live). The
-				// initial_setup_token file lands there at mode 0600 —
-				// GitLab-style `initial_root_password` UX so the
-				// operator can `cat` it via SSH instead of trawling
-				// journald.
+				// 5s budget for the empty-DB probe so a wedged SQLite
+				// can't block server boot. A failure here is logged
+				// loudly but doesn't block startup — the bootstrap
+				// path remains unconditionally open in that case,
+				// which is the safer side of a deploy already in
+				// progress.
 				func() {
 					armCtx, armCancel := context.WithTimeout(context.Background(), 5*time.Second)
 					defer armCancel()
-					if err := authH.MaybeGenerateSetupToken(armCtx, cfg.Storage.BasePath); err != nil {
-						logger.Error("bootstrap: setup token arm failed",
+					if err := authH.ArmDeployRaceWindow(armCtx, 0); err != nil {
+						logger.Error("bootstrap: deploy-race window arm failed",
 							"error", err,
-							"impact", "POST /api/v1/bootstrap will refuse until DB is reachable or a row is added manually")
+							"impact", "bootstrap remains open without a deadline; restart once you've finished onboarding")
 					}
 				}()
 			}
