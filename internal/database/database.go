@@ -55,7 +55,17 @@ func Open(databaseURL string) (*DB, error) {
 	// instead of round-tripping page reads from disk on every refresh.
 	// Bumping further (e.g. 256 MiB) buys diminishing returns unless the
 	// DB grows past ~500 MiB.
-	dsn := path + sep + "_pragma=busy_timeout(5000)" +
+	// busy_timeout(30000) bumped from 5s after the 2026-05-25 DR
+	// validation surfaced a real "login fails with SQLITE_BUSY"
+	// scenario: port_expose_registry purge (runs every 30s) holds
+	// the writer lock long enough that a concurrent login lockout
+	// check (which writes failed_login_count / locked_until on
+	// users) blew past the 5s limit and surfaced as "Invalid email
+	// or password" in the UI — a confusing message for what is
+	// actually a transient lock contention. 30s matches the
+	// background purge period so a worst-case login retry waits
+	// out one full cycle instead of dying mid-cycle.
+	dsn := path + sep + "_pragma=busy_timeout(30000)" +
 		"&_pragma=journal_mode(WAL)" +
 		"&_pragma=synchronous(NORMAL)" +
 		"&_pragma=foreign_keys(ON)" +
