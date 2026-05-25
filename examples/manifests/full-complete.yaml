@@ -68,11 +68,11 @@ spec:
       agents:
         - { slug: trapper, name: Trapper, agent_role: LEAD, cli_adapter: CLAUDE_CODE,
             llm: { provider: ANTHROPIC, model: claude-opus-4-7 },
-            tool_profile: full, memory_enabled: true,
+            tool_profile: FULL, memory_enabled: true,
             env_refs: [ANTHROPIC_API_KEY, GH_TOKEN] }
         - { slug: spotter, name: Spotter, agent_role: AGENT, cli_adapter: CLAUDE_CODE,
             llm: { provider: ANTHROPIC, model: claude-sonnet-4-6 },
-            tool_profile: review, memory_enabled: true,
+            tool_profile: MINIMAL, memory_enabled: true,
             env_refs: [ANTHROPIC_API_KEY, GH_TOKEN, LINEAR_API_KEY] }
 
     # And one for community ops (Discord watcher, vendor alerts, etc.).
