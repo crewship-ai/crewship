@@ -50,6 +50,10 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 		agents.SetLicense(r.license)
 	}
 	creds := NewCredentialHandler(r.db, r.logger)
+	// Stash on the router so registerInternalRoutes can wire the
+	// /api/v1/internal/credentials Create + Rotate adapter against
+	// the same instance the public surface uses.
+	r.credentialHandler = creds
 	skills := NewSkillHandler(r.db, r.logger)
 	skills.SetJournal(r.Journal())
 
@@ -258,6 +262,10 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/skills/import", authed(wsCtx(http.HandlerFunc(skills.Import))))
 	r.mux.Handle("DELETE /api/v1/workspaces/{workspaceId}/skills/{skillId}", authed(wsCtx(http.HandlerFunc(skills.Delete))))
 	skillGen := NewSkillGenerateHandler(r.db, r.logger)
+	// Same stash-for-reuse pattern as creds above — the internal
+	// /api/v1/internal/skills/generate adapter shares the instance
+	// (per-workspace LLM credential cache must not fork).
+	r.skillGenHandler = skillGen
 	// Path param name MUST match what the wsCtx middleware reads — the
 	// pattern is {workspaceId} everywhere else in the API, and changing
 	// it broke the workspace lookup on this route in the prior commit.

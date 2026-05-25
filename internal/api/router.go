@@ -77,6 +77,16 @@ type Router struct {
 	authBaseURL            string
 	license                *license.License
 	agentHandler           *AgentHandler
+	// credentialHandler and skillGenHandler are stashed at
+	// registerCrewsRoutes time so the registerInternalRoutes step
+	// can wire the matching /api/v1/internal/credentials and
+	// /api/v1/internal/skills/generate adapters without re-
+	// constructing a parallel instance (matters for state-bearing
+	// fields like the SkillGenerateHandler's per-workspace LLM
+	// credential cache). nil-safe — adapters skip registration when
+	// the parent handler isn't wired (test routers, early init).
+	credentialHandler      *CredentialHandler
+	skillGenHandler        *SkillGenerateHandler
 	storagePath            string // base path for crew file storage
 	catalogFetcher         *devcontainer.CatalogFetcher
 	runtimeFetcher         *devcontainer.RuntimeFetcher

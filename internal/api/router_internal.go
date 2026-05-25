@@ -61,6 +61,27 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 		hireAdapter := NewHireInternalAdapter(r.agentHandler)
 		r.mux.Handle("POST /api/v1/internal/agents/hire", internalAuth(http.HandlerFunc(hireAdapter.Hire)))
 	}
+	// PRD-SLASH-CAPABILITIES-2026 §6.4 — three internal mirrors so
+	// the sidecar's slash-action routes (commit 5) have a backend
+	// surface to proxy into. Each adapter injects workspace +
+	// MANAGER role; the credentials adapter additionally requires
+	// X-Caller-User-Id (autonomous credential mutation is rejected
+	// at the adapter boundary). nil-safe registration mirrors the
+	// hireAdapter pattern above — test routers that don't construct
+	// the parent handler skip the mirror entirely.
+	if pipes != nil {
+		routineAdapter := NewRoutineInternalAdapter(pipes)
+		r.mux.Handle("POST /api/v1/internal/routines/schedules", internalAuth(http.HandlerFunc(routineAdapter.CreateSchedule)))
+	}
+	if r.skillGenHandler != nil {
+		skillAdapter := NewSkillInternalAdapter(r.skillGenHandler)
+		r.mux.Handle("POST /api/v1/internal/skills/generate", internalAuth(http.HandlerFunc(skillAdapter.Generate)))
+	}
+	if r.credentialHandler != nil {
+		credAdapter := NewCredentialInternalAdapter(r.credentialHandler)
+		r.mux.Handle("POST /api/v1/internal/credentials", internalAuth(http.HandlerFunc(credAdapter.Create)))
+		r.mux.Handle("POST /api/v1/internal/credentials/{credentialId}/rotate", internalAuth(http.HandlerFunc(credAdapter.Rotate)))
+	}
 	r.mux.Handle("GET /api/v1/internal/crew-connections", internalAuth(http.HandlerFunc(internal.ListCrewConnections)))
 	r.mux.Handle("POST /api/v1/internal/mcp-tool-calls", internalAuth(http.HandlerFunc(internal.RecordMCPToolCall)))
 	// Sidecar-emitted Crow's Nest journal events (network.egress, file.written).
