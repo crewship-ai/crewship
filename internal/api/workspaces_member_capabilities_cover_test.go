@@ -9,12 +9,6 @@ import (
 	"testing"
 )
 
-// adminCapsCtx is the shared "I'm an admin acting on this workspace"
-// context setup. Cuts noise from every test in this file.
-func adminCapsCtx(req *httptest.ResponseRecorder, body string, wsID, adminID, memberID string) (*httptest.ResponseRecorder, *httptest.ResponseRecorder, interface{}) {
-	return nil, nil, nil
-}
-
 // TestGetMemberCapabilities_HappyPath covers the previously 0%-
 // covered GET handler. ADMIN reads a MEMBER's row, gets the parsed
 // capability set + role back.
