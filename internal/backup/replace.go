@@ -315,19 +315,29 @@ func resolveDeletionOrder(ctx context.Context, tx *sql.Tx, in []ScopedTable) ([]
 	for _, st := range in {
 		inSet[st.Name] = st
 	}
-	// outDegree[T] = number of tables IN in-set that T FKs INTO.
-	// children[T] = set of tables in in-set that FK to T.
-	// Delete order: zero-outdegree tables first (they don't reference
-	// anyone we still need to delete), then propagate.
-	outDegree := make(map[string]int, len(in))
-	children := make(map[string][]string, len(in))
+	// inDegree[T] = number of tables IN in-set that FK TO T (i.e. T
+	// is a PARENT of those tables, so T must be deleted LAST among
+	// them). parents[T] = set of in-set tables T FKs to (T is their
+	// child).
+	//
+	// Delete-safe ordering: tables with zero in-degree are "leaves"
+	// (nothing in the set points to them) → safe to delete first.
+	// Emitting one of those then decrements the in-degree of every
+	// table IT points to (its parents) — once any parent's in-degree
+	// hits zero, it joins the queue.
+	//
+	// A previous version of this function used outDegree and emitted
+	// parents-first; that was INSERT order, not DELETE order, and was
+	// only masked by defer_foreign_keys + CASCADE rules. Local unit
+	// test TestResolveDeletionOrder_TopologicalOnFKEdges caught it.
+	inDegree := make(map[string]int, len(in))
+	parents := make(map[string][]string, len(in))
 	for _, st := range in {
 		edges, err := tableFKEdgesTx(ctx, tx, st.Name)
 		if err != nil {
 			// Table missing on target / introspection failed —
-			// treat as zero outdegree; the DELETE itself will
+			// treat as zero in-degree; the DELETE itself will
 			// either no-op or surface the real error.
-			outDegree[st.Name] = 0
 			continue
 		}
 		for _, e := range edges {
@@ -337,17 +347,17 @@ func resolveDeletionOrder(ctx context.Context, tx *sql.Tx, in []ScopedTable) ([]
 			if e.ToTable == st.Name {
 				continue // self-FK; ignore for ordering
 			}
-			outDegree[st.Name]++
-			children[e.ToTable] = append(children[e.ToTable], st.Name)
+			inDegree[e.ToTable]++
+			parents[st.Name] = append(parents[st.Name], e.ToTable)
 		}
 	}
 
-	// Queue = tables with no outgoing edges into the in-set (they
-	// reference nothing we plan to delete later → safe to delete
-	// first). Sort for determinism.
+	// Queue = tables with no incoming edges from the in-set (nothing
+	// we still need to delete points to them → safe to delete first).
+	// Sort for determinism.
 	var queue []string
 	for _, st := range in {
-		if outDegree[st.Name] == 0 {
+		if inDegree[st.Name] == 0 {
 			queue = append(queue, st.Name)
 		}
 	}
@@ -363,14 +373,14 @@ func resolveDeletionOrder(ctx context.Context, tx *sql.Tx, in []ScopedTable) ([]
 		}
 		seen[head] = true
 		out = append(out, inSet[head])
-		// Anything that FK'd INTO head can now drop its outdegree
-		// count — and if that reaches zero it joins the queue.
-		nextBatch := children[head]
+		// Now that head is deleted, every PARENT of head has one
+		// fewer in-bound reference. Drop their in-degree.
+		nextBatch := parents[head]
 		sort.Strings(nextBatch)
-		for _, child := range nextBatch {
-			outDegree[child]--
-			if outDegree[child] <= 0 && !seen[child] {
-				queue = append(queue, child)
+		for _, parent := range nextBatch {
+			inDegree[parent]--
+			if inDegree[parent] <= 0 && !seen[parent] {
+				queue = append(queue, parent)
 			}
 		}
 	}
