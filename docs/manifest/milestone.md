@@ -179,7 +179,7 @@ The synthesised slug strips non-alphanumeric runs to single dashes (`v1.0 launch
 
 ## See also
 
-- [kind: Project](project.md) — parent record; must exist before any milestone.
-- [kind: Label](label.md) — applied to issues, not directly to milestones.
-- [kind: SavedView](saved_view.md) — `entity_type: issue` views can filter by milestone via the UI (no manifest field today).
+- [kind: Project](/manifest/project) — parent record; must exist before any milestone.
+- [kind: Label](/manifest/label) — applied to issues, not directly to milestones.
+- [kind: SavedView](/manifest/saved_view) — `entity_type: issue` views can filter by milestone via the UI (no manifest field today).
 - SPEC-2 section 3 — authoritative contract for this kind.

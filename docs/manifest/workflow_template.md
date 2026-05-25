@@ -232,7 +232,7 @@ Built-in templates (`sequential`, `parallel`, `dev-test-loop`, `pipeline`, plus 
 
 ## See also
 
-- [kind: Project](project.md) — projects don't reference workflow templates directly today, but a future `default_workflow_slug` field is planned.
-- [kind: TriageRule](triage_rule.md) — `actions.set_status` references a stage name; if you wire one up, make sure the stage exists in whichever template the matched issue lives under.
-- [kind: SavedView](saved_view.md) — views can filter by stage type (`type=open`/`type=started`) to render "active work" boards.
+- [kind: Project](/manifest/project) — projects don't reference workflow templates directly today, but a future `default_workflow_slug` field is planned.
+- [kind: TriageRule](/manifest/triage_rule) — `actions.set_status` references a stage name; if you wire one up, make sure the stage exists in whichever template the matched issue lives under.
+- [kind: SavedView](/manifest/saved_view) — views can filter by stage type (`type=open`/`type=started`) to render "active work" boards.
 - SPEC-2 section 8 — authoritative contract for this kind.

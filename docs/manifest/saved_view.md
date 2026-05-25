@@ -227,11 +227,11 @@ modulo the slug if you renamed a view between exports.
 
 ## See also
 
-- [`kind: Label`](label.md) — referenced via `spec.filter.label_slugs`.
-- [`kind: Project`](project.md) — referenced via
+- [`kind: Label`](/manifest/label) — referenced via `spec.filter.label_slugs`.
+- [`kind: Project`](/manifest/project) — referenced via
   `spec.filter.project_slug`.
-- [`kind: TriageRule`](triage_rule.md) — sibling read-list automation;
+- [`kind: TriageRule`](/manifest/triage_rule) — sibling read-list automation;
   triage rules tag issues, saved views surface the tagged subset.
-- [Apply order in SPEC-2](../../.claude/context/specs/SPEC-2-manifest-complete.md)
+- Apply order in SPEC-2 (`.claude/context/specs/SPEC-2-manifest-complete.md`)
   — Phase 16 (SavedViews) depends on Phase 4 (Labels) and
   Phase 3 (Projects).

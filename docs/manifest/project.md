@@ -169,4 +169,4 @@ For every declared project that already exists remotely, emit `Action=Delete` (D
 - [RecurringIssue](./recurring_issue.md) — pre-creates issues into a `template.project_slug`.
 - [TriageRule](./triage_rule.md) — can route incoming issues into a project via `actions.assign_to_project_slug`.
 - [SavedView](./saved_view.md) — filters its result set by `filter.project_slug`.
-- [SPEC-2 §1 Project](../../.claude/context/specs/SPEC-2-manifest-complete.md) — implementation contract.
+- SPEC-2 §1 Project (`.claude/context/specs/SPEC-2-manifest-complete.md`) — implementation contract.

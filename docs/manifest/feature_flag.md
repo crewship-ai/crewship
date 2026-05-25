@@ -262,8 +262,8 @@ slug, never by id.
 
 ## See also
 
-- [InstanceSetting](instance_setting.md) — the other admin-only
+- [InstanceSetting](/manifest/instance_setting) — the other admin-only
   kind in the manifest; same dual-layer pattern but for
   configuration key/value pairs instead of feature toggles.
-- [SPEC-2 §9](../../.claude/context/specs/SPEC-2-manifest-complete.md) —
+- SPEC-2 §9 (`.claude/context/specs/SPEC-2-manifest-complete.md`) —
   the authoritative implementation contract.

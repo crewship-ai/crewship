@@ -246,6 +246,6 @@ Re-applying an exported `CrewTemplate` doc is a pure `Unchanged` plan (the crew 
 
 - [`docs/manifest/recipe.md`](./recipe.md) — sibling install-only reference kind.
 - [`docs/manifest/connector.md`](./connector.md) — sibling install-only reference kind (integrations).
-- [`internal/api/crew_templates.go`](../../internal/api/crew_templates.go) — backend handler for `GET /api/v1/crew-templates`, `GET /api/v1/crew-templates/{slug}`, `POST /api/v1/crew-templates/{slug}/deploy`.
-- [`internal/database/seed_crew_templates.go`](../../internal/database/seed_crew_templates.go) — source of truth for built-in templates that ship with the binary.
-- [`internal/manifest/kinds/crew_template.go`](../../internal/manifest/kinds/crew_template.go) — this kind's Go implementation.
+- `internal/api/crew_templates.go` — backend handler for `GET /api/v1/crew-templates`, `GET /api/v1/crew-templates/{slug}`, `POST /api/v1/crew-templates/{slug}/deploy`.
+- `internal/database/seed_crew_templates.go` — source of truth for built-in templates that ship with the binary.
+- `internal/manifest/kinds/crew_template.go` — this kind's Go implementation.

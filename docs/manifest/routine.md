@@ -339,14 +339,12 @@ env.
 
 ## See also
 
-- [Crew](crew.md) — the parent kind; routines reference a crew via
-  `metadata.labels.crew`.
-- [Agent](crew.md#agents) — `step.agent_slug` resolves against
-  agents-in-crew.
-- [Connector](connector.md) — `credentials_required` types are
+- [Your First Crew](/guides/first-crew) — the parent concept; routines reference a crew via
+  `metadata.labels.crew`. `step.agent_slug` resolves against agents-in-crew.
+- [Connector](/manifest/connector) — `credentials_required` types are
   resolved against workspace credentials, which may come from
   installed connectors.
-- [Hook](hook.md) — `pre_run` / `post_run` hooks fire around every
+- [Hook](/manifest/hook) — `pre_run` / `post_run` hooks fire around every
   routine invocation.
 - `schemas/routine.v1.json` — JSON Schema for the DSL portion of
   `spec:` (everything except `schedules` + `webhook`). Use with VSCode
