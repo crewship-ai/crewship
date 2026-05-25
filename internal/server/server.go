@@ -732,19 +732,18 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 				// Open the deploy-race bootstrap window. When the users
 				// table is empty at startup the Bootstrap handler stays
 				// open for the default duration (5 min — see
-				// defaultBootstrapWindow in auth.go), matching
-				// Portainer's first-run model. After the window
-				// elapses the handler refuses with 410 until the
-				// server is restarted. n8n-style form, no token to
-				// copy: the operator opens /bootstrap, fills in name +
-				// email + password, hits Continue.
+				// defaultBootstrapWindow in auth.go) — a fixed first-
+				// run window pattern. After the window elapses the
+				// handler refuses with 410 until the server is
+				// restarted. Operator-driven flow: open /bootstrap,
+				// submit name + email + password, Continue.
 				//
 				// 5s budget for the empty-DB probe so a wedged SQLite
 				// can't block server boot. A failure here is logged
-				// loudly but doesn't block startup — the bootstrap
-				// path remains unconditionally open in that case,
-				// which is the safer side of a deploy already in
-				// progress.
+				// loudly AND records the error on the handler — the
+				// bootstrap path then fails closed (503) until the DB
+				// recovers and the server is restarted. See
+				// bootstrapArmingFailed in auth.go.
 				func() {
 					armCtx, armCancel := context.WithTimeout(context.Background(), 5*time.Second)
 					defer armCancel()

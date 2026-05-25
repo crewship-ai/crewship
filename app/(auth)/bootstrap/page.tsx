@@ -12,15 +12,16 @@ import { Label } from "@/components/ui/label"
 import { useAuth } from "@/hooks/use-auth"
 
 /**
- * First-run bootstrap — n8n / Portainer style.
+ * Single-form first-run bootstrap with a time-bounded window.
  *
- * Single 3-field form (name + email + password). No setup token, no
- * placeholder credentials, no separate profile-setup step afterwards.
- * The server-side deploy-race protection is a 5-minute window (matches
- * Portainer's first-run model): bootstrap is open for that long after
- * `crewship start`, then refuses with 410 until restart. Operators
- * needing a hands-off provision set CREWSHIP_INITIAL_ADMIN_EMAIL /
- * CREWSHIP_INITIAL_ADMIN_PASSWORD env vars before starting the server.
+ * Three input fields (name + email + password), one submit, done. No
+ * setup token, no placeholder credentials, no separate profile-setup
+ * step afterwards. Deploy-race protection is a fixed-duration
+ * bootstrap window enforced server-side (default 5 minutes): the
+ * /api/v1/bootstrap endpoint accepts requests for that long after
+ * `crewship start`, then refuses with 410 until the server is
+ * restarted. Headless / CI provisioning uses `crewship init` against
+ * the same endpoint and is bound by the same window.
  *
  * Flow:
  *   /login  → setup-status check finds needs_bootstrap=true → /bootstrap

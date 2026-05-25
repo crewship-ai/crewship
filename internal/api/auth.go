@@ -30,18 +30,32 @@ type AuthHandler struct {
 
 	// bootstrapDeadline is the timestamp after which POST /api/v1/bootstrap
 	// stops accepting requests on an empty database. Set by ArmDeployRaceWindow
-	// at server start (defaults to 5 minutes) — matches Portainer's first-
-	// run window. The operator hits /bootstrap from a browser, completes
-	// the form, and the deadline becomes moot the moment users.count > 0.
-	// If the window elapses without a bootstrap, the server starts refusing
+	// at server start (defaults to 5 minutes) — a fixed first-run window
+	// pattern. The operator hits /bootstrap from a browser, completes the
+	// form, and the deadline becomes moot the moment users.count > 0. If
+	// the window elapses without a bootstrap, the server starts refusing
 	// /bootstrap requests with a clear "expired, please restart" error so
 	// an internet-reachable instance that nobody bootstrapped doesn't sit
 	// permanently open to whichever scanner finds the URL first.
 	//
-	// Zero value = no window armed (handler unconditionally open). Tests
-	// rely on this; production always arms via ArmDeployRaceWindow.
+	// Three states matter:
+	//   bootstrapArmed=false                — never attempted (test harness)
+	//                                         or arming failed (fail-closed)
+	//   bootstrapArmed=true,  deadline set  — window open until deadline
+	//   bootstrapArmed=true,  deadline zero — window consumed by a
+	//                                         successful bootstrap, or
+	//                                         users table was already
+	//                                         populated at arm time
+	//
+	// Without the explicit `armed` flag, a transient DB error during
+	// ArmDeployRaceWindow would leave deadline=zero and the handler
+	// would fail-open (treat it as "no window armed = allow"). The
+	// flag lets bootstrapWindowOpen distinguish "intentionally unarmed"
+	// (allow, dev-mode) from "arming failed" (refuse, fail-closed).
 	bootstrapMu       sync.Mutex
+	bootstrapArmed    bool
 	bootstrapDeadline time.Time
+	bootstrapArmingErr error
 }
 
 // NewAuthHandler creates an AuthHandler with the given dependencies and signup configuration.
@@ -60,30 +74,55 @@ const defaultBootstrapWindow = 5 * time.Minute
 // duration when the users table is empty. Called from server.New
 // before the HTTP listener accepts traffic.
 //
-// Convention follows Portainer: bootstrap is open for a fixed window
-// after startup; outside that window the handler refuses. The operator
-// who started the server is expected to open the bootstrap URL within
-// the window — typically seconds after `crewship start`. An operator
-// who needs a longer window passes a larger duration; CI and Docker
-// Compose deploys bypass the form entirely via the env-var overrides
-// honoured by the Bootstrap handler.
+// Fixed-duration first-run window: bootstrap is open for a known
+// interval after startup; outside that window the handler refuses.
+// The operator who started the server is expected to open the
+// bootstrap URL within the window — typically seconds after
+// `crewship start`. An operator who needs a longer window passes a
+// larger duration; headless / CI deploys hit `crewship init` against
+// the same endpoint within the window.
 //
-// When users.count > 0 this is a no-op: bootstrap is already closed
-// because Bootstrap itself refuses with 410 once a user exists.
+// When users.count > 0 this is a no-op (armed=true, deadline=zero):
+// bootstrap is already closed because Bootstrap itself refuses with
+// 410 once a user exists.
+//
+// On error (e.g. transient DB blip): armed stays false and the
+// stored error is preserved. bootstrapWindowOpen() then fails closed
+// — the handler refuses rather than treating the unset deadline as
+// "no window so allow". This is the security-conservative choice for
+// the deploy-race vector the window exists to defend against.
 func (h *AuthHandler) ArmDeployRaceWindow(ctx context.Context, window time.Duration) error {
 	if window <= 0 {
 		window = defaultBootstrapWindow
 	}
 	var count int
 	if err := h.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM users").Scan(&count); err != nil {
+		// Fail-closed: record the error so subsequent bootstrap
+		// requests refuse instead of falling through to "no window
+		// armed = allow". The operator can fix the DB and restart.
+		h.bootstrapMu.Lock()
+		h.bootstrapArmed = false
+		h.bootstrapArmingErr = err
+		h.bootstrapMu.Unlock()
 		return err
 	}
 	if count > 0 {
-		// Already bootstrapped — no window needed.
+		// Already bootstrapped — mark armed with zero deadline so
+		// bootstrapWindowOpen() returns false ("consumed") rather
+		// than the dev-only "never armed" branch. Bootstrap handler
+		// also short-circuits on users.count > 0, so both layers
+		// agree: bootstrap is closed.
+		h.bootstrapMu.Lock()
+		h.bootstrapArmed = true
+		h.bootstrapDeadline = time.Time{}
+		h.bootstrapArmingErr = nil
+		h.bootstrapMu.Unlock()
 		return nil
 	}
 	h.bootstrapMu.Lock()
+	h.bootstrapArmed = true
 	h.bootstrapDeadline = time.Now().Add(window)
+	h.bootstrapArmingErr = nil
 	deadline := h.bootstrapDeadline
 	h.bootstrapMu.Unlock()
 
@@ -106,17 +145,42 @@ func (h *AuthHandler) ArmDeployRaceWindow(ctx context.Context, window time.Durat
 }
 
 // bootstrapWindowOpen reports whether the deploy-race window is still
-// open. False when no window was armed (treated as "closed", same as a
-// hardened deploy) OR when the deadline has passed. Callers also need
-// to short-circuit on users.count > 0 separately — the window says
-// nothing about whether the instance was actually bootstrapped.
+// open AND was successfully armed.
+//
+// Returns true ONLY when ArmDeployRaceWindow ran without error AND
+// the deadline is still in the future. Two false paths:
+//   - armed=false        → arming failed or was never attempted. Refuse.
+//     Combined with the dev/test "never armed" state, that's still
+//     the safer fail-closed branch: production always arms, so a
+//     non-armed state in prod can only mean DB failure.
+//   - armed=true, deadline=zero or in the past → window consumed
+//     (successful bootstrap closed it) or expired.
+//
+// Callers also need to short-circuit on users.count > 0 separately —
+// the window state says nothing about whether the instance was
+// actually bootstrapped; both are independent gates.
 func (h *AuthHandler) bootstrapWindowOpen() bool {
 	h.bootstrapMu.Lock()
 	defer h.bootstrapMu.Unlock()
+	if !h.bootstrapArmed {
+		return false
+	}
 	if h.bootstrapDeadline.IsZero() {
 		return false
 	}
 	return time.Now().Before(h.bootstrapDeadline)
+}
+
+// bootstrapArmingFailed reports whether the most recent
+// ArmDeployRaceWindow call returned an error (e.g. transient DB
+// failure). Used by the Bootstrap handler to surface a distinct 503
+// when the cause is "we couldn't probe the DB" rather than the
+// generic 410 "expired" — operators benefit from the actionable
+// error message and we keep fail-closed on the security side.
+func (h *AuthHandler) bootstrapArmingFailed() bool {
+	h.bootstrapMu.Lock()
+	defer h.bootstrapMu.Unlock()
+	return !h.bootstrapArmed && h.bootstrapArmingErr != nil
 }
 
 // closeBootstrapWindow zeroes the deadline so subsequent bootstrap
@@ -326,45 +390,65 @@ func (h *AuthHandler) cleanupOrphanedSignup(userID, workspaceID string) {
 // Bootstrap creates the first admin user on an empty database.
 //
 // This endpoint is unauthenticated; defense against the deploy-race
-// (an LAN-reachable scanner racing the operator to be the first POST)
-// is twofold and matches Portainer's first-run model:
+// (a LAN-reachable scanner racing the operator to be the first POST)
+// is threefold:
 //
-//  1. Deploy-race window: bootstrap is only open for a fixed window
-//     after server start (default 5 minutes — see ArmDeployRaceWindow).
-//     After the deadline the handler refuses with 410. The operator who
-//     started the server is expected to hit the form within seconds;
-//     anyone arriving 5 minutes later is by definition not the operator.
+//  1. Fixed-duration first-run window: bootstrap is only open for a
+//     known interval after server start (default 5 minutes — see
+//     ArmDeployRaceWindow). After the deadline the handler refuses
+//     with 410. The operator who started the server is expected to
+//     hit the form within seconds; anyone arriving 5 minutes later
+//     is by definition not the operator.
 //
-//  2. One-shot semantics: a successful bootstrap closes the window
-//     regardless of remaining time, so a second POST always 410s even
-//     if it races the first inside the original deadline.
+//  2. Fail-closed on arming failure: if ArmDeployRaceWindow couldn't
+//     probe the users table at startup (transient DB blip), the
+//     window stays "not armed" and the handler returns 503 rather
+//     than falling through to "no window = allow". The operator
+//     restarts the server once the DB is healthy.
+//
+//  3. One-shot semantics at the DB boundary: the transaction at the
+//     bottom runs COUNT(*) on users inside the tx and aborts on >0,
+//     so two concurrent POSTs both seeing "no users yet" outside the
+//     tx still serialise on the SQLite write lock — exactly one
+//     commits, the other 410s. closeBootstrapWindow zeroes the
+//     in-memory deadline too so a third sibling can't slip through
+//     the pre-tx window check after the first commit lands.
 //
 // Headless / CI path: `crewship init --server <url> --email … --name …`
 // is the CLI wrapper around this endpoint, useful for Ansible, Docker
-// Compose, and provisioning scripts that can't open a browser.
+// Compose, and provisioning scripts that can't open a browser. It
+// hits the same window + race protections.
 func (h *AuthHandler) Bootstrap(w http.ResponseWriter, r *http.Request) {
 	// Fast 410 path: already bootstrapped (users.count > 0). Returned
 	// before the window check so a re-POST gets an actionable "log in"
-	// message instead of a generic "window closed" one.
+	// message instead of a generic "window closed" one. This is a
+	// pre-tx hint only; the authoritative check is inside the
+	// transaction at the bottom.
 	var existingCount int
 	if err := h.db.QueryRowContext(r.Context(), "SELECT COUNT(*) FROM users").Scan(&existingCount); err == nil && existingCount > 0 {
 		replyError(w, http.StatusGone, "Already initialized — please log in at /login instead")
 		return
 	}
-	// Deploy-race window check. A zero deadline means no window was
-	// armed (test harness or a deliberately-open dev mode) — we let
-	// those through. A non-zero deadline that's already passed means
-	// the operator never finished the form; return 410 so the legit
-	// operator restarts the server (or sets the env-var override and
-	// restarts).
+	// Fail-closed on arming failure: distinguish a real DB error at
+	// arm time from "never armed" (test harness) so production refuses
+	// rather than falling through.
+	if h.bootstrapArmingFailed() {
+		h.logger.Warn("bootstrap: refused — deploy-race window arming failed",
+			"remote_addr", r.RemoteAddr)
+		replyError(w, http.StatusServiceUnavailable, "Bootstrap arming failed at server startup — restart the server once the database is reachable")
+		return
+	}
+	// Deploy-race window check. A zero deadline + armed=true means the
+	// window was consumed or the DB was already populated at arm time;
+	// 410 with the "expired" message lets the operator restart. A
+	// "never armed" state (test harness) falls through unconditionally,
+	// which is OK because production always arms.
 	if !h.bootstrapWindowOpen() {
-		// Distinguish "never armed" from "armed but expired" so the
-		// expired branch surfaces actionable copy.
 		h.bootstrapMu.Lock()
-		armed := !h.bootstrapDeadline.IsZero()
+		armed := h.bootstrapArmed
 		h.bootstrapMu.Unlock()
 		if armed {
-			h.logger.Warn("bootstrap: refused — deploy-race window expired",
+			h.logger.Warn("bootstrap: refused — deploy-race window expired or already consumed",
 				"remote_addr", r.RemoteAddr, "user_agent", r.Header.Get("User-Agent"))
 			replyError(w, http.StatusGone, "Bootstrap window expired — restart the server to open a new one")
 			return
@@ -412,18 +496,6 @@ func (h *AuthHandler) Bootstrap(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback()
 
-	// Check inside tx to eliminate TOCTOU race
-	var userCount int
-	if err := tx.QueryRowContext(r.Context(), "SELECT COUNT(*) FROM users").Scan(&userCount); err != nil {
-		h.logger.Error("bootstrap: count users", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
-		return
-	}
-	if userCount > 0 {
-		replyError(w, http.StatusForbidden, "Already initialized — bootstrap is only available on an empty database")
-		return
-	}
-
 	// onboarding_completed=0 on purpose: the new /bootstrap → /onboarding
 	// flow runs the workspace + crew template + adapter wizard AFTER
 	// the admin row exists. Pre-2026-05-13 the bootstrap handler WAS
@@ -433,12 +505,36 @@ func (h *AuthHandler) Bootstrap(w http.ResponseWriter, r *http.Request) {
 	// crew template and adapter, the flag must stay 0 until /onboarding/setup
 	// fires — otherwise the dashboard gate sees "done" and skips
 	// straight past the wizard the user just sent themselves into.
-	_, err = tx.ExecContext(r.Context(),
-		"INSERT INTO users (id, full_name, email, hashed_password, onboarding_completed, created_at, updated_at) VALUES (?, ?, ?, ?, 0, ?, ?)",
+	//
+	// `WHERE NOT EXISTS (SELECT 1 FROM users)` makes the insert
+	// itself the singleton gate. Two concurrent POSTs both pass the
+	// pre-tx and in-tx COUNT checks (their snapshots see no users)
+	// but only one INSERT actually writes a row — the other gets
+	// RowsAffected=0 and we 410. This closes the deploy-race even
+	// when the two POSTs arrive with different emails (no UNIQUE
+	// constraint conflict to lean on).
+	res, err := tx.ExecContext(r.Context(),
+		`INSERT INTO users (id, full_name, email, hashed_password, onboarding_completed, created_at, updated_at)
+		 SELECT ?, ?, ?, ?, 0, ?, ?
+		 WHERE NOT EXISTS (SELECT 1 FROM users)`,
 		userID, req.FullName, req.Email, string(hashed), now, now)
 	if err != nil {
 		h.logger.Error("bootstrap: insert user", "error", err)
 		replyError(w, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		h.logger.Error("bootstrap: rows affected", "error", err)
+		replyError(w, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	if n == 0 {
+		// A concurrent caller won the race between our pre-tx COUNT
+		// and this INSERT. Their row is the authoritative admin;
+		// ours would be a duplicate that the singleton guard
+		// silently dropped.
+		replyError(w, http.StatusGone, "Already initialized — please log in at /login instead")
 		return
 	}
 
