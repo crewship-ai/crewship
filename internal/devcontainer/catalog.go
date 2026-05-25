@@ -119,13 +119,6 @@ var FallbackCatalog = []CatalogEntry{
 	},
 }
 
-// SearchCatalog filters the embedded fallback catalog. Use
-// CatalogFetcher.GetCatalog + FilterCatalog when you need the live remote
-// catalog instead of the baked-in defaults.
-func SearchCatalog(query string) []CatalogEntry {
-	return FilterCatalog(FallbackCatalog, query)
-}
-
 // FilterCatalog returns entries whose Name, Description, or Category contain
 // the query string (case-insensitive). An empty query returns a copy of the
 // full list.
