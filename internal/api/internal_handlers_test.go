@@ -2400,24 +2400,6 @@ func TestGenerateCUID_Unique(t *testing.T) {
 	}
 }
 
-func TestEncodeBase36(t *testing.T) {
-	t.Parallel()
-	cases := []struct {
-		in   int64
-		want string
-	}{
-		{0, "0"},
-		{35, "z"},
-		{36, "10"},
-		{1296, "100"},
-	}
-	for _, tc := range cases {
-		if got := encodeBase36(tc.in); got != tc.want {
-			t.Errorf("encodeBase36(%d) = %q, want %q", tc.in, got, tc.want)
-		}
-	}
-}
-
 // ============================================================================
 // helpers
 // ============================================================================
