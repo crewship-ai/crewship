@@ -125,7 +125,10 @@ func TestCredentialAdapter_InjectsAuthUser(t *testing.T) {
 	if WorkspaceIDFromContext(injected.Context()) != "ws-1" {
 		t.Errorf("workspace not injected")
 	}
-	if RoleFromContext(injected.Context()) != "MANAGER" {
-		t.Errorf("role not injected as MANAGER")
+	// Credential adapter injects ADMIN (not MANAGER like routine /
+	// skill) because CredentialHandler.Rotate gates on canRole("manage"),
+	// which requires ADMIN+. See internal_credentials_mutate.go:injectContext.
+	if RoleFromContext(injected.Context()) != "ADMIN" {
+		t.Errorf("role not injected as ADMIN")
 	}
 }

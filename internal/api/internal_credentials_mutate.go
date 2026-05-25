@@ -120,9 +120,16 @@ func (h *CredentialInternalAdapter) envelope(w http.ResponseWriter, r *http.Requ
 // minimum is sufficient. (Email is populated as a debug-friendly
 // "x-internal" placeholder so a log line that prints it doesn't
 // confuse an operator into thinking the user has no email.)
+//
+// Role injection is ADMIN (not MANAGER like the other internal
+// mirrors) because CredentialHandler.Rotate gates on canRole("manage")
+// — manage requires ADMIN+. The capability gate added in commit 6 is
+// the actual security boundary for slash-initiated credential
+// mutation; this role injection just clears the pre-capability
+// role check that predates the dual-path design.
 func (h *CredentialInternalAdapter) injectContext(r *http.Request, wsID, callerID string) *http.Request {
 	ctx := context.WithValue(r.Context(), ctxWorkspaceID, wsID)
-	ctx = context.WithValue(ctx, ctxRole, "MANAGER")
+	ctx = context.WithValue(ctx, ctxRole, "ADMIN")
 	ctx = context.WithValue(ctx, ctxUser, &AuthUser{ID: callerID, Email: "x-internal"})
 	return r.WithContext(ctx)
 }
