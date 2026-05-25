@@ -275,10 +275,10 @@ schema change.
 
 ## See also
 
-- [kind: Recipe](recipe.md) — sister install-only reference kind.
-- [kind: CrewTemplate](crew_template.md) — deploys a packaged crew
+- [kind: Recipe](/manifest/recipe) — sister install-only reference kind.
+- [kind: CrewTemplate](/manifest/crew_template) — deploys a packaged crew
   rather than wiring a single integration.
-- [kind: Crew](../guides/crews.md) — defines workspace credentials a
+- [Your First Crew](/guides/first-crew) — defines workspace credentials a
   connector can bind to.
 - Backend handler: `internal/api/connectors_handler.go`.
 - Catalog fixtures: `internal/connectors/fixtures/*.yaml`.

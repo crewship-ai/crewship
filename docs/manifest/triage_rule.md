@@ -295,11 +295,11 @@ produces zero plan items the second time.
 
 ## See also
 
-- [Label](label.md) — `actions.add_labels` references Label slugs
-- [Project](project.md) — `actions.assign_to_project_slug` references Project slugs
-- [RecurringIssue](recurring_issue.md) — sibling kind for time-based
+- [Label](/manifest/label) — `actions.add_labels` references Label slugs
+- [Project](/manifest/project) — `actions.assign_to_project_slug` references Project slugs
+- [RecurringIssue](/manifest/recurring_issue) — sibling kind for time-based
   (rather than match-based) issue creation
-- [SavedView](saved_view.md) — uses the same label/project FK
+- [SavedView](/manifest/saved_view) — uses the same label/project FK
   conventions for filter expressions
 - `internal/api/triage_handler.go` — backend handler that serves
   the REST endpoints this kind targets

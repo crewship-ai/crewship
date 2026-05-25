@@ -325,8 +325,8 @@ ships exactly the schedules that crew owns.
 
 ## See also
 
-- [`kind: Crew`](crew.md) — provides the `crew_slug` reference. Crew must exist before the recurring issue applies.
-- [`kind: Label`](label.md) — provides the `labels[]` references.
-- [`kind: Project`](project.md) — provides the `project_slug` reference.
-- [`kind: Routine`](routine.md) — for cron-triggered **automation pipelines**, where the trigger runs code instead of opening an issue. Recurring issues are the lightweight cousin: they only create a tracked work item; routines run a full agent pipeline.
-- [`kind: TriageRule`](triage_rule.md) — to auto-label or auto-route the issues a recurring schedule creates.
+- [`kind: Crew`](/guides/first-crew) — provides the `crew_slug` reference. Crew must exist before the recurring issue applies.
+- [`kind: Label`](/manifest/label) — provides the `labels[]` references.
+- [`kind: Project`](/manifest/project) — provides the `project_slug` reference.
+- [`kind: Routine`](/manifest/routine) — for cron-triggered **automation pipelines**, where the trigger runs code instead of opening an issue. Recurring issues are the lightweight cousin: they only create a tracked work item; routines run a full agent pipeline.
+- [`kind: TriageRule`](/manifest/triage_rule) — to auto-label or auto-route the issues a recurring schedule creates.

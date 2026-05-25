@@ -230,9 +230,9 @@ declaratively.
 
 ## See also
 
-- [`internal/hooks/store.go`](../../internal/hooks/store.go) — Go
+- `internal/hooks/store.go` — Go
   side of hook registration (`hooks.Register`).
-- [`internal/api/hooks_handler.go`](../../internal/api/hooks_handler.go)
+- `internal/api/hooks_handler.go`
   — REST handler the manifest calls.
 - [Hooks operator guide](../guides/hooks.mdx) — runtime semantics,
   matcher syntax, and handler kinds.
