@@ -750,7 +750,7 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 					if err := authH.ArmDeployRaceWindow(armCtx, 0); err != nil {
 						logger.Error("bootstrap: deploy-race window arm failed",
 							"error", err,
-							"impact", "bootstrap remains open without a deadline; restart once you've finished onboarding")
+							"impact", "fail-closed: /api/v1/bootstrap returns 503 via bootstrapArmingFailed() until the database is reachable and the server is restarted")
 					}
 				}()
 			}
