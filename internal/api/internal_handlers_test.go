@@ -2327,7 +2327,7 @@ func TestStaticFileHandler_Basic(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	h := StaticFileHandlerFromDir(dir)
+	h := StaticFileHandler(os.DirFS(dir))
 
 	cases := []struct {
 		path     string
@@ -2361,7 +2361,7 @@ func TestStaticFileHandler_DirectoryIndex(t *testing.T) {
 	os.WriteFile(subdir+"/index.html", []byte("SUBINDEX"), 0o644)
 	os.WriteFile(dir+"/index.html", []byte("ROOT"), 0o644)
 
-	h := StaticFileHandlerFromDir(dir)
+	h := StaticFileHandler(os.DirFS(dir))
 	req := httptest.NewRequest(http.MethodGet, "/sub", nil)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
