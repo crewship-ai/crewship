@@ -20,6 +20,36 @@ import (
 // callers wiring in untrusted strings.
 var ErrUnsafeBackupPath = errors.New("backup storage: unsafe path")
 
+// ErrBundleNotFound is returned by Exists when the bundle file is
+// absent from the storage backend. Used by API/CLI handlers to map
+// to HTTP 404 without bypassing the storage provider abstraction
+// (which the previous os.Stat in internal/api did). Wrap distinct
+// from os.ErrNotExist so callers can branch via errors.Is without
+// importing os.
+var ErrBundleNotFound = errors.New("backup: bundle not found")
+
+// Exists reports whether a bundle file is present at the supplied
+// path. Uses the active storage provider (LocalStorageOps by default)
+// so filesystem access stays inside the backup package — API handlers
+// MUST NOT call os.Stat directly per the provider-pattern guideline
+// (internal/**/*.go: never access filesystem directly).
+//
+// Returns:
+//   - (true,  nil) if the file exists.
+//   - (false, ErrBundleNotFound) if the path is absent.
+//   - (false, wrapped err) for path-validation or unexpected I/O errors.
+func Exists(ctx context.Context, path string) (bool, error) {
+	st := getDefaultStorage()
+	_, err := st.Stat(ctx, path)
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return false, ErrBundleNotFound
+	}
+	return false, fmt.Errorf("backup: stat bundle: %w", err)
+}
+
 // cleanPath canonicalises an operator-supplied path and rejects the
 // obvious red flags: empty string, embedded NUL. Returns the cleaned
 // path on success. Every LocalStorageOps method funnels through this

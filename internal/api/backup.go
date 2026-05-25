@@ -331,32 +331,44 @@ func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	// Existence check returns 404 before RestoreBackup gets a chance to
-	// fail with "open bundle: no such file" (which maps to 500). The
-	// previous bundleBelongsToWorkspace gate folded this check into its
-	// 404 path implicitly — Inspect returned an error for missing files
-	// and the helper treated that as "not found". The dedicated stat
-	// preserves the 404 contract without the cross-tenant gate.
-	if _, err := os.Stat(req.Path); err != nil {
-		if os.IsNotExist(err) {
+	// Existence check returns 404 before RestoreBackup gets a chance
+	// to fail with "open bundle: no such file" (which maps to 500).
+	// Routed through backup.Exists rather than os.Stat to preserve
+	// the provider-pattern boundary that the HTTP layer MUST NOT
+	// cross (per internal/**/*.go guideline).
+	if _, err := backup.Exists(ctx, req.Path); err != nil {
+		if errors.Is(err, backup.ErrBundleNotFound) {
 			replyError(w, http.StatusNotFound, "backup not found")
 			return
 		}
-		replyError(w, http.StatusInternalServerError, "stat backup: "+err.Error())
+		replyError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	// Pre-fix this handler called bundleBelongsToWorkspace, which
-	// blocked the canonical disaster-recovery flow: after `dev.sh
-	// nuke` the fresh-bootstrap workspace has a NEW CUID, so the
-	// bundle's workspace_id never matched the current context's
-	// workspace_id and the API returned 404 even though the admin had
-	// a valid bundle for that slug. Restore now relies solely on the
-	// admin role gate above — the bundle's manifest dictates the
-	// post-restore identity. List / Inspect / Verify / Download still
-	// filter by workspace context (cross-tenant disclosure concern);
-	// Restore is a write that PRODUCES the workspace the bundle
-	// describes, so no such disclosure exists.
-	_ = workspaceID // retained for audit / journal calls below
+	// Cross-tenant write guard: the bundle must either match the
+	// caller's current workspace (by id OR slug — slug match covers
+	// the post-`dev.sh nuke` DR scenario where the fresh-bootstrap
+	// workspace has a NEW CUID but the same slug as the source) OR
+	// the caller's instance must have no workspace yet (canonical
+	// "first restore on a fresh instance" DR path). Otherwise
+	// reject with 403 so an admin can't restore another tenant's
+	// bundle into their workspace context.
+	//
+	// Pre-fix this handler dropped the binding entirely, which
+	// CodeRabbit flagged as a cross-tenant write risk (issue #594
+	// comment, internal/api/backup.go:348). This re-introduces the
+	// check in a way that allows DR while blocking cross-tenant
+	// abuse.
+	allowed, denyReason, err := allowRestore(ctx, h.db, req.Path, workspaceID)
+	if err != nil {
+		h.logger.Warn("backup restore authorization probe failed", "error", err, "path", req.Path)
+		replyError(w, http.StatusInternalServerError, "authorize restore: "+err.Error())
+		return
+	}
+	if !allowed {
+		h.logger.Warn("backup restore denied", "reason", denyReason, "path", req.Path, "workspace_id", workspaceID, "user", user.ID)
+		replyError(w, http.StatusForbidden, denyReason)
+		return
+	}
 
 	ops := h.dockerOps
 
@@ -413,6 +425,69 @@ func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
 		"rows_inserted":         result.RowsInserted,
 		"docker_phase_skipped":  result.DockerPhaseSkipped,
 	})
+}
+
+// allowRestore enforces the cross-tenant write guard described in
+// the Restore handler above. Three allow paths:
+//
+//  1. Bundle's workspace ID matches the caller's current
+//     workspaceID (canonical re-restore into the same workspace).
+//  2. Bundle's workspace slug matches the slug of the row at the
+//     caller's current workspaceID (post-nuke fresh-bootstrap
+//     with the same slug under a new id — the DR scenario the
+//     previous strict ID gate broke).
+//  3. The instance has zero workspaces (canonical "first restore
+//     on a fresh instance" — typical after `crewship start` with
+//     no bootstrap completed).
+//
+// Returns (true, "", nil) on allow, (false, reason, nil) on deny,
+// or (_, _, err) on probe failure.
+func allowRestore(ctx context.Context, db *sql.DB, bundlePath, callerWorkspaceID string) (bool, string, error) {
+	// Path 3: empty instance → DR escape hatch.
+	var wsCount int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM workspaces`).Scan(&wsCount); err != nil {
+		return false, "", fmt.Errorf("count workspaces: %w", err)
+	}
+	if wsCount == 0 {
+		return true, "", nil
+	}
+	// Need the bundle's workspace identity for paths 1 and 2.
+	m, err := backup.Inspect(ctx, bundlePath)
+	if err != nil {
+		// Defer the real error to the restore flow which gives a
+		// better message; here we just deny.
+		return false, "could not read bundle manifest for authorization", nil
+	}
+	if m.Contents.Workspace == nil {
+		// No workspace anchor in manifest (instance-scope or
+		// custom-built dump). Defer the decision; restore will
+		// fail loudly if the bundle isn't workspace-scoped.
+		return true, "", nil
+	}
+	bundleID := m.Contents.Workspace.ID
+	bundleSlug := m.Contents.Workspace.Slug
+	if callerWorkspaceID == "" {
+		// Caller has no current workspace context (e.g. just
+		// bootstrapped) — fall through to slug-only match below
+		// so DR via API still works for the operator who just
+		// created the instance owner account.
+	} else {
+		// Path 1: ID match.
+		if bundleID == callerWorkspaceID {
+			return true, "", nil
+		}
+		// Path 2: slug match against caller's workspace row.
+		var callerSlug string
+		err := db.QueryRowContext(ctx, `SELECT slug FROM workspaces WHERE id = ?`, callerWorkspaceID).Scan(&callerSlug)
+		if err == nil && callerSlug != "" && callerSlug == bundleSlug {
+			return true, "", nil
+		}
+	}
+	return false, fmt.Sprintf(
+		"bundle workspace %q (slug %q) is not bound to your current workspace; "+
+			"restore on the source instance, or use a fresh instance for cross-tenant DR",
+		bundleID, bundleSlug,
+	), nil
 }
 
 // Status handles GET /api/v1/admin/backups/status. Reports whether an

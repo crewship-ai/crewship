@@ -1,5 +1,7 @@
 package backup
 
+import "sort"
+
 // intent.go — authoritative allowlist of workspace-scoped tables and
 // what backup should do with each one.
 //
@@ -155,8 +157,11 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 }
 
 // IncludedTables returns the names of tables the bundle should
-// include, derived from BackupTableIntent. Sorted alphabetically;
-// runtime ordering for FK-safe INSERT is computed elsewhere.
+// include, derived from BackupTableIntent. Sorted alphabetically
+// — map iteration order is nondeterministic so the explicit sort
+// pins the contract callers rely on (drift-detection test fixtures
+// compare ordered slices). Runtime ordering for FK-safe INSERT is
+// computed elsewhere via DiscoverScopedTables.
 func IncludedTables() []string {
 	out := make([]string, 0, len(BackupTableIntent))
 	for name, intent := range BackupTableIntent {
@@ -164,5 +169,6 @@ func IncludedTables() []string {
 			out = append(out, name)
 		}
 	}
+	sort.Strings(out)
 	return out
 }

@@ -164,7 +164,7 @@ func equalityOrIN(quotedCol string, n int) string {
 func DiscoverScopedTables(ctx context.Context, db *sql.DB) ([]ScopedTable, error) {
 	allTables, err := listAllTables(ctx, db)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("backup: discover scoped tables: %w", err)
 	}
 	// Map every table → its outgoing FK edges. Used to build the
 	// REVERSE-FK adjacency (which tables reference X).
@@ -172,7 +172,7 @@ func DiscoverScopedTables(ctx context.Context, db *sql.DB) ([]ScopedTable, error
 	for _, t := range allTables {
 		edges, err := tableFKEdges(ctx, db, t)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("backup: discover scoped tables: introspect %q: %w", t, err)
 		}
 		outgoing[t] = edges
 	}
@@ -238,11 +238,14 @@ func listAllTables(ctx context.Context, db *sql.DB) ([]string, error) {
 	for rows.Next() {
 		var t string
 		if err := rows.Scan(&t); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("backup: scan sqlite_master row: %w", err)
 		}
 		out = append(out, t)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("backup: iterate sqlite_master: %w", err)
+	}
+	return out, nil
 }
 
 // tableFKEdges returns the FK edges out of `table`. Wraps
@@ -269,7 +272,7 @@ func tableFKEdges(ctx context.Context, db *sql.DB, table string) ([]ScopeEdge, e
 			matchClause        sql.NullString
 		)
 		if err := rows.Scan(&id, &seq, &refTable, &from, &to, &onUpdate, &onDelete, &matchClause); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("backup: scan FK row for %q: %w", table, err)
 		}
 		if from == "" || refTable == "" {
 			continue
@@ -284,7 +287,10 @@ func tableFKEdges(ctx context.Context, db *sql.DB, table string) ([]ScopeEdge, e
 			ToColumn:   to,
 		})
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("backup: iterate FK rows for %q: %w", table, err)
+	}
+	return out, nil
 }
 
 // CategoriseScopedTables splits discovered tables into three buckets
