@@ -33,9 +33,9 @@ func TestSlashCommandsList_FiltersByCapability(t *testing.T) {
 	h := NewSlashCommandsHandler(router)
 
 	tests := []struct {
-		name       string
-		userID     string
-		wantIDs    []string
+		name    string
+		userID  string
+		wantIDs []string
 	}{
 		{
 			name:    "chat-only member sees empty actions",

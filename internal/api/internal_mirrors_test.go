@@ -41,24 +41,34 @@ func TestRoutineAdapter_NilHandlerReturns500(t *testing.T) {
 // handler — without that step the public handler reads
 // r.PathValue("workspaceId") = "" and 400s.
 //
-// We don't actually call SkillGenerateHandler.Generate here (it
-// would try to reach an LLM); we use a stand-in func that just
-// records the path value, so the adapter wiring is exercised in
-// isolation.
+// CodeRabbit nitpick: previously this test reproduced the adapter
+// logic inline and asserted only the recorder default — it never
+// touched SkillInternalAdapter.Generate, so an adapter regression
+// would have slipped through. Now we call the adapter directly
+// against a real (empty-state) SkillGenerateHandler whose downstream
+// Generate will fail on the empty JSON body. The 400 response is
+// the signal that adapter.Generate ran end-to-end AND propagated
+// the workspaceId path value (without it the downstream would
+// produce a different error).
 func TestSkillAdapter_StampsPathValue(t *testing.T) {
-	r := httptest.NewRequest(http.MethodPost, "/?workspace_id=ws-42", strings.NewReader(`{}`))
+	db := setupTestDB(t)
+	gen := &SkillGenerateHandler{db: db, logger: nil} // logger fine to be nil — handler guards
+	adapter := NewSkillInternalAdapter(gen)
+
+	r := httptest.NewRequest(http.MethodPost, "/?workspace_id=ws-42", strings.NewReader(``))
 	w := httptest.NewRecorder()
+	adapter.Generate(w, r)
 
-	// Simulate what the adapter does, since we can't easily stub
-	// SkillGenerateHandler without a DB.
-	wsID := r.URL.Query().Get("workspace_id")
-	r.SetPathValue("workspaceId", wsID)
-
-	if got := r.PathValue("workspaceId"); got != "ws-42" {
-		t.Errorf("PathValue after adapter stamp = %q, want ws-42", got)
+	// PathValue ws-42 was stamped by the adapter — downstream
+	// SkillGenerateHandler.Generate now sees it via r.PathValue and
+	// progresses past the workspace-required guard. The empty body
+	// then fails JSON decode → 400. Without the SetPathValue, the
+	// downstream would 400 with "workspace_id required" instead.
+	if r.PathValue("workspaceId") != "ws-42" {
+		t.Errorf("PathValue after adapter call = %q, want ws-42 (stamp dropped)", r.PathValue("workspaceId"))
 	}
-	if w.Code != 200 {
-		t.Errorf("status = %d", w.Code) // no write expected
+	if w.Code != 400 {
+		t.Errorf("status = %d, want 400 (adapter passed workspace, downstream rejected body)", w.Code)
 	}
 }
 

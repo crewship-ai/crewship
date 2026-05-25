@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -70,10 +71,21 @@ func TestMigrateV109_MemberCapabilitiesBackfill(t *testing.T) {
 	if _, err := db.Exec(`UPDATE workspace_members SET capabilities = NULL`); err != nil {
 		t.Fatalf("null caps: %v", err)
 	}
-	if _, err := db.Exec(migrationMemberCapabilities); err != nil {
-		// The ALTER part will fail (column already exists from the
-		// migrate run). The UPDATE part should still apply. We split
-		// the constant into the UPDATE clause for the replay.
+	_, err = db.Exec(migrationMemberCapabilities)
+	if err != nil {
+		// CodeRabbit CR-10: narrow the catch-all. The ONLY expected
+		// failure mode here is the ALTER complaining about the
+		// already-existing column (because Migrate() already ran the
+		// full constant once and we're replaying it). Any other
+		// error means the migration SQL itself has a real bug — we
+		// must surface it, not silently fall through to the manual
+		// UPDATE replay which would mask the real problem.
+		if !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
+			t.Fatalf("migration replay returned unexpected error: %v", err)
+		}
+		// Expected duplicate-column error — replay the UPDATE leg in
+		// isolation so the per-role bundle assertions below have
+		// something to assert against.
 		if _, err2 := db.Exec(`
 			UPDATE workspace_members
 			SET capabilities = CASE role

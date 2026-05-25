@@ -20,7 +20,17 @@ export interface SlashFormField {
   default?: string
 }
 
-export interface SlashCommand {
+/**
+ * SlashActionSchema is the server-driven entry. Renamed from
+ * `SlashCommand` in this file because slash-palette.tsx already
+ * exports a different `SlashCommand` shape (client-side palette
+ * row with `icon: ComponentType`, `group`, `run`); two unrelated
+ * types under the same name made imports ambiguous. (CodeRabbit
+ * nitpick.) The wire shape is intentionally narrower than a
+ * full UI row — the icon string is resolved to a component at
+ * render time by the consumer.
+ */
+export interface SlashActionSchema {
   id: string
   label: string
   /** Czech label; React picks based on user locale. Falls back to `label`. */
@@ -30,6 +40,13 @@ export interface SlashCommand {
   capability: string
   form_schema?: SlashFormField[]
 }
+
+/**
+ * @deprecated Use SlashActionSchema. Kept as a type alias for one
+ * release so any external import keeps compiling; remove in a
+ * follow-up PR once dashboard consumers are migrated.
+ */
+export type SlashCommand = SlashActionSchema
 
 /**
  * Fetch the slash command catalog for the active workspace.
@@ -53,7 +70,7 @@ export function useSlashCommands(workspaceId: string | null | undefined) {
       if (!res.ok) {
         throw new Error(`slash-commands fetch failed: ${res.status}`)
       }
-      return (await res.json()) as SlashCommand[]
+      return (await res.json()) as SlashActionSchema[]
     },
   })
 }

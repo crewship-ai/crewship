@@ -60,23 +60,23 @@ type Router struct {
 	// it from the daemon depends on the host's /etc/hosts mapping —
 	// fragile on multi-host lab networks. Use the loopback variant
 	// (typically 127.0.0.1:<port>) instead when set. (Issue #535.)
-	internalLoopbackURL    string
-	hub                    *ws.Hub
-	orch                   *orchestrator.Orchestrator
-	keeperGK               gatekeeper.Evaluator
-	keeperSecrets          SecretGetter
-	keeperContainer        provider.ContainerProvider
-	keeperConfig           *config.KeeperConfig
-	keeperConvReader       ConversationReader
-	missionCallback        MissionCallback
-	scheduleUpdater        ScheduleUpdater
-	logWriter              *logcollector.Writer
-	allowSignup            bool
-	googleClientID         string
-	googleSecret           string
-	authBaseURL            string
-	license                *license.License
-	agentHandler           *AgentHandler
+	internalLoopbackURL string
+	hub                 *ws.Hub
+	orch                *orchestrator.Orchestrator
+	keeperGK            gatekeeper.Evaluator
+	keeperSecrets       SecretGetter
+	keeperContainer     provider.ContainerProvider
+	keeperConfig        *config.KeeperConfig
+	keeperConvReader    ConversationReader
+	missionCallback     MissionCallback
+	scheduleUpdater     ScheduleUpdater
+	logWriter           *logcollector.Writer
+	allowSignup         bool
+	googleClientID      string
+	googleSecret        string
+	authBaseURL         string
+	license             *license.License
+	agentHandler        *AgentHandler
 	// credentialHandler and skillGenHandler are stashed at
 	// registerCrewsRoutes time so the registerInternalRoutes step
 	// can wire the matching /api/v1/internal/credentials and

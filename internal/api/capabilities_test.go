@@ -191,12 +191,12 @@ func TestBundleCapabilities(t *testing.T) {
 // rather than persisting unmatchable strings.
 func TestIsValidCapability(t *testing.T) {
 	cases := map[string]bool{
-		"chat":            true,
-		"routine.create":  true,
-		"routine.creat":   false, // typo
-		"ROUTINE.CREATE":  false, // case-sensitive on purpose
-		"":                false,
-		"future.thing":    false,
+		"chat":           true,
+		"routine.create": true,
+		"routine.creat":  false, // typo
+		"ROUTINE.CREATE": false, // case-sensitive on purpose
+		"":               false,
+		"future.thing":   false,
 	}
 	for input, want := range cases {
 		t.Run(input, func(t *testing.T) {

@@ -98,7 +98,7 @@ func LoadServerSlashCommands(ctx context.Context, repl *REPL, client SlashHTTPCl
 	}
 	for _, cmd := range cmds {
 		cmd := cmd // capture
-		repl.Register(cmd.ID, buildSlashHandler(cmd, client))
+		repl.Register(cmd.ID, buildSlashHandler(cmd, client, repl.Out))
 	}
 	return len(cmds)
 }
@@ -107,7 +107,20 @@ func LoadServerSlashCommands(ctx context.Context, repl *REPL, client SlashHTTPCl
 // args, builds the JSON body via slashCommandPayload, and POSTs to
 // the matching public endpoint. Errors are surfaced inline so the
 // user sees them right after the prompt.
-func buildSlashHandler(cmd ServerSlashCommand, client SlashHTTPClient) REPLHandler {
+//
+// `out` is the REPL's standard-output writer (repl.Out). We thread
+// it through explicitly rather than reaching for os.Stdout so
+// embedded REPLs (test, future TUI host) capture the success line
+// in their own buffer instead of leaking it to the process stdout.
+// (CodeRabbit CR-7.)
+func buildSlashHandler(cmd ServerSlashCommand, client SlashHTTPClient, out io.Writer) REPLHandler {
+	if out == nil {
+		// Defence: never panic on a nil Out (some test harnesses
+		// build REPLs without setting it). Fall back to os.Stdout
+		// so the operator at least sees the confirmation; this is
+		// the pre-CR-7 default behaviour for completeness.
+		out = os.Stdout
+	}
 	return func(ctx context.Context, args []string) (bool, error) {
 		values, err := parseKeyValueArgs(args)
 		if err != nil {
@@ -140,13 +153,13 @@ func buildSlashHandler(cmd ServerSlashCommand, client SlashHTTPClient) REPLHandl
 			return true, err
 		}
 		defer resp.Body.Close()
-		out, _ := io.ReadAll(resp.Body)
+		respBody, _ := io.ReadAll(resp.Body)
 		if resp.StatusCode >= 400 {
-			return true, fmt.Errorf("/%s failed: %s — %s", cmd.ID, resp.Status, string(out))
+			return true, fmt.Errorf("/%s failed: %s — %s", cmd.ID, resp.Status, string(respBody))
 		}
-		// Success — surface a short confirmation. The user is in a
-		// chat REPL; a long JSON dump would clutter the conversation.
-		fmt.Fprintf(os.Stdout, "[/%s] ✓\n", cmd.ID)
+		// Success — surface a short confirmation via repl.Out so
+		// embedded REPLs (tests, TUI host) capture it.
+		fmt.Fprintf(out, "[/%s] ✓\n", cmd.ID)
 		return true, nil
 	}
 }
@@ -161,23 +174,62 @@ var keyValuePattern = regexp.MustCompile(`([a-zA-Z_][a-zA-Z0-9_]*)=(?:"([^"]*)"|
 // contain quoted spaces. We re-join + re-parse with a regex because
 // the REPL's strings.Fields split breaks `key="a b"` into ["key=\"a",
 // "b\""] — losing the structure we need.
+//
+// Rejection rules (CodeRabbit CR-8):
+//
+//   - At least one key=value match is required when args are
+//     non-blank. A line that's all garbage (no = signs) errors.
+//   - Bytes that didn't match any kv pair are an error too. The
+//     pre-CR-8 implementation silently dropped them, which hid
+//     typos like `crons=0 7 * * MON` (missing `e` → no match → no
+//     warning, server gets `cron_expr=""` and 400s confusingly).
+//     Now we sum the matched-span lengths and compare against the
+//     joined input length (after collapsing inter-token whitespace
+//     introduced by strings.Join); any positive remainder means
+//     there's content the user typed that the parser didn't
+//     understand.
 func parseKeyValueArgs(args []string) (map[string]string, error) {
 	if len(args) == 0 {
 		return map[string]string{}, nil
 	}
 	joined := strings.Join(args, " ")
 	out := map[string]string{}
-	matches := keyValuePattern.FindAllStringSubmatch(joined, -1)
-	if len(matches) == 0 && strings.TrimSpace(joined) != "" {
+	matchIdx := keyValuePattern.FindAllStringSubmatchIndex(joined, -1)
+	if len(matchIdx) == 0 && strings.TrimSpace(joined) != "" {
 		return nil, fmt.Errorf("could not parse args — use key=value or key=\"quoted value\" form")
 	}
-	for _, m := range matches {
-		key := m[1]
-		val := m[2]
-		if val == "" {
-			val = m[3]
+
+	// Walk matches in order, capturing each kv pair AND the gap
+	// before it. A non-whitespace gap means the user typed something
+	// the regex didn't recognise — surface it.
+	var leftover strings.Builder
+	cursor := 0
+	for _, idx := range matchIdx {
+		start, end := idx[0], idx[1]
+		gap := joined[cursor:start]
+		if strings.TrimSpace(gap) != "" {
+			leftover.WriteString(strings.TrimSpace(gap))
+			leftover.WriteString(" ")
+		}
+		// idx[2..3] = key, idx[4..5] = quoted val, idx[6..7] = bare val
+		key := joined[idx[2]:idx[3]]
+		var val string
+		if idx[4] >= 0 {
+			val = joined[idx[4]:idx[5]]
+		} else if idx[6] >= 0 {
+			val = joined[idx[6]:idx[7]]
 		}
 		out[key] = val
+		cursor = end
+	}
+	if cursor < len(joined) {
+		tail := strings.TrimSpace(joined[cursor:])
+		if tail != "" {
+			leftover.WriteString(tail)
+		}
+	}
+	if leftover.Len() > 0 {
+		return nil, fmt.Errorf("unparseable args: %q — use key=value or key=\"quoted value\" form", strings.TrimSpace(leftover.String()))
 	}
 	return out, nil
 }

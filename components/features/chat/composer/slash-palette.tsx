@@ -34,7 +34,7 @@ import {
 import { useDrawerStore, type DrawerTab } from "@/stores/drawer-store"
 import {
   useSlashCommands,
-  type SlashCommand as ServerSlashCommand,
+  type SlashActionSchema as ServerSlashCommand,
 } from "@/hooks/use-slash-commands"
 
 interface DrawerApi {

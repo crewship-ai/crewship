@@ -21,6 +21,7 @@ package api
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"net/http"
 	"sync"
 	"time"
@@ -114,18 +115,35 @@ func InvalidateCapabilityCache(workspaceID, userID string) {
 }
 
 // loadCapabilitiesForMember reads the capabilities + role from the
-// workspace_members row, falling back to role-derived defaults when
-// the column is NULL (legacy row that hasn't been backfilled yet
-// because the migration ran but the application-layer write that
-// would fill the column hasn't happened).
+// workspace_members row. Returns:
 //
-// Returns (nil, "", false) if no membership row exists — the caller
-// treats that as "not a member" and denies. Distinct from the
-// "member with no granted capabilities" case (which returns
-// chat-only via the defensive HasCapability path).
-func loadCapabilitiesForMember(ctx context.Context, db *sql.DB, workspaceID, userID string) (map[string]struct{}, string, bool) {
+//   - (caps, role, nil)   — row exists; caps populated per the rules
+//     below.
+//   - (nil, "", nil)      — no membership row (caller treats as
+//     "not a member").
+//   - (nil, "", err)      — real DB error (caller surfaces 500 instead
+//     of conflating with not-a-member).
+//
+// Capability resolution rules for an existing row:
+//
+//   - capabilities IS NULL  → role-derived fallback bundle. This is
+//     the legacy / upgrade-in-progress path: the migration ran but no
+//     application write has filled the column, so we'd rather grant
+//     role-equivalent defaults than lock the user out.
+//
+//   - capabilities IS valid JSON with at least one known entry →
+//     return that set verbatim. Operator intent honored.
+//
+//   - capabilities IS present but ParseCapabilities returns nil (the
+//     value parsed to an empty array, was malformed JSON, or only
+//     contained unknown future-version strings) → return the
+//     chat-only baseline, NOT the role fallback. An explicit-but-
+//     drained value reflects deliberate operator intent ("strip this
+//     user back to chat") and the runtime must not silently restore
+//     role-derived privileges. (CodeRabbit CR-1.)
+func loadCapabilitiesForMember(ctx context.Context, db *sql.DB, workspaceID, userID string) (map[string]struct{}, string, error) {
 	if db == nil || workspaceID == "" || userID == "" {
-		return nil, "", false
+		return nil, "", nil
 	}
 	var capsJSON sql.NullString
 	var role string
@@ -134,18 +152,30 @@ func loadCapabilitiesForMember(ctx context.Context, db *sql.DB, workspaceID, use
 		FROM workspace_members
 		WHERE workspace_id = ? AND user_id = ?
 	`, workspaceID, userID).Scan(&capsJSON, &role)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, "", nil
+	}
 	if err != nil {
-		return nil, "", false
+		// Real DB error — surface to caller so it can 500. Collapsing
+		// this into "not a member" used to mask transient SQLITE_BUSY
+		// behind a 403 that an operator couldn't distinguish from a
+		// genuine permission deny. (CodeRabbit CR-2.)
+		return nil, "", err
 	}
-	if capsJSON.Valid {
-		caps := ParseCapabilities(capsJSON.String)
-		if caps != nil {
-			return caps, role, true
-		}
+	if !capsJSON.Valid {
+		// NULL: legacy / upgrade-in-progress. Role fallback is the
+		// safe degrade so a fresh INSERT that didn't fill the column
+		// doesn't lock the user out before the backfill catches up.
+		return FallbackCapabilitiesForRole(role), role, nil
 	}
-	// NULL or unparseable: degrade to role-derived defaults so the
-	// upgrade-in-progress window doesn't lock anyone out.
-	return FallbackCapabilitiesForRole(role), role, true
+	caps := ParseCapabilities(capsJSON.String)
+	if caps == nil {
+		// Explicit-empty / malformed / all-unknown-strings. Operator
+		// intent: chat-only. NOT role fallback — that would silently
+		// restore privileges the operator just stripped.
+		return map[string]struct{}{CapabilityChat: {}}, role, nil
+	}
+	return caps, role, nil
 }
 
 // CapabilitiesForMember is the cached lookup that handlers call
@@ -155,17 +185,41 @@ func loadCapabilitiesForMember(ctx context.Context, db *sql.DB, workspaceID, use
 // caps so a single DB round-trip serves both the capability gate
 // and any layered role gate the same handler runs.)
 //
-// Returns (nil, "", false) when no membership row exists.
+// Returns (nil, "", false) when no membership row exists. DB errors
+// are NOT swallowed — they propagate via the loader's error return
+// and surface as (nil, "", false) too BUT the caller can re-query
+// via CapabilitiesForMemberE to get the underlying error and surface
+// a 500 instead of conflating with not-a-member. Existing callers
+// keep working unchanged.
 func CapabilitiesForMember(ctx context.Context, db *sql.DB, workspaceID, userID string) (map[string]struct{}, string, bool) {
+	caps, role, _, ok := CapabilitiesForMemberE(ctx, db, workspaceID, userID)
+	return caps, role, ok
+}
+
+// CapabilitiesForMemberE is the same lookup as CapabilitiesForMember
+// but also returns the underlying error so callers that need to
+// distinguish "not a member" from "DB failed" can do so. The bool
+// return stays "true on real hit" for symmetry with the existing
+// helper — false means either no row OR error; the error tells the
+// caller which.
+//
+// Cache is only populated on a successful load (no row → no cache;
+// error → no cache), so repeated calls on a transient SQLITE_BUSY
+// won't pin a wrong answer for the TTL window.
+func CapabilitiesForMemberE(ctx context.Context, db *sql.DB, workspaceID, userID string) (map[string]struct{}, string, error, bool) {
 	if e, ok := defaultCapabilityCache.get(workspaceID, userID); ok {
-		return e.caps, e.role, true
+		return e.caps, e.role, nil, true
 	}
-	caps, role, ok := loadCapabilitiesForMember(ctx, db, workspaceID, userID)
-	if !ok {
-		return nil, "", false
+	caps, role, err := loadCapabilitiesForMember(ctx, db, workspaceID, userID)
+	if err != nil {
+		return nil, "", err, false
+	}
+	if role == "" {
+		// No membership row.
+		return nil, "", nil, false
 	}
 	defaultCapabilityCache.put(workspaceID, userID, caps, role)
-	return caps, role, true
+	return caps, role, nil, true
 }
 
 // requireCapabilityOrForbid is the capability-gate variant of

@@ -322,6 +322,42 @@ func TestGetMemberCapabilities_DBError(t *testing.T) {
 	}
 }
 
+// TestPatchCapabilities_RaceMemberDeletedBetweenReadAndWrite is the
+// CodeRabbit CR-9 regression. Between the load step and the UPDATE
+// step a concurrent RemoveMember can delete the row; the UPDATE
+// then affects 0 rows but the old code 200'd + audited. Now we 404.
+func TestPatchCapabilities_RaceMemberDeletedBetweenReadAndWrite(t *testing.T) {
+	h := newWsHandlerForTest(t)
+	adminID := seedTestUser(t, h.db)
+	wsID := seedTestWorkspace(t, h.db, adminID)
+	ludmilaID := seedMemberWithCapabilities(t, h.db, wsID, "MEMBER",
+		`["chat"]`, "ludmila-race")
+	InvalidateCapabilityCache(wsID, ludmilaID)
+
+	// Inject the race deterministically: delete the row out from
+	// under the cached read. The cache holds the post-load state;
+	// the next CapabilitiesForMember call hits cache, the UPDATE
+	// hits the (now-empty) table → 0 rows affected.
+	_, _, _ = CapabilitiesForMember(context.Background(), h.db, wsID, ludmilaID)
+	if _, err := h.db.Exec(`DELETE FROM workspace_members WHERE user_id = ?`, ludmilaID); err != nil {
+		t.Fatalf("simulate race: %v", err)
+	}
+
+	req := httptest.NewRequest("PATCH", "/x", strings.NewReader(
+		`{"set":["chat","routine.create"]}`))
+	req.SetPathValue("memberId", ludmilaID)
+	ctx := context.WithValue(req.Context(), ctxWorkspaceID, wsID)
+	ctx = context.WithValue(ctx, ctxUser, &AuthUser{ID: adminID})
+	ctx = context.WithValue(ctx, ctxRole, "ADMIN")
+	req = req.WithContext(ctx)
+	w := httptest.NewRecorder()
+
+	h.PatchMemberCapabilities(w, req)
+	if w.Code != 404 {
+		t.Errorf("status = %d, want 404 (member deleted between read and write)", w.Code)
+	}
+}
+
 // TestPatchCapabilities_DBUpdateError covers the line 158-162 branch:
 // the UPDATE itself fails with a SQL error. Same close-DB technique.
 func TestPatchCapabilities_DBUpdateError(t *testing.T) {

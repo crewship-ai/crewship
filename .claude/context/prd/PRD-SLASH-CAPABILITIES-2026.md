@@ -167,7 +167,7 @@ through HTTP headers is the only correct shape.
 
 Inbound chat-bridge / CLI repl request to the sidecar carries:
 
-```
+```http
 X-Caller-User-Id: <user id>     (omitted for autonomous-agent tool calls)
 X-Caller-Source:  chat-ui | cli-repl
 ```
@@ -208,7 +208,7 @@ Pattern `internal/api/internal_hire.go:13-17`: each new file
 exposes a thin adapter over the public handler with workspace context
 injected from query params.
 
-```
+```text
 internal/api/internal_routines.go     → InternalRoutineHandler.CreateSchedule
 internal/api/internal_skills.go       → InternalSkillHandler.Generate
 internal/api/internal_credentials.go  → adds Create + Rotate (LIST exists)
@@ -220,7 +220,7 @@ agent goes through `autonomy_level` path instead, see §6.5).
 
 Routes registered in `router_internal.go`:
 
-```
+```http
 POST /api/v1/internal/routines/schedules
 POST /api/v1/internal/skills/generate
 POST /api/v1/internal/credentials/{id}/rotate
@@ -234,7 +234,7 @@ add the body-create variant under the same route group.)
 Five-line handlers in the `internal/sidecar/` package, registered in
 the switch at `server.go:309-456`. Pattern `spawn.go:43-55`.
 
-```
+```text
 POST /routines/schedules/create  → proxyToAPI("POST /api/v1/internal/routines/schedules")
 POST /skills/generate            → proxyToAPI("POST /api/v1/internal/skills/generate")
 POST /credentials/create         → proxyToAPI("POST /api/v1/internal/credentials")
@@ -349,7 +349,7 @@ Two pieces:
 
 **Admin command surface** (`cmd/crewship/cmd_admin.go`):
 
-```
+```bash
 crewship member list                                           # list members + their capabilities
 crewship member capabilities <user>                            # show capabilities for one user
 crewship member grant <user> <capability> [<capability>...]    # add capability

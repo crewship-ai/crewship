@@ -22,7 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { apiFetch } from "@/lib/api-fetch"
-import type { SlashCommand, SlashFormField } from "@/hooks/use-slash-commands"
+import type { SlashActionSchema, SlashFormField } from "@/hooks/use-slash-commands"
 
 /**
  * Generic action modal driven by a slash command's form_schema.
@@ -41,7 +41,7 @@ import type { SlashCommand, SlashFormField } from "@/hooks/use-slash-commands"
  */
 interface SlashActionModalProps {
   /** The slash command the user picked. null = modal closed. */
-  command: SlashCommand | null
+  command: SlashActionSchema | null
   /** Active workspace id; required to address the right endpoint. */
   workspaceId: string
   /** Conversation context — optional pre-fill source for fields like
@@ -50,7 +50,7 @@ interface SlashActionModalProps {
   onClose: () => void
   /** Called on a successful submit so the parent can clear the slash
    *  input, scroll to the new artifact, fire its own analytics, etc. */
-  onSuccess?: (command: SlashCommand, result: unknown) => void
+  onSuccess?: (command: SlashActionSchema, result: unknown) => void
 }
 
 export function SlashActionModal({
@@ -88,7 +88,7 @@ export function SlashActionModal({
 }
 
 interface FormProps extends Omit<SlashActionModalProps, "command"> {
-  command: SlashCommand
+  command: SlashActionSchema
 }
 
 function Form({

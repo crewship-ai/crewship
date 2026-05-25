@@ -18,19 +18,6 @@ func newWsHandlerForTest(t *testing.T) *WorkspaceHandler {
 	return &WorkspaceHandler{db: db, logger: slog.Default()}
 }
 
-// withAdminCtx stamps the four context values every capability-
-// admin handler reads: workspace, user, role, plus the request
-// path value the route uses for memberId.
-func withAdminCtx(req interface{}, wsID, adminID, role, targetMemberID string) {
-	if r, ok := req.(*requestWithSetters); ok {
-		r.set(wsID, adminID, role, targetMemberID)
-	}
-}
-
-type requestWithSetters struct{}
-
-func (r *requestWithSetters) set(wsID, adminID, role, targetMemberID string) {}
-
 // TestPatchCapabilities_SetReplacesEntireRow exercises the canonical
 // shape the Members grid posts: the post-edit state of the row.
 // Asserts the row is replaced exactly, with chat always implied.

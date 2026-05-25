@@ -51,6 +51,31 @@ func TestParseKeyValueArgs(t *testing.T) {
 			args:    []string{"hello", "world"},
 			wantErr: true,
 		},
+		// CodeRabbit CR-8: partial-parse rejection. The pre-fix
+		// regex silently dropped leftover tokens; now they error.
+		{
+			name:    "kv with leading garbage",
+			args:    []string{"junk", "slug=daily-digest"},
+			wantErr: true,
+		},
+		{
+			name:    "kv with trailing garbage",
+			args:    []string{"slug=daily-digest", "extra"},
+			wantErr: true,
+		},
+		{
+			name:    "kv with garbage between",
+			args:    []string{"slug=x", "noise", "type=SECRET"},
+			wantErr: true,
+		},
+		// Typo case from the docstring example: missing "e" turns
+		// the cron key into garbage, dropping the entire spec value.
+		// Pre-CR-8 this silently succeeded with values={"crons":"0"}.
+		{
+			name:    "typo in key drops value silently (now rejected)",
+			args:    []string{"crons=0", "7", "*", "*", "MON"},
+			wantErr: true,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

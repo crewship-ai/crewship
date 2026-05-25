@@ -183,7 +183,7 @@ func TestBuildSlashHandler_RequiredFieldMissing(t *testing.T) {
 		},
 	}
 	c := &fakeSlashClient{wsID: "ws"}
-	h := buildSlashHandler(cmd, c)
+	h := buildSlashHandler(cmd, c, nil)
 	_, err := h(context.Background(), []string{}) // no args
 	if err == nil || !strings.Contains(err.Error(), "required field") {
 		t.Errorf("expected 'required field' error, got %v", err)
@@ -204,7 +204,7 @@ func TestBuildSlashHandler_RequiredFieldDefault(t *testing.T) {
 		},
 	}
 	c := &fakeSlashClient{wsID: "ws"}
-	h := buildSlashHandler(cmd, c)
+	h := buildSlashHandler(cmd, c, nil)
 	_, err := h(context.Background(), []string{})
 	if err != nil {
 		t.Errorf("default should satisfy required: %v", err)
@@ -224,7 +224,7 @@ func TestBuildSlashHandler_OptionalDefaultApplied(t *testing.T) {
 		},
 	}
 	c := &fakeSlashClient{wsID: "ws"}
-	h := buildSlashHandler(cmd, c)
+	h := buildSlashHandler(cmd, c, nil)
 	if _, err := h(context.Background(), []string{}); err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -239,7 +239,7 @@ func TestBuildSlashHandler_OptionalDefaultApplied(t *testing.T) {
 func TestBuildSlashHandler_UnknownEndpoint(t *testing.T) {
 	cmd := ServerSlashCommand{ID: "future-cmd"}
 	c := &fakeSlashClient{wsID: "ws"}
-	h := buildSlashHandler(cmd, c)
+	h := buildSlashHandler(cmd, c, nil)
 	_, err := h(context.Background(), []string{})
 	if err == nil || !strings.Contains(err.Error(), "unknown slash command") {
 		t.Errorf("expected unknown-id error, got %v", err)
@@ -254,7 +254,7 @@ func TestBuildSlashHandler_PostTransportError(t *testing.T) {
 		wsID:    "ws",
 		postErr: []error{errors.New("conn reset")},
 	}
-	h := buildSlashHandler(cmd, c)
+	h := buildSlashHandler(cmd, c, nil)
 	_, err := h(context.Background(), []string{})
 	if err == nil || !strings.Contains(err.Error(), "conn reset") {
 		t.Errorf("expected transport error, got %v", err)
@@ -269,7 +269,7 @@ func TestBuildSlashHandler_PostNon2xx(t *testing.T) {
 		wsID:     "ws",
 		postResp: []*http.Response{mkResp(403, `{"error":"Forbidden"}`)},
 	}
-	h := buildSlashHandler(cmd, c)
+	h := buildSlashHandler(cmd, c, nil)
 	_, err := h(context.Background(), []string{})
 	if err == nil || !strings.Contains(err.Error(), "/routine failed") {
 		t.Errorf("expected /routine failed wrapper, got %v", err)
@@ -287,7 +287,7 @@ func TestBuildSlashHandler_HappyPath(t *testing.T) {
 		wsID:     "ws",
 		postResp: []*http.Response{mkResp(201, `{"id":"sched_1"}`)},
 	}
-	h := buildSlashHandler(cmd, c)
+	h := buildSlashHandler(cmd, c, nil)
 	cont, err := h(context.Background(), []string{})
 	if err != nil {
 		t.Errorf("unexpected err: %v", err)
@@ -297,6 +297,56 @@ func TestBuildSlashHandler_HappyPath(t *testing.T) {
 	}
 	if c.postCalls != 1 {
 		t.Errorf("postCalls = %d, want 1", c.postCalls)
+	}
+}
+
+// TestBuildSlashHandler_WritesSuccessToOut is the CodeRabbit CR-7
+// regression: success confirmation must go via the passed-in writer
+// (repl.Out) instead of being hardcoded to os.Stdout. We pass a
+// bytes.Buffer and assert it captures the confirmation line.
+func TestBuildSlashHandler_WritesSuccessToOut(t *testing.T) {
+	cmd := ServerSlashCommand{ID: "routine"}
+	c := &fakeSlashClient{
+		wsID:     "ws",
+		postResp: []*http.Response{mkResp(201, `{}`)},
+	}
+	out := &bytes.Buffer{}
+	h := buildSlashHandler(cmd, c, out)
+	if _, err := h(context.Background(), []string{}); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if !strings.Contains(out.String(), "[/routine] ✓") {
+		t.Errorf("success confirmation missing from out buffer; got %q", out.String())
+	}
+}
+
+// TestLoadServerSlashCommands_RegistersHandlerWithReplOut wires the
+// full LoadServerSlashCommands path against a REPL whose Out is a
+// captured buffer; asserts the resulting handler writes its success
+// line through that buffer (end-to-end CR-7 coverage).
+func TestLoadServerSlashCommands_RegistersHandlerWithReplOut(t *testing.T) {
+	catalog := `[{"id":"routine","label":"R","capability":"routine.create"}]`
+	c := &fakeSlashClient{
+		wsID:     "ws",
+		getResp:  []*http.Response{mkResp(200, catalog)},
+		postResp: []*http.Response{mkResp(201, `{}`)},
+	}
+	repl := newTestREPL()
+	out := &bytes.Buffer{}
+	repl.Out = out
+	got := LoadServerSlashCommands(context.Background(), repl, c)
+	if got != 1 {
+		t.Fatalf("registered %d, want 1", got)
+	}
+	handler, ok := repl.Slash["routine"]
+	if !ok {
+		t.Fatal("routine handler not registered")
+	}
+	if _, err := handler(context.Background(), []string{}); err != nil {
+		t.Fatalf("handler err: %v", err)
+	}
+	if !strings.Contains(out.String(), "[/routine] ✓") {
+		t.Errorf("repl.Out did not capture success line: %q", out.String())
 	}
 }
 

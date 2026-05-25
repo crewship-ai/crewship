@@ -153,11 +153,30 @@ func (h *WorkspaceHandler) PatchMemberCapabilities(w http.ResponseWriter, r *htt
 	}
 
 	serialized := SerializeCapabilities(next)
-	if _, err := h.db.ExecContext(r.Context(),
+	result, err := h.db.ExecContext(r.Context(),
 		`UPDATE workspace_members SET capabilities = ?, updated_at = datetime('now') WHERE workspace_id = ? AND user_id = ?`,
-		serialized, workspaceID, memberID); err != nil {
+		serialized, workspaceID, memberID)
+	if err != nil {
 		h.logger.Error("update capabilities", "error", err, "member_id", memberID)
 		replyError(w, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	// CodeRabbit CR-9: between the load (above) and the UPDATE, the
+	// member row can have been deleted by a concurrent RemoveMember
+	// call. SQL UPDATE on a no-longer-existing row returns nil error
+	// but 0 rows affected; without this check we'd 200 + emit an
+	// audit row claiming the mutation succeeded. 404 makes the
+	// race visible to the operator. RowsAffected itself can
+	// theoretically error on a future driver — we surface that as
+	// 500 rather than guess.
+	affected, err := result.RowsAffected()
+	if err != nil {
+		h.logger.Error("rows affected", "error", err, "member_id", memberID)
+		replyError(w, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	if affected == 0 {
+		replyError(w, http.StatusNotFound, "Member not found (deleted concurrently)")
 		return
 	}
 

@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -45,7 +46,7 @@ func TestRequireCapability_AutonomousAgentBypasses(t *testing.T) {
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest("POST", "/x", nil)
 	got := requireCapabilityOrForbid(w, r, silentLogger(), db,
-		"any-ws", "" /* callerUserID empty = autonomous */,
+		"any-ws", "", /* callerUserID empty = autonomous */
 		CapabilityRoutineCreate, "routine.create", "routine:new")
 	if !got {
 		t.Fatal("autonomous agent path must return true")
@@ -124,6 +125,94 @@ func TestRequireCapability_NoMembershipRow(t *testing.T) {
 	}
 	if w.Code != 403 {
 		t.Errorf("status = %d, want 403", w.Code)
+	}
+}
+
+// TestRequireCapability_ExplicitEmptyDoesNotFallBackToRole is the
+// CodeRabbit CR-1 regression. When operator explicitly stores an
+// empty array, malformed JSON, or only future-unknown capability
+// strings, the runtime must NOT silently restore the role-derived
+// bundle — that would resurrect privileges the operator just
+// deliberately stripped. We seed an OWNER (whose role fallback would
+// grant everything) with the explicit-empty value, then assert
+// credential.create is denied.
+func TestRequireCapability_ExplicitEmptyDoesNotFallBackToRole(t *testing.T) {
+	db := setupTestDB(t)
+	ownerID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, ownerID)
+
+	cases := []struct {
+		name     string
+		capsJSON string
+	}{
+		{"empty array", `[]`},
+		{"malformed JSON", `[invalid`},
+		{"only unknown strings", `["future.capability","also.future"]`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			uid := "u-explicit-empty-" + strings.ReplaceAll(tc.name, " ", "-")
+			if _, err := db.Exec(`INSERT INTO users (id, email, full_name) VALUES (?, ?, ?)`,
+				uid, uid+"@x", "U"); err != nil {
+				t.Fatalf("seed user: %v", err)
+			}
+			if _, err := db.Exec(`INSERT INTO workspace_members (id, workspace_id, user_id, role, capabilities) VALUES (?, ?, ?, 'OWNER', ?)`,
+				"m-"+uid, wsID, uid, tc.capsJSON); err != nil {
+				t.Fatalf("seed member: %v", err)
+			}
+			InvalidateCapabilityCache(wsID, uid)
+
+			w := httptest.NewRecorder()
+			r := httptest.NewRequest("POST", "/x", nil)
+			got := requireCapabilityOrForbid(w, r, silentLogger(), db,
+				wsID, uid, CapabilityCredentialCreate, "credential.create", "cred:new")
+			if got {
+				t.Errorf("OWNER with explicit-empty caps (%q) MUST be denied; got grant", tc.capsJSON)
+			}
+		})
+	}
+}
+
+// TestCapabilitiesForMemberE_PropagatesDBError is the CodeRabbit
+// CR-2 regression. A real DB error (closed connection, query
+// failure) must surface as a non-nil err — the caller routes it
+// as 500, not 403, so transient SQLITE_BUSY doesn't masquerade as
+// "you're not a member".
+func TestCapabilitiesForMemberE_PropagatesDBError(t *testing.T) {
+	db := setupTestDB(t)
+	ownerID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, ownerID)
+	InvalidateCapabilityCache(wsID, ownerID)
+	_ = db.Close()
+
+	_, _, err, ok := CapabilitiesForMemberE(context.Background(), db, wsID, ownerID)
+	if err == nil {
+		t.Error("expected non-nil error on closed DB")
+	}
+	if ok {
+		t.Error("expected ok=false on DB error")
+	}
+}
+
+// TestCapabilitiesForMemberE_NotAMember asserts the distinct
+// (nil, "", nil, false) shape for "no membership row" — the caller
+// reads err=nil and routes as 403, not 500.
+func TestCapabilitiesForMemberE_NotAMember(t *testing.T) {
+	db := setupTestDB(t)
+	ownerID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, ownerID)
+
+	if _, err := db.Exec(`INSERT INTO users (id, email, full_name) VALUES ('outsider','o@x','O')`); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	InvalidateCapabilityCache(wsID, "outsider")
+
+	_, _, err, ok := CapabilitiesForMemberE(context.Background(), db, wsID, "outsider")
+	if err != nil {
+		t.Errorf("not-a-member must NOT surface an err; got %v", err)
+	}
+	if ok {
+		t.Error("expected ok=false for non-member")
 	}
 }
 

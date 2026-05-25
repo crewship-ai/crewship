@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useMemo } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { Check, Lock } from "lucide-react"
@@ -245,23 +245,33 @@ function CapabilityRow({
         const isChat = cap === Capability.Chat
         const isGranted = isChat || grantedSet.has(cap)
         const cellLocked = locked || isChat
+        const memberLabel = member.user.full_name ?? member.user.email
+        // CodeRabbit CR-3: title attribute is unreliable for screen
+        // readers / keyboard users. aria-label provides the
+        // accessible name; aria-pressed exposes the toggle state so
+        // assistive tech announces "Routine create, pressed" rather
+        // than just "button". role="switch" is the WAI-ARIA pattern
+        // for a binary on/off control.
+        const ariaLabel = isChat
+          ? `Chat is always granted for ${memberLabel}`
+          : isOwner
+            ? `OWNER capabilities are immutable: ${cap} for ${memberLabel}`
+            : isSelf
+              ? `You cannot modify your own capabilities: ${cap}`
+              : isGranted
+                ? `Revoke ${cap} from ${memberLabel}`
+                : `Grant ${cap} to ${memberLabel}`
         return (
           <td key={cap} className="py-2 text-center">
             <button
               type="button"
+              role="switch"
+              aria-checked={isGranted}
+              aria-label={ariaLabel}
+              aria-disabled={cellLocked}
               disabled={cellLocked || isLoading || mutation.isPending}
               onClick={() => mutation.mutate({ cap, next: !isGranted })}
-              title={
-                isChat
-                  ? "Chat is always granted."
-                  : isOwner
-                    ? "OWNER capabilities are immutable."
-                    : isSelf
-                      ? "You cannot modify your own capabilities."
-                      : isGranted
-                        ? `Revoke ${cap}`
-                        : `Grant ${cap}`
-              }
+              title={ariaLabel}
               className={cn(
                 "inline-flex h-5 w-5 items-center justify-center rounded border transition-colors",
                 isGranted
@@ -272,9 +282,9 @@ function CapabilityRow({
               )}
             >
               {isChat ? (
-                <Lock className="h-3 w-3" />
+                <Lock className="h-3 w-3" aria-hidden="true" />
               ) : isGranted ? (
-                <Check className="h-3 w-3" />
+                <Check className="h-3 w-3" aria-hidden="true" />
               ) : null}
             </button>
           </td>
@@ -293,55 +303,14 @@ function PresetChips({
   workspaceId: string
   currentUserId: string
 }) {
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  // Selection UI is intentionally MVP-minimal — the chips below
+  // apply the preset to every eligible member workspace-wide (the
+  // admin's most common case: rolling out a new bundle to everyone).
+  // Per-row selection mode lands when usage telemetry says it's worth
+  // the surface area. (CodeRabbit CR-5: removed the unused
+  // applyPreset / selectedIds / eligibleCount scaffolding that
+  // hinted at a selection-mode UI we haven't shipped yet.)
   const queryClient = useQueryClient()
-
-  const applyPreset = async (preset: CapabilityBundle) => {
-    if (selectedIds.size === 0) {
-      toast.info("Select members in the table first.")
-      return
-    }
-    const eligible = Array.from(selectedIds).filter((id) => {
-      const m = members.find((mem) => mem.user.id === id)
-      return m && m.role !== "OWNER" && id !== currentUserId
-    })
-    if (eligible.length === 0) {
-      toast.info("Selected rows are all locked (OWNER or self).")
-      return
-    }
-    await Promise.all(
-      eligible.map((id) =>
-        apiFetch(
-          `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/members/${encodeURIComponent(id)}/capabilities?workspace_id=${encodeURIComponent(workspaceId)}`,
-          {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ preset }),
-          },
-        ),
-      ),
-    )
-    toast.success(`Applied "${preset}" to ${eligible.length} member(s)`)
-    queryClient.invalidateQueries({ queryKey: ["member-capabilities", workspaceId] })
-    setSelectedIds(new Set())
-  }
-
-  // Selection UI is intentionally minimal for the MVP — the
-  // wireframe shows multi-select but the row-level checkbox to enter
-  // selection mode is a polish iteration. For now the chips apply to
-  // ALL eligible members; selection-mode UI lands when usage telemetry
-  // says it's worth the surface area.
-  const eligibleCount = members.filter(
-    (m) => m.role !== "OWNER" && m.user.id !== currentUserId,
-  ).length
-
-  // Stub selection: shift-click would go here; the chips below
-  // apply the preset to every eligible member (admin's most common
-  // case: rolling out a new bundle workspace-wide).
-  if (selectedIds.size === 0 && eligibleCount > 0) {
-    // Auto-select all eligible so the chips have an obvious effect.
-    // Visual selection UI follows in a polish pass.
-  }
 
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -401,24 +370,59 @@ async function applyPresetAll(
   ) {
     return
   }
-  try {
-    await Promise.all(
-      eligible.map((m) =>
-        apiFetch(
+  // CodeRabbit CR-4: previously this called Promise.all on the raw
+  // apiFetch results and immediately toasted "success" — apiFetch
+  // resolves on 4xx/5xx too (only network errors reject), so a
+  // server-side rejection (admin lacks role, OWNER target, ...) was
+  // silently celebrated. Now we await each response, partition by
+  // resp.ok, and only claim success for the rows that actually 2xx'd.
+  type result = { id: string; ok: boolean; status: number; body: string }
+  const results: result[] = await Promise.all(
+    eligible.map(async (m): Promise<result> => {
+      try {
+        const resp = await apiFetch(
           `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/members/${encodeURIComponent(m.user.id)}/capabilities?workspace_id=${encodeURIComponent(workspaceId)}`,
           {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ preset }),
           },
-        ),
-      ),
-    )
-    toast.success(`Applied "${preset}" to ${eligible.length} member(s)`)
+        )
+        const body = resp.ok ? "" : await resp.text().catch(() => "")
+        return { id: m.user.id, ok: resp.ok, status: resp.status, body }
+      } catch (err) {
+        return {
+          id: m.user.id,
+          ok: false,
+          status: 0,
+          body: (err as Error).message,
+        }
+      }
+    }),
+  )
+  const ok = results.filter((r) => r.ok).length
+  const failed = results.filter((r) => !r.ok)
+  if (ok > 0) {
     queryClient.invalidateQueries({ queryKey: ["member-capabilities", workspaceId] })
-  } catch (err) {
-    toast.error(`Bulk preset failed: ${(err as Error).message}`)
   }
+  if (failed.length === 0) {
+    toast.success(`Applied "${preset}" to ${ok} member(s)`)
+    return
+  }
+  if (ok === 0) {
+    // Whole batch failed — show the first body so the admin sees the
+    // actual server message (typo, role too low, etc.) rather than
+    // a generic "bulk failed".
+    toast.error(
+      `Bulk preset failed (${failed.length}/${eligible.length}): ${failed[0].body || `HTTP ${failed[0].status}`}`,
+    )
+    return
+  }
+  // Partial success — surface both counts so the admin knows the
+  // cache invalidate ran but some rows still need their attention.
+  toast.warning(
+    `Applied "${preset}" to ${ok}/${eligible.length} member(s); ${failed.length} failed.`,
+  )
 }
 
 function initials(name: string | null, email: string): string {

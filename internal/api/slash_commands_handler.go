@@ -29,12 +29,12 @@ import "net/http"
 // names with json tags would be fine too but the JSON shape here
 // is small enough to inline.
 type slashCommand struct {
-	ID         string            `json:"id"`
-	Label      string            `json:"label"`
-	LabelCS    string            `json:"label_cs,omitempty"`
-	Icon       string            `json:"icon,omitempty"`
-	Capability string            `json:"capability"`
-	FormSchema []slashFormField  `json:"form_schema,omitempty"`
+	ID         string           `json:"id"`
+	Label      string           `json:"label"`
+	LabelCS    string           `json:"label_cs,omitempty"`
+	Icon       string           `json:"icon,omitempty"`
+	Capability string           `json:"capability"`
+	FormSchema []slashFormField `json:"form_schema,omitempty"`
 }
 
 // slashFormField describes one form field the slash action modal
@@ -175,4 +175,3 @@ func (h *SlashCommandsHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, out)
 }
-

@@ -49,9 +49,14 @@ func TestProxyToAPI_PropagatesCallerUserID(t *testing.T) {
 // headers onto the outbound request when the inbound didn't carry
 // them — autonomous-agent path must look identical to pre-PR
 // behaviour so the backend autonomy gate runs unchanged.
+//
+// CodeRabbit CR-11: assert upstreamReached so a future regression
+// that short-circuits proxyToAPI before reaching upstream doesn't
+// let the header-absence assertion pass vacuously.
 func TestProxyToAPI_OmitsHeadersWhenAbsent(t *testing.T) {
-	var hadCaller, hadSource bool
+	var hadCaller, hadSource, upstreamReached bool
 	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamReached = true
 		_, hadCaller = r.Header["X-Caller-User-Id"]
 		_, hadSource = r.Header["X-Caller-Source"]
 		w.WriteHeader(http.StatusOK)
@@ -66,6 +71,9 @@ func TestProxyToAPI_OmitsHeadersWhenAbsent(t *testing.T) {
 
 	srv.proxyToAPI(w, req, http.MethodPost, "/api/v1/internal/test")
 
+	if !upstreamReached {
+		t.Fatal("proxyToAPI never reached upstream — header-absence assertion would pass vacuously")
+	}
 	if hadCaller {
 		t.Error("X-Caller-User-Id leaked onto outbound when inbound didn't set it")
 	}
