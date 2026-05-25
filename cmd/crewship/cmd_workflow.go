@@ -387,7 +387,15 @@ func slugify(s string) string {
 }
 
 func init() {
-	workflowCreateCmd.Flags().StringP("file", "f", "", "Path to a SPEC-2 YAML manifest (required)")
+	// NO -f shorthand: rootCmd already owns -f for the persistent
+	// --format flag. Registering `-f` on a child for a different long
+	// name ("file") triggers a cobra-level panic at FIRST invocation
+	// of `crewship workflow create --help` — cobra merges persistent
+	// flags into every child's flagset at lookup time, and the
+	// shorthand collision aborts the process. Use the long form:
+	// `crewship workflow create --file path.yaml`. Matches the
+	// pattern in `crewship apply --file` which is also shorthand-free.
+	workflowCreateCmd.Flags().String("file", "", "Path to a SPEC-2 YAML manifest (required)")
 	workflowDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
 
 	workflowCmd.AddCommand(workflowListCmd)
