@@ -64,10 +64,12 @@ func NewAuthHandler(db *sql.DB, logger *slog.Logger, validator *auth.JWTValidato
 	return &AuthHandler{db: db, logger: logger, validator: validator, sessions: sessionsStore, allowSignup: allowSignup}
 }
 
-// defaultBootstrapWindow matches Portainer's 5-minute first-run window
-// — long enough for a human operator to open the URL after starting
-// the server, short enough that an unbootstrapped instance left
-// running on a public IP doesn't sit indefinitely open.
+// defaultBootstrapWindow is the fixed first-run window applied when
+// the caller passes a non-positive duration to ArmDeployRaceWindow.
+// Five minutes is long enough for a human operator to open the URL
+// after `crewship start`, short enough that an unbootstrapped
+// instance left running on a public IP doesn't sit indefinitely open
+// to whichever scanner finds it first.
 const defaultBootstrapWindow = 5 * time.Minute
 
 // ArmDeployRaceWindow opens the bootstrap window for the configured
