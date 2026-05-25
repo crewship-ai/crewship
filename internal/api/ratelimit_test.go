@@ -15,6 +15,7 @@ import (
 
 func TestRateLimiter_AllowsWithinLimit(t *testing.T) {
 	rl := NewRateLimiter(10) // 10 req/min
+	t.Cleanup(rl.Close)
 	handler := rl.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -31,6 +32,7 @@ func TestRateLimiter_AllowsWithinLimit(t *testing.T) {
 
 func TestRateLimiter_BlocksOverLimit(t *testing.T) {
 	rl := NewRateLimiter(5) // 5 req/min, burst = 5
+	t.Cleanup(rl.Close)
 	handler := rl.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -70,6 +72,7 @@ func TestRateLimiter_BlocksOverLimit(t *testing.T) {
 
 func TestRateLimiter_SeparateIPsIndependent(t *testing.T) {
 	rl := NewRateLimiter(2) // 2 req/min, burst = 2
+	t.Cleanup(rl.Close)
 	handler := rl.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -215,6 +218,7 @@ func TestExtractIP_RemoteAddr(t *testing.T) {
 // the 4th request because XFF is ignored.
 func TestRateLimiter_XFFRotationDoesNotBypass(t *testing.T) {
 	rl := NewRateLimiter(3)
+	t.Cleanup(rl.Close)
 	handler := rl.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -237,6 +241,7 @@ func TestRateLimiter_XFFRotationDoesNotBypass(t *testing.T) {
 // — each user's XFF gets its own bucket as expected.
 func TestRateLimiter_XFFFromTrustedProxyStillSeparates(t *testing.T) {
 	rl := NewRateLimiter(2)
+	t.Cleanup(rl.Close)
 	handler := rl.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -351,6 +356,7 @@ func itoa(i int) string {
 
 func TestRateLimiter_Cleanup(t *testing.T) {
 	rl := NewRateLimiter(10)
+	t.Cleanup(rl.Close)
 
 	// Add a visitor
 	rl.getLimiter("10.0.0.1")
