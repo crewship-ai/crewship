@@ -43,9 +43,9 @@ func NewCredentialInternalAdapter(creds *CredentialHandler) *CredentialInternalA
 }
 
 // Create reads workspace_id + caller from the request envelope,
-// injects them into the context, then calls public
-// CredentialHandler.Create. Rejects on missing X-Caller-User-Id —
-// see file header.
+// gates on credential.create capability, injects context, then
+// calls public CredentialHandler.Create. Rejects on missing
+// X-Caller-User-Id at the envelope step — see file header.
 func (h *CredentialInternalAdapter) Create(w http.ResponseWriter, r *http.Request) {
 	if h == nil || h.creds == nil {
 		replyError(w, http.StatusInternalServerError, "credential adapter not configured")
@@ -53,6 +53,11 @@ func (h *CredentialInternalAdapter) Create(w http.ResponseWriter, r *http.Reques
 	}
 	wsID, callerID, ok := h.envelope(w, r)
 	if !ok {
+		return
+	}
+	if !requireCapabilityOrForbid(w, r, h.creds.logger, h.creds.db,
+		wsID, callerID,
+		CapabilityCredentialCreate, "credential.create", "credential:new") {
 		return
 	}
 	r = h.injectContext(r, wsID, callerID)
@@ -64,6 +69,10 @@ func (h *CredentialInternalAdapter) Create(w http.ResponseWriter, r *http.Reques
 // r.PathValue("credentialId") — the internal route uses the same
 // pattern so SetPathValue is unnecessary (the router will populate
 // it from /credentials/{credentialId}/rotate).
+//
+// credential.rotate is a distinct capability from credential.create
+// so an admin can let an oncall user rotate a leaked token without
+// also granting them blanket vault-add reach.
 func (h *CredentialInternalAdapter) Rotate(w http.ResponseWriter, r *http.Request) {
 	if h == nil || h.creds == nil {
 		replyError(w, http.StatusInternalServerError, "credential adapter not configured")
@@ -71,6 +80,12 @@ func (h *CredentialInternalAdapter) Rotate(w http.ResponseWriter, r *http.Reques
 	}
 	wsID, callerID, ok := h.envelope(w, r)
 	if !ok {
+		return
+	}
+	credID := r.PathValue("credentialId")
+	if !requireCapabilityOrForbid(w, r, h.creds.logger, h.creds.db,
+		wsID, callerID,
+		CapabilityCredentialRotate, "credential.rotate", "credential:"+credID) {
 		return
 	}
 	r = h.injectContext(r, wsID, callerID)

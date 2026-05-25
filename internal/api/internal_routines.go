@@ -33,6 +33,19 @@ import (
 // internal /api/v1/internal/routines/schedules route can dispatch
 // into it with workspace + role context injected from query params
 // and the internal-token vouch.
+//
+// Dual-path enforcement (PRD-SLASH-CAPABILITIES-2026 §6.5):
+//
+//   - User-initiated slash command (X-Caller-User-Id present): gate
+//     on the caller's routine.create capability. Denies with 403 and
+//     a user-attributed audit entry.
+//   - Autonomous-agent tool call (X-Caller-User-Id absent): pass
+//     through. The underlying CreateSchedule still enforces
+//     canRole("create") on the injected MANAGER role, so the call
+//     succeeds (today) — the autonomy_level gate is the moral
+//     authority but is enforced upstream of this handler in the
+//     /spawn-style entry; this surface receives only post-autonomy
+//     calls from the sidecar.
 type RoutineInternalAdapter struct {
 	pipes *PipelineHandler
 }
@@ -71,12 +84,30 @@ func (h *RoutineInternalAdapter) CreateSchedule(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	// Dual-path: user-attributed slash command vs autonomous-agent.
+	// CallerUserIDFromRequest returns non-empty when the chat-bridge /
+	// CLI repl propagated X-Caller-User-Id; empty for the agent
+	// tool-call surface.
+	callerID := CallerUserIDFromRequest(r)
+	if callerID != "" {
+		if !requireCapabilityOrForbid(w, r, h.pipes.logger, h.pipes.db,
+			wsID, callerID,
+			CapabilityRoutineCreate, "routine.create", "routine:new") {
+			return
+		}
+	}
+
 	// Inject workspace + role context. Caller-identity propagation
 	// (X-Caller-User-Id) flows through the headers untouched — the
-	// dual-path handler in commit 6 reads it via
-	// CallerUserIDFromRequest to choose capability vs autonomy gate.
+	// underlying CreateSchedule reads UserFromContext for attribution.
 	ctx := context.WithValue(r.Context(), ctxWorkspaceID, wsID)
 	ctx = context.WithValue(ctx, ctxRole, "MANAGER")
+	if callerID != "" {
+		// Real user identity for audit. Email is a debug-friendly
+		// placeholder; downstream code paths that need name/email
+		// query the users table by id.
+		ctx = context.WithValue(ctx, ctxUser, &AuthUser{ID: callerID, Email: "x-internal"})
+	}
 	r = r.WithContext(ctx)
 	h.pipes.CreateSchedule(w, r)
 }

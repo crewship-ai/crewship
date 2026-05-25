@@ -40,6 +40,12 @@ func NewSkillInternalAdapter(gen *SkillGenerateHandler) *SkillInternalAdapter {
 // MANAGER role into the context, then calls the public Generate
 // path. LLM call, Anthropic credential resolve, body scan, and
 // skill upsert all run in the public handler unchanged.
+//
+// Dual-path: when X-Caller-User-Id is present (user-initiated
+// slash command from chat-bridge / CLI repl), gates on
+// skill.create capability before the LLM bill fires. Autonomous-
+// agent path falls through — the autonomy gate runs upstream
+// before this surface is hit.
 func (h *SkillInternalAdapter) Generate(w http.ResponseWriter, r *http.Request) {
 	if h == nil || h.gen == nil {
 		replyError(w, http.StatusInternalServerError, "skill adapter not configured")
@@ -50,6 +56,16 @@ func (h *SkillInternalAdapter) Generate(w http.ResponseWriter, r *http.Request) 
 		replyError(w, http.StatusBadRequest, "workspace_id required")
 		return
 	}
+
+	callerID := CallerUserIDFromRequest(r)
+	if callerID != "" {
+		if !requireCapabilityOrForbid(w, r, h.gen.logger, h.gen.db,
+			wsID, callerID,
+			CapabilitySkillCreate, "skill.create", "skill:new") {
+			return
+		}
+	}
+
 	// Public Generate reads workspaceId via r.PathValue — the public
 	// route is /workspaces/{workspaceId}/skills/generate. The internal
 	// route doesn't have a {workspaceId} pattern (it takes it from
@@ -60,6 +76,9 @@ func (h *SkillInternalAdapter) Generate(w http.ResponseWriter, r *http.Request) 
 
 	ctx := context.WithValue(r.Context(), ctxWorkspaceID, wsID)
 	ctx = context.WithValue(ctx, ctxRole, "MANAGER")
+	if callerID != "" {
+		ctx = context.WithValue(ctx, ctxUser, &AuthUser{ID: callerID, Email: "x-internal"})
+	}
 	r = r.WithContext(ctx)
 	h.gen.Generate(w, r)
 }
