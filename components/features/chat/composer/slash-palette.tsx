@@ -14,6 +14,11 @@ import {
   Undo2,
   PanelRight,
   Sparkles,
+  CalendarClock,
+  AlertCircle,
+  Brain,
+  Key,
+  type LucideIcon,
 } from "lucide-react"
 
 import {
@@ -27,6 +32,10 @@ import {
   CommandShortcut,
 } from "@/components/ui/command"
 import { useDrawerStore, type DrawerTab } from "@/stores/drawer-store"
+import {
+  useSlashCommands,
+  type SlashCommand as ServerSlashCommand,
+} from "@/hooks/use-slash-commands"
 
 interface DrawerApi {
   toggle: (tab?: DrawerTab) => void
@@ -36,6 +45,26 @@ interface SlashPaletteProps {
   onCommand?: (id: string, args?: string) => void
   /** Current chat agent slug (used for /new-session deeplinks). */
   agentSlug?: string
+  /** Active workspace — required for the server-driven actions group.
+   *  Omit on surfaces that don't have a workspace context yet (e.g.
+   *  pre-onboarding); the palette renders without the actions group. */
+  workspaceId?: string
+  /** Invoked when the user picks a server-driven action. The parent
+   *  chat panel owns the SlashActionModal lifecycle so the form can
+   *  read conversation context for pre-fill. */
+  onAction?: (command: ServerSlashCommand) => void
+}
+
+// Server-driven icon resolution. The catalog uses lucide icon names;
+// we map them to components here so the registry can stay stringly-
+// typed on the wire. Unknown icon names fall back to Sparkles so an
+// unrecognised entry still renders.
+const ICON_BY_NAME: Record<string, LucideIcon> = {
+  "calendar-clock": CalendarClock,
+  "alert-circle": AlertCircle,
+  brain: Brain,
+  sparkles: Sparkles,
+  key: Key,
 }
 
 interface SlashCommand {
@@ -177,10 +206,22 @@ const GROUP_LABELS: Record<SlashCommand["group"], string> = {
   navigation: "Navigation",
 }
 
-export function SlashPalette({ onCommand, agentSlug }: SlashPaletteProps) {
+export function SlashPalette({
+  onCommand,
+  agentSlug,
+  workspaceId,
+  onAction,
+}: SlashPaletteProps) {
   const [open, setOpen] = useState(false)
   const router = useRouter()
   const toggleDrawer = useDrawerStore((s) => s.toggle)
+
+  // Server-driven actions — capability-filtered per the caller's
+  // workspace_members.capabilities row. Empty list (= no grants) just
+  // means the actions group doesn't render; chat/view/tools/navigation
+  // groups continue to work unchanged so the palette is never broken
+  // by a chat-only user.
+  const { data: actions = [] } = useSlashCommands(workspaceId)
 
   useHotkeys(
     ["mod+k"],
@@ -215,6 +256,33 @@ export function SlashPalette({ onCommand, agentSlug }: SlashPaletteProps) {
       <CommandInput placeholder="Type a command or search…" />
       <CommandList>
         <CommandEmpty>No commands match.</CommandEmpty>
+        {/* Server-driven actions group — renders first so capability-
+            granted actions are the high-signal items at the top of
+            the palette. Hidden entirely when the user has no grants
+            (the rest of the palette is unaffected). */}
+        {actions.length > 0 && (
+          <>
+            <CommandGroup heading={`Actions (${actions.length})`}>
+              {actions.map((cmd) => {
+                const Icon = (cmd.icon && ICON_BY_NAME[cmd.icon]) || Sparkles
+                return (
+                  <CommandItem
+                    key={`server-${cmd.id}`}
+                    value={`${cmd.label} ${cmd.label_cs ?? ""}`}
+                    onSelect={() => {
+                      onAction?.(cmd)
+                      setOpen(false)
+                    }}
+                  >
+                    <Icon className="h-4 w-4" />
+                    <span>{cmd.label}</span>
+                  </CommandItem>
+                )
+              })}
+            </CommandGroup>
+            <CommandSeparator />
+          </>
+        )}
         {Object.entries(grouped).map(([group, list], gi) => (
           <div key={group}>
             {gi > 0 && <CommandSeparator />}
