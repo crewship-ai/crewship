@@ -6,6 +6,7 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"strings"
 	"time"
@@ -58,7 +59,16 @@ var builtinCrewTemplateFS embed.FS
 // byte-identical to its pre-migration form once SeedBuiltinCrewTemplates
 // runs.
 func loadBuiltinCrewTemplates() ([]builtinCrewTemplateDoc, error) {
-	entries, err := builtinCrewTemplateFS.ReadDir("builtin/crew-templates")
+	return loadCrewTemplatesFromFS(builtinCrewTemplateFS, "builtin/crew-templates")
+}
+
+// loadCrewTemplatesFromFS is the FS-injectable core that
+// loadBuiltinCrewTemplates wraps around embed.FS. Pulled out so
+// edge-case unit tests can feed adversarial fixtures via
+// testing/fstest.MapFS without polluting the production
+// builtin/crew-templates/ dir.
+func loadCrewTemplatesFromFS(fsys fs.FS, dir string) ([]builtinCrewTemplateDoc, error) {
+	entries, err := fs.ReadDir(fsys, dir)
 	if err != nil {
 		return nil, fmt.Errorf("read embedded builtin crew-templates dir: %w", err)
 	}
@@ -68,7 +78,7 @@ func loadBuiltinCrewTemplates() ([]builtinCrewTemplateDoc, error) {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".yaml") {
 			continue
 		}
-		data, err := builtinCrewTemplateFS.ReadFile("builtin/crew-templates/" + e.Name())
+		data, err := fs.ReadFile(fsys, dir+"/"+e.Name())
 		if err != nil {
 			return nil, fmt.Errorf("read embedded %s: %w", e.Name(), err)
 		}

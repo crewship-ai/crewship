@@ -7,6 +7,7 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"strings"
 	"time"
@@ -57,7 +58,17 @@ var builtinWorkflowFS embed.FS
 // on map iteration order — invisible until the day a new file lands
 // alphabetically before sequential.yaml).
 func loadBuiltinWorkflowTemplates() ([]builtinTemplateDoc, error) {
-	entries, err := builtinWorkflowFS.ReadDir("builtin/workflow-templates")
+	return loadWorkflowTemplatesFromFS(builtinWorkflowFS, "builtin/workflow-templates")
+}
+
+// loadWorkflowTemplatesFromFS is the FS-injectable core that
+// loadBuiltinWorkflowTemplates wraps around embed.FS. Pulled out for
+// edge-case unit tests (empty dir, malformed YAML, missing field,
+// duplicate name) — testing/fstest.MapFS feeds adversarial fixtures
+// in without polluting the real builtin/workflow-templates/ dir,
+// which has to keep shipping valid YAML for production seed.
+func loadWorkflowTemplatesFromFS(fsys fs.FS, dir string) ([]builtinTemplateDoc, error) {
+	entries, err := fs.ReadDir(fsys, dir)
 	if err != nil {
 		return nil, fmt.Errorf("read embedded builtin templates dir: %w", err)
 	}
@@ -67,7 +78,7 @@ func loadBuiltinWorkflowTemplates() ([]builtinTemplateDoc, error) {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".yaml") {
 			continue
 		}
-		data, err := builtinWorkflowFS.ReadFile("builtin/workflow-templates/" + e.Name())
+		data, err := fs.ReadFile(fsys, dir+"/"+e.Name())
 		if err != nil {
 			return nil, fmt.Errorf("read embedded %s: %w", e.Name(), err)
 		}
