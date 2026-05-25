@@ -331,6 +331,20 @@ func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	// Existence check returns 404 before RestoreBackup gets a chance to
+	// fail with "open bundle: no such file" (which maps to 500). The
+	// previous bundleBelongsToWorkspace gate folded this check into its
+	// 404 path implicitly — Inspect returned an error for missing files
+	// and the helper treated that as "not found". The dedicated stat
+	// preserves the 404 contract without the cross-tenant gate.
+	if _, err := os.Stat(req.Path); err != nil {
+		if os.IsNotExist(err) {
+			replyError(w, http.StatusNotFound, "backup not found")
+			return
+		}
+		replyError(w, http.StatusInternalServerError, "stat backup: "+err.Error())
+		return
+	}
 	// Pre-fix this handler called bundleBelongsToWorkspace, which
 	// blocked the canonical disaster-recovery flow: after `dev.sh
 	// nuke` the fresh-bootstrap workspace has a NEW CUID, so the
