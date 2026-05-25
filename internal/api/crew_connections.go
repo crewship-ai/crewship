@@ -179,34 +179,6 @@ func AreCrewsConnected(ctx context.Context, db *sql.DB, crewA, crewB string) (bo
 	return true, nil
 }
 
-// ConnectedCrewIDs returns all crew IDs that a given crew can communicate with.
-func ConnectedCrewIDs(ctx context.Context, db *sql.DB, crewID string) ([]string, error) {
-	rows, err := db.QueryContext(ctx, `
-		SELECT CASE
-			WHEN from_crew_id = ? THEN to_crew_id
-			ELSE from_crew_id
-		END AS connected_crew_id
-		FROM crew_connections
-		WHERE status = 'active' AND (
-			from_crew_id = ?
-			OR (to_crew_id = ? AND direction = 'bidirectional')
-		)`, crewID, crewID, crewID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var ids []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, fmt.Errorf("scan connected crew: %w", err)
-		}
-		ids = append(ids, id)
-	}
-	return ids, rows.Err()
-}
-
 func generateConnID() string {
 	b := make([]byte, 8)
 	if _, err := rand.Read(b); err != nil {
