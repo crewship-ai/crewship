@@ -52,9 +52,9 @@ type AuthHandler struct {
 	// would fail-open (treat it as "no window armed = allow"). The
 	// flag lets bootstrapWindowOpen distinguish "intentionally unarmed"
 	// (allow, dev-mode) from "arming failed" (refuse, fail-closed).
-	bootstrapMu       sync.Mutex
-	bootstrapArmed    bool
-	bootstrapDeadline time.Time
+	bootstrapMu        sync.Mutex
+	bootstrapArmed     bool
+	bootstrapDeadline  time.Time
 	bootstrapArmingErr error
 }
 
