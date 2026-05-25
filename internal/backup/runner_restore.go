@@ -415,24 +415,34 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 
 	var stats RestoreStats
 	if extracted.DBDump != nil {
-		hooks := &RestoreDumpHooks{PreCommit: dockerRestore}
+		// PreInsert composition: --replace wipe FIRST (if enabled),
+		// THEN user-email reconciliation. The order matters when
+		// --replace drops a target user via cascade — reconciliation
+		// must see the post-wipe state, not the pre-wipe state,
+		// otherwise a stale "matching email" target id gets recorded
+		// and the FK rewrites would point at a row that just got
+		// deleted. Today users are not wiped by --replace (they're
+		// global), so the ordering is defensive against future
+		// schema changes.
+		preInsertSteps := []func(context.Context, *sql.Tx) error{}
 		if opts.Replace {
-			// --replace path: before the INSERT pass runs, wipe every
-			// workspace-scoped row that belongs to the bundle's
-			// workspace by either id (re-restore into same instance)
-			// or slug (post-`dev.sh nuke` fresh-bootstrap workspace
-			// with the same slug but a new CUID). The bundle then
-			// lands its rows with the original IDs intact.
+			// --replace path: wipe every workspace-scoped row that
+			// belongs to the bundle's workspace by either id
+			// (re-restore into same instance) or slug (post-`dev.sh
+			// nuke` fresh-bootstrap workspace with the same slug but
+			// a new CUID). The bundle then lands its rows with the
+			// original IDs intact.
 			//
-			// Resolving the bundle's workspace identity from the dump
-			// directly so this works even when manifest.Contents.Workspace
-			// is absent (older bundles, custom dumps).
+			// Resolving the bundle's workspace identity from the
+			// dump directly so this works even when
+			// manifest.Contents.Workspace is absent (older bundles,
+			// custom dumps).
 			bundleID := firstWorkspaceID(extracted.DBDump)
 			bundleSlug := firstWorkspaceSlug(extracted.DBDump)
 			if bundleID == "" {
 				return nil, fmt.Errorf("backup: --replace requires the bundle to carry a workspace row; this one does not")
 			}
-			hooks.PreInsert = func(ctx context.Context, tx *sql.Tx) error {
+			preInsertSteps = append(preInsertSteps, func(ctx context.Context, tx *sql.Tx) error {
 				deleted, err := ReplaceWorkspaceContents(ctx, tx, bundleID, bundleSlug)
 				if err != nil {
 					return err
@@ -441,7 +451,35 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 					opts.Logger(fmt.Sprintf("--replace: wiped target workspace state before restore (%d tables touched)", len(deleted)))
 				}
 				return nil
+			})
+		}
+		// User reconciliation runs ALWAYS, not only under --replace.
+		// The canonical "same admin email on source and target"
+		// scenario produces UNIQUE(email) collisions on naive
+		// INSERT OR IGNORE; bundle row drops and dependent
+		// crew_members.user_id orphans → FK violation → restore
+		// aborts. Aligning bundle user IDs to matching target IDs
+		// (and rewriting every FK) makes the restore land cleanly.
+		preInsertSteps = append(preInsertSteps, func(ctx context.Context, tx *sql.Tx) error {
+			remap, err := ReconcileUsersByEmail(ctx, tx, extracted.DBDump)
+			if err != nil {
+				return err
 			}
+			if opts.Logger != nil && len(remap) > 0 {
+				opts.Logger(fmt.Sprintf("user reconciliation: aligned %d bundle user(s) to target by email", len(remap)))
+			}
+			return nil
+		})
+		hooks := &RestoreDumpHooks{
+			PreCommit: dockerRestore,
+			PreInsert: func(ctx context.Context, tx *sql.Tx) error {
+				for _, step := range preInsertSteps {
+					if err := step(ctx, tx); err != nil {
+						return err
+					}
+				}
+				return nil
+			},
 		}
 		s, err := RestoreDumpTxHooks(ctx, db, extracted.DBDump, hooks)
 		if err != nil {

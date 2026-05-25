@@ -59,17 +59,107 @@ import (
 //
 // Tables that may not exist in every schema revision are skipped at
 // runtime; the exporter logs the skip so operators can see it.
+//
+// FK-safe order: parents BEFORE children so INSERT OR IGNORE during
+// restore lands cleanly. Entries grouped by FK depth from
+// workspaces (the anchor) so a hand-edit doesn't accidentally put a
+// child before its parent.
+//
+// Expansion 2026-05-25: added the credentials family, memory/files,
+// chat sub-tables, scheduling, mission/workflow, and discovered
+// tables so a workspace bundle round-trips the full user state.
+// Previously these were silently dropped from bundles — the
+// 96-MB UO-Outlands DR scenario lost every credential on restore.
+//
+// IntentMap (intent.go) is the source of truth for "is this table
+// workspace-scoped and should it ride bundles?" — entries here MUST
+// have IntentInclude in BackupTableIntent or restore-time drift
+// detection will refuse to wipe under --replace. New migrations
+// should update BOTH lists. The CI drift test on real schema
+// catches the asymmetry; intent_test.go pins the alignment.
 var BackupTables = []string{
+	// Depth 0: anchor + global identities (no workspace FK)
 	"users",
 	"workspaces",
-	"crews",
-	"agents",
 	"skills",
-	"agent_skills",
-	"crew_members",
+	// Depth 1: direct workspace_id children
+	"crews",
 	"chats",
-	"agent_mcp_bindings",
+	"workspace_files",
+	"chat_attachments",
 	"journal_entries",
+	"workspace_members",
+	"workspace_invitations",
+	"workspace_mcp_servers",
+	"backup_destinations",
+	"scheduled_jobs",
+	"port_exposures",
+	"eval_runs",
+	"gate_reward_history",
+	"memory_health_snapshots",
+	"feature_flag_overrides",
+	"budget_limits",
+	"cost_ledger",
+	"hooks_config",
+	"issue_counters",
+	"subscriptions",
+	"inbox_items",
+	"webhooks",
+	"routines",
+	"schedules",
+	"recurring_issues",
+	"triage_rules",
+	"workflow_templates",
+	"saved_views",
+	"hooks",
+	"labels",
+	"milestones",
+	"projects",
+	"missions",
+	"crew_templates",
+	"credentials",
+	// Depth 2: workspace via crews
+	"crew_members",
+	"agents",
+	"crew_connections",
+	"crew_mcp_servers",
+	"credential_crews",
+	// Depth 3+: workspace via agents
+	"agent_skills",
+	"agent_mcp_bindings",
+	"agent_credentials",
+	"agent_config_history",
+	"agent_runs",
+	"checkpoints",
+	"assignments",
+	"approvals_queue",
+	"pipelines",
+	"pipeline_versions",
+	"pipeline_schedules",
+	"pipeline_webhooks",
+	"pipeline_runs",
+	// Credential audit/rotations: depend on credentials being in already
+	"credential_audit",
+	"credential_rotations",
+	// Chat sub-entities
+	"chat_branches",
+	"message_reactions",
+	"message_feedback",
+	// Memory / mission sub-entities
+	"memory_relations",
+	"memory_proposals",
+	"memory_versions",
+	"mission_tasks",
+	"mission_activity",
+	"mission_comments",
+	"mission_labels",
+	"mission_proposals",
+	"mission_relations",
+	"skill_invocations",
+	"workflow_states",
+	"captain_chats",
+	"peer_cards",
+	"user_peer_consent",
 }
 
 // DBDump captures the exported rows from one or more tables. Keys are
@@ -216,6 +306,19 @@ func DumpWorkspace(ctx context.Context, db *sql.DB, workspaceID string) (*DBDump
 		WorkspaceID: workspaceID,
 		Tables:      map[string][]map[string]any{},
 	}
+	// Discover the live FK graph once up front. Each entry in
+	// BackupTables that doesn't have a hand-rolled case in
+	// workspaceFilterSQL falls through to this map for an
+	// automatically-derived scope filter. This is the IntentMap →
+	// dump wiring that bug #4 was missing.
+	scoped, err := discoverScopedTablesTx(ctx, tx)
+	if err != nil {
+		return nil, fmt.Errorf("backup: discover scoped tables: %w", err)
+	}
+	scopedByName := make(map[string]ScopedTable, len(scoped))
+	for _, st := range scoped {
+		scopedByName[st.Name] = st
+	}
 	// Inter-table dependencies for transitive scoping. If a filter uses
 	// a sub-query against another table that doesn't exist in the
 	// current schema (e.g. a minimal test DB without agent_skills, or
@@ -254,13 +357,23 @@ func DumpWorkspace(ctx context.Context, db *sql.DB, workspaceID string) (*DBDump
 		}
 		where, args, _ := workspaceFilterSQL(table, workspaceID)
 		if where == "workspace_id = ?" {
-			// Confirm column presence; skip if missing.
+			// Confirm column presence. If absent, fall through to the
+			// discovery-based filter (transitively-scoped tables).
 			hasCol, err := tableHasColumn(ctx, tx, table, "workspace_id")
 			if err != nil {
 				return nil, fmt.Errorf("backup: probe column on %s: %w", table, err)
 			}
 			if !hasCol {
-				continue
+				st, ok := scopedByName[table]
+				if !ok {
+					// Table is in BackupTables but unreachable from
+					// workspaces via FK walk — either a hardcoded
+					// special case that never got a real
+					// workspaceFilterSQL entry, or a schema-skew
+					// artifact. Skip rather than dump everything.
+					continue
+				}
+				where, args = st.WorkspaceScopeFilter(workspaceID)
 			}
 		}
 		query := fmt.Sprintf("SELECT * FROM %s WHERE %s", table, where)

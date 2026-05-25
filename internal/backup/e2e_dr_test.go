@@ -294,6 +294,110 @@ func TestE2E_DisasterRecovery_ReplaceWipesOnSlugMatchWithDifferentID(t *testing.
 	}
 }
 
+// TestE2E_DisasterRecovery_SameAdminEmailDoesNotOrphanFK is the
+// CRITICAL test the previous DR test suite missed. Real DR scenario:
+// admin uses the same email (`admin@example.com`) on both the
+// source and the target instance — common when a single operator
+// runs both. Pre-fix the restore aborted with deferred FK violations
+// because UNIQUE(email) dropped the bundle's user row at INSERT OR
+// IGNORE, leaving `crew_members.user_id` pointing at a nonexistent
+// row.
+//
+// The fix (ReconcileUsersByEmail) runs as a PreInsert hook on EVERY
+// restore (not just --replace), aligning bundle user IDs to matching
+// target IDs by email match and rewriting every FK column that
+// references users.
+//
+// This test would have caught the bug; it didn't exist before, which
+// is the original test gap the user called out in the critical review.
+func TestE2E_DisasterRecovery_SameAdminEmailDoesNotOrphanFK(t *testing.T) {
+	ctx := context.Background()
+
+	source := openMigratedDB(t)
+	bundleWorkspaceID := seedWorkspace(t, source)
+
+	const passphrase = "dr-e2e-same-email-test"
+	createResult, err := backup.CreateBackup(ctx, source, backup.CreateOptions{
+		Scope:       backup.ScopeWorkspace,
+		WorkspaceID: bundleWorkspaceID,
+		OutputDir:   t.TempDir(),
+		Actor:       backup.Actor{UserID: "u_admin", Email: "admin@e2e.test", Role: "ADMIN"},
+		Passphrase:  passphrase,
+	})
+	if err != nil {
+		t.Fatalf("CreateBackup: %v", err)
+	}
+
+	// Target: fresh instance with an admin under the SAME email
+	// (admin@e2e.test) but a DIFFERENT id. This is the operator
+	// running both instances under their own account.
+	target := openMigratedDB(t)
+	const targetAdminID = "u_admin_target_xyz"
+	if _, err := target.ExecContext(ctx,
+		`INSERT INTO users (id, email, full_name) VALUES (?, ?, ?)`,
+		targetAdminID, "admin@e2e.test", "Admin (target)"); err != nil {
+		t.Fatalf("seed target admin: %v", err)
+	}
+
+	// Restore WITHOUT --replace — reconciliation should run anyway
+	// and the bundle should land cleanly.
+	restoreResult, err := backup.RestoreBackup(ctx, target, backup.RestoreOptions{
+		Path:       createResult.Path,
+		Passphrase: passphrase,
+		Actor:      backup.Actor{UserID: targetAdminID, Email: "admin@e2e.test", Role: "ADMIN"},
+	})
+	if err != nil {
+		t.Fatalf("RestoreBackup with same-email admin: %v", err)
+	}
+	if restoreResult.RowsInserted <= 0 {
+		t.Fatalf("expected rows inserted, got %d", restoreResult.RowsInserted)
+	}
+
+	// Assert: the workspace landed under the bundle's ID.
+	var restoredID string
+	if err := target.QueryRowContext(ctx,
+		`SELECT id FROM workspaces WHERE slug = ?`, "e2e-ws").Scan(&restoredID); err != nil {
+		t.Fatalf("query restored workspace: %v", err)
+	}
+	if restoredID != bundleWorkspaceID {
+		t.Errorf("workspace id drift: bundle=%s restored=%s", bundleWorkspaceID, restoredID)
+	}
+
+	// Assert: only ONE user with admin@e2e.test (target's id won),
+	// not both (which would mean the alignment didn't fire).
+	var adminCount int
+	if err := target.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM users WHERE email = ?`, "admin@e2e.test").Scan(&adminCount); err != nil {
+		t.Fatalf("count admins: %v", err)
+	}
+	if adminCount != 1 {
+		t.Errorf("expected 1 admin row after reconciliation, got %d", adminCount)
+	}
+
+	// Assert: crew_members.user_id was rewritten to target's admin id,
+	// not the bundle's. Same-email admin retains their target identity.
+	var crewMemberUserID string
+	if err := target.QueryRowContext(ctx,
+		`SELECT user_id FROM crew_members WHERE id = ?`, "cm_alpha_admin").Scan(&crewMemberUserID); err != nil {
+		t.Fatalf("query crew_member: %v", err)
+	}
+	if crewMemberUserID != targetAdminID {
+		t.Errorf("FK rewrite missed: crew_members.user_id=%s, want target id %s",
+			crewMemberUserID, targetAdminID)
+	}
+
+	// Assert: chats.created_by was also rewritten (FK to users).
+	var chatCreatedBy string
+	if err := target.QueryRowContext(ctx,
+		`SELECT created_by FROM chats WHERE id = ?`, "ch_alice_1").Scan(&chatCreatedBy); err != nil {
+		t.Fatalf("query chat: %v", err)
+	}
+	if chatCreatedBy != targetAdminID {
+		t.Errorf("FK rewrite missed: chats.created_by=%s, want target id %s",
+			chatCreatedBy, targetAdminID)
+	}
+}
+
 // TestE2E_DisasterRecovery_ReplaceWithNoMatchingTarget covers the
 // "restore into completely fresh instance" path. --replace finds no
 // workspace under the bundle's id OR slug, the pre-INSERT delete pass

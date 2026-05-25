@@ -60,49 +60,66 @@ type ScopeEdge struct {
 
 // WorkspaceScopeFilter returns a parametrised WHERE clause fragment
 // (and arg list) that selects only rows on this table belonging to
-// the given workspace.
+// the given workspace. Convenience wrapper for the single-id case.
+func (st ScopedTable) WorkspaceScopeFilter(workspaceID string) (string, []any) {
+	return st.WorkspaceScopeFilterIDs([]string{workspaceID})
+}
+
+// WorkspaceScopeFilterIDs is the multi-workspace variant. Used by
+// ReplaceWorkspaceContents which clears every target workspace that
+// matches the bundle by either id OR slug — possibly multiple rows.
 //
-// Depth 1 (direct workspace_id column) collapses to `col = ?`.
+// Depth 1 (direct workspace_id column) collapses to `col = ?` for
+// a single id, or `col IN (?, ?, ...)` for many.
 // Depth N expands inside-out into a chain of IN-subqueries that
 // traces JoinPath back to workspaces. The deepest level uses an
-// equality against workspaces.id directly so we avoid the otherwise-
-// trailing `id IN (SELECT id FROM workspaces WHERE id = ?)` no-op
-// that the SQLite query planner can't always fold.
+// equality (or IN) against workspaces.id directly so we avoid the
+// otherwise-trailing `id IN (SELECT id FROM workspaces WHERE id = ?)`
+// no-op that the SQLite query planner can't always fold.
 //
-// The returned SQL fragment is intended to be appended after `WHERE`
-// in a `SELECT * FROM <table>` query — the caller still owns table
-// quoting and column projection.
+// Empty workspaceIDs returns `1=0` — fail closed rather than
+// exfiltrate every row.
 //
 // Example expansions:
 //
-//	depth 1 (chats):
+//	depth 1 / 1 id (chats):
 //	    workspace_id = ?
 //
-//	depth 2 (agents):
+//	depth 1 / N ids (chats):
+//	    workspace_id IN (?, ?, ?)
+//
+//	depth 2 / 1 id (agents):
 //	    crew_id IN (SELECT id FROM crews WHERE workspace_id = ?)
 //
-//	depth 3 (agent_skills):
+//	depth 3 / N ids (agent_skills):
 //	    agent_id IN (SELECT id FROM agents WHERE crew_id IN
-//	      (SELECT id FROM crews WHERE workspace_id = ?))
-func (st ScopedTable) WorkspaceScopeFilter(workspaceID string) (string, []any) {
+//	      (SELECT id FROM crews WHERE workspace_id IN (?, ?)))
+func (st ScopedTable) WorkspaceScopeFilterIDs(workspaceIDs []string) (string, []any) {
 	if len(st.JoinPath) == 0 {
 		// Workspaces itself has an empty JoinPath. We never dump it
 		// via filter (it's the anchor), but a misuse should fail
 		// closed rather than exfiltrating every row.
 		return "1=0", nil
 	}
-	args := []any{workspaceID}
+	if len(workspaceIDs) == 0 {
+		return "1=0", nil
+	}
+	args := make([]any, len(workspaceIDs))
+	for i, id := range workspaceIDs {
+		args[i] = id
+	}
 
 	// Innermost predicate runs on the table CLOSEST to workspaces:
-	// "<that table's FK column to workspaces> = ?". That edge is
-	// JoinPath[len-1].
+	// either "<col> = ?" or "<col> IN (?, ?, ...)" depending on id
+	// count.
 	last := st.JoinPath[len(st.JoinPath)-1]
-	where := fmt.Sprintf("%s = ?", quoteIdent(last.FromColumn))
+	leaf := equalityOrIN(quoteIdent(last.FromColumn), len(workspaceIDs))
 
 	// Walk outward from second-to-last edge back to JoinPath[0]
 	// (which is the edge directly on st). Each level wraps the
 	// previous `where` in a subquery against the closer-to-this-table
 	// FK column.
+	where := leaf
 	for i := len(st.JoinPath) - 2; i >= 0; i-- {
 		edge := st.JoinPath[i]
 		where = fmt.Sprintf("%s IN (SELECT %s FROM %s WHERE %s)",
@@ -113,6 +130,24 @@ func (st ScopedTable) WorkspaceScopeFilter(workspaceID string) (string, []any) {
 		)
 	}
 	return where, args
+}
+
+// equalityOrIN renders either `<col> = ?` (single id, lets SQLite use
+// equality index lookup) or `<col> IN (?, ?, ...)` (multiple ids).
+// The single-id branch is the hot path — every workspace-scoped
+// SELECT during normal dump goes through it.
+func equalityOrIN(quotedCol string, n int) string {
+	if n == 1 {
+		return quotedCol + " = ?"
+	}
+	placeholders := make([]byte, 0, 2*n)
+	for i := 0; i < n; i++ {
+		if i > 0 {
+			placeholders = append(placeholders, ',', ' ')
+		}
+		placeholders = append(placeholders, '?')
+	}
+	return fmt.Sprintf("%s IN (%s)", quotedCol, placeholders)
 }
 
 // DiscoverScopedTables walks the FK graph from `workspaces` outward

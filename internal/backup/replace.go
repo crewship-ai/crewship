@@ -82,37 +82,20 @@ func ReplaceWorkspaceContents(ctx context.Context, tx *sql.Tx, bundleWorkspaceID
 	if err != nil {
 		return nil, err
 	}
-	// DELETE in reverse-FK-dependency order so children land before
-	// parents (deletion-side; INSERT-side is the opposite).
-	order := resolveDeletionOrder(include)
+	// DELETE in FK-safe topological order: children before parents
+	// so PK-cascade rules don't fire. Heuristic depth-sort was a
+	// crutch — defer_foreign_keys hid the ordering bug. Real
+	// topological sort means we can drop defer_foreign_keys later.
+	order, err := resolveDeletionOrder(ctx, tx, include)
+	if err != nil {
+		return nil, err
+	}
 
 	deleted := map[string]int{}
 	for _, st := range order {
-		expr, args := st.WorkspaceScopeFilter("?-placeholder?")
-		// Replace the single placeholder with N expansions for each
-		// target workspace id. WorkspaceScopeFilter produces
-		// exactly one `?` at the deepest level (id = ?), so we
-		// expand that into `id IN (?, ?, ...)`. Detect by counting
-		// the placeholders and substituting the right pattern.
-		if strings.Count(expr, "?") != 1 {
-			return nil, fmt.Errorf("backup: unexpected placeholder count in scope filter for %s: %s", st.Name, expr)
-		}
-		// Find the innermost `= ?` and replace with `IN (?, ?, ...)`.
-		// The filter always ends with "workspace_id = ?" or
-		// "<col> = ?" at the deepest level, so substring replace is
-		// safe (no other = ? in the chain).
-		placeholders := make([]string, len(targetIDs))
-		ids := make([]any, len(targetIDs))
-		for i, id := range targetIDs {
-			placeholders[i] = "?"
-			ids[i] = id
-		}
-		_ = args // unused; we rebuild args via targetIDs below
-		// Replace the trailing `= ?` with `IN (?, ?, ...)`.
-		expr = strings.Replace(expr, "= ?", "IN ("+strings.Join(placeholders, ",")+")", 1)
-
+		expr, args := st.WorkspaceScopeFilterIDs(targetIDs)
 		query := fmt.Sprintf("DELETE FROM %s WHERE %s", quoteIdent(st.Name), expr)
-		res, err := tx.ExecContext(ctx, query, ids...)
+		res, err := tx.ExecContext(ctx, query, args...)
 		if err != nil {
 			return nil, fmt.Errorf("backup: replace delete from %s: %w", st.Name, err)
 		}
@@ -121,9 +104,9 @@ func ReplaceWorkspaceContents(ctx context.Context, tx *sql.Tx, bundleWorkspaceID
 		}
 	}
 
-	// Finally, delete the workspace row itself. Done last because every
-	// scoped table FKs into it (CASCADE or NO ACTION) and a workspaces
-	// DELETE before children would violate FKs.
+	// Finally, delete the workspace row itself. Done last because
+	// every scoped table FKs into it (CASCADE or NO ACTION) and a
+	// workspaces DELETE before children would violate FKs.
 	placeholders := make([]string, len(targetIDs))
 	ids := make([]any, len(targetIDs))
 	for i, id := range targetIDs {
@@ -304,16 +287,108 @@ func tableFKEdgesTx(ctx context.Context, tx *sql.Tx, table string) ([]ScopeEdge,
 	return out, rows.Err()
 }
 
-// resolveDeletionOrder orders the discovered tables so children land
-// before parents. Computed by sorting on JoinPath depth descending
-// (deepest first = furthest from workspaces = no other table FKs to
-// it inside the scoped set, with the inverse-depth heuristic correct
-// in our schema shape).
-func resolveDeletionOrder(in []ScopedTable) []ScopedTable {
-	out := make([]ScopedTable, len(in))
-	copy(out, in)
-	sort.SliceStable(out, func(i, j int) bool {
-		return len(out[i].JoinPath) > len(out[j].JoinPath)
-	})
-	return out
+// resolveDeletionOrder returns the input tables in a topological
+// order suitable for DELETE: every child appears BEFORE every table
+// it FKs into. Implemented as Kahn's algorithm against the FK edges
+// of the supplied tables (probed via PRAGMA on tx so a schema-skewed
+// target gets the order it actually has).
+//
+// Ordering matters even with defer_foreign_keys=ON for two reasons:
+//
+//  1. CASCADE DELETE rules fire IMMEDIATELY regardless of
+//     defer_foreign_keys (per SQLite docs). A parent DELETE before
+//     children cascades through the whole subtree, often beyond what
+//     the bundle declared — we want explicit, bounded deletes.
+//  2. RESTRICT/NO ACTION constraints still fail mid-statement even
+//     under deferred mode if the violating row exists at statement
+//     end. Children-first ordering avoids that.
+//
+// Cycles in the FK graph are tolerated: any unordered tables get
+// appended at the end (the assertNoFKViolations check after INSERT
+// will catch any actual issue), with a warning in the error path
+// caller can choose to surface.
+func resolveDeletionOrder(ctx context.Context, tx *sql.Tx, in []ScopedTable) ([]ScopedTable, error) {
+	if len(in) == 0 {
+		return in, nil
+	}
+	inSet := make(map[string]ScopedTable, len(in))
+	for _, st := range in {
+		inSet[st.Name] = st
+	}
+	// outDegree[T] = number of tables IN in-set that T FKs INTO.
+	// children[T] = set of tables in in-set that FK to T.
+	// Delete order: zero-outdegree tables first (they don't reference
+	// anyone we still need to delete), then propagate.
+	outDegree := make(map[string]int, len(in))
+	children := make(map[string][]string, len(in))
+	for _, st := range in {
+		edges, err := tableFKEdgesTx(ctx, tx, st.Name)
+		if err != nil {
+			// Table missing on target / introspection failed —
+			// treat as zero outdegree; the DELETE itself will
+			// either no-op or surface the real error.
+			outDegree[st.Name] = 0
+			continue
+		}
+		for _, e := range edges {
+			if _, ok := inSet[e.ToTable]; !ok {
+				continue
+			}
+			if e.ToTable == st.Name {
+				continue // self-FK; ignore for ordering
+			}
+			outDegree[st.Name]++
+			children[e.ToTable] = append(children[e.ToTable], st.Name)
+		}
+	}
+
+	// Queue = tables with no outgoing edges into the in-set (they
+	// reference nothing we plan to delete later → safe to delete
+	// first). Sort for determinism.
+	var queue []string
+	for _, st := range in {
+		if outDegree[st.Name] == 0 {
+			queue = append(queue, st.Name)
+		}
+	}
+	sort.Strings(queue)
+
+	out := make([]ScopedTable, 0, len(in))
+	seen := make(map[string]bool, len(in))
+	for len(queue) > 0 {
+		head := queue[0]
+		queue = queue[1:]
+		if seen[head] {
+			continue
+		}
+		seen[head] = true
+		out = append(out, inSet[head])
+		// Anything that FK'd INTO head can now drop its outdegree
+		// count — and if that reaches zero it joins the queue.
+		nextBatch := children[head]
+		sort.Strings(nextBatch)
+		for _, child := range nextBatch {
+			outDegree[child]--
+			if outDegree[child] <= 0 && !seen[child] {
+				queue = append(queue, child)
+			}
+		}
+	}
+
+	// Any unvisited table indicates a cycle. Append in name order so
+	// the result is still deterministic; defer_foreign_keys covers
+	// the remaining safety.
+	if len(out) < len(in) {
+		var leftover []string
+		for _, st := range in {
+			if !seen[st.Name] {
+				leftover = append(leftover, st.Name)
+			}
+		}
+		sort.Strings(leftover)
+		for _, name := range leftover {
+			out = append(out, inSet[name])
+		}
+	}
+	return out, nil
 }

@@ -23,11 +23,21 @@ package backup
 
 // FormatVersion is the on-disk layout version written into every
 // MANIFEST.json produced by this binary.
-const FormatVersion = 1
+//
+// v1 → v2 (2026-05-25): no on-disk layout change. The bump reflects
+// restore-side semantics: --replace mode lands and the dump now
+// carries the expanded table set discovered via FK walk (50+ tables
+// vs the historical 10). A v1 reader on a future version can still
+// restore v2 bundles correctly because INSERT OR IGNORE silently
+// drops unknown tables — but the bump pins the boundary so admins
+// reading manifest.format_version can tell whether their bundle
+// supports the post-rewrite contract.
+const FormatVersion = 2
 
 // MinSupportedFormatVersion is the oldest bundle layout this binary can
 // still read. It implements the N-2 policy: MinSupportedFormatVersion =
-// max(1, FormatVersion-2).
+// max(1, FormatVersion-2). v1 bundles (encrypted AGE-passphrase, 10-
+// table dump) remain restorable.
 const MinSupportedFormatVersion = 1
 
 // IsCompatible reports whether a bundle written with `written` can be
