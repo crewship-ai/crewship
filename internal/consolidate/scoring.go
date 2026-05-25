@@ -2,7 +2,6 @@ package consolidate
 
 import (
 	"math"
-	"strings"
 	"time"
 )
 
@@ -293,28 +292,4 @@ func conceptualRichnessScore(evidenceCount, distinctTypes int) float64 {
 	breadth := math.Min(float64(evidenceCount)/8.0, 1.0)
 	diversity := math.Min(float64(distinctTypes)/4.0, 1.0)
 	return 0.3*breadth + 0.7*diversity
-}
-
-// NormaliseQuery normalises a query string for the unique-queries
-// counter — lowercase, trim, collapse internal whitespace. Same
-// pattern dedupAgainstPrior uses for pattern hashes so the two
-// dedup surfaces stay consistent.
-func NormaliseQuery(q string) string {
-	q = strings.ToLower(strings.TrimSpace(q))
-	var b strings.Builder
-	b.Grow(len(q))
-	prevSpace := false
-	for _, r := range q {
-		if r == ' ' || r == '\t' || r == '\n' || r == '\r' {
-			if prevSpace {
-				continue
-			}
-			b.WriteByte(' ')
-			prevSpace = true
-			continue
-		}
-		b.WriteRune(r)
-		prevSpace = false
-	}
-	return b.String()
 }

@@ -222,20 +222,6 @@ func TestComputeScore_Composite_Bounded(t *testing.T) {
 	}
 }
 
-func TestNormaliseQuery_Trimming(t *testing.T) {
-	cases := []struct{ in, want string }{
-		{"  Hello World  ", "hello world"},
-		{"\tFOO\n\nBAR", "foo bar"},
-		{"already_clean", "already_clean"},
-		{"", ""},
-	}
-	for _, c := range cases {
-		if got := NormaliseQuery(c.in); got != c.want {
-			t.Errorf("NormaliseQuery(%q) = %q, want %q", c.in, got, c.want)
-		}
-	}
-}
-
 // TestComputeScore_StaleStrongFreq pins the worked example: a
 // candidate with strong frequency + diversity but a stale last-seen
 // scores around 0.62, well under MinScore=0.80. Asserts the
