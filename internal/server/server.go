@@ -729,25 +729,28 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 			// without fixing the DB" — strictly safer than a silent
 			// open window.
 			if authH := apiRouter.AuthHandler(); authH != nil {
-				// 5s budget for the empty-DB probe so a wedged SQLite
-				// can't block server boot. The handler refuses bootstrap
-				// when no token is armed, so timeout = fail-closed.
-				// defer cancel so a panic between the WithTimeout and
-				// MaybeGenerateSetupToken doesn't leak the context.
+				// Open the deploy-race bootstrap window. When the users
+				// table is empty at startup the Bootstrap handler stays
+				// open for the default duration (5 min — see
+				// defaultBootstrapWindow in auth.go) — a fixed first-
+				// run window pattern. After the window elapses the
+				// handler refuses with 410 until the server is
+				// restarted. Operator-driven flow: open /bootstrap,
+				// submit name + email + password, Continue.
 				//
-				// cfg.Storage.BasePath = the server-owned data dir
-				// (mode 0700, where /workspace, /output etc. live). The
-				// initial_setup_token file lands there at mode 0600 —
-				// GitLab-style `initial_root_password` UX so the
-				// operator can `cat` it via SSH instead of trawling
-				// journald.
+				// 5s budget for the empty-DB probe so a wedged SQLite
+				// can't block server boot. A failure here is logged
+				// loudly AND records the error on the handler — the
+				// bootstrap path then fails closed (503) until the DB
+				// recovers and the server is restarted. See
+				// bootstrapArmingFailed in auth.go.
 				func() {
 					armCtx, armCancel := context.WithTimeout(context.Background(), 5*time.Second)
 					defer armCancel()
-					if err := authH.MaybeGenerateSetupToken(armCtx, cfg.Storage.BasePath); err != nil {
-						logger.Error("bootstrap: setup token arm failed",
+					if err := authH.ArmDeployRaceWindow(armCtx, 0); err != nil {
+						logger.Error("bootstrap: deploy-race window arm failed",
 							"error", err,
-							"impact", "POST /api/v1/bootstrap will refuse until DB is reachable or a row is added manually")
+							"impact", "fail-closed: /api/v1/bootstrap returns 503 via bootstrapArmingFailed() until the database is reachable and the server is restarted")
 					}
 				}()
 			}

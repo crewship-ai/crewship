@@ -27,6 +27,7 @@ func (r *Router) registerSystemRoutes() {
 
 	// First-run gate (no auth) — tells the login page whether to
 	// redirect a visitor to /bootstrap on an empty database.
+	//
 	setupH := NewSetupStatusHandler(r.db, r.logger, r.allowSignup)
 	r.mux.HandleFunc("GET /api/v1/system/setup-status", setupH.Status)
 
