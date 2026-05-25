@@ -235,6 +235,25 @@ func (s *Server) proxyToAPIFiltered(
 		req.Header.Set("Content-Type", "application/json")
 	}
 
+	// Propagate end-user attribution through the sidecar so the backend
+	// handler can dual-path: user-attributed (capability check) vs.
+	// autonomous-agent (autonomy_level check). Headers are pass-through
+	// — the chat-bridge / CLI repl sets them on the inbound request when
+	// the action was end-user-initiated (slash command); autonomous-agent
+	// tool calls leave them empty and the backend falls back to the
+	// autonomy gate. Source is informational for audit (chat-ui vs cli-
+	// repl vs anything-else) and never gates behaviour by itself.
+	//
+	// See PRD-SLASH-CAPABILITIES-2026.md §6.3 — these headers are the
+	// dual-path discriminator the backend handler reads via
+	// CallerUserIDFromRequest (internal/api/caller_identity.go).
+	if callerID := r.Header.Get("X-Caller-User-Id"); callerID != "" {
+		req.Header.Set("X-Caller-User-Id", callerID)
+	}
+	if callerSrc := r.Header.Get("X-Caller-Source"); callerSrc != "" {
+		req.Header.Set("X-Caller-Source", callerSrc)
+	}
+
 	resp, err := ipcClient.Do(req)
 	if err != nil {
 		writeJSONResponse(w, http.StatusBadGateway, map[string]string{"error": "crewshipd request failed"})

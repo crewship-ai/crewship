@@ -159,27 +159,48 @@ braces during the rollout.
 
 ### 6.3 IPC identity propagation
 
-`IPCConfig` (`internal/sidecar/server.go:36-45`) gains
-`CallerUserID string` and `CallerSource string` (`"chat-ui"` |
-`"cli-repl"` | `"agent-autonomous"`). The CLI/chat-bridge populates
-both when establishing the sidecar session.
+Originally drafted as a field on `IPCConfig`; revised on implementation
+because IPCConfig is static-per-sidecar-lifetime (one config = one agent
+container) but caller user id is per-request — Ludmila and Pavel can
+chat with the same agent in different windows. Per-request propagation
+through HTTP headers is the only correct shape.
 
-`proxyToAPI` (`internal/sidecar/proxy.go`) attaches:
+Inbound chat-bridge / CLI repl request to the sidecar carries:
 
 ```
-X-Caller-User-Id: <user id or empty>
-X-Caller-Source:  <chat-ui | cli-repl | agent-autonomous>
+X-Caller-User-Id: <user id>     (omitted for autonomous-agent tool calls)
+X-Caller-Source:  chat-ui | cli-repl
 ```
 
-Backend middleware reads these into context keys `ctxCallerUserID`
-and `ctxCallerSource`. The existing `ctxRole` injection stays as a
-fallback (so older sidecar binaries still work mid-upgrade) but its
-value is rewritten if `X-Caller-User-Id` is present: the handler
-recomputes role from the user's actual membership row, not the
-blanket-injected MANAGER.
+`proxyToAPIFiltered` (`internal/sidecar/coordinator.go:195`) is the
+single chokepoint for sidecar → backend IPC; it propagates the two
+headers verbatim when present, omits them when absent (so autonomous-
+agent calls look identical to pre-PR behaviour on the wire).
+
+Backend reads them via the new helper:
+
+```go
+// internal/api/caller_identity.go
+func CallerUserIDFromRequest(r *http.Request) string
+func CallerSourceFromRequest(r *http.Request) string
+```
+
+`CallerUserIDFromRequest` prefers `UserFromContext` (set by
+AuthMiddleware on JWT / CLI-token paths) over the header so a JWT
+caller can't spoof a different user's id by also setting the header.
+The header path is the only signal on internal-token routes (no
+AuthMiddleware there).
+
+Empty return from `CallerUserIDFromRequest` is the discriminator the
+dual-path handlers use to decide capability check (user-attributed)
+vs. autonomy_level check (autonomous). No context key changes; no
+middleware rewrite of `ctxRole` (deferred — the blanket-MANAGER
+injection stays for now and the dual-path handlers in commit 6
+ignore it when the caller-id header is present).
 
 This commit, in isolation, closes the audit-attribution gap even
-before any new capability check is wired.
+before any new capability check is wired — handlers that adopt
+`CallerUserIDFromRequest` can already log user-attributed actions.
 
 ### 6.4 Three internal API mirrors
 
