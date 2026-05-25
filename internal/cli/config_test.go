@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestResolveServer(t *testing.T) {
@@ -128,7 +130,7 @@ func TestConfigSaveLoad(t *testing.T) {
 		Format:    "json",
 	}
 
-	data, err := marshalConfig(original)
+	data, err := yaml.Marshal(original)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
@@ -170,7 +172,7 @@ func TestConfigFilePermissions(t *testing.T) {
 	configPath := filepath.Join(tmpDir, "cli-config.yaml")
 
 	cfg := &CLIConfig{Token: "secret-token"}
-	data, _ := marshalConfig(cfg)
+	data, _ := yaml.Marshal(cfg)
 	if err := os.WriteFile(configPath, data, 0600); err != nil {
 		t.Fatalf("write: %v", err)
 	}

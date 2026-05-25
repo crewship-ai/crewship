@@ -108,11 +108,6 @@ func SaveConfig(cfg *CLIConfig) error {
 	return nil
 }
 
-// marshalConfig serializes config to YAML bytes.
-func marshalConfig(cfg *CLIConfig) ([]byte, error) {
-	return yaml.Marshal(cfg)
-}
-
 // loadConfigFrom loads config from a specific path.
 func loadConfigFrom(path string) (*CLIConfig, error) {
 	data, err := os.ReadFile(path)
