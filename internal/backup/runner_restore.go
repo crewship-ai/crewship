@@ -35,6 +35,19 @@ type RestoreOptions struct {
 	// decrypt, payload walk) but commits no DB writes and performs no
 	// docker CopyTo. RestoreResult reports what WOULD have happened.
 	DryRun bool
+	// Replace, when true, deletes every existing workspace-scoped row
+	// on the target whose workspace matches the bundle by either id or
+	// slug BEFORE the INSERT pass. This is the canonical
+	// disaster-recovery path: a post-`dev.sh nuke` bootstrap
+	// regenerates the workspace CUID with the same slug, and a normal
+	// restore would either no-op (id collision against fresh empty row)
+	// or fail UNIQUE(slug). --replace clears the conflicting target
+	// state so the bundle lands with its original IDs intact.
+	//
+	// Mutually exclusive with AsWorkspace / AsCrew — those flags exist
+	// to FORK the workspace under a new slug; --replace exists to
+	// REASSERT the bundle's identity over whatever the target has.
+	Replace bool
 	// Logger, if set, receives human-readable progress/warning
 	// messages (e.g. "docker phase skipped …"). The CLI wires this
 	// into stderr; the REST handler can log to slog.
@@ -177,6 +190,17 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 	}
 	if opts.AsCrew != "" && manifest.Scope != ScopeCrew {
 		return nil, fmt.Errorf("%w: --as-crew is only valid for crew-scope bundles (this bundle is %s)", ErrInvalidScope, manifest.Scope)
+	}
+	// --replace and --as-* are semantic opposites: --replace reasserts
+	// the bundle's identity OVER whatever the target has under the
+	// same slug; --as-* forks the bundle under a NEW slug. Combining
+	// them is incoherent — refuse up front so the admin sees the
+	// conflict before we touch anything.
+	if opts.Replace && (opts.AsWorkspace != "" || opts.AsCrew != "") {
+		return nil, fmt.Errorf("%w: --replace is incompatible with --as-workspace / --as-crew", ErrInvalidScope)
+	}
+	if opts.Replace && manifest.Scope != ScopeWorkspace {
+		return nil, fmt.Errorf("%w: --replace is only supported for workspace-scope bundles", ErrInvalidScope)
 	}
 
 	// Schema skew detection. The bundle records which DB migrations
@@ -391,7 +415,35 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 
 	var stats RestoreStats
 	if extracted.DBDump != nil {
-		s, err := RestoreDumpTx(ctx, db, extracted.DBDump, dockerRestore)
+		hooks := &RestoreDumpHooks{PreCommit: dockerRestore}
+		if opts.Replace {
+			// --replace path: before the INSERT pass runs, wipe every
+			// workspace-scoped row that belongs to the bundle's
+			// workspace by either id (re-restore into same instance)
+			// or slug (post-`dev.sh nuke` fresh-bootstrap workspace
+			// with the same slug but a new CUID). The bundle then
+			// lands its rows with the original IDs intact.
+			//
+			// Resolving the bundle's workspace identity from the dump
+			// directly so this works even when manifest.Contents.Workspace
+			// is absent (older bundles, custom dumps).
+			bundleID := firstWorkspaceID(extracted.DBDump)
+			bundleSlug := firstWorkspaceSlug(extracted.DBDump)
+			if bundleID == "" {
+				return nil, fmt.Errorf("backup: --replace requires the bundle to carry a workspace row; this one does not")
+			}
+			hooks.PreInsert = func(ctx context.Context, tx *sql.Tx) error {
+				deleted, err := ReplaceWorkspaceContents(ctx, tx, bundleID, bundleSlug)
+				if err != nil {
+					return err
+				}
+				if opts.Logger != nil && len(deleted) > 0 {
+					opts.Logger(fmt.Sprintf("--replace: wiped target workspace state before restore (%d tables touched)", len(deleted)))
+				}
+				return nil
+			}
+		}
+		s, err := RestoreDumpTxHooks(ctx, db, extracted.DBDump, hooks)
 		if err != nil {
 			return nil, err
 		}

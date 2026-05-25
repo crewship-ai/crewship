@@ -509,6 +509,32 @@ type RestoreStats struct {
 // IGNORE swallowed every PK collision" scenario that happens when
 // you restore into the same instance that produced the bundle).
 func RestoreDumpTx(ctx context.Context, db *sql.DB, dump *DBDump, preCommit func(context.Context) error) (RestoreStats, error) {
+	return RestoreDumpTxHooks(ctx, db, dump, &RestoreDumpHooks{PreCommit: preCommit})
+}
+
+// RestoreDumpHooks carries optional tx-bound callbacks that run at
+// well-defined points inside RestoreDumpTxHooks's transaction. nil
+// closures or a nil RestoreDumpHooks are equivalent to no-ops.
+type RestoreDumpHooks struct {
+	// PreInsert runs INSIDE the tx, AFTER PRAGMA setup but BEFORE the
+	// per-table INSERT pass. Used by --replace mode to wipe the
+	// target workspace's rows first so the bundle can land with
+	// original IDs intact.
+	PreInsert func(ctx context.Context, tx *sql.Tx) error
+	// PreCommit runs INSIDE the tx, AFTER all INSERTs and the FK
+	// integrity check, BEFORE Commit. Used by the docker phase: a
+	// CopyTo failure rolls the DB back rather than leaving a
+	// half-restored container with orphan rows.
+	PreCommit func(ctx context.Context) error
+}
+
+// RestoreDumpTxHooks runs the restore INSERTs inside a transaction
+// with the supplied lifecycle hooks. See RestoreDumpHooks for the
+// contract of each hook.
+func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *RestoreDumpHooks) (RestoreStats, error) {
+	if hooks == nil {
+		hooks = &RestoreDumpHooks{}
+	}
 	var stats RestoreStats
 	// PRAGMA foreign_keys is a no-op inside an open transaction per
 	// the SQLite docs, so we must set it on a held connection BEFORE
@@ -544,6 +570,16 @@ func RestoreDumpTx(ctx context.Context, db *sql.DB, dump *DBDump, preCommit func
 			_ = tx.Rollback()
 		}
 	}()
+	// PreInsert hook runs BEFORE any per-table INSERT. The canonical
+	// use case is --replace: clear the target workspace's rows so the
+	// bundle's rows land with their original IDs instead of either
+	// colliding (PK clash) or being silently dropped (INSERT OR
+	// IGNORE no-op against a fresh-bootstrap row with the same slug).
+	if hooks.PreInsert != nil {
+		if err := hooks.PreInsert(ctx, tx); err != nil {
+			return stats, fmt.Errorf("backup: pre-insert hook: %w", err)
+		}
+	}
 
 	for _, table := range BackupTables {
 		rows, ok := dump.Tables[table]
@@ -623,8 +659,10 @@ func RestoreDumpTx(ctx context.Context, db *sql.DB, dump *DBDump, preCommit func
 	if err := assertNoFKViolationsTx(ctx, tx); err != nil {
 		return stats, err
 	}
-	if err := preCommit(ctx); err != nil {
-		return stats, err
+	if hooks.PreCommit != nil {
+		if err := hooks.PreCommit(ctx); err != nil {
+			return stats, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return stats, fmt.Errorf("backup: commit restore tx: %w", err)

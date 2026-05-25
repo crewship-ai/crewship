@@ -293,7 +293,13 @@ type restoreRequest struct {
 	Identity    string `json:"identity,omitempty"`
 	AsWorkspace string `json:"as_workspace,omitempty"`
 	AsCrew      string `json:"as_crew,omitempty"`
-	DryRun      bool   `json:"dry_run,omitempty"`
+	// Replace, when true, wipes existing target rows matching the
+	// bundle's workspace (by id OR slug) before INSERT. Canonical
+	// disaster-recovery path: after `dev.sh nuke` the fresh-bootstrap
+	// workspace has a new CUID but the same slug — --replace clears
+	// the conflicting target so the bundle lands with original IDs.
+	Replace bool `json:"replace,omitempty"`
+	DryRun  bool `json:"dry_run,omitempty"`
 }
 
 // Restore handles POST /api/v1/admin/backups/restore.
@@ -325,10 +331,18 @@ func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if !bundleBelongsToWorkspace(ctx, req.Path, workspaceID) {
-		replyError(w, http.StatusNotFound, "backup not found")
-		return
-	}
+	// Pre-fix this handler called bundleBelongsToWorkspace, which
+	// blocked the canonical disaster-recovery flow: after `dev.sh
+	// nuke` the fresh-bootstrap workspace has a NEW CUID, so the
+	// bundle's workspace_id never matched the current context's
+	// workspace_id and the API returned 404 even though the admin had
+	// a valid bundle for that slug. Restore now relies solely on the
+	// admin role gate above — the bundle's manifest dictates the
+	// post-restore identity. List / Inspect / Verify / Download still
+	// filter by workspace context (cross-tenant disclosure concern);
+	// Restore is a write that PRODUCES the workspace the bundle
+	// describes, so no such disclosure exists.
+	_ = workspaceID // retained for audit / journal calls below
 
 	ops := h.dockerOps
 
@@ -348,6 +362,7 @@ func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
 		Identities:   identities,
 		AsWorkspace:  req.AsWorkspace,
 		AsCrew:       req.AsCrew,
+		Replace:      req.Replace,
 		DryRun:       req.DryRun,
 		Actor:        backup.Actor{UserID: user.ID, Email: user.Email, Role: role},
 		DockerOps:    ops,

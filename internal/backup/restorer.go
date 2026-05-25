@@ -9,6 +9,27 @@ import (
 	"strings"
 )
 
+// symlinkSectionIsStrict reports whether a payload entry's section
+// rejects `..` and absolute symlink targets. workspace/ and volumes/
+// hold user code and dotfiles — both routinely contain parent-relative
+// symlinks (node_modules dedup, mise / pnpm / pyenv) that the
+// container's filesystem containment already bounds. memory/ and
+// system/ stay strict because nothing legitimate writes parent-ref
+// symlinks there.
+//
+// Names without a known section prefix default to STRICT so an
+// unrecognised future section cannot be used to smuggle escaping
+// links by mistake.
+func symlinkSectionIsStrict(name string) bool {
+	switch {
+	case strings.HasPrefix(name, "workspace/"),
+		strings.HasPrefix(name, "volumes/"):
+		return false
+	default:
+		return true
+	}
+}
+
 // ExtractedPayload carries the section readers pulled out of a bundle
 // payload tar. The large per-crew sections (workspace, volumes,
 // memory) are written to disk as temp files rather than buffered in
@@ -240,33 +261,43 @@ func ExtractPayload(ctx context.Context, payload io.Reader) (*ExtractedPayload, 
 		if strings.Contains(name, "..") {
 			return nil, fmt.Errorf("%w: payload entry %q contains parent reference", ErrInvalidManifest, hdr.Name)
 		}
-		// Hardlinks (TypeLink) and symlinks (TypeSymlink) get the same
-		// validation: NUL-free target, not absolute, no ".." escape.
+		// Hardlinks (TypeLink) and symlinks (TypeSymlink) get a NUL-free
+		// check unconditionally, then section-aware policy on the
+		// target path.
+		//
 		// Docker's CopyTo bounds extraction to the dst container, so a
 		// rogue link cannot reach the host — but a tampered bundle
 		// could still smuggle a `/etc/shadow` or `../../etc/passwd`
 		// link INTO the restored container's rootfs (especially the
-		// uid-0 /var/lib path). Defence-in-depth: reject up front so
-		// the failure mode is "bad bundle", not "unexpected file
-		// inside the container".
+		// uid-0 /var/lib path).
 		//
-		// Legitimate `..`-bearing targets that crews actually ship
-		// (mise / pyenv / npm dedup) live under paths the collector
-		// already excludes (.local/share/mise/, .local/share/pnpm/,
-		// node_modules/, etc.), so this check does not regress real
-		// restores. If a future tool under a non-excluded path needs
-		// a parent-relative link, the collector exclusion list — not
-		// this safety check — is the right knob.
+		// Section policy:
+		//
+		//   workspace/  — user code section. Legitimate node_modules,
+		//                 mise, pnpm, pyenv all use `..` parent
+		//                 references for symlink dedup. Allow `..`
+		//                 and absolute targets; Docker's CopyTo
+		//                 containment is the security boundary.
+		//   volumes/    — user dotfiles + tooling. Same as workspace.
+		//   memory/     — agent-written markdown. Strict (memory should
+		//                 never legitimately contain `..` symlinks).
+		//   system/     — /var/lib service data. Strict — anything
+		//                 escaping a service's data dir is suspicious.
+		//
+		// Pre-fix this check was unconditional and broke restores for
+		// any workspace containing a Node.js/Python repo (bug #1).
 		if hdr.Typeflag == tar.TypeLink || hdr.Typeflag == tar.TypeSymlink {
 			if strings.ContainsRune(hdr.Linkname, 0) {
 				return nil, fmt.Errorf("%w: payload entry %q link target contains NUL", ErrInvalidManifest, hdr.Name)
 			}
 			clean := path.Clean(hdr.Linkname)
-			if path.IsAbs(clean) {
-				return nil, fmt.Errorf("%w: payload entry %q link target is absolute (%q)", ErrInvalidManifest, hdr.Name, clean)
-			}
-			if clean == ".." || strings.HasPrefix(clean, "../") {
-				return nil, fmt.Errorf("%w: payload entry %q link target escapes via parent reference (%q)", ErrInvalidManifest, hdr.Name, clean)
+			if symlinkSectionIsStrict(name) {
+				if path.IsAbs(clean) {
+					return nil, fmt.Errorf("%w: payload entry %q link target is absolute (%q)", ErrInvalidManifest, hdr.Name, clean)
+				}
+				if clean == ".." || strings.HasPrefix(clean, "../") {
+					return nil, fmt.Errorf("%w: payload entry %q link target escapes via parent reference (%q)", ErrInvalidManifest, hdr.Name, clean)
+				}
 			}
 		}
 

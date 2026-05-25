@@ -73,4 +73,22 @@ var (
 	// re-run the backfill manually, or restore onto a clean instance.
 	// Maps to HTTP 500.
 	ErrRestoreBackfillFailed = errors.New("backup: restore backfill hook failed")
+
+	// ErrDiscoveryDrift is returned by CategoriseScopedTables when the
+	// runtime FK walk surfaces a workspace-scoped table that has no
+	// entry in BackupTableIntent. The drift means a recent migration
+	// added a table that references workspaces (directly or
+	// transitively) without an explicit "include in bundles" /
+	// "exclude as operational" decision. Surfacing this loudly during
+	// test runs is the safety net that keeps bundles from silently
+	// missing rows from a future migration.
+	ErrDiscoveryDrift = errors.New("backup: discovery found workspace-scoped tables not in BackupTableIntent")
+
+	// ErrTargetConflict is returned by RestoreBackup when the target
+	// database already holds rows that would collide with the bundle.
+	// Specifically: a workspace row exists with the same slug as the
+	// bundle's workspace but a different id, OR with the same id but
+	// inconsistent state. The caller must re-run with --replace
+	// (wipe-and-restore) or --as-workspace <new-slug> (fork beside).
+	ErrTargetConflict = errors.New("backup: restore target already holds a conflicting workspace")
 )

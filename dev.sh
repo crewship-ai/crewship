@@ -673,6 +673,13 @@ cmd_nuke() {
     rm -f "$PROJECT_DIR/crewship.db"
     rm -f "$PROJECT_DIR/crewship.db-shm"
     rm -f "$PROJECT_DIR/crewship.db-wal"
+    # Migration safety snapshots: migrate.go writes
+    # crewship.db.pre-migrate-vXX-to-vYY-<ts>.bak whenever a migration
+    # mutates rows in a way that's hard to reverse. A factory reset
+    # that leaves these behind preserves data through the "nuke" and
+    # confuses DR testing — the supposedly-empty target boots with
+    # stale state from the previous lifecycle.
+    rm -f "$PROJECT_DIR"/crewship.db.pre-migrate-*.bak
     ok "SQLite database removed"
   fi
 

@@ -178,6 +178,7 @@ func init() {
 	backupRestoreCmd.Flags().String("passphrase-file", "", "Read passphrase from file instead of prompting")
 	backupRestoreCmd.Flags().Bool("use-keyring", false, "Read the passphrase from the local backup keyring before prompting")
 	backupRestoreCmd.Flags().Bool("dry-run", false, "Verify compat, checksum and decryption without applying workspace/crew writes or docker changes (an audit row is still recorded)")
+	backupRestoreCmd.Flags().Bool("replace", false, "Wipe existing target rows matching the bundle's workspace (by id OR slug) BEFORE restore. Canonical disaster-recovery path: lands bundle data with original IDs after `dev.sh nuke` or a fresh-instance bootstrap re-took the slug under a new id. Mutually exclusive with --as-workspace / --as-crew.")
 
 	backupRotateCmd.Flags().Int("keep-last", 0, "Keep only the N newest bundles (0 disables)")
 	backupRotateCmd.Flags().Int("keep-days", 0, "Drop bundles older than N days (0 disables)")
