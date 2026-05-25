@@ -114,34 +114,44 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"crew_mcp_servers":       IntentInclude,
 	"crew_templates":         IntentInclude,
 	"feature_flag_overrides": IntentInclude,
-	"gdpr_actions":           IntentExcludeOperational, // audit-like, instance-bound
-	"hooks_config":           IntentInclude,
-	"inbox_items":            IntentInclude,
-	"issue_counters":         IntentInclude,
-	"memory_proposals":       IntentInclude,
-	"memory_versions":        IntentInclude,
-	"message_feedback":       IntentInclude,
-	"mission_activity":       IntentInclude,
-	"mission_comments":       IntentInclude,
-	"mission_labels":         IntentInclude,
-	"mission_proposals":      IntentInclude,
-	"mission_relations":      IntentInclude,
-	"mission_tasks":          IntentInclude,
-	"peer_card_audit":        IntentExcludeOperational, // audit trail
-	"peer_cards":             IntentInclude,
-	"pipeline_runs":          IntentInclude,
-	"pipeline_schedules":     IntentInclude,
-	"pipeline_versions":      IntentInclude,
-	"pipeline_waitpoints":    IntentExcludeRuntime, // suspended pipelines reset
-	"pipeline_webhooks":      IntentInclude,
-	"pipelines":              IntentInclude,
-	"skill_invocations":      IntentExcludeOperational, // telemetry
-	"subscriptions":          IntentInclude,
-	"user_peer_consent":      IntentInclude,
-	"workflow_states":        IntentInclude,
-	"workspace_invitations":  IntentInclude,
-	"workspace_mcp_servers":  IntentInclude,
-	"workspace_members":      IntentInclude, // who can access — must restore
+	// gdpr_actions MUST roundtrip. The table records Art. 15
+	// (access) / Art. 17 (deletion) compliance events with required
+	// `reason` fields — a regulator audit reading "we lost the
+	// GDPR log on a restore" is not a defensible posture.
+	"gdpr_actions":       IntentInclude,
+	"hooks_config":       IntentInclude,
+	"inbox_items":        IntentInclude,
+	"issue_counters":     IntentInclude,
+	"memory_proposals":   IntentInclude,
+	"memory_versions":    IntentInclude,
+	"message_feedback":   IntentInclude,
+	"mission_activity":   IntentInclude,
+	"mission_comments":   IntentInclude,
+	"mission_labels":     IntentInclude,
+	"mission_proposals":  IntentInclude,
+	"mission_relations":  IntentInclude,
+	"mission_tasks":      IntentInclude,
+	"peer_card_audit":    IntentExcludeOperational, // audit trail
+	"peer_cards":         IntentInclude,
+	"pipeline_runs":      IntentInclude,
+	"pipeline_schedules": IntentInclude,
+	"pipeline_versions":  IntentInclude,
+	// pipeline_waitpoints holds suspended-workflow state (pending
+	// approval tokens, event-wait, decision_payload, timeout_at).
+	// These are DURABLE state — a "pending" waitpoint is a real
+	// suspended pipeline run with a token an approver still holds.
+	// Dropping these on restore breaks every in-flight workflow.
+	// Initial classification (IntentExcludeRuntime) was wrong.
+	"pipeline_waitpoints":   IntentInclude,
+	"pipeline_webhooks":     IntentInclude,
+	"pipelines":             IntentInclude,
+	"skill_invocations":     IntentExcludeOperational, // telemetry
+	"subscriptions":         IntentInclude,
+	"user_peer_consent":     IntentInclude,
+	"workflow_states":       IntentInclude,
+	"workspace_invitations": IntentInclude,
+	"workspace_mcp_servers": IntentInclude,
+	"workspace_members":     IntentInclude, // who can access — must restore
 }
 
 // IncludedTables returns the names of tables the bundle should

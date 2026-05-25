@@ -138,6 +138,8 @@ var BackupTables = []string{
 	"pipeline_schedules",
 	"pipeline_webhooks",
 	"pipeline_runs",
+	"pipeline_waitpoints", // suspended workflow state — durable
+	"gdpr_actions",        // Art. 15/17 compliance audit trail
 	// Credential audit/rotations: depend on credentials being in already
 	"credential_audit",
 	"credential_rotations",
