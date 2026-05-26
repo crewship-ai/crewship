@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { act, renderHook, waitFor } from "@testing-library/react"
 
 const mockFetch = vi.fn()
@@ -28,6 +28,10 @@ describe("useWorkspace", () => {
       storage.clear()
     })
     _resetWorkspaceStoreForTests()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
   })
 
   it("starts in loading state", () => {

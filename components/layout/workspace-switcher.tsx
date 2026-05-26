@@ -61,7 +61,11 @@ export function WorkspaceSwitcher() {
         <SidebarMenuItem>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <SidebarMenuButton size="lg" tooltip={triggerLabel}>
+              <SidebarMenuButton
+                size="lg"
+                tooltip={triggerLabel}
+                aria-label={`Current workspace: ${triggerLabel}`}
+              >
                 <div className="flex h-6 w-6 items-center justify-center rounded-md bg-primary text-[9px] font-bold text-primary-foreground shrink-0">
                   {workspace ? avatarLetter(workspace.name) : "·"}
                 </div>
