@@ -73,7 +73,7 @@ func TestMigrateV109_MemberCapabilitiesBackfill(t *testing.T) {
 	}
 	_, err = db.Exec(migrationMemberCapabilities)
 	if err != nil {
-		// CodeRabbit CR-10: narrow the catch-all. The ONLY expected
+		// narrow the catch-all. The ONLY expected
 		// failure mode here is the ALTER complaining about the
 		// already-existing column (because Migrate() already ran the
 		// full constant once and we're replaying it). Any other

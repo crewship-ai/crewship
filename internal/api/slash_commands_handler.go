@@ -81,17 +81,15 @@ var slashCommandCatalog = []slashCommand{
 			{Name: "priority", Type: "priority", Default: "none"},
 		},
 	},
-	{
-		ID:         "remember",
-		Label:      "Remember this",
-		LabelCS:    "Zapamatuj si toto",
-		Icon:       "brain",
-		Capability: CapabilityMemoryWrite,
-		FormSchema: []slashFormField{
-			{Name: "content", Type: "textarea", Required: true},
-			{Name: "scope", Type: "memory_scope", Default: "agent"},
-		},
-	},
+	// "remember" slash command is intentionally NOT in the catalog
+	// yet — the `/api/v1/memory/write` backend route doesn't exist
+	// (memory write happens via the sidecar's loopback /memory/write,
+	// which the dashboard / public CLI can't reach). Tracked as a
+	// follow-up PR: add a public memory write endpoint that runs the
+	// HITL verifier from MEMORY-ROADMAP-2026 PR #3 and registers
+	// here. The CapabilityMemoryWrite constant + role bundles stay
+	// so the follow-up only needs to add this catalog entry +
+	// endpoint without a schema change.
 	{
 		ID:         "skill",
 		Label:      "Create skill from this conversation",

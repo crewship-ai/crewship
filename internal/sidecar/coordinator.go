@@ -247,6 +247,41 @@ func (s *Server) proxyToAPIFiltered(
 	// See PRD-SLASH-CAPABILITIES-2026.md §6.3 — these headers are the
 	// dual-path discriminator the backend handler reads via
 	// CallerUserIDFromRequest (internal/api/caller_identity.go).
+	//
+	// === SECURITY / TRUST BOUNDARY ===
+	//
+	// The sidecar listens on 127.0.0.1:9119 *inside* the agent's own
+	// container's network namespace. Anything that can hit this port is
+	// inside the same container — i.e. the agent process and any tooling
+	// it launched. By design that includes potentially-malicious agent
+	// output (e.g. a tool call that constructs an arbitrary HTTP request
+	// against localhost). A compromised agent could set its OWN
+	// X-Caller-User-Id header to a different user's id and the backend
+	// would log + audit the operation as that other user.
+	//
+	// The mitigations are operational, not protocol-level:
+	//
+	//   - Inbound listeners (handleHTTP / handleLocal / proxy.go:308)
+	//     already verify the request came over loopback AND the TCP peer
+	//     address is also loopback (remoteIsLoopback) so a peer crew on
+	//     the same Docker bridge can't reach this port via Host-header
+	//     spoofing.
+	//   - Capability-gated endpoints (commit 6) only TRUST the header in
+	//     the slash-command path; autonomous tool calls go through a
+	//     SEPARATE backend route family that ignores the header and gates
+	//     on the crew's autonomy_level instead.
+	//   - The chat-bridge / CLI repl are the only legit setters; both run
+	//     OUTSIDE the agent container, attach the header before sending
+	//     to the sidecar, and the agent process can't intercept that
+	//     in-flight (different namespace).
+	//
+	// What remains untrusted: the agent inside the container can mint
+	// its own X-Caller-User-Id and forge a slash action AS IF a real
+	// user had clicked it. Future hardening should sign the header with
+	// an HMAC keyed by a secret only the chat-bridge / CLI repl knows
+	// (the same key shape as the IPC token); the backend would then
+	// reject any X-Caller-User-Id without a valid signature. Tracked in
+	// PRD §11 Out-of-scope.
 	if callerID := r.Header.Get("X-Caller-User-Id"); callerID != "" {
 		req.Header.Set("X-Caller-User-Id", callerID)
 	}

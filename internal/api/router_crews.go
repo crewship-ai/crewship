@@ -76,6 +76,10 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 		authed(wsCtx(http.HandlerFunc(ws.GetMemberCapabilities))))
 	r.mux.Handle("PATCH /api/v1/workspaces/{workspaceId}/members/{memberId}/capabilities",
 		authed(wsCtx(http.HandlerFunc(ws.PatchMemberCapabilities))))
+	// Bulk variant — drives the Members capability grid in one
+	// round-trip instead of N+1 fan-out across per-member endpoints.
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/members/capabilities",
+		authed(wsCtx(http.HandlerFunc(ws.ListMembersCapabilities))))
 
 	// Workspace invitations
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/invitations", authed(wsCtx(http.HandlerFunc(ws.ListInvitations))))

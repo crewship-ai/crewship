@@ -9,6 +9,75 @@ import (
 	"testing"
 )
 
+// TestListMembersCapabilities_BulkReturnsAllMembers covers the
+// workspace-wide bulk endpoint. One SELECT, one response, every
+// member's capabilities included. Drives the Members grid.
+func TestListMembersCapabilities_BulkReturnsAllMembers(t *testing.T) {
+	h := newWsHandlerForTest(t)
+	adminID := seedTestUser(t, h.db)
+	wsID := seedTestWorkspace(t, h.db, adminID)
+	seedMemberWithCapabilities(t, h.db, wsID, "MEMBER", `["chat"]`, "bulk-a")
+	seedMemberWithCapabilities(t, h.db, wsID, "MEMBER", `["chat","routine.create"]`, "bulk-b")
+	seedMemberWithCapabilities(t, h.db, wsID, "MANAGER", `["chat","routine.create","issue.create","memory.write"]`, "bulk-c")
+
+	req := httptest.NewRequest("GET", "/x", nil)
+	ctx := context.WithValue(req.Context(), ctxWorkspaceID, wsID)
+	ctx = context.WithValue(ctx, ctxUser, &AuthUser{ID: adminID})
+	ctx = context.WithValue(ctx, ctxRole, "ADMIN")
+	req = req.WithContext(ctx)
+	w := httptest.NewRecorder()
+
+	h.ListMembersCapabilities(w, req)
+	if w.Code != 200 {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	var got capabilitiesBulkResponse
+	if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	// 4 members total: original OWNER + 3 seeded.
+	if len(got.Members) != 4 {
+		t.Errorf("got %d members, want 4", len(got.Members))
+	}
+	// Spot-check: every returned member has at least chat (defensive
+	// invariant from resolveCapabilitiesFromRow).
+	for _, m := range got.Members {
+		hasChat := false
+		for _, c := range m.Capabilities {
+			if c == "chat" {
+				hasChat = true
+				break
+			}
+		}
+		if !hasChat {
+			t.Errorf("member %s has no chat capability in bulk response: %v", m.UserID, m.Capabilities)
+		}
+	}
+}
+
+// TestListMembersCapabilities_NonAdminDenied — bulk endpoint must
+// share the same admin-only gate as the per-member variant. Capability
+// topology is operator-confidential.
+func TestListMembersCapabilities_NonAdminDenied(t *testing.T) {
+	h := newWsHandlerForTest(t)
+	adminID := seedTestUser(t, h.db)
+	wsID := seedTestWorkspace(t, h.db, adminID)
+	managerID := seedMemberWithCapabilities(t, h.db, wsID, "MANAGER",
+		`["chat","routine.create"]`, "bulk-mgr-deny")
+
+	req := httptest.NewRequest("GET", "/x", nil)
+	ctx := context.WithValue(req.Context(), ctxWorkspaceID, wsID)
+	ctx = context.WithValue(ctx, ctxUser, &AuthUser{ID: managerID})
+	ctx = context.WithValue(ctx, ctxRole, "MANAGER")
+	req = req.WithContext(ctx)
+	w := httptest.NewRecorder()
+
+	h.ListMembersCapabilities(w, req)
+	if w.Code != 403 {
+		t.Errorf("status = %d, want 403", w.Code)
+	}
+}
+
 // TestGetMemberCapabilities_HappyPath covers the previously 0%-
 // covered GET handler. ADMIN reads a MEMBER's row, gets the parsed
 // capability set + role back.
@@ -317,7 +386,7 @@ func TestGetMemberCapabilities_DBError(t *testing.T) {
 }
 
 // TestPatchCapabilities_RaceMemberDeletedBetweenReadAndWrite is the
-// CodeRabbit CR-9 regression. Between the load step and the UPDATE
+// regression test. Between the load step and the UPDATE
 // step a concurrent RemoveMember can delete the row; the UPDATE
 // then affects 0 rows but the old code 200'd + audited. Now we 404.
 func TestPatchCapabilities_RaceMemberDeletedBetweenReadAndWrite(t *testing.T) {

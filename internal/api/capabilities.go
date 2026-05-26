@@ -14,6 +14,7 @@ package api
 
 import (
 	"encoding/json"
+	"sort"
 	"strings"
 )
 
@@ -85,8 +86,8 @@ var allCapabilities = map[string]struct{}{
 // a grant so a typo (`routine.creat` ← missing 'e') produces a
 // rejection instead of a row that silently never matches the runtime
 // constant.
-func IsValidCapability(cap string) bool {
-	_, ok := allCapabilities[cap]
+func IsValidCapability(capability string) bool {
+	_, ok := allCapabilities[capability]
 	return ok
 }
 
@@ -100,9 +101,7 @@ func AllCapabilities() []string {
 	for c := range allCapabilities {
 		out = append(out, c)
 	}
-	// Sort by lexical order so render output is stable across calls
-	// and across Go map-iteration nondeterminism.
-	sortStringsInPlace(out)
+	sort.Strings(out)
 	return out
 }
 
@@ -226,7 +225,7 @@ func SerializeCapabilities(caps map[string]struct{}) string {
 	for c := range caps {
 		out = append(out, c)
 	}
-	sortStringsInPlace(out)
+	sort.Strings(out)
 	b, _ := json.Marshal(out)
 	return string(b)
 }
@@ -236,11 +235,15 @@ func SerializeCapabilities(caps map[string]struct{}) string {
 // can chat, even if the stored set somehow omits it (defensive: an
 // admin couldn't mean to revoke chat without ejecting the user
 // entirely, so the runtime never enforces deny on chat).
-func HasCapability(caps map[string]struct{}, cap string) bool {
-	if cap == CapabilityChat {
+//
+// Parameter is named `capability` (not `cap`) to avoid shadowing the
+// Go built-in. Linters flag the shadow; humans reading the code see
+// "capability" as the obvious intent.
+func HasCapability(caps map[string]struct{}, capability string) bool {
+	if capability == CapabilityChat {
 		return true
 	}
-	_, ok := caps[cap]
+	_, ok := caps[capability]
 	return ok
 }
 
@@ -274,16 +277,4 @@ func FallbackCapabilitiesForRole(role string) map[string]struct{} {
 		out[c] = struct{}{}
 	}
 	return out
-}
-
-// sortStringsInPlace is a tiny insertion sort so we don't pull
-// sort.Strings into the import list just for the stable-output
-// requirement. n is bounded by the capability count (≤10 for the
-// foreseeable future), so O(n²) is irrelevant.
-func sortStringsInPlace(s []string) {
-	for i := 1; i < len(s); i++ {
-		for j := i; j > 0 && s[j-1] > s[j]; j-- {
-			s[j-1], s[j] = s[j], s[j-1]
-		}
-	}
 }

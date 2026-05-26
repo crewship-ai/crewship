@@ -1,12 +1,20 @@
 "use client"
 
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
-import { Check, Lock } from "lucide-react"
+import { Check, Lock, ArrowRight } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { apiFetch } from "@/lib/api-fetch"
 import { cn } from "@/lib/utils"
 import {
@@ -59,27 +67,36 @@ interface CapabilitiesResponse {
   capabilities: string[]
 }
 
+interface CapabilitiesBulkResponse {
+  members: CapabilitiesResponse[]
+}
+
 export function CapabilityGrid({ members, workspaceId, currentUserId }: CapabilityGridProps) {
-  // One query for the whole grid — server already returns
-  // capabilities per-member; we fan out via Promise.all so the
-  // initial render lights up quickly even with 50+ members.
-  // Cached per-workspace; mutations invalidate this key.
+  // ONE round-trip for the whole grid via the bulk endpoint. The
+  // previous N+1 fan-out (one GET per member) was tolerable for 5
+  // members but quadratic for the 500-user Microsoft tenant the
+  // PRD targets. The bulk endpoint runs one SELECT server-side and
+  // a single admin-role check, so a 500-member workspace render
+  // costs 1 HTTP call instead of 500.
   const { data: capsByUser, isLoading } = useQuery({
     queryKey: ["member-capabilities", workspaceId],
     queryFn: async () => {
-      const entries = await Promise.all(
-        members.map(async (m) => {
-          const res = await apiFetch(
-            `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/members/${encodeURIComponent(m.user.id)}/capabilities?workspace_id=${encodeURIComponent(workspaceId)}`,
-          )
-          if (!res.ok) {
-            return [m.user.id, [] as string[]] as const
-          }
-          const data = (await res.json()) as CapabilitiesResponse
-          return [m.user.id, data.capabilities ?? []] as const
-        }),
+      const res = await apiFetch(
+        `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/members/capabilities?workspace_id=${encodeURIComponent(workspaceId)}`,
       )
-      return Object.fromEntries(entries) as Record<string, string[]>
+      if (!res.ok) {
+        // 403 here means the user is no longer admin; the parent
+        // surface hides this component for non-admins so the
+        // outcome is a brief flash. Return empty so the table
+        // renders without throwing.
+        return {} as Record<string, string[]>
+      }
+      const data = (await res.json()) as CapabilitiesBulkResponse
+      const map: Record<string, string[]> = {}
+      for (const m of data.members ?? []) {
+        map[m.user_id] = m.capabilities ?? []
+      }
+      return map
     },
     enabled: Boolean(workspaceId) && members.length > 0,
   })
@@ -90,6 +107,7 @@ export function CapabilityGrid({ members, workspaceId, currentUserId }: Capabili
         members={members}
         workspaceId={workspaceId}
         currentUserId={currentUserId}
+        capsByUser={capsByUser}
       />
       <div className="overflow-x-auto">
         <table className="w-full text-xs border-collapse">
@@ -246,7 +264,7 @@ function CapabilityRow({
         const isGranted = isChat || grantedSet.has(cap)
         const cellLocked = locked || isChat
         const memberLabel = member.user.full_name ?? member.user.email
-        // CodeRabbit CR-3: title attribute is unreliable for screen
+        // title attribute is unreliable for screen
         // readers / keyboard users. aria-label provides the
         // accessible name; aria-pressed exposes the toggle state so
         // assistive tech announces "Routine create, pressed" rather
@@ -298,54 +316,205 @@ function PresetChips({
   members,
   workspaceId,
   currentUserId,
+  capsByUser,
 }: {
   members: CapabilityGridMember[]
   workspaceId: string
   currentUserId: string
+  capsByUser: Record<string, string[]> | undefined
 }) {
-  // Selection UI is intentionally MVP-minimal — the chips below
-  // apply the preset to every eligible member workspace-wide (the
-  // admin's most common case: rolling out a new bundle to everyone).
-  // Per-row selection mode lands when usage telemetry says it's worth
-  // the surface area. (CodeRabbit CR-5: removed the unused
-  // applyPreset / selectedIds / eligibleCount scaffolding that
-  // hinted at a selection-mode UI we haven't shipped yet.)
+  // Quick presets apply workspace-wide to every eligible member
+  // (excludes OWNER + self). Per-row selection mode is a future
+  // iteration.
   const queryClient = useQueryClient()
+  const [pending, setPending] = useState<CapabilityBundle | null>(null)
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      <span className="text-[11px] text-muted-foreground">Quick preset:</span>
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        className="h-6 text-[11px]"
-        onClick={() => applyPresetAll("chat", members, workspaceId, currentUserId, queryClient)}
-      >
-        Chat
-      </Button>
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        className="h-6 text-[11px]"
-        onClick={() => applyPresetAll("power", members, workspaceId, currentUserId, queryClient)}
-      >
-        Power
-      </Button>
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        className="h-6 text-[11px]"
-        onClick={() => applyPresetAll("admin", members, workspaceId, currentUserId, queryClient)}
-      >
-        Admin
-      </Button>
-      <span className="text-[11px] text-muted-foreground ml-auto">
-        {CAPABILITY_BUNDLES.power.length}-cap "power" = chat + routine + issue + memory
-      </span>
-    </div>
+    <>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-[11px] text-muted-foreground">Quick preset:</span>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-6 text-[11px]"
+          onClick={() => setPending("chat")}
+        >
+          Chat
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-6 text-[11px]"
+          onClick={() => setPending("power")}
+        >
+          Power
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-6 text-[11px]"
+          onClick={() => setPending("admin")}
+        >
+          Admin
+        </Button>
+        <span className="text-[11px] text-muted-foreground ml-auto">
+          {CAPABILITY_BUNDLES.power.length}-cap &quot;power&quot; = chat + routine + issue + memory
+        </span>
+      </div>
+      <PresetDiffDialog
+        preset={pending}
+        members={members}
+        currentUserId={currentUserId}
+        capsByUser={capsByUser}
+        onCancel={() => setPending(null)}
+        onConfirm={async () => {
+          if (!pending) return
+          await applyPresetAll(pending, members, workspaceId, currentUserId, queryClient)
+          setPending(null)
+        }}
+      />
+    </>
+  )
+}
+
+// PresetDiffDialog renders the before/after capability diff for every
+// member the preset would touch, so the admin can see exactly which
+// rows lose / gain which capabilities before committing. Replaces the
+// previous window.confirm — bulk preset is irreversible (overwrites
+// per-row tuning) and the operator needs to see the blast radius.
+//
+// "Eligible" = not OWNER + not caller's own row. OWNERs are immutable
+// server-side; caller's own row is immutable client-side (defence
+// against downgrade-then-restore).
+function PresetDiffDialog({
+  preset,
+  members,
+  currentUserId,
+  capsByUser,
+  onCancel,
+  onConfirm,
+}: {
+  preset: CapabilityBundle | null
+  members: CapabilityGridMember[]
+  currentUserId: string
+  capsByUser: Record<string, string[]> | undefined
+  onCancel: () => void
+  onConfirm: () => void
+}) {
+  if (!preset) return null
+
+  const target = new Set(CAPABILITY_BUNDLES[preset] as readonly string[])
+  const eligible = members.filter(
+    (m) => m.role !== "OWNER" && m.user.id !== currentUserId,
+  )
+
+  // Per-row diff: gains (in target, not currently) + losses (in
+  // current, not in target). Skip rows where the diff is empty —
+  // applying the preset to them is a server-side no-op.
+  type rowDiff = {
+    member: CapabilityGridMember
+    current: string[]
+    gains: string[]
+    losses: string[]
+  }
+  const diffs: rowDiff[] = eligible
+    .map((m) => {
+      const current = (capsByUser?.[m.user.id] ?? []).slice().sort()
+      const gains: string[] = []
+      const losses: string[] = []
+      for (const t of target) {
+        if (!current.includes(t)) gains.push(t)
+      }
+      for (const c of current) {
+        if (!target.has(c)) losses.push(c)
+      }
+      return { member: m, current, gains, losses }
+    })
+    .filter((d) => d.gains.length > 0 || d.losses.length > 0)
+
+  const noChange = eligible.length > 0 && diffs.length === 0
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && onCancel()}>
+      <DialogContent className="sm:max-w-2xl max-h-[80vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>
+            Apply preset &quot;{preset}&quot; ({CAPABILITY_BUNDLES[preset].length} cap
+            {CAPABILITY_BUNDLES[preset].length === 1 ? "" : "s"})
+          </DialogTitle>
+          <DialogDescription>
+            {eligible.length === 0
+              ? "No eligible members (all OWNER or self)."
+              : noChange
+                ? `All ${eligible.length} eligible member(s) already match this preset — nothing to change.`
+                : `${diffs.length} of ${eligible.length} eligible member(s) will be modified. Review below.`}
+          </DialogDescription>
+        </DialogHeader>
+
+        {diffs.length > 0 && (
+          <div className="space-y-3">
+            <div className="text-[11px] text-muted-foreground">
+              Target set:{" "}
+              <code className="bg-muted px-1 py-0.5 rounded">
+                {Array.from(target).sort().join(", ")}
+              </code>
+            </div>
+            <div className="space-y-2 border border-border/60 rounded-md divide-y divide-border/40">
+              {diffs.map((d) => (
+                <div key={d.member.user.id} className="px-3 py-2 space-y-1.5">
+                  <div className="flex items-center gap-2 text-xs">
+                    <span className="font-medium">
+                      {d.member.user.full_name ?? d.member.user.email}
+                    </span>
+                    <Badge variant="outline" className="text-[10px]">
+                      {d.member.role}
+                    </Badge>
+                  </div>
+                  {d.gains.length > 0 && (
+                    <div className="flex items-center gap-1.5 text-[11px]">
+                      <span className="text-emerald-600 dark:text-emerald-400 font-mono">
+                        +{d.gains.length}
+                      </span>
+                      <ArrowRight className="h-3 w-3 text-muted-foreground" />
+                      <code className="bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 px-1 rounded text-[10px]">
+                        {d.gains.join(", ")}
+                      </code>
+                    </div>
+                  )}
+                  {d.losses.length > 0 && (
+                    <div className="flex items-center gap-1.5 text-[11px]">
+                      <span className="text-rose-600 dark:text-rose-400 font-mono">
+                        -{d.losses.length}
+                      </span>
+                      <ArrowRight className="h-3 w-3 text-muted-foreground" />
+                      <code className="bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 px-1 rounded text-[10px]">
+                        {d.losses.join(", ")}
+                      </code>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={onCancel}>
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            disabled={eligible.length === 0 || noChange}
+            onClick={onConfirm}
+          >
+            Apply to {diffs.length} member{diffs.length === 1 ? "" : "s"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -363,19 +532,14 @@ async function applyPresetAll(
     toast.info("No eligible members (all OWNER or self).")
     return
   }
-  if (
-    !window.confirm(
-      `Apply "${preset}" preset to ${eligible.length} member(s)? This overwrites their current capabilities.`,
-    )
-  ) {
-    return
-  }
-  // CodeRabbit CR-4: previously this called Promise.all on the raw
-  // apiFetch results and immediately toasted "success" — apiFetch
-  // resolves on 4xx/5xx too (only network errors reject), so a
-  // server-side rejection (admin lacks role, OWNER target, ...) was
-  // silently celebrated. Now we await each response, partition by
-  // resp.ok, and only claim success for the rows that actually 2xx'd.
+  // Confirmation lives in the PresetDiffDialog above (visible
+  // before-and-after diff). By the time we reach here the admin
+  // has clicked "Apply" on that dialog.
+  //
+  // Partition responses by resp.ok — apiFetch resolves on 4xx/5xx
+  // too (only network errors reject), so a server-side rejection
+  // (typo, OWNER target slipping through, ...) would otherwise be
+  // toasted as success.
   type result = { id: string; ok: boolean; status: number; body: string }
   const results: result[] = await Promise.all(
     eligible.map(async (m): Promise<result> => {

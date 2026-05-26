@@ -300,10 +300,10 @@ func TestBuildSlashHandler_HappyPath(t *testing.T) {
 	}
 }
 
-// TestBuildSlashHandler_WritesSuccessToOut is the CodeRabbit CR-7
-// regression: success confirmation must go via the passed-in writer
-// (repl.Out) instead of being hardcoded to os.Stdout. We pass a
-// bytes.Buffer and assert it captures the confirmation line.
+// TestBuildSlashHandler_WritesSuccessToOut asserts the success
+// confirmation goes via the passed-in writer (repl.Out) instead of
+// being hardcoded to os.Stdout. Pass a bytes.Buffer and assert it
+// captures the confirmation line.
 func TestBuildSlashHandler_WritesSuccessToOut(t *testing.T) {
 	cmd := ServerSlashCommand{ID: "routine"}
 	c := &fakeSlashClient{
@@ -323,7 +323,7 @@ func TestBuildSlashHandler_WritesSuccessToOut(t *testing.T) {
 // TestLoadServerSlashCommands_RegistersHandlerWithReplOut wires the
 // full LoadServerSlashCommands path against a REPL whose Out is a
 // captured buffer; asserts the resulting handler writes its success
-// line through that buffer (end-to-end CR-7 coverage).
+// line through that buffer (end-to-end coverage).
 func TestLoadServerSlashCommands_RegistersHandlerWithReplOut(t *testing.T) {
 	catalog := `[{"id":"routine","label":"R","capability":"routine.create"}]`
 	c := &fakeSlashClient{
@@ -357,7 +357,7 @@ func TestSlashCommandPayload_AllIDs(t *testing.T) {
 	t.Run("credential", func(t *testing.T) {
 		got := slashCommandPayload("credential", map[string]string{
 			"name": "GH_PAT", "type": "SECRET", "value": "ghp_x",
-		}).(map[string]any)
+		})
 		if got["name"] != "GH_PAT" || got["type"] != "SECRET" || got["value"] != "ghp_x" {
 			t.Errorf("credential reshape: %v", got)
 		}
@@ -365,17 +365,13 @@ func TestSlashCommandPayload_AllIDs(t *testing.T) {
 	t.Run("issue", func(t *testing.T) {
 		got := slashCommandPayload("issue", map[string]string{
 			"title": "Bug", "description": "It broke", "priority": "high",
-		}).(map[string]any)
+		})
 		if got["title"] != "Bug" || got["priority"] != "high" {
 			t.Errorf("issue reshape: %v", got)
 		}
 	})
-	t.Run("remember", func(t *testing.T) {
-		got := slashCommandPayload("remember", map[string]string{
-			"content": "X is Y", "scope": "crew",
-		}).(map[string]any)
-		if got["content"] != "X is Y" || got["scope"] != "crew" {
-			t.Errorf("remember reshape: %v", got)
-		}
-	})
+	// "remember" branch intentionally removed from slashCommandPayload
+	// — the backend route doesn't exist yet (see
+	// slash_commands_handler.go catalog note). It'll come back when
+	// the public memory write endpoint lands.
 }

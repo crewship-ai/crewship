@@ -36,6 +36,10 @@ import (
 // background sweep is intentionally absent because the working set
 // is bounded by active members × workspaces (low cardinality) and
 // process restart already clears it.
+//
+// HA / multi-process invalidation is out of scope — see
+// PRD-SLASH-CAPABILITIES-2026.md §11. A future Redis-backed cache
+// with pub/sub invalidate is the upgrade path.
 type capabilityCache struct {
 	mu    sync.RWMutex
 	ttl   time.Duration
@@ -114,33 +118,48 @@ func InvalidateCapabilityCache(workspaceID, userID string) {
 	defaultCapabilityCache.Invalidate(workspaceID, userID)
 }
 
+// resolveCapabilitiesFromRow turns the raw (capsJSON, role) pair from
+// a workspace_members SELECT into the authoritative capability set
+// the runtime acts on. Single source of truth so the read API
+// (GetMemberCapabilities) and the runtime gate (requireCapabilityOrForbid)
+// can't diverge on how they interpret edge cases.
+//
+// Resolution rules:
+//
+//   - capsJSON IS NULL → role-derived fallback. Legacy /
+//     upgrade-in-progress path: a row exists but the application
+//     write that should fill the column hasn't happened. Falling back
+//     to the role bundle keeps a fresh INSERT working before the
+//     backfill catches up.
+//   - capsJSON IS valid JSON with at least one known entry → that set
+//     verbatim. Operator intent honoured.
+//   - capsJSON IS present but ParseCapabilities returns nil (empty
+//     array, malformed JSON, only future-unknown strings) →
+//     chat-only baseline, NOT the role fallback. An explicit-but-
+//     drained value reflects deliberate operator intent ("strip this
+//     user back to chat") and the runtime must not silently restore
+//     role-derived privileges.
+func resolveCapabilitiesFromRow(capsJSON sql.NullString, role string) map[string]struct{} {
+	if !capsJSON.Valid {
+		return FallbackCapabilitiesForRole(role)
+	}
+	caps := ParseCapabilities(capsJSON.String)
+	if caps == nil {
+		return map[string]struct{}{CapabilityChat: {}}
+	}
+	return caps
+}
+
 // loadCapabilitiesForMember reads the capabilities + role from the
-// workspace_members row. Returns:
+// workspace_members row, then runs resolveCapabilitiesFromRow on the
+// result. Returns:
 //
 //   - (caps, role, nil)   — row exists; caps populated per the rules
-//     below.
+//     in resolveCapabilitiesFromRow.
 //   - (nil, "", nil)      — no membership row (caller treats as
 //     "not a member").
 //   - (nil, "", err)      — real DB error (caller surfaces 500 instead
 //     of conflating with not-a-member).
-//
-// Capability resolution rules for an existing row:
-//
-//   - capabilities IS NULL  → role-derived fallback bundle. This is
-//     the legacy / upgrade-in-progress path: the migration ran but no
-//     application write has filled the column, so we'd rather grant
-//     role-equivalent defaults than lock the user out.
-//
-//   - capabilities IS valid JSON with at least one known entry →
-//     return that set verbatim. Operator intent honored.
-//
-//   - capabilities IS present but ParseCapabilities returns nil (the
-//     value parsed to an empty array, was malformed JSON, or only
-//     contained unknown future-version strings) → return the
-//     chat-only baseline, NOT the role fallback. An explicit-but-
-//     drained value reflects deliberate operator intent ("strip this
-//     user back to chat") and the runtime must not silently restore
-//     role-derived privileges. (CodeRabbit CR-1.)
 func loadCapabilitiesForMember(ctx context.Context, db *sql.DB, workspaceID, userID string) (map[string]struct{}, string, error) {
 	if db == nil || workspaceID == "" || userID == "" {
 		return nil, "", nil
@@ -159,38 +178,21 @@ func loadCapabilitiesForMember(ctx context.Context, db *sql.DB, workspaceID, use
 		// Real DB error — surface to caller so it can 500. Collapsing
 		// this into "not a member" used to mask transient SQLITE_BUSY
 		// behind a 403 that an operator couldn't distinguish from a
-		// genuine permission deny. (CodeRabbit CR-2.)
+		// genuine permission deny.
 		return nil, "", err
 	}
-	if !capsJSON.Valid {
-		// NULL: legacy / upgrade-in-progress. Role fallback is the
-		// safe degrade so a fresh INSERT that didn't fill the column
-		// doesn't lock the user out before the backfill catches up.
-		return FallbackCapabilitiesForRole(role), role, nil
-	}
-	caps := ParseCapabilities(capsJSON.String)
-	if caps == nil {
-		// Explicit-empty / malformed / all-unknown-strings. Operator
-		// intent: chat-only. NOT role fallback — that would silently
-		// restore privileges the operator just stripped.
-		return map[string]struct{}{CapabilityChat: {}}, role, nil
-	}
-	return caps, role, nil
+	return resolveCapabilitiesFromRow(capsJSON, role), role, nil
 }
 
 // CapabilitiesForMember is the cached lookup that handlers call
 // before requireCapabilityOrForbid (or to inspect the set for UI
 // filtering, e.g. the /slash-commands handler). Returns the
-// capability set + the underlying role. (role is returned alongside
-// caps so a single DB round-trip serves both the capability gate
-// and any layered role gate the same handler runs.)
+// capability set + the underlying role.
 //
-// Returns (nil, "", false) when no membership row exists. DB errors
-// are NOT swallowed — they propagate via the loader's error return
-// and surface as (nil, "", false) too BUT the caller can re-query
-// via CapabilitiesForMemberE to get the underlying error and surface
-// a 500 instead of conflating with not-a-member. Existing callers
-// keep working unchanged.
+// Returns (nil, "", false) when no membership row exists OR when the
+// DB lookup failed. The bool collapses both into "false" for
+// backwards compatibility; new callers wanting to distinguish should
+// use CapabilitiesForMemberE.
 func CapabilitiesForMember(ctx context.Context, db *sql.DB, workspaceID, userID string) (map[string]struct{}, string, bool) {
 	caps, role, _, ok := CapabilitiesForMemberE(ctx, db, workspaceID, userID)
 	return caps, role, ok
@@ -222,6 +224,13 @@ func CapabilitiesForMemberE(ctx context.Context, db *sql.DB, workspaceID, userID
 	return caps, role, nil, true
 }
 
+// auditRoleNonMember is the role literal recorded in audit logs when
+// the deny reason is "caller has no membership row in the workspace".
+// Distinct from empty so an operator scanning the log can tell the
+// non-member case apart from a real role check (and from a future
+// audit-emit bug that drops the role field).
+const auditRoleNonMember = "non-member"
+
 // requireCapabilityOrForbid is the capability-gate variant of
 // requireRoleOrForbid. Returns true on grant so the caller can
 // early-return on false:
@@ -238,10 +247,13 @@ func CapabilitiesForMemberE(ctx context.Context, db *sql.DB, workspaceID, userID
 //     the authoritative gate for that path. This branch is what
 //     keeps the sidecar-vouched / X-Caller-User-Id-absent path
 //     working — never wrong-deny a legit autonomous agent.
-//   - membership row missing: deny + audit (caller pretended to be
-//     a member of a workspace they aren't in).
-//   - capability not granted: deny + audit, action recorded for the
-//     SIEM trail.
+//   - DB error during lookup: 500 + log. NOT 403 — transient
+//     SQLITE_BUSY masquerading as "Forbidden" is the bug that
+//     drove the E-variant lookup.
+//   - membership row missing: 403 + audit with role="non-member"
+//     (distinct literal so the log line isn't ambiguous about
+//     whether the role field was simply unset).
+//   - capability not granted: 403 + audit, role recorded.
 //   - capability granted: true (cached for next 30 s).
 //
 // Audit emit matches replyForbidden — same (subject_user_id, role,
@@ -262,19 +274,34 @@ func requireCapabilityOrForbid(
 	if callerUserID == "" {
 		return true
 	}
-	caps, role, ok := CapabilitiesForMember(r.Context(), db, workspaceID, callerUserID)
+	caps, role, err, ok := CapabilitiesForMemberE(r.Context(), db, workspaceID, callerUserID)
+	if err != nil {
+		// Surface the failure so the caller can see it's
+		// infrastructure, not a permission deny. We don't expose
+		// the SQL error to the wire — operators read /var/log.
+		if logger != nil {
+			logger.Warn("rbac: capability lookup failed",
+				"user_id", callerUserID,
+				"workspace_id", workspaceID,
+				"action", action,
+				"resource", resource,
+				"error", err.Error(),
+			)
+		}
+		replyError(w, http.StatusInternalServerError, "Internal server error")
+		return false
+	}
 	if !ok {
 		// No membership row — caller has no business in this
-		// workspace at all. Audit as a role-level deny rather than
-		// a capability deny because the absence of membership is
-		// the underlying reason; capability would be misleading.
-		replyForbidden(w, logger, callerUserID, "", action, resource)
+		// workspace at all. Audit with the non-member role literal
+		// so the log line is unambiguous.
+		replyForbidden(w, logger, callerUserID, auditRoleNonMember, action, resource)
 		return false
 	}
 	if HasCapability(caps, capability) {
 		return true
 	}
-	// Capability missing — audit with the role so the operator
+	// Capability missing — audit with the real role so the operator
 	// reviewing logs can decide between "grant capability" and
 	// "promote role".
 	replyForbidden(w, logger, callerUserID, role, action, resource)

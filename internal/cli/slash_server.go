@@ -112,13 +112,12 @@ func LoadServerSlashCommands(ctx context.Context, repl *REPL, client SlashHTTPCl
 // it through explicitly rather than reaching for os.Stdout so
 // embedded REPLs (test, future TUI host) capture the success line
 // in their own buffer instead of leaking it to the process stdout.
-// (CodeRabbit CR-7.)
 func buildSlashHandler(cmd ServerSlashCommand, client SlashHTTPClient, out io.Writer) REPLHandler {
 	if out == nil {
 		// Defence: never panic on a nil Out (some test harnesses
 		// build REPLs without setting it). Fall back to os.Stdout
 		// so the operator at least sees the confirmation; this is
-		// the pre-CR-7 default behaviour for completeness.
+		// the previously default behaviour for completeness.
 		out = os.Stdout
 	}
 	return func(ctx context.Context, args []string) (bool, error) {
@@ -175,12 +174,12 @@ var keyValuePattern = regexp.MustCompile(`([a-zA-Z_][a-zA-Z0-9_]*)=(?:"([^"]*)"|
 // the REPL's strings.Fields split breaks `key="a b"` into ["key=\"a",
 // "b\""] — losing the structure we need.
 //
-// Rejection rules (CodeRabbit CR-8):
+// Rejection rules:
 //
 //   - At least one key=value match is required when args are
 //     non-blank. A line that's all garbage (no = signs) errors.
 //   - Bytes that didn't match any kv pair are an error too. The
-//     pre-CR-8 implementation silently dropped them, which hid
+//     previously implementation silently dropped them, which hid
 //     typos like `crons=0 7 * * MON` (missing `e` → no match → no
 //     warning, server gets `cron_expr=""` and 400s confusingly).
 //     Now we sum the matched-span lengths and compare against the
@@ -249,8 +248,8 @@ func slashCommandEndpoint(id, workspaceID string) (string, error) {
 		return "/api/v1/credentials?workspace_id=" + url.QueryEscape(workspaceID), nil
 	case "issue":
 		return "/api/v1/issues?workspace_id=" + url.QueryEscape(workspaceID), nil
-	case "remember":
-		return "/api/v1/memory/write?workspace_id=" + url.QueryEscape(workspaceID), nil
+	// "remember" intentionally absent — see catalog note in
+	// slash_commands_handler.go.
 	default:
 		return "", fmt.Errorf("unknown slash command id: %s", id)
 	}
@@ -259,7 +258,11 @@ func slashCommandEndpoint(id, workspaceID string) (string, error) {
 // slashCommandPayload reshapes the flat key=value map into the body
 // shape the matching handler expects. Mirror of buildPayload in
 // slash-action-modal.tsx.
-func slashCommandPayload(id string, values map[string]string) any {
+//
+// Return type is map[string]any (not bare any) so callers don't
+// type-assert. JSON marshalling treats both shapes identically; the
+// typed return surfaces shape mistakes at compile time.
+func slashCommandPayload(id string, values map[string]string) map[string]any {
 	switch id {
 	case "routine":
 		return map[string]any{
@@ -283,11 +286,6 @@ func slashCommandPayload(id string, values map[string]string) any {
 			"title":       values["title"],
 			"description": values["description"],
 			"priority":    values["priority"],
-		}
-	case "remember":
-		return map[string]any{
-			"content": values["content"],
-			"scope":   values["scope"],
 		}
 	default:
 		// Fall through: pass the raw values map. The server will

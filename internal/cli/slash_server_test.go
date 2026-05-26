@@ -51,7 +51,7 @@ func TestParseKeyValueArgs(t *testing.T) {
 			args:    []string{"hello", "world"},
 			wantErr: true,
 		},
-		// CodeRabbit CR-8: partial-parse rejection. The pre-fix
+		// partial-parse rejection. The pre-fix
 		// regex silently dropped leftover tokens; now they error.
 		{
 			name:    "kv with leading garbage",
@@ -70,7 +70,7 @@ func TestParseKeyValueArgs(t *testing.T) {
 		},
 		// Typo case from the docstring example: missing "e" turns
 		// the cron key into garbage, dropping the entire spec value.
-		// Pre-CR-8 this silently succeeded with values={"crons":"0"}.
+		// previously this silently succeeded with values={"crons":"0"}.
 		{
 			name:    "typo in key drops value silently (now rejected)",
 			args:    []string{"crons=0", "7", "*", "*", "MON"},
@@ -102,7 +102,8 @@ func TestSlashCommandEndpoint(t *testing.T) {
 		{"skill", "/api/v1/workspaces/ws-1/skills/generate"},
 		{"credential", "/api/v1/credentials?workspace_id=ws-1"},
 		{"issue", "/api/v1/issues?workspace_id=ws-1"},
-		{"remember", "/api/v1/memory/write?workspace_id=ws-1"},
+		// "remember" intentionally absent — backend route doesn't
+		// exist yet (see slash_commands_handler.go catalog note).
 	}
 	for _, tc := range cases {
 		t.Run(tc.id, func(t *testing.T) {
@@ -130,7 +131,7 @@ func TestSlashCommandPayload(t *testing.T) {
 	t.Run("routine", func(t *testing.T) {
 		got := slashCommandPayload("routine", map[string]string{
 			"name": "Weekly", "cron": "0 7 * * MON", "timezone": "UTC",
-		}).(map[string]any)
+		})
 		if got["cron_expr"] != "0 7 * * MON" {
 			t.Errorf("cron→cron_expr mapping broken: %v", got)
 		}
@@ -138,7 +139,7 @@ func TestSlashCommandPayload(t *testing.T) {
 	t.Run("skill", func(t *testing.T) {
 		got := slashCommandPayload("skill", map[string]string{
 			"slug": "x", "prompt": "Use when …",
-		}).(map[string]any)
+		})
 		if got["slug"] != "x" || got["prompt"] != "Use when …" {
 			t.Errorf("skill mapping broken: %v", got)
 		}
@@ -146,7 +147,7 @@ func TestSlashCommandPayload(t *testing.T) {
 	t.Run("unknown id passes raw values", func(t *testing.T) {
 		got := slashCommandPayload("future-command", map[string]string{
 			"x": "1", "y": "2",
-		}).(map[string]any)
+		})
 		if got["x"] != "1" || got["y"] != "2" {
 			t.Errorf("fall-through mapping dropped fields: %v", got)
 		}

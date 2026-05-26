@@ -365,8 +365,10 @@ function endpointForCommand(id: string, workspaceId: string): string {
       // follow-up; for now the modal pre-validates by hitting the
       // workspace-default crew via a helper.
       return `/api/v1/issues?workspace_id=${ws}`
-    case "remember":
-      return `/api/v1/memory/write?workspace_id=${ws}`
+    // "remember" intentionally absent — see catalog note in
+    // internal/api/slash_commands_handler.go. The backend route
+    // doesn't exist yet; the server-side catalog omits the entry
+    // so this branch is unreachable from the live UI.
     default:
       // Defence: never POST to an unknown endpoint. A new slash
       // action from the server we don't know how to dispatch
@@ -400,8 +402,6 @@ function buildPayload(id: string, values: Record<string, string>): unknown {
         description: values.description,
         priority: values.priority || "none",
       }
-    case "remember":
-      return { content: values.content, scope: values.scope || "agent" }
     default:
       return values
   }

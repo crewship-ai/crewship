@@ -43,11 +43,82 @@ type capabilitiesGetResponse struct {
 	Capabilities []string `json:"capabilities"`
 }
 
+// capabilitiesBulkResponse is the shape returned by the workspace-
+// wide bulk endpoint. One entry per workspace_members row. Order
+// stable (membership.created_at ASC) so the Members grid renders
+// the same row order between page loads.
+type capabilitiesBulkResponse struct {
+	Members []capabilitiesGetResponse `json:"members"`
+}
+
 type capabilitiesPatchRequest struct {
 	Set    []string `json:"set,omitempty"`
 	Grant  []string `json:"grant,omitempty"`
 	Revoke []string `json:"revoke,omitempty"`
 	Preset string   `json:"preset,omitempty"`
+}
+
+// ListMembersCapabilities is the bulk variant — one SELECT, one
+// response, all members of the workspace. Drives the Members
+// capability grid in a single round-trip instead of the N+1 fan-out
+// the per-member endpoint would force (a 500-member workspace = 500
+// HTTP calls + 500 admin role checks).
+//
+// Admin-only, mirrors GetMemberCapabilities. resolveCapabilitiesFromRow
+// runs per row so the same edge-case semantics (explicit-empty,
+// malformed, role fallback) apply to both surfaces.
+//
+// Order is stable: ORDER BY wm.created_at ASC so the dashboard renders
+// rows in the same order across page loads.
+func (h *WorkspaceHandler) ListMembersCapabilities(w http.ResponseWriter, r *http.Request) {
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	role := RoleFromContext(r.Context())
+	caller := UserFromContext(r.Context())
+
+	callerID := ""
+	if caller != nil {
+		callerID = caller.ID
+	}
+	if !requireRoleOrForbid(w, h.logger, callerID, role,
+		"capability.read", "workspace:"+workspaceID, "manage") {
+		return
+	}
+
+	rows, err := h.db.QueryContext(r.Context(), `
+		SELECT user_id, role, capabilities
+		FROM workspace_members
+		WHERE workspace_id = ?
+		ORDER BY created_at ASC
+	`, workspaceID)
+	if err != nil {
+		h.logger.Error("list members capabilities", "error", err, "workspace_id", workspaceID)
+		replyError(w, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	defer rows.Close()
+
+	out := capabilitiesBulkResponse{Members: []capabilitiesGetResponse{}}
+	for rows.Next() {
+		var userID, memberRole string
+		var capsJSON sql.NullString
+		if err := rows.Scan(&userID, &memberRole, &capsJSON); err != nil {
+			h.logger.Error("scan member row", "error", err)
+			replyError(w, http.StatusInternalServerError, "Internal server error")
+			return
+		}
+		caps := resolveCapabilitiesFromRow(capsJSON, memberRole)
+		out.Members = append(out.Members, capabilitiesGetResponse{
+			UserID:       userID,
+			Role:         memberRole,
+			Capabilities: capsAsSortedSlice(caps),
+		})
+	}
+	if err := rows.Err(); err != nil {
+		h.logger.Error("rows iteration", "error", err)
+		replyError(w, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // GetMemberCapabilities returns the parsed capability set + role.
@@ -161,7 +232,7 @@ func (h *WorkspaceHandler) PatchMemberCapabilities(w http.ResponseWriter, r *htt
 		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
-	// CodeRabbit CR-9: between the load (above) and the UPDATE, the
+	// between the load (above) and the UPDATE, the
 	// member row can have been deleted by a concurrent RemoveMember
 	// call. SQL UPDATE on a no-longer-existing row returns nil error
 	// but 0 rows affected; without this check we'd 200 + emit an
@@ -204,27 +275,14 @@ func (h *WorkspaceHandler) PatchMemberCapabilities(w http.ResponseWriter, r *htt
 // and role for one membership row. Returns empty role when no row
 // exists so the caller can 404 distinctly from a member with empty
 // caps.
+//
+// Thin wrapper around loadCapabilitiesForMember — both used to have
+// independent SELECT + resolve logic that diverged on the
+// explicit-empty edge case (read API returned role bundle, runtime
+// gate returned chat-only). Sharing the implementation guarantees
+// the read API shows exactly what the runtime will enforce.
 func loadMemberCapabilitiesByMemberID(ctx context.Context, db *sql.DB, workspaceID, userID string) (map[string]struct{}, string, error) {
-	var capsJSON sql.NullString
-	var role string
-	err := db.QueryRowContext(ctx, `
-		SELECT capabilities, role
-		FROM workspace_members
-		WHERE workspace_id = ? AND user_id = ?
-	`, workspaceID, userID).Scan(&capsJSON, &role)
-	if err == sql.ErrNoRows {
-		return nil, "", nil
-	}
-	if err != nil {
-		return nil, "", err
-	}
-	if capsJSON.Valid {
-		caps := ParseCapabilities(capsJSON.String)
-		if caps != nil {
-			return caps, role, nil
-		}
-	}
-	return FallbackCapabilitiesForRole(role), role, nil
+	return loadCapabilitiesForMember(ctx, db, workspaceID, userID)
 }
 
 // applyCapabilityMutation interprets a patch body and returns the

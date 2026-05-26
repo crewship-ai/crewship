@@ -475,3 +475,18 @@ PRDs:
   remains the extension point for power users; no shared catalog.
 - **Capability inheritance across workspaces.** Each membership row
   has its own set; no cross-workspace propagation.
+- **HA / multi-process cache invalidation.** `defaultCapabilityCache`
+  in `capabilities_check.go` is a process singleton with 30 s TTL.
+  `InvalidateCapabilityCache` only reaches the local process — a
+  second backend instance behind a load balancer continues serving
+  the pre-mutation set until its own TTL expires. Self-host single-
+  binary deployments (today) are unaffected. The upgrade path when
+  SaaS / HA arrives is a Redis-backed cache with pub/sub invalidate:
+  same call site, same TTL semantics, different storage.
+- **HMAC-signed `X-Caller-User-Id`.** The sidecar at 127.0.0.1:9119
+  inside the agent container trusts whatever sets the header. A
+  compromised agent process could forge another user's id. Mitigated
+  operationally (loopback-only listener, sidecar-vouched routes
+  separate from autonomous routes); fully closed via HMAC-signed
+  header in a follow-up. See `coordinator.go:proxyToAPIFiltered`
+  "SECURITY / TRUST BOUNDARY" comment for the full threat model.

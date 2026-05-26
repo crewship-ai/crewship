@@ -25,8 +25,8 @@ export interface SlashFormField {
  * `SlashCommand` in this file because slash-palette.tsx already
  * exports a different `SlashCommand` shape (client-side palette
  * row with `icon: ComponentType`, `group`, `run`); two unrelated
- * types under the same name made imports ambiguous. (CodeRabbit
- * nitpick.) The wire shape is intentionally narrower than a
+ * types under the same name made imports ambiguous. The wire shape
+ * is intentionally narrower than a
  * full UI row — the icon string is resolved to a component at
  * render time by the consumer.
  */

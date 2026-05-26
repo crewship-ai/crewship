@@ -48,9 +48,14 @@ func TestSlashCommandsList_FiltersByCapability(t *testing.T) {
 			wantIDs: []string{"routine"},
 		},
 		{
-			name:    "admin sees full catalog",
-			userID:  adminFull,
-			wantIDs: []string{"routine", "issue", "remember", "skill", "credential"},
+			name:   "admin sees full catalog",
+			userID: adminFull,
+			// "remember" intentionally absent — see catalog note in
+			// slash_commands_handler.go. Public memory-write endpoint
+			// lands in a follow-up; the capability constant + role
+			// bundles stay so the follow-up only needs to add the
+			// catalog entry.
+			wantIDs: []string{"routine", "issue", "skill", "credential"},
 		},
 	}
 	for _, tc := range tests {

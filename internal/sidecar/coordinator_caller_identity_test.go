@@ -50,7 +50,7 @@ func TestProxyToAPI_PropagatesCallerUserID(t *testing.T) {
 // them — autonomous-agent path must look identical to pre-PR
 // behaviour so the backend autonomy gate runs unchanged.
 //
-// CodeRabbit CR-11: assert upstreamReached so a future regression
+// assert upstreamReached so a future regression
 // that short-circuits proxyToAPI before reaching upstream doesn't
 // let the header-absence assertion pass vacuously.
 func TestProxyToAPI_OmitsHeadersWhenAbsent(t *testing.T) {

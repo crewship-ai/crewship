@@ -3,8 +3,10 @@ package api
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -16,6 +18,26 @@ import (
 // something with a Warn method.
 func silentLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+// captureLoggerSink records each Warn call into the provided slice
+// so a test can assert what landed in audit. Minimal — we don't
+// reach for testify or buffer-the-formatted-line because the
+// assertions in this file just check for substring presence.
+type captureLoggerSink struct {
+	out *[]string
+}
+
+func (c *captureLoggerSink) Warn(msg string, args ...any) {
+	parts := []string{msg}
+	for _, a := range args {
+		parts = append(parts, fmt.Sprintf("%v", a))
+	}
+	*c.out = append(*c.out, strings.Join(parts, " "))
+}
+
+func captureLogger(into *[]string) *captureLoggerSink {
+	return &captureLoggerSink{out: into}
 }
 
 // seedMemberWithCapabilities inserts a workspace_members row with an
@@ -129,7 +151,7 @@ func TestRequireCapability_NoMembershipRow(t *testing.T) {
 }
 
 // TestRequireCapability_ExplicitEmptyDoesNotFallBackToRole is the
-// CodeRabbit CR-1 regression. When operator explicitly stores an
+// regression test. When operator explicitly stores an
 // empty array, malformed JSON, or only future-unknown capability
 // strings, the runtime must NOT silently restore the role-derived
 // bundle — that would resurrect privileges the operator just
@@ -173,11 +195,66 @@ func TestRequireCapability_ExplicitEmptyDoesNotFallBackToRole(t *testing.T) {
 	}
 }
 
-// TestCapabilitiesForMemberE_PropagatesDBError is the CodeRabbit
-// CR-2 regression. A real DB error (closed connection, query
-// failure) must surface as a non-nil err — the caller routes it
-// as 500, not 403, so transient SQLITE_BUSY doesn't masquerade as
-// "you're not a member".
+// TestRequireCapability_DBErrorReturns500NotForbidden asserts the
+// enforcement path wired through CapabilitiesForMemberE — a closed
+// DB during the lookup must surface as 500, never 403. The
+// pre-fix code path called the non-E variant and silently 403'd
+// on SQLITE_BUSY, making infrastructure failures look like
+// permission denies.
+func TestRequireCapability_DBErrorReturns500NotForbidden(t *testing.T) {
+	db := setupTestDB(t)
+	ownerID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, ownerID)
+	InvalidateCapabilityCache(wsID, ownerID)
+	_ = db.Close()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("POST", "/x", nil)
+	got := requireCapabilityOrForbid(w, r, silentLogger(), db,
+		wsID, ownerID, CapabilityRoutineCreate, "routine.create", "x")
+	if got {
+		t.Fatal("expected deny on DB error")
+	}
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500 (DB error must NOT masquerade as 403)", w.Code)
+	}
+}
+
+// TestRequireCapability_NonMemberLogsDistinctRole asserts the
+// non-member deny path uses the auditRoleNonMember literal so log
+// scanners can tell the case apart from an unset role field.
+func TestRequireCapability_NonMemberLogsDistinctRole(t *testing.T) {
+	db := setupTestDB(t)
+	ownerID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, ownerID)
+
+	if _, err := db.Exec(`INSERT INTO users (id, email, full_name) VALUES ('outsider2','o2@x','O')`); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	InvalidateCapabilityCache(wsID, "outsider2")
+
+	var captured []string
+	logger := captureLogger(&captured)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("POST", "/x", nil)
+	got := requireCapabilityOrForbid(w, r, logger, db,
+		wsID, "outsider2", CapabilityChat, "test.action", "test:res")
+	if got {
+		t.Fatal("expected deny for non-member")
+	}
+	if w.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", w.Code)
+	}
+	joined := strings.Join(captured, " | ")
+	if !strings.Contains(joined, "non-member") {
+		t.Errorf("audit log should contain 'non-member' literal, got: %s", joined)
+	}
+}
+
+// TestCapabilitiesForMemberE_PropagatesDBError covers the E-variant
+// contract: a real DB error (closed connection, query failure) must
+// surface as a non-nil err — the caller routes it as 500, not 403,
+// so transient SQLITE_BUSY doesn't masquerade as "you're not a member".
 func TestCapabilitiesForMemberE_PropagatesDBError(t *testing.T) {
 	db := setupTestDB(t)
 	ownerID := seedTestUser(t, db)
