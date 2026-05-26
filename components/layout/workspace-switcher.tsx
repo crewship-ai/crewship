@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Check, ChevronDown, Plus } from "lucide-react"
 import { toast } from "sonner"
 import { useWorkspace, type WorkspaceData } from "@/hooks/use-workspace"
@@ -154,7 +154,7 @@ function WorkspaceRow({
   )
 }
 
-function CreateWorkspaceDialog({
+export function CreateWorkspaceDialog({
   open,
   onOpenChange,
   onCreated,
@@ -174,6 +174,14 @@ function CreateWorkspaceDialog({
     setSlugTouched(false)
     setSubmitting(false)
   }
+
+  // Clear form when the dialog closes from any source — Cancel button,
+  // Escape, or overlay click. The Dialog's own onOpenChange handles
+  // Esc/overlay, but Cancel calls the parent setter directly, which
+  // would otherwise leak stale name/slug into the next open.
+  useEffect(() => {
+    if (!open && !submitting) reset()
+  }, [open, submitting])
 
   function handleNameChange(v: string) {
     setName(v)
@@ -225,10 +233,7 @@ function CreateWorkspaceDialog({
     <Dialog
       open={open}
       onOpenChange={(v) => {
-        if (!submitting) {
-          if (!v) reset()
-          onOpenChange(v)
-        }
+        if (!submitting) onOpenChange(v)
       }}
     >
       <DialogContent className="max-w-md">
