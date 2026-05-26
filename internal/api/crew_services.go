@@ -121,4 +121,3 @@ func validateServicesJSON(body string) error {
 	}
 	return nil
 }
-

@@ -189,4 +189,3 @@ func StaticFileHandler(webFS fs.FS) http.Handler {
 		serveFile(w, "index.html")
 	})
 }
-

@@ -57,4 +57,3 @@ func TestValidateServicesJSON_AcceptsEmpty(t *testing.T) {
 		t.Errorf("whitespace-only should be accepted, got %v", err)
 	}
 }
-
