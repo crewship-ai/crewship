@@ -44,19 +44,21 @@ func TestBackupTableIntent_NoDuplicatesAndAllValid(t *testing.T) {
 	}
 }
 
-// TestBackupTableIntent_SortedIncludedTables exercises IncludedTables
-// via sort to lock the contract that the returned list, while not
-// sorted by the function itself, contains exactly the IntentInclude
-// names from the source map.
+// TestBackupTableIntent_SortedIncludedTables pins the contract that
+// IncludedTables() returns its result already sorted alphabetically.
+// Re-sorting `got` here would mask a regression where the function
+// stops sorting; we check sort-order directly instead.
 func TestBackupTableIntent_SortedIncludedTables(t *testing.T) {
 	got := IncludedTables()
+	if !sort.StringsAreSorted(got) {
+		t.Fatalf("IncludedTables must return sorted output, got %v", got)
+	}
 	want := []string{}
 	for n, i := range BackupTableIntent {
 		if i == IntentInclude {
 			want = append(want, n)
 		}
 	}
-	sort.Strings(got)
 	sort.Strings(want)
 	if len(got) != len(want) {
 		t.Errorf("count drift: IncludedTables=%d, direct filter=%d", len(got), len(want))

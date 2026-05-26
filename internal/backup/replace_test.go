@@ -155,11 +155,15 @@ func TestReplaceWorkspaceContents_WipesBySlugMatch(t *testing.T) {
 	}
 
 	var n int
-	_ = db.QueryRow(`SELECT COUNT(*) FROM workspaces WHERE slug = 'shared-slug'`).Scan(&n)
+	if err := db.QueryRow(`SELECT COUNT(*) FROM workspaces WHERE slug = 'shared-slug'`).Scan(&n); err != nil {
+		t.Fatalf("count workspaces: %v", err)
+	}
 	if n != 0 {
 		t.Errorf("slug-matched workspace should be deleted, %d remain", n)
 	}
-	_ = db.QueryRow(`SELECT COUNT(*) FROM crews WHERE workspace_id = 'ws_target_new'`).Scan(&n)
+	if err := db.QueryRow(`SELECT COUNT(*) FROM crews WHERE workspace_id = 'ws_target_new'`).Scan(&n); err != nil {
+		t.Fatalf("count crews: %v", err)
+	}
 	if n != 0 {
 		t.Errorf("dependent crews should cascade, %d remain", n)
 	}
@@ -228,8 +232,13 @@ func TestResolveDeletionOrder_TopologicalOnFKEdges(t *testing.T) {
 	for i, st := range out {
 		pos[st.Name] = i
 	}
+	agentsPos, okAgents := pos["agents"]
+	crewsPos, okCrews := pos["crews"]
+	if !okAgents || !okCrews {
+		t.Fatalf("expected both agents and crews in deletion order, got %v", names(out))
+	}
 	// agents FKs to crews → agents must come before crews.
-	if pos["agents"] > pos["crews"] {
+	if agentsPos > crewsPos {
 		t.Errorf("agents should be deleted before crews; got order %v", names(out))
 	}
 }

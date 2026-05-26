@@ -482,6 +482,15 @@ func allowRestore(ctx context.Context, db *sql.DB, bundlePath, callerWorkspaceID
 		if err == nil && callerSlug != "" && callerSlug == bundleSlug {
 			return true, "", nil
 		}
+		// Unexpected probe failures must surface as 500, not 403 —
+		// a deny here would mask a server-side issue and confuse
+		// the operator into thinking the bundle is wrong when it's
+		// actually a DB hiccup. sql.ErrNoRows is the only benign
+		// case (caller's workspaceID points to a deleted row) and
+		// falls through to deny normally.
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return false, "", fmt.Errorf("lookup caller workspace slug: %w", err)
+		}
 	}
 	return false, fmt.Sprintf(
 		"bundle workspace %q (slug %q) is not bound to your current workspace; "+
