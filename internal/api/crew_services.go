@@ -101,9 +101,10 @@ func validateServicesJSON(body string) error {
 			}
 			// Parse-validate each duration string up front so a
 			// typo ("5sec" instead of "5s") is reported at write
-			// time. Previously servicesFromJSON silently defaulted
-			// any unparseable duration to its hardcoded default,
-			// hiding config drift behind a happy-looking runtime.
+			// time. Without this, chatbridge.parseDuration silently
+			// defaults any unparseable value to its hardcoded
+			// fallback, hiding config drift behind a happy-looking
+			// runtime.
 			for fieldName, value := range map[string]string{
 				"interval":     s.Healthcheck.Interval,
 				"timeout":      s.Healthcheck.Timeout,
