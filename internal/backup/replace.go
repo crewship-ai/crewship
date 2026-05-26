@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"fmt"
 	"sort"
-	"strings"
 )
 
 // replace.go — implementation of `--replace` restore mode.
@@ -107,15 +106,20 @@ func ReplaceWorkspaceContents(ctx context.Context, tx *sql.Tx, bundleWorkspaceID
 	// Finally, delete the workspace row itself. Done last because
 	// every scoped table FKs into it (CASCADE or NO ACTION) and a
 	// workspaces DELETE before children would violate FKs.
-	placeholders := make([]string, len(targetIDs))
-	ids := make([]any, len(targetIDs))
+	//
+	// Uses equalityOrIN (discovery.go) so the predicate stays
+	// indexable on the single-id case and matches the pattern every
+	// other DELETE in the loop above uses via WorkspaceScopeFilterIDs.
+	// Inlining the placeholder build here drifted from that
+	// canonical shape — CodeRabbit flagged the inconsistency as a
+	// maintenance hazard.
+	args := make([]any, len(targetIDs))
 	for i, id := range targetIDs {
-		placeholders[i] = "?"
-		ids[i] = id
+		args[i] = id
 	}
 	res, err := tx.ExecContext(ctx,
-		"DELETE FROM workspaces WHERE id IN ("+strings.Join(placeholders, ",")+")",
-		ids...,
+		"DELETE FROM workspaces WHERE "+equalityOrIN(quoteIdent("id"), len(targetIDs)),
+		args...,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("backup: replace delete workspaces: %w", err)

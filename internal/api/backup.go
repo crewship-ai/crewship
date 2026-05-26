@@ -453,9 +453,13 @@ func allowRestore(ctx context.Context, db *sql.DB, bundlePath, callerWorkspaceID
 	}
 	// Need the bundle's workspace identity for paths 1 and 2.
 	m, err := backup.Inspect(ctx, bundlePath)
-	if err != nil {
+	if err != nil || m == nil {
 		// Defer the real error to the restore flow which gives a
-		// better message; here we just deny.
+		// better message; here we just deny. Guard against
+		// (nil, nil) returns explicitly — current backup.Inspect
+		// always pairs nil with an error, but a defensive nil
+		// check is cheap and prevents a future contract change
+		// from triggering a nil-pointer panic on the next line.
 		return false, "could not read bundle manifest for authorization", nil
 	}
 	if m.Contents.Workspace == nil {
@@ -466,12 +470,7 @@ func allowRestore(ctx context.Context, db *sql.DB, bundlePath, callerWorkspaceID
 	}
 	bundleID := m.Contents.Workspace.ID
 	bundleSlug := m.Contents.Workspace.Slug
-	if callerWorkspaceID == "" {
-		// Caller has no current workspace context (e.g. just
-		// bootstrapped) — fall through to slug-only match below
-		// so DR via API still works for the operator who just
-		// created the instance owner account.
-	} else {
+	if callerWorkspaceID != "" {
 		// Path 1: ID match.
 		if bundleID == callerWorkspaceID {
 			return true, "", nil
@@ -492,11 +491,12 @@ func allowRestore(ctx context.Context, db *sql.DB, bundlePath, callerWorkspaceID
 			return false, "", fmt.Errorf("lookup caller workspace slug: %w", err)
 		}
 	}
-	return false, fmt.Sprintf(
-		"bundle workspace %q (slug %q) is not bound to your current workspace; "+
-			"restore on the source instance, or use a fresh instance for cross-tenant DR",
-		bundleID, bundleSlug,
-	), nil
+	// Generic deny — deliberately does NOT echo bundleID / bundleSlug
+	// back to the client. Returning those values would let an
+	// unauthenticated probe enumerate workspace slugs by trying paths.
+	// The real bundle identity stays in the server-side log written by
+	// the caller (Restore handler logs the workspace_id at Warn level).
+	return false, "bundle is not bound to your current workspace; restore on the source instance, or use a fresh instance for cross-tenant DR", nil
 }
 
 // Status handles GET /api/v1/admin/backups/status. Reports whether an
