@@ -14,7 +14,6 @@ import {
   PanelLeftClose,
   Pin,
   MousePointer2,
-  ChevronDown,
   Users,
   BookOpen,
   ScrollText,
@@ -24,14 +23,7 @@ import {
 import { useInboxUnreadCount } from "@/hooks/use-inbox"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useAbilities } from "@/hooks/use-abilities"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
+import { WorkspaceSwitcher } from "@/components/layout/workspace-switcher"
 import {
   Sidebar,
   SidebarContent,
@@ -95,42 +87,8 @@ export function AppSidebar() {
 
   return (
     <Sidebar variant="sidebar" collapsible="icon">
-      {/* Workspace switcher (replaces Crewship logo) */}
       <SidebarHeader className="p-2">
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <SidebarMenuButton size="lg" tooltip="Unify Technology">
-                  <div className="flex h-6 w-6 items-center justify-center rounded-md bg-primary text-[9px] font-bold text-primary-foreground shrink-0">
-                    U
-                  </div>
-                  <div className="grid flex-1 text-left text-sm leading-tight group-data-[collapsible=icon]:hidden">
-                    <span className="truncate font-semibold text-[13px]">Unify Technology</span>
-                    <span className="truncate text-[10px] text-muted-foreground">3 members</span>
-                  </div>
-                  <ChevronDown className="h-3 w-3 text-muted-foreground shrink-0 group-data-[collapsible=icon]:hidden" />
-                </SidebarMenuButton>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" side="bottom" className="w-72">
-                <DropdownMenuLabel className="text-micro uppercase tracking-wider text-muted-foreground font-medium">
-                  Workspaces
-                </DropdownMenuLabel>
-                <DropdownMenuItem className="flex items-center gap-3 py-2 bg-primary/5">
-                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary text-micro font-bold text-primary-foreground shrink-0">
-                    U
-                  </div>
-                  <div className="min-w-0">
-                    <div className="text-xs font-medium">Unify Technology</div>
-                    <div className="text-micro text-muted-foreground">3 members</div>
-                  </div>
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem className="text-xs">Create workspace</DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </SidebarMenuItem>
-        </SidebarMenu>
+        <WorkspaceSwitcher />
       </SidebarHeader>
 
       <SidebarContent>
