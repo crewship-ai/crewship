@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"mime"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strings"
 )
@@ -189,9 +188,4 @@ func StaticFileHandler(webFS fs.FS) http.Handler {
 		slog.Debug("SPA fallback", "path", r.URL.Path)
 		serveFile(w, "index.html")
 	})
-}
-
-// StaticFileHandlerFromDir returns a StaticFileHandler backed by the given directory path.
-func StaticFileHandlerFromDir(dir string) http.Handler {
-	return StaticFileHandler(os.DirFS(dir))
 }

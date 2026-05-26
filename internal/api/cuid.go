@@ -37,9 +37,3 @@ func generateCUID() string {
 	out = hex.AppendEncode(out, b)
 	return string(out)
 }
-
-// encodeBase36 remains a thin wrapper around strconv.FormatInt so existing
-// tests keep exercising the public contract.
-func encodeBase36(n int64) string {
-	return strconv.FormatInt(n, 36)
-}
