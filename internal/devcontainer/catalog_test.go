@@ -47,7 +47,7 @@ func TestCatalogHasMinimumEntries(t *testing.T) {
 }
 
 func TestFilterCatalog_FallbackByName(t *testing.T) {
-	results := FilterCatalog(FallbackCatalog,"python")
+	results := FilterCatalog(FallbackCatalog, "python")
 	if len(results) == 0 {
 		t.Fatal("expected at least one result for 'python'")
 	}
@@ -64,16 +64,16 @@ func TestFilterCatalog_FallbackByName(t *testing.T) {
 }
 
 func TestFilterCatalog_FallbackByCategory(t *testing.T) {
-	results := FilterCatalog(FallbackCatalog,"cloud")
+	results := FilterCatalog(FallbackCatalog, "cloud")
 	if len(results) == 0 {
 		t.Fatal("expected results for category 'cloud'")
 	}
 }
 
 func TestFilterCatalog_CaseInsensitive(t *testing.T) {
-	lower := FilterCatalog(FallbackCatalog,"node")
-	upper := FilterCatalog(FallbackCatalog,"NODE")
-	mixed := FilterCatalog(FallbackCatalog,"Node")
+	lower := FilterCatalog(FallbackCatalog, "node")
+	upper := FilterCatalog(FallbackCatalog, "NODE")
+	mixed := FilterCatalog(FallbackCatalog, "Node")
 
 	if len(lower) == 0 {
 		t.Fatal("expected results for 'node'")
@@ -85,14 +85,14 @@ func TestFilterCatalog_CaseInsensitive(t *testing.T) {
 }
 
 func TestFilterCatalog_FallbackNoMatch(t *testing.T) {
-	results := FilterCatalog(FallbackCatalog,"zzz_nonexistent_zzz")
+	results := FilterCatalog(FallbackCatalog, "zzz_nonexistent_zzz")
 	if len(results) != 0 {
 		t.Errorf("expected empty results for nonsense query, got %d", len(results))
 	}
 }
 
 func TestFilterCatalog_FallbackEmptyQuery(t *testing.T) {
-	results := FilterCatalog(FallbackCatalog,"")
+	results := FilterCatalog(FallbackCatalog, "")
 	if len(results) != len(FallbackCatalog) {
 		t.Errorf("empty query should return all entries: got %d, want %d", len(results), len(FallbackCatalog))
 	}

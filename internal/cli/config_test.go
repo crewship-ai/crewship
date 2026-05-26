@@ -172,7 +172,10 @@ func TestConfigFilePermissions(t *testing.T) {
 	configPath := filepath.Join(tmpDir, "cli-config.yaml")
 
 	cfg := &CLIConfig{Token: "secret-token"}
-	data, _ := yaml.Marshal(cfg)
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
 	if err := os.WriteFile(configPath, data, 0600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
