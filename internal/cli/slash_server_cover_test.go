@@ -374,4 +374,43 @@ func TestSlashCommandPayload_AllIDs(t *testing.T) {
 	// — the backend route doesn't exist yet (see
 	// slash_commands_handler.go catalog note). It'll come back when
 	// the public memory write endpoint lands.
+
+	// UI-parity defaults: the CLI used to ship empty strings for
+	// optional fields when the user omitted them. The dashboard
+	// applies "UTC" / "SECRET" / "none" defaults via form_schema,
+	// so identical commands behaved subtly differently between the
+	// REPL and the UI. slashCommandPayload now applies the same
+	// fallbacks inline.
+	t.Run("routine timezone defaults to UTC", func(t *testing.T) {
+		got := slashCommandPayload("routine", map[string]string{
+			"name": "Daily", "cron": "0 7 * * *", "timezone": "",
+		})
+		if got["timezone"] != "UTC" {
+			t.Errorf("timezone default lost: %v", got)
+		}
+	})
+	t.Run("routine timezone explicit override wins", func(t *testing.T) {
+		got := slashCommandPayload("routine", map[string]string{
+			"name": "Daily", "cron": "0 7 * * *", "timezone": "Europe/Prague",
+		})
+		if got["timezone"] != "Europe/Prague" {
+			t.Errorf("explicit timezone overridden: %v", got)
+		}
+	})
+	t.Run("credential type defaults to SECRET", func(t *testing.T) {
+		got := slashCommandPayload("credential", map[string]string{
+			"name": "Test", "value": "v",
+		})
+		if got["type"] != "SECRET" {
+			t.Errorf("type default lost: %v", got)
+		}
+	})
+	t.Run("issue priority defaults to none", func(t *testing.T) {
+		got := slashCommandPayload("issue", map[string]string{
+			"title": "T",
+		})
+		if got["priority"] != "none" {
+			t.Errorf("priority default lost: %v", got)
+		}
+	})
 }

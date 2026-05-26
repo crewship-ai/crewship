@@ -138,10 +138,14 @@ function Form({
         body: JSON.stringify(buildPayload(command.id, values)),
       })
       if (!res.ok) {
-        const body = await res.text()
-        // 403 from server = capability recheck failed (admin revoked
-        // between palette open and submit). UX nuance deferred per
-        // PRD §3 non-goals — just surface the message.
+        // Log raw body to console for operator debugging; surface
+        // only a status-mapped sanitized message to the user.
+        // Credential endpoint can return plaintext secret material
+        // in validation errors, so the body MUST NOT reach the DOM.
+        const body = await res.text().catch(() => "")
+        if (body) {
+          console.warn(`[slash ${command.id}] server error:`, body)
+        }
         toast.error(humanizeError(res.status, body))
         return
       }
@@ -407,12 +411,31 @@ function buildPayload(id: string, values: Record<string, string>): unknown {
   }
 }
 
-function humanizeError(status: number, body: string): string {
-  if (status === 403) {
-    return "You don't have permission for this action. An admin may have revoked it."
+// humanizeError maps an HTTP status from a slash-action POST onto a
+// UI-safe message. Server response bodies are intentionally NOT
+// echoed — the credential endpoint can include plaintext secret
+// material in validation errors, and the routine / issue endpoints
+// can include SQL fragments / stack traces in their 500 paths. The
+// raw text goes to console.warn for operator debugging; the toast
+// gets the status-mapped human message only.
+//
+// `body` is no longer consumed — kept in the signature for caller
+// compatibility but the modal now logs it before calling this fn.
+function humanizeError(status: number, _body: string): string {
+  switch (status) {
+    case 400:
+      return "The form values were rejected by the server."
+    case 401:
+      return "Your session expired. Reload and sign in again."
+    case 403:
+      return "You don't have permission for this action. An admin may have revoked it."
+    case 404:
+      return "The target resource no longer exists."
+    case 413:
+      return "Request too large."
+    case 500:
+      return "Server error. See the operator log for details."
+    default:
+      return `Request failed (HTTP ${status}).`
   }
-  if (status === 400) {
-    return body || "The form values were rejected by the server."
-  }
-  return `Request failed (${status})${body ? `: ${body.slice(0, 200)}` : ""}`
 }

@@ -257,18 +257,32 @@ func slashCommandEndpoint(id, workspaceID string) (string, error) {
 
 // slashCommandPayload reshapes the flat key=value map into the body
 // shape the matching handler expects. Mirror of buildPayload in
-// slash-action-modal.tsx.
+// slash-action-modal.tsx — the two MUST stay in sync, including the
+// fallback defaults for optional fields. The UI applies "UTC" /
+// "SECRET" / "none" defaults when the form-schema field is unset;
+// the CLI used to ship those values as empty strings, which made
+// `/routine` / `/credential` / `/issue` behave subtly differently
+// between the dashboard and the REPL when the user omitted the
+// optional value.
 //
 // Return type is map[string]any (not bare any) so callers don't
 // type-assert. JSON marshalling treats both shapes identically; the
 // typed return surfaces shape mistakes at compile time.
 func slashCommandPayload(id string, values map[string]string) map[string]any {
+	// nonEmptyOr returns the first non-empty value (or the fallback)
+	// — used to apply UI-parity defaults inline.
+	nonEmptyOr := func(v, fallback string) string {
+		if v == "" {
+			return fallback
+		}
+		return v
+	}
 	switch id {
 	case "routine":
 		return map[string]any{
 			"name":      values["name"],
 			"cron_expr": values["cron"],
-			"timezone":  values["timezone"],
+			"timezone":  nonEmptyOr(values["timezone"], "UTC"),
 		}
 	case "skill":
 		return map[string]any{
@@ -278,14 +292,14 @@ func slashCommandPayload(id string, values map[string]string) map[string]any {
 	case "credential":
 		return map[string]any{
 			"name":  values["name"],
-			"type":  values["type"],
+			"type":  nonEmptyOr(values["type"], "SECRET"),
 			"value": values["value"],
 		}
 	case "issue":
 		return map[string]any{
 			"title":       values["title"],
 			"description": values["description"],
-			"priority":    values["priority"],
+			"priority":    nonEmptyOr(values["priority"], "none"),
 		}
 	default:
 		// Fall through: pass the raw values map. The server will
