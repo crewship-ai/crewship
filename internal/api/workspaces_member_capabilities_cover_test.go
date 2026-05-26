@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"reflect"
 	"strings"
@@ -300,6 +301,40 @@ func TestApplyCapabilityMutation_NoBody(t *testing.T) {
 	}
 }
 
+// TestApplyCapabilityMutation_EmptyArraysRejected guards against the
+// silent-reset bug: an empty array slipping past the multi-shape
+// check and executing as a destructive "replace with chat-only" or
+// "no-op". All three array-shaped bodies (set, grant, revoke) must
+// error symmetrically when the array is empty.
+//
+// Pre-fix, `{"set":[]}` made it through because the counter used
+// `body.Set != nil` (true for empty slice) but grant/revoke used
+// `len(...) > 0`. An optimistic UI sending `{"set":[]}` would have
+// silently wiped the member's capabilities back to chat-only.
+func TestApplyCapabilityMutation_EmptyArraysRejected(t *testing.T) {
+	current := map[string]struct{}{"chat": {}, "routine.create": {}, "skill.create": {}}
+	cases := []struct {
+		name string
+		body capabilitiesPatchRequest
+	}{
+		{"set=[]", capabilitiesPatchRequest{Set: []string{}}},
+		{"grant=[]", capabilitiesPatchRequest{Grant: []string{}}},
+		{"revoke=[]", capabilitiesPatchRequest{Revoke: []string{}}},
+		{"all=[]", capabilitiesPatchRequest{Set: []string{}, Grant: []string{}, Revoke: []string{}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			next, err := applyCapabilityMutation(current, tc.body)
+			if err == nil {
+				t.Fatalf("empty %s must error; got next=%v", tc.name, next)
+			}
+			if !strings.Contains(err.Error(), "set, grant, revoke, preset") {
+				t.Errorf("error message unhelpful: %v", err)
+			}
+		})
+	}
+}
+
 // TestApplyCapabilityMutation_InvalidSetCapability covers the
 // "set with unknown capability" rejection path.
 func TestApplyCapabilityMutation_InvalidSetCapability(t *testing.T) {
@@ -382,6 +417,36 @@ func TestGetMemberCapabilities_DBError(t *testing.T) {
 	h.GetMemberCapabilities(w, req)
 	if w.Code != 500 {
 		t.Errorf("status = %d, want 500 on DB error", w.Code)
+	}
+}
+
+// TestPatchCapabilities_BodyTooLarge guards the MaxBytesReader cap.
+// A malicious ADMIN streaming a multi-GB JSON body would otherwise
+// pin the server; now we reject at 16 KB with a 413.
+func TestPatchCapabilities_BodyTooLarge(t *testing.T) {
+	h := newWsHandlerForTest(t)
+	adminID := seedTestUser(t, h.db)
+	wsID := seedTestWorkspace(t, h.db, adminID)
+	ludmilaID := seedMemberWithCapabilities(t, h.db, wsID, "MEMBER",
+		`["chat"]`, "ludmila-body-cap")
+
+	// Craft a body that's well over the 16 KB limit — pad the JSON
+	// with a giant repeated capability name (still parses as JSON,
+	// just oversized). MaxBytesReader trips before the decoder
+	// even sees a full object.
+	huge := strings.Repeat("a", 20*1024)
+	body := `{"set":["` + huge + `"]}`
+	req := httptest.NewRequest("PATCH", "/x", strings.NewReader(body))
+	req.SetPathValue("memberId", ludmilaID)
+	ctx := context.WithValue(req.Context(), ctxWorkspaceID, wsID)
+	ctx = context.WithValue(ctx, ctxUser, &AuthUser{ID: adminID})
+	ctx = context.WithValue(ctx, ctxRole, "ADMIN")
+	req = req.WithContext(ctx)
+	w := httptest.NewRecorder()
+
+	h.PatchMemberCapabilities(w, req)
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("status = %d, want 413", w.Code)
 	}
 }
 

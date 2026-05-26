@@ -189,8 +189,15 @@ function CapabilityRow({
         },
       )
       if (!res.ok) {
-        const text = await res.text()
-        throw new Error(text || `PATCH failed: ${res.status}`)
+        // Sanitize the user-facing message — server bodies can carry
+        // SQL fragments / stack traces that don't belong in a toast.
+        // We log the full text to console for operator debugging but
+        // surface only the humanized message to the UI.
+        const text = await res.text().catch(() => "")
+        if (text) {
+          console.warn("[capability PATCH] server error:", text)
+        }
+        throw new Error(humanizePatchError(res.status))
       }
       return (await res.json()) as CapabilitiesResponse
     },
@@ -574,11 +581,16 @@ async function applyPresetAll(
     return
   }
   if (ok === 0) {
-    // Whole batch failed — show the first body so the admin sees the
-    // actual server message (typo, role too low, etc.) rather than
-    // a generic "bulk failed".
+    // Whole batch failed — log raw bodies to the console for
+    // operator debugging, surface a sanitized message + status
+    // codes to the toast. We never put server response text into
+    // the UI directly (see humanizePatchError rationale).
+    for (const f of failed) {
+      console.warn(`[bulk preset] member ${f.id} failed: HTTP ${f.status}`, f.body)
+    }
+    const firstStatus = failed[0].status
     toast.error(
-      `Bulk preset failed (${failed.length}/${eligible.length}): ${failed[0].body || `HTTP ${failed[0].status}`}`,
+      `Bulk preset failed for all ${failed.length} member(s): ${humanizePatchError(firstStatus)}`,
     )
     return
   }
@@ -587,6 +599,30 @@ async function applyPresetAll(
   toast.warning(
     `Applied "${preset}" to ${ok}/${eligible.length} member(s); ${failed.length} failed.`,
   )
+}
+
+// humanizePatchError maps an HTTP status from the capability PATCH
+// endpoint onto a UI-safe message. The raw server body can include
+// SQL error fragments / stack traces / internal field names that
+// don't belong in an end-user toast — the operator can find the
+// full detail in the browser console / server logs.
+function humanizePatchError(status: number): string {
+  switch (status) {
+    case 400:
+      return "Invalid request. Check capability names and try again."
+    case 401:
+      return "Your session expired. Reload and sign in again."
+    case 403:
+      return "Permission denied. Your admin role may have been revoked."
+    case 404:
+      return "Member no longer exists in this workspace."
+    case 413:
+      return "Request too large. Reduce the change set."
+    case 500:
+      return "Server error. See the operator log for details."
+    default:
+      return `Request failed (HTTP ${status}).`
+  }
 }
 
 function initials(name: string | null, email: string): string {

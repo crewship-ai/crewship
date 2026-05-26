@@ -33,6 +33,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"sort"
 )
@@ -57,6 +58,13 @@ type capabilitiesPatchRequest struct {
 	Revoke []string `json:"revoke,omitempty"`
 	Preset string   `json:"preset,omitempty"`
 }
+
+// patchCapabilitiesMaxBodyBytes caps the PATCH request body.
+// Capability strings top out at ~30 chars; even a maximal body
+// (all four shapes filled, every capability included) is well
+// under 1 KB. 16 KB leaves room for future fields without giving
+// an attacker a multi-GB streaming target.
+const patchCapabilitiesMaxBodyBytes = 16 * 1024
 
 // ListMembersCapabilities is the bulk variant — one SELECT, one
 // response, all members of the workspace. Drives the Members
@@ -200,8 +208,18 @@ func (h *WorkspaceHandler) PatchMemberCapabilities(w http.ResponseWriter, r *htt
 		return
 	}
 
+	// Cap the body before decoding — without this an ADMIN could
+	// stream a multi-GB JSON document and pin the server. 16 KB is
+	// generous for the actual shape (a maximally-filled body is well
+	// under 1 KB).
+	r.Body = http.MaxBytesReader(w, r.Body, patchCapabilitiesMaxBodyBytes)
 	var body capabilitiesPatchRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			replyError(w, http.StatusRequestEntityTooLarge, "Request body too large")
+			return
+		}
 		replyError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
@@ -247,6 +265,19 @@ func (h *WorkspaceHandler) PatchMemberCapabilities(w http.ResponseWriter, r *htt
 		return
 	}
 	if affected == 0 {
+		// Member row vanished between the load (line above) and the
+		// UPDATE (concurrent RemoveMember). Emit the audit BEFORE
+		// returning so an operator scanning the log sees the
+		// mutation attempt and its outcome — silent failure here
+		// would hide capability changes from forensic review.
+		h.logger.Info("rbac: capability mutation aborted (race)",
+			"actor_user_id", caller.ID,
+			"target_user_id", memberID,
+			"workspace_id", workspaceID,
+			"action", "capability.patch.race_aborted",
+			"old", capsAsSortedSlice(current),
+			"attempted", capsAsSortedSlice(next),
+		)
 		replyError(w, http.StatusNotFound, "Member not found (deleted concurrently)")
 		return
 	}
@@ -288,11 +319,22 @@ func loadMemberCapabilitiesByMemberID(ctx context.Context, db *sql.DB, workspace
 // applyCapabilityMutation interprets a patch body and returns the
 // resulting capability set. Exactly one of set/grant/revoke/preset
 // may be present — multiple is a 400 (intent ambiguous).
+//
+// Empty arrays are rejected as bad shape, not silently treated as
+// no-ops. A previous version counted `body.Set != nil` (which fires
+// for `[]`) but `len(body.Grant) > 0` (which doesn't), so
+// `{"set":[]}` slipped past the "multiple shapes" check, hit the
+// set branch, and wrote chat-only — silently resetting the member's
+// capabilities. Now every shape uses len() so the counter is
+// symmetric: `set:[]`, `grant:[]`, `revoke:[]` all error as "missing
+// shape" rather than executing as a destructive no-op. Operators
+// who really want chat-only must send `{"set":["chat"]}` (explicit).
 func applyCapabilityMutation(current map[string]struct{}, body capabilitiesPatchRequest) (map[string]struct{}, error) {
 	// Tally which fields were used so we can reject "multiple
-	// shapes in one request" cleanly.
+	// shapes in one request" cleanly. len() everywhere so an empty
+	// array counts as absent — preventing the silent-reset footgun.
 	shapes := 0
-	if body.Set != nil {
+	if len(body.Set) > 0 {
 		shapes++
 	}
 	if len(body.Grant) > 0 {
@@ -305,14 +347,14 @@ func applyCapabilityMutation(current map[string]struct{}, body capabilitiesPatch
 		shapes++
 	}
 	if shapes == 0 {
-		return nil, errBadCapabilityBody("body must contain one of: set, grant, revoke, preset")
+		return nil, errBadCapabilityBody("body must contain one of: set, grant, revoke, preset (with non-empty value)")
 	}
 	if shapes > 1 {
 		return nil, errBadCapabilityBody("body must contain exactly one of: set, grant, revoke, preset")
 	}
 
 	switch {
-	case body.Set != nil:
+	case len(body.Set) > 0:
 		// Whole-row replace. Validate every entry.
 		next := make(map[string]struct{}, len(body.Set))
 		for _, c := range body.Set {
