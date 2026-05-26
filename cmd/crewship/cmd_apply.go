@@ -62,6 +62,7 @@ func init() {
 	applyCmd.Flags().Bool("replace", false, "Delete and recreate existing resources (destructive)")
 	applyCmd.Flags().Bool("from-env", false, "Read credential values from process environment")
 	applyCmd.Flags().String("secrets-file", "", "Load credential values from a KEY=VALUE file")
+	applyCmd.Flags().Bool("skip-test-gate", false, "Forward skip_test_gate=true on routine save (requires OWNER/ADMIN role server-side)")
 	applyCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompts (required for destructive plans in non-TTY)")
 	_ = applyCmd.MarkFlagRequired("file")
 
@@ -85,6 +86,7 @@ func runApply(cmd *cobra.Command, args []string) error {
 	replace, _ := cmd.Flags().GetBool("replace")
 	fromEnv, _ := cmd.Flags().GetBool("from-env")
 	secretsFile, _ := cmd.Flags().GetString("secrets-file")
+	skipTestGate, _ := cmd.Flags().GetBool("skip-test-gate")
 	yes, _ := cmd.Flags().GetBool("yes")
 
 	if strict && replace {
@@ -119,8 +121,9 @@ func runApply(cmd *cobra.Command, args []string) error {
 	// `terraform plan && terraform apply` so users always know what
 	// they're about to mutate.
 	plan, err := manifest.BuildPlan(cmd.Context(), client, bundle, manifest.Options{
-		Mode:    mode,
-		Secrets: secrets,
+		Mode:         mode,
+		Secrets:      secrets,
+		SkipTestGate: skipTestGate,
 	})
 	if err != nil {
 		return err
@@ -130,6 +133,7 @@ func runApply(cmd *cobra.Command, args []string) error {
 
 	if dryRun {
 		printSummary(plan, nil)
+		printWarnings(plan)
 		return nil
 	}
 
@@ -143,10 +147,11 @@ func runApply(cmd *cobra.Command, args []string) error {
 	}
 
 	result, err := manifest.Apply(cmd.Context(), client, bundle, manifest.Options{
-		Mode:     mode,
-		Secrets:  secrets,
-		Yes:      yes,
-		OnReport: func(string) { /* plan already printed */ },
+		Mode:         mode,
+		Secrets:      secrets,
+		Yes:          yes,
+		SkipTestGate: skipTestGate,
+		OnReport:     func(string) { /* plan already printed */ },
 	})
 	// Any error from Apply means nothing was committed past the
 	// point of failure — print whatever summary we have and bail.
@@ -159,6 +164,7 @@ func runApply(cmd *cobra.Command, args []string) error {
 	// fool downstream tooling into thinking apply succeeded.
 	if err != nil {
 		printSummary(plan, result)
+		printWarnings(plan)
 		if errors.Is(err, manifest.ErrConfirmationRequired) {
 			return fmt.Errorf("aborted: destructive plan requires confirmation (pass --yes)")
 		}
@@ -180,9 +186,25 @@ func runApply(cmd *cobra.Command, args []string) error {
 			fmt.Fprintf(os.Stdout, "  - %s\n", env)
 		}
 	}
+	printWarnings(plan)
 
 	provisionHintForCrews(bundle)
 	return nil
+}
+
+// printWarnings emits the yellow "Warnings:" block at the tail of an
+// apply run. Called from every exit path that has built a Plan —
+// dry-run, apply-error, success — so the operator never silently
+// loses pre-flight advisories. No-op when there are none.
+func printWarnings(plan *manifest.Plan) {
+	if plan == nil || len(plan.Warnings) == 0 {
+		return
+	}
+	fmt.Fprintln(os.Stdout)
+	fmt.Fprintf(os.Stdout, "%sWarnings:%s\n", cli.Yellow, cli.Reset)
+	for _, w := range plan.Warnings {
+		fmt.Fprintf(os.Stdout, "  ! %s\n", w)
+	}
 }
 
 // loadManifestBundle reads from a file path, or from stdin when the

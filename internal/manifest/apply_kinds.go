@@ -44,6 +44,13 @@ func (pb *planBuilder) planNewKinds(ctx context.Context, b *Bundle) error {
 		return err
 	}
 	c := newInternalClient(pb.client)
+	if pb.opts.SkipTestGate {
+		// Decorator pattern: the routine kind keeps building a plain
+		// save body, the boundary injects the OWNER/ADMIN bypass
+		// field. Scope is just the /pipelines/save endpoint — see
+		// internal/manifest/skip_test_gate.go.
+		c = withSkipTestGate(c)
+	}
 
 	// Phase 3: Projects (no deps)
 	for i := range b.Projects {
@@ -187,6 +194,7 @@ func (pb *planBuilder) planNewKinds(ctx context.Context, b *Bundle) error {
 			return fmt.Errorf("routine %q: plan: %w", doc.Metadata.Slug, err)
 		}
 		pb.appendKindItems(items)
+		pb.plan.Warnings = append(pb.plan.Warnings, routinePlanWarnings(doc)...)
 	}
 
 	// Phase 14: RecurringIssues (deps: Projects, Labels, Crews)
@@ -557,13 +565,25 @@ func mapKindAction(a internalapi.PlanAction) Action {
 // apply loop (which passes ctx + *Client + Options). A nil inner
 // closure → nil wrapper, so ActionUnchanged items don't get a
 // no-op call.
+//
+// Re-applies the per-apply client decorators (today: withSkipTestGate)
+// at exec time. planNewKinds also applies them at plan time so the
+// build path sees the same surface, but the exec closure runs later
+// against an adapter constructed here — without the re-wrap, the
+// decorated planning client would be silently swapped for an
+// undecorated exec client and any body mutation (e.g.
+// skip_test_gate=true on routine save) would never reach the server.
 func wrapKindExec(inner func(ctx context.Context, c internalapi.Client) error, c *Client) func(ctx context.Context, _ *Client, _ Options) error {
 	if inner == nil {
 		return nil
 	}
 	adapter := newInternalClient(c)
-	return func(ctx context.Context, _ *Client, _ Options) error {
-		return inner(ctx, adapter)
+	return func(ctx context.Context, _ *Client, opts Options) error {
+		execClient := adapter
+		if opts.SkipTestGate {
+			execClient = withSkipTestGate(execClient)
+		}
+		return inner(ctx, execClient)
 	}
 }
 
