@@ -100,7 +100,7 @@ running `--replace` on the wrong target has no warning.
 DELETE queries with `EXPLAIN QUERY PLAN` (or just count via SELECT
 COUNT) to report:
 
-```
+```text
 WOULD WIPE under --replace:
   workspaces.id IN (ws_old_xyz)    → 1 row
   crews                            → 2 rows
@@ -125,7 +125,7 @@ silently — agents start failing API calls with no clear cause.
 using the target's keyring. On failure, log a `WARN` with a
 prominent message:
 
-```
+```text
 WARNING: restored credentials cannot be decrypted with this
 instance's ENCRYPTION_KEY. The bundle's source ENCRYPTION_KEY
 must be set on this host for credentials to work. See

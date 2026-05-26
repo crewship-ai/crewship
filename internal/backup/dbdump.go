@@ -776,7 +776,7 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 	}
 	if hooks.PreCommit != nil {
 		if err := hooks.PreCommit(ctx); err != nil {
-			return stats, err
+			return stats, fmt.Errorf("backup: pre-commit hook: %w", err)
 		}
 	}
 	if err := tx.Commit(); err != nil {

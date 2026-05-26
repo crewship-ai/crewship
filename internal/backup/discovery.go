@@ -318,7 +318,7 @@ func CategoriseScopedTables(discovered []ScopedTable, intent map[string]ScopedTa
 	}
 	if len(unknown) > 0 {
 		sort.Strings(unknown)
-		return nil, nil, fmt.Errorf("%w: %v (add to BackupTableIntent in dump.go)", ErrDiscoveryDrift, unknown)
+		return nil, nil, fmt.Errorf("%w: %v (add to BackupTableIntent in intent.go)", ErrDiscoveryDrift, unknown)
 	}
 	return include, exclude, nil
 }

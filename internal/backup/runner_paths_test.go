@@ -69,8 +69,11 @@ func TestCreateBackup_RejectsCrewScopeMissingCrewID(t *testing.T) {
 func TestCreateBackup_RejectsConflictingEncryption(t *testing.T) {
 	ctx := context.Background()
 	source := openMigratedDB(t)
-	id, _ := age.GenerateX25519Identity()
-	_, err := backup.CreateBackup(ctx, source, backup.CreateOptions{
+	id, err := age.GenerateX25519Identity()
+	if err != nil {
+		t.Fatalf("GenerateX25519Identity: %v", err)
+	}
+	_, err = backup.CreateBackup(ctx, source, backup.CreateOptions{
 		Scope:       backup.ScopeWorkspace,
 		WorkspaceID: "ws_x",
 		Actor:       backup.Actor{UserID: "u_admin", Role: "ADMIN"},
