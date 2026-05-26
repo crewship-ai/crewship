@@ -73,34 +73,59 @@ func TestExtractPayload_RejectsParentTraversal(t *testing.T) {
 	}
 }
 
-// TestExtractPayload_RejectsAbsoluteSymlink locks in the defence-in-
-// depth policy: a tampered bundle that ships a symlink to an
-// absolute host-rooted path (e.g. /etc/passwd) is rejected at
-// preflight even though docker CopyTo would already bound the
-// extraction to the destination container. The point is to fail
-// loud at the bundle layer so the operator sees "bad bundle", not
-// "unexpected /etc reference inside the restored container".
+// TestExtractPayload_AcceptsAbsoluteSymlinkInWorkspace pins the
+// section-aware policy: workspace/ holds user code, where
+// node_modules dedup / mise shims / pyenv stubs routinely use
+// absolute and parent-relative symlinks. Pre-fix the restorer
+// rejected any such link, which broke restores for every workspace
+// containing a real Node.js or Python project — the actual user-
+// observed regression from the 2026-05-25 DR cycle:
 //
-// Legit container layouts that previously needed to pass — mise /
-// pyenv / npm dedup / cursor-agent shims — have always lived under
-// volumeExclusions, so this rejection does not regress real
-// restores; the collector strips them before they reach the bundle.
-func TestExtractPayload_RejectsAbsoluteSymlink(t *testing.T) {
-	payload := buildPayloadWithEntry(t, "workspace/my-crew/link", tar.TypeSymlink, "/etc/passwd")
+//	workspace/uo-outlands/vendor-investment/node_modules/.bin/drizzle-kit
+//	  -> ../drizzle-kit/bin.cjs
+//
+// Docker CopyTo containment is the security boundary for these
+// sections; the bundle layer must not duplicate it.
+func TestExtractPayload_AcceptsAbsoluteSymlinkInWorkspace(t *testing.T) {
+	payload := buildPayloadWithEntry(t, "workspace/my-crew/node_modules/.bin/foo", tar.TypeSymlink, "/usr/local/bin/foo")
+	out, err := ExtractPayload(t.Context(), bytes.NewReader(payload))
+	if err != nil {
+		t.Fatalf("workspace/ absolute symlink should pass preflight; got %v", err)
+	}
+	t.Cleanup(func() { _ = out.Close() })
+}
+
+func TestExtractPayload_AcceptsParentTraversalSymlinkInWorkspace(t *testing.T) {
+	payload := buildPayloadWithEntry(t,
+		"workspace/uo-outlands/vendor-investment/node_modules/.bin/drizzle-kit",
+		tar.TypeSymlink, "../drizzle-kit/bin.cjs")
+	out, err := ExtractPayload(t.Context(), bytes.NewReader(payload))
+	if err != nil {
+		t.Fatalf("workspace/ ..-bearing symlink should pass preflight; got %v", err)
+	}
+	t.Cleanup(func() { _ = out.Close() })
+}
+
+// TestExtractPayload_RejectsAbsoluteSymlinkInMemory verifies strict
+// sections still reject escaping links. memory/ is agent-written
+// markdown; nothing legitimately writes parent-relative or absolute
+// symlinks there, so we keep the strict policy as a defence layer.
+func TestExtractPayload_RejectsAbsoluteSymlinkInMemory(t *testing.T) {
+	payload := buildPayloadWithEntry(t, "memory/my-crew/escape", tar.TypeSymlink, "/etc/passwd")
 	_, err := ExtractPayload(t.Context(), bytes.NewReader(payload))
 	if err == nil {
-		t.Fatal("expected absolute-target symlink to be rejected at preflight")
+		t.Fatal("expected memory/ absolute symlink to be rejected at preflight")
 	}
 	if !errors.Is(err, ErrInvalidManifest) {
 		t.Errorf("expected ErrInvalidManifest, got %v", err)
 	}
 }
 
-func TestExtractPayload_RejectsParentTraversalSymlink(t *testing.T) {
-	payload := buildPayloadWithEntry(t, "workspace/my-crew/link", tar.TypeSymlink, "../../../etc/passwd")
+func TestExtractPayload_RejectsParentTraversalSymlinkInSystem(t *testing.T) {
+	payload := buildPayloadWithEntry(t, "system/my-crew/var-lib/redis/escape", tar.TypeSymlink, "../../../etc/passwd")
 	_, err := ExtractPayload(t.Context(), bytes.NewReader(payload))
 	if err == nil {
-		t.Fatal("expected '..'-bearing symlink to be rejected at preflight")
+		t.Fatal("expected system/ ..-bearing symlink to be rejected at preflight")
 	}
 	if !errors.Is(err, ErrInvalidManifest) {
 		t.Errorf("expected ErrInvalidManifest, got %v", err)
@@ -132,11 +157,24 @@ func TestExtractPayload_AcceptsHardLink(t *testing.T) {
 	t.Cleanup(func() { _ = out.Close() })
 }
 
-func TestExtractPayload_RejectsAbsoluteHardLink(t *testing.T) {
+// Hardlinks in workspace/ follow the same permissive policy as
+// symlinks — npm/yarn/pnpm dedupe across node_modules with
+// absolute-shaped hardlink targets sometimes. Strict sections
+// (memory/, system/) still reject.
+func TestExtractPayload_AcceptsAbsoluteHardLinkInWorkspace(t *testing.T) {
 	payload := buildPayloadWithEntry(t, "workspace/my-crew/hard", tar.TypeLink, "/usr/bin/sudo")
+	out, err := ExtractPayload(t.Context(), bytes.NewReader(payload))
+	if err != nil {
+		t.Fatalf("workspace/ absolute hardlink should pass preflight; got %v", err)
+	}
+	t.Cleanup(func() { _ = out.Close() })
+}
+
+func TestExtractPayload_RejectsAbsoluteHardLinkInMemory(t *testing.T) {
+	payload := buildPayloadWithEntry(t, "memory/my-crew/hard", tar.TypeLink, "/usr/bin/sudo")
 	_, err := ExtractPayload(t.Context(), bytes.NewReader(payload))
 	if err == nil {
-		t.Fatal("expected absolute-target hardlink to be rejected at preflight")
+		t.Fatal("expected memory/ absolute hardlink to be rejected at preflight")
 	}
 	if !errors.Is(err, ErrInvalidManifest) {
 		t.Errorf("expected ErrInvalidManifest, got %v", err)

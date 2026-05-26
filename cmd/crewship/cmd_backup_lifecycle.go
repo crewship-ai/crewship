@@ -220,11 +220,13 @@ var backupRestoreCmd = &cobra.Command{
 		}
 
 		dryRun, _ := cmd.Flags().GetBool("dry-run")
+		replace, _ := cmd.Flags().GetBool("replace")
 		body := map[string]any{
 			"path":         args[0],
 			"passphrase":   passphrase,
 			"as_workspace": asWorkspace,
 			"as_crew":      asCrew,
+			"replace":      replace,
 			"dry_run":      dryRun,
 		}
 		client := newAPIClient()

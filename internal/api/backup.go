@@ -293,7 +293,13 @@ type restoreRequest struct {
 	Identity    string `json:"identity,omitempty"`
 	AsWorkspace string `json:"as_workspace,omitempty"`
 	AsCrew      string `json:"as_crew,omitempty"`
-	DryRun      bool   `json:"dry_run,omitempty"`
+	// Replace, when true, wipes existing target rows matching the
+	// bundle's workspace (by id OR slug) before INSERT. Canonical
+	// disaster-recovery path: after `dev.sh nuke` the fresh-bootstrap
+	// workspace has a new CUID but the same slug — --replace clears
+	// the conflicting target so the bundle lands with original IDs.
+	Replace bool `json:"replace,omitempty"`
+	DryRun  bool `json:"dry_run,omitempty"`
 }
 
 // Restore handles POST /api/v1/admin/backups/restore.
@@ -325,8 +331,42 @@ func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if !bundleBelongsToWorkspace(ctx, req.Path, workspaceID) {
-		replyError(w, http.StatusNotFound, "backup not found")
+	// Existence check returns 404 before RestoreBackup gets a chance
+	// to fail with "open bundle: no such file" (which maps to 500).
+	// Routed through backup.Exists rather than os.Stat to preserve
+	// the provider-pattern boundary that the HTTP layer MUST NOT
+	// cross (per internal/**/*.go guideline).
+	if _, err := backup.Exists(ctx, req.Path); err != nil {
+		if errors.Is(err, backup.ErrBundleNotFound) {
+			replyError(w, http.StatusNotFound, "backup not found")
+			return
+		}
+		replyError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	// Cross-tenant write guard: the bundle must either match the
+	// caller's current workspace (by id OR slug — slug match covers
+	// the post-`dev.sh nuke` DR scenario where the fresh-bootstrap
+	// workspace has a NEW CUID but the same slug as the source) OR
+	// the caller's instance must have no workspace yet (canonical
+	// "first restore on a fresh instance" DR path). Otherwise
+	// reject with 403 so an admin can't restore another tenant's
+	// bundle into their workspace context.
+	//
+	// Pre-fix this handler dropped the binding entirely, which
+	// CodeRabbit flagged as a cross-tenant write risk (issue #594
+	// comment, internal/api/backup.go:348). This re-introduces the
+	// check in a way that allows DR while blocking cross-tenant
+	// abuse.
+	allowed, denyReason, err := allowRestore(ctx, h.db, req.Path, workspaceID)
+	if err != nil {
+		h.logger.Warn("backup restore authorization probe failed", "error", err, "path", req.Path)
+		replyError(w, http.StatusInternalServerError, "authorize restore: "+err.Error())
+		return
+	}
+	if !allowed {
+		h.logger.Warn("backup restore denied", "reason", denyReason, "path", req.Path, "workspace_id", workspaceID, "user", user.ID)
+		replyError(w, http.StatusForbidden, denyReason)
 		return
 	}
 
@@ -348,6 +388,7 @@ func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
 		Identities:   identities,
 		AsWorkspace:  req.AsWorkspace,
 		AsCrew:       req.AsCrew,
+		Replace:      req.Replace,
 		DryRun:       req.DryRun,
 		Actor:        backup.Actor{UserID: user.ID, Email: user.Email, Role: role},
 		DockerOps:    ops,
@@ -384,6 +425,78 @@ func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
 		"rows_inserted":         result.RowsInserted,
 		"docker_phase_skipped":  result.DockerPhaseSkipped,
 	})
+}
+
+// allowRestore enforces the cross-tenant write guard described in
+// the Restore handler above. Three allow paths:
+//
+//  1. Bundle's workspace ID matches the caller's current
+//     workspaceID (canonical re-restore into the same workspace).
+//  2. Bundle's workspace slug matches the slug of the row at the
+//     caller's current workspaceID (post-nuke fresh-bootstrap
+//     with the same slug under a new id — the DR scenario the
+//     previous strict ID gate broke).
+//  3. The instance has zero workspaces (canonical "first restore
+//     on a fresh instance" — typical after `crewship start` with
+//     no bootstrap completed).
+//
+// Returns (true, "", nil) on allow, (false, reason, nil) on deny,
+// or (_, _, err) on probe failure.
+func allowRestore(ctx context.Context, db *sql.DB, bundlePath, callerWorkspaceID string) (bool, string, error) {
+	// Path 3: empty instance → DR escape hatch.
+	var wsCount int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM workspaces`).Scan(&wsCount); err != nil {
+		return false, "", fmt.Errorf("count workspaces: %w", err)
+	}
+	if wsCount == 0 {
+		return true, "", nil
+	}
+	// Need the bundle's workspace identity for paths 1 and 2.
+	m, err := backup.Inspect(ctx, bundlePath)
+	if err != nil || m == nil {
+		// Defer the real error to the restore flow which gives a
+		// better message; here we just deny. Guard against
+		// (nil, nil) returns explicitly — current backup.Inspect
+		// always pairs nil with an error, but a defensive nil
+		// check is cheap and prevents a future contract change
+		// from triggering a nil-pointer panic on the next line.
+		return false, "could not read bundle manifest for authorization", nil
+	}
+	if m.Contents.Workspace == nil {
+		// No workspace anchor in manifest (instance-scope or
+		// custom-built dump). Defer the decision; restore will
+		// fail loudly if the bundle isn't workspace-scoped.
+		return true, "", nil
+	}
+	bundleID := m.Contents.Workspace.ID
+	bundleSlug := m.Contents.Workspace.Slug
+	if callerWorkspaceID != "" {
+		// Path 1: ID match.
+		if bundleID == callerWorkspaceID {
+			return true, "", nil
+		}
+		// Path 2: slug match against caller's workspace row.
+		var callerSlug string
+		err := db.QueryRowContext(ctx, `SELECT slug FROM workspaces WHERE id = ?`, callerWorkspaceID).Scan(&callerSlug)
+		if err == nil && callerSlug != "" && callerSlug == bundleSlug {
+			return true, "", nil
+		}
+		// Unexpected probe failures must surface as 500, not 403 —
+		// a deny here would mask a server-side issue and confuse
+		// the operator into thinking the bundle is wrong when it's
+		// actually a DB hiccup. sql.ErrNoRows is the only benign
+		// case (caller's workspaceID points to a deleted row) and
+		// falls through to deny normally.
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return false, "", fmt.Errorf("lookup caller workspace slug: %w", err)
+		}
+	}
+	// Generic deny — deliberately does NOT echo bundleID / bundleSlug
+	// back to the client. Returning those values would let an
+	// unauthenticated probe enumerate workspace slugs by trying paths.
+	// The real bundle identity stays in the server-side log written by
+	// the caller (Restore handler logs the workspace_id at Warn level).
+	return false, "bundle is not bound to your current workspace; restore on the source instance, or use a fresh instance for cross-tenant DR", nil
 }
 
 // Status handles GET /api/v1/admin/backups/status. Reports whether an
