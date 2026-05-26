@@ -139,6 +139,33 @@ func seedNuke(ctx context.Context, client *cli.Client) error {
 		failures = append(failures, fmt.Sprintf("integrations: %v", err))
 	}
 
+	// Delete routine triggers + routines. Order matters: webhooks and
+	// schedules FK back to the pipeline row, so they go first.
+	// The routine endpoints are workspace-scoped (no implicit-ws
+	// variant), so we compose the URLs from the client's resolved ID.
+	ws := client.GetWorkspaceID()
+	if ws != "" {
+		if err := nukeList(ctx, client,
+			"/api/v1/workspaces/"+ws+"/pipeline-webhooks",
+			"/api/v1/workspaces/"+ws+"/pipeline-webhooks/",
+		); err != nil {
+			failures = append(failures, fmt.Sprintf("pipeline-webhooks: %v", err))
+		}
+		if err := nukeList(ctx, client,
+			"/api/v1/workspaces/"+ws+"/pipeline-schedules",
+			"/api/v1/workspaces/"+ws+"/pipeline-schedules/",
+		); err != nil {
+			failures = append(failures, fmt.Sprintf("pipeline-schedules: %v", err))
+		}
+		// Pipelines key by slug, not ID — use nukeListBySlug.
+		if err := nukeListBySlug(ctx, client,
+			"/api/v1/workspaces/"+ws+"/pipelines",
+			"/api/v1/workspaces/"+ws+"/pipelines/",
+		); err != nil {
+			failures = append(failures, fmt.Sprintf("pipelines: %v", err))
+		}
+	}
+
 	// Delete crews
 	if err := nukeList(ctx, client, "/api/v1/crews", "/api/v1/crews/"); err != nil {
 		failures = append(failures, fmt.Sprintf("crews: %v", err))
@@ -178,6 +205,46 @@ func nukeList(ctx context.Context, client *cli.Client, listPath, deletePrefix st
 		}
 		if r.StatusCode >= 300 {
 			failures = append(failures, fmt.Sprintf("DELETE %s%s: HTTP %d", deletePrefix, item.ID, r.StatusCode))
+		}
+		r.Body.Close()
+	}
+	if len(failures) > 0 {
+		return fmt.Errorf("%d delete failures: %s", len(failures), strings.Join(failures, "; "))
+	}
+	return nil
+}
+
+// nukeListBySlug is nukeList for endpoints that key on slug rather
+// than id (pipelines).
+func nukeListBySlug(ctx context.Context, client *cli.Client, listPath, deletePrefix string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	resp, err := client.Get(listPath)
+	if err != nil {
+		return fmt.Errorf("GET %s: %w", listPath, err)
+	}
+	var items []struct {
+		Slug string `json:"slug"`
+	}
+	if err := cli.ReadJSON(resp, &items); err != nil {
+		return fmt.Errorf("decode %s: %w", listPath, err)
+	}
+	var failures []string
+	for _, item := range items {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if item.Slug == "" {
+			continue
+		}
+		r, err := client.Delete(deletePrefix + item.Slug)
+		if err != nil {
+			failures = append(failures, fmt.Sprintf("DELETE %s%s: %v", deletePrefix, item.Slug, err))
+			continue
+		}
+		if r.StatusCode >= 300 {
+			failures = append(failures, fmt.Sprintf("DELETE %s%s: HTTP %d", deletePrefix, item.Slug, r.StatusCode))
 		}
 		r.Body.Close()
 	}
