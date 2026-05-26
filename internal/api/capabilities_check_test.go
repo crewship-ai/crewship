@@ -150,6 +150,101 @@ func TestRequireCapability_NoMembershipRow(t *testing.T) {
 	}
 }
 
+// TestRequireRoleOrCapabilityOrForbid covers the OR-combined gate
+// that public endpoints use after the real-e2e revealed the
+// public-route gap: pre-fix, MEMBER with explicit capability still
+// got 403 because public routes had only role check.
+//
+// Scenarios:
+//
+//   - MANAGER role, no capability needed       → grant
+//   - MEMBER role, has explicit capability     → grant
+//   - MEMBER role, no capability               → deny
+//   - VIEWER role, has explicit capability     → grant (capability
+//     wins even when role
+//     is the lowest tier)
+//   - empty callerID (autonomous), role passes → grant
+//   - empty callerID, role fails               → deny (no fallback
+//     — agent path has its
+//     own autonomy gate
+//     upstream)
+//   - DB error during capability lookup        → 500 (not 403)
+func TestRequireRoleOrCapabilityOrForbid(t *testing.T) {
+	db := setupTestDB(t)
+	ownerID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, ownerID)
+
+	memberWithCap := seedMemberWithCapabilities(t, db, wsID, "MEMBER",
+		`["chat","routine.create"]`, "rocof-member-with-cap")
+	memberNoCap := seedMemberWithCapabilities(t, db, wsID, "MEMBER",
+		`["chat"]`, "rocof-member-no-cap")
+	viewerWithCap := seedMemberWithCapabilities(t, db, wsID, "VIEWER",
+		`["chat","routine.create"]`, "rocof-viewer-with-cap")
+	InvalidateCapabilityCache(wsID, memberWithCap)
+	InvalidateCapabilityCache(wsID, memberNoCap)
+	InvalidateCapabilityCache(wsID, viewerWithCap)
+
+	type tc struct {
+		name        string
+		role        string
+		callerID    string
+		shouldGrant bool
+		wantCode    int
+	}
+	cases := []tc{
+		{"MANAGER role grants", "MANAGER", "anyone", true, 0},
+		{"MEMBER with capability grants", "MEMBER", memberWithCap, true, 0},
+		{"MEMBER without capability denies", "MEMBER", memberNoCap, false, 403},
+		{"VIEWER with capability grants", "VIEWER", viewerWithCap, true, 0},
+		{"autonomous role-pass", "ADMIN", "", true, 0},
+		{"autonomous role-fail denies", "MEMBER", "", false, 403},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			r := httptest.NewRequest("POST", "/x", nil)
+			got := requireRoleOrCapabilityOrForbid(w, r, silentLogger(), db,
+				wsID, c.callerID, c.role,
+				CapabilityRoutineCreate, "routine.create", "routine:new",
+				"create")
+			if got != c.shouldGrant {
+				t.Fatalf("got grant=%v, want %v (status %d)", got, c.shouldGrant, w.Code)
+			}
+			if !c.shouldGrant && w.Code != c.wantCode {
+				t.Errorf("status = %d, want %d", w.Code, c.wantCode)
+			}
+		})
+	}
+}
+
+// TestRequireRoleOrCapabilityOrForbid_DBError covers the surfacing
+// of capability-lookup errors. A closed DB makes the lookup fail;
+// the helper must 500 rather than 403 so transient infrastructure
+// problems aren't mis-attributed as permission denies.
+func TestRequireRoleOrCapabilityOrForbid_DBError(t *testing.T) {
+	db := setupTestDB(t)
+	ownerID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, ownerID)
+	memberID := seedMemberWithCapabilities(t, db, wsID, "MEMBER",
+		`["chat"]`, "rocof-db-err")
+	InvalidateCapabilityCache(wsID, memberID)
+	_ = db.Close()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("POST", "/x", nil)
+	// MEMBER role fails role check → falls into capability path → DB error
+	got := requireRoleOrCapabilityOrForbid(w, r, silentLogger(), db,
+		wsID, memberID, "MEMBER",
+		CapabilityRoutineCreate, "routine.create", "routine:new",
+		"create")
+	if got {
+		t.Fatal("expected deny on DB error")
+	}
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", w.Code)
+	}
+}
+
 // TestRequireCapability_ExplicitEmptyDoesNotFallBackToRole is the
 // regression test. When operator explicitly stores an
 // empty array, malformed JSON, or only future-unknown capability

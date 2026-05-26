@@ -86,10 +86,19 @@ func (h *PipelineHandler) CreateSchedule(w http.ResponseWriter, r *http.Request)
 	}
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	// Audit M2-promoted: creating a schedule fires the pipeline on cron
-	// — same blast radius as Save. Same gate.
+	// — same blast radius as Save. Layered gate: MANAGER+ role passes
+	// straight through; MEMBER with explicit routine.create capability
+	// also passes (slash command UX). PRD-SLASH-CAPABILITIES-2026 §6.
 	role := RoleFromContext(r.Context())
-	if !canRole(role, "create") {
-		replyError(w, http.StatusForbidden, "Forbidden")
+	caller := UserFromContext(r.Context())
+	callerID := ""
+	if caller != nil {
+		callerID = caller.ID
+	}
+	if !requireRoleOrCapabilityOrForbid(w, r, h.logger, h.db,
+		workspaceID, callerID, role,
+		CapabilityRoutineCreate, "routine.create", "workspace:"+workspaceID,
+		"create") {
 		return
 	}
 

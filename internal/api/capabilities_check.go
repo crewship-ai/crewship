@@ -231,6 +231,75 @@ func CapabilitiesForMemberE(ctx context.Context, db *sql.DB, workspaceID, userID
 // audit-emit bug that drops the role field).
 const auditRoleNonMember = "non-member"
 
+// requireRoleOrCapabilityOrForbid is the OR-combined gate that
+// public end-user endpoints (POST /credentials, POST /pipeline-
+// schedules, POST /skills/generate, POST /crews/{id}/issues) use
+// to grant access to BOTH the legacy MANAGER+ path AND the new
+// per-capability path. Without this layer the public endpoints
+// stayed MANAGER-only — slash actions from the dashboard / CLI
+// 403'd for any MEMBER with an explicit capability grant, defeating
+// the whole point of the PR (the internal API mirrors gate
+// correctly but only the agent-via-sidecar path reached them).
+//
+// Behaviour:
+//
+//   - role passes canRole(...requiredActions)  → grant. Existing
+//     MANAGER+ callers keep working with zero change.
+//   - role fails but capability is granted     → grant + audit as
+//     a capability-gated access (role recorded so operators can
+//     tell which dimension let the call through).
+//   - both miss                                → 403 with audit.
+//
+// The capability check fires only when role check would have
+// denied — that keeps the audit log signal clean (MANAGER+
+// successes don't spam capability audits) and avoids a redundant
+// DB lookup on the hot path.
+//
+// callerUserID empty (autonomous agent) defers to the existing
+// requireRoleOrForbid behaviour — autonomous calls don't have a
+// capability set, the autonomy_level gate (handled separately by
+// the agent-facing routes) is the authoritative path there.
+func requireRoleOrCapabilityOrForbid(
+	w http.ResponseWriter,
+	r *http.Request,
+	logger interface {
+		Warn(msg string, args ...any)
+	},
+	db *sql.DB,
+	workspaceID, callerUserID, role, capability, action, resource string,
+	requiredRoleActions ...string,
+) bool {
+	// Role check first — preserves existing behaviour exactly for
+	// MANAGER+ callers and skips the DB lookup on their hot path.
+	if canRole(role, requiredRoleActions...) {
+		return true
+	}
+	// Role check failed. If we have a caller id, try the capability
+	// path. Autonomous calls (no caller id) fall straight through
+	// to the existing forbid emit.
+	if callerUserID != "" {
+		caps, _, err, ok := CapabilitiesForMemberE(r.Context(), db, workspaceID, callerUserID)
+		if err != nil {
+			if logger != nil {
+				logger.Warn("rbac: capability lookup failed",
+					"user_id", callerUserID,
+					"workspace_id", workspaceID,
+					"action", action,
+					"resource", resource,
+					"error", err.Error(),
+				)
+			}
+			replyError(w, http.StatusInternalServerError, "Internal server error")
+			return false
+		}
+		if ok && HasCapability(caps, capability) {
+			return true
+		}
+	}
+	replyForbidden(w, logger, callerUserID, role, action, resource)
+	return false
+}
+
 // requireCapabilityOrForbid is the capability-gate variant of
 // requireRoleOrForbid. Returns true on grant so the caller can
 // early-return on false:
