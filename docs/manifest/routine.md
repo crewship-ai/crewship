@@ -337,6 +337,71 @@ manually before re-applying, otherwise the Plan layer will print a
 warning that the webhook's public URL won't be discoverable from the
 env.
 
+## Code-step limitation
+
+`type: code` is part of the DSL surface and the validator accepts it,
+but the production CodeRunner is not yet wired
+(`internal/pipeline/runner_code.go`). A routine that declares a code
+step **will save successfully** and the schedule will fire on cron,
+but the step itself fails at runtime with:
+
+```text
+code step "<id>": no CodeRunner wired (production wiring missing) —
+convert this step to type: agent_run with an agent that has
+shell-tool access
+```
+
+`crewship apply` surfaces this at plan time as a yellow warning so
+you see the gap before the cron fires the first time:
+
+```text
+Warnings:
+  ! routine "seznam-check": step "probe" is type: code, but the
+    production CodeRunner is not yet wired — invocations will fail
+    until the step is converted to type: agent_run with a shell-tool-
+    enabled agent
+```
+
+### Conversion recipe
+
+Replace the code step with an `agent_run` against an agent whose
+`tool_profile: FULL` (or any profile that includes shell). The agent
+runs the same command from inside its container, which is already
+wired end-to-end.
+
+Before:
+
+```yaml
+steps:
+  - id: probe
+    type: code
+    code:
+      runtime: bash
+      code: |
+        curl -sS https://www.seznam.cz -o /tmp/page.html -w '%{http_code}'
+```
+
+After:
+
+```yaml
+steps:
+  - id: probe
+    type: agent_run
+    agent_slug: sre-lead
+    prompt: |
+      Run exactly one shell command and report the http status code:
+
+          curl -sS https://www.seznam.cz -o /tmp/page.html -w '%{http_code}'
+
+      Reply on one line: `OK <code>` if status is 200, otherwise
+      `BREACH <code>`.
+```
+
+Trade-off: an agent_run is ~30× more expensive than a raw shell
+exec because it goes through the LLM. For pure shell probes that's
+acceptable as a stopgap; the proper fix is to land a Docker-backed
+CodeRunner — tracked separately from this doc.
+
 ## See also
 
 - [Your First Crew](/guides/first-crew) — the parent concept; routines reference a crew via

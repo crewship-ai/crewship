@@ -62,6 +62,7 @@ func init() {
 	applyCmd.Flags().Bool("replace", false, "Delete and recreate existing resources (destructive)")
 	applyCmd.Flags().Bool("from-env", false, "Read credential values from process environment")
 	applyCmd.Flags().String("secrets-file", "", "Load credential values from a KEY=VALUE file")
+	applyCmd.Flags().Bool("skip-test-gate", false, "Forward skip_test_gate=true on routine save (requires OWNER/ADMIN role server-side)")
 	applyCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompts (required for destructive plans in non-TTY)")
 	_ = applyCmd.MarkFlagRequired("file")
 
@@ -85,6 +86,7 @@ func runApply(cmd *cobra.Command, args []string) error {
 	replace, _ := cmd.Flags().GetBool("replace")
 	fromEnv, _ := cmd.Flags().GetBool("from-env")
 	secretsFile, _ := cmd.Flags().GetString("secrets-file")
+	skipTestGate, _ := cmd.Flags().GetBool("skip-test-gate")
 	yes, _ := cmd.Flags().GetBool("yes")
 
 	if strict && replace {
@@ -119,8 +121,9 @@ func runApply(cmd *cobra.Command, args []string) error {
 	// `terraform plan && terraform apply` so users always know what
 	// they're about to mutate.
 	plan, err := manifest.BuildPlan(cmd.Context(), client, bundle, manifest.Options{
-		Mode:    mode,
-		Secrets: secrets,
+		Mode:         mode,
+		Secrets:      secrets,
+		SkipTestGate: skipTestGate,
 	})
 	if err != nil {
 		return err
@@ -143,10 +146,11 @@ func runApply(cmd *cobra.Command, args []string) error {
 	}
 
 	result, err := manifest.Apply(cmd.Context(), client, bundle, manifest.Options{
-		Mode:     mode,
-		Secrets:  secrets,
-		Yes:      yes,
-		OnReport: func(string) { /* plan already printed */ },
+		Mode:         mode,
+		Secrets:      secrets,
+		Yes:          yes,
+		SkipTestGate: skipTestGate,
+		OnReport:     func(string) { /* plan already printed */ },
 	})
 	// Any error from Apply means nothing was committed past the
 	// point of failure — print whatever summary we have and bail.
@@ -178,6 +182,13 @@ func runApply(cmd *cobra.Command, args []string) error {
 			}
 			seen[env] = true
 			fmt.Fprintf(os.Stdout, "  - %s\n", env)
+		}
+	}
+	if len(plan.Warnings) > 0 {
+		fmt.Fprintln(os.Stdout)
+		fmt.Fprintf(os.Stdout, "%sWarnings:%s\n", cli.Yellow, cli.Reset)
+		for _, w := range plan.Warnings {
+			fmt.Fprintf(os.Stdout, "  ! %s\n", w)
 		}
 	}
 

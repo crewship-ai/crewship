@@ -92,8 +92,16 @@ type Options struct {
 	// after running its own prompt. Calling Apply() with Yes=false
 	// and HasDestructive()=true returns ErrConfirmationRequired so
 	// the caller can prompt and retry.
-	Yes      bool
-	OnReport func(line string)
+	Yes bool
+	// SkipTestGate forwards `skip_test_gate: true` on every routine
+	// save the apply produces. The server-side handler honours the
+	// flag only for OWNER/ADMIN callers; MANAGER+ requests fall back
+	// to the standard "fresh passing test_run within 5 minutes" gate.
+	// Required when applying a fresh routine whose dependencies (e.g.
+	// PENDING credentials) prevent a successful test_run from
+	// happening before save. See pipelines_crud.Save.
+	SkipTestGate bool
+	OnReport     func(line string)
 }
 
 // ErrConfirmationRequired is returned by Apply when the plan

@@ -24,9 +24,12 @@ For the narrative tour and the manifest format, see [Guides → Workspace Manife
 | `--replace` | `false` | Delete every matching resource before recreating it. Destructive; prompts unless `--yes`. |
 | `--from-env` | `false` | Read credential values from the process environment (var name = credential's `env:` field). |
 | `--secrets-file <path>` | `""` | Load credential values from a `KEY=VALUE` file. Comments (`#`) and quoted values supported. |
+| `--skip-test-gate` | `false` | Forward `skip_test_gate: true` on routine save so apply can ship a brand-new routine without first running it. Server gates the field on OWNER/ADMIN role; MANAGER+ callers get the standard "fresh passing test_run within 5 minutes" requirement. |
 | `-y`, `--yes` | `false` | Skip confirmation prompts. Required when running in a non-TTY (CI) with destructive operations. |
 
 `--strict` and `--replace` are mutually exclusive. Apply also requires an authenticated session (`crewship login`) and a workspace context — both are inherited from the current CLI profile.
+
+Use `--skip-test-gate` when applying a manifest whose routine depends on credentials that are still PENDING from the same apply: the test_run would attempt to invoke the routine before its credentials exist, fail, and block save. Operators with OWNER/ADMIN role bypass the gate; everyone else must seed the credentials first and re-run apply without the flag.
 
 ## Examples
 

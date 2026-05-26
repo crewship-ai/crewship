@@ -53,6 +53,13 @@ type Plan struct {
 	// plan will leave as PENDING (no value supplied). The CLI prints
 	// this list at the end so the user knows to fill values in.
 	PendingCredentials []string
+	// Warnings carries non-fatal advisories surfaced during plan
+	// construction. They do NOT block apply; the CLI prints them
+	// before exit so the operator sees them next to the summary.
+	// Examples: a routine declares a `type: code` step which the
+	// production runner does not yet wire (see
+	// internal/pipeline/runner_code.go).
+	Warnings []string
 }
 
 // HasDestructive returns true when the plan includes any delete.

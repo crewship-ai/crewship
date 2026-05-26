@@ -44,6 +44,13 @@ func (pb *planBuilder) planNewKinds(ctx context.Context, b *Bundle) error {
 		return err
 	}
 	c := newInternalClient(pb.client)
+	if pb.opts.SkipTestGate {
+		// Decorator pattern: the routine kind keeps building a plain
+		// save body, the boundary injects the OWNER/ADMIN bypass
+		// field. Scope is just the /pipelines/save endpoint — see
+		// internal/manifest/skip_test_gate.go.
+		c = withSkipTestGate(c)
+	}
 
 	// Phase 3: Projects (no deps)
 	for i := range b.Projects {
@@ -187,6 +194,7 @@ func (pb *planBuilder) planNewKinds(ctx context.Context, b *Bundle) error {
 			return fmt.Errorf("routine %q: plan: %w", doc.Metadata.Slug, err)
 		}
 		pb.appendKindItems(items)
+		pb.plan.Warnings = append(pb.plan.Warnings, routinePlanWarnings(doc)...)
 	}
 
 	// Phase 14: RecurringIssues (deps: Projects, Labels, Crews)
