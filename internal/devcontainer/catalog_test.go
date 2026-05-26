@@ -46,8 +46,8 @@ func TestCatalogHasMinimumEntries(t *testing.T) {
 	}
 }
 
-func TestSearchCatalogByName(t *testing.T) {
-	results := SearchCatalog("python")
+func TestFilterCatalog_FallbackByName(t *testing.T) {
+	results := FilterCatalog(FallbackCatalog, "python")
 	if len(results) == 0 {
 		t.Fatal("expected at least one result for 'python'")
 	}
@@ -63,17 +63,17 @@ func TestSearchCatalogByName(t *testing.T) {
 	}
 }
 
-func TestSearchCatalogByCategory(t *testing.T) {
-	results := SearchCatalog("cloud")
+func TestFilterCatalog_FallbackByCategory(t *testing.T) {
+	results := FilterCatalog(FallbackCatalog, "cloud")
 	if len(results) == 0 {
 		t.Fatal("expected results for category 'cloud'")
 	}
 }
 
-func TestSearchCatalogCaseInsensitive(t *testing.T) {
-	lower := SearchCatalog("node")
-	upper := SearchCatalog("NODE")
-	mixed := SearchCatalog("Node")
+func TestFilterCatalog_CaseInsensitive(t *testing.T) {
+	lower := FilterCatalog(FallbackCatalog, "node")
+	upper := FilterCatalog(FallbackCatalog, "NODE")
+	mixed := FilterCatalog(FallbackCatalog, "Node")
 
 	if len(lower) == 0 {
 		t.Fatal("expected results for 'node'")
@@ -84,15 +84,15 @@ func TestSearchCatalogCaseInsensitive(t *testing.T) {
 	}
 }
 
-func TestSearchCatalogNoMatch(t *testing.T) {
-	results := SearchCatalog("zzz_nonexistent_zzz")
+func TestFilterCatalog_FallbackNoMatch(t *testing.T) {
+	results := FilterCatalog(FallbackCatalog, "zzz_nonexistent_zzz")
 	if len(results) != 0 {
 		t.Errorf("expected empty results for nonsense query, got %d", len(results))
 	}
 }
 
-func TestSearchCatalogEmptyQuery(t *testing.T) {
-	results := SearchCatalog("")
+func TestFilterCatalog_FallbackEmptyQuery(t *testing.T) {
+	results := FilterCatalog(FallbackCatalog, "")
 	if len(results) != len(FallbackCatalog) {
 		t.Errorf("empty query should return all entries: got %d, want %d", len(results), len(FallbackCatalog))
 	}

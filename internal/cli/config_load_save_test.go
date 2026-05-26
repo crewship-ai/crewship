@@ -10,10 +10,10 @@ import (
 // ---------------------------------------------------------------------------
 // config.go — DefaultConfigDir, DefaultConfigPath, LoadConfig, SaveConfig.
 //
-// Existing config_test.go covers loadConfigFrom + marshalConfig (the path-
-// explicit variants used by unit tests). This file covers the four
-// public entry points that hit the real ~/.crewship path — exercised
-// hermetically by pointing $HOME at t.TempDir().
+// Existing config_test.go covers loadConfigFrom (the path-explicit
+// loader used by unit tests). This file covers the four public entry
+// points that hit the real ~/.crewship path — exercised hermetically
+// by pointing $HOME at t.TempDir().
 // ---------------------------------------------------------------------------
 
 func TestDefaultConfigDir_PointsAtHomeCrewship(t *testing.T) {

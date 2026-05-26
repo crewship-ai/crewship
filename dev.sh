@@ -668,19 +668,23 @@ cmd_nuke() {
   rm -f "$SOCKET_PATH"
   ok "Data directories removed"
 
-  # 4. Remove SQLite database
-  if [[ -f "$PROJECT_DIR/crewship.db" ]]; then
-    rm -f "$PROJECT_DIR/crewship.db"
-    rm -f "$PROJECT_DIR/crewship.db-shm"
-    rm -f "$PROJECT_DIR/crewship.db-wal"
-    # Migration safety snapshots: migrate.go writes
-    # crewship.db.pre-migrate-vXX-to-vYY-<ts>.bak whenever a migration
-    # mutates rows in a way that's hard to reverse. A factory reset
-    # that leaves these behind preserves data through the "nuke" and
-    # confuses DR testing — the supposedly-empty target boots with
-    # stale state from the previous lifecycle.
-    rm -f "$PROJECT_DIR"/crewship.db.pre-migrate-*.bak
-    ok "SQLite database removed"
+  # 4. Remove SQLite database + every sidecar file the engine writes
+  #    next to it (WAL journal, shared-memory file, schema-backup
+  #    snapshots from migrate.go's pre-migrate-vN-to-vM-<ts>.bak path).
+  #    Without the glob, a `nuke` left stale `.bak` files behind that
+  #    looked like "fresh start" containers had old data, and on a
+  #    later `restore` the migrate engine occasionally re-opened the
+  #    backup believing it was current. Wipe everything matching the
+  #    DB stem so the next `start` builds from scratch every time.
+  local db_removed=false
+  for path in "$PROJECT_DIR"/crewship.db "$PROJECT_DIR"/crewship.db-shm "$PROJECT_DIR"/crewship.db-wal "$PROJECT_DIR"/crewship.db-journal "$PROJECT_DIR"/crewship.db.pre-migrate-*; do
+    if [[ -e "$path" ]]; then
+      rm -f "$path"
+      db_removed=true
+    fi
+  done
+  if [[ "$db_removed" == "true" ]]; then
+    ok "SQLite database + sidecars removed"
   fi
 
   # 5. Remove log files

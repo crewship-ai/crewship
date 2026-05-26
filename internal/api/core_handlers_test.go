@@ -1312,7 +1312,7 @@ func TestCrewConnections_CRUD(t *testing.T) {
 	}
 }
 
-func TestAreCrewsConnected_AndConnectedCrewIDs(t *testing.T) {
+func TestAreCrewsConnected(t *testing.T) {
 	db := setupTestDB(t)
 	userID := seedTestUser(t, db)
 	wsID := seedTestWorkspace(t, db, userID)
@@ -1339,14 +1339,6 @@ func TestAreCrewsConnected_AndConnectedCrewIDs(t *testing.T) {
 	}
 	if ok, _ := AreCrewsConnected(ctx, db, "cb", "cc"); ok {
 		t.Errorf("cb↔cc not connected")
-	}
-
-	ids, err := ConnectedCrewIDs(ctx, db, "ca")
-	if err != nil {
-		t.Fatalf("conn ids: %v", err)
-	}
-	if len(ids) != 2 {
-		t.Errorf("ca connected to %d, want 2", len(ids))
 	}
 }
 

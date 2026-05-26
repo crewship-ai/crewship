@@ -1,9 +1,11 @@
 package api
 
 // Crew services helpers. The wire format for services is an opaque
-// JSON document stored in crews.services_json; this file parses,
-// validates, and translates it into the provider.CrewService shape
-// the docker provider consumes at EnsureCrewRuntime time.
+// JSON document stored in crews.services_json; this file validates
+// that document so a malformed payload never reaches the docker
+// provider. The resolve-to-provider.CrewService translation lives in
+// internal/chatbridge/services.go (kept duplicated to avoid a
+// chatbridge → api dependency cycle).
 //
 // The on-disk JSON mirrors internal/manifest.Service: it's the same
 // shape the manifest emits via apply, so the round-trip is
@@ -16,8 +18,6 @@ import (
 	"regexp"
 	"strings"
 	"time"
-
-	"github.com/crewship-ai/crewship/internal/provider"
 )
 
 // serviceWire is the JSON shape we accept on the wire and emit back
@@ -101,9 +101,10 @@ func validateServicesJSON(body string) error {
 			}
 			// Parse-validate each duration string up front so a
 			// typo ("5sec" instead of "5s") is reported at write
-			// time. Previously servicesFromJSON silently defaulted
-			// any unparseable duration to its hardcoded default,
-			// hiding config drift behind a happy-looking runtime.
+			// time. Without this, chatbridge.parseDuration silently
+			// defaults any unparseable value to its hardcoded
+			// fallback, hiding config drift behind a happy-looking
+			// runtime.
 			for fieldName, value := range map[string]string{
 				"interval":     s.Healthcheck.Interval,
 				"timeout":      s.Healthcheck.Timeout,
@@ -119,76 +120,4 @@ func validateServicesJSON(body string) error {
 		}
 	}
 	return nil
-}
-
-// servicesFromJSON deserialises services_json from a crew row and
-// resolves env_refs against the workspace's credentials table to
-// produce a provider.CrewService slice ready for the docker
-// provider. resolver is a function that, given an env var name,
-// returns its plaintext value (or empty when the credential is
-// PENDING; the provider treats empty as "skip injection").
-//
-// envValueFor MUST be a closure over the workspace's credential
-// vault — never a literal map exposed by the request body. The
-// only call path is loadCrewServices below.
-func servicesFromJSON(body string, envValueFor func(envVar string) string) ([]provider.CrewService, error) {
-	if strings.TrimSpace(body) == "" {
-		return nil, nil
-	}
-	var services []serviceWire
-	if err := json.Unmarshal([]byte(body), &services); err != nil {
-		return nil, fmt.Errorf("unmarshal services_json: %w", err)
-	}
-	out := make([]provider.CrewService, 0, len(services))
-	for _, s := range services {
-		env := map[string]string{}
-		for k, v := range s.Env {
-			env[k] = v
-		}
-		for _, ref := range s.EnvRefs {
-			if v := envValueFor(ref); v != "" {
-				env[ref] = v
-			}
-			// PENDING / missing credentials simply don't get
-			// injected. The sidecar may still start (e.g. Postgres
-			// with no POSTGRES_PASSWORD just fails inside its
-			// entrypoint) and the operator sees the failure mode
-			// they'd expect from a half-configured deploy.
-		}
-		vols := make([]provider.CrewServiceVolume, 0, len(s.Volumes))
-		for _, v := range s.Volumes {
-			vols = append(vols, provider.CrewServiceVolume{Name: v.Name, Mount: v.Mount})
-		}
-		var hc *provider.CrewServiceHealthcheck
-		if s.Healthcheck != nil {
-			hc = &provider.CrewServiceHealthcheck{
-				Test:    s.Healthcheck.Test,
-				Retries: s.Healthcheck.Retries,
-			}
-			hc.Interval = parseDuration(s.Healthcheck.Interval, 5*time.Second)
-			hc.Timeout = parseDuration(s.Healthcheck.Timeout, 3*time.Second)
-			hc.StartPeriod = parseDuration(s.Healthcheck.StartPeriod, 0)
-		}
-		out = append(out, provider.CrewService{
-			Name:        s.Name,
-			Image:       s.Image,
-			Command:     s.Command,
-			Env:         env,
-			Ports:       s.Ports,
-			Volumes:     vols,
-			Healthcheck: hc,
-		})
-	}
-	return out, nil
-}
-
-func parseDuration(s string, def time.Duration) time.Duration {
-	if s == "" {
-		return def
-	}
-	d, err := time.ParseDuration(s)
-	if err != nil {
-		return def
-	}
-	return d
 }
