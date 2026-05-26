@@ -565,13 +565,25 @@ func mapKindAction(a internalapi.PlanAction) Action {
 // apply loop (which passes ctx + *Client + Options). A nil inner
 // closure → nil wrapper, so ActionUnchanged items don't get a
 // no-op call.
+//
+// Re-applies the per-apply client decorators (today: withSkipTestGate)
+// at exec time. planNewKinds also applies them at plan time so the
+// build path sees the same surface, but the exec closure runs later
+// against an adapter constructed here — without the re-wrap, the
+// decorated planning client would be silently swapped for an
+// undecorated exec client and any body mutation (e.g.
+// skip_test_gate=true on routine save) would never reach the server.
 func wrapKindExec(inner func(ctx context.Context, c internalapi.Client) error, c *Client) func(ctx context.Context, _ *Client, _ Options) error {
 	if inner == nil {
 		return nil
 	}
 	adapter := newInternalClient(c)
-	return func(ctx context.Context, _ *Client, _ Options) error {
-		return inner(ctx, adapter)
+	return func(ctx context.Context, _ *Client, opts Options) error {
+		execClient := adapter
+		if opts.SkipTestGate {
+			execClient = withSkipTestGate(execClient)
+		}
+		return inner(ctx, execClient)
 	}
 }
 

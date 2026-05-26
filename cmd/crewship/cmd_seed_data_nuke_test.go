@@ -25,19 +25,23 @@ func TestSeedNuke_CascadesPipelines(t *testing.T) {
 
 	const wsID = "cabcdefghijklmnopqrs"
 
+	// Slice (not map) so the test can assert relative ordering. The
+	// production cascade documents "webhooks → schedules → pipelines"
+	// because schedules and webhooks FK back to pipelines; a regression
+	// that reorders the calls would corrupt the cascade silently if we
+	// only checked existence.
 	type seen struct {
 		mu      sync.Mutex
-		deletes map[string]bool
+		deletes []string
 	}
-	got := &seen{deletes: map[string]bool{}}
+	got := &seen{}
 
 	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
-		// Record every DELETE so the test can assert the cascade order.
 		if r.Method == http.MethodDelete {
 			got.mu.Lock()
-			got.deletes[r.URL.Path] = true
+			got.deletes = append(got.deletes, r.URL.Path)
 			got.mu.Unlock()
 			w.WriteHeader(http.StatusNoContent)
 			return
@@ -70,21 +74,38 @@ func TestSeedNuke_CascadesPipelines(t *testing.T) {
 		t.Fatalf("seedNuke: %v", err)
 	}
 
+	got.mu.Lock()
+	actual := append([]string(nil), got.deletes...)
+	got.mu.Unlock()
+
+	// Existence pass: every expected DELETE must be present.
 	wantDeletes := []string{
 		"/api/v1/workspaces/" + wsID + "/pipeline-webhooks/wh_test",
 		"/api/v1/workspaces/" + wsID + "/pipeline-schedules/psched_test",
 		"/api/v1/workspaces/" + wsID + "/pipelines/my-routine",
 	}
-	got.mu.Lock()
-	defer got.mu.Unlock()
+	idx := map[string]int{}
+	for i, p := range actual {
+		idx[p] = i
+	}
 	for _, want := range wantDeletes {
-		if !got.deletes[want] {
-			var keys []string
-			for k := range got.deletes {
-				keys = append(keys, k)
-			}
-			t.Errorf("seedNuke did not DELETE %q\nactual DELETEs: %s",
-				want, strings.Join(keys, "\n  "))
+		if _, ok := idx[want]; !ok {
+			t.Errorf("seedNuke did not DELETE %q\nactual DELETEs:\n  %s",
+				want, strings.Join(actual, "\n  "))
 		}
+	}
+
+	// Order pass: webhooks before schedules before the pipeline row
+	// itself. FK relations make the reverse order impossible to
+	// execute against a real Postgres without ON DELETE CASCADE.
+	if t.Failed() {
+		return
+	}
+	whIdx := idx["/api/v1/workspaces/"+wsID+"/pipeline-webhooks/wh_test"]
+	schIdx := idx["/api/v1/workspaces/"+wsID+"/pipeline-schedules/psched_test"]
+	plnIdx := idx["/api/v1/workspaces/"+wsID+"/pipelines/my-routine"]
+	if !(whIdx < plnIdx && schIdx < plnIdx) {
+		t.Errorf("cascade order broken: webhooks(%d), schedules(%d), pipelines(%d) — both triggers must precede the pipeline row\nactual DELETEs:\n  %s",
+			whIdx, schIdx, plnIdx, strings.Join(actual, "\n  "))
 	}
 }

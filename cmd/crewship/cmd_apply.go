@@ -133,6 +133,7 @@ func runApply(cmd *cobra.Command, args []string) error {
 
 	if dryRun {
 		printSummary(plan, nil)
+		printWarnings(plan)
 		return nil
 	}
 
@@ -163,6 +164,7 @@ func runApply(cmd *cobra.Command, args []string) error {
 	// fool downstream tooling into thinking apply succeeded.
 	if err != nil {
 		printSummary(plan, result)
+		printWarnings(plan)
 		if errors.Is(err, manifest.ErrConfirmationRequired) {
 			return fmt.Errorf("aborted: destructive plan requires confirmation (pass --yes)")
 		}
@@ -184,16 +186,25 @@ func runApply(cmd *cobra.Command, args []string) error {
 			fmt.Fprintf(os.Stdout, "  - %s\n", env)
 		}
 	}
-	if len(plan.Warnings) > 0 {
-		fmt.Fprintln(os.Stdout)
-		fmt.Fprintf(os.Stdout, "%sWarnings:%s\n", cli.Yellow, cli.Reset)
-		for _, w := range plan.Warnings {
-			fmt.Fprintf(os.Stdout, "  ! %s\n", w)
-		}
-	}
+	printWarnings(plan)
 
 	provisionHintForCrews(bundle)
 	return nil
+}
+
+// printWarnings emits the yellow "Warnings:" block at the tail of an
+// apply run. Called from every exit path that has built a Plan —
+// dry-run, apply-error, success — so the operator never silently
+// loses pre-flight advisories. No-op when there are none.
+func printWarnings(plan *manifest.Plan) {
+	if plan == nil || len(plan.Warnings) == 0 {
+		return
+	}
+	fmt.Fprintln(os.Stdout)
+	fmt.Fprintf(os.Stdout, "%sWarnings:%s\n", cli.Yellow, cli.Reset)
+	for _, w := range plan.Warnings {
+		fmt.Fprintf(os.Stdout, "  ! %s\n", w)
+	}
 }
 
 // loadManifestBundle reads from a file path, or from stdin when the
