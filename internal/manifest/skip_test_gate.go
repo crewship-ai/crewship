@@ -71,12 +71,17 @@ func isPipelineSavePath(path string) bool {
 // every caller in the manifest layer uses maps today, and silently
 // hijacking some other body shape would be more surprising than the
 // flag failing to apply.
+//
+// Capacity hint is len(m) (not len(m)+1) to keep CodeQL's "size
+// computation for allocation may overflow" gate quiet. Go grows the
+// map on the one extra Set call below, so the runtime cost is the
+// same one bucket reallocation either way.
 func mergeSkipTestGate(body any) any {
 	m, ok := body.(map[string]any)
 	if !ok {
 		return body
 	}
-	out := make(map[string]any, len(m)+1)
+	out := make(map[string]any, len(m))
 	for k, v := range m {
 		out[k] = v
 	}

@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/crewship-ai/crewship/internal/manifest/kinds"
 	"github.com/crewship-ai/crewship/internal/manifest/internalapi"
+	"github.com/crewship-ai/crewship/internal/manifest/kinds"
 )
 
 // TestRoutinePlanWarnings_FiresOnCodeStep verifies that a routine
