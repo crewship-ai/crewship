@@ -13,12 +13,23 @@ import (
 // ── Create — POST /api/v1/issues ────────────────────────────────────────────
 
 func (h *IssueHandler) Create(w http.ResponseWriter, r *http.Request) {
-	if !requireRole(w, r, "create") {
-		return
-	}
-
 	crewID := r.PathValue("crewId")
 	wsID := WorkspaceIDFromContext(r.Context())
+	// Layered gate: MANAGER+ passes (legacy); MEMBER with
+	// issue.create capability also passes (slash command UX).
+	// PRD-SLASH-CAPABILITIES-2026 §6.
+	role := RoleFromContext(r.Context())
+	caller := UserFromContext(r.Context())
+	callerID := ""
+	if caller != nil {
+		callerID = caller.ID
+	}
+	if !requireRoleOrCapabilityOrForbid(w, r, h.logger, h.db,
+		wsID, callerID, role,
+		CapabilityIssueCreate, "issue.create", "crew:"+crewID,
+		"create") {
+		return
+	}
 
 	var req struct {
 		Title         string   `json:"title"`

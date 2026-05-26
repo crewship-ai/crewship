@@ -60,23 +60,33 @@ type Router struct {
 	// it from the daemon depends on the host's /etc/hosts mapping —
 	// fragile on multi-host lab networks. Use the loopback variant
 	// (typically 127.0.0.1:<port>) instead when set. (Issue #535.)
-	internalLoopbackURL    string
-	hub                    *ws.Hub
-	orch                   *orchestrator.Orchestrator
-	keeperGK               gatekeeper.Evaluator
-	keeperSecrets          SecretGetter
-	keeperContainer        provider.ContainerProvider
-	keeperConfig           *config.KeeperConfig
-	keeperConvReader       ConversationReader
-	missionCallback        MissionCallback
-	scheduleUpdater        ScheduleUpdater
-	logWriter              *logcollector.Writer
-	allowSignup            bool
-	googleClientID         string
-	googleSecret           string
-	authBaseURL            string
-	license                *license.License
-	agentHandler           *AgentHandler
+	internalLoopbackURL string
+	hub                 *ws.Hub
+	orch                *orchestrator.Orchestrator
+	keeperGK            gatekeeper.Evaluator
+	keeperSecrets       SecretGetter
+	keeperContainer     provider.ContainerProvider
+	keeperConfig        *config.KeeperConfig
+	keeperConvReader    ConversationReader
+	missionCallback     MissionCallback
+	scheduleUpdater     ScheduleUpdater
+	logWriter           *logcollector.Writer
+	allowSignup         bool
+	googleClientID      string
+	googleSecret        string
+	authBaseURL         string
+	license             *license.License
+	agentHandler        *AgentHandler
+	// credentialHandler and skillGenHandler are stashed at
+	// registerCrewsRoutes time so the registerInternalRoutes step
+	// can wire the matching /api/v1/internal/credentials and
+	// /api/v1/internal/skills/generate adapters without re-
+	// constructing a parallel instance (matters for state-bearing
+	// fields like the SkillGenerateHandler's per-workspace LLM
+	// credential cache). nil-safe — adapters skip registration when
+	// the parent handler isn't wired (test routers, early init).
+	credentialHandler      *CredentialHandler
+	skillGenHandler        *SkillGenerateHandler
 	storagePath            string // base path for crew file storage
 	catalogFetcher         *devcontainer.CatalogFetcher
 	runtimeFetcher         *devcontainer.RuntimeFetcher

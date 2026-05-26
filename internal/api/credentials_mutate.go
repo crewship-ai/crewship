@@ -162,11 +162,13 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 		callerUserID = user.ID
 	}
 
-	// MANAGER tier can create credentials — the FE CASL ability mirrors
-	// this. "manage" was historically too tight (OWNER+ADMIN only) and
-	// caused 403s for the Add flow even though the button rendered.
-	if !requireRoleOrForbid(w, h.logger, callerUserID, role,
-		"credential.create", "workspace:"+WorkspaceIDFromContext(r.Context()), "create") {
+	// Layered gate: MANAGER+ passes (legacy); MEMBER with
+	// credential.create capability also passes (slash command UX).
+	// PRD-SLASH-CAPABILITIES-2026 §6.
+	if !requireRoleOrCapabilityOrForbid(w, r, h.logger, h.db,
+		workspaceID, callerUserID, role,
+		CapabilityCredentialCreate, "credential.create", "workspace:"+workspaceID,
+		"create") {
 		return
 	}
 	// Defence in depth: authed middleware should always populate user,

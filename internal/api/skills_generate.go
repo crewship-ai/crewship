@@ -92,13 +92,24 @@ You will receive the user's intent in the next message. Respond with the SKILL.m
 // minutes of polling. Same role as `skill import` to keep the surface
 // uniform.
 func (h *SkillGenerateHandler) Generate(w http.ResponseWriter, r *http.Request) {
-	if !requireRole(w, r, "create") {
-		return
-	}
-
 	wsID := r.PathValue("workspaceId")
 	if wsID == "" {
 		writeProblem(w, r, http.StatusBadRequest, "workspace_id is required")
+		return
+	}
+	// Layered gate: MANAGER+ role passes; MEMBER with skill.create
+	// capability also passes (slash command UX).
+	// PRD-SLASH-CAPABILITIES-2026 §6.
+	role := RoleFromContext(r.Context())
+	caller := UserFromContext(r.Context())
+	callerID := ""
+	if caller != nil {
+		callerID = caller.ID
+	}
+	if !requireRoleOrCapabilityOrForbid(w, r, h.logger, h.db,
+		wsID, callerID, role,
+		CapabilitySkillCreate, "skill.create", "workspace:"+wsID,
+		"create") {
 		return
 	}
 

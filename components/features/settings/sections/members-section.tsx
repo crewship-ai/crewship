@@ -16,6 +16,7 @@ import {
   Collapsible, CollapsibleContent, CollapsibleTrigger,
 } from "@/components/ui/collapsible"
 import { InviteMemberDialog } from "@/components/features/members/invite-member-dialog"
+import { CapabilityGrid } from "@/components/admin/capability-grid"
 import { cn } from "@/lib/utils"
 import { SettingsCard, SettingsRow } from "../shared"
 
@@ -39,6 +40,9 @@ interface MembersSectionProps {
   currentUserId?: string
   canInvite: boolean
   onRefresh: () => void
+  /** Caller's workspace role. Surfaces the per-member capability
+   *  grid (PRD-SLASH-CAPABILITIES-2026 §6.7) only for ADMIN+. */
+  callerRole?: string
 }
 
 // ── Constants ────────────────────────────────────────────────────────
@@ -97,9 +101,12 @@ export function MembersSection({
   currentUserId,
   canInvite,
   onRefresh,
+  callerRole,
 }: MembersSectionProps) {
   const [removingId, setRemovingId] = useState<string | null>(null)
   const [rolesOpen, setRolesOpen] = useState(false)
+  const [capsOpen, setCapsOpen] = useState(false)
+  const isAdmin = callerRole === "ADMIN" || callerRole === "OWNER"
 
   async function handleRemove(memberId: string) {
     setRemovingId(memberId)
@@ -248,6 +255,37 @@ export function MembersSection({
           </div>
         </CollapsibleContent>
       </Collapsible>
+
+      {/* ── Per-member capabilities (admin-only, PRD-SLASH-CAPABILITIES-2026 §6.7) ── */}
+      {isAdmin && currentUserId && (
+        <Collapsible open={capsOpen} onOpenChange={setCapsOpen}>
+          <CollapsibleTrigger asChild>
+            <button
+              type="button"
+              className="flex items-center gap-2 mb-2.5 group"
+            >
+              <motion.div animate={{ rotate: capsOpen ? 90 : 0 }} transition={{ duration: 0.15 }}>
+                <ChevronRight className="h-3 w-3 text-muted-foreground" />
+              </motion.div>
+              <span className="text-body font-medium text-muted-foreground group-hover:text-foreground/80 transition-colors leading-none">
+                Per-member capabilities
+              </span>
+              <span className="text-[10px] text-muted-foreground/60 leading-none">
+                grant individual high-value actions without promoting role
+              </span>
+            </button>
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <div className="rounded-xl border border-border/60 bg-card p-3">
+              <CapabilityGrid
+                members={members}
+                workspaceId={workspaceId}
+                currentUserId={currentUserId}
+              />
+            </div>
+          </CollapsibleContent>
+        </Collapsible>
+      )}
     </div>
   )
 }

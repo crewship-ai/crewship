@@ -69,12 +69,29 @@ func TestIssue_Create_MissingTitle(t *testing.T) {
 }
 
 func TestIssue_Create_Forbidden_Viewer(t *testing.T) {
-	h, userID, wsID, crewID, _, _ := newTestIssueHandler(t)
+	h, _, wsID, crewID, _, _ := newTestIssueHandler(t)
+
+	// Use a DISTINCT VIEWER user (not the OWNER from newTestIssueHandler) —
+	// post-PR the issue.Create handler's gate does a DB capability lookup,
+	// so faking VIEWER in ctx while the DB membership row says OWNER would
+	// grant via the capability path (OWNER row has issue.create). Seed a
+	// clean VIEWER row with chat-only caps so both role and capability
+	// dimensions deny.
+	viewerID := "viewer-issue-deny"
+	if _, err := h.db.Exec(`INSERT INTO users (id, email, full_name) VALUES (?, ?, 'V')`,
+		viewerID, viewerID+"@x"); err != nil {
+		t.Fatalf("seed viewer user: %v", err)
+	}
+	if _, err := h.db.Exec(`INSERT INTO workspace_members (id, workspace_id, user_id, role, capabilities) VALUES (?, ?, ?, 'VIEWER', '["chat"]')`,
+		"m-"+viewerID, wsID, viewerID); err != nil {
+		t.Fatalf("seed viewer membership: %v", err)
+	}
+	InvalidateCapabilityCache(wsID, viewerID)
 
 	body := bytes.NewBufferString(`{"title":"x"}`)
 	req := httptest.NewRequest("POST", "/", body)
 	req.SetPathValue("crewId", crewID)
-	ctx := withUser(req.Context(), &AuthUser{ID: userID})
+	ctx := withUser(req.Context(), &AuthUser{ID: viewerID})
 	ctx = withWorkspace(ctx, wsID, "VIEWER")
 	req = req.WithContext(ctx)
 	rr := httptest.NewRecorder()
