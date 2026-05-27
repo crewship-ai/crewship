@@ -1,0 +1,96 @@
+---
+title: "Workflow"
+description: "Manage workspace workflow templates — reusable issue-lifecycle stage definitions."
+icon: "git-branch"
+---
+
+# Workflow
+
+`cmd/crewship/cmd_workflow.go` exposes the workflow-template surface. A workflow template defines a reusable **issue lifecycle** — the ordered list of stages (e.g. `backlog → in_progress → review → done`) that crews attach to their issue trackers. Backed by `/api/v1/workflow-templates` (see `internal/api/workflow_templates_handler.go`).
+
+Aliases: `workflows`, `workflow-template`, `workflow-templates`.
+
+All commands operate on the active workspace ([`crewship workspace use`](/cli/workspace)) and resolve `<slug>` arguments against the stored template `name` — both an exact-name hit (case-insensitive) and a kebab-cased form like `engineering-standard` are accepted. Ambiguous slugs that match multiple templates fail with a hint to retry using the exact name.
+
+## `crewship workflow list`
+
+`GET /api/v1/workflow-templates`. Lists every template visible to the workspace — built-in rows first, then user-created.
+
+```bash
+crewship workflow list
+crewship workflows list                              # alias
+```
+
+Output columns: `ID`, `NAME`, `BUILTIN`, `STAGES`, `ICON`, `COLOR`. The `STAGES` column counts entries inside the stored `template_json` blob — a value of `0` indicates a corrupt row that should be inspected via `workflow get`.
+
+## `crewship workflow get <slug>`
+
+`GET /api/v1/workflow-templates/{id}` after resolving `<slug>` via the list endpoint. Prints every column including the full `template_json` so you can pipe it through `jq` to inspect the stage list.
+
+```bash
+crewship workflow get engineering-standard
+crewship workflow get "Engineering Standard"        # exact name also works
+```
+
+## `crewship workflow create -f <manifest.yaml>`
+
+`POST /api/v1/workflow-templates`. The CLI reads a SPEC-2 YAML manifest, validates the minimum shape locally, and posts the canonical `template_json` to the server (which re-validates the stage list).
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--file <path>` | string | (required) | Path to a SPEC-2 YAML manifest. **No `-f` shorthand** — root `--format` owns `-f`. |
+
+```yaml
+# engineering-standard.yaml
+apiVersion: crewship/v1
+kind: WorkflowTemplate
+metadata:
+  name: Engineering Standard
+  slug: engineering-standard
+spec:
+  description: Default issue lifecycle for engineering crews
+  icon: ":hammer_and_wrench:"
+  color: "#3B82F6"
+  stages:
+    - { name: backlog,     type: open,      position: 1, color: "#9CA3AF" }
+    - { name: in_progress, type: started,   position: 2, color: "#3B82F6" }
+    - { name: done,        type: completed, position: 3, color: "#10B981" }
+```
+
+```bash
+crewship workflow create --file engineering-standard.yaml
+```
+
+### Validation rules
+
+Enforced both client- and server-side (`validateTemplateJSON` in `internal/api/workflow_templates_handler.go`):
+
+- `spec.stages` must contain **at least one** stage.
+- Every stage requires `name`, `type`, and `position`.
+- `stage.type` must be one of `open`, `started`, `completed`, `cancelled`.
+- Exactly **one** stage with `type: open`; **at least one** with `type: completed`.
+- `name` and `position` values are unique within the template; `position` must be `> 0`.
+- `stage.color` (if set) must be a hex string like `#3B82F6`.
+
+A name collision with an existing template in the same workspace returns `409 Conflict`.
+
+## `crewship workflow delete <slug>`
+
+`DELETE /api/v1/workflow-templates/{id}` after resolving `<slug>`. Aliases: `remove`, `rm`. Prompts for confirmation unless `-y`/`--yes` is passed.
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `-y`, `--yes` | bool | `false` | Skip the interactive confirmation prompt. |
+
+```bash
+crewship workflow delete engineering-standard
+crewship workflow rm engineering-standard -y         # alias + non-interactive
+```
+
+Workflow templates are reference data — crews that still point at the deleted template fall back to the runtime default lifecycle rather than failing.
+
+## See also
+
+- [`crewship apply`](/cli/apply) — declarative path for the same manifest envelope; reconciles templates as part of a larger bundle.
+- [WorkflowTemplate manifest schema](https://github.com/crewship-ai/crewship/blob/main/docs/manifest/workflow_template.md) — full YAML field reference.
+- [`crewship issue`](/cli/issue) — issues whose stage column is governed by these templates.

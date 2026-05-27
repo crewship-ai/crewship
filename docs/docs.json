@@ -243,7 +243,8 @@
               "cli/triage",
               "cli/recurring",
               "cli/saved-view",
-              "cli/escalation"
+              "cli/escalation",
+              "cli/workflow"
             ]
           },
           {
