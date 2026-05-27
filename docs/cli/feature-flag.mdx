@@ -1,0 +1,93 @@
+---
+title: "crewship feature-flag"
+description: "List feature flags, toggle per-workspace overrides, or drop overrides to inherit the instance default."
+icon: "toggle-left"
+---
+
+# crewship feature-flag
+
+Manage feature flags for the current workspace. The CLI surfaces the **override** layer (per-workspace on/off) plus a `list` view that includes the instance default. Flag **definitions** (creating, renaming, deleting a flag's identity) are an instance-admin operation and live in the web UI and direct API calls — see [the API reference below](#api).
+
+```bash
+crewship feature-flag <subcommand> [flags]
+```
+
+The command accepts the alias `crewship flag`.
+
+## Subcommands
+
+| Command | Description |
+|---------|-------------|
+| `list` | Show every flag with its instance default, this workspace's override, and the effective value. |
+| `enable <key>` | Force the flag on for the current workspace (PUT override). |
+| `disable <key>` | Force the flag off for the current workspace (PUT override). |
+| `inherit <key>` | Drop the override and revert to the instance default. |
+
+---
+
+## `crewship feature-flag list`
+
+Lists every flag the instance knows about with three columns of state plus the resolved effective value:
+
+```bash
+crewship feature-flag list
+```
+
+| Column | Meaning |
+|--------|---------|
+| `KEY` | Flag identifier. |
+| `DEFAULT` | The instance default — what every workspace sees when there's no override. |
+| `WORKSPACE` | This workspace's override: `on`, `off`, or `inherit` when no override is set. |
+| `EFFECTIVE` | What actually applies to this workspace right now — the override if set, otherwise `DEFAULT`. |
+| `PERCENT` | Gradual-rollout percentage (server-side); overrides bypass the percentage gate entirely. |
+| `DESCRIPTION` | Free-form description from the flag definition; `-` when unset. |
+
+The global `--format` flag is honoured (`table`, `json`, `yaml`).
+
+---
+
+## `crewship feature-flag enable` / `disable`
+
+```bash
+crewship feature-flag enable provisioner-v2
+crewship feature-flag disable noisy-experiment
+```
+
+Writes a per-workspace override. Idempotent — repeating the command is a no-op. The override **always wins** over the instance default and the rollout percentage, so use these to opt a single workspace into or out of a flag regardless of the broader rollout state.
+
+---
+
+## `crewship feature-flag inherit`
+
+```bash
+crewship feature-flag inherit provisioner-v2
+```
+
+Removes the override. The next read of the flag reverts to the instance default + gradual-rollout percentage logic. Use this when you want a previously-pinned workspace to follow the instance default again.
+
+---
+
+## API
+
+The CLI is a thin wrapper over six endpoints:
+
+| Verb | Path | Wrapped by |
+|------|------|------------|
+| `GET` | `/api/v1/feature-flags` | `crewship feature-flag list` |
+| `POST` | `/api/v1/feature-flags` | — (web UI / direct API; flag definition CRUD) |
+| `PATCH` | `/api/v1/feature-flags/{key}` | — (web UI / direct API) |
+| `DELETE` | `/api/v1/feature-flags/{key}` | — (web UI / direct API) |
+| `PUT` | `/api/v1/feature-flags/{key}/override` | `enable` / `disable` |
+| `DELETE` | `/api/v1/feature-flags/{key}/override` | `inherit` |
+
+Flag definition CRUD (the three middle rows) intentionally has no CLI wrapper — creating a flag is an instance-admin event that should land via a code change, a migration, or the admin UI rather than an ad-hoc CLI call.
+
+## Common errors
+
+- **`API error (404): Feature flag not found`** — the `<key>` you passed doesn't exist on this instance. Run `crewship feature-flag list` to see the catalog.
+- **`API error (403): Forbidden`** — override writes require `OWNER` / `ADMIN` (`canRole "manage"`). MEMBER and VIEWER roles can only `list`.
+
+## See also
+
+- [Feature flag manifest](/manifest/feature_flag) — declare flags as part of a workspace manifest under [`crewship apply`](/cli/apply).
+- [`crewship features`](/cli/features) — different command, lists the devcontainer features catalog (note the missing hyphen).

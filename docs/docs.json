@@ -318,6 +318,7 @@
               "cli/system",
               "cli/backup",
               "cli/features",
+              "cli/feature-flag",
               "cli/runtimes",
               "cli/eval",
               "cli/consolidate",
