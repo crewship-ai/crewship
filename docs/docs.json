@@ -316,6 +316,7 @@
             "pages": [
               "cli/config",
               "cli/system",
+              "cli/instance",
               "cli/backup",
               "cli/features",
               "cli/feature-flag",

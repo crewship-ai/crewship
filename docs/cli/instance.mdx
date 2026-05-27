@@ -1,0 +1,105 @@
+---
+title: "crewship instance"
+description: "Read and write instance-wide settings stored in the singleton app_settings table."
+icon: "gear"
+---
+
+# crewship instance
+
+Manage instance-level configuration. Settings live in the singleton `app_settings` table and are shared across every workspace on this `crewshipd` binary. Most users do not need this command; it exists for the operator running [`crewship start`](/cli/start).
+
+```bash
+crewship instance settings <subcommand> [flags]
+```
+
+The `settings` group accepts the alias `setting`. Underneath sits a thin wrapper over [`/api/v1/instance/settings`](#api).
+
+## Subcommands
+
+| Command | Description |
+|---------|-------------|
+| `settings list` | List every key/value pair currently stored. |
+| `settings get <key>` | Read one setting. |
+| `settings set <key> <value>` | Upsert. Sensitive keys are stored verbatim but echoed back as `***`. |
+| `settings delete <key>` | Remove a setting. Aliases: `remove`, `rm`. Pass `--yes` to skip the confirmation prompt. |
+
+---
+
+## `crewship instance settings list`
+
+```bash
+crewship instance settings list
+```
+
+Columns: `KEY`, `VALUE`, `UPDATED`. The global `--format` flag is honoured (`table`, `json`, `yaml`).
+
+**Sensitive value redaction.** Three key-prefix patterns are written through but read as `***`:
+
+- `smtp.password`
+- `oauth.*.client_secret`
+- `webhook.*.secret`
+
+This is **server-side** redaction — `list` and `get` both return `***` for these keys. There is no read-the-real-value path; verify the value landed correctly by checking that the dependent service (SMTP send, OAuth callback, webhook delivery) actually works.
+
+---
+
+## `crewship instance settings get`
+
+```bash
+crewship instance settings get smtp.host
+# Key     : smtp.host
+# Value   : mail.acme-engineering.com
+# Updated : 2026-05-27T08:14:22Z
+```
+
+Returns `404` if the key has never been set. The compiled-in default (if any) is not surfaced — callers fall back via the same code path the web UI uses.
+
+---
+
+## `crewship instance settings set`
+
+```bash
+crewship instance settings set smtp.host mail.acme-engineering.com
+crewship instance settings set smtp.password "$(cat ~/.secrets/smtp-password)"
+# ✓ Setting saved: smtp.password = ***
+```
+
+Upserts. There is no separate `create` — `set` is idempotent. The echoed response for a sensitive key is `***`, not the literal value you sent — this is the redaction layer, not a bug.
+
+---
+
+## `crewship instance settings delete`
+
+```bash
+crewship instance settings delete smtp.host
+# Delete instance setting "smtp.host"? [y/N]: y
+# ✓ Setting deleted.
+
+crewship instance settings delete smtp.host --yes  # skip prompt
+```
+
+A small set of **bootstrap-protected** keys are rejected server-side with `403`:
+
+- `instance.bootstrap_at`
+- `instance.first_user_id`
+- `schema.version`
+
+Deleting these would break re-bootstrap on the next restart, so they cannot be removed via this surface. To rotate them, restart the daemon onto a fresh DB and re-bootstrap.
+
+---
+
+## API
+
+| Verb | Path | Wrapped by |
+|------|------|------------|
+| `GET` | `/api/v1/instance/settings` | `settings list` |
+| `GET` | `/api/v1/instance/settings/{key}` | `settings get` |
+| `PUT` | `/api/v1/instance/settings/{key}` | `settings set` |
+| `DELETE` | `/api/v1/instance/settings/{key}` | `settings delete` |
+
+All four require `OWNER` / `ADMIN` (`canRole "manage"`).
+
+## See also
+
+- [`crewship system`](/cli/system) — adjacent admin diagnostics (Keeper status, version, stats).
+- [`crewship system stats`](/cli/system#crewship-system-stats) — workspace-scoped aggregate; complements the instance-wide settings here.
