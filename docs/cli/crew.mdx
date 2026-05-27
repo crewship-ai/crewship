@@ -35,9 +35,13 @@ crewship crew <subcommand> [flags]
 | `config` | Manage runtime configuration (devcontainer, mise, runtime image) |
 | `provision` | Trigger devcontainer provisioning |
 | `provision status` | Check provisioning status |
+| `restart-agents` | Drop the runtime container so the next exec rebuilds from the cached image |
 | `rebuild` | Invalidate the cache and re-provision the container |
 | `cache list` | List cached devcontainer images (`crewship-cache:*`) |
 | `cache prune` | Remove old or unreferenced cached images |
+| `files list` | List entries under the crew's `/crew/shared/` Shared Ship volume |
+| `files get` | Download a file from the crew's shared volume |
+| `files save` | Upload bytes (stdin / `--file` / `--content`) into the shared volume |
 
 ---
 
@@ -361,6 +365,71 @@ crewship crew rebuild <slug-or-id> --no-watch
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--no-watch` | `bool` | `false` | Do not watch progress; return immediately after triggering. |
+
+---
+
+## `crewship crew restart-agents`
+
+Force-remove the crew's runtime container. The next agent exec recreates it from the current cached image, so agents pick up a new system prompt, new MCP config, and new env vars **without** a full rebuild. Idempotent — succeeds with `restarted=0` when no container was running.
+
+```bash
+crewship crew restart-agents <slug-or-id>
+crewship crew restart-agents <slug-or-id> --format json
+```
+
+Backed by `POST /api/v1/crews/{crewId}/restart-agents`. The handler returns `{"restarted": <n>}`. Use `restart-agents` for hot config refreshes; reach for [`rebuild`](#crewship-crew-rebuild) only when the image itself has changed.
+
+---
+
+## `crewship crew files`
+
+Inspect or write files in the crew's `/crew/shared/` directory — the inter-agent **Shared Ship** namespace. Alias: `crew file`. Server routes live in `internal/api/proxy_files.go`; the CLI download path mirrors [`crewship agent files`](/cli/agent#crewship-agent-files) so the table / json / yaml output feels identical across scopes.
+
+### `crewship crew files list <slug-or-id>`
+
+```bash
+crewship crew files list demo-crew
+crewship crew files list demo-crew --path /shared/notes
+crewship crew files list demo-crew --recursive --format json --filter '.[] | .name'
+```
+
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--path <subdir>` | string | (root) | Subdirectory under `/crew/shared` to list. Forwarded as `?subdir=`. |
+| `--recursive` | bool | `false` | Recurse into subdirectories. Forwarded as `?recursive=true`. |
+| `--filter <expr>` | string | | gojq filter applied before rendering. |
+
+### `crewship crew files get <slug-or-id> <path>`
+
+Stream a file from the crew shared volume. Defaults to stdout when no `--out` is given so the output is pipe-friendly; pass `--out <file>` (or `-` to force stdout) to land bytes on disk.
+
+```bash
+crewship crew files get demo-crew shared/notes.md
+crewship crew files get demo-crew shared/dump.bin --out /tmp/dump.bin
+```
+
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--out <path>` | string | (stdout) | Output path. `-` or empty means stdout. |
+
+Disk writes use the same atomic-tempfile-then-`rename(2)` pattern as `agent files --download`, so a Ctrl-C or transport hiccup mid-copy does not clobber an existing good file.
+
+### `crewship crew files save <slug-or-id> <path>`
+
+Upload bytes to the crew shared volume. Source comes from `--file` (local path), `--content` (inline string), or stdin when neither flag is given. `--content` and `--file` are mutually exclusive.
+
+```bash
+echo "hi" | crewship crew files save demo-crew shared/hi.txt
+crewship crew files save demo-crew shared/note.md --content "draft"
+crewship crew files save demo-crew shared/data.bin --file /tmp/data.bin
+```
+
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--content` | string | | Inline content string. |
+| `--file` | string | | Local file path to upload. |
+
+Save issues a raw `PUT /api/v1/crews/{crewId}/files/save?path=…` with `Content-Type: application/octet-stream` so binary uploads round-trip byte-for-byte.
 
 ---
 
