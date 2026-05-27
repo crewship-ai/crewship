@@ -149,9 +149,8 @@ succeeds in one command.
 
 | Command | Description |
 |---|---|
-| `crewship saved-view list` | List every saved view visible to the current user (own + shared) |
-| `crewship saved-view get <slug>` | Read one saved view by slug |
-| `crewship saved-view delete <slug>` | Delete a saved view (owner-only) |
+| `crewship saved-view list` | List every saved view visible to the current user (own + shared). |
+| `crewship saved-view delete <view-id>` | Delete a saved view (owner-only). Takes the **view id**, not a slug — saved views have no slug column server-side. |
 | `crewship apply -f saved-view.yaml` | Create or update from a manifest |
 | `crewship export workspace` | Include saved views in the workspace export |
 

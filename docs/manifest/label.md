@@ -97,11 +97,12 @@ hood; no new subcommands ship with this kind.
 
 | Command                                | Description                          |
 | -------------------------------------- | ------------------------------------ |
-| `crewship label list`                  | List every label in the workspace.   |
-| `crewship label create <name> --color` | Create one label inline.             |
-| `crewship label delete <id>`           | Remove a label (by id, not name).    |
-| `crewship apply --file labels.yaml`    | Declarative upsert from manifest.    |
-| `crewship export workspace`            | Round-trip — emits one doc per row.  |
+| `crewship label list`                                    | List every label in the workspace.   |
+| `crewship label create --name <name> --color <hex>`      | Create one label inline. `--name` and `--color` are required flags; `--group` is optional. |
+| `crewship label update <id> --name <name> --color <hex>` | Patch fields on one label by id. |
+| `crewship label delete <id>`                             | Remove a label (by id, not name).    |
+| `crewship apply --file labels.yaml`                      | Declarative upsert from manifest.    |
+| `crewship export workspace`                              | Round-trip — emits one doc per row.  |
 
 ## REST endpoint mapping
 
