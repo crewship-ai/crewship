@@ -305,6 +305,7 @@
               "cli/approvals",
               "cli/policy",
               "cli/hire",
+              "cli/persona",
               "cli/hooks",
               "cli/checkpoint"
             ]

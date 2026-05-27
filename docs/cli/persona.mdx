@@ -1,0 +1,125 @@
+---
+title: "crewship persona"
+description: "View, edit, reset, and inspect the version history of PERSONA.md for an agent or a crew default."
+icon: "user-pen"
+---
+
+# crewship persona
+
+Manage `PERSONA.md` — the ~1.5 KB identity surface the orchestrator
+injects into every agent's system prompt at session start. The CLI
+mirrors the [agent persona API](/api-reference/agents#agent-persona) and the [crew persona API](/api-reference/crews#crew-persona).
+
+Two layers:
+
+- **Agent layer** — per-agent override. Wins outright when non-empty.
+- **Crew default layer** — workspace-shared baseline that every agent in the crew falls back to.
+
+```bash
+crewship persona <subcommand> [flags]
+```
+
+All commands operate on the active workspace ([`crewship workspace use`](/cli/workspace)) and resolve targets by slug, not ID, to match the rest of the CLI surface.
+
+## Subcommands
+
+| Command | Description |
+|---------|-------------|
+| `view <agent-slug>` | Show the resolved persona — content plus which layer it came from. |
+| `edit <agent-slug>` | Open `$EDITOR` to update the agent-layer override. |
+| `reset <agent-slug>` | Drop the agent-layer file (crew default reappears). |
+| `history <agent-slug>` | List the agent's persona version log (newest first). |
+| `suggest-from-inbox <audit-id>` | Operator-side approval of a pending agent persona proposal. |
+| `crew <crew-slug>` | Sub-tree applying the same view/edit/reset/history verbs to the crew-default layer. |
+
+---
+
+## `crewship persona view`
+
+```bash
+crewship persona view <agent-slug>
+```
+
+Prints the resolved persona — agent-layer file if present, otherwise crew default, otherwise the per-role synthesised stub — along with the layer marker and byte count.
+
+```text
+Layer:        agent       (1842 / 1500 bytes)
+From default: false
+─────
+# Engineer
+
+Focus on backend services. Prefer async over sync...
+```
+
+`From default` is `true` only when neither agent nor crew has a file on disk and the response is the `You are the {role}...` synthesised text — useful when reviewing a freshly-onboarded crew.
+
+---
+
+## `crewship persona edit`
+
+```bash
+crewship persona edit <agent-slug>
+crewship persona edit <agent-slug> --no-editor < new-persona.md
+```
+
+Pulls the current agent-layer content, opens `$EDITOR`, and writes the saved buffer back via [`PUT /api/v1/agents/{id}/persona`](/api-reference/agents#set-persona). Without an editor (CI, piped stdin) pass `--no-editor` and provide the new body on stdin.
+
+| Flag | Default | Effect |
+|---|---|---|
+| `--no-editor` | `false` | Skip `$EDITOR`; read the new content from stdin. |
+
+The server caps at **1500 bytes**; the CLI rejects oversize buffers client-side before the round-trip.
+
+---
+
+## `crewship persona reset`
+
+```bash
+crewship persona reset <agent-slug>
+```
+
+Removes the agent-layer file. The next `view` falls through to the crew default (or the synthesised stub when the crew has none).
+
+---
+
+## `crewship persona history`
+
+```bash
+crewship persona history <agent-slug>
+crewship persona history <agent-slug> --limit 5
+```
+
+Lists `memory_versions` rows for the agent's `PERSONA.md` path, newest first. Server clamps `--limit` to 100. Use the printed `sha256` with [`crewship memory show`](/cli/memory#show) to read an older version's content without restoring it.
+
+---
+
+## `crewship persona suggest-from-inbox`
+
+```bash
+crewship persona suggest-from-inbox <audit-id>
+```
+
+When an agent's [`POST /persona/suggest`](/api-reference/agents#suggest-persona) lands as an inbox proposal (because the crew's autonomy is `strict` / `guided` / `trusted`), this is the operator's approval path: redeem the inbox `audit_id` to apply the proposed content and write a `memory_versions` entry.
+
+Reject with the regular [`crewship approve --deny`](/cli/approvals) flow against the same inbox item.
+
+---
+
+## `crewship persona crew`
+
+```bash
+crewship persona crew <crew-slug>              # default subcommand: view
+crewship persona crew view <crew-slug>
+crewship persona crew edit <crew-slug>
+crewship persona crew reset <crew-slug>
+```
+
+Same verbs against the crew-default layer at [`/api/v1/crews/{crewId}/persona`](/api-reference/crews#crew-persona). There is **no `suggest`** equivalent — agents propose only into their own layer, and the operator authors crew defaults directly.
+
+---
+
+## See also
+
+- [Agent Persona API](/api-reference/agents#agent-persona) — REST shape per endpoint, plus the policy gating for `suggest`.
+- [Crew Persona API](/api-reference/crews#crew-persona) — the default layer this CLI's `crew` sub-tree edits.
+- [Autonomy & self-learning](/guides/autonomy-and-self-learning) — how crew `autonomy_level` decides whether an agent's `suggest` auto-applies or queues for operator approval.
