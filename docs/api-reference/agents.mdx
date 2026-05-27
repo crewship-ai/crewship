@@ -496,6 +496,103 @@ who turns it on must be senior enough to own the consequences.
 
 ---
 
+## Agent Peer Cards
+
+Per-`(agent, user)` markdown notes produced by the `PeerCardSync`
+routine — the agent's own "what I know about this person" file.
+These endpoints are **operator-facing**: the cards live on disk
+under `{outputBase}/crews/{crewID}/agents/{slug}/.memory/peers/`,
+and every read/write/delete writes a `peer_card_audit` row for GDPR
+SAR coverage.
+
+The user-facing surface (view-mine / opt-out / delete-mine) lives
+under `/api/v1/users/me/peer-cards` and shares the same disk + DB
+primitives — these agent-flavor endpoints exist so an operator can
+clean up cards on behalf of a user (compliance ticket, leaver
+workflow) or inspect what an agent has been writing about people.
+
+The `{userId}` path parameter is the raw `user_id`; the server
+derives the `user_slug` via `memory.UserSlug` so the URL stays
+debuggable.
+
+### List Agent Peers
+
+```
+GET /api/v1/agents/{agentId}/peers
+```
+
+Returns the agent's peer-card index (no card content — fetch via the
+single-card endpoint below). Workspace-scoped; agents in other
+workspaces return `404`.
+
+**Response:** `200 OK`
+
+```json
+{
+  "agent_id": "agent-uuid",
+  "peers": [
+    {
+      "id": "pc-uuid",
+      "user_id": "user-uuid",
+      "user_slug": "alice",
+      "bytes": 412,
+      "created_at": "2026-05-10T...",
+      "updated_at": "2026-05-26T..."
+    }
+  ]
+}
+```
+
+| Status | Condition |
+|--------|-----------|
+| `404` | Agent not found in the current workspace |
+| `409` | Agent has no `crew_id` — peer cards require a crew-scoped path |
+
+### Get Agent Peer Card
+
+```
+GET /api/v1/agents/{agentId}/peers/{userId}
+```
+
+Returns one card's full content (markdown). Writes a `read` row to
+`peer_card_audit`.
+
+**Response:** `200 OK`
+
+```json
+{
+  "agent_id": "agent-uuid",
+  "user_id": "user-uuid",
+  "user_slug": "alice",
+  "content": "# Alice Chen\n\n- Prefers async over sync...\n",
+  "bytes": 412
+}
+```
+
+| Status | Condition |
+|--------|-----------|
+| `404` | Agent not found, or no card exists for this `(agent, user)` |
+| `409` | Agent has no `crew_id` |
+| `503` | `outputBasePath` not configured server-side |
+
+### Delete Agent Peer Card
+
+```
+DELETE /api/v1/agents/{agentId}/peers/{userId}
+```
+
+Removes the card from disk and the `peer_cards` row, then writes a
+`delete` audit row. Idempotent — deleting a non-existent card returns
+`204` rather than `404` so an operator script can retry safely.
+
+**Response:** `204 No Content`
+
+<Note>
+  The GDPR cascade endpoint [`DELETE /api/v1/admin/users/{userId}/data`](/api-reference/admin#delete-api-v1-admin-users-userid-data) deletes peer cards across **all** agents in the workspace for a single user — that's the right path for a full SAR. This per-agent endpoint is for the narrower "clean up just this agent's notes about this user" case.
+</Note>
+
+---
+
 ## Agent Skills
 
 ### List Skills
