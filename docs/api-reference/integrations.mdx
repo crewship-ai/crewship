@@ -279,6 +279,73 @@ Same probe semantics as the workspace test endpoint.
 |---|---|
 | `404` | Crew or integration not found |
 
+### List Crew Integration Tools
+
+```
+GET /api/v1/crews/{crewId}/integrations/{integrationId}/tools?workspace_id={workspaceId}
+```
+
+Returns the catalog of tools exposed by the bound MCP server, with
+each tool's per-crew enabled/disabled state. The catalog itself is
+cached server-side; calls to this endpoint do **not** re-fetch from
+the MCP server — use [Refresh Crew Integration Tools](#refresh-crew-integration-tools) for that.
+
+**Response:** `200 OK`
+
+```json
+{
+  "tools": [
+    { "name": "search", "description": "...", "enabled": true },
+    { "name": "create_issue", "description": "...", "enabled": false }
+  ]
+}
+```
+
+| Status | Condition |
+|---|---|
+| `404` | Crew or integration not found |
+
+### Update Crew Integration Tool
+
+```
+PATCH /api/v1/crews/{crewId}/integrations/{integrationId}/tools/{toolName}?workspace_id={workspaceId}
+Content-Type: application/json
+```
+
+Flip a single tool's enabled flag for this crew. Wraps the `crewship
+integration tool enable/disable` CLI subcommands.
+
+**Request Body:**
+
+```json
+{ "enabled": false }
+```
+
+**Response:** `200 OK` — updated tool object.
+
+| Status | Condition |
+|---|---|
+| `404` | Crew, integration, or tool name not found in the cached catalog |
+
+### Refresh Crew Integration Tools
+
+```
+POST /api/v1/crews/{crewId}/integrations/{integrationId}/tools/refresh?workspace_id={workspaceId}
+```
+
+Re-fetch the tool catalog from the MCP server and overwrite the
+server-side cache. Use after the MCP server adds, renames, or removes
+tools — without a refresh, the [List](#list-crew-integration-tools)
+endpoint will keep returning the stale catalog.
+
+**Response:** `200 OK` — same shape as List, reflecting the new
+catalog.
+
+| Status | Condition |
+|---|---|
+| `404` | Crew or integration not found |
+| `502` | MCP server unreachable or returned an invalid catalog |
+
 ---
 
 ## Agent MCP Bindings
