@@ -1,14 +1,58 @@
 ---
 title: "Authentication"
-description: "Google sign-in, device pairing for the CLI, active-session management, long-lived CLI tokens, and email-based password recovery."
+description: "Email/password signup, Google sign-in, device pairing for the CLI, active-session management, long-lived CLI tokens, and email-based password recovery."
 icon: "lock"
 ---
 
 # Authentication
 
-Authentication surface in Crewship is split across several flows. The interactive web flow is `/api/auth/*` (NextAuth-compatible -- see [Internal API](/api-reference/internal)); everything covered on this page is the `/api/v1/auth/*` surface that wraps Google sign-in, CLI pairing, active session listing/revocation, long-lived CLI tokens, and password recovery.
+Authentication surface in Crewship is split across several flows. The interactive web flow is `/api/auth/*` (NextAuth-compatible -- see [Internal API](/api-reference/internal)); everything covered on this page is the `/api/v1/auth/*` surface that wraps email/password signup, Google sign-in, CLI pairing, active session listing/revocation, long-lived CLI tokens, and password recovery.
 
 All `/api/v1/auth/*` routes are mounted behind a rate limit of 10 req/min/IP. Routes marked **auth required** read the caller's identity from the session cookie issued by `/api/auth/callback/credentials`; the rest are intentionally unauthenticated because the request body (a state token, pairing code, or reset token) IS the credential.
+
+---
+
+## Email/password signup
+
+### `POST /api/v1/auth/signup`
+
+Create a new user, their starter workspace, and the OWNER workspace
+membership in a single transaction, then set the session cookie so
+the client is signed in immediately. Off by default — enable with
+`CREWSHIP_ALLOW_SIGNUP=true` at startup. On a closed instance
+(default), the endpoint returns `403` with the env-var name in the
+error message.
+
+**Request body:**
+
+```json
+{
+  "full_name": "Alice Chen",
+  "email": "alice@example.com",
+  "password": "correct-horse-battery-staple"
+}
+```
+
+| Field | Rule |
+|-------|------|
+| `full_name` | Min 2 characters. |
+| `email` | Must match the server's basic email regex. |
+| `password` | Min 8 characters. |
+
+**Response:** `201 Created` with the new user + workspace summary and
+a `Set-Cookie: __Secure-authjs.session-token=...` header. The caller
+is signed in — no follow-up login call needed.
+
+| Status | Condition |
+|--------|-----------|
+| `400` | Field fails one of the validation rules above. |
+| `403` | Signup is disabled (`CREWSHIP_ALLOW_SIGNUP` is unset/false). |
+| `409` | Email already registered on this instance. |
+| `500` | DB transaction or session-cookie issue failed; account rolled back so no orphan rows land. |
+
+<Note>
+  Signup is distinct from [`POST /api/v1/bootstrap`](/api-reference/overview) — bootstrap is the one-shot empty-instance flow that always creates the first OWNER regardless of `CREWSHIP_ALLOW_SIGNUP`. Signup is the steady-state "add another user to this open instance" surface. Most production deployments leave signup off and onboard via [device pairing](#device-pairing) or direct admin invites.
+</Note>
 
 ---
 
