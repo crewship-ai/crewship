@@ -261,6 +261,168 @@ Soft-deletes the agent (sets `deleted_at`).
 
 ---
 
+## Agent Persona
+
+The persona layer is per-agent `PERSONA.md` markdown that the
+orchestrator injects into every system prompt. Resolution is layered:
+the agent layer (if a file exists on disk) wins; otherwise the crew
+default layer; otherwise the synthesized default built from the
+agent's role + role title. Direct writes are operator-only; agents
+edit only via the **suggest** endpoint, which the policy resolver
+gates per crew-autonomy level (see [Autonomy & self-learning](/guides/autonomy-and-self-learning)).
+
+### Get Persona
+
+```
+GET /api/v1/agents/{agentId}/persona
+```
+
+Returns the resolved persona — agent layer if a file is present,
+crew default otherwise, synthesised default if neither layer is
+configured.
+
+**Response:** `200 OK`
+
+```json
+{
+  "agent_id": "agent-uuid",
+  "layer": "agent",
+  "from_default": false,
+  "content": "# PERSONA.md...\n",
+  "bytes": 1842,
+  "cap_bytes": 1500
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `layer` | `string` | `agent` or `crew` — which layer the response came from. The synthesised default is reported as `crew` with `from_default = true`. |
+| `from_default` | `bool` | `true` when no file exists on either layer and the synthesised "You are the {role}…" stub was returned |
+| `cap_bytes` | `integer` | Max accepted size on `PUT` / `POST suggest` (`memory.PersonaCapBytes` = 1500 bytes) |
+
+### Set Persona
+
+```
+PUT /api/v1/agents/{agentId}/persona
+Content-Type: application/json
+```
+
+Operator-only direct write of the agent layer. Records a row in
+`memory_versions` so [Get Persona History](#get-persona-history) can
+replay the chain.
+
+**Request:**
+
+```json
+{ "content": "# Engineer\n\nFocus on backend services...\n" }
+```
+
+**Response:** `200 OK`
+
+```json
+{ "layer": "agent", "bytes": 1842, "updated": "2026-05-27T18:42:11Z" }
+```
+
+| Status | Condition |
+|--------|-----------|
+| `413` | `content` exceeds `cap_bytes` |
+| `400` | Invalid JSON or missing storage configuration |
+| `500` | Storage write/fsync failure |
+
+<Note>
+  Agents cannot use this endpoint to mutate their own persona — `ActionPersonaDirectWrite` is `DecisionRejected` across every autonomy level in Phase 1. Agent edits flow exclusively through [Suggest Persona](#suggest-persona).
+</Note>
+
+### Reset Persona
+
+```
+DELETE /api/v1/agents/{agentId}/persona
+```
+
+Removes the agent layer file. The next `GET` falls through to the crew layer (or the synthesised default).
+
+**Response:** `204 No Content`
+
+### Get Persona History
+
+```
+GET /api/v1/agents/{agentId}/persona/history?limit=20
+```
+
+Lists rows from `memory_versions` filtered to this agent's
+`PERSONA.md` path. Pairs with [`GET /api/v1/admin/memory/versions/{id}/content`](/api-reference/admin#get-api-v1-admin-memory-versions-id-content) for content drill-down — the history endpoint deliberately omits content to keep responses small.
+
+**Query Parameters:**
+
+| Param | Default | Max | Description |
+|-------|---------|-----|-------------|
+| `limit` | `20` | `100` | Page size, clamped server-side. |
+
+**Response:** `200 OK`
+
+```json
+{
+  "entries": [
+    {
+      "id": "mv-cuid",
+      "sha256": "deadbeef…",
+      "bytes": 1842,
+      "written_at": "2026-05-27T18:42:11Z",
+      "written_by": "user-uuid",
+      "parent_sha": "cafef00d…"
+    }
+  ]
+}
+```
+
+`parent_sha` is omitted on the first version (when the chain starts).
+
+### Suggest Persona
+
+```
+POST /api/v1/agents/{agentId}/persona/suggest
+Content-Type: application/json
+```
+
+Agent-initiated persona proposal. The crew's autonomy policy decides
+the outcome:
+
+| Crew autonomy | Outcome |
+|---------------|---------|
+| `strict` / `guided` / `trusted` | Inbox approval item created. Agent learns `pending` so it can reference the proposal in subsequent runs. |
+| `full` | Auto-apply + journal entry — unless the agent's `self_learning_enabled = 0`, which demotes auto-apply back to inbox approval. |
+
+`ActionPersonaDirectWrite` is rejected across every autonomy level —
+this endpoint is the **only** path an agent can use to write a
+persona.
+
+**Request:**
+
+```json
+{
+  "content": "# Engineer\n\nFocus on backend services...\n",
+  "rationale": "Operator briefly emphasised the on-call rotation; reflecting that in the persona."
+}
+```
+
+**Response:** `200 OK`
+
+```json
+{
+  "decision": "inbox_approve",
+  "inbox_id": "ib-cuid",
+  "rationale": "..."
+}
+```
+
+| Status | Condition |
+|--------|-----------|
+| `400` | Missing / empty `content` field |
+| `413` | `content` exceeds `cap_bytes` |
+| `503` | Server built without storage configuration (`outputBasePath` empty) |
+
+---
+
 ## Agent Skills
 
 ### List Skills
