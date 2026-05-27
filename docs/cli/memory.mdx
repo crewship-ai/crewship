@@ -111,6 +111,58 @@ crewship memory reindex -p /path/to/crew-root -S crew
 
 Returns non-zero exit code if all reindex operations fail.
 
+### log
+
+List the `memory_versions` audit chain for a path, newest-first. **Reads the local DB directly** (`openAdminDB` — same DB the server uses) rather than going through the API; that means it works without a running server but the binary must run on the same host as the data dir.
+
+```bash
+crewship memory log <workspace-id> <path>
+crewship memory log <workspace-id> <path> --limit 100 --format text
+```
+
+`<path>` is the audit-trail identifier the consolidator + approve flow record under. For canonical learned files this is `crew:<crew_id>/learned-YYYY-MM-DD.md` (see `internal/consolidate.canonicalAuditPath`); for pins it's `crew:<crew_id>/pins.md`.
+
+| Flag | Default | Description |
+|---|---|---|
+| `--limit <n>` | `20` | Max rows. Clamped to `1000` server-side. |
+| `--format` | `json` | `json` (pretty-printed) or `text` (one row per line, git-log–style: `<sha-12>  <ts>  <bytes> B  <writtenBy>`). |
+
+Empty result prints `no versions for <ws> @ <path>` to stderr and exits 0.
+
+### show
+
+Print the raw content of one historical version to stdout. The canonical file on disk is **not** touched — this is the "preview without restoring" path.
+
+```bash
+crewship memory show <workspace-id> <path> <sha>
+crewship memory show <ws> <path> <sha> > preview.md
+```
+
+Stdout = raw blob bytes (pipe-friendly). Stderr carries status/errors. Exit codes:
+
+- `0` — blob found and streamed
+- `1` — version not found or read error
+- `2` — invalid usage
+
+### restore
+
+Atomically replace the canonical memory file at `<canonical-path>` with the content of version `<sha>`, then write a fresh `memory_versions` row so the chain stays forward-only — history is never rewritten.
+
+```bash
+crewship memory restore <workspace-id> <path> <sha> <canonical-path>
+crewship memory restore ws_a crew:abc/learned-2026-05-20.md <sha> /data/memory/ws_a/crew_abc/learned-2026-05-20.md \
+  --user operator@example.com --tier learned
+```
+
+| Flag | Default | Description |
+|---|---|---|
+| `--blob-root` | `{CREWSHIP_DATA_DIR}/memory/versions` (or `~/.crewship/memory/versions`) | Content-addressed blob store root. Match what the server wrote to. |
+| `--user` | `$USER` (falls back to `cli`) | `writtenBy` for the new audit row. Use a real operator id for compliance trails. |
+| `--tier` | `learned` | Tier label for the new audit row: `agent` / `crew` / `workspace` / `pins` / `learned`. |
+| `--force` | `false` | Skip the "canonical path must stay inside the data dir" guard. Use only when a workspace's memory dir lives outside the standard tree. |
+
+The path guard rejects empty strings, any path containing `..`, and any target whose absolute form does not start with `{blob-root}/..` (the data dir, one level above `versions`).
+
 ## Scope and Path Resolution
 
 The meaning of `--path` depends on the selected scope:
