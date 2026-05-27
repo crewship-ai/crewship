@@ -118,6 +118,28 @@ crewship journal priority j_abc --mark normal
 
 The `--mark` value is validated client-side before the request goes out. Each invocation also writes a `memory.priority_changed` audit entry to the journal carrying the previous and new priority plus the supplied reason — so the curation history is itself queryable.
 
+## `crewship journal lookup`
+
+Fetch the workspace reference table the web timeline uses to render journal cards with human-readable crew/agent/mission names. Useful for joining `crewship journal --format json` output against names in shell pipelines.
+
+```bash
+crewship journal lookup
+crewship journal lookup --format json
+crewship journal lookup --format json | jq '.crews[] | {id, slug, name}'
+```
+
+Backed by `GET /api/v1/journal/lookup`. The endpoint is workspace-scoped — no filter arguments. The response groups three reference lists:
+
+| Section | Fields |
+|---|---|
+| `crews` | `id`, `name`, `slug`, `icon`, `color` |
+| `agents` | `id`, `name`, `slug`, `crew_id` |
+| `missions` | `id`, `title`, `status` |
+
+Text mode renders each section as a short table and caps each at **50 rows** so the output stays scannable; pass `--format json` (or `yaml`) to get the full unbounded snapshot.
+
+To narrow the timeline to a single run rather than a reference table, use [`crewship journal --trace-id <run-id>`](#flags) on the list command — the two surfaces serve different jobs.
+
 ## Sample output
 
 ```
