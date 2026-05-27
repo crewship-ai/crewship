@@ -262,6 +262,41 @@ POST /api/v1/crews/{crewId}/members?workspace_id={workspaceId}
 | `404` | Crew not found |
 | `409` | User is already a member of this crew |
 
+### Update Member Role
+
+```
+PATCH /api/v1/crews/{crewId}/members/{memberId}?workspace_id={workspaceId}
+Content-Type: application/json
+```
+
+Elevate or clear the per-crew role override. The crew-member row
+carries an optional `role` column that, when set, **wins over** the
+workspace-level role for permissions scoped to this crew. Clearing it
+(empty or omitted `role`) drops the member back to inheriting their
+workspace role.
+
+**Auth:** `OWNER` or `ADMIN` role on the workspace. A per-crew ADMIN
+is **not** allowed to reshape membership — that could ladder a MEMBER
+straight to OWNER and bypass the workspace gate.
+
+**Request Body:**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `role` | string | No | One of `OWNER`, `ADMIN`, `MANAGER`, `MEMBER`, `VIEWER`. Omit or pass `""` to clear the override (member inherits workspace role). |
+
+```json
+{ "role": "ADMIN" }
+```
+
+**Response:** `200 OK` — updated member object.
+
+| Status | Condition |
+|---|---|
+| `400` | `role` is not in the enum set |
+| `403` | Caller is not workspace OWNER / ADMIN |
+| `404` | Crew or member not found |
+
 ### Remove Member
 
 ```
