@@ -271,9 +271,9 @@ No authentication required. Returns `{"status": "ok"}` with HTTP 200.
 
 | Endpoint | Description |
 |---|---|
-| `GET /api/v1/admin/stats` | Platform statistics |
-| `GET /api/v1/admin/users` | List all users |
-| `GET /api/v1/admin/workspaces` | List all workspaces |
+| `GET /api/v1/admin/stats` | Aggregate counts for the current workspace (workspaces always 1, users, agents, running) |
+| `GET /api/v1/admin/users` | List members of the current workspace |
+| `GET /api/v1/admin/workspaces` | Return the current workspace with member/agent/crew counts |
 | `GET /api/v1/admin/keeper/requests` | Keeper access request log |
 
 ### Audit
