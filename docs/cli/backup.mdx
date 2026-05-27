@@ -25,6 +25,7 @@ reference.
 |---------|-------------|
 | `create` | Create a new backup bundle. |
 | `list` | List bundles in `~/.crewship/backups`. |
+| `download` | Stream a backup bundle from the server to disk. |
 | `inspect` | Show the manifest of a bundle without decrypting the payload. |
 | `verify` | Recompute and check the bundle SHA-256 without restoring. |
 | `restore` | Restore a workspace or crew from a bundle. |
@@ -32,6 +33,8 @@ reference.
 | `delete` | Remove a single bundle from disk. |
 | `status` | Show the active advisory lock for this workspace. |
 | `unlock` | Force-release a stale advisory lock (emergency only). |
+| `self-test` | Run the backup canary round-trip on a crew (admin diagnostic). |
+| `metrics` | Show process-lifetime backup counters (instance owner only). |
 
 ---
 
@@ -75,6 +78,29 @@ crewship backup list
 ```
 
 **Output columns:** FILE, SCOPE, SIZE, ENCRYPTED, FORMAT, CREATED_AT.
+
+---
+
+## `crewship backup download`
+
+Stream a backup bundle from the server's backup directory to a local
+file. The argument is the bundle's full path as returned by
+[`backup list`](#crewship-backup-list). Used when the bundle lives on
+the server (e.g. nightly create on a remote instance) and you need a
+local copy before [`restore`](#crewship-backup-restore).
+
+```bash
+crewship backup download /var/crewship/backups/crewship-workspace-acme-2026-05-27.tar.zst
+crewship backup download /var/crewship/backups/bundle.tar.zst --out ~/restores/bundle.tar.zst
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--out` | `string` | basename of source | Output file path. |
+| `--force` | `bool` | `false` | Overwrite the output file if it already exists. Without this flag the command refuses to clobber, since a bundle is the only authoritative copy of a workspace at that point in time. |
+
+The endpoint sends `no-store`/`no-cache` headers and a half-written
+file is removed on copy failure — partial bundles never land on disk.
 
 ---
 
@@ -198,6 +224,42 @@ crewship backup unlock --force
   alongside it; the two will race on the Docker pause / unpause
   sequence. Confirm no backup is actually running before invoking this.
 </Warning>
+
+---
+
+## `crewship backup self-test`
+
+Run the server-side canary round-trip (collect → destroy → restore →
+verify → cleanup) on a crew's container without producing a bundle on
+disk. Quick way to validate the backup pipeline end-to-end after
+upgrading the agent runtime image or after restoring an instance.
+
+```bash
+crewship backup self-test --crew dev-team
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--crew` | `string` | — | Crew slug or ID to run the canary against. **Required.** |
+
+Output is the server's raw JSON: an `"ok"` boolean and per-stage
+timings. Non-zero exit if any stage of the round-trip fails.
+
+---
+
+## `crewship backup metrics`
+
+Dump the in-memory backup counters — created / failed totals, duration
+quantiles, lock-held gauge. These are **process-lifetime** values that
+reset on a restart of `crewshipd`, so they're useful for a quick health
+read after a long-running run, not for historical reporting (use the
+journal for that).
+
+```bash
+crewship backup metrics
+```
+
+Gated to instance OWNER server-side. Output is pretty-printed JSON.
 
 ## See also
 
