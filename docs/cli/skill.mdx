@@ -30,6 +30,9 @@ crewship skill <subcommand> [flags]
 | `delete` | Remove a skill from the workspace registry. |
 | `assign` | Attach a skill to one agent, several agents, or a whole crew. |
 | `unassign` | Detach the same way. |
+| `proposed list` | List skills auto-promoted from memory awaiting operator approval. |
+| `proposed approve` | Import a staged proposal via the canonical importer. |
+| `proposed reject` | Discard a staged proposal (deletes the `.proposed/` file). |
 
 ---
 
@@ -111,6 +114,19 @@ crewship skill list --vendor anthropic --category DESIGN
 crewship skill list --installed-for viktor
 crewship skill list --search pdf
 ```
+
+---
+
+## `crewship skill get`
+
+Show metadata for one skill — name, slug, category, version, source, author, tool count, created-at. The markdown `description` body renders below the metadata block via `glamour` for human formats; JSON / YAML / quiet outputs include it raw inside the serialized struct.
+
+```bash
+crewship skill get <slug-or-id>
+crewship skill get pdf-cleanup --format json | jq '.tool_count'
+```
+
+Backed by `GET /api/v1/skills/{id}` after resolving `<slug-or-id>` to the skill's id.
 
 ---
 
@@ -246,6 +262,58 @@ After `unassign`, the next time the agent runs, the orchestrator prunes
 the skill folder from the agent's container (`.claude/skills/<slug>/`,
 `.cursor/rules/<slug>.mdc`, etc.) so a CLI auto-discovery walker can no
 longer pick it up.
+
+---
+
+## `crewship skill proposed`
+
+Operator-side HITL surface for the memory→Skills bridge. When the consolidator sees a learned rule with sustained recall (default ≥ 10 recall events, composite score ≥ 0.85) it stages an Anthropic-format `SKILL.md` under `.memory/{crew-slug}/topics/.proposed/skill-<slug>.md`. These three verbs let an operator inspect and decide. Each requires `OWNER`, `ADMIN`, or `MANAGER` role.
+
+### `crewship skill proposed list`
+
+```bash
+crewship skill proposed list --crew <crew-id>
+crewship skill proposed list --crew <crew-id> --format json
+```
+
+| Flag | Required | Description |
+|---|---|---|
+| `--crew` | yes | Crew id whose `.proposed/` dir to scan. The CLI URL-encodes this value so any future id-scheme change with special chars stays safe. |
+| `--format` | no | `text` (default) or `json`. |
+
+**Output columns:** FILE, NAME, CATEGORY, DESCRIPTION (truncated to 60 chars), QUALITY (`ok` when the server didn't flag it).
+
+Backed by `GET /api/v1/skills/proposed?crew_id=<id>`.
+
+### `crewship skill proposed approve`
+
+Run the staged file through the canonical skill importer — same path as URL-based imports, so the SPDX license check and prompt-injection scan apply. On success the staging file is deleted and an `EntryMemorySkillApproved` journal entry fires.
+
+```bash
+crewship skill proposed approve --crew <crew-id> --file skill-deploy-friday.md
+```
+
+| Flag | Required | Description |
+|---|---|---|
+| `--crew` | yes | Crew id. |
+| `--file` | yes | Staged file name as listed (e.g. `skill-deploy-friday.md`). |
+
+Backed by `POST /api/v1/skills/proposed/approve`. Output: `approved <file> -> skill <id> (<slug>, created|updated)`.
+
+### `crewship skill proposed reject`
+
+Discard the staging file without importing. **Idempotent** — rejecting an already-deleted file returns success, and an `EntryMemorySkillRejected` journal entry fires either way.
+
+```bash
+crewship skill proposed reject --crew <crew-id> --file skill-noise.md
+```
+
+| Flag | Required | Description |
+|---|---|---|
+| `--crew` | yes | Crew id. |
+| `--file` | yes | Staged file name. |
+
+Backed by `POST /api/v1/skills/proposed/reject`.
 
 ---
 
