@@ -496,6 +496,61 @@ who turns it on must be senior enough to own the consequences.
 
 ---
 
+## Agent Inbox Summary
+
+```
+GET /api/v1/agents/{agentId}/inbox
+```
+
+Consolidated "what's waiting on this agent" payload used by the
+Crews preview panel — one round-trip instead of four parallel fetches
+across approvals, assignments, escalations, and peer messages. UI is
+the primary consumer; operators can poll the endpoint for an at-a-glance
+load check.
+
+**Response:** `200 OK`
+
+```json
+{
+  "approvals_pending": 2,
+  "assignments_open": 5,
+  "escalations_open": 0,
+  "peer_messages": [
+    {
+      "id": "pm-uuid",
+      "from_agent_name": "Martin",
+      "from_agent_slug": "martin",
+      "question": "What's the latest on the deploy script?",
+      "response": null,
+      "escalated": false,
+      "status": "open",
+      "created_at": "2026-05-27T12:30:00Z",
+      "direction": "incoming"
+    }
+  ],
+  "cost_usd_this_month": 4.21,
+  "llm_calls_this_month": 312,
+  "tokens_used_this_month": 184221
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `approvals_pending` | `int` | Inbox waitpoint items awaiting this agent's decision. |
+| `assignments_open` | `int` | Tasks routed to this agent that have not reached a terminal state. |
+| `escalations_open` | `int` | Peer conversations escalated up the lead chain that still target this agent. |
+| `peer_messages` | `array` | Last N peer messages (both directions). `direction` is `"incoming"` or `"outgoing"`; `response` and `duration_ms` are populated only for resolved exchanges. |
+| `cost_usd_this_month` | `float` | Sum of `paymaster_events.cost_usd` for runs attributed to this agent in the current calendar month. |
+| `llm_calls_this_month` | `int` | Count of `agent_run` step completions in the current month. |
+| `tokens_used_this_month` | `int64` | Sum of input + output tokens reported by the journal in the current month. |
+
+| Status | Condition |
+|--------|-----------|
+| `401` | Workspace context missing |
+| `404` | Agent not found in the current workspace |
+
+---
+
 ## Agent Peer Cards
 
 Per-`(agent, user)` markdown notes produced by the `PeerCardSync`
