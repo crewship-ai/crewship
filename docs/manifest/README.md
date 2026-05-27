@@ -29,8 +29,12 @@ spec:
 
 | Kind | What it is | Lifecycle | Doc |
 |---|---|---|---|
-| [`Workspace`](workspace.md) | Top-level bundle: credentials + skills + crews | full CRUD | (existing) |
-| [`Crew`](crew.md) | One crew: agents + sidecars + MCP servers + credentials | full CRUD | (existing) |
+| `Workspace` | Top-level bundle: credentials + skills + crews | full CRUD | _(in-tree; see [SPEC-2](../../.claude/context/specs/SPEC-2-manifest-complete.md) — page pending)_ |
+| `Crew` | One crew: agents + sidecars + MCP servers + credentials | full CRUD | _(in-tree; see [SPEC-2](../../.claude/context/specs/SPEC-2-manifest-complete.md) — page pending)_ |
+| `Agent` | Single agent within a crew (used inline under `Crew.spec.agents` or standalone) | full CRUD | _(page pending)_ |
+| `Skill` | Skill registry entry (used inline under `Workspace.spec.skills`) | full CRUD | _(page pending)_ |
+| `Integration` | MCP server integration (workspace-, crew-, or agent-scoped) | full CRUD | _(page pending)_ |
+| `Issue` | Issue tracker row (rarely declared standalone — typically managed via the API/CLI) | full CRUD | _(page pending)_ |
 | [`Project`](project.md) | Container for missions and milestones | full CRUD | [project.md](project.md) |
 | [`Label`](label.md) | Tag for issues and missions | full CRUD | [label.md](label.md) |
 | [`Milestone`](milestone.md) | Time-boxed project goal | full CRUD | [milestone.md](milestone.md) |
@@ -130,18 +134,18 @@ Every kind also has a per-entity CLI surface for one-off operations (no manifest
 |---|---|
 | Project | `crewship project list/get/create/update/delete` |
 | Label | `crewship label list/create/update/delete` |
-| Milestone | `crewship milestone list/create/update/delete` |
-| Routine | `crewship pipeline list/save/run/schedules/webhooks/...` |
-| RecurringIssue | `crewship recurring list/create/update/delete` |
-| TriageRule | `crewship triage list/create/update/delete/process` |
-| SavedView | `crewship saved-view list/create/update/delete` |
+| Milestone | `crewship project milestone list/create/update/delete` |
+| Routine | `crewship routine list/save/run/schedules/webhooks/...` (alias: `pipeline`) |
+| RecurringIssue | `crewship recurring list/delete` |
+| TriageRule | `crewship triage list/process` |
+| SavedView | `crewship saved-view list/delete` |
 | WorkflowTemplate | `crewship workflow list/get/create/delete` |
 | FeatureFlag | `crewship feature-flag list/enable/disable/inherit` |
 | InstanceSetting | `crewship instance settings list/get/set/delete` |
 | Hook | `crewship hooks list/enable/disable` |
-| Recipe | `crewship recipe list/get/install` |
+| Recipe | _(manifest-only — install via `crewship apply`)_ |
 | CrewTemplate | `crewship template list/get/deploy` |
-| Connector | `crewship connector list/get/install` |
+| Connector | _(manifest-only — install via `crewship apply`)_ |
 
 ## Examples
 
