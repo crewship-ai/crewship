@@ -30,6 +30,7 @@ See [Routines guide](/guides/routines) for the conceptual overview.
 | Diagnostics | `bench <slug>` | Variance characterisation — N runs, pass-rate + cost/latency stats |
 | Runs | `runs <slug>` | List recent runs from journal |
 | Runs | `records <slug>` | List runs from `pipeline_runs` projection (v83) |
+| Runs | `active` | List in-flight runs across the workspace |
 | Runs | `logs <run_id>` | Full journal trace for a run (post-mortem) |
 | Runs | `cancel <run_id>` | Cancel an in-flight run |
 | Runs | `watch <slug>` | Stream live run + step events |
@@ -203,6 +204,22 @@ crewship routine records eval-extract-emails --json | jq '.[] | select(.cost_usd
 | `--json` | Emit JSON for scripting |
 
 Falls back with a clear message to `crewship routine runs <slug>` when the server predates v83.
+
+---
+
+## `crewship routine active`
+
+List in-flight runs across the entire workspace (not scoped to a single slug). Useful when triaging "is anything still running?" before a deploy or restart.
+
+```bash
+crewship routine active
+```
+
+Backed by `GET /api/v1/workspaces/{ws}/pipelines/runs/active` — the handler note in `internal/api/pipeline_handler_extra.go` flags it as **single-replica scope**: in a multi-replica deployment the response only reflects runs hosted by the replica the request landed on.
+
+**Output columns:** RUN_ID (truncated), SLUG, STARTED, CANCEL_REQ, CONCURRENCY_KEY. Empty list prints `No active runs.`
+
+Pair with `routine cancel <run_id>` to terminate any of the listed runs.
 
 ---
 
