@@ -1,0 +1,142 @@
+---
+title: "Admin"
+description: "Host-only operator commands that bypass the HTTP API and write directly to the local SQLite database. The recovery surface for when a user (typically you) cannot log in."
+icon: "key-round"
+---
+
+# crewship admin
+
+`cmd/crewship/cmd_admin.go` exposes the **operator-on-the-host recovery surface**. Every subcommand under `admin` opens the local SQLite database directly (no HTTP, no auth token) — the server doesn't even need to be running. Use these when a user is locked out of the UI.
+
+The "credential" for these commands is **shell access to the host**. That matches what GitLab (`gitlab-rake gitlab:password:reset`), Gitea (`gitea admin user change-password`), Nextcloud (`occ user:resetpassword`), and Mattermost (`mmctl user change-password`) all do — if you can SSH to the box, you ARE the admin.
+
+```bash
+crewship admin <subcommand> [flags]
+```
+
+Requirements:
+
+- Read+write access to the data directory (default `~/.crewship`). The binary opens `~/.crewship/crewship.db` directly via `openAdminDB`.
+- The `crewship` binary must run on the **same host** as the data directory.
+- A `crewship login` token is **not** required — the host's filesystem permissions are the authentication.
+
+## Subcommands
+
+| Command | Purpose |
+|---|---|
+| `reset-password` | Reset a user's password (interactive prompt or `--password` / `--password-stdin`). |
+| `list-users` | List every user in the local database. |
+| `promote` | Promote a user to a workspace role (`OWNER`, `ADMIN`, `MANAGER`). |
+| `invalidate-sessions` | Force-logout every active session for a user (no password change). |
+| `sessions list` | Forensic read of `user_sessions` for one user — all rows, including revoked + expired. |
+
+---
+
+## `crewship admin reset-password`
+
+Rotate a user's password. The hashed value is written into `users.password_hash` and every active session row for that user is revoked as a side effect (the audit trail records `reason='admin_reset'`).
+
+```bash
+# Interactive: stdin prompt with hidden input (no shell-history leak)
+crewship admin reset-password --email admin@example.com
+
+# Scripted: pipe the new password on stdin (CI-friendly)
+echo 's3cret!' | crewship admin reset-password --email admin@example.com --password-stdin
+
+# Argv (NOT recommended — visible in shell history and ps output)
+crewship admin reset-password --email admin@example.com --password 's3cret!'
+```
+
+| Flag | Required | Description |
+|---|---|---|
+| `--email` | yes | Email of the user to reset. Normalised lowercase. |
+| `--password` | no | New password as argv. Leaks to shell history; avoid in CI. |
+| `--password-stdin` | no | Read the new password from stdin. Mutually exclusive with `--password`. |
+
+Omit both `--password` and `--password-stdin` to get an interactive prompt with hidden input — the right default for ad-hoc recovery from a host shell.
+
+---
+
+## `crewship admin list-users`
+
+Dump every row in the `users` table, ordered by `created_at`. Shows email, full name, role, lockout state, and the last successful login timestamp.
+
+```bash
+crewship admin list-users
+crewship admin list-users --locked-only
+```
+
+| Flag | Default | Description |
+|---|---|---|
+| `--locked-only` | `false` | Filter to currently locked-out accounts only. Useful when triaging "who's stuck?" after a brute-force probe. |
+
+The lockout column reflects the `users.locked_until` timestamp set by the failed-login throttle — `list-users --locked-only` followed by `reset-password` is the canonical "unlock this user" pair.
+
+---
+
+## `crewship admin promote`
+
+Grant a workspace role to an existing user. Roles ascend `MANAGER` < `ADMIN` < `OWNER`; the command writes the row into `workspace_members` (or upgrades the existing row in place).
+
+```bash
+crewship admin promote --email admin@example.com --role OWNER
+crewship admin promote --email lead@example.com --role ADMIN --workspace acme
+```
+
+| Flag | Required | Description |
+|---|---|---|
+| `--email` | yes | Email of the user to promote. |
+| `--role` | yes | Target role — exactly one of `OWNER`, `ADMIN`, `MANAGER`. |
+| `--workspace` | no | Workspace slug. Defaults to the user's only workspace **when they have exactly one** — when ambiguous the command errors and asks you to pick. |
+
+This is the post-`init` step for bootstrapping a second admin: the first user from `crewship init` is `OWNER` automatically; everyone else starts as a regular member and needs `admin promote` to gain elevated access without going through the UI.
+
+---
+
+## `crewship admin invalidate-sessions`
+
+Force-logout every active session for one user **without** changing their password. The user can still sign in normally afterwards — they just have to re-authenticate on every device they were already on.
+
+```bash
+crewship admin invalidate-sessions --email user@example.com
+```
+
+| Flag | Required | Description |
+|---|---|---|
+| `--email` | yes | Email of the user whose sessions to revoke. |
+
+Each revoked row is stamped `reason='admin_invalidate'` so the audit trail distinguishes this from the side-effect revokes that fire during `reset-password` (those carry `reason='admin_reset'`).
+
+When to reach for this instead of `reset-password`:
+
+- Laptop stolen / recovered, the password is believed safe but a cached cookie might still be on the device.
+- Suspected token leak via Slack screenshot, browser history dump, etc.
+- Periodic compliance sweep — "log everyone out of yesterday's sessions".
+
+---
+
+## `crewship admin sessions list`
+
+Forensic read of `user_sessions` for one user — mirrors [`crewship session list`](/cli/session) but for **arbitrary** users (the user-side command is self-only). Admin-only via direct DB access.
+
+```bash
+crewship admin sessions list --email user@example.com
+crewship admin sessions list --email user@example.com --active-only
+crewship admin sessions list --email user@example.com --limit 200
+```
+
+| Flag | Required | Default | Description |
+|---|---|---|---|
+| `--email` | yes | | Email of the user whose sessions to list. |
+| `--active-only` | no | `false` | Filter to non-revoked, non-expired rows (matches what `crewship session list` shows the user themselves). |
+| `--limit` | no | `50` | Row cap. Useful for users with hundreds of historic sessions. |
+
+Output columns: SESSION ID, CREATED, EXPIRES, REVOKED, STATUS (derived from `revoked_at` + `expires_at`), DEVICE, IP, LAST SEEN. Sorted `created_at DESC`. A typo'd email reports `no user with email <addr>` rather than silently returning zero rows.
+
+Pair with `admin invalidate-sessions` to act on what `sessions list` surfaces.
+
+## See also
+
+- [`crewship init`](/cli/init) — first-user bootstrap on a fresh database. After `init`, `admin promote` is how you add a second OWNER.
+- [`crewship session`](/cli/session) — user-scoped self-service of the same `user_sessions` table.
+- [`crewship doctor`](/cli/doctor) — adjacent host-side diagnostics (data dir, schema version, container runtime).

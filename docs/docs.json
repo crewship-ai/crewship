@@ -192,7 +192,8 @@
               "cli/setup",
               "cli/session",
               "cli/token",
-              "cli/me"
+              "cli/me",
+              "cli/admin"
             ]
           },
           {
