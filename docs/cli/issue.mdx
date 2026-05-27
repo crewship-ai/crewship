@@ -24,10 +24,19 @@ crewship issue <subcommand> [flags]
 | `update` | Update an issue |
 | `delete` | Delete an issue |
 | `comment` | Add a comment to an issue |
+| `comments` | List comments on an issue |
 | `labels` | List workspace labels |
 | `start` | Start an issue (dispatch to assigned agent) |
 | `stop` | Stop an issue (cancel running tasks) |
 | `review` | Review an issue (approve or request changes) |
+| `activity` | Show the activity timeline for an issue |
+| `subtasks` | List sub-issues of an issue (aliases: `subissues`, `sub-issues`) |
+| `relate` | Create a relation between two issues |
+| `relations` | List relations for an issue (alias: `relates`) |
+| `unrelate` | Remove a relation by relation ID |
+| `bind-routine` | Bind a routine slug to an issue (sets `routine_id`) |
+| `unbind-routine` | Clear the routine binding on an issue |
+| `bulk update` | Apply the same patch to up to 100 issues in one round-trip |
 
 ---
 
@@ -196,3 +205,120 @@ crewship issue review BE-42 --action request_changes --comment "Needs more tests
 | `--action` | `string` | _(required)_ | Review action: `approve` or `request_changes`. |
 | `--comment` | `string` | | Review comment. |
 | `--reassign` | `string` | | Agent slug to reassign to (for `request_changes`). |
+
+---
+
+## `crewship issue comments`
+
+List comments on an issue. Hits `GET /api/v1/crews/{crewId}/issues/{ident}/comments` after resolving `<identifier>` to its crew via `fetchIssue`.
+
+```bash
+crewship issue comments BE-42
+```
+
+**Output columns:** ID, AUTHOR, TYPE, BODY (truncated to 60 chars, newlines flattened), CREATED.
+
+---
+
+## `crewship issue activity`
+
+Dump the mission-activity timeline for an issue. Hits `GET /api/v1/crews/{crewId}/issues/{ident}/activity`. Server caps the result at 50 rows DESC — pipe through `jq` if you need older history.
+
+```bash
+crewship issue activity BE-42
+crewship issue activity BE-42 --format json | jq '.[] | select(.action=="status_changed")'
+```
+
+**Output columns:** WHEN (relative time), ACTOR (`type/name`), ACTION, DETAILS (truncated to 60 chars).
+
+---
+
+## `crewship issue subtasks`
+
+List sub-issues — children whose `parent_issue_id` equals this issue's id. Mirrors the **SubIssues** panel on the issue-detail page.
+
+Aliases: `subissues`, `sub-issues`.
+
+```bash
+crewship issue subtasks BE-42
+crewship issue subissues BE-42                # alias
+```
+
+**Output columns:** ID, TITLE (truncated to 50), STATUS, PRIORITY, ASSIGNEE.
+
+---
+
+## `crewship issue relate`
+
+Create a typed link between two issues. Wraps `POST /api/v1/crews/{crewId}/issues/{ident}/relations`.
+
+```bash
+crewship issue relate BE-42 BE-50 --type blocks
+crewship issue relate BE-42 BE-50 --type blocked-by   # hyphens auto-normalised to underscores
+```
+
+| Flag | Default | Description |
+|---|---|---|
+| `--type` | `relates_to` | Relation type: `blocks`, `blocked_by`, `relates_to`, `duplicate_of`. Hyphenated forms (`blocked-by`, `relates-to`, `duplicate-of`) are normalised client-side. |
+
+## `crewship issue relations`
+
+List existing relations on an issue. Alias: `relates`.
+
+```bash
+crewship issue relations BE-42
+```
+
+**Output columns:** ID, TYPE, TARGET (identifier), TITLE (truncated to 40), STATUS.
+
+## `crewship issue unrelate`
+
+Remove a relation by its **relation ID** (not the issue identifier). Hits `DELETE /api/v1/relations/{id}`.
+
+```bash
+crewship issue unrelate rel_01HVZ...
+```
+
+---
+
+## `crewship issue bind-routine`
+
+Bind a routine slug to an issue — the server stores the underlying `routine_id` (pipeline UUID) so subsequent routine renames don't break the link. Wraps `PATCH /api/v1/crews/{crewId}/issues/{ident}` with `{"routine_id": <id>}`.
+
+```bash
+crewship issue bind-routine BE-42 my-pr-review-routine
+```
+
+The slug is resolved client-side via the workspace's routine list before the PATCH, so a typo surfaces as `routine "xyz": <404>` instead of a silent no-op.
+
+## `crewship issue unbind-routine`
+
+Clear the routine binding (server normalises empty string to SQL `NULL`).
+
+```bash
+crewship issue unbind-routine BE-42
+```
+
+---
+
+## `crewship issue bulk update`
+
+Apply the same field updates to up to 100 issues in a single round-trip. Wraps `PATCH /api/v1/issues/bulk`. The 100-id cap is enforced both client-side (friendly error) and server-side (400).
+
+```bash
+crewship issue bulk update --ids ms_a,ms_b,ms_c --status DONE
+crewship issue bulk update --ids ms_a,ms_b --priority high --assignee agent_xyz
+crewship issue bulk update --ids ms_a,ms_b --labels lbl_bug,lbl_p0
+```
+
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--ids` | string | _(required)_ | Comma-separated issue IDs (CUIDs, not identifiers). Empty entries are stripped; >100 entries reject locally. |
+| `--status` | string | | New status for all listed issues. |
+| `--priority` | string | | New priority. |
+| `--assignee` | string | | Assignee ID (NOT a slug — bulk callers tend to script with IDs). Empty string clears the assignee. |
+| `--assignee-type` | string | `agent` | Forwarded only when `--assignee` is non-empty. |
+| `--project` | string | | Project ID. Empty string unlinks the issue from its project. |
+| `--labels` | string | | Comma-separated label IDs. **REPLACES** the existing label set on each issue; empty string clears all labels. |
+
+At least one of `--status` / `--priority` / `--assignee` / `--project` / `--labels` must be supplied. Response surfaces as `Bulk update applied to <updated>/<requested> issue(s).` — the two counts differ when some IDs were 404 or 403.
