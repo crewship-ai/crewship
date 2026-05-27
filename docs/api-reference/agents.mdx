@@ -423,6 +423,79 @@ persona.
 
 ---
 
+## Agent Self-Learning Posture
+
+Per-agent flag controlling whether `ALLOW` decisions from the Keeper
+evaluators **auto-apply** (`enabled = true`) or **queue for operator
+approval** in the inbox (`enabled = false`). Orthogonal to the crew's
+`autonomy_level`: the per-action policy gate (`policy.DecideAction`)
+is the upstream authority — this flag only decides what happens to
+already-ALLOWed decisions. See [Autonomy & self-learning](/guides/autonomy-and-self-learning).
+
+### Get Self-Learning
+
+```
+GET /api/v1/agents/{agentId}/learning
+```
+
+Returns the current flag plus the audit triple (who flipped it, when,
+why). Any authenticated workspace member can read — the value is
+non-secret diagnostic state.
+
+**Response:** `200 OK`
+
+```json
+{
+  "agent_id": "agent-uuid",
+  "enabled": true,
+  "set_by_user_id": "user-uuid",
+  "set_at": "2026-05-26T09:14:22Z",
+  "reason": "Trusted crew, agent has cleared 50+ approvals without an override"
+}
+```
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `enabled` | `bool` | Persisted as `0` / `1` on `agents.self_learning_enabled`. |
+| `set_by_user_id` | `string?` | Omitted on agents that have never had the flag flipped. |
+| `set_at` | `string?` | RFC3339; omitted when never set. |
+| `reason` | `string?` | Operator-supplied rationale from the most recent `PATCH`; omitted when never set. |
+
+### Set Self-Learning
+
+```
+PATCH /api/v1/agents/{agentId}/learning
+Content-Type: application/json
+```
+
+Flip the flag. Requires `OWNER` / `ADMIN` (`canRole(role, "manage")`)
+— self-learning weakens the inbox-approval invariant, so the operator
+who turns it on must be senior enough to own the consequences.
+
+**Request:**
+
+```json
+{
+  "enabled": true,
+  "reason": "Trusted crew, agent has cleared 50+ approvals without an override"
+}
+```
+
+| Field | Type | Required | Notes |
+|-------|------|----------|-------|
+| `enabled` | `bool` | yes | Decoded as `*bool` server-side — a missing or `null` field returns `400`, **not** a silent flip to `false`. Be explicit about direction. |
+| `reason` | `string` | yes | Non-empty after trim. Persisted on the row so a later audit can answer "who turned this on, when, and why". |
+
+**Response:** `200 OK` — same shape as `GET`, reflecting the new state and the freshly-recorded audit triple.
+
+| Status | Condition |
+|--------|-----------|
+| `400` | `enabled` field missing / null, or `reason` empty |
+| `403` | Caller is not OWNER / ADMIN |
+| `404` | Agent not found in the current workspace |
+
+---
+
 ## Agent Skills
 
 ### List Skills
