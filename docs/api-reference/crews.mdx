@@ -353,6 +353,81 @@ and agents fall back to their per-role synthesised default.
 
 ---
 
+## Crew Policy
+
+Each crew carries an autonomy posture that gates every HITL-relevant
+decision the orchestrator makes — memory writes, skill creation,
+behavior-monitor escalations, persona suggestions, ephemeral spawns.
+The dial is read by every PR-B / PR-C subsystem via the shared
+`policy.Resolver`. The CLI counterpart is [`crewship policy
+get/set`](/cli/policy).
+
+| Field | Values | Meaning |
+|-------|--------|---------|
+| `autonomy_level` | `strict` / `guided` / `trusted` / `full` | How much an agent can do without operator approval. `strict` queues everything; `full` auto-applies most decisions. |
+| `behavior_mode` | `warn` / `block` | What the behavior monitor does on a flagged action — `warn` lets it through with a journal entry, `block` rejects. |
+
+### Get Crew Policy
+
+```
+GET /api/v1/crews/{crewId}/policy
+```
+
+**Response:** `200 OK`
+
+```json
+{
+  "crew_id": "crew-uuid",
+  "autonomy_level": "guided",
+  "behavior_mode": "warn",
+  "set_by_user_id": "user-uuid",
+  "set_at": "2026-05-26T14:22:10Z",
+  "reason": "Default for newly-onboarded crews"
+}
+```
+
+`set_by_user_id` / `set_at` / `reason` are omitted on crews whose
+policy still matches the seed defaults (no operator has ever flipped
+it). On crews that have been touched at least once, the audit triple
+records who, when, why.
+
+### Set Crew Policy
+
+```
+PUT /api/v1/crews/{crewId}/policy
+Content-Type: application/json
+```
+
+Replaces the policy. Requires `OWNER` / `ADMIN` (`canRole "manage"`)
+— the same gate as [`/api/v1/agents/{id}/learning`](/api-reference/agents#set-self-learning).
+
+**Request:**
+
+```json
+{
+  "autonomy_level": "trusted",
+  "behavior_mode": "block",
+  "reason": "Crew has cleared 30 days of approvals without an override"
+}
+```
+
+| Field | Required | Notes |
+|-------|----------|-------|
+| `autonomy_level` | yes | Must be one of the four enum values; other strings return `400`. |
+| `behavior_mode` | yes | `warn` or `block`. Missing field returns `400` (no silent default). |
+| `reason` | yes | Non-empty after trim — persisted on the audit triple. |
+
+**Response:** `200 OK` — same shape as `GET`, reflecting the new
+state and the freshly-recorded audit triple.
+
+| Status | Condition |
+|--------|-----------|
+| `400` | Invalid enum value, or missing `reason` |
+| `403` | Caller is not OWNER / ADMIN |
+| `404` | Crew not found |
+
+---
+
 ## Apply Avatar Style
 
 ```
