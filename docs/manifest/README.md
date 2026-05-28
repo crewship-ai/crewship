@@ -29,7 +29,7 @@ spec:
 
 | Kind | What it is | Lifecycle | Doc |
 |---|---|---|---|
-| `Workspace` | Top-level bundle: credentials + skills + crews | full CRUD | _(in-tree; see [SPEC-2](../../.claude/context/specs/SPEC-2-manifest-complete.md) — page pending)_ |
+| [`Workspace`](workspace.md) | Top-level bundle: credentials + skills + crews | full CRUD | [workspace.md](workspace.md) |
 | [`Crew`](crew.md) | One crew: agents + sidecars + MCP servers + credentials | full CRUD | [crew.md](crew.md) |
 | [`Agent`](agent.md) | Single agent within a crew (used inline under `Crew.spec.agents` or standalone) | full CRUD | [agent.md](agent.md) |
 | [`Skill`](skill.md) | Skill registry entry (used inline under `Workspace.spec.skills`) | full CRUD | [skill.md](skill.md) |
