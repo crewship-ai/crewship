@@ -34,7 +34,7 @@ spec:
 | [`Agent`](agent.md) | Single agent within a crew (used inline under `Crew.spec.agents` or standalone) | full CRUD | [agent.md](agent.md) |
 | [`Skill`](skill.md) | Skill registry entry (used inline under `Workspace.spec.skills`) | full CRUD | [skill.md](skill.md) |
 | `Integration` | MCP server integration (workspace-, crew-, or agent-scoped) | full CRUD | _(page pending)_ |
-| `Issue` | Issue tracker row (rarely declared standalone — typically managed via the API/CLI) | full CRUD | _(page pending)_ |
+| [`Issue`](issue.md) | Issue tracker row (rarely declared standalone — typically managed via the API/CLI) | full CRUD | [issue.md](issue.md) |
 | [`Project`](project.md) | Container for missions and milestones | full CRUD | [project.md](project.md) |
 | [`Label`](label.md) | Tag for issues and missions | full CRUD | [label.md](label.md) |
 | [`Milestone`](milestone.md) | Time-boxed project goal | full CRUD | [milestone.md](milestone.md) |
