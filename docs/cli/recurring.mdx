@@ -22,6 +22,37 @@ crewship recurring list --filter '.[] | {id, cadence, title}'
 crewship recurring list --format yaml
 ```
 
+## `crewship recurring create`
+
+`POST /api/v1/recurring-issues`. Registers a schedule: the server stamps out a new issue for `--crew` on the cadence in `--cron` (a standard 5-field `minute hour day-of-month month day-of-week` expression, validated server-side; the crew must belong to the active workspace).
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--crew <id>` | string | (required) | Crew the stamped issues belong to. |
+| `--title <t>` | string | (required) | Issue title. |
+| `--cron <expr>` | string | (required) | 5-field cron expression. |
+| `--description <d>` | string | (unset) | Issue description. |
+| `--priority <p>` | string | (unset) | Issue priority. |
+| `--project <id>` | string | (unset) | Project ID. |
+| `--milestone <id>` | string | (unset) | Milestone ID. |
+| `--assignee-type <t>` | string | (unset) | `agent` or `user`. |
+| `--assignee <id>` | string | (unset) | Assignee ID. |
+| `--labels <json>` | string | (unset) | Labels JSON. |
+
+```bash
+crewship recurring create --crew crew_abc --title "Daily standup" --cron "0 9 * * *"
+crewship recurring create --crew crew_abc --title "Weekly report" --cron "0 9 * * 1" --priority high
+```
+
+## `crewship recurring update <recurring-id>`
+
+`PATCH /api/v1/recurring-issues/{id}`. Only the flags you set are sent. Accepts the same fields as `create` plus `--enabled` to toggle the schedule. Changing `--cron` recomputes the next run server-side.
+
+```bash
+crewship recurring update rec_abc123 --cron "0 8 * * *"
+crewship recurring update rec_abc123 --enabled=false
+```
+
 ## `crewship recurring delete <recurring-id>`
 
 `DELETE /api/v1/recurring-issues/{id}`. Prints `[deleted recurring <id>]` on success.

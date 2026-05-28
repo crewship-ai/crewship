@@ -83,6 +83,24 @@ func postJSON(client *cli.Client, path string, body any, out any) error {
 	return cli.ReadJSON(resp, out)
 }
 
+// patchJSON sends a PATCH with body and decodes into out (if non-nil).
+// Mirrors postJSON — used by the admin-extras CRUD verbs whose handlers
+// return the freshly-updated row.
+func patchJSON(client *cli.Client, path string, body any, out any) error {
+	resp, err := client.Patch(path, body)
+	if err != nil {
+		return err
+	}
+	if err := cli.CheckError(resp); err != nil {
+		return err
+	}
+	if out == nil {
+		_ = resp.Body.Close()
+		return nil
+	}
+	return cli.ReadJSON(resp, out)
+}
+
 // deleteJSON sends a DELETE; ignores response body on success.
 func deleteJSON(client *cli.Client, path string) error {
 	resp, err := client.Delete(path)
