@@ -1,16 +1,17 @@
 // Routes-registration smoke test for the Connectors API surface.
 //
-// We don't ship the actual route registrations in router_routes.go
-// yet (impl phase), but we DO want to know that:
+// The four routes are wired in registerCrewsRoutes (router_crews.go),
+// adjacent to /api/v1/integrations and /api/v1/recipes. This file
+// covers:
 //
 //  1. NewConnectorHandler can be constructed against the test DB
 //     without panicking on the embedded fixture set.
 //  2. The four exported handler methods (List, Get, Verify, Install)
 //     accept the request shape produced by Go's net/http ServeMux
 //     with `{connectorId}` path parameters.
-//
-// When the implementer adds the four `r.mux.Handle(...)` lines to
-// router_routes.go, this test stays passing as the contract spec.
+//  3. The routes are actually registered on a real Router — a regression
+//     guard so the wiring can't silently disappear (see
+//     TestConnectorRoutes_WiredIntoRouter).
 package api
 
 import (
@@ -19,6 +20,9 @@ import (
 	"net/http/httptest"
 	"os"
 	"testing"
+
+	"github.com/crewship-ai/crewship/internal/auth"
+	"github.com/crewship-ai/crewship/internal/auth/sessions"
 )
 
 // TestConnectorHandler_ConstructionSucceedsAgainstShippedFixtures
@@ -85,6 +89,49 @@ func TestConnectorRoutes_PathPatternsRegisterCleanly(t *testing.T) {
 	mux.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Errorf("captured route returned %d, want 200", rr.Code)
+	}
+}
+
+// TestConnectorRoutes_WiredIntoRouter builds a real Router and confirms
+// GET /api/v1/connectors is actually registered — i.e. an authed request
+// does NOT 404. This is the regression guard for the route wiring in
+// router_crews.go: if someone deletes the r.mux.Handle lines, the catalog
+// browse endpoint would start 404ing and this test fails.
+func TestConnectorRoutes_WiredIntoRouter(t *testing.T) {
+	t.Parallel()
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	seedTestWorkspace(t, db, userID)
+
+	const secret = "test-secret-for-jwt-signing-32chars!!"
+	r, err := NewRouter(db, secret, newTestLogger())
+	if err != nil {
+		t.Fatalf("NewRouter: %v", err)
+	}
+
+	v, err := auth.NewJWTValidator(secret)
+	if err != nil {
+		t.Fatalf("auth.NewJWTValidator: %v", err)
+	}
+	sess, err := sessions.NewDBStore(db).Create(t.Context(), userID, "test", "127.0.0.1", auth.RefreshTokenTTL)
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	tok, err := v.IssueAccessToken(userID, sess.ID, "Test User", "test@example.com")
+	if err != nil {
+		t.Fatalf("issue access token: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/connectors", nil)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	if rr.Code == http.StatusNotFound {
+		t.Fatalf("GET /api/v1/connectors returned 404 — route not wired into the Router; body: %s", rr.Body.String())
+	}
+	if rr.Code != http.StatusOK {
+		t.Errorf("GET /api/v1/connectors = %d, want 200 (catalog browse needs only auth); body: %s", rr.Code, rr.Body.String())
 	}
 }
 

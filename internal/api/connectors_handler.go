@@ -19,7 +19,8 @@
 //   - Verify + Install additionally require ?workspace_id=X plus a
 //     MANAGER+ role on that workspace; lower roles get 403.
 //
-// TDD STUB — methods panic until implemented.
+// Wired in registerCrewsRoutes (router_crews.go), adjacent to the
+// /api/v1/integrations and /api/v1/recipes surfaces.
 package api
 
 import (
