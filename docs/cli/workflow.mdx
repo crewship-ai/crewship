@@ -74,6 +74,21 @@ Enforced both client- and server-side (`validateTemplateJSON` in `internal/api/w
 
 A name collision with an existing template in the same workspace returns `409 Conflict`.
 
+## `crewship workflow update <slug> -f <manifest.yaml>`
+
+`PATCH /api/v1/workflow-templates/{id}`. Resolves `<slug>` against the stored template `name` (same matching as `get`/`delete`), then PATCHes the parsed manifest onto that row. The manifest uses the exact same SPEC-2 envelope as `create`, and the server re-runs the full stage validation — a manifest rejected on create is rejected on update too.
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--file <path>` | string | (required) | Path to a SPEC-2 YAML manifest. **No `-f` shorthand** — root `--format` owns `-f`. |
+
+```bash
+crewship workflow update engineering-standard --file engineering-standard.yaml
+crewship workflow update "Engineering Standard" --file engineering-standard.yaml   # exact name
+```
+
+Built-in templates (`is_builtin: true`) and rows in another workspace surface as `404 Not found`; renaming into an existing template's name returns `409 Conflict`.
+
 ## `crewship workflow delete <slug>`
 
 `DELETE /api/v1/workflow-templates/{id}` after resolving `<slug>`. Aliases: `remove`, `rm`. Prompts for confirmation unless `-y`/`--yes` is passed.

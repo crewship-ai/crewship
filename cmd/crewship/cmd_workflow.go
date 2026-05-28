@@ -217,6 +217,64 @@ See docs/manifest/workflow_template.md for the full schema.`,
 	},
 }
 
+var workflowUpdateCmd = &cobra.Command{
+	Use:   "update <slug>",
+	Short: "Update a workflow template from a YAML manifest file",
+	Long: `Update an existing workflow template by submitting the manifest in
+-f / --file. The <slug> resolves to the stored template (matches against
+name, exactly like ` + "`workflow get`" + ` / ` + "`workflow delete`" + `), then the parsed
+manifest is PATCHed onto that row.
+
+The file MUST follow the same SPEC-2 WorkflowTemplate envelope as
+` + "`workflow create`" + ` — see ` + "`crewship workflow create --help`" + ` for the schema.
+The server re-validates the full stage list, so a manifest that would be
+rejected on create is rejected on update too.`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+
+		path, _ := cmd.Flags().GetString("file")
+		if path == "" {
+			return fmt.Errorf("-f/--file is required")
+		}
+
+		body, err := loadWorkflowTemplateBody(path)
+		if err != nil {
+			return err
+		}
+
+		client := newAPIClient()
+		// Resolve the slug→id first (the PATCH route is keyed by id), the
+		// same lookup `delete` performs. A slug that doesn't resolve fails
+		// here before we touch the PATCH endpoint.
+		t, err := findWorkflowTemplateBySlug(client, args[0])
+		if err != nil {
+			return err
+		}
+
+		resp, err := client.Patch("/api/v1/workflow-templates/"+t.ID, body)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+
+		var updated workflowTemplateItem
+		if err := cli.ReadJSON(resp, &updated); err != nil {
+			return err
+		}
+		cli.PrintSuccess(fmt.Sprintf("Workflow template updated: %s (%s)", updated.Name, updated.ID))
+		return nil
+	},
+}
+
 var workflowDeleteCmd = &cobra.Command{
 	Use:     "delete <slug>",
 	Aliases: []string{"remove", "rm"},
@@ -396,10 +454,14 @@ func init() {
 	// `crewship workflow create --file path.yaml`. Matches the
 	// pattern in `crewship apply --file` which is also shorthand-free.
 	workflowCreateCmd.Flags().String("file", "", "Path to a SPEC-2 YAML manifest (required)")
+	// Same shorthand-free --file as create — root --format owns -f (see the
+	// comment above and TestWorkflowCreate_HelpDoesNotPanic).
+	workflowUpdateCmd.Flags().String("file", "", "Path to a SPEC-2 YAML manifest (required)")
 	workflowDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
 
 	workflowCmd.AddCommand(workflowListCmd)
 	workflowCmd.AddCommand(workflowGetCmd)
 	workflowCmd.AddCommand(workflowCreateCmd)
+	workflowCmd.AddCommand(workflowUpdateCmd)
 	workflowCmd.AddCommand(workflowDeleteCmd)
 }
