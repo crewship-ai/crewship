@@ -69,7 +69,7 @@ Both the event tag and content are passed through a terminal sanitiser before pr
 ## Common errors
 
 - **`agent not found: <slug>`** — no agent matches the slug or ID in the active workspace. Run `crewship agent list` to see what's available.
-- **`agent has no crew (logs require a crew)`** — the agent record exists but isn't attached to a crew. Logs come from the crew container; attach the agent with `crewship agent assign` first.
+- **`agent has no crew (logs require a crew)`** — the agent record exists but isn't attached to a crew. Logs come from the crew container, and an agent's crew is set when it is hired — recreate the agent inside a crew with `crewship hire <role> --crew <slug>`.
 - **`get WS token for follow: …`** — `--follow` needs the WebSocket endpoint; this surfaces when `/api/v1/ws-token` is unreachable. Usually a server restart or revoked CLI token.
 
 ## See also

@@ -111,7 +111,7 @@ Plan includes 1 destructive operation. Continue? [y/N] y
 
 Applied: 4 created, 1 updated, 0 unchanged, 1 deleted.
 
-PENDING credentials (set values in the UI, or via 'crewship credential set'):
+PENDING credentials (set values in the UI, or via 'crewship credential update'):
   - ANTHROPIC_API_KEY
 ```
 
@@ -132,7 +132,7 @@ Manifests never carry secret values. `crewship apply` resolves the `env:` slot t
 2. `--from-env` (process environment) if supplied
 3. Otherwise the credential is created as `status=PENDING` and printed at the end
 
-PENDING credentials never inject their placeholder into the agent's environment. Agents that need a pending credential fail with `credential not configured` until you set the value through the UI or `crewship credential set`.
+PENDING credentials never inject their placeholder into the agent's environment. Agents that need a pending credential fail with `credential not configured` until you set the value through the UI or `crewship credential update`.
 
 ## What gets deleted on sync
 
@@ -147,7 +147,7 @@ Resources synced (= deleted when missing from the manifest, with confirmation):
 Resources **not** synced (additive only):
 
 - skills at workspace scope — drop them via `crewship skill rm`
-- credentials themselves — drop them via UI or `crewship credential rm`
+- credentials themselves — drop them via UI or `crewship credential delete`
 
 ## Exit codes
 

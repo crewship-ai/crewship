@@ -174,7 +174,7 @@ crewship apply --file team.yaml --from-env
 # 2. From a KEY=VALUE file (docker-compose --env-file shape)
 crewship apply --file team.yaml --secrets-file ./secrets.env
 
-# 3. Slot only — value supplied later via UI or `crewship credential set`
+# 3. Slot only — value supplied later via UI or `crewship credential update`
 crewship apply --file team.yaml
 ```
 
@@ -183,7 +183,7 @@ The third mode creates credentials with `status=PENDING`. Agents that need a pen
 After apply, the CLI prints the list of pending env vars so you know what's still left to fill in:
 
 ```
-PENDING credentials (set values in the UI, or via 'crewship credential set'):
+PENDING credentials (set values in the UI, or via 'crewship credential update'):
   - ANTHROPIC_API_KEY
   - GH_TOKEN
 ```

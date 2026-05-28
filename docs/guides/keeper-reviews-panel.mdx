@@ -143,7 +143,7 @@ After overnight cron runs, the panel typically has 10–50 pending rows across t
 5. Read `ollama_raw_response` to see the LLM's full rationale
 6. If the decision was wrong, revert by setting `lifecycle_state` back via SQL (no UI override yet — tracked as a UI follow-up) and either:
    - Update the skill's failure-tolerance threshold in the evaluator prompt template (eng work)
-   - Add the skill to the per-crew skill protection list (`crewship skill protect <id>`) so future reviews can't archive it
+   - Pin the skill in the Keeper reviews panel so future reviews can't archive it
 
 ### "I think the behavior monitor is too noisy"
 

@@ -132,7 +132,7 @@ Partial update -- only provided fields are changed. Setting `preferred_language`
 | `403` | Caller is not `OWNER`/`ADMIN` |
 | `409` | New `slug` already taken |
 
-> **Note:** There is no `DELETE /workspaces/{workspaceId}` endpoint. Workspace deletion is handled out-of-band (`crewship admin workspace delete` on the host).
+> **Note:** There is no `DELETE /workspaces/{workspaceId}` endpoint and no `crewship workspace delete` command. Workspace deletion is handled out-of-band (a direct operation on the host database); deleting the last workspace would orphan its owner, so it is intentionally not exposed through the API or CLI.
 
 ---
 

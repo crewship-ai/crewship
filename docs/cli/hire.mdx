@@ -166,7 +166,7 @@ crewship agent list --crew on-call --ephemeral live
 
 The sweeper that ghosts expired ephemerals (`internal/ephemeral/expiry.go`, 5-minute ticker) **skips agents with `status='RUNNING'`**. A mission in flight finishes even if its TTL elapsed mid-call; the agent ghosts on the next sweep after it idles back to `IDLE`. This avoids the worst-case "agent was mid-tool-call when ghost flag fired" scenario.
 
-The trade-off is that a long-running ephemeral can outlive its TTL by up to one sweep interval (5 min). For stricter timing, provision a permanent agent and `crewship agent rm <id>` explicitly.
+The trade-off is that a long-running ephemeral can outlive its TTL by up to one sweep interval (5 min). For stricter timing, provision a permanent agent and `crewship agent delete <id>` explicitly.
 
 ---
 
