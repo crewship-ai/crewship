@@ -68,25 +68,50 @@ func confirmNuke(cmd *cobra.Command, client *cli.Client, server string) error {
 // nukeWorkspaceIdentity resolves the active workspace's (name, slug) for the
 // confirmation summary. Returns ("the active workspace", "") when it can't be
 // determined — nukeDecision then refuses an interactive confirm (empty slug).
+//
+// Fail-closed by design: we MUST NOT fall back to the first workspace in the
+// list. The actual wipe is wsCtx-bound to client.WorkspaceID server-side; if
+// we showed the operator a different workspace's slug to type, they'd confirm
+// against the wrong identity and still wipe the active one. An empty slug
+// forces the user to pass --yes explicitly (CI/scripts), which is the safer
+// degradation than a misleading prompt.
 func nukeWorkspaceIdentity(client *cli.Client) (name, slug string) {
 	resp, err := client.Get("/api/v1/workspaces")
 	if err != nil {
 		return "the active workspace", ""
 	}
-	var wss []struct {
-		ID   string `json:"id"`
-		Name string `json:"name"`
-		Slug string `json:"slug"`
-	}
+	var wss []workspaceSummary
 	if err := cli.ReadJSON(resp, &wss); err != nil || len(wss) == 0 {
 		return "the active workspace", ""
 	}
+	n, s := findActiveWorkspace(wss, client.WorkspaceID)
+	if s == "" {
+		return "the active workspace", ""
+	}
+	return n, s
+}
+
+// workspaceSummary is the subset of the /workspaces list shape that the nuke
+// confirmation gate needs. Named so findActiveWorkspace is unit-testable.
+type workspaceSummary struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Slug string `json:"slug"`
+}
+
+// findActiveWorkspace returns the (name, slug) of the workspace whose id matches
+// activeID, or ("", "") if no workspace matches. Fail-closed by design: a
+// no-match must NOT fall back to wss[0], because the wipe is wsCtx-bound to
+// activeID server-side — showing the operator a different workspace's slug to
+// type would let them confirm under a false identity and still wipe the active
+// one. The empty-slug return forces nukeDecision to refuse unless --yes is set.
+func findActiveWorkspace(wss []workspaceSummary, activeID string) (name, slug string) {
 	for _, w := range wss {
-		if w.ID == client.WorkspaceID {
+		if w.ID == activeID {
 			return w.Name, w.Slug
 		}
 	}
-	return wss[0].Name, wss[0].Slug
+	return "", ""
 }
 
 // nukeCount returns len() of a list endpoint, best-effort (0 on any error).

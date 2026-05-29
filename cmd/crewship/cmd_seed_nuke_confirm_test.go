@@ -2,6 +2,43 @@ package main
 
 import "testing"
 
+// TestFindActiveWorkspace pins the fail-closed lookup: when the active
+// workspace id doesn't match any row in the listing, the function MUST return
+// ("", "") rather than fall back to the first workspace. The destructive nuke
+// path relies on this — a wrong-but-non-empty slug would let an operator type
+// it, confirm under a false identity, and still wipe the real active workspace
+// (the wipe is wsCtx-bound server-side, not slug-bound). CodeRabbit caught this
+// as a Major issue in review round 3 of PR #600.
+func TestFindActiveWorkspace(t *testing.T) {
+	t.Parallel()
+	wss := []workspaceSummary{
+		{ID: "ws-a", Name: "Acme", Slug: "acme"},
+		{ID: "ws-b", Name: "Beta", Slug: "beta"},
+	}
+	cases := []struct {
+		name           string
+		wss            []workspaceSummary
+		activeID       string
+		wantName, want string
+	}{
+		{"match returns identity", wss, "ws-b", "Beta", "beta"},
+		{"first-entry match", wss, "ws-a", "Acme", "acme"},
+		{"no match returns empty", wss, "ws-missing", "", ""},
+		{"empty list returns empty", nil, "ws-a", "", ""},
+		{"empty active id returns empty (won't false-match an empty-id row)", wss, "", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			n, s := findActiveWorkspace(tc.wss, tc.activeID)
+			if n != tc.wantName || s != tc.want {
+				t.Errorf("findActiveWorkspace(_, %q) = (%q,%q); want (%q,%q)",
+					tc.activeID, n, s, tc.wantName, tc.want)
+			}
+		})
+	}
+}
+
 // TestNukeDecision pins the confirmation policy for `seed --nuke`. The wipe is
 // the single most destructive CLI action (it deletes ALL workspace contents),
 // so the gate must be strict: --yes bypasses (CI), a non-interactive session
