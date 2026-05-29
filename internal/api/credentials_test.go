@@ -28,12 +28,27 @@ func newCredHandler(t *testing.T) (*CredentialHandler, *sql.DB) {
 func TestCredCreate_Forbidden(t *testing.T) {
 	t.Parallel()
 	h, db := newCredHandler(t)
-	userID := seedTestUser(t, db)
-	wsID := seedTestWorkspace(t, db, userID)
+	ownerID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, ownerID)
+
+	// Seed a DISTINCT VIEWER user with chat-only caps — layered
+	// capability gate does a DB lookup so using the OWNER's id with
+	// a faked VIEWER ctx would grant via capability. PRD-SLASH-
+	// CAPABILITIES-2026 §6.
+	viewerID := "viewer-cred-deny"
+	if _, err := db.Exec(`INSERT INTO users (id, email, full_name) VALUES (?, ?, 'V')`,
+		viewerID, viewerID+"@x"); err != nil {
+		t.Fatalf("seed viewer user: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO workspace_members (id, workspace_id, user_id, role, capabilities) VALUES (?, ?, ?, 'VIEWER', '["chat"]')`,
+		"m-"+viewerID, wsID, viewerID); err != nil {
+		t.Fatalf("seed viewer membership: %v", err)
+	}
+	InvalidateCapabilityCache(wsID, viewerID)
 
 	body := bytes.NewBufferString(`{"name":"x","value":"v"}`)
 	req := httptest.NewRequest("POST", "/api/v1/credentials", body)
-	ctx := withUser(req.Context(), &AuthUser{ID: userID})
+	ctx := withUser(req.Context(), &AuthUser{ID: viewerID})
 	ctx = withWorkspace(ctx, wsID, "VIEWER")
 	req = req.WithContext(ctx)
 	rr := httptest.NewRecorder()

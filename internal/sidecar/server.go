@@ -427,6 +427,27 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 				s.handlePipelinesDryRun(w, r, slug)
 				return
 
+			// PRD-SLASH-CAPABILITIES-2026 §6.5 — slash-action routes.
+			// User-initiated routine / skill / credential mutation
+			// flows through here when the chat-bridge or CLI repl
+			// translates a /routine, /skill, /credential slash command
+			// into a sidecar POST. Authorization happens server-side
+			// (capability check in commit 6's dual-path handlers);
+			// the sidecar just forwards and lets the X-Caller-User-Id
+			// header flow through unchanged via proxyToAPIFiltered.
+			case r.Method == http.MethodPost && r.URL.Path == "/routines/schedules/create":
+				s.handleRoutineScheduleCreate(w, r)
+				return
+			case r.Method == http.MethodPost && r.URL.Path == "/skills/generate":
+				s.handleSkillGenerate(w, r)
+				return
+			case r.Method == http.MethodPost && r.URL.Path == "/credentials/create":
+				s.handleCredentialCreate(w, r)
+				return
+			case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/credentials/") && strings.HasSuffix(r.URL.Path, "/rotate"):
+				s.handleCredentialRotate(w, r)
+				return
+
 			// MCP Gateway routes
 			case r.Method == http.MethodGet && r.URL.Path == "/mcp/tools":
 				s.handleMCPListTools(w, r)

@@ -1390,6 +1390,14 @@ END;
 	// attributable content. See migrate_consts_v107_gdpr_cascade.go.
 	{version: 107, name: "gdpr_cascade", sql: migrationGDPRCascade},
 	{version: 108, name: "mission_provenance", sql: migrationMissionProvenance},
+
+	// v109 (PRD-SLASH-CAPABILITIES-2026 §6.1): per-membership
+	// capability set on workspace_members. Layers on top of the v100
+	// role tier model — capability strings are workspace-scoped JSON
+	// in TEXT (same shape as cli_tokens.scopes). Backfill writes
+	// role-aware bundles so single-operator OWNER installs upgrade
+	// without losing surface. See migrate_consts_v109_member_capabilities.go.
+	{version: 109, name: "member_capabilities", sql: migrationMemberCapabilities},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

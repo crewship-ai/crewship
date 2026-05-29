@@ -36,6 +36,12 @@ func (r *Router) registerRoutes() {
 	// Admin stats, audit, keeper admin log, backups.
 	r.registerAdminRoutes()
 
+	// Slash-command catalog (GET /api/v1/slash-commands) — feeds
+	// the chat composer palette and the CLI repl autocomplete with
+	// capability-filtered actions. Admin capability-management
+	// routes land alongside in PRD-SLASH-CAPABILITIES-2026 commit 8.
+	r.registerSlashRoutes()
+
 	// Sidecar IPC — every /api/v1/internal/* endpoint plus the
 	// keeper internal surface and cross-crew messaging.
 	r.registerInternalRoutes(pipes, oh)

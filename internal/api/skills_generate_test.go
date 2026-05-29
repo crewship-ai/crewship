@@ -32,14 +32,29 @@ func newSkillGenHandler(t *testing.T) *SkillGenerateHandler {
 
 func TestSkillGenerate_RoleForbidden(t *testing.T) {
 	h := newSkillGenHandler(t)
-	userID := seedTestUser(t, h.db)
-	wsID := seedTestWorkspace(t, h.db, userID)
+	ownerID := seedTestUser(t, h.db)
+	wsID := seedTestWorkspace(t, h.db, ownerID)
 
-	// VIEWER cannot 'create'. Per canRole: only OWNER/ADMIN/MANAGER pass.
+	// Seed a DISTINCT VIEWER user with chat-only capabilities — the
+	// layered capability gate (PRD-SLASH-CAPABILITIES-2026 §6) does a
+	// DB lookup, so using the OWNER's id with a faked VIEWER ctx would
+	// grant via the capability path. We want both role + capability
+	// dimensions to deny.
+	viewerID := "viewer-skill-deny"
+	if _, err := h.db.Exec(`INSERT INTO users (id, email, full_name) VALUES (?, ?, 'V')`,
+		viewerID, viewerID+"@x"); err != nil {
+		t.Fatalf("seed viewer user: %v", err)
+	}
+	if _, err := h.db.Exec(`INSERT INTO workspace_members (id, workspace_id, user_id, role, capabilities) VALUES (?, ?, ?, 'VIEWER', '["chat"]')`,
+		"m-"+viewerID, wsID, viewerID); err != nil {
+		t.Fatalf("seed viewer membership: %v", err)
+	}
+	InvalidateCapabilityCache(wsID, viewerID)
+
 	req := httptest.NewRequest("POST", "/api/v1/workspaces/"+wsID+"/skills/generate",
 		strings.NewReader(`{"slug":"x","prompt":"y"}`))
 	req.SetPathValue("workspaceId", wsID)
-	req = withWorkspaceUser(req, userID, wsID, "VIEWER")
+	req = withWorkspaceUser(req, viewerID, wsID, "VIEWER")
 	rr := httptest.NewRecorder()
 	h.Generate(rr, req)
 	if rr.Code != http.StatusForbidden {
