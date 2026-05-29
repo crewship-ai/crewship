@@ -5,6 +5,58 @@ icon: "rss"
 mode: "center"
 ---
 
+<Update label="May 29, 2026" tags={["features", "updates", "fixes"]}>
+
+## Slash commands and per-user capabilities
+
+End users now get a server-driven slash palette in chat and CLI for `/routine`, `/issue`, `/skill`, and `/credential`. Each action is gated by a per-user capability, so admins can grant a single MEMBER permission to author routines or rotate credentials without promoting them to the MANAGER tier. Capabilities are managed inline from Workspace Settings → Members (with a preview diff before bulk preset changes), or via `crewship workspace member capabilities`. See [Slash commands](/cli/slash) and [RBAC](/security/rbac).
+
+## Streamlined first-run bootstrap
+
+The setup-token gate is gone. The `/bootstrap` form now takes name, email, and password — submit and you're in. Bootstrap stays open for a 5-minute window after `crewship start`, then returns 410 until the server is restarted. Both browser and headless (`crewship init`) paths use the same window. See [Quickstart](/quickstart).
+
+## Disaster-recovery backup rewrite
+
+`crewship backup restore` adds a `--replace` mode for the canonical "nuke and restore preserving original IDs" flow. The restore pipeline now discovers workspace-scoped tables at runtime, reconciles users by email so an admin with the same address on source and target doesn't orphan FK references, and applies section-aware symlink policy so workspaces containing `node_modules` (or any project with relative-target symlinks) restore cleanly. See [Backup](/guides/backup) and [`crewship backup`](/cli/backup).
+
+## Declarative apply for crews, agents, skills, integrations, and issues
+
+`crewship apply` now understands five additional top-level kinds — `Skill`, `Crew`, `Agent`, `Integration`, and `Issue` — so a workspace can be provisioned end-to-end from a single manifest bundle. Built-in seed catalogues moved from Go literals to embedded YAML, so the same shapes round-trip through export/apply. See [Manifests](/guides/manifests) and [`crewship apply`](/cli/apply).
+
+## Mission outcomes feed crew memory
+
+When a mission completes, its outcome and provenance now flow into crew memory automatically — agents can recall what they shipped and why on the next mission without an operator re-priming the context. See [Episodic memory](/guides/episodic-memory) and [Agent memory](/guides/agent-memory).
+
+## Workspace switcher
+
+The sidebar workspace switcher is now real: list every workspace you belong to, switch with one click, persist the selection across reloads, and create a new workspace from the same menu. The selected workspace is honored by every component that reads it. See [Onboarding](/guides/onboarding).
+
+## Profiling and tracing setup
+
+Two opt-in observability surfaces landed: a `pprof` endpoint for CPU/heap snapshots and a Pyroscope push exporter for continuous profiling. The OpenTelemetry `service.name` is now configurable via env so multiple deployments tag their traces distinctly. See [Telemetry](/guides/telemetry) and the [OTLP setup guide](/observability/otlp-setup).
+
+## Updates
+
+- **Destructive CLI commands prompt before acting.** Six commands now ask for confirmation and accept `--yes` for scripted use.
+- **Manifest validate catches duplicate slugs.** `crewship apply --dry-run` now fails fast when two documents share the same `metadata.slug` within a kind, instead of silently overwriting on apply. See [Manifest schema](/configuration/manifest-schema).
+- **`crewship apply` gains `--skip-test-gate`.** Routines that depend on PENDING credentials can now be applied without the pre-flight test invocation, and `type: code` steps surface a plan-time warning so the gap is visible before the cron fires. See [`crewship apply`](/cli/apply).
+- **Go toolchain bumped to 1.26.3.** Picks up eight stdlib CVE fixes; no API or behaviour change.
+- **SQLite busy timeout raised 5s → 30s.** Eliminates the spurious "Invalid email or password" login error that surfaced on moderately loaded instances after a backup restore.
+- **CLI hardening pass.** Security tightening across the CLI binary. See [CLI overview](/cli/overview).
+
+## Fixes
+
+- **`crewship workflow create --help` no longer panics** from a flag-shorthand collision with the root `--format` flag. See [AI workflows](/cli/ai-workflows).
+- **Persona commands** crashed on every invocation; now fixed.
+- **CLI typo'd subcommands** are rejected with a clear error instead of being silently dispatched to `crewship ask`.
+- **`crewship now` / `me` / `today`** now exit non-zero when every fetch fails with `session_invalid`, so wrapper scripts notice the missing login.
+- **`/metrics` loopback bypass** now checks the true client IP, closing a path where a misconfigured proxy could expose the endpoint externally. See [Metrics](/cli/metrics).
+- **Create-workspace dialog** now resets when closed via Cancel, Escape, or overlay click — stale values no longer persist across reopens.
+- **MCP registry page size** is now capped at 100 to prevent unbounded responses.
+- **Example manifest** (`examples/manifests/full-complete.yaml`) had two invalid `tool_profile` values that failed validation for anyone copying it as a starter — corrected to the documented enum.
+
+</Update>
+
 <Update label="May 22, 2026" tags={["features", "updates", "fixes"]}>
 
 ## Agent Evolution lands
