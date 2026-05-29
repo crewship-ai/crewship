@@ -5,14 +5,102 @@ package main
 // per-entity seeders.
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
 
 	"github.com/crewship-ai/crewship/cmd/crewship/seeddata"
 	"github.com/crewship-ai/crewship/internal/cli"
+	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
+
+// nukeDecision is the pure confirmation policy for `seed --nuke`, extracted so
+// the branch matrix is unit-testable without a real TTY/stdin. The wipe deletes
+// ALL workspace contents, so the gate is strict:
+//   - yes=true                  → proceed (CI / scripted resets)
+//   - not interactive, no --yes → refuse (never wipe unattended)
+//   - interactive               → typed input must equal the workspace slug,
+//     and the slug must be known (non-empty)
+func nukeDecision(yes, interactive bool, typed, wsSlug string) error {
+	if yes {
+		return nil
+	}
+	if !interactive {
+		return errors.New("refusing to nuke in a non-interactive session without --yes")
+	}
+	if wsSlug == "" || strings.TrimSpace(typed) != wsSlug {
+		return errors.New("aborted: workspace slug did not match")
+	}
+	return nil
+}
+
+// confirmNuke prints a blast-radius summary (what / where / how much) and gates
+// the wipe behind a typed-slug confirmation. --yes bypasses the prompt for CI.
+// Counts are best-effort — a failed lookup shows 0 but never weakens the gate.
+func confirmNuke(cmd *cobra.Command, client *cli.Client, server string) error {
+	yes, _ := cmd.Flags().GetBool("yes")
+	wsName, wsSlug := nukeWorkspaceIdentity(client)
+	crews := nukeCount(client, "/api/v1/crews")
+	agents := nukeCount(client, "/api/v1/agents")
+
+	fmt.Fprintf(os.Stderr, "\n⚠️  NUKE permanently deletes ALL contents of workspace %q (%s)\n", wsName, wsSlug)
+	fmt.Fprintf(os.Stderr, "    on %s — %d crew(s), %d agent(s), plus every issue, project,\n", server, crews, agents)
+	fmt.Fprintln(os.Stderr, "    label, pipeline, schedule, webhook, and credential. This cannot be undone.")
+
+	if yes {
+		fmt.Fprintln(os.Stderr, "    --yes set; proceeding without prompt.")
+		return nukeDecision(true, false, "", wsSlug)
+	}
+	interactive := term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd()))
+	if !interactive {
+		return nukeDecision(false, false, "", wsSlug)
+	}
+	fmt.Fprintf(os.Stderr, "\nType the workspace slug %q to confirm the wipe: ", wsSlug)
+	typed, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+	return nukeDecision(false, true, typed, wsSlug)
+}
+
+// nukeWorkspaceIdentity resolves the active workspace's (name, slug) for the
+// confirmation summary. Returns ("the active workspace", "") when it can't be
+// determined — nukeDecision then refuses an interactive confirm (empty slug).
+func nukeWorkspaceIdentity(client *cli.Client) (name, slug string) {
+	resp, err := client.Get("/api/v1/workspaces")
+	if err != nil {
+		return "the active workspace", ""
+	}
+	var wss []struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+		Slug string `json:"slug"`
+	}
+	if err := cli.ReadJSON(resp, &wss); err != nil || len(wss) == 0 {
+		return "the active workspace", ""
+	}
+	for _, w := range wss {
+		if w.ID == client.WorkspaceID {
+			return w.Name, w.Slug
+		}
+	}
+	return wss[0].Name, wss[0].Slug
+}
+
+// nukeCount returns len() of a list endpoint, best-effort (0 on any error).
+func nukeCount(client *cli.Client, path string) int {
+	resp, err := client.Get(path)
+	if err != nil {
+		return 0
+	}
+	var items []json.RawMessage
+	if err := cli.ReadJSON(resp, &items); err != nil {
+		return 0
+	}
+	return len(items)
+}
 
 func seedNuke(ctx context.Context, client *cli.Client) error {
 	if err := ctx.Err(); err != nil {

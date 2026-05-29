@@ -41,6 +41,7 @@ All data is created through the REST API, ensuring business logic
 
 func init() {
 	seedCmd.Flags().Bool("nuke", false, "Delete all workspace contents before seeding")
+	seedCmd.Flags().Bool("yes", false, "Skip the --nuke confirmation prompt (for CI/scripts). Without it, an interactive nuke requires typing the workspace slug.")
 	seedCmd.Flags().Bool("skip-issues", false, "Skip issue/project/label seeding")
 	seedCmd.Flags().String("password", "", "Admin password for bootstrap (defaults to devDefaultPassword)")
 	seedCmd.Flags().Bool("smoke-test", false, "After seeding, send a test prompt to each agent to verify end-to-end")
@@ -164,6 +165,11 @@ func runSeed(cmd *cobra.Command, args []string) error {
 	// ── Phase 0: Nuke (after auth, before seed) ──
 	if nuke {
 		if err := ctx.Err(); err != nil {
+			return err
+		}
+		// Typed-slug confirmation gate — the wipe is irreversible and
+		// deletes the entire workspace. --yes bypasses for CI.
+		if err := confirmNuke(cmd, client, cli.ResolveServer(flagServer, cliCfg)); err != nil {
 			return err
 		}
 		if err := seedNuke(ctx, client); err != nil {

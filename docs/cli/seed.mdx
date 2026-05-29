@@ -18,7 +18,8 @@ On a fresh database, seed bootstraps the admin user (`demo@crewship.ai`) itself.
 
 | Flag | Default | Purpose |
 | --- | --- | --- |
-| `--nuke` | `false` | Delete all workspace contents before seeding. Runs *after* auth, so a missing/invalid token won't wipe the wrong workspace. |
+| `--nuke` | `false` | Delete all workspace contents before seeding. Runs *after* auth, so a missing/invalid token won't wipe the wrong workspace. **Prompts for confirmation** — see below. |
+| `--yes` | `false` | Skip the `--nuke` confirmation prompt (for CI/scripts). Without it, an interactive nuke requires typing the workspace slug; a non-interactive session refuses to nuke unless `--yes` is set. |
 | `--skip-issues` | `false` | Skip the issue/project/label phase. Useful when you only need crews + agents and want a faster seed. |
 | `--password <pw>` | `password123` | Admin password used by bootstrap. The default is the dev convention `password123` — override in any non-local environment. |
 | `--smoke-test` | `false` | After seeding, send a test prompt to each agent to verify end-to-end execution. Implies `--wait-provision`. |
@@ -53,9 +54,30 @@ The token + workspace are saved to `~/.crewship/cli-config.yaml`, so any follow-
 
 ```bash
 crewship seed --nuke
+# ⚠️  NUKE permanently deletes ALL contents of workspace "Acme Engineering" (acme)
+#     on https://crewship-dev2.unifylab.cz — 4 crew(s), 12 agent(s), plus every
+#     issue, project, label, pipeline, schedule, webhook, and credential. This
+#     cannot be undone.
+#
+# Type the workspace slug "acme" to confirm the wipe: acme
 ```
 
-Wipes the active workspace's contents first, then seeds. The auth step runs before `--nuke` so a typo in `--server` or a stale token won't trash a different workspace.
+Wipes the active workspace's contents first, then seeds. Two guards:
+
+- **Auth before nuke** — the auth step runs before `--nuke`, so a typo in `--server` or a stale token fails *before* anything is deleted (it can't trash a different workspace).
+- **Typed-slug confirmation** — `--nuke` prints a blast-radius summary (workspace, server, crew/agent counts) and requires you to type the workspace **slug** exactly before it proceeds. This is the guard against an accidental wipe of the *intended* workspace.
+
+For CI or scripted resets, pass `--yes` to skip the prompt:
+
+```bash
+crewship seed --nuke --yes
+```
+
+In a non-interactive session (no TTY), `--nuke` **refuses to run** unless `--yes` is given — it never wipes unattended on a guessed confirmation.
+
+<Warning>
+  `--yes` removes the only interactive safety on the most destructive command in the CLI. Reserve it for automation against throwaway/dev instances; never wire it into a script that could point at a real workspace.
+</Warning>
 
 ### CI-friendly run that waits
 
