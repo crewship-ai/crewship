@@ -108,7 +108,9 @@ in position order by ` + "`crewship triage process`" + `; the first match wins.`
 		setStringFlag(cmd, body, "assignee", "assignee_id")
 		setStringFlag(cmd, body, "priority", "priority")
 		setStringFlag(cmd, body, "project", "project_id")
-		setStringFlag(cmd, body, "labels", "labels_json")
+		if err := setJSONFlag(cmd, body, "labels", "labels_json"); err != nil {
+			return err
+		}
 
 		var out any
 		if err := postJSON(client, "/api/v1/triage-rules", body, &out); err != nil {
@@ -143,7 +145,9 @@ var triageUpdateCmd = &cobra.Command{
 		setChangedString(flags, body, "assignee", "assignee_id")
 		setChangedString(flags, body, "priority", "priority")
 		setChangedString(flags, body, "project", "project_id")
-		setChangedString(flags, body, "labels", "labels_json")
+		if err := setChangedJSON(flags, body, "labels", "labels_json"); err != nil {
+			return err
+		}
 		if flags.Changed("position") {
 			v, _ := flags.GetInt("position")
 			body["position"] = v
@@ -250,7 +254,9 @@ Example cron values:
 		setStringFlag(cmd, body, "milestone", "milestone_id")
 		setStringFlag(cmd, body, "assignee-type", "assignee_type")
 		setStringFlag(cmd, body, "assignee", "assignee_id")
-		setStringFlag(cmd, body, "labels", "labels_json")
+		if err := setJSONFlag(cmd, body, "labels", "labels_json"); err != nil {
+			return err
+		}
 
 		var out any
 		if err := postJSON(client, "/api/v1/recurring-issues", body, &out); err != nil {
@@ -280,7 +286,9 @@ var recurringUpdateCmd = &cobra.Command{
 		setChangedString(flags, body, "milestone", "milestone_id")
 		setChangedString(flags, body, "assignee-type", "assignee_type")
 		setChangedString(flags, body, "assignee", "assignee_id")
-		setChangedString(flags, body, "labels", "labels_json")
+		if err := setChangedJSON(flags, body, "labels", "labels_json"); err != nil {
+			return err
+		}
 		setChangedString(flags, body, "cron", "cron_expression")
 		if flags.Changed("enabled") {
 			v, _ := flags.GetBool("enabled")
@@ -531,6 +539,36 @@ func setChangedString(flags *pflag.FlagSet, body map[string]any, flag, key strin
 		v, _ := flags.GetString(flag)
 		body[key] = v
 	}
+}
+
+// setJSONFlag is setStringFlag for fields that must carry valid JSON (e.g.
+// labels_json). A malformed value is rejected locally with a precise error
+// rather than forwarded to the server.
+func setJSONFlag(cmd *cobra.Command, body map[string]any, flag, key string) error {
+	v, _ := cmd.Flags().GetString(flag)
+	if v == "" {
+		return nil
+	}
+	if !json.Valid([]byte(v)) {
+		return fmt.Errorf("--%s must be valid JSON", flag)
+	}
+	body[key] = v
+	return nil
+}
+
+// setChangedJSON is setChangedString with JSON validation for the update verbs.
+// An explicit empty string still passes through (the handler clears it to
+// NULL); a non-empty value must parse as JSON.
+func setChangedJSON(flags *pflag.FlagSet, body map[string]any, flag, key string) error {
+	if !flags.Changed(flag) {
+		return nil
+	}
+	v, _ := flags.GetString(flag)
+	if v != "" && !json.Valid([]byte(v)) {
+		return fmt.Errorf("--%s must be valid JSON", flag)
+	}
+	body[key] = v
+	return nil
 }
 
 // emitFormattedJSON honours --filter/--format on commands that return raw

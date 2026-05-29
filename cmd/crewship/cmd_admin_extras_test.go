@@ -5,7 +5,34 @@ import (
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/cli"
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
+
+// snapshotFlags records the value + Changed state of every flag on cmd and
+// restores both at test end. The RunE tests below mutate package-global Cobra
+// command flags (Set + flipping .Changed); without restoring .Changed a flag
+// left "changed" leaks into sibling tests that branch on flags.Changed().
+// Pairs with saveCLIState, which covers the config globals.
+func snapshotFlags(t *testing.T, cmd *cobra.Command) {
+	t.Helper()
+	type saved struct {
+		val     string
+		changed bool
+	}
+	orig := map[string]saved{}
+	cmd.Flags().VisitAll(func(f *pflag.Flag) {
+		orig[f.Name] = saved{f.Value.String(), f.Changed}
+	})
+	t.Cleanup(func() {
+		cmd.Flags().VisitAll(func(f *pflag.Flag) {
+			if s, ok := orig[f.Name]; ok {
+				_ = f.Value.Set(s.val)
+				f.Changed = s.changed
+			}
+		})
+	})
+}
 
 // ── triage ──────────────────────────────────────────────────────────────────
 
@@ -37,12 +64,8 @@ func TestTriageCreate_Flags(t *testing.T) {
 
 func TestTriageCreateRunE_RequiresName(t *testing.T) {
 	saveCLIState(t)
+	snapshotFlags(t, triageCreateCmd)
 	cliCfg = &cli.CLIConfig{Token: "fake-token", Workspace: "ws-1"}
-	t.Cleanup(func() {
-		_ = triageCreateCmd.Flags().Set("name", "")
-		_ = triageCreateCmd.Flags().Set("pattern", "")
-		_ = triageCreateCmd.Flags().Set("match-type", "")
-	})
 	_ = triageCreateCmd.Flags().Set("name", "")
 	_ = triageCreateCmd.Flags().Set("pattern", "bug")
 	_ = triageCreateCmd.Flags().Set("match-type", "contains")
@@ -55,12 +78,8 @@ func TestTriageCreateRunE_RequiresName(t *testing.T) {
 
 func TestTriageCreateRunE_RequiresPattern(t *testing.T) {
 	saveCLIState(t)
+	snapshotFlags(t, triageCreateCmd)
 	cliCfg = &cli.CLIConfig{Token: "fake-token", Workspace: "ws-1"}
-	t.Cleanup(func() {
-		_ = triageCreateCmd.Flags().Set("name", "")
-		_ = triageCreateCmd.Flags().Set("pattern", "")
-		_ = triageCreateCmd.Flags().Set("match-type", "")
-	})
 	_ = triageCreateCmd.Flags().Set("name", "Bugs")
 	_ = triageCreateCmd.Flags().Set("pattern", "")
 	_ = triageCreateCmd.Flags().Set("match-type", "contains")
@@ -73,12 +92,8 @@ func TestTriageCreateRunE_RequiresPattern(t *testing.T) {
 
 func TestTriageCreateRunE_RejectsBadMatchType(t *testing.T) {
 	saveCLIState(t)
+	snapshotFlags(t, triageCreateCmd)
 	cliCfg = &cli.CLIConfig{Token: "fake-token", Workspace: "ws-1"}
-	t.Cleanup(func() {
-		_ = triageCreateCmd.Flags().Set("name", "")
-		_ = triageCreateCmd.Flags().Set("pattern", "")
-		_ = triageCreateCmd.Flags().Set("match-type", "")
-	})
 	_ = triageCreateCmd.Flags().Set("name", "Bugs")
 	_ = triageCreateCmd.Flags().Set("pattern", "bug")
 	_ = triageCreateCmd.Flags().Set("match-type", "fuzzy")
@@ -102,6 +117,7 @@ func TestTriageUpdate_Args(t *testing.T) {
 func TestTriageUpdateRunE_NoFields(t *testing.T) {
 	saveCLIState(t)
 	cliCfg = &cli.CLIConfig{Token: "fake-token", Workspace: "ws-1"}
+	snapshotFlags(t, triageUpdateCmd)
 	for _, f := range []string{"name", "pattern", "match-type", "crew", "assignee", "priority", "project", "labels", "position", "enabled"} {
 		if lk := triageUpdateCmd.Flags().Lookup(f); lk != nil {
 			lk.Changed = false
@@ -149,12 +165,8 @@ func TestRecurringCreate_Flags(t *testing.T) {
 
 func TestRecurringCreateRunE_RequiresCrew(t *testing.T) {
 	saveCLIState(t)
+	snapshotFlags(t, recurringCreateCmd)
 	cliCfg = &cli.CLIConfig{Token: "fake-token", Workspace: "ws-1"}
-	t.Cleanup(func() {
-		_ = recurringCreateCmd.Flags().Set("crew", "")
-		_ = recurringCreateCmd.Flags().Set("title", "")
-		_ = recurringCreateCmd.Flags().Set("cron", "")
-	})
 	_ = recurringCreateCmd.Flags().Set("crew", "")
 	_ = recurringCreateCmd.Flags().Set("title", "Daily standup")
 	_ = recurringCreateCmd.Flags().Set("cron", "0 9 * * *")
@@ -167,12 +179,8 @@ func TestRecurringCreateRunE_RequiresCrew(t *testing.T) {
 
 func TestRecurringCreateRunE_RequiresTitle(t *testing.T) {
 	saveCLIState(t)
+	snapshotFlags(t, recurringCreateCmd)
 	cliCfg = &cli.CLIConfig{Token: "fake-token", Workspace: "ws-1"}
-	t.Cleanup(func() {
-		_ = recurringCreateCmd.Flags().Set("crew", "")
-		_ = recurringCreateCmd.Flags().Set("title", "")
-		_ = recurringCreateCmd.Flags().Set("cron", "")
-	})
 	_ = recurringCreateCmd.Flags().Set("crew", "crew-1")
 	_ = recurringCreateCmd.Flags().Set("title", "")
 	_ = recurringCreateCmd.Flags().Set("cron", "0 9 * * *")
@@ -185,12 +193,8 @@ func TestRecurringCreateRunE_RequiresTitle(t *testing.T) {
 
 func TestRecurringCreateRunE_RequiresCron(t *testing.T) {
 	saveCLIState(t)
+	snapshotFlags(t, recurringCreateCmd)
 	cliCfg = &cli.CLIConfig{Token: "fake-token", Workspace: "ws-1"}
-	t.Cleanup(func() {
-		_ = recurringCreateCmd.Flags().Set("crew", "")
-		_ = recurringCreateCmd.Flags().Set("title", "")
-		_ = recurringCreateCmd.Flags().Set("cron", "")
-	})
 	_ = recurringCreateCmd.Flags().Set("crew", "crew-1")
 	_ = recurringCreateCmd.Flags().Set("title", "Daily standup")
 	_ = recurringCreateCmd.Flags().Set("cron", "")
@@ -214,6 +218,7 @@ func TestRecurringUpdate_Args(t *testing.T) {
 func TestRecurringUpdateRunE_NoFields(t *testing.T) {
 	saveCLIState(t)
 	cliCfg = &cli.CLIConfig{Token: "fake-token", Workspace: "ws-1"}
+	snapshotFlags(t, recurringUpdateCmd)
 	for _, f := range []string{"crew", "title", "description", "priority", "project", "milestone", "assignee-type", "assignee", "labels", "cron", "enabled"} {
 		if lk := recurringUpdateCmd.Flags().Lookup(f); lk != nil {
 			lk.Changed = false
@@ -251,11 +256,8 @@ func TestSavedViewCreate_Flags(t *testing.T) {
 
 func TestSavedViewCreateRunE_RequiresName(t *testing.T) {
 	saveCLIState(t)
+	snapshotFlags(t, savedViewCreateCmd)
 	cliCfg = &cli.CLIConfig{Token: "fake-token", Workspace: "ws-1"}
-	t.Cleanup(func() {
-		_ = savedViewCreateCmd.Flags().Set("name", "")
-		_ = savedViewCreateCmd.Flags().Set("filters", "")
-	})
 	_ = savedViewCreateCmd.Flags().Set("name", "")
 	_ = savedViewCreateCmd.Flags().Set("filters", `{"status":"open"}`)
 
@@ -267,11 +269,8 @@ func TestSavedViewCreateRunE_RequiresName(t *testing.T) {
 
 func TestSavedViewCreateRunE_RequiresFilters(t *testing.T) {
 	saveCLIState(t)
+	snapshotFlags(t, savedViewCreateCmd)
 	cliCfg = &cli.CLIConfig{Token: "fake-token", Workspace: "ws-1"}
-	t.Cleanup(func() {
-		_ = savedViewCreateCmd.Flags().Set("name", "")
-		_ = savedViewCreateCmd.Flags().Set("filters", "")
-	})
 	_ = savedViewCreateCmd.Flags().Set("name", "My open issues")
 	_ = savedViewCreateCmd.Flags().Set("filters", "")
 
@@ -283,11 +282,8 @@ func TestSavedViewCreateRunE_RequiresFilters(t *testing.T) {
 
 func TestSavedViewCreateRunE_RejectsInvalidFilters(t *testing.T) {
 	saveCLIState(t)
+	snapshotFlags(t, savedViewCreateCmd)
 	cliCfg = &cli.CLIConfig{Token: "fake-token", Workspace: "ws-1"}
-	t.Cleanup(func() {
-		_ = savedViewCreateCmd.Flags().Set("name", "")
-		_ = savedViewCreateCmd.Flags().Set("filters", "")
-	})
 	_ = savedViewCreateCmd.Flags().Set("name", "My open issues")
 	_ = savedViewCreateCmd.Flags().Set("filters", "not-json")
 
@@ -310,6 +306,7 @@ func TestSavedViewUpdate_Args(t *testing.T) {
 func TestSavedViewUpdateRunE_NoFields(t *testing.T) {
 	saveCLIState(t)
 	cliCfg = &cli.CLIConfig{Token: "fake-token", Workspace: "ws-1"}
+	snapshotFlags(t, savedViewUpdateCmd)
 	for _, f := range []string{"name", "filters", "sort", "view-type", "default", "shared"} {
 		if lk := savedViewUpdateCmd.Flags().Lookup(f); lk != nil {
 			lk.Changed = false

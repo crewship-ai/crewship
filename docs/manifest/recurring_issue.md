@@ -213,7 +213,7 @@ The standalone `crewship recurring` command (`cmd/crewship/cmd_admin_extras.go`)
 |---|---|
 | `crewship recurring list` | List recurring-issue schedules in the current workspace. |
 | `crewship recurring delete <id>` | Delete one schedule by row id. |
-| `crewship apply --file recurring.yaml` | Declarative create / update / delete — the only path for authoring schedules. Toggling `spec.enabled: true|false` in the manifest is how you enable/disable. |
+| `crewship apply --file recurring.yaml` | Declarative create / update / delete — the only path for authoring schedules. Toggling `spec.enabled: true\|false` in the manifest is how you enable/disable. |
 | `crewship apply --file recurring.yaml --dry-run` | Plan-only — shows the per-row create/update/delete the apply would perform. |
 | `crewship export workspace` | Includes every recurring issue the user can read. |
 

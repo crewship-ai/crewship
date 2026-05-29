@@ -104,8 +104,8 @@ func TestSeedNuke_CascadesPipelines(t *testing.T) {
 	whIdx := idx["/api/v1/workspaces/"+wsID+"/pipeline-webhooks/wh_test"]
 	schIdx := idx["/api/v1/workspaces/"+wsID+"/pipeline-schedules/psched_test"]
 	plnIdx := idx["/api/v1/workspaces/"+wsID+"/pipelines/my-routine"]
-	if !(whIdx < plnIdx && schIdx < plnIdx) {
-		t.Errorf("cascade order broken: webhooks(%d), schedules(%d), pipelines(%d) — both triggers must precede the pipeline row\nactual DELETEs:\n  %s",
+	if !(whIdx < schIdx && schIdx < plnIdx) {
+		t.Errorf("cascade order broken: webhooks(%d), schedules(%d), pipelines(%d) — must delete webhooks, then schedules, then the pipeline row\nactual DELETEs:\n  %s",
 			whIdx, schIdx, plnIdx, strings.Join(actual, "\n  "))
 	}
 }

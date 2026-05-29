@@ -32,7 +32,7 @@ crewship workflow get engineering-standard
 crewship workflow get "Engineering Standard"        # exact name also works
 ```
 
-## `crewship workflow create -f <manifest.yaml>`
+## `crewship workflow create --file <manifest.yaml>`
 
 `POST /api/v1/workflow-templates`. The CLI reads a SPEC-2 YAML manifest, validates the minimum shape locally, and posts the canonical `template_json` to the server (which re-validates the stage list).
 
@@ -74,7 +74,7 @@ Enforced both client- and server-side (`validateTemplateJSON` in `internal/api/w
 
 A name collision with an existing template in the same workspace returns `409 Conflict`.
 
-## `crewship workflow update <slug> -f <manifest.yaml>`
+## `crewship workflow update <slug> --file <manifest.yaml>`
 
 `PATCH /api/v1/workflow-templates/{id}`. Resolves `<slug>` against the stored template `name` (same matching as `get`/`delete`), then PATCHes the parsed manifest onto that row. The manifest uses the exact same SPEC-2 envelope as `create`, and the server re-runs the full stage validation — a manifest rejected on create is rejected on update too.
 

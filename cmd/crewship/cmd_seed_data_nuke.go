@@ -236,6 +236,10 @@ func nukeListBySlug(ctx context.Context, client *cli.Client, listPath, deletePre
 			return err
 		}
 		if item.Slug == "" {
+			// A row with no slug can't be addressed by the slug-based
+			// delete path, so it would survive the nuke. Surface it as a
+			// failure instead of silently leaving it behind.
+			failures = append(failures, fmt.Sprintf("DELETE %s<empty-slug>: row has no slug — remove it manually", deletePrefix))
 			continue
 		}
 		r, err := client.Delete(deletePrefix + item.Slug)

@@ -124,7 +124,7 @@ crewship memory log <workspace-id> <path> --limit 100 --format text
 
 | Flag | Default | Description |
 |---|---|---|
-| `--limit <n>` | `20` | Max rows. Clamped to `1000` server-side. |
+| `--limit <n>` | `20` | Max rows. Clamped to `1000` by the local query (this command reads the DB directly, no server involved). |
 | `--format` | `json` | `json` (pretty-printed) or `text` (one row per line, git-log–style: `<sha-12>  <ts>  <bytes> B  <writtenBy>`). |
 
 Empty result prints `no versions for <ws> @ <path>` to stderr and exits 0.
