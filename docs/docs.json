@@ -192,7 +192,8 @@
               "cli/setup",
               "cli/session",
               "cli/token",
-              "cli/me"
+              "cli/me",
+              "cli/admin"
             ]
           },
           {
@@ -243,7 +244,8 @@
               "cli/triage",
               "cli/recurring",
               "cli/saved-view",
-              "cli/escalation"
+              "cli/escalation",
+              "cli/workflow"
             ]
           },
           {
@@ -305,6 +307,7 @@
               "cli/approvals",
               "cli/policy",
               "cli/hire",
+              "cli/persona",
               "cli/hooks",
               "cli/checkpoint"
             ]
@@ -316,8 +319,10 @@
             "pages": [
               "cli/config",
               "cli/system",
+              "cli/instance",
               "cli/backup",
               "cli/features",
+              "cli/feature-flag",
               "cli/runtimes",
               "cli/eval",
               "cli/consolidate",
@@ -366,6 +371,7 @@
               "api-reference/recurring-issues",
               "api-reference/saved-views",
               "api-reference/triage",
+              "api-reference/workflow-templates",
               "api-reference/credentials",
               "api-reference/skills",
               "api-reference/recipes",

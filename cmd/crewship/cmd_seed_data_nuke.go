@@ -5,14 +5,139 @@ package main
 // per-entity seeders.
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
 
 	"github.com/crewship-ai/crewship/cmd/crewship/seeddata"
 	"github.com/crewship-ai/crewship/internal/cli"
+	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
+
+// nukeDecision is the pure confirmation policy for `seed --nuke`, extracted so
+// the branch matrix is unit-testable without a real TTY/stdin. The wipe deletes
+// ALL workspace contents, so the gate is strict:
+//   - yes=true                  → proceed (CI / scripted resets)
+//   - not interactive, no --yes → refuse (never wipe unattended)
+//   - interactive               → typed input must equal the workspace slug,
+//     and the slug must be known (non-empty)
+func nukeDecision(yes, interactive bool, typed, wsSlug string) error {
+	if yes {
+		return nil
+	}
+	if !interactive {
+		return errors.New("refusing to nuke in a non-interactive session without --yes")
+	}
+	if wsSlug == "" || strings.TrimSpace(typed) != wsSlug {
+		return errors.New("aborted: workspace slug did not match")
+	}
+	return nil
+}
+
+// confirmNuke prints a blast-radius summary (what / where / how much) and gates
+// the wipe behind a typed-slug confirmation. --yes bypasses the prompt for CI.
+// Counts are best-effort — a failed lookup shows 0 but never weakens the gate.
+func confirmNuke(cmd *cobra.Command, client *cli.Client, server string) error {
+	yes, _ := cmd.Flags().GetBool("yes")
+	wsName, wsSlug := nukeWorkspaceIdentity(client)
+	crews := nukeCount(client, "/api/v1/crews")
+	agents := nukeCount(client, "/api/v1/agents")
+
+	fmt.Fprintf(os.Stderr, "\n⚠️  NUKE permanently deletes ALL contents of workspace %q (%s)\n", wsName, wsSlug)
+	fmt.Fprintf(os.Stderr, "    on %s — %d crew(s), %d agent(s), plus every issue, project,\n", server, crews, agents)
+	fmt.Fprintln(os.Stderr, "    label, pipeline, schedule, webhook, and credential. This cannot be undone.")
+
+	if yes {
+		fmt.Fprintln(os.Stderr, "    --yes set; proceeding without prompt.")
+		return nukeDecision(true, false, "", wsSlug)
+	}
+	interactive := term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd()))
+	if !interactive {
+		return nukeDecision(false, false, "", wsSlug)
+	}
+	fmt.Fprintf(os.Stderr, "\nType the workspace slug %q to confirm the wipe: ", wsSlug)
+	typed, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+	return nukeDecision(false, true, typed, wsSlug)
+}
+
+// nukeWorkspaceIdentity resolves the active workspace's (name, slug) for the
+// confirmation summary. Returns ("the active workspace", "") when it can't be
+// determined — nukeDecision then refuses an interactive confirm (empty slug).
+//
+// Fail-closed by design: we MUST NOT fall back to the first workspace in the
+// list. The actual wipe is wsCtx-bound to client.WorkspaceID server-side; if
+// we showed the operator a different workspace's slug to type, they'd confirm
+// against the wrong identity and still wipe the active one. An empty slug
+// forces the user to pass --yes explicitly (CI/scripts), which is the safer
+// degradation than a misleading prompt.
+func nukeWorkspaceIdentity(client *cli.Client) (name, slug string) {
+	resp, err := client.Get("/api/v1/workspaces")
+	if err != nil {
+		return "the active workspace", ""
+	}
+	var wss []workspaceSummary
+	if err := cli.ReadJSON(resp, &wss); err != nil || len(wss) == 0 {
+		return "the active workspace", ""
+	}
+	n, s := findActiveWorkspace(wss, client.WorkspaceID)
+	if s == "" {
+		return "the active workspace", ""
+	}
+	return n, s
+}
+
+// workspaceSummary is the subset of the /workspaces list shape that the nuke
+// confirmation gate needs. Named so findActiveWorkspace is unit-testable.
+type workspaceSummary struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Slug string `json:"slug"`
+}
+
+// findActiveWorkspace returns the (name, slug) of the workspace whose id matches
+// activeID, or ("", "") if no workspace matches. Fail-closed by design: a
+// no-match must NOT fall back to wss[0], because the wipe is wsCtx-bound to
+// activeID server-side — showing the operator a different workspace's slug to
+// type would let them confirm under a false identity and still wipe the active
+// one. The empty-slug return forces nukeDecision to refuse unless --yes is set.
+//
+// Defensive against bad data: an empty activeID never matches anything (the
+// wipe context is unknown — never gamble), and rows with empty IDs are skipped
+// (a malformed /workspaces row whose id is "" would otherwise false-match an
+// empty activeID and reopen the fail-closed path). Both guards are unit-tested
+// because this is the single thing between an operator and a workspace wipe.
+func findActiveWorkspace(wss []workspaceSummary, activeID string) (name, slug string) {
+	if activeID == "" {
+		return "", ""
+	}
+	for _, w := range wss {
+		if w.ID == "" {
+			continue
+		}
+		if w.ID == activeID {
+			return w.Name, w.Slug
+		}
+	}
+	return "", ""
+}
+
+// nukeCount returns len() of a list endpoint, best-effort (0 on any error).
+func nukeCount(client *cli.Client, path string) int {
+	resp, err := client.Get(path)
+	if err != nil {
+		return 0
+	}
+	var items []json.RawMessage
+	if err := cli.ReadJSON(resp, &items); err != nil {
+		return 0
+	}
+	return len(items)
+}
 
 func seedNuke(ctx context.Context, client *cli.Client) error {
 	if err := ctx.Err(); err != nil {
@@ -236,6 +361,10 @@ func nukeListBySlug(ctx context.Context, client *cli.Client, listPath, deletePre
 			return err
 		}
 		if item.Slug == "" {
+			// A row with no slug can't be addressed by the slug-based
+			// delete path, so it would survive the nuke. Surface it as a
+			// failure instead of silently leaving it behind.
+			failures = append(failures, fmt.Sprintf("DELETE %s<empty-slug>: row has no slug — remove it manually", deletePrefix))
 			continue
 		}
 		r, err := client.Delete(deletePrefix + item.Slug)

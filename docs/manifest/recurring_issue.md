@@ -207,18 +207,15 @@ a brand-new workspace.
 
 ## CLI reference
 
+The standalone `crewship recurring` command (`cmd/crewship/cmd_admin_extras.go`) is intentionally minimal — list + delete only. Per-row create/update/enable/disable is **manifest-driven**: there is no `crewship recurring create / get / enable / disable` subcommand today; reach for `crewship apply` instead.
+
 | Command | Description |
 |---|---|
-| `crewship recurring list` | List recurring issues in the current workspace |
-| `crewship recurring get <slug>` | Show one recurring issue |
-| `crewship recurring create -f recurring.yaml` | Apply a single recurring-issue file |
-| `crewship recurring delete <slug>` | Delete by slug |
-| `crewship recurring enable <slug>` | Set `enabled: true` |
-| `crewship recurring disable <slug>` | Set `enabled: false` |
-| `crewship apply --file recurring.yaml` | Generic apply path; works for any kind |
-| `crewship export workspace` | Includes every recurring issue the user can read |
-
-(`crewship recurring …` subcommands are provided by `cmd/crewship/cmd_recurring.go`; the apply/export commands are generic across all kinds.)
+| `crewship recurring list` | List recurring-issue schedules in the current workspace. |
+| `crewship recurring delete <id>` | Delete one schedule by row id. |
+| `crewship apply --file recurring.yaml` | Declarative create / update / delete — the only path for authoring schedules. Toggling `spec.enabled: true\|false` in the manifest is how you enable/disable. |
+| `crewship apply --file recurring.yaml --dry-run` | Plan-only — shows the per-row create/update/delete the apply would perform. |
+| `crewship export workspace` | Includes every recurring issue the user can read. |
 
 ## REST endpoint mapping
 

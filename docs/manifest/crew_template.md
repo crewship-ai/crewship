@@ -130,13 +130,13 @@ The planner emits `Unchanged` with a warning. Useful for keeping a CrewTemplate 
 
 ## CLI reference
 
-The crew-template surface already has a dedicated CLI; manifest-level apply does not add new subcommands beyond the global `apply` / `export`.
+The crew-template surface has a dedicated CLI under `crewship template …` (no hyphen — registered as `templateCmd` in `cmd/crewship/cmd_template.go`); manifest-level apply does not add new subcommands beyond the global `apply` / `export`.
 
 | Command                                                | One-liner |
 |--------------------------------------------------------|-----------|
-| `crewship crew-template list`                          | List the workspace's templates (built-in + workspace-authored). |
-| `crewship crew-template get <slug>`                    | Show a single template's agent list. |
-| `crewship crew-template deploy <slug> --name <name>`   | Imperative deploy (equivalent to applying one `CrewTemplate` doc). |
+| `crewship template list`                               | List the workspace's templates (built-in + workspace-authored). |
+| `crewship template get <slug>`                         | Show a single template's agent list. |
+| `crewship template deploy <slug> --name <name>`        | Imperative deploy (equivalent to applying one `CrewTemplate` doc). |
 | `crewship apply --file <file>`                         | Declarative apply — deploys every `CrewTemplate` doc whose override slug isn't yet realised. |
 | `crewship export workspace`                            | Emits `CrewTemplate` docs for crews whose slug heuristically matches a template (see "Round-trip via export"). |
 

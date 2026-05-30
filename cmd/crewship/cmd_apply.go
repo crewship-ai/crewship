@@ -175,7 +175,7 @@ func runApply(cmd *cobra.Command, args []string) error {
 
 	if result != nil && len(result.PendingCredentials) > 0 {
 		fmt.Fprintln(os.Stdout)
-		fmt.Fprintf(os.Stdout, "%sPENDING credentials (set values in the UI, or via 'crewship credential set'):%s\n",
+		fmt.Fprintf(os.Stdout, "%sPENDING credentials (set values in the UI, or via 'crewship credential update'):%s\n",
 			cli.Yellow, cli.Reset)
 		seen := map[string]bool{}
 		for _, env := range result.PendingCredentials {

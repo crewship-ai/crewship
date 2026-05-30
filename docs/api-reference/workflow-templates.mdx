@@ -1,0 +1,160 @@
+---
+title: "Workflow Templates"
+description: "Reusable issue-lifecycle stage definitions (backlog → in_progress → done) attached to crews — workspace-scoped, with built-in and user-created rows sharing the same shape."
+icon: "git-branch"
+---
+
+# Workflow Templates
+
+A workflow template defines an **ordered list of stages** (e.g. `backlog → in_progress → review → done`) that crews attach to their issue trackers. The frontend renders these as column headers on board views; the issue handler enforces the stage transitions when an issue moves between columns.
+
+Implementation: `internal/api/workflow_templates_handler.go`. Backed by the `workflow_templates` table (schema introduced in migration v19, see `internal/database/migrate_consts_v16_v25.go`).
+
+All endpoints require an authenticated session and workspace context. Mutating verbs additionally require `OWNER`, `ADMIN`, or `MANAGER` role (`requireRole("create")`).
+
+## Template shape
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | string (CUID) | |
+| `name` | string | Workspace-unique. The DB has a `UNIQUE(workspace_id, name)` index — collisions on `POST`/`PATCH` surface as `409`. |
+| `description` | string \| null | |
+| `template_json` | string | JSON-encoded stage array. See [Stage shape](#stage-shape). Stored canonicalised — the server re-marshals it on every write so byte-identical manifests round-trip cleanly. |
+| `icon` | string \| null | Emoji shortcode or single Unicode glyph the frontend renders next to the template name. |
+| `color` | string \| null | Hex string like `#3B82F6`. Validated against `^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$`. |
+| `is_builtin` | bool | Server-controlled. `true` for the seed-time templates; user-created rows are always `false`. Callers cannot mark their own rows as built-in. |
+| `created_at` | RFC3339 | |
+| `updated_at` | RFC3339 | |
+
+## Stage shape
+
+Stages live inside `template_json` as a JSON array. Each stage:
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `name` | string | Yes | Unique within the template (case-sensitive — the DB stores it verbatim). |
+| `type` | string | Yes | One of `open`, `started`, `completed`, `cancelled`. Drives behaviour beyond display (e.g. closed-state inference). |
+| `position` | integer | Yes | Positive integer; unique within the template; controls left-to-right order on board views. `0` and negative values reject as `400`. |
+| `color` | string | No | Hex string like `#3B82F6` (3- or 6-digit). Empty/missing renders with the workspace default. |
+
+Validation rules enforced by `validateTemplateJSON`:
+
+- At least one stage.
+- Exactly **one** stage with `type: open`.
+- At least **one** stage with `type: completed`.
+- All `name` values unique; all `position` values unique.
+
+Violations return `400` with a single-sentence message describing the failing constraint.
+
+## `GET /api/v1/workflow-templates`
+
+List every template visible to the current workspace. Built-in rows surface first (`is_builtin DESC`), then user-created rows by `created_at ASC`.
+
+**Auth:** authenticated session + workspace context.
+
+**Response:** `200 OK` — JSON array (never `null`).
+
+```json
+[
+  {
+    "id": "wt_01HVZ...",
+    "name": "Engineering Standard",
+    "description": "Default engineering lifecycle",
+    "template_json": "[{\"name\":\"backlog\",\"type\":\"open\",\"position\":1,\"color\":\"#9CA3AF\"},{\"name\":\"in_progress\",\"type\":\"started\",\"position\":2,\"color\":\"#3B82F6\"},{\"name\":\"done\",\"type\":\"completed\",\"position\":3,\"color\":\"#10B981\"}]",
+    "icon": ":hammer_and_wrench:",
+    "color": "#3B82F6",
+    "is_builtin": false,
+    "created_at": "2026-05-19T18:22:10Z",
+    "updated_at": "2026-05-19T18:22:10Z"
+  }
+]
+```
+
+## `POST /api/v1/workflow-templates`
+
+Create a new user-owned template.
+
+**Auth:** authenticated session + workspace context + `requireRole("create")`.
+
+**Request body:**
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `name` | string | Yes | Workspace-unique. |
+| `description` | string \| null | No | |
+| `template_json` | string | Yes | Stage array (see [Stage shape](#stage-shape)). The handler canonicalises this — what the GET reads back is byte-equal regardless of the whitespace you posted. |
+| `icon` | string \| null | No | |
+| `color` | string \| null | No | Hex string. |
+
+**Response:** `201 Created` with the full template object.
+
+| Status | Condition |
+|---|---|
+| `400` | Missing `name`, missing/invalid `template_json` (any stage rule above), or invalid color. |
+| `401` | Not authenticated. |
+| `403` | Caller is below the `MANAGER` role. |
+| `409` | A template with the same `name` already exists in this workspace. |
+
+Broadcasts `workflow_template.created` on the workspace WS channel with `{"id": "<id>"}`.
+
+## `GET /api/v1/workflow-templates/{id}`
+
+Fetch a single template by id, scoped to the calling workspace.
+
+**Auth:** authenticated session + workspace context.
+
+**Response:** `200 OK` with the template object.
+
+| Status | Condition |
+|---|---|
+| `404` | Template id does not exist, **or** exists in a different workspace. The handler deliberately collapses these into one response code so cross-workspace existence can't be inferred. |
+
+## `PATCH /api/v1/workflow-templates/{id}`
+
+Partial update. Only the mutable subset (`name`, `description`, `template_json`, `icon`, `color`) is writable. `is_builtin`, `created_at`, and `id` are immutable; `updated_at` is set to "now" on every successful write.
+
+**Auth:** authenticated session + workspace context + `requireRole("create")`.
+
+**Request body:** every field optional; only provided (non-null) keys are written.
+
+| Field | Type | Notes |
+|---|---|---|
+| `name` | string | Empty string → `400 name cannot be empty`. |
+| `description` | string | Empty string clears the column (stored as SQL `NULL`). |
+| `template_json` | string | Re-validated against the full stage rule set on every write — there is no partial-stage edit path. |
+| `icon` | string | Empty string clears to `NULL`. |
+| `color` | string | Empty string clears to `NULL`; non-empty must match the hex regex. |
+
+**Response:** `200 OK` with the freshly-updated template (so callers don't need to re-`GET`).
+
+| Status | Condition |
+|---|---|
+| `400` | Malformed body, no fields supplied, or any stage rule violation. |
+| `401` | Not authenticated. |
+| `403` | Caller is below the `MANAGER` role. |
+| `404` | Template id does not exist in this workspace. |
+| `409` | New `name` collides with an existing template in the workspace. |
+
+Broadcasts `workflow_template.updated` on the workspace WS channel with `{"id": "<id>"}`.
+
+## `DELETE /api/v1/workflow-templates/{id}`
+
+Hard delete. Templates are reference data — crews that still point at the deleted template fall back to the runtime default lifecycle at next render rather than failing.
+
+**Auth:** authenticated session + workspace context + `requireRole("create")`.
+
+**Response:** `204 No Content`.
+
+| Status | Condition |
+|---|---|
+| `401` | Not authenticated. |
+| `403` | Caller is below the `MANAGER` role. |
+| `404` | Template id does not exist in this workspace. |
+
+Broadcasts `workflow_template.deleted` on the workspace WS channel with `{"id": "<id>"}`.
+
+## See also
+
+- [`crewship workflow`](/cli/workflow) — CLI wrapper around these endpoints.
+- [WorkflowTemplate manifest schema](https://github.com/crewship-ai/crewship/blob/main/docs/manifest/workflow_template.md) — SPEC-2 YAML shape the CLI consumes; the resulting `template_json` is the same array documented above.
+- [Issues](/api-reference/issues) — the issue rows whose stage column these templates govern.

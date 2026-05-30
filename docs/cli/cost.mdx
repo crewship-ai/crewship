@@ -54,8 +54,31 @@ Subscription plans (no per-call $)
 
 Per-crew rows are sorted descending by `cost_usd` regardless of server return order, so the highest-spend crew is always at the top.
 
+## `crewship cost forecast`
+
+Project the cost of a future run **before** sending it. Two modes — pick by which flag you set:
+
+```bash
+# Prompt-size projection (~4 chars/token heuristic, same rule as `crewship ask --estimate`)
+crewship cost forecast --prompt "rewrite auth"
+cat plan.md | crewship cost forecast --prompt @-
+crewship cost forecast --prompt @plan.md
+
+# History-based projection (averages the last 20 runs of <agent-slug>)
+crewship cost forecast --from-history viktor
+```
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--prompt <text\|@file\|@->` | string | | Prompt-mode source: literal text, `@path` to read a file, or `@-` for stdin. |
+| `--from-history <agent-slug>` | string | | History-mode source: averages the last 20 runs of the named agent. |
+| `--output-ratio <float>` | float | `2.0` | Output tokens projected as this multiple of input tokens (prompt mode only). Most agent runs return less than the input on average — `2.0` is a generous safety margin. |
+
+`--prompt` and `--from-history` are **mutually exclusive** and exactly one is required. Both modes print the same row layout (provider, input $, projected total $) so the output is directly comparable across modes.
+
+History mode walks `/api/v1/runs?agent_id=<id>&limit=20`, sums `usage.input_tokens` / `usage.output_tokens` out of each run's `metadata`, and averages. Metadata blobs lacking the usage keys are skipped silently — runs from providers that don't report usage simply don't contribute to the average.
+
 ## See also
 
-- [`crewship paymaster`](/cli/paymaster) — full-fidelity rollups (top, by-crew, subscriptions, forecast).
-- [`crewship cost-forecast`](/cli/paymaster) — projected month-end spend.
+- [`crewship paymaster`](/cli/paymaster) — full-fidelity rollups (top, by-crew, by-agent, by-mission, subscriptions).
 - [`crewship history`](/cli/history) — recent runs to correlate with cost spikes.

@@ -165,22 +165,20 @@ spec:
 
 ## CLI reference
 
-The existing `crewship triage` surface covers per-rule admin and
-the `process` endpoint (which actually evaluates rules against the
-current backlog). The manifest pipeline uses the CRUD endpoints
-under the hood; no new subcommands ship with this kind.
+The existing `crewship triage` surface is intentionally minimal —
+list + process only. Per-rule CRUD is **manifest-driven**: there is no
+`crewship triage create / get / delete` subcommand today, and the only
+declarative path is `crewship apply`. The manifest pipeline uses the
+underlying CRUD REST endpoints (see the mapping table below) under the
+hood.
 
-| Command                                  | Description                                          |
-| ---------------------------------------- | ---------------------------------------------------- |
-| `crewship triage list`                   | List every triage rule in the workspace.             |
-| `crewship triage get <slug>`             | Fetch a single rule by name/slug.                    |
-| `crewship triage create -f rule.yaml`    | Imperative create from a YAML file.                  |
-| `crewship triage delete <slug>`          | Delete a rule (one-shot; bypasses manifest).         |
-| `crewship triage process`                | Evaluate all enabled rules against the backlog.      |
-
-For declarative management, use `crewship apply --file
-triage.yaml` instead — manifest-managed rules round-trip via
-`crewship export` and survive workspace migrations.
+| Command                                              | Description                                          |
+| ---------------------------------------------------- | ---------------------------------------------------- |
+| `crewship triage list`                               | List every triage rule in the workspace.             |
+| `crewship triage process`                            | Evaluate all enabled rules against the backlog (one-shot manual fire). |
+| `crewship apply --file triage.yaml`                  | Create / update rules from a manifest. |
+| `crewship apply --file triage.yaml --replace --yes`  | Destructive recreate (delete-then-create per rule).  |
+| `crewship export workspace`                          | Round-trip — emits one `TriageRule` doc per stored row. |
 
 ## REST endpoint mapping
 

@@ -137,6 +137,14 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.mux.Handle("PATCH /api/v1/crews/{crewId}/integrations/{integrationId}", authed(wsCtx(http.HandlerFunc(integrations.UpdateCrewIntegration))))
 	r.mux.Handle("DELETE /api/v1/crews/{crewId}/integrations/{integrationId}", authed(wsCtx(http.HandlerFunc(integrations.DeleteCrewIntegration))))
 	r.mux.Handle("POST /api/v1/crews/{crewId}/integrations/{integrationId}/test", authed(wsCtx(http.HandlerFunc(integrations.TestCrewIntegrationConnection))))
+	// Connectors — curated manifest catalog + install flow. List/Get are
+	// catalog browse (auth only, no workspace context); Verify/Install
+	// mutate workspace state and gate on MANAGER+ via wsCtx-resolved role.
+	connectorsH := NewConnectorHandler(r.db, r.logger)
+	r.mux.Handle("GET /api/v1/connectors", authed(http.HandlerFunc(connectorsH.List)))
+	r.mux.Handle("GET /api/v1/connectors/{connectorId}", authed(http.HandlerFunc(connectorsH.Get)))
+	r.mux.Handle("POST /api/v1/connectors/{connectorId}/verify", authed(wsCtx(http.HandlerFunc(connectorsH.Verify))))
+	r.mux.Handle("POST /api/v1/connectors/{connectorId}/install", authed(wsCtx(http.HandlerFunc(connectorsH.Install))))
 	// Recipes — 1-click curated bundles (CONNECTIONS.md §6)
 	recipesH := NewRecipeHandler(r.db, r.logger)
 	r.mux.Handle("GET /api/v1/recipes", authed(http.HandlerFunc(recipesH.List)))

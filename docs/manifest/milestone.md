@@ -94,16 +94,19 @@ The `Project` and `Milestone` documents may live in the same multi-doc YAML file
 
 ## CLI reference
 
+The milestone CLI is nested under [`crewship project`](../cli/project) because milestones are children of a project. There is no standalone `crewship milestone` root command.
+
 ```bash
-crewship milestone list --project <project-slug>   # nested list
-crewship milestone get <milestone-id>              # GET /api/v1/milestones/{id}
-crewship milestone create -f milestone.yaml        # POST /api/v1/projects/{projectId}/milestones
-crewship milestone update <id> -f milestone.yaml   # PATCH /api/v1/milestones/{id}
-crewship milestone delete <id>                     # DELETE /api/v1/milestones/{id}
-crewship apply --file milestone.yaml               # manifest pipeline (preferred for repeatable setups)
+crewship project milestone list <project-id-or-slug>          # GET /api/v1/projects/{id}/milestones
+crewship project milestone create <project-id-or-slug> \
+  --name "Phase 1" --target-date 2026-06-15                   # POST /api/v1/projects/{id}/milestones
+crewship project milestone update <milestone-id> --status completed
+                                                              # PATCH /api/v1/milestones/{id}
+crewship project milestone delete <milestone-id>              # DELETE /api/v1/milestones/{id}
+crewship apply --file milestone.yaml                          # manifest pipeline (preferred for repeatable setups)
 ```
 
-`crewship apply` is the only path that resolves `project_slug` → `project_id` for you. The flat `crewship milestone create` requires you to pass the resolved project ID via its own flag.
+`crewship apply` is the only path that resolves `project_slug` → `project_id` for you. The flat `crewship project milestone create` takes the resolved project id (or slug) positionally and accepts individual `--name` / `--target-date` / `--status` / `--description` flags rather than a YAML file. For multi-milestone bundles, reach for `crewship apply`.
 
 ## REST endpoint mapping
 

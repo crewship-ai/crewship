@@ -262,6 +262,41 @@ POST /api/v1/crews/{crewId}/members?workspace_id={workspaceId}
 | `404` | Crew not found |
 | `409` | User is already a member of this crew |
 
+### Update Member Role
+
+```
+PATCH /api/v1/crews/{crewId}/members/{memberId}?workspace_id={workspaceId}
+Content-Type: application/json
+```
+
+Elevate or clear the per-crew role override. The crew-member row
+carries an optional `role` column that, when set, **wins over** the
+workspace-level role for permissions scoped to this crew. Clearing it
+(empty or omitted `role`) drops the member back to inheriting their
+workspace role.
+
+**Auth:** `OWNER` or `ADMIN` role on the workspace. A per-crew ADMIN
+is **not** allowed to reshape membership — that could ladder a MEMBER
+straight to OWNER and bypass the workspace gate.
+
+**Request Body:**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `role` | string | No | One of `OWNER`, `ADMIN`, `MANAGER`, `MEMBER`, `VIEWER`. Omit or pass `""` to clear the override (member inherits workspace role). |
+
+```json
+{ "role": "ADMIN" }
+```
+
+**Response:** `200 OK` — updated member object.
+
+| Status | Condition |
+|---|---|
+| `400` | `role` is not in the enum set |
+| `403` | Caller is not workspace OWNER / ADMIN |
+| `404` | Crew or member not found |
+
 ### Remove Member
 
 ```
@@ -279,6 +314,152 @@ DELETE /api/v1/crews/{crewId}/members/{memberId}?workspace_id={workspaceId}
 | Status | Condition |
 |---|---|
 | `404` | Crew or member not found |
+
+---
+
+## Crew Persona
+
+The crew layer of the persona stack — `PERSONA.md` markdown that the
+orchestrator injects into every agent in the crew, used as the default
+when an agent has no agent-layer file. Resolution is layered: the
+agent layer wins if present; otherwise crew default; otherwise the
+synthesised "You are the {role}..." stub. See the [Agent Persona
+section in the agents reference](/api-reference/agents#agent-persona)
+for the cross-layer model and `cap_bytes` (1500).
+
+All three endpoints are operator-only; there is no crew-flavoured
+`suggest` analog (agents propose into their own layer, not the crew
+default).
+
+### Get Crew Persona
+
+```
+GET /api/v1/crews/{crewId}/persona
+```
+
+**Response:** `200 OK`
+
+```json
+{
+  "crew_id": "crew-uuid",
+  "layer": "crew",
+  "content": "# Default persona for this crew...\n",
+  "bytes": 412,
+  "cap_bytes": 1500
+}
+```
+
+Unlike [`GET /agents/{id}/persona`](/api-reference/agents#get-persona), this endpoint does **not** report a `from_default` flag — the crew layer either has a file or it doesn't. When empty, `content` is `""` and clients fall through to the per-agent synthesised default.
+
+### Set Crew Persona
+
+```
+PUT /api/v1/crews/{crewId}/persona
+Content-Type: application/json
+```
+
+Writes the crew layer file. Records a row in `memory_versions` keyed
+to the crew-layer path so the history endpoint can replay the chain.
+
+**Request:**
+
+```json
+{ "content": "# Default persona for this crew\n\n..." }
+```
+
+**Response:** `200 OK` — `{ "layer": "crew", "bytes": N, "updated": "<rfc3339>" }`
+
+| Status | Condition |
+|--------|-----------|
+| `413` | `content` exceeds `cap_bytes` (1500) |
+| `404` | Crew not found |
+| `500` | Storage write / fsync failure |
+
+### Reset Crew Persona
+
+```
+DELETE /api/v1/crews/{crewId}/persona
+```
+
+Removes the crew layer file. Subsequent reads return empty content
+and agents fall back to their per-role synthesised default.
+
+**Response:** `204 No Content`
+
+---
+
+## Crew Policy
+
+Each crew carries an autonomy posture that gates every HITL-relevant
+decision the orchestrator makes — memory writes, skill creation,
+behavior-monitor escalations, persona suggestions, ephemeral spawns.
+The dial is read by every PR-B / PR-C subsystem via the shared
+`policy.Resolver`. The CLI counterpart is [`crewship policy
+get/set`](/cli/policy).
+
+| Field | Values | Meaning |
+|-------|--------|---------|
+| `autonomy_level` | `strict` / `guided` / `trusted` / `full` | How much an agent can do without operator approval. `strict` queues everything; `full` auto-applies most decisions. |
+| `behavior_mode` | `warn` / `block` | What the behavior monitor does on a flagged action — `warn` lets it through with a journal entry, `block` rejects. |
+
+### Get Crew Policy
+
+```
+GET /api/v1/crews/{crewId}/policy
+```
+
+**Response:** `200 OK`
+
+```json
+{
+  "crew_id": "crew-uuid",
+  "autonomy_level": "guided",
+  "behavior_mode": "warn",
+  "set_by_user_id": "user-uuid",
+  "set_at": "2026-05-26T14:22:10Z",
+  "reason": "Default for newly-onboarded crews"
+}
+```
+
+`set_by_user_id` / `set_at` / `reason` are omitted on crews whose
+policy still matches the seed defaults (no operator has ever flipped
+it). On crews that have been touched at least once, the audit triple
+records who, when, why.
+
+### Set Crew Policy
+
+```
+PUT /api/v1/crews/{crewId}/policy
+Content-Type: application/json
+```
+
+Replaces the policy. Requires `OWNER` / `ADMIN` (`canRole "manage"`)
+— the same gate as [`/api/v1/agents/{id}/learning`](/api-reference/agents#set-self-learning).
+
+**Request:**
+
+```json
+{
+  "autonomy_level": "trusted",
+  "behavior_mode": "block",
+  "reason": "Crew has cleared 30 days of approvals without an override"
+}
+```
+
+| Field | Required | Notes |
+|-------|----------|-------|
+| `autonomy_level` | yes | Must be one of the four enum values; other strings return `400`. |
+| `behavior_mode` | yes | `warn` or `block`. Missing field returns `400` (no silent default). |
+| `reason` | yes | Non-empty after trim — persisted on the audit triple. |
+
+**Response:** `200 OK` — same shape as `GET`, reflecting the new
+state and the freshly-recorded audit triple.
+
+| Status | Condition |
+|--------|-----------|
+| `400` | Invalid enum value, or missing `reason` |
+| `403` | Caller is not OWNER / ADMIN |
+| `404` | Crew not found |
 
 ---
 

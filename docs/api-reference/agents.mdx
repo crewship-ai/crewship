@@ -261,6 +261,393 @@ Soft-deletes the agent (sets `deleted_at`).
 
 ---
 
+## Agent Persona
+
+The persona layer is per-agent `PERSONA.md` markdown that the
+orchestrator injects into every system prompt. Resolution is layered:
+the agent layer (if a file exists on disk) wins; otherwise the crew
+default layer; otherwise the synthesized default built from the
+agent's role + role title. Direct writes are operator-only; agents
+edit only via the **suggest** endpoint, which the policy resolver
+gates per crew-autonomy level (see [Autonomy & self-learning](/guides/autonomy-and-self-learning)).
+
+### Get Persona
+
+```
+GET /api/v1/agents/{agentId}/persona
+```
+
+Returns the resolved persona — agent layer if a file is present,
+crew default otherwise, synthesised default if neither layer is
+configured.
+
+**Response:** `200 OK`
+
+```json
+{
+  "agent_id": "agent-uuid",
+  "layer": "agent",
+  "from_default": false,
+  "content": "# PERSONA.md...\n",
+  "bytes": 1842,
+  "cap_bytes": 1500
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `layer` | `string` | `agent` or `crew` — which layer the response came from. The synthesised default is reported as `crew` with `from_default = true`. |
+| `from_default` | `bool` | `true` when no file exists on either layer and the synthesised "You are the {role}…" stub was returned |
+| `cap_bytes` | `integer` | Max accepted size on `PUT` / `POST suggest` (`memory.PersonaCapBytes` = 1500 bytes) |
+
+### Set Persona
+
+```
+PUT /api/v1/agents/{agentId}/persona
+Content-Type: application/json
+```
+
+Operator-only direct write of the agent layer. Records a row in
+`memory_versions` so [Get Persona History](#get-persona-history) can
+replay the chain.
+
+**Request:**
+
+```json
+{ "content": "# Engineer\n\nFocus on backend services...\n" }
+```
+
+**Response:** `200 OK`
+
+```json
+{ "layer": "agent", "bytes": 1842, "updated": "2026-05-27T18:42:11Z" }
+```
+
+| Status | Condition |
+|--------|-----------|
+| `413` | `content` exceeds `cap_bytes` |
+| `400` | Invalid JSON or missing storage configuration |
+| `500` | Storage write/fsync failure |
+
+<Note>
+  Agents cannot use this endpoint to mutate their own persona — `ActionPersonaDirectWrite` is `DecisionRejected` across every autonomy level in Phase 1. Agent edits flow exclusively through [Suggest Persona](#suggest-persona).
+</Note>
+
+### Reset Persona
+
+```
+DELETE /api/v1/agents/{agentId}/persona
+```
+
+Removes the agent layer file. The next `GET` falls through to the crew layer (or the synthesised default).
+
+**Response:** `204 No Content`
+
+### Get Persona History
+
+```
+GET /api/v1/agents/{agentId}/persona/history?limit=20
+```
+
+Lists rows from `memory_versions` filtered to this agent's
+`PERSONA.md` path. Pairs with [`GET /api/v1/admin/memory/versions/{id}/content`](/api-reference/admin#get-api-v1-admin-memory-versions-id-content) for content drill-down — the history endpoint deliberately omits content to keep responses small.
+
+**Query Parameters:**
+
+| Param | Default | Max | Description |
+|-------|---------|-----|-------------|
+| `limit` | `20` | `100` | Page size, clamped server-side. |
+
+**Response:** `200 OK`
+
+```json
+{
+  "entries": [
+    {
+      "id": "mv-cuid",
+      "sha256": "deadbeef…",
+      "bytes": 1842,
+      "written_at": "2026-05-27T18:42:11Z",
+      "written_by": "user-uuid",
+      "parent_sha": "cafef00d…"
+    }
+  ]
+}
+```
+
+`parent_sha` is omitted on the first version (when the chain starts).
+
+### Suggest Persona
+
+```
+POST /api/v1/agents/{agentId}/persona/suggest
+Content-Type: application/json
+```
+
+Agent-initiated persona proposal. The crew's autonomy policy decides
+the outcome:
+
+| Crew autonomy | Outcome |
+|---------------|---------|
+| `strict` / `guided` / `trusted` | Inbox approval item created. Agent learns `pending` so it can reference the proposal in subsequent runs. |
+| `full` | Auto-apply + journal entry — unless the agent's `self_learning_enabled = 0`, which demotes auto-apply back to inbox approval. |
+
+`ActionPersonaDirectWrite` is rejected across every autonomy level —
+this endpoint is the **only** path an agent can use to write a
+persona.
+
+**Request:**
+
+```json
+{
+  "content": "# Engineer\n\nFocus on backend services...\n",
+  "rationale": "Operator briefly emphasised the on-call rotation; reflecting that in the persona."
+}
+```
+
+**Response:** `200 OK`
+
+```json
+{
+  "decision": "inbox_approve",
+  "inbox_id": "ib-cuid",
+  "rationale": "..."
+}
+```
+
+| Status | Condition |
+|--------|-----------|
+| `400` | Missing / empty `content` field |
+| `413` | `content` exceeds `cap_bytes` |
+| `503` | Server built without storage configuration (`outputBasePath` empty) |
+
+---
+
+## Agent Self-Learning Posture
+
+Per-agent flag controlling whether `ALLOW` decisions from the Keeper
+evaluators **auto-apply** (`enabled = true`) or **queue for operator
+approval** in the inbox (`enabled = false`). Orthogonal to the crew's
+`autonomy_level`: the per-action policy gate (`policy.DecideAction`)
+is the upstream authority — this flag only decides what happens to
+already-ALLOWed decisions. See [Autonomy & self-learning](/guides/autonomy-and-self-learning).
+
+### Get Self-Learning
+
+```
+GET /api/v1/agents/{agentId}/learning
+```
+
+Returns the current flag plus the audit triple (who flipped it, when,
+why). Any authenticated workspace member can read — the value is
+non-secret diagnostic state.
+
+**Response:** `200 OK`
+
+```json
+{
+  "agent_id": "agent-uuid",
+  "enabled": true,
+  "set_by_user_id": "user-uuid",
+  "set_at": "2026-05-26T09:14:22Z",
+  "reason": "Trusted crew, agent has cleared 50+ approvals without an override"
+}
+```
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `enabled` | `bool` | Persisted as `0` / `1` on `agents.self_learning_enabled`. |
+| `set_by_user_id` | `string?` | Omitted on agents that have never had the flag flipped. |
+| `set_at` | `string?` | RFC3339; omitted when never set. |
+| `reason` | `string?` | Operator-supplied rationale from the most recent `PATCH`; omitted when never set. |
+
+### Set Self-Learning
+
+```
+PATCH /api/v1/agents/{agentId}/learning
+Content-Type: application/json
+```
+
+Flip the flag. Requires `OWNER` / `ADMIN` (`canRole(role, "manage")`)
+— self-learning weakens the inbox-approval invariant, so the operator
+who turns it on must be senior enough to own the consequences.
+
+**Request:**
+
+```json
+{
+  "enabled": true,
+  "reason": "Trusted crew, agent has cleared 50+ approvals without an override"
+}
+```
+
+| Field | Type | Required | Notes |
+|-------|------|----------|-------|
+| `enabled` | `bool` | yes | Decoded as `*bool` server-side — a missing or `null` field returns `400`, **not** a silent flip to `false`. Be explicit about direction. |
+| `reason` | `string` | yes | Non-empty after trim. Persisted on the row so a later audit can answer "who turned this on, when, and why". |
+
+**Response:** `200 OK` — same shape as `GET`, reflecting the new state and the freshly-recorded audit triple.
+
+| Status | Condition |
+|--------|-----------|
+| `400` | `enabled` field missing / null, or `reason` empty |
+| `403` | Caller is not OWNER / ADMIN |
+| `404` | Agent not found in the current workspace |
+
+---
+
+## Agent Inbox Summary
+
+```
+GET /api/v1/agents/{agentId}/inbox
+```
+
+Consolidated "what's waiting on this agent" payload used by the
+Crews preview panel — one round-trip instead of four parallel fetches
+across approvals, assignments, escalations, and peer messages. UI is
+the primary consumer; operators can poll the endpoint for an at-a-glance
+load check.
+
+**Response:** `200 OK`
+
+```json
+{
+  "approvals_pending": 2,
+  "assignments_open": 5,
+  "escalations_open": 0,
+  "peer_messages": [
+    {
+      "id": "pm-uuid",
+      "from_agent_name": "Martin",
+      "from_agent_slug": "martin",
+      "question": "What's the latest on the deploy script?",
+      "response": null,
+      "escalated": false,
+      "status": "open",
+      "created_at": "2026-05-27T12:30:00Z",
+      "direction": "incoming"
+    }
+  ],
+  "cost_usd_this_month": 4.21,
+  "llm_calls_this_month": 312,
+  "tokens_used_this_month": 184221
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `approvals_pending` | `int` | Inbox waitpoint items awaiting this agent's decision. |
+| `assignments_open` | `int` | Tasks routed to this agent that have not reached a terminal state. |
+| `escalations_open` | `int` | Peer conversations escalated up the lead chain that still target this agent. |
+| `peer_messages` | `array` | Last N peer messages (both directions). `direction` is `"incoming"` or `"outgoing"`; `response` and `duration_ms` are populated only for resolved exchanges. |
+| `cost_usd_this_month` | `float` | Sum of `paymaster_events.cost_usd` for runs attributed to this agent in the current calendar month. |
+| `llm_calls_this_month` | `int` | Count of `agent_run` step completions in the current month. |
+| `tokens_used_this_month` | `int64` | Sum of input + output tokens reported by the journal in the current month. |
+
+| Status | Condition |
+|--------|-----------|
+| `401` | Workspace context missing |
+| `404` | Agent not found in the current workspace |
+
+---
+
+## Agent Peer Cards
+
+Per-`(agent, user)` markdown notes produced by the `PeerCardSync`
+routine — the agent's own "what I know about this person" file.
+These endpoints are **operator-facing**: the cards live on disk
+under `{outputBase}/crews/{crewID}/agents/{slug}/.memory/peers/`,
+and every read/write/delete writes a `peer_card_audit` row for GDPR
+SAR coverage.
+
+The user-facing surface (view-mine / opt-out / delete-mine) lives
+under `/api/v1/users/me/peer-cards` and shares the same disk + DB
+primitives — these agent-flavor endpoints exist so an operator can
+clean up cards on behalf of a user (compliance ticket, leaver
+workflow) or inspect what an agent has been writing about people.
+
+The `{userId}` path parameter is the raw `user_id`; the server
+derives the `user_slug` via `memory.UserSlug` so the URL stays
+debuggable.
+
+### List Agent Peers
+
+```
+GET /api/v1/agents/{agentId}/peers
+```
+
+Returns the agent's peer-card index (no card content — fetch via the
+single-card endpoint below). Workspace-scoped; agents in other
+workspaces return `404`.
+
+**Response:** `200 OK`
+
+```json
+{
+  "agent_id": "agent-uuid",
+  "peers": [
+    {
+      "id": "pc-uuid",
+      "user_id": "user-uuid",
+      "user_slug": "alice",
+      "bytes": 412,
+      "created_at": "2026-05-10T...",
+      "updated_at": "2026-05-26T..."
+    }
+  ]
+}
+```
+
+| Status | Condition |
+|--------|-----------|
+| `404` | Agent not found in the current workspace |
+| `409` | Agent has no `crew_id` — peer cards require a crew-scoped path |
+
+### Get Agent Peer Card
+
+```
+GET /api/v1/agents/{agentId}/peers/{userId}
+```
+
+Returns one card's full content (markdown). Writes a `read` row to
+`peer_card_audit`.
+
+**Response:** `200 OK`
+
+```json
+{
+  "agent_id": "agent-uuid",
+  "user_id": "user-uuid",
+  "user_slug": "alice",
+  "content": "# Alice Chen\n\n- Prefers async over sync...\n",
+  "bytes": 412
+}
+```
+
+| Status | Condition |
+|--------|-----------|
+| `404` | Agent not found, or no card exists for this `(agent, user)` |
+| `409` | Agent has no `crew_id` |
+| `503` | `outputBasePath` not configured server-side |
+
+### Delete Agent Peer Card
+
+```
+DELETE /api/v1/agents/{agentId}/peers/{userId}
+```
+
+Removes the card from disk and the `peer_cards` row, then writes a
+`delete` audit row. Idempotent — deleting a non-existent card returns
+`204` rather than `404` so an operator script can retry safely.
+
+**Response:** `204 No Content`
+
+<Note>
+  The GDPR cascade endpoint [`DELETE /api/v1/admin/users/{userId}/data`](/api-reference/admin#delete-api-v1-admin-users-userid-data) deletes peer cards across **all** agents in the workspace for a single user — that's the right path for a full SAR. This per-agent endpoint is for the narrower "clean up just this agent's notes about this user" case.
+</Note>
+
+---
+
 ## Agent Skills
 
 ### List Skills

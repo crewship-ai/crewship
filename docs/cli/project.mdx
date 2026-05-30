@@ -24,6 +24,10 @@ Auth: every subcommand requires `crewship login` plus an active workspace. The P
 | `project update <id>` | Patch any mutable field. |
 | `project delete <id>` | Delete the project. Issues are unlinked (set `project_id = NULL`), not deleted. |
 | `project stats <id>` | Breakdown by status / assignee / label / crews. |
+| `project milestone list <id>` | List milestones for a project. |
+| `project milestone create <id> --name <n>` | Create a milestone. |
+| `project milestone update <milestone-id>` | Patch a milestone. |
+| `project milestone delete <milestone-id>` | Delete a milestone (prompts unless `-y`). Aliases: `remove`, `rm`. |
 
 ## Flags
 
@@ -145,6 +149,37 @@ crewship project delete mobile-launch
 ```
 
 The delete unlinks every issue and mission (sets `project_id = NULL` in the same transaction) so the destroy doesn't cascade into issue loss.
+
+### Milestones
+
+Each project carries an ordered list of milestones (named delivery checkpoints with an optional target date). Backed by `/api/v1/projects/{id}/milestones` for list/create and `/api/v1/milestones/{id}` for update/delete (see `internal/api/milestone_handler.go`). Alias on the parent verb: `milestones`.
+
+```bash
+# List milestones — columns: ID, NAME, STATUS, TARGET, ISSUES (done/total), POS
+crewship project milestone list mobile-launch
+
+# Create
+crewship project milestone create mobile-launch \
+  --name "Phase 1 — onboarding" \
+  --target-date 2026-06-15 \
+  --status active
+
+# Update (any subset of fields)
+crewship project milestone update mil_abc123 \
+  --status completed --position 2
+
+# Delete (prompts unless --yes)
+crewship project milestone delete mil_abc123 --yes
+crewship project milestones rm mil_abc123 --yes      # alias on the group + verb
+```
+
+| Verb | Flags | Notes |
+|---|---|---|
+| `create` | `--name` (required), `--description`, `--target-date` (ISO 8601), `--status` (default `active`) | Posts to `/projects/{id}/milestones`. |
+| `update` | `--name`, `--description`, `--target-date`, `--status`, `--position` | PATCH; only flags actually `Changed()` are forwarded. Reject with `no fields to update` when none are. |
+| `delete` | `-y`, `--yes` | DELETE. Aliases: `remove`, `rm`. |
+
+`update`/`delete` take the **milestone id** (not the project id) because milestones are keyed independently once created.
 
 ## Common errors
 

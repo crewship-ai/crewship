@@ -115,14 +115,12 @@ spec:
 
 ## CLI reference
 
-The recipe surface already has a dedicated CLI; manifest-level apply does not add new subcommands beyond the global `apply` / `export`.
+`Recipe` is driven by the generic `crewship apply` / `crewship export` commands; there is no per-kind `crewship recipe …` subcommand today. The endpoints below back the manifest plan/apply machinery; raw HTTP callers can hit them directly.
 
 | Command | One-liner |
 |---|---|
-| `crewship recipe list` | List the server catalog (matches `GET /api/v1/recipes`). |
-| `crewship recipe get <slug>` | Show a single catalog entry. |
-| `crewship recipe install <slug>` | Imperative install (equivalent to `apply` with one `Recipe` doc). |
 | `crewship apply --file <file>` | Declarative apply — installs every `Recipe` doc whose `spec.install: true` is not yet realised. |
+| `crewship apply --file <file> --dry-run` | Show the install plan without mutating. |
 | `crewship export workspace` | Emits one `Recipe` doc per installed recipe (see "Round-trip via export"). |
 
 ## REST endpoint mapping

@@ -153,7 +153,7 @@ spec:
 
 ```
 crewship feature-flag list
-    List every flag + this workspace's effective override state.
+    List every flag + this workspace's effective override state. Alias: `flag list`.
 
 crewship feature-flag enable <key>
     Shortcut: PUT override with enabled: true for the current workspace.
@@ -161,9 +161,11 @@ crewship feature-flag enable <key>
 crewship feature-flag disable <key>
     Shortcut: PUT override with enabled: false.
 
-crewship feature-flag override <key> --workspace <ws-slug> --enabled <bool>
-    Admin form: target an arbitrary workspace by slug instead of the current one.
+crewship feature-flag inherit <key>
+    Drop this workspace's override row and revert to the instance default.
 ```
+
+The override subcommands all operate on the **current** workspace (resolved via `crewship workspace use` / `CREWSHIP_WORKSPACE`); there is no `--workspace` flag for targeting an arbitrary other workspace from the CLI. To cross-target, switch workspace context first.
 
 For full CRUD (creating new flag definitions, deleting flags) use
 `crewship apply --file flag.yaml`. The admin CLI intentionally

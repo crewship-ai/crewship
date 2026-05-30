@@ -22,12 +22,17 @@ crewship agent <subcommand> [flags]
 | `update` | Update an agent |
 | `delete` | Delete an agent |
 | `runs` | List runs for an agent |
+| `chats` | List recent chats for an agent (alias: `sessions`) |
 | `stop` | Stop a running agent |
 | `logs` | Show agent container logs |
 | `debug` | Show agent debug info (container state, env, crewshipd status) |
 | `skills` | List skills assigned to an agent |
 | `credentials` | List credentials assigned to an agent |
 | `mcp` | Show or set MCP server configuration for an agent |
+| `files` | List files in the agent's working directory, or download a single file |
+| `file-write` | Write a file into the agent's working directory |
+| `inbox` | Show peer messages received by the agent |
+| `git-log` | Show git log inside the agent's container |
 
 ---
 
@@ -234,3 +239,91 @@ crewship agent mcp <agent-slug> --set-file agent-mcp.json
 <Note>
 The JSON must contain a `"mcpServers"` object at the top level. `--set` and `--set-file` are mutually exclusive. `--resolved` cannot be combined with set operations.
 </Note>
+
+---
+
+## `crewship agent chats`
+
+List the agent's recent chat sessions — id, title, status, message count, and start/end timestamps. Mirrors the **SessionsSidebar** panel in the web UI. Alias: `sessions`.
+
+```bash
+crewship agent chats viktor
+crewship agent chats viktor --format json | jq '.[] | select(.status=="ACTIVE")'
+```
+
+**Output columns:** CHAT ID, TITLE, STATUS, MSGS, STARTED, ENDED.
+
+Backed by `GET /api/v1/agents/{id}/chats`.
+
+---
+
+## `crewship agent files`
+
+List the agent's `/output/<slug>/` working-directory artefacts, or download a single file. Same view the web Files panel renders.
+
+```bash
+crewship agent files viktor
+crewship agent files viktor --download README.md
+crewship agent files viktor --download report.txt --out /tmp/saved.txt
+crewship agent files viktor --filter '.[] | .name'      # gojq expression
+```
+
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--download <name>` | string | | Download this file instead of listing. |
+| `--out <path>` | string | basename of file | Output path for `--download`. Pass `-` to stream the file body to stdout. |
+| `--filter <expr>` | string | | gojq filter applied before rendering (when not downloading). |
+
+Downloads stream into a tempfile next to the target and `rename(2)` only on success — Ctrl-C or transport errors mid-copy do not clobber an existing good file with a truncated one.
+
+Backed by `GET /api/v1/agents/{id}/files` and `GET /api/v1/agents/{id}/files/download?path=…`.
+
+---
+
+## `crewship agent file-write`
+
+Upload bytes to the agent's working directory. Source comes from `--from` (local file), `--content` (inline string), or stdin when neither flag is given. `--content` and `--from` are mutually exclusive.
+
+```bash
+echo "draft" | crewship agent file-write viktor notes/draft.md
+crewship agent file-write viktor config/x.toml --from ./local.toml
+crewship agent file-write viktor README.md --content "# hi"
+```
+
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--content` | string | | Inline content string. |
+| `--from` | string | | Local file path to upload. |
+
+Backed by `PUT /api/v1/agents/{id}/files/save?path=<path>`. The handler reads `r.Body` raw — no JSON envelope — so binary uploads round-trip byte-for-byte.
+
+---
+
+## `crewship agent inbox`
+
+List peer-to-peer messages addressed to this agent. Useful for debugging cross-agent collaboration: did the message arrive? was it read?
+
+```bash
+crewship agent inbox viktor
+crewship agent inbox viktor --filter '.[] | .from'
+```
+
+**Output columns:** WHEN, FROM (truncated to 15 chars), MESSAGE (truncated to 60 chars, newlines flattened).
+
+Backed by `GET /api/v1/agents/{id}/inbox`.
+
+---
+
+## `crewship agent git-log`
+
+Show the git commit log from inside the agent's container — useful for inspecting what code-writing agents have committed locally before any push.
+
+```bash
+crewship agent git-log viktor
+crewship agent git-log viktor --filter '.[] | .message'
+crewship agent git-log viktor --format json
+```
+
+Default rendering prints short hash + relative date + truncated subject line. The handler tolerates both `[...]` and `{"commits":[...]}` shapes from the server side.
+
+Backed by `GET /api/v1/agents/{id}/git-log`.

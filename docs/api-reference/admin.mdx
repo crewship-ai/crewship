@@ -72,6 +72,121 @@ Lists all users in the current workspace with their roles.
 | `workspace` | `object?` | Workspace details (id, name, slug) |
 | `role` | `string?` | Role in this workspace (OWNER, ADMIN, MEMBER, VIEWER) |
 
+## GET /api/v1/admin/users/\{userId\}/data
+
+GDPR Art. 15 (Right of Access) — return every row referencing the given user across the cascadable tables in the current workspace. Writes a `gdpr_actions` audit row with `action='export'`.
+
+**Required role:** ADMIN or OWNER (`manage` permission). MANAGER is intentionally **not** a SAR actor — auditor framing is Compliance/Founder separation of duties.
+
+### Response
+
+```json
+{
+  "data_subject_id": "user-uuid",
+  "workspace_id": "ws-uuid",
+  "exported_at": "2026-05-27T17:52:40.123456789Z",
+  "action_id": "gdpr-action-cuid",
+  "peer_cards": [
+    {
+      "id": "pc-uuid",
+      "agent_id": "agent-uuid",
+      "user_slug": "alice",
+      "path": "/crew/agents/<slug>/peer-cards/alice.md",
+      "bytes": 412,
+      "created_at": "2026-05-01T...",
+      "updated_at": "2026-05-26T..."
+    }
+  ],
+  "memory_versions": [
+    {
+      "id": "mv-uuid",
+      "path": "agents/<slug>/memory/long_term/...",
+      "tier": "long_term",
+      "sha256": "deadbeef...",
+      "bytes": 1024,
+      "written_at": "2026-05-10T...",
+      "written_by": "agent-uuid",
+      "payload_ref": "blob://..."
+    }
+  ],
+  "inbox_items": [
+    {
+      "id": "ib-uuid",
+      "kind": "waitpoint",
+      "source_id": "run-uuid",
+      "title": "Approve PR #142",
+      "body_md": "...",
+      "state": "open",
+      "payload_json": "{...}",
+      "created_at": "2026-05-15T..."
+    }
+  ]
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `data_subject_id` | `string` | The `userId` whose data is being exported. |
+| `workspace_id` | `string` | Workspace the export was scoped to. |
+| `exported_at` | `string` | RFC3339Nano timestamp of the export. |
+| `action_id` | `string` | Audit row in `gdpr_actions` for this SAR call — the operator's defensible artefact. |
+| `peer_cards` | `array` | Per-agent peer card rows referencing this user. |
+| `memory_versions` | `array` | Memory rows with `data_subject_id = userId`. Content blob is not inlined — `payload_ref` points at the content-addressed store. |
+| `inbox_items` | `array` | Inbox items addressed to or referencing this user. |
+
+<Note>
+  `lessons.md` content is **not** scanned for user mentions — a known gap (see [GDPR guide](/security/gdpr)). Operators must manually review lessons after a SAR if any lesson body could carry user-attributable text.
+</Note>
+
+## DELETE /api/v1/admin/users/\{userId\}/data
+
+GDPR Art. 17 (Right to Erasure) — cascade purge every row referencing the user across the cascadable tables. Writes a `gdpr_actions` audit row with `action='delete'`. **`reason` is required** for the audit trail.
+
+**Required role:** ADMIN or OWNER (`manage` permission).
+
+### Request
+
+```json
+{
+  "reason": "User SAR ticket #INC-1234 — Right to Erasure request"
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `reason` | `string` | yes | Non-empty after trim. Persisted on the `gdpr_actions` row alongside the actor and target. Used in compliance reviews. |
+
+### Response
+
+`202 Accepted` on full success; `207 Multi-Status` on partial success (some tables purged, others returned errors — the `gdpr_actions` row carries the full per-table summary).
+
+```json
+{
+  "action_id": "gdpr-action-cuid",
+  "data_subject": "user-uuid",
+  "workspace_id": "ws-uuid",
+  "rows_deleted": 7,
+  "scope": {
+    "peer_cards": 3,
+    "memory_versions": 2,
+    "inbox_items": 2
+  }
+}
+```
+
+On partial failure the same shape is returned with an additional `"error": "<first-error>"` field and HTTP 207.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `action_id` | `string` | The audit row id. The same SAR re-run writes a **second** action row — idempotent in row counts (zero on second run) but the audit trail records every attempt. |
+| `rows_deleted` | `int` | Sum across all cascadable tables. |
+| `scope` | `object` | Per-table count summary (extensible — new keys appear additively as new tables join the cascade). |
+| `error` | `string?` | Present only on HTTP 207. First error encountered; consult the audit row for the full per-table picture. |
+
+<Warning>
+  Memory `payload_ref` content-addressed blobs on disk are **not** deleted by this endpoint — blobs are deduplicated across workspaces and require a separate sweep job (planned). The audit/index rows ARE purged so the SAR is honoured at the DB-visibility layer. See the [GDPR guide](/security/gdpr) for the operator workflow.
+</Warning>
+
 ## GET /api/v1/admin/workspaces
 
 Lists workspace details with member, agent, and crew counts.

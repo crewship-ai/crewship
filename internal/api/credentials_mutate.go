@@ -70,7 +70,7 @@ type createCredentialRequest struct {
 	// value — the row's status is set to PENDING and the encrypted_value
 	// holds a sentinel. Used by `crewship apply -f` so a manifest can
 	// declare credential slots that the user fills in later through the
-	// UI or `crewship credential set`. Mirrors the OAuth-pending path
+	// UI or `crewship credential update`. Mirrors the OAuth-pending path
 	// (value="pending_oauth") which is already wired into the resolver,
 	// so no orchestrator changes are needed: pending creds simply fail
 	// agent runs with a "credential not configured" error until the user

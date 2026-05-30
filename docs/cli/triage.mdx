@@ -21,6 +21,57 @@ crewship triage list
 crewship triage list --filter '.[] | select(.enabled)'
 ```
 
+## `crewship triage create`
+
+`POST /api/v1/triage-rules`. Creates a rule that classifies pending issues by title. A rule matches an issue title via `--match-type` against `--pattern`, then applies the configured action fields. Rules evaluate in position order during `process`; the first match wins.
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--name <name>` | string | (required) | Rule name. |
+| `--pattern <pat>` | string | (required) | Title pattern to match. |
+| `--match-type <t>` | string | (required) | One of `contains`, `regex`, `exact` (validated client-side and server-side). |
+| `--crew <id>` | string | (unset) | Route matched issues to this crew. |
+| `--assignee <id>` | string | (unset) | Assign matched issues to this agent. |
+| `--priority <p>` | string | (unset) | Set priority on matched issues. |
+| `--project <id>` | string | (unset) | Set project on matched issues. |
+| `--labels <json>` | string | (unset) | Labels JSON to attach. |
+
+```bash
+crewship triage create --name "Bugs to backend" --pattern bug --match-type contains --crew crew_abc
+crewship triage create --name "Hotfix regex" --pattern '^\[hotfix\]' --match-type regex --priority urgent
+```
+
+A `regex` pattern is compiled server-side; an invalid expression returns `400`.
+
+## `crewship triage update <rule-id>`
+
+`PATCH /api/v1/triage-rules/{id}`. Only the flags you set are sent. The same string fields as `create` are accepted, plus `--position` (reordering) and `--enabled` (toggle). Passing an empty string to `--crew`/`--assignee`/`--project` clears that field server-side.
+
+| Flag | Type | Effect |
+|---|---|---|
+| `--name`, `--pattern`, `--match-type` | string | Same semantics as `create`. |
+| `--crew`, `--assignee`, `--priority`, `--project`, `--labels` | string | Same as `create`; empty string clears nullable fields. |
+| `--position <n>` | int | New ordering position. |
+| `--enabled` | bool | Enable or disable the rule. |
+
+```bash
+crewship triage update rule_abc --enabled=false
+crewship triage update rule_abc --priority high --position 1
+```
+
+## `crewship triage delete <rule-id>`
+
+`DELETE /api/v1/triage-rules/{id}`. Aliases: `remove`, `rm`. Prompts for confirmation unless `-y`/`--yes` is passed.
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `-y`, `--yes` | bool | `false` | Skip the interactive confirmation prompt. |
+
+```bash
+crewship triage delete rule_abc
+crewship triage rm rule_abc -y
+```
+
 ## `crewship triage process`
 
 `POST /api/v1/triage/process` with `{}`. Runs the processor: every enabled rule is applied to all pending issues. Returns whatever the server reports as the processed counts and per-rule outcomes.

@@ -24,6 +24,32 @@ crewship saved-view list --filter '.[] | {id, name, owner}'
 crewship view list                              # alias
 ```
 
+## `crewship saved-view create`
+
+`POST /api/v1/saved-views`. Persists a query bookmark for the current user. `--filters` is the filter JSON the web UI stores; `--sort` is optional sort JSON. Both are validated as JSON client-side before the request is sent.
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--name <name>` | string | (required) | View name. |
+| `--filters <json>` | string | (required) | Filter JSON. |
+| `--sort <json>` | string | (unset) | Sort JSON. |
+| `--view-type <t>` | string | `list` | View type (server default `list`). |
+| `--shared` | bool | `false` | Share the view with the whole workspace. |
+
+```bash
+crewship saved-view create --name "My open issues" --filters '{"status":"open","assignee":"me"}'
+crewship saved-view create --name "Team backlog" --filters '{"status":"backlog"}' --shared
+```
+
+## `crewship saved-view update <view-id>`
+
+`PATCH /api/v1/saved-views/{id}`. Owner-only (the server returns `403` for non-owners). Only the flags you set are sent. Accepts the same fields as `create` plus `--default` to mark the view as the default. `--filters`/`--sort` are JSON-validated client-side.
+
+```bash
+crewship saved-view update sv_abc123 --name "Renamed view"
+crewship saved-view update sv_abc123 --default
+```
+
 ## `crewship saved-view delete <view-id>`
 
 `DELETE /api/v1/saved-views/{id}`. Prints `[deleted view <id>]` on success.
