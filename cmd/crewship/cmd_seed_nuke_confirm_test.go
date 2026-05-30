@@ -25,7 +25,17 @@ func TestFindActiveWorkspace(t *testing.T) {
 		{"first-entry match", wss, "ws-a", "Acme", "acme"},
 		{"no match returns empty", wss, "ws-missing", "", ""},
 		{"empty list returns empty", nil, "ws-a", "", ""},
-		{"empty active id returns empty (won't false-match an empty-id row)", wss, "", "", ""},
+		{"empty active id returns empty (won't false-match anything)", wss, "", "", ""},
+		{
+			"empty-id row is skipped even when active id is empty",
+			[]workspaceSummary{{ID: "", Name: "Malformed", Slug: "malformed"}, {ID: "ws-a", Name: "Acme", Slug: "acme"}},
+			"", "", "",
+		},
+		{
+			"empty-id row is skipped when active id is non-empty",
+			[]workspaceSummary{{ID: "", Name: "Malformed", Slug: "malformed"}, {ID: "ws-a", Name: "Acme", Slug: "acme"}},
+			"ws-a", "Acme", "acme",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

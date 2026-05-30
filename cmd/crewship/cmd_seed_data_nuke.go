@@ -105,8 +105,20 @@ type workspaceSummary struct {
 // activeID server-side — showing the operator a different workspace's slug to
 // type would let them confirm under a false identity and still wipe the active
 // one. The empty-slug return forces nukeDecision to refuse unless --yes is set.
+//
+// Defensive against bad data: an empty activeID never matches anything (the
+// wipe context is unknown — never gamble), and rows with empty IDs are skipped
+// (a malformed /workspaces row whose id is "" would otherwise false-match an
+// empty activeID and reopen the fail-closed path). Both guards are unit-tested
+// because this is the single thing between an operator and a workspace wipe.
 func findActiveWorkspace(wss []workspaceSummary, activeID string) (name, slug string) {
+	if activeID == "" {
+		return "", ""
+	}
 	for _, w := range wss {
+		if w.ID == "" {
+			continue
+		}
 		if w.ID == activeID {
 			return w.Name, w.Slug
 		}
