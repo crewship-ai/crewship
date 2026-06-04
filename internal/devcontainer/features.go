@@ -294,6 +294,21 @@ func (d *FeatureDownloader) resolveFromCache(ref, dir string) (*ResolvedFeature,
 	}, nil
 }
 
+// createExtractTempDir creates a private, crypto-randomly named temporary
+// directory in the parent of destDir for atomic extraction. The created dir
+// carries destDir's base name as a prefix so it is recognisable on disk, but
+// the random suffix (from os.MkdirTemp, mode 0700) defeats the symlink/TOCTOU
+// race that a predictable name would invite.
+func createExtractTempDir(destDir string) (string, error) {
+	// MkdirTemp needs the parent to exist; ClearCache (os.RemoveAll on the
+	// cache root) may have removed it, so recreate it first to avoid ENOENT.
+	parent := filepath.Dir(destDir)
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		return "", fmt.Errorf("ensuring temp dir parent %q: %w", parent, err)
+	}
+	return os.MkdirTemp(parent, filepath.Base(destDir)+".tmp-")
+}
+
 // pull fetches the OCI image for ref using go-containerregistry and extracts
 // its first layer (the feature tarball) into destDir. Extraction is atomic:
 // content is written to a temporary directory first, then renamed into place.
@@ -330,8 +345,11 @@ func (d *FeatureDownloader) pull(ctx context.Context, ref, destDir string) error
 	defer rc.Close()
 
 	// Extract into a temporary directory first, then rename atomically.
-	tempDir := destDir + ".tmp-" + fmt.Sprintf("%x", sha256.Sum256([]byte(ref+fmt.Sprint(os.Getpid()))))[:12]
-	if err := os.MkdirAll(tempDir, 0o755); err != nil {
+	// Use a crypto-random suffix (os.MkdirTemp) rather than a predictable
+	// name: a deterministic temp path is a TOCTOU/symlink-race target an
+	// attacker could pre-create to redirect extraction outside the cache.
+	tempDir, err := createExtractTempDir(destDir)
+	if err != nil {
 		return fmt.Errorf("creating temp cache dir: %w", err)
 	}
 	// Ensure cleanup on failure.

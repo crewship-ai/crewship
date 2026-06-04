@@ -3,7 +3,6 @@ package api
 import (
 	"crypto/rand"
 	"crypto/sha256"
-	"crypto/subtle"
 	"database/sql"
 	"encoding/hex"
 	"errors"
@@ -288,14 +287,13 @@ func (h *RecoveryHandler) Reset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Defense in depth: even though SQL filtered by tokenHash, do a
-	// final constant-time compare so two equal-length hash strings
-	// don't ride a millisecond timing oracle.
-	storedHash := tokenHash
-	if subtle.ConstantTimeCompare([]byte(tokenHash), []byte(storedHash)) != 1 {
-		replyError(w, http.StatusBadRequest, "Invalid or expired token")
-		return
-	}
+	// The authorization gate is the parameterized lookup above
+	// (`WHERE token = ? AND purpose = 'password_reset'`): a row only
+	// comes back when the SHA-256 of the supplied token matches a stored
+	// hash. The token column carries the full 256-bit hash, so there is
+	// no separate hash field on the row to constant-time compare against
+	// — an in-process `tokenHash == tokenHash` check would be a no-op,
+	// not a timing defense. Proceed on the row the SQL already vetted.
 
 	expires, err := time.Parse(time.RFC3339, expiresStr)
 	if err != nil || time.Now().UTC().After(expires) {

@@ -10,6 +10,14 @@ import (
 	"github.com/crewship-ai/crewship/internal/pipeline"
 )
 
+// maxExecBodyBytes caps the JSON request body on the pipeline exec
+// surface (run / dry_run / test / approve). Run inputs and inline
+// definitions can dwarf a UI-preference blob, so this sits well above
+// user_preferences.go's 16 KB — but still bounds the decoder so a single
+// oversized POST can't pin memory. MaxBytesReader trips past the cap and
+// Decode surfaces the error as a 400.
+const maxExecBodyBytes = 1 << 20 // 1 MiB
+
 // runRequestBody is the shared shape for /run + /dry_run.
 //
 // TierOverride is the eval-suite knob that replaces every agent_run
@@ -63,7 +71,7 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 
 	var body runRequestBody
 	if r.ContentLength > 0 {
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxExecBodyBytes)).Decode(&body); err != nil {
 			replyError(w, http.StatusBadRequest, "invalid request body")
 			return
 		}
@@ -162,7 +170,7 @@ func (h *PipelineHandler) DryRun(w http.ResponseWriter, r *http.Request) {
 	}
 	var body runRequestBody
 	if r.ContentLength > 0 {
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxExecBodyBytes)).Decode(&body); err != nil {
 			replyError(w, http.StatusBadRequest, "invalid request body")
 			return
 		}
@@ -207,7 +215,7 @@ func (h *PipelineHandler) TestRun(w http.ResponseWriter, r *http.Request) {
 		AuthorCrewID string          `json:"author_crew_id"`
 		SampleInputs map[string]any  `json:"sample_inputs"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxExecBodyBytes)).Decode(&body); err != nil {
 		replyError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
@@ -500,7 +508,7 @@ func (h *PipelineHandler) ApproveWaitpoint(w http.ResponseWriter, r *http.Reques
 		Comment  string `json:"comment"`
 	}
 	if r.ContentLength > 0 {
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxExecBodyBytes)).Decode(&body); err != nil {
 			replyError(w, http.StatusBadRequest, "invalid request body")
 			return
 		}

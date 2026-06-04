@@ -323,8 +323,34 @@ func (h *InternalHandler) UpdateCredentialStatus(w http.ResponseWriter, r *http.
 // GET /api/v1/internal/agents/{agentId}/webhook-secret
 func (h *InternalHandler) GetWebhookSecret(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")
+
+	// Tenant scoping. The pre-fix query was `WHERE id = ?` with the agentID
+	// straight from the path and no scoping, so any internal caller — or the
+	// public webhook trigger flow, which lets the URL pick crew/agent — could
+	// fetch ANY agent's webhook secret across workspace boundaries and then
+	// forge a validly-signed webhook for that agent. We now constrain the
+	// lookup by whatever tenant scope the caller supplies.
+	//
+	// Both scopes are OPTIONAL query params (same backwards-compat shape as
+	// UpdateCredentialStatus above): the sidecar IPC resolver and the public
+	// webhook handler reach this via SecretLookup(crewID, agentID) and pass
+	// crew_id, while UI/admin callers pass workspace_id. A missing scope keeps
+	// the legacy id-only behavior so existing internal callers don't break;
+	// a present-but-mismatched scope yields the same 404 as a non-existent
+	// agent (404 not 403 — don't leak that the agent exists in another tenant).
+	query := "SELECT webhook_secret FROM agents WHERE id = ?"
+	args := []any{agentID}
+	if wsID := r.URL.Query().Get("workspace_id"); wsID != "" {
+		query += " AND workspace_id = ?"
+		args = append(args, wsID)
+	}
+	if crewID := r.URL.Query().Get("crew_id"); crewID != "" {
+		query += " AND crew_id = ?"
+		args = append(args, crewID)
+	}
+
 	var secret sql.NullString
-	err := h.db.QueryRowContext(r.Context(), "SELECT webhook_secret FROM agents WHERE id = ?", agentID).Scan(&secret)
+	err := h.db.QueryRowContext(r.Context(), query, args...).Scan(&secret)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			replyError(w, http.StatusNotFound, "Agent not found")

@@ -98,6 +98,12 @@ func TestKeeperHandleRequest_DenyByDefault(t *testing.T) {
 		`INSERT INTO credentials (id, workspace_id, name, type, security_level, encrypted_value, created_by)
 		 VALUES ('cred-k1', ?, 'prod-ssh', 'SECRET', 3, 'v1:aW52YWxpZA==', ?)`, wsID, userID)
 
+	// Assign the credential to the agent — the credential_id-direct path now
+	// requires an agent_credentials assignment for the requesting agent.
+	execOrFatal(t, db,
+		`INSERT INTO agent_credentials (id, agent_id, credential_id, env_var_name, priority)
+		 VALUES ('ac-k1', 'agent-k1', 'cred-k1', 'PROD_SSH', 0)`)
+
 	// Handler with no gatekeeper → deny-all
 	h := NewKeeperHandler(db, "internal-token", nil, logger)
 
