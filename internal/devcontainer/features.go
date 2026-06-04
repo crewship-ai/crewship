@@ -300,7 +300,13 @@ func (d *FeatureDownloader) resolveFromCache(ref, dir string) (*ResolvedFeature,
 // the random suffix (from os.MkdirTemp, mode 0700) defeats the symlink/TOCTOU
 // race that a predictable name would invite.
 func createExtractTempDir(destDir string) (string, error) {
-	return os.MkdirTemp(filepath.Dir(destDir), filepath.Base(destDir)+".tmp-")
+	// MkdirTemp needs the parent to exist; ClearCache (os.RemoveAll on the
+	// cache root) may have removed it, so recreate it first to avoid ENOENT.
+	parent := filepath.Dir(destDir)
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		return "", fmt.Errorf("ensuring temp dir parent %q: %w", parent, err)
+	}
+	return os.MkdirTemp(parent, filepath.Base(destDir)+".tmp-")
 }
 
 // pull fetches the OCI image for ref using go-containerregistry and extracts

@@ -189,14 +189,24 @@ func formatJournalTimeline(entries []map[string]any) string {
 // entries, and run metadata, so it must not be group/world-readable —
 // even when --out targets a shared location like /tmp.
 func exportMkdir(path string) error {
-	return os.MkdirAll(path, 0o700)
+	if err := os.MkdirAll(path, 0o700); err != nil {
+		return err
+	}
+	// MkdirAll leaves a pre-existing directory's mode untouched; force
+	// owner-only so reusing an older, looser --out dir still locks down.
+	return os.Chmod(path, 0o700)
 }
 
 // writeArtifactFile writes a single bundle artifact (prompt.md,
 // response.md, timeline.txt) with owner-only (0600) permissions. See
 // exportMkdir for the sensitivity rationale.
 func writeArtifactFile(path string, data []byte) error {
-	return os.WriteFile(path, data, 0o600)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return err
+	}
+	// WriteFile preserves an existing file's mode; force owner-only so a
+	// previously world-readable artifact from an older run is tightened.
+	return os.Chmod(path, 0o600)
 }
 
 // writeJSONFile marshals v with two-space indent and writes to path.

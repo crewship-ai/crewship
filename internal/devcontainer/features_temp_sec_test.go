@@ -61,3 +61,26 @@ func TestSecFeaturesTempDirRandom(t *testing.T) {
 		t.Errorf("temp dir mode = %#o, want 0700", perm)
 	}
 }
+
+// TestSecFeaturesTempDirRecreatesParent guards the regression where switching
+// to os.MkdirTemp(filepath.Dir(destDir), ...) fails with ENOENT if the parent
+// (the feature cache root) was wiped by ClearCache (CodeRabbit #612).
+// createExtractTempDir must recreate the parent first.
+func TestSecFeaturesTempDirRecreatesParent(t *testing.T) {
+	base := t.TempDir()
+	// destDir's parent does NOT exist (simulates a cleared cache root).
+	destDir := filepath.Join(base, "wiped-cache-root", "feature-key")
+
+	tmp, err := createExtractTempDir(destDir)
+	if err != nil {
+		t.Fatalf("createExtractTempDir with missing parent: %v", err)
+	}
+	defer os.RemoveAll(tmp)
+
+	if filepath.Dir(tmp) != filepath.Dir(destDir) {
+		t.Errorf("temp dir parent = %s, want %s", filepath.Dir(tmp), filepath.Dir(destDir))
+	}
+	if _, err := os.Stat(tmp); err != nil {
+		t.Errorf("temp dir not created: %v", err)
+	}
+}
