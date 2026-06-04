@@ -1,10 +1,10 @@
 ---
 title: "Issues"
-description: "Linear-style issue tracker with projects, labels, comments, relations, and agent execution."
+description: "Issue tracker with projects, labels, comments, relations, and agent execution."
 icon: "circle-dot"
 ---
 
-Issues are crew-scoped tracker items modelled after Linear: each carries a human-readable identifier (e.g. `ENG-42`), a status flow, and lifecycle operations for agent execution. Beyond CRUD, the API covers comments, relations, an activity log, workspace labels, and projects that group issues with tracking metadata. Under the hood, issues are stored in the `missions` table with `mission_type = 'issue'` -- they share infrastructure with missions but keep their own status flow, identifiers, and lifecycle.
+Issues are crew-scoped tracker items: each carries a human-readable identifier (e.g. `ENG-42`), a status flow, and lifecycle operations for agent execution. Beyond CRUD, the API covers comments, relations, an activity log, workspace labels, and projects that group issues with tracking metadata. Under the hood, issues are stored in the `missions` table with `mission_type = 'issue'` -- they share infrastructure with missions but keep their own status flow, identifiers, and lifecycle.
 
 <Note>
   All issue endpoints require authentication and workspace context.

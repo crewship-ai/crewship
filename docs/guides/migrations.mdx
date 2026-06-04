@@ -30,7 +30,7 @@ After v52, `journal_entries` is the canonical audit stream. After v53, replay/re
 | v | Name | Adds | PR |
 |---|---|---|---|
 | 54 | `add_memory_importance_and_gate_rewards` | `journal_embeddings.importance_score`, `reference_count`, `last_referenced_at`. Foundations for nightly decay-and-reinforce. | #211 |
-| 55 | `add_memory_quality_uplift` | `journal_entries_fts` (FTS5 mirror), `journal_entries_archived` (compaction sink with truncated payloads), `memory_relations` (A-Mem-style edges), `memory_health_snapshots` (daily 5-metric scores). | #212 |
+| 55 | `add_memory_quality_uplift` | `journal_entries_fts` (FTS5 mirror), `journal_entries_archived` (compaction sink with truncated payloads), `memory_relations` (embedding relation graph), `memory_health_snapshots` (daily 5-metric scores). | #212 |
 
 These two PRs together delivered the [Episodic memory](/guides/episodic-memory) uplift: hybrid retrieval (RRF over dense + BM25), archive layer, relation graph, and the health dashboard. The `?q=` parameter on the journal API is backed by the FTS5 table from v55.
 

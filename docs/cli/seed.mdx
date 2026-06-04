@@ -95,7 +95,7 @@ Blocks until every crew is provisioned, then sends one prompt to each agent. Non
 crewship seed --skip-issues --password "$(op read op://Dev/crewship/admin)"
 ```
 
-The issue/project/label phase is the slowest because it inserts dozens of rows and creates Linear-style backlogs; `--skip-issues` halves wall-clock time for crew-development work.
+The issue/project/label phase is the slowest because it inserts dozens of rows and creates realistic issue backlogs; `--skip-issues` halves wall-clock time for crew-development work.
 
 ### Backup self-test (CI guardrail)
 

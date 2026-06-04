@@ -96,7 +96,7 @@ CREATE TABLE journal_entries_archived (
   archived_at  TEXT NOT NULL
 );
 
--- A-Mem-style edge graph: similarity edges linking related embeddings.
+-- embedding relation graph: similarity edges linking related embeddings.
 CREATE TABLE memory_relations (
   src_entry_id TEXT NOT NULL,
   dst_entry_id TEXT NOT NULL,
@@ -167,7 +167,7 @@ with `k_RRF = 60` (the value used in the original RRF paper; further tuning had 
 
 `HybridRecall` is the recommended entry point for new code. The pure-cosine `Recall` is preserved for the orchestrator's prompt-injection path (where rank stability across small query perturbations matters more than recall on lexical hits) and for tests that want a deterministic similarity score.
 
-## Memory relations (A-Mem-style edges)
+## Memory relations (embedding relation graph)
 
 Embeddings live in isolation by default; `memory_relations` lets us treat them as a graph. Two relation types are populated automatically:
 

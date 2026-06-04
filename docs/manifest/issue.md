@@ -3,7 +3,7 @@
 ## What it is
 
 `kind: Issue` is the per-row CRUD entry point for a single issue
-(Linear-style ticket) declared in source control. Its cousin
+(a tracker ticket) declared in source control. Its cousin
 [`RecurringIssue`](/manifest/recurring_issue) mints the same shape on a
 cron; `kind: Issue` is for human-authored, one-shot tickets that
 should be tracked declaratively rather than clicked into the UI.

@@ -438,7 +438,7 @@ The `server` package is the one place that imports all of them -- exactly becaus
 
 - **Migration 52** added 8 tables: `journal_entries`, `journal_embeddings`, `agent_status`, `approvals_queue`, `checkpoints`, `hooks_config`, `cost_ledger`, `budget_limits`.
 - **Migration 53** added `eval_runs` (Quartermaster's durable replay/regression index with status + metrics columns).
-- **Migration 55** added `journal_entries_fts` (FTS5 mirror of `summary` + `payload`), `journal_entries_archived` (compaction sink with truncated payloads), `memory_relations` (A-Mem-style edge graph), and `memory_health_snapshots` (daily 5-metric scoring) — see [Episodic memory](/guides/episodic-memory).
+- **Migration 55** added `journal_entries_fts` (FTS5 mirror of `summary` + `payload`), `journal_entries_archived` (compaction sink with truncated payloads), `memory_relations` (embedding relation graph), and `memory_health_snapshots` (daily 5-metric scoring) — see [Episodic memory](/guides/episodic-memory).
 - **Migration 60** added a partial index on `journal_entries (workspace_id, trace_id) WHERE trace_id IS NOT NULL` to make run aggregation `GROUP BY trace_id` cheap.
 - **Migration 61** backfilled the legacy `agent_runs` table into journal entries, snapshotted the original rows to `agent_runs_archive`, and dropped `agent_runs` — `journal_entries` is now the **single source of truth** for runs.
 - **Migration 62** added 9 columns to `cost_ledger` for billing-mode-aware accounting (`billing_mode`, `quota_remaining_pct`, `quota_window`, `subscription_plan`, four `rate_*_per_m` snapshot columns, `cost_confidence`) plus a partial index on `(workspace_id, billing_mode)` — see [Paymaster](/guides/paymaster).
