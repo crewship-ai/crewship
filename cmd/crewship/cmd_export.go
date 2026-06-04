@@ -53,7 +53,7 @@ Examples:
 		if out == "" {
 			out = "./run-" + runID
 		}
-		if err := os.MkdirAll(out, 0o755); err != nil {
+		if err := exportMkdir(out); err != nil {
 			return fmt.Errorf("create %s: %w", out, err)
 		}
 
@@ -96,12 +96,12 @@ Examples:
 				}
 				prompt, response := splitPromptResponse(messages)
 				if prompt != "" {
-					if err := os.WriteFile(filepath.Join(out, "prompt.md"), []byte(prompt+"\n"), 0o644); err != nil {
+					if err := writeArtifactFile(filepath.Join(out, "prompt.md"), []byte(prompt+"\n")); err != nil {
 						return fmt.Errorf("write prompt.md: %w", err)
 					}
 				}
 				if response != "" {
-					if err := os.WriteFile(filepath.Join(out, "response.md"), []byte(response+"\n"), 0o644); err != nil {
+					if err := writeArtifactFile(filepath.Join(out, "response.md"), []byte(response+"\n")); err != nil {
 						return fmt.Errorf("write response.md: %w", err)
 					}
 				}
@@ -118,7 +118,7 @@ Examples:
 					return err
 				}
 				timeline := formatJournalTimeline(entries)
-				if err := os.WriteFile(filepath.Join(out, "timeline.txt"), []byte(timeline), 0o644); err != nil {
+				if err := writeArtifactFile(filepath.Join(out, "timeline.txt"), []byte(timeline)); err != nil {
 					return fmt.Errorf("write timeline.txt: %w", err)
 				}
 			}
@@ -184,14 +184,30 @@ func formatJournalTimeline(entries []map[string]any) string {
 	return string(sb)
 }
 
+// exportMkdir creates the bundle output directory with owner-only
+// permissions. The bundle holds full prompts, agent responses, journal
+// entries, and run metadata, so it must not be group/world-readable —
+// even when --out targets a shared location like /tmp.
+func exportMkdir(path string) error {
+	return os.MkdirAll(path, 0o700)
+}
+
+// writeArtifactFile writes a single bundle artifact (prompt.md,
+// response.md, timeline.txt) with owner-only (0600) permissions. See
+// exportMkdir for the sensitivity rationale.
+func writeArtifactFile(path string, data []byte) error {
+	return os.WriteFile(path, data, 0o600)
+}
+
 // writeJSONFile marshals v with two-space indent and writes to path.
 // Indented because the bundle is meant to be human-read or diffed in git.
+// Written 0600 — the bundle is sensitive (see exportMkdir).
 func writeJSONFile(path string, v any) error {
 	data, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal %s: %w", path, err)
 	}
-	return os.WriteFile(path, append(data, '\n'), 0o644)
+	return writeArtifactFile(path, append(data, '\n'))
 }
 
 func init() {

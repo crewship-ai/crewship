@@ -280,10 +280,12 @@ func TestCovKEExecute_EnvVarFromAssignment(t *testing.T) {
 	db := setupTestDB(t)
 	wsID, crewID, agentID, credID := seedKeeperFixture(t, db)
 
-	// Assign the credential to the agent with a specific env var name.
+	// The fixture already assigns this credential to the agent; override the
+	// env var name so it is derived from the assignment (UNIQUE(agent_id,
+	// credential_id) blocks a second insert).
 	execOrFatal(t, db,
-		`INSERT INTO agent_credentials (id, agent_id, credential_id, env_var_name) VALUES (?, ?, ?, ?)`,
-		"ac-cov-ke", agentID, credID, "DEPLOY_TOKEN")
+		`UPDATE agent_credentials SET env_var_name = ? WHERE agent_id = ? AND credential_id = ?`,
+		"DEPLOY_TOKEN", agentID, credID)
 
 	gk := &mockEvaluator{resp: keeper.GatekeeperResponse{
 		Decision:  string(keeper.DecisionAllow),

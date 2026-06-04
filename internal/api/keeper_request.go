@@ -97,14 +97,19 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Look up credential metadata (name, security_level)
+	// Look up credential metadata (name, security_level). The JOIN on
+	// agent_credentials binds the requesting agent: the credential_id-direct
+	// path must require an assignment just like the credential_name path, so an
+	// agent cannot name a PEER agent's credential_id in the same workspace. No
+	// assignment row → treated as "credential not found" (no existence leak).
 	var credName string
 	var secLevel int
 	err = h.db.QueryRowContext(r.Context(), `
-		SELECT name, COALESCE(security_level, 1)
-		FROM credentials
-		WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
-		body.CredentialID, body.WorkspaceID).Scan(&credName, &secLevel)
+		SELECT c.name, COALESCE(c.security_level, 1)
+		FROM credentials c
+		JOIN agent_credentials ac ON ac.credential_id = c.id
+		WHERE c.id = ? AND ac.agent_id = ? AND c.workspace_id = ? AND c.deleted_at IS NULL`,
+		body.CredentialID, body.RequestingAgentID, body.WorkspaceID).Scan(&credName, &secLevel)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			replyError(w, http.StatusNotFound, "credential not found")

@@ -432,6 +432,11 @@ func TestKeeperHandleExecute_L1AutoAllow_MustEvaluateCommand(t *testing.T) {
 	execOrFatal(t, db,
 		`INSERT INTO credentials (id, workspace_id, name, type, security_level, encrypted_value, created_by)
 		 VALUES (?, ?, 'github-token', 'SECRET', 1, 'v1:aW52YWxpZA==', ?)`, credID, wsID, userID)
+	// Assign the credential to the agent — the credential_id-direct path now
+	// requires an agent_credentials assignment for the requesting agent.
+	execOrFatal(t, db,
+		`INSERT INTO agent_credentials (id, agent_id, credential_id, env_var_name, priority)
+		 VALUES (?, ?, ?, 'GITHUB_TOKEN', 0)`, "l1-ac-"+wsID, agentID, credID)
 
 	gk := &capturingEvaluator{resp: keeper.GatekeeperResponse{
 		Decision:  string(keeper.DecisionAllow),

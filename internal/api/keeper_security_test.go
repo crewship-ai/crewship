@@ -61,6 +61,16 @@ func seedKeeperFixture(t *testing.T, db *sql.DB) (wsID, crewID, agentID, credID 
 		`INSERT INTO credentials (id, workspace_id, name, type, security_level, encrypted_value, created_by)
 		 VALUES (?, ?, 'prod-ssh', 'SECRET', 2, 'v1:aW52YWxpZA==', ?)`,
 		credID, wsID, userID)
+
+	// Assign the credential to the fixture agent. Keeper now requires an
+	// agent_credentials assignment binding the requesting agent even on the
+	// credential_id-direct path (peer-credential escalation fix), so the
+	// canonical fixture agent must legitimately own the credential for the
+	// ALLOW/ESCALATE/DENY happy paths to be reachable.
+	execOrFatal(t, db,
+		`INSERT INTO agent_credentials (id, agent_id, credential_id, env_var_name, priority)
+		 VALUES (?, ?, ?, 'PROD_SSH', 0)`,
+		"security-ac-"+wsID, agentID, credID)
 	return
 }
 

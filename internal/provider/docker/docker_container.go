@@ -273,25 +273,7 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 		}
 	}
 	if needsDockerChown {
-		chownCmd := "chown -R 1001:1001"
-		for _, dir := range allDirs {
-			chownCmd += " /mnt" + dir
-		}
-		// .memory subtrees need a different ownership story than the
-		// rest of the bind mount: the sidecar process (UID 1002) owns
-		// the FTS5 SQLite index, while the agent process (UID 1001)
-		// also reads/writes plaintext markdown files in the same tree
-		// via shell tools. After the broad `chown -R 1001:1001` above
-		// the sidecar can't open index.sqlite and the dispatcher path
-		// validator (which by design refuses to fall through on a
-		// missing base path) silently disables every memory tool with
-		// `SQLITE_CANTOPEN (14)`. Flip .memory directories to group
-		// 1002 with setgid + g+rwx so both UIDs can write, and new
-		// files inherit the sidecar group. (Issue #530, paired with
-		// the sidecar-side MkdirAll fix.)
-		chownCmd += ` && find /mnt` + crewPath + ` -name .memory -type d -exec chgrp -R 1002 {} +`
-		chownCmd += ` ; find /mnt` + crewPath + ` -name .memory -type d -exec chmod 2775 {} +`
-		chownCmd += ` ; find /mnt` + crewPath + ` -path '*/.memory/*' -type f -exec chmod g+rw {} +`
+		chownCmd := buildChownInitCmd(allDirs, crewPath)
 		var mounts []mount.Mount
 		for _, dir := range allDirs {
 			mounts = append(mounts, mount.Mount{Type: mount.TypeBind, Source: dir, Target: "/mnt" + dir})
@@ -621,6 +603,39 @@ func (p *Provider) runPostStartCommands(ctx context.Context, containerID string,
 		}
 		cancel()
 	}
+}
+
+// shellQuote wraps s in single quotes for safe interpolation into a
+// `sh -c "..."` command string. Inside single quotes the shell treats every
+// character literally, so the only thing that needs special handling is an
+// embedded single quote, expressed via the classic close-quote / escaped
+// literal-quote / reopen-quote idiom. This neutralises spaces, ;, |, &,
+// $(...), backticks, redirections and every other metacharacter. Crew IDs are
+// server-generated CUIDs today, but quoting here makes the command robust if a
+// path component ever becomes user-influenced.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// buildChownInitCmd assembles the root-owned init container's shell command
+// that fixes bind-mount ownership for the container user (1001:1001) and then
+// re-flips .memory subtrees to the sidecar group (1002). A shell is genuinely
+// required: the command chains `find` invocations (with -name/-path globs) and
+// `&&` / `;` sequencing. Every interpolated filesystem path is run through
+// shellQuote so the command does exactly what it did before for a normal path,
+// while no path component can inject shell syntax. See Issue #530 for the
+// .memory ownership rationale.
+func buildChownInitCmd(allDirs []string, crewPath string) string {
+	mnt := func(p string) string { return shellQuote("/mnt" + p) }
+
+	chownCmd := "chown -R 1001:1001"
+	for _, dir := range allDirs {
+		chownCmd += " " + mnt(dir)
+	}
+	chownCmd += ` && find ` + mnt(crewPath) + ` -name .memory -type d -exec chgrp -R 1002 {} +`
+	chownCmd += ` ; find ` + mnt(crewPath) + ` -name .memory -type d -exec chmod 2775 {} +`
+	chownCmd += ` ; find ` + mnt(crewPath) + ` -path '*/.memory/*' -type f -exec chmod g+rw {} +`
+	return chownCmd
 }
 
 // shortID returns first 12 chars of a container ID, or the full string if shorter.

@@ -35,6 +35,24 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 		body.TriggerType = "USER"
 	}
 
+	// Tenancy guard: the internal token authenticates the *sidecar*, not a
+	// workspace. A caller could otherwise post their own workspace_id with
+	// another workspace's agent_id and mutate that agent. Confirm the agent
+	// actually belongs to the claimed workspace BEFORE emitting any journal
+	// entry or flipping status — see proxy.go's `WHERE id=? AND workspace_id=?`.
+	var agentWorkspaceID string
+	switch err := h.db.QueryRowContext(r.Context(),
+		"SELECT workspace_id FROM agents WHERE id = ? AND workspace_id = ?",
+		body.AgentID, body.WorkspaceID).Scan(&agentWorkspaceID); {
+	case err == sql.ErrNoRows:
+		replyError(w, http.StatusNotFound, "Agent not found in workspace")
+		return
+	case err != nil:
+		h.logger.Error("create run: agent workspace check", "error", err, "agent_id", body.AgentID)
+		replyError(w, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	// Emit run.started FIRST — this is the source of truth for runs
@@ -72,7 +90,7 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 	// Now flip the agent to RUNNING. Failure is debug-only because the
 	// run trace already exists — recoverOrphanedRuns will clean up.
 	if _, err := h.db.ExecContext(r.Context(),
-		"UPDATE agents SET status = 'RUNNING', updated_at = ? WHERE id = ?", now, body.AgentID); err != nil {
+		"UPDATE agents SET status = 'RUNNING', updated_at = ? WHERE id = ? AND workspace_id = ?", now, body.AgentID, body.WorkspaceID); err != nil {
 		h.logger.Debug("update agent status on run create", "error", err, "agent_id", body.AgentID)
 	}
 

@@ -145,14 +145,19 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Look up credential metadata
+	// Look up credential metadata. The JOIN on agent_credentials binds the
+	// requesting agent so the credential_id-direct path requires an assignment,
+	// matching the credential_name path — an agent cannot name a PEER agent's
+	// credential_id in the same workspace. No assignment row → "credential not
+	// found" (no existence leak).
 	var credName string
 	var secLevel int
 	err = h.db.QueryRowContext(r.Context(), `
-		SELECT name, COALESCE(security_level, 1)
-		FROM credentials
-		WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
-		body.CredentialID, body.WorkspaceID).Scan(&credName, &secLevel)
+		SELECT c.name, COALESCE(c.security_level, 1)
+		FROM credentials c
+		JOIN agent_credentials ac ON ac.credential_id = c.id
+		WHERE c.id = ? AND ac.agent_id = ? AND c.workspace_id = ? AND c.deleted_at IS NULL`,
+		body.CredentialID, body.RequestingAgentID, body.WorkspaceID).Scan(&credName, &secLevel)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			replyError(w, http.StatusNotFound, "credential not found")
@@ -166,15 +171,28 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 	// Determine the environment variable name for the credential
 	envVar := body.EnvVar
 	if envVar == "" {
-		// Try to look up from agent_credentials assignment
+		// The assignment must exist: a missing agent_credentials row is a HARD
+		// denial, not a silent fallback to a derived env-var name. (The metadata
+		// JOIN above already requires the assignment, so a missing row here would
+		// only arise from a concurrent unassignment — fail closed.)
 		var assignedEnvVar string
 		lookupErr := h.db.QueryRowContext(r.Context(),
 			`SELECT env_var_name FROM agent_credentials WHERE agent_id = ? AND credential_id = ?`,
 			body.RequestingAgentID, body.CredentialID).Scan(&assignedEnvVar)
-		if lookupErr == nil && assignedEnvVar != "" && envVarNamePattern.MatchString(assignedEnvVar) {
+		if lookupErr != nil {
+			if errors.Is(lookupErr, sql.ErrNoRows) {
+				replyError(w, http.StatusNotFound, "credential not found")
+				return
+			}
+			h.logger.Error("keeper execute: lookup assignment env var", "error", lookupErr)
+			replyError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+		if assignedEnvVar != "" && envVarNamePattern.MatchString(assignedEnvVar) {
 			envVar = assignedEnvVar
 		} else {
-			// Fallback: derive from credential name
+			// Legitimate assignment exists but its env_var_name is empty/invalid:
+			// derive a safe name from the credential name.
 			envVar = envVarSanitizePattern.ReplaceAllString(strings.ToUpper(credName), "_")
 			if envVar == "" || !envVarNamePattern.MatchString(envVar) {
 				envVar = "KEEPER_SECRET"
