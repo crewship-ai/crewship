@@ -114,6 +114,7 @@
                   "guides/crew-journal",
                   "guides/activity",
                   "guides/tracing",
+                  "observability/otlp-setup",
                   "guides/feedback",
                   "guides/telemetry"
                 ]
@@ -162,6 +163,33 @@
               "configuration/providers",
               "configuration/devcontainers",
               "configuration/manifest-schema"
+            ]
+          },
+          {
+            "group": "Manifest Reference",
+            "icon": "file-code",
+            "pages": [
+              "manifest/README",
+              "manifest/workspace",
+              "manifest/crew",
+              "manifest/agent",
+              "manifest/skill",
+              "manifest/integration",
+              "manifest/connector",
+              "manifest/issue",
+              "manifest/project",
+              "manifest/milestone",
+              "manifest/label",
+              "manifest/recurring_issue",
+              "manifest/triage_rule",
+              "manifest/saved_view",
+              "manifest/workflow_template",
+              "manifest/routine",
+              "manifest/feature_flag",
+              "manifest/instance_setting",
+              "manifest/hook",
+              "manifest/recipe",
+              "manifest/crew_template"
             ]
           }
         ]
