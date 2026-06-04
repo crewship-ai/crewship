@@ -67,10 +67,9 @@ if req.Command == "" &&
 
 ## LLM Evaluation
 
-For L2+ credentials (and L1 execute requests), Keeper sends a structured prompt to the local LLM:
+For L2+ credentials (and L1 execute requests), Keeper sends a structured prompt to the local LLM.
 
-### Prompt Structure
-
+<Accordion title="Full prompt structure">
 ```
 You are the Keeper -- a security gatekeeper for AI agent credential access.
 
@@ -96,6 +95,7 @@ Decision criteria:
 
 Respond with ONLY valid JSON: {"decision": "ALLOW|DENY|ESCALATE", "reason": "...", "risk": 1-10}
 ```
+</Accordion>
 
 ### Prompt Injection Defense
 
@@ -191,18 +191,18 @@ Enable Keeper in your config:
 keeper:
   enabled: true
   ollama_url: "http://localhost:11434"
-  model: "phi3:mini"
+  model: "claude-haiku-4-5"
 ```
 
 Or via environment variables:
 ```bash
 KEEPER_ENABLED=true
 KEEPER_OLLAMA_URL=http://localhost:11434
-KEEPER_MODEL=phi3:mini
+KEEPER_MODEL=claude-haiku-4-5
 ```
 
 <Note>
-  Setting `KEEPER_OLLAMA_URL` auto-enables Keeper unless `KEEPER_ENABLED` is explicitly set to `false`. The default model is `phi3:mini`.
+  Setting `KEEPER_OLLAMA_URL` auto-enables Keeper unless `KEEPER_ENABLED` is explicitly set to `false`. There is **no default model** — an enabled Keeper with an empty `keeper.model` (and no `KEEPER_MODEL`) fails validation at startup with `keeper.enabled=true but keeper.model is empty`. The earlier silent `phi3:mini` fallback was removed (PR-Z).
 </Note>
 
 ## Audit Trail

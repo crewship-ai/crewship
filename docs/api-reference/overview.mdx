@@ -4,6 +4,8 @@ description: "REST API conventions, authentication, error handling, and communic
 icon: "code"
 ---
 
+The Crewship REST API is a single versioned surface under `/api/v1/` that drives every workspace, crew, agent, and credential operation. This page covers the cross-cutting conventions — base URL, the five authentication methods, RBAC roles, request/response format, pagination, and the RFC 7807 error shape — then links out to each resource group. Real-time updates and inbound triggers ride alongside REST over [WebSocket](/api-reference/websocket) and [Webhooks](/api-reference/webhooks).
+
 ## Base URL
 
 ```
@@ -20,7 +22,7 @@ All endpoints are prefixed with `/api/v1/` unless otherwise noted. Exceptions:
 
 ## Authentication
 
-Crewship supports four authentication methods depending on the context.
+Crewship supports five authentication methods depending on the context.
 
 ### 1. Session Cookie (Browser)
 
@@ -82,7 +84,9 @@ Header: X-Webhook-Secret: <per-agent-secret>
 
 ## Authorization (RBAC)
 
-Workspace membership is required for all workspace-scoped endpoints. The `workspace_id` query parameter (or `{workspaceId}` path parameter) identifies the workspace context.
+<Note>
+  Workspace membership is required for all workspace-scoped endpoints. The `workspace_id` query parameter (or `{workspaceId}` path parameter) identifies the workspace context.
+</Note>
 
 | Role | Permissions |
 |---|---|
@@ -90,6 +94,7 @@ Workspace membership is required for all workspace-scoped endpoints. The `worksp
 | `ADMIN` | Can create, update, delete resources; manage credentials |
 | `MANAGER` | Can create and update resources |
 | `MEMBER` | Read-only access |
+| `VIEWER` | Read-only access (lowest tier) |
 
 Permission mapping:
 
@@ -186,7 +191,7 @@ Some older endpoints return a simpler format:
     CRUD for crews, members, container config, network policies.
   </Card>
   <Card title="Agents" href="/api-reference/agents">
-    CRUD for agents, skills, credentials, chats, runs + workspace-level status aggregate (legacy `/agents/fleet-status` endpoint).
+    CRUD for agents, skills, credentials, chats, runs, persona, hire/rehire.
   </Card>
   <Card title="Missions" href="/api-reference/missions">
     Mission lifecycle, tasks, start/restart/resume/clone, metrics.
@@ -209,13 +214,31 @@ Some older endpoints return a simpler format:
   <Card title="WebSocket" href="/api-reference/websocket">
     Real-time channels, subscriptions, chat, event types.
   </Card>
+  <Card title="Connectors" href="/api-reference/connectors">
+    Curated connector catalog — browse, verify credentials, install.
+  </Card>
+  <Card title="Feature Flags" href="/api-reference/feature-flags">
+    Feature flag CRUD with percentage rollout and per-workspace overrides.
+  </Card>
+  <Card title="Instance Settings" href="/api-reference/instance-settings">
+    Instance-wide settings with sensitive-value redaction and protected keys.
+  </Card>
+  <Card title="Policies" href="/api-reference/policies">
+    Per-crew autonomy levels and behavior modes.
+  </Card>
+  <Card title="Privacy" href="/api-reference/privacy">
+    GDPR peer-card access — view, purge, consent / opt-out.
+  </Card>
+  <Card title="Slash Commands" href="/api-reference/slash-commands">
+    Capability-filtered slash-command catalog for the composer and CLI.
+  </Card>
 </CardGroup>
 
 ---
 
 ## Additional Endpoints
 
-These endpoints are documented here for completeness but do not have dedicated pages.
+These endpoints are documented here for completeness but do not have dedicated pages — health, system status, auth, onboarding, admin, audit, runs, and workspaces.
 
 ### Health Check
 
@@ -233,6 +256,7 @@ No authentication required. Returns `{"status": "ok"}` with HTTP 200.
 | `GET /api/v1/system/license` | License status and limits |
 | `GET /api/v1/system/keeper` | Keeper (credential access control) status |
 | `GET /api/v1/crewshipd` | Crewshipd process health and status |
+| `GET /api/v1/system/aux-status` | Resolved auxiliary-model assignment per slot (provider, model, timeout, `explicit`/`fallback` source) |
 
 ### Activity
 
@@ -256,8 +280,10 @@ No authentication required. Returns `{"status": "ok"}` with HTTP 200.
 | `GET /api/auth/providers` | Available auth providers |
 | `GET /api/auth/session` | Current session |
 | `POST /api/auth/callback/credentials` | Login with email/password |
+| `POST /api/auth/token/refresh` | Refresh the session token (NextAuth-compatible token rotation) |
 | `GET /api/auth/signin` | Sign-in page redirect |
 | `POST /api/auth/signout` | Sign out (clears cookie) |
+| `GET /api/auth/error` | NextAuth error page redirect |
 
 ### Onboarding
 

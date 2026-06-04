@@ -4,6 +4,12 @@ description: "Inbound webhook endpoint for triggering agent execution from exter
 icon: "zap"
 ---
 
+Crewship exposes a single inbound webhook that lets an external system (GitHub, Grafana, n8n, CI, …) trigger an agent run. The endpoint authenticates the request against the agent's per-agent webhook secret, enqueues the run asynchronously, and returns `202` immediately. Use the [monitoring endpoints](#monitoring-webhook-runs) or the `workspace` WebSocket channel to follow execution.
+
+<Note>
+  This endpoint uses **webhook-secret authentication only** — not session or CLI token auth. Provide exactly one of `X-Signature` (preferred) or `X-Webhook-Secret` (deprecated).
+</Note>
+
 ## Trigger Agent via Webhook
 
 ```
@@ -14,13 +20,29 @@ Triggers an agent run from an external system. The webhook validates the request
 
 ### Authentication
 
-Webhook authentication uses a per-agent HMAC secret. Include it in the `X-Webhook-Secret` header:
+The endpoint accepts two header-based schemes. Provide **one** of them; if both are absent the request is rejected with `401`.
+
+**`X-Signature` (preferred).** A hex-encoded HMAC-SHA256 of the **raw request body**, keyed by the agent's per-agent webhook secret (no `sha256=` prefix):
+
+```
+X-Signature: <hex(HMAC-SHA256(body, secret))>
+```
+
+This binds the signature to the exact payload, so a leaked header from one request can't be replayed against a different body.
+
+**`X-Webhook-Secret` (deprecated).** The per-agent secret sent in plaintext:
 
 ```
 X-Webhook-Secret: <per-agent-secret>
 ```
 
-The secret is validated using constant-time comparison. This endpoint does **not** use session or CLI token authentication.
+This path still works during the deprecation window but is going away. Requests authenticated this way receive `Deprecation` and `Sunset: Thu, 31 Dec 2026 23:59:59 GMT` response headers.
+
+<Warning>
+  `X-Webhook-Secret` is deprecated (sunset 2026-12-31). Migrate to `X-Signature` before the sunset date.
+</Warning>
+
+Both schemes validate using constant-time comparison. This endpoint does **not** use session or CLI token authentication.
 
 ### Path Parameters
 
@@ -34,7 +56,8 @@ The secret is validated using constant-time comparison. This endpoint does **not
 | Header | Required | Description |
 |---|---|---|
 | `Content-Type` | Yes | `application/json` |
-| `X-Webhook-Secret` | Yes | Per-agent webhook secret |
+| `X-Signature` | One of | Preferred. Hex HMAC-SHA256 of the raw body, keyed by the agent's webhook secret. |
+| `X-Webhook-Secret` | One of | **Deprecated** (sunset 2026-12-31). Per-agent webhook secret in plaintext. |
 
 ### Request Body
 
@@ -70,11 +93,12 @@ The webhook returns immediately. Agent execution happens asynchronously.
 
 **`202 Accepted`** on success — the body is `{"status": "accepted"}`. The status reflects the fire-and-forget contract: the agent run is enqueued asynchronously, and `202` (not `200`) signals "we received it, work has not finished".
 
-**`401 Unauthorized`** if the webhook secret is invalid or missing.
+**`401 Unauthorized`** if neither `X-Signature` nor `X-Webhook-Secret` is provided, or the supplied signature/secret is invalid.
 
 ### What Happens Behind the Scenes
 
-1. **Secret validation** -- the agent's webhook secret is looked up via the internal IPC resolver and compared
+<Accordion title="Webhook execution pipeline">
+1. **Auth validation** -- the agent's webhook secret is looked up via the internal IPC resolver; an `X-Signature` is verified as an HMAC of the body, otherwise a plaintext `X-Webhook-Secret` is compared (constant-time)
 2. **Agent config resolution** -- the agent's full configuration (CLI adapter, LLM model, credentials, etc.) is resolved
 3. **Chat session creation** -- a webhook-scoped chat session is created or reused (`webhook-{agentId}`)
 4. **Container startup** -- the crew's container runtime is ensured running
@@ -82,6 +106,7 @@ The webhook returns immediately. Agent execution happens asynchronously.
 6. **Agent execution** -- the agent is started asynchronously with a 10-minute timeout
 7. **Log streaming** -- agent output is streamed to the log collector and broadcast via WebSocket on `workspace:{workspaceId}`
 8. **Run completion** -- the run record is updated with status (`COMPLETED` or `FAILED`), exit code, duration, and error message
+</Accordion>
 
 ### Prerequisites
 
@@ -92,7 +117,9 @@ The webhook endpoint is only registered when all of the following are configured
 - Log writer is configured
 - Internal token is set
 
-If any of these are missing, the endpoint will return `404`.
+<Note>
+  If any prerequisite is missing the route is never registered, so the endpoint returns `404`.
+</Note>
 
 ---
 
@@ -129,4 +156,8 @@ The per-agent webhook secret is available through the internal API:
 GET /api/v1/internal/agents/{agentId}/webhook-secret
 ```
 
-This endpoint requires internal token authentication (IPC only). The secret is stored as part of the agent configuration and can be viewed in the Crewship UI under the agent's settings.
+This endpoint requires internal token authentication (IPC only). The secret is stored as part of the agent configuration.
+
+<Tip>
+  You can also view the per-agent webhook secret in the Crewship UI under the agent's settings.
+</Tip>

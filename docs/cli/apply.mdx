@@ -1,6 +1,6 @@
 ---
 title: "Apply"
-description: "Apply a workspace manifest. Idempotent, plan-then-confirm, Terraform-style."
+description: "Apply a workspace manifest. Idempotent, plan-then-confirm."
 icon: "play"
 ---
 
@@ -156,7 +156,7 @@ Resources **not** synced (additive only):
 | `0` | Success (apply completed, or dry-run validated cleanly) |
 | `1` | Generic failure (validation, network, partial apply) |
 
-`apply` doesn't surface a Terraform-style "code 2 = changes applied" because every CI pipeline already knows the previous state via git. Use `--dry-run` for the "did anything change?" check.
+`apply` doesn't surface a "code 2 = changes applied" because every CI pipeline already knows the previous state via git. Use `--dry-run` for the "did anything change?" check.
 
 ## Common errors
 

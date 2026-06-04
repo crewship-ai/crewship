@@ -54,7 +54,7 @@ func TestNotification_MarkRead(t *testing.T) {
 	h.db.QueryRow(`SELECT id FROM notifications`).Scan(&nid)
 
 	req := httptest.NewRequest("POST", "/", nil)
-	req.SetPathValue("id", nid)
+	req.SetPathValue("notificationId", nid)
 	req = req.WithContext(withUser(req.Context(), &AuthUser{ID: userID}))
 	rr := httptest.NewRecorder()
 	h.MarkRead(rr, req)
@@ -74,7 +74,7 @@ func TestNotification_MarkRead_NotFound(t *testing.T) {
 	h, userID, _ := newNotificationHandler(t)
 
 	req := httptest.NewRequest("POST", "/", nil)
-	req.SetPathValue("id", "missing")
+	req.SetPathValue("notificationId", "missing")
 	req = req.WithContext(withUser(req.Context(), &AuthUser{ID: userID}))
 	rr := httptest.NewRecorder()
 	h.MarkRead(rr, req)
@@ -86,7 +86,7 @@ func TestNotification_MarkRead_NotFound(t *testing.T) {
 func TestNotification_MarkRead_Unauthenticated(t *testing.T) {
 	h, _, _ := newNotificationHandler(t)
 	req := httptest.NewRequest("POST", "/", nil)
-	req.SetPathValue("id", "x")
+	req.SetPathValue("notificationId", "x")
 	rr := httptest.NewRecorder()
 	h.MarkRead(rr, req)
 	if rr.Code != http.StatusUnauthorized {
@@ -128,7 +128,7 @@ func TestNotification_Delete(t *testing.T) {
 	h.db.QueryRow(`SELECT id FROM notifications`).Scan(&nid)
 
 	req := httptest.NewRequest("DELETE", "/", nil)
-	req.SetPathValue("id", nid)
+	req.SetPathValue("notificationId", nid)
 	req = req.WithContext(withUser(req.Context(), &AuthUser{ID: userID}))
 	rr := httptest.NewRecorder()
 	h.Delete(rr, req)
@@ -149,6 +149,40 @@ func TestNotification_Delete(t *testing.T) {
 	h.Delete(rr3, req3)
 	if rr3.Code != http.StatusUnauthorized {
 		t.Errorf("status = %d", rr3.Code)
+	}
+}
+
+// TestNotification_MarkRead_Delete_ThroughRealRoute drives MarkRead and Delete
+// through a mux carrying the PRODUCTION route patterns ({notificationId}), so
+// the path param is populated exactly as in prod. A handler reading the wrong
+// PathValue key gets "" → 404 on a valid notification. Regression guard.
+func TestNotification_MarkRead_Delete_ThroughRealRoute(t *testing.T) {
+	h, userID, wsID := newNotificationHandler(t)
+	CreateNotification(h.db, nil, wsID, userID, "user", userID, "x", "issue", "1", "T")
+	var nid string
+	h.db.QueryRow(`SELECT id FROM notifications`).Scan(&nid)
+
+	inject := func(next http.HandlerFunc) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			next(w, r.WithContext(withUser(r.Context(), &AuthUser{ID: userID})))
+		}
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/v1/notifications/{notificationId}/read", inject(h.MarkRead))
+	mux.HandleFunc("DELETE /api/v1/notifications/{notificationId}", inject(h.Delete))
+
+	preq := httptest.NewRequest("POST", "/api/v1/notifications/"+nid+"/read", nil)
+	prr := httptest.NewRecorder()
+	mux.ServeHTTP(prr, preq)
+	if prr.Code != http.StatusOK {
+		t.Fatalf("MarkRead through route: %d body=%s", prr.Code, prr.Body.String())
+	}
+
+	dreq := httptest.NewRequest("DELETE", "/api/v1/notifications/"+nid, nil)
+	drr := httptest.NewRecorder()
+	mux.ServeHTTP(drr, dreq)
+	if drr.Code != http.StatusNoContent {
+		t.Fatalf("Delete through route: %d body=%s", drr.Code, drr.Body.String())
 	}
 }
 

@@ -4,7 +4,7 @@
 
 `kind: Crew` is the full-CRUD authoring surface for one crew: Create on
 first apply, Update on drift, Unchanged when the declared spec already
-matches the server. Where [`CrewTemplate`](./crew_template.md) is a
+matches the server. Where [`CrewTemplate`](/manifest/crew_template) is a
 one-shot *deploy* of a server-side blueprint (no in-place updates),
 `kind: Crew` owns every field of the crew row directly — runtime image,
 devcontainer overlay, mise toolchain, and sidecar services.
@@ -19,8 +19,8 @@ The kind is implemented in `internal/manifest/kinds/crew.go`.
 > **Agents are separate documents.** A standalone `kind: Crew`
 > document defines only the crew row (and its sidecars / container
 > config). Its agents are authored either as standalone
-> [`kind: Agent`](./agent.md) documents that reference this crew by
-> `crew_slug`, or inline under a [`kind: Workspace`](./workspace.md)
+> [`kind: Agent`](/manifest/agent) documents that reference this crew by
+> `crew_slug`, or inline under a [`kind: Workspace`](/manifest/workspace)
 > bundle's nested crew shape. The standalone Crew document does **not**
 > carry an `agents:` list.
 
@@ -197,6 +197,8 @@ spec:
 
 ## REST endpoint mapping
 
+How each manifest field maps onto the create/update request body:
+
 | Manifest field | POST/PATCH body field | Notes |
 |---|---|---|
 | `metadata.name` | `name` | |
@@ -268,9 +270,9 @@ container_ttl_hours, network_mode) are dropped.
 
 ## See also
 
-- [Agent](./agent.md) — references this crew via `spec.crew_slug`.
-- [CrewTemplate](./crew_template.md) — one-shot deploy of a server blueprint.
-- [Integration](./integration.md) — crew-scoped MCP servers.
-- [Workspace](./workspace.md) — the top-level bundle that nests crews + agents.
+- [Agent](/manifest/agent) — references this crew via `spec.crew_slug`.
+- [CrewTemplate](/manifest/crew_template) — one-shot deploy of a server blueprint.
+- [Integration](/manifest/integration) — crew-scoped MCP servers.
+- [Workspace](/manifest/workspace) — the top-level bundle that nests crews + agents.
 - Backend: `internal/api/crews_create.go`, `internal/api/crews_update.go`, `internal/api/crew_services.go`.
 - This kind's Go implementation: `internal/manifest/kinds/crew.go`.

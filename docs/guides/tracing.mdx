@@ -113,7 +113,7 @@ From a trace you've opened in your collector, search the journal for `trace_id =
 
 The sidecar speaks HTTP to crewshipd. The server chain injects trace headers on every outbound IPC call, and the sidecar extracts them on every inbound. Result: a span started in the web handler can span the sidecar's keeper evaluation call all the way to the gatekeeper LLM round-trip as a single trace.
 
-For external webhooks fired by [Hooks](/guides/hooks), the `http` handler calls `telemetry.InjectHTTP(ctx, req)` before sending so the receiving system can correlate.
+For external webhooks fired by [Hooks](/guides/hooks), the `http` handler calls `telemetry.Inject(ctx, req.Header)` before sending so the receiving system can correlate.
 
 ## Gotchas
 

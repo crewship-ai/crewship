@@ -1,0 +1,136 @@
+---
+title: "Instance Settings"
+description: "CRUD over the instance-global key/value settings store, with redaction of sensitive values and protection of bootstrap markers."
+icon: "sliders"
+---
+
+Instance settings are a singleton, instance-global key/value store (the
+`app_settings` table). Reads (List, Get) are open to `MANAGER` and above;
+writes (Put, Delete) require `OWNER` or `ADMIN`.
+
+**Sensitive-value redaction.** Values under these key patterns always read
+back as `***`, even on the same request that set them (write-only on read):
+
+- `smtp.password*`
+- `oauth.*.client_secret`
+- `webhook.*.secret`
+
+**Protected keys.** Bootstrap markers cannot be deleted -- `DELETE` returns
+`403` (with `application/problem+json`) for:
+
+- `instance.bootstrap_at`
+- `instance.first_user_id`
+- `schema.version`
+
+---
+
+## List Settings
+
+```
+GET /api/v1/instance/settings?workspace_id={workspaceId}
+```
+
+Returns every setting row, ordered by `key` ascending. Sensitive values are
+redacted.
+
+**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role (`create` tier)
+
+**Response:** `200 OK`
+
+```json
+[
+  { "key": "instance.name", "value": "Acme Crewship", "updated_at": "2024-01-15T10:00:00Z" },
+  { "key": "smtp.password", "value": "***", "updated_at": "2024-01-15T10:00:00Z" }
+]
+```
+
+### Response Fields
+
+| Field | Type | Description |
+|---|---|---|
+| `key` | string | Setting key |
+| `value` | string | Stored value, or `***` when the key is sensitive |
+| `updated_at` | string? | ISO 8601 timestamp; omitted when empty |
+
+---
+
+## Get Setting
+
+```
+GET /api/v1/instance/settings/{key}?workspace_id={workspaceId}
+```
+
+Returns one key/value pair, redacting the value if sensitive.
+
+**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
+
+| Path Parameter | Description |
+|---|---|
+| `key` | Setting key |
+
+**Response:** `200 OK` -- a single setting object (same shape as a List item).
+
+| Status | Condition |
+|---|---|
+| `400` | Missing `key` |
+| `404` | Setting not found |
+
+---
+
+## Set Setting
+
+```
+PUT /api/v1/instance/settings/{key}?workspace_id={workspaceId}
+```
+
+Upserts a value for `key`. An empty string is a valid value (e.g. clearing a
+banner); only an absent `value` field is rejected.
+
+**Auth:** `OWNER` or `ADMIN` role (`manage` tier)
+
+**Request Body:**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `value` | string | Yes | The value to store. Empty string is valid; a missing field returns `400`. |
+
+```json
+{ "value": "Acme Crewship" }
+```
+
+**Response:** `200 OK` -- the stored row, with redaction applied if the key is sensitive.
+
+```json
+{ "key": "instance.name", "value": "Acme Crewship", "updated_at": "2024-01-15T10:00:00Z" }
+```
+
+| Status | Condition |
+|---|---|
+| `400` | Missing `key`, invalid JSON, or missing `value` field |
+| `403` | Insufficient role |
+
+**WebSocket event:** `instance_setting.updated`
+
+---
+
+## Delete Setting
+
+```
+DELETE /api/v1/instance/settings/{key}?workspace_id={workspaceId}
+```
+
+Removes a key. Protected bootstrap markers cannot be deleted -- the guard
+fires before the delete, so a `403` is returned even if the row does not
+exist (a probing client cannot tell whether the marker was ever set).
+
+**Auth:** `OWNER` or `ADMIN` role
+
+**Response:** `204 No Content`
+
+| Status | Condition |
+|---|---|
+| `400` | Missing `key` |
+| `403` | Key is on the protected allowlist (`application/problem+json`) |
+| `404` | Setting not found |
+
+**WebSocket event:** `instance_setting.deleted`

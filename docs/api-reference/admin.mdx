@@ -6,7 +6,39 @@ icon: "shield-check"
 
 # Admin API
 
-Administrative endpoints for workspace management, user listing, and Keeper security audit logs. Most endpoints require the OWNER role.
+The operational surface for OWNER and ADMIN roles: workspace stats, user management, GDPR subject-access and erasure, memory administration, the Keeper security audit log, and a set of cross-cutting system and metrics endpoints. Most endpoints require the OWNER role; the GDPR and memory-admin endpoints require ADMIN or OWNER (manage permission). The Keeper Phase 2 evaluators and three system endpoints have their own auth model, noted inline.
+
+<Note>
+  Unless a section says otherwise, every endpoint on this page requires the **OWNER** role. The GDPR, memory-admin, and Keeper-requests endpoints accept **ADMIN or OWNER** (manage permission).
+</Note>
+
+## Endpoints
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| `GET` | [/api/v1/admin/stats](#get-api-v1-admin-stats) | Aggregate stats for the current workspace |
+| `GET` | [/api/v1/admin/users](#get-api-v1-admin-users) | List workspace users with roles |
+| `GET` | [/api/v1/admin/users/\{userId\}/data](#get-api-v1-admin-users-userid-data) | GDPR Art. 15 — export every row referencing a user |
+| `DELETE` | [/api/v1/admin/users/\{userId\}/data](#delete-api-v1-admin-users-userid-data) | GDPR Art. 17 — cascade purge a user's data |
+| `GET` | [/api/v1/admin/workspaces](#get-api-v1-admin-workspaces) | Workspace details with member/agent/crew counts |
+| `GET` | [/api/v1/admin/memory/stats](#get-api-v1-admin-memory-stats) | Memory subsystem totals + per-tier/per-agent rollups |
+| `GET` | [/api/v1/admin/memory/versions](#get-api-v1-admin-memory-versions) | Row-level drill-down into `memory_versions` |
+| `GET` | [/api/v1/admin/memory/versions/\{id\}/content](#get-api-v1-admin-memory-versions-id-content) | Raw blob bytes for a single memory version |
+| `GET` | [/api/v1/admin/memory/config](#get-api-v1-admin-memory-config) | Read per-workspace memory configuration |
+| `PATCH` | [/api/v1/admin/memory/config](#patch-api-v1-admin-memory-config) | Partial-merge update of memory configuration |
+| `GET` | [/api/v1/admin/keeper/requests](#get-api-v1-admin-keeper-requests) | Keeper access-request audit log |
+| `POST` | [/api/v1/internal/keeper/skill-review](#post-api-v1-internal-keeper-skill-review) | F4.1 — periodic skill audit |
+| `POST` | [/api/v1/internal/keeper/behavior](#post-api-v1-internal-keeper-behavior) | F4.2 — post-tool-call behavior monitor |
+| `POST` | [/api/v1/internal/keeper/memory-health](#post-api-v1-internal-keeper-memory-health) | F4.3 — periodic memory consolidation review |
+| `POST` | [/api/v1/internal/keeper/negative-learning](#post-api-v1-internal-keeper-negative-learning) | F4.4 — failure-event lesson capture |
+| `GET` | [/api/v1/system/setup-status](#get-api-v1-system-setup-status) | First-run bootstrap + signup gate |
+| `GET` | [/api/v1/system/telemetry](#get-api-v1-system-telemetry) | Read-only Sentry consent gate |
+| `GET` | [/api/v1/system/version](#get-api-v1-system-version) | Running binary version + latest release |
+| `GET` | [/api/v1/metrics/timeseries](#get-api-v1-metrics-timeseries) | Bucketed time-series metrics for dashboard charts |
+
+## Stats & users
+
+Read surfaces for workspace-level counts and membership. Both require the OWNER role.
 
 ## GET /api/v1/admin/stats
 
@@ -71,6 +103,14 @@ Lists all users in the current workspace with their roles.
 | `created_at` | `string` | ISO 8601 creation timestamp |
 | `workspace` | `object?` | Workspace details (id, name, slug) |
 | `role` | `string?` | Role in this workspace (OWNER, ADMIN, MEMBER, VIEWER) |
+
+## GDPR
+
+Subject-access export and right-to-erasure across the cascadable tables. Both require ADMIN or OWNER (manage permission) and write a `gdpr_actions` audit row.
+
+<Warning>
+  The DELETE endpoint cascade-purges every row referencing the user across the cascadable tables and cannot be undone. A `reason` is required for the audit trail.
+</Warning>
 
 ## GET /api/v1/admin/users/\{userId\}/data
 
@@ -187,6 +227,10 @@ On partial failure the same shape is returned with an additional `"error": "<fir
   Memory `payload_ref` content-addressed blobs on disk are **not** deleted by this endpoint — blobs are deduplicated across workspaces and require a separate sweep job (planned). The audit/index rows ARE purged so the SAR is honoured at the DB-visibility layer. See the [GDPR guide](/security/gdpr) for the operator workflow.
 </Warning>
 
+## Workspaces
+
+Workspace detail read, scoped to the current workspace. Requires the OWNER role.
+
 ## GET /api/v1/admin/workspaces
 
 Lists workspace details with member, agent, and crew counts.
@@ -213,6 +257,10 @@ Lists workspace details with member, agent, and crew counts.
 <Note>
   This endpoint is scoped to the current workspace only. It does not list other workspaces in the system.
 </Note>
+
+## Memory admin
+
+Inspect and tune the memory subsystem: aggregate stats, row-level version drill-down, raw blob retrieval, and the per-workspace retention config. All require ADMIN or OWNER (manage permission).
 
 ## GET /api/v1/admin/memory/stats
 
@@ -385,8 +433,7 @@ curl -H "Authorization: Bearer $TOKEN" \
 
 | Status | Condition |
 |--------|-----------|
-| `400` | Missing `id` path segment |
-| `401` | Missing workspace context |
+| `400` | Missing workspace context OR missing `id` path segment |
 | `403` | MEMBER role |
 | `404` | Unknown id OR cross-workspace probe (no existence leak) |
 | `410` | Row exists but the blob file is missing on disk (retention sweep, restore-from-backup race) |
@@ -480,6 +527,10 @@ curl -X PATCH \
   The read-merge-write runs inside a SQLite `BEGIN IMMEDIATE` (serializable) transaction so concurrent PATCHes touching different keys serialise rather than last-write-wins. Each real diff emits a `memory.config_updated` journal entry (Notice severity, ActorUser) with payload `{workspace_id, changes: {field: {from, to}}}`. If the stored JSON is corrupt, PATCH still succeeds (treats the existing document as empty) so operators can fix the row without resorting to manual SQL.
 </Note>
 
+## Keeper
+
+The operator-facing Keeper audit log, plus the Phase 2 F4 evaluator routes. The audit-log read requires ADMIN or OWNER (manage permission); the Phase 2 evaluator routes are internal-auth (see below).
+
 ## GET /api/v1/admin/keeper/requests
 
 Returns the Keeper access request audit log -- every credential access and command execution request evaluated by the Keeper.
@@ -528,17 +579,16 @@ Returns the Keeper access request audit log -- every credential access and comma
 | `credential_id` | `string` | Credential being accessed |
 | `credential_name` | `string` | Credential display name |
 | `intent` | `string` | Agent's stated intent for access |
-| `request_type` | `string` | `credential` or `execute` |
-| `command` | `string?` | Shell command (for execute requests) |
+| `request_type` | `string` | One of `credential` / `execute` / `skill_review` / `behavior` / `memory_health` / `negative_learning` (see Keeper Phase 2 below) |
+| `command` | `string?` | Shell command (for execute requests); omitted when null |
 | `decision` | `string?` | `ALLOW`, `DENY`, or `ESCALATE` |
 | `reason` | `string?` | LLM-generated explanation |
 | `risk_score` | `integer?` | Risk assessment (1-10 scale) |
-| `exit_code` | `integer?` | Command exit code (for execute requests) |
-| `ollama_prompt` | `string?` | Full prompt sent to the Keeper LLM |
-| `ollama_raw_response` | `string?` | Raw LLM response text |
+| `exit_code` | `integer?` | Command exit code (for execute requests); omitted when null |
+| `ollama_prompt` | `string?` | Full prompt sent to the Keeper LLM; omitted when null |
+| `ollama_raw_response` | `string?` | Raw LLM response text; omitted when null |
 | `created_at` | `string` | ISO 8601 request timestamp |
 | `decided_at` | `string?` | ISO 8601 decision timestamp |
-| `request_type` | `string` | One of `credential` / `execute` / `skill_review` / `behavior` / `memory_health` / `negative_learning` (see Keeper Phase 2 below) |
 
 <Note>
   Phase 2 request types (`skill_review`, `behavior`, `memory_health`, `negative_learning`) populate the same audit log surface as Phase 1 (`credential`, `execute`) with the same shape. The `intent` column carries the F4 evaluator's structured summary instead of a free-form access reason; the `ollama_prompt` + `ollama_raw_response` capture the LLM evaluation round-trip. Filter by `request_type` to slice the log into per-evaluator views.
@@ -546,7 +596,9 @@ Returns the Keeper access request audit log -- every credential access and comma
 
 ## Keeper Phase 2 — F4 evaluators
 
-Phase 2 endpoints are **internal-auth** (X-Internal-Token) — they're invoked by the platform itself (scheduler routines + the post-tool-call hook), not by operators directly. The admin-facing surface is the `/api/v1/admin/keeper/requests` log above, plus the per-type filters in the admin UI's "Keeper P2 reviews" panel (PR-F2).
+<Note>
+  Phase 2 endpoints are **internal-auth** (X-Internal-Token) — they're invoked by the platform itself (scheduler routines + the post-tool-call hook), not by operators directly. The admin-facing surface is the `/api/v1/admin/keeper/requests` log above, plus the per-type filters in the admin UI's "Keeper P2 reviews" panel (PR-F2).
+</Note>
 
 If an operator needs to trigger an evaluator ad-hoc (debugging, manual re-evaluation), the routes are reachable via the internal token. The expected production path is automated: routines fire on cron, the behavior hook fires on tool-call sampling.
 
@@ -627,13 +679,16 @@ DENY routes a blocking `inbox_items` row to the assigned agents' workspace (per 
   "decision": "DENY",
   "reason": "Destructive command without scoped path; recommend restricting to a specific directory",
   "risk_score": 7,
-  "should_block": true
+  "should_block": true,
+  "policy_decision": "block_inbox"
 }
 ```
 
+`policy_decision` is the resolved per-crew policy verdict (e.g. `inbox_approve`, `auto_log_inbox`, `block_inbox`) that drives whether an inbox row is written and whether it blocks.
+
 ### POST /api/v1/internal/keeper/memory-health
 
-**F4.3 — periodic memory consolidation review.** Cron-fires daily 03:30 UTC. The evaluator consumes `consolidate.HealthSnapshot` (reachability ratio, staleness days, refute count from `memory_relations`) and decides whether to auto-trigger a consolidation routine.
+**F4.3 — periodic memory consolidation review.** Cron-fires daily 03:30 UTC. The evaluator consumes a `consolidate.HealthSnapshot` (the 5-metric health score: Freshness / Coverage / Coherence / Efficiency / Reachability, each in `[0, 100]`, plus the weighted `Overall`) and decides whether to auto-trigger a consolidation routine. Staleness and contradiction counts travel as separate top-level body fields, not inside `snapshot`.
 
 **Request body:**
 
@@ -643,11 +698,27 @@ DENY routes a blocking `inbox_items` row to the assigned agents' workspace (per 
   "crew_id": "crw_…",
   "crew_name": "Ops",
   "agent_name": "Anna",
-  "snapshot": { "reachability_pct": 0.87, "stalest_entry_days": 412, "contradiction_count": 3 },
+  "snapshot": {
+    "WorkspaceID": "ws_…",
+    "CrewID": "crw_…",
+    "Freshness": 80,
+    "Coverage": 70,
+    "Coherence": 65,
+    "Efficiency": 90,
+    "Reachability": 87,
+    "Overall": 76
+  },
   "agent_md_bytes": 2840,
-  "persona_md_bytes": 1120
+  "persona_md_bytes": 1120,
+  "crew_md_bytes": 5120,
+  "stalest_entry_days": 412,
+  "contradiction_count": 3
 }
 ```
+
+<Note>
+  `snapshot` is the `consolidate.HealthSnapshot` Go struct serialised **without JSON tags**, so its wire keys are PascalCase (`Freshness`, `Reachability`, `Overall`, …) and each metric is on a `0–100` scale — not the `reachability_pct` / `0–1` shape an external caller might guess. `stalest_entry_days` and `contradiction_count` are top-level fields alongside `snapshot`, not nested inside it.
+</Note>
 
 **Response:**
 
@@ -712,11 +783,17 @@ When `self_learning_enabled = 0` the response still says `write_lesson: true` (t
 
 ### Cross-tenant guard
 
-All four endpoints assert `body.workspace_id == ctx.workspace_id` via `assertBodyWorkspaceMatchesCtx` before any evaluator runs. Asymmetric forgery (query=A, body=B) returns `400 Bad Request`. Empty ctx workspace also returns 400 — the gate refuses to operate without the middleware that's supposed to set it. Symmetric forgery (caller picks one workspace consistently) requires PR-F24 token-to-workspace binding to close fully. See [Internal IPC — Tenant isolation](/api-reference/internal#tenant-isolation-on-internal-auth-handlers).
+<Accordion title="How the four evaluators enforce workspace isolation">
+  All four endpoints assert `body.workspace_id == ctx.workspace_id` via `assertBodyWorkspaceMatchesCtx` before any evaluator runs. Asymmetric forgery (query=A, body=B) returns `400 Bad Request`. Empty ctx workspace also returns 400 — the gate refuses to operate without the middleware that's supposed to set it. Symmetric forgery (caller picks one workspace consistently) requires PR-F24 token-to-workspace binding to close fully. See [Internal IPC — Tenant isolation](/api-reference/internal#tenant-isolation-on-internal-auth-handlers).
+</Accordion>
 
 ## System
 
-Small cross-cutting endpoints that don't belong to any single domain handler. They surface install state, telemetry consent, the running binary's version, and dashboard time-series metrics. Three are intentionally unauthenticated because the login page itself needs to read them before any session exists.
+Small cross-cutting endpoints that don't belong to any single domain handler. They surface install state, telemetry consent, the running binary's version, and dashboard time-series metrics.
+
+<Note>
+  `setup-status` and `telemetry` are intentionally **unauthenticated** because the login page needs to read them before any session exists; `version` and `metrics/timeseries` require an authenticated user (`metrics/timeseries` also needs workspace context).
+</Note>
 
 ### GET /api/v1/system/setup-status
 

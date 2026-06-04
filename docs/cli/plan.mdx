@@ -6,7 +6,7 @@ icon: "list-ordered"
 
 # Plan
 
-`cmd/crewship/cmd_plan.go` runs the default agent in PLAN mode. The agent outputs a step-by-step plan plus the files it would touch, without calling any tools or modifying anything. Useful before kicking off a long autonomous run — review, adjust, then re-run with [`crewship run`](/cli/agent) or [`crewship ask`](/cli/agent).
+`cmd/crewship/cmd_plan.go` runs the default agent in PLAN mode. The agent outputs a step-by-step plan plus the files it would touch, without calling any tools or modifying anything. Useful before kicking off a long autonomous run — review, adjust, then re-run with [`crewship run`](/cli/run) or [`crewship ask`](/cli/ask).
 
 The agent stays a normal CHAT agent server-side — plan mode is achieved by prompting alone, not by a separate API mode. This keeps the feature shippable in one PR at the cost of relying on instruction-following: if the agent ignores "do not call tools," output degrades gracefully into a verbose preview.
 
@@ -68,6 +68,6 @@ crewship plan "review my changes" --with-git-staged --with-git-status
 
 ## See also
 
-- [`crewship ask`](/cli/agent) — execute the plan once you're happy.
-- [`crewship run`](/cli/agent) — same idea, agent-pinned.
+- [`crewship ask`](/cli/ask) — execute the plan once you're happy.
+- [`crewship run`](/cli/run) — same idea, agent-pinned.
 - [`crewship explain <run-id>`](/cli/explain) — post-hoc summary of what an executed run actually did.

@@ -99,4 +99,4 @@ Item subtypes: `agent_message`, `reasoning`, `command_execution` (uses `aggregat
 
 **`unknown flag: --quiet`** — adapter regression; ensure orchestrator pinned to current schema (see `cli_adapter_versions_test.go`).
 
-**MCP server returns 401** — verify `bearer_token_env_var` references a credential present in the container env. See `crewship agent <slug> --resolved` to dump the exec env.
+**MCP server returns 401** — verify `bearer_token_env_var` references a credential present in the container env. Run `crewship agent mcp <slug> --resolved` to dump the effective merged MCP config (crew + agent, including each server's bound credential name) and confirm the expected credential is wired.

@@ -6,7 +6,7 @@ icon: "users"
 
 # crewship crew
 
-Manage crews (teams of AI agents sharing a container).
+A crew is a team of AI agents that share one runtime container and a common Shared Ship volume. Use these commands to create and tune crews, manage members and cross-crew connections, wire up MCP servers, drive the devcontainer build pipeline (provision, rebuild, cache), and read or write files in the crew's shared workspace.
 
 ```bash
 crewship crew <subcommand> [flags]
@@ -126,6 +126,10 @@ crewship crew delete backend-team --yes
 | Flag | Short | Type | Default | Description |
 |------|-------|------|---------|-------------|
 | `--yes` | `-y` | `bool` | `false` | Skip confirmation prompt. |
+
+<Warning>
+Deleting a crew removes its agents and runtime context. `--yes` bypasses the prompt — use it only in scripts.
+</Warning>
 
 ---
 
@@ -397,7 +401,7 @@ crewship crew files list demo-crew --recursive --format json --filter '.[] | .na
 |---|---|---|---|
 | `--path <subdir>` | string | (root) | Subdirectory under `/crew/shared` to list. Forwarded as `?subdir=`. |
 | `--recursive` | bool | `false` | Recurse into subdirectories. Forwarded as `?recursive=true`. |
-| `--filter <expr>` | string | | gojq filter applied before rendering. |
+| `--filter <expr>` | string | | jq filter applied before rendering. |
 
 ### `crewship crew files get <slug-or-id> <path>`
 

@@ -9,7 +9,7 @@ Crewship is a **self-hosted runtime for AI coding agents**. This page gets you f
 <Warning>
   **v0.1 beta — use the Claude Code adapter.** Crewship ships scaffolds
   for Codex, Gemini, OpenCode, Cursor, and Factory Droid, but only
-  **Claude Code** has parity-tested streaming, MCP support, and prompt
+  **Claude Code** has production-tested streaming, MCP support, and prompt
   scrubbers in this release. Pick Claude Code in the agent picker for
   the supported path; the other adapters are marked **Beta** in-product
   and have known gaps (Cursor MCP is upstream-broken in headless mode;
@@ -145,7 +145,7 @@ For pinned versions, custom install directories, PostgreSQL mode, and air-gapped
     # ✓ Default workspace set to: side-proj
     ```
 
-    The selection is written to `~/.crewship/config.yaml` and used by every subsequent CLI call. Override per-command with `--workspace <slug>` if needed.
+    The selection is written to `~/.crewship/cli-config.yaml` and used by every subsequent CLI call. Override per-command with `--workspace <slug>` if needed.
   </Step>
 
   <Step title="Check system health">

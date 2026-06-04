@@ -134,16 +134,15 @@ The sidecar handles credential injection for MCP server authentication, keeping 
 
 ## MCP Registry
 
-Crewship syncs with the official MCP registry at `registry.modelcontextprotocol.io/v0/servers`. The `SyncMCPRegistry` function (`internal/api/mcp_registry.go`) fetches and caches all registered servers locally.
+Crewship syncs with the official MCP registry at `registry.modelcontextprotocol.io/v0/servers`. The `SyncMCPRegistry` function (`internal/api/mcp_registry.go`) fetches and caches all registered servers locally. This allows users to browse and install MCP servers from the registry without manual configuration.
 
-Registry entries include:
+<Accordion title="What registry entries include">
 - Server name and display name
 - Description and category
 - Package information (runtime, environment variables)
 - Remote transport configuration
 - Verification status
-
-This allows users to browse and install MCP servers from the registry without manual configuration.
+</Accordion>
 
 ## Crew Connections
 

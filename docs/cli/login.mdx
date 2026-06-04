@@ -96,6 +96,14 @@ crewship whoami
 
 Hits `GET /api/v1/workspaces` plus `GET /api/v1/auth/cli-token/validate` to print the email, server URL, currently selected workspace (if any), and your role in it. Useful as a CI smoke check (`crewship whoami || exit 1`) before running a real mutation.
 
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--json` | bool | `false` | Emit machine-readable JSON to stdout instead of human-readable text. |
+
+```bash
+crewship whoami --json
+```
+
 When no workspace is selected, prints how many are available and how to pick one:
 
 ```

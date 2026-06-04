@@ -21,7 +21,7 @@ All three are scoped to the same time range so rows line up.
 |---|---|---|---|
 | `--range <window>` | string | `24h` | Time window: `1h`, `24h`, `7d`, `30d`. Threaded into every underlying call. |
 | `--limit <n>` | int | `5` | Number of top spenders to print. |
-| `--watch` | bool | `false` | Re-render on interval (shared `addWatchFlag` helper). |
+| `--watch <duration>` | string | `""` | Auto-refresh every `<duration>` (e.g. `5s`, `1m`; min `1s`). Empty disables. Shared `addWatchFlag` helper. |
 
 ### Examples
 
@@ -30,7 +30,7 @@ crewship cost
 crewship cost --range 7d
 crewship cost --range 30d --limit 10
 crewship cost --format json     # full structured payload for scripts
-crewship cost --watch
+crewship cost --watch 5s         # re-render every 5 seconds
 ```
 
 ### Output

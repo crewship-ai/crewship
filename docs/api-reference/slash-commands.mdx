@@ -1,0 +1,90 @@
+---
+title: "Slash Commands"
+description: "Server-driven slash command registry, capability-filtered to the caller's grants."
+icon: "terminal"
+---
+
+The slash command registry is a server-driven catalog of actions that can be
+launched from the chat UI palette and the CLI repl. Each entry carries a
+`capability`; the handler intersects the static catalog with the caller's
+capability set and returns only the entries the caller is allowed to invoke --
+entries the caller can't use never reach the wire.
+
+The endpoint requires authentication and workspace context (the slash palette
+is workspace-scoped). A caller with no relevant grants gets an empty array,
+not a `403` -- the palette still opens, just with no actions in it.
+
+## i18n
+
+Entries carry both `label` (English) and `label_cs` (Czech) so the dashboard
+can pick by locale without a translation step. The shape is open -- additional
+`label_*` fields may be added without breaking clients.
+
+---
+
+## List Slash Commands
+
+```
+GET /api/v1/slash-commands?workspace_id={workspaceId}
+```
+
+Returns the catalog intersected with the caller's capability set, in catalog
+order.
+
+**Auth:** Any authenticated workspace member (filtered by caller capabilities)
+
+**Response:** `200 OK`
+
+```json
+[
+  {
+    "id": "routine",
+    "label": "Create routine from this conversation",
+    "label_cs": "Vytvořit rutinu z této konverzace",
+    "icon": "calendar-clock",
+    "capability": "routine.create",
+    "form_schema": [
+      { "name": "name", "type": "text", "required": true },
+      { "name": "cron", "type": "cron", "required": true },
+      { "name": "timezone", "type": "timezone", "default": "UTC" }
+    ]
+  }
+]
+```
+
+### Entry Fields
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | string | Command ID |
+| `label` | string | English label |
+| `label_cs` | string? | Czech label |
+| `icon` | string? | Lucide icon name |
+| `capability` | string | Capability required to invoke this command |
+| `form_schema` | array? | Form fields the action modal renders |
+
+### Form Field
+
+| Field | Type | Description |
+|---|---|---|
+| `name` | string | Field name |
+| `type` | string | Renderer type (open set; unknown types fall back to `text`) |
+| `required` | boolean? | Whether the field is required |
+| `default` | string? | Default value |
+
+### Static Catalog Entries
+
+The platform-defined catalog includes these actions (each gated by its own
+capability):
+
+| `id` | Action | Capability |
+|---|---|---|
+| `routine` | Create a routine from the conversation | `routine.create` |
+| `issue` | Create an issue from the conversation | `issue.create` |
+| `skill` | Create a skill from the conversation | `skill.create` |
+| `credential` | Add a credential | `credential.create` |
+
+| Status | Condition |
+|---|---|
+| `400` | Missing workspace context |
+| `401` | Not authenticated |

@@ -106,7 +106,7 @@ PUT /api/v1/crews/{crewId}/files/save?path={filePath}
 The request body contains the raw file content. The `path` query parameter specifies the destination path inside the container.
 
 <Note>
-  File save operations require the `create` permission (MEMBER role or above). VIEWER role users cannot upload files.
+  File save operations require the `create` permission (MANAGER role or above). MEMBER and VIEWER role users cannot upload files.
 </Note>
 
 ## Output Directory Convention
@@ -140,14 +140,14 @@ The `/crew/shared/.memory/` subdirectory holds **crew shared memory** -- FTS5-in
 
 ## File Events via WebSocket
 
-File changes inside crew containers are broadcast in real-time via WebSocket on the `files:{crewId}` channel.
+File changes inside crew containers are broadcast in real-time via WebSocket on the `crew:{crewId}` channel, as `file.event` messages.
 
 ### Subscribing
 
 ```json
 {
   "type": "subscribe",
-  "channel": "files:{crewId}"
+  "channel": "crew:{crewId}"
 }
 ```
 
@@ -163,14 +163,14 @@ File changes inside crew containers are broadcast in real-time via WebSocket on 
 
 ```json
 {
-  "type": "file_event",
-  "channel": "files:crew-uuid",
+  "type": "file.event",
+  "channel": "crew:crew-uuid",
   "payload": {
     "event": "file_created",
-    "path": "output/viktor/report.md",
-    "name": "report.md",
+    "path": "viktor/report.md",
+    "agent": "viktor",
     "size": 4096,
-    "modified_at": "2025-01-15T10:30:00Z"
+    "timestamp": "2025-01-15T10:30:00Z"
   }
 }
 ```
@@ -181,7 +181,7 @@ File changes inside crew containers are broadcast in real-time via WebSocket on 
 
 ## Channel Authorization
 
-Subscribing to `files:{crewId}` requires membership in the crew's workspace. The WebSocket hub verifies workspace membership before allowing the subscription.
+Subscribing to `crew:{crewId}` requires membership in the crew's workspace. The WebSocket hub verifies workspace membership before allowing the subscription.
 
 ## What's Next
 

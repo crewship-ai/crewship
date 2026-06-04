@@ -61,7 +61,7 @@ Sampled post-tool-call. The orchestrator's `EventPostToolCall` hook fires on a p
 
 For `behavior_mode='warn'` (the default) every DENY here is a **non-blocking** inbox notification — the agent's NEXT tool call proceeds. The operator's job is to skim the warns, spot patterns ("agent X keeps trying to call `rm -rf`"), and either:
 
-- Tighten the crew's autonomy_level (`crewship policy set --autonomy strict`)
+- Tighten the crew's autonomy_level (`crewship policy set --crew <slug> --level strict`)
 - Update the agent's PERSONA.md to explicitly forbid the pattern (operator-only edit)
 - Flip the crew to `behavior_mode='block'` once you trust the signal enough that interrupts are worth it
 
@@ -152,7 +152,7 @@ Symptoms: every other row in F4.2 is DENY for the same `tool_name` and the agent
 Fixes in order of preference:
 
 1. Update the agent's PERSONA.md to explain the legitimate use case for that tool — the next F4.2 evaluation reads the persona and is less likely to DENY
-2. Lower the F4.2 sampling rate for the crew (`crewship policy set --behavior-sample-rate 20` — every 20th call instead of 1-in-5)
+2. Lower the F4.2 sampling rate (the default is every 5th tool call per crew, tuned via the `SetSampleEvery` hook in `internal/keeper/behaviorhook` — not yet exposed as a CLI flag)
 3. Switch the F3 `Behavior` aux slot to a stricter model that's less prone to false positives
 
 If symptoms persist, file an issue — the F4.2 prompt template may need a tightening pass.

@@ -62,7 +62,11 @@ The F4.2 behavior monitor (Keeper Phase 2) samples tool calls per crew config an
 
 ### Forbidden combination
 
-`autonomy=full + behavior_mode=block` is **rejected** at both the API layer and the database CHECK constraint. The combination is contradictory — `full` means "trust the agent to act on its own", `block` means "let the behavior monitor interrupt the agent" — and the UI `CrewPolicyControls` panel greys the `block` option with a tooltip when `autonomy=full` is selected so the operator can't even submit it. See `internal/policy/types.go::Validate` + `TestPolicy_DecideBehaviorDeny_FullBlock_FailsClosed` for the contract test.
+<Warning>
+`autonomy=full + behavior_mode=block` is **rejected** at both the API layer and the database CHECK constraint.
+</Warning>
+
+The combination is contradictory — `full` means "trust the agent to act on its own", `block` means "let the behavior monitor interrupt the agent" — and the UI `CrewPolicyControls` panel greys the `block` option with a tooltip when `autonomy=full` is selected so the operator can't even submit it. See `internal/policy/types.go::Validate` + `TestPolicy_DecideBehaviorDeny_FullBlock_FailsClosed` for the contract test.
 
 ## `self_learning_enabled` — per-agent override on auto-apply
 
@@ -78,7 +82,9 @@ For both:
 - `self_learning_enabled = 1` → ALLOW auto-applies (lesson lands, persona updates)
 - `self_learning_enabled = 0` → ALLOW queues a blocking inbox row with the full proposal payload; operator approves before the change lands
 
+<Note>
 The flag does **NOT** override the crew's `autonomy_level`. A strict crew + `self_learning=1` agent still routes proposals through inbox — `autonomy=strict` says "every action via inbox" regardless of which agent. The `self_learning` flag only relaxes the path when policy ALREADY returns an auto-apply decision (which only happens at `trusted` or `full`).
+</Note>
 
 ### When to flip self_learning ON
 
@@ -94,7 +100,9 @@ The flag does **NOT** override the crew's `autonomy_level`. A strict crew + `sel
 
 ## Composition — worked examples
 
-### Example 1: trusted crew + self_learning OFF agent
+<AccordionGroup>
+
+<Accordion title="Example 1: trusted crew + self_learning OFF agent">
 
 Crew: `autonomy=trusted, behavior_mode=warn`
 Agent in crew: `self_learning_enabled=0`
@@ -105,19 +113,27 @@ Same agent later fails a task. The F4.4 negative-learning evaluator decides the 
 
 Result: agent acts freely day-to-day (autonomy=trusted), the operator sees anti-pattern signals as warnings (behavior=warn), and the operator gates lasting changes to the agent's posture (self_learning=0).
 
-### Example 2: full crew + self_learning ON agent (max autonomy)
+</Accordion>
+
+<Accordion title="Example 2: full crew + self_learning ON agent (max autonomy)">
 
 Crew: `autonomy=full, behavior_mode=warn`
 Agent in crew: `self_learning_enabled=1`
 
 Everything auto-applies — tool calls, lessons, persona suggestions. The behavior monitor still warns on anti-patterns (operator sees them in the inbox) but nothing blocks. Use for power-team workflows where the operator has explicitly pre-approved the agent's mandate.
 
-### Example 3: strict crew + self_learning ON agent
+</Accordion>
+
+<Accordion title="Example 3: strict crew + self_learning ON agent">
 
 Crew: `autonomy=strict, behavior_mode=block`
 Agent in crew: `self_learning_enabled=1`
 
 `self_learning=1` is a no-op here. `autonomy=strict` → every policy decision is `inbox_approve` regardless of evaluator decision. The agent can flip the self_learning flag on but it won't bypass the crew's strict posture. Useful for documenting intent (the operator believes the agent CAN be trusted to evolve, but the crew's compliance posture requires explicit approval anyway) without changing behavior.
+
+</Accordion>
+
+</AccordionGroup>
 
 ## Where to set them
 
@@ -133,7 +149,7 @@ UI: **Crew Canvas → Settings → Autonomy & behavior** panel. The panel:
 CLI: `crewship policy get/set/list`
 
 ```bash
-crewship policy set my-crew --autonomy trusted --behavior warn \
+crewship policy set --crew my-crew --level trusted --behavior warn \
   --reason "team has built confidence over Q2"
 ```
 

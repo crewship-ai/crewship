@@ -8,7 +8,7 @@ icon: "search"
 
 Print the journal entries for a run as a one-line-per-event timeline. Each line shows timestamp, severity chip, entry type, and summary. Costs and tool calls are pulled out into a footer block when present.
 
-Sibling design with [`crewship explain`](/cli/agent):
+Sibling design with [`crewship explain`](/cli/explain):
 
 - `crewship inspect <run-id>` — structured timeline (this command, fast, no LLM)
 - `crewship explain <run-id>` — LLM-summarised narrative (slower, costs tokens)
@@ -90,6 +90,6 @@ The CLI fetches journal entries scoped to the run's agent and the run's time win
 ## See also
 
 - [`crewship journal`](/cli/journal) — agent-scoped journal browser; `inspect` is the run-scoped distillation.
-- [`crewship explain`](/cli/agent) — LLM-summarised narrative of the same data.
-- [`crewship history`](/cli/agent) — list recent runs to find a run ID.
+- [`crewship explain`](/cli/explain) — LLM-summarised narrative of the same data.
+- [`crewship history`](/cli/history) — list recent runs to find a run ID.
 - [`crewship telemetry`](/cli/telemetry) — wider-view tracing across the workspace.

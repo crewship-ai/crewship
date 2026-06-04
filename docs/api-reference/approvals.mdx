@@ -1,14 +1,31 @@
 ---
 title: "Approvals"
-description: "Harbor Master human-in-the-loop approval queue."
+description: "Harbormaster human-in-the-loop approval queue."
 icon: "anchor"
 ---
 
-All endpoints require authentication and are workspace-scoped. Decision endpoints additionally require `OWNER` or `ADMIN` role. Enqueue is internal-only -- it fires from `harbormaster.Gate` when an agent hits a rule-matching action. See the [Harbor Master guide](/guides/harbormaster).
+The Harbormaster approval queue is the human-in-the-loop gate for agent actions that match a policy rule. Enqueue is internal-only -- it fires from `harbormaster.Gate` when an agent hits a rule-matching action -- so the public surface is the read + decide flow operators use to triage, approve, or deny pending requests. See the [Harbormaster guide](/guides/harbormaster).
+
+<Note>
+  All endpoints require authentication and are workspace-scoped. Decision endpoints additionally require `OWNER` or `ADMIN` role.
+</Note>
+
+## Endpoints
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | [`/api/v1/approvals`](#list-approvals) | List approval requests |
+| GET | [`/api/v1/approvals/{id}`](#get-approval) | Get a single request |
+| POST | [`/api/v1/approvals/{id}/decide`](#decide) | Approve or deny a request |
+| POST | [`/api/v1/approvals/reset-auto-tuning`](#reset-auto-tuning) | Reset learned auto-tuning state for a tool |
 
 ---
 
-## List approvals
+## Queue
+
+Read the approval queue and inspect individual requests.
+
+### List approvals
 
 ```
 GET /api/v1/approvals?status=pending&limit=50
@@ -27,21 +44,22 @@ GET /api/v1/approvals?status=pending&limit=50
 {
   "rows": [
     {
-      "id": "req_01HXYZABCDEF",
-      "workspace_id": "ws_123",
-      "crew_id": "crw_backend",
-      "agent_id": "agt_viktor",
-      "mission_id": "MIS-42",
-      "requested_by": "agt_viktor",
-      "kind": "destructive_op",
-      "reason": "rm -rf /data/*",
-      "payload": { "tool": "Bash", "args": { "command": "rm -rf /data/*" } },
-      "status": "pending",
-      "decided_by": null,
-      "decided_at": null,
-      "decision_comment": null,
-      "timeout_at": "2026-04-17T11:23:41Z",
-      "created_at": "2026-04-17T10:23:41Z"
+      "ID": "req_01HXYZABCDEF",
+      "WorkspaceID": "ws_123",
+      "CrewID": "crw_backend",
+      "AgentID": "agt_viktor",
+      "MissionID": "MIS-42",
+      "RequestedBy": "agt_viktor",
+      "Kind": "destructive_op",
+      "Reason": "rm -rf /data/*",
+      "Payload": { "tool": "Bash", "args": { "command": "rm -rf /data/*" } },
+      "Status": "pending",
+      "DecidedBy": "",
+      "DecidedAt": null,
+      "DecisionComment": "",
+      "TimeoutAt": "2026-04-17T11:23:41Z",
+      "CreatedAt": "2026-04-17T10:23:41Z",
+      "TimeoutSecs": 0
     }
   ],
   "status": "pending",
@@ -49,16 +67,20 @@ GET /api/v1/approvals?status=pending&limit=50
 }
 ```
 
+The `rows[]` objects are serialized with their Go field names (PascalCase) — the `harbormaster.Request` struct carries no JSON tags. The `rows`, `status`, and `count` envelope keys are lowercase. `TimeoutSecs` is an in-memory-only field that is never read back from the row, so it always serializes as `0` here (the effective deadline is `TimeoutAt`). `DecidedAt` and `TimeoutAt` are pointers — they serialize as `null` when unset rather than being omitted.
+
+For `?status=all`, the `status` envelope key echoes back as an empty string (`""`), not `"all"` — the handler maps `all` to "no status filter" internally.
+
 | Field | Type | Description |
 |---|---|---|
-| `rows[].kind` | string | `tool_call`, `cost_threshold`, `destructive_op`, `target_environment`, `custom`. |
-| `rows[].status` | string | See Status values above. |
-| `rows[].payload` | object | Tool call context (`tool`, `args`, plus any rule-specific fields). |
-| `rows[].timeout_at` | string? | RFC3339 deadline; the sweeper flips past-due rows to `timeout`. |
+| `rows[].Kind` | string | `tool_call`, `cost_threshold`, `destructive_op`, `target_environment`, `custom`. |
+| `rows[].Status` | string | See Status values above. |
+| `rows[].Payload` | object | Tool call context (`tool`, `args`, plus any rule-specific fields). |
+| `rows[].TimeoutAt` | string? | RFC3339 deadline; the sweeper flips past-due rows to `timeout`. |
 
 ---
 
-## Get approval
+### Get approval
 
 ```
 GET /api/v1/approvals/{id}
@@ -75,7 +97,11 @@ Returns the full request object (same schema as list rows).
 
 ---
 
-## Decide
+## Decisions
+
+Approve or deny a pending request, and manage the auto-tuning model that learns from those decisions.
+
+### Decide
 
 ```
 POST /api/v1/approvals/{id}/decide
@@ -118,31 +144,39 @@ POST /api/v1/approvals/{id}/decide
 
 ---
 
-## Reset auto-tuning
+### Reset auto-tuning
 
 ```
 POST /api/v1/approvals/reset-auto-tuning
 ```
 
-Harbor Master observes operator decisions over time and auto-tunes its rule confidences (a denied request that would have auto-approved next time is a calibration signal). This endpoint resets that learned state to defaults — useful after a major change in policy or after a misconfiguration polluted the auto-tuning model.
+Harbormaster observes operator decisions over time and auto-tunes its rule confidences (a denied request that would have auto-approved next time is a calibration signal). This endpoint resets that learned state to defaults — useful after a major change in policy or after a misconfiguration polluted the auto-tuning model.
 
 **Auth:** `OWNER` or `ADMIN` only.
 
-**Request body:** none, or `{}`.
+**Request body:** requires a non-empty `tool` field — the reset is scoped to a single tool's auto-tuning state.
+
+```json
+{ "tool": "Bash" }
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `tool` | string | Yes | Tool whose rolling reward window to clear. Omitting it (or sending `""`) returns 400 `tool required`. |
 
 **Response:** `200 OK`
 
 ```json
 {
-  "ok": true,
-  "reset_at": "2026-04-30T11:42:18Z",
-  "rules_reset": 14
+  "tool": "Bash",
+  "rows_deleted": 14,
+  "workspace_id": "ws_123"
 }
 ```
 
-`rules_reset` is the number of rule rows whose tuning state was cleared. Idempotent — calling twice in a row returns `rules_reset: 0` on the second call.
+`rows_deleted` is the number of auto-tuning rows wiped for that tool. Idempotent — calling twice in a row returns `rows_deleted: 0` on the second call.
 
-**Errors:** `401` not authenticated; `403` wrong role; `500` DB error.
+**Errors:** `400` bad JSON or missing `tool`; `401` not authenticated; `403` wrong role; `500` DB error.
 
 This does **not** affect already-decided approval rows, journal history, or the rule definitions themselves — only the per-rule confidence that drives auto-mode (`async`/`sync`/`required`) selection.
 
@@ -162,5 +196,5 @@ See [Crew Journal](/guides/crew-journal) for payload shapes.
 
 ## Related
 
-- [Harbor Master guide](/guides/harbormaster).
+- [Harbormaster guide](/guides/harbormaster).
 - [`crewship approvals`](/cli/approvals).

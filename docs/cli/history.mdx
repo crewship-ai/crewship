@@ -8,7 +8,7 @@ icon: "history"
 
 `cmd/crewship/cmd_history.go` is the "what did I run lately?" command. Reads `GET /api/v1/runs` for the run list and, with `--prompts`, fetches `GET /api/v1/chats/{chatId}/messages` for the first user-role message of each run in a bounded 4-way worker pool.
 
-Different from [`crewship run list`](/cli/agent):
+Different from [`crewship run list`](/cli/run):
 - Adds an optional first-message preview per run.
 - Defaults to the last 24 h window.
 - Pretty single-line rendering with truncation.

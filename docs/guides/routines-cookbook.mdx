@@ -17,6 +17,10 @@ Every recipe has the same anatomy:
 3. **Gates explained** — why each `must_contain` / schema / `outcomes.criteria` is there. The gates are the design — copying the prompt without the gates doesn't reproduce the routine.
 4. **Failure modes & fixes** — what goes wrong on weak tiers and the typical resolution.
 
+<Note>
+The gates are the design. Copying a recipe's prompt without its `validation` / `outcomes` block does **not** reproduce the routine — the gates are what make the output reliable enough to depend on.
+</Note>
+
 Every routine here can be benched in one command:
 
 ```bash
@@ -254,7 +258,11 @@ Without `project_title`, the LLM step would see the entire JSON response (often 
 
 ### Egress allowlist
 
-`egress_targets: ["api.example.com"]` is enforced at runtime. A typo'd URL host fails at the http step rather than going to a different server. **Always set this** — leaving it unset opens the routine to SSRF if any input is template-substituted into a URL.
+`egress_targets: ["api.example.com"]` is enforced at runtime. A typo'd URL host fails at the http step rather than going to a different server.
+
+<Warning>
+**Always set `egress_targets`** — leaving it unset opens the routine to SSRF if any input is template-substituted into a URL.
+</Warning>
 
 ---
 
@@ -328,9 +336,11 @@ If the webhook upstream re-fires with the same `Idempotency-Key`, the second req
 **Goal**: take a hand-written routine and decide, with data, whether to ship it on `fast` or `smart` tier. This is the workflow PRD §18 calls "operator promotion path."
 
 ```bash
-# 1. Author the routine, save with skip_test_gate=false (real test_run gate)
+# 1. Author the routine and save it. `routine save` always runs the
+#    test_run gate inline before persisting (no skip flag) — a failing
+#    test_run aborts the save. --author-crew takes the owning crew_id.
 crewship routine save --name='my-summarizer' --definition=routine.json \
-  --author-crew=engineering
+  --author-crew=<crew_id>
 
 # 2. Bench at fast tier — 10 runs to characterise
 crewship routine bench my-summarizer --runs 10 --tier-override fast
@@ -381,7 +391,7 @@ crewship eval compare my-summarizer --tier-a fast --tier-b smart -f markdown
 
 Output (markdown, paste into PR description):
 
-```markdown
+````markdown
 ## Eval compare — `my-summarizer` (DIVERGE-B-PASS)
 
 | Side | Tier  | Status     | Cost (USD) | Duration (ms) |
@@ -401,7 +411,7 @@ Output (markdown, paste into PR description):
 
 ### Errors
 - **A** at `summarize`: outcomes failed: bullet 2 contains 32 words (max 25)
-```
+````
 
 The verdict (`DIVERGE-B-PASS`) tells you Haiku can't satisfy the gate but Opus can. Now you have a real data point for the "ship at fast?" decision: probably no, unless you can rewrite the gate.
 

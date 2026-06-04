@@ -4,13 +4,31 @@ description: "Trigger manual memory consolidation runs."
 icon: "layers"
 ---
 
-Single endpoint that forces an immediate run of the memory consolidation worker. Requires authentication, workspace scope, and `OWNER` or `ADMIN` role. See the [Consolidate guide](/guides/consolidate).
+Memory consolidation distills recent journal entries into durable `learned-*.md` rules. One endpoint forces an immediate run of the consolidation worker; the rest drive the human-in-the-loop review of proposed rule merges — preview a diff, then approve, reject, or explain each proposal. See the [Consolidate guide](/guides/consolidate).
 
-The scheduled runner ticks every 6h regardless; this endpoint exists so operators can force an immediate pass after curating a crew or auditing new rules.
+The scheduled runner ticks every 6h regardless; the trigger endpoint exists so operators can force an immediate pass after curating a crew or auditing new rules.
+
+<Note>
+  All endpoints require authentication and workspace scope. The trigger, approve, and reject endpoints require `OWNER` or `ADMIN`; the read-only diff and explain endpoints accept `MEMBER` or higher.
+</Note>
+
+## Endpoints
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| POST | [`/api/v1/consolidate/run`](#trigger-run) | Force an immediate consolidation run |
+| GET | [`/api/v1/consolidate/proposed/{id}/diff`](#preview-proposal-diff) | Preview the post-merge diff |
+| POST | [`/api/v1/consolidate/proposed/{id}/approve`](#approve-proposal) | Approve a proposal (merge its rules) |
+| POST | [`/api/v1/consolidate/proposed/{id}/reject`](#reject-proposal) | Reject a proposal |
+| GET | [`/api/v1/consolidate/proposed/{id}/explain`](#explain-proposal) | Inspect a proposal's rules and evidence |
 
 ---
 
-## Trigger run
+## Triggering runs
+
+Force an immediate consolidation pass instead of waiting for the 6h scheduler.
+
+### Trigger run
 
 ```
 POST /api/v1/consolidate/run
@@ -66,7 +84,11 @@ In both cases the journal records a `system.consolidation_triggered` + `system.c
 | 500 | DB error. |
 | 503 | Consolidator not wired in this build (dev/test). |
 
-## Preview proposal diff
+## Proposal review (HITL)
+
+Preview, approve, reject, or explain the rule-merge proposals a consolidation run produces.
+
+### Preview proposal diff
 
 ```
 GET /api/v1/consolidate/proposed/{id}/diff
@@ -128,7 +150,7 @@ curl -H "Authorization: Bearer $TOKEN" \
 | 413 | Proposal markdown or canonical file exceeds the 8 MB read cap (DoS guard). |
 | 500 | Read error other than not-found, or diff builder failure. |
 
-## Approve proposal
+### Approve proposal
 
 ```
 POST /api/v1/consolidate/proposed/{id}/approve
@@ -178,7 +200,7 @@ curl -X POST -H "Authorization: Bearer $TOKEN" \
 | 409 | Proposal already decided (`approved` or `rejected`); idempotent retry is rejected so the body is not re-merged. |
 | 500 | Canonical append failed, DB transition failed, or unexpected lookup error. |
 
-## Reject proposal
+### Reject proposal
 
 ```
 POST /api/v1/consolidate/proposed/{id}/reject
@@ -236,7 +258,7 @@ curl -X POST -H "Authorization: Bearer $TOKEN" \
 | 409 | Proposal already decided. |
 | 500 | DB transition failed, or unexpected lookup error. |
 
-## Explain proposal
+### Explain proposal
 
 ```
 GET /api/v1/consolidate/proposed/{id}/explain

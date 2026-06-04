@@ -6,13 +6,32 @@ icon: "package"
 
 # Provisioning
 
-Endpoints that drive the [Devcontainers](/guides/devcontainers) pipeline: discover available features and runtimes, trigger or rebuild a crew's cached image, and inspect the local cache. All routes require auth and are workspace-scoped where they touch crew rows.
+Endpoints that drive the [Devcontainers](/guides/devcontainers) pipeline: discover available features and runtimes, trigger or rebuild a crew's cached image, and inspect the local cache.
 
 Implementation lives in `internal/api/crew_provisioning_jobs.go` and `internal/api/crew_provisioning_cache.go`; the underlying provisioner is in `internal/devcontainer/`.
+
+<Note>
+  All routes require authentication and are workspace-scoped where they touch crew rows.
+</Note>
+
+## Endpoints
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | [`/api/v1/features/catalog`](#feature-catalog) | List installable devcontainer features |
+| GET | [`/api/v1/runtimes/catalog`](#runtime-catalog) | List mise-managed runtimes |
+| GET | [`/api/v1/crews/{crewId}/provision`](#provision-status) | Get crew provision status |
+| POST | [`/api/v1/crews/{crewId}/provision`](#trigger-provision) | Trigger a provision |
+| POST | [`/api/v1/crews/{crewId}/rebuild`](#rebuild) | Clear the cache marker and rebuild |
+| POST | [`/api/v1/crews/{crewId}/restart-agents`](#restart-agents) | Recreate the runtime container without rebuilding |
+| GET | [`/api/v1/cache/images`](#list-cached-images) | List cached images |
+| DELETE | [`/api/v1/cache/images/{tag}`](#delete-cached-image) | Delete a cached image |
 
 ---
 
 ## Catalogs
+
+Discover the features and runtimes a crew can pin in its `devcontainer_config`.
 
 ### Feature catalog
 
@@ -90,6 +109,8 @@ Lists the mise-managed runtimes (Node, Python, Go, Terraform, kubectl, …) the 
 ---
 
 ## Crew provisioning lifecycle
+
+Inspect, trigger, rebuild, and recycle a crew's cached image and runtime container.
 
 ### Provision status
 
@@ -176,6 +197,10 @@ POST /api/v1/crews/{crewId}/rebuild
 
 Clears the cached image marker on the crew row and triggers a fresh provision. Use when upstream features publish breaking updates under the same tag.
 
+<Warning>
+  Discards the existing cache marker before rebuilding — the next agent run waits on a full pipeline pass.
+</Warning>
+
 **Response:** `202 Accepted` — same shape as Trigger.
 
 ### Restart agents
@@ -184,11 +209,25 @@ Clears the cached image marker on the crew row and triggers a fresh provision. U
 POST /api/v1/crews/{crewId}/restart-agents
 ```
 
-Stops and re-execs every agent in the crew without rebuilding the container. Used when an env-var change should take effect without the cost of a new image. Returns `200 OK` with `{ restarted: <count> }`.
+Force-removes the crew's runtime container so the next agent exec recreates it from the current `cached_image` — without rebuilding the image. Used when an env-var change should take effect without the cost of a new image. Idempotent: when no container is running it still returns `200 OK` with `{ "restarted": 0 }`.
+
+Requires the `update` role action (OWNER, ADMIN, MANAGER).
+
+**Response:** `200 OK` with `{ "restarted": <count> }` — the count is the number of non-deleted agents in the crew (they share one container, so all are recreated together).
+
+| Status | Condition |
+|---|---|
+| 400 | Empty crew ID. |
+| 403 | Caller lacks `update` permission. |
+| 404 | Crew not in workspace. |
+| 500 | DB error or Docker `ContainerRemove` failure. |
+| 503 | Docker client not configured. |
 
 ---
 
 ## Cache image registry
+
+Inspect and prune the locally built `crewship-cache:*` images. This registry is **per-host, not per-workspace** — see [Tenancy](#tenancy).
 
 ### List cached images
 
@@ -203,16 +242,24 @@ GET /api/v1/cache/images
   "images": [
     {
       "tag": "crewship-cache:a1b2c3d4e5f6",
-      "config_hash": "a1b2c3d4e5f6…",
-      "created_at": "2026-04-29T18:22:01Z",
-      "size_bytes": 824_191_022,
-      "referenced_by_crew_ids": ["crw_backend"]
+      "size": 824191022,
+      "created_at": 1714415721,
+      "referenced_by": ["backend"]
     }
   ]
 }
 ```
 
-Images orphaned from any crew (i.e. `referenced_by_crew_ids` is empty) are eligible for the GC sweeper. See [`CREWSHIP_CACHE_GC_AUTODELETE`](/configuration/environment#devcontainer-cache-gc).
+| Field | Type | Description |
+|---|---|---|
+| `tag` | string | The `crewship-cache:*` image tag. |
+| `size` | integer | Image size in bytes. |
+| `created_at` | integer | Image creation time as **Unix seconds** (from the Docker image summary), not an RFC3339 string. |
+| `referenced_by` | string[] | Slugs of live crews referencing this tag (workspace-scoped). |
+
+Requires the `read` role action (any workspace member). Returns `503` (`{ "error": "cache management not available (Docker client not configured)" }`) when no Docker client is wired, and `500` on a Docker `ImageList` failure.
+
+Images orphaned from any crew (i.e. `referenced_by` is empty) are eligible for the GC sweeper. See [`CREWSHIP_CACHE_GC_AUTODELETE`](/configuration/environment#devcontainer-cache-gc).
 
 ### Delete cached image
 
@@ -220,16 +267,45 @@ Images orphaned from any crew (i.e. `referenced_by_crew_ids` is empty) are eligi
 DELETE /api/v1/cache/images/{tag}
 ```
 
-Removes a cached image. Refuses to delete an image still referenced by a crew (returns 409 with the offending `crew_id`s). For force-delete, clear the crew's `cached_image` first via `POST /api/v1/crews/{crewId}/rebuild`.
+Removes a cached image. By default refuses to delete an image still referenced by a live crew (returns `409 Conflict`). Pass `?force=true` to delete anyway.
 
-**Response:** `204 No Content` on success, `409 Conflict` if referenced.
+<Warning>
+  `?force=true` removes an image even while live crews reference it — their next agent run rebuilds from scratch.
+</Warning>
+
+Requires the `delete` role action (**OWNER, ADMIN** only — a `MANAGER` is rejected with `403`).
+
+**Response:** `200 OK`
+
+```json
+{ "tag": "crewship-cache:a1b2c3d4e5f6", "status": "deleted" }
+```
+
+A `409 Conflict` body lists the referencing crew slugs under `referenced_by`. The reference check is **host-global** — it counts crews in *any* workspace, so an image another tenant still uses cannot be force-free-deleted by accident:
+
+```json
+{
+  "error": "image is referenced by live crews; pass ?force=true to delete anyway",
+  "referenced_by": ["backend"]
+}
+```
+
+**Errors:**
+
+| Status | Condition |
+|---|---|
+| 400 | Empty `tag`, or `tag` outside the `crewship-cache:` namespace (`{ "error": "only crewship-cache:* tags may be deleted" }`). |
+| 403 | Caller is below the `ADMIN` role. |
+| 409 | Image still referenced by a live crew and `?force=true` not set. |
+| 500 | Docker `ImageRemove` failed. |
+| 503 | Docker client not configured (`{ "error": "cache management not available (Docker client not configured)" }`). |
 
 ---
 
 ## Tenancy
 
-- `crewId` and any `tag` referenced by a crew row are validated via `crewBelongsToWorkspace`. Cross-tenant lookups return `404`.
-- The cache image registry is **per-host, not per-workspace** — operators sharing a Docker daemon will see each other's tags. The `referenced_by_crew_ids` field is workspace-scoped, however, so leakage stops at the tag level.
+- `crewId` on the provision-status / trigger / rebuild / restart-agents routes is validated against the session workspace via the `crews.workspace_id` SELECT; a crew in another workspace returns `404`.
+- The cache image registry is **per-host, not per-workspace** — operators sharing a Docker daemon will see each other's tags, and the cache routes do **not** workspace-scope the `{tag}` path param. `GET /cache/images` scopes only the `referenced_by` annotation to the caller's workspace; `DELETE /cache/images/{tag}` deliberately checks references **across all workspaces** so a tag another tenant depends on cannot be deleted without `?force=true`. There is no cross-tenant `404` on a `{tag}` — the tag namespace is shared by design.
 
 ## Related
 

@@ -108,7 +108,7 @@ crewship mission update <id> --status COMPLETED
 
 ## `crewship mission delete`
 
-Delete a mission. Prompts for confirmation.
+Delete a mission.
 
 ```bash
 crewship mission delete <id>
@@ -118,6 +118,10 @@ crewship mission delete <id> --yes
 | Flag | Short | Type | Default | Description |
 |------|-------|------|---------|-------------|
 | `--yes` | `-y` | `bool` | `false` | Skip confirmation prompt. |
+
+<Warning>
+  Removes the mission and its tasks. Prompts for confirmation unless `--yes`.
+</Warning>
 
 ---
 
@@ -147,7 +151,7 @@ Reports the number of tasks that were reset.
 
 ## `crewship mission restart`
 
-Restart a mission from the beginning, resetting all tasks to PENDING. Prompts for confirmation.
+Restart a mission from the beginning, resetting all tasks to PENDING.
 
 ```bash
 crewship mission restart <id>
@@ -157,6 +161,12 @@ crewship mission restart <id> --yes
 | Flag | Short | Type | Default | Description |
 |------|-------|------|---------|-------------|
 | `--yes` | `-y` | `bool` | `false` | Skip confirmation prompt. |
+
+<Warning>
+  Resets **all** tasks to PENDING — completed work is discarded. Prompts for
+  confirmation unless `--yes`. Use [`resume`](#crewship-mission-resume) to
+  restart only failed tasks.
+</Warning>
 
 ---
 

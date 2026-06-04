@@ -6,7 +6,26 @@ icon: "repeat"
 
 # Recurring
 
-`cmd/crewship/cmd_admin_extras.go` ships thin REST wrappers for endpoints that have a server but no dedicated CLI. `recurring` exposes scheduled issue creation — issues that the server stamps out on a cadence.
+Manage recurring-issue schedules — issues that the server stamps out on a cadence (a thin REST wrapper for endpoints that have a server but no richer CLI). Define a cron expression and a crew, and Crewship creates the issue automatically on every tick.
+
+```bash
+crewship recurring <subcommand> [flags]
+```
+
+<Note>
+  Defined in `cmd/crewship/cmd_admin_extras.go`.
+</Note>
+
+## Subcommands
+
+| Command | Description |
+|---|---|
+| `list` | List recurring-issue schedules. |
+| `create` | Register a new schedule. |
+| `update <recurring-id>` | Patch a schedule (only set flags are sent). |
+| `delete <recurring-id>` | Remove a schedule. |
+
+---
 
 ## `crewship recurring list`
 
@@ -14,13 +33,15 @@ icon: "repeat"
 
 | Flag | Type | Default | Effect |
 |---|---|---|---|
-| `--filter <expr>` | string | (unset) | gojq filter expression applied before output. |
+| `--filter <expr>` | string | (unset) | jq filter expression applied before output. |
 
 ```bash
 crewship recurring list
 crewship recurring list --filter '.[] | {id, cadence, title}'
 crewship recurring list --format yaml
 ```
+
+---
 
 ## `crewship recurring create`
 
@@ -44,6 +65,8 @@ crewship recurring create --crew crew_abc --title "Daily standup" --cron "0 9 * 
 crewship recurring create --crew crew_abc --title "Weekly report" --cron "0 9 * * 1" --priority high
 ```
 
+---
+
 ## `crewship recurring update <recurring-id>`
 
 `PATCH /api/v1/recurring-issues/{id}`. Only the flags you set are sent. Accepts the same fields as `create` plus `--enabled` to toggle the schedule. Changing `--cron` recomputes the next run server-side.
@@ -52,6 +75,8 @@ crewship recurring create --crew crew_abc --title "Weekly report" --cron "0 9 * 
 crewship recurring update rec_abc123 --cron "0 8 * * *"
 crewship recurring update rec_abc123 --enabled=false
 ```
+
+---
 
 ## `crewship recurring delete <recurring-id>`
 

@@ -8,7 +8,9 @@ icon: "clipboard-check"
 
 Quartermaster is the eval framework. It reads the [Crew Journal](/guides/crew-journal) and derives typed "what happened" artifacts: a step-by-step trajectory, aggregate metrics, regression reports that compare two runs, and LLM-as-judge verdicts for qualitative scoring.
 
+<Note>
 **Replay** in this package means **observational replay** -- rehydrate the trajectory from the journal and recompute metrics. Re-executing agents end-to-end is a later tier and not in scope.
+</Note>
 
 The durable index of runs lives in `eval_runs` (migration 53). Each run status is updated from `queued` -> `running` -> `completed`/`failed` by the background worker.
 
@@ -41,7 +43,9 @@ Reads the mission's journal, extracts a trajectory, and computes a `seed_signatu
 
 Workspace-scoped: the mission must belong to the caller's workspace. `OWNER` or `ADMIN` role required.
 
+<Info>
 The handler returns **202 Accepted** immediately; the actual extract+compute+emit runs in a 10-minute goroutine. Poll via `crewship eval runs` or `GET /api/v1/eval/runs`.
+</Info>
 
 ## Regression
 
@@ -55,9 +59,9 @@ Computes metrics for both missions and compares. Delta signs matter -- cost goin
 
 | Metric | Direction that counts as regression | Threshold |
 |---|---|---|
-| `ToolSuccessRate` | Down | > 5% |
-| `TotalCostUSD` | Up | > 20% |
-| `StepsToGoal` | Up | > 30% |
+| `ToolSuccessRate` | Down | > 5% (absolute) |
+| `TotalCostUSD` | Up | > 15% (relative) |
+| `StepsToGoal` | Up | > 20% (relative) |
 | `Hallucinations` | Up | Any increase |
 
 When a regression is detected the run completes with `result: "regressed: <delta summary>"` and emits `eval.regression_detected` into the journal (which [Episodic memory](/guides/episodic-memory) picks up).
@@ -95,11 +99,11 @@ The `Judge` interface is provider-neutral -- callers plug Ollama, Anthropic, or 
 
 ```go
 type JudgeInterface interface {
-    Grade(ctx context.Context, subject string, rubric []string) (JudgeVerdict, error)
+    Judge(ctx context.Context, prompt string, rubric []string) (JudgeVerdict, error)
 }
 ```
 
-`EnsembleJudge` runs the same grade multiple times with **rubric-shuffle anti-bias** (permuting rubric order per invocation) and aggregates via median + stddev. Stddev > 0.25 lowers the verdict's `Confidence` and flips `HumanEscalate = true`.
+`EnsembleJudge` runs `k` random judges from the pool, each seeing a **rubric-shuffled** copy (permuting rubric order per invocation to mitigate position bias) and aggregates via median score + averaged confidence. Stddev > 0.25 annotates the verdict's reasoning with a high-disagreement warning; an averaged confidence below 0.9 flips `HumanEscalate = true`.
 
 Used by future eval rubrics and crew-to-crew critique flows.
 

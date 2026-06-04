@@ -4,6 +4,35 @@ description: "Skill marketplace, skill import, workflow templates, and crew temp
 icon: "wand-sparkles"
 ---
 
+Skills are reusable capabilities you assign to agents; templates are reusable blueprints for missions and crews. This page covers the skill marketplace (list, get, filter), bringing skills in (URL/paste import, bulk git import, and AI generation), the memory→Skills proposal bridge, plus workflow templates and crew-template blueprints with their AI-assisted wizard. A skill may bundle a system-prompt snippet, MCP server configuration, credential requirements, and tool definitions.
+
+<Note>
+Most read endpoints accept a session or CLI token with workspace membership. Write endpoints have endpoint-specific auth: import/generate require `MANAGER`+, `DELETE /skills/{skillId}` requires `OWNER`/`ADMIN`, and some template actions (crew-template deploy, AI crew wizard) are workspace-member scoped — see each endpoint for its exact role gate.
+</Note>
+
+## Endpoints
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| `GET` | [`/api/v1/skills`](#list-skills) | List/filter skills in the marketplace |
+| `GET` | [`/api/v1/skills/{skillId}`](#get-skill) | Get full skill details |
+| `POST` | [`/api/v1/workspaces/{workspaceId}/skills/import`](#import-skill) | Import a skill from URL or content |
+| `POST` | [`/api/v1/workspaces/{workspaceId}/skills/generate`](#generate-skill) | AI-author a skill from intent |
+| `POST` | [`/api/v1/workspaces/{workspaceId}/skills/bulk-import`](#bulk-import-skills) | Import all SKILL.md files in a git repo |
+| `DELETE` | [`/api/v1/workspaces/{workspaceId}/skills/{skillId}`](#delete-skill) | Delete a non-bundled skill |
+| `GET` | [`/api/v1/skills/proposed`](#list-proposed-skills) | List memory-proposed skills |
+| `POST` | [`/api/v1/skills/proposed/approve`](#approve-proposed-skill) | Approve a proposed skill |
+| `POST` | [`/api/v1/skills/proposed/reject`](#reject-proposed-skill) | Reject a proposed skill |
+| `GET` | [`/api/v1/templates`](#list-templates) | List workflow templates |
+| `POST` | [`/api/v1/templates`](#create-template) | Create a workflow template |
+| `GET` | [`/api/v1/templates/{templateId}`](#get-template) | Get a workflow template |
+| `PATCH` | [`/api/v1/templates/{templateId}`](#update-template) | Update a workflow template |
+| `DELETE` | [`/api/v1/templates/{templateId}`](#delete-template) | Delete a workflow template |
+| `GET` | [`/api/v1/crew-templates`](#list-crew-templates) | List crew-template blueprints |
+| `GET` | [`/api/v1/crew-templates/{slug}`](#get-crew-template) | Get a crew-template blueprint |
+| `POST` | [`/api/v1/crew-templates/{slug}/deploy`](#deploy-crew-template) | Deploy a crew blueprint |
+| `POST` | [`/api/v1/crew-ai-suggest`](#ai-crew-wizard) | AI-suggest a crew configuration |
+
 ---
 
 ## Skills
@@ -43,7 +72,7 @@ GET /api/v1/skills?workspace_id={workspaceId}
     "description": "Review pull requests and suggest improvements",
     "version": "1.0.0",
     "author": "Crewship",
-    "category": "coding",
+    "category": "CODING",
     "source": "BUNDLED",
     "icon": "git-pull-request",
     "verification": "VERIFIED",
@@ -89,7 +118,7 @@ GET /api/v1/skills?workspace_id={workspaceId}
 | `maturity` | string | `OFFICIAL`, `CURATED`, `COMMUNITY`, or `EXPERIMENTAL` |
 | `scan_status` | string | Security scan status |
 | `description_quality` | string? | Description quality rating |
-| `installed_on` | array? | Per-agent install metadata (agent + crew info); always populated |
+| `installed_on` | array? | Per-agent install metadata (agent + crew info). Populated on the list response for skills installed on at least one agent; omitted (`omitempty`) when the skill is installed nowhere |
 
 ### Get Skill
 
@@ -174,7 +203,11 @@ POST /api/v1/workspaces/{workspaceId}/skills/generate
 
 Authors a SKILL.md from a natural-language intent by calling Anthropic with a condensed skill-creator prompt, then inserts it with `source = 'GENERATED'`. The user can edit the body via the skills detail page afterwards. (`internal/api/skills_generate.go:94`)
 
-**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role (`canRole(role, "create")`). This endpoint spends real Anthropic tokens against the workspace's API key on every call.
+**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role (`canRole(role, "create")`).
+
+<Note>
+This endpoint spends real Anthropic tokens against the workspace's API key on every call.
+</Note>
 
 **Prerequisite:** Workspace must have an `ACTIVE` credential with `provider = ANTHROPIC` and `type = API_KEY` (not `AI_CLI_TOKEN`). OAuth bearer tokens from `claude` CLI login won't work against the Messages API.
 
@@ -283,6 +316,10 @@ DELETE /api/v1/workspaces/{workspaceId}/skills/{skillId}
 ```
 
 Permanently deletes a non-bundled skill (`internal/api/skills.go:519`).
+
+<Warning>
+This is a permanent delete, not a soft delete. `BUNDLED` skills cannot be removed — they are re-seeded on every server start.
+</Warning>
 
 **Auth:** `OWNER` or `ADMIN` role (`canRole(role, "manage")`)
 
@@ -410,16 +447,32 @@ Deletes the staging file and emits an audit entry. Idempotent: calling reject tw
 
 ## Skill Sources
 
+`source` is a free-form string, not a closed enum. The values the
+codebase actually writes:
+
 | Source | Description |
 |---|---|
-| `BUNDLED` | Ships with Crewship |
-| `MANAGED` | Maintained by the Crewship team |
-| `MARKETPLACE` | Community-contributed |
-| `CUSTOM` | Workspace-scoped (user-imported) |
+| `BUNDLED` | Server-seeded skill that ships with Crewship (re-seeded on every start; cannot be deleted) |
+| `GENERATED` | Authored by the [Generate](#generate-skill) endpoint |
+| `CUSTOM` | Workspace-defined skill (e.g. applied via manifest) |
+| _(a URL)_ | URL-imported skills store the normalized source URL in `source`; pasted-content imports leave it empty |
 
 ## Skill Categories
 
-`coding`, `messaging`, `automation`, `data`, `devops`, `support`, `sales`, `custom`
+The validated `category` enum (uppercase; parser/`internal/skills/parser.go`,
+must match the `SkillCategory` enum in `prisma/schema.prisma`):
+
+`CODING`, `AUTOMATION`, `DATA`, `DEVOPS`, `SUPPORT`, `SALES`, `WRITING`, `RESEARCH`, `PM`, `DESIGN`, `SECURITY`, `FINANCE`, `OPS`, `CUSTOM`
+
+A skill whose frontmatter category is missing or unrecognised defaults to `CUSTOM`.
+
+## Skill Runtimes
+
+`runtime` enum: `INSTRUCTIONS` (default), `SCRIPT`, `MCP`, `HYBRID`.
+
+## Skill Maturity
+
+`maturity` enum: `OFFICIAL`, `CURATED`, `COMMUNITY` (default), `EXPERIMENTAL`. The Skills list sorts `OFFICIAL` → `CURATED` → `COMMUNITY` → other, then by name.
 
 ---
 
@@ -512,9 +565,28 @@ Deploys the template, creating:
 - All agents defined in the template
 - Auto-assignment of credentials and skills
 
-**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
+**Auth:** Session or CLI token + workspace membership. The handler does
+**not** perform a role check beyond workspace context
+(`internal/api/crew_templates.go:364`).
+
+**Request Body:**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `crew_name` | string | Yes | Name for the new crew |
+| `crew_slug` | string | No | Slug for the new crew (derived from `crew_name` when omitted) |
+
+```json
+{ "crew_name": "Release Crew" }
+```
 
 **Response:** `201 Created` -- the created crew and agents.
+
+| Status | Condition |
+|---|---|
+| `400` | Invalid JSON, or missing `crew_name` |
+| `404` | Template not found |
+| `409` | A crew with the derived/supplied slug already exists |
 
 ---
 
@@ -524,11 +596,33 @@ Deploys the template, creating:
 POST /api/v1/crew-ai-suggest?workspace_id={workspaceId}
 ```
 
-Uses AI to suggest a crew configuration based on a natural language description.
+Uses AI to suggest a crew configuration based on a natural language description. Spends Anthropic tokens against the workspace's API key.
 
-**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
+**Auth:** Session or CLI token + workspace membership. The handler does
+**not** perform a role check beyond workspace context
+(`internal/api/crew_ai.go:89`).
+
+**Prerequisite:** Workspace must have an `ACTIVE` credential with
+`provider = ANTHROPIC` and `type = API_KEY` (OAuth `AI_CLI_TOKEN`s from
+`claude` CLI login do not work against the Messages API).
+
+**Request Body:**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `description` | string | Yes | Natural-language description (10–2000 characters) |
+
+```json
+{ "description": "A crew that triages GitHub issues and drafts release notes." }
+```
 
 **Response:** `200 OK` -- suggested crew configuration.
+
+| Status | Condition |
+|---|---|
+| `400` | Invalid JSON, or `description` shorter than 10 / longer than 2000 characters |
+| `422` | No active Anthropic `API_KEY` credential in the workspace |
+| `502` | AI suggestion call failed |
 
 ---
 

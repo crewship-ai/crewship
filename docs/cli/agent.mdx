@@ -6,7 +6,7 @@ icon: "bot"
 
 # crewship agent
 
-Manage AI agents within a workspace.
+Create, configure, and inspect the AI agents that do the work inside a crew. Reach for these commands to provision a new agent, tweak its adapter or model, browse its runs and chats, or peek inside its container (files, logs, git history, peer inbox).
 
 ```bash
 crewship agent <subcommand> [flags]
@@ -78,7 +78,7 @@ crewship agent create --name "Viktor" --crew backend-team --role LEAD
 | `--name` | `string` | _(required)_ | Agent name. |
 | `--slug` | `string` | _(auto from name)_ | Agent slug. |
 | `--crew` | `string` | | Crew slug or ID. |
-| `--role` | `string` | `AGENT` | Agent role: `AGENT`, `LEAD`, or `COORDINATOR` (deprecated -- kept for backward compatibility). |
+| `--role` | `string` | `AGENT` | Agent role: `AGENT` or `LEAD`. |
 | `--role-title` | `string` | | Human-readable role title. |
 | `--cli-adapter` | `string` | `CLAUDE_CODE` | CLI adapter: `CLAUDE_CODE`, `CODEX_CLI`, `GEMINI_CLI`, `OPENCODE`, `CURSOR_CLI`, `FACTORY_DROID`. |
 | `--system-prompt` | `string` | | System prompt text or `@file.txt` to read from file. |
@@ -138,6 +138,10 @@ crewship agent delete viktor --yes
 | Flag | Short | Type | Default | Description |
 |------|-------|------|---------|-------------|
 | `--yes` | `-y` | `bool` | `false` | Skip confirmation prompt. |
+
+<Warning>
+Deletion is permanent. `--yes` skips the prompt — reserve it for scripts where you already know the slug is correct.
+</Warning>
 
 ---
 
@@ -265,14 +269,14 @@ List the agent's `/output/<slug>/` working-directory artefacts, or download a si
 crewship agent files viktor
 crewship agent files viktor --download README.md
 crewship agent files viktor --download report.txt --out /tmp/saved.txt
-crewship agent files viktor --filter '.[] | .name'      # gojq expression
+crewship agent files viktor --filter '.[] | .name'      # piped through the jq binary
 ```
 
 | Flag | Type | Default | Description |
 |---|---|---|---|
 | `--download <name>` | string | | Download this file instead of listing. |
 | `--out <path>` | string | basename of file | Output path for `--download`. Pass `-` to stream the file body to stdout. |
-| `--filter <expr>` | string | | gojq filter applied before rendering (when not downloading). |
+| `--filter <expr>` | string | | jq filter applied before rendering (when not downloading). Piped through the external `jq` binary on `PATH`; if `jq` is absent the raw output is shown. |
 
 Downloads stream into a tempfile next to the target and `rename(2)` only on success — Ctrl-C or transport errors mid-copy do not clobber an existing good file with a truncated one.
 

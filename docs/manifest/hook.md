@@ -234,7 +234,7 @@ declaratively.
   side of hook registration (`hooks.Register`).
 - `internal/api/hooks_handler.go`
   — REST handler the manifest calls.
-- [Hooks operator guide](../guides/hooks.mdx) — runtime semantics,
+- [Hooks operator guide](/guides/hooks) — runtime semantics,
   matcher syntax, and handler kinds.
 - `kind: TriageRule` — also "rules in YAML", but those *are*
   user-creatable because they only mutate workspace data, not the

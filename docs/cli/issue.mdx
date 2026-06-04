@@ -1,12 +1,12 @@
 ---
 title: "Issue Commands"
-description: "Linear-style issue tracking with labels, comments, and agent dispatch."
+description: "Issue tracking with labels, comments, and agent dispatch."
 icon: "circle-dot"
 ---
 
 # crewship issue
 
-Manage issues -- Linear-style issue tracking integrated with agent dispatch.
+Issue tracking wired directly into agent dispatch. Use these commands to create and triage issues, manage labels, comments, relations, and sub-issues, and hand work to an assigned agent (`start` / `stop` / `review`). Issues can also be bound to a routine so a fixed workflow runs whenever the issue is started.
 
 ```bash
 crewship issue <subcommand> [flags]
@@ -101,6 +101,12 @@ crewship issue create --crew backend-team --title "Add caching" --assignee vikto
 | `--assignee-type` | `string` | `agent` | Assignee type: `agent` or `user`. |
 | `--labels` | `string` | | Comma-separated label IDs. |
 | `--due-date` | `string` | | Due date in ISO 8601 format. |
+| `--project-id` | `string` | | Attach to a project (ID). |
+| `--milestone-id` | `string` | | Attach to a milestone (ID). |
+| `--parent-issue-id` | `string` | | Make this a sub-issue of the given parent (issue ID). |
+| `--estimate` | `int` | `0` | Effort estimate (story points or hours, depending on workspace). |
+| `--sort-order` | `float64` | `0` | Manual sort order within a list (lower = top). |
+| `--routine-id` | `string` | | Bind to a routine (pipeline ID). |
 
 ---
 
@@ -122,6 +128,12 @@ crewship issue update BE-42 --priority urgent --assignee franta
 | `--assignee` | `string` | | New assignee (agent slug). |
 | `--assignee-type` | `string` | | Assignee type: `agent` or `user`. |
 | `--due-date` | `string` | | Due date (ISO 8601). |
+| `--project-id` | `string` | | Project ID (empty string = unlink). |
+| `--milestone-id` | `string` | | Milestone ID (empty string = unlink). |
+| `--parent-issue-id` | `string` | | Parent issue ID (empty string = make top-level). |
+| `--estimate` | `int` | `0` | Effort estimate. |
+| `--sort-order` | `float64` | `0` | Manual sort order. |
+| `--routine-id` | `string` | | Routine (pipeline) ID; empty string = unbind. |
 
 ---
 
@@ -137,6 +149,10 @@ crewship issue delete BE-42 --yes
 | Flag | Short | Type | Default | Description |
 |------|-------|------|---------|-------------|
 | `--yes` | `-y` | `bool` | `false` | Skip confirmation prompt. |
+
+<Warning>
+Deletion is permanent. `--yes` skips the prompt — reserve it for scripts.
+</Warning>
 
 ---
 

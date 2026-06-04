@@ -60,10 +60,12 @@ $EDITOR ./pdf-cleanup.md
 crewship skill import --file ./pdf-cleanup.md
 ```
 
-`init` is intentionally offline — it doesn't talk to the server, so it
-works for users who only have a Claude Code OAuth token and cannot reach
-the Anthropic Messages API directly (the path `crewship skill create`
-needs).
+<Tip>
+  `init` is intentionally offline — it doesn't talk to the server, so it
+  works for users who only have a Claude Code OAuth token and cannot reach
+  the Anthropic Messages API directly (the path `crewship skill create`
+  needs).
+</Tip>
 
 ---
 
@@ -201,10 +203,12 @@ crewship skill create --slug pdf-cleanup \
   --prompt "Help users sanitise PDFs: strip metadata, remove embedded JS, flatten forms"
 ```
 
-> **Requires** an active Anthropic credential of type `API_KEY` in the
-> workspace (Settings → Credentials). An OAuth token from `claude /login`
-> is **not** sufficient (it's a Bearer for claude.ai, not the Messages API).
-> Users without an API key should reach for `skill init` instead.
+<Note>
+  **Requires** an active Anthropic credential of type `API_KEY` in the
+  workspace (Settings → Credentials). An OAuth token from `claude /login`
+  is **not** sufficient (it's a Bearer for claude.ai, not the Messages API).
+  Users without an API key should reach for `skill init` instead.
+</Note>
 
 | Flag | Default | Notes |
 |------|---|---|
@@ -225,7 +229,10 @@ crewship skill delete <slug-or-id> --force  # skip confirm
 crewship skill rm <slug-or-id>              # alias
 ```
 
-`BUNDLED` skills cannot be deleted — they re-seed on every server start.
+<Warning>
+  Cascades to `agent_skills` — every agent loses the skill. `BUNDLED` skills
+  cannot be deleted (they re-seed on every server start).
+</Warning>
 
 ---
 
@@ -267,7 +274,11 @@ longer pick it up.
 
 ## `crewship skill proposed`
 
-Operator-side HITL surface for the memory→Skills bridge. When the consolidator sees a learned rule with sustained recall (default ≥ 10 recall events, composite score ≥ 0.85) it stages an Anthropic-format `SKILL.md` under `.memory/{crew-slug}/topics/.proposed/skill-<slug>.md`. These three verbs let an operator inspect and decide. Each requires `OWNER`, `ADMIN`, or `MANAGER` role.
+Operator-side HITL surface for the memory→Skills bridge. When the consolidator sees a learned rule with sustained recall (default ≥ 10 recall events, composite score ≥ 0.85) it stages an Anthropic-format `SKILL.md` under `.memory/{crew-slug}/topics/.proposed/skill-<slug>.md`. These three verbs let an operator inspect and decide.
+
+<Note>
+  Each `proposed` verb requires `OWNER`, `ADMIN`, or `MANAGER` role.
+</Note>
 
 ### `crewship skill proposed list`
 

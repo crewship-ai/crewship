@@ -8,6 +8,10 @@ icon: "file-code"
 
 Crewship can be configured via a YAML file passed at startup. Environment variables override YAML values. The config is loaded and validated in `internal/config/config.go`.
 
+<Info>
+  The config file has ten top-level sections: `server`, `ipc`, `container`, `storage`, `state`, `logging`, `auth`, `llm_proxy`, `keeper`, and `license`. The [Complete Reference](#complete-reference) below shows every field with its default; [Section Details](#section-details) explains the load-bearing ones.
+</Info>
+
 ## Loading Order
 
 ```
@@ -38,8 +42,8 @@ container:
   default_runtime: "runc"       # "runc" | "runsc" | "kata-runtime" | "sysbox-runc"
   network: "crewship-agents"    # Docker bridge network name
   container_prefix: ""          # Name prefix for multi-instance isolation
-  default_memory_mb: 512        # Default container memory limit
-  default_cpus: 1.0             # Default container CPU limit
+  default_memory_mb: 8192       # Default container memory limit
+  default_cpus: 2.0             # Default container CPU limit
   sidecar_enabled: false        # Enable sidecar proxy for credential injection
 
 # Note: Crewship injects the sidecar binary and entrypoint script into the
@@ -81,7 +85,7 @@ llm_proxy:
 keeper:
   enabled: false
   ollama_url: "http://localhost:11434"
-  model: "phi3:mini"
+  model: "claude-haiku-4-5"
 
 # License
 license:
@@ -110,8 +114,8 @@ container:
   default_runtime: "runc"
   network: "crewship-agents"
   container_prefix: ""
-  default_memory_mb: 512
-  default_cpus: 1.0
+  default_memory_mb: 8192
+  default_cpus: 2.0
   sidecar_enabled: false
 ```
 
@@ -191,7 +195,7 @@ The LLM proxy manages token usage tracking and provider health monitoring.
 keeper:
   enabled: false
   ollama_url: "http://localhost:11434"
-  model: "phi3:mini"
+  model: "claude-haiku-4-5"
 ```
 
 <Tip>
@@ -251,5 +255,5 @@ auth:
 keeper:
   enabled: true
   ollama_url: "http://ollama-host:11434"
-  model: "phi3:mini"
+  model: "claude-haiku-4-5"
 ```

@@ -244,7 +244,7 @@ entries).
 
 ## See also
 
-- [Agent](./agent.md) — binds skills via `spec.skills` (slug list).
-- [Workspace](./workspace.md) — declares skills inline under `spec.skills`.
+- [Agent](/manifest/agent) — binds skills via `spec.skills` (slug list).
+- [Workspace](/manifest/workspace) — declares skills inline under `spec.skills`.
 - Backend: `internal/api/skills.go`, `internal/skills/importer.go`.
 - This kind's Go implementation: `internal/manifest/kinds/skill.go`.

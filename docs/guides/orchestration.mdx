@@ -35,7 +35,7 @@ A mission progresses through these states:
 
 ## The Mission Engine
 
-The `MissionEngine` is the central orchestrator. Key parameters:
+The `MissionEngine` is the central orchestrator. Its behaviour is governed by a handful of fixed parameters:
 
 | Parameter | Value | Source |
 |-----------|-------|--------|
@@ -110,7 +110,7 @@ After conversation and memory injection, the orchestrator appends additional con
 
 ## Mission Brief Construction
 
-When an agent is dispatched for a mission task, the `buildMissionBrief` function constructs a rich context prompt with five sections:
+When an agent is dispatched for a mission task, the `buildMissionBrief` function constructs a rich context prompt with five sections. The total brief is capped at 32KB (`maxBriefTotalLen`); if exceeded, the brief is truncated with a note.
 
 ### 1. IMPORTANT Preamble
 
@@ -142,8 +142,6 @@ The specific task title, description, and iteration number (if this is a retry).
 ### 5. [OUTPUT FORMAT]
 
 Structured handoff instructions requiring the agent to produce a `---HANDOFF---` block with summary, confidence, and artifacts.
-
-The total brief is capped at 32KB (`maxBriefTotalLen`). If exceeded, the brief is truncated with a note.
 
 ## Lead Planning Phase
 
@@ -291,8 +289,9 @@ The `ValidateDAG` method checks all mission tasks for:
 1. **References to nonexistent task IDs** -- any `depends_on` entry that does not match an existing task ID causes validation to fail
 2. **Circular dependencies** -- detected using Kahn's algorithm (topological sort)
 
-### Kahn's Algorithm
+DAG validation runs before the mission loop begins scheduling, preventing tasks from being dispatched into an unresolvable dependency graph. The error message reports the number of tasks involved in the cycle: `"circular dependency detected: N tasks involved in cycle"`.
 
+<Accordion title="Kahn's Algorithm internals">
 The implementation builds an adjacency list and computes in-degrees for each task:
 
 ```
@@ -302,10 +301,7 @@ The implementation builds an adjacency list and computes in-degrees for each tas
 4. If a task's in-degree reaches 0, enqueue it
 5. If visited count != total tasks, a cycle exists
 ```
-
-The error message reports the number of tasks involved in the cycle: `"circular dependency detected: N tasks involved in cycle"`.
-
-DAG validation runs before the mission loop begins scheduling, preventing tasks from being dispatched into an unresolvable dependency graph.
+</Accordion>
 
 ## Deadlock Detection
 
@@ -330,8 +326,9 @@ The `CooldownManager` (`internal/orchestrator/failover.go`) handles rate limit d
 
 ### Rate Limit Detection
 
-The `IsRateLimitError` function checks stderr output against known patterns:
+The `IsRateLimitError` function checks stderr output against known patterns. Detection requires exit code 1 and a case-insensitive match against any of these patterns.
 
+<Accordion title="Rate-limit patterns">
 | Pattern | Example |
 |---------|---------|
 | `rate limit` | "Rate limit exceeded" |
@@ -341,8 +338,7 @@ The `IsRateLimitError` function checks stderr output against known patterns:
 | `quota exceeded` | "Quota exceeded for model" |
 | `insufficient_quota` | "insufficient_quota" |
 | `billing_hard_limit` | "billing_hard_limit_reached" |
-
-Detection requires exit code 1 and a case-insensitive match against any of these patterns.
+</Accordion>
 
 ### Cooldown Behavior
 
@@ -359,6 +355,9 @@ The `ProgressWriter` (`internal/orchestrator/progress.go`) appends structured JS
 
 ### Event Types
 
+Each event includes a UTC timestamp.
+
+<Accordion title="Progress event reference">
 | Event | Fields | When |
 |-------|--------|------|
 | `mission_started` | `mission_id` | Mission loop begins |
@@ -369,8 +368,8 @@ The `ProgressWriter` (`internal/orchestrator/progress.go`) appends structured JS
 | `mission_deadlock` | `mission_id` | All tasks BLOCKED with no progress |
 | `mission_REVIEW` | `mission_id` | All tasks terminal, mission entering review |
 | `mission_timeout` | `mission_id` | Mission exceeded 2-hour timeout |
-
-Each event includes a UTC timestamp. The progress file is append-only and agents can read it during retry iterations to understand what happened in previous attempts (the Ralph Loop "external state" pattern).
+</Accordion>
+ The progress file is append-only and agents can read it during retry iterations to understand what happened in previous attempts (the Ralph Loop "external state" pattern).
 
 The `BuildProgressContext` method formats the JSONL into a human-readable text block suitable for injection into an agent's system prompt.
 
@@ -416,5 +415,5 @@ Lead agents interact with the orchestration system through the sidecar proxy at 
 
 ## What's Next
 
-- [Keeper](/guides/keeper) -- persistent agent memory across sessions
+- [Agent memory](/guides/agent-memory) -- persistent agent memory across sessions
 - [Scheduling](/guides/scheduling) -- cron-based automated agent runs

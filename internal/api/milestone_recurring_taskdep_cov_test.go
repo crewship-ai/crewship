@@ -264,7 +264,7 @@ func TestCovMRTMilestoneListWithCounts(t *testing.T) {
 func TestCovMRTRecurringDeleteForbidden(t *testing.T) {
 	h, userID, wsID, _ := covMRTRecurringHandler(t)
 	req := httptest.NewRequest("DELETE", "/", nil)
-	req.SetPathValue("id", "anything")
+	req.SetPathValue("recurringId", "anything")
 	req = withWorkspaceUser(req, userID, wsID, "MEMBER")
 	rr := httptest.NewRecorder()
 	h.Delete(rr, req)
@@ -287,7 +287,7 @@ func TestCovMRTRecurringUpdateBadJSON(t *testing.T) {
 	mustUnmarshal(t, cRR, &resp)
 
 	uReq := httptest.NewRequest("PATCH", "/", bytes.NewBufferString(`not json`))
-	uReq.SetPathValue("id", resp.ID)
+	uReq.SetPathValue("recurringId", resp.ID)
 	uReq = withWorkspaceUser(uReq, userID, wsID, "OWNER")
 	uRR := httptest.NewRecorder()
 	h.Update(uRR, uReq)
@@ -326,7 +326,7 @@ func TestCovMRTRecurringUpdateNullableFields(t *testing.T) {
 	// (SetNull branch), and change cron (recompute next_run).
 	upd := `{"project_id":"","milestone_id":"` + msID + `","cron_expression":"15 10 * * *","crew_id":"` + crewID + `"}`
 	uReq := httptest.NewRequest("PATCH", "/", bytes.NewBufferString(upd))
-	uReq.SetPathValue("id", resp.ID)
+	uReq.SetPathValue("recurringId", resp.ID)
 	uReq = withWorkspaceUser(uReq, userID, wsID, "OWNER")
 	uRR := httptest.NewRecorder()
 	h.Update(uRR, uReq)

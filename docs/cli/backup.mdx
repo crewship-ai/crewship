@@ -6,18 +6,19 @@ icon: "database-backup"
 
 # crewship backup
 
-Create, list, inspect and restore workspace / crew backups. Every
-subcommand requires the **OWNER** or **ADMIN** role on the target
-workspace — other roles are refused at both the CLI and the server.
+Create, list, inspect and restore workspace / crew backups. This page is
+the flat flag reference; for the conceptual overview (bundle layout, lock
+semantics, encryption chain, admin UI, instance-scope details) see the
+[Backup & Restore guide](/guides/backup).
 
 ```bash
 crewship backup <subcommand> [flags]
 ```
 
-For the conceptual overview (bundle layout, lock semantics, encryption
-chain, admin UI, instance-scope details) see the
-[Backup & Restore guide](/guides/backup). This page is the flat flag
-reference.
+<Note>
+  Every subcommand requires the **OWNER** or **ADMIN** role on the target
+  workspace — other roles are refused at both the CLI and the server.
+</Note>
 
 ## Subcommands
 
@@ -148,7 +149,14 @@ crewship backup restore bundle.tar.zst --use-keyring
 | `--as-crew` | `string` | | Restore the crew under a new slug (`--scope=crew` only). |
 | `--passphrase-file` | `string` | | Read the passphrase from a file instead of prompting. |
 | `--use-keyring` | `bool` | `false` | Read the passphrase from `~/.crewship/backup-keyring.enc` before prompting. |
+| `--replace` | `bool` | `false` | Disaster-recovery path: wipe existing target rows matching the bundle's workspace (by id **or** slug) **before** restore, so the bundle lands with its original IDs after a `nuke` or fresh-instance bootstrap re-took the slug under a new id. Mutually exclusive with `--as-workspace` / `--as-crew`. |
 | `--dry-run` | `bool` | `false` | Verify format / checksum / decrypt, replay the restore tx, then roll back. Writes a `backup.restore.dry_run` audit row. |
+
+<Warning>
+  The server refuses a restore if a workspace (or crew) with the same slug
+  already exists. Use `--as-workspace` / `--as-crew` to land the payload
+  under a fresh identity, or `--dry-run` to validate before cutover.
+</Warning>
 
 A dry-run leaves only the audit row — no DB rows, no docker changes.
 Use it to prove a bundle is restorable before cutover.
@@ -179,8 +187,12 @@ bundles.
 
 ## `crewship backup delete`
 
-Remove a single bundle from disk. Interactive confirmation is required
-unless `--force` is passed.
+Remove a single bundle from disk.
+
+<Warning>
+  A bundle may be the only authoritative copy of a workspace at that point
+  in time. Interactive confirmation is required unless `--force` is passed.
+</Warning>
 
 ```bash
 crewship backup delete ~/.crewship/backups/old.tar.zst
@@ -259,7 +271,11 @@ journal for that).
 crewship backup metrics
 ```
 
-Gated to instance OWNER server-side. Output is pretty-printed JSON.
+Output is pretty-printed JSON.
+
+<Note>
+  Gated to instance OWNER server-side.
+</Note>
 
 ## See also
 

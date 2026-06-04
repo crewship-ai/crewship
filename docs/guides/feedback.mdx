@@ -6,7 +6,7 @@ icon: "thumbs-up"
 
 # Feedback
 
-Feedback is Crewship's structured signal layer: thumb-up, thumb-down, "edit", "regenerate", "abandon". It sits alongside open-vocabulary [emoji reactions](/guides/chat-sessions) but exposes a tight six-value enum so the eval pipeline and the [online sampler](/guides/routines#online-eval-sampler) can query a stable target without LIKE-matching codepoints.
+Feedback is Crewship's structured signal layer: helpful, not_helpful, "inaccurate", "unsafe", "edit", "regenerate". It sits alongside open-vocabulary [emoji reactions](/guides/chat-sessions) but exposes a tight six-value enum so the eval pipeline and the [online sampler](/guides/routines#online-eval-sampler) can query a stable target without LIKE-matching codepoints.
 
 ## Why feedback (and not reactions)
 

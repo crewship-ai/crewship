@@ -51,11 +51,9 @@ crewship hire \
 | `--crew` | yes | — | Crew slug or ID to hire into. The agent inherits this crew's MCP config, network policy, container image, and autonomy_level. |
 | `--template` | yes | — | Built-in agent template that defines the role + system prompt skeleton + CLI adapter (e.g. `incident-responder`, `code-reviewer`, `release-manager`). |
 | `--reason` | yes | — | Free-form audit text. Appended to `agents.hire_reason` as a chronological history (rehires also append; the column reads as the agent's lifecycle narrative). |
-| `--ttl` | optional | `60` | Time-to-live in minutes. Server-clamped to `[30, 1440]` (30 min minimum prevents trivial-hire abuse; 24 hr maximum enforces the "ephemeral" framing — longer work hires a permanent agent). |
+| `--ttl` | optional | `30` | Time-to-live in minutes. Cobra registers `0`, which the server treats as "use the default" and clamps into `[30, 1440]` (30 min minimum prevents trivial-hire abuse; 24 hr maximum enforces the "ephemeral" framing — longer work hires a permanent agent). The effective default is `30`. |
 | `--model` | optional | template default | Override the LLM model for this hire. Useful when the template defaults to Sonnet but the work needs Opus. |
 | `--parent-lead` | optional | — | Agent ID of the LEAD that initiated this hire (LEAD-driven sub-agent spawning). Links the rows for journal queries. |
-| `--ws-id` / `--ws` | optional | active | Workspace override; defaults to the workspace from the active CLI token. |
-| `--output` | optional | `table` | `table` or `json` for the hire response. |
 | `--yes` | optional | `false` | Skip interactive confirmation prompts. |
 
 ### Response
@@ -117,9 +115,7 @@ crewship rehire incident-responder-a3f8 \
 |---|---|---|---|
 | `agent` (positional) | yes | — | Slug or ID of the ephemeral agent. Can be a ghost (`expired_at != NULL`) — that's the canonical rehire case — or a still-live ephemeral whose operator wants to extend before it ghosts. |
 | `--reason` | yes | — | Audit text appended to `hire_reason`. |
-| `--ttl` | optional | `60` | New TTL in minutes. Resets `expires_at` to `now() + ttl`. Same `[30, 1440]` clamp as hire. |
-| `--ws-id` / `--ws` | optional | active | Workspace override. |
-| `--output` | optional | `table` | `table` or `json`. |
+| `--ttl` | optional | `30` | New TTL in minutes. Resets `expires_at` to `now() + ttl`. Cobra registers `0` (server treats as default) and applies the same `[30, 1440]` clamp as hire; effective default `30`. |
 
 ### Effect on the agent row
 
@@ -147,18 +143,17 @@ Same as `hire` (0 / 2 / 3 / 4 / 5). Rehire-specific:
 
 ## Listing ephemeral agents
 
-`crewship agent list` shows ephemerals by default; filter to just the live ones:
+`crewship agent list` shows every agent in the workspace, ephemerals included. Scope to one crew with `--crew`:
 
 ```bash
-crewship agent list --crew on-call --ephemeral live
+crewship agent list --crew on-call
 ```
 
-| Filter | Meaning |
-|---|---|
-| `--ephemeral all` | Both live and ghost (default). |
-| `--ephemeral live` | `ephemeral=1 AND expired_at IS NULL`. |
-| `--ephemeral ghost` | `ephemeral=1 AND expired_at IS NOT NULL`. |
-| `--ephemeral none` | Permanent agents only (`ephemeral=0`). |
+Ephemeral agents appear alongside permanent ones; live vs. ghost state is read off each agent's `expired_at` / `expires_at` fields. Use `--format json` and `jq` if you want to filter to just the live or ghost rows:
+
+```bash
+crewship agent list --crew on-call --format json | jq '.[] | select(.ephemeral and (.expired_at == null))'
+```
 
 ---
 

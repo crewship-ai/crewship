@@ -26,7 +26,7 @@ This page is the operator playbook for the four-state lifecycle: **hire → live
 | **Ghost** | `ephemeral=1, expires_at=<past>, expired_at IS NOT NULL` | TTL elapsed. Does NOT count against quota. Stays in the agents table for audit + rehire. |
 | **Pending review** | `status='PENDING_REVIEW'` | Guided-crew hire that hasn't been operator-approved yet. Chatbridge refuses to start the agent until status flips to `IDLE`. |
 
-The state machine derives from two columns rather than a single `lifecycle` enum because we wanted the schema to be queryable without an enum dance — `WHERE ephemeral=1 AND expired_at IS NULL` is the canonical "live ephemerals" query and a single integer comparison is faster than any enum string check. The trade-off (the state is reconstructed in the query layer) is documented as drift §10.5 in [PRD-AGENT-EVOLUTION-2026.md].
+The state machine derives from two columns rather than a single `lifecycle` enum because we wanted the schema to be queryable without an enum dance — `WHERE ephemeral=1 AND expired_at IS NULL` is the canonical "live ephemerals" query and a single integer comparison is faster than any enum string check. The trade-off (the state is reconstructed in the query layer) is documented as drift §10.5 in `PRD-AGENT-EVOLUTION-2026.md`.
 
 ## Hiring
 
@@ -74,7 +74,7 @@ A live ephemeral agent is functionally identical to a permanent agent — same c
 - It counts against `crews.max_ephemeral_agents` (default 10 — configurable per crew via the policy panel)
 - A background sweeper checks every 5 minutes whether `expires_at < now()` and ghosts it if so
 
-The quota matters because Crewship runs each agent in its own container — letting an operator hire 1000 ephemerals in a panic would exhaust host memory. When the quota is reached, hire returns `429 Too Many Requests` with the live count + max in the response body, and the operator either raises `max_ephemeral_agents` for that crew (via `crewship policy set --max-ephemeral N`) or rehires a ghost rather than hiring fresh (rehires don't count — they reuse the existing row).
+The quota matters because Crewship runs each agent in its own container — letting an operator hire 1000 ephemerals in a panic would exhaust host memory. When the quota is reached, hire returns `429 Too Many Requests` with the live count + max in the response body, and the operator either raises the cap for that crew or rehires a ghost rather than hiring fresh (rehires don't count — they reuse the existing row). The cap is the `crews.max_ephemeral_agents` column (0–100); set it through the crew policy panel or via `PATCH /api/v1/crews/{crewId}` with `{"max_ephemeral_agents": N}` — there is no dedicated CLI flag for it today.
 
 ## Ghosting
 

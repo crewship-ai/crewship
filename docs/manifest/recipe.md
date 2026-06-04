@@ -181,7 +181,7 @@ Re-applying an exported recipe doc is a no-op (`Unchanged`) because the recipe i
 
 ## See also
 
-- [`docs/manifest/crew_template.md`](./crew_template.md) — the deploy-only sibling for crew templates.
-- [`docs/manifest/connector.md`](./connector.md) — the install-only reference kind for integration connectors.
+- [`docs/manifest/crew_template.md`](/manifest/crew_template) — the deploy-only sibling for crew templates.
+- [`docs/manifest/connector.md`](/manifest/connector) — the install-only reference kind for integration connectors.
 - `internal/recipes/recipes.go` — the in-binary catalog source of truth.
 - `internal/api/recipes.go` — backend handler for `GET /api/v1/recipes`, `GET /api/v1/recipes/{slug}`, `POST /api/v1/recipes/{slug}/install`.

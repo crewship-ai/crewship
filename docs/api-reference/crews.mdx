@@ -4,11 +4,49 @@ description: "Manage crews -- isolated agent teams with their own containers, ne
 icon: "users"
 ---
 
-All crew endpoints require authentication and workspace context (`workspace_id` query parameter).
+Crews are isolated agent teams, each with its own container resources, network policy, and members. A crew bundles the runtime sandbox (memory/CPU/TTL, runtime image, devcontainer/mise config), the egress posture (`free` vs `restricted` with an allowed-domain list), an autonomy policy, an optional shared persona, and cross-crew connections that gate agent-to-agent messaging.
+
+All crew endpoints require authentication and workspace context (the `workspace_id` query parameter).
+
+## Endpoints
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | [`/api/v1/crews`](#list-crews) | List crews in a workspace |
+| POST | [`/api/v1/crews`](#create-crew) | Create a crew |
+| GET | [`/api/v1/crews/{crewId}`](#get-crew) | Get a single crew |
+| PATCH / PUT | [`/api/v1/crews/{crewId}`](#update-crew) | Update a crew |
+| DELETE | [`/api/v1/crews/{crewId}`](#delete-crew) | Soft-delete a crew |
+| GET | [`/api/v1/crews/{crewId}/members`](#list-members) | List crew members |
+| POST | [`/api/v1/crews/{crewId}/members`](#add-member) | Add a crew member |
+| PATCH | [`/api/v1/crews/{crewId}/members/{memberId}`](#update-member-role) | Update a member's per-crew role |
+| DELETE | [`/api/v1/crews/{crewId}/members/{memberId}`](#remove-member) | Remove a crew member |
+| GET | [`/api/v1/crews/{crewId}/persona`](#get-crew-persona) | Get the crew persona |
+| PUT | [`/api/v1/crews/{crewId}/persona`](#set-crew-persona) | Set the crew persona |
+| DELETE | [`/api/v1/crews/{crewId}/persona`](#reset-crew-persona) | Reset the crew persona |
+| GET | [`/api/v1/crews/{crewId}/policy`](#get-crew-policy) | Get the crew autonomy policy |
+| PUT | [`/api/v1/crews/{crewId}/policy`](#set-crew-policy) | Set the crew autonomy policy |
+| POST | [`/api/v1/crews/{crewId}/apply-avatar-style`](#apply-avatar-style) | Apply an avatar style across agents |
+| GET | [`/api/v1/crew-connections`](#list-connections) | List crew connections |
+| POST | [`/api/v1/crew-connections`](#create-connection) | Create a crew connection |
+| DELETE | [`/api/v1/crew-connections/{connectionId}`](#delete-connection) | Delete a crew connection |
+| GET | [`/api/v1/crews/{crewId}/files`](#crew-files-proxy) | List files in the crew workspace |
+| GET | [`/api/v1/crews/{crewId}/files/download`](#crew-files-proxy) | Download a file |
+| PUT | [`/api/v1/crews/{crewId}/files/save`](#crew-files-proxy) | Save/upload a file |
+| GET | [`/api/v1/crews/{crewId}/assignments`](#crew-assignments) | List task assignments |
+| GET | [`/api/v1/crews/{crewId}/peer-conversations`](#crew-peer-conversations) | List peer conversations |
+| GET | [`/api/v1/crews/{crewId}/standup`](#crew-standup) | Get the crew standup summary |
+| GET | [`/api/v1/crews/{crewId}/escalations`](#list-escalations) | List crew escalations |
+| PATCH | [`/api/v1/escalations/{escalationId}/resolve`](#resolve-escalation) | Resolve an escalation |
+| GET | [`/api/v1/escalations/pending-count`](#pending-escalation-count) | Count pending escalations |
 
 ---
 
-## List Crews
+## Crew CRUD
+
+Create, read, update, and soft-delete crews and their container/network configuration.
+
+### List Crews
 
 ```
 GET /api/v1/crews?workspace_id={workspaceId}
@@ -74,6 +112,7 @@ Returns all crews in the workspace, ordered by creation date descending.
 | `services_json` | string? | Sidecar services JSON (max 64 KB) |
 | `cached_image` | string? | Locally built image tag (set by provisioner) |
 | `config_hash` | string? | Hash of devcontainer/mise/runtime inputs used for `cached_image` |
+| `max_ephemeral_agents` | integer | Per-crew quota enforced by the hire flow; always present on List/Get/Update responses |
 | `issue_prefix` | string? | Issue identifier prefix (e.g., `"ENG"`); always `null` on List (only populated by Get) |
 | `created_at` | string | ISO 8601 timestamp |
 | `updated_at` | string | ISO 8601 timestamp |
@@ -82,7 +121,7 @@ Returns all crews in the workspace, ordered by creation date descending.
 
 ---
 
-## Create Crew
+### Create Crew
 
 ```
 POST /api/v1/crews?workspace_id={workspaceId}
@@ -136,7 +175,7 @@ POST /api/v1/crews?workspace_id={workspaceId}
 
 ---
 
-## Get Crew
+### Get Crew
 
 ```
 GET /api/v1/crews/{crewId}?workspace_id={workspaceId}
@@ -156,7 +195,7 @@ GET /api/v1/crews/{crewId}?workspace_id={workspaceId}
 
 ---
 
-## Update Crew
+### Update Crew
 
 ```
 PATCH /api/v1/crews/{crewId}?workspace_id={workspaceId}
@@ -179,7 +218,8 @@ Both `PATCH` and `PUT` are supported and behave identically (partial update -- o
 | `avatar_style` | string | Avatar style for agents |
 | `container_memory_mb` | integer | Container memory limit in MB |
 | `container_cpus` | number | Container CPU limit |
-| `container_ttl_hours` | integer | Container TTL in hours |
+| `container_ttl_hours` | integer | Container TTL in hours (`0` clears it to `null`; negative is rejected) |
+| `max_ephemeral_agents` | integer | Per-crew hire-flow quota; must be between `0` and `100` |
 | `network_mode` | string | `"free"` or `"restricted"` |
 | `allowed_domains` | string[] | Allowed domains (restricted mode) |
 | `mcp_config_json` | string | Raw MCP server config JSON (must contain `mcpServers` object) |
@@ -192,24 +232,28 @@ Both `PATCH` and `PUT` are supported and behave identically (partial update -- o
 
 **Response:** `200 OK` -- updated crew object.
 
-**Note:** Changing `network_mode`, `allowed_domains`, or `services_json` triggers a container restart so the docker provider picks up the new policy / sidecar set on the next agent run. Changing `runtime_image`, `devcontainer_config`, or `mise_config` invalidates `cached_image` + `config_hash` to force a rebuild.
+<Note>
+  Changing `network_mode`, `allowed_domains`, or `services_json` triggers a container restart so the docker provider picks up the new policy / sidecar set on the next agent run. Changing `runtime_image`, `devcontainer_config`, or `mise_config` invalidates `cached_image` + `config_hash` to force a rebuild.
+</Note>
 
 | Status | Condition |
 |---|---|
-| `400` | Invalid field values (name/slug length, slug format, `network_mode`, domain entry, `container_ttl_hours` negative, MCP JSON missing `mcpServers`, escalation thresholds out of range, oversize or invalid `devcontainer_config`/`mise_config`/`services_json`, `runtime_image` not found) |
+| `400` | Invalid field values (name/slug length, slug format, `network_mode`, domain entry, `container_ttl_hours` negative, `max_ephemeral_agents` outside 0-100, MCP JSON missing `mcpServers`, escalation thresholds out of range, oversize or invalid `devcontainer_config`/`mise_config`/`services_json`, `runtime_image` not found) |
 | `403` | Insufficient role |
 | `404` | Crew not found |
 | `409` | Slug already taken |
 
 ---
 
-## Delete Crew
+### Delete Crew
 
 ```
 DELETE /api/v1/crews/{crewId}?workspace_id={workspaceId}
 ```
 
-Soft-deletes the crew (sets `deleted_at`) and cascade-deletes its missions, mission tasks, and crew members so identifier prefixes can be reused. The slug is rewritten to `{slug}_deleted_{id}` on next Create reuse.
+<Warning>
+  Soft-deletes the crew (sets `deleted_at`) and cascade-deletes its missions, mission tasks, and crew members so identifier prefixes can be reused. The slug is rewritten to `{slug}_deleted_{id}` on next Create reuse.
+</Warning>
 
 **Auth:** Session or CLI token + `OWNER` or `ADMIN` role
 
@@ -228,7 +272,9 @@ Soft-deletes the crew (sets `deleted_at`) and cascade-deletes its missions, miss
 
 ---
 
-## Crew Members
+## Members
+
+Manage the per-crew membership roster and optional per-crew role overrides that win over the workspace role for crew-scoped permissions.
 
 ### List Members
 
@@ -248,17 +294,23 @@ POST /api/v1/crews/{crewId}/members?workspace_id={workspaceId}
 
 **Request Body:**
 
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `user_id` | string | Yes | Target user's ID (must already be a workspace member) |
+| `role` | string | No | Optional per-crew role override -- one of `OWNER`, `ADMIN`, `MANAGER`, `MEMBER`, `VIEWER`. Omit to inherit the workspace role. |
+
 ```json
 {
-  "user_id": "user_abc123"
+  "user_id": "user_abc123",
+  "role": "MANAGER"
 }
 ```
 
-**Response:** `201 Created` -- member object with nested `user` (id/email/full_name/avatar_url).
+**Response:** `201 Created` -- member object with nested `user` (id/email/full_name/avatar_url). The `role` override is **not** echoed on the Add response (it is only included by List Members).
 
 | Status | Condition |
 |---|---|
-| `400` | Missing `user_id`, or user is not a workspace member |
+| `400` | Missing `user_id`, invalid `role`, or user is not a workspace member |
 | `404` | Crew not found |
 | `409` | User is already a member of this crew |
 
@@ -289,7 +341,11 @@ straight to OWNER and bypass the workspace gate.
 { "role": "ADMIN" }
 ```
 
-**Response:** `200 OK` — updated member object.
+**Response:** `200 OK` — a status envelope echoing the applied role (an empty `role` means the override was cleared):
+
+```json
+{ "status": "updated", "role": "ADMIN" }
+```
 
 | Status | Condition |
 |---|---|
@@ -317,7 +373,7 @@ DELETE /api/v1/crews/{crewId}/members/{memberId}?workspace_id={workspaceId}
 
 ---
 
-## Crew Persona
+## Persona
 
 The crew layer of the persona stack — `PERSONA.md` markdown that the
 orchestrator injects into every agent in the crew, used as the default
@@ -388,7 +444,7 @@ and agents fall back to their per-role synthesised default.
 
 ---
 
-## Crew Policy
+## Policy
 
 Each crew carries an autonomy posture that gates every HITL-relevant
 decision the orchestrator makes — memory writes, skill creation,
@@ -433,8 +489,11 @@ PUT /api/v1/crews/{crewId}/policy
 Content-Type: application/json
 ```
 
-Replaces the policy. Requires `OWNER` / `ADMIN` (`canRole "manage"`)
-— the same gate as [`/api/v1/agents/{id}/learning`](/api-reference/agents#set-self-learning).
+Replaces the policy. Records the audit triple (`set_by_user_id`, `set_at`,
+`reason`) atomically with the value change and invalidates the resolver cache
+so the next decision sees the new state.
+
+**Auth:** Session or CLI token + workspace membership (no additional role gate)
 
 **Request:**
 
@@ -450,20 +509,23 @@ Replaces the policy. Requires `OWNER` / `ADMIN` (`canRole "manage"`)
 |-------|----------|-------|
 | `autonomy_level` | yes | Must be one of the four enum values; other strings return `400`. |
 | `behavior_mode` | yes | `warn` or `block`. Missing field returns `400` (no silent default). |
-| `reason` | yes | Non-empty after trim — persisted on the audit triple. |
+| `reason` | conditional | Required **only** when `autonomy_level=full` — non-empty, persisted on the audit triple. Optional for `strict` / `guided` / `trusted`. |
 
 **Response:** `200 OK` — same shape as `GET`, reflecting the new
 state and the freshly-recorded audit triple.
 
 | Status | Condition |
 |--------|-----------|
-| `400` | Invalid enum value, or missing `reason` |
-| `403` | Caller is not OWNER / ADMIN |
+| `400` | Invalid enum value, the forbidden `full` + `block` combination, or `reason` missing when `autonomy_level=full` |
 | `404` | Crew not found |
 
 ---
 
-## Apply Avatar Style
+## Avatar
+
+Bulk-apply an avatar style across a crew's agents, or clear per-agent overrides.
+
+### Apply Avatar Style
 
 ```
 POST /api/v1/crews/{crewId}/apply-avatar-style?workspace_id={workspaceId}
@@ -495,7 +557,7 @@ When `reset_overrides` is `true`, the response is `{ "updated": N, "reset": true
 
 ---
 
-## Crew Connections
+## Connections
 
 Crew connections define which crews can communicate with each other for cross-crew task assignment and messaging.
 

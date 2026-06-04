@@ -87,10 +87,11 @@ See [Presence API](/api-reference/presence) for schemas.
 
 ```bash
 crewship presence roster
+crewship presence roster --crew backend-team
 crewship presence roster --crew cmo2pe4dj0005ba0a129f
 ```
 
-Note: `--crew` expects the crew ID today; slug resolution is TBD. See [`crewship presence`](/cli/presence).
+`--crew` accepts either a crew slug or a CUID — slugs are resolved against `/api/v1/crews` before each render. See [`crewship presence`](/cli/presence).
 
 ## Journal entries
 

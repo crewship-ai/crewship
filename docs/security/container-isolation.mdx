@@ -222,6 +222,7 @@ The `scrubber` package (`internal/scrubber/`) removes credential values from age
 
 The Docker provider (`internal/provider/docker/docker.go`) auto-detects the container runtime by probing socket paths:
 
+<Accordion title="Socket paths probed for runtime auto-detection">
 | Socket Path | Runtime |
 |-------------|---------|
 | `/var/run/docker.sock` | Docker |
@@ -232,5 +233,6 @@ The Docker provider (`internal/provider/docker/docker.go`) auto-detects the cont
 | `/run/user/{uid}/podman/podman.sock` | Podman (rootless) |
 | `/run/podman/podman.sock` | Podman (root) |
 | `/run/containerd/containerd.sock` | nerdctl |
+</Accordion>
 
 Each socket gets a 1.5-second ping timeout to avoid blocking on unresponsive daemons.

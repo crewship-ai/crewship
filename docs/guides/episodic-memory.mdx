@@ -47,7 +47,9 @@ func shouldEmbed(entryType string, severity string) bool {
 | `peer.conversation` | Listed in `EmbeddableEntryTypes` but `shouldEmbed` always returns false — plain Q&A is too high-volume to embed. The indexer is expected to apply its own escalation-aware filter and force it via the override below when the question ends in an escalation. |
 | `exec.output_chunk`, `container.metrics`, `network.*` | **Never** |
 
+<Tip>
 To force an embedding on an otherwise-filtered entry, tag it with `refs.episodic = true` in the journal payload. The indexer checks this flag before applying the type/severity filter.
+</Tip>
 
 ## Storage
 
@@ -70,8 +72,9 @@ Vectors are stored as little-endian float32 BLOBs -- native Go slice serialisati
 
 ### Migration 55 additions
 
-Added in PR #212 alongside the memory uplift:
+Added in PR #212 alongside the memory uplift.
 
+<Accordion title="Migration 55 schema — FTS5 mirror, archive sink, relation graph, health snapshots">
 ```sql
 -- FTS5 contentless mirror of journal_entries.summary + payload.
 -- Insert/update/delete triggers keep it in lockstep with the base table.
@@ -93,7 +96,7 @@ CREATE TABLE journal_entries_archived (
   archived_at  TEXT NOT NULL
 );
 
--- A-Mem-style edge graph: similarity edges linking related embeddings.
+-- embedding relation graph: similarity edges linking related embeddings.
 CREATE TABLE memory_relations (
   src_entry_id TEXT NOT NULL,
   dst_entry_id TEXT NOT NULL,
@@ -117,6 +120,7 @@ CREATE TABLE memory_health_snapshots (
   PRIMARY KEY (workspace_id, crew_id, snapshot_date)
 );
 ```
+</Accordion>
 
 ## Scopes
 
@@ -135,7 +139,9 @@ const (
 | `AGENT` (default) | `own` |
 | `LEAD` | `crew_shared` |
 
+<Note>
 **Workspace isolation is always enforced** at the query boundary -- a cross-workspace recall is impossible even with a misconfigured scope.
+</Note>
 
 ## Hybrid retrieval
 
@@ -161,7 +167,7 @@ with `k_RRF = 60` (the value used in the original RRF paper; further tuning had 
 
 `HybridRecall` is the recommended entry point for new code. The pure-cosine `Recall` is preserved for the orchestrator's prompt-injection path (where rank stability across small query perturbations matters more than recall on lexical hits) and for tests that want a deterministic similarity score.
 
-## Memory relations (A-Mem-style edges)
+## Memory relations (embedding relation graph)
 
 Embeddings live in isolation by default; `memory_relations` lets us treat them as a graph. Two relation types are populated automatically:
 
@@ -277,7 +283,7 @@ type Embedder interface {
 }
 ```
 
-Production wiring uses the Ollama adapter (`embedder.go`) against `nomic-embed-text`. The adapter follows the `OLLAMA_HOST` env var and falls back to `http://host.docker.internal:11434`.
+Production wiring uses the Ollama adapter (`embedder.go`) against `nomic-embed-text` (768-dimensional vectors). The embedder shares the Keeper's Ollama base URL — `KEEPER_OLLAMA_URL`, which defaults to `http://localhost:11434` (the config falls back to that value when the env var is unset, so the embedder is configured by default). The embedder ends up nil only when that Ollama endpoint is unreachable at startup, which disables episodic recall — see the next paragraph.
 
 If the embedder is nil (Ollama unreachable at startup), `Recall` returns an empty slice silently -- agent runs don't fail on embedding outages. This is configured in `server/orchestrator_adapters.go:newEpisodicRecallAdapter`.
 
@@ -301,45 +307,44 @@ The composite `score` is reported with three colour bands:
 | Yellow | `50–75` | Functional but with at least one weak metric. Watch the dashboard. |
 | Green | `≥ 75` | All metrics in healthy range. |
 
-Health is exposed by `internal/api/memory_health_handler.go` over scores derived in `internal/episodic/`. The daily consolidator job recomputes it after `IndexNew`; operators can call it on demand via:
+Health is exposed by `internal/api/memory_health_handler.go` over scores derived in `internal/episodic/`. The daily consolidator job recomputes it; operators can call it on demand via:
 
 - HTTP — `GET /api/v1/memory/health[?crew_id=<slug>]`. See [Memory API](/api-reference/memory).
 - CLI — `crewship memory health [--crew <slug>]`. See [`crewship memory health`](/cli/memory#health).
 
-The endpoint returns the **latest snapshot** in the table — it does not recompute on read. Use `crewship memory health --recompute` (or POST the equivalent) to force a fresh score.
+The endpoint returns the **latest snapshot** in the table — it does not recompute on read. Scores are refreshed by the daily consolidator; there is no on-demand recompute flag (`crewship memory health` accepts only `--crew`). To force a fresh score sooner, trigger consolidation (`crewship consolidate run`).
 
 ## In-session memory nudge
 
-When an agent run accumulates **30 or more new journal entries** since its last `memory.updated` entry, the orchestrator injects a short reminder into the next system prompt:
+When an agent run accumulates **60 or more new journal entries** since its last `memory.updated` entry, the orchestrator injects a short reminder into the next system prompt:
 
-> You have 47 new journal entries since your last memory update. Consider summarising what you've learned with `summary.generated` so future sessions can recall it.
+> You have 72 new journal entries since your last memory update. Consider appending any recurring pattern you've noticed to `~/.memory/AGENT.md` before the session ends — the consolidator won't replace your personal observations.
 
-The threshold is fixed at 30 because that's roughly when an agent's working context starts evicting its own short-term memory. The nudge only fires once per session — once the agent emits a new `summary.generated`, the counter resets.
+The threshold (`nudgeThreshold` in `internal/orchestrator/memory.go`) was raised from 30 to 60 because at 30 the nudge fired on essentially every session after a memory write. The nudge only fires once per session — once the agent emits a new `memory.updated`, the counter resets.
 
-A second nudge fires opportunistically when daily cost exceeds \$1 (default; configurable per workspace):
-
-> Last 24h: 142 calls, 3.4M tokens, \$8.71. Watch for runaway loops — the consolidator will summarise this batch on the next tick.
-
-Both nudges are advisory — agents can ignore them, and they are stripped from the context before the LLM call records its response payload.
+The nudge is advisory — agents can ignore it, and it is stripped from the context before the LLM call records its response payload.
 
 ## Indexer
 
-`episodic.IndexNew(ctx, db, embedder)` walks unindexed journal entries that pass `shouldEmbed`, computes embeddings, and inserts them into `journal_embeddings`. The background consolidator runs this on its 6h tick; you can trigger it manually:
+The `Indexer` (`internal/episodic/indexer.go`) runs a background sweeper loop on a **30-second poll** (`NewIndexer(..., poll)`), processing up to 64 unindexed embeddable entries per `sweepOnce`. Hot-path callers that want an embedding ready before the next recall call `Indexer.IndexOne(ctx, entry)` directly — typically right after writing a `summary.generated` entry:
 
 ```go
-n, err := episodic.IndexNew(ctx, db, embedder)
+err := x.IndexOne(ctx, entry)
 ```
 
 Only entries whose type survives the coarse SQL filter (the `EmbeddableEntryTypes` slice) are candidates; the Go-side `shouldEmbed` then applies the severity-aware refinement.
 
 ## Gotchas
 
+<Warning>
+**Do not add `exec.output_chunk` to the embeddable list.** Doing so will flood the embedding space with low-signal log chatter and kill recall quality. The comment in `types.go` is not a suggestion.
+</Warning>
+
 - **Ollama dependency.** No Ollama = no episodic memory. Set `OLLAMA_MODELS="/Volumes/SSD 990 PRO/ollama-models"` (external SSD) and `ollama serve` before `./dev.sh start` when testing locally.
-- **Embedding is best-effort.** An embedder error during `IndexNew` logs and skips; the entry is retried next run.
+- **Embedding is best-effort.** An embedder error during a `sweepOnce` pass logs and skips; the entry is retried next sweep.
 - **Cosine on small sets is fine.** Don't pre-optimise for a vector DB until the per-agent scan latency exceeds 50ms.
-- **Do not add `exec.output_chunk` to the embeddable list.** Doing so will flood the embedding space with low-signal log chatter and kill recall quality. The comment in `types.go` is not a suggestion.
 
 ## Related
 
 - [Crew Journal](/guides/crew-journal) -- source of entries.
-- [Consolidate](/guides/consolidate) -- runs `IndexNew` on the daily tick.
+- [Consolidate](/guides/consolidate) -- the nightly workers that produce many of the embeddable entry types (`summary.generated`, `memory.consolidated`).

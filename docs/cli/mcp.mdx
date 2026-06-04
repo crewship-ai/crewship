@@ -14,7 +14,11 @@ crewship crew mcp <crew-slug> [flags]
 crewship agent mcp <agent-slug> [flags]
 ```
 
-Auth: every subcommand requires `crewship login`. Registry browse/search don't require a workspace (registry data is workspace-agnostic and the CLI strips the `workspace_id` header before sending). Everything else does.
+<Note>
+  Every subcommand requires `crewship login`. Registry browse/search don't
+  require a workspace (registry data is workspace-agnostic and the CLI strips
+  the `workspace_id` header before sending). Everything else does.
+</Note>
 
 ## Subcommands
 
@@ -135,7 +139,9 @@ crewship mcp registry sync
 # ✓ MCP registry sync triggered.
 ```
 
-A 429 means someone synced recently — cooldown is 1 hour.
+<Note>
+  Admin-only, with a 1-hour cooldown. A `429` means someone synced recently.
+</Note>
 
 ### Show / set a crew's config
 

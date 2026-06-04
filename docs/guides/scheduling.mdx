@@ -89,39 +89,41 @@ Examples:
 
 Each scheduled trigger follows this sequence:
 
-### 1. Chat Session Creation
+<Steps>
+  <Step title="Chat Session Creation">
+    A new chat session is created with a deterministic ID (format: `sched_{unixnano}_{random_hex}`). The chat title is set to `"Scheduled: {agent_name}"`.
+  </Step>
 
-A new chat session is created with a deterministic ID (format: `sched_{unixnano}_{random_hex}`). The chat title is set to `"Scheduled: {agent_name}"`.
+  <Step title="Chat Resolution">
+    The `ResolveChat` call loads the full agent context: credentials, system prompt, skills, MCP servers, network policy, and crew membership. This ensures the scheduled run has the same capabilities as an interactive run.
+  </Step>
 
-### 2. Chat Resolution
+  <Step title="Container Management">
+    If a container provider is configured, the scheduler ensures the crew container is running before execution. Default resource limits:
 
-The `ResolveChat` call loads the full agent context: credentials, system prompt, skills, MCP servers, network policy, and crew membership. This ensures the scheduled run has the same capabilities as an interactive run.
+    | Resource | Default |
+    |----------|---------|
+    | Memory | 4096 MB |
+    | CPUs | 2.0 |
+  </Step>
 
-### 3. Container Management
+  <Step title="Run Record">
+    A run record is created with trigger type `SCHEDULED` before execution begins. Metadata includes the CLI adapter, crew info, and a `scheduled` tag.
+  </Step>
 
-If a container provider is configured, the scheduler ensures the crew container is running before execution. Default resource limits:
+  <Step title="Agent Execution">
+    The agent runs through `orchestrator.RunAgent` with the same pipeline as interactive runs: sidecar proxy, credential injection, memory, and conversation history.
+  </Step>
 
-| Resource | Default |
-|----------|---------|
-| Memory | 4096 MB |
-| CPUs | 2.0 |
+  <Step title="Result Recording">
+    After execution completes, the run record is updated with:
+    - Status: `COMPLETED` or `FAILED`
+    - Duration in milliseconds
+    - Cost and usage metadata (if available from the LLM provider)
 
-### 4. Run Record
-
-A run record is created with trigger type `SCHEDULED` before execution begins. Metadata includes the CLI adapter, crew info, and a `scheduled` tag.
-
-### 5. Agent Execution
-
-The agent runs through `orchestrator.RunAgent` with the same pipeline as interactive runs: sidecar proxy, credential injection, memory, and conversation history.
-
-### 6. Result Recording
-
-After execution completes, the run record is updated with:
-- Status: `COMPLETED` or `FAILED`
-- Duration in milliseconds
-- Cost and usage metadata (if available from the LLM provider)
-
-The assistant response is persisted to the conversation store and the message count is incremented.
+    The assistant response is persisted to the conversation store and the message count is incremented.
+  </Step>
+</Steps>
 
 ## Timeout
 
@@ -131,7 +133,9 @@ Each scheduled run has a **45-minute timeout**. If the agent does not complete w
 ctx, cancel := context.WithTimeout(s.ctx, 45*time.Minute)
 ```
 
-This is separate from the per-agent `timeout_secs` setting, which controls the LLM execution timeout within the container. The 45-minute limit is the outer boundary for the entire scheduled run cycle including container startup and chat resolution.
+<Info>
+  This is separate from the per-agent `timeout_secs` setting, which controls the LLM execution timeout within the container. The 45-minute limit is the outer boundary for the entire scheduled run cycle including container startup and chat resolution.
+</Info>
 
 ## Monitoring
 
@@ -186,4 +190,4 @@ The next scheduled trigger will attempt the full pipeline again. There is no exp
 ## What's Next
 
 - [Orchestration](/guides/orchestration) -- multi-agent missions with task dependencies
-- [Keeper](/guides/keeper) -- persistent agent memory
+- [Agent memory](/guides/agent-memory) -- persistent agent memory across runs

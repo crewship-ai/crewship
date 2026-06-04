@@ -4,7 +4,17 @@ description: "Watch Roster -- live agent status across a workspace or crew."
 icon: "eye"
 ---
 
-All endpoints require authentication and are workspace-scoped. This is a read-only API -- presence writes come from the agent runtime via `presence.Upsert`. See the [Watch Roster guide](/guides/watch-roster).
+The Presence API powers the Watch Roster — a live view of every agent's status across a workspace or a single crew. It is read-only: status is owned by the system and written by the agent runtime on lifecycle transitions, so there is no `POST` surface. See the [Watch Roster guide](/guides/watch-roster).
+
+<Note>
+  The single read endpoint requires authentication and is workspace-scoped. A `crew_id` filter pointing outside the caller's workspace returns `404` (same shape as not-found, so existence isn't leaked).
+</Note>
+
+## Endpoints
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | [`/api/v1/presence/roster`](#roster) | Live agent status across a workspace or crew |
 
 ---
 
@@ -61,8 +71,10 @@ GET /api/v1/presence/roster?crew_id=<optional>
 
 | Status | Condition |
 |---|---|
-| 401 | No workspace. |
-| 404 | `crew_id` filter points to cross-tenant crew. |
+| 400 | No `workspace_id` resolved for the session (the `RequireWorkspace` middleware rejects before the handler runs). |
+| 401 | Not authenticated. |
+| 403 | Authenticated, but not a member of the resolved workspace. |
+| 404 | `crew_id` filter points to a crew outside the caller's workspace. |
 | 500 | DB error. |
 
 ## Details field conventions

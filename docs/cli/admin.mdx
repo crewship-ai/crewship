@@ -14,11 +14,15 @@ The "credential" for these commands is **shell access to the host**. That matche
 crewship admin <subcommand> [flags]
 ```
 
-Requirements:
+<Note>
+  **The credential for these commands is shell access to the host** — there
+  is no `crewship login` token. Requirements:
 
-- Read+write access to the data directory (default `~/.crewship`). The binary opens `~/.crewship/crewship.db` directly via `openAdminDB`.
-- The `crewship` binary must run on the **same host** as the data directory.
-- A `crewship login` token is **not** required — the host's filesystem permissions are the authentication.
+  - Read+write access to the data directory (default `~/.crewship`). The
+    binary opens `~/.crewship/crewship.db` directly via `openAdminDB`.
+  - The `crewship` binary must run on the **same host** as the data directory.
+  - The host's filesystem permissions are the authentication.
+</Note>
 
 ## Subcommands
 
@@ -34,7 +38,13 @@ Requirements:
 
 ## `crewship admin reset-password`
 
-Rotate a user's password. The hashed value is written into `users.password_hash` and every active session row for that user is revoked as a side effect (the audit trail records `reason='admin_reset'`).
+Rotate a user's password.
+
+<Warning>
+  The hashed value is written into `users.password_hash` and every active
+  session row for that user is revoked as a side effect (the audit trail
+  records `reason='admin_reset'`).
+</Warning>
 
 ```bash
 # Interactive: stdin prompt with hidden input (no shell-history leak)
@@ -53,7 +63,11 @@ crewship admin reset-password --email admin@example.com --password 's3cret!'
 | `--password` | no | New password as argv. Leaks to shell history; avoid in CI. |
 | `--password-stdin` | no | Read the new password from stdin. Mutually exclusive with `--password`. |
 
-Omit both `--password` and `--password-stdin` to get an interactive prompt with hidden input — the right default for ad-hoc recovery from a host shell.
+<Tip>
+  Omit both `--password` and `--password-stdin` to get an interactive prompt
+  with hidden input — the right default for ad-hoc recovery from a host
+  shell, and the only form that never leaks to shell history or `ps`.
+</Tip>
 
 ---
 
@@ -107,11 +121,11 @@ crewship admin invalidate-sessions --email user@example.com
 
 Each revoked row is stamped `reason='admin_invalidate'` so the audit trail distinguishes this from the side-effect revokes that fire during `reset-password` (those carry `reason='admin_reset'`).
 
-When to reach for this instead of `reset-password`:
-
-- Laptop stolen / recovered, the password is believed safe but a cached cookie might still be on the device.
-- Suspected token leak via Slack screenshot, browser history dump, etc.
-- Periodic compliance sweep — "log everyone out of yesterday's sessions".
+<Accordion title="When to reach for this instead of reset-password">
+  - Laptop stolen / recovered, the password is believed safe but a cached cookie might still be on the device.
+  - Suspected token leak via Slack screenshot, browser history dump, etc.
+  - Periodic compliance sweep — "log everyone out of yesterday's sessions".
+</Accordion>
 
 ---
 

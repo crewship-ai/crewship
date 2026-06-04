@@ -131,6 +131,8 @@ input/output, status updates streamed over WebSocket — passes through
 `internal/scrubber/` before it is persisted or shown to a human. The
 scrubber owns **17 credential-shaped patterns** today:
 
+<Accordion title="The 17 credential-shaped patterns">
+
 - OpenSSH private-key blocks
 - PEM-encoded private-key blocks (`-----BEGIN [RSA|EC|DSA|ED25519] PRIVATE KEY-----`)
 - Anthropic keys (`sk-ant-...`)
@@ -148,6 +150,8 @@ scrubber owns **17 credential-shaped patterns** today:
 - JWT bearer tokens (`Bearer eyJ...`)
 - JSON `password|secret|token|api_key|apikey|secret_key` field values
 - `PASSWORD|SECRET|API_KEY|...` shell-style env assignments
+
+</Accordion>
 
 The list grows as the maintainer encounters new shapes in the wild.
 
@@ -235,6 +239,8 @@ flowchart TD
 
 ### Rule families (current — PR-F4 v2)
 
+<Accordion title="All rule families (unicode, regex, exfiltration, persistence, base64, homoglyph, tool-return)">
+
 **Invisible-unicode codepoints (14)** — zero-width spaces (ZWSP, ZWNJ, ZWJ), BIDI overrides (LRM/RLM/LRE/RLE/LRO/RLO), directional isolates (LRI/RLI/FSI/PDI), and the byte-order mark. Source-file numeric literals so the rule file itself stays free of the codepoints it scans for. Cheap check; runs first.
 
 **Prompt-injection regex (9 rules, line-anchored, case-insensitive)** — `ignore previous|all|prior instructions`, `you are now DAN|<role>`, `disregard rules|instructions|the above|system|previous`, `<!-- ignore ... -->` HTML smuggling, plus the five exfiltration / persistence patterns below.
@@ -250,6 +256,8 @@ flowchart TD
 **Tool-return scan path (PR-F4 "scan path 1")** — the orchestrator's `emitToolResultBlock` (`internal/orchestrator/exec_mcp.go`) wraps incoming Claude `tool_result` blocks through `ScanContent` before forwarding to the agent. A hit replaces the result body with the `[BLOCKED]` placeholder + writes the original to the agent's `.quarantine/`. This is the MINJA defence: an agent that called a search tool can't have the search result inject "ignore previous instructions" into its own context.
 
 **Per-adapter sweep (PR-F4 follow-up)** — the wire-up above covers Claude's `tool_result` shape. The Codex / Gemini / OpenCode / Factory Droid adapters parse tool results differently; each needs its own scan-site. Tracked separately so a missing adapter isn't a silent bypass.
+
+</Accordion>
 
 ### What the scanner does NOT catch (yet)
 
@@ -282,7 +290,9 @@ Idempotent on content: the same poisoned body quarantined twice reuses the same 
 
 ### Fail-closed posture
 
-Quarantine WRITE failure (disk full, container permission drop) returns `IsError=true` from the scanner — the poisoned content is NOT returned to the model. The agent sees a tool error instead. This is the right default: a half-working scanner is worse than no scanner if it lets content through on the failure path.
+<Note>
+  Quarantine WRITE failure (disk full, container permission drop) returns `IsError=true` from the scanner — the poisoned content is NOT returned to the model. The agent sees a tool error instead. This is the right default: a half-working scanner is worse than no scanner if it lets content through on the failure path.
+</Note>
 
 ## What this composition does and does not protect against
 
@@ -302,6 +312,10 @@ Quarantine WRITE failure (disk full, container permission drop) returns `IsError
 
 Crewship v0.1 beta is the first public beta. The threat model above
 describes the **current implementation**, with these gaps:
+
+<Warning>
+  These are known, accepted gaps in the v0.1 beta. Operators with stricter requirements must layer host-level controls (network policy, capability drops, rootless runtime) on top.
+</Warning>
 
 - **Egress is `HTTP_PROXY`-style, not network-enforced.** Agents that
   bypass `HTTP_PROXY` or open raw sockets exit the allowlist

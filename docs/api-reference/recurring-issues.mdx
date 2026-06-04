@@ -12,7 +12,18 @@ Implementation: `internal/api/recurring_issue_handler.go`. Backed by the `recurr
 
 The cron expression is parsed and validated **at write time** using the standard 5-field syntax (`Minute | Hour | DayOfMonth | Month | DayOfWeek`); the parser is `github.com/robfig/cron/v3`. The next fire time is computed on create and on every cron change and stored in `next_run`, so the dispatcher can wake by index without re-parsing.
 
-All endpoints require an authenticated session and workspace context.
+<Note>
+  All endpoints require an authenticated session and workspace context.
+</Note>
+
+## Endpoints
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | [`/api/v1/recurring-issues`](#get-api-v1-recurring-issues) | List recurring issue templates |
+| POST | [`/api/v1/recurring-issues`](#post-api-v1-recurring-issues) | Create a template |
+| PATCH | [`/api/v1/recurring-issues/{recurringId}`](#patch-api-v1-recurring-issues-recurringid) | Update a template |
+| DELETE | [`/api/v1/recurring-issues/{recurringId}`](#delete-api-v1-recurring-issues-recurringid) | Delete a template |
 
 ## Recurring issue shape
 
@@ -36,7 +47,11 @@ All endpoints require an authenticated session and workspace context.
 | `run_count` | int | Total successful fires. |
 | `created_at` | RFC3339 | |
 
-## `GET /api/v1/recurring-issues`
+## Endpoint reference
+
+CRUD over the templates. Cron is parsed and `next_run` recomputed on every create and cron change.
+
+### `GET /api/v1/recurring-issues`
 
 List recurring issues in the workspace, newest first.
 
@@ -74,7 +89,7 @@ List recurring issues in the workspace, newest first.
 ]
 ```
 
-## `POST /api/v1/recurring-issues`
+### `POST /api/v1/recurring-issues`
 
 Create a new recurring issue template.
 
@@ -107,7 +122,7 @@ Create a new recurring issue template.
 | `401` | Not authenticated. |
 | `403` | Caller is below the `MANAGER` role. |
 
-## `PATCH /api/v1/recurring-issues/{recurringId}`
+### `PATCH /api/v1/recurring-issues/{recurringId}`
 
 Partial update. When `cron_expression` is changed, the new value is re-parsed and `next_run` is recomputed in the same write — so the dispatcher's next wake reflects the new schedule without a second round-trip.
 
@@ -140,9 +155,13 @@ Partial update. When `cron_expression` is changed, the new value is re-parsed an
 | `403` | Caller is below the `MANAGER` role. |
 | `404` | Recurring issue id not found in this workspace. |
 
-## `DELETE /api/v1/recurring-issues/{recurringId}`
+### `DELETE /api/v1/recurring-issues/{recurringId}`
 
 Hard delete. The recurring template is removed; **already-fired issues are not touched** — they remain in the backlog with whatever state they've reached.
+
+<Warning>
+  Hard delete, not soft delete — the template row is removed outright. Already-fired backlog issues survive untouched.
+</Warning>
 
 **Auth:** authenticated session + workspace context + `OWNER` or `ADMIN` role (`requireRole("manage")`).
 

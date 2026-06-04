@@ -29,46 +29,46 @@ spec:
 
 | Kind | What it is | Lifecycle | Doc |
 |---|---|---|---|
-| [`Workspace`](workspace.md) | Top-level bundle: credentials + skills + crews | full CRUD | [workspace.md](workspace.md) |
-| [`Crew`](crew.md) | One crew: agents + sidecars + MCP servers + credentials | full CRUD | [crew.md](crew.md) |
-| [`Agent`](agent.md) | Single agent within a crew (used inline under `Crew.spec.agents` or standalone) | full CRUD | [agent.md](agent.md) |
-| [`Skill`](skill.md) | Skill registry entry (used inline under `Workspace.spec.skills`) | full CRUD | [skill.md](skill.md) |
-| [`Integration`](integration.md) | MCP server integration (workspace-, crew-, or agent-scoped) | full CRUD | [integration.md](integration.md) |
-| [`Issue`](issue.md) | Issue tracker row (rarely declared standalone — typically managed via the API/CLI) | full CRUD | [issue.md](issue.md) |
-| [`Project`](project.md) | Container for missions and milestones | full CRUD | [project.md](project.md) |
-| [`Label`](label.md) | Tag for issues and missions | full CRUD | [label.md](label.md) |
-| [`Milestone`](milestone.md) | Time-boxed project goal | full CRUD | [milestone.md](milestone.md) |
+| [`Workspace`](/manifest/workspace) | Top-level bundle: credentials + skills + crews | full CRUD | [workspace.md](/manifest/workspace) |
+| [`Crew`](/manifest/crew) | One crew: agents + sidecars + MCP servers + credentials | full CRUD | [crew.md](/manifest/crew) |
+| [`Agent`](/manifest/agent) | Single agent within a crew (used inline under `Crew.spec.agents` or standalone) | full CRUD | [agent.md](/manifest/agent) |
+| [`Skill`](/manifest/skill) | Skill registry entry (used inline under `Workspace.spec.skills`) | full CRUD | [skill.md](/manifest/skill) |
+| [`Integration`](/manifest/integration) | MCP server integration (workspace-, crew-, or agent-scoped) | full CRUD | [integration.md](/manifest/integration) |
+| [`Issue`](/manifest/issue) | Issue tracker row (rarely declared standalone — typically managed via the API/CLI) | full CRUD | [issue.md](/manifest/issue) |
+| [`Project`](/manifest/project) | Container for missions and milestones | full CRUD | [project.md](/manifest/project) |
+| [`Label`](/manifest/label) | Tag for issues and missions | full CRUD | [label.md](/manifest/label) |
+| [`Milestone`](/manifest/milestone) | Time-boxed project goal | full CRUD | [milestone.md](/manifest/milestone) |
 
 ### Workflow + automation
 
 | Kind | What it is | Lifecycle | Doc |
 |---|---|---|---|
-| [`Routine`](routine.md) | Workflow DSL (steps + schedules + webhook) | full CRUD | [routine.md](routine.md) |
-| [`RecurringIssue`](recurring_issue.md) | Issue template + cron → periodic issue creation | full CRUD | [recurring_issue.md](recurring_issue.md) |
-| [`TriageRule`](triage_rule.md) | Match + actions for auto-routing incoming issues | full CRUD | [triage_rule.md](triage_rule.md) |
-| [`WorkflowTemplate`](workflow_template.md) | Custom issue status flow (Kanban-style stages) | full CRUD | [workflow_template.md](workflow_template.md) |
+| [`Routine`](/manifest/routine) | Workflow DSL (steps + schedules + webhook) | full CRUD | [routine.md](/manifest/routine) |
+| [`RecurringIssue`](/manifest/recurring_issue) | Issue template + cron → periodic issue creation | full CRUD | [recurring_issue.md](/manifest/recurring_issue) |
+| [`TriageRule`](/manifest/triage_rule) | Match + actions for auto-routing incoming issues | full CRUD | [triage_rule.md](/manifest/triage_rule) |
+| [`WorkflowTemplate`](/manifest/workflow_template) | Custom issue status flow (Kanban-style stages) | full CRUD | [workflow_template.md](/manifest/workflow_template) |
 
 ### Views + ops
 
 | Kind | What it is | Lifecycle | Doc |
 |---|---|---|---|
-| [`SavedView`](saved_view.md) | Shared filtered list (issues / missions / runs) | full CRUD | [saved_view.md](saved_view.md) |
-| [`Hook`](hook.md) | Toggle for code-registered lifecycle hooks | enable/disable only | [hook.md](hook.md) |
+| [`SavedView`](/manifest/saved_view) | Shared filtered list (issues / missions / runs) | full CRUD | [saved_view.md](/manifest/saved_view) |
+| [`Hook`](/manifest/hook) | Toggle for code-registered lifecycle hooks | enable/disable only | [hook.md](/manifest/hook) |
 
 ### Catalog references (install / deploy)
 
 | Kind | What it is | Lifecycle | Doc |
 |---|---|---|---|
-| [`Recipe`](recipe.md) | Install a recipe from the server catalog | install only | [recipe.md](recipe.md) |
-| [`CrewTemplate`](crew_template.md) | Deploy a crew from a template blueprint | deploy only (one-shot) | [crew_template.md](crew_template.md) |
-| [`Connector`](connector.md) | Install an OAuth connector (Linear, GitHub, …) | install only | [connector.md](connector.md) |
+| [`Recipe`](/manifest/recipe) | Install a recipe from the server catalog | install only | [recipe.md](/manifest/recipe) |
+| [`CrewTemplate`](/manifest/crew_template) | Deploy a crew from a template blueprint | deploy only (one-shot) | [crew_template.md](/manifest/crew_template) |
+| [`Connector`](/manifest/connector) | Install an OAuth connector (Linear, GitHub, …) | install only | [connector.md](/manifest/connector) |
 
 ### Instance / org config
 
 | Kind | What it is | Lifecycle | Doc |
 |---|---|---|---|
-| [`FeatureFlag`](feature_flag.md) | Toggle experimental features (instance-default + per-workspace override) | full CRUD | [feature_flag.md](feature_flag.md) |
-| [`InstanceSetting`](instance_setting.md) | Key/value config (SMTP, branding, …) — admin-only | full CRUD | [instance_setting.md](instance_setting.md) |
+| [`FeatureFlag`](/manifest/feature_flag) | Toggle experimental features (instance-default + per-workspace override) | full CRUD | [feature_flag.md](/manifest/feature_flag) |
+| [`InstanceSetting`](/manifest/instance_setting) | Key/value config (SMTP, branding, …) — admin-only | full CRUD | [instance_setting.md](/manifest/instance_setting) |
 
 ## Foreign-key references
 
@@ -149,9 +149,9 @@ Every kind also has a per-entity CLI surface for one-off operations (no manifest
 
 ## Examples
 
-- [examples/manifests/full-complete.yaml](../../examples/manifests/full-complete.yaml) — one document per kind in one file
-- [examples/manifests/full-team.workspace.yaml](../../examples/manifests/full-team.workspace.yaml) — multi-crew workspace (legacy shape)
-- [examples/manifests/code-review.crew.yaml](../../examples/manifests/code-review.crew.yaml) — single-crew (legacy shape)
+- [examples/manifests/full-complete.yaml](https://github.com/crewship-ai/crewship/blob/main/examples/manifests/full-complete.yaml) — one document per kind in one file
+- [examples/manifests/full-team.workspace.yaml](https://github.com/crewship-ai/crewship/blob/main/examples/manifests/full-team.workspace.yaml) — multi-crew workspace (legacy shape)
+- [examples/manifests/code-review.crew.yaml](https://github.com/crewship-ai/crewship/blob/main/examples/manifests/code-review.crew.yaml) — single-crew (legacy shape)
 
 ## What's NOT in the manifest (and why)
 
@@ -168,6 +168,6 @@ Some entities are deliberately out of scope:
 
 ## See also
 
-- [SPEC-2-manifest-complete.md](../../.claude/context/specs/SPEC-2-manifest-complete.md) — implementation contract / full schema
-- [PRD: API](../../.claude/context/prd/API.md)
-- [PRD: ORCHESTRATION](../../.claude/context/prd/ORCHESTRATION.md)
+- `SPEC-2-manifest-complete.md` — implementation contract / full schema (internal spec, in-repo)
+- PRD: API — internal product spec (in-repo)
+- PRD: ORCHESTRATION — internal product spec (in-repo)

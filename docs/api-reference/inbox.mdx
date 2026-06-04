@@ -8,7 +8,19 @@ icon: "inbox"
 
 The inbox is the unified human-in-the-loop surface for the workspace. Rows are written by source-of-truth handlers (`waitpoint create`, `escalation create`, `run-failure terminal`, generic agent messages); these three endpoints are the **read + state-flip surface** the UI consumes — no inserts. For the source endpoints that create inbox items (and the conflict rules about how items get resolved), see the [Inbox guide](/guides/inbox).
 
-All endpoints require an authenticated session and a workspace context.
+<Note>
+  All endpoints require an authenticated session and a workspace context.
+</Note>
+
+## Endpoints
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | [`/api/v1/inbox`](#get-apiv1inbox) | List items (newest-first, with unread count) |
+| GET | [`/api/v1/inbox/count`](#get-apiv1inboxcount) | Unread count for the bell badge |
+| PATCH | [`/api/v1/inbox/{id}`](#patch-apiv1inboxid) | Flip an item's state |
+
+---
 
 ## Visibility model
 
@@ -50,7 +62,11 @@ An item addressed to OWNER never appears for a MEMBER, even if both belong to th
 | `created_at` | RFC3339 | |
 | `updated_at` | RFC3339 | |
 
-## `GET /api/v1/inbox`
+## Reading the inbox
+
+List visible items or fetch just the unread count for the bell badge — both share the [visibility predicate](#visibility-model) above.
+
+### `GET /api/v1/inbox`
 
 Paginated, newest-first list. The UI calls this on first load and after every WS `inbox.updated` event.
 
@@ -89,7 +105,7 @@ The response inlines both row count and unread count so the bell badge renders f
 }
 ```
 
-## `GET /api/v1/inbox/count`
+### `GET /api/v1/inbox/count`
 
 Bell-badge endpoint. Same visibility predicate as List, cheaper payload — no JSON parse, no payload column read.
 
@@ -97,7 +113,11 @@ Bell-badge endpoint. Same visibility predicate as List, cheaper payload — no J
 { "unread_count": 7 }
 ```
 
-## `PATCH /api/v1/inbox/{id}`
+## Updating state
+
+Flip an item between `unread` / `read` / `resolved`. Source-managed kinds are restricted to `read` — see the conflict rule below.
+
+### `PATCH /api/v1/inbox/{id}`
 
 Flip an item's state. The body is JSON:
 
@@ -119,7 +139,7 @@ Returns `200`:
 { "id": "ibx_01HVZ...", "state": "resolved" }
 ```
 
-### Source-managed kinds — `409 Conflict`
+#### Source-managed kinds — `409 Conflict`
 
 For `kind` in `{ waitpoint, escalation, failed_run }`, the inbox row is a mirror of an authoritative source row (the waitpoint token, the escalation row, the failed pipeline run). PATCH only supports `state: "read"` for these — `unread` and `resolved` would desync the inbox row from the source, because the user expects the flip to *also* approve the waitpoint / close the escalation / retry the run, and the inbox PATCH doesn't do that.
 
@@ -134,7 +154,7 @@ The non-read transition returns `409` with a hint at the right endpoint:
 
 Generic kinds (`message`) flip freely between all three states.
 
-### State transitions
+#### State transitions
 
 - **→ read** sets `read_at` and `read_by_user_id` (both `COALESCE`'d so re-reading doesn't move the timestamp).
 - **→ unread** clears `read_at`, `read_by_user_id`, `resolved_at`, `resolved_by_user_id`, `resolved_action`.
@@ -147,7 +167,8 @@ Every successful PATCH broadcasts on the workspace channel:
 ```json
 {
   "type": "inbox.updated",
-  "data": { "id": "ibx_01HVZ...", "state": "resolved" }
+  "channel": "workspace:wsp_01HVZ...",
+  "payload": { "id": "ibx_01HVZ...", "state": "resolved" }
 }
 ```
 

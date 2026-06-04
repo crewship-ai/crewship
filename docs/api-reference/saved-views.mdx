@@ -1,6 +1,6 @@
 ---
 title: "Saved Views"
-description: "Per-user saved issue views with optional workspace sharing — store filters_json + sort_json so a user (or the workspace) can replay a Linear-style filter from one click."
+description: "Per-user saved issue views with optional workspace sharing — store filters_json + sort_json so a user (or the workspace) can replay a saved filter from one click."
 icon: "bookmark"
 ---
 
@@ -10,7 +10,18 @@ A saved view is a named bundle of issue filters and sort preferences a user want
 
 Implementation: `internal/api/saved_view_handler.go`. Backed by the `saved_views` table.
 
-All endpoints require an authenticated session and workspace context.
+<Note>
+  All endpoints require an authenticated session and workspace context.
+</Note>
+
+## Endpoints
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | [`/api/v1/saved-views`](#get-api-v1-saved-views) | List own + shared views |
+| POST | [`/api/v1/saved-views`](#post-api-v1-saved-views) | Create a view |
+| PATCH | [`/api/v1/saved-views/{viewId}`](#patch-api-v1-saved-views-viewid) | Update a view (owner only) |
+| DELETE | [`/api/v1/saved-views/{viewId}`](#delete-api-v1-saved-views-viewid) | Delete a view (owner only) |
 
 ## Visibility model
 
@@ -35,7 +46,11 @@ A view owned by another user but shared is returned read-only — `Update` and `
 | `shared` | bool | When `true`, the view is visible to every workspace member. |
 | `created_at` | RFC3339 | |
 
-## `GET /api/v1/saved-views`
+## Endpoint reference
+
+CRUD over saved views. Reads return own + shared rows; writes are restricted to the owner.
+
+### `GET /api/v1/saved-views`
 
 List the calling user's views plus every shared view in the workspace. Defaults pinned to the top, then alphabetical by name.
 
@@ -58,7 +73,7 @@ List the calling user's views plus every shared view in the workspace. Defaults 
 ]
 ```
 
-## `POST /api/v1/saved-views`
+### `POST /api/v1/saved-views`
 
 Create a new saved view owned by the calling user.
 
@@ -84,7 +99,7 @@ Create a new saved view owned by the calling user.
 | `401` | Not authenticated. |
 | `403` | Caller is below the `MANAGER` role. |
 
-## `PATCH /api/v1/saved-views/{viewId}`
+### `PATCH /api/v1/saved-views/{viewId}`
 
 Partial update. Only the **owner** of the view can update it — `Update` reads `user_id` from the row and compares it against the session user.
 
@@ -110,7 +125,7 @@ Partial update. Only the **owner** of the view can update it — `Update` reads 
 | `403` | Caller is not the view owner. |
 | `404` | View id does not exist. |
 
-## `DELETE /api/v1/saved-views/{viewId}`
+### `DELETE /api/v1/saved-views/{viewId}`
 
 Hard delete. As with `PATCH`, only the owner can delete.
 

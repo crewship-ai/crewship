@@ -4,7 +4,22 @@ description: "Cost rollups across crew, agent, and mission scopes."
 icon: "credit-card"
 ---
 
-All endpoints require authentication and are workspace-scoped. Write path is **exclusively internal** via the [LLM middleware](/guides/llm-middleware) -- no POST endpoints. See the [Paymaster guide](/guides/paymaster) for the cost ledger and budget model, and the [Sidecar coverage section](/guides/paymaster#sidecar-coverage-of-agent-cli-calls) for the known limitation around agent CLI bypass.
+Paymaster exposes read-only cost rollups across crew, agent, and mission scopes, plus a leaderboard of top spenders and a flat-rate subscription usage view. Every spend figure comes from the `cost_ledger`, which is written exclusively by the internal cost-record path — there are no public write endpoints. See the [Paymaster guide](/guides/paymaster) for the cost ledger and budget model, and the [Sidecar coverage section](/guides/paymaster#sidecar-coverage-of-agent-cli-calls) for the known limitation around agent CLI bypass.
+
+<Note>
+  All read endpoints require authentication and are workspace-scoped. The write path is **exclusively internal** via the [LLM middleware](/guides/llm-middleware) — there are no POST endpoints on the public surface.
+</Note>
+
+## Endpoints
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | [`/api/v1/paymaster/spend/by-crew`](#spend-by-crew) | Cost rollup grouped by crew |
+| GET | [`/api/v1/paymaster/spend/by-agent/{crewId}`](#spend-by-agent-within-a-crew) | Cost rollup by agent within a crew |
+| GET | [`/api/v1/paymaster/spend/by-mission/{missionId}`](#spend-by-mission) | Total spend for one mission |
+| GET | [`/api/v1/paymaster/top-spenders`](#top-spenders) | Leaderboard of agents by spend |
+| GET | [`/api/v1/paymaster/subscriptions`](#subscriptions) | Flat-rate credential usage rollup |
+| POST | [`/api/v1/internal/cost/record`](#internal-cost-record) | Internal: sidecar reports parsed LLM usage |
 
 ## Time window parameters
 
@@ -112,10 +127,16 @@ Mission-scoped spend. Window-less -- sums the full mission.
     "cost_usd": 7.8945,
     "call_count": 28,
     "input_tokens": 542108,
-    "output_tokens": 192743
+    "output_tokens": 192743,
+    "first_ts": "2026-04-10T10:14:02Z",
+    "last_ts": "2026-04-17T09:58:31Z"
   }
 }
 ```
+
+`first_ts` / `last_ts` span the activity window for the mission. When no
+spend has been recorded they come back as the zero time
+(`"0001-01-01T00:00:00Z"`); the other numeric fields are `0`.
 
 **Errors:**
 
@@ -145,14 +166,14 @@ GET /api/v1/paymaster/top-spenders?limit=10&range=7d
 {
   "rows": [
     {
-      "scope_kind": "crew",
-      "scope_id": "crw_backend",
+      "scope_kind": "agent",
+      "scope_id": "agt_viktor",
       "cost_usd": 14.3210,
       "call_count": 132
     },
     {
       "scope_kind": "agent",
-      "scope_id": "agt_viktor",
+      "scope_id": "agt_eva",
       "cost_usd": 4.2103,
       "call_count": 42
     }
@@ -164,8 +185,8 @@ GET /api/v1/paymaster/top-spenders?limit=10&range=7d
 
 | Field | Type | Description |
 |---|---|---|
-| `rows[].scope_kind` | string | `workspace`, `crew`, `mission`, or `agent`. |
-| `rows[].scope_id` | string | Matching ID for the scope_kind. |
+| `rows[].scope_kind` | string | Always `agent` — the leaderboard ranks agents by spend (rows with a NULL `agent_id` are excluded). |
+| `rows[].scope_id` | string | The agent ID. |
 
 ---
 
@@ -194,7 +215,7 @@ Rollup of flat-rate credential usage grouped by `(subscription_plan, provider)`.
       "call_count": 1284,
       "input_tokens": 14_205_338,
       "output_tokens": 5_127_912,
-      "last_used_at": "2026-04-30T11:42:18.221Z"
+      "last_ts": "2026-04-30T11:42:18.221Z"
     },
     {
       "subscription_plan": "ChatGPT Plus",
@@ -202,7 +223,7 @@ Rollup of flat-rate credential usage grouped by `(subscription_plan, provider)`.
       "call_count": 312,
       "input_tokens": 1_802_443,
       "output_tokens": 622_501,
-      "last_used_at": "2026-04-30T09:11:02.083Z"
+      "last_ts": "2026-04-30T09:11:02.083Z"
     }
   ],
   "since": "2026-03-31T11:42:18Z",
@@ -217,7 +238,7 @@ Rollup of flat-rate credential usage grouped by `(subscription_plan, provider)`.
 | `rows[].call_count` | integer | Number of `cost_ledger` rows with `billing_mode='flat_rate'` for this `(plan, provider)`. |
 | `rows[].input_tokens` | integer | Sum of `input_tokens`. |
 | `rows[].output_tokens` | integer | Sum of `output_tokens`. |
-| `rows[].last_used_at` | string (RFC3339) | Most recent `ts` in the group. |
+| `rows[].last_ts` | string (RFC3339) | Most recent `ts` in the group. |
 
 **Errors:** `401` no workspace; `500` DB error.
 
@@ -229,7 +250,9 @@ Rollup of flat-rate credential usage grouped by `(subscription_plan, provider)`.
 POST /api/v1/internal/cost/record
 ```
 
-**Internal only — `X-Internal-Token` required.** This is how the sidecar reports parsed LLM usage from inside a crew container. Agents cannot reach this endpoint directly; the sidecar runs as UID 1002 and holds the token. Authoritative scope (workspace / crew / agent IDs) is taken from the sidecar's `IPCConfig` set at exec time, so an agent that captures the token still cannot forge cross-tenant attribution.
+<Note>
+  **Internal only — `X-Internal-Token` required.** This is how the sidecar reports parsed LLM usage from inside a crew container. Agents cannot reach this endpoint directly; the sidecar runs as UID 1002 and holds the token. Authoritative scope (workspace / crew / agent IDs) is taken from the sidecar's `IPCConfig` set at exec time, so an agent that captures the token still cannot forge cross-tenant attribution.
+</Note>
 
 See [Internal IPC API](/api-reference/internal#cost-record) for the full request/response schema and the surrounding security model.
 

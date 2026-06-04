@@ -125,6 +125,10 @@ Save-time validator walks **every** template-bearing field (prompt, nested input
 Templates are **regex substitution, not expression evaluation**. There is no arithmetic, no function calls, no inline conditionals. If you need logic, add another step.
 </Warning>
 
+<Info>
+Save-time validation walks **every** template-bearing field and rejects placeholders that reference unknown inputs or unseen-yet steps — so a typo'd `{{ inputs.tyop }}` fails at save, not at 3am in production.
+</Info>
+
 ## Step types
 
 ### `agent_run`
@@ -278,7 +282,9 @@ Save endpoints (sidecar `/pipelines/save`, user `/api/v1/workspaces/{ws}/pipelin
 
 This is the **self-improvement loop**: an authoring agent that writes brittle DSL gets a structured failure report it can read and revise from. Without the gate, MVP would ship pipelines that pass schema but fail at runtime.
 
+<Tip>
 `skip_test_gate: true` is honored only when the caller's role is OWNER or ADMIN; lower roles get 403. Useful for hand-crafted DSL from known-good templates (the seed flow uses it).
+</Tip>
 
 ## Triggers
 
@@ -290,7 +296,11 @@ crewship routine schedules create --slug summarize-text \
     --inputs '{"text":"…default"}'
 ```
 
-5-field cron expression. Scheduler runs in-process and ticks every 30s, so minimum resolution is 1 minute. Single-instance only — running multiple replicas would double-fire (no leader election yet).
+5-field cron expression. Scheduler runs in-process and ticks every 30s, so minimum resolution is 1 minute.
+
+<Warning>
+Single-instance only — running multiple replicas would double-fire (no leader election yet).
+</Warning>
 
 ### Webhooks
 
@@ -301,7 +311,9 @@ crewship routine webhooks create --slug pr-review-structured \
 
 Output reveals the public URL and signing secret **once** (Stripe-style). External services POST event payload to `/api/v1/webhooks/{token}`. With HMAC, sender includes header `X-Crewship-Signature: sha256=<hex_hmac_of_body>`, validated server-side via `hmac.Equal` (timing-safe). Rate limited per token, per minute, default 60.
 
-To rotate the secret: delete the webhook + create a new one. There is no in-place rotation by design.
+<Warning>
+The signing secret is shown **once**. To rotate it: delete the webhook + create a new one. There is no in-place rotation by design.
+</Warning>
 
 ### Manual
 
@@ -522,38 +534,40 @@ The platform **fails fast** if the rendered key is empty (missing input + no lit
 
 ## Troubleshooting
 
+<Tip>
 **Before going through this list:** run `crewship routine doctor <slug>` first. Most "blind alley" failures (missing crew provisioning, agent slug typo, missing credential, contradictory validation gate, cost cap too tight) surface as a ✗ check on doctor before they ever cost an LLM call.
+</Tip>
 
-### Save returns 422 "save requires a fresh, passing test_run"
-
+<AccordionGroup>
+<Accordion title="Save returns 422 &quot;save requires a fresh, passing test_run&quot;">
 The save endpoint requires the test gate cleared. Preferred path: call `/test_run`, capture the `save_token` from its response, and pass `"save_token": "<token>"` in the `/save` body. The token is a server-signed HMAC over `(workspace_id | definition_hash | user_id | issued_at)` and expires after 5 minutes — it cannot be forged from the client side.
 
 Alternatives:
-- `--skip-test-gate` (CLI) / `"skip_test_gate": true` (API) if your role is OWNER/ADMIN and you trust the DSL — bypasses the gate without running the test_run.
+- `crewship apply --skip-test-gate` (CLI — the flag lives on `apply`, not `routine save`) / `"skip_test_gate": true` (API) if your role is OWNER/ADMIN and you trust the DSL — bypasses the gate without running the test_run.
 - Legacy fallback: send `"last_test_run_at"` + `"last_test_run_passed"` in the body. Honoured for backwards compatibility, but trusts client-supplied values; new clients should always use `save_token`.
+</Accordion>
 
-### Run starts but no step events appear in the UI
-
+<Accordion title="Run starts but no step events appear in the UI">
 Check that `?include_steps=1` is in the runs URL the UI fetches. The list endpoint defaults to run-level only to keep payload bounded; the detail panel passes the flag explicitly. After a refresh, the waterfall populates from journal entries plus live WebSocket events.
+</Accordion>
 
-### Schedule shows enabled=true but never fires
-
+<Accordion title="Schedule shows enabled=true but never fires">
 The scheduler ticks every 30s; with single-binary deployment, restarting the server resets the in-memory tick cursor. Pending schedules whose `next_run_at` has passed will fire on the next tick after restart. If you've edited the cron expression, `next_run_at` recomputes from `now()` — so a `0 9 * * *` schedule edited at 10:30 won't fire until 9 AM tomorrow.
+</Accordion>
 
-### Webhook returns 401 / 403 on a known-good token
-
+<Accordion title="Webhook returns 401 / 403 on a known-good token">
 HMAC mismatch: check the `X-Crewship-Signature: sha256=<hex>` header, computed as `HMAC-SHA256(signing_secret, request_body)` over the **raw bytes** the sender sent (not a re-serialized form). The server uses `hmac.Equal` for comparison so timing-safe.
+</Accordion>
 
-### Run cost is higher than `estimated_cost_usd`
-
+<Accordion title="Run cost is higher than estimated_cost_usd">
 Two-tier escalation walks the fallback chain. With `on_fail: escalate_tier`, a failed Haiku run retries on Sonnet (5-10× more expensive), then Opus (20-50× more expensive) before giving up. Tighten validation gates (loosen `must_contain`, raise `min_length`), or set `max_cost_usd` on the routine to abort the run between steps when a cost ceiling is hit.
+</Accordion>
 
-### "Pipeline X step Y stuck in pending state"
-
+<Accordion title="&quot;Pipeline X step Y stuck in pending state&quot;">
 Probably a waitpoint without a matching listener (process restarted between the `wait` step starting and a decision arriving). Check `crewship routine waitpoints list`; if listed, decide via approve/reject. The recovery scan at server boot reports stranded waitpoints in the log line `pipeline waitpoint store wired (...) stranded_pending=N`.
+</Accordion>
 
-### Run returns 500 "pipeline: concurrency_key rendered to empty value"
-
+<Accordion title="Run returns 500 &quot;pipeline: concurrency_key rendered to empty value&quot;">
 The DSL declared a non-empty `concurrency_key` template but the rendered value is an empty string — typically because a referenced input was omitted at trigger time. Full error message:
 
 ```
@@ -567,6 +581,8 @@ Fixes, in order of preference:
 2. **Set a default on the InputSpec.** If the input is genuinely optional but you still want a tenant-style gate, add `"default": "global"` (or any non-empty sentinel) to the `InputSpec`. The platform merges defaults before rendering the key.
 3. **Use a literal prefix.** A template like `"vendor-alert-{{ inputs.vendor_id }}"` always renders non-empty (the literal `vendor-alert-` survives even when `vendor_id` is missing); the key still gates, just less granularly.
 4. **Drop the gate.** If you genuinely don't want concurrency control, omit `concurrency_key` entirely (do NOT set it to `""` — that's the *unset* sentinel).
+</Accordion>
+</AccordionGroup>
 
 ## CLI reference
 
@@ -607,6 +623,8 @@ The `pipeline` alias is preserved for back-compat on the legacy subcommands (`pi
 - Frontend: `app/(dashboard)/routines/`, `components/features/routines/`, hooks `use-pipelines*`
 
 ## Limitations (current MVP)
+
+These are known gaps in the current MVP — none block production use, but they shape what you can rely on today.
 
 - **Run state is in-memory** — restart loses active runs. Pending waitpoints survive (DB-backed); active step execution does not. A `pipeline_runs` table with status enum + checkpoint is the next-step PR.
 - **Single-instance scheduler** — running multiple replicas would double-fire schedules.

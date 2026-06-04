@@ -4,13 +4,27 @@ description: "Mission replay and regression detection via Quartermaster."
 icon: "clipboard-check"
 ---
 
-All endpoints require authentication and are workspace-scoped. Mutating endpoints (`replay`, `regression`) require `OWNER` or `ADMIN` role. Mission IDs must belong to the caller's workspace -- cross-tenant IDs return 404 with the same shape as "not found". See the [Quartermaster guide](/guides/quartermaster).
+Quartermaster replays a mission deterministically or diffs two missions to detect regressions in tool success, cost, and step signature. Both mutating endpoints return `202 Accepted` immediately and run the work in a background goroutine; poll [List runs](#list-runs) for results. See the [Quartermaster guide](/guides/quartermaster).
 
-Replay and regression both **return 202 Accepted immediately** and perform the work in a 10-minute background goroutine. Poll via List Runs.
+<Note>
+  All endpoints require authentication and are workspace-scoped. Mutating endpoints (`replay`, `regression`) require `OWNER` or `ADMIN` role. Mission IDs must belong to the caller's workspace -- cross-tenant IDs return 404 with the same shape as "not found".
+</Note>
+
+## Endpoints
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| POST | [`/api/v1/eval/replay`](#queue-a-replay) | Queue a deterministic mission replay |
+| POST | [`/api/v1/eval/regression`](#queue-a-regression) | Queue a baseline-vs-candidate regression |
+| GET | [`/api/v1/eval/runs`](#list-runs) | List eval runs (poll for results) |
 
 ---
 
-## Queue a replay
+## Queueing runs
+
+Replay and regression both **return 202 Accepted immediately** and perform the work in a 10-minute background goroutine. Poll via [List runs](#list-runs).
+
+### Queue a replay
 
 ```
 POST /api/v1/eval/replay
@@ -51,7 +65,7 @@ POST /api/v1/eval/replay
 
 ---
 
-## Queue a regression
+### Queue a regression
 
 ```
 POST /api/v1/eval/regression
@@ -86,7 +100,11 @@ Both must be in the caller's workspace. The handler checks them independently so
 
 ---
 
-## List runs
+## Results
+
+Poll for run status, results, and per-run token/cost totals.
+
+### List runs
 
 ```
 GET /api/v1/eval/runs?limit=50
@@ -108,26 +126,28 @@ GET /api/v1/eval/runs?limit=50
       "workspace_id": "ws_123",
       "kind": "replay",
       "mission_id": "MIS-42",
-      "baseline_mission_id": "",
-      "candidate_mission_id": "",
-      "seed": 42,
-      "seed_signature": "sha256:7c1b...",
       "status": "completed",
       "result": "ok",
-      "tokens": 184251,
-      "cost_usd": 0.8421,
+      "seed": 42,
+      "signature": "7c1b...",
+      "total_tokens": 184251,
+      "total_cost_usd": 0.8421,
       "regressed": false,
       "created_by": "user_123",
       "created_at": "2026-04-17T10:00:00Z",
-      "updated_at": "2026-04-17T10:02:41Z"
+      "completed_at": "2026-04-17T10:02:41Z"
     },
     {
       "id": "er_b2c3d4e5f6071829",
+      "workspace_id": "ws_123",
       "kind": "regression",
       "baseline_mission_id": "MIS-41",
       "candidate_mission_id": "MIS-42",
       "status": "completed",
       "result": "regressed: tool success -8% cost +22%",
+      "seed": 0,
+      "total_tokens": 201044,
+      "total_cost_usd": 0.9133,
       "regressed": true,
       "created_at": "2026-04-17T10:15:00Z"
     }
@@ -137,12 +157,17 @@ GET /api/v1/eval/runs?limit=50
 }
 ```
 
+The serialized struct (`quartermaster.RunRecord`) marks `mission_id`, `baseline_mission_id`, `candidate_mission_id`, `result`, `signature`, `created_by`, and `completed_at` as `omitempty` — empty values are dropped from the row, not emitted as `""`/`null`. `seed`, `total_tokens`, `total_cost_usd`, and `regressed` are always present.
+
 | Field | Type | Description |
 |---|---|---|
 | `rows[].kind` | string | `replay` or `regression`. |
 | `rows[].status` | string | `queued`, `running`, `completed`, `failed`. |
-| `rows[].result` | string | Human-readable outcome. On failure, the error message. |
-| `rows[].seed_signature` | string | sha256 over step-type + tool-name sequence; stable across deterministic replays. |
+| `rows[].result` | string | Human-readable outcome. On failure, the error message. Regression success uses `no_regression`; a detected regression reads `regressed: <delta summary>`. Omitted while empty. |
+| `rows[].signature` | string | sha256 over step-type + tool-name sequence; stable across deterministic replays. Populated for replay runs; omitted when empty. |
+| `rows[].total_tokens` | integer | Total tokens consumed by the run. |
+| `rows[].total_cost_usd` | number | Total USD cost of the run. |
+| `rows[].completed_at` | string? | RFC3339 completion timestamp; omitted until the run finishes. |
 | `rows[].regressed` | boolean | For regression kind only; true if at least one metric crossed the threshold. |
 
 ## Tenancy and role gates

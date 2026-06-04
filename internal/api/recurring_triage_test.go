@@ -98,7 +98,7 @@ func TestRecurring_List_Update_Delete(t *testing.T) {
 	// Update
 	body3 := bytes.NewBufferString(`{"title":"renamed","cron_expression":"30 9 * * *","enabled":false,"description":"d","priority":"high","project_id":"","milestone_id":"","assignee_type":"agent","assignee_id":"agent-worker","labels_json":"[]"}`)
 	req3 := httptest.NewRequest("PATCH", "/", body3)
-	req3.SetPathValue("id", resp.ID)
+	req3.SetPathValue("recurringId", resp.ID)
 	req3 = req3.WithContext(withWorkspace(withUser(req3.Context(), &AuthUser{ID: userID}), wsID, "OWNER"))
 	rr3 := httptest.NewRecorder()
 	h.Update(rr3, req3)
@@ -108,7 +108,7 @@ func TestRecurring_List_Update_Delete(t *testing.T) {
 
 	// Delete
 	req4 := httptest.NewRequest("DELETE", "/", nil)
-	req4.SetPathValue("id", resp.ID)
+	req4.SetPathValue("recurringId", resp.ID)
 	req4 = req4.WithContext(withWorkspace(withUser(req4.Context(), &AuthUser{ID: userID}), wsID, "OWNER"))
 	rr4 := httptest.NewRecorder()
 	h.Delete(rr4, req4)
@@ -120,7 +120,7 @@ func TestRecurring_List_Update_Delete(t *testing.T) {
 func TestRecurring_Update_NotFound(t *testing.T) {
 	h, userID, wsID, _ := newRecurringHandler(t)
 	req := httptest.NewRequest("PATCH", "/", bytes.NewBufferString(`{"title":"x"}`))
-	req.SetPathValue("id", "missing")
+	req.SetPathValue("recurringId", "missing")
 	req = req.WithContext(withWorkspace(withUser(req.Context(), &AuthUser{ID: userID}), wsID, "OWNER"))
 	rr := httptest.NewRecorder()
 	h.Update(rr, req)
@@ -141,7 +141,7 @@ func TestRecurring_Update_BadCron(t *testing.T) {
 	mustUnmarshal(t, rr, &resp)
 
 	req2 := httptest.NewRequest("PATCH", "/", bytes.NewBufferString(`{"cron_expression":"bogus"}`))
-	req2.SetPathValue("id", resp.ID)
+	req2.SetPathValue("recurringId", resp.ID)
 	req2 = req2.WithContext(withWorkspace(withUser(req2.Context(), &AuthUser{ID: userID}), wsID, "OWNER"))
 	rr2 := httptest.NewRecorder()
 	h.Update(rr2, req2)
@@ -162,7 +162,7 @@ func TestRecurring_Update_NoFields(t *testing.T) {
 	mustUnmarshal(t, rr, &resp)
 
 	req2 := httptest.NewRequest("PATCH", "/", bytes.NewBufferString(`{}`))
-	req2.SetPathValue("id", resp.ID)
+	req2.SetPathValue("recurringId", resp.ID)
 	req2 = req2.WithContext(withWorkspace(withUser(req2.Context(), &AuthUser{ID: userID}), wsID, "OWNER"))
 	rr2 := httptest.NewRecorder()
 	h.Update(rr2, req2)
@@ -174,7 +174,7 @@ func TestRecurring_Update_NoFields(t *testing.T) {
 func TestRecurring_Delete_NotFound(t *testing.T) {
 	h, userID, wsID, _ := newRecurringHandler(t)
 	req := httptest.NewRequest("DELETE", "/", nil)
-	req.SetPathValue("id", "missing")
+	req.SetPathValue("recurringId", "missing")
 	req = req.WithContext(withWorkspace(withUser(req.Context(), &AuthUser{ID: userID}), wsID, "OWNER"))
 	rr := httptest.NewRecorder()
 	h.Delete(rr, req)
@@ -247,7 +247,7 @@ func TestTriage_CRUD(t *testing.T) {
 	// Update
 	body3 := bytes.NewBufferString(`{"name":"renamed","pattern":"crash","match_type":"contains","priority":"high","labels_json":"[]","position":1,"enabled":true,"crew_id":"","assignee_id":"","project_id":""}`)
 	req3 := httptest.NewRequest("PATCH", "/", body3)
-	req3.SetPathValue("id", tr.ID)
+	req3.SetPathValue("ruleId", tr.ID)
 	req3 = req3.WithContext(withWorkspace(withUser(req3.Context(), &AuthUser{ID: userID}), wsID, "OWNER"))
 	rr3 := httptest.NewRecorder()
 	h.UpdateRule(rr3, req3)
@@ -257,7 +257,7 @@ func TestTriage_CRUD(t *testing.T) {
 
 	// Delete
 	req4 := httptest.NewRequest("DELETE", "/", nil)
-	req4.SetPathValue("id", tr.ID)
+	req4.SetPathValue("ruleId", tr.ID)
 	req4 = req4.WithContext(withWorkspace(withUser(req4.Context(), &AuthUser{ID: userID}), wsID, "OWNER"))
 	rr4 := httptest.NewRecorder()
 	h.DeleteRule(rr4, req4)
@@ -278,7 +278,7 @@ func TestTriage_UpdateRule_BadMatchType(t *testing.T) {
 	mustUnmarshal(t, rr, &tr)
 
 	req2 := httptest.NewRequest("PATCH", "/", bytes.NewBufferString(`{"match_type":"yolo"}`))
-	req2.SetPathValue("id", tr.ID)
+	req2.SetPathValue("ruleId", tr.ID)
 	req2 = req2.WithContext(withWorkspace(withUser(req2.Context(), &AuthUser{ID: userID}), wsID, "OWNER"))
 	rr2 := httptest.NewRecorder()
 	h.UpdateRule(rr2, req2)
@@ -299,7 +299,7 @@ func TestTriage_UpdateRule_BadRegex(t *testing.T) {
 	mustUnmarshal(t, rr, &tr)
 
 	req2 := httptest.NewRequest("PATCH", "/", bytes.NewBufferString(`{"pattern":"[","match_type":"regex"}`))
-	req2.SetPathValue("id", tr.ID)
+	req2.SetPathValue("ruleId", tr.ID)
 	req2 = req2.WithContext(withWorkspace(withUser(req2.Context(), &AuthUser{ID: userID}), wsID, "OWNER"))
 	rr2 := httptest.NewRecorder()
 	h.UpdateRule(rr2, req2)
@@ -320,7 +320,7 @@ func TestTriage_UpdateRule_NoFields(t *testing.T) {
 	mustUnmarshal(t, rr, &tr)
 
 	req2 := httptest.NewRequest("PATCH", "/", bytes.NewBufferString(`{}`))
-	req2.SetPathValue("id", tr.ID)
+	req2.SetPathValue("ruleId", tr.ID)
 	req2 = req2.WithContext(withWorkspace(withUser(req2.Context(), &AuthUser{ID: userID}), wsID, "OWNER"))
 	rr2 := httptest.NewRecorder()
 	h.UpdateRule(rr2, req2)
@@ -332,7 +332,7 @@ func TestTriage_UpdateRule_NoFields(t *testing.T) {
 func TestTriage_UpdateRule_NotFound(t *testing.T) {
 	h, userID, wsID, _, _ := newTriageHandler(t)
 	req := httptest.NewRequest("PATCH", "/", bytes.NewBufferString(`{"name":"x"}`))
-	req.SetPathValue("id", "missing")
+	req.SetPathValue("ruleId", "missing")
 	req = req.WithContext(withWorkspace(withUser(req.Context(), &AuthUser{ID: userID}), wsID, "OWNER"))
 	rr := httptest.NewRecorder()
 	h.UpdateRule(rr, req)
@@ -344,7 +344,7 @@ func TestTriage_UpdateRule_NotFound(t *testing.T) {
 func TestTriage_DeleteRule_NotFound(t *testing.T) {
 	h, userID, wsID, _, _ := newTriageHandler(t)
 	req := httptest.NewRequest("DELETE", "/", nil)
-	req.SetPathValue("id", "missing")
+	req.SetPathValue("ruleId", "missing")
 	req = req.WithContext(withWorkspace(withUser(req.Context(), &AuthUser{ID: userID}), wsID, "OWNER"))
 	rr := httptest.NewRecorder()
 	h.DeleteRule(rr, req)
@@ -406,6 +406,90 @@ func TestTriage_Process_Forbidden(t *testing.T) {
 	h.Process(rr, req)
 	if rr.Code != http.StatusForbidden {
 		t.Errorf("status = %d, want 403", rr.Code)
+	}
+}
+
+// TestRecurring_Update_Delete_ThroughRealRoute drives Update/Delete through a
+// mux carrying the PRODUCTION route pattern ({recurringId}), so the path param
+// is populated by the router exactly as it is in prod. A handler that reads the
+// wrong PathValue key returns "" → 404 on an existing record. Regression guard
+// for the route/handler param-name mismatch.
+func TestRecurring_Update_Delete_ThroughRealRoute(t *testing.T) {
+	h, userID, wsID, crewID := newRecurringHandler(t)
+
+	// Create one.
+	req := httptest.NewRequest("POST", "/", bytes.NewBufferString(
+		`{"crew_id":"`+crewID+`","title":"x","cron_expression":"0 9 * * *"}`))
+	req = req.WithContext(withWorkspace(withUser(req.Context(), &AuthUser{ID: userID}), wsID, "OWNER"))
+	rr := httptest.NewRecorder()
+	h.Create(rr, req)
+	var resp recurringIssueResponse
+	mustUnmarshal(t, rr, &resp)
+
+	inject := func(next http.HandlerFunc) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			r = r.WithContext(withWorkspace(withUser(r.Context(), &AuthUser{ID: userID}), wsID, "OWNER"))
+			next(w, r)
+		}
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("PATCH /api/v1/recurring-issues/{recurringId}", inject(h.Update))
+	mux.HandleFunc("DELETE /api/v1/recurring-issues/{recurringId}", inject(h.Delete))
+
+	// PATCH via the real URL path.
+	body := `{"title":"renamed","cron_expression":"30 9 * * *","enabled":false,"description":"d","priority":"high","project_id":"","milestone_id":"","assignee_type":"agent","assignee_id":"agent-worker","labels_json":"[]"}`
+	preq := httptest.NewRequest("PATCH", "/api/v1/recurring-issues/"+resp.ID, bytes.NewBufferString(body))
+	prr := httptest.NewRecorder()
+	mux.ServeHTTP(prr, preq)
+	if prr.Code != http.StatusOK {
+		t.Fatalf("PATCH through route: %d body=%s", prr.Code, prr.Body.String())
+	}
+
+	// DELETE via the real URL path.
+	dreq := httptest.NewRequest("DELETE", "/api/v1/recurring-issues/"+resp.ID, nil)
+	drr := httptest.NewRecorder()
+	mux.ServeHTTP(drr, dreq)
+	if drr.Code != http.StatusNoContent {
+		t.Fatalf("DELETE through route: %d body=%s", drr.Code, drr.Body.String())
+	}
+}
+
+// TestTriage_Update_Delete_ThroughRealRoute is the triage-rule analogue:
+// the production route uses {ruleId}; a handler reading another key 404s.
+func TestTriage_Update_Delete_ThroughRealRoute(t *testing.T) {
+	h, userID, wsID, _, _ := newTriageHandler(t)
+
+	req := httptest.NewRequest("POST", "/", bytes.NewBufferString(
+		`{"name":"bug-rule","pattern":"bug","match_type":"contains"}`))
+	req = req.WithContext(withWorkspace(withUser(req.Context(), &AuthUser{ID: userID}), wsID, "OWNER"))
+	rr := httptest.NewRecorder()
+	h.CreateRule(rr, req)
+	var tr triageRuleResponse
+	mustUnmarshal(t, rr, &tr)
+
+	inject := func(next http.HandlerFunc) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			r = r.WithContext(withWorkspace(withUser(r.Context(), &AuthUser{ID: userID}), wsID, "OWNER"))
+			next(w, r)
+		}
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("PATCH /api/v1/triage-rules/{ruleId}", inject(h.UpdateRule))
+	mux.HandleFunc("DELETE /api/v1/triage-rules/{ruleId}", inject(h.DeleteRule))
+
+	body := `{"name":"renamed","pattern":"crash","match_type":"contains","priority":"high","labels_json":"[]","position":1,"enabled":true,"crew_id":"","assignee_id":"","project_id":""}`
+	preq := httptest.NewRequest("PATCH", "/api/v1/triage-rules/"+tr.ID, bytes.NewBufferString(body))
+	prr := httptest.NewRecorder()
+	mux.ServeHTTP(prr, preq)
+	if prr.Code != http.StatusOK {
+		t.Fatalf("PATCH through route: %d body=%s", prr.Code, prr.Body.String())
+	}
+
+	dreq := httptest.NewRequest("DELETE", "/api/v1/triage-rules/"+tr.ID, nil)
+	drr := httptest.NewRecorder()
+	mux.ServeHTTP(drr, dreq)
+	if drr.Code != http.StatusNoContent {
+		t.Fatalf("DELETE through route: %d body=%s", drr.Code, drr.Body.String())
 	}
 }
 

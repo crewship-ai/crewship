@@ -10,7 +10,19 @@ A workflow template defines an **ordered list of stages** (e.g. `backlog → in_
 
 Implementation: `internal/api/workflow_templates_handler.go`. Backed by the `workflow_templates` table (schema introduced in migration v19, see `internal/database/migrate_consts_v16_v25.go`).
 
-All endpoints require an authenticated session and workspace context. Mutating verbs additionally require `OWNER`, `ADMIN`, or `MANAGER` role (`requireRole("create")`).
+<Note>
+  All endpoints require an authenticated session and workspace context. Mutating verbs additionally require `OWNER`, `ADMIN`, or `MANAGER` role (`requireRole("create")`).
+</Note>
+
+## Endpoints
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | [`/api/v1/workflow-templates`](#get-api-v1-workflow-templates) | List templates |
+| POST | [`/api/v1/workflow-templates`](#post-api-v1-workflow-templates) | Create a template |
+| GET | [`/api/v1/workflow-templates/{id}`](#get-api-v1-workflow-templates-id) | Get a single template |
+| PATCH | [`/api/v1/workflow-templates/{id}`](#patch-api-v1-workflow-templates-id) | Update a template |
+| DELETE | [`/api/v1/workflow-templates/{id}`](#delete-api-v1-workflow-templates-id) | Delete a template |
 
 ## Template shape
 
@@ -46,7 +58,11 @@ Validation rules enforced by `validateTemplateJSON`:
 
 Violations return `400` with a single-sentence message describing the failing constraint.
 
-## `GET /api/v1/workflow-templates`
+## Endpoint reference
+
+CRUD over templates. Built-in rows are server-controlled and surface first on List.
+
+### `GET /api/v1/workflow-templates`
 
 List every template visible to the current workspace. Built-in rows surface first (`is_builtin DESC`), then user-created rows by `created_at ASC`.
 
@@ -70,7 +86,7 @@ List every template visible to the current workspace. Built-in rows surface firs
 ]
 ```
 
-## `POST /api/v1/workflow-templates`
+### `POST /api/v1/workflow-templates`
 
 Create a new user-owned template.
 
@@ -97,7 +113,7 @@ Create a new user-owned template.
 
 Broadcasts `workflow_template.created` on the workspace WS channel with `{"id": "<id>"}`.
 
-## `GET /api/v1/workflow-templates/{id}`
+### `GET /api/v1/workflow-templates/{id}`
 
 Fetch a single template by id, scoped to the calling workspace.
 
@@ -109,7 +125,7 @@ Fetch a single template by id, scoped to the calling workspace.
 |---|---|
 | `404` | Template id does not exist, **or** exists in a different workspace. The handler deliberately collapses these into one response code so cross-workspace existence can't be inferred. |
 
-## `PATCH /api/v1/workflow-templates/{id}`
+### `PATCH /api/v1/workflow-templates/{id}`
 
 Partial update. Only the mutable subset (`name`, `description`, `template_json`, `icon`, `color`) is writable. `is_builtin`, `created_at`, and `id` are immutable; `updated_at` is set to "now" on every successful write.
 
@@ -137,9 +153,13 @@ Partial update. Only the mutable subset (`name`, `description`, `template_json`,
 
 Broadcasts `workflow_template.updated` on the workspace WS channel with `{"id": "<id>"}`.
 
-## `DELETE /api/v1/workflow-templates/{id}`
+### `DELETE /api/v1/workflow-templates/{id}`
 
 Hard delete. Templates are reference data — crews that still point at the deleted template fall back to the runtime default lifecycle at next render rather than failing.
+
+<Warning>
+  Hard delete (no soft delete). Crews still pointing at the removed template fall back to the runtime default lifecycle on next render rather than failing.
+</Warning>
 
 **Auth:** authenticated session + workspace context + `requireRole("create")`.
 

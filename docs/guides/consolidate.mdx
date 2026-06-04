@@ -6,16 +6,16 @@ icon: "layers"
 
 # Consolidate
 
+Two background workers run against the [Crew Journal](/guides/crew-journal). Both start automatically at server boot (`consolidate.StartBackground`) on the cadences below; you can also trigger a consolidation run on demand via the API/CLI.
+
+1. **Consolidator** — runs every 6h. Walks recent journal entries per crew and produces a set of learned rules appended to `.memory/topics/learned-YYYY-MM-DD.md`. Emits `memory.consolidated`.
+2. **Compactor** — runs daily at 03:00 UTC. Rolls up low-signal entries older than 30 days into a single `system.compaction` entry and deletes the originals. `warn`/`error` rows are preserved indefinitely.
+
+Each degrades gracefully when its inputs are absent: no summarizer (auxiliary LLM) configured → the consolidator loop still runs but produces no rules; the compactor always runs its retention sweep.
+
 <Note>
-**Roadmap (v0.2).** The Consolidate package ships in v0.1 but is not auto-scheduled. Manual trigger via API/CLI works today; automatic scheduling and the "supervisor crew" pattern are planned for v0.2.
+The "supervisor crew" orchestration pattern (a dedicated crew that reviews and curates consolidated rules) is on the roadmap and not part of the current automatic workers.
 </Note>
-
-Two background workers can run against the [Crew Journal](/guides/crew-journal). v0.1 ships them as on-demand tools — v0.2 wires them onto the cadences described below.
-
-1. **Consolidator** — designed cadence: every 6h. Walks recent journal entries per crew and produces a set of learned rules appended to `.memory/topics/learned-YYYY-MM-DD.md`. Emits `memory.consolidated`.
-2. **Compactor** — designed cadence: daily at 03:00 UTC. Rolls up low-signal entries older than 30 days into a single `system.compaction` entry and deletes the originals. `warn`/`error` rows are preserved indefinitely.
-
-Both are optional (no summarizer = no rules; no Compactor window = no compaction). In v0.1 you trigger them manually via the API and CLI.
 
 ## Candidate entry types
 
@@ -148,6 +148,6 @@ Full reference: [`crewship consolidate`](/cli/consolidate).
 ## Related
 
 - [Crew Journal](/guides/crew-journal) -- input stream.
-- [Episodic memory](/guides/episodic-memory) -- indexer runs on the consolidator tick.
+- [Episodic memory](/guides/episodic-memory) -- the vector index built from the entry types these workers emit.
 - [Memory System](/guides/agent-memory) -- consumes the generated `topics/learned-*.md` files.
 - [`crewship consolidate`](/cli/consolidate), [Consolidate API](/api-reference/consolidate).

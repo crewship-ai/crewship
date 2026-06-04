@@ -21,7 +21,9 @@ crewship integration <subcommand> [flags]
 crewship intg <subcommand> [flags]
 ```
 
-Auth: every subcommand requires `crewship login` plus an active workspace.
+<Note>
+**Auth:** every subcommand requires `crewship login` plus an active workspace.
+</Note>
 
 ## Subcommands
 
@@ -212,11 +214,15 @@ Pass `--credential ""` to clear the binding's credential link.
 
 ## Common errors
 
+<Accordion title="Common errors and what they mean">
+
 - **`--name is required`** — `integration add` or `integration crew create` was called without a name.
 - **`--agent and --server are required`** — `integration bind` needs both flags.
 - **`--agent and --binding-id are required`** — `integration unbind`.
 - **`no fields to update`** — crew `update` or agent `update-binding` was called with no `Changed()` flags.
 - **`no fields to update (use --credential, --cred-type, --cred-header, --env-var-name, or --enabled)`** — explicit guidance from `agent update-binding`.
+
+</Accordion>
 
 ## See also
 

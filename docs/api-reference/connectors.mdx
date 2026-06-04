@@ -1,0 +1,200 @@
+---
+title: "Connectors"
+description: "Curated connector catalog -- browse, verify, and install pre-built MCP integrations."
+icon: "plug"
+---
+
+Connectors are a **curated catalog** of pre-built integrations, each described
+by a manifest (auth fields, MCP transport, verify probe, OAuth block). Browse
+the catalog, verify submitted credentials against the provider, then install
+to materialize a workspace- or crew-scoped integration.
+
+This is the catalog flow; the [`/api/v1/integrations`](/api-reference/integrations)
+endpoints remain the path for the "Custom MCP server" escape hatch. List and
+Get are open to any authenticated role; Verify and Install require a
+`workspace_id` and a `MANAGER`+ role on that workspace.
+
+## Auth Modes
+
+A manifest's `auth_mode` determines how credentials are collected and what the
+install flow returns next:
+
+| `auth_mode` | Meaning |
+|---|---|
+| `pat` | Personal access token / API key pasted into form fields |
+| `conn_string` | Connection string pasted into form fields |
+| `mcp_oauth` | The MCP server itself drives OAuth 2.1 + DCR; install returns `next_step: "mcp_oauth"` |
+| `byo_oauth` | Bring-your-own OAuth app; install returns `next_step: "oauth"` plus an `oauth_url` to open |
+| `none` | No credentials required |
+
+---
+
+## List Connectors
+
+```
+GET /api/v1/connectors
+```
+
+Returns the catalog as an array (stable insertion order; empty array on an
+empty catalog).
+
+**Auth:** Any authenticated user
+
+**Response:** `200 OK`
+
+```json
+[
+  {
+    "id": "github",
+    "name": "GitHub",
+    "description": "Issues, PRs, and repo access via the GitHub MCP server",
+    "category": "developer-tools",
+    "auth_mode": "pat",
+    "brand_logo": "https://...",
+    "brand_color": "#181717"
+  }
+]
+```
+
+### List Item Fields
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | string | Connector ID (manifest id) |
+| `name` | string | Display name |
+| `description` | string | Short description |
+| `category` | string | Catalog category |
+| `auth_mode` | string | One of the auth modes above |
+| `brand_logo` | string | Brand logo URL |
+| `brand_color` | string | Brand accent color |
+
+| Status | Condition |
+|---|---|
+| `401` | Not authenticated |
+
+---
+
+## Get Connector
+
+```
+GET /api/v1/connectors/{connectorId}
+```
+
+Returns the full manifest verbatim so the frontend can render the
+schema-driven form (fields, verify block, OAuth block) without a second
+round-trip.
+
+**Auth:** Any authenticated user
+
+| Path Parameter | Description |
+|---|---|
+| `connectorId` | Manifest ID |
+
+**Response:** `200 OK` -- the full connector manifest.
+
+| Status | Condition |
+|---|---|
+| `401` | Not authenticated |
+| `404` | No connector with this ID |
+
+---
+
+## Verify Connector
+
+```
+POST /api/v1/connectors/{connectorId}/verify?workspace_id={workspaceId}
+```
+
+Pre-install probe. For `pat` / `conn_string` manifests with a verify block,
+this resolves the submitted field values into the manifest's verify HTTP
+request and makes one call against the provider. `mcp_oauth`, `byo_oauth`, and
+`none` skip the probe (auth happens via redirect) and return `ok: true`.
+
+The outbound probe is SSRF-safe: the resolved URL is validated and dialed
+through a guarded client that rejects loopback, RFC1918, and cloud-metadata
+addresses.
+
+**Auth:** `MANAGER`+ role on the workspace
+
+**Request Body:**
+
+| Field | Type | Description |
+|---|---|---|
+| `fields` | object | Map of user-submitted form values keyed by field key |
+
+```json
+{ "fields": { "token": "ghp_xxx" } }
+```
+
+**Response:** `200 OK`
+
+```json
+{ "ok": true, "message": "" }
+```
+
+`ok: false` means the provider rejected the credentials -- the call itself
+succeeded, so treat it as user-correctable, not a server error. The `message`
+carries a human-readable cause (e.g. a bounded snippet of the provider's
+error response). `4xx` is reserved for system-level problems.
+
+| Status | Condition |
+|---|---|
+| `400` | Invalid body, or a required field is missing |
+| `401` | Not authenticated |
+| `403` | Caller is not `MANAGER`+ |
+| `404` | No connector with this ID |
+
+---
+
+## Install Connector
+
+```
+POST /api/v1/connectors/{connectorId}/install?workspace_id={workspaceId}
+```
+
+Materializes the manifest's MCP block against the submitted fields and
+persists an integration row, encrypting any `pat` / `conn_string` /
+`byo_oauth` field values into the credential vault. Omit `crew_id` to install
+at workspace scope; set it to install at crew scope.
+
+**Auth:** `MANAGER`+ role on the workspace
+
+**Request Body:**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `crew_id` | string | No | Crew ID for crew-scoped install; omit for workspace scope |
+| `name` | string | No | User-facing label; defaults to the manifest name |
+| `fields` | object | Conditional | Map of submitted form values (required fields per the manifest) |
+
+```json
+{
+  "name": "GitHub (org)",
+  "fields": { "token": "ghp_xxx" }
+}
+```
+
+**Response:** `201 Created`
+
+```json
+{
+  "integration_id": "cm1abc123",
+  "next_step": "oauth",
+  "oauth_url": "https://github.com/login/oauth/authorize?..."
+}
+```
+
+### Response Fields
+
+| Field | Type | Description |
+|---|---|---|
+| `integration_id` | string | ID of the created integration row |
+| `next_step` | string? | `""` (complete), `"oauth"` (open `oauth_url`), or `"mcp_oauth"` (hand off to MCP-OAuth/DCR) |
+| `oauth_url` | string? | Authorization URL to open in a popup (only when `next_step` is `"oauth"`) |
+
+| Status | Condition |
+|---|---|
+| `400` | Missing `workspace_id`, invalid body, or a required field is missing |
+| `401` | Not authenticated |
+| `403` | Caller is not `MANAGER`+ |
+| `404` | No connector with this ID |

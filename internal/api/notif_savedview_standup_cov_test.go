@@ -164,7 +164,7 @@ func TestCovNSVNotificationListHappyAndEmpty(t *testing.T) {
 func TestCovNSVNotificationMarkReadUnauthorized(t *testing.T) {
 	h, _, _ := covNSVNotifHandler(t)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/notifications/n1/read", nil)
-	req.SetPathValue("id", "n1")
+	req.SetPathValue("notificationId", "n1")
 	rec := httptest.NewRecorder()
 	h.MarkRead(rec, req)
 	if rec.Code != http.StatusUnauthorized {
@@ -175,7 +175,7 @@ func TestCovNSVNotificationMarkReadUnauthorized(t *testing.T) {
 func TestCovNSVNotificationMarkReadNotFound(t *testing.T) {
 	h, userID, wsID := covNSVNotifHandler(t)
 	req := withWorkspaceUser(httptest.NewRequest(http.MethodPost, "/api/v1/notifications/nope/read", nil), userID, wsID, "OWNER")
-	req.SetPathValue("id", "nope")
+	req.SetPathValue("notificationId", "nope")
 	rec := httptest.NewRecorder()
 	h.MarkRead(rec, req)
 	if rec.Code != http.StatusNotFound {
@@ -188,7 +188,7 @@ func TestCovNSVNotificationMarkReadHappy(t *testing.T) {
 	covNSVSeedNotification(t, h, "n1", wsID, userID, "created", false)
 
 	req := withWorkspaceUser(httptest.NewRequest(http.MethodPost, "/api/v1/notifications/n1/read", nil), userID, wsID, "OWNER")
-	req.SetPathValue("id", "n1")
+	req.SetPathValue("notificationId", "n1")
 	rec := httptest.NewRecorder()
 	h.MarkRead(rec, req)
 	if rec.Code != http.StatusOK {
@@ -204,7 +204,7 @@ func TestCovNSVNotificationMarkReadHappy(t *testing.T) {
 
 	// Already-read row: affected==0 but exists → still 200 (not 404).
 	req = withWorkspaceUser(httptest.NewRequest(http.MethodPost, "/api/v1/notifications/n1/read", nil), userID, wsID, "OWNER")
-	req.SetPathValue("id", "n1")
+	req.SetPathValue("notificationId", "n1")
 	rec = httptest.NewRecorder()
 	h.MarkRead(rec, req)
 	if rec.Code != http.StatusOK {
@@ -246,7 +246,7 @@ func TestCovNSVNotificationDelete(t *testing.T) {
 
 	// Unauthorized.
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/notifications/n1", nil)
-	req.SetPathValue("id", "n1")
+	req.SetPathValue("notificationId", "n1")
 	rec := httptest.NewRecorder()
 	h.Delete(rec, req)
 	if rec.Code != http.StatusUnauthorized {
@@ -255,7 +255,7 @@ func TestCovNSVNotificationDelete(t *testing.T) {
 
 	// Not found.
 	req = withWorkspaceUser(httptest.NewRequest(http.MethodDelete, "/api/v1/notifications/nope", nil), userID, wsID, "OWNER")
-	req.SetPathValue("id", "nope")
+	req.SetPathValue("notificationId", "nope")
 	rec = httptest.NewRecorder()
 	h.Delete(rec, req)
 	if rec.Code != http.StatusNotFound {
@@ -265,7 +265,7 @@ func TestCovNSVNotificationDelete(t *testing.T) {
 	// Happy.
 	covNSVSeedNotification(t, h, "n1", wsID, userID, "a", false)
 	req = withWorkspaceUser(httptest.NewRequest(http.MethodDelete, "/api/v1/notifications/n1", nil), userID, wsID, "OWNER")
-	req.SetPathValue("id", "n1")
+	req.SetPathValue("notificationId", "n1")
 	rec = httptest.NewRecorder()
 	h.Delete(rec, req)
 	if rec.Code != http.StatusNoContent {

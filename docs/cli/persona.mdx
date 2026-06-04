@@ -19,7 +19,11 @@ Two layers:
 crewship persona <subcommand> [flags]
 ```
 
-All commands operate on the active workspace ([`crewship workspace use`](/cli/workspace)) and resolve targets by slug, not ID, to match the rest of the CLI surface.
+<Note>
+  All commands operate on the active workspace
+  ([`crewship workspace use`](/cli/workspace)) and resolve targets by slug,
+  not ID, to match the rest of the CLI surface.
+</Note>
 
 ## Subcommands
 
@@ -29,8 +33,8 @@ All commands operate on the active workspace ([`crewship workspace use`](/cli/wo
 | `edit <agent-slug>` | Open `$EDITOR` to update the agent-layer override. |
 | `reset <agent-slug>` | Drop the agent-layer file (crew default reappears). |
 | `history <agent-slug>` | List the agent's persona version log (newest first). |
-| `suggest-from-inbox <audit-id>` | Operator-side approval of a pending agent persona proposal. |
-| `crew <crew-slug>` | Sub-tree applying the same view/edit/reset/history verbs to the crew-default layer. |
+| `suggest-from-inbox <audit-id>` | Phase-2 stub — prints a hint to apply the proposal manually via `persona edit`. |
+| `crew <crew-slug>` | Sub-tree applying the `view` / `edit` / `reset` verbs to the crew-default layer. |
 
 ---
 
@@ -59,16 +63,13 @@ Focus on backend services. Prefer async over sync...
 
 ```bash
 crewship persona edit <agent-slug>
-crewship persona edit <agent-slug> --no-editor < new-persona.md
 ```
 
-Pulls the current agent-layer content, opens `$EDITOR`, and writes the saved buffer back via [`PUT /api/v1/agents/{id}/persona`](/api-reference/agents#set-persona). Without an editor (CI, piped stdin) pass `--no-editor` and provide the new body on stdin.
+Pulls the current agent-layer content, opens `$EDITOR` (falling back to `vi`), and writes the saved buffer back via [`PUT /api/v1/agents/{id}/persona`](/api-reference/agents#set-persona). An empty buffer aborts the edit without writing.
 
-| Flag | Default | Effect |
-|---|---|---|
-| `--no-editor` | `false` | Skip `$EDITOR`; read the new content from stdin. |
-
-The server caps at **1500 bytes**; the CLI rejects oversize buffers client-side before the round-trip.
+<Note>
+  The server caps persona content at **1500 bytes**.
+</Note>
 
 ---
 
@@ -78,7 +79,10 @@ The server caps at **1500 bytes**; the CLI rejects oversize buffers client-side 
 crewship persona reset <agent-slug>
 ```
 
-Removes the agent-layer file. The next `view` falls through to the crew default (or the synthesised stub when the crew has none).
+<Warning>
+  Removes the agent-layer file. The next `view` falls through to the crew
+  default (or the synthesised stub when the crew has none).
+</Warning>
 
 ---
 
@@ -86,10 +90,9 @@ Removes the agent-layer file. The next `view` falls through to the crew default 
 
 ```bash
 crewship persona history <agent-slug>
-crewship persona history <agent-slug> --limit 5
 ```
 
-Lists `memory_versions` rows for the agent's `PERSONA.md` path, newest first. Server clamps `--limit` to 100. Use the printed `sha256` with [`crewship memory show`](/cli/memory#show) to read an older version's content without restoring it.
+Lists `memory_versions` rows for the agent's `PERSONA.md` path, newest first (most recent 20 entries). Use the printed `sha256` with [`crewship memory show`](/cli/memory#show) to read an older version's content without restoring it.
 
 ---
 
@@ -99,9 +102,7 @@ Lists `memory_versions` rows for the agent's `PERSONA.md` path, newest first. Se
 crewship persona suggest-from-inbox <audit-id>
 ```
 
-When an agent's [`POST /persona/suggest`](/api-reference/agents#suggest-persona) lands as an inbox proposal (because the crew's autonomy is `strict` / `guided` / `trusted`), this is the operator's approval path: redeem the inbox `audit_id` to apply the proposed content and write a `memory_versions` entry.
-
-Reject with the regular [`crewship approve --deny`](/cli/approvals) flow against the same inbox item.
+This is a **Phase-2 stub**. When an agent's [`POST /persona/suggest`](/api-reference/agents#suggest-persona) lands as an inbox proposal (because the crew's autonomy is `strict` / `guided` / `trusted`), there is not yet a dedicated endpoint to fetch an arbitrary audit row by id, so the command does not auto-apply. It prints a hint to view the proposal in the inbox UI and apply it manually via `crewship persona edit <agent>`.
 
 ---
 

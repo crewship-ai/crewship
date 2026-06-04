@@ -15,7 +15,9 @@ crewship ws <subcommand> [flags]
 
 The active workspace is stored in `~/.crewship/cli-config.yaml` under `workspace` (slug or id). It is sent as `workspace_id=` on every API request by the CLI client, so switching workspaces is purely client-side — no server round-trip.
 
-Auth: `list`, `use`, and `get` require `crewship login`; mutations additionally require an active workspace context. Role gates apply server-side — `OWNER`/`ADMIN` to update or invite, `MEMBER+` to read.
+<Note>
+**Auth:** `list`, `use`, and `get` require `crewship login`; mutations additionally require an active workspace context. Role gates apply server-side — `OWNER`/`ADMIN` to update or invite, `MEMBER+` to read.
+</Note>
 
 ## Subcommands
 
@@ -29,6 +31,7 @@ Auth: `list`, `use`, and `get` require `crewship login`; mutations additionally 
 | `workspace member list` | List members of the active workspace. |
 | `workspace member add <user-id>` | Add an existing user to the workspace. |
 | `workspace member remove <user-id>` | Remove a member (prompts unless `-y`). |
+| `workspace member capabilities ...` | Manage per-member capability grants (aliases: `caps`, `capability`). See [below](#workspace-member-capabilities). |
 | `workspace invite [email]` | Invite by email (shortcut for `invite create`). |
 | `workspace invite create <email>` | Create an invitation. |
 | `workspace invite list` | List pending invitations. |
@@ -114,6 +117,42 @@ crewship workspace member remove usr_abc123 --yes
 
 User IDs come from `crewship admin list-users` or the web UI's user table.
 
+## `workspace member capabilities`
+
+Per-member capabilities grant individual high-value actions (create routines, skills, credentials, ...) to one member **without** promoting them to a wider RBAC role. They layer on top of the member's role — a `MEMBER` can be handed `routine.create` while everyone else in that role stays chat-only.
+
+Aliases: `caps`, `capability`. **ADMIN+ required** to mutate; the CLI exits non-zero on a `403` so a misconfigured CI pipeline fails loudly. Capabilities are workspace-scoped — a user in multiple workspaces is configured separately in each.
+
+The `chat` capability is always implied and cannot be granted or revoked individually; removing chat means removing the member entirely (`workspace member remove`). The OWNER target is immutable, and you cannot mutate your own row (downgrade-then-restore defence).
+
+Valid capability strings: `chat`, `routine.create`, `skill.create`, `credential.create`, `credential.rotate`, `issue.create`, `memory.write`.
+
+### Subcommands
+
+| Command | Args | Purpose |
+| --- | --- | --- |
+| `capabilities list <user-id>` | exactly 1 | Show capabilities granted to one member. |
+| `capabilities grant <user-id> <cap> [<cap>...]` | 2+ | Grant one or more capabilities incrementally (existing grants preserved). |
+| `capabilities revoke <user-id> <cap> [<cap>...]` | 2+ | Revoke one or more capabilities incrementally (other grants preserved). |
+| `capabilities preset <user-id> <chat\|power\|admin>` | exactly 2 | Replace the member's capability set with a named bundle (overwrites existing grants). |
+
+Bundles map to common combinations:
+
+| Bundle | Capabilities |
+| --- | --- |
+| `chat` | chat-only baseline (default for new MEMBERs). |
+| `power` | chat + `routine.create` + `issue.create` + `memory.write` (trusted team members). |
+| `admin` | full set, including `credential.create` + `credential.rotate`. |
+
+```bash
+crewship workspace member capabilities list usr_abc123
+crewship workspace member caps grant usr_abc123 routine.create issue.create memory.write
+crewship workspace member caps revoke usr_abc123 memory.write
+crewship workspace member caps preset usr_abc123 power
+```
+
+Unknown capability strings are rejected server-side (`400`, typo guard). Revoking `chat` is rejected by the server. The `list` command prints `USER`, `ROLE`, `CAPABILITIES` columns; mutations print the resulting capability set.
+
 ### Invitations
 
 ```bash
@@ -129,10 +168,14 @@ The shortcut form (`invite <email>`) and the explicit form (`invite create <emai
 
 ## Common errors
 
+<Accordion title="Common errors and what they mean">
+
 - **`workspace "X" not found or not accessible`** — `workspace use` validated against `/api/v1/workspaces` and your token has no membership.
 - **`--name is required`** — `create` needs at least a name.
 - **`no fields to update`** — `update` was called without any of `--name` / `--slug` / `--language`.
 - **`no workspace selected`** — `update` ran without an active workspace. Run `crewship workspace use` first or pass `--workspace`.
+
+</Accordion>
 
 ## See also
 

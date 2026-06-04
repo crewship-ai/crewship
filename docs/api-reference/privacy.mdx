@@ -1,0 +1,170 @@
+---
+title: "Privacy"
+description: "GDPR primitives for per-user peer cards -- list, purge, and opt out of peer-card extraction."
+icon: "user-shield"
+---
+
+Agents may extract "peer cards" -- per-user notes about the people they
+collaborate with. These endpoints give every authenticated user GDPR control
+over the cards stored about **themselves**: list what's held, purge it, and
+manage opt-out consent.
+
+Every endpoint acts on the caller's own data only -- the user ID is read from
+the auth context, never a path parameter. They require authentication and
+workspace context. Cross-user GDPR actions (admin acting on another user) go
+through a separate admin surface.
+
+Opt-out is a **hard stop**: setting `opted_out=true` triggers an immediate
+purge of every existing card about the user across every agent in the current
+workspace -- it does not wait for the next routine sweep.
+
+---
+
+## List My Peer Cards
+
+```
+GET /api/v1/users/me/peer-cards?workspace_id={workspaceId}
+```
+
+Lists every peer card mentioning the requesting user across every agent in the
+current workspace, including content (the user has a right to see what was
+stored). Each read is itself audited.
+
+**Auth:** Any authenticated user (own data only)
+
+**Response:** `200 OK`
+
+```json
+{
+  "user_id": "user_123",
+  "peers": [
+    {
+      "id": "pc_abc",
+      "agent_id": "agent_xyz",
+      "agent_slug": "ada",
+      "user_slug": "pavel",
+      "bytes": 412,
+      "created_at": "2026-05-26T14:22:10Z",
+      "updated_at": "2026-05-26T14:22:10Z",
+      "content": "# Pavel\n..."
+    }
+  ]
+}
+```
+
+### Peer Card Fields
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | string | Peer card ID |
+| `agent_id` | string | Agent that authored the card |
+| `agent_slug` | string | Agent slug |
+| `user_slug` | string | The card's user slug |
+| `bytes` | integer | Card size in bytes |
+| `created_at` | string | ISO 8601 timestamp |
+| `updated_at` | string | ISO 8601 timestamp |
+| `content` | string? | Card markdown; omitted when no storage path is configured |
+
+| Status | Condition |
+|---|---|
+| `401` | Not authenticated |
+| `400` | Missing workspace context |
+
+---
+
+## Purge My Peer Cards
+
+```
+DELETE /api/v1/users/me/peer-cards?workspace_id={workspaceId}
+```
+
+Deletes every card about the requesting user across every agent in the
+workspace (disk + index + per-card audit). Does not touch consent -- a user
+can delete current cards without opting out of future extraction.
+
+**Auth:** Any authenticated user (own data only)
+
+**Response:** `200 OK`
+
+```json
+{ "user_id": "user_123", "purged": 3 }
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `user_id` | string | The requesting user |
+| `purged` | integer | Number of cards deleted |
+
+---
+
+## Get Peer Consent
+
+```
+GET /api/v1/users/me/peer-consent?workspace_id={workspaceId}
+```
+
+Returns the user's opt-out state for the current workspace.
+
+**Auth:** Any authenticated user (own data only)
+
+**Response:** `200 OK`
+
+```json
+{
+  "user_id": "user_123",
+  "workspace_id": "ws_123",
+  "opted_out": false,
+  "opted_out_at": ""
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `user_id` | string | The requesting user |
+| `workspace_id` | string | Current workspace |
+| `opted_out` | boolean | Whether the user has opted out of peer-card extraction |
+| `opted_out_at` | string | ISO 8601 timestamp of opt-out; empty when not opted out |
+
+---
+
+## Set Peer Consent
+
+```
+PUT /api/v1/users/me/peer-consent?workspace_id={workspaceId}
+Content-Type: application/json
+```
+
+Flips the opt-out state. Setting `opted_out=true` triggers an **immediate
+purge** of all existing peer cards about the user in this workspace, alongside
+the consent change and an audit row.
+
+**Auth:** Any authenticated user (own data only)
+
+**Request Body:**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `opted_out` | boolean | Yes | `true` to opt out (and purge); `false` to opt back in |
+
+```json
+{ "opted_out": true }
+```
+
+**Response:** `200 OK`
+
+```json
+{
+  "user_id": "user_123",
+  "workspace_id": "ws_123",
+  "opted_out": true,
+  "purged": 3
+}
+```
+
+`purged` reflects the number of cards removed by the opt-out (0 when opting
+back in).
+
+| Status | Condition |
+|---|---|
+| `400` | Invalid JSON or missing workspace context |
+| `401` | Not authenticated |

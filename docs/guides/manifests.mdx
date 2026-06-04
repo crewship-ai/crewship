@@ -165,7 +165,11 @@ What sync **does not** delete (additive only — drop them through the UI or oth
 
 ## Credential safety
 
-Manifests **never** carry secret values. The `credentials:` block declares slots — `env`, `provider`, `type`, `label`. Values arrive at apply-time through one of three paths:
+<Warning>
+Manifests **never** carry secret values. The `credentials:` block declares slots — `env`, `provider`, `type`, `label`. Commit the manifest to git; the secrets stay out of it.
+</Warning>
+
+Values arrive at apply-time through one of three paths:
 
 ```bash
 # 1. From the process environment (matches credential.env name)
@@ -200,9 +204,9 @@ skills:
     path: ./skills/security-review/SKILL.md
 
   # URL: fetched at apply time. Pin with ref + digest for reproducibility.
-  - slug: git-flow
-    source: https://github.com/anthropics/skills/blob/main/git-flow/SKILL.md
-    ref: v1.2.0
+  - slug: canvas-design
+    source: https://github.com/anthropics/skills/blob/main/skills/canvas-design/SKILL.md
+    ref: main
 
   # Inline: SKILL.md body in the manifest itself. Hard cap 8 KB.
   - slug: house-style
@@ -223,7 +227,9 @@ agents:
     skills: [security-review, house-style]
 ```
 
+<Info>
 The validator rejects dangling references (agent points at a skill the manifest doesn't declare) — no half-applied state.
+</Info>
 
 ## Sidecar services (Redis, Postgres, etc.)
 
@@ -448,7 +454,7 @@ rm /tmp/secrets.env
 
 ## Examples
 
-The repo ships with five reference manifests under `examples/manifests/`:
+The repo ships with these reference manifests under `examples/manifests/`:
 
 | File | Demonstrates |
 | --- | --- |
@@ -457,6 +463,7 @@ The repo ships with five reference manifests under `examples/manifests/`:
 | `full-team.workspace.yaml` | Workspace bundle with 2 crews sharing creds + skill |
 | `python-with-features.crew.yaml` | In-container Redis + Postgres via devcontainer features |
 | `python-with-services.crew.yaml` | Sidecar Redis + Postgres on a crew bridge network |
+| `full-complete.yaml` | One document of every manifest kind in a single file |
 
 ## See also
 

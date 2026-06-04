@@ -6,7 +6,11 @@ icon: "chart-line"
 
 # Memory Observability
 
-This guide is for the human running the instance — not for agents and not for end users. It covers the four read surfaces operators have over the memory subsystem, the per-workspace retention knob, and the diff-preview workflow that gates consolidator proposals before they hit disk.
+<Info>
+This guide is for the human running the instance — not for agents and not for end users.
+</Info>
+
+It covers the four read surfaces operators have over the memory subsystem, the per-workspace retention knob, and the diff-preview workflow that gates consolidator proposals before they hit disk.
 
 For the agent-side primer on what memory _is_, see [Memory System](/guides/agent-memory) and [Episodic memory](/guides/episodic-memory). For the consolidator's own lifecycle (when it runs, what it writes), see [Consolidate](/guides/consolidate).
 
@@ -32,25 +36,37 @@ All four require workspace context and the `manage` role. Field shapes, query pa
 
 ## Audit watcher
 
-Wired at server startup; no operator configuration required beyond having `CREWSHIP_BASE_PATH` point at the directory the crew bind-mounts live under. The watcher runs on the host, watches `{basePath}/crews/**` for close-write events, shape-matches paths against the canonical layout (`AGENT.md`, `CREW.md`, `pins/`, `learned-*.md`, `daily/*.md`), and:
+Wired at server startup; no operator configuration required beyond having `CREWSHIP_STORAGE_BASE_PATH` point at the directory the crew bind-mounts live under. The watcher runs on the host, watches `{basePath}/crews/**` for close-write events, shape-matches paths against the canonical layout (`AGENT.md`, `CREW.md`, `pins/`, `learned-*.md`, `daily/*.md`), and:
 
 - Skips silently on unknown shapes (`.tmp` staging files, `.lock` files, hidden dotfiles, non-`.md` scratch).
 - Skips silently when the path resolves to an orphaned bind-mount (crew was deleted, files remain on disk).
 - Writes a `memory_versions` row with `written_by="audit-watcher"` so a row's provenance — direct filesystem write vs. IPC-mediated — is preserved for forensics.
 - Emits the same `memory.updated` journal entry the sidecar emits, so dashboards and consumers don't need to distinguish.
 
-If `CREWSHIP_BASE_PATH` is empty the watcher is disabled and logs a single `info`-level "watcher disabled" line — pre-existing behaviour for hostless builds. If fsnotify init fails the server stays up; the warning is logged but does not gate startup.
+If `CREWSHIP_STORAGE_BASE_PATH` is empty the watcher is disabled and logs a single `info`-level "watcher disabled" line — pre-existing behaviour for hostless builds. If fsnotify init fails the server stays up; the warning is logged but does not gate startup.
 
 ## HITL preview workflow
 
 The consolidator can be configured to propose `learned-YYYY-MM-DD.md` updates instead of writing them directly. Proposals land in `memory_proposals` and emit `memory.consolidation_proposed`. The reviewer flow is:
 
-1. **List pending proposals** — surface them in the journal stream or query `memory_proposals` directly (no public list endpoint yet; track via `memory.consolidation_proposed` events).
-2. **Preview the diff** — [`GET /consolidate/proposed/{id}/diff`](/api-reference/consolidate#preview-proposal-diff) returns a 3-line-context unified diff between the current canonical file and what an approve would write. The post-merge half of the diff is byte-identical to what `/approve` will commit, modulo the per-instant `Approved at HH:MM:SS` line. That equality is the load-bearing UX promise — what you read is what gets written.
-3. **Read the rationale** — `GET /consolidate/proposed/{id}/explain` returns the source journal entries the consolidator extracted the rule from.
-4. **Approve or reject** — `POST /consolidate/proposed/{id}/approve` writes the merged file and emits `memory.consolidated`. `POST .../reject` flips the proposal row to `status='rejected'` (with `decided_at` / `decided_by_user_id` populated), resolves the inbox item, and logs the reason at notice level — there is no `memory.*` event for rejection; the audit trail is the row state plus the log line.
+<Steps>
+  <Step title="List pending proposals">
+    Surface them in the journal stream or query `memory_proposals` directly (no public list endpoint yet; track via `memory.consolidation_proposed` events).
+  </Step>
+  <Step title="Preview the diff">
+    [`GET /consolidate/proposed/{id}/diff`](/api-reference/consolidate#preview-proposal-diff) returns a 3-line-context unified diff between the current canonical file and what an approve would write. The post-merge half of the diff is byte-identical to what `/approve` will commit, modulo the per-instant `Approved at HH:MM:SS` line. That equality is the load-bearing UX promise — what you read is what gets written.
+  </Step>
+  <Step title="Read the rationale">
+    `GET /consolidate/proposed/{id}/explain` returns the source journal entries the consolidator extracted the rule from.
+  </Step>
+  <Step title="Approve or reject">
+    `POST /consolidate/proposed/{id}/approve` writes the merged file and emits `memory.consolidated`. `POST .../reject` flips the proposal row to `status='rejected'` (with `decided_at` / `decided_by_user_id` populated), resolves the inbox item, and logs the reason at notice level — there is no `memory.*` event for rejection; the audit trail is the row state plus the log line.
+  </Step>
+</Steps>
 
+<Note>
 The diff endpoint is read-only and idempotent. Calling it repeatedly is fine; it does not advance state.
+</Note>
 
 ## Per-workspace retention
 
@@ -79,7 +95,9 @@ curl -X PATCH \
 
 PATCH is partial — keys you don't send are left untouched. To clear an override and fall back to the default, send `{"versions_retention_days": null}`. The PATCH runs under a serializable transaction so two concurrent PATCHes for the same workspace can't clobber each other.
 
+<Note>
 The change takes effect on the next daily sweep tick (03:00 UTC). It does **not** retroactively delete rows — only the next sweep deletes anything older than the new window.
+</Note>
 
 ## Common operator tasks
 

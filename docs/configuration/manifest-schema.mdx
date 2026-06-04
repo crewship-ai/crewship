@@ -10,6 +10,10 @@ Flat reference for every field accepted under `apiVersion: crewship/v1`. For the
 
 The Go type definitions live at `internal/manifest/schema.go`; this page mirrors them.
 
+<Info>
+  Reference order: [Top level](#top-level) → [`metadata`](#metadata) → the two kinds ([`Crew`](#kind-crew) / [`Workspace`](#kind-workspace)) → the reusable building blocks ([`CrewSpec`](#crewspec), [`Devcontainer`](#devcontainer), [`Credential`](#credential), [`Skill`](#skill), [`MCPServer`](#mcpserver), [`Agent`](#agent), [`Service`](#service)) → the [cross-reference](#cross-reference-rules), [shape](#shape-rules), and [size-cap](#size-caps) rules the validator enforces.
+</Info>
+
 ## Top level
 
 Every manifest must start with these three keys:

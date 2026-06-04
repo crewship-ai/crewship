@@ -2,7 +2,7 @@
 
 ## What it is
 
-A `WorkflowTemplate` defines the **state machine** an issue, run, or other tracked item moves through inside a workspace. It's the Linear-style equivalent of "status options on a board": you declare an ordered list of stages, each tagged with a `type` (open, started, completed, or cancelled), and the workspace UI uses that as the column layout for kanban boards plus the legal transition graph for status changes.
+A `WorkflowTemplate` defines the **state machine** an issue, run, or other tracked item moves through inside a workspace. It's the equivalent of "status options on a board": you declare an ordered list of stages, each tagged with a `type` (open, started, completed, or cancelled), and the workspace UI uses that as the column layout for kanban boards plus the legal transition graph for status changes.
 
 WorkflowTemplates are workspace-scoped and idempotent on `metadata.slug` within a workspace. The `workflow_templates` DB table has no slug column, so on export the manifest synthesises a kebab-case slug from `metadata.name` to keep round-trips stable.
 

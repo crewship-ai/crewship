@@ -81,11 +81,15 @@ paths = [
   # Prisma schema — type definitions, no secrets.
   '''prisma/schema\.prisma$''',
 
-  # Documentation files that show installation examples with placeholder keys.
-  # Verified: only these three files contained 'sk-...'-style example strings.
+  # Documentation files that show installation / API examples with placeholder
+  # keys. Verified: these files only contain placeholder example strings —
+  # 'sk-...'-style keys and the literal `crewship_cli_xxxxx` bearer-token
+  # placeholder used in curl examples.
   '''docs/guides/installation\.mdx$''',
   '''docs/configuration/environment\.mdx$''',
   '''docs/api-reference/overview\.mdx$''',
+  '''docs/cli/eval\.mdx$''',
+  '''docs/guides/chat-sessions\.mdx$''',
 
   # Launch audit memo: documents the gitleaks allowlist itself, which
   # means the placeholder strings being allowlisted (e.g. AKIAABCDEFG…)

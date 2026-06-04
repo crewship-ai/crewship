@@ -27,7 +27,7 @@ Defined in `internal/hooks/types.go` (15 events currently):
 **Currently dispatched** (call sites wired):
 
 - `pre_agent_start`, `post_agent_stop` -- orchestrator agent lifecycle. **Both payloads carry `mission_id` since PR #210** so a hook can scope its action to the running mission without a separate join.
-- `on_approval_requested` -- fires when [Harbor Master](/guides/harbormaster)'s `Gate` returns `Required=true`, before the request lands in the approvals queue. The hook receives the same scope (`workspace_id`, `crew_id`, `agent_id`, `mission_id`), the credential ID, and the `intent` string. Use this to forward HITL notifications to Slack / PagerDuty / your own pager-of-choice. PR #210 finally wired this dispatch site — earlier docs claimed it fired but the call site was missing.
+- `on_approval_requested` -- fires when [Harbormaster](/guides/harbormaster)'s `Gate` returns `Required=true`, before the request lands in the approvals queue. The hook receives the same scope (`workspace_id`, `crew_id`, `agent_id`, `mission_id`), the credential ID, and the `intent` string. Use this to forward HITL notifications to Slack / PagerDuty / your own pager-of-choice. PR #210 finally wired this dispatch site — earlier docs claimed it fired but the call site was missing.
 - `on_guardrail_triggered` -- fires from [Lookout](/guides/lookout)'s `InputGuard` on every finding (block, sanitize, AND log mode — log isn't "guard disabled," it's observability + alerting without breaking the call). Wired via a `GuardListener` context callback in `internal/pipeline/runner_llm.go` so the integration path stays decoupled (lookout has no dep on the hooks package). Payload:
 
   ```json
@@ -43,9 +43,10 @@ Defined in `internal/hooks/types.go` (15 events currently):
   }
   ```
 
-  Severity on the `HookEventContext` is the finding's severity (`info` | `warn` | `error`) so a webhook can throttle by criticality. Dispatch failures are logged but never change the guard's verdict — a blocked call stays blocked even if the alert channel is down.
+  Severity on the `HookEventContext` is the finding's severity (`low` | `medium` | `high` | `critical`) so a webhook can throttle by criticality. Dispatch failures are logged but never change the guard's verdict — a blocked call stays blocked even if the alert channel is down.
 
-**Defined but not yet dispatched** (add a `hooks.Dispatch` call at the relevant point when the corresponding platform path wires through):
+<Accordion title="Defined but not yet dispatched">
+Add a `hooks.Dispatch` call at the relevant point when the corresponding platform path wires through:
 
 - `pre_task_delegation`, `post_task_delegation` -- hook into the assignment path (`orchestrator.RunAgentForAssignment`).
 - `pre_tool_call`, `post_tool_call` -- needs orchestrator tool-call interception.
@@ -53,6 +54,7 @@ Defined in `internal/hooks/types.go` (15 events currently):
 - `pre_memory_write`, `post_memory_write` -- memory consolidation path.
 - `pre_peer_conversation`, `post_peer_conversation` -- peer bridge.
 - `on_budget_exceeded` -- Paymaster already emits journal entries; hooks are the natural next step.
+</Accordion>
 
 When adding a new dispatch site, also add a row to `AllEvents` in `types.go` and test coverage in `hooks_test.go`.
 
@@ -82,7 +84,7 @@ _, err := hooks.Register(ctx, db, h, allowedShell)
 
 ### http
 
-POSTs the event context as JSON to `handler_config.url`. Supports HMAC signing via `handler_config.hmac_secret` (header `X-Crewship-Signature: sha256=<hex>`). Timeout defaults to 5s.
+POSTs the event context as JSON to `handler_config.url`. Supports HMAC signing via `handler_config.hmac_secret` (header `X-Crewship-Signature: sha256=<hex>`). Timeout defaults to 30s, overridable via `handler_config.timeout_secs`.
 
 ### subagent
 
@@ -136,7 +138,7 @@ _, err := hooks.Register(ctx, db, hooks.Hook{
     Blocking: false,
     Enabled:  true,
     CreatedBy: userID,
-})
+}, true /* allowedShell — only true for confirmed OWNER */)
 ```
 
 ## Endpoints
@@ -170,14 +172,19 @@ Payload includes `hook_id`, `handler_kind`, `outcome`, `latency_ms`, `blocking`,
 
 ## Gotchas
 
-- **Shell hooks bypass container isolation.** They run on the host with the privileges of the `crewship` process. Restrict to OWNER role and audit `handler_config.command` carefully.
+<Warning>
+  **Shell hooks bypass container isolation.** They run on the host with the privileges of the `crewship` process. Restrict to OWNER role and audit `handler_config.command` carefully.
+</Warning>
+
+<Accordion title="More edge cases">
 - **Non-blocking goroutines use `context.Background()`.** Cancelling the request that triggered the dispatch does NOT cancel the hook; per-handler timeouts bound runtime. If a webhook hangs, the goroutine times out but is not killable from the caller.
 - **Event names are stable.** Renaming requires a migration on `hooks_config.event` -- breaks every existing registration.
 - **Matcher regex compile is cached forever.** A bad regex is cached as a nil sentinel; subsequent calls skip it silently. If a hook never fires, check the logs for `hooks: compile regex failed`.
+</Accordion>
 
 ## Related
 
-- [Harbor Master](/guides/harbormaster) -- emits `on_approval_requested`.
+- [Harbormaster](/guides/harbormaster) -- emits `on_approval_requested`.
 - [Paymaster](/guides/paymaster) -- future `on_budget_exceeded` source.
 - [Lookout](/guides/lookout) -- emits `on_guardrail_triggered` via the GuardListener context callback.
 - [Crew Journal](/guides/crew-journal) -- `hook.fired`, `hook.blocked`, `system.hook_toggled`.

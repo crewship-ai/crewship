@@ -6,9 +6,28 @@ icon: "bookmark"
 
 # Saved View
 
-`cmd/crewship/cmd_admin_extras.go` exposes the saved-views surface. A saved view is a named, server-stored query bookmark — the filters and sort you set in the web UI, persisted and addressable from the CLI.
+Manage saved views — named, server-stored query bookmarks. A saved view captures the filters and sort you set in the web UI (across issues / runs / activity), persisted and addressable from the CLI.
 
-Aliases: `saved-views`, `view`.
+```bash
+crewship saved-view <subcommand> [flags]
+```
+
+**Aliases:** `saved-views`, `view`.
+
+<Note>
+  Defined in `cmd/crewship/cmd_admin_extras.go`.
+</Note>
+
+## Subcommands
+
+| Command | Description |
+|---|---|
+| `list` | List saved views. |
+| `create` | Persist a new query bookmark. |
+| `update <view-id>` | Patch a view (owner-only; only set flags are sent). |
+| `delete <view-id>` | Remove a view. |
+
+---
 
 ## `crewship saved-view list`
 
@@ -16,13 +35,15 @@ Aliases: `saved-views`, `view`.
 
 | Flag | Type | Default | Effect |
 |---|---|---|---|
-| `--filter <expr>` | string | (unset) | gojq filter applied before output. |
+| `--filter <expr>` | string | (unset) | jq filter applied before output. |
 
 ```bash
 crewship saved-view list
 crewship saved-view list --filter '.[] | {id, name, owner}'
 crewship view list                              # alias
 ```
+
+---
 
 ## `crewship saved-view create`
 
@@ -41,14 +62,22 @@ crewship saved-view create --name "My open issues" --filters '{"status":"open","
 crewship saved-view create --name "Team backlog" --filters '{"status":"backlog"}' --shared
 ```
 
+---
+
 ## `crewship saved-view update <view-id>`
 
-`PATCH /api/v1/saved-views/{id}`. Owner-only (the server returns `403` for non-owners). Only the flags you set are sent. Accepts the same fields as `create` plus `--default` to mark the view as the default. `--filters`/`--sort` are JSON-validated client-side.
+`PATCH /api/v1/saved-views/{id}`. Only the flags you set are sent. Accepts the same fields as `create` plus `--default` to mark the view as the default. `--filters`/`--sort` are JSON-validated client-side.
+
+<Note>
+  Owner-only — the server returns `403` for non-owners.
+</Note>
 
 ```bash
 crewship saved-view update sv_abc123 --name "Renamed view"
 crewship saved-view update sv_abc123 --default
 ```
+
+---
 
 ## `crewship saved-view delete <view-id>`
 

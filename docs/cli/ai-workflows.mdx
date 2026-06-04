@@ -286,16 +286,29 @@ crewship inspect r_abc --filter '.entries[] | select(.severity=="error")'
 crewship agent files viktor --filter '.[] | .name'
 ```
 
-## Container shell access (deferred)
+## Interactive REPL: `crewship shell`
 
-`crewship shell <agent>` for a live PTY into an agent container is
-deferred to its own follow-up — it requires WS-multiplexed terminal
-plumbing not yet wired in the CLI. Today, the closest paths are:
+`crewship shell` opens an interactive REPL where each typed line is a
+prompt to the default agent. Slash-commands (`/agent <slug>`, `/plan`,
+`/effort`, `/think`, `/quit`, …) control session state, and
+`@`-prefixed tokens inline file content.
+
+```bash
+crewship shell
+# then, at the prompt:
+#   what time is it?
+#   /agent viktor
+#   summarise @notes.md
+#   /quit
+```
+
+`crewship shell` drives the agent through prompts, not a raw shell inside
+its container. To observe a running container directly, use:
 
 ```bash
 crewship logs viktor --follow      # live stdout
 crewship agent debug viktor        # container state + env
-crewship open crows-nest <crew>    # full live observation in web UI
+crewship open crew <crew>          # full live observation in web UI
 ```
 
 ## Health: `doctor`, `lint`, `config validate`

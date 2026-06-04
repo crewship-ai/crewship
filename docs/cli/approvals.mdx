@@ -1,16 +1,21 @@
 ---
 title: "Approvals Commands"
-description: "List and decide Harbor Master human-in-the-loop approval requests."
+description: "List and decide Harbormaster human-in-the-loop approval requests."
 icon: "anchor"
 ---
 
 # crewship approvals
 
-Manage the [Harbor Master](/guides/harbormaster) approval queue. `list` is safe for any workspace member; `approve` and `deny` require `OWNER` or `ADMIN` role server-side (403 otherwise).
+Manage the [Harbormaster](/guides/harbormaster) approval queue — list pending human-in-the-loop requests and decide them.
 
 ```bash
 crewship approvals <subcommand> [flags]
 ```
+
+<Note>
+  `list` is safe for any workspace member; `approve` and `deny` require
+  `OWNER` or `ADMIN` role server-side (403 otherwise).
+</Note>
 
 ## Subcommands
 
@@ -96,9 +101,12 @@ Text mode prints canonical fields (`id`, `status`, `kind`, `reason`, `crew_id`, 
 
 ## `crewship approvals reset-auto-tuning <tool>`
 
-Wipe the reward history used by Harbor Master gate auto-tuning for the given tool. Auto-tuning downgrades sync→async after 90%+ approvals and upgrades async→sync after 70%+ denials, over the last 20 decisions per tool+args shape. When that window gets skewed (e.g. automation approving on humans' behalf for a stretch), reset to make the gate respect the configured mode again until humans re-train it naturally.
+Wipe the reward history used by Harbormaster gate auto-tuning for the given tool. Auto-tuning downgrades sync→async after 90%+ approvals and upgrades async→sync after 70%+ denials, over the last 20 decisions per tool+args shape. When that window gets skewed (e.g. automation approving on humans' behalf for a stretch), reset to make the gate respect the configured mode again until humans re-train it naturally.
 
-Requires `OWNER` or `ADMIN` on the caller's workspace.
+<Warning>
+  Permanently wipes the rolling reward history for the tool (no
+  confirmation). Requires `OWNER` or `ADMIN` on the caller's workspace.
+</Warning>
 
 ```bash
 crewship approvals reset-auto-tuning shell.exec
@@ -118,5 +126,5 @@ Output reports `rows_deleted` from `gate_reward_history`.
 
 ## Related
 
-- [Harbor Master guide](/guides/harbormaster).
+- [Harbormaster guide](/guides/harbormaster).
 - [Approvals API](/api-reference/approvals).
