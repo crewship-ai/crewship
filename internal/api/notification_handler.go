@@ -147,7 +147,7 @@ func (h *NotificationHandler) MarkRead(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	notifID := r.PathValue("id")
+	notifID := r.PathValue("notificationId")
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	res, err := h.db.ExecContext(r.Context(),
@@ -221,7 +221,7 @@ func (h *NotificationHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	notifID := r.PathValue("id")
+	notifID := r.PathValue("notificationId")
 
 	res, err := h.db.ExecContext(r.Context(),
 		`DELETE FROM notifications WHERE id = ? AND user_id = ?`,

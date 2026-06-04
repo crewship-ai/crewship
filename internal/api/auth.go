@@ -640,7 +640,7 @@ func (h *AuthHandler) Bootstrap(w http.ResponseWriter, r *http.Request) {
 }
 
 // WsToken generates a short-lived JWE for authenticating WebSocket connections.
-// POST /api/v1/auth/ws-token — works with both session cookies and CLI tokens.
+// GET /api/v1/ws-token — works with both session cookies and CLI tokens.
 //
 // For browser auth: ticket carries user.SessionID so the WS hub can
 // enforce server-side revocation (close 4401 if the session gets

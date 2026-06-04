@@ -22,7 +22,7 @@ import (
 //
 // POST /api/v1/agents/{agentId}/chats/{chatId}/attachments
 //
-// Body: multipart/form-data with one "file" field (10 MB cap).
+// Body: multipart/form-data with one "file" field (25 MB cap).
 // Returns: {filename, size, path} where path is the relative path the
 //
 //	agent can use (e.g. "attachments/<chatId>/photo.png").

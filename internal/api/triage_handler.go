@@ -185,13 +185,13 @@ func (h *TriageHandler) CreateRule(w http.ResponseWriter, r *http.Request) {
 // ── 3. UpdateRule — PATCH /api/v1/triage-rules/{id} ────────────────────────
 
 // UpdateRule modifies an existing triage rule.
-// PATCH /api/v1/triage/rules/{ruleId}
+// PATCH /api/v1/triage-rules/{ruleId}
 func (h *TriageHandler) UpdateRule(w http.ResponseWriter, r *http.Request) {
 	if !requireRole(w, r, "create") {
 		return
 	}
 
-	ruleID := r.PathValue("id")
+	ruleID := r.PathValue("ruleId")
 	wsID := WorkspaceIDFromContext(r.Context())
 
 	// Verify rule exists
@@ -322,13 +322,13 @@ func (h *TriageHandler) UpdateRule(w http.ResponseWriter, r *http.Request) {
 // ── 4. DeleteRule — DELETE /api/v1/triage-rules/{id} ───────────────────────
 
 // DeleteRule removes a triage rule.
-// DELETE /api/v1/triage/rules/{ruleId}
+// DELETE /api/v1/triage-rules/{ruleId}
 func (h *TriageHandler) DeleteRule(w http.ResponseWriter, r *http.Request) {
 	if !requireRole(w, r, "manage") {
 		return
 	}
 
-	ruleID := r.PathValue("id")
+	ruleID := r.PathValue("ruleId")
 	wsID := WorkspaceIDFromContext(r.Context())
 
 	res, err := h.db.ExecContext(r.Context(),
