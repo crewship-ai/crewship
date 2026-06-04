@@ -198,8 +198,9 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 	// builder applies it verbatim. Mirror the credentials_mutate.go
 	// pattern: a present non-empty crew_id must exist in the CALLER's
 	// workspace. An explicit empty string (detach from crew) is allowed;
-	// a non-string value is rejected.
-	if crewVal, ok := body["crew_id"]; ok && crewVal != nil {
+	// null and non-string values are rejected (use "" to detach) so the
+	// builder can never NULL-out crew_id and orphan the agent.
+	if crewVal, ok := body["crew_id"]; ok {
 		crewStr, isStr := crewVal.(string)
 		if !isStr {
 			replyError(w, http.StatusBadRequest, "Invalid crew_id")

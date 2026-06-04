@@ -18,11 +18,24 @@ package database
 // soft-deleted (deleted_at IS NOT NULL) leads are exempt, so demoting /
 // re-creating a lead works normally.
 //
-// Safe to apply on existing data: builtin crew templates and the seed
-// path each create exactly one LEAD per crew, so no current install has a
-// duplicate that would block the CREATE UNIQUE INDEX. IF NOT EXISTS keeps
-// the migration idempotent.
+// Remediation-first: any install that hit the old TOCTOU race may already
+// hold two live LEADs in one crew, which would make CREATE UNIQUE INDEX
+// fail and abort the whole migration. So before creating the index we
+// demote the extras — keeping the earliest (lowest rowid) LEAD per crew
+// and flipping the rest to AGENT. Crew-less LEADs (crew_id IS NULL) are
+// left alone: the partial index is on crew_id, and SQLite treats NULLs as
+// distinct, so they never collide. The remediation + index run in one
+// transaction (see migrate.go), so they apply atomically. IF NOT EXISTS
+// keeps the index creation idempotent.
 const migrationOneLeadPerCrew = `
+UPDATE agents SET agent_role = 'AGENT'
+WHERE agent_role = 'LEAD' AND deleted_at IS NULL AND crew_id IS NOT NULL
+  AND rowid NOT IN (
+    SELECT MIN(rowid) FROM agents
+    WHERE agent_role = 'LEAD' AND deleted_at IS NULL AND crew_id IS NOT NULL
+    GROUP BY crew_id
+  );
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_one_lead_per_crew
     ON agents(crew_id)
     WHERE agent_role = 'LEAD' AND deleted_at IS NULL;

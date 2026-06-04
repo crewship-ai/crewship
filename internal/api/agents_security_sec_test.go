@@ -70,6 +70,34 @@ func TestSecAgentCrewIDForeignWorkspace(t *testing.T) {
 	}
 }
 
+// TestSecAgentCrewIDNullRejected — a `crew_id: null` PATCH must be rejected
+// (400), not silently NULL out crew_id and orphan the agent. Detach is only
+// via an explicit empty string.
+func TestSecAgentCrewIDNullRejected(t *testing.T) {
+	h := NewAgentHandler(setupTestDB(t), newTestLogger())
+	userID := seedTestUser(t, h.db)
+	wsID := seedTestWorkspace(t, h.db, userID)
+	crewID := seedCrewRow(t, h.db, "crew-keep", wsID, "Keep", "keep")
+	agentID := seedAgentRow(t, h.db, "ag-keep", wsID, crewID, "Keeper", "keeper", "AGENT")
+
+	r := httptest.NewRequest("PATCH", "/api/v1/agents/"+agentID, strings.NewReader(`{"crew_id":null}`))
+	r.SetPathValue("agentId", agentID)
+	r = withWorkspaceUser(r, userID, wsID, "OWNER")
+	rr := httptest.NewRecorder()
+	h.Update(rr, r)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("crew_id:null PATCH = %d, want 400; body: %s", rr.Code, rr.Body.String())
+	}
+	var got interface{}
+	if err := h.db.QueryRow(`SELECT crew_id FROM agents WHERE id = ?`, agentID).Scan(&got); err != nil {
+		t.Fatalf("read crew_id: %v", err)
+	}
+	if got != crewID {
+		t.Fatalf("crew_id changed to %v, want unchanged %q", got, crewID)
+	}
+}
+
 // TestSecAgentCrewIDSameWorkspace — guard rail for FIX 1: a crew_id that
 // DOES belong to the caller's workspace must still be accepted.
 func TestSecAgentCrewIDSameWorkspace(t *testing.T) {
