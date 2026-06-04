@@ -251,11 +251,11 @@ func TestCovKPMemoryHealthEscalateBlocking(t *testing.T) {
 // a trusted crew produces a NON-blocking inbox item on ESCALATE. This
 // exercises the inboxBlockingForPolicy=false branch through the handler.
 func TestCovKPMemoryHealthEscalateNonBlocking(t *testing.T) {
-	db, pr := kp2DB(t)
+	db, _ := kp2DB(t)
 	if _, err := db.Exec(`UPDATE crews SET autonomy_level='trusted' WHERE id='cr1'`); err != nil {
 		t.Fatal(err)
 	}
-	pr = policy.NewResolver(db)
+	pr := policy.NewResolver(db)
 
 	p := &kp2Provider{content: `{"decision":"ESCALATE","reason":"operator review","risk":5}`}
 	gk := gatekeeper.New(p, "claude-haiku-4-5", kp2Logger())
