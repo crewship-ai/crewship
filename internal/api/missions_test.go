@@ -599,3 +599,177 @@ func TestMissionDelete(t *testing.T) {
 		t.Errorf("mission still exists after delete")
 	}
 }
+
+// --- Start: POST /api/v1/crews/{crewId}/missions/{missionId}/start ---
+
+func startMissionReq(t *testing.T, userID, wsID, crewID, missionID, role string) *http.Request {
+	t.Helper()
+	req := httptest.NewRequest("POST", "/api/v1/crews/"+crewID+"/missions/"+missionID+"/start", nil)
+	req.SetPathValue("crewId", crewID)
+	req.SetPathValue("missionId", missionID)
+	ctx := withUser(req.Context(), &AuthUser{ID: userID})
+	ctx = withWorkspace(ctx, wsID, role)
+	return req.WithContext(ctx)
+}
+
+func TestMissionStart(t *testing.T) {
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	crewID := seedMissionCrew(t, db, wsID)
+	missionID := seedMissionRow(t, db, "m-start", wsID, crewID, "Startable")
+
+	handler := NewMissionHandler(db, nil, nil, logger)
+
+	rr := httptest.NewRecorder()
+	handler.Start(rr, startMissionReq(t, userID, wsID, crewID, missionID, "MANAGER"))
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body: %s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	var result map[string]string
+	if err := json.Unmarshal(rr.Body.Bytes(), &result); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if result["status"] != "IN_PROGRESS" {
+		t.Errorf("status = %q, want IN_PROGRESS", result["status"])
+	}
+
+	var dbStatus string
+	if err := db.QueryRow("SELECT status FROM missions WHERE id = ?", missionID).Scan(&dbStatus); err != nil {
+		t.Fatalf("query status: %v", err)
+	}
+	if dbStatus != "IN_PROGRESS" {
+		t.Errorf("db status = %q, want IN_PROGRESS", dbStatus)
+	}
+}
+
+func TestMissionStart_NotFound(t *testing.T) {
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	crewID := seedMissionCrew(t, db, wsID)
+
+	handler := NewMissionHandler(db, nil, nil, logger)
+
+	rr := httptest.NewRecorder()
+	handler.Start(rr, startMissionReq(t, userID, wsID, crewID, "does-not-exist", "MANAGER"))
+
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want %d; body: %s", rr.Code, http.StatusNotFound, rr.Body.String())
+	}
+}
+
+func TestMissionStart_NotPlanning(t *testing.T) {
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	crewID := seedMissionCrew(t, db, wsID)
+	missionID := seedMissionRow(t, db, "m-running", wsID, crewID, "Already running")
+	if _, err := db.Exec("UPDATE missions SET status = 'IN_PROGRESS' WHERE id = ?", missionID); err != nil {
+		t.Fatalf("flip status: %v", err)
+	}
+
+	handler := NewMissionHandler(db, nil, nil, logger)
+
+	rr := httptest.NewRecorder()
+	handler.Start(rr, startMissionReq(t, userID, wsID, crewID, missionID, "MANAGER"))
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d; body: %s", rr.Code, http.StatusBadRequest, rr.Body.String())
+	}
+}
+
+func TestMissionStart_Forbidden(t *testing.T) {
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	crewID := seedMissionCrew(t, db, wsID)
+	missionID := seedMissionRow(t, db, "m-forbid", wsID, crewID, "No access")
+
+	handler := NewMissionHandler(db, nil, nil, logger)
+
+	rr := httptest.NewRecorder()
+	handler.Start(rr, startMissionReq(t, userID, wsID, crewID, missionID, "VIEWER"))
+
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want %d; body: %s", rr.Code, http.StatusForbidden, rr.Body.String())
+	}
+}
+
+// --- Metrics: GET /api/v1/mission-metrics ---
+
+func TestMissionMetrics_Empty(t *testing.T) {
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	handler := NewMissionHandler(db, nil, nil, logger)
+
+	req := httptest.NewRequest("GET", "/api/v1/mission-metrics", nil)
+	ctx := withUser(req.Context(), &AuthUser{ID: userID})
+	ctx = withWorkspace(ctx, wsID, "VIEWER")
+	req = req.WithContext(ctx)
+	rr := httptest.NewRecorder()
+
+	handler.Metrics(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body: %s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	var m map[string]interface{}
+	if err := json.Unmarshal(rr.Body.Bytes(), &m); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if m["total_missions"] != float64(0) {
+		t.Errorf("total_missions = %v, want 0", m["total_missions"])
+	}
+}
+
+func TestMissionMetrics_Counts(t *testing.T) {
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	crewID := seedMissionCrew(t, db, wsID)
+	seedMissionRow(t, db, "mm-1", wsID, crewID, "Planning one")
+	mID2 := seedMissionRow(t, db, "mm-2", wsID, crewID, "Active one")
+	if _, err := db.Exec("UPDATE missions SET status = 'IN_PROGRESS' WHERE id = ?", mID2); err != nil {
+		t.Fatalf("flip status: %v", err)
+	}
+
+	handler := NewMissionHandler(db, nil, nil, logger)
+
+	req := httptest.NewRequest("GET", "/api/v1/mission-metrics", nil)
+	ctx := withUser(req.Context(), &AuthUser{ID: userID})
+	ctx = withWorkspace(ctx, wsID, "VIEWER")
+	req = req.WithContext(ctx)
+	rr := httptest.NewRecorder()
+
+	handler.Metrics(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body: %s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	var m map[string]interface{}
+	if err := json.Unmarshal(rr.Body.Bytes(), &m); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if m["total_missions"] != float64(2) {
+		t.Errorf("total_missions = %v, want 2", m["total_missions"])
+	}
+	if m["active_missions"] != float64(2) {
+		t.Errorf("active_missions = %v, want 2 (PLANNING + IN_PROGRESS both count as active)", m["active_missions"])
+	}
+}

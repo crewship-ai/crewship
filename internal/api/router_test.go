@@ -5,31 +5,99 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/database"
 )
 
+// migratedTemplateDB caches a single fully-migrated SQLite file. Running the
+// full migration set on every setupTestDB call dominated the package's
+// wall-clock once the handler-coverage suites pushed it past 1,200 calls
+// (the CI Go job started hitting its 15-minute cap). Migrating once into a
+// template file and copying that file per-test turns a ~hundreds-of-ms
+// migration into a ~1ms file copy, with identical schema and full per-test
+// isolation (each test still gets its own DB file + connection pool).
+var (
+	migratedTemplateOnce sync.Once
+	migratedTemplatePath string
+	migratedTemplateErr  error
+)
+
+func buildMigratedTemplate() {
+	dir, err := os.MkdirTemp("", "api-db-template")
+	if err != nil {
+		migratedTemplateErr = err
+		return
+	}
+	path := filepath.Join(dir, "template.db")
+	db, err := database.Open("file:" + path)
+	if err != nil {
+		migratedTemplateErr = err
+		return
+	}
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	if err := database.Migrate(context.Background(), db.DB, logger); err != nil {
+		db.Close()
+		migratedTemplateErr = err
+		return
+	}
+	// Fold the WAL back into the main file so a plain file copy carries the
+	// complete schema (no -wal/-shm sidecars to track).
+	if _, err := db.DB.Exec("PRAGMA wal_checkpoint(TRUNCATE)"); err != nil {
+		db.Close()
+		migratedTemplateErr = err
+		return
+	}
+	if err := db.Close(); err != nil {
+		migratedTemplateErr = err
+		return
+	}
+	migratedTemplatePath = path
+}
+
 func setupTestDB(t *testing.T) *sql.DB {
 	t.Helper()
+	migratedTemplateOnce.Do(buildMigratedTemplate)
+	if migratedTemplateErr != nil {
+		t.Fatalf("build migrated template: %v", migratedTemplateErr)
+	}
+
 	dir := t.TempDir()
-	db, err := database.Open("file:" + filepath.Join(dir, "test.db"))
+	dst := filepath.Join(dir, "test.db")
+	if err := copyFile(migratedTemplatePath, dst); err != nil {
+		t.Fatalf("copy template db: %v", err)
+	}
+
+	db, err := database.Open("file:" + dst)
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
-
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	if err := database.Migrate(context.Background(), db.DB, logger); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-
 	t.Cleanup(func() { db.Close() })
 	return db.DB
+}
+
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		return err
+	}
+	return out.Close()
 }
 
 func seedTestUser(t *testing.T, db *sql.DB) string {
