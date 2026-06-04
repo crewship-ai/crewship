@@ -68,6 +68,15 @@ first crewship process starts; migrating an existing plaintext volume
 in place is possible but slow and risky.
 </Warning>
 
+<Note>
+By default both `CREWSHIP_DATA_DIR` (database, config) and
+`CREWSHIP_STORAGE_BASE_PATH` (the per-agent `.memory/` trees described
+above) resolve to `/var/lib/crewship`, so one LUKS volume covers both.
+If you've pointed `CREWSHIP_STORAGE_BASE_PATH` at a *separate* disk,
+LUKS-encrypt that disk too — the agent memory is the most sensitive
+at-rest surface.
+</Note>
+
 ### One-time setup
 
 ```bash

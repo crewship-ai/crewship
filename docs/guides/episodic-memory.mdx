@@ -283,7 +283,7 @@ type Embedder interface {
 }
 ```
 
-Production wiring uses the Ollama adapter (`embedder.go`) against `nomic-embed-text` (768-dimensional vectors). The embedder shares the Keeper's Ollama base URL — set via `KEEPER_OLLAMA_URL`, defaulting to `http://localhost:11434`. When `KEEPER_OLLAMA_URL` is unset the embedder is nil and episodic recall is disabled.
+Production wiring uses the Ollama adapter (`embedder.go`) against `nomic-embed-text` (768-dimensional vectors). The embedder shares the Keeper's Ollama base URL — `KEEPER_OLLAMA_URL`, which defaults to `http://localhost:11434` (the config falls back to that value when the env var is unset, so the embedder is configured by default). The embedder ends up nil only when that Ollama endpoint is unreachable at startup, which disables episodic recall — see the next paragraph.
 
 If the embedder is nil (Ollama unreachable at startup), `Recall` returns an empty slice silently -- agent runs don't fail on embedding outages. This is configured in `server/orchestrator_adapters.go:newEpisodicRecallAdapter`.
 

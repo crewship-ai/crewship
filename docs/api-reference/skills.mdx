@@ -7,7 +7,7 @@ icon: "wand-sparkles"
 Skills are reusable capabilities you assign to agents; templates are reusable blueprints for missions and crews. This page covers the skill marketplace (list, get, filter), bringing skills in (URL/paste import, bulk git import, and AI generation), the memory→Skills proposal bridge, plus workflow templates and crew-template blueprints with their AI-assisted wizard. A skill may bundle a system-prompt snippet, MCP server configuration, credential requirements, and tool definitions.
 
 <Note>
-Most read endpoints accept a session or CLI token with workspace membership; import, generate, delete, and template mutations require a `MANAGER`+ role as noted per endpoint.
+Most read endpoints accept a session or CLI token with workspace membership. Write endpoints have endpoint-specific auth: import/generate require `MANAGER`+, `DELETE /skills/{skillId}` requires `OWNER`/`ADMIN`, and some template actions (crew-template deploy, AI crew wizard) are workspace-member scoped — see each endpoint for its exact role gate.
 </Note>
 
 ## Endpoints

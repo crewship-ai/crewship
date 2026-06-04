@@ -36,7 +36,7 @@ This binds the signature to the exact payload, so a leaked header from one reque
 X-Webhook-Secret: <per-agent-secret>
 ```
 
-This path still works during the deprecation window but is going away. Requests authenticated this way receive `Deprecation` and `Sunset: Wed, 31 Dec 2026 23:59:59 GMT` response headers.
+This path still works during the deprecation window but is going away. Requests authenticated this way receive `Deprecation` and `Sunset: Thu, 31 Dec 2026 23:59:59 GMT` response headers.
 
 <Warning>
   `X-Webhook-Secret` is deprecated (sunset 2026-12-31). Migrate to `X-Signature` before the sunset date.

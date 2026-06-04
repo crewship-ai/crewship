@@ -111,7 +111,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.Header().Set("Deprecation", `version="X-Webhook-Secret"`)
-		w.Header().Set("Sunset", "Wed, 31 Dec 2026 23:59:59 GMT")
+		w.Header().Set("Sunset", "Thu, 31 Dec 2026 23:59:59 GMT")
 		h.logger.Warn("webhook accepted on deprecated X-Webhook-Secret path; migrate to X-Signature (HMAC-SHA256 of body)",
 			"crew_id", crewID, "agent_id", agentID)
 	}

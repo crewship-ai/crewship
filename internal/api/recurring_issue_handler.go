@@ -210,7 +210,7 @@ func (h *RecurringIssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, resp)
 }
 
-// ── 3. Update — PATCH /api/v1/recurring-issues/{id} ────────────────────────
+// ── 3. Update — PATCH /api/v1/recurring-issues/{recurringId} ────────────────────────
 
 // Update modifies a recurring issue schedule's properties.
 // PATCH /api/v1/recurring-issues/{recurringId}
@@ -348,7 +348,7 @@ func (h *RecurringIssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, ri)
 }
 
-// ── 4. Delete — DELETE /api/v1/recurring-issues/{id} ───────────────────────
+// ── 4. Delete — DELETE /api/v1/recurring-issues/{recurringId} ───────────────────────
 
 // Delete removes a recurring issue schedule.
 // DELETE /api/v1/recurring-issues/{recurringId}

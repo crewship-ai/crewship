@@ -7,7 +7,7 @@ icon: "bot"
 An **agent** is an AI coding agent with a configurable role, CLI adapter, skills, and credentials. Agents belonging to the same crew share one Linux container. These endpoints cover the full agent lifecycle: creating and configuring permanent agents, hiring short-lived ephemeral "contractors", managing their skills and credentials, driving chats and runs, inspecting workspace files, and tuning the persona and self-learning layers that shape each agent's behavior.
 
 <Note>
-  All agent endpoints require authentication and workspace context (the `workspace_id` query parameter).
+  All `/api/v1/agents/*` endpoints require authentication and workspace context (the `workspace_id` query parameter). The chat-message proxy (`/api/v1/chats/{chatId}/messages`) is the exception — it resolves the workspace from the chat row and takes no `workspace_id`.
 </Note>
 
 ## Endpoints
