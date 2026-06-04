@@ -6,7 +6,7 @@ icon: "terminal"
 
 # Shell
 
-`cmd/crewship/cmd_shell.go` opens an interactive REPL session. Each typed line is dispatched to the default agent via the [`ask`](/cli/agent) pipeline; slash-commands inside the REPL control session state. `@`-prefixed tokens (e.g. `summarise @notes.md`) inline file content via the same `ExpandAtFiles` helper used elsewhere.
+`cmd/crewship/cmd_shell.go` opens an interactive REPL session. Each typed line is dispatched to the default agent via the [`ask`](/cli/ask) pipeline; slash-commands inside the REPL control session state. `@`-prefixed tokens (e.g. `summarise @notes.md`) inline file content via the same `ExpandAtFiles` helper used elsewhere.
 
 The active agent latches across turns — `/agent viktor`, then plain "what's up" still targets viktor.
 
@@ -63,6 +63,6 @@ Once set, `/agent`, `/effort`, `/think`, and `/plan` persist across turns. Plan-
 
 ## See also
 
-- [`crewship ask`](/cli/agent) — the one-shot equivalent; `shell` is essentially a REPL wrapper around it.
+- [`crewship ask`](/cli/ask) — the one-shot equivalent; `shell` is essentially a REPL wrapper around it.
 - [`crewship slash`](/cli/slash) — top-level slash commands (different surface: user-defined `.md` files).
 - [`crewship tui`](/cli/tui) — full-screen Bubble Tea dashboard for monitoring rather than chat.

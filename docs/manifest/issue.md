@@ -4,7 +4,7 @@
 
 `kind: Issue` is the per-row CRUD entry point for a single issue
 (Linear-style ticket) declared in source control. Its cousin
-[`RecurringIssue`](./recurring_issue.md) mints the same shape on a
+[`RecurringIssue`](/manifest/recurring_issue) mints the same shape on a
 cron; `kind: Issue` is for human-authored, one-shot tickets that
 should be tracked declaratively rather than clicked into the UI.
 
@@ -28,7 +28,7 @@ journal grep-able and lets cross-document references resolve, but it is
 Because there's no server slug, drift detection matches a declared
 issue to a remote row by the pair **(crew, title)**. The consequence:
 **renaming an issue's title in the manifest creates a new row instead
-of updating the old one.** This mirrors how [Milestone](./milestone.md)
+of updating the old one.** This mirrors how [Milestone](/manifest/milestone)
 behaves (also no slug column). Keep titles stable if you want updates
 to land on the same row.
 
@@ -65,7 +65,7 @@ spec:
 | `spec.status` | enum | no | One of `backlog` \| `todo` \| `in_progress` \| `review` \| `done` \| `failed` \| `cancelled` (uppercase also accepted; up-cased before sending). See the create-status quirk below. |
 | `spec.assignee_slug` | string | no | Agent slug → `assignee_type=agent` + `assignee_id`. |
 | `spec.project_slug` | string | no | Project slug → `project_id`. |
-| `spec.labels` | []string | no | Label slugs (the [Label](./label.md) kind enforces slug == name). No duplicates, no empty entries. |
+| `spec.labels` | []string | no | Label slugs (the [Label](/manifest/label) kind enforces slug == name). No duplicates, no empty entries. |
 
 > **Create-status quirk.** The create handler hard-codes the new row
 > to `BACKLOG` and ignores `spec.status` on POST. If you declare
@@ -209,8 +209,8 @@ comment counts) are dropped.
 
 ## See also
 
-- [RecurringIssue](./recurring_issue.md) — the cron-driven sibling that mints the same shape.
-- [TriageRule](./triage_rule.md) — auto-routes incoming issues.
-- [Crew](./crew.md) — the parent crew (`spec.crew_slug`).
-- [Project](./project.md) / [Label](./label.md) / [Agent](./agent.md) — FK targets.
+- [RecurringIssue](/manifest/recurring_issue) — the cron-driven sibling that mints the same shape.
+- [TriageRule](/manifest/triage_rule) — auto-routes incoming issues.
+- [Crew](/manifest/crew) — the parent crew (`spec.crew_slug`).
+- [Project](/manifest/project) / [Label](/manifest/label) / [Agent](/manifest/agent) — FK targets.
 - This kind's Go implementation: `internal/manifest/kinds/issue.go`.

@@ -4,13 +4,27 @@ description: "Per-message feedback signals (thumb-up/down, edit, regenerate) bou
 icon: "thumbs-up"
 ---
 
-Endpoints under `/api/v1/feedback` capture structured per-message signal for the [continuous-learning loop](/guides/feedback). All endpoints require authentication; rows are private to the authoring user (no cross-user reads, even within the same workspace).
+Endpoints under `/api/v1/feedback` capture structured per-message signal — thumb-up/down, edit, regenerate — for the [continuous-learning loop](/guides/feedback). Rows are keyed to an OTel `trace_id` so the eval pipeline can join signals back onto the run that produced them. See the [Feedback guide](/guides/feedback) for the design contract and UI flow.
 
-See the [Feedback guide](/guides/feedback) for the design contract and UI flow.
+<Note>
+  All endpoints require authentication. Rows are private to the authoring user — no cross-user reads, even within the same workspace.
+</Note>
+
+## Endpoints
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| POST | [`/api/v1/feedback`](#create-upsert-feedback) | Create or upsert a feedback signal |
+| GET | [`/api/v1/feedback`](#list-feedback) | List the caller's feedback by message or trace |
+| DELETE | [`/api/v1/feedback`](#delete-feedback) | Clear a feedback signal |
 
 ---
 
-## Create / upsert feedback
+## Signals
+
+Create, read, and clear per-message feedback rows scoped to the authoring user.
+
+### Create / upsert feedback
 
 ```
 POST /api/v1/feedback
@@ -42,6 +56,7 @@ Idempotent at the `(message_id, user_id, signal)` tuple. A re-submit with the sa
 | `401` | No authenticated user. Returned BEFORE any DB lookup so anonymous probes can't enumerate ids via response codes. |
 | `403` | Authenticated user has no workspace membership (fallback path). |
 | `404` | Provided `chat_id` is not in a workspace the caller belongs to. |
+| `413` | Request body exceeds the size cap (`http.MaxBytesReader`). |
 | `500` | DB write failure. The error body is `{"error":"internal"}` — details land in server logs. |
 
 **Example:**
@@ -61,7 +76,7 @@ curl -X POST https://api.crewship.local/api/v1/feedback \
 
 ---
 
-## List feedback
+### List feedback
 
 ```
 GET /api/v1/feedback?message_id=<id>
@@ -101,7 +116,7 @@ Ordered by `created_at DESC`. Empty array when no matching rows visible to the c
 
 ---
 
-## Delete feedback
+### Delete feedback
 
 ```
 DELETE /api/v1/feedback?message_id=<id>&signal=<signal>

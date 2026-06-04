@@ -44,10 +44,11 @@ Crewship's adapter builds:
 ```bash
 claude --print --output-format stream-json --include-partial-messages \
        --dangerously-skip-permissions --verbose \
-       [--bare] --strict-mcp-config --no-session-persistence \
+       [--bare] --setting-sources "" --strict-mcp-config --no-session-persistence \
        --model <model> --system-prompt <preamble+persona> \
+       [--tools Read,Search,Grep] \
        --max-turns 50 \
-       [--mcp-config /crew/agents/<slug>/.mcp.json] \
+       --mcp-config /crew/agents/<slug>/.mcp.json \
        -- <user message>
 ```
 

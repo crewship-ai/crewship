@@ -13,8 +13,11 @@ Skills are **system prompt extensions** that get injected into an agent's prompt
 When an agent has skills assigned, their content is injected as `<skill>` blocks in the system prompt. The agent's LLM reads these instructions and follows them during execution.
 
 ```
-[ACTIVE SKILLS]
-<skill name="Network Probe">
+[SKILLS AVAILABLE]
+You have access to the following skill playbooks. Activate them when the user's
+request matches each skill's "When to Activate" criteria.
+
+<skill name="Network Probe" category="DEVOPS">
   # Network Probe
   ## When to use this skill
   - Task involves ping, HTTP checks, DNS resolution...
@@ -23,11 +26,12 @@ When an agent has skills assigned, their content is injected as `<skill>` blocks
   ## Guardrails
   - Never ping more than 10 times per host...
 </skill>
+[END SKILLS AVAILABLE]
 ```
 
 ## Built-in Skills
 
-Crewship ships with five built-in skills in `cmd/crewship/seeddata/skills.go`:
+Crewship ships with five built-in skills, defined in `cmd/crewship/seeddata/builtin/skills.yaml` and loaded at startup by `cmd/crewship/seeddata/skills.go`:
 
 <CardGroup cols={2}>
   <Card title="Network Probe" icon="wifi">
@@ -93,7 +97,9 @@ icon: "terminal"
 - Never do...
 ```
 
+<Note>
 Import via the API endpoint `POST /api/v1/workspaces/{id}/skills/import` with the SKILL.md content as the body.
+</Note>
 
 ## Skill Categories
 
@@ -116,8 +122,9 @@ Import via the API endpoint `POST /api/v1/workspaces/{id}/skills/import` with th
 
 ## Skill Assignment
 
-Skills are assigned to specific agents. The seed data maps agents to skills based on their role:
+Skills are assigned to specific agents. The seed data maps agents to skills based on their role.
 
+<Accordion title="Seed-data agent → skill assignments">
 ```
 Engineering crew:
   tomas (Lead):   network-probe, script-runner, file-crafter
@@ -139,6 +146,7 @@ Research crew:
   lucie (Lead):   web-scraper, script-runner
   filip:          web-scraper, script-runner
 ```
+</Accordion>
 
 ## Creating Custom Skills
 

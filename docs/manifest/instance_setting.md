@@ -50,7 +50,7 @@ For each `(key, value)` in `spec.settings`:
      item that will `PUT /api/v1/instance/settings/{key}` with the resolved
      value.
 
-In **ApplyReplace** mode (`crewship apply --mode replace`), Plan additionally
+In **ApplyReplace** mode (`crewship apply --replace`), Plan additionally
 enumerates every key present remotely but not declared in `spec.settings` and
 emits a **Delete** plan item for each — except for protected keys (see below),
 which surface as Unchanged with a "protected; skipped" description.
@@ -193,7 +193,7 @@ spec:
 ### ApplyReplace — declarative full state
 
 ```sh
-crewship apply --file settings.yaml --mode replace --yes
+crewship apply --file settings.yaml --replace --yes
 ```
 
 With the manifest above, ApplyReplace will:

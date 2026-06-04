@@ -46,6 +46,7 @@
               "guides/manifests",
               "guides/devcontainers",
               "guides/credentials",
+              "guides/auto-managed-credentials",
               {
                 "group": "Skills",
                 "icon": "sparkles",
@@ -376,13 +377,18 @@
               "api-reference/skills",
               "api-reference/recipes",
               "api-reference/integrations",
+              "api-reference/connectors",
               "api-reference/conversations",
               "api-reference/preferences",
+              "api-reference/privacy",
               "api-reference/notifications",
               "api-reference/inbox",
               "api-reference/webhooks",
               "api-reference/websocket",
               "api-reference/admin",
+              "api-reference/feature-flags",
+              "api-reference/instance-settings",
+              "api-reference/policies",
               "api-reference/backup",
               "api-reference/provisioning",
               "api-reference/port-expose",
@@ -396,6 +402,7 @@
               "api-reference/memory",
               "api-reference/eval",
               "api-reference/consolidate",
+              "api-reference/slash-commands",
               "api-reference/internal"
             ]
           }

@@ -14,7 +14,20 @@ A recipe is a hardcoded bundle of:
 
 Recipes are baked into the binary (`internal/recipes`) for the MVP — there is no admin UI to author them; a future migration may promote them to a DB-backed catalogue. The browse / preview / install endpoints below back the dashboard empty state and the "Install recipe" Sheet.
 
-The implementation lives in `internal/api/recipes.go`. Install is **atomic**: credentials, the new crew, and its MCP servers are all created in a single transaction — any failure rolls back everything, so a half-installed recipe (orphan crew without its credentials, etc.) never exists.
+The implementation lives in `internal/api/recipes.go`.
+
+<Note>
+  Install is **atomic**: credentials, the new crew, and its MCP servers are all created in a single transaction — any failure rolls back everything, so a half-installed recipe (orphan crew without its credentials, etc.) never exists.
+</Note>
+
+## Endpoints
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | [`/api/v1/recipes`](#get-api-v1-recipes) | List the curated recipe set |
+| GET | [`/api/v1/recipes/{slug}`](#get-api-v1-recipes-slug) | Get a single recipe |
+| GET | [`/api/v1/recipes/{slug}/preview`](#get-api-v1-recipes-slug-preview) | Dry-run an install (no state change) |
+| POST | [`/api/v1/recipes/{slug}/install`](#post-api-v1-recipes-slug-install) | Atomically install a recipe |
 
 ## Recipe shape
 
@@ -52,7 +65,11 @@ Each MCP server entry:
 | `env_mapping` | object \| omitted | Map of `ENV_NAME` → recipe credential `env_var_name`. The install flow turns this into the `env_json` the integration handlers consume. |
 | `icon` | string \| omitted | Brand logo hint. |
 
-## `GET /api/v1/recipes`
+## Browse & preview
+
+Read-only endpoints that back the dashboard cards and the install Sheet.
+
+### `GET /api/v1/recipes`
 
 Return the curated recipe set in display order. No pagination — the catalogue is intentionally small (3 entries at the time of writing).
 
@@ -98,7 +115,7 @@ Return the curated recipe set in display order. No pagination — the catalogue 
 ]
 ```
 
-## `GET /api/v1/recipes/{slug}`
+### `GET /api/v1/recipes/{slug}`
 
 Return a single recipe by slug. Distinct from List so the install Sheet can fetch fresh detail without re-iterating the whole catalogue.
 
@@ -109,7 +126,7 @@ Return a single recipe by slug. Distinct from List so the install Sheet can fetc
 | `200` | Recipe found — returns the recipe object (same shape as a List entry). |
 | `404` | Recipe slug not found. |
 
-## `GET /api/v1/recipes/{slug}/preview`
+### `GET /api/v1/recipes/{slug}/preview`
 
 Dry run for the install Sheet. Tells the FE which credentials the user **already has** in the workspace (so the wizard can skip the "Paste your X" step for those), and which crew slug the install will actually resolve to (suffixes `-2` / `-3` ... if the recipe's preferred slug is already taken).
 
@@ -142,11 +159,19 @@ Does not mutate any state.
 | `404` | Recipe slug not found. |
 | `500` | Credential lookup or slug resolution failed (rare — surfaces a DB-level error rather than silently treating a failed query as "missing credential" and then 409-ing mid-install). |
 
-## `POST /api/v1/recipes/{slug}/install`
+## Install
+
+Atomically commit a recipe — credentials, crew, and MCP servers — in one transaction.
+
+### `POST /api/v1/recipes/{slug}/install`
 
 Atomic install. Creates the credentials the recipe needs (or reuses existing ones), the crew, and the MCP servers in a single SQLite transaction. The response describes what was actually created vs. reused so the FE can phrase the success toast accurately.
 
-**Auth:** authenticated session + workspace context + `OWNER`, `ADMIN`, or `MANAGER` role (`canRole(role, "manage")`).
+<Note>
+  Install requires `OWNER` or `ADMIN` role (`canRole(role, "manage")`). The `"manage"` action maps to OWNER/ADMIN only — a `MANAGER` is **not** sufficient to install a recipe, even though MANAGER can create individual crews/credentials.
+</Note>
+
+**Auth:** authenticated session + workspace context + `OWNER` or `ADMIN` role (`canRole(role, "manage")`).
 
 ```json
 {
@@ -166,7 +191,7 @@ Atomic install. Creates the credentials the recipe needs (or reuses existing one
 | `credential_values` | object | Map of `env_var_name → raw secret`. **Missing entries are treated as "user already has this credential"** — install looks the row up by `env_var_name` and reuses it. Bad shape → `400`. |
 | `account_labels` | object | Optional. Map of `env_var_name → human label` for the credential row. If absent, the recipe's `label` is used. |
 
-### Validation
+#### Validation
 
 The handler does a cheap shape check **outside** the transaction so it can `400` fast on bad input: for every credential the recipe declares, either the workspace must already contain it (looked up by `env_var_name`) **or** the request body must carry a non-empty value for it. Anything else returns:
 
@@ -177,15 +202,15 @@ The handler does a cheap shape check **outside** the transaction so it can `400`
 }
 ```
 
-### Race-safe credential upsert
+#### Race-safe credential upsert
 
 Two concurrent installs of the same recipe on the same workspace must both converge on the same credential row rather than 500-ing the loser on `UNIQUE(workspace_id, name)`. Implementation uses `INSERT OR IGNORE` followed by `SELECT id` — the loser's insert becomes a no-op; the follow-up `SELECT` returns whichever id won the race.
 
-### Race-safe crew slug allocation
+#### Race-safe crew slug allocation
 
 Crew slug allocation also happens inside the transaction. If the recipe's `crew_slug` is taken at insert time, the handler retries with `slug-2`, `slug-3`, ... up to 100 attempts. Slug resolution from the Preview endpoint is advisory only — the install does its own lookup inside the tx so the existence check and the insert see the same snapshot.
 
-### Response
+#### Response
 
 **Status:** `201 Created`
 
@@ -211,7 +236,7 @@ Crew slug allocation also happens inside the transaction. If the recipe's `crew_
 |---|---|
 | `400` | Bad JSON body or missing `credential_values` for credentials the workspace doesn't already have. |
 | `401` | Not authenticated. |
-| `403` | Caller is below the `MANAGER` role. |
+| `403` | Caller is below the `ADMIN` role (MANAGER and below are rejected — `"manage"` requires OWNER/ADMIN). |
 | `404` | Recipe slug not found. |
 | `500` | Tx commit failed, encryption failed, or slug allocation exhausted 100 attempts (the last is effectively impossible in practice — nobody installs the same recipe a hundred times). |
 

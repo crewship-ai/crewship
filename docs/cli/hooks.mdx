@@ -12,7 +12,11 @@ Manage the lifecycle-hook registry -- scripts or webhooks that fire on platform 
 crewship hooks <subcommand> [flags]
 ```
 
-There is no `register` subcommand by design. Hook registration is a config-time operation (seeded at provision or written directly via `hooks.Register`). The CLI and API are strictly read + enable/disable.
+<Note>
+  There is no `register` subcommand by design. Hook registration is a
+  config-time operation (seeded at provision or written directly via
+  `hooks.Register`). The CLI and API are strictly read + enable/disable.
+</Note>
 
 ## Subcommands
 
@@ -82,12 +86,18 @@ Same auth and audit semantics as enable.
 
 ## Currently-dispatched events
 
-As of PR #210:
+<Accordion title="Which events actually fire (as of PR #210)">
+  Dispatched:
 
-- `pre_agent_start`, `post_agent_stop`
-- `on_approval_requested`
+  - `pre_agent_start`, `post_agent_stop`
+  - `on_approval_requested`
 
-Other 12 events are defined but not yet dispatched at their call sites -- see the [Hooks guide coverage table](/guides/hooks#coverage-status-as-of-pr-210). Registering a hook on an undispatched event is legal but nothing will fire it.
+  The other 12 events are defined but not yet dispatched at their call
+  sites — see the
+  [Hooks guide coverage table](/guides/hooks#coverage-status-as-of-pr-210).
+  Registering a hook on an undispatched event is legal but nothing will
+  fire it.
+</Accordion>
 
 ## Related
 

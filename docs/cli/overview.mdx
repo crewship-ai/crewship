@@ -6,7 +6,9 @@ icon: "terminal"
 
 # Crewship CLI
 
-The `crewship` command-line interface lets you manage agents, crews, missions, skills, credentials, and more from the terminal.
+The `crewship` command-line interface is the supported way to drive a Crewship instance from your terminal — and the same surface agents use to operate Crewship themselves. It covers everything from running an agent and tailing the journal to managing crews, skills, credentials, routines, and workspace administration.
+
+This page is the index: global flags and authentication first, then the top-level commands grouped by what they do. Multi-subcommand areas (agent, crew, issue, routine, workspace, integration) each have their own dedicated page.
 
 ```bash
 crewship [command] [flags]
@@ -289,7 +291,7 @@ crewship open journal
 crewship open --print-only mission MIS-42
 ```
 
-Resources: `dashboard`, `agents`, `agent <slug>`, `crews`, `crew <slug>`, `chat <id>`, `mission <id>`, `journal`, `approvals`, `paymaster`, `crows-nest`.
+Resources: `dashboard`, `activity`, `agents`, `agent <slug>`, `crews`, `crew <slug>`, `chat <id>`, `mission <id>`, `journal`, `approvals`, `integrations`, `routines`, `issues`, `runs`, `settings`, `admin`, `audit`, `credentials`.
 
 ### `crewship chat`
 
@@ -377,13 +379,13 @@ View audit logs for the workspace.
 
 ```bash
 crewship audit
-crewship audit --action create
-crewship audit --lines 100
+crewship audit --action agent.run
+crewship audit --action credential.rotate --lines 100
 ```
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--action` | `string` | | Filter by action: `create`, `update`, `delete`. |
+| `--action` | `string` | | Filter by action (domain verb, e.g. `agent.run`, `credential.rotate`, `workspace.create`). |
 | `--lines` | `int` | `50` | Number of audit entries. |
 
 ### `crewship cost`
@@ -479,6 +481,10 @@ Revoke a CLI token.
 crewship token revoke <token-id>
 ```
 
+<Warning>
+Revocation is immediate and irreversible — any session or script still using that token stops working at once.
+</Warning>
+
 ### `crewship token validate`
 
 Validate the current CLI token.
@@ -560,6 +566,10 @@ crewship seed --skip-issues
 | `--skip-issues` | `bool` | `false` | Skip issue/project/label seeding. |
 | `--password` | `string` | `password123` | Admin password for bootstrap. |
 
+<Warning>
+`--nuke` deletes all existing workspace contents before seeding. There is no undo — only run it against a throwaway dev instance.
+</Warning>
+
 <Note>
 On a fresh database, `seed` automatically bootstraps the first admin user. On an existing database, it requires authentication via `crewship login`.
 </Note>
@@ -595,27 +605,26 @@ reference.
 |---|---|---|
 | `crewship admin` | Operate on the local DB directly when `crewshipd` is stopped (reset password, promote, list users) | See the [Admin CLI guide](/guides/admin-cli) |
 | `crewship telemetry` | Manage crash-reporting consent (`on` / `off` / `status`) | See the [Telemetry guide](/guides/telemetry) |
-| `crewship diff` | Show diff of agent's working tree vs. the workspace seed | — |
+| `crewship diff` | Diff two runs side by side (`diff <run-a> <run-b>`) | — |
 | `crewship escalation` | List, inspect, and resolve agent escalations recorded by the sidecar | — |
-| `crewship expose` | Open / close a port-forward from a running agent's container to the host | See [Port-expose API](/api-reference/port-expose) |
+| `crewship expose` | Audit (`list`) and tear down (`revoke`) agent-initiated port exposures for a crew | See [Port-expose API](/api-reference/port-expose) |
 | `crewship integration` | Manage workspace integrations (Linear, GitHub App, Slack, …) | See the [Integrations guide](/guides/integrations) |
 | `crewship mcp` | Inspect, register, and remove MCP servers attached to an agent | See the [MCP / multi-CLI guide](/guides/mcp-multi-cli) |
-| `crewship milestone` | CRUD milestones on the workspace's issue tracker | — |
 | `crewship notify` | Send a one-off notification to the active operator (used by routines) | — |
-| `crewship pipeline` | Lower-level surface for routines (`routine` is the user-facing name) | See the [Routines guide](/guides/routines) |
-| `crewship plan` | Render a routine DAG without executing it (dry-run + cost estimate) | — |
-| `crewship project` | Manage projects inside the issue tracker | — |
-| `crewship recap` | Print a human-readable recap of recent crew activity | — |
-| `crewship resume` | Resume a paused waitpoint or a failed run from a checkpoint | — |
-| `crewship session` | Inspect and manage CLI sessions (mostly an internal surface) | — |
-| `crewship setup` | One-shot guided setup for a fresh install (wraps `init` + `login` + first crew) | — |
-| `crewship shell` | Drop into a shell inside an agent's container | — |
+| `crewship routine` | Manage workspace routines (declarative DSL workflows; alias: `pipeline`) | See the [Routines guide](/guides/routines) |
+| `crewship plan` | Run the default agent in read-only PLAN mode (architect mode; no tools, no changes) | — |
+| `crewship project` | Manage projects (and `project milestone` subcommands) inside the issue tracker | — |
+| `crewship recap` | AI-generated summary of a chat session (`recap <chat-id>`) | — |
+| `crewship resume` | Pick up an existing CLI session by chat-id, run-id, or PR URL | — |
+| `crewship session` | List and revoke the caller's active browser sessions (`list` / `revoke`) | — |
+| `crewship setup` | Finish onboarding on an already-authenticated instance (first crew template + adapter + CLI token) | — |
+| `crewship shell` | Interactive REPL: each line is a prompt to the default agent (slash-commands control state) | — |
 | `crewship slash` | Run a saved slash-command shortcut against the default agent | — |
 | `crewship template` | Manage agent and crew templates | — |
 | `crewship tui` | Launch the interactive terminal UI | — |
 | `crewship wait` | Block until a run, mission, or waitpoint reaches a terminal state | — |
 | `crewship workspace` | List, switch, and manage workspaces | Touched briefly in **Authentication** above |
-| `crewship me` / `today` / `now` | Quick-action shortcuts that route a default-agent prompt with built-in context (`me` = bio, `today` = day plan, `now` = the moment) | — |
+| `crewship me` / `today` / `now` | Quick-action dashboards composed from multiple REST endpoints (`me` = your missions/approvals/runs, `today` = today's runs + spend, `now` = live status board) | — |
 
 Anything missing from this table that you reach for often is a docs
 bug — open an issue or PR.

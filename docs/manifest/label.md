@@ -186,8 +186,8 @@ crew can reference any label. Pass `--crew-only` to exclude them.
 
 ## See also
 
-- [Project](./project.md) — usually labeled alongside (e.g. `bug` + `q2-roadmap`).
-- [TriageRule](./triage_rule.md) — references labels via `actions.add_labels`.
-- [RecurringIssue](./recurring_issue.md) — references labels via `template.labels`.
-- [SavedView](./saved_view.md) — references labels via `filter.label_slugs`.
+- [Project](/manifest/project) — usually labeled alongside (e.g. `bug` + `q2-roadmap`).
+- [TriageRule](/manifest/triage_rule) — references labels via `actions.add_labels`.
+- [RecurringIssue](/manifest/recurring_issue) — references labels via `template.labels`.
+- [SavedView](/manifest/saved_view) — references labels via `filter.label_slugs`.
 - Backend handler: `internal/api/issue_handler_labels.go`.

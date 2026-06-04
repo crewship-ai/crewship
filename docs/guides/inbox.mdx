@@ -156,10 +156,10 @@ The row in the inbox UI:
 
 The **Approve hire** button calls `POST /api/v1/agents/{agentId}/approve-hire`. The handler does four things atomically:
 
-1. `UPDATE agents SET status='IDLE' WHERE id=? AND status='PENDING_REVIEW'` — guarded WHERE so a concurrent fire/soft-delete returns 404 rather than silently writing nothing
+1. `UPDATE agents SET status='IDLE' WHERE id=? AND status='PENDING_REVIEW'` — guarded WHERE so a concurrent approve (zero rows affected) returns 409 rather than silently writing nothing; a soft-deleted/missing agent already 404s at the preceding load
 2. `inbox.ResolveBySource` — flips this inbox row to `resolved` so it doesn't reappear
 3. Journal entry `agent.hire_approved` with the actor's user_id
-4. WebSocket broadcast `agent.ready` so the agent canvas + crew roster repaint instantly
+4. WebSocket broadcast `agent.hire_approved` so the agent canvas + crew roster repaint instantly
 
 There's intentionally **no Deny button** today. To deny a pending hire, the operator opens the crew page and fires the agent (`DELETE /api/v1/agents/{id}`) — same path as deleting any agent. Two reasons:
 
@@ -183,8 +183,8 @@ The four F4 evaluators route every DENY or ESCALATE decision to the inbox (PR-C)
 
 Operators see the row, decide, and click **Approve** or **Reject**:
 
-- **Approve** lands the proposed action and writes a `keeper.approval` journal entry
-- **Reject** discards the proposal and writes a `keeper.rejection` journal entry; the evaluator gets the rejection as a `prior_lesson` hint on its next run for the same context (dup-suppression — see [F4.4 negative-learning](/api-reference/admin#post-apiv1internalkeepernegative-learning))
+- **Approve** lands the proposed action and writes a journal entry recording the decision
+- **Reject** discards the proposal and records the dismissal; the evaluator gets the rejection as a `prior_lesson` hint on its next run for the same context (dup-suppression — see [F4.4 negative-learning](/api-reference/admin#post-apiv1internalkeepernegative-learning))
 
 For the full operator workflow on these rows — when to approve, what to investigate, how to override an evaluator — see [Keeper Reviews panel](/guides/keeper-reviews-panel) which is the dedicated triage surface (the inbox shows individual rows; the panel shows the queue).
 

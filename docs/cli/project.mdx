@@ -12,7 +12,12 @@ Projects are the unit of delivery — a named bundle of missions, issues, and cr
 crewship project <subcommand> [flags]
 ```
 
-Auth: every subcommand requires `crewship login` plus an active workspace. The PATCH/DELETE surface mirrors `internal/api/project_handler.go` — fields you don't set with `Changed()` aren't sent, so partial updates won't clobber unrelated columns.
+<Note>
+  Every subcommand requires `crewship login` plus an active workspace. The
+  PATCH/DELETE surface mirrors `internal/api/project_handler.go` — fields you
+  don't set with `Changed()` aren't sent, so partial updates won't clobber
+  unrelated columns.
+</Note>
 
 ## Subcommands
 
@@ -148,7 +153,11 @@ crewship project delete mobile-launch
 # Delete project "mobile-launch"? (issues will be unlinked, not deleted) [y/N]
 ```
 
-The delete unlinks every issue and mission (sets `project_id = NULL` in the same transaction) so the destroy doesn't cascade into issue loss.
+<Warning>
+  Delete unlinks every issue and mission (sets `project_id = NULL` in the
+  same transaction) so the destroy doesn't cascade into issue loss — but the
+  project itself is gone. Prompts unless `-y`.
+</Warning>
 
 ### Milestones
 

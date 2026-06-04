@@ -4,9 +4,46 @@ description: "MCP server integrations at workspace, crew, and agent levels, plus
 icon: "plug"
 ---
 
-Crewship uses a three-tier integration model: workspace-level MCP servers cascade down to crews, which cascade down to agent bindings. Each level can override or extend the configuration.
+Integrations connect agents to external tools through MCP (Model Context Protocol) servers. Crewship uses a three-tier model: workspace-level MCP servers cascade down to crews, which cascade down to agent bindings, and each level can override or extend the configuration. Servers can be defined directly, discovered from the MCP registry, and authenticated with stored credentials or a full OAuth 2.0 flow.
 
-All integration endpoints require authentication and workspace context.
+<Note>
+All integration endpoints require authentication and workspace context (except where a step explicitly states otherwise, such as the OAuth callback).
+</Note>
+
+## Endpoints
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| `GET` | [`/api/v1/integrations`](#list-workspace-integrations) | List workspace MCP servers |
+| `POST` | [`/api/v1/integrations`](#create-workspace-integration) | Create a workspace MCP server |
+| `GET` | [`/api/v1/integrations/{integrationId}`](#get-workspace-integration) | Get a workspace integration |
+| `PATCH` | [`/api/v1/integrations/{integrationId}`](#update-workspace-integration) | Update a workspace integration |
+| `DELETE` | [`/api/v1/integrations/{integrationId}`](#delete-workspace-integration) | Delete a workspace integration |
+| `POST` | [`/api/v1/integrations/{integrationId}/test`](#test-workspace-integration) | Test a workspace MCP connection |
+| `GET` | [`/api/v1/integrations/crews`](#all-crew-integrations) | Cross-crew integration overview |
+| `GET` | [`/api/v1/crews/{crewId}/integrations`](#list-crew-integrations) | List crew MCP bindings |
+| `POST` | [`/api/v1/crews/{crewId}/integrations`](#create-crew-integration) | Create a crew MCP binding |
+| `PATCH` | [`/api/v1/crews/{crewId}/integrations/{integrationId}`](#update-crew-integration) | Update a crew binding |
+| `DELETE` | [`/api/v1/crews/{crewId}/integrations/{integrationId}`](#delete-crew-integration) | Delete a crew binding |
+| `POST` | [`/api/v1/crews/{crewId}/integrations/{integrationId}/test`](#test-crew-integration) | Test a crew MCP connection |
+| `GET` | [`/api/v1/crews/{crewId}/integrations/{integrationId}/tools`](#list-crew-integration-tools) | List per-tool bindings |
+| `PATCH` | [`/api/v1/crews/{crewId}/integrations/{integrationId}/tools/{toolName}`](#update-crew-integration-tool) | Toggle a single tool |
+| `POST` | [`/api/v1/crews/{crewId}/integrations/{integrationId}/tools/refresh`](#refresh-crew-integration-tools) | Reconcile tool bindings |
+| `GET` | [`/api/v1/agents/{agentId}/integrations`](#list-agent-bindings) | List agent MCP bindings |
+| `POST` | [`/api/v1/agents/{agentId}/integrations`](#create-agent-binding) | Create an agent binding |
+| `PATCH` | [`/api/v1/agents/{agentId}/integrations/{integrationId}`](#update-agent-binding) | Update an agent binding |
+| `DELETE` | [`/api/v1/agents/{agentId}/integrations/{integrationId}`](#delete-agent-binding) | Delete an agent binding |
+| `GET` | [`/api/v1/agents/{agentId}/integrations/resolved`](#resolve-agent-integrations) | Resolve effective integrations |
+| `GET` | [`/api/v1/oauth/providers`](#list-oauth-providers) | List OAuth providers |
+| `POST` | [`/api/v1/oauth/initiate`](#initiate-oauth-flow) | Start an OAuth flow |
+| `GET` | [`/api/v1/oauth/callback`](#oauth-callback) | Handle the OAuth callback |
+| `POST` | [`/api/v1/oauth/exchange`](#exchange-token) | Exchange code for tokens |
+| `POST` | [`/api/v1/oauth/loopback`](#loopback) | Handle loopback redirect |
+| `POST` | [`/api/v1/oauth/discover`](#discover-oauth-endpoints) | Discover OAuth endpoints |
+| `POST` | [`/api/v1/oauth/auto-connect`](#auto-connect-integration) | Create integration from OAuth |
+| `GET` | [`/api/v1/mcp-registry`](#list-registry-entries) | List MCP registry entries |
+| `GET` | [`/api/v1/mcp-registry/search`](#search-registry) | Search the MCP registry |
+| `POST` | [`/api/v1/mcp-registry/sync`](#sync-registry) | Sync the MCP registry |
 
 ---
 
@@ -133,6 +170,10 @@ DELETE /api/v1/integrations/{integrationId}?workspace_id={workspaceId}
 
 Cascade-deletes agent bindings, crew-level overrides, and finally the workspace server, all in one transaction.
 
+<Warning>
+This cascades: every agent binding and crew-level override of the integration is removed alongside the workspace server, in a single transaction.
+</Warning>
+
 **Auth:** `OWNER` or `ADMIN` role
 
 **Response:** `200 OK`
@@ -151,7 +192,7 @@ Cascade-deletes agent bindings, crew-level overrides, and finally the workspace 
 POST /api/v1/integrations/{integrationId}/test?workspace_id={workspaceId}
 ```
 
-Tests the MCP server connection. For `stdio` transport the test is skipped (servers can only be probed inside a container at runtime); for `streamable-http` an MCP `initialize` handshake is attempted via an SSRF-safe HTTP client.
+Tests the MCP server connection. For `stdio` transport the server is not actually launched (that only happens inside a container at runtime) — instead the config is statically validated (command must be a bare executable with no embedded whitespace, `args_json` must be a valid JSON string array), returning `status: "ok"` when well-formed or `status: "error"` otherwise. For `streamable-http` (also `http`/`sse`) an MCP `initialize` handshake is attempted via an SSRF-safe HTTP client (private/loopback IPs blocked).
 
 **Response:** `200 OK`
 
@@ -165,9 +206,9 @@ Tests the MCP server connection. For `stdio` transport the test is skipped (serv
 
 | Field | Description |
 |---|---|
-| `status` | One of `ok`, `error`, `auth_required`, `skipped` |
-| `message` | Optional human-readable description |
-| `server_info` | Optional raw `initialize` response from the server |
+| `status` | `ok`, `error`, or `auth_required` (the struct also defines `skipped`, but the current handlers never emit it) |
+| `message` | Optional human-readable description (omitted when empty) |
+| `server_info` | Optional raw `initialize` `result` from the server (omitted when empty) |
 
 | Status | Condition |
 |---|---|
@@ -175,7 +216,11 @@ Tests the MCP server connection. For `stdio` transport the test is skipped (serv
 
 ---
 
-## All Crew Integrations
+## Crew Integrations
+
+Crew-level MCP bindings — either standalone servers or overrides linked to a workspace integration. This tier also carries per-tool enable/disable state.
+
+### All Crew Integrations
 
 ```
 GET /api/v1/integrations/crews?workspace_id={workspaceId}
@@ -184,10 +229,6 @@ GET /api/v1/integrations/crews?workspace_id={workspaceId}
 Cross-crew overview of all crew-level integration bindings.
 
 **Response:** `200 OK` -- array of crew integration objects.
-
----
-
-## Crew Integrations
 
 ### List Crew Integrations
 
@@ -253,6 +294,10 @@ DELETE /api/v1/crews/{crewId}/integrations/{integrationId}?workspace_id={workspa
 
 Cascade-deletes agent bindings and any OAuth credentials that were auto-created for this integration (only when no other binding still references them).
 
+<Warning>
+This cascades: agent bindings are removed, and OAuth credentials auto-created for this integration are deleted too — but only when no other binding still references them.
+</Warning>
+
 **Auth:** `OWNER` or `ADMIN` role
 
 **Response:** `200 OK`
@@ -285,25 +330,34 @@ Same probe semantics as the workspace test endpoint.
 GET /api/v1/crews/{crewId}/integrations/{integrationId}/tools?workspace_id={workspaceId}
 ```
 
-Returns the catalog of tools exposed by the bound MCP server, with
-each tool's per-crew enabled/disabled state. The catalog itself is
-cached server-side; calls to this endpoint do **not** re-fetch from
-the MCP server — use [Refresh Crew Integration Tools](#refresh-crew-integration-tools) for that.
+Returns the recorded per-tool enable/disable bindings for the crew's
+MCP server (`mcp_tool_bindings`). Only tools that have been toggled or
+seen via [Refresh](#refresh-crew-integration-tools) have a row; a tool
+with no row is treated as **enabled** by default. This endpoint does
+**not** contact the MCP server.
 
-**Response:** `200 OK`
+**Response:** `200 OK` — a JSON **array** of tool-binding objects (no wrapper).
 
 ```json
-{
-  "tools": [
-    { "name": "search", "description": "...", "enabled": true },
-    { "name": "create_issue", "description": "...", "enabled": false }
-  ]
-}
+[
+  { "id": "tb_abc", "tool_name": "search", "description": "...", "enabled": true, "created_at": "2026-05-14T09:12:44Z", "updated_at": "2026-05-14T09:12:44Z" },
+  { "id": "tb_def", "tool_name": "create_issue", "description": null, "enabled": false, "created_at": "2026-05-14T09:12:44Z", "updated_at": "2026-05-14T09:12:44Z" }
+]
 ```
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | string | Tool-binding row ID |
+| `tool_name` | string | MCP tool name |
+| `description` | string? | Tool description (nullable) |
+| `enabled` | boolean | Per-crew enabled state |
+| `created_at` | string | ISO 8601 timestamp |
+| `updated_at` | string | ISO 8601 timestamp |
 
 | Status | Condition |
 |---|---|
 | `404` | Crew or integration not found |
+| `500` | Database error (a real DB failure is not collapsed to 404) |
 
 ### Update Crew Integration Tool
 
@@ -312,20 +366,30 @@ PATCH /api/v1/crews/{crewId}/integrations/{integrationId}/tools/{toolName}?works
 Content-Type: application/json
 ```
 
-Flip a single tool's enabled flag for this crew. Wraps the `crewship
-integration tool enable/disable` CLI subcommands.
+Upsert a single tool's binding for this crew. If no row exists for the
+tool it is materialised (a fresh row defaults to `enabled = true`).
+Wraps the `crewship integration tool enable/disable` CLI subcommands.
 
-**Request Body:**
+**Auth:** `OWNER` or `ADMIN` role (`canRole(role, "manage")`)
+
+**Request Body:** provide at least one of the following fields.
+
+| Field | Type | Description |
+|---|---|---|
+| `enabled` | boolean | New enabled state (omit to leave unchanged) |
+| `description` | string | Tool description to store (omit to leave unchanged) |
 
 ```json
 { "enabled": false }
 ```
 
-**Response:** `200 OK` — updated tool object.
+**Response:** `200 OK` — the upserted tool-binding object (same shape as the [List](#list-crew-integration-tools) entries).
 
 | Status | Condition |
 |---|---|
-| `404` | Crew, integration, or tool name not found in the cached catalog |
+| `400` | Empty `toolName`, invalid JSON, or neither `enabled` nor `description` supplied |
+| `403` | Insufficient role |
+| `404` | Crew or integration not found |
 
 ### Refresh Crew Integration Tools
 
@@ -333,18 +397,40 @@ integration tool enable/disable` CLI subcommands.
 POST /api/v1/crews/{crewId}/integrations/{integrationId}/tools/refresh?workspace_id={workspaceId}
 ```
 
-Re-fetch the tool catalog from the MCP server and overwrite the
-server-side cache. Use after the MCP server adds, renames, or removes
-tools — without a refresh, the [List](#list-crew-integration-tools)
-endpoint will keep returning the stale catalog.
+Reconcile the `mcp_tool_bindings` rows for this crew server against a
+tool list supplied **in the request body** (typically posted by the
+frontend after a successful test-connection round-trip). The server
+does **not** contact the MCP server itself: new tools are inserted
+`enabled = true`, existing tools have their description refreshed but
+their `enabled` state left untouched, and tools absent from the payload
+are left in place (never auto-revoked). An empty list is a no-op.
 
-**Response:** `200 OK` — same shape as List, reflecting the new
-catalog.
+**Auth:** `OWNER` or `ADMIN` role (`canRole(role, "manage")`)
+
+**Request Body:**
+
+```json
+{
+  "tools": [
+    { "name": "search", "description": "Search issues" },
+    { "name": "create_issue", "description": null }
+  ]
+}
+```
+
+**Response:** `200 OK`
+
+```json
+{ "created": 1, "updated": 1, "total": 2 }
+```
+
+`total` is the number of entries in the request `tools` array.
 
 | Status | Condition |
 |---|---|
+| `400` | Invalid JSON body |
+| `403` | Insufficient role |
 | `404` | Crew or integration not found |
-| `502` | MCP server unreachable or returned an invalid catalog |
 
 ---
 
@@ -474,7 +560,11 @@ Starts the OAuth authorization flow by generating an authorization URL.
 GET /api/v1/oauth/callback?code={code}&state={state}
 ```
 
-Handles the OAuth callback from the provider. **No authentication required** -- uses the state token for validation.
+Handles the OAuth callback from the provider.
+
+<Note>
+No authentication required — this endpoint uses the state token for validation instead.
+</Note>
 
 ### Exchange Token
 

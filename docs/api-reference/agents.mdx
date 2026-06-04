@@ -4,11 +4,61 @@ description: "Manage agents — AI coding agents with configurable roles, CLI ad
 icon: "bot"
 ---
 
-All agent endpoints require authentication and workspace context (`workspace_id` query parameter).
+An **agent** is an AI coding agent with a configurable role, CLI adapter, skills, and credentials. Agents belonging to the same crew share one Linux container. These endpoints cover the full agent lifecycle: creating and configuring permanent agents, hiring short-lived ephemeral "contractors", managing their skills and credentials, driving chats and runs, inspecting workspace files, and tuning the persona and self-learning layers that shape each agent's behavior.
 
----
+<Note>
+  All agent endpoints require authentication and workspace context (the `workspace_id` query parameter).
+</Note>
 
-## Crews Status
+## Endpoints
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | [/api/v1/agents/crews-status](#crews-status) | Lightweight agent counts by status for toolbar/dashboard widgets |
+| GET | [/api/v1/agent-load](#agent-load) | Agent load metrics across the workspace |
+| GET | [/api/v1/agents](#list-agents) | List agents (optionally filtered by crew) |
+| POST | [/api/v1/agents](#create-agent) | Create a new agent |
+| GET | [/api/v1/agents/{agentId}](#get-agent) | Get a single agent |
+| PATCH | [/api/v1/agents/{agentId}](#update-agent) | Partially update an agent |
+| DELETE | [/api/v1/agents/{agentId}](#delete-agent) | Soft-delete an agent |
+| POST | [/api/v1/agents/hire](#hire-agent) | Spawn a new ephemeral agent under a crew |
+| POST | [/api/v1/agents/{agentId}/rehire](#rehire-agent) | Resurrect or extend an ephemeral agent |
+| POST | [/api/v1/agents/{agentId}/approve-hire](#approve-hire) | Approve a guided-autonomy pending hire |
+| GET | [/api/v1/agents/{agentId}/persona](#get-persona) | Get the resolved persona |
+| PUT | [/api/v1/agents/{agentId}/persona](#set-persona) | Operator-only direct persona write |
+| DELETE | [/api/v1/agents/{agentId}/persona](#reset-persona) | Remove the agent persona layer |
+| GET | [/api/v1/agents/{agentId}/persona/history](#get-persona-history) | List persona version history |
+| POST | [/api/v1/agents/{agentId}/persona/suggest](#suggest-persona) | Agent-initiated persona proposal |
+| GET | [/api/v1/agents/{agentId}/learning](#get-self-learning) | Get the self-learning flag and audit triple |
+| PATCH | [/api/v1/agents/{agentId}/learning](#set-self-learning) | Flip the self-learning flag |
+| GET | [/api/v1/agents/{agentId}/inbox](#agent-inbox-summary) | Consolidated "what's waiting on this agent" payload |
+| GET | [/api/v1/agents/{agentId}/peers](#list-agent-peers) | List the agent's peer-card index |
+| GET | [/api/v1/agents/{agentId}/peers/{userId}](#get-agent-peer-card) | Get one peer card's full content |
+| DELETE | [/api/v1/agents/{agentId}/peers/{userId}](#delete-agent-peer-card) | Delete one peer card |
+| GET | [/api/v1/agents/{agentId}/skills](#list-skills) | List skill assignments |
+| POST | [/api/v1/agents/{agentId}/skills](#add-skill) | Assign a skill |
+| DELETE | [/api/v1/agents/{agentId}/skills/{skillId}](#remove-skill) | Remove a skill |
+| GET | [/api/v1/agents/{agentId}/credentials](#list-credentials) | List credential assignments |
+| POST | [/api/v1/agents/{agentId}/credentials](#assign-credential) | Assign a credential |
+| DELETE | [/api/v1/agents/{agentId}/credentials/{assignmentId}](#remove-credential) | Remove a credential |
+| GET | [/api/v1/agents/{agentId}/chats](#list-chats) | List chat sessions |
+| POST | [/api/v1/agents/{agentId}/chats](#create-chat) | Create a new chat session |
+| GET | [/api/v1/agents/{agentId}/runs](#agent-runs) | List execution history |
+| GET | [/api/v1/agents/{agentId}/debug](#agent-proxy-endpoints) | Debug information for a running agent |
+| GET | [/api/v1/agents/{agentId}/files](#agent-proxy-endpoints) | List files in agent workspace |
+| GET | [/api/v1/agents/{agentId}/files/download](#agent-proxy-endpoints) | Download a file |
+| PUT | [/api/v1/agents/{agentId}/files/save](#agent-proxy-endpoints) | Save/upload a file |
+| GET | [/api/v1/agents/{agentId}/container-files](#container-files) | List files inside the running container |
+| GET | [/api/v1/agents/{agentId}/git-log](#git-log) | Recent git commits from the container workspace |
+| GET | [/api/v1/agents/{agentId}/logs](#agent-proxy-endpoints) | Get agent logs |
+| POST | [/api/v1/agents/{agentId}/stop](#agent-proxy-endpoints) | Stop a running agent |
+| GET | [/api/v1/chats/{chatId}/messages](#chat-messages) | Get messages for a chat session |
+
+## Status & Metrics
+
+Lightweight, read-only aggregates that power toolbar and dashboard widgets.
+
+### Crews Status
 
 ```
 GET /api/v1/agents/crews-status?workspace_id={workspaceId}
@@ -27,15 +77,16 @@ Returns lightweight agent counts by status for toolbar/dashboard widgets.
   "total": 12,
   "running": 3,
   "error": 1,
-  "idle": 8
+  "idle": 8,
+  "queued": 0
 }
 ```
 
-The three status fields (`running`, `error`, `idle`) are always present in the response — zero counts are not omitted. There is no `stopped` bucket: agents that exit cleanly are surfaced as `idle` until their container is reaped.
+The agent status buckets (`total`, `running`, `error`, `idle`) are always present — zero counts are not omitted. Any status that is not `RUNNING` or `ERROR` (including `IDLE` and `PENDING_REVIEW`) folds into the `idle` bucket; there is no `stopped` bucket. The `queued` field counts admission-queue *assignments* (not agents) currently in the `QUEUED` state — independent of the agent buckets, and `0` on servers that pre-date the queue migration (`internal/api/agents.go:111-151`).
 
 ---
 
-## Agent Load
+### Agent Load
 
 ```
 GET /api/v1/agent-load?workspace_id={workspaceId}
@@ -45,7 +96,11 @@ Returns agent load metrics across the workspace.
 
 ---
 
-## List Agents
+## Lifecycle & CRUD
+
+Create, read, update, and soft-delete permanent agents.
+
+### List Agents
 
 ```
 GET /api/v1/agents?workspace_id={workspaceId}
@@ -101,12 +156,20 @@ GET /api/v1/agents?workspace_id={workspaceId}
       "skills": 2,
       "credentials": 1,
       "chats": 5
-    }
+    },
+    "created_by_user_id": "user_789",
+    "ephemeral": false,
+    "expires_at": null,
+    "expired_at": null,
+    "parent_lead_id": null,
+    "hire_reason": null
   }
 ]
 ```
 
-### Response Fields
+`mcp_config_json` and `created_by_user_id` carry `omitempty` — they are dropped from the JSON entirely when null/empty rather than serialized as `null`.
+
+#### Response Fields
 
 | Field | Type | Description |
 |---|---|---|
@@ -135,13 +198,19 @@ GET /api/v1/agents?workspace_id={workspaceId}
 | `schedule_enabled` | boolean | Whether schedule is active |
 | `schedule_last_run` | string? | ISO 8601 timestamp of last scheduled run |
 | `schedule_next_run` | string? | ISO 8601 timestamp of next scheduled run |
-| `mcp_config_json` | string? | Agent-level MCP server config |
+| `mcp_config_json` | string? | Agent-level MCP server config (omitted when empty) |
 | `crew` | object? | Embedded crew info (name, slug, color, avatar_style) |
 | `_count` | object | Counts: skills, credentials, chats |
+| `created_by_user_id` | string | Creator user ID; omitted for legacy rows with no creator |
+| `ephemeral` | boolean | `true` for hired contractor agents, `false` for permanent agents |
+| `expires_at` | string? | RFC3339 TTL deadline (ephemeral agents only) |
+| `expired_at` | string? | RFC3339 ghost timestamp once the TTL elapses |
+| `parent_lead_id` | string? | LEAD agent that parented this ephemeral |
+| `hire_reason` | string? | Timestamped hire/rehire reason log |
 
 ---
 
-## Create Agent
+### Create Agent
 
 ```
 POST /api/v1/agents?workspace_id={workspaceId}
@@ -205,7 +274,7 @@ POST /api/v1/agents?workspace_id={workspaceId}
 
 ---
 
-## Get Agent
+### Get Agent
 
 ```
 GET /api/v1/agents/{agentId}?workspace_id={workspaceId}
@@ -219,7 +288,7 @@ GET /api/v1/agents/{agentId}?workspace_id={workspaceId}
 
 ---
 
-## Update Agent
+### Update Agent
 
 ```
 PATCH /api/v1/agents/{agentId}?workspace_id={workspaceId}
@@ -227,7 +296,7 @@ PATCH /api/v1/agents/{agentId}?workspace_id={workspaceId}
 
 Partial update -- only provided fields are changed.
 
-**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role (`canRole(role, "create")` in `internal/api/agents_update.go:18`)
+**Auth:** Per-agent edit gate (`canEditAgent` in `internal/api/agents_update.go:27`, defined at `internal/api/rbac.go:151`). `OWNER` / `ADMIN` may edit any agent; `MANAGER` may edit only agents they created or agents in crews where they hold per-crew `ADMIN`/`OWNER`; `MEMBER` / `VIEWER` are refused.
 
 **Request Body:** Same fields as Create, all optional. `status` is not mutable through this endpoint. Additionally supports:
 
@@ -243,7 +312,7 @@ Partial update -- only provided fields are changed.
 
 ---
 
-## Delete Agent
+### Delete Agent
 
 ```
 DELETE /api/v1/agents/{agentId}?workspace_id={workspaceId}
@@ -251,13 +320,191 @@ DELETE /api/v1/agents/{agentId}?workspace_id={workspaceId}
 
 Soft-deletes the agent (sets `deleted_at`).
 
-**Auth:** `OWNER` or `ADMIN` role (`canRole(role, "manage")` in `internal/api/agents_query.go:220`)
+<Warning>
+  This is a destructive operation. Same per-agent edit gate as Update (`canEditAgent` in `internal/api/agents_query.go:266`, defined at `internal/api/rbac.go:151`). `OWNER` / `ADMIN` delete any agent; `MANAGER` deletes only agents they created or agents in crews where they hold per-crew `ADMIN`/`OWNER`.
+</Warning>
 
 **Response:** `200 OK`
 
 ```json
 { "success": true }
 ```
+
+---
+
+## Hire / Rehire / Approve
+
+Ephemeral agents ("contractors") are short-lived agents spawned against a
+crew with a TTL. When the TTL elapses the agent becomes a **ghost** (the
+row is preserved for audit but no longer counts against the crew's quota).
+The hire flow is gated by the crew's **autonomy policy** (`strict` /
+`guided` / `trusted` / `full`) and bounded by the crew's
+`max_ephemeral_agents` quota (ghosts excluded).
+
+<Note>
+  All three endpoints require `OWNER`, `ADMIN`, or `MANAGER` role (`canRole(role, "create")`).
+</Note>
+
+### Hire Agent
+
+```
+POST /api/v1/agents/hire?workspace_id={workspaceId}
+```
+
+Spawns a new ephemeral agent under a crew. The crew's autonomy policy
+decides the outcome:
+
+| Autonomy | Outcome |
+|---|---|
+| `strict` | `403` — the hire is rejected with a structured reason. |
+| `guided` | `202` — the agent row is created in `PENDING_REVIEW`, a **blocking** inbox waitpoint is dropped, and the agent will not start until [approved](#approve-hire). |
+| `trusted` | `201` — the agent goes live immediately; a non-blocking inbox visibility item is recorded. |
+| `full` | `201` — the agent goes live immediately; journal-only, no inbox row. |
+
+**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
+
+**Request Body:**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `crew_id` | string | Conditional | Target crew by id. Provide exactly one of `crew_id` / `crew_slug`. |
+| `crew_slug` | string | Conditional | Target crew by slug. Mutually exclusive with `crew_id`. |
+| `template_slug` | string | Yes | Crew template the ephemeral is built from (built-in or workspace-owned). |
+| `ttl_minutes` | integer | No | Lifetime in minutes. Clamped to `1–1440`; a value of `0`/negative falls back to the server floor of **30**. |
+| `reason` | string | Yes | Audit/history trail for the hire. |
+| `model` | string | No | LLM model override. Empty falls back to the template default at provisioning time. |
+| `parent_lead_id` | string | No | A `LEAD` agent in the **same crew + workspace** that parents this ephemeral. |
+
+```json
+{
+  "crew_slug": "engineering",
+  "template_slug": "backend-dev",
+  "ttl_minutes": 60,
+  "reason": "Spike: investigate the flaky deploy script",
+  "model": "claude-sonnet-4-20250514"
+}
+```
+
+**Response:** `201 Created` (live) or `202 Accepted` (pending review).
+
+```json
+{
+  "id": "agent_abc",
+  "crew_id": "crew_123",
+  "workspace_id": "ws_456",
+  "slug": "backend-dev-eph-1a2b3c",
+  "name": "Backend Dev",
+  "status": "IDLE",
+  "ephemeral": true,
+  "expires_at": "2026-06-04T13:00:00Z",
+  "expired_at": null,
+  "parent_lead_id": null,
+  "hire_reason": "[2026-06-04T12:00:00Z] hire: Spike: investigate the flaky deploy script",
+  "pending_review": false,
+  "inbox_item_id": "ib-cuid",
+  "decision": "auto_log_journal"
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | string | New agent id. |
+| `crew_id` | string? | Resolved crew id. |
+| `workspace_id` | string | Workspace id. |
+| `slug` | string | Generated ephemeral slug (`<template>-eph-<hex>`). |
+| `name` | string | Template name. |
+| `status` | string | `IDLE` on a live hire, `PENDING_REVIEW` when the policy is `guided`. |
+| `ephemeral` | boolean | Always `true`. |
+| `expires_at` | string? | RFC3339 TTL deadline. |
+| `expired_at` | string? | RFC3339 ghost timestamp (always `null` on a fresh hire). |
+| `parent_lead_id` | string? | Echo of the parenting LEAD, when supplied. |
+| `hire_reason` | string? | Timestamped reason log (rehires append to this). |
+| `pending_review` | boolean | `true` only on the `guided` → `202` path. |
+| `inbox_item_id` | string | Inbox row id (blocking waitpoint on `guided`, visibility item on `trusted`). Omitted when empty (`full`). |
+| `decision` | string | The policy decision that produced this outcome. |
+
+| Status | Condition |
+|---|---|
+| `201` | Live ephemeral (`trusted` / `full`). |
+| `202` | `PENDING_REVIEW` + blocking inbox item (`guided`). |
+| `400` | Missing/invalid `template_slug`, `reason`, or `crew_id`/`crew_slug` (neither, or both). |
+| `403` | `strict` autonomy rejected the hire, or caller lacks MANAGER+. |
+| `404` | Crew or template not found in this workspace. |
+| `429` | Crew quota (`max_ephemeral_agents`) reached — rehire a ghost or raise the quota. |
+
+### Rehire Agent
+
+```
+POST /api/v1/agents/{agentId}/rehire?workspace_id={workspaceId}
+```
+
+Resurrects an expired ephemeral ("ghost"): clears `expired_at`, pushes
+`expires_at` forward by the new TTL, and **appends** a new reason line to
+the `hire_reason` history. The container is not rebuilt here — the
+chatbridge auto-provisions a fresh one on the next message. Rehiring a
+still-live ephemeral (extending its TTL before it ghosts) is free and does
+not consume an extra quota slot.
+
+**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
+
+**Request Body:**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `ttl_minutes` | integer | No | New lifetime in minutes. Same `1–1440` clamp / 30-minute floor as Hire. |
+| `reason` | string | Yes | Appended to the `hire_reason` history trail. |
+
+```json
+{
+  "ttl_minutes": 90,
+  "reason": "Deploy script needs another pass"
+}
+```
+
+**Response:** `200 OK` — same shape as the Hire response, echoing the
+agent's persisted `status` (rehire does not change it) and the updated
+`expires_at` / `hire_reason`.
+
+| Status | Condition |
+|---|---|
+| `200` | Rehire succeeded; agent is live again. |
+| `400` | Missing `reason`, or invalid JSON. |
+| `403` | Caller lacks MANAGER+, or `strict` autonomy rejected the rehire. |
+| `404` | Agent not found in this workspace, or the agent is **not ephemeral**. |
+| `429` | Crew quota reached (only when rehiring a ghost). |
+
+### Approve Hire
+
+```
+POST /api/v1/agents/{agentId}/approve-hire?workspace_id={workspaceId}
+```
+
+The guided-autonomy approval step. Flips a `PENDING_REVIEW` ephemeral to
+`IDLE` (an atomic conditional UPDATE, so two concurrent approvals can't
+both win), resolves the blocking inbox waitpoint addressed to the agent,
+and writes an `agent.hire_approved` audit entry. The chatbridge refuses to
+start a `PENDING_REVIEW` agent, so this is what actually releases the gate.
+
+**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
+
+**Request Body:** empty.
+
+**Response:** `200 OK`
+
+```json
+{
+  "id": "agent_abc",
+  "status": "IDLE",
+  "crew_id": "crew_123"
+}
+```
+
+| Status | Condition |
+|---|---|
+| `200` | Agent flipped to `IDLE`; chatbridge will now serve messages. |
+| `403` | Caller lacks MANAGER+. |
+| `404` | Agent not found in this workspace. |
+| `409` | Agent is not in `PENDING_REVIEW` (already approved, hired under non-guided autonomy, or a permanent agent). |
 
 ---
 
@@ -339,7 +586,9 @@ replay the chain.
 DELETE /api/v1/agents/{agentId}/persona
 ```
 
-Removes the agent layer file. The next `GET` falls through to the crew layer (or the synthesised default).
+<Warning>
+  Removes the agent layer file. The next `GET` falls through to the crew layer (or the synthesised default).
+</Warning>
 
 **Response:** `204 No Content`
 
@@ -405,19 +654,33 @@ persona.
 }
 ```
 
-**Response:** `200 OK`
+**Response:** `200 OK` (proposal queued or applied) / `403` (policy rejected)
 
 ```json
 {
+  "agent_id": "agent-uuid",
   "decision": "inbox_approve",
-  "inbox_id": "ib-cuid",
-  "rationale": "..."
+  "bytes": 1842,
+  "rationale": "...",
+  "timestamp": "2026-05-27T18:42:11Z",
+  "applied": false,
+  "pending": true
 }
 ```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `decision` | `string` | Policy decision that drove the outcome (e.g. `inbox_approve`, `auto_journal`, `rejected`). |
+| `applied` | `bool` | `true` only when the suggestion was auto-applied to disk (`full` autonomy + `self_learning_enabled = 1`). |
+| `pending` | `bool` | `true` when the proposal was queued for operator approval (present on the inbox path). |
+| `self_learning_gate` | `string?` | `"off"` only when a per-agent `self_learning_enabled = 0` demoted an auto-apply decision back to inbox approval. |
+
+There is no `inbox_id` in this response — the proposal is recorded as an `audit_logs` row (`persona.suggest_pending`), not returned to the caller.
 
 | Status | Condition |
 |--------|-----------|
 | `400` | Missing / empty `content` field |
+| `403` | Policy rejected the suggestion (autonomy floor) |
 | `413` | `content` exceeds `cap_bytes` |
 | `503` | Server built without storage configuration (`outputBasePath` empty) |
 
@@ -540,9 +803,9 @@ load check.
 | `assignments_open` | `int` | Tasks routed to this agent that have not reached a terminal state. |
 | `escalations_open` | `int` | Peer conversations escalated up the lead chain that still target this agent. |
 | `peer_messages` | `array` | Last N peer messages (both directions). `direction` is `"incoming"` or `"outgoing"`; `response` and `duration_ms` are populated only for resolved exchanges. |
-| `cost_usd_this_month` | `float` | Sum of `paymaster_events.cost_usd` for runs attributed to this agent in the current calendar month. |
-| `llm_calls_this_month` | `int` | Count of `agent_run` step completions in the current month. |
-| `tokens_used_this_month` | `int64` | Sum of input + output tokens reported by the journal in the current month. |
+| `cost_usd_this_month` | `float` | Sum of `cost_ledger.cost_usd` for this agent in the current calendar month. `0` when the `cost_ledger` table is absent (older workspaces). |
+| `llm_calls_this_month` | `int` | Count of `cost_ledger` rows for this agent in the current month. |
+| `tokens_used_this_month` | `int64` | Sum of `input_tokens + output_tokens` from `cost_ledger` in the current month. |
 
 | Status | Condition |
 |--------|-----------|
@@ -636,9 +899,9 @@ Returns one card's full content (markdown). Writes a `read` row to
 DELETE /api/v1/agents/{agentId}/peers/{userId}
 ```
 
-Removes the card from disk and the `peer_cards` row, then writes a
-`delete` audit row. Idempotent — deleting a non-existent card returns
-`204` rather than `404` so an operator script can retry safely.
+<Warning>
+  Removes the card from disk and the `peer_cards` row, then writes a `delete` audit row. Idempotent — deleting a non-existent card returns `204` rather than `404` so an operator script can retry safely.
+</Warning>
 
 **Response:** `204 No Content`
 
@@ -649,6 +912,8 @@ Removes the card from disk and the `peer_cards` row, then writes a
 ---
 
 ## Agent Skills
+
+Assign, list, and remove the skills available to an agent.
 
 ### List Skills
 
@@ -664,13 +929,24 @@ GET /api/v1/agents/{agentId}/skills?workspace_id={workspaceId}
 POST /api/v1/agents/{agentId}/skills?workspace_id={workspaceId}
 ```
 
+**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role (`canRole(role, "create")`)
+
+**Request Body:**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `skill_id` | string | Yes | Skill to assign |
+| `config` | string | No | Per-assignment config blob (stored as-is) |
+
 ```json
 {
   "skill_id": "skill_abc"
 }
 ```
 
-**Response:** `201 Created`
+**Response:** `201 Created` -- `{ "id": "<assignment_id>" }` on a fresh assign.
+
+The assign is idempotent: re-assigning an already-installed skill returns `200 OK` with `{ "id": "<existing_id>", "already_assigned": true }` rather than a `409`.
 
 ### Remove Skill
 
@@ -683,6 +959,8 @@ DELETE /api/v1/agents/{agentId}/skills/{skillId}?workspace_id={workspaceId}
 ---
 
 ## Agent Credentials
+
+Assign, list, and remove the credentials injected into an agent's container.
 
 ### List Credentials
 
@@ -747,7 +1025,9 @@ The path segment is the **assignment ID** (`agent_credentials.id`), not the cred
 
 ---
 
-## Agent Chats
+## Agent Chats & Runs
+
+List and create interactive chat sessions, and review execution history.
 
 ### List Chats
 
@@ -769,7 +1049,7 @@ Creates a new interactive chat session with the agent.
 
 ---
 
-## Agent Runs
+### Agent Runs
 
 ```
 GET /api/v1/agents/{agentId}/runs?workspace_id={workspaceId}
@@ -784,6 +1064,10 @@ List execution history for an agent.
 ## Agent Proxy Endpoints
 
 These endpoints proxy requests through the crewshipd sidecar to the agent's container.
+
+<Warning>
+  `POST /api/v1/agents/{agentId}/stop` halts a running agent.
+</Warning>
 
 | Endpoint | Method | Description |
 |---|---|---|
@@ -802,9 +1086,9 @@ These endpoints proxy requests through the crewshipd sidecar to the agent's cont
 GET /api/v1/agents/{agentId}/container-files?subdir={path}
 ```
 
-Lists files inside the agent's running container (as opposed to `/files`, which lists the persistent workspace mount). Proxied through crewshipd; the request is rejected before the IPC hop if the agent is not assigned to a crew. (`internal/api/proxy_files.go:319`)
+Lists files inside the agent's running container (as opposed to `/files`, which lists the persistent workspace mount). Proxied through crewshipd; the request is rejected before the IPC hop if the agent is not assigned to a crew. (`internal/api/proxy_files.go:350`)
 
-**Auth:** Session or CLI token + workspace membership
+**Auth:** Session or CLI token + workspace membership with at least `read`-tier role (`canRole(role, "read")`)
 
 **Query Parameters:**
 
@@ -817,6 +1101,7 @@ Lists files inside the agent's running container (as opposed to `/files`, which 
 | Status | Condition |
 |---|---|
 | `400` | `subdir` path is invalid (traversal or absolute) |
+| `403` | Caller lacks `read`-tier role |
 | `404` | Agent not found, or agent not assigned to a crew |
 | `502` | Sidecar IPC call failed |
 
@@ -826,14 +1111,15 @@ Lists files inside the agent's running container (as opposed to `/files`, which 
 GET /api/v1/agents/{agentId}/git-log
 ```
 
-Fetches recent git commits from the agent's container workspace. Proxied through crewshipd; the agent's `slug` is forwarded as `agent_slug` so the sidecar can scope the log to that agent's directory inside the shared crew container. (`internal/api/proxy.go:295`)
+Fetches recent git commits from the agent's container workspace. Proxied through crewshipd; the agent's `slug` is forwarded as `agent_slug` so the sidecar can scope the log to that agent's directory inside the shared crew container. (`internal/api/proxy.go:312`)
 
-**Auth:** Session or CLI token + workspace membership
+**Auth:** Session or CLI token + workspace membership with at least `read`-tier role (`canRole(role, "read")`)
 
 **Response:** `200 OK` -- JSON array of commit entries (unwrapped from the IPC layer's `{commits: [...]}` envelope). Returns `[]` when the sidecar response is unparseable or empty.
 
 | Status | Condition |
 |---|---|
+| `403` | Caller lacks `read`-tier role |
 | `404` | Agent not found, or agent not assigned to a crew |
 | `502` | Sidecar IPC call failed |
 
@@ -845,8 +1131,13 @@ Fetches recent git commits from the agent's container workspace. Proxied through
 GET /api/v1/chats/{chatId}/messages
 ```
 
-Get messages for a specific chat session. Proxied through crewshipd.
+Get messages for a specific chat session. Proxied through crewshipd. Supports `?offset=` and `?limit=` (default `50`, max `500`).
 
-**Auth:** Session or CLI token (auth required, no workspace context needed)
+**Auth:** Session or CLI token with `read`-tier role, plus membership of the chat's workspace. The workspace is resolved from the chat row (no `workspace_id` query param needed); the caller must appear in `workspace_members` for that workspace or the call returns `403`. (`internal/api/proxy.go:258`)
 
-**Response:** `200 OK` -- array of message objects.
+**Response:** `200 OK` -- proxied message payload. A chat that doesn't exist yet (new session before its first message) returns `{ "messages": [] }` rather than `404`.
+
+| Status | Condition |
+|---|---|
+| `403` | Caller lacks `read`-tier role, or is not a member of the chat's workspace |
+| `502` | Sidecar IPC call failed |

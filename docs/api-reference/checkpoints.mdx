@@ -4,11 +4,30 @@ description: "Cartographer mission checkpoints: list, create, restore (advisory)
 icon: "map"
 ---
 
-All endpoints require authentication and are workspace-scoped. Cross-tenant IDs return 404 (same shape as "not found"). See the [Cartographer guide](/guides/cartographer).
+Cartographer checkpoints capture a mission's journal cursor and agent state so a run can be inspected, advisory-restored, or forked into a new mission. Restore is non-destructive — it reports divergence without mutating mission state — while Fork branches a fresh mission anchored at the checkpoint. See the [Cartographer guide](/guides/cartographer).
+
+<Note>
+  All endpoints require authentication and are workspace-scoped. Cross-tenant IDs return 404 (same shape as "not found").
+</Note>
+
+## Endpoints
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | [`/api/v1/missions/{missionId}/checkpoints`](#list-checkpoints) | List checkpoints for a mission |
+| POST | [`/api/v1/missions/{missionId}/checkpoints`](#create-checkpoint) | Create a checkpoint |
+| GET | [`/api/v1/checkpoints/{id}`](#get-checkpoint) | Get a single checkpoint |
+| POST | [`/api/v1/checkpoints/{id}/restore`](#restore-advisory) | Advisory restore (reports divergence) |
+| POST | [`/api/v1/checkpoints/{id}/fork`](#fork) | Fork into a new mission |
+| DELETE | [`/api/v1/checkpoints/{id}`](#delete) | Delete a checkpoint |
 
 ---
 
-## List checkpoints
+## Mission checkpoints
+
+List and create checkpoints scoped to a mission's journal.
+
+### List checkpoints
 
 ```
 GET /api/v1/missions/{missionId}/checkpoints?limit=50
@@ -39,8 +58,11 @@ GET /api/v1/missions/{missionId}/checkpoints?limit=50
       "mission_id": "MIS-42",
       "label": "green build",
       "journal_cursor": "j_7f3e2a1b8c9d0e12",
-      "state": { "...snapshot json..." },
-      "fork_of": null,
+      "state": {
+        "agent_memory": { "viktor": "9f86d081..." },
+        "pending_tasks": ["mt_001"],
+        "open_assignments": []
+      },
       "created_by": "user_123",
       "created_at": "2026-04-17T10:23:41Z"
     }
@@ -48,6 +70,8 @@ GET /api/v1/missions/{missionId}/checkpoints?limit=50
   "count": 1
 }
 ```
+
+`fork_of` is `omitempty`: it appears only on checkpoints created by Fork (carrying the source checkpoint id) and is dropped from the JSON entirely on independent checkpoints. `crew_id`, `label`, and `state.crew_container_id`/`state.meta` are likewise omitted when empty.
 
 **Errors:**
 
@@ -58,7 +82,7 @@ GET /api/v1/missions/{missionId}/checkpoints?limit=50
 
 ---
 
-## Create checkpoint
+### Create checkpoint
 
 ```
 POST /api/v1/missions/{missionId}/checkpoints
@@ -86,7 +110,13 @@ POST /api/v1/missions/{missionId}/checkpoints
 
 ---
 
-## Get checkpoint
+---
+
+## Inspect, restore, and fork
+
+Read a single checkpoint by ID, run an advisory restore that only reports drift, or branch a new mission from a checkpoint.
+
+### Get checkpoint
 
 ```
 GET /api/v1/checkpoints/{id}
@@ -96,9 +126,7 @@ GET /api/v1/checkpoints/{id}
 
 **Errors:** `404` on missing or cross-tenant.
 
----
-
-## Restore (advisory)
+### Restore (advisory)
 
 ```
 POST /api/v1/checkpoints/{id}/restore
@@ -123,9 +151,7 @@ Returns the checkpoint plus the list of journal entries that have diverged since
 
 **Errors:** `404` on missing or cross-tenant.
 
----
-
-## Fork
+### Fork
 
 ```
 POST /api/v1/checkpoints/{id}/fork
@@ -164,7 +190,9 @@ DELETE /api/v1/checkpoints/{id}
 
 **Errors:** `404` on missing or cross-tenant.
 
-**Gotcha:** Forks that referenced the deleted checkpoint via `fork_of` are orphaned (their reference is set to NULL) -- no cascade. The forked missions themselves are untouched.
+<Warning>
+  Forks that referenced the deleted checkpoint via `fork_of` are orphaned (their reference is set to NULL) -- no cascade. The forked missions themselves are untouched.
+</Warning>
 
 ## Journal side-effects
 

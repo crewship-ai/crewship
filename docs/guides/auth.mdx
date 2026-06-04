@@ -157,8 +157,9 @@ If Google access ever needs to be turned off later, just unset either env var an
 A Docker-based deployment pipeline must produce a logged-in-able admin account, but `RESEND_API_KEY` isn't available in the build environment.
 
 ```bash
-# Migrate + bootstrap during image build:
-crewship migrate
+# Bootstrap during image build. Migrations apply automatically the first
+# time the server boots (`crewship start`), so there's no separate migrate
+# step — the admin commands below operate on the data directory directly.
 crewship admin reset-password \
   --email=admin@example.com \
   --password="$BOOTSTRAP_PASSWORD"

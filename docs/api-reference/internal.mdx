@@ -10,6 +10,67 @@ Routes mounted under `/api/v1/internal/*` are not part of the public API. They a
 
 This page is here so integrators building their own sidecar image, runtime adapter, or replay tool understand the contract. **End users should never call these endpoints directly.**
 
+<Note>
+  Every route below is wrapped in `internalAuth` and authenticated with the **`X-Internal-Token`** header. The token lives only inside the sidecar (UID 1002); agents (UID 1001) cannot read it. These endpoints are **not** for external clients.
+</Note>
+
+## Endpoints
+
+One row per documented internal route, grouped by family. See [Route catalog](#route-catalog) for the per-family detail and [Authentication](#authentication) for the trust model.
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| `POST` | [/api/v1/internal/cost/record](#cost-ledger) | Sidecar reports parsed LLM usage |
+| `POST` | [/api/v1/internal/journal/emit](#journal) | Sidecar emits a journal entry |
+| `GET` | [/api/v1/internal/credentials](#credentials) | List credentials this agent may use |
+| `PATCH` | [/api/v1/internal/credentials/\{credentialId\}](#credentials) | Update credential status |
+| `POST` | [/api/v1/internal/credentials](#credentials) | Slash-action mirror — create a credential |
+| `POST` | [/api/v1/internal/credentials/\{credentialId\}/rotate](#credentials) | Slash-action mirror — rotate a credential |
+| `POST` | [/api/v1/internal/chats](#chats) | Create a chat row from inside a container |
+| `GET` | [/api/v1/internal/chats/\{chatId\}/resolve](#chats) | Resolve a chat ID to its scope |
+| `PATCH` | [/api/v1/internal/chats/\{chatId\}/message-count](#chats) | Increment message counter |
+| `PATCH` | [/api/v1/internal/chats/\{chatId\}/title](#chats) | Set chat title |
+| `GET` | [/api/v1/internal/agents/\{agentId\}/resolve](#agents-and-crews) | Resolve agent slug/ID to its full record |
+| `GET` | [/api/v1/internal/agents/\{agentId\}/webhook-secret](#agents-and-crews) | Fetch the agent's webhook HMAC secret |
+| `GET` | [/api/v1/internal/crews](#agents-and-crews) | List crews (sidecar discovery) |
+| `POST` | [/api/v1/internal/crews](#agents-and-crews) | Create a crew programmatically |
+| `POST` | [/api/v1/internal/agents](#agents-and-crews) | Create an agent programmatically |
+| `POST` | [/api/v1/internal/agents/hire](#agents-and-crews) | LEAD-initiated ephemeral hire |
+| `GET` | [/api/v1/internal/crew-connections](#agents-and-crews) | List crew connections |
+| `POST` | [/api/v1/internal/pipelines/save](#pipelines-routines-and-skills) | Save an agent-authored pipeline definition |
+| `POST` | [/api/v1/internal/routines/schedules](#pipelines-routines-and-skills) | Slash-action mirror — create a pipeline schedule |
+| `POST` | [/api/v1/internal/skills/generate](#pipelines-routines-and-skills) | Slash-action mirror — LLM-author a SKILL.md |
+| `POST` | [/api/v1/internal/runs](#runs) | Create a run row |
+| `PATCH` | [/api/v1/internal/runs/\{runId\}](#runs) | Update run status / metrics |
+| `POST` | [/api/v1/internal/crew-messages](#crew-messaging-and-files) | Send a peer message |
+| `GET` | [/api/v1/internal/crew-messages](#crew-messaging-and-files) | List peer messages |
+| `GET` | [/api/v1/internal/crew-files/\{crewId\}](#crew-messaging-and-files) | Read a file in the crew's shared volume |
+| `POST` | [/api/v1/internal/crew-files/\{crewId\}](#crew-messaging-and-files) | Write a file in the crew's shared volume |
+| `POST` | [/api/v1/internal/assignments](#assignments-and-queries) | Create an assignment from inside a container |
+| `GET` | [/api/v1/internal/assignments/\{assignmentId\}](#assignments-and-queries) | Fetch assignment status |
+| `POST` | [/api/v1/internal/queries](#assignments-and-queries) | Free-form sub-query |
+| `GET` | [/api/v1/internal/standup](#assignments-and-queries) | Fetch the standup digest the agent should read |
+| `POST` | [/api/v1/internal/escalations](#assignments-and-queries) | Open an escalation |
+| `GET` | [/api/v1/internal/escalations/\{escalationId\}/wait](#assignments-and-queries) | Long-poll for response |
+| `POST` | [/api/v1/internal/report-confidence](#assignments-and-queries) | Report agent self-confidence after a turn |
+| `POST` | [/api/v1/internal/missions](#missions-and-issues) | Create a mission |
+| `GET` | [/api/v1/internal/missions/\{missionId\}](#missions-and-issues) | Get mission details |
+| `POST` | [/api/v1/internal/missions/\{missionId\}/start](#missions-and-issues) | Transition mission to running |
+| `GET` | [/api/v1/internal/issues](#missions-and-issues) | List issues |
+| `GET` | [/api/v1/internal/issues/\{identifier\}](#missions-and-issues) | Get a specific issue |
+| `POST` | [/api/v1/internal/issues](#missions-and-issues) | Create issue |
+| `PATCH` | [/api/v1/internal/issues/\{identifier\}](#missions-and-issues) | Update issue status |
+| `POST` | [/api/v1/internal/issues/\{identifier\}/comments](#missions-and-issues) | Comment on issue |
+| `POST` | [/api/v1/internal/keeper/request](#keeper) | Sidecar forwards a credential read request |
+| `GET` | [/api/v1/internal/keeper/request/\{requestId\}](#keeper) | Fetch a previously submitted request's decision |
+| `POST` | [/api/v1/internal/keeper/execute](#keeper) | Sidecar forwards a sealed credential-use request |
+| `POST` | [/api/v1/internal/keeper/skill-review](#keeper) | Evaluate a proposed skill before adoption |
+| `POST` | [/api/v1/internal/keeper/behavior](#keeper) | Evaluate an agent behaviour signal |
+| `POST` | [/api/v1/internal/keeper/memory-health](#keeper) | Evaluate agent memory health |
+| `POST` | [/api/v1/internal/keeper/negative-learning](#keeper) | Evaluate a negative-learning candidate |
+| `POST` | [/api/v1/internal/mcp-tool-calls](#mcp-audit) | Record an MCP tool invocation for audit |
+| `POST` | [/api/v1/internal/port-expose](#port-expose) | Request a capability URL for an internal port |
+
 ## Authentication
 
 Every internal route is wrapped in `internalAuth`:
@@ -22,7 +83,9 @@ The token is generated at server startup if `CREWSHIP_INTERNAL_TOKEN` is not set
 
 Workspace / crew / agent / mission scope is **not** taken from request bodies (with one documented exception, see the next paragraph). The IPC layer reads it from the sidecar's `IPCConfig` (set by the orchestrator at exec time and pinned to the container) and projects it onto the request. An agent that captured the token still cannot forge cross-tenant attribution because the auth context overrides whatever they put in the body.
 
-**Known exception (tracked as PR-F24 / PR-F25):** the `/api/v1/internal/keeper/*` family (skill-review, behavior, memory-health, negative-learning) currently reads `body.workspace_id` AND `ctx.workspace_id` (the latter set by the `internalWsCtx` middleware from the `?workspace_id` query parameter). The handlers enforce `body.workspace_id == ctx.workspace_id` via the `assertBodyWorkspaceMatchesCtx` helper in `internal/api/keeper_phase2.go` so asymmetric forgery is rejected at the handler boundary, but the symmetric case (caller picks one workspace consistently across query + body) is only closed once the `X-Internal-Token` itself is bound to a workspace by `internalWsCtx`. Tracking the token-to-workspace binding refactor as `PR-F24` and the body-workspace-drop architectural cleanup as `PR-F25` — see PRD-AGENT-EVOLUTION-2026.md §6.1.
+<Accordion title="Known exception: the keeper/* family and tenant isolation (PR-F24 / PR-F25)" id="tenant-isolation-on-internal-auth-handlers">
+  **Known exception (tracked as PR-F24 / PR-F25):** the `/api/v1/internal/keeper/*` family (skill-review, behavior, memory-health, negative-learning) currently reads `body.workspace_id` AND `ctx.workspace_id` (the latter set by the `internalWsCtx` middleware from the `?workspace_id` query parameter). The handlers enforce `body.workspace_id == ctx.workspace_id` via the `assertBodyWorkspaceMatchesCtx` helper in `internal/api/keeper_phase2.go` so asymmetric forgery is rejected at the handler boundary, but the symmetric case (caller picks one workspace consistently across query + body) is only closed once the `X-Internal-Token` itself is bound to a workspace by `internalWsCtx`. Tracking the token-to-workspace binding refactor as `PR-F24` and the body-workspace-drop architectural cleanup as `PR-F25` — see PRD-AGENT-EVOLUTION-2026.md §6.1.
+</Accordion>
 
 ## Route catalog
 
@@ -46,6 +109,10 @@ Sourced from the per-domain `internal/api/router_*.go` files (split by domain in
 |---|---|---|
 | `GET` | `/api/v1/internal/credentials` | List credentials this agent is allowed to use. |
 | `PATCH` | `/api/v1/internal/credentials/{credentialId}` | Update credential status (e.g. mark expired). |
+| `POST` | `/api/v1/internal/credentials` | Slash-action mirror — create a credential. Requires `X-Caller-User-Id`. See [Slash-action mirrors](#slash-action-mirrors). |
+| `POST` | `/api/v1/internal/credentials/{credentialId}/rotate` | Slash-action mirror — rotate a credential. Requires `X-Caller-User-Id`. See [Slash-action mirrors](#slash-action-mirrors). |
+
+The `POST` create/rotate routes are registered only when the public `CredentialHandler` is wired (`router_internal.go:80-84`); test routers that omit it skip the mirror.
 
 ### Chats
 
@@ -65,7 +132,22 @@ Sourced from the per-domain `internal/api/router_*.go` files (split by domain in
 | `GET` | `/api/v1/internal/crews` | List crews (sidecar discovery). |
 | `POST` | `/api/v1/internal/crews` | Create a crew programmatically. |
 | `POST` | `/api/v1/internal/agents` | Create an agent programmatically. |
+| `POST` | `/api/v1/internal/agents/hire` | LEAD-initiated ephemeral hire — sidecar `/spawn` proxies here. See [Ephemeral hire](#ephemeral-hire). |
 | `GET` | `/api/v1/internal/crew-connections` | List crew connections. |
+
+The `POST .../agents/hire` route is registered only when the public `AgentHandler` is wired (`router_internal.go:60-63`); the nil-safe adapter returns `500` otherwise.
+
+### Pipelines, routines, and skills
+
+These are the trusted forward-targets for agent-authored pipelines and the sidecar's slash-action routes. Each dispatches into the same public handler the dashboard / CLI uses, with workspace + role context injected at the internal boundary.
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/api/v1/internal/pipelines/save` | Save an agent-authored pipeline definition. See [Pipeline save](#pipeline-save). |
+| `POST` | `/api/v1/internal/routines/schedules` | Slash-action mirror — create a pipeline schedule (routine). See [Slash-action mirrors](#slash-action-mirrors). |
+| `POST` | `/api/v1/internal/skills/generate` | Slash-action mirror — LLM-author a SKILL.md. See [Slash-action mirrors](#slash-action-mirrors). |
+
+`routines/schedules` is registered only when the `PipelineHandler` is wired (`router_internal.go:72-75`); `skills/generate` only when the `SkillGenerateHandler` is wired (`router_internal.go:76-79`).
 
 ### Runs
 
@@ -118,6 +200,15 @@ Since PR #234, runs are reconstructed from journal entries; these endpoints exis
 | `GET` | `/api/v1/internal/keeper/request/{requestId}` | Fetch the status / decision of a previously submitted request. |
 | `POST` | `/api/v1/internal/keeper/execute` | Sidecar forwards a sealed credential-use request after gatekeeper approval. See the [Keeper section](#keeper) for the full request flow. |
 
+Keeper Phase 2 (aux-LLM evaluators, PR-C / PRD §6 F4). All four are wrapped in `internalAuth` **and** `internalWsCtx` (which reads `?workspace_id=` into the request context — see the [Authentication](#authentication) known-exception note). They are always registered, returning a deterministic `503` ("evaluator not configured") until the evaluators are wired (`router_internal.go:164-183`).
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/api/v1/internal/keeper/skill-review` | Evaluate a proposed skill before adoption. |
+| `POST` | `/api/v1/internal/keeper/behavior` | Evaluate an agent behaviour signal. |
+| `POST` | `/api/v1/internal/keeper/memory-health` | Evaluate agent memory health. |
+| `POST` | `/api/v1/internal/keeper/negative-learning` | Evaluate a negative-learning candidate. |
+
 ### MCP audit
 
 | Method | Path | Purpose |
@@ -133,6 +224,10 @@ Since PR #234, runs are reconstructed from journal entries; these endpoints exis
 User-facing port-expose lifecycle endpoints live on the public API — see [Port Expose](/api-reference/port-expose).
 
 ---
+
+# Endpoint deep-dives
+
+The routes above are catalog entries; the sections below give the full request/response contract for the ones with non-trivial bodies, trust models, or error matrices.
 
 ## Cost record
 
@@ -206,6 +301,80 @@ When `had_status_429=true`, the response is **still 202** — the ledger row was
 | 400 | Invalid JSON, body exceeds 16 KiB, missing `workspace_id` / `provider` / `model`, `billing_mode` not `metered` / `flat_rate`, or any validation wrapped as `paymaster.ErrInvalidRequest` (e.g. `flat_rate` without `subscription_plan`). |
 | 401 | Bad or missing `X-Internal-Token`. |
 | 500 | DB error from `paymaster.Record`. |
+
+## Ephemeral hire
+
+```
+POST /api/v1/internal/agents/hire
+```
+
+The internal entry for a LEAD agent spawning a short-lived "contractor" agent. The sidecar's `/spawn` flow proxies here. The `HireInternalAdapter` reads `workspace_id` from the query string (the sidecar attaches it), injects a `MANAGER` role into the request context, then calls the public `AgentHandler.Hire` path unchanged — so the per-crew autonomy policy gate, the `crews.max_ephemeral_agents` quota, the audit log, and the inbox emission all run exactly as they do for a human hire. The adapter deliberately does **not** inject a `user_id`; the resulting audit row is attributed to `actor.system`. (`internal/api/internal_hire.go:45`)
+
+**Request body** (same shape as the public `POST /api/v1/agents/hire`):
+
+| Field | Type | Notes |
+|---|---|---|
+| `crew_id` / `crew_slug` | string | One required, mutually exclusive. |
+| `template_slug` | string | Required. Template the ephemeral is cloned from. |
+| `model` | string | Optional. Empty falls back to the template default. |
+| `ttl_minutes` | integer | Optional. Clamped to `1..1440`; `0` → 30 min default. |
+| `reason` | string | Required (audit + history trail). |
+| `parent_lead_id` | string | Optional. Must be a `LEAD` in the same crew. |
+
+`workspace_id` is **not** read from the body — it comes from the `?workspace_id=` query parameter the sidecar attaches.
+
+**Response:** mirrors the public Hire handler — `201 Created` (live ephemeral), `202 Accepted` (waiting on inbox approval), with a body carrying `id`, `slug`, `status`, `ephemeral`, `expires_at`, `decision`, and optionally `inbox_item_id`.
+
+**Errors:** `400` (missing `workspace_id` query param, or missing/invalid body fields), `403` (strict crew rejected the hire), `404` (crew or template not found), `429` (per-crew ephemeral quota reached), `500` (adapter not configured / DB error).
+
+## Pipeline save
+
+```
+POST /api/v1/internal/pipelines/save
+```
+
+The trusted endpoint the sidecar forwards to when an agent emits a new pipeline definition. `X-Internal-Token` runs upstream; the handler trusts the caller's claim about author identity from the body. It parses + validates the DSL, runs cross-crew reference checks and cycle detection over the workspace's saved pipelines, then persists. (`internal/api/pipelines_crud.go:634`)
+
+**Request body:**
+
+| Field | Type | Notes |
+|---|---|---|
+| `workspace_id` | string | **Required.** |
+| `slug` | string | **Required.** |
+| `definition` | JSON | **Required.** Raw pipeline DSL. |
+| `name`, `description` | string | Optional metadata. |
+| `author_crew_id`, `author_agent_id`, `author_chat_id`, `author_run_id` | string | Author attribution; recorded with `authored_via = agent`. `author_crew_id` also scopes the agent-slug validation set. |
+| `last_test_run_at` | string | RFC 3339. Feeds the test-run gate. |
+| `last_test_run_passed` | bool | Feeds the test-run gate. |
+
+**Response:** `201 Created` — the saved pipeline object (`toPipelineResponse`).
+
+**Errors:** `400` (invalid JSON, or missing `workspace_id` / `slug` / `definition`), `409` (slug already exists in the workspace), `422` (DSL parse / validation / cycle-detection failure, or the test-run gate was not satisfied), `500` (DB error).
+
+## Slash-action mirrors
+
+Four internal routes mirror public handlers so the sidecar's slash-action surface (and, where noted, autonomous agent tool calls) have a trusted backend to proxy into. Each adapter reads `workspace_id` from the `?workspace_id=` query parameter and injects a role into the request context before dispatching to the shared public handler. They follow a **dual-path** model (PRD-SLASH-CAPABILITIES-2026 §6.5):
+
+- **User-initiated** (`X-Caller-User-Id` header present): the adapter gates on the caller's per-action capability (`routine.create`, `skill.create`, `credential.create`, `credential.rotate`) and stamps the real user id for audit attribution.
+- **Autonomous-agent** (`X-Caller-User-Id` absent): falls through the capability gate (the autonomy gate runs upstream), relying on the injected role to clear the public handler's pre-existing role check.
+
+| Route | Public handler | Injected role | `X-Caller-User-Id` | Capability |
+|---|---|---|---|---|
+| `POST /api/v1/internal/routines/schedules` | `PipelineHandler.CreateSchedule` | `MANAGER` | Optional | `routine.create` (when present) |
+| `POST /api/v1/internal/skills/generate` | `SkillGenerateHandler.Generate` | `MANAGER` | Optional | `skill.create` (when present) |
+| `POST /api/v1/internal/credentials` | `CredentialHandler.Create` | `ADMIN` | **Required** | `credential.create` |
+| `POST /api/v1/internal/credentials/{credentialId}/rotate` | `CredentialHandler.Rotate` | `ADMIN` | **Required** | `credential.rotate` |
+
+**Credentials are the exception:** both credential mirrors **reject** with `401` when `X-Caller-User-Id` is absent — autonomous-agent credential mutation is intentionally not supported, because the public Create/Rotate handlers write a human user id into the audit / rotation-initiator columns and rotation has a workspace-wide blast radius. (`internal/api/internal_credentials_mutate.go:99-113`)
+
+**Request / response shapes** match the underlying public endpoints:
+
+- `routines/schedules` → body is the schedule shape (`name`, `target_pipeline_slug` or `target_pipeline_id`, `cron_expr`, `timezone`, `inputs`, `enabled`); `cron_expr` is required. Returns `201 Created` with the schedule object. (`internal/api/internal_routines.go:76`, `internal/api/pipeline_schedules.go:82`)
+- `skills/generate` → body `{ "slug", "prompt", "model"? }` (`slug` + `prompt` required). The adapter stamps `workspace_id` as the `{workspaceId}` path value the public handler expects. Returns `200 OK` with `{ "skill_id", "slug", "content", "scan_status", ... }`. Needs an Anthropic `API_KEY` credential in the workspace (`412` otherwise). (`internal/api/internal_skills.go:49`, `internal/api/skills_generate.go:94`)
+- `credentials` (create) → same body as [Create Credential](/api-reference/credentials#create-credential). Returns `201 Created`. (`internal/api/internal_credentials_mutate.go:49`)
+- `credentials/{credentialId}/rotate` → same body as [Rotate Credential](/api-reference/credentials#rotate-credential) (`value` required, `grace_seconds` optional). `credentialId` is read from the path. Returns `200 OK` with the rotation object. (`internal/api/internal_credentials_mutate.go:76`)
+
+Common errors across all four: `400` (missing `workspace_id` query param or body validation), `401` (credentials only: missing `X-Caller-User-Id`), `403` (capability denied), `500` (adapter not configured).
 
 ## Related
 

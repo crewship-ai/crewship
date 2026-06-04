@@ -4,18 +4,70 @@ description: "Manage workspaces -- the top-level tenant boundary that owns crews
 icon: "building"
 ---
 
-A **workspace** is the top-level tenant in Crewship. Every crew, agent, credential, skill, and pipeline belongs to exactly one workspace, and a user joins a workspace with a role (`OWNER`, `ADMIN`, `MANAGER`, `MEMBER`, `VIEWER`).
+A **workspace** is the top-level tenant in Crewship. Every crew, agent, credential, skill, and pipeline belongs to exactly one workspace, and a user joins a workspace with a role (`OWNER`, `ADMIN`, `MANAGER`, `MEMBER`, `VIEWER`). Reach for these endpoints whenever you need to read or change a workspace itself or anything scoped under it -- its members and their capabilities, invitations, pipelines and their runs/versions/schedules/webhooks, and the workspace skills registry. The standalone workspace-metadata calls (list/create/get/update) sit at the top; everything else is nested under `/api/v1/workspaces/{workspaceId}/...`.
 
+<Note>
 Workspace-scoped endpoints are nested under `/api/v1/workspaces/{workspaceId}/...` and require:
 
 - A valid JWT session cookie **or** a CLI token (`crewship_cli_…`) in the `Authorization` header.
 - The authenticated user to be a member of the workspace (enforced by the `wsCtx` middleware, which also injects `workspace_id` and `role` into the request context).
 
 Errors follow [RFC 7807 Problem Details](https://datatracker.ietf.org/doc/html/rfc7807) -- responses include `type`, `title`, `status`, `detail`, and `instance`.
+</Note>
+
+## Endpoints
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| `GET` | [`/api/v1/workspaces`](#list-workspaces) | Every workspace the caller belongs to |
+| `POST` | [`/api/v1/workspaces`](#create-workspace) | Provision a workspace, caller becomes `OWNER` |
+| `GET` | [`/api/v1/workspaces/{workspaceId}`](#get-workspace) | Fetch a single workspace |
+| `PATCH` | [`/api/v1/workspaces/{workspaceId}`](#update-workspace) | Partial update of workspace fields |
+| `GET` | [`/api/v1/workspaces/{workspaceId}/members`](#list-members) | All members of the workspace |
+| `POST` | [`/api/v1/workspaces/{workspaceId}/members`](#add-member) | Add an existing user by user ID |
+| `DELETE` | [`/api/v1/workspaces/{workspaceId}/members/{memberId}`](#remove-member) | Remove a member (not the `OWNER`) |
+| `GET` | [`/api/v1/workspaces/{workspaceId}/members/{memberId}/capabilities`](#get-member-capabilities) | Resolved capability set for one member |
+| `PATCH` | [`/api/v1/workspaces/{workspaceId}/members/{memberId}/capabilities`](#update-member-capabilities) | Mutate one member's capability set |
+| `GET` | [`/api/v1/workspaces/{workspaceId}/members/capabilities`](#list-all-member-capabilities-bulk) | Capabilities for every member in one call |
+| `GET` | [`/api/v1/workspaces/{workspaceId}/invitations`](#list-invitations) | Pending invitations |
+| `POST` | [`/api/v1/workspaces/{workspaceId}/invitations`](#create-invitation) | Issue a token-gated invitation |
+| `GET` | [`/api/v1/workspaces/{workspaceId}/pipelines`](#list-pipelines) | Workspace-visible pipelines |
+| `GET` | [`/api/v1/workspaces/{workspaceId}/pipelines/{slug}`](#get-pipeline) | One pipeline with full `definition` |
+| `DELETE` | [`/api/v1/workspaces/{workspaceId}/pipelines/{slug}`](#delete-pipeline) | Soft-delete a pipeline |
+| `POST` | [`/api/v1/workspaces/{workspaceId}/pipelines/save`](#save-pipeline) | Create or update a pipeline |
+| `POST` | [`/api/v1/workspaces/{workspaceId}/pipelines/test_run`](#test-run-a-draft) | Run an unsaved draft DSL |
+| `POST` | [`/api/v1/workspaces/{workspaceId}/pipelines/{slug}/dry_run`](#dry-run-a-saved-pipeline) | WouldExecute report, no agent runs |
+| `POST` | [`/api/v1/workspaces/{workspaceId}/pipelines/{slug}/run`](#run-pipeline) | Invoke a saved pipeline |
+| `GET` | [`/api/v1/workspaces/{workspaceId}/pipelines/{slug}/runs`](#list-pipeline-runs-journal-backed) | Journal-backed run entries |
+| `GET` | [`/api/v1/workspaces/{workspaceId}/pipelines/{slug}/run-records`](#list-pipeline-run-records-projection-table) | Column-typed run projection |
+| `GET` | [`/api/v1/workspaces/{workspaceId}/pipelines/runs/active`](#list-active-runs-in-memory-registry) | In-flight runs (this replica) |
+| `GET` | [`/api/v1/workspaces/{workspaceId}/pipeline-runs`](#list-workspace-runs-cross-pipeline-feed) | Cross-pipeline run feed |
+| `GET` | [`/api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}`](#get-pipeline-run) | Persisted state of one run |
+| `POST` | [`/api/v1/workspaces/{workspaceId}/pipelines/runs/{runId}/cancel`](#cancel-pipeline-run) | Cancel an in-flight run |
+| `GET` | [`/api/v1/workspaces/{workspaceId}/pipelines/{slug}/versions`](#list-versions) | Pipeline version history |
+| `GET` | [`/api/v1/workspaces/{workspaceId}/pipelines/{slug}/versions/{n}`](#get-one-version) | One version with full DSL |
+| `POST` | [`/api/v1/workspaces/{workspaceId}/pipelines/{slug}/rollback`](#rollback-to-a-version) | Roll head back to a version |
+| `GET` | [`/api/v1/workspaces/{workspaceId}/pipelines/{slug}/export`](#export-pipeline-bundle) | Export a portable bundle |
+| `POST` | [`/api/v1/workspaces/{workspaceId}/pipelines/import`](#import-pipeline-bundle) | Create a pipeline from a bundle |
+| `GET` | [`/api/v1/workspaces/{workspaceId}/pipelines/waitpoints`](#list-pending-waitpoints) | Pending approval waitpoints |
+| `POST` | [`/api/v1/workspaces/{workspaceId}/pipelines/waitpoints/{token}/approve`](#approve-reject-waitpoint) | Approve / reject a waitpoint |
+| `GET` | [`/api/v1/workspaces/{workspaceId}/pipeline-schedules`](#list-schedules) | Cron schedules |
+| `POST` | [`/api/v1/workspaces/{workspaceId}/pipeline-schedules`](#create-schedule) | Create a schedule |
+| `PATCH` | [`/api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}`](#update-schedule) | Update a schedule |
+| `DELETE` | [`/api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}`](#delete-schedule) | Soft-delete a schedule |
+| `GET` | [`/api/v1/workspaces/{workspaceId}/pipeline-webhooks`](#list-webhooks) | Webhooks |
+| `POST` | [`/api/v1/workspaces/{workspaceId}/pipeline-webhooks`](#create-webhook) | Create a webhook |
+| `DELETE` | [`/api/v1/workspaces/{workspaceId}/pipeline-webhooks/{webhookId}`](#delete-webhook) | Soft-delete a webhook |
+| `POST` | [`/api/v1/workspaces/{workspaceId}/skills/import`](#import-skill-url-or-paste) | Import one `SKILL.md` |
+| `POST` | [`/api/v1/workspaces/{workspaceId}/skills/bulk-import`](#bulk-import-from-git-repo) | Bulk-import skills from a git repo |
+| `POST` | [`/api/v1/workspaces/{workspaceId}/skills/generate`](#generate-skill-llm) | Generate a skill via LLM |
+| `DELETE` | [`/api/v1/workspaces/{workspaceId}/skills/{skillId}`](#delete-skill) | Delete a skill |
 
 ---
 
 ## Workspace metadata
+
+Read and manage the workspace record itself -- list the ones you belong to, create new ones, and update name/slug/language.
 
 ### List workspaces
 
@@ -55,9 +107,9 @@ Returns every workspace the authenticated user belongs to, ordered by `created_a
 | `logo_url` | string? | URL to workspace logo |
 | `preferred_language` | string? | Canonical language name (e.g. `"Czech"`, `"English"`) -- see [language list](#preferred_language-values) |
 | `currentUserRole` | string | Caller's role in this workspace (`OWNER` / `ADMIN` / `MANAGER` / `MEMBER` / `VIEWER`) |
-| `_count_crews` | integer | Number of non-deleted crews |
-| `_count_agents` | integer | Number of non-deleted agents |
-| `_count_members` | integer | Number of workspace members |
+| `_count_crews` | integer | Number of non-deleted crews (omitted from the JSON when `0`) |
+| `_count_agents` | integer | Number of non-deleted agents (omitted when `0`) |
+| `_count_members` | integer | Number of workspace members (omitted when `0`) |
 | `created_at` / `updated_at` | string | RFC 3339 timestamp |
 
 ### Create workspace
@@ -132,11 +184,15 @@ Partial update -- only provided fields are changed. Setting `preferred_language`
 | `403` | Caller is not `OWNER`/`ADMIN` |
 | `409` | New `slug` already taken |
 
-> **Note:** There is no `DELETE /workspaces/{workspaceId}` endpoint and no `crewship workspace delete` command. Workspace deletion is handled out-of-band (a direct operation on the host database); deleting the last workspace would orphan its owner, so it is intentionally not exposed through the API or CLI.
+<Note>
+There is no `DELETE /workspaces/{workspaceId}` endpoint and no `crewship workspace delete` command. Workspace deletion is handled out-of-band (a direct operation on the host database); deleting the last workspace would orphan its owner, so it is intentionally not exposed through the API or CLI.
+</Note>
 
 ---
 
 ## Members
+
+List the people in a workspace, add an existing user directly, or remove one. (To bring in someone who has no account yet, issue an [invitation](#invitations).)
 
 ### List members
 
@@ -173,7 +229,11 @@ Returns all members of the workspace ordered by `created_at` ASC, joined to `use
 POST /api/v1/workspaces/{workspaceId}/members
 ```
 
-Adds an existing user to the workspace by user ID. Use this when the user already has a Crewship account; for unknown email addresses, use [Create invitation](#create-invitation) instead.
+Adds an existing user to the workspace by user ID.
+
+<Tip>
+Use this when the user already has a Crewship account; for unknown email addresses, use [Create invitation](#create-invitation) instead.
+</Tip>
 
 **Auth:** `OWNER` or `ADMIN` (`canRole "manage"`).
 
@@ -196,10 +256,14 @@ Adds an existing user to the workspace by user ID. Use this when the user alread
 | Status | Condition |
 |---|---|
 | `400` | Missing `user_id`, invalid `role` |
-| `402` | License member limit exceeded |
+| `402` | License member limit reached |
 | `403` | Caller not `OWNER`/`ADMIN`, or tried to assign `ADMIN` without being `OWNER` |
 | `404` | `user_id` does not match any user |
 | `409` | User is already a member |
+
+<Accordion title="License limit (402 Payment Required)">
+When the workspace's license caps the member count, adding a member that would exceed it returns **`402 Payment Required`** with the limit detail in the Problem Details body. The check runs before the request body is read, so a capped workspace rejects every add regardless of payload. The same limit applies to [Create invitation](#create-invitation).
+</Accordion>
 
 ### Remove member
 
@@ -207,7 +271,9 @@ Adds an existing user to the workspace by user ID. Use this when the user alread
 DELETE /api/v1/workspaces/{workspaceId}/members/{memberId}
 ```
 
+<Warning>
 Removes a workspace member. **You cannot remove the workspace OWNER.**
+</Warning>
 
 **Auth:** `OWNER` or `ADMIN` (`canRole "manage"`).
 
@@ -221,6 +287,153 @@ Removes a workspace member. **You cannot remove the workspace OWNER.**
 |---|---|
 | `403` | Caller not `OWNER`/`ADMIN`, **or** target member is the `OWNER` |
 | `404` | `memberId` not found in this workspace |
+
+---
+
+## Member capabilities
+
+**Capabilities** are per-member string grants layered *on top of* a member's RBAC role. They let a workspace admin hand an individual user a specific higher-tier action -- "let this `MEMBER` create routines" -- without promoting them to `MANAGER`. The role still sets the baseline; capabilities only ever widen it.
+
+The closed set of seven capabilities:
+
+| Capability | Gates |
+|---|---|
+| `chat` | Baseline -- talk to agents. **Always implied**; every member has it even when the stored set omits it, and it cannot be revoked (remove the member instead). |
+| `routine.create` | Create pipeline schedules (cron-driven routines) |
+| `skill.create` | Generate / import skills |
+| `credential.create` | Create credential rows (fresh secret material in the vault) |
+| `credential.rotate` | Rotate an existing credential's value |
+| `issue.create` | File issues |
+| `memory.write` | Write to agent / crew / workspace memory via `/remember` |
+
+**Presets** are named bundles for the common combinations:
+
+| Preset | Capabilities |
+|---|---|
+| `chat` | `chat` |
+| `power` | `chat`, `routine.create`, `issue.create`, `memory.write` |
+| `admin` | all seven |
+
+A member with no explicit set falls back to a role-derived default (`OWNER`/`ADMIN` → `admin` bundle, `MANAGER` → power-equivalent, others → `chat`). The capability lists returned by these endpoints are always sorted alphabetically.
+
+All three endpoints require the caller to be `ADMIN` or `OWNER`.
+
+<Note>
+**Path-param note:** on the per-member capability endpoints the
+`{memberId}` segment is the member's **user ID** (it is matched against
+`workspace_members.user_id`), not the `workspace_members.id` row ID used
+by [Remove member](#remove-member). The `user_id` field in the response
+echoes the value you passed in.
+</Note>
+
+### Get member capabilities
+
+```
+GET /api/v1/workspaces/{workspaceId}/members/{memberId}/capabilities
+```
+
+Returns the resolved capability set and role for a single member. Listing a member's capabilities reveals the workspace's permission topology, so the endpoint is admin-gated.
+
+**Auth:** `ADMIN` or `OWNER`.
+
+**Response:** `200 OK`
+
+```json
+{
+  "user_id": "user_jdoe42",
+  "role": "MEMBER",
+  "capabilities": ["chat", "issue.create", "routine.create"]
+}
+```
+
+| Status | Condition |
+|---|---|
+| `403` | Caller below `ADMIN` |
+| `404` | `memberId` not found in this workspace |
+
+### Update member capabilities
+
+```
+PATCH /api/v1/workspaces/{workspaceId}/members/{memberId}/capabilities
+```
+
+Mutates a member's capability set. The body must contain **exactly one** of four mutation shapes:
+
+| Field | Type | Effect |
+|---|---|---|
+| `set` | string[] | Replace the entire set with these capabilities |
+| `grant` | string[] | Add these to the current set |
+| `revoke` | string[] | Remove these from the current set |
+| `preset` | string | Apply a named bundle -- `"chat"`, `"power"`, or `"admin"` |
+
+Empty arrays are **rejected** (a `400`, not treated as a no-op) -- to reset a member to chat-only, send `{"set": ["chat"]}` explicitly. `chat` is always implied: it is silently kept on `set`, and revoking it is rejected.
+
+```json
+{ "preset": "power" }
+```
+
+```json
+{ "grant": ["routine.create", "issue.create"] }
+```
+
+**Auth:** `ADMIN` or `OWNER`.
+
+**Guards:**
+
+- A caller **cannot mutate their own** capability row (defence against a downgrade-then-restore stunt) -- `403`.
+- `OWNER` capability rows are **immutable** -- any attempt returns `403`.
+- The request body is capped at 16 KB -- a larger body returns `413`.
+
+**Response:** `200 OK` -- the post-mutation state (same shape as Get):
+
+```json
+{
+  "user_id": "user_jdoe42",
+  "role": "MEMBER",
+  "capabilities": ["chat", "issue.create", "memory.write", "routine.create"]
+}
+```
+
+| Status | Condition |
+|---|---|
+| `400` | Zero or more than one mutation shape, empty array, unknown capability / preset, attempt to revoke `chat`, invalid JSON |
+| `401` | Not authenticated |
+| `403` | Caller below `ADMIN`, caller mutating own row, or target is an `OWNER` |
+| `404` | `memberId` not found (including a row deleted concurrently mid-update) |
+| `413` | Request body exceeds 16 KB |
+
+### List all member capabilities (bulk)
+
+```
+GET /api/v1/workspaces/{workspaceId}/members/capabilities
+```
+
+Returns the resolved capabilities for **every** member of the workspace in one round-trip -- this drives the Members capability grid without an N+1 fan-out across the per-member endpoint. Rows are ordered by membership `created_at` ASC so the grid renders stably between page loads.
+
+**Auth:** `ADMIN` or `OWNER`.
+
+**Response:** `200 OK`
+
+```json
+{
+  "members": [
+    {
+      "user_id": "user_jdoe42",
+      "role": "OWNER",
+      "capabilities": ["chat", "credential.create", "credential.rotate", "issue.create", "memory.write", "routine.create", "skill.create"]
+    },
+    {
+      "user_id": "user_asmith7",
+      "role": "MEMBER",
+      "capabilities": ["chat", "issue.create"]
+    }
+  ]
+}
+```
+
+| Status | Condition |
+|---|---|
+| `403` | Caller below `ADMIN` |
 
 ---
 
@@ -355,12 +568,17 @@ Returns the same shape as List but with the full `definition` (raw DSL JSON) inl
 DELETE /api/v1/workspaces/{workspaceId}/pipelines/{slug}
 ```
 
+<Warning>
 Soft-deletes the pipeline (`deleted_at` set). Versions, run history, and bound schedules/webhooks are retained.
+</Warning>
+
+**Auth:** `OWNER` or `ADMIN` (`canRole "delete"`).
 
 **Response:** `204 No Content`
 
 | Status | Condition |
 |---|---|
+| `403` | Caller below `ADMIN` |
 | `404` | Pipeline not found |
 
 ### Save pipeline
@@ -516,7 +734,7 @@ Column-typed scan over `pipeline_runs` (migration v83). Faster than `/runs` beca
 | Parameter | Type | Default | Description |
 |---|---|---|---|
 | `limit` | integer | 50 | Hard cap 500 |
-| `status` | string | -- | Filter to a single `RunStatus` (`running`, `completed`, `failed`, `paused`, `queued`, `cancelled`) |
+| `status` | string | -- | Filter to a single `RunStatus` (`queued`, `running`, `completed`, `failed`, `cancelled`; plus `dry_run` / `interrupted`). There is no `paused` run status here -- a run waiting on an approval keeps its `running` status in this table. |
 
 **Response:** `200 OK` -- array of run records. Each record:
 
@@ -624,7 +842,7 @@ GET /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}
 
 Returns the persisted state of a single run from `pipeline_runs`, joined to `pipelines` and `missions` for human-readable enrichment. `step_outputs_json` is parsed server-side into an object so the UI does not have to `JSON.parse` twice.
 
-**Response:** `200 OK` -- single row with the same fields as the workspace-runs list plus `workspace_id`, `inputs` (parsed), and `idempotency_key`.
+**Response:** `200 OK` -- single row. Includes `id`, `workspace_id`, `pipeline_id`, `pipeline_slug`, `pipeline_name`, `status`, `mode`, `current_step_id`, `step_outputs` (parsed), `output`, `started_at`, `ended_at`, `error_message`, `failed_at_step`, `cost_usd`, `duration_ms`, `triggered_via`, `triggered_by_id`, `idempotency_key`, `inputs` (parsed), and `issue_identifier`. Unlike the workspace-runs feed, this view does **not** carry the `invoking_crew_id` / `invoking_agent_id` / `invoking_user_id` attribution fields.
 
 | Status | Condition |
 |---|---|
@@ -640,6 +858,8 @@ Pre-empts an in-flight run by triggering its context. The run loop checks `ctx.E
 
 Idempotent: cancelling an already-cancelled run is a no-op (200 with the same response). Cancelling a **finished** run returns 404 because the in-memory registry only tracks live runs.
 
+**Auth:** `OWNER` or `ADMIN` (`canRole "manage"`) -- cancelling another user's run is a manage-tier action.
+
 **Response:** `200 OK`
 
 ```json
@@ -652,12 +872,15 @@ Idempotent: cancelling an already-cancelled run is a no-op (200 with the same re
 
 | Status | Condition |
 |---|---|
+| `403` | Caller below `ADMIN` |
 | `404` | Run not found in this workspace (already finished, or never started here) |
 | `503` | Run registry not wired |
 
 ---
 
 ## Versions
+
+Every save snapshots the pipeline, so you can inspect its history, fetch a specific revision, or roll the head pointer back.
 
 ### List versions
 
@@ -706,6 +929,8 @@ POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/rollback
 
 Rolls the pipeline's head pointer + `definition_json` back to the named version. History is preserved -- rollback does not delete newer versions.
 
+**Auth:** `OWNER` or `ADMIN` (`canRole "manage"`).
+
 **Request body:**
 
 ```json
@@ -717,11 +942,14 @@ Rolls the pipeline's head pointer + `definition_json` back to the named version.
 | Status | Condition |
 |---|---|
 | `400` | `version` missing or < 1 |
+| `403` | Caller below `ADMIN` |
 | `404` | Pipeline or version not found |
 
 ---
 
 ## Import / export
+
+Move a pipeline between workspaces as a portable bundle -- export from one, import into another.
 
 ### Export pipeline bundle
 
@@ -759,7 +987,9 @@ Returns a portable `crewship-pipeline-bundle/v1` document. Author identity, runt
 }
 ```
 
-> The bundle's `metadata.head_version` field is misnamed in the current build -- it actually carries `invocation_count`. Treat it as opaque metadata.
+<Note>
+The bundle's `metadata.head_version` field is misnamed in the current build -- it actually carries `invocation_count`. Treat it as opaque metadata.
+</Note>
 
 ### Import pipeline bundle
 
@@ -770,6 +1000,8 @@ POST /api/v1/workspaces/{workspaceId}/pipelines/import
 Creates a pipeline from a previously exported bundle. The receiving workspace becomes the author context; the original bundle's source workspace id is preserved on the pipeline row as `imported_from_url` for audit.
 
 Imports **skip the test-run gate** by design -- a marketplace bundle is presumed to have passed test-run in its source workspace.
+
+**Auth:** `MANAGER`+ (`canRole "create"`) -- importing creates a new pipeline row, same privilege as Save.
 
 **Request body:** the bundle JSON plus an explicit `author_crew_id`:
 
@@ -787,6 +1019,7 @@ Imports **skip the test-run gate** by design -- a marketplace bundle is presumed
 | Status | Condition |
 |---|---|
 | `400` | Invalid bundle JSON, unsupported `format`, missing `pipeline.name`/`pipeline.definition`, missing `author_crew_id` |
+| `403` | Caller below `MANAGER` |
 | `409` | Slug already exists in this workspace |
 | `422` | DSL parse / validate failure (receiving workspace doesn't have every referenced agent slug) |
 
@@ -895,6 +1128,8 @@ POST /api/v1/workspaces/{workspaceId}/pipeline-schedules
 
 Accepts either `target_pipeline_slug` (UI-friendly) or `target_pipeline_id` (CLI-friendly).
 
+**Auth:** `MANAGER`+ (`canRole "create"`), **or** a `MEMBER` holding the `routine.create` capability.
+
 **Request body:**
 
 | Field | Type | Required | Description |
@@ -913,6 +1148,7 @@ Accepts either `target_pipeline_slug` (UI-friendly) or `target_pipeline_id` (CLI
 | Status | Condition |
 |---|---|
 | `400` | Missing `cron_expr`, invalid cron / timezone, pipeline not found in this workspace |
+| `403` | Caller below `MANAGER` without `routine.create` |
 | `503` | Schedule store not wired |
 
 ### Update schedule
@@ -923,11 +1159,14 @@ PATCH /api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}
 
 **Whole-row replace semantics** -- the caller sends the post-edit state, missing fields fall back to the existing row.
 
+**Auth:** `OWNER` or `ADMIN` (`canRole "manage"`).
+
 **Response:** `200 OK` -- updated schedule.
 
 | Status | Condition |
 |---|---|
 | `400` | Invalid body / cron / timezone |
+| `403` | Caller below `ADMIN` |
 | `404` | Schedule not found in this workspace |
 | `503` | Schedule store not wired |
 
@@ -937,12 +1176,17 @@ PATCH /api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}
 DELETE /api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}
 ```
 
+<Warning>
 Soft delete. In-flight scheduled runs finish; no new runs fire.
+</Warning>
+
+**Auth:** `OWNER` or `ADMIN` (`canRole "delete"`).
 
 **Response:** `204 No Content`
 
 | Status | Condition |
 |---|---|
+| `403` | Caller below `ADMIN` |
 | `404` | Schedule not found |
 | `503` | Schedule store not wired |
 
@@ -992,6 +1236,8 @@ Returns all non-deleted webhooks. The `signing_secret` value is **never** return
 POST /api/v1/workspaces/{workspaceId}/pipeline-webhooks
 ```
 
+**Auth:** `MANAGER`+ (`canRole "create"`) -- a webhook mints a public dispatch URL, so creation is gated at MANAGER+.
+
 **Request body:**
 
 | Field | Type | Required | Description |
@@ -1000,16 +1246,17 @@ POST /api/v1/workspaces/{workspaceId}/pipeline-webhooks
 | `target_pipeline_slug` | string | one-of | -- |
 | `target_pipeline_id` | string | one-of | -- |
 | `target_pipeline_version` | integer | no | -- |
-| `signing_secret` | string | no | Used for HMAC-SHA256 verification of the `X-Crewship-Signature` header |
-| `inputs_template` | object | no | Merged on top of the default `{event, raw, headers}` envelope when the webhook fires |
+| `signing_secret` | string | no | Used for HMAC-SHA256 verification of the `X-Crewship-Signature` header. **If omitted, the server auto-generates a 32-byte hex secret** -- HMAC verification is mandatory on every webhook, so `signing_secret_set` is always `true`. |
+| `inputs_template` | object | no | Merged on top of the default `{event, raw, headers}` envelope when the webhook fires (the three reserved keys cannot be overridden) |
 | `enabled` | boolean | no | Default `true` |
-| `rate_limit_per_min` | integer | no | Per-token rate limit; 0 disables |
+| `rate_limit_per_min` | integer | no | Per-token rate limit; `0` (or unset) floors to 600/min server-side, not unlimited |
 
-**Response:** `201 Created` -- webhook object **including** `signing_secret` (this is the only time it is returned; subsequent reads return only `signing_secret_set: true`).
+**Response:** `201 Created` -- webhook object **including** `signing_secret` (this is the only time it is returned, whether supplied or auto-generated; subsequent reads return only `signing_secret_set: true`).
 
 | Status | Condition |
 |---|---|
 | `400` | Missing/invalid pipeline reference |
+| `403` | Caller below `MANAGER` |
 | `503` | Webhook store not wired |
 
 ### Delete webhook
@@ -1018,12 +1265,17 @@ POST /api/v1/workspaces/{workspaceId}/pipeline-webhooks
 DELETE /api/v1/workspaces/{workspaceId}/pipeline-webhooks/{webhookId}
 ```
 
+<Warning>
 Soft delete.
+</Warning>
+
+**Auth:** `OWNER` or `ADMIN` (`canRole "delete"`).
 
 **Response:** `204 No Content`
 
 | Status | Condition |
 |---|---|
+| `403` | Caller below `ADMIN` |
 | `404` | Webhook not found in this workspace |
 | `503` | Webhook store not wired |
 
@@ -1056,13 +1308,13 @@ Imports a single `SKILL.md` either by URL (SSRF-validated, HTTPS-only, no loopba
 ```json
 {
   "skill_id": "sk_a1b2c3d4e5f6",
-  "slug": "github-pr-review",
-  "created": true,
   "name": "github-pr-review",
-  "display_name": "GitHub PR Review",
-  "scan_status": "CLEAN"
+  "slug": "github-pr-review",
+  "created": true
 }
 ```
+
+The import response carries only these four fields (`created` is `true` for a fresh row, `false` for an in-place update of an existing slug). Scan status and display name are persisted on the skill row but **not** echoed here -- fetch the skill via `GET /api/v1/skills/{skillId}` to read them.
 
 | Status | Condition |
 |---|---|
@@ -1077,7 +1329,9 @@ POST /api/v1/workspaces/{workspaceId}/skills/bulk-import
 
 Walks a public git repository for `SKILL.md` files and upserts each through the same license-gated path as single-import. Per-skill rejections are reported in the response's `skipped` list rather than failing the whole batch.
 
-> Local-path bulk import (the importer's `Paths` field beyond the optional in-repo subdirectory filter) is intentionally **not** exposed -- it would turn the endpoint into an arbitrary host-FS read primitive.
+<Note>
+Local-path bulk import (the importer's `Paths` field beyond the optional in-repo subdirectory filter) is intentionally **not** exposed -- it would turn the endpoint into an arbitrary host-FS read primitive.
+</Note>
 
 **Auth:** `MANAGER`+ (`canRole "create"`).
 
@@ -1162,7 +1416,9 @@ Requires an `ACTIVE` Anthropic credential of type `API_KEY` (a real `sk-ant-...`
 DELETE /api/v1/workspaces/{workspaceId}/skills/{skillId}
 ```
 
+<Warning>
 Removes a skill from the registry. Cascades to `agent_skills` via FK. **`BUNDLED` skills are refused** -- the binary re-seeds them on every startup, so a delete is a no-op churn and creates a malicious-operator window.
+</Warning>
 
 **Auth:** `OWNER` or `ADMIN` (`canRole "manage"`). The skills registry is shared global state; destructive operations get the higher tier.
 

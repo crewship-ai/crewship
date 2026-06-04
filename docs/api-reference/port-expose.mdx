@@ -4,13 +4,20 @@ description: "Capability URLs for exposing in-container ports to the operator's 
 icon: "globe"
 ---
 
-# Port Expose
-
-When an agent runs `npm run dev` or starts a service inside its container, the operator wants a clickable URL to open it. Port expose creates a **capability URL** — `https://<host>/exposed/<token>` — that reverse-proxies to the in-container port. The token is the auth: anyone with the URL gets through, anyone without it gets a 404.
+When an agent runs `npm run dev` or starts a service inside its container, the operator wants a clickable URL to open it. Port expose creates a **capability URL** — `https://<host>/exposed/<token>` — that reverse-proxies to the in-container port. The token is the auth: anyone with the URL gets through, anyone without it gets a 404. Exposes are created by the sidecar on the agent's behalf, then listed and revoked through the user-facing crew endpoints.
 
 This is the right shape for ephemeral dev URLs: short-lived, easy to share with a teammate via Slack, no JWT plumbing needed. For long-lived or sensitive surfaces, do not use this — set up a proper authenticating proxy.
 
 Implementation: `internal/api/port_expose_handler.go`. Capability URLs hit Go 1.22+ `ServeMux` with `/exposed/{token}` and `/exposed/{token}/` (trailing slash and bare-token forms both routed to the same handler).
+
+## Endpoints
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| ANY | [`/exposed/{token}`](#capability-url-reverse-proxy) | Public capability URL — reverse-proxies to the in-container port |
+| POST | [`/api/v1/internal/port-expose`](#sidecar-request) | Internal: sidecar requests a new expose |
+| GET | [`/api/v1/crews/{crewId}/port-expose`](#list) | List a crew's port-exposes |
+| POST | [`/api/v1/crews/{crewId}/port-expose/{id}/revoke`](#revoke) | Revoke an expose |
 
 ---
 
@@ -21,17 +28,18 @@ ANY /exposed/{token}
 ANY /exposed/{token}/
 ```
 
-**No auth header.** The token IS the auth; presenting a valid, non-revoked, non-expired token yields proxied traffic to the registered in-container port. All HTTP verbs are forwarded (GET / POST / PUT / DELETE / PATCH / HEAD / OPTIONS) so static sites, REST APIs, and WebSocket upgrades all work.
+**No auth header.** The token IS the auth; presenting a valid, non-revoked, non-expired token yields proxied traffic to the registered in-container port. All HTTP verbs are forwarded (GET / POST / PUT / DELETE / PATCH / HEAD / OPTIONS) so static sites and REST APIs work.
 
-WebSocket upgrades **are** supported — the proxy detects the `Upgrade: websocket` header and switches to bidirectional pipe mode.
+**WebSocket upgrades are not supported.** A request carrying `Upgrade: websocket` is rejected with `426 Upgrade Required` (`websocket not supported`); the exposed-port proxy only handles plain HTTP request/response traffic.
 
 **Errors:**
 
 | Status | Condition |
 |---|---|
-| 404 | Token unknown, expired, or revoked. (Same shape so existence isn't leaked.) |
-| 502 | Upstream (in-container) port not reachable. |
-| 504 | Upstream timeout. |
+| 404 | Token unknown or revoked. (Same shape so existence isn't leaked.) |
+| 410 | Token expired (`gone (expired)`). |
+| 426 | `Upgrade: websocket` request (`websocket not supported`). |
+| 502 | Upstream (in-container) port not reachable, or any reverse-proxy error (including timeout). |
 
 There is no rate limit on the capability URL — it forwards as fast as the underlying TCP connection allows.
 
@@ -39,26 +47,32 @@ There is no rate limit on the capability URL — it forwards as fast as the unde
 
 ## Sidecar request
 
+How a new capability URL is minted — the agent never calls this directly.
+
 ```
 POST /api/v1/internal/port-expose
 ```
 
-**Internal only — `X-Internal-Token` required.** The agent asks the sidecar (e.g. via a tool call), the sidecar asks the server. Agents cannot reach this endpoint directly.
+<Note>
+  **Internal only — `X-Internal-Token` required.** The agent asks the sidecar (e.g. via a tool call), the sidecar asks the server. Agents cannot reach this endpoint directly.
+</Note>
 
 **Request body:**
 
 ```json
 {
-  "container_port": 3000,
-  "label": "next-dev",
+  "port": 3000,
+  "description": "next-dev",
   "ttl_seconds": 3600
 }
 ```
 
 | Field | Type | Description |
 |---|---|---|
-| `container_port` | integer | Port number inside the crew container. |
-| `label` | string | Operator-facing name; surfaced in the audit list. |
+| `port` | integer | Port number (1-65535) inside the crew container. |
+| `description` | string | Operator-facing name; surfaced in the audit list. Max 200 chars. |
+| `container_id` | string | Container to target. Required (the sidecar supplies it). |
+| `chat_id` | string | Optional — associates the expose with a chat session for UI surfacing. |
 | `ttl_seconds` | integer | Lifetime in seconds. Server clamps to a max of 24 hours. |
 
 **Response:** `201 Created`
@@ -86,28 +100,33 @@ GET /api/v1/crews/{crewId}/port-expose
 
 Lists every active port-expose for a crew. Workspace-scoped.
 
-**Response:** `200 OK`
+By default only `ACTIVE` exposes are returned. Filter with `?status=active|revoked|expired|all`.
+
+**Response:** `200 OK` — a **bare JSON array** (not wrapped in an `exposes` object).
 
 ```json
-{
-  "exposes": [
-    {
-      "id": "pe_a1b2",
-      "agent_id": "agt_viktor",
-      "container_port": 3000,
-      "label": "next-dev",
-      "url": "https://crewship.example.com/exposed/tk_…",
-      "created_at": "2026-04-30T11:42:18Z",
-      "expires_at": "2026-04-30T15:42:18Z",
-      "revoked": false,
-      "request_count": 47,
-      "last_request_at": "2026-04-30T11:55:01Z"
-    }
-  ]
-}
+[
+  {
+    "id": "pe_a1b2",
+    "agent_id": "agt_viktor",
+    "agent_slug": "viktor",
+    "container_port": 3000,
+    "description": "next-dev",
+    "status": "ACTIVE",
+    "created_at": "2026-04-30T11:42:18Z",
+    "expires_at": "2026-04-30T15:42:18Z"
+  }
+]
 ```
 
-The `request_count` is incremented by the reverse proxy on every successful forward, so operators can spot which exposes are actually being hit. Use this to find the dead expose left over from yesterday's debugging.
+| Field | Type | Description |
+|---|---|---|
+| `status` | string | `ACTIVE`, `REVOKED`, or `EXPIRED`. |
+| `revoked_at` | string? | Present only on revoked rows (RFC3339). |
+| `revoked_reason` | string? | Present only on revoked rows, if a reason was supplied. |
+| `description` | string? | Operator-facing label set at creation. Omitted when empty. |
+
+The `token` (and thus the public `url`) is intentionally **not** included — only the issuing agent receives the capability URL.
 
 ### Revoke
 
@@ -115,9 +134,26 @@ The `request_count` is incremented by the reverse proxy on every successful forw
 POST /api/v1/crews/{crewId}/port-expose/{id}/revoke
 ```
 
-Marks the expose as revoked; the next request to its capability URL returns 404. Idempotent.
+Marks the expose as revoked; the next request to its capability URL returns 404. Requires `MANAGER`+ (the `create` permission). **Not idempotent** — a second revoke of the same expose returns `409 Conflict` because the conditional update only matches `ACTIVE`/`PENDING` rows.
 
-**Response:** `204 No Content`.
+**Request body (optional):**
+
+```json
+{ "reason": "debugging finished" }
+```
+
+`reason` is optional (max 500 chars) and recorded on the audit row.
+
+**Response:** `200 OK`
+
+```json
+{ "status": "revoked" }
+```
+
+| Status | Condition |
+|---|---|
+| 403 | Caller below `MANAGER`. |
+| 409 | Expose not found, or already revoked/expired. |
 
 ---
 

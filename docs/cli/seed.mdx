@@ -27,6 +27,8 @@ On a fresh database, seed bootstraps the admin user (`demo@crewship.ai`) itself.
 | `--provision-timeout <s>` | `900` | Per-crew provisioning timeout (seconds). |
 | `--wait-provision` | `false` | Block until all crews finish provisioning. Default is fire-and-forget — seed returns while provisioning runs in the background. |
 | `--test-backup` | `false` | After seeding, run a backup/restore round-trip self-test on one crew. Implies `--wait-provision`. |
+| `--with-memory` | `false` | Pre-seed agent memory tiers (`AGENT.md` / `CREW.md` / `PERSONA.md` / `pins.md` / `daily/{date}.md` / `learned.md`) for the demo workspace; useful for memory-recall demos and live GDPR/RBAC tests. |
+| `--with-users` | `false` | Add four extra users (`ADMIN`, `MANAGER`, `MEMBER`, `VIEWER`) to the workspace for RBAC matrix testing; requires `CREWSHIP_ALLOW_SIGNUP=true` on the server. |
 
 ## Examples
 

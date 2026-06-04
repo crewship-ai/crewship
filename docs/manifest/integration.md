@@ -11,7 +11,7 @@ integration declared once and shared across many crews
 outside the bulkier `kind: Crew` document.
 
 The legacy inline `mcp_servers:` block nested under a crew (see
-[Crew](./crew.md) and [Workspace](./workspace.md)) still works and
+[Crew](/manifest/crew) and [Workspace](/manifest/workspace)) still works and
 remains the most ergonomic shape for bundling integrations with a crew
 definition. `kind: Integration` is the inverse: declare once, scope
 explicitly.
@@ -36,7 +36,7 @@ mistake and fails loudly).
 `metadata.slug` MUST equal `metadata.name` — the server keys MCP-server
 uniqueness on `name` within the (workspace, crew) tuple, but every
 cross-kind reference uses slug, so the manifest forces the two to
-match (the same convention [Label](./label.md) uses).
+match (the same convention [Label](/manifest/label) uses).
 
 ### `env` vs `env_mapping`
 
@@ -157,7 +157,7 @@ spec:
 
 There is no dedicated `crewship integration` per-kind admin command —
 integrations are authored through the manifest pipeline (or installed
-as part of a [Connector](./connector.md) / [Recipe](./recipe.md)). The
+as part of a [Connector](/manifest/connector) / [Recipe](/manifest/recipe)). The
 relevant CLI surface is the global apply/export flow:
 
 | Command | Description |
@@ -243,8 +243,8 @@ slug for stable diffs.
 
 ## See also
 
-- [Crew](./crew.md) — can declare integrations inline via `mcp_servers:`.
-- [Connector](./connector.md) — install-only OAuth connectors (Linear, GitHub, …).
-- [Recipe](./recipe.md) — catalog installs that may bundle integrations.
+- [Crew](/manifest/crew) — can declare integrations inline via `mcp_servers:`.
+- [Connector](/manifest/connector) — install-only OAuth connectors (Linear, GitHub, …).
+- [Recipe](/manifest/recipe) — catalog installs that may bundle integrations.
 - Backend: `internal/api/workspace_integrations.go`, `internal/api/crew_integrations.go`.
 - This kind's Go implementation: `internal/manifest/kinds/integration.go`.

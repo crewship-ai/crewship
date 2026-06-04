@@ -4,16 +4,25 @@ description: "Project milestones — named, dated checkpoints with issue rollup 
 icon: "flag"
 ---
 
-# Milestones
-
-A milestone is a named checkpoint inside a project — typically a release target, a deadline, or a logical chunk of work. Each milestone tracks an issue rollup (`issue_count`, `done_count`) so the FE can render burn-down without a separate query.
+A milestone is a named checkpoint inside a project — typically a release target, a deadline, or a logical chunk of work. Each milestone tracks an issue rollup (`issue_count`, `done_count`) so the FE can render burn-down without a separate query. List and create are nested under the owning project; update and delete address the milestone id directly.
 
 Implementation: `internal/api/milestone_handler.go`. Backed by the `milestones` table; issue counts are computed from `missions WHERE mission_type = 'issue'`.
 
-All endpoints require an authenticated session and workspace context. The URL space is split:
+<Note>
+  All endpoints require an authenticated session and workspace context. The URL space is split:
 
-- **List / Create** are nested under the project: `/api/v1/projects/{projectId}/milestones`. The project must belong to the calling workspace (`projects.workspace_id`), otherwise `404`.
-- **Update / Delete** address the milestone directly: `/api/v1/milestones/{milestoneId}`. Workspace ownership is verified by joining `milestones → projects → workspace_id`.
+  - **List / Create** are nested under the project: `/api/v1/projects/{projectId}/milestones`. The project must belong to the calling workspace (`projects.workspace_id`), otherwise `404`.
+  - **Update / Delete** address the milestone directly: `/api/v1/milestones/{milestoneId}`. Workspace ownership is verified by joining `milestones → projects → workspace_id`.
+</Note>
+
+## Endpoints
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | [`/api/v1/projects/{projectId}/milestones`](#get-apiv1projectsprojectidmilestones) | List milestones in a project |
+| POST | [`/api/v1/projects/{projectId}/milestones`](#post-apiv1projectsprojectidmilestones) | Create a milestone |
+| PATCH | [`/api/v1/milestones/{milestoneId}`](#patch-apiv1milestonesmilestoneid) | Partially update a milestone |
+| DELETE | [`/api/v1/milestones/{milestoneId}`](#delete-apiv1milestonesmilestoneid) | Delete a milestone (unlinks issues) |
 
 ## Milestone shape
 
@@ -119,7 +128,9 @@ Partial update. Workspace ownership is verified by joining `milestones → proje
 
 ## `DELETE /api/v1/milestones/{milestoneId}`
 
-Hard delete the milestone. Attached issues are **not** deleted — they're unlinked from the milestone (`UPDATE missions SET milestone_id = NULL WHERE milestone_id = ?`) inside the same transaction as the milestone row delete. This keeps history intact while letting the project be reorganised without orphan FK errors.
+<Warning>
+  Hard delete the milestone. Attached issues are **not** deleted — they're unlinked from the milestone (`UPDATE missions SET milestone_id = NULL WHERE milestone_id = ?`) inside the same transaction as the milestone row delete. This keeps history intact while letting the project be reorganised without orphan FK errors.
+</Warning>
 
 **Auth:** authenticated session + workspace context + `OWNER` or `ADMIN` role (`requireRole("manage")`).
 

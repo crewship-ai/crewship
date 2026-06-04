@@ -8,7 +8,22 @@ icon: "messages-square"
 
 Endpoints for the chat surface beyond the basic message list: emoji reactions on assistant messages and file attachments uploaded for an agent. See the [Chat & Sessions guide](/guides/chat-sessions) for the user-facing model.
 
-All endpoints require an authenticated session. Migration v57 (`add_chat_extras`) added the `message_reactions`, `chat_attachments`, `chat_branches`, and `workspace_files` tables that back this surface.
+Migration v57 (`add_chat_extras`) added the `message_reactions`, `chat_attachments`, `chat_branches`, and `workspace_files` tables that back this surface.
+
+<Note>
+  All endpoints require an authenticated session.
+</Note>
+
+## Endpoints
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | [`/api/v1/chats/{chatId}/messages/{messageId}/reactions`](#list-reactions) | List aggregated reactions on a message |
+| POST | [`/api/v1/chats/{chatId}/messages/{messageId}/reactions`](#add-reaction) | Add a reaction |
+| DELETE | [`/api/v1/chats/{chatId}/messages/{messageId}/reactions/{emoji}`](#remove-reaction) | Remove a reaction |
+| POST | [`/api/v1/agents/{agentId}/chats/{chatId}/attachments`](#upload-attachment) | Upload a chat attachment |
+
+Peer-to-peer crew messaging lives on the [internal IPC plane](#crew-messaging-sidecar-ipc), not the public API.
 
 ---
 
@@ -57,7 +72,7 @@ Content-Type: application/json
 { "emoji": "👍" }
 ```
 
-**Response:** `201 Created` — `{ ok: true }`. Idempotent: posting the same `(user, message, emoji)` twice succeeds the second time without creating a duplicate row, thanks to the UNIQUE constraint.
+**Response:** `204 No Content` — no body. Idempotent: posting the same `(user, message, emoji)` twice succeeds the second time without creating a duplicate row, thanks to the UNIQUE constraint.
 
 **Errors:** `400` invalid emoji or empty body; `401` not authenticated; `404` chat not in workspace.
 
@@ -100,11 +115,12 @@ The path is **agent-and-chat scoped**, not just chat-scoped — the handler veri
 {
   "filename": "report.pdf",
   "size": 482311,
-  "path": "attachments/cht_xyz/report.pdf"
+  "path": "attachments/cht_xyz/report.pdf",
+  "agent_path": "/output/viktor/attachments/cht_xyz/report.pdf"
 }
 ```
 
-The `path` is relative — the agent reads it from `/output/<agentSlug>/<path>`.
+The `path` is relative — the agent reads it from `/output/<agentSlug>/<path>`. `agent_path` is the same location pre-resolved to its absolute in-container path, handy for the agent prompt.
 
 **Errors:**
 

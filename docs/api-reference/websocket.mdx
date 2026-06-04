@@ -4,6 +4,12 @@ description: "Real-time channels for log streaming, chat, events, and live updat
 icon: "signal"
 ---
 
+Crewship pushes real-time updates — log streaming, chat token streams, and entity-change events — over a single token-authenticated WebSocket. Clients subscribe to typed channels (`workspace:{id}`, `session:{chatId}`, …); the server validates each subscription against database membership and fans state changes out to the subscribers. Most dashboard state arrives on the `workspace` channel, while a few high-fanout streams (chat, mission detail, files) use narrower channels.
+
+<Note>
+  Connecting requires a short-lived JWT from `GET /api/v1/ws-token` (itself session- or CLI-authenticated). The token is validated only during the handshake; the connection stays authenticated afterward.
+</Note>
+
 ## Connection
 
 ```
@@ -17,7 +23,11 @@ ws://<host>:8080/ws?token=<jwt>
 3. The token is validated during the handshake using the same JWT validator as the REST API
 4. After connection, the token is no longer needed -- the connection remains authenticated
 
-The WebSocket server uses `golang.org/x/net/websocket` (not gorilla/websocket). The handshake skips origin checks -- authentication is token-based only.
+The WebSocket server uses `golang.org/x/net/websocket` (not gorilla/websocket). Authentication is token-based. Inbound frames are capped at 64 KiB.
+
+<Warning>
+  The handshake validates the `Origin` header against the request `Host` (cross-site WebSocket hijacking protection). `localhost`/`127.0.0.1` origins are allowed outside production; in production (`CREWSHIP_ENV=production`) the origin host must match exactly.
+</Warning>
 
 ---
 
@@ -151,42 +161,160 @@ Channels follow the format `type:id`. Access is validated against database membe
 
 ## Server Event Types
 
-Events are broadcast to channels when state changes occur. Below are the event types by channel.
+Events are broadcast to channels when state changes occur. Below are the event
+types by channel. Most state changes fan out on the **workspace** channel so a
+single subscription drives the whole dashboard; a few high-fanout streams
+(chat, mission detail, files) use narrower channels.
+
+Many payloads carry only the entity `id` (and sometimes `identifier`/`status`)
+as a refresh hint -- the client is expected to refetch the full resource over
+REST. The shapes below reflect what the server actually sends.
 
 ### Workspace Channel (`workspace:{id}`)
+
+#### Crews & agents
 
 | Event Type | Description | Payload |
 |---|---|---|
 | `crew.created` | Crew was created | `{ id, name, slug }` |
 | `crew.updated` | Crew was updated | `{ id }` |
 | `crew.deleted` | Crew was deleted | `{ id }` |
+| `agent.created` | Agent was created | `{ id, ... }` |
+| `agent.updated` | Agent was updated | `{ id }` |
+| `agent.deleted` | Agent was deleted | `{ id }` |
+| `agent.hired` | Agent was hired | `{ id, ... }` |
+| `agent.rehired` | Agent was rehired | `{ id, ... }` |
+| `agent.hire_approved` | Agent hire request approved | `{ id, ... }` |
+| `agent.skill_assigned` | Skill assigned to agent | `{ id, ... }` |
+| `agent.skill_unassigned` | Skill removed from agent | `{ id, ... }` |
+| `agent.expired` | Ephemeral agent reached TTL and was ghosted | `{ id, crew_id, name, expired_at }` |
 | `agent.log` | Agent log output | `{ ts, level, agent, agent_id, event, content, metadata }` |
-| `mission.updated` | Mission status changed | `{ id, crew_id, status }` |
+| `agent.status` | Agent run status change | `{ agent_id, status, ... }` |
+| `run.started` | An agent run started | `{ agent_id, ... }` |
+
+#### Missions, tasks & issues
+
+| Event Type | Description | Payload |
+|---|---|---|
+| `mission.created` | Mission was created | `{ id, ... }` |
+| `mission.updated` | Mission was updated / status changed | `{ id, crew_id, title, status }` |
+| `task.updated` | Mission task status changed | `{ id, mission_id, status }` |
+| `confidence.low` | A task's planning confidence is low | `{ task_id, mission_id, level }` |
+| `approval.required` | A task is awaiting human approval | `{ task_id, mission_id }` |
+| `approval.resolved` | A pending approval was resolved | `{ task_id, mission_id, ... }` |
 | `issue.created` | Issue was created | `{ id }` |
-| `issue.updated` | Issue was updated | `{ id }` |
+| `issue.updated` | Issue was updated | `{ id }` (sometimes `identifier`, `status`) |
 | `issue.deleted` | Issue was deleted | `{ identifier }` |
 | `issue.started` | Issue execution started | `{ id, identifier, status }` |
+| `issues.bulk_updated` | Multiple issues updated in bulk | `{ count }` |
+
+#### Projects & milestones
+
+| Event Type | Description | Payload |
+|---|---|---|
 | `project.created` | Project was created | `{ id }` |
 | `project.updated` | Project was updated | `{ id }` |
 | `project.deleted` | Project was deleted | `{ id }` |
-| `integration.updated` | Integration was changed | `{ id }` |
+| `milestone.created` | Milestone was created | `{ id, project_id }` |
+| `milestone.updated` | Milestone was updated | `{ id, project_id }` |
+| `milestone.deleted` | Milestone was deleted | `{ id, project_id }` |
+
+#### Integrations & credentials
+
+| Event Type | Description | Payload |
+|---|---|---|
+| `integration.created` | Integration was added | `{ id, ... }` |
+| `integration.updated` | Integration was changed | `{ id, ... }` |
+| `integration.deleted` | Integration was removed | `{ id, ... }` |
+| `credential.expired` | An OAuth credential expired (token refresh failed) | `{ credential_id, reason }` |
+
+#### Assignments, escalations & peers
+
+| Event Type | Description | Payload |
+|---|---|---|
+| `assignment.updated` | Agent-to-agent assignment changed | `{ id, status, ... }` |
+| `assignment_queued` | Assignment was queued for dispatch | `{ ... }` |
+| `assignment_unqueued` | Assignment was removed from the queue | `{ ... }` |
+| `escalation.created` | An escalation was raised | `{ id, crew_id, from_slug, reason }` |
+| `escalation.resolved` | An escalation was resolved | `{ id, ... }` |
+| `peer_conversation.updated` | Peer (agent-to-agent) conversation changed | `{ ... }` |
+
+#### Containers & provisioning
+
+| Event Type | Description | Payload |
+|---|---|---|
+| `container.stats` | Live container resource metrics (~5s cadence) | `{ container_id, crew_id, cpu_percent, memory_used, memory_limit, memory_percent, net_rx_bytes, net_tx_bytes, pids, timestamp }` |
+| `provision.started` | Crew container provisioning started | `{ ... }` |
+| `provision.progress` | Provisioning progress update | `{ ... }` |
+| `provision.completed` | Provisioning finished | `{ ... }` |
+| `provision.failed` | Provisioning failed | `{ ... }` |
+| `port_expose.created` | A container port was exposed | `{ ... }` |
+| `port_expose.revoked` | An exposed port was revoked | `{ ... }` |
+
+#### Pipelines
+
+Pipeline run/step events broadcast on the **workspace** channel (not a
+dedicated channel) so the Graph view can update `PipelineRunNode` status
+without polling. Every payload also carries `pipeline_id`, `pipeline_slug`,
+and `run_id`.
+
+| Event Type | Description | Payload (plus the run/pipeline trio) |
+|---|---|---|
+| `pipeline.run.started` | Pipeline run kicked off | `{ mode, author_crew_id, invoking_crew_id, invoking_agent_id, step_count, inputs_preview }` |
+| `pipeline.run.completed` | Pipeline run finished successfully | `{ total_duration_ms, total_cost_usd }` |
+| `pipeline.run.failed` | Pipeline run failed | `{ failed_at_step, error_message }` |
+| `pipeline.step.started` | Step began | `{ step_id, step_index, step_type, tier_adapter, tier_model }` |
+| `pipeline.step.completed` | Step completed | `{ step_id, output_preview, duration_ms, cost_usd }` |
+| `pipeline.step.skipped` | Step skipped (`if` condition false) | `{ step_id, condition }` |
+| `pipeline.step.retry` | Transient failure, step is being retried | `{ step_id, attempt, error_message_preview, sleep_ms }` |
+| `pipeline.step.failed` | Step failed terminally | `{ step_id, error_class, error_message_preview }` |
+| `pipeline.step.validation_failed` | Step output failed a validation gate | `{ step_id, reason, action }` |
+
+#### Configuration & inbox
+
+| Event Type | Description | Payload |
+|---|---|---|
+| `inbox.updated` | Unified inbox changed | `{ ... }` |
+| `instance_setting.updated` | An instance-level setting changed | `{ key }` |
+| `feature_flag.created` | A feature flag was created | `{ key }` |
+| `feature_flag.updated` | A feature flag was updated | `{ key }` |
+| `feature_flag.deleted` | A feature flag was deleted | `{ key }` |
+| `feature_flag.override_set` | A workspace flag override was set | `{ ... }` |
+| `feature_flag.override_cleared` | A workspace flag override was cleared | `{ ... }` |
+| `workflow_template.created` | Workflow template created | `{ id }` |
+| `workflow_template.updated` | Workflow template updated | `{ id }` |
+| `workflow_template.deleted` | Workflow template deleted | `{ id }` |
+| `triage_rule.created` | Triage rule created | `{ id }` |
+| `triage_rule.updated` | Triage rule updated | `{ id }` |
+| `triage_rule.deleted` | Triage rule deleted | `{ id }` |
+| `triage.processed` | A `POST /triage/process` batch matched at least one issue | `{ processed, matched }` (string-encoded counts) |
+| `recurring_issue.created` | Recurring issue created | `{ id }` |
+| `recurring_issue.updated` | Recurring issue updated | `{ id }` |
+| `recurring_issue.deleted` | Recurring issue deleted | `{ id }` |
 
 ### Crew Channel (`crew:{id}`)
 
 | Event Type | Description | Payload |
 |---|---|---|
 | `mission.created` | Mission was created in crew | `{ id, title }` |
+| `file.event` | File created/modified/deleted in the crew's output dir | `{ event, path, agent, size, timestamp }` |
+
+<Note>
+The `files:{crewId}` channel exists for subscription (file change events) and
+shares its access rule with `crew`. File-change events are broadcast on the
+`crew:{crewId}` channel as `file.event`.
+</Note>
 
 ### Mission Channel (`mission:{id}`)
 
 | Event Type | Description | Payload |
 |---|---|---|
-| `mission.status` | Mission status changed | `{ id, status }` |
-| `mission.updated` | Mission was updated | `{ id, status }` |
+| `mission.status` | Mission status changed | `{ id, title, status }` |
+| `task.status` | A task within the mission changed status | `{ id, status }` |
 
 ### Session Channel (`session:{chatId}`)
 
-Chat streaming events from the agent ChatHandler:
+#### Chat streaming events from the agent ChatHandler
 
 | Event Type | Description |
 |---|---|
@@ -200,6 +328,26 @@ Chat streaming events from the agent ChatHandler:
 | `result` | Final result (includes metadata: `total_cost_usd`, `num_turns`, `usage`) |
 | `system` | System message |
 
+#### Session-scoped lifecycle events
+
+These mirror their `*.updated`/`*.created` workspace counterparts but are
+scoped to the originating chat session.
+
+| Event Type | Description | Payload |
+|---|---|---|
+| `assignment_created` | Assignment created in this session | `{ id, target, task }` |
+| `assignment_running` | Assignment started running | `{ ... }` |
+| `assignment_completed` | Assignment completed | `{ ... }` |
+| `assignment_failed` | Assignment failed | `{ ... }` |
+| `assignment_queued` | Assignment queued | `{ ... }` |
+| `assignment_unqueued` | Assignment unqueued | `{ ... }` |
+| `escalation_created` | Escalation raised in this session | `{ id, from, reason }` |
+| `escalation_resolved` | Escalation resolved | `{ ... }` |
+| `peer_query_running` | Peer query started | `{ ... }` |
+| `peer_query_completed` | Peer query completed | `{ ... }` |
+| `peer_query_failed` | Peer query failed | `{ ... }` |
+| `port_expose_created` | Port exposed from this session | `{ ... }` |
+
 ### Keeper Channel (`keeper:{workspaceId}`)
 
 | Event Type | Description | Payload |
@@ -210,7 +358,15 @@ Chat streaming events from the agent ChatHandler:
 
 | Event Type | Description | Payload |
 |---|---|---|
-| `provider_status` | Container/credential provider status update | `{ provider, status, details }` |
+| `provider_status` | Container/credential provider status update | `{ connection_id, old_status, new_status }` |
+
+<Note>
+The server also targets a `user:{userId}` channel for `notification.created`
+events (`{ id, action, entity_type, entity_id, entity_title }`). This channel
+is **not currently subscribable** -- the channel authorizer has no `user` case,
+so subscription requests are denied. Notifications are read over REST until a
+`user` channel authorization rule is added.
+</Note>
 
 ---
 
@@ -223,7 +379,9 @@ Chat streaming events from the agent ChatHandler:
 5. **Keepalive** -- server sends pings every 30 seconds; client can also send pings
 6. **Disconnect** -- client disconnects; all channel subscriptions are cleaned up
 
-The server maintains a send buffer of 64 messages per client. If the buffer is full, messages are dropped silently for that client.
+<Warning>
+  The server maintains a send buffer of 64 messages per client. If the buffer is full, messages are dropped silently for that client — a slow consumer can miss events, so treat most payloads as refresh hints and refetch over REST.
+</Warning>
 
 ---
 

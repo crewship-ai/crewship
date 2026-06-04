@@ -19,7 +19,7 @@ crewship system <subcommand>
 | `info` | Show runtime and license information |
 | `keeper` | Show Keeper security system status |
 | `stats` | Show admin stats (workspaces, users, agents, running) |
-| `onboarding` | Show onboarding status for the current user |
+| `onboarding` | Onboarding status / setup / complete (subcommands: `status`, `setup`, `complete`) |
 | `aux-status` | Show auxiliary model assignment per slot (PR-B F3) |
 
 ---
@@ -64,10 +64,64 @@ crewship system stats
 
 ## `crewship system onboarding`
 
-Show onboarding status for the current user. Output is always JSON.
+Inspect or drive the onboarding wizard for the current user. The bare `crewship system onboarding` invocation delegates to `status` for backwards compatibility with scripts that pre-date the subcommands.
 
 ```bash
-crewship system onboarding
+crewship system onboarding          # same as `onboarding status`
+```
+
+### Subcommands
+
+| Command | Description |
+|---------|-------------|
+| `status` | Show whether onboarding is complete (default if no subcommand). Output is always JSON. |
+| `setup` | Run the onboarding setup wizard (crew + agent + credential). |
+| `complete` | Mark onboarding as finished without running the wizard. |
+
+### `crewship system onboarding status`
+
+Show whether onboarding is complete for the current user. Hits `GET /api/v1/onboarding/status`. Output is always JSON.
+
+```bash
+crewship system onboarding status
+```
+
+### `crewship system onboarding setup`
+
+Provision a starter crew, agent, and LLM credential in one shot — the headless equivalent of the web onboarding wizard. `POST /api/v1/onboarding/setup`. `--crew` and `--agent` are required.
+
+```bash
+echo "$ANTHROPIC_KEY" | crewship system onboarding setup \
+  --crew "backend" --agent "viktor" \
+  --llm-provider ANTHROPIC --credential-value-stdin
+
+crewship system onboarding setup \
+  --crew "ops" --agent "eva" \
+  --llm-provider OLLAMA --llm-model llama3
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--crew` | `string` | _(required)_ | Crew name to create (slugified server-side). |
+| `--agent` | `string` | _(required)_ | First agent name in the crew. |
+| `--cli-adapter` | `string` | `CLAUDE_CODE` | CLI adapter for the agent. |
+| `--llm-provider` | `string` | | LLM provider: `ANTHROPIC`, `OPENAI`, `GOOGLE`, `CURSOR`, `FACTORY`, `OLLAMA`. |
+| `--llm-model` | `string` | | LLM model identifier (provider-specific). |
+| `--credential-name` | `string` | | Display name for the stored API key. |
+| `--credential-value-stdin` | `bool` | `false` | Read the credential value from stdin (preferred over `--credential-value` — keeps it out of `ps`). |
+| `--credential-value` | `string` | | API key value (deprecated; visible in `ps` and shell history — use `--credential-value-stdin`). |
+
+<Tip>
+  Pipe the key on stdin with `--credential-value-stdin` rather than passing
+  `--credential-value` — the latter is visible in `ps` and shell history.
+</Tip>
+
+### `crewship system onboarding complete`
+
+Mark onboarding as completed for the current user without running the setup wizard. Useful when a workspace was provisioned through other channels (CLI agent create, restore from backup).
+
+```bash
+crewship system onboarding complete
 ```
 
 ---

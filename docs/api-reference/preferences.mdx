@@ -4,21 +4,29 @@ description: "Per-user JSON-blob key-value store backing UI settings (panel size
 icon: "sliders-horizontal"
 ---
 
-# User Preferences
-
-User preferences are persisted in `user_preferences` (migration v58) as a string-keyed map of raw JSON values, scoped to the authenticated user. They follow the user across browsers, devices, and workspaces — preferences are never workspace-scoped.
+User preferences are a per-user, string-keyed store of raw JSON values backing UI settings — panel sizes, last-opened tabs, density, and the like. They follow the user across browsers, devices, and workspaces (preferences are never workspace-scoped), and the endpoints below let the frontend list, upsert, and delete individual keys.
 
 The handler is **deliberately schemaless on the value side**. The frontend writes whatever JSON shape it wants under a key; the server stores the bytes and hands them back unchanged on read. This keeps UI iteration fast — adding a new preference doesn't need a migration or a backend release.
 
-Implementation: `internal/api/user_preferences.go`. Backed by `user_preferences (user_id, pref_key, pref_value, updated_at)` with a `UNIQUE(user_id, pref_key)` constraint.
+Implementation: `internal/api/user_preferences.go`. Persisted in `user_preferences` (migration v58) as `(user_id, pref_key, pref_value, updated_at)` with a `UNIQUE(user_id, pref_key)` constraint.
+
+## Endpoints
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | [`/api/v1/me/preferences`](#list-preferences) | List all preferences for the user |
+| PUT | [`/api/v1/me/preferences/{key}`](#set-one-preference) | Upsert one preference key |
+| DELETE | [`/api/v1/me/preferences/{key}`](#delete-one-preference) | Delete one preference key |
 
 ## Auth and limits
 
-- All endpoints require an authenticated session.
-- The `user_id` is taken from the session — never from request bodies or query parameters.
-- **Key constraint**: `[a-zA-Z0-9._-]{1,64}`. Anything else returns `400`. Keys land in URL paths, so this is a defensive parse before they reach the SQL layer.
-- **Value cap**: 16 KB per key. Larger payloads return `400`.
-- There is no admin endpoint to read another user's preferences.
+<Note>
+  - All endpoints require an authenticated session.
+  - The `user_id` is taken from the session — never from request bodies or query parameters.
+  - **Key constraint**: `[a-zA-Z0-9._-]{1,64}`. Anything else returns `400`. Keys land in URL paths, so this is a defensive parse before they reach the SQL layer.
+  - **Value cap**: 16 KB per key. Larger payloads return `413 Request Entity Too Large`.
+  - There is no admin endpoint to read another user's preferences.
+</Note>
 
 ---
 
@@ -87,8 +95,9 @@ Content-Type: application/json
 
 | Status | Condition |
 |---|---|
-| 400 | Invalid key (regex), body is not valid JSON, or body exceeds 16 KB. |
+| 400 | Invalid key (regex), or empty body. |
 | 401 | Not authenticated. |
+| 413 | Body exceeds the 16 KB cap. |
 | 500 | DB error. |
 
 The PUT is atomic via SQLite UPSERT (`INSERT … ON CONFLICT(user_id, pref_key) DO UPDATE`), so concurrent writes from two devices don't lose data — last write wins.

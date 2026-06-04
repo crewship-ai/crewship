@@ -4,15 +4,30 @@ description: "Memory health snapshot — five metrics that quantify how usable t
 icon: "brain"
 ---
 
-# Memory
+The Memory API exposes the read surfaces over an agent's episodic and markdown memory: a health snapshot that scores how usable the memory is, a hybrid recall search that fuses two retrieval engines, and the version audit trail for canonical memory files. The mutating restore endpoint lives on the [Admin reference](/api-reference/admin) because it requires OWNER/ADMIN.
 
-Read-only endpoint for the memory health dashboard. Backed by `internal/consolidate.ComputeHealth`. The five aggregate queries it runs are cheap, so the handler **recomputes on every request** rather than reading the persisted `memory_health_snapshots` table — those snapshots exist for time-series plots, not real-time reads.
+<Note>
+  Every endpoint requires authentication and workspace context. `workspace_id` is always pulled from the session — never accepted as a query parameter or body field — and `crew_id`, when set, is validated against the caller's workspace (cross-tenant lookups return `404`).
+</Note>
 
-See [Episodic memory — health scoring](/guides/episodic-memory#health-scoring) for the formula and operator interpretation.
+## Endpoints
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | [`/api/v1/memory/health`](#get-health-snapshot) | Memory health snapshot (five metrics + composite) |
+| POST | [`/api/v1/memory/search/hybrid`](#hybrid-search) | Fused FTS5 + episodic memory recall |
+| GET | [`/api/v1/memory/versions`](#get-apiv1memoryversions) | Audit chain for one canonical memory path |
+| GET | [`/api/v1/memory/versions/{sha}`](#get-apiv1memoryversionssha) | Raw blob bytes for one historical version |
 
 ---
 
-## Get health snapshot
+## Health
+
+Read-only snapshot for the memory health dashboard. Backed by `internal/consolidate.ComputeHealth`. The five aggregate queries it runs are cheap, so the handler **recomputes on every request** rather than reading the persisted `memory_health_snapshots` table — those snapshots exist for time-series plots, not real-time reads.
+
+See [Episodic memory — health scoring](/guides/episodic-memory#health-scoring) for the formula and operator interpretation.
+
+### Get health snapshot
 
 ```
 GET /api/v1/memory/health
@@ -42,8 +57,14 @@ GET /api/v1/memory/health
     "reachability": 78.0
   },
   "details": {
-    "indexed_entries":    1284,
-    "embeddable_entries": 1390
+    "freshness_recent_24h":     12,
+    "freshness_baseline_daily":  9.4,
+    "coverage_distinct_types":   5,
+    "coherence_relations":       1284,
+    "coherence_embeddings":      1390,
+    "efficiency_archived":       640,
+    "efficiency_live":           1390,
+    "reachability_connected":    1084
   }
 }
 ```
@@ -55,7 +76,7 @@ GET /api/v1/memory/health
 | `computed_at` | string (RFC3339) | When this response was computed. The handler **always recomputes**, so this is `now`. |
 | `overall` | number | Weighted composite, 0–100. Formula: `0.25·freshness + 0.25·coverage + 0.20·coherence + 0.15·efficiency + 0.15·reachability`. |
 | `metrics.*` | number | Each metric, 0–100. See [the guide](/guides/episodic-memory#health-scoring) for what each one measures. |
-| `details` | object | Free-form supplementary data (entry counts, embedding model, recent compaction stats, …). Schema is not stable across versions; consume defensively. |
+| `details` | object | Free-form supplementary data — the per-metric inputs each score was derived from (`freshness_recent_24h`, `coverage_distinct_types`, `coherence_relations`/`coherence_embeddings`, `efficiency_archived`/`efficiency_live`, `reachability_connected`, …). Schema is not stable across versions; consume defensively. |
 
 There is no separate `band` field — clients categorise locally:
 
@@ -77,6 +98,89 @@ The CLI uses these exact thresholds (`internal/cli` colour helpers) and the FE f
 
 ---
 
+## Hybrid search
+
+```
+POST /api/v1/memory/search/hybrid
+```
+
+Single-shot memory recall that **fuses two retrieval engines** and merges
+their results with [Reciprocal Rank Fusion](https://en.wikipedia.org/wiki/Learning_to_rank) (RRF, `k = 60`):
+
+- **FTS5 / BM25** — the workspace-tier full-text index over markdown memory.
+- **Episodic recall** — dense-vector + BM25 recall over the crew journal.
+
+The handler **degrades gracefully**: if only one engine is wired (no
+embedder, or no FTS engine for the workspace), it returns that engine's
+results alone; if neither has matches it returns `200` with an empty
+`hits` array and `count: 0` — the same shape the sidecar `/memory/search`
+uses.
+
+**Auth:** required + workspace context (MEMBER+). Every query is anchored
+on the caller's session workspace, so a foreign `workspace_id` cannot be
+smuggled through the body.
+
+**Request body:**
+
+```json
+{
+  "query": "deploy script flakiness",
+  "limit": 10,
+  "scope": "crew_shared",
+  "crew_id": "crew_123"
+}
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `query` | string | -- | Required. The search text. `400` when empty. |
+| `limit` | integer | `10` | Max hits to return. Non-positive values fall back to the default; capped at `50` server-side. |
+| `scope` | string | `""` | One of `""` (no scope filter, MEMBER+ implied), `"own"` (caller's own memory only), or `"crew_shared"` (crew-shared memory). Any other value is `400`. |
+| `crew_id` | string | -- | Optional. Binds `crew_shared` results to a single crew. |
+
+**Response:** `200 OK`
+
+```json
+{
+  "query": "deploy script flakiness",
+  "count": 2,
+  "hits": [
+    {
+      "source": "fts",
+      "score": 0.0163,
+      "fts": { "...": "FTS5 chunk hit" }
+    },
+    {
+      "source": "episodic",
+      "score": 0.0159,
+      "episodic": { "...": "journal entry hit" }
+    }
+  ]
+}
+```
+
+The unused half of each hit is **omitted**, not emitted as `null`
+(`fts` / `episodic` both carry `omitempty`): an FTS-sourced hit has no
+`episodic` key and vice-versa.
+
+| Field | Type | Description |
+|---|---|---|
+| `query` | string | Echo of the request's `query`. |
+| `count` | integer | `len(hits)`. |
+| `hits[]` | array | Fused, RRF-ranked results. |
+| `hits[].source` | string | `"fts"` or `"episodic"` — which engine produced the hit. |
+| `hits[].score` | number | The RRF score used for ranking (higher = better). |
+| `hits[].fts` | object? | The FTS5 chunk payload; omitted on episodic-sourced hits. |
+| `hits[].episodic` | object? | The episodic journal-entry payload; omitted on FTS-sourced hits. |
+
+| Status | Condition |
+|---|---|
+| `400` | Malformed JSON, empty `query`, or an invalid `scope`. |
+| `401` | No workspace context in the session. |
+| `500` | Underlying `memory.HybridSearch` failed. |
+
+---
+
 ## Memory versions audit trail
 
 The HTTP mirror of `crewship memory log/show`. Workspace is anchored from the session -- query strings never carry `workspace_id`, so a cross-workspace probe can't smuggle a foreign id through. Restore (`POST /api/v1/memory/versions/{sha}/restore`) is documented separately on the [Admin reference](/api-reference/admin) because it requires OWNER/ADMIN and mutates canonical state; the two read endpoints below are MEMBER+.
@@ -92,7 +196,7 @@ Returns the audit chain for one canonical memory path, newest-first.
 | Param | Type | Default | Description |
 |---|---|---|---|
 | `path` | string | -- | Required. Canonical memory path (e.g. `agent:martin/AGENT.md`). 400 when omitted. |
-| `limit` | integer | `20` | Max rows to return. Any positive integer is accepted; non-positive or non-numeric values fall back to the default. |
+| `limit` | integer | `20` | Max rows to return. Positive values are accepted and clamped to a hard ceiling of `1000`; non-positive or non-numeric values fall back to the default. |
 
 **Response:** `200 OK`
 
@@ -103,19 +207,24 @@ Returns the audit chain for one canonical memory path, newest-first.
   "entries": [
     {
       "id": "mv_01HZA...",
+      "path": "agent:martin/AGENT.md",
+      "tier": "agent",
       "sha256": "abc...",
       "bytes": 1284,
       "written_at": "2026-05-18T08:30:00Z",
       "written_by": "audit-watcher",
-      "parent_sha": "def..."
+      "parent_sha": "def...",
+      "payload_ref": "/var/lib/crewship/memory/versions/ab/abc..."
     },
     {
       "id": "mv_01HZ9...",
+      "path": "agent:martin/AGENT.md",
+      "tier": "agent",
       "sha256": "def...",
       "bytes": 1180,
       "written_at": "2026-05-17T22:11:48Z",
       "written_by": "audit-watcher",
-      "parent_sha": null
+      "payload_ref": "/var/lib/crewship/memory/versions/de/def..."
     }
   ]
 }
@@ -126,6 +235,9 @@ Returns the audit chain for one canonical memory path, newest-first.
 | `path` | string | Echo of the request's `path`. |
 | `count` | integer | `len(entries)` -- handy when paging is bounded by `limit`. |
 | `entries[]` | array | Newest-first list of `memory_versions` rows for this path in the caller's workspace. |
+| `entries[].tier` | string | `agent`, `crew`, `workspace`, `pins`, or `learned`. |
+| `entries[].parent_sha` | string? | sha256 of the prior version in the chain. **Omitted** (not `null`) on the root version — the field carries `omitempty` and the column is COALESCE'd to `""`. |
+| `entries[].payload_ref` | string | On-disk path to the content-addressed blob. |
 
 | Status | Condition |
 |---|---|

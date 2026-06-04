@@ -32,7 +32,7 @@ crewship slash init
 
 The sample looks like:
 
-```markdown
+````markdown
 ---
 name: review
 description: Ask the default agent to review a git diff
@@ -46,7 +46,7 @@ Be terse. Lead with the highest-severity issue.
 ```
 $args
 ```
-```
+````
 
 Once saved, you invoke it like a built-in: `crewship review staged 'auth refactor'`.
 
@@ -66,5 +66,5 @@ Once saved, you invoke it like a built-in: `crewship review staged 'auth refacto
 ## See also
 
 - [`crewship prompt`](/cli/prompt) — local prompt library, lower-cost than a full slash command.
-- [`crewship ask`](/cli/agent) — the dispatch target for every slash command.
+- [`crewship ask`](/cli/ask) — the dispatch target for every slash command.
 - [`crewship plan`](/cli/plan) — what `plan: true` in frontmatter activates.

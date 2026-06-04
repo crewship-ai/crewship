@@ -16,8 +16,8 @@ Crewship ships as a **single binary** that embeds the Next.js frontend, SQLite d
 ## Prerequisites
 
 <CardGroup cols={2}>
-  <Card title="Go 1.22+" icon="golang">
-    Required for building from source. The binary is statically compiled with `go:embed`.
+  <Card title="Go 1.26+" icon="golang">
+    Required for building from source (`go.mod` declares `go 1.26`). The binary is statically compiled with `go:embed`.
   </Card>
   <Card title="Node.js 20+ & pnpm" icon="node-js">
     Required only for development (frontend build). Not needed at runtime.
@@ -64,12 +64,14 @@ Crewship ships as a **single binary** that embeds the Next.js frontend, SQLite d
     <Note>
       `crewship start` auto-generates the secrets it needs on first
       boot — `ENCRYPTION_KEY`, `NEXTAUTH_SECRET`, and
-      `CREWSHIP_INTERNAL_TOKEN` are all written to
+      `CREWSHIP_ADMIN_TOKEN_HMAC_KEY` are all written to
       `~/.crewship/secrets.env` (mode `0600`) and reused on subsequent
-      starts. No manual env file is required. To bring your own
-      secrets (e.g. from a secret manager), export the matching env
-      vars before running `crewship start` and the auto-generation is
-      skipped for any that are already set.
+      starts. (`CREWSHIP_INTERNAL_TOKEN` is also auto-generated when
+      unset, but in-memory per boot rather than persisted.) No manual
+      env file is required. To bring your own secrets (e.g. from a
+      secret manager), export the matching env vars before running
+      `crewship start` and the auto-generation is skipped for any that
+      are already set.
     </Note>
   </Step>
 
@@ -172,11 +174,12 @@ go build --> crewship (single binary)
 After starting, verify everything is working:
 
 ```bash
-# Check the API is responding
-curl http://localhost:8080/api/v1/health
+# Check the API is responding (no auth)
+curl http://localhost:8080/api/health
 
-# Check container runtime detection
-curl http://localhost:8080/api/v1/internal/status
+# Check container runtime detection (requires an auth token)
+curl -H "Authorization: Bearer <token>" \
+  http://localhost:8080/api/v1/system/runtime
 ```
 
 ## Seeding Demo Data

@@ -8,6 +8,10 @@ icon: "sliders-horizontal"
 
 All Crewship configuration can be set via environment variables. These override values from the YAML config file. The mapping is defined in `applyEnvOverrides` in `internal/config/config.go`.
 
+<Tip>
+  As of PR #446, **no env vars are required for first boot** — secrets are auto-generated and persisted. Set variables here only to override a default or hand a secret to an external manager. Jump to a group: [Server](#server) · [Container](#container) · [Storage](#storage) · [Auth](#authentication) · [Encryption](#encryption) · [Keeper](#keeper-ai-security-gatekeeper) · [CLI client](#cli-client) · [Installer](#installer).
+</Tip>
+
 ## Server
 
 | Variable | Default | Description |
@@ -67,6 +71,37 @@ All Crewship configuration can be set via environment variables. These override 
 |----------|---------|-------------|
 | `CREWSHIP_ALLOWED_ORIGINS` | (unset — same-origin only) | Comma-separated allowlist of cross-origin `scheme://host[:port]` values that may issue state-changing requests (POST/PUT/PATCH/DELETE). Parsed by `internal/api/origin_check.go`; matched as **exact host equality** after `url.Parse` (no suffix wildcards, no IDN tricks — those previously enabled bypasses). Required whenever the frontend is served from a different origin than the daemon (cross-origin Playwright E2E, separate `:3001` dev frontend on `nuke`-reset envs, reverse-proxy host with custom domain). `dev.sh` writes this automatically alongside `NEXTAUTH_URL`/`CREWSHIP_PORT` so the value survives `./dev.sh nuke`. Example: `CREWSHIP_ALLOWED_ORIGINS=https://app.crewship.io,https://staging.crewship.io`. |
 
+## Rate limiting & proxy trust
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CREWSHIP_TRUSTED_PROXY_CIDRS` | (unset — only loopback `127.0.0.0/8` and `::1/128` trusted) | Comma-separated list of CIDR ranges whose `X-Forwarded-For` header the rate limiter and client-IP extractor will trust. Set this to the address(es) of your reverse proxy (nginx/Caddy/load balancer) so per-IP throttles see the real client IP. Leaving it unset means any non-loopback client presenting a forged `X-Forwarded-For` is ignored (the header is only honoured from trusted hops). Read by `internal/api/ratelimit.go`. |
+| `CREWSHIP_ENV` | (unset — treated as non-prod) | Deployment environment label. When set to `prod` or `production` (case-insensitive), the server **refuses to start** if rate limiting has been disabled, and tightens WebSocket origin enforcement. Any other value (or unset) is treated as non-production. Read by `internal/api/ratelimit.go` and `internal/ws/hub.go`. |
+
+## Metrics
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CREWSHIP_METRICS_TOKEN` | (unset — metrics only reachable from loopback) | Bearer token gating non-loopback access to the Prometheus `/metrics` endpoint. Loopback peers are always allowed; remote scrapers must send `Authorization: Bearer <token>`. When unset, non-loopback requests are rejected outright. Read by `internal/server/routes.go`. |
+
+## Webhooks / hooks (SSRF guard)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CREWSHIP_HOOKS_ALLOW_PRIVATE` | (unset — private destinations blocked) | Set to `1`/`true`/`yes`/`on` to allow hook/webhook handlers to dial loopback and RFC1918 private addresses. Off by default so a misconfigured hook cannot reach localhost services or internal LAN hosts. Link-local (cloud metadata IMDS `169.254.169.254`), multicast, and unspecified addresses stay blocked regardless of this flag. Read by `internal/hooks/http.go`. |
+
+## Profiling & observability
+
+These are off by default and intended for operators debugging performance.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CREWSHIP_PPROF_ADDR` | (unset — pprof disabled) | Bind address for the Go `net/http/pprof` server (recommended: `127.0.0.1:6060`, loopback only). Exposing pprof publicly is an info-leak and DoS vector, so it stays off unless explicitly set. Read by `internal/server/server.go`. |
+| `CREWSHIP_PYROSCOPE_URL` | (unset — push profiling disabled) | Pyroscope server URL. When set, the binary continuously pushes CPU/heap/goroutine/alloc profiles. Read by `internal/server/server.go`. |
+| `CREWSHIP_PYROSCOPE_TAG_SLOT` | (hostname) | Value for the `slot` tag attached to Pyroscope profiles, used to filter the Grafana flame-graph per dev slot/instance. Falls back to the machine hostname when unset. Read by `internal/telemetry/pyroscope.go`. |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | (unset — noop tracer) | Standard OpenTelemetry OTLP HTTP endpoint for GenAI traces. When unset, tracing silently degrades to a no-op tracer so local dev runs without an observability stack. Read by `internal/server/server.go` / `internal/telemetry/provider.go`. |
+| `CREWSHIP_SERVICE_NAME` | `crewshipd` | Overrides the OpenTelemetry `service.name` resource attribute. Set per binary (e.g. `crewship-sidecar`) or per tenant to differentiate traces. Read by `internal/telemetry/service_name.go`. |
+
 ## Crash reporting (Sentry)
 
 | Variable | Default | Description |
@@ -125,7 +160,7 @@ All Crewship configuration can be set via environment variables. These override 
 |----------|---------|-------------|
 | `KEEPER_ENABLED` | `false` | Enable Keeper AI gatekeeper (`true` or `1`) |
 | `KEEPER_OLLAMA_URL` | `http://localhost:11434` | Ollama API URL for Keeper LLM |
-| `KEEPER_MODEL` | `phi3:mini` | Ollama model name for Keeper evaluations |
+| `KEEPER_MODEL` | _(none)_ | Model for Keeper evaluations (e.g. `claude-haiku-4-5`, or an Ollama model name). No default — an enabled Keeper with an empty model fails startup validation. |
 
 <Tip>
   Setting `KEEPER_OLLAMA_URL` auto-enables Keeper (unless `KEEPER_ENABLED` is explicitly `false`). This means you only need to set the URL to activate Keeper.
@@ -159,6 +194,15 @@ See [Paymaster](/guides/paymaster) for the full billing-mode model and [Migratio
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `OLLAMA_MODELS` | `~/.ollama/models` | Directory where Ollama stores model blobs. Used by the [Keeper](/guides/keeper) gatekeeper LLM, the [Episodic memory](/guides/episodic-memory) embedder, and the [Consolidator](/guides/consolidate). On macOS dev machines this is typically pointed at an external SSD: `OLLAMA_MODELS="/Volumes/SSD 990 PRO/ollama-models"`. Set this **before** starting Ollama (`./dev.sh start` or `ollama serve`); changing it requires a restart. |
+
+## Feature toggles & runtime tuning
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CREWSHIP_CONSOLIDATE_HITL` | (unset — off) | Set to `1`/`true`/`yes`/`on` to route the [memory consolidator](/guides/consolidate) through a human-in-the-loop approval step instead of writing directly. Read on every tick so it can be flipped without a restart. Read by `internal/consolidate/runner.go`. |
+| `CREWSHIP_PIPELINE_RUNNER` | (unset — orchestrator runner) | Selects the pipeline execution backend. Set to `llm_direct` to run pipeline steps through the in-process LLM runner instead of spawning orchestrator containers (also the automatic fallback when no container provider is available). Read by `cmd/crewship/cmd_start.go`. |
+| `CREWSHIP_FORECAST_RATES` | (built-in rate table) | Overrides the provider price table used by `crewship cost forecast`. Format: `Name,inPerM,outPerM;Name,inPerM,outPerM;…` (USD per million tokens). Malformed entries fall back to the defaults with a one-time stderr warning. Read by `cmd/crewship/cmd_cost_forecast.go`. |
+| `CREWSHIP_QUERY_DEPTH` | `0` | Default crew-to-crew query recursion depth when a request does not specify one. Hard-capped at `2` (deeper queries are rejected to prevent loops). Read by `internal/sidecar/query.go`. |
 
 ## License
 
@@ -210,6 +254,27 @@ minutes (closing the race between `docker commit` and the DB update inside
   logs first to verify nothing important would be removed.
 </Note>
 
+## CLI client
+
+These configure the `crewship` CLI on a developer/operator machine (not the server). They override values in `~/.crewship/cli-config.yaml`. Resolution order and parsing live in `internal/cli/config.go`.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CREWSHIP_SERVER` | `http://localhost:8080` | Base URL of the Crewship server the CLI talks to. Takes precedence over `server:` in the config file, but loses to a per-command `--server` flag. |
+| `CREWSHIP_CONFIG` | `~/.crewship/cli-config.yaml` | Path to the CLI config file. Pin it to a per-instance path when running multiple clones on the same machine so their sessions don't clobber each other. |
+| `CREWSHIP_WORKSPACE` | (unset) | Default workspace ID/slug for commands that take one. |
+| `CREWSHIP_DEFAULT_AGENT` | (unset) | Default agent the CLI targets when a command omits an explicit agent. |
+
+## Installer
+
+Read by `scripts/install.sh` (the `curl … | bash` install path), not by the running server.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CREWSHIP_VERSION` | (latest stable release) | Pin a specific release tag, e.g. `v0.1.0-beta.1`, instead of the latest stable. |
+| `CREWSHIP_INSTALL_DIR` | auto (`$XDG_BIN_HOME` / `$HOME/.local/bin`, else `/usr/local/bin`) | Override the directory the binary is installed into. |
+| `CREWSHIP_SKIP_VERIFY` | `0` | Set to `1` to skip checksum verification of the downloaded binary (not recommended). |
+
 ## Complete Example
 
 ```bash
@@ -237,7 +302,7 @@ CREWSHIP_ALLOW_SIGNUP=true
 
 # Keeper (optional)
 KEEPER_OLLAMA_URL=http://localhost:11434
-KEEPER_MODEL=phi3:mini
+KEEPER_MODEL=claude-haiku-4-5
 
 # Logging
 CREWSHIP_LOG_LEVEL=info

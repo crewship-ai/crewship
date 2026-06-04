@@ -11,9 +11,9 @@ workspace; `crewship export workspace` round-trips it back.
 
 It is the most convenient shape for shipping or sharing a complete
 team setup as one file. The same underlying data can also be expressed
-as a set of standalone documents — [`Crew`](./crew.md),
-[`Agent`](./agent.md), [`Skill`](./skill.md),
-[`Integration`](./integration.md) — but `kind: Workspace` keeps the
+as a set of standalone documents — [`Crew`](/manifest/crew),
+[`Agent`](/manifest/agent), [`Skill`](/manifest/skill),
+[`Integration`](/manifest/integration) — but `kind: Workspace` keeps the
 shared credentials and skills in one place and nests everything that
 belongs to a crew under it.
 
@@ -108,7 +108,7 @@ spec:
 ### `spec.skills[]`
 
 Workspace-scoped skill declarations. Each needs **exactly one** body
-source (`inline` / `path` / `source`); see [Skill](./skill.md) for the
+source (`inline` / `path` / `source`); see [Skill](/manifest/skill) for the
 detailed source semantics.
 
 | Field | Type | Required | Notes |
@@ -125,13 +125,48 @@ Each entry is a crew. The nested shape carries `slug`, `name`, `icon`,
 `agents:` list. Workspace-scoped credentials and skills are visible to
 every crew; per-crew entries add to (and can override) them.
 
-- **agents** — see [Agent](./agent.md) for the field reference (the
+- **agents** — see [Agent](/manifest/agent) for the field reference (the
   nested form omits `crew_slug` since the parent crew is implicit). At
-  most one agent per crew may be `agent_role: LEAD`.
-- **mcp_servers** — the inline form of [Integration](./integration.md),
-  crew-scoped.
+  most one agent per crew may be `agent_role: LEAD`. Only `AGENT` and
+  `LEAD` are valid here — `COORDINATOR` is rejected in the nested form
+  (see the validation rules below).
+- **mcp_servers** — the inline form of [Integration](/manifest/integration),
+  crew-scoped. Each entry's `transport` is one of `stdio`,
+  `streamable-http`, `http`, or `sse`.
 - **services** — sidecar containers; same shape as
-  [Crew](./crew.md)'s `spec.services`.
+  [Crew](/manifest/crew)'s `spec.services`, including the
+  `auto_credentials` block described below.
+
+#### `spec.crews[].services[].auto_credentials[]`
+
+Declares secrets that Crewship generates and manages for you instead of
+asking the operator for a value. Each entry produces an
+`AUTO_MANAGED` credential row at apply time (attributed to the crew's
+lead agent), is injected as an env var into the sidecar's runtime, and
+— unless opted out — is appended to every agent's `env_refs` in the
+same crew so agents can reach the sidecar with the right value.
+
+You rarely fill this by hand: for well-known images (`postgres:*`,
+`mysql:*`, `mariadb:*`, `mongo:*`, `rabbitmq:*`, `elasticsearch:*`) the
+parser merges in a sugar default that generates the image's root
+password automatically. Explicit entries win over a sugar default with
+the same `name`. See
+[Auto-managed credentials](/guides/auto-managed-credentials) for
+the deep dive.
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `name` | string | **yes** | The credential's workspace-unique name **and** the default env-var name on the sidecar + every crew agent. SCREAMING_SNAKE_CASE (env-var shaped); must not clash with the crew's `credentials[]`. |
+| `inject_as_env` | string | no | Override the env-var name the **sidecar** receives (some images want `MARIADB_ROOT_PASSWORD`, not `name`). Env-var shaped. Empty → use `name`. |
+| `inject_to_agents` | bool | no | Whether crew agents pick the credential up automatically. Defaults to **true**; set `false` when the sidecar uses the secret internally but no agent should ever see it. |
+| `length` | int | no | Random bytes Crewship generates before hex-encoding. Default **32** bytes (64 hex chars); minimum 16. |
+| `description` | string | no | Shown in the UI on the "Created by &lt;agent&gt;" row. The sugar layer fills this in for known images. |
+
+> **Host-published ports disable auto_credentials.** When a service
+> publishes a port to the host the sidecar leaves the crew's private
+> bridge, so the external attack surface deserves an operator-chosen
+> secret. `validate.go` refuses `auto_credentials` in that
+> configuration — declare the credential as a regular slot instead.
 
 ## Examples
 
@@ -165,7 +200,7 @@ spec:
 ### Multi-crew with shared skill + credentials
 
 See
-[`examples/manifests/full-team.workspace.yaml`](../../examples/manifests/full-team.workspace.yaml)
+[`examples/manifests/full-team.workspace.yaml`](https://github.com/crewship-ai/crewship/blob/main/examples/manifests/full-team.workspace.yaml)
 for a complete two-crew bundle that shares workspace-level credentials
 and a `house-style` skill, then gives each crew its own agents and MCP
 servers.
@@ -217,9 +252,22 @@ every failure into one message so you fix them in a single pass:
   `cli_adapter`, and `tool_profile` enum-checked; at most one LEAD per
   crew; `skills` and `env_refs` resolve against the crew-scope then
   workspace-scope declarations.
+
+  > **`COORDINATOR` is not valid in nested bundles.** Inside a
+  > `kind: Crew` or `kind: Workspace` document the agent-role validator
+  > (`validAgentRole`, `internal/manifest/validate.go`) admits only
+  > `AGENT` and `LEAD`. The standalone [`kind: Agent`](/manifest/agent) form
+  > accepts `COORDINATOR` in its own front-end validator, but the
+  > nested form rejects it outright — prefer `AGENT`/`LEAD` everywhere.
 - MCP servers and services validate their own shapes (env-mapping
   values resolve to known credentials; service names are DNS labels;
-  named volumes only).
+  named volumes only). MCP `transport` must be one of `stdio`,
+  `streamable-http`, `http`, or `sse` — `stdio` requires `command`;
+  the three HTTP-family transports require `endpoint`.
+- Services: `auto_credentials[]` entries each need a valid env-var-shaped
+  `name` (unique within the service, no clash with the crew's
+  `credentials[]`); `inject_as_env`, when set, must be env-var-shaped;
+  `length`, when positive, is at least the 16-byte floor.
 
 ## Round-trip via export
 
@@ -233,8 +281,8 @@ bundle.
 
 ## See also
 
-- [Crew](./crew.md) / [Agent](./agent.md) / [Skill](./skill.md) / [Integration](./integration.md) — the standalone equivalents of the nested blocks.
-- [`examples/manifests/full-team.workspace.yaml`](../../examples/manifests/full-team.workspace.yaml) — complete multi-crew bundle.
+- [Crew](/manifest/crew) / [Agent](/manifest/agent) / [Skill](/manifest/skill) / [Integration](/manifest/integration) — the standalone equivalents of the nested blocks.
+- [`examples/manifests/full-team.workspace.yaml`](https://github.com/crewship-ai/crewship/blob/main/examples/manifests/full-team.workspace.yaml) — complete multi-crew bundle.
 - Schema source: `internal/manifest/schema.go` (`WorkspaceDocument`, `WorkspaceSpec`).
 - Validation: `internal/manifest/validate.go` (`checkWorkspaceDoc`).
 - Export: `internal/manifest/export.go` (`ExportWorkspace`).

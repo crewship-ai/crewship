@@ -39,12 +39,11 @@ Bare provider model IDs (no namespace prefix). Droid multiplexes across provider
 ## Command shape
 
 ```bash
-droid exec --auto <low|medium> -o stream-json --model <m> -- <message>
+droid exec --auto <low|medium|high> -o stream-json --model <m> -- <message>
 ```
 
 - `exec` — non-interactive subcommand
-- `--auto low` (read-only, MINIMAL/CONSULTATIVE profile) | `medium` (file edits, default)
-- `--auto high` is intentionally NOT exposed (bypasses workspace boundary)
+- `--auto low` (read-only, `MINIMAL` profile) | `medium` (file edits, default for `CODING`) | `high` (`FULL` profile)
 - `-o stream-json` — JSONL events
 - `--mission` is NOT used — fails in headless containers per Factory issue #794
 

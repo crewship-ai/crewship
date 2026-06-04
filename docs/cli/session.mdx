@@ -17,7 +17,9 @@ Defined in `cmd/crewship/cmd_session.go`. Sessions are *user-scoped*, not worksp
 crewship session <subcommand>
 ```
 
-Auth: every subcommand requires `crewship login`. No workspace context required.
+<Note>
+  Every subcommand requires `crewship login`. No workspace context required.
+</Note>
 
 ## Subcommands
 
@@ -28,7 +30,12 @@ Auth: every subcommand requires `crewship login`. No workspace context required.
 
 ## Flags
 
-Neither subcommand defines local flags. Use the global `--format json` / `--format yaml` for scripting.
+| Subcommand | Flag | Short | Type | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `session list` | `--warn-stale-days` | | `int` | `30` | Flag sessions whose `last_used_at` is older than N days. Pass `0` to disable the staleness warning. |
+| `session revoke` | `--yes` | `-y` | `bool` | `false` | Skip the confirmation prompt. |
+
+Beyond these, use the global `--format json` / `--format yaml` for scripting.
 
 ## Examples
 
@@ -41,7 +48,10 @@ crewship session list
 # sess_xyz9876543   -        2026-04-30 11:18  2026-05-18 16:30  198.51.100.42  Mozilla/5.0 (Windows NT 1
 ```
 
-`CURRENT` flags the session that owns the token you're using right now — careful with `revoke` on this row.
+<Warning>
+  `CURRENT` flags the session that owns the token you're using right now —
+  revoking that row logs you out. Re-run `crewship login` to continue.
+</Warning>
 
 ### Audit dump for compliance
 

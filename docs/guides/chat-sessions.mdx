@@ -28,6 +28,8 @@ For one-off "ask the agent a question" use, just open `/chat/<agent>` and start 
 
 ## Key concepts
 
+<Accordion title="Glossary — session, origin, branch, attachment, panel, and friends">
+
 | Term | What it means here |
 |------|-------------------|
 | **Session** | One row in `chats`, scoped to one agent. Stable ID, persists across reloads and operators. Anyone with read access to the agent can resume the same transcript. Created lazily on first send (or explicitly via `POST /api/v1/agents/{agentId}/chats`). |
@@ -44,11 +46,15 @@ For one-off "ask the agent a question" use, just open `/chat/<agent>` and start 
 | **Pinned session** | A session with a per-user pin flag set. Pinned sessions float to the top of the sidebar regardless of last-message timestamp. Useful for "the conversation I always come back to". |
 | **`workspace_files`** | The durable, workspace-scoped blob index (migration v57). The Files right-panel reads from this view; mid-edit files live there until the agent's next commit. |
 
+</Accordion>
+
 ## Usage
 
 The end-to-end loop from "I have an agent" to "we had a productive conversation about it" is five steps. Each step has a dedicated section below with the full surface area; this is the orientation walk-through.
 
-### 1. Open the chat
+<Steps>
+
+<Step title="Open the chat">
 
 ```text
 https://crewship.example.com/chat/viktor
@@ -56,7 +62,9 @@ https://crewship.example.com/chat/viktor
 
 Drops you into Viktor's most recent session. To start fresh, click **New session** in the sidebar. To jump to a specific past conversation, paste the deep-link URL `?session=<chatId>`. To approach from the canvas instead, use `/crews?crew=<slug>&agent=viktor` — see [Routes](#routes).
 
-### 2. Send a message
+</Step>
+
+<Step title="Send a message">
 
 Type into the composer and hit **Enter**. The agent's response streams back via WebSocket; the presence chip in the footer shows `thinking` while the model is generating. Useful composer tricks (full detail in [Composer](#composer)):
 
@@ -64,7 +72,9 @@ Type into the composer and hit **Enter**. The agent's response streams back via 
 - Drag, paste, or click-upload an image / file — capped at 25 MB, surfaced to the agent under `/output/<agentSlug>/attachments/…`.
 - Pick a different model from the dropdown next to **Send** for *this turn only* (handy for switching to Opus mid-conversation for a hard step).
 
-### 3. Watch the agent work
+</Step>
+
+<Step title="Watch the agent work">
 
 While the agent is acting, flip the right panel to the relevant tab — see [Right panel](#right-panel) for the full tab map:
 
@@ -75,13 +85,21 @@ While the agent is acting, flip the right panel to the relevant tab — see [Rig
 
 Each tab is its own URL query param (`&panel=files`, etc.), so you can share the exact view you're staring at.
 
-### 4. React or reroll
+</Step>
+
+<Step title="React or reroll">
 
 Hover an assistant message to surface the **reactions** strip (👍 👎 ❤️ 🤔 🚀). Reactions are workspace-shared and surface back to the agent on the next turn so it can adjust. Hover a user message instead to surface **Edit** — editing rewrites that turn and truncates the conversation, but the old branch lives on in `chat_branches` and can be revisited later via the branch picker. See [Edit-and-resend](#edit-and-resend).
 
-### 5. Resume later
+</Step>
+
+<Step title="Resume later">
 
 Just copy the URL. The session ID is in `?session=<chatId>`, the right-panel state is in `&panel=…`. Bookmark, paste into Linear, share over Slack — anyone with read access on the agent lands on exactly the same view (their reactions are scoped to *them*, the session itself is shared). Pin the session in the sidebar if it's a long-running thread you want to surface above the timestamp-sorted list.
+
+</Step>
+
+</Steps>
 
 For non-UI surfaces — CLI-initiated chats, webhook-driven chats, scheduled chats — see the [API reference](#api-reference) below; the `origin` field on the create payload stamps the right sidebar chip so an operator scrolling the list can tell at a glance which conversations came from automation.
 
@@ -105,14 +123,13 @@ A GitHub issue webhook fires; your trigger handler posts to Crewship:
 
 ```bash
 curl -X POST https://crewship.example.com/api/v1/agents/triage-bot/chats \
-  -H "Authorization: Bearer $CREWSHIP_PAT" \
-  -d '{
-    "origin": "WEBHOOK",
-    "initial_message": "Triage GH issue #482: Login broken on mobile Safari. Repro steps inside.",
-    "metadata": {"github_issue": 482, "repo": "acme/web"}
-  }'
-# {"chat_id":"cht_xyz789","origin":"WEBHOOK","created_at":"…"}
+  -H "Authorization: Bearer crewship_cli_xxxxx" \
+  -d '{"origin": "WEBHOOK"}'
+# {"id":"cht_xyz789"}
 ```
+
+The create call only stamps the session shell (`session_id?`, `origin?`); the
+opening message is sent as a follow-up turn on the returned chat id.
 
 The new session shows up in the agent's sidebar with a coloured `WEBHOOK` chip, so an operator scrolling the list can distinguish auto-triaged issues from human-initiated conversations at a glance. The agent processes the message, does its triage, posts a summary — and a human can take over the conversation by opening `?session=cht_xyz789` and replying directly.
 
@@ -136,19 +153,14 @@ The chat surface is small — no dedicated `/api-reference/chats` page yet; the 
 
 | Method | Path | Purpose |
 |---|---|---|
-| `POST` | `/api/v1/agents/{agentId}/chats` | Create a session. Body: `{initial_message?, origin?, metadata?}`. `origin` is one of `UI / CLI / WEBHOOK / CRON / AGENT` — anything else is stored as `NULL`. |
-| `GET` | `/api/v1/agents/{agentId}/chats` | List the agent's sessions. Query: `origin=…`, `pinned=true`, `archived=true`, `limit` (default 50). |
-| `GET` | `/api/v1/chats/{chatId}` | Full session detail including the message stream. |
-| `PATCH` | `/api/v1/chats/{chatId}` | Rename / pin / archive. Body: `{title?, pinned?, archived?}`. |
-| `DELETE` | `/api/v1/chats/{chatId}` | Delete a session. Cascade-deletes messages, reactions, attachments, branches. |
+| `POST` | `/api/v1/agents/{agentId}/chats` | Create a session. Body: `{session_id?, origin?}`. `origin` is one of `UI / CLI / WEBHOOK / CRON / AGENT` — anything else is stored as `NULL`. Returns `{"id": "<chatId>"}`. |
+| `GET` | `/api/v1/agents/{agentId}/chats` | List the agent's sessions. |
 
 ### Messages
 
 | Method | Path | Purpose |
 |---|---|---|
-| `POST` | `/api/v1/chats/{chatId}/messages` | Send a user turn. Body: `{content, request_id, model?, attachments?}`. Idempotent under `request_id`. |
-| `GET` | `/api/v1/chats/{chatId}/messages` | Paginated message history. Keyset cursor; newest-first. |
-| `PATCH` | `/api/v1/chats/{chatId}/messages/{messageId}` | Edit a user turn. Truncates the active branch; the old tail moves to `chat_branches`. |
+| `GET` | `/api/v1/chats/{chatId}/messages` | Paginated message history (handler `ProxyHandler.ChatMessages`). |
 
 ### Reactions
 
@@ -163,8 +175,6 @@ The chat surface is small — no dedicated `/api-reference/chats` page yet; the 
 | Method | Path | Purpose |
 |---|---|---|
 | `POST` | `/api/v1/agents/{agentId}/chats/{chatId}/attachments` | Upload a file (multipart, ≤25 MB). Returns the file's storage URL + the `chat_attachments` row ID. Handler: `ProxyHandler.AgentChatAttachment` in `internal/api/proxy_attachments.go`. |
-| `GET` | `/api/v1/chats/{chatId}/attachments` | List attachments on a chat. |
-| `DELETE` | `/api/v1/chats/{chatId}/attachments/{attachmentId}` | Remove an attachment. The blob is also evicted from `workspace_files`. |
 
 ### Realtime (WebSocket)
 
@@ -269,6 +279,8 @@ These query params are stable. Do not link to the Next.js internal route segment
 
 ## Common pitfalls
 
+<Accordion title="Footguns and surprising behaviour (13)">
+
 - **Edit-and-resend truncates the active branch — but the tail isn't gone.** Editing a user message moves every message after it into `chat_branches`. The UI shows a small "view earlier branches" affordance, but a hurried operator may believe they've lost the alternate response. Train the muscle of opening the branch picker before assuming work is unrecoverable.
 - **Reactions are workspace-shared, not per-user-private.** A 👎 from one operator is visible to every other operator in the same workspace, and is also surfaced to the agent on the next turn. Use reactions as a deliberate signal — not as a private bookmark. If you need a private flag, use the [Inbox](/guides/inbox) pin instead.
 - **`chats.origin` silently NULLs unrecognised values.** Anything outside the `UI / CLI / WEBHOOK / CRON / AGENT` allow-list gets stored as `NULL` to keep the UI chip safe from injection. A webhook handler that posts `origin: "github"` will succeed (200 OK) but show no chip — the silent failure is by design. Validate the enum on your side before posting.
@@ -277,10 +289,12 @@ These query params are stable. Do not link to the Next.js internal route segment
 - **The Files right-panel shows mid-edit state, not committed state.** It reads `workspace_files`, which tracks the agent's live working tree. If you want to see what was actually committed by the agent, look at the **Diff** tab against `HEAD`, or run `git log` in the **Terminal** tab — the Files view is intentionally optimistic.
 - **Closing the Terminal tab does NOT kill the agent's tmux session.** Re-opening reattaches to the same shell. This is a feature (long-running commands survive a tab close) but operators sometimes assume "close" means "stop". To actually stop, kill the process inside the terminal first.
 - **`request_id` must be stable per logical send, not per React render.** Generate the UUID once when the user hits **Send**, not in the render function. A re-render-derived ID lets the server treat a retry as a new turn — defeating the dedupe contract.
-- **Slash palette commands must be registered server-side.** `/foo` in the composer where `foo` isn't a registered command sends the literal text as a chat message — there's no client-side "unknown command" error. Add commands via the slash-command registration interface in `internal/api/agent_chats.go` rather than expecting the UI to discover them.
+- **Slash palette commands must be registered server-side.** `/foo` in the composer where `foo` isn't a registered command sends the literal text as a chat message — there's no client-side "unknown command" error. Commands are served from `GET /api/v1/slash-commands` (handler `internal/api/slash_commands_handler.go`) rather than discovered by the UI.
 - **Shallow router state evaporates on hard navigation.** `panel=files` survives in-app tab switches and back/forward, but a hard reload that hits a 3xx redirect (e.g. auth expiry → login → bounce) loses everything past `?session=…`. Bookmark with intent, not panic.
 - **WS reconnect dedupes by `request_id`, not by content.** Two genuinely different sends that collide on a re-used `request_id` will silently merge into one turn server-side. Use a fresh UUID per logical send.
 - **Right-panel tabs don't unsubscribe on inactive.** Switching from Terminal to Files stops the *render* of the terminal stream but the WS subscription stays live in the background. This is intentional (re-opening the tab is instant) but means a workspace with many open chat tabs holds many parallel sidecar exec streams — heavy for the sidecar.
+
+</Accordion>
 
 ## Related
 

@@ -40,60 +40,62 @@ Skip memory if the agent is single-use, the conversation never references prior 
 | **Budget** | The character allowance for memory content in the system prompt. Default 15,000 chars. The crew tier is capped at 40% of total; the agent tier reclaims the remainder. Empty tiers reclaim their entire share. |
 | **System-prompt injection** | The orchestrator's `BuildMemoryBlock` reads the top-K chunks at session start and prepends them between `[AGENT MEMORY]` / `[END AGENT MEMORY]` and `[CREW SHARED MEMORY]` / `[END CREW SHARED MEMORY]` markers. The LLM sees memory as part of its system prompt; the agent never has to *ask* for it. |
 | **Sidecar memory engine** | Each agent container's sidecar process (`localhost:9119`) owns the agent's FTS5 index and proxies search to the lead's sidecar for crew-tier queries. The lead sidecar reindexes the crew tier every 60 seconds. |
-| **`memory_enabled`** | Per-agent flag. `false` by default — memory tiers are not read, written, or indexed for that agent. Flip via `crewship agent update --memory-enabled`. |
+| **`memory_enabled`** | Per-agent flag. `false` by default — memory tiers are not read, written, or indexed for that agent. Flip via `crewship agent update --memory`. |
 | **Consolidation** | The nightly worker in `internal/consolidate/` that promotes recurring observations from `daily/*.md` into `AGENT.md` / `CREW.md` and archives the original log. Keeps the evergreen tier from drifting stale and the daily tier from growing unboundedly. |
 
 ## Usage
 
 The end-to-end loop from "memory off" to "agent recalls last week's decision" is five steps. Each step links down to the deeper detail section below.
 
-### 1. Enable memory on the agent
+<Steps>
+  <Step title="Enable memory on the agent">
+    Memory is `memory_enabled=false` by default. Flip it on at create or update time:
 
-Memory is `memory_enabled=false` by default. Flip it on at create or update time:
+    ```bash
+    crewship agent create --name "Researcher" --memory
+    # or for an existing agent:
+    crewship agent update researcher --memory
+    ```
 
-```bash
-crewship agent create --name "Researcher" --memory-enabled
-# or for an existing agent:
-crewship agent update researcher --memory-enabled
-```
+    The next time the agent runs in a session, its sidecar provisions `~/.memory/AGENT.md` (and the crew tier if the agent belongs to one) and starts the FTS5 index.
+  </Step>
 
-The next time the agent runs in a session, its sidecar provisions `~/.memory/AGENT.md` (and the crew tier if the agent belongs to one) and starts the FTS5 index.
+  <Step title="Let the agent write to its own memory">
+    No special API needed — the agent writes by running shell or file-tool commands inside its container. The two common patterns:
 
-### 2. Let the agent write to its own memory
+    ```bash
+    # Append a long-term fact to AGENT.md
+    echo "## Preference\nUser likes terse PR descriptions." >> ~/.memory/AGENT.md
 
-No special API needed — the agent writes by running shell or file-tool commands inside its container. The two common patterns:
+    # Drop a session-specific note in today's daily log
+    echo "- Investigated auth/middleware refactor; chose option B." \
+      >> ~/.memory/daily/$(date -I).md
+    ```
 
-```bash
-# Append a long-term fact to AGENT.md
-echo "## Preference\nUser likes terse PR descriptions." >> ~/.memory/AGENT.md
+    The crew lead writes to `/crew/shared/.memory/CREW.md` and `/crew/shared/.memory/topics/<name>.md` the same way — see [File Structure](#file-structure) for the full layout.
+  </Step>
 
-# Drop a session-specific note in today's daily log
-echo "- Investigated auth/middleware refactor; chose option B." \
-  >> ~/.memory/daily/$(date -I).md
-```
+  <Step title="Subsequent sessions retrieve memory automatically">
+    When the orchestrator builds the system prompt for the agent's next session, `BuildMemoryBlock` selects the top-K chunks within budget and injects them between `[AGENT MEMORY]` / `[CREW SHARED MEMORY]` markers. The agent doesn't have to ask — it reads the markers as part of normal context. See [Reading Memory](#2-reading-memory-system-prompt-injection) for the exact prompt shape.
+  </Step>
 
-The crew lead writes to `/crew/shared/.memory/CREW.md` and `/crew/shared/.memory/topics/<name>.md` the same way — see [File Structure](#file-structure) for the full layout.
+  <Step title="Search explicitly when you need to">
+    For mid-session lookups outside the initial prompt budget, the agent calls its sidecar's search endpoint:
 
-### 3. Subsequent sessions retrieve memory automatically
+    ```bash
+    curl -sX POST localhost:9119/memory/search \
+      -d '{"query": "PostgreSQL migration strategy", "scope": "both", "limit": 5}'
+    ```
 
-When the orchestrator builds the system prompt for the agent's next session, `BuildMemoryBlock` selects the top-K chunks within budget and injects them between `[AGENT MEMORY]` / `[CREW SHARED MEMORY]` markers. The agent doesn't have to ask — it reads the markers as part of normal context. See [Reading Memory](#2-reading-memory-system-prompt-injection) for the exact prompt shape.
+    `scope` is one of `agent`, `crew`, `both`. With `both`, BM25 (and dense scores, when an embedding model is configured) are RRF-merged across the two engines and each result carries its origin.
+  </Step>
 
-### 4. Search explicitly when you need to
+  <Step title="Let consolidation tend the index">
+    The [Consolidation worker](/guides/consolidate) runs nightly: recurring observations from `daily/*.md` get promoted into the evergreen `AGENT.md` / `CREW.md`, and the daily logs get archived. You don't run it by hand for normal operation — the workspace operator can trigger one off-cycle via `crewship consolidate run --crew=<crew>` (optionally scoped with `--since`) if a tier is visibly drifting.
 
-For mid-session lookups outside the initial prompt budget, the agent calls its sidecar's search endpoint:
-
-```bash
-curl -sX POST localhost:9119/memory/search \
-  -d '{"query": "PostgreSQL migration strategy", "scope": "both", "limit": 5}'
-```
-
-`scope` is one of `agent`, `crew`, `both`. With `both`, BM25 (and dense scores, when an embedding model is configured) are RRF-merged across the two engines and each result carries its origin.
-
-### 5. Let consolidation tend the index
-
-The [Consolidation worker](/guides/consolidate) runs nightly: recurring observations from `daily/*.md` get promoted into the evergreen `AGENT.md` / `CREW.md`, and the daily logs get archived. You don't run it by hand for normal operation — the workspace operator can trigger one off-cycle via `crewship consolidate run --workspace=<slug>` if a tier is visibly drifting.
-
-For development without a running server, the [`crewship memory`](#cli-development--debugging) CLI lets you reindex and search on-disk memory directly — useful for poking at a backup or a frozen container.
+    For development without a running server, the [`crewship memory`](#cli-development--debugging) CLI lets you reindex and search on-disk memory directly — useful for poking at a backup or a frozen container.
+  </Step>
+</Steps>
 
 ## Examples
 
@@ -162,7 +164,7 @@ A workspace-scope memory tier (org-level strategy, cross-crew knowledge) is on t
 Set `memory_enabled` to `true` when creating or updating an agent:
 
 ```bash
-crewship agent create --name "My Agent" --memory-enabled
+crewship agent create --name "My Agent" --memory
 ```
 
 <Note>
@@ -405,6 +407,7 @@ Agents in one crew cannot access another crew's shared memory. Container bind mo
 
 ## Best Practices
 
+<AccordionGroup>
 <Accordion title="Writing effective AGENT.md">
 - **Use clear headings** (`## Identity`, `## Learned Facts`, `## Preferences`, `## Project Context`)
 - **Be specific.** "Use driver name `sqlite` not `sqlite3`" beats "there's a sqlite driver thing"
@@ -424,18 +427,25 @@ Agents in one crew cannot access another crew's shared memory. Container bind mo
 - **Trigger reindex after bulk writes.** Agent memory reindexes on startup; crew memory reindexes every 60s
 - **Use `scope=both`** to search across personal and crew knowledge simultaneously
 </Accordion>
+</AccordionGroup>
 
 ## Common pitfalls
 
-- **Memory is `memory_enabled=false` by default.** The most common "my agent isn't remembering anything" report is just an agent that was never opted in. Check `crewship agent get <slug>` and flip the flag if needed.
-- **Memory files are not encrypted at rest.** `AGENT.md`, `CREW.md`, daily logs, and the `index.sqlite` files live as plain on-disk bytes inside the container. Never write secrets, tokens, or PII into memory — credentials belong in [Keeper](/guides/keeper), not in `~/.memory/`.
+<Note>
+**Memory is `memory_enabled=false` by default.** The most common "my agent isn't remembering anything" report is just an agent that was never opted in. Check `crewship agent get <slug>` and flip the flag if needed.
+</Note>
+
+<Warning>
+**Memory files are not encrypted at rest.** `AGENT.md`, `CREW.md`, daily logs, and the `index.sqlite` files live as plain on-disk bytes inside the container. Never write secrets, tokens, or PII into memory — credentials belong in [Keeper](/guides/keeper), not in `~/.memory/`.
+</Warning>
+
 - **Crew reindex lags up to 60 seconds.** The lead sidecar reindexes the crew tier on a 60-second tick. Writes to `CREW.md` or `topics/*.md` are searchable on the next tick, not immediately — if you need instant visibility, hit `POST /memory/reindex?scope=crew` from the lead's sidecar.
 - **Single-agent crews have no crew tier.** The `crew` scope returns 503 for an agent that isn't a member of a crew (or whose crew has only itself). The budget for the agent tier is 100% in that case; no crew context to retrieve.
 - **Agents cannot read other agents' personal memory — even within the same crew.** Container bind mounts enforce this at the filesystem level, not by API check. If a workflow needs cross-agent state, the right surface is `CREW.md` or `topics/`, written by the lead.
 - **Budget is measured in characters, not tokens.** The default 15,000-character budget is ~3,500–4,500 tokens depending on language and content. Don't reason about budget as if it were tokens — the orchestrator slices on character boundaries.
 - **The 10 MB per-agent memory cap is a hard limit.** Once a directory exceeds it, new writes fail rather than evicting old ones — consolidation isn't automatic eviction. Curated facts only, not raw logs.
 - **Don't delete `AGENT.md` entries casually.** Memory is append-mostly. Remove only entries that are explicitly outdated — pruning live knowledge is what makes an agent feel "dumber than yesterday".
-- **Migration v54/v55 must be applied for hybrid retrieval.** Older databases that predate the Crew Journal era (PRs #211/#212) don't have the `importance_score`, `reference_count`, or `journal_entries_fts` columns these endpoints read. Run `crewship migrate` after a binary upgrade and before depending on RRF scoring.
+- **Migration v54/v55 must be applied for hybrid retrieval.** Older databases that predate the Crew Journal era (PRs #211/#212) don't have the `importance_score`, `reference_count`, or `journal_entries_fts` columns these endpoints read. Migrations apply automatically on `crewship start`, so start the upgraded binary once before depending on RRF scoring.
 - **Docker network `Internal: true` blocks sidecar → embedding model.** If the agents network is `Internal: true`, the sidecar can read its on-disk FTS5 index but cannot reach a remote embedding service if one is configured, silently degrading hybrid retrieval to BM25-only. The fix lives in `internal/provider/docker/docker.go:ensureNetwork` — the network must be `Internal: false` with a gateway.
 
 ## Related

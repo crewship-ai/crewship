@@ -4,13 +4,51 @@ description: "Linear-style issue tracker with projects, labels, comments, relati
 icon: "circle-dot"
 ---
 
-Issues are stored in the `missions` table with `mission_type = 'issue'`. They share infrastructure with missions but have their own status flow, identifiers (e.g., `ENG-42`), and lifecycle operations.
+Issues are crew-scoped tracker items modelled after Linear: each carries a human-readable identifier (e.g. `ENG-42`), a status flow, and lifecycle operations for agent execution. Beyond CRUD, the API covers comments, relations, an activity log, workspace labels, and projects that group issues with tracking metadata. Under the hood, issues are stored in the `missions` table with `mission_type = 'issue'` -- they share infrastructure with missions but keep their own status flow, identifiers, and lifecycle.
 
-All issue endpoints require authentication and workspace context.
+<Note>
+  All issue endpoints require authentication and workspace context.
+</Note>
+
+## Endpoints
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| `GET` | [`/api/v1/issues`](#list-issues-workspace) | List issues across a workspace |
+| `GET` | [`/api/v1/issues/{identifier}`](#get-issue-workspace-scoped) | Get an issue by identifier (workspace-wide) |
+| `POST` | [`/api/v1/crews/{crewId}/issues`](#create-issue) | Create an issue |
+| `GET` | [`/api/v1/crews/{crewId}/issues/{identifier}`](#get-issue-crew-scoped) | Get an issue within a crew |
+| `PATCH` | [`/api/v1/crews/{crewId}/issues/{identifier}`](#update-issue) | Update an issue |
+| `DELETE` | [`/api/v1/crews/{crewId}/issues/{identifier}`](#delete-issue) | Delete an issue |
+| `POST` | [`/api/v1/crews/{crewId}/issues/{identifier}/start`](#start-issue) | Start issue execution |
+| `POST` | [`/api/v1/crews/{crewId}/issues/{identifier}/stop`](#stop-issue) | Stop a running issue |
+| `POST` | [`/api/v1/crews/{crewId}/issues/{identifier}/review`](#review-issue) | Submit a review decision |
+| `PATCH` | [`/api/v1/issues/bulk`](#bulk-update) | Bulk-update up to 100 issues |
+| `GET` | [`/api/v1/crews/{crewId}/issues/{identifier}/subtasks`](#list-sub-issues) | List an issue's sub-issues |
+| `GET` | [`/api/v1/crews/{crewId}/issues/{identifier}/activity`](#list-activity) | List an issue's activity log |
+| `GET` | [`/api/v1/crews/{crewId}/issues/{identifier}/comments`](#list-comments) | List comments on an issue |
+| `POST` | [`/api/v1/crews/{crewId}/issues/{identifier}/comments`](#create-comment) | Add a comment |
+| `GET` | [`/api/v1/crews/{crewId}/issues/{identifier}/relations`](#list-relations) | List relations |
+| `POST` | [`/api/v1/crews/{crewId}/issues/{identifier}/relations`](#create-relation) | Create a relation |
+| `DELETE` | [`/api/v1/relations/{relationId}`](#delete-relation) | Delete a relation |
+| `GET` | [`/api/v1/labels`](#list-labels) | List workspace labels |
+| `POST` | [`/api/v1/labels`](#create-label) | Create a label |
+| `PATCH` | [`/api/v1/labels/{labelId}`](#update-label) | Update a label |
+| `DELETE` | [`/api/v1/labels/{labelId}`](#delete-label) | Delete a label |
+| `GET` | [`/api/v1/projects`](#list-projects) | List projects |
+| `POST` | [`/api/v1/projects`](#create-project) | Create a project |
+| `GET` | [`/api/v1/projects/{projectId}`](#get-project) | Get a project |
+| `PATCH` | [`/api/v1/projects/{projectId}`](#update-project) | Update a project |
+| `DELETE` | [`/api/v1/projects/{projectId}`](#delete-project) | Delete a project |
+| `GET` | [`/api/v1/projects/{projectId}/stats`](#project-stats) | Project breakdown stats |
 
 ---
 
-## List Issues (Workspace)
+## Issues CRUD
+
+Create, read, update, and delete issues. Most write operations require `OWNER`, `ADMIN`, or `MANAGER` role and emit a WebSocket event on `workspace:{workspaceId}`.
+
+### List Issues (Workspace)
 
 ```
 GET /api/v1/issues?workspace_id={workspaceId}
@@ -70,13 +108,12 @@ Returns issues across the workspace with filtering, sorting, and pagination.
       }
     ],
     "project_id": "proj_123",
-    "project_name": "Q1 Backend Overhaul",
     "comment_count": 3
   }
 ]
 ```
 
-### Response Fields
+<Accordion title="Response fields">
 
 | Field | Type | Description |
 |---|---|---|
@@ -100,7 +137,6 @@ Returns issues across the workspace with filtering, sorting, and pagination.
 | `lead_agent_id` | string | Crew's lead agent ID |
 | `labels` | array | Array of label objects |
 | `project_id` | string? | Parent project ID |
-| `project_name` | string? | Project name (when project_id is set) |
 | `estimate` | integer? | Effort/points estimate |
 | `parent_issue_id` | string? | Parent issue ID for sub-issues |
 | `milestone_id` | string? | Associated milestone ID |
@@ -113,9 +149,9 @@ Returns issues across the workspace with filtering, sorting, and pagination.
 | `updated_at` | string | ISO 8601 timestamp |
 | `completed_at` | string? | When issue was completed/cancelled |
 
----
+</Accordion>
 
-## Get Issue (Workspace-scoped)
+### Get Issue (Workspace-scoped)
 
 ```
 GET /api/v1/issues/{identifier}?workspace_id={workspaceId}
@@ -129,9 +165,7 @@ Get an issue by its identifier (e.g., `ENG-42`) across the entire workspace. No 
 |---|---|
 | `404` | Issue not found |
 
----
-
-## Create Issue
+### Create Issue
 
 ```
 POST /api/v1/crews/{crewId}/issues?workspace_id={workspaceId}
@@ -180,9 +214,7 @@ The crew must have a LEAD agent. The issue identifier is auto-generated from the
 
 **WebSocket event:** `issue.created` on `workspace:{workspaceId}`
 
----
-
-## Get Issue (Crew-scoped)
+### Get Issue (Crew-scoped)
 
 ```
 GET /api/v1/crews/{crewId}/issues/{identifier}?workspace_id={workspaceId}
@@ -192,9 +224,7 @@ Get an issue by its identifier within a specific crew. Includes labels and comme
 
 **Response:** `200 OK` -- full issue object.
 
----
-
-## Update Issue
+### Update Issue
 
 ```
 PATCH /api/v1/crews/{crewId}/issues/{identifier}?workspace_id={workspaceId}
@@ -247,15 +277,15 @@ Significant changes (status, assignee, priority) are logged as activity entries.
 
 **WebSocket event:** `issue.updated` on `workspace:{workspaceId}`
 
----
-
-## Delete Issue
+### Delete Issue
 
 ```
 DELETE /api/v1/crews/{crewId}/issues/{identifier}?workspace_id={workspaceId}
 ```
 
-Hard-deletes the issue. Only issues in `BACKLOG` or `CANCELLED` status can be deleted.
+<Warning>
+  Hard-deletes the issue. Only issues in `BACKLOG` or `CANCELLED` status can be deleted.
+</Warning>
 
 **Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
 
@@ -270,7 +300,11 @@ Hard-deletes the issue. Only issues in `BACKLOG` or `CANCELLED` status can be de
 
 ---
 
-## Start Issue
+## Lifecycle Actions
+
+Drive an issue through agent execution: start, stop, and review.
+
+### Start Issue
 
 ```
 POST /api/v1/crews/{crewId}/issues/{identifier}/start?workspace_id={workspaceId}
@@ -302,17 +336,15 @@ Starts execution of a `BACKLOG` or `TODO` issue. The issue must have an assignee
 
 **WebSocket event:** `issue.started` on `workspace:{workspaceId}`
 
----
-
-## Stop Issue
+### Stop Issue
 
 ```
 POST /api/v1/crews/{crewId}/issues/{identifier}/stop?workspace_id={workspaceId}
 ```
 
-Stops a running issue. Cancels all running/pending tasks and sets status to `CANCELLED`.
-
-Only issues in `IN_PROGRESS` or `REVIEW` status can be stopped.
+<Warning>
+  Stops a running issue. Cancels all running/pending tasks and sets status to `CANCELLED`. Only issues in `IN_PROGRESS` or `REVIEW` status can be stopped.
+</Warning>
 
 **Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
 
@@ -330,9 +362,7 @@ Only issues in `IN_PROGRESS` or `REVIEW` status can be stopped.
 | `400` | Issue not in IN_PROGRESS or REVIEW status |
 | `404` | Issue not found |
 
----
-
-## Review Issue
+### Review Issue
 
 ```
 POST /api/v1/crews/{crewId}/issues/{identifier}/review?workspace_id={workspaceId}
@@ -377,7 +407,11 @@ Submit a review decision for an issue in `REVIEW` or `IN_PROGRESS` status.
 
 ---
 
-## Bulk Update
+## Bulk
+
+Apply one set of field updates across many issues from the board/list multi-select toolbar.
+
+### Bulk Update
 
 ```
 PATCH /api/v1/issues/bulk
@@ -429,7 +463,11 @@ When `updated > 0`, an `issues.bulk_updated` WebSocket event is broadcast on `wo
 
 ---
 
-## List Sub-issues
+## Sub-issues
+
+Issues can nest via `parent_issue_id`. List the children of one parent.
+
+### List Sub-issues
 
 ```
 GET /api/v1/crews/{crewId}/issues/{identifier}/subtasks
@@ -453,7 +491,11 @@ Returns the children of one parent issue -- rows where `parent_issue_id` equals 
 
 ---
 
-## List Activity
+## Activity
+
+A read-only audit trail of significant issue changes.
+
+### List Activity
 
 ```
 GET /api/v1/crews/{crewId}/issues/{identifier}/activity?workspace_id={workspaceId}
@@ -483,6 +525,8 @@ Returns the activity log for an issue (status changes, assignments, reviews). Li
 ---
 
 ## Comments
+
+Threaded discussion on an issue, ordered oldest-first.
 
 ### List Comments
 
@@ -534,6 +578,8 @@ POST /api/v1/crews/{crewId}/issues/{identifier}/comments?workspace_id={workspace
 ---
 
 ## Relations
+
+Link issues to one another (blocks, relates to, duplicate of). Relation types are flipped when viewed from the target side.
 
 ### List Relations
 
@@ -777,7 +823,9 @@ DELETE /api/v1/projects/{projectId}?workspace_id={workspaceId}
 
 **Auth:** `OWNER` or `ADMIN` role
 
-Unlinks all issues from the project before deletion.
+<Warning>
+  Unlinks all issues from the project before deletion.
+</Warning>
 
 **Response:** `204 No Content`
 
@@ -822,59 +870,9 @@ Returns breakdown data: counts by status, by assignee, by label, and crew list.
 
 ---
 
-## Bulk Update
+## Reference
 
-```
-PATCH /api/v1/issues/bulk?workspace_id={workspaceId}
-```
-
-Apply the same field updates to up to 100 issues in a single request. Issues not in the caller's workspace are silently skipped; invalid status transitions are also skipped per-issue.
-
-**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
-
-**Request Body:**
-
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `ids` | string[] | Yes | Issue IDs (1-100) |
-| `updates.status` | string | No | New status (skipped for issues where transition is invalid) |
-| `updates.priority` | string | No | Priority level |
-| `updates.assignee_type` | string | No | `"user"` or `"agent"` |
-| `updates.assignee_id` | string | No | Assignee ID |
-| `updates.project_id` | string | No | Project ID (empty string to unlink) |
-| `updates.labels` | string[] | No | Replace all labels with this set of label IDs |
-
-**Response:** `200 OK`
-
-```json
-{ "updated": 7 }
-```
-
-| Status | Condition |
-|---|---|
-| `400` | `ids` empty or > 100 |
-
-**WebSocket event:** `issues.bulk_updated` on `workspace:{workspaceId}` (only when at least one issue was updated)
-
----
-
-## List Sub-Issues
-
-```
-GET /api/v1/crews/{crewId}/issues/{identifier}/subtasks?workspace_id={workspaceId}
-```
-
-Returns all child issues whose `parent_issue_id` references this issue, ordered by `sort_order` then `created_at`.
-
-**Response:** `200 OK` -- array of issue objects (same shape as List Issues).
-
-| Status | Condition |
-|---|---|
-| `404` | Parent issue not found |
-
----
-
-## Issue Statuses
+### Issue Statuses
 
 | Status | Description |
 |---|---|
@@ -887,7 +885,7 @@ Returns all child issues whose `parent_issue_id` references this issue, ordered 
 | `CANCELLED` | Cancelled by user |
 | `DUPLICATE` | Marked as duplicate (no transitions out) |
 
-## Priority Levels
+### Priority Levels
 
 | Value | Description |
 |---|---|

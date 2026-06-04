@@ -71,16 +71,23 @@ The innermost `providerCaller` unpacks the opaque `CallRequest.Inputs` back into
 The same principle shows up elsewhere:
 
 - **Keeper**: SecretStore -> Gatekeeper LLM -> Decision. Journal emit is outermost so even rejected requests are audited.
-- **Harbor Master**: Enqueue -> (optional sync poll) -> Decide. Journal emit fires on each state transition.
+- **Harbormaster**: Enqueue -> (optional sync poll) -> Decide. Journal emit fires on each state transition.
 - **Hooks**: Dispatch -> blocking handlers (sequential, stop on Block) -> non-blocking goroutines. The hook.fired entry lands regardless of outcome.
 
 ## Stream() path
 
-`Provider.Stream()` currently bypasses the full middleware. Reason: the paymaster ledger row depends on final token counts which arrive in the terminal `message_delta` event; wiring that through the sync `CallResponse` shape would need a streaming variant of `CallResponse`. That's deferred.
+`Provider.Stream()` now runs through the **same** middleware stack as `Complete`. `wrappedProvider.Stream()` builds a per-call `telemetry → paymaster → lookout` chain around a `streamCaller` that closes over the handler:
 
-**Lookout is still wired** synchronously before streaming starts -- `wrappedProvider.Stream()` scans every user/tool message with `lookout.ScanInput` and returns `*lookout.BlockedError` if any fires. Without this pre-call guard, a caller that picks `Stream` over `Complete` would silently bypass every guardrail.
+```go
+var caller paymaster.LLMCaller = &streamCaller{p: w.base, handler: handler}
+caller = lookoutCaller(caller, w.j)
+caller = paymaster.Middleware(caller, w.j, w.db)
+caller = telemetry.LLMMiddleware(caller)
+```
 
-Streaming callers who also want paymaster accounting today fall back to the orchestrator-level accounting that predates this middleware (see [`internal/orchestrator`](https://github.com/crewship-ai/crewship/tree/main/internal/orchestrator)).
+The synchronous `CallResponse` the `streamCaller` returns carries the final token counts computed across the stream, which lets `paymaster.Middleware` write a normal `cost_ledger` row and lets `telemetry.LLMMiddleware` close out a normal `llm.call` span. Callers that pick `Stream` over `Complete` now **pay, log, and guard identically** — the older bypass (where streaming fell back to orchestrator-level accounting) is gone.
+
+`lookoutCaller` stays inside `paymaster.Middleware` for the same reason as the Complete path: a blocked input never reaches the provider, so no ledger row is written for work that never happened.
 
 ## Custom composition
 
@@ -97,10 +104,12 @@ If you rearrange, understand the reasoning above. A PR that moves paymaster insi
 
 ## Gotchas
 
+<Accordion title="Edge cases and footguns">
 - **Context scope is required.** Without `lookout.WithScope` in ctx, the paymaster rejects every call. This is by design (unscoped calls are unbillable) but produces a confusing error in tests -- always attach a scope.
 - **Type assertion failures fail fast.** `providerCaller` returns `"inputs not llm.Request (got %T)"` if something upstream handed it the wrong shape. This is always a wiring bug.
-- **Stream bypass is documented but not gated.** Nothing prevents an existing caller from picking `Stream` over `Complete`. Audit new call sites; if the caller doesn't need streaming, prefer `Complete` so the full stack runs.
+- **Stream runs the full stack.** `Stream` and `Complete` now both flow through `telemetry → paymaster → lookout`, so picking one over the other no longer changes billing or guardrail coverage. The streaming `streamCaller` returns a `"stream inputs not llm.Request (got %T)"` error on a type-assertion mismatch — same fail-fast wiring-bug signal as the Complete path.
 - **Journal emitter is shared.** Both paymaster and lookout emit through the same `journal.Emitter` instance. A nil emitter would no-op silently -- the production path always sets it.
+</Accordion>
 
 ## Related
 

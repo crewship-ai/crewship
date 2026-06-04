@@ -42,7 +42,11 @@ crewship policy <subcommand> [flags]
 | `warn` | F4.2 `DENY` decisions land as non-blocking inbox notifications; the agent's action proceeds. Default. |
 | `block` | F4.2 `DENY` aborts the next tool call. Opt-in once behavior-monitor confidence is built. |
 
-The combination `autonomy_level=full` with `behavior_mode=block` is rejected by the API (opt-in trust paired with opt-in restriction is incoherent).
+<Note>
+  The combination `autonomy_level=full` with `behavior_mode=block` is
+  rejected by the API (opt-in trust paired with opt-in restriction is
+  incoherent).
+</Note>
 
 ---
 
@@ -93,6 +97,12 @@ crewship policy set --crew sandbox --level strict --behavior block
 | `--reason` | `string` | | Operator-supplied reason. Required when `--level=full`. |
 | `--yes` | `bool` | `false` | Skip the loose-transition confirmation prompt. |
 
+<Warning>
+  Loosening autonomy (any → `trusted` or `full`) prompts for confirmation
+  unless `--yes`; `--level full` additionally requires `--reason`. Raising a
+  crew to `full` means journal-only logging — agents act without approval.
+</Warning>
+
 **Validation order:**
 
 1. `--crew`, `--level` presence checks (no round-trip on missing flags).
@@ -138,6 +148,6 @@ The `CREW` column is enriched from `/api/v1/crews` because the policy API only r
 
 ## Related
 
-- [PR-B F2 PRD section](https://github.com/crewship-ai/crewship/blob/main/.claude/context/prd/PRD-AGENT-EVOLUTION-2026.md) — autonomy slider design rationale.
+- PR-B F2 PRD section (`PRD-AGENT-EVOLUTION-2026.md`, internal spec) — autonomy slider design rationale.
 - [`crewship system aux-status`](/cli/system) — diagnostic surface for the parallel PR-B F3 auxiliary-model assignment.
 - [`crewship approvals`](/cli/approvals) — inspect the inbox items the autonomy dial routes through.

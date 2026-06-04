@@ -146,7 +146,7 @@ Parser lives in `internal/devcontainer/config.go`:
 ```
 
 <Note>
-  `postCreateCommand` accepts the polymorphic forms from the spec: a single string, an array of strings (run sequentially), or an object of named commands (keys ignored, values executed). See `parsePostCreateCommand` in `internal/devcontainer/config.go`.
+  `postCreateCommand` accepts the polymorphic forms from the spec: a single string, an array of strings (run sequentially), or an object of named commands (keys ignored, values executed). See `parsePolymorphicCommand` in `internal/devcontainer/config.go`.
 </Note>
 
 ### mise config
@@ -193,7 +193,7 @@ mise is installed as the `agent` user (UID 1001), so tools land under `/home/age
     # Change the base image
     crewship crew config engineering --runtime-image debian:bookworm-slim
 
-    # Export full config (prints YAML)
+    # Export full config (prints JSON)
     crewship crew config engineering --export
 
     # Clear all runtime config (back to default base, no features/mise)
@@ -371,7 +371,7 @@ The `crewship seed` command seeds demo crews with sensible devcontainer + mise c
 ```bash
 crewship seed                     # populate crews + credentials + agents
 crewship seed --smoke-test        # also run `crewship run <slug> "hello"` on every agent
-crewship seed --smoke-test --smoke-timeout 90s
+crewship seed --smoke-test --smoke-timeout 90   # per-agent timeout in seconds
 ```
 
 | Crew | Base image | Features | mise |
@@ -417,14 +417,17 @@ The probes always execute as the agent UID (1001), so they reflect what the agen
 
 PR #225 extends the devcontainer expansion vocabulary the spec defines:
 
-- `${devcontainerId}` — resolves to the cached image hash for this crew. Useful for binding host paths that are unique per provisioning run.
-- `${VAR}` — resolved against the **base image's environment** (everything in the image's `ENV` directives), not the host's. So referencing `${HOME}` resolves to whatever the image set it to (e.g. `/home/agent`), not the operator's home directory.
+- `${devcontainerId}` — resolves to a stable, Docker-volume-safe identifier derived from the crew ID (SHA-256 of the crew ID, first 16 hex chars). Useful for naming per-crew persistent volumes.
+- `${VAR}` / `${containerEnv:VAR}` — resolved against the **base image's environment** (everything in the image's `ENV` directives), not the host's. So referencing `${HOME}` resolves to whatever the image set it to (e.g. `/home/agent`), not the operator's home directory. Only the curly-brace form is expanded — bare `$VAR` is left untouched.
 
-These expansions apply in `mounts[*].source`, `containerEnv`, and `forwardPorts` strings. Unknown variables fail provisioning loudly rather than silently expanding to empty — `${TYPO}` will surface as an error in the provisioning log instead of producing a busted mount.
+`${devcontainerId}` is expanded in mount `source`/`target` strings; `${VAR}` / `${containerEnv:VAR}` is expanded in `containerEnv` values (against the image's default `ENV`). Unknown variables are **left in place verbatim** (e.g. `${TYPO}` stays as the literal token) so an operator can spot and debug them in the rendered config — they are not treated as a hard provisioning error.
 
 ## Runtime bind-mount semantics
 
-- **`crewship-sidecar` + `entrypoint.sh`** are bind-mounted **read-only** from the host into every crew container. Host-side edits do **not** take effect in already-running containers — the mount is snapshotted at `docker create` time.
+<Warning>
+**`crewship-sidecar` + `entrypoint.sh`** are bind-mounted **read-only** from the host into every crew container. Host-side edits do **not** take effect in already-running containers — the mount is snapshotted at `docker create` time.
+</Warning>
+
 - To roll out a new sidecar or entrypoint across existing crews, rebuild the sidecar (`make build:sidecar`) and then remove each crew's container: `docker rm -f crewship-team-<slug>`. The container is recreated transparently on the next agent message, picking up the updated bind mount.
 - **`postStartCommand`** runs on *every* start, so it is the right hook for operations that must reflect host state at the moment of launch (e.g. refreshing a secret via `vault read`). Do not try to bake those into `postCreateCommand` — they'd freeze at provisioning time.
 - Cached images (`crewship-cache:{hash}`) live on the Docker host indefinitely. Run `crewship crew cache prune --older-than 30d` as part of your maintenance rotation; cached images referenced by live crews are protected automatically.
@@ -475,15 +478,26 @@ These expansions apply in `mounts[*].source`, `containerEnv`, and `forwardPorts`
 
 If you have a long-running deployment that still references `ghcr.io/crewship-ai/agent-runtime:latest`:
 
-1. Update Crewship to the current release (post-[`dd86356`](https://github.com/crewship-ai/crewship/commit/dd86356)).
-2. `make build:sidecar` on the host.
-3. For each existing crew:
-   ```bash
-   crewship crew config <slug> --runtime-image debian:bookworm-slim
-   crewship crew config <slug> --devcontainer ./devcontainer.json   # with common-utils + claude-code
-   crewship crew rebuild <slug>
-   ```
-4. Restart `crewshipd`. The fail-fast check will confirm your sidecar is discoverable.
+<Steps>
+  <Step title="Update Crewship to the current release">
+    Post-[`dd86356`](https://github.com/crewship-ai/crewship/commit/dd86356).
+  </Step>
+  <Step title="Build the sidecar on the host">
+    ```bash
+    make build:sidecar
+    ```
+  </Step>
+  <Step title="Reconfigure each existing crew">
+    ```bash
+    crewship crew config <slug> --runtime-image debian:bookworm-slim
+    crewship crew config <slug> --devcontainer ./devcontainer.json   # with common-utils + claude-code
+    crewship crew rebuild <slug>
+    ```
+  </Step>
+  <Step title="Restart crewshipd">
+    The fail-fast check will confirm your sidecar is discoverable.
+  </Step>
+</Steps>
 
 The legacy image is no longer published by CI (`agent-runtime.yml` workflow deleted). Pulling its old tag still works but sits frozen; nothing in Crewship itself assumes it anymore.
 

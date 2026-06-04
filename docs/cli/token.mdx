@@ -6,7 +6,27 @@ icon: "key"
 
 # Token
 
-`cmd/crewship/cmd_token.go` exposes the CLI-token surface (`/api/v1/auth/cli-tokens`). These are the long-lived bearers `crewship login --token` consumes and that you create in **Settings → CLI tokens** in the web UI. All subcommands clear `WorkspaceID` on the client — tokens are user-scoped, not workspace-scoped.
+Manage the CLI-token surface (`/api/v1/auth/cli-tokens`). These are the long-lived bearers `crewship login --token` consumes and that you create in **Settings → CLI tokens** in the web UI. Tokens are user-scoped, not workspace-scoped — every subcommand clears `WorkspaceID` on the client.
+
+```bash
+crewship token <subcommand> [flags]
+```
+
+<Note>
+  Defined in `cmd/crewship/cmd_token.go`. All subcommands require an active login.
+</Note>
+
+## Subcommands
+
+| Command | Description |
+|---|---|
+| `list` | List your CLI tokens with last-used and staleness flags. |
+| `create [name]` | Mint a new token (the full bearer is shown once). |
+| `revoke <token-id>` | Revoke a token immediately. |
+| `rotate <token-id>` | Create a replacement token, then revoke the old one. |
+| `validate` | Confirm the active token is still valid. |
+
+---
 
 ## `crewship token list`
 
@@ -15,7 +35,14 @@ icon: "key"
 ```bash
 crewship token list
 crewship token list --format json
+crewship token list --warn-stale-days 30
 ```
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--warn-stale-days` | int | `90` | Flag tokens older / unused longer than N days. `0` disables the staleness check. |
+
+---
 
 ## `crewship token create [name]`
 
@@ -36,14 +63,31 @@ Token:  crewship_cli_eyJ...
 Store this token securely — it won't be shown again.
 ```
 
+<Tip>
+  The bearer is stored only at creation. Capture it now — there is no way to retrieve it later.
+</Tip>
+
+---
+
 ## `crewship token revoke <token-id>`
 
-`DELETE /api/v1/auth/cli-tokens/{id}`. Anything still using the token starts getting 401 immediately.
+`DELETE /api/v1/auth/cli-tokens/{id}`. Prompts for confirmation unless `-y`.
 
 ```bash
 crewship token revoke tok_abc12345
 # ✓ Token revoked.
+crewship token revoke tok_abc12345 --yes   # skip the prompt (CI)
 ```
+
+| Flag | Short | Type | Default | Effect |
+|---|---|---|---|---|
+| `--yes` | `-y` | bool | `false` | Skip the confirmation prompt. |
+
+<Warning>
+  Anything still using the token starts getting 401 immediately. Update clients before revoking.
+</Warning>
+
+---
 
 ## `crewship token rotate <token-id>`
 
@@ -58,17 +102,21 @@ crewship token rotate tok_abc12345
 crewship token rotate tok_abc12345 --name "ci-runner v2"
 ```
 
-Safety notes (printed in `--help` and embedded in the rotation flow):
+<Warning>
+  Safety notes (printed in `--help` and embedded in the rotation flow):
 
-- The new token is printed **before** revoke is attempted. If revoke fails, the new one is already valid — re-run `crewship token revoke <old-id>` manually to finish.
-- We do **not** roll back the new token on revoke failure — that would leave you with neither.
-- Anything still using the old token will start getting 401 the moment revoke lands. Update clients first, then rotate — or rotate then immediately update clients.
+  - The new token is printed **before** revoke is attempted. If revoke fails, the new one is already valid — re-run `crewship token revoke <old-id>` manually to finish.
+  - We do **not** roll back the new token on revoke failure — that would leave you with neither.
+  - Anything still using the old token will start getting 401 the moment revoke lands. Update clients first, then rotate — or rotate then immediately update clients.
+</Warning>
 
 Errors:
 
 - **`token <id> is already revoked`** — pick a different token or just `create` a fresh one.
 - **`token <id> not found (run 'crewship token list')`** — typo or the token belongs to another user.
 - **`revoke old token (new token IS active, re-run 'crewship token revoke <old-id>'): <err>`** — exactly the case described above; the new token is fine, finish manually.
+
+---
 
 ## `crewship token validate`
 
@@ -78,7 +126,12 @@ Errors:
 crewship token validate
 # ✓ Token is valid.
 #   User: petra@example.com
+crewship token validate --json
 ```
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--json` | bool | `false` | Emit machine-readable JSON to stdout instead of human-readable text. |
 
 `401` / `403` map to `token is invalid or expired`.
 

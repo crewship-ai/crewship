@@ -24,8 +24,9 @@ hint text in the second column is the remediation.
 - **Container runtime detected** — Docker / Podman / Colima / OrbStack
   / Apple Containers. If FAIL, install one (see
   [Install — container runtime requirement](/guides/install)).
-- **Port binding** — confirms the HTTP port (default `8080`) is not in
-  use by another process.
+- **Server reachable** — TCP-dials the configured server host:port
+  (default `localhost:8080`) so you can tell "server down / wrong
+  port" apart from "auth issue".
 - **Database file permissions** — confirms `~/.crewship/crewship.db`
   is `0600` (owner-only). Drift here usually means a backup was
   restored via `tar` without preserving the mode bit.
@@ -45,7 +46,11 @@ crewship doctor --no-color    # plain text output for log capture
 
 ## Symptom catalog
 
-### `crewship start` exits immediately, no error
+Find your symptom below; each panel expands to its diagnosis and fix.
+
+<AccordionGroup>
+
+<Accordion title="`crewship start` exits immediately, no error">
 
 Almost always means migrations failed silently or the data directory
 isn't writable. Run:
@@ -66,7 +71,9 @@ run migrations` or `failed to open database`. Common fixes:
   can't be written and the boot aborts to prevent a half-migrated DB.
   Free space, then re-run.
 
-### Agent containers won't start
+</Accordion>
+
+<Accordion title="Agent containers won't start">
 
 ```
 ERROR no Docker-compatible runtime found
@@ -91,7 +98,9 @@ colima start
 On Linux, `systemctl start docker` or install `podman`. Crewship picks
 whatever socket it finds — no further config needed.
 
-### "Agent exited with code 123"
+</Accordion>
+
+<Accordion title='"Agent exited with code 123"'>
 
 Specific to Claude Code adapter. **Almost always missing or invalid
 `CLAUDE_CODE_OAUTH_TOKEN`** — the agent CLI failed its startup auth
@@ -109,7 +118,9 @@ Other non-zero exits (1, 2, 127) usually mean the agent CLI binary
 isn't installed in the container image — check `crewship agent debug
 <id>` for the container's resolved `PATH`.
 
-### `curl crewship.ai/install | bash` fails with "Bad substitution"
+</Accordion>
+
+<Accordion title='`curl crewship.ai/install | bash` fails with "Bad substitution"'>
 
 Wrong shell. Use `bash`, not `sh`:
 
@@ -122,7 +133,9 @@ The script uses `set -euo pipefail` and array-expansion guards that
 Debian/Ubuntu `dash` (the default `/bin/sh`) does not implement. See
 the `bash` note in [Install](/guides/install).
 
-### `brew install crewship-ai/tap/crewship` fails with "tap not found"
+</Accordion>
+
+<Accordion title='`brew install crewship-ai/tap/crewship` fails with "tap not found"'>
 
 Update brew and try again:
 
@@ -137,7 +150,9 @@ formula version different from what you'd expect, the goreleaser
 auto-push for the latest release may have failed — file an issue and
 fall back to the `curl | bash` install.
 
-### macOS Gatekeeper blocks the binary
+</Accordion>
+
+<Accordion title="macOS Gatekeeper blocks the binary">
 
 Releases are cosign-signed but not Apple-notarized in v0.1 (Apple
 Developer Program enrollment is a separate workstream). After the
@@ -156,7 +171,9 @@ xattr -d com.apple.quarantine $(which crewship)
 Or right-click → Open → Open Anyway in Finder. The `brew install` path
 strips quarantine automatically; only direct downloads need this.
 
-### Linux: daemon won't survive logout
+</Accordion>
+
+<Accordion title="Linux: daemon won't survive logout">
 
 `crewship start` as a `systemctl --user` service (or a `tmux`-less SSH
 session) is killed when the user logs out, because systemd-user
@@ -174,7 +191,9 @@ it's on. Headless servers (no interactive shell) are the common case;
 desktop installs that always have a logged-in graphical session can
 skip this step.
 
-### Windows: SmartScreen blocks the binary
+</Accordion>
+
+<Accordion title="Windows: SmartScreen blocks the binary">
 
 Windows builds aren't Authenticode-signed in v0.1 (we sign later in
 the beta). On first launch you'll see a SmartScreen "Don't run" prompt.
@@ -183,7 +202,9 @@ Right-click `crewship.exe` → **Properties** → check **Unblock** → OK.
 One-time per binary — subsequent runs skip the prompt. The Homebrew
 and Docker Compose install paths bypass this entirely.
 
-### "Migration version N collision"
+</Accordion>
+
+<Accordion title='"Migration version N collision"'>
 
 This means your local DB has a migration applied under one name but
 the binary expects a different name at that version. Caused by
@@ -197,8 +218,11 @@ code expects "add_skill_bootstrap_fields" — rename the new migration
 to the next free version
 ```
 
+<Warning>
 **For end users:** restore your last backup with the matching binary,
-or wipe the DB if you have no data to preserve:
+or wipe the DB if you have no data to preserve. Wiping the DB is
+destructive — move it aside (don't delete) so you can recover if needed.
+</Warning>
 
 ```bash
 crewship doctor                                  # confirm the issue
@@ -209,7 +233,9 @@ crewship start                                   # fresh DB, replays migrations
 **Maintainer-side:** the `migration-lint` CI workflow now catches this
 class of bug pre-merge, so it should not recur in v0.1+ releases.
 
-### Web UI loads but API requests fail with 401
+</Accordion>
+
+<Accordion title="Web UI loads but API requests fail with 401">
 
 Token expired or never set. Two paths:
 
@@ -223,7 +249,9 @@ In the UI: log out and log back in. If the bootstrap user was reset
 (rare — only happens after `crewship.db` deletion), visit
 `/bootstrap` to recreate the initial admin account.
 
-### "Sentry endpoint unreachable" in doctor
+</Accordion>
+
+<Accordion title='"Sentry endpoint unreachable" in doctor'>
 
 WARN, not FAIL. Telemetry won't ship until the network heals; nothing
 else breaks. If you want to silence the warning:
@@ -238,6 +266,10 @@ Or redirect to a Sentry instance you can reach:
 export CREWSHIP_SENTRY_DSN=https://<key>@self-hosted-sentry.example/1
 crewship start
 ```
+
+</Accordion>
+
+</AccordionGroup>
 
 ## Where to go next
 

@@ -15,7 +15,7 @@ Each row in the response carries the tool name, the agent that called it, the ar
 | Flag | Type | Default | Effect |
 |---|---|---|---|
 | `--limit <n>` | int | `50` | Max calls to return. Sent as `?limit=`. |
-| `--filter <expr>` | string | (unset) | gojq filter applied before output. |
+| `--filter <expr>` | string | (unset) | Pipe the JSON output through the `jq` binary (must be installed and on `PATH`). If `jq` is missing, the raw, unfiltered output is printed instead. |
 
 ### Examples
 
@@ -30,6 +30,6 @@ Default output is indented JSON — the rows don't have a canonical table form, 
 
 ## See also
 
-- [`crewship mcp`](/cli/agent) — install and configure MCP integrations.
-- [`crewship integration`](/cli/agent) — broader integration management.
+- [`crewship mcp`](/cli/mcp) — install and configure MCP integrations.
+- [`crewship integration`](/cli/integration) — broader integration management.
 - [`crewship audit`](/cli/audit) — workspace audit trail (MCP calls are also journaled).

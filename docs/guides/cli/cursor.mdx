@@ -91,6 +91,6 @@ JSONL per [cursor.com/docs/cli/reference/output-format](https://cursor.com/docs/
 
 **Write tool hangs forever** — `--force` flag missing from adapter command (regression check `cli_adapter_versions_test.go`).
 
-**MCP servers listed but never invoke** — `--approve-mcps` missing when MCP configured. The adapter only adds it when `req.MCPServers` or `req.CrewMCPConfigJSON` is non-empty.
+**MCP servers listed but never invoke** — `--approve-mcps` missing when MCP configured. The adapter only adds it when `req.MCPServers`, `req.CrewMCPConfigJSON`, or `req.AgentMCPConfigJSON` is non-empty.
 
 **`tool_call:completed` events lost on reconnect** — known upstream regression (forum #157593). `model_call_id` + `timestamp_ms` are captured by parser to enable chat-bridge dedup.

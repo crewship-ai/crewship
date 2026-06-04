@@ -12,7 +12,7 @@ This page is for **developers building a new provider**. Operators looking for h
 
 ## Why a formal interface
 
-Before the interface, every external memory backend would have to fork `internal/memory/dispatcher.go` and re-wire the four tool handlers (`memory.read` / `memory.write` / `memory.search` / `memory.append_daily`) against its own SDK. The dispatcher then becomes the integration boundary instead of a clean contract.
+Before the interface, every external memory backend would have to fork `internal/memory/tools.go` and re-wire the four tool handlers (`memory.read` / `memory.write` / `memory.search` / `memory.append_daily`) against its own SDK. The dispatcher then becomes the integration boundary instead of a clean contract.
 
 `Provider` flips that:
 

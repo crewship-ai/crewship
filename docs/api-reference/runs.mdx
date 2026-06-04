@@ -6,7 +6,18 @@ icon: "play"
 
 A "run" is one agent execution — orchestrator picks up an assignment, exec's the CLI, the run ends with one of `COMPLETED` / `FAILED` / `CANCELLED` / `TIMEOUT`. Since PR #234 the legacy `agent_runs` table is gone; runs are reconstructed from the [Crew Journal](/guides/crew-journal) by grouping `journal_entries` on `trace_id` (which equals the run id). The HTTP shape is preserved — frontend consumers don't see a contract change.
 
-Every endpoint is workspace-scoped via the session context. There is no write endpoint — runs come into existence when the orchestrator emits `run.started` and conclude when a terminal `run.{completed|failed|cancelled|timeout}` lands on the same `trace_id`.
+Every endpoint is workspace-scoped via the session context.
+
+<Note>
+  Runs are **read-only** — there is no write endpoint. A run comes into existence when the orchestrator emits `run.started` and concludes when a terminal `run.{completed|failed|cancelled|timeout}` lands on the same `trace_id`.
+</Note>
+
+## Endpoints
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | [`/api/v1/runs`](#list-runs) | List runs with KPI tiles and pagination |
+| GET | [`/api/v1/runs/{id}`](#get-a-single-run) | Get one run by trace id |
 
 ---
 
@@ -86,8 +97,9 @@ Returns a paginated list of runs with KPI tiles (`stats`) and pagination metadat
 
 | Status | Condition |
 |---|---|
-| 400 | Invalid `status` value (must be one of the five enum values). |
-| 401 | No workspace context. |
+| 400 | Invalid `status` value (must be one of the five enum values), or no `workspace_id` resolved for the session (the `RequireWorkspace` middleware rejects before the handler runs). |
+| 401 | Not authenticated. |
+| 403 | Authenticated, but not a member of the resolved workspace. |
 | 500 | DB error. |
 
 ---
@@ -133,8 +145,9 @@ The handler does not have a direct `journal.GetRunByID` primitive yet -- it scan
 
 | Status | Condition |
 |---|---|
-| `400` | Empty `id` path segment. |
-| `401` | No workspace context. |
+| `400` | Empty `id` path segment, or no `workspace_id` resolved for the session (the `RequireWorkspace` middleware rejects before the handler runs). |
+| `401` | Not authenticated. |
+| `403` | Authenticated, but not a member of the resolved workspace. |
 | `404` | No run with that id in the caller's workspace (cross-workspace probes are masked as 404 -- the journal store filter never matches a foreign workspace's trace id). |
 | `500` | Journal page query failed, or enrichment returned an empty slice for a found row (data integrity issue). |
 

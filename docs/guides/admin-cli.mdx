@@ -12,7 +12,7 @@ The `crewship admin` command group is the operator-on-the-host recovery surface.
 
 The flow is deliberately non-circular. The most important caller is an admin whose account is locked out and whose server may or may not be running — routing recovery through the same server they're recovering would be a chicken-and-egg failure. `crewship admin` therefore takes a read+write lock on `~/.crewship/crewship.db` (or whatever `CREWSHIP_DATA_DIR` points at), runs the requested SQL in a transaction, and exits. The HTTP layer never sees the request, the auth middleware never runs, and the audit journal records a `journal.admin_cli` entry attributed to `host:$USER` so the action still shows up in the timeline.
 
-Four subcommands ship today, all in `cmd/crewship/cmd_admin.go`. `reset-password` mints a fresh bcrypt hash for a user (interactive prompt by default; `--password` for scripted recovery; `--password-stdin` for the leak-free CI pattern that mirrors `docker login --password-stdin`) and revokes every active session in the same transaction so a leaked cookie can't outlive the recovery. `invalidate-sessions` is the same session-revoke without a password rotation — use when the password is believed safe but a session token is suspected leaked. `list-users` dumps every row of the `users` table to a tab-aligned table, flags currently-locked-out accounts with a footer count, accepts `--locked-only` to filter, and shows the per-account `failed_login_count`. `promote` rewrites a user's workspace role (`OWNER` / `ADMIN` / `MANAGER`), accepting `--workspace=<slug>` or defaulting to the user's single workspace when there's exactly one. All four short-circuit early with a clear error if the data directory is missing or the database is locked by a running server.
+Five subcommands ship today, all in `cmd/crewship/cmd_admin.go`. `reset-password` mints a fresh bcrypt hash for a user (interactive prompt by default; `--password` for scripted recovery; `--password-stdin` for the leak-free CI pattern that mirrors `docker login --password-stdin`) and revokes every active session in the same transaction so a leaked cookie can't outlive the recovery. `invalidate-sessions` is the same session-revoke without a password rotation — use when the password is believed safe but a session token is suspected leaked. `list-users` dumps every row of the `users` table to a tab-aligned table, flags currently-locked-out accounts with a footer count, accepts `--locked-only` to filter, and shows the per-account `failed_login_count`. `promote` rewrites a user's workspace role (`OWNER` / `ADMIN` / `MANAGER`), accepting `--workspace=<slug>` or defaulting to the user's single workspace when there's exactly one. `sessions list` is a forensic read-only dump of every `user_sessions` row for `--email=<email>` (`--active-only` to filter, `--limit` to cap) — the read side paired with `invalidate-sessions`. All five short-circuit early with a clear error if the data directory is missing or the database is locked by a running server.
 
 ## When to use it
 
@@ -175,8 +175,9 @@ A Dockerfile that bakes a baseline workspace for a demo deployment:
 ```dockerfile
 FROM crewship-ai/crewship:latest
 
-# Apply migrations so the schema exists
-RUN crewship migrate
+# Migrations apply automatically the first time the server boots
+# (`crewship start` runs them before serving), so there's no separate
+# migrate step to bake into the image.
 
 # Seed the OWNER account. The password is mounted as a BuildKit secret so it
 # never lands in image layers or metadata; the email is a plain ARG because
@@ -217,7 +218,7 @@ The audit timeline gets a `journal.admin_cli` entry attributed to the OS user wh
 
 The admin CLI is **deliberately not** exposed as an HTTP API — that's the whole point of the surface. Every other Crewship feature has a `/api-reference/<thing>` page; this one does not. Routing recovery through the same server you're recovering would be circular, and exposing these writes over HTTP would create a parallel auth surface to harden when the existing one already covers every healthy-system case.
 
-The full source of truth is one file: [`cmd/crewship/cmd_admin.go`](https://github.com/crewship-ai/crewship/blob/main/cmd/crewship/cmd_admin.go) (~407 lines). It's small enough to read top-to-bottom; the test file `cmd_admin_test.go` covers the same surface.
+The full source of truth is one file: [`cmd/crewship/cmd_admin.go`](https://github.com/crewship-ai/crewship/blob/main/cmd/crewship/cmd_admin.go) (~814 lines). It's small enough to read top-to-bottom; the test file `cmd_admin_test.go` covers the same surface.
 
 The SQL surface area each subcommand touches:
 
@@ -226,6 +227,7 @@ The SQL surface area each subcommand touches:
 | `reset-password` | `users.hashed_password`, `users.failed_login_count`, `users.locked_until`, `users.last_failed_login_at`, `users.updated_at` | Email must exist (no implicit `INSERT`). Resetting also unlocks the account and clears the failed-login counter. |
 | `list-users` | *(read-only)* | None — just `SELECT email, role, created_at, last_login_at FROM users`. |
 | `promote` | `workspace_members.role` | Refuses to demote the last `OWNER` of a workspace; if `--workspace` omitted, user must belong to exactly one workspace. |
+| `invalidate-sessions` | `user_sessions.revoked_at`, `user_sessions.revoked_reason` | Email must exist. Revokes only currently-active rows (`revoked_at IS NULL AND expires_at > now`), stamping `revoked_reason='admin_invalidate'`. Leaves the password untouched. |
 
 Every successful write also appends one row to `journal_entries` with `entry_type='journal.admin_cli'`, attributed to `host:$USER`. Read it back through the same [Crew Journal](/api-reference/journal) API the rest of the audit timeline uses — admin-CLI actions are first-class events, not invisible side-channels.
 
@@ -239,8 +241,8 @@ For the user/workspace data model these commands operate on, see the [Admin API 
 - **Email casing is significant.** `users.email` is stored as the user typed it; `Admin@example.com` and `admin@example.com` are distinct rows. Always `list-users` first and copy the email value verbatim — the reset will silently target nothing useful if the casing drifts.
 - **`reset-password` DOES invalidate active sessions.** Every active session for the user is revoked in the same transaction as the password change (`revoked_reason='password_change'`), so a leaked cookie can't outlive the recovery. No server restart needed — the next request on the old cookie returns 401. If you want force-logout WITHOUT changing the password (suspected token leak but the password is believed safe), use `crewship admin invalidate-sessions` instead.
 - **Don't put the password in shell history.** `--password='…'` lands in `~/.bash_history` and is visible in `ps` to anyone with shell access during the window the command runs. Prefer the interactive prompt; for scripted use, pass via `--password="$VAR"` where `VAR` is sourced from an env file or BuildKit secret mount.
-- **`CREWSHIP_DATA_DIR` overrides `~/.crewship`.** On a host where the service was started with a custom data dir (common on dev VMs), running `crewship admin` with default env points at the wrong empty database, silently fails to find the user, and prints a misleading "no such email" error. Export the same `CREWSHIP_DATA_DIR` the service uses, or pass `--data-dir`.
-- **Migration version conflicts can hide your write.** If the data directory predates the migration that added the column you're updating (e.g. `password_updated_at`), the write succeeds but the new column stays at its default. Always run `crewship migrate` before `crewship admin` on a database that was created on an older binary.
+- **`CREWSHIP_DATA_DIR` overrides `~/.crewship`.** On a host where the service was started with a custom data dir (common on dev VMs), running `crewship admin` with default env points at the wrong empty database, silently fails to find the user, and prints a misleading "no such email" error. Export the same `CREWSHIP_DATA_DIR` the service uses (there is no `--data-dir` flag — the env var is the only override).
+- **Migration version conflicts can hide your write.** If the data directory predates the migration that added the column you're updating (e.g. `password_updated_at`), the write succeeds but the new column stays at its default. Migrations apply automatically on `crewship start`, so start the server once against an older database (letting it migrate) before running `crewship admin` against it.
 
 ## Related
 

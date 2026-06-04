@@ -4,11 +4,21 @@ description: "Per-user notification feed — list, count unread, mark read, dele
 icon: "bell"
 ---
 
-# Notifications
+Per-user activity feed. Other handlers create rows by calling the internal `CreateNotification` helper (`internal/api/notification_handler.go`); the user-facing endpoints below let the frontend list, count, mark read, and dismiss them. Every new row also fans out over WebSocket on the `user:{userID}` channel as `notification.created` so the dashboard updates without polling.
 
-Per-user activity feed. Other handlers create rows by calling the internal `CreateNotification` helper (`internal/api/notification_handler.go`); the user-facing endpoints below let the frontend list and dismiss them. Every new row also fans out over WebSocket on the `user:{userID}` channel as `notification.created` so the dashboard updates without polling.
+<Note>
+  All endpoints below require an authenticated session. Notifications are strictly per-user — every query scopes to `user_id = <session user>`, and a row belonging to another user is indistinguishable from one that doesn't exist (`404`).
+</Note>
 
-All endpoints below require an authenticated session. Notifications are strictly per-user — every query scopes to `user_id = <session user>`.
+## Endpoints
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | [`/api/v1/notifications`](#get-apiv1notifications) | List notifications, newest first |
+| GET | [`/api/v1/notifications/count`](#get-apiv1notificationscount) | Unread count for the navbar badge |
+| POST | [`/api/v1/notifications/{notificationId}/read`](#post-apiv1notificationsnotificationidread) | Mark one notification read |
+| POST | [`/api/v1/notifications/read-all`](#post-apiv1notificationsread-all) | Mark all unread read |
+| DELETE | [`/api/v1/notifications/{notificationId}`](#delete-apiv1notificationsnotificationid) | Delete one notification |
 
 ## Response shape
 
@@ -17,7 +27,7 @@ All endpoints below require an authenticated session. Notifications are strictly
 | `id` | string (CUID) | Notification id |
 | `actor_type` | `"user"` \| `"agent"` | Who triggered the notification |
 | `actor_id` | string | User or agent id |
-| `actor_name` | string \| null | Joined from `users.full_name` or `agents.name`; null if the actor was deleted |
+| `actor_name` | string \| omitted | Joined from `users.full_name` or `agents.name`; the field is **omitted** (carries `omitempty`) when the actor row no longer exists |
 | `action` | string | Free-form action verb (e.g. `mentioned`, `assigned`, `completed`) |
 | `entity_type` | string | Entity kind the action targets (e.g. `mission`, `issue`, `chat`) |
 | `entity_id` | string \| null | Entity id |
@@ -94,7 +104,8 @@ When any handler in the server calls `CreateNotification`, the new row is broadc
 ```json
 {
   "type": "notification.created",
-  "data": {
+  "channel": "user:usr_01HVZ...",
+  "payload": {
     "id": "ntf_01HVZ...",
     "action": "mentioned",
     "entity_type": "mission",

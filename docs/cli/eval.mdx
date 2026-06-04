@@ -36,6 +36,8 @@ Mission-level `replay` and `regression` enqueue work asynchronously and return a
 
 ## `crewship eval replay <mission-id>`
 
+Replay a single mission deterministically. Enqueues asynchronously and returns a `run_id` — poll completion via [`eval runs`](#crewship-eval-runs).
+
 ```bash
 crewship eval replay MIS-42 --seed 42
 ```
@@ -50,11 +52,17 @@ Sample output:
 Replay queued: run_id=er_a1b2c3d4e5f60718 status=queued
 ```
 
-**Auth:** Requires `OWNER` or `ADMIN` role (403 otherwise). Mission must belong to your workspace (404 otherwise, same shape as "not found" so existence isn't leaked).
+<Note>
+  Requires `OWNER` or `ADMIN` role (403 otherwise). Mission must belong to
+  your workspace (404 otherwise, same shape as "not found" so existence
+  isn't leaked).
+</Note>
 
 ---
 
 ## `crewship eval regression <baseline-id> <candidate-id>`
+
+Regression-diff two missions. Enqueues asynchronously and returns a `run_id`.
 
 ```bash
 crewship eval regression MIS-41 MIS-42
@@ -97,8 +105,9 @@ Status progresses `queued` -> `running` -> `completed` | `failed`. For regressio
 The CLI does not yet expose a dedicated `get` subcommand. For a specific run, query the API:
 
 ```bash
-curl -H "Authorization: Bearer $CREWSHIP_TOKEN" \
-  "$CREWSHIP_URL/api/v1/eval/runs?limit=200" | jq '.rows[] | select(.id == "er_...")'
+# $CREWSHIP_SERVER is the instance URL; pass a CLI token as the bearer.
+curl -H "Authorization: Bearer crewship_cli_xxxxx" \
+  "$CREWSHIP_SERVER/api/v1/eval/runs?limit=200" | jq '.rows[] | select(.id == "er_...")'
 ```
 
 Or watch the [Crew Journal](/guides/crew-journal) for `eval.run_started`, `eval.metric`, `eval.regression_detected` entries correlated by the `run_id` in the payload.
@@ -166,7 +175,10 @@ Verdict (top of output):
 | `DIVERGE-B-PASS` | Only side B passed. |
 | `AMBIGUOUS` | At least one side errored at transport level — verdict can't be cleanly assigned. |
 
-**`--tier-a` and `--tier-b` MUST differ** — passing the same value on both errors out.
+<Note>
+  `--tier-a` and `--tier-b` MUST differ — passing the same value on both
+  errors out.
+</Note>
 
 Output text identity is NOT asserted — two LLM runs are rarely identical at the byte level. The verdict is about gate-pass agreement, not text agreement.
 
@@ -251,7 +263,10 @@ Cells that exist in NEITHER baseline nor current are skipped (they get no row).
 crewship eval baseline delete main
 ```
 
-Permanently removes the on-disk baseline file. No confirmation prompt — file is per-developer state.
+<Warning>
+  Permanently removes the on-disk baseline file. No confirmation prompt —
+  the file is per-developer state.
+</Warning>
 
 ## Related
 

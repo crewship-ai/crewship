@@ -1,14 +1,14 @@
 ---
-title: "Harbor Master"
+title: "Harbormaster"
 description: "Human-in-the-loop (HITL) approval queue that gates high-risk agent actions behind a human decision."
 icon: "anchor"
 ---
 
-# Harbor Master
+# Harbormaster
 
-Harbor Master is the HITL approval workflow. Agents call `Gate` before high-risk actions (destructive ops, production targets, expensive tool calls); if a rule matches, the action is queued in `approvals_queue` and either logged-and-continued (**async**) or paused until a human decides (**sync**). Decisions and timeouts emit journal entries so the audit trail is complete.
+Harbormaster is the HITL approval workflow. Agents call `Gate` before high-risk actions (destructive ops, production targets, expensive tool calls); if a rule matches, the action is queued in `approvals_queue` and either logged-and-continued (**async**) or paused until a human decides (**sync**). Decisions and timeouts emit journal entries so the audit trail is complete.
 
-This complements [Lookout](/guides/lookout): Lookout sanitises *content*; Harbor Master gates *actions*.
+This complements [Lookout](/guides/lookout): Lookout sanitises *content*; Harbormaster gates *actions*.
 
 ## Gate modes
 
@@ -103,11 +103,11 @@ crewship approvals approve <id> --comment "looks safe"
 crewship approvals deny <id>   --comment "wrong mission"
 ```
 
-See [`crewship approvals`](/cli/approvals). `cancel` is not yet implemented -- the backend endpoint is pending.
+See [`crewship approvals`](/cli/approvals) for the full command surface. Pending requests resolve by `approve`, `deny`, or the server-side timeout sweeper.
 
 ## Hook integration
 
-The [hooks](/guides/hooks) system fires `on_approval_requested` when Harbor Master determines approval is required — specifically, when `Gate` returns `Required=true` (applies to Approved, Denied, and Pending branches). The orchestrator's `HookDispatcher` dispatches the event after the gate decision lands; the harbormaster package itself stays hook-agnostic. Use this hook to page oncall, post to Slack, or auto-escalate:
+The [hooks](/guides/hooks) system fires `on_approval_requested` when Harbormaster determines approval is required — specifically, when `Gate` returns `Required=true` (applies to Approved, Denied, and Pending branches). The orchestrator's `HookDispatcher` dispatches the event after the gate decision lands; the harbormaster package itself stays hook-agnostic. Use this hook to page oncall, post to Slack, or auto-escalate:
 
 ```yaml
 # hooks_config row (illustrative -- registration is config-time)
@@ -167,10 +167,12 @@ decision *is* the signal (no LLM judge needed).
 
 ## Gotchas
 
+<Accordion title="Edge cases and footguns">
 - **Only OWNER and ADMIN can decide.** The `Decide` handler inline-checks `RoleFromContext` and returns 403 for anyone else. This used to be documented as "middleware-enforced" but there was no middleware -- the check is now explicit in the handler.
 - **Soft-delete = denial.** If the row vanishes between enqueue and poll (e.g. DB cleanup), Gate fails closed with `Denied=true`.
 - **Sync mode holds an HTTP goroutine.** A long-running sync approval pins one connection. Don't route high-volume traffic through sync mode; use async + a hook for routing.
 - **TimeoutSecs is per-call.** If a caller passes 30 and the sweeper interval is 30, you can get one extra poll where the row is still pending but timeout_at has passed -- both paths converge, but test expectations should allow 1-2s of slop.
+</Accordion>
 
 ## Related
 

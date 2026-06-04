@@ -1,0 +1,217 @@
+---
+title: "Feature Flags"
+description: "Instance-global feature toggles with percentage rollout and per-workspace overrides."
+icon: "toggle-on"
+---
+
+Feature flags are an instance-global toggle surface: an ADMIN defines a flag
+with a default `enabled` state and percentage rollout, then individual
+workspaces may attach an override row that flips the flag for that workspace
+only.
+
+All endpoints require authentication and workspace context. Reads are open to
+any workspace role; mutations (flag definition CRUD and per-workspace override
+CRUD) require `OWNER` or `ADMIN`.
+
+---
+
+## List Feature Flags
+
+```
+GET /api/v1/feature-flags?workspace_id={workspaceId}
+```
+
+Returns every flag definition, ordered by `key` ascending. When the request
+carries workspace context, each flag includes the current workspace's
+override state (`override_enabled`), or `null`/omitted when no override row
+exists for that flag.
+
+**Auth:** Any authenticated workspace member (`read`)
+
+**Response:** `200 OK`
+
+```json
+[
+  {
+    "id": "cm1abc123",
+    "key": "new-dashboard",
+    "description": "Roll out the redesigned dashboard",
+    "enabled": true,
+    "percentage": 50,
+    "created_at": "2024-01-15T10:00:00Z",
+    "updated_at": "2024-01-15T10:00:00Z",
+    "override_enabled": false
+  }
+]
+```
+
+### Response Fields
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | string | Flag ID (CUID) |
+| `key` | string | Unique flag key |
+| `description` | string? | Human-readable description |
+| `enabled` | boolean | Instance-global default state |
+| `percentage` | integer | Rollout percentage (0-100) |
+| `created_at` | string | ISO 8601 timestamp |
+| `updated_at` | string | ISO 8601 timestamp |
+| `override_enabled` | boolean? | Current workspace's override state; omitted when no override row exists (flag inherits the instance default) |
+
+---
+
+## Create Feature Flag
+
+```
+POST /api/v1/feature-flags?workspace_id={workspaceId}
+```
+
+Inserts a new instance-global flag definition.
+
+**Auth:** `OWNER` or `ADMIN` role
+
+**Request Body:**
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `key` | string | Yes | -- | Unique flag key |
+| `description` | string | No | `null` | Human-readable description |
+| `enabled` | boolean | No | `false` | Default state |
+| `percentage` | integer | No | `0` | Rollout percentage (0-100) |
+
+```json
+{
+  "key": "new-dashboard",
+  "description": "Roll out the redesigned dashboard",
+  "enabled": true,
+  "percentage": 50
+}
+```
+
+**Response:** `201 Created` -- the created flag object (same shape as a List item, without `override_enabled`).
+
+| Status | Condition |
+|---|---|
+| `400` | Missing `key`, invalid JSON, or `percentage` outside 0-100 |
+| `403` | Insufficient role |
+| `409` | A flag with this key already exists |
+
+**WebSocket event:** `feature_flag.created`
+
+---
+
+## Update Feature Flag
+
+```
+PATCH /api/v1/feature-flags/{key}?workspace_id={workspaceId}
+```
+
+Partial update -- only provided fields are changed.
+
+**Auth:** `OWNER` or `ADMIN` role
+
+| Path Parameter | Description |
+|---|---|
+| `key` | Flag key |
+
+**Request Body:** All fields optional.
+
+| Field | Type | Description |
+|---|---|---|
+| `description` | string | Description; empty string clears it to `null` |
+| `enabled` | boolean | Default state |
+| `percentage` | integer | Rollout percentage (0-100) |
+
+**Response:** `200 OK` -- the updated flag object, including `override_enabled` for the current workspace (same shape as a List item).
+
+| Status | Condition |
+|---|---|
+| `400` | Invalid JSON, `percentage` outside 0-100, or no fields to update |
+| `403` | Insufficient role |
+| `404` | Flag not found |
+
+**WebSocket event:** `feature_flag.updated`
+
+---
+
+## Delete Feature Flag
+
+```
+DELETE /api/v1/feature-flags/{key}?workspace_id={workspaceId}
+```
+
+Removes the flag definition. The `ON DELETE CASCADE` on the override table
+means all per-workspace override rows are removed too.
+
+**Auth:** `OWNER` or `ADMIN` role
+
+**Response:** `204 No Content`
+
+| Status | Condition |
+|---|---|
+| `403` | Insufficient role |
+| `404` | Flag not found |
+
+**WebSocket event:** `feature_flag.deleted`
+
+---
+
+## Set Workspace Override
+
+```
+PUT /api/v1/feature-flags/{key}/override?workspace_id={workspaceId}
+```
+
+Creates or replaces the current workspace's override row for the named flag.
+Idempotent -- a repeated `PUT` with the same body updates the same row in
+place (keyed on `UNIQUE(flag_id, workspace_id)`).
+
+**Auth:** `OWNER` or `ADMIN` role
+
+**Request Body:**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `enabled` | boolean | Yes | Explicit override value. Must be present -- an absent field is rejected (a missing body must not silently disable the flag). |
+
+```json
+{ "enabled": true }
+```
+
+**Response:** `200 OK`
+
+```json
+{ "key": "new-dashboard", "enabled": true }
+```
+
+| Status | Condition |
+|---|---|
+| `400` | Invalid JSON, missing workspace context, or missing explicit `enabled` field |
+| `403` | Insufficient role |
+| `404` | Flag not found |
+
+**WebSocket event:** `feature_flag.override_set`
+
+---
+
+## Clear Workspace Override
+
+```
+DELETE /api/v1/feature-flags/{key}/override?workspace_id={workspaceId}
+```
+
+Removes the current workspace's override row, reverting the flag's effective
+value to the instance-global default. Idempotent -- returns `204` whether or
+not an override row existed (after this call, the override does not exist).
+
+**Auth:** `OWNER` or `ADMIN` role
+
+**Response:** `204 No Content`
+
+| Status | Condition |
+|---|---|
+| `400` | Missing workspace context |
+| `403` | Insufficient role |
+| `404` | Flag not found |
+
+**WebSocket event:** `feature_flag.override_cleared` (only when a row was actually removed)

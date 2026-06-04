@@ -4,11 +4,29 @@ description: "Lifecycle hook registry -- read + enable/disable only."
 icon: "webhook"
 ---
 
-All endpoints require authentication and are workspace-scoped. There is **no register / create / delete endpoint** -- hook registration is a config-time operation (via `hooks.Register` in Go). See the [Hooks guide](/guides/hooks).
+The lifecycle hook registry is **read + enable/disable only** over HTTP. Hooks fire shell commands, HTTP webhooks, or subagents on lifecycle events; the API lets operators list them and toggle them on or off, but registration itself is a config-time operation via `hooks.Register` in Go — there is no create or delete endpoint. See the [Hooks guide](/guides/hooks).
+
+<Note>
+  All endpoints require authentication and are workspace-scoped. Enable / disable additionally require `OWNER` or `ADMIN`.
+</Note>
+
+## Endpoints
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | [`/api/v1/hooks`](#list-hooks) | List hooks (optionally filtered by crew) |
+| POST | [`/api/v1/hooks/{id}/enable`](#enable) | Enable a hook |
+| POST | [`/api/v1/hooks/{id}/disable`](#disable) | Disable a hook |
+
+Registration is Go-only — see [Registration](#registration-go-only).
 
 ---
 
-## List hooks
+## Reading hooks
+
+List the registered hooks for a workspace, optionally narrowed to one crew.
+
+### List hooks
 
 ```
 GET /api/v1/hooks?crew_id=<optional>
@@ -68,7 +86,15 @@ GET /api/v1/hooks?crew_id=<optional>
 
 ---
 
-## Enable
+## Toggling hooks
+
+Flip a hook on or off. Both transitions emit `system.hook_toggled` into the journal with the actor's user ID.
+
+<Warning>
+  Enabling a hook can invoke shell commands, hit third-party webhooks, or dispatch subagents -- which is why both endpoints require `OWNER` or `ADMIN`.
+</Warning>
+
+### Enable
 
 ```
 POST /api/v1/hooks/{id}/enable
@@ -96,7 +122,7 @@ Emits `system.hook_toggled` into the journal with the actor's user ID.
 
 ---
 
-## Disable
+### Disable
 
 ```
 POST /api/v1/hooks/{id}/disable

@@ -62,7 +62,7 @@ Detectors (in `injection.go`):
 | `rtl_override_unicode` | RTL override codepoints (U+202E, U+2066-2069). |
 | `lakera_detected` | External Lakera Guard verdict when enabled. |
 
-The guard is wired into [`llm.Middleware`](/guides/llm-middleware) so every `Complete()` call is scanned. The `Stream()` path scans up-front synchronously -- a separate guard in `llm/middleware.go` refuses prompt-injection before the first token flows.
+The guard is wired into [`llm.Middleware`](/guides/llm-middleware) so every `Complete()` call is scanned. The `Stream()` path runs through the **same** `lookoutCaller` chain (`internal/llm/middleware.go`), scanning every user/tool message synchronously before the first token flows.
 
 ### Per-routine action policy
 
@@ -157,12 +157,17 @@ Guidelines:
 
 ## Gotchas
 
+<Warning>
+  **Output guard is not in the LLM middleware.** If you add a new streaming consumer, wire `OutputGuard` yourself or secrets may flow through to clients unredacted.
+</Warning>
+
+<Accordion title="More edge cases">
 - **Scope is required.** `emitGuardEntry` silently no-ops if `lookout.ScopeFromContext(ctx)` returns zero. Always wrap your request context with `lookout.WithScope(ctx, scope)` before invoking the guards -- the HTTP handler chain does this for you.
-- **Output guard is not in the LLM middleware.** If you add a new streaming consumer, wire `OutputGuard` yourself or secrets may flow through to clients unredacted.
 - **Sanitize verdict** is not a block. The returned text is the safe version; the `err` is non-nil only if the journal emit fell over.
+</Accordion>
 
 ## Related
 
 - [LLM middleware](/guides/llm-middleware) -- where `InputGuard` is composed.
-- [Harbor Master](/guides/harbormaster) -- complementary: approvals gate the *action*, Lookout sanitises the *content*.
+- [Harbormaster](/guides/harbormaster) -- complementary: approvals gate the *action*, Lookout sanitises the *content*.
 - [Crew Journal](/guides/crew-journal) -- `guardrail.input_blocked` / `guardrail.output_blocked`.

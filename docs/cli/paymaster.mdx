@@ -119,9 +119,18 @@ crewship paymaster subscriptions --format json | jq '.[].call_count'
 
 ## Known limitation
 
-Paymaster metering **only captures calls that flow through `internal/llm`** (Keeper, summaries, consolidation, quartermaster). Calls made by the agent's own CLI adapter (`claude`, `gemini`) talking directly to the provider API **are not recorded in `cost_ledger`**. See [Paymaster guide](/guides/paymaster) for details.
+<Warning>
+  Paymaster metering **only captures calls that flow through `internal/llm`**
+  (Keeper, summaries, consolidation, quartermaster). Calls made by the
+  agent's own CLI adapter (`claude`, `gemini`) talking directly to the
+  provider API **are not recorded in `cost_ledger`**. See the
+  [Paymaster guide](/guides/paymaster) for details.
 
-Consequence: the numbers here are accurate for server-side LLM activity; agent-driven spend is visible only on the provider's dashboard. Use workspace-wide budgets as the authoritative cap until the proxy rework lands.
+  Consequence: the numbers here are accurate for server-side LLM activity;
+  agent-driven spend is visible only on the provider's dashboard. Use
+  workspace-wide budgets as the authoritative cap until the proxy rework
+  lands.
+</Warning>
 
 ## Related
 

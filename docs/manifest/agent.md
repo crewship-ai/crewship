@@ -65,7 +65,7 @@ spec:
 | `metadata.description` | string | no | Mapped to `agents.description`. |
 | `spec.crew_slug` | string | **yes** | Parent crew slug. Resolved to `crew_id` at Plan time. The manifest requires it for every agent even though the server allows crewless agents — so cross-document references stay unambiguous. |
 | `spec.role_title` | string | no | Human-facing UI title (e.g. "Technical Architect"). |
-| `spec.agent_role` | enum | no | One of `LEAD` \| `AGENT` \| `COORDINATOR`. Empty → server default `AGENT`. `LEAD` requires a `crew_slug`. |
+| `spec.agent_role` | enum | no | One of `LEAD` \| `AGENT` \| `COORDINATOR`. Empty → server default `AGENT`. `LEAD` requires a `crew_slug`. **`COORDINATOR` is effectively unsupported — prefer `AGENT`/`LEAD`** (see the note below). |
 | `spec.cli_adapter` | enum | no | One of `CLAUDE_CODE` \| `OPENCODE` \| `CODEX_CLI` \| `GEMINI_CLI` \| `CURSOR_CLI` \| `FACTORY_DROID`. |
 | `spec.llm.provider` | enum | no | One of `ANTHROPIC` \| `OPENAI` \| `GOOGLE` \| `NONE`. `NONE` = explicitly no LLM (for adapters that pin their own). |
 | `spec.llm.model` | string | no | Adapter-specific model id. Free-form by design. |
@@ -81,6 +81,22 @@ spec:
 > is resolved relative to the manifest file and folded into `prompt`
 > before Validate runs, so a hand-built document that never went
 > through the loader must set `prompt` directly.
+
+> **`COORDINATOR` is asymmetric — and effectively unsupported.** The
+> standalone `kind: Agent` validator (`validAgentRoles`,
+> `internal/manifest/kinds/agent.go`) still admits `COORDINATOR`, but:
+>
+> - The **nested** form — an agent inside a `kind: Crew` or
+>   `kind: Workspace` bundle — rejects it outright. Its validator
+>   (`validAgentRole`, `internal/manifest/validate.go`) accepts only
+>   `AGENT` and `LEAD`.
+> - Even via the standalone kind, the server's agent-role enum was
+>   trimmed to `AGENT`/`LEAD` in v0.1, so apply can still fail with a
+>   `400` at the `POST /api/v1/agents` call.
+>
+> In practice **use `AGENT` or `LEAD`**. `COORDINATOR` survives in the
+> standalone front-end validator only so a future server rollback stays
+> a one-line change; treat it as unsupported today.
 
 ## Examples
 
@@ -150,6 +166,8 @@ CLI surface is the global apply/export flow:
 | `crewship export workspace` | Round-trip — emits one `kind: Agent` document per agent, with bindings folded back in. |
 
 ## REST endpoint mapping
+
+How each manifest field maps onto the create/update request body and binding calls:
 
 | Manifest field | POST/PATCH body field | Notes |
 |---|---|---|
@@ -232,8 +250,8 @@ model (runtime status, run counts, timestamps) are dropped.
 
 ## See also
 
-- [Crew](./crew.md) — the parent crew; can also declare agents inline under `spec.agents`.
-- [Skill](./skill.md) — bound via `spec.skills` (slug list).
-- [Workspace](./workspace.md) — the top-level bundle that nests crews + agents.
-- [Issue](./issue.md) — references an agent via `spec.assignee_slug`.
+- [Crew](/manifest/crew) — the parent crew; can also declare agents inline under `spec.agents`.
+- [Skill](/manifest/skill) — bound via `spec.skills` (slug list).
+- [Workspace](/manifest/workspace) — the top-level bundle that nests crews + agents.
+- [Issue](/manifest/issue) — references an agent via `spec.assignee_slug`.
 - This kind's Go implementation: `internal/manifest/kinds/agent.go`.

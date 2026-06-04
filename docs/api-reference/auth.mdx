@@ -10,6 +10,62 @@ Authentication surface in Crewship is split across several flows. The interactiv
 
 All `/api/v1/auth/*` routes are mounted behind a rate limit of 10 req/min/IP. Routes marked **auth required** read the caller's identity from the session cookie issued by `/api/auth/callback/credentials`; the rest are intentionally unauthenticated because the request body (a state token, pairing code, or reset token) IS the credential.
 
+## Endpoints
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| POST | [`/api/auth/token/refresh`](#post-api-auth-token-refresh) | Rotate the browser session token |
+| GET | [`/api/auth/error`](#get-api-auth-error) | NextAuth error redirect target |
+| POST | [`/api/v1/auth/signup`](#post-api-v1-auth-signup) | Email/password signup |
+| GET | [`/api/v1/auth/google/status`](#get-api-v1-auth-google-status) | Is Google sign-in enabled |
+| GET | [`/api/v1/auth/google/redirect`](#get-api-v1-auth-google-redirect) | Start the Google OAuth2 flow |
+| GET | [`/api/v1/auth/google/callback`](#get-api-v1-auth-google-callback) | Google OAuth2 redirect target |
+| POST | [`/api/v1/auth/pair/start`](#post-api-v1-auth-pair-start) | Mint a device-pairing code |
+| GET | [`/api/v1/auth/pair/poll`](#get-api-v1-auth-pair-poll) | Poll a pairing code's status |
+| POST | [`/api/v1/auth/pair/redeem`](#post-api-v1-auth-pair-redeem) | Redeem a code for a CLI token |
+| GET | [`/api/v1/auth/sessions`](#get-api-v1-auth-sessions) | List the caller's active sessions |
+| POST | [`/api/v1/auth/sessions/{id}/revoke`](#post-api-v1-auth-sessions-id-revoke) | Revoke a single session |
+| POST | [`/api/v1/auth/cli-token`](#post-api-v1-auth-cli-token) | Mint a long-lived CLI token |
+| GET | [`/api/v1/auth/cli-token/validate`](#get-api-v1-auth-cli-token-validate) | Validate the current CLI token |
+| GET | [`/api/v1/auth/cli-tokens`](#get-api-v1-auth-cli-tokens) | List the caller's CLI tokens |
+| DELETE | [`/api/v1/auth/cli-tokens/{tokenId}`](#delete-api-v1-auth-cli-tokens-tokenid) | Revoke a CLI token |
+| POST | [`/api/v1/auth/forgot`](#post-api-v1-auth-forgot) | Request a password-reset email |
+| POST | [`/api/v1/auth/reset`](#post-api-v1-auth-reset) | Consume a reset token, set a new password |
+
+---
+
+## NextAuth-compatible browser session
+
+The interactive web flow lives under `/api/auth/*` (no `/v1`). These are the NextAuth-compatible routes the browser uses for the cookie-based session; the full table is in the [API overview](/api-reference/overview#nextauth-compatibility). Two of them are worth calling out here:
+
+### `POST /api/auth/token/refresh`
+
+Rotates the session token. The browser calls this when its short-lived access token nears expiry to obtain a fresh one without re-entering credentials.
+
+**Auth:** the `refresh-token` cookie IS the credential (no `Authorization` header).
+
+**Behaviour:** layered CSRF defence (POST-only, path-scoped `SameSite=Lax` refresh cookie, and a same-origin `Origin`/`Referer` check). Implements refresh-token **rotation with reuse detection** — each refresh token carries a unique JTI, the session row tracks the current JTI, and a successful refresh CAS-rotates old → new. A request replaying an already-rotated JTI is treated as token theft: the **entire session is revoked** and the call returns `401`. On any failure both auth cookies are cleared so a dead token isn't resent.
+
+| Status | Condition |
+|---|---|
+| `200` | New access + refresh cookies set. |
+| `401` | Missing/expired/invalid refresh cookie, session not found, revoked, or inactive (cookies cleared). |
+| `403` | Cross-origin request (`Origin`/`Referer` check failed). |
+| `405` | Non-POST method. |
+| `500` | Sessions store unreachable or token-mint failure (cookies preserved so the client can retry). |
+
+### `GET /api/auth/error`
+
+NextAuth error redirect target. Echoes the `?error=` query value back as JSON (defaulting to `Default` when absent) so the login UI can render a human-readable message.
+
+**Auth:** none.
+
+**Response:** `200 OK`
+
+```json
+{ "error": "CredentialsSignin", "message": "Authentication error: CredentialsSignin" }
+```
+
 ---
 
 ## Email/password signup
@@ -39,9 +95,17 @@ error message.
 | `email` | Must match the server's basic email regex. |
 | `password` | Min 8 characters. |
 
-**Response:** `201 Created` with the new user + workspace summary and
-a `Set-Cookie: __Secure-authjs.session-token=...` header. The caller
-is signed in — no follow-up login call needed.
+**Response:** `201 Created`. The body is just the new user's `id` and
+`email` — the workspace and OWNER membership are created server-side
+but are not echoed back. A `Set-Cookie: __Secure-authjs.session-token=...`
+header is set, so the caller is signed in — no follow-up login call needed.
+
+```json
+{
+  "id": "u_01HVY...",
+  "email": "alice@example.com"
+}
+```
 
 | Status | Condition |
 |--------|-----------|
@@ -78,7 +142,7 @@ Probe that tells the login page whether to render the "Continue with Google" but
 
 ### `GET /api/v1/auth/google/redirect`
 
-Starts the OAuth2 flow. The handler mints a single-use state token (16 random bytes, stored in `oauth_states` with the requested post-login redirect, 15-min TTL) and 302s the browser to `accounts.google.com`.
+Starts the OAuth2 flow. The handler mints a single-use state token (32 random bytes, stored in `oauth_states` with the requested post-login redirect, 15-min TTL) and 307s the browser to `accounts.google.com`.
 
 **Auth:** none.
 
@@ -286,12 +350,20 @@ Mints a new token for the calling user.
 **Request body** (optional):
 
 ```json
-{ "name": "ci-runner" }
+{
+  "name": "ci-runner",
+  "tier": "STANDARD",
+  "expires_in_seconds": 86400,
+  "scopes": ["agents:read", "agents:run"]
+}
 ```
 
 | Field | Type | Description |
 |---|---|---|
 | `name` | string | Optional. Defaults to `"CLI token"`. Free-form label rendered in the Settings list. |
+| `tier` | string | Optional. `STANDARD` (default) or `ADMIN`. `STANDARD` tokens never expire unless `expires_in_seconds` is given; `ADMIN` tokens are OWNER-only, HMAC-signed, and default to a bounded lifetime (capped server-side). |
+| `expires_in_seconds` | integer | Optional. TTL in seconds from issue time. `0`/omitted means "tier default" (STANDARD: no expiry; ADMIN: the server's default ADMIN lifetime, clamped to the ADMIN max and floored at 60s). |
+| `scopes` | string[] | Optional. Narrows the token below the caller's full workspace role. Empty list = full role (historical behaviour). Each entry must be a known `resource:action` scope (e.g. `agents:read`, `crews:write`, `workspace:admin`, or wildcards `*` / `agents:*`); an unknown scope is `400`, a scope exceeding the caller's role is `403`. |
 
 **Response:** `200 OK`
 
@@ -300,9 +372,20 @@ Mints a new token for the calling user.
   "token": "crewship_cli_3f9a4d2b8e7c1f5a0d6b9e2c4f8a1d3b5e7c9f1a",
   "id": "clt_01HVZ...",
   "name": "ci-runner",
+  "tier": "STANDARD",
   "created_at": "2026-05-20T08:31:02Z"
 }
 ```
+
+| Field | Type | Description |
+|---|---|---|
+| `token` | string | The raw bearer token. Returned exactly once. |
+| `id` | string | `cli_tokens.id`. |
+| `name` | string | The label (defaults to `"CLI token"`). |
+| `tier` | string | Always present — `STANDARD` or `ADMIN`, echoing the resolved tier. |
+| `created_at` | string | RFC3339 issue time. |
+| `expires_at` | string? | RFC3339 expiry. Present only when the token has one (any ADMIN token, or a STANDARD token with `expires_in_seconds` set). |
+| `scopes` | string[]? | Echo of the normalised scope list. Present only when a non-empty `scopes` was supplied. |
 
 <Warning>
   The `token` field is the **only** time the raw value leaves the server. Store it immediately -- there is no recovery path. Lost tokens must be revoked and replaced.
@@ -340,12 +423,14 @@ Lists all CLI tokens belonging to the calling user, newest first. The plaintext 
     {
       "id": "clt_01HVZ...",
       "name": "ci-runner",
+      "tier": "STANDARD",
       "created_at": "2026-05-20T08:31:02Z",
       "last_used_at": "2026-05-20T08:42:15Z"
     },
     {
       "id": "clt_01HVX...",
       "name": "pair-claude_code",
+      "tier": "STANDARD",
       "created_at": "2026-05-19T14:02:11Z",
       "revoked_at": "2026-05-19T19:18:00Z"
     }
@@ -357,7 +442,9 @@ Lists all CLI tokens belonging to the calling user, newest first. The plaintext 
 |---|---|---|
 | `id` | string | Token id. |
 | `name` | string | Operator-supplied label. Pairing-flow tokens are named `pair[-<adapter_hint>]`. |
+| `tier` | string | Always present — `STANDARD` or `ADMIN`. |
 | `created_at` | string | RFC3339. |
+| `expires_at` | string? | RFC3339 expiry. Present only when the token has one (any ADMIN token, or a STANDARD token created with `expires_in_seconds`). |
 | `last_used_at` | string? | RFC3339 of the last successful auth. Updated asynchronously by `ValidateCLIToken`. Omitted on tokens never used. |
 | `revoked_at` | string? | RFC3339 when `/auth/cli-tokens/{tokenId}` was called. Omitted on still-active tokens. |
 

@@ -7,7 +7,8 @@ icon: "shield"
 # Encryption at rest
 
 Crewship stores per-agent memory on the host filesystem — under
-`$CREWSHIP_DATA_DIR/output/crews/{crewID}/agents/{slug}/.memory/`
+the storage base path (`CREWSHIP_STORAGE_BASE_PATH`, default
+`/var/lib/crewship`) at `crews/{crewID}/agents/{slug}/.memory/`
 — as plaintext markdown plus a SQLite database next to it. That's
 the right default for ergonomics (operators can grep, back up,
 edit), but it leaves the operator on the hook for at-rest
@@ -26,7 +27,10 @@ options are documented below.
 The encryption-at-rest layer protects against ONE thing: a host
 disk leaving the data centre (stolen drive, decommissioned VM,
 unmounted backup tape) with the data unrecoverable to whoever
-finds it. It does NOT protect against:
+finds it.
+
+<Warning>
+Encryption-at-rest does NOT protect against:
 
 - A live Crewship process being compromised (the encryption keys
   are in RAM by definition).
@@ -36,6 +40,7 @@ finds it. It does NOT protect against:
   (the bind mount sees plaintext).
 - A backup tool that copies the unmounted/unlocked filesystem
   (it sees plaintext too).
+</Warning>
 
 For those threats, layered controls (auth, RBAC, container
 isolation, audit logging) carry the load. Encryption-at-rest is
@@ -55,10 +60,13 @@ the "if the disk walks off" insurance.
 
 ## Option A — LUKS (block-level, recommended for new hosts)
 
-LUKS is the canonical Linux block-encryption layer. Configure it
-on the disk hosting `$CREWSHIP_DATA_DIR` BEFORE the first
-crewship process starts; migrating an existing plaintext volume
+LUKS is the canonical Linux block-encryption layer.
+
+<Warning>
+Configure LUKS on the disk hosting `$CREWSHIP_DATA_DIR` BEFORE the
+first crewship process starts; migrating an existing plaintext volume
 in place is possible but slow and risky.
+</Warning>
 
 ### One-time setup
 
@@ -91,10 +99,12 @@ For unattended boot, add an entry to `/etc/crypttab`:
 crewship-data UUID=<from-blkid> /etc/crewship.key luks
 ```
 
+<Warning>
 The keyfile lives outside the LUKS volume (typically a separate
 ramdisk, a TPM-sealed file, or a remote secrets fetch). NEVER
 store the keyfile on the same disk you're trying to encrypt —
 defeats the purpose.
+</Warning>
 
 ## Option B — eCryptfs (per-directory, for existing hosts)
 
@@ -141,7 +151,7 @@ sudo cat /dev/mapper/crewship-data | head -c 200 | xxd
 # 2. Remount + read via crewship; the plaintext should be
 #    visible (we're testing the mount, not the encryption).
 sudo mount /dev/mapper/crewship-data /var/lib/crewship
-cat /var/lib/crewship/output/crews/*/agents/*/.memory/PERSONA.md
+cat /var/lib/crewship/crews/*/agents/*/.memory/PERSONA.md
 ```
 
 ### Verify eCryptfs (Option B)
@@ -158,20 +168,24 @@ sudo cat /var/lib/crewship/ECRYPTFS_FNEK_ENCRYPTED.* 2>/dev/null \
 # 2. Remount with the same passphrase you set up with and read
 #    via crewship; the plaintext should be visible.
 sudo mount -t ecryptfs /var/lib/crewship /var/lib/crewship
-cat /var/lib/crewship/output/crews/*/agents/*/.memory/PERSONA.md
+cat /var/lib/crewship/crews/*/agents/*/.memory/PERSONA.md
 ```
 
 ## Backups
 
 Backups taken via `crewship backup create` read the volume while
-it's unlocked, so the resulting tarball is plaintext. If you
-need at-rest protection for the backup itself, run the tarball
-through GPG / age before storing it off-host:
+it's unlocked. The backup tool encrypts the bundle natively
+(passphrase or age `--recipient`); use `--no-encrypt` only if you
+intend to layer your own protection. If you need to wrap a
+plaintext bundle yourself, run it through GPG / age before storing
+it off-host:
 
 ```bash
-crewship backup create --output /tmp/snap.tar
-gpg --symmetric --cipher-algo AES256 /tmp/snap.tar
-shred -u /tmp/snap.tar
+# Writes an encrypted bundle into a directory you choose; the
+# server resolves the bundle path and prints it on success.
+crewship backup create --scope=workspace --output /tmp/backups
+gpg --symmetric --cipher-algo AES256 /tmp/backups/<bundle>
+shred -u /tmp/backups/<bundle>
 ```
 
 Or, more sustainably, point the backup tool at a separate
@@ -179,6 +193,7 @@ encrypted mount.
 
 ## Application-layer encryption (deliberately out of scope)
 
+<Note>
 PRs that add per-row encryption inside `crewshipd` for these
 small markdown files have come up and been rejected. The
 trade-off ratio doesn't work:
@@ -189,6 +204,7 @@ trade-off ratio doesn't work:
 - Benefit: marginal over filesystem encryption for the dominant
   threat (lost disk), zero benefit for the other threats already
   enumerated above.
+</Note>
 
 If your compliance posture genuinely requires application-layer
 encryption (e.g. you legitimately can't trust the host operator),

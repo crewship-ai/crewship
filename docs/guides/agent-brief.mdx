@@ -48,10 +48,9 @@ type SharedMemoryRef struct {
 
 ```go
 const (
-    missionMaxBytes  = 500   // one paragraph
-    sharedMemoryMax  = 10    // cross-tier references
-    constraintsMax   = 20    // do/don't lines
-    constraintMaxLen = 200   // per-constraint cap
+    missionMaxBytes = 500   // one paragraph
+    sharedMemoryMax = 10    // cross-tier references
+    constraintsMax  = 20    // do/don't lines
 )
 ```
 
@@ -59,18 +58,18 @@ These are **defensive safety ceilings**, not product constraints. The goal is to
 
 - **`missionMaxBytes = 500`** — one paragraph. Anything larger should live in `SharedMemory` references, not the brief envelope. If the mission needs more than 500 chars to state, the parent's understanding of what it's delegating isn't compact enough yet.
 - **`sharedMemoryMax = 10`** — ten parent-tier pointers is already a lot of cross-context for one sub-agent to digest. More than that is usually a sign the lead should be sharing a whole `CREW.md` tier rather than cherry-picking files.
-- **`constraintsMax = 20` × `constraintMaxLen = 200`** — twenty short do/don't lines. Constraints are not the place to write a whole policy document; they're the place to write "do not modify migration v107", "ask before deploying", "the user dislikes long bullet lists." If the parent has more, push them into `PERSONA.md` so they survive across sub-agent hires.
+- **`constraintsMax = 20`** — twenty short do/don't lines (each must be non-empty). Constraints are not the place to write a whole policy document; they're the place to write "do not modify migration v107", "ask before deploying", "the user dislikes long bullet lists." If the parent has more, push them into `PERSONA.md` so they survive across sub-agent hires.
 
 `Validate()` rejects on every overflow with an explicit message naming which cap fired. `ApplyBrief` calls `Validate()` before writing — a malformed brief never lands on disk.
 
 ## How it gets into the sub-agent's prompt
 
 ```
-ApplyBrief(ctx, agentID, brief)
+orchestrator.ApplyBrief(ctx, agentSlug, containerID, brief)
   → validates brief
-  → marshals to JSON
+  → renders to markdown
   → base64-encodes
-  → exec into container: `sh -c "mkdir -p $1 && printf '%s' $2 | base64 -d > $3" apply_brief "$AGENT_MEMORY_DIR" "$encoded" "$BRIEF_MD_PATH"`
+  → exec into container: `sh -c 'mkdir -p "$1" && printf "%s" "$2" | base64 -d > "$3"' apply_brief "$dir" "$encoded" "$target"` (as UID 1001:1001)
   → file lands at /crew/agents/{slug}/.memory/BRIEF.md
 
 orchestrator.buildAgentMemoryBlock(...)
@@ -148,7 +147,8 @@ brief := orchestrator.AgentBrief{
 }
 
 // ApplyBrief writes BRIEF.md into the sub-agent's container.
-if err := orchestrator.ApplyBrief(ctx, hired.ID, brief); err != nil {
+// Signature: (ctx, agentSlug, containerID, brief) — a method on *Orchestrator.
+if err := orch.ApplyBrief(ctx, hired.Slug, hired.ContainerID, brief); err != nil {
     return fmt.Errorf("apply brief: %w", err)
 }
 
@@ -196,7 +196,7 @@ func TestApplyBrief_WritesBriefMDToAgentDir(t *testing.T) {
         Mission: "test",
         ParentAgentID: "agt_lead",
     }
-    if err := orch.ApplyBrief(ctx, "agt_sub", brief); err != nil {
+    if err := orch.ApplyBrief(ctx, "agt_sub", "ctr_sub", brief); err != nil {
         t.Fatal(err)
     }
 

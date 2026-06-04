@@ -215,7 +215,7 @@ List in-flight runs across the entire workspace (not scoped to a single slug). U
 crewship routine active
 ```
 
-Backed by `GET /api/v1/workspaces/{ws}/pipelines/runs/active` — the handler note in `internal/api/pipeline_handler_extra.go` flags it as **single-replica scope**: in a multi-replica deployment the response only reflects runs hosted by the replica the request landed on.
+Backed by `GET /api/v1/workspaces/{ws}/pipelines/runs/active` — the handler note in `internal/api/pipeline_runs.go` flags it as **single-replica scope**: in a multi-replica deployment the response only reflects runs hosted by the replica the request landed on.
 
 **Output columns:** RUN_ID (truncated), SLUG, STARTED, CANCEL_REQ, CONCURRENCY_KEY. Empty list prints `No active runs.`
 
@@ -330,6 +330,7 @@ crewship routine watch summarize-text --run-id <id>
 | `--once` | false | Exit after the first run completes / fails |
 | `--run-id` | | Filter to events for one run_id only |
 | `--interval` | 2s | Poll interval (Go duration format) |
+| `--since` | 5m | Lookback window on first poll (Go duration; currently informational — full window per page) |
 
 Ctrl-C / SIGTERM exit cleanly.
 
@@ -467,7 +468,9 @@ crewship routine webhooks create \
     --rate-limit 30
 ```
 
+<Warning>
 **Stripe-style secret reveal:** the signing secret is shown ONCE in the response. Save it now or rotate via delete+recreate.
+</Warning>
 
 | Flag | Required | Description |
 |------|:---:|-------------|
@@ -488,7 +491,9 @@ Print the public URL without re-revealing the signing secret.
 crewship routine webhooks delete wh_abc123 --yes
 ```
 
-Existing senders using the deleted token will start getting 404s.
+<Warning>
+Existing senders using the deleted token will start getting 404s. `--yes` skips the confirmation prompt.
+</Warning>
 
 ---
 

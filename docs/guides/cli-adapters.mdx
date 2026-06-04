@@ -10,7 +10,7 @@ icon: "terminal"
 
 Crewship runs each agent as a subprocess of a vendor coding CLI inside the crew container. The agent record's `cli_adapter` column picks which binary and which command line; the orchestrator's `BuildCLICommand` (`internal/orchestrator/exec.go`) is the one place that knows the per-vendor flag conventions. Everything else in the orchestrator — prompt assembly, memory injection, journal writing, tool routing — is adapter-agnostic; the adapter layer is only responsible for translating Crewship's uniform internal representation into whatever flags / files / stdio shape a given vendor CLI expects.
 
-The adapter pattern exists because no two coding-CLI vendors agree on anything. Claude Code reads its system prompt from a `--system-prompt` flag; every other adapter has no equivalent flag, so Crewship prepends the preamble inline with `[SYSTEM]/[USER]` delimiters on turn 1 and lets the CLI's own file-discovery path (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.cursor/rules/`, `.factory/AGENTS.md`) carry the same content into turn 2+. Factory Droid additionally expresses autonomy as a tier (`--auto low|medium`) instead of a tool list. Rather than picking a winner, Crewship supports all of them — six adapters as of 2026-04 — and lets the operator choose per agent. The selection lives on the agent row, so a `backend` crew can run Claude Code while a `data` crew uses Gemini, with no orchestrator-wide config change.
+The adapter pattern exists because no two coding-CLI vendors agree on anything. Claude Code reads its system prompt from a `--system-prompt` flag; every other adapter has no equivalent flag, so Crewship prepends the preamble inline with `[SYSTEM]/[USER]` delimiters on turn 1 and lets the CLI's own file-discovery path (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.cursor/rules/`, `.factory/AGENTS.md`) carry the same content into turn 2+. Factory Droid additionally expresses autonomy as a tier (`--auto low|medium|high`) instead of a tool list. Rather than picking a winner, Crewship supports all of them — six adapters as of 2026-04 — and lets the operator choose per agent. The selection lives on the agent row, so a `backend` crew can run Claude Code while a `data` crew uses Gemini, with no orchestrator-wide config change.
 
 Adding another vendor is intentionally small: one new `case` in `BuildCLICommand` for the command-line translation, plus a normalisation rule in `agents_create.go` for the default tool profile and any vendor-specific defaults. The `adapter_hint` field on the [CLI pairing](/guides/cli-pairing) request is *telemetry only* — the backend never routes on it, and the frontend list of adapters lives in `lib/cli-adapters.ts` rather than in Go, so a new adapter is a TypeScript file plus a Go switch arm, not a schema migration.
 
@@ -19,11 +19,11 @@ Adding another vendor is intentionally small: one new `case` in `BuildCLICommand
 | Adapter | Binary | Turn-1 system prompt | Turn-2+ persistence | Output | Notes |
 |---|---|---|---|---|---|
 | `CLAUDE_CODE` | `claude --print --output-format stream-json --include-partial-messages --dangerously-skip-permissions --verbose` | `--system-prompt` flag | `AGENTS.md` + canonical memory file set written to CWD | stream-JSON on stdout | Supports `--model`, `--tools`, `--mcp-config <path>`. Default. |
-| `CODEX_CLI` | `codex exec --json --sandbox <mode>` | `[SYSTEM]/[USER]` prepend in the prompt body (Codex has no system-prompt flag) | `AGENTS.md` written into CWD before exec | NDJSON | `--sandbox` enabled when `tool_profile=CODING`. |
+| `CODEX_CLI` | `codex exec --json --sandbox <mode>` | `[SYSTEM]/[USER]` prepend in the prompt body (Codex has no system-prompt flag) | `AGENTS.md` written into CWD before exec | NDJSON | `--sandbox` is always passed: `read-only` for `tool_profile=MINIMAL`, `workspace-write` otherwise. |
 | `GEMINI_CLI` | `gemini -p <message> --output-format stream-json` | `[SYSTEM]/[USER]` prepend (no documented `--system-instruction` flag in headless mode) | `GEMINI.md` + canonical memory file set | NDJSON | Uses `-p` for the user message. |
-| `OPENCODE` | `opencode run <message>` | `[SYSTEM]/[USER]` prepend | `AGENTS.md` written into CWD before exec | text | sst.dev's BYOK CLI; works with any provider. |
+| `OPENCODE` | `opencode run --format json` | `[SYSTEM]/[USER]` prepend | `AGENTS.md` written into CWD before exec | single JSON object (no streaming) | sst.dev's BYOK CLI; works with any provider. |
 | `CURSOR_CLI` | `cursor-agent -p --output-format stream-json` | `[SYSTEM]/[USER]` prepend (no `--system-prompt` flag in headless mode) | `.cursor/rules/`, `AGENTS.md`, `CLAUDE.md` written into CWD | stream-JSON on stdout (same shape as Claude Code) | Added 2026-04. `-m <model>` for model override. |
-| `FACTORY_DROID` | `droid exec --auto {low\|medium}` | `[SYSTEM]/[USER]` prepend | `AGENTS.md` + `.factory/AGENTS.md` written into CWD | text | Added 2026-04. Tiered autonomy — see below. |
+| `FACTORY_DROID` | `droid exec --auto {low\|medium\|high} -o stream-json` | `[SYSTEM]/[USER]` prepend | `AGENTS.md` + `.factory/AGENTS.md` written into CWD | stream-JSON (NDJSON) | Added 2026-04. Tiered autonomy — see below. |
 
 The default fallback when `cli_adapter` is empty or unknown is `claude --print <message>` — minimal flags, no streaming, lowest-risk degradation.
 
@@ -41,19 +41,23 @@ Cursor reads its system instructions from files in the working directory: `.curs
 
 | `--auto` value | Behaviour | When |
 |---|---|---|
-| `low` | Read-only — agent inspects but does not mutate files. | `tool_profile` is `MINIMAL` or `CONSULTATIVE`. |
+| `low` | Read-only — agent inspects but does not mutate files. | `tool_profile` is `MINIMAL`. |
 | `medium` | Can edit files within scope. | Default — `tool_profile` is `CODING` or unset. |
-| `high` | Fully autonomous. **Not exposed by Crewship.** | Factory's docs warn it can perform destructive operations without further confirmation. |
+| `high` | Fully autonomous. | `tool_profile` is `FULL`. Factory's docs warn it can perform destructive operations without further confirmation. |
+
+The mapping lives in `internal/orchestrator/adapter_droid.go` (`BuildCommand`): `MINIMAL → low`, `FULL → high`, and everything else (`CODING` or an unset profile) → `medium`.
 
 The default is `medium` because the API normalises an empty `ToolProfile` to `CODING` (see `internal/api/agents_create.go`), and `CODING` agents are expected to write code. The previous "default = low" choice was theoretical; in production almost every agent would be told to write code anyway. The current inversion (default-medium, explicit-low) is honest about production behaviour.
 
-If a customer genuinely needs `--auto high`, add a new `tool_profile` value (e.g. `AUTONOMOUS`) and gate it behind a Harbor Master approval. Do not flip the default.
+<Warning>
+  `--auto high` is reachable by setting an agent's `tool_profile` to `FULL`. Factory's docs warn this tier can perform destructive operations without further confirmation, so gate `FULL` agents behind a Harbormaster approval rather than making it the default.
+</Warning>
 
 ## Adapters that are deliberately NOT supported
 
-`BuildCLICommand` only ships adapters for CLI agents that meet four
-criteria:
+`BuildCLICommand` only ships adapters for CLI agents that meet four criteria. CLI agents that don't meet all four are skipped today. Adding a new adapter is a one-line change once the upstream surface stabilises; open a GitHub issue to discuss before opening a PR.
 
+<Accordion title="The four inclusion criteria">
 - **Stable headless / `--exec` surface** — single-shot invocation
   with deterministic stdout, no interactive REPL requirement
 - **Settled flag set** — no recent breaking changes to the
@@ -62,10 +66,7 @@ criteria:
   required at runtime
 - **Documented function-calling or MCP support** — necessary for
   the memory + skill primitives to wire in
-
-CLI agents that don't meet all four are skipped today. Adding a new
-adapter is a one-line change once the upstream surface stabilises;
-open a GitHub issue to discuss before opening a PR.
+</Accordion>
 
 ## How the adapter signals the sidecar
 

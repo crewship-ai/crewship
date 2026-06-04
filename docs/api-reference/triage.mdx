@@ -10,7 +10,19 @@ A triage rule matches an issue **title** against a `pattern` (substring, regex, 
 
 Implementation: `internal/api/triage_handler.go`. Backed by the `triage_rules` table.
 
-All endpoints require an authenticated session and workspace context.
+<Note>
+  All endpoints require an authenticated session and workspace context.
+</Note>
+
+## Endpoints
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | [`/api/v1/triage-rules`](#get-api-v1-triage-rules) | List rules in evaluation order |
+| POST | [`/api/v1/triage-rules`](#post-api-v1-triage-rules) | Create a rule |
+| PATCH | [`/api/v1/triage-rules/{ruleId}`](#patch-api-v1-triage-rules-ruleid) | Update / reorder a rule |
+| DELETE | [`/api/v1/triage-rules/{ruleId}`](#delete-api-v1-triage-rules-ruleid) | Delete a rule |
+| POST | [`/api/v1/triage/process`](#post-api-v1-triage-process) | Run all rules against the backlog |
 
 ## Rule shape
 
@@ -30,7 +42,11 @@ All endpoints require an authenticated session and workspace context.
 | `match_count` | int | Number of issues this rule has ever matched. Incremented atomically inside `Process`. |
 | `created_at` | RFC3339 | |
 
-## `GET /api/v1/triage-rules`
+## Rule CRUD
+
+Manage the ordered rule set. Rules evaluate in `position` order; first match wins.
+
+### `GET /api/v1/triage-rules`
 
 List every rule in the workspace, ordered by `position ASC, created_at ASC`.
 
@@ -58,7 +74,7 @@ List every rule in the workspace, ordered by `position ASC, created_at ASC`.
 ]
 ```
 
-## `POST /api/v1/triage-rules`
+### `POST /api/v1/triage-rules`
 
 Create a new rule. Auto-positioned at the end of the queue (`MAX(position) + 1`); reorder with `PATCH`.
 
@@ -89,7 +105,7 @@ Rules are created `enabled = true` and `match_count = 0`.
 | `401` | Not authenticated. |
 | `403` | Caller is below the `MANAGER` role. |
 
-## `PATCH /api/v1/triage-rules/{ruleId}`
+### `PATCH /api/v1/triage-rules/{ruleId}`
 
 Partial update. Every field optional. Pass `crew_id`, `assignee_id`, or `project_id` as `""` to NULL them out (the handler distinguishes "field absent" from "field set to empty string" and routes the empty string to `SET column = NULL`).
 
@@ -123,9 +139,13 @@ When **both** `pattern` and `match_type` are present and `match_type` is `regex`
 | `403` | Caller is below the `MANAGER` role. |
 | `404` | Rule id not found in this workspace. |
 
-## `DELETE /api/v1/triage-rules/{ruleId}`
+### `DELETE /api/v1/triage-rules/{ruleId}`
 
 Hard delete. Higher role bar than create / update because the rule is the source of truth for downstream automation.
+
+<Warning>
+  Hard delete — the rule row is removed outright (no soft delete). The higher role bar reflects that the rule drives downstream automation.
+</Warning>
 
 **Auth:** authenticated session + workspace context + `OWNER` or `ADMIN` role (`requireRole("manage")`).
 
@@ -139,13 +159,17 @@ Hard delete. Higher role bar than create / update because the rule is the source
 | `403` | Caller is below the `ADMIN` role. |
 | `404` | Rule id not found in this workspace. |
 
-## `POST /api/v1/triage/process`
+## Process the backlog
+
+One-shot endpoint that applies the rule set to the current backlog.
+
+### `POST /api/v1/triage/process`
 
 Run all enabled rules against every **unassigned BACKLOG issue** in the workspace and apply the first-match update to each. Idempotent: re-running on a backlog where everything matched already does nothing — once an issue has an `assignee_id`, the rule loader's `WHERE assignee_id IS NULL` excludes it.
 
 **Auth:** authenticated session + workspace context + `OWNER`, `ADMIN`, or `MANAGER` role (`requireRole("create")`).
 
-### Algorithm
+#### Algorithm
 
 1. Load enabled rules ordered by `position ASC`. Regex patterns are pre-compiled once per call (so a single bad regex in the rule set logs a warning and skips that rule, but doesn't abort the batch or re-compile per issue).
 2. Load all BACKLOG missions where `assignee_id IS NULL` and `mission_type = 'issue'` (sub-issues, missions, and crew missions are excluded).
@@ -153,7 +177,7 @@ Run all enabled rules against every **unassigned BACKLOG issue** in the workspac
 4. Increment `match_count` on rules that matched.
 5. Broadcast `triage.processed` on the workspace channel with `processed` (total backlog scanned) and `matched` (rows mutated) — only when at least one match occurred.
 
-### Match-type semantics
+#### Match-type semantics
 
 | `match_type` | Comparison |
 |---|---|
@@ -163,7 +187,7 @@ Run all enabled rules against every **unassigned BACKLOG issue** in the workspac
 
 `labels_json` is currently **read but not applied** to the issue inside `Process` — only `crew_id`, `assignee_id`/`assignee_type`, `priority`, and `project_id` are written. The column exists on the rule for forwards compatibility.
 
-### Response
+#### Response
 
 ```json
 { "processed": 42, "matched": 11 }

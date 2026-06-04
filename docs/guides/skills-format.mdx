@@ -35,8 +35,8 @@ credential_requirements:
 
 | Field | Required | Validation | Notes |
 |---|---|---|---|
-| `name` | ✅ | kebab-case slug, `^[a-z0-9][a-z0-9._-]{0,127}$` | The canonical identifier. Drives the folder name on disk and the slug column in the registry. |
-| `description` | ✅ | Single line, ≤ 1024 chars | The trigger. Should start with `Use when ...`, `Useful for ...`, `To <verb> ...`. The LLM uses this to decide whether the skill is relevant. |
+| `name` | ✅ | Non-empty; auto-slugified to kebab-case (`Slugify`) | The canonical identifier. Drives the folder name on disk and the slug column in the registry. A missing `name` is the only frontmatter field whose absence hard-fails the parser. The CLI scaffolder (`skill init`) additionally enforces `^[a-z0-9][a-z0-9._-]{0,127}$` at the boundary. |
+| `description` | recommended | Single line; lint-only via `LintDescription` (not enforced) | The trigger. Should start with `Use when ...`, `Useful for ...`, `To <verb> ...`. A weak/missing description is recorded in `description_quality` (warns at `<30` chars or no trigger phrase) but never rejects the import. The LLM uses this to decide whether the skill is relevant. |
 | `license` | ✅ for `import` to pass the SPDX gate | Free-form; resolved through `DetectSPDX` against the allowlist | Without an allowlisted SPDX id the import is rejected unless `--unsafe-license` is passed. |
 | `display_name` | optional | — | Human-readable name. Defaults to `name` if absent. |
 | `version` | optional | semver-ish string | Stored on the row. Currently informational; **not used for upsert ordering** (last write wins). |
@@ -98,8 +98,8 @@ for audit; the canonicalised SPDX id, if any, is written to
 Every imported body runs through `ScanContent`
 (`internal/skills/safety.go`). Patterns it flags:
 
-- "ignore previous / prior / earlier instructions"
-- "you are now …" role hijack attempts
+- "ignore / disregard / forget previous / prior / earlier instructions"
+- Pseudo-tag role hijacks (`<system>`, `<|im_start|>`, `new instructions: ignore …`)
 - "reveal the system prompt"
 - "DAN" jailbreak markers
 - Large base64 blobs (≥ 1024 contiguous base64 chars) — used to smuggle

@@ -184,6 +184,7 @@ Unknown network modes default to **restricted** (fail closed). Keep this list in
 
 The sidecar exposes a local API on port 9119 (`internal/sidecar/server.go`). The path count below is 36; the 39-route total reflects three paths that register multiple HTTP verbs (`/manifest` GET+PATCH, `/crew-connections` GET+POST, `/connections/{id}/files` GET+POST):
 
+<Accordion title="Full endpoint catalog (36 paths)">
 | Category | Endpoints |
 |----------|-----------|
 | **Memory** | `/memory/search`, `/memory/status`, `/memory/reindex` |
@@ -195,6 +196,7 @@ The sidecar exposes a local API on port 9119 (`internal/sidecar/server.go`). The
 | **Management** | `/crews`, `/crew/create`, `/agent/create`, `/credentials`, `/agent-credentials`, `/issue/create` |
 | **Pipelines** | `/pipelines`, `/pipelines/{slug}`, `/pipelines/save`, `/pipelines/{slug}/run`, `/pipelines/{slug}/dry_run` |
 | **Other** | `/manifest` (GET/PATCH), `/expose-port` |
+</Accordion>
 
 ## Keeper Request Lifecycle
 
@@ -272,6 +274,10 @@ The crew journal is the audit trail and is persisted across container restarts: 
 
 ### What Crewship does NOT protect against
 
+<Warning>
+  These are explicit non-goals of the runtime's trust boundary. Each one is the operator's responsibility to mitigate at the host or deployment layer.
+</Warning>
+
 - **A compromised host.** Docker is the bottom of the trust stack. If the host kernel, Docker daemon, or root account is compromised, every credential and every journal entry is exposed. Run crewshipd on a hardened host; do not expose port 8080 publicly without an authenticating reverse proxy.
 - **A malicious or misconfigured Keeper LLM.** If the Ollama model used by the Gatekeeper has been swapped for an adversarial one, `ALLOW` decisions cannot be trusted. Pin model digests, audit the model out-of-band, and treat the Keeper as a defense-in-depth layer rather than a primary control.
 - **Side channels in scrubbed output.** The scrubber redacts known credential shapes. A sufficiently creative agent can still leak partial information through timing, exit codes, or format-string tricks. Treat `/keeper/request` as a weaker contract than `/keeper/execute` for genuinely sensitive secrets.
@@ -285,8 +291,8 @@ Crewship supports multiple AI coding CLIs, configured per agent:
 | Adapter | CLI Command | System Prompt | Notes |
 |---------|------------|---------------|-------|
 | `CLAUDE_CODE` | `claude --print --output-format stream-json` | Via `--system-prompt` flag | Supports `--model`, `--tools`, `--mcp-config` |
-| `CODEX_CLI` | `codex --quiet` | N/A | Supports `--sandbox` for CODING profile |
-| `GEMINI_CLI` | `gemini` | Via `--system-instruction` | Uses `-p` for prompt |
+| `CODEX_CLI` | `codex exec --json` | Folded into user message (no flag) | The Rust port has no `--quiet`/`--system-prompt`; non-interactive runs go through `exec` |
+| `GEMINI_CLI` | `gemini -p <message> --output-format stream-json` | Folded into user message (no flag) | `--system-instruction` is not documented in headless mode, so the system prompt is prepended to the message |
 | `OPENCODE` | `opencode run` | Via `AGENTS.md` file in CWD | Reads system prompt from file |
 | `CURSOR_CLI` | `cursor-agent -p --output-format stream-json --stream-partial-output --force` | Folded into user message (no flag) | MCP listed but not invoked in headless mode (Cursor forum #143045/#148397); `SupportsMCP()` returns false |
 | `FACTORY_DROID` | `droid exec --auto <low\|medium\|high> -o stream-json` | Folded into user message (no flag) | Autonomy mapped from `tool_profile` (MINIMAL→low, CODING→medium, FULL→high); `--mission` avoided (Factory issue #794) |
@@ -395,7 +401,7 @@ The `journal_entries` table (migration 52) is the one write target. Every platfo
 - [Watch Roster](/guides/watch-roster) upserts `agent_status` and emits `agent.status_change`.
 - [Episodic memory](/guides/episodic-memory) selectively embeds a subset of journal entries into `journal_embeddings`.
 - [Cartographer](/guides/cartographer) anchors named checkpoints at journal cursors.
-- [Harbor Master](/guides/harbormaster) queues approvals; transitions emit `approval.*`.
+- [Harbormaster](/guides/harbormaster) queues approvals; transitions emit `approval.*`.
 - [Hooks](/guides/hooks) fire on lifecycle events and emit `hook.fired` / `hook.blocked`.
 - [Quartermaster](/guides/quartermaster) derives typed trajectories and metrics from the journal.
 

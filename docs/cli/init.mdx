@@ -26,6 +26,7 @@ This is the unauthenticated counterpart to `crewship setup`. Typical order on a 
 | `--email <email>` | (required) | Admin email address. Becomes the OWNER user. |
 | `--name "<full name>"` | (required) | Admin full name (display name in the UI). |
 | `--password <pw>` | (prompted, hidden input) | Admin password. Minimum 8 characters. When omitted, the command reads it from the terminal without echo. |
+| `--password-stdin` | `false` | Read admin password from stdin (preferred for CI / scripts — avoids argv leak). |
 
 `--email` and `--name` are hard-required. `--password` is prompted when missing; passing it on the command line is convenient for scripted installs but leaks into shell history — prefer the prompt or pipe via `--password "$(cat secret.txt)"`.
 

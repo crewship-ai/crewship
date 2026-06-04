@@ -4,11 +4,39 @@ description: "Mission lifecycle management -- create, start, monitor, and contro
 icon: "flag"
 ---
 
-All mission endpoints require authentication and workspace context.
+Missions orchestrate multi-agent task execution: a LEAD agent plans a breakdown, agents work tasks, and the mission moves through a status flow from `PLANNING` to a terminal state. Beyond CRUD, the API exposes lifecycle actions -- start, restart, resume, and clone -- plus task management, mission checkpoints, and workspace-wide metrics.
+
+<Note>
+  All mission endpoints require authentication and workspace context.
+</Note>
+
+## Endpoints
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| `GET` | [`/api/v1/missions`](#list-all-missions-workspace) | List all missions in a workspace |
+| `GET` | [`/api/v1/crews/{crewId}/missions`](#list-crew-missions) | List a crew's missions |
+| `POST` | [`/api/v1/crews/{crewId}/missions`](#create-mission) | Create a mission |
+| `GET` | [`/api/v1/crews/{crewId}/missions/{missionId}`](#get-mission) | Get a mission with tasks |
+| `PATCH` | [`/api/v1/crews/{crewId}/missions/{missionId}`](#update-mission) | Update a mission |
+| `DELETE` | [`/api/v1/crews/{crewId}/missions/{missionId}`](#delete-mission) | Delete a mission |
+| `POST` | [`/api/v1/crews/{crewId}/missions/{missionId}/start`](#start-mission) | Start a mission |
+| `POST` | [`/api/v1/crews/{crewId}/missions/{missionId}/restart`](#restart-mission) | Restart a terminal mission |
+| `POST` | [`/api/v1/crews/{crewId}/missions/{missionId}/resume`](#resume-mission) | Resume a failed mission |
+| `POST` | [`/api/v1/crews/{crewId}/missions/{missionId}/clone`](#clone-mission) | Clone a mission |
+| `POST` | [`/api/v1/crews/{crewId}/missions/{missionId}/tasks`](#create-task) | Add a task |
+| `PATCH` | [`/api/v1/crews/{crewId}/missions/{missionId}/tasks/{taskId}`](#update-task) | Update a task |
+| `GET` | [`/api/v1/missions/{missionId}/checkpoints`](#list-mission-checkpoints) | List mission checkpoints |
+| `POST` | [`/api/v1/missions/{missionId}/checkpoints`](#create-mission-checkpoint) | Create a mission checkpoint |
+| `GET` | [`/api/v1/mission-metrics`](#mission-metrics) | Aggregated mission metrics |
 
 ---
 
-## List All Missions (Workspace)
+## Missions
+
+Create, read, update, and delete missions. Write operations require `OWNER`, `ADMIN`, or `MANAGER` role.
+
+### List All Missions (Workspace)
 
 ```
 GET /api/v1/missions?workspace_id={workspaceId}
@@ -57,15 +85,14 @@ List all missions across the workspace.
       "failed": 0,
       "skipped": 0,
       "awaiting_approval": 0
-    },
-    "tasks": []
+    }
   }
 ]
 ```
 
----
+The `tasks` array is only included when `include_tasks=true`; it is omitted from the default list response.
 
-## List Crew Missions
+### List Crew Missions
 
 ```
 GET /api/v1/crews/{crewId}/missions?workspace_id={workspaceId}
@@ -81,9 +108,7 @@ GET /api/v1/crews/{crewId}/missions?workspace_id={workspaceId}
 
 **Response:** `200 OK` -- array of mission objects with `task_stats`.
 
----
-
-## Create Mission
+### Create Mission
 
 ```
 POST /api/v1/crews/{crewId}/missions?workspace_id={workspaceId}
@@ -119,9 +144,7 @@ The lead agent must exist in the specified crew and have the `LEAD` role.
 
 **WebSocket events:** `mission.created` on `crew:{crewId}`, `mission.updated` on `workspace:{workspaceId}`
 
----
-
-## Get Mission
+### Get Mission
 
 ```
 GET /api/v1/crews/{crewId}/missions/{missionId}?workspace_id={workspaceId}
@@ -180,9 +203,7 @@ Returns the mission with all tasks and task stats.
 |---|---|
 | `404` | Mission not found |
 
----
-
-## Update Mission
+### Update Mission
 
 ```
 PATCH /api/v1/crews/{crewId}/missions/{missionId}?workspace_id={workspaceId}
@@ -216,15 +237,15 @@ When status changes to `COMPLETED`, `FAILED`, or `CANCELLED`, `completed_at` is 
 | `400` | Invalid status transition |
 | `404` | Mission not found |
 
----
-
-## Delete Mission
+### Delete Mission
 
 ```
 DELETE /api/v1/crews/{crewId}/missions/{missionId}?workspace_id={workspaceId}
 ```
 
-Only missions in `PLANNING` or `CANCELLED` status can be deleted (hard delete).
+<Warning>
+  Only missions in `PLANNING` or `CANCELLED` status can be deleted (hard delete).
+</Warning>
 
 **Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
 
@@ -237,7 +258,11 @@ Only missions in `PLANNING` or `CANCELLED` status can be deleted (hard delete).
 
 ---
 
-## Start Mission
+## Lifecycle Actions
+
+Drive a mission through execution: start a planned mission, or restart, resume, and clone existing ones. All require `OWNER`, `ADMIN`, or `MANAGER` role.
+
+### Start Mission
 
 ```
 POST /api/v1/crews/{crewId}/missions/{missionId}/start?workspace_id={workspaceId}
@@ -265,9 +290,7 @@ Validates the task dependency DAG before starting. Uses atomic compare-and-swap 
 | `409` | Mission was already started by another request |
 | `500` | MissionEngine failed to start (rolls back to PLANNING) |
 
----
-
-## Restart Mission
+### Restart Mission
 
 ```
 POST /api/v1/crews/{crewId}/missions/{missionId}/restart?workspace_id={workspaceId}
@@ -288,9 +311,7 @@ Restarts a `COMPLETED`, `FAILED`, or `CANCELLED` mission. Resets non-COMPLETED t
 | `404` | Mission not found |
 | `409` | Mission is not in a terminal state (`COMPLETED`/`FAILED`/`CANCELLED`) |
 
----
-
-## Resume Mission
+### Resume Mission
 
 ```
 POST /api/v1/crews/{crewId}/missions/{missionId}/resume?workspace_id={workspaceId}
@@ -308,9 +329,7 @@ Resumes a `FAILED` mission from the point of failure. The handler atomically cla
 | `404` | Mission not found |
 | `409` | Mission is not currently `FAILED` |
 
----
-
-## Clone Mission
+### Clone Mission
 
 ```
 POST /api/v1/crews/{crewId}/missions/{missionId}/clone?workspace_id={workspaceId}
@@ -330,7 +349,11 @@ The handler returns the new mission id and status only; fetch `GET /api/v1/crews
 
 ---
 
-## Create Task
+## Tasks
+
+Add and update the individual tasks that make up a mission's work breakdown.
+
+### Create Task
 
 ```
 POST /api/v1/crews/{crewId}/missions/{missionId}/tasks?workspace_id={workspaceId}
@@ -355,9 +378,7 @@ Tasks can only be added to missions in `PLANNING` or `IN_PROGRESS` state. If any
 
 **Response:** `201 Created`
 
----
-
-## Update Task
+### Update Task
 
 ```
 PATCH /api/v1/crews/{crewId}/missions/{missionId}/tasks/{taskId}?workspace_id={workspaceId}
@@ -392,7 +413,9 @@ PATCH /api/v1/crews/{crewId}/missions/{missionId}/tasks/{taskId}?workspace_id={w
 
 ---
 
-## Mission Checkpoints
+## Checkpoints
+
+Cartographer checkpoints bookmark a mission's journal cursor and state snapshot for the timeline UI.
 
 Cartographer checkpoints capture a mission's journal cursor plus a state snapshot (agent-memory hashes, pending tasks, open assignments, crew container id) so the timeline UI can offer "list bookmarks" and (advisory) "restore/fork from here" affordances. The full restore/fork/get/delete surface is documented on the [Checkpoints](/api-reference/checkpoints) page; the two endpoints below are mission-scoped and live here for convenience. (`internal/api/cartographer_handler.go`)
 
@@ -472,13 +495,17 @@ Captures the mission's current journal cursor + materialized state and writes a 
 
 ---
 
-## Mission Metrics
+## Metrics
+
+Workspace-wide aggregates for dashboards.
+
+### Mission Metrics
 
 ```
 GET /api/v1/mission-metrics?workspace_id={workspaceId}
 ```
 
-Aggregated mission metrics for the workspace, covering the last 24 hours.
+Aggregated mission metrics for the workspace. `total_missions` and `active_missions` are lifetime counts; the `*_24h` fields cover the trailing 24 hours.
 
 **Response:** `200 OK`
 
@@ -498,7 +525,9 @@ Aggregated mission metrics for the workspace, covering the last 24 hours.
 
 ---
 
-## Mission Statuses
+## Reference
+
+### Mission Statuses
 
 | Status | Description |
 |---|---|
@@ -509,7 +538,7 @@ Aggregated mission metrics for the workspace, covering the last 24 hours.
 | `FAILED` | Unresolvable problem encountered |
 | `CANCELLED` | Cancelled by user or system |
 
-## Task Statuses
+### Task Statuses
 
 | Status | Description |
 |---|---|

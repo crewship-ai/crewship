@@ -214,6 +214,8 @@ spec:
 
 ## REST endpoint mapping
 
+How each manifest field lands on a REST call and ultimately a DB column:
+
 | Manifest field | HTTP verb | Path | DB column / table |
 |---|---|---|---|
 | `metadata.slug` + `spec.*` (routine DSL) | `POST` | `/api/v1/workspaces/{ws}/pipelines/save` | `pipelines.slug` + `pipelines.definition_json` |

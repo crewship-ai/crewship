@@ -88,7 +88,7 @@ Beyond the rename itself, the same release shipped the following net-new capabil
 
 ### "I'm using the CLI"
 
-Nothing to change. `crewship pipeline list` keeps working as an alias for `crewship routine list`. New subcommands (`schedules` / `webhooks` / `waitpoints` / `validate` / `watch` / `logs` / `records` / `doctor` / `bench`) are only available under the `routine` name; the `pipeline` alias doesn't expose them. Recommended: switch your scripts to `routine` so both old and new commands are available.
+Nothing to change. `pipeline` is a cobra alias on the top-level command, so `crewship pipeline X` works for **every** subcommand — including the new ones (`schedules` / `webhooks` / `waitpoints` / `validate` / `watch` / `logs` / `records` / `doctor` / `bench`). `crewship pipeline list` and `crewship routine list` are identical. Recommended: switch your scripts to `routine` for forward-consistency, but nothing forces it.
 
 ### "I'm using the API"
 
@@ -153,7 +153,7 @@ Highlights for security/stability-conscious users:
 
 | Feature | Status |
 |---------|--------|
-| Persistent run state (`pipeline_runs` table with status enum + checkpoint) | Follow-up PR. Currently runs are in-memory; restart loses active runs. Pending waitpoints survive (DB-backed); active step execution does not. |
+| Mid-run checkpoint + resume of active step execution | The `pipeline_runs` table (status enum + projection) shipped in v83 and boot recovery marks interrupted in-flight runs, but active step execution still lives in the in-process run registry — a restart does not resume a step that was mid-execution. Pending waitpoints survive (DB-backed); active step execution does not. |
 | Distributed scheduler with leader election | Follow-up. Single-instance only — running multiple replicas would double-fire schedules. |
 | Monaco DSL editor write mode in UI | Follow-up. UI is read-only; authoring works through CLI / agent / API. |
 | NL → cron expression converter | Foundation PRD scope; not in MVP. |

@@ -94,7 +94,7 @@ The `Project` and `Milestone` documents may live in the same multi-doc YAML file
 
 ## CLI reference
 
-The milestone CLI is nested under [`crewship project`](../cli/project) because milestones are children of a project. There is no standalone `crewship milestone` root command.
+The milestone CLI is nested under [`crewship project`](/cli/project) because milestones are children of a project. There is no standalone `crewship milestone` root command.
 
 ```bash
 crewship project milestone list <project-id-or-slug>          # GET /api/v1/projects/{id}/milestones

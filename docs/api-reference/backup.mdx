@@ -6,30 +6,40 @@ icon: "shield"
 
 # Backup API
 
-All endpoints live under `/api/v1/admin/backups` and are gated by the `authed` + `wsCtx` middleware chain. Handlers additionally re-check the workspace role (`canRole(role, "manage")`) — only **OWNER** and **ADMIN** pass. Every mutation writes one row to `audit_log`.
+REST endpoints for creating, listing, inspecting, verifying, restoring, rotating, and deleting backup bundles. All routes live under `/api/v1/admin/backups` and are gated by the `authed` + `wsCtx` middleware chain. Handlers additionally re-check the workspace role (`canRole(role, "manage")`) — only **OWNER** and **ADMIN** pass. Every mutation writes one row to `audit_log`.
 
 Routes are registered in `internal/api/router_admin.go` (domain split in May 2026); handlers live in `internal/api/backup.go`.
 
-| Method | Path | Purpose |
+<Note>
+  Every endpoint requires authentication, workspace context, and **OWNER** or **ADMIN** on the workspace. The `metrics` endpoint is stricter still — see its [authorisation warning](#get-apiv1adminbackupsmetrics).
+</Note>
+
+## Endpoints
+
+| Method | Endpoint | Purpose |
 |---|---|---|
-| `POST` | `/api/v1/admin/backups` | Create a new bundle |
-| `GET` | `/api/v1/admin/backups` | List bundles for the current workspace |
-| `GET` | `/api/v1/admin/backups/status` | Inspect the per-workspace advisory lock |
-| `GET` | `/api/v1/admin/backups/metrics` | Process-lifetime counters (instance OWNER only) |
-| `DELETE` | `/api/v1/admin/backups/status` | Force-release the lock |
-| `GET` | `/api/v1/admin/backups/inspect` | Read the plaintext MANIFEST |
-| `GET` | `/api/v1/admin/backups/verify` | Recompute sealed-payload SHA-256 |
-| `POST` | `/api/v1/admin/backups/rotate` | Apply retention policy |
-| `GET` | `/api/v1/admin/backups/download` | Stream bundle bytes |
-| `POST` | `/api/v1/admin/backups/restore` | Restore a bundle |
-| `POST` | `/api/v1/admin/backups/self-test` | Run a backup self-test (round-trip create + verify) |
-| `DELETE` | `/api/v1/admin/backups` | Delete a bundle from disk |
+| POST | [`/api/v1/admin/backups`](#post-apiv1adminbackups) | Create a new bundle |
+| GET | [`/api/v1/admin/backups`](#get-apiv1adminbackups) | List bundles for the current workspace |
+| GET | [`/api/v1/admin/backups/status`](#get-apiv1adminbackupsstatus) | Inspect the per-workspace advisory lock |
+| DELETE | [`/api/v1/admin/backups/status`](#delete-apiv1adminbackupsstatus) | Force-release the lock |
+| GET | [`/api/v1/admin/backups/metrics`](#get-apiv1adminbackupsmetrics) | Process-lifetime counters (instance OWNER only) |
+| GET | [`/api/v1/admin/backups/inspect`](#get-apiv1adminbackupsinspect) | Read the plaintext MANIFEST |
+| GET | [`/api/v1/admin/backups/verify`](#get-apiv1adminbackupsverify) | Recompute sealed-payload SHA-256 |
+| POST | [`/api/v1/admin/backups/rotate`](#post-apiv1adminbackupsrotate) | Apply retention policy |
+| GET | [`/api/v1/admin/backups/download`](#get-apiv1adminbackupsdownload) | Stream bundle bytes |
+| POST | [`/api/v1/admin/backups/restore`](#post-apiv1adminbackupsrestore) | Restore a bundle |
+| POST | [`/api/v1/admin/backups/self-test`](#post-apiv1adminbackupsself-test) | Run a backup self-test (round-trip create + verify) |
+| DELETE | [`/api/v1/admin/backups`](#delete-apiv1adminbackups) | Delete a bundle from disk |
 
 <Note>
   Path-based endpoints (`inspect`, `verify`, `download`, `restore`, `delete`) validate that the supplied path lives under `~/.crewship/backups` and belongs to the caller's workspace. **Symlinks are explicitly rejected during path validation** — no escape via `ln -s` to read files outside the backup directory. Paths from other workspaces return `404 Not Found` rather than `403`, so the endpoint does not confirm existence of bundles outside the caller's scope.
 </Note>
 
-## POST /api/v1/admin/backups
+## Create and list
+
+Create new bundles and enumerate the ones already on disk for the current workspace.
+
+### POST /api/v1/admin/backups
 
 Create a new backup bundle. Runs inline (seconds to minutes); no async job queue.
 
@@ -64,7 +74,7 @@ Create a new backup bundle. Runs inline (seconds to minutes); no async job queue
   "path": "/home/admin/.crewship/backups/crewship-workspace-acme-2026-04-15T12-05-01Z.tar.zst",
   "size_bytes": 13421772,
   "payload_sha256": "b5f7…",
-  "format_version": 1,
+  "format_version": 2,
   "scope": "workspace",
   "scope_level": "standard",
   "created_at": "2026-04-15T12:05:01Z",
@@ -73,6 +83,10 @@ Create a new backup bundle. Runs inline (seconds to minutes); no async job queue
 ```
 
 `scope_level` is omitted when the bundle has no explicit level recorded in its manifest.
+
+<Note>
+  New bundles are written at `format_version` **2** (`backup.FormatVersion`, bumped v1→v2 on 2026-05-25 when `--replace` mode and the FK-walked 50+-table dump landed). Restore enforces an N-2 compatibility window: this binary reads `format_version` in `[MinSupportedFormatVersion, FormatVersion]` = `[1, 2]`. A bundle newer than the reader returns `ErrFormatTooNew` (400); older than the window returns `ErrFormatTooOld` (400).
+</Note>
 
 ### Errors
 
@@ -86,7 +100,7 @@ Create a new backup bundle. Runs inline (seconds to minutes); no async job queue
 
 Audit action: `backup.create`.
 
-## GET /api/v1/admin/backups
+### GET /api/v1/admin/backups
 
 List bundles from `~/.crewship/backups` filtered to the caller's workspace (bundles of other workspaces are hidden from the response).
 
@@ -103,7 +117,7 @@ List bundles from `~/.crewship/backups` filtered to the caller's workspace (bund
       "scope_level": "standard",
       "encrypted": true,
       "created_at": "2026-04-15T12:05:01Z",
-      "format_version": 1
+      "format_version": 2
     }
   ]
 }
@@ -111,7 +125,11 @@ List bundles from `~/.crewship/backups` filtered to the caller's workspace (bund
 
 Entries are sourced from `backup_catalog` first (reconciled against disk on each call); a missing/empty catalog falls back to a filesystem scan. `scope_level` is omitted when the source manifest did not record it.
 
-## GET /api/v1/admin/backups/status
+## Locking and metrics
+
+Inspect or force-release the per-workspace advisory lock, and read process-lifetime backup counters.
+
+### GET /api/v1/admin/backups/status
 
 Report the workspace's advisory lock.
 
@@ -129,7 +147,13 @@ Report the workspace's advisory lock.
 
 `held: false` omits the detail fields. The lock TTL is 1 hour (`backup.DefaultLockTTL`). Missing workspace context returns `400` (not 401).
 
-## GET /api/v1/admin/backups/metrics
+### DELETE /api/v1/admin/backups/status
+
+Force-release the per-workspace lock regardless of owner. Intended as an emergency escape hatch when a crashed backup left a stale lock behind. Returns `204 No Content`.
+
+Audit action: `backup.unlock`.
+
+### GET /api/v1/admin/backups/metrics
 
 Return a point-in-time snapshot of process-lifetime counters for the backup subsystem — created / failed / restored totals, size bytes, approximate duration quantiles, and per-workspace lock-hold seconds. Counters reset on every restart; persistent reporting should read `audit_log` instead.
 
@@ -163,7 +187,11 @@ Duration quantiles are approximated from an in-memory ring buffer (tens-to-hundr
 | `401 Unauthorized` | No authenticated session. |
 | `403 Forbidden` | Authenticated, but email does not match `CREWSHIP_OWNER_EMAIL`. |
 
-## POST /api/v1/admin/backups/self-test
+## Inspect, verify, and self-test
+
+Read a bundle's manifest, recompute its checksum, or run an end-to-end canary without leaving a bundle on disk.
+
+### POST /api/v1/admin/backups/self-test
 
 Per-crew round-trip canary: collect → destroy a canary marker inside the crew container → restore → verify → cleanup. Used by the seed CLI and CI harness to validate the backup pipeline end-to-end without leaving a bundle on disk. Lightweight: no encryption, no DB dump.
 
@@ -190,13 +218,7 @@ Gated by workspace `OWNER`/`ADMIN` (`canRole(role, "manage")`), the same as the 
 | `503 Service Unavailable` | `dockerOps` not wired (no Docker daemon). |
 | `500 Internal Server Error` | Canary insert/destroy/restore/verify failed. |
 
-## DELETE /api/v1/admin/backups/status
-
-Force-release the per-workspace lock regardless of owner. Intended as an emergency escape hatch when a crashed backup left a stale lock behind. Returns `204 No Content`.
-
-Audit action: `backup.unlock`.
-
-## GET /api/v1/admin/backups/inspect
+### GET /api/v1/admin/backups/inspect
 
 Return the plaintext MANIFEST for a bundle without decrypting the payload.
 
@@ -210,7 +232,7 @@ Return the plaintext MANIFEST for a bundle without decrypting the payload.
 
 Returns the manifest JSON as produced by `backup.Inspect` (`internal/backup/manifest.go`).
 
-## GET /api/v1/admin/backups/verify
+### GET /api/v1/admin/backups/verify
 
 Recompute the sealed-payload SHA-256 and compare against the MANIFEST. Does not decrypt. Streams the payload from a temp file so peak heap is bounded by the zstd decoder window.
 
@@ -226,14 +248,18 @@ Recompute the sealed-payload SHA-256 and compare against the MANIFEST. Does not 
 {
   "valid": true,
   "size_bytes": 13421772,
-  "manifest": { "format_version": 1, "scope": "workspace", "…": "…" },
+  "manifest": { "format_version": 2, "scope": "workspace", "…": "…" },
   "error": ""
 }
 ```
 
 `valid: false` sets `error` to a human-readable reason (`checksum mismatch`, `truncated payload`, `unreadable bundle`, …).
 
-## POST /api/v1/admin/backups/rotate
+## Retention, transfer, and restore
+
+Apply retention policy, stream bundles off-box, restore into the current workspace, or delete bundles from disk.
+
+### POST /api/v1/admin/backups/rotate
 
 Apply retention policy to the caller's workspace. Per-workspace only — another workspace's bundles are never enumerated.
 
@@ -260,7 +286,7 @@ With `dry_run: true` the paths are returned but the files stay on disk and no au
 
 Audit action (per deleted bundle, non-dry-run only): `backup.rotate`.
 
-## GET /api/v1/admin/backups/download
+### GET /api/v1/admin/backups/download
 
 Stream the raw bundle bytes over HTTP for `scp`-free transfer off-box.
 
@@ -273,7 +299,7 @@ Response headers:
 
 Audit action: `backup.download`.
 
-## POST /api/v1/admin/backups/restore
+### POST /api/v1/admin/backups/restore
 
 Restore a bundle into the current workspace.
 
@@ -286,6 +312,7 @@ Restore a bundle into the current workspace.
   "identity": "",
   "as_workspace": "",
   "as_crew": "",
+  "replace": false,
   "dry_run": false
 }
 ```
@@ -297,13 +324,14 @@ Restore a bundle into the current workspace.
 | `identity` | AGE X25519 secret key (`AGE-SECRET-KEY-1…`) for bundles sealed with `--recipient`. Parsed with `age.ParseX25519Identity`; invalid values return 400. |
 | `as_workspace` | Land the workspace under a new slug. Docker phase is skipped. |
 | `as_crew` | Land the crew under a new slug (crew-scope bundles only). Docker phase is skipped. |
+| `replace` | When `true`, wipe existing target rows matching the bundle's workspace (by id OR slug) before INSERT. Disaster-recovery path: after a `nuke` the fresh-bootstrap workspace has a new CUID but the same slug — `replace` clears the conflicting target so the bundle lands with its original IDs. |
 | `dry_run` | Decrypt + replay the DB transaction, then **roll back**. No workspace / crew / agent writes are applied. |
 
 ### Response — `200 OK`
 
 ```json
 {
-  "manifest": { "format_version": 1, "scope": "workspace", "…": "…" },
+  "manifest": { "format_version": 2, "scope": "workspace", "…": "…" },
   "restored_ws": "acme",
   "restored_workspace_id": "ws_abc123",
   "crews_count": 4,
@@ -319,13 +347,14 @@ Restore a bundle into the current workspace.
 | Status | Condition |
 |---|---|
 | `400` | Invalid path, format too new/old (`ErrFormatTooNew`, `ErrFormatTooOld`), invalid manifest, invalid checksum, decryption failure (wrong passphrase / corrupted bundle). |
-| `404` | Bundle does not belong to caller's workspace (or does not exist). |
+| `403` | Bundle is not bound to the caller's current workspace (by id or slug) and the instance already has at least one workspace. The cross-tenant write guard (`allowRestore`) refuses the restore; restore on the source instance or use a fresh instance for cross-tenant DR. |
+| `404` | Bundle file does not exist on disk (`ErrBundleNotFound`). |
 | `409` | `ErrNoOpRestore` — bundle would insert zero rows; treated as "nothing to do". |
-| `500` | Unexpected failure during extraction / replay. |
+| `500` | Unexpected failure during extraction / replay, or the cross-tenant authorization probe failed. |
 
 Audit action: `backup.restore` (or `backup.restore.dry_run` for `dry_run: true`).
 
-## DELETE /api/v1/admin/backups
+### DELETE /api/v1/admin/backups
 
 Delete a bundle from disk. Returns `204 No Content`.
 
