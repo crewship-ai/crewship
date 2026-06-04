@@ -160,6 +160,14 @@ paths = [
   # `order-12345-attempt-1`. Gitleaks' generic-api-key rule fires
   # on the placeholder; verified false positive (CodeRabbit #285).
   '''docs/guides/routines-cookbook\.mdx$''',
+
+  # internal/api credential-handler coverage test. Uses pemFixture() to
+  # build a synthetic OPENSSH PRIVATE KEY / CERTIFICATE block plus inline
+  # fake API-key/secret values (e.g. "sk-apikeyvalue") to exercise the
+  # per-type credential create/update validation + encrypt-at-rest paths.
+  # generic-api-key fires on the base64 PEM body; verified synthetic — no
+  # production credential.
+  '''internal/api/credentials_mutate_deep_cov_test\.go$''',
 ]
 
 # Strings that look like secrets but are documented placeholders.

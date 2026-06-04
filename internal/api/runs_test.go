@@ -268,6 +268,92 @@ func TestRunHandler_List_CrossTenantHidden(t *testing.T) {
 	}
 }
 
+func TestRunHandler_Get_RequiresWorkspace(t *testing.T) {
+	f := newRunsTestFixture(t)
+	req := httptest.NewRequest("GET", "/api/v1/runs/run_a", nil)
+	req.SetPathValue("id", "run_a")
+	rr := httptest.NewRecorder()
+	f.h.Get(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Errorf("status=%d want 401; body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestRunHandler_Get_MissingID(t *testing.T) {
+	f := newRunsTestFixture(t)
+	req := httptest.NewRequest("GET", "/api/v1/runs/", nil)
+	req = withWorkspaceUser(req, f.user, f.wsID, "OWNER")
+	rr := httptest.NewRecorder()
+	f.h.Get(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("status=%d want 400; body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestRunHandler_Get_NotFound(t *testing.T) {
+	f := newRunsTestFixture(t)
+	req := httptest.NewRequest("GET", "/api/v1/runs/nope", nil)
+	req.SetPathValue("id", "nope")
+	req = withWorkspaceUser(req, f.user, f.wsID, "OWNER")
+	rr := httptest.NewRecorder()
+	f.h.Get(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("status=%d want 404; body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestRunHandler_Get_HappyPath(t *testing.T) {
+	f := newRunsTestFixture(t)
+	now := time.Now().UTC()
+	f.emitRunRow(t, "run_get", "COMPLETED", "USER", now.Add(-2*time.Minute))
+
+	req := httptest.NewRequest("GET", "/api/v1/runs/run_get", nil)
+	req.SetPathValue("id", "run_get")
+	req = withWorkspaceUser(req, f.user, f.wsID, "OWNER")
+	rr := httptest.NewRecorder()
+	f.h.Get(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var run runResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &run); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if run.ID != "run_get" {
+		t.Errorf("id=%q want run_get", run.ID)
+	}
+	if run.Status != "COMPLETED" {
+		t.Errorf("status=%q want COMPLETED", run.Status)
+	}
+}
+
+func TestRunHandler_Get_CrossTenantMasked(t *testing.T) {
+	f := newRunsTestFixture(t)
+	// Seed a run in a second workspace the caller is NOT scoped to for
+	// this request; Get must mask it as 404 rather than returning it.
+	wsOther := "ws-other-get"
+	if _, err := f.h.db.Exec(`INSERT INTO workspaces (id, name, slug) VALUES (?, 'O', 'oget')`, wsOther); err != nil {
+		t.Fatalf("seed other ws: %v", err)
+	}
+	now := time.Now().UTC()
+	if _, err := f.h.db.Exec(`
+		INSERT INTO journal_entries
+			(id, workspace_id, agent_id, ts, entry_type, severity, priority, actor_type, actor_id, summary, payload, refs, trace_id)
+		VALUES ('j_xget', ?, ?, ?, 'run.started', 'info', 'normal', 'sidecar', ?, 'r', '{"trigger_type":"USER"}', '{}', 'foreign_run')`,
+		wsOther, f.agent, now.Format("2006-01-02T15:04:05.000Z"), f.agent); err != nil {
+		t.Fatalf("seed foreign run: %v", err)
+	}
+
+	req := httptest.NewRequest("GET", "/api/v1/runs/foreign_run", nil)
+	req.SetPathValue("id", "foreign_run")
+	req = withWorkspaceUser(req, f.user, f.wsID, "OWNER")
+	rr := httptest.NewRecorder()
+	f.h.Get(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("status=%d want 404 (cross-tenant masked); body=%s", rr.Code, rr.Body.String())
+	}
+}
+
 func TestValidRunStatus(t *testing.T) {
 	for _, ok := range []string{"RUNNING", "COMPLETED", "FAILED", "CANCELLED", "TIMEOUT"} {
 		if !validRunStatus(ok) {
