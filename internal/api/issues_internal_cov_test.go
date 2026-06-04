@@ -59,7 +59,9 @@ func TestCovII2List_DefaultMissionTypeFilter(t *testing.T) {
 		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
 	}
 	var got []issueResponse
-	json.Unmarshal(rr.Body.Bytes(), &got)
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if len(got) != 1 {
 		t.Fatalf("got %d issues, want 1 (orchestration mission must be filtered out)", len(got))
 	}
@@ -85,7 +87,9 @@ func TestCovII2List_AssigneeFilter(t *testing.T) {
 		t.Fatalf("status = %d", rr.Code)
 	}
 	var got []issueResponse
-	json.Unmarshal(rr.Body.Bytes(), &got)
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if len(got) != 1 {
 		t.Errorf("matching assignee: got %d want 1", len(got))
 	}
@@ -187,7 +191,9 @@ func TestCovII2Create_WithLabelsAndDefaultPriority(t *testing.T) {
 		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
 	}
 	var resp map[string]string
-	json.Unmarshal(rr.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	newID := resp["id"]
 	if newID == "" {
 		t.Fatal("missing id in response")
@@ -256,7 +262,9 @@ func TestCovII2Create_EmptyPrefixDerivedFromSlug(t *testing.T) {
 		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
 	}
 	var resp map[string]string
-	json.Unmarshal(rr.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if resp["identifier"] != "PLA-1" {
 		t.Errorf("identifier = %q, want PLA-1 (slug-derived prefix)", resp["identifier"])
 	}
@@ -486,10 +494,11 @@ func TestCovII2Mission_Create_FullFields(t *testing.T) {
 		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
 	}
 	var resp struct {
-		ID    string         `json:"id"`
-		Tasks map[string]int `json:"tasks"`
+		ID string `json:"id"`
 	}
-	json.Unmarshal(rr.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if resp.ID == "" {
 		t.Fatal("missing mission id")
 	}

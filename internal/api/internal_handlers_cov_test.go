@@ -119,7 +119,9 @@ func TestCovIICreateChat(t *testing.T) {
 			t.Fatalf("code=%d want 201; body=%s", rec.Code, rec.Body.String())
 		}
 		var n int
-		db.QueryRow("SELECT COUNT(*) FROM chats WHERE id = 'chatNew'").Scan(&n)
+		if err := db.QueryRow("SELECT COUNT(*) FROM chats WHERE id = 'chatNew'").Scan(&n); err != nil {
+			t.Fatalf("scan chat count: %v", err)
+		}
 		if n != 1 {
 			t.Fatalf("expected chat row, got %d", n)
 		}
@@ -227,7 +229,9 @@ func TestCovIIIncrementMessageCount(t *testing.T) {
 			t.Fatalf("code=%d want 200; body=%s", rec.Code, rec.Body.String())
 		}
 		var n int
-		db.QueryRow("SELECT message_count FROM chats WHERE id = 'chatI'").Scan(&n)
+		if err := db.QueryRow("SELECT message_count FROM chats WHERE id = 'chatI'").Scan(&n); err != nil {
+			t.Fatalf("scan message_count: %v", err)
+		}
 		if n != 3 {
 			t.Fatalf("message_count=%d want 3", n)
 		}
@@ -277,7 +281,9 @@ func TestCovIIUpdateChatTitle(t *testing.T) {
 			t.Fatalf("code=%d want 200; body=%s", rec.Code, rec.Body.String())
 		}
 		var title string
-		db.QueryRow("SELECT title FROM chats WHERE id = 'chatT'").Scan(&title)
+		if err := db.QueryRow("SELECT title FROM chats WHERE id = 'chatT'").Scan(&title); err != nil {
+			t.Fatalf("scan title: %v", err)
+		}
 		if title != "Hello" {
 			t.Fatalf("title=%q want Hello", title)
 		}
@@ -332,7 +338,9 @@ func TestCovIICreateRun(t *testing.T) {
 			t.Fatalf("expected 1 journal entry, got %d", len(em.entries))
 		}
 		var status string
-		db.QueryRow("SELECT status FROM agents WHERE id = 'agentR'").Scan(&status)
+		if err := db.QueryRow("SELECT status FROM agents WHERE id = 'agentR'").Scan(&status); err != nil {
+			t.Fatalf("scan agent status: %v", err)
+		}
 		if status != "RUNNING" {
 			t.Fatalf("agent status=%q want RUNNING", status)
 		}
@@ -420,7 +428,9 @@ func TestCovIIUpdateRun(t *testing.T) {
 			t.Fatalf("emitted type=%q want run.completed", got)
 		}
 		var status string
-		db.QueryRow("SELECT status FROM agents WHERE id='agentU'").Scan(&status)
+		if err := db.QueryRow("SELECT status FROM agents WHERE id='agentU'").Scan(&status); err != nil {
+			t.Fatalf("scan agent status: %v", err)
+		}
 		if status != "IDLE" {
 			t.Fatalf("agent status=%q want IDLE", status)
 		}
@@ -538,7 +548,9 @@ func TestCovIICreateCrew(t *testing.T) {
 			t.Fatalf("code=%d want 201; body=%s", rec.Code, rec.Body.String())
 		}
 		var n int
-		db.QueryRow("SELECT COUNT(*) FROM crews WHERE slug='bravo' AND workspace_id=?", wsID).Scan(&n)
+		if err := db.QueryRow("SELECT COUNT(*) FROM crews WHERE slug='bravo' AND workspace_id=?", wsID).Scan(&n); err != nil {
+			t.Fatalf("scan crew count: %v", err)
+		}
 		if n != 1 {
 			t.Fatalf("crew not inserted, count=%d", n)
 		}
@@ -599,7 +611,9 @@ func TestCovIICreateAgent(t *testing.T) {
 			t.Fatalf("code=%d want 201; body=%s", rec.Code, rec.Body.String())
 		}
 		var n int
-		db.QueryRow("SELECT COUNT(*) FROM agents WHERE slug='nora-crew' AND workspace_id=?", wsID).Scan(&n)
+		if err := db.QueryRow("SELECT COUNT(*) FROM agents WHERE slug='nora-crew' AND workspace_id=?", wsID).Scan(&n); err != nil {
+			t.Fatalf("scan agent count: %v", err)
+		}
 		if n != 1 {
 			t.Fatalf("agent not inserted with suffixed slug, count=%d", n)
 		}
@@ -693,7 +707,9 @@ func TestCovIIRecordMCPToolCall(t *testing.T) {
 			t.Fatalf("code=%d want 201; body=%s", rec.Code, rec.Body.String())
 		}
 		var scope string
-		db.QueryRow("SELECT mcp_server_scope FROM mcp_tool_calls WHERE mcp_server_id='srv1'").Scan(&scope)
+		if err := db.QueryRow("SELECT mcp_server_scope FROM mcp_tool_calls WHERE mcp_server_id='srv1'").Scan(&scope); err != nil {
+			t.Fatalf("scan scope: %v", err)
+		}
 		if scope != "workspace" {
 			t.Fatalf("scope=%q want workspace (default)", scope)
 		}
@@ -961,14 +977,20 @@ func TestCovIIMissionCreate(t *testing.T) {
 			t.Fatalf("code=%d want 201; body=%s", rec.Code, rec.Body.String())
 		}
 		var nm, nt int
-		db.QueryRow("SELECT COUNT(*) FROM missions WHERE title='Ship it'").Scan(&nm)
-		db.QueryRow("SELECT COUNT(*) FROM mission_tasks").Scan(&nt)
+		if err := db.QueryRow("SELECT COUNT(*) FROM missions WHERE title='Ship it'").Scan(&nm); err != nil {
+			t.Fatalf("scan mission count: %v", err)
+		}
+		if err := db.QueryRow("SELECT COUNT(*) FROM mission_tasks").Scan(&nt); err != nil {
+			t.Fatalf("scan task count: %v", err)
+		}
 		if nm != 1 || nt != 2 {
 			t.Fatalf("missions=%d tasks=%d want 1/2", nm, nt)
 		}
 		// The second task depends on another → BLOCKED.
 		var blocked int
-		db.QueryRow("SELECT COUNT(*) FROM mission_tasks WHERE status='BLOCKED'").Scan(&blocked)
+		if err := db.QueryRow("SELECT COUNT(*) FROM mission_tasks WHERE status='BLOCKED'").Scan(&blocked); err != nil {
+			t.Fatalf("scan blocked count: %v", err)
+		}
 		if blocked != 1 {
 			t.Fatalf("blocked=%d want 1", blocked)
 		}
@@ -1038,7 +1060,9 @@ func TestCovIIMissionStartAndGet(t *testing.T) {
 			t.Fatalf("code=%d want 200; body=%s", rec.Code, rec.Body.String())
 		}
 		var st string
-		db.QueryRow("SELECT status FROM missions WHERE id='m1'").Scan(&st)
+		if err := db.QueryRow("SELECT status FROM missions WHERE id='m1'").Scan(&st); err != nil {
+			t.Fatalf("scan mission status: %v", err)
+		}
 		if st != "IN_PROGRESS" {
 			t.Fatalf("status=%q want IN_PROGRESS", st)
 		}

@@ -325,7 +325,9 @@ func TestCovHireFullAutonomyNoInbox(t *testing.T) {
 		t.Errorf("inbox_item_id = %q on full autonomy; want empty (journal-only)", resp.InboxItemID)
 	}
 	var inboxCount int
-	_ = db.QueryRow(`SELECT COUNT(*) FROM inbox_items WHERE source_id = ?`, resp.ID).Scan(&inboxCount)
+	if err := db.QueryRow(`SELECT COUNT(*) FROM inbox_items WHERE source_id = ?`, resp.ID).Scan(&inboxCount); err != nil {
+		t.Fatalf("scan inbox count: %v", err)
+	}
 	if inboxCount != 0 {
 		t.Errorf("inbox rows = %d on full autonomy; want 0", inboxCount)
 	}
@@ -358,7 +360,9 @@ func TestCovHireEmptyModelStoresNull(t *testing.T) {
 		t.Fatalf("status = %d, want 201; body: %s", rr.Code, rr.Body.String())
 	}
 	var resp hireResponse
-	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	var provider, model sql.NullString
 	if err := db.QueryRow(`SELECT llm_provider, llm_model FROM agents WHERE id = ?`, resp.ID).Scan(&provider, &model); err != nil {
 		t.Fatalf("verify llm cols: %v", err)

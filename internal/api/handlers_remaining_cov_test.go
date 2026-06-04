@@ -524,9 +524,13 @@ func TestCovRemHire_FullAutonomyJournalOnly(t *testing.T) {
 		t.Fatalf("status = %d, want 201; body: %s", rr.Code, rr.Body.String())
 	}
 	var resp hireResponse
-	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	var inbox int
-	_ = db.QueryRow(`SELECT COUNT(*) FROM inbox_items WHERE source_id = ?`, resp.ID).Scan(&inbox)
+	if err := db.QueryRow(`SELECT COUNT(*) FROM inbox_items WHERE source_id = ?`, resp.ID).Scan(&inbox); err != nil {
+		t.Fatalf("scan inbox count: %v", err)
+	}
 	if inbox != 0 {
 		t.Errorf("inbox rows = %d on full autonomy, want 0 (journal only)", inbox)
 	}
@@ -811,7 +815,9 @@ func TestCovRemCreateInvitation_EmptyRoleDefaultsToMember(t *testing.T) {
 		t.Fatalf("status = %d, want 201; body: %s", rr.Code, rr.Body.String())
 	}
 	var got invitationResponse
-	_ = json.Unmarshal(rr.Body.Bytes(), &got)
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if got.Role != "MEMBER" {
 		t.Errorf("default role = %q, want MEMBER", got.Role)
 	}

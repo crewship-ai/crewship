@@ -87,7 +87,9 @@ func TestCovCLIPairStart_StripsBadAdapterHint(t *testing.T) {
 		t.Fatalf("status = %d", rr.Code)
 	}
 	var resp pairStartResponse
-	json.Unmarshal(rr.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 
 	var hint interface{}
 	if err := db.QueryRow(`SELECT adapter_hint FROM cli_pairings WHERE code=?`, resp.Code).Scan(&hint); err != nil {
@@ -159,7 +161,9 @@ func TestCovCLIPairPoll_PendingHappy(t *testing.T) {
 	startRR := httptest.NewRecorder()
 	h.Start(startRR, startReq)
 	var start pairStartResponse
-	json.Unmarshal(startRR.Body.Bytes(), &start)
+	if err := json.Unmarshal(startRR.Body.Bytes(), &start); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 
 	req := httptest.NewRequest("GET", "/api/v1/cli/pair/poll?code="+start.Code, nil)
 	req = req.WithContext(withUser(req.Context(), &AuthUser{ID: userID}))
@@ -169,7 +173,9 @@ func TestCovCLIPairPoll_PendingHappy(t *testing.T) {
 		t.Fatalf("status = %d", rr.Code)
 	}
 	var resp pairPollResponse
-	json.Unmarshal(rr.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if resp.Status != "pending" {
 		t.Errorf("status = %q, want pending", resp.Status)
 	}
@@ -200,7 +206,9 @@ func TestCovCLIPairPoll_PendingButExpiredFlipsToExpired(t *testing.T) {
 		t.Fatalf("status = %d", rr.Code)
 	}
 	var resp pairPollResponse
-	json.Unmarshal(rr.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if resp.Status != "expired" {
 		t.Errorf("reported status = %q, want expired", resp.Status)
 	}
@@ -236,7 +244,9 @@ func TestCovCLIPairPoll_ConsumedStatus(t *testing.T) {
 		t.Fatalf("status = %d", rr.Code)
 	}
 	var resp pairPollResponse
-	json.Unmarshal(rr.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if resp.Status != "consumed" {
 		t.Errorf("status = %q, want consumed", resp.Status)
 	}
@@ -350,7 +360,9 @@ func TestCovCLIPairRedeem_HappyPathWithHint(t *testing.T) {
 	}
 
 	var resp pairRedeemResponse
-	json.Unmarshal(rr.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if !strings.HasPrefix(resp.CliToken, cliTokenPrefix) {
 		t.Errorf("cli_token = %q, want %s* prefix", resp.CliToken, cliTokenPrefix)
 	}
@@ -583,7 +595,9 @@ func TestCovCLITokenCreate_StandardWithExpiry(t *testing.T) {
 		ExpiresAt string `json:"expires_at"`
 		Tier      string `json:"tier"`
 	}
-	json.Unmarshal(rr.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if resp.ExpiresAt == "" {
 		t.Error("STANDARD token with expires_in_seconds must echo expires_at")
 	}
@@ -643,7 +657,9 @@ func TestCovCLITokenList_EmptyReturnsEmptyArray(t *testing.T) {
 	var resp struct {
 		Data []map[string]interface{} `json:"data"`
 	}
-	json.Unmarshal(rr.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if resp.Data == nil {
 		t.Error("data must be [] not null")
 	}
@@ -676,7 +692,9 @@ func TestCovCLITokenList_EchoesExpiryAndRevoked(t *testing.T) {
 	var resp struct {
 		Data []map[string]interface{} `json:"data"`
 	}
-	json.Unmarshal(rr.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if len(resp.Data) != 1 {
 		t.Fatalf("len = %d, want 1", len(resp.Data))
 	}

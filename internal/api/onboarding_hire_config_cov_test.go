@@ -148,13 +148,17 @@ func TestCovOHCOnboardingStatus_SmartDetectViaAgents(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
 	}
 	var resp map[string]bool
-	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if !resp["completed"] {
 		t.Errorf("completed = false; smart-detect should mark completed when agents exist")
 	}
 	// Flag must have been persisted.
 	var flag int
-	_ = db.QueryRow(`SELECT onboarding_completed FROM users WHERE id = ?`, userID).Scan(&flag)
+	if err := db.QueryRow(`SELECT onboarding_completed FROM users WHERE id = ?`, userID).Scan(&flag); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
 	if flag != 1 {
 		t.Errorf("onboarding_completed = %d, want persisted 1", flag)
 	}
@@ -163,7 +167,9 @@ func TestCovOHCOnboardingStatus_SmartDetectViaAgents(t *testing.T) {
 func TestCovOHCOnboardingStatus_AlreadyCompleted(t *testing.T) {
 	db := setupTestDB(t)
 	userID := seedTestUser(t, db)
-	_, _ = db.Exec(`UPDATE users SET onboarding_completed = 1 WHERE id = ?`, userID)
+	if _, err := db.Exec(`UPDATE users SET onboarding_completed = 1 WHERE id = ?`, userID); err != nil {
+		t.Fatalf("exec: %v", err)
+	}
 	h := covOHCOnboardingHandler(db)
 	req := httptest.NewRequest("GET", "/api/v1/onboarding/status", nil)
 	req = req.WithContext(withUser(req.Context(), &AuthUser{ID: userID}))
@@ -173,7 +179,9 @@ func TestCovOHCOnboardingStatus_AlreadyCompleted(t *testing.T) {
 		t.Fatalf("status = %d, want 200", rr.Code)
 	}
 	var resp map[string]bool
-	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if !resp["completed"] {
 		t.Errorf("completed = false; want true for already-completed user")
 	}
@@ -218,7 +226,9 @@ func TestCovOHCOnboardingComplete_Happy(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
 	}
 	var flag int
-	_ = db.QueryRow(`SELECT onboarding_completed FROM users WHERE id = ?`, userID).Scan(&flag)
+	if err := db.QueryRow(`SELECT onboarding_completed FROM users WHERE id = ?`, userID).Scan(&flag); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
 	if flag != 1 {
 		t.Errorf("onboarding_completed = %d, want 1", flag)
 	}
@@ -342,12 +352,16 @@ func TestCovOHCOnboardingSetup_BlankHappyWithPreferredLanguage(t *testing.T) {
 	}
 	// preferred_language is persisted before the branch.
 	var lang string
-	_ = db.QueryRow(`SELECT COALESCE(preferred_language,'') FROM workspaces WHERE id = ?`, wsID).Scan(&lang)
+	if err := db.QueryRow(`SELECT COALESCE(preferred_language,'') FROM workspaces WHERE id = ?`, wsID).Scan(&lang); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
 	if lang != "Czech" {
 		t.Errorf("preferred_language = %q, want Czech", lang)
 	}
 	var crewCount int
-	_ = db.QueryRow(`SELECT COUNT(*) FROM crews WHERE workspace_id = ?`, wsID).Scan(&crewCount)
+	if err := db.QueryRow(`SELECT COUNT(*) FROM crews WHERE workspace_id = ?`, wsID).Scan(&crewCount); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
 	if crewCount != 1 {
 		t.Errorf("crews = %d, want 1", crewCount)
 	}
@@ -358,7 +372,9 @@ func TestCovOHCOnboardingSetup_AlreadyCompletedConflict(t *testing.T) {
 	db := setupTestDB(t)
 	userID := seedTestUser(t, db)
 	seedTestWorkspace(t, db, userID)
-	_, _ = db.Exec(`UPDATE users SET onboarding_completed = 1 WHERE id = ?`, userID)
+	if _, err := db.Exec(`UPDATE users SET onboarding_completed = 1 WHERE id = ?`, userID); err != nil {
+		t.Fatalf("exec: %v", err)
+	}
 	h := covOHCOnboardingHandler(db)
 	rr := covOHCPostSetup(t, h, userID, map[string]any{
 		"crew_name": "C", "agent_name": "A", "llm_provider": "OLLAMA",
@@ -388,19 +404,25 @@ func TestCovOHCOnboardingSetup_TemplateHappy(t *testing.T) {
 		t.Fatalf("status = %d, want 201; body: %s", rr.Code, rr.Body.String())
 	}
 	var resp map[string]any
-	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if resp["crew_id"] == "" || resp["crew_id"] == nil {
 		t.Errorf("crew_id missing in template deploy response")
 	}
 	// Workspace was renamed.
 	var name string
-	_ = db.QueryRow(`SELECT name FROM workspaces WHERE id = ?`, wsID).Scan(&name)
+	if err := db.QueryRow(`SELECT name FROM workspaces WHERE id = ?`, wsID).Scan(&name); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
 	if name != "Renamed WS" {
 		t.Errorf("workspace name = %q, want Renamed WS", name)
 	}
 	// onboarding flag claimed.
 	var flag int
-	_ = db.QueryRow(`SELECT onboarding_completed FROM users WHERE id = ?`, userID).Scan(&flag)
+	if err := db.QueryRow(`SELECT onboarding_completed FROM users WHERE id = ?`, userID).Scan(&flag); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
 	if flag != 1 {
 		t.Errorf("onboarding_completed = %d, want 1", flag)
 	}
@@ -453,7 +475,9 @@ func TestCovOHCOnboardingSetup_TemplateUnknownProviderRejected(t *testing.T) {
 		t.Fatalf("status = %d, want 400 (unknown provider); body: %s", rr.Code, rr.Body.String())
 	}
 	var flag int
-	_ = db.QueryRow(`SELECT onboarding_completed FROM users WHERE id = ?`, userID).Scan(&flag)
+	if err := db.QueryRow(`SELECT onboarding_completed FROM users WHERE id = ?`, userID).Scan(&flag); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
 	if flag != 0 {
 		t.Errorf("onboarding_completed = %d, want rolled-back 0 after reject", flag)
 	}
@@ -474,7 +498,9 @@ func TestCovOHCOnboardingSetup_TemplateNotFound(t *testing.T) {
 	}
 	// Completion flag rolled back so a retry with a valid slug works.
 	var flag int
-	_ = db.QueryRow(`SELECT onboarding_completed FROM users WHERE id = ?`, userID).Scan(&flag)
+	if err := db.QueryRow(`SELECT onboarding_completed FROM users WHERE id = ?`, userID).Scan(&flag); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
 	if flag != 0 {
 		t.Errorf("onboarding_completed = %d, want rolled-back 0", flag)
 	}
@@ -486,7 +512,9 @@ func TestCovOHCOnboardingSetup_TemplateAlreadyCompletedConflict(t *testing.T) {
 	userID := seedTestUser(t, db)
 	seedTestWorkspace(t, db, userID)
 	covOHCSeedBuiltinTemplate(t, db, "dup-crew", "Dup Crew")
-	_, _ = db.Exec(`UPDATE users SET onboarding_completed = 1 WHERE id = ?`, userID)
+	if _, err := db.Exec(`UPDATE users SET onboarding_completed = 1 WHERE id = ?`, userID); err != nil {
+		t.Fatalf("exec: %v", err)
+	}
 	h := covOHCOnboardingHandler(db)
 
 	rr := covOHCPostSetup(t, h, userID, map[string]any{
@@ -650,19 +678,25 @@ func TestCovOHCHire_FullAutonomyJournalOnly(t *testing.T) {
 		t.Fatalf("status = %d, want 201; body: %s", rr.Code, rr.Body.String())
 	}
 	var resp hireResponse
-	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if resp.Decision != string(policy.DecisionAutoJournal) {
 		t.Errorf("decision = %q, want %q (full autonomy)", resp.Decision, policy.DecisionAutoJournal)
 	}
 	// Journal-only → no inbox row.
 	var inboxCount int
-	_ = db.QueryRow(`SELECT COUNT(*) FROM inbox_items WHERE source_id = ?`, resp.ID).Scan(&inboxCount)
+	if err := db.QueryRow(`SELECT COUNT(*) FROM inbox_items WHERE source_id = ?`, resp.ID).Scan(&inboxCount); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
 	if inboxCount != 0 {
 		t.Errorf("inbox rows = %d on full autonomy; want 0 (journal-only)", inboxCount)
 	}
 	// llm_provider inferred from model.
 	var prov string
-	_ = db.QueryRow(`SELECT COALESCE(llm_provider,'') FROM agents WHERE id = ?`, resp.ID).Scan(&prov)
+	if err := db.QueryRow(`SELECT COALESCE(llm_provider,'') FROM agents WHERE id = ?`, resp.ID).Scan(&prov); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
 	if prov != "ANTHROPIC" {
 		t.Errorf("llm_provider = %q, want ANTHROPIC (inferred)", prov)
 	}
@@ -716,7 +750,9 @@ func TestCovOHCHire_ParentLeadHappy(t *testing.T) {
 		t.Fatalf("status = %d, want 201; body: %s", rr.Code, rr.Body.String())
 	}
 	var resp hireResponse
-	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if resp.ParentLeadID == nil || *resp.ParentLeadID != "lead-ok" {
 		t.Errorf("parent_lead_id = %v, want lead-ok", resp.ParentLeadID)
 	}
@@ -798,7 +834,9 @@ func TestCovOHCRehire_GhostHappy(t *testing.T) {
 	}
 	// expired_at cleared (un-ghosted), reason appended.
 	var expiredAt, reason string
-	_ = db.QueryRow(`SELECT COALESCE(expired_at,''), COALESCE(hire_reason,'') FROM agents WHERE id = ?`, aid).Scan(&expiredAt, &reason)
+	if err := db.QueryRow(`SELECT COALESCE(expired_at,''), COALESCE(hire_reason,'') FROM agents WHERE id = ?`, aid).Scan(&expiredAt, &reason); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
 	if expiredAt != "" {
 		t.Errorf("expired_at = %q, want cleared after rehire", expiredAt)
 	}

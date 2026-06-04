@@ -423,7 +423,9 @@ func TestCovPCList_ExcludesEphemeralAndHiddenByDefault(t *testing.T) {
 	rr := httptest.NewRecorder()
 	h.List(rr, req)
 	var out []pipelineResponse
-	_ = json.Unmarshal(rr.Body.Bytes(), &out)
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if len(out) != 1 || out[0].Slug != "visible" {
 		t.Errorf("default list = %+v, want only [visible]", slugsOf(out))
 	}
@@ -434,7 +436,9 @@ func TestCovPCList_ExcludesEphemeralAndHiddenByDefault(t *testing.T) {
 	rr2 := httptest.NewRecorder()
 	h.List(rr2, req2)
 	var out2 []pipelineResponse
-	_ = json.Unmarshal(rr2.Body.Bytes(), &out2)
+	if err := json.Unmarshal(rr2.Body.Bytes(), &out2); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if len(out2) != 3 {
 		t.Errorf("include-all list count = %d, want 3 (%+v)", len(out2), slugsOf(out2))
 	}
@@ -451,7 +455,9 @@ func TestCovPCList_FilterByAuthorCrew(t *testing.T) {
 	rr := httptest.NewRecorder()
 	h.List(rr, req)
 	var out []pipelineResponse
-	_ = json.Unmarshal(rr.Body.Bytes(), &out)
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if len(out) != 1 || out[0].Slug != "mine" {
 		t.Errorf("author-crew filter = %+v, want only [mine]", slugsOf(out))
 	}

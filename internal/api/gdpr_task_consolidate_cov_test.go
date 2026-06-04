@@ -176,8 +176,10 @@ func TestCovGTC_CreateTask_DependencyCompleted_Pending(t *testing.T) {
 	// (exercises the allCompleted==true branch, distinct from the BLOCKED case
 	// already covered).
 	depID := generateCUID()
-	h.db.Exec(`INSERT INTO mission_tasks(id,mission_id,title,status,task_order,depends_on,created_at,updated_at)
-		VALUES (?,?,?,?,?,?,datetime('now'),datetime('now'))`, depID, missionID, "Dep", "COMPLETED", 1, "[]")
+	if _, err := h.db.Exec(`INSERT INTO mission_tasks(id,mission_id,title,status,task_order,depends_on,created_at,updated_at)
+		VALUES (?,?,?,?,?,?,datetime('now'),datetime('now'))`, depID, missionID, "Dep", "COMPLETED", 1, "[]"); err != nil {
+		t.Fatalf("insert dep: %v", err)
+	}
 
 	body := bytes.NewBufferString(`{"title":"after","depends_on":["` + depID + `"]}`)
 	req := httptest.NewRequest("POST", "/", body)
@@ -190,7 +192,9 @@ func TestCovGTC_CreateTask_DependencyCompleted_Pending(t *testing.T) {
 		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
 	}
 	var resp missionTaskResponse
-	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if resp.Status != "PENDING" {
 		t.Errorf("status = %q, want PENDING (all deps COMPLETED)", resp.Status)
 	}
@@ -215,8 +219,10 @@ func TestCovGTC_UpdateTask_BeginTxError_500(t *testing.T) {
 func TestCovGTC_UpdateTask_MetadataFields_OK(t *testing.T) {
 	h, userID, wsID, crewID, _, missionID := newMissionHandlerForTasks(t)
 	tID := generateCUID()
-	h.db.Exec(`INSERT INTO mission_tasks(id,mission_id,title,status,task_order,depends_on,created_at,updated_at)
-		VALUES (?,?,?,?,?,?,datetime('now'),datetime('now'))`, tID, missionID, "Task", "PENDING", 1, "[]")
+	if _, err := h.db.Exec(`INSERT INTO mission_tasks(id,mission_id,title,status,task_order,depends_on,created_at,updated_at)
+		VALUES (?,?,?,?,?,?,datetime('now'),datetime('now'))`, tID, missionID, "Task", "PENDING", 1, "[]"); err != nil {
+		t.Fatalf("insert task: %v", err)
+	}
 
 	// Only metadata fields (no status / editable-field gate) — exercises
 	// applyTaskMetadataFields' non-empty update builder path.
@@ -243,8 +249,10 @@ func TestCovGTC_UpdateTask_MetadataFields_OK(t *testing.T) {
 func TestCovGTC_UpdateTask_EditableTitleAndDeps_OK(t *testing.T) {
 	h, userID, wsID, crewID, _, missionID := newMissionHandlerForTasks(t)
 	tID := generateCUID()
-	h.db.Exec(`INSERT INTO mission_tasks(id,mission_id,title,status,task_order,depends_on,created_at,updated_at)
-		VALUES (?,?,?,?,?,?,datetime('now'),datetime('now'))`, tID, missionID, "Task", "PENDING", 1, "[]")
+	if _, err := h.db.Exec(`INSERT INTO mission_tasks(id,mission_id,title,status,task_order,depends_on,created_at,updated_at)
+		VALUES (?,?,?,?,?,?,datetime('now'),datetime('now'))`, tID, missionID, "Task", "PENDING", 1, "[]"); err != nil {
+		t.Fatalf("insert task: %v", err)
+	}
 
 	// Editable fields on a PENDING task: title + description + empty depends_on.
 	// Exercises applyTaskEditableFields success branches (title/description
@@ -274,11 +282,15 @@ func TestCovGTC_UpdateTask_CompletedUnblocksDependents(t *testing.T) {
 	// in-progress task that we transition to COMPLETED → unblockNeeded path +
 	// broadcast-on-status branch + the dependent gets unblocked.
 	doneID := generateCUID()
-	h.db.Exec(`INSERT INTO mission_tasks(id,mission_id,title,status,task_order,depends_on,created_at,updated_at)
-		VALUES (?,?,?,?,?,?,datetime('now'),datetime('now'))`, doneID, missionID, "Lead", "IN_PROGRESS", 1, "[]")
+	if _, err := h.db.Exec(`INSERT INTO mission_tasks(id,mission_id,title,status,task_order,depends_on,created_at,updated_at)
+		VALUES (?,?,?,?,?,?,datetime('now'),datetime('now'))`, doneID, missionID, "Lead", "IN_PROGRESS", 1, "[]"); err != nil {
+		t.Fatalf("insert lead: %v", err)
+	}
 	depID := generateCUID()
-	h.db.Exec(`INSERT INTO mission_tasks(id,mission_id,title,status,task_order,depends_on,created_at,updated_at)
-		VALUES (?,?,?,?,?,?,datetime('now'),datetime('now'))`, depID, missionID, "Dependent", "BLOCKED", 2, `["`+doneID+`"]`)
+	if _, err := h.db.Exec(`INSERT INTO mission_tasks(id,mission_id,title,status,task_order,depends_on,created_at,updated_at)
+		VALUES (?,?,?,?,?,?,datetime('now'),datetime('now'))`, depID, missionID, "Dependent", "BLOCKED", 2, `["`+doneID+`"]`); err != nil {
+		t.Fatalf("insert dependent: %v", err)
+	}
 
 	body := bytes.NewBufferString(`{"status":"COMPLETED"}`)
 	req := httptest.NewRequest("PATCH", "/", body)

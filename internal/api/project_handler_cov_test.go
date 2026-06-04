@@ -57,7 +57,9 @@ func covProjLeadID(t *testing.T, h *ProjectHandler, wsID, crewID string) string 
 	t.Helper()
 	leadID := "covproj-lead-" + crewID
 	var exists int
-	_ = h.db.QueryRow(`SELECT COUNT(*) FROM agents WHERE id = ?`, leadID).Scan(&exists)
+	if err := h.db.QueryRow(`SELECT COUNT(*) FROM agents WHERE id = ?`, leadID).Scan(&exists); err != nil {
+		t.Fatalf("scan agent count: %v", err)
+	}
 	if exists == 0 {
 		if _, err := h.db.ExecContext(context.Background(),
 			`INSERT INTO agents (id, workspace_id, crew_id, name, slug, agent_role, status, cli_adapter, temperature, timeout_seconds, tool_profile, memory_enabled)
@@ -212,7 +214,9 @@ func TestCovProjCreate_ExplicitFields(t *testing.T) {
 		t.Fatalf("status = %d, want 201", rec.Code)
 	}
 	var resp projectResponse
-	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if resp.Color != "red" || resp.Status != "in_progress" || resp.Priority != "high" {
 		t.Fatalf("explicit fields not honored: %+v", resp)
 	}
@@ -536,7 +540,9 @@ func TestCovProjStats_EmptyProject(t *testing.T) {
 	var resp struct {
 		TotalIssues int `json:"total_issues"`
 	}
-	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if resp.TotalIssues != 0 {
 		t.Fatalf("total = %d, want 0", resp.TotalIssues)
 	}

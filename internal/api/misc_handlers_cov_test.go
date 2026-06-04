@@ -29,7 +29,9 @@ func TestCovMisc_PendingEscalationCount_DBError(t *testing.T) {
 func TestCovMisc_CreateEscalation_CredentialType(t *testing.T) {
 	h, _, wsID, crewID, leadID, _ := newQueryHandler(t)
 	chatID := generateCUID()
-	h.db.Exec(`INSERT INTO chats(id,agent_id,workspace_id,mode,status) VALUES (?, ?, ?, 'CHAT', 'ACTIVE')`, chatID, leadID, wsID)
+	if _, err := h.db.Exec(`INSERT INTO chats(id,agent_id,workspace_id,mode,status) VALUES (?, ?, ?, 'CHAT', 'ACTIVE')`, chatID, leadID, wsID); err != nil {
+		t.Fatalf("insert chat: %v", err)
+	}
 
 	// CREDENTIAL type with context+metadata exercises the contextVal/metadataVal
 	// non-nil branches plus the explicit-type acceptance path.
@@ -61,9 +63,13 @@ func TestCovMisc_CreateEscalation_InsertDBError(t *testing.T) {
 func TestCovMisc_ResolveEscalation_RedirectSuccess(t *testing.T) {
 	h, userID, wsID, crewID, leadID, _ := newQueryHandler(t)
 	chatID := generateCUID()
-	h.db.Exec(`INSERT INTO chats(id,agent_id,workspace_id,mode,status) VALUES (?, ?, ?, 'CHAT', 'ACTIVE')`, chatID, leadID, wsID)
-	h.db.Exec(`INSERT INTO escalations(id,workspace_id,crew_id,chat_id,from_agent_id,reason,status,type,created_at)
-		VALUES ('e-redir-ok', ?, ?, ?, ?, 'help', 'PENDING', 'TEXT', datetime('now'))`, wsID, crewID, chatID, leadID)
+	if _, err := h.db.Exec(`INSERT INTO chats(id,agent_id,workspace_id,mode,status) VALUES (?, ?, ?, 'CHAT', 'ACTIVE')`, chatID, leadID, wsID); err != nil {
+		t.Fatalf("insert chat: %v", err)
+	}
+	if _, err := h.db.Exec(`INSERT INTO escalations(id,workspace_id,crew_id,chat_id,from_agent_id,reason,status,type,created_at)
+		VALUES ('e-redir-ok', ?, ?, ?, ?, 'help', 'PENDING', 'TEXT', datetime('now'))`, wsID, crewID, chatID, leadID); err != nil {
+		t.Fatalf("insert escalation: %v", err)
+	}
 
 	// redirect_to=worker exists in the same crew (seedIssueFixtures seeds slug "worker").
 	body := bytes.NewBufferString(`{"resolution":"hand off","action":"redirect","redirect_to":"worker"}`)
@@ -76,7 +82,9 @@ func TestCovMisc_ResolveEscalation_RedirectSuccess(t *testing.T) {
 		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
 	}
 	var resp map[string]string
-	json.Unmarshal(rr.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if resp["action"] != "redirect" {
 		t.Errorf("action = %q want redirect", resp["action"])
 	}
@@ -86,9 +94,13 @@ func TestCovMisc_ResolveEscalation_CredentialEncrypts(t *testing.T) {
 	setTestEncryptionKeyParallelSafe(t)
 	h, userID, wsID, crewID, leadID, _ := newQueryHandler(t)
 	chatID := generateCUID()
-	h.db.Exec(`INSERT INTO chats(id,agent_id,workspace_id,mode,status) VALUES (?, ?, ?, 'CHAT', 'ACTIVE')`, chatID, leadID, wsID)
-	h.db.Exec(`INSERT INTO escalations(id,workspace_id,crew_id,chat_id,from_agent_id,reason,status,type,created_at)
-		VALUES ('e-cred', ?, ?, ?, ?, 'secret please', 'PENDING', 'CREDENTIAL', datetime('now'))`, wsID, crewID, chatID, leadID)
+	if _, err := h.db.Exec(`INSERT INTO chats(id,agent_id,workspace_id,mode,status) VALUES (?, ?, ?, 'CHAT', 'ACTIVE')`, chatID, leadID, wsID); err != nil {
+		t.Fatalf("insert chat: %v", err)
+	}
+	if _, err := h.db.Exec(`INSERT INTO escalations(id,workspace_id,crew_id,chat_id,from_agent_id,reason,status,type,created_at)
+		VALUES ('e-cred', ?, ?, ?, ?, 'secret please', 'PENDING', 'CREDENTIAL', datetime('now'))`, wsID, crewID, chatID, leadID); err != nil {
+		t.Fatalf("insert escalation: %v", err)
+	}
 
 	body := bytes.NewBufferString(`{"resolution":"s3cr3t-value","action":"approve"}`)
 	req := httptest.NewRequest("PATCH", "/", body)
@@ -120,9 +132,13 @@ func TestCovMisc_ResolveEscalation_CredentialEncrypts(t *testing.T) {
 func TestCovMisc_ResolveEscalation_RedirectLookupDBError(t *testing.T) {
 	h, userID, wsID, crewID, leadID, _ := newQueryHandler(t)
 	chatID := generateCUID()
-	h.db.Exec(`INSERT INTO chats(id,agent_id,workspace_id,mode,status) VALUES (?, ?, ?, 'CHAT', 'ACTIVE')`, chatID, leadID, wsID)
-	h.db.Exec(`INSERT INTO escalations(id,workspace_id,crew_id,chat_id,from_agent_id,reason,status,type,created_at)
-		VALUES ('e-redir-err', ?, ?, ?, ?, 'help', 'PENDING', 'TEXT', datetime('now'))`, wsID, crewID, chatID, leadID)
+	if _, err := h.db.Exec(`INSERT INTO chats(id,agent_id,workspace_id,mode,status) VALUES (?, ?, ?, 'CHAT', 'ACTIVE')`, chatID, leadID, wsID); err != nil {
+		t.Fatalf("insert chat: %v", err)
+	}
+	if _, err := h.db.Exec(`INSERT INTO escalations(id,workspace_id,crew_id,chat_id,from_agent_id,reason,status,type,created_at)
+		VALUES ('e-redir-err', ?, ?, ?, ?, 'help', 'PENDING', 'TEXT', datetime('now'))`, wsID, crewID, chatID, leadID); err != nil {
+		t.Fatalf("insert escalation: %v", err)
+	}
 	if err := h.db.Close(); err != nil {
 		t.Fatalf("close db: %v", err)
 	}
@@ -142,9 +158,13 @@ func TestCovMisc_ListEscalations_CredentialMaskedAndDBError(t *testing.T) {
 		setTestEncryptionKeyParallelSafe(t)
 		h, userID, wsID, crewID, leadID, _ := newQueryHandler(t)
 		chatID := generateCUID()
-		h.db.Exec(`INSERT INTO chats(id,agent_id,workspace_id,mode,status) VALUES (?, ?, ?, 'CHAT', 'ACTIVE')`, chatID, leadID, wsID)
-		h.db.Exec(`INSERT INTO escalations(id,workspace_id,crew_id,chat_id,from_agent_id,reason,status,type,resolution,created_at)
-			VALUES ('e-mask', ?, ?, ?, ?, 'r', 'RESOLVED', 'CREDENTIAL', 'enc-blob', datetime('now'))`, wsID, crewID, chatID, leadID)
+		if _, err := h.db.Exec(`INSERT INTO chats(id,agent_id,workspace_id,mode,status) VALUES (?, ?, ?, 'CHAT', 'ACTIVE')`, chatID, leadID, wsID); err != nil {
+			t.Fatalf("insert chat: %v", err)
+		}
+		if _, err := h.db.Exec(`INSERT INTO escalations(id,workspace_id,crew_id,chat_id,from_agent_id,reason,status,type,resolution,created_at)
+			VALUES ('e-mask', ?, ?, ?, ?, 'r', 'RESOLVED', 'CREDENTIAL', 'enc-blob', datetime('now'))`, wsID, crewID, chatID, leadID); err != nil {
+			t.Fatalf("insert escalation: %v", err)
+		}
 
 		req := httptest.NewRequest("GET", "/?limit=10", nil)
 		req.SetPathValue("crewId", crewID)
@@ -198,14 +218,18 @@ func TestCovMisc_WaitForEscalation_CredentialDecrypt(t *testing.T) {
 	setTestEncryptionKeyParallelSafe(t)
 	h, _, wsID, crewID, leadID, _ := newQueryHandler(t)
 	chatID := generateCUID()
-	h.db.Exec(`INSERT INTO chats(id,agent_id,workspace_id,mode,status) VALUES (?, ?, ?, 'CHAT', 'ACTIVE')`, chatID, leadID, wsID)
+	if _, err := h.db.Exec(`INSERT INTO chats(id,agent_id,workspace_id,mode,status) VALUES (?, ?, ?, 'CHAT', 'ACTIVE')`, chatID, leadID, wsID); err != nil {
+		t.Fatalf("insert chat: %v", err)
+	}
 
 	enc, err := encryption.Encrypt("the-secret")
 	if err != nil {
 		t.Fatalf("encrypt: %v", err)
 	}
-	h.db.Exec(`INSERT INTO escalations(id,workspace_id,crew_id,chat_id,from_agent_id,reason,status,type,resolution,action,created_at)
-		VALUES ('e-wcred', ?, ?, ?, ?, 'r', 'RESOLVED', 'CREDENTIAL', ?, 'approve', datetime('now'))`, wsID, crewID, chatID, leadID, enc)
+	if _, err := h.db.Exec(`INSERT INTO escalations(id,workspace_id,crew_id,chat_id,from_agent_id,reason,status,type,resolution,action,created_at)
+		VALUES ('e-wcred', ?, ?, ?, ?, 'r', 'RESOLVED', 'CREDENTIAL', ?, 'approve', datetime('now'))`, wsID, crewID, chatID, leadID, enc); err != nil {
+		t.Fatalf("insert escalation: %v", err)
+	}
 
 	req := httptest.NewRequest("GET", "/", nil)
 	req.SetPathValue("escalationId", "e-wcred")
@@ -215,7 +239,9 @@ func TestCovMisc_WaitForEscalation_CredentialDecrypt(t *testing.T) {
 		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
 	}
 	var resp map[string]interface{}
-	json.Unmarshal(rr.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if resp["resolution"] != "the-secret" {
 		t.Errorf("resolution = %v, want decrypted plaintext", resp["resolution"])
 	}
@@ -224,9 +250,13 @@ func TestCovMisc_WaitForEscalation_CredentialDecrypt(t *testing.T) {
 func TestCovMisc_WaitForEscalation_ChannelDelivery(t *testing.T) {
 	h, _, wsID, crewID, leadID, _ := newQueryHandler(t)
 	chatID := generateCUID()
-	h.db.Exec(`INSERT INTO chats(id,agent_id,workspace_id,mode,status) VALUES (?, ?, ?, 'CHAT', 'ACTIVE')`, chatID, leadID, wsID)
-	h.db.Exec(`INSERT INTO escalations(id,workspace_id,crew_id,chat_id,from_agent_id,reason,status,type,created_at)
-		VALUES ('e-chan', ?, ?, ?, ?, 'h', 'PENDING', 'TEXT', datetime('now'))`, wsID, crewID, chatID, leadID)
+	if _, err := h.db.Exec(`INSERT INTO chats(id,agent_id,workspace_id,mode,status) VALUES (?, ?, ?, 'CHAT', 'ACTIVE')`, chatID, leadID, wsID); err != nil {
+		t.Fatalf("insert chat: %v", err)
+	}
+	if _, err := h.db.Exec(`INSERT INTO escalations(id,workspace_id,crew_id,chat_id,from_agent_id,reason,status,type,created_at)
+		VALUES ('e-chan', ?, ?, ?, ?, 'h', 'PENDING', 'TEXT', datetime('now'))`, wsID, crewID, chatID, leadID); err != nil {
+		t.Fatalf("insert escalation: %v", err)
+	}
 
 	done := make(chan *httptest.ResponseRecorder, 1)
 	go func() {
@@ -254,7 +284,9 @@ func TestCovMisc_WaitForEscalation_ChannelDelivery(t *testing.T) {
 		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
 	}
 	var resp map[string]interface{}
-	json.Unmarshal(rr.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if resp["resolution"] != "approved!" {
 		t.Errorf("resolution = %v, want approved!", resp["resolution"])
 	}
@@ -285,14 +317,22 @@ func TestCovMisc_Confidence_AutoEscalate_DedupAndNotify(t *testing.T) {
 	t.Run("dedup: second low report does not double-escalate", func(t *testing.T) {
 		h, _, wsID, crewID, leadID, workerID := newQueryHandler(t)
 		missionID := generateCUID()
-		h.db.Exec(`INSERT INTO chats(id,agent_id,workspace_id,mode,status) VALUES (?, ?, ?, 'MISSION', 'ACTIVE')`, missionID, leadID, wsID)
-		h.db.Exec(`UPDATE crews SET escalation_config='{"require_approval_below":0.5}' WHERE id=?`, crewID)
-		h.db.Exec(`INSERT INTO missions(id,workspace_id,crew_id,lead_agent_id,trace_id,title,status,created_at,updated_at)
-			VALUES (?, ?, ?, ?, ?, 'M', 'IN_PROGRESS', datetime('now'), datetime('now'))`, missionID, wsID, crewID, leadID, "trace-"+missionID)
+		if _, err := h.db.Exec(`INSERT INTO chats(id,agent_id,workspace_id,mode,status) VALUES (?, ?, ?, 'MISSION', 'ACTIVE')`, missionID, leadID, wsID); err != nil {
+			t.Fatalf("insert chat: %v", err)
+		}
+		if _, err := h.db.Exec(`UPDATE crews SET escalation_config='{"require_approval_below":0.5}' WHERE id=?`, crewID); err != nil {
+			t.Fatalf("update crew: %v", err)
+		}
+		if _, err := h.db.Exec(`INSERT INTO missions(id,workspace_id,crew_id,lead_agent_id,trace_id,title,status,created_at,updated_at)
+			VALUES (?, ?, ?, ?, ?, 'M', 'IN_PROGRESS', datetime('now'), datetime('now'))`, missionID, wsID, crewID, leadID, "trace-"+missionID); err != nil {
+			t.Fatalf("insert mission: %v", err)
+		}
 		tID := generateCUID()
-		h.db.Exec(`INSERT INTO mission_tasks(id,mission_id,assigned_agent_id,title,status,task_order,depends_on,created_at,updated_at)
+		if _, err := h.db.Exec(`INSERT INTO mission_tasks(id,mission_id,assigned_agent_id,title,status,task_order,depends_on,created_at,updated_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
-			tID, missionID, workerID, "T", "IN_PROGRESS", 1, "[]")
+			tID, missionID, workerID, "T", "IN_PROGRESS", 1, "[]"); err != nil {
+			t.Fatalf("insert mission_task: %v", err)
+		}
 
 		bodyStr := `{"agent_id":"` + workerID + `","crew_id":"` + crewID + `","confidence":0.2,"reason":"low"}`
 		for i := 0; i < 2; i++ {
@@ -317,15 +357,23 @@ func TestCovMisc_Confidence_AutoEscalate_DedupAndNotify(t *testing.T) {
 	t.Run("notify threshold only", func(t *testing.T) {
 		h, _, wsID, crewID, leadID, workerID := newQueryHandler(t)
 		missionID := generateCUID()
-		h.db.Exec(`INSERT INTO chats(id,agent_id,workspace_id,mode,status) VALUES (?, ?, ?, 'MISSION', 'ACTIVE')`, missionID, leadID, wsID)
+		if _, err := h.db.Exec(`INSERT INTO chats(id,agent_id,workspace_id,mode,status) VALUES (?, ?, ?, 'MISSION', 'ACTIVE')`, missionID, leadID, wsID); err != nil {
+			t.Fatalf("insert chat: %v", err)
+		}
 		// notify at 0.8, require-approval at 0.5 — confidence 0.6 should notify, not escalate.
-		h.db.Exec(`UPDATE crews SET escalation_config='{"require_approval_below":0.5,"notify_threshold":0.8}' WHERE id=?`, crewID)
-		h.db.Exec(`INSERT INTO missions(id,workspace_id,crew_id,lead_agent_id,trace_id,title,status,created_at,updated_at)
-			VALUES (?, ?, ?, ?, ?, 'M', 'IN_PROGRESS', datetime('now'), datetime('now'))`, missionID, wsID, crewID, leadID, "trace-"+missionID)
+		if _, err := h.db.Exec(`UPDATE crews SET escalation_config='{"require_approval_below":0.5,"notify_threshold":0.8}' WHERE id=?`, crewID); err != nil {
+			t.Fatalf("update crew: %v", err)
+		}
+		if _, err := h.db.Exec(`INSERT INTO missions(id,workspace_id,crew_id,lead_agent_id,trace_id,title,status,created_at,updated_at)
+			VALUES (?, ?, ?, ?, ?, 'M', 'IN_PROGRESS', datetime('now'), datetime('now'))`, missionID, wsID, crewID, leadID, "trace-"+missionID); err != nil {
+			t.Fatalf("insert mission: %v", err)
+		}
 		tID := generateCUID()
-		h.db.Exec(`INSERT INTO mission_tasks(id,mission_id,assigned_agent_id,title,status,task_order,depends_on,created_at,updated_at)
+		if _, err := h.db.Exec(`INSERT INTO mission_tasks(id,mission_id,assigned_agent_id,title,status,task_order,depends_on,created_at,updated_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
-			tID, missionID, workerID, "T", "IN_PROGRESS", 1, "[]")
+			tID, missionID, workerID, "T", "IN_PROGRESS", 1, "[]"); err != nil {
+			t.Fatalf("insert mission_task: %v", err)
+		}
 
 		body := bytes.NewBufferString(`{"agent_id":"` + workerID + `","crew_id":"` + crewID + `","confidence":0.6,"reason":"meh"}`)
 		req := httptest.NewRequest("POST", "/", body)
@@ -335,7 +383,9 @@ func TestCovMisc_Confidence_AutoEscalate_DedupAndNotify(t *testing.T) {
 			t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
 		}
 		var resp map[string]interface{}
-		json.Unmarshal(rr.Body.Bytes(), &resp)
+		if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
 		if resp["action"] != "notified" {
 			t.Errorf("action = %v, want notified", resp["action"])
 		}
@@ -398,7 +448,9 @@ func TestCovMisc_SetupStatus_NeedsBootstrap(t *testing.T) {
 		t.Fatalf("status = %d", rr.Code)
 	}
 	var resp setupStatusResponse
-	json.Unmarshal(rr.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if !resp.NeedsBootstrap {
 		t.Error("empty users table must report needs_bootstrap=true")
 	}
@@ -418,7 +470,9 @@ func TestCovMisc_SetupStatus_AlreadyInitialized(t *testing.T) {
 		t.Fatalf("status = %d", rr.Code)
 	}
 	var resp setupStatusResponse
-	json.Unmarshal(rr.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if resp.NeedsBootstrap {
 		t.Error("non-empty users table must report needs_bootstrap=false")
 	}
@@ -441,7 +495,9 @@ func TestCovMisc_SetupStatus_DBErrorFallsBackToFalse(t *testing.T) {
 		t.Fatalf("status = %d, want 200 even on DB error", rr.Code)
 	}
 	var resp setupStatusResponse
-	json.Unmarshal(rr.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if resp.NeedsBootstrap {
 		t.Error("DB error must fall back to needs_bootstrap=false")
 	}
@@ -475,7 +531,9 @@ func TestCovMisc_SystemVersion_Authenticated(t *testing.T) {
 		t.Fatalf("status = %d", rr.Code)
 	}
 	var resp map[string]interface{}
-	json.Unmarshal(rr.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if resp["current"] != "v1.2.3" {
 		t.Errorf("current = %v, want v1.2.3", resp["current"])
 	}

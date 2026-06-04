@@ -324,15 +324,21 @@ func TestCovIntDeleteWorkspaceIntegration(t *testing.T) {
 		t.Fatalf("delete: want 200, got %d: %s", rec3.Code, rec3.Body)
 	}
 	var n int
-	db.QueryRow(`SELECT COUNT(*) FROM workspace_mcp_servers WHERE id='wd-1'`).Scan(&n)
+	if err := db.QueryRow(`SELECT COUNT(*) FROM workspace_mcp_servers WHERE id='wd-1'`).Scan(&n); err != nil {
+		t.Fatalf("scan ws count: %v", err)
+	}
 	if n != 0 {
 		t.Fatalf("ws server not deleted")
 	}
-	db.QueryRow(`SELECT COUNT(*) FROM crew_mcp_servers WHERE id='cd-1'`).Scan(&n)
+	if err := db.QueryRow(`SELECT COUNT(*) FROM crew_mcp_servers WHERE id='cd-1'`).Scan(&n); err != nil {
+		t.Fatalf("scan crew count: %v", err)
+	}
 	if n != 0 {
 		t.Fatalf("crew server override not cascaded")
 	}
-	db.QueryRow(`SELECT COUNT(*) FROM agent_mcp_bindings WHERE id='bd-1'`).Scan(&n)
+	if err := db.QueryRow(`SELECT COUNT(*) FROM agent_mcp_bindings WHERE id='bd-1'`).Scan(&n); err != nil {
+		t.Fatalf("scan binding count: %v", err)
+	}
 	if n != 0 {
 		t.Fatalf("binding not cascaded")
 	}
@@ -460,13 +466,17 @@ func TestCovIntListCrewIntegrations_Migrate(t *testing.T) {
 		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body)
 	}
 	var n int
-	db.QueryRow(`SELECT COUNT(*) FROM crew_mcp_servers WHERE crew_id=? AND name='weather'`, crewID).Scan(&n)
+	if err := db.QueryRow(`SELECT COUNT(*) FROM crew_mcp_servers WHERE crew_id=? AND name='weather'`, crewID).Scan(&n); err != nil {
+		t.Fatalf("scan crew count: %v", err)
+	}
 	if n != 1 {
 		t.Fatalf("blob not migrated, count=%d", n)
 	}
 	// blob cleared
 	var blobAfter interface{}
-	db.QueryRow(`SELECT mcp_config_json FROM crews WHERE id=?`, crewID).Scan(&blobAfter)
+	if err := db.QueryRow(`SELECT mcp_config_json FROM crews WHERE id=?`, crewID).Scan(&blobAfter); err != nil {
+		t.Fatalf("scan blob: %v", err)
+	}
 	if blobAfter != nil {
 		t.Fatalf("blob not cleared: %v", blobAfter)
 	}
@@ -546,9 +556,13 @@ func TestCovIntCreateCrewIntegration(t *testing.T) {
 		t.Fatalf("create ok: want 201, got %d: %s", rec.Code, rec.Body)
 	}
 	var got crewMCPServerResponse
-	json.Unmarshal(rec.Body.Bytes(), &got)
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	var cnt int
-	db.QueryRow(`SELECT COUNT(*) FROM crew_mcp_servers WHERE id=? AND workspace_mcp_server_id='link-ok'`, got.ID).Scan(&cnt)
+	if err := db.QueryRow(`SELECT COUNT(*) FROM crew_mcp_servers WHERE id=? AND workspace_mcp_server_id='link-ok'`, got.ID).Scan(&cnt); err != nil {
+		t.Fatalf("scan count: %v", err)
+	}
 	if cnt != 1 {
 		t.Fatalf("crew integration not persisted with link")
 	}
@@ -598,7 +612,9 @@ func TestCovIntUpdateCrewIntegration(t *testing.T) {
 	}
 	var transport, dn string
 	var enabled int
-	db.QueryRow(`SELECT transport, display_name, enabled FROM crew_mcp_servers WHERE id='cu-1'`).Scan(&transport, &dn, &enabled)
+	if err := db.QueryRow(`SELECT transport, display_name, enabled FROM crew_mcp_servers WHERE id='cu-1'`).Scan(&transport, &dn, &enabled); err != nil {
+		t.Fatalf("scan crew server: %v", err)
+	}
 	if transport != "stdio" || dn != "GH" || enabled != 0 {
 		t.Fatalf("update not persisted: %s %s %d", transport, dn, enabled)
 	}
@@ -640,15 +656,21 @@ func TestCovIntDeleteCrewIntegration(t *testing.T) {
 		t.Fatalf("delete: want 200, got %d: %s", rec.Code, rec.Body)
 	}
 	var n int
-	db.QueryRow(`SELECT COUNT(*) FROM crew_mcp_servers WHERE id='cdel-1'`).Scan(&n)
+	if err := db.QueryRow(`SELECT COUNT(*) FROM crew_mcp_servers WHERE id='cdel-1'`).Scan(&n); err != nil {
+		t.Fatalf("scan crew count: %v", err)
+	}
 	if n != 0 {
 		t.Fatalf("crew server not deleted")
 	}
-	db.QueryRow(`SELECT COUNT(*) FROM agent_mcp_bindings WHERE id='bdel-1'`).Scan(&n)
+	if err := db.QueryRow(`SELECT COUNT(*) FROM agent_mcp_bindings WHERE id='bdel-1'`).Scan(&n); err != nil {
+		t.Fatalf("scan binding count: %v", err)
+	}
 	if n != 0 {
 		t.Fatalf("binding not deleted")
 	}
-	db.QueryRow(`SELECT COUNT(*) FROM credentials WHERE id=?`, credID).Scan(&n)
+	if err := db.QueryRow(`SELECT COUNT(*) FROM credentials WHERE id=?`, credID).Scan(&n); err != nil {
+		t.Fatalf("scan cred count: %v", err)
+	}
 	if n != 0 {
 		t.Fatalf("orphan oauth credential not cascade-deleted")
 	}
@@ -736,8 +758,12 @@ func TestCovIntMigrateJSONBlobToAgentServers(t *testing.T) {
 		t.Fatalf("migrate: %v", err)
 	}
 	var srvCnt, bindCnt int
-	db.QueryRow(`SELECT COUNT(*) FROM crew_mcp_servers WHERE crew_id=? AND name='weather'`, crewID).Scan(&srvCnt)
-	db.QueryRow(`SELECT COUNT(*) FROM agent_mcp_bindings WHERE agent_id=?`, agentID).Scan(&bindCnt)
+	if err := db.QueryRow(`SELECT COUNT(*) FROM crew_mcp_servers WHERE crew_id=? AND name='weather'`, crewID).Scan(&srvCnt); err != nil {
+		t.Fatalf("scan server count: %v", err)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM agent_mcp_bindings WHERE agent_id=?`, agentID).Scan(&bindCnt); err != nil {
+		t.Fatalf("scan binding count: %v", err)
+	}
 	if srvCnt != 1 || bindCnt != 1 {
 		t.Fatalf("migration incomplete: servers=%d bindings=%d", srvCnt, bindCnt)
 	}
@@ -781,7 +807,9 @@ func TestCovIntListAgentBindings(t *testing.T) {
 		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body)
 	}
 	var out []agentMCPBindingResponse
-	json.Unmarshal(rec.Body.Bytes(), &out)
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if len(out) != 1 || out[0].ServerName != "gh" {
 		t.Fatalf("unexpected bindings: %+v", out)
 	}
@@ -794,7 +822,9 @@ func TestCovIntCreateAgentBinding(t *testing.T) {
 	crewID := seedCrewRow(t, db, "crew-cb", wsID, "Crew", "crew-cb")
 	agentID := seedAgentRow(t, db, "agent-cb", wsID, crewID, "Ag", "ag", "AGENT")
 	otherWS := "other-cb"
-	db.Exec(`INSERT INTO workspaces (id, name, slug) VALUES (?, 'O', 'ocb')`, otherWS)
+	if _, err := db.Exec(`INSERT INTO workspaces (id, name, slug) VALUES (?, 'O', 'ocb')`, otherWS); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
 	covIntWSServer(t, db, "wsrv-cb", wsID, "gh", "streamable-http", "https://e")
 	covIntWSServer(t, db, "wsrv-other", otherWS, "ghother", "streamable-http", "https://e")
 	covIntCrewServer(t, db, "csrv-cb", crewID, "ghcrew", "streamable-http", "https://e")
@@ -850,9 +880,13 @@ func TestCovIntCreateAgentBinding(t *testing.T) {
 		t.Fatalf("create ok: want 201, got %d: %s", rec.Code, rec.Body)
 	}
 	var got agentMCPBindingResponse
-	json.Unmarshal(rec.Body.Bytes(), &got)
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	var cnt int
-	db.QueryRow(`SELECT COUNT(*) FROM agent_mcp_bindings WHERE id=? AND credential_id=?`, got.ID, credOK).Scan(&cnt)
+	if err := db.QueryRow(`SELECT COUNT(*) FROM agent_mcp_bindings WHERE id=? AND credential_id=?`, got.ID, credOK).Scan(&cnt); err != nil {
+		t.Fatalf("scan count: %v", err)
+	}
 	if cnt != 1 {
 		t.Fatalf("binding not persisted")
 	}
@@ -869,7 +903,9 @@ func TestCovIntUpdateAgentBinding(t *testing.T) {
 	crewID := seedCrewRow(t, db, "crew-ub", wsID, "Crew", "crew-ub")
 	agentID := seedAgentRow(t, db, "agent-ub", wsID, crewID, "Ag", "ag", "AGENT")
 	otherWS := "other-ub"
-	db.Exec(`INSERT INTO workspaces (id, name, slug) VALUES (?, 'O', 'oub')`, otherWS)
+	if _, err := db.Exec(`INSERT INTO workspaces (id, name, slug) VALUES (?, 'O', 'oub')`, otherWS); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
 	covIntCrewServer(t, db, "csrv-ub", crewID, "gh", "streamable-http", "https://e")
 	covIntBinding(t, db, "bind-ub", agentID, "csrv-ub", "crew", "")
 	credOK := covIntCredential(t, db, "cred-ub", wsID, userID, "tok", "ACTIVE")
@@ -958,7 +994,9 @@ func TestCovIntDeleteAgentBinding(t *testing.T) {
 		t.Fatalf("delete: want 200, got %d", rec.Code)
 	}
 	var n int
-	db.QueryRow(`SELECT COUNT(*) FROM agent_mcp_bindings WHERE id='bind-db'`).Scan(&n)
+	if err := db.QueryRow(`SELECT COUNT(*) FROM agent_mcp_bindings WHERE id='bind-db'`).Scan(&n); err != nil {
+		t.Fatalf("scan binding count: %v", err)
+	}
 	if n != 0 {
 		t.Fatalf("binding not deleted")
 	}
@@ -1030,7 +1068,9 @@ func TestCovIntResolveAgentIntegrations(t *testing.T) {
 		t.Fatalf("resolve: want 200, got %d: %s", rec.Code, rec.Body)
 	}
 	var out []ResolvedIntegration
-	json.Unmarshal(rec.Body.Bytes(), &out)
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	byName := map[string]ResolvedIntegration{}
 	for _, s := range out {
 		byName[s.Name] = s

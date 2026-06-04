@@ -274,7 +274,9 @@ func TestCovCMDCreate_TagsSet(t *testing.T) {
 		t.Errorf("response tags = %v, want 2", resp.Tags)
 	}
 	var tagsRaw sql.NullString
-	db.QueryRow("SELECT tags FROM credentials WHERE id = ?", resp.ID).Scan(&tagsRaw)
+	if err := db.QueryRow("SELECT tags FROM credentials WHERE id = ?", resp.ID).Scan(&tagsRaw); err != nil {
+		t.Fatalf("scan tags: %v", err)
+	}
 	if !tagsRaw.Valid || !strings.Contains(tagsRaw.String, "prod") {
 		t.Errorf("stored tags = %v, want JSON containing prod", tagsRaw)
 	}
@@ -295,7 +297,9 @@ func TestCovCMDCreate_EmptyTagsLeaveColumnNull(t *testing.T) {
 		t.Errorf("response tags = %v, want empty", resp.Tags)
 	}
 	var tagsRaw sql.NullString
-	db.QueryRow("SELECT tags FROM credentials WHERE id = ?", resp.ID).Scan(&tagsRaw)
+	if err := db.QueryRow("SELECT tags FROM credentials WHERE id = ?", resp.ID).Scan(&tagsRaw); err != nil {
+		t.Fatalf("scan tags: %v", err)
+	}
 	if tagsRaw.Valid {
 		t.Errorf("tags column = %q, want NULL on empty array", tagsRaw.String)
 	}
@@ -326,7 +330,9 @@ func TestCovCMDCreate_LegacyCrewIDMergedIntoCrewIDs(t *testing.T) {
 		t.Errorf("crew_ids = %v, want [crew-legacy]", resp.CrewIDs)
 	}
 	var count int
-	db.QueryRow("SELECT COUNT(*) FROM credential_crews WHERE credential_id = ? AND crew_id = 'crew-legacy'", resp.ID).Scan(&count)
+	if err := db.QueryRow("SELECT COUNT(*) FROM credential_crews WHERE credential_id = ? AND crew_id = 'crew-legacy'", resp.ID).Scan(&count); err != nil {
+		t.Fatalf("scan junction count: %v", err)
+	}
 	if count != 1 {
 		t.Errorf("junction rows = %d, want 1", count)
 	}
@@ -349,7 +355,9 @@ func TestCovCMDCreate_LegacyCrewIDDeduped(t *testing.T) {
 		t.Fatalf("status = %d, body: %s", rr.Code, rr.Body.String())
 	}
 	var count int
-	db.QueryRow("SELECT COUNT(*) FROM credential_crews WHERE credential_id = ?", resp.ID).Scan(&count)
+	if err := db.QueryRow("SELECT COUNT(*) FROM credential_crews WHERE credential_id = ?", resp.ID).Scan(&count); err != nil {
+		t.Fatalf("scan junction count: %v", err)
+	}
 	if count != 1 {
 		t.Errorf("junction rows = %d, want 1 (deduped)", count)
 	}
@@ -439,7 +447,9 @@ func TestCovCMDCreate_AttributionArmsPersisted(t *testing.T) {
 			}
 			var at sql.NullString
 			var aid sql.NullString
-			db.QueryRow("SELECT created_by_actor_type, created_by_actor_id FROM credentials WHERE id = ?", resp.ID).Scan(&at, &aid)
+			if err := db.QueryRow("SELECT created_by_actor_type, created_by_actor_id FROM credentials WHERE id = ?", resp.ID).Scan(&at, &aid); err != nil {
+				t.Fatalf("scan attribution: %v", err)
+			}
 			if at.String != tc.wantType {
 				t.Errorf("actor_type = %q, want %q", at.String, tc.wantType)
 			}
@@ -503,7 +513,9 @@ func TestCovCMDCreate_ProvisionedForServicePersisted(t *testing.T) {
 		t.Errorf("response provisioned_for_service = %v, want crew-a/postgres", resp.ProvisionedForService)
 	}
 	var pfs sql.NullString
-	db.QueryRow("SELECT provisioned_for_service FROM credentials WHERE id = ?", resp.ID).Scan(&pfs)
+	if err := db.QueryRow("SELECT provisioned_for_service FROM credentials WHERE id = ?", resp.ID).Scan(&pfs); err != nil {
+		t.Fatalf("scan provisioned_for_service: %v", err)
+	}
 	if !pfs.Valid || pfs.String != "crew-a/postgres" {
 		t.Errorf("stored provisioned_for_service = %v, want crew-a/postgres", pfs)
 	}
@@ -547,7 +559,9 @@ func TestCovCMDCreate_OAuth2ClientIDNoSecret(t *testing.T) {
 	}
 	var clientID string
 	var encSecret sql.NullString
-	db.QueryRow("SELECT oauth_client_id, oauth_client_secret_enc FROM credentials WHERE id = ?", resp.ID).Scan(&clientID, &encSecret)
+	if err := db.QueryRow("SELECT oauth_client_id, oauth_client_secret_enc FROM credentials WHERE id = ?", resp.ID).Scan(&clientID, &encSecret); err != nil {
+		t.Fatalf("scan oauth fields: %v", err)
+	}
 	if clientID != "cid" {
 		t.Errorf("oauth_client_id = %q, want cid", clientID)
 	}
@@ -592,7 +606,9 @@ func TestCovCMDUpdate_RotateResetsStatus(t *testing.T) {
 	}
 	var status string
 	var lastErr sql.NullString
-	db.QueryRow("SELECT status, last_error FROM credentials WHERE id = 'c-rot'").Scan(&status, &lastErr)
+	if err := db.QueryRow("SELECT status, last_error FROM credentials WHERE id = 'c-rot'").Scan(&status, &lastErr); err != nil {
+		t.Fatalf("scan status: %v", err)
+	}
 	if status != "ACTIVE" {
 		t.Errorf("status = %q, want ACTIVE after rotate", status)
 	}
@@ -638,8 +654,10 @@ func TestCovCMDUpdate_ProviderMetadata(t *testing.T) {
 	}
 	var provider, label, email string
 	var secLevel int
-	db.QueryRow("SELECT provider, account_label, account_email, security_level FROM credentials WHERE id = 'c-meta'").
-		Scan(&provider, &label, &email, &secLevel)
+	if err := db.QueryRow("SELECT provider, account_label, account_email, security_level FROM credentials WHERE id = 'c-meta'").
+		Scan(&provider, &label, &email, &secLevel); err != nil {
+		t.Fatalf("scan provider metadata: %v", err)
+	}
 	if provider != "GITLAB" || label != "work" || email != "a@b.co" || secLevel != 3 {
 		t.Errorf("got provider=%q label=%q email=%q sl=%d", provider, label, email, secLevel)
 	}
@@ -688,7 +706,9 @@ func TestCovCMDUpdate_TagsSetThenClear(t *testing.T) {
 		t.Fatalf("set tags status = %d, body: %s", rr.Code, rr.Body.String())
 	}
 	var raw sql.NullString
-	db.QueryRow("SELECT tags FROM credentials WHERE id = 'c-utags'").Scan(&raw)
+	if err := db.QueryRow("SELECT tags FROM credentials WHERE id = 'c-utags'").Scan(&raw); err != nil {
+		t.Fatalf("scan tags: %v", err)
+	}
 	if !raw.Valid || !strings.Contains(raw.String, "a") {
 		t.Errorf("tags after set = %v", raw)
 	}
@@ -697,7 +717,9 @@ func TestCovCMDUpdate_TagsSetThenClear(t *testing.T) {
 	if rr := covCMDupdate(t, h, userID, wsID, "c-utags", "OWNER", `{"tags":[]}`); rr.Code != http.StatusOK {
 		t.Fatalf("clear tags status = %d, body: %s", rr.Code, rr.Body.String())
 	}
-	db.QueryRow("SELECT tags FROM credentials WHERE id = 'c-utags'").Scan(&raw)
+	if err := db.QueryRow("SELECT tags FROM credentials WHERE id = 'c-utags'").Scan(&raw); err != nil {
+		t.Fatalf("scan tags: %v", err)
+	}
 	if raw.Valid {
 		t.Errorf("tags after clear = %q, want NULL", raw.String)
 	}
@@ -724,12 +746,16 @@ func TestCovCMDUpdate_CrewIDsClearedResetsToWorkspace(t *testing.T) {
 		t.Fatalf("clear status = %d, body: %s", rr.Code, rr.Body.String())
 	}
 	var scope string
-	db.QueryRow("SELECT scope FROM credentials WHERE id = 'c-clr'").Scan(&scope)
+	if err := db.QueryRow("SELECT scope FROM credentials WHERE id = 'c-clr'").Scan(&scope); err != nil {
+		t.Fatalf("scan scope: %v", err)
+	}
 	if scope != "WORKSPACE" {
 		t.Errorf("scope = %q, want WORKSPACE", scope)
 	}
 	var count int
-	db.QueryRow("SELECT COUNT(*) FROM credential_crews WHERE credential_id = 'c-clr'").Scan(&count)
+	if err := db.QueryRow("SELECT COUNT(*) FROM credential_crews WHERE credential_id = 'c-clr'").Scan(&count); err != nil {
+		t.Fatalf("scan junction count: %v", err)
+	}
 	if count != 0 {
 		t.Errorf("junction rows = %d, want 0", count)
 	}
@@ -762,15 +788,23 @@ func TestCovCMDList_MemberCrewScopedVisibility(t *testing.T) {
 	seedCredentialEnc(t, db, wsID, ownerID, "ws-cred", "ws-cred", "v")
 	// Crew-scoped cred attached to crew-mem (member belongs) — visible.
 	seedCredentialEnc(t, db, wsID, ownerID, "crew-cred", "crew-cred", "v")
-	db.Exec("UPDATE credentials SET scope = 'CREW' WHERE id = 'crew-cred'")
-	db.Exec(`INSERT INTO credential_crews (credential_id, crew_id) VALUES ('crew-cred', 'crew-mem')`)
+	if _, err := db.Exec("UPDATE credentials SET scope = 'CREW' WHERE id = 'crew-cred'"); err != nil {
+		t.Fatalf("set crew-cred scope: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO credential_crews (credential_id, crew_id) VALUES ('crew-cred', 'crew-mem')`); err != nil {
+		t.Fatalf("attach crew-cred: %v", err)
+	}
 	// Crew-scoped cred attached to a crew the member is NOT in — hidden.
 	if _, err := db.Exec(`INSERT INTO crews (id, workspace_id, name, slug, created_at, updated_at) VALUES ('crew-other', ?, 'O', 'o', datetime('now'), datetime('now'))`, wsID); err != nil {
 		t.Fatalf("seed other crew: %v", err)
 	}
 	seedCredentialEnc(t, db, wsID, ownerID, "hidden-cred", "hidden-cred", "v")
-	db.Exec("UPDATE credentials SET scope = 'CREW' WHERE id = 'hidden-cred'")
-	db.Exec(`INSERT INTO credential_crews (credential_id, crew_id) VALUES ('hidden-cred', 'crew-other')`)
+	if _, err := db.Exec("UPDATE credentials SET scope = 'CREW' WHERE id = 'hidden-cred'"); err != nil {
+		t.Fatalf("set hidden-cred scope: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO credential_crews (credential_id, crew_id) VALUES ('hidden-cred', 'crew-other')`); err != nil {
+		t.Fatalf("attach hidden-cred: %v", err)
+	}
 
 	req := httptest.NewRequest("GET", "/api/v1/credentials", nil)
 	req = withWorkspaceUser(req, memberID, wsID, "MEMBER")
@@ -780,7 +814,9 @@ func TestCovCMDList_MemberCrewScopedVisibility(t *testing.T) {
 		t.Fatalf("status = %d, body: %s", rr.Code, rr.Body.String())
 	}
 	var creds []credentialResponse
-	json.Unmarshal(rr.Body.Bytes(), &creds)
+	if err := json.Unmarshal(rr.Body.Bytes(), &creds); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	got := map[string]bool{}
 	for _, c := range creds {
 		got[c.ID] = true
@@ -810,7 +846,9 @@ func TestCovCMDList_Pagination(t *testing.T) {
 		t.Fatalf("status = %d, body: %s", rr.Code, rr.Body.String())
 	}
 	var creds []credentialResponse
-	json.Unmarshal(rr.Body.Bytes(), &creds)
+	if err := json.Unmarshal(rr.Body.Bytes(), &creds); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if len(creds) != 2 {
 		t.Errorf("len = %d, want 2 (limit honoured)", len(creds))
 	}

@@ -325,7 +325,9 @@ func TestCovPSWSchedules_Update_RetargetAndCron_Returns200(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
 	}
 	var resp scheduleResponse
-	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if resp.TargetPipelineID != "pln_b" {
 		t.Errorf("retarget failed: target = %q, want pln_b", resp.TargetPipelineID)
 	}
@@ -366,7 +368,9 @@ func TestCovPSWSchedules_Update_EmptyBodyPreserves_Returns200(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
 	}
 	var resp scheduleResponse
-	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if resp.CronExpr != "*/10 * * * *" {
 		t.Errorf("cron should be preserved: %q", resp.CronExpr)
 	}
@@ -472,7 +476,9 @@ func TestCovPSWWebhooks_Create_ByPipelineID_Returns201(t *testing.T) {
 		t.Fatalf("status = %d, want 201; body=%s", rr.Code, rr.Body.String())
 	}
 	var resp webhookResponse
-	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if resp.TargetPipelineID != "pln_id" {
 		t.Errorf("target id = %q, want pln_id", resp.TargetPipelineID)
 	}

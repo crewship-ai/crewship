@@ -155,7 +155,9 @@ func TestCovCMCreate_SSHKeyPEMSuccess(t *testing.T) {
 		t.Fatalf("status = %d, want 201; body: %s", rr.Code, rr.Body.String())
 	}
 	var typ string
-	db.QueryRow(`SELECT type FROM credentials WHERE name='sshk'`).Scan(&typ)
+	if err := db.QueryRow(`SELECT type FROM credentials WHERE name='sshk'`).Scan(&typ); err != nil {
+		t.Fatalf("scan type: %v", err)
+	}
 	if typ != "SSH_KEY" {
 		t.Errorf("type = %q, want SSH_KEY", typ)
 	}
@@ -194,12 +196,16 @@ func TestCovCMCreate_ManifestPending(t *testing.T) {
 		t.Fatalf("status = %d, want 201; body: %s", rr.Code, rr.Body.String())
 	}
 	var status string
-	db.QueryRow(`SELECT status FROM credentials WHERE name='slot'`).Scan(&status)
+	if err := db.QueryRow(`SELECT status FROM credentials WHERE name='slot'`).Scan(&status); err != nil {
+		t.Fatalf("scan status: %v", err)
+	}
 	if status != "PENDING" {
 		t.Errorf("status = %q, want PENDING", status)
 	}
 	var resp credentialResponse
-	json.Unmarshal(rr.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if resp.Status != "PENDING" {
 		t.Errorf("resp.Status = %q, want PENDING", resp.Status)
 	}
@@ -232,7 +238,9 @@ func TestCovCMCreate_SecurityLevelHonored(t *testing.T) {
 		t.Fatalf("status = %d, want 201; body: %s", rr.Code, rr.Body.String())
 	}
 	var lvl int
-	db.QueryRow(`SELECT security_level FROM credentials WHERE name='sl'`).Scan(&lvl)
+	if err := db.QueryRow(`SELECT security_level FROM credentials WHERE name='sl'`).Scan(&lvl); err != nil {
+		t.Fatalf("scan security_level: %v", err)
+	}
 	if lvl != 3 {
 		t.Errorf("security_level = %d, want 3", lvl)
 	}
@@ -251,7 +259,9 @@ func TestCovCMCreate_SecurityLevelOutOfRangeDefaultsTo1(t *testing.T) {
 		t.Fatalf("status = %d, want 201; body: %s", rr.Code, rr.Body.String())
 	}
 	var lvl int
-	db.QueryRow(`SELECT security_level FROM credentials WHERE name='sl2'`).Scan(&lvl)
+	if err := db.QueryRow(`SELECT security_level FROM credentials WHERE name='sl2'`).Scan(&lvl); err != nil {
+		t.Fatalf("scan security_level: %v", err)
+	}
 	if lvl != 1 {
 		t.Errorf("security_level = %d, want 1 (out-of-range default)", lvl)
 	}
@@ -271,12 +281,16 @@ func TestCovCMCreate_TagsAndDescription(t *testing.T) {
 		t.Fatalf("status = %d, want 201; body: %s", rr.Code, rr.Body.String())
 	}
 	var resp credentialResponse
-	json.Unmarshal(rr.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if len(resp.Tags) != 2 {
 		t.Errorf("resp.Tags = %v, want 2 entries", resp.Tags)
 	}
 	var tagsCol sql.NullString
-	db.QueryRow(`SELECT tags FROM credentials WHERE name='tagged'`).Scan(&tagsCol)
+	if err := db.QueryRow(`SELECT tags FROM credentials WHERE name='tagged'`).Scan(&tagsCol); err != nil {
+		t.Fatalf("scan tags: %v", err)
+	}
 	if !tagsCol.Valid || !strings.Contains(tagsCol.String, "prod") {
 		t.Errorf("tags column = %v, want JSON containing prod", tagsCol)
 	}
@@ -344,8 +358,10 @@ func TestCovCMCreate_AgentActorSuccess(t *testing.T) {
 	}
 	var actorType string
 	var actorID sql.NullString
-	db.QueryRow(`SELECT created_by_actor_type, created_by_actor_id FROM credentials WHERE name='a'`).
-		Scan(&actorType, &actorID)
+	if err := db.QueryRow(`SELECT created_by_actor_type, created_by_actor_id FROM credentials WHERE name='a'`).
+		Scan(&actorType, &actorID); err != nil {
+		t.Fatalf("scan attribution: %v", err)
+	}
 	if actorType != "agent" || !actorID.Valid || actorID.String != "ag1" {
 		t.Errorf("attribution = (%q,%v), want (agent,ag1)", actorType, actorID)
 	}
@@ -430,7 +446,9 @@ func TestCovCMCreate_ProvisionedForServiceSuccess(t *testing.T) {
 		t.Fatalf("status = %d, want 201; body: %s", rr.Code, rr.Body.String())
 	}
 	var pfs sql.NullString
-	db.QueryRow(`SELECT provisioned_for_service FROM credentials WHERE name='a'`).Scan(&pfs)
+	if err := db.QueryRow(`SELECT provisioned_for_service FROM credentials WHERE name='a'`).Scan(&pfs); err != nil {
+		t.Fatalf("scan provisioned_for_service: %v", err)
+	}
 	if !pfs.Valid || pfs.String != "crew/svc" {
 		t.Errorf("provisioned_for_service = %v, want crew/svc", pfs)
 	}
@@ -449,7 +467,9 @@ func TestCovCMCreate_ProvisionedForServiceWhitespaceIgnored(t *testing.T) {
 		t.Fatalf("status = %d, want 201; body: %s", rr.Code, rr.Body.String())
 	}
 	var pfs sql.NullString
-	db.QueryRow(`SELECT provisioned_for_service FROM credentials WHERE name='a'`).Scan(&pfs)
+	if err := db.QueryRow(`SELECT provisioned_for_service FROM credentials WHERE name='a'`).Scan(&pfs); err != nil {
+		t.Fatalf("scan provisioned_for_service: %v", err)
+	}
 	if pfs.Valid {
 		t.Errorf("provisioned_for_service = %q, want NULL", pfs.String)
 	}
@@ -470,12 +490,16 @@ func TestCovCMCreate_LegacyCrewIDMerged(t *testing.T) {
 		t.Fatalf("status = %d, want 201; body: %s", rr.Code, rr.Body.String())
 	}
 	var resp credentialResponse
-	json.Unmarshal(rr.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if resp.Scope != "CREW" {
 		t.Errorf("scope = %q, want CREW", resp.Scope)
 	}
 	var count int
-	db.QueryRow(`SELECT COUNT(*) FROM credential_crews WHERE credential_id=?`, resp.ID).Scan(&count)
+	if err := db.QueryRow(`SELECT COUNT(*) FROM credential_crews WHERE credential_id=?`, resp.ID).Scan(&count); err != nil {
+		t.Fatalf("scan junction count: %v", err)
+	}
 	if count != 1 {
 		t.Errorf("credential_crews = %d, want 1", count)
 	}
@@ -524,7 +548,9 @@ func TestCovCMUpdate_SecurityLevelSuccess(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
 	}
 	var lvl int
-	db.QueryRow(`SELECT security_level FROM credentials WHERE id='c1'`).Scan(&lvl)
+	if err := db.QueryRow(`SELECT security_level FROM credentials WHERE id='c1'`).Scan(&lvl); err != nil {
+		t.Fatalf("scan security_level: %v", err)
+	}
 	if lvl != 2 {
 		t.Errorf("security_level = %d, want 2", lvl)
 	}
@@ -544,7 +570,9 @@ func TestCovCMUpdate_TagsSet(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
 	}
 	var tagsCol sql.NullString
-	db.QueryRow(`SELECT tags FROM credentials WHERE id='c1'`).Scan(&tagsCol)
+	if err := db.QueryRow(`SELECT tags FROM credentials WHERE id='c1'`).Scan(&tagsCol); err != nil {
+		t.Fatalf("scan tags: %v", err)
+	}
 	if !tagsCol.Valid || !strings.Contains(tagsCol.String, "a") {
 		t.Errorf("tags = %v, want JSON containing a", tagsCol)
 	}
@@ -563,7 +591,9 @@ func TestCovCMUpdate_TagsCleared(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
 	}
 	var tagsCol sql.NullString
-	db.QueryRow(`SELECT tags FROM credentials WHERE id='c1'`).Scan(&tagsCol)
+	if err := db.QueryRow(`SELECT tags FROM credentials WHERE id='c1'`).Scan(&tagsCol); err != nil {
+		t.Fatalf("scan tags: %v", err)
+	}
 	if tagsCol.Valid {
 		t.Errorf("tags = %q, want NULL after clear", tagsCol.String)
 	}
@@ -596,7 +626,9 @@ func TestCovCMUpdate_RotateResetsStatusAndClearsError(t *testing.T) {
 	wsID := seedTestWorkspace(t, db, userID)
 	seedCredentialEnc(t, db, wsID, userID, "c1", "n", "old")
 	// Pretend the monitor flagged it.
-	db.Exec(`UPDATE credentials SET status='EXPIRED', last_error='boom' WHERE id='c1'`)
+	if _, err := db.Exec(`UPDATE credentials SET status='EXPIRED', last_error='boom' WHERE id='c1'`); err != nil {
+		t.Fatalf("set error state: %v", err)
+	}
 
 	rr := covCMUpdate(t, h, userID, wsID, "OWNER", "c1", `{"value":"fresh"}`)
 	if rr.Code != http.StatusOK {
@@ -604,7 +636,9 @@ func TestCovCMUpdate_RotateResetsStatusAndClearsError(t *testing.T) {
 	}
 	var status string
 	var lastErr sql.NullString
-	db.QueryRow(`SELECT status, last_error FROM credentials WHERE id='c1'`).Scan(&status, &lastErr)
+	if err := db.QueryRow(`SELECT status, last_error FROM credentials WHERE id='c1'`).Scan(&status, &lastErr); err != nil {
+		t.Fatalf("scan status: %v", err)
+	}
 	if status != "ACTIVE" {
 		t.Errorf("status = %q, want ACTIVE after rotate", status)
 	}

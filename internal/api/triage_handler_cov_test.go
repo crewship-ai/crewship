@@ -195,7 +195,9 @@ func TestCovTriCreateRule_Happy(t *testing.T) {
 	rec2 := httptest.NewRecorder()
 	h.CreateRule(rec2, req2)
 	var out2 triageRuleResponse
-	_ = json.Unmarshal(rec2.Body.Bytes(), &out2)
+	if err := json.Unmarshal(rec2.Body.Bytes(), &out2); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if out2.Position != 2 {
 		t.Fatalf("second rule position = %d, want 2", out2.Position)
 	}
@@ -393,7 +395,9 @@ func TestCovTriProcess_NoRules(t *testing.T) {
 		t.Fatalf("got %d, want 200", rec.Code)
 	}
 	var out map[string]int
-	_ = json.Unmarshal(rec.Body.Bytes(), &out)
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if out["processed"] != 0 || out["matched"] != 0 {
 		t.Fatalf("no-rules should be 0/0; got %+v", out)
 	}
@@ -426,7 +430,9 @@ func TestCovTriProcess_MatchedAndUnmatched(t *testing.T) {
 		t.Fatalf("got %d, want 200: %s", rec.Code, rec.Body.String())
 	}
 	var out map[string]int
-	_ = json.Unmarshal(rec.Body.Bytes(), &out)
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if out["processed"] != 2 {
 		t.Fatalf("processed = %d, want 2", out["processed"])
 	}
@@ -483,7 +489,9 @@ func TestCovTriProcess_RegexAndExactMatch(t *testing.T) {
 		t.Fatalf("got %d, want 200", rec.Code)
 	}
 	var out map[string]int
-	_ = json.Unmarshal(rec.Body.Bytes(), &out)
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if out["processed"] != 3 || out["matched"] != 2 {
 		t.Fatalf("got processed=%d matched=%d, want 3/2", out["processed"], out["matched"])
 	}

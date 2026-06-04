@@ -275,7 +275,9 @@ func TestCovPSTSuggest_NilResolverDefaultsInbox(t *testing.T) {
 		t.Fatalf("suggest: %d %s", rec.Code, rec.Body.String())
 	}
 	var got map[string]any
-	_ = json.Unmarshal(rec.Body.Bytes(), &got)
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if got["decision"] != string(policy.DecisionInboxApprove) {
 		t.Errorf("expected inbox_approve default; got %v", got["decision"])
 	}
@@ -303,7 +305,9 @@ func TestCovPSTSuggest_SoloAgentPath(t *testing.T) {
 		t.Fatalf("solo suggest: %d %s", rec.Code, rec.Body.String())
 	}
 	var got map[string]any
-	_ = json.Unmarshal(rec.Body.Bytes(), &got)
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	// crewID == "" so the resolver block is skipped → inbox-approve default.
 	if got["decision"] != string(policy.DecisionInboxApprove) {
 		t.Errorf("expected inbox_approve for solo agent; got %v", got["decision"])
@@ -510,7 +514,9 @@ func TestCovPSTCrewTemplate_ListGetCustom(t *testing.T) {
 		t.Fatalf("list: %d %s", rr.Code, rr.Body.String())
 	}
 	var templates []crewTemplateResponse
-	_ = json.Unmarshal(rr.Body.Bytes(), &templates)
+	if err := json.Unmarshal(rr.Body.Bytes(), &templates); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	var sawMine, sawTheirs bool
 	for _, tpl := range templates {
 		if tpl.Slug == "mine" {
@@ -537,7 +543,9 @@ func TestCovPSTCrewTemplate_ListGetCustom(t *testing.T) {
 		t.Fatalf("get mine: %d %s", getRR.Code, getRR.Body.String())
 	}
 	var got crewTemplateResponse
-	_ = json.Unmarshal(getRR.Body.Bytes(), &got)
+	if err := json.Unmarshal(getRR.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if len(got.Agents) != 1 || got.Agents[0].Slug != "dev" {
 		t.Errorf("expected 1 dev agent in custom template; got %+v", got.Agents)
 	}
@@ -590,7 +598,9 @@ func TestCovPSTDeploy_ExplicitSlugAndAutoAssign(t *testing.T) {
 		t.Fatalf("deploy: %d %s", depRR.Code, depRR.Body.String())
 	}
 	var dep deployCrewResult
-	_ = json.Unmarshal(depRR.Body.Bytes(), &dep)
+	if err := json.Unmarshal(depRR.Body.Bytes(), &dep); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	// Explicit slug got slugified ("Custom Slug!" → "custom-slug").
 	if dep.CrewSlug != "custom-slug" {
 		t.Errorf("expected slugified explicit slug 'custom-slug'; got %q", dep.CrewSlug)

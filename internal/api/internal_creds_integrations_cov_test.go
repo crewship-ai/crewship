@@ -194,7 +194,9 @@ func TestCovICIListCredentials_ProviderFilter(t *testing.T) {
 		t.Fatalf("status = %d, want 200, body: %s", rr.Code, rr.Body.String())
 	}
 	var result []map[string]any
-	json.Unmarshal(rr.Body.Bytes(), &result)
+	if err := json.Unmarshal(rr.Body.Bytes(), &result); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if len(result) != 1 {
 		t.Fatalf("len = %d, want 1 (provider filter)", len(result))
 	}
@@ -405,7 +407,9 @@ func TestCovICIGetWebhookSecret_Happy(t *testing.T) {
 		t.Fatalf("status = %d, want 200, body: %s", rr.Code, rr.Body.String())
 	}
 	var resp map[string]string
-	json.Unmarshal(rr.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if resp["webhook_secret"] != "whsec_abc" {
 		t.Errorf("webhook_secret = %q, want whsec_abc", resp["webhook_secret"])
 	}
@@ -674,7 +678,9 @@ func TestCovICIUpdateCrewIntegration_HappyTransition(t *testing.T) {
 		t.Fatalf("status = %d, want 200, body: %s", rr.Code, rr.Body.String())
 	}
 	var resp crewMCPServerResponse
-	json.Unmarshal(rr.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if resp.Transport != "streamable-http" {
 		t.Errorf("transport = %q, want streamable-http", resp.Transport)
 	}
@@ -761,19 +767,25 @@ func TestCovICIDeleteCrewIntegration_CascadesOAuthCredential(t *testing.T) {
 
 	// Server gone.
 	var serverCount int
-	db.QueryRow("SELECT COUNT(*) FROM crew_mcp_servers WHERE id = 'int-del'").Scan(&serverCount)
+	if err := db.QueryRow("SELECT COUNT(*) FROM crew_mcp_servers WHERE id = 'int-del'").Scan(&serverCount); err != nil {
+		t.Fatalf("scan server count: %v", err)
+	}
 	if serverCount != 0 {
 		t.Errorf("crew server should be deleted, count = %d", serverCount)
 	}
 	// Binding gone.
 	var bindCount int
-	db.QueryRow("SELECT COUNT(*) FROM agent_mcp_bindings WHERE id = 'bind-del'").Scan(&bindCount)
+	if err := db.QueryRow("SELECT COUNT(*) FROM agent_mcp_bindings WHERE id = 'bind-del'").Scan(&bindCount); err != nil {
+		t.Fatalf("scan bind count: %v", err)
+	}
 	if bindCount != 0 {
 		t.Errorf("binding should be deleted, count = %d", bindCount)
 	}
 	// OAuth credential cascade-deleted (no remaining bindings reference it).
 	var credCount int
-	db.QueryRow("SELECT COUNT(*) FROM credentials WHERE id = 'cred-oauth'").Scan(&credCount)
+	if err := db.QueryRow("SELECT COUNT(*) FROM credentials WHERE id = 'cred-oauth'").Scan(&credCount); err != nil {
+		t.Fatalf("scan cred count: %v", err)
+	}
 	if credCount != 0 {
 		t.Errorf("orphan OAuth credential should be cascade-deleted, count = %d", credCount)
 	}
@@ -801,7 +813,9 @@ func TestCovICIListAllCrewIntegrations_WithBlobMigration(t *testing.T) {
 		t.Fatalf("status = %d, want 200, body: %s", rr.Code, rr.Body.String())
 	}
 	var result []crewIntegrationOverview
-	json.Unmarshal(rr.Body.Bytes(), &result)
+	if err := json.Unmarshal(rr.Body.Bytes(), &result); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if len(result) != 1 {
 		t.Fatalf("len = %d, want 1 (migrated weather server)", len(result))
 	}
@@ -815,7 +829,9 @@ func TestCovICIListAllCrewIntegrations_WithBlobMigration(t *testing.T) {
 
 	// Blob should be cleared after successful migration.
 	var blobAfter sql.NullString
-	db.QueryRow("SELECT mcp_config_json FROM crews WHERE id = 'crewM'").Scan(&blobAfter)
+	if err := db.QueryRow("SELECT mcp_config_json FROM crews WHERE id = 'crewM'").Scan(&blobAfter); err != nil {
+		t.Fatalf("scan blob: %v", err)
+	}
 	if blobAfter.Valid && blobAfter.String != "" {
 		t.Errorf("mcp_config_json should be cleared after migration, got %q", blobAfter.String)
 	}
@@ -888,12 +904,16 @@ func TestCovICIMigrateJSONBlobToCrewServers_ClearsBlob(t *testing.T) {
 	}
 
 	var count int
-	db.QueryRow("SELECT COUNT(*) FROM crew_mcp_servers WHERE crew_id = 'crewMig'").Scan(&count)
+	if err := db.QueryRow("SELECT COUNT(*) FROM crew_mcp_servers WHERE crew_id = 'crewMig'").Scan(&count); err != nil {
+		t.Fatalf("scan count: %v", err)
+	}
 	if count != 2 {
 		t.Errorf("crew_mcp_servers count = %d, want 2", count)
 	}
 	var blobAfter sql.NullString
-	db.QueryRow("SELECT mcp_config_json FROM crews WHERE id = 'crewMig'").Scan(&blobAfter)
+	if err := db.QueryRow("SELECT mcp_config_json FROM crews WHERE id = 'crewMig'").Scan(&blobAfter); err != nil {
+		t.Fatalf("scan blob: %v", err)
+	}
 	if blobAfter.Valid && blobAfter.String != "" {
 		t.Errorf("blob should be cleared, got %q", blobAfter.String)
 	}
@@ -902,7 +922,9 @@ func TestCovICIMigrateJSONBlobToCrewServers_ClearsBlob(t *testing.T) {
 	if err := MigrateJSONBlobToCrewServers(context.Background(), db, covICILogger(), "crewMig", wsID, blob); err != nil {
 		t.Fatalf("migrate (2nd): %v", err)
 	}
-	db.QueryRow("SELECT COUNT(*) FROM crew_mcp_servers WHERE crew_id = 'crewMig'").Scan(&count)
+	if err := db.QueryRow("SELECT COUNT(*) FROM crew_mcp_servers WHERE crew_id = 'crewMig'").Scan(&count); err != nil {
+		t.Fatalf("scan count: %v", err)
+	}
 	if count != 2 {
 		t.Errorf("after idempotent re-run count = %d, want 2", count)
 	}
@@ -919,7 +941,9 @@ func TestCovICIMigrateJSONBlobToCrewServers_EmptyBlobNoop(t *testing.T) {
 		t.Fatalf("migrate empty: %v", err)
 	}
 	var count int
-	db.QueryRow("SELECT COUNT(*) FROM crew_mcp_servers WHERE crew_id = 'crewEmpty'").Scan(&count)
+	if err := db.QueryRow("SELECT COUNT(*) FROM crew_mcp_servers WHERE crew_id = 'crewEmpty'").Scan(&count); err != nil {
+		t.Fatalf("scan count: %v", err)
+	}
 	if count != 0 {
 		t.Errorf("empty blob should insert 0 rows, got %d", count)
 	}

@@ -61,7 +61,9 @@ func TestCovIHListMissionTypeOverride(t *testing.T) {
 		t.Fatalf("status = %d", rr.Code)
 	}
 	var got []issueResponse
-	json.Unmarshal(rr.Body.Bytes(), &got)
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if len(got) != 0 {
 		t.Errorf("len = %d, want 0", len(got))
 	}
@@ -143,9 +145,13 @@ func TestCovIHCreateWithLabelsHappy(t *testing.T) {
 		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
 	}
 	var resp issueResponse
-	json.Unmarshal(rr.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	var n int
-	h.db.QueryRow(`SELECT COUNT(*) FROM mission_labels WHERE mission_id=?`, resp.ID).Scan(&n)
+	if err := h.db.QueryRow(`SELECT COUNT(*) FROM mission_labels WHERE mission_id=?`, resp.ID).Scan(&n); err != nil {
+		t.Fatalf("scan label count: %v", err)
+	}
 	if n != 1 {
 		t.Errorf("label assoc count = %d, want 1", n)
 	}
@@ -399,7 +405,9 @@ func TestCovIHReviewApproveFromInProgress(t *testing.T) {
 		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
 	}
 	var st string
-	h.db.QueryRow(`SELECT status FROM missions WHERE crew_id=? AND identifier='ENG-1'`, crewID).Scan(&st)
+	if err := h.db.QueryRow(`SELECT status FROM missions WHERE crew_id=? AND identifier='ENG-1'`, crewID).Scan(&st); err != nil {
+		t.Fatalf("scan status: %v", err)
+	}
 	if st != "DONE" {
 		t.Errorf("status = %q, want DONE", st)
 	}
@@ -415,7 +423,9 @@ func TestCovIHReviewRequestChangesReassign(t *testing.T) {
 		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
 	}
 	var assignee string
-	h.db.QueryRow(`SELECT COALESCE(assignee_id,'') FROM missions WHERE crew_id=? AND identifier='ENG-1'`, crewID).Scan(&assignee)
+	if err := h.db.QueryRow(`SELECT COALESCE(assignee_id,'') FROM missions WHERE crew_id=? AND identifier='ENG-1'`, crewID).Scan(&assignee); err != nil {
+		t.Fatalf("scan assignee: %v", err)
+	}
 	if assignee != "agent-worker" {
 		t.Errorf("assignee_id = %q, want agent-worker", assignee)
 	}
@@ -467,7 +477,9 @@ func TestCovIHStartLeadAssignee(t *testing.T) {
 		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
 	}
 	var n int
-	h.db.QueryRow(`SELECT COUNT(*) FROM mission_tasks WHERE mission_id=?`, id).Scan(&n)
+	if err := h.db.QueryRow(`SELECT COUNT(*) FROM mission_tasks WHERE mission_id=?`, id).Scan(&n); err != nil {
+		t.Fatalf("scan task count: %v", err)
+	}
 	if n != 0 {
 		t.Errorf("task count = %d, want 0 (lead planning skips default task)", n)
 	}
@@ -507,12 +519,16 @@ func TestCovIHBulkUpdateWithLabels(t *testing.T) {
 		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
 	}
 	var resp map[string]int
-	json.Unmarshal(rr.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if resp["updated"] != 2 {
 		t.Errorf("updated = %d, want 2", resp["updated"])
 	}
 	var n int
-	h.db.QueryRow(`SELECT COUNT(*) FROM mission_labels WHERE mission_id=?`, id1).Scan(&n)
+	if err := h.db.QueryRow(`SELECT COUNT(*) FROM mission_labels WHERE mission_id=?`, id1).Scan(&n); err != nil {
+		t.Fatalf("scan label assoc: %v", err)
+	}
 	if n != 1 {
 		t.Errorf("label assoc = %d, want 1", n)
 	}
@@ -529,7 +545,9 @@ func TestCovIHBulkUpdateInvalidTransitionSkipped(t *testing.T) {
 		t.Fatalf("status = %d", rr.Code)
 	}
 	var resp map[string]int
-	json.Unmarshal(rr.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if resp["updated"] != 0 {
 		t.Errorf("updated = %d, want 0", resp["updated"])
 	}

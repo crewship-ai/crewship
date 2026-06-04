@@ -220,7 +220,9 @@ func TestCovAPCrewDeleteRoundTrip(t *testing.T) {
 		t.Fatalf("GET crew: %d %s", rec.Code, rec.Body.String())
 	}
 	var got map[string]any
-	_ = json.Unmarshal(rec.Body.Bytes(), &got)
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if got["content"] != "" {
 		t.Errorf("expected empty crew content after delete; got %+v", got)
 	}
@@ -268,7 +270,9 @@ func TestCovAPSoloAgentPersona(t *testing.T) {
 		t.Fatalf("GET solo: %d %s", rec.Code, rec.Body.String())
 	}
 	var got map[string]any
-	_ = json.Unmarshal(rec.Body.Bytes(), &got)
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if got["layer"] != "agent" || !strings.Contains(got["content"].(string), "Solo") {
 		t.Errorf("expected solo agent layer; got %+v", got)
 	}

@@ -134,7 +134,9 @@ func TestCovTGBCreateTask_WithCompletedDependency_Pending(t *testing.T) {
 		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
 	}
 	var resp missionTaskResponse
-	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if resp.Status != "PENDING" {
 		t.Errorf("status = %q, want PENDING", resp.Status)
 	}
@@ -177,7 +179,9 @@ func TestCovTGBUpdateTask_StatusTransition_Happy(t *testing.T) {
 		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
 	}
 	var resp missionTaskResponse
-	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if resp.Status != "IN_PROGRESS" {
 		t.Errorf("status = %q, want IN_PROGRESS", resp.Status)
 	}
@@ -208,7 +212,9 @@ func TestCovTGBUpdateTask_EditableFields_Happy(t *testing.T) {
 		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
 	}
 	var resp missionTaskResponse
-	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if resp.Title != "renamed" {
 		t.Errorf("title = %q, want renamed", resp.Title)
 	}
@@ -240,7 +246,9 @@ func TestCovTGBUpdateTask_DependsOnRecalc_Blocked(t *testing.T) {
 		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
 	}
 	var resp missionTaskResponse
-	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if resp.Status != "BLOCKED" {
 		t.Errorf("status = %q, want BLOCKED", resp.Status)
 	}
@@ -438,7 +446,9 @@ func TestCovTGBGDPRDelete_Happy_202(t *testing.T) {
 	}
 	// rows should be gone afterwards.
 	var n int
-	_ = h.db.QueryRow(`SELECT COUNT(*) FROM memory_versions WHERE data_subject_id = ?`, subj).Scan(&n)
+	if err := h.db.QueryRow(`SELECT COUNT(*) FROM memory_versions WHERE data_subject_id = ?`, subj).Scan(&n); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
 	if n != 0 {
 		t.Errorf("memory_versions remaining = %d, want 0", n)
 	}
