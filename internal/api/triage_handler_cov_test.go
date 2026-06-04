@@ -209,7 +209,7 @@ func TestCovTriUpdateRule_Forbidden(t *testing.T) {
 	h, db, userID, wsID := covTriHandler(t)
 	id := covTriSeedRule(t, db, wsID, "n", "p", "contains", true, 1)
 	req := httptest.NewRequest(http.MethodPatch, "/api/v1/triage/rules/"+id, jsonBody(map[string]string{"name": "x"}))
-	req.SetPathValue("id", id)
+	req.SetPathValue("ruleId", id)
 	req = withWorkspaceUser(req, userID, wsID, "VIEWER")
 	rec := httptest.NewRecorder()
 	h.UpdateRule(rec, req)
@@ -221,7 +221,7 @@ func TestCovTriUpdateRule_Forbidden(t *testing.T) {
 func TestCovTriUpdateRule_NotFound(t *testing.T) {
 	h, _, userID, wsID := covTriHandler(t)
 	req := httptest.NewRequest(http.MethodPatch, "/api/v1/triage/rules/missing", jsonBody(map[string]string{"name": "x"}))
-	req.SetPathValue("id", "missing")
+	req.SetPathValue("ruleId", "missing")
 	req = withWorkspaceUser(req, userID, wsID, "OWNER")
 	rec := httptest.NewRecorder()
 	h.UpdateRule(rec, req)
@@ -234,7 +234,7 @@ func TestCovTriUpdateRule_InvalidJSON(t *testing.T) {
 	h, db, userID, wsID := covTriHandler(t)
 	id := covTriSeedRule(t, db, wsID, "n", "p", "contains", true, 1)
 	req := httptest.NewRequest(http.MethodPatch, "/api/v1/triage/rules/"+id, strings.NewReader("{bad"))
-	req.SetPathValue("id", id)
+	req.SetPathValue("ruleId", id)
 	req = withWorkspaceUser(req, userID, wsID, "OWNER")
 	rec := httptest.NewRecorder()
 	h.UpdateRule(rec, req)
@@ -248,7 +248,7 @@ func TestCovTriUpdateRule_BadMatchType(t *testing.T) {
 	id := covTriSeedRule(t, db, wsID, "n", "p", "contains", true, 1)
 	mt := "invalid"
 	req := httptest.NewRequest(http.MethodPatch, "/api/v1/triage/rules/"+id, jsonBody(map[string]any{"match_type": mt}))
-	req.SetPathValue("id", id)
+	req.SetPathValue("ruleId", id)
 	req = withWorkspaceUser(req, userID, wsID, "OWNER")
 	rec := httptest.NewRecorder()
 	h.UpdateRule(rec, req)
@@ -263,7 +263,7 @@ func TestCovTriUpdateRule_BadRegex(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPatch, "/api/v1/triage/rules/"+id, jsonBody(map[string]any{
 		"pattern": "(", "match_type": "regex",
 	}))
-	req.SetPathValue("id", id)
+	req.SetPathValue("ruleId", id)
 	req = withWorkspaceUser(req, userID, wsID, "OWNER")
 	rec := httptest.NewRecorder()
 	h.UpdateRule(rec, req)
@@ -276,7 +276,7 @@ func TestCovTriUpdateRule_NoFields(t *testing.T) {
 	h, db, userID, wsID := covTriHandler(t)
 	id := covTriSeedRule(t, db, wsID, "n", "p", "contains", true, 1)
 	req := httptest.NewRequest(http.MethodPatch, "/api/v1/triage/rules/"+id, jsonBody(map[string]any{}))
-	req.SetPathValue("id", id)
+	req.SetPathValue("ruleId", id)
 	req = withWorkspaceUser(req, userID, wsID, "OWNER")
 	rec := httptest.NewRecorder()
 	h.UpdateRule(rec, req)
@@ -306,7 +306,7 @@ func TestCovTriUpdateRule_Happy(t *testing.T) {
 		"enabled":     enabled,
 	}
 	req := httptest.NewRequest(http.MethodPatch, "/api/v1/triage/rules/"+id, jsonBody(body))
-	req.SetPathValue("id", id)
+	req.SetPathValue("ruleId", id)
 	req = withWorkspaceUser(req, userID, wsID, "OWNER")
 	rec := httptest.NewRecorder()
 	h.UpdateRule(rec, req)
@@ -331,7 +331,7 @@ func TestCovTriDeleteRule_Forbidden(t *testing.T) {
 	h, db, userID, wsID := covTriHandler(t)
 	id := covTriSeedRule(t, db, wsID, "n", "p", "contains", true, 1)
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/triage/rules/"+id, nil)
-	req.SetPathValue("id", id)
+	req.SetPathValue("ruleId", id)
 	req = withWorkspaceUser(req, userID, wsID, "MANAGER") // manage requires OWNER/ADMIN
 	rec := httptest.NewRecorder()
 	h.DeleteRule(rec, req)
@@ -343,7 +343,7 @@ func TestCovTriDeleteRule_Forbidden(t *testing.T) {
 func TestCovTriDeleteRule_NotFound(t *testing.T) {
 	h, _, userID, wsID := covTriHandler(t)
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/triage/rules/missing", nil)
-	req.SetPathValue("id", "missing")
+	req.SetPathValue("ruleId", "missing")
 	req = withWorkspaceUser(req, userID, wsID, "OWNER")
 	rec := httptest.NewRecorder()
 	h.DeleteRule(rec, req)
@@ -356,7 +356,7 @@ func TestCovTriDeleteRule_Happy(t *testing.T) {
 	h, db, userID, wsID := covTriHandler(t)
 	id := covTriSeedRule(t, db, wsID, "n", "p", "contains", true, 1)
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/triage/rules/"+id, nil)
-	req.SetPathValue("id", id)
+	req.SetPathValue("ruleId", id)
 	req = withWorkspaceUser(req, userID, wsID, "OWNER")
 	rec := httptest.NewRecorder()
 	h.DeleteRule(rec, req)
