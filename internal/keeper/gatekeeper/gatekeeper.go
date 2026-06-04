@@ -430,7 +430,7 @@ func (g *Gatekeeper) buildBehaviorPrompt(req EvalRequest) string {
 	fmt.Fprintf(&sb, "Agent: %s (crew: %s)\n", req.AgentName, req.CrewName)
 	fmt.Fprintf(&sb, "Behavior mode: %s (warn=non-blocking inbox; block=interrupt next call)\n", in.BehaviorMode)
 	fmt.Fprintf(&sb, "Tool: %s\n", in.ToolName)
-	fmt.Fprintf(&sb, "Args (truncated): %s\n", truncateSnippet(in.ToolArgsSnippet, 500))
+	fmt.Fprintf(&sb, "Args (truncated): %q\n", truncateSnippet(in.ToolArgsSnippet, 500))
 	if len(in.RecentToolCalls) > 0 {
 		fmt.Fprintf(&sb, "Recent tool-call names (oldest→newest): %s\n", strings.Join(in.RecentToolCalls, ", "))
 	}
@@ -501,10 +501,10 @@ func (g *Gatekeeper) buildNegativeLearningPrompt(req EvalRequest) string {
 	if in.ToolName != "" {
 		fmt.Fprintf(&sb, "Tool: %s\n", in.ToolName)
 	}
-	fmt.Fprintf(&sb, "Failure snippet (truncated):\n%s\n", truncateSnippet(in.FailureSnippet, 1000))
+	fmt.Fprintf(&sb, "Failure snippet (truncated): %q\n", truncateSnippet(in.FailureSnippet, 1000))
 	if in.PriorLesson != "" {
 		sb.WriteString("Prior lesson on same kind (dup-suppression context):\n")
-		fmt.Fprintf(&sb, "%s\n", truncateSnippet(in.PriorLesson, 400))
+		fmt.Fprintf(&sb, "%q\n", truncateSnippet(in.PriorLesson, 400))
 	}
 	sb.WriteString("===================================\n\n")
 

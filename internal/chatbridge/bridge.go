@@ -33,8 +33,21 @@ const AgentStatusPendingReview = "PENDING_REVIEW"
 type ChatResolver interface {
 	CreateChat(ctx context.Context, req CreateChatRequest) error
 	ResolveChat(ctx context.Context, chatID string) (*ChatInfo, error)
-	ResolveAgent(ctx context.Context, agentID string) (*ChatInfo, error)
-	GetWebhookSecret(ctx context.Context, agentID string) (string, error)
+	// ResolveAgent resolves an agent ID to its configuration. workspaceID
+	// is an OPTIONAL tenant scope: when non-empty the resolver constrains
+	// the lookup to that workspace and a cross-tenant agent id yields a
+	// 404 (treated as "not found"). Callers that have already
+	// workspace-validated the agent id (e.g. the pipeline runner, which
+	// resolves the id via a workspace-joined query) pass it so the
+	// server-side scope engages; callers without a known workspace pass "".
+	ResolveAgent(ctx context.Context, agentID, workspaceID string) (*ChatInfo, error)
+	// GetWebhookSecret retrieves the webhook secret for an agent. crewID is
+	// an OPTIONAL tenant scope sent as ?crew_id= so the server constrains
+	// the lookup to the (crew, agent) pair the webhook URL named — without
+	// it any caller could fetch any agent's secret across crew boundaries
+	// and forge a validly-signed webhook. Empty crewID keeps the legacy
+	// id-only behavior for callers that don't know the crew.
+	GetWebhookSecret(ctx context.Context, crewID, agentID string) (string, error)
 	CreateRun(ctx context.Context, runID, agentID, chatID, workspaceID, triggerType string, metadata map[string]interface{}) error
 	UpdateRun(ctx context.Context, runID, status string, exitCode *int, errorMsg *string, metadata map[string]interface{}) error
 	IncrementMessageCount(ctx context.Context, chatID string, delta int) error

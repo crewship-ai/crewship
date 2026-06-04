@@ -16,7 +16,7 @@ func (s *Server) handleIssueCreate(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Title       string `json:"title"`
 		Description string `json:"description"`
-		CrewID      string `json:"crew_id"`
+		CrewID      string `json:"crew_id"` // SECURITY: ignored — the trusted IPC crew identity is always used.
 		Priority    string `json:"priority"`
 		ProjectID   string `json:"project_id"`
 		AssigneeID  string `json:"assignee_id"`
@@ -30,21 +30,22 @@ func (s *Server) handleIssueCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Default crew_id to the sidecar's crew if not specified
-	crewID := req.CrewID
-	if crewID == "" {
-		crewID = s.ipc.CrewID
-	}
+	// SECURITY: always use the trusted IPC crew identity. A request-supplied
+	// crew_id is ignored — honoring it would let a compromised agent create an
+	// issue in another crew (cross-crew override). This matches the
+	// keeper_bridge.go pattern of deriving crew from s.ipc.
+	crewID := s.ipc.CrewID
 	if crewID == "" {
 		writeJSONResponse(w, http.StatusBadRequest, map[string]string{"error": "crew_id is required"})
 		return
 	}
 
 	body := map[string]interface{}{
-		"workspace_id":  s.ipc.WorkspaceID,
-		"crew_id":       crewID,
-		"title":         req.Title,
-		"assignee_type": "agent",
+		"workspace_id":    s.ipc.WorkspaceID,
+		"crew_id":         crewID,
+		"title":           req.Title,
+		"assignee_type":   "agent",
+		"author_agent_id": s.ipc.AgentID,
 	}
 	if req.Description != "" {
 		body["description"] = req.Description

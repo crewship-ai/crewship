@@ -166,12 +166,13 @@ func (h *SavedViewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	wsID := WorkspaceIDFromContext(r.Context())
 	viewID := r.PathValue("viewId")
 
-	// Verify view exists and belongs to this user
+	// Verify view exists in this workspace and belongs to this user
 	var ownerID string
 	err := h.db.QueryRowContext(r.Context(),
-		`SELECT user_id FROM saved_views WHERE id = ?`, viewID).Scan(&ownerID)
+		`SELECT user_id FROM saved_views WHERE id = ? AND workspace_id = ?`, viewID, wsID).Scan(&ownerID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeProblem(w, r, http.StatusNotFound, "Saved view not found")
@@ -225,7 +226,7 @@ func (h *SavedViewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	query, args := ub.Build("saved_views", "id = ?", viewID)
+	query, args := ub.Build("saved_views", "id = ? AND workspace_id = ?", viewID, wsID)
 	if _, err := h.db.ExecContext(r.Context(), query, args...); err != nil {
 		h.logger.Error("update saved view", "error", err)
 		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
@@ -237,7 +238,7 @@ func (h *SavedViewHandler) Update(w http.ResponseWriter, r *http.Request) {
 	err = h.db.QueryRowContext(r.Context(), `
 		SELECT id, name, filters_json, sort_json, view_type,
 		       is_default, shared, created_at
-		FROM saved_views WHERE id = ?`, viewID).Scan(
+		FROM saved_views WHERE id = ? AND workspace_id = ?`, viewID, wsID).Scan(
 		&sv.ID, &sv.Name, &sv.FiltersJSON, &sv.SortJSON,
 		&sv.ViewType, &sv.IsDefault, &sv.Shared, &sv.CreatedAt,
 	)
@@ -261,12 +262,13 @@ func (h *SavedViewHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	wsID := WorkspaceIDFromContext(r.Context())
 	viewID := r.PathValue("viewId")
 
-	// Only the owner can delete
+	// Only the owner can delete, and only within the current workspace
 	var ownerID string
 	err := h.db.QueryRowContext(r.Context(),
-		`SELECT user_id FROM saved_views WHERE id = ?`, viewID).Scan(&ownerID)
+		`SELECT user_id FROM saved_views WHERE id = ? AND workspace_id = ?`, viewID, wsID).Scan(&ownerID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeProblem(w, r, http.StatusNotFound, "Saved view not found")
@@ -282,7 +284,7 @@ func (h *SavedViewHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	res, err := h.db.ExecContext(r.Context(),
-		`DELETE FROM saved_views WHERE id = ?`, viewID)
+		`DELETE FROM saved_views WHERE id = ? AND workspace_id = ?`, viewID, wsID)
 	if err != nil {
 		h.logger.Error("delete saved view", "error", err)
 		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")

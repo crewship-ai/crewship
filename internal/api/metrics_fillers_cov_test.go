@@ -437,11 +437,14 @@ func TestCovMetFillCostUSD_None(t *testing.T) {
 func TestCovMetFillCostUSD_GroupByModel(t *testing.T) {
 	h, db, wsID := newMetricsHandlerForTest(t)
 	seedCrewRow(t, db, "crew-mdl", wsID, "ModelCrew", "model-crew")
-	// Two leads with distinct llm_model values, plus one with NULL model to
-	// hit the COALESCE 'unknown' branch.
-	seedAgentRow(t, db, "lead-opus", wsID, "crew-mdl", "Opus", "opus", "LEAD")
-	seedAgentRow(t, db, "lead-sonnet", wsID, "crew-mdl", "Sonnet", "sonnet", "LEAD")
-	seedAgentRow(t, db, "lead-none", wsID, "crew-mdl", "NoneModel", "none-model", "LEAD")
+	// Three agents with distinct llm_model values (one NULL → COALESCE
+	// 'unknown' branch), each the lead_agent_id of a mission below.
+	// fillCostUSD joins missions.lead_agent_id → agents and groups by
+	// llm_model (no agent_role filter), and the DB enforces one LEAD per
+	// crew, so these are plain AGENTs sharing the crew.
+	seedAgentRow(t, db, "lead-opus", wsID, "crew-mdl", "Opus", "opus", "AGENT")
+	seedAgentRow(t, db, "lead-sonnet", wsID, "crew-mdl", "Sonnet", "sonnet", "AGENT")
+	seedAgentRow(t, db, "lead-none", wsID, "crew-mdl", "NoneModel", "none-model", "AGENT")
 	if _, err := db.Exec(`UPDATE agents SET llm_model = 'opus-x' WHERE id = 'lead-opus'`); err != nil {
 		t.Fatalf("set opus model: %v", err)
 	}

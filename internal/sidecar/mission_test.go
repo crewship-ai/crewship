@@ -327,7 +327,11 @@ func TestHandleMissionCreate_OmitsEmptyDescriptionAndPlan(t *testing.T) {
 	}
 }
 
-func TestHandleMissionCreate_RequestCrewIDOverridesIPC(t *testing.T) {
+// TestHandleMissionCreate_RequestCrewIDIgnored is the security regression test
+// for the cross-crew override vulnerability: a request-supplied crew_id must be
+// IGNORED. The sidecar always forwards its trusted IPC crew identity, so a
+// compromised agent cannot create a mission in another crew.
+func TestHandleMissionCreate_RequestCrewIDIgnored(t *testing.T) {
 	var sentBody map[string]interface{}
 	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		b, _ := io.ReadAll(r.Body)
@@ -351,8 +355,8 @@ func TestHandleMissionCreate_RequestCrewIDOverridesIPC(t *testing.T) {
 	if w.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d", w.Code)
 	}
-	if sentBody["crew_id"] != "override-crew" {
-		t.Errorf("expected req.crew_id to override IPC, got %v", sentBody["crew_id"])
+	if sentBody["crew_id"] != "ipc-crew" {
+		t.Errorf("request crew_id must be ignored; expected trusted IPC crew, got %v", sentBody["crew_id"])
 	}
 }
 

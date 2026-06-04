@@ -128,7 +128,11 @@ func (r *OrchestratorRunner) RunStep(ctx context.Context, req AgentStepRequest) 
 	//    skills, MCP servers etc. The resolver hits the internal
 	//    /api/v1/internal/agents/{id}/resolve endpoint so we get
 	//    the same configuration the chat handler uses.
-	info, err := r.resolver.ResolveAgent(ctx, agentID)
+	// req.WorkspaceID is passed so the resolver's server-side scope engages:
+	// agentID was already workspace-validated by resolveAgentID above, and
+	// sending the workspace makes the resolve query reject any id that
+	// somehow points outside this workspace (defence-in-depth, 404).
+	info, err := r.resolver.ResolveAgent(ctx, agentID, req.WorkspaceID)
 	if err != nil {
 		return AgentStepResult{}, fmt.Errorf("resolve agent config: %w", err)
 	}

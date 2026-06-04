@@ -210,7 +210,11 @@ func (h *BackupHandler) Create(w http.ResponseWriter, r *http.Request) {
 	outputDir := req.OutputDir
 	if outputDir != "" {
 		if err := validateBackupPath(outputDir); err != nil {
-			replyError(w, http.StatusBadRequest, "invalid output_dir: "+err.Error())
+			// Log the specific reason (which may include the backups
+			// directory path) server-side only; return a generic message
+			// so the client-facing response never leaks the absolute dir.
+			h.logger.Warn("backup output_dir rejected", "error", err.Error())
+			replyError(w, http.StatusBadRequest, "invalid backup path")
 			return
 		}
 	}
@@ -328,7 +332,11 @@ func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := validateBackupPath(req.Path); err != nil {
-		replyError(w, http.StatusBadRequest, err.Error())
+		// Log the specific reason (which may include the backups directory
+		// path) server-side only; return a generic message so the
+		// client-facing response never leaks the absolute dir.
+		h.logger.Warn("backup restore path rejected", "error", err.Error())
+		replyError(w, http.StatusBadRequest, "invalid backup path")
 		return
 	}
 	// Existence check returns 404 before RestoreBackup gets a chance

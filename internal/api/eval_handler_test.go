@@ -23,16 +23,22 @@ import (
 func seedMissionRow(t *testing.T, db *sql.DB, id, wsID, crewID, title string) string {
 	t.Helper()
 	// Use the seeded crew to anchor a lead agent — missions.NOT NULL
-	// FK on lead_agent_id means we need a real agent row.
+	// FK on lead_agent_id means we need a real agent row. The DB now
+	// enforces one LEAD per crew (idx_agents_one_lead_per_crew), so reuse
+	// an existing crew lead when seeding multiple missions in the same crew.
 	leadID := "lead-" + id
-	_, err := db.Exec(`INSERT INTO agents (id, workspace_id, crew_id, name, slug, agent_role, status,
-		cli_adapter, tool_profile, timeout_seconds, memory_enabled)
-		VALUES (?, ?, ?, ?, ?, 'LEAD', 'IDLE', 'CLAUDE_CODE', 'CODING', 1800, 0)`,
-		leadID, wsID, crewID, "Lead "+id, "lead-"+id)
-	if err != nil {
-		t.Fatalf("seed lead agent: %v", err)
+	var existing string
+	if err := db.QueryRow(`SELECT id FROM agents WHERE crew_id = ? AND agent_role = 'LEAD' AND deleted_at IS NULL`, crewID).Scan(&existing); err == nil {
+		leadID = existing
+	} else {
+		if _, err := db.Exec(`INSERT INTO agents (id, workspace_id, crew_id, name, slug, agent_role, status,
+			cli_adapter, tool_profile, timeout_seconds, memory_enabled)
+			VALUES (?, ?, ?, ?, ?, 'LEAD', 'IDLE', 'CLAUDE_CODE', 'CODING', 1800, 0)`,
+			leadID, wsID, crewID, "Lead "+id, "lead-"+id); err != nil {
+			t.Fatalf("seed lead agent: %v", err)
+		}
 	}
-	_, err = db.Exec(`INSERT INTO missions (id, workspace_id, crew_id, lead_agent_id, trace_id, title, status)
+	_, err := db.Exec(`INSERT INTO missions (id, workspace_id, crew_id, lead_agent_id, trace_id, title, status)
 		VALUES (?, ?, ?, ?, ?, ?, 'PLANNING')`,
 		id, wsID, crewID, leadID, "trace-"+id, title)
 	if err != nil {

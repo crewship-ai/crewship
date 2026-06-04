@@ -164,8 +164,8 @@ func TestHandleIssueCreate_ForwardsToCrewshipd(t *testing.T) {
 	if receivedBody["assignee_type"] != "agent" {
 		t.Errorf("expected assignee_type=agent (always), got %v", receivedBody["assignee_type"])
 	}
-	if receivedBody["crew_id"] != "crew-override" {
-		t.Errorf("request crew_id should override IPC crew_id, got %v", receivedBody["crew_id"])
+	if receivedBody["crew_id"] != "crew-1" {
+		t.Errorf("request crew_id must be ignored; expected trusted IPC crew, got %v", receivedBody["crew_id"])
 	}
 	if receivedBody["workspace_id"] != "ws-1" {
 		t.Errorf("expected workspace_id from IPC, got %v", receivedBody["workspace_id"])
@@ -212,6 +212,42 @@ func TestHandleIssueCreate_DefaultsCrewIDFromIPC(t *testing.T) {
 	}
 	if receivedBody["crew_id"] != "ipc-crew" {
 		t.Errorf("expected crew_id default from IPC, got %v", receivedBody["crew_id"])
+	}
+}
+
+// TestSecIssueCreate_RequestCrewIDIgnored is the security regression test for
+// the cross-crew override vulnerability: a request-supplied crew_id must be
+// IGNORED. The sidecar always forwards its trusted IPC crew + agent identity.
+func TestSecIssueCreate_RequestCrewIDIgnored(t *testing.T) {
+	var receivedBody map[string]interface{}
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		json.Unmarshal(b, &receivedBody)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		w.Write([]byte(`{}`))
+	}))
+	defer mock.Close()
+
+	srv := newQueryServer(t, &IPCConfig{
+		BaseURL: mock.URL, Token: "t", CrewID: "ipc-crew", WorkspaceID: "w", AgentID: "ipc-agent",
+	}, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/issue/create",
+		strings.NewReader(`{"title":"x","crew_id":"override-crew"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	srv.handleIssueCreate(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", w.Code)
+	}
+	if receivedBody["crew_id"] != "ipc-crew" {
+		t.Errorf("request crew_id must be ignored; expected trusted IPC crew, got %v", receivedBody["crew_id"])
+	}
+	if receivedBody["author_agent_id"] != "ipc-agent" {
+		t.Errorf("expected author_agent_id forwarded from IPC, got %v", receivedBody["author_agent_id"])
 	}
 }
 

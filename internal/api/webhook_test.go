@@ -27,12 +27,14 @@ import (
 // reaching the orchestrator. Other methods exist to satisfy the
 // chatbridge.ChatResolver interface; they return zero values.
 type fakeChatResolver struct {
-	lookupCalledWithAgentID  string
-	lookupReturnSecret       string
-	lookupReturnErr          error
-	resolveCalledWithAgentID string
-	resolveReturnInfo        *chatbridge.ChatInfo
-	resolveReturnErr         error
+	lookupCalledWithAgentID      string
+	lookupCalledWithCrewID       string
+	lookupReturnSecret           string
+	lookupReturnErr              error
+	resolveCalledWithAgentID     string
+	resolveCalledWithWorkspaceID string
+	resolveReturnInfo            *chatbridge.ChatInfo
+	resolveReturnErr             error
 }
 
 func (f *fakeChatResolver) CreateChat(_ context.Context, _ chatbridge.CreateChatRequest) error {
@@ -41,12 +43,14 @@ func (f *fakeChatResolver) CreateChat(_ context.Context, _ chatbridge.CreateChat
 func (f *fakeChatResolver) ResolveChat(_ context.Context, _ string) (*chatbridge.ChatInfo, error) {
 	return nil, nil
 }
-func (f *fakeChatResolver) ResolveAgent(_ context.Context, agentID string) (*chatbridge.ChatInfo, error) {
+func (f *fakeChatResolver) ResolveAgent(_ context.Context, agentID, workspaceID string) (*chatbridge.ChatInfo, error) {
 	f.resolveCalledWithAgentID = agentID
+	f.resolveCalledWithWorkspaceID = workspaceID
 	return f.resolveReturnInfo, f.resolveReturnErr
 }
-func (f *fakeChatResolver) GetWebhookSecret(_ context.Context, agentID string) (string, error) {
+func (f *fakeChatResolver) GetWebhookSecret(_ context.Context, crewID, agentID string) (string, error) {
 	f.lookupCalledWithAgentID = agentID
+	f.lookupCalledWithCrewID = crewID
 	return f.lookupReturnSecret, f.lookupReturnErr
 }
 func (f *fakeChatResolver) CreateRun(_ context.Context, _, _, _, _, _ string, _ map[string]interface{}) error {

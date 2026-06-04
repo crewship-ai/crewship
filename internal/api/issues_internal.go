@@ -167,14 +167,15 @@ func (h *InternalIssueHandler) Get(w http.ResponseWriter, r *http.Request) {
 // Allows agents to create issues via the sidecar.
 func (h *InternalIssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		WorkspaceID  string   `json:"workspace_id"`
-		CrewID       string   `json:"crew_id"`
-		Title        string   `json:"title"`
-		Description  *string  `json:"description"`
-		Priority     string   `json:"priority"`
-		AssigneeType *string  `json:"assignee_type"`
-		AssigneeID   *string  `json:"assignee_id"`
-		Labels       []string `json:"labels"`
+		WorkspaceID   string   `json:"workspace_id"`
+		CrewID        string   `json:"crew_id"`
+		Title         string   `json:"title"`
+		Description   *string  `json:"description"`
+		Priority      string   `json:"priority"`
+		AssigneeType  *string  `json:"assignee_type"`
+		AssigneeID    *string  `json:"assignee_id"`
+		AuthorAgentID string   `json:"author_agent_id"`
+		Labels        []string `json:"labels"`
 	}
 	if err := readJSON(r, &req); err != nil {
 		writeProblem(w, r, http.StatusBadRequest, "Invalid JSON body")
@@ -186,6 +187,26 @@ func (h *InternalIssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Priority == "" {
 		req.Priority = "none"
+	}
+
+	// SECURITY (defense-in-depth): when an author agent is supplied, verify it
+	// actually belongs to the supplied crew+workspace. Without this, a
+	// compromised agent could create an issue in another crew (cross-crew
+	// override). The sidecar always forwards its trusted IPC agent identity.
+	if req.AuthorAgentID != "" {
+		var exists int
+		err := h.db.QueryRowContext(r.Context(),
+			`SELECT 1 FROM agents WHERE id = ? AND crew_id = ? AND workspace_id = ? AND deleted_at IS NULL`,
+			req.AuthorAgentID, req.CrewID, req.WorkspaceID).Scan(&exists)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				writeProblem(w, r, http.StatusBadRequest, "author agent does not belong to the specified crew/workspace")
+				return
+			}
+			h.logger.Error("validate author agent", "error", err)
+			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			return
+		}
 	}
 
 	tx, err := h.db.BeginTx(r.Context(), nil)
