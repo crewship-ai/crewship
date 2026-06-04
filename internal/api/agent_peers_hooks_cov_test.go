@@ -259,14 +259,14 @@ func TestCovPH2HooksList_CrewFilterHappy(t *testing.T) {
 	// for a crew-filtered list (WHERE crew_id IS NULL OR crew_id = ?).
 	if _, err := hooks.Register(context.Background(), db, hooks.Hook{
 		WorkspaceID: wsID, CrewID: crewID, Event: hooks.EventPostToolCall,
-		HandlerKind: hooks.HandlerKindHTTP,
+		HandlerKind:   hooks.HandlerKindHTTP,
 		HandlerConfig: map[string]any{"url": "http://x.test/h"}, Enabled: true,
 	}, false); err != nil {
 		t.Fatalf("register crew hook: %v", err)
 	}
 	if _, err := hooks.Register(context.Background(), db, hooks.Hook{
 		WorkspaceID: wsID, Event: hooks.EventPreToolCall,
-		HandlerKind: hooks.HandlerKindHTTP,
+		HandlerKind:   hooks.HandlerKindHTTP,
 		HandlerConfig: map[string]any{"url": "http://x.test/g"}, Enabled: true,
 	}, false); err != nil {
 		t.Fatalf("register ws hook: %v", err)
