@@ -44,11 +44,11 @@ func (m *mockResolver) UpdateChatTitle(_ context.Context, _, _ string) error {
 	return nil
 }
 
-func (m *mockResolver) ResolveAgent(_ context.Context, _ string) (*ChatInfo, error) {
+func (m *mockResolver) ResolveAgent(_ context.Context, _, _ string) (*ChatInfo, error) {
 	return m.info, m.err
 }
 
-func (m *mockResolver) GetWebhookSecret(_ context.Context, _ string) (string, error) {
+func (m *mockResolver) GetWebhookSecret(_ context.Context, _, _ string) (string, error) {
 	return "", nil
 }
 

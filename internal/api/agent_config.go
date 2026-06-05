@@ -284,9 +284,19 @@ func (h *InternalHandler) resolveAgentConfigWithOpener(w http.ResponseWriter, r 
 // -----------------------------------------------------------------------------
 
 // loadAgentData fetches the core agent and crew data from the database.
+//
+// Tenant scoping: an OPTIONAL ?workspace_id= query param constrains the
+// lookup to that workspace (mirrors the GetWebhookSecret optional-scope
+// shape). When present and the agent belongs to a different workspace the
+// row doesn't match and the caller sees the same sql.ErrNoRows → 404 as a
+// genuinely-missing agent (we don't leak cross-tenant existence). A missing
+// param keeps the legacy id-only behavior so existing internal callers
+// (chat resolve, webhook resolve) are unaffected. Callers that ALREADY
+// workspace-validated the id (the pipeline runner) send it so the scope
+// engages defence-in-depth.
 func (h *InternalHandler) loadAgentData(r *http.Request, agentID string) (*agentConfigData, error) {
 	d := &agentConfigData{agentID: agentID}
-	err := h.db.QueryRowContext(r.Context(), `
+	query := `
 		SELECT a.slug, a.name, a.status, a.role_title, a.agent_role, a.cli_adapter, a.system_prompt_legacy,
 			a.tool_profile, a.timeout_seconds, a.memory_enabled,
 			c2.id, c2.slug, c2.name, a.workspace_id, a.llm_model,
@@ -297,8 +307,13 @@ func (h *InternalHandler) loadAgentData(r *http.Request, agentID string) (*agent
 			c2.mcp_config_json, a.mcp_config_json
 		FROM agents a
 		LEFT JOIN crews c2 ON c2.id = a.crew_id
-		WHERE a.id = ?
-	`, agentID).Scan(&d.agentSlug, &d.agentName, &d.agentStatus, &d.roleTitle, &d.agentRole, &d.cliAdapter, &d.systemPrompt,
+		WHERE a.id = ?`
+	args := []any{agentID}
+	if wsID := r.URL.Query().Get("workspace_id"); wsID != "" {
+		query += " AND a.workspace_id = ?"
+		args = append(args, wsID)
+	}
+	err := h.db.QueryRowContext(r.Context(), query, args...).Scan(&d.agentSlug, &d.agentName, &d.agentStatus, &d.roleTitle, &d.agentRole, &d.cliAdapter, &d.systemPrompt,
 		&d.toolProfile, &d.timeoutSecs, &d.memoryEnabled,
 		&d.crewID, &d.crewSlug, &d.crewName, &d.wsID, &d.llmModel,
 		&d.crewNetworkMode, &d.crewAllowedDomains,

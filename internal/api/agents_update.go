@@ -192,6 +192,34 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Validate crew_id if being updated. crew_id is a relational field —
+	// without this check a PATCH could reassign an agent into a crew that
+	// belongs to ANOTHER workspace (cross-tenant IDOR), since the update
+	// builder applies it verbatim. Mirror the credentials_mutate.go
+	// pattern: a present non-empty crew_id must exist in the CALLER's
+	// workspace. An explicit empty string (detach from crew) is allowed;
+	// null and non-string values are rejected (use "" to detach) so the
+	// builder can never NULL-out crew_id and orphan the agent.
+	if crewVal, ok := body["crew_id"]; ok {
+		crewStr, isStr := crewVal.(string)
+		if !isStr {
+			replyError(w, http.StatusBadRequest, "Invalid crew_id")
+			return
+		}
+		if crewStr != "" {
+			crewFound, err := crewExists(r.Context(), h.db, crewStr, workspaceID)
+			if err != nil {
+				h.logger.Error("check crew exists for agent update", "crew_id", crewStr, "error", err)
+				replyError(w, http.StatusInternalServerError, "Internal server error")
+				return
+			}
+			if !crewFound {
+				replyError(w, http.StatusBadRequest, "Invalid crew_id")
+				return
+			}
+		}
+	}
+
 	ub := newUpdate()
 	for jsonKey, col := range allowed {
 		if val, ok := body[jsonKey]; ok {

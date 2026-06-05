@@ -312,14 +312,24 @@ func (r *IPCResolver) ResolveChat(ctx context.Context, chatID string) (*ChatInfo
 }
 
 // ResolveAgent resolves an agent ID to its configuration via the internal API.
-func (r *IPCResolver) ResolveAgent(ctx context.Context, agentID string) (*ChatInfo, error) {
+// When workspaceID is non-empty it is sent as ?workspace_id= so the server
+// constrains the lookup to that tenant (404 on cross-tenant id).
+func (r *IPCResolver) ResolveAgent(ctx context.Context, agentID, workspaceID string) (*ChatInfo, error) {
 	resolveURL := fmt.Sprintf("%s/api/v1/internal/agents/%s/resolve", r.baseURL, url.PathEscape(agentID))
+	if workspaceID != "" {
+		resolveURL += "?workspace_id=" + url.QueryEscape(workspaceID)
+	}
 	return r.resolve(ctx, resolveURL)
 }
 
 // GetWebhookSecret retrieves the webhook secret for an agent via the internal API.
-func (r *IPCResolver) GetWebhookSecret(ctx context.Context, agentID string) (string, error) {
+// When crewID is non-empty it is sent as ?crew_id= so the server scopes the
+// lookup to the (crew, agent) pair — the cross-crew leak guard.
+func (r *IPCResolver) GetWebhookSecret(ctx context.Context, crewID, agentID string) (string, error) {
 	u := fmt.Sprintf("%s/api/v1/internal/agents/%s/webhook-secret", r.baseURL, url.PathEscape(agentID))
+	if crewID != "" {
+		u += "?crew_id=" + url.QueryEscape(crewID)
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return "", err

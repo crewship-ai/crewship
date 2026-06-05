@@ -13,7 +13,7 @@ type missionCreateRequest struct {
 	Title       string `json:"title"`
 	Description string `json:"description,omitempty"`
 	Plan        string `json:"plan,omitempty"`
-	CrewID      string `json:"crew_id,omitempty"` // Required for COORDINATOR (deprecated) — regular LEAD/AGENT inherit sidecar's crew.
+	CrewID      string `json:"crew_id,omitempty"` // SECURITY: ignored — the trusted IPC crew identity is always used. Kept for backward-compatible request parsing.
 	Tasks       []struct {
 		Title         string   `json:"title"`
 		Description   string   `json:"description,omitempty"`
@@ -85,15 +85,14 @@ func (s *Server) handleMissionCreate(w http.ResponseWriter, r *http.Request) {
 		tasks = append(tasks, it)
 	}
 
-	// Use explicit crew_id if provided (COORDINATOR — deprecated), otherwise use sidecar's crew.
-	// The explicit-crew_id branch exists for the deprecated COORDINATOR role; retained for backward compat.
+	// SECURITY: always use the trusted IPC crew identity. A request-supplied
+	// crew_id is ignored — honoring it would let a compromised agent create a
+	// mission in another crew with itself as lead (cross-crew override). This
+	// matches the keeper_bridge.go pattern of deriving crew from s.ipc.
 	crewID := s.ipc.CrewID
-	if req.CrewID != "" {
-		crewID = req.CrewID
-	}
 	if crewID == "" {
 		writeJSONResponse(w, http.StatusBadRequest, map[string]string{
-			"error": "crew_id required (COORDINATOR agents must specify crew_id explicitly)",
+			"error": "crew_id required (sidecar IPC crew identity not configured)",
 		})
 		return
 	}

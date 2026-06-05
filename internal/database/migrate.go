@@ -1398,6 +1398,13 @@ END;
 	// role-aware bundles so single-operator OWNER installs upgrade
 	// without losing surface. See migrate_consts_v109_member_capabilities.go.
 	{version: 109, name: "member_capabilities", sql: migrationMemberCapabilities},
+
+	// v110: partial unique index enforcing at-most-one-LEAD-per-crew at
+	// the DB level, closing the check-then-act TOCTOU race in the agent
+	// create + promote paths. Partial on (agent_role='LEAD' AND
+	// deleted_at IS NULL) so AGENT rows and soft-deleted leads are
+	// unconstrained. See migrate_consts_v110_one_lead_per_crew.go.
+	{version: 110, name: "one_lead_per_crew", sql: migrationOneLeadPerCrew},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

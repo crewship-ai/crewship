@@ -240,7 +240,8 @@ func (h *PersonaHandler) DeleteAgentPersona(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if err := memory.ResetPersona(paths, memory.PersonaAgent); err != nil {
-		replyError(w, http.StatusInternalServerError, err.Error())
+		h.logger.Error("reset agent persona failed", "agent_id", agentID, "error", err)
+		replyError(w, http.StatusInternalServerError, "failed to reset persona")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -410,7 +411,8 @@ func (h *PersonaHandler) SuggestAgentPersona(w http.ResponseWriter, r *http.Requ
 		// orchestration layer); we record the version so the
 		// timeline tooling has the row to link back to.
 		if err := memory.WritePersona(paths, memory.PersonaAgent, body.Content); err != nil {
-			replyError(w, http.StatusInternalServerError, err.Error())
+			h.logger.Error("persona suggest auto-apply write failed", "agent_id", agentID, "error", err)
+			replyError(w, http.StatusInternalServerError, "failed to write persona")
 			return
 		}
 		h.recordVersion(r, agentID, "agent", paths.AgentPath(), body.Content)
@@ -596,7 +598,7 @@ func (h *PersonaHandler) replyAgentLookup(w http.ResponseWriter, err error) {
 		return
 	}
 	h.logger.Warn("persona handler: agent lookup", "err", err)
-	replyError(w, http.StatusInternalServerError, err.Error())
+	replyError(w, http.StatusInternalServerError, "agent lookup failed")
 }
 
 // --- Crew flavor ------------------------------------------------------------
@@ -632,12 +634,14 @@ func (h *PersonaHandler) GetCrewPersona(w http.ResponseWriter, r *http.Request) 
 			replyError(w, http.StatusNotFound, "crew not found")
 			return
 		}
-		replyError(w, http.StatusInternalServerError, err.Error())
+		h.logger.Error("crew persona lookup failed", "crew_id", crewID, "error", err)
+		replyError(w, http.StatusInternalServerError, "crew lookup failed")
 		return
 	}
 	resolved, err := memory.LoadPersona(paths)
 	if err != nil {
-		replyError(w, http.StatusInternalServerError, err.Error())
+		h.logger.Error("load crew persona failed", "crew_id", crewID, "error", err)
+		replyError(w, http.StatusInternalServerError, "failed to load persona")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -661,7 +665,8 @@ func (h *PersonaHandler) PutCrewPersona(w http.ResponseWriter, r *http.Request) 
 			replyError(w, http.StatusNotFound, "crew not found")
 			return
 		}
-		replyError(w, http.StatusInternalServerError, err.Error())
+		h.logger.Error("crew persona lookup failed", "crew_id", crewID, "error", err)
+		replyError(w, http.StatusInternalServerError, "crew lookup failed")
 		return
 	}
 	var body struct {
@@ -701,11 +706,13 @@ func (h *PersonaHandler) DeleteCrewPersona(w http.ResponseWriter, r *http.Reques
 			replyError(w, http.StatusNotFound, "crew not found")
 			return
 		}
-		replyError(w, http.StatusInternalServerError, err.Error())
+		h.logger.Error("crew persona lookup failed", "crew_id", crewID, "error", err)
+		replyError(w, http.StatusInternalServerError, "crew lookup failed")
 		return
 	}
 	if err := memory.ResetPersona(paths, memory.PersonaCrew); err != nil {
-		replyError(w, http.StatusInternalServerError, err.Error())
+		h.logger.Error("reset crew persona failed", "crew_id", crewID, "error", err)
+		replyError(w, http.StatusInternalServerError, "failed to reset persona")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

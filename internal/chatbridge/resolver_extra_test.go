@@ -296,7 +296,7 @@ func TestResolveAgentSuccess(t *testing.T) {
 	t.Cleanup(ts.Close)
 
 	r := NewIPCResolver(ts.URL, "tok", slog.Default())
-	info, err := r.ResolveAgent(context.Background(), "a1")
+	info, err := r.ResolveAgent(context.Background(), "a1", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -315,7 +315,7 @@ func TestResolveAgentNotFound(t *testing.T) {
 	}))
 	t.Cleanup(ts.Close)
 	r := NewIPCResolver(ts.URL, "tok", slog.Default())
-	if _, err := r.ResolveAgent(context.Background(), "missing"); err == nil {
+	if _, err := r.ResolveAgent(context.Background(), "missing", ""); err == nil {
 		t.Fatal("expected error")
 	}
 }
@@ -330,7 +330,7 @@ func TestGetWebhookSecretSuccess(t *testing.T) {
 	}))
 	t.Cleanup(ts.Close)
 	r := NewIPCResolver(ts.URL, "tok", slog.Default())
-	got, err := r.GetWebhookSecret(context.Background(), "agent-1")
+	got, err := r.GetWebhookSecret(context.Background(), "", "agent-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -347,7 +347,7 @@ func TestGetWebhookSecretMissingMapsToErr(t *testing.T) {
 	}))
 	t.Cleanup(ts.Close)
 	r := NewIPCResolver(ts.URL, "tok", slog.Default())
-	_, err := r.GetWebhookSecret(context.Background(), "a1")
+	_, err := r.GetWebhookSecret(context.Background(), "", "a1")
 	if !errors.Is(err, ErrNoWebhookSecret) {
 		t.Errorf("err = %v, want ErrNoWebhookSecret", err)
 	}
@@ -360,7 +360,7 @@ func TestGetWebhookSecretBadStatus(t *testing.T) {
 	}))
 	t.Cleanup(ts.Close)
 	r := NewIPCResolver(ts.URL, "tok", slog.Default())
-	if _, err := r.GetWebhookSecret(context.Background(), "a1"); err == nil {
+	if _, err := r.GetWebhookSecret(context.Background(), "", "a1"); err == nil {
 		t.Fatal("expected error")
 	}
 }
@@ -372,7 +372,7 @@ func TestGetWebhookSecretBadJSON(t *testing.T) {
 	}))
 	t.Cleanup(ts.Close)
 	r := NewIPCResolver(ts.URL, "tok", slog.Default())
-	if _, err := r.GetWebhookSecret(context.Background(), "a1"); err == nil {
+	if _, err := r.GetWebhookSecret(context.Background(), "", "a1"); err == nil {
 		t.Fatal("expected error")
 	}
 }

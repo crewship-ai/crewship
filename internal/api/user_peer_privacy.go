@@ -75,7 +75,8 @@ func (h *UserPeerPrivacyHandler) GetConsent(w http.ResponseWriter, r *http.Reque
 		WHERE user_id = ? AND workspace_id = ?
 	`, userID, wsID).Scan(&opted, &optedAt)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		replyError(w, http.StatusInternalServerError, err.Error())
+		h.logger.Error("peer consent read failed", "user_id", userID, "workspace_id", wsID, "error", err)
+		replyError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -117,7 +118,8 @@ func (h *UserPeerPrivacyHandler) PutConsent(w http.ResponseWriter, r *http.Reque
 		    opted_out_at = CASE WHEN excluded.opted_out = 1 THEN excluded.opted_out_at ELSE NULL END,
 		    updated_at   = excluded.updated_at
 	`, userID, wsID, opt, now, now); err != nil {
-		replyError(w, http.StatusInternalServerError, err.Error())
+		h.logger.Error("peer consent write failed", "user_id", userID, "workspace_id", wsID, "error", err)
+		replyError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
 	// Audit the flip itself.
@@ -243,7 +245,8 @@ func (h *UserPeerPrivacyHandler) GetMyCards(w http.ResponseWriter, r *http.Reque
 		ORDER BY pc.updated_at DESC
 	`, userID, wsID)
 	if err != nil {
-		replyError(w, http.StatusInternalServerError, err.Error())
+		h.logger.Error("peer cards list failed", "user_id", userID, "workspace_id", wsID, "error", err)
+		replyError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
 	defer rows.Close()

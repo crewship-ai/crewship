@@ -36,10 +36,10 @@ func (minimalChatResolver) CreateChat(_ context.Context, _ chatbridge.CreateChat
 func (minimalChatResolver) ResolveChat(_ context.Context, _ string) (*chatbridge.ChatInfo, error) {
 	return nil, nil
 }
-func (minimalChatResolver) ResolveAgent(_ context.Context, _ string) (*chatbridge.ChatInfo, error) {
+func (minimalChatResolver) ResolveAgent(_ context.Context, _, _ string) (*chatbridge.ChatInfo, error) {
 	return nil, nil
 }
-func (minimalChatResolver) GetWebhookSecret(_ context.Context, _ string) (string, error) {
+func (minimalChatResolver) GetWebhookSecret(_ context.Context, _, _ string) (string, error) {
 	return "", nil
 }
 func (minimalChatResolver) CreateRun(_ context.Context, _, _, _, _, _ string, _ map[string]interface{}) error {

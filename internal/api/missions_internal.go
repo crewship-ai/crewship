@@ -58,6 +58,23 @@ func (h *InternalMissionHandler) Create(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// SECURITY (defense-in-depth): verify the lead agent actually belongs to
+	// the supplied crew+workspace. Without this, a compromised agent could
+	// create a mission in another crew with itself as lead (cross-crew override).
+	var exists int
+	err := h.db.QueryRowContext(r.Context(),
+		`SELECT 1 FROM agents WHERE id = ? AND crew_id = ? AND workspace_id = ? AND deleted_at IS NULL`,
+		req.LeadAgentID, req.CrewID, req.WorkspaceID).Scan(&exists)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			replyError(w, http.StatusBadRequest, "lead agent does not belong to the specified crew/workspace")
+			return
+		}
+		h.logger.Error("validate lead agent", "error", err)
+		replyError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
 	id := generateCUID()
 	traceID := "mission-" + generateCUID()
 	now := time.Now().UTC().Format(time.RFC3339)

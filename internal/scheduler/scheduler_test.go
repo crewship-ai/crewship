@@ -61,13 +61,13 @@ func (m *mockResolver) ResolveChat(_ context.Context, _ string) (*chatbridge.Cha
 	return m.resolveInfo, m.resolveErr
 }
 
-func (m *mockResolver) ResolveAgent(_ context.Context, _ string) (*chatbridge.ChatInfo, error) {
+func (m *mockResolver) ResolveAgent(_ context.Context, _, _ string) (*chatbridge.ChatInfo, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.resolveInfo, m.resolveErr
 }
 
-func (m *mockResolver) GetWebhookSecret(_ context.Context, _ string) (string, error) {
+func (m *mockResolver) GetWebhookSecret(_ context.Context, _, _ string) (string, error) {
 	return "", nil
 }
 

@@ -6,6 +6,7 @@ package api
 import (
 	"database/sql"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/license"
@@ -230,6 +231,23 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		req.AvatarSeed, req.AvatarStyle, req.TimeoutSeconds, req.ToolProfile, memEnabled,
 		createdByUserID, now, now)
 	if err != nil {
+		// A UNIQUE violation here is one of two concurrency races that
+		// slipped past the check-then-act SELECTs above:
+		//   - idx_agents_one_lead_per_crew (v110): a second LEAD raced
+		//     into the same crew between our existing-lead SELECT and
+		//     this INSERT.
+		//   - the slug UNIQUE constraint: a duplicate slug landed between
+		//     our slug SELECT and this INSERT.
+		// Both are caller-correctable conflicts, not server faults —
+		// surface 409 (matching workflow_templates_handler.go).
+		if isUniqueConstraintErr(err) {
+			msg := "Agent slug already taken in this workspace"
+			if req.AgentRole == "LEAD" && strings.Contains(err.Error(), "one_lead_per_crew") {
+				msg = "Crew already has a lead agent"
+			}
+			replyError(w, http.StatusConflict, msg)
+			return
+		}
 		h.logger.Error("insert agent", "error", err)
 		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
