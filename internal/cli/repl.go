@@ -251,7 +251,8 @@ func ExpandAtFiles(ctx context.Context, s string) (string, error) {
 			continue
 		}
 		path := token
-		if strings.HasPrefix(path, "~/") {
+		homeToken := strings.HasPrefix(path, "~/")
+		if homeToken {
 			home, herr := os.UserHomeDir()
 			if herr != nil {
 				// Preserve the literal token rather than synthesising
@@ -263,7 +264,13 @@ func ExpandAtFiles(ctx context.Context, s string) (string, error) {
 			}
 			path = filepath.Join(home, path[2:])
 		}
-		data, err := readAtFileBounded(path)
+		// Containment: a plain relative/absolute @file token is confined
+		// to the working directory so `@../../../etc/passwd` can't inline
+		// arbitrary files. An explicit ~/ token is the one documented
+		// exception (the user typed their home dir) and skips the cwd
+		// check — but ~/ itself was joined onto $HOME above, so it still
+		// can't climb out of the filesystem in a surprising way.
+		data, err := readAtFileBounded(path, homeToken)
 		if err != nil {
 			b.WriteString(s[i:j])
 		} else {
@@ -276,7 +283,23 @@ func ExpandAtFiles(ctx context.Context, s string) (string, error) {
 
 // readAtFileBounded opens path and reads up to MaxAtFileBytes. Returns
 // the (possibly truncated) bytes and a wrapped error on failure.
-func readAtFileBounded(path string) ([]byte, error) {
+//
+// Unless homeToken is set, the path is contained to the current working
+// directory: any ".." segment or an absolute/relative path that resolves
+// outside the cwd subtree is rejected before the open. This stops a
+// hostile prompt (`@../../../etc/passwd`, `@/etc/shadow`) from inlining
+// arbitrary files into an agent's context via @file expansion. The
+// containment shape mirrors cmd_memory_versions.go:canonicalPathIsSafe.
+//
+// homeToken == true is the single documented exception: the user typed
+// an explicit `~/...` reference, which the caller already joined onto
+// $HOME, so the cwd subtree check would be wrong for it.
+func readAtFileBounded(path string, homeToken bool) ([]byte, error) {
+	if !homeToken {
+		if err := atFilePathContained(path); err != nil {
+			return nil, err
+		}
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", path, err)
@@ -287,6 +310,39 @@ func readAtFileBounded(path string) ([]byte, error) {
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
 	return data, nil
+}
+
+// atFilePathContained rejects @file paths that escape the working
+// directory: any ".." segment, or a cleaned absolute path that does not
+// sit under the cwd subtree. Empty paths are rejected too. Mirrors the
+// containment in cmd_memory_versions.go:canonicalPathIsSafe but rooted
+// at the cwd rather than a caller-supplied root.
+func atFilePathContained(path string) error {
+	if strings.TrimSpace(path) == "" {
+		return fmt.Errorf("empty @file path")
+	}
+	if strings.Contains(path, "..") {
+		return fmt.Errorf("@file path %q rejected: '..' traversal not allowed", path)
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("@file containment: resolve working dir: %w", err)
+	}
+	absP, err := filepath.Abs(path)
+	if err != nil {
+		return fmt.Errorf("@file containment: resolve %q: %w", path, err)
+	}
+	rootWithSep := filepath.Clean(wd) + string(os.PathSeparator)
+	cleaned := filepath.Clean(absP)
+	if cleaned+string(os.PathSeparator) == rootWithSep {
+		// The path is the working directory itself — a directory, not a
+		// file; let os.Open surface the "is a directory" error normally.
+		return nil
+	}
+	if !strings.HasPrefix(cleaned+string(os.PathSeparator), rootWithSep) {
+		return fmt.Errorf("@file path %q rejected: resolves outside the working directory", path)
+	}
+	return nil
 }
 
 func isSpace(c byte) bool {

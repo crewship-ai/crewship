@@ -132,6 +132,18 @@ var backupCreateCmd = &cobra.Command{
 			"no_encrypt": noEncrypt,
 			"output_dir": outputDir,
 		}
+		// Transport-security pre-flight before the encryption passphrase
+		// rides the wire — mirrors cmd_login.go / cmd_setup.go. Blocks on
+		// a structurally broken --server, warns on plaintext HTTP to a
+		// non-loopback host. Skipped when nothing secret is being sent
+		// (--no-encrypt / --recipient leave passphrase empty), so an
+		// unencrypted backup over a plain-HTTP dev box doesn't get a
+		// spurious credentials-in-the-clear warning.
+		if passphrase != "" {
+			if err := preflightServerURL(cmd.ErrOrStderr(), cli.ResolveServer(flagServer, cliCfg)); err != nil {
+				return err
+			}
+		}
 		resp, err := client.Post("/api/v1/admin/backups", body)
 		if err != nil {
 			return err

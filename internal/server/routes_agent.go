@@ -212,6 +212,15 @@ func (s *Server) handleAgentLogs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	// Clamp the offset: a negative value is meaningless and a huge one would
+	// drive a wasteful full scan of the agent log file with nothing to return.
+	const maxLogOffset = 10_000_000
+	if offset < 0 {
+		offset = 0
+	}
+	if offset > maxLogOffset {
+		offset = maxLogOffset
+	}
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	if limit <= 0 {
 		limit = 100

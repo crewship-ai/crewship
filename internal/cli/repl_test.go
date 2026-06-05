@@ -57,14 +57,25 @@ func TestREPL_UnknownSlash(t *testing.T) {
 }
 
 func TestExpandAtFiles(t *testing.T) {
+	// @file expansion is now contained to the working directory (see
+	// readAtFileBounded), so the referenced files must live under cwd.
+	// chdir into a temp dir and reference files by their basename.
 	dir := t.TempDir()
-	p := filepath.Join(dir, "note.md")
-	if err := os.WriteFile(p, []byte("FOO BAR\n"), 0o644); err != nil {
+	prevWD, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(prevWD) }()
+
+	if err := os.WriteFile(filepath.Join(dir, "note.md"), []byte("FOO BAR\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	t.Run("expands existing file", func(t *testing.T) {
-		got, err := ExpandAtFiles(context.Background(), "look at @"+p+" and decide")
+		got, err := ExpandAtFiles(context.Background(), "look at @note.md and decide")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -77,8 +88,8 @@ func TestExpandAtFiles(t *testing.T) {
 	})
 
 	t.Run("preserves missing-file token", func(t *testing.T) {
-		got, _ := ExpandAtFiles(context.Background(), "nope @/does/not/exist done")
-		if !strings.Contains(got, "@/does/not/exist") {
+		got, _ := ExpandAtFiles(context.Background(), "nope @does-not-exist done")
+		if !strings.Contains(got, "@does-not-exist") {
 			t.Errorf("missing-file token should be preserved: %q", got)
 		}
 	})
@@ -90,16 +101,25 @@ func TestExpandAtFiles(t *testing.T) {
 		}
 	})
 
+	t.Run("traversal token preserved (not inlined)", func(t *testing.T) {
+		// A `..`-escaping token must be left verbatim, never expanded —
+		// the containment guard in readAtFileBounded refuses the read
+		// and ExpandAtFiles falls back to the literal token.
+		got, _ := ExpandAtFiles(context.Background(), "sneaky @../../../etc/hosts end")
+		if !strings.Contains(got, "@../../../etc/hosts") {
+			t.Errorf("traversal token should be preserved verbatim: %q", got)
+		}
+	})
+
 	t.Run("caps reads at MaxAtFileBytes", func(t *testing.T) {
-		big := filepath.Join(dir, "big.txt")
 		buf := make([]byte, MaxAtFileBytes+1024)
 		for i := range buf {
 			buf[i] = 'a'
 		}
-		if err := os.WriteFile(big, buf, 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, "big.txt"), buf, 0o644); err != nil {
 			t.Fatal(err)
 		}
-		got, err := ExpandAtFiles(context.Background(), "@"+big)
+		got, err := ExpandAtFiles(context.Background(), "@big.txt")
 		if err != nil {
 			t.Fatal(err)
 		}

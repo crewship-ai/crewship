@@ -63,7 +63,7 @@ func (h *InternalMissionHandler) Create(w http.ResponseWriter, r *http.Request) 
 	// create a mission in another crew with itself as lead (cross-crew override).
 	var exists int
 	err := h.db.QueryRowContext(r.Context(),
-		`SELECT 1 FROM agents WHERE id = ? AND crew_id = ? AND workspace_id = ? AND deleted_at IS NULL`,
+		`SELECT 1 FROM agents WHERE id = ? AND crew_id = ? AND workspace_id = ?`,
 		req.LeadAgentID, req.CrewID, req.WorkspaceID).Scan(&exists)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -160,9 +160,28 @@ func (h *InternalMissionHandler) Start(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// SECURITY (defense-in-depth): scope the mission lookup to the caller's
+	// workspace (and crew, when supplied). Without this, a compromised sidecar
+	// or an agent that enumerated a mission id could start a mission belonging
+	// to another crew/workspace. Scope is sourced from the trusted IPC identity
+	// the sidecar forwards as query params (workspace_id required, crew_id
+	// optional), mirroring InternalIssueHandler.Get.
+	wsID := r.URL.Query().Get("workspace_id")
+	if wsID == "" {
+		replyError(w, http.StatusBadRequest, "workspace_id is required")
+		return
+	}
+	crewID := r.URL.Query().Get("crew_id")
+
+	selArgs := []any{missionID, wsID}
+	selQuery := `SELECT status FROM missions WHERE id = ? AND workspace_id = ?`
+	if crewID != "" {
+		selQuery = `SELECT status FROM missions WHERE id = ? AND workspace_id = ? AND crew_id = ?`
+		selArgs = []any{missionID, wsID, crewID}
+	}
+
 	var currentStatus string
-	err := h.db.QueryRowContext(r.Context(),
-		`SELECT status FROM missions WHERE id = ?`, missionID).Scan(&currentStatus)
+	err := h.db.QueryRowContext(r.Context(), selQuery, selArgs...).Scan(&currentStatus)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			replyError(w, http.StatusNotFound, "mission not found")
@@ -181,9 +200,13 @@ func (h *InternalMissionHandler) Start(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
-	if _, err := h.db.ExecContext(r.Context(),
-		`UPDATE missions SET status = 'IN_PROGRESS', updated_at = ? WHERE id = ?`,
-		now, missionID); err != nil {
+	updQuery := `UPDATE missions SET status = 'IN_PROGRESS', updated_at = ? WHERE id = ? AND workspace_id = ?`
+	updArgs := []any{now, missionID, wsID}
+	if crewID != "" {
+		updQuery = `UPDATE missions SET status = 'IN_PROGRESS', updated_at = ? WHERE id = ? AND workspace_id = ? AND crew_id = ?`
+		updArgs = []any{now, missionID, wsID, crewID}
+	}
+	if _, err := h.db.ExecContext(r.Context(), updQuery, updArgs...); err != nil {
 		h.logger.Error("update mission status", "error", err)
 		replyError(w, http.StatusInternalServerError, "failed to start mission")
 		return
@@ -214,6 +237,16 @@ func (h *InternalMissionHandler) Get(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// SECURITY (defense-in-depth): scope the mission lookup to the caller's
+	// workspace (and crew, when supplied) so an enumerated mission id from
+	// another crew/workspace cannot be read. Mirrors InternalIssueHandler.Get.
+	wsID := r.URL.Query().Get("workspace_id")
+	if wsID == "" {
+		replyError(w, http.StatusBadRequest, "workspace_id is required")
+		return
+	}
+	crewID := r.URL.Query().Get("crew_id")
+
 	var m struct {
 		ID          string  `json:"id"`
 		TraceID     string  `json:"trace_id"`
@@ -222,9 +255,13 @@ func (h *InternalMissionHandler) Get(w http.ResponseWriter, r *http.Request) {
 		Status      string  `json:"status"`
 		CreatedAt   string  `json:"created_at"`
 	}
-	err := h.db.QueryRowContext(r.Context(),
-		`SELECT id, trace_id, title, description, status, created_at FROM missions WHERE id = ?`,
-		missionID).Scan(&m.ID, &m.TraceID, &m.Title, &m.Description, &m.Status, &m.CreatedAt)
+	getQuery := `SELECT id, trace_id, title, description, status, created_at FROM missions WHERE id = ? AND workspace_id = ?`
+	getArgs := []any{missionID, wsID}
+	if crewID != "" {
+		getQuery = `SELECT id, trace_id, title, description, status, created_at FROM missions WHERE id = ? AND workspace_id = ? AND crew_id = ?`
+		getArgs = []any{missionID, wsID, crewID}
+	}
+	err := h.db.QueryRowContext(r.Context(), getQuery, getArgs...).Scan(&m.ID, &m.TraceID, &m.Title, &m.Description, &m.Status, &m.CreatedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			replyError(w, http.StatusNotFound, "mission not found")

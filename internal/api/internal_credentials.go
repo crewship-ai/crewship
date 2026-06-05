@@ -108,10 +108,24 @@ func (h *InternalHandler) ListCredentials(w http.ResponseWriter, r *http.Request
 		includeValues = false
 	}
 
+	// Status gate. The metadata-only path (default sidecar/LEAD discovery) keeps
+	// returning EXPIRED/ERROR so the management view can surface unhealthy
+	// credentials. But the include_values path decrypts and hands back plaintext
+	// tokens — that path is runtime credential INJECTION (the in-process LLM
+	// proxy TokenSyncer), so a non-ACTIVE credential there is a revoked secret
+	// being handed to an agent. When include_values is in effect we hard-filter
+	// to status = 'ACTIVE' so an EXPIRED/ERROR/REVOKED token is never decrypted
+	// and injected. The gate rides the exact same condition that already
+	// controls value exposure, so the management view is unaffected.
+	statusClause := "status IN ('ACTIVE', 'EXPIRED', 'ERROR')"
+	if includeValues {
+		statusClause = "status = 'ACTIVE'"
+	}
+
 	query := `SELECT id, workspace_id, name, type, provider, encrypted_value,
 		encrypted_refresh_token, token_expires_at, account_label, account_email, status
 		FROM credentials
-		WHERE status IN ('ACTIVE', 'EXPIRED', 'ERROR') AND deleted_at IS NULL
+		WHERE ` + statusClause + ` AND deleted_at IS NULL
 		AND type IN ('AI_CLI_TOKEN', 'API_KEY') AND provider != 'NONE'`
 
 	var args []any

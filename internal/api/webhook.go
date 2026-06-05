@@ -32,6 +32,33 @@ type webhookIdempotencyKeyCtxKey struct{}
 // enforces dedup, so reusing the pipeline store avoids a new table/migration.
 const webhookIdempotencyPipelineID = "webhook"
 
+// defaultAgentWebhookRatePerMin caps how many agent-webhook RunAgent
+// dispatches a single agent can trigger in a 60s window. R4#3: each
+// delivery spawns a 10-min RunAgent, and distinct Idempotency-Keys bypass
+// the dedup window, so without a per-agent gate a signed (or distributed)
+// sender could fan out unbounded concurrent runs against one agent. The
+// pipeline side has the equivalent guard via pipeline.AllowWebhookFire;
+// this is its agent-webhook mirror, keyed by agent id instead of token.
+//
+// Generous on purpose — it throttles abuse, not normal use. 60/min ≈
+// one run/second per agent is far above any legitimate single-agent
+// webhook cadence; the cap exists to deny a flood, not to rate-shape
+// healthy traffic.
+const defaultAgentWebhookRatePerMin = 60
+
+// defaultAgentWebhookMaxConcurrent caps how many agent-webhook runs a
+// single agent may have IN FLIGHT at once (process-local). RunAgent
+// holds the slot for up to its 10-min timeout; the registry frees it on
+// completion. This is the second layer of the R4#3 gate: even within the
+// per-minute budget, a burst that all lands before any run finishes can't
+// pin more than this many concurrent 10-min runs on one agent.
+const defaultAgentWebhookMaxConcurrent = 8
+
+// agentWebhookConcurrencyKey is the synthetic concurrency-key prefix for
+// agent-webhook runs in the shared RunRegistry. Keyed per agent so the
+// in-flight cap is per-agent, independent of pipeline runs.
+const agentWebhookConcurrencyKey = "agent-webhook"
+
 // WebhookHandler receives incoming webhook events and triggers agent runs.
 type WebhookHandler struct {
 	db        *sql.DB
@@ -43,6 +70,14 @@ type WebhookHandler struct {
 	container provider.ContainerProvider
 	logWriter *logcollector.Writer
 	idem      *pipeline.IdempotencyStore
+
+	// agentRatePerMin / agentMaxConcurrent gate agent-webhook dispatch
+	// (R4#3). Defaulted in the constructor; overridable (tests tighten
+	// them to trip the gate deterministically). agentRuns is the shared
+	// in-flight registry backing the concurrency cap.
+	agentRatePerMin    int
+	agentMaxConcurrent int
+	agentRuns          *pipeline.RunRegistry
 }
 
 // NewWebhookHandler creates a WebhookHandler with the given dependencies for webhook verification and dispatch.
@@ -56,13 +91,16 @@ func NewWebhookHandler(
 	logWriter *logcollector.Writer,
 ) *WebhookHandler {
 	wh := &WebhookHandler{
-		db:        db,
-		logger:    logger,
-		resolver:  resolver,
-		orch:      orch,
-		hub:       hub,
-		container: container,
-		logWriter: logWriter,
+		db:                 db,
+		logger:             logger,
+		resolver:           resolver,
+		orch:               orch,
+		hub:                hub,
+		container:          container,
+		logWriter:          logWriter,
+		agentRatePerMin:    defaultAgentWebhookRatePerMin,
+		agentMaxConcurrent: defaultAgentWebhookMaxConcurrent,
+		agentRuns:          pipeline.NewRunRegistry(),
 	}
 	// Webhook re-delivery dedup reuses the pipeline idempotency primitive
 	// (shared pipeline_run_idempotency table) so we don't add a new table.
@@ -108,6 +146,14 @@ func agentWebhookIdempotencyKey(ctx context.Context, agentID string, payload web
 	return "wh-" + hex.EncodeToString(h.Sum(nil))
 }
 
+// agentWebhookRateKey namespaces the per-agent rate window inside the
+// shared pipeline rate limiter so an agent id can never collide with a
+// pipeline webhook token (which is an opaque hex string). The "awh:"
+// prefix marks the agent-webhook namespace.
+func agentWebhookRateKey(agentID string) string {
+	return "awh:" + agentID
+}
+
 func (h *WebhookHandler) trigger(ctx context.Context, crewID, agentID string, payload webhook.WebhookPayload) error {
 	h.logger.Info("webhook trigger", "crew_id", crewID, "agent_id", agentID, "event", payload.Event)
 
@@ -121,6 +167,14 @@ func (h *WebhookHandler) trigger(ctx context.Context, crewID, agentID string, pa
 		return fmt.Errorf("resolve agent: %w", err)
 	}
 
+	// Mint the run id ONCE, up front. R6: this exact id is what we reserve
+	// in the idempotency table AND what we hand to CreateRun, so the
+	// idempotency row maps the event to the run that actually exists.
+	// generateCUID (not UnixNano) — two webhooks that land in the same
+	// nanosecond tick would otherwise mint identical ids and collide on
+	// the runs PK. Mirrors the pipeline executor's pre-allocated id.
+	runID := generateCUID()
+
 	// Idempotency: dedup webhook re-deliveries. Prefer the caller's
 	// Idempotency-Key header (stashed into ctx by ServeHTTP); fall back to
 	// a synthetic key derived from agent id + payload so a provider that
@@ -128,23 +182,51 @@ func (h *WebhookHandler) trigger(ctx context.Context, crewID, agentID string, pa
 	// A matched key short-circuits before any container/run side-effect.
 	idemKey := agentWebhookIdempotencyKey(ctx, agentID, payload)
 	if h.idem != nil && info.WorkspaceID != "" {
-		runID := generateCUID()
 		resolvedID, isNew, idErr := h.idem.LookupOrReserve(
 			ctx, info.WorkspaceID, idemKey, runID,
 			webhookIdempotencyPipelineID, pipeline.DefaultIdempotencyTTL)
 		switch {
 		case errors.Is(idErr, nil) && !isNew:
-			// Duplicate delivery — original run owns the result.
+			// Duplicate delivery — original run owns the result. Return the
+			// reserved (original) run id's outcome by short-circuiting; we
+			// do NOT dispatch, do NOT create a second run.
 			h.logger.Info("webhook dedup: duplicate delivery short-circuited",
 				"agent_id", agentID, "original_run_id", resolvedID)
 			return nil
+		case errors.Is(idErr, nil) && isNew:
+			// Fresh reservation — the run we're about to dispatch uses the
+			// id we just reserved (runID). Nothing to do; runID already
+			// carries it through to CreateRun below.
 		case idErr != nil:
 			// Idempotency failure must not drop a legitimate webhook —
 			// log and fall through to dispatch (at-least-once beats
-			// silently swallowing the event).
+			// silently swallowing the event). The reserved/created ids
+			// still match because both use the same runID.
 			h.logger.Warn("webhook dedup: reservation failed, dispatching anyway",
 				"agent_id", agentID, "error", idErr)
 		}
+	}
+
+	// Rate/concurrency gate (R4#3). A fresh idempotency key gets us here,
+	// so dedup alone cannot stop a distributed sender from fanning out
+	// distinct-key deliveries into unbounded concurrent 10-min runs. Gate
+	// per agent: an M/min rate window plus an N-in-flight concurrency cap.
+	// Both are generous (abuse, not normal use) and process-local — a
+	// multi-replica deployment would want a shared limiter, but this is a
+	// real first layer that a single binary enforces correctly.
+	//
+	// On reject we Forget the just-made reservation so a legitimate retry
+	// with the same key isn't poisoned for the full TTL (mirrors the
+	// pipeline executor's Forget-on-concurrency-reject).
+	if !pipeline.AllowWebhookFire(agentWebhookRateKey(agentID), h.agentRatePerMin) {
+		if h.idem != nil && info.WorkspaceID != "" {
+			if fErr := h.idem.Forget(ctx, info.WorkspaceID, idemKey); fErr != nil {
+				h.logger.Warn("webhook rate gate: failed to release reservation", "agent_id", agentID, "error", fErr)
+			}
+		}
+		h.logger.Warn("webhook rate gate: agent over per-minute limit, dropping delivery",
+			"agent_id", agentID, "limit_per_min", h.agentRatePerMin)
+		return fmt.Errorf("webhook: agent %s rate limit exceeded (%d/min)", agentID, h.agentRatePerMin)
 	}
 
 	// 2. Create a chat session for this webhook if it doesn't exist
@@ -173,10 +255,10 @@ func (h *WebhookHandler) trigger(ctx context.Context, crewID, agentID string, pa
 		return fmt.Errorf("ensure crew runtime: %w", err)
 	}
 
-	// 4. Create run record. generateCUID (not UnixNano) — two webhooks that
-	// land in the same nanosecond tick would otherwise mint identical run
-	// ids and collide on the runs PK.
-	runID := generateCUID()
+	// 4. Create run record. Reuses the runID minted (and idempotency-
+	// reserved) at the top of trigger — R6: the run record and the
+	// idempotency reservation share one id, so a redelivery resolves to a
+	// run that exists.
 	runMeta := map[string]interface{}{
 		"event":   payload.Event,
 		"source":  payload.Source,
@@ -201,6 +283,33 @@ func (h *WebhookHandler) trigger(ctx context.Context, crewID, agentID string, pa
 	go func() {
 		runCtx, cancel := context.WithTimeout(parentCtx, 10*time.Minute)
 		defer cancel()
+
+		// In-flight concurrency cap (R4#3, second layer). The rate window
+		// bounds runs/min; this bounds runs IN FLIGHT per agent, so a burst
+		// that all lands before any run finishes still can't pin more than
+		// agentMaxConcurrent 10-min runs on one agent. On reject we mark the
+		// run THROTTLED and return without invoking the orchestrator.
+		if h.agentRuns != nil {
+			acquired, release, acqErr := h.agentRuns.Acquire(runCtx, pipeline.AcquireOpts{
+				RunID:          runID,
+				WorkspaceID:    info.WorkspaceID,
+				ConcurrencyKey: agentWebhookConcurrencyKey + ":" + agentID,
+				MaxConcurrent:  h.agentMaxConcurrent,
+			})
+			if acqErr != nil {
+				h.logger.Warn("webhook concurrency gate: agent at in-flight cap, dropping run",
+					"agent_id", agentID, "max_concurrent", h.agentMaxConcurrent, "error", acqErr)
+				exitCode := 1
+				status := "THROTTLED"
+				msg := acqErr.Error()
+				if updateErr := h.resolver.UpdateRun(runCtx, runID, status, &exitCode, &msg, nil); updateErr != nil {
+					h.logger.Warn("failed to update throttled run status", "run_id", runID, "error", updateErr)
+				}
+				return
+			}
+			runCtx = acquired
+			defer release()
+		}
 
 		req := orchestrator.AgentRunRequest{
 			AgentID:        info.AgentID,

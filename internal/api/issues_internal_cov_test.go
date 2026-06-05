@@ -522,7 +522,7 @@ func TestCovII2Mission_Start_PathFallback(t *testing.T) {
 		t.Fatalf("seed mission: %v", err)
 	}
 	// No SetPathValue → forces the strings.Split fallback on the URL path.
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/internal/missions/mi2-1/start", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/internal/missions/mi2-1/start?workspace_id="+wsID, nil)
 	rr := httptest.NewRecorder()
 	h.Start(rr, req)
 	if rr.Code != http.StatusOK {
@@ -542,7 +542,7 @@ func TestCovII2Mission_Start_PathFallback(t *testing.T) {
 func TestCovII2Mission_Start_DBError(t *testing.T) {
 	h, db, _, _, _ := covII2NewMissionHandler(t)
 	db.Close()
-	req := httptest.NewRequest(http.MethodPost, "/", nil)
+	req := httptest.NewRequest(http.MethodPost, "/?workspace_id=ws-x", nil)
 	req.SetPathValue("missionId", "anything")
 	rr := httptest.NewRecorder()
 	h.Start(rr, req)
@@ -562,7 +562,7 @@ func TestCovII2Mission_Get_PathFallbackAndDBError(t *testing.T) {
 	}
 
 	// Path fallback (no SetPathValue).
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/internal/missions/mi2-g", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/internal/missions/mi2-g?workspace_id="+wsID, nil)
 	rr := httptest.NewRecorder()
 	h.Get(rr, req)
 	if rr.Code != http.StatusOK {
@@ -571,7 +571,7 @@ func TestCovII2Mission_Get_PathFallbackAndDBError(t *testing.T) {
 
 	// DB error.
 	db.Close()
-	req2 := httptest.NewRequest(http.MethodGet, "/", nil)
+	req2 := httptest.NewRequest(http.MethodGet, "/?workspace_id="+wsID, nil)
 	req2.SetPathValue("missionId", "mi2-g")
 	rr2 := httptest.NewRecorder()
 	h.Get(rr2, req2)

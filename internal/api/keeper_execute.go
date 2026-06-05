@@ -75,7 +75,8 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 		err := h.db.QueryRowContext(r.Context(), `
 			SELECT c.id FROM credentials c
 			JOIN agent_credentials ac ON ac.credential_id = c.id
-			WHERE ac.agent_id = ? AND ac.env_var_name = ? AND c.workspace_id = ? AND c.deleted_at IS NULL
+			WHERE ac.agent_id = ? AND ac.env_var_name = ? AND c.workspace_id = ?
+			  AND c.status = 'ACTIVE' AND c.deleted_at IS NULL
 			LIMIT 1`,
 			body.RequestingAgentID, body.CredentialName, body.WorkspaceID).Scan(&body.CredentialID)
 		if err != nil {
@@ -150,13 +151,20 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 	// matching the credential_name path — an agent cannot name a PEER agent's
 	// credential_id in the same workspace. No assignment row → "credential not
 	// found" (no existence leak).
+	//
+	// status = 'ACTIVE' gate: a credential the OAuth refresh worker or
+	// UpdateCredentialStatus has marked EXPIRED / ERROR / REVOKED /
+	// RATE_LIMITED is treated as unavailable here — the same not-found path —
+	// so a stale/revoked secret is never injected even though the row is not
+	// yet soft-deleted.
 	var credName string
 	var secLevel int
 	err = h.db.QueryRowContext(r.Context(), `
 		SELECT c.name, COALESCE(c.security_level, 1)
 		FROM credentials c
 		JOIN agent_credentials ac ON ac.credential_id = c.id
-		WHERE c.id = ? AND ac.agent_id = ? AND c.workspace_id = ? AND c.deleted_at IS NULL`,
+		WHERE c.id = ? AND ac.agent_id = ? AND c.workspace_id = ?
+		  AND c.status = 'ACTIVE' AND c.deleted_at IS NULL`,
 		body.CredentialID, body.RequestingAgentID, body.WorkspaceID).Scan(&credName, &secLevel)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/database"
+	"github.com/crewship-ai/crewship/internal/httpsafe"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
@@ -164,6 +165,13 @@ func (h *IntegrationHandler) CreateWorkspaceIntegration(w http.ResponseWriter, r
 		replyError(w, http.StatusBadRequest, "command is required for stdio transport")
 		return
 	}
+	// SSRF guard: http(s) endpoints must not target internal/loopback/link-local hosts.
+	if req.Transport == "streamable-http" && req.Endpoint != nil {
+		if _, err := httpsafe.ValidateURL(*req.Endpoint, "http", "https"); err != nil {
+			replyError(w, http.StatusBadRequest, "endpoint is not allowed: "+err.Error())
+			return
+		}
+	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	id := generateCUID()
@@ -258,6 +266,13 @@ func (h *IntegrationHandler) UpdateWorkspaceIntegration(w http.ResponseWriter, r
 		u.Set("transport", *req.Transport)
 	}
 	if req.Endpoint != nil {
+		// SSRF guard: reject internal/loopback/link-local http(s) endpoints.
+		if *req.Endpoint != "" {
+			if _, err := httpsafe.ValidateURL(*req.Endpoint, "http", "https"); err != nil {
+				replyError(w, http.StatusBadRequest, "endpoint is not allowed: "+err.Error())
+				return
+			}
+		}
 		u.Set("endpoint", *req.Endpoint)
 	}
 	if req.Command != nil {

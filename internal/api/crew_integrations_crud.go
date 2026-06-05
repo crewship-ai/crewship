@@ -8,6 +8,8 @@ import (
 	"database/sql"
 	"net/http"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/httpsafe"
 )
 
 type createCrewIntegrationRequest struct {
@@ -77,6 +79,13 @@ func (h *IntegrationHandler) CreateCrewIntegration(w http.ResponseWriter, r *htt
 	if req.Transport == "stdio" && (req.Command == nil || *req.Command == "") {
 		replyError(w, http.StatusBadRequest, "command is required for stdio transport")
 		return
+	}
+	// SSRF guard: http(s) endpoints must not target internal/loopback/link-local hosts.
+	if req.Transport == "streamable-http" && req.Endpoint != nil {
+		if _, err := httpsafe.ValidateURL(*req.Endpoint, "http", "https"); err != nil {
+			replyError(w, http.StatusBadRequest, "endpoint is not allowed: "+err.Error())
+			return
+		}
 	}
 
 	// If linking to workspace server, verify it exists and belongs to same workspace
@@ -166,6 +175,13 @@ func (h *IntegrationHandler) UpdateCrewIntegration(w http.ResponseWriter, r *htt
 		u.Set("transport", *req.Transport)
 	}
 	if req.Endpoint != nil {
+		// SSRF guard: reject internal/loopback/link-local http(s) endpoints.
+		if *req.Endpoint != "" {
+			if _, err := httpsafe.ValidateURL(*req.Endpoint, "http", "https"); err != nil {
+				replyError(w, http.StatusBadRequest, "endpoint is not allowed: "+err.Error())
+				return
+			}
+		}
 		u.Set("endpoint", *req.Endpoint)
 	}
 	if req.Command != nil {

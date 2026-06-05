@@ -3,11 +3,74 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/spf13/cobra"
 )
+
+// emitToken writes a freshly-minted CLI token to the operator in the
+// least-leaky way the flags allow. Both `token create` and
+// `token rotate` route their bearer through here so the secret-safe
+// paths stay identical.
+//
+// Precedence (most → least confined):
+//
+//	--output-file PATH → write the bare token to PATH with 0600 perms.
+//	                     stdout gets only a confirmation line; the secret
+//	                     never touches stdout / shell history / CI logs.
+//	--quiet            → print ONLY the bare token (no labels), so
+//	                     `TOKEN=$(crewship token create --quiet)` captures
+//	                     cleanly. A one-line "sensitive" notice goes to
+//	                     stderr (not captured by $(...)).
+//	default            → the human-readable block, but the token line and
+//	                     the "store this securely" warning go to STDERR
+//	                     so a naive `... > file` or a CI step log doesn't
+//	                     silently persist the bearer on stdout.
+//
+// The metadata (Name, ID) always goes to stdout in the default/file
+// modes — only the token value itself is treated as the secret.
+func emitToken(cmd *cobra.Command, name, id, token string) error {
+	outFile, _ := cmd.Flags().GetString("output-file")
+	quiet, _ := cmd.Flags().GetBool("quiet")
+	out := cmd.OutOrStdout()
+	errOut := cmd.ErrOrStderr()
+
+	if outFile != "" {
+		// 0600 + O_EXCL-free create: we overwrite an existing file the
+		// operator pointed us at, but lock the perms so a rotated token
+		// never lands world-readable. Trailing newline so the file is a
+		// clean single-line secret for `cat`/`$(<file)` consumers.
+		if err := os.WriteFile(outFile, []byte(token+"\n"), 0o600); err != nil {
+			return fmt.Errorf("write token to %s: %w", outFile, err)
+		}
+		fmt.Fprintf(out, "%sToken created:%s %s\n", cli.Bold, cli.Reset, name)
+		if id != "" {
+			fmt.Fprintf(out, "%sID:%s     %s\n", cli.Dim, cli.Reset, id)
+		}
+		fmt.Fprintf(out, "%sToken written to %s (mode 0600).%s\n", cli.Dim, outFile, cli.Reset)
+		return nil
+	}
+
+	if quiet {
+		// Bare token on stdout for command-substitution capture; the
+		// advisory rides stderr so it doesn't pollute the captured value.
+		fmt.Fprintln(out, token)
+		fmt.Fprintf(errOut, "%sToken is sensitive — it won't be shown again. Avoid shell history / CI logs.%s\n", cli.Yellow, cli.Reset)
+		return nil
+	}
+
+	// Default human path. Metadata to stdout; the secret + warning to
+	// stderr so a redirect of stdout doesn't quietly persist the bearer.
+	fmt.Fprintf(out, "%sToken created:%s %s\n", cli.Bold, cli.Reset, name)
+	if id != "" {
+		fmt.Fprintf(out, "%sID:%s     %s\n", cli.Dim, cli.Reset, id)
+	}
+	fmt.Fprintf(errOut, "%sToken:%s  %s\n", cli.Dim, cli.Reset, token)
+	fmt.Fprintf(errOut, "\n%sStore this token securely — it won't be shown again. (Use --output-file to write it straight to a 0600 file, or --quiet for capture.)%s\n", cli.Yellow, cli.Reset)
+	return nil
+}
 
 var tokenCmd = &cobra.Command{
 	Use:   "token",
@@ -184,11 +247,7 @@ var tokenCreateCmd = &cobra.Command{
 			return err
 		}
 
-		fmt.Printf("%sToken created:%s %s\n", cli.Bold, cli.Reset, result.Name)
-		fmt.Printf("%sID:%s     %s\n", cli.Dim, cli.Reset, result.ID)
-		fmt.Printf("%sToken:%s  %s\n", cli.Dim, cli.Reset, result.Token)
-		fmt.Printf("\n%sStore this token securely — it won't be shown again.%s\n", cli.Yellow, cli.Reset)
-		return nil
+		return emitToken(cmd, result.Name, result.ID, result.Token)
 	},
 }
 
@@ -325,13 +384,14 @@ Examples:
 			return fmt.Errorf("parse new token: %w", err)
 		}
 
-		// Print the new credential BEFORE revoking the old one. If
-		// revoke fails the user still has the new token and a clear
-		// instruction to finish the rotation manually.
-		fmt.Printf("%sNew token created:%s %s\n", cli.Bold, cli.Reset, created.Name)
-		fmt.Printf("%sID:%s     %s\n", cli.Dim, cli.Reset, created.ID)
-		fmt.Printf("%sToken:%s  %s\n", cli.Dim, cli.Reset, created.Token)
-		fmt.Printf("\n%sStore this token securely — it won't be shown again.%s\n\n", cli.Yellow, cli.Reset)
+		// Emit the new credential BEFORE revoking the old one. If revoke
+		// fails the user still has the new token and a clear instruction
+		// to finish the rotation manually. emitToken honours
+		// --output-file / --quiet so the rotated bearer can stay off
+		// stdout / shell history just like create.
+		if err := emitToken(cmd, created.Name, created.ID, created.Token); err != nil {
+			return err
+		}
 
 		// Revoke the old token. A failure here leaves both tokens valid
 		// — surface it loudly so the operator can clean up.
@@ -433,6 +493,16 @@ exit status without re-parsing the output.`,
 
 func init() {
 	tokenRotateCmd.Flags().String("name", "", "Override new token name (default: '<old name> (rotated YYYY-MM-DD)')")
+
+	// Secret-safe output for the two commands that mint a bearer. Default
+	// keeps the human block but routes the token value to stderr; these
+	// flags add a 0600-file sink and a bare-stdout capture mode so the
+	// token stays out of shell history / CI step logs.
+	for _, c := range []*cobra.Command{tokenCreateCmd, tokenRotateCmd} {
+		c.Flags().String("output-file", "", "Write the bare token to this file (mode 0600) instead of stdout")
+		c.Flags().Bool("quiet", false, "Print only the bare token to stdout (for $(...) capture); advisory goes to stderr")
+	}
+
 	tokenListCmd.Flags().Int("warn-stale-days", 90, "Flag tokens older / unused longer than N days (0 disables)")
 	tokenValidateCmd.Flags().Bool("json", false, "Emit machine-readable JSON to stdout instead of human-readable text")
 	tokenRevokeCmd.Flags().BoolP("yes", "y", false, "Skip confirmation")

@@ -224,6 +224,15 @@ func runSetup(cmd *cobra.Command, _ []string) error {
 		body["crew_template_slug"] = crewSlug
 	}
 
+	// Transport-security pre-flight before the per-adapter CLI token
+	// (credential_value) rides the wire — mirrors cmd_login.go. Blocks on
+	// a structurally broken --server, warns on plaintext HTTP to a
+	// non-loopback host. The resolved server matches what newAPIClient()
+	// is about to dial (flag > env > config > default).
+	if err := preflightServerURL(cmd.ErrOrStderr(), cli.ResolveServer(flagServer, cliCfg)); err != nil {
+		return err
+	}
+
 	client := newAPIClient()
 	resp, err := client.Post("/api/v1/onboarding/setup", body)
 	if err != nil {

@@ -1052,7 +1052,7 @@ func TestInternalMissions_Start(t *testing.T) {
 	h := NewInternalMissionHandler(db, nil, nil, testLogger())
 
 	t.Run("happy", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPost, "/", nil)
+		req := httptest.NewRequest(http.MethodPost, "/?workspace_id="+wsID, nil)
 		req.SetPathValue("missionId", "m1")
 		w := httptest.NewRecorder()
 		h.Start(w, req)
@@ -1062,7 +1062,7 @@ func TestInternalMissions_Start(t *testing.T) {
 	})
 
 	t.Run("not_found", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPost, "/", nil)
+		req := httptest.NewRequest(http.MethodPost, "/?workspace_id="+wsID, nil)
 		req.SetPathValue("missionId", "missing")
 		w := httptest.NewRecorder()
 		h.Start(w, req)
@@ -1072,7 +1072,7 @@ func TestInternalMissions_Start(t *testing.T) {
 	})
 
 	t.Run("wrong_state", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPost, "/", nil)
+		req := httptest.NewRequest(http.MethodPost, "/?workspace_id="+wsID, nil)
 		req.SetPathValue("missionId", "m2")
 		w := httptest.NewRecorder()
 		h.Start(w, req)
@@ -1097,7 +1097,7 @@ func TestInternalMissions_Get(t *testing.T) {
 	h := NewInternalMissionHandler(db, nil, nil, testLogger())
 
 	t.Run("happy", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req := httptest.NewRequest(http.MethodGet, "/?workspace_id="+wsID, nil)
 		req.SetPathValue("missionId", "m1")
 		w := httptest.NewRecorder()
 		h.Get(w, req)
@@ -1107,7 +1107,7 @@ func TestInternalMissions_Get(t *testing.T) {
 	})
 
 	t.Run("not_found", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req := httptest.NewRequest(http.MethodGet, "/?workspace_id="+wsID, nil)
 		req.SetPathValue("missionId", "missing")
 		w := httptest.NewRecorder()
 		h.Get(w, req)
