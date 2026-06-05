@@ -61,14 +61,7 @@ func TestExpandAtFiles(t *testing.T) {
 	// readAtFileBounded), so the referenced files must live under cwd.
 	// chdir into a temp dir and reference files by their basename.
 	dir := t.TempDir()
-	prevWD, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chdir(dir); err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = os.Chdir(prevWD) }()
+	t.Chdir(dir) // isolated, auto-restored — no process-global cwd mutation
 
 	if err := os.WriteFile(filepath.Join(dir, "note.md"), []byte("FOO BAR\n"), 0o644); err != nil {
 		t.Fatal(err)

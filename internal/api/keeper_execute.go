@@ -320,6 +320,21 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Re-validate the credential is STILL active before injecting. The
+	// gatekeeper Evaluate above can take seconds (LLM round-trip), during
+	// which the OAuth refresh worker or an operator may revoke/expire it;
+	// the status filter on the metadata lookup is then stale. Fail closed
+	// so a just-revoked secret is never handed to the container.
+	var stillActive int
+	if err := h.db.QueryRowContext(r.Context(),
+		`SELECT 1 FROM credentials WHERE id = ? AND workspace_id = ? AND status = 'ACTIVE' AND deleted_at IS NULL`,
+		body.CredentialID, body.WorkspaceID).Scan(&stillActive); err != nil {
+		h.logger.Warn("keeper execute: credential no longer active at inject time",
+			"credential_id", body.CredentialID, "error", err)
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "credential not found"})
+		return
+	}
+
 	plainValue, found := h.secrets.Get(body.CredentialID)
 	if !found {
 		h.logger.Error("keeper execute: secret not in store", "credential_id", body.CredentialID)

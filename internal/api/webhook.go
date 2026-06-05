@@ -229,6 +229,34 @@ func (h *WebhookHandler) trigger(ctx context.Context, crewID, agentID string, pa
 		return fmt.Errorf("webhook: agent %s rate limit exceeded (%d/min)", agentID, h.agentRatePerMin)
 	}
 
+	// In-flight concurrency cap (R4#3, second layer) — acquired UP FRONT,
+	// before any container warmup or run-record write, so a throttled
+	// delivery warms no container and writes no run row (no load
+	// amplification). The slot is held for the lifetime of the async run
+	// (released in the goroutine below). On reject we Forget the
+	// idempotency reservation (mirroring the rate gate) so a redelivery
+	// with the same key can retry once capacity frees.
+	var releaseSlot func()
+	if h.agentRuns != nil {
+		_, release, acqErr := h.agentRuns.Acquire(ctx, pipeline.AcquireOpts{
+			RunID:          runID,
+			WorkspaceID:    info.WorkspaceID,
+			ConcurrencyKey: agentWebhookConcurrencyKey + ":" + agentID,
+			MaxConcurrent:  h.agentMaxConcurrent,
+		})
+		if acqErr != nil {
+			if h.idem != nil && info.WorkspaceID != "" {
+				if fErr := h.idem.Forget(ctx, info.WorkspaceID, idemKey); fErr != nil {
+					h.logger.Warn("webhook concurrency gate: failed to release reservation", "agent_id", agentID, "error", fErr)
+				}
+			}
+			h.logger.Warn("webhook concurrency gate: agent at in-flight cap, dropping delivery",
+				"agent_id", agentID, "max_concurrent", h.agentMaxConcurrent)
+			return fmt.Errorf("webhook: agent %s concurrency limit reached (%d)", agentID, h.agentMaxConcurrent)
+		}
+		releaseSlot = release
+	}
+
 	// 2. Create a chat session for this webhook if it doesn't exist
 	// We use a deterministic chat ID based on the agent ID so we don't spam sessions,
 	// or we could create a new one every time. Let's use a "webhook" suffix.
@@ -252,6 +280,9 @@ func (h *WebhookHandler) trigger(ctx context.Context, crewID, agentID string, pa
 		CachedImage: info.CachedImage,
 	})
 	if err != nil {
+		if releaseSlot != nil {
+			releaseSlot()
+		}
 		return fmt.Errorf("ensure crew runtime: %w", err)
 	}
 
@@ -284,31 +315,10 @@ func (h *WebhookHandler) trigger(ctx context.Context, crewID, agentID string, pa
 		runCtx, cancel := context.WithTimeout(parentCtx, 10*time.Minute)
 		defer cancel()
 
-		// In-flight concurrency cap (R4#3, second layer). The rate window
-		// bounds runs/min; this bounds runs IN FLIGHT per agent, so a burst
-		// that all lands before any run finishes still can't pin more than
-		// agentMaxConcurrent 10-min runs on one agent. On reject we mark the
-		// run THROTTLED and return without invoking the orchestrator.
-		if h.agentRuns != nil {
-			acquired, release, acqErr := h.agentRuns.Acquire(runCtx, pipeline.AcquireOpts{
-				RunID:          runID,
-				WorkspaceID:    info.WorkspaceID,
-				ConcurrencyKey: agentWebhookConcurrencyKey + ":" + agentID,
-				MaxConcurrent:  h.agentMaxConcurrent,
-			})
-			if acqErr != nil {
-				h.logger.Warn("webhook concurrency gate: agent at in-flight cap, dropping run",
-					"agent_id", agentID, "max_concurrent", h.agentMaxConcurrent, "error", acqErr)
-				exitCode := 1
-				status := "THROTTLED"
-				msg := acqErr.Error()
-				if updateErr := h.resolver.UpdateRun(runCtx, runID, status, &exitCode, &msg, nil); updateErr != nil {
-					h.logger.Warn("failed to update throttled run status", "run_id", runID, "error", updateErr)
-				}
-				return
-			}
-			runCtx = acquired
-			defer release()
+		// The in-flight concurrency slot was acquired up front (before any
+		// container/run work); release it when this run finishes.
+		if releaseSlot != nil {
+			defer releaseSlot()
 		}
 
 		req := orchestrator.AgentRunRequest{

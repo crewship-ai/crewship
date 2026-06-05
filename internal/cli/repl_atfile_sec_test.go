@@ -102,16 +102,52 @@ func TestSecAtFileInDirAllowed(t *testing.T) {
 	}
 }
 
-// chdir switches into dir and returns a restore func. Kept local so the
-// security test doesn't depend on test helpers in sibling files.
+// TestSecAtFileSymlinkEscapeRejected pins the symlink-resolving containment:
+// an in-tree symlink that points OUTSIDE the working directory must not let
+// a `@file` read smuggle out-of-tree content past the lexical prefix check.
+func TestSecAtFileSymlinkEscapeRejected(t *testing.T) {
+	parent := t.TempDir()
+	work := filepath.Join(parent, "work")
+	if err := os.Mkdir(work, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	secret := filepath.Join(parent, "secret.txt")
+	if err := os.WriteFile(secret, []byte("TOP-SECRET"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// A symlink inside work pointing at the out-of-tree secret file.
+	if err := os.Symlink(secret, filepath.Join(work, "link.txt")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	// A symlink inside work pointing at the out-of-tree parent directory.
+	if err := os.Symlink(parent, filepath.Join(work, "out")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	restore := chdir(t, work)
+	defer restore()
+
+	for _, p := range []string{"link.txt", filepath.FromSlash("out/secret.txt")} {
+		data, err := readAtFileBounded(p, false)
+		if err == nil && strings.Contains(string(data), "TOP-SECRET") {
+			t.Fatalf("symlink escape %q leaked out-of-tree content: %q", p, string(data))
+		}
+	}
+
+	// A filename merely CONTAINING ".." (not a traversal segment) is allowed.
+	if err := os.WriteFile(filepath.Join(work, "release..md"), []byte("OK"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if data, err := readAtFileBounded("release..md", false); err != nil || string(data) != "OK" {
+		t.Errorf("`release..md` should be readable; got %q, %v", string(data), err)
+	}
+}
+
+// chdir switches into dir for the test using t.Chdir, which isolates the
+// change and auto-restores at test end (no process-global cwd leak). The
+// returned func is a no-op kept for call-site compatibility.
 func chdir(t *testing.T, dir string) func() {
 	t.Helper()
-	prev, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chdir(dir); err != nil {
-		t.Fatal(err)
-	}
-	return func() { _ = os.Chdir(prev) }
+	t.Chdir(dir)
+	return func() {}
 }

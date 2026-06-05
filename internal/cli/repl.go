@@ -321,10 +321,22 @@ func atFilePathContained(path string) error {
 	if strings.TrimSpace(path) == "" {
 		return fmt.Errorf("empty @file path")
 	}
-	if strings.Contains(path, "..") {
-		return fmt.Errorf("@file path %q rejected: '..' traversal not allowed", path)
+	// Reject ".." as a path SEGMENT, not a raw substring, so legitimate
+	// in-tree names like "release..md" or "v1..backup/note.txt" are allowed
+	// while "../escape" is not.
+	for _, seg := range strings.Split(filepath.ToSlash(filepath.Clean(path)), "/") {
+		if seg == ".." {
+			return fmt.Errorf("@file path %q rejected: '..' traversal not allowed", path)
+		}
 	}
 	wd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("@file containment: resolve working dir: %w", err)
+	}
+	// Resolve symlinks on BOTH ends so an in-tree symlink that points
+	// outside the working dir (work/sub -> /etc) can't smuggle an
+	// out-of-tree read past a purely lexical prefix check.
+	realRoot, err := filepath.EvalSymlinks(wd)
 	if err != nil {
 		return fmt.Errorf("@file containment: resolve working dir: %w", err)
 	}
@@ -332,14 +344,24 @@ func atFilePathContained(path string) error {
 	if err != nil {
 		return fmt.Errorf("@file containment: resolve %q: %w", path, err)
 	}
-	rootWithSep := filepath.Clean(wd) + string(os.PathSeparator)
-	cleaned := filepath.Clean(absP)
-	if cleaned+string(os.PathSeparator) == rootWithSep {
-		// The path is the working directory itself — a directory, not a
-		// file; let os.Open surface the "is a directory" error normally.
-		return nil
+	realTarget, err := filepath.EvalSymlinks(absP)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("@file containment: resolve %q: %w", path, err)
+		}
+		// File (or a leaf component) doesn't exist yet: resolve the deepest
+		// existing ancestor, then re-attach the unresolved base name.
+		realParent, perr := filepath.EvalSymlinks(filepath.Dir(absP))
+		if perr != nil {
+			return fmt.Errorf("@file containment: resolve %q: %w", path, perr)
+		}
+		realTarget = filepath.Join(realParent, filepath.Base(absP))
 	}
-	if !strings.HasPrefix(cleaned+string(os.PathSeparator), rootWithSep) {
+	rel, err := filepath.Rel(realRoot, realTarget)
+	if err != nil {
+		return fmt.Errorf("@file path %q rejected: %w", path, err)
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
 		return fmt.Errorf("@file path %q rejected: resolves outside the working directory", path)
 	}
 	return nil

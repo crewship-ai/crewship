@@ -12,7 +12,24 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/httpsafe"
 )
+
+// mcpClientTransport is the http.RoundTripper used by per-server MCP
+// clients for all outbound JSON-RPC traffic. It defaults to an
+// SSRF-safe transport whose DialContext re-resolves the host at connect
+// time and refuses any private/loopback/link-local IP — the runtime
+// defence against a config hostname that RESOLVES to RFC1918 /
+// 169.254.169.254 even though httpsafe.ValidateURL accepted it at
+// integration create/update (DNS-rebinding / split-horizon SSRF).
+//
+// It is a package var rather than a const transport so the test binary
+// can swap in a loopback-allowing transport (httptest servers bind
+// 127.0.0.1, which SafeTransport blocks). Production code never
+// reassigns it; see TestMain in this package for the test override and
+// TestSecMCPDial for the assertion that the default rejects loopback.
+var mcpClientTransport http.RoundTripper = httpsafe.SafeTransport()
 
 // MCPGateway manages connections to external MCP servers and routes tool calls
 // with transparent per-agent credential injection (Gateway Offload pattern).
@@ -203,7 +220,8 @@ func NewMCPGateway(servers []MCPServerInput, ipc *IPCConfig, logger *slog.Logger
 			endpoint:    s.Endpoint,
 			credential:  s.Credential,
 			httpClient: &http.Client{
-				Timeout: 30 * time.Second,
+				Timeout:   30 * time.Second,
+				Transport: mcpClientTransport,
 			},
 			logger: logger,
 		}

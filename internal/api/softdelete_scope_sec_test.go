@@ -105,8 +105,8 @@ func TestSecSoftDel_CreateRun_DeletedAgent404(t *testing.T) {
 	rr := httptest.NewRecorder()
 	h.CreateRun(rr, req)
 
-	if rr.Code != http.StatusNotFound && rr.Code != http.StatusForbidden {
-		t.Fatalf("CreateRun on soft-deleted agent must be rejected (404/403); got %d body=%s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("CreateRun on soft-deleted agent must be 404; got %d body=%s", rr.Code, rr.Body.String())
 	}
 	// The tombstoned agent must not be flipped to RUNNING.
 	var status string

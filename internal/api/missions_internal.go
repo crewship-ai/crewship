@@ -63,7 +63,7 @@ func (h *InternalMissionHandler) Create(w http.ResponseWriter, r *http.Request) 
 	// create a mission in another crew with itself as lead (cross-crew override).
 	var exists int
 	err := h.db.QueryRowContext(r.Context(),
-		`SELECT 1 FROM agents WHERE id = ? AND crew_id = ? AND workspace_id = ?`,
+		`SELECT 1 FROM agents WHERE id = ? AND crew_id = ? AND workspace_id = ? AND deleted_at IS NULL`,
 		req.LeadAgentID, req.CrewID, req.WorkspaceID).Scan(&exists)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {

@@ -133,7 +133,9 @@ func TestSecClampUpdateTaskMaxIterations(t *testing.T) {
 		t.Fatalf("create status=%d body=%s", createRR.Code, createRR.Body.String())
 	}
 	var created missionTaskResponse
-	json.Unmarshal(createRR.Body.Bytes(), &created)
+	if err := json.Unmarshal(createRR.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode created task: %v", err)
+	}
 
 	body := bytes.NewBufferString(`{"max_iterations":10000}`)
 	req := httptest.NewRequest("PATCH", "/", body)

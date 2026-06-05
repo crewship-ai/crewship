@@ -38,11 +38,24 @@ func emitToken(cmd *cobra.Command, name, id, token string) error {
 	errOut := cmd.ErrOrStderr()
 
 	if outFile != "" {
-		// 0600 + O_EXCL-free create: we overwrite an existing file the
-		// operator pointed us at, but lock the perms so a rotated token
-		// never lands world-readable. Trailing newline so the file is a
-		// clean single-line secret for `cat`/`$(<file)` consumers.
-		if err := os.WriteFile(outFile, []byte(token+"\n"), 0o600); err != nil {
+		// Lock the perms to 0600 even when OVERWRITING a pre-existing file:
+		// os.WriteFile preserves an existing file's (possibly world-readable)
+		// mode, so open with O_TRUNC at 0600 AND Chmod explicitly so a
+		// rotated token never lands world-readable. Trailing newline keeps
+		// the file a clean single-line secret for `cat`/`$(<file)`.
+		f, err := os.OpenFile(outFile, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+		if err != nil {
+			return fmt.Errorf("write token to %s: %w", outFile, err)
+		}
+		if err := f.Chmod(0o600); err != nil {
+			f.Close()
+			return fmt.Errorf("secure token file %s: %w", outFile, err)
+		}
+		if _, err := f.WriteString(token + "\n"); err != nil {
+			f.Close()
+			return fmt.Errorf("write token to %s: %w", outFile, err)
+		}
+		if err := f.Close(); err != nil {
 			return fmt.Errorf("write token to %s: %w", outFile, err)
 		}
 		fmt.Fprintf(out, "%sToken created:%s %s\n", cli.Bold, cli.Reset, name)
