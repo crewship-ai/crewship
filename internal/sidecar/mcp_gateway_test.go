@@ -3,6 +3,7 @@ package sidecar
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -10,7 +11,72 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/crewship-ai/crewship/internal/httpsafe"
 )
+
+// TestMain swaps the package-level mcpClientTransport (which defaults to
+// httpsafe.SafeTransport() in production — it refuses loopback/private
+// IPs at dial time) for a plain transport, because every gateway test in
+// this package points its mcpClient at an httptest server bound to
+// 127.0.0.1. The production SSRF guarantee is asserted directly in
+// TestSecMCPDial, which exercises the real default transport.
+func TestMain(m *testing.M) {
+	prev := mcpClientTransport
+	mcpClientTransport = http.DefaultTransport
+	code := m.Run()
+	mcpClientTransport = prev
+	os.Exit(code)
+}
+
+// TestSecMCPDial verifies the runtime SSRF defence: the production
+// default transport (httpsafe.SafeTransport) must refuse to dial a host
+// that resolves to a loopback/private address, while the test-injected
+// transport (http.DefaultTransport) is allowed to reach the httptest
+// server. This is the DNS-resolved-IP layer that write-time
+// httpsafe.ValidateURL cannot provide.
+func TestSecMCPDial(t *testing.T) {
+	// Sanity: the test binary runs with the loopback-allowing override
+	// installed by TestMain, so a normal mockMCPServer call connects.
+	if mcpClientTransport == nil {
+		t.Fatal("expected test transport to be installed by TestMain")
+	}
+	srv := mockMCPServer(t, nil)
+	defer srv.Close()
+	allowed := NewMCPGateway([]MCPServerInput{
+		{ID: "ok", Name: "ok", Transport: "streamable-http", Endpoint: srv.URL},
+	}, nil, newTestLogger())
+	defer allowed.Close() // stop the audit worker goroutine started by NewMCPGateway
+	if err := allowed.Connect(context.Background()); err != nil {
+		t.Fatalf("injected test transport should reach loopback httptest server: %v", err)
+	}
+
+	// Now exercise the *production* default transport directly: a client
+	// built with httpsafe.SafeTransport must refuse the loopback dial.
+	prodClient := &http.Client{Timeout: 5 * time.Second, Transport: httpsafe.SafeTransport()}
+	req, err := http.NewRequest(http.MethodPost, srv.URL, strings.NewReader("{}"))
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	if _, err := prodClient.Do(req); err == nil {
+		t.Fatal("production SafeTransport must refuse to dial a loopback address")
+	} else if !errors.Is(err, httpsafe.ErrBlocked) {
+		t.Fatalf("expected httpsafe.ErrBlocked dialing loopback, got %v", err)
+	}
+
+	// Link-local metadata endpoint (169.254.169.254) must also be blocked
+	// when reached as a literal — the canonical cloud-metadata SSRF target.
+	metaReq, err := http.NewRequest(http.MethodGet, "http://169.254.169.254/latest/meta-data/", nil)
+	if err != nil {
+		t.Fatalf("build metadata request: %v", err)
+	}
+	if _, err := prodClient.Do(metaReq); err == nil {
+		t.Fatal("production SafeTransport must refuse to dial 169.254.169.254")
+	} else if !errors.Is(err, httpsafe.ErrBlocked) {
+		t.Fatalf("expected httpsafe.ErrBlocked dialing link-local, got %v", err)
+	}
+}
 
 func newTestLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))

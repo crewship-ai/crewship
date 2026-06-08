@@ -10,6 +10,13 @@ import (
 	"time"
 )
 
+// maxTaskIterations bounds the configured retry cap for an assignment task.
+// The runtime loop (orchestrator/loop.go ShouldRetry) honours whatever value
+// is stored, so an absurd value here would let a single task retry far beyond
+// any sane budget. Mirrors the pipeline outcomes cap (dsl_validate_gates.go),
+// just with more headroom for multi-step assignment tasks.
+const maxTaskIterations = 50
+
 // CreateTask handles POST /api/v1/crews/{crewId}/missions/{missionId}/tasks
 func (h *MissionHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 	if !requireRole(w, r, "create") {
@@ -53,6 +60,11 @@ func (h *MissionHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Title == "" {
 		writeProblem(w, r, http.StatusBadRequest, "title is required")
+		return
+	}
+	if req.MaxIterations != nil && (*req.MaxIterations < 0 || *req.MaxIterations > maxTaskIterations) {
+		writeProblem(w, r, http.StatusBadRequest,
+			fmt.Sprintf("max_iterations must be between 0 and %d", maxTaskIterations))
 		return
 	}
 
@@ -154,6 +166,7 @@ type updateTaskRequest struct {
 	OutputPath      *string  `json:"output_path"`
 	TokenCount      *int     `json:"token_count"`
 	EstimatedCost   *float64 `json:"estimated_cost"`
+	MaxIterations   *int     `json:"max_iterations"`
 }
 
 // validateTaskStatusTransition checks whether the transition from currentStatus
@@ -298,6 +311,9 @@ func (h *MissionHandler) applyTaskMetadataFields(ctx context.Context, tx *sql.Tx
 	if req.EstimatedCost != nil {
 		ub.Set("estimated_cost", *req.EstimatedCost)
 	}
+	if req.MaxIterations != nil {
+		ub.Set("max_iterations", *req.MaxIterations)
+	}
 
 	if ub.Empty() {
 		return nil
@@ -322,6 +338,11 @@ func (h *MissionHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 	var req updateTaskRequest
 	if err := readJSON(r, &req); err != nil {
 		writeProblem(w, r, http.StatusBadRequest, "Invalid JSON body")
+		return
+	}
+	if req.MaxIterations != nil && (*req.MaxIterations < 0 || *req.MaxIterations > maxTaskIterations) {
+		writeProblem(w, r, http.StatusBadRequest,
+			fmt.Sprintf("max_iterations must be between 0 and %d", maxTaskIterations))
 		return
 	}
 

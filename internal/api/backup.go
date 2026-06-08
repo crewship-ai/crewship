@@ -485,7 +485,7 @@ func allowRestore(ctx context.Context, db *sql.DB, bundlePath, callerWorkspaceID
 		}
 		// Path 2: slug match against caller's workspace row.
 		var callerSlug string
-		err := db.QueryRowContext(ctx, `SELECT slug FROM workspaces WHERE id = ?`, callerWorkspaceID).Scan(&callerSlug)
+		err := db.QueryRowContext(ctx, `SELECT slug FROM workspaces WHERE id = ? AND deleted_at IS NULL`, callerWorkspaceID).Scan(&callerSlug)
 		if err == nil && callerSlug != "" && callerSlug == bundleSlug {
 			return true, "", nil
 		}

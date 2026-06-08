@@ -42,7 +42,7 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 	// entry or flipping status — see proxy.go's `WHERE id=? AND workspace_id=?`.
 	var agentWorkspaceID string
 	switch err := h.db.QueryRowContext(r.Context(),
-		"SELECT workspace_id FROM agents WHERE id = ? AND workspace_id = ?",
+		"SELECT workspace_id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
 		body.AgentID, body.WorkspaceID).Scan(&agentWorkspaceID); {
 	case err == sql.ErrNoRows:
 		replyError(w, http.StatusNotFound, "Agent not found in workspace")

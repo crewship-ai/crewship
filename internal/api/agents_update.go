@@ -241,7 +241,7 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	query, args := ub.Build("agents", "id = ? AND workspace_id = ?", agentID, workspaceID)
+	query, args := ub.Build("agents", "id = ? AND workspace_id = ? AND deleted_at IS NULL", agentID, workspaceID)
 	if _, err := h.db.ExecContext(r.Context(), query, args...); err != nil {
 		h.logger.Error("update agent", "error", err)
 		replyError(w, http.StatusInternalServerError, "Internal server error")

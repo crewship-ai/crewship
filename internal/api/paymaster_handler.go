@@ -94,7 +94,7 @@ func (h *PaymasterHandler) SpendByAgent(w http.ResponseWriter, r *http.Request) 
 // as "not found" (which hid transient outages in earlier revisions).
 func crewBelongsToWorkspace(ctx context.Context, db *sql.DB, crewID, workspaceID string) (bool, error) {
 	var n int
-	err := db.QueryRowContext(ctx, `SELECT 1 FROM crews WHERE id = ? AND workspace_id = ?`, crewID, workspaceID).Scan(&n)
+	err := db.QueryRowContext(ctx, `SELECT 1 FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`, crewID, workspaceID).Scan(&n)
 	if err == nil {
 		return n == 1, nil
 	}

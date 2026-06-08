@@ -1032,7 +1032,7 @@ func TestCovIIMissionStartAndGet(t *testing.T) {
 	h := NewInternalMissionHandler(db, nil, nil, newTestLogger())
 
 	t.Run("Start: not found → 404", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPost, "/x", nil)
+		req := httptest.NewRequest(http.MethodPost, "/x?workspace_id="+wsID, nil)
 		req.SetPathValue("missionId", "ghost")
 		rec := httptest.NewRecorder()
 		h.Start(rec, req)
@@ -1042,7 +1042,7 @@ func TestCovIIMissionStartAndGet(t *testing.T) {
 	})
 
 	t.Run("Start: wrong state → 400", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPost, "/x", nil)
+		req := httptest.NewRequest(http.MethodPost, "/x?workspace_id="+wsID, nil)
 		req.SetPathValue("missionId", "m2")
 		rec := httptest.NewRecorder()
 		h.Start(rec, req)
@@ -1052,7 +1052,7 @@ func TestCovIIMissionStartAndGet(t *testing.T) {
 	})
 
 	t.Run("Start: PLANNING → 200 IN_PROGRESS", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPost, "/x", nil)
+		req := httptest.NewRequest(http.MethodPost, "/x?workspace_id="+wsID, nil)
 		req.SetPathValue("missionId", "m1")
 		rec := httptest.NewRecorder()
 		h.Start(rec, req)
@@ -1069,7 +1069,7 @@ func TestCovIIMissionStartAndGet(t *testing.T) {
 	})
 
 	t.Run("Get: not found → 404", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/x", nil)
+		req := httptest.NewRequest(http.MethodGet, "/x?workspace_id="+wsID, nil)
 		req.SetPathValue("missionId", "ghost")
 		rec := httptest.NewRecorder()
 		h.Get(rec, req)
@@ -1079,7 +1079,7 @@ func TestCovIIMissionStartAndGet(t *testing.T) {
 	})
 
 	t.Run("Get: happy path → 200 with tasks key", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/x", nil)
+		req := httptest.NewRequest(http.MethodGet, "/x?workspace_id="+wsID, nil)
 		req.SetPathValue("missionId", "m1")
 		rec := httptest.NewRecorder()
 		h.Get(rec, req)

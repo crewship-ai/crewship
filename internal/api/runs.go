@@ -167,11 +167,20 @@ func (h *RunHandler) List(w http.ResponseWriter, r *http.Request) {
 	if page < 1 {
 		page = 1
 	}
+	// Upper-clamp page before the (page-1)*limit multiply: an unbounded page
+	// can overflow a signed int to a negative offset, confusing pagination.
+	const maxPage = 1_000_000
+	if page > maxPage {
+		page = maxPage
+	}
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	if limit < 1 || limit > 100 {
 		limit = 50
 	}
 	offset := (page - 1) * limit
+	if offset < 0 {
+		offset = 0
+	}
 
 	// Status, when supplied, must be one of the documented enum values.
 	// journal.ListRuns silently treats unknown statuses as "no filter"

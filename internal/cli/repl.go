@@ -251,7 +251,8 @@ func ExpandAtFiles(ctx context.Context, s string) (string, error) {
 			continue
 		}
 		path := token
-		if strings.HasPrefix(path, "~/") {
+		homeToken := strings.HasPrefix(path, "~/")
+		if homeToken {
 			home, herr := os.UserHomeDir()
 			if herr != nil {
 				// Preserve the literal token rather than synthesising
@@ -263,7 +264,13 @@ func ExpandAtFiles(ctx context.Context, s string) (string, error) {
 			}
 			path = filepath.Join(home, path[2:])
 		}
-		data, err := readAtFileBounded(path)
+		// Containment: a plain relative/absolute @file token is confined
+		// to the working directory so `@../../../etc/passwd` can't inline
+		// arbitrary files. An explicit ~/ token is the one documented
+		// exception (the user typed their home dir) and skips the cwd
+		// check — but ~/ itself was joined onto $HOME above, so it still
+		// can't climb out of the filesystem in a surprising way.
+		data, err := readAtFileBounded(path, homeToken)
 		if err != nil {
 			b.WriteString(s[i:j])
 		} else {
@@ -276,7 +283,23 @@ func ExpandAtFiles(ctx context.Context, s string) (string, error) {
 
 // readAtFileBounded opens path and reads up to MaxAtFileBytes. Returns
 // the (possibly truncated) bytes and a wrapped error on failure.
-func readAtFileBounded(path string) ([]byte, error) {
+//
+// Unless homeToken is set, the path is contained to the current working
+// directory: any ".." segment or an absolute/relative path that resolves
+// outside the cwd subtree is rejected before the open. This stops a
+// hostile prompt (`@../../../etc/passwd`, `@/etc/shadow`) from inlining
+// arbitrary files into an agent's context via @file expansion. The
+// containment shape mirrors cmd_memory_versions.go:canonicalPathIsSafe.
+//
+// homeToken == true is the single documented exception: the user typed
+// an explicit `~/...` reference, which the caller already joined onto
+// $HOME, so the cwd subtree check would be wrong for it.
+func readAtFileBounded(path string, homeToken bool) ([]byte, error) {
+	if !homeToken {
+		if err := atFilePathContained(path); err != nil {
+			return nil, err
+		}
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", path, err)
@@ -287,6 +310,61 @@ func readAtFileBounded(path string) ([]byte, error) {
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
 	return data, nil
+}
+
+// atFilePathContained rejects @file paths that escape the working
+// directory: any ".." segment, or a cleaned absolute path that does not
+// sit under the cwd subtree. Empty paths are rejected too. Mirrors the
+// containment in cmd_memory_versions.go:canonicalPathIsSafe but rooted
+// at the cwd rather than a caller-supplied root.
+func atFilePathContained(path string) error {
+	if strings.TrimSpace(path) == "" {
+		return fmt.Errorf("empty @file path")
+	}
+	// Reject ".." as a path SEGMENT, not a raw substring, so legitimate
+	// in-tree names like "release..md" or "v1..backup/note.txt" are allowed
+	// while "../escape" is not.
+	for _, seg := range strings.Split(filepath.ToSlash(filepath.Clean(path)), "/") {
+		if seg == ".." {
+			return fmt.Errorf("@file path %q rejected: '..' traversal not allowed", path)
+		}
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("@file containment: resolve working dir: %w", err)
+	}
+	// Resolve symlinks on BOTH ends so an in-tree symlink that points
+	// outside the working dir (work/sub -> /etc) can't smuggle an
+	// out-of-tree read past a purely lexical prefix check.
+	realRoot, err := filepath.EvalSymlinks(wd)
+	if err != nil {
+		return fmt.Errorf("@file containment: resolve working dir: %w", err)
+	}
+	absP, err := filepath.Abs(path)
+	if err != nil {
+		return fmt.Errorf("@file containment: resolve %q: %w", path, err)
+	}
+	realTarget, err := filepath.EvalSymlinks(absP)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("@file containment: resolve %q: %w", path, err)
+		}
+		// File (or a leaf component) doesn't exist yet: resolve the deepest
+		// existing ancestor, then re-attach the unresolved base name.
+		realParent, perr := filepath.EvalSymlinks(filepath.Dir(absP))
+		if perr != nil {
+			return fmt.Errorf("@file containment: resolve %q: %w", path, perr)
+		}
+		realTarget = filepath.Join(realParent, filepath.Base(absP))
+	}
+	rel, err := filepath.Rel(realRoot, realTarget)
+	if err != nil {
+		return fmt.Errorf("@file path %q rejected: %w", path, err)
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return fmt.Errorf("@file path %q rejected: resolves outside the working directory", path)
+	}
+	return nil
 }
 
 func isSpace(c byte) bool {

@@ -4,10 +4,24 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 )
+
+// missionScopeQuery builds the ?workspace_id=&crew_id= query string the
+// internal mission Start/Get endpoints now require, sourced from the trusted
+// IPC identity (never the agent's request) so a compromised agent can't
+// start/read a mission outside its own crew/workspace.
+func (s *Server) missionScopeQuery() string {
+	q := url.Values{}
+	q.Set("workspace_id", s.ipc.WorkspaceID)
+	if s.ipc.CrewID != "" {
+		q.Set("crew_id", s.ipc.CrewID)
+	}
+	return "?" + q.Encode()
+}
 
 type missionCreateRequest struct {
 	Title       string `json:"title"`
@@ -135,7 +149,7 @@ func (s *Server) handleMissionStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.proxyIPCJSON(w, r, http.MethodPost, "/api/v1/internal/missions/"+missionID+"/start", "mission start", nil)
+	s.proxyIPCJSON(w, r, http.MethodPost, "/api/v1/internal/missions/"+missionID+"/start"+s.missionScopeQuery(), "mission start", nil)
 }
 
 // handleMissionStatus handles GET /mission/{missionId}
@@ -152,7 +166,7 @@ func (s *Server) handleMissionStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.proxyIPCJSON(w, r, http.MethodGet, "/api/v1/internal/missions/"+missionID, "mission status", nil)
+	s.proxyIPCJSON(w, r, http.MethodGet, "/api/v1/internal/missions/"+missionID+s.missionScopeQuery(), "mission status", nil)
 }
 
 // handleMissionTemplates handles GET /mission/templates
