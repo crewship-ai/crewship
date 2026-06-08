@@ -79,14 +79,18 @@ ssh "$SERVER_HOST" bash -s -- "$SERVER_PATH" "$BRANCH" "$SENTRY_DSN_VAL" "$NEXT_
   # genuinely out of sync with package.json on origin/$BRANCH, fail LOUDLY with
   # the full pnpm error rather than masking it through `| tail` and drifting.
   echo "  Installing npm deps (frozen lockfile)..."
-  if ! pnpm install --frozen-lockfile >/tmp/crewship-pnpm-install.log 2>&1; then
+  # Unique temp log (mktemp) + cleanup trap so concurrent slot deploys on the
+  # same host don't clobber each other's output.
+  PNPM_INSTALL_LOG="$(mktemp /tmp/crewship-pnpm-install.XXXXXX)"
+  trap 'rm -f "$PNPM_INSTALL_LOG"' EXIT
+  if ! pnpm install --frozen-lockfile >"$PNPM_INSTALL_LOG" 2>&1; then
     echo "  ERROR: 'pnpm install --frozen-lockfile' failed — pnpm-lock.yaml is" >&2
     echo "  out of sync with package.json on origin/$BRANCH. Commit an updated" >&2
     echo "  lockfile; do NOT run an unfrozen install on the slot." >&2
-    tail -20 /tmp/crewship-pnpm-install.log >&2
+    tail -20 "$PNPM_INSTALL_LOG" >&2
     exit 1
   fi
-  tail -2 /tmp/crewship-pnpm-install.log
+  tail -2 "$PNPM_INSTALL_LOG"
 
   # Restart
   echo "  Restarting services..."
