@@ -71,8 +71,22 @@ ssh "$SERVER_HOST" bash -s -- "$SERVER_PATH" "$BRANCH" "$SENTRY_DSN_VAL" "$NEXT_
   echo "  Building Go..."
   make build:go 2>&1
 
-  echo "  Installing npm deps..."
-  pnpm install 2>&1 | tail -2
+  # --frozen-lockfile: install EXACTLY what pnpm-lock.yaml pins, same as CI
+  # (setup-node-pnpm action), release.yml, nightly.yml and the Dockerfile. An
+  # unfrozen `pnpm install` here would silently bump transitive deps on the
+  # slot, so the binary it embeds diverges from what CI built — type errors and
+  # runtime behaviour that don't reproduce anywhere else. If the lockfile is
+  # genuinely out of sync with package.json on origin/$BRANCH, fail LOUDLY with
+  # the full pnpm error rather than masking it through `| tail` and drifting.
+  echo "  Installing npm deps (frozen lockfile)..."
+  if ! pnpm install --frozen-lockfile >/tmp/crewship-pnpm-install.log 2>&1; then
+    echo "  ERROR: 'pnpm install --frozen-lockfile' failed — pnpm-lock.yaml is" >&2
+    echo "  out of sync with package.json on origin/$BRANCH. Commit an updated" >&2
+    echo "  lockfile; do NOT run an unfrozen install on the slot." >&2
+    tail -20 /tmp/crewship-pnpm-install.log >&2
+    exit 1
+  fi
+  tail -2 /tmp/crewship-pnpm-install.log
 
   # Restart
   echo "  Restarting services..."
