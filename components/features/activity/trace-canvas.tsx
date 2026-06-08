@@ -14,6 +14,7 @@ import {
   type Node,
   type NodeTypes,
   type EdgeTypes,
+  type OnNodeDrag,
 } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
 import { Workflow } from "lucide-react"
@@ -201,7 +202,12 @@ function CanvasInner({
   // as the orchestration WorkflowGraph.
   const userPositions = useRef(new Map<string, { x: number; y: number }>())
 
-  const onNodeDragStop = useCallback((_: React.MouseEvent, node: Node) => {
+  // Type the callback via OnNodeDrag so the event param is inferred from the
+  // installed @xyflow/react version rather than hard-coded. ReactFlow has typed
+  // this param differently across versions (DOM `MouseEvent | TouchEvent` vs
+  // React `MouseEvent`); pinning either literal breaks whichever environment
+  // resolves the other. Sourcing the type from the package can't mismatch.
+  const onNodeDragStop = useCallback<OnNodeDrag<Node>>((_, node) => {
     userPositions.current.set(node.id, { ...node.position })
   }, [])
 
