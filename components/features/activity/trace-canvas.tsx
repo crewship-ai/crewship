@@ -201,7 +201,7 @@ function CanvasInner({
   // as the orchestration WorkflowGraph.
   const userPositions = useRef(new Map<string, { x: number; y: number }>())
 
-  const onNodeDragStop = useCallback((_: MouseEvent | TouchEvent, node: Node) => {
+  const onNodeDragStop = useCallback((_: React.MouseEvent, node: Node) => {
     userPositions.current.set(node.id, { ...node.position })
   }, [])
 
