@@ -283,6 +283,15 @@ func (h *WebhookHandler) trigger(ctx context.Context, crewID, agentID string, pa
 		if releaseSlot != nil {
 			releaseSlot()
 		}
+		// Forget the idempotency reservation (mirroring the rate/concurrency
+		// gates above): startup failed, so no run was created or started. A
+		// redelivery with the same key must be allowed to retry rather than
+		// being deduped against a reservation that never produced a run.
+		if h.idem != nil && info.WorkspaceID != "" {
+			if fErr := h.idem.Forget(ctx, info.WorkspaceID, idemKey); fErr != nil {
+				h.logger.Warn("webhook startup failure: failed to release reservation", "agent_id", agentID, "error", fErr)
+			}
+		}
 		return fmt.Errorf("ensure crew runtime: %w", err)
 	}
 

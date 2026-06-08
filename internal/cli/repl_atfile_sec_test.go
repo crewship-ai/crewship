@@ -129,7 +129,14 @@ func TestSecAtFileSymlinkEscapeRejected(t *testing.T) {
 
 	for _, p := range []string{"link.txt", filepath.FromSlash("out/secret.txt")} {
 		data, err := readAtFileBounded(p, false)
-		if err == nil && strings.Contains(string(data), "TOP-SECRET") {
+		// The read MUST be rejected outright: a nil error means the containment
+		// check let an out-of-tree symlink through, which is the regression
+		// this test guards — assert that independently of the content so a
+		// successful-but-empty read can't pass silently.
+		if err == nil {
+			t.Fatalf("symlink escape %q should be rejected, but read succeeded: %q", p, string(data))
+		}
+		if strings.Contains(string(data), "TOP-SECRET") {
 			t.Fatalf("symlink escape %q leaked out-of-tree content: %q", p, string(data))
 		}
 	}

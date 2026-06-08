@@ -47,6 +47,7 @@ func TestSecMCPDial(t *testing.T) {
 	allowed := NewMCPGateway([]MCPServerInput{
 		{ID: "ok", Name: "ok", Transport: "streamable-http", Endpoint: srv.URL},
 	}, nil, newTestLogger())
+	defer allowed.Close() // stop the audit worker goroutine started by NewMCPGateway
 	if err := allowed.Connect(context.Background()); err != nil {
 		t.Fatalf("injected test transport should reach loopback httptest server: %v", err)
 	}
