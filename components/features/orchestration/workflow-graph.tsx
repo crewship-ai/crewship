@@ -13,6 +13,7 @@ import {
   type Node,
   type NodeTypes,
   type EdgeTypes,
+  type OnNodeDrag,
   BackgroundVariant,
 } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
@@ -150,7 +151,9 @@ function WorkflowGraphInner(
   // Track user-dragged node positions so polling doesn't reset them
   const userPositions = useRef(new Map<string, { x: number; y: number }>())
 
-  const onNodeDragStop = useCallback((_: React.MouseEvent, node: Node) => {
+  // Type via OnNodeDrag so the event param is inferred from the installed
+  // @xyflow/react version (see trace-canvas.tsx for the version-skew rationale).
+  const onNodeDragStop = useCallback<OnNodeDrag<Node>>((_, node) => {
     userPositions.current.set(node.id, { ...node.position })
   }, [])
 
