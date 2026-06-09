@@ -63,8 +63,15 @@ type skillInvocationObserver struct {
 const skillSlugCacheTTL = 60 * time.Second
 
 type slugCacheEntry struct {
+	// slugs maps canonical slug → skill_id (the record/journal key).
 	slugs map[string]string
-	at    time.Time
+	// aliases maps a normalized identifier → canonical slug. It covers the
+	// slug itself, the SKILL.md frontmatter `name`, and the display name —
+	// because Claude Code's "Skill" tool refers to a skill by its SKILL.md
+	// `name`, which can differ from the Crewship slug (e.g. frontmatter
+	// name "code-review" vs slug "code-reviewer").
+	aliases map[string]string
+	at      time.Time
 }
 
 func newSkillInvocationObserver(logger *slog.Logger, db *sql.DB, j journal.Emitter) *skillInvocationObserver {
@@ -97,9 +104,9 @@ func (o *skillInvocationObserver) Observe(obs orchestrator.SkillInvocation) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	slugs, err := o.assignedSlugs(ctx, obs.AgentID)
+	slugs, aliases, err := o.assignedSkills(ctx, obs.AgentID)
 	if err != nil {
-		o.logger.Debug("skill_invocation: resolve assigned slugs",
+		o.logger.Debug("skill_invocation: resolve assigned skills",
 			"agent_id", obs.AgentID, "error", err)
 		return
 	}
@@ -107,7 +114,7 @@ func (o *skillInvocationObserver) Observe(obs orchestrator.SkillInvocation) {
 		return // agent has no enabled skills; nothing can match
 	}
 
-	slug := matchSkillSlug(obs.ToolName, obs.Payload, slugs)
+	slug := matchSkillSlug(obs.ToolName, obs.Payload, aliases)
 	if slug == "" {
 		return
 	}
@@ -128,46 +135,91 @@ func (o *skillInvocationObserver) Observe(obs orchestrator.SkillInvocation) {
 	o.emit(ctx, obs, skillID, slug, exitCode, usageCount)
 }
 
-// assignedSlugs returns the agent's enabled skill slug→id map, caching
-// the result per agent_id.
-func (o *skillInvocationObserver) assignedSlugs(ctx context.Context, agentID string) (map[string]string, error) {
+// assignedSkills returns the agent's enabled skills as a canonical slug→id
+// map plus an alias→slug lookup (slug, SKILL.md frontmatter name, display
+// name), caching both per agent_id. The alias map is what lets a Skill-tool
+// invocation that names the skill by its SKILL.md `name` resolve back to the
+// Crewship slug even when the two differ.
+func (o *skillInvocationObserver) assignedSkills(ctx context.Context, agentID string) (slugs, aliases map[string]string, err error) {
 	now := o.clock()
 
 	o.mu.Lock()
 	if e, ok := o.slugCache[agentID]; ok && now.Sub(e.at) < skillSlugCacheTTL {
 		o.mu.Unlock()
-		return e.slugs, nil
+		return e.slugs, e.aliases, nil
 	}
 	o.mu.Unlock()
 
 	rows, err := o.db.QueryContext(ctx, `
-		SELECT s.slug, s.id
+		SELECT s.slug, s.id, COALESCE(s.name, ''), COALESCE(s.content, '')
 		  FROM agent_skills a
 		  JOIN skills s ON s.id = a.skill_id
 		 WHERE a.agent_id = ? AND a.enabled = 1`, agentID)
 	if err != nil {
-		return nil, fmt.Errorf("query assigned skills for agent %s: %w", agentID, err)
+		return nil, nil, fmt.Errorf("query assigned skills for agent %s: %w", agentID, err)
 	}
 	defer rows.Close()
 
-	m := make(map[string]string)
+	slugs = make(map[string]string)
+	aliases = make(map[string]string)
 	for rows.Next() {
-		var slug, id string
-		if err := rows.Scan(&slug, &id); err != nil {
-			return nil, fmt.Errorf("scan assigned skill row: %w", err)
+		var slug, id, name, content string
+		if err := rows.Scan(&slug, &id, &name, &content); err != nil {
+			return nil, nil, fmt.Errorf("scan assigned skill row: %w", err)
 		}
-		if slug != "" {
-			m[slug] = id
+		if slug == "" {
+			continue
 		}
+		slugs[slug] = id
+		addAlias(aliases, slug, slug)
+		addAlias(aliases, frontmatterName(content), slug)
+		addAlias(aliases, name, slug)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate assigned skills: %w", err)
+		return nil, nil, fmt.Errorf("iterate assigned skills: %w", err)
 	}
 
 	o.mu.Lock()
-	o.slugCache[agentID] = slugCacheEntry{slugs: m, at: now}
+	o.slugCache[agentID] = slugCacheEntry{slugs: slugs, aliases: aliases, at: now}
 	o.mu.Unlock()
-	return m, nil
+	return slugs, aliases, nil
+}
+
+// addAlias registers a normalized identifier → canonical slug, first-write-
+// wins so a slug never gets shadowed by another skill's display name.
+func addAlias(m map[string]string, alias, slug string) {
+	a := normAlias(alias)
+	if a == "" {
+		return
+	}
+	if _, exists := m[a]; !exists {
+		m[a] = slug
+	}
+}
+
+// normAlias lowercases + trims an identifier for case-insensitive matching.
+func normAlias(s string) string { return strings.ToLower(strings.TrimSpace(s)) }
+
+// frontmatterName extracts the `name:` field from a SKILL.md's leading YAML
+// frontmatter (the identifier Claude Code's Skill tool uses). Returns "" when
+// there is no frontmatter or no name.
+func frontmatterName(content string) string {
+	s := strings.TrimLeft(content, " \t\r\n")
+	if !strings.HasPrefix(s, "---") {
+		return ""
+	}
+	rest := s[3:]
+	end := strings.Index(rest, "\n---")
+	if end < 0 {
+		return ""
+	}
+	for _, line := range strings.Split(rest[:end], "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "name:") {
+			return strings.Trim(strings.TrimSpace(strings.TrimPrefix(line, "name:")), `"'`)
+		}
+	}
+	return ""
 }
 
 // record writes the skill_invocations audit row and denormalises the
@@ -261,32 +313,32 @@ func (o *skillInvocationObserver) emit(
 // command / name / slug); any other tool name is treated as a direct
 // slug candidate (CLI-style skills invoked as their own tool). Returns
 // "" when no slug can be derived.
-func matchSkillSlug(toolName string, payload map[string]any, assigned map[string]string) string {
-	// CLI-style: a tool named exactly as one of the agent's assigned skills.
-	if _, ok := assigned[toolName]; ok {
-		return toolName
+func matchSkillSlug(toolName string, payload map[string]any, aliases map[string]string) string {
+	// CLI-style: a tool named as one of the agent's assigned skills (by slug,
+	// frontmatter name, or display name).
+	if s := resolveAlias(toolName, aliases); s != "" {
+		return s
 	}
 	if toolName != "Skill" {
 		return ""
 	}
-	// Claude Code's "Skill" tool carries the target slug somewhere in its
-	// input, but the key has varied across versions (skill/command/name/
-	// slug/…) and the value may be a bare slug or a slug-led command string.
-	// Match key-agnostically against the agent's assigned slugs: try the
-	// conventional keys first (deterministic), then scan every string value.
-	// Gating on `assigned` keeps this safe from false positives — only a
-	// skill the agent actually has can ever match.
+	// Claude Code's "Skill" tool carries the target skill identifier in its
+	// input, but the key has varied (skill/command/name/slug/…) and the value
+	// is the SKILL.md `name` — which may differ from the slug. Resolve it
+	// through the alias map: try the conventional keys first (deterministic),
+	// then scan every string value. Gating on the agent's assigned aliases
+	// keeps this free of false positives.
 	in := payloadInput(payload)
 	for _, key := range []string{"skill", "command", "name", "slug", "skill_name", "skillName"} {
 		if v, ok := in[key].(string); ok {
-			if s := assignedFromValue(v, assigned); s != "" {
+			if s := resolveAlias(v, aliases); s != "" {
 				return s
 			}
 		}
 	}
 	for _, v := range in {
 		if vs, ok := v.(string); ok {
-			if s := assignedFromValue(vs, assigned); s != "" {
+			if s := resolveAlias(vs, aliases); s != "" {
 				return s
 			}
 		}
@@ -294,23 +346,21 @@ func matchSkillSlug(toolName string, payload map[string]any, assigned map[string
 	return ""
 }
 
-// assignedFromValue resolves a tool-input string to one of the agent's
-// assigned skill slugs: an exact match, or the leading whitespace-delimited
-// token (so a "code-reviewer review this file" command still resolves to
-// "code-reviewer"). Returns "" when no assigned slug matches.
-func assignedFromValue(v string, assigned map[string]string) string {
-	v = strings.TrimSpace(v)
-	if v == "" {
+// resolveAlias maps a tool-input identifier to a canonical assigned slug: an
+// exact (normalized) alias match, or the leading whitespace-delimited token
+// (so a "code-review review this file" command still resolves). Returns ""
+// when no assigned alias matches.
+func resolveAlias(v string, aliases map[string]string) string {
+	n := normAlias(v)
+	if n == "" {
 		return ""
 	}
-	if _, ok := assigned[v]; ok {
-		return v
+	if s, ok := aliases[n]; ok {
+		return s
 	}
-	if i := strings.IndexAny(v, " \t\n"); i > 0 {
-		if tok := v[:i]; tok != "" {
-			if _, ok := assigned[tok]; ok {
-				return tok
-			}
+	if i := strings.IndexAny(n, " \t\n"); i > 0 {
+		if s, ok := aliases[n[:i]]; ok {
+			return s
 		}
 	}
 	return ""

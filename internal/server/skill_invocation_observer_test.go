@@ -370,8 +370,15 @@ func TestSkillInvocationObserver_SlugCacheTTLRefresh(t *testing.T) {
 }
 
 func TestMatchSkillSlug(t *testing.T) {
-	// Matching is gated on the agent's assigned slugs.
-	assigned := map[string]string{"deploy": "sk_deploy", "code-reviewer": "sk_cr"}
+	// alias→canonical-slug, as assignedSkills builds it: slug, SKILL.md
+	// frontmatter name ("code-review"), and display name all alias to the
+	// canonical slug "code-reviewer".
+	aliases := map[string]string{
+		"deploy":        "deploy",
+		"code-reviewer": "code-reviewer",
+		"code-review":   "code-reviewer", // frontmatter name ≠ slug
+		"code reviewer": "code-reviewer", // display name
+	}
 	cases := []struct {
 		name    string
 		tool    string
@@ -382,11 +389,16 @@ func TestMatchSkillSlug(t *testing.T) {
 		{"skill_command_key", "Skill", map[string]any{"input": map[string]any{"command": "deploy"}}, "deploy"},
 		{"skill_name_key", "Skill", map[string]any{"input": map[string]any{"name": "deploy"}}, "deploy"},
 		{"skill_slug_key", "Skill", map[string]any{"input": map[string]any{"slug": "deploy"}}, "deploy"},
-		// Key-agnostic: slug under an unexpected key is still found by the value scan.
-		{"skill_unknown_key", "Skill", map[string]any{"input": map[string]any{"args": "code-reviewer"}}, "code-reviewer"},
-		// Slug-led command string resolves via the leading token.
-		{"skill_command_with_args", "Skill", map[string]any{"input": map[string]any{"command": "code-reviewer review main.go"}}, "code-reviewer"},
-		// A value that is not an assigned slug must not match (no false positive).
+		// THE BUG: Claude Code names the skill by its SKILL.md frontmatter
+		// name ("code-review"), which differs from the slug ("code-reviewer").
+		{"skill_frontmatter_name", "Skill", map[string]any{"input": map[string]any{"skill": "code-review", "args": "review x"}}, "code-reviewer"},
+		// Display-name match (case-insensitive).
+		{"skill_display_name", "Skill", map[string]any{"input": map[string]any{"skill": "Code Reviewer"}}, "code-reviewer"},
+		// Key-agnostic: identifier under an unexpected key, found by value scan.
+		{"skill_unknown_key", "Skill", map[string]any{"input": map[string]any{"args": "code-review"}}, "code-reviewer"},
+		// Identifier-led command string resolves via the leading token.
+		{"skill_command_with_args", "Skill", map[string]any{"input": map[string]any{"command": "code-review review main.go"}}, "code-reviewer"},
+		// A value that is not an assigned alias must not match (no false positive).
 		{"skill_unassigned", "Skill", map[string]any{"input": map[string]any{"skill": "unknown-skill"}}, ""},
 		{"skill_no_key", "Skill", map[string]any{"input": map[string]any{"foo": "bar"}}, ""},
 		{"skill_empty_value", "Skill", map[string]any{"input": map[string]any{"skill": ""}}, ""},
@@ -397,8 +409,28 @@ func TestMatchSkillSlug(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := matchSkillSlug(tc.tool, tc.payload, assigned); got != tc.want {
+			if got := matchSkillSlug(tc.tool, tc.payload, aliases); got != tc.want {
 				t.Fatalf("matchSkillSlug(%q) = %q, want %q", tc.tool, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestFrontmatterName(t *testing.T) {
+	cases := []struct {
+		name, content, want string
+	}{
+		{"basic", "---\nname: code-review\ndescription: x\n---\nbody", "code-review"},
+		{"quoted", "---\nname: \"code-review\"\n---\n", "code-review"},
+		{"leading_blank", "\n\n---\nname: foo\n---\n", "foo"},
+		{"no_frontmatter", "# just markdown\nname: nope", ""},
+		{"no_name", "---\ndescription: x\n---\n", ""},
+		{"empty", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := frontmatterName(tc.content); got != tc.want {
+				t.Fatalf("frontmatterName(%q) = %q, want %q", tc.content, got, tc.want)
 			}
 		})
 	}
@@ -485,7 +517,7 @@ func TestSkillInvocationObserver_RecordErrorPath(t *testing.T) {
 	defer func() { _ = w.Close() }()
 	o := newSkillInvocationObserver(siLogger(), db, w)
 	// Warm the per-agent slug cache so the second Observe skips the query.
-	if _, err := o.assignedSlugs(context.Background(), "a1"); err != nil {
+	if _, _, err := o.assignedSkills(context.Background(), "a1"); err != nil {
 		t.Fatalf("warm cache: %v", err)
 	}
 	_ = db.Close() // now BeginTx in record() fails
