@@ -377,14 +377,21 @@ func (d *Dispatcher) handleWrite(ctx context.Context, raw json.RawMessage) (Tool
 		return ToolResult{IsError: true, Content: "memory.write: " + err.Error()}, nil
 	}
 
+	// Read the current on-disk body once for both modes. append uses it
+	// as the prefix; replace discards it for the new content but still
+	// surfaces it as current_entries in the overflow guidance below (PR
+	// #6) so the agent can consolidate the existing file in-turn. The
+	// store stays a pure bounded store — this read is only for the
+	// guidance payload, it never widens the cap.
+	old, err := os.ReadFile(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return ToolResult{IsError: true, Content: "memory.write: " + err.Error()}, nil
+	}
+	currentBody := string(old)
+
 	var data []byte
-	var existing int
+	existing := len(old)
 	if a.Mode == "append" {
-		old, err := os.ReadFile(path)
-		if err != nil && !errors.Is(err, os.ErrNotExist) {
-			return ToolResult{IsError: true, Content: "memory.write: " + err.Error()}, nil
-		}
-		existing = len(old)
 		data = append(old, []byte(a.Content)...)
 	} else {
 		data = []byte(a.Content)
@@ -443,17 +450,27 @@ func (d *Dispatcher) handleWrite(ctx context.Context, raw json.RawMessage) (Tool
 	}
 
 	if cap > 0 && len(data) > cap {
+		// PR #6: instead of a bare rejection, hand the agent everything
+		// it needs to fix this within the SAME turn — the current file
+		// body (current_entries) plus a usage string — and tell it to
+		// consolidate that body and retry the write now, rather than
+		// abandoning the write. The store does not consolidate for the
+		// agent; it just surfaces the material so the agent can.
 		return ToolResult{
 			IsError: true,
 			Content: fmt.Sprintf(
-				"memory.write: cap exceeded for tier=%s. Final would be %d bytes; cap is %d. "+
-					"Use mode='replace' (shrinks the file) or drop older entries before retrying.",
-				a.Tier, len(data), cap),
+				"memory.write: cap exceeded for tier=%s. Final would be %d bytes; cap is %d (%s). "+
+					"Consolidate the current entries shown in metadata.current_entries — merge "+
+					"duplicates, drop stale lines, summarize — then retry this write in this turn "+
+					"with mode='replace' carrying the consolidated body.",
+				a.Tier, len(data), cap, capUsage(existing, cap)),
 			Metadata: map[string]any{
-				"tier":           a.Tier,
-				"cap_bytes":      cap,
-				"projected_size": len(data),
-				"current_size":   existing,
+				"tier":            a.Tier,
+				"cap_bytes":       cap,
+				"projected_size":  len(data),
+				"current_size":    existing,
+				"current_entries": currentBody,
+				"usage":           capUsage(existing, cap),
 			},
 		}, nil
 	}
@@ -472,10 +489,20 @@ func (d *Dispatcher) handleWrite(ctx context.Context, raw json.RawMessage) (Tool
 		},
 	}
 	if cap > 0 && float64(len(data)) >= float64(cap)*softCapPct {
+		// PR #6 parity with the hard-error branch: the write succeeded,
+		// but it's close enough to the cap that the NEXT append will be
+		// rejected. Surface the just-written body as current_entries +
+		// usage and steer the agent to consolidate it and re-write the
+		// consolidated form in this same turn, while it still has the
+		// content in context — don't make it wait for the hard error.
 		res.Content += fmt.Sprintf(
-			". warning: approaching cap (%d of %d bytes, %d%%). "+
-				"Consider mode='replace' with consolidated content soon to avoid the next append being rejected.",
-			len(data), cap, capPct(len(data), cap))
+			". warning: approaching cap (%s). Consolidate the entries in "+
+				"metadata.current_entries — merge duplicates, drop stale lines, "+
+				"summarize — and rewrite the consolidated body with mode='replace' "+
+				"in this turn to avoid the next append being rejected.",
+			capUsage(len(data), cap))
+		res.Metadata["current_entries"] = string(data)
+		res.Metadata["usage"] = capUsage(len(data), cap)
 	}
 	return res, nil
 }
@@ -711,6 +738,13 @@ func capPct(size, c int) int {
 		return 0
 	}
 	return (size * 100) / c
+}
+
+// capUsage renders a compact "<size> of <cap> bytes, <pct>%" usage
+// string for the PR #6 overflow / soft-cap guidance. Single source so
+// the message body and the metadata["usage"] field never drift.
+func capUsage(size, c int) string {
+	return fmt.Sprintf("%d of %d bytes, %d%%", size, c, capPct(size, c))
 }
 
 // assertMemoryFile rejects two attack surfaces against a candidate

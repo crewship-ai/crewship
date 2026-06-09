@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/memory"
 	"github.com/crewship-ai/crewship/internal/provider"
 )
 
@@ -433,7 +434,25 @@ func assembleSections(startMarker, endMarker string, sections []memorySection, b
 		if s.content == "" || totalChars >= contentBudget {
 			continue
 		}
-		section := fmt.Sprintf("--- %s ---\n%s\n", s.label, s.content)
+		// PR #4: load-time injection scan. Every tier's content is
+		// authored by prior agent runs and may carry indirect-injection
+		// payloads (the write-path scanner can miss content that landed
+		// via a route that bypassed the dispatcher, or pre-dates it).
+		// Scan each section's body before it reaches the model and, on a
+		// hit, substitute a deterministic blocked-notice in place of the
+		// body — the label is preserved so the operator still sees which
+		// file tripped, and the live file on disk is left untouched.
+		// Per-section so one poisoned tier never blanks its clean
+		// siblings. ScanContent is deterministic (first-hit, fixed rule
+		// order), so the substituted notice is byte-stable.
+		body := s.content
+		if hit := memory.ScanContent(body); hit != nil {
+			body = fmt.Sprintf(
+				"[BLOCKED: possible prompt injection in %s — category=%s pattern=%s; operator can inspect the file directly]",
+				s.label, hit.Category, hit.Pattern,
+			)
+		}
+		section := fmt.Sprintf("--- %s ---\n%s\n", s.label, body)
 		remaining := contentBudget - totalChars
 		if len(section) > remaining {
 			if remaining <= len(truncSuffix) {

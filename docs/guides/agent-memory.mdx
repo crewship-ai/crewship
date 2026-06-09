@@ -405,6 +405,57 @@ Agents in one crew cannot access another crew's shared memory. Container bind mo
 | Daily log size | 100 KB per file | Maximum single `daily/*.md` file |
 | Crew memory reindex | Every 60 seconds | Automatic periodic reindex by Lead sidecar |
 
+## Load-time injection scan
+
+Memory files are authored by prior agent runs, so a file on disk can carry an
+indirect-injection payload (text ingested from a web fetch, a peer message, or
+a file read, then persisted). Every memory tier is scanned **again at prompt
+assembly time**, immediately before its content is placed into the system
+prompt — independent of the write-path scan.
+
+The scan runs **per section**. If a section's body trips the scanner, only that
+section's body is replaced with a deterministic notice; clean sibling sections
+in the same block are untouched:
+
+```
+--- Daily log: 2026-06-09 (today) ---
+[BLOCKED: possible prompt injection in Daily log: 2026-06-09 (today) — category=prompt_injection pattern=ignore_previous_instructions; operator can inspect the file directly]
+```
+
+What this means for operators:
+
+- **The live file is never modified.** The substitution happens only in the
+  assembled prompt. The file on disk is left exactly as written so you can open
+  it and judge the content yourself — the notice points you at the file rather
+  than discarding anything.
+- **The label is preserved** so you can tell which tier and which file produced
+  the hit, and the `category` / `pattern` map back to the scanner rule.
+- **It is deterministic.** The same file content always yields the same notice
+  (first-hit, fixed rule order), so a blocked section won't flicker between
+  runs.
+
+## Memory write overflow guidance
+
+The `memory.write` tool is a pure bounded store — each tier has a fixed byte cap
+and the store never silently evicts or rewrites entries for the agent. When a
+write would cross a cap, the tool now hands the agent enough to fix it **within
+the same turn** instead of just rejecting the call:
+
+- **Hard cap exceeded** (the write would push the tier past its cap): the result
+  is an error, nothing is written, and the result metadata carries
+  `current_entries` (the current on-disk body) and `usage` (e.g.
+  `3900 of 4000 bytes, 97%`). The message instructs the agent to consolidate the
+  current entries — merge duplicates, drop stale lines, summarize — and retry the
+  write **in this turn** with `mode='replace'` carrying the consolidated body.
+- **Soft cap (80%) crossed** (the write succeeds but is close to the cap): the
+  same `current_entries` + `usage` are attached and the warning steers the agent
+  to consolidate and rewrite the consolidated body in this turn, before the next
+  append is rejected.
+
+`append` and `replace` are at parity — both surface `current_entries` + `usage`
+on overflow. This keeps the store dumb (it does not consolidate for the agent)
+while giving the agent the material to self-curate without losing the turn.
+
 ## Best Practices
 
 <AccordionGroup>
