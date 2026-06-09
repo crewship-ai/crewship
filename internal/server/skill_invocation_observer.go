@@ -25,6 +25,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -43,13 +44,26 @@ type skillInvocationObserver struct {
 
 	// slugCache memoises the per-agent enabled-skill slug→id map so the
 	// hot path doesn't re-run the agent_skills JOIN on every tool call.
-	// Keyed by agent_id. Skill assignments change rarely (operator
-	// action) relative to tool-call rate, so a process-lifetime cache is
-	// the right trade — a stale entry only means a freshly-assigned
-	// skill's first few invocations aren't recorded, which the next
-	// process restart (or cache miss on an unseen agent) self-heals.
+	// Keyed by agent_id. Entries carry a timestamp and expire after
+	// skillSlugCacheTTL so enable/disable/reassignment changes in
+	// agent_skills are reflected within the TTL window without paying a
+	// JOIN per tool call — a bounded staleness instead of process-lifetime.
 	mu        sync.Mutex
-	slugCache map[string]map[string]string // agent_id → (slug → skill_id)
+	slugCache map[string]slugCacheEntry // agent_id → (slugs + fetch time)
+
+	// now is an injectable clock for the cache TTL (nil → time.Now).
+	now func() time.Time
+}
+
+// skillSlugCacheTTL bounds how long a cached per-agent slug map is trusted
+// before a fresh agent_skills lookup. Short enough that an operator's
+// reassignment takes effect promptly, long enough to keep the hot path off
+// the DB under a tool storm.
+const skillSlugCacheTTL = 60 * time.Second
+
+type slugCacheEntry struct {
+	slugs map[string]string
+	at    time.Time
 }
 
 func newSkillInvocationObserver(logger *slog.Logger, db *sql.DB, j journal.Emitter) *skillInvocationObserver {
@@ -57,8 +71,15 @@ func newSkillInvocationObserver(logger *slog.Logger, db *sql.DB, j journal.Emitt
 		logger:    logger,
 		db:        db,
 		journ:     j,
-		slugCache: make(map[string]map[string]string),
+		slugCache: make(map[string]slugCacheEntry),
 	}
+}
+
+func (o *skillInvocationObserver) clock() time.Time {
+	if o.now != nil {
+		return o.now()
+	}
+	return time.Now()
 }
 
 // Observe records a skill invocation when the tool call maps to one of
@@ -109,10 +130,12 @@ func (o *skillInvocationObserver) Observe(obs orchestrator.SkillInvocation) {
 // assignedSlugs returns the agent's enabled skill slug→id map, caching
 // the result per agent_id.
 func (o *skillInvocationObserver) assignedSlugs(ctx context.Context, agentID string) (map[string]string, error) {
+	now := o.clock()
+
 	o.mu.Lock()
-	if m, ok := o.slugCache[agentID]; ok {
+	if e, ok := o.slugCache[agentID]; ok && now.Sub(e.at) < skillSlugCacheTTL {
 		o.mu.Unlock()
-		return m, nil
+		return e.slugs, nil
 	}
 	o.mu.Unlock()
 
@@ -122,7 +145,7 @@ func (o *skillInvocationObserver) assignedSlugs(ctx context.Context, agentID str
 		  JOIN skills s ON s.id = a.skill_id
 		 WHERE a.agent_id = ? AND a.enabled = 1`, agentID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("query assigned skills for agent %s: %w", agentID, err)
 	}
 	defer rows.Close()
 
@@ -130,18 +153,18 @@ func (o *skillInvocationObserver) assignedSlugs(ctx context.Context, agentID str
 	for rows.Next() {
 		var slug, id string
 		if err := rows.Scan(&slug, &id); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("scan assigned skill row: %w", err)
 		}
 		if slug != "" {
 			m[slug] = id
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("iterate assigned skills: %w", err)
 	}
 
 	o.mu.Lock()
-	o.slugCache[agentID] = m
+	o.slugCache[agentID] = slugCacheEntry{slugs: m, at: now}
 	o.mu.Unlock()
 	return m, nil
 }
@@ -159,7 +182,7 @@ func (o *skillInvocationObserver) record(
 
 	tx, err := o.db.BeginTx(ctx, nil)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("begin skill_invocations tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
@@ -170,7 +193,7 @@ func (o *skillInvocationObserver) record(
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		uuid.NewString(), skillID, obs.AgentID, obs.WorkspaceID,
 		now, durationMS, exitCode, payloadJSON); err != nil {
-		return 0, err
+		return 0, fmt.Errorf("insert skill_invocations (skill %s): %w", skillID, err)
 	}
 
 	errInc := 0
@@ -183,17 +206,17 @@ func (o *skillInvocationObserver) record(
 		       error_count = error_count + ?,
 		       last_used_at = ?
 		 WHERE id = ?`, errInc, now, skillID); err != nil {
-		return 0, err
+		return 0, fmt.Errorf("update skills counters (skill %s): %w", skillID, err)
 	}
 
 	var usageCount int
 	if err := tx.QueryRowContext(ctx,
 		`SELECT usage_count FROM skills WHERE id = ?`, skillID).Scan(&usageCount); err != nil {
-		return 0, err
+		return 0, fmt.Errorf("read usage_count (skill %s): %w", skillID, err)
 	}
 
 	if err := tx.Commit(); err != nil {
-		return 0, err
+		return 0, fmt.Errorf("commit skill_invocations tx: %w", err)
 	}
 	return usageCount, nil
 }
@@ -297,6 +320,11 @@ func marshalInvocationPayload(payload map[string]any, slug string) string {
 	}
 	b, err := json.Marshal(out)
 	if err != nil {
+		// Keep the resolved slug for downstream attribution even when the
+		// full input can't be marshalled (e.g. an unserialisable value).
+		if sb, e2 := json.Marshal(map[string]any{"skill_slug": slug}); e2 == nil {
+			return string(sb)
+		}
 		return `{"skill_slug":""}`
 	}
 	const cap = 4096

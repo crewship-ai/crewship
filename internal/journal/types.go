@@ -234,8 +234,8 @@ const (
 	// EntrySkillInvoked fires when an agent actually calls one of its
 	// assigned skills (matched on the orchestrator tool-call hot path).
 	// Payload carries `skill_id`, `skill_slug`, `agent_id`, `tool_name`,
-	// and `usage_count` (the post-increment denormalised counter on the
-	// skills row). This is the telemetry source the F4.1 skill-review
+	// `exit_code`, and `usage_count` (the post-increment denormalised
+	// counter on the skills row). This is the telemetry source the F4.1 skill-review
 	// sweep reads to decide "is this skill actually in use?" — every
 	// invocation also lands a skill_invocations audit row + bumps the
 	// skills lifecycle counters in the same transaction.

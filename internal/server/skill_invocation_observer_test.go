@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/journal"
@@ -318,6 +319,53 @@ func TestSkillInvocationObserver_CachePerAgent(t *testing.T) {
 	}
 	if n := countInvocations(t, db, "sk_orphan"); n != 1 {
 		t.Fatalf("orphan invocations = %d, want 1 (only a2)", n)
+	}
+}
+
+// TestSkillInvocationObserver_SlugCacheTTLRefresh proves an assignment
+// change made after the cache is warm is reflected once the TTL elapses
+// (and not before) — guards against the process-lifetime-staleness that
+// would otherwise miss a newly-enabled skill.
+func TestSkillInvocationObserver_SlugCacheTTLRefresh(t *testing.T) {
+	db := siDB(t)
+	w := journal.NewWriter(db, siLogger(), journal.WriterOptions{})
+	defer func() { _ = w.Close() }()
+	o := newSkillInvocationObserver(siLogger(), db, w)
+
+	base := time.Date(2026, 6, 9, 12, 0, 0, 0, time.UTC)
+	clk := base
+	o.now = func() time.Time { return clk }
+
+	// sk_lint is assigned to a1 but DISABLED (as2.enabled=0): calling it
+	// must not match, and this warms the cache for a1.
+	o.Observe(orchestrator.SkillInvocation{
+		WorkspaceID: "ws1", CrewID: "cr1", AgentID: "a1", ToolName: "lint"})
+	drainWriter(t, w)
+	if n := countInvocations(t, db, "sk_lint"); n != 0 {
+		t.Fatalf("disabled skill should not match; got %d", n)
+	}
+
+	// Operator enables sk_lint for a1.
+	if _, err := db.Exec(`UPDATE agent_skills SET enabled = 1 WHERE id = 'as2'`); err != nil {
+		t.Fatal(err)
+	}
+
+	// Within the TTL window the warm (stale) cache still misses.
+	clk = base.Add(skillSlugCacheTTL / 2)
+	o.Observe(orchestrator.SkillInvocation{
+		WorkspaceID: "ws1", CrewID: "cr1", AgentID: "a1", ToolName: "lint"})
+	drainWriter(t, w)
+	if n := countInvocations(t, db, "sk_lint"); n != 0 {
+		t.Fatalf("stale cache should still miss within TTL; got %d", n)
+	}
+
+	// Past the TTL the cache refreshes and the now-enabled skill matches.
+	clk = base.Add(skillSlugCacheTTL + time.Second)
+	o.Observe(orchestrator.SkillInvocation{
+		WorkspaceID: "ws1", CrewID: "cr1", AgentID: "a1", ToolName: "lint"})
+	drainWriter(t, w)
+	if n := countInvocations(t, db, "sk_lint"); n != 1 {
+		t.Fatalf("after TTL the enabled skill should match; got %d", n)
 	}
 }
 
