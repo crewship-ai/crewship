@@ -175,6 +175,51 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Validate llm_model against the provider's model set. Previously
+	// llm_model was a silent passthrough — any string persisted, including
+	// a typo that the runtime would then 404 on at first invocation. Turn
+	// that into a real check: resolve the provider's valid model IDs
+	// (live-or-curated) and reject an llm_model that isn't one of them.
+	//
+	// The provider is taken from the update body when present, else the
+	// agent's current llm_provider in the DB (changing the model without
+	// touching the provider is the common case). Validation is skipped
+	// — model passes through — when the validator isn't wired, the model
+	// is empty/cleared, the provider can't be determined, or the provider's
+	// model set is unknowable (no live lister + no curated fallback, e.g. an
+	// unreachable OLLAMA daemon) — we never reject what we can't disprove.
+	if modelVal, ok := body["llm_model"]; ok && h.modelValidator != nil {
+		modelStr, isStr := modelVal.(string)
+		if isStr && modelStr != "" {
+			provider := ""
+			if pv, ok := body["llm_provider"]; ok {
+				if pvStr, ok := pv.(string); ok {
+					provider = pvStr
+				}
+			}
+			if provider == "" {
+				var provNull sql.NullString
+				if err := h.db.QueryRowContext(r.Context(),
+					"SELECT llm_provider FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+					agentID, workspaceID).Scan(&provNull); err != nil {
+					h.logger.Error("query agent llm_provider for model validation", "error", err)
+					replyError(w, http.StatusInternalServerError, "Internal server error")
+					return
+				}
+				if provNull.Valid {
+					provider = provNull.String
+				}
+			}
+			if provider != "" {
+				if valid, ok := h.modelValidator.providerModelIDs(r.Context(), workspaceID, provider); ok && !valid[modelStr] {
+					replyError(w, http.StatusBadRequest,
+						"llm_model is not a known model for provider "+provider)
+					return
+				}
+			}
+		}
+	}
+
 	// Validate mcp_config_json if being updated
 	if mcpVal, ok := body["mcp_config_json"]; ok {
 		if mcpStr, ok := mcpVal.(string); ok && mcpStr != "" {

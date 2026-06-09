@@ -15,6 +15,7 @@ import (
 )
 
 const anthropicAPIURL = "https://api.anthropic.com/v1/messages"
+const anthropicModelsURL = "https://api.anthropic.com/v1/models"
 
 // Anthropic implements Provider for the Anthropic Messages API.
 type Anthropic struct {
@@ -37,6 +38,52 @@ func NewAnthropic(apiKey string) *Anthropic {
 
 // Name returns "anthropic".
 func (a *Anthropic) Name() string { return "anthropic" }
+
+// ListModels implements ModelLister against Anthropic's GET /v1/models. On any
+// failure the caller falls back to the curated set (CuratedModels), so the raw
+// error here is informational only — but we still return it so the caller can
+// distinguish "no credential" from "API said no".
+func (a *Anthropic) ListModels(ctx context.Context) ([]ModelInfo, error) {
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, anthropicModelsURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	httpReq.Header.Set("anthropic-version", "2023-06-01")
+	httpReq.Header.Set("x-api-key", a.apiKey)
+
+	resp, err := a.client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("anthropic http: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if err := checkAnthropicStatus(resp); err != nil {
+		return nil, err
+	}
+
+	var raw struct {
+		Data []struct {
+			ID          string `json:"id"`
+			DisplayName string `json:"display_name"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+		return nil, fmt.Errorf("decode anthropic models: %w", err)
+	}
+
+	out := make([]ModelInfo, 0, len(raw.Data))
+	for _, m := range raw.Data {
+		if m.ID == "" {
+			continue
+		}
+		name := m.DisplayName
+		if name == "" {
+			name = m.ID
+		}
+		out = append(out, ModelInfo{ID: m.ID, DisplayName: name, Provider: "anthropic"})
+	}
+	return out, nil
+}
 
 // Complete sends a non-streaming completion request to the Anthropic Messages API.
 func (a *Anthropic) Complete(ctx context.Context, req Request) (*Response, error) {

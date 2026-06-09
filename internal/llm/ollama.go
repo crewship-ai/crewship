@@ -45,6 +45,45 @@ func NewOllama(baseURL, model string) *Ollama {
 // Name returns "ollama".
 func (o *Ollama) Name() string { return "ollama" }
 
+// ListModels implements ModelLister against Ollama's GET /api/tags. There is
+// no curated fallback for Ollama (the model set is whatever the local daemon
+// has pulled), so a failure here is terminal for the caller — they get the
+// error, not a static list.
+func (o *Ollama) ListModels(ctx context.Context) ([]ModelInfo, error) {
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, o.baseURL+"/api/tags", nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	resp, err := o.client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("ollama http: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return nil, fmt.Errorf("ollama returned %d: %s", resp.StatusCode, errBody)
+	}
+
+	var raw struct {
+		Models []struct {
+			Name string `json:"name"`
+		} `json:"models"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+		return nil, fmt.Errorf("decode ollama tags: %w", err)
+	}
+
+	out := make([]ModelInfo, 0, len(raw.Models))
+	for _, m := range raw.Models {
+		if m.Name == "" {
+			continue
+		}
+		out = append(out, ModelInfo{ID: m.Name, DisplayName: m.Name, Provider: "ollama"})
+	}
+	return out, nil
+}
+
 // Complete sends a non-streaming completion request to the Ollama API.
 func (o *Ollama) Complete(ctx context.Context, req Request) (*Response, error) {
 	body, err := o.buildRequestBody(req, false)

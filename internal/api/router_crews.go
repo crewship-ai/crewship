@@ -189,6 +189,17 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	crewAI.SetJournal(r.Journal())
 	r.mux.Handle("POST /api/v1/crew-ai-suggest", authed(wsCtx(http.HandlerFunc(crewAI.Suggest))))
 
+	// Model discovery — live-or-curated per provider. The agent update path
+	// reuses this same resolver to validate llm_model, so the handler is also
+	// stashed on the AgentHandler as its ModelValidator.
+	ollamaURL := ""
+	if r.keeperConfig != nil {
+		ollamaURL = r.keeperConfig.OllamaURL
+	}
+	models := NewModelsHandler(r.db, r.logger, ollamaURL)
+	r.mux.Handle("GET /api/v1/models", authed(wsCtx(http.HandlerFunc(models.List))))
+	agents.SetModelValidator(models)
+
 	// Agents (require workspace context)
 	r.mux.Handle("GET /api/v1/agents/crews-status", authed(wsCtx(http.HandlerFunc(agents.CrewsStatus))))
 	r.mux.Handle("GET /api/v1/agent-load", authed(wsCtx(http.HandlerFunc(agents.Load))))

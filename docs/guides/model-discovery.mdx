@@ -1,0 +1,102 @@
+---
+title: "Model Discovery"
+description: "List the models a provider can serve, live from the provider or from a curated fallback, and validate an agent's model against that set."
+icon: "list-checks"
+---
+
+# Model Discovery
+
+Crewship can enumerate the models each LLM provider can serve so you don't have
+to guess a model identifier (and only find out it's wrong when an agent 404s on
+its first run). Discovery is **live when possible, curated when not**:
+
+- If the workspace has an active API key for the provider, Crewship asks the
+  provider's own models API and returns exactly what your key can use.
+- Otherwise it returns a **curated fallback** — a hand-maintained list of the
+  provider's current generally-available models.
+
+The response always reports which path was taken via a `source` field
+(`"live"` or `"curated"`).
+
+## HTTP API
+
+```
+GET /api/v1/models?provider=<PROVIDER>
+```
+
+`provider` is required and case-insensitive. Supported values:
+`ANTHROPIC`, `OPENAI`, `GOOGLE`, `OLLAMA`.
+
+Response:
+
+```json
+{
+  "provider": "ANTHROPIC",
+  "source": "live",
+  "models": [
+    { "id": "claude-opus-4-8", "display_name": "Claude Opus 4.8", "provider": "anthropic" },
+    { "id": "claude-sonnet-4-6", "display_name": "Claude Sonnet 4.6", "provider": "anthropic" }
+  ]
+}
+```
+
+| Provider  | Live source            | Curated fallback |
+| --------- | ---------------------- | ---------------- |
+| ANTHROPIC | `GET /v1/models`       | Yes              |
+| OPENAI    | `GET /v1/models`       | Yes              |
+| GOOGLE    | (none yet)             | Yes              |
+| OLLAMA    | `GET /api/tags`        | **No**           |
+
+<Note>
+**OLLAMA has no curated fallback.** Its model set is whatever the local Ollama
+daemon has pulled, so there is no sensible static list. If the daemon can't be
+reached, the endpoint returns **502 Bad Gateway** rather than an empty list, so
+"daemon unreachable" is never silently mistaken for "no models installed".
+</Note>
+
+An unknown or unsupported `provider` returns **400 Bad Request**. `CURSOR` and
+`FACTORY` route through CLI adapters and have no model-discovery surface.
+
+## CLI
+
+Every API endpoint has a matching CLI command. Use `crewship model list`:
+
+```bash
+# Anthropic — live if you have an ANTHROPIC API_KEY credential, else curated
+crewship model list --provider anthropic
+
+# OpenAI as machine-readable JSON (for scripts / agents)
+crewship model list --provider openai --format json
+
+# Ollama — live only; requires a reachable daemon
+crewship model list --provider ollama
+```
+
+Output (table format):
+
+```
+anthropic models  (source=live, 2 total)
+  claude-opus-4-8                  Claude Opus 4.8
+  claude-sonnet-4-6
+```
+
+`--format json` / `--format yaml` emit the full payload, including the `source`
+field, for programmatic use.
+
+## Model validation on agent update
+
+Because Crewship knows each provider's model set, updating an agent now
+**validates `llm_model`** instead of silently accepting any string. A
+`PATCH /api/v1/agents/{id}` that sets `llm_model` to a value the provider can't
+serve returns **400 Bad Request**:
+
+```bash
+crewship agent update my-agent --llm-provider ANTHROPIC --llm-model claude-made-up-9
+# => API error (400): llm_model is not a known model for provider ANTHROPIC
+```
+
+The provider used for validation is the `llm_provider` in the same request if
+present, otherwise the agent's currently stored provider. Validation is
+**skipped** (the model passes through) only when the model set can't be
+determined — for example an OLLAMA daemon that isn't reachable — so Crewship
+never rejects a model it can't prove invalid.
