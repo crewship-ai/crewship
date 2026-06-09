@@ -165,6 +165,19 @@ If no auxiliary model is configured, the summarize call fails, or it exceeds a b
 
 Whenever older turns overflow the budget — whether they were summarized or dropped — the orchestrator emits a `conversation.compacted` entry to the [Crew Journal](/guides/crew-journal) carrying `session_id`, `overflow_messages`, `summarized`, and `summary_bytes`. Query it with `crewship journal --type conversation.compacted` to audit what fell out of an agent's context window over time.
 
+### Temporally-anchored summaries
+
+The summary is written as **dated past-tense facts**, not open instructions. The aux model is told today's date (UTC) and asked to rewrite completed or imperative actions accordingly — "Sent the report on 2026-06-09" rather than a bare "email the report" that a resumed agent could mistake for a still-pending task and re-run. When a date can be recovered from the transcript itself the model prefers it; otherwise it anchors to "around &lt;today&gt;". This keeps long-running sessions from silently re-issuing work that already completed before the older turns scrolled out of the window.
+
+### Robustness at the overflow boundary
+
+Two guards keep compaction safe on long, tool-heavy sessions:
+
+- **Tool context is never half-shown.** When the message that sits on the overflow boundary carries a tool-result summary, it is dropped into the overflow whole (where the summarizer can still capture it) rather than truncated into a half-sentence that references a tool whose result was cut. The one exception is a lone oversized message — it is still truncated so the recent window is never empty.
+- **Summaries are session-pure.** Compaction operates strictly on one session's history; if a future change ever mixed turns from different sessions into one overflow slice, the orchestrator detects the mismatch and falls back to truncation instead of risking one session's content leaking into another's summary.
+
+The leading bytes of an agent's system prompt are unaffected by any of this — the summary block is injected after the cached system-prompt prefix, so repeated compaction never perturbs prompt caching.
+
 ## API reference
 
 The chat surface is small — no dedicated `/api-reference/chats` page yet; the handler source is `internal/api/agent_chats.go`. Every endpoint requires `Authorization: Bearer <CLI token>` or a valid session cookie, and access is gated by the caller's read/write role on the parent agent.

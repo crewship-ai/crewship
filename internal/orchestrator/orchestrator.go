@@ -252,6 +252,12 @@ type Orchestrator struct {
 	// SetConversationSummarizer.
 	convSummarizer ConversationSummarizer
 
+	// now is an injectable clock for resolving "today" when temporally
+	// anchoring a compaction summary. Production leaves it nil and nowUTC()
+	// falls back to time.Now().UTC() — the same shape as
+	// consolidate.Consolidator.Now. Tests pin it to a fixed instant.
+	now func() time.Time
+
 	// episodicUnreachableLastLogged tracks when we last surfaced an
 	// "ollama unreachable" log so we can dedup the spam without going
 	// permanently silent. N parallel agent runs each hit recall every
@@ -722,6 +728,17 @@ func (o *Orchestrator) getConvSummarizer() ConversationSummarizer {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 	return o.convSummarizer
+}
+
+// nowUTC resolves the current time in UTC, using the injectable o.now clock
+// when set (tests pin it) and falling back to time.Now().UTC() otherwise. It
+// always normalizes to UTC so date formatting is stable regardless of the
+// injected zone — mirroring consolidate.Consolidator.now().
+func (o *Orchestrator) nowUTC() time.Time {
+	if o.now != nil {
+		return o.now().UTC()
+	}
+	return time.Now().UTC()
 }
 
 // SetSidecarEnabled enables the sidecar proxy for credential injection.
