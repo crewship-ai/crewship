@@ -370,6 +370,8 @@ func TestSkillInvocationObserver_SlugCacheTTLRefresh(t *testing.T) {
 }
 
 func TestMatchSkillSlug(t *testing.T) {
+	// Matching is gated on the agent's assigned slugs.
+	assigned := map[string]string{"deploy": "sk_deploy", "code-reviewer": "sk_cr"}
 	cases := []struct {
 		name    string
 		tool    string
@@ -380,15 +382,22 @@ func TestMatchSkillSlug(t *testing.T) {
 		{"skill_command_key", "Skill", map[string]any{"input": map[string]any{"command": "deploy"}}, "deploy"},
 		{"skill_name_key", "Skill", map[string]any{"input": map[string]any{"name": "deploy"}}, "deploy"},
 		{"skill_slug_key", "Skill", map[string]any{"input": map[string]any{"slug": "deploy"}}, "deploy"},
+		// Key-agnostic: slug under an unexpected key is still found by the value scan.
+		{"skill_unknown_key", "Skill", map[string]any{"input": map[string]any{"args": "code-reviewer"}}, "code-reviewer"},
+		// Slug-led command string resolves via the leading token.
+		{"skill_command_with_args", "Skill", map[string]any{"input": map[string]any{"command": "code-reviewer review main.go"}}, "code-reviewer"},
+		// A value that is not an assigned slug must not match (no false positive).
+		{"skill_unassigned", "Skill", map[string]any{"input": map[string]any{"skill": "unknown-skill"}}, ""},
 		{"skill_no_key", "Skill", map[string]any{"input": map[string]any{"foo": "bar"}}, ""},
 		{"skill_empty_value", "Skill", map[string]any{"input": map[string]any{"skill": ""}}, ""},
 		{"skill_nil_payload", "Skill", nil, ""},
 		{"direct_tool_name", "deploy", nil, "deploy"},
-		{"read_direct", "Read", map[string]any{"input": map[string]any{"file_path": "/x"}}, "Read"},
+		// A non-skill tool (Read) is no longer mistaken for a skill.
+		{"read_not_a_skill", "Read", map[string]any{"input": map[string]any{"file_path": "/x"}}, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := matchSkillSlug(tc.tool, tc.payload); got != tc.want {
+			if got := matchSkillSlug(tc.tool, tc.payload, assigned); got != tc.want {
 				t.Fatalf("matchSkillSlug(%q) = %q, want %q", tc.tool, got, tc.want)
 			}
 		})

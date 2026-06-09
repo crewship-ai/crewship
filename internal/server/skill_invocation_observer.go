@@ -27,6 +27,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -106,7 +107,7 @@ func (o *skillInvocationObserver) Observe(obs orchestrator.SkillInvocation) {
 		return // agent has no enabled skills; nothing can match
 	}
 
-	slug := matchSkillSlug(obs.ToolName, obs.Payload)
+	slug := matchSkillSlug(obs.ToolName, obs.Payload, slugs)
 	if slug == "" {
 		return
 	}
@@ -260,17 +261,59 @@ func (o *skillInvocationObserver) emit(
 // command / name / slug); any other tool name is treated as a direct
 // slug candidate (CLI-style skills invoked as their own tool). Returns
 // "" when no slug can be derived.
-func matchSkillSlug(toolName string, payload map[string]any) string {
-	if toolName == "Skill" {
-		in := payloadInput(payload)
-		for _, key := range []string{"skill", "command", "name", "slug"} {
-			if v, ok := in[key].(string); ok && v != "" {
-				return v
-			}
-		}
+func matchSkillSlug(toolName string, payload map[string]any, assigned map[string]string) string {
+	// CLI-style: a tool named exactly as one of the agent's assigned skills.
+	if _, ok := assigned[toolName]; ok {
+		return toolName
+	}
+	if toolName != "Skill" {
 		return ""
 	}
-	return toolName
+	// Claude Code's "Skill" tool carries the target slug somewhere in its
+	// input, but the key has varied across versions (skill/command/name/
+	// slug/…) and the value may be a bare slug or a slug-led command string.
+	// Match key-agnostically against the agent's assigned slugs: try the
+	// conventional keys first (deterministic), then scan every string value.
+	// Gating on `assigned` keeps this safe from false positives — only a
+	// skill the agent actually has can ever match.
+	in := payloadInput(payload)
+	for _, key := range []string{"skill", "command", "name", "slug", "skill_name", "skillName"} {
+		if v, ok := in[key].(string); ok {
+			if s := assignedFromValue(v, assigned); s != "" {
+				return s
+			}
+		}
+	}
+	for _, v := range in {
+		if vs, ok := v.(string); ok {
+			if s := assignedFromValue(vs, assigned); s != "" {
+				return s
+			}
+		}
+	}
+	return ""
+}
+
+// assignedFromValue resolves a tool-input string to one of the agent's
+// assigned skill slugs: an exact match, or the leading whitespace-delimited
+// token (so a "code-reviewer review this file" command still resolves to
+// "code-reviewer"). Returns "" when no assigned slug matches.
+func assignedFromValue(v string, assigned map[string]string) string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return ""
+	}
+	if _, ok := assigned[v]; ok {
+		return v
+	}
+	if i := strings.IndexAny(v, " \t\n"); i > 0 {
+		if tok := v[:i]; tok != "" {
+			if _, ok := assigned[tok]; ok {
+				return tok
+			}
+		}
+	}
+	return ""
 }
 
 // payloadInput returns the tool input map from the observation payload,
