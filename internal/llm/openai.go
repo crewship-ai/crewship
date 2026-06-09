@@ -9,6 +9,7 @@ import (
 	"io"
 	"math/rand"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -51,7 +52,17 @@ func (o *OpenAI) Name() string { return "openai" }
 // "/chat/completions" suffix and appending "/models", which keeps the version
 // segment intact for Azure / proxy deployments that customise it.
 func (o *OpenAI) ListModels(ctx context.Context) ([]ModelInfo, error) {
-	modelsURL := strings.TrimSuffix(o.baseURL, "/chat/completions") + "/models"
+	// Parse the base URL and rewrite only the trailing "/chat/completions"
+	// path segment to "/models". Going through net/url (instead of a raw
+	// string TrimSuffix) preserves scheme, host, and — critically for Azure
+	// / proxy deployments — the query string (e.g. ?api-version=...) and any
+	// trailing slash, which a suffix trim on the full URL would mangle.
+	u, err := url.Parse(o.baseURL)
+	if err != nil {
+		return nil, fmt.Errorf("parse base url: %w", err)
+	}
+	u.Path = strings.TrimSuffix(strings.TrimRight(u.Path, "/"), "/chat/completions") + "/models"
+	modelsURL := u.String()
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, modelsURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)

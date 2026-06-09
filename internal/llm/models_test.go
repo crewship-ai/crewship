@@ -176,6 +176,33 @@ func TestOpenAIListModels(t *testing.T) {
 	}
 }
 
+// TestOpenAIListModels_PreservesQueryAndPath pins the net/url-based models
+// endpoint derivation: an Azure/proxy base URL with a query string and a
+// versioned path must rewrite only the trailing chat/completions segment to
+// /models while keeping the path prefix and the query (e.g. api-version).
+func TestOpenAIListModels_PreservesQueryAndPath(t *testing.T) {
+	var gotPath, gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotQuery = r.URL.Query().Get("api-version")
+		_, _ = w.Write([]byte(`{"data":[{"id":"gpt-4o"}]}`))
+	}))
+	defer srv.Close()
+
+	o := NewOpenAIWithBaseURL("test-key", srv.URL+"/openai/deployments/x/chat/completions?api-version=2024-02-01")
+	got, err := o.ListModels(context.Background())
+	if err != nil {
+		t.Fatalf("ListModels: %v", err)
+	}
+	if gotPath != "/openai/deployments/x/models" {
+		t.Errorf("path = %q, want /openai/deployments/x/models", gotPath)
+	}
+	if gotQuery != "2024-02-01" {
+		t.Errorf("api-version query not preserved: %q", gotQuery)
+	}
+	assertModelIDs(t, got, []string{"gpt-4o"})
+}
+
 func TestAnthropicListModels(t *testing.T) {
 	tests := []struct {
 		name    string

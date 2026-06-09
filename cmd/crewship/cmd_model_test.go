@@ -133,8 +133,8 @@ func TestAcceptance_ModelList(t *testing.T) {
 		if got := r.URL.Query().Get("provider"); got != "anthropic" {
 			t.Errorf("provider query = %q", got)
 		}
-		if got := r.Header.Get("Authorization"); !strings.Contains(got, "test-token") {
-			t.Errorf("missing/!test-token auth header: %q", got)
+		if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
+			t.Errorf("auth header = %q, want exact \"Bearer test-token\"", got)
 		}
 		_, _ = w.Write([]byte(`{"provider":"ANTHROPIC","source":"live","models":[
 			{"id":"claude-opus-4-8","display_name":"Claude Opus 4.8","provider":"anthropic"},
