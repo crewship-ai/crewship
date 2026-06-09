@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/crewship-ai/crewship/internal/conversation"
 	"github.com/crewship-ai/crewship/internal/tokenutil"
@@ -537,40 +538,63 @@ func TestEmitCompactionEvent(t *testing.T) {
 	fj := &captureJournal{}
 	o.SetJournal(fj)
 
-	// No overflow → no emit.
-	o.emitCompactionEvent(context.Background(), AgentRunRequest{ChatID: "c1"}, compactionStats{})
-	if len(fj.entries) != 0 {
-		t.Fatalf("no-overflow should not emit; got %d entries", len(fj.entries))
-	}
+	t.Run("no overflow does not emit", func(t *testing.T) {
+		fj.entries = nil
+		o.emitCompactionEvent(context.Background(), AgentRunRequest{ChatID: "c1"}, compactionStats{})
+		if len(fj.entries) != 0 {
+			t.Fatalf("no-overflow should not emit; got %d entries", len(fj.entries))
+		}
+	})
 
-	// Overflow + summarized → one scoped conversation.compacted event.
-	o.emitCompactionEvent(context.Background(),
-		AgentRunRequest{WorkspaceID: "w1", CrewID: "cr1", AgentID: "a1", ChatID: "c1"},
-		compactionStats{OverflowMessages: 3, Summarized: true, SummaryBytes: 120})
-	if len(fj.entries) != 1 {
-		t.Fatalf("expected one emit, got %d", len(fj.entries))
-	}
-	e := fj.entries[0]
-	if e.Type != "conversation.compacted" {
-		t.Errorf("type = %q, want conversation.compacted", e.Type)
-	}
-	if e.WorkspaceID != "w1" || e.CrewID != "cr1" || e.AgentID != "a1" {
-		t.Errorf("scope not propagated: %+v", e)
-	}
-	if e.Payload["overflow_messages"] != 3 || e.Payload["summarized"] != true || e.Payload["summary_bytes"] != 120 {
-		t.Errorf("payload mismatch: %+v", e.Payload)
-	}
-	if e.Payload["session_id"] != "c1" {
-		t.Errorf("session_id not in payload: %+v", e.Payload)
-	}
+	t.Run("overflow summarized emits scoped event", func(t *testing.T) {
+		fj.entries = nil
+		o.emitCompactionEvent(context.Background(),
+			AgentRunRequest{WorkspaceID: "w1", CrewID: "cr1", AgentID: "a1", ChatID: "c1"},
+			compactionStats{OverflowMessages: 3, Summarized: true, SummaryBytes: 120})
+		if len(fj.entries) != 1 {
+			t.Fatalf("expected one emit, got %d", len(fj.entries))
+		}
+		e := fj.entries[0]
+		if e.Type != "conversation.compacted" {
+			t.Errorf("type = %q, want conversation.compacted", e.Type)
+		}
+		if e.WorkspaceID != "w1" || e.CrewID != "cr1" || e.AgentID != "a1" {
+			t.Errorf("scope not propagated: %+v", e)
+		}
+		if e.Payload["overflow_messages"] != 3 || e.Payload["summarized"] != true || e.Payload["summary_bytes"] != 120 {
+			t.Errorf("payload mismatch: %+v", e.Payload)
+		}
+		if e.Payload["session_id"] != "c1" {
+			t.Errorf("session_id not in payload: %+v", e.Payload)
+		}
+	})
 
-	// Overflow but not summarized → still emits (truncation audit), summarized=false.
-	fj.entries = nil
-	o.emitCompactionEvent(context.Background(),
-		AgentRunRequest{AgentID: "a1", ChatID: "c2"},
-		compactionStats{OverflowMessages: 2, Summarized: false})
-	if len(fj.entries) != 1 || fj.entries[0].Payload["summarized"] != false {
-		t.Errorf("truncation fallback should emit with summarized=false; got %+v", fj.entries)
+	t.Run("overflow truncation-fallback still emits", func(t *testing.T) {
+		fj.entries = nil
+		o.emitCompactionEvent(context.Background(),
+			AgentRunRequest{AgentID: "a1", ChatID: "c2"},
+			compactionStats{OverflowMessages: 2, Summarized: false})
+		if len(fj.entries) != 1 || fj.entries[0].Payload["summarized"] != false {
+			t.Errorf("truncation fallback should emit with summarized=false; got %+v", fj.entries)
+		}
+	})
+}
+
+func TestSummarizeOverflow_ClampPreservesValidUTF8(t *testing.T) {
+	// A byte-budget cut that lands mid-rune must not yield invalid UTF-8.
+	// 🚀 is 4 bytes; budget 10 splits the third rune — the partial bytes
+	// must be dropped, not emitted.
+	o, _ := newConvOrchestrator(t)
+	o.SetConversationSummarizer(&fakeConvSummarizer{out: strings.Repeat("🚀", 100)})
+
+	out := o.summarizeOverflow(context.Background(),
+		[]conversation.Message{{Role: conversation.RoleAssistant, Content: "x"}}, 10)
+
+	if len(out) > 10 {
+		t.Errorf("summary not clamped to budget: %d bytes > 10", len(out))
+	}
+	if !utf8.ValidString(out) {
+		t.Errorf("clamped summary is not valid UTF-8: %q", out)
 	}
 }
 

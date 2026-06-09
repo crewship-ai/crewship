@@ -247,7 +247,10 @@ func (o *Orchestrator) summarizeOverflow(ctx context.Context, overflow []convers
 		return ""
 	}
 	if len(out) > budget {
-		out = out[:budget]
+		// Clamp by bytes, then drop any partial multi-byte rune the cut may
+		// have split so the summary block never carries invalid UTF-8 into
+		// the prompt.
+		out = strings.ToValidUTF8(out[:budget], "")
 	}
 	return out
 }
