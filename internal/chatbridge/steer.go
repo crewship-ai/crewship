@@ -76,6 +76,16 @@ type SteerResult struct {
 	InFlight bool `json:"in_flight"`
 }
 
+// steerRejectedError marks a steer failure caused by the caller's input
+// (empty content or a content-policy block) rather than an internal fault.
+// The HTTP layer asserts the SteerRejected() method structurally to map it
+// to 422 with this safe message, while internal faults (e.g. a persist
+// failure) fall through to a generic 500 and never leak their detail.
+type steerRejectedError struct{ msg string }
+
+func (e *steerRejectedError) Error() string       { return e.msg }
+func (e *steerRejectedError) SteerRejected() bool { return true }
+
 // Steer delivers a mid-turn steering message into a chat.
 //
 // Safe-slice behaviour (live injection deferred — see PR follow-ups):
@@ -97,7 +107,7 @@ type SteerResult struct {
 func (b *Bridge) Steer(ctx context.Context, chatID, content string) (SteerResult, error) {
 	trimmed := strings.TrimSpace(content)
 	if trimmed == "" {
-		return SteerResult{}, fmt.Errorf("steering content is empty")
+		return SteerResult{}, &steerRejectedError{"steering content is empty"}
 	}
 
 	// Quarantine scan BEFORE persistence. A hit blocks the whole
@@ -105,7 +115,8 @@ func (b *Bridge) Steer(ctx context.Context, chatID, content string) (SteerResult
 	if hit := memory.ScanContent(trimmed); hit != nil {
 		b.logger.Warn("steering message blocked by content scan",
 			"chat_id", chatID, "category", hit.Category, "pattern", hit.Pattern)
-		return SteerResult{}, fmt.Errorf("steering message blocked: %s (%s)", hit.Category, hit.Pattern)
+		// Don't echo scanner internals (category/pattern) to the caller.
+		return SteerResult{}, &steerRejectedError{"steering message blocked by content policy"}
 	}
 
 	inFlight := b.runInFlight(chatID)

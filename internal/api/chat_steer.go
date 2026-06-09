@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -105,11 +106,18 @@ func (h *SteerHandler) Steer(w http.ResponseWriter, r *http.Request) {
 
 	res, err := h.steerer.Steer(r.Context(), chatID, body.Message)
 	if err != nil {
-		// The only non-infrastructure failure path in the bridge's Steer
-		// is the content scan / empty-content guard — surface it as 422
-		// (the request was well-formed but the payload was rejected).
-		h.logger.Info("steer rejected", "chat_id", chatID, "error", err)
-		replyError(w, http.StatusUnprocessableEntity, err.Error())
+		// Caller-input rejections (empty / content-policy block) carry a
+		// safe message and map to 422. Anything else is an internal fault
+		// (e.g. a persistence failure) — return a generic 500 and keep the
+		// detail in the server log, never in the response body.
+		var rej interface{ SteerRejected() bool }
+		if errors.As(err, &rej) && rej.SteerRejected() {
+			h.logger.Info("steer rejected", "chat_id", chatID, "error", err)
+			replyError(w, http.StatusUnprocessableEntity, err.Error())
+			return
+		}
+		h.logger.Error("steer failed", "chat_id", chatID, "error", err)
+		replyError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
