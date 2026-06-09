@@ -1405,6 +1405,16 @@ END;
 	// deleted_at IS NULL) so AGENT rows and soft-deleted leads are
 	// unconstrained. See migrate_consts_v110_one_lead_per_crew.go.
 	{version: 110, name: "one_lead_per_crew", sql: migrationOneLeadPerCrew},
+
+	// v111: cross-session conversation search. Adds conversation_messages
+	// (a queryable mirror of the JSONL chat logs) and its external-content
+	// FTS5 shadow conversation_messages_fts. The conversation Store
+	// dual-writes a row here on every Append; Search filters ALWAYS by
+	// agent_id. First slice is BM25-only with no backfill of pre-v111
+	// history. See migrate_consts_v111_conversation_search.go. NOTE: the
+	// user-model branch takes v112 — keep this at v111 to avoid a
+	// cross-branch collision.
+	{version: 111, name: "add_conversation_search", sql: migrationConversationSearch},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

@@ -182,20 +182,81 @@ func ToolSchemas() map[string]ToolSchema {
 				"additionalProperties": false
 			}`),
 		},
+		"conversation.search": {
+			Name: "conversation.search",
+			Description: "Keyword (BM25) search across YOUR OWN past chat sessions. Returns up to 'limit' " +
+				"ranked messages with the source session_id and timestamp so you can recall what was " +
+				"discussed or decided in an earlier conversation. Scoped to your agent identity — you " +
+				"cannot see another agent's history. Search is from-now-on: only sessions recorded after " +
+				"this feature shipped are indexed.",
+			InputSchema: json.RawMessage(`{
+				"type": "object",
+				"properties": {
+					"q": {
+						"type": "string",
+						"description": "Search query. Plain text; FTS5 operators are treated as literal words."
+					},
+					"limit": {
+						"type": "integer",
+						"minimum": 1,
+						"maximum": 100,
+						"description": "Maximum number of hits. Defaults to 20; values out of range are clamped."
+					}
+				},
+				"required": ["q"],
+				"additionalProperties": false
+			}`),
+		},
 	}
+}
+
+// ConvSearcher is the narrow dependency the dispatcher needs to back the
+// conversation.search tool. *conversation.Store satisfies it. Kept as an
+// interface so the memory package does not import conversation (avoiding a
+// dependency cycle) and so tests can inject a stub.
+type ConvSearcher interface {
+	Search(ctx context.Context, agentID, query string, limit int) ([]ConvSearchHit, error)
+}
+
+// ConvSearchHit is the dispatcher-facing shape of a conversation search
+// result. It mirrors conversation.SearchHit; the server adapter converts
+// between the two so neither package imports the other.
+type ConvSearchHit struct {
+	ID          string `json:"id"`
+	SessionID   string `json:"session_id"`
+	Role        string `json:"role"`
+	Content     string `json:"content"`
+	ToolSummary string `json:"tool_summary,omitempty"`
+	Timestamp   string `json:"ts"`
 }
 
 // Dispatcher routes ToolCall to per-tool handlers. Stateless beyond
 // the AgentContext, so callers can share an instance across the
 // duration of a single agent turn without coordinating writes.
 type Dispatcher struct {
-	ctx AgentContext
-	now func() time.Time
+	ctx        AgentContext
+	now        func() time.Time
+	convSearch ConvSearcher
+}
+
+// DispatcherOption configures a Dispatcher at construction. Variadic so
+// existing NewDispatcher(ac) callers are unaffected.
+type DispatcherOption func(*Dispatcher)
+
+// WithConvSearcher wires the backend for the conversation.search tool.
+// When unset, conversation.search returns a recoverable IsError result
+// explaining the tool is unavailable rather than failing the run.
+func WithConvSearcher(cs ConvSearcher) DispatcherOption {
+	return func(d *Dispatcher) { d.convSearch = cs }
 }
 
 // NewDispatcher builds a Dispatcher bound to the given AgentContext.
-func NewDispatcher(ac AgentContext) *Dispatcher {
-	return &Dispatcher{ctx: ac, now: func() time.Time { return time.Now().UTC() }}
+func NewDispatcher(ac AgentContext, opts ...DispatcherOption) *Dispatcher {
+	d := &Dispatcher{ctx: ac, now: func() time.Time { return time.Now().UTC() }}
+	for _, opt := range opts {
+		opt(d)
+	}
+	return d
 }
 
 // Dispatch is the single entry point. Unknown tool names return
@@ -211,12 +272,55 @@ func (d *Dispatcher) Dispatch(ctx context.Context, call ToolCall) (ToolResult, e
 		return d.handleSearch(ctx, call.Args)
 	case "memory.append_daily":
 		return d.handleAppendDaily(ctx, call.Args)
+	case "conversation.search":
+		return d.handleConversationSearch(ctx, call.Args)
 	default:
 		return ToolResult{
 			IsError: true,
-			Content: fmt.Sprintf("unknown tool: %q. Available: memory.read, memory.write, memory.search, memory.append_daily.", call.Name),
+			Content: fmt.Sprintf("unknown tool: %q. Available: memory.read, memory.write, memory.search, memory.append_daily, conversation.search.", call.Name),
 		}, nil
 	}
+}
+
+type convSearchArgs struct {
+	Q     string `json:"q"`
+	Limit int    `json:"limit"`
+}
+
+// handleConversationSearch backs the conversation.search tool. It is
+// agent-scoped: the agent_id comes from the dispatcher's AgentContext, never
+// from the model's args, so an agent can only search its own history. A
+// missing searcher (dispatcher built without WithConvSearcher) is a
+// recoverable IsError rather than a panic so a run on a build without the
+// mirror degrades gracefully.
+func (d *Dispatcher) handleConversationSearch(ctx context.Context, raw json.RawMessage) (ToolResult, error) {
+	if err := ctx.Err(); err != nil {
+		return ToolResult{IsError: true, Content: "conversation.search: cancelled: " + err.Error()}, nil
+	}
+	var a convSearchArgs
+	if err := json.Unmarshal(raw, &a); err != nil {
+		return ToolResult{IsError: true, Content: "conversation.search: invalid args: " + err.Error()}, nil
+	}
+	if strings.TrimSpace(a.Q) == "" {
+		return ToolResult{IsError: true, Content: "conversation.search: q is required"}, nil
+	}
+	if d.convSearch == nil {
+		return ToolResult{IsError: true, Content: "conversation.search: not available on this deployment"}, nil
+	}
+	if strings.TrimSpace(d.ctx.AgentID) == "" {
+		return ToolResult{IsError: true, Content: "conversation.search: agent identity unavailable"}, nil
+	}
+	if a.Limit <= 0 || a.Limit > 100 {
+		a.Limit = 20
+	}
+
+	hits, err := d.convSearch.Search(ctx, d.ctx.AgentID, a.Q, a.Limit)
+	if err != nil {
+		return ToolResult{IsError: true, Content: "conversation.search: " + err.Error()}, nil
+	}
+	envelope := map[string]any{"hits": hits, "query": a.Q, "count": len(hits)}
+	body, _ := json.MarshalIndent(envelope, "", "  ")
+	return ToolResult{Content: string(body)}, nil
 }
 
 type readArgs struct {

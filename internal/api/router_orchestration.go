@@ -463,6 +463,13 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	// Cross-crew activity feed (public, authenticated)
 	r.mux.Handle("GET /api/v1/activity", authed(wsCtx(http.HandlerFunc(queries.ListAllActivity))))
 
+	// Cross-session conversation search (public, authenticated). Backed by
+	// the conversation_messages FTS5 mirror (v111). The handler verifies
+	// the requested agent belongs to the caller's workspace before the
+	// agent-scoped BM25 query runs.
+	convSearchHandler := NewConversationHandler(r.db, r.convSearcher)
+	r.mux.Handle("POST /api/v1/conversations/search", authed(wsCtx(http.HandlerFunc(convSearchHandler.Search))))
+
 	// Port exposures — agent-initiated reverse proxy for container ports.
 	// MVP uses AllowAllPolicy; the registry + proxy route + CLI list/revoke
 	// are all wired here in one place so swapping in a future ApprovalPolicy
