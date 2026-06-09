@@ -123,6 +123,9 @@ func (o *Orchestrator) buildMemoryContext(ctx context.Context, req AgentRunReque
 		if pb := o.buildPersonaBlock(ctx, req); pb != "" {
 			early.WriteString(pb)
 		}
+		if um := o.buildUserModelBlock(ctx, req); um != "" {
+			early.WriteString(um)
+		}
 		if pc := o.buildPeerCardBlock(ctx, req); pc != "" {
 			early.WriteString(pc)
 		}
@@ -153,6 +156,12 @@ func (o *Orchestrator) buildMemoryContext(ctx context.Context, req AgentRunReque
 	// consistent shape.
 	if personaBlock := o.buildPersonaBlock(ctx, req); personaBlock != "" {
 		b.WriteString(personaBlock)
+	}
+	// PR #10 F6: the evolving per-(operator, workspace) model — a
+	// general working-style hint — is emitted BEFORE the per-agent
+	// peer card so the broad hint frames the narrower relationship hint.
+	if userModelBlock := o.buildUserModelBlock(ctx, req); userModelBlock != "" {
+		b.WriteString(userModelBlock)
 	}
 	if peerBlock := o.buildPeerCardBlock(ctx, req); peerBlock != "" {
 		b.WriteString(peerBlock)

@@ -249,6 +249,58 @@ When a session starts, the orchestrator reads memory files and injects them into
 [END MEMORY INSTRUCTIONS]
 ```
 
+### 2a. Operator model (per-user)
+
+Alongside the three memory tiers, Crewship distils a small **operator model**
+for each person who works with a crew. It captures *how an operator likes to
+work* — communication style, timezone, language, level of detail — as a hint,
+not as a fact about who they are or what they want.
+
+The model is keyed on **(operator, workspace)**, independent of which agent is
+answering. Every agent in a crew reads the same model, stored crew-shared at:
+
+```
+/crew/shared/.memory/users/{user_slug}.md
+```
+
+`user_slug` is a one-way hash (`sha256(user_id ‖ workspace_id)[:16]`), so the
+filename never carries the operator's identity into a directory listing or a
+stack trace. The same hash gives each workspace its own isolated model for the
+same person — a user who works in two workspaces gets two independent models.
+
+When a session opens, the orchestrator injects **only the session opener's**
+model — never another operator's, even if one exists on disk — as an
+`[OPERATOR MODEL]` block, placed *before* the per-agent `[PEER CONTEXT]` block
+so the broad working-style hint frames the narrower per-agent relationship hint:
+
+```
+[OPERATOR MODEL]
+This operator has worked with the crew before. The following profile was
+distilled and merged across prior sessions — treat it as a hint about how
+they prefer to work, not as a fact about who they are or what they want.
+- timezone: UTC+1
+- language: Czech
+- tone: terse, technical
+[END OPERATOR MODEL]
+```
+
+**Evolving, not overwriting.** A daily background sweep refreshes the model from
+recent sessions. Refreshes **merge**: a field the latest session is silent about
+is preserved from the prior model rather than dropped, so a one-off session that
+only touches one aspect of how an operator works can't erase the stable picture
+built up over time. A field the session *does* re-touch is updated to the newer
+value. The model is capped at 1.5 KB.
+
+**Eligibility.** An operator gets a model once their interaction with the crew
+crosses a threshold (≥10 messages **or** ≥5 minutes of session time). Below that,
+no model is written.
+
+**Opt-out and deletion.** The operator model reuses the same per-(operator,
+workspace) consent flag as peer cards: opting out of one opts out of both. When
+an operator is opted out, the next sweep purges any existing model from disk and
+its index row, and records the deletion in the audit log. Deleting the user
+cascades the index row away as well.
+
 ### 3. Searching Memory
 
 Agents search memory via the sidecar HTTP API with a `scope` parameter:

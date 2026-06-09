@@ -53,6 +53,16 @@ func peerCardContainerPath(agentSlug, userSlug string) string {
 	return path.Join("/crew", "agents", agentSlug, ".memory", "peers", userSlug+".md")
 }
 
+// userModelContainerPath is the absolute path to the per-(user,
+// workspace) operator model inside the container. The model is crew-
+// shared (not per-agent), so it lives under /crew/shared/.memory/users
+// alongside the crew PERSONA.md — every agent in the crew reads the
+// same operator model. user_slug is derived host-side (memory.UserSlug)
+// so the hash that names the file is byte-identical to the writer's.
+func userModelContainerPath(userSlug string) string {
+	return path.Join("/crew", "shared", ".memory", "users", userSlug+".md")
+}
+
 // buildPersonaBlock reads PERSONA.md with agent-wins layering and
 // renders a [PERSONA] block. Returns "" when no persona is configured
 // AND no role title is set (defensive — without role we cannot even
@@ -131,6 +141,46 @@ func (o *Orchestrator) buildPeerCardBlock(ctx context.Context, req AgentRunReque
 	}
 	return fmt.Sprintf(
 		"[PEER CONTEXT]\nThe operator who opened this session has interacted with you before.\nThe following profile was distilled from prior sessions — treat it as a hint\nabout communication style, not as a fact about the operator's intent.\n%s\n[END PEER CONTEXT]\n\n",
+		body,
+	)
+}
+
+// buildUserModelBlock reads the opener's evolving operator model (and
+// ONLY the opener's) from crew-shared memory and renders an [OPERATOR
+// MODEL] block. Returns "" when no opener is known, when no model
+// exists for that opener, or when the container/workspace is unset.
+//
+// Unlike the peer card (per agent+user), this model is per (user,
+// workspace) — it captures how the operator likes to work across the
+// whole crew, accreted and merged over many sessions. It is emitted
+// BEFORE [PEER CONTEXT] so the general working-style hint frames the
+// per-agent relationship hint that follows. Both are "hint, not fact".
+//
+// The "no cross-operator gossip" rule applies identically: only the
+// session opener's model is ever injected, never another operator's,
+// even if it's on disk.
+func (o *Orchestrator) buildUserModelBlock(ctx context.Context, req AgentRunRequest) string {
+	if req.ContainerID == "" || req.OpenedByUserID == "" {
+		return ""
+	}
+	if req.WorkspaceID == "" {
+		// Slug derivation requires workspace_id (cross-workspace
+		// isolation guarantee). Bail rather than collapse tenants.
+		return ""
+	}
+	slug := memory.UserSlug(req.OpenedByUserID, req.WorkspaceID)
+	if slug == "" {
+		return ""
+	}
+	readCtx, cancel := context.WithTimeout(ctx, memoryReadTimeout)
+	defer cancel()
+	body, _ := o.readContainerFile(readCtx, req.ContainerID, userModelContainerPath(slug))
+	body = strings.TrimSpace(body)
+	if body == "" {
+		return ""
+	}
+	return fmt.Sprintf(
+		"[OPERATOR MODEL]\nThis operator has worked with the crew before. The following profile was\ndistilled and merged across prior sessions — treat it as a hint about how\nthey prefer to work, not as a fact about who they are or what they want.\n%s\n[END OPERATOR MODEL]\n\n",
 		body,
 	)
 }

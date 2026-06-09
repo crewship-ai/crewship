@@ -1405,6 +1405,15 @@ END;
 	// deleted_at IS NULL) so AGENT rows and soft-deleted leads are
 	// unconstrained. See migrate_consts_v110_one_lead_per_crew.go.
 	{version: 110, name: "one_lead_per_crew", sql: migrationOneLeadPerCrew},
+
+	// v112: index table for the evolving per-user operator model
+	// (PR #10 F6). Mirrors peer_cards but keyed on (workspace_id,
+	// user_slug) alone — no agent_id, because the model is per
+	// operator, not per (agent, operator). v111 is reserved for the
+	// conversation-search branch; this takes max+2 to dodge the
+	// version-collision silent-skip hazard. See
+	// migrate_consts_v112_user_models.go.
+	{version: 112, name: "user_models", sql: migrationUserModels},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

@@ -88,6 +88,7 @@ The Agent Evolution PRD (§6 in `PRD-AGENT-EVOLUTION-2026.md`, internal spec) sh
 | 105 | `peer_consent` | GDPR primitives for per-user peer cards: `user_peer_consent` (opt-out), `peer_cards` (disk-mirror index), `peer_card_audit` (per-action audit keyed by data subject). | #471 (PR-E) |
 | 106 | `self_learning` | `agents.self_learning_enabled` (BOOL, default 0) + audit triple. Consumed by F4.4 negative-learning + F6 persona-suggest ALLOW paths — OFF queues a blocking inbox row, ON auto-applies. | #472 (PR-G) |
 | 107 | `gdpr_cascade` | `data_subject_id` foreign key on `memory_versions` + `inbox_items` (both nullable, partial indexes). New `gdpr_actions` audit table (Article 15 + Article 17 history per subject). CHECK requires non-empty `length(trim(reason))` when `action='delete'`. | #472 (PR-G/PR-F) |
+| 112 | `user_models` | Disk-mirror index for the evolving per-operator model: `user_models` keyed on `UNIQUE(workspace_id, user_slug)` — **no `agent_id`**, because the model is per (operator, workspace), not per (agent, operator). Nullable `crew_id` (ON DELETE SET NULL) records which crew's shared memory holds the file. `user_id` cascades. Reuses `user_peer_consent` for opt-out and `peer_card_audit` for write/delete records. | (PR #10) |
 
 <Accordion title="Migration ordering notes — the v100–v107 renumber cascade">
 
@@ -98,6 +99,18 @@ v100–v107 landed across **multiple PRs in parallel** and several were renumber
 - **PR-G `self_learning` + `gdpr_cascade`** were drafted as v106 + v107 and kept those numbers — by the time they merged, the renumber cascade was already settled.
 
 This renumber cascade is captured in PRD §10.5 (the "two columns vs lifecycle enum" decision log) and PRD §10.3 (the autonomy_level int→string drift). Read those entries to reconcile a doc reference that mentions an old version number.
+
+</Accordion>
+
+<Accordion title="Why user_models is v112, not v111">
+
+The migration runner keys on the version **number**, not the name — so two
+branches that both claim the same next number will land non-deterministically
+depending on merge order, and the second one silently skips. `user_models` was
+developed alongside a conversation-search branch that takes the next free
+number (v111); to dodge the collision, `user_models` deliberately claims
+**max+2 = v112**. The gap at v111 is intentional and harmless: the runner only
+requires versions to be monotonic, not contiguous.
 
 </Accordion>
 
