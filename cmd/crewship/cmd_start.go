@@ -603,6 +603,27 @@ var startCmd = &cobra.Command{
 			}()
 		}
 
+		// PR#10 — UserModelSync routine. Companion to PeerCardSync above:
+		// walks every workspace once per day at ~05:00 UTC (staggered one
+		// hour after peer cards) and writes / purges the per-(user,
+		// workspace) operator model under cfg.Storage.BasePath. Without this
+		// worker the [OPERATOR MODEL] prompt block never gets a file to read.
+		// Extractor defaults to NoopUserModelExtractor — aux-LLM extraction
+		// lands with the same slot the peer-card extractor will use.
+		if deps.DB != nil {
+			userModelStop := make(chan struct{})
+			var userModelWg sync.WaitGroup
+			consolidate.StartUserModelSyncWorker(
+				deps.DB, logger,
+				consolidate.UserModelWorkerConfig{BasePath: cfg.Storage.BasePath},
+				userModelStop, &userModelWg,
+			)
+			defer func() {
+				close(userModelStop)
+				userModelWg.Wait()
+			}()
+		}
+
 		if err := srv.Start(ctx); err != nil {
 			return fmt.Errorf("server error: %w", err)
 		}

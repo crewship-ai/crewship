@@ -1411,10 +1411,15 @@ END;
 	// FTS5 shadow conversation_messages_fts. The conversation Store
 	// dual-writes a row here on every Append; Search filters ALWAYS by
 	// agent_id. First slice is BM25-only with no backfill of pre-v111
-	// history. See migrate_consts_v111_conversation_search.go. NOTE: the
-	// user-model branch takes v112 — keep this at v111 to avoid a
-	// cross-branch collision.
+	// history. See migrate_consts_v111_conversation_search.go.
 	{version: 111, name: "add_conversation_search", sql: migrationConversationSearch},
+
+	// v112: index table for the evolving per-user operator model
+	// (PR #10 F6). Mirrors peer_cards but keyed on (workspace_id,
+	// user_slug) alone — no agent_id, because the model is per
+	// operator, not per (agent, operator). See
+	// migrate_consts_v112_user_models.go.
+	{version: 112, name: "user_models", sql: migrationUserModels},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

@@ -125,6 +125,73 @@ func TestBuildPeerCardBlock_InjectsOpenerCardOnly(t *testing.T) {
 	}
 }
 
+// --- [OPERATOR MODEL] block (PR #10) ---
+
+// The operator model is keyed on OpenedByUserID + WorkspaceID and read
+// from the crew-shared memory (/crew/shared/.memory/users/{slug}.md).
+func TestBuildUserModelBlock_InjectsOpenerModel(t *testing.T) {
+	slug := memory.UserSlug("u1", "ws1")
+	mc := mockContainerForMemory(map[string]string{
+		"/crew/shared/.memory/users/" + slug + ".md": "- tone: terse, technical",
+	})
+	o := New(mc, newMemState(), slog.Default())
+	got := o.buildUserModelBlock(context.Background(), AgentRunRequest{
+		AgentSlug: "alice", ContainerID: "c1", WorkspaceID: "ws1",
+		OpenedByUserID: "u1",
+	})
+	if !strings.Contains(got, "[OPERATOR MODEL]") {
+		t.Errorf("expected [OPERATOR MODEL] header; got %q", got)
+	}
+	if !strings.Contains(got, "terse, technical") {
+		t.Errorf("opener's model not injected; got %q", got)
+	}
+	// "hint not fact" framing must be present.
+	if !strings.Contains(strings.ToLower(got), "hint") {
+		t.Errorf("expected 'hint not fact' framing; got %q", got)
+	}
+}
+
+// No opener → no block, even when a model exists on disk (system runs).
+func TestBuildUserModelBlock_RequiresOpener(t *testing.T) {
+	slug := memory.UserSlug("u1", "ws1")
+	mc := mockContainerForMemory(map[string]string{
+		"/crew/shared/.memory/users/" + slug + ".md": "- tone: terse",
+	})
+	o := New(mc, newMemState(), slog.Default())
+	if got := o.buildUserModelBlock(context.Background(), AgentRunRequest{
+		AgentSlug: "alice", ContainerID: "c1", WorkspaceID: "ws1",
+	}); got != "" {
+		t.Errorf("expected empty block without opener; got %q", got)
+	}
+}
+
+// Missing WorkspaceID → empty (slug derivation fails closed), guarding
+// the cross-tenant leak.
+func TestBuildUserModelBlock_RequiresWorkspace(t *testing.T) {
+	slug := memory.UserSlug("u1", "ws1")
+	mc := mockContainerForMemory(map[string]string{
+		"/crew/shared/.memory/users/" + slug + ".md": "- tone: terse",
+	})
+	o := New(mc, newMemState(), slog.Default())
+	if got := o.buildUserModelBlock(context.Background(), AgentRunRequest{
+		AgentSlug: "alice", ContainerID: "c1", OpenedByUserID: "u1",
+	}); got != "" {
+		t.Errorf("expected empty when WorkspaceID is unset; got %q", got)
+	}
+}
+
+// No model on disk for the opener → empty block (fresh operator).
+func TestBuildUserModelBlock_NoModelEmpty(t *testing.T) {
+	mc := mockContainerForMemory(map[string]string{})
+	o := New(mc, newMemState(), slog.Default())
+	if got := o.buildUserModelBlock(context.Background(), AgentRunRequest{
+		AgentSlug: "alice", ContainerID: "c1", WorkspaceID: "ws1",
+		OpenedByUserID: "u1",
+	}); got != "" {
+		t.Errorf("expected empty block for opener with no model; got %q", got)
+	}
+}
+
 // Workspace component is load-bearing in the slug derivation. If a
 // future bug drops the workspace_id, this test catches the
 // cross-tenant card leak before it ships.
