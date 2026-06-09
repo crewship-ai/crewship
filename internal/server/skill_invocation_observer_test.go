@@ -196,6 +196,41 @@ func TestSkillInvocationObserver_Match(t *testing.T) {
 // skill_invocations row, bumps skills.usage_count to 1 + last_used_at,
 // emits a skill.invoked journal entry, and makes loadSkillSweepInputs
 // report a non-zero InvocationCount for the matched skill.
+// TestSkillInvocationObserver_BundledNameVsSlug is the faithful reproduction
+// of the live dev1 bug found by real e2e: a BUNDLED skill whose DB content is
+// empty (the SKILL.md is materialized from the embedded bundle, not
+// skills.content), so its frontmatter name lives nowhere in the row — slug
+// "code-reviewer", display/name "Code Reviewer". Claude Code's Skill tool
+// then invokes it as {"skill":"code-review"} (the frontmatter name). The
+// observer must still resolve that to the slug and record the invocation,
+// via the alphanumeric prefix fuzzy match. Pins the fix end-to-end.
+func TestSkillInvocationObserver_BundledNameVsSlug(t *testing.T) {
+	db := siDB(t)
+	if _, err := db.Exec(`INSERT INTO skills (id, name, slug, display_name, content) VALUES ('sk_cr', 'Code Reviewer', 'code-reviewer', 'Code Reviewer', '')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO agent_skills (id, agent_id, skill_id, enabled) VALUES ('as_cr','a1','sk_cr',1)`); err != nil {
+		t.Fatal(err)
+	}
+	w := journal.NewWriter(db, siLogger(), journal.WriterOptions{})
+	defer func() { _ = w.Close() }()
+	o := newSkillInvocationObserver(siLogger(), db, w)
+
+	o.Observe(orchestrator.SkillInvocation{
+		WorkspaceID: "ws1", CrewID: "cr1", AgentID: "a1",
+		ToolName: "Skill",
+		Payload:  map[string]any{"input": map[string]any{"skill": "code-review", "args": "review main.go"}},
+	})
+	drainWriter(t, w)
+
+	if n := countInvocations(t, db, "sk_cr"); n != 1 {
+		t.Fatalf("code-reviewer invocations = %d, want 1 (frontmatter name 'code-review' must fuzzy-resolve to slug 'code-reviewer')", n)
+	}
+	if c, _, _ := skillUsage(t, db, "sk_cr"); c != 1 {
+		t.Fatalf("usage_count = %d, want 1", c)
+	}
+}
+
 func TestSkillInvocationObserver_ProducerToConsumer(t *testing.T) {
 	db := siDB(t)
 	w := journal.NewWriter(db, siLogger(), journal.WriterOptions{})
