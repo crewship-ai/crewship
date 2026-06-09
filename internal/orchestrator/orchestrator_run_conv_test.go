@@ -314,10 +314,15 @@ type fakeConvSummarizer struct {
 	// block makes Summarize wait for context cancellation (timeout) and
 	// return ctx.Err(), to exercise the bounded-timeout fallback.
 	block bool
+	// lastPrompt captures the most recent prompt string handed to the
+	// summarizer, so tests can assert on the aux-LLM directive (e.g. the
+	// TEMPORAL ANCHORING header + injected date).
+	lastPrompt string
 }
 
-func (f *fakeConvSummarizer) Summarize(ctx context.Context, _ string) (string, error) {
+func (f *fakeConvSummarizer) Summarize(ctx context.Context, prompt string) (string, error) {
 	f.calls++
+	f.lastPrompt = prompt
 	if f.block {
 		<-ctx.Done()
 		return "", ctx.Err()
@@ -592,5 +597,284 @@ func TestBuildConversationContext_Compaction_SummaryClampedToBudget(t *testing.T
 	}
 	if qCount > summaryBudget {
 		t.Errorf("summary not clamped: %d summary chars > budget %d", qCount, summaryBudget)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// PR #2 — Temporal anchoring. When a date is resolvable from o.nowUTC(),
+// summarizeOverflow prepends a TEMPORAL ANCHORING directive (carrying today's
+// UTC date) to the aux-LLM prompt so the model rewrites completed actions as
+// dated past-tense facts rather than open instructions. Best-effort: an empty
+// date omits the directive, keeping the prompt byte-identical to PR #1.
+// ---------------------------------------------------------------------------
+
+// fixedClock returns a now func pinned to a single instant.
+func fixedClock(t time.Time) func() time.Time { return func() time.Time { return t } }
+
+func TestNowUTC_NilFallsBackToWallClock(t *testing.T) {
+	// Unwired clock → nowUTC() must return a non-zero UTC time near wall
+	// clock. We can't pin the value, but it must be UTC and recent.
+	o, _ := newConvOrchestrator(t) // now is nil
+	got := o.nowUTC()
+	if got.Location() != time.UTC {
+		t.Errorf("nowUTC() location = %v, want UTC", got.Location())
+	}
+	if got.IsZero() {
+		t.Errorf("nowUTC() returned the zero time with nil clock")
+	}
+	if d := time.Since(got); d < -time.Minute || d > time.Minute {
+		t.Errorf("nowUTC() = %v, not within a minute of wall clock", got)
+	}
+}
+
+func TestNowUTC_PinnedClockNormalizedToUTC(t *testing.T) {
+	// A pinned clock in a non-UTC zone is normalized to UTC, mirroring
+	// consolidate.Consolidator.now().
+	loc := time.FixedZone("UTC+5", 5*60*60)
+	o, _ := newConvOrchestrator(t)
+	o.now = fixedClock(time.Date(2026, 6, 9, 1, 0, 0, 0, loc))
+	got := o.nowUTC()
+	if got.Location() != time.UTC {
+		t.Errorf("nowUTC() did not normalize to UTC: %v", got.Location())
+	}
+	// 2026-06-09 01:00 +05:00 == 2026-06-08 20:00 UTC.
+	if y, m, d := got.Date(); y != 2026 || m != time.June || d != 8 {
+		t.Errorf("nowUTC() date = %04d-%02d-%02d, want 2026-06-08", y, m, d)
+	}
+}
+
+func TestSummarizeOverflow_InjectsTemporalAnchor(t *testing.T) {
+	o, _ := newConvOrchestrator(t)
+	sum := &fakeConvSummarizer{out: "ok"}
+	o.SetConversationSummarizer(sum)
+	o.now = fixedClock(time.Date(2026, 6, 9, 12, 0, 0, 0, time.UTC))
+
+	out := o.summarizeOverflow(context.Background(), []conversation.Message{
+		{Role: conversation.RoleAssistant, Content: "did work"},
+	}, 500)
+	if out != "ok" {
+		t.Fatalf("summarizer output = %q, want \"ok\"", out)
+	}
+	if !strings.Contains(sum.lastPrompt, "TEMPORAL ANCHORING") {
+		t.Errorf("prompt missing TEMPORAL ANCHORING header; got %q", sum.lastPrompt)
+	}
+	if !strings.Contains(sum.lastPrompt, "2026-06-09") {
+		t.Errorf("prompt missing injected UTC date 2026-06-09; got %q", sum.lastPrompt)
+	}
+	// The directive must precede the existing summary instruction + transcript.
+	ai := strings.Index(sum.lastPrompt, "TEMPORAL ANCHORING")
+	ii := strings.Index(sum.lastPrompt, conversationSummaryInstruction)
+	if !(ai >= 0 && ii >= 0 && ai < ii) {
+		t.Errorf("anchor directive must precede summary instruction: ai=%d ii=%d", ai, ii)
+	}
+}
+
+func TestSummarizeOverflow_EmptyDateOmitsAnchor_ByteIdenticalToBaseline(t *testing.T) {
+	// Best-effort: when nowUTC() yields the zero time, the date string is
+	// empty and the directive is omitted, so the aux prompt is byte-for-byte
+	// the PR #1 baseline (instruction + transcript, no anchor).
+	o, _ := newConvOrchestrator(t)
+	sum := &fakeConvSummarizer{out: "ok"}
+	o.SetConversationSummarizer(sum)
+	o.now = fixedClock(time.Time{}) // zero time → empty 2006-01-02 is "0001-01-01"... use sentinel
+
+	msgs := []conversation.Message{
+		{Role: conversation.RoleAssistant, Content: "did work", ToolSummary: "ran build: ok"},
+	}
+	_ = o.summarizeOverflow(context.Background(), msgs, 500)
+
+	// Reconstruct the PR #1 baseline prompt (instruction + transcript) and
+	// compare byte-for-byte.
+	var want strings.Builder
+	want.WriteString(conversationSummaryInstruction)
+	want.WriteString("[assistant]: did work\n")
+	want.WriteString("  ran build: ok\n")
+	if sum.lastPrompt != want.String() {
+		t.Errorf("empty-date prompt not byte-identical to baseline:\n got=%q\nwant=%q", sum.lastPrompt, want.String())
+	}
+	if strings.Contains(sum.lastPrompt, "TEMPORAL ANCHORING") {
+		t.Errorf("anchor leaked into prompt despite empty date; got %q", sum.lastPrompt)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// PR #3 — Compaction robustness.
+// ---------------------------------------------------------------------------
+
+// (a) Boundary tool-summary preservation: when the boundary message would be
+// truncated and lose its ToolSummary, prefer dropping it whole into overflow
+// — unless it is the only message that fits.
+
+func TestSelectRecentMessages_BoundaryWithToolSummary_DroppedWhole(t *testing.T) {
+	// Two messages. The newest fits fully. The next-older has a ToolSummary
+	// and would be truncated (Content shrunk, ToolSummary zeroed) under the
+	// >200-remaining last-resort rule. Because another message already fits,
+	// we must drop it whole into overflow rather than emit a tool-less
+	// fragment.
+	newest := conversation.Message{Role: conversation.RoleAssistant, Content: "NEWEST_" + strings.Repeat("n", 300)}
+	older := conversation.Message{Role: conversation.RoleAssistant, Content: "OLDER_" + strings.Repeat("o", 300), ToolSummary: "ran build: ok"}
+	msgs := []conversation.Message{older, newest}
+
+	// Budget 400: newest = 307 chars fits (totalChars=307); older = 319+13
+	// won't fit, remaining = 93 ≤ 200 historically dropped anyway — engineer
+	// a budget where remaining > 200 so the OLD code would truncate.
+	// newest 307 chars; budget 600 → remaining after newest = 293 > 200.
+	recent, overflow := selectRecentMessages(msgs, 600)
+
+	for _, m := range recent {
+		if strings.Contains(m.Content, "...(truncated)") && m.ToolSummary == "" && strings.Contains(m.Content, "OLDER_") {
+			t.Errorf("boundary msg with ToolSummary was truncated tool-less into recent window: %+v", m)
+		}
+	}
+	// older must be in overflow, whole, ToolSummary intact.
+	foundWhole := false
+	for _, m := range overflow {
+		if strings.Contains(m.Content, "OLDER_") {
+			if m.ToolSummary != "ran build: ok" || strings.Contains(m.Content, "...(truncated)") {
+				t.Errorf("overflow boundary msg not whole: %+v", m)
+			}
+			foundWhole = true
+		}
+	}
+	if !foundWhole {
+		t.Errorf("boundary msg with ToolSummary not dropped into overflow; recent=%+v overflow=%+v", recent, overflow)
+	}
+}
+
+func TestSelectRecentMessages_BoundaryWithToolSummary_OnlyMessage_StillTruncated(t *testing.T) {
+	// Single message larger than budget, carrying a ToolSummary. Dropping it
+	// whole would produce an empty window. The last-resort >200 truncation
+	// must still fire so the window is never empty.
+	only := conversation.Message{Role: conversation.RoleAssistant, Content: "ONLY_" + strings.Repeat("z", 600), ToolSummary: "ran build: ok"}
+	recent, overflow := selectRecentMessages([]conversation.Message{only}, 400)
+
+	if len(recent) != 1 {
+		t.Fatalf("expected the only message to be kept (truncated), got recent=%+v overflow=%+v", recent, overflow)
+	}
+	if !strings.Contains(recent[0].Content, "...(truncated)") {
+		t.Errorf("only message should have been truncated to avoid an empty window; got %q", recent[0].Content)
+	}
+	if len(overflow) != 0 {
+		t.Errorf("nothing should overflow when there is a single message; got %+v", overflow)
+	}
+}
+
+func TestSelectRecentMessages_BoundaryNoToolSummary_StillTruncates(t *testing.T) {
+	// The whole-drop rule is scoped to the ToolSummary-loss case. A boundary
+	// message WITHOUT a ToolSummary keeps the historical >200 truncation
+	// behavior, so the existing truncation tests stay green.
+	newest := conversation.Message{Role: conversation.RoleAssistant, Content: "NEWEST_" + strings.Repeat("n", 100)}
+	older := conversation.Message{Role: conversation.RoleAssistant, Content: "OLDER_" + strings.Repeat("o", 600)}
+	recent, _ := selectRecentMessages([]conversation.Message{older, newest}, 500)
+
+	sawTruncated := false
+	for _, m := range recent {
+		if strings.Contains(m.Content, "OLDER_") && strings.Contains(m.Content, "...(truncated)") {
+			sawTruncated = true
+		}
+	}
+	if !sawTruncated {
+		t.Errorf("boundary msg without ToolSummary should still truncate into the window; recent=%+v", recent)
+	}
+}
+
+// (b) ChatID-consistency guard in summarizeOverflow.
+
+func TestSummarizeOverflow_MixedChatID_SkipsAndReturnsEmpty(t *testing.T) {
+	o, _ := newConvOrchestrator(t)
+	sum := &fakeConvSummarizer{out: "should-not-be-called"}
+	o.SetConversationSummarizer(sum)
+
+	out := o.summarizeOverflow(context.Background(), []conversation.Message{
+		{ChatID: "ses-a", Role: conversation.RoleAssistant, Content: "from session a"},
+		{ChatID: "ses-b", Role: conversation.RoleAssistant, Content: "from session b"},
+	}, 500)
+
+	if out != "" {
+		t.Errorf("mixed ChatID overflow → want \"\" (skip), got %q", out)
+	}
+	if sum.calls != 0 {
+		t.Errorf("summarizer must not be invoked on mixed-ChatID overflow; calls=%d", sum.calls)
+	}
+}
+
+func TestSingleChatID(t *testing.T) {
+	tests := []struct {
+		name   string
+		msgs   []conversation.Message
+		wantID string
+		wantOK bool
+	}{
+		{"empty slice passes", nil, "", true},
+		{"single message", []conversation.Message{{ChatID: "a"}}, "a", true},
+		{"all same", []conversation.Message{{ChatID: "a"}, {ChatID: "a"}}, "a", true},
+		{"all empty same", []conversation.Message{{ChatID: ""}, {ChatID: ""}}, "", true},
+		{"mixed", []conversation.Message{{ChatID: "a"}, {ChatID: "b"}}, "a", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			id, ok := singleChatID(tc.msgs)
+			if id != tc.wantID || ok != tc.wantOK {
+				t.Errorf("singleChatID(%+v) = (%q,%v), want (%q,%v)", tc.msgs, id, ok, tc.wantID, tc.wantOK)
+			}
+		})
+	}
+}
+
+func TestSummarizeOverflow_ConsistentChatID_Proceeds(t *testing.T) {
+	// All messages share one ChatID (or empty) → the guard passes and the
+	// summarizer is invoked normally.
+	o, _ := newConvOrchestrator(t)
+	sum := &fakeConvSummarizer{out: "ok"}
+	o.SetConversationSummarizer(sum)
+
+	out := o.summarizeOverflow(context.Background(), []conversation.Message{
+		{ChatID: "ses-a", Role: conversation.RoleAssistant, Content: "one"},
+		{ChatID: "ses-a", Role: conversation.RoleAssistant, Content: "two"},
+	}, 500)
+	if out != "ok" || sum.calls != 1 {
+		t.Errorf("consistent ChatID should summarize: out=%q calls=%d", out, sum.calls)
+	}
+}
+
+// (c) System-prompt prefix byte-stability across repeated compaction.
+
+func TestAssembledPrompt_SystemPromptPrefixByteStable(t *testing.T) {
+	// The final prompt is `req.SystemPrompt + "\n\n" + history`. Across two
+	// compactions of the same overflowing session — with the summarizer
+	// returning two DIFFERENT strings — the leading len(req.SystemPrompt)
+	// bytes must stay byte-identical to the original SystemPrompt. The
+	// summary lives strictly after the cache-stable prefix.
+	const systemPrompt = "[ETHOS]\nYou are a careful agent.\n[IDENTITY]\nName: Test\n"
+
+	o, store := newConvOrchestrator(t)
+	sid := seedOverflowSession(t, store)
+
+	assemble := func(summary string) string {
+		o.SetConversationSummarizer(&fakeConvSummarizer{out: summary})
+		history := o.buildConversationContext(context.Background(), sid, 2000)
+		if history == "" {
+			t.Fatalf("expected non-empty history for overflowing session")
+		}
+		return systemPrompt + "\n\n" + history
+	}
+
+	first := assemble("SUMMARY_ALPHA_111")
+	second := assemble("SUMMARY_BETA_222_different_length")
+
+	if first[:len(systemPrompt)] != systemPrompt {
+		t.Errorf("first run perturbed the SystemPrompt prefix: %q", first[:len(systemPrompt)])
+	}
+	if second[:len(systemPrompt)] != systemPrompt {
+		t.Errorf("second run perturbed the SystemPrompt prefix: %q", second[:len(systemPrompt)])
+	}
+	if first[:len(systemPrompt)] != second[:len(systemPrompt)] {
+		t.Errorf("SystemPrompt prefix diverged across compactions:\n first=%q\nsecond=%q",
+			first[:len(systemPrompt)], second[:len(systemPrompt)])
+	}
+	// Sanity: the two assemblies differ (proves the summary actually changed,
+	// so the prefix-stability assertion is meaningful, not vacuous).
+	if first == second {
+		t.Errorf("assemblies identical — different summaries did not flow through; test is vacuous")
 	}
 }

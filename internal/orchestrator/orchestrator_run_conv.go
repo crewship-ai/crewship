@@ -49,6 +49,20 @@ Omit pleasantries and tool-call noise. Output only the summary prose, no preambl
 EARLIER CONVERSATION TO SUMMARIZE:
 `
 
+// conversationTemporalAnchorInstruction is prepended to the aux-LLM prompt
+// (before conversationSummaryInstruction) when a "today" date is resolvable.
+// Without it the summarizer can echo imperative phrasing ("email the report")
+// that a resumed agent reads as a still-open instruction and re-runs already
+// completed work. It carries today's UTC date (2006-01-02) so the model can
+// anchor finished actions as dated past-tense facts. The %s is the date.
+//
+// It lives only in the throwaway aux prompt — never in the cached
+// system-prompt prefix — so the prompt-cache invariant is unaffected.
+const conversationTemporalAnchorInstruction = `TEMPORAL ANCHORING — today's date is %s (UTC).
+When you summarize, rewrite completed or imperative actions as dated past-tense facts (e.g. "Sent the report on %s"), not as open instructions. Prefer a date recoverable from the transcript itself; if none is present, anchor to "around %s". Never restate a finished action as a still-open instruction.
+
+`
+
 // compactionStats reports what buildConversationContextWithStats did with the
 // overflow (older) slice, for observability / journal emission. The zero
 // value means nothing overflowed — no compaction decision was made.
@@ -178,7 +192,18 @@ func selectRecentMessages(messages []conversation.Message, charBudget int) (rece
 		if totalChars+msgLen > charBudget {
 			// Try to fit a truncated version of this message.
 			remaining := charBudget - totalChars
-			if remaining > 200 {
+			// Tool-context preservation: truncating this boundary message
+			// zeroes its ToolSummary (below), leaving the recent window with
+			// a half-sentence that references a tool whose result was
+			// dropped. When the message actually carries a ToolSummary AND
+			// at least one other message already fits, prefer dropping it
+			// whole into the overflow (where it can still be summarized)
+			// rather than emitting a tool-less fragment. We only do this when
+			// the window is non-empty — never produce an empty window; the
+			// >200 last-resort truncation still fires for a lone oversized
+			// boundary message.
+			wouldLoseToolSummary := msg.ToolSummary != "" && len(msg.Content) > remaining
+			if remaining > 200 && !(wouldLoseToolSummary && len(selected) > 0) {
 				truncated := msg
 				if len(truncated.Content) > remaining {
 					truncated.Content = truncated.Content[:remaining-20] + "...(truncated)"
@@ -189,7 +214,9 @@ func selectRecentMessages(messages []conversation.Message, charBudget int) (rece
 				// everything strictly older than it.
 				cut = i
 			} else {
-				// Dropped entirely; it joins the overflow.
+				// Dropped entirely; it joins the overflow (whole, so the
+				// overflow slice never starts mid-message and the
+				// ToolSummary survives for compaction).
 				cut = i + 1
 			}
 			break
@@ -222,7 +249,26 @@ func (o *Orchestrator) summarizeOverflow(ctx context.Context, overflow []convers
 		return ""
 	}
 
+	// Session-purity guard: summarizeOverflow is a pure function of its
+	// overflow arg and the overflow must come from a single session. If a
+	// future caching change ever mixed messages from different sessions into
+	// one overflow slice, compacting them would leak one session's history
+	// into another's summary. Detect a mixed ChatID and safe-degrade to
+	// truncation (return "") rather than risk contamination.
+	if id, ok := singleChatID(overflow); !ok {
+		o.logger.Debug("conversation compaction skipped: overflow spans multiple sessions",
+			"session_messages", len(overflow), "first_session_id", id)
+		return ""
+	}
+
 	var sb strings.Builder
+	// Temporal anchoring (best-effort): when a "today" date is resolvable,
+	// prepend the anchor directive so the summary renders finished work as
+	// dated past-tense facts. An empty date (zero clock) omits the directive,
+	// keeping the prompt byte-identical to the pre-anchor baseline.
+	if today := o.todayString(); today != "" {
+		fmt.Fprintf(&sb, conversationTemporalAnchorInstruction, today, today, today)
+	}
 	sb.WriteString(conversationSummaryInstruction)
 	for _, msg := range overflow {
 		fmt.Fprintf(&sb, "[%s]: %s\n", msg.Role, msg.Content)
@@ -250,6 +296,35 @@ func (o *Orchestrator) summarizeOverflow(ctx context.Context, overflow []convers
 		out = out[:budget]
 	}
 	return out
+}
+
+// todayString renders today's date as UTC 2006-01-02 for the temporal-anchor
+// directive, or "" when no usable date is resolvable (zero clock) — the
+// signal to omit the directive entirely (best-effort). The format idiom
+// mirrors internal/orchestrator/memory.go's "today" rendering.
+func (o *Orchestrator) todayString() string {
+	now := o.nowUTC()
+	if now.IsZero() {
+		return ""
+	}
+	return now.Format("2006-01-02")
+}
+
+// singleChatID reports whether every message in msgs shares one ChatID,
+// returning that id. An empty slice trivially passes (the callers guard
+// len==0 separately). A mixed slice returns ok=false with the first id seen,
+// for the skip-and-log path.
+func singleChatID(msgs []conversation.Message) (id string, ok bool) {
+	if len(msgs) == 0 {
+		return "", true
+	}
+	id = msgs[0].ChatID
+	for _, m := range msgs[1:] {
+		if m.ChatID != id {
+			return id, false
+		}
+	}
+	return id, true
 }
 
 // emitCompactionEvent records a conversation.compacted journal entry when a
