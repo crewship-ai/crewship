@@ -145,6 +145,26 @@ Paste into the SRE channel on Slack with one line: "Live terminal on the agent's
 
 When the incident closes, the session row survives — it stays as a permanent record of what was said, what was tried, and what fixed it. The webhook-triggered originals from step 2 and the human-driven escalation here live in the same `chats` table, distinguishable only by their `origin` chip in the sidebar.
 
+## Long conversations & context compaction
+
+A session is durable on disk, but each agent turn only sees as much of the transcript as fits the model's context window. The orchestrator (`internal/orchestrator/orchestrator_run_conv.go`) sizes a conversation budget and fills it newest-first, so the most recent turns are always present in full.
+
+When a conversation outgrows that budget, the older turns are **compacted** rather than dropped. If an auxiliary model is configured (the same summarizer slot Crewship uses for memory consolidation — `KEEPER_OLLAMA_URL` + `KEEPER_MODEL`), the overflow is summarized into a short block prepended to the verbatim recent window:
+
+```
+[EARLIER CONVERSATION — SUMMARY of older messages no longer shown in full]
+…decisions made, facts established, completed work, open threads…
+[END EARLIER CONVERSATION]
+[CONVERSATION HISTORY - previous messages in this session]
+…recent turns, verbatim…
+```
+
+A fixed slice of the budget (15%) funds the summary so it never crowds out the recent turns. The summary is regenerated per turn and lives only in that turn's prompt — it is mid-conversation content, never part of the cached system-prompt prefix, so it doesn't perturb prompt caching.
+
+If no auxiliary model is configured, the summarize call fails, or it exceeds a bounded timeout, the orchestrator falls back to plain newest-first truncation — the historical behavior — so a misconfigured or slow aux model can never stall or fail a run. In that mode the oldest turns drop with a `…(truncated)` marker on the boundary message, exactly as before.
+
+Whenever older turns overflow the budget — whether they were summarized or dropped — the orchestrator emits a `conversation.compacted` entry to the [Crew Journal](/guides/crew-journal) carrying `session_id`, `overflow_messages`, `summarized`, and `summary_bytes`. Query it with `crewship journal --type conversation.compacted` to audit what fell out of an agent's context window over time.
+
 ## API reference
 
 The chat surface is small — no dedicated `/api-reference/chats` page yet; the handler source is `internal/api/agent_chats.go`. Every endpoint requires `Authorization: Bearer <CLI token>` or a valid session cookie, and access is gated by the caller's read/write role on the parent agent.

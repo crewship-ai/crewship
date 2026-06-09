@@ -244,6 +244,14 @@ type Orchestrator struct {
 	// Wired from server.New via SetWorkspaceMemoryProvider.
 	workspaceMemory WorkspaceMemoryProvider
 
+	// convSummarizer compacts the overflow (oldest) slice of a long
+	// conversation into a short summary block instead of dropping it
+	// outright. Nil-safe: when unwired (no aux model configured) the
+	// conversation builder falls back to plain newest-first truncation,
+	// byte-for-byte unchanged. Wired from server.New via
+	// SetConversationSummarizer.
+	convSummarizer ConversationSummarizer
+
 	// episodicUnreachableLastLogged tracks when we last surfaced an
 	// "ollama unreachable" log so we can dedup the spam without going
 	// permanently silent. N parallel agent runs each hit recall every
@@ -685,6 +693,35 @@ func (o *Orchestrator) SetWorkspaceMemoryProvider(p WorkspaceMemoryProvider) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.workspaceMemory = p
+}
+
+// ConversationSummarizer compacts a block of older conversation turns into
+// a short prose summary. It is deliberately the same single-method shape as
+// the consolidator's summarizer slot so the existing aux-LLM adapter wired
+// in server.New satisfies it by structural match — the orchestrator never
+// imports internal/consolidate (that would form a dependency cycle).
+type ConversationSummarizer interface {
+	Summarize(ctx context.Context, prompt string) (string, error)
+}
+
+// SetConversationSummarizer wires the aux-LLM slot used to compact the
+// overflow slice of a long conversation. Passing nil (the default until an
+// aux model is configured) keeps buildConversationContext on its plain
+// newest-first truncation path. Concurrency-safe; can be re-wired after
+// construction.
+func (o *Orchestrator) SetConversationSummarizer(s ConversationSummarizer) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.convSummarizer = s
+}
+
+// getConvSummarizer returns the wired conversation summarizer or nil. Unlike
+// getHooks/getEpisodicRecall there is no no-op fallback object: a nil result
+// is the explicit signal for the truncation fallback path.
+func (o *Orchestrator) getConvSummarizer() ConversationSummarizer {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	return o.convSummarizer
 }
 
 // SetSidecarEnabled enables the sidecar proxy for credential injection.

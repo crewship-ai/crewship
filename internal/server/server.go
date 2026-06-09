@@ -603,6 +603,14 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 			summWrapped := llm.Middleware(summBase, s.journalWriter, s.db)
 			summarizerEarly = newLLMSummarizer(summWrapped, s.cfg.Keeper.Model)
 		}
+		// Reuse the same aux-LLM summarizer for mid-conversation compaction:
+		// when older turns overflow the budget, buildConversationContext
+		// compacts the overflow slice into a summary block instead of
+		// dropping it. Nil (no aux model configured) leaves the orchestrator
+		// on its plain newest-first truncation fallback.
+		if summarizerEarly != nil {
+			orch.SetConversationSummarizer(summarizerEarly)
+		}
 		s.consolidator = &consolidate.Consolidator{
 			DB:         deps.DB,
 			Journal:    s.journalWriter,

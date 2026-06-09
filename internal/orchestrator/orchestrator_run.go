@@ -231,7 +231,8 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	memTokenBudget := remaining * tokenutil.MemoryBudgetPct / 100
 
 	if o.convStore != nil && req.ChatID != "" && !req.SkipConvHistory {
-		history := o.buildConversationContext(ctx, req.ChatID, convTokenBudget)
+		history, compaction := o.buildConversationContextWithStats(ctx, req.ChatID, convTokenBudget)
+		o.emitCompactionEvent(ctx, req, compaction)
 		if history != "" {
 			req.SystemPrompt = req.SystemPrompt + "\n\n" + history
 		}
