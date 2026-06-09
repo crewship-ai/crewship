@@ -710,6 +710,20 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 				logger.Info("keeper: orchestrator tool-call observer wired to behaviorhook")
 			}
 
+			// PR #7 skill-invocation telemetry: wire the orchestrator's
+			// SkillInvocationObserver to the trusted-tier consumer that
+			// records skill_invocations + denormalises the skills
+			// lifecycle counters + emits skill.invoked. Independent of the
+			// behavior evaluator — it only needs the DB + journal writer,
+			// both of which are local to the server. The observer itself
+			// no-ops on a nil DB, but skipping the wire when either
+			// dependency is absent keeps the boot logs honest.
+			if s.db != nil && s.journalWriter != nil {
+				orch.SetSkillInvocationObserver(
+					newSkillInvocationObserver(logger, s.db, s.journalWriter))
+				logger.Info("keeper: orchestrator skill-invocation telemetry observer wired")
+			}
+
 			// Pipeline AgentRunner is wired in cmd_start.go after
 			// the chatbridge.ChatResolver is built — the runner
 			// needs the resolver + IPC base URL to look up agent

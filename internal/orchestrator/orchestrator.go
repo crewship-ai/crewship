@@ -237,6 +237,19 @@ type Orchestrator struct {
 	// most events by design, and dropping the overflow is preferable
 	// to back-pressuring the agent's tool-result loop.
 	postToolCallSem chan struct{}
+	// skillInvocationObs is the optional PR #7 skill-invocation telemetry
+	// hook. Wired from server.New via SetSkillInvocationObserver; nil-safe
+	// via getSkillInvocationObserver so a server without the observer
+	// installed just no-ops on the hot path. Sibling to postToolCallObs:
+	// both ride the same tool_call event tap.
+	skillInvocationObs SkillInvocationObserver
+	// skillInvocationSem bounds in-flight Observe goroutines for the skill
+	// telemetry observer, identical token-bucket-with-drop policy to
+	// postToolCallSem. The observer's work is a small bounded SQL txn (no
+	// LLM call), so saturation is far less likely than the behavior
+	// monitor's — but the cap keeps a pathological tool storm from
+	// spawning unbounded goroutines all the same.
+	skillInvocationSem chan struct{}
 	// workspaceMemory resolves cross-crew memory for a workspace into a
 	// [WORKSPACE MEMORY] system-prompt block. Nil-safe — when no
 	// provider is wired (default), buildWorkspaceMemoryBlock returns
@@ -312,6 +325,46 @@ type ToolCallObservation struct {
 	MissionID   string
 	ToolName    string
 	Payload     map[string]any
+}
+
+// SkillInvocationObserver is the narrow interface the orchestrator uses
+// to notify the PR #7 skill-invocation telemetry consumer of each
+// tool_call event. The adapter in server/ (skill_invocation_observer.go)
+// resolves the agent's assigned skill slugs, matches the tool call
+// against them, and — on a hit — writes a skill_invocations audit row,
+// denormalises the skills lifecycle counters, and emits a skill.invoked
+// journal entry, all in one transaction.
+//
+// Decoupled via a narrow interface (rather than a direct import of the
+// server-side SQL implementation) so this package stays free of database
+// and journal dependencies on its exported surface — same one-way
+// dependency direction as PostToolCallObserver (server → orchestrator).
+type SkillInvocationObserver interface {
+	// Observe is called from the orchestrator's tool_call event tap,
+	// already inside a goroutine bounded by skillInvocationSem.
+	// Implementations MUST treat the call as best-effort: errors are
+	// logged inside the observer, never returned. A tool call that does
+	// not correspond to one of the agent's assigned skills is a no-op.
+	Observe(SkillInvocation)
+}
+
+// SkillInvocation carries the tool_call payload the skill-invocation
+// observer needs to resolve + record an invocation. Mirrors
+// ToolCallObservation but kept distinct so the two observers can evolve
+// independently (e.g. duration/exit-code fields the behavior monitor
+// doesn't care about).
+type SkillInvocation struct {
+	WorkspaceID string
+	CrewID      string
+	AgentID     string
+	MissionID   string
+	// ToolName is the raw tool name from the event ("Skill", "Read",
+	// "Bash", or a slug). The observer decides whether it maps to an
+	// assigned skill.
+	ToolName string
+	// Payload carries the tool input under the "input" key (the skill
+	// slug for a "Skill" tool call lives there). Bounded upstream.
+	Payload map[string]any
 }
 
 // HookEventContext mirrors hooks.EventContext in a narrow form so
@@ -529,6 +582,96 @@ func (o *Orchestrator) getPostToolCallObserver() PostToolCallObserver {
 	return o.postToolCallObs // nil allowed; caller guards
 }
 
+// SetSkillInvocationObserver wires the PR #7 skill-invocation telemetry
+// consumer onto the orchestrator hot path. nil is accepted and treated
+// as "no observer configured" — the tool_call branch no-ops when
+// getSkillInvocationObserver returns nil.
+func (o *Orchestrator) SetSkillInvocationObserver(obs SkillInvocationObserver) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.skillInvocationObs = obs
+}
+
+func (o *Orchestrator) getSkillInvocationObserver() SkillInvocationObserver {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	return o.skillInvocationObs // nil allowed; caller guards
+}
+
+// dispatchToolCallObservers fans a single tool_call event out to both the
+// behavior monitor (PR-C F4.2) and the skill-invocation telemetry
+// consumer (PR #7). Both ride this one tap, so the tool_name + input are
+// extracted once and shared. Each observer runs in a goroutine bounded by
+// its own token-bucket semaphore: a non-blocking claim spawns the
+// goroutine, an overflow drops the event (and logs) rather than piling up
+// unbounded goroutines under a tool storm. The behavior monitor's own
+// sampling already discards most calls, and the skill consumer's work is
+// a small bounded SQL txn, so a dropped overflow is acceptable on both.
+//
+// Extracted from RunAgent's event tap so the dispatch contract (which
+// tools reach which observer, and the bounded-fan-out policy) is unit-
+// testable without driving a full agent run. event MUST be a tool_call
+// event; the caller guards the type check.
+func (o *Orchestrator) dispatchToolCallObservers(req AgentRunRequest, event AgentEvent) {
+	toolName := event.Content
+	if toolName == "" {
+		if m, ok := event.Metadata.(map[string]interface{}); ok {
+			if tn, ok := m["tool_name"].(string); ok {
+				toolName = tn
+			}
+		}
+	}
+	if toolName == "" {
+		return
+	}
+	payload := map[string]any{}
+	if m, ok := event.Metadata.(map[string]interface{}); ok {
+		if in, ok := m["input"]; ok {
+			payload["input"] = in
+		}
+	}
+
+	if obs := o.getPostToolCallObserver(); obs != nil {
+		select {
+		case o.postToolCallSem <- struct{}{}:
+			go func() {
+				defer func() { <-o.postToolCallSem }()
+				obs.Observe(ToolCallObservation{
+					WorkspaceID: req.WorkspaceID,
+					CrewID:      req.CrewID,
+					AgentID:     req.AgentID,
+					MissionID:   req.MissionID,
+					ToolName:    toolName,
+					Payload:     payload,
+				})
+			}()
+		default:
+			o.logger.Debug("post_tool_call: observer saturated, dropping event",
+				"agent_id", req.AgentID, "tool", toolName)
+		}
+	}
+
+	if obs := o.getSkillInvocationObserver(); obs != nil {
+		select {
+		case o.skillInvocationSem <- struct{}{}:
+			go func() {
+				defer func() { <-o.skillInvocationSem }()
+				obs.Observe(SkillInvocation{
+					WorkspaceID: req.WorkspaceID,
+					CrewID:      req.CrewID,
+					AgentID:     req.AgentID,
+					MissionID:   req.MissionID,
+					ToolName:    toolName,
+					Payload:     payload,
+				})
+			}()
+		default:
+			o.logger.Debug("skill_invocation: observer saturated, dropping event",
+				"agent_id", req.AgentID, "tool", toolName)
+		}
+	}
+}
+
 type noopHooks struct{}
 
 func (noopHooks) Dispatch(_ context.Context, _ string, _ HookEventContext) error { return nil }
@@ -639,24 +782,33 @@ func truncateCmd(argv []string, n int) string {
 // indistinguishable from un-sampled ones.
 const postToolCallSemCap = 64
 
+// skillInvocationSemCap bounds concurrent skill-invocation telemetry
+// observations. The observer's work is a small bounded SQL transaction
+// (no LLM latency), so it drains far faster than the behavior monitor;
+// the cap exists only to keep a pathological tool storm from spawning
+// unbounded goroutines. Overflow drops the telemetry event — the same
+// statistically-acceptable loss policy as the behavior observer.
+const skillInvocationSemCap = 64
+
 func New(
 	container provider.ContainerProvider,
 	state provider.StateProvider,
 	logger *slog.Logger,
 ) *Orchestrator {
 	return &Orchestrator{
-		container:         container,
-		state:             state,
-		scrubber:          scrubber.New(),
-		logger:            logger,
-		cooldown:          NewCooldownManager(),
-		accepting:         true,
-		crews:             make(map[string]*crewState),
-		tmuxCache:         make(map[string]bool),
-		snapshotHashCache: make(map[string]string),
-		snapshotPending:   make(map[string]string),
-		snapshotInFlight:  make(map[string]*sync.Mutex),
-		postToolCallSem:   make(chan struct{}, postToolCallSemCap),
+		container:          container,
+		state:              state,
+		scrubber:           scrubber.New(),
+		logger:             logger,
+		cooldown:           NewCooldownManager(),
+		accepting:          true,
+		crews:              make(map[string]*crewState),
+		tmuxCache:          make(map[string]bool),
+		snapshotHashCache:  make(map[string]string),
+		snapshotPending:    make(map[string]string),
+		snapshotInFlight:   make(map[string]*sync.Mutex),
+		postToolCallSem:    make(chan struct{}, postToolCallSemCap),
+		skillInvocationSem: make(chan struct{}, skillInvocationSemCap),
 	}
 }
 
