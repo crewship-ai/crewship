@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/conversation"
+	"github.com/crewship-ai/crewship/internal/tokenutil"
 )
 
 // ---------------------------------------------------------------------------
@@ -293,4 +295,147 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// ---------------------------------------------------------------------------
+// Conversation compaction — buildConversationContext summarizes the overflow
+// (oldest) slice into an [EARLIER CONVERSATION — SUMMARY] block when an aux
+// summarizer is wired, instead of dropping it. The fallback (no summarizer,
+// or summarize error) must stay byte-compatible with the truncation path the
+// tests above pin.
+// ---------------------------------------------------------------------------
+
+// fakeConvSummarizer is a test double for ConversationSummarizer. It records
+// call count and returns a canned result/error.
+type fakeConvSummarizer struct {
+	out   string
+	err   error
+	calls int
+}
+
+func (f *fakeConvSummarizer) Summarize(_ context.Context, _ string) (string, error) {
+	f.calls++
+	return f.out, f.err
+}
+
+// seedOverflowSession appends three large messages that together exceed any
+// reasonable budget, so the oldest overflow the recent window. Returns the
+// session id.
+func seedOverflowSession(t *testing.T, store *conversation.Store) string {
+	t.Helper()
+	const sid = "ses-overflow"
+	big := strings.Repeat("x", 4000)
+	appendMsg(t, store, sid, conversation.RoleAssistant, "OLDEST_"+big, "", time.Unix(1, 0))
+	appendMsg(t, store, sid, conversation.RoleAssistant, "MIDDLE_"+big, "", time.Unix(2, 0))
+	appendMsg(t, store, sid, conversation.RoleAssistant, "NEWEST_"+big, "", time.Unix(3, 0))
+	return sid
+}
+
+func TestBuildConversationContext_Compaction_SummarizesOverflow(t *testing.T) {
+	o, store := newConvOrchestrator(t)
+	sum := &fakeConvSummarizer{out: "COMPACTED_SUMMARY_OF_OLD_TURNS"}
+	o.SetConversationSummarizer(sum)
+	sid := seedOverflowSession(t, store)
+
+	// tokenBudget 2000 → 8000 char budget → summaryBudget 1200 (≥200), so
+	// compaction engages and the oldest message overflows.
+	got := o.buildConversationContext(context.Background(), sid, 2000)
+
+	if sum.calls != 1 {
+		t.Fatalf("summarizer calls = %d, want 1", sum.calls)
+	}
+	if !strings.Contains(got, "[EARLIER CONVERSATION — SUMMARY") {
+		t.Errorf("missing summary block header; got %q", got[:min(300, len(got))])
+	}
+	if !strings.Contains(got, "COMPACTED_SUMMARY_OF_OLD_TURNS") {
+		t.Errorf("summary text missing; got %q", got[:min(300, len(got))])
+	}
+	if !strings.Contains(got, "[END EARLIER CONVERSATION]") {
+		t.Errorf("missing summary closing fence; got %q", got[:min(300, len(got))])
+	}
+	if !strings.Contains(got, "NEWEST_") {
+		t.Errorf("recent message missing from verbatim window; got %q", got[:min(300, len(got))])
+	}
+	// Summary block must precede the verbatim history fence.
+	si := strings.Index(got, "[EARLIER CONVERSATION")
+	hi := strings.Index(got, "[CONVERSATION HISTORY")
+	if !(si >= 0 && hi >= 0 && si < hi) {
+		t.Errorf("summary block must precede history fence: si=%d hi=%d", si, hi)
+	}
+}
+
+func TestBuildConversationContext_Compaction_ErrorFallsBackToTruncation(t *testing.T) {
+	o, store := newConvOrchestrator(t)
+	sum := &fakeConvSummarizer{err: errors.New("aux model down")}
+	o.SetConversationSummarizer(sum)
+	sid := seedOverflowSession(t, store)
+
+	got := o.buildConversationContext(context.Background(), sid, 2000)
+
+	if sum.calls != 1 {
+		t.Fatalf("summarizer calls = %d, want 1 (attempted then failed)", sum.calls)
+	}
+	if strings.Contains(got, "[EARLIER CONVERSATION") {
+		t.Errorf("summary block emitted despite summarize error; got %q", got[:min(300, len(got))])
+	}
+	if !strings.Contains(got, "NEWEST_") {
+		t.Errorf("recent message missing after fallback; got %q", got[:min(300, len(got))])
+	}
+}
+
+func TestBuildConversationContext_Compaction_NilSummarizerNoBlock(t *testing.T) {
+	// No summarizer wired → compaction off, no aux call, oldest dropped as
+	// before. This is the default production-without-aux-model path.
+	o, store := newConvOrchestrator(t)
+	sid := seedOverflowSession(t, store)
+
+	got := o.buildConversationContext(context.Background(), sid, 2000)
+
+	if strings.Contains(got, "[EARLIER CONVERSATION") {
+		t.Errorf("summary block emitted with no summarizer wired; got %q", got[:min(300, len(got))])
+	}
+	if !strings.Contains(got, "NEWEST_") {
+		t.Errorf("recent message missing; got %q", got[:min(300, len(got))])
+	}
+}
+
+func TestBuildConversationContext_Compaction_UnderBudgetNoCall(t *testing.T) {
+	// When the whole history fits, there is no overflow → the summarizer is
+	// never invoked and no summary block appears.
+	o, store := newConvOrchestrator(t)
+	sum := &fakeConvSummarizer{out: "should-not-appear"}
+	o.SetConversationSummarizer(sum)
+	const sid = "ses-underbudget"
+	appendMsg(t, store, sid, conversation.RoleAssistant, "short reply one", "", time.Unix(1, 0))
+	appendMsg(t, store, sid, conversation.RoleAssistant, "short reply two", "", time.Unix(2, 0))
+
+	got := o.buildConversationContext(context.Background(), sid, 8000)
+
+	if sum.calls != 0 {
+		t.Errorf("summarizer invoked for under-budget conversation: calls=%d", sum.calls)
+	}
+	if strings.Contains(got, "[EARLIER CONVERSATION") {
+		t.Errorf("summary block emitted with no overflow; got %q", got)
+	}
+}
+
+func TestBuildConversationContext_Compaction_SummaryClampedToBudget(t *testing.T) {
+	// A verbose model must not blow past the reserved summary slice. The 'Q'
+	// marker appears nowhere in the fences/trailer, so counting it isolates
+	// the summary body length.
+	o, store := newConvOrchestrator(t)
+	sum := &fakeConvSummarizer{out: strings.Repeat("Q", 100000)}
+	o.SetConversationSummarizer(sum)
+	sid := seedOverflowSession(t, store)
+
+	got := o.buildConversationContext(context.Background(), sid, 2000)
+
+	summaryBudget := tokenutil.CharsForTokens(2000) * conversationSummaryBudgetPct / 100
+	qCount := strings.Count(got, "Q")
+	if qCount == 0 {
+		t.Fatalf("summary body missing entirely; got %q", got[:min(300, len(got))])
+	}
+	if qCount > summaryBudget {
+		t.Errorf("summary not clamped: %d summary chars > budget %d", qCount, summaryBudget)
+	}
 }
