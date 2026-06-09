@@ -97,36 +97,12 @@ func (o *skillInvocationObserver) Observe(obs orchestrator.SkillInvocation) {
 	if o == nil || o.db == nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	// TEMP DIAGNOSTIC (remove after #7 signal confirmed): emitted BEFORE any
-	// guard so it proves whether Observe is invoked at all and with what
-	// scope/tool/input. Falls back to a sentinel workspace so the entry
-	// passes journal Validate even when obs.WorkspaceID is empty.
-	if o.journ != nil {
-		ws := obs.WorkspaceID
-		if ws == "" {
-			ws = "diag-no-ws"
-		}
-		_, _ = o.journ.Emit(ctx, journal.Entry{
-			WorkspaceID: ws, AgentID: obs.AgentID,
-			Type:      journal.EntryType("skill.observe_debug"),
-			Severity:  journal.SeverityInfo,
-			ActorType: journal.ActorAgent, ActorID: obs.AgentID,
-			Summary: "skill observe debug",
-			Payload: map[string]any{
-				"obs_workspace_id": obs.WorkspaceID,
-				"obs_agent_id":     obs.AgentID,
-				"tool_name":        obs.ToolName,
-				"input":            obs.Payload["input"],
-			},
-		})
-	}
-
 	if obs.WorkspaceID == "" || obs.AgentID == "" || obs.ToolName == "" {
 		return
 	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
 	slugs, aliases, err := o.assignedSkills(ctx, obs.AgentID)
 	if err != nil {
@@ -387,7 +363,48 @@ func resolveAlias(v string, aliases map[string]string) string {
 			return s
 		}
 	}
+	// Fuzzy fallback: bundled skills carry no DB content, so their SKILL.md
+	// frontmatter name (what Claude Code's Skill tool passes, e.g.
+	// "code-review") can differ from every DB field (slug "code-reviewer",
+	// display "Code Reviewer"). Compare on an alphanumeric-only normalization
+	// and accept a prefix relation. Gated on the agent's assigned aliases and
+	// floored at minFuzzyAliasLen, so it can only ever resolve to a skill the
+	// agent actually has — no cross-skill false positives.
+	va := normAlpha(v)
+	if len(va) >= minFuzzyAliasLen {
+		// Prefer the leading token's alpha form when v is a command string.
+		if i := strings.IndexAny(v, " \t\n"); i > 0 {
+			if t := normAlpha(v[:i]); len(t) >= minFuzzyAliasLen {
+				va = t
+			}
+		}
+		for alias, slug := range aliases {
+			ka := normAlpha(alias)
+			if len(ka) < minFuzzyAliasLen {
+				continue
+			}
+			if strings.HasPrefix(ka, va) || strings.HasPrefix(va, ka) {
+				return slug
+			}
+		}
+	}
 	return ""
+}
+
+// minFuzzyAliasLen floors the alphanumeric prefix match so short identifiers
+// can't collide (e.g. "go" matching "google").
+const minFuzzyAliasLen = 5
+
+// normAlpha lowercases and keeps only [a-z0-9], bridging slug/name spelling
+// differences like "code-review" ↔ "code-reviewer" ↔ "Code Reviewer".
+func normAlpha(s string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(s) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 // payloadInput returns the tool input map from the observation payload,

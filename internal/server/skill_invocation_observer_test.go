@@ -416,6 +416,42 @@ func TestMatchSkillSlug(t *testing.T) {
 	}
 }
 
+func TestResolveAlias_FuzzyPrefix(t *testing.T) {
+	// Real bundled scenario: DB content is empty so only slug + display name
+	// are known aliases (no frontmatter "code-review"), yet Claude Code's
+	// Skill tool passes "code-review".
+	aliases := map[string]string{
+		"code-reviewer": "code-reviewer", // slug
+		"code reviewer": "code-reviewer", // display name (normAlias form)
+		"deploy":        "deploy",
+	}
+	cases := []struct{ in, want string }{
+		{"code-review", "code-reviewer"},                // fuzzy prefix
+		{"code-review review main.go", "code-reviewer"}, // command form → leading token
+		{"go", ""},              // too short, no collision
+		{"deploy", "deploy"},    // exact still works
+		{"unrelated-skill", ""}, // no match
+	}
+	for _, c := range cases {
+		if got := resolveAlias(c.in, aliases); got != c.want {
+			t.Errorf("resolveAlias(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestNormAlpha(t *testing.T) {
+	for in, want := range map[string]string{
+		"code-review":   "codereview",
+		"Code Reviewer": "codereviewer",
+		"a_b-c d":       "abcd",
+		"":              "",
+	} {
+		if got := normAlpha(in); got != want {
+			t.Errorf("normAlpha(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestFrontmatterName(t *testing.T) {
 	cases := []struct {
 		name, content, want string
