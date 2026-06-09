@@ -161,7 +161,9 @@ When a conversation outgrows that budget, the older turns are **compacted** rath
 
 A fixed slice of the budget (15%) funds the summary so it never crowds out the recent turns. The summary is regenerated per turn and lives only in that turn's prompt — it is mid-conversation content, never part of the cached system-prompt prefix, so it doesn't perturb prompt caching.
 
-If no auxiliary model is configured, or the summarize call fails, the orchestrator falls back to plain newest-first truncation — the historical behavior — so a misconfigured or slow aux model can never fail a run. In that mode the oldest turns drop with a `…(truncated)` marker on the boundary message, exactly as before.
+If no auxiliary model is configured, the summarize call fails, or it exceeds a bounded timeout, the orchestrator falls back to plain newest-first truncation — the historical behavior — so a misconfigured or slow aux model can never stall or fail a run. In that mode the oldest turns drop with a `…(truncated)` marker on the boundary message, exactly as before.
+
+Whenever older turns overflow the budget — whether they were summarized or dropped — the orchestrator emits a `conversation.compacted` entry to the [Crew Journal](/guides/crew-journal) carrying `session_id`, `overflow_messages`, `summarized`, and `summary_bytes`. Query it with `crewship journal --type conversation.compacted` to audit what fell out of an agent's context window over time.
 
 ## API reference
 

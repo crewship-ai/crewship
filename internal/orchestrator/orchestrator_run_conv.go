@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/conversation"
 	"github.com/crewship-ai/crewship/internal/tokenutil"
@@ -15,9 +16,7 @@ import (
 const (
 	// conversationSummaryBudgetPct is the slice of the conversation char
 	// budget reserved for the compaction summary block when older turns
-	// overflow. The remainder funds the verbatim recent window. Kept small
-	// so a summary never crowds out the recent transcript the agent needs
-	// most.
+	// overflow. The remainder funds the verbatim recent window.
 	conversationSummaryBudgetPct = 15
 
 	// minConversationSummaryChars floors the summary budget. Below this a
@@ -25,6 +24,12 @@ const (
 	// so we skip compaction and fall back to plain truncation.
 	minConversationSummaryChars = 200
 )
+
+// conversationSummarizeTimeout bounds the synchronous aux-LLM call on the
+// prompt-assembly hot path. A slow (but not erroring) summarizer must never
+// stall a turn — on timeout the call errors and we fall back to plain
+// truncation. A var (not const) so tests can shrink it.
+var conversationSummarizeTimeout = 12 * time.Second
 
 // conversationSummaryInstruction is the directive handed to the aux model
 // when compacting the overflow (oldest) slice of a long conversation. It
@@ -44,25 +49,50 @@ Omit pleasantries and tool-call noise. Output only the summary prose, no preambl
 EARLIER CONVERSATION TO SUMMARIZE:
 `
 
-// buildConversationContext reads messages from the session JSONL and formats them
-// as a conversation transcript for the system prompt. Uses a token budget to
-// dynamically size the window — short exchanges get more turns, long tool-heavy
-// turns get fewer but always include the most recent messages.
+// compactionStats reports what buildConversationContextWithStats did with the
+// overflow (older) slice, for observability / journal emission. The zero
+// value means nothing overflowed — no compaction decision was made.
+type compactionStats struct {
+	// OverflowMessages is the count of older messages that did not fit the
+	// verbatim recent window (the ones summarized, or dropped on fallback).
+	OverflowMessages int
+	// Summarized is true when the overflow was compacted into a summary
+	// block; false when it was dropped by truncation (no summarizer wired,
+	// or the summarize call failed / timed out / returned blank).
+	Summarized bool
+	// SummaryBytes is the size of the rendered summary body (0 when not summarized).
+	SummaryBytes int
+}
+
+// buildConversationContext is the string-only convenience wrapper over
+// buildConversationContextWithStats. Most callers (and tests) only need the
+// assembled transcript; the orchestration layer uses the stats variant so it
+// can emit a conversation.compacted journal event with run scope.
+func (o *Orchestrator) buildConversationContext(ctx context.Context, sessionID string, tokenBudget int) string {
+	s, _ := o.buildConversationContextWithStats(ctx, sessionID, tokenBudget)
+	return s
+}
+
+// buildConversationContextWithStats reads messages from the session JSONL and
+// formats them as a conversation transcript for the system prompt, returning
+// what it did with any overflow (see compactionStats).
 //
-// When older turns overflow the budget AND an aux-LLM summarizer is wired
-// (SetConversationSummarizer), the overflow slice is compacted into an
-// [EARLIER CONVERSATION — SUMMARY] block prepended to the verbatim recent
-// window, instead of being dropped outright. With no summarizer wired, or if
-// the summarize call fails, the function falls back to plain newest-first
-// truncation — byte-for-byte the historical behavior.
+// It sizes a token budget and fills it newest-first; when older turns overflow
+// AND an aux-LLM summarizer is wired (SetConversationSummarizer), the overflow
+// slice is compacted into an [EARLIER CONVERSATION — SUMMARY] block prepended
+// to the verbatim recent window, instead of being dropped. With no summarizer
+// wired, or if the summarize call fails / times out, it falls back to plain
+// newest-first truncation — byte-for-byte the historical behavior.
 //
 // Cache note: the returned block is mid-conversation content, never part of
-// the cached system-prompt prefix, so injecting a freshly-generated summary
-// here does not perturb the prompt-cache invariant.
-func (o *Orchestrator) buildConversationContext(ctx context.Context, sessionID string, tokenBudget int) string {
+// the cached system-prompt prefix, so a freshly-generated summary here does
+// not perturb the prompt-cache invariant.
+func (o *Orchestrator) buildConversationContextWithStats(ctx context.Context, sessionID string, tokenBudget int) (string, compactionStats) {
+	var stats compactionStats
+
 	messages, err := o.convStore.Read(ctx, sessionID, 0, 0)
 	if err != nil || len(messages) == 0 {
-		return ""
+		return "", stats
 	}
 
 	// Skip the current user message (just appended by bridge before RunAgent call).
@@ -70,7 +100,7 @@ func (o *Orchestrator) buildConversationContext(ctx context.Context, sessionID s
 		messages = messages[:len(messages)-1]
 	}
 	if len(messages) == 0 {
-		return ""
+		return "", stats
 	}
 
 	charBudget := tokenutil.CharsForTokens(tokenBudget)
@@ -78,12 +108,13 @@ func (o *Orchestrator) buildConversationContext(ctx context.Context, sessionID s
 	// Default path: fill the recent window with the full budget. overflow
 	// holds the older messages that didn't fit (chronological order).
 	selected, overflow := selectRecentMessages(messages, charBudget)
+	stats.OverflowMessages = len(overflow)
 
 	// Compaction path: if older turns overflowed and a summarizer is wired,
 	// reserve a slice of the budget for a summary block and re-select the
-	// recent window against the reduced budget so the two fit together. If
-	// the summarize call produces nothing usable, we keep the full-budget
-	// `selected` from above and drop the overflow — the historical behavior.
+	// recent window against the reduced budget so the two fit together. On a
+	// summarize failure we keep the full-budget `selected` and drop the
+	// overflow — the historical behavior.
 	var summaryBlock string
 	if len(overflow) > 0 && o.getConvSummarizer() != nil {
 		summaryBudget := charBudget * conversationSummaryBudgetPct / 100
@@ -92,12 +123,17 @@ func (o *Orchestrator) buildConversationContext(ctx context.Context, sessionID s
 			if s := o.summarizeOverflow(ctx, overflow2, summaryBudget); s != "" {
 				summaryBlock = s
 				selected = recent2
+				stats.OverflowMessages = len(overflow2)
 			}
 		}
 	}
+	if summaryBlock != "" {
+		stats.Summarized = true
+		stats.SummaryBytes = len(summaryBlock)
+	}
 
 	if len(selected) == 0 && summaryBlock == "" {
-		return ""
+		return "", stats
 	}
 
 	var b strings.Builder
@@ -120,7 +156,7 @@ func (o *Orchestrator) buildConversationContext(ctx context.Context, sessionID s
 	}
 	b.WriteString("[END CONVERSATION HISTORY]\n")
 	b.WriteString("The user's new message follows. Continue the conversation naturally, referencing previous context when relevant.")
-	return b.String()
+	return b.String(), stats
 }
 
 // selectRecentMessages walks backward from the newest message accumulating
@@ -176,8 +212,10 @@ func selectRecentMessages(messages []conversation.Message, charBudget int) (rece
 // summarizeOverflow renders the overflow messages into a transcript and asks
 // the wired aux-LLM summarizer to compact them. Returns "" (caller falls back
 // to truncation) when no summarizer is wired, the overflow is empty, or the
-// call errors / yields blank output. The result is clamped to budget chars so
-// a verbose model can't blow past the reserved slice.
+// call errors / times out / yields blank output. The result is clamped to
+// budget chars so a verbose model can't blow past the reserved slice. The call
+// is bounded by conversationSummarizeTimeout so a slow aux model can't stall
+// the turn.
 func (o *Orchestrator) summarizeOverflow(ctx context.Context, overflow []conversation.Message, budget int) string {
 	summarizer := o.getConvSummarizer()
 	if summarizer == nil || len(overflow) == 0 {
@@ -193,10 +231,13 @@ func (o *Orchestrator) summarizeOverflow(ctx context.Context, overflow []convers
 		}
 	}
 
-	out, err := summarizer.Summarize(ctx, sb.String())
+	cctx, cancel := context.WithTimeout(ctx, conversationSummarizeTimeout)
+	defer cancel()
+
+	out, err := summarizer.Summarize(cctx, sb.String())
 	if err != nil {
-		// Best-effort: a wedged or misconfigured aux model must never fail a
-		// run — fall back to truncation.
+		// Best-effort: a wedged, slow, or misconfigured aux model must never
+		// fail a run — fall back to truncation.
 		o.logger.Debug("conversation compaction summarize failed; falling back to truncation",
 			"session_messages", len(overflow), "error", err)
 		return ""
@@ -209,4 +250,38 @@ func (o *Orchestrator) summarizeOverflow(ctx context.Context, overflow []convers
 		out = out[:budget]
 	}
 	return out
+}
+
+// emitCompactionEvent records a conversation.compacted journal entry when a
+// turn's prior history overflowed the budget — whether the overflow was
+// summarized or dropped by truncation. No-op when nothing overflowed. Nil-safe
+// via getJournal(). Gives operators a CLI-queryable ("crewship journal") audit
+// of what fell out of the context window.
+func (o *Orchestrator) emitCompactionEvent(ctx context.Context, req AgentRunRequest, stats compactionStats) {
+	if stats.OverflowMessages == 0 {
+		return
+	}
+	summary := fmt.Sprintf("compacted %d older message(s) into a %d-byte summary",
+		stats.OverflowMessages, stats.SummaryBytes)
+	if !stats.Summarized {
+		summary = fmt.Sprintf("dropped %d older message(s) by truncation (no summarizer available)",
+			stats.OverflowMessages)
+	}
+	_, _ = o.getJournal().Emit(ctx, JournalEntry{
+		WorkspaceID: req.WorkspaceID,
+		CrewID:      req.CrewID,
+		AgentID:     req.AgentID,
+		MissionID:   req.MissionID,
+		Type:        "conversation.compacted",
+		Severity:    "info",
+		ActorType:   "system",
+		ActorID:     req.AgentID,
+		Summary:     summary,
+		Payload: map[string]any{
+			"session_id":        req.ChatID,
+			"overflow_messages": stats.OverflowMessages,
+			"summarized":        stats.Summarized,
+			"summary_bytes":     stats.SummaryBytes,
+		},
+	})
 }

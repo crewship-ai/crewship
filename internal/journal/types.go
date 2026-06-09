@@ -31,6 +31,14 @@ const (
 	EntryMessageBroadcast EntryType = "message.broadcast"
 	EntryAgentMentioned   EntryType = "agent.mentioned"
 
+	// EntryConversationCompacted is emitted when an agent's prior session
+	// history overflows the context budget and the orchestrator either
+	// summarizes the overflow into a compaction block or (no summarizer
+	// wired / summarize failed) drops it by truncation. Payload carries
+	// session_id, overflow_messages, summarized (bool), summary_bytes —
+	// the audit trail for "what fell out of the window this turn".
+	EntryConversationCompacted EntryType = "conversation.compacted"
+
 	// Mission / task
 	EntryMissionStatus    EntryType = "mission.status_change"
 	EntryMissionComment   EntryType = "mission.comment"

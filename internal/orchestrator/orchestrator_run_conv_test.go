@@ -311,11 +311,26 @@ type fakeConvSummarizer struct {
 	out   string
 	err   error
 	calls int
+	// block makes Summarize wait for context cancellation (timeout) and
+	// return ctx.Err(), to exercise the bounded-timeout fallback.
+	block bool
 }
 
-func (f *fakeConvSummarizer) Summarize(_ context.Context, _ string) (string, error) {
+func (f *fakeConvSummarizer) Summarize(ctx context.Context, _ string) (string, error) {
 	f.calls++
+	if f.block {
+		<-ctx.Done()
+		return "", ctx.Err()
+	}
 	return f.out, f.err
+}
+
+// captureJournal captures emitted entries for assertions.
+type captureJournal struct{ entries []JournalEntry }
+
+func (f *captureJournal) Emit(_ context.Context, e JournalEntry) (string, error) {
+	f.entries = append(f.entries, e)
+	return "", nil
 }
 
 // seedOverflowSession appends three large messages that together exceed any
@@ -416,6 +431,146 @@ func TestBuildConversationContext_Compaction_UnderBudgetNoCall(t *testing.T) {
 	}
 	if strings.Contains(got, "[EARLIER CONVERSATION") {
 		t.Errorf("summary block emitted with no overflow; got %q", got)
+	}
+}
+
+func TestBuildConversationContext_Compaction_TimeoutFallsBackToTruncation(t *testing.T) {
+	// A slow (blocking, non-erroring) aux model must not stall the turn:
+	// the bounded timeout fires, the call errors, and we fall back to
+	// truncation. Shrink the timeout so the test is fast.
+	old := conversationSummarizeTimeout
+	conversationSummarizeTimeout = 30 * time.Millisecond
+	defer func() { conversationSummarizeTimeout = old }()
+
+	o, store := newConvOrchestrator(t)
+	o.SetConversationSummarizer(&fakeConvSummarizer{block: true})
+	sid := seedOverflowSession(t, store)
+
+	got, stats := o.buildConversationContextWithStats(context.Background(), sid, 2000)
+
+	if strings.Contains(got, "[EARLIER CONVERSATION") {
+		t.Errorf("timed-out summary should not emit a block; got %q", got[:min(300, len(got))])
+	}
+	if stats.Summarized {
+		t.Errorf("Summarized must be false on timeout; stats=%+v", stats)
+	}
+	if stats.OverflowMessages == 0 {
+		t.Errorf("overflow should still be recorded on fallback; stats=%+v", stats)
+	}
+	if !strings.Contains(got, "NEWEST_") {
+		t.Errorf("recent window should survive the fallback; got %q", got[:min(300, len(got))])
+	}
+}
+
+func TestBuildConversationContext_Compaction_BlankOutputFallsBack(t *testing.T) {
+	// A summarizer returning only whitespace is treated as no summary →
+	// fall back to truncation, no block, Summarized=false.
+	o, store := newConvOrchestrator(t)
+	o.SetConversationSummarizer(&fakeConvSummarizer{out: "   \n\t  "})
+	sid := seedOverflowSession(t, store)
+
+	got, stats := o.buildConversationContextWithStats(context.Background(), sid, 2000)
+
+	if strings.Contains(got, "[EARLIER CONVERSATION") {
+		t.Errorf("blank summary should not emit a block; got %q", got[:min(300, len(got))])
+	}
+	if stats.Summarized {
+		t.Errorf("Summarized must be false on blank output; stats=%+v", stats)
+	}
+}
+
+func TestSummarizeOverflow_DefensiveReturns(t *testing.T) {
+	// Direct unit coverage of the early-return guards the budget path never
+	// reaches in practice (nil summarizer / empty overflow).
+	o, _ := newConvOrchestrator(t) // no summarizer wired
+	if got := o.summarizeOverflow(context.Background(),
+		[]conversation.Message{{Role: conversation.RoleAssistant, Content: "x"}}, 500); got != "" {
+		t.Errorf("nil summarizer → want \"\", got %q", got)
+	}
+	o.SetConversationSummarizer(&fakeConvSummarizer{out: "ignored"})
+	if got := o.summarizeOverflow(context.Background(), nil, 500); got != "" {
+		t.Errorf("empty overflow → want \"\", got %q", got)
+	}
+}
+
+func TestSummarizeOverflow_RendersToolSummaryLine(t *testing.T) {
+	// Overflow messages carrying a ToolSummary must render the indented
+	// tool line into the summarizer prompt (covers that branch).
+	o, _ := newConvOrchestrator(t)
+	o.SetConversationSummarizer(&fakeConvSummarizer{out: "ok"})
+	out := o.summarizeOverflow(context.Background(), []conversation.Message{
+		{Role: conversation.RoleAssistant, Content: "did work", ToolSummary: "ran build: ok"},
+	}, 500)
+	if out != "ok" {
+		t.Errorf("want summarizer output \"ok\", got %q", out)
+	}
+}
+
+func TestBuildConversationContextWithStats_ReportsCompaction(t *testing.T) {
+	o, store := newConvOrchestrator(t)
+	o.SetConversationSummarizer(&fakeConvSummarizer{out: "COMPACTED"})
+	sid := seedOverflowSession(t, store)
+
+	_, stats := o.buildConversationContextWithStats(context.Background(), sid, 2000)
+
+	if !stats.Summarized || stats.OverflowMessages == 0 || stats.SummaryBytes == 0 {
+		t.Errorf("expected compaction stats, got %+v", stats)
+	}
+}
+
+func TestBuildConversationContext_WrapperMatchesStatsVariant(t *testing.T) {
+	// The string-only wrapper must return exactly the stats variant's first
+	// return — guards against drift between the two entry points.
+	o, store := newConvOrchestrator(t)
+	o.SetConversationSummarizer(&fakeConvSummarizer{out: "COMPACTED"})
+	sid := seedOverflowSession(t, store)
+
+	a := o.buildConversationContext(context.Background(), sid, 2000)
+	b, _ := o.buildConversationContextWithStats(context.Background(), sid, 2000)
+	if a != b {
+		t.Errorf("wrapper diverged from stats variant:\n wrapper=%q\n stats  =%q", a, b)
+	}
+}
+
+func TestEmitCompactionEvent(t *testing.T) {
+	o, _ := newConvOrchestrator(t)
+	fj := &captureJournal{}
+	o.SetJournal(fj)
+
+	// No overflow → no emit.
+	o.emitCompactionEvent(context.Background(), AgentRunRequest{ChatID: "c1"}, compactionStats{})
+	if len(fj.entries) != 0 {
+		t.Fatalf("no-overflow should not emit; got %d entries", len(fj.entries))
+	}
+
+	// Overflow + summarized → one scoped conversation.compacted event.
+	o.emitCompactionEvent(context.Background(),
+		AgentRunRequest{WorkspaceID: "w1", CrewID: "cr1", AgentID: "a1", ChatID: "c1"},
+		compactionStats{OverflowMessages: 3, Summarized: true, SummaryBytes: 120})
+	if len(fj.entries) != 1 {
+		t.Fatalf("expected one emit, got %d", len(fj.entries))
+	}
+	e := fj.entries[0]
+	if e.Type != "conversation.compacted" {
+		t.Errorf("type = %q, want conversation.compacted", e.Type)
+	}
+	if e.WorkspaceID != "w1" || e.CrewID != "cr1" || e.AgentID != "a1" {
+		t.Errorf("scope not propagated: %+v", e)
+	}
+	if e.Payload["overflow_messages"] != 3 || e.Payload["summarized"] != true || e.Payload["summary_bytes"] != 120 {
+		t.Errorf("payload mismatch: %+v", e.Payload)
+	}
+	if e.Payload["session_id"] != "c1" {
+		t.Errorf("session_id not in payload: %+v", e.Payload)
+	}
+
+	// Overflow but not summarized → still emits (truncation audit), summarized=false.
+	fj.entries = nil
+	o.emitCompactionEvent(context.Background(),
+		AgentRunRequest{AgentID: "a1", ChatID: "c2"},
+		compactionStats{OverflowMessages: 2, Summarized: false})
+	if len(fj.entries) != 1 || fj.entries[0].Payload["summarized"] != false {
+		t.Errorf("truncation fallback should emit with summarized=false; got %+v", fj.entries)
 	}
 }
 
