@@ -92,3 +92,24 @@ type Provider interface {
 	// Name returns the provider identifier (e.g. "anthropic", "openai", "ollama").
 	Name() string
 }
+
+// ModelInfo describes one model a provider can serve. ID is the wire
+// identifier passed to Complete/Stream as Request.Model; DisplayName is a
+// human-friendly label (may equal ID when the upstream gives none).
+type ModelInfo struct {
+	ID          string `json:"id"`
+	DisplayName string `json:"display_name,omitempty"`
+	Provider    string `json:"provider"`
+}
+
+// ModelLister is an OPTIONAL capability a Provider may implement to enumerate
+// the models it can serve. It is intentionally separate from Provider so the
+// core completion interface stays minimal — callers type-assert for it
+// (`p, ok := prov.(ModelLister)`) and fall back to CuratedModels when the
+// provider can't (or won't) list live.
+type ModelLister interface {
+	// ListModels returns the models the provider can serve right now. A
+	// non-nil error means the live lookup failed; callers should fall back
+	// to the curated set rather than surfacing the raw error.
+	ListModels(ctx context.Context) ([]ModelInfo, error)
+}

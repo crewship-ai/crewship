@@ -45,6 +45,48 @@ func NewOpenAIWithBaseURL(apiKey, baseURL string) *OpenAI {
 // Name returns "openai".
 func (o *OpenAI) Name() string { return "openai" }
 
+// ListModels implements ModelLister against the OpenAI-compatible
+// GET {base}/v1/models. baseURL is the chat-completions endpoint
+// (".../v1/chat/completions"); we derive the models endpoint by trimming the
+// "/chat/completions" suffix and appending "/models", which keeps the version
+// segment intact for Azure / proxy deployments that customise it.
+func (o *OpenAI) ListModels(ctx context.Context) ([]ModelInfo, error) {
+	modelsURL := strings.TrimSuffix(o.baseURL, "/chat/completions") + "/models"
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, modelsURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	httpReq.Header.Set("Authorization", "Bearer "+o.apiKey)
+
+	resp, err := o.client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("openai http: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if err := checkOpenAIStatus(resp); err != nil {
+		return nil, err
+	}
+
+	var raw struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+		return nil, fmt.Errorf("decode openai models: %w", err)
+	}
+
+	out := make([]ModelInfo, 0, len(raw.Data))
+	for _, m := range raw.Data {
+		if m.ID == "" {
+			continue
+		}
+		out = append(out, ModelInfo{ID: m.ID, DisplayName: m.ID, Provider: "openai"})
+	}
+	return out, nil
+}
+
 // Complete sends a non-streaming completion request to the OpenAI-compatible API.
 func (o *OpenAI) Complete(ctx context.Context, req Request) (*Response, error) {
 	body, err := o.buildRequestBody(req, false)

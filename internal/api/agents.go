@@ -33,6 +33,19 @@ type AgentHandler struct {
 	// wired one yet, so tests built with the legacy 2-arg
 	// NewAgentHandler keep compiling.
 	policyResolver *policy.Resolver
+	// modelValidator validates an agent's llm_model against the provider's
+	// model set on update. Nil-safe: when unset (e.g. legacy test routers),
+	// llm_model passes through unchecked — the historical behaviour.
+	modelValidator ModelValidator
+}
+
+// ModelValidator resolves the valid model-ID set for a provider in a
+// workspace, used by the agent update path to reject a bogus llm_model.
+// ok=false means the set is unknowable (no live lister and no curated
+// fallback) — the caller must then NOT reject, since it can't prove the model
+// invalid. *ModelsHandler implements this.
+type ModelValidator interface {
+	providerModelIDs(ctx context.Context, wsID, provider string) (map[string]bool, bool)
 }
 
 // NewAgentHandler creates an AgentHandler with the given database and logger.
@@ -74,6 +87,10 @@ func (h *AgentHandler) SetScheduler(su ScheduleUpdater) { h.scheduleUpdater = su
 // when the resolver isn't wired, which matches the v100 column
 // default the DB ships with.
 func (h *AgentHandler) SetPolicyResolver(r *policy.Resolver) { h.policyResolver = r }
+
+// SetModelValidator wires the model-set validator used by Update to reject a
+// bogus llm_model. Nil-safe: when unset, llm_model passes through unchecked.
+func (h *AgentHandler) SetModelValidator(v ModelValidator) { h.modelValidator = v }
 
 // CrewsStatus returns lightweight agent counts by status for the toolbar.
 //

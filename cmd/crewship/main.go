@@ -92,6 +92,7 @@ func init() {
 	rootCmd.AddCommand(watchCmd)
 	rootCmd.AddCommand(paymasterCmd)
 	rootCmd.AddCommand(costCmd)
+	rootCmd.AddCommand(modelCmd)
 	rootCmd.AddCommand(approvalsCmd)
 	rootCmd.AddCommand(inboxCmd)
 	rootCmd.AddCommand(pipelineCmd)

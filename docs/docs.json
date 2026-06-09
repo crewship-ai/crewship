@@ -47,6 +47,7 @@
               "guides/devcontainers",
               "guides/credentials",
               "guides/auto-managed-credentials",
+              "guides/model-discovery",
               {
                 "group": "Skills",
                 "icon": "sparkles",
