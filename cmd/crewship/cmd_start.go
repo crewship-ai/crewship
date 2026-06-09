@@ -278,6 +278,14 @@ var startCmd = &cobra.Command{
 		)
 		srv.SetChatHandler(bridge)
 
+		// Wire mid-turn steering: the API's POST /chats/{id}/steer route
+		// delivers into the bridge's queued-steer path, and the bridge
+		// announces steering_queued on the chat's WS session channel.
+		if apiRouter := srv.APIRouter(); apiRouter != nil {
+			apiRouter.SetSteerer(bridge)
+		}
+		bridge.SetSteerBroadcaster(srv.WSHub())
+
 		// Wire the API router's ProvisioningHandler into chatbridge so the
 		// "send first message at unprovisioned crew" path can auto-trigger
 		// the build instead of erroring out. The result-shape adapter exists

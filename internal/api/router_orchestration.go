@@ -262,6 +262,16 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	r.mux.Handle("DELETE /api/v1/chats/{chatId}/messages/{messageId}/reactions/{emoji}",
 		authed(http.HandlerFunc(mrh.Remove)))
 
+	// Mid-turn steering: POST a steering message into a chat. The bridge
+	// guards against racing a second run into a live turn — today the
+	// message is QUEUED for the next turn (live injection is a deferred
+	// follow-up). Scoped via chats.workspace_id like reactions, so
+	// cross-tenant returns 404. The Steerer (chatbridge.Bridge) is wired
+	// post-construction via SetSteerer; until then the route returns 503.
+	r.steerHandler = NewSteerHandler(r.db, r.steerer, r.logger)
+	r.mux.Handle("POST /api/v1/chats/{chatId}/steer",
+		authed(http.HandlerFunc(r.steerHandler.Steer)))
+
 	// Typed feedback signal: thumbs / edit / regenerate bound to trace_id
 	// for the ADLC phase-7 continuous-learning loop. Sits beside reactions
 	// rather than replacing it — reactions are open-vocabulary social

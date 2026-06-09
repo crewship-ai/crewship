@@ -153,6 +153,23 @@ type Bridge struct {
 	// skip the "Starting container..." status events (container is warm).
 	containerMu    sync.RWMutex
 	containerCache map[string]string
+
+	// activeRunsMu guards activeRuns, the per-chat in-flight run counter
+	// that powers mid-turn steering. It mirrors containerMu's role:
+	// a small, dedicated lock for one map, not a single coarse Bridge
+	// mutex. A count (not a bool) tolerates overlapping runs on the same
+	// chat (e.g. a retried turn) without one finishing run clearing the
+	// flag while another is still live.
+	activeRunsMu sync.Mutex
+	activeRuns   map[string]int
+
+	// steerBroadcaster announces steering_queued events on the chat's
+	// session channel. Optional: nil means the WS announcement is
+	// skipped (the durable persist is the contract; the event is a UI
+	// nicety). Wired post-construction via SetSteerBroadcaster because
+	// the ws.Hub is built in the server boot sequence, same as the
+	// ProvisioningEnqueuer.
+	steerBroadcaster SteerBroadcaster
 }
 
 // SetProvisioningEnqueuer wires the auto-provision trigger after Bridge
@@ -201,6 +218,7 @@ func New(
 		cfg:            cfg,
 		logger:         logger,
 		containerCache: make(map[string]string),
+		activeRuns:     make(map[string]int),
 	}
 }
 
@@ -631,6 +649,11 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	}
 
 	startedAt := time.Now()
+	// Mark this chat as having a live run so a steering message arriving
+	// mid-turn (POST /chats/{id}/steer) is detected and QUEUED instead of
+	// racing a second Exec into the same container. Balanced by markRunEnd.
+	b.markRunStart(chatID)
+	defer b.markRunEnd(chatID)
 	runErr := b.orch.RunAgent(ctx, req, handler)
 	if runErr != nil {
 		// If context was cancelled (user pressed stop), don't emit error -- the hub

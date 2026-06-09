@@ -125,6 +125,15 @@ type Router struct {
 	// initialised, so two-phase wiring is the cheapest fix.
 	PipelinesHandler *PipelineHandler
 
+	// steerer delivers mid-turn steering messages (POST
+	// /api/v1/chats/{chatId}/steer). The chatbridge.Bridge satisfies it.
+	// Wired post-construction from cmd_start (same boot-order reason as
+	// the scheduler / provisioning enqueuer); nil → the steer route
+	// returns 503. The SteerHandler holds this pointer indirectly via
+	// the Router so SetSteerer can rewire it after the bridge is built.
+	steerer      Steerer
+	steerHandler *SteerHandler
+
 	// authHandler is the live AuthHandler created during route
 	// registration. Stored on the Router so server.New can call
 	// MaybeGenerateSetupToken (Patch C) on the same instance that
@@ -338,6 +347,17 @@ func (r *Router) SetScheduler(su ScheduleUpdater) {
 	r.scheduleUpdater = su
 	if r.agentHandler != nil {
 		r.agentHandler.SetScheduler(su)
+	}
+}
+
+// SetSteerer wires the mid-turn steering delivery (chatbridge.Bridge)
+// after route registration. The chat bridge is built later in the server
+// boot sequence than the router; this flips the POST /chats/{id}/steer
+// route from 503 to live.
+func (r *Router) SetSteerer(s Steerer) {
+	r.steerer = s
+	if r.steerHandler != nil {
+		r.steerHandler.SetSteerer(s)
 	}
 }
 
