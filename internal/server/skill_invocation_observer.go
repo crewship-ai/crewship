@@ -110,11 +110,35 @@ func (o *skillInvocationObserver) Observe(obs orchestrator.SkillInvocation) {
 			"agent_id", obs.AgentID, "error", err)
 		return
 	}
+	slug := matchSkillSlug(obs.ToolName, obs.Payload, aliases)
+
+	// TEMP DIAGNOSTIC (remove after #7 signal confirmed): surface exactly
+	// what the observer sees for a Skill tool call so the real input shape
+	// and alias resolution are visible via `crewship journal`.
+	if obs.ToolName == "Skill" && o.journ != nil {
+		aliasKeys := make([]string, 0, len(aliases))
+		for k := range aliases {
+			aliasKeys = append(aliasKeys, k)
+		}
+		_, _ = o.journ.Emit(ctx, journal.Entry{
+			WorkspaceID: obs.WorkspaceID, CrewID: obs.CrewID, AgentID: obs.AgentID,
+			Type:      journal.EntryType("skill.observe_debug"),
+			Severity:  journal.SeverityInfo,
+			ActorType: journal.ActorAgent, ActorID: obs.AgentID,
+			Summary: "skill observe debug",
+			Payload: map[string]any{
+				"tool_name":    obs.ToolName,
+				"input":        obs.Payload["input"],
+				"slug_count":   len(slugs),
+				"aliases":      aliasKeys,
+				"matched_slug": slug,
+			},
+		})
+	}
+
 	if len(slugs) == 0 {
 		return // agent has no enabled skills; nothing can match
 	}
-
-	slug := matchSkillSlug(obs.ToolName, obs.Payload, aliases)
 	if slug == "" {
 		return
 	}
