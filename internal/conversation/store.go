@@ -199,8 +199,12 @@ func (s *Store) Search(ctx context.Context, agentID, query string, limit int) ([
 	if phrase == "" {
 		return nil, fmt.Errorf("query is required")
 	}
-	if limit <= 0 || limit > 100 {
-		limit = 20
+	const (
+		searchDefaultLimit = 20  // initial slice capacity (constant, never caller-controlled)
+		searchMaxLimit     = 100 // hard ceiling on rows returned
+	)
+	if limit <= 0 || limit > searchMaxLimit {
+		limit = searchDefaultLimit
 	}
 
 	// JOIN the external-content FTS shadow on rowid and rank by bm25().
@@ -221,7 +225,10 @@ func (s *Store) Search(ctx context.Context, agentID, query string, limit int) ([
 	}
 	defer rows.Close()
 
-	out := make([]SearchHit, 0, limit)
+	// Preallocate with a fixed capacity (NOT the caller-influenced limit) so
+	// the allocation size never depends on untrusted input; the slice grows
+	// to at most `limit` rows, which the SQL LIMIT already bounds.
+	out := make([]SearchHit, 0, searchDefaultLimit)
 	for rows.Next() {
 		var (
 			h     SearchHit
