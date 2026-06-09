@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/memory"
 	"github.com/crewship-ai/crewship/internal/scrubber"
@@ -194,33 +195,79 @@ func (s *Server) handleMemoryWrite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Reindex on next watcher tick is the normal path; trigger an
-	// immediate reindex too so search hits the new content without
-	// debounce lag — the writer is the in-process consumer here.
-	if err := engine.ReindexContext(r.Context()); err != nil {
-		s.logger.Warn("post-write reindex failed", "error", err, "scope", req.Scope)
+	// The write itself is durable on disk at this point, so the 201 is
+	// honest the moment we return it. The two follow-on side effects —
+	// (1) an immediate FTS reindex so search hits the new content
+	// without waiting for the watcher debounce, and (2) the
+	// memory.updated journal emit — are pushed onto the single-worker,
+	// strict-FIFO background executor so a slow SQLite reindex or a
+	// laggy IPC round-trip can't delay the response the agent is
+	// blocked on. Ordering across turns is preserved: turn N's reindex
+	// always lands before turn N+1's (memory_executor.go).
+	//
+	// We must NOT capture r.Context() here — it is cancelled the instant
+	// this handler returns, which is before the off-thread task runs.
+	// Capture only stable values and build a fresh bounded context
+	// inside the closure.
+	scope := req.Scope
+	file := req.File
+	bytesWritten := res.BytesWritten
+	enqueued := s.memoryExec != nil && s.memoryExec.submit(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), memoryReindexTimeout)
+		defer cancel()
+
+		// Reindex on next watcher tick is the normal path; trigger an
+		// immediate reindex too so search hits the new content without
+		// debounce lag — the writer is the in-process consumer here.
+		if err := engine.ReindexContext(ctx); err != nil {
+			s.logger.Warn("post-write reindex failed", "error", err, "scope", scope)
+		}
+
+		// memory.updated is emitted only on the agent-initiated write
+		// path (this handler). fsnotify-detected writes by the
+		// consolidator or external tools intentionally do NOT emit
+		// this entry — the nudge counter in buildNudgeBlock measures
+		// agent-initiated activity, and any fsnotify emission would
+		// loop back into "the agent just wrote, reset the nudge",
+		// preventing the threshold from ever firing.
+		s.emitJournal(ctx, "memory.updated",
+			"agent wrote "+file,
+			map[string]any{
+				"scope":         scope,
+				"file":          file,
+				"bytes_written": bytesWritten,
+			}, nil)
+	})
+	if !enqueued {
+		// Executor is absent (degraded/test) or already shutting down.
+		// Fall back to a synchronous reindex + emit so the index and the
+		// journal don't silently diverge from disk on this path. This
+		// runs on the request goroutine but only when the off-thread
+		// path is unavailable, so the common case stays non-blocking.
+		if err := engine.ReindexContext(r.Context()); err != nil {
+			s.logger.Warn("post-write reindex failed (sync fallback)", "error", err, "scope", scope)
+		}
+		s.emitJournal(r.Context(), "memory.updated",
+			"agent wrote "+file,
+			map[string]any{
+				"scope":         scope,
+				"file":          file,
+				"bytes_written": bytesWritten,
+			}, nil)
 	}
 
-	// memory.updated is emitted only on the agent-initiated write
-	// path (this handler). fsnotify-detected writes by the
-	// consolidator or external tools intentionally do NOT emit
-	// this entry — the nudge counter in buildNudgeBlock measures
-	// agent-initiated activity, and any fsnotify emission would
-	// loop back into "the agent just wrote, reset the nudge",
-	// preventing the threshold from ever firing.
-	s.emitJournal(r.Context(), "memory.updated",
-		"agent wrote "+req.File,
-		map[string]any{
-			"scope":         req.Scope,
-			"file":          req.File,
-			"bytes_written": res.BytesWritten,
-		}, nil)
-
 	writeJSONResponse(w, http.StatusCreated, MemoryWriteResponse{
-		BytesWritten: res.BytesWritten,
+		BytesWritten: bytesWritten,
 		Path:         target,
 	})
 }
+
+// memoryReindexTimeout bounds the off-thread reindex + journal emit so a
+// hung SQLite operation can't pin the background worker forever (which
+// would stall every subsequent turn's reindex behind it). Generous
+// enough for a large daily-log reindex, tight enough that a wedged FTS5
+// write surfaces as a logged warning rather than a permanent stall.
+const memoryReindexTimeout = 30 * time.Second
 
 // resolveMemoryEngineWithPath returns the engine + its base path for
 // the given scope so handlers can validate paths and call WriteFile.
@@ -307,9 +354,3 @@ func safeJoinUnder(base, rel string) (string, error) {
 }
 
 var errIllegalPath = errors.New("illegal file path")
-
-// memoryWriteRequestSilentTimeout is reserved for a future
-// per-tier write deadline. Today the handler relies on r.Context()
-// from the HTTP server's timeout; this var is here so the deadline
-// landing point is obvious to future maintainers.
-var _ = context.Background

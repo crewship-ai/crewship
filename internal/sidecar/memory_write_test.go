@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/memory"
 	"github.com/crewship-ai/crewship/internal/scrubber"
@@ -25,11 +26,14 @@ func newWriteTestServer(t *testing.T) (*Server, string) {
 		t.Fatalf("memory.New: %v", err)
 	}
 	t.Cleanup(func() { _ = eng.Close() })
+	ex := newMemoryExecutor(silent)
+	t.Cleanup(func() { ex.Close(time.Second) })
 	return &Server{
 		memoryEngine:    eng,
 		agentMemoryBase: base,
 		scrubber:        scrubber.New(),
 		logger:          silent,
+		memoryExec:      ex,
 	}, base
 }
 
@@ -151,6 +155,131 @@ func TestHandleMemoryWrite_BadJSON_400(t *testing.T) {
 	s.handleMemoryWrite(rr, req)
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", rr.Code)
+	}
+}
+
+// TestHandleMemoryWrite_SlowReindexDoesNotBlock201 occupies the
+// executor's single in-flight slot with a long-running task, then issues
+// a write. The 201 must return promptly without waiting for the queued
+// reindex to run — proving the reindex is off the request hot path.
+func TestHandleMemoryWrite_SlowReindexDoesNotBlock201(t *testing.T) {
+	s, _ := newWriteTestServer(t)
+
+	// Wedge the worker with a slow task so any post-write reindex this
+	// handler enqueues sits behind it. If the handler reindexed inline,
+	// it would not even reach submit — but if it (incorrectly) blocked
+	// waiting for the queue to clear, the 201 would be delayed by ~the
+	// slow task's runtime.
+	release := make(chan struct{})
+	s.memoryExec.submit(func() { <-release })
+
+	body, _ := json.Marshal(MemoryWriteRequest{File: "AGENT.md", Content: "fast path\n"})
+	req := httptest.NewRequest("POST", "http://localhost/memory/write", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+
+	t0 := time.Now()
+	s.handleMemoryWrite(rr, req)
+	elapsed := time.Since(t0)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", rr.Code, rr.Body.String())
+	}
+	if elapsed > 500*time.Millisecond {
+		t.Fatalf("handler blocked for %v; reindex is not off-thread", elapsed)
+	}
+	close(release)
+}
+
+// TestHandleMemoryWrite_OrderingPreserved issues several writes and
+// confirms the file content reflects the LAST write after the executor
+// drains — strict-FIFO reindexing means the final state is consistent
+// with the final write, never an earlier turn winning a race.
+func TestHandleMemoryWrite_OrderingPreserved(t *testing.T) {
+	s, base := newWriteTestServer(t)
+
+	for i := 0; i < 5; i++ {
+		content := "turn " + string(rune('0'+i)) + "\n"
+		body, _ := json.Marshal(MemoryWriteRequest{File: "AGENT.md", Content: content})
+		req := httptest.NewRequest("POST", "http://localhost/memory/write", bytes.NewReader(body))
+		rr := httptest.NewRecorder()
+		s.handleMemoryWrite(rr, req)
+		if rr.Code != http.StatusCreated {
+			t.Fatalf("write %d status = %d, want 201", i, rr.Code)
+		}
+	}
+
+	// Barrier: all enqueued reindexes have run in submission order.
+	if !s.memoryExec.Flush(2 * time.Second) {
+		t.Fatalf("executor Flush timed out")
+	}
+
+	got, _ := os.ReadFile(filepath.Join(base, "AGENT.md"))
+	if !strings.Contains(string(got), "turn 4") {
+		t.Errorf("final content = %q, want last write 'turn 4'", got)
+	}
+}
+
+// TestHandleMemoryWrite_SyncFallbackNoExecutor verifies the handler still
+// reindexes + emits synchronously when no executor is wired (degraded /
+// legacy construction), so the index never silently diverges from disk.
+func TestHandleMemoryWrite_SyncFallbackNoExecutor(t *testing.T) {
+	s, base := newWriteTestServer(t)
+	s.memoryExec.Close(time.Second)
+	s.memoryExec = nil // force the synchronous fallback branch
+
+	body, _ := json.Marshal(MemoryWriteRequest{File: "AGENT.md", Content: "sync fallback\n"})
+	req := httptest.NewRequest("POST", "http://localhost/memory/write", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+	s.handleMemoryWrite(rr, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", rr.Code, rr.Body.String())
+	}
+	got, _ := os.ReadFile(filepath.Join(base, "AGENT.md"))
+	if !strings.Contains(string(got), "sync fallback") {
+		t.Errorf("file not persisted on sync fallback: %q", got)
+	}
+}
+
+// TestHandleMemoryWrite_SyncFallbackReindexError exercises the synchronous
+// fallback's reindex-error warning branch: WriteFile (disk-only) still
+// succeeds, but the engine's DB is closed so ReindexContext fails. The handler
+// logs and swallows the error — the write is already durable, so the 201
+// still stands.
+func TestHandleMemoryWrite_SyncFallbackReindexError(t *testing.T) {
+	s, _ := newWriteTestServer(t)
+	s.memoryExec.Close(time.Second)
+	s.memoryExec = nil         // force the synchronous fallback branch
+	_ = s.memoryEngine.Close() // make ReindexContext fail (closed DB)
+
+	body, _ := json.Marshal(MemoryWriteRequest{File: "AGENT.md", Content: "x\n"})
+	req := httptest.NewRequest("POST", "http://localhost/memory/write", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+	s.handleMemoryWrite(rr, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201 even on reindex error; body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestHandleMemoryWrite_OffThreadReindexError exercises the off-thread
+// closure's reindex-error warning branch: closing the engine underneath the
+// executor makes the queued ReindexContext fail. The 201 is unaffected; the
+// error is logged off-thread.
+func TestHandleMemoryWrite_OffThreadReindexError(t *testing.T) {
+	s, _ := newWriteTestServer(t)
+
+	body, _ := json.Marshal(MemoryWriteRequest{File: "AGENT.md", Content: "x\n"})
+	req := httptest.NewRequest("POST", "http://localhost/memory/write", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+
+	// Close the engine before the queued reindex runs so ReindexContext
+	// errors inside the off-thread closure.
+	_ = s.memoryEngine.Close()
+	s.handleMemoryWrite(rr, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", rr.Code, rr.Body.String())
+	}
+	if !s.memoryExec.Flush(2 * time.Second) {
+		t.Fatalf("executor Flush timed out")
 	}
 }
 
