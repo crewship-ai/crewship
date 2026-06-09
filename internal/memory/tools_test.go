@@ -23,6 +23,7 @@ func TestToolSchemas_AllFourPresent(t *testing.T) {
 		"memory.write",
 		"memory.search",
 		"memory.append_daily",
+		"conversation.search",
 	}
 	if got := len(schemas); got != len(wantNames) {
 		t.Fatalf("expected %d schemas, got %d", len(wantNames), got)

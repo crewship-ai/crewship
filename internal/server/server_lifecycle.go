@@ -349,6 +349,29 @@ func (a *convStoreAdapter) Read(ctx context.Context, sessionID string, offset, l
 	return out, nil
 }
 
+// SearchConversations adapts conversation.Store.Search to the
+// api.ConversationSearcher interface so POST /api/v1/conversations/search
+// can run the agent-scoped BM25 query against the v111 FTS5 mirror.
+func (a *convStoreAdapter) SearchConversations(ctx context.Context, agentID, query string, limit int) ([]goapi.ConversationSearchHit, error) {
+	hits, err := a.store.Search(ctx, agentID, query, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]goapi.ConversationSearchHit, len(hits))
+	for i, h := range hits {
+		out[i] = goapi.ConversationSearchHit{
+			ID:          h.ID,
+			SessionID:   h.SessionID,
+			AgentID:     h.AgentID,
+			Role:        string(h.Role),
+			Content:     h.Content,
+			ToolSummary: h.ToolSummary,
+			Timestamp:   h.Timestamp.UTC().Format(time.RFC3339Nano),
+		}
+	}
+	return out, nil
+}
+
 // recoverOrphanedRuns marks stale RUNNING runs as CANCELLED and resets
 // agent statuses. This handles cases where the server crashed or was
 // restarted while agent runs were in progress.

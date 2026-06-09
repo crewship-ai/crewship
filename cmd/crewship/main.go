@@ -86,6 +86,7 @@ func init() {
 	rootCmd.AddCommand(integrationCmd)
 	rootCmd.AddCommand(missionCmd)
 	rootCmd.AddCommand(activityCmd)
+	rootCmd.AddCommand(conversationCmd)
 	rootCmd.AddCommand(historyCmd)
 	rootCmd.AddCommand(journalCmd)
 	rootCmd.AddCommand(recallCmd)

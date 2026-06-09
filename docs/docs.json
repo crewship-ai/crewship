@@ -100,6 +100,7 @@
                   "guides/memory-provider",
                   "guides/agent-brief",
                   "guides/episodic-memory",
+                  "guides/conversation-search",
                   "guides/consolidate",
                   "guides/memory-observability",
                   "guides/llm-middleware",

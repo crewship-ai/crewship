@@ -188,6 +188,15 @@ func WithKeeperConversations(cr ConversationReader) RouterOption {
 	}
 }
 
+// WithConversationSearch attaches the agent-scoped conversation search
+// backend so POST /api/v1/conversations/search becomes usable. When unset
+// the route returns 503 (feature not configured).
+func WithConversationSearch(s ConversationSearcher) RouterOption {
+	return func(r *Router) {
+		r.convSearcher = s
+	}
+}
+
 // WithMissionCallback attaches a callback invoked when assignment results affect missions.
 func WithMissionCallback(cb MissionCallback) RouterOption {
 	return func(r *Router) {

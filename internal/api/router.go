@@ -68,6 +68,7 @@ type Router struct {
 	keeperContainer     provider.ContainerProvider
 	keeperConfig        *config.KeeperConfig
 	keeperConvReader    ConversationReader
+	convSearcher        ConversationSearcher
 	missionCallback     MissionCallback
 	scheduleUpdater     ScheduleUpdater
 	logWriter           *logcollector.Writer

@@ -203,7 +203,16 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 	}
 	logW := logcollector.NewWriter(cfg.Storage.LogPath, logger)
 	logR := logcollector.NewReader(cfg.Storage.LogPath)
-	convStore := conversation.NewStore(cfg.Storage.BasePath, logger)
+	// WithDB enables the conversation_messages search mirror (v111): every
+	// Append dual-writes a searchable row backing POST
+	// /api/v1/conversations/search. deps.DB is guaranteed non-nil by the
+	// panic guard further down, but construct defensively in case the
+	// ordering ever changes — WithDB(nil) just leaves the mirror disabled.
+	var convOpts []conversation.Option
+	if deps != nil && deps.DB != nil {
+		convOpts = append(convOpts, conversation.WithDB(deps.DB))
+	}
+	convStore := conversation.NewStore(cfg.Storage.BasePath, logger, convOpts...)
 
 	orch.SetConversationStore(convStore)
 
@@ -588,7 +597,11 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 
 		// Wire conversation history so Keeper can verify agent intent against actual chat
 		if convStore != nil {
-			opts = append(opts, goapi.WithKeeperConversations(&convStoreAdapter{store: convStore}))
+			convAdapter := &convStoreAdapter{store: convStore}
+			opts = append(opts, goapi.WithKeeperConversations(convAdapter))
+			// Same adapter backs cross-session search; the searchable
+			// mirror is only populated when convStore was built WithDB.
+			opts = append(opts, goapi.WithConversationSearch(convAdapter))
 		}
 
 		// Build the shared Consolidator so the router-backed manual

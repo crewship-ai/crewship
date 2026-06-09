@@ -368,6 +368,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 
 	if err := b.convStore.Append(ctx, chatID, conversation.Message{
 		ID:        generateMsgID(),
+		AgentID:   info.AgentID,
 		Role:      conversation.RoleUser,
 		Content:   content,
 		Timestamp: time.Now().UTC(),
@@ -649,6 +650,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 			if fullResponse != "" {
 				_ = b.convStore.Append(cleanCtx, chatID, conversation.Message{
 					ID:        generateMsgID(),
+					AgentID:   info.AgentID,
 					Role:      conversation.RoleAssistant,
 					Content:   fullResponse,
 					Timestamp: time.Now().UTC(),
@@ -704,6 +706,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 
 	if err := b.convStore.Append(ctx, chatID, conversation.Message{
 		ID:          generateMsgID(),
+		AgentID:     info.AgentID,
 		Role:        conversation.RoleAssistant,
 		Content:     fullResponse,
 		ToolSummary: toolSummary,

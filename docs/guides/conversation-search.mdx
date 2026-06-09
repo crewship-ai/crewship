@@ -1,0 +1,130 @@
+---
+title: "Conversation Search"
+description: "Keyword (BM25) search across an agent's past chat sessions, scoped to that agent and ranked by relevance."
+icon: "magnifying-glass"
+---
+
+# Conversation Search
+
+## Overview
+
+**Conversation search** lets you (or an agent) find earlier chat turns by
+keyword. Every message in a chat session is persisted twice: as the durable
+JSONL session log on disk, and as a searchable row in a full-text index. The
+search runs over that index and returns the matching messages ranked by
+relevance, each with its source session id and timestamp.
+
+It answers the question *"what did this agent and I discuss — or decide —
+before?"* without you having to remember which session it happened in.
+
+This is distinct from the [Crew Journal](/guides/crew-journal) `recall`
+surface, which searches the workspace-wide *event* memory (runs, peer
+conversations, escalations). Conversation search is scoped to a single
+agent's *chat* history.
+
+## Scope and isolation
+
+- **Per-agent.** A search is always filtered by `agent_id`. An agent can only
+  search its own conversation history; one agent can never read another
+  agent's chats through this surface. The API additionally verifies that the
+  requested agent belongs to your workspace before running the query.
+- **Search-from-now-on.** Only conversations recorded after this feature
+  shipped are indexed. There is no backfill of older history — the index
+  fills as new turns land.
+- **Keyword (BM25) only.** This first release ranks by BM25 full-text
+  relevance. There is no semantic / embedding re-rank yet.
+
+## CLI
+
+Use `crewship conversation search` (alias: `crewship conv search`):
+
+```bash
+# Search one agent's chats by keyword
+crewship conversation search backend-bot "deploy pipeline"
+
+# Accept an agent id or slug; cap the number of hits
+crewship conversation search agent_123 "rate limit" --limit 50
+
+# Machine-readable output for piping to jq
+crewship conversation search backend-bot "auth" --format json | jq '.hits[].session_id'
+```
+
+Arguments and flags:
+
+| Argument / flag | Meaning |
+|-----------------|---------|
+| `<agent-slug-or-id>` | The agent whose conversations to search. A slug is resolved to its id. |
+| `<query>` | The search text. Remaining args are joined with spaces. FTS5 operators (`OR`, `NEAR`, `*`) are treated as literal words, not query syntax. |
+| `--limit <n>` | Maximum number of hits (1–100). Defaults to 20; out-of-range values are clamped. |
+| `--format json\|yaml` | Emit the raw result envelope instead of the table view. |
+
+Each hit shows its timestamp, the message role (`user` / `assistant`), the
+source `session_id`, and a snippet of the matched content.
+
+## API
+
+`POST /api/v1/conversations/search`
+
+Request body:
+
+```json
+{
+  "agent_id": "agent_123",
+  "query": "deploy pipeline",
+  "limit": 20
+}
+```
+
+| Field | Required | Notes |
+|-------|----------|-------|
+| `agent_id` | yes | Must belong to the caller's workspace. |
+| `query` | yes | Free text. Operators are neutralised to literal words. |
+| `limit` | no | 1–100; defaults to 20, out-of-range values are clamped. |
+
+Response:
+
+```json
+{
+  "count": 1,
+  "query": "deploy pipeline",
+  "hits": [
+    {
+      "id": "msg_abc",
+      "session_id": "sess-42",
+      "agent_id": "agent_123",
+      "role": "user",
+      "content": "please deploy the staging pipeline tonight",
+      "ts": "2026-06-01T10:00:00Z"
+    }
+  ]
+}
+```
+
+Status codes:
+
+| Code | When |
+|------|------|
+| `200` | Search ran; `hits` may be empty. |
+| `400` | Missing `agent_id` / `query`, or a malformed query. |
+| `401` | No workspace in the request context. |
+| `404` | The agent does not exist in your workspace. |
+| `503` | The search mirror is not configured on this deployment. |
+
+## Agent tool
+
+Agents can call the `conversation.search` tool to recall their own past
+sessions. The tool is agent-scoped — the agent identity is supplied by the
+runtime, not by the model, so an agent cannot search another agent's
+history. Where the searchable mirror is not reachable from the agent's
+sandbox, the tool returns a recoverable "not available" result rather than
+failing the run.
+
+## How it works
+
+When a chat turn is persisted, the conversation store writes the JSONL line
+(the durable source of truth) and, when a database mirror is configured,
+dual-writes a row into a `conversation_messages` table backed by an
+SQLite FTS5 external-content index. Search joins the index, filters by
+`agent_id`, and orders by BM25. The JSONL files remain authoritative; the
+index is a rebuildable mirror, so a transient write failure costs at most the
+searchability of a single turn, never the turn itself.
