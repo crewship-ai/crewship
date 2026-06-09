@@ -119,7 +119,18 @@ type Server struct {
 	mcpGateway  *MCPGateway
 	logger      *slog.Logger
 	readyCh     chan struct{} // closed when the TCP listener is bound
+	// memoryExec runs post-write side effects (FTS reindex + the
+	// memory.updated journal emit) off the request hot path so a slow
+	// reindex can't delay the 201 the agent is blocked on. Strict FIFO,
+	// no-drop — see memory_executor.go. Always non-nil after NewServer.
+	memoryExec *memoryExecutor
 }
+
+// memoryExecCloseTimeout bounds how long sidecar shutdown waits for the
+// off-thread reindex queue to drain. A wedged reindex must not block
+// container teardown indefinitely; 5s comfortably covers a normal drain
+// while staying under typical orchestrator stop grace periods.
+const memoryExecCloseTimeout = 5 * time.Second
 
 // NewServer creates a sidecar server ready to start.
 func NewServer(cfg ServerConfig) *Server {
@@ -174,6 +185,10 @@ func NewServer(cfg ServerConfig) *Server {
 		// called on the sidecar path), so a single instance under
 		// concurrent handlers is safe.
 		scrubber: scrubber.New(),
+		// Single-worker, strict-FIFO, no-drop executor for post-write
+		// reindex + journal emit. Started here so it's live before the
+		// HTTP server begins accepting writes.
+		memoryExec: newMemoryExecutor(cfg.Logger),
 	}
 
 	// Billing-mode + plan come from the orchestrator-set env vars in
@@ -616,6 +631,14 @@ func (s *Server) Start(ctx context.Context) error {
 	case <-ctx.Done():
 		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
+		// Drain the off-thread reindex/journal queue first (bounded) so
+		// any reindex the agent triggered just before stop still lands
+		// before the engine is closed underneath it.
+		if s.memoryExec != nil {
+			if !s.memoryExec.Close(memoryExecCloseTimeout) {
+				s.logger.Warn("memory executor drain timed out on shutdown")
+			}
+		}
 		if s.mcpGateway != nil {
 			s.mcpGateway.Close()
 		}
@@ -634,6 +657,11 @@ func (s *Server) Start(ctx context.Context) error {
 		}
 		return nil
 	case err := <-errCh:
+		if s.memoryExec != nil {
+			if !s.memoryExec.Close(memoryExecCloseTimeout) {
+				s.logger.Warn("memory executor drain timed out on shutdown")
+			}
+		}
 		if s.mcpGateway != nil {
 			s.mcpGateway.Close()
 		}
