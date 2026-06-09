@@ -229,6 +229,58 @@ var chatReactListCmd = &cobra.Command{
 	},
 }
 
+// chatSteerCmd delivers a mid-turn steering message into a chat session.
+// The server guards against racing a second run into a live turn — today
+// the message is QUEUED for the next turn (live injection is a follow-up).
+// This is the CLI parity for POST /api/v1/chats/{chatId}/steer.
+var chatSteerCmd = &cobra.Command{
+	Use:   "steer <chat-id>",
+	Short: "Send a mid-turn steering message into a chat (queued for the next turn)",
+	Long: `Queue a steering message for a chat session. If the agent is mid-turn,
+the message is held and applied on the next turn rather than interrupting the
+running one (live mid-turn injection is a planned follow-up). The text is
+scanned for prompt-injection before it is accepted.
+
+Examples:
+  crewship chat steer c_abc123 --message "focus on the auth bug first"
+  crewship chat steer c_abc123 -m "use the staging DB, not prod"`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client, err := requireAuthAndWorkspace()
+		if err != nil {
+			return err
+		}
+		message, _ := cmd.Flags().GetString("message")
+		if strings.TrimSpace(message) == "" {
+			return fmt.Errorf("--message is required")
+		}
+		chatID := args[0]
+
+		path := "/api/v1/chats/" + url.PathEscape(chatID) + "/steer"
+		var res struct {
+			Queued   bool `json:"queued"`
+			InFlight bool `json:"in_flight"`
+		}
+		if err := postJSON(client, path, map[string]string{"message": message}, &res); err != nil {
+			return err
+		}
+
+		f := newFormatter()
+		switch f.Format {
+		case "json":
+			return f.JSON(res)
+		case "yaml":
+			return f.YAML(res)
+		}
+		if res.InFlight {
+			cli.PrintSuccess("Steering message queued — a run is in flight; it will apply on the next turn.")
+		} else {
+			cli.PrintSuccess("Steering message queued for the next turn.")
+		}
+		return nil
+	},
+}
+
 // chatAttachCmd uploads a file as an attachment scoped to a (agent, chat)
 // pair. The server route lives under /agents/{agentId}/chats/{chatId}, so
 // the CLI resolves the agent ID from the chat (which the local server can
@@ -453,6 +505,8 @@ func init() {
 
 	chatAttachCmd.Flags().String("agent", "", "Override the auto-resolved agent slug or ID")
 
+	chatSteerCmd.Flags().StringP("message", "m", "", "Steering message text (required)")
+
 	chatReactCmd.AddCommand(chatReactAddCmd)
 	chatReactCmd.AddCommand(chatReactRemoveCmd)
 	chatReactCmd.AddCommand(chatReactListCmd)
@@ -460,4 +514,5 @@ func init() {
 	chatCmd.AddCommand(chatReactCmd)
 	chatCmd.AddCommand(chatAttachCmd)
 	chatCmd.AddCommand(chatListCmd)
+	chatCmd.AddCommand(chatSteerCmd)
 }

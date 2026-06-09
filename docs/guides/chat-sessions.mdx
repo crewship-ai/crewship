@@ -209,6 +209,34 @@ The chat surface is small — no dedicated `/api-reference/chats` page yet; the 
 |---|---|---|
 | `POST` | `/api/v1/agents/{agentId}/chats/{chatId}/attachments` | Upload a file (multipart, ≤25 MB). Returns the file's storage URL + the `chat_attachments` row ID. Handler: `ProxyHandler.AgentChatAttachment` in `internal/api/proxy_attachments.go`. |
 
+### Mid-turn steering
+
+Sometimes you want to redirect an agent that is already mid-turn — "actually, focus on the auth bug first" — without waiting for the current run to finish or starting a competing second run in the same container.
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/api/v1/chats/{chatId}/steer` | Queue a steering message. Body: `{message}`. Returns `{queued, in_flight}`. Scoped via `chats.workspace_id`, so cross-tenant returns `404`. |
+
+The CLI parity is `crewship chat steer`:
+
+```bash
+# Redirect a chat — applied on the next turn
+crewship chat steer c_abc123 --message "focus on the auth bug first"
+crewship chat steer c_abc123 -m "use the staging DB, not prod"
+
+# Scriptable
+crewship chat steer c_abc123 -m "tighten the scope" --format json
+# → {"queued":true,"in_flight":true}
+```
+
+<Note>
+**Today's behavior is queue-for-next-turn, not live injection.** When a run is already in flight for the chat, the bridge detects it (an in-flight guard tracks live runs per chat) and **queues** the steering message rather than spawning a second run that would race the first into the same container. The queued message is persisted to conversation history tagged as a steer, and a `steering_queued` event is emitted on the chat's `session:<chatID>` WebSocket channel; the agent picks it up on the next turn like any other user message.
+
+`in_flight` in the response tells you whether a run was live when you steered (`true` → it lands after the current turn finishes; `false` → it lands at the start of the next turn you kick off). The steering text is run through the same content scan as memory and tool output, so a prompt-injection payload is rejected with `422` and nothing is persisted.
+
+**Live injection into a running turn** — interrupting the model's current generation to feed it the new instruction immediately — is a planned follow-up, not in this release.
+</Note>
+
 ### Realtime (WebSocket)
 
 The chat page subscribes to the per-session WebSocket channel (`session:<chatID>`) and listens for the events the runtime actually emits. There are no `chat.message.*` or `chat.reaction.*` events today — message turns are read back via REST after a successful POST, and reactions are local-state-only on the client.
@@ -221,6 +249,7 @@ The chat page subscribes to the per-session WebSocket channel (`session:<chatID>
 | `peer_query_running` | `session:<chatID>` | A peer-query sub-task started inside this chat (multi-agent dispatch). |
 | `escalation_created` / `escalation_resolved` | `session:<chatID>` | The agent escalated to a human, or the escalation was decided. |
 | `port_expose_created` | `session:<chatID>` | The agent opened a container port and the proxy URL is ready. |
+| `steering_queued` | `session:<chatID>` | A mid-turn steering message was queued (see [Mid-turn steering](#mid-turn-steering)); the agent applies it on the next turn. |
 
 Each event triggers a REST re-fetch of the affected resource — the server-side state is authoritative and the next render is a function of that, not of imperative local mutations. Reconnect is idempotent: sends in-flight at disconnect time carry the same client `request_id` and the server dedupes.
 
