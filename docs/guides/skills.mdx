@@ -189,6 +189,20 @@ Marketplace skills go through a verification pipeline:
   Skills are injected into the system prompt, so they consume token budget. Keep skills focused and concise -- a skill with 500 words of instructions is more effective than one with 2000 words of edge cases.
 </Tip>
 
+## Invocation telemetry
+
+Every time an agent actually *uses* one of its assigned skills, Crewship records it. This is what lets the skill-review sweep distinguish a skill that is genuinely in use from one that is just assigned and forgotten.
+
+The orchestrator watches the agent's tool-call stream. When a tool call maps to one of the agent's enabled skills -- either a `Skill` tool call whose input names the skill's slug, or a tool whose name *is* an assigned slug -- the platform, in a single transaction:
+
+- inserts one row into `skill_invocations` (an append-only audit log: which skill, which agent, which workspace, when, and the exit code);
+- bumps the skill's denormalised counters: `usage_count`, `last_used_at`, and -- when the call reported a non-zero exit code -- `error_count`;
+- emits a `skill.invoked` entry to the Crew Journal (payload carries `skill_id`, `skill_slug`, `agent_id`, `tool_name`, `exit_code`, and the post-increment `usage_count`).
+
+Recording is **best-effort and off the hot path** -- it runs in a bounded background worker, so a busy agent is never slowed by telemetry, and a tool call that does not correspond to an assigned skill is silently ignored. A non-skill tool (e.g. `Read`, `Bash`) never produces an invocation row.
+
+The skill-review routine reads the `skill_invocations` aggregate (count + error count over a lookback window) to decide whether an assigned skill is still earning its place in the system prompt. Filter the journal Timeline on `skill.invoked` to see, per agent, exactly which skills are pulling their weight.
+
 ## What's Next
 
 <CardGroup cols={2}>
