@@ -39,6 +39,9 @@ type Client struct {
 	mu               sync.Mutex // protects channels map
 	consecutiveDrops atomic.Uint32
 	disconnectFired  atomic.Bool
+	// writeWait overrides defaultWriteWait per connection; zero means use
+	// the default. Set at construction in the hub; only tests vary it.
+	writeWait time.Duration
 }
 
 func (c *Client) readPump() {
@@ -76,6 +79,16 @@ func (c *Client) readPump() {
 	}
 }
 
+// defaultWriteWait bounds how long a single outbound frame may block in
+// conn.Write before the connection is torn down. Without it, a client
+// that has stopped reading (full TCP receive window) blocks the write
+// indefinitely — the goroutine hangs until the kernel-level TCP timeout
+// (minutes), holding a slot and stalling broadcast dispatch behind it.
+// The hub-level slow-consumer drop logic (consecutiveDropsBeforeDisconnect)
+// only fires when the per-client send buffer overflows; it does not help
+// once a write has already entered a blocking syscall.
+const defaultWriteWait = 10 * time.Second
+
 func (c *Client) writePump() {
 	ticker := time.NewTicker(30 * time.Second)
 	defer func() {
@@ -89,15 +102,32 @@ func (c *Client) writePump() {
 			if !ok {
 				return
 			}
-			if _, err := c.conn.Write(msg); err != nil {
+			if !c.writeFrame(msg) {
 				return
 			}
 		case <-ticker.C:
-			if _, err := c.conn.Write(pingMessageBytes); err != nil {
+			if !c.writeFrame(pingMessageBytes) {
 				return
 			}
 		}
 	}
+}
+
+// writeFrame writes one frame under a fresh write deadline and reports
+// whether the caller should keep the pump running. A failed or timed-out
+// write returns false so writePump exits and the deferred Close runs.
+func (c *Client) writeFrame(msg []byte) bool {
+	wait := c.writeWait
+	if wait <= 0 {
+		wait = defaultWriteWait
+	}
+	if err := c.conn.SetWriteDeadline(time.Now().Add(wait)); err != nil {
+		return false
+	}
+	if _, err := c.conn.Write(msg); err != nil {
+		return false
+	}
+	return true
 }
 
 // watchSessionRevocation polls user_sessions every 30s and force-closes
