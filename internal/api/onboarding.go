@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/crashreport"
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/services"
@@ -207,6 +208,14 @@ type onboardingSetupRequest struct {
 	// orchestrator can pass it through verbatim ("Czech", "English",
 	// "Português", etc.) without us maintaining an ISO-code map.
 	PreferredLanguage string `json:"preferred_language"`
+	// TelemetryOptIn is the explicit crash-reporting consent answer from
+	// the onboarding consent step (web wizard checkbox / `crewship setup`
+	// prompt). Pointer so "field omitted" (older frontend, scripted setup
+	// without --telemetry) is distinguishable from an explicit false —
+	// omitted leaves the version-based default from crashreport.Init
+	// untouched, while true/false is persisted exactly like
+	// `crewship telemetry on|off` would write it.
+	TelemetryOptIn *bool `json:"telemetry_opt_in"`
 }
 
 var slugRegex = regexp.MustCompile(`[^a-z0-9-]`)
@@ -262,6 +271,18 @@ func (h *OnboardingHandler) Setup(w http.ResponseWriter, r *http.Request) {
 			"UPDATE workspaces SET preferred_language = ?, updated_at = ? WHERE id = ?",
 			lang, time.Now().UTC().Format(time.RFC3339), workspaceID); err != nil {
 			h.logger.Warn("set preferred_language", "error", err)
+		}
+	}
+
+	// Persist the explicit telemetry consent answer (when the wizard sent
+	// one) before the branch, like preferred_language — it applies to both
+	// the template and blank forks and a failed write must not take down
+	// onboarding. The running server picks the new value up on its next
+	// crashreport.Init (i.e. next start), same as `crewship telemetry
+	// on|off`.
+	if req.TelemetryOptIn != nil {
+		if _, _, err := crashreport.SetOptIn(r.Context(), h.db, *req.TelemetryOptIn); err != nil {
+			h.logger.Warn("persist onboarding telemetry consent", "error", err)
 		}
 	}
 

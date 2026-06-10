@@ -1,14 +1,15 @@
 ---
 title: "Telemetry"
-description: "Anonymous crash reporting in v0.1 beta — opt out with one command, override the Sentry DSN, and review exactly what does and does not leave your machine."
+description: "Anonymous crash reporting — defaults by build flavour, the onboarding consent step, the Sentry DSN override, and exactly what does and does not leave your machine."
 icon: "shield-check"
 ---
 
 # Telemetry
 
-Crewship sends anonymous crash reports to help the maintainer diagnose
-bugs in the v0.1 beta. This page covers what is sent, how to opt out,
-and how to redirect crash data to your own Sentry project.
+Crewship can send anonymous crash reports to help the maintainer
+diagnose bugs. This page covers the default for your build, the
+onboarding consent step, what is sent, how to opt in/out, and how to
+redirect crash data to your own Sentry project.
 
 <Note>
 This guide is about **crash reporting** (the `crewship telemetry`
@@ -17,20 +18,46 @@ collector) see [Tracing](/guides/tracing). Different package, different
 concern — same English word.
 </Note>
 
-## Default for v0.1 beta: enabled
+## Default by build flavour
 
-The first time you run `crewship start`, telemetry is enabled
-automatically and a consent row is written to the local database. There
-is no first-run prompt — non-interactive deployments (Docker, systemd,
-CI) would otherwise end up silently telemetry-less, and a solo
-maintainer needs the crash signal during beta.
+The default is decided by the version your binary was built from:
 
-The default-on stance applies to the **v0.1 beta only**. It will revert
-to opt-in for v1.0 GA.
+| Build flavour | Version string | Default |
+|---|---|---|
+| Prerelease | contains `-beta` / `-rc` (e.g. `v0.1.0-beta.4`) | **Enabled** |
+| Dev / unversioned | `dev`, empty, bare commit SHA | **Enabled** |
+| Stable release | `vX.Y.Z` with no prerelease suffix (e.g. `v1.0.0`) | **Disabled** |
 
-If you'd rather opt out immediately, run the command below before or
-after the first `crewship start`. Opt-out is sticky — once you've said
-no, the beta default never flips it back on.
+On a **prerelease or dev build**, the first `crewship start` enables
+telemetry automatically and writes a consent row to the local database
+— non-interactive deployments (Docker, systemd, CI) would otherwise end
+up silently telemetry-less, and a solo maintainer needs the crash
+signal while a release is still baking. (Dev builds ship with an empty
+compiled-in DSN, so nothing is actually sent unless you set
+`CREWSHIP_SENTRY_DSN`.)
+
+On a **stable release**, telemetry is strictly **opt-in**: nothing is
+enabled and nothing is written until you explicitly consent — in the
+onboarding wizard, or with `crewship telemetry on`.
+
+Your explicit choice is sticky in both directions. Once you've answered
+— via onboarding or the CLI — no version default ever overrides it,
+including across upgrades.
+
+## Onboarding asks explicitly
+
+Both onboarding surfaces include a consent step, so even on a
+prerelease build you get an explicit choice the first time you set up
+a workspace:
+
+- the **web wizard** shows a "Send anonymous crash reports" checkbox in
+  the final step, pre-ticked to your build's default;
+- **`crewship setup`** asks the same question interactively, or takes
+  `--telemetry=true|false` for scripted runs (omit the flag with
+  `--yes` to keep the server's default).
+
+The answer is stored exactly as if you had run
+`crewship telemetry on|off` yourself.
 
 ## Opting out
 
@@ -103,7 +130,7 @@ When telemetry is enabled:
 - Crewship **version**, commit SHA, OS, and architecture
 - The anonymous **install ID** (random 32-hex)
 - A **Sentry "environment"** tag derived from the version (`beta`,
-  `production`)
+  `production`, `development`)
 
 ## What is never sent
 

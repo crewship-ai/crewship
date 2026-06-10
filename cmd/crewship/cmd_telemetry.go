@@ -27,15 +27,22 @@ var telemetryCmd = &cobra.Command{
 	Use:   "telemetry",
 	Short: "Manage anonymous crash reporting",
 	Long: `Crewship sends anonymous crash reports to the project maintainer's Sentry
-to help diagnose bugs in the v0.1 beta. The feature is ENABLED by default
-during beta — disable any time with:
+to help diagnose bugs. Manage the consent state any time with:
 
   crewship telemetry off
   crewship telemetry on        # re-enable
   crewship telemetry status    # show current state, endpoint, install ID
 
-The default-on stance applies to the v0.1 beta only; v1.0 GA will revert
-to opt-in. Documented in README and RELEASING.md.
+The default depends on the build (decided by version, see
+internal/crashreport.DefaultOptIn):
+
+  - prerelease builds (-beta / -rc) and dev builds: ENABLED by default,
+    so the maintainer has crash signal while a release is still baking
+  - stable release versions: DISABLED by default — strictly opt-in
+
+Your explicit choice (this command, or the consent step in onboarding)
+is sticky and always wins over the default. Documented in README and
+docs/guides/telemetry.
 
 Routing override:
   Set CREWSHIP_SENTRY_DSN to your own Sentry DSN to redirect events to a
@@ -98,10 +105,15 @@ var telemetryStatusCmd = &cobra.Command{
 
 		switch {
 		case !asked:
-			// With beta default-on, this branch should be unreachable after
-			// the first `crewship start`. Kept as a safety net for builds
-			// that haven't called crashreport.Init yet.
-			fmt.Println("Telemetry: not yet configured. Will default to ENABLED on the next `crewship start` for v0.1 beta.")
+			// Prerelease/dev builds settle the default on first
+			// `crewship start`, so this branch is mostly seen on stable
+			// builds (default-off writes nothing) and on DBs that have
+			// never booted the server.
+			if crashreport.DefaultOptIn(version) {
+				fmt.Println("Telemetry: not yet configured. This prerelease/dev build defaults to ENABLED on the next `crewship start` — opt out now with `crewship telemetry off`.")
+			} else {
+				fmt.Println("Telemetry: not yet configured. This stable build keeps telemetry DISABLED until you opt in with `crewship telemetry on`.")
+			}
 		case enabled:
 			fmt.Println("Telemetry: ENABLED")
 			if installID != "" {
