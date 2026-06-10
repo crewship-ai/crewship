@@ -143,17 +143,26 @@ func TestShutdown_RejectsSubsequentStartMission(t *testing.T) {
 
 // ---- StartMission gates ----
 
-func TestStartMission_RejectsConcurrentStart(t *testing.T) {
-	e := newLifecycleEngine(t, setupTestDB(t))
+func TestStartMission_ConcurrentStartIsIdempotentNoop(t *testing.T) {
 	// Pre-seed the active map as if a concurrent start beat us. The TOCTOU
-	// guard in StartMission checks for this exact sentinel.
+	// guard in StartMission checks for this exact sentinel — and since W5
+	// (boot re-attach) it resolves the race as a successful no-op: the
+	// desired state (a live loop) already holds, so no error and, crucially,
+	// no second loop replacing the existing state.
+	e := newLifecycleEngine(t, setupTestDB(t))
+	existing := &missionState{ID: "mission-busy"}
 	e.mu.Lock()
-	e.active["mission-busy"] = &missionState{ID: "mission-busy"}
+	e.active["mission-busy"] = existing
 	e.mu.Unlock()
 
-	err := e.StartMission(context.Background(), "mission-busy")
-	if err == nil || !strings.Contains(err.Error(), "already active") {
-		t.Errorf("StartMission with active mission = %v, want \"already active\" error", err)
+	if err := e.StartMission(context.Background(), "mission-busy"); err != nil {
+		t.Errorf("StartMission with active mission = %v, want nil (idempotent no-op)", err)
+	}
+	e.mu.Lock()
+	got := e.active["mission-busy"]
+	e.mu.Unlock()
+	if got != existing {
+		t.Error("idempotent StartMission replaced the existing active mission state")
 	}
 }
 
