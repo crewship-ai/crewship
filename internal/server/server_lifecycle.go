@@ -65,6 +65,19 @@ func (s *Server) Start(ctx context.Context) error {
 	go s.wsHub.Run(ctx)
 	go s.orchestrator.Start(ctx)
 
+	// Re-attach mission orchestration loops lost in a previous crewshipd
+	// run. runMissionLoop is in-memory and only ever spawned by API
+	// handlers, so after a restart every IN_PROGRESS mission would sit
+	// driverless forever without this scan. Runs after orphaned-run
+	// recovery (above) so stale RUNNING state is already cleaned, and on
+	// the cancellable run ctx so Shutdown stops the re-attached loops the
+	// same way it stops handler-started ones.
+	if s.db != nil && s.missionEngine != nil {
+		if n := s.missionEngine.ReattachInProgressMissions(ctx); n > 0 {
+			s.logger.Info("re-attached in-progress missions after restart", "count", n)
+		}
+	}
+
 	// Rehydrate stats + file-watcher tracking for crew containers that
 	// survived a previous crewshipd run. Without this, the stats
 	// collector and listening-port scanner stay blind to existing

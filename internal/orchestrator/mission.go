@@ -189,6 +189,12 @@ type TaskInfo struct {
 
 // StartMission begins orchestrating a mission that is in IN_PROGRESS status.
 // It resolves ready tasks and schedules them as assignments.
+//
+// Idempotent: starting a mission that already has a live orchestration loop
+// is a successful no-op. Callers race legitimately — the boot-time re-attach
+// scan (ReattachInProgressMissions) and the API start handlers can both ask
+// for the same mission; whoever loses the race must not surface an error,
+// because the desired state (a loop driving the mission) already holds.
 func (e *MissionEngine) StartMission(ctx context.Context, missionID string) error {
 	e.mu.Lock()
 	if e.stopping {
@@ -197,7 +203,8 @@ func (e *MissionEngine) StartMission(ctx context.Context, missionID string) erro
 	}
 	if _, exists := e.active[missionID]; exists {
 		e.mu.Unlock()
-		return fmt.Errorf("mission %s is already active", missionID)
+		e.logger.Debug("mission already active — StartMission is a no-op", "mission_id", missionID)
+		return nil
 	}
 	// Insert sentinel to prevent concurrent starts (TOCTOU race)
 	e.active[missionID] = &missionState{ID: missionID}
