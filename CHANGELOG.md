@@ -19,21 +19,37 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   `internal/auth/internaltoken`) and injects it via the stdin
   `IPCConfig`. The `internalAuth` middleware validates the binding on
   every `/api/v1/internal/*` request: tampered tokens fail the
-  constant-time MAC check, and any `?workspace_id` that disagrees with
-  the token's bound workspace is rejected with 403 before the handler
-  runs (`internalWsCtx` re-checks as defense in depth). Handlers that
-  scope by a body-carried `workspace_id` (`cost/record`,
-  `journal/emit`, `pipelines/save`) enforce the same binding
-  in-handler via `assertInternalTokenWorkspace`. Pre-fix, an agent
-  that captured the token inside its container could aim internal
-  routes at ANY workspace by picking the `?workspace_id` it wanted —
-  the "symmetric case" left open by the earlier Keeper Phase 2
-  asymmetric fix below. Derivation is stateless (no persistence;
+  constant-time MAC check, and the binding is enforced as a **mandatory
+  request scope** rather than an optional `?workspace_id` check. For a
+  bound token `requireInternal` rejects a `?workspace_id` that disagrees
+  with the binding (403) and **injects** the bound workspace when the
+  caller omits the query — so every handler that filters by
+  `?workspace_id` (webhook secret, list credentials, agent/chat resolve,
+  crew/agent create) is tenant-scoped automatically, with no
+  legacy-unscoped fall-through. Path-param mutations that don't read the
+  query (chat message-count / title, run finalize, credential status)
+  constrain their `WHERE` clause by the bound workspace (foreign rows →
+  404, never mutated). Handlers scoped by a body-carried `workspace_id`
+  (`cost/record`, `journal/emit`, `pipelines/save`, plus the issue /
+  mission / assignment / query / escalation create handlers and the
+  confidence report) enforce the same binding in-handler via
+  `assertInternalTokenWorkspace`. The unbound master token — which
+  authorizes every workspace and so retains cross-tenant power if leaked
+  from a container — is now **pinned to a loopback origin**: a master
+  token presented from a Docker-bridge / LAN IP is refused (403), capping
+  the blast radius of a leaked master to the host trust boundary
+  (`CREWSHIP_INTERNAL_ALLOW_ANY=true` relaxes the pin for reverse-proxy
+  setups). Pre-fix, an agent that captured the token inside its container
+  could aim internal routes at ANY workspace by picking the
+  `?workspace_id` it wanted (or simply omitting it on the routes that
+  ran unscoped) — the "symmetric case" left open by the earlier Keeper
+  Phase 2 asymmetric fix below. Derivation is stateless (no persistence;
   derived tokens roll with the master each boot) and the master token
-  remains valid for host-side trusted callers (chat bridge, LLM proxy)
-  that never enter a container. See the updated "Tenant isolation"
-  section in `docs/security/threat-model.mdx` and the retired "known
-  exception" block in `docs/api-reference/internal.mdx`.
+  remains valid for host-side trusted callers (chat bridge, webhook
+  secret resolver, LLM proxy) that reach the API over loopback and never
+  enter a container. See the updated "Tenant isolation" section in
+  `docs/security/threat-model.mdx` and the retired "known exception"
+  block in `docs/api-reference/internal.mdx`.
 
 - **Cross-tenant scoping on Keeper Phase 2 internal endpoints.** The four
   `/api/v1/internal/keeper/*` handlers (skill-review, behavior,

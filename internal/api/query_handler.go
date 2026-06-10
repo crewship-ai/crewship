@@ -95,6 +95,12 @@ func (h *QueryHandler) Create(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	// PR-F24 F-4: a bound token may only run peer queries inside its own
+	// workspace (body workspace_id scopes the lookup; the auth middleware
+	// can't inspect bodies).
+	if !assertInternalTokenWorkspace(w, r, body.WorkspaceID) {
+		return
+	}
 
 	startTime := time.Now()
 

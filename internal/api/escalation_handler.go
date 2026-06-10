@@ -52,6 +52,12 @@ func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) 
 		})
 		return
 	}
+	// PR-F24 F-4: a bound token may only raise escalations in its own
+	// workspace (body workspace_id is the insert scope; the auth
+	// middleware can't inspect bodies).
+	if !assertInternalTokenWorkspace(w, r, body.WorkspaceID) {
+		return
+	}
 
 	// Look up the from agent
 	var fromAgentID string

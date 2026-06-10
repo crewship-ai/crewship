@@ -138,6 +138,15 @@ func (h *InternalHandler) requireInternal(next http.Handler) http.Handler {
 	// the operator has accepted that X-Internal-Token is the sole guard.
 	allowAny := os.Getenv("CREWSHIP_INTERNAL_ALLOW_ANY") == "true"
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Resolve the request origin once: the network gate, the
+		// master-token loopback pin (F-6), and the audit log all need it.
+		host, _, splitErr := net.SplitHostPort(r.RemoteAddr)
+		if splitErr != nil {
+			host = r.RemoteAddr
+		}
+		ip := net.ParseIP(host)
+		isLoopback := ip != nil && ip.IsLoopback()
+
 		// Network gate first: refuse the request before constant-time
 		// token compare so a public scanner can't even use this endpoint
 		// to oracle the token's presence. Loopback always allowed (in-
@@ -146,12 +155,7 @@ func (h *InternalHandler) requireInternal(next http.Handler) http.Handler {
 		// CREWSHIP_INTERNAL_ALLOW_ANY=true bypasses entirely for setups
 		// where a reverse proxy strips/spoofs RemoteAddr.
 		if !allowAny {
-			host, _, splitErr := net.SplitHostPort(r.RemoteAddr)
-			if splitErr != nil {
-				host = r.RemoteAddr
-			}
-			ip := net.ParseIP(host)
-			if ip == nil || (!ip.IsLoopback() && !ipInPrivateNet(ip)) {
+			if ip == nil || (!isLoopback && !ipInPrivateNet(ip)) {
 				h.logger.Warn("internal API access from non-internal IP — refused",
 					"path", r.URL.Path,
 					"remote_addr", r.RemoteAddr,
@@ -186,18 +190,32 @@ func (h *InternalHandler) requireInternal(next http.Handler) http.Handler {
 			// The binding enforcement: a caller-supplied workspace_id
 			// that disagrees with the token's workspace is the
 			// cross-tenant forgery this token format exists to stop.
-			// Routes without a workspace_id query param pass through;
-			// handlers that need the trusted scope read it via
-			// InternalTokenWorkspaceFromContext.
-			if q := r.URL.Query().Get("workspace_id"); q != "" && q != wsID {
-				h.logger.Warn("internal API cross-workspace request refused",
-					"path", r.URL.Path,
-					"remote_addr", r.RemoteAddr,
-					"token_workspace", wsID,
-					"requested_workspace", q,
-					"user_agent", r.Header.Get("User-Agent"))
-				replyError(w, http.StatusForbidden, "Forbidden")
-				return
+			//
+			// Mandatory-scope injection (PR-F24 hardening): a bound
+			// token is the workspace scope. When the caller supplies a
+			// query workspace_id it must agree (403 on mismatch); when
+			// it omits one, we INJECT the bound workspace into the query
+			// so every handler that filters by ?workspace_id (webhook
+			// secret, list credentials, agent resolve, …) becomes
+			// tenant-scoped automatically instead of silently running
+			// unscoped. There is no "legacy unscoped" fall-through for
+			// bound tokens any more. Path-param handlers that don't read
+			// the query consult InternalTokenWorkspaceFromContext.
+			q := r.URL.Query()
+			if reqWS := q.Get("workspace_id"); reqWS != "" {
+				if reqWS != wsID {
+					h.logger.Warn("internal API cross-workspace request refused",
+						"path", r.URL.Path,
+						"remote_addr", r.RemoteAddr,
+						"token_workspace", wsID,
+						"requested_workspace", reqWS,
+						"user_agent", r.Header.Get("User-Agent"))
+					replyError(w, http.StatusForbidden, "Forbidden")
+					return
+				}
+			} else {
+				q.Set("workspace_id", wsID)
+				r.URL.RawQuery = q.Encode()
 			}
 			ctx := context.WithValue(r.Context(), ctxInternalTokenWS, wsID)
 			next.ServeHTTP(w, r.WithContext(ctx))
@@ -229,6 +247,33 @@ func (h *InternalHandler) requireInternal(next http.Handler) http.Handler {
 				"path", r.URL.Path,
 				"remote_addr", r.RemoteAddr,
 				"token_present", token != "",
+				"user_agent", r.Header.Get("User-Agent"))
+			replyError(w, http.StatusForbidden, "Forbidden")
+			return
+		}
+
+		// Master-token origin pin (PR-F24 / F-6). The unbound master
+		// authorizes EVERY workspace (its bound scope is ""), so a copy
+		// leaked into a crew container would otherwise retain full
+		// cross-tenant power — the exact blast radius the per-workspace
+		// derived tokens exist to cap. The only legitimate master-token
+		// callers are host-side trusted services (chat-bridge resolver,
+		// LLM-proxy cost monitor, webhook secret resolver) that dial the
+		// internal API in-process over loopback (127.0.0.1 / ::1; see
+		// WithInternalLoopbackURL and the default NextjsURL). Sidecars,
+		// which reach us from a Docker-bridge / LAN IP, always carry a
+		// workspace-bound token and took the branch above. So a master
+		// token arriving from a non-loopback origin is, by construction,
+		// either a leak being replayed from inside a container or a
+		// misconfiguration — refuse it. Operators who front crewshipd
+		// with a reverse proxy that rewrites RemoteAddr opt back in with
+		// CREWSHIP_INTERNAL_ALLOW_ANY=true (the same kill-switch that
+		// relaxes the network gate), accepting that the token is then
+		// the sole guard.
+		if !allowAny && !isLoopback {
+			h.logger.Warn("internal API master token from non-loopback origin refused",
+				"path", r.URL.Path,
+				"remote_addr", r.RemoteAddr,
 				"user_agent", r.Header.Get("User-Agent"))
 			replyError(w, http.StatusForbidden, "Forbidden")
 			return

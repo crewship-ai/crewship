@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
 	"github.com/crewship-ai/crewship/internal/encryption"
 )
 
@@ -104,14 +105,50 @@ func TestRequireInternal_NetworkGate(t *testing.T) {
 	t.Run("docker_bridge_rfc1918_passes_gate", func(t *testing.T) {
 		t.Setenv("CREWSHIP_INTERNAL_ALLOW_ANY", "")
 		wrapped := h.requireInternal(downstream)
-		// 172.17.0.x is the default Docker bridge subnet on Linux.
+		// 172.17.0.x is the default Docker bridge subnet on Linux. This is
+		// the real sidecar origin, so it carries a WORKSPACE-BOUND token
+		// (PR-F24): a bare master token from a bridge IP is refused by the
+		// F-6 loopback pin. The bound token both passes the network gate
+		// and authorizes its workspace, which is what we assert here.
+		req := httptest.NewRequest(http.MethodGet, "/x", nil)
+		req.RemoteAddr = "172.17.0.5:54321"
+		req.Header.Set("X-Internal-Token", internaltoken.DeriveWorkspaceToken("tok", "ws_bridge"))
+		rr := httptest.NewRecorder()
+		wrapped.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Errorf("status = %d, want 200", rr.Code)
+		}
+	})
+
+	t.Run("docker_bridge_master_token_refused", func(t *testing.T) {
+		// F-6: a bare master token replayed from a Docker-bridge IP (the
+		// leaked-master-inside-a-container vector) is refused even though
+		// it passes the network gate and the constant-time compare. Only
+		// loopback (host-side trusted) callers may use the master.
+		t.Setenv("CREWSHIP_INTERNAL_ALLOW_ANY", "")
+		wrapped := h.requireInternal(downstream)
+		req := httptest.NewRequest(http.MethodGet, "/x", nil)
+		req.RemoteAddr = "172.17.0.5:54321"
+		req.Header.Set("X-Internal-Token", "tok")
+		rr := httptest.NewRecorder()
+		wrapped.ServeHTTP(rr, req)
+		if rr.Code != http.StatusForbidden {
+			t.Errorf("status = %d, want 403 (master token from bridge origin must be refused)", rr.Code)
+		}
+	})
+
+	t.Run("docker_bridge_master_token_allowed_with_allow_any", func(t *testing.T) {
+		// Operators fronting crewshipd with a RemoteAddr-rewriting proxy
+		// opt back into token-only via the existing kill-switch.
+		t.Setenv("CREWSHIP_INTERNAL_ALLOW_ANY", "true")
+		wrapped := h.requireInternal(downstream)
 		req := httptest.NewRequest(http.MethodGet, "/x", nil)
 		req.RemoteAddr = "172.17.0.5:54321"
 		req.Header.Set("X-Internal-Token", "tok")
 		rr := httptest.NewRecorder()
 		wrapped.ServeHTTP(rr, req)
 		if rr.Code != http.StatusOK {
-			t.Errorf("status = %d, want 200", rr.Code)
+			t.Errorf("status = %d, want 200 (CREWSHIP_INTERNAL_ALLOW_ANY relaxes the loopback pin)", rr.Code)
 		}
 	})
 

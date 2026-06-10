@@ -185,6 +185,12 @@ func (h *InternalIssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, r, http.StatusBadRequest, "title, crew_id, and workspace_id are required")
 		return
 	}
+	// PR-F24 F-4: a bound token may only write into its own workspace.
+	// requireInternal sees only the query string; this guards the
+	// body-carried workspace_id (403 on a foreign tenant).
+	if !assertInternalTokenWorkspace(w, r, req.WorkspaceID) {
+		return
+	}
 	if req.Priority == "" {
 		req.Priority = "none"
 	}
@@ -331,6 +337,10 @@ func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Reque
 		writeProblem(w, r, http.StatusBadRequest, "workspace_id is required")
 		return
 	}
+	// PR-F24 F-4: bound token may only update its own workspace's issues.
+	if !assertInternalTokenWorkspace(w, r, req.WorkspaceID) {
+		return
+	}
 
 	// Find the issue
 	var missionID, currentStatus string
@@ -419,6 +429,10 @@ func (h *InternalIssueHandler) CreateComment(w http.ResponseWriter, r *http.Requ
 	}
 	if req.Body == "" || req.WorkspaceID == "" {
 		writeProblem(w, r, http.StatusBadRequest, "body and workspace_id are required")
+		return
+	}
+	// PR-F24 F-4: bound token may only comment on its own workspace's issues.
+	if !assertInternalTokenWorkspace(w, r, req.WorkspaceID) {
 		return
 	}
 

@@ -177,6 +177,18 @@ func (h *InternalHandler) UpdateRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Tenant scope (PR-F24 F-5). The run's owning workspace comes from
+	// its run.started journal entry, not from the request. A bound token
+	// may only finalize runs in its own workspace; otherwise an agent
+	// that enumerated a run id could flip a foreign tenant's run status
+	// (and trip its consolidator / dashboard events). Master-token
+	// (host-side) callers have an empty scope and are unaffected. 404,
+	// not 403, so we don't confirm the run exists in another tenant.
+	if scope := InternalTokenWorkspaceFromContext(r.Context()); scope != "" && scope != workspaceID {
+		replyError(w, http.StatusNotFound, "run not found")
+		return
+	}
+
 	// Idempotency guard: if a terminal run.* entry already exists for this
 	// trace, treat the call as a no-op success. Sidecar retries (network
 	// blip, 503 retry) would otherwise append duplicate run.completed/

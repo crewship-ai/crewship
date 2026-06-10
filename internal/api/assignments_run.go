@@ -44,6 +44,12 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	// PR-F24 F-4: a bound token may only dispatch assignments in its own
+	// workspace (body workspace_id is the dispatch scope; the auth
+	// middleware can't inspect bodies).
+	if !assertInternalTokenWorkspace(w, r, body.WorkspaceID) {
+		return
+	}
 
 	// Look up the assigning agent from the parent chat
 	var assignedByID string

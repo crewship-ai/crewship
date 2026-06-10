@@ -343,14 +343,45 @@ than per-user JWTs. Tokens come in two forms:
   workspace_id)>`, `internal/auth/internaltoken`) are what sidecars
   receive at startup via their stdin `IPCConfig`. The middleware
   re-derives the MAC from the embedded workspace ID and the in-memory
-  master secret, and rejects (403) any request whose `?workspace_id`
-  disagrees with the token's binding — so a token captured inside a
-  container only ever authorizes the workspace it was issued for.
-  Derivation is stateless; tokens roll with the master on every boot.
+  master secret, so a token captured inside a container only ever
+  authorizes the workspace it was issued for. Derivation is stateless;
+  tokens roll with the master on every boot.
+
+  The binding is enforced as a **mandatory request scope**, not as an
+  optional `?workspace_id` check (that earlier shape left a hole: a
+  bound token that simply *omitted* the query fell through to unscoped
+  reach). `requireInternal` now, for a bound token:
+    - rejects (403) a supplied `?workspace_id` that disagrees with the
+      binding; and
+    - **injects** the bound workspace into `?workspace_id` when the
+      caller omits it.
+  Every handler that filters by `?workspace_id` (webhook secret, list
+  credentials, agent/chat resolve, crew/agent create, …) is therefore
+  tenant-scoped automatically — there is no "legacy unscoped"
+  fall-through for bound tokens. Path-param mutations that do not read
+  the query (chat message-count / title, run finalize, credential
+  status) additionally constrain their `WHERE` clause by the bound
+  workspace from context (foreign rows → 404, never mutated). Handlers
+  scoped by a `workspace_id` carried only in the JSON body
+  (issue/mission/assignment/query/escalation create, confidence report,
+  cost record, journal emit, pipeline save) enforce the same binding
+  in-handler via `assertInternalTokenWorkspace` (403 on a foreign
+  tenant), since the auth middleware cannot inspect bodies.
 - **The master token** (`CREWSHIP_INTERNAL_TOKEN`) never enters a
   container. It remains valid for host-side trusted callers (the chat
-  bridge resolver and the LLM proxy cost monitor) that talk to the
-  internal API from inside the trust boundary.
+  bridge resolver, the webhook secret resolver, and the LLM proxy cost
+  monitor) that dial the internal API in-process over **loopback**
+  (127.0.0.1 / ::1). Because the master's bound scope is empty it
+  authorizes every workspace, so a copy leaked into a crew container
+  would otherwise retain full cross-tenant power. To cap that blast
+  radius, `requireInternal` **pins the master to a loopback origin**: a
+  master token arriving from a Docker-bridge / LAN IP (the only place a
+  container-side leak could be replayed from) is refused with 403.
+  Sidecars reach the API from a bridge IP and always carry a bound
+  token, so they are unaffected. Operators who front crewshipd with a
+  reverse proxy that rewrites `RemoteAddr` opt back into token-only with
+  `CREWSHIP_INTERNAL_ALLOW_ANY=true` (the same kill-switch that relaxes
+  the network gate), accepting that the token is then the sole guard.
 
 For internal routes, the IPC layer additionally projects
 `IPCConfig.workspace_id` from the orchestrator's sidecar contract
@@ -384,13 +415,29 @@ cleanup now that the binding holds, no longer a security gap.
 
 Internal routes that carry `workspace_id` only in the JSON body
 (`POST /internal/cost/record`, `POST /internal/journal/emit`,
-`POST /internal/pipelines/save`) enforce the same binding in-handler
-(`assertInternalTokenWorkspace`), since the auth middleware cannot
-inspect bodies. Residual: the binding derives its trust from the
-sidecar process boundary (UID 1002 vs. agent UID 1001) — an attacker
-who fully compromises the sidecar process itself still acts with that
-workspace's authority, which is the intended blast-radius cap, not a
-bypass.
+`POST /internal/pipelines/save`, plus the issue/mission/assignment/
+query/escalation create handlers and the confidence report) enforce the
+same binding in-handler (`assertInternalTokenWorkspace`, or — where the
+workspace is resolved from the DB rather than the body, as in the
+confidence report — a direct check against the resolved workspace),
+since the auth middleware cannot inspect bodies.
+
+**Residuals (intended, not bypasses):**
+
+- The binding derives its trust from the sidecar process boundary
+  (UID 1002 vs. agent UID 1001). An attacker who fully compromises the
+  sidecar process itself still acts with that one workspace's authority
+  — the intended blast-radius cap.
+- The master-token loopback pin assumes host-side trusted callers reach
+  the internal API over loopback, which holds for the in-process
+  callers in this codebase (`internal/chatbridge/resolver.go` dials
+  `WithInternalLoopbackURL` = `127.0.0.1:<port>`; the LLM-proxy
+  `TokenSyncer` / `CredentialMonitor` dial `cfg.Auth.NextjsURL`, which
+  defaults to `http://localhost:<port>`). If an operator overrides
+  `CREWSHIP_NEXTJS_URL` to a non-loopback host so the proxy dials the
+  API across a network hop, those master-token calls will be refused
+  unless `CREWSHIP_INTERNAL_ALLOW_ANY=true` is also set — a deliberate
+  fail-closed posture, documented here rather than silently relaxed.
 
 ### Hardening surface — what's locked vs. what's tracked
 
@@ -399,7 +446,10 @@ bypass.
 | `self_learning_enabled` cross-tenant lookup | ✅ closed asymmetric — `workspace_id` in WHERE clause |
 | F4 handler body / ctx workspace consistency | ✅ closed — `assertBodyWorkspaceMatchesCtx` |
 | F4 handler body / ctx workspace symmetric forgery | ✅ closed — PR-F24 workspace-bound `X-Internal-Token` (HMAC-derived, validated in middleware) |
-| Body-workspace internal routes (cost / journal / pipeline save) | ✅ closed — in-handler `assertInternalTokenWorkspace` binding check |
+| Bound token, no `?workspace_id` → unscoped reach (webhook secret / list credentials / agent+chat resolve) | ✅ closed — `requireInternal` injects bound workspace as mandatory scope (F-1, F-2, F-3) |
+| Body-workspace internal routes (cost / journal / pipeline save / issue / mission / assignment / query / escalation / confidence) | ✅ closed — in-handler `assertInternalTokenWorkspace` binding check (F-4) |
+| Path-param mutations cross-tenant (chat count/title, run finalize, credential status) | ✅ closed — `WHERE workspace_id = <bound>` from context (F-5) |
+| Leaked master token replayed from a container | ✅ mitigated — master accepted only from a loopback origin (F-6); residual capped to the host trust boundary |
 | F4 handler body-workspace drop | ⏳ PR-F25 (eliminate body workspace param — cleanup, no longer a security gap) |
 | Lessons memory tier agent-author write | ✅ closed — dispatcher rejects `tier="lessons"` |
 | Memory file injection scan (READ path) | ✅ — 9 rules + 14 unicode codepoints |

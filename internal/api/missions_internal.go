@@ -57,6 +57,12 @@ func (h *InternalMissionHandler) Create(w http.ResponseWriter, r *http.Request) 
 		replyError(w, http.StatusBadRequest, "title, lead_agent_id, crew_id, workspace_id required")
 		return
 	}
+	// PR-F24 F-4: a bound token may only create missions in its own
+	// workspace; the body-carried workspace_id is checked here because
+	// requireInternal cannot inspect request bodies.
+	if !assertInternalTokenWorkspace(w, r, req.WorkspaceID) {
+		return
+	}
 
 	// SECURITY (defense-in-depth): verify the lead agent actually belongs to
 	// the supplied crew+workspace. Without this, a compromised agent could

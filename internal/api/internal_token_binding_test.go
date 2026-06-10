@@ -35,6 +35,13 @@ func bindTestRequest(token, query string) *http.Request {
 // the compatibility half: the derived token a sidecar receives at
 // startup must authorize requests for its own workspace (with or
 // without the ?workspace_id query parameter the sidecar attaches).
+//
+// PR-F24 hardening: the "without_workspace_query" case no longer pins
+// the hole (bound token, no query → 200 with UNSCOPED reach). It pins
+// the new mandatory-scope semantics instead: requireInternal INJECTS
+// the bound workspace into the request query so every handler that
+// filters by ?workspace_id is tenant-scoped automatically, with no
+// "legacy unscoped" fall-through for bound tokens.
 func TestRequireInternal_WorkspaceBoundToken_AuthorizesOwnWorkspace(t *testing.T) {
 	t.Parallel()
 	h := NewInternalHandler(nil, bindTestMaster, testLogger())
@@ -48,9 +55,10 @@ func TestRequireInternal_WorkspaceBoundToken_AuthorizesOwnWorkspace(t *testing.T
 		{"without_workspace_query", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			var sawBound string
+			var sawBound, sawQueryWS string
 			downstream := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				sawBound = InternalTokenWorkspaceFromContext(r.Context())
+				sawQueryWS = r.URL.Query().Get("workspace_id")
 				w.WriteHeader(http.StatusOK)
 			})
 			rr := httptest.NewRecorder()
@@ -60,6 +68,15 @@ func TestRequireInternal_WorkspaceBoundToken_AuthorizesOwnWorkspace(t *testing.T
 			}
 			if sawBound != "ws_a" {
 				t.Errorf("downstream saw bound workspace %q, want ws_a", sawBound)
+			}
+			// The mandatory-scope guarantee: whether or not the caller
+			// supplied the query, downstream MUST observe the bound
+			// workspace projected onto ?workspace_id — so a query-scoped
+			// handler (webhook secret, list credentials, …) can never run
+			// unscoped under a bound token.
+			if sawQueryWS != "ws_a" {
+				t.Errorf("downstream query workspace_id = %q, want ws_a "+
+					"(bound token must inject the scope, never fall through unscoped)", sawQueryWS)
 			}
 		})
 	}
