@@ -415,12 +415,25 @@ cleanup now that the binding holds, no longer a security gap.
 
 Internal routes that carry `workspace_id` only in the JSON body
 (`POST /internal/cost/record`, `POST /internal/journal/emit`,
-`POST /internal/pipelines/save`, plus the issue/mission/assignment/
-query/escalation create handlers and the confidence report) enforce the
-same binding in-handler (`assertInternalTokenWorkspace`, or — where the
-workspace is resolved from the DB rather than the body, as in the
-confidence report — a direct check against the resolved workspace),
-since the auth middleware cannot inspect bodies.
+`POST /internal/pipelines/save`, `POST /internal/mcp-tool-calls`, plus
+the issue/mission/assignment/query/escalation create handlers and the
+confidence report) enforce the same binding in-handler
+(`assertInternalTokenWorkspace`, or — where the workspace is resolved
+from the DB rather than the body, as in the confidence report — a
+direct check against the resolved workspace), since the auth middleware
+cannot inspect bodies.
+
+The cross-crew messaging surface (`/internal/crew-messages`,
+`/internal/crew-files/{crewId}`) historically authorized purely via
+active `crew_connections` rows, which left a captured bound token able
+to read/send messages and read/write shared files for any *foreign*
+workspace's connected crews. Round 2 (R-2) closed this: when the
+request authenticated with a workspace-bound token, every
+caller-supplied crew ID (`from_crew_id` / `to_crew_id` / `crew_id` /
+`requester_crew_id` / the path `crewId`) must resolve to the token's
+bound workspace (403 otherwise; unknown crews get the same 403 so the
+check is not an existence oracle). Master-token loopback callers keep
+the connection-only model.
 
 **Residuals (intended, not bypasses):**
 
@@ -450,6 +463,8 @@ since the auth middleware cannot inspect bodies.
 | Body-workspace internal routes (cost / journal / pipeline save / issue / mission / assignment / query / escalation / confidence) | ✅ closed — in-handler `assertInternalTokenWorkspace` binding check (F-4) |
 | Path-param mutations cross-tenant (chat count/title, run finalize, credential status) | ✅ closed — `WHERE workspace_id = <bound>` from context (F-5) |
 | Leaked master token replayed from a container | ✅ mitigated — master accepted only from a loopback origin (F-6); residual capped to the host trust boundary |
+| MCP tool-call audit writer (`POST /internal/mcp-tool-calls`) body workspace | ✅ closed — in-handler `assertInternalTokenWorkspace` (R-1) |
+| Cross-crew messaging / shared files (`/internal/crew-messages`, `/internal/crew-files`) connection-only auth | ✅ closed — caller-supplied crew IDs must resolve to the token's bound workspace (R-2) |
 | F4 handler body-workspace drop | ⏳ PR-F25 (eliminate body workspace param — cleanup, no longer a security gap) |
 | Lessons memory tier agent-author write | ✅ closed — dispatcher rejects `tier="lessons"` |
 | Memory file injection scan (READ path) | ✅ — 9 rules + 14 unicode codepoints |
