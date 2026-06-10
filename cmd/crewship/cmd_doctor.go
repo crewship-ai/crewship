@@ -612,11 +612,20 @@ func checkTelemetryStatus(ctx context.Context, db *sql.DB, dsn string) checkResu
 		}
 	}
 	if !asked {
+		// Default-by-version (crashreport.DefaultOptIn): prerelease/dev
+		// builds flip to ENABLED on next start, stable builds stay off
+		// until the operator opts in. Surface the one that applies.
+		detail := "telemetry not yet configured (stable build: stays DISABLED until you opt in)"
+		hint := "opt in with 'crewship telemetry on'"
+		if crashreport.DefaultOptIn(version) {
+			detail = "telemetry not yet configured (prerelease/dev build: will default to ENABLED on next start)"
+			hint = "run 'crewship telemetry status' for details, or opt out with 'crewship telemetry off'"
+		}
 		return checkResult{
 			name:   "telemetry status",
 			status: "WARN",
-			detail: "telemetry not yet configured (will default to ENABLED on next start)",
-			hint:   "run 'crewship telemetry status' for details, or opt out with 'crewship telemetry off'",
+			detail: detail,
+			hint:   hint,
 		}
 	}
 	if !enabled {
@@ -691,9 +700,10 @@ func checkSentryDSNWiring(ctx context.Context, db *sql.DB, dsn string) checkResu
 		}
 	}
 	if !asked {
-		// Beta default is opt-in-on-first-start, so the operator WILL want
-		// the DSN wired before that flip. INFO + hint is the right shape:
-		// nothing is broken yet, but here's what to set before it matters.
+		// Prerelease/dev builds flip consent on at first start, and a
+		// stable-build operator may opt in any time — either way the DSN
+		// should be wired before it matters. INFO + hint is the right
+		// shape: nothing is broken yet, but here's what to set.
 		return checkResult{
 			name:   "sentry DSN wiring",
 			status: "INFO",
