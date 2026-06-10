@@ -312,6 +312,19 @@ func (h *InternalHandler) RecordMCPToolCall(w http.ResponseWriter, r *http.Reque
 		replyError(w, http.StatusBadRequest, "workspace_id, agent_id, mcp_server_id, and tool_name are required")
 		return
 	}
+	// PR-F24 R-1: a bound token may only write audit rows attributed to
+	// its own workspace. requireInternal sees only the query string;
+	// this guards the body-carried workspace_id (403 on a foreign
+	// tenant), same as the F-4 body-workspace writers.
+	if !assertInternalTokenWorkspace(w, r, body.WorkspaceID) {
+		return
+	}
+	// PR-F24 foreign-ID closure: crew_id is independent of the workspace_id
+	// checked above — prove it belongs to the bound workspace so a ws-A
+	// token can't write an audit row attributed to a ws-B crew.
+	if !assertBoundCrewWorkspaceDB(w, r, h.db, h.logger, body.CrewID) {
+		return
+	}
 	if body.MCPServerScope == "" {
 		body.MCPServerScope = "workspace"
 	}

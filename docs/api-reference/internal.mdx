@@ -6,12 +6,12 @@ icon: "lock"
 
 # Internal IPC
 
-Routes mounted under `/api/v1/internal/*` are not part of the public API. They are the surface used by the **sidecar** (running as UID 1002 inside every crew container) and a small set of orchestrator helpers. The sidecar holds the only copy of `CREWSHIP_INTERNAL_TOKEN` inside a container; agents (UID 1001) cannot read it from disk or process memory.
+Routes mounted under `/api/v1/internal/*` are not part of the public API. They are the surface used by the **sidecar** (running as UID 1002 inside every crew container) and a small set of orchestrator helpers. The sidecar holds the only internal-API credential inside a container — a **workspace-bound token** derived from `CREWSHIP_INTERNAL_TOKEN` (never the master itself); agents (UID 1001) cannot read it from disk or process memory.
 
 This page is here so integrators building their own sidecar image, runtime adapter, or replay tool understand the contract. **End users should never call these endpoints directly.**
 
 <Note>
-  Every route below is wrapped in `internalAuth` and authenticated with the **`X-Internal-Token`** header. The token lives only inside the sidecar (UID 1002); agents (UID 1001) cannot read it. These endpoints are **not** for external clients.
+  Every route below is wrapped in `internalAuth` and authenticated with the **`X-Internal-Token`** header. Sidecars carry a **workspace-bound** token (derived per workspace from the master at sidecar start) that only authorizes their own workspace; the token lives only inside the sidecar (UID 1002); agents (UID 1001) cannot read it. These endpoints are **not** for external clients.
 </Note>
 
 ## Endpoints
@@ -79,12 +79,26 @@ Every internal route is wrapped in `internalAuth`:
 X-Internal-Token: <token>
 ```
 
-The token is generated at server startup if `CREWSHIP_INTERNAL_TOKEN` is not set in the environment. For multi-host deployments, set it explicitly on every host so a sidecar restart on host A doesn't suddenly fail when its request lands on host B.
+The master token is generated at server startup if `CREWSHIP_INTERNAL_TOKEN` is not set in the environment. For multi-host deployments, set it explicitly on every host so a sidecar restart on host A doesn't suddenly fail when its request lands on host B.
 
-Workspace / crew / agent / mission scope is **not** taken from request bodies (with one documented exception, see the next paragraph). The IPC layer reads it from the sidecar's `IPCConfig` (set by the orchestrator at exec time and pinned to the container) and projects it onto the request. An agent that captured the token still cannot forge cross-tenant attribution because the auth context overrides whatever they put in the body.
+**Sidecars never receive the master token.** At sidecar start, the orchestrator derives a **workspace-bound token** — `wsv1.<workspace_id>.<hex(HMAC-SHA256(master, derivation_context || workspace_id))>` — and injects it via the sidecar's stdin `IPCConfig`. The `derivation_context` is a fixed, versioned domain-separation string (`"crewship internal-token workspace binding v1\x00"`); the MAC is computed over that context concatenated with the workspace ID, **not** over the workspace ID alone. Use `internaltoken.DeriveWorkspaceToken` (in `internal/auth/internaltoken`) as the canonical implementation — a custom sidecar that hashes only the workspace ID will mint tokens that fail validation. The `internalAuth` middleware validates the binding on every request: the MAC is re-derived from the embedded `workspace_id` and the in-memory master. The binding is enforced as a **mandatory request scope**:
 
-<Accordion title="Known exception: the keeper/* family and tenant isolation (PR-F24 / PR-F25)" id="tenant-isolation-on-internal-auth-handlers">
-  **Known exception (tracked as PR-F24 / PR-F25):** the `/api/v1/internal/keeper/*` family (skill-review, behavior, memory-health, negative-learning) currently reads `body.workspace_id` AND `ctx.workspace_id` (the latter set by the `internalWsCtx` middleware from the `?workspace_id` query parameter). The handlers enforce `body.workspace_id == ctx.workspace_id` via the `assertBodyWorkspaceMatchesCtx` helper in `internal/api/keeper_phase2.go` so asymmetric forgery is rejected at the handler boundary, but the symmetric case (caller picks one workspace consistently across query + body) is only closed once the `X-Internal-Token` itself is bound to a workspace by `internalWsCtx`. Tracking the token-to-workspace binding refactor as `PR-F24` and the body-workspace-drop architectural cleanup as `PR-F25` — see PRD-AGENT-EVOLUTION-2026.md §6.1.
+- a `?workspace_id` query parameter that disagrees with the token's bound workspace is rejected with `403` before the handler runs; and
+- when the caller omits `?workspace_id`, the middleware **injects** the bound workspace into the query — so every handler that filters by `?workspace_id` (`/agents/{id}/webhook-secret`, `/credentials`, `/agents/{id}/resolve`, `/chats/{id}/resolve`, `/crews`, …) is tenant-scoped automatically. There is no "legacy unscoped" path for a bound token.
+
+Path-param mutations that don't read the query (chat message-count / title, run finalize, credential status) additionally constrain their lookup by the bound workspace; a foreign-tenant row returns `404`, never mutated. Handlers scoped by a `workspace_id` carried only in the JSON body (`/cost/record`, `/journal/emit`, `/pipelines/save`, and the issue / mission / assignment / query / escalation create handlers and the confidence report) enforce the binding in-handler via `assertInternalTokenWorkspace` (`403` on a foreign tenant), since the auth middleware cannot inspect bodies.
+
+Derivation is stateless, so tokens stay valid for the lifetime of one server boot and roll automatically with the master on restart. The unbound master token remains valid for host-side trusted callers (chat bridge, webhook secret resolver, LLM proxy monitor) that never enter a container — but only from a **loopback** origin: a master token arriving from a Docker-bridge / LAN IP is refused with `403` (capping the blast radius of a master copy leaked into a container). Set `CREWSHIP_INTERNAL_ALLOW_ANY=true` to relax both the loopback pin and the network gate when a reverse proxy rewrites `RemoteAddr`.
+
+Workspace / crew / agent / mission scope is **not** taken from request bodies in a way that can cross tenants. The IPC layer reads it from the sidecar's `IPCConfig` (set by the orchestrator at exec time and pinned to the container) and projects it onto the request, and the token binding constrains every handler to its workspace. An agent that captured the sidecar's token cannot forge cross-tenant attribution: the token only authorizes the workspace it is cryptographically bound to.
+
+<Accordion title="Resolved exception: the keeper/* family and tenant isolation (PR-F24 closed; PR-F25 pending)" id="tenant-isolation-on-internal-auth-handlers">
+  The `/api/v1/internal/keeper/*` family (skill-review, behavior, memory-health, negative-learning) reads `body.workspace_id` AND `ctx.workspace_id` (the latter set by the `internalWsCtx` middleware from the `?workspace_id` query parameter). Historically this family carried a documented cross-tenant gap. Both halves are now closed:
+
+  - **Asymmetric forgery** (workspace A in query, workspace B in body) is rejected at the handler boundary by the `assertBodyWorkspaceMatchesCtx` helper in `internal/api/keeper_phase2.go`.
+  - **Symmetric forgery** (caller picks one foreign workspace consistently across query + body) is closed by `PR-F24`: the `X-Internal-Token` a sidecar holds is bound to its workspace, and both `internalAuth` and `internalWsCtx` reject a `?workspace_id` that disagrees with the binding.
+
+  The remaining cleanup, `PR-F25`, drops `body.workspace_id` from these four handlers entirely and derives workspace from context only — an architectural simplification, no longer a security gap.
 </Accordion>
 
 ## Route catalog

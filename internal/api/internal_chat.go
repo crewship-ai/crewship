@@ -60,9 +60,18 @@ func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 		agentID  string
 		openedBy sql.NullString
 	)
-	err := h.db.QueryRowContext(r.Context(),
-		"SELECT agent_id, created_by FROM chats WHERE id = ?",
-		chatID).Scan(&agentID, &openedBy)
+	// Tenant scope (PR-F24 F-2). A workspace-bound token constrains the
+	// chat lookup to its workspace; a foreign chat id then yields the
+	// same ErrNoRows → 404 as a missing one (don't leak cross-tenant
+	// existence). Master-token (host-side) callers have an empty scope
+	// and keep the id-only behavior.
+	chatQuery := "SELECT agent_id, created_by FROM chats WHERE id = ?"
+	chatArgs := []any{chatID}
+	if scope := InternalTokenWorkspaceFromContext(r.Context()); scope != "" {
+		chatQuery += " AND workspace_id = ?"
+		chatArgs = append(chatArgs, scope)
+	}
+	err := h.db.QueryRowContext(r.Context(), chatQuery, chatArgs...).Scan(&agentID, &openedBy)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			replyError(w, http.StatusNotFound, "Chat not found")
@@ -94,9 +103,15 @@ func (h *InternalHandler) IncrementMessageCount(w http.ResponseWriter, r *http.R
 		replyError(w, http.StatusBadRequest, "Invalid delta")
 		return
 	}
-	res, err := h.db.ExecContext(r.Context(),
-		"UPDATE chats SET message_count = message_count + ? WHERE id = ?",
-		body.Delta, chatID)
+	// Tenant scope (PR-F24 F-5): a bound token may only bump its own
+	// workspace's chats. A foreign chat id matches zero rows → 404 below.
+	mcQuery := "UPDATE chats SET message_count = message_count + ? WHERE id = ?"
+	mcArgs := []any{body.Delta, chatID}
+	if scope := InternalTokenWorkspaceFromContext(r.Context()); scope != "" {
+		mcQuery += " AND workspace_id = ?"
+		mcArgs = append(mcArgs, scope)
+	}
+	res, err := h.db.ExecContext(r.Context(), mcQuery, mcArgs...)
 	if err != nil {
 		h.logger.Error("increment message count", "error", err)
 		replyError(w, http.StatusInternalServerError, "Internal server error")
@@ -130,9 +145,15 @@ func (h *InternalHandler) UpdateChatTitle(w http.ResponseWriter, r *http.Request
 		replyError(w, http.StatusBadRequest, "title required")
 		return
 	}
-	res, err := h.db.ExecContext(r.Context(),
-		"UPDATE chats SET title = ? WHERE id = ? AND (title IS NULL OR title = '')",
-		body.Title, chatID)
+	// Tenant scope (PR-F24 F-5): a bound token may only title its own
+	// workspace's chats; a foreign id matches zero rows → 404 below.
+	titleQuery := "UPDATE chats SET title = ? WHERE id = ? AND (title IS NULL OR title = '')"
+	titleArgs := []any{body.Title, chatID}
+	if scope := InternalTokenWorkspaceFromContext(r.Context()); scope != "" {
+		titleQuery += " AND workspace_id = ?"
+		titleArgs = append(titleArgs, scope)
+	}
+	res, err := h.db.ExecContext(r.Context(), titleQuery, titleArgs...)
 	if err != nil {
 		h.logger.Error("update chat title", "error", err)
 		replyError(w, http.StatusInternalServerError, "Internal server error")
