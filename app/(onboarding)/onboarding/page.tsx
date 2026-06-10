@@ -15,7 +15,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { Checkbox } from "@/components/ui/checkbox"
 import { CLI_ADAPTERS, CLI_ADAPTER_KEYS, getModelsForAdapter } from "@/lib/cli-adapters"
+import { buildOnboardingSetupBody } from "@/lib/onboarding-setup"
 import { getAdapterBrand, ADAPTER_TOKEN_GUIDE, ADAPTER_TOKEN_CMD, ADAPTER_CLI_INSTALL } from "@/lib/cli-adapter-brand"
 import { LANGUAGES } from "@/lib/languages"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -135,6 +137,12 @@ export default function OnboardingPage() {
   const [adapter, setAdapter] = useState<string>("CLAUDE_CODE")
   const [model, setModel] = useState<string>("")
   const [apiKey, setApiKey] = useState("")
+  // Crash-reporting consent. Seeded from the server's current state (see
+  // the /api/v1/system/telemetry effect below) so the checkbox reflects
+  // the build's default — prerelease/dev servers boot default-on, stable
+  // servers default-off. The user's explicit answer rides the setup
+  // submission as `telemetry_opt_in` and is sticky server-side.
+  const [telemetryOptIn, setTelemetryOptIn] = useState(false)
   const [pairRemainingSec, setPairRemainingSec] = useState<number | null>(null)
 
   const [pairCode, setPairCode] = useState<string | null>(null)
@@ -185,6 +193,17 @@ export default function OnboardingPage() {
       .then((r) => (r.ok ? r.json() : { available: false }))
       .then((d) => setRuntimeReady(Boolean(d.available)))
       .catch(() => setRuntimeReady(false))
+  }, [])
+
+  // Seed the telemetry consent checkbox from the server's current state:
+  // prerelease/dev builds boot with crash reporting defaulted on, stable
+  // builds default off (internal/crashreport.DefaultOptIn). On any fetch
+  // failure the checkbox stays unticked — the privacy-preserving default.
+  useEffect(() => {
+    fetch("/api/v1/system/telemetry")
+      .then((r) => (r.ok ? r.json() : { enabled: false }))
+      .then((d) => setTelemetryOptIn(Boolean(d.enabled)))
+      .catch(() => undefined)
   }, [])
 
   // Seed the language picker from the browser locale so a Czech
@@ -344,22 +363,19 @@ export default function OnboardingPage() {
     setError(null)
     try {
       const adapterCfg = CLI_ADAPTERS[adapter]
-      const body: Record<string, unknown> = {
-        workspace_name: workspaceName,
-        preferred_language: language,
-        crew_template_slug: crewSlug && crewSlug !== "blank" ? crewSlug : undefined,
-        crew_name: crewSlug === "blank" ? "My Crew" : undefined,
-        agent_name: crewSlug === "blank" ? `${adapterCfg?.label ?? "Agent"} #1` : undefined,
-        cli_adapter: adapter,
-        llm_provider: adapterCfg?.provider,
-        llm_model: model || undefined,
-        credential_name: adapterCfg?.envVar,
-        // API key is always sent now — agents need it regardless of
-        // browser vs CLI mode. Pairing mode just decides how the
-        // human drives Crewship.
-        credential_value: apiKey,
-        pairing_mode: mode === "cli",
-      }
+      const body = buildOnboardingSetupBody({
+        workspaceName,
+        language,
+        crewSlug,
+        adapter,
+        adapterLabel: adapterCfg?.label,
+        provider: adapterCfg?.provider,
+        envVar: adapterCfg?.envVar,
+        model,
+        apiKey,
+        pairingMode: mode === "cli",
+        telemetryOptIn,
+      })
       const res = await fetch("/api/v1/onboarding/setup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -886,6 +902,33 @@ export default function OnboardingPage() {
                         </div>
                       </div>
                     )}
+
+                    {/* TELEMETRY CONSENT — explicit choice, pre-ticked to
+                        the build's default (prerelease/dev = on, stable
+                        = off; seeded from /api/v1/system/telemetry). The
+                        answer is sticky server-side, same as running
+                        `crewship telemetry on|off`. */}
+                    <label
+                      htmlFor="telemetry_opt_in"
+                      className="flex items-start gap-2.5 rounded-xl border border-border p-3.5 cursor-pointer hover:bg-muted/40 transition-colors"
+                    >
+                      <Checkbox
+                        id="telemetry_opt_in"
+                        checked={telemetryOptIn}
+                        onCheckedChange={(v) => setTelemetryOptIn(v === true)}
+                        className="mt-0.5"
+                      />
+                      <span className="min-w-0">
+                        <span className="block text-sm font-medium tracking-tight">
+                          Send anonymous crash reports
+                        </span>
+                        <span className="block text-xs text-muted-foreground leading-relaxed mt-0.5">
+                          Helps the maintainer fix bugs. Stack traces and version info only — never your
+                          workspace data, credentials, or prompts. Change anytime with{" "}
+                          <code className="font-mono text-foreground/80">crewship telemetry on|off</code>.
+                        </span>
+                      </span>
+                    </label>
                   </div>
                 )}
               </motion.div>

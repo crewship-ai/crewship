@@ -171,13 +171,13 @@ var startCmd = &cobra.Command{
 		// migration log, not silently retried here.
 		printFirstRunWelcome(db.DB, logger)
 
-		// Telemetry: ENABLED by default for v0.1 beta. crashreport.Init
-		// writes "1" to app_settings on first start (no prompt). The
-		// operator can disable any time with `crewship telemetry off`.
-		// The first-run TTY prompt previously called here is deprecated
-		// for the beta default-on stance; see project memory
-		// telemetry-beta-default-on. Revert to prompted opt-in when
-		// flipping the Init default back for v1.0.
+		// Telemetry: default decided by build flavour (see
+		// crashreport.DefaultOptIn). Prerelease/dev builds default to
+		// ENABLED — Init persists "1" on first start. Stable release
+		// versions stay OFF until the operator consents via the
+		// onboarding step (web wizard / `crewship setup`) or
+		// `crewship telemetry on`. An explicit on/off choice is sticky
+		// and always wins over the default.
 		if err := crashreport.Init(context.Background(), db.DB, version, logger); err != nil {
 			logger.Warn("crashreport init failed", "error", err)
 		}

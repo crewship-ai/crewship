@@ -7,7 +7,11 @@ icon: "database"
 # Episodic Memory
 
 <Note>
-**Roadmap (v0.2).** The episodic package ships in v0.1 but the embed-on-write hook into the journal writer is not yet wired, so journal entries are *not* indexed automatically. Manual indexing via the API works today for evaluation; vector recall queries only return results for entries that were indexed manually until the auto-wire ships in v0.2.
+**Auto-indexing is wired at boot.** When an embedder is configured (`KEEPER_OLLAMA_URL` pointing at an Ollama host serving `nomic-embed-text`), the server starts the background indexer sweeper automatically at boot — new embeddable journal entries become vector-searchable within one 30-second sweep, no manual indexing required.
+
+Without an embedder, episodic recall runs in **sparse-only mode** (keyword/FTS, no vector similarity). That degraded state is never silent: the server logs a WARN at boot, `GET /healthz` reports `"episodic": "sparse-only"` (vs `"vector"`), and `crewship doctor` surfaces it as a WARN with the fix.
+
+*Roadmap (v0.2):* the synchronous embed-on-write hook (`Indexer.IndexOne` directly from the journal writer hot path) is not yet wired — until then a freshly written entry can lag recall by up to one sweep interval.
 </Note>
 
 Episodic is a narrow vector-recall layer over the [Crew Journal](/guides/crew-journal). It embeds a **selective** subset of journal entries and serves top-K similarity queries to agents planning new work.
@@ -326,7 +330,11 @@ The nudge is advisory — agents can ignore it, and it is stripped from the cont
 
 ## Indexer
 
-The `Indexer` (`internal/episodic/indexer.go`) runs a background sweeper loop on a **30-second poll** (`NewIndexer(..., poll)`), processing up to 64 unindexed embeddable entries per `sweepOnce`. Hot-path callers that want an embedding ready before the next recall call `Indexer.IndexOne(ctx, entry)` directly — typically right after writing a `summary.generated` entry:
+The `Indexer` (`internal/episodic/indexer.go`) runs a background sweeper loop on a **30-second poll** (`NewIndexer(..., poll)`), processing up to 64 unindexed embeddable entries per `sweepOnce`.
+
+The server starts this sweeper automatically at boot when an embedder is configured (`startEpisodicIndexer` in `internal/server/server_lifecycle.go`, gated on `KEEPER_OLLAMA_URL`). When no embedder is configured the server instead logs one WARN at boot and reports `"episodic": "sparse-only"` on `/healthz`; `crewship doctor` reads that field and warns with the enable hint.
+
+Hot-path callers that want an embedding ready before the next recall call `Indexer.IndexOne(ctx, entry)` directly — typically right after writing a `summary.generated` entry:
 
 ```go
 err := x.IndexOne(ctx, entry)
@@ -340,7 +348,7 @@ Only entries whose type survives the coarse SQL filter (the `EmbeddableEntryType
 **Do not add `exec.output_chunk` to the embeddable list.** Doing so will flood the embedding space with low-signal log chatter and kill recall quality. The comment in `types.go` is not a suggestion.
 </Warning>
 
-- **Ollama dependency.** No Ollama = no episodic memory. Set `OLLAMA_MODELS="/Volumes/SSD 990 PRO/ollama-models"` (external SSD) and `ollama serve` before `./dev.sh start` when testing locally.
+- **Ollama dependency.** No Ollama = sparse-only recall (no vector similarity). Set `KEEPER_OLLAMA_URL`, plus `OLLAMA_MODELS="/Volumes/SSD 990 PRO/ollama-models"` (external SSD) and `ollama serve` before `./dev.sh start` when testing locally. Check the active mode via `GET /healthz` (`episodic` field) or `crewship doctor`.
 - **Embedding is best-effort.** An embedder error during a `sweepOnce` pass logs and skips; the entry is retried next sweep.
 - **Cosine on small sets is fine.** Don't pre-optimise for a vector DB until the per-agent scan latency exceeds 50ms.
 

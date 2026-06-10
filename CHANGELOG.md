@@ -36,6 +36,20 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Added
 
+- **Domain metrics on `/metrics` (W10).** The Prometheus endpoint now
+  exposes operator-facing series next to the existing process gauges:
+  `crewshipd_assignments{status}`, `crewshipd_assignment_queue_depth`
+  / `_queue_crews` / `_queue_depth_max` (aggregated — no per-crew
+  labels by design), `crewshipd_pipeline_runs{status}`,
+  `crewshipd_agent_run_events_total{event}`,
+  `crewshipd_llm_calls_total{provider}` +
+  `crewshipd_llm_cost_usd_total{provider}` from the paymaster ledger,
+  `crewshipd_containers_tracked` / `_reporting`, and
+  `crewshipd_db_migration_version`. Label sets are closed (unknown
+  values fold into `other`), the DB-derived block is cached for 15s,
+  and migration v113 adds the two status indexes the counts ride on.
+  Documented in `docs/observability/metrics.md`.
+
 - **PR-G / PR-F UI surface.** Three React panels expose previously
   backend-only governance toggles: `CrewPolicyControls`
   (`autonomy_level` × `behavior_mode` × `max_ephemeral_agents`),
@@ -81,6 +95,24 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   fetch.
 
 ### Fixed
+
+- **Episodic indexer now starts at server boot.** The journal-embedding
+  sweeper (`episodic.NewIndexer`) was fully implemented and tested but
+  never constructed in production, so `HybridRecall` always queried an
+  empty vector index. The server now starts the sweeper at boot when an
+  embedder is configured (`KEEPER_OLLAMA_URL`). Without one, episodic
+  recall runs in **sparse-only mode** and says so: a WARN at boot, an
+  `episodic: vector|sparse-only` field on `GET /healthz`, and a
+  matching `crewship doctor` check with the enable hint.
+
+- **Stuck-QUEUED assignment sweeper now runs in production.** The
+  crash-recovery sweeper (`StartStuckQueueSweeper`) was implemented
+  and tested but never started — QUEUED assignments stranded by a
+  crash between "row set QUEUED" and the next completion-path pump
+  stayed queued forever after a restart. Server boot now starts the
+  sweeper alongside the other background loops (scan every 60s, rows
+  count as stuck after 10min queued; goroutine exits cleanly on
+  shutdown) and logs a `stuck-queue sweeper started` line at boot.
 
 - **Inbox `fetch()` network-error handling.** Both `wrap("approved")`
   (approve-hire) and `wrap("retried")` (routine retry) in
