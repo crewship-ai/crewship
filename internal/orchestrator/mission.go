@@ -349,12 +349,22 @@ func (e *MissionEngine) runMissionLoop(ctx context.Context, ms *missionState) {
 				e.logger.Error("schedule ready tasks", "mission_id", ms.ID, "error", err)
 			}
 
-			if err := e.checkMissionCompletion(ctx, ms); err != nil {
+			// Load the post-schedule task snapshot once and share it with
+			// both the completion and deadlock checks. They are read-only
+			// over mission_tasks and run back-to-back, so a single query
+			// replaces the two they each previously issued every tick.
+			tasks, tasksErr := e.loadTasks(ctx, ms.ID)
+			if tasksErr != nil {
+				e.logger.Error("load tasks for tick", "mission_id", ms.ID, "error", tasksErr)
+				continue
+			}
+
+			if err := e.checkMissionCompletionWithTasks(ctx, ms, tasks); err != nil {
 				e.logger.Error("check mission completion", "mission_id", ms.ID, "error", err)
 			}
 
 			// Deadlock detection: all tasks BLOCKED with nothing making progress
-			if e.detectDeadlock(ctx, ms.ID) {
+			if deadlockFromTasks(tasks) {
 				e.logger.Error("deadlock detected — all tasks BLOCKED with no progress possible",
 					"mission_id", ms.ID)
 				now := time.Now().UTC().Format(time.RFC3339)
