@@ -11,7 +11,6 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useRealtimeEvent, type RealtimeEvent } from "@/hooks/use-realtime"
-import type { Mission } from "@/lib/types/mission"
 
 import { KpiCard } from "@/components/features/dashboard/kpi-card"
 import { DashboardCard } from "@/components/features/dashboard/dashboard-card"
@@ -30,9 +29,12 @@ import { RecipesEmptyState } from "@/components/features/dashboard/recipes-cards
 import { WelcomeChecklist } from "@/components/features/dashboard/welcome-checklist"
 
 import {
-  AgentSummary, CrewSummary, ProjectSummary, RunsResponse,
-  MissionMetricsResponse, KeeperRequest, TimeseriesResponse,
-} from "./dashboard-types"
+  useAgentSummaries, useCrewSummaries, useProjectSummaries,
+  useDashboardMissions, useMissionMetrics, useRecentRuns,
+  usePendingEscalationCount, useKeeperRequests, useMetricsTimeseries,
+  useInvalidateDashboard,
+  DASHBOARD_THROUGHPUT_PARAMS, DASHBOARD_COST_PARAMS,
+} from "@/hooks/use-dashboard-data"
 import {
   crewColor, STATUS_PALETTE, formatCost, formatRelativeShort,
 } from "./dashboard-helpers"
@@ -41,19 +43,7 @@ export default function DashboardPage() {
   const router = useRouter()
   const { workspaceId, loading: wsLoading } = useWorkspace()
 
-  // ── Core data state ────────────────────────────────────────────────
-  const [agents, setAgents] = useState<AgentSummary[]>([])
-  const [crews, setCrews] = useState<CrewSummary[]>([])
-  const [projects, setProjects] = useState<ProjectSummary[]>([])
-  const [missions, setMissions] = useState<Mission[]>([])
-  const [metrics, setMetrics] = useState<MissionMetricsResponse | null>(null)
-  const [runsData, setRunsData] = useState<RunsResponse | null>(null)
-  const [escalationCount, setEscalationCount] = useState(0)
-  const [keeperRequests, setKeeperRequests] = useState<KeeperRequest[]>([])
-  const [throughputData, setThroughputData] = useState<TimeseriesResponse | null>(null)
-  const [costData, setCostData] = useState<TimeseriesResponse | null>(null)
   const [containerStats, setContainerStats] = useState<Map<string, ContainerStatsEntry>>(new Map())
-  const [loading, setLoading] = useState(true)
   const [onboardingChecked, setOnboardingChecked] = useState(false)
   // Post-onboarding breadcrumb — read in an effect, not inline in
   // render. localStorage access during SSR or in restricted contexts
@@ -89,85 +79,38 @@ export default function DashboardPage() {
     }
   }, [])
 
-  // ── Fetchers ────────────────────────────────────────────────────────
+  // ── Queries ─────────────────────────────────────────────────────────
   //
-  // Each fetch builds the next snapshot first, then commits it atomically.
-  // If any individual request fails, we still clear the matching slice so a
-  // workspace switch never leaves yesterday's data showing under today's
-  // workspace (use empty-state rather than stale state).
-  const fetchData = useCallback(async (showLoading = true) => {
-    if (!workspaceId) return
-    if (showLoading) setLoading(true)
-    try {
-      const ws = encodeURIComponent(workspaceId)
-      const [
-        agentsRes,
-        crewsRes,
-        projectsRes,
-        missionsRes,
-        metricsRes,
-        runsRes,
-        escCountRes,
-        keeperRes,
-      ] = await Promise.all([
-        fetch(`/api/v1/agents?workspace_id=${ws}`),
-        fetch(`/api/v1/crews?workspace_id=${ws}`),
-        fetch(`/api/v1/projects?workspace_id=${ws}`),
-        fetch(`/api/v1/missions?workspace_id=${ws}&limit=50&include_tasks=true`),
-        fetch(`/api/v1/mission-metrics?workspace_id=${ws}`),
-        fetch(`/api/v1/runs?workspace_id=${ws}&limit=50`),
-        fetch(`/api/v1/escalations/pending-count?workspace_id=${ws}`),
-        fetch(`/api/v1/admin/keeper/requests?workspace_id=${ws}&limit=10`),
-      ])
-      setAgents(agentsRes.ok ? await agentsRes.json() : [])
-      setCrews(crewsRes.ok ? await crewsRes.json() : [])
-      setProjects(projectsRes.ok ? await projectsRes.json() : [])
-      setMissions(missionsRes.ok ? await missionsRes.json() : [])
-      setMetrics(metricsRes.ok ? await metricsRes.json() : null)
-      setRunsData(runsRes.ok ? await runsRes.json() : null)
-      if (escCountRes.ok) {
-        const data = await escCountRes.json()
-        setEscalationCount(Number(data?.count) || 0)
-      } else {
-        setEscalationCount(0)
-      }
-      if (keeperRes.ok) {
-        const data = await keeperRes.json()
-        setKeeperRequests(Array.isArray(data) ? data : (data?.data ?? []))
-      } else {
-        setKeeperRequests([])
-      }
-    } catch {
-      // Network-level failure — clear every slice so we don't keep showing
-      // another workspace's data. The UI renders its normal empty states.
-      setAgents([])
-      setCrews([])
-      setProjects([])
-      setMissions([])
-      setMetrics(null)
-      setRunsData(null)
-      setEscalationCount(0)
-      setKeeperRequests([])
-    } finally {
-      if (showLoading) setLoading(false)
-    }
-  }, [workspaceId])
+  // React Query owns the data layer (see hooks/use-dashboard-data.ts for
+  // the key conventions + error policy). The workspace id lives inside
+  // every query key, so a workspace switch lands on a fresh cache entry
+  // and never shows yesterday's data under today's workspace. Queries
+  // hold (isPending → skeleton) until the onboarding gate resolves.
+  const queryOpts = { enabled: onboardingChecked }
+  const agentsQ = useAgentSummaries(workspaceId, queryOpts)
+  const crewsQ = useCrewSummaries(workspaceId, queryOpts)
+  const projectsQ = useProjectSummaries(workspaceId, queryOpts)
+  const missionsQ = useDashboardMissions(workspaceId, queryOpts)
+  const metricsQ = useMissionMetrics(workspaceId, queryOpts)
+  const runsQ = useRecentRuns(workspaceId, queryOpts)
+  const escCountQ = usePendingEscalationCount(workspaceId, queryOpts)
+  const keeperQ = useKeeperRequests(workspaceId, queryOpts)
+  const throughputQ = useMetricsTimeseries(workspaceId, DASHBOARD_THROUGHPUT_PARAMS, queryOpts)
+  const costQ = useMetricsTimeseries(workspaceId, DASHBOARD_COST_PARAMS, queryOpts)
 
-  const fetchTimeseries = useCallback(async () => {
-    if (!workspaceId) return
-    try {
-      const ws = encodeURIComponent(workspaceId)
-      const [thruRes, costRes] = await Promise.all([
-        fetch(`/api/v1/metrics/timeseries?workspace_id=${ws}&metric=issues_closed&window=24h&bucket=1h&group_by=crew`),
-        fetch(`/api/v1/metrics/timeseries?workspace_id=${ws}&metric=cost_usd&window=7d&bucket=1d&group_by=none`),
-      ])
-      setThroughputData(thruRes.ok ? await thruRes.json() : null)
-      setCostData(costRes.ok ? await costRes.json() : null)
-    } catch {
-      setThroughputData(null)
-      setCostData(null)
-    }
-  }, [workspaceId])
+  // Array slices go through useMemo so the `?? []` fallback yields a
+  // stable reference while a query has no data yet — the derived
+  // useMemos below depend on these.
+  const agents = useMemo(() => agentsQ.data ?? [], [agentsQ.data])
+  const crews = useMemo(() => crewsQ.data ?? [], [crewsQ.data])
+  const projects = useMemo(() => projectsQ.data ?? [], [projectsQ.data])
+  const missions = useMemo(() => missionsQ.data ?? [], [missionsQ.data])
+  const keeperRequests = useMemo(() => keeperQ.data ?? [], [keeperQ.data])
+  const metrics = metricsQ.data ?? null
+  const runsData = runsQ.data ?? null
+  const escalationCount = escCountQ.data ?? 0
+  const throughputData = throughputQ.data ?? null
+  const costData = costQ.data ?? null
 
   // Reset workspace-scoped state when the user switches workspaces — otherwise
   // state Maps like `containerStats` accumulate across workspace boundaries
@@ -177,21 +120,18 @@ export default function DashboardPage() {
     setContainerStats(new Map())
   }, [workspaceId])
 
-  useEffect(() => {
-    if (!workspaceId || !onboardingChecked) return
-    fetchData()
-    fetchTimeseries()
-  }, [workspaceId, onboardingChecked, fetchData, fetchTimeseries])
-
-  // ── Realtime: debounced refetch so a burst of events doesn't storm the API ─
+  // ── Realtime: debounced invalidation so a burst of events doesn't storm
+  // the API. Invalidation refetches in the background (isFetching, not
+  // isPending), so live updates never flash the skeleton — same contract
+  // as the old fetchData(false).
+  const invalidateDashboard = useInvalidateDashboard(workspaceId)
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined)
   const debouncedRefetch = useCallback(() => {
     clearTimeout(debounceRef.current)
     debounceRef.current = setTimeout(() => {
-      fetchData(false)
-      fetchTimeseries()
+      invalidateDashboard()
     }, 250)
-  }, [fetchData, fetchTimeseries])
+  }, [invalidateDashboard])
 
   useRealtimeEvent("run.started", debouncedRefetch)
   useRealtimeEvent("run.completed", debouncedRefetch)
@@ -231,6 +171,12 @@ export default function DashboardPage() {
   }, []))
 
   // ── Derived data ────────────────────────────────────────────────────
+  // isPending covers both "fetching for the first time" and "queries held
+  // by the onboarding/workspace gate" — the skeleton shows in both, which
+  // matches the old loading=true initial state.
+  const loading = [
+    agentsQ, crewsQ, projectsQ, missionsQ, metricsQ, runsQ, escCountQ, keeperQ,
+  ].some((q) => q.isPending)
   const isLoading = wsLoading || loading
 
   const totalAgents = agents.length
@@ -494,7 +440,7 @@ export default function DashboardPage() {
       {crews.length === 0 && workspaceId && (
         <RecipesEmptyState
           workspaceId={workspaceId}
-          onInstalled={() => { fetchData(); fetchTimeseries() }}
+          onInstalled={invalidateDashboard}
         />
       )}
 
