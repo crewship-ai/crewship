@@ -412,7 +412,7 @@ func (e *Executor) executeOneStep(
 	if dsl.MaxCostUSD > 0 && costNow > dsl.MaxCostUSD {
 		f := &dagStepFailure{
 			stepID:    step.ID,
-			message:   fmt.Sprintf("cost cap exceeded: $%.4f > $%.4f after step %q", costNow, dsl.MaxCostUSD, step.ID),
+			message:   costCapExceededMessage(costNow, dsl.MaxCostUSD, step.ID),
 			isCostCap: true,
 		}
 		firstErr.CompareAndSwap(nil, f)

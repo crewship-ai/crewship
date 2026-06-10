@@ -552,6 +552,14 @@ type RunInput struct {
 	resumeCurrentStepID  string
 }
 
+// costCapExceededMessage is the single wording for max_cost_usd
+// breaches. The live post-step gates (linear loop + DAG scheduler)
+// and the resume-time gate all share it so operators see one
+// consistent failure regardless of where the breach was caught.
+func costCapExceededMessage(costUSD, capUSD float64, stepID string) string {
+	return fmt.Sprintf("cost cap exceeded: $%.4f > $%.4f after step %q", costUSD, capUSD, stepID)
+}
+
 // runDSL is the actual step loop. depth bounds call_pipeline recursion
 // across nested invocations; the top-level Run starts depth at 0.
 func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (result *RunResult, err error) {
@@ -680,6 +688,38 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (result *
 		// persist helper short-circuits when result is unset
 		// (recursive helper returns early).
 		defer e.persistRunTerminal(ctx, runID, in, pipelineID, result, startedAt)
+	}
+
+	// Resume-time cost-cap gate. The live gate runs AFTER each step
+	// completes — so a hard kill that lands after a step-boundary
+	// flush persisted an already-at-or-over-budget CostUSD but before
+	// that post-step gate ran leaves a row whose restored cost would
+	// otherwise buy one more step (or DAG wave) past max_cost_usd.
+	// Re-check the restored total here, before either scheduler can
+	// dispatch anything, and fail through the same path a live breach
+	// uses (same status, same wording) so resumed and live breaches
+	// are indistinguishable to operators. >= rather than the live
+	// gate's >: at exactly the cap the budget is fully consumed and
+	// there is nothing left to spend on another step.
+	if in.resume && dsl.MaxCostUSD > 0 && result.CostUSD >= dsl.MaxCostUSD {
+		// Attribute the breach to the last restored step in source
+		// order — the closest analogue to the live gate's "after
+		// step X" — falling back to the stamped in-flight step.
+		lastRestored := in.resumeCurrentStepID
+		for i := range dsl.Steps {
+			if _, ok := in.restoredOutputs[dsl.Steps[i].ID]; ok {
+				lastRestored = dsl.Steps[i].ID
+			}
+		}
+		result.Status = "FAILED"
+		result.FailedAtStep = lastRestored
+		result.ErrorMessage = costCapExceededMessage(result.CostUSD, dsl.MaxCostUSD, lastRestored)
+		emit.emitRunFailed(ctx, lastRestored, result.ErrorMessage)
+		if in.Mode == ModeRun && in.pipeline != nil {
+			_ = e.store.RecordInvocation(ctx, in.pipeline.ID, "FAILED")
+		}
+		result.DurationMs = time.Since(startedAt).Milliseconds()
+		return result, nil
 	}
 
 	// DAG dispatch — if any step declares `needs:` AND we're not in
@@ -827,7 +867,7 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (result *
 			if dsl.MaxCostUSD > 0 && result.CostUSD > dsl.MaxCostUSD {
 				result.Status = "FAILED"
 				result.FailedAtStep = step.ID
-				result.ErrorMessage = fmt.Sprintf("cost cap exceeded: $%.4f > $%.4f after step %q", result.CostUSD, dsl.MaxCostUSD, step.ID)
+				result.ErrorMessage = costCapExceededMessage(result.CostUSD, dsl.MaxCostUSD, step.ID)
 				emit.emitRunFailed(ctx, step.ID, result.ErrorMessage)
 				if in.Mode == ModeRun && in.pipeline != nil {
 					_ = e.store.RecordInvocation(ctx, in.pipeline.ID, "FAILED")

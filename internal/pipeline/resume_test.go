@@ -15,6 +15,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 )
@@ -589,5 +590,153 @@ func TestRunStore_ListInFlightAndMarkInterrupted(t *testing.T) {
 	rec, _ = store.Get(ctx, "run_done")
 	if rec.Status != RunStatusCompleted {
 		t.Errorf("terminal row mutated: %+v", rec)
+	}
+}
+
+const resumeCostCapLinearDSL = `{
+  "dsl_version": "1.0",
+  "name": "resume-costcap-linear",
+  "max_cost_usd": 0.005,
+  "steps": [
+    {"id": "a", "type": "agent_run", "agent_slug": "s_a", "prompt": "do a"},
+    {"id": "b", "type": "agent_run", "agent_slug": "s_b", "prompt": "use {{ steps.a.output }}"},
+    {"id": "c", "type": "agent_run", "agent_slug": "s_c", "prompt": "finish"}
+  ]
+}`
+
+const resumeCostCapDAGDSL = `{
+  "dsl_version": "1.0",
+  "name": "resume-costcap-dag",
+  "max_cost_usd": 0.005,
+  "steps": [
+    {"id": "a", "type": "agent_run", "agent_slug": "s_a", "prompt": "do a"},
+    {"id": "b", "type": "agent_run", "agent_slug": "s_b", "prompt": "use {{ steps.a.output }}", "needs": ["a"]},
+    {"id": "c", "type": "agent_run", "agent_slug": "s_c", "prompt": "finish", "needs": ["b"]}
+  ]
+}`
+
+// TestResume_RestoredCostBreachesCap_FailsBeforeAnyStep pins the
+// resume-time cost-cap gate: when the previous lifetime's
+// step-boundary flush persisted a CostUSD already at or over
+// max_cost_usd (the process died after the flush but before the
+// post-step cap gate ran), the resumed run must terminate through
+// the same cap-failure path a live breach uses — WITHOUT scheduling
+// a single further step. Covers both the linear loop and the DAG
+// scheduler entrypoints, plus the >= boundary (budget fully consumed
+// = nothing left to spend on another step).
+func TestResume_RestoredCostBreachesCap_FailsBeforeAnyStep(t *testing.T) {
+	cases := []struct {
+		name         string
+		slug         string
+		dsl          string
+		restoredCost float64
+	}{
+		{"linear over cap", "resume-costcap-linear", resumeCostCapLinearDSL, 0.009},
+		{"linear exactly at cap", "resume-costcap-linear", resumeCostCapLinearDSL, 0.005},
+		{"dag over cap", "resume-costcap-dag", resumeCostCapDAGDSL, 0.009},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			db := openResumeTestDB(t)
+			defer db.Close()
+			ctx := context.Background()
+
+			store := NewStore(db)
+			runStore := NewRunStore(db)
+			p := saveResumePipeline(t, store, tc.slug, tc.dsl)
+
+			insertInFlightRun(t, runStore, &RunRecord{
+				ID:              "run_costcap_" + tc.slug,
+				WorkspaceID:     "ws_test",
+				PipelineID:      p.ID,
+				PipelineSlug:    p.Slug,
+				Status:          RunStatusRunning,
+				Mode:            ModeRun,
+				CurrentStepID:   "b",
+				StepOutputsJSON: `{"a":"restored-output-a"}`,
+				CostUSD:         tc.restoredCost,
+			})
+
+			runner := newMockRunner()
+			em := &captureEmitter{}
+			exec := NewExecutor(store, NewResolver(db), runner, em).WithRunStore(runStore)
+
+			resumed, interrupted, err := exec.ResumeInterruptedRuns(ctx, slog.Default())
+			if err != nil {
+				t.Fatalf("resume scan: %v", err)
+			}
+			if resumed != 1 || interrupted != 0 {
+				t.Fatalf("resumed=%d interrupted=%d, want 1/0", resumed, interrupted)
+			}
+
+			rec := waitForRunStatus(t, runStore, "run_costcap_"+tc.slug, RunStatusFailed, 5*time.Second)
+			if !strings.Contains(rec.ErrorMessage, "cost cap exceeded") {
+				t.Errorf("error message: got %q, want cost cap wording", rec.ErrorMessage)
+			}
+
+			// The whole point: NO further step may execute once the
+			// restored cost already breaches the budget.
+			runner.mu.Lock()
+			defer runner.mu.Unlock()
+			if len(runner.calls) != 0 {
+				t.Errorf("expected 0 runner calls after resume of over-budget run, got %d: %+v", len(runner.calls), runner.calls)
+			}
+		})
+	}
+}
+
+// TestResume_RestoredCostUnderCap_LiveCapStillTrips is the regression
+// guard for the gate above: a restored cost just UNDER the cap must
+// still resume normally, and the existing live post-step cap check
+// must still trip once the next step pushes the total over budget.
+func TestResume_RestoredCostUnderCap_LiveCapStillTrips(t *testing.T) {
+	db := openResumeTestDB(t)
+	defer db.Close()
+	ctx := context.Background()
+
+	store := NewStore(db)
+	runStore := NewRunStore(db)
+	// Cap 0.005, restored 0.0045: under the cap, so the run resumes.
+	// Mock runner charges 0.001/step → step b lands at 0.0055 > cap.
+	p := saveResumePipeline(t, store, "resume-costcap-linear", resumeCostCapLinearDSL)
+
+	insertInFlightRun(t, runStore, &RunRecord{
+		ID:              "run_costcap_under",
+		WorkspaceID:     "ws_test",
+		PipelineID:      p.ID,
+		PipelineSlug:    p.Slug,
+		Status:          RunStatusRunning,
+		Mode:            ModeRun,
+		CurrentStepID:   "b",
+		StepOutputsJSON: `{"a":"restored-output-a"}`,
+		CostUSD:         0.0045,
+	})
+
+	runner := newMockRunner()
+	runner.outputsBySlug["s_b"] = []string{"output-b"}
+	em := &captureEmitter{}
+	exec := NewExecutor(store, NewResolver(db), runner, em).WithRunStore(runStore)
+
+	resumed, interrupted, err := exec.ResumeInterruptedRuns(ctx, slog.Default())
+	if err != nil {
+		t.Fatalf("resume scan: %v", err)
+	}
+	if resumed != 1 || interrupted != 0 {
+		t.Fatalf("resumed=%d interrupted=%d, want 1/0", resumed, interrupted)
+	}
+
+	rec := waitForRunStatus(t, runStore, "run_costcap_under", RunStatusFailed, 5*time.Second)
+	if !strings.Contains(rec.ErrorMessage, "cost cap exceeded") {
+		t.Errorf("error message: got %q, want cost cap wording", rec.ErrorMessage)
+	}
+	if !strings.Contains(rec.ErrorMessage, `after step "b"`) {
+		t.Errorf("error message should attribute the live breach to step b: %q", rec.ErrorMessage)
+	}
+
+	// Exactly one step (b) ran: a was restored, c never started.
+	runner.mu.Lock()
+	defer runner.mu.Unlock()
+	if len(runner.calls) != 1 || runner.calls[0].AgentSlug != "s_b" {
+		t.Errorf("expected exactly one runner call (s_b), got %+v", runner.calls)
 	}
 }
