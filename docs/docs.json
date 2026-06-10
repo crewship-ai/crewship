@@ -117,6 +117,7 @@
                   "guides/activity",
                   "guides/tracing",
                   "observability/otlp-setup",
+                  "observability/metrics",
                   "guides/feedback",
                   "guides/telemetry"
                 ]

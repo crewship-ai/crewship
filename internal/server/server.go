@@ -81,6 +81,10 @@ type Server struct {
 	runCtx            context.Context
 	runCancel         context.CancelFunc
 
+	// domainMetrics caches the DB-derived block of /metrics (W10) for
+	// domainMetricsTTL so scrape frequency never multiplies query load.
+	domainMetrics domainMetricsCache
+
 	// bgCtx / bgCancel scope the lifetime of goroutines launched by New()
 	// itself (rather than Start()) — currently the devcontainer catalog
 	// and mise runtime refresh tickers. Cancelled by Shutdown() and by
