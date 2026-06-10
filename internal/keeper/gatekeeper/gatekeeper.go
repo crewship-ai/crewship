@@ -42,6 +42,50 @@ func hasMinDistinctChars(s string, min int) bool {
 	return false
 }
 
+// l1MinDistinctChars is the distinct-rune floor for the L1 auto-allow fast
+// path. Raised from 3 to 5: three distinct runes still let trivial filler
+// like "aaabbbcccddd" pass the length gate and auto-approve any L1
+// credential. Five rejects that class while still admitting any genuine
+// short phrase ("deploy svc") and the pinned numeric-token case.
+const l1MinDistinctChars = 5
+
+// injectionMarkers are lowercase substrings whose presence in an
+// agent-supplied intent makes it look like a prompt-injection attempt
+// rather than a plain statement of intent. Their job is narrow: keep such
+// an intent OFF the L1 auto-allow fast path so it is forced through the
+// LLM evaluator (which is instructed to DENY injection-shaped intents) or,
+// when no LLM is configured, the deny-by-default fallback. They are NOT a
+// blocklist that itself denies — false positives only cost a normal LLM
+// review, so the list can be liberal. Intent is also %q-escaped before it
+// reaches any prompt, which already neutralises structural breakout; this
+// is defence in depth against the semantic angle.
+var injectionMarkers = []string{
+	"ignore previous", "ignore all previous", "disregard previous",
+	"disregard all", "forget previous", "forget all",
+	"[system]", "<system>", "system:", "system prompt",
+	"you are now", "you are no longer", "act as",
+	"decision:", "decision =", "decision\":", "\"decision\"",
+	"override", "new instructions", "above instructions",
+}
+
+// looksLikeIntentInjection reports whether s contains any injection marker
+// or JSON-brace pair (a crude attempt to inject a decision object). Used
+// only to gate the L1 fast path — see injectionMarkers.
+func looksLikeIntentInjection(s string) bool {
+	lower := strings.ToLower(s)
+	for _, m := range injectionMarkers {
+		if strings.Contains(lower, m) {
+			return true
+		}
+	}
+	// A JSON object literal in a stated intent is never legitimate and is
+	// the shape used to forge a {"decision":"ALLOW"} response.
+	if strings.Contains(s, "{") && strings.Contains(s, "}") {
+		return true
+	}
+	return false
+}
+
 // Evaluator decides whether a credential request should be allowed.
 type Evaluator interface {
 	Evaluate(ctx context.Context, req EvalRequest) (keeper.GatekeeperResponse, error)
@@ -211,7 +255,8 @@ func (g *Gatekeeper) Evaluate(ctx context.Context, req EvalRequest) (keeper.Gate
 		req.Command == "" &&
 		req.SecurityLevel == keeper.SecurityLevelL1 &&
 		len(intent) >= minIntentLength &&
-		hasMinDistinctChars(intent, 3) {
+		hasMinDistinctChars(intent, l1MinDistinctChars) &&
+		!looksLikeIntentInjection(intent) {
 		g.logger.Info("keeper: L1 auto-allow",
 			"agent", req.AgentName, "credential", req.CredentialName)
 		return keeper.GatekeeperResponse{
