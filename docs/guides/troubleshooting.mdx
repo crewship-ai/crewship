@@ -120,13 +120,13 @@ isn't installed in the container image — check `crewship agent debug
 
 </Accordion>
 
-<Accordion title='`curl crewship.ai/install | bash` fails with "Bad substitution"'>
+<Accordion title='`curl … install.sh | bash` fails with "Bad substitution"'>
 
 Wrong shell. Use `bash`, not `sh`:
 
 ```bash
-curl -fsSL https://crewship.ai/install | bash    # ✓ correct
-curl -fsSL https://crewship.ai/install | sh      # ✗ fails on dash
+curl -fsSL https://raw.githubusercontent.com/crewship-ai/crewship/main/scripts/install.sh | bash    # ✓ correct
+curl -fsSL https://raw.githubusercontent.com/crewship-ai/crewship/main/scripts/install.sh | sh      # ✗ fails on dash
 ```
 
 The script uses `set -euo pipefail` and array-expansion guards that
