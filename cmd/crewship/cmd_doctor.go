@@ -139,6 +139,11 @@ counters or filter the per-check array.`,
 		results = append(results, checkSidecarBinary())
 		results = append(results, checkNextAuthSecret())
 		runProbe(checkServerReachable)
+		// Episodic recall mode (W2): reads the `episodic` field off the
+		// server's /healthz. WARN when recall runs sparse-only (no
+		// embedder configured), INFO when the server is down or older
+		// (the reachable check above already covers a dead daemon).
+		runProbe(runCheckEpisodicRecallMode)
 
 		// New checks (CRE-XXX): telemetry visibility, DSN reachability,
 		// data-dir perm drift, and CLI staleness. Each one is implemented

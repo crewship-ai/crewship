@@ -73,6 +73,7 @@ type Server struct {
 	terminalHandler   *terminal.Handler
 	journalWriter     *journal.Writer
 	consolidator      *consolidate.Consolidator
+	episodicEmbedder  episodic.Embedder
 	telemetryShutdown func()
 	pprofShutdown     func()
 	pyroscopeShutdown func()
@@ -119,6 +120,13 @@ type Deps struct {
 	DB        *sql.DB
 	WebFS     fs.FS
 	License   *license.License
+
+	// EpisodicEmbedder overrides the embedder used for episodic recall
+	// and the boot-time indexer sweeper. Production leaves it nil — the
+	// server then builds an Ollama embedder from cfg.Keeper when one is
+	// configured. Tests inject a fake here so embedder-present wiring is
+	// exercised without an Ollama server (W2, release-1.0 hardening).
+	EpisodicEmbedder episodic.Embedder
 }
 
 // Close releases resources held by the dependencies (e.g. state provider).
@@ -427,13 +435,28 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 		orch.SetApprovalGate(newApprovalGateAdapter(deps.DB, s.journalWriter))
 		orch.SetPresenceTracker(newPresenceAdapter(deps.DB, s.journalWriter, logger))
 		orch.SetMemoryMetrics(newMemoryMetricsAdapter(deps.DB))
-		var embedder episodic.Embedder
-		if cfg.Keeper.OllamaURL != "" {
-			// nomic-embed-text is the expected model on the Ollama host
-			// per episodic/embedder.go defaults. Workspaces can override
-			// via future config; for now use the same base URL as Keeper.
+		// Episodic embedder resolution. Injection (tests/fakes) wins;
+		// otherwise build an Ollama embedder when Keeper Ollama is
+		// actually configured. Gating on Keeper.Enabled — not just a
+		// non-empty URL — matters because config.Default() ships a
+		// localhost:11434 placeholder URL: without the Enabled check
+		// every deployment would construct an embedder pointing at an
+		// Ollama that usually isn't there, and the boot-time indexer
+		// would hammer a dead endpoint every sweep. Enabled flips true
+		// automatically when KEEPER_OLLAMA_URL is set (see
+		// config.applyEnvOverrides), so "Ollama URL present" is still
+		// the operator-facing contract.
+		//
+		// nomic-embed-text is the expected model on the Ollama host per
+		// episodic/embedder.go defaults. Workspaces can override via
+		// future config; for now use the same base URL as Keeper.
+		embedder := deps.EpisodicEmbedder
+		if embedder == nil && cfg.Keeper.Enabled && cfg.Keeper.OllamaURL != "" {
 			embedder = episodic.NewOllamaEmbedder(cfg.Keeper.OllamaURL)
 		}
+		// Stashed on Server so Start() can launch the indexer sweeper
+		// and /healthz can report vector vs sparse-only recall mode.
+		s.episodicEmbedder = embedder
 		orch.SetEpisodicRecall(newEpisodicRecallAdapter(deps.DB, embedder))
 
 		// OTel GenAI telemetry. Endpoint defaults to OTEL_EXPORTER_OTLP_ENDPOINT

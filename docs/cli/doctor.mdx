@@ -83,6 +83,22 @@ Surfaces where the JWT signing secret lives (env var vs `<dataDir>/secrets.env`)
 | **WARN — `persisted secret file exists but NEXTAUTH_SECRET entry is missing`** | The file was hand-edited or partial; delete it so the next `start` regenerates (any credentials encrypted under the missing key are unrecoverable). |
 | **WARN — `cannot inspect persisted secret file: …`** | Usually a permission/ownership problem on the data dir. Check `~/.crewship` (or `$CREWSHIP_DATA_DIR`) permissions. |
 
+### Episodic recall mode
+
+Reads the `episodic` field from the running server's `/healthz`.
+Reports whether [episodic memory](/guides/episodic-memory) recall runs
+with a vector embedder or degraded to keyword/FTS only.
+
+- **PASS — `vector + sparse recall`** — an embedder is configured
+  (`KEEPER_OLLAMA_URL`); the boot-time indexer sweeper is embedding
+  journal entries and recall serves vector + BM25 results.
+- **WARN — `sparse-only`** — no embedder configured. Recall still
+  works on keywords, but vector similarity is off. Set
+  `KEEPER_OLLAMA_URL` to an Ollama host serving `nomic-embed-text`.
+- **INFO — server not reachable / older server** — the daemon is down
+  (the *server reachable* check already FAILs for that) or predates
+  the `episodic` health field.
+
 ### Telemetry status
 
 Reads `app_settings.telemetry_opt_in` from the local DB. Reports:
