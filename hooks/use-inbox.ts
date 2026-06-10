@@ -1,6 +1,9 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+
+import { apiFetch } from "@/lib/api-fetch"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 
 // InboxItem mirrors the wire shape from /api/v1/inbox. State =
@@ -37,77 +40,89 @@ interface InboxListResponse {
   unread_count: number
 }
 
+type StateFilter = "unread" | "read" | "resolved" | "all"
+
+/**
+ * Query keys follow the [resource, workspaceId, scope/params] convention
+ * (see hooks/use-dashboard-data.ts for the full write-up). `all` is the
+ * shared prefix: invalidating it refreshes every mounted inbox surface
+ * (bell, sidebar badge, /inbox page) in one call.
+ */
+export const inboxKeys = {
+  all: (ws: string) => ["inbox", ws] as const,
+  list: (ws: string, state: StateFilter) => ["inbox", ws, "list", { state }] as const,
+  count: (ws: string) => ["inbox", ws, "count"] as const,
+}
+
+/** Shared WS → cache invalidation. Any inbox state change emits
+ *  inbox.updated; source-of-truth events (escalation.created,
+ *  pipeline.waitpoint.created) also touch inbox rows, so the list and
+ *  badge light up the moment a new item lands — no poll loop. */
+function useInboxRealtimeInvalidation(workspaceId: string | null | undefined) {
+  const qc = useQueryClient()
+  const invalidate = useCallback(() => {
+    if (!workspaceId) return
+    qc.invalidateQueries({ queryKey: inboxKeys.all(workspaceId) })
+  }, [qc, workspaceId])
+
+  useRealtimeEvent("inbox.updated", invalidate)
+  useRealtimeEvent("escalation.created", invalidate)
+  useRealtimeEvent("pipeline.waitpoint.created", invalidate)
+}
+
 // useInbox manages the workspace inbox feed: fetches the list, exposes
 // the unread badge count, and provides patch helpers that flip an item
-// between unread / read / resolved. The realtime event "inbox.updated"
-// triggers a refresh so a decision made in another tab (or by a peer)
-// propagates without a manual reload.
-export function useInbox(workspaceId: string | null | undefined, stateFilter?: "unread" | "read" | "resolved" | "all") {
-  const [items, setItems] = useState<InboxItem[]>([])
-  const [unreadCount, setUnreadCount] = useState(0)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const abortRef = useRef<AbortController | null>(null)
+// between unread / read / resolved. Backed by React Query — realtime
+// events invalidate the cache, mutations reconcile it in place.
+export function useInbox(workspaceId: string | null | undefined, stateFilter?: StateFilter) {
+  const qc = useQueryClient()
+  // workspace_id is required by RequireWorkspace middleware; the
+  // backend route is /api/v1/inbox (no path param) so the value has to
+  // land on the URL. 'all' and "no filter" hit the same URL — normalise
+  // so they share a cache entry.
+  const stateParam: StateFilter = stateFilter && stateFilter !== "all" ? stateFilter : "all"
+  const listKey = inboxKeys.list(workspaceId ?? "", stateParam)
 
-  const refresh = useCallback(async () => {
-    if (!workspaceId) {
-      setItems([])
-      setUnreadCount(0)
-      return
-    }
-    abortRef.current?.abort()
-    const ctrl = new AbortController()
-    abortRef.current = ctrl
-    setLoading(true)
-    setError(null)
-    try {
-      // workspace_id is required by RequireWorkspace middleware. Use
-      // the same query-param pattern as /issues + /missions; the
-      // backend route is /api/v1/inbox (no path param) so the value
-      // has to land on the URL.
-      const params = new URLSearchParams({ workspace_id: workspaceId })
-      if (stateFilter && stateFilter !== "all") {
-        params.set("state", stateFilter)
+  const query = useQuery<InboxListResponse>({
+    queryKey: listKey,
+    queryFn: async ({ signal }) => {
+      const params = new URLSearchParams({ workspace_id: workspaceId! })
+      if (stateParam !== "all") {
+        params.set("state", stateParam)
       }
-      const res = await fetch(`/api/v1/inbox?${params.toString()}`, { signal: ctrl.signal })
-      if (ctrl.signal.aborted) return
+      const res = await apiFetch(`/api/v1/inbox?${params.toString()}`, { signal })
       if (!res.ok) {
-        setError(`inbox: ${res.status}`)
-        setLoading(false)
-        return
+        throw new Error(`inbox: ${res.status}`)
       }
-      const data: InboxListResponse = await res.json()
-      if (ctrl.signal.aborted) return
-      setItems(data.rows ?? [])
-      setUnreadCount(data.unread_count ?? 0)
-    } catch (e) {
-      if (ctrl.signal.aborted) return
-      setError(e instanceof Error ? e.message : String(e))
-    } finally {
-      if (!ctrl.signal.aborted) setLoading(false)
-    }
-  }, [workspaceId, stateFilter])
+      return (await res.json()) as InboxListResponse
+    },
+    enabled: Boolean(workspaceId),
+    // Single-shot like the previous hand-rolled fetch — the error
+    // banner shows immediately and the WS invalidation retriggers.
+    retry: false,
+  })
 
+  useInboxRealtimeInvalidation(workspaceId)
+
+  // PATCH failures surface through the same `error` field the list
+  // fetch uses (the /inbox page renders it as "Inbox unavailable: …").
+  // Kept outside the query so a failed action doesn't poison the
+  // cached list; cleared when fresh data lands, matching the old
+  // refresh()-clears-error behaviour.
+  const [patchError, setPatchError] = useState<string | null>(null)
+  const { dataUpdatedAt } = query
   useEffect(() => {
-    refresh()
-    return () => { abortRef.current?.abort() }
-  }, [refresh])
+    if (dataUpdatedAt) setPatchError(null)
+  }, [dataUpdatedAt])
 
-  // Live refresh: any inbox state change emits inbox.updated; the
-  // bell + page mirror it without a poll loop. Cheap because it just
-  // re-fires the same workspace-scoped GET.
-  useRealtimeEvent("inbox.updated", refresh)
-  // Source-of-truth events also touch inbox rows (escalation.created,
-  // pipeline.waitpoint.created) — listen so the inbox lights up the
-  // moment a new item lands, not on next poll.
-  useRealtimeEvent("escalation.created", refresh)
-  useRealtimeEvent("pipeline.waitpoint.created", refresh)
-
-  const patch = useCallback(
-    async (id: string, state: InboxItem["state"], resolvedAction?: string) => {
-      if (!workspaceId) return
-      const res = await fetch(
-        `/api/v1/inbox/${encodeURIComponent(id)}?workspace_id=${encodeURIComponent(workspaceId)}`,
+  const mutation = useMutation<
+    void,
+    Error,
+    { id: string; state: InboxItem["state"]; resolvedAction?: string }
+  >({
+    mutationFn: async ({ id, state, resolvedAction }) => {
+      const res = await apiFetch(
+        `/api/v1/inbox/${encodeURIComponent(id)}?workspace_id=${encodeURIComponent(workspaceId!)}`,
         {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
@@ -116,87 +131,103 @@ export function useInbox(workspaceId: string | null | undefined, stateFilter?: "
       )
       if (!res.ok) {
         const body = await res.json().catch(() => null)
-        const err = new Error(body?.error ?? `patch failed (${res.status})`)
-        setError(err.message)
         // Propagate to the caller so a UI button can show its own
         // toast + roll back optimistic UI. Earlier silently-swallowed
         // errors meant a 409 (e.g. the source-managed kind guard)
         // never surfaced to the user.
-        throw err
+        throw new Error(body?.error ?? `patch failed (${res.status})`)
       }
-      // Optimistic local update plus reconciliation against the
-      // current filter so a stateFilter='unread' view drops the row
-      // when it transitions to read/resolved (instead of leaving a
-      // stale row in the list until the next refresh).
-      const before = items.find((it) => it.id === id)
-      const matchesFilter =
-        !stateFilter || stateFilter === "all" || stateFilter === state
-      setItems((prev) => {
-        if (!matchesFilter) {
-          return prev.filter((it) => it.id !== id)
+    },
+    retry: false,
+    onMutate: () => setPatchError(null),
+    onSuccess: (_data, { id, state, resolvedAction }) => {
+      // Reconcile the cached list in place (instead of refetching) so
+      // a stateFilter='unread' view drops the row when it transitions
+      // to read/resolved. The next inbox.updated WS event re-syncs
+      // against the server anyway.
+      qc.setQueryData<InboxListResponse>(listKey, (prev) => {
+        if (!prev) return prev
+        const before = prev.rows?.find((it) => it.id === id)
+        const matchesFilter = stateParam === "all" || stateParam === state
+        const rows = matchesFilter
+          ? (prev.rows ?? []).map((it) =>
+              it.id === id
+                ? {
+                    ...it,
+                    state,
+                    resolved_action:
+                      state === "resolved" ? resolvedAction ?? it.resolved_action : it.resolved_action,
+                  }
+                : it,
+            )
+          : (prev.rows ?? []).filter((it) => it.id !== id)
+        let unread = prev.unread_count ?? 0
+        if (before) {
+          const wasUnread = before.state === "unread"
+          const isUnread = state === "unread"
+          if (wasUnread && !isUnread) unread = Math.max(0, unread - 1)
+          else if (!wasUnread && isUnread) unread = unread + 1
         }
-        return prev.map((it) =>
-          it.id === id
-            ? {
-                ...it,
-                state,
-                resolved_action:
-                  state === "resolved" ? resolvedAction ?? it.resolved_action : it.resolved_action,
-              }
-            : it,
-        )
-      })
-      setUnreadCount((prev) => {
-        if (!before) return prev
-        const wasUnread = before.state === "unread"
-        const isUnread = state === "unread"
-        if (wasUnread && !isUnread) return Math.max(0, prev - 1)
-        if (!wasUnread && isUnread) return prev + 1
-        return prev
+        return { ...prev, rows, unread_count: unread }
       })
     },
-    [items, workspaceId, stateFilter],
+    onError: (err) => setPatchError(err.message),
+  })
+  const { mutateAsync } = mutation
+
+  const patch = useCallback(
+    async (id: string, state: InboxItem["state"], resolvedAction?: string) => {
+      if (!workspaceId) return
+      await mutateAsync({ id, state, resolvedAction })
+    },
+    [mutateAsync, workspaceId],
   )
 
-  return { items, unreadCount, loading, error, refresh, patch }
+  const refresh = useCallback(async () => {
+    if (!workspaceId) return
+    await qc.invalidateQueries({ queryKey: inboxKeys.all(workspaceId) })
+  }, [qc, workspaceId])
+
+  return {
+    items: query.data?.rows ?? [],
+    unreadCount: query.data?.unread_count ?? 0,
+    // isFetching (not isLoading) mirrors the old loading flag, which
+    // was set on every refresh, not just the first one.
+    loading: query.isFetching,
+    error: patchError ?? (query.error ? query.error.message : null),
+    refresh,
+    patch,
+  }
 }
 
 // useInboxUnreadCount is the lighter cousin used by the top-bar bell
-// when the full list isn't needed. Polls the dedicated /count endpoint
-// every 30s plus listens to the realtime event so the badge updates
-// instantly when something changes elsewhere.
+// when the full list isn't needed. WS events (below) are the primary
+// trigger — the long refetchInterval is only a safety net for missed
+// events (dropped socket, missed frame during reconnect), replacing
+// the old blind 30s poll.
 export function useInboxUnreadCount(workspaceId: string | null | undefined) {
-  const [count, setCount] = useState(0)
-
-  const refresh = useCallback(async () => {
-    if (!workspaceId) {
-      setCount(0)
-      return
-    }
-    try {
-      const res = await fetch(
-        `/api/v1/inbox/count?workspace_id=${encodeURIComponent(workspaceId)}`,
+  const query = useQuery<number>({
+    queryKey: inboxKeys.count(workspaceId ?? ""),
+    queryFn: async ({ signal }) => {
+      const res = await apiFetch(
+        `/api/v1/inbox/count?workspace_id=${encodeURIComponent(workspaceId!)}`,
+        { signal },
       )
-      if (!res.ok) return
+      if (!res.ok) {
+        // Throwing keeps the previous data in the cache — the bell
+        // badge stays at the last known good value, as before.
+        throw new Error(`inbox count: ${res.status}`)
+      }
       const data: { unread_count: number } = await res.json()
-      setCount(data.unread_count ?? 0)
-    } catch {
-      /* swallow — bell badge stays at last known good value */
-    }
-  }, [workspaceId])
+      return data.unread_count ?? 0
+    },
+    enabled: Boolean(workspaceId),
+    retry: false,
+    refetchInterval: 120_000,
+    refetchIntervalInBackground: false,
+  })
 
-  useEffect(() => {
-    refresh()
-    // 30s polling matches the scheduler tick — keeps the bell alive
-    // without thrashing the API. Realtime events below cut latency
-    // when something happens between polls.
-    const t = setInterval(refresh, 30_000)
-    return () => clearInterval(t)
-  }, [refresh])
+  useInboxRealtimeInvalidation(workspaceId)
 
-  useRealtimeEvent("inbox.updated", refresh)
-  useRealtimeEvent("escalation.created", refresh)
-  useRealtimeEvent("pipeline.waitpoint.created", refresh)
-
-  return count
+  return query.data ?? 0
 }
