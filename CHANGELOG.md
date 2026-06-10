@@ -82,6 +82,15 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- **Episodic indexer now starts at server boot.** The journal-embedding
+  sweeper (`episodic.NewIndexer`) was fully implemented and tested but
+  never constructed in production, so `HybridRecall` always queried an
+  empty vector index. The server now starts the sweeper at boot when an
+  embedder is configured (`KEEPER_OLLAMA_URL`). Without one, episodic
+  recall runs in **sparse-only mode** and says so: a WARN at boot, an
+  `episodic: vector|sparse-only` field on `GET /healthz`, and a
+  matching `crewship doctor` check with the enable hint.
+
 - **Stuck-QUEUED assignment sweeper now runs in production.** The
   crash-recovery sweeper (`StartStuckQueueSweeper`) was implemented
   and tested but never started — QUEUED assignments stranded by a

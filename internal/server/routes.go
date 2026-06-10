@@ -53,6 +53,10 @@ func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
 		"status":  "ok",
 		"service": "crewshipd",
 		"uptime":  time.Since(s.startedAt).String(),
+		// Episodic recall mode: "vector" (embedder configured, indexer
+		// sweeping) or "sparse-only" (degraded — no embedder, recall is
+		// keyword/FTS only). `crewship doctor` reads this field.
+		"episodic": s.episodicMode(),
 	})
 }
 

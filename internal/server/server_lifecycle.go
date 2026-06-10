@@ -22,6 +22,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/conversation"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/ephemeral"
+	"github.com/crewship-ai/crewship/internal/episodic"
 	"github.com/crewship-ai/crewship/internal/harbormaster"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/memory"
@@ -139,6 +140,16 @@ func (s *Server) Start(ctx context.Context) error {
 		go s.credMonitor.Run(ctx)
 	}
 
+	// Episodic indexer sweeper (W2, release-1.0 hardening): embeds
+	// high-value journal entries into journal_embeddings so HybridRecall
+	// has a vector index to query. Needs only the DB + an embedder; when
+	// no embedder is configured the helper logs the sparse-only WARN and
+	// /healthz reports the degraded mode instead of recall silently
+	// returning "".
+	if s.db != nil {
+		s.startEpisodicIndexer(ctx)
+	}
+
 	// Crew Journal background workers. Each is a small goroutine that
 	// only runs when s.db and the journal writer are live — early init
 	// paths that come up without DB (tests, --dry-run) skip silently.
@@ -251,6 +262,52 @@ func (s *Server) Start(ctx context.Context) error {
 	case <-ctx.Done():
 		return s.Shutdown()
 	}
+}
+
+// episodicIndexerPoll is the sleep between indexer sweeps for new
+// embeddable journal entries. 30s matches the episodic package default:
+// shorter hammers the Ollama embedder during active missions, longer
+// widens the recall blind window between an event happening and the
+// entry becoming vector-searchable. Each sweep processes up to 64
+// entries, so a backlog drains at ~2 entries/second worst case.
+//
+// var (not const) so the boot-wiring test can shrink it: the initial
+// sweep can lose a SQLite busy race against the other boot goroutines,
+// and a test waiting out the full production interval for the retry
+// would be either flaky or 30s slow. Production never mutates it.
+var episodicIndexerPoll = 30 * time.Second
+
+// startEpisodicIndexer launches the episodic indexer sweeper when an
+// embedder is configured, or logs the degraded-mode WARN when it isn't.
+// Called from Start() with the run context so the sweeper goroutine
+// stops on server shutdown. Requires s.db (caller guards).
+//
+// The sparse-only branch is deliberately loud: before W2 the indexer was
+// never constructed in production, HybridRecall queried an empty index,
+// and recall silently returned "" with no operator-visible signal. The
+// same vector/sparse-only state is exposed on /healthz (see
+// handleHealthz) and surfaced by `crewship doctor`.
+func (s *Server) startEpisodicIndexer(ctx context.Context) {
+	if s.episodicEmbedder == nil {
+		s.logger.Warn("episodic recall running in sparse-only mode — no embedder configured; " +
+			"set KEEPER_OLLAMA_URL to an Ollama host serving nomic-embed-text to enable vector recall")
+		return
+	}
+	idx := episodic.NewIndexer(s.db, s.episodicEmbedder, s.logger, episodicIndexerPoll)
+	go idx.Start(ctx)
+	s.logger.Info("episodic indexer started",
+		"model", s.episodicEmbedder.Model(),
+		"poll", episodicIndexerPoll.String())
+}
+
+// episodicMode reports the recall mode for health surfaces: "vector"
+// when an embedder is wired (indexer running, HybridRecall serves
+// vec+BM25), "sparse-only" when recall degrades to keyword/FTS only.
+func (s *Server) episodicMode() string {
+	if s.episodicEmbedder != nil {
+		return "vector"
+	}
+	return "sparse-only"
 }
 
 // Shutdown gracefully stops all server subsystems, draining connections and
