@@ -152,6 +152,7 @@ export function AvatarPickerDialog({
                 key={qs}
                 type="button"
                 onClick={() => setDraftSeed(qs)}
+                aria-label={`Use avatar seed ${qs}`}
                 className={cn(
                   "rounded-lg overflow-hidden border transition-colors",
                   draftSeed === qs ? "border-blue-400" : "border-white/10 hover:border-white/25",
@@ -180,6 +181,7 @@ export function AvatarPickerDialog({
             type="text"
             value={draftSeed}
             onChange={(e) => setDraftSeed(e.target.value)}
+            aria-label="Avatar seed"
             className="w-full bg-zinc-950 border border-white/15 rounded px-2 py-1.5 text-sm font-mono outline-none focus:border-blue-400"
           />
           <div className="text-[11px] text-muted-foreground mt-1">

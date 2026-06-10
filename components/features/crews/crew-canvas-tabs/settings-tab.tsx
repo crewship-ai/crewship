@@ -48,18 +48,19 @@ export function SettingsTab({
         <h2 className="text-lg font-semibold">Profile</h2>
         <div className="rounded-xl border border-white/8 bg-card divide-y divide-white/5">
           <Row label="Name">
-            <EditableField value={crew.name} onSave={(v) => patch({ name: v })} />
+            <EditableField value={crew.name} onSave={(v) => patch({ name: v })} ariaLabel="Name" />
           </Row>
           <Row label="Slug">
-            <EditableField value={crew.slug} onSave={(v) => patch({ slug: v })} mono />
+            <EditableField value={crew.slug} onSave={(v) => patch({ slug: v })} ariaLabel="Slug" mono />
           </Row>
           <Row label="Description" align="start">
-            <EditableField value={crew.description} onSave={(v) => patch({ description: v })} />
+            <EditableField value={crew.description} onSave={(v) => patch({ description: v })} ariaLabel="Description" />
           </Row>
           <Row label="Issue prefix">
             <EditableField
               value={crew.issue_prefix ?? ""}
               onSave={(v) => patch({ issue_prefix: (v || null) && v.toUpperCase().slice(0, 5) })}
+              ariaLabel="Issue prefix"
               mono
               placeholder="ENG"
             />
@@ -70,6 +71,7 @@ export function SettingsTab({
               <EditableField
                 value={crew.avatar_style ?? "bottts-neutral"}
                 onSave={(v) => patch({ avatar_style: v })}
+                ariaLabel="Avatar style"
                 options={STYLE_OPTIONS}
                 format={(v) => STYLE_OPTIONS.find((o) => o.value === v)?.label ?? v}
               />

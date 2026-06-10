@@ -229,6 +229,7 @@ export function RoutineSchedulesTab({ workspaceId, pipelineId, slug }: Props) {
               <div>
                 <FieldLabel>Cron expression</FieldLabel>
                 <Input
+                  aria-label="Cron expression"
                   value={cronExpr}
                   onChange={(e) => setCronExpr(e.target.value)}
                   className="mt-1.5 h-9 font-mono text-sm"
@@ -238,6 +239,7 @@ export function RoutineSchedulesTab({ workspaceId, pipelineId, slug }: Props) {
               <div>
                 <FieldLabel>Timezone</FieldLabel>
                 <Input
+                  aria-label="Timezone"
                   value={timezone}
                   onChange={(e) => setTimezone(e.target.value)}
                   className="mt-1.5 h-9 text-sm"
@@ -247,6 +249,7 @@ export function RoutineSchedulesTab({ workspaceId, pipelineId, slug }: Props) {
             <div>
               <FieldLabel>Inputs (JSON)</FieldLabel>
               <textarea
+                aria-label="Inputs JSON"
                 value={inputsJson}
                 onChange={(e) => setInputsJson(e.target.value)}
                 className="mt-1.5 h-24 w-full resize-none rounded-md border border-white/[0.1] bg-background p-2.5 font-mono text-[12px] leading-relaxed"

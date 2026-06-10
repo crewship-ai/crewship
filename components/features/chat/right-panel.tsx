@@ -290,10 +290,10 @@ export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId,
                 {editorSaving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
                 Save
               </button>
-              <button onClick={() => setEditorExpanded(!editorExpanded)} className="p-1 rounded hover:bg-[#3c3c3c] text-[#888]">
+              <button onClick={() => setEditorExpanded(!editorExpanded)} aria-label={editorExpanded ? "Collapse editor" : "Expand editor"} className="p-1 rounded hover:bg-[#3c3c3c] text-[#888]">
                 {editorExpanded ? <Minimize2 className="h-3 w-3" /> : <Maximize2 className="h-3 w-3" />}
               </button>
-              <button onClick={closeEditor} className="p-1 rounded hover:bg-[#3c3c3c] text-[#888]">
+              <button onClick={closeEditor} aria-label="Close editor" className="p-1 rounded hover:bg-[#3c3c3c] text-[#888]">
                 <X className="h-3 w-3" />
               </button>
             </div>

@@ -251,7 +251,7 @@ export function CrewCanvas({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1">
             <h1 className="text-2xl font-semibold">
-              <EditableField value={crew.name} onSave={(v) => patch({ name: v })} />
+              <EditableField value={crew.name} onSave={(v) => patch({ name: v })} ariaLabel="Crew name" />
             </h1>
             <span className="text-[11px] flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-zinc-800 text-foreground/80 border border-white/10">
               Crew

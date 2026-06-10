@@ -457,7 +457,7 @@ export function CrewPolicyControls({ crewId, workspaceId, canEdit }: CrewPolicyC
               disabled={!dirty || forbiddenCombination || quotaInvalid || (policyFieldDirty && reason.trim() === "") || saving}
               className={cn(
                 "text-xs px-3 py-1.5 rounded border transition-colors",
-                "bg-primary/20 border-primary/40 text-primary hover:bg-primary/30",
+                "bg-primary/20 border-primary/40 text-primary-hover hover:bg-primary/30",
                 "disabled:opacity-50 disabled:cursor-not-allowed",
               )}
             >

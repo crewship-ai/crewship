@@ -425,7 +425,7 @@ export function RuntimeConfig({ value, onChange }: RuntimeConfigProps) {
                           <div className="font-medium flex items-center gap-1.5">
                             {img.label}
                             {img.recommended && (
-                              <span className="text-[9px] px-1 py-0 rounded bg-primary/20 text-primary">RECOMMENDED</span>
+                              <span className="text-[9px] px-1 py-0 rounded bg-primary/20 text-primary-hover">RECOMMENDED</span>
                             )}
                           </div>
                           <div className="text-[10px] text-muted-foreground line-clamp-2 mt-0.5">

@@ -53,22 +53,23 @@ export function OverviewTab({
         </div>
         <div className="rounded-xl border border-white/8 bg-card divide-y divide-white/5">
           <Row label="Name">
-            <EditableField value={agent.name} onSave={(v) => patch({ name: v })} />
+            <EditableField value={agent.name} onSave={(v) => patch({ name: v })} ariaLabel="Name" />
           </Row>
           <Row label="Slug">
-            <EditableField value={agent.slug} onSave={(v) => patch({ slug: v })} mono />
+            <EditableField value={agent.slug} onSave={(v) => patch({ slug: v })} ariaLabel="Slug" mono />
           </Row>
           <Row label="Role title">
-            <EditableField value={agent.role_title} onSave={(v) => patch({ role_title: v })} />
+            <EditableField value={agent.role_title} onSave={(v) => patch({ role_title: v })} ariaLabel="Role title" />
           </Row>
           <Row label="Description" align="start">
-            <EditableField value={agent.description} onSave={(v) => patch({ description: v })} />
+            <EditableField value={agent.description} onSave={(v) => patch({ description: v })} ariaLabel="Description" />
           </Row>
           <Row label="Crew">
             <EditableField
               value={agent.crew_id ?? ""}
               onSave={(v) => patch({ crew_id: v || null })}
               options={crewOptions}
+              ariaLabel="Crew"
               format={(_v) => agent.crew?.name ?? "(no crew)"}
             />
           </Row>
@@ -77,6 +78,7 @@ export function OverviewTab({
               value={agent.agent_role}
               onSave={(v) => patch({ agent_role: v })}
               options={[...ROLE_OPTIONS]}
+              ariaLabel="Agent role"
               format={(v) => ROLE_OPTIONS.find((o) => o.value === v)?.label ?? v}
             />
           </Row>
@@ -85,6 +87,7 @@ export function OverviewTab({
               <EditableField
                 value={agent.lead_mode || "active"}
                 onSave={(v) => patch({ lead_mode: v })}
+                ariaLabel="Lead mode"
                 options={[
                   { value: "active", label: "Active (orchestrates crew)" },
                   { value: "passive", label: "Passive (frontend only)" },

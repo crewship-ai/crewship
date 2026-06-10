@@ -50,6 +50,7 @@ export function AdvancedSection({
           <Row label="Timeout (s)">
             <EditableField
               value={String(agent.timeout_seconds)}
+              ariaLabel="Timeout in seconds"
               onSave={(v) => {
                 const n = parseInt(v, 10)
                 if (!Number.isInteger(n) || n < 1) return
@@ -61,6 +62,7 @@ export function AdvancedSection({
             <EditableField
               value={agent.tool_profile}
               onSave={(v) => patch({ tool_profile: v })}
+              ariaLabel="Tool profile"
               options={[...TOOL_PROFILE_OPTIONS]}
               format={(v) => TOOL_PROFILE_OPTIONS.find((o) => o.value === v)?.label ?? v}
             />

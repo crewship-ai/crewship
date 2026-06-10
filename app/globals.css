@@ -128,9 +128,12 @@
 
   /* Brand — #1E7BFE (vivid blue from Crewship logo's blue-bg variant).
    *  Hex used directly — OKLCH approximations of vivid blues can drift
-   *  visibly when round-tripped to sRGB on non-wide-gamut monitors. */
+   *  visibly when round-tripped to sRGB on non-wide-gamut monitors.
+   *  primary-foreground is the page-background navy, not white: white on
+   *  #1E7BFE is 3.95:1 (fails WCAG AA 4.5:1 for normal text); the dark
+   *  navy reads at 5.22:1 while keeping the same brand blue surface. */
   --primary: #1E7BFE;
-  --primary-foreground: oklch(1.0000 0 0);
+  --primary-foreground: oklch(0.10 0.008 285);
   --primary-hover: #3D8FFE;
 
   --secondary: oklch(1.0000 0 0);

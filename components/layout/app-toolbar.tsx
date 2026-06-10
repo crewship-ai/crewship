@@ -555,7 +555,7 @@ export function AppToolbar() {
                   <div className="flex h-6 w-6 items-center justify-center rounded bg-primary text-[8px] font-bold text-primary-foreground">U</div>
                   <SheetTitle className="text-sm">Unify Technology</SheetTitle>
                 </div>
-                <button onClick={() => setMobileNavOpen(false)} className="h-8 w-8 flex items-center justify-center rounded-md hover:bg-accent">
+                <button onClick={() => setMobileNavOpen(false)} aria-label="Close navigation" className="h-8 w-8 flex items-center justify-center rounded-md hover:bg-accent">
                   <X className="h-4 w-4" />
                 </button>
               </div>

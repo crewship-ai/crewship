@@ -149,6 +149,7 @@ export function CrewsExplorer({
           size="icon-xs"
           className="text-muted-foreground/70 hover:text-foreground/70 ml-auto"
           onClick={onToggleCollapse}
+          aria-label={collapsed ? "Expand explorer" : "Collapse explorer"}
         >
           {collapsed ? <PanelLeftOpen className="h-3.5 w-3.5" /> : <PanelLeftClose className="h-3.5 w-3.5" />}
         </Button>
