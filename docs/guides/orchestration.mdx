@@ -58,6 +58,10 @@ The `runMissionLoop` function runs as a goroutine for each active mission. Every
 5. Detect deadlocks (all tasks BLOCKED with no progress)
 ```
 
+### Restart Durability
+
+Mission loops are in-memory goroutines, but missions survive server restarts. At boot — right after orphaned-run recovery — the server scans the database for missions still in `IN_PROGRESS` and re-attaches an orchestration loop to each one. Tasks the previous process never dispatched are picked up on the next tick, and `BLOCKED` tasks whose dependencies already completed are self-healed back to `PENDING`. No operator action is needed after a restart or crash; the 2-hour mission timeout restarts from the moment of re-attach.
+
 ## Task States
 
 ```

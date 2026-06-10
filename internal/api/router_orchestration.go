@@ -444,6 +444,9 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	// registered in router_internal.go.
 	assign := NewAssignmentHandler(r.db, r.orch, r.hub, r.internalToken, r.logger)
 	assign.SetJournal(r.Journal())
+	// Stash on the Router so the server boot path can start the
+	// stuck-QUEUED sweeper on this same instance (Assignments()).
+	r.assignmentHandler = assign
 	if r.missionCallback != nil {
 		assign.SetMissionCallback(r.missionCallback)
 		// Wire AssignmentHandler as the TaskDispatcher so the MissionEngine

@@ -103,12 +103,14 @@ the maintainer in production-shaped workloads; the pieces marked 🟡 and
   load and may run, but expect rough edges — file issues with logs.
 - **PostgreSQL is on the v0.2 roadmap.** Beta runs on SQLite via
   `modernc.org/sqlite` (single-binary, WAL mode, no extra services).
-- **Telemetry is ON by default in v0.1 beta.** Anonymous crash reports
-  flow to the maintainer's Sentry to give a solo team enough signal to
-  fix bugs. Disable with `crewship telemetry off` (sticky), or
+- **Telemetry defaults ON only in prerelease builds.** Beta/RC and dev
+  builds send anonymous crash reports to the maintainer's Sentry to
+  give a solo team enough signal to fix bugs; stable release versions
+  keep telemetry OFF until you opt in. The onboarding wizard (web and
+  `crewship setup`) asks explicitly either way, and your answer is
+  sticky — change it anytime with `crewship telemetry on|off`, or
   redirect to your own Sentry with `CREWSHIP_SENTRY_DSN=...`. Full
   details in [docs/guides/telemetry](docs/guides/telemetry.mdx).
-  Reverts to opt-in for v1.0 GA.
 - **APIs may break across minor bumps** (v0.1 → v0.2). Patch bumps
   inside a minor (v0.1.0 → v0.1.1) are backwards-compatible.
 - **No multi-host clustering.** One Crewship instance manages many

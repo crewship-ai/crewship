@@ -1420,6 +1420,11 @@ END;
 	// operator, not per (agent, operator). See
 	// migrate_consts_v112_user_models.go.
 	{version: 112, name: "user_models", sql: migrationUserModels},
+
+	// v113: plain status indexes on assignments + pipeline_runs so the
+	// /metrics domain gauges (W10) count by status off an index instead
+	// of scanning. See migrate_consts_v113_metrics_indexes.go.
+	{version: 113, name: "metrics_status_indexes", sql: migrationMetricsStatusIndexes},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

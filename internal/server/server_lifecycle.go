@@ -22,6 +22,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/conversation"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/ephemeral"
+	"github.com/crewship-ai/crewship/internal/episodic"
 	"github.com/crewship-ai/crewship/internal/harbormaster"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/memory"
@@ -29,6 +30,30 @@ import (
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/scrubber"
 	"github.com/crewship-ai/crewship/internal/ws"
+)
+
+// Stuck-QUEUED assignment sweeper boot defaults. The sweeper
+// (goapi.AssignmentHandler.StartStuckQueueSweeper) is the crash-recovery
+// net for the assignment queue: QUEUED rows are normally drained by the
+// completion-path pump, but a crash between "row set QUEUED" and "next
+// completion fires" strands them forever — nothing re-pumps after a
+// restart. The boot-time sweeper catches exactly that.
+//
+//   - stuckQueueSweepInterval (60s): how often the sweeper scans. Cheap
+//     query (partial index on assignments(status, queued_at)), so a
+//     minute-grain scan costs nothing on idle systems while keeping
+//     post-crash recovery latency operator-friendly.
+//   - stuckQueueStaleAfter (10min): how long a row must sit QUEUED
+//     before it counts as stuck. Generously above any healthy pump
+//     cadence (completions fire every few seconds under load), so the
+//     sweeper never races a live pump — it only ever sees rows whose
+//     pump path is genuinely gone.
+//
+// Declared as vars (not consts) so the boot-wiring integration test can
+// shrink them to milliseconds; production code never mutates them.
+var (
+	stuckQueueSweepInterval = 60 * time.Second
+	stuckQueueStaleAfter    = 10 * time.Minute
 )
 
 // Server is the main crewship process, wiring together the HTTP server, IPC
@@ -65,6 +90,35 @@ func (s *Server) Start(ctx context.Context) error {
 	go s.wsHub.Run(ctx)
 	go s.orchestrator.Start(ctx)
 
+	// Stuck-QUEUED assignment sweeper: crash-recovery net for the
+	// assignment queue (see the stuckQueueSweep* vars above for the
+	// cadence rationale). Runs on the same AssignmentHandler instance
+	// the HTTP routes use; the goroutine exits when ctx is cancelled
+	// at shutdown. nil-guarded because the API router (and with it the
+	// handler) only exists when a DB was wired — headless/dry-run
+	// boots have no queue to sweep.
+	if s.apiRouter != nil {
+		if assign := s.apiRouter.Assignments(); assign != nil {
+			assign.StartStuckQueueSweeper(ctx, stuckQueueSweepInterval, stuckQueueStaleAfter)
+			s.logger.Info("stuck-queue sweeper started",
+				"interval", stuckQueueSweepInterval.String(),
+				"stale_after", stuckQueueStaleAfter.String())
+		}
+	}
+
+	// Re-attach mission orchestration loops lost in a previous crewshipd
+	// run. runMissionLoop is in-memory and only ever spawned by API
+	// handlers, so after a restart every IN_PROGRESS mission would sit
+	// driverless forever without this scan. Runs after orphaned-run
+	// recovery (above) so stale RUNNING state is already cleaned, and on
+	// the cancellable run ctx so Shutdown stops the re-attached loops the
+	// same way it stops handler-started ones.
+	if s.db != nil && s.missionEngine != nil {
+		if n := s.missionEngine.ReattachInProgressMissions(ctx); n > 0 {
+			s.logger.Info("re-attached in-progress missions after restart", "count", n)
+		}
+	}
+
 	// Rehydrate stats + file-watcher tracking for crew containers that
 	// survived a previous crewshipd run. Without this, the stats
 	// collector and listening-port scanner stay blind to existing
@@ -84,6 +138,16 @@ func (s *Server) Start(ctx context.Context) error {
 	}
 	if s.credMonitor != nil {
 		go s.credMonitor.Run(ctx)
+	}
+
+	// Episodic indexer sweeper (W2, release-1.0 hardening): embeds
+	// high-value journal entries into journal_embeddings so HybridRecall
+	// has a vector index to query. Needs only the DB + an embedder; when
+	// no embedder is configured the helper logs the sparse-only WARN and
+	// /healthz reports the degraded mode instead of recall silently
+	// returning "".
+	if s.db != nil {
+		s.startEpisodicIndexer(ctx)
 	}
 
 	// Crew Journal background workers. Each is a small goroutine that
@@ -198,6 +262,52 @@ func (s *Server) Start(ctx context.Context) error {
 	case <-ctx.Done():
 		return s.Shutdown()
 	}
+}
+
+// episodicIndexerPoll is the sleep between indexer sweeps for new
+// embeddable journal entries. 30s matches the episodic package default:
+// shorter hammers the Ollama embedder during active missions, longer
+// widens the recall blind window between an event happening and the
+// entry becoming vector-searchable. Each sweep processes up to 64
+// entries, so a backlog drains at ~2 entries/second worst case.
+//
+// var (not const) so the boot-wiring test can shrink it: the initial
+// sweep can lose a SQLite busy race against the other boot goroutines,
+// and a test waiting out the full production interval for the retry
+// would be either flaky or 30s slow. Production never mutates it.
+var episodicIndexerPoll = 30 * time.Second
+
+// startEpisodicIndexer launches the episodic indexer sweeper when an
+// embedder is configured, or logs the degraded-mode WARN when it isn't.
+// Called from Start() with the run context so the sweeper goroutine
+// stops on server shutdown. Requires s.db (caller guards).
+//
+// The sparse-only branch is deliberately loud: before W2 the indexer was
+// never constructed in production, HybridRecall queried an empty index,
+// and recall silently returned "" with no operator-visible signal. The
+// same vector/sparse-only state is exposed on /healthz (see
+// handleHealthz) and surfaced by `crewship doctor`.
+func (s *Server) startEpisodicIndexer(ctx context.Context) {
+	if s.episodicEmbedder == nil {
+		s.logger.Warn("episodic recall running in sparse-only mode — no embedder configured; " +
+			"set KEEPER_OLLAMA_URL to an Ollama host serving nomic-embed-text to enable vector recall")
+		return
+	}
+	idx := episodic.NewIndexer(s.db, s.episodicEmbedder, s.logger, episodicIndexerPoll)
+	go idx.Start(ctx)
+	s.logger.Info("episodic indexer started",
+		"model", s.episodicEmbedder.Model(),
+		"poll", episodicIndexerPoll.String())
+}
+
+// episodicMode reports the recall mode for health surfaces: "vector"
+// when an embedder is wired (indexer running, HybridRecall serves
+// vec+BM25), "sparse-only" when recall degrades to keyword/FTS only.
+func (s *Server) episodicMode() string {
+	if s.episodicEmbedder != nil {
+		return "vector"
+	}
+	return "sparse-only"
 }
 
 // Shutdown gracefully stops all server subsystems, draining connections and

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"strings"
 
@@ -13,6 +14,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/crewship-ai/crewship/internal/cli"
+	"github.com/crewship-ai/crewship/internal/crashreport"
 )
 
 // readLine reads a single line from stdin, returns the trimmed
@@ -60,6 +62,7 @@ var (
 	setupModelFlag     string
 	setupAPIKeyFlag    string
 	setupYesFlag       bool
+	setupTelemetryFlag bool
 )
 
 var setupCmd = &cobra.Command{
@@ -97,6 +100,7 @@ func init() {
 	setupCmd.Flags().StringVar(&setupAPIKeyFlag, "api-key", "", "Deprecated alias for --token (will be removed)")
 	_ = setupCmd.Flags().MarkDeprecated("api-key", "use --token instead — onboarding accepts CLI tokens, not raw API keys")
 	setupCmd.Flags().BoolVar(&setupYesFlag, "yes", false, "Skip interactive prompts; require all values via flags")
+	setupCmd.Flags().BoolVar(&setupTelemetryFlag, "telemetry", false, "Enable anonymous crash reporting (--telemetry=false to opt out). Omit to keep the server's version-based default; interactive runs always ask")
 
 	rootCmd.AddCommand(setupCmd)
 }
@@ -207,6 +211,29 @@ func runSetup(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
+	// Telemetry consent — the CLI counterpart of the web wizard's consent
+	// step. An explicit --telemetry flag always wins (scripting / --yes);
+	// interactive runs ask with the server's current state as the default
+	// (prerelease builds boot default-on, stable builds default-off — see
+	// crashreport.DefaultOptIn). When neither applies (--yes without the
+	// flag), the field is omitted and the server-side version default
+	// keeps ruling.
+	var telemetryOptIn *bool
+	switch {
+	case cmd.Flags().Changed("telemetry"):
+		v := setupTelemetryFlag
+		telemetryOptIn = &v
+	case interactive:
+		answer, err := promptYesNo(
+			"Send anonymous crash reports to help improve Crewship? (change anytime: crewship telemetry on|off)",
+			serverTelemetryEnabled(),
+		)
+		if err != nil {
+			return err
+		}
+		telemetryOptIn = &answer
+	}
+
 	body := map[string]any{
 		"workspace_name":     workspaceName,
 		"preferred_language": language,
@@ -222,6 +249,9 @@ func runSetup(cmd *cobra.Command, _ []string) error {
 		body["agent_name"] = fmt.Sprintf("%s #1", adapterCfg.label)
 	} else {
 		body["crew_template_slug"] = crewSlug
+	}
+	if telemetryOptIn != nil {
+		body["telemetry_opt_in"] = *telemetryOptIn
 	}
 
 	// Transport-security pre-flight before the per-adapter CLI token
@@ -262,6 +292,13 @@ func runSetup(cmd *cobra.Command, _ []string) error {
 	cli.PrintSuccess(fmt.Sprintf("Workspace ready — crew %q deployed with %d %s.",
 		crewSlug, agentCount, agentNoun,
 	))
+	if telemetryOptIn != nil {
+		if *telemetryOptIn {
+			fmt.Println("Telemetry: enabled — anonymous crash reports only. Disable anytime with `crewship telemetry off`.")
+		} else {
+			fmt.Println("Telemetry: disabled. Enable anytime with `crewship telemetry on`.")
+		}
+	}
 	if result.AgentID != "" {
 		fmt.Printf("First agent ID: %s\n", result.AgentID)
 		// Use the resolved server URL (flag > env > config > default),
@@ -353,6 +390,71 @@ func promptAPIKey(adapterLabel string) (string, error) {
 		return "", fmt.Errorf("read token: %w", err)
 	}
 	return strings.TrimSpace(string(bytes)), nil
+}
+
+// promptYesNo asks a yes/no question with a default that bare-Enter
+// accepts. Re-asks on input it can't parse instead of silently picking
+// the default — a consent prompt is the one place a misread keystroke
+// shouldn't be papered over.
+func promptYesNo(prompt string, def bool) (bool, error) {
+	suffix := "[Y/n]"
+	if !def {
+		suffix = "[y/N]"
+	}
+	for {
+		fmt.Printf("%s %s: ", prompt, suffix)
+		raw, err := readLine()
+		if err != nil {
+			return false, err
+		}
+		if v, ok := parseYesNo(raw, def); ok {
+			return v, nil
+		}
+		fmt.Println("Please answer y or n.")
+	}
+}
+
+// parseYesNo maps free-form y/n input to a bool. Empty input accepts the
+// default; ok=false means the input was unparseable and the caller should
+// re-prompt. Split from promptYesNo so the parsing contract is testable
+// without a TTY.
+func parseYesNo(raw string, def bool) (value, ok bool) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "":
+		return def, true
+	case "y", "yes":
+		return true, true
+	case "n", "no":
+		return false, true
+	default:
+		return false, false
+	}
+}
+
+// serverTelemetryEnabled reads the server's current crash-reporting
+// consent state to seed the interactive prompt's default — a prerelease
+// server boots with telemetry defaulted on, a stable server with it off,
+// and an operator who already ran `crewship telemetry on|off` sees their
+// own choice reflected. Best-effort: any transport/parse failure falls
+// back to the CLI build's own version default rather than aborting setup
+// over a cosmetic prompt default.
+func serverTelemetryEnabled() bool {
+	client := newAPIClient()
+	resp, err := client.Get("/api/v1/system/telemetry")
+	if err != nil {
+		return crashreport.DefaultOptIn(version)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return crashreport.DefaultOptIn(version)
+	}
+	var st struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := cli.ReadJSON(resp, &st); err != nil {
+		return crashreport.DefaultOptIn(version)
+	}
+	return st.Enabled
 }
 
 func promptOptional(prompt, defaultValue string) (string, error) {
