@@ -36,6 +36,21 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Added
 
+- **Pipeline resume-from-step at boot.** The executor now persists
+  `current_step_id` + the step-outputs map at every step boundary, and
+  boot recovery re-enters previously in-flight runs from the next
+  unfinished step instead of stamping them `interrupted`: completed
+  steps are restored (not re-executed), the in-flight step re-runs
+  with at-least-once semantics, DAG runs recover at wave granularity,
+  and runs parked on a `wait` approval step re-attach to their
+  original pending waitpoint token so the approval card stays
+  answerable across restarts. `interrupted` remains the fallback when
+  persisted state is insufficient (missing pipeline, definition drift,
+  non-resumable mode), with the reason recorded in `error_message`.
+  Operator escape hatch: `CREWSHIP_PIPELINE_RESUME=off` restores the
+  old stamp-everything-interrupted behaviour. See
+  `docs/guides/routines.mdx` § Durability and restart recovery.
+
 - **PR-G / PR-F UI surface.** Three React panels expose previously
   backend-only governance toggles: `CrewPolicyControls`
   (`autonomy_level` × `behavior_mode` × `max_ephemeral_agents`),

@@ -68,7 +68,10 @@
 // CLI / UI / API; the WaitFor pre-registers the listener channel
 // before the decided-state DB check to eliminate the lost-wakeup
 // race that earlier had goroutines parked forever after a fast-path
-// CompleteApproval. RecoverPending sweeps stranded entries at boot.
+// CompleteApproval. RecoverPending sweeps timed-out entries at boot;
+// runs parked on a wait step are then re-attached to their original
+// pending token by the boot resume scan (resume.go), so approvals
+// stay answerable across restarts.
 //
 // # Cross-references
 //

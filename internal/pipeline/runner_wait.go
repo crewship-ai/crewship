@@ -64,16 +64,35 @@ func (e *Executor) runWaitStep(ctx context.Context, step Step, parentRender Rend
 				return "", 0, time.Since(stepStart).Milliseconds(), ctx.Err()
 			}
 		}
-		token, err := e.waitpoints.CreateApproval(ctx, WaitpointApprovalRequest{
-			WorkspaceID:    in.WorkspaceID,
-			PipelineRunID:  runID,
-			StepID:         step.ID,
-			Prompt:         prompt,
-			InvokingCrewID: in.InvokingCrewID,
-			TimeoutSec:     step.TimeoutSec,
-		})
-		if err != nil {
-			return "", 0, time.Since(stepStart).Milliseconds(), fmt.Errorf("wait step %q create approval: %w", step.ID, err)
+		// Boot-time resume: re-attach to the waitpoint the previous
+		// lifetime created for this (run, step) instead of minting a
+		// duplicate approval (second token + second inbox card).
+		// WaitFor handles both live and already-decided tokens — if
+		// the approval was resolved between the kill and the resume,
+		// the DB re-check inside WaitFor returns immediately.
+		var token string
+		if in.resume {
+			if finder, ok := e.waitpoints.(WaitpointResumer); ok {
+				existing, ferr := finder.FindApprovalForStep(ctx, runID, step.ID)
+				if ferr != nil {
+					return "", 0, time.Since(stepStart).Milliseconds(), fmt.Errorf("wait step %q find resumable approval: %w", step.ID, ferr)
+				}
+				token = existing
+			}
+		}
+		if token == "" {
+			created, err := e.waitpoints.CreateApproval(ctx, WaitpointApprovalRequest{
+				WorkspaceID:    in.WorkspaceID,
+				PipelineRunID:  runID,
+				StepID:         step.ID,
+				Prompt:         prompt,
+				InvokingCrewID: in.InvokingCrewID,
+				TimeoutSec:     step.TimeoutSec,
+			})
+			if err != nil {
+				return "", 0, time.Since(stepStart).Milliseconds(), fmt.Errorf("wait step %q create approval: %w", step.ID, err)
+			}
+			token = created
 		}
 		approved, err := e.waitpoints.WaitFor(ctx, token)
 		if err != nil {

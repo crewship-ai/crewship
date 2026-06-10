@@ -204,7 +204,7 @@ Egress allowlist enforced both pre-flight AND on every redirect (CheckRedirect c
 }
 ```
 
-Three kinds: `approval` (HITL token), `datetime` (sleep until ISO timestamp), `event` (filter on journal events). DB-backed waitpoint store survives process restart for `approval` kind; the recovery scan at boot reports stranded pending waitpoints.
+Three kinds: `approval` (HITL token), `datetime` (sleep until ISO timestamp), `event` (filter on journal events). The DB-backed waitpoint store survives process restart for the `approval` kind: at boot, the run that was parked on the wait step is resumed and re-attaches to the original pending token, so the approval stays answerable (see [Durability and restart recovery](#durability-and-restart-recovery)).
 
 Approve via UI Inbox, CLI `crewship routine waitpoints approve <token>`, or API.
 
@@ -385,6 +385,24 @@ crewship routine waitpoints reject  <token> --comment "needs revision"
 
 The decision comment is forwarded to the parked run as the wait step's output, so downstream steps can read approval rationale via `{{ steps.<wait_step_id>.output }}`.
 
+## Durability and restart recovery
+
+Run state is persisted to the `pipeline_runs` table at every step boundary: when a step starts, `current_step_id` is stamped; when it completes, the full step-outputs map and accumulated cost are flushed. A hard kill (crash, OOM, `kill -9`) therefore loses at most the step that was in flight.
+
+At boot, the server scans for runs left in `queued`/`running` from the previous process lifetime and **resumes them from the next unfinished step**:
+
+- **Completed steps are restored, not re-executed.** Their outputs feed downstream `{{ steps.X.output }}` templates exactly as if the process had never died.
+- **The in-flight step re-executes from scratch** — at-least-once semantics. For an `agent_run` step this means the agent call is re-issued (and re-billed); `http`/`code` steps with external side effects may fire twice. Design steps to be idempotent where that matters.
+- **Runs parked on a `wait` approval step re-attach to the original waitpoint token.** No duplicate approval card is created; the pending inbox item stays answerable across the restart, and approving it resumes the run.
+- **DAG runs (`needs:`) resume at wave granularity** — the parallel scheduler flushes state when each wave completes, so a kill mid-wave re-executes that wave's unfinished steps.
+- The accumulated cost is restored too, so `max_cost_usd` keeps counting across the restart instead of resetting.
+
+When persisted state is insufficient to resume safely, the run is stamped `interrupted` instead — never silently dropped, never wrongly resumed. Fallback triggers: the pipeline row is gone or no longer parses, the definition drifted (persisted step ids that no longer exist), unreadable persisted inputs/outputs, or a non-resumable mode (`test_run` gates from a previous lifetime are not re-run). The reason lands in the run's `error_message`.
+
+Graceful shutdowns are different: an in-flight run cancelled by shutdown is finalized as `cancelled` (a terminal state) and is **not** resumed at next boot. Resume targets hard kills, where no terminal write could land.
+
+Set `CREWSHIP_PIPELINE_RESUME=off` to disable resume and restore the older stamp-everything-`interrupted` behaviour — useful if a crash loop would otherwise re-burn the in-flight agent step's tokens on every restart. Default is on.
+
 ## Online eval sampler
 
 The online sampler watches completed routine runs and grades a configurable percentage of them through the existing rubric grader so production traffic continuously feeds the drift detector — not just on-demand replays or scheduled regression suites.
@@ -564,7 +582,7 @@ Two-tier escalation walks the fallback chain. With `on_fail: escalate_tier`, a f
 </Accordion>
 
 <Accordion title="&quot;Pipeline X step Y stuck in pending state&quot;">
-Probably a waitpoint without a matching listener (process restarted between the `wait` step starting and a decision arriving). Check `crewship routine waitpoints list`; if listed, decide via approve/reject. The recovery scan at server boot reports stranded waitpoints in the log line `pipeline waitpoint store wired (...) stranded_pending=N`.
+Since resume-from-step landed, a restart between the `wait` step starting and a decision arriving re-attaches the run to its pending waitpoint at boot — approving via `crewship routine waitpoints approve <token>` resumes it. If the run shows `interrupted` instead, its persisted state was insufficient to resume (the reason is in the run's `error_message`); the orphaned waitpoint can still be listed and rejected to clear the inbox. The boot log lines `pipeline boot recovery done (resume-from-step) resumed=N interrupted=M` and `pipeline waitpoint store wired (...) stranded_pending=N` show what recovery did.
 </Accordion>
 
 <Accordion title="Run returns 500 &quot;pipeline: concurrency_key rendered to empty value&quot;">
@@ -626,7 +644,7 @@ The `pipeline` alias is preserved for back-compat on the legacy subcommands (`pi
 
 These are known gaps in the current MVP — none block production use, but they shape what you can rely on today.
 
-- **Run state is in-memory** — restart loses active runs. Pending waitpoints survive (DB-backed); active step execution does not. A `pipeline_runs` table with status enum + checkpoint is the next-step PR.
+- **Resume is at-least-once, step-granular** — restart recovery re-enters runs from the last persisted step boundary (see [Durability and restart recovery](#durability-and-restart-recovery)). The step that was in flight at the kill re-executes from scratch; there is no sub-step checkpointing, and DAG runs recover at wave granularity. Runs whose persisted state no longer matches the definition fall back to `interrupted`.
 - **Single-instance scheduler** — running multiple replicas would double-fire schedules.
 - **DSL editor is read-only in UI** — Monaco write-mode is a follow-up. Authoring through CLI / agent / API works fully.
 - **No cross-adapter tier swap yet** — same-provider model swap (Haiku→Opus) works; Claude→Gemini swap requires a shorthand→constant mapping not yet wired.

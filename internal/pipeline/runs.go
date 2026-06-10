@@ -292,12 +292,59 @@ func (s *RunStore) ListActive(ctx context.Context, workspaceID string) ([]*RunRe
 	return out, rows.Err()
 }
 
+// ListInFlight returns every queued/running run across ALL
+// workspaces. Used by the boot-time resume scan, which runs before
+// any workspace context exists — the per-workspace variant
+// (ListActive) serves the UI panels.
+func (s *RunStore) ListInFlight(ctx context.Context) ([]*RunRecord, error) {
+	rows, err := s.db.QueryContext(ctx,
+		runSelectColumns+` WHERE status IN ('queued','running') ORDER BY started_at ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("pipeline_runs: list in-flight: %w", err)
+	}
+	defer rows.Close()
+	var out []*RunRecord
+	for rows.Next() {
+		r, err := scanRun(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// MarkInterrupted is the single-row fallback used by the boot resume
+// scan when a run's persisted state is insufficient to resume safely
+// (missing pipeline, schema drift, non-resumable mode). Guarded on
+// status so a run that resumed and finished between the scan's read
+// and this write is never clobbered back to interrupted.
+func (s *RunStore) MarkInterrupted(ctx context.Context, runID, reason string) error {
+	if reason == "" {
+		reason = "process restarted with run in flight"
+	}
+	_, err := s.db.ExecContext(ctx, `
+UPDATE pipeline_runs
+SET status = 'interrupted',
+    ended_at = COALESCE(ended_at, datetime('now','subsec')),
+    error_message = ?,
+    updated_at = datetime('now','subsec')
+WHERE id = ? AND status IN ('queued','running')`, reason, runID)
+	if err != nil {
+		return fmt.Errorf("pipeline_runs: mark interrupted: %w", err)
+	}
+	return nil
+}
+
 // RecoverInterruptedAtBoot is the boot-time scan that promotes any
 // run still in queued/running from a previous process lifetime to
 // "interrupted". Counterpart to the waitpoint recovery scan added in
-// the stabilization commit. We can't actually resume the runs (the
-// goroutine is gone), but we can close their audit story so the UI
-// doesn't show forever-running entries from before the restart.
+// the stabilization commit. Kept as the bulk fallback path for when
+// resume is disabled (CREWSHIP_PIPELINE_RESUME=off) or no executor
+// can be wired at boot; the default boot path is
+// Executor.ResumeInterruptedRuns (resume.go), which re-enters runs
+// from their last persisted step and only stamps "interrupted" when
+// state is insufficient.
 //
 // Returns how many rows were promoted. The boot wireup logs the
 // count so abnormal accumulation is observable.

@@ -424,15 +424,23 @@ var startCmd = &cobra.Command{
 			// persist across restarts and the inbox UI can fire
 			// /pipelines/waitpoints/{token}/approve. Without this,
 			// approval steps timeout after 60s in-memory only.
+			//
+			// wpStore + runStore are hoisted because the boot-time
+			// run recovery block below (after the full executor
+			// wiring) must reuse the SAME waitpoint store instance —
+			// the in-memory listener registry is what connects a
+			// resumed run's WaitFor to the HTTP approve endpoint.
+			var wpStore *pipeline.SQLWaitpointStore
+			var runStore *pipeline.RunStore
 			if deps.DB != nil {
-				wpStore := pipeline.NewSQLWaitpointStore(deps.DB)
+				wpStore = pipeline.NewSQLWaitpointStore(deps.DB)
 				defer wpStore.Close()
 				srv.APIRouter().PipelinesHandler.SetWaitpointStore(wpStore)
-				// Recovery scan: pending waitpoints from the previous
-				// process lifetime have no goroutine parked on them
-				// (run state is in-memory only). Sweep elapsed-timeout
-				// rows eagerly and log how many remain so abnormal
-				// accumulation is observable at boot.
+				// Recovery scan: sweep elapsed-timeout waitpoints
+				// eagerly and log how many pending remain. Pending
+				// waitpoints whose run resumes below get a fresh
+				// listener re-registered; the count here is the
+				// pre-resume snapshot.
 				if timedOut, pending, err := wpStore.RecoverPending(ctx); err != nil {
 					logger.Warn("pipeline waitpoint recovery scan failed", "error", err)
 				} else {
@@ -442,18 +450,14 @@ var startCmd = &cobra.Command{
 
 				// Wire RunStore (migration v83) so the executor
 				// persists per-run state alongside journal_entries
-				// and the boot recovery scan can mark previously
-				// in-flight runs interrupted. The PipelinesHandler
-				// holds the store reference; newExecutor() picks it
-				// up via WithRunStore on every handler path.
-				runStore := pipeline.NewRunStore(deps.DB)
+				// and the boot recovery scan below can resume (or
+				// mark interrupted) previously in-flight runs. The
+				// PipelinesHandler holds the store reference;
+				// newExecutor() picks it up via WithRunStore on
+				// every handler path.
+				runStore = pipeline.NewRunStore(deps.DB)
 				srv.APIRouter().PipelinesHandler.SetRunStore(runStore)
-				if interrupted, err := runStore.RecoverInterruptedAtBoot(ctx); err != nil {
-					logger.Warn("pipeline_runs recovery scan failed", "error", err)
-				} else {
-					logger.Info("pipeline_runs store wired (persistent per-run state; v83)",
-						"interrupted_recovered", interrupted)
-				}
+				logger.Info("pipeline_runs store wired (persistent per-run state; v83)")
 			}
 
 			// Wire WS broadcaster so pipeline run + step events
@@ -522,6 +526,57 @@ var startCmd = &cobra.Command{
 				scheduler.Start(ctx)
 				defer scheduler.Stop()
 				logger.Info("pipeline scheduler wired (cron triggers; 30s tick)")
+			}
+
+			// Boot-time pipeline run recovery (W6 resume-from-step).
+			// Placed AFTER the runner/registry/waitpoint wiring so the
+			// resume executor has the full production capability set.
+			// Default: re-enter previously in-flight runs from their
+			// persisted step state (completed steps restored, in-flight
+			// step re-executed, wait-step approvals re-attached to the
+			// original token). Runs whose state is insufficient fall
+			// back to "interrupted", same as before.
+			//
+			// CREWSHIP_PIPELINE_RESUME=off restores the old
+			// stamp-everything-interrupted behaviour — the operator
+			// escape hatch if resumed agent steps re-burning tokens
+			// after a crash loop is worse than losing the runs.
+			if runStore != nil {
+				ph := srv.APIRouter().PipelinesHandler
+				if pipelineResumeEnabled() && ph.Runner() != nil {
+					resumeExec := pipeline.NewExecutor(
+						pipeline.NewStore(deps.DB),
+						pipeline.NewResolver(deps.DB),
+						ph.Runner(),
+						ph.Emitter(),
+					).WithRunRegistry(runRegistry).WithRunStore(runStore)
+					if wpStore != nil {
+						resumeExec = resumeExec.WithWaitpointStore(wpStore)
+					}
+					if hub := srv.WSHub(); hub != nil {
+						resumeExec = resumeExec.WithWSBroadcaster(hub)
+					}
+					if resumed, interrupted, err := resumeExec.ResumeInterruptedRuns(ctx, logger); err != nil {
+						logger.Warn("pipeline run resume scan failed; falling back to interrupted stamp", "error", err)
+						if n, rerr := runStore.RecoverInterruptedAtBoot(ctx); rerr != nil {
+							logger.Warn("pipeline_runs recovery scan failed", "error", rerr)
+						} else {
+							logger.Info("pipeline runs recovered as interrupted", "interrupted_recovered", n)
+						}
+					} else {
+						logger.Info("pipeline boot recovery done (resume-from-step)",
+							"resumed", resumed, "interrupted", interrupted)
+					}
+				} else {
+					// Resume disabled (env gate) or no runner wired —
+					// stamp in-flight rows interrupted like before.
+					if interrupted, err := runStore.RecoverInterruptedAtBoot(ctx); err != nil {
+						logger.Warn("pipeline_runs recovery scan failed", "error", err)
+					} else {
+						logger.Info("pipeline runs recovered as interrupted (resume disabled)",
+							"interrupted_recovered", interrupted)
+					}
+				}
 			}
 		}
 
@@ -660,6 +715,21 @@ func checkAnyRuntime(ctx context.Context) bool {
 // it found, so seeing it set here means the override path won.
 func cfgBoltPathFromEnv() bool {
 	return strings.TrimSpace(os.Getenv("CREWSHIP_BOLT_PATH")) != ""
+}
+
+// pipelineResumeEnabled reads the CREWSHIP_PIPELINE_RESUME gate for
+// boot-time resume-from-step. Default ON — resume is the behaviour
+// users expect from a durable run store; the env var is the operator
+// escape hatch (e.g. a crash loop where every restart re-burns the
+// in-flight agent step's tokens). Same env-first style as
+// CREWSHIP_PIPELINE_RUNNER above; accepted falsey spellings mirror
+// config.envBool.
+func pipelineResumeEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("CREWSHIP_PIPELINE_RESUME"))) {
+	case "0", "false", "off", "no", "n", "f":
+		return false
+	}
+	return true
 }
 
 func initProviders(ctx context.Context, cfg *config.Config, logger *slog.Logger, skipDocker bool) (*server.Deps, error) {

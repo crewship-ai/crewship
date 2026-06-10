@@ -160,6 +160,19 @@ func (e *Executor) runDAG(
 		stepIndex[dsl.Steps[i].ID] = i
 	}
 
+	// Boot-time resume: steps restored from the previous lifetime
+	// already completed — seed them into the completed set so the
+	// ready-set computation schedules only unfinished steps. Their
+	// outputs were seeded into result.StepOutputs by runDSL, so
+	// downstream templates render against the completed work.
+	if in.resume {
+		for id := range in.restoredOutputs {
+			if _, ok := stepByID[id]; ok {
+				completed[id] = true
+			}
+		}
+	}
+
 	// Run-scoped cancel for fail-fast across the wave.
 	dagCtx, dagCancel := context.WithCancel(ctx)
 	defer dagCancel()
@@ -229,7 +242,20 @@ func (e *Executor) runDAG(
 				completed[sp.ID] = true
 			}
 		}
+		// Snapshot under the lock for the wave-boundary flush below —
+		// holding resMu across a DB write would stall peers.
+		outputsSnap := make(map[string]string, len(result.StepOutputs))
+		for k, v := range result.StepOutputs {
+			outputsSnap[k] = v
+		}
+		costSnap := result.CostUSD
 		resMu.Unlock()
+
+		// Flush persisted step state at the wave boundary so a hard
+		// kill mid-DAG loses at most the in-flight wave. DAG resume
+		// granularity is therefore per-wave, not per-step — the
+		// parallel scheduler has no single current_step_id to stamp.
+		e.persistStepOutputs(ctx, in, depth, runID, outputsSnap, costSnap, startedAt)
 
 		if f := firstErr.Load(); f != nil {
 			fail := f.(*dagStepFailure)

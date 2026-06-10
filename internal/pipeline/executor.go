@@ -224,6 +224,21 @@ type WaitpointStore interface {
 	WaitFor(ctx context.Context, token string) (bool, error)
 }
 
+// WaitpointResumer is the optional capability a WaitpointStore can
+// implement to support boot-time resume of runs parked on a `wait`
+// step: instead of minting a duplicate approval (second inbox card,
+// second token), the resumed wait step looks up the waitpoint the
+// previous lifetime created for (run, step) and re-registers its
+// listener on the original token. Detected via type assertion so
+// test stubs that only implement WaitpointStore keep working.
+type WaitpointResumer interface {
+	// FindApprovalForStep returns the most recent approval-kind
+	// waitpoint token for the (pipelineRunID, stepID) pair, or ""
+	// when none exists (the kill happened before CreateApproval
+	// landed — the resumed step then creates a fresh one).
+	FindApprovalForStep(ctx context.Context, pipelineRunID, stepID string) (string, error)
+}
+
 // WaitpointApprovalRequest is the metadata stored alongside the
 // waitpoint so the inbox/UI can render a meaningful approval card.
 type WaitpointApprovalRequest struct {
@@ -447,6 +462,22 @@ type RunInput struct {
 	TriggeredByID string
 	pipeline      *Pipeline
 	dsl           *DSL
+
+	// resume marks this input as a boot-time re-entry of a run from a
+	// previous process lifetime (W6 resume-from-step). Set only by
+	// ResumeInterruptedRuns — external callers cannot reach it, which
+	// keeps the resume semantics (skip restored steps, re-attach
+	// waitpoints, no fresh pipeline_runs insert) off the public API.
+	resume bool
+	// restoredOutputs is the step-outputs map recovered from the
+	// run's persisted pipeline_runs row. Steps present here are
+	// treated as already completed: their outputs feed template
+	// rendering but they are not re-executed.
+	restoredOutputs map[string]string
+	// restoredCostUSD seeds the run's accumulated cost so the
+	// max_cost_usd guardrail keeps counting across the restart
+	// instead of resetting to zero.
+	restoredCostUSD float64
 }
 
 // runDSL is the actual step loop. depth bounds call_pipeline recursion
@@ -541,17 +572,36 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (result *
 		StepOutputs:  make(map[string]string, len(dsl.Steps)),
 	}
 
+	// Boot-time resume: seed the result with the step outputs the
+	// previous lifetime persisted so (a) templates of later steps
+	// render against the completed work and (b) the step loops below
+	// skip everything that already ran. Cost is restored too so the
+	// max_cost_usd guardrail counts across the restart.
+	if in.resume {
+		for k, v := range in.restoredOutputs {
+			result.StepOutputs[k] = v
+		}
+		result.CostUSD = in.restoredCostUSD
+	}
+
 	if in.Mode != ModeDryRun && depth == 0 {
-		emit.emitRunStarted(ctx, in.Mode, fmt.Sprintf("%v", inputsForCtx), len(dsl.Steps))
-		// Persist the run row alongside the journal event when
-		// the RunStore is wired. Top-level only — nested
-		// call_pipeline runs reuse the parent's row id rather
-		// than minting their own (the call_pipeline trace lives
-		// in journal_entries; tying nested runs into pipeline_runs
-		// would conflate "this run completed" with "this nested
-		// step completed"). Failure is non-fatal: best-effort
-		// projection alongside the canonical journal.
-		e.persistRunStart(ctx, in, runID, pipelineID, pipelineSlug, inputsForCtx, startedAt)
+		if in.resume {
+			// The pipeline_runs row already exists (status=running
+			// from before the restart) — no fresh insert. Journal a
+			// resumed marker instead of a second run.started.
+			emit.emitRunResumed(ctx, in.Mode, len(in.restoredOutputs), len(dsl.Steps))
+		} else {
+			emit.emitRunStarted(ctx, in.Mode, fmt.Sprintf("%v", inputsForCtx), len(dsl.Steps))
+			// Persist the run row alongside the journal event when
+			// the RunStore is wired. Top-level only — nested
+			// call_pipeline runs reuse the parent's row id rather
+			// than minting their own (the call_pipeline trace lives
+			// in journal_entries; tying nested runs into pipeline_runs
+			// would conflate "this run completed" with "this nested
+			// step completed"). Failure is non-fatal: best-effort
+			// projection alongside the canonical journal.
+			e.persistRunStart(ctx, in, runID, pipelineID, pipelineSlug, inputsForCtx, startedAt)
+		}
 		// Deferred terminal write — captures result via closure so
 		// every return path (linear / DAG / cost-cap / retry-
 		// exhaust / cancel) lands the same finalized row. The
@@ -590,6 +640,17 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (result *
 
 		step := dsl.Steps[i]
 
+		// Resume skip: a step whose output was restored from the
+		// previous lifetime already ran to completion (or was
+		// deliberately skipped — "<skipped>" restores the same way).
+		// Its output is in result.StepOutputs for downstream
+		// templates; re-executing it would double side effects.
+		if in.resume {
+			if _, done := result.StepOutputs[step.ID]; done {
+				continue
+			}
+		}
+
 		stepStart := time.Now()
 		// Build the rendered prompt for both run + dry-run paths.
 		ctxRender := RenderContext{
@@ -608,9 +669,15 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (result *
 			if !evalIfCondition(Render(step.If, ctxRender)) {
 				emit.emitStepSkipped(ctx, step, step.If)
 				result.StepOutputs[step.ID] = "<skipped>"
+				e.persistStepOutputs(ctx, in, depth, runID, result.StepOutputs, result.CostUSD, startedAt)
 				continue
 			}
 		}
+
+		// Stamp the in-flight step BEFORE dispatch so a hard kill
+		// mid-step leaves current_step_id pointing at the step that
+		// was running — boot-time resume re-executes from here.
+		e.persistStepEntry(ctx, in, depth, runID, step.ID)
 
 		// Apply per-run tier override if the caller passed one.
 		// ModelOverride still wins inside Resolver — author's
@@ -675,6 +742,9 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (result *
 			result.StepOutputs[step.ID] = output
 			result.CostUSD += stepCost
 			emit.emitStepCompleted(ctx, step, output, stepDur, stepCost)
+			// Flush the outputs map at the step boundary so a kill
+			// between steps loses at most the in-flight step.
+			e.persistStepOutputs(ctx, in, depth, runID, result.StepOutputs, result.CostUSD, startedAt)
 
 			// Cost-cap gate. Checked AFTER the step completes (we
 			// can't refund work already done) but BEFORE the next
@@ -1026,6 +1096,44 @@ func (e *Executor) runCallPipelineStep(ctx context.Context, step Step, parent Ru
 			fmt.Errorf("nested pipeline %q failed at step %q: %s", step.PipelineSlug, nested.FailedAtStep, nested.ErrorMessage)
 	}
 	return nested.Output, nested.CostUSD, time.Since(stepStart).Milliseconds(), nil
+}
+
+// stepPersistEnabled centralises the gate for per-step run-state
+// writes: a wired RunStore, top-level run (nested call_pipeline runs
+// share the parent's row), a real mode, and a saved pipeline (drafts
+// have no row — see persistRunStart's skip rationale).
+func (e *Executor) stepPersistEnabled(in RunInput, depth int) bool {
+	return e.runStore != nil && depth == 0 && in.Mode != ModeDryRun && in.pipeline != nil
+}
+
+// persistStepEntry stamps status=running + current_step_id at step
+// entry so a hard kill mid-step leaves a row pointing at the step
+// that was in flight. Best-effort like every projection write.
+func (e *Executor) persistStepEntry(ctx context.Context, in RunInput, depth int, runID, stepID string) {
+	if !e.stepPersistEnabled(in, depth) {
+		return
+	}
+	if err := e.runStore.MarkRunning(ctx, runID, stepID); err != nil {
+		e.persistWarn("step entry", runID, err)
+	}
+}
+
+// persistStepOutputs flushes the step-outputs map + running cost at a
+// step boundary so boot-time resume can restore every completed step.
+// Duration is wall time since this lifetime's start — on a resumed
+// run it intentionally restarts from the resume point rather than
+// pretending continuity across the gap the process was down.
+//
+// Takes the outputs map + cost explicitly (not *RunResult) so the DAG
+// scheduler can pass a mutex-guarded snapshot without holding the
+// lock across a DB write.
+func (e *Executor) persistStepOutputs(ctx context.Context, in RunInput, depth int, runID string, stepOutputs map[string]string, costUSD float64, startedAt time.Time) {
+	if !e.stepPersistEnabled(in, depth) {
+		return
+	}
+	if err := e.runStore.AppendStepOutput(ctx, runID, stepOutputs, costUSD, time.Since(startedAt).Milliseconds()); err != nil {
+		e.persistWarn("step outputs", runID, err)
+	}
 }
 
 // persistRunStart inserts a fresh pipeline_runs row at run boundary
