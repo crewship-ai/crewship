@@ -25,6 +25,13 @@ const (
 	ctxUser        contextKey = "user"
 	ctxWorkspaceID contextKey = "workspace_id"
 	ctxRole        contextKey = "role"
+	// ctxInternalTokenWS carries the workspace a workspace-bound
+	// X-Internal-Token is cryptographically bound to (PR-F24). Set by
+	// requireInternal after HMAC validation; empty for master-token
+	// callers (host-side trusted services). Distinct from
+	// ctxWorkspaceID on purpose: this value is derived from the token
+	// itself, never from caller-supplied query/body input.
+	ctxInternalTokenWS contextKey = "internal_token_workspace"
 )
 
 // Reason codes returned in 401 bodies and WWW-Authenticate. The
@@ -64,6 +71,17 @@ func WorkspaceIDFromContext(ctx context.Context) string {
 // RoleFromContext returns the workspace membership role (e.g. OWNER, ADMIN, MEMBER) from the request context.
 func RoleFromContext(ctx context.Context) string {
 	s, _ := ctx.Value(ctxRole).(string)
+	return s
+}
+
+// InternalTokenWorkspaceFromContext returns the workspace the request's
+// X-Internal-Token is bound to (PR-F24), or "" when the caller
+// authenticated with the unbound master token (host-side trusted
+// services) or the request didn't pass requireInternal at all. Unlike
+// WorkspaceIDFromContext, this value is derived from the token's HMAC
+// — it cannot be forged by query parameters or request bodies.
+func InternalTokenWorkspaceFromContext(ctx context.Context) string {
+	s, _ := ctx.Value(ctxInternalTokenWS).(string)
 	return s
 }
 
@@ -301,13 +319,46 @@ func reasonForJWTErr(err error) string {
 	}
 }
 
+// assertInternalTokenWorkspace rejects an internal-auth request whose
+// body-declared workspace disagrees with the workspace bound to the
+// caller's X-Internal-Token (PR-F24). requireInternal can only see
+// query parameters; handlers that scope by a workspace_id carried in
+// the JSON body (cost record, journal emit, pipeline save) call this
+// after decoding so a captured sidecar token can't write rows into a
+// foreign tenant either. No-op for master-token callers — those have
+// no binding in context by design (host-side trusted services).
+//
+// Returns false (after writing the 403) when the values disagree —
+// caller should immediately `return`.
+func assertInternalTokenWorkspace(w http.ResponseWriter, r *http.Request, bodyWS string) bool {
+	bound := InternalTokenWorkspaceFromContext(r.Context())
+	if bound == "" || bound == bodyWS {
+		return true
+	}
+	replyError(w, http.StatusForbidden,
+		"workspace_id does not match the workspace bound to the internal token")
+	return false
+}
+
 // internalWsCtx extracts workspace_id from query params and sets it in context.
 // Used for internal routes called by sidecar (no JWT auth, just X-Internal-Token).
+//
+// PR-F24: when the request authenticated with a workspace-bound token,
+// the query value must agree with the token's binding. requireInternal
+// already rejects the mismatch upstream; the re-check here keeps the
+// gate even if the middleware chain is ever reordered or a route gets
+// wired with internalWsCtx but a different auth wrapper (the round-8
+// lesson: never assume the other middleware ran).
 func internalWsCtx(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		wsID := r.URL.Query().Get("workspace_id")
 		if wsID == "" {
 			replyError(w, http.StatusBadRequest, "workspace_id query parameter required")
+			return
+		}
+		if bound := InternalTokenWorkspaceFromContext(r.Context()); bound != "" && bound != wsID {
+			replyError(w, http.StatusForbidden,
+				"workspace_id does not match the workspace bound to the internal token")
 			return
 		}
 		ctx := context.WithValue(r.Context(), ctxWorkspaceID, wsID)

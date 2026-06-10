@@ -82,6 +82,11 @@ func (r *Router) handleSidecarEmit(w http.ResponseWriter, req *http.Request) {
 		replyError(w, http.StatusBadRequest, "workspace_id required")
 		return
 	}
+	// PR-F24: a sidecar's token is workspace-bound — refuse journal
+	// entries attributed to a foreign tenant.
+	if !assertInternalTokenWorkspace(w, req, body.WorkspaceID) {
+		return
+	}
 	if strings.TrimSpace(body.Summary) == "" {
 		replyError(w, http.StatusBadRequest, "summary required")
 		return

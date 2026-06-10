@@ -641,6 +641,11 @@ func (h *PipelineHandler) InternalSave(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusBadRequest, "workspace_id, slug, definition required")
 		return
 	}
+	// PR-F24: a sidecar's token is workspace-bound — refuse pipeline
+	// saves aimed at a foreign tenant.
+	if !assertInternalTokenWorkspace(w, r, body.WorkspaceID) {
+		return
+	}
 
 	// Parse + validate before save so the agent gets a clean error
 	// message at this layer rather than at the next /run.

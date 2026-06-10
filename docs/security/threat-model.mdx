@@ -337,35 +337,60 @@ describes the **current implementation**, with these gaps:
 ## Tenant isolation on internal-auth handlers
 
 `/api/v1/internal/*` routes authenticate via `X-Internal-Token` rather
-than per-user JWTs. The token authenticates the caller as "the
-sidecar" but is NOT bound to a specific workspace in the current
-implementation — the `internalWsCtx` middleware reads `?workspace_id`
-from the query string and trusts whatever value is passed.
+than per-user JWTs. Tokens come in two forms:
 
-For most internal routes, the IPC layer projects `IPCConfig.workspace_id`
-from the orchestrator's sidecar contract before the request leaves the
-container, so a captured token can't be aimed at another workspace
-even with crafted query parameters. This invariant is the basis of
-the claim in `docs/api-reference/internal.mdx`.
+- **Workspace-bound tokens** (`wsv1.<workspace_id>.<HMAC-SHA256(master,
+  workspace_id)>`, `internal/auth/internaltoken`) are what sidecars
+  receive at startup via their stdin `IPCConfig`. The middleware
+  re-derives the MAC from the embedded workspace ID and the in-memory
+  master secret, and rejects (403) any request whose `?workspace_id`
+  disagrees with the token's binding — so a token captured inside a
+  container only ever authorizes the workspace it was issued for.
+  Derivation is stateless; tokens roll with the master on every boot.
+- **The master token** (`CREWSHIP_INTERNAL_TOKEN`) never enters a
+  container. It remains valid for host-side trusted callers (the chat
+  bridge resolver and the LLM proxy cost monitor) that talk to the
+  internal API from inside the trust boundary.
 
-### Known exception — Keeper Phase 2 family
+For internal routes, the IPC layer additionally projects
+`IPCConfig.workspace_id` from the orchestrator's sidecar contract
+before the request leaves the container. Pre-PR-F24 that projection
+was the only line of defense (the token itself was a single global
+secret and `internalWsCtx` trusted whatever `?workspace_id` was
+passed); the cryptographic binding now enforces it server-side.
+
+### Resolved exception — Keeper Phase 2 family
 
 The `/api/v1/internal/keeper/{skill-review,behavior,memory-health,
 negative-learning}` handlers (PR-C / PRD §6 F4) read `body.workspace_id`
 from the JSON payload alongside `ctx.workspace_id` from the middleware.
-Asymmetric forgery (caller passes workspace A in query, claims
-workspace B in body) is **rejected** by the
-`assertBodyWorkspaceMatchesCtx` helper in `internal/api/keeper_phase2.go`,
-which compares both values and returns 400 on mismatch.
+This family used to carry a documented cross-tenant gap; both halves
+are now closed:
 
-Symmetric forgery — caller picks one workspace consistently across
-both query and body — is **not yet closed**. It would require binding
-the `X-Internal-Token` to a workspace at issue time and validating
-that binding in `internalWsCtx`. Tracked as `PR-F24` in
-PRD-AGENT-EVOLUTION-2026.md §6.1. A second path (`PR-F25`) eliminates
-`body.workspace_id` from these four handlers and derives workspace
-from context only, restoring the original invariant. Either close
-retires this "Known exception".
+- Asymmetric forgery (caller passes workspace A in query, claims
+  workspace B in body) is **rejected** by the
+  `assertBodyWorkspaceMatchesCtx` helper in
+  `internal/api/keeper_phase2.go`, which compares both values and
+  returns 400 on mismatch.
+- Symmetric forgery (caller picks one foreign workspace consistently
+  across both query and body) is **closed by PR-F24**: the
+  `X-Internal-Token` a sidecar holds is bound to its workspace at
+  issue time, and both `internalAuth` and `internalWsCtx` validate
+  that binding against `?workspace_id` (403 on mismatch).
+
+A follow-up (`PR-F25`) eliminates `body.workspace_id` from these four
+handlers and derives workspace from context only — an architectural
+cleanup now that the binding holds, no longer a security gap.
+
+Internal routes that carry `workspace_id` only in the JSON body
+(`POST /internal/cost/record`, `POST /internal/journal/emit`,
+`POST /internal/pipelines/save`) enforce the same binding in-handler
+(`assertInternalTokenWorkspace`), since the auth middleware cannot
+inspect bodies. Residual: the binding derives its trust from the
+sidecar process boundary (UID 1002 vs. agent UID 1001) — an attacker
+who fully compromises the sidecar process itself still acts with that
+workspace's authority, which is the intended blast-radius cap, not a
+bypass.
 
 ### Hardening surface — what's locked vs. what's tracked
 
@@ -373,8 +398,9 @@ retires this "Known exception".
 |---|---|
 | `self_learning_enabled` cross-tenant lookup | ✅ closed asymmetric — `workspace_id` in WHERE clause |
 | F4 handler body / ctx workspace consistency | ✅ closed — `assertBodyWorkspaceMatchesCtx` |
-| F4 handler body / ctx workspace symmetric forgery | ⏳ PR-F24 (token-to-workspace binding) |
-| F4 handler body-workspace drop | ⏳ PR-F25 (eliminate body workspace param) |
+| F4 handler body / ctx workspace symmetric forgery | ✅ closed — PR-F24 workspace-bound `X-Internal-Token` (HMAC-derived, validated in middleware) |
+| Body-workspace internal routes (cost / journal / pipeline save) | ✅ closed — in-handler `assertInternalTokenWorkspace` binding check |
+| F4 handler body-workspace drop | ⏳ PR-F25 (eliminate body workspace param — cleanup, no longer a security gap) |
 | Lessons memory tier agent-author write | ✅ closed — dispatcher rejects `tier="lessons"` |
 | Memory file injection scan (READ path) | ✅ — 9 rules + 14 unicode codepoints |
 | Memory scanner v2 (base64 / homoglyph / URL exfil) | ✅ shipped — PR-F4 |

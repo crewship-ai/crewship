@@ -10,6 +10,7 @@ import (
 	"os"
 	"sync/atomic"
 
+	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
@@ -164,6 +165,47 @@ func (h *InternalHandler) requireInternal(next http.Handler) http.Handler {
 		}
 
 		token := r.Header.Get("X-Internal-Token")
+
+		// Workspace-bound token path (PR-F24). Sidecars no longer hold
+		// the master token — at sidecar start the orchestrator hands
+		// each one HMAC(master, workspace_id) instead, so a token
+		// captured inside a container only authorizes its own
+		// workspace. The prefix check is on a public format marker,
+		// not a secret; the MAC verification inside
+		// ValidateWorkspaceToken is constant-time.
+		if internaltoken.IsWorkspaceToken(token) {
+			wsID, ok := internaltoken.ValidateWorkspaceToken(h.internalToken, token)
+			if !ok {
+				h.logger.Warn("internal API auth failed: invalid workspace-bound token",
+					"path", r.URL.Path,
+					"remote_addr", r.RemoteAddr,
+					"user_agent", r.Header.Get("User-Agent"))
+				replyError(w, http.StatusForbidden, "Forbidden")
+				return
+			}
+			// The binding enforcement: a caller-supplied workspace_id
+			// that disagrees with the token's workspace is the
+			// cross-tenant forgery this token format exists to stop.
+			// Routes without a workspace_id query param pass through;
+			// handlers that need the trusted scope read it via
+			// InternalTokenWorkspaceFromContext.
+			if q := r.URL.Query().Get("workspace_id"); q != "" && q != wsID {
+				h.logger.Warn("internal API cross-workspace request refused",
+					"path", r.URL.Path,
+					"remote_addr", r.RemoteAddr,
+					"token_workspace", wsID,
+					"requested_workspace", q,
+					"user_agent", r.Header.Get("User-Agent"))
+				replyError(w, http.StatusForbidden, "Forbidden")
+				return
+			}
+			ctx := context.WithValue(r.Context(), ctxInternalTokenWS, wsID)
+			next.ServeHTTP(w, r.WithContext(ctx))
+			return
+		}
+
+		// Master-token path — host-side trusted callers (chatbridge
+		// resolver, llmproxy monitor) that never enter a container.
 		// Always run constant-time comparison to avoid timing sidechannels.
 		// Pad empty strings to a fixed sentinel so the comparison still runs
 		// in constant time even when token or internalToken is empty.

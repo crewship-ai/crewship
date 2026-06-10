@@ -76,6 +76,11 @@ func (r *Router) handleSidecarCostRecord(w http.ResponseWriter, req *http.Reques
 		replyError(w, http.StatusBadRequest, "workspace_id required")
 		return
 	}
+	// PR-F24: a sidecar's token is workspace-bound — refuse cost rows
+	// aimed at a foreign tenant.
+	if !assertInternalTokenWorkspace(w, req, body.WorkspaceID) {
+		return
+	}
 	if strings.TrimSpace(body.Provider) == "" || strings.TrimSpace(body.Model) == "" {
 		replyError(w, http.StatusBadRequest, "provider and model required")
 		return
