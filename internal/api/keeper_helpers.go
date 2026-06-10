@@ -90,6 +90,15 @@ func containsDangerousShellChars(cmd string) bool {
 		return true
 	}
 
+	// ANSI-C quoting ($'...') decodes backslash escapes, so $'\n' yields a
+	// real newline (a command separator) that the single-quote splitter
+	// below would otherwise treat as quoted-and-safe. The opening $' also
+	// straddles the split boundary, so it has to be checked on the raw
+	// command before splitting.
+	if strings.Contains(cmd, "$'") {
+		return true
+	}
+
 	// Simple approach: check outside single-quoted strings.
 	// Split by single quotes — odd-indexed segments are inside quotes.
 	parts := strings.Split(cmd, "'")
@@ -98,11 +107,23 @@ func containsDangerousShellChars(cmd string) bool {
 			// Inside single quotes — skip (shell does not interpret these)
 			continue
 		}
-		// Check for dangerous patterns outside quotes
-		if strings.ContainsAny(part, ";|>`") {
+		// Check for dangerous patterns outside quotes. The character set
+		// includes & (a single & backgrounds the left command and runs
+		// the right one — a separator the same way ; is; this also covers
+		// &&) alongside the classic ; | > and backtick.
+		if strings.ContainsAny(part, ";|>&`") {
 			return true
 		}
-		if strings.Contains(part, "&&") || strings.Contains(part, "||") || strings.Contains(part, "$(") || strings.Contains(part, "${") {
+		// <( is process substitution — it runs the inner command. Plain
+		// input redirection (`cmd < file`) is deliberately NOT blocked
+		// here: it adds no exfiltration capability over a bare `cat file`,
+		// which the gate already permits.
+		if strings.Contains(part, "<(") {
+			return true
+		}
+		// && and || need no explicit check: their & and | are already in
+		// the ContainsAny set above.
+		if strings.Contains(part, "$(") || strings.Contains(part, "${") {
 			return true
 		}
 	}

