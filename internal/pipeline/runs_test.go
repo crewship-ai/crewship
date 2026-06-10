@@ -33,6 +33,7 @@ CREATE TABLE pipeline_runs (
     pipeline_id         TEXT NOT NULL REFERENCES pipelines(id) ON DELETE CASCADE,
     pipeline_slug       TEXT NOT NULL,
     pipeline_version    INTEGER,
+    definition_hash     TEXT,
     status              TEXT NOT NULL,
     mode                TEXT NOT NULL DEFAULT 'run',
     started_at          TEXT NOT NULL,

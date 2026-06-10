@@ -139,6 +139,38 @@ func (c *pipelineEmitContext) emitRunStarted(ctx context.Context, mode RunMode, 
 	c.broadcast("pipeline.run.started", payload)
 }
 
+// emitRunResumed records that a previously in-flight run was
+// re-entered at boot from its persisted step state. Reuses
+// EntryPipelineRunStarted with a resumed=true marker — a dedicated
+// entry type would require a journal migration for what is
+// semantically a (re)start; mirrors the emitStepSkipped precedent.
+func (c *pipelineEmitContext) emitRunResumed(ctx context.Context, mode RunMode, restoredSteps, stepCount int) {
+	if c == nil {
+		return
+	}
+	payload := map[string]any{
+		"mode":              string(mode),
+		"author_crew_id":    c.authorCrewID,
+		"invoking_crew_id":  c.invokingCrewID,
+		"invoking_agent_id": c.invokingAgentID,
+		"step_count":        stepCount,
+		"resumed":           true,
+		"restored_steps":    restoredSteps,
+	}
+	_, _ = c.emitter.Emit(ctx, journal.Entry{
+		WorkspaceID: c.workspaceID,
+		CrewID:      c.invokingCrewID,
+		AgentID:     c.invokingAgentID,
+		Type:        journal.EntryPipelineRunStarted,
+		Severity:    journal.SeverityInfo,
+		ActorType:   journal.ActorOrchestrator,
+		ActorID:     c.runID,
+		Summary:     "Pipeline " + c.pipelineSlug + " resumed after restart",
+		Payload:     mergePayload(payload, "pipeline_id", c.pipelineID, "pipeline_slug", c.pipelineSlug, "run_id", c.runID),
+	})
+	c.broadcast("pipeline.run.started", payload)
+}
+
 // mergePayload returns a new map with the base payload plus the
 // supplied key/value pairs. Used to keep journal Entry payload + WS
 // broadcast payload alignment without mutating the caller's map.

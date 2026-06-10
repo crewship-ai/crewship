@@ -64,22 +64,55 @@ func (e *Executor) runWaitStep(ctx context.Context, step Step, parentRender Rend
 				return "", 0, time.Since(stepStart).Milliseconds(), ctx.Err()
 			}
 		}
-		token, err := e.waitpoints.CreateApproval(ctx, WaitpointApprovalRequest{
-			WorkspaceID:    in.WorkspaceID,
-			PipelineRunID:  runID,
-			StepID:         step.ID,
-			Prompt:         prompt,
-			InvokingCrewID: in.InvokingCrewID,
-			TimeoutSec:     step.TimeoutSec,
-		})
-		if err != nil {
-			return "", 0, time.Since(stepStart).Milliseconds(), fmt.Errorf("wait step %q create approval: %w", step.ID, err)
+		// Boot-time resume: re-attach to the waitpoint the previous
+		// lifetime created for this (run, step) instead of minting a
+		// duplicate approval (second token + second inbox card).
+		// WaitFor handles both live and already-decided tokens — if
+		// the approval was resolved between the kill and the resume,
+		// the DB re-check inside WaitFor returns immediately.
+		var token string
+		if in.resume {
+			if finder, ok := e.waitpoints.(WaitpointResumer); ok {
+				existing, ferr := finder.FindApprovalForStep(ctx, runID, step.ID)
+				if ferr != nil {
+					return "", 0, time.Since(stepStart).Milliseconds(), fmt.Errorf("wait step %q find resumable approval: %w", step.ID, ferr)
+				}
+				token = existing
+			}
+		}
+		if token == "" {
+			created, err := e.waitpoints.CreateApproval(ctx, WaitpointApprovalRequest{
+				WorkspaceID:    in.WorkspaceID,
+				PipelineRunID:  runID,
+				StepID:         step.ID,
+				Prompt:         prompt,
+				InvokingCrewID: in.InvokingCrewID,
+				TimeoutSec:     step.TimeoutSec,
+			})
+			if err != nil {
+				return "", 0, time.Since(stepStart).Milliseconds(), fmt.Errorf("wait step %q create approval: %w", step.ID, err)
+			}
+			token = created
 		}
 		approved, err := e.waitpoints.WaitFor(ctx, token)
 		if err != nil {
 			return "", 0, time.Since(stepStart).Milliseconds(), fmt.Errorf("wait step %q wait: %w", step.ID, err)
 		}
 		if !approved {
+			// WaitFor collapses denial / timeout / cancellation into
+			// approved=false. Re-read the terminal status (committed
+			// to the DB before the channel signal in every path) so a
+			// waitpoint that expired — e.g. during downtime, before a
+			// boot-time resume re-attached — is reported as what it
+			// is, not as a human "denied".
+			if reader, ok := e.waitpoints.(WaitpointStatusReader); ok {
+				switch st, serr := reader.WaitpointStatus(ctx, token); {
+				case serr == nil && st == "timed_out":
+					return "", 0, time.Since(stepStart).Milliseconds(), fmt.Errorf("wait step %q (approval) timed out", step.ID)
+				case serr == nil && st == "cancelled":
+					return "", 0, time.Since(stepStart).Milliseconds(), fmt.Errorf("wait step %q (approval) cancelled", step.ID)
+				}
+			}
 			return "", 0, time.Since(stepStart).Milliseconds(), fmt.Errorf("wait step %q (approval) denied", step.ID)
 		}
 		return "waited:approval:approved", 0, time.Since(stepStart).Milliseconds(), nil

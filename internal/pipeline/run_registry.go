@@ -13,6 +13,15 @@ import (
 // Retry-After hint (or queue, depending on the surface).
 var ErrConcurrencyLimitReached = errors.New("pipeline: concurrency limit reached")
 
+// ErrDuplicateRunID is returned by RunRegistry.Acquire when the
+// requested RunID is already live in the registry. Silently
+// overwriting the existing entry would orphan the live run's cancel
+// func (Cancel would pre-empt the wrong context) and let two
+// executions share one run id — the exact double-resume hazard the
+// boot-scan lifetime fence guards against. Callers treat this as
+// "the run is already executing on this process".
+var ErrDuplicateRunID = errors.New("pipeline: run id already registered in run registry")
+
 // ErrRunNotFound is returned by RunRegistry.Cancel when no run with
 // the given id is currently in flight on this process. Distinct from
 // "run finished" — the registry only tracks live runs, so a
@@ -81,6 +90,15 @@ type AcquireOpts struct {
 func (r *RunRegistry) Acquire(parent context.Context, opts AcquireOpts) (context.Context, func(), error) {
 	r.mu.Lock()
 
+	// Duplicate run id = a second execution trying to share a live
+	// run's identity (e.g. a boot-resume racing a scheduler-started
+	// run). Overwriting would orphan the live entry's cancel func and
+	// let the loser's release() delete the winner's slot. Refuse.
+	if _, exists := r.runs[opts.RunID]; exists {
+		r.mu.Unlock()
+		return nil, func() {}, ErrDuplicateRunID
+	}
+
 	if opts.ConcurrencyKey != "" {
 		max := opts.MaxConcurrent
 		if max <= 0 {
@@ -142,6 +160,18 @@ func (r *RunRegistry) Cancel(runID string) error {
 	entry.info.CancelRequested = true
 	entry.cancel()
 	return nil
+}
+
+// IsLive reports whether a run with the given id is currently
+// tracked by this registry, i.e. executing on this process. The boot
+// resume scan uses it as a lifetime fence: a pipeline_runs row whose
+// id is live here was started by THIS lifetime (scheduler/HTTP) and
+// must not be "resumed" a second time.
+func (r *RunRegistry) IsLive(runID string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	_, ok := r.runs[runID]
+	return ok
 }
 
 // IsCancelRequested reports whether Cancel has been called for the

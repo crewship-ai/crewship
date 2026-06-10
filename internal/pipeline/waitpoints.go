@@ -263,6 +263,49 @@ func (s *SQLWaitpointStore) WaitFor(ctx context.Context, token string) (bool, er
 	}
 }
 
+// FindApprovalForStep implements WaitpointResumer: it returns the
+// most recent approval-kind token for (pipelineRunID, stepID), or ""
+// when none exists. Status is deliberately NOT filtered — a token
+// decided (or timed out by the boot sweep) between the kill and the
+// resume should be returned so WaitFor resolves it from DB state,
+// rather than the resumed step minting a fresh approval and silently
+// resurrecting an already-answered question.
+func (s *SQLWaitpointStore) FindApprovalForStep(ctx context.Context, pipelineRunID, stepID string) (string, error) {
+	var token string
+	err := s.db.QueryRowContext(ctx, `
+SELECT token FROM pipeline_waitpoints
+WHERE pipeline_run_id = ? AND step_id = ? AND kind = 'approval'
+ORDER BY created_at DESC LIMIT 1`, pipelineRunID, stepID).Scan(&token)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("waitpoints: find for step: %w", err)
+	}
+	return token, nil
+}
+
+// WaitpointStatus implements WaitpointStatusReader: it returns the
+// row's current status string so the wait step can distinguish a
+// timeout/cancellation from a human denial after WaitFor reports
+// approved=false. Every negative transition (CompleteApproval,
+// sweeper, RecoverPending) commits the status to the DB before
+// signalling the listener channel, so this read is never ahead of
+// the decision the waiter observed.
+func (s *SQLWaitpointStore) WaitpointStatus(ctx context.Context, token string) (string, error) {
+	var status string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT status FROM pipeline_waitpoints WHERE token = ?`, token,
+	).Scan(&status)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", fmt.Errorf("waitpoint %q not found", token)
+	}
+	if err != nil {
+		return "", err
+	}
+	return status, nil
+}
+
 // CompleteApproval marks the waitpoint approved/denied and signals
 // any waiting goroutine. Called by the public HTTP endpoint when
 // an operator clicks approve/deny in the inbox.

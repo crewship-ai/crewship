@@ -76,6 +76,36 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Added
 
+- **Pipeline resume-from-step at boot.** The executor now persists
+  `current_step_id` + the step-outputs map at every step boundary, and
+  boot recovery re-enters previously in-flight runs from the next
+  unfinished step instead of stamping them `interrupted`: completed
+  steps are restored (not re-executed), the in-flight step re-runs
+  with at-least-once semantics, DAG runs recover at wave granularity,
+  and runs parked on a `wait` approval step re-attach to their
+  original pending waitpoint token so the approval card stays
+  answerable across restarts. `interrupted` remains the fallback when
+  persisted state is insufficient (missing pipeline, definition drift,
+  non-resumable mode), with the reason recorded in `error_message`.
+  Operator escape hatch: `CREWSHIP_PIPELINE_RESUME=off` restores the
+  old stamp-everything-interrupted behaviour. See
+  `docs/guides/routines.mdx` § Durability and restart recovery.
+
+  Hardening pass on the resume scan: (1) the boot scan now runs
+  BEFORE the cron scheduler starts and is additionally fenced on
+  process-boot time + the live run registry, so a scheduled run fired
+  at boot can never be "resumed" into a second concurrent execution
+  under the same run id — `RunRegistry.Acquire` also rejects
+  duplicate run ids outright instead of silently overwriting the live
+  entry; (2) a resumed run that loses the concurrency-slot race
+  retries with capped exponential backoff instead of being
+  permanently stamped interrupted; (3) migration v114 stamps the
+  pipeline's definition content hash onto each run row at start, and
+  resume refuses (→ `interrupted: definition changed`) when the
+  definition was edited in place even if every step id survived;
+  (4) a waitpoint that timed out during downtime now fails the
+  resumed run with `timed out` instead of misreporting `denied`.
+
 - **Domain metrics on `/metrics` (W10).** The Prometheus endpoint now
   exposes operator-facing series next to the existing process gauges:
   `crewshipd_assignments{status}`, `crewshipd_assignment_queue_depth`

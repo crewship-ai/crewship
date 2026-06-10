@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 )
 
@@ -58,11 +59,24 @@ const (
 // in the DB until the run ends. step_outputs_json is opaque to the
 // store; callers marshal/unmarshal as needed (typically map[string]string).
 type RunRecord struct {
-	ID               string
-	WorkspaceID      string
-	PipelineID       string
-	PipelineSlug     string
-	PipelineVersion  *int
+	ID           string
+	WorkspaceID  string
+	PipelineID   string
+	PipelineSlug string
+	// PipelineVersion mirrors pipelines.head_version at insert time.
+	// NULL = unknown/HEAD. Note it is NOT a reliable drift signal: the
+	// version store dedupes by content hash, so an edit cycle A→B→A
+	// leaves head_version pointing at B's row while the live
+	// definition is A. DefinitionHash below is the drift gate.
+	PipelineVersion *int
+	// DefinitionHash is sha256(definition_json) of the pipeline AS IT
+	// WAS when the run started (migration v114). Boot-time resume
+	// compares it against the pipeline's current hash: any in-place
+	// edit — even one that keeps every step id — makes the persisted
+	// step outputs unsafe to replay against the changed definition.
+	// Empty on rows from before v114; those fall back to the weaker
+	// step-id-existence gate.
+	DefinitionHash   string
 	Status           RunStatus
 	Mode             RunMode
 	StartedAt        time.Time
@@ -144,15 +158,15 @@ func (s *RunStore) Insert(ctx context.Context, r *RunRecord) error {
 
 	_, err := s.db.ExecContext(ctx, `
 INSERT INTO pipeline_runs (
-    id, workspace_id, pipeline_id, pipeline_slug, pipeline_version,
+    id, workspace_id, pipeline_id, pipeline_slug, pipeline_version, definition_hash,
     status, mode, started_at, ended_at, current_step_id,
     step_outputs_json, output, cost_usd, duration_ms,
     error_message, failed_at_step, error_fingerprint,
     invoking_crew_id, invoking_agent_id, invoking_user_id,
     triggered_via, triggered_by_id, idempotency_key,
     inputs_json, concurrency_key, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		r.ID, r.WorkspaceID, r.PipelineID, r.PipelineSlug, nullableIntPtr(r.PipelineVersion),
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		r.ID, r.WorkspaceID, r.PipelineID, r.PipelineSlug, nullableIntPtr(r.PipelineVersion), nullableStr(r.DefinitionHash),
 		string(r.Status), string(r.Mode), formatRFC3339(r.StartedAt), nullableTime(r.EndedAt), nullableStr(r.CurrentStepID),
 		r.StepOutputsJSON, nullableStr(r.Output), r.CostUSD, r.DurationMs,
 		nullableStr(r.ErrorMessage), nullableStr(r.FailedAtStep), nullableStr(r.ErrorFingerprint),
@@ -292,12 +306,59 @@ func (s *RunStore) ListActive(ctx context.Context, workspaceID string) ([]*RunRe
 	return out, rows.Err()
 }
 
+// ListInFlight returns every queued/running run across ALL
+// workspaces. Used by the boot-time resume scan, which runs before
+// any workspace context exists — the per-workspace variant
+// (ListActive) serves the UI panels.
+func (s *RunStore) ListInFlight(ctx context.Context) ([]*RunRecord, error) {
+	rows, err := s.db.QueryContext(ctx,
+		runSelectColumns+` WHERE status IN ('queued','running') ORDER BY started_at ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("pipeline_runs: list in-flight: %w", err)
+	}
+	defer rows.Close()
+	var out []*RunRecord
+	for rows.Next() {
+		r, err := scanRun(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// MarkInterrupted is the single-row fallback used by the boot resume
+// scan when a run's persisted state is insufficient to resume safely
+// (missing pipeline, schema drift, non-resumable mode). Guarded on
+// status so a run that resumed and finished between the scan's read
+// and this write is never clobbered back to interrupted.
+func (s *RunStore) MarkInterrupted(ctx context.Context, runID, reason string) error {
+	if reason == "" {
+		reason = "process restarted with run in flight"
+	}
+	_, err := s.db.ExecContext(ctx, `
+UPDATE pipeline_runs
+SET status = 'interrupted',
+    ended_at = COALESCE(ended_at, datetime('now','subsec')),
+    error_message = ?,
+    updated_at = datetime('now','subsec')
+WHERE id = ? AND status IN ('queued','running')`, reason, runID)
+	if err != nil {
+		return fmt.Errorf("pipeline_runs: mark interrupted: %w", err)
+	}
+	return nil
+}
+
 // RecoverInterruptedAtBoot is the boot-time scan that promotes any
 // run still in queued/running from a previous process lifetime to
 // "interrupted". Counterpart to the waitpoint recovery scan added in
-// the stabilization commit. We can't actually resume the runs (the
-// goroutine is gone), but we can close their audit story so the UI
-// doesn't show forever-running entries from before the restart.
+// the stabilization commit. Kept as the bulk fallback path for when
+// resume is disabled (CREWSHIP_PIPELINE_RESUME=off) or no executor
+// can be wired at boot; the default boot path is
+// Executor.ResumeInterruptedRuns (resume.go), which re-enters runs
+// from their last persisted step and only stamps "interrupted" when
+// state is insufficient.
 //
 // Returns how many rows were promoted. The boot wireup logs the
 // count so abnormal accumulation is observable.
@@ -336,6 +397,7 @@ func (s *RunStore) ResolveByIdempotencyKey(ctx context.Context, workspaceID, key
 
 const runSelectColumns = `
 SELECT id, workspace_id, pipeline_id, pipeline_slug, pipeline_version,
+       COALESCE(definition_hash,''),
        status, mode, started_at, ended_at, COALESCE(current_step_id,''),
        step_outputs_json, COALESCE(output,''), cost_usd, duration_ms,
        COALESCE(error_message,''), COALESCE(failed_at_step,''), COALESCE(error_fingerprint,''),
@@ -359,6 +421,7 @@ func scanRun(row scanRunRow) (*RunRecord, error) {
 	var status, mode, triggeredVia string
 	if err := row.Scan(
 		&r.ID, &r.WorkspaceID, &r.PipelineID, &r.PipelineSlug, &version,
+		&r.DefinitionHash,
 		&status, &mode, &startedAt, &endedAt, &r.CurrentStepID,
 		&r.StepOutputsJSON, &r.Output, &r.CostUSD, &r.DurationMs,
 		&r.ErrorMessage, &r.FailedAtStep, &r.ErrorFingerprint,
@@ -375,7 +438,15 @@ func scanRun(row scanRunRow) (*RunRecord, error) {
 		v := int(version.Int64)
 		r.PipelineVersion = &v
 	}
-	r.StartedAt, _ = parseRFC3339Opt(startedAt)
+	var startedAtErr error
+	r.StartedAt, startedAtErr = parseRFC3339Opt(startedAt)
+	if startedAtErr != nil {
+		// Zero-time StartedAt makes the row look older than any boot
+		// cutoff (i.e. resumable) — keep that behaviour, but don't let
+		// a corrupt timestamp pass silently.
+		slog.Warn("pipeline runs: unparseable started_at on run row; treating as zero time",
+			"run_id", r.ID, "started_at", startedAt, "error", startedAtErr)
+	}
 	if endedAt.Valid && endedAt.String != "" {
 		t, _ := parseRFC3339Opt(endedAt.String)
 		r.EndedAt = &t
