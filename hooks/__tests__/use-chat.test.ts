@@ -32,13 +32,35 @@ import { renderHook, act } from "@testing-library/react"
 import { useChat } from "@/hooks/use-chat"
 
 describe("useChat", () => {
+  // useChat now batches streamed text tokens into one commit per
+  // animation frame. Capture scheduled frames so tests can flush them
+  // deterministically; non-text events still commit text synchronously
+  // (the hook flushes before handling them), so only text-only
+  // assertions need an explicit flushFrames().
+  let rafQueue: Array<FrameRequestCallback | undefined>
   beforeEach(() => {
     vi.clearAllMocks()
     mockStatus.current = "connected"
+    rafQueue = []
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+      rafQueue.push(cb)
+      return rafQueue.length
+    })
+    vi.stubGlobal("cancelAnimationFrame", (id: number) => {
+      rafQueue[id - 1] = undefined
+    })
   })
 
   function getOnMessage(): (msg: unknown) => void {
     return (globalThis as Record<string, unknown>).__testOnMessage as (msg: unknown) => void
+  }
+
+  function flushFrames(): void {
+    act(() => {
+      const pending = rafQueue
+      rafQueue = []
+      for (const cb of pending) cb?.(0)
+    })
   }
 
   it("starts with empty turns and not streaming", () => {
@@ -102,6 +124,7 @@ describe("useChat", () => {
         payload: { type: "text", content: "world" },
       })
     })
+    flushFrames()
 
     // Should be ONE assistant turn with ONE text part (accumulated)
     expect(result.current.turns).toHaveLength(1)
@@ -135,6 +158,7 @@ describe("useChat", () => {
         payload: { type: "text", content: "Here is the answer" },
       })
     })
+    flushFrames()
 
     expect(result.current.turns).toHaveLength(1)
     expect(result.current.turns[0].role).toBe("assistant")
@@ -260,6 +284,7 @@ describe("useChat", () => {
         payload: { type: "text", content: "Response" },
       })
     })
+    flushFrames()
 
     // Status part is removed when text arrives (transient indicator)
     expect(result.current.turns).toHaveLength(1)
@@ -363,6 +388,7 @@ describe("useChat", () => {
         payload: { type: "text", content: "Hello" },
       })
     })
+    flushFrames()
     expect(result.current.turns[0].isStreaming).toBe(true)
     expect(result.current.turns[0].parts[0].isStreaming).toBe(true)
 
@@ -389,6 +415,7 @@ describe("useChat", () => {
         payload: { type: "text", content: "Hello" },
       })
     })
+    flushFrames()
 
     act(() => {
       result.current.stopGeneration()
@@ -420,6 +447,7 @@ describe("useChat", () => {
         payload: { type: "text", content: "fresh reply" },
       })
     })
+    flushFrames()
     const lastTurn = result.current.turns[result.current.turns.length - 1]
     expect(lastTurn.role).toBe("assistant")
     expect(lastTurn.parts[0].content).toBe("fresh reply")
