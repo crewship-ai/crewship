@@ -11,6 +11,13 @@ export interface EditableFieldProps {
   onSave: (next: string) => void | Promise<void>
   /** Optional select options. When provided, renders a dropdown instead of a text input. */
   options?: ReadonlyArray<{ value: string; label: string }>
+  /**
+   * Accessible name for the underlying control (select / text input).
+   * The visible row label lives in the parent (PropertyRow etc.), so the
+   * control itself has no associated <label> — without this, axe flags
+   * select-name / label violations.
+   */
+  ariaLabel: string
   /** Placeholder rendered when value is empty. */
   placeholder?: string
   /** Render value as monospace code (e.g. for slugs). */
@@ -40,6 +47,7 @@ export function EditableField({
   value,
   onSave,
   options,
+  ariaLabel,
   placeholder = "empty — click to add",
   mono = false,
   readOnly = false,
@@ -91,6 +99,7 @@ export function EditableField({
             <select
               value={value ?? ""}
               onChange={(e) => commit(e.target.value)}
+              aria-label={ariaLabel}
               className="appearance-none bg-transparent border border-transparent hover:border-white/10 rounded px-2 pr-6 py-0.5 text-sm text-foreground/90 cursor-pointer focus:outline-none focus:border-white/15"
             >
               {options.map((opt) => (
@@ -116,6 +125,7 @@ export function EditableField({
           ref={inputRef}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
+          aria-label={ariaLabel}
           onBlur={() => commit(draft)}
           onKeyDown={(e) => {
             if (e.key === "Enter") {

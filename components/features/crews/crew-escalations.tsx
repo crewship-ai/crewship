@@ -124,10 +124,10 @@ export function CrewEscalations({ crewId, workspaceId }: CrewEscalationsProps) {
 
       {escalations.length === 0 ? (
         <div className="flex flex-col items-center gap-3 py-8 text-center">
-          <AlertTriangle className="h-8 w-8 text-muted-foreground/50" />
+          <AlertTriangle className="h-8 w-8 text-muted-foreground-soft" />
           <div>
             <p className="text-body text-muted-foreground">No escalations yet.</p>
-            <p className="text-label text-muted-foreground/70 mt-1">
+            <p className="text-label text-muted-foreground mt-1">
               Escalations appear when agents need human intervention or encounter blockers.
             </p>
           </div>

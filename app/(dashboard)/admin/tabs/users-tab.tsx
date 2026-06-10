@@ -18,14 +18,14 @@ export const UsersTab = React.memo(function UsersTab({ users }: UsersTabProps) {
       }
     >
       {users.length === 0 ? (
-        <div className="flex items-center justify-center py-10 text-[11px] text-muted-foreground/60">
+        <div className="flex items-center justify-center py-10 text-[11px] text-muted-foreground">
           No users
         </div>
       ) : (
         <>
           {/* Desktop header */}
           <div
-            className="hidden md:grid items-center gap-3 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 border-b border-border/60"
+            className="hidden md:grid items-center gap-3 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground border-b border-border/60"
             style={{ gridTemplateColumns: "minmax(0,1.6fr) minmax(0,1fr) 80px minmax(0,0.9fr)" }}
           >
             <div>User</div>
@@ -45,7 +45,7 @@ export const UsersTab = React.memo(function UsersTab({ users }: UsersTabProps) {
             >
               <div className="min-w-0">
                 <div className="text-xs font-medium truncate">{u.full_name ?? "—"}</div>
-                <div className="text-[10px] text-muted-foreground/60 truncate">{u.email}</div>
+                <div className="text-[10px] text-muted-foreground truncate">{u.email}</div>
               </div>
               <div className="text-[11px] text-muted-foreground truncate">
                 {u.workspace?.name ?? "—"}

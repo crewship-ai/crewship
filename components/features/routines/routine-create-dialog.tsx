@@ -361,10 +361,11 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
               />
             </div>
             <div className="mb-3">
-              <label className="text-[10px] uppercase tracking-wider text-muted-foreground">
+              <label htmlFor="routine-author-crew" className="text-[10px] uppercase tracking-wider text-muted-foreground">
                 Author crew
               </label>
               <select
+                id="routine-author-crew"
                 value={authorCrewId}
                 onChange={(e) => setAuthorCrewId(e.target.value)}
                 className="h-7 w-full rounded-md border border-white/10 bg-background px-1.5 text-xs"
@@ -417,6 +418,7 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
             </div>
             <textarea
               value={dslJson}
+              aria-label="Routine definition JSON"
               onChange={(e) => {
                 setDslJson(e.target.value)
                 setParseError(null)

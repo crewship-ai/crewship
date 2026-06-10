@@ -216,7 +216,7 @@ export function AppToolbar() {
           </Link>
           {agentBreadcrumb.crewName && agentBreadcrumb.crewId && (
             <>
-              <span className="text-muted-foreground/40 text-sm shrink-0">/</span>
+              <span className="text-muted-foreground-soft text-sm shrink-0">/</span>
               <Link
                 href={`/crews/${agentBreadcrumb.crewId}`}
                 className="text-sm text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1.5"
@@ -229,7 +229,7 @@ export function AppToolbar() {
               </Link>
             </>
           )}
-          <span className="text-muted-foreground/40 text-sm shrink-0">/</span>
+          <span className="text-muted-foreground-soft text-sm shrink-0">/</span>
           <span className="text-sm font-semibold truncate">{agentBreadcrumb.agentName}</span>
         </>
       )
@@ -241,7 +241,7 @@ export function AppToolbar() {
           <Link href="/crews/agents" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
             Agents
           </Link>
-          <span className="text-muted-foreground/40 text-sm shrink-0">/</span>
+          <span className="text-muted-foreground-soft text-sm shrink-0">/</span>
           <span className="text-sm text-muted-foreground">...</span>
         </>
       )
@@ -267,14 +267,14 @@ export function AppToolbar() {
           >
             Crews
           </Link>
-          <span className="text-muted-foreground/40 text-sm shrink-0">/</span>
+          <span className="text-muted-foreground-soft text-sm shrink-0">/</span>
           <Link
             href={`/crews?agent=${encodeURIComponent(chatAgentSlug)}`}
             className="text-sm text-muted-foreground hover:text-foreground transition-colors truncate"
           >
             {chatAgentSlug}
           </Link>
-          <span className="text-muted-foreground/40 text-sm shrink-0">/</span>
+          <span className="text-muted-foreground-soft text-sm shrink-0">/</span>
           <span className="text-sm font-semibold">Chat</span>
         </>
       )
@@ -288,7 +288,7 @@ export function AppToolbar() {
           <span className="text-sm text-muted-foreground">Settings</span>
           {tabTitle && (
             <>
-              <span className="text-muted-foreground/40 text-sm shrink-0">/</span>
+              <span className="text-muted-foreground-soft text-sm shrink-0">/</span>
               <span className="text-sm font-semibold truncate">{tabTitle}</span>
             </>
           )}
@@ -307,7 +307,7 @@ export function AppToolbar() {
               <button
                 type="button"
                 onClick={item.onClick}
-                className="text-xs text-muted-foreground/70 hover:text-foreground/90 transition-colors truncate max-w-[160px]"
+                className="text-xs text-muted-foreground hover:text-foreground/90 transition-colors truncate max-w-[160px]"
               >
                 {item.label}
               </button>
@@ -555,7 +555,7 @@ export function AppToolbar() {
                   <div className="flex h-6 w-6 items-center justify-center rounded bg-primary text-[8px] font-bold text-primary-foreground">U</div>
                   <SheetTitle className="text-sm">Unify Technology</SheetTitle>
                 </div>
-                <button onClick={() => setMobileNavOpen(false)} className="h-8 w-8 flex items-center justify-center rounded-md hover:bg-accent">
+                <button onClick={() => setMobileNavOpen(false)} aria-label="Close navigation" className="h-8 w-8 flex items-center justify-center rounded-md hover:bg-accent">
                   <X className="h-4 w-4" />
                 </button>
               </div>
@@ -576,7 +576,7 @@ export function AppToolbar() {
                           onClick={() => !disabled && setMobileNavOpen(false)}
                           className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
                             disabled
-                              ? "text-muted-foreground/50 pointer-events-none"
+                              ? "text-muted-foreground-soft pointer-events-none"
                               : isActive
                                 ? "bg-accent text-foreground font-medium"
                                 : "text-muted-foreground hover:text-foreground hover:bg-accent/50"

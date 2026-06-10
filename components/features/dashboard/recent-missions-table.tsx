@@ -47,7 +47,7 @@ function formatCost(cost: number | null | undefined): string {
 export function RecentMissionsTable({ missions }: RecentMissionsTableProps) {
   if (missions.length === 0) {
     return (
-      <div className="flex items-center justify-center h-[120px] text-[11px] text-muted-foreground/50">
+      <div className="flex items-center justify-center h-[120px] text-[11px] text-muted-foreground-soft">
         No missions yet
       </div>
     )
@@ -76,7 +76,7 @@ export function RecentMissionsTable({ missions }: RecentMissionsTableProps) {
               <span className="text-foreground/80 truncate">{m.title}</span>
               <div className="flex items-center gap-1.5">
                 <Progress value={pct} className="h-1 flex-1 bg-white/[0.06]" indicatorClassName={progressCls} />
-                <span className="text-[9px] font-mono text-muted-foreground/60 tabular-nums w-8 text-right shrink-0">{pct}%</span>
+                <span className="text-[9px] font-mono text-muted-foreground tabular-nums w-8 text-right shrink-0">{pct}%</span>
               </div>
               <span className={cn("inline-flex items-center justify-center px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wide border", statusCls)}>
                 {m.status.replace("_", " ").toLowerCase()}
@@ -84,7 +84,7 @@ export function RecentMissionsTable({ missions }: RecentMissionsTableProps) {
               <span className="font-mono text-[10px] text-muted-foreground text-right tabular-nums">
                 {formatCost(m.total_estimated_cost)}
               </span>
-              <span className="text-[10px] text-muted-foreground/60 text-right">
+              <span className="text-[10px] text-muted-foreground text-right">
                 {formatRelativeTime(m.updated_at)}
               </span>
             </Link>

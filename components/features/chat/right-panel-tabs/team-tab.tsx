@@ -108,9 +108,9 @@ export function TeamTab({ agentId, workspaceId }: TeamTabProps) {
               <span className={cn("font-medium", isOutgoing ? "text-blue-400" : "text-emerald-400")}>
                 {msg.from_name}
               </span>
-              <span className="text-muted-foreground/50">&rarr;</span>
+              <span className="text-muted-foreground-soft">&rarr;</span>
               <span className="font-medium text-muted-foreground">{msg.to_name}</span>
-              <span className="ml-auto text-muted-foreground/40">
+              <span className="ml-auto text-muted-foreground-soft">
                 {new Date(msg.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
               </span>
             </div>

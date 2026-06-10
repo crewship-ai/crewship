@@ -101,7 +101,7 @@ export default function ApprovalsPage() {
                 className={cn(
                   "flex items-center justify-between w-full px-2.5 py-1.5 rounded text-xs transition-colors",
                   active
-                    ? "bg-primary/15 text-primary"
+                    ? "bg-primary/15 text-primary-hover"
                     : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
                 )}
               >

@@ -251,7 +251,7 @@ export function CredentialDetailSheet({
                       {formatRelativeTime(credential.last_used_at)}
                     </span>
                   ) : (
-                    <span className="text-muted-foreground/60">never</span>
+                    <span className="text-muted-foreground">never</span>
                   )}
                 </Field>
                 {credential.last_error && (
@@ -483,7 +483,7 @@ export function CredentialDetailSheet({
                             {r.status}
                           </Badge>
                           <span className="text-muted-foreground">{formatRelativeTime(r.rotated_at)}</span>
-                          <span className="ml-auto text-[10px] text-muted-foreground/70 font-mono">
+                          <span className="ml-auto text-[10px] text-muted-foreground font-mono">
                             {Math.round(r.grace_seconds / 3600)}h grace
                           </span>
                         </li>

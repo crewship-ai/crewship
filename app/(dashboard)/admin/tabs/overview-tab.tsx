@@ -58,7 +58,7 @@ export const OverviewTab = React.memo(function OverviewTab({
         <SettingsRow
           label={
             <span className="inline-flex items-center gap-2">
-              <Database className="h-3 w-3 text-muted-foreground/60" />
+              <Database className="h-3 w-3 text-muted-foreground" />
               Database
             </span>
           }
@@ -71,7 +71,7 @@ export const OverviewTab = React.memo(function OverviewTab({
         <SettingsRow
           label={
             <span className="inline-flex items-center gap-2">
-              <Cpu className="h-3 w-3 text-muted-foreground/60" />
+              <Cpu className="h-3 w-3 text-muted-foreground" />
               Engine
             </span>
           }
@@ -84,7 +84,7 @@ export const OverviewTab = React.memo(function OverviewTab({
         <SettingsRow
           label={
             <span className="inline-flex items-center gap-2">
-              <Container className="h-3 w-3 text-muted-foreground/60" />
+              <Container className="h-3 w-3 text-muted-foreground" />
               Container runtime
             </span>
           }

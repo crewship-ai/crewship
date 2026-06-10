@@ -72,7 +72,7 @@ export function EmptyRoster({ agents, crews, onAgentSelect }: EmptyRosterProps) 
       {agents.length === 0 ? (
         <div className="rounded-xl border border-white/8 bg-card p-12 text-center">
           <p className="text-sm text-muted-foreground mb-2">No agents yet</p>
-          <p className="text-xs text-muted-foreground/70">
+          <p className="text-xs text-muted-foreground">
             Use the <span className="text-foreground/80">+ Crew</span> and{" "}
             <span className="text-foreground/80">+ Agent</span> buttons in the toolbar to start.
           </p>

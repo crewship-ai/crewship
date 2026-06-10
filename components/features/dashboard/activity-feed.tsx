@@ -137,7 +137,7 @@ export function ActivityFeed() {
         aria-live="polite"
         aria-relevant="additions"
         aria-label="Live workspace activity feed"
-        className="flex items-center justify-center h-[240px] text-[11px] text-muted-foreground/50"
+        className="flex items-center justify-center h-[240px] text-[11px] text-muted-foreground-soft"
       >
         Waiting for activity…
       </div>
@@ -163,14 +163,14 @@ export function ActivityFeed() {
             transition={{ type: "spring", stiffness: 380, damping: 32 }}
             className="flex items-center gap-2 py-1 px-1 rounded hover:bg-white/[0.02]"
           >
-            <span className="text-[10px] font-mono text-muted-foreground/40 w-[56px] shrink-0">{formatTime(e.ts)}</span>
+            <span className="text-[10px] font-mono text-muted-foreground-soft w-[56px] shrink-0">{formatTime(e.ts)}</span>
             <span className={cn("text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded border shrink-0", tagStyle(e.label))}>
               {e.label}
             </span>
             <span className="text-[10px] font-mono text-muted-foreground shrink-0 w-[56px] truncate">{e.tag}</span>
             <span className="text-[11px] text-foreground/80 flex-1 truncate">{e.title}</span>
             {e.actor && (
-              <span className="text-[10px] text-muted-foreground/60 shrink-0">@{e.actor}</span>
+              <span className="text-[10px] text-muted-foreground shrink-0">@{e.actor}</span>
             )}
           </motion.div>
         ))}

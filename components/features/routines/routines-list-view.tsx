@@ -290,7 +290,7 @@ function RoutineRow({
 }) {
   const status = routine.last_invocation_status?.toLowerCase()
   const statusPill = !status ? (
-    <span className="text-[11px] text-muted-foreground/60">never invoked</span>
+    <span className="text-[11px] text-muted-foreground">never invoked</span>
   ) : (
     <Pill
       tone={
@@ -353,7 +353,7 @@ function RoutineRow({
           <div className="truncate text-[12px] text-foreground/85">
             {routine.author_agent_name || (routine.author_crew_id ? truncate(routine.author_crew_id, 16) : "—")}
           </div>
-          <div className="text-[10px] capitalize text-muted-foreground/70">
+          <div className="text-[10px] capitalize text-muted-foreground">
             {routine.authored_via.replace(/_/g, " ")}
           </div>
         </div>
@@ -438,7 +438,7 @@ function EmptyState() {
               </div>
               <h4 className="mb-1 text-sm font-medium">{q.title}</h4>
               <p className="mb-3 text-[12px] leading-relaxed text-muted-foreground">{q.description}</p>
-              <p className="text-[10px] uppercase tracking-wider text-muted-foreground/70">{q.cta}</p>
+              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{q.cta}</p>
             </div>
           ))}
         </div>

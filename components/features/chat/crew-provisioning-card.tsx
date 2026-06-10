@@ -129,7 +129,7 @@ export function CrewProvisioningCard({
           <div className="text-xs text-muted-foreground flex items-center gap-2">
             <span>{crew.message ?? "Pulling base image…"}</span>
             {crew.total ? (
-              <span className="tabular-nums shrink-0 text-muted-foreground/70">
+              <span className="tabular-nums shrink-0 text-muted-foreground">
                 {crew.step ?? 0}/{crew.total}
               </span>
             ) : null}

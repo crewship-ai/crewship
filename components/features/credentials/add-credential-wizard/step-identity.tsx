@@ -89,10 +89,11 @@ export function StepIdentity({ state, setState, workspaceId }: Props) {
       </div>
 
       <div>
-        <label className="block text-[11px] uppercase tracking-wider text-muted-foreground font-medium mb-1.5">
+        <label htmlFor="credential-expires" className="block text-[11px] uppercase tracking-wider text-muted-foreground font-medium mb-1.5">
           Expires
         </label>
         <input
+          id="credential-expires"
           type="date"
           value={state.expiresAt}
           onChange={(e) => setState({ expiresAt: e.target.value })}

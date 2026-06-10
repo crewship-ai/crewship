@@ -117,7 +117,7 @@ function SectionHeader({ title, badge, hint }: { title: string; badge?: string; 
           {badge}
         </span>
       )}
-      {hint && <span className="ml-auto text-[11px] text-muted-foreground/70 font-mono">{hint}</span>}
+      {hint && <span className="ml-auto text-[11px] text-muted-foreground font-mono">{hint}</span>}
     </div>
   )
 }
@@ -157,13 +157,13 @@ function ResourceCell({
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-2">
             <span className="text-[10.5px] uppercase tracking-wider text-muted-foreground font-medium">{label}</span>
-            <span className="text-[10px] text-muted-foreground/60 truncate">— {help}</span>
+            <span className="text-[10px] text-muted-foreground truncate">— {help}</span>
           </div>
           <div className={cn("text-[15px] font-semibold leading-tight mt-0.5", t.value)}>{value}</div>
         </div>
       </div>
       <div className="min-h-[28px]">{children}</div>
-      <code className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-black/30 text-muted-foreground/70 truncate self-start">
+      <code className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-black/30 text-muted-foreground truncate self-start">
         {cli}
       </code>
     </div>
@@ -216,7 +216,7 @@ function NetworkCell({ state, setState }: Props) {
             tone="amber"
           />
         </div>
-        <code className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-black/30 text-muted-foreground/70 self-start mt-1.5">
+        <code className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-black/30 text-muted-foreground self-start mt-1.5">
           --network-mode {state.networkMode}
         </code>
       </div>
@@ -226,7 +226,7 @@ function NetworkCell({ state, setState }: Props) {
           <div className="flex items-baseline justify-between mb-1.5">
             <span className="text-[10.5px] uppercase tracking-wider text-muted-foreground font-medium">
               Allowed domains
-              <span className="ml-2 text-[10px] text-muted-foreground/60 normal-case tracking-normal">supports wildcards (<code className="font-mono">*.github.com</code>)</span>
+              <span className="ml-2 text-[10px] text-muted-foreground normal-case tracking-normal">supports wildcards (<code className="font-mono">*.github.com</code>)</span>
             </span>
             <span className="text-[10px] text-muted-foreground">{state.allowedDomains.length} listed</span>
           </div>
@@ -409,7 +409,7 @@ function DomainChips({ value, onChange }: { value: string[]; onChange: (v: strin
       ))}
       <div className="flex items-center gap-1 flex-1 min-w-[140px]">
         <label htmlFor={inputId} className="sr-only">Add an allowed domain</label>
-        <Plus className="h-3 w-3 text-muted-foreground/50 ml-1" aria-hidden="true" />
+        <Plus className="h-3 w-3 text-muted-foreground-soft ml-1" aria-hidden="true" />
         <input
           id={inputId}
           value={draft}
@@ -424,7 +424,7 @@ function DomainChips({ value, onChange }: { value: string[]; onChange: (v: strin
           }}
           onBlur={commit}
           placeholder={value.length === 0 ? "github.com, *.npmjs.org, api.anthropic.com" : "add another…"}
-          className="flex-1 bg-transparent border-0 outline-none text-xs font-mono px-1 py-0.5 placeholder:text-muted-foreground/40"
+          className="flex-1 bg-transparent border-0 outline-none text-xs font-mono px-1 py-0.5 placeholder:text-muted-foreground-soft"
         />
       </div>
     </div>

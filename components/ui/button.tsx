@@ -9,7 +9,13 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground hover:bg-primary/90",
+        // Dark hover must go LIGHTER, not translucent: primary-foreground is
+        // the page-background navy there, and bg-primary/90 composited over
+        // the dark page drops navy text to 4.37:1 (< AA 4.5:1). Solid
+        // --primary-hover #3D8FFE keeps navy text at 6.43:1. Light mode keeps
+        // the /90 dim (white-on-blue, unchanged behavior).
+        default:
+          "bg-primary text-primary-foreground hover:bg-primary/90 dark:hover:bg-primary-hover",
         destructive:
           "bg-destructive text-white hover:bg-destructive/90 focus-visible:ring-destructive/20 dark:bg-destructive/60 dark:focus-visible:ring-destructive/40",
         outline:

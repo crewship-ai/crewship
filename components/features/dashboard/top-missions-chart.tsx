@@ -38,7 +38,7 @@ function formatUsd(n: number): string {
 export function TopMissionsChart({ missions, format = formatUsd, emptyLabel = "No missions with cost data yet" }: TopMissionsChartProps) {
   if (missions.length === 0) {
     return (
-      <div className="flex items-center justify-center h-[140px] text-[11px] text-muted-foreground/50">
+      <div className="flex items-center justify-center h-[140px] text-[11px] text-muted-foreground-soft">
         {emptyLabel}
       </div>
     )

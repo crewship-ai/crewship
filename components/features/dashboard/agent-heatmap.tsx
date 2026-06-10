@@ -42,7 +42,7 @@ export function AgentHeatmap({ agents, buckets }: AgentHeatmapProps) {
 
   if (agents.length === 0 || buckets.length === 0) {
     return (
-      <div className="flex items-center justify-center h-[180px] text-[11px] text-muted-foreground/50">
+      <div className="flex items-center justify-center h-[180px] text-[11px] text-muted-foreground-soft">
         No activity data yet
       </div>
     )
@@ -54,7 +54,7 @@ export function AgentHeatmap({ agents, buckets }: AgentHeatmapProps) {
       {/* Header row — hour ticks */}
       <div className="grid" style={{ gridTemplateColumns: "72px 1fr" }}>
         <div />
-        <div className="grid text-[9px] font-mono text-muted-foreground/50 pb-1" style={{ gridTemplateColumns: `repeat(${buckets.length}, 1fr)` }}>
+        <div className="grid text-[9px] font-mono text-muted-foreground-soft pb-1" style={{ gridTemplateColumns: `repeat(${buckets.length}, 1fr)` }}>
           {buckets.map((b, i) => {
             const d = new Date(b.ts)
             const hh = String(d.getHours()).padStart(2, "0")
@@ -98,7 +98,7 @@ export function AgentHeatmap({ agents, buckets }: AgentHeatmapProps) {
         )
       })}
       {/* Scale legend */}
-      <div className="flex items-center gap-1.5 text-[9px] text-muted-foreground/50 pt-2 pl-[72px]">
+      <div className="flex items-center gap-1.5 text-[9px] text-muted-foreground-soft pt-2 pl-[72px]">
         <span>less</span>
         <div className="flex gap-0.5">
           <div className="h-2.5 w-2.5 rounded-[2px] bg-white/[0.03]" />

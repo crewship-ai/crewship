@@ -97,7 +97,7 @@ export function JSONViewer({ value, maxChars = 65_536 }: JSONViewerProps) {
           size="xs"
           onClick={onCopy}
           aria-label="Copy as JSON"
-          className="px-1.5 text-[10px] text-muted-foreground/60"
+          className="px-1.5 text-[10px] text-muted-foreground"
         >
           <Copy className="h-3 w-3" />
           {copied ? "Copied" : "Copy"}
@@ -178,7 +178,7 @@ const MAX_TABLE_ROWS = 200
 function TruncatedRowsHint({ shown, total }: { shown: number; total: number }) {
   if (shown >= total) return null
   return (
-    <div className="border-t border-white/[0.04] bg-white/[0.02] px-2 py-1 text-[10px] text-muted-foreground/70">
+    <div className="border-t border-white/[0.04] bg-white/[0.02] px-2 py-1 text-[10px] text-muted-foreground">
       Showing first {shown} of {total} rows — switch to JSON for the full payload
     </div>
   )
@@ -189,7 +189,7 @@ function TableJSON({ parsed }: { parsed: ParsedValue }) {
     const entries = Object.entries(parsed.obj)
     if (entries.length === 0) {
       return (
-        <div className="rounded bg-background/60 p-2 text-[10px] text-muted-foreground/60">
+        <div className="rounded bg-background/60 p-2 text-[10px] text-muted-foreground">
           (empty object)
         </div>
       )
@@ -200,10 +200,10 @@ function TableJSON({ parsed }: { parsed: ParsedValue }) {
         <table className="w-full text-[10px]">
           <thead className="bg-white/[0.04]">
             <tr>
-              <th className="px-2 py-1 text-left font-medium text-muted-foreground/70">
+              <th className="px-2 py-1 text-left font-medium text-muted-foreground">
                 Key
               </th>
-              <th className="px-2 py-1 text-left font-medium text-muted-foreground/70">
+              <th className="px-2 py-1 text-left font-medium text-muted-foreground">
                 Value
               </th>
             </tr>
@@ -234,10 +234,10 @@ function TableJSON({ parsed }: { parsed: ParsedValue }) {
           <table className="w-full text-[10px]">
             <thead className="bg-white/[0.04]">
               <tr>
-                <th className="px-2 py-1 text-left font-medium text-muted-foreground/70">
+                <th className="px-2 py-1 text-left font-medium text-muted-foreground">
                   #
                 </th>
-                <th className="px-2 py-1 text-left font-medium text-muted-foreground/70">
+                <th className="px-2 py-1 text-left font-medium text-muted-foreground">
                   Value
                 </th>
               </tr>
@@ -245,7 +245,7 @@ function TableJSON({ parsed }: { parsed: ParsedValue }) {
             <tbody>
               {visibleArr.map((v, i) => (
                 <tr key={i} className="border-t border-white/[0.04]">
-                  <td className="px-2 py-1 font-mono text-muted-foreground/70">{i}</td>
+                  <td className="px-2 py-1 font-mono text-muted-foreground">{i}</td>
                   <td className="px-2 py-1 font-mono text-foreground/80">
                     {summarizeValue(v)}
                   </td>
@@ -275,7 +275,7 @@ function TableJSON({ parsed }: { parsed: ParsedValue }) {
         <table className="w-full text-[10px]">
           <thead className="bg-white/[0.04]">
             <tr>
-              <th className="px-2 py-1 text-left font-medium text-muted-foreground/70">
+              <th className="px-2 py-1 text-left font-medium text-muted-foreground">
                 #
               </th>
               {columns.map((c) => (
@@ -290,7 +290,7 @@ function TableJSON({ parsed }: { parsed: ParsedValue }) {
               const obj = (item ?? {}) as Record<string, unknown>
               return (
                 <tr key={i} className="border-t border-white/[0.04]">
-                  <td className="px-2 py-1 font-mono text-muted-foreground/70">{i}</td>
+                  <td className="px-2 py-1 font-mono text-muted-foreground">{i}</td>
                   {columns.map((c) => (
                     <td key={c} className="px-2 py-1 font-mono text-foreground/80">
                       {summarizeValue(obj[c])}

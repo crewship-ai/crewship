@@ -1080,7 +1080,7 @@ function ModeCard({
       }`}
     >
       {recommended && (
-        <span className="absolute top-2 right-2 inline-flex items-center gap-1 rounded-full bg-primary/15 border border-primary/30 px-2 py-0.5 text-[10px] font-semibold text-primary uppercase tracking-[0.06em]">
+        <span className="absolute top-2 right-2 inline-flex items-center gap-1 rounded-full bg-primary/15 border border-primary/30 px-2 py-0.5 text-[10px] font-semibold text-primary-hover uppercase tracking-[0.06em]">
           Recommended
         </span>
       )}

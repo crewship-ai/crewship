@@ -39,7 +39,7 @@ const SLOT_DESCRIPTIONS: Record<string, string> = {
 function SourcePill({ source }: { source: AuxSlot["source"] }) {
   if (source === "explicit") {
     return (
-      <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/15 text-primary uppercase tracking-wider">
+      <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/15 text-primary-hover uppercase tracking-wider">
         explicit
       </span>
     )

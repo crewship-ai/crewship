@@ -271,7 +271,7 @@ export function ProfileSection({
       {/* ── Account ── */}
       <SettingsCard title="Account" description="Your identity on this instance">
         <SettingsRow label="Profile picture">
-          <div className="h-7 w-7 rounded-full bg-primary/80 ring-2 ring-border flex items-center justify-center text-primary-foreground text-[10px] font-semibold">
+          <div className="h-7 w-7 rounded-full bg-primary ring-2 ring-border flex items-center justify-center text-primary-foreground text-[10px] font-semibold">
             {initials}
           </div>
         </SettingsRow>
@@ -372,7 +372,7 @@ export function ProfileSection({
                 <code className="flex-1 text-[11px] font-mono text-foreground break-all select-all leading-relaxed">
                   {tokenVisible ? newToken.token : newToken.token.slice(0, 18) + "•".repeat(24)}
                 </code>
-                <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-foreground" onClick={() => setTokenVisible(!tokenVisible)}>
+                <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-foreground" onClick={() => setTokenVisible(!tokenVisible)} aria-label={tokenVisible ? "Hide token" : "Show token"}>
                   {tokenVisible ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
                 </Button>
                 <Button variant="ghost" size="sm" className={cn("h-6 gap-1 text-[10px]", tokenCopied ? "text-foreground" : "text-muted-foreground")} onClick={() => handleCopyToken(newToken.token)}>
@@ -671,7 +671,7 @@ function TokenListItem({
         <TooltipProvider delayDuration={0}>
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive hover:bg-destructive/10" onClick={onRevoke}>
+              <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive hover:bg-destructive/10" onClick={onRevoke} aria-label="Revoke token">
                 <Trash2 className="h-3 w-3" />
               </Button>
             </TooltipTrigger>

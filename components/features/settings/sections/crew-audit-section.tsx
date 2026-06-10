@@ -393,7 +393,7 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
       ) : filteredLogs.length === 0 ? (
         <div className="rounded-xl border border-border/60 bg-card flex flex-col items-center justify-center py-12 text-center">
           <div className="w-10 h-10 rounded-lg bg-muted/50 flex items-center justify-center mb-3">
-            <Shield className="h-4 w-4 text-muted-foreground/60" />
+            <Shield className="h-4 w-4 text-muted-foreground" />
           </div>
           <div className="text-sm font-medium text-foreground/80">
             {searchQuery ? "No matching events" : "No activity yet"}
@@ -424,7 +424,7 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
                     <div className="flex items-center gap-2.5 min-w-0">
                       <ChevronRight
                         className={cn(
-                          "h-3 w-3 shrink-0 text-muted-foreground/60 transition-transform duration-150",
+                          "h-3 w-3 shrink-0 text-muted-foreground transition-transform duration-150",
                           isExpanded && "rotate-90 text-foreground",
                         )}
                       />
@@ -433,7 +433,7 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
                       </span>
                       <span className="text-xs text-foreground/80 truncate">
                         {log.user?.full_name ?? log.user?.email ?? (
-                          <span className="text-muted-foreground/60">System</span>
+                          <span className="text-muted-foreground">System</span>
                         )}
                       </span>
                     </div>
@@ -447,7 +447,7 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
                         {log.entity_type}
                       </span>
                       {log.entity_id && (
-                        <span className="font-mono text-[10px] text-muted-foreground/60 hidden sm:inline">
+                        <span className="font-mono text-[10px] text-muted-foreground hidden sm:inline">
                           {log.entity_id.slice(0, 8)}
                         </span>
                       )}
@@ -471,7 +471,7 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
                         <div className="px-4 py-3 pl-11">
                           <div className="grid gap-3 sm:grid-cols-2 max-w-3xl">
                             <div>
-                              <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 mb-0.5">
+                              <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-0.5">
                                 IP address
                               </div>
                               <div className="font-mono text-[11px] text-foreground/80">
@@ -479,7 +479,7 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
                               </div>
                             </div>
                             <div>
-                              <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 mb-0.5">
+                              <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-0.5">
                                 User agent
                               </div>
                               <div className="font-mono text-[11px] text-foreground/80 truncate" title={log.user_agent ?? ""}>
@@ -488,7 +488,7 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
                             </div>
                             {log.metadata && Object.keys(log.metadata).length > 0 && (
                               <div className="sm:col-span-2">
-                                <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 mb-1">
+                                <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">
                                   Metadata
                                 </div>
                                 <pre className="bg-muted/40 border border-border/60 rounded p-2 text-[10px] font-mono text-muted-foreground overflow-auto max-h-32">
@@ -497,7 +497,7 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
                               </div>
                             )}
                           </div>
-                          <div className="flex items-center gap-1.5 mt-3 text-[10px] text-muted-foreground/60">
+                          <div className="flex items-center gap-1.5 mt-3 text-[10px] text-muted-foreground">
                             <Shield className="h-3 w-3" />
                             This record is immutable.
                           </div>

@@ -61,13 +61,13 @@ export function CrewsSubbar({
           <Link href="/crews" className="text-muted-foreground hover:text-foreground/80 shrink-0">
             Crews
           </Link>
-          {(crewName || agentName) && <span className="text-muted-foreground/50 shrink-0">/</span>}
+          {(crewName || agentName) && <span className="text-muted-foreground-soft shrink-0">/</span>}
           {crewName && (
             <span className={cn("truncate", agentName ? "text-foreground/70" : "text-foreground/90 font-medium")}>
               {crewName}
             </span>
           )}
-          {agentName && <span className="text-muted-foreground/50 shrink-0">/</span>}
+          {agentName && <span className="text-muted-foreground-soft shrink-0">/</span>}
           {agentName && <span className="text-foreground font-medium truncate">{agentName}</span>}
         </nav>
 

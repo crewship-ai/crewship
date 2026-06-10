@@ -219,7 +219,7 @@ export function LogsToolbar({
               className={cn(
                 "h-7 px-2 text-[10px] font-mono uppercase tracking-wider flex items-center gap-1 transition-colors border-r border-border/60 last:border-r-0",
                 active
-                  ? "bg-primary/15 text-primary"
+                  ? "bg-primary/15 text-primary-hover"
                   : "text-muted-foreground hover:text-foreground",
               )}
               style={

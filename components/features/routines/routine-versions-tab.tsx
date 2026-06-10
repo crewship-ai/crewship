@@ -140,7 +140,7 @@ export function RoutineVersionsTab({ workspaceId, slug, onRolledBack }: Props) {
                 {v.change_summary ? (
                   <p className="text-sm text-foreground/90">{v.change_summary}</p>
                 ) : (
-                  <p className="text-sm italic text-muted-foreground/60">No change summary</p>
+                  <p className="text-sm italic text-muted-foreground">No change summary</p>
                 )}
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground">
                   <span>{new Date(v.created_at).toLocaleString()}</span>

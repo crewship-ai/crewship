@@ -152,7 +152,7 @@ export function MembersSection({
             >
               {/* Left: avatar + name + email */}
               <div className="flex items-center gap-2.5 min-w-0">
-                <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/80">
+                <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary">
                   <span className="text-[10px] font-semibold text-primary-foreground leading-none">
                     {initials(member.user.full_name, member.user.email)}
                   </span>
@@ -270,7 +270,7 @@ export function MembersSection({
               <span className="text-body font-medium text-muted-foreground group-hover:text-foreground/80 transition-colors leading-none">
                 Per-member capabilities
               </span>
-              <span className="text-[10px] text-muted-foreground/60 leading-none">
+              <span className="text-[10px] text-muted-foreground leading-none">
                 grant individual high-value actions without promoting role
               </span>
             </button>

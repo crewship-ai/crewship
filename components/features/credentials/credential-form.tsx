@@ -369,7 +369,7 @@ export function CredentialForm({
               }
             }}
             placeholder={values.tags.length === 0 ? "prod, billing, internal…" : ""}
-            className="flex-1 min-w-[80px] bg-transparent text-xs outline-none placeholder:text-muted-foreground/60"
+            className="flex-1 min-w-[80px] bg-transparent text-xs outline-none placeholder:text-muted-foreground"
           />
           {knownTags && knownTags.length > 0 && (
             <datalist id="cred-tag-suggestions">
@@ -389,7 +389,7 @@ export function CredentialForm({
       >
         {advancedOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
         Advanced
-        <span className="text-muted-foreground/60">
+        <span className="text-muted-foreground">
           (description, expiry, scope, provider override)
         </span>
       </button>
