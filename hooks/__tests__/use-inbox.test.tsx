@@ -183,7 +183,7 @@ describe("useInbox", () => {
       const [url, init] = mockFetch.mock.calls[1] as [string, RequestInit]
       expect(url).toBe("/api/v1/inbox/i1?workspace_id=ws-1")
       expect(init.method).toBe("PATCH")
-      expect(JSON.parse(init.body as string)).toEqual({ state: "read", resolved_action: undefined })
+      expect(JSON.parse(init.body as string)).toEqual({ state: "read" })
 
       // i1 left the unread filter; badge decremented. (The cache write
       // notifies observers in a batched microtask — waitFor flushes it.)
