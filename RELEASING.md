@@ -221,7 +221,7 @@ The runtime default is decided by build flavour
 (`crashreport.DefaultOptIn`, keyed on the version stamped at build
 time):
 
-- **Prerelease (-beta/-rc) and dev builds: default ENABLED.** There is
+- **Pre-release (-beta/-rc) and dev builds: default ENABLED.** There is
   no first-run prompt on `crewship start` — a deterministic default-on
   means a non-interactive deployment (Docker, systemd, CI) doesn't end
   up silently telemetry-less while a release is still baking. On first
