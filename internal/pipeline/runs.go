@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 )
 
@@ -437,7 +438,15 @@ func scanRun(row scanRunRow) (*RunRecord, error) {
 		v := int(version.Int64)
 		r.PipelineVersion = &v
 	}
-	r.StartedAt, _ = parseRFC3339Opt(startedAt)
+	var startedAtErr error
+	r.StartedAt, startedAtErr = parseRFC3339Opt(startedAt)
+	if startedAtErr != nil {
+		// Zero-time StartedAt makes the row look older than any boot
+		// cutoff (i.e. resumable) — keep that behaviour, but don't let
+		// a corrupt timestamp pass silently.
+		slog.Warn("pipeline runs: unparseable started_at on run row; treating as zero time",
+			"run_id", r.ID, "started_at", startedAt, "error", startedAtErr)
+	}
 	if endedAt.Valid && endedAt.String != "" {
 		t, _ := parseRFC3339Opt(endedAt.String)
 		r.EndedAt = &t

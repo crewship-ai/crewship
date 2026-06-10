@@ -352,6 +352,21 @@ func (e *Executor) Run(ctx context.Context, in RunInput) (*RunResult, error) {
 	in.pipeline = p
 	in.dsl = dsl
 
+	// Boot-time resume re-validation (TOCTOU guard): buildResumePlan
+	// vetted the persisted state against the definition AS OF the boot
+	// scan, but runResumedRun's concurrency-slot retry loop can wait
+	// unboundedly and every retry reloads the pipeline fresh right
+	// above. An edit landing in that window would resume old restored
+	// outputs against a changed definition — exactly the hazard the
+	// scan-time gate exists to close. Re-check against the definition
+	// that will actually execute; runResumedRun maps this error to an
+	// interrupted row.
+	if in.resume {
+		if reason := resumeDefinitionDrift(in.resumeDefinitionHash, p.DefinitionHash, dsl, in.restoredOutputs, in.resumeCurrentStepID); reason != "" {
+			return nil, fmt.Errorf("%w: %s", ErrResumeDefinitionChanged, reason)
+		}
+	}
+
 	// Pre-allocate the runID so idempotency reserves the same id
 	// the run will eventually emit to the journal.
 	preallocRunID := in.RunIDOverride
@@ -528,6 +543,13 @@ type RunInput struct {
 	// max_cost_usd guardrail keeps counting across the restart
 	// instead of resetting to zero.
 	restoredCostUSD float64
+	// resumeDefinitionHash / resumeCurrentStepID carry the run row's
+	// stamped definition hash and in-flight step id so Run can
+	// re-validate the freshly loaded definition against them on every
+	// resume re-entry (the scan-time gate alone leaves a TOCTOU
+	// window — see resumeDefinitionDrift). Set only by runResumedRun.
+	resumeDefinitionHash string
+	resumeCurrentStepID  string
 }
 
 // runDSL is the actual step loop. depth bounds call_pipeline recursion

@@ -407,3 +407,148 @@ VALUES ('tok_timed_out', 'ws_test', 'run_wait_timeout', 'gate', 'approval', 'ok?
 		t.Errorf("error %q must not claim the approval was denied", rec.ErrorMessage)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// R1 — TOCTOU re-validation: definition edited while waiting for slot
+// ---------------------------------------------------------------------------
+
+// TestResume_DefinitionEditedWhileWaitingForSlot_Interrupted pins the
+// TOCTOU window between the boot scan's drift gate and the actual
+// re-entry: buildResumePlan validates the definition hash AS OF the
+// scan, but the concurrency-slot retry loop in runResumedRun can wait
+// arbitrarily long, and every retry's e.Run() reloads the pipeline
+// fresh. An edit landing in that window must interrupt the run — not
+// resume the old restored outputs against the changed definition.
+func TestResume_DefinitionEditedWhileWaitingForSlot_Interrupted(t *testing.T) {
+	db := openResumeTestDB(t)
+	defer db.Close()
+	ctx := context.Background()
+
+	store := NewStore(db)
+	runStore := NewRunStore(db)
+	p := saveResumePipeline(t, store, "resume-toctou", resumeConcurrencyDSL)
+
+	reg := NewRunRegistry()
+	// Occupy the only slot for the key so the resumed run parks in the
+	// retry loop instead of executing immediately.
+	_, releaseBlocker, err := reg.Acquire(ctx, AcquireOpts{
+		RunID: "run_blocker", WorkspaceID: "ws_test", ConcurrencyKey: "cc-gate",
+	})
+	if err != nil {
+		t.Fatalf("acquire blocker: %v", err)
+	}
+
+	insertInFlightRun(t, runStore, &RunRecord{
+		ID: "run_toctou", WorkspaceID: "ws_test",
+		PipelineID: p.ID, PipelineSlug: p.Slug,
+		Status: RunStatusRunning, Mode: ModeRun,
+		CurrentStepID: "b", StepOutputsJSON: `{"a":"stale-a"}`,
+		DefinitionHash: p.DefinitionHash,
+	})
+
+	runner := newMockRunner()
+	runner.outputsBySlug["s_b"] = []string{"out-b"}
+	em := &captureEmitter{}
+	exec := NewExecutor(store, NewResolver(db), runner, em).
+		WithRunStore(runStore).
+		WithRunRegistry(reg).
+		WithResumeRetryBackoff(10*time.Millisecond, 50*time.Millisecond)
+
+	// Scan-time gate passes: the stamped hash matches the definition.
+	resumed, interrupted, err := exec.ResumeInterruptedRuns(ctx, slog.Default())
+	if err != nil {
+		t.Fatalf("resume scan: %v", err)
+	}
+	if resumed != 1 || interrupted != 0 {
+		t.Fatalf("resumed=%d interrupted=%d, want 1/0", resumed, interrupted)
+	}
+
+	// Edit the pipeline WHILE the resumed run is parked on the slot —
+	// same step ids, changed content, so only the hash catches it.
+	edited := strings.Replace(resumeConcurrencyDSL, `"prompt": "do a"`, `"prompt": "do a differently"`, 1)
+	if edited == resumeConcurrencyDSL {
+		t.Fatal("test setup: edit did not change the definition")
+	}
+	p2 := saveResumePipeline(t, store, "resume-toctou", edited)
+	if p2.ID != p.ID {
+		t.Fatalf("re-save changed pipeline id: %s -> %s", p.ID, p2.ID)
+	}
+	if p2.DefinitionHash == p.DefinitionHash {
+		t.Fatal("test setup: definition hash did not change")
+	}
+
+	// Free the slot — the retry's reload must now detect the drift.
+	releaseBlocker()
+
+	final := waitForRunStatus(t, runStore, "run_toctou", RunStatusInterrupted, 5*time.Second)
+	if !strings.Contains(final.ErrorMessage, "definition changed while waiting to resume") {
+		t.Errorf("reason %q must say the definition changed while waiting to resume", final.ErrorMessage)
+	}
+	runner.mu.Lock()
+	defer runner.mu.Unlock()
+	if len(runner.calls) != 0 {
+		t.Errorf("run executed %d steps against the changed definition, want 0", len(runner.calls))
+	}
+}
+
+// TestResume_MatchingHashAfterSlotWait_StillResumes is the regression
+// guard for the re-validation: a stamped hash that still matches the
+// reloaded definition after the slot wait must resume and complete,
+// not trip the new gate.
+func TestResume_MatchingHashAfterSlotWait_StillResumes(t *testing.T) {
+	db := openResumeTestDB(t)
+	defer db.Close()
+	ctx := context.Background()
+
+	store := NewStore(db)
+	runStore := NewRunStore(db)
+	p := saveResumePipeline(t, store, "resume-toctou-ok", resumeConcurrencyDSL)
+
+	reg := NewRunRegistry()
+	_, releaseBlocker, err := reg.Acquire(ctx, AcquireOpts{
+		RunID: "run_blocker", WorkspaceID: "ws_test", ConcurrencyKey: "cc-gate",
+	})
+	if err != nil {
+		t.Fatalf("acquire blocker: %v", err)
+	}
+
+	insertInFlightRun(t, runStore, &RunRecord{
+		ID: "run_toctou_ok", WorkspaceID: "ws_test",
+		PipelineID: p.ID, PipelineSlug: p.Slug,
+		Status: RunStatusRunning, Mode: ModeRun,
+		CurrentStepID: "b", StepOutputsJSON: `{"a":"restored-a"}`,
+		DefinitionHash: p.DefinitionHash,
+	})
+
+	runner := newMockRunner()
+	runner.outputsBySlug["s_b"] = []string{"out-b"}
+	em := &captureEmitter{}
+	exec := NewExecutor(store, NewResolver(db), runner, em).
+		WithRunStore(runStore).
+		WithRunRegistry(reg).
+		WithResumeRetryBackoff(10*time.Millisecond, 50*time.Millisecond)
+
+	resumed, interrupted, err := exec.ResumeInterruptedRuns(ctx, slog.Default())
+	if err != nil {
+		t.Fatalf("resume scan: %v", err)
+	}
+	if resumed != 1 || interrupted != 0 {
+		t.Fatalf("resumed=%d interrupted=%d, want 1/0", resumed, interrupted)
+	}
+
+	// Let the run hit the busy slot at least once, then release.
+	time.Sleep(50 * time.Millisecond)
+	releaseBlocker()
+
+	final := waitForRunStatus(t, runStore, "run_toctou_ok", RunStatusCompleted, 5*time.Second)
+	if !strings.Contains(final.StepOutputsJSON, "out-b") {
+		t.Errorf("resumed run did not execute step b: %s", final.StepOutputsJSON)
+	}
+	runner.mu.Lock()
+	defer runner.mu.Unlock()
+	for _, call := range runner.calls {
+		if call.AgentSlug == "s_a" {
+			t.Errorf("step a was re-executed on resume with matching hash")
+		}
+	}
+}

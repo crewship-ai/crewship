@@ -29,11 +29,56 @@ import (
 	"time"
 )
 
+// ErrResumeDefinitionChanged is returned by Run when a boot-time
+// resume's re-validation (see resumeDefinitionDrift) detects that the
+// pipeline definition changed between the scan-time gate and the
+// actual re-entry — e.g. an edit landing while the resumed run waited
+// on its concurrency slot.
+var ErrResumeDefinitionChanged = errors.New("definition changed while waiting to resume")
+
 // resumePlan is the validated state needed to re-enter one run.
 type resumePlan struct {
 	rec      *RunRecord
 	inputs   map[string]any
 	restored map[string]string
+}
+
+// resumeDefinitionDrift is the shared drift gate for resume-from-step:
+// the persisted run state must still line up with the definition that
+// would execute. Returns "" when consistent, otherwise a human-readable
+// reason. Called once at scan time (buildResumePlan) and again inside
+// Run on every resume re-entry — the concurrency-slot retry loop can
+// wait arbitrarily long, and each retry reloads the pipeline fresh, so
+// the scan-time check alone leaves a TOCTOU window.
+func resumeDefinitionDrift(stampedHash, currentHash string, dsl *DSL, restored map[string]string, currentStepID string) string {
+	// Content-hash gate (stamped at persistRunStart, v114): any edit
+	// since the run started — including an in-place edit that keeps
+	// every step id — means the persisted outputs were produced by
+	// different steps than the ones that would execute now. Rows from
+	// before v114 have no stamp and fall through to the weaker
+	// step-id-existence gate below.
+	if stampedHash != "" && stampedHash != currentHash {
+		return "definition changed since run started (content hash mismatch)"
+	}
+	known := make(map[string]struct{}, len(dsl.Steps))
+	for i := range dsl.Steps {
+		known[dsl.Steps[i].ID] = struct{}{}
+	}
+	// Every persisted step id must still exist in the definition. A
+	// renamed/removed step means the restored outputs no longer line
+	// up with the steps that would execute — resuming could skip the
+	// wrong work or double the right work.
+	for stepID := range restored {
+		if _, ok := known[stepID]; !ok {
+			return fmt.Sprintf("definition drifted: persisted output for unknown step %q", stepID)
+		}
+	}
+	if currentStepID != "" {
+		if _, ok := known[currentStepID]; !ok {
+			return fmt.Sprintf("definition drifted: current step %q no longer exists", currentStepID)
+		}
+	}
+	return ""
 }
 
 // ResumeInterruptedRuns is the boot-time recovery scan. It walks every
@@ -120,23 +165,9 @@ func (e *Executor) buildResumePlan(ctx context.Context, rec *RunRecord) (*resume
 	if err != nil {
 		return nil, "pipeline not loadable: " + err.Error()
 	}
-	// Content-hash drift gate (stamped at persistRunStart, v114): any
-	// edit since the run started — including an in-place edit that
-	// keeps every step id — means the persisted outputs were produced
-	// by different steps than the ones that would execute now.
-	// Resuming would feed old outputs into changed prompts. Rows from
-	// before v114 have no stamp and fall through to the weaker
-	// step-id-existence gate below.
-	if rec.DefinitionHash != "" && rec.DefinitionHash != p.DefinitionHash {
-		return nil, "definition changed since run started (content hash mismatch)"
-	}
 	dsl, err := Parse([]byte(p.DefinitionJSON))
 	if err != nil {
 		return nil, "stored definition no longer parses: " + err.Error()
-	}
-	known := make(map[string]struct{}, len(dsl.Steps))
-	for i := range dsl.Steps {
-		known[dsl.Steps[i].ID] = struct{}{}
 	}
 
 	restored := map[string]string{}
@@ -145,19 +176,10 @@ func (e *Executor) buildResumePlan(ctx context.Context, rec *RunRecord) (*resume
 			return nil, "persisted step outputs unreadable: " + err.Error()
 		}
 	}
-	// Drift gate: every persisted step id must still exist in the
-	// definition. A renamed/removed step means the restored outputs
-	// no longer line up with the steps that would execute — resuming
-	// could skip the wrong work or double the right work.
-	for stepID := range restored {
-		if _, ok := known[stepID]; !ok {
-			return nil, fmt.Sprintf("definition drifted: persisted output for unknown step %q", stepID)
-		}
-	}
-	if rec.CurrentStepID != "" {
-		if _, ok := known[rec.CurrentStepID]; !ok {
-			return nil, fmt.Sprintf("definition drifted: current step %q no longer exists", rec.CurrentStepID)
-		}
+	// Drift gate — shared with Run's resume re-validation (see
+	// resumeDefinitionDrift for the rationale behind each check).
+	if reason := resumeDefinitionDrift(rec.DefinitionHash, p.DefinitionHash, dsl, restored, rec.CurrentStepID); reason != "" {
+		return nil, reason
 	}
 
 	inputs := map[string]any{}
@@ -217,6 +239,11 @@ func (e *Executor) runResumedRun(ctx context.Context, plan *resumePlan, logger *
 			resume:          true,
 			restoredOutputs: plan.restored,
 			restoredCostUSD: rec.CostUSD,
+			// Carried so Run can re-validate the definition against the
+			// state this run actually persisted — see the
+			// ErrResumeDefinitionChanged case below.
+			resumeDefinitionHash: rec.DefinitionHash,
+			resumeCurrentStepID:  rec.CurrentStepID,
 		})
 		switch {
 		case err == nil:
@@ -225,6 +252,20 @@ func (e *Executor) runResumedRun(ctx context.Context, plan *resumePlan, logger *
 		case errors.Is(err, ErrDuplicateRunID):
 			logger.Warn("pipeline resume: run id already live on this process; standing down",
 				"run_id", rec.ID)
+			return
+		case errors.Is(err, ErrResumeDefinitionChanged):
+			// TOCTOU gate fired: the pipeline was edited between the
+			// scan-time validation and this re-entry (e.g. while the
+			// run waited on its concurrency slot). Same fallback as the
+			// scan-time gate — interrupted, never a wrong resume.
+			markCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			if markErr := e.runStore.MarkInterrupted(markCtx, rec.ID, err.Error()); markErr != nil {
+				logger.Warn("pipeline resume: terminal fallback write failed",
+					"run_id", rec.ID, "error", markErr)
+			}
+			cancel()
+			logger.Info("pipeline run marked interrupted (definition changed while waiting to resume)",
+				"run_id", rec.ID, "pipeline_slug", rec.PipelineSlug, "error", err)
 			return
 		case errors.Is(err, ErrConcurrencyLimitReached):
 			logger.Info("pipeline resume: concurrency slot busy; will retry",
