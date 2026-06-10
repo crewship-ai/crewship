@@ -181,6 +181,11 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "# TYPE %s %s\n", m.name, m.mtype)
 		fmt.Fprintf(w, "%s{hostname=%q} %v\n", m.name, hostname, m.value)
 	}
+
+	// Domain metrics (assignments, queue depth, pipeline runs, run
+	// events, LLM cost, container health, migration version) — see
+	// metrics_domain.go. Cached for domainMetricsTTL.
+	fmt.Fprint(w, s.domainMetricsBlock(r.Context(), hostname))
 }
 
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {

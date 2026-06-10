@@ -36,6 +36,20 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Added
 
+- **Domain metrics on `/metrics` (W10).** The Prometheus endpoint now
+  exposes operator-facing series next to the existing process gauges:
+  `crewshipd_assignments{status}`, `crewshipd_assignment_queue_depth`
+  / `_queue_crews` / `_queue_depth_max` (aggregated — no per-crew
+  labels by design), `crewshipd_pipeline_runs{status}`,
+  `crewshipd_agent_run_events_total{event}`,
+  `crewshipd_llm_calls_total{provider}` +
+  `crewshipd_llm_cost_usd_total{provider}` from the paymaster ledger,
+  `crewshipd_containers_tracked` / `_reporting`, and
+  `crewshipd_db_migration_version`. Label sets are closed (unknown
+  values fold into `other`), the DB-derived block is cached for 15s,
+  and migration v113 adds the two status indexes the counts ride on.
+  Documented in `docs/observability/metrics.md`.
+
 - **PR-G / PR-F UI surface.** Three React panels expose previously
   backend-only governance toggles: `CrewPolicyControls`
   (`autonomy_level` × `behavior_mode` × `max_ephemeral_agents`),
