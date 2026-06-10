@@ -197,6 +197,15 @@ func TestResume_ConcurrencyLimit_RetriedNotInterrupted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("acquire blocker: %v", err)
 	}
+	// Guard the slot release so a failed assertion before the explicit
+	// release doesn't leave the resume retry loop spinning against a
+	// permanently held slot during test teardown.
+	releasedBlocker := false
+	t.Cleanup(func() {
+		if !releasedBlocker {
+			releaseBlocker()
+		}
+	})
 
 	insertInFlightRun(t, runStore, &RunRecord{
 		ID: "run_resume_cc", WorkspaceID: "ws_test",
@@ -235,6 +244,7 @@ func TestResume_ConcurrencyLimit_RetriedNotInterrupted(t *testing.T) {
 
 	// Free the slot — the retry loop must pick it up and finish.
 	releaseBlocker()
+	releasedBlocker = true
 	final := waitForRunStatus(t, runStore, "run_resume_cc", RunStatusCompleted, 5*time.Second)
 	if !strings.Contains(final.StepOutputsJSON, "out-b") {
 		t.Errorf("resumed run did not execute step b: %s", final.StepOutputsJSON)
@@ -437,6 +447,15 @@ func TestResume_DefinitionEditedWhileWaitingForSlot_Interrupted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("acquire blocker: %v", err)
 	}
+	// Guard the slot release so a failed assertion before the explicit
+	// release doesn't leave the resume retry loop spinning against a
+	// permanently held slot during test teardown.
+	releasedBlocker := false
+	t.Cleanup(func() {
+		if !releasedBlocker {
+			releaseBlocker()
+		}
+	})
 
 	insertInFlightRun(t, runStore, &RunRecord{
 		ID: "run_toctou", WorkspaceID: "ws_test",
@@ -479,6 +498,7 @@ func TestResume_DefinitionEditedWhileWaitingForSlot_Interrupted(t *testing.T) {
 
 	// Free the slot — the retry's reload must now detect the drift.
 	releaseBlocker()
+	releasedBlocker = true
 
 	final := waitForRunStatus(t, runStore, "run_toctou", RunStatusInterrupted, 5*time.Second)
 	if !strings.Contains(final.ErrorMessage, "definition changed while waiting to resume") {
@@ -511,6 +531,15 @@ func TestResume_MatchingHashAfterSlotWait_StillResumes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("acquire blocker: %v", err)
 	}
+	// Guard the slot release so a failed assertion before the explicit
+	// release doesn't leave the resume retry loop spinning against a
+	// permanently held slot during test teardown.
+	releasedBlocker := false
+	t.Cleanup(func() {
+		if !releasedBlocker {
+			releaseBlocker()
+		}
+	})
 
 	insertInFlightRun(t, runStore, &RunRecord{
 		ID: "run_toctou_ok", WorkspaceID: "ws_test",
@@ -539,6 +568,7 @@ func TestResume_MatchingHashAfterSlotWait_StillResumes(t *testing.T) {
 	// Let the run hit the busy slot at least once, then release.
 	time.Sleep(50 * time.Millisecond)
 	releaseBlocker()
+	releasedBlocker = true
 
 	final := waitForRunStatus(t, runStore, "run_toctou_ok", RunStatusCompleted, 5*time.Second)
 	if !strings.Contains(final.StepOutputsJSON, "out-b") {
