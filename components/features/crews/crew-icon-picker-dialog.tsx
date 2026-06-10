@@ -107,7 +107,7 @@ export function CrewIconPickerDialog({
         <div>
           <div className="text-xs text-muted-foreground mb-1.5 flex items-center justify-between">
             <span>Icon</span>
-            <span className="text-[10px] text-muted-foreground/60">
+            <span className="text-[10px] text-muted-foreground">
               {filteredIcons.length} of {CREW_ICONS.length}
             </span>
           </div>

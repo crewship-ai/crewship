@@ -533,18 +533,18 @@ export function RuntimeConfig({ value, onChange }: RuntimeConfigProps) {
 
                       <div className="flex-1 min-w-0 flex items-center gap-2">
                         <span className="font-medium text-foreground truncate">{feature.name}</span>
-                        <span className="text-muted-foreground/60 text-[10px] font-mono shrink-0">
+                        <span className="text-muted-foreground text-[10px] font-mono shrink-0">
                           {toolName}
                         </span>
                         {feature.description && (
-                          <span className="text-muted-foreground/60 truncate hidden md:inline">
+                          <span className="text-muted-foreground truncate hidden md:inline">
                             {feature.description}
                           </span>
                         )}
                       </div>
 
                       {feature.size_hint && (
-                        <span className="shrink-0 text-[10px] text-muted-foreground/50 font-mono">
+                        <span className="shrink-0 text-[10px] text-muted-foreground-soft font-mono">
                           {feature.size_hint}
                         </span>
                       )}
@@ -680,11 +680,11 @@ export function RuntimeConfig({ value, onChange }: RuntimeConfigProps) {
 
                       <div className="flex-1 min-w-0 flex items-center gap-2">
                         <span className="font-medium text-foreground truncate">{entry.name}</span>
-                        <span className="text-muted-foreground/60 text-[10px] font-mono shrink-0">
+                        <span className="text-muted-foreground text-[10px] font-mono shrink-0">
                           {entry.tool}
                         </span>
                         {entry.description && (
-                          <span className="text-muted-foreground/60 truncate hidden md:inline">
+                          <span className="text-muted-foreground truncate hidden md:inline">
                             {entry.description}
                           </span>
                         )}

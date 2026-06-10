@@ -177,7 +177,7 @@ export function RoutineSchedulesTab({ workspaceId, pipelineId, slug }: Props) {
                         <span>
                           Last: <span className="text-foreground/85">{new Date(s.last_run_at).toLocaleString()}</span>
                           {s.last_status && (
-                            <span className="ml-1 text-muted-foreground/70">({s.last_status})</span>
+                            <span className="ml-1 text-muted-foreground">({s.last_status})</span>
                           )}
                         </span>
                       )}

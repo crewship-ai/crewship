@@ -29,7 +29,7 @@ interface ProjectProgressProps {
 export function ProjectProgress({ projects, emptyLabel = "No active projects" }: ProjectProgressProps) {
   if (projects.length === 0) {
     return (
-      <div className="flex items-center justify-center h-[140px] text-[11px] text-muted-foreground/50">
+      <div className="flex items-center justify-center h-[140px] text-[11px] text-muted-foreground-soft">
         {emptyLabel}
       </div>
     )
@@ -53,7 +53,7 @@ export function ProjectProgress({ projects, emptyLabel = "No active projects" }:
                 <span className="w-2 h-2 rounded-sm shrink-0 bg-(--project-color)" aria-hidden />
                 <span className="truncate">{p.name}</span>
               </span>
-              <span className="font-mono text-[10px] text-muted-foreground/70 tabular-nums shrink-0 ml-2">
+              <span className="font-mono text-[10px] text-muted-foreground tabular-nums shrink-0 ml-2">
                 {p.completedCount}/{p.issueCount} · {pct}%
               </span>
             </div>

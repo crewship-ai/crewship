@@ -177,7 +177,7 @@ export const KeeperTab = React.memo(function KeeperTab({
           >
             {keeperLiveEvents.length === 0 ? (
               <div className="flex items-center justify-center py-10 text-center">
-                <div className="text-[11px] text-muted-foreground/60 max-w-sm">
+                <div className="text-[11px] text-muted-foreground max-w-sm">
                   Waiting for keeper events. Send a credential request from an agent to see it here in real time.
                 </div>
               </div>
@@ -209,7 +209,7 @@ export const KeeperTab = React.memo(function KeeperTab({
                         {evt.intent}
                       </div>
                       {evt.reason && (
-                        <div className="text-[10px] text-muted-foreground/70 truncate italic mt-0.5">
+                        <div className="text-[10px] text-muted-foreground truncate italic mt-0.5">
                           {evt.reason}
                         </div>
                       )}
@@ -233,13 +233,13 @@ export const KeeperTab = React.memo(function KeeperTab({
             }
           >
             {keeperLog.length === 0 ? (
-              <div className="flex items-center justify-center py-10 text-[11px] text-muted-foreground/60">
+              <div className="flex items-center justify-center py-10 text-[11px] text-muted-foreground">
                 No keeper requests yet
               </div>
             ) : (
               <>
                 {/* Desktop header */}
-                <div className="hidden md:grid md:grid-cols-[minmax(0,1.2fr)_minmax(0,1.4fr)_70px_90px_60px_120px] items-center gap-3 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 border-b border-border/60">
+                <div className="hidden md:grid md:grid-cols-[minmax(0,1.2fr)_minmax(0,1.4fr)_70px_90px_60px_120px] items-center gap-3 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground border-b border-border/60">
                   <div>Agent</div>
                   <div>Credential</div>
                   <div>Type</div>
@@ -263,11 +263,11 @@ export const KeeperTab = React.memo(function KeeperTab({
                       {entry.credential_name}
                     </div>
                     <div className="text-[11px] text-muted-foreground">
-                      <span className="md:hidden text-muted-foreground/60">Type: </span>
+                      <span className="md:hidden text-muted-foreground">Type: </span>
                       {entry.request_type === "execute" ? "Execute" : "Access"}
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className="md:hidden text-[11px] text-muted-foreground/60">Decision:</span>
+                      <span className="md:hidden text-[11px] text-muted-foreground">Decision:</span>
                       <StatusBadge
                         status={decisionStatusKey(entry.decision)}
                         label={entry.decision ?? "PENDING"}
@@ -275,7 +275,7 @@ export const KeeperTab = React.memo(function KeeperTab({
                       />
                     </div>
                     <div className="text-[11px] text-muted-foreground font-mono md:text-right tabular-nums">
-                      <span className="md:hidden text-muted-foreground/60">Risk: </span>
+                      <span className="md:hidden text-muted-foreground">Risk: </span>
                       {entry.risk_score != null ? `${entry.risk_score}/10` : "—"}
                     </div>
                     <div className="text-[11px] text-muted-foreground font-mono truncate">
@@ -374,7 +374,7 @@ export const KeeperTab = React.memo(function KeeperTab({
                   </DetailBlock>
 
                   <div className="pt-3 border-t border-border/60">
-                    <div className="text-[10px] text-muted-foreground/60">
+                    <div className="text-[10px] text-muted-foreground">
                       Request ID:{" "}
                       <span className="font-mono">{selectedKeeperEntry.id}</span>
                     </div>
@@ -393,7 +393,7 @@ export const KeeperTab = React.memo(function KeeperTab({
 
 function FieldLabel({ children }: { children: React.ReactNode }) {
   return (
-    <div className="text-[10px] font-semibold text-muted-foreground/60 uppercase tracking-wider">
+    <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
       {children}
     </div>
   )

@@ -220,14 +220,14 @@ export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId,
                   ))}
                 </div>
               ) : (
-                <div className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-muted-foreground/70">
+                <div className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-muted-foreground">
                   <FileText className="h-3 w-3" />
                   No files in this session yet
                 </div>
               )}
             </ScopeSection>
             <ScopeSection icon={Users} title="Crew" defaultOpen={false}>
-              <div className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-muted-foreground/70">
+              <div className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-muted-foreground">
                 <FileText className="h-3 w-3" />
                 Shared crew files (loaded on demand)
               </div>
@@ -242,7 +242,7 @@ export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId,
                 </span>
               }
             >
-              <div className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-muted-foreground/70">
+              <div className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-muted-foreground">
                 <FileText className="h-3 w-3" />
                 Workspace-level files — backend pending
               </div>

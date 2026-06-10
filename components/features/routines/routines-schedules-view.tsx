@@ -260,7 +260,7 @@ export function RoutinesSchedulesView({
                             {s.last_status}
                           </Pill>
                         ) : (
-                          <span className="text-[11px] text-muted-foreground/60">—</span>
+                          <span className="text-[11px] text-muted-foreground">—</span>
                         )}
                       </td>
                     </tr>

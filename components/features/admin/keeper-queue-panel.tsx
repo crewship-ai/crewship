@@ -248,7 +248,7 @@ export const KeeperQueuePanel = React.memo(function KeeperQueuePanel({
             >
               <Icon className="h-3 w-3" />
               {tab.label}
-              <span className="text-[10px] text-muted-foreground/70 font-mono">{tab.prdRef}</span>
+              <span className="text-[10px] text-muted-foreground font-mono">{tab.prdRef}</span>
               {count > 0 && (
                 <span className={cn(
                   "ml-1 inline-flex items-center justify-center h-4 min-w-4 px-1 rounded-full text-[10px] font-mono",
@@ -283,14 +283,14 @@ export const KeeperQueuePanel = React.memo(function KeeperQueuePanel({
           >
             {rows.length === 0 ? (
               <div className="flex items-center justify-center py-10 text-center px-4">
-                <div className="text-[11px] text-muted-foreground/60 max-w-sm">
+                <div className="text-[11px] text-muted-foreground max-w-sm">
                   {activeTab.emptyHint}
                 </div>
               </div>
             ) : (
               <>
                 {/* Desktop header */}
-                <div className="hidden md:grid md:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)_90px_60px_minmax(0,1.4fr)_120px] items-center gap-3 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 border-b border-border/60">
+                <div className="hidden md:grid md:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)_90px_60px_minmax(0,1.4fr)_120px] items-center gap-3 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground border-b border-border/60">
                   <div>Agent</div>
                   <div>Crew</div>
                   <div>Decision</div>
@@ -408,7 +408,7 @@ export const KeeperQueuePanel = React.memo(function KeeperQueuePanel({
               </DetailBlock>
 
               <div className="pt-3 border-t border-border/60">
-                <div className="text-[10px] text-muted-foreground/60">
+                <div className="text-[10px] text-muted-foreground">
                   Request ID:{" "}
                   <span className="font-mono">{selected.id}</span>
                 </div>
@@ -423,7 +423,7 @@ export const KeeperQueuePanel = React.memo(function KeeperQueuePanel({
 
 function FieldLabel({ children }: { children: React.ReactNode }) {
   return (
-    <div className="text-[10px] font-semibold text-muted-foreground/60 uppercase tracking-wider">
+    <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
       {children}
     </div>
   )

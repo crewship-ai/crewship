@@ -134,4 +134,38 @@ describe("dark theme WCAG AA contrast (axe color-contrast parity)", () => {
     expect(contrast(muted, luminanceFromRgb(tokenRgb("background")))).toBeGreaterThanOrEqual(4.5)
     expect(contrast(muted, luminanceFromRgb(tokenRgb("card")))).toBeGreaterThanOrEqual(4.5)
   })
+
+  // The dim metadata tier. Replaces text-muted-foreground/40–/70, which
+  // composited to 1.74–3.21:1 on the dark background — every one of
+  // those alpha variants failed AA for normal-size text.
+  it("muted-foreground-soft on background and card ≥ 4.5:1", () => {
+    const soft = luminanceFromRgb(tokenRgb("muted-foreground-soft"))
+    expect(contrast(soft, luminanceFromRgb(tokenRgb("background")))).toBeGreaterThanOrEqual(4.5)
+    expect(contrast(soft, luminanceFromRgb(tokenRgb("card")))).toBeGreaterThanOrEqual(4.5)
+  })
+
+  // Hover states must hold AA too. bg-primary/90 over the dark page bg
+  // dropped navy button text to 4.37:1, so the default button hovers to
+  // solid --primary-hover in dark mode (components/ui/button.tsx).
+  it("primary-foreground on primary-hover (button hover) ≥ 4.5:1", () => {
+    const ratio = contrast(
+      luminanceFromRgb(tokenRgb("primary-foreground")),
+      luminanceFromRgb(tokenRgb("primary-hover")),
+    )
+    expect(ratio).toBeGreaterThanOrEqual(4.5)
+  })
+
+  // crew-policy-controls save button: hover tint capped at bg-primary/25
+  // (was /30 → 4.26:1 over card with text-primary-hover).
+  it("primary-hover as text on bg-primary/25 over card and background ≥ 4.5:1", () => {
+    const hover = luminanceFromRgb(tokenRgb("primary-hover"))
+    const primary = tokenRgb("primary")
+    for (const surface of ["card", "background"] as const) {
+      const tinted = luminanceFromRgb(blend(primary, 0.25, tokenRgb(surface)))
+      expect(
+        contrast(hover, tinted),
+        `text-primary-hover on bg-primary/25 over ${surface}`,
+      ).toBeGreaterThanOrEqual(4.5)
+    }
+  })
 })

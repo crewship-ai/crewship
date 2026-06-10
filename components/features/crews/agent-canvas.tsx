@@ -292,13 +292,13 @@ export function AgentCanvas({
             </code>
             {agent.role_title && (
               <>
-                <span className="text-muted-foreground/50">·</span>
+                <span className="text-muted-foreground-soft">·</span>
                 <span>{agent.role_title}</span>
               </>
             )}
             {agent.crew && (
               <>
-                <span className="text-muted-foreground/50">·</span>
+                <span className="text-muted-foreground-soft">·</span>
                 <button
                   type="button"
                   onClick={() => onSelectCrew(agent.crew!.slug)}

@@ -106,7 +106,7 @@ export function SettingsEmpty({
   children: ReactNode
 }) {
   return (
-    <div className="px-4 py-6 text-center text-[11px] text-muted-foreground/60">
+    <div className="px-4 py-6 text-center text-[11px] text-muted-foreground">
       {children}
     </div>
   )

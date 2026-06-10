@@ -27,7 +27,7 @@ const emptyConfig: ChartConfig = {
 export function CrewRadial({ crews }: CrewRadialProps) {
   if (crews.length === 0) {
     return (
-      <div className="flex items-center justify-center h-[200px] text-[11px] text-muted-foreground/50">
+      <div className="flex items-center justify-center h-[200px] text-[11px] text-muted-foreground-soft">
         No crews
       </div>
     )
@@ -58,7 +58,7 @@ export function CrewRadial({ crews }: CrewRadialProps) {
               {c.healthPct}%
             </div>
           </div>
-          <div className="text-[9px] font-mono text-muted-foreground/60 uppercase tracking-wider mt-1">
+          <div className="text-[9px] font-mono text-muted-foreground uppercase tracking-wider mt-1">
             {c.runningCount}/{c.totalAgents} {c.runningCount === 0 ? "idle" : "running"}
           </div>
         </div>

@@ -674,7 +674,7 @@ function CredentialRow({ cred, selected, onToggleSelect, onOpen, onEdit, onDelet
       <TableCell>
         <div className="flex items-center gap-1 flex-wrap">
           {cred.tags.length === 0 ? (
-            <span className="text-[10px] text-muted-foreground/40">—</span>
+            <span className="text-[10px] text-muted-foreground-soft">—</span>
           ) : (
             cred.tags.slice(0, 3).map((t) => (
               <Badge key={t} variant="outline" className="text-[10px] px-1 font-mono">{t}</Badge>
@@ -691,7 +691,7 @@ function CredentialRow({ cred, selected, onToggleSelect, onOpen, onEdit, onDelet
         <span className="text-xs text-muted-foreground">
           {cred._count_agent_credentials > 0
             ? `${cred._count_agent_credentials} ${cred._count_agent_credentials === 1 ? "agent" : "agents"}`
-            : <span className="text-muted-foreground/50">—</span>}
+            : <span className="text-muted-foreground-soft">—</span>}
           {cred.mcp_used && <span className="ml-1.5 text-[9px] text-blue-300">MCP</span>}
         </span>
       </TableCell>
@@ -702,7 +702,7 @@ function CredentialRow({ cred, selected, onToggleSelect, onOpen, onEdit, onDelet
             {lastUsed}
           </span>
         ) : (
-          <span className="text-xs text-muted-foreground/40">never</span>
+          <span className="text-xs text-muted-foreground-soft">never</span>
         )}
       </TableCell>
       <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>

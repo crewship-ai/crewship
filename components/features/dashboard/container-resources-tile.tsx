@@ -33,7 +33,7 @@ interface ContainerResourcesTileProps {
 export function ContainerResourcesTile({ entries }: ContainerResourcesTileProps) {
   if (entries.length === 0) {
     return (
-      <div className="flex items-center justify-center h-[96px] text-[11px] text-muted-foreground/50">
+      <div className="flex items-center justify-center h-[96px] text-[11px] text-muted-foreground-soft">
         No containers running
       </div>
     )

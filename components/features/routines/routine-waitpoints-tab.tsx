@@ -161,7 +161,7 @@ export function RoutineWaitpointsTab({ workspaceId, slug }: Props) {
                       placeholder="Decision comment (optional, sent to the parked run as the waitpoint payload)…"
                       value={comments[w.token] ?? ""}
                       onChange={(e) => setComments((prev) => ({ ...prev, [w.token]: e.target.value }))}
-                      className="h-16 w-full resize-none rounded-md border border-white/[0.1] bg-background p-2.5 text-[13px] leading-relaxed placeholder:text-muted-foreground/50"
+                      className="h-16 w-full resize-none rounded-md border border-white/[0.1] bg-background p-2.5 text-[13px] leading-relaxed placeholder:text-muted-foreground-soft"
                     />
                   </div>
 

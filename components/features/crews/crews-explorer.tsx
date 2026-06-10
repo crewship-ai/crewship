@@ -147,7 +147,7 @@ export function CrewsExplorer({
         <Button
           variant="ghost"
           size="icon-xs"
-          className="text-muted-foreground/70 hover:text-foreground/70 ml-auto"
+          className="text-muted-foreground hover:text-foreground/70 ml-auto"
           onClick={onToggleCollapse}
           aria-label={collapsed ? "Expand explorer" : "Collapse explorer"}
         >
@@ -207,14 +207,14 @@ export function CrewsExplorer({
                     >
                       <ChevronRight
                         className={cn(
-                          "h-3 w-3 text-muted-foreground/50 transition-transform",
+                          "h-3 w-3 text-muted-foreground-soft transition-transform",
                           expanded && "rotate-90",
                         )}
                       />
                     </span>
                     <CrewIcon icon={crew.icon || "briefcase"} color={crew.color} size="sm" />
                     <span className="text-[12px] font-medium truncate flex-1">{crew.name}</span>
-                    <span className="text-[10px] text-muted-foreground/50 tabular-nums shrink-0">
+                    <span className="text-[10px] text-muted-foreground-soft tabular-nums shrink-0">
                       {crewAgents.length}
                     </span>
                     {/* Mini status dots */}
@@ -254,7 +254,7 @@ export function CrewsExplorer({
                         />
                         <div className="flex-1 min-w-0">
                           <span className="text-[11px] font-medium truncate block">{agent.name}</span>
-                          <span className="text-[10px] text-muted-foreground/60 truncate block">
+                          <span className="text-[10px] text-muted-foreground truncate block">
                             {agent.role_title || agent.agent_role}
                           </span>
                         </div>
@@ -277,7 +277,7 @@ export function CrewsExplorer({
             {/* Unassigned */}
             {unassigned.length > 0 && (
               <div className="mt-2 pt-2 border-t border-border">
-                <div className="px-2 py-1 text-[10px] font-semibold text-muted-foreground/40 uppercase tracking-wider">
+                <div className="px-2 py-1 text-[10px] font-semibold text-muted-foreground-soft uppercase tracking-wider">
                   Unassigned
                 </div>
                 {unassigned.map((agent) => {
@@ -300,7 +300,7 @@ export function CrewsExplorer({
                       />
                       <div className="flex-1 min-w-0">
                         <span className="text-[11px] font-medium truncate block">{agent.name}</span>
-                        <span className="text-[10px] text-muted-foreground/60 truncate block">
+                        <span className="text-[10px] text-muted-foreground truncate block">
                           {agent.role_title || agent.agent_role}
                         </span>
                       </div>

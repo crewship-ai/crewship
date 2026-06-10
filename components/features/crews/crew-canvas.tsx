@@ -263,18 +263,18 @@ export function CrewCanvas({
             </code>
             {crew.issue_prefix && (
               <>
-                <span className="text-muted-foreground/50">·</span>
+                <span className="text-muted-foreground-soft">·</span>
                 <span className="text-xs">prefix <code className="font-mono uppercase text-foreground/80 px-1 py-0.5 rounded bg-zinc-900 border border-white/8">{crew.issue_prefix}</code></span>
               </>
             )}
-            <span className="text-muted-foreground/50">·</span>
+            <span className="text-muted-foreground-soft">·</span>
             <span className="text-xs">Created {new Date(crew.created_at).toLocaleDateString()}</span>
           </div>
           <div className="text-xs text-muted-foreground mt-1.5 flex items-center gap-3 flex-wrap">
             <span><span className="text-foreground/80">{crew._count?.agents ?? agentsForCrew.length}</span> agents</span>
             <span><span className="text-foreground/80">{crew._count?.members ?? 0}</span> member{crew._count?.members === 1 ? "" : "s"}</span>
             <span><span className="text-foreground/80">{recentMissions.length}</span> missions</span>
-            <span className="text-muted-foreground/50">·</span>
+            <span className="text-muted-foreground-soft">·</span>
             <span className="truncate">container: <span className="text-foreground/80">{containerSummary}</span></span>
           </div>
         </div>

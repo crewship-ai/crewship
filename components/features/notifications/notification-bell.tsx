@@ -150,11 +150,11 @@ export function NotificationBell() {
         </div>
         <ScrollArea className="max-h-[400px]">
           {loading && notifications.length === 0 ? (
-            <div className="py-8 text-center text-xs text-muted-foreground/40">Loading...</div>
+            <div className="py-8 text-center text-xs text-muted-foreground-soft">Loading...</div>
           ) : notifications.length === 0 ? (
             <div className="py-8 text-center">
               <Bell className="h-5 w-5 mx-auto mb-2 text-muted-foreground/30" />
-              <p className="text-xs text-muted-foreground/40">No notifications yet</p>
+              <p className="text-xs text-muted-foreground-soft">No notifications yet</p>
             </div>
           ) : (
             <div className="py-1">
@@ -197,7 +197,7 @@ export function NotificationBell() {
                           <span className="text-foreground/60">{n.entity_title}</span>
                         )}
                       </p>
-                      <span className="text-[10px] text-muted-foreground/40">
+                      <span className="text-[10px] text-muted-foreground-soft">
                         {formatRelativeTime(n.created_at)}
                       </span>
                     </div>
@@ -209,7 +209,7 @@ export function NotificationBell() {
                           e.stopPropagation()
                           markAsRead(n.id)
                         }}
-                        className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-white/[0.08] text-muted-foreground/40 hover:text-blue-400 transition-all shrink-0 mt-0.5"
+                        className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-white/[0.08] text-muted-foreground-soft hover:text-blue-400 transition-all shrink-0 mt-0.5"
                         aria-label="Mark as read"
                         title="Mark as read"
                       >

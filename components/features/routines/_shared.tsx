@@ -36,14 +36,14 @@ export function Card({ title, subtitle, icon: Icon, action, tone = "default", cl
         <div className="flex items-center gap-2 border-b border-border/40 px-4 py-2.5">
           {title && (
             <div className="inline-flex items-center gap-1.5">
-              {Icon && <Icon className="h-3.5 w-3.5 text-foreground/40" />}
+              {Icon && <Icon className="h-3.5 w-3.5 text-muted-foreground-soft" />}
               <span className="text-[11px] font-semibold uppercase tracking-wider text-foreground/70">
                 {title}
               </span>
             </div>
           )}
           {subtitle && (
-            <span className="font-mono text-[10px] text-muted-foreground/60">{subtitle}</span>
+            <span className="font-mono text-[10px] text-muted-foreground">{subtitle}</span>
           )}
           {action && <span className="ml-auto">{action}</span>}
         </div>
@@ -64,7 +64,7 @@ export function EmptyState({ icon: Icon, title, description, action }: EmptyStat
   return (
     <div className="flex flex-col items-center justify-center px-6 py-12 text-center">
       <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-white/[0.04]">
-        <Icon className="h-6 w-6 text-muted-foreground/60" />
+        <Icon className="h-6 w-6 text-muted-foreground" />
       </div>
       <div className="text-sm font-medium text-foreground">{title}</div>
       {description && (

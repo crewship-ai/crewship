@@ -210,7 +210,7 @@ export function RoutineOverviewTab({
                 />
               ))}
               {inputs.length === 0 && outputs.length === 0 && (
-                <div className="py-4 text-center text-xs text-muted-foreground/60">
+                <div className="py-4 text-center text-xs text-muted-foreground">
                   No inputs / outputs declared.
                 </div>
               )}
@@ -252,16 +252,16 @@ export function RoutineOverviewTab({
             tone={schedules.length > 0 ? "violet" : "default"}
           >
             {schedules.length === 0 ? (
-              <div className="px-3 py-4 text-center text-xs text-muted-foreground/60">
+              <div className="px-3 py-4 text-center text-xs text-muted-foreground">
                 No cron triggers wired.<br />
-                <span className="text-muted-foreground/40">Add one in the Schedules tab to run this routine on a cadence.</span>
+                <span className="text-muted-foreground-soft">Add one in the Schedules tab to run this routine on a cadence.</span>
               </div>
             ) : (
               <div className="divide-y divide-border/40">
                 {schedules.slice(0, 4).map((s) => (
                   <div key={s.id} className="px-3 py-2.5">
                     <div className="flex items-center gap-2">
-                      <Calendar className={cn("h-3.5 w-3.5 shrink-0", s.enabled ? "text-violet-400" : "text-muted-foreground/40")} />
+                      <Calendar className={cn("h-3.5 w-3.5 shrink-0", s.enabled ? "text-violet-400" : "text-muted-foreground-soft")} />
                       <span className="truncate text-xs font-medium">{s.name}</span>
                       {!s.enabled && (
                         <Badge variant="outline" className="px-1 py-0 text-[9px]">paused</Badge>
@@ -273,7 +273,7 @@ export function RoutineOverviewTab({
                       <span>{s.timezone}</span>
                     </div>
                     {(s.next_run_at || s.last_run_at) && (
-                      <div className="mt-1 ml-5.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10px] text-muted-foreground/70">
+                      <div className="mt-1 ml-5.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10px] text-muted-foreground">
                         {s.next_run_at && <span>next <span className="text-foreground/80">{relTime(s.next_run_at)}</span></span>}
                         {s.last_run_at && <span>last <span className="text-foreground/80">{relTime(s.last_run_at)}</span></span>}
                       </div>
@@ -451,7 +451,7 @@ function RunsChart({ bins }: { bins: Array<{ day: string; total: number; failed:
           </g>
         ))}
       </svg>
-      <div className="mt-1 flex justify-between text-[10px] text-muted-foreground/50">
+      <div className="mt-1 flex justify-between text-[10px] text-muted-foreground-soft">
         {bins.map((b, i) => (
           <span key={i}>{b.day}</span>
         ))}
@@ -505,7 +505,7 @@ function IORow({
             </span>
           )}
           {defaultStr !== null && !isLongDefault && (
-            <span className="font-mono text-[11px] text-muted-foreground/70">
+            <span className="font-mono text-[11px] text-muted-foreground">
               default {defaultStr}
             </span>
           )}
@@ -541,9 +541,9 @@ function LastRunCard({
   if (!run) {
     return (
       <Card title="Last run">
-        <div className="px-3 py-5 text-center text-xs text-muted-foreground/60">
+        <div className="px-3 py-5 text-center text-xs text-muted-foreground">
           This routine hasn't been invoked yet.<br />
-          <span className="text-muted-foreground/40">Click <b>Run</b> above to trigger a manual invocation.</span>
+          <span className="text-muted-foreground-soft">Click <b>Run</b> above to trigger a manual invocation.</span>
         </div>
       </Card>
     )
@@ -672,7 +672,7 @@ function RunFeedRow({ run }: { run: PipelineRunRecord }) {
       <span className="shrink-0 text-right tabular-nums text-muted-foreground">
         {run.duration_ms > 0 ? formatDuration(run.duration_ms) : "—"}
       </span>
-      <span className={cn("shrink-0 text-right text-muted-foreground/60", isFailed && "text-rose-400")}>
+      <span className={cn("shrink-0 text-right text-muted-foreground", isFailed && "text-rose-400")}>
         {relTime(run.started_at)}
       </span>
     </div>
@@ -692,7 +692,7 @@ function MetaCell({
 }) {
   return (
     <div className="border-b border-dashed border-border/40 py-2 last:border-b-0">
-      <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">{k}</div>
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{k}</div>
       <div className={cn("mt-0.5 text-sm text-foreground/90", mono && "font-mono text-[12px]")} title={title}>
         {v}
       </div>

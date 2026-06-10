@@ -201,7 +201,7 @@ export function BottomPanel({
                 "px-2.5 py-1 rounded flex items-center gap-1.5 transition-colors",
                 active && "bg-white/[0.06] text-foreground",
                 !active && !t.soon && "text-muted-foreground hover:bg-white/5",
-                t.soon && "text-muted-foreground/50 cursor-not-allowed",
+                t.soon && "text-muted-foreground-soft cursor-not-allowed",
               )}
             >
               <Icon className="h-3 w-3" />

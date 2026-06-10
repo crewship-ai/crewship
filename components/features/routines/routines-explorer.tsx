@@ -80,7 +80,7 @@ const STATUS_BUCKETS: { id: StatusBucket; label: string; icon: typeof ScrollText
   { id: "all", label: "All", icon: ScrollText, tone: "text-foreground/70" },
   { id: "completed", label: "Completed", icon: CheckCircle2, tone: "text-emerald-400" },
   { id: "failed", label: "Failed", icon: XCircle, tone: "text-rose-400" },
-  { id: "never", label: "Never invoked", icon: CircleDashed, tone: "text-muted-foreground/60" },
+  { id: "never", label: "Never invoked", icon: CircleDashed, tone: "text-muted-foreground" },
 ]
 
 export function RoutinesExplorer({
@@ -204,14 +204,14 @@ export function RoutinesExplorer({
       {/* ── Search + Filter ── */}
       <div className="px-2 py-2 shrink-0 flex items-center gap-1.5">
         <div className="flex items-center gap-1.5 h-8 px-2.5 bg-white/[0.04] border border-white/[0.08] rounded-md flex-1 min-w-0">
-          <Search className="h-3.5 w-3.5 text-muted-foreground/50 shrink-0" />
+          <Search className="h-3.5 w-3.5 text-muted-foreground-soft shrink-0" />
           <input
             type="text"
             value={search}
             onChange={(e) => onSearchChange(e.target.value)}
             placeholder="Search routines, agents..."
             data-routines-search-input
-            className="flex-1 bg-transparent text-xs text-foreground placeholder:text-muted-foreground/40 outline-none min-w-0"
+            className="flex-1 bg-transparent text-xs text-foreground placeholder:text-muted-foreground-soft outline-none min-w-0"
           />
           <AnimatePresence>
             {search && (
@@ -220,7 +220,7 @@ export function RoutinesExplorer({
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.5 }}
                 onClick={() => onSearchChange("")}
-                className="text-muted-foreground/50 hover:text-foreground"
+                className="text-muted-foreground-soft hover:text-foreground"
               >
                 <X className="h-3.5 w-3.5" />
               </motion.button>
@@ -235,7 +235,7 @@ export function RoutinesExplorer({
               "flex items-center gap-1 h-8 px-2.5 rounded-md border text-[11px] whitespace-nowrap transition-colors",
               filterLabel
                 ? "bg-blue-500/10 border-blue-500/30 text-blue-400"
-                : "bg-white/[0.04] border-white/[0.08] text-muted-foreground/60 hover:text-muted-foreground",
+                : "bg-white/[0.04] border-white/[0.08] text-muted-foreground-soft hover:text-muted-foreground",
             )}
           >
             <Filter className="h-3 w-3" />
@@ -270,7 +270,7 @@ export function RoutinesExplorer({
                   {...dropdownAnim}
                   className="absolute right-0 top-9 z-50 bg-card border border-white/[0.1] rounded-lg shadow-xl py-1 min-w-[200px] max-h-[360px] overflow-y-auto"
                 >
-                  <div className="px-3 py-1 text-[9px] font-semibold text-foreground/40 uppercase tracking-wider">Usage</div>
+                  <div className="px-3 py-1 text-[9px] font-semibold text-muted-foreground-soft uppercase tracking-wider">Usage</div>
                   {(["all", "popular", "fresh"] as RoutineFilters["invocations"][]).map((v) => (
                     <button
                       key={v}
@@ -292,7 +292,7 @@ export function RoutinesExplorer({
                   {agents.length > 0 && (
                     <>
                       <div className="border-t border-white/[0.06] mt-1" />
-                      <div className="px-3 py-1 text-[9px] font-semibold text-foreground/40 uppercase tracking-wider">
+                      <div className="px-3 py-1 text-[9px] font-semibold text-muted-foreground-soft uppercase tracking-wider">
                         Authors
                       </div>
                       <button
@@ -326,13 +326,13 @@ export function RoutinesExplorer({
                             style={{ backgroundImage: `url(${getAgentAvatarUrl(a.id)})` }}
                           />
                           <span className="truncate flex-1">{a.name}</span>
-                          <span className="text-[10px] tabular-nums text-foreground/40">{a.count}</span>
+                          <span className="text-[10px] tabular-nums text-muted-foreground-soft">{a.count}</span>
                         </button>
                       ))}
                     </>
                   )}
                   <div className="border-t border-white/[0.06] mt-1" />
-                  <div className="px-3 py-1 text-[9px] font-semibold text-foreground/40 uppercase tracking-wider">
+                  <div className="px-3 py-1 text-[9px] font-semibold text-muted-foreground-soft uppercase tracking-wider">
                     Visibility
                   </div>
                   <button
@@ -359,12 +359,12 @@ export function RoutinesExplorer({
           className="flex items-center gap-1.5 w-full px-3 py-1.5 hover:bg-white/[0.02]"
         >
           <motion.div animate={{ rotate: statusOpen ? 0 : -90 }} transition={{ duration: 0.15 }}>
-            <ChevronDown className="h-3 w-3 text-muted-foreground/40" />
+            <ChevronDown className="h-3 w-3 text-muted-foreground-soft" />
           </motion.div>
           <span className="text-[10px] font-semibold text-foreground/50 uppercase tracking-wider flex-1 text-left">
             Status
           </span>
-          <span className="text-[10px] text-foreground/35">{STATUS_BUCKETS.length}</span>
+          <span className="text-[10px] text-muted-foreground-soft">{STATUS_BUCKETS.length}</span>
         </button>
         <AnimatePresence initial={false}>
           {statusOpen && (
@@ -384,7 +384,7 @@ export function RoutinesExplorer({
                   >
                     <IconComp className={cn("h-3.5 w-3.5 shrink-0", b.tone)} />
                     <span className="text-xs text-foreground/80 truncate flex-1">{b.label}</span>
-                    <span className="text-[10px] text-foreground/40 tabular-nums">{count}</span>
+                    <span className="text-[10px] text-muted-foreground-soft tabular-nums">{count}</span>
                   </button>
                 )
               })}
@@ -401,7 +401,7 @@ export function RoutinesExplorer({
             key={displayed.length}
             initial={{ opacity: 0, y: -4 }}
             animate={{ opacity: 1, y: 0 }}
-            className="text-[10px] text-foreground/35"
+            className="text-[10px] text-muted-foreground-soft"
           >
             {displayed.length}
           </motion.span>
@@ -444,7 +444,7 @@ export function RoutinesExplorer({
                           {routine.name || routine.slug}
                         </span>
                         {routine.invocation_count > 0 && (
-                          <span className="text-[10px] font-mono tabular-nums text-foreground/40 shrink-0">
+                          <span className="text-[10px] font-mono tabular-nums text-muted-foreground-soft shrink-0">
                             {routine.invocation_count}
                           </span>
                         )}
@@ -476,7 +476,7 @@ export function RoutinesExplorer({
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ delay: 0.1 }}
-              className="flex items-center justify-center py-6 text-xs text-foreground/40"
+              className="flex items-center justify-center py-6 text-xs text-muted-foreground-soft"
             >
               No routines found
             </motion.div>
@@ -492,7 +492,7 @@ export function RoutinesExplorer({
             className="flex items-center gap-1.5 flex-1 px-3 py-1.5 text-left min-w-0"
           >
             <motion.div animate={{ rotate: inboxOpen ? 0 : -90 }} transition={{ duration: 0.15 }}>
-              <ChevronDown className="h-3 w-3 text-muted-foreground/40" />
+              <ChevronDown className="h-3 w-3 text-muted-foreground-soft" />
             </motion.div>
             <span className="text-[10px] font-semibold text-foreground/50 uppercase tracking-wider flex-1">
               Inbox
@@ -511,7 +511,7 @@ export function RoutinesExplorer({
             href="/inbox"
             aria-label="Open full inbox page"
             title="Open full inbox"
-            className="opacity-0 group-hover:opacity-100 p-1 rounded text-muted-foreground/50 hover:text-foreground hover:bg-white/[0.04] transition-opacity shrink-0"
+            className="opacity-0 group-hover:opacity-100 p-1 rounded text-muted-foreground-soft hover:text-foreground hover:bg-white/[0.04] transition-opacity shrink-0"
           >
             <ExternalLink className="h-3 w-3" />
           </Link>

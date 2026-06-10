@@ -369,7 +369,7 @@ export function FilesTab({ workspaceId, context }: { workspaceId: string; contex
             )}
           </>
         ) : (
-          <div className="flex items-center justify-center h-full text-xs text-muted-foreground/60 px-6 text-center">
+          <div className="flex items-center justify-center h-full text-xs text-muted-foreground px-6 text-center">
             Click a file in the tree to preview its contents.
           </div>
         )}

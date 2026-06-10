@@ -139,7 +139,7 @@ function BellRow({ item, onClick }: { item: InboxItem; onClick: () => void }) {
       <Icon className={cn("mt-0.5 h-3.5 w-3.5 shrink-0", accent)} />
       <div className="min-w-0 flex-1">
         <div className="truncate text-xs font-medium text-foreground">{item.title}</div>
-        <div className="mt-0.5 text-[10px] text-muted-foreground/70">
+        <div className="mt-0.5 text-[10px] text-muted-foreground">
           {item.sender_name ? `${item.sender_name} · ` : ""}
           {relTime(item.created_at)}
         </div>

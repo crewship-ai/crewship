@@ -290,7 +290,7 @@ export function CrewsContainersSection({
         <div className="rounded-xl border border-border/60 bg-card overflow-hidden">
           <div className="flex flex-col items-center justify-center py-12 text-center">
             <div className="w-10 h-10 rounded-lg bg-muted/50 flex items-center justify-center mb-3">
-              <Box className="h-4 w-4 text-muted-foreground/60" />
+              <Box className="h-4 w-4 text-muted-foreground" />
             </div>
             <div className="text-sm font-medium text-foreground/80">No crews yet</div>
             <div className="text-[11px] text-muted-foreground mt-0.5 max-w-xs">
@@ -355,7 +355,7 @@ export function CrewsContainersSection({
 
         <div className="rounded-xl border border-border/60 bg-card overflow-hidden">
             {filteredCrews.length === 0 ? (
-              <div className="px-4 py-8 text-center text-[11px] text-muted-foreground/60">
+              <div className="px-4 py-8 text-center text-[11px] text-muted-foreground">
                 No crews matching &quot;{search}&quot;
               </div>
             ) : (

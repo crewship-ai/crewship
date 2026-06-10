@@ -270,7 +270,7 @@ export function MembersSection({
               <span className="text-body font-medium text-muted-foreground group-hover:text-foreground/80 transition-colors leading-none">
                 Per-member capabilities
               </span>
-              <span className="text-[10px] text-muted-foreground/60 leading-none">
+              <span className="text-[10px] text-muted-foreground leading-none">
                 grant individual high-value actions without promoting role
               </span>
             </button>

@@ -178,7 +178,7 @@ function ProvisioningRow({
         <div className="ml-4 text-[11px] text-muted-foreground flex items-center gap-2">
           <Loader2 className="h-3 w-3 animate-spin shrink-0" />
           <span className="truncate">{crew.message ?? "Building image…"}</span>
-          <span className="tabular-nums shrink-0 text-muted-foreground/70">
+          <span className="tabular-nums shrink-0 text-muted-foreground">
             {crew.step ?? 0}/{crew.total}
           </span>
         </div>
@@ -299,10 +299,10 @@ function ProvisioningChecklist({
           key={row.planIdx}
           className={`flex items-center gap-2 text-[11px] ${
             row.state === "done"
-              ? "text-muted-foreground/70"
+              ? "text-muted-foreground"
               : row.state === "active"
                 ? "text-foreground font-medium"
-                : "text-muted-foreground/50"
+                : "text-muted-foreground-soft"
           }`}
         >
           <span className="w-3 h-3 shrink-0 flex items-center justify-center">
@@ -311,7 +311,7 @@ function ProvisioningChecklist({
             ) : row.state === "active" ? (
               <Loader2 className="h-3 w-3 animate-spin text-blue-400" />
             ) : (
-              <Circle className="h-2 w-2 text-muted-foreground/40" />
+              <Circle className="h-2 w-2 text-muted-foreground-soft" />
             )}
           </span>
           <span className="truncate">{row.label}</span>

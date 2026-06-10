@@ -556,7 +556,7 @@ export default function DashboardPage() {
           {throughputData && throughputSeries.length > 0 ? (
             <ThroughputChart buckets={throughputBuckets} series={throughputSeries} height={180} />
           ) : (
-            <div className="flex items-center justify-center h-[180px] text-[11px] text-muted-foreground/50">
+            <div className="flex items-center justify-center h-[180px] text-[11px] text-muted-foreground-soft">
               {throughputData ? "No issues closed in the last 24h" : "Metrics endpoint unavailable"}
             </div>
           )}
@@ -566,7 +566,7 @@ export default function DashboardPage() {
           {donutData.length > 0 ? (
             <StatusDonut data={donutData} />
           ) : (
-            <div className="flex items-center justify-center h-[160px] text-[11px] text-muted-foreground/50">No missions yet</div>
+            <div className="flex items-center justify-center h-[160px] text-[11px] text-muted-foreground-soft">No missions yet</div>
           )}
         </DashboardCard>
       </div>
@@ -582,7 +582,7 @@ export default function DashboardPage() {
           {costData && costSeries.length > 0 ? (
             <CostBurnChart buckets={costBuckets} series={costSeries} height={160} />
           ) : (
-            <div className="flex items-center justify-center h-[160px] text-[11px] text-muted-foreground/50">
+            <div className="flex items-center justify-center h-[160px] text-[11px] text-muted-foreground-soft">
               {costData ? "No cost data in the last 7 days" : "Metrics endpoint unavailable"}
             </div>
           )}

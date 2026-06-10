@@ -120,7 +120,7 @@ export function SessionsSidebar({
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search sessions…"
-            className="flex-1 bg-transparent text-xs outline-none placeholder:text-muted-foreground/60"
+            className="flex-1 bg-transparent text-xs outline-none placeholder:text-muted-foreground"
           />
         </div>
       </div>

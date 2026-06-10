@@ -112,10 +112,10 @@ export function CrewActivityFeed({ workspaceId, agentId, crewId }: CrewActivityF
   if (items.length === 0) {
     return (
       <div className="flex flex-col items-center gap-3 py-12 text-center">
-        <Activity className="h-8 w-8 text-muted-foreground/50" />
+        <Activity className="h-8 w-8 text-muted-foreground-soft" />
         <div>
           <p className="text-body text-muted-foreground">No activity yet.</p>
-          <p className="text-label text-muted-foreground/70 mt-1">
+          <p className="text-label text-muted-foreground mt-1">
             Activity appears when agents work on assignments, query peers, or raise escalations.
           </p>
         </div>
