@@ -58,11 +58,33 @@ func (e *Executor) ResumeInterruptedRuns(ctx context.Context, logger *slog.Logge
 	if logger == nil {
 		logger = slog.Default()
 	}
+	// Lifetime fence (defense in depth against boot-ordering races):
+	// the scan must only touch runs left over from a PREVIOUS process
+	// lifetime. A row started at-or-after the cutoff, or whose id is
+	// live in the RunRegistry, was started by THIS process (scheduler
+	// tick or HTTP trigger firing before the scan) — "resuming" it
+	// would launch a second concurrent execution under the same run
+	// id. Such rows are skipped outright: not resumed, not stamped
+	// interrupted (they are healthy and already running).
+	cutoff := e.resumeCutoff
+	if cutoff.IsZero() {
+		cutoff = time.Now()
+	}
 	recs, err := e.runStore.ListInFlight(ctx)
 	if err != nil {
 		return 0, 0, fmt.Errorf("pipeline: resume scan: %w", err)
 	}
 	for _, rec := range recs {
+		if !rec.StartedAt.Before(cutoff) {
+			logger.Info("pipeline resume: skipping run started in current lifetime",
+				"run_id", rec.ID, "started_at", rec.StartedAt, "boot_cutoff", cutoff)
+			continue
+		}
+		if e.runs != nil && e.runs.IsLive(rec.ID) {
+			logger.Info("pipeline resume: skipping run live in this process's registry",
+				"run_id", rec.ID)
+			continue
+		}
 		plan, reason := e.buildResumePlan(ctx, rec)
 		if plan == nil {
 			if markErr := e.runStore.MarkInterrupted(ctx, rec.ID, "not resumable after restart: "+reason); markErr != nil {
@@ -97,6 +119,16 @@ func (e *Executor) buildResumePlan(ctx context.Context, rec *RunRecord) (*resume
 	p, err := e.store.GetByID(ctx, rec.PipelineID)
 	if err != nil {
 		return nil, "pipeline not loadable: " + err.Error()
+	}
+	// Content-hash drift gate (stamped at persistRunStart, v114): any
+	// edit since the run started — including an in-place edit that
+	// keeps every step id — means the persisted outputs were produced
+	// by different steps than the ones that would execute now.
+	// Resuming would feed old outputs into changed prompts. Rows from
+	// before v114 have no stamp and fall through to the weaker
+	// step-id-existence gate below.
+	if rec.DefinitionHash != "" && rec.DefinitionHash != p.DefinitionHash {
+		return nil, "definition changed since run started (content hash mismatch)"
 	}
 	dsl, err := Parse([]byte(p.DefinitionJSON))
 	if err != nil {
@@ -146,35 +178,84 @@ func (e *Executor) buildResumePlan(ctx context.Context, rec *RunRecord) (*resume
 // IdempotencyKey is deliberately NOT carried over: the original key
 // already maps to this run id in the dedupe store, and re-presenting
 // it would short-circuit to DEDUPED instead of executing.
+//
+// Transient failures are retried, permanent ones interrupt:
+//
+//   - ErrConcurrencyLimitReached just means the slot is busy right
+//     now (another resumed run, a fresh scheduled run on the same
+//     key). Hours of restored step work must not be abandoned over a
+//     timing collision, so we wait and retry with capped exponential
+//     backoff for as long as the server lives — behaviourally the
+//     run is queued on the slot. A shutdown mid-wait leaves the row
+//     in 'running' so the NEXT boot's scan picks it up again.
+//   - ErrDuplicateRunID means this run id is already executing on
+//     this process (lifetime-fence race). Never stamp the row — that
+//     would clobber the live run's state. Log and stand down.
+//   - Anything else (pipeline reload failure, broken inputs) is
+//     permanent for this lifetime → interrupted with the reason.
 func (e *Executor) runResumedRun(ctx context.Context, plan *resumePlan, logger *slog.Logger) {
 	rec := plan.rec
-	res, err := e.Run(ctx, RunInput{
-		PipelineID:      rec.PipelineID,
-		WorkspaceID:     rec.WorkspaceID,
-		InvokingCrewID:  rec.InvokingCrewID,
-		InvokingAgentID: rec.InvokingAgentID,
-		Inputs:          plan.inputs,
-		Mode:            ModeRun,
-		RunIDOverride:   rec.ID,
-		TriggeredVia:    rec.TriggeredVia,
-		TriggeredByID:   rec.TriggeredByID,
-		resume:          true,
-		restoredOutputs: plan.restored,
-		restoredCostUSD: rec.CostUSD,
-	})
-	if err != nil {
-		// Run() failed before runDSL's terminal defer could take
-		// over (pipeline reload, concurrency gate) — close the audit
-		// story here so the row doesn't sit in 'running' forever.
-		// Fresh context: the resume ctx may already be shutting down.
-		markCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if markErr := e.runStore.MarkInterrupted(markCtx, rec.ID, "resume failed: "+err.Error()); markErr != nil {
-			logger.Warn("pipeline resume: terminal fallback write failed",
-				"run_id", rec.ID, "error", markErr)
-		}
-		logger.Warn("pipeline run resume failed", "run_id", rec.ID, "error", err)
-		return
+	backoff := e.resumeRetryBase
+	if backoff <= 0 {
+		backoff = 2 * time.Second
 	}
-	logger.Info("resumed pipeline run finished", "run_id", rec.ID, "status", res.Status)
+	maxBackoff := e.resumeRetryMax
+	if maxBackoff <= 0 {
+		maxBackoff = time.Minute
+	}
+	for {
+		res, err := e.Run(ctx, RunInput{
+			PipelineID:      rec.PipelineID,
+			WorkspaceID:     rec.WorkspaceID,
+			InvokingCrewID:  rec.InvokingCrewID,
+			InvokingAgentID: rec.InvokingAgentID,
+			Inputs:          plan.inputs,
+			Mode:            ModeRun,
+			RunIDOverride:   rec.ID,
+			TriggeredVia:    rec.TriggeredVia,
+			TriggeredByID:   rec.TriggeredByID,
+			resume:          true,
+			restoredOutputs: plan.restored,
+			restoredCostUSD: rec.CostUSD,
+		})
+		switch {
+		case err == nil:
+			logger.Info("resumed pipeline run finished", "run_id", rec.ID, "status", res.Status)
+			return
+		case errors.Is(err, ErrDuplicateRunID):
+			logger.Warn("pipeline resume: run id already live on this process; standing down",
+				"run_id", rec.ID)
+			return
+		case errors.Is(err, ErrConcurrencyLimitReached):
+			logger.Info("pipeline resume: concurrency slot busy; will retry",
+				"run_id", rec.ID, "retry_in", backoff)
+			select {
+			case <-ctx.Done():
+				// Shutdown while queued on the slot. Leave the row in
+				// 'running' — the next boot scan re-enters it with the
+				// same restored state.
+				logger.Info("pipeline resume: shutdown while waiting for slot; run left in-flight for next boot",
+					"run_id", rec.ID)
+				return
+			case <-time.After(backoff):
+			}
+			backoff *= 2
+			if backoff > maxBackoff {
+				backoff = maxBackoff
+			}
+		default:
+			// Run() failed before runDSL's terminal defer could take
+			// over (pipeline reload, broken state) — close the audit
+			// story here so the row doesn't sit in 'running' forever.
+			// Fresh context: the resume ctx may already be shutting down.
+			markCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			if markErr := e.runStore.MarkInterrupted(markCtx, rec.ID, "resume failed: "+err.Error()); markErr != nil {
+				logger.Warn("pipeline resume: terminal fallback write failed",
+					"run_id", rec.ID, "error", markErr)
+			}
+			cancel()
+			logger.Warn("pipeline run resume failed", "run_id", rec.ID, "error", err)
+			return
+		}
+	}
 }

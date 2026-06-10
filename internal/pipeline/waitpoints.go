@@ -285,6 +285,27 @@ ORDER BY created_at DESC LIMIT 1`, pipelineRunID, stepID).Scan(&token)
 	return token, nil
 }
 
+// WaitpointStatus implements WaitpointStatusReader: it returns the
+// row's current status string so the wait step can distinguish a
+// timeout/cancellation from a human denial after WaitFor reports
+// approved=false. Every negative transition (CompleteApproval,
+// sweeper, RecoverPending) commits the status to the DB before
+// signalling the listener channel, so this read is never ahead of
+// the decision the waiter observed.
+func (s *SQLWaitpointStore) WaitpointStatus(ctx context.Context, token string) (string, error) {
+	var status string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT status FROM pipeline_waitpoints WHERE token = ?`, token,
+	).Scan(&status)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", fmt.Errorf("waitpoint %q not found", token)
+	}
+	if err != nil {
+		return "", err
+	}
+	return status, nil
+}
+
 // CompleteApproval marks the waitpoint approved/denied and signals
 // any waiting goroutine. Called by the public HTTP endpoint when
 // an operator clicks approve/deny in the inbox.

@@ -95,6 +95,16 @@ type Executor struct {
 	// in-memory only (pre-v83 behaviour). Production wiring passes a
 	// real store at boot so list-active-runs + boot-recovery work.
 	runStore *RunStore
+
+	// resumeCutoff is the process-boot fence for the boot resume scan
+	// (see WithResumeCutoff). Zero = the scan uses its own entry time.
+	resumeCutoff time.Time
+
+	// resumeRetryBase / resumeRetryMax tune the backoff for resumed
+	// runs that lose the concurrency-slot race (see
+	// WithResumeRetryBackoff). Zero = production defaults.
+	resumeRetryBase time.Duration
+	resumeRetryMax  time.Duration
 }
 
 // WithEgressGate wires the HTTP allowlist. Builders can call this
@@ -181,6 +191,32 @@ func (e *Executor) WithRunStore(s *RunStore) *Executor {
 	return e
 }
 
+// WithResumeCutoff sets the process-boot timestamp the boot resume
+// scan fences on: only pipeline_runs rows started BEFORE the cutoff
+// (i.e. by a previous process lifetime) are considered for resume.
+// Rows started at-or-after the cutoff were created by this lifetime
+// (scheduler tick, HTTP trigger) and are skipped. When unset, the
+// scan defaults to its own entry time — correct as long as the scan
+// runs before any work source starts, which the boot wiring
+// guarantees; the explicit cutoff is the defense-in-depth layer
+// against boot-ordering regressions.
+func (e *Executor) WithResumeCutoff(t time.Time) *Executor {
+	e.resumeCutoff = t
+	return e
+}
+
+// WithResumeRetryBackoff tunes the retry cadence the resume scan uses
+// when a re-entered run loses the concurrency-slot race
+// (ErrConcurrencyLimitReached): base is the first delay, max caps the
+// exponential growth. Zero values fall back to the production
+// defaults (2s base, 60s cap). Tests pass millisecond values to keep
+// the retry path fast.
+func (e *Executor) WithResumeRetryBackoff(base, max time.Duration) *Executor {
+	e.resumeRetryBase = base
+	e.resumeRetryMax = max
+	return e
+}
+
 // CodeRunner is the contract for executing StepCode. Production
 // wires a Docker-backed runner; tests can pass a stub. The
 // implementation is in internal/pipeline/runner_code.go.
@@ -237,6 +273,20 @@ type WaitpointResumer interface {
 	// when none exists (the kill happened before CreateApproval
 	// landed — the resumed step then creates a fresh one).
 	FindApprovalForStep(ctx context.Context, pipelineRunID, stepID string) (string, error)
+}
+
+// WaitpointStatusReader is the optional capability a WaitpointStore
+// can implement to expose the terminal status of a waitpoint. The
+// wait step uses it after WaitFor returns approved=false to tell a
+// human denial apart from a timeout (or cancellation) — without it,
+// every negative outcome surfaces as "denied", which misleads
+// operators when a waitpoint simply expired during downtime.
+// Detected via type assertion so test stubs that only implement
+// WaitpointStore keep working.
+type WaitpointStatusReader interface {
+	// WaitpointStatus returns the waitpoint's current status string
+	// (pending | approved | denied | timed_out | cancelled).
+	WaitpointStatus(ctx context.Context, token string) (string, error)
 }
 
 // WaitpointApprovalRequest is the metadata stored alongside the
@@ -1177,6 +1227,16 @@ func (e *Executor) persistRunStart(ctx context.Context, in RunInput, runID, pipe
 		InputsJSON:      string(inputsRaw),
 		TriggeredVia:    in.TriggeredVia,
 		TriggeredByID:   in.TriggeredByID,
+	}
+	if in.pipeline != nil {
+		// Stamp the definition content hash AS OF run start so the
+		// boot resume scan can detect any edit since — including
+		// in-place edits that keep every step id, which the step-id
+		// existence gate alone cannot see. (pipeline_version is NOT
+		// used for this: the version store dedupes by content hash,
+		// so head_version can point at a stale row after an A→B→A
+		// edit cycle.)
+		rec.DefinitionHash = in.pipeline.DefinitionHash
 	}
 	if err := e.runStore.Insert(ctx, rec); err != nil {
 		e.persistWarn("run start", runID, err)

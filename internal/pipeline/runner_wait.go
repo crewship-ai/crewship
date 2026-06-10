@@ -99,6 +99,20 @@ func (e *Executor) runWaitStep(ctx context.Context, step Step, parentRender Rend
 			return "", 0, time.Since(stepStart).Milliseconds(), fmt.Errorf("wait step %q wait: %w", step.ID, err)
 		}
 		if !approved {
+			// WaitFor collapses denial / timeout / cancellation into
+			// approved=false. Re-read the terminal status (committed
+			// to the DB before the channel signal in every path) so a
+			// waitpoint that expired — e.g. during downtime, before a
+			// boot-time resume re-attached — is reported as what it
+			// is, not as a human "denied".
+			if reader, ok := e.waitpoints.(WaitpointStatusReader); ok {
+				switch st, serr := reader.WaitpointStatus(ctx, token); {
+				case serr == nil && st == "timed_out":
+					return "", 0, time.Since(stepStart).Milliseconds(), fmt.Errorf("wait step %q (approval) timed out", step.ID)
+				case serr == nil && st == "cancelled":
+					return "", 0, time.Since(stepStart).Milliseconds(), fmt.Errorf("wait step %q (approval) cancelled", step.ID)
+				}
+			}
 			return "", 0, time.Since(stepStart).Milliseconds(), fmt.Errorf("wait step %q (approval) denied", step.ID)
 		}
 		return "waited:approval:approved", 0, time.Since(stepStart).Milliseconds(), nil

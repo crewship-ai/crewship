@@ -478,6 +478,14 @@ var startCmd = &cobra.Command{
 			srv.APIRouter().PipelinesHandler.SetRunRegistry(runRegistry)
 			logger.Info("pipeline run registry wired (cancel + concurrency_key gating)")
 
+			// Boot cutoff for the resume scan's lifetime fence,
+			// captured BEFORE any run source (scheduler, HTTP server)
+			// exists: every pipeline_runs row started before this
+			// instant belongs to a previous process lifetime; anything
+			// at-or-after it was started by this process and must not
+			// be double-entered by the scan.
+			pipelineBootCutoff := time.Now()
+
 			// Webhook store — event-driven triggers. Dispatch is
 			// public (no auth middleware); auth comes from the token
 			// in the URL plus optional HMAC.
@@ -487,9 +495,71 @@ var startCmd = &cobra.Command{
 				logger.Info("pipeline webhooks wired (event-driven triggers; HMAC + per-token rate limit)")
 			}
 
+			// Boot-time pipeline run recovery (W6 resume-from-step).
+			// MUST run BEFORE the scheduler below starts: the
+			// scheduler fires an immediate tick on Start, and a
+			// freshly-fired scheduled run inserts a 'running' row that
+			// a later scan would otherwise "resume" a second time
+			// under the same run id. The scan additionally fences on
+			// pipelineBootCutoff + the shared run registry (defense in
+			// depth), but correct ordering keeps the fence a backstop
+			// rather than the primary defence.
+			//
+			// Default: re-enter previously in-flight runs from their
+			// persisted step state (completed steps restored, in-flight
+			// step re-executed, wait-step approvals re-attached to the
+			// original token). Runs whose state is insufficient fall
+			// back to "interrupted", same as before.
+			//
+			// CREWSHIP_PIPELINE_RESUME=off restores the old
+			// stamp-everything-interrupted behaviour — the operator
+			// escape hatch if resumed agent steps re-burning tokens
+			// after a crash loop is worse than losing the runs.
+			if runStore != nil {
+				ph := srv.APIRouter().PipelinesHandler
+				if pipelineResumeEnabled() && ph.Runner() != nil {
+					resumeExec := pipeline.NewExecutor(
+						pipeline.NewStore(deps.DB),
+						pipeline.NewResolver(deps.DB),
+						ph.Runner(),
+						ph.Emitter(),
+					).WithRunRegistry(runRegistry).
+						WithRunStore(runStore).
+						WithResumeCutoff(pipelineBootCutoff)
+					if wpStore != nil {
+						resumeExec = resumeExec.WithWaitpointStore(wpStore)
+					}
+					if hub := srv.WSHub(); hub != nil {
+						resumeExec = resumeExec.WithWSBroadcaster(hub)
+					}
+					if resumed, interrupted, err := resumeExec.ResumeInterruptedRuns(ctx, logger); err != nil {
+						logger.Warn("pipeline run resume scan failed; falling back to interrupted stamp", "error", err)
+						if n, rerr := runStore.RecoverInterruptedAtBoot(ctx); rerr != nil {
+							logger.Warn("pipeline_runs recovery scan failed", "error", rerr)
+						} else {
+							logger.Info("pipeline runs recovered as interrupted", "interrupted_recovered", n)
+						}
+					} else {
+						logger.Info("pipeline boot recovery done (resume-from-step)",
+							"resumed", resumed, "interrupted", interrupted)
+					}
+				} else {
+					// Resume disabled (env gate) or no runner wired —
+					// stamp in-flight rows interrupted like before.
+					if interrupted, err := runStore.RecoverInterruptedAtBoot(ctx); err != nil {
+						logger.Warn("pipeline_runs recovery scan failed", "error", err)
+					} else {
+						logger.Info("pipeline runs recovered as interrupted (resume disabled)",
+							"interrupted_recovered", interrupted)
+					}
+				}
+			}
+
 			// Pipeline schedules — cron triggers for saved pipelines.
 			// The store backs the CRUD endpoints; the scheduler runs
-			// in-process and fires due schedules every 30s.
+			// in-process and fires due schedules every 30s. Started
+			// strictly AFTER the boot recovery scan above so its
+			// immediate first tick cannot race the scan (see F1).
 			//
 			// Single-instance: running multiple replicas would
 			// double-fire (no leader election yet); deferring leader
@@ -526,57 +596,6 @@ var startCmd = &cobra.Command{
 				scheduler.Start(ctx)
 				defer scheduler.Stop()
 				logger.Info("pipeline scheduler wired (cron triggers; 30s tick)")
-			}
-
-			// Boot-time pipeline run recovery (W6 resume-from-step).
-			// Placed AFTER the runner/registry/waitpoint wiring so the
-			// resume executor has the full production capability set.
-			// Default: re-enter previously in-flight runs from their
-			// persisted step state (completed steps restored, in-flight
-			// step re-executed, wait-step approvals re-attached to the
-			// original token). Runs whose state is insufficient fall
-			// back to "interrupted", same as before.
-			//
-			// CREWSHIP_PIPELINE_RESUME=off restores the old
-			// stamp-everything-interrupted behaviour — the operator
-			// escape hatch if resumed agent steps re-burning tokens
-			// after a crash loop is worse than losing the runs.
-			if runStore != nil {
-				ph := srv.APIRouter().PipelinesHandler
-				if pipelineResumeEnabled() && ph.Runner() != nil {
-					resumeExec := pipeline.NewExecutor(
-						pipeline.NewStore(deps.DB),
-						pipeline.NewResolver(deps.DB),
-						ph.Runner(),
-						ph.Emitter(),
-					).WithRunRegistry(runRegistry).WithRunStore(runStore)
-					if wpStore != nil {
-						resumeExec = resumeExec.WithWaitpointStore(wpStore)
-					}
-					if hub := srv.WSHub(); hub != nil {
-						resumeExec = resumeExec.WithWSBroadcaster(hub)
-					}
-					if resumed, interrupted, err := resumeExec.ResumeInterruptedRuns(ctx, logger); err != nil {
-						logger.Warn("pipeline run resume scan failed; falling back to interrupted stamp", "error", err)
-						if n, rerr := runStore.RecoverInterruptedAtBoot(ctx); rerr != nil {
-							logger.Warn("pipeline_runs recovery scan failed", "error", rerr)
-						} else {
-							logger.Info("pipeline runs recovered as interrupted", "interrupted_recovered", n)
-						}
-					} else {
-						logger.Info("pipeline boot recovery done (resume-from-step)",
-							"resumed", resumed, "interrupted", interrupted)
-					}
-				} else {
-					// Resume disabled (env gate) or no runner wired —
-					// stamp in-flight rows interrupted like before.
-					if interrupted, err := runStore.RecoverInterruptedAtBoot(ctx); err != nil {
-						logger.Warn("pipeline_runs recovery scan failed", "error", err)
-					} else {
-						logger.Info("pipeline runs recovered as interrupted (resume disabled)",
-							"interrupted_recovered", interrupted)
-					}
-				}
 			}
 		}
 

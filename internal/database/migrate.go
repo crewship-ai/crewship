@@ -1425,6 +1425,13 @@ END;
 	// /metrics domain gauges (W10) count by status off an index instead
 	// of scanning. See migrate_consts_v113_metrics_indexes.go.
 	{version: 113, name: "metrics_status_indexes", sql: migrationMetricsStatusIndexes},
+
+	// v114: definition_hash on pipeline_runs — the content hash of the
+	// pipeline as of run start, so boot-time resume can refuse to
+	// replay persisted step outputs against an edited definition even
+	// when every step id survived the edit. See
+	// migrate_consts_v114_pipeline_runs_definition_hash.go.
+	{version: 114, name: "pipeline_runs_definition_hash", sql: migrationPipelineRunsDefinitionHash},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the
