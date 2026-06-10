@@ -134,6 +134,22 @@ func (sc *StatsCollector) Tracked() []TrackedContainer {
 	return out
 }
 
+// ReportingCount returns how many tracked containers have at least one
+// collected metrics sample. Used by /metrics as a cheap container-health
+// proxy ("stats poll succeeding") that needs no provider round-trip at
+// scrape time.
+func (sc *StatsCollector) ReportingCount() int {
+	sc.latestMu.RLock()
+	defer sc.latestMu.RUnlock()
+	n := 0
+	for _, m := range sc.latest {
+		if m != nil {
+			n++
+		}
+	}
+	return n
+}
+
 // LatestByCrewID looks up the container registered for the given crewID and
 // returns its latest metrics along with the container ID. This avoids trusting
 // a client-supplied container_id parameter.

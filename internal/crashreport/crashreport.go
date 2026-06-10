@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -57,6 +58,40 @@ func ResolveDSN() string {
 		return env
 	}
 	return DSN
+}
+
+// stableVersionRe matches a stable release version: optional "v" prefix,
+// dotted numeric core, optional "+build" metadata — and crucially NO
+// prerelease suffix ("-beta.4", "-rc.1", …). Matches the tag shapes
+// goreleaser stamps into `version` via ldflags.
+var stableVersionRe = regexp.MustCompile(`^v?\d+(\.\d+){0,2}(\+[0-9A-Za-z.-]+)?$`)
+
+// DefaultOptIn is the single source of truth for the telemetry
+// default-by-version policy:
+//
+//   - prerelease builds (version containing "-beta"/"-rc"/any other
+//     prerelease suffix) → default ON. A solo maintainer needs the crash
+//     signal while a release is still baking, and beta users get an
+//     explicit consent step during onboarding on top of this default.
+//   - dev / unversioned builds ("dev", "", bare commit SHA) → default ON.
+//     These are maintainer builds; the compiled-in DSN is empty for them
+//     anyway, so nothing is sent unless CREWSHIP_SENTRY_DSN is set.
+//   - stable release versions (v1.0.0, v0.2.7, …) → default OFF. Stable
+//     telemetry is strictly opt-in: onboarding asks, or the operator runs
+//     `crewship telemetry on`.
+//
+// The default only applies while no consent row exists in app_settings.
+// An explicit `crewship telemetry on|off` (or the onboarding consent
+// step) writes that row and always wins — see Init.
+//
+// Pure function; exported so cmd_telemetry/cmd_setup can explain the
+// default that applies to the running build.
+func DefaultOptIn(version string) bool {
+	v := strings.ToLower(strings.TrimSpace(version))
+	if stableVersionRe.MatchString(v) {
+		return false
+	}
+	return true
 }
 
 // SettingOptIn is the app_settings key that stores the operator's
@@ -134,16 +169,18 @@ func CurrentBackend() Backend {
 // Init reads the consent state from the DB, generates an install ID,
 // and primes the configured backend.
 //
-// Default behaviour for v0.1 beta is OPT-OUT: if no consent setting
-// exists yet (i.e. the operator has never run `crewship telemetry
-// on/off`), telemetry is treated as ENABLED. The first start writes
-// "1" to settle the setting. The operator can disable any time with
-// `crewship telemetry off`. This default-on stance is documented in
-// the README + RELEASING and is intended to be reverted to opt-in
-// when v1.0 GA ships.
+// When no consent setting exists yet (the operator has never run
+// `crewship telemetry on/off` and never answered the onboarding consent
+// step), the default is decided by DefaultOptIn(version):
 //
-// An explicit "0" in app_settings (the operator opted out) wins over
-// the default; opt-out is sticky.
+//   - prerelease (-beta/-rc) and dev/unversioned builds default to
+//     ENABLED; the first start writes "1" so subsequent boots are
+//     deterministic.
+//   - stable release versions default to DISABLED and nothing is
+//     persisted — telemetry on stable is strictly opt-in.
+//
+// An explicit consent row in app_settings ("1" or "0") always wins over
+// the default; both opt-in and opt-out are sticky.
 //
 // Safe to call multiple times; each call refreshes state, which matters
 // after `crewship telemetry on/off` flips the setting at runtime.
@@ -153,16 +190,21 @@ func Init(ctx context.Context, db *sql.DB, version string, logger *slog.Logger) 
 		return fmt.Errorf("read consent state: %w", err)
 	}
 
-	// Beta default: if the operator has never been asked, treat as opted
-	// in and persist that decision so subsequent boots are deterministic.
-	// This lives in Init (not in some `defaultOptIn()` helper) on purpose:
-	// when the default flips back to opt-in for v1.0 we delete the block,
-	// not chase it through three packages.
 	if !asked {
-		if _, _, err := SetOptIn(ctx, db, true); err != nil {
-			return fmt.Errorf("persist beta default opt-in: %w", err)
+		if DefaultOptIn(version) {
+			// Prerelease/dev default: treat as opted in and persist the
+			// decision so subsequent boots are deterministic. The operator
+			// can flip it any time with `crewship telemetry off`.
+			if _, _, err := SetOptIn(ctx, db, true); err != nil {
+				return fmt.Errorf("persist prerelease default opt-in: %w", err)
+			}
+			enabled = true
 		}
-		enabled = true
+		// Stable default: stay disabled WITHOUT writing a consent row.
+		// "asked" stays false so the onboarding consent step (web wizard +
+		// `crewship setup`) knows the user still owes an explicit choice,
+		// and `crewship telemetry status` reports "not yet configured"
+		// instead of a phantom opt-out.
 	}
 
 	if !enabled {

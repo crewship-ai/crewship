@@ -72,8 +72,14 @@ verifies the keyless Sigstore signature against the expected GitHub
 Actions OIDC identity.
 
 ```bash
-curl -fsSL https://crewship.ai/install | bash
+curl -fsSL https://raw.githubusercontent.com/crewship-ai/crewship/main/scripts/install.sh | bash
 ```
+
+<Note>
+The short `https://crewship.ai/install` alias will point at this
+script once the project website goes live; until then, fetch it
+straight from the repo as shown above.
+</Note>
 
 Missing `cosign` produces a soft warning rather than a hard failure so
 the one-liner keeps working for first-time users — install it from
@@ -83,7 +89,7 @@ for full supply-chain verification.
 ### Pinning a version
 
 ```bash
-CREWSHIP_VERSION=v0.1.0-beta.1 curl -fsSL https://crewship.ai/install | bash
+CREWSHIP_VERSION=v0.1.0-beta.1 curl -fsSL https://raw.githubusercontent.com/crewship-ai/crewship/main/scripts/install.sh | bash
 ```
 
 Omitting the variable picks the latest stable tag.
@@ -95,7 +101,7 @@ By default the script prefers a no-sudo user dir on your `PATH`
 `/usr/local/bin`. Override with:
 
 ```bash
-CREWSHIP_INSTALL_DIR=$HOME/.crewship/bin curl -fsSL https://crewship.ai/install | bash
+CREWSHIP_INSTALL_DIR=$HOME/.crewship/bin curl -fsSL https://raw.githubusercontent.com/crewship-ai/crewship/main/scripts/install.sh | bash
 ```
 
 <Warning>
@@ -162,20 +168,17 @@ healthcheck (`/healthz`) reports healthy — typically within 10 seconds.
 `.env` and they persist across restarts because Compose reads `.env`
 each time the stack starts.
 
-### PostgreSQL mode
+### PostgreSQL
 
-For multi-user deployments where SQLite contention becomes a concern,
-the compose file ships with a commented-out PostgreSQL service. To
-enable:
-
-1. Uncomment the `postgres:` service block and the `crewship-pgdata:`
-   named volume.
-2. Set `DATABASE_URL=postgres://crewship:${POSTGRES_PASSWORD}@postgres:5432/crewship`
-   and `POSTGRES_PASSWORD` in `.env`.
-3. Restart the stack.
-
-The Crewship binary picks Postgres up from the `postgres://` scheme on
-`DATABASE_URL`; the rest of the configuration is identical.
+<Note>
+**PostgreSQL is on the v0.2 roadmap.** The beta runs exclusively on
+SQLite via `modernc.org/sqlite` (single binary, WAL mode, no extra
+services). The server accepts only `file:` DSNs on `DATABASE_URL` —
+there is no Postgres driver in the binary today, so a `postgres://`
+URL will not connect. The commented-out `postgres:` service block in
+`docker/docker-compose.prod.yml` is a placeholder for that v0.2
+work; leave it commented for now.
+</Note>
 
 ### Docker socket: brokered through a socket proxy by default
 

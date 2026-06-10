@@ -217,25 +217,26 @@ entirely. No client-side persistence, no separate browser-side consent
 prompt; the CLI is the single control surface. Any fetch failure on
 the consent endpoint defaults to NOT initialising (privacy bias).
 
-The runtime behaviour for **v0.1 beta** is:
+The runtime default is decided by build flavour
+(`crashreport.DefaultOptIn`, keyed on the version stamped at build
+time):
 
-- **Default: ENABLED**. There is no first-run prompt — earlier drafts
-  had a TTY prompt with hard-default-no, but that path was removed in
-  favour of a deterministic default-on so a non-interactive deployment
-  (Docker, systemd, CI) doesn't end up silently telemetry-less. On
-  first `crewship start`, if no consent row exists in `app_settings`,
+- **Pre-release (-beta/-rc) and dev builds: default ENABLED.** There is
+  no first-run prompt on `crewship start` — a deterministic default-on
+  means a non-interactive deployment (Docker, systemd, CI) doesn't end
+  up silently telemetry-less while a release is still baking. On first
+  start, if no consent row exists in `app_settings`,
   `crashreport.Init` writes `"1"` and brings the Sentry client up.
-- **`crewship telemetry off` is sticky.** Once the operator opts out
-  (writes `"0"` to `app_settings.telemetry_enabled`), Init treats that
-  as an explicit decision and never flips it back, regardless of the
-  beta default.
+- **Stable release versions: default DISABLED, strictly opt-in.** Init
+  writes nothing; telemetry stays off until the operator consents via
+  the onboarding step (web wizard checkbox / `crewship setup` prompt /
+  `--telemetry` flag) or `crewship telemetry on`.
+- **Explicit choices are sticky in both directions.** Once a consent
+  row exists in `app_settings.telemetry_opt_in` ("1" or "0"), Init
+  treats it as the operator's decision and no version default ever
+  flips it, including across upgrades.
 - **Status visible any time** via `crewship telemetry status` — shows
   enabled/disabled, install ID, and the resolved DSN endpoint host.
-
-The opt-out stance is a deliberate beta choice — a solo maintainer
-needs the crash signal — and is intended to revert to opt-in for
-v1.0 GA. Tracking: the project memory `telemetry-beta-default-on`
-documents the revert plan.
 
 ### Routing override
 

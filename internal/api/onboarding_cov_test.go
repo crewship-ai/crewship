@@ -185,6 +185,89 @@ func TestCovOnbSetup_SingleAgentSuccess(t *testing.T) {
 	}
 }
 
+// ---- Setup: explicit telemetry consent rides the wizard submission ----
+
+func TestCovOnbSetup_TelemetryConsentPersisted(t *testing.T) {
+	// The onboarding wizard (web + `crewship setup`) carries an explicit
+	// telemetry consent answer in `telemetry_opt_in`. The handler must
+	// persist it via crashreport.SetOptIn so the choice survives in
+	// app_settings exactly like `crewship telemetry on|off` would write it.
+	withTokenProbeSkipped(t)
+	setTestEncryptionKeyParallelSafe(t)
+
+	for _, tc := range []struct {
+		name    string
+		consent string // JSON literal for the field
+		want    string // expected app_settings value
+	}{
+		{"opt-in", "true", "1"},
+		{"opt-out", "false", "0"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := setupTestDB(t)
+			userID := seedTestUser(t, db)
+			seedTestWorkspace(t, db, userID)
+
+			svc := services.NewOnboardingService(db, testLogger(), generateCUID)
+			h := NewOnboardingHandler(db, svc, testLogger())
+
+			body := `{
+				"crew_name":"Build Crew",
+				"agent_name":"Eva",
+				"telemetry_opt_in":` + tc.consent + `
+			}`
+			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+			req = req.WithContext(withUser(req.Context(), &AuthUser{ID: userID}))
+			w := httptest.NewRecorder()
+			h.Setup(w, req)
+
+			if w.Code != http.StatusCreated {
+				t.Fatalf("status = %d, want 201, body=%s", w.Code, w.Body.String())
+			}
+			var val string
+			if err := db.QueryRow(
+				"SELECT value FROM app_settings WHERE key = 'telemetry_opt_in'").Scan(&val); err != nil {
+				t.Fatalf("read telemetry_opt_in: %v", err)
+			}
+			if val != tc.want {
+				t.Errorf("telemetry_opt_in = %q, want %q", val, tc.want)
+			}
+		})
+	}
+}
+
+func TestCovOnbSetup_TelemetryOmittedLeavesDefault(t *testing.T) {
+	// Backwards compatibility: a wizard submission WITHOUT the field
+	// (older frontend, scripted CLI without --telemetry) must not touch
+	// the consent row — the version-based default keeps ruling.
+	withTokenProbeSkipped(t)
+	setTestEncryptionKeyParallelSafe(t)
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	seedTestWorkspace(t, db, userID)
+
+	svc := services.NewOnboardingService(db, testLogger(), generateCUID)
+	h := NewOnboardingHandler(db, svc, testLogger())
+
+	body := `{"crew_name":"C","agent_name":"A"}`
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+	req = req.WithContext(withUser(req.Context(), &AuthUser{ID: userID}))
+	w := httptest.NewRecorder()
+	h.Setup(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201, body=%s", w.Code, w.Body.String())
+	}
+
+	var n int
+	if err := db.QueryRow(
+		"SELECT COUNT(*) FROM app_settings WHERE key = 'telemetry_opt_in'").Scan(&n); err != nil {
+		t.Fatalf("count telemetry_opt_in rows: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("expected no consent row when telemetry_opt_in omitted, found %d", n)
+	}
+}
+
 // ---- Setup: second call after success → service returns
 //      ErrOnboardingAlreadyCompleted → 409 ----
 
