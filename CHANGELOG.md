@@ -82,6 +82,15 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- **Stuck-QUEUED assignment sweeper now runs in production.** The
+  crash-recovery sweeper (`StartStuckQueueSweeper`) was implemented
+  and tested but never started — QUEUED assignments stranded by a
+  crash between "row set QUEUED" and the next completion-path pump
+  stayed queued forever after a restart. Server boot now starts the
+  sweeper alongside the other background loops (scan every 60s, rows
+  count as stuck after 10min queued; goroutine exits cleanly on
+  shutdown) and logs a `stuck-queue sweeper started` line at boot.
+
 - **Inbox `fetch()` network-error handling.** Both `wrap("approved")`
   (approve-hire) and `wrap("retried")` (routine retry) in
   `inbox-list.tsx` now wrap `await fetch(…)` in `try`/`catch`. Pre-

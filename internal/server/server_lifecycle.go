@@ -31,6 +31,30 @@ import (
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
+// Stuck-QUEUED assignment sweeper boot defaults. The sweeper
+// (goapi.AssignmentHandler.StartStuckQueueSweeper) is the crash-recovery
+// net for the assignment queue: QUEUED rows are normally drained by the
+// completion-path pump, but a crash between "row set QUEUED" and "next
+// completion fires" strands them forever — nothing re-pumps after a
+// restart. The boot-time sweeper catches exactly that.
+//
+//   - stuckQueueSweepInterval (60s): how often the sweeper scans. Cheap
+//     query (partial index on assignments(status, queued_at)), so a
+//     minute-grain scan costs nothing on idle systems while keeping
+//     post-crash recovery latency operator-friendly.
+//   - stuckQueueStaleAfter (10min): how long a row must sit QUEUED
+//     before it counts as stuck. Generously above any healthy pump
+//     cadence (completions fire every few seconds under load), so the
+//     sweeper never races a live pump — it only ever sees rows whose
+//     pump path is genuinely gone.
+//
+// Declared as vars (not consts) so the boot-wiring integration test can
+// shrink them to milliseconds; production code never mutates them.
+var (
+	stuckQueueSweepInterval = 60 * time.Second
+	stuckQueueStaleAfter    = 10 * time.Minute
+)
+
 // Server is the main crewship process, wiring together the HTTP server, IPC
 
 // stats collector, and all background goroutines. It blocks until ctx is done.
@@ -64,6 +88,22 @@ func (s *Server) Start(ctx context.Context) error {
 
 	go s.wsHub.Run(ctx)
 	go s.orchestrator.Start(ctx)
+
+	// Stuck-QUEUED assignment sweeper: crash-recovery net for the
+	// assignment queue (see the stuckQueueSweep* vars above for the
+	// cadence rationale). Runs on the same AssignmentHandler instance
+	// the HTTP routes use; the goroutine exits when ctx is cancelled
+	// at shutdown. nil-guarded because the API router (and with it the
+	// handler) only exists when a DB was wired — headless/dry-run
+	// boots have no queue to sweep.
+	if s.apiRouter != nil {
+		if assign := s.apiRouter.Assignments(); assign != nil {
+			assign.StartStuckQueueSweeper(ctx, stuckQueueSweepInterval, stuckQueueStaleAfter)
+			s.logger.Info("stuck-queue sweeper started",
+				"interval", stuckQueueSweepInterval.String(),
+				"stale_after", stuckQueueStaleAfter.String())
+		}
+	}
 
 	// Re-attach mission orchestration loops lost in a previous crewshipd
 	// run. runMissionLoop is in-memory and only ever spawned by API

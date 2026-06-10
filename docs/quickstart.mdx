@@ -23,7 +23,7 @@ If you just want to see the dashboard come up on your machine, this is enough:
 
 ```bash
 # 1. Install (binary, single command)
-curl -fsSL https://crewship.ai/install | bash
+curl -fsSL https://raw.githubusercontent.com/crewship-ai/crewship/main/scripts/install.sh | bash
 
 # 2. Start the runtime — embedded UI + SQLite + Go server, no Node.js, no external DB
 crewship start
@@ -54,10 +54,14 @@ That's it. The runtime is now serving on your hardware. No agents have been crea
     ```bash
     # Verifies SHA-256 against signed checksums.txt; cosign signature
     # verified too when cosign is on PATH.
-    curl -fsSL https://crewship.ai/install | bash
+    curl -fsSL https://raw.githubusercontent.com/crewship-ai/crewship/main/scripts/install.sh | bash
 
     crewship version
     ```
+
+    The short `https://crewship.ai/install` alias will point at this
+    script once the project website goes live; until then, fetch it
+    straight from the repo as shown.
   </Tab>
   <Tab title="Docker Compose">
     ```bash
@@ -82,7 +86,7 @@ That's it. The runtime is now serving on your hardware. No agents have been crea
   </Tab>
 </Tabs>
 
-For pinned versions, custom install directories, PostgreSQL mode, and air-gapped install paths see the full [Install guide](/guides/install).
+For pinned versions, custom install directories, and air-gapped install paths see the full [Install guide](/guides/install).
 
 ## Initial Setup
 
@@ -176,11 +180,19 @@ For pinned versions, custom install directories, PostgreSQL mode, and air-gapped
     echo "sk-ant-api03-YOUR-KEY" | crewship credential create \
       --name "anthropic-key" \
       --provider ANTHROPIC \
-      --type AI_CLI_TOKEN \
+      --type API_KEY \
       --value-stdin
     ```
 
     The key is validated against the provider API, then encrypted with AES-256-GCM before storage.
+
+    <Note>
+      `--type API_KEY` is for plain provider API keys (`sk-ant-api...`).
+      If you instead have a Claude Code OAuth token from a flat-rate
+      subscription (`sk-ant-oat...`), use `--type AI_CLI_TOKEN` — the
+      runtime injects the two differently, and mixing them up breaks
+      agent authentication.
+    </Note>
 
     <Tip>
       Use `--value-stdin` to pipe the key securely. Using `--value` directly exposes the key in the process list.

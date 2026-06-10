@@ -142,6 +142,14 @@ type Router struct {
 	// token lives on a handler the dispatcher never reaches.
 	authHandler *AuthHandler
 
+	// assignmentHandler is the live AssignmentHandler created during
+	// route registration. Stored on the Router so the server boot path
+	// can start the stuck-QUEUED sweeper (StartStuckQueueSweeper) on
+	// the same instance the HTTP dispatch routes use — a second
+	// instance would work (the sweeper is stateless over the DB) but
+	// would split journal/log wiring across two handlers for no gain.
+	assignmentHandler *AssignmentHandler
+
 	// version is the ldflags-injected binary version (e.g. "v0.1.0-beta.1"
 	// or "dev" for local builds). Surfaced on GET /api/v1/system/version
 	// so the web UI can render an "update available" banner.
@@ -251,6 +259,14 @@ func (r *Router) Provisioning() *ProvisioningHandler {
 // (handler-only tests that build a Router by hand).
 func (r *Router) AuthHandler() *AuthHandler {
 	return r.authHandler
+}
+
+// Assignments returns the registered AssignmentHandler so server startup
+// code can start the stuck-QUEUED sweeper on the same instance the
+// dispatch routes use. Returns nil when registerOrchestrationRoutes
+// hasn't run yet (handler-only tests that build a Router by hand).
+func (r *Router) Assignments() *AssignmentHandler {
+	return r.assignmentHandler
 }
 
 // Journal returns the journal emitter or a no-op if unset. Handlers should
