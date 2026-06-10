@@ -23,6 +23,13 @@ const (
 	// summary can't carry enough signal to be worth an aux-LLM round-trip,
 	// so we skip compaction and fall back to plain truncation.
 	minConversationSummaryChars = 200
+
+	// convMaxLoadMessages caps how many of the newest turns are loaded from
+	// a session's JSONL when building context. It bounds peak memory and
+	// summariser input on pathologically long sessions while sitting far
+	// above any realistic useful-context window, so normal sessions load
+	// in full and behave exactly as before.
+	convMaxLoadMessages = 20000
 )
 
 // conversationSummarizeTimeout bounds the synchronous aux-LLM call on the
@@ -104,7 +111,14 @@ func (o *Orchestrator) buildConversationContext(ctx context.Context, sessionID s
 func (o *Orchestrator) buildConversationContextWithStats(ctx context.Context, sessionID string, tokenBudget int) (string, compactionStats) {
 	var stats compactionStats
 
-	messages, err := o.convStore.Read(ctx, sessionID, 0, 0)
+	// Load only the recent tail rather than the whole JSONL. A long-lived
+	// session can accumulate hundreds of thousands of turns; reading it
+	// all into memory on every agent run — just to keep a budget-bounded
+	// recent window plus a summarisable overflow slice — is wasteful and a
+	// memory hazard at the extreme. convMaxLoadMessages caps peak memory
+	// while staying far above any realistic useful-context size; beyond it
+	// the oldest turns are neither shown verbatim nor summarised.
+	messages, err := o.convStore.ReadTail(ctx, sessionID, convMaxLoadMessages)
 	if err != nil || len(messages) == 0 {
 		return "", stats
 	}
