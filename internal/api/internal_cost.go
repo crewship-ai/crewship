@@ -81,6 +81,12 @@ func (r *Router) handleSidecarCostRecord(w http.ResponseWriter, req *http.Reques
 	if !assertInternalTokenWorkspace(w, req, body.WorkspaceID) {
 		return
 	}
+	// PR-F24 foreign-ID closure: crew_id rides in the body independent of
+	// workspace_id — prove it belongs to the bound workspace so a ws-A
+	// token can't attribute a cost row to a ws-B crew.
+	if !assertBoundCrewWorkspaceDB(w, req, r.db, r.logger, body.CrewID) {
+		return
+	}
 	if strings.TrimSpace(body.Provider) == "" || strings.TrimSpace(body.Model) == "" {
 		replyError(w, http.StatusBadRequest, "provider and model required")
 		return

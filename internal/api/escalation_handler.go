@@ -58,6 +58,16 @@ func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) 
 	if !assertInternalTokenWorkspace(w, r, body.WorkspaceID) {
 		return
 	}
+	// PR-F24 foreign-ID closure: crew_id and chat_id are independent of the
+	// workspace_id checked above — prove they belong to the bound workspace
+	// before inserting the escalation so a ws-A token can't raise one
+	// attributed to a ws-B crew/chat.
+	if !assertBoundCrewWorkspaceDB(w, r, h.db, h.logger, body.CrewID) {
+		return
+	}
+	if !assertBoundChatWorkspaceDB(w, r, h.db, h.logger, body.ChatID) {
+		return
+	}
 
 	// Look up the from agent
 	var fromAgentID string

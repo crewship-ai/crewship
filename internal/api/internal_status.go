@@ -319,6 +319,12 @@ func (h *InternalHandler) RecordMCPToolCall(w http.ResponseWriter, r *http.Reque
 	if !assertInternalTokenWorkspace(w, r, body.WorkspaceID) {
 		return
 	}
+	// PR-F24 foreign-ID closure: crew_id is independent of the workspace_id
+	// checked above — prove it belongs to the bound workspace so a ws-A
+	// token can't write an audit row attributed to a ws-B crew.
+	if !assertBoundCrewWorkspaceDB(w, r, h.db, h.logger, body.CrewID) {
+		return
+	}
 	if body.MCPServerScope == "" {
 		body.MCPServerScope = "workspace"
 	}

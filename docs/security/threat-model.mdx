@@ -340,12 +340,15 @@ describes the **current implementation**, with these gaps:
 than per-user JWTs. Tokens come in two forms:
 
 - **Workspace-bound tokens** (`wsv1.<workspace_id>.<HMAC-SHA256(master,
-  workspace_id)>`, `internal/auth/internaltoken`) are what sidecars
-  receive at startup via their stdin `IPCConfig`. The middleware
-  re-derives the MAC from the embedded workspace ID and the in-memory
-  master secret, so a token captured inside a container only ever
-  authorizes the workspace it was issued for. Derivation is stateless;
-  tokens roll with the master on every boot.
+  derivation_context || workspace_id)>`, derived by
+  `internaltoken.DeriveWorkspaceToken`) are what sidecars receive at
+  startup via their stdin `IPCConfig`. The MAC is keyed by the master
+  secret and computed over a fixed versioned domain-separation context
+  concatenated with the workspace ID (not the workspace ID alone). The
+  middleware re-derives the MAC from the embedded workspace ID and the
+  in-memory master secret, so a token captured inside a container only
+  ever authorizes the workspace it was issued for. Derivation is
+  stateless; tokens roll with the master on every boot.
 
   The binding is enforced as a **mandatory request scope**, not as an
   optional `?workspace_id` check (that earlier shape left a hole: a

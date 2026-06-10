@@ -340,6 +340,67 @@ func assertInternalTokenWorkspace(w http.ResponseWriter, r *http.Request, bodyWS
 	return false
 }
 
+// assertBoundCrewWorkspaceDB rejects an internal-auth request when any
+// of the supplied crew IDs does not resolve (via the crews table) to the
+// workspace the caller's X-Internal-Token is bound to (PR-F24 foreign-ID
+// closure). assertInternalTokenWorkspace already proves the body's
+// workspace_id matches the binding; this closes the gap where a handler
+// then keeps going with additional body-carried crew references that
+// were never proven to live in that same workspace.
+//
+// No-op for master-token callers (no binding in context). Unknown crew
+// IDs are rejected with the same 403 so the check is not an existence
+// oracle. Empty IDs are skipped (optional fields). Returns false after
+// writing the 403 — caller must return immediately.
+func assertBoundCrewWorkspaceDB(w http.ResponseWriter, r *http.Request, db *sql.DB, logger *slog.Logger, crewIDs ...string) bool {
+	bound := InternalTokenWorkspaceFromContext(r.Context())
+	if bound == "" {
+		return true
+	}
+	for _, crewID := range crewIDs {
+		if crewID == "" {
+			continue
+		}
+		var wsID string
+		err := db.QueryRowContext(r.Context(),
+			`SELECT workspace_id FROM crews WHERE id = ?`, crewID).Scan(&wsID)
+		if err != nil || wsID != bound {
+			if err != nil && !errors.Is(err, sql.ErrNoRows) && logger != nil {
+				logger.Error("resolve crew workspace for token binding", "crew_id", crewID, "error", err)
+			}
+			replyError(w, http.StatusForbidden,
+				"crew does not belong to the workspace bound to the internal token")
+			return false
+		}
+	}
+	return true
+}
+
+// assertBoundChatWorkspaceDB is the chat-table analogue of
+// assertBoundCrewWorkspaceDB: it rejects an internal-auth request whose
+// body-carried chat ID does not resolve to the token's bound workspace
+// (PR-F24 foreign-ID closure). No-op for master-token callers; unknown
+// chat IDs are rejected with the same 403 so it is not an existence
+// oracle. Returns false after writing the 403.
+func assertBoundChatWorkspaceDB(w http.ResponseWriter, r *http.Request, db *sql.DB, logger *slog.Logger, chatID string) bool {
+	bound := InternalTokenWorkspaceFromContext(r.Context())
+	if bound == "" || chatID == "" {
+		return true
+	}
+	var wsID string
+	err := db.QueryRowContext(r.Context(),
+		`SELECT workspace_id FROM chats WHERE id = ?`, chatID).Scan(&wsID)
+	if err != nil || wsID != bound {
+		if err != nil && !errors.Is(err, sql.ErrNoRows) && logger != nil {
+			logger.Error("resolve chat workspace for token binding", "chat_id", chatID, "error", err)
+		}
+		replyError(w, http.StatusForbidden,
+			"chat does not belong to the workspace bound to the internal token")
+		return false
+	}
+	return true
+}
+
 // internalWsCtx extracts workspace_id from query params and sets it in context.
 // Used for internal routes called by sidecar (no JWT auth, just X-Internal-Token).
 //

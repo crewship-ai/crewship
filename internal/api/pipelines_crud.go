@@ -646,6 +646,14 @@ func (h *PipelineHandler) InternalSave(w http.ResponseWriter, r *http.Request) {
 	if !assertInternalTokenWorkspace(w, r, body.WorkspaceID) {
 		return
 	}
+	// PR-F24 foreign-ID closure: author_crew_id is independent of the
+	// workspace_id checked above. A bound ws-A token must not attribute a
+	// pipeline to a ws-B crew (and the validator below would otherwise read
+	// that foreign crew's agent slugs), so prove it belongs to the bound
+	// workspace first.
+	if !assertBoundCrewWorkspaceDB(w, r, h.db, h.logger, body.AuthorCrewID) {
+		return
+	}
 
 	// Parse + validate before save so the agent gets a clean error
 	// message at this layer rather than at the next /run.

@@ -184,10 +184,26 @@ func TestSecBinding_F3_ListCredentialsScoped(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &creds); err != nil {
 		t.Fatalf("decode: %v; body=%s", err, rr.Body.String())
 	}
+	// Assert both directions: ws-A's own cred is present (so a regression
+	// that drops the bound workspace's own rows fails here, not just an
+	// empty list), and ws-B's cred is absent.
+	var sawCredA, sawCredB bool
 	for _, c := range creds {
 		if c["workspace_id"] != ids.wsA {
 			t.Fatalf("ListCredentials leaked a non-ws_a credential: %+v", c)
 		}
+		if c["id"] == "cred_a" {
+			sawCredA = true
+		}
+		if c["id"] == "cred_b" {
+			sawCredB = true
+		}
+	}
+	if !sawCredA {
+		t.Fatalf("ListCredentials dropped ws-A's own credential cred_a; got %d creds: %+v", len(creds), creds)
+	}
+	if sawCredB {
+		t.Fatalf("ListCredentials leaked ws-B's credential cred_b across the tenant boundary")
 	}
 }
 
@@ -195,9 +211,22 @@ func TestSecBinding_F3_ListCredentialsScoped(t *testing.T) {
 // F-4 HIGH — body-workspace writers must reject a foreign body workspace.
 // ws-A token POSTing an issue into ws-B must 403.
 // ---------------------------------------------------------------------------
+// countRows returns COUNT(*) over the given table, failing the test on a
+// query error. Used to pin "the 403 wrote nothing" — a handler that
+// writes before returning 403 would otherwise still pass on status alone.
+func scopeCountRows(t *testing.T, h *InternalHandler, table string) int {
+	t.Helper()
+	var n int
+	if err := h.db.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&n); err != nil {
+		t.Fatalf("count %s: %v", table, err)
+	}
+	return n
+}
+
 func TestSecBinding_F4_IssueCreateForeignBody403(t *testing.T) {
 	h, ids := seedScope(t)
 	ih := NewInternalIssueHandler(h.db, nil, testLogger())
+	before := scopeCountRows(t, h, "missions")
 	body, _ := json.Marshal(map[string]string{
 		"workspace_id": ids.wsB, "crew_id": ids.crewB, "title": "x",
 	})
@@ -208,23 +237,44 @@ func TestSecBinding_F4_IssueCreateForeignBody403(t *testing.T) {
 		t.Fatalf("status = %d, want 403 (ws-A token must not create issue in ws-B); body=%s",
 			rr.Code, rr.Body.String())
 	}
+	if after := scopeCountRows(t, h, "missions"); after != before {
+		t.Fatalf("issue (missions) row written despite 403: count %d→%d", before, after)
+	}
 }
 
 func TestSecBinding_F4_IssueUpdateForeignBody403(t *testing.T) {
 	h, ids := seedScope(t)
 	ih := NewInternalIssueHandler(h.db, nil, testLogger())
-	body, _ := json.Marshal(map[string]string{"workspace_id": ids.wsB, "status": "TODO"})
+	// Seed a ws-B issue so UpdateStatus has a real row to (not) mutate;
+	// without it the 403 could be masked by a "not found" path.
+	if _, err := h.db.Exec(`
+		INSERT INTO missions (id, workspace_id, crew_id, lead_agent_id, trace_id, title, status, priority, number, identifier, mission_type, created_at, updated_at)
+		VALUES ('iss_b1', ?, ?, ?, 'tr-b1', 'ws-b issue', 'BACKLOG', 'low', 1, 'PRE-1', 'issue', datetime('now'), datetime('now'))`,
+		ids.wsB, ids.crewB, ids.agentB); err != nil {
+		t.Fatalf("seed ws-B issue: %v", err)
+	}
+	body, _ := json.Marshal(map[string]string{"workspace_id": ids.wsB, "status": "TODO", "priority": "high"})
 	rr := httptest.NewRecorder()
 	req := setPathValue(boundReq(http.MethodPatch, "/x", body, scopeMaster, ids.wsA), "identifier", "PRE-1")
 	h.requireInternal(http.HandlerFunc(ih.UpdateStatus)).ServeHTTP(rr, req)
 	if rr.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403; body=%s", rr.Code, rr.Body.String())
 	}
+	// The seeded row must be untouched — the body's status=TODO and
+	// priority=high must not have landed; the seeded BACKLOG/low remains.
+	var status, priority string
+	if err := h.db.QueryRow(`SELECT status, COALESCE(priority,'') FROM missions WHERE id = 'iss_b1'`).Scan(&status, &priority); err != nil {
+		t.Fatalf("read ws-B issue: %v", err)
+	}
+	if status != "BACKLOG" || priority != "low" {
+		t.Fatalf("ws-B issue mutated cross-tenant: status=%q priority=%q, want BACKLOG/low", status, priority)
+	}
 }
 
 func TestSecBinding_F4_MissionCreateForeignBody403(t *testing.T) {
 	h, ids := seedScope(t)
 	mh := NewInternalMissionHandler(h.db, nil, nil, testLogger())
+	before := scopeCountRows(t, h, "missions")
 	body, _ := json.Marshal(map[string]string{
 		"workspace_id": ids.wsB, "crew_id": ids.crewB, "lead_agent_id": ids.agentB, "title": "x",
 	})
@@ -233,6 +283,9 @@ func TestSecBinding_F4_MissionCreateForeignBody403(t *testing.T) {
 	h.requireInternal(http.HandlerFunc(mh.Create)).ServeHTTP(rr, req)
 	if rr.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403; body=%s", rr.Code, rr.Body.String())
+	}
+	if after := scopeCountRows(t, h, "missions"); after != before {
+		t.Fatalf("mission row written despite 403: count %d→%d", before, after)
 	}
 }
 
@@ -314,8 +367,13 @@ func TestSecBinding_F6_MasterTokenFromBridgeRefused(t *testing.T) {
 	req.Header.Set("X-Internal-Token", scopeMaster)
 	rr := httptest.NewRecorder()
 	h.requireInternal(downstream).ServeHTTP(rr, req)
-	if rr.Code == http.StatusOK || reached {
-		t.Fatalf("master token from bridge origin was accepted (status=%d, reached=%v); "+
-			"a leaked master inside a container must not authorize", rr.Code, reached)
+	// Pin the specific refusal path: F-6 is the loopback-pin on a master
+	// token that already cleared the private-network gate, so the response
+	// must be exactly 403 (a 404 would mean the network gate fired instead,
+	// testing a different control). The downstream handler must never run.
+	if rr.Code != http.StatusForbidden || reached {
+		t.Fatalf("bridge-origin master token must produce HTTP 403 without reaching downstream "+
+			"(got status=%d, reached=%v); a leaked master inside a container must not authorize",
+			rr.Code, reached)
 	}
 }
