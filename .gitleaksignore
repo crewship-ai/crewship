@@ -42,3 +42,8 @@
 # even for files that no longer exist on HEAD.
 7d57b511af600f436f2d2a9dfb0ec12c7a546bc5:audit/leaked-issues-snapshot-2026-05-23.md:generic-api-key:1312
 7d57b511af600f436f2d2a9dfb0ec12c7a546bc5:audit/leaked-issues-snapshot-2026-05-23.md:generic-api-key:1316
+
+# Mission re-attach boot test (PR #641) — fake JWT secret in test setup,
+# same "test-secret-for-*-32ch" convention as the other server tests.
+# generic-api-key trips on entropy; manually verified not a real credential.
+1b0e41cbe8e80747f7a85f86d36da82089c107f9:internal/server/mission_reattach_boot_test.go:generic-api-key:48
