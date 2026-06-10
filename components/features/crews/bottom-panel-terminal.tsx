@@ -62,7 +62,7 @@ export function BottomPanelTerminal({
           <TerminalSquare className="h-3.5 w-3.5" />
           <StatusDot status={status} />
           <span>{agentName}</span>
-          <span className="text-muted-foreground/60">· /crew/agents/{agentSlug}</span>
+          <span className="text-muted-foreground">· /crew/agents/{agentSlug}</span>
         </div>
         {offline && (
           <button

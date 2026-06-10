@@ -54,7 +54,7 @@ export function TemplateBrowser({ selected, onSelect }: TemplateBrowserProps) {
       {/* Search bar */}
       <div className="px-3 py-2.5 border-b border-white/[0.08]">
         <div className="relative flex-1">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground/60" />
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
           <input
             type="search"
             value={search}
@@ -173,7 +173,7 @@ function CategoryChip({
       )}
     >
       {label}
-      <span className={cn("text-[10px]", active ? "opacity-80" : "text-muted-foreground/60")}>{count}</span>
+      <span className={cn("text-[10px]", active ? "opacity-80" : "text-muted-foreground")}>{count}</span>
     </button>
   )
 }
@@ -234,7 +234,7 @@ function EmptyState({ search }: { search: string }) {
   return (
     <div className="text-center py-10 px-4">
       <p className="text-sm text-muted-foreground mb-1">No personas match</p>
-      <p className="text-[11px] text-muted-foreground/60">
+      <p className="text-[11px] text-muted-foreground">
         {search ? (
           <>
             Try a different search term, or click <span className="text-foreground/80">All</span> to see every persona.
@@ -267,7 +267,7 @@ function ComingSoon({ source }: { source: PersonaSource }) {
   return (
     <div className="text-center py-10 px-4">
       <p className="text-sm text-foreground/80 mb-1">{l.title}</p>
-      <p className="text-[11px] text-muted-foreground/70 max-w-[260px] mx-auto">{l.desc}</p>
+      <p className="text-[11px] text-muted-foreground max-w-[260px] mx-auto">{l.desc}</p>
     </div>
   )
 }

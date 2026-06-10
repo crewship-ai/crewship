@@ -244,7 +244,7 @@ function CapabilityRow({
     <tr className="border-b border-border/40 hover:bg-muted/30">
       <td className="pl-3 py-2 sticky left-0 bg-background z-10">
         <div className="flex items-center gap-2">
-          <div className="h-6 w-6 shrink-0 rounded-full bg-primary/80 flex items-center justify-center">
+          <div className="h-6 w-6 shrink-0 rounded-full bg-primary flex items-center justify-center">
             <span className="text-[10px] font-semibold text-primary-foreground">
               {initials(member.user.full_name, member.user.email)}
             </span>

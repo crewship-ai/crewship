@@ -279,7 +279,7 @@ export function AgentCanvas({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1">
             <h1 className="text-2xl font-semibold">
-              <EditableField value={agent.name} onSave={(v) => patch({ name: v })} placeholder="Name…" />
+              <EditableField value={agent.name} onSave={(v) => patch({ name: v })} ariaLabel="Agent name" placeholder="Name…" />
             </h1>
             <span className={cn("text-[11px] flex items-center gap-1.5 px-2 py-0.5 rounded-full border shrink-0", status.className)}>
               <span className={cn("w-1.5 h-1.5 rounded-full", isRunning ? "bg-emerald-400 animate-pulse" : "bg-current")} />
@@ -292,13 +292,13 @@ export function AgentCanvas({
             </code>
             {agent.role_title && (
               <>
-                <span className="text-muted-foreground/50">·</span>
+                <span className="text-muted-foreground-soft">·</span>
                 <span>{agent.role_title}</span>
               </>
             )}
             {agent.crew && (
               <>
-                <span className="text-muted-foreground/50">·</span>
+                <span className="text-muted-foreground-soft">·</span>
                 <button
                   type="button"
                   onClick={() => onSelectCrew(agent.crew!.slug)}

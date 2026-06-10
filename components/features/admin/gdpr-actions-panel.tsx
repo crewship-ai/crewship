@@ -188,7 +188,7 @@ export const GdprActionsPanel = React.memo(function GdprActionsPanel({
             />
           </div>
           {filtered.length === 0 ? (
-            <div className="text-[11px] text-muted-foreground/60 py-3 text-center">
+            <div className="text-[11px] text-muted-foreground py-3 text-center">
               No matching users
             </div>
           ) : (
@@ -212,7 +212,7 @@ export const GdprActionsPanel = React.memo(function GdprActionsPanel({
                       <div className="text-xs font-medium truncate">
                         {u.full_name ?? "(no name)"}
                       </div>
-                      <div className="text-[10px] text-muted-foreground/60 truncate">
+                      <div className="text-[10px] text-muted-foreground truncate">
                         {u.email} · <span className="font-mono">{u.id}</span>
                       </div>
                     </div>
@@ -237,7 +237,7 @@ export const GdprActionsPanel = React.memo(function GdprActionsPanel({
               label={
                 <div>
                   <div>{selectedUser.email}</div>
-                  <div className="text-[10px] text-muted-foreground/60 font-mono">
+                  <div className="text-[10px] text-muted-foreground font-mono">
                     {selectedUser.id}
                   </div>
                 </div>
@@ -266,7 +266,7 @@ export const GdprActionsPanel = React.memo(function GdprActionsPanel({
                 label={
                   <div>
                     <div>{selectedUser.email}</div>
-                    <div className="text-[10px] text-muted-foreground/60 font-mono">
+                    <div className="text-[10px] text-muted-foreground font-mono">
                       {selectedUser.id}
                     </div>
                   </div>

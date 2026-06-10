@@ -220,6 +220,7 @@ export function RoutineWebhooksTab({ workspaceId, pipelineId, slug }: Props) {
               <FieldLabel>Rate limit per minute</FieldLabel>
               <Input
                 type="number"
+                aria-label="Rate limit per minute"
                 value={rateLimit}
                 onChange={(e) => setRateLimit(parseInt(e.target.value, 10) || 60)}
                 className="mt-1.5 h-9 text-sm"

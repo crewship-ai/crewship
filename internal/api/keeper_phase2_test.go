@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/keeper"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
@@ -337,11 +338,12 @@ func mustJSON(t *testing.T, v any) *bytes.Buffer {
 // 400 BEFORE evaluating anything. The asymmetric-bypass vector
 // (caller passes workspace A in query, claims workspace B in body)
 // is the one this fix closes; the symmetric case (caller picks one
-// workspace consistently) still requires PR-F24 token-to-workspace
-// binding to close fully.
+// workspace consistently) is closed by PR-F24 token-to-workspace
+// binding — see TestKeeperPhase2_SymmetricCrossTenant_ClosedByTokenBinding.
 //
 // If this test fails the cross-tenant gate is half-open again —
-// don't loosen without the upstream binding landing first.
+// don't loosen it; it remains the in-handler defense layer under
+// the middleware token binding.
 func TestKeeperPhase2_NegativeLearning_RejectsBodyWorkspaceMismatch(t *testing.T) {
 	db, pr := kp2DB(t)
 	tmp := t.TempDir()
@@ -419,5 +421,71 @@ func TestKeeperPhase2_NegativeLearning_RejectsEmptyCtxWorkspace(t *testing.T) {
 	_ = db.QueryRow(`SELECT COUNT(*) FROM keeper_requests`).Scan(&n)
 	if n != 0 {
 		t.Errorf("keeper_requests should be empty after rejected request; got %d rows", n)
+	}
+}
+
+// TestKeeperPhase2_SymmetricCrossTenant_ClosedByTokenBinding flips the
+// long-standing known-gap note (PR-F24): the symmetric cross-tenant
+// case — a caller that picks ONE foreign workspace consistently
+// across query and body — used to sail through because the
+// X-Internal-Token was a single global secret and internalWsCtx
+// trusted ?workspace_id. Sidecars now hold a workspace-bound derived
+// token, and requireInternal refuses any request whose query
+// workspace disagrees with the token's binding. This test drives the
+// real middleware chain the router builds
+// (requireInternal → internalWsCtx → handler) end to end.
+func TestKeeperPhase2_SymmetricCrossTenant_ClosedByTokenBinding(t *testing.T) {
+	db, pr := kp2DB(t)
+	tmp := t.TempDir()
+
+	p := &kp2Provider{content: `{"decision":"ALLOW","reason":"ok","risk":1}`}
+	gk := gatekeeper.New(p, "claude-haiku-4-5", kp2Logger())
+	ev := gatekeeper.NewNegativeLearningEvaluator(gk, kp2Logger())
+
+	const master = "kp2-master-secret"
+	kp2 := NewKeeperPhase2Handler(db, master, pr, nil, nil, nil, ev, kp2Logger())
+	ih := NewInternalHandler(db, master, kp2Logger())
+	chain := ih.requireInternal(internalWsCtx(http.HandlerFunc(kp2.HandleNegativeLearning)))
+
+	makeReq := func(token string) (*httptest.ResponseRecorder, *http.Request) {
+		body := negativeLearningBody{
+			WorkspaceID:    "ws1", // consistent across query AND body — the symmetric shape
+			CrewID:         "cr1",
+			AgentID:        "a1",
+			AgentName:      "Worker",
+			CrewName:       "Ops",
+			AgentMemoryDir: tmp,
+			Trigger:        "run_failed",
+			FailureSnippet: "x",
+		}
+		r := httptest.NewRequest(http.MethodPost,
+			"/api/v1/internal/keeper/negative-learning?workspace_id=ws1", mustJSON(t, body))
+		r.RemoteAddr = "127.0.0.1:1234" // pass requireInternal's network gate
+		r.Header.Set("X-Internal-Token", token)
+		return httptest.NewRecorder(), r
+	}
+
+	// Attacker: sidecar token bound to ws_attacker, request aimed
+	// consistently at ws1. Pre-PR-F24 this was the open bypass; it
+	// must now die in the middleware with 403, before the handler
+	// (and any keeper_requests persistence) runs.
+	w, r := makeReq(internaltoken.DeriveWorkspaceToken(master, "ws_attacker"))
+	chain.ServeHTTP(w, r)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("cross-tenant status = %d body=%s; want 403 (symmetric bypass must be closed)",
+			w.Code, w.Body.String())
+	}
+	var n int
+	_ = db.QueryRow(`SELECT COUNT(*) FROM keeper_requests`).Scan(&n)
+	if n != 0 {
+		t.Fatalf("keeper_requests rows = %d after rejected cross-tenant request, want 0", n)
+	}
+
+	// Legitimate sidecar: token bound to ws1 sends the identical
+	// request and must still reach the evaluator.
+	w, r = makeReq(internaltoken.DeriveWorkspaceToken(master, "ws1"))
+	chain.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("same-workspace status = %d body=%s; want 200", w.Code, w.Body.String())
 	}
 }

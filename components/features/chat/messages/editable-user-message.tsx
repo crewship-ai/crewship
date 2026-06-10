@@ -49,6 +49,7 @@ export function EditableUserMessage({
         <textarea
           ref={taRef}
           value={draft}
+          aria-label="Edit message"
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {

@@ -25,6 +25,13 @@ const (
 	ctxUser        contextKey = "user"
 	ctxWorkspaceID contextKey = "workspace_id"
 	ctxRole        contextKey = "role"
+	// ctxInternalTokenWS carries the workspace a workspace-bound
+	// X-Internal-Token is cryptographically bound to (PR-F24). Set by
+	// requireInternal after HMAC validation; empty for master-token
+	// callers (host-side trusted services). Distinct from
+	// ctxWorkspaceID on purpose: this value is derived from the token
+	// itself, never from caller-supplied query/body input.
+	ctxInternalTokenWS contextKey = "internal_token_workspace"
 )
 
 // Reason codes returned in 401 bodies and WWW-Authenticate. The
@@ -64,6 +71,17 @@ func WorkspaceIDFromContext(ctx context.Context) string {
 // RoleFromContext returns the workspace membership role (e.g. OWNER, ADMIN, MEMBER) from the request context.
 func RoleFromContext(ctx context.Context) string {
 	s, _ := ctx.Value(ctxRole).(string)
+	return s
+}
+
+// InternalTokenWorkspaceFromContext returns the workspace the request's
+// X-Internal-Token is bound to (PR-F24), or "" when the caller
+// authenticated with the unbound master token (host-side trusted
+// services) or the request didn't pass requireInternal at all. Unlike
+// WorkspaceIDFromContext, this value is derived from the token's HMAC
+// — it cannot be forged by query parameters or request bodies.
+func InternalTokenWorkspaceFromContext(ctx context.Context) string {
+	s, _ := ctx.Value(ctxInternalTokenWS).(string)
 	return s
 }
 
@@ -301,13 +319,107 @@ func reasonForJWTErr(err error) string {
 	}
 }
 
+// assertInternalTokenWorkspace rejects an internal-auth request whose
+// body-declared workspace disagrees with the workspace bound to the
+// caller's X-Internal-Token (PR-F24). requireInternal can only see
+// query parameters; handlers that scope by a workspace_id carried in
+// the JSON body (cost record, journal emit, pipeline save) call this
+// after decoding so a captured sidecar token can't write rows into a
+// foreign tenant either. No-op for master-token callers — those have
+// no binding in context by design (host-side trusted services).
+//
+// Returns false (after writing the 403) when the values disagree —
+// caller should immediately `return`.
+func assertInternalTokenWorkspace(w http.ResponseWriter, r *http.Request, bodyWS string) bool {
+	bound := InternalTokenWorkspaceFromContext(r.Context())
+	if bound == "" || bound == bodyWS {
+		return true
+	}
+	replyError(w, http.StatusForbidden,
+		"workspace_id does not match the workspace bound to the internal token")
+	return false
+}
+
+// assertBoundCrewWorkspaceDB rejects an internal-auth request when any
+// of the supplied crew IDs does not resolve (via the crews table) to the
+// workspace the caller's X-Internal-Token is bound to (PR-F24 foreign-ID
+// closure). assertInternalTokenWorkspace already proves the body's
+// workspace_id matches the binding; this closes the gap where a handler
+// then keeps going with additional body-carried crew references that
+// were never proven to live in that same workspace.
+//
+// No-op for master-token callers (no binding in context). Unknown crew
+// IDs are rejected with the same 403 so the check is not an existence
+// oracle. Empty IDs are skipped (optional fields). Returns false after
+// writing the 403 — caller must return immediately.
+func assertBoundCrewWorkspaceDB(w http.ResponseWriter, r *http.Request, db *sql.DB, logger *slog.Logger, crewIDs ...string) bool {
+	bound := InternalTokenWorkspaceFromContext(r.Context())
+	if bound == "" {
+		return true
+	}
+	for _, crewID := range crewIDs {
+		if crewID == "" {
+			continue
+		}
+		var wsID string
+		err := db.QueryRowContext(r.Context(),
+			`SELECT workspace_id FROM crews WHERE id = ?`, crewID).Scan(&wsID)
+		if err != nil || wsID != bound {
+			if err != nil && !errors.Is(err, sql.ErrNoRows) && logger != nil {
+				logger.Error("resolve crew workspace for token binding", "crew_id", crewID, "error", err)
+			}
+			replyError(w, http.StatusForbidden,
+				"crew does not belong to the workspace bound to the internal token")
+			return false
+		}
+	}
+	return true
+}
+
+// assertBoundChatWorkspaceDB is the chat-table analogue of
+// assertBoundCrewWorkspaceDB: it rejects an internal-auth request whose
+// body-carried chat ID does not resolve to the token's bound workspace
+// (PR-F24 foreign-ID closure). No-op for master-token callers; unknown
+// chat IDs are rejected with the same 403 so it is not an existence
+// oracle. Returns false after writing the 403.
+func assertBoundChatWorkspaceDB(w http.ResponseWriter, r *http.Request, db *sql.DB, logger *slog.Logger, chatID string) bool {
+	bound := InternalTokenWorkspaceFromContext(r.Context())
+	if bound == "" || chatID == "" {
+		return true
+	}
+	var wsID string
+	err := db.QueryRowContext(r.Context(),
+		`SELECT workspace_id FROM chats WHERE id = ?`, chatID).Scan(&wsID)
+	if err != nil || wsID != bound {
+		if err != nil && !errors.Is(err, sql.ErrNoRows) && logger != nil {
+			logger.Error("resolve chat workspace for token binding", "chat_id", chatID, "error", err)
+		}
+		replyError(w, http.StatusForbidden,
+			"chat does not belong to the workspace bound to the internal token")
+		return false
+	}
+	return true
+}
+
 // internalWsCtx extracts workspace_id from query params and sets it in context.
 // Used for internal routes called by sidecar (no JWT auth, just X-Internal-Token).
+//
+// PR-F24: when the request authenticated with a workspace-bound token,
+// the query value must agree with the token's binding. requireInternal
+// already rejects the mismatch upstream; the re-check here keeps the
+// gate even if the middleware chain is ever reordered or a route gets
+// wired with internalWsCtx but a different auth wrapper (the round-8
+// lesson: never assume the other middleware ran).
 func internalWsCtx(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		wsID := r.URL.Query().Get("workspace_id")
 		if wsID == "" {
 			replyError(w, http.StatusBadRequest, "workspace_id query parameter required")
+			return
+		}
+		if bound := InternalTokenWorkspaceFromContext(r.Context()); bound != "" && bound != wsID {
+			replyError(w, http.StatusForbidden,
+				"workspace_id does not match the workspace bound to the internal token")
 			return
 		}
 		ctx := context.WithValue(r.Context(), ctxWorkspaceID, wsID)

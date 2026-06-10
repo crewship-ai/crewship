@@ -11,6 +11,46 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Security
 
+- **X-Internal-Token is now bound to a workspace (PR-F24) — closes the
+  documented symmetric cross-tenant bypass.** Sidecars no longer
+  receive the process-wide master internal token. At sidecar start the
+  orchestrator derives a workspace-bound token
+  (`wsv1.<workspace_id>.<HMAC-SHA256(master, workspace_id)>`,
+  `internal/auth/internaltoken`) and injects it via the stdin
+  `IPCConfig`. The `internalAuth` middleware validates the binding on
+  every `/api/v1/internal/*` request: tampered tokens fail the
+  constant-time MAC check, and the binding is enforced as a **mandatory
+  request scope** rather than an optional `?workspace_id` check. For a
+  bound token `requireInternal` rejects a `?workspace_id` that disagrees
+  with the binding (403) and **injects** the bound workspace when the
+  caller omits the query — so every handler that filters by
+  `?workspace_id` (webhook secret, list credentials, agent/chat resolve,
+  crew/agent create) is tenant-scoped automatically, with no
+  legacy-unscoped fall-through. Path-param mutations that don't read the
+  query (chat message-count / title, run finalize, credential status)
+  constrain their `WHERE` clause by the bound workspace (foreign rows →
+  404, never mutated). Handlers scoped by a body-carried `workspace_id`
+  (`cost/record`, `journal/emit`, `pipelines/save`, plus the issue /
+  mission / assignment / query / escalation create handlers and the
+  confidence report) enforce the same binding in-handler via
+  `assertInternalTokenWorkspace`. The unbound master token — which
+  authorizes every workspace and so retains cross-tenant power if leaked
+  from a container — is now **pinned to a loopback origin**: a master
+  token presented from a Docker-bridge / LAN IP is refused (403), capping
+  the blast radius of a leaked master to the host trust boundary
+  (`CREWSHIP_INTERNAL_ALLOW_ANY=true` relaxes the pin for reverse-proxy
+  setups). Pre-fix, an agent that captured the token inside its container
+  could aim internal routes at ANY workspace by picking the
+  `?workspace_id` it wanted (or simply omitting it on the routes that
+  ran unscoped) — the "symmetric case" left open by the earlier Keeper
+  Phase 2 asymmetric fix below. Derivation is stateless (no persistence;
+  derived tokens roll with the master each boot) and the master token
+  remains valid for host-side trusted callers (chat bridge, webhook
+  secret resolver, LLM proxy) that reach the API over loopback and never
+  enter a container. See the updated "Tenant isolation" section in
+  `docs/security/threat-model.mdx` and the retired "known exception"
+  block in `docs/api-reference/internal.mdx`.
+
 - **Cross-tenant scoping on Keeper Phase 2 internal endpoints.** The four
   `/api/v1/internal/keeper/*` handlers (skill-review, behavior,
   memory-health, negative-learning) now (a) include `workspace_id` in
@@ -20,10 +60,10 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   auth caller could pass an `agent_id` from workspace A while claiming
   workspace B in the body and read the gate flag — asymmetric cross-
   tenant bypass. The symmetric case (caller picks one workspace
-  consistently across query + body) remains open until the `X-Internal-
-  Token` is bound to a workspace (tracked as PR-F24); see
-  `docs/api-reference/internal.mdx` for the explicit "known exception"
-  block on this route family.
+  consistently across query + body) is closed by the workspace-bound
+  `X-Internal-Token` entry above (PR-F24); the former "known
+  exception" block in `docs/api-reference/internal.mdx` is retired
+  accordingly.
 
 - **Lessons memory tier hardened against agent-author writes.** The
   generic `memory.write(tier="lessons", …)` dispatcher path returned

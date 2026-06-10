@@ -57,14 +57,17 @@ import (
 
 // assertBodyWorkspaceMatchesCtx (audit round 3 defense) rejects F4
 // requests where the body workspace_id doesn't match the request
-// context workspace_id. The X-Internal-Token auth path doesn't bind
-// the token to a workspace, so both values are caller-controlled —
-// but enforcing consistency closes the asymmetric-bypass vector
-// where a caller could pass workspace A in the query (which feeds
-// policy resolution + paymaster scope) while passing workspace B in
-// the body (which fed the self_learning gate lookup before this
-// fix). Symmetric bypass (caller picks one workspace consistently)
-// still requires PR-F24 token-to-workspace binding to close.
+// context workspace_id. Enforcing consistency closes the
+// asymmetric-bypass vector where a caller could pass workspace A in
+// the query (which feeds policy resolution + paymaster scope) while
+// passing workspace B in the body (which fed the self_learning gate
+// lookup before this fix). The symmetric bypass (caller picks one
+// workspace consistently) is closed upstream by PR-F24: sidecars
+// hold a workspace-bound X-Internal-Token and requireInternal
+// rejects any ?workspace_id that disagrees with the token's binding,
+// so the ctx value this helper compares against is anchored to the
+// token. This in-handler check stays as the layered defense for
+// master-token callers and middleware-chain regressions.
 //
 // Returns false (and writes the error response) when the values
 // disagree — caller should immediately `return`.
@@ -775,18 +778,19 @@ func (h *KeeperPhase2Handler) HandleNegativeLearning(w http.ResponseWriter, r *h
 // Package-level (not a method) so both handlers can call it without
 // dragging a *KeeperPhase2Handler into the persona surface. PR-G F4.1 UX gate.
 //
-// SECURITY (defense in depth, partial close — see PR-F24 for full):
-// workspace_id is part of the WHERE clause so a lookup with an
-// agent_id from workspace A and a workspace_id of B returns no row
-// (the row's workspace_id IS A, not B). This closes the asymmetric
-// case where the caller passes inconsistent workspace identifiers
-// across the request surface. It does NOT close the symmetric case
-// where a caller consistently passes the same target workspace in
-// both query + body — that requires binding the X-Internal-Token to
-// a workspace, which is tracked as PR-F24 (token-to-workspace
-// binding) in PRD §10. The F4 handlers add a layered defense via
-// assertBodyWorkspaceMatchesCtx so body.WorkspaceID can't disagree
-// with ctx.WorkspaceID even from the same trusted caller.
+// SECURITY (defense in depth): workspace_id is part of the WHERE
+// clause so a lookup with an agent_id from workspace A and a
+// workspace_id of B returns no row (the row's workspace_id IS A, not
+// B). This closes the asymmetric case where the caller passes
+// inconsistent workspace identifiers across the request surface. The
+// symmetric case — a caller consistently passing the same foreign
+// workspace in both query + body — is closed by PR-F24: the
+// X-Internal-Token sidecars hold is bound to their workspace
+// (HMAC(master, workspace_id), internal/auth/internaltoken) and
+// requireInternal rejects any ?workspace_id mismatch before the
+// handler runs. The F4 handlers additionally keep the layered
+// defense via assertBodyWorkspaceMatchesCtx so body.WorkspaceID
+// can't disagree with ctx.WorkspaceID even from a trusted caller.
 //
 // Empty workspaceID returns false (safe default) — the caller's own
 // validation should have rejected the empty value upstream.

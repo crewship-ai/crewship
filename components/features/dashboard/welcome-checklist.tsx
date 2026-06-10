@@ -141,7 +141,7 @@ export function WelcomeChecklist({ firstAgentId }: { firstAgentId?: string | nul
                 {item.done ? (
                   <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
                 ) : (
-                  <Circle className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground/60" />
+                  <Circle className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
                 )}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">

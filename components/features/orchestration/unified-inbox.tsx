@@ -109,7 +109,7 @@ function InboxSection({
     <Collapsible open={open} onOpenChange={setOpen}>
       <CollapsibleTrigger asChild>
         <button className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-accent/50 transition-colors">
-          <span className="text-muted-foreground/70 shrink-0">
+          <span className="text-muted-foreground shrink-0">
             {open ? (
               <ChevronDown className="h-3 w-3" />
             ) : (
@@ -141,11 +141,11 @@ function InboxSection({
                 </div>
                 <div className="flex items-center gap-1.5 mt-0.5">
                   {task.agent_slug && (
-                    <span className="text-[10px] font-mono text-muted-foreground/70">
+                    <span className="text-[10px] font-mono text-muted-foreground">
                       @{task.agent_slug}
                     </span>
                   )}
-                  <span className="text-[10px] text-muted-foreground/50 truncate">
+                  <span className="text-[10px] text-muted-foreground-soft truncate">
                     {mission.title}
                   </span>
                 </div>
@@ -213,7 +213,7 @@ export function UnifiedInbox({
           />
 
           {total === 0 && (
-            <div className="flex flex-col items-center justify-center py-8 gap-2 text-muted-foreground/50">
+            <div className="flex flex-col items-center justify-center py-8 gap-2 text-muted-foreground-soft">
               <CheckCircle2 className="h-6 w-6" />
               <span className="text-xs">All clear</span>
             </div>

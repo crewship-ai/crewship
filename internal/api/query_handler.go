@@ -95,6 +95,21 @@ func (h *QueryHandler) Create(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	// PR-F24 F-4: a bound token may only run peer queries inside its own
+	// workspace (body workspace_id scopes the lookup; the auth middleware
+	// can't inspect bodies).
+	if !assertInternalTokenWorkspace(w, r, body.WorkspaceID) {
+		return
+	}
+	// PR-F24 foreign-ID closure: crew_id and chat_id are independent of the
+	// workspace_id checked above — prove they belong to the bound workspace
+	// before running the peer query so a ws-A token can't drive a ws-B crew.
+	if !assertBoundCrewWorkspaceDB(w, r, h.db, h.logger, body.CrewID) {
+		return
+	}
+	if !assertBoundChatWorkspaceDB(w, r, h.db, h.logger, body.ChatID) {
+		return
+	}
 
 	startTime := time.Now()
 

@@ -267,7 +267,7 @@ export function RunsView({ workspaceId, workspaceLoading }: RunsViewProps) {
                             ? "bg-amber-500/15 text-amber-300"
                             : s === "CANCELLED"
                               ? "bg-muted text-foreground"
-                              : "bg-primary/15 text-primary"
+                              : "bg-primary/15 text-primary-hover"
                     : "text-muted-foreground hover:text-foreground",
                 )}
               >

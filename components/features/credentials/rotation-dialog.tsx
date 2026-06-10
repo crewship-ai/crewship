@@ -194,6 +194,7 @@ export function RotationDialog({
                   type="number"
                   min={0}
                   max={168}
+                  aria-label="Grace period in hours"
                   value={customHours}
                   onChange={(e) => setCustomHours(Number(e.target.value))}
                   className="w-24 bg-zinc-950 border border-white/15 rounded-md px-2 py-1 text-sm outline-none focus:border-blue-400"

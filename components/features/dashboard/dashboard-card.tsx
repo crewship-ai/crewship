@@ -27,11 +27,11 @@ export function DashboardCard({ title, icon: Icon, hint, action, className, chil
     >
       <div className="flex items-center justify-between mb-3.5">
         <div className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-foreground/70 uppercase tracking-wider">
-          {Icon && <Icon className="h-3.5 w-3.5 text-foreground/40" />}
+          {Icon && <Icon className="h-3.5 w-3.5 text-muted-foreground-soft" />}
           <span>{title}</span>
         </div>
         {(hint || action) && (
-          <div className="flex items-center gap-2 text-[10px] font-mono text-muted-foreground/60">
+          <div className="flex items-center gap-2 text-[10px] font-mono text-muted-foreground">
             {hint}
             {action}
           </div>

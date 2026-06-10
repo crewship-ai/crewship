@@ -138,6 +138,7 @@ export function SystemPromptEditor({
           <textarea
             ref={taRef}
             value={draft}
+            aria-label="System prompt"
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
               if ((e.metaKey || e.ctrlKey) && e.key === "s") {

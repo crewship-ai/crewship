@@ -10,9 +10,12 @@ import { Toaster } from "@/components/ui/sonner"
  * Root client-side providers. A single React Query client is held for
  * the lifetime of the app shell; list views prefer staleTime 30s so
  * polling does not hammer the backend while the user navigates tabs.
- * The admin Backups panel is currently the only RQ consumer — existing
- * admin tabs still use raw fetch + useState. Adopt RQ for new features
- * incrementally; a wholesale rewrite is out of scope here.
+ * React Query is the canonical data layer for new and migrated
+ * surfaces (dashboard, inbox, admin backups so far) — see the
+ * "Frontend data fetching" section in CONTRIBUTING.md and
+ * hooks/use-dashboard-data.ts for the conventions. Remaining
+ * fetch+useState hooks migrate incrementally; a wholesale rewrite is
+ * out of scope.
  */
 export function Providers({ children }: { children: React.ReactNode }) {
   // useState keeps the client stable across re-renders. Creating a

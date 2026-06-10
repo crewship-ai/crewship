@@ -10,8 +10,33 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
 	"github.com/crewship-ai/crewship/internal/provider"
 )
+
+// sidecarIPCToken returns the internal-API token to hand a sidecar at
+// startup. It is always workspace-bound (PR-F24): the raw master token
+// must never enter a container, because any agent that captured it
+// there (UID escalation, memory dump) could call /api/v1/internal/*
+// for every workspace. Derivation is HMAC(master, workspaceID), so the
+// API middleware can validate the binding statelessly against the same
+// in-memory master for the lifetime of one boot.
+//
+// Fail closed: with an empty master or an empty workspace there is
+// nothing safe to issue — return "" so the sidecar's IPC calls get
+// loud 403s instead of a process-wide secret. An empty workspace here
+// would indicate a bug upstream (IPC configs are only built for crew
+// runs, which always carry a workspace).
+func sidecarIPCToken(master, workspaceID string, logger *slog.Logger) string {
+	if master == "" {
+		return ""
+	}
+	if workspaceID == "" {
+		logger.Error("sidecar IPC token: empty workspace_id — refusing to issue a token (master token never enters containers)")
+		return ""
+	}
+	return internaltoken.DeriveWorkspaceToken(master, workspaceID)
+}
 
 // PreRunInstallPackages installs system packages as root before the agent starts.
 // The agent runs as UID 1001 (non-root) and cannot install apt packages itself.

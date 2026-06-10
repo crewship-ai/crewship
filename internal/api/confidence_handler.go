@@ -50,6 +50,17 @@ func (h *QueryHandler) ReportConfidence(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// PR-F24 F-4: the owning workspace is resolved from the DB (agent +
+	// crew), not trusted from the body — so a bound ws-A token could
+	// otherwise pass an agent/crew that resolves into ws-B and write a
+	// foreign task's confidence. Enforce the binding against the resolved
+	// workspace. 404 (matching the "no active task" path) so we don't
+	// confirm the cross-tenant task exists.
+	if scope := InternalTokenWorkspaceFromContext(r.Context()); scope != "" && scope != resolvedWsID {
+		replyError(w, http.StatusNotFound, "no active task found for agent")
+		return
+	}
+
 	if _, err := h.db.ExecContext(r.Context(),
 		`UPDATE mission_tasks SET confidence = ? WHERE id = ?`,
 		body.Confidence, taskID); err != nil {

@@ -66,7 +66,7 @@ export const RuntimeTab = React.memo(function RuntimeTab({
                     <span className="font-mono text-muted-foreground">{rt.version}</span>
                   </div>
                   {rt.socket && (
-                    <p className="text-[10px] text-muted-foreground/70 font-mono truncate mt-0.5">
+                    <p className="text-[10px] text-muted-foreground font-mono truncate mt-0.5">
                       {rt.socket}
                     </p>
                   )}
@@ -106,7 +106,7 @@ export const RuntimeTab = React.memo(function RuntimeTab({
                     <span className="font-medium">
                       {key.charAt(0).toUpperCase() + key.slice(1)}
                     </span>
-                    <ExternalLink className="h-2.5 w-2.5 text-muted-foreground/60 ml-auto" />
+                    <ExternalLink className="h-2.5 w-2.5 text-muted-foreground ml-auto" />
                   </a>
                 ))}
               </div>

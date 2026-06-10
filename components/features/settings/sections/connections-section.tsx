@@ -258,7 +258,7 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
         {connections.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-10 text-center">
             <div className="w-8 h-8 rounded-lg bg-muted/50 flex items-center justify-center mb-2">
-              <Unlink2 className="h-3.5 w-3.5 text-muted-foreground/60" />
+              <Unlink2 className="h-3.5 w-3.5 text-muted-foreground" />
             </div>
             <div className="text-xs font-medium text-foreground/80">No connections</div>
             <div className="text-[11px] text-muted-foreground mt-0.5 max-w-xs">
@@ -284,9 +284,9 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
                   <CrewDot color={fromCrew?.color} />
                   <span className="truncate">{conn.from_crew_name}</span>
                   {conn.direction === "bidirectional" ? (
-                    <ArrowLeftRight className="size-3 text-muted-foreground/60 shrink-0" />
+                    <ArrowLeftRight className="size-3 text-muted-foreground shrink-0" />
                   ) : (
-                    <ArrowRight className="size-3 text-muted-foreground/60 shrink-0" />
+                    <ArrowRight className="size-3 text-muted-foreground shrink-0" />
                   )}
                   <CrewDot color={toCrew?.color} />
                   <span className="truncate">{conn.to_crew_name}</span>

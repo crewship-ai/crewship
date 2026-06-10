@@ -38,7 +38,7 @@ function RecentSessionsCard({ agentSlug, chats }: { agentSlug: string; chats: Ch
                   {formatRelative(c.created_at)} · {c.message_count} message{c.message_count === 1 ? "" : "s"}
                 </div>
               </div>
-              <ChevronRight className="h-3 w-3 text-muted-foreground/50" />
+              <ChevronRight className="h-3 w-3 text-muted-foreground-soft" />
             </Link>
           ))
         )}

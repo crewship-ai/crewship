@@ -278,7 +278,7 @@ export function CreateAgentDialog({
           <button
             type="button"
             onClick={() => onOpenChange(false)}
-            className="text-muted-foreground/70 hover:text-foreground p-0.5"
+            className="text-muted-foreground hover:text-foreground p-0.5"
             aria-label="Close"
           >
             <X className="h-4 w-4" />
@@ -489,7 +489,7 @@ WORK STYLE: …`}
                 spellCheck={false}
                 className="w-full min-h-[140px] max-h-[260px] resize-y bg-zinc-950 border border-white/[0.15] rounded-md px-3 py-2 text-[12px] font-mono leading-relaxed outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/15"
               />
-              <p className="text-[10.5px] text-muted-foreground/70 mt-1.5 flex items-center gap-1.5">
+              <p className="text-[10.5px] text-muted-foreground mt-1.5 flex items-center gap-1.5">
                 {isPromptFromTemplate && draft.selectedPersona ? (
                   <>
                     <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-400/15 text-emerald-300 border border-emerald-400/25">
@@ -568,7 +568,7 @@ WORK STYLE: …`}
                   className={cn("h-3.5 w-3.5 transition-transform", advancedOpen && "rotate-90")}
                 />
                 <strong>Advanced</strong>
-                <span className="text-muted-foreground/70 text-[11px]">
+                <span className="text-muted-foreground text-[11px]">
                   tool profile · CLI adapter · LLM provider · timeout
                   {draft.agentRole === "LEAD" && " · lead mode"}
                 </span>
@@ -651,7 +651,7 @@ WORK STYLE: …`}
                     )}
                   </div>
 
-                  <p className="text-[10.5px] text-muted-foreground/60">
+                  <p className="text-[10.5px] text-muted-foreground">
                     Not editable here:{" "}
                     <code className="font-mono text-[10px] px-1 py-0.5 rounded bg-white/[0.04]">
                       temperature
@@ -746,7 +746,7 @@ function Section({
             {label}
           </span>
           {hint && (
-            <span className="text-[11px] text-muted-foreground/60 truncate">{hint}</span>
+            <span className="text-[11px] text-muted-foreground truncate">{hint}</span>
           )}
         </div>
         {right && <div className="shrink-0">{right}</div>}
@@ -773,7 +773,7 @@ function FieldShell({
         <span>{label}</span>
         {required && <span className="text-red-400">*</span>}
         {hint && (
-          <span className="normal-case font-normal tracking-normal text-[11px] text-muted-foreground/60">
+          <span className="normal-case font-normal tracking-normal text-[11px] text-muted-foreground">
             — {hint}
           </span>
         )}

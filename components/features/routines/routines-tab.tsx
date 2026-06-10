@@ -63,7 +63,7 @@ export function RoutinesTab({ workspaceId }: RoutinesTabProps) {
               className={cn(
                 "rounded-sm px-2 py-0.5 text-[11px] capitalize transition-colors",
                 statusFilter === s
-                  ? "bg-primary/15 text-primary"
+                  ? "bg-primary/15 text-primary-hover"
                   : "text-muted-foreground hover:text-foreground",
               )}
             >

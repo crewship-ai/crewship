@@ -29,7 +29,7 @@ export default function DashboardLayout({
   if (status === "loading" || status === "unauthenticated") {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground/40" />
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground-soft" />
       </div>
     )
   }

@@ -17,6 +17,20 @@ name: E2E Devcontainer
 #     gh workflow run e2e-devcontainer.yml --ref <branch>
 #
 # Also runs nightly at 02:30 UTC against main.
+#
+# TODO(a11y-ci): e2e/a11y.spec.ts (axe wcag2a+wcag2aa scan of the nine
+# dashboard surfaces) is NOT wired into any CI workflow yet — it runs
+# manually on the dev VM via
+#     pnpm exec playwright test e2e/a11y.spec.ts
+# against a seeded instance. Wiring it here is blocked on real infra
+# work, not on the spec: jobs in this workflow build the Go binary with
+# a one-line web/out/index.html stub (see .github/actions/setup-go-embed),
+# so the embedded UI cannot serve any dashboard page. An a11y job needs:
+#   1. `pnpm build` before `go build` so the real Next export is embedded
+#      (also what the currently-red onboarding job needs to render /login);
+#   2. an onboarded + seeded workspace (`crewship seed`) plus
+#      E2E_EMAIL/E2E_PASSWORD for playwright.config.ts globalSetup.
+# Until that lands, the honest status is: a11y scans are dev-VM manual.
 
 on:
   workflow_dispatch: {}

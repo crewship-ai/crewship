@@ -17,14 +17,14 @@ export const WorkspacesTab = React.memo(function WorkspacesTab({ orgs }: Workspa
       }
     >
       {orgs.length === 0 ? (
-        <div className="flex items-center justify-center py-10 text-[11px] text-muted-foreground/60">
+        <div className="flex items-center justify-center py-10 text-[11px] text-muted-foreground">
           No workspaces
         </div>
       ) : (
         <>
           {/* Desktop header */}
           <div
-            className="hidden md:grid items-center gap-3 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 border-b border-border/60"
+            className="hidden md:grid items-center gap-3 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground border-b border-border/60"
             style={{ gridTemplateColumns: "minmax(0,1.8fr) 90px 90px 90px minmax(0,1fr)" }}
           >
             <div>Workspace</div>
@@ -49,7 +49,7 @@ export const WorkspacesTab = React.memo(function WorkspacesTab({ orgs }: Workspa
                 </div>
                 <div className="min-w-0">
                   <div className="text-xs font-medium truncate">{o.name}</div>
-                  <div className="text-[10px] text-muted-foreground/60 font-mono truncate">{o.slug}</div>
+                  <div className="text-[10px] text-muted-foreground font-mono truncate">{o.slug}</div>
                 </div>
               </div>
               <div className="text-center text-xs tabular-nums">{o._count_members ?? 0}</div>

@@ -468,6 +468,7 @@ export function IssuePageClient() {
                 <div className="flex items-center gap-2">
                   <Input
                     value={titleDraft}
+                    aria-label="Issue title"
                     onChange={(e) => setTitleDraft(e.target.value)}
                     className="text-title font-semibold bg-accent border-border h-10"
                     onKeyDown={(e) => {

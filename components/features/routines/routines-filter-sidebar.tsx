@@ -98,14 +98,14 @@ export function RoutinesFilterSidebar({
       {/* ── Search ── */}
       <div className="shrink-0 px-2 py-2">
         <div className="flex h-8 items-center gap-1.5 rounded-md border border-white/[0.08] bg-white/[0.04] px-2.5">
-          <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground/50" aria-hidden="true" />
+          <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground-soft" aria-hidden="true" />
           <input
             type="text"
             value={search}
             onChange={(e) => onSearchChange(e.target.value)}
             placeholder="Search routines, agents..."
             aria-label="Search routines and agents"
-            className="min-w-0 flex-1 bg-transparent text-xs text-foreground placeholder:text-muted-foreground/40 outline-none"
+            className="min-w-0 flex-1 bg-transparent text-xs text-foreground placeholder:text-muted-foreground-soft outline-none"
           />
           <AnimatePresence>
             {search && (
@@ -117,7 +117,7 @@ export function RoutinesFilterSidebar({
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.5 }}
                 onClick={() => onSearchChange("")}
-                className="text-muted-foreground/50 hover:text-foreground"
+                className="text-muted-foreground-soft hover:text-foreground"
               >
                 <X className="h-3.5 w-3.5" aria-hidden="true" />
               </motion.button>
@@ -128,9 +128,9 @@ export function RoutinesFilterSidebar({
 
       {/* ── Counts strip ── */}
       <div className="mx-2 mb-2 shrink-0 rounded-md border border-white/[0.06] bg-white/[0.02] px-2 py-1.5">
-        <div className="text-[10px] uppercase tracking-wider text-muted-foreground/60">Showing</div>
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Showing</div>
         <div className="text-sm font-medium tabular-nums">
-          {filteredCount} <span className="font-normal text-muted-foreground/60">of {totalRoutines}</span>
+          {filteredCount} <span className="font-normal text-muted-foreground">of {totalRoutines}</span>
         </div>
       </div>
 
@@ -237,7 +237,7 @@ export function RoutinesFilterSidebar({
                 className="h-3 w-3 cursor-pointer accent-blue-500"
               />
             </label>
-            <p className="mt-1 px-2 text-[10px] text-muted-foreground/60">
+            <p className="mt-1 px-2 text-[10px] text-muted-foreground">
               {counts.ephemeral} ephemeral routines (auto-generated delegation wraps).
             </p>
           </div>
@@ -263,13 +263,13 @@ function Section({ label, count, open, onToggle, children }: SectionProps) {
         className="flex w-full items-center gap-1.5 px-3 py-1.5 hover:bg-white/[0.02]"
       >
         <motion.div animate={{ rotate: open ? 0 : -90 }} transition={{ duration: 0.15 }}>
-          <ChevronDown className="h-3 w-3 text-muted-foreground/40" />
+          <ChevronDown className="h-3 w-3 text-muted-foreground-soft" />
         </motion.div>
         <span className="flex-1 text-left text-[10px] font-semibold uppercase tracking-wider text-foreground/50">
           {label}
         </span>
         {count !== null && (
-          <span className="text-[10px] tabular-nums text-foreground/35">{count}</span>
+          <span className="text-[10px] tabular-nums text-muted-foreground-soft">{count}</span>
         )}
       </button>
       <AnimatePresence initial={false}>
@@ -327,7 +327,7 @@ function FacetRow({ label, count, active, onClick, dot, avatar }: FacetRowProps)
       <span className={cn("flex-1 truncate text-xs", active ? "text-blue-300" : "text-foreground/80")}>
         {label}
       </span>
-      <span className="font-mono text-[10px] tabular-nums text-foreground/35">{count}</span>
+      <span className="font-mono text-[10px] tabular-nums text-muted-foreground-soft">{count}</span>
     </button>
   )
 }

@@ -127,7 +127,7 @@ export const ChatTreeRow = React.memo(function ChatTreeRow({ node, depth, expand
         ) : <span className="w-3" />}
         {getChatFileIcon(node.name, node.is_dir, isOpen)}
         <span className="truncate">{node.name}</span>
-        {!node.is_dir && <span className="ml-auto text-micro text-muted-foreground/50 shrink-0">{formatFileSize(node.size)}</span>}
+        {!node.is_dir && <span className="ml-auto text-micro text-muted-foreground-soft shrink-0">{formatFileSize(node.size)}</span>}
       </button>
       {node.is_dir && isOpen && node.children.map((child) => (
         <ChatTreeRow key={child.path} node={child} depth={depth + 1} expanded={expanded} loadingDirs={loadingDirs} selectedFile={selectedFile} onToggle={onToggle} onFileClick={onFileClick} />

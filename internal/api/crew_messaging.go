@@ -69,6 +69,12 @@ func (h *CrewMessagingHandler) SendMessage(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	// PR-F24 R-2: a bound token may only message between crews of its
+	// own workspace.
+	if !h.assertBoundCrewWorkspace(w, r, req.FromCrewID, req.ToCrewID) {
+		return
+	}
+
 	// Verify the from_crew actually belongs to the claimed workspace.
 	actualWSID := h.resolveWorkspaceID(r.Context(), req.FromCrewID)
 	if actualWSID == "" || actualWSID != req.WorkspaceID {
@@ -149,6 +155,12 @@ func (h *CrewMessagingHandler) ListMessages(w http.ResponseWriter, r *http.Reque
 	since := r.URL.Query().Get("since")             // RFC3339 timestamp
 	peerCrewID := r.URL.Query().Get("peer_crew_id") // optional: filter to specific peer
 
+	// PR-F24 R-2: a bound token may only list mailboxes of crews in its
+	// own workspace (the peer filter included).
+	if !h.assertBoundCrewWorkspace(w, r, crewID, peerCrewID) {
+		return
+	}
+
 	var query string
 	var args []interface{}
 
@@ -227,6 +239,12 @@ func (h *CrewMessagingHandler) ReadFile(w http.ResponseWriter, r *http.Request) 
 
 	if targetCrewID == "" || filePath == "" || requesterCrewID == "" {
 		replyError(w, http.StatusBadRequest, "crewId, path, and requester_crew_id are required")
+		return
+	}
+
+	// PR-F24 R-2: a bound token may only touch shared files of crews in
+	// its own workspace.
+	if !h.assertBoundCrewWorkspace(w, r, requesterCrewID, targetCrewID) {
 		return
 	}
 
@@ -346,6 +364,12 @@ func (h *CrewMessagingHandler) WriteFile(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// PR-F24 R-2: a bound token may only touch shared files of crews in
+	// its own workspace.
+	if !h.assertBoundCrewWorkspace(w, r, requesterCrewID, targetCrewID) {
+		return
+	}
+
 	// Validate connection: requester must be able to write to target.
 	// For unidirectional connections, only the source can write.
 	allowed, err := h.canCommunicate(r, requesterCrewID, targetCrewID)
@@ -414,6 +438,42 @@ func (h *CrewMessagingHandler) WriteFile(w http.ResponseWriter, r *http.Request)
 }
 
 // --- Helpers ---
+
+// assertBoundCrewWorkspace enforces the PR-F24 workspace binding on the
+// cross-crew messaging surface (R-2). When the request authenticated
+// with a workspace-bound X-Internal-Token, every caller-supplied crew
+// ID must resolve (via the crews table) to that bound workspace — a
+// captured ws-A token must not read or send messages, or touch shared
+// files, for crews of a foreign workspace, even when those crews hold
+// an active crew_connections row between themselves. Master-token
+// callers (loopback, no binding in context) keep current behavior.
+//
+// Unknown crew IDs are rejected with the same 403 so the check is not
+// an existence oracle. Returns false after writing the response —
+// caller must return immediately.
+func (h *CrewMessagingHandler) assertBoundCrewWorkspace(w http.ResponseWriter, r *http.Request, crewIDs ...string) bool {
+	bound := InternalTokenWorkspaceFromContext(r.Context())
+	if bound == "" {
+		return true
+	}
+	for _, crewID := range crewIDs {
+		if crewID == "" {
+			continue
+		}
+		var wsID string
+		err := h.db.QueryRowContext(r.Context(),
+			`SELECT workspace_id FROM crews WHERE id = ?`, crewID).Scan(&wsID)
+		if err != nil || wsID != bound {
+			if err != nil && !errors.Is(err, sql.ErrNoRows) {
+				h.logger.Error("resolve crew workspace for token binding", "crew_id", crewID, "error", err)
+			}
+			replyError(w, http.StatusForbidden,
+				"crew does not belong to the workspace bound to the internal token")
+			return false
+		}
+	}
+	return true
+}
 
 // canCommunicate checks if fromCrewID is allowed to send to toCrewID.
 func (h *CrewMessagingHandler) canCommunicate(r *http.Request, fromCrewID, toCrewID string) (bool, error) {

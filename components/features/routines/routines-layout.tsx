@@ -306,12 +306,12 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
                     <ChevronLeft className="h-3.5 w-3.5" />
                     Back to routines
                   </button>
-                  <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground/40" />
+                  <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground-soft" />
                   <span className="truncate text-xs font-medium text-foreground/85" title={selectedRoutine?.name || selectedSlug}>
                     {selectedRoutine?.name || selectedSlug}
                   </span>
                   {selectedRoutine?.slug && (
-                    <span className="ml-1 truncate font-mono text-[11px] text-muted-foreground/60">
+                    <span className="ml-1 truncate font-mono text-[11px] text-muted-foreground">
                       {selectedRoutine.slug}
                     </span>
                   )}

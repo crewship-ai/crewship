@@ -104,7 +104,7 @@ export function ConversationSearch({ turns }: ConversationSearchProps) {
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search in conversation…"
               autoFocus
-              className="flex-1 bg-transparent outline-none text-sm placeholder:text-muted-foreground/60"
+              className="flex-1 bg-transparent outline-none text-sm placeholder:text-muted-foreground"
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
                   e.preventDefault()

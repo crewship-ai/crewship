@@ -392,12 +392,14 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 			}
 		}
 		// Build IPC config for agents in a crew so the sidecar can forward
-		// assignment requests (LEAD), peer queries, and escalations (all roles)
+		// assignment requests (LEAD), peer queries, and escalations (all roles).
+		// The token handed to the sidecar is workspace-bound (PR-F24), never
+		// the raw master internal token — see sidecarIPCToken.
 		var ipcCfg *SidecarIPCConfig
 		if ipcBaseURL != "" && (req.AgentRole == "LEAD" || len(req.CrewMembers) > 0) {
 			ipcCfg = &SidecarIPCConfig{
 				BaseURL:     ipcBaseURL,
-				Token:       ipcToken,
+				Token:       sidecarIPCToken(ipcToken, req.WorkspaceID, o.logger),
 				AgentID:     req.AgentID,
 				AgentSlug:   req.AgentSlug,
 				CrewID:      req.CrewID,

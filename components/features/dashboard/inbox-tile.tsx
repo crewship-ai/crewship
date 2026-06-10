@@ -32,7 +32,7 @@ const KIND_META: Record<InboxKind, { Icon: LucideIcon; cls: string }> = {
 export function InboxTile({ entries, emptyLabel = "Inbox empty — you're clear ✓" }: InboxTileProps) {
   if (entries.length === 0) {
     return (
-      <div className="flex items-center justify-center h-[240px] text-[11px] text-muted-foreground/50">
+      <div className="flex items-center justify-center h-[240px] text-[11px] text-muted-foreground-soft">
         {emptyLabel}
       </div>
     )
@@ -54,7 +54,7 @@ export function InboxTile({ entries, emptyLabel = "Inbox empty — you're clear 
                 <div className="text-[10px] text-muted-foreground truncate mt-0.5">{e.subtitle}</div>
               )}
             </div>
-            <div className="text-[10px] font-mono text-muted-foreground/50 shrink-0">{e.relative}</div>
+            <div className="text-[10px] font-mono text-muted-foreground-soft shrink-0">{e.relative}</div>
           </div>
         )
         return e.href ? (

@@ -212,7 +212,7 @@ function TodoWriteCard({ part, agentId }: { part: TurnPart; agentId?: string }) 
               ) : todo.status === "in_progress" ? (
                 <Clock className="h-3.5 w-3.5 text-amber-500 shrink-0 mt-0.5 animate-spin" />
               ) : (
-                <CircleDot className="h-3.5 w-3.5 text-muted-foreground/40 shrink-0 mt-0.5" />
+                <CircleDot className="h-3.5 w-3.5 text-muted-foreground-soft shrink-0 mt-0.5" />
               )}
               <span className={todo.status === "completed" ? "text-muted-foreground line-through" : ""}>{todo.content}</span>
             </div>

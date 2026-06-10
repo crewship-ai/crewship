@@ -85,7 +85,7 @@ export function StepIdentity({ state, setState }: Props) {
           <div>
             <Label htmlFor="crew-wizard-description">
               Description
-              <span className="text-muted-foreground/60 normal-case tracking-normal text-[11px] font-normal ml-2">
+              <span className="text-muted-foreground normal-case tracking-normal text-[11px] font-normal ml-2">
                 optional, shown in roster &amp; sidebar
               </span>
             </Label>

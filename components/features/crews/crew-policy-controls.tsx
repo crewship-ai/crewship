@@ -421,7 +421,7 @@ export function CrewPolicyControls({ crewId, workspaceId, canEdit }: CrewPolicyC
           />
           <div id={`ephemeral-quota-help-${crewId}`} className="text-[11px] text-muted-foreground flex-1">
             Hard cap on concurrent ephemeral (hired) agents this crew can have. Ghosts don&rsquo;t count.
-            <span className="block text-muted-foreground/60 mt-0.5">
+            <span className="block text-muted-foreground mt-0.5">
               Integer 0-{MAX_EPHEMERAL_AGENTS_CEILING}; default 10.
             </span>
           </div>
@@ -457,7 +457,9 @@ export function CrewPolicyControls({ crewId, workspaceId, canEdit }: CrewPolicyC
               disabled={!dirty || forbiddenCombination || quotaInvalid || (policyFieldDirty && reason.trim() === "") || saving}
               className={cn(
                 "text-xs px-3 py-1.5 rounded border transition-colors",
-                "bg-primary/20 border-primary/40 text-primary hover:bg-primary/30",
+                // hover capped at /25: text-primary-hover on primary/30 over card is
+                // 4.26:1 (< AA); /25 keeps 4.61:1 on card, 5.00:1 on page bg.
+                "bg-primary/20 border-primary/40 text-primary-hover hover:bg-primary/25",
                 "disabled:opacity-50 disabled:cursor-not-allowed",
               )}
             >

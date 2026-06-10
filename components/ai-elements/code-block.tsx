@@ -243,7 +243,7 @@ const LINE_NUMBER_CLASSES = cn(
   "before:w-8",
   "before:mr-4",
   "before:text-right",
-  "before:text-muted-foreground/50",
+  "before:text-muted-foreground-soft",
   "before:font-mono",
   "before:select-none"
 );
@@ -494,6 +494,7 @@ export const CodeBlockCopyButton = ({
       onClick={copyToClipboard}
       size="icon"
       variant="ghost"
+      aria-label="Copy code"
       {...props}
     >
       {children ?? <Icon size={14} />}
