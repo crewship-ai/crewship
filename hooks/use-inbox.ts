@@ -170,6 +170,16 @@ export function useInbox(workspaceId: string | null | undefined, stateFilter?: S
         }
         return { ...prev, rows, unread_count: unread }
       })
+      // Mark every other inbox entry (sibling state filters, the bell
+      // count) stale without refetching now: the in-place edit above
+      // keeps the current view instant, the WS broadcast usually
+      // re-syncs everything, and — when WS is down — a filter switch
+      // re-observes a stale query and refetches instead of serving a
+      // cached list that never saw this PATCH.
+      qc.invalidateQueries({
+        queryKey: inboxKeys.all(workspaceId!),
+        refetchType: "none",
+      })
     },
     onError: (err) => setPatchError(err.message),
   })
@@ -202,9 +212,11 @@ export function useInbox(workspaceId: string | null | undefined, stateFilter?: S
 
 // useInboxUnreadCount is the lighter cousin used by the top-bar bell
 // when the full list isn't needed. WS events (below) are the primary
-// trigger — the long refetchInterval is only a safety net for missed
-// events (dropped socket, missed frame during reconnect), replacing
-// the old blind 30s poll.
+// trigger — the refetchInterval is a safety net for missed events.
+// It keeps the pre-react-query 30s cadence, including background
+// tabs, because WS death can be terminal (use-websocket gives up
+// after MAX_RECONNECT_ATTEMPTS) and the badge is then the only
+// signal that a human-in-the-loop approval is waiting.
 export function useInboxUnreadCount(workspaceId: string | null | undefined) {
   const query = useQuery<number>({
     queryKey: inboxKeys.count(workspaceId ?? ""),
@@ -223,8 +235,8 @@ export function useInboxUnreadCount(workspaceId: string | null | undefined) {
     },
     enabled: Boolean(workspaceId),
     retry: false,
-    refetchInterval: 120_000,
-    refetchIntervalInBackground: false,
+    refetchInterval: 30_000,
+    refetchIntervalInBackground: true,
   })
 
   useInboxRealtimeInvalidation(workspaceId)
