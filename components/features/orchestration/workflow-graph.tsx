@@ -195,16 +195,23 @@ function WorkflowGraphInner(
   // Inject activity snippets into agent nodes
   useEffect(() => {
     if (activities.size === 0) return
-    setNodes((prev) =>
-      prev.map((node) => {
+    setNodes((prev) => {
+      // Build the next array but track whether any node actually changed.
+      // If nothing did, return the SAME array reference so the state
+      // update bails out — otherwise this fires a React Flow re-render
+      // every activity poll (~500ms) even when no snippet moved.
+      let changed = false
+      const next = prev.map((node) => {
         if (node.type !== "agent") return node
         const slug = (node.data as Record<string, unknown>)?.agentSlug as string | undefined
         const snippet = slug ? activities.get(slug) ?? null : null
         const current = (node.data as Record<string, unknown>)?.activitySnippet
         if (current === snippet) return node
+        changed = true
         return { ...node, data: { ...node.data, activitySnippet: snippet } }
       })
-    )
+      return changed ? next : prev
+    })
   }, [activities, setNodes])
 
   // Clear highlight if the highlighted node no longer exists (collapsed crew, graph rebuild)
