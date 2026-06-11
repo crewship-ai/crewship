@@ -30,17 +30,34 @@ type scheduleResponse struct {
 	LastStatus            string         `json:"last_status,omitempty"`
 	LastRunID             string         `json:"last_run_id,omitempty"`
 	NextRunAt             *time.Time     `json:"next_run_at,omitempty"`
-	CreatedAt             time.Time      `json:"created_at"`
-	UpdatedAt             time.Time      `json:"updated_at"`
+	// Wake gate — see pipeline.Schedule. WakeInputs is always a real
+	// object (like Inputs) so callers don't branch on null; the
+	// telemetry fields are omitted while zero to keep ungated
+	// schedules' payloads unchanged.
+	WakePipelineID   string         `json:"wake_pipeline_id,omitempty"`
+	WakePipelineSlug string         `json:"wake_pipeline_slug,omitempty"`
+	WakeInputs       map[string]any `json:"wake_inputs,omitempty"`
+	WakeCheckCount   int            `json:"wake_check_count,omitempty"`
+	WakeFireCount    int            `json:"wake_fire_count,omitempty"`
+	LastWakeAt       *time.Time     `json:"last_wake_at,omitempty"`
+	LastWakeStatus   string         `json:"last_wake_status,omitempty"`
+	CreatedAt        time.Time      `json:"created_at"`
+	UpdatedAt        time.Time      `json:"updated_at"`
 }
 
-func (h *PipelineHandler) toScheduleResponse(s *pipeline.Schedule, slug string) scheduleResponse {
+func (h *PipelineHandler) toScheduleResponse(s *pipeline.Schedule, slug, wakeSlug string) scheduleResponse {
 	var inputs map[string]any
 	if s.InputsJSON != "" {
 		_ = json.Unmarshal([]byte(s.InputsJSON), &inputs)
 	}
 	if inputs == nil {
 		inputs = map[string]any{}
+	}
+	var wakeInputs map[string]any
+	if s.WakePipelineID != "" && s.WakeInputsJSON != "" {
+		if err := json.Unmarshal([]byte(s.WakeInputsJSON), &wakeInputs); err != nil {
+			h.logger.Warn("unmarshal wake_inputs_json", "schedule_id", s.ID, "error", err)
+		}
 	}
 	return scheduleResponse{
 		ID:                    s.ID,
@@ -57,6 +74,13 @@ func (h *PipelineHandler) toScheduleResponse(s *pipeline.Schedule, slug string) 
 		LastStatus:            s.LastStatus,
 		LastRunID:             s.LastRunID,
 		NextRunAt:             s.NextRunAt,
+		WakePipelineID:        s.WakePipelineID,
+		WakePipelineSlug:      wakeSlug,
+		WakeInputs:            wakeInputs,
+		WakeCheckCount:        s.WakeCheckCount,
+		WakeFireCount:         s.WakeFireCount,
+		LastWakeAt:            s.LastWakeAt,
+		LastWakeStatus:        s.LastWakeStatus,
 		CreatedAt:             s.CreatedAt,
 		UpdatedAt:             s.UpdatedAt,
 	}
@@ -71,6 +95,53 @@ type scheduleRequestBody struct {
 	Timezone              string         `json:"timezone"`
 	Inputs                map[string]any `json:"inputs"`
 	Enabled               *bool          `json:"enabled,omitempty"`
+	// Wake gate. Pointers so PATCH can distinguish "absent — keep the
+	// existing gate" from explicit `""` — clear it. Slug preferred
+	// (UI-facing), ID accepted for CLI/API callers, same convention
+	// as the target_pipeline pair above.
+	WakePipelineSlug *string        `json:"wake_pipeline_slug,omitempty"`
+	WakePipelineID   *string        `json:"wake_pipeline_id,omitempty"`
+	WakeInputs       map[string]any `json:"wake_inputs,omitempty"`
+}
+
+// resolveWakePipeline validates a wake-gate reference at save time —
+// this is the enforcement point for "wake checks are free":
+//
+//  1. the probe exists in this workspace,
+//  2. it is NOT the schedule's own routine (self-gating runs the
+//     target twice per tick), and
+//  3. its definition declares `agentless: true`, so by the agentless
+//     guarantee it can never invoke an LLM.
+//
+// Returns (id, slug, error); errors are user-facing 400 material.
+func (h *PipelineHandler) resolveWakePipeline(r *http.Request, workspaceID, targetPipelineID, wakeID, wakeSlug string) (string, string, error) {
+	var p *pipeline.Pipeline
+	var err error
+	switch {
+	case wakeID != "":
+		p, err = h.store.GetByID(r.Context(), wakeID)
+		if err == nil && p.WorkspaceID != workspaceID {
+			err = errors.New("not in this workspace")
+		}
+	case wakeSlug != "":
+		p, err = h.store.GetBySlug(r.Context(), workspaceID, wakeSlug)
+	default:
+		return "", "", errors.New("wake_pipeline_slug or wake_pipeline_id required")
+	}
+	if err != nil {
+		return "", "", errors.New("wake pipeline not found")
+	}
+	if p.ID == targetPipelineID {
+		return "", "", errors.New("wake gate cannot reference the schedule's own routine")
+	}
+	dsl, err := pipeline.Parse([]byte(p.DefinitionJSON))
+	if err != nil {
+		return "", "", errors.New("wake pipeline definition does not parse")
+	}
+	if !dsl.Agentless {
+		return "", "", errors.New("wake gate requires an agentless routine — declare \"agentless\": true in " + p.Slug + " (wake checks must be free of LLM spend)")
+	}
+	return p.ID, p.Slug, nil
 }
 
 // CreateSchedule POST /workspaces/{wsId}/pipeline-schedules
@@ -122,6 +193,15 @@ func (h *PipelineHandler) CreateSchedule(w http.ResponseWriter, r *http.Request)
 		enabled = *body.Enabled
 	}
 
+	wakeID, wakeSlug := "", ""
+	if reqWakeID, reqWakeSlug, set := wakeRefFromBody(&body); set && (reqWakeID != "" || reqWakeSlug != "") {
+		wakeID, wakeSlug, err = h.resolveWakePipeline(r, workspaceID, pipelineID, reqWakeID, reqWakeSlug)
+		if err != nil {
+			replyError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+
 	in := pipeline.SaveScheduleInput{
 		WorkspaceID:           workspaceID,
 		Name:                  defaultIfBlank(body.Name, slug),
@@ -131,6 +211,8 @@ func (h *PipelineHandler) CreateSchedule(w http.ResponseWriter, r *http.Request)
 		Timezone:              body.Timezone,
 		Inputs:                body.Inputs,
 		Enabled:               enabled,
+		WakePipelineID:        wakeID,
+		WakeInputs:            body.WakeInputs,
 	}
 	saved, err := h.schedules.Save(r.Context(), in)
 	if err != nil {
@@ -145,7 +227,24 @@ func (h *PipelineHandler) CreateSchedule(w http.ResponseWriter, r *http.Request)
 		replyError(w, http.StatusInternalServerError, "failed to create schedule")
 		return
 	}
-	writeJSON(w, http.StatusCreated, h.toScheduleResponse(saved, slug))
+	writeJSON(w, http.StatusCreated, h.toScheduleResponse(saved, slug, wakeSlug))
+}
+
+// wakeRefFromBody collapses the wake_pipeline_slug / wake_pipeline_id
+// pointer pair into (id, slug, set). set=false means the caller didn't
+// mention the gate at all (PATCH keeps the existing one); set=true
+// with both values empty is an explicit clear.
+func wakeRefFromBody(body *scheduleRequestBody) (id, slug string, set bool) {
+	if body.WakePipelineID == nil && body.WakePipelineSlug == nil {
+		return "", "", false
+	}
+	if body.WakePipelineID != nil {
+		id = *body.WakePipelineID
+	}
+	if body.WakePipelineSlug != nil {
+		slug = *body.WakePipelineSlug
+	}
+	return id, slug, true
 }
 
 // ListSchedules GET /workspaces/{wsId}/pipeline-schedules
@@ -166,15 +265,21 @@ func (h *PipelineHandler) ListSchedules(w http.ResponseWriter, r *http.Request) 
 	// render the schedule next to the pipeline name. Avoid N+1 with
 	// a small in-memory cache.
 	slugCache := map[string]string{}
-	for _, s := range rows {
-		slug, ok := slugCache[s.TargetPipelineID]
+	lookupSlug := func(pipelineID string) string {
+		if pipelineID == "" {
+			return ""
+		}
+		slug, ok := slugCache[pipelineID]
 		if !ok {
-			if p, perr := h.store.GetByID(r.Context(), s.TargetPipelineID); perr == nil {
+			if p, perr := h.store.GetByID(r.Context(), pipelineID); perr == nil {
 				slug = p.Slug
 			}
-			slugCache[s.TargetPipelineID] = slug
+			slugCache[pipelineID] = slug
 		}
-		out = append(out, h.toScheduleResponse(s, slug))
+		return slug
+	}
+	for _, s := range rows {
+		out = append(out, h.toScheduleResponse(s, lookupSlug(s.TargetPipelineID), lookupSlug(s.WakePipelineID)))
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -255,6 +360,37 @@ func (h *PipelineHandler) UpdateSchedule(w http.ResponseWriter, r *http.Request)
 		_ = json.Unmarshal([]byte(existing.InputsJSON), &inputs)
 	}
 
+	// Wake gate merge: absent fields keep the existing gate, an
+	// explicit empty ref clears it, a non-empty ref re-validates
+	// (exists, agentless, not self) like create.
+	wakeID := existing.WakePipelineID
+	wakeSlug := ""
+	if reqWakeID, reqWakeSlug, set := wakeRefFromBody(&body); set {
+		if reqWakeID == "" && reqWakeSlug == "" {
+			wakeID = ""
+		} else {
+			wakeID, wakeSlug, err = h.resolveWakePipeline(r, workspaceID, pipelineID, reqWakeID, reqWakeSlug)
+			if err != nil {
+				replyError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+		}
+	} else if wakeID != "" {
+		// Unchanged gate — re-check it didn't become the new target
+		// (a PATCH that retargets the schedule onto its own probe).
+		if wakeID == pipelineID {
+			replyError(w, http.StatusBadRequest, "wake gate cannot reference the schedule's own routine")
+			return
+		}
+		if p, perr := h.store.GetByID(r.Context(), wakeID); perr == nil {
+			wakeSlug = p.Slug
+		}
+	}
+	wakeInputs := body.WakeInputs
+	if wakeInputs == nil && wakeID != "" {
+		_ = json.Unmarshal([]byte(existing.WakeInputsJSON), &wakeInputs)
+	}
+
 	in := pipeline.SaveScheduleInput{
 		ID:                    scheduleID,
 		WorkspaceID:           workspaceID,
@@ -265,6 +401,8 @@ func (h *PipelineHandler) UpdateSchedule(w http.ResponseWriter, r *http.Request)
 		Timezone:              tz,
 		Inputs:                inputs,
 		Enabled:               enabled,
+		WakePipelineID:        wakeID,
+		WakeInputs:            wakeInputs,
 	}
 	saved, err := h.schedules.Save(r.Context(), in)
 	if err != nil {
@@ -276,7 +414,7 @@ func (h *PipelineHandler) UpdateSchedule(w http.ResponseWriter, r *http.Request)
 		replyError(w, http.StatusInternalServerError, "failed to update schedule")
 		return
 	}
-	writeJSON(w, http.StatusOK, h.toScheduleResponse(saved, slug))
+	writeJSON(w, http.StatusOK, h.toScheduleResponse(saved, slug, wakeSlug))
 }
 
 // DeleteSchedule DELETE /workspaces/{wsId}/pipeline-schedules/{scheduleId}

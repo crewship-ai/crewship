@@ -49,6 +49,12 @@ const (
 	TriggeredViaSchedule     TriggeredVia = "schedule"
 	TriggeredViaWebhook      TriggeredVia = "webhook"
 	TriggeredViaCallPipeline TriggeredVia = "call_pipeline"
+	// TriggeredViaWakeCheck marks probe runs the scheduler fired to
+	// evaluate a schedule's wake gate (pipeline_schedules.
+	// wake_pipeline_id). Always an agentless routine; high-frequency
+	// crons produce many of these, so run lists can filter them out
+	// by this marker.
+	TriggeredViaWakeCheck TriggeredVia = "wake_check"
 	// TriggeredViaIssue marks runs fired from an issue's "Run routine"
 	// button. TriggeredByID carries the issue identifier (e.g. ENG-15)
 	// so the runs list can JOIN back to missions for the source pill.

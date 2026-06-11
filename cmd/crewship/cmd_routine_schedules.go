@@ -35,8 +35,32 @@ type scheduleRow struct {
 	LastStatus            *string                `json:"last_status,omitempty"`
 	LastRunID             *string                `json:"last_run_id,omitempty"`
 	NextRunAt             *string                `json:"next_run_at,omitempty"`
+	WakePipelineID        string                 `json:"wake_pipeline_id,omitempty"`
+	WakePipelineSlug      string                 `json:"wake_pipeline_slug,omitempty"`
+	WakeInputs            map[string]interface{} `json:"wake_inputs,omitempty"`
+	WakeCheckCount        int                    `json:"wake_check_count,omitempty"`
+	WakeFireCount         int                    `json:"wake_fire_count,omitempty"`
+	LastWakeAt            *string                `json:"last_wake_at,omitempty"`
+	LastWakeStatus        string                 `json:"last_wake_status,omitempty"`
 	CreatedAt             string                 `json:"created_at"`
 	UpdatedAt             string                 `json:"updated_at"`
+}
+
+// wakeCell renders the WAKE column: the probe slug plus woke/checked
+// telemetry once the gate has actually run ("cost-probe 3/96" = 96
+// checks, 3 fires). "—" = ungated.
+func wakeCell(s scheduleRow) string {
+	if s.WakePipelineSlug == "" && s.WakePipelineID == "" {
+		return "—"
+	}
+	label := s.WakePipelineSlug
+	if label == "" {
+		label = shortID(s.WakePipelineID)
+	}
+	if s.WakeCheckCount > 0 {
+		return fmt.Sprintf("%s %d/%d", label, s.WakeFireCount, s.WakeCheckCount)
+	}
+	return label
 }
 
 var routineSchedulesCmd = &cobra.Command{
@@ -47,14 +71,23 @@ named, targets one routine by slug, and can be enabled/disabled
 independently. The scheduler runs in-process and ticks every 30s, so
 the minimum cron resolution is one minute.
 
+A schedule may carry a WAKE GATE: an agentless probe routine that runs
+first on every tick — free of LLM spend by the agentless guarantee —
+and the main routine fires only when the probe's final output is
+truthy (same falsy rule as step 'if:' conditions). The list view
+shows woke/checked telemetry per gated schedule.
+
 Examples:
   crewship routine schedules list
   crewship routine schedules list --slug summarize-text
   crewship routine schedules create --slug summarize-text \
       --name "daily-summary" --cron "0 9 * * *" --inputs '{"text":"…"}'
+  crewship routine schedules create --slug cost-report \
+      --cron "*/15 * * * *" --wake-slug cost-spike-probe   # LLM only on spike
   crewship routine schedules enable <schedule_id>
   crewship routine schedules disable <schedule_id>
   crewship routine schedules update <schedule_id> --cron "0 8 * * *"
+  crewship routine schedules update <schedule_id> --no-wake   # drop the gate
   crewship routine schedules now <schedule_id>     # force-fire ad-hoc
   crewship routine schedules delete <schedule_id>
 `,
@@ -110,7 +143,7 @@ var routineSchedulesListCmd = &cobra.Command{
 			return nil
 		}
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "ID\tNAME\tROUTINE\tCRON\tTZ\tENABLED\tNEXT")
+		fmt.Fprintln(w, "ID\tNAME\tROUTINE\tCRON\tTZ\tENABLED\tWAKE\tNEXT")
 		for _, s := range rows {
 			next := "—"
 			if s.NextRunAt != nil && *s.NextRunAt != "" {
@@ -120,8 +153,8 @@ var routineSchedulesListCmd = &cobra.Command{
 			if s.Enabled {
 				enabled = "yes"
 			}
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-				shortID(s.ID), s.Name, s.TargetPipelineSlug, s.CronExpr, s.Timezone, enabled, next)
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+				shortID(s.ID), s.Name, s.TargetPipelineSlug, s.CronExpr, s.Timezone, enabled, wakeCell(s), next)
 		}
 		return w.Flush()
 	},
@@ -137,8 +170,13 @@ var routineSchedulesCreateCmd = &cobra.Command{
 		timezone, _ := cmd.Flags().GetString("timezone")
 		inputsJSON, _ := cmd.Flags().GetString("inputs")
 		enabled, _ := cmd.Flags().GetBool("enabled")
+		wakeSlug, _ := cmd.Flags().GetString("wake-slug")
+		wakeInputsJSON, _ := cmd.Flags().GetString("wake-inputs")
 		if slug == "" || cronExpr == "" {
 			return fmt.Errorf("--slug and --cron are required")
+		}
+		if wakeInputsJSON != "" && wakeSlug == "" {
+			return fmt.Errorf("--wake-inputs requires --wake-slug")
 		}
 		if name == "" {
 			name = fmt.Sprintf("%s schedule", slug)
@@ -157,6 +195,24 @@ var routineSchedulesCreateCmd = &cobra.Command{
 				return fmt.Errorf("--inputs must be valid JSON: %w", err)
 			}
 		}
+		body := map[string]interface{}{
+			"name":                 name,
+			"target_pipeline_slug": slug,
+			"cron_expr":            cronExpr,
+			"timezone":             timezone,
+			"inputs":               inputs,
+			"enabled":              enabled,
+		}
+		if wakeSlug != "" {
+			body["wake_pipeline_slug"] = wakeSlug
+			if wakeInputsJSON != "" {
+				var wakeInputs map[string]interface{}
+				if err := json.Unmarshal([]byte(wakeInputsJSON), &wakeInputs); err != nil {
+					return fmt.Errorf("--wake-inputs must be valid JSON: %w", err)
+				}
+				body["wake_inputs"] = wakeInputs
+			}
+		}
 		if err := requireAuth(); err != nil {
 			return err
 		}
@@ -167,14 +223,7 @@ var routineSchedulesCreateCmd = &cobra.Command{
 		ws := client.GetWorkspaceID()
 		resp, err := client.Post(
 			fmt.Sprintf("/api/v1/workspaces/%s/pipeline-schedules", ws),
-			map[string]interface{}{
-				"name":                 name,
-				"target_pipeline_slug": slug,
-				"cron_expr":            cronExpr,
-				"timezone":             timezone,
-				"inputs":               inputs,
-				"enabled":              enabled,
-			},
+			body,
 		)
 		if err != nil {
 			return err
@@ -187,6 +236,9 @@ var routineSchedulesCreateCmd = &cobra.Command{
 		_ = json.NewDecoder(resp.Body).Decode(&out)
 		fmt.Printf("Schedule created: %s (%s @ %s)\n", out.Name, out.CronExpr, out.Timezone)
 		fmt.Printf("  ID:     %s\n", out.ID)
+		if out.WakePipelineSlug != "" {
+			fmt.Printf("  Wake:   %s (routine fires only when the probe's output is truthy)\n", out.WakePipelineSlug)
+		}
 		if out.NextRunAt != nil {
 			fmt.Printf("  Next:   %s\n", formatTimestamp(*out.NextRunAt))
 		}
@@ -220,8 +272,31 @@ var routineSchedulesUpdateCmd = &cobra.Command{
 			}
 			body["inputs"] = inputs
 		}
+		noWake, _ := cmd.Flags().GetBool("no-wake")
+		wakeSlug, _ := cmd.Flags().GetString("wake-slug")
+		if noWake && wakeSlug != "" {
+			return fmt.Errorf("--no-wake and --wake-slug are mutually exclusive")
+		}
+		if noWake {
+			// Explicit empty slug = clear the gate (the API treats an
+			// absent field as "keep existing").
+			body["wake_pipeline_slug"] = ""
+		}
+		if wakeSlug != "" {
+			body["wake_pipeline_slug"] = wakeSlug
+		}
+		if v, _ := cmd.Flags().GetString("wake-inputs"); v != "" {
+			if noWake {
+				return fmt.Errorf("--no-wake and --wake-inputs are mutually exclusive")
+			}
+			var wakeInputs map[string]interface{}
+			if err := json.Unmarshal([]byte(v), &wakeInputs); err != nil {
+				return fmt.Errorf("--wake-inputs must be valid JSON: %w", err)
+			}
+			body["wake_inputs"] = wakeInputs
+		}
 		if len(body) == 0 {
-			return fmt.Errorf("at least one of --cron / --timezone / --name / --enabled / --inputs required")
+			return fmt.Errorf("at least one of --cron / --timezone / --name / --enabled / --inputs / --wake-slug / --wake-inputs / --no-wake required")
 		}
 		if err := requireAuth(); err != nil {
 			return err
@@ -387,12 +462,17 @@ func init() {
 	routineSchedulesCreateCmd.Flags().String("timezone", "", "IANA timezone (default: UTC; for host-local pass an IANA zone like Europe/Prague — `date +%Z` returns abbreviations the server rejects)")
 	routineSchedulesCreateCmd.Flags().String("inputs", "", "JSON object passed as inputs on each tick (e.g. '{\"text\":\"…\"}')")
 	routineSchedulesCreateCmd.Flags().Bool("enabled", true, "create the schedule already enabled (default true)")
+	routineSchedulesCreateCmd.Flags().String("wake-slug", "", "wake gate: agentless probe routine evaluated before each fire — the main routine runs only when the probe's output is truthy")
+	routineSchedulesCreateCmd.Flags().String("wake-inputs", "", "JSON object passed to the wake probe on each tick (requires --wake-slug)")
 
 	routineSchedulesUpdateCmd.Flags().String("name", "", "new schedule name")
 	routineSchedulesUpdateCmd.Flags().String("cron", "", "new cron expression")
 	routineSchedulesUpdateCmd.Flags().String("timezone", "", "new IANA timezone")
 	routineSchedulesUpdateCmd.Flags().Bool("enabled", false, "set enabled state — explicit flag presence required (--enabled / --enabled=false)")
 	routineSchedulesUpdateCmd.Flags().String("inputs", "", "replace inputs JSON object")
+	routineSchedulesUpdateCmd.Flags().String("wake-slug", "", "set/replace the wake gate's agentless probe routine")
+	routineSchedulesUpdateCmd.Flags().String("wake-inputs", "", "replace the wake probe's inputs JSON object")
+	routineSchedulesUpdateCmd.Flags().Bool("no-wake", false, "remove the wake gate (schedule fires on every tick again)")
 
 	routineSchedulesDeleteCmd.Flags().Bool("yes", false, "skip the interactive confirmation prompt")
 
