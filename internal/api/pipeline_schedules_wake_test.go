@@ -165,6 +165,35 @@ func TestPipelineSchedules_Update_ClearsWakeGate(t *testing.T) {
 	}
 }
 
+func TestPipelineSchedules_List_ResolvesWakeSlug(t *testing.T) {
+	h, db, userID, wsID := scheduleHandlerRig(t)
+	seedPipelineRow(t, db, wsID, "pln_main", "ping-hosts")
+	seedPipelineRowDef(t, db, wsID, "pln_probe", "cost-probe", agentlessProbeDef)
+	createWakeGatedSchedule(t, h, userID, wsID)
+
+	req := withWorkspaceUser(httptest.NewRequest("GET",
+		"/api/v1/workspaces/"+wsID+"/pipeline-schedules", nil),
+		userID, wsID, "OWNER")
+	rr := httptest.NewRecorder()
+	h.ListSchedules(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d (body: %s)", rr.Code, rr.Body.String())
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &rows); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 schedule, got %d", len(rows))
+	}
+	if rows[0]["wake_pipeline_slug"] != "cost-probe" {
+		t.Errorf("list should resolve wake_pipeline_slug, got %v", rows[0]["wake_pipeline_slug"])
+	}
+	if rows[0]["target_pipeline_slug"] != "ping-hosts" {
+		t.Errorf("target slug resolution regressed: %v", rows[0]["target_pipeline_slug"])
+	}
+}
+
 func TestPipelineSchedules_Update_WithoutWakeFields_KeepsGate(t *testing.T) {
 	h, db, userID, wsID := scheduleHandlerRig(t)
 	seedPipelineRow(t, db, wsID, "pln_main", "ping-hosts")

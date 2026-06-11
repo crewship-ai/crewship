@@ -55,7 +55,9 @@ func (h *PipelineHandler) toScheduleResponse(s *pipeline.Schedule, slug, wakeSlu
 	}
 	var wakeInputs map[string]any
 	if s.WakePipelineID != "" && s.WakeInputsJSON != "" {
-		_ = json.Unmarshal([]byte(s.WakeInputsJSON), &wakeInputs)
+		if err := json.Unmarshal([]byte(s.WakeInputsJSON), &wakeInputs); err != nil {
+			h.logger.Warn("unmarshal wake_inputs_json", "schedule_id", s.ID, "error", err)
+		}
 	}
 	return scheduleResponse{
 		ID:                    s.ID,

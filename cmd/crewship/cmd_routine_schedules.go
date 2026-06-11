@@ -74,7 +74,7 @@ the minimum cron resolution is one minute.
 A schedule may carry a WAKE GATE: an agentless probe routine that runs
 first on every tick — free of LLM spend by the agentless guarantee —
 and the main routine fires only when the probe's final output is
-truthy (same falsey rule as step 'if:' conditions). The list view
+truthy (same falsy rule as step 'if:' conditions). The list view
 shows woke/checked telemetry per gated schedule.
 
 Examples:

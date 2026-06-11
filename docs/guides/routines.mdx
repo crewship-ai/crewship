@@ -332,7 +332,7 @@ Single-instance only — running multiple replicas would double-fire (no leader 
 
 ### Wake gates
 
-A plain cron fires the full routine — including its LLM steps — on every tick, even when there is nothing worth the model's attention. A **wake gate** fixes that: the schedule references an [agentless](#agentless-routines) probe routine, the scheduler runs the probe first on each tick (free of LLM spend by the agentless guarantee), and the main routine fires only when the probe's **final output is truthy**. Same falsey rule as step `if:` conditions — empty, `false`, `0`, `null`, `nil`, `no`, `off` (case-insensitive) skip the tick; anything else wakes the routine.
+A plain cron fires the full routine — including its LLM steps — on every tick, even when there is nothing worth the model's attention. A **wake gate** fixes that: the schedule references an [agentless](#agentless-routines) probe routine, the scheduler runs the probe first on each tick (free of LLM spend by the agentless guarantee), and the main routine fires only when the probe's **final output is truthy**. Same falsy rule as step `if:` conditions — empty, `false`, `0`, `null`, `nil`, `no`, `off` (case-insensitive) skip the tick; anything else wakes the routine.
 
 ```bash
 # LLM only runs when the probe prints something truthy:
