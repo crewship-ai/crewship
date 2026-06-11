@@ -20,7 +20,8 @@ export function useEngineStatus(workspaceId: string | null) {
   useEffect(() => {
     if (!workspaceId) return
 
-    let timer: ReturnType<typeof setInterval> | undefined
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout> | undefined
 
     async function check() {
       controllerRef.current?.abort()
@@ -52,11 +53,24 @@ export function useEngineStatus(workspaceId: string | null) {
       }
     }
 
+    // Self-scheduling timeout with ±15% jitter rather than a fixed
+    // setInterval: several open dashboards would otherwise poll
+    // /crewshipd on the same 10s tick and spike the backend. check()
+    // already aborts any in-flight request, so polls never overlap.
+    const schedule = () => {
+      const delay = POLL_INTERVAL * (0.85 + Math.random() * 0.3)
+      timer = setTimeout(async () => {
+        await check()
+        if (!cancelled) schedule()
+      }, delay)
+    }
+
     check()
-    timer = setInterval(check, POLL_INTERVAL)
+    schedule()
 
     return () => {
-      clearInterval(timer)
+      cancelled = true
+      if (timer) clearTimeout(timer)
       controllerRef.current?.abort()
     }
   }, [workspaceId])

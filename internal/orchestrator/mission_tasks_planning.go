@@ -362,6 +362,17 @@ func (e *MissionEngine) detectDeadlock(ctx context.Context, missionID string) bo
 	if err != nil || len(tasks) == 0 {
 		return false
 	}
+	return deadlockFromTasks(tasks)
+}
+
+// deadlockFromTasks is the pure decision over an already-loaded task
+// snapshot. It lets a single mission tick share one loadTasks across the
+// completion and deadlock checks (both read-only over mission_tasks and
+// run back-to-back) instead of issuing a separate query for each.
+func deadlockFromTasks(tasks []TaskInfo) bool {
+	if len(tasks) == 0 {
+		return false
+	}
 	for _, t := range tasks {
 		switch t.Status {
 		case "PENDING", "IN_PROGRESS", "AWAITING_APPROVAL":

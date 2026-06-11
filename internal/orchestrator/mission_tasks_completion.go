@@ -320,7 +320,15 @@ func (e *MissionEngine) checkMissionCompletion(ctx context.Context, ms *missionS
 	if err != nil {
 		return err
 	}
+	return e.checkMissionCompletionWithTasks(ctx, ms, tasks)
+}
 
+// checkMissionCompletionWithTasks is checkMissionCompletion over an
+// already-loaded task snapshot, so the tick loop can load mission_tasks
+// once and share the slice with the deadlock check. It only mutates the
+// missions table (never mission_tasks rows), which is what makes sharing
+// that snapshot with the subsequent deadlock check safe.
+func (e *MissionEngine) checkMissionCompletionWithTasks(ctx context.Context, ms *missionState, tasks []TaskInfo) error {
 	if len(tasks) == 0 {
 		// No mission_tasks — check if lead planning completed and all assignments are done.
 		// This handles the case where lead used /assign (creates assignments, not mission_tasks).
@@ -349,10 +357,9 @@ func (e *MissionEngine) checkMissionCompletion(ctx context.Context, ms *missionS
 		e.logger.Info("lead planning complete, all assignments finished — moving to REVIEW",
 			"mission_id", ms.ID, "total_assignments", total)
 		now := time.Now().UTC().Format(time.RFC3339)
-		_, err = e.db.ExecContext(ctx,
+		if _, err := e.db.ExecContext(ctx,
 			`UPDATE missions SET status = 'REVIEW', completed_at = ?, updated_at = ? WHERE id = ? AND status = 'IN_PROGRESS'`,
-			now, now, ms.ID)
-		if err != nil {
+			now, now, ms.ID); err != nil {
 			return fmt.Errorf("update mission to REVIEW: %w", err)
 		}
 		e.broadcastMissionStatus(ms, "REVIEW")
@@ -390,10 +397,9 @@ func (e *MissionEngine) checkMissionCompletion(ctx context.Context, ms *missionS
 	now := time.Now().UTC().Format(time.RFC3339)
 	completedAt := sql.NullString{String: now, Valid: true}
 
-	_, err = e.db.ExecContext(ctx,
+	if _, err := e.db.ExecContext(ctx,
 		`UPDATE missions SET status = ?, completed_at = ?, updated_at = ? WHERE id = ? AND status = 'IN_PROGRESS'`,
-		newStatus, completedAt, now, ms.ID)
-	if err != nil {
+		newStatus, completedAt, now, ms.ID); err != nil {
 		return fmt.Errorf("update mission status: %w", err)
 	}
 

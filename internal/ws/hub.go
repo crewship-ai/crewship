@@ -477,6 +477,7 @@ func (h *Hub) HandleUpgrade(w http.ResponseWriter, r *http.Request) {
 				send:          make(chan []byte, 64),
 				ctx:           ctx,
 				cancel:        cancel,
+				writeWait:     defaultWriteWait,
 			}
 
 			h.register <- client

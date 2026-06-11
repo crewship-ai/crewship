@@ -192,6 +192,13 @@ export function useChat({ wsUrl, getToken, sessionId }: UseChatOptions) {
   const [isStreaming, setIsStreaming] = useState(false)
   const textBufferRef = useRef("")
   const thinkingBufferRef = useRef("")
+  // Streaming text arrives token-by-token. pendingTextRef accumulates the
+  // tokens seen since the last commit; rafIdRef holds the scheduled frame
+  // so a whole burst commits with a single setTurns instead of one per
+  // token (each commit re-renders the streaming turn and re-parses its
+  // markdown). See flushPendingText / scheduleTextFlush below.
+  const pendingTextRef = useRef("")
+  const rafIdRef = useRef<number | null>(null)
   // True between stopGeneration() and the next sendMessage/regenerate/edit.
   // Used to drop chat_event deltas that arrive after a local cancel — the
   // server's cancel ack races against in-flight packets, and without this
@@ -211,7 +218,25 @@ export function useChat({ wsUrl, getToken, sessionId }: UseChatOptions) {
     textBufferRef.current = ""
     thinkingBufferRef.current = ""
     cancelledRef.current = false
+    // Drop any text buffered for the previous session and cancel its
+    // pending frame so it can't commit into the new session's turns.
+    pendingTextRef.current = ""
+    if (rafIdRef.current !== null) {
+      cancelAnimationFrame(rafIdRef.current)
+      rafIdRef.current = null
+    }
   }, [sessionId])
+
+  // Cancel any in-flight frame on unmount so the scheduled callback never
+  // runs against a torn-down component.
+  useEffect(() => {
+    return () => {
+      if (rafIdRef.current !== null) {
+        cancelAnimationFrame(rafIdRef.current)
+        rafIdRef.current = null
+      }
+    }
+  }, [])
 
   const handleAssignmentEvent = useCallback(
     (type: AssignmentEventType, payload: Record<string, unknown>) => {
@@ -411,6 +436,36 @@ export function useChat({ wsUrl, getToken, sessionId }: UseChatOptions) {
       ]
     })
   }, [])
+
+  // flushPendingText commits the buffered tokens (if any) with a single
+  // handleTextEvent call and clears the scheduled frame. Called from the
+  // animation frame and synchronously before any non-text event so the
+  // streamed text lands in order ahead of tool calls, status, done, etc.
+  const flushPendingText = useCallback(() => {
+    if (rafIdRef.current !== null) {
+      cancelAnimationFrame(rafIdRef.current)
+      rafIdRef.current = null
+    }
+    const pending = pendingTextRef.current
+    if (!pending) return
+    pendingTextRef.current = ""
+    handleTextEvent(pending)
+  }, [handleTextEvent])
+
+  // scheduleTextFlush coalesces a burst of tokens into one commit per
+  // animation frame. Falls back to a synchronous flush where rAF is
+  // unavailable (non-browser / tests without the global stubbed).
+  const scheduleTextFlush = useCallback(() => {
+    if (typeof requestAnimationFrame === "undefined") {
+      flushPendingText()
+      return
+    }
+    if (rafIdRef.current !== null) return
+    rafIdRef.current = requestAnimationFrame(() => {
+      rafIdRef.current = null
+      flushPendingText()
+    })
+  }, [flushPendingText])
 
   const handleToolCallEvent = useCallback(
     (content: string, metadata: Record<string, unknown> | undefined) => {
@@ -718,6 +773,9 @@ export function useChat({ wsUrl, getToken, sessionId }: UseChatOptions) {
         const payload = (typeof msg.payload === "object" && msg.payload !== null)
           ? msg.payload as Record<string, unknown>
           : {}
+        // Commit any buffered stream text before the assignment turn so
+        // the two render in arrival order.
+        flushPendingText()
         handleAssignmentEvent(msg.type as AssignmentEventType, payload)
         return
       }
@@ -741,15 +799,22 @@ export function useChat({ wsUrl, getToken, sessionId }: UseChatOptions) {
       const channelSessionId = msg.channel?.startsWith("session:") ? msg.channel.slice(8) : undefined
       if (channelSessionId && channelSessionId !== sessionId) return
 
+      // Text streams token-by-token: buffer and commit once per animation
+      // frame. Every other event commits the buffered text first (below)
+      // so nothing renders ahead of the text it followed on the wire.
+      if (eventType === "text") {
+        pendingTextRef.current += content
+        scheduleTextFlush()
+        return
+      }
+      flushPendingText()
+
       switch (eventType) {
         case "status":
           handleStatusEvent(content)
           break
         case "thinking":
           handleThinkingEvent(content, metadata)
-          break
-        case "text":
-          handleTextEvent(content)
           break
         case "tool_call":
           handleToolCallEvent(content, metadata)
@@ -782,7 +847,8 @@ export function useChat({ wsUrl, getToken, sessionId }: UseChatOptions) {
       handleAssignmentEvent,
       handleStatusEvent,
       handleThinkingEvent,
-      handleTextEvent,
+      flushPendingText,
+      scheduleTextFlush,
       handleToolCallEvent,
       handleToolResultEvent,
       handleImageEvent,
@@ -842,6 +908,13 @@ export function useChat({ wsUrl, getToken, sessionId }: UseChatOptions) {
     // or appending parts to it; cleared by the next sendMessage.
     setIsStreaming(false)
     cancelledRef.current = true
+    // Drop any buffered-but-uncommitted tokens and cancel their frame so
+    // a late flush can't re-open the turn we're closing here.
+    pendingTextRef.current = ""
+    if (rafIdRef.current !== null) {
+      cancelAnimationFrame(rafIdRef.current)
+      rafIdRef.current = null
+    }
     setTurns((prev) =>
       prev.map((t) =>
         t.role === "assistant" && t.isStreaming

@@ -299,6 +299,78 @@ func (s *Store) Read(ctx context.Context, sessionID string, offset, limit int) (
 	return messages, scanner.Err()
 }
 
+// ReadTail returns the newest maxMessages messages of a session,
+// oldest-first within that window. Unlike Read(offset, limit) — which
+// returns the HEAD (oldest) slice — ReadTail keeps a bounded ring buffer
+// while streaming the JSONL, so peak memory is O(maxMessages) rather than
+// O(file size). A full conversation can grow to hundreds of thousands of
+// turns; loading it whole just to keep the recent window is wasteful and,
+// at the extreme, a memory hazard. maxMessages <= 0 means "no cap" and
+// behaves like a full read. A missing session file returns (nil, nil).
+func (s *Store) ReadTail(ctx context.Context, sessionID string, maxMessages int) ([]Message, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := validateID(sessionID); err != nil {
+		return nil, fmt.Errorf("invalid session ID: %w", err)
+	}
+
+	path := filepath.Join(s.basePath, "conversations", sessionID+".jsonl")
+	f, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("open %s: %w", path, err)
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+
+	// ring holds at most maxMessages entries; head is the index of the
+	// oldest retained message. Once full we overwrite the oldest, so the
+	// buffer always holds the most recent window seen so far.
+	var ring []Message
+	head := 0
+	count := 0
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		var msg Message
+		if err := json.Unmarshal(line, &msg); err != nil {
+			continue
+		}
+		if maxMessages <= 0 {
+			ring = append(ring, msg)
+			continue
+		}
+		if len(ring) < maxMessages {
+			ring = append(ring, msg)
+		} else {
+			ring[head] = msg
+			head = (head + 1) % maxMessages
+		}
+		count++
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+
+	if maxMessages <= 0 || count <= maxMessages {
+		return ring, nil
+	}
+
+	// Unroll the ring into chronological order starting at head.
+	out := make([]Message, 0, len(ring))
+	for i := 0; i < len(ring); i++ {
+		out = append(out, ring[(head+i)%len(ring)])
+	}
+	return out, nil
+}
+
 // Close closes all open session file handles.
 func (s *Store) Close() {
 	s.mu.Lock()
