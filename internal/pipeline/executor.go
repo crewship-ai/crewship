@@ -722,6 +722,30 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (result *
 		return result, nil
 	}
 
+	// Agentless guarantee — runtime belt-and-braces behind the
+	// save-time validator. A definition that reaches the executor with
+	// agentless=true AND an LLM-capable step (row written before the
+	// validator existed, or smuggled past it) fails here, before either
+	// scheduler can dispatch anything. One check covers linear, DAG,
+	// and dry-run paths alike.
+	if dsl.Agentless {
+		for i := range dsl.Steps {
+			st := &dsl.Steps[i]
+			if st.Type != StepAgentRun && st.Type != StepCallPipeline {
+				continue
+			}
+			result.Status = "FAILED"
+			result.FailedAtStep = st.ID
+			result.ErrorMessage = fmt.Sprintf("agentless routine contains %s step %q — token-zero guarantee violated; fix and re-save the definition", st.Type, st.ID)
+			emit.emitRunFailed(ctx, st.ID, result.ErrorMessage)
+			if in.Mode == ModeRun && in.pipeline != nil {
+				_ = e.store.RecordInvocation(ctx, in.pipeline.ID, "FAILED")
+			}
+			result.DurationMs = time.Since(startedAt).Milliseconds()
+			return result, nil
+		}
+	}
+
 	// DAG dispatch — if any step declares `needs:` AND we're not in
 	// dry-run (which still wants the linear "what would execute"
 	// preview), switch to the parallel scheduler. The linear loop

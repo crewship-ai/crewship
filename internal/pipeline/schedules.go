@@ -37,10 +37,31 @@ type Schedule struct {
 	LastStatus            string
 	LastRunID             string
 	NextRunAt             *time.Time
-	CreatedAt             time.Time
-	UpdatedAt             time.Time
-	DeletedAt             *time.Time
+
+	// Wake gate. When WakePipelineID is set, each cron tick first
+	// runs that (agentless — enforced at API save time) probe
+	// routine; the main routine fires only when the probe's final
+	// output is truthy (same falsey rule as step `if:`). Telemetry
+	// is kept apart from last_run_* so "checked 96×, woke 3×" is
+	// visible without conflating probe ticks with real runs.
+	WakePipelineID string
+	WakeInputsJSON string // raw JSON; parsed lazily at fire time
+	WakeCheckCount int
+	WakeFireCount  int
+	LastWakeAt     *time.Time
+	LastWakeStatus string // WOKE | SKIPPED | ERROR
+
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	DeletedAt *time.Time
 }
+
+// Wake check outcomes recorded in pipeline_schedules.last_wake_status.
+const (
+	WakeStatusWoke    = "WOKE"    // probe truthy (or absent) — main routine fired
+	WakeStatusSkipped = "SKIPPED" // probe falsey — tick skipped, no main run
+	WakeStatusError   = "ERROR"   // probe failed — failed OPEN, main routine fired
+)
 
 // SaveScheduleInput is the payload for ScheduleStore.Save.
 type SaveScheduleInput struct {
@@ -53,6 +74,13 @@ type SaveScheduleInput struct {
 	Timezone              string
 	Inputs                map[string]any
 	Enabled               bool
+	// WakePipelineID enables the wake gate ("" = no gate; on update,
+	// "" clears an existing gate — whole-row replace semantics, same
+	// as every other field here). The API layer validates the target
+	// exists, is agentless, and isn't the schedule's own routine; the
+	// store persists what it's given.
+	WakePipelineID string
+	WakeInputs     map[string]any
 }
 
 // ScheduleStore is the persistence + listing API for
@@ -96,6 +124,13 @@ func (s *ScheduleStore) Save(ctx context.Context, in SaveScheduleInput) (*Schedu
 	if string(inputsJSON) == "null" {
 		inputsJSON = []byte("{}")
 	}
+	wakeInputsJSON, err := json.Marshal(in.WakeInputs)
+	if err != nil {
+		return nil, fmt.Errorf("marshal wake inputs: %w", err)
+	}
+	if string(wakeInputsJSON) == "null" {
+		wakeInputsJSON = []byte("{}")
+	}
 	now := time.Now().UTC()
 
 	if in.ID == "" {
@@ -105,12 +140,14 @@ func (s *ScheduleStore) Save(ctx context.Context, in SaveScheduleInput) (*Schedu
 INSERT INTO pipeline_schedules (
     id, workspace_id, name, target_pipeline_id, target_pipeline_version,
     cron_expr, timezone, inputs_json, enabled, next_run_at,
+    wake_pipeline_id, wake_inputs_json,
     created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			id, in.WorkspaceID, in.Name, in.TargetPipelineID,
 			nullInt(in.TargetPipelineVersion),
 			in.CronExpr, in.Timezone, string(inputsJSON), boolToInt(in.Enabled),
 			nextRun.UTC().Format(time.RFC3339Nano),
+			nullStr(in.WakePipelineID), string(wakeInputsJSON),
 			now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano),
 		)
 		if err != nil {
@@ -124,11 +161,13 @@ INSERT INTO pipeline_schedules (
 UPDATE pipeline_schedules
 SET name = ?, target_pipeline_id = ?, target_pipeline_version = ?,
     cron_expr = ?, timezone = ?, inputs_json = ?, enabled = ?,
-    next_run_at = ?, updated_at = ?
+    next_run_at = ?, wake_pipeline_id = ?, wake_inputs_json = ?,
+    updated_at = ?
 WHERE id = ? AND deleted_at IS NULL`,
 		in.Name, in.TargetPipelineID, nullInt(in.TargetPipelineVersion),
 		in.CronExpr, in.Timezone, string(inputsJSON), boolToInt(in.Enabled),
 		nextRun.UTC().Format(time.RFC3339Nano),
+		nullStr(in.WakePipelineID), string(wakeInputsJSON),
 		now.Format(time.RFC3339Nano),
 		in.ID,
 	)
@@ -221,6 +260,39 @@ UPDATE pipeline_schedules
 SET last_run_at = ?, last_status = ?, last_run_id = ?, next_run_at = ?, updated_at = ?
 WHERE id = ?`,
 		now, status, nullStr(runID), nextRun.UTC().Format(time.RFC3339Nano), now, scheduleID,
+	)
+	return err
+}
+
+// recordWakeCheck persists the outcome of one wake-gate evaluation.
+// Counters + last_wake_* are wake-only telemetry — last_run_* stays
+// strictly about main runs. advanceNext is true on a SKIPPED tick
+// (no main run follows, so the wake record is what moves next_run_at
+// forward); on WOKE/ERROR the subsequent recordRun advances it.
+func (s *ScheduleStore) recordWakeCheck(ctx context.Context, scheduleID, status string, nextRun time.Time, advanceNext bool) error {
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	fired := 0
+	if status == WakeStatusWoke || status == WakeStatusError {
+		fired = 1
+	}
+	if advanceNext {
+		_, err := s.db.ExecContext(ctx, `
+UPDATE pipeline_schedules
+SET wake_check_count = wake_check_count + 1,
+    wake_fire_count = wake_fire_count + ?,
+    last_wake_at = ?, last_wake_status = ?, next_run_at = ?, updated_at = ?
+WHERE id = ?`,
+			fired, now, status, nextRun.UTC().Format(time.RFC3339Nano), now, scheduleID,
+		)
+		return err
+	}
+	_, err := s.db.ExecContext(ctx, `
+UPDATE pipeline_schedules
+SET wake_check_count = wake_check_count + 1,
+    wake_fire_count = wake_fire_count + ?,
+    last_wake_at = ?, last_wake_status = ?, updated_at = ?
+WHERE id = ?`,
+		fired, now, status, now, scheduleID,
 	)
 	return err
 }
@@ -323,6 +395,21 @@ func (s *PipelineScheduler) fireOne(ctx context.Context, sched *Schedule) {
 	}
 	nextRun := cronSched.Next(time.Now().In(loc))
 
+	// Wake gate — when the schedule carries a probe routine, run it
+	// first and only fall through to the main routine when the probe
+	// says wake. A SKIPPED tick advances next_run_at via the wake
+	// record (no recordRun follows) and leaves last_run_* untouched,
+	// so the run telemetry stays strictly about main runs.
+	if sched.WakePipelineID != "" {
+		proceed, wakeStatus := s.runWakeCheck(ctx, sched)
+		if err := s.store.recordWakeCheck(ctx, sched.ID, wakeStatus, nextRun, !proceed); err != nil {
+			s.logger.Warn("pipeline scheduler: record wake check", "error", err, "schedule", sched.ID)
+		}
+		if !proceed {
+			return
+		}
+	}
+
 	// Resolve pipeline + parse inputs
 	pipeline, err := s.pipelines.GetByID(ctx, sched.TargetPipelineID)
 	if err != nil {
@@ -362,11 +449,60 @@ func (s *PipelineScheduler) fireOne(ctx context.Context, sched *Schedule) {
 	}
 }
 
+// runWakeCheck executes the schedule's probe routine and maps its
+// outcome to (proceed, wakeStatus):
+//
+//   - probe COMPLETED + truthy final output → (true, WOKE)
+//   - probe COMPLETED + falsey final output → (false, SKIPPED)
+//   - probe failed / didn't load            → (true, ERROR)
+//
+// Errors fail OPEN: a monitoring schedule whose probe broke must wake
+// the main routine rather than go silently blind — occasional token
+// spend on a flapping probe is the cheaper failure mode. The ERROR
+// wake status keeps the breakage visible to operators.
+//
+// Truthiness reuses evalIfCondition, the same falsey rule step `if:`
+// conditions use (empty/false/0/null/nil/no/off → skip), so probe
+// authors learn one rule for both features.
+func (s *PipelineScheduler) runWakeCheck(ctx context.Context, sched *Schedule) (bool, string) {
+	var wakeInputs map[string]any
+	if sched.WakeInputsJSON != "" {
+		_ = json.Unmarshal([]byte(sched.WakeInputsJSON), &wakeInputs)
+	}
+	res, err := s.executor.Run(ctx, RunInput{
+		PipelineID:    sched.WakePipelineID,
+		WorkspaceID:   sched.WorkspaceID,
+		Inputs:        wakeInputs,
+		Mode:          ModeRun,
+		TriggeredVia:  TriggeredViaWakeCheck,
+		TriggeredByID: sched.ID,
+	})
+	if err != nil || res == nil || res.Status != "COMPLETED" {
+		errMsg := ""
+		if err != nil {
+			errMsg = err.Error()
+		} else if res != nil {
+			errMsg = res.ErrorMessage
+		}
+		s.logger.Warn("pipeline scheduler: wake check failed — failing open",
+			"schedule", sched.ID, "wake_pipeline", sched.WakePipelineID, "error", errMsg)
+		return true, WakeStatusError
+	}
+	if evalIfCondition(res.Output) {
+		return true, WakeStatusWoke
+	}
+	return false, WakeStatusSkipped
+}
+
 const scheduleSelect = `
 SELECT id, workspace_id, name, target_pipeline_id, target_pipeline_version,
        cron_expr, timezone, inputs_json, enabled,
        last_run_at, COALESCE(last_status, ''), COALESCE(last_run_id, ''),
-       next_run_at, created_at, updated_at, deleted_at
+       next_run_at,
+       COALESCE(wake_pipeline_id, ''), COALESCE(wake_inputs_json, '{}'),
+       wake_check_count, wake_fire_count,
+       last_wake_at, COALESCE(last_wake_status, ''),
+       created_at, updated_at, deleted_at
 FROM pipeline_schedules`
 
 func scanSchedule(rs rowScanner) (*Schedule, error) {
@@ -375,6 +511,7 @@ func scanSchedule(rs rowScanner) (*Schedule, error) {
 		targetVersion sql.NullInt64
 		lastRunAt     sql.NullString
 		nextRunAt     sql.NullString
+		lastWakeAt    sql.NullString
 		deletedAt     sql.NullString
 		enabled       int
 		createdAt     string
@@ -384,7 +521,11 @@ func scanSchedule(rs rowScanner) (*Schedule, error) {
 		&s.ID, &s.WorkspaceID, &s.Name, &s.TargetPipelineID, &targetVersion,
 		&s.CronExpr, &s.Timezone, &s.InputsJSON, &enabled,
 		&lastRunAt, &s.LastStatus, &s.LastRunID,
-		&nextRunAt, &createdAt, &updatedAt, &deletedAt,
+		&nextRunAt,
+		&s.WakePipelineID, &s.WakeInputsJSON,
+		&s.WakeCheckCount, &s.WakeFireCount,
+		&lastWakeAt, &s.LastWakeStatus,
+		&createdAt, &updatedAt, &deletedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -396,6 +537,7 @@ func scanSchedule(rs rowScanner) (*Schedule, error) {
 	}
 	s.LastRunAt = parseTimePtr(lastRunAt.String)
 	s.NextRunAt = parseTimePtr(nextRunAt.String)
+	s.LastWakeAt = parseTimePtr(lastWakeAt.String)
 	s.CreatedAt = parseTimeOrZero(createdAt)
 	s.UpdatedAt = parseTimeOrZero(updatedAt)
 	if deletedAt.Valid {

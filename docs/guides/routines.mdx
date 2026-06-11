@@ -93,6 +93,7 @@ Minimal valid routine:
 | `max_concurrent` | integer | Cap on simultaneous runs sharing the resolved `concurrency_key`. Defaults to `1` when `concurrency_key` is set (strict per-key serialisation); ignored otherwise. |
 | `guardrails` | object | Per-routine [Lookout](/guides/lookout) policy. `guardrails.input.prompt_injection.action`: `block` (default) \| `sanitize` \| `log`. |
 | `eval` | object | Continuous online grading. See [Online eval](#online-eval-sampler) below. |
+| `agentless` | boolean | Token-zero guarantee: the routine may only contain `http` / `code` / `wait` / `transform` steps and can never invoke an LLM. See [Agentless routines](#agentless-routines). |
 
 ### InputSpec
 
@@ -256,6 +257,33 @@ Any step can carry `"if": "{{ inputs.run_summary }}"`. The placeholder is render
 
 Steps with no overlapping `needs` execute in parallel (one goroutine wave per ready set). Final output picks the unique leaf node; for multi-leaf DAGs the first leaf in source order wins.
 
+## Agentless routines
+
+Declare `"agentless": true` to get a **token-zero guarantee**: the routine can never invoke an LLM, no matter who edits it later. This is what makes high-frequency automation (health checks, metric probes, TLS expiry watches) free to run on a tight cron.
+
+```json
+{
+  "dsl_version": "1.0",
+  "name": "cost-spike-probe",
+  "agentless": true,
+  "egress_targets": ["billing.example.com"],
+  "steps": [
+    { "id": "fetch", "type": "http",
+      "http": { "method": "GET", "url": "https://billing.example.com/today" } },
+    { "id": "judge", "type": "code",
+      "code": { "runtime": "bash",
+        "code": "[ \"$TODAY_USD\" -gt 100 ] && echo true || echo false" } }
+  ]
+}
+```
+
+Enforced at two layers:
+
+- **Save time** — validation rejects `agent_run` (direct LLM spend), `call_pipeline` (the target resolves by slug at runtime, so a nested routine could gain an agent step later and silently break the guarantee), and `eval.online` with `sample_rate > 0` (online grading runs a grader agent against the routine's runs).
+- **Run time** — the executor independently refuses to dispatch an LLM-capable step inside an agentless run, so even a definition written before the validator existed fails closed.
+
+Everything else works as usual: egress allowlist, credentials, versioning, dry-run, schedules, webhooks. Agentless routines are also the only valid probes for [wake gates](#wake-gates).
+
 ## Two-tier execution
 
 The economic value-prop: an Opus-class authoring model designs the routine, a Haiku-class executor model runs each invocation. Workspace `execution_tiers_json` maps complexity classes to `(adapter, model)`:
@@ -301,6 +329,29 @@ crewship routine schedules create --slug summarize-text \
 <Warning>
 Single-instance only — running multiple replicas would double-fire (no leader election yet).
 </Warning>
+
+### Wake gates
+
+A plain cron fires the full routine — including its LLM steps — on every tick, even when there is nothing worth the model's attention. A **wake gate** fixes that: the schedule references an [agentless](#agentless-routines) probe routine, the scheduler runs the probe first on each tick (free of LLM spend by the agentless guarantee), and the main routine fires only when the probe's **final output is truthy**. Same falsey rule as step `if:` conditions — empty, `false`, `0`, `null`, `nil`, `no`, `off` (case-insensitive) skip the tick; anything else wakes the routine.
+
+```bash
+# LLM only runs when the probe prints something truthy:
+crewship routine schedules create --slug cost-report \
+    --cron "*/15 * * * *" \
+    --wake-slug cost-spike-probe --wake-inputs '{"threshold":"100"}'
+
+# Drop the gate later (fire on every tick again):
+crewship routine schedules update <schedule_id> --no-wake
+```
+
+This gives schedules a cost ladder: **agentless schedule** (always free) → **wake-gated schedule** (probe free, LLM only on signal) → **plain schedule** (today's default, unchanged).
+
+Semantics worth knowing:
+
+- The probe must be `agentless: true`, live in the same workspace, and can't be the schedule's own routine — all validated when the schedule is saved.
+- **Probe errors fail open**: a broken or deleted probe wakes the main routine instead of going silently blind, and records `last_wake_status: ERROR` so you can see the probe needs fixing.
+- A skipped tick advances `next_run_at` but leaves `last_run_*` untouched — run telemetry stays strictly about main runs. Wake telemetry lives in `wake_check_count` / `wake_fire_count` / `last_wake_at` / `last_wake_status`, and `routine schedules list` shows it as `<probe> woke/checked` in the WAKE column.
+- Probe executions are regular runs with `triggered_via: wake_check`, so they're auditable in run history and filterable out of dashboards.
 
 ### Webhooks
 
@@ -527,6 +578,17 @@ crewship routine dry-run summarize-text --inputs '{"text":"..."}'
 
 Returns a `would_execute` report with which agent, which tier, the rendered prompt, and an estimated cost. Zero side effects.
 
+### "Watch a metric on a tight cron, spend tokens only on a spike"
+
+Author an [agentless](#agentless-routines) probe that prints `true`/`false`, then attach it as a [wake gate](#wake-gates):
+
+```bash
+crewship routine schedules create --slug incident-summary \
+    --cron "*/5 * * * *" --wake-slug error-rate-probe
+```
+
+The probe runs every 5 minutes for free; the LLM routine fires only on the ticks where the probe's output is truthy. `routine schedules list` shows how often the gate woke vs. checked.
+
 ### "Cancel an in-flight run"
 
 ```bash
@@ -637,7 +699,7 @@ The `pipeline` alias is preserved for back-compat on the legacy subcommands (`pi
 
 ## Backend reference
 
-- Migrations v78 (pipelines + execution_tiers_json), v79 (versions + waitpoints), v80 (schedules), v81 (run idempotency), v82 (webhooks)
+- Migrations v78 (pipelines + execution_tiers_json), v79 (versions + waitpoints), v80 (schedules), v81 (run idempotency), v82 (webhooks), v115 (schedule wake gates)
 - Source: `internal/pipeline/` (~10 700 LOC, 36 files)
 - API: `internal/api/pipelines.go`, `pipeline_runs.go`, `pipeline_schedules.go`, `pipeline_webhooks.go`
 - Sidecar: `internal/sidecar/pipelines.go` (port 9119)

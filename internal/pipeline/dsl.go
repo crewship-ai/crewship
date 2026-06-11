@@ -104,6 +104,9 @@ func Validate(dsl *DSL, agentSlugs map[string]struct{}, pipelineSlugs map[string
 	if len(dsl.Steps) == 0 {
 		return errors.New("pipeline: at least one step required")
 	}
+	if err := validateAgentless(dsl); err != nil {
+		return err
+	}
 
 	seenStepIDs := make(map[string]struct{}, len(dsl.Steps))
 	for i, st := range dsl.Steps {

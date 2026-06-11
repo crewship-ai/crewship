@@ -33,7 +33,13 @@ CREATE TABLE IF NOT EXISTS pipeline_schedules (
     next_run_at              TEXT,
     created_at               TEXT NOT NULL DEFAULT (datetime('now','subsec')),
     updated_at               TEXT NOT NULL DEFAULT (datetime('now','subsec')),
-    deleted_at               TEXT
+    deleted_at               TEXT,
+    wake_pipeline_id         TEXT,
+    wake_inputs_json         TEXT NOT NULL DEFAULT '{}',
+    wake_check_count         INTEGER NOT NULL DEFAULT 0,
+    wake_fire_count          INTEGER NOT NULL DEFAULT 0,
+    last_wake_at             TEXT,
+    last_wake_status         TEXT
 );
 `
 

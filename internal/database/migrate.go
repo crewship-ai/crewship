@@ -1432,6 +1432,13 @@ END;
 	// when every step id survived the edit. See
 	// migrate_consts_v114_pipeline_runs_definition_hash.go.
 	{version: 114, name: "pipeline_runs_definition_hash", sql: migrationPipelineRunsDefinitionHash},
+
+	// v115: wake-gate columns on pipeline_schedules — an optional
+	// agentless probe routine evaluated before each cron fire, plus
+	// the checked/woke telemetry counters. NULL wake_pipeline_id
+	// keeps existing schedules on today's fire-every-tick path. See
+	// migrate_consts_v115_schedule_wake_gates.go.
+	{version: 115, name: "schedule_wake_gates", sql: migrationScheduleWakeGates},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

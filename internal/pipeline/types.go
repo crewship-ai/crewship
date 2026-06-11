@@ -58,8 +58,22 @@ type DSL struct {
 	// to enqueue a completed run for rubric grading via grader_agent.
 	// Empty leaves online grading disabled (existing replay/regression
 	// suites still work).
-	Eval  *EvalConfig `json:"eval,omitempty"`
-	Steps []Step      `json:"steps"`
+	Eval *EvalConfig `json:"eval,omitempty"`
+	// Agentless is the token-zero guarantee: a routine that declares
+	// it can never invoke an LLM. Save-time validation rejects
+	// agent_run (the obvious spend), call_pipeline (its target
+	// resolves by slug at RUNTIME, so the referenced routine could
+	// gain an agent step later and silently break the guarantee),
+	// and eval.online with sample_rate > 0 (online grading runs a
+	// grader agent against this routine's completed runs). The
+	// executor re-checks at run time as belt-and-braces for rows
+	// written before the validator existed.
+	//
+	// Agentless routines are what makes schedule wake gates free:
+	// pipeline_schedules.wake_pipeline_id may only reference an
+	// agentless routine.
+	Agentless bool   `json:"agentless,omitempty"`
+	Steps     []Step `json:"steps"`
 }
 
 // EvalConfig groups eval-time configuration. Currently scoped to
