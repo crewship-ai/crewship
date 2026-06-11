@@ -55,7 +55,7 @@ Subcommand status:
   get        GET    /api/v1/workspaces/{ws}/pipelines/{slug}
   run        POST   /api/v1/workspaces/{ws}/pipelines/{slug}/run
   dry-run    POST   /api/v1/workspaces/{ws}/pipelines/{slug}/dry_run
-  save       POST   /api/v1/workspaces/{ws}/pipelines/test_run + .../internal/pipelines/save
+  save       POST   /api/v1/workspaces/{ws}/pipelines/test_run + .../pipelines/save
   delete     DELETE /api/v1/workspaces/{ws}/pipelines/{slug}
   runs       GET    /api/v1/workspaces/{ws}/pipelines/{slug}/runs (journal-backed)
   versions   GET    /api/v1/workspaces/{ws}/pipelines/{slug}/versions
