@@ -56,6 +56,10 @@ func stuckSweeperRig(t *testing.T) (*AssignmentHandler, *sql.DB, string, []strin
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	hub := ws.NewHub(logger, nil, ws.NopValidatorForTests, ws.NopSessionsForTests)
 	h := NewAssignmentHandler(db, nil, hub, "internal-test", logger)
+	// Pumped dispatches run on fire-and-forget goroutines; without this
+	// wait they race the fixture DB close and TempDir removal (observed
+	// as "TempDir RemoveAll cleanup: directory not empty" under load).
+	t.Cleanup(h.WaitDispatches)
 	return h, db, crewID, agentIDs, chatID
 }
 

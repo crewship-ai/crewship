@@ -142,7 +142,9 @@ func (h *AssignmentHandler) pumpAndDispatch(ctx context.Context, crewID string) 
 		return 0, fmt.Errorf("pumpAndDispatch: pump crew %s: %w", crewID, err)
 	}
 	for _, id := range claimed {
+		h.dispatchWG.Add(1)
 		go func(assignmentID string) {
+			defer h.dispatchWG.Done()
 			if derr := h.dispatchByID(context.Background(), assignmentID); derr != nil {
 				h.logger.Error("pumped dispatch failed",
 					"assignment_id", assignmentID,
