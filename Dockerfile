@@ -47,7 +47,7 @@ RUN --mount=type=cache,id=go-mod,target=/go/pkg/mod \
     -o /crewship ./cmd/crewship
 
 # -- Runner --
-FROM alpine:3.23
+FROM alpine:3.24
 
 RUN apk --no-cache add ca-certificates && \
     addgroup -g 1001 -S crewship && adduser -u 1001 -S crewship -G crewship
