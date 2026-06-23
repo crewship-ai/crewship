@@ -196,6 +196,14 @@ func (w *Writer) Flush(ctx context.Context) error {
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
+	case <-w.closed:
+		// Closed while the barrier was in flight. The first select can
+		// win the queue send even when w.closed is already closed (select
+		// picks randomly among ready cases), and after the worker exits
+		// nobody will ever ack — without this case the caller hangs
+		// forever. The shutdown drain persisted everything buffered
+		// before the barrier, so the durability promise holds.
+		return nil
 	}
 }
 
@@ -290,6 +298,14 @@ func (w *Writer) run() {
 			for {
 				select {
 				case e := <-w.queue:
+					// A flush barrier caught in shutdown must be acked,
+					// not persisted — appending it to batch would both
+					// hang the Flush caller and write the sentinel row.
+					if e.flushBarrierAck != nil {
+						drain()
+						close(e.flushBarrierAck)
+						continue
+					}
 					batch = append(batch, e)
 					if len(batch) >= w.flushN {
 						drain()

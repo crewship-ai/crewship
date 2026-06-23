@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sync"
 
 	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/journal"
@@ -32,6 +33,20 @@ type AssignmentHandler struct {
 	internalToken   string
 	missionCallback MissionCallback
 	journal         journal.Emitter
+
+	// dispatchWG tracks the async runAssignment/dispatchByID goroutines
+	// spawned by Create and pumpAndDispatch. Nothing in the request path
+	// waits on it; it exists so shutdown (and tests) can drain in-flight
+	// dispatches instead of leaving them racing the DB teardown.
+	dispatchWG sync.WaitGroup
+}
+
+// WaitDispatches blocks until every async dispatch goroutine spawned so
+// far has finished. Call during graceful shutdown after the listener
+// stops accepting requests; tests use it to keep spawned dispatches from
+// outliving their fixture DB.
+func (h *AssignmentHandler) WaitDispatches() {
+	h.dispatchWG.Wait()
 }
 
 // NewAssignmentHandler creates an AssignmentHandler with the given orchestrator, WebSocket hub, and internal token.

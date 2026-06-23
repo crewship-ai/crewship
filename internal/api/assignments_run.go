@@ -277,7 +277,11 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Run the sub-agent asynchronously
-	go h.runAssignment(context.Background(), assignmentID, body, target, creds)
+	h.dispatchWG.Add(1)
+	go func() {
+		defer h.dispatchWG.Done()
+		h.runAssignment(context.Background(), assignmentID, body, target, creds)
+	}()
 
 	writeJSON(w, http.StatusCreated, map[string]string{
 		"assignment_id": assignmentID,

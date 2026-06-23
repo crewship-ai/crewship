@@ -107,9 +107,11 @@ describe("useEngineStatus", () => {
 
     renderHook(() => useEngineStatus("ws-1"))
 
+    // waitFor polls on real time; under full-suite load the default
+    // 1s window is flaky.
     await waitFor(() => {
       expect(mockFetch).toHaveBeenCalledTimes(1)
-    })
+    }, { timeout: 5000 })
 
     await act(async () => {
       vi.advanceTimersByTime(10_000)
@@ -117,7 +119,7 @@ describe("useEngineStatus", () => {
 
     await waitFor(() => {
       expect(mockFetch).toHaveBeenCalledTimes(2)
-    })
+    }, { timeout: 5000 })
   })
 
   it("cleans up interval on unmount", async () => {
