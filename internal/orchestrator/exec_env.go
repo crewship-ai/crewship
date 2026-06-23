@@ -314,12 +314,11 @@ func BuildEnvVarsSidecar(req AgentRunRequest, keeperEnabled bool) []string {
 // CredentialEnvExposure describes a credential whose plaintext value is placed
 // directly into the agent container's environment by BuildEnvVarsSidecar, and is
 // therefore readable by the agent process (e.g. via `env` or /proc/self/environ).
-// It is the inverse of the isolation guarantee. API-key credentials for Claude
-// Code are isolated by the sidecar reverse-proxy and never appear here, but the
+// It is the inverse of the isolation guarantee. API keys for the proxy-injected
+// adapter are isolated by the sidecar reverse-proxy and never appear here, but the
 // following DO land in the env: OAuth tokens (HTTPS CONNECT tunnels can't be
-// proxied), BYO API keys for adapters that reach their upstream over CONNECT
-// (Codex/Gemini/OpenCode/Cursor/Droid), CLI tokens (read from env by
-// gh/vercel/etc.), and SECRET credentials with Keeper disabled. Surfacing these
+// proxied), BYO API keys for CONNECT-tunneled adapters, CLI tokens (read from env
+// by the CLI tooling), and SECRET credentials with Keeper disabled. Surfacing these
 // lets operators see and act on the credential-isolation gap rather than
 // discovering it only by reading the code.
 type CredentialEnvExposure struct {
@@ -357,12 +356,12 @@ func AgentEnvCredentialExposures(req AgentRunRequest, keeperEnabled bool) []Cred
 		}
 	}
 
-	// BYO API keys: adapters that talk to their upstream over an HTTPS CONNECT
-	// tunnel (Codex/Gemini/OpenCode/Cursor/Droid) get the real key written into
-	// the env, because the sidecar reverse-proxy only injects for api.anthropic.com
-	// (Claude Code's path returns an empty set and stays isolated). Mirror
-	// BuildEnvVarsSidecar's allowed-override loop exactly — one exposure per
-	// matching credential, keyed by its own EnvVarName.
+	// BYO API keys: CONNECT-tunneled adapters reach their upstream over an HTTPS
+	// CONNECT tunnel and get the real key written into the env, because the sidecar
+	// reverse-proxy only injects for the proxy-injected endpoint (the proxy-injected
+	// adapter returns an empty set and stays isolated). Mirror BuildEnvVarsSidecar's
+	// allowed-override loop exactly — one exposure per matching credential, keyed by
+	// its own EnvVarName.
 	if allowed := apiKeyEnvVarsForAdapter(req.CLIAdapter); len(allowed) > 0 {
 		for _, cred := range req.Credentials {
 			if cred.PlainValue == "" {
@@ -379,8 +378,8 @@ func AgentEnvCredentialExposures(req AgentRunRequest, keeperEnabled bool) []Cred
 		}
 	}
 
-	// CLI tokens: always injected to env — CLI tools (gh, vercel, ...) read
-	// credentials from env vars, which the HTTPS CONNECT proxy cannot rewrite.
+	// CLI tokens: always injected to env — CLI tooling reads credentials from env
+	// vars, which the HTTPS CONNECT proxy cannot rewrite.
 	for _, cred := range req.Credentials {
 		if cred.Type == "CLI_TOKEN" && cred.EnvVarName != "" && cred.PlainValue != "" {
 			out = append(out, CredentialEnvExposure{
