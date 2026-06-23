@@ -695,8 +695,12 @@ func TestEnsureCrewRuntime_StartError(t *testing.T) {
 
 func TestEnsureCrewRuntime_InitChownCreateFails_FallsBackToChmod(t *testing.T) {
 	t.Parallel()
-	if os.Geteuid() == 0 {
-		t.Skip("running as root — os.Chown succeeds, fallback unreachable")
+	if euid := os.Geteuid(); euid == 0 || euid == 1001 {
+		// The chmod-0777 fallback only triggers when os.Chown(dir, 1001, 1001)
+		// fails. Root can chown to anyone, and uid 1001 (the agent uid — and
+		// the GitHub Actions "runner" user) can chown the dir to itself, so in
+		// both cases chown succeeds and the fallback is unreachable.
+		t.Skip("euid can chown to agent uid 1001 — chmod fallback unreachable")
 	}
 
 	f := &covRT{

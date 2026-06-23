@@ -73,9 +73,21 @@ func TestWatch_EmitsLifecycleEvents(t *testing.T) {
 	if err := os.WriteFile(target, []byte("v2-longer"), 0o640); err != nil {
 		t.Fatalf("modify: %v", err)
 	}
-	modified := waitForEvent(t, events, "file_modified", "report.md")
-	if modified.Size != int64(len("v2-longer")) {
-		t.Errorf("modified size = %d, want %d", modified.Size, len("v2-longer"))
+	// On Linux, the initial create emits CREATE+MODIFY (both at the v1 size),
+	// so a stale file_modified for v1 can arrive before the v2 write's event.
+	// Drain file_modified events until one reports the new size.
+	wantSize := int64(len("v2-longer"))
+	var modified FileEvent
+	mdeadline := time.After(3 * time.Second)
+	for modified.Size != wantSize {
+		select {
+		case fe := <-events:
+			if fe.Event == "file_modified" && fe.Path == "report.md" {
+				modified = fe
+			}
+		case <-mdeadline:
+			t.Fatalf("timed out waiting for file_modified report.md size %d, last size %d", wantSize, modified.Size)
+		}
 	}
 
 	if err := os.Remove(target); err != nil {
