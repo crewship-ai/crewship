@@ -311,6 +311,81 @@ func BuildEnvVarsSidecar(req AgentRunRequest, keeperEnabled bool) []string {
 	return env
 }
 
+// CredentialEnvExposure describes a credential whose plaintext value is placed
+// directly into the agent container's environment by BuildEnvVarsSidecar, and is
+// therefore readable by the agent process (e.g. via `env` or /proc/self/environ).
+// It is the inverse of the isolation guarantee: API-key credentials are injected
+// by the sidecar proxy and never appear here, but OAuth tokens (HTTPS CONNECT
+// tunnels can't be proxied), CLI tokens (read from env by gh/vercel/etc.), and
+// SECRET credentials with Keeper disabled DO land in the env. Surfacing these lets
+// operators see and act on the credential-isolation gap rather than discovering it
+// only by reading the code.
+type CredentialEnvExposure struct {
+	EnvVarName string
+	Type       string
+	// Reason explains why the value is in the env and, when Actionable, how to
+	// close the gap.
+	Reason string
+	// Actionable is true when the operator can remediate the exposure through
+	// configuration (today: enabling Keeper isolates SECRET credentials). OAuth
+	// and CLI tokens are structurally un-isolatable behind the proxy, so they are
+	// reported as informational (Actionable=false).
+	Actionable bool
+}
+
+// AgentEnvCredentialExposures reports the credentials that BuildEnvVarsSidecar
+// injects as plaintext into the agent environment, mirroring its injection logic
+// exactly. The caller is expected to log the result so the isolation gap is
+// observable instead of silent. It performs no logging and allocates only when an
+// exposure actually exists.
+func AgentEnvCredentialExposures(req AgentRunRequest, keeperEnabled bool) []CredentialEnvExposure {
+	var out []CredentialEnvExposure
+
+	// OAuth: BuildEnvVarsSidecar injects only the FIRST matching token as
+	// CLAUDE_CODE_OAUTH_TOKEN and stops; mirror that so we don't over-report.
+	for _, cred := range req.Credentials {
+		isOAuth := cred.Type == "AI_CLI_TOKEN" || strings.HasPrefix(cred.PlainValue, "sk-ant-oat")
+		if isOAuth && cred.PlainValue != "" {
+			out = append(out, CredentialEnvExposure{
+				EnvVarName: "CLAUDE_CODE_OAUTH_TOKEN",
+				Type:       "AI_CLI_TOKEN",
+				Reason:     "OAuth token authenticates inside an HTTPS CONNECT tunnel the sidecar cannot inject into, so it must live in the agent env",
+			})
+			break
+		}
+	}
+
+	// CLI tokens: always injected to env — CLI tools (gh, vercel, ...) read
+	// credentials from env vars, which the HTTPS CONNECT proxy cannot rewrite.
+	for _, cred := range req.Credentials {
+		if cred.Type == "CLI_TOKEN" && cred.EnvVarName != "" && cred.PlainValue != "" {
+			out = append(out, CredentialEnvExposure{
+				EnvVarName: cred.EnvVarName,
+				Type:       "CLI_TOKEN",
+				Reason:     "CLI tools read credentials from env vars, which cannot be proxied",
+			})
+		}
+	}
+
+	// SECRET credentials: isolated behind the Keeper request/execute flow when
+	// Keeper is enabled, but injected to env as a legacy fallback when it is off.
+	// This is the one exposure an operator can close, so flag it actionable.
+	if !keeperEnabled {
+		for _, cred := range req.Credentials {
+			if cred.Type == "SECRET" && cred.EnvVarName != "" && cred.PlainValue != "" {
+				out = append(out, CredentialEnvExposure{
+					EnvVarName: cred.EnvVarName,
+					Type:       "SECRET",
+					Reason:     "Keeper is disabled; enable it (set KEEPER_MODEL / KEEPER_OLLAMA_URL) to isolate SECRET credentials behind /keeper/request",
+					Actionable: true,
+				})
+			}
+		}
+	}
+
+	return out
+}
+
 // apiKeyEnvVarsForAdapter returns the set of env-var names whose presence the
 // given CLI adapter's binary genuinely needs in order to authenticate. Used
 // by BuildEnvVarsSidecar to decide which dummy provider keys to overwrite with
