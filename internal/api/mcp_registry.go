@@ -111,14 +111,52 @@ const (
 // server.
 var mcpRegistryURL = "https://registry.modelcontextprotocol.io/v0/servers"
 
+// mcpRegistrySyncTimeout bounds one whole sync (all pages + the upsert
+// tx) when the caller's context carries no deadline of its own. The
+// boot-time worker passes a cancel-on-shutdown context — without this
+// cap a hung registry endpoint pins the sync goroutine for the
+// lifetime of the process (#653). Var so tests can shrink it.
+var mcpRegistrySyncTimeout = 5 * time.Minute
+
+// registryUpsertRow is one decoded registry entry, staged between the
+// fetch phase and the write phase of SyncMCPRegistry. Holding plain
+// values here (rather than exec'ing inside the fetch loop) is what
+// keeps the write transaction off the network path.
+type registryUpsertRow struct {
+	name, displayName, description, icon, transport string
+	websiteURL, sourceURL                           string
+	packageName, packageRegistry                    string
+	command, endpoint, authType, envVarsJSON        string
+	verified                                        int
+}
+
 // SyncMCPRegistry fetches the official MCP registry and upserts all servers
 // into the local mcp_registry_servers table. Only entries flagged as
 // _meta.…/official.isLatest are persisted (the registry now returns every
 // version of every server, and we want one row per server).
+//
+// Two strictly separated phases (#653): first every page is fetched and
+// decoded with NO database transaction open, then a single short write
+// tx upserts the staged rows. SQLite allows one writer per database —
+// the pre-fix version opened the tx before the first page fetch, so a
+// slow or hung registry endpoint blocked every other writer in the
+// process (journal, run projections, registries) for the duration.
 func SyncMCPRegistry(ctx context.Context, db *sql.DB, logger *slog.Logger) error {
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, mcpRegistrySyncTimeout)
+		defer cancel()
+	}
 	client := &http.Client{Timeout: 60 * time.Second}
-
 	now := time.Now().UTC().Format(time.RFC3339)
+
+	// ── Phase 1: fetch + decode all pages (no tx held) ──
+	rows, totalEntries, err := fetchRegistryRows(ctx, client)
+	if err != nil {
+		return err
+	}
+
+	// ── Phase 2: one short write transaction for the upserts ──
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin sync transaction: %w", err)
@@ -163,9 +201,36 @@ func SyncMCPRegistry(ctx context.Context, db *sql.DB, logger *slog.Logger) error
 	}
 	defer stmt.Close()
 
+	count := 0
+	for _, row := range rows {
+		if _, err := stmt.ExecContext(ctx,
+			row.name, row.name, row.displayName, row.description,
+			row.icon, row.transport, row.websiteURL, row.sourceURL,
+			row.packageName, row.packageRegistry, row.command, row.endpoint,
+			row.authType, row.envVarsJSON, "",
+			row.verified, now,
+		); err != nil {
+			logger.Warn("skip registry entry", "name", row.name, "error", err)
+			continue
+		}
+		count++
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit sync transaction: %w", err)
+	}
+
+	logger.Info("MCP registry sync complete", "servers_synced", count, "total_entries", totalEntries)
+	return nil
+}
+
+// fetchRegistryRows pages through the registry and returns the staged
+// upsert rows plus the raw entry count (all versions, pre-filter).
+// Pure network + decode — callers must not hold a DB transaction.
+func fetchRegistryRows(ctx context.Context, client *http.Client) ([]registryUpsertRow, int, error) {
+	var rows []registryUpsertRow
 	cursor := ""
 	totalEntries := 0
-	count := 0
 	for pageNum := 0; pageNum < mcpRegistryMaxPages; pageNum++ {
 		pageURL := fmt.Sprintf("%s?limit=%d", mcpRegistryURL, mcpRegistryPageSize)
 		if cursor != "" {
@@ -174,13 +239,13 @@ func SyncMCPRegistry(ctx context.Context, db *sql.DB, logger *slog.Logger) error
 
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, pageURL, nil)
 		if err != nil {
-			return fmt.Errorf("create registry request: %w", err)
+			return nil, 0, fmt.Errorf("create registry request: %w", err)
 		}
 		req.Header.Set("Accept", "application/json")
 
 		resp, err := client.Do(req)
 		if err != nil {
-			return fmt.Errorf("fetch registry: %w", err)
+			return nil, 0, fmt.Errorf("fetch registry: %w", err)
 		}
 
 		if resp.StatusCode != http.StatusOK {
@@ -191,19 +256,19 @@ func SyncMCPRegistry(ctx context.Context, db *sql.DB, logger *slog.Logger) error
 			// the schema mismatch was. (Issue #540.)
 			snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 			resp.Body.Close()
-			return fmt.Errorf("registry returned HTTP %d for %s: %s",
+			return nil, 0, fmt.Errorf("registry returned HTTP %d for %s: %s",
 				resp.StatusCode, pageURL, strings.TrimSpace(string(snippet)))
 		}
 
 		body, err := io.ReadAll(io.LimitReader(resp.Body, 50<<20))
 		resp.Body.Close()
 		if err != nil {
-			return fmt.Errorf("read registry response: %w", err)
+			return nil, 0, fmt.Errorf("read registry response: %w", err)
 		}
 
 		var listPage registryListResponse
 		if err := json.Unmarshal(body, &listPage); err != nil {
-			return fmt.Errorf("parse registry response: %w", err)
+			return nil, 0, fmt.Errorf("parse registry response: %w", err)
 		}
 
 		for _, envelope := range listPage.Servers {
@@ -268,17 +333,22 @@ func SyncMCPRegistry(ctx context.Context, db *sql.DB, logger *slog.Logger) error
 				verified = 1
 			}
 
-			if _, err := stmt.ExecContext(ctx,
-				entry.Name, entry.Name, displayName, entry.Description,
-				icon, transport, entry.WebsiteURL, entry.Repository.URL,
-				packageName, packageRegistry, command, endpoint,
-				authType, string(envVarsJSON), "",
-				verified, now,
-			); err != nil {
-				logger.Warn("skip registry entry", "name", entry.Name, "error", err)
-				continue
-			}
-			count++
+			rows = append(rows, registryUpsertRow{
+				name:            entry.Name,
+				displayName:     displayName,
+				description:     entry.Description,
+				icon:            icon,
+				transport:       transport,
+				websiteURL:      entry.WebsiteURL,
+				sourceURL:       entry.Repository.URL,
+				packageName:     packageName,
+				packageRegistry: packageRegistry,
+				command:         command,
+				endpoint:        endpoint,
+				authType:        authType,
+				envVarsJSON:     string(envVarsJSON),
+				verified:        verified,
+			})
 		}
 
 		if listPage.Metadata.NextCursor == "" || listPage.Metadata.NextCursor == cursor {
@@ -287,12 +357,7 @@ func SyncMCPRegistry(ctx context.Context, db *sql.DB, logger *slog.Logger) error
 		cursor = listPage.Metadata.NextCursor
 	}
 
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit sync transaction: %w", err)
-	}
-
-	logger.Info("MCP registry sync complete", "servers_synced", count, "total_entries", totalEntries)
-	return nil
+	return rows, totalEntries, nil
 }
 
 // --- Background worker ---
