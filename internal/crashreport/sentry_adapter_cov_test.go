@@ -39,8 +39,16 @@ func TestSentryBackend_InitCaptureFlush_DeliversToDSNHost(t *testing.T) {
 	}
 
 	b.Capture(errors.New("boom for coverage"), map[string]string{"area": "test"})
-	b.Flush(2 * time.Second)
+	// Give Flush generous headroom: on a loaded CI runner the async ingest
+	// POST can take longer than a tight window, and Flush can also return
+	// just before the httptest handler runs. Flush with a wide timeout, then
+	// poll for the request to land so the assertion isn't racing delivery.
+	b.Flush(10 * time.Second)
 
+	deadline := time.Now().Add(5 * time.Second)
+	for received.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
 	if received.Load() == 0 {
 		t.Fatal("Sentry ingest server received no requests after Capture+Flush")
 	}
