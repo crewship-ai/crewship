@@ -221,12 +221,26 @@ func TestShutdown_RunsOptionalShutdownHooks(t *testing.T) {
 
 func TestStartIPC_ListenErrorPropagates(t *testing.T) {
 	s := newTestServerForT(t)
-	// Parent directory does not exist → net.Listen("unix", ...) fails.
-	s.cfg.IPC.SocketPath = filepath.Join(t.TempDir(), "missing-subdir", "ipc.sock")
+	// Force net.Listen("unix", ...) to fail deterministically by placing the
+	// socket *under a regular file*, so both startIPC's removeSocketFile
+	// MkdirAll and the subsequent Listen fail with ENOTDIR.
+	//
+	// A merely *missing* parent dir is NOT enough: startIPC calls
+	// removeSocketFile first, which MkdirAll-creates the parent, after which
+	// Listen succeeds and the blocking Serve() never returns — this
+	// goroutine-less startIPC() call would then hang forever instead of
+	// returning the expected error. (Locally on macOS the missing-dir variant
+	// only "passed" by accident, because the long /var/folders TempDir path
+	// blew the unix-socket path limit; on Linux CI it hung.)
+	notADir := filepath.Join(t.TempDir(), "not-a-dir")
+	if err := os.WriteFile(notADir, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s.cfg.IPC.SocketPath = filepath.Join(notADir, "ipc.sock")
 
 	err := s.startIPC()
 	if err == nil {
-		t.Fatal("want listen error for socket in missing directory, got nil")
+		t.Fatal("want listen error for socket under a non-directory, got nil")
 	}
 }
 
