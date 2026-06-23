@@ -132,7 +132,7 @@ func TestCovRN_EnrichRuns_Branches(t *testing.T) {
 			Metadata: map[string]any{"k": "v"}},
 		{ID: "r2", WorkspaceID: wsID, AgentID: "covrn-e-ag2", Status: journal.RunStatus("RUNNING"),
 			CreatedAt: started},
-		{ID: "r3", WorkspaceID: wsID, AgentID: "", CreatedAt: started}, // agentless: skipped in lookup
+		{ID: "r3", WorkspaceID: wsID, AgentID: "", CreatedAt: started},            // agentless: skipped in lookup
 		{ID: "r4", WorkspaceID: wsID, AgentID: "covrn-e-ag1", CreatedAt: started}, // dup agent id
 	}
 	out := h.enrichRuns(context.Background(), wsID, runs)

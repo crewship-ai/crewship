@@ -14,9 +14,9 @@ import (
 )
 
 const (
-	covMissionCrew = "ccrewa1234567890123456789"
-	covMissionIDCli7   = "cmiss1234567890123456789"
-	covLeadID      = "clead1234567890123456789"
+	covMissionCrew   = "ccrewa1234567890123456789"
+	covMissionIDCli7 = "cmiss1234567890123456789"
+	covLeadID        = "clead1234567890123456789"
 )
 
 // covMissionStubs registers crews + agents + missions lists used by the

@@ -358,9 +358,9 @@ func TestMain_ViolationsExitOne(t *testing.T) {
 	//  - v2 is renamed
 	//  - v3 is removed entirely
 	head := baseMigrateGo
-	head = strings.Replace(head, "PRIMARY KEY", "NOT NULL", 1)                                       // body edit
+	head = strings.Replace(head, "PRIMARY KEY", "NOT NULL", 1)                                          // body edit
 	head = strings.Replace(head, `{version: 2, name: "add_flags"`, `{version: 2, name: "add_flag2"`, 1) // rename
-	head = strings.Replace(head, "\t{version: 3, name: \"inline_only\"},\n", "", 1)                  // removal
+	head = strings.Replace(head, "\t{version: 3, name: \"inline_only\"},\n", "", 1)                     // removal
 	if err := os.WriteFile(filepath.Join(dir, "internal", "database", "migrate.go"), []byte(head), 0o644); err != nil {
 		t.Fatal(err)
 	}

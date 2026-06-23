@@ -632,9 +632,9 @@ func setDeadCLI(t *testing.T) {
 // applicable), and a dead server.
 func TestWorkspaceCmds_GuardsAndTransport(t *testing.T) {
 	type cmdCase struct {
-		name      string
-		needsWS   bool
-		run       func() error
+		name    string
+		needsWS bool
+		run     func() error
 	}
 	cases := []cmdCase{
 		{"list", false, func() error { return workspaceListCmd.RunE(workspaceListCmd, nil) }},

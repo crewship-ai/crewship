@@ -42,22 +42,22 @@ type covRT struct {
 	mu sync.Mutex
 
 	// knobs
-	listBody         string                                        // GET /containers/json ("" => "[]")
-	listStatus       int                                           // 0 => 200
-	inspectBody      string                                        // GET /containers/{id}/json ("" => 404)
-	inspectStatus    int                                           // 0 => 200 (when inspectBody set)
-	networksStatus   int                                           // 0 => 200 list containing cfg network
-	networkName      string                                        // network reported by list
-	createFn         func(req container.CreateRequest) (string, int) // nil => ("cov-cid-...", 201)
-	startFn          func(id string) int                           // nil => 204
+	listBody           string                                          // GET /containers/json ("" => "[]")
+	listStatus         int                                             // 0 => 200
+	inspectBody        string                                          // GET /containers/{id}/json ("" => 404)
+	inspectStatus      int                                             // 0 => 200 (when inspectBody set)
+	networksStatus     int                                             // 0 => 200 list containing cfg network
+	networkName        string                                          // network reported by list
+	createFn           func(req container.CreateRequest) (string, int) // nil => ("cov-cid-...", 201)
+	startFn            func(id string) int                             // nil => 204
 	volumeCreateFail   bool
-	volumeCreateFailOn int // fail only the Nth volumes/create call (1-based)
-	imgInspectFn     func(call int) (string, int) // nil => local-present body
-	pullStatus       int                          // 0 => 200 "{}"
-	execCreateStatus int                          // 0 => 200
-	execIDs          []string                     // successive exec-create ids (last repeats)
-	execStartStatus  int                          // 0 => 200
-	execInspectFn    func(execID string, call int) (string, int) // nil => not running, exit 0
+	volumeCreateFailOn int                                         // fail only the Nth volumes/create call (1-based)
+	imgInspectFn       func(call int) (string, int)                // nil => local-present body
+	pullStatus         int                                         // 0 => 200 "{}"
+	execCreateStatus   int                                         // 0 => 200
+	execIDs            []string                                    // successive exec-create ids (last repeats)
+	execStartStatus    int                                         // 0 => 200
+	execInspectFn      func(execID string, call int) (string, int) // nil => not running, exit 0
 
 	// recordings
 	creates         []container.CreateRequest
@@ -826,10 +826,10 @@ func TestEnsureCrewRuntime_ExtraMountsAllowlist(t *testing.T) {
 
 	team := covTeam()
 	team.ExtraMounts = []provider.CrewMount{
-		{Source: "/", Target: "/host"},                                       // must be rejected
-		{Source: "/var/run/docker.sock", Target: "/var/run/docker.sock"},     // allowlisted bind
-		{Source: "covvol", Target: "/data", Type: "volume"},                  // named volume OK
-		{Source: "/etc/shadow", Target: "/secrets-steal", Type: "bind"},      // must be rejected
+		{Source: "/", Target: "/host"},                                   // must be rejected
+		{Source: "/var/run/docker.sock", Target: "/var/run/docker.sock"}, // allowlisted bind
+		{Source: "covvol", Target: "/data", Type: "volume"},              // named volume OK
+		{Source: "/etc/shadow", Target: "/secrets-steal", Type: "bind"},  // must be rejected
 	}
 	if _, err := p.EnsureCrewRuntime(context.Background(), team); err != nil {
 		t.Fatalf("EnsureCrewRuntime: %v", err)

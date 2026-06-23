@@ -28,11 +28,11 @@ import (
 const (
 	covWorkspaceIDCli1 = "cworkspace0123456789abcd"
 	covAgentIDCli1     = "cagent0123456789abcdefgh"
-	covAgent2ID    = "cagent20123456789abcdefg"
-	covSkillID     = "cskill0123456789abcdefgh"
-	covCrewID      = "ccrew0123456789abcdefghi"
-	covCredID      = "ccred0123456789abcdefghi"
-	covIntgID      = "cintg0123456789abcdefghi"
+	covAgent2ID        = "cagent20123456789abcdefg"
+	covSkillID         = "cskill0123456789abcdefgh"
+	covCrewID          = "ccrew0123456789abcdefghi"
+	covCredID          = "ccred0123456789abcdefghi"
+	covIntgID          = "cintg0123456789abcdefghi"
 )
 
 // covSetup snapshots CLI globals, spins up a stub API server, and points
@@ -552,7 +552,7 @@ func TestSkillCreateRunECov_PrintMode(t *testing.T) {
 	genPath := "/api/v1/workspaces/" + covWorkspaceIDCli1 + "/skills/generate"
 	s.OnPost(genPath, clitest.JSONResponse(200, map[string]string{
 		"skill_id": covSkillID, "slug": "pdf-cleanup",
-		"content": "---\nname: pdf-cleanup\n---\ngenerated body",
+		"content":     "---\nname: pdf-cleanup\n---\ngenerated body",
 		"scan_status": "CLEAN",
 	}))
 	covSetFlag(t, skillCreateCmd, "slug", "pdf-cleanup")

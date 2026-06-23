@@ -279,7 +279,7 @@ func TestFollowJournal_ReconnectThenPermanent(t *testing.T) {
 			fmt.Fprint(w, `data: {"ts":"2026-01-01T00:00:00Z","entry_type":"run.completed","severity":"info","summary":"stream entry","actor_type":"agent"}`+"\n\n")
 			fmt.Fprint(w, "data: not-json\n\n")
 			fmt.Fprint(w, "id: 43\n\n") // id-only frame: advances cursor, no data
-			return // server closes; client should reconnect
+			return                      // server closes; client should reconnect
 		}
 		lastEventID.Store(r.Header.Get("Last-Event-ID"))
 		w.WriteHeader(http.StatusNotFound)

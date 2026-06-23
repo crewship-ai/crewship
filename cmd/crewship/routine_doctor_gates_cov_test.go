@@ -38,8 +38,8 @@ func TestCheckValidationGates_StepsWithoutValidation(t *testing.T) {
 
 	def := map[string]interface{}{
 		"steps": []interface{}{
-			"not-a-map", // non-map entries are skipped
-			map[string]interface{}{"id": "s1"},                        // no validation block
+			"not-a-map",                        // non-map entries are skipped
+			map[string]interface{}{"id": "s1"}, // no validation block
 			map[string]interface{}{"id": "s2", "validation": "wrong"}, // wrong shape
 		},
 	}

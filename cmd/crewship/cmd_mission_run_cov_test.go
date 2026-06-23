@@ -263,11 +263,13 @@ func missionRunRunners(t *testing.T) map[string]func() error {
 	covSetFlagCli6(t, missionRestartCmd, "yes", "true")
 	covSetFlagCli6(t, missionTaskUpdateCmd, "title", "x")
 	return map[string]func() error{
-		"start":       func() error { return missionStartCmd.RunE(missionStartCmd, []string{covMissionIDCli6}) },
-		"resume":      func() error { return missionResumeCmd.RunE(missionResumeCmd, []string{covMissionIDCli6}) },
-		"add-task":    func() error { return missionAddTaskCmd.RunE(missionAddTaskCmd, []string{covMissionIDCli6}) },
-		"restart":     func() error { return missionRestartCmd.RunE(missionRestartCmd, []string{covMissionIDCli6}) },
-		"task-update": func() error { return missionTaskUpdateCmd.RunE(missionTaskUpdateCmd, []string{covMissionIDCli6, "task1"}) },
+		"start":    func() error { return missionStartCmd.RunE(missionStartCmd, []string{covMissionIDCli6}) },
+		"resume":   func() error { return missionResumeCmd.RunE(missionResumeCmd, []string{covMissionIDCli6}) },
+		"add-task": func() error { return missionAddTaskCmd.RunE(missionAddTaskCmd, []string{covMissionIDCli6}) },
+		"restart":  func() error { return missionRestartCmd.RunE(missionRestartCmd, []string{covMissionIDCli6}) },
+		"task-update": func() error {
+			return missionTaskUpdateCmd.RunE(missionTaskUpdateCmd, []string{covMissionIDCli6, "task1"})
+		},
 	}
 }
 

@@ -177,9 +177,9 @@ func (covG2FailStore) Revoke(context.Context, string, string) error { return nil
 func (covG2FailStore) RevokeAllForUser(context.Context, string, string) (int64, error) {
 	return 0, nil
 }
-func (covG2FailStore) TouchLastUsed(context.Context, string) error                { return nil }
+func (covG2FailStore) TouchLastUsed(context.Context, string) error                    { return nil }
 func (covG2FailStore) RotateRefreshJti(context.Context, string, string, string) error { return nil }
-func (covG2FailStore) SetClock(func() time.Time)                                  {}
+func (covG2FailStore) SetClock(func() time.Time)                                      {}
 
 var _ sessions.Store = covG2FailStore{}
 

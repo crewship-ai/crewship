@@ -134,11 +134,11 @@ func TestCrewContainerNameCustomPrefix(t *testing.T) {
 
 func TestEnsureNetwork(t *testing.T) {
 	tests := []struct {
-		name        string
-		body        string
-		wantErr     string
-		wantCreate  bool
-		denyCreate  bool
+		name       string
+		body       string
+		wantErr    string
+		wantCreate bool
+		denyCreate bool
 	}{
 		{
 			name:       "list unavailable is non-fatal",

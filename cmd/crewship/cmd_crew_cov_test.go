@@ -51,7 +51,7 @@ func covCrewListPayload() []map[string]any {
 		{
 			"id": covCrewIDCli4, "name": "Engineering", "slug": "engineering",
 			"container_memory_mb": 2048, "container_cpus": 1.5,
-			"network_mode": "restricted",
+			"network_mode":  "restricted",
 			"runtime_image": "mcr.microsoft.com/devcontainers/javascript-node:22-bookworm",
 			"cached_image":  "crewship-cache:02be226ac713abcd",
 			"_count":        map[string]int{"agents": 3, "members": 2},
@@ -319,9 +319,9 @@ func TestCrewStatusRunE_PerEndpointFailures(t *testing.T) {
 	// Each sub-fetch failure surfaces with its own prefix so the
 	// operator knows which call broke.
 	type tc struct {
-		name     string
-		install  func(stub *clitest.StubServer)
-		wantErr  string
+		name    string
+		install func(stub *clitest.StubServer)
+		wantErr string
 	}
 	healthyCrew := func(stub *clitest.StubServer) {
 		stub.OnGet("/api/v1/crews/"+covCrewIDCli4, clitest.JSONResponse(200, map[string]string{"name": "E", "slug": "e"}))

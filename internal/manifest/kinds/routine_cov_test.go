@@ -275,8 +275,8 @@ func TestRoutineCov_ListRoutines(t *testing.T) {
 
 	t.Run("wrapped shape with per-slug fetch", func(t *testing.T) {
 		c := newCovClient(map[string]covRoute{
-			"GET " + pipes:           {body: `{"pipelines":[{"slug":"r1"}]}`},
-			"GET " + pipes + "/r1":   {body: `{"id":"p1","slug":"r1","name":"R1","definition":{"dsl_version":"1.0"}}`},
+			"GET " + pipes:         {body: `{"pipelines":[{"slug":"r1"}]}`},
+			"GET " + pipes + "/r1": {body: `{"id":"p1","slug":"r1","name":"R1","definition":{"dsl_version":"1.0"}}`},
 		})
 		out, err := listRoutines(context.Background(), c, "ws_cov")
 		if err != nil {

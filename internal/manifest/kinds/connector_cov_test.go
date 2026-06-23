@@ -227,7 +227,7 @@ func TestConnectorCov_ExportConnectors(t *testing.T) {
 	})
 	t.Run("detail fetch failure → shell doc", func(t *testing.T) {
 		c := newCovClient(map[string]covRoute{
-			"GET " + list:                  {body: `[{"id":"linear","installed":true}]`},
+			"GET " + list:                   {body: `[{"id":"linear","installed":true}]`},
 			"GET /api/v1/connectors/linear": {status: 500, body: "x"},
 		})
 		docs, err := ExportConnectors(context.Background(), c)
@@ -261,8 +261,8 @@ func TestConnectorCov_Plan_InstallExec(t *testing.T) {
 	t.Run("install POST 500", func(t *testing.T) {
 		d := connectorCovDoc(true)
 		c := newCovClient(map[string]covRoute{
-			"GET /api/v1/credentials":                 {body: `[{"name":"LINEAR_PROD_KEY"}]`},
-			"POST /api/v1/connectors/linear/install":  {status: 500, body: "boom"},
+			"GET /api/v1/credentials":                {body: `[{"name":"LINEAR_PROD_KEY"}]`},
+			"POST /api/v1/connectors/linear/install": {status: 500, body: "boom"},
 		})
 		items, err := d.Plan(context.Background(), c, remote)
 		if err != nil {

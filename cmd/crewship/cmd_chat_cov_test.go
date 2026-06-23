@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -389,7 +390,7 @@ func TestPostMultipart_NilContextAndExistingWorkspaceParam(t *testing.T) {
 	stub.OnPost("/api/v1/x", clitest.JSONResponse(200, map[string]any{"ok": true}))
 
 	// Path already carries workspace_id → must NOT be overwritten.
-	resp, err := postMultipart(nil, newAPIClient(), "/api/v1/x?workspace_id=explicit", "text/plain", strings.NewReader("body"))
+	resp, err := postMultipart(context.Background(), newAPIClient(), "/api/v1/x?workspace_id=explicit", "text/plain", strings.NewReader("body"))
 	if err != nil {
 		t.Fatalf("postMultipart: %v", err)
 	}
@@ -407,7 +408,7 @@ func TestPostMultipart_BadURL(t *testing.T) {
 	covStub(t)
 	client := newAPIClient()
 	client.BaseURL = "http://[::1]:bad"
-	if _, err := postMultipart(nil, client, "/x", "text/plain", strings.NewReader("b")); err == nil {
+	if _, err := postMultipart(context.Background(), client, "/x", "text/plain", strings.NewReader("b")); err == nil {
 		t.Fatal("expected parse error for invalid base URL")
 	}
 }

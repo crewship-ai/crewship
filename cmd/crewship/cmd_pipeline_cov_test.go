@@ -262,7 +262,7 @@ func TestPipelineSaveRunE(t *testing.T) {
 			!strings.Contains(err.Error(), "step 2 exploded") {
 			t.Fatalf("want test_run failure error, got %v", err)
 		}
-		if n := len(stub.CallsFor("POST", "/api/v1/internal/pipelines/save")); n != 0 {
+		if n := len(stub.CallsFor("POST", pipelinesPathCov()+"/save")); n != 0 {
 			t.Errorf("save endpoint must not be called after failed test_run; got %d calls", n)
 		}
 	})
@@ -273,8 +273,9 @@ func TestPipelineSaveRunE(t *testing.T) {
 		setupStubCLICov(t, stub)
 		stub.OnPost(pipelinesPathCov()+"/test_run", clitest.JSONResponse(200, map[string]any{
 			"status": "COMPLETED", "duration_ms": 120, "cost_usd": 0.01,
+			"save_token": "tok-happy",
 		}))
-		stub.OnPost("/api/v1/internal/pipelines/save", clitest.JSONResponse(200, map[string]any{
+		stub.OnPost(pipelinesPathCov()+"/save", clitest.JSONResponse(200, map[string]any{
 			"id": "p9", "slug": "email-fetch-v2",
 			"definition_hash": "abcdef0123456789deadbeef",
 		}))
@@ -310,7 +311,7 @@ func TestPipelineSaveRunE(t *testing.T) {
 			t.Errorf("test_run sample_inputs: %v", testBody["sample_inputs"])
 		}
 
-		saveCalls := stub.CallsFor("POST", "/api/v1/internal/pipelines/save")
+		saveCalls := stub.CallsFor("POST", pipelinesPathCov()+"/save")
 		if len(saveCalls) != 1 {
 			t.Fatalf("expected one save POST, got %d", len(saveCalls))
 		}
@@ -319,11 +320,14 @@ func TestPipelineSaveRunE(t *testing.T) {
 		if saveBody["slug"] != "email-fetch-v2" {
 			t.Errorf("save slug: got %v want email-fetch-v2 (slugified from name)", saveBody["slug"])
 		}
-		if saveBody["workspace_id"] != covWorkspaceID || saveBody["author_agent_id"] != "ag_1" {
-			t.Errorf("save body: %v", saveBody)
+		// Post-#655: the user-facing save carries the HMAC save_token minted by
+		// test_run (not a self-claimed boolean), and the workspace comes from the
+		// URL path. author_agent is recorded only on the sidecar path.
+		if saveBody["author_crew_id"] != "crew_a" {
+			t.Errorf("save body author_crew_id: got %v want crew_a", saveBody["author_crew_id"])
 		}
-		if saveBody["last_test_run_passed"] != true {
-			t.Errorf("save body must claim a passed test_run; got %v", saveBody["last_test_run_passed"])
+		if saveBody["save_token"] != "tok-happy" {
+			t.Errorf("save body must carry the HMAC save_token from test_run; got %v", saveBody["save_token"])
 		}
 	})
 }
@@ -738,7 +742,7 @@ func TestPipelineSaveRunE_ServerSideErrors(t *testing.T) {
 		defer stub.Close()
 		setupStubCLICov(t, stub)
 		stub.OnPost(pipelinesPathCov()+"/test_run", clitest.JSONResponse(200, map[string]any{"status": "COMPLETED"}))
-		stub.OnPost("/api/v1/internal/pipelines/save", clitest.ErrorResponse(403, "not yours"))
+		stub.OnPost(pipelinesPathCov()+"/save", clitest.ErrorResponse(403, "not yours"))
 		setSaveFlags(t)
 
 		_, err := captureStdoutCov(t, func() error {
@@ -754,7 +758,7 @@ func TestPipelineSaveRunE_ServerSideErrors(t *testing.T) {
 		defer stub.Close()
 		setupStubCLICov(t, stub)
 		stub.OnPost(pipelinesPathCov()+"/test_run", clitest.JSONResponse(200, map[string]any{"status": "COMPLETED"}))
-		stub.OnPost("/api/v1/internal/pipelines/save", clitest.TextResponse(200, "not json"))
+		stub.OnPost(pipelinesPathCov()+"/save", clitest.TextResponse(200, "not json"))
 		setSaveFlags(t)
 
 		_, err := captureStdoutCov(t, func() error {

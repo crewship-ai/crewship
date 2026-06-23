@@ -45,7 +45,7 @@ func TestShellRunE_SlashCommandSession(t *testing.T) {
 	// RunE is invoked directly (not via Execute), so the command has no
 	// context yet; repl.Run dereferences it for cancellation.
 	shellCmd.SetContext(context.Background())
-	t.Cleanup(func() { shellCmd.SetContext(nil) })
+	t.Cleanup(func() { shellCmd.SetContext(context.Background()) })
 
 	script := strings.Join([]string{
 		"/help",
@@ -106,14 +106,14 @@ func TestShellRunE_SlashCommandSession(t *testing.T) {
 
 	for _, want := range []string{
 		"crewship shell — type /help for commands",
-		"/agent <slug>",       // /help output
-		"active agent:",       // /agent with no args
-		"agent → viktor",      // /agent viktor
-		"workspace → w2",      // /workspace w2
-		"workspace → w3",      // /cd alias
-		"plan-mode: true",     // /plan toggled on
-		"effort → high",       // /effort high
-		"show-thinking: true", // /think toggled on
+		"/agent <slug>",                    // /help output
+		"active agent:",                    // /agent with no args
+		"agent → viktor",                   // /agent viktor
+		"workspace → w2",                   // /workspace w2
+		"workspace → w3",                   // /cd alias
+		"plan-mode: true",                  // /plan toggled on
+		"effort → high",                    // /effort high
+		"show-thinking: true",              // /think toggled on
 		"readline history is a v2 feature", // /history stub
 	} {
 		if !strings.Contains(out, want) {
@@ -132,7 +132,7 @@ func TestShellRunE_ExitCommand(t *testing.T) {
 	cliCfg = &cli.CLIConfig{Token: "tok", Workspace: covWSCli9, Server: "http://127.0.0.1:1"}
 	t.Cleanup(ResetAIFirstLatches)
 	shellCmd.SetContext(context.Background())
-	t.Cleanup(func() { shellCmd.SetContext(nil) })
+	t.Cleanup(func() { shellCmd.SetContext(context.Background()) })
 
 	r, w, err := os.Pipe()
 	if err != nil {

@@ -251,10 +251,10 @@ func TestRoutineLogsRunE_ErrorBranches(t *testing.T) {
 	runPath := "/api/v1/workspaces/" + covWSCli8 + "/pipeline-runs/run_x"
 	journalPath := "/api/v1/workspaces/" + covWSCli8 + "/pipelines/pr-review/runs"
 	cases := []struct {
-		name    string
-		slug    bool
-		route   func(*clitest.StubServer)
-		noWS    bool
+		name  string
+		slug  bool
+		route func(*clitest.StubServer)
+		noWS  bool
 	}{
 		{name: "no workspace", noWS: true},
 		{name: "slug-free transport", route: func(s *clitest.StubServer) { s.OnGet(runPath, covAbort()) }},

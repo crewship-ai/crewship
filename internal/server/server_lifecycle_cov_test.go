@@ -311,9 +311,9 @@ func TestStart_FullDepsBootAndShutdown(t *testing.T) {
 	cfg.Keeper.Model = "test-model"
 	cfg.Auth.InternalToken = "cov-internal-token"
 	cfg.LLMProxy.Enabled = true
-	cfg.LLMProxy.TokenSyncInterval = time.Hour    // first fetch only
-	cfg.LLMProxy.HealthCheckInterval = time.Hour  // first check only
-	cfg.Auth.NextjsURL = "http://127.0.0.1:1"     // unreachable, fails fast
+	cfg.LLMProxy.TokenSyncInterval = time.Hour   // first fetch only
+	cfg.LLMProxy.HealthCheckInterval = time.Hour // first check only
+	cfg.Auth.NextjsURL = "http://127.0.0.1:1"    // unreachable, fails fast
 
 	logger := logging.New("error", "json", nil)
 	s := New(cfg, logger, &Deps{DB: db, Container: &mockContainer{}, State: newMockState()})

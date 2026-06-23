@@ -32,7 +32,7 @@ func TestStartWatcher_DefaultsApplied(t *testing.T) {
 	// Zero Debounce + zero PollInterval + poll-only mode + nil Logger +
 	// nil ctx — the "at least one detection mechanism" rule must force
 	// the 30s poll fallback.
-	w, err := StartWatcher(nil, root, WatchConfig{Debounce: 0, PollInterval: 0, UseFsnotify: false, Logger: nil})
+	w, err := StartWatcher(context.Background(), root, WatchConfig{Debounce: 0, PollInterval: 0, UseFsnotify: false, Logger: nil})
 	if err != nil {
 		t.Fatalf("StartWatcher: %v", err)
 	}

@@ -31,8 +31,8 @@ func newCovMHRig(t *testing.T) *covMHRig {
 	crewID := seedMissionCrew(t, db, wsID)
 	leadID := seedMissionAgent(t, db, wsID, crewID, "lead-mh", "LEAD")
 	return &covMHRig{
-		h:      NewMissionHandler(db, nil, nil, covMMLogger()),
-		db:     db, userID: userID, wsID: wsID, crewID: crewID, leadID: leadID,
+		h:  NewMissionHandler(db, nil, nil, covMMLogger()),
+		db: db, userID: userID, wsID: wsID, crewID: crewID, leadID: leadID,
 	}
 }
 

@@ -573,17 +573,17 @@ func TestShouldExclude_Patterns(t *testing.T) {
 		patterns []string
 		want     bool
 	}{
-		{"node_modules", []string{"node_modules/"}, true},                 // exact dir, no trailing slash on path
+		{"node_modules", []string{"node_modules/"}, true},                // exact dir, no trailing slash on path
 		{"node_modules/react/index.js", []string{"node_modules/"}, true}, // descendant
 		{"src/node_modules/x.js", []string{"node_modules/"}, true},       // nested anywhere
 		{"a/b/node_modules", []string{"node_modules/"}, false},           // trailing dir without slash nested — not matched by "/pat" contains
 		{".cache/mise/trusted", []string{".cache/"}, true},
 		{"src/main.go", []string{"node_modules/", ".cache/"}, false},
 		{"dump.rdb", []string{"dpkg/"}, false},
-		{"exact", []string{"exact"}, true},               // bare pattern, exact match
-		{"deep/exact", []string{"exact"}, true},          // bare pattern as component
-		{"exactly-not", []string{"exact"}, false},        // prefix only — no match
-		{"workspace/file.txt", nil, false},               // empty patterns
+		{"exact", []string{"exact"}, true},        // bare pattern, exact match
+		{"deep/exact", []string{"exact"}, true},   // bare pattern as component
+		{"exactly-not", []string{"exact"}, false}, // prefix only — no match
+		{"workspace/file.txt", nil, false},        // empty patterns
 		{"a/__pycache__/mod.pyc", volumeExclusions, true},
 		{"redis/dump.rdb", varLibExclusions, false},
 		{"dpkg/status", varLibExclusions, true},

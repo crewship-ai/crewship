@@ -184,7 +184,7 @@ func TestHandleAgentLogs_ReadsEntriesFromDisk(t *testing.T) {
 		t.Fatalf("status = %d, want 200", w.Code)
 	}
 	var resp struct {
-		AgentID string                `json:"agent_id"`
+		AgentID string                  `json:"agent_id"`
 		Logs    []logcollector.LogEntry `json:"logs"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {

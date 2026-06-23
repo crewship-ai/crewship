@@ -234,10 +234,10 @@ func TestHandleFileDownload_HeaderInjectionSanitized(t *testing.T) {
 // table skips.
 func TestDetectMIME_RemainingTypes(t *testing.T) {
 	cases := map[string]string{
-		"notes.txt":  "text/plain",
-		"page.HTML":  "text/html",
-		"pic.jpg":    "image/jpeg",
-		"pic.JPEG":   "image/jpeg",
+		"notes.txt":   "text/plain",
+		"page.HTML":   "text/html",
+		"pic.jpg":     "image/jpeg",
+		"pic.JPEG":    "image/jpeg",
 		"diagram.svg": "image/svg+xml",
 	}
 	for name, want := range cases {

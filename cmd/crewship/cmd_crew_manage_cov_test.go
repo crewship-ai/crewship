@@ -156,13 +156,13 @@ func TestSanitizeTerminal_StripsControlKeepsWhitespace(t *testing.T) {
 		in, want string
 	}{
 		{"plain text", "plain text"},
-		{"line1\nline2", "line1\nline2"},          // newline preserved
-		{"col1\tcol2", "col1\tcol2"},              // tab preserved
-		{"evil\rcarriage", "evilcarriage"},        // CR stripped
-		{"\x1b[31mred\x1b[0m", "[31mred[0m"},      // ESC stripped, printable remains
-		{"bell\x07ding", "bellding"},              // BEL stripped
-		{"null\x00byte", "nullbyte"},              // NUL stripped
-		{"emoji 🛠 stays", "emoji 🛠 stays"},        // non-control unicode kept
+		{"line1\nline2", "line1\nline2"},     // newline preserved
+		{"col1\tcol2", "col1\tcol2"},         // tab preserved
+		{"evil\rcarriage", "evilcarriage"},   // CR stripped
+		{"\x1b[31mred\x1b[0m", "[31mred[0m"}, // ESC stripped, printable remains
+		{"bell\x07ding", "bellding"},         // BEL stripped
+		{"null\x00byte", "nullbyte"},         // NUL stripped
+		{"emoji 🛠 stays", "emoji 🛠 stays"},   // non-control unicode kept
 	}
 	for _, tc := range cases {
 		if got := sanitizeTerminal(tc.in); got != tc.want {
@@ -338,7 +338,7 @@ func TestCrewUpdateRunE_HappyPath_SlugResolutionAndBody(t *testing.T) {
 	covSetFlagsCli4(t, c, map[string]string{
 		"name":            "Engineering v2",
 		"ttl":             "0", // explicit 0 clears TTL server-side
-		"allowed-domains": "", // explicit empty list
+		"allowed-domains": "",  // explicit empty list
 	})
 
 	out, err := covCaptureStdoutCli4(t, func() error { return c.RunE(c, []string{"engineering"}) })
