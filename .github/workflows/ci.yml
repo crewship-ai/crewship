@@ -192,6 +192,9 @@ jobs:
       - name: Go build
         run: go build ./cmd/crewship
 
+      - name: Go test (DIAGNOSTIC internal/server)
+        run: go test ./internal/server/ -v -count=1 -timeout 180s
+
       - name: Go test
         # -timeout 15m: the internal/api package suite has grown past
         # the Go default 10m (PR-A native memory tools + PR-D ephemeral
