@@ -8,7 +8,6 @@ import (
 	"os"
 	"strings"
 	"text/tabwriter"
-	"time"
 
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/spf13/cobra"
@@ -56,7 +55,7 @@ Subcommand status:
   get        GET    /api/v1/workspaces/{ws}/pipelines/{slug}
   run        POST   /api/v1/workspaces/{ws}/pipelines/{slug}/run
   dry-run    POST   /api/v1/workspaces/{ws}/pipelines/{slug}/dry_run
-  save       POST   /api/v1/workspaces/{ws}/pipelines/test_run + .../internal/pipelines/save
+  save       POST   /api/v1/workspaces/{ws}/pipelines/test_run + .../pipelines/save
   delete     DELETE /api/v1/workspaces/{ws}/pipelines/{slug}
   runs       GET    /api/v1/workspaces/{ws}/pipelines/{slug}/runs (journal-backed)
   versions   GET    /api/v1/workspaces/{ws}/pipelines/{slug}/versions
@@ -297,6 +296,11 @@ reuse contract).`,
 			ErrorMessage string  `json:"error_message"`
 			DurationMs   int64   `json:"duration_ms"`
 			CostUSD      float64 `json:"cost_usd"`
+			// SaveToken is the HMAC proof that THIS user just
+			// test-ran THIS definition. Forwarded to the save
+			// endpoint so the gate clears without body-trusted
+			// timestamps.
+			SaveToken string `json:"save_token"`
 		}
 		if err := json.NewDecoder(testResp.Body).Decode(&testResult); err != nil {
 			return fmt.Errorf("decode test_run response: %w", err)
@@ -306,26 +310,24 @@ reuse contract).`,
 		}
 		fmt.Printf("test_run passed (%dms, $%.4f). Saving...\n", testResult.DurationMs, testResult.CostUSD)
 
-		// Step 2: internal save. We hit the public path indirectly
-		// via the sidecar IPC route — but from the CLI we need the
-		// internal endpoint directly with our user JWT. The
-		// PipelineHandler.InternalSave route is mounted under
-		// authed() (not under the X-Internal-Token chain) precisely
-		// because user-driven save flows from the CLI need to land
-		// here too.
-		nowRFC := time.Now().UTC().Format(time.RFC3339Nano)
+		// Step 2: user-facing save. The internal
+		// /api/v1/internal/pipelines/save route is mounted under
+		// internalAuth (X-Internal-Token) — sidecar only; a user CLI
+		// token always 403s there (issue #654). The workspace-scoped
+		// save endpoint is the CLI's contract: JWT auth, MANAGER+
+		// role, authorship recorded as the calling user, and the test
+		// gate cleared by the HMAC save_token /test_run just minted —
+		// no body-trusted timestamps.
+		_ = authorAgent // recorded only on the sidecar path; user saves attribute the calling user
 		saveBody := map[string]any{
-			"workspace_id":         ws,
-			"slug":                 slugifyName(name),
-			"name":                 name,
-			"description":          description,
-			"definition":           json.RawMessage(definitionRaw),
-			"author_crew_id":       authorCrew,
-			"author_agent_id":      authorAgent,
-			"last_test_run_at":     nowRFC,
-			"last_test_run_passed": true,
+			"slug":           slugifyName(name),
+			"name":           name,
+			"description":    description,
+			"definition":     json.RawMessage(definitionRaw),
+			"author_crew_id": authorCrew,
+			"save_token":     testResult.SaveToken,
 		}
-		saveResp, err := client.Post("/api/v1/internal/pipelines/save", saveBody)
+		saveResp, err := client.Post(fmt.Sprintf("/api/v1/workspaces/%s/pipelines/save", ws), saveBody)
 		if err != nil {
 			return err
 		}
