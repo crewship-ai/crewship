@@ -61,6 +61,7 @@ func covCaptureStdoutCli4(t *testing.T, fn func() error) (string, error) {
 	os.Stdout, os.Stderr = w, w
 	done := make(chan string, 1)
 	go func() {
+		defer r.Close()
 		b, _ := io.ReadAll(r)
 		done <- string(b)
 	}()

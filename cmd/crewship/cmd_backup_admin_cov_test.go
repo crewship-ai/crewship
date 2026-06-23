@@ -107,6 +107,7 @@ func covCaptureFD(t *testing.T, target **os.File, fn func() error) (string, erro
 
 	done := make(chan string, 1)
 	go func() {
+		defer r.Close()
 		b, _ := io.ReadAll(r)
 		done <- string(b)
 	}()

@@ -46,6 +46,7 @@ func captureStdoutCovCli2(t *testing.T, fn func()) string {
 	os.Stderr = w
 	done := make(chan string, 1)
 	go func() {
+		defer r.Close()
 		b, _ := io.ReadAll(r)
 		done <- string(b)
 	}()

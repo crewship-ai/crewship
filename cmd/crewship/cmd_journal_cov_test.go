@@ -74,6 +74,7 @@ func captureStdoutCov(t *testing.T, fn func() error) (string, error) {
 	os.Stdout = w
 	outCh := make(chan string, 1)
 	go func() {
+		defer r.Close()
 		b, _ := io.ReadAll(r)
 		outCh <- string(b)
 	}()

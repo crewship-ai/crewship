@@ -71,6 +71,7 @@ func covCaptureStdoutCli3(t *testing.T, fn func()) string {
 	os.Stdout = w
 	done := make(chan string, 1)
 	go func() {
+		defer r.Close()
 		b, _ := io.ReadAll(r)
 		done <- string(b)
 	}()
@@ -95,6 +96,7 @@ func covCaptureStderr(t *testing.T, fn func()) string {
 	os.Stderr = w
 	done := make(chan string, 1)
 	go func() {
+		defer r.Close()
 		b, _ := io.ReadAll(r)
 		done <- string(b)
 	}()

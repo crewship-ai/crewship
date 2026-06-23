@@ -87,6 +87,7 @@ func runMain(t *testing.T, stdin string) {
 	os.Stdout = wOut
 	t.Cleanup(func() {
 		os.Stdout = oldStdout
+		wOut.Close()
 		rOut.Close()
 	})
 

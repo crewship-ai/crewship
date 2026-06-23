@@ -256,6 +256,7 @@ func captureStdout(t *testing.T, fn func()) string {
 
 	outCh := make(chan string, 1)
 	go func() {
+		defer r.Close()
 		b, _ := io.ReadAll(r)
 		outCh <- string(b)
 	}()

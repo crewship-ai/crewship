@@ -72,6 +72,7 @@ func captureStdoutCovCli10(t *testing.T, fn func() error) (string, error) {
 	os.Stdout = w
 	done := make(chan string, 1)
 	go func() {
+		defer r.Close()
 		b, _ := io.ReadAll(r)
 		done <- string(b)
 	}()
@@ -94,6 +95,7 @@ func captureStderrCov(t *testing.T, fn func() error) (string, error) {
 	os.Stderr = w
 	done := make(chan string, 1)
 	go func() {
+		defer r.Close()
 		b, _ := io.ReadAll(r)
 		done <- string(b)
 	}()
