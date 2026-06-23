@@ -314,12 +314,14 @@ func BuildEnvVarsSidecar(req AgentRunRequest, keeperEnabled bool) []string {
 // CredentialEnvExposure describes a credential whose plaintext value is placed
 // directly into the agent container's environment by BuildEnvVarsSidecar, and is
 // therefore readable by the agent process (e.g. via `env` or /proc/self/environ).
-// It is the inverse of the isolation guarantee: API-key credentials are injected
-// by the sidecar proxy and never appear here, but OAuth tokens (HTTPS CONNECT
-// tunnels can't be proxied), CLI tokens (read from env by gh/vercel/etc.), and
-// SECRET credentials with Keeper disabled DO land in the env. Surfacing these lets
-// operators see and act on the credential-isolation gap rather than discovering it
-// only by reading the code.
+// It is the inverse of the isolation guarantee. API-key credentials for Claude
+// Code are isolated by the sidecar reverse-proxy and never appear here, but the
+// following DO land in the env: OAuth tokens (HTTPS CONNECT tunnels can't be
+// proxied), BYO API keys for adapters that reach their upstream over CONNECT
+// (Codex/Gemini/OpenCode/Cursor/Droid), CLI tokens (read from env by
+// gh/vercel/etc.), and SECRET credentials with Keeper disabled. Surfacing these
+// lets operators see and act on the credential-isolation gap rather than
+// discovering it only by reading the code.
 type CredentialEnvExposure struct {
 	EnvVarName string
 	Type       string
@@ -352,6 +354,28 @@ func AgentEnvCredentialExposures(req AgentRunRequest, keeperEnabled bool) []Cred
 				Reason:     "OAuth token authenticates inside an HTTPS CONNECT tunnel the sidecar cannot inject into, so it must live in the agent env",
 			})
 			break
+		}
+	}
+
+	// BYO API keys: adapters that talk to their upstream over an HTTPS CONNECT
+	// tunnel (Codex/Gemini/OpenCode/Cursor/Droid) get the real key written into
+	// the env, because the sidecar reverse-proxy only injects for api.anthropic.com
+	// (Claude Code's path returns an empty set and stays isolated). Mirror
+	// BuildEnvVarsSidecar's allowed-override loop exactly — one exposure per
+	// matching credential, keyed by its own EnvVarName.
+	if allowed := apiKeyEnvVarsForAdapter(req.CLIAdapter); len(allowed) > 0 {
+		for _, cred := range req.Credentials {
+			if cred.PlainValue == "" {
+				continue
+			}
+			if _, ok := allowed[cred.EnvVarName]; !ok {
+				continue
+			}
+			out = append(out, CredentialEnvExposure{
+				EnvVarName: cred.EnvVarName,
+				Type:       "API_KEY",
+				Reason:     "adapter " + req.CLIAdapter + " reaches its upstream over an HTTPS CONNECT tunnel, so the real API key is written to env (the sidecar reverse-proxy only injects for api.anthropic.com)",
+			})
 		}
 	}
 

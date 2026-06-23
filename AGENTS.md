@@ -31,7 +31,7 @@ so parallel agents/worktrees run conflict-free (see `dev.sh`).
 
 ## Architecture map (`internal/`)
 
-```
+```text
 api/            HTTP API (stdlib http.ServeMux, "METHOD /path" patterns)
 orchestrator/   agent execution engine — container exec + streaming + env build
 sidecar/        credential-injecting forward proxy (127.0.0.1:9119)
