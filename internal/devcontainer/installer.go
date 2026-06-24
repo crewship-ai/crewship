@@ -241,6 +241,32 @@ func createTarFromDir(srcDir, prefix string) (*bytes.Buffer, error) {
 	return &buf, nil
 }
 
+// Feature-install-contract identity, per https://containers.dev/implementors/features/.
+// The remote user is the non-root user common-utils creates (UID 1001); the
+// container user is root (features install as root at build/exec time).
+const (
+	featureRemoteUser        = "agent"
+	featureRemoteUserHome    = "/home/agent"
+	featureContainerUser     = "root"
+	featureContainerUserHome = "/root"
+)
+
+// featureContractEnv returns the standard devcontainer feature-install-contract
+// variables that the runner MUST supply, shared by BOTH install paths:
+// exec-install (buildFeatureEnv) and the BuildKit Dockerfile RUN (dockerfile.go).
+// Keeping a single source prevents the two paths from drifting — a drift that
+// previously left _REMOTE_USER_HOME unset on the BuildKit path and broke every
+// feature whose install.sh copies out of $_REMOTE_USER_HOME. _CONTAINER_ID is
+// path-specific (a runtime container id) and added by callers that have one.
+func featureContractEnv() []string {
+	return []string{
+		"_REMOTE_USER=" + featureRemoteUser,
+		"_REMOTE_USER_HOME=" + featureRemoteUserHome,
+		"_CONTAINER_USER=" + featureContainerUser,
+		"_CONTAINER_USER_HOME=" + featureContainerUserHome,
+	}
+}
+
 // buildFeatureEnv constructs environment variables for a feature installation.
 // Each option key is uppercased (e.g., "version" -> "VERSION=3.11").
 // Standard devcontainer variables _CONTAINER_ID and _REMOTE_USER are included.
@@ -267,14 +293,9 @@ func buildFeatureEnv(containerID, featureID string, metadataOptions, userOptions
 	// $_REMOTE_USER then promotes it to a system path via
 	// `cp "$_REMOTE_USER_HOME/.local/bin/<tool>" ...` silently became
 	// `cp /.local/bin/<tool>` (failing the whole build) when _REMOTE_USER_HOME
-	// was unset.
-	env := []string{
-		"_CONTAINER_ID=" + containerID,
-		"_REMOTE_USER=agent",
-		"_REMOTE_USER_HOME=/home/agent",
-		"_CONTAINER_USER=root",
-		"_CONTAINER_USER_HOME=/root",
-	}
+	// was unset. featureContractEnv is shared with the BuildKit Dockerfile path
+	// (dockerfile.go) so the two install paths can never drift apart again.
+	env := append([]string{"_CONTAINER_ID=" + containerID}, featureContractEnv()...)
 
 	// Apply defaults from feature metadata for options the user didn't set.
 	for key, spec := range metadataOptions {

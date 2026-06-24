@@ -66,8 +66,12 @@ func GenerateDockerfile(b DockerfileBuild) (string, error) {
 
 		// Inline the install env so option values never leak into image layers
 		// as ENV (which would persist and pollute the runtime environment).
+		// Feature-install-contract vars (_REMOTE_USER, _REMOTE_USER_HOME, …)
+		// shared with the exec-install path so install.sh scripts that rely on
+		// $_REMOTE_USER_HOME (e.g. copying a tool out of it) work identically
+		// whether the feature is baked via BuildKit or installed via exec.
 		env := featureBuildEnv(f.Metadata, b.OptionsByRef[f.Ref])
-		assigns := "_REMOTE_USER=agent"
+		assigns := strings.Join(featureContractEnv(), " ")
 		if len(env) > 0 {
 			assigns += " " + strings.Join(env, " ")
 		}
