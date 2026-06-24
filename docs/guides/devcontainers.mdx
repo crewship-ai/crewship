@@ -59,6 +59,27 @@ This guide explains the whole pipeline end-to-end, from setting a base image on 
 +----------------------------------------------------------------+
 ```
 
+### Phase 1: Dockerfile + BuildKit provisioning
+
+As of Phase 1, when the Docker CLI with BuildKit is available the provisioner
+no longer builds the runtime by spinning up a temp container and
+`docker commit`-ing it. Instead it **generates a Dockerfile per crew and
+builds it with BuildKit**, which buys:
+
+- **Per-feature layer caching** — adding one feature rebuilds only that layer;
+  `common-utils` and the previously-installed features hit the cache.
+- **Package-manager cache mounts** — apt / npm / pip caches persist across
+  builds, so re-provisions don't re-download the world.
+- **Deterministic ordering** — features install in dependency order
+  (topological sort with `common-utils` first).
+
+Intermediate per-feature layers are tagged `crewship-feat:{hash}` (regenerable,
+never referenced directly); the final per-crew image is still tagged
+`crewship-cache:{hash[:12]}`. The transition is transparent: if BuildKit is
+unavailable on the host, provisioning falls back to the container-commit path
+shown above with **no operator action required**. Either way you trigger it
+with the same `crewship crew provision` / `crewship crew rebuild` commands.
+
 ---
 
 ## Prerequisites

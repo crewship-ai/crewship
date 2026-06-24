@@ -432,6 +432,16 @@ decides the outcome:
 | `404` | Crew or template not found in this workspace. |
 | `429` | Crew quota (`max_ephemeral_agents`) reached — rehire a ghost or raise the quota. |
 
+#### Credential assignment
+
+On a successful hire (`201`/`202`), Crewship auto-assigns the available
+workspace Anthropic credentials (`API_KEY` / `AI_CLI_TOKEN`, first-created
+wins) to the new agent so it can authenticate on first run. This is
+best-effort and runs after the agent row is committed: assignment failures are
+journaled as `credential.auto_assign_failed` and never fail the hire, and a
+workspace with no Anthropic credential journals `credential.auto_assign_empty`.
+Assign manually later via `POST /api/v1/agents/{agentId}/credentials` if needed.
+
 ### Rehire Agent
 
 ```

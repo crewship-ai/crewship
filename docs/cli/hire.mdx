@@ -80,6 +80,19 @@ crewship hire \
 | `expires_at` | RFC3339 UTC. Set to `now() + ttl_minutes`. |
 | `hire_reason` | Accumulating history — each hire/rehire appends `<timestamp>: <reason>`. |
 
+### Auto-assigned credentials
+
+On a successful hire, Crewship automatically assigns the available workspace
+Anthropic credential (type `API_KEY` or `AI_CLI_TOKEN`, ordered by creation
+date) to the new ephemeral agent, so it can authenticate on first run. This is
+best-effort and never blocks the hire:
+
+- No Anthropic credential in the workspace → the hire still succeeds and the
+  agent journals `credential.auto_assign_empty`; the agent will fail to chat
+  until you [add one](/guides/credentials) and rehire (or assign manually).
+- You can always override afterwards with
+  `crewship credential assign <agent> <credential>`.
+
 ### Exit codes
 
 | Code | Meaning |

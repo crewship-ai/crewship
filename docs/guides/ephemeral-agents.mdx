@@ -66,6 +66,18 @@ A `guided`-crew hire lands as `PENDING_REVIEW`. The inbox shows the hire request
 
 The operator can also "fire" the pending agent by deleting it from the crew page — same path as deleting any agent. No separate "deny hire" endpoint exists today (tracked as PR-F follow-up); fire is the explicit reject path.
 
+### Credential setup
+
+Ephemeral agents inherit a workspace Anthropic credential on hire — Crewship
+auto-assigns the first available one (`API_KEY` / `AI_CLI_TOKEN`, ordered by
+creation date) right after the agent row is committed, so the agent can
+authenticate on its first chat. If the workspace has no Anthropic credential
+yet, the hire still succeeds but the agent journals `credential.auto_assign_empty`
+and won't be able to chat until one exists. Add one (Settings → Credentials, or
+`crewship credential add`), then rehire to trigger assignment — or assign
+manually with `crewship credential assign <agent> <credential>`. See the
+[Credentials guide](/guides/credentials).
+
 ## The live state
 
 A live ephemeral agent is functionally identical to a permanent agent — same chat surface, same memory tools, same skills. The differences:
