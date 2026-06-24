@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -26,20 +27,50 @@ type InboxHandler struct {
 }
 
 // inboxVisibilityClause restricts inbox results to items targeted at
-// either the workspace as a whole, the caller's user id, or the
-// caller's role. Without this every workspace member could see
-// items addressed to a specific OWNER (e.g. a routing-key escalation
-// or a personal review request) — a real privacy / least-privilege
-// gap. Returns the SQL fragment + the args to bind, in order.
+// either the workspace as a whole, the caller's user id, or a role the
+// caller's role encompasses. Without this every workspace member could
+// see items addressed to a specific OWNER (e.g. a routing-key escalation
+// or a personal review request) — a real privacy / least-privilege gap.
+// Returns the SQL fragment + the args to bind, in order.
 //
-// All three handlers (List, UnreadCount, PatchState) call this so
-// the predicate stays consistent across the surface.
+// Role targeting is HIERARCHICAL: an item targeted at role X needs
+// X-or-higher privilege to act on, so a caller sees it when their rank
+// is >= X's rank. This is why an OWNER sees MANAGER-targeted escalations
+// and failed-cron alerts (an earlier strict `target_role = caller_role`
+// match hid every MANAGER item from the OWNER, who is the one person who
+// should never miss them), while a MEMBER still can't see MANAGER items.
+//
+// All three handlers (List, UnreadCount, PatchState) call this so the
+// predicate stays consistent across the surface.
 func inboxVisibilityClause(userID, role string) (string, []interface{}) {
-	return ` AND (
+	// Target roles the caller can see = every role at or below the
+	// caller's rank. roleRank[""] is 0, so an empty/unknown caller role
+	// falls through to "untargeted + personal items only".
+	callerRank := roleRank[role]
+	args := []interface{}{userID}
+	visible := make([]string, 0, len(roleRank))
+	for name, rank := range roleRank {
+		if rank > 0 && rank <= callerRank {
+			visible = append(visible, name)
+		}
+	}
+
+	clause := ` AND (
         (COALESCE(target_user_id, '') = '' AND COALESCE(target_role, '') = '')
-        OR target_user_id = ?
-        OR target_role = ?
-    )`, []interface{}{userID, role}
+        OR target_user_id = ?`
+	if len(visible) > 0 {
+		sort.Strings(visible) // deterministic SQL + arg order
+		ph := make([]string, len(visible))
+		for i, v := range visible {
+			ph[i] = "?"
+			args = append(args, v)
+		}
+		clause += `
+        OR target_role IN (` + strings.Join(ph, ", ") + `)`
+	}
+	clause += `
+    )`
+	return clause, args
 }
 
 func NewInboxHandler(db *sql.DB, logger *slog.Logger, hub *ws.Hub) *InboxHandler {

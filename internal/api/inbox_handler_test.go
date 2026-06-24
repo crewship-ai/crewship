@@ -52,9 +52,13 @@ func TestInboxHandler_List_VisibilityAndFilters(t *testing.T) {
 	seedInboxItem(t, h, wsID, "vis-ws", "message", "unread", "", "", "workspace-wide", now)
 	seedInboxItem(t, h, wsID, "vis-user", "message", "unread", userID, "", "for me", now.Add(time.Second))
 	seedInboxItem(t, h, wsID, "vis-role", "escalation", "unread", "", "OWNER", "for my role", now.Add(2*time.Second))
-	// Hidden: targeted to a different user / different role
+	// Hidden: targeted to a different user, or to an unknown role (rank 0,
+	// invisible to everyone). Note an OWNER now sees every RANKED role-
+	// targeted item (MANAGER/MEMBER/...) via the hierarchy — covered by
+	// TestInboxVisibility_RoleHierarchy below — so the role-hidden case
+	// here uses a role that exists in no rank table.
 	seedInboxItem(t, h, wsID, "hidden-user", "message", "unread", otherUser, "", "not for me", now)
-	seedInboxItem(t, h, wsID, "hidden-role", "message", "unread", "", "MEMBER", "wrong role", now)
+	seedInboxItem(t, h, wsID, "hidden-role", "message", "unread", "", "GHOST", "unknown role", now)
 	// State variety on visible rows
 	seedInboxItem(t, h, wsID, "vis-read", "message", "read", "", "", "already read", now.Add(-1*time.Hour))
 	seedInboxItem(t, h, wsID, "vis-resolved", "message", "resolved", "", "", "done", now.Add(-2*time.Hour))
@@ -157,6 +161,64 @@ func TestInboxHandler_List_VisibilityAndFilters(t *testing.T) {
 	h.List(rr7, req7)
 	if rr7.Code != http.StatusOK {
 		t.Errorf("limit=99999 status = %d, want 200 (silently clamp)", rr7.Code)
+	}
+}
+
+// TestInboxVisibility_RoleHierarchy pins that role targeting is a
+// minimum-privilege threshold, not an exact-audience match: a caller
+// sees items targeted at their role OR any lower-ranked role, but never
+// a higher one. This is the fix for an OWNER silently missing every
+// MANAGER-targeted escalation / failed-cron alert.
+func TestInboxVisibility_RoleHierarchy(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	h := NewInboxHandler(db, newTestLogger(), nil)
+
+	now := time.Now().UTC()
+	seedInboxItem(t, h, wsID, "for-owner", "message", "unread", "", "OWNER", "owner only", now)
+	seedInboxItem(t, h, wsID, "for-mgr", "escalation", "unread", "", "MANAGER", "manager+", now)
+	seedInboxItem(t, h, wsID, "for-member", "message", "unread", "", "MEMBER", "member+", now)
+
+	visibleIDs := func(role string) map[string]bool {
+		req := withWorkspaceUser(httptest.NewRequest("GET", "/api/v1/inbox?state=all", nil), userID, wsID, role)
+		rr := httptest.NewRecorder()
+		h.List(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("%s list status = %d", role, rr.Code)
+		}
+		var resp inboxListResponse
+		if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("%s decode: %v", role, err)
+		}
+		out := map[string]bool{}
+		for _, row := range resp.Rows {
+			out[row.ID] = true
+		}
+		return out
+	}
+
+	owner := visibleIDs("OWNER")
+	for _, id := range []string{"for-owner", "for-mgr", "for-member"} {
+		if !owner[id] {
+			t.Errorf("OWNER should see %s", id)
+		}
+	}
+
+	mgr := visibleIDs("MANAGER")
+	if !mgr["for-mgr"] || !mgr["for-member"] {
+		t.Errorf("MANAGER should see for-mgr + for-member, got %v", mgr)
+	}
+	if mgr["for-owner"] {
+		t.Error("MANAGER must NOT see an OWNER-targeted item")
+	}
+
+	mem := visibleIDs("MEMBER")
+	if !mem["for-member"] {
+		t.Error("MEMBER should see for-member")
+	}
+	if mem["for-mgr"] || mem["for-owner"] {
+		t.Errorf("MEMBER must NOT see manager/owner items, got %v", mem)
 	}
 }
 
