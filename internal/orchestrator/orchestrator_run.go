@@ -360,6 +360,19 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	var env []string
 	if sidecarEnabled {
 		env = BuildEnvVarsSidecar(req, keeperEnabled)
+		// Surface the credential-isolation gap: any plaintext credential that
+		// lands in the agent env (readable by the agent process). Actionable
+		// exposures (SECRET with Keeper off) warn so an operator can close them;
+		// structurally un-isolatable ones (OAuth / CLI tokens) stay at debug.
+		for _, exp := range AgentEnvCredentialExposures(req, keeperEnabled) {
+			if exp.Actionable {
+				o.logger.Warn("credential plaintext exposed in agent environment",
+					"agent_id", req.AgentID, "env_var", exp.EnvVarName, "type", exp.Type, "reason", exp.Reason)
+			} else {
+				o.logger.Debug("credential present in agent environment (not isolatable)",
+					"agent_id", req.AgentID, "env_var", exp.EnvVarName, "type", exp.Type, "reason", exp.Reason)
+			}
+		}
 		// Minimal env-builder signal at debug level. The previous Info
 		// log dumped every credential's EnvVarName + Type + value_len,
 		// which leaks auth metadata into production logs. Keep just a
