@@ -87,7 +87,14 @@ func TestStart_StuckQueueSweeper_RescuesStrandedQueuedRow(t *testing.T) {
 	// QUEUED (it gets pumped → claimed RUNNING → terminal FAILED here,
 	// since the test server has no container provider — either way the
 	// queue moved, which is the recovery contract).
-	deadline := time.Now().Add(5 * time.Second)
+	//
+	// Generous deadline: once running the sweeper ticks every 50ms, but the
+	// clock starts at go s.Start(ctx) and Server.Start first runs DB migrations
+	// and spins up every background worker before the sweeper's first tick.
+	// Under loaded CI that boot can take several seconds, and a 5s deadline
+	// raced it and flaked. The loop breaks the instant the row moves, so the
+	// wider window only costs wall-clock on a genuinely stuck sweeper.
+	deadline := time.Now().Add(30 * time.Second)
 	swept := false
 	for time.Now().Before(deadline) {
 		var status string
