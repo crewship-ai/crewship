@@ -52,7 +52,10 @@ func (e *Executor) runTransformStep(step Step, parentRender RenderContext) (stri
 	// through to the identity short-circuit for "tostring"/"length"
 	// on raw strings.
 	var v any
-	if err := DecodeAgentJSON(rawInput, &v); err != nil {
+	// UseNumber-decode so numeric tokens keep full precision through @json
+	// canonicalisation (and through path/tostring output) instead of being
+	// flattened to float64.
+	if err := DecodeAgentJSONNumber(rawInput, &v); err != nil {
 		switch expr {
 		case "length":
 			return fmt.Sprintf("%d", len(rawInput)), 0, time.Since(stepStart).Milliseconds(), nil
@@ -121,7 +124,7 @@ func evalTransform(v any, expr string) (string, error) {
 
 	// Path expressions: ".a.b[0].c"
 	if !strings.HasPrefix(expr, ".") {
-		return "", fmt.Errorf("expression %q must start with '.' or be one of: length, keys, tostring", expr)
+		return "", fmt.Errorf("expression %q must start with '.' or be one of: length, keys, tostring, @json (alias tojson)", expr)
 	}
 	cursor := v
 	rest := expr[1:]

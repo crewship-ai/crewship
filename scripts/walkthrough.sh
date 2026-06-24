@@ -81,6 +81,6 @@ cs eval scenarios --runs 3 --tiers fast,smart -f markdown
 echo "== 8. Scheduler: the seeded cron schedules =="
 cs routine schedules list
 # Force-fire one out of cycle to see it on the activity rail:
-cs routine schedules now "$(cs routine schedules list --json | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)" || true
+cs routine schedules now "$(cs routine schedules list --json | jq -r '.[0].id // empty')" || true
 
 echo "== walkthrough complete =="

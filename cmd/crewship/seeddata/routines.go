@@ -991,16 +991,19 @@ var Routines = []RoutineDef{
 					"pipeline_slug": "extract-contacts",
 				},
 				{
+					// No `needs`: the three probes call independent recipes and
+					// don't consume each other's output. Chaining them would let
+					// one early failure skip the rest and hide exactly the
+					// cross-recipe drift this sweep exists to surface — so they
+					// fan out and each runs (and can fail) on its own.
 					"id":            "ticket",
 					"type":          "call_pipeline",
 					"pipeline_slug": "classify-ticket",
-					"needs":         []string{"contacts"},
 				},
 				{
 					"id":            "dates",
 					"type":          "call_pipeline",
 					"pipeline_slug": "normalize-dates",
-					"needs":         []string{"ticket"},
 				},
 			},
 		},
@@ -1043,6 +1046,21 @@ func init() {
 		steps, ok := Routines[i].Definition["steps"].([]map[string]interface{})
 		if !ok {
 			panic("seeddata: routine " + Routines[i].Slug + " has unexpected steps type for canonicalisation")
+		}
+		// Confirm the target step actually exists before wiring `needs` +
+		// `{{ steps.<id>.output }}` to it. A stale canonicalJSONRecipes entry
+		// (e.g. a recipe step renamed) would otherwise silently produce a
+		// canonical step pointing at nothing and fail only at run time —
+		// panic here so the mistake surfaces at init/build instead.
+		foundStep := false
+		for _, s := range steps {
+			if id, _ := s["id"].(string); id == stepID {
+				foundStep = true
+				break
+			}
+		}
+		if !foundStep {
+			panic("seeddata: routine " + Routines[i].Slug + " canonicalisation targets unknown step id " + stepID)
 		}
 		Routines[i].Definition["steps"] = append(steps, map[string]interface{}{
 			"id":    "canonical",

@@ -57,6 +57,29 @@ func TestTransform_CanonicalJSON(t *testing.T) {
 	}
 }
 
+func TestTransform_CanonicalJSON_PreservesLargeNumbers(t *testing.T) {
+	store, resolver, cleanup := openExecutorTestDB(t)
+	defer cleanup()
+	exec := NewExecutor(store, resolver, nil, nil)
+
+	// A 20-digit integer and a high-precision decimal must survive @json
+	// verbatim. A float64 decode would round these (e.g. the int becomes
+	// 1.2345678901234568e+19), breaking byte-stability — the regression
+	// UseNumber decoding guards against.
+	s := Step{ID: "n", Type: StepTransform, Transform: &TransformStep{
+		Input:      `{"big": 12345678901234567890, "frac": 0.12345678901234567}`,
+		Expression: "@json",
+	}}
+	out, _, _, err := exec.runTransformStep(s, RenderContext{})
+	if err != nil {
+		t.Fatalf("runTransformStep: %v", err)
+	}
+	const want = `{"big":12345678901234567890,"frac":0.12345678901234567}`
+	if out != want {
+		t.Errorf("@json = %q, want %q (numbers must keep full precision)", out, want)
+	}
+}
+
 func TestTransform_FieldAccess(t *testing.T) {
 	store, resolver, cleanup := openExecutorTestDB(t)
 	defer cleanup()
