@@ -507,3 +507,90 @@ func defaultIfBlank(s, fallback string) string {
 	}
 	return s
 }
+
+// RunSchedule force-fires a schedule out of cycle: it runs the schedule's
+// target pipeline NOW with the schedule's stored inputs, without touching
+// the cron cadence (no recordRun, so next_run_at is unchanged). This is the
+// server side of `crewship routine schedules now <id>`, which previously
+// 404'd because the endpoint didn't exist.
+//
+// POST /api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}/run
+func (h *PipelineHandler) RunSchedule(w http.ResponseWriter, r *http.Request) {
+	if h.schedules == nil {
+		replyError(w, http.StatusServiceUnavailable, "pipeline_schedules backend not wired")
+		return
+	}
+	if h.runner == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "pipeline runner not wired",
+			"hint":  "the orchestrator hasn't booted yet, or this build was assembled without the runner adapter",
+		})
+		return
+	}
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	// Firing a schedule runs a pipeline — same tier as a manual run.
+	role := RoleFromContext(r.Context())
+	if !canRole(role, "create") {
+		replyError(w, http.StatusForbidden, "Forbidden")
+		return
+	}
+	scheduleID := r.PathValue("scheduleId")
+	if scheduleID == "" {
+		replyError(w, http.StatusBadRequest, "scheduleId required")
+		return
+	}
+
+	sched, err := h.schedules.GetByID(r.Context(), scheduleID)
+	if err != nil {
+		if errors.Is(err, pipeline.ErrNotFound) {
+			replyError(w, http.StatusNotFound, "schedule not found")
+			return
+		}
+		replyError(w, http.StatusInternalServerError, "failed to load schedule")
+		return
+	}
+	if sched.WorkspaceID != workspaceID {
+		replyError(w, http.StatusNotFound, "schedule not found")
+		return
+	}
+
+	p, err := h.store.GetByID(r.Context(), sched.TargetPipelineID)
+	if err != nil {
+		if errors.Is(err, pipeline.ErrNotFound) {
+			replyError(w, http.StatusNotFound, "schedule target pipeline not found")
+			return
+		}
+		h.logger.Error("schedule run: load target", "error", err, "schedule", scheduleID)
+		replyError(w, http.StatusInternalServerError, "load target pipeline")
+		return
+	}
+
+	var inputs map[string]any
+	if sched.InputsJSON != "" {
+		_ = json.Unmarshal([]byte(sched.InputsJSON), &inputs)
+	}
+
+	exec := h.newExecutor()
+	res, err := exec.Run(r.Context(), pipeline.RunInput{
+		PipelineID:    p.ID,
+		WorkspaceID:   workspaceID,
+		Inputs:        inputs,
+		Mode:          pipeline.ModeRun,
+		TriggeredVia:  pipeline.TriggeredViaSchedule,
+		TriggeredByID: sched.ID,
+	})
+	if err != nil {
+		if errors.Is(err, pipeline.ErrConcurrencyLimitReached) {
+			w.Header().Set("Retry-After", "5")
+			writeJSON(w, http.StatusTooManyRequests, map[string]string{
+				"error":  "concurrency limit reached for this pipeline",
+				"reason": "another run with the same concurrency_key is already in flight",
+			})
+			return
+		}
+		h.logger.Error("schedule run: exec", "error", err, "schedule", scheduleID)
+		replyError(w, http.StatusInternalServerError, "Failed to start scheduled run")
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}

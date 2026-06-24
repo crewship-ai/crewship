@@ -210,6 +210,45 @@ func printHireResponse(resp *http.Response, headline string) error {
 	return nil
 }
 
+// hireApproveCmd approves a guided-autonomy hire that is sitting in
+// PENDING_REVIEW (it lands there with a blocking inbox waitpoint). This
+// is the CLI counterpart to the UI inbox "Approve" button — without it
+// there was no terminal path to release a staged hire.
+var hireApproveCmd = &cobra.Command{
+	Use:   "approve <agent-id-or-slug>",
+	Short: "Approve a staged (PENDING_REVIEW) ephemeral hire",
+	Long: `Approve an ephemeral agent that a guided-autonomy hire left in
+PENDING_REVIEW, flipping it to IDLE so it can serve work. Mirrors the
+UI inbox approval. The agent id is printed by 'crewship hire' and shown
+in 'crewship agent list'.`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+		client := newAPIClient()
+		agentID, err := resolveAgentID(client, args[0])
+		if err != nil {
+			return err
+		}
+		resp, err := client.Post("/api/v1/agents/"+agentID+"/approve-hire", map[string]interface{}{})
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		// 409 = not PENDING_REVIEW (already approved, or hired under
+		// non-guided autonomy). Surface the server's reason verbatim.
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		cli.PrintSuccess(fmt.Sprintf("Hire approved: %s is now active", args[0]))
+		return nil
+	},
+}
+
 func init() {
 	// Hire flags. --crew is the only "must specify shape" flag; the
 	// rest have sensible server-side defaults.
@@ -225,6 +264,7 @@ func init() {
 	rehireCmd.Flags().String("reason", "", "One-line justification (required, appended to hire history)")
 	rehireCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
 
+	hireCmd.AddCommand(hireApproveCmd)
 	rootCmd.AddCommand(hireCmd)
 	rootCmd.AddCommand(rehireCmd)
 }
