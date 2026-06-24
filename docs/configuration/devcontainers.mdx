@@ -185,6 +185,10 @@ to remove crash leaks:
   any workspace are flagged. A 5-minute age floor protects images that
   Provision() has just committed but not yet linked to a crew, eliminating
   the obvious race window.
+- **Intermediate feature images** (`crewship-feat:*`) — the per-feature
+  layers the BuildKit path produces — are regenerable and never referenced
+  by a crew row, so the sweeper treats any unreferenced one beyond the age
+  floor the same way it treats orphaned cache images.
 
 ### Orphan deletion policy
 
@@ -209,7 +213,9 @@ Docker's `ImageList` is O(n) over every image on the host. The sweeper and `GET 
 | Feature downloader (OCI) | `internal/devcontainer/features.go` |
 | Feature installer (exec) | `internal/devcontainer/installer.go` |
 | Provisioner + caching | `internal/devcontainer/provisioner.go` |
-| REST handlers + GC sweepers | `internal/api/crew_provisioning.go` |
+| BuildKit feature-image builder | `internal/devcontainer/imagebuilder.go` |
+| Generated Dockerfile | `internal/devcontainer/dockerfile.go` |
+| REST handlers + GC sweepers | `internal/api/crew_provisioning.go`, `internal/api/crew_provisioning_gc.go` |
 | Shared HEAD-digest cache | `internal/dockerutil/imagedigest.go` |
 | CLI `crew config` | `cmd/crewship/cmd_crew_config.go` |
 | CLI `crew provision` | `cmd/crewship/cmd_crew_provision.go` |

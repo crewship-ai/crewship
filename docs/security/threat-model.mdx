@@ -120,6 +120,11 @@ The agent therefore cannot:
   scrubber (Layer 3) drops anything that looks like a key in the
   agent's output before it lands in the journal or web UI.
 
+When a credential *does* end up in the agent env (OAuth/CLI tokens, or
+SECRET credentials with Keeper off), the Orchestrator logs the exposure at
+WARN (actionable) or DEBUG (structural) so operators can monitor and remediate
+where possible — see [Monitoring credential exposure](/guides/credentials#monitoring-credential-exposure).
+
 Detail: [Credentials guide](/guides/credentials) for the operator
 flow, [`internal/sidecar/`](https://github.com/crewship-ai/crewship/tree/main/internal/sidecar)
 for the source.

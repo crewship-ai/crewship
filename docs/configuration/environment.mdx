@@ -230,18 +230,20 @@ The Docker provider checks `DOCKER_HOST` first, then auto-detects from candidate
 
 ## Devcontainer Cache GC
 
-Crewship runs a background sweeper every 30 minutes that detects two kinds
+Crewship runs a background sweeper every 30 minutes that detects three kinds
 of leaks: temporary provisioning containers orphaned by a `crewshipd` crash
-(matched by the `crewship.temp=provision` label) and unreferenced
+(matched by the `crewship.temp=provision` label), unreferenced
 `crewship-cache:*` images left behind when the process is killed between
-`docker commit` and the database write that links the image to a crew.
+`docker commit` and the database write that links the image to a crew, and
+intermediate `crewship-feat:*` BuildKit feature images (per-feature layers
+that are regenerable and never directly referenced by a crew row).
 
-Temp containers older than one hour are always removed. Cache images are
-**logged only by default**; deletion must be explicitly enabled.
+Temp containers older than one hour are always removed. Cache and feature
+images are **logged only by default**; deletion must be explicitly enabled.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `CREWSHIP_CACHE_GC_AUTODELETE` | (unset) | Set to `true` or `1` to remove unreferenced `crewship-cache:*` images automatically. Default behaviour is to log the orphans only — destructive removal is opt-in because deleting a freshly-built local image is surprising in interactive environments. |
+| `CREWSHIP_CACHE_GC_AUTODELETE` | (unset) | Set to `true` or `1` to remove unreferenced `crewship-cache:*` and intermediate `crewship-feat:*` images automatically. Default behaviour is to log the orphans only — destructive removal is opt-in because deleting a freshly-built local image is surprising in interactive environments. |
 
 A 5-minute age floor protects images that were committed in the last few
 minutes (closing the race between `docker commit` and the DB update inside
