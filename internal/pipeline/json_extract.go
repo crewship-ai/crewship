@@ -73,3 +73,17 @@ func DecodeAgentJSON(raw string, v any) error {
 	dec := json.NewDecoder(strings.NewReader(ExtractJSONCandidate(raw)))
 	return dec.Decode(v)
 }
+
+// DecodeAgentJSONNumber is DecodeAgentJSON but decodes JSON numbers as
+// json.Number rather than float64, preserving integer width and decimal
+// precision. The transform runner uses this so `@json` canonicalisation is
+// byte-stable for large or high-precision numbers — a plain float64 decode
+// round-trips e.g. 12345678901234567890 to 1.2345678901234568e+19, defeating
+// the whole point of a reproducible canonical form. The schema-validation and
+// grader paths deliberately keep DecodeAgentJSON's float64 decode, since the
+// jsonschema validator expects float64 for its numeric constraints.
+func DecodeAgentJSONNumber(raw string, v any) error {
+	dec := json.NewDecoder(strings.NewReader(ExtractJSONCandidate(raw)))
+	dec.UseNumber()
+	return dec.Decode(v)
+}

@@ -37,8 +37,13 @@ func TestSeedRoutinesValidateAgainstDSL(t *testing.T) {
 	}
 
 	// Every known routine/scenario slug — call_pipeline targets resolve here.
+	// Fail fast on a slug clash: seeding saves by slug, so two defs sharing
+	// one would conflict at save time — and a plain map assignment masks it.
 	pipelineSlugs := map[string]struct{}{}
 	for _, d := range all {
+		if _, dup := pipelineSlugs[d.Slug]; dup {
+			t.Fatalf("duplicate seed slug %q across routines/eval-scenarios — save-by-slug would conflict", d.Slug)
+		}
 		pipelineSlugs[d.Slug] = struct{}{}
 	}
 

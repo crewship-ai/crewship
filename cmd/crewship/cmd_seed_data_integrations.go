@@ -58,7 +58,9 @@ func seedIntegrations(ctx context.Context, client *cli.Client, crewIDs, agentIDs
 			body["args_json"] = integ.ArgsJSON
 		}
 		if integ.EnvJSON != "" {
-			body["env_json"] = integ.EnvJSON
+			// Fill secret placeholders (e.g. GITHUB_PERSONAL_ACCESS_TOKEN from
+			// SEED_GITHUB_TOKEN) so a stdio MCP server isn't seeded unauthenticated.
+			body["env_json"] = seeddata.ResolveIntegrationEnvJSON(integ.EnvJSON)
 		}
 
 		path := fmt.Sprintf("/api/v1/crews/%s/integrations", crewID)

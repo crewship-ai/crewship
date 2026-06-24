@@ -1,11 +1,43 @@
 package seeddata
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 
 	"gopkg.in/yaml.v3"
 )
+
+// ResolveIntegrationEnvJSON returns envJSON with empty secret placeholders
+// filled from the corresponding SEED_* env var. Today the only such secret is
+// the GitHub MCP server's GITHUB_PERSONAL_ACCESS_TOKEN, fed from
+// SEED_GITHUB_TOKEN. Without this the github integration seeds with the empty
+// token from integrations.yaml and the MCP server runs UNAUTHENTICATED even
+// when SEED_GITHUB_TOKEN is set (the token is otherwise only wired to agents
+// as GH_TOKEN). Returns envJSON unchanged when the token isn't set or the JSON
+// is malformed, so seeding still proceeds.
+func ResolveIntegrationEnvJSON(envJSON string) string {
+	if envJSON == "" {
+		return ""
+	}
+	tok := os.Getenv("SEED_GITHUB_TOKEN")
+	if tok == "" {
+		return envJSON
+	}
+	var env map[string]string
+	if err := json.Unmarshal([]byte(envJSON), &env); err != nil {
+		return envJSON
+	}
+	if v, ok := env["GITHUB_PERSONAL_ACCESS_TOKEN"]; !ok || v != "" {
+		return envJSON
+	}
+	env["GITHUB_PERSONAL_ACCESS_TOKEN"] = tok
+	b, err := json.Marshal(env)
+	if err != nil {
+		return envJSON
+	}
+	return string(b)
+}
 
 // IntegrationDef defines a crew-level MCP server integration.
 type IntegrationDef struct {

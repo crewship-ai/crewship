@@ -50,10 +50,20 @@ func TestSeedSchedules_Created(t *testing.T) {
 	if len(calls) != 3 {
 		t.Fatalf("calls = %d", len(calls))
 	}
-	body := string(calls[0].Body)
-	for _, want := range []string{`"target_pipeline_slug":"classify-ticket"`, `"cron_expr":"*/30 * * * *"`, `"enabled":true`} {
-		if !strings.Contains(body, want) {
-			t.Errorf("schedule body missing %s: %s", want, body)
+	// Assert all three seeded payloads (in demoSchedules order), not just
+	// calls[0] — otherwise the other two definitions could regress or
+	// duplicate silently while the test still passes.
+	wantPerCall := [][]string{
+		{`"target_pipeline_slug":"classify-ticket"`, `"cron_expr":"*/30 * * * *"`, `"enabled":true`},
+		{`"target_pipeline_slug":"daily-status-digest"`, `"cron_expr":"0 9 * * *"`, `"enabled":true`},
+		{`"target_pipeline_slug":"consistency-sweep"`, `"cron_expr":"0 */6 * * *"`, `"enabled":true`},
+	}
+	for i, wants := range wantPerCall {
+		body := string(calls[i].Body)
+		for _, want := range wants {
+			if !strings.Contains(body, want) {
+				t.Errorf("schedule[%d] body missing %s: %s", i, want, body)
+			}
 		}
 	}
 }
