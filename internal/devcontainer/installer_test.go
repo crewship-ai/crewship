@@ -461,11 +461,12 @@ func TestBuildFeatureEnv_NilOptions(t *testing.T) {
 	}
 }
 
-// Regression test for the provisioning failure where the claude-code feature's
-// install.sh does `cp "$_REMOTE_USER_HOME/.local/bin/claude" /usr/local/bin/claude`
-// and _REMOTE_USER_HOME was unset, expanding to `/.local/bin/claude` → "cannot stat".
+// Regression test for the provisioning failure where a feature's install.sh
+// copies a tool out of `$_REMOTE_USER_HOME/.local/bin/...` into a system path
+// while _REMOTE_USER_HOME is unset, expanding to a root-relative `/.local/bin/...`
+// → "cannot stat".
 func TestBuildFeatureEnv_SetsRemoteUserHome(t *testing.T) {
-	env := buildFeatureEnv("c1", "claude-code", nil, nil)
+	env := buildFeatureEnv("c1", "some-feature", nil, nil)
 	var got string
 	for _, e := range env {
 		if strings.HasPrefix(e, "_REMOTE_USER_HOME=") {

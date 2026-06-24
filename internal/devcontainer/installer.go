@@ -263,10 +263,11 @@ func buildFeatureEnv(containerID, featureID string, metadataOptions, userOptions
 	// (https://containers.dev/implementors/features/). _REMOTE_USER is the
 	// non-root user common-utils creates (UID 1001, home /home/agent);
 	// _CONTAINER_USER is the user the build-time exec runs as (root). Upstream
-	// features rely on these — e.g. the claude-code feature installs as
-	// $_REMOTE_USER then does `cp "$_REMOTE_USER_HOME/.local/bin/claude" ...`,
-	// which silently became `cp /.local/bin/claude` (failing the whole build)
-	// when _REMOTE_USER_HOME was unset.
+	// features rely on these — e.g. a feature that installs a tool as
+	// $_REMOTE_USER then promotes it to a system path via
+	// `cp "$_REMOTE_USER_HOME/.local/bin/<tool>" ...` silently became
+	// `cp /.local/bin/<tool>` (failing the whole build) when _REMOTE_USER_HOME
+	// was unset.
 	env := []string{
 		"_CONTAINER_ID=" + containerID,
 		"_REMOTE_USER=agent",
