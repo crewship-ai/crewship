@@ -238,6 +238,28 @@ func TestSweepOrphanCacheImages_SkipsReferenced(t *testing.T) {
 	}
 }
 
+func TestSweepOrphanCacheImages_PrunesFeatureImages(t *testing.T) {
+	now := time.Now().Unix()
+	old := now - int64((24 * time.Hour).Seconds())
+	fake := &fakeGCClient{
+		images: []image.Summary{
+			// Intermediate BuildKit feature image — regenerable, never
+			// referenced by a crew → must be pruned.
+			{RepoTags: []string{"crewship-feat:abc123"}, Created: old},
+			// A feature image younger than the age floor must be kept.
+			{RepoTags: []string{"crewship-feat:young1"}, Created: now - 1},
+		},
+	}
+	h := newGCTestHandler(t, fake)
+	t.Setenv(cacheGCAutoDeleteEnv, "true")
+
+	h.sweepOrphanCacheImages(context.Background())
+
+	if len(fake.removedImages) != 1 || fake.removedImages[0] != "crewship-feat:abc123" {
+		t.Errorf("expected only the old feature image pruned, got %v", fake.removedImages)
+	}
+}
+
 // listLocalImagesCached — TTL behaviour.
 func TestListLocalImagesCached_Memoizes(t *testing.T) {
 	fake := &fakeGCClient{images: []image.Summary{{RepoTags: []string{"crewship-cache:a"}}}}

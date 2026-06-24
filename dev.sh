@@ -292,7 +292,20 @@ start_go() {
   local bin_dir
   bin_dir="$(dirname "$binary")"
   log "Building crewship-sidecar..."
-  if ! (cd "$PROJECT_DIR" && CGO_ENABLED=0 go build -ldflags="-s -w" -o "${bin_dir}/crewship-sidecar" ./cmd/crewship-sidecar) 2>&1; then
+  # The sidecar is bind-mounted into the crew's LINUX container and exec'd
+  # there (sanity-checked with `--version`), so it must be a linux binary for
+  # the container's arch — NOT a host-native one. On a macOS host a native
+  # build produces a Mach-O binary that fails to exec in the container with
+  # exit 255, which the engine misreports as a glibc/musl mismatch. Always
+  # cross-compile for linux; match GOARCH to the Docker container platform
+  # (which follows the host arch).
+  local sidecar_goarch
+  case "$(uname -m)" in
+    arm64 | aarch64) sidecar_goarch="arm64" ;;
+    x86_64 | amd64)  sidecar_goarch="amd64" ;;
+    *)               sidecar_goarch="$(go env GOARCH)" ;;
+  esac
+  if ! (cd "$PROJECT_DIR" && CGO_ENABLED=0 GOOS=linux GOARCH="$sidecar_goarch" go build -ldflags="-s -w" -o "${bin_dir}/crewship-sidecar" ./cmd/crewship-sidecar) 2>&1; then
     err "Sidecar build failed -- check errors above"
     return 1
   fi

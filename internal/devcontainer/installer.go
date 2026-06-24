@@ -259,9 +259,21 @@ func createTarFromDir(srcDir, prefix string) (*bytes.Buffer, error) {
 // "user explicitly set version=”" is a valid (if rare) intent we don't
 // override.
 func buildFeatureEnv(containerID, featureID string, metadataOptions, userOptions map[string]any) []string {
+	// Standard devcontainer feature-contract variables the runner MUST supply
+	// (https://containers.dev/implementors/features/). _REMOTE_USER is the
+	// non-root user common-utils creates (UID 1001, home /home/agent);
+	// _CONTAINER_USER is the user the build-time exec runs as (root). Upstream
+	// features rely on these — e.g. a feature that installs a tool as
+	// $_REMOTE_USER then promotes it to a system path via
+	// `cp "$_REMOTE_USER_HOME/.local/bin/<tool>" ...` silently became
+	// `cp /.local/bin/<tool>` (failing the whole build) when _REMOTE_USER_HOME
+	// was unset.
 	env := []string{
 		"_CONTAINER_ID=" + containerID,
 		"_REMOTE_USER=agent",
+		"_REMOTE_USER_HOME=/home/agent",
+		"_CONTAINER_USER=root",
+		"_CONTAINER_USER_HOME=/root",
 	}
 
 	// Apply defaults from feature metadata for options the user didn't set.

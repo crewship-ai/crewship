@@ -83,6 +83,7 @@ type Provisioner struct {
 	docker     CommitClient
 	installer  *Installer
 	downloader *FeatureDownloader
+	builder    ImageBuilder
 	logger     *slog.Logger
 
 	// digestResolver caches remote manifest digests used by ensureImage. Shared
@@ -146,10 +147,15 @@ func NewProvisioner(docker CommitClient, installer *Installer, downloader *Featu
 		docker:         docker,
 		installer:      installer,
 		downloader:     downloader,
+		builder:        NewDockerBuildKitBuilder(logger),
 		logger:         logger,
 		digestResolver: dockerutil.NewDigestResolver(0, 0), // package defaults
 	}
 }
+
+// SetImageBuilder overrides the image builder (tests inject a fake; callers can
+// disable BuildKit by passing a builder whose Available() returns false).
+func (p *Provisioner) SetImageBuilder(b ImageBuilder) { p.builder = b }
 
 // Step label helpers — kept centralized so the plan emitted via WithPlan and
 // the per-step messages emitted via WithProgress always agree on exact text.
@@ -171,8 +177,10 @@ func featureStepLabel(featureID string) string {
 }
 
 // featureLeafID extracts the leaf name from a feature reference.
-//   ghcr.io/devcontainers/features/python:1 → "python"
-//   common-utils:2                          → "common-utils"
+//
+//	ghcr.io/devcontainers/features/python:1 → "python"
+//	common-utils:2                          → "common-utils"
+//
 // The leaf is what we display in the checklist and what install.sh-emitting
 // features identify themselves by; matches `feature.Metadata.ID` after
 // download for every feature we've seen in the wild.
@@ -284,10 +292,34 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 		}
 	}
 
-	emit(pullStepLabel(baseImage))
+	// 1b. Resolve features once — the BuildKit build and the in-container
+	// install both consume them, and aggregateFeatureRequirements needs them
+	// regardless of which path runs.
+	resolvedFeatures, optionsByRef, err := p.resolveFeatures(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
 
-	// 2. Create temporary container.
-	containerID, err := p.createTempContainer(ctx, baseImage)
+	// Choose the build engine. With BuildKit available we bake the features
+	// into an intermediate image so each feature is a cached layer (adding a
+	// feature only rebuilds its layer and what follows); otherwise the features
+	// install sequentially in the temp container. Either way the temp container
+	// then runs mise, postCreate hooks and env baking before the final commit —
+	// so this is a surgical swap of just the feature-install step.
+	effectiveBase := baseImage
+	useBuildKit := p.builder != nil && p.builder.Available() && len(resolvedFeatures) > 0
+	if useBuildKit {
+		featImage, berr := p.buildFeatureImage(ctx, baseImage, resolvedFeatures, optionsByRef, emit)
+		if berr != nil {
+			return nil, berr
+		}
+		effectiveBase = featImage
+	} else {
+		emit(pullStepLabel(baseImage))
+	}
+
+	// 2. Create temporary container from the (possibly feature-baked) base.
+	containerID, err := p.createTempContainer(ctx, effectiveBase)
 	if err != nil {
 		return nil, fmt.Errorf("creating temp container: %w", err)
 	}
@@ -304,15 +336,14 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 		return nil, fmt.Errorf("starting temp container: %w", err)
 	}
 
-	// 4. Download and sort features. Both the agent user (via common-utils
-	// feature with username/userUid options) and the Claude Code CLI (via
-	// devcontainers-extra/claude-code feature) come from the devcontainer
-	// configuration — no custom Go installers needed.
-	resolvedFeatures, err := p.installFeatures(ctx, containerID, cfg, func(featureID string) {
-		emit(featureStepLabel(featureID))
-	})
-	if err != nil {
-		return nil, err
+	// 4. Install features in the container only when BuildKit didn't already
+	// bake them into effectiveBase.
+	if !useBuildKit {
+		if err := p.installResolvedFeatures(ctx, containerID, resolvedFeatures, optionsByRef, func(featureID string) {
+			emit(featureStepLabel(featureID))
+		}); err != nil {
+			return nil, err
+		}
 	}
 
 	// 5. Handle mise configuration.
