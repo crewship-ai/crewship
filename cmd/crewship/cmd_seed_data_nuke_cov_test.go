@@ -233,7 +233,11 @@ func TestNukeList(t *testing.T) {
 	t.Run("undecodable list is an error", func(t *testing.T) {
 		s := clitest.NewStubServer()
 		defer s.Close()
-		// Unregistered path → 404 plain-text → decode error.
+		// 200 with a non-array body → passes nukeList's HTTP-status check
+		// (CheckError) and then fails to decode into []item. An unregistered
+		// path would now surface as the HTTP 404 error instead, never
+		// reaching the decode path this case is meant to exercise.
+		s.OnGet("/api/v1/labels", clitest.JSONResponse(200, "not-a-list"))
 		err := nukeList(context.Background(), covStubClient(s), "/api/v1/labels", "/api/v1/labels/")
 		if err == nil || !strings.Contains(err.Error(), "decode /api/v1/labels") {
 			t.Fatalf("expected decode error, got %v", err)
@@ -332,6 +336,9 @@ func TestNukeCrewIntegrations(t *testing.T) {
 	t.Run("decode error", func(t *testing.T) {
 		s := clitest.NewStubServer()
 		defer s.Close()
+		// 200 with a non-array body → passes the HTTP-status check, then
+		// fails to decode (an unregistered path now surfaces as HTTP 404).
+		s.OnGet("/api/v1/integrations/crews", clitest.JSONResponse(200, "not-a-list"))
 		err := nukeCrewIntegrations(context.Background(), covStubClient(s))
 		if err == nil || !strings.Contains(err.Error(), "decode integrations") {
 			t.Fatalf("expected decode error, got %v", err)
