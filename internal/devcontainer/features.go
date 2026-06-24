@@ -497,31 +497,129 @@ func readMetadata(dir string) (FeatureMetadata, error) {
 	return meta, nil
 }
 
+// featureRefKey normalizes a feature reference to its tag/digest-stripped,
+// lowercased OCI path — registry namespace preserved. Upstream features
+// express installsAfter as full refs (e.g.
+// "ghcr.io/devcontainers/features/common-utils"), so this is the primary
+// matching key. Keeping the namespace is what stops two registries that
+// publish the same leaf name (.../features/git vs
+// .../features-community/git) from collapsing into one graph node. A bare id
+// with no registry passes through unchanged, so it doubles as the key for
+// installsAfter entries written as short ids.
+func featureRefKey(s string) string {
+	if s == "" {
+		return ""
+	}
+	// Drop a digest suffix (...@sha256:hex).
+	if i := strings.Index(s, "@"); i >= 0 {
+		s = s[:i]
+	}
+	// Drop a tag suffix — the tag colon follows the last path segment.
+	if slash := strings.LastIndex(s, "/"); slash >= 0 {
+		if colon := strings.LastIndex(s, ":"); colon > slash {
+			s = s[:colon]
+		}
+	} else if colon := strings.LastIndex(s, ":"); colon >= 0 {
+		s = s[:colon]
+	}
+	return strings.ToLower(s)
+}
+
+// featureLeafKey reduces a reference to just its lowercased leaf segment. Used
+// only as a fallback for bare-id matching (a feature's Metadata.ID is the
+// short leaf, and a few features list installsAfter by bare id). Leaf keys can
+// collide across registries, so featureRefKey is always tried first.
+func featureLeafKey(s string) string {
+	s = featureRefKey(s)
+	if slash := strings.LastIndex(s, "/"); slash >= 0 {
+		s = s[slash+1:]
+	}
+	return s
+}
+
+// indexOfCommonUtils returns the position of the common-utils feature in the
+// slice, or -1 if absent. Detected via its canonical ref (any tag/digest) or
+// its leaf id so it works whether or not Ref/Metadata are fully populated.
+func indexOfCommonUtils(features []*ResolvedFeature) int {
+	for i, f := range features {
+		if f == nil {
+			continue
+		}
+		if featureLeafKey(f.Metadata.ID) == "common-utils" || isCommonUtilsRef(f.Ref) {
+			return i
+		}
+	}
+	return -1
+}
+
 // SortFeatures performs a topological sort of features based on their
 // installsAfter dependencies. Features with no dependencies or whose
 // dependencies are not in the input set come first. The sort is stable:
 // features at the same dependency depth retain their original order.
+//
+// common-utils is special-cased to install first: it creates the `agent` user
+// (UID 1001) that every other feature's install.sh assumes exists
+// (claude-code/github-cli call `su agent`), and features routinely forget to
+// declare the dependency. An implicit edge common-utils → every other feature
+// guarantees it leads without relying on each author getting installsAfter
+// right.
 func SortFeatures(features []*ResolvedFeature) []*ResolvedFeature {
 	if len(features) <= 1 {
 		return features
 	}
 
-	// Build an index from feature ID to position.
-	idIndex := make(map[string]int, len(features))
+	// Index each feature by its full normalized OCI ref (namespace-preserving,
+	// the primary key) and by its bare leaf id (fallback). installsAfter
+	// entries are full refs in practice but occasionally bare ids, so both
+	// forms can resolve. Ref keys are written first; leaf keys may collide
+	// across registries, which is why lookups try the full ref first.
+	idIndex := make(map[string]int, len(features)*2)
 	for i, f := range features {
-		idIndex[f.Metadata.ID] = i
+		if k := featureRefKey(f.Ref); k != "" {
+			idIndex[k] = i
+		}
+		if k := featureLeafKey(f.Metadata.ID); k != "" {
+			if _, exists := idIndex[k]; !exists {
+				idIndex[k] = i
+			}
+		}
+	}
+	lookupDep := func(dep string) (int, bool) {
+		if j, ok := idIndex[featureRefKey(dep)]; ok {
+			return j, true
+		}
+		j, ok := idIndex[featureLeafKey(dep)]
+		return j, ok
 	}
 
 	// Kahn's algorithm for topological sort.
 	n := len(features)
 	inDegree := make([]int, n)
 	adjList := make([][]int, n)
+	addEdge := func(from, to int) {
+		adjList[from] = append(adjList[from], to)
+		inDegree[to]++
+	}
 
 	for i, f := range features {
 		for _, depID := range f.Metadata.InstallsAfter {
-			if j, ok := idIndex[depID]; ok {
-				adjList[j] = append(adjList[j], i)
-				inDegree[i]++
+			if j, ok := lookupDep(depID); ok && j != i {
+				addEdge(j, i)
+			}
+		}
+	}
+
+	// Force common-utils first via implicit edges. Only safe to add when
+	// common-utils has no incoming dependency of its own (inDegree == 0) — the
+	// real-world case — so the added edges can never close a cycle.
+	if cu := indexOfCommonUtils(features); cu >= 0 && inDegree[cu] == 0 {
+		existing := make(map[int]bool, len(adjList[cu]))
+		for _, t := range adjList[cu] {
+			existing[t] = true
+		}
+		for i := range features {
+			if i != cu && !existing[i] {
+				addEdge(cu, i)
 			}
 		}
 	}
