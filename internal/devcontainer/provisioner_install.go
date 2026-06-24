@@ -140,9 +140,13 @@ func (p *Provisioner) ensureImage(ctx context.Context, ref string) error {
 // callback. Receives the resolved feature ID (e.g. "common-utils"), not the
 // full ref. May be called from the same goroutine as the install itself.
 
-func (p *Provisioner) installFeatures(ctx context.Context, containerID string, cfg *Config, beforeInstall func(featureID string)) ([]*ResolvedFeature, error) {
+// resolveFeatures downloads and dependency-sorts the features declared in cfg,
+// returning the sorted features and the per-ref options map. It performs no
+// container work, so both the BuildKit and container-commit provisioning paths
+// share it (and the result feeds aggregateFeatureRequirements either way).
+func (p *Provisioner) resolveFeatures(ctx context.Context, cfg *Config) ([]*ResolvedFeature, map[string]map[string]any, error) {
 	if len(cfg.Features) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	// Sort feature refs for deterministic download order.
@@ -197,7 +201,7 @@ func (p *Provisioner) installFeatures(ctx context.Context, containerID string, c
 	wg.Wait()
 
 	if downloadErr != nil {
-		return nil, downloadErr
+		return nil, nil, downloadErr
 	}
 
 	// Filter out any nil entries (shouldn't happen given error handling above,
@@ -211,20 +215,23 @@ func (p *Provisioner) installFeatures(ctx context.Context, containerID string, c
 	resolved = nonNil
 
 	// Sort by dependency order.
-	sorted := SortFeatures(resolved)
+	return SortFeatures(resolved), optionsByRef, nil
+}
 
-	// Install each feature.
+// installResolvedFeatures runs each feature's install.sh inside containerID in
+// dependency order (the container-commit path). beforeInstall fires per feature
+// for progress reporting.
+func (p *Provisioner) installResolvedFeatures(ctx context.Context, containerID string, sorted []*ResolvedFeature, optionsByRef map[string]map[string]any, beforeInstall func(featureID string)) error {
 	for _, feature := range sorted {
 		if beforeInstall != nil {
 			beforeInstall(feature.Metadata.ID)
 		}
 		opts := optionsByRef[feature.Ref]
 		if err := p.installer.InstallFeature(ctx, containerID, feature, opts); err != nil {
-			return nil, fmt.Errorf("installing feature %s: %w", feature.Metadata.ID, err)
+			return fmt.Errorf("installing feature %s: %w", feature.Metadata.ID, err)
 		}
 	}
-
-	return sorted, nil
+	return nil
 }
 
 // runFeatureLifecycleCommands executes feature-level postCreateCommand hooks

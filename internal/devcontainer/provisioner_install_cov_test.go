@@ -299,12 +299,28 @@ func TestCreateTempContainer_EnsureImageFailure(t *testing.T) {
 
 // --- installFeatures -----------------------------------------------------------
 
+// covInstallFeatures composes the split resolve+install pipeline so these
+// coverage tests keep exercising the full download → sort → install flow that
+// the former installFeatures method provided in one call. Download errors come
+// from resolveFeatures, install errors from installResolvedFeatures — matching
+// the original error semantics.
+func covInstallFeatures(p *Provisioner, ctx context.Context, cid string, cfg *Config, cb func(string)) ([]*ResolvedFeature, error) {
+	sorted, opts, err := p.resolveFeatures(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+	if err := p.installResolvedFeatures(ctx, cid, sorted, opts, cb); err != nil {
+		return nil, err
+	}
+	return sorted, nil
+}
+
 func TestInstallFeatures_NoFeaturesIsNoop(t *testing.T) {
 	t.Parallel()
 
 	exec := newCovExecClient(nil)
 	p := newCovProvisioner(&mockCommitClient{}, exec, t.TempDir())
-	got, err := p.installFeatures(context.Background(), "cid", &Config{Image: "x"}, nil)
+	got, err := covInstallFeatures(p, context.Background(), "cid", &Config{Image: "x"}, nil)
 	if err != nil || got != nil {
 		t.Errorf("expected nil/nil for empty features, got %v, %v", got, err)
 	}
@@ -331,7 +347,7 @@ func TestInstallFeatures_DependencyOrderAndCallback(t *testing.T) {
 		refB: nil,
 	}}
 	var callbackOrder []string
-	sorted, err := p.installFeatures(context.Background(), "cid", cfg, func(id string) {
+	sorted, err := covInstallFeatures(p, context.Background(), "cid", cfg, func(id string) {
 		callbackOrder = append(callbackOrder, id)
 	})
 	if err != nil {
@@ -381,7 +397,7 @@ func TestInstallFeatures_DownloadErrorPropagates(t *testing.T) {
 		goodRef:               nil,
 		"ghcr.io/t/bad ref:1": nil, // unparseable → download fails without network
 	}}
-	_, err := p.installFeatures(context.Background(), "cid", cfg, nil)
+	_, err := covInstallFeatures(p, context.Background(), "cid", cfg, nil)
 	if err == nil || !strings.Contains(err.Error(), "downloading feature") {
 		t.Errorf("expected download error, got %v", err)
 	}
@@ -402,7 +418,7 @@ func TestInstallFeatures_InstallErrorPropagates(t *testing.T) {
 	})
 	p := newCovProvisioner(&mockCommitClient{}, exec, cacheDir)
 	cfg := &Config{Image: "x", Features: map[string]map[string]any{ref: nil}}
-	_, err := p.installFeatures(context.Background(), "cid", cfg, nil)
+	_, err := covInstallFeatures(p, context.Background(), "cid", cfg, nil)
 	if err == nil || !strings.Contains(err.Error(), "installing feature broken") {
 		t.Errorf("expected install error for broken, got %v", err)
 	}
