@@ -15,7 +15,12 @@ if [ ! -f /home/agent/.bashrc ]; then
     cp /etc/skel/.bashrc /home/agent/.bashrc 2>/dev/null || true
     cp /etc/skel/.profile /home/agent/.profile 2>/dev/null || true
 fi
-mkdir -p /home/agent/.claude /home/agent/.local/bin /home/agent/.ssh
+# Tolerate failures here: `set -e` is on, and if the /home/agent volume is ever
+# not writable by this uid (e.g. a root-owned named volume), a failed mkdir must
+# NOT abort the script before `exec sleep infinity` below — that would kill
+# PID 1 and take the whole container down, failing every exec (including
+# concurrent lead + sub-agent runs) with exit 137.
+mkdir -p /home/agent/.claude /home/agent/.local/bin /home/agent/.ssh 2>/dev/null || true
 chmod 700 /home/agent/.ssh 2>/dev/null || true
 
 # Ensure crew tools directory is usable.

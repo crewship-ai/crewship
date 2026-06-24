@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -76,6 +77,17 @@ type Provider struct {
 	// `Conflict: container name already in use`. Different crews still
 	// run in parallel.
 	crewLocks sync.Map // crew_id (string) → *sync.Mutex
+
+	// checkVolumeMountpoint gates the host-side volume self-heal in
+	// ensureVolume. The check os.Stat's the daemon-reported Mountpoint
+	// (/var/lib/docker/volumes/<name>/_data), which is only reachable from
+	// this process when the daemon shares the host filesystem (native Linux
+	// daemon). On a VM-backed runtime (Docker Desktop / Colima / OrbStack on
+	// macOS or Windows) that path never exists on the host, so the check
+	// would false-positive on EVERY volume and destructively recreate it —
+	// which recreates the crew container and trips the entrypoint perms bug.
+	// Default: true only on linux hosts. Tests set it explicitly.
+	checkVolumeMountpoint bool
 }
 
 // lockForCrew returns the mutex for a given crew, creating it on first
@@ -239,6 +251,10 @@ func New(ctx context.Context, cfg Config, logger *slog.Logger) (*Provider, error
 		logger:         logger,
 		detected:       *detected,
 		digestResolver: dockerutil.NewDigestResolver(0, 0), // package defaults
+		// The host-side volume self-heal only makes sense when the daemon
+		// shares this process's filesystem — true for a native Linux daemon,
+		// false for any VM-backed runtime (always the case on macOS/Windows).
+		checkVolumeMountpoint: runtime.GOOS == "linux",
 	}
 
 	logger.Info("container runtime detected",
@@ -436,6 +452,13 @@ func (p *Provider) ensureVolume(ctx context.Context, name string) error {
 		// fine, Docker itself can still mount it, so we treat it as
 		// healthy. Only ENOENT means the backing _data is genuinely
 		// gone and we need to rebuild.
+		// On a VM-backed daemon (macOS/Windows; always when not host-local) the
+		// daemon-reported Mountpoint is not reachable from this process, so the
+		// host-side self-heal can't run — trust the daemon's "exists" and skip
+		// it. Without this, every provision would false-positive and recreate.
+		if !p.checkVolumeMountpoint {
+			return nil
+		}
 		if existing.Mountpoint != "" {
 			if _, statErr := os.Stat(existing.Mountpoint); statErr == nil {
 				return nil
