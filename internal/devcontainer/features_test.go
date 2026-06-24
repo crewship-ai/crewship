@@ -319,6 +319,42 @@ func TestSortFeatures_InstallsAfterFullRefMatches(t *testing.T) {
 	}
 }
 
+// TestSortFeatures_SameLeafDifferentRegistries guards namespace preservation:
+// two registries publishing the same leaf id (git) must remain distinct graph
+// nodes, and a full-ref installsAfter must resolve to the exact registry it
+// names — not whichever happened to win a leaf-key collision.
+func TestSortFeatures_SameLeafDifferentRegistries(t *testing.T) {
+	features := []*ResolvedFeature{
+		{Ref: "ghcr.io/devcontainers/features/git:1", Metadata: FeatureMetadata{ID: "git"}},
+		{Ref: "ghcr.io/devcontainers-community/features/git:1", Metadata: FeatureMetadata{ID: "git"}},
+		// Depends specifically on the community git via full ref.
+		{Ref: "ghcr.io/acme/features/tool:1", Metadata: FeatureMetadata{ID: "tool", InstallsAfter: []string{"ghcr.io/devcontainers-community/features/git"}}},
+	}
+	sorted := SortFeatures(features)
+	if len(sorted) != 3 {
+		t.Fatalf("expected 3 features, got %d", len(sorted))
+	}
+	// The community git (index 1) must precede tool; the canonical git
+	// (index 0) carries no edge to tool, so the dependency must not have
+	// silently bound to the wrong feature.
+	posCommunityGit, posTool := -1, -1
+	for i, f := range sorted {
+		switch f.Ref {
+		case "ghcr.io/devcontainers-community/features/git:1":
+			posCommunityGit = i
+		case "ghcr.io/acme/features/tool:1":
+			posTool = i
+		}
+	}
+	if posCommunityGit < 0 || posTool < 0 || posCommunityGit > posTool {
+		var refs []string
+		for _, f := range sorted {
+			refs = append(refs, f.Ref)
+		}
+		t.Fatalf("community git must precede tool via full-ref installsAfter, got %v", refs)
+	}
+}
+
 // TestSortFeatures_NoCycleWhenExplicitDep verifies the implicit
 // common-utils-first edge composes cleanly with an explicit installsAfter on
 // common-utils: no duplicate emission, no cycle fallback, all features present.

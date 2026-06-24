@@ -497,16 +497,16 @@ func readMetadata(dir string) (FeatureMetadata, error) {
 	return meta, nil
 }
 
-// featureDepKey normalizes a feature identifier — a full OCI ref, a
-// version-pinned ref, or a bare id — down to its lowercased leaf name so
-// dependency edges actually form. Upstream features express installsAfter
-// as full refs (e.g. "ghcr.io/devcontainers/features/common-utils"), while a
-// feature's own Metadata.ID is the short leaf ("common-utils"); keying both
-// sides through this function lets cross-namespace edges match. Previously
-// the graph keyed on raw Metadata.ID and compared it against raw installsAfter
-// strings, so the lookup never hit and the topological sort was a no-op for
-// every real-world feature.
-func featureDepKey(s string) string {
+// featureRefKey normalizes a feature reference to its tag/digest-stripped,
+// lowercased OCI path — registry namespace preserved. Upstream features
+// express installsAfter as full refs (e.g.
+// "ghcr.io/devcontainers/features/common-utils"), so this is the primary
+// matching key. Keeping the namespace is what stops two registries that
+// publish the same leaf name (.../features/git vs
+// .../features-community/git) from collapsing into one graph node. A bare id
+// with no registry passes through unchanged, so it doubles as the key for
+// installsAfter entries written as short ids.
+func featureRefKey(s string) string {
 	if s == "" {
 		return ""
 	}
@@ -522,24 +522,19 @@ func featureDepKey(s string) string {
 	} else if colon := strings.LastIndex(s, ":"); colon >= 0 {
 		s = s[:colon]
 	}
-	// Take the leaf path segment.
-	if slash := strings.LastIndex(s, "/"); slash >= 0 {
-		s = s[slash+1:]
-	}
 	return strings.ToLower(s)
 }
 
-// featureKey returns the normalized graph key for a resolved feature,
-// preferring its declared Metadata.ID and falling back to its Ref when the
-// metadata hasn't been populated (e.g. in unit tests).
-func featureKey(f *ResolvedFeature) string {
-	if f == nil {
-		return ""
+// featureLeafKey reduces a reference to just its lowercased leaf segment. Used
+// only as a fallback for bare-id matching (a feature's Metadata.ID is the
+// short leaf, and a few features list installsAfter by bare id). Leaf keys can
+// collide across registries, so featureRefKey is always tried first.
+func featureLeafKey(s string) string {
+	s = featureRefKey(s)
+	if slash := strings.LastIndex(s, "/"); slash >= 0 {
+		s = s[slash+1:]
 	}
-	if k := featureDepKey(f.Metadata.ID); k != "" {
-		return k
-	}
-	return featureDepKey(f.Ref)
+	return s
 }
 
 // indexOfCommonUtils returns the position of the common-utils feature in the
@@ -550,7 +545,7 @@ func indexOfCommonUtils(features []*ResolvedFeature) int {
 		if f == nil {
 			continue
 		}
-		if featureDepKey(f.Metadata.ID) == "common-utils" || isCommonUtilsRef(f.Ref) {
+		if featureLeafKey(f.Metadata.ID) == "common-utils" || isCommonUtilsRef(f.Ref) {
 			return i
 		}
 	}
@@ -573,13 +568,28 @@ func SortFeatures(features []*ResolvedFeature) []*ResolvedFeature {
 		return features
 	}
 
-	// Build an index from normalized feature key to position so installsAfter
-	// entries (full OCI refs) match feature ids (short leaves).
-	idIndex := make(map[string]int, len(features))
+	// Index each feature by its full normalized OCI ref (namespace-preserving,
+	// the primary key) and by its bare leaf id (fallback). installsAfter
+	// entries are full refs in practice but occasionally bare ids, so both
+	// forms can resolve. Ref keys are written first; leaf keys may collide
+	// across registries, which is why lookups try the full ref first.
+	idIndex := make(map[string]int, len(features)*2)
 	for i, f := range features {
-		if k := featureKey(f); k != "" {
+		if k := featureRefKey(f.Ref); k != "" {
 			idIndex[k] = i
 		}
+		if k := featureLeafKey(f.Metadata.ID); k != "" {
+			if _, exists := idIndex[k]; !exists {
+				idIndex[k] = i
+			}
+		}
+	}
+	lookupDep := func(dep string) (int, bool) {
+		if j, ok := idIndex[featureRefKey(dep)]; ok {
+			return j, true
+		}
+		j, ok := idIndex[featureLeafKey(dep)]
+		return j, ok
 	}
 
 	// Kahn's algorithm for topological sort.
@@ -593,7 +603,7 @@ func SortFeatures(features []*ResolvedFeature) []*ResolvedFeature {
 
 	for i, f := range features {
 		for _, depID := range f.Metadata.InstallsAfter {
-			if j, ok := idIndex[featureDepKey(depID)]; ok && j != i {
+			if j, ok := lookupDep(depID); ok && j != i {
 				addEdge(j, i)
 			}
 		}
