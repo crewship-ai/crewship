@@ -1,7 +1,8 @@
 package api
 
 // Orphan-resource garbage collection: stale temp containers from
-// crashed provision runs, plus unreferenced crewship-cache:* images.
+// crashed provision runs, plus unreferenced crewship-cache:* images and
+// intermediate crewship-feat:* BuildKit feature images.
 // Extracted from crew_provisioning.go for readability.
 
 import (
@@ -40,9 +41,10 @@ const (
 	cacheImageMinAge = 5 * time.Minute
 
 	// cacheGCAutoDeleteEnv gates destructive removal of unreferenced
-	// crewship-cache:* images. Default (unset/false) is log-only — an operator
-	// has to opt in to deletion because dropping an image someone just built
-	// locally is surprising.
+	// crewship-cache:* images AND intermediate crewship-feat:* BuildKit feature
+	// images. Default (unset/false) is log-only — an operator has to opt in to
+	// deletion because dropping an image someone just built locally is
+	// surprising.
 	cacheGCAutoDeleteEnv = "CREWSHIP_CACHE_GC_AUTODELETE"
 )
 
@@ -111,9 +113,11 @@ func (h *ProvisioningHandler) sweepOrphanTempContainers(ctx context.Context) {
 	}
 }
 
-// sweepOrphanCacheImages finds crewship-cache:* images that have no referencing
-// crew row across ALL workspaces. These are leaks from a crash window between
-// ContainerCommit and the crews.cached_image UPDATE. Removal is opt-in via
+// sweepOrphanCacheImages finds orphaned images to reclaim: crewship-cache:*
+// images that have no referencing crew row across ALL workspaces (leaks from a
+// crash window between ContainerCommit and the crews.cached_image UPDATE), plus
+// intermediate crewship-feat:* BuildKit feature images (regenerable, never
+// referenced by a crew row). Removal of both is opt-in via
 // CREWSHIP_CACHE_GC_AUTODELETE=true — default is log-only for visibility.
 
 func (h *ProvisioningHandler) sweepOrphanCacheImages(ctx context.Context) {
@@ -192,7 +196,7 @@ func (h *ProvisioningHandler) sweepOrphanCacheImages(ctx context.Context) {
 		return
 	}
 	if !autoDelete {
-		h.logger.Info("orphan cache-image GC: unreferenced cache images detected (log-only, set CREWSHIP_CACHE_GC_AUTODELETE=true to remove)",
+		h.logger.Info("orphan cache-image GC: unreferenced cache/feature images detected (log-only, set CREWSHIP_CACHE_GC_AUTODELETE=true to remove crewship-cache:* and crewship-feat:*)",
 			"orphans", orphans, "count", len(orphans), "skipped_too_young", tooYoung)
 		return
 	}

@@ -74,6 +74,46 @@ func TestStageBuildContext_WritesDockerfileAndFeatures(t *testing.T) {
 	}
 }
 
+// TestStageBuildContext_TagReflectsFeatureContent guards the cache key against
+// silently reusing a stale image when a feature republishes new files under the
+// same ref/options — i.e. when the generated Dockerfile is byte-identical but
+// the feature's own files changed.
+func TestStageBuildContext_TagReflectsFeatureContent(t *testing.T) {
+	t.Parallel()
+
+	mkFeature := func(body string) []*ResolvedFeature {
+		d := t.TempDir()
+		if err := os.WriteFile(filepath.Join(d, "install.sh"), []byte(body), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		return []*ResolvedFeature{
+			{Ref: "ghcr.io/devcontainers/features/common-utils:2", Dir: d, Metadata: FeatureMetadata{ID: "common-utils"}},
+		}
+	}
+
+	ctx1, df1, tag1, err := stageBuildContext("ubuntu:22.04", mkFeature("#!/bin/sh\necho v1"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(ctx1)
+	ctx2, df2, tag2, err := stageBuildContext("ubuntu:22.04", mkFeature("#!/bin/sh\necho v2"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(ctx2)
+
+	// Precondition: same base image, ref, and options → identical Dockerfile,
+	// so the only thing that differs is the feature's file content.
+	if df1 != df2 {
+		t.Fatalf("precondition failed: Dockerfiles differ (%q vs %q)", df1, df2)
+	}
+	// The tag MUST change when feature content changes, or the exact-tag fast
+	// path would silently reuse a stale image.
+	if tag1 == tag2 {
+		t.Errorf("tag must change when feature content changes; both = %q", tag1)
+	}
+}
+
 func TestProvision_UsesBuildKitWhenAvailable(t *testing.T) {
 	cacheDir := t.TempDir()
 	ref := "ghcr.io/devcontainers/features/common-utils:2"

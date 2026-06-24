@@ -177,8 +177,10 @@ func featureStepLabel(featureID string) string {
 }
 
 // featureLeafID extracts the leaf name from a feature reference.
-//   ghcr.io/devcontainers/features/python:1 → "python"
-//   common-utils:2                          → "common-utils"
+//
+//	ghcr.io/devcontainers/features/python:1 → "python"
+//	common-utils:2                          → "common-utils"
+//
 // The leaf is what we display in the checklist and what install.sh-emitting
 // features identify themselves by; matches `feature.Metadata.ID` after
 // download for every feature we've seen in the wild.

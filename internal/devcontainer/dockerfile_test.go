@@ -79,9 +79,9 @@ func TestGenerateDockerfile_EnvDefaultsOverrideSortedQuoted(t *testing.T) {
 				Metadata: FeatureMetadata{
 					ID: "node",
 					Options: map[string]any{
-						"version":   map[string]any{"default": "lts"},
+						"version":    map[string]any{"default": "lts"},
 						"nodeGypDep": map[string]any{"default": false},
-						"bad-key":   map[string]any{"default": "skipme"}, // invalid env name → skipped
+						"bad-key":    map[string]any{"default": "skipme"}, // invalid env name → skipped
 					},
 				},
 			},

@@ -151,9 +151,10 @@ func (p *Provisioner) buildFeatureImage(ctx context.Context, baseImage string, f
 // stageBuildContext materializes a build context directory for the given
 // features: it writes the generated Dockerfile and copies each feature's
 // extracted directory to <context>/features/{id}. Returns the context dir and
-// the feature-image tag derived from the Dockerfile content (so any change to
-// base image, features, or options yields a new tag and a clean rebuild). The
-// caller is responsible for removing contextDir.
+// the feature-image tag derived from the Dockerfile content AND the staged
+// feature file contents (so any change to base image, features, options, or a
+// feature's own files yields a new tag and a clean rebuild). The caller is
+// responsible for removing contextDir.
 func stageBuildContext(baseImage string, features []*ResolvedFeature, optionsByRef map[string]map[string]any) (contextDir, dockerfile, tag string, err error) {
 	dockerfile, err = GenerateDockerfile(DockerfileBuild{
 		BaseImage:    baseImage,
@@ -187,9 +188,58 @@ func stageBuildContext(baseImage string, features []*ResolvedFeature, optionsByR
 		}
 	}
 
-	sum := sha256.Sum256([]byte(dockerfile))
-	tag = FeatureImageTagPrefix + hex.EncodeToString(sum[:])[:12]
+	// Derive the tag from the Dockerfile AND the staged feature contents. The
+	// Dockerfile alone only captures base image + refs + options; hashing the
+	// actual feature files means a feature that republishes new content under
+	// the same mutable ref (e.g. ":2") yields a new tag and a clean rebuild,
+	// instead of the exact-tag fast path silently reusing a stale image.
+	contentHash, err := hashBuildInputs(dockerfile, features)
+	if err != nil {
+		cleanup()
+		return "", "", "", fmt.Errorf("hashing build inputs: %w", err)
+	}
+	tag = FeatureImageTagPrefix + contentHash[:12]
 	return contextDir, dockerfile, tag, nil
+}
+
+// hashBuildInputs returns a hex content hash over the generated Dockerfile and
+// the full contents of every feature directory (path, mode, and bytes), walked
+// in lexical order for determinism. Folding feature file bytes into the tag is
+// what makes the cache key honor content changes, not just the Dockerfile.
+func hashBuildInputs(dockerfile string, features []*ResolvedFeature) (string, error) {
+	h := sha256.New()
+	h.Write([]byte(dockerfile))
+	for _, f := range features {
+		if f == nil {
+			continue
+		}
+		// Domain separator keyed by feature id so reordering or renaming a
+		// feature changes the hash even with identical file bytes.
+		fmt.Fprintf(h, "\x00feat:%s\x00", f.Metadata.ID)
+		walkErr := filepath.Walk(f.Dir, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			if !info.Mode().IsRegular() {
+				return nil // dirs/symlinks/etc. — only regular file bytes matter
+			}
+			rel, err := filepath.Rel(f.Dir, path)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(h, "%s\x00%o\x00", rel, info.Mode().Perm())
+			data, err := os.ReadFile(path) // #nosec G304 — feature-cache path we extracted
+			if err != nil {
+				return err
+			}
+			h.Write(data)
+			return nil
+		})
+		if walkErr != nil {
+			return "", walkErr
+		}
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // copyTree recursively copies the directory at src into dst, creating dst.
