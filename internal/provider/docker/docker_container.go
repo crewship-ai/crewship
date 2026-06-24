@@ -90,12 +90,22 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	// stale one. Pre-fix the loop short-circuited on State=running
 	// without checking Config.Image, so the operator had to
 	// `docker rm -f <name>` by hand after every devcontainer edit.
+	// callerSpecifiedImage distinguishes "caller wants THIS image" from "caller
+	// passed no image, fall back to the runtime default". The image-drift
+	// recreate below must only fire in the former case: a bare-config caller
+	// (e.g. the assignment path's GetOrCreateContainer, which passes only
+	// ID+Slug) would otherwise resolve desiredImage to the default and tear
+	// down a perfectly good provisioned container out from under a concurrent
+	// run — killing that run with exit 137 and thrashing the container.
 	desiredImage := p.cfg.RuntimeImage
+	callerSpecifiedImage := false
 	if team.Image != "" {
 		desiredImage = team.Image
+		callerSpecifiedImage = true
 	}
 	if team.CachedImage != "" {
 		desiredImage = team.CachedImage
+		callerSpecifiedImage = true
 	}
 
 	p.logger.Debug("listing containers")
@@ -118,7 +128,7 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 				// container is stale by definition (its filesystem
 				// reflects the OLD provisioned image). Tear it down
 				// and fall through to create-new with the new tag.
-				if inspect.Config != nil && desiredImage != "" && inspect.Config.Image != desiredImage {
+				if callerSpecifiedImage && inspect.Config != nil && desiredImage != "" && inspect.Config.Image != desiredImage {
 					p.logger.Info("recreating container (image drift)",
 						"container", containerName,
 						"running_image", inspect.Config.Image,
