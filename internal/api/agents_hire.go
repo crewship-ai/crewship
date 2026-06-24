@@ -359,6 +359,13 @@ func (h *AgentHandler) Hire(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Auto-assign an available Anthropic credential to the freshly-hired
+	// ephemeral agent, exactly as crew-template deploy does. Without it the
+	// agent row exists but has no credential, so its very first run fails to
+	// authenticate (claude exits 1, has_oauth_env=false). Best-effort: any
+	// failure is journalled by the helper, never fatal to the hire.
+	autoAssignCredentials(r.Context(), h.db, h.logger, h.journal, workspaceID, agentID, createdAt)
+
 	user := UserFromContext(r.Context())
 	userID := ""
 	if user != nil {
