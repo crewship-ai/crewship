@@ -421,3 +421,64 @@ func TestPipelineSchedules_Delete_OtherWorkspaceSchedule_Returns404(t *testing.T
 		t.Fatalf("cross-workspace DELETE leaked: status = %d, want 404", rr.Code)
 	}
 }
+
+// ── RunSchedule (force-fire) ────────────────────────────────────────────
+
+func TestPipelineSchedules_Run_NoRunner_Returns503(t *testing.T) {
+	h, _, userID, wsID := scheduleHandlerRig(t) // no runner wired
+	req := withWorkspaceUser(httptest.NewRequest("POST",
+		"/api/v1/workspaces/"+wsID+"/pipeline-schedules/psched_x/run", nil),
+		userID, wsID, "OWNER")
+	req.SetPathValue("scheduleId", "psched_x")
+	rr := httptest.NewRecorder()
+	h.RunSchedule(rr, req)
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503 (runner not wired)", rr.Code)
+	}
+}
+
+func TestPipelineSchedules_Run_UnknownID_Returns404(t *testing.T) {
+	h, _, userID, wsID := scheduleHandlerRig(t)
+	h.SetRunner(&stubRunner{output: "ok"})
+	req := withWorkspaceUser(httptest.NewRequest("POST",
+		"/api/v1/workspaces/"+wsID+"/pipeline-schedules/psched_nope/run", nil),
+		userID, wsID, "OWNER")
+	req.SetPathValue("scheduleId", "psched_nope")
+	rr := httptest.NewRecorder()
+	h.RunSchedule(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404; body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// A schedule belonging to another workspace must NOT be fireable — the
+// force-fire path enforces the same workspace scoping as delete/update.
+func TestPipelineSchedules_Run_OtherWorkspace_Returns404(t *testing.T) {
+	h, db, userID, wsID := scheduleHandlerRig(t)
+	h.SetRunner(&stubRunner{output: "ok"})
+	otherWS := "ws_other_run"
+	if _, err := db.Exec(`INSERT INTO workspaces (id, name, slug) VALUES (?, 'Other', 'other-run')`, otherWS); err != nil {
+		t.Fatalf("seed other ws: %v", err)
+	}
+	seedPipelineRow(t, db, otherWS, "pln_run_b", "theirs-run")
+	saved, err := pipeline.NewScheduleStore(db).Save(t.Context(), pipeline.SaveScheduleInput{
+		WorkspaceID:      otherWS,
+		Name:             "Theirs",
+		TargetPipelineID: "pln_run_b",
+		CronExpr:         "*/15 * * * *",
+		Timezone:         "UTC",
+		Enabled:          true,
+	})
+	if err != nil {
+		t.Fatalf("seed foreign: %v", err)
+	}
+	req := withWorkspaceUser(httptest.NewRequest("POST",
+		"/api/v1/workspaces/"+wsID+"/pipeline-schedules/"+saved.ID+"/run", nil),
+		userID, wsID, "OWNER")
+	req.SetPathValue("scheduleId", saved.ID)
+	rr := httptest.NewRecorder()
+	h.RunSchedule(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("cross-workspace force-fire leaked: status = %d, want 404; body=%s", rr.Code, rr.Body.String())
+	}
+}
