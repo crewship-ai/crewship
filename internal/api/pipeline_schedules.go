@@ -521,10 +521,8 @@ func (h *PipelineHandler) RunSchedule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.runner == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
-			"error": "pipeline runner not wired",
-			"hint":  "the orchestrator hasn't booted yet, or this build was assembled without the runner adapter",
-		})
+		replyError(w, http.StatusServiceUnavailable,
+			"pipeline runner not wired (orchestrator not booted yet, or this build was assembled without the runner adapter)")
 		return
 	}
 	workspaceID := WorkspaceIDFromContext(r.Context())
@@ -564,10 +562,24 @@ func (h *PipelineHandler) RunSchedule(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusInternalServerError, "load target pipeline")
 		return
 	}
+	// Defense-in-depth tenant isolation: the schedule is already scoped to
+	// this workspace, but its target is loaded by pipeline ID alone — a row
+	// pointing at a foreign pipeline must not run it here. Surface as 404,
+	// same as a missing target.
+	if p.WorkspaceID != workspaceID {
+		replyError(w, http.StatusNotFound, "schedule target pipeline not found")
+		return
+	}
 
 	var inputs map[string]any
 	if sched.InputsJSON != "" {
-		_ = json.Unmarshal([]byte(sched.InputsJSON), &inputs)
+		// Don't silently drop a corrupt stored payload — that would force-fire
+		// the run with nil inputs (wrong run shape). Fail loudly instead.
+		if err := json.Unmarshal([]byte(sched.InputsJSON), &inputs); err != nil {
+			h.logger.Error("schedule run: malformed stored inputs", "error", err, "schedule", scheduleID)
+			replyError(w, http.StatusInternalServerError, "schedule has malformed stored inputs")
+			return
+		}
 	}
 
 	exec := h.newExecutor()
@@ -582,10 +594,8 @@ func (h *PipelineHandler) RunSchedule(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if errors.Is(err, pipeline.ErrConcurrencyLimitReached) {
 			w.Header().Set("Retry-After", "5")
-			writeJSON(w, http.StatusTooManyRequests, map[string]string{
-				"error":  "concurrency limit reached for this pipeline",
-				"reason": "another run with the same concurrency_key is already in flight",
-			})
+			replyError(w, http.StatusTooManyRequests,
+				"concurrency limit reached for this pipeline: another run with the same concurrency_key is already in flight")
 			return
 		}
 		h.logger.Error("schedule run: exec", "error", err, "schedule", scheduleID)
