@@ -264,6 +264,89 @@ func TestSortFeatures(t *testing.T) {
 	})
 }
 
+// indexOf returns the position of the feature with the given ID in the
+// sorted slice, or -1 if absent.
+func indexOf(features []*ResolvedFeature, id string) int {
+	for i, f := range features {
+		if f.Metadata.ID == id {
+			return i
+		}
+	}
+	return -1
+}
+
+// TestSortFeatures_CommonUtilsFirst guards the install-order blocker: the
+// agent user (UID 1001) is created by common-utils, and every other feature's
+// install.sh assumes it exists (claude-code/github-cli run `su agent`). Even
+// when features arrive in the broken alphabetical order the provisioner used
+// to hand us — and even when a feature like claude-code declares no dependency
+// at all — common-utils must install first.
+func TestSortFeatures_CommonUtilsFirst(t *testing.T) {
+	features := []*ResolvedFeature{
+		// Alphabetically "claude-code" sorts before "common-utils" (the bug);
+		// it declares no installsAfter, so only the common-utils-first rule
+		// can rescue it.
+		{Ref: "ghcr.io/devcontainers-extra/features/claude-code:1", Metadata: FeatureMetadata{ID: "claude-code"}},
+		{Ref: "ghcr.io/devcontainers/features/common-utils:2", Metadata: FeatureMetadata{ID: "common-utils"}},
+		{Ref: "ghcr.io/devcontainers/features/github-cli:1", Metadata: FeatureMetadata{ID: "github-cli", InstallsAfter: []string{"ghcr.io/devcontainers/features/common-utils"}}},
+	}
+	sorted := SortFeatures(features)
+	if got := featureIDs(sorted); len(sorted) != 3 {
+		t.Fatalf("expected 3 features, got %d (%q)", len(sorted), got)
+	}
+	cu := indexOf(sorted, "common-utils")
+	if cu != 0 {
+		t.Fatalf("common-utils must install first, got order %q", featureIDs(sorted))
+	}
+	if cu > indexOf(sorted, "claude-code") || cu > indexOf(sorted, "github-cli") {
+		t.Fatalf("common-utils must precede dependents, got order %q", featureIDs(sorted))
+	}
+}
+
+// TestSortFeatures_InstallsAfterFullRefMatches isolates the topological-sort
+// defect: upstream features express installsAfter as full OCI refs while a
+// feature's own Metadata.ID is the short leaf id. The dependency edge must
+// form despite that mismatch. No common-utils here, so this exercises Fix B
+// (ref↔id normalization) independently of the common-utils-first convention.
+func TestSortFeatures_InstallsAfterFullRefMatches(t *testing.T) {
+	features := []*ResolvedFeature{
+		{Ref: "ghcr.io/devcontainers/features/github-cli:1", Metadata: FeatureMetadata{ID: "github-cli", InstallsAfter: []string{"ghcr.io/devcontainers/features/git"}}},
+		{Ref: "ghcr.io/devcontainers/features/git:1", Metadata: FeatureMetadata{ID: "git"}},
+	}
+	sorted := SortFeatures(features)
+	if indexOf(sorted, "git") > indexOf(sorted, "github-cli") {
+		t.Fatalf("git must install before github-cli (installsAfter full ref), got order %q", featureIDs(sorted))
+	}
+}
+
+// TestSortFeatures_NoCycleWhenExplicitDep verifies the implicit
+// common-utils-first edge composes cleanly with an explicit installsAfter on
+// common-utils: no duplicate emission, no cycle fallback, all features present.
+func TestSortFeatures_NoCycleWhenExplicitDep(t *testing.T) {
+	features := []*ResolvedFeature{
+		{Ref: "ghcr.io/devcontainers/features/common-utils:2", Metadata: FeatureMetadata{ID: "common-utils"}},
+		{Ref: "ghcr.io/devcontainers/features/github-cli:1", Metadata: FeatureMetadata{ID: "github-cli", InstallsAfter: []string{"ghcr.io/devcontainers/features/common-utils"}}},
+		{Ref: "ghcr.io/devcontainers/features/node:1", Metadata: FeatureMetadata{ID: "node"}},
+	}
+	sorted := SortFeatures(features)
+	if len(sorted) != 3 {
+		t.Fatalf("expected all 3 features, got %d (%q)", len(sorted), featureIDs(sorted))
+	}
+	seen := map[string]bool{}
+	for _, f := range sorted {
+		if seen[f.Metadata.ID] {
+			t.Fatalf("feature %q emitted twice: %q", f.Metadata.ID, featureIDs(sorted))
+		}
+		seen[f.Metadata.ID] = true
+	}
+	if indexOf(sorted, "common-utils") != 0 {
+		t.Fatalf("common-utils must be first, got order %q", featureIDs(sorted))
+	}
+	if indexOf(sorted, "common-utils") > indexOf(sorted, "github-cli") {
+		t.Fatalf("common-utils must precede github-cli, got order %q", featureIDs(sorted))
+	}
+}
+
 func TestReadMetadata(t *testing.T) {
 	dir := t.TempDir()
 

@@ -176,7 +176,6 @@ func featureStepLabel(featureID string) string {
 // The leaf is what we display in the checklist and what install.sh-emitting
 // features identify themselves by; matches `feature.Metadata.ID` after
 // download for every feature we've seen in the wild.
-
 func featureLeafID(ref string) string {
 	// Drop a tag suffix.
 	if idx := strings.LastIndex(ref, ":"); idx >= 0 {
@@ -186,6 +185,20 @@ func featureLeafID(ref string) string {
 		return ref[idx+1:]
 	}
 	return ref
+}
+
+// commonUtilsFirst stable-sorts feature refs so any common-utils variant
+// leads. The provisioning plan shown in the UI is built before features are
+// downloaded (so progress appears immediately), so it can't run the full
+// SortFeatures topological sort — but it can cheaply guarantee the one
+// ordering users actually notice and that SortFeatures also enforces at
+// install time: common-utils, which creates the agent user, comes first. The
+// UI checklist matches steps to the plan by string equality, so plan order
+// must mirror install order or rows stick on "pending".
+func commonUtilsFirst(refs []string) {
+	sort.SliceStable(refs, func(i, j int) bool {
+		return isCommonUtilsRef(refs[i]) && !isCommonUtilsRef(refs[j])
+	})
 }
 
 // provisionerSchemaVersion invalidates all cached images when this changes.
@@ -230,17 +243,19 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 	// Compute the step plan up front so the UI can render a stable
 	// checklist (done / active / pending). Granularity matches what we
 	// actually emit below: pull + one per feature + (mise as a single
-	// bucket) + commit. The plan is alphabetical on feature ID — the
-	// real install order from SortFeatures may differ slightly, but the
-	// checklist is matched by exact label string, so the user just sees
-	// rows light up out of order if dependencies force it. That's a
-	// trivial UX cost compared to the alternative (downloading every
-	// feature before showing any progress).
+	// bucket) + commit. We can't run the full SortFeatures topological
+	// sort here (features aren't downloaded yet), so the plan is
+	// alphabetical — except common-utils, which SortFeatures always
+	// installs first and which we hoist to the front here too so the
+	// string-matched UI checklist lines up. Any remaining reordering from
+	// installsAfter is a trivial UX cost compared to downloading every
+	// feature before showing any progress.
 	featureRefs := make([]string, 0, len(cfg.Features))
 	for ref := range cfg.Features {
 		featureRefs = append(featureRefs, ref)
 	}
 	sort.Strings(featureRefs)
+	commonUtilsFirst(featureRefs)
 	plan := make([]string, 0, 2+len(cfg.Features))
 	plan = append(plan, pullStepLabel(baseImage))
 	for _, ref := range featureRefs {

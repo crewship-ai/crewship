@@ -1,6 +1,7 @@
 package devcontainer
 
 import (
+	"sort"
 	"strings"
 	"testing"
 )
@@ -155,6 +156,43 @@ func TestFeatureLeafID_IsIdempotentOnAlreadyLeaf(t *testing.T) {
 		twice := featureLeafID(once)
 		if once != twice {
 			t.Errorf("idempotency broken for %q: once=%q twice=%q", in, once, twice)
+		}
+	}
+}
+
+// TestCommonUtilsFirst_PlanOrdering guards Fix C: the provisioning plan shown
+// in the UI is built before features download (so progress appears instantly),
+// so it can't run the full topological sort — but it must still surface
+// common-utils first so the checklist matches the real install order that
+// SortFeatures guarantees. Without this, common-utils jumps to the front of
+// the actual install while the plan still lists it alphabetically, leaving the
+// string-matched UI checklist stuck.
+func TestCommonUtilsFirst_PlanOrdering(t *testing.T) {
+	refs := []string{
+		"ghcr.io/devcontainers-extra/features/claude-code:1",
+		"ghcr.io/devcontainers/features/common-utils:2",
+		"ghcr.io/devcontainers/features/github-cli:1",
+	}
+	sort.Strings(refs) // mirror the alphabetical plan order in Provision
+	commonUtilsFirst(refs)
+	if !isCommonUtilsRef(refs[0]) {
+		t.Fatalf("common-utils must lead the plan, got %v", refs)
+	}
+	// The remaining refs keep their (alphabetical) relative order.
+	if refs[1] != "ghcr.io/devcontainers-extra/features/claude-code:1" || refs[2] != "ghcr.io/devcontainers/features/github-cli:1" {
+		t.Fatalf("non-common-utils refs lost stable order: %v", refs)
+	}
+}
+
+// TestCommonUtilsFirst_NoCommonUtilsIsNoop ensures the helper is a stable no-op
+// when no common-utils variant is present.
+func TestCommonUtilsFirst_NoCommonUtilsIsNoop(t *testing.T) {
+	refs := []string{"ghcr.io/devcontainers/features/git:1", "ghcr.io/devcontainers/features/node:1"}
+	want := []string{refs[0], refs[1]}
+	commonUtilsFirst(refs)
+	for i := range want {
+		if refs[i] != want[i] {
+			t.Fatalf("expected no-op, got %v", refs)
 		}
 	}
 }

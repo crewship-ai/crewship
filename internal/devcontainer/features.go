@@ -497,31 +497,119 @@ func readMetadata(dir string) (FeatureMetadata, error) {
 	return meta, nil
 }
 
+// featureDepKey normalizes a feature identifier — a full OCI ref, a
+// version-pinned ref, or a bare id — down to its lowercased leaf name so
+// dependency edges actually form. Upstream features express installsAfter
+// as full refs (e.g. "ghcr.io/devcontainers/features/common-utils"), while a
+// feature's own Metadata.ID is the short leaf ("common-utils"); keying both
+// sides through this function lets cross-namespace edges match. Previously
+// the graph keyed on raw Metadata.ID and compared it against raw installsAfter
+// strings, so the lookup never hit and the topological sort was a no-op for
+// every real-world feature.
+func featureDepKey(s string) string {
+	if s == "" {
+		return ""
+	}
+	// Drop a digest suffix (...@sha256:hex).
+	if i := strings.Index(s, "@"); i >= 0 {
+		s = s[:i]
+	}
+	// Drop a tag suffix — the tag colon follows the last path segment.
+	if slash := strings.LastIndex(s, "/"); slash >= 0 {
+		if colon := strings.LastIndex(s, ":"); colon > slash {
+			s = s[:colon]
+		}
+	} else if colon := strings.LastIndex(s, ":"); colon >= 0 {
+		s = s[:colon]
+	}
+	// Take the leaf path segment.
+	if slash := strings.LastIndex(s, "/"); slash >= 0 {
+		s = s[slash+1:]
+	}
+	return strings.ToLower(s)
+}
+
+// featureKey returns the normalized graph key for a resolved feature,
+// preferring its declared Metadata.ID and falling back to its Ref when the
+// metadata hasn't been populated (e.g. in unit tests).
+func featureKey(f *ResolvedFeature) string {
+	if f == nil {
+		return ""
+	}
+	if k := featureDepKey(f.Metadata.ID); k != "" {
+		return k
+	}
+	return featureDepKey(f.Ref)
+}
+
+// indexOfCommonUtils returns the position of the common-utils feature in the
+// slice, or -1 if absent. Detected via its canonical ref (any tag/digest) or
+// its leaf id so it works whether or not Ref/Metadata are fully populated.
+func indexOfCommonUtils(features []*ResolvedFeature) int {
+	for i, f := range features {
+		if f == nil {
+			continue
+		}
+		if featureDepKey(f.Metadata.ID) == "common-utils" || isCommonUtilsRef(f.Ref) {
+			return i
+		}
+	}
+	return -1
+}
+
 // SortFeatures performs a topological sort of features based on their
 // installsAfter dependencies. Features with no dependencies or whose
 // dependencies are not in the input set come first. The sort is stable:
 // features at the same dependency depth retain their original order.
+//
+// common-utils is special-cased to install first: it creates the `agent` user
+// (UID 1001) that every other feature's install.sh assumes exists
+// (claude-code/github-cli call `su agent`), and features routinely forget to
+// declare the dependency. An implicit edge common-utils → every other feature
+// guarantees it leads without relying on each author getting installsAfter
+// right.
 func SortFeatures(features []*ResolvedFeature) []*ResolvedFeature {
 	if len(features) <= 1 {
 		return features
 	}
 
-	// Build an index from feature ID to position.
+	// Build an index from normalized feature key to position so installsAfter
+	// entries (full OCI refs) match feature ids (short leaves).
 	idIndex := make(map[string]int, len(features))
 	for i, f := range features {
-		idIndex[f.Metadata.ID] = i
+		if k := featureKey(f); k != "" {
+			idIndex[k] = i
+		}
 	}
 
 	// Kahn's algorithm for topological sort.
 	n := len(features)
 	inDegree := make([]int, n)
 	adjList := make([][]int, n)
+	addEdge := func(from, to int) {
+		adjList[from] = append(adjList[from], to)
+		inDegree[to]++
+	}
 
 	for i, f := range features {
 		for _, depID := range f.Metadata.InstallsAfter {
-			if j, ok := idIndex[depID]; ok {
-				adjList[j] = append(adjList[j], i)
-				inDegree[i]++
+			if j, ok := idIndex[featureDepKey(depID)]; ok && j != i {
+				addEdge(j, i)
+			}
+		}
+	}
+
+	// Force common-utils first via implicit edges. Only safe to add when
+	// common-utils has no incoming dependency of its own (inDegree == 0) — the
+	// real-world case — so the added edges can never close a cycle.
+	if cu := indexOfCommonUtils(features); cu >= 0 && inDegree[cu] == 0 {
+		existing := make(map[int]bool, len(adjList[cu]))
+		for _, t := range adjList[cu] {
+			existing[t] = true
+		}
+		for i := range features {
+			if i != cu && !existing[i] {
+				addEdge(cu, i)
 			}
 		}
 	}
