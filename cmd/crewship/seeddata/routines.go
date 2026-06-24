@@ -1006,3 +1006,52 @@ var Routines = []RoutineDef{
 		},
 	},
 }
+
+// canonicalJSONRecipes maps a recipe slug → the id of the agent_run step
+// whose JSON output should be canonicalised. Authored once here rather
+// than inlined into every Definition literal so the recipes stay readable
+// and the canonicalisation policy lives in one place.
+var canonicalJSONRecipes = map[string]string{
+	"extract-contacts":     "extract",
+	"parse-log-line":       "parse",
+	"classify-ticket":      "classify",
+	"csv-to-json":          "convert",
+	"normalize-dates":      "normalize",
+	"json-schema-validate": "validate",
+	"invoice-extract":      "extract",
+	"routing-decision":     "route",
+	"diff-risk-score":      "score",
+	"fetch-and-extract":    "extract",
+}
+
+// init appends a final `@json` transform step to every deterministic
+// JSON recipe. An LLM's JSON output is only SEMANTICALLY stable on a
+// fast tier — its whitespace and key order drift run-to-run (e.g. Haiku
+// emitted both `{"a":1}` and `{"a": 1}` for the same input). The
+// transform parses that output (stripping any code fence) and
+// re-serialises it canonically (compact, alphabetically-sorted keys),
+// so the routine's FINAL output is byte-identical every run and across
+// tiers — the property that makes these recipes hard, reproducible test
+// scenarios. The agent_run step keeps its own validation/grader; this
+// only normalises the bytes that flow out of the routine.
+func init() {
+	for i := range Routines {
+		stepID, ok := canonicalJSONRecipes[Routines[i].Slug]
+		if !ok {
+			continue
+		}
+		steps, ok := Routines[i].Definition["steps"].([]map[string]interface{})
+		if !ok {
+			panic("seeddata: routine " + Routines[i].Slug + " has unexpected steps type for canonicalisation")
+		}
+		Routines[i].Definition["steps"] = append(steps, map[string]interface{}{
+			"id":    "canonical",
+			"type":  "transform",
+			"needs": []string{stepID},
+			"transform": map[string]interface{}{
+				"input":      "{{ steps." + stepID + ".output }}",
+				"expression": "@json",
+			},
+		})
+	}
+}

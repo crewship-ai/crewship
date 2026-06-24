@@ -17,6 +17,12 @@ import (
 //	.[index]       — array index by integer
 //	.field[index]  — combined
 //	.              — identity (returns Input as-is)
+//	@json          — canonical JSON: parse the (possibly fenced) input
+//	                 and re-serialise compact with alphabetically-sorted
+//	                 object keys. Makes an upstream agent's JSON output
+//	                 byte-stable across runs/tiers regardless of the
+//	                 model's whitespace and key-order choices — the
+//	                 building block for reproducible "recipe" routines.
 //	tostring       — coerce to string (default behaviour for
 //	                 primitive results; documented for clarity)
 //	length         — array/string/object length
@@ -101,6 +107,16 @@ func evalTransform(v any, expr string) (string, error) {
 		return string(b), nil
 	case "tostring":
 		return stringify(v), nil
+	case "@json", "tojson":
+		// Canonical re-serialisation: encoding/json emits compact output
+		// and sorts map keys alphabetically, so two semantically-equal
+		// inputs that differ only in whitespace or key order collapse to
+		// the identical byte string. Array element order is preserved.
+		b, err := json.Marshal(v)
+		if err != nil {
+			return "", fmt.Errorf("@json: marshal: %w", err)
+		}
+		return string(b), nil
 	}
 
 	// Path expressions: ".a.b[0].c"

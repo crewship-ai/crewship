@@ -23,6 +23,40 @@ func TestTransform_Identity(t *testing.T) {
 	}
 }
 
+func TestTransform_CanonicalJSON(t *testing.T) {
+	store, resolver, cleanup := openExecutorTestDB(t)
+	defer cleanup()
+	exec := NewExecutor(store, resolver, nil, nil)
+
+	// Two inputs that differ only in whitespace + key order (the second
+	// also wrapped in a ```json fence, as LLM output often is) must
+	// collapse to the identical canonical byte string — this is what
+	// makes a "recipe" routine's JSON output reproducible on Haiku.
+	a := Step{ID: "a", Type: StepTransform, Transform: &TransformStep{
+		Input:      `{"b": 2, "a": 1}`,
+		Expression: "@json",
+	}}
+	b := Step{ID: "b", Type: StepTransform, Transform: &TransformStep{
+		Input:      "```json\n{\n  \"a\": 1,\n  \"b\": 2\n}\n```",
+		Expression: "@json",
+	}}
+	outA, _, _, err := exec.runTransformStep(a, RenderContext{})
+	if err != nil {
+		t.Fatalf("a: %v", err)
+	}
+	outB, _, _, err := exec.runTransformStep(b, RenderContext{})
+	if err != nil {
+		t.Fatalf("b: %v", err)
+	}
+	const want = `{"a":1,"b":2}`
+	if outA != want {
+		t.Errorf("a canonical = %q, want %q", outA, want)
+	}
+	if outA != outB {
+		t.Errorf("canonicalisation not byte-stable: %q vs %q", outA, outB)
+	}
+}
+
 func TestTransform_FieldAccess(t *testing.T) {
 	store, resolver, cleanup := openExecutorTestDB(t)
 	defer cleanup()
