@@ -415,6 +415,15 @@ func TestBuildFeatureEnv(t *testing.T) {
 	if envMap["_REMOTE_USER"] != "agent" {
 		t.Errorf("_REMOTE_USER = %q", envMap["_REMOTE_USER"])
 	}
+	if envMap["_REMOTE_USER_HOME"] != "/home/agent" {
+		t.Errorf("_REMOTE_USER_HOME = %q, want /home/agent", envMap["_REMOTE_USER_HOME"])
+	}
+	if envMap["_CONTAINER_USER"] != "root" {
+		t.Errorf("_CONTAINER_USER = %q, want root", envMap["_CONTAINER_USER"])
+	}
+	if envMap["_CONTAINER_USER_HOME"] != "/root" {
+		t.Errorf("_CONTAINER_USER_HOME = %q, want /root", envMap["_CONTAINER_USER_HOME"])
+	}
 	if envMap["VERSION"] != "3.11" {
 		t.Errorf("VERSION = %q", envMap["VERSION"])
 	}
@@ -425,8 +434,46 @@ func TestBuildFeatureEnv(t *testing.T) {
 
 func TestBuildFeatureEnv_NilOptions(t *testing.T) {
 	env := buildFeatureEnv("container-xyz", "node", nil, nil)
-	if len(env) != 2 {
-		t.Errorf("expected 2 env vars (_CONTAINER_ID, _REMOTE_USER), got %d", len(env))
+	// With no options, only the standard devcontainer feature-contract vars
+	// are emitted: _CONTAINER_ID, _REMOTE_USER, _REMOTE_USER_HOME,
+	// _CONTAINER_USER, _CONTAINER_USER_HOME.
+	want := map[string]string{
+		"_CONTAINER_ID":        "container-xyz",
+		"_REMOTE_USER":         "agent",
+		"_REMOTE_USER_HOME":    "/home/agent",
+		"_CONTAINER_USER":      "root",
+		"_CONTAINER_USER_HOME": "/root",
+	}
+	envMap := make(map[string]string)
+	for _, e := range env {
+		parts := strings.SplitN(e, "=", 2)
+		if len(parts) == 2 {
+			envMap[parts[0]] = parts[1]
+		}
+	}
+	if len(env) != len(want) {
+		t.Errorf("expected %d env vars, got %d: %v", len(want), len(env), env)
+	}
+	for k, v := range want {
+		if envMap[k] != v {
+			t.Errorf("%s = %q, want %q", k, envMap[k], v)
+		}
+	}
+}
+
+// Regression test for the provisioning failure where the claude-code feature's
+// install.sh does `cp "$_REMOTE_USER_HOME/.local/bin/claude" /usr/local/bin/claude`
+// and _REMOTE_USER_HOME was unset, expanding to `/.local/bin/claude` → "cannot stat".
+func TestBuildFeatureEnv_SetsRemoteUserHome(t *testing.T) {
+	env := buildFeatureEnv("c1", "claude-code", nil, nil)
+	var got string
+	for _, e := range env {
+		if strings.HasPrefix(e, "_REMOTE_USER_HOME=") {
+			got = strings.TrimPrefix(e, "_REMOTE_USER_HOME=")
+		}
+	}
+	if got != "/home/agent" {
+		t.Fatalf("_REMOTE_USER_HOME = %q, want /home/agent", got)
 	}
 }
 
