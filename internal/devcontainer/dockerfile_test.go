@@ -57,12 +57,20 @@ func TestGenerateDockerfile_StructureAndOrder(t *testing.T) {
 		last += idx + len(want)
 	}
 
-	// Cache mount + _REMOTE_USER must be present.
+	// Cache mount + the feature-install-contract identity must be present.
 	if !strings.Contains(df, "--mount=type=cache,target=/var/cache/apt") {
 		t.Fatalf("missing apt cache mount:\n%s", df)
 	}
-	if !strings.Contains(df, "_REMOTE_USER=agent bash -e ./install.sh") {
-		t.Fatalf("missing _REMOTE_USER/install invocation:\n%s", df)
+	if !strings.Contains(df, "_REMOTE_USER=agent") {
+		t.Fatalf("missing _REMOTE_USER:\n%s", df)
+	}
+	// _REMOTE_USER_HOME must be set, or features whose install.sh copies out of
+	// $_REMOTE_USER_HOME (e.g. a tool from ~/.local/bin) break the build.
+	if !strings.Contains(df, "_REMOTE_USER_HOME=/home/agent") {
+		t.Fatalf("missing _REMOTE_USER_HOME (BuildKit feature install would fail):\n%s", df)
+	}
+	if !strings.Contains(df, "bash -e ./install.sh") {
+		t.Fatalf("missing install.sh invocation:\n%s", df)
 	}
 	// _CONTAINER_ID is runtime-only and must not appear at build time.
 	if strings.Contains(df, "_CONTAINER_ID") {
