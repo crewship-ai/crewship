@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -86,7 +85,8 @@ type Provider struct {
 	// macOS or Windows) that path never exists on the host, so the check
 	// would false-positive on EVERY volume and destructively recreate it —
 	// which recreates the crew container and trips the entrypoint perms bug.
-	// Default: true only on linux hosts. Tests set it explicitly.
+	// Set by daemonSharesHostFS (daemon-locality probe) in New(); tests set it
+	// explicitly.
 	checkVolumeMountpoint bool
 }
 
@@ -252,9 +252,11 @@ func New(ctx context.Context, cfg Config, logger *slog.Logger) (*Provider, error
 		detected:       *detected,
 		digestResolver: dockerutil.NewDigestResolver(0, 0), // package defaults
 		// The host-side volume self-heal only makes sense when the daemon
-		// shares this process's filesystem — true for a native Linux daemon,
-		// false for any VM-backed runtime (always the case on macOS/Windows).
-		checkVolumeMountpoint: runtime.GOOS == "linux",
+		// shares this process's filesystem. Detect that by probing the
+		// daemon's reported storage root rather than guessing from GOOS —
+		// Docker Desktop on Linux is VM-backed too, so a host-OS check would
+		// false-positive there.
+		checkVolumeMountpoint: daemonSharesHostFS(ctx, cli),
 	}
 
 	logger.Info("container runtime detected",
@@ -427,6 +429,25 @@ func (p *Provider) buildMounts(slug, workspacePath, outputPath, crewPath, secret
 		},
 	)
 	return mounts, nil
+}
+
+// daemonSharesHostFS reports whether the Docker daemon's storage lives on THIS
+// process's filesystem (a native daemon) rather than inside a VM or on a remote
+// host. Only then can ensureVolume's self-heal meaningfully os.Stat a volume's
+// reported Mountpoint. Detected by probing the daemon's own DockerRootDir:
+// reachable (exists, or EACCES = exists-but-root-owned) ⇒ local; ENOENT or an
+// Info() failure ⇒ VM-backed/remote, where we must trust VolumeInspect instead.
+// This is more reliable than a GOOS check (Docker Desktop on Linux is VM-backed
+// too).
+func daemonSharesHostFS(ctx context.Context, cli *client.Client) bool {
+	info, err := cli.Info(ctx)
+	if err != nil || info.DockerRootDir == "" {
+		return false
+	}
+	if _, statErr := os.Stat(info.DockerRootDir); statErr == nil || !os.IsNotExist(statErr) {
+		return true
+	}
+	return false
 }
 
 // ensureVolume creates a Docker named volume if it doesn't already
