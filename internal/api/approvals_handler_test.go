@@ -361,6 +361,117 @@ func TestApprovals_Decide_AlreadyDecided_Returns409(t *testing.T) {
 	}
 }
 
+// ── Cancel ──────────────────────────────────────────────────────────────
+
+func TestApprovals_Cancel_NoUser_Returns401(t *testing.T) {
+	h, _, wsID := approvalsHandlerRig(t)
+	ctx := withWorkspace(context.Background(), wsID, "OWNER")
+	req := httptest.NewRequest("POST", "/api/v1/approvals/x/cancel",
+		strings.NewReader(`{}`)).WithContext(ctx)
+	req.SetPathValue("id", "x")
+	rr := httptest.NewRecorder()
+	h.Cancel(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rr.Code)
+	}
+}
+
+func TestApprovals_Cancel_MemberRole_Returns403(t *testing.T) {
+	h, userID, wsID := approvalsHandlerRig(t)
+	id := enqueueApproval(t, h, wsID, userID, "members-cant-cancel")
+	req := withWorkspaceUser(
+		httptest.NewRequest("POST", "/api/v1/approvals/"+id+"/cancel",
+			strings.NewReader(`{}`)),
+		userID, wsID, "MEMBER",
+	)
+	req.SetPathValue("id", id)
+	rr := httptest.NewRecorder()
+	h.Cancel(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", rr.Code)
+	}
+}
+
+func TestApprovals_Cancel_UnknownID_Returns404(t *testing.T) {
+	h, userID, wsID := approvalsHandlerRig(t)
+	req := withWorkspaceUser(
+		httptest.NewRequest("POST", "/api/v1/approvals/ap_nope/cancel",
+			strings.NewReader(`{}`)),
+		userID, wsID, "OWNER",
+	)
+	req.SetPathValue("id", "ap_nope")
+	rr := httptest.NewRecorder()
+	h.Cancel(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rr.Code)
+	}
+}
+
+func TestApprovals_Cancel_HappyPath_PersistsCancelled(t *testing.T) {
+	h, userID, wsID := approvalsHandlerRig(t)
+	id := enqueueApproval(t, h, wsID, userID, "cancel-me")
+
+	req := withWorkspaceUser(
+		httptest.NewRequest("POST", "/api/v1/approvals/"+id+"/cancel",
+			strings.NewReader(`{"reason":"mission aborted"}`)),
+		userID, wsID, "OWNER",
+	)
+	req.SetPathValue("id", id)
+	rr := httptest.NewRecorder()
+	h.Cancel(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+
+	// The row must actually flip to cancelled — a green status over a
+	// still-pending row would be a silent regression (issue #617).
+	row, err := harbormaster.Get(context.Background(), h.db, wsID, id)
+	if err != nil {
+		t.Fatalf("post-cancel read: %v", err)
+	}
+	if row.Status != harbormaster.StatusCancelled {
+		t.Errorf("row status = %q, want cancelled", row.Status)
+	}
+}
+
+func TestApprovals_Cancel_EmptyBody_Succeeds(t *testing.T) {
+	h, userID, wsID := approvalsHandlerRig(t)
+	id := enqueueApproval(t, h, wsID, userID, "cancel-no-body")
+
+	// A bare POST with no body must still cancel (reason is optional).
+	req := withWorkspaceUser(
+		httptest.NewRequest("POST", "/api/v1/approvals/"+id+"/cancel", nil),
+		userID, wsID, "ADMIN",
+	)
+	req.SetPathValue("id", id)
+	rr := httptest.NewRecorder()
+	h.Cancel(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestApprovals_Cancel_AlreadyDecided_Returns409(t *testing.T) {
+	h, userID, wsID := approvalsHandlerRig(t)
+	id := enqueueApproval(t, h, wsID, userID, "decided-then-cancel")
+	if err := harbormaster.Decide(context.Background(), h.db, h.journal,
+		wsID, id, harbormaster.StatusApproved, userID, "first"); err != nil {
+		t.Fatalf("seed decide: %v", err)
+	}
+
+	req := withWorkspaceUser(
+		httptest.NewRequest("POST", "/api/v1/approvals/"+id+"/cancel",
+			strings.NewReader(`{}`)),
+		userID, wsID, "OWNER",
+	)
+	req.SetPathValue("id", id)
+	rr := httptest.NewRecorder()
+	h.Cancel(rr, req)
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", rr.Code)
+	}
+}
+
 // ── ResetAutoTuning ─────────────────────────────────────────────────────
 
 func TestApprovals_ResetAutoTuning_NoWorkspace_Returns401(t *testing.T) {

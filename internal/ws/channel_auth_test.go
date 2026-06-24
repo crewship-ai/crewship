@@ -53,6 +53,24 @@ func TestDBChannelAuthorizer_CanSubscribeFailClosed(t *testing.T) {
 	}
 }
 
+// TestDBChannelAuthorizer_UserChannel covers the user:{userId} channel
+// (issue #614): a user may subscribe to their own channel but not another
+// user's, and the check needs no DB membership lookup. Before the fix this
+// channel fell through to default:false so notification.created broadcasts
+// were never delivered over WS.
+func TestDBChannelAuthorizer_UserChannel(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+	auth := NewDBChannelAuthorizer(db)
+
+	if !auth.CanSubscribe(context.Background(), "u1", "user:u1") {
+		t.Error("user should be allowed to subscribe to their own channel")
+	}
+	if auth.CanSubscribe(context.Background(), "u1", "user:u2") {
+		t.Error("user must not subscribe to another user's channel")
+	}
+}
+
 // openTestDB returns a minimal SQLite DB for authorizer tests. It only needs
 // the schema objects CanSubscribe reads from (workspace_members and friends),
 // which we create directly instead of wiring the whole migration runner.

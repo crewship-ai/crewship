@@ -3,6 +3,8 @@ package api
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -145,6 +147,99 @@ func (h *ApprovalsHandler) Decide(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": string(status), "decided_by": user.ID})
+}
+
+// Cancel serves POST /api/v1/approvals/{id}/cancel with an optional
+// {"reason":"..."} body. It withdraws a still-pending approval, moving it
+// to the 'cancelled' status (issue #617 — that status was previously
+// unreachable from CLI/API; only an agent's internal self-abort hit it).
+//
+// Requires OWNER or ADMIN, mirroring Decide: withdrawing a gated action is
+// an operator-level call, not something an unprivileged member should do.
+//
+// harbormaster.Cancel is invoked with a nil emitter so its built-in
+// ActorAgent journal entry (which models an agent self-withdrawing) is
+// suppressed; this path instead emits an operator-attributed (ActorUser)
+// entry below, the same handler-emits-audit shape as ResetAutoTuning.
+func (h *ApprovalsHandler) Cancel(w http.ResponseWriter, r *http.Request) {
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	if workspaceID == "" {
+		replyError(w, http.StatusUnauthorized, "workspace required")
+		return
+	}
+	user := UserFromContext(r.Context())
+	if user == nil {
+		replyError(w, http.StatusUnauthorized, "auth required")
+		return
+	}
+	role := RoleFromContext(r.Context())
+	if role != "OWNER" && role != "ADMIN" {
+		replyError(w, http.StatusForbidden, "cancelling an approval requires OWNER or ADMIN role")
+		return
+	}
+	id := r.PathValue("id")
+
+	// Body is optional — a bare POST cancels with no reason. Only reject a
+	// body that is present but malformed.
+	var body struct {
+		Reason string `json:"reason"`
+	}
+	if r.Body != nil {
+		// An empty body (io.EOF) is fine — reason is optional; only a
+		// present-but-malformed body is a 400.
+		dec := json.NewDecoder(r.Body)
+		if err := dec.Decode(&body); err != nil && !errors.Is(err, io.EOF) {
+			replyError(w, http.StatusBadRequest, "bad json")
+			return
+		}
+		// Decode consumes only the first JSON value, so a body like
+		// `{"reason":"x"}{"evil":1}` would otherwise slip through. Require the
+		// stream to end after the single (optional) payload.
+		if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+			replyError(w, http.StatusBadRequest, "unexpected data after JSON body")
+			return
+		}
+	}
+
+	err := harbormaster.Cancel(r.Context(), h.db, nil, workspaceID, id, body.Reason)
+	switch err {
+	case nil:
+		// ok
+	case harbormaster.ErrNotFound:
+		replyError(w, http.StatusNotFound, "not found")
+		return
+	case harbormaster.ErrNotPending:
+		replyError(w, http.StatusConflict, "approval is not pending (already decided or cancelled)")
+		return
+	default:
+		h.logger.Error("approvals cancel", "err", err)
+		replyError(w, http.StatusInternalServerError, "cancel failed")
+		return
+	}
+
+	// Operator-attributed audit. Pull the (now-cancelled) row for crew/agent/
+	// mission refs; tolerate a nil row so a journal lookup miss can't turn a
+	// successful cancel into a 500.
+	entry := journal.Entry{
+		WorkspaceID: workspaceID,
+		Type:        journal.EntryApprovalCancelled,
+		Severity:    journal.SeverityNotice,
+		ActorType:   journal.ActorUser,
+		ActorID:     user.ID,
+		Summary:     "approval cancelled by operator: " + body.Reason,
+		Payload:     map[string]any{"approval_id": id, "reason": body.Reason, "cancelled_by": user.ID},
+		Refs:        map[string]any{"approval_id": id},
+	}
+	if row, _ := harbormaster.Get(r.Context(), h.db, workspaceID, id); row != nil {
+		entry.CrewID = row.CrewID
+		entry.AgentID = row.AgentID
+		entry.MissionID = row.MissionID
+	}
+	if _, emitErr := h.journal.Emit(r.Context(), entry); emitErr != nil {
+		h.logger.Warn("approvals cancel: audit emit failed", "err", emitErr)
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "cancelled", "cancelled_by": user.ID})
 }
 
 // ResetAutoTuning serves POST /api/v1/approvals/reset-auto-tuning.

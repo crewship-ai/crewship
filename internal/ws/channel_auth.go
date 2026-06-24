@@ -62,6 +62,14 @@ func (a *DBChannelAuthorizer) CanSubscribe(ctx context.Context, userID, channel 
 	case "mission":
 		// mission:{missionId} — check mission's workspace membership
 		return a.isMemberOfMissionWorkspace(ctx, userID, chID)
+	case "user":
+		// user:{userId} — a per-user channel (notification.created is
+		// broadcast here). Only the user themselves may subscribe; there is
+		// no workspace membership to consult because the channel is scoped
+		// to the identity, not a tenant. Without this case the authorizer
+		// fell through to default:false, so no client could ever subscribe
+		// and real-time notifications silently never arrived (issue #614).
+		return userID == chID
 	case "providers":
 		// global channel — any authenticated user
 		return userID != ""

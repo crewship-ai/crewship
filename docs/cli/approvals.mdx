@@ -13,8 +13,8 @@ crewship approvals <subcommand> [flags]
 ```
 
 <Note>
-  `list` is safe for any workspace member; `approve` and `deny` require
-  `OWNER` or `ADMIN` role server-side (403 otherwise).
+  `list` is safe for any workspace member; `approve`, `deny`, and `cancel`
+  require `OWNER` or `ADMIN` role server-side (403 otherwise).
 </Note>
 
 ## Subcommands
@@ -25,9 +25,8 @@ crewship approvals <subcommand> [flags]
 | `get <id>` | Fetch a single approval request with full detail. |
 | `approve <id>` | Approve a pending request. |
 | `deny <id>` | Deny a pending request. |
+| `cancel <id>` | Withdraw a pending request (moves it to `cancelled`). |
 | `reset-auto-tuning <tool>` | Wipe rolling reward history for a tool to re-train gate auto-tuning. |
-
-`cancel` is deliberately absent -- the backend does not expose `POST /api/v1/approvals/{id}/cancel` yet.
 
 ---
 
@@ -83,6 +82,27 @@ crewship approvals deny req_01HXYZABCDEF --comment "wrong mission target"
 | Flag | Type | Default | Description |
 |---|---|---|---|
 | `--comment` | `string` | | Optional comment recorded with the decision. |
+
+---
+
+## `crewship approvals cancel <id>`
+
+Withdraw a still-pending request without approving or denying it. The request moves to the `cancelled` status. Use this when the gated action is no longer relevant (mission aborted, agent retired, duplicate request). Only pending requests can be cancelled — an already-decided or already-cancelled request returns a conflict.
+
+```bash
+crewship approvals cancel req_01HXYZABCDEF
+crewship approvals cancel req_01HXYZABCDEF --reason "mission aborted"
+```
+
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--reason` | `string` | | Optional reason recorded with the cancellation. |
+
+Sample output:
+
+```
+✓ Approval req_01HXYZABCDEF: cancelled (by user_123)
+```
 
 ---
 

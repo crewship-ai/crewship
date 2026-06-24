@@ -31,7 +31,7 @@ crewship consolidate run --since 7d
 
 | Flag | Type | Description |
 |---|---|---|
-| `--crew` | `string` | Limit to a single crew ID (slug resolution not yet wired). Empty = every crew in the workspace. |
+| `--crew` | `string` | Limit to a single crew (slug or ID; slugs are resolved automatically). Empty = every crew in the workspace. |
 | `--since` | `string` | Only consider journal entries newer than this window. Accepts Go durations (`90m`, `24h`) plus `d`/`w` shorthand (`7d`, `2w`). Default 24h. |
 
 The command takes **no positional args** -- scope is passed via flags. A bare `crewship consolidate run backend-team` fails (`unknown command`).

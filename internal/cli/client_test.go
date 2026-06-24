@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -67,6 +68,96 @@ func TestClientSendsAuthHeader(t *testing.T) {
 	if gotAuth != "Bearer my-secret-token" {
 		t.Errorf("Authorization = %q, want Bearer my-secret-token", gotAuth)
 	}
+}
+
+// TestClientTokenHostBinding covers the issue #571 guard: the bearer token
+// must reach only the host it was issued for. httptest serves on 127.0.0.1,
+// so a matching TokenHost lets the token through, a mismatched one refuses
+// the request before it hits the network, and the override sends it anyway.
+func TestClientTokenHostBinding(t *testing.T) {
+	newServer := func(seen *string) *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			*seen = r.Header.Get("Authorization")
+			w.WriteHeader(200)
+		}))
+	}
+
+	t.Run("matching host sends token", func(t *testing.T) {
+		var gotAuth string
+		srv := newServer(&gotAuth)
+		defer srv.Close()
+		c := NewClient(srv.URL, "secret", "")
+		c.TokenHost = "127.0.0.1"
+		resp, err := c.Get("/test")
+		if err != nil {
+			t.Fatalf("Get() error: %v", err)
+		}
+		resp.Body.Close()
+		if gotAuth != "Bearer secret" {
+			t.Errorf("Authorization = %q, want Bearer secret", gotAuth)
+		}
+	})
+
+	t.Run("mismatched host refuses without sending", func(t *testing.T) {
+		// Count hits, not just the observed header: gotAuth=="" alone would
+		// also pass if the client made an unauthenticated network call. The
+		// guarantee is "refused before the network", so the server must see
+		// zero requests.
+		var hits int
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			hits++
+			w.WriteHeader(200)
+		}))
+		defer srv.Close()
+		c := NewClient(srv.URL, "secret", "")
+		c.TokenHost = "real-server.example.com"
+		resp, err := c.Get("/test")
+		if err == nil {
+			if resp != nil {
+				resp.Body.Close()
+			}
+			t.Fatal("expected ServerMismatchError, got nil")
+		}
+		var mm *ServerMismatchError
+		if !errors.As(err, &mm) {
+			t.Fatalf("error = %v, want *ServerMismatchError", err)
+		}
+		if hits != 0 {
+			t.Errorf("request reached the server despite host mismatch (hits=%d)", hits)
+		}
+	})
+
+	t.Run("override sends to mismatched host", func(t *testing.T) {
+		var gotAuth string
+		srv := newServer(&gotAuth)
+		defer srv.Close()
+		c := NewClient(srv.URL, "secret", "")
+		c.TokenHost = "real-server.example.com"
+		c.AllowHostMismatch = true
+		resp, err := c.Get("/test")
+		if err != nil {
+			t.Fatalf("Get() error: %v", err)
+		}
+		resp.Body.Close()
+		if gotAuth != "Bearer secret" {
+			t.Errorf("Authorization = %q, want Bearer secret (override on)", gotAuth)
+		}
+	})
+
+	t.Run("empty TokenHost disables the check", func(t *testing.T) {
+		var gotAuth string
+		srv := newServer(&gotAuth)
+		defer srv.Close()
+		c := NewClient(srv.URL, "secret", "") // TokenHost unset
+		resp, err := c.Get("/test")
+		if err != nil {
+			t.Fatalf("Get() error: %v", err)
+		}
+		resp.Body.Close()
+		if gotAuth != "Bearer secret" {
+			t.Errorf("Authorization = %q, want Bearer secret (binding disabled)", gotAuth)
+		}
+	})
 }
 
 func TestClientPostJSON(t *testing.T) {
