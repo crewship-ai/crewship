@@ -217,6 +217,7 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	r.mux.Handle("GET /api/v1/approvals", authed(wsCtx(http.HandlerFunc(ah.List))))
 	r.mux.Handle("GET /api/v1/approvals/{id}", authed(wsCtx(http.HandlerFunc(ah.Get))))
 	r.mux.Handle("POST /api/v1/approvals/{id}/decide", authed(wsCtx(http.HandlerFunc(ah.Decide))))
+	r.mux.Handle("POST /api/v1/approvals/{id}/cancel", authed(wsCtx(http.HandlerFunc(ah.Cancel))))
 	r.mux.Handle("POST /api/v1/approvals/reset-auto-tuning", authed(wsCtx(http.HandlerFunc(ah.ResetAutoTuning))))
 
 	// Unified Inbox — the canonical "stuff that needs the human"

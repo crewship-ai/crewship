@@ -144,6 +144,47 @@ POST /api/v1/approvals/{id}/decide
 
 ---
 
+### Cancel
+
+```
+POST /api/v1/approvals/{id}/cancel
+```
+
+Withdraw a still-pending request, moving it to the `cancelled` status. Unlike `decide`, this records no approve/deny outcome — it marks the gated action moot (mission aborted, agent retired, duplicate request).
+
+**Auth:** `OWNER` or `ADMIN` only. 403 for any other role.
+
+**Request body:** optional. A bare `POST` cancels with no reason; a present-but-malformed body is a 400.
+
+```json
+{ "reason": "mission aborted" }
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `reason` | string | No | Free-form cancellation rationale. Stored in `approvals_queue.decision_comment`. |
+
+**Response:** `200 OK`
+
+```json
+{
+  "status": "cancelled",
+  "cancelled_by": "user_123"
+}
+```
+
+**Errors:**
+
+| Status | Condition |
+|---|---|
+| 400 | Body present but malformed JSON. |
+| 401 | Not authenticated. |
+| 403 | Not OWNER/ADMIN. |
+| 404 | Request not found. |
+| 409 | Request not pending (already decided or cancelled). |
+
+---
+
 ### Reset auto-tuning
 
 ```
@@ -190,7 +231,8 @@ Every write emits a journal entry:
 | Decide approved | `approval.granted` (info) |
 | Decide denied | `approval.denied` (warn) |
 | Timeout sweep | `approval.timeout` (warn) |
-| Cancel (internal) | `approval.cancelled` (notice) |
+| Cancel (agent self-withdraw) | `approval.cancelled` (notice, actor = agent) |
+| Cancel (operator via API/CLI) | `approval.cancelled` (notice, actor = user) |
 
 See [Crew Journal](/guides/crew-journal) for payload shapes.
 

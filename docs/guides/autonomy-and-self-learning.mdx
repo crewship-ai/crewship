@@ -98,6 +98,24 @@ The flag does **NOT** override the crew's `autonomy_level`. A strict crew + `sel
 - Agents that act on production data where a wrong lesson could compound across many future interactions
 - Compliance crews where every learning signal needs an operator's name attached
 
+### Setting the flag
+
+Flip the flag through the dedicated audited endpoint (a `reason` is mandatory — it lands in the audit triple):
+
+```
+PATCH /api/v1/agents/{agentId}/learning
+{ "enabled": true, "reason": "graduated to autonomous after 3 weeks supervised" }
+```
+
+Requires `ADMIN`+. The CLI exposes the same control on `agent update`:
+
+```bash
+crewship agent update viktor --self-learning --learning-reason "graduated to autonomous"
+crewship agent update viktor --self-learning=false --learning-reason "drift observed, reverting to inbox"
+```
+
+`--learning-reason` is required whenever `--self-learning` is set; omitting it errors before any request is sent.
+
 ## Composition — worked examples
 
 <AccordionGroup>

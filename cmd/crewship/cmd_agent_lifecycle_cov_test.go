@@ -179,7 +179,7 @@ func TestAgentUpdateRunE_NoFields(t *testing.T) {
 	covResetFlagsCli6(t, agentUpdateCmd,
 		"name", "role", "role-title", "cli-adapter", "tool-profile", "lead-mode",
 		"llm-provider", "llm-model", "timeout", "memory", "system-prompt",
-		"avatar-seed", "avatar-style")
+		"avatar-seed", "avatar-style", "self-learning", "learning-reason")
 
 	// CUID argument: resolveAgentID short-circuits, no HTTP call needed.
 	err := agentUpdateCmd.RunE(agentUpdateCmd, []string{covAgentIDCli6})
@@ -239,6 +239,56 @@ func TestAgentUpdateRunE_PatchesChangedFields(t *testing.T) {
 		if body[k] != v {
 			t.Errorf("body[%q] = %v, want %v", k, body[k], v)
 		}
+	}
+}
+
+// TestAgentUpdateRunE_SelfLearning verifies issue #615: --self-learning is
+// applied via the dedicated audited endpoint (PATCH /agents/{id}/learning),
+// carrying the required reason — not folded into the generic agent PATCH.
+func TestAgentUpdateRunE_SelfLearning(t *testing.T) {
+	stub := clitest.NewStubServer()
+	defer stub.Close()
+	covSetupCli6(t, stub)
+
+	covSetFlagCli6(t, agentUpdateCmd, "self-learning", "true")
+	covSetFlagCli6(t, agentUpdateCmd, "learning-reason", "graduated to autonomous")
+	stub.OnPatch("/api/v1/agents/"+covAgentIDCli6+"/learning", clitest.EmptyResponse(200))
+
+	if err := agentUpdateCmd.RunE(agentUpdateCmd, []string{covAgentIDCli6}); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	calls := stub.CallsFor("PATCH", "/api/v1/agents/"+covAgentIDCli6+"/learning")
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 PATCH to /learning, got %d", len(calls))
+	}
+	body := covDecodeBody(t, calls[0].Body)
+	if body["enabled"] != true {
+		t.Errorf("enabled = %v, want true", body["enabled"])
+	}
+	if body["reason"] != "graduated to autonomous" {
+		t.Errorf("reason = %v, want the audit reason", body["reason"])
+	}
+	// The generic agent PATCH must NOT be called when only self-learning changed.
+	if n := len(stub.CallsFor("PATCH", "/api/v1/agents/"+covAgentIDCli6)); n != 0 {
+		t.Errorf("generic agent PATCH should not fire, got %d", n)
+	}
+}
+
+// TestAgentUpdateRunE_SelfLearningRequiresReason verifies the audit reason is
+// mandatory: --self-learning without --learning-reason errors before any HTTP.
+func TestAgentUpdateRunE_SelfLearningRequiresReason(t *testing.T) {
+	stub := clitest.NewStubServer()
+	defer stub.Close()
+	covSetupCli6(t, stub)
+
+	covSetFlagCli6(t, agentUpdateCmd, "self-learning", "true")
+
+	err := agentUpdateCmd.RunE(agentUpdateCmd, []string{covAgentIDCli6})
+	if err == nil || !strings.Contains(err.Error(), "learning-reason is required") {
+		t.Errorf("expected learning-reason-required error, got %v", err)
+	}
+	if n := len(stub.Calls()); n != 0 {
+		t.Errorf("no HTTP call expected, got %d", n)
 	}
 }
 

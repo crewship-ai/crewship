@@ -28,7 +28,8 @@ Subcommand status:
   list      — live (GET /api/v1/approvals)
   get       — live (GET /api/v1/approvals/{id})
   approve   — live (POST /api/v1/approvals/{id}/decide)
-  deny      — live (POST /api/v1/approvals/{id}/decide)`,
+  deny      — live (POST /api/v1/approvals/{id}/decide)
+  cancel    — live (POST /api/v1/approvals/{id}/cancel)`,
 }
 
 // approvalsGetCmd fetches a single approval request by ID. Used by:
@@ -205,6 +206,53 @@ var approvalsDenyCmd = &cobra.Command{
 	},
 }
 
+// approvalsCancelCmd withdraws a still-pending approval, moving it to the
+// 'cancelled' status (issue #617). Distinct from deny: cancel records no
+// approve/deny decision — it's "this request is moot, drop it". Requires
+// OWNER or ADMIN server-side (403 otherwise).
+var approvalsCancelCmd = &cobra.Command{
+	Use:   "cancel <id>",
+	Short: "Cancel (withdraw) a pending request (requires OWNER or ADMIN)",
+	Long: `Withdraw a still-pending approval request without approving or denying it.
+The request moves to the 'cancelled' status. Use this when the gated action
+is no longer relevant (mission aborted, agent retired, duplicate request).
+
+Only pending requests can be cancelled; an already-decided or already-
+cancelled request returns a conflict.
+
+Examples:
+  crewship approvals cancel apr_abc123
+  crewship approvals cancel apr_abc123 --reason "mission aborted"`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client, err := requireAuthAndWorkspace()
+		if err != nil {
+			return err
+		}
+		reason, _ := cmd.Flags().GetString("reason")
+		body := map[string]string{}
+		if reason != "" {
+			body["reason"] = reason
+		}
+		resp, err := client.Post("/api/v1/approvals/"+url.PathEscape(args[0])+"/cancel", body)
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		var out struct {
+			Status      string `json:"status"`
+			CancelledBy string `json:"cancelled_by"`
+		}
+		if err := cli.ReadJSON(resp, &out); err != nil {
+			return err
+		}
+		cli.PrintSuccess(fmt.Sprintf("Approval %s: %s (by %s)", args[0], out.Status, out.CancelledBy))
+		return nil
+	},
+}
+
 // decideApproval POSTs to /decide with either "approved" or "denied".
 // Shared by both approve and deny so the request/response decode stays
 // in one place and can't drift.
@@ -248,11 +296,13 @@ func init() {
 
 	approvalsApproveCmd.Flags().String("comment", "", "Optional comment recorded with the decision")
 	approvalsDenyCmd.Flags().String("comment", "", "Optional comment recorded with the decision")
+	approvalsCancelCmd.Flags().String("reason", "", "Optional reason recorded with the cancellation")
 
 	approvalsCmd.AddCommand(approvalsListCmd)
 	approvalsCmd.AddCommand(approvalsGetCmd)
 	approvalsCmd.AddCommand(approvalsApproveCmd)
 	approvalsCmd.AddCommand(approvalsDenyCmd)
+	approvalsCmd.AddCommand(approvalsCancelCmd)
 	approvalsCmd.AddCommand(approvalsResetAutoTuningCmd)
 }
 

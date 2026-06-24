@@ -25,7 +25,7 @@ Examples:
   crewship consolidate run --since 24h
   crewship consolidate run --since 7d
 
-Note: --crew expects the crew ID today (slug→ID resolution is TBD).
+Note: --crew accepts a crew slug or ID (slugs are resolved automatically).
       --since accepts Go durations (24h, 90m) plus d/w shorthand.`,
 }
 
@@ -49,7 +49,14 @@ var consolidateRunCmd = &cobra.Command{
 		since, _ := cmd.Flags().GetString("since")
 		body := map[string]string{}
 		if crew != "" {
-			body["crew_id"] = crew
+			// Resolve slug→ID the same way every other crew-scoped command
+			// does (issue #616). A CUID passes through untouched; a slug is
+			// looked up against /api/v1/crews so `--crew backend-team` works.
+			crewID, err := resolveCrewID(client, crew)
+			if err != nil {
+				return err
+			}
+			body["crew_id"] = crewID
 		}
 		if since != "" {
 			body["since"] = since
@@ -94,7 +101,7 @@ var consolidateRunCmd = &cobra.Command{
 }
 
 func init() {
-	consolidateRunCmd.Flags().String("crew", "", "Limit consolidation to a single crew ID (slug resolution not yet wired)")
+	consolidateRunCmd.Flags().String("crew", "", "Limit consolidation to a single crew (slug or ID)")
 	consolidateRunCmd.Flags().String("since", "", "Only consider journal entries newer than this window (e.g. 24h, 90m, 7d, 2w)")
 
 	consolidateCmd.AddCommand(consolidateRunCmd)

@@ -200,18 +200,39 @@ var agentUpdateCmd = &cobra.Command{
 			body["avatar_style"] = v
 		}
 
-		if len(body) == 0 {
+		// self_learning lives behind its own audited endpoint
+		// (PATCH /agents/{id}/learning), not the generic agent PATCH, so it
+		// is applied as a separate call (issue #615). The endpoint mandates
+		// a non-empty reason for the audit trail, so require --learning-reason.
+		learningChanged := flags.Changed("self-learning")
+
+		if len(body) == 0 && !learningChanged {
 			return fmt.Errorf("no fields to update")
 		}
 
-		resp, err := client.Patch("/api/v1/agents/"+agentID, body)
-		if err != nil {
-			return err
+		if len(body) > 0 {
+			resp, err := client.Patch("/api/v1/agents/"+agentID, body)
+			if err != nil {
+				return err
+			}
+			if err := cli.CheckError(resp); err != nil {
+				return err
+			}
+			resp.Body.Close()
 		}
-		if err := cli.CheckError(resp); err != nil {
-			return err
+
+		if learningChanged {
+			enabled, _ := flags.GetBool("self-learning")
+			reason, _ := flags.GetString("learning-reason")
+			reason = strings.TrimSpace(reason)
+			if reason == "" {
+				return fmt.Errorf("--learning-reason is required when setting --self-learning (recorded in the audit trail)")
+			}
+			if err := patchJSON(client, "/api/v1/agents/"+agentID+"/learning",
+				map[string]interface{}{"enabled": enabled, "reason": reason}, nil); err != nil {
+				return err
+			}
 		}
-		resp.Body.Close()
 
 		cli.PrintSuccess("Agent updated successfully.")
 		return nil

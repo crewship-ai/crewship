@@ -93,7 +93,9 @@ func TestConsolidateRunRunE_TriggeredWithScope(t *testing.T) {
 		"worker_id": "w-42",
 	}))
 	cliCfg = &cli.CLIConfig{Token: "tok", Workspace: "cabcdefghijklmnopqrs", Server: stub.URL()}
-	setConsolidateFlags(t, "crew-123", "24h")
+	// A CUID passes through resolveCrewID untouched (no /crews lookup).
+	const crewCUID = "ccrew0123456789012345"
+	setConsolidateFlags(t, crewCUID, "24h")
 
 	out, err := captureStdout(t, func() error {
 		return consolidateRunCmd.RunE(consolidateRunCmd, nil)
@@ -111,11 +113,46 @@ func TestConsolidateRunRunE_TriggeredWithScope(t *testing.T) {
 	}
 	var body map[string]string
 	clitest.MustDecodeJSONBody(calls[0].Body, &body)
-	if body["crew_id"] != "crew-123" {
+	if body["crew_id"] != crewCUID {
 		t.Errorf("crew_id: got %q", body["crew_id"])
 	}
 	if body["since"] != "24h" {
 		t.Errorf("since: got %q", body["since"])
+	}
+}
+
+// TestConsolidateRunRunE_ResolvesCrewSlug verifies issue #616: a --crew slug
+// is resolved to its CUID via /api/v1/crews before the consolidate POST,
+// matching every other crew-scoped command.
+func TestConsolidateRunRunE_ResolvesCrewSlug(t *testing.T) {
+	saveCLIState(t)
+	stub := clitest.NewStubServer()
+	defer stub.Close()
+	stub.OnGet("/api/v1/crews", clitest.JSONResponse(http.StatusOK, []map[string]any{
+		{"id": "ccrewbackendteam0001234", "slug": "backend-team"},
+	}))
+	stub.OnPost("/api/v1/consolidate/run", clitest.JSONResponse(http.StatusOK, map[string]any{
+		"triggered": true,
+		"worker_id": "w-7",
+	}))
+	cliCfg = &cli.CLIConfig{Token: "tok", Workspace: "cabcdefghijklmnopqrs", Server: stub.URL()}
+	setConsolidateFlags(t, "backend-team", "")
+
+	_, err := captureStdout(t, func() error {
+		return consolidateRunCmd.RunE(consolidateRunCmd, nil)
+	})
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+
+	calls := stub.CallsFor("POST", "/api/v1/consolidate/run")
+	if len(calls) != 1 {
+		t.Fatalf("want 1 POST, got %d", len(calls))
+	}
+	var body map[string]string
+	clitest.MustDecodeJSONBody(calls[0].Body, &body)
+	if body["crew_id"] != "ccrewbackendteam0001234" {
+		t.Errorf("crew_id: got %q, want resolved CUID", body["crew_id"])
 	}
 }
 

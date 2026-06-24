@@ -164,6 +164,8 @@ func init() {
 	agentUpdateCmd.Flags().String("llm-provider", "", "LLM provider: ANTHROPIC|OPENAI|GOOGLE")
 	agentUpdateCmd.Flags().String("llm-model", "", "LLM model")
 	agentUpdateCmd.Flags().Bool("memory", false, "Enable memory")
+	agentUpdateCmd.Flags().Bool("self-learning", false, "Enable/disable per-agent self-learning (requires --learning-reason for audit)")
+	agentUpdateCmd.Flags().String("learning-reason", "", "Audit reason recorded with the --self-learning change (required when --self-learning is set)")
 	agentUpdateCmd.Flags().String("lead-mode", "", "Lead mode")
 	agentUpdateCmd.Flags().Int("timeout", 0, "Timeout in seconds")
 	agentUpdateCmd.Flags().String("avatar-seed", "", "Avatar seed")

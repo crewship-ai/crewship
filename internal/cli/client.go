@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -18,6 +19,18 @@ type Client struct {
 	WorkspaceID string
 	HTTPClient  *http.Client
 	Verbose     bool
+	// TokenHost is the hostname the stored Token was issued for (the host
+	// of the configured server URL). When set, the client refuses to attach
+	// the bearer token to a request whose host differs — this is the guard
+	// against issue #571, where `crewship --server http://attacker.com …`
+	// leaked the operator's token to any attacker-controlled host. Empty
+	// disables the check (e.g. login flows that mint a token for a brand-new
+	// server, or a hand-edited config with a token but no server).
+	TokenHost string
+	// AllowHostMismatch, when true, sends the token regardless of TokenHost.
+	// The intentional escape hatch for SSH tunnels / a moved server, wired
+	// from --server-allow-mismatch / CREWSHIP_ALLOW_SERVER_MISMATCH.
+	AllowHostMismatch bool
 	// ctx is bound to every request issued by Do. Defaults to
 	// context.Background(); use WithContext to attach a cancellable
 	// context (e.g., for graceful shutdown via Ctrl-C).
@@ -100,8 +113,8 @@ func (c *Client) Do(method, path string, body interface{}) (*http.Response, erro
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	if c.Token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.Token)
+	if err := c.applyAuth(req); err != nil {
+		return nil, err
 	}
 
 	resp, err := c.HTTPClient.Do(req)
@@ -110,6 +123,43 @@ func (c *Client) Do(method, path string, body interface{}) (*http.Response, erro
 	}
 
 	return resp, nil
+}
+
+// ServerMismatchError is returned when the client is asked to send the
+// bearer token to a host other than the one the token was issued for.
+// The token is NEVER written to the request when this fires — the request
+// is refused before it reaches the network (issue #571).
+type ServerMismatchError struct {
+	TokenHost   string // host the stored token belongs to
+	RequestHost string // host the request was about to hit
+}
+
+func (e *ServerMismatchError) Error() string {
+	return fmt.Sprintf(
+		"refusing to send your auth token to %q: the stored credential was issued for %q. "+
+			"If this is intentional (SSH tunnel, the server moved), re-run `crewship login --server <url>` "+
+			"to rebind the token, or pass --server-allow-mismatch (env CREWSHIP_ALLOW_SERVER_MISMATCH=1)",
+		e.RequestHost, e.TokenHost)
+}
+
+// applyAuth attaches the bearer token to req after verifying the
+// destination host is allowed to receive it. With no token it is a no-op.
+// When TokenHost is set and the request host differs (and the mismatch
+// override is off), it returns a *ServerMismatchError WITHOUT setting the
+// Authorization header, so the credential never rides a request to the
+// wrong host.
+func (c *Client) applyAuth(req *http.Request) error {
+	if c.Token == "" {
+		return nil
+	}
+	if c.TokenHost != "" && !c.AllowHostMismatch {
+		reqHost := strings.ToLower(req.URL.Hostname())
+		if reqHost != strings.ToLower(c.TokenHost) {
+			return &ServerMismatchError{TokenHost: c.TokenHost, RequestHost: reqHost}
+		}
+	}
+	req.Header.Set("Authorization", "Bearer "+c.Token)
+	return nil
 }
 
 // GetWorkspaceID returns the resolved workspace ID (CUID).
@@ -148,8 +198,8 @@ func (c *Client) resolveWorkspaceSlug(ctx context.Context, slug string) (string,
 	if err != nil {
 		return "", fmt.Errorf("create workspace request: %w", err)
 	}
-	if c.Token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.Token)
+	if err := c.applyAuth(req); err != nil {
+		return "", err
 	}
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {

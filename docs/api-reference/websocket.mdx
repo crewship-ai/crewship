@@ -360,12 +360,17 @@ scoped to the originating chat session.
 |---|---|---|
 | `provider_status` | Container/credential provider status update | `{ connection_id, old_status, new_status }` |
 
+### User Channel (`user:{userId}`)
+
+| Event Type | Description | Payload |
+|---|---|---|
+| `notification.created` | A new notification was created for the user | `{ id, action, entity_type, entity_id, entity_title }` |
+
 <Note>
-The server also targets a `user:{userId}` channel for `notification.created`
-events (`{ id, action, entity_type, entity_id, entity_title }`). This channel
-is **not currently subscribable** -- the channel authorizer has no `user` case,
-so subscription requests are denied. Notifications are read over REST until a
-`user` channel authorization rule is added.
+Only the user themselves may subscribe to their own `user:{userId}` channel —
+the authorizer grants access when the connecting user's id equals the channel
+id, with no workspace membership lookup (the channel is scoped to the identity,
+not a tenant). REST (`GET /api/v1/notifications`) remains available for polling.
 </Note>
 
 ---
