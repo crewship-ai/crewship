@@ -297,11 +297,20 @@ func (h *RecoveryHandler) Reset(w http.ResponseWriter, r *http.Request) {
 
 	expires, err := time.Parse(time.RFC3339, expiresStr)
 	if err != nil || time.Now().UTC().After(expires) {
-		// Sweep the dead token (best-effort, outside the tx — rollback
-		// will undo any work inside; the cleanup runs on its own).
-		if _, dbErr := h.db.ExecContext(r.Context(),
+		// Sweep the dead token, then commit. This MUST run on the open tx,
+		// not a fresh h.db connection: this tx still holds the read lock
+		// from the SELECT above, and a DELETE on a second connection
+		// self-contends under file-backed SQLite — the writer blocks for the
+		// full busy_timeout (30s) before giving up, stalling every
+		// expired-token reset attempt by exactly that long. The tx has only
+		// read so far, so committing the cleanup is safe and releases the
+		// lock immediately. Best-effort: a failed sweep still returns the
+		// generic error (the deferred Rollback covers the no-commit paths).
+		if _, dbErr := tx.ExecContext(r.Context(),
 			"DELETE FROM verification_tokens WHERE token = ?", tokenHash); dbErr != nil {
 			h.logger.Warn("reset password: cleanup expired token", "error", dbErr)
+		} else if dbErr := tx.Commit(); dbErr != nil {
+			h.logger.Warn("reset password: commit expired-token cleanup", "error", dbErr)
 		}
 		replyError(w, http.StatusBadRequest, "Invalid or expired token")
 		return
