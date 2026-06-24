@@ -68,10 +68,32 @@ func seedSchedules(ctx context.Context, client *cli.Client) error {
 	fmt.Fprintln(os.Stderr, "Creating demo schedules...")
 
 	endpoint := fmt.Sprintf("/api/v1/workspaces/%s/pipeline-schedules", wsID)
+
+	// Idempotency: the create endpoint does NOT 409 on a duplicate name, so a
+	// re-seed without --nuke would otherwise stack a second (third, …) copy of
+	// every demo schedule. Pre-fetch existing schedules and skip any whose name
+	// already exists. Keyed by name because that's what's stable across re-seeds
+	// (the target slug can repeat across demo schedules).
+	existingByName := map[string]bool{}
+	if r, err := client.Get(endpoint); err == nil {
+		var existing []struct {
+			Name string `json:"name"`
+		}
+		if cli.ReadJSON(r, &existing) == nil {
+			for _, e := range existing {
+				existingByName[e.Name] = true
+			}
+		}
+	}
+
 	created := 0
 	for _, s := range demoSchedules {
 		if err := ctx.Err(); err != nil {
 			return err
+		}
+		if existingByName[s.Name] {
+			fmt.Fprintf(os.Stderr, "  = Schedule exists: %s\n", s.Name)
+			continue
 		}
 		body := map[string]interface{}{
 			"name":                 s.Name,

@@ -125,6 +125,16 @@ func bridgeServerFromPort() {
 	if port == "" {
 		return
 	}
+	// Never shadow an explicitly-configured server. The CREWSHIP_PORT bridge
+	// is only a convenience for local multi-instance dev.sh, where no server
+	// is configured. Without this guard, running `crewship seed` from a repo
+	// dir whose .env.local sets CREWSHIP_PORT would silently retarget a remote
+	// server selected via CREWSHIP_CONFIG / cli-config.yaml to 127.0.0.1:PORT
+	// — a footgun that points a --nuke at the wrong (local) server while the
+	// token + workspace come from the remote config.
+	if cfg, err := cli.LoadConfig(); err == nil && cfg != nil && cfg.Server != "" {
+		return
+	}
 	_ = os.Setenv("CREWSHIP_SERVER", "http://127.0.0.1:"+port)
 }
 
