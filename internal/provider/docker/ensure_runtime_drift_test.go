@@ -295,3 +295,39 @@ func TestEnsureCrewRuntime_NoRecreateOnSameImage(t *testing.T) {
 		}
 	}
 }
+
+// TestEnsureCrewRuntime_NoRecreateWhenCallerOmitsImage guards the assignment-path
+// regression (exit 137 during lead delegation): a caller that passes neither
+// CachedImage nor Image — e.g. the orchestrator's bare GetOrCreateContainer used
+// by the assignment/query paths — must NOT trigger an image-drift recreate
+// against the runtime-default image. The running container was provisioned to a
+// crewship-cache:* tag; tearing it down because a bare-config caller resolved
+// the default image clobbered a concurrent run (the lead's) with SIGKILL. The
+// running container must be reused as-is.
+func TestEnsureCrewRuntime_NoRecreateWhenCallerOmitsImage(t *testing.T) {
+	t.Parallel()
+
+	const slug = "eng"
+	const runningImg = "crewship-cache:PROVISIONED-sha" // != cfg.RuntimeImage default
+
+	p, calls := newDriftFixture(t, "crewship-team-"+slug, runningImg)
+
+	id, err := p.EnsureCrewRuntime(context.Background(), provider.CrewConfig{
+		ID:   "crew-id-1",
+		Slug: slug,
+		// No CachedImage, no Image: desiredImage falls back to the runtime
+		// default, which must NOT be treated as drift for a caller that never
+		// asked for a specific image.
+	})
+	if err != nil {
+		t.Fatalf("EnsureCrewRuntime: %v", err)
+	}
+	if id != "stale-cid-0123456789ab" {
+		t.Errorf("expected the running container to be reused, got %q", id)
+	}
+	for _, c := range calls.snapshot() {
+		if strings.HasPrefix(c, "remove ") || c == "create" {
+			t.Errorf("bare-config caller must not recreate a running container; got %q", c)
+		}
+	}
+}
