@@ -35,9 +35,15 @@ func (h *AgentHandler) ListCredentials(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// COALESCE the nullable text columns: a credential may legitimately have a
+	// NULL provider/type/status (e.g. a SECRET with no provider, or a row mid
+	// lifecycle), and ac.env_var_name/created_at can be NULL on older rows.
+	// Scanning a NULL into a Go string returns "converting NULL to string is
+	// unsupported" and 500s the whole list — so normalize to '' in SQL.
 	rows, err := h.db.QueryContext(r.Context(), `
-		SELECT ac.id, ac.agent_id, ac.credential_id, c.name, c.type, c.provider, c.status,
-			ac.env_var_name, ac.priority, ac.created_at
+		SELECT ac.id, ac.agent_id, ac.credential_id,
+			COALESCE(c.name, ''), COALESCE(c.type, ''), COALESCE(c.provider, ''), COALESCE(c.status, ''),
+			COALESCE(ac.env_var_name, ''), ac.priority, COALESCE(ac.created_at, '')
 		FROM agent_credentials ac
 		JOIN credentials c ON c.id = ac.credential_id
 		WHERE ac.agent_id = ?
