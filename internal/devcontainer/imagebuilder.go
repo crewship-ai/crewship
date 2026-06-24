@@ -14,6 +14,12 @@ import (
 	"strings"
 )
 
+// FeatureImageTagPrefix is the Docker repository for intermediate BuildKit
+// feature images (crewship-feat:{hash}). These are regenerable and never
+// referenced by a crew row, so the orphan GC may prune them freely (subject to
+// its age floor) — distinct from the final crewship-cache:* images.
+const FeatureImageTagPrefix = "crewship-feat:"
+
 // ImageBuilder builds a container image from a generated Dockerfile plus a
 // staged build context. It abstracts the build engine so the Docker (BuildKit)
 // implementation here can be joined later by a Kubernetes one (kaniko /
@@ -182,7 +188,7 @@ func stageBuildContext(baseImage string, features []*ResolvedFeature, optionsByR
 	}
 
 	sum := sha256.Sum256([]byte(dockerfile))
-	tag = "crewship-feat:" + hex.EncodeToString(sum[:])[:12]
+	tag = FeatureImageTagPrefix + hex.EncodeToString(sum[:])[:12]
 	return contextDir, dockerfile, tag, nil
 }
 

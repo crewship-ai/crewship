@@ -166,11 +166,19 @@ func (h *ProvisioningHandler) sweepOrphanCacheImages(ctx context.Context) {
 	tooYoung := 0
 	for _, img := range imgs {
 		for _, tag := range img.RepoTags {
-			if !strings.HasPrefix(tag, cacheImagePrefix) {
+			// Intermediate BuildKit feature images are regenerable and never
+			// referenced by a crew row — always orphan candidates (the age
+			// floor still protects an image mid-provision). crewship-cache:*
+			// images are orphans only when no crew points at them.
+			isFeat := strings.HasPrefix(tag, devcontainer.FeatureImageTagPrefix)
+			isCache := strings.HasPrefix(tag, cacheImagePrefix)
+			if !isFeat && !isCache {
 				continue
 			}
-			if _, ok := referenced[tag]; ok {
-				continue
+			if isCache {
+				if _, ok := referenced[tag]; ok {
+					continue
+				}
 			}
 			if img.Created > safeCutoff {
 				tooYoung++
