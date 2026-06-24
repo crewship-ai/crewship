@@ -282,7 +282,9 @@ reuse contract).`,
 			"author_crew_id": authorCrew,
 			"sample_inputs":  sampleInputs,
 		}
-		testResp, err := client.Post(fmt.Sprintf("/api/v1/workspaces/%s/pipelines/test_run", ws), testBody)
+		// test_run executes the routine once (worker + any grader loop), so it
+		// outlasts the 30s default client timeout — lift it for this call.
+		testResp, err := client.WithTimeout(evalRunTimeout).Post(fmt.Sprintf("/api/v1/workspaces/%s/pipelines/test_run", ws), testBody)
 		if err != nil {
 			return err
 		}
@@ -384,7 +386,9 @@ var pipelineRunCmd = &cobra.Command{
 		if tierOverride != "" {
 			runBody["tier_override"] = tierOverride
 		}
-		resp, err := client.Do("POST", fmt.Sprintf("/api/v1/workspaces/%s/pipelines/%s/run", ws, args[0]), runBody)
+		// Synchronous run — blocks on the agent (and grader loop); lift the
+		// per-call timeout above the 30s default.
+		resp, err := client.WithTimeout(evalRunTimeout).Do("POST", fmt.Sprintf("/api/v1/workspaces/%s/pipelines/%s/run", ws, args[0]), runBody)
 		if err != nil {
 			return err
 		}

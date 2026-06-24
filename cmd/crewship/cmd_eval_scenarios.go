@@ -179,6 +179,13 @@ func resolveScenarioSlugs(client *cli.Client, ws, supplied string) ([]string, er
 	return out, nil
 }
 
+// evalRunTimeout is the per-request cap for a synchronous scenario /run. It is
+// generous because a graded scenario blocks on a worker run plus a grader loop
+// (and tier escalation), which easily outlasts the 30s default and otherwise
+// surfaces as a spurious "context deadline exceeded" even though the server-side
+// run completes.
+const evalRunTimeout = 10 * time.Minute
+
 // executeOneScenario fires one /run request and shapes the response
 // into a scenarioOutcome. Errors are absorbed into the outcome so
 // the batch loop never crashes on a single bad run — that would
@@ -194,7 +201,9 @@ func executeOneScenario(client *cli.Client, ws, slug, tier string, attempt int, 
 	if tier != "" {
 		body["tier_override"] = tier
 	}
-	resp, err := client.Post(fmt.Sprintf("/api/v1/workspaces/%s/pipelines/%s/run", ws, slug), body)
+	// Synchronous /run blocks until worker + grader loop finish — lift the
+	// per-call timeout above the 30s default for just this request.
+	resp, err := client.WithTimeout(evalRunTimeout).Post(fmt.Sprintf("/api/v1/workspaces/%s/pipelines/%s/run", ws, slug), body)
 	if err != nil {
 		return scenarioOutcome{
 			Scenario:     slug,

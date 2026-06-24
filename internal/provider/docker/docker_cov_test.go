@@ -557,6 +557,52 @@ func TestEnsureVolume_MountpointVanished_RemoveAndRecreate(t *testing.T) {
 	}
 }
 
+// TestEnsureVolume_VMRuntime_SkipsHostStat covers the macOS/VM-backed-daemon
+// case: the daemon-reported Mountpoint (/var/lib/docker/volumes/...) is not
+// reachable from this process, so a missing host path must NOT be read as a
+// vanished volume — otherwise every provision destructively recreates the
+// volume and its crew container. With the host-stat check disabled, an
+// inspect-confirmed volume is trusted: no force-remove, no recreate.
+func TestEnsureVolume_VMRuntime_SkipsHostStat(t *testing.T) {
+	t.Parallel()
+
+	gone := filepath.Join(t.TempDir(), "vanished", "_data") // never exists on host
+	var mu sync.Mutex
+	var removed, created bool
+	p := newCovProvider(t, Config{}, func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch {
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/volumes/"):
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"Name": "v1", "Driver": "local", "Mountpoint": gone, "Scope": "local",
+			})
+		case r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/volumes/"):
+			removed = true
+			w.WriteHeader(http.StatusNoContent)
+		case strings.HasSuffix(r.URL.Path, "/volumes/create"):
+			created = true
+			_ = json.NewEncoder(w).Encode(map[string]any{"Name": "v1"})
+		default:
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	})
+	p.checkVolumeMountpoint = false // simulate a VM-backed runtime (macOS/Windows)
+
+	if err := p.ensureVolume(context.Background(), "v1"); err != nil {
+		t.Fatalf("ensureVolume: %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if removed {
+		t.Error("VM-runtime volume must NOT be force-removed on a missing host mountpoint")
+	}
+	if created {
+		t.Error("inspect-confirmed volume must not be recreated when host-stat is disabled")
+	}
+}
+
 func TestEnsureVolume_MountpointVanished_RemoveFails(t *testing.T) {
 	t.Parallel()
 

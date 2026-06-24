@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -39,6 +41,19 @@ type Client struct {
 	resolvedWorkspaceID string
 }
 
+// DefaultTimeout is the per-request cap for ordinary CLI calls. Overridable via
+// CREWSHIP_HTTP_TIMEOUT (seconds) for environments where even routine listing is
+// slow. Long synchronous calls (a routine /run that waits for the agent + any
+// grader loop) should instead use WithTimeout to lift the cap just for that call.
+func defaultHTTPTimeout() time.Duration {
+	if v := os.Getenv("CREWSHIP_HTTP_TIMEOUT"); v != "" {
+		if secs, err := strconv.Atoi(v); err == nil && secs > 0 {
+			return time.Duration(secs) * time.Second
+		}
+	}
+	return 30 * time.Second
+}
+
 // NewClient creates a CLI client targeting the given server URL with
 // optional JWT token and workspace ID.
 func NewClient(baseURL, token, workspaceID string) *Client {
@@ -48,9 +63,26 @@ func NewClient(baseURL, token, workspaceID string) *Client {
 		WorkspaceID: workspaceID,
 		ctx:         context.Background(),
 		HTTPClient: &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout: defaultHTTPTimeout(),
 		},
 	}
+}
+
+// WithTimeout returns a shallow copy of the client whose HTTP client uses the
+// given overall request timeout instead of the default. Use it for endpoints
+// that legitimately run long: a synchronous routine /run blocks until the agent
+// (and any grader loop) finishes, which routinely exceeds the 30s default and
+// would otherwise fail with "context deadline exceeded" even though the
+// server-side run completes. A non-positive d leaves the default in place.
+func (c *Client) WithTimeout(d time.Duration) *Client {
+	if d <= 0 {
+		return c
+	}
+	clone := *c
+	hc := *c.HTTPClient
+	hc.Timeout = d
+	clone.HTTPClient = &hc
+	return &clone
 }
 
 // WithContext returns a shallow copy of the client whose outgoing requests
