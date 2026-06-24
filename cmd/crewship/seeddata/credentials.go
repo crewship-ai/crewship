@@ -49,6 +49,28 @@ func ResolveAnthropicCredential() CredentialDef {
 	}
 }
 
+// ResolveGitHubCredential returns the GitHub credential if SEED_GITHUB_TOKEN
+// is set, else nil. Type CLI_TOKEN (NOT API_KEY): CLI_TOKEN credentials are
+// mounted into the agent container as a 0400 file at /secrets/agent/{ENVVAR}
+// plus an env var pointing the in-container `gh` CLI at it — whereas API_KEY
+// goes through the Keeper sidecar proxy and never lands on disk. EnvVarName
+// GH_TOKEN is what the GitHub CLI reads for auth, so a seeded token makes
+// `gh` work inside the crew container with zero extra setup.
+func ResolveGitHubCredential() *CredentialDef {
+	token := os.Getenv("SEED_GITHUB_TOKEN")
+	if token == "" {
+		return nil
+	}
+	return &CredentialDef{
+		Name:        "GH_TOKEN",
+		Description: "GitHub token for the in-container gh CLI (engineering + quality)",
+		Type:        "CLI_TOKEN",
+		Provider:    "GITHUB",
+		EnvVarName:  "GH_TOKEN",
+		Value:       token,
+	}
+}
+
 // ResolveGoogleCredential returns the Google credential if env vars are set.
 // Returns nil if SEED_GOOGLE_EMAIL and SEED_GOOGLE_PASSWORD are not both set.
 func ResolveGoogleCredential() *CredentialDef {

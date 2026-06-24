@@ -1,6 +1,6 @@
 issues:
     - crew_slug: engineering
-      assignee: martin
+      assignee: sam
       title: Ping google.com 5 times and save results
       description: |-
         Run ping -c 5 google.com inside the container.
@@ -9,7 +9,7 @@ issues:
       priority: high
       project: Network Probes
     - crew_slug: engineering
-      assignee: martin
+      assignee: sam
       title: Check HTTP status of 5 popular websites
       description: |-
         Use curl to check the HTTP status code of these URLs:
@@ -22,8 +22,8 @@ issues:
         Save results as a CSV file: /tmp/http-status.csv with columns: url,status_code,response_time_ms
       priority: medium
       project: Network Probes
-    - crew_slug: devops
-      assignee: radek
+    - crew_slug: ops
+      assignee: riley
       title: Trace DNS resolution for 3 domains
       description: |-
         Resolve these domains and save the results:
@@ -35,8 +35,8 @@ issues:
         Save output to /tmp/dns-results.txt with format: domain -> ip1, ip2, ...
       priority: medium
       project: Network Probes
-    - crew_slug: devops
-      assignee: radek
+    - crew_slug: ops
+      assignee: riley
       title: Measure download speed with a 1MB test file
       description: |-
         Download a 1MB test file from https://httpbin.org/bytes/1048576 using curl.
@@ -46,7 +46,7 @@ issues:
       priority: low
       project: Network Probes
     - crew_slug: engineering
-      assignee: viktor
+      assignee: sam
       title: Create a directory tree with sample files
       description: |-
         Create the following directory structure under /tmp/demo-project/:
@@ -64,7 +64,7 @@ issues:
       priority: high
       project: File Operations
     - crew_slug: engineering
-      assignee: nela
+      assignee: robin
       title: Generate a CSV report with random data
       description: |-
         Create a Python script that generates a CSV file with 50 rows of sample data.
@@ -75,7 +75,7 @@ issues:
       priority: medium
       project: File Operations
     - crew_slug: quality
-      assignee: petra
+      assignee: casey
       title: Write a log parser that extracts errors
       description: |-
         Create a bash script /tmp/log-parser.sh that:
@@ -87,8 +87,8 @@ issues:
         Run the script and verify the output.
       priority: medium
       project: File Operations
-    - crew_slug: research
-      assignee: filip
+    - crew_slug: ops
+      assignee: riley
       title: Fetch and parse the Hacker News front page
       description: |-
         Use curl to download https://news.ycombinator.com/ (HTML).
@@ -101,8 +101,8 @@ issues:
         Note: Use grep/sed/awk for parsing, no external libraries needed.
       priority: high
       project: Web Scraping
-    - crew_slug: research
-      assignee: filip
+    - crew_slug: ops
+      assignee: riley
       title: Fetch current weather data from wttr.in
       description: |-
         Use curl to fetch weather for Prague from wttr.in:
@@ -117,8 +117,8 @@ issues:
         Save a human-readable summary to /tmp/weather-prague.txt
       priority: medium
       project: Web Scraping
-    - crew_slug: research
-      assignee: lucie
+    - crew_slug: ops
+      assignee: morgan
       title: Download and analyze a public JSON API
       description: |-
         Fetch a list of users from https://jsonplaceholder.typicode.com/users
@@ -131,7 +131,7 @@ issues:
       priority: low
       project: Web Scraping
     - crew_slug: engineering
-      assignee: viktor
+      assignee: sam
       title: Write a Python script that generates Fibonacci
       description: |-
         Create /tmp/fibonacci.py that:
@@ -143,7 +143,7 @@ issues:
       priority: high
       project: Script Factory
     - crew_slug: engineering
-      assignee: nela
+      assignee: robin
       title: Create a bash system info collector
       description: |-
         Write /tmp/sysinfo.sh that collects and saves to /tmp/sysinfo.txt:
@@ -159,7 +159,7 @@ issues:
       priority: medium
       project: Script Factory
     - crew_slug: quality
-      assignee: daniel
+      assignee: casey
       title: Write and run a simple test suite in bash
       description: |-
         Create /tmp/test-suite.sh — a minimal test framework in bash.
@@ -174,8 +174,8 @@ issues:
         Run the test suite and save results to /tmp/test-results.txt
       priority: medium
       project: Script Factory
-    - crew_slug: devops
-      assignee: ondrej
+    - crew_slug: ops
+      assignee: morgan
       title: Inventory all installed tools in the container
       description: |-
         Check which common tools are available in the container:
@@ -188,8 +188,8 @@ issues:
         This helps us know what agents can use.
       priority: low
       project: System Info
-    - crew_slug: devops
-      assignee: jakub
+    - crew_slug: ops
+      assignee: casey
       title: Map container resource limits and environment
       description: |-
         Collect container environment info and save to /tmp/container-info.txt:

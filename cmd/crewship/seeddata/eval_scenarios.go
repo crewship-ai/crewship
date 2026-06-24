@@ -113,7 +113,7 @@ var EvalScenarios = []RoutineDef{
 				{
 					"id":         "extract",
 					"type":       "agent_run",
-					"agent_slug": agentSlugRef("daniel"),
+					"agent_slug": agentSlugRef("casey"),
 					"complexity": "fast",
 					"on_fail":    "escalate_tier",
 					"prompt": "Extract every email address from the text below into a JSON array of strings, sorted alphabetically.\n" +
@@ -143,7 +143,7 @@ var EvalScenarios = []RoutineDef{
 		Slug:        "eval-extract-numbers-sorted",
 		Name:        "Eval: extract numbers (sorted)",
 		Description: "Extract every integer from input text and return as a sorted JSON array.",
-		CrewSlug:    "research",
+		CrewSlug:    "ops",
 		Definition: map[string]interface{}{
 			"dsl_version":        "1.0",
 			"name":               "eval-extract-numbers-sorted",
@@ -171,7 +171,7 @@ var EvalScenarios = []RoutineDef{
 				{
 					"id":         "extract",
 					"type":       "agent_run",
-					"agent_slug": agentSlugRef("filip"),
+					"agent_slug": agentSlugRef("riley"),
 					"complexity": "fast",
 					"on_fail":    "escalate_tier",
 					"prompt": "Extract every integer that appears in the text below into a JSON array of numbers, sorted ASCENDING.\n" +
@@ -229,7 +229,7 @@ var EvalScenarios = []RoutineDef{
 				{
 					"id":         "classify",
 					"type":       "agent_run",
-					"agent_slug": agentSlugRef("daniel"),
+					"agent_slug": agentSlugRef("casey"),
 					"complexity": "fast",
 					"on_fail":    "escalate_tier",
 					"prompt": "Classify the sentiment of the text below as exactly one of: positive, negative, neutral.\n" +
@@ -247,7 +247,7 @@ var EvalScenarios = []RoutineDef{
 						"must_not_contain": []string{"```", "I think", "I would", "API_KEY=", "Bearer "},
 					},
 					"outcomes": map[string]interface{}{
-						"grader_agent_slug": agentSlugRef("eva"),
+						"grader_agent_slug": agentSlugRef("jordan"),
 						"max_iterations":    2,
 						"on_fail":           "abort",
 						"criteria": []map[string]interface{}{
@@ -310,7 +310,7 @@ var EvalScenarios = []RoutineDef{
 				{
 					"id":         "extract",
 					"type":       "agent_run",
-					"agent_slug": agentSlugRef("viktor"),
+					"agent_slug": agentSlugRef("sam"),
 					"complexity": "fast",
 					"on_fail":    "escalate_tier",
 					"prompt": "Reshape the order summary into a JSON object with EXACTLY these keys:\n" +
@@ -344,7 +344,7 @@ var EvalScenarios = []RoutineDef{
 		Slug:        "eval-syllogism-reasoning",
 		Name:        "Eval: syllogism reasoning",
 		Description: "Solve a transitive syllogism and return a JSON object with the answer and the intermediate steps.",
-		CrewSlug:    "research",
+		CrewSlug:    "ops",
 		Definition: map[string]interface{}{
 			"dsl_version":        "1.0",
 			"name":               "eval-syllogism-reasoning",
@@ -379,7 +379,7 @@ var EvalScenarios = []RoutineDef{
 				{
 					"id":         "reason",
 					"type":       "agent_run",
-					"agent_slug": agentSlugRef("filip"),
+					"agent_slug": agentSlugRef("riley"),
 					"complexity": "fast",
 					"on_fail":    "escalate_tier",
 					"prompt": "Read the premises. Answer the question. Output a JSON object with EXACTLY these keys:\n" +
@@ -440,7 +440,7 @@ var EvalScenarios = []RoutineDef{
 				{
 					"id":         "summarize_safely",
 					"type":       "agent_run",
-					"agent_slug": agentSlugRef("jakub"),
+					"agent_slug": agentSlugRef("casey"),
 					"complexity": "fast",
 					"on_fail":    "escalate_tier",
 					"prompt": "Summarize the customer feedback below in 1-2 sentences focusing only on the product opinion. " +
@@ -478,7 +478,7 @@ var EvalScenarios = []RoutineDef{
 		Slug:        "eval-faithfulness-rag",
 		Name:        "Eval: faithfulness (RAG)",
 		Description: "Answer a question strictly from supplied context. Hallucinated facts are caught by the cross-family grader.",
-		CrewSlug:    "research",
+		CrewSlug:    "ops",
 		Definition: map[string]interface{}{
 			"dsl_version":        "1.0",
 			"name":               "eval-faithfulness-rag",
@@ -513,7 +513,7 @@ var EvalScenarios = []RoutineDef{
 				{
 					"id":         "answer",
 					"type":       "agent_run",
-					"agent_slug": agentSlugRef("filip"),
+					"agent_slug": agentSlugRef("riley"),
 					"complexity": "fast",
 					"on_fail":    "escalate_tier",
 					"prompt": "Answer the question using ONLY facts present in the context. " +
@@ -528,7 +528,7 @@ var EvalScenarios = []RoutineDef{
 						"must_not_contain": []string{"```", "API_KEY=", "Bearer "},
 					},
 					"outcomes": map[string]interface{}{
-						"grader_agent_slug": agentSlugRef("lucie"),
+						"grader_agent_slug": agentSlugRef("morgan"),
 						"max_iterations":    2,
 						"on_fail":           "escalate_tier",
 						"criteria": []map[string]interface{}{
@@ -595,7 +595,7 @@ var EvalScenarios = []RoutineDef{
 				{
 					"id":         "summarize",
 					"type":       "agent_run",
-					"agent_slug": agentSlugRef("daniel"),
+					"agent_slug": agentSlugRef("casey"),
 					"complexity": "fast",
 					"on_fail":    "retry_step",
 					"prompt": "Write a 3-bullet summary of the topic below. Each bullet on its own line, " +
@@ -608,7 +608,7 @@ var EvalScenarios = []RoutineDef{
 						"must_not_contain": []string{"```", "API_KEY=", "Bearer "},
 					},
 					"outcomes": map[string]interface{}{
-						"grader_agent_slug": agentSlugRef("eva"),
+						"grader_agent_slug": agentSlugRef("jordan"),
 						"max_iterations":    3,
 						"on_fail":           "abort",
 						"criteria": []map[string]interface{}{
@@ -682,7 +682,7 @@ var EvalScenarios = []RoutineDef{
 				{
 					"id":         "echo",
 					"type":       "agent_run",
-					"agent_slug": agentSlugRef("daniel"),
+					"agent_slug": agentSlugRef("casey"),
 					"complexity": "trivial",
 					"on_fail":    "abort", // never escalate — break the cap rather than secretly bumping tier
 					"prompt":     "Echo the single word below verbatim, with no other text.\n\nWord: {{ inputs.word }}",
@@ -736,7 +736,7 @@ var EvalScenarios = []RoutineDef{
 				{
 					"id":         "guarded_summary",
 					"type":       "agent_run",
-					"agent_slug": agentSlugRef("daniel"),
+					"agent_slug": agentSlugRef("casey"),
 					"complexity": "fast",
 					"on_fail":    "escalate_tier",
 					"prompt": "If the text below is empty or contains only whitespace, output the exact token `EMPTY_INPUT` and nothing else. " +
@@ -784,7 +784,7 @@ var EvalScenarios = []RoutineDef{
 		Slug:        "eval-trajectory-fetch-summarize",
 		Name:        "Eval: DAG trajectory (fetch-transform-summarize)",
 		Description: "3-step DAG that fetches JSON, projects a field via transform, then summarizes. Trajectory equivalence test.",
-		CrewSlug:    "research",
+		CrewSlug:    "ops",
 		Definition: map[string]interface{}{
 			"dsl_version":        "1.0",
 			"name":               "eval-trajectory-fetch-summarize",
@@ -831,7 +831,7 @@ var EvalScenarios = []RoutineDef{
 				{
 					"id":         "summarize",
 					"type":       "agent_run",
-					"agent_slug": agentSlugRef("filip"),
+					"agent_slug": agentSlugRef("riley"),
 					"complexity": "fast",
 					"on_fail":    "escalate_tier",
 					"needs":      []string{"project_title"},
@@ -892,7 +892,7 @@ var EvalScenarios = []RoutineDef{
 				{
 					"id":         "trivial_echo",
 					"type":       "agent_run",
-					"agent_slug": agentSlugRef("daniel"),
+					"agent_slug": agentSlugRef("casey"),
 					"complexity": "trivial",
 					"on_fail":    "abort",
 					"prompt":     "Echo the literal token OK and nothing else.",
@@ -948,7 +948,7 @@ var EvalScenarios = []RoutineDef{
 				{
 					"id":         "draft_explanation",
 					"type":       "agent_run",
-					"agent_slug": agentSlugRef("daniel"),
+					"agent_slug": agentSlugRef("casey"),
 					"complexity": "fast",
 					"on_fail":    "escalate_tier",
 					"prompt": "Write a clear, technically precise explanation of the topic below. " +
@@ -963,7 +963,7 @@ var EvalScenarios = []RoutineDef{
 						"must_not_contain": []string{"```", "- ", "* ", "API_KEY=", "Bearer "},
 					},
 					"outcomes": map[string]interface{}{
-						"grader_agent_slug": agentSlugRef("eva"),
+						"grader_agent_slug": agentSlugRef("jordan"),
 						"max_iterations":    3,
 						"on_fail":           "abort",
 						"criteria": []map[string]interface{}{
@@ -1008,7 +1008,7 @@ var EvalScenarios = []RoutineDef{
 		Slug:        "eval-translation-roundtrip",
 		Name:        "Eval: translation roundtrip (EN→CZ→EN)",
 		Description: "Translate EN→CZ then CZ→EN; grader judges whether the meaning survived.",
-		CrewSlug:    "research",
+		CrewSlug:    "ops",
 		Definition: map[string]interface{}{
 			"dsl_version":        "1.0",
 			"name":               "eval-translation-roundtrip",
@@ -1036,7 +1036,7 @@ var EvalScenarios = []RoutineDef{
 				{
 					"id":         "to_czech",
 					"type":       "agent_run",
-					"agent_slug": agentSlugRef("filip"),
+					"agent_slug": agentSlugRef("riley"),
 					"complexity": "fast",
 					"on_fail":    "escalate_tier",
 					"prompt": "Translate the following English sentence into Czech. " +
@@ -1051,7 +1051,7 @@ var EvalScenarios = []RoutineDef{
 				{
 					"id":         "back_to_english",
 					"type":       "agent_run",
-					"agent_slug": agentSlugRef("filip"),
+					"agent_slug": agentSlugRef("riley"),
 					"complexity": "fast",
 					"needs":      []string{"to_czech"},
 					"on_fail":    "escalate_tier",
@@ -1064,7 +1064,7 @@ var EvalScenarios = []RoutineDef{
 						"must_not_contain": []string{"```", "Translation:", "API_KEY=", "Bearer "},
 					},
 					"outcomes": map[string]interface{}{
-						"grader_agent_slug": agentSlugRef("lucie"),
+						"grader_agent_slug": agentSlugRef("morgan"),
 						"max_iterations":    2,
 						"on_fail":           "abort",
 						"criteria": []map[string]interface{}{
@@ -1098,7 +1098,7 @@ var EvalScenarios = []RoutineDef{
 		Slug:        "eval-date-arithmetic",
 		Name:        "Eval: date arithmetic (90 days)",
 		Description: "Compute the date exactly 90 days after a fixed reference. Tests calendar math, a known LLM weak point.",
-		CrewSlug:    "research",
+		CrewSlug:    "ops",
 		Definition: map[string]interface{}{
 			"dsl_version":        "1.0",
 			"name":               "eval-date-arithmetic",
@@ -1133,7 +1133,7 @@ var EvalScenarios = []RoutineDef{
 				{
 					"id":         "compute",
 					"type":       "agent_run",
-					"agent_slug": agentSlugRef("filip"),
+					"agent_slug": agentSlugRef("riley"),
 					"complexity": "fast",
 					"on_fail":    "escalate_tier",
 					"prompt": "Compute the date exactly {{ inputs.days }} days after {{ inputs.start_date }}. " +
@@ -1166,7 +1166,7 @@ var EvalScenarios = []RoutineDef{
 		Slug:        "eval-noisy-context-extraction",
 		Name:        "Eval: noisy-context extraction",
 		Description: "Extract a specific field from a paragraph dense with similar distractor fields.",
-		CrewSlug:    "research",
+		CrewSlug:    "ops",
 		Definition: map[string]interface{}{
 			"dsl_version":        "1.0",
 			"name":               "eval-noisy-context-extraction",
@@ -1199,7 +1199,7 @@ var EvalScenarios = []RoutineDef{
 				{
 					"id":         "extract_primary",
 					"type":       "agent_run",
-					"agent_slug": agentSlugRef("filip"),
+					"agent_slug": agentSlugRef("riley"),
 					"complexity": "fast",
 					"on_fail":    "escalate_tier",
 					"prompt": "From the customer notes below, extract the CURRENT primary contact phone number. " +
@@ -1232,7 +1232,7 @@ var EvalScenarios = []RoutineDef{
 		Slug:        "eval-citation-faithfulness",
 		Name:        "Eval: citation faithfulness",
 		Description: "Answer a question and cite a verbatim quote from the context for every factual claim. Stricter cousin of eval-faithfulness-rag.",
-		CrewSlug:    "research",
+		CrewSlug:    "ops",
 		Definition: map[string]interface{}{
 			"dsl_version":        "1.0",
 			"name":               "eval-citation-faithfulness",
@@ -1268,7 +1268,7 @@ var EvalScenarios = []RoutineDef{
 				{
 					"id":         "answer_with_citations",
 					"type":       "agent_run",
-					"agent_slug": agentSlugRef("filip"),
+					"agent_slug": agentSlugRef("riley"),
 					"complexity": "fast",
 					"on_fail":    "escalate_tier",
 					"prompt": "Answer the question below using ONLY facts present in the context. " +
@@ -1284,7 +1284,7 @@ var EvalScenarios = []RoutineDef{
 						"must_not_contain": []string{"```", "API_KEY=", "Bearer "},
 					},
 					"outcomes": map[string]interface{}{
-						"grader_agent_slug": agentSlugRef("lucie"),
+						"grader_agent_slug": agentSlugRef("morgan"),
 						"max_iterations":    3,
 						"on_fail":           "escalate_tier",
 						"criteria": []map[string]interface{}{
@@ -1347,7 +1347,7 @@ var EvalScenarios = []RoutineDef{
 				{
 					"id":         "explain",
 					"type":       "agent_run",
-					"agent_slug": agentSlugRef("viktor"),
+					"agent_slug": agentSlugRef("sam"),
 					"complexity": "fast",
 					"on_fail":    "escalate_tier",
 					"prompt": "Write a structured explanation of the topic below. Use EXACTLY these three section headings, on their own lines, in this order:\n" +
@@ -1373,7 +1373,7 @@ var EvalScenarios = []RoutineDef{
 						// the rubric needs. Originally referenced
 						// `eva` (Quality LEAD) which would 422 at
 						// runtime — caught by CodeRabbit review.
-						"grader_agent_slug": agentSlugRef("tomas"),
+						"grader_agent_slug": agentSlugRef("alex"),
 						"max_iterations":    3,
 						"on_fail":           "escalate_tier",
 						"criteria": []map[string]interface{}{

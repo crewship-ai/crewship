@@ -374,6 +374,39 @@ func seedCredentials(ctx context.Context, client *cli.Client, agentIDs map[strin
 		fmt.Fprintln(os.Stderr, "  Skipping Google credential (set SEED_GOOGLE_EMAIL + SEED_GOOGLE_PASSWORD)")
 	}
 
+	// GitHub credential (optional). Type CLI_TOKEN → mounted as a 0400 file
+	// at /secrets/agent/GH_TOKEN + env GH_TOKEN, which the in-container `gh`
+	// CLI reads directly. Same idempotent/surface-failure pattern as above.
+	githubCred := seeddata.ResolveGitHubCredential()
+	if githubCred != nil {
+		githubID, err := seedOneCredential(client, *githubCred)
+		if err != nil {
+			cli.PrintWarning("GitHub credential: " + err.Error())
+		} else {
+			githubAssigned := 0
+			for slug, agentID := range agentIDs {
+				resp, err := client.Post(
+					fmt.Sprintf("/api/v1/agents/%s/credentials", agentID),
+					map[string]string{"credential_id": githubID, "env_var_name": githubCred.EnvVarName},
+				)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "  ! Assign GitHub credential to agent %s: %v\n", slug, err)
+					continue
+				}
+				status := resp.StatusCode
+				resp.Body.Close()
+				if status >= 400 && status != http.StatusConflict {
+					fmt.Fprintf(os.Stderr, "  ! Assign GitHub credential to agent %s: HTTP %d\n", slug, status)
+					continue
+				}
+				githubAssigned++
+			}
+			fmt.Fprintf(os.Stderr, "  + Assigned %s to %d/%d agents\n", githubCred.Name, githubAssigned, len(agentIDs))
+		}
+	} else {
+		fmt.Fprintln(os.Stderr, "  Skipping GitHub credential (set SEED_GITHUB_TOKEN)")
+	}
+
 	return nil
 }
 

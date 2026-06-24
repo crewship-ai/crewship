@@ -4,10 +4,10 @@ integrations:
       transport: streamable-http
       endpoint: https://mcp.linear.app/mcp
       crew_slug: engineering
-    - name: google-workspace
-      display_name: Google Workspace
+    - name: github
+      display_name: GitHub
       transport: stdio
       command: npx
-      args_json: '["-y", "@anthropic-ai/google-workspace-mcp"]'
-      env_json: '{"GOOGLE_ACCESS_TOKEN": ""}'
+      args_json: '["-y", "@modelcontextprotocol/server-github"]'
+      env_json: '{"GITHUB_PERSONAL_ACCESS_TOKEN": ""}'
       crew_slug: engineering

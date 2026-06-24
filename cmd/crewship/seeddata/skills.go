@@ -65,20 +65,14 @@ func mustLoadSkills() []SkillDef {
 // Go map (not YAML) because it's a relationship, not a catalogue — the
 // data is most useful when right next to the agent fixture review.
 var SkillAssignments = map[string][]string{
-	// Engineering — network probes, file ops, scripting
-	"tomas":  {"network-probe", "script-runner", "file-crafter"},
-	"viktor": {"script-runner", "file-crafter"},
-	"nela":   {"file-crafter", "web-scraper"},
-	"martin": {"network-probe", "system-inspector"},
-	// Quality — testing, log parsing, validation
-	"eva":    {"script-runner", "file-crafter"},
-	"daniel": {"script-runner"},
-	"petra":  {"file-crafter", "script-runner"},
-	"jakub":  {"system-inspector"},
-	// DevOps — network, system inspection
-	"ondrej": {"network-probe", "system-inspector"},
-	"radek":  {"network-probe", "system-inspector"},
-	// Research — web scraping, data analysis
-	"lucie": {"web-scraper", "script-runner"},
-	"filip": {"web-scraper", "script-runner"},
+	// Engineering — scripting, file ops, inspection
+	"alex":  {"network-probe", "script-runner", "file-crafter"},
+	"sam":   {"script-runner", "file-crafter", "system-inspector"},
+	"robin": {"file-crafter", "web-scraper"},
+	// Quality — testing, validation, review
+	"jordan": {"script-runner", "file-crafter"},
+	"casey":  {"system-inspector", "script-runner", "file-crafter"},
+	// Ops — network, system inspection, automation
+	"morgan": {"network-probe", "system-inspector"},
+	"riley":  {"web-scraper", "script-runner", "network-probe"},
 }

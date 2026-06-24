@@ -34,9 +34,25 @@ type demoSchedule struct {
 
 var demoSchedules = []demoSchedule{
 	{
-		Name:       "Demo: extract emails (every 10m)",
-		TargetSlug: "eval-extract-emails",
-		CronExpr:   "*/10 * * * *",
+		// Light, recurring activity on the rail — a deterministic recipe.
+		Name:       "Demo: classify ticket (every 30m)",
+		TargetSlug: "classify-ticket",
+		CronExpr:   "*/30 * * * *",
+		Enabled:    true,
+	},
+	{
+		// Daily generative digest — the canonical scheduled-summary use case.
+		Name:       "Demo: daily status digest (09:00)",
+		TargetSlug: "daily-status-digest",
+		CronExpr:   "0 9 * * *",
+		Enabled:    true,
+	},
+	{
+		// Consistency harness — fans out across the core deterministic
+		// recipes every 6h so cross-tier drift shows up on the rail.
+		Name:       "Demo: consistency sweep (every 6h)",
+		TargetSlug: "consistency-sweep",
+		CronExpr:   "0 */6 * * *",
 		Enabled:    true,
 	},
 }
