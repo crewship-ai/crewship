@@ -122,18 +122,20 @@ func TestCov2PCImport_SlugFallbackAndMetadata(t *testing.T) {
 	}
 }
 
-func TestCov2PCImport_SlugConflict409(t *testing.T) {
+func TestCov2PCImport_ResurrectsSoftDeleted(t *testing.T) {
 	h, db, userID, wsID, crewID := cov2PCRig(t)
-	// A soft-deleted pipeline keeps its UNIQUE(workspace_id, slug) row but
-	// is invisible to the upsert lookup → the INSERT trips the constraint.
+	// A soft-deleted pipeline keeps its UNIQUE(workspace_id, slug) row; the
+	// upsert lookup now finds it and resurrects via the UPDATE path rather
+	// than tripping the constraint — so re-importing a previously-deleted
+	// slug succeeds (this is what makes `seed --nuke` re-imports work).
 	covPCInsertPipeline(t, db, wsID, "p-exists", "takenpipe", crewID, 0, 1, 0)
 	if _, err := db.Exec(`UPDATE pipelines SET deleted_at = datetime('now') WHERE id = 'p-exists'`); err != nil {
 		t.Fatalf("soft delete: %v", err)
 	}
 	rr := httptest.NewRecorder()
 	h.ImportPipeline(rr, cov2PCImportReq(userID, wsID, cov2PCImportBody("takenpipe", "takenpipe", "")))
-	if rr.Code != http.StatusConflict {
-		t.Fatalf("status = %d, want 409, body=%s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201 (resurrected), body=%s", rr.Code, rr.Body.String())
 	}
 }
 
@@ -224,10 +226,11 @@ func TestCov2PCSave_CycleDetected422(t *testing.T) {
 	}
 }
 
-func TestCov2PCSave_SlugConflict409(t *testing.T) {
+func TestCov2PCSave_ResurrectsSoftDeleted(t *testing.T) {
 	h, db, userID, wsID, crewID := cov2PCRig(t)
-	// Soft-deleted row: invisible to the upsert lookup, still holds the
-	// UNIQUE(workspace_id, slug) slot → INSERT → ErrSlugConflict.
+	// Soft-deleted row still holds the UNIQUE(workspace_id, slug) slot; the
+	// upsert lookup finds it and resurrects via the UPDATE path, so saving a
+	// previously-deleted slug succeeds (idempotent re-seed contract).
 	covPCInsertPipeline(t, db, wsID, "p-c1", "clashslug", crewID, 0, 1, 0)
 	if _, err := db.Exec(`UPDATE pipelines SET deleted_at = datetime('now') WHERE id = 'p-c1'`); err != nil {
 		t.Fatalf("soft delete: %v", err)
@@ -236,8 +239,8 @@ func TestCov2PCSave_SlugConflict409(t *testing.T) {
 	req = withWorkspaceUser(req, userID, wsID, "OWNER")
 	rr := httptest.NewRecorder()
 	h.Save(rr, req)
-	if rr.Code != http.StatusConflict {
-		t.Fatalf("status = %d, want 409, body=%s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201 (resurrected), body=%s", rr.Code, rr.Body.String())
 	}
 }
 
@@ -315,7 +318,7 @@ func TestCov2PCInternalSave_TestGateFailed422(t *testing.T) {
 	}
 }
 
-func TestCov2PCInternalSave_SlugConflict409(t *testing.T) {
+func TestCov2PCInternalSave_ResurrectsSoftDeleted(t *testing.T) {
 	h, db, _, wsID, crewID := cov2PCRig(t)
 	covPCInsertPipeline(t, db, wsID, "p-ic", "ip5", crewID, 0, 1, 0)
 	if _, err := db.Exec(`UPDATE pipelines SET deleted_at = datetime('now') WHERE id = 'p-ic'`); err != nil {
@@ -323,8 +326,8 @@ func TestCov2PCInternalSave_SlugConflict409(t *testing.T) {
 	}
 	rr := httptest.NewRecorder()
 	h.InternalSave(rr, httptest.NewRequest("POST", "/x", strings.NewReader(cov2PCInternalBody(wsID, "ip5", true))))
-	if rr.Code != http.StatusConflict {
-		t.Fatalf("status = %d, want 409, body=%s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201 (resurrected), body=%s", rr.Code, rr.Body.String())
 	}
 }
 

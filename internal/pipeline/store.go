@@ -422,13 +422,24 @@ func (s *Store) scanOne(ctx context.Context, q string, args ...any) (*Pipeline, 
 // findIDBySlug returns just the id + created_at for a workspace+slug
 // pair. Cheap lookup used by the upsert path so we don't materialise
 // the whole row twice.
+//
+// It intentionally does NOT filter on `deleted_at IS NULL`: the
+// (workspace_id, slug) UNIQUE index counts soft-deleted rows, so a
+// tombstone keeps the slug occupied at the index level. If the lookup
+// skipped tombstones, the upsert would fall through to INSERT and trip
+// the constraint with ErrSlugConflict — which made a slug un-recreatable
+// after deletion and broke `seed --nuke` re-seeds (nuke soft-deletes
+// every routine, so the next seed 409'd on every slug). Finding the
+// tombstone routes Save down the UPDATE path instead, which clears
+// deleted_at (resurrect) and appends a fresh version — making save an
+// idempotent upsert-by-slug.
 func (s *Store) findIDBySlug(ctx context.Context, workspaceID, slug string) (string, time.Time, error) {
 	var (
 		id        string
 		createdAt string
 	)
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, created_at FROM pipelines WHERE workspace_id = ? AND slug = ? AND deleted_at IS NULL`,
+		`SELECT id, created_at FROM pipelines WHERE workspace_id = ? AND slug = ?`,
 		workspaceID, slug,
 	).Scan(&id, &createdAt)
 	if errors.Is(err, sql.ErrNoRows) {
