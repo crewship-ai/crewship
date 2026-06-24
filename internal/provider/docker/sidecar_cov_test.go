@@ -45,6 +45,11 @@ func newCovProvider(t *testing.T, cfg Config, handler http.HandlerFunc) *Provide
 		cfg:            cfg,
 		logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
 		digestResolver: dockerutil.NewDigestResolver(time.Hour, 2*time.Second),
+		// Default the test provider to host-local-daemon semantics so volume
+		// self-heal tests run their intended path regardless of the test
+		// host's OS. The VM-runtime case is covered by an explicit test that
+		// flips this to false.
+		checkVolumeMountpoint: true,
 	}
 	t.Cleanup(func() {
 		_ = cli.Close()
@@ -75,6 +80,11 @@ func newCovProviderTCP(t *testing.T, cfg Config, handler http.HandlerFunc) *Prov
 		cfg:            cfg,
 		logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
 		digestResolver: dockerutil.NewDigestResolver(time.Hour, 2*time.Second),
+		// Default the test provider to host-local-daemon semantics so volume
+		// self-heal tests run their intended path regardless of the test
+		// host's OS. The VM-runtime case is covered by an explicit test that
+		// flips this to false.
+		checkVolumeMountpoint: true,
 	}
 	t.Cleanup(func() {
 		_ = cli.Close()

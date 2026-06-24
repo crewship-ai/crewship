@@ -76,6 +76,18 @@ type Provider struct {
 	// `Conflict: container name already in use`. Different crews still
 	// run in parallel.
 	crewLocks sync.Map // crew_id (string) → *sync.Mutex
+
+	// checkVolumeMountpoint gates the host-side volume self-heal in
+	// ensureVolume. The check os.Stat's the daemon-reported Mountpoint
+	// (/var/lib/docker/volumes/<name>/_data), which is only reachable from
+	// this process when the daemon shares the host filesystem (native Linux
+	// daemon). On a VM-backed runtime (Docker Desktop / Colima / OrbStack on
+	// macOS or Windows) that path never exists on the host, so the check
+	// would false-positive on EVERY volume and destructively recreate it —
+	// which recreates the crew container and trips the entrypoint perms bug.
+	// Set by daemonSharesHostFS (daemon-locality probe) in New(); tests set it
+	// explicitly.
+	checkVolumeMountpoint bool
 }
 
 // lockForCrew returns the mutex for a given crew, creating it on first
@@ -239,6 +251,12 @@ func New(ctx context.Context, cfg Config, logger *slog.Logger) (*Provider, error
 		logger:         logger,
 		detected:       *detected,
 		digestResolver: dockerutil.NewDigestResolver(0, 0), // package defaults
+		// The host-side volume self-heal only makes sense when the daemon
+		// shares this process's filesystem. Detect that by probing the
+		// daemon's reported storage root rather than guessing from GOOS —
+		// Docker Desktop on Linux is VM-backed too, so a host-OS check would
+		// false-positive there.
+		checkVolumeMountpoint: daemonSharesHostFS(ctx, cli),
 	}
 
 	logger.Info("container runtime detected",
@@ -413,6 +431,25 @@ func (p *Provider) buildMounts(slug, workspacePath, outputPath, crewPath, secret
 	return mounts, nil
 }
 
+// daemonSharesHostFS reports whether the Docker daemon's storage lives on THIS
+// process's filesystem (a native daemon) rather than inside a VM or on a remote
+// host. Only then can ensureVolume's self-heal meaningfully os.Stat a volume's
+// reported Mountpoint. Detected by probing the daemon's own DockerRootDir:
+// reachable (exists, or EACCES = exists-but-root-owned) ⇒ local; ENOENT or an
+// Info() failure ⇒ VM-backed/remote, where we must trust VolumeInspect instead.
+// This is more reliable than a GOOS check (Docker Desktop on Linux is VM-backed
+// too).
+func daemonSharesHostFS(ctx context.Context, cli *client.Client) bool {
+	info, err := cli.Info(ctx)
+	if err != nil || info.DockerRootDir == "" {
+		return false
+	}
+	if _, statErr := os.Stat(info.DockerRootDir); statErr == nil || !os.IsNotExist(statErr) {
+		return true
+	}
+	return false
+}
+
 // ensureVolume creates a Docker named volume if it doesn't already
 // exist. If Docker's metadata claims the volume exists but its on-disk
 // Mountpoint is missing (e.g. operator wiped /var/lib/docker/volumes/X
@@ -436,6 +473,13 @@ func (p *Provider) ensureVolume(ctx context.Context, name string) error {
 		// fine, Docker itself can still mount it, so we treat it as
 		// healthy. Only ENOENT means the backing _data is genuinely
 		// gone and we need to rebuild.
+		// On a VM-backed daemon (macOS/Windows; always when not host-local) the
+		// daemon-reported Mountpoint is not reachable from this process, so the
+		// host-side self-heal can't run — trust the daemon's "exists" and skip
+		// it. Without this, every provision would false-positive and recreate.
+		if !p.checkVolumeMountpoint {
+			return nil
+		}
 		if existing.Mountpoint != "" {
 			if _, statErr := os.Stat(existing.Mountpoint); statErr == nil {
 				return nil
