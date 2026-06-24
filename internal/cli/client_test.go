@@ -99,8 +99,15 @@ func TestClientTokenHostBinding(t *testing.T) {
 	})
 
 	t.Run("mismatched host refuses without sending", func(t *testing.T) {
-		var gotAuth string
-		srv := newServer(&gotAuth)
+		// Count hits, not just the observed header: gotAuth=="" alone would
+		// also pass if the client made an unauthenticated network call. The
+		// guarantee is "refused before the network", so the server must see
+		// zero requests.
+		var hits int
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			hits++
+			w.WriteHeader(200)
+		}))
 		defer srv.Close()
 		c := NewClient(srv.URL, "secret", "")
 		c.TokenHost = "real-server.example.com"
@@ -115,8 +122,8 @@ func TestClientTokenHostBinding(t *testing.T) {
 		if !errors.As(err, &mm) {
 			t.Fatalf("error = %v, want *ServerMismatchError", err)
 		}
-		if gotAuth != "" {
-			t.Errorf("token leaked to mismatched host: %q", gotAuth)
+		if hits != 0 {
+			t.Errorf("request reached the server despite host mismatch (hits=%d)", hits)
 		}
 	})
 

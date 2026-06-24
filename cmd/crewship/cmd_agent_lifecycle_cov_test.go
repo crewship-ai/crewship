@@ -292,6 +292,27 @@ func TestAgentUpdateRunE_SelfLearningRequiresReason(t *testing.T) {
 	}
 }
 
+// TestAgentUpdateRunE_SelfLearningCannotCombine verifies the guard against
+// half-applied updates: --self-learning (separate audited endpoint) can't be
+// mixed with generic field changes in one invocation, so neither HTTP call fires.
+func TestAgentUpdateRunE_SelfLearningCannotCombine(t *testing.T) {
+	stub := clitest.NewStubServer()
+	defer stub.Close()
+	covSetupCli6(t, stub)
+
+	covSetFlagCli6(t, agentUpdateCmd, "name", "Eva 3")
+	covSetFlagCli6(t, agentUpdateCmd, "self-learning", "true")
+	covSetFlagCli6(t, agentUpdateCmd, "learning-reason", "graduated")
+
+	err := agentUpdateCmd.RunE(agentUpdateCmd, []string{covAgentIDCli6})
+	if err == nil || !strings.Contains(err.Error(), "cannot be combined") {
+		t.Errorf("expected cannot-combine error, got %v", err)
+	}
+	if n := len(stub.Calls()); n != 0 {
+		t.Errorf("no HTTP call expected when the mix is rejected, got %d", n)
+	}
+}
+
 func TestAgentUpdateRunE_SystemPromptFromFile(t *testing.T) {
 	stub := clitest.NewStubServer()
 	defer stub.Close()

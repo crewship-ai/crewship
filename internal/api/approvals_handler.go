@@ -187,8 +187,16 @@ func (h *ApprovalsHandler) Cancel(w http.ResponseWriter, r *http.Request) {
 	if r.Body != nil {
 		// An empty body (io.EOF) is fine — reason is optional; only a
 		// present-but-malformed body is a 400.
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil && !errors.Is(err, io.EOF) {
+		dec := json.NewDecoder(r.Body)
+		if err := dec.Decode(&body); err != nil && !errors.Is(err, io.EOF) {
 			replyError(w, http.StatusBadRequest, "bad json")
+			return
+		}
+		// Decode consumes only the first JSON value, so a body like
+		// `{"reason":"x"}{"evil":1}` would otherwise slip through. Require the
+		// stream to end after the single (optional) payload.
+		if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+			replyError(w, http.StatusBadRequest, "unexpected data after JSON body")
 			return
 		}
 	}

@@ -210,6 +210,19 @@ var agentUpdateCmd = &cobra.Command{
 			return fmt.Errorf("no fields to update")
 		}
 
+		// The generic agent PATCH and the audited /learning PATCH are two
+		// separate endpoints with no cross-endpoint transaction, so applying
+		// both in one invocation risks a half-applied update (e.g. the name
+		// change commits, then the learning flip 403s) that leaves the agent
+		// in a partial state even though the command failed. Refuse the mix
+		// up front. Self-learning is a deliberate, ADMIN-only posture change —
+		// running it as its own invocation is the right granularity anyway.
+		if len(body) > 0 && learningChanged {
+			return fmt.Errorf("--self-learning cannot be combined with other field updates in one command " +
+				"(it goes through a separate audited endpoint and can't be applied atomically); " +
+				"run it on its own: crewship agent update <id> --self-learning[=false] --learning-reason \"...\"")
+		}
+
 		if len(body) > 0 {
 			resp, err := client.Patch("/api/v1/agents/"+agentID, body)
 			if err != nil {
