@@ -61,10 +61,30 @@ func TestBridgeServerFromPortCov(t *testing.T) {
 	t.Run("bridges port into server", func(t *testing.T) {
 		t.Setenv("CREWSHIP_SERVER", "")
 		covUnsetenv(t, "CREWSHIP_SERVER")
+		// Isolate from the operator's real CLI config so the no-config-server
+		// path is exercised deterministically.
+		t.Setenv("CREWSHIP_CONFIG", filepath.Join(t.TempDir(), "absent.yaml"))
 		t.Setenv("CREWSHIP_PORT", "8083")
 		bridgeServerFromPort()
 		if got := os.Getenv("CREWSHIP_SERVER"); got != "http://127.0.0.1:8083" {
 			t.Errorf("CREWSHIP_SERVER = %q, want http://127.0.0.1:8083", got)
+		}
+	})
+	t.Run("skips bridge when config has a server", func(t *testing.T) {
+		t.Setenv("CREWSHIP_SERVER", "")
+		covUnsetenv(t, "CREWSHIP_SERVER")
+		// A config file selecting a (remote) server must NOT be shadowed by the
+		// CREWSHIP_PORT convenience bridge — else a repo-dir .env.local PORT
+		// would silently retarget a remote --nuke to 127.0.0.1.
+		cfgPath := filepath.Join(t.TempDir(), "cli-config.yaml")
+		if err := os.WriteFile(cfgPath, []byte("server: https://remote.example.com\ntoken: t\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("CREWSHIP_CONFIG", cfgPath)
+		t.Setenv("CREWSHIP_PORT", "8083")
+		bridgeServerFromPort()
+		if got := os.Getenv("CREWSHIP_SERVER"); got != "" {
+			t.Errorf("CREWSHIP_SERVER = %q, want unset (config server wins)", got)
 		}
 	})
 }
@@ -94,7 +114,8 @@ func TestLoadDotEnvLocalCov_ParsesFileWithoutOverwriting(t *testing.T) {
 	t.Setenv("COVSEED_PRESET", "from-shell")
 	covUnsetenv(t, "CREWSHIP_SERVER")
 	covUnsetenv(t, "CREWSHIP_PORT")
-	t.Cleanup(func() { _ = os.Unsetenv("CREWSHIP_PORT") }) // set by the loader
+	t.Setenv("CREWSHIP_CONFIG", filepath.Join(dir, "absent.yaml")) // no config server → port bridge applies
+	t.Cleanup(func() { _ = os.Unsetenv("CREWSHIP_PORT") })         // set by the loader
 
 	loadDotEnvLocal()
 
@@ -117,8 +138,10 @@ func TestLoadDotEnvLocalCov_ParsesFileWithoutOverwriting(t *testing.T) {
 }
 
 func TestLoadDotEnvLocalCov_NoFileStillBridges(t *testing.T) {
-	t.Chdir(t.TempDir())
+	dir := t.TempDir()
+	t.Chdir(dir)
 	covUnsetenv(t, "CREWSHIP_SERVER")
+	t.Setenv("CREWSHIP_CONFIG", filepath.Join(dir, "absent.yaml")) // no config server → port bridge applies
 	t.Setenv("CREWSHIP_PORT", "9091")
 
 	loadDotEnvLocal()

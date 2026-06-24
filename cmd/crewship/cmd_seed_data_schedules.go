@@ -34,9 +34,25 @@ type demoSchedule struct {
 
 var demoSchedules = []demoSchedule{
 	{
-		Name:       "Demo: extract emails (every 10m)",
-		TargetSlug: "eval-extract-emails",
-		CronExpr:   "*/10 * * * *",
+		// Light, recurring activity on the rail — a deterministic recipe.
+		Name:       "Demo: classify ticket (every 30m)",
+		TargetSlug: "classify-ticket",
+		CronExpr:   "*/30 * * * *",
+		Enabled:    true,
+	},
+	{
+		// Daily generative digest — the canonical scheduled-summary use case.
+		Name:       "Demo: daily status digest (09:00)",
+		TargetSlug: "daily-status-digest",
+		CronExpr:   "0 9 * * *",
+		Enabled:    true,
+	},
+	{
+		// Consistency harness — fans out across the core deterministic
+		// recipes every 6h so cross-tier drift shows up on the rail.
+		Name:       "Demo: consistency sweep (every 6h)",
+		TargetSlug: "consistency-sweep",
+		CronExpr:   "0 */6 * * *",
 		Enabled:    true,
 	},
 }
@@ -52,10 +68,32 @@ func seedSchedules(ctx context.Context, client *cli.Client) error {
 	fmt.Fprintln(os.Stderr, "Creating demo schedules...")
 
 	endpoint := fmt.Sprintf("/api/v1/workspaces/%s/pipeline-schedules", wsID)
+
+	// Idempotency: the create endpoint does NOT 409 on a duplicate name, so a
+	// re-seed without --nuke would otherwise stack a second (third, …) copy of
+	// every demo schedule. Pre-fetch existing schedules and skip any whose name
+	// already exists. Keyed by name because that's what's stable across re-seeds
+	// (the target slug can repeat across demo schedules).
+	existingByName := map[string]bool{}
+	if r, err := client.Get(endpoint); err == nil {
+		var existing []struct {
+			Name string `json:"name"`
+		}
+		if cli.ReadJSON(r, &existing) == nil {
+			for _, e := range existing {
+				existingByName[e.Name] = true
+			}
+		}
+	}
+
 	created := 0
 	for _, s := range demoSchedules {
 		if err := ctx.Err(); err != nil {
 			return err
+		}
+		if existingByName[s.Name] {
+			fmt.Fprintf(os.Stderr, "  = Schedule exists: %s\n", s.Name)
+			continue
 		}
 		body := map[string]interface{}{
 			"name":                 s.Name,

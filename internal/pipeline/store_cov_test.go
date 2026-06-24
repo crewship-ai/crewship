@@ -77,26 +77,45 @@ func TestStore_Save_DefaultsViaAndDSLVersion(t *testing.T) {
 	}
 }
 
-// TestStore_Save_SlugConflictOnSoftDeletedRow exercises the UNIQUE
-// constraint → ErrSlugConflict mapping: a soft-deleted row keeps the
-// (workspace_id, slug) pair occupied at the index level while being
-// invisible to findIDBySlug, so the insert path trips the constraint.
-func TestStore_Save_SlugConflictOnSoftDeletedRow(t *testing.T) {
+// TestStore_Save_ResurrectsSoftDeletedRow pins the upsert-by-slug
+// contract: saving a slug whose row was soft-deleted RESURRECTS that
+// row (clears deleted_at, appends a version) instead of returning
+// ErrSlugConflict. The (workspace_id, slug) UNIQUE index still counts
+// the tombstone, so findIDBySlug locates it and Save routes down the
+// UPDATE path. This is what makes `seed --nuke` re-seeds work: nuke
+// soft-deletes every routine, and the next seed brings each one back
+// under the same slug + row id (history preserved).
+func TestStore_Save_ResurrectsSoftDeletedRow(t *testing.T) {
 	db := openStoreTestDB(t)
 	defer db.Close()
 	store := NewStore(db)
 	ctx := context.Background()
 
-	p, err := store.Save(ctx, validSaveInput("p-conflict"))
+	p, err := store.Save(ctx, validSaveInput("p-resurrect"))
 	if err != nil {
 		t.Fatalf("save: %v", err)
 	}
 	if err := store.SoftDelete(ctx, p.ID); err != nil {
 		t.Fatalf("soft delete: %v", err)
 	}
-	_, err = store.Save(ctx, validSaveInput("p-conflict"))
-	if !errors.Is(err, ErrSlugConflict) {
-		t.Errorf("expected ErrSlugConflict, got %v", err)
+	// While tombstoned the slug is invisible to the active view.
+	if _, err := store.GetBySlug(ctx, "ws_test", "p-resurrect"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound on tombstoned slug, got %v", err)
+	}
+	// Re-saving the same slug resurrects the original row.
+	p2, err := store.Save(ctx, validSaveInput("p-resurrect"))
+	if err != nil {
+		t.Fatalf("resurrect save should succeed, got %v", err)
+	}
+	if p2.ID != p.ID {
+		t.Errorf("resurrect must reuse the row: got id %q, want %q", p2.ID, p.ID)
+	}
+	got, err := store.GetBySlug(ctx, "ws_test", "p-resurrect")
+	if err != nil {
+		t.Fatalf("slug should be active again after resurrect: %v", err)
+	}
+	if got.ID != p.ID {
+		t.Errorf("active slug id mismatch after resurrect: %q vs %q", got.ID, p.ID)
 	}
 }
 

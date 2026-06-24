@@ -40,20 +40,30 @@ func TestSeedSchedules_Created(t *testing.T) {
 	if err != nil {
 		t.Fatalf("seedSchedules: %v", err)
 	}
-	if !strings.Contains(stderr, "+ Schedule: Demo: extract emails") {
+	if !strings.Contains(stderr, "+ Schedule: Demo: classify ticket") {
 		t.Errorf("created log missing: %q", stderr)
 	}
-	if !strings.Contains(stderr, "Created 1/1 demo schedule(s)") {
+	if !strings.Contains(stderr, "Created 3/3 demo schedule(s)") {
 		t.Errorf("summary line missing: %q", stderr)
 	}
 	calls := s.CallsFor("POST", covSchedulesPath)
-	if len(calls) != 1 {
+	if len(calls) != 3 {
 		t.Fatalf("calls = %d", len(calls))
 	}
-	body := string(calls[0].Body)
-	for _, want := range []string{`"target_pipeline_slug":"eval-extract-emails"`, `"cron_expr":"*/10 * * * *"`, `"enabled":true`} {
-		if !strings.Contains(body, want) {
-			t.Errorf("schedule body missing %s: %s", want, body)
+	// Assert all three seeded payloads (in demoSchedules order), not just
+	// calls[0] — otherwise the other two definitions could regress or
+	// duplicate silently while the test still passes.
+	wantPerCall := [][]string{
+		{`"target_pipeline_slug":"classify-ticket"`, `"cron_expr":"*/30 * * * *"`, `"enabled":true`},
+		{`"target_pipeline_slug":"daily-status-digest"`, `"cron_expr":"0 9 * * *"`, `"enabled":true`},
+		{`"target_pipeline_slug":"consistency-sweep"`, `"cron_expr":"0 */6 * * *"`, `"enabled":true`},
+	}
+	for i, wants := range wantPerCall {
+		body := string(calls[i].Body)
+		for _, want := range wants {
+			if !strings.Contains(body, want) {
+				t.Errorf("schedule[%d] body missing %s: %s", i, want, body)
+			}
 		}
 	}
 }
@@ -73,7 +83,7 @@ func TestSeedSchedules_TargetMissing404(t *testing.T) {
 	if !strings.Contains(stderr, "target pipeline not found — skipping") {
 		t.Errorf("404 skip log missing: %q", stderr)
 	}
-	if !strings.Contains(stderr, "Created 0/1") {
+	if !strings.Contains(stderr, "Created 0/3") {
 		t.Errorf("summary should show zero created: %q", stderr)
 	}
 }
@@ -106,10 +116,10 @@ func TestSeedSchedules_TransportErrorTolerated(t *testing.T) {
 	if err != nil {
 		t.Fatalf("transport failure must not abort the seed phase: %v", err)
 	}
-	if !strings.Contains(stderr, "! Schedule eval-extract-emails:") {
+	if !strings.Contains(stderr, "! Schedule classify-ticket:") {
 		t.Errorf("transport error log missing: %q", stderr)
 	}
-	if !strings.Contains(stderr, "Created 0/1") {
+	if !strings.Contains(stderr, "Created 0/3") {
 		t.Errorf("summary should report zero created: %q", stderr)
 	}
 }

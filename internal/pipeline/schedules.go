@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/robfig/cron/v3"
+
+	"github.com/crewship-ai/crewship/internal/inbox"
 )
 
 // Schedule is one cron trigger for a saved pipeline. Bound to a
@@ -415,6 +417,10 @@ func (s *PipelineScheduler) fireOne(ctx context.Context, sched *Schedule) {
 	if err != nil {
 		s.logger.Error("pipeline scheduler: load pipeline", "error", err, "schedule", sched.ID)
 		_ = s.store.recordRun(ctx, sched.ID, "", "FAILED", nextRun)
+		// This FAILED path (deleted/broken target routine) must alert too —
+		// it returns before the post-execution alert below, so without this
+		// a broken cron target fails silently forever.
+		s.alertFailedScheduledRun(ctx, sched, "", "", "", "the schedule's target routine could not be loaded (deleted or broken)")
 		return
 	}
 	var inputs map[string]any
@@ -446,6 +452,52 @@ func (s *PipelineScheduler) fireOne(ctx context.Context, sched *Schedule) {
 
 	if err := s.store.recordRun(ctx, sched.ID, runID, status, nextRun); err != nil {
 		s.logger.Warn("pipeline scheduler: record run", "error", err)
+	}
+
+	if status == "FAILED" {
+		errLine := "the run did not complete"
+		if runErr != nil {
+			errLine = truncateForPreview(runErr.Error())
+		}
+		s.alertFailedScheduledRun(ctx, sched, pipeline.ID, pipeline.Slug, runID, errLine)
+	}
+}
+
+// alertFailedScheduledRun surfaces a failed cron run as a MANAGER inbox item
+// so a broken cron doesn't fail silently — nobody is watching a scheduled run
+// live. Invoked for EVERY recordRun(..., "FAILED", ...) path, including the
+// early target-load failure where pipelineID/pipelineSlug are unknown.
+//
+// Dedup key (SourceID) is the run id, falling back to the schedule id when the
+// run never started, so INSERT OR IGNORE yields one item per failed run rather
+// than a flood. Ad-hoc runs never call this — the operator who triggered them
+// is already looking at the result.
+func (s *PipelineScheduler) alertFailedScheduledRun(ctx context.Context, sched *Schedule, pipelineID, pipelineSlug, runID, errLine string) {
+	sourceID := runID
+	if sourceID == "" {
+		sourceID = sched.ID
+	}
+	label := pipelineSlug
+	if label == "" {
+		label = "target routine"
+	}
+	if err := inbox.Insert(ctx, s.store.db, s.logger, inbox.Item{
+		WorkspaceID: sched.WorkspaceID,
+		Kind:        "failed_run",
+		SourceID:    sourceID,
+		TargetRole:  "MANAGER",
+		Title:       fmt.Sprintf("Scheduled routine failed: %s", label),
+		BodyMD:      fmt.Sprintf("Schedule **%s** fired `%s` and it failed — %s.", sched.Name, label, errLine),
+		SenderType:  "pipeline",
+		SenderName:  sched.Name,
+		Priority:    "high",
+		Payload: map[string]interface{}{
+			"schedule_id": sched.ID,
+			"pipeline_id": pipelineID,
+			"run_id":      runID,
+		},
+	}); err != nil {
+		s.logger.Warn("pipeline scheduler: inbox alert on failed run", "error", err, "schedule", sched.ID)
 	}
 }
 

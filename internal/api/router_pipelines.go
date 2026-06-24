@@ -61,6 +61,8 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipeline-schedules", authed(wsCtx(http.HandlerFunc(pipes.CreateSchedule))))
 	r.mux.Handle("PATCH /api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}", authed(wsCtx(http.HandlerFunc(pipes.UpdateSchedule))))
 	r.mux.Handle("DELETE /api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}", authed(wsCtx(http.HandlerFunc(pipes.DeleteSchedule))))
+	// Force-fire a schedule out of cycle (CLI: `routine schedules now`).
+	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}/run", authed(wsCtx(http.HandlerFunc(pipes.RunSchedule))))
 	// Run control — cancel + active list. The cancel API is the
 	// other half of concurrency control: a stuck run holds a slot
 	// until either it finishes or the operator pre-empts it.

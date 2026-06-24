@@ -17,6 +17,12 @@ import (
 //	.[index]       — array index by integer
 //	.field[index]  — combined
 //	.              — identity (returns Input as-is)
+//	@json          — canonical JSON: parse the (possibly fenced) input
+//	                 and re-serialise compact with alphabetically-sorted
+//	                 object keys. Makes an upstream agent's JSON output
+//	                 byte-stable across runs/tiers regardless of the
+//	                 model's whitespace and key-order choices — the
+//	                 building block for reproducible "recipe" routines.
 //	tostring       — coerce to string (default behaviour for
 //	                 primitive results; documented for clarity)
 //	length         — array/string/object length
@@ -46,7 +52,10 @@ func (e *Executor) runTransformStep(step Step, parentRender RenderContext) (stri
 	// through to the identity short-circuit for "tostring"/"length"
 	// on raw strings.
 	var v any
-	if err := DecodeAgentJSON(rawInput, &v); err != nil {
+	// UseNumber-decode so numeric tokens keep full precision through @json
+	// canonicalisation (and through path/tostring output) instead of being
+	// flattened to float64.
+	if err := DecodeAgentJSONNumber(rawInput, &v); err != nil {
 		switch expr {
 		case "length":
 			return fmt.Sprintf("%d", len(rawInput)), 0, time.Since(stepStart).Milliseconds(), nil
@@ -101,11 +110,21 @@ func evalTransform(v any, expr string) (string, error) {
 		return string(b), nil
 	case "tostring":
 		return stringify(v), nil
+	case "@json", "tojson":
+		// Canonical re-serialisation: encoding/json emits compact output
+		// and sorts map keys alphabetically, so two semantically-equal
+		// inputs that differ only in whitespace or key order collapse to
+		// the identical byte string. Array element order is preserved.
+		b, err := json.Marshal(v)
+		if err != nil {
+			return "", fmt.Errorf("@json: marshal: %w", err)
+		}
+		return string(b), nil
 	}
 
 	// Path expressions: ".a.b[0].c"
 	if !strings.HasPrefix(expr, ".") {
-		return "", fmt.Errorf("expression %q must start with '.' or be one of: length, keys, tostring", expr)
+		return "", fmt.Errorf("expression %q must start with '.' or be one of: length, keys, tostring, @json (alias tojson)", expr)
 	}
 	cursor := v
 	rest := expr[1:]
