@@ -162,6 +162,10 @@ func seedNuke(ctx context.Context, client *cli.Client) error {
 			failures = append(failures, fmt.Sprintf("list issues (offset=%d): %v", offset, err))
 			break
 		}
+		if err := cli.CheckError(resp); err != nil {
+			failures = append(failures, fmt.Sprintf("list issues (offset=%d): %v", offset, err))
+			break
+		}
 		var issues []issueItem
 		if err := cli.ReadJSON(resp, &issues); err != nil {
 			failures = append(failures, fmt.Sprintf("decode issues (offset=%d): %v", offset, err))
@@ -312,6 +316,12 @@ func nukeList(ctx context.Context, client *cli.Client, listPath, deletePrefix st
 	if err != nil {
 		return fmt.Errorf("GET %s: %w", listPath, err)
 	}
+	// Surface a non-2xx (e.g. 403 not-a-member) as a clear HTTP error instead
+	// of letting ReadJSON try to decode the error body into []item and report
+	// a confusing "cannot unmarshal object into []…".
+	if err := cli.CheckError(resp); err != nil {
+		return fmt.Errorf("GET %s: %w", listPath, err)
+	}
 	var items []struct {
 		ID string `json:"id"`
 	}
@@ -347,6 +357,9 @@ func nukeListBySlug(ctx context.Context, client *cli.Client, listPath, deletePre
 	}
 	resp, err := client.Get(listPath)
 	if err != nil {
+		return fmt.Errorf("GET %s: %w", listPath, err)
+	}
+	if err := cli.CheckError(resp); err != nil {
 		return fmt.Errorf("GET %s: %w", listPath, err)
 	}
 	var items []struct {
@@ -389,6 +402,9 @@ func nukeCrewIntegrations(ctx context.Context, client *cli.Client) error {
 	}
 	resp, err := client.Get("/api/v1/integrations/crews")
 	if err != nil {
+		return fmt.Errorf("GET /api/v1/integrations/crews: %w", err)
+	}
+	if err := cli.CheckError(resp); err != nil {
 		return fmt.Errorf("GET /api/v1/integrations/crews: %w", err)
 	}
 	var items []struct {
