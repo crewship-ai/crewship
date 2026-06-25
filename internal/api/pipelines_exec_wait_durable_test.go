@@ -45,6 +45,12 @@ func (b *blockingWaitpoints) WaitFor(ctx context.Context, _ string) (bool, error
 
 func (b *blockingWaitpoints) approve() { b.approved <- true }
 
+func (b *blockingWaitpoints) parked() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.created > 0
+}
+
 func seedWaitPipeline(t *testing.T, db *sql.DB, slug string) {
 	t.Helper()
 	now := time.Now().UTC().Format(time.RFC3339Nano)
@@ -61,7 +67,11 @@ VALUES (?, 'ws_smoke', ?, ?, ?, ?, 0, 1, 'crew_a', 'agent_lead', 'agent_tool_cal
 // A run parked on an approval gate must survive the originating request
 // being cancelled (the reverse proxy timing out the held-open request) and
 // resume to completion once the waitpoint is approved — not get marked
-// failed. Regression test for the manual-run-fails-at-wait bug.
+// failed. This is RED on main: there the handler runs exec.Run on
+// r.Context(), so cancelling the request cancels the parked WaitFor and the
+// run fails at the gate (handler returns 500). The WithoutCancel detach
+// makes it GREEN: the run ignores the request cancel and completes on
+// approval (200).
 func TestPipelineRun_WaitGate_DurableAcrossRequestCancel(t *testing.T) {
 	db := openSmokeDB(t)
 	defer db.Close()
@@ -71,8 +81,6 @@ func TestPipelineRun_WaitGate_DurableAcrossRequestCancel(t *testing.T) {
 	h.SetRunStore(pipeline.NewRunStore(db))
 	wp := newBlockingWaitpoints()
 	h.SetWaitpointStore(wp)
-	// Tiny budget so the handler hands back 202 without a real 50s wait.
-	h.SetRunResponseBudget(50 * time.Millisecond)
 
 	// Cancellable request context = the proxy connection that will time out.
 	ctx, cancel := context.WithCancel(context.Background())
@@ -81,41 +89,44 @@ func TestPipelineRun_WaitGate_DurableAcrossRequestCancel(t *testing.T) {
 	req.SetPathValue("slug", "waitdemo")
 	rr := httptest.NewRecorder()
 
-	h.Run(rr, req)
+	// The handler is synchronous and blocks at the gate, so drive it on a
+	// goroutine while the test orchestrates the cancel + approval.
+	handlerReturned := make(chan struct{})
+	go func() {
+		h.Run(rr, req)
+		close(handlerReturned)
+	}()
 
-	// Parked at the gate past the budget → 202 + run id (not 500/failed).
-	if rr.Code != http.StatusAccepted {
-		t.Fatalf("status = %d, want 202; body=%s", rr.Code, rr.Body.String())
-	}
-	var resp struct {
-		RunID  string `json:"run_id"`
-		Status string `json:"status"`
-	}
-	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode 202: %v", err)
-	}
-	if resp.RunID == "" {
-		t.Fatalf("202 response carried no run_id: %s", rr.Body.String())
+	// Wait until the run has parked on the approval waitpoint.
+	parkDeadline := time.Now().Add(3 * time.Second)
+	for !wp.parked() {
+		if time.Now().After(parkDeadline) {
+			t.Fatal("run never reached the approval gate")
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 
 	// The proxy drops the original request — the detached run must survive.
 	cancel()
-	// Approve the gate → the background run resumes.
+	// Give a buggy (request-context-coupled) implementation a beat to fail.
+	time.Sleep(50 * time.Millisecond)
+	// Approve the gate → the run resumes and the handler returns.
 	wp.approve()
 
-	rs := pipeline.NewRunStore(db)
-	deadline := time.Now().Add(3 * time.Second)
-	var final pipeline.RunStatus
-	for time.Now().Before(deadline) {
-		rec, err := rs.Get(context.Background(), resp.RunID)
-		if err == nil && rec != nil &&
-			(rec.Status == pipeline.RunStatusCompleted || rec.Status == pipeline.RunStatusFailed) {
-			final = rec.Status
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
+	select {
+	case <-handlerReturned:
+	case <-time.After(3 * time.Second):
+		t.Fatal("handler did not return after approval — run did not resume")
 	}
-	if final != pipeline.RunStatusCompleted {
-		t.Fatalf("run did not resume to completed after approval; final status = %q", final)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (run resumed); body=%s", rr.Code, rr.Body.String())
+	}
+	var res pipeline.RunResult
+	if err := json.Unmarshal(rr.Body.Bytes(), &res); err != nil {
+		t.Fatalf("decode RunResult: %v; body=%s", err, rr.Body.String())
+	}
+	if res.Status != "COMPLETED" {
+		t.Fatalf("run status = %q, want COMPLETED (resumed across request cancel)", res.Status)
 	}
 }

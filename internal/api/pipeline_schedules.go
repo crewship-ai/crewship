@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -583,7 +584,13 @@ func (h *PipelineHandler) RunSchedule(w http.ResponseWriter, r *http.Request) {
 	}
 
 	exec := h.newExecutor()
-	res, err := exec.Run(r.Context(), pipeline.RunInput{
+	// Detach from the request context for the same reason as the manual
+	// run path (see PipelineHandler.Run): a wait/approval step parks the
+	// run past the reverse proxy's per-request budget, and tying it to
+	// r.Context() would cancel + fail it at the gate. WithoutCancel keeps
+	// auth/workspace/trace values while shedding cancellation so a manually
+	// fired scheduled run with an approval gate still resumes.
+	res, err := exec.Run(context.WithoutCancel(r.Context()), pipeline.RunInput{
 		PipelineID:    p.ID,
 		WorkspaceID:   workspaceID,
 		Inputs:        inputs,

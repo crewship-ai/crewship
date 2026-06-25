@@ -38,19 +38,7 @@ type PipelineHandler struct {
 	// to the timestamp-based gate. Production wiring sets this to the
 	// process internal token at boot.
 	saveTokenSecret []byte
-
-	// runResponseBudget bounds how long Run holds the HTTP response open
-	// before it hands back a 202 + run id and lets the (already detached)
-	// run finish in the background. Keeps the synchronous-result contract
-	// for fast runs while letting a run parked on a wait/approval step
-	// survive past the reverse proxy's request timeout. Zero → default.
-	runResponseBudget time.Duration
 }
-
-// defaultRunResponseBudget sits comfortably under the reverse proxy's
-// per-request timeout so a parked run gets a clean 202 rather than the
-// proxy 502-ing the held-open request.
-const defaultRunResponseBudget = 50 * time.Second
 
 // NewPipelineHandler wires the pipeline subsystem against an
 // existing DB handle. AgentRunner and Emitter are accepted as
@@ -97,13 +85,6 @@ func (h *PipelineHandler) SetSaveTokenSecret(secret []byte) {
 // and list-runs falls back to the legacy scan path.
 func (h *PipelineHandler) SetRunStore(s *pipeline.RunStore) {
 	h.runStore = s
-}
-
-// SetRunResponseBudget overrides how long Run waits for a synchronous
-// result before returning 202. Tests set a tiny value to exercise the
-// parked-run path without a real 50s wait.
-func (h *PipelineHandler) SetRunResponseBudget(d time.Duration) {
-	h.runResponseBudget = d
 }
 
 // SetJournal wires a journal Emitter post-construction so journal

@@ -117,12 +117,6 @@ func mergeInputs(supplied map[string]any, dsl *DSL) map[string]any {
 	return out
 }
 
-// NewRunID mints a "run_" CUID, exported so an HTTP handler can
-// pre-allocate the id it will pass as RunInput.RunIDOverride before
-// dispatching the run on a detached goroutine — letting it answer the
-// caller with the run id even when the run is still in flight.
-func NewRunID() string { return generateRunID() }
-
 // generateRunID mints a "run_" CUID for journaling. Distinct from
 // generatePipelineID so journal queries can pattern-match either
 // kind without ambiguity.

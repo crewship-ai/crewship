@@ -121,10 +121,29 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 	}
 
 	exec := h.newExecutor()
-	// Pre-allocate the run id so we can hand it back even if the run is
-	// still in flight when the response budget elapses.
-	runID := pipeline.NewRunID()
-	in := pipeline.RunInput{
+	// Detach execution from the HTTP request's lifecycle. A `wait`
+	// (approval) step parks the run until it's decided — far longer than
+	// the reverse proxy's per-request budget. Running on r.Context() meant
+	// the proxy timing out the held-open request cancelled the run and
+	// marked it FAILED at the gate, so the routine never resumed on
+	// approval (scheduled runs survive because the scheduler runs on its
+	// own server-lifetime context). context.WithoutCancel keeps the
+	// auth/workspace/trace values but sheds cancellation, so the run
+	// outlives the request and resumes when the waitpoint is decided.
+	//
+	// We deliberately do NOT wrap this in a WithTimeout like the
+	// eval/consolidate detach handlers do: their work is bounded to a few
+	// minutes, whereas a wait step is bounded by its own timeout_seconds
+	// (hours, set per-DSL). A handler-level deadline would either cut a
+	// legitimate long approval short or be redundant with the step's.
+	//
+	// The call stays synchronous (no 202 contract change): a fast run
+	// returns its full RunResult as before; for a parked run the proxy
+	// times out the client but the run survives server-side and the human
+	// resolves the waitpoint from the inbox to resume it. net/http's
+	// per-request recover still contains any panic from exec.Run.
+	runCtx := context.WithoutCancel(r.Context())
+	res, err := exec.Run(runCtx, pipeline.RunInput{
 		PipelineID:      p.ID,
 		WorkspaceID:     workspaceID,
 		InvokingCrewID:  invokingCrew,
@@ -135,70 +154,23 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 		TierOverride:    tierOverride,
 		TriggeredVia:    triggeredVia,
 		TriggeredByID:   body.TriggeredByID,
-		RunIDOverride:   runID,
-	}
-
-	// Detach execution from the HTTP request's lifecycle. A `wait`
-	// (approval) step parks the run until it's decided — far longer than
-	// the reverse proxy's per-request budget. Running on r.Context() meant
-	// the proxy timing out the held-open request cancelled the run and
-	// marked it failed, so the routine never resumed on approval. Mirror
-	// eval_handler's WithoutCancel dispatch: run on a cancellation-detached
-	// copy (keeps auth/workspace/trace values) in a goroutine, and answer
-	// synchronously for the common case. A fast run returns its full
-	// RunResult; a run still in flight after the budget (almost always
-	// parked on a waitpoint) gets a 202 + run id and finishes — and
-	// resumes — in the background.
-	runCtx := context.WithoutCancel(r.Context())
-	type runOutcome struct {
-		res *pipeline.RunResult
-		err error
-	}
-	done := make(chan runOutcome, 1)
-	go func() {
-		res, err := exec.Run(runCtx, in)
-		done <- runOutcome{res, err}
-	}()
-
-	budget := h.runResponseBudget
-	if budget <= 0 {
-		budget = defaultRunResponseBudget
-	}
-	timer := time.NewTimer(budget)
-	defer timer.Stop()
-
-	select {
-	case out := <-done:
-		if out.err != nil {
-			// Concurrency rejection is a normal 429, not an internal
-			// error. Map before the catch-all.
-			if errors.Is(out.err, pipeline.ErrConcurrencyLimitReached) {
-				w.Header().Set("Retry-After", "5")
-				writeJSON(w, http.StatusTooManyRequests, map[string]string{
-					"error":  "concurrency limit reached for this pipeline",
-					"reason": "another run with the same concurrency_key is already in flight",
-				})
-				return
-			}
-			h.logger.Error("pipeline run: exec", "error", out.err, "slug", slug)
-			replyError(w, http.StatusInternalServerError, "Failed to start pipeline run")
+	})
+	if err != nil {
+		// Concurrency rejection is a normal 429, not an internal
+		// error. Map before the catch-all.
+		if errors.Is(err, pipeline.ErrConcurrencyLimitReached) {
+			w.Header().Set("Retry-After", "5")
+			writeJSON(w, http.StatusTooManyRequests, map[string]string{
+				"error":  "concurrency limit reached for this pipeline",
+				"reason": "another run with the same concurrency_key is already in flight",
+			})
 			return
 		}
-		writeJSON(w, http.StatusOK, out.res)
-	case <-timer.C:
-		// Still running past the budget — almost always parked on an
-		// approval waitpoint. Hand back the run id + status so the caller
-		// can track it; the detached goroutine keeps executing and the
-		// terminal status lands in pipeline_runs. The waitpoint is in the
-		// inbox for the human to resolve, which resumes this run.
-		writeJSON(w, http.StatusAccepted, map[string]any{
-			"run_id":        runID,
-			"pipeline_id":   p.ID,
-			"pipeline_slug": p.Slug,
-			"status":        "running",
-			"message":       "run is in progress (it may be waiting on an approval) — track it via the runs list, or resolve the waitpoint in the inbox to resume it",
-		})
+		h.logger.Error("pipeline run: exec", "error", err, "slug", slug)
+		replyError(w, http.StatusInternalServerError, "Failed to start pipeline run")
+		return
 	}
+	writeJSON(w, http.StatusOK, res)
 }
 
 // DryRun returns the structured WouldExecute report for a saved
