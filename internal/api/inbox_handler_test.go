@@ -562,13 +562,43 @@ func TestInboxHandler_BulkPatchState(t *testing.T) {
 		t.Errorf("read updated = %v, want 3 (read allowed for all kinds)", got)
 	}
 
-	// Cross-workspace / unknown ids are counted as not_found, not errors.
+	// Unknown ids are counted as not_found, not errors.
 	out = bulk([]string{"does-not-exist"}, "resolved", "dismissed")
 	if got := out["not_found"]; got != float64(1) {
 		t.Errorf("not_found = %v, want 1", got)
 	}
 	if got := out["updated"]; got != float64(0) {
 		t.Errorf("updated = %v, want 0 for unknown id", got)
+	}
+
+	// An id that EXISTS but is targeted at another user is invisible to
+	// this caller — the visibility clause must make bulk treat it as
+	// not_found, never act on it (no flipping rows addressed to someone
+	// else by stuffing ids into the array).
+	_, err := db.Exec(`INSERT INTO users (id, email, full_name) VALUES ('other-u', 'other@x.io', 'Other')`)
+	if err != nil {
+		t.Fatalf("seed other user: %v", err)
+	}
+	_, err = db.Exec(`
+		INSERT INTO inbox_items (id, workspace_id, kind, source_id, target_user_id,
+			title, body_md, sender_type, state, priority, blocking, payload_json, created_at, updated_at)
+		VALUES ('inaccessible', ?, 'message', 'src-inacc', 'other-u', 'private', '', 'system',
+			'unread', 'medium', 0, '{}', ?, ?)`,
+		wsID, now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano))
+	if err != nil {
+		t.Fatalf("seed inaccessible item: %v", err)
+	}
+	out = bulk([]string{"inaccessible"}, "resolved", "dismissed")
+	if got := out["not_found"]; got != float64(1) {
+		t.Errorf("inaccessible not_found = %v, want 1 (invisible to caller)", got)
+	}
+	if got := out["updated"]; got != float64(0) {
+		t.Errorf("inaccessible updated = %v, want 0 (must not act on others' rows)", got)
+	}
+	var state string
+	db.QueryRow(`SELECT state FROM inbox_items WHERE id='inaccessible'`).Scan(&state)
+	if state != "unread" {
+		t.Errorf("inaccessible item state = %s, want unread (untouched)", state)
 	}
 }
 

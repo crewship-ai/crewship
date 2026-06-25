@@ -160,7 +160,14 @@ export function InboxList() {
   useEffect(() => {
     if (liveSelected) setSelectedSnapshot(liveSelected)
   }, [liveSelected])
-  const selected = liveSelected ?? (selectedSnapshot?.id === selectedId ? selectedSnapshot : null)
+  // Scope the snapshot to the active workspace too — switching workspaces
+  // must not keep rendering the prior workspace's detail item until fresh
+  // list data lands.
+  const selected =
+    liveSelected ??
+    (selectedSnapshot?.id === selectedId && selectedSnapshot.workspace_id === workspaceId
+      ? selectedSnapshot
+      : null)
 
   const counts = useMemo(() => {
     const unread = items.filter((i) => i.state === "unread").length
@@ -236,24 +243,37 @@ export function InboxList() {
     return { total: sel.length, decision: decision.length, safe: sel.length - decision.length }
   }, [items, checked])
 
-  // Bulk apply: one round-trip via /inbox/bulk. The server skips decision
-  // items it must not close, so we surface both counts.
+  // Bulk apply via /inbox/bulk. Chunked to the backend's 500-id cap so a
+  // large select-all can't fail the whole action; the server skips
+  // decision items it must not close, and we surface every count
+  // (resolved / left-open / no-longer-available).
   const runBulk = async (state: "read" | "resolved", action?: string) => {
     if (!workspaceId || checked.size === 0) return
     setBulkBusy(true)
     try {
-      const res = await inboxBulk(workspaceId, Array.from(checked), state, action)
-      if (!res.ok) {
-        toast.error(res.error)
-        return
+      const ids = Array.from(checked)
+      const CHUNK = 500
+      let updated = 0
+      let skipped = 0
+      let notFound = 0
+      for (let i = 0; i < ids.length; i += CHUNK) {
+        const res = await inboxBulk(workspaceId, ids.slice(i, i + CHUNK), state, action)
+        if (!res.ok) {
+          toast.error(res.error)
+          return
+        }
+        updated += res.result.updated
+        skipped += res.result.skipped
+        notFound += res.result.not_found
       }
-      const { updated, skipped } = res.result
       const verb = state === "resolved" ? "resolved" : "marked read"
-      toast.success(
-        skipped > 0
-          ? `${updated} ${verb} · ${skipped} left open (need an explicit decision)`
-          : `${updated} ${verb}`,
-      )
+      const extra = [
+        skipped > 0 ? `${skipped} left open (need a decision)` : "",
+        notFound > 0 ? `${notFound} no longer available` : "",
+      ]
+        .filter(Boolean)
+        .join(" · ")
+      toast.success(extra ? `${updated} ${verb} · ${extra}` : `${updated} ${verb}`)
       clearChecked()
       await refresh()
     } finally {
@@ -320,6 +340,7 @@ export function InboxList() {
             <button
               key={d.id}
               onClick={() => setGroupBy(d.id)}
+              aria-pressed={groupBy === d.id}
               className={cn(
                 "rounded px-1.5 py-0.5 text-[11px] transition-colors",
                 groupBy === d.id
@@ -367,6 +388,7 @@ export function InboxList() {
                       />
                       <button
                         onClick={() => toggleCollapse(g.key)}
+                        aria-expanded={!isCollapsed}
                         className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
                       >
                         {isCollapsed ? (
@@ -396,7 +418,10 @@ export function InboxList() {
                               // the read-transition evicting this row.
                               setSelectedSnapshot(item)
                               if (item.state === "unread") {
-                                patch(item.id, "read")
+                                // Fire-and-forget; useInbox surfaces the
+                                // error itself, so just swallow the reject
+                                // to avoid an unhandled rejection.
+                                void patch(item.id, "read").catch(() => {})
                               }
                             }}
                           />
@@ -547,16 +572,15 @@ function InboxRow({
         item.state === "resolved" && "opacity-60",
       )}
     >
-      {/* Per-row checkbox for bulk select. stopPropagation so ticking
-          it doesn't also open the detail / mark the row read. */}
-      <span
-        className="mt-0.5 shrink-0"
-        onClick={(e) => {
-          e.stopPropagation()
-          onToggleCheck()
-        }}
-      >
-        <Checkbox checked={checked} aria-label={`Select ${item.title}`} />
+      {/* Per-row checkbox for bulk select. Toggle is wired through
+          onCheckedChange so it works for keyboard + screen-reader users;
+          the wrapper just stops the click from also opening the detail. */}
+      <span className="mt-0.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+        <Checkbox
+          checked={checked}
+          onCheckedChange={onToggleCheck}
+          aria-label={`Select ${item.title}`}
+        />
       </span>
       {/* unread dot — left of icon */}
       <span
