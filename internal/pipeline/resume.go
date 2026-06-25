@@ -150,6 +150,50 @@ func (e *Executor) ResumeInterruptedRuns(ctx context.Context, logger *slog.Logge
 	return resumed, interrupted, nil
 }
 
+// ResumeAfterApproval re-enters a run that PARKED on a wait(approval) step
+// (status=waiting) once the approval has been recorded. It is the in-process
+// analogue of the boot-time scan: load the run row, build the same resume plan
+// (restored step outputs + drift gate), and re-run via the normal Run path with
+// resume=true. The resumed wait step finds the approval already decided and
+// continues; completed steps are skipped from restored outputs.
+//
+// Call AFTER CompleteApproval has committed the decision (the approve HTTP
+// handler does exactly this). Runs in its own goroutine on a detached context
+// so it outlives the approve request; a shutdown mid-resume leaves the row
+// in-flight for the next boot scan. Safe to call for non-resumable rows — it
+// no-ops with a logged reason rather than erroring.
+func (e *Executor) ResumeAfterApproval(runID string, logger *slog.Logger) {
+	if e.runStore == nil {
+		return
+	}
+	if logger == nil {
+		logger = slog.Default()
+	}
+	ctx := context.Background()
+	rec, err := e.runStore.Get(ctx, runID)
+	if err != nil || rec == nil {
+		logger.Warn("approval resume: run not found", "run_id", runID, "error", err)
+		return
+	}
+	if rec.Status != RunStatusWaiting {
+		// Not parked (already resumed, completed, or a non-suspend run) —
+		// nothing to do. Avoids double-execution if approve fires twice.
+		logger.Info("approval resume: run not in waiting state; skipping",
+			"run_id", runID, "status", rec.Status)
+		return
+	}
+	plan, reason := e.buildResumePlan(ctx, rec)
+	if plan == nil {
+		markCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = e.runStore.MarkInterrupted(markCtx, rec.ID, "not resumable after approval: "+reason)
+		cancel()
+		logger.Warn("approval resume: not resumable", "run_id", runID, "reason", reason)
+		return
+	}
+	logger.Info("resuming pipeline run after approval", "run_id", runID, "pipeline_slug", rec.PipelineSlug)
+	go e.runResumedRun(ctx, plan, logger)
+}
+
 // buildResumePlan validates that a run's persisted state is
 // sufficient to resume. Returns (nil, reason) when it is not — the
 // reason lands in the row's error_message so operators can see WHY a

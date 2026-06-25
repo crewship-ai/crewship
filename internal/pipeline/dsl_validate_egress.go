@@ -47,10 +47,12 @@ func validateStepEgress(st Step) error {
 			return fmt.Errorf("pipeline: step %q (code) missing code body", st.ID)
 		}
 		switch st.Code.Runtime {
-		case "python", "go", "bash":
-			// ok
+		case "expr", "python", "go", "bash":
+			// expr = the wired deterministic/token-zero runtime (agentless
+			// probes); python/go/bash validate but need a sandbox runner wired
+			// (fail closed at runtime until then).
 		default:
-			return fmt.Errorf("pipeline: step %q (code) runtime %q invalid (allowed: python go bash)", st.ID, st.Code.Runtime)
+			return fmt.Errorf("pipeline: step %q (code) runtime %q invalid (allowed: expr python go bash)", st.ID, st.Code.Runtime)
 		}
 		if st.Code.Code == "" {
 			return fmt.Errorf("pipeline: step %q (code) missing code", st.ID)

@@ -91,7 +91,7 @@ func TestRunWaitStep_NilWaitBody_Errors(t *testing.T) {
 	// + journal emit semantics consistent for malformed steps.
 	e := &Executor{}
 	step := Step{ID: "wait_nil", Type: StepWait, Wait: nil}
-	out, cost, _, err := e.runWaitStep(context.Background(), step, emptyRender(), RunInput{}, "run-1")
+	out, cost, _, err := e.runWaitStep(context.Background(), step, emptyRender(), RunInput{}, "run-1", 0)
 	if err == nil {
 		t.Fatal("expected error on nil Wait body")
 	}
@@ -109,7 +109,7 @@ func TestRunWaitStep_UnknownKind_Errors(t *testing.T) {
 	// quoted in the error (operator triage signal).
 	e := &Executor{}
 	step := waitStepReq("flux-capacitor")
-	_, _, _, err := e.runWaitStep(context.Background(), step, emptyRender(), RunInput{}, "run-1")
+	_, _, _, err := e.runWaitStep(context.Background(), step, emptyRender(), RunInput{}, "run-1", 0)
 	if err == nil {
 		t.Fatal("expected error on unknown kind")
 	}
@@ -130,7 +130,7 @@ func TestRunWaitStep_EventKind_NotImplementedYet(t *testing.T) {
 	// skip event gates.
 	e := &Executor{}
 	step := waitStepReq("event")
-	_, _, _, err := e.runWaitStep(context.Background(), step, emptyRender(), RunInput{}, "run-1")
+	_, _, _, err := e.runWaitStep(context.Background(), step, emptyRender(), RunInput{}, "run-1", 0)
 	if err == nil {
 		t.Fatal("expected \"not yet implemented\" error on event kind")
 	}
@@ -149,7 +149,7 @@ func TestRunWaitStep_Datetime_PastReturnsImmediately(t *testing.T) {
 	step := waitStepReq("datetime")
 	step.Wait.Until = "2020-01-01T00:00:00Z"
 
-	out, _, _, err := e.runWaitStep(context.Background(), step, emptyRender(), RunInput{}, "run-1")
+	out, _, _, err := e.runWaitStep(context.Background(), step, emptyRender(), RunInput{}, "run-1", 0)
 	if err != nil {
 		t.Fatalf("past datetime: %v", err)
 	}
@@ -167,7 +167,7 @@ func TestRunWaitStep_Datetime_FutureSleepsThenReturns(t *testing.T) {
 	step.Wait.Until = time.Now().Add(50 * time.Millisecond).UTC().Format(time.RFC3339Nano)
 
 	start := time.Now()
-	out, _, _, err := e.runWaitStep(context.Background(), step, emptyRender(), RunInput{}, "run-1")
+	out, _, _, err := e.runWaitStep(context.Background(), step, emptyRender(), RunInput{}, "run-1", 0)
 	elapsed := time.Since(start)
 	if err != nil {
 		t.Fatalf("future datetime: %v", err)
@@ -195,7 +195,7 @@ func TestRunWaitStep_Datetime_ContextCancelInterrupts(t *testing.T) {
 	}()
 
 	start := time.Now()
-	_, _, _, err := e.runWaitStep(ctx, step, emptyRender(), RunInput{}, "run-1")
+	_, _, _, err := e.runWaitStep(ctx, step, emptyRender(), RunInput{}, "run-1", 0)
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("err = %v, want errors.Is(err, context.Canceled)", err)
 	}
@@ -211,7 +211,7 @@ func TestRunWaitStep_Datetime_UnparseableUntil_WrapsError(t *testing.T) {
 	step := waitStepReq("datetime")
 	step.Wait.Until = "this is not a date"
 
-	_, _, _, err := e.runWaitStep(context.Background(), step, emptyRender(), RunInput{}, "run-1")
+	_, _, _, err := e.runWaitStep(context.Background(), step, emptyRender(), RunInput{}, "run-1", 0)
 	if err == nil {
 		t.Fatal("expected parse error")
 	}
@@ -235,7 +235,7 @@ func TestRunWaitStep_Datetime_UntilFromInputTemplate(t *testing.T) {
 	render := emptyRender()
 	render.Inputs["deadline"] = "2020-01-01T00:00:00Z" // past → immediate return
 
-	out, _, _, err := e.runWaitStep(context.Background(), step, render, RunInput{}, "run-1")
+	out, _, _, err := e.runWaitStep(context.Background(), step, render, RunInput{}, "run-1", 0)
 	if err != nil {
 		t.Fatalf("templated past Until: %v", err)
 	}
@@ -261,7 +261,7 @@ func TestRunWaitStep_Approval_NoStoreWired_ContextCancelExits(t *testing.T) {
 	}()
 
 	start := time.Now()
-	_, _, _, err := e.runWaitStep(ctx, step, emptyRender(), RunInput{}, "run-1")
+	_, _, _, err := e.runWaitStep(ctx, step, emptyRender(), RunInput{}, "run-1", 0)
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("err = %v, want errors.Is(err, context.Canceled)", err)
 	}
@@ -284,7 +284,7 @@ func TestRunWaitStep_Approval_HappyPath(t *testing.T) {
 	out, _, _, err := e.runWaitStep(context.Background(), step,
 		emptyRender(),
 		RunInput{WorkspaceID: "ws-1", InvokingCrewID: "crew-x"},
-		"run-42")
+		"run-42", 0)
 	if err != nil {
 		t.Fatalf("approval happy: %v", err)
 	}
@@ -323,7 +323,7 @@ func TestRunWaitStep_Approval_Denied_ReturnsError(t *testing.T) {
 	e := &Executor{waitpoints: store}
 	step := waitStepReq("approval")
 
-	_, _, _, err := e.runWaitStep(context.Background(), step, emptyRender(), RunInput{}, "run-1")
+	_, _, _, err := e.runWaitStep(context.Background(), step, emptyRender(), RunInput{}, "run-1", 0)
 	if err == nil {
 		t.Fatal("expected error on denied approval")
 	}
@@ -340,7 +340,7 @@ func TestRunWaitStep_Approval_CreateError_WrapsWithCreateApproval(t *testing.T) 
 	e := &Executor{waitpoints: store}
 	step := waitStepReq("approval")
 
-	_, _, _, err := e.runWaitStep(context.Background(), step, emptyRender(), RunInput{}, "run-1")
+	_, _, _, err := e.runWaitStep(context.Background(), step, emptyRender(), RunInput{}, "run-1", 0)
 	if err == nil {
 		t.Fatal("expected error from CreateApproval failure")
 	}
@@ -359,7 +359,7 @@ func TestRunWaitStep_Approval_WaitForError_WrapsWithWait(t *testing.T) {
 	e := &Executor{waitpoints: store}
 	step := waitStepReq("approval")
 
-	_, _, _, err := e.runWaitStep(context.Background(), step, emptyRender(), RunInput{}, "run-1")
+	_, _, _, err := e.runWaitStep(context.Background(), step, emptyRender(), RunInput{}, "run-1", 0)
 	if err == nil {
 		t.Fatal("expected error from WaitFor failure")
 	}
@@ -387,7 +387,7 @@ func TestRunWaitStep_Approval_PromptRenderedFromTemplate(t *testing.T) {
 	render := emptyRender()
 	render.Inputs["env"] = "production"
 
-	_, _, _, err := e.runWaitStep(context.Background(), step, render, RunInput{}, "run-1")
+	_, _, _, err := e.runWaitStep(context.Background(), step, render, RunInput{}, "run-1", 0)
 	if err != nil {
 		t.Fatalf("approval with template: %v", err)
 	}

@@ -39,11 +39,11 @@ func (e *Executor) runCodeStep(ctx context.Context, step Step, parentRender Rend
 		// (internal/manifest/routine_warnings.go); the message here is
 		// the runtime fallback for routines that bypassed apply (legacy
 		// `routine save -f`, import bundles, direct API calls).
-		// See docs/manifest/routine.md "Code-step limitation" for the
+		// See docs/manifest/routine.md "Code steps" for the
 		// agent_run conversion recipe.
 		return "", 0, 0, fmt.Errorf("code step %q: no CodeRunner wired (production wiring missing) — "+
 			"convert this step to type: agent_run with an agent that has shell-tool access "+
-			"(see docs/manifest/routine.md `Code-step limitation`)", step.ID)
+			"(see docs/manifest/routine.md `Code steps`)", step.ID)
 	}
 
 	// Translate render context inputs → env vars. Use a fresh map
@@ -66,10 +66,15 @@ func (e *Executor) runCodeStep(ctx context.Context, step Step, parentRender Rend
 		WorkspaceID: in.WorkspaceID,
 		Runtime:     step.Code.Runtime,
 		Version:     step.Code.Version,
-		Code:        step.Code.Code,
-		InputEnv:    envIn,
-		TimeoutSec:  timeoutSec,
-		MaxBytes:    1_000_000, // 1 MB stdout cap; matches HTTP step default
+		// Render the body so {{ inputs.x }} / {{ steps.y.output }} substitute
+		// exactly like agent_run prompts (executor renders step.Prompt the same
+		// way). Inputs ALSO flow as CREWSHIP_INPUT_* env (below) for runners
+		// that prefer env over substitution. Without this, templated code
+		// reaches the runtime literally.
+		Code:       Render(step.Code.Code, parentRender),
+		InputEnv:   envIn,
+		TimeoutSec: timeoutSec,
+		MaxBytes:   1_000_000, // 1 MB stdout cap; matches HTTP step default
 	})
 	dur := time.Since(stepStart).Milliseconds()
 	if err != nil {

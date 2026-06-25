@@ -180,7 +180,8 @@ func (e *Executor) runDAG(
 	// Mutex protects result.StepOutputs + result.CostUSD because
 	// multiple goroutines write into them.
 	var resMu sync.Mutex
-	var firstErr atomic.Value // holds *dagStepFailure
+	var firstErr atomic.Value  // holds *dagStepFailure
+	var suspended atomic.Value // holds *suspendError (wait-step park; not a failure)
 
 	for {
 		// Compute the ready set: completed[needs[*]] && !completed[id]
@@ -223,7 +224,7 @@ func (e *Executor) runDAG(
 				if dagCtx.Err() != nil {
 					return
 				}
-				e.executeOneStep(dagCtx, step, stepIndex[step.ID], in, runID, pipelineID, emit, inputsForCtx, renderEnv, depth, &resMu, result, dsl, &firstErr, dagCancel)
+				e.executeOneStep(dagCtx, step, stepIndex[step.ID], in, runID, pipelineID, emit, inputsForCtx, renderEnv, depth, &resMu, result, dsl, &firstErr, &suspended, dagCancel)
 			}()
 		}
 		wg.Wait()
@@ -256,6 +257,21 @@ func (e *Executor) runDAG(
 		// granularity is therefore per-wave, not per-step — the
 		// parallel scheduler has no single current_step_id to stamp.
 		e.persistStepOutputs(ctx, in, depth, runID, outputsSnap, costSnap, startedAt)
+
+		// Suspend takes precedence over a failure: a wait step parked on an
+		// approval (MarkWaiting already stamped status=waiting + current_step
+		// inside runWaitStep). Return WAITING promptly and release the slot;
+		// the approve handler (or boot scan) resumes from the restored
+		// outputs. Checked before firstErr so a sibling cancelled by the
+		// suspend's dagCancel doesn't mask the park as a failure.
+		if s := suspended.Load(); s != nil {
+			susp := s.(*suspendError)
+			result.Status = "WAITING"
+			result.CurrentStep = susp.stepID
+			result.WaitpointToken = susp.token
+			result.DurationMs = time.Since(startedAt).Milliseconds()
+			return result, nil
+		}
 
 		if f := firstErr.Load(); f != nil {
 			fail := f.(*dagStepFailure)
@@ -353,6 +369,7 @@ func (e *Executor) executeOneStep(
 	result *RunResult,
 	dsl *DSL,
 	firstErr *atomic.Value,
+	suspended *atomic.Value,
 	dagCancel context.CancelFunc,
 ) {
 	// Render against a fresh snapshot of step outputs so peer-wave
@@ -394,6 +411,14 @@ func (e *Executor) executeOneStep(
 
 	output, stepCost, stepDur, stepErr := e.runStepWithRetry(ctx, *step, renderedPrompt, tier, fallback, in, runID, pipelineID, emit, ctxRender, depth)
 	if stepErr != nil {
+		// Suspend (wait-step park) is not a failure: record it separately and
+		// stop scheduling. The runDAG loop checks `suspended` before firstErr.
+		var susp *suspendError
+		if errors.As(stepErr, &susp) {
+			suspended.CompareAndSwap(nil, susp)
+			dagCancel()
+			return
+		}
 		f := &dagStepFailure{stepID: step.ID, message: stepErr.Error()}
 		firstErr.CompareAndSwap(nil, f)
 		dagCancel()

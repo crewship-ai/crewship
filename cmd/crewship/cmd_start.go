@@ -420,6 +420,16 @@ var startCmd = &cobra.Command{
 			srv.APIRouter().PipelinesHandler.SetSaveTokenSecret([]byte(cfg.Auth.InternalToken))
 			logger.Info("pipeline save_token signing enabled (HMAC-SHA256 over internal token)")
 
+			// Wire the production CodeRunner for type:code steps. The
+			// ExprCodeRunner is a pure-Go, deterministic comparison/arithmetic
+			// evaluator — token-zero, no container, no exec surface — which is
+			// exactly what agentless wake-gate probes (e.g. cost-spike-probe)
+			// need. It needs no Docker/provider dependency, so it works in
+			// every deployment incl. the no-Docker llm_direct branch. Other
+			// runtimes (bash/python/go) still fail closed with a wiring hint.
+			srv.APIRouter().PipelinesHandler.SetCodeRunner(pipeline.ExprCodeRunner{})
+			logger.Info("pipeline code runner wired (deterministic expr runtime; token-zero, no container)")
+
 			// Wire production WaitpointStore so StepWait approvals
 			// persist across restarts and the inbox UI can fire
 			// /pipelines/waitpoints/{token}/approve. Without this,

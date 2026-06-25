@@ -409,14 +409,16 @@ var pipelineRunCmd = &cobra.Command{
 		// terminal user, not us — we just label COMPLETED / FAILED
 		// / DRY_RUN_OK + show output + show step outputs map.
 		var result struct {
-			RunID        string            `json:"run_id"`
-			Status       string            `json:"status"`
-			Output       string            `json:"output"`
-			StepOutputs  map[string]string `json:"step_outputs"`
-			DurationMs   int64             `json:"duration_ms"`
-			CostUSD      float64           `json:"cost_usd"`
-			FailedAtStep string            `json:"failed_at_step"`
-			ErrorMessage string            `json:"error_message"`
+			RunID          string            `json:"run_id"`
+			Status         string            `json:"status"`
+			Output         string            `json:"output"`
+			StepOutputs    map[string]string `json:"step_outputs"`
+			DurationMs     int64             `json:"duration_ms"`
+			CostUSD        float64           `json:"cost_usd"`
+			FailedAtStep   string            `json:"failed_at_step"`
+			ErrorMessage   string            `json:"error_message"`
+			WaitpointToken string            `json:"waitpoint_token"`
+			CurrentStep    string            `json:"current_step"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 			return fmt.Errorf("decode run response: %w", err)
@@ -425,6 +427,14 @@ var pipelineRunCmd = &cobra.Command{
 		if result.Status == "FAILED" {
 			fmt.Printf("  failed at step: %s\n  error: %s\n", result.FailedAtStep, result.ErrorMessage)
 			return fmt.Errorf("routine run failed")
+		}
+		if result.Status == "WAITING" {
+			// Parked on a human approval — NOT a failure. The run released
+			// its slot; approve (or reject) to resume it.
+			fmt.Printf("  paused at approval step: %s\n", result.CurrentStep)
+			fmt.Printf("  approve: crewship routine waitpoints approve %s --comment \"LGTM\"\n", result.WaitpointToken)
+			fmt.Printf("  reject:  crewship routine waitpoints reject %s\n", result.WaitpointToken)
+			return nil
 		}
 		if result.Output != "" {
 			fmt.Println("\nFinal output:")
