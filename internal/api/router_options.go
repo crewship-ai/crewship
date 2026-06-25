@@ -125,6 +125,15 @@ func WithKeeperConfig(cfg *config.KeeperConfig) RouterOption {
 	}
 }
 
+// WithComposioConfig passes the Composio managed-integration provider config
+// (API key + optional base URL) used by the /api/v1/integrations/composio/*
+// routes.
+func WithComposioConfig(cfg *config.ComposioConfig) RouterOption {
+	return func(r *Router) {
+		r.composioConfig = cfg
+	}
+}
+
 // WithKeeperConversations attaches a conversation reader so Keeper can inspect
 // the agent's actual chat history before making access decisions.
 func WithAllowSignup(allow bool) RouterOption {

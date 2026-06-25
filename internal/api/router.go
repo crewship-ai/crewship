@@ -67,6 +67,7 @@ type Router struct {
 	keeperSecrets       SecretGetter
 	keeperContainer     provider.ContainerProvider
 	keeperConfig        *config.KeeperConfig
+	composioConfig      *config.ComposioConfig
 	keeperConvReader    ConversationReader
 	convSearcher        ConversationSearcher
 	missionCallback     MissionCallback

@@ -137,6 +137,11 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.mux.Handle("PATCH /api/v1/crews/{crewId}/integrations/{integrationId}", authed(wsCtx(http.HandlerFunc(integrations.UpdateCrewIntegration))))
 	r.mux.Handle("DELETE /api/v1/crews/{crewId}/integrations/{integrationId}", authed(wsCtx(http.HandlerFunc(integrations.DeleteCrewIntegration))))
 	r.mux.Handle("POST /api/v1/crews/{crewId}/integrations/{integrationId}/test", authed(wsCtx(http.HandlerFunc(integrations.TestCrewIntegrationConnection))))
+	// Composio managed integrations — read-only inventory (auth-config catalog
+	// + connected accounts grouped by user_id). Two literal path segments after
+	// /integrations so it never collides with the /{integrationId} wildcard.
+	composioH := NewComposioHandler(r.db, r.logger, r.composioConfig)
+	r.mux.Handle("GET /api/v1/integrations/composio/inventory", authed(wsCtx(http.HandlerFunc(composioH.ListInventory))))
 	// Connectors — curated manifest catalog + install flow. List/Get are
 	// catalog browse (auth only, no workspace context); Verify/Install
 	// mutate workspace state and gate on MANAGER+ via wsCtx-resolved role.

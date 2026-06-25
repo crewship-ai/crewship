@@ -21,6 +21,35 @@ unaffected**. The sections below describe the legacy mechanism.
 
 Crewship supports two integration mechanisms: **OAuth 2.0 connections** for service authentication and **MCP (Model Context Protocol) servers** for extending agent tool capabilities.
 
+## Managed Integrations (Composio)
+
+Crewship's managed integration path uses [Composio](https://composio.dev) so you connect apps once instead of hosting MCP servers yourself.
+
+**Object model**
+
+| Concept | What it is |
+| --- | --- |
+| **Auth config** | Per-app OAuth blueprint (GitHub, Slack, Gmail, …). One per app, shared by all users. The "connector catalog". |
+| **User (`user_id`)** | An end-user identity — the isolation boundary. A user owns a set of connected accounts. |
+| **Connected account** | One user's authorised connection to an app (OAuth tokens). |
+
+**How isolation works.** An agent is bound to exactly **one `user_id`** and therefore sees only that user's connected accounts — never anyone else's. To give 30 mailboxes to 30 agents, create 30 users (one per mailbox) and bind each agent to its user; the per-agent MCP URL is scoped server-side, so an agent cannot reach another user's accounts even in principle. Use Composio **projects** only for coarse isolation (per environment, or per customer/workspace) — not per agent.
+
+**Enabling.** Set `COMPOSIO_API_KEY` (a project API key) on the server; presence of the key auto-enables the provider. Optionally pin `COMPOSIO_BASE_URL`. Billing is by tool calls (Composio free tier = 20K/mo), not by number of users or connected accounts.
+
+**Inspecting the inventory.** The operator view of the catalog and connected accounts (grouped by user):
+
+```bash
+crewship integration composio inventory
+```
+
+returns the same data as `GET /api/v1/integrations/composio/inventory`. This is an operator/admin view — agents are never handed the full list.
+
+<Note>
+Connecting accounts and per-agent binding (the write/OAuth flow and UI) ship in
+follow-up slices. Today the managed path is read-only inventory.
+</Note>
+
 ## OAuth 2.0 Integrations
 
 Crewship includes pre-configured OAuth providers for popular services. The implementation uses PKCE (Proof Key for Code Exchange) per RFC 7636 for secure authorization.

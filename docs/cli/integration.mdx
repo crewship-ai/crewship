@@ -27,6 +27,16 @@ crewship intg <subcommand> [flags]
 
 ## Subcommands
 
+### Managed integrations (Composio)
+
+| Command | Purpose |
+| --- | --- |
+| `integration composio inventory` | Show the Composio connector catalog (auth configs) and connected accounts grouped by `user_id`. |
+
+Maps to `GET /api/v1/integrations/composio/inventory`. Requires `COMPOSIO_API_KEY`
+on the server; prints a "not configured" notice otherwise. Add `--output json`
+for the raw payload. See the [Integrations guide](/guides/integrations#managed-integrations-composio).
+
 ### Workspace-scoped
 
 | Command | Purpose |

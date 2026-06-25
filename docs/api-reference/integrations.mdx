@@ -44,6 +44,64 @@ All integration endpoints require authentication and workspace context (except w
 | `GET` | [`/api/v1/mcp-registry`](#list-registry-entries) | List MCP registry entries |
 | `GET` | [`/api/v1/mcp-registry/search`](#search-registry) | Search the MCP registry |
 | `POST` | [`/api/v1/mcp-registry/sync`](#sync-registry) | Sync the MCP registry |
+| `GET` | [`/api/v1/integrations/composio/inventory`](#composio-inventory) | Composio catalog + connected accounts per user |
+
+---
+
+## Managed Integrations (Composio)
+
+Read-only inventory of the Composio managed-integration provider. See the
+[Integrations guide](/guides/integrations#managed-integrations-composio) for the
+object model. Requires `COMPOSIO_API_KEY` on the server; when unset the endpoint
+returns `enabled: false` with empty lists rather than an error.
+
+### Composio Inventory
+
+```
+GET /api/v1/integrations/composio/inventory?workspace_id={workspaceId}
+```
+
+Returns the connector catalog (auth configs) and every connected account
+grouped by Composio `user_id`. Gated on workspace `read`. This is an operator
+view; agents are scoped to a single `user_id` and never receive the full list.
+
+**Response:** `200 OK`
+
+```json
+{
+  "enabled": true,
+  "auth_configs": [
+    {
+      "id": "ac_JE6J7fDSsneA",
+      "name": "gmail-i6p1sb",
+      "status": "ENABLED",
+      "toolkit": { "slug": "gmail", "logo": "https://logos.composio.dev/api/gmail" }
+    }
+  ],
+  "users": [
+    {
+      "user_id": "pg-test-8acca167",
+      "connected_accounts": [
+        {
+          "id": "ca_2pjydr0oHqiI",
+          "user_id": "pg-test-8acca167",
+          "status": "ACTIVE",
+          "toolkit": { "slug": "gmail" },
+          "auth_config": { "id": "ac_JE6J7fDSsneA", "auth_scheme": "OAUTH2", "is_composio_managed": true, "is_disabled": false }
+        }
+      ]
+    }
+  ]
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `enabled` | boolean | Whether the provider is configured (`COMPOSIO_API_KEY` set) |
+| `auth_configs` | array | Connector catalog — one entry per configured app |
+| `users` | array | Connected accounts grouped by Composio `user_id`, sorted by `user_id` |
+
+CLI: `crewship integration composio inventory`.
 
 ---
 
