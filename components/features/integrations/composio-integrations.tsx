@@ -2,7 +2,6 @@
 
 import * as React from "react"
 import Link from "next/link"
-import Image from "next/image"
 import {
   Plug,
   ShieldCheck,
@@ -39,19 +38,29 @@ type ToolkitInfo = {
 type ToolkitsResp = { enabled: boolean; total: number; toolkits: ToolkitInfo[] }
 
 function ToolkitIcon({ toolkit, size = 20 }: { toolkit: Toolkit; size?: number }) {
-  if (toolkit.logo) {
+  // Composio logos are remote SVGs. next/image chokes on them under static
+  // export, so use a plain <img> with a graceful fallback to the Plug glyph.
+  const [failed, setFailed] = React.useState(false)
+  if (toolkit.logo && !failed) {
     return (
-      <Image
+      <img
         src={toolkit.logo}
-        alt={toolkit.slug}
+        alt=""
         width={size}
         height={size}
-        className="rounded"
-        unoptimized
+        className="rounded object-contain"
+        onError={() => setFailed(true)}
       />
     )
   }
-  return <Plug className="text-blue-400" style={{ width: size, height: size }} />
+  return (
+    <span
+      className="flex items-center justify-center rounded bg-blue-500/10 text-[10px] font-semibold uppercase text-blue-400"
+      style={{ width: size, height: size }}
+    >
+      {toolkit.slug.slice(0, 2)}
+    </span>
+  )
 }
 
 function StatusDot({ status }: { status: string }) {
