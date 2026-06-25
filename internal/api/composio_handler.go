@@ -93,8 +93,8 @@ type composioInventoryResponse struct {
 // composioUserInventory groups one Composio user's connected accounts — the
 // isolation unit Crewship binds agents against.
 type composioUserInventory struct {
-	UserID            string                       `json:"user_id"`
-	ConnectedAccounts []composio.ConnectedAccount  `json:"connected_accounts"`
+	UserID            string                      `json:"user_id"`
+	ConnectedAccounts []composio.ConnectedAccount `json:"connected_accounts"`
 }
 
 // ── ListInventory — GET /api/v1/integrations/composio/inventory ──────────────
@@ -191,6 +191,60 @@ func (h *ComposioHandler) ListToolkits(w http.ResponseWriter, r *http.Request) {
 		Enabled:  true,
 		Total:    page.TotalItems,
 		Toolkits: page.Items,
+	})
+}
+
+// ── ListTools — GET /api/v1/integrations/composio/tools ──────────────────────
+
+type composioToolsResponse struct {
+	Enabled bool            `json:"enabled"`
+	Total   int             `json:"total"`
+	Tools   []composio.Tool `json:"tools"`
+}
+
+// toolsPageLimit caps the tools page we proxy from Composio. A single toolkit
+// can expose hundreds of tools (GitHub: 846); the UI narrows via search.
+const toolsPageLimit = 40
+
+// ListTools proxies the tools a Composio toolkit exposes. `toolkit` is required
+// (a 400 otherwise); `search` and `limit` (max 100, default 40) are optional.
+// Read-gated; returns enabled:false when the provider is unconfigured.
+func (h *ComposioHandler) ListTools(w http.ResponseWriter, r *http.Request) {
+	if !requireRole(w, r, "read") {
+		return
+	}
+	client, _ := h.resolveClient(r)
+	if client == nil {
+		writeJSON(w, http.StatusOK, composioToolsResponse{Enabled: false, Tools: []composio.Tool{}})
+		return
+	}
+
+	toolkit := strings.TrimSpace(r.URL.Query().Get("toolkit"))
+	if toolkit == "" {
+		writeProblem(w, r, http.StatusBadRequest, "toolkit is required")
+		return
+	}
+	search := r.URL.Query().Get("search")
+	limit := toolsPageLimit
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 100 {
+			limit = n
+		}
+	}
+
+	page, err := client.ListTools(r.Context(), toolkit, search, limit)
+	if err != nil {
+		h.logger.Error("composio: list tools", "error", err)
+		writeProblem(w, r, http.StatusBadGateway, "Composio API error")
+		return
+	}
+	if page.Items == nil {
+		page.Items = []composio.Tool{}
+	}
+	writeJSON(w, http.StatusOK, composioToolsResponse{
+		Enabled: true,
+		Total:   page.TotalItems,
+		Tools:   page.Items,
 	})
 }
 

@@ -46,6 +46,7 @@ All integration endpoints require authentication and workspace context (except w
 | `POST` | [`/api/v1/mcp-registry/sync`](#sync-registry) | Sync the MCP registry |
 | `GET` | [`/api/v1/integrations/composio/inventory`](#composio-inventory) | Composio catalog + connected accounts per user |
 | `GET` | [`/api/v1/integrations/composio/toolkits`](#composio-toolkits) | Browse the Composio app catalog (1000+ apps) |
+| `GET` | [`/api/v1/integrations/composio/tools`](#composio-tools) | List the tools a toolkit exposes |
 | `GET` | [`/api/v1/integrations/composio/settings`](#composio-settings) | Get the workspace Composio config status |
 | `PUT` | [`/api/v1/integrations/composio/settings`](#composio-settings) | Set & validate the workspace Composio API key |
 | `DELETE` | [`/api/v1/integrations/composio/settings`](#composio-settings) | Remove the workspace API key (revert to env) |
@@ -146,6 +147,42 @@ returns `enabled: false` when the provider is unconfigured.
 | `toolkits` | array | The current page of apps (slug, name, meta) |
 
 CLI: `crewship integration composio toolkits [--search] [--category] [--limit]`.
+
+### Composio Tools
+
+```
+GET /api/v1/integrations/composio/tools?workspace_id={workspaceId}&toolkit={slug}&search={q}&limit={n}
+```
+
+Lists the tools a single toolkit exposes (e.g. `github` has 846, `gmail` 61).
+`toolkit` is **required** (`400` otherwise). `search` and `limit` (max 100,
+default 40) are optional server-side filters. Read-gated; returns
+`enabled: false` when the provider is unconfigured.
+
+**Response:** `200 OK`
+
+```json
+{
+  "enabled": true,
+  "total": 846,
+  "tools": [
+    {
+      "slug": "GITHUB_CREATE_AN_ISSUE",
+      "name": "Create an issue",
+      "description": "Create a new issue in a repository",
+      "toolkit": { "slug": "github" }
+    }
+  ]
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `enabled` | boolean | Whether the provider is configured |
+| `total` | integer | Total tools matching the filter for the toolkit |
+| `tools` | array | The current page of tools (slug, name, description, toolkit) |
+
+CLI: `crewship integration composio tools <toolkit> [--search] [--limit]`.
 
 ### Composio Settings
 

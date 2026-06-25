@@ -27,6 +27,8 @@ func fakeComposioAPI(t *testing.T, authConfigs, connectedAccounts string) *httpt
 			_, _ = w.Write([]byte(connectedAccounts))
 		case "/api/v3/toolkits":
 			_, _ = w.Write([]byte(`{"total_items":1047,"items":[{"slug":"github","name":"GitHub","meta":{"description":"x","logo":"l","tools_count":846,"categories":[{"id":"developer-tools","name":"developer tools"}]}}]}`))
+		case "/api/v3.1/tools":
+			_, _ = w.Write([]byte(`{"total_items":846,"items":[{"slug":"GITHUB_CREATE_AN_ISSUE","name":"Create an issue","description":"Create a new issue","toolkit":{"slug":"github"}}]}`))
 		case "/api/v3.1/auth_configs":
 			_, _ = w.Write([]byte(`{"id":"ac_new"}`))
 		case "/api/v3.1/connected_accounts/link":
@@ -106,6 +108,53 @@ func TestComposio_ListToolkits(t *testing.T) {
 	mustUnmarshal(t, rr, &got)
 	if !got.Enabled || got.Total != 1047 || len(got.Toolkits) != 1 || got.Toolkits[0].Slug != "github" {
 		t.Errorf("unexpected toolkits response: %+v", got)
+	}
+}
+
+func TestComposio_ListTools(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	srv := fakeComposioAPI(t, `{"items":[]}`, `{"items":[]}`)
+	h := NewComposioHandler(db, newComposioTestLogger(), &config.ComposioConfig{
+		Enabled: true, APIKey: "ak_test", BaseURL: srv.URL,
+	})
+
+	req := httptest.NewRequest("GET", "/api/v1/integrations/composio/tools?toolkit=github", nil)
+	req = withWorkspaceUser(req, userID, wsID, "VIEWER")
+	rr := httptest.NewRecorder()
+	h.ListTools(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	var got composioToolsResponse
+	mustUnmarshal(t, rr, &got)
+	if !got.Enabled || got.Total != 846 || len(got.Tools) != 1 || got.Tools[0].Slug != "GITHUB_CREATE_AN_ISSUE" {
+		t.Errorf("unexpected tools response: %+v", got)
+	}
+	if got.Tools[0].Toolkit.Slug != "github" {
+		t.Errorf("tool toolkit = %+v", got.Tools[0].Toolkit)
+	}
+}
+
+func TestComposio_ListTools_RequiresToolkit(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	srv := fakeComposioAPI(t, `{"items":[]}`, `{"items":[]}`)
+	h := NewComposioHandler(db, newComposioTestLogger(), &config.ComposioConfig{
+		Enabled: true, APIKey: "ak_test", BaseURL: srv.URL,
+	})
+
+	req := httptest.NewRequest("GET", "/api/v1/integrations/composio/tools", nil) // no toolkit
+	req = withWorkspaceUser(req, userID, wsID, "VIEWER")
+	rr := httptest.NewRecorder()
+	h.ListTools(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d, want 400 (toolkit required)", rr.Code)
 	}
 }
 

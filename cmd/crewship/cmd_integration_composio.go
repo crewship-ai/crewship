@@ -16,9 +16,9 @@ import (
 
 // composioInventoryResponse mirrors the server's wire shape.
 type composioInventoryResponse struct {
-	Enabled     bool                     `json:"enabled"`
-	AuthConfigs []composioAuthConfig     `json:"auth_configs"`
-	Users       []composioUserInventory  `json:"users"`
+	Enabled     bool                    `json:"enabled"`
+	AuthConfigs []composioAuthConfig    `json:"auth_configs"`
+	Users       []composioUserInventory `json:"users"`
 }
 
 type composioToolkit struct {
@@ -65,6 +65,19 @@ type composioToolkitsResponse struct {
 	Enabled  bool                  `json:"enabled"`
 	Total    int                   `json:"total"`
 	Toolkits []composioToolkitInfo `json:"toolkits"`
+}
+
+type composioTool struct {
+	Slug        string          `json:"slug"`
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	Toolkit     composioToolkit `json:"toolkit"`
+}
+
+type composioToolsResponse struct {
+	Enabled bool           `json:"enabled"`
+	Total   int            `json:"total"`
+	Tools   []composioTool `json:"tools"`
 }
 
 type composioSettingsResponse struct {
@@ -193,6 +206,52 @@ var composioToolkitsCmd = &cobra.Command{
 	},
 }
 
+var composioToolsCmd = &cobra.Command{
+	Use:   "tools <toolkit>",
+	Short: "List the tools a Composio toolkit exposes (e.g. github has 846)",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client, err := requireAuthAndWorkspace()
+		if err != nil {
+			return err
+		}
+		search, _ := cmd.Flags().GetString("search")
+		limit, _ := cmd.Flags().GetInt("limit")
+
+		path := "/api/v1/integrations/composio/tools"
+		q := url.Values{}
+		q.Set("toolkit", args[0])
+		if search != "" {
+			q.Set("search", search)
+		}
+		if limit > 0 {
+			q.Set("limit", strconv.Itoa(limit))
+		}
+		path += "?" + q.Encode()
+
+		var res composioToolsResponse
+		if err := getJSON(client, path, &res); err != nil {
+			return err
+		}
+
+		f := newFormatter()
+		if f.Format == "json" || f.Format == "yaml" {
+			return f.Auto(res, nil, nil)
+		}
+		if !res.Enabled {
+			fmt.Println("Composio is not configured on this server (set COMPOSIO_API_KEY).")
+			return nil
+		}
+		rows := make([][]string, 0, len(res.Tools))
+		for _, t := range res.Tools {
+			rows = append(rows, []string{t.Slug, t.Name, t.Description})
+		}
+		f.Table([]string{"SLUG", "NAME", "DESCRIPTION"}, rows)
+		fmt.Printf("\nShowing %d of %d tools for %q. Narrow with --search.\n", len(res.Tools), res.Total, args[0])
+		return nil
+	},
+}
+
 var composioKeyCmd = &cobra.Command{
 	Use:   "key",
 	Short: "Manage the workspace Composio API key",
@@ -302,6 +361,8 @@ func init() {
 	composioToolkitsCmd.Flags().String("search", "", "Filter apps by name/slug")
 	composioToolkitsCmd.Flags().String("category", "", "Filter by category (e.g. email, developer-tools)")
 	composioToolkitsCmd.Flags().Int("limit", 0, "Max apps to return (default server-side)")
+	composioToolsCmd.Flags().String("search", "", "Filter tools by name/slug")
+	composioToolsCmd.Flags().Int("limit", 0, "Max tools to return (default server-side)")
 
 	composioKeySetCmd.Flags().String("key", "", "Composio project API key (ak_…)")
 	composioKeySetCmd.Flags().String("base-url", "", "Override Composio base URL (optional)")
@@ -310,6 +371,7 @@ func init() {
 
 	composioCmd.AddCommand(composioInventoryCmd)
 	composioCmd.AddCommand(composioToolkitsCmd)
+	composioCmd.AddCommand(composioToolsCmd)
 	composioCmd.AddCommand(composioKeyCmd)
 	composioCmd.AddCommand(composioConnectCmd)
 	integrationCmd.AddCommand(composioCmd)

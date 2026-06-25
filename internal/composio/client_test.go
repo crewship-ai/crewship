@@ -101,6 +101,34 @@ func TestClient_ListToolkits(t *testing.T) {
 	}
 }
 
+func TestClient_ListTools(t *testing.T) {
+	var gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"total_items":846,"items":[
+			{"slug":"GITHUB_CREATE_AN_ISSUE","name":"Create an issue","description":"Create a new issue in a repository","toolkit":{"slug":"github","logo":"https://logos.composio.dev/api/github"}}
+		]}`))
+	}))
+	t.Cleanup(srv.Close)
+	c := NewClient("ak_test", srv.URL)
+
+	page, err := c.ListTools(context.Background(), "github", "issue", 5)
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+	if !strings.Contains(gotQuery, "toolkit_slug=github") || !strings.Contains(gotQuery, "search=issue") || !strings.Contains(gotQuery, "limit=5") {
+		t.Errorf("query = %q, want toolkit_slug=github & search=issue & limit=5", gotQuery)
+	}
+	if page.TotalItems != 846 || len(page.Items) != 1 {
+		t.Fatalf("page = %+v", page)
+	}
+	tool := page.Items[0]
+	if tool.Slug != "GITHUB_CREATE_AN_ISSUE" || tool.Name != "Create an issue" || tool.Toolkit.Slug != "github" {
+		t.Errorf("unexpected tool: %+v", tool)
+	}
+}
+
 func TestClient_DefaultBaseURL(t *testing.T) {
 	c := NewClient("ak_test", "")
 	if c.baseURL != DefaultBaseURL {

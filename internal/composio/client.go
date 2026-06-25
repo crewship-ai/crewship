@@ -157,6 +157,51 @@ func (c *Client) ListToolkits(ctx context.Context, search, category string, limi
 	return ToolkitPage{Items: env.Items, TotalItems: env.TotalItems}, nil
 }
 
+// Tool is a single action a toolkit exposes (GitHub has 846, Gmail 61, …).
+// The Toolkit field carries the parent toolkit slug Composio nests under
+// `toolkit`. Distinct from ToolkitInfo (the catalog entry for the whole app).
+type Tool struct {
+	Slug        string  `json:"slug"`
+	Name        string  `json:"name"`
+	Description string  `json:"description"`
+	Toolkit     Toolkit `json:"toolkit"`
+}
+
+// ToolPage is a paginated slice of a toolkit's tools.
+type ToolPage struct {
+	Items      []Tool
+	TotalItems int
+}
+
+// ListTools returns a page of the tools a toolkit exposes. toolkitSlug filters
+// to one app (Composio's `toolkit_slug` query param); search is passed through
+// (server-side filter); limit caps the page size (Composio default applies when
+// <= 0).
+func (c *Client) ListTools(ctx context.Context, toolkitSlug, search string, limit int) (ToolPage, error) {
+	q := url.Values{}
+	if toolkitSlug != "" {
+		q.Set("toolkit_slug", toolkitSlug)
+	}
+	if search != "" {
+		q.Set("search", search)
+	}
+	if limit > 0 {
+		q.Set("limit", strconv.Itoa(limit))
+	}
+	path := "/api/v3.1/tools"
+	if enc := q.Encode(); enc != "" {
+		path += "?" + enc
+	}
+	var env struct {
+		Items      []Tool `json:"items"`
+		TotalItems int    `json:"total_items"`
+	}
+	if err := c.get(ctx, path, &env); err != nil {
+		return ToolPage{}, err
+	}
+	return ToolPage{Items: env.Items, TotalItems: env.TotalItems}, nil
+}
+
 // ListAuthConfigs returns the project's connector catalog (one entry per
 // configured app).
 func (c *Client) ListAuthConfigs(ctx context.Context) ([]AuthConfig, error) {
