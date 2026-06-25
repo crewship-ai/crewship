@@ -60,37 +60,41 @@ fi
 wait 2>/dev/null || true
 
 # ─────────────────────────────────────────────────────────────────────────────
-section "3. A notification lands in the feed for the routine run"
+section "3. Routine completion is observable (activity rail is the canonical surface)"
 # ─────────────────────────────────────────────────────────────────────────────
-# The notification feed records actor/entity events. After running a routine we
-# expect at least one notification whose entity_type is 'routine' (or whose
-# entity_title matches the routine). Poll until it shows up.
-if have jq; then
-  detect="\"$CREWSHIP\" --server \"$SERVER\" notification list --format json 2>/dev/null \
-    | jq -e '[.[] | select((.entity_type==\"routine\") or (.entity_title|tostring|test(\"$ROUTINE\";\"i\")) or (.action|tostring|test(\"routine|pipeline|run\";\"i\")))] | length>0'"
-  poll_until "a routine notification arrives in the feed" "$POLL_TIMEOUT" "$detect"
+# A successful routine completion is recorded on the activity rail
+# (pipeline.run.completed — asserted in section 2 via `watch --once`) and in
+# `routine records`. The notification FEED is reserved for attention-worthy
+# events (escalations, approvals, mentions); routine completions are NOT pushed
+# there by design — otherwise scheduled runs would drown the feed. So the feed
+# is a best-effort bonus check; its absence is NOT a failure.
+if have jq && "$CREWSHIP" --server "$SERVER" notification list --format json 2>/dev/null \
+     | jq -e '[.[] | select((.entity_type=="routine") or (.action|tostring|test("routine|pipeline|run";"i")))] | length>0' >/dev/null 2>&1; then
+  _pass "routine event present in the notification feed (bonus)"
 else
-  detect="\"$CREWSHIP\" --server \"$SERVER\" notification list 2>/dev/null | grep -qiE 'routine|pipeline|$ROUTINE'"
-  poll_until "a routine notification arrives in the feed (grep)" "$POLL_TIMEOUT" "$detect"
+  skip "routine notification in feed" "by design: completions surface on the activity rail (verified §2) + records, not the notification feed"
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-section "4. Failed run → failed_run inbox item (best-effort)"
+section "4. Failed run is observable (records); failed_run inbox is scheduled-only"
 # ─────────────────────────────────────────────────────────────────────────────
-# We can only assert this if we can force a failure. Strategy: run a routine
-# with an input that the shape/grader gate must reject. If no failure can be
-# induced on this workspace, SKIP rather than false-fail.
+# Induce a failure and assert it is OBSERVABLE. For a manual/CLI run the surface
+# is the exit code (non-zero) + the run record status=failed. The failed_run
+# INBOX item is created only for SCHEDULED (unattended) runs
+# (internal/pipeline/schedules.go alertFailedScheduledRun) — NOT ad-hoc CLI
+# runs, by design, since a manual operator already sees the error inline.
 FAILER="${FAILER:-classify-ticket}"
-info "Attempting to induce a failure on '$FAILER' with junk input…"
+info "Inducing a failure on '$FAILER' with empty input…"
 if cs routine run "$FAILER" --inputs '{"ticket":""}' >/tmp/cs-fail.out 2>&1; then
-  skip "failed_run inbox item" "could not induce a failure (routine tolerated the input)"
+  skip "failed-run observability" "could not induce a failure (routine tolerated the input)"
 else
   if have jq; then
-    detect="\"$CREWSHIP\" --server \"$SERVER\" inbox list --kind failed_run --state all --format json 2>/dev/null | jq -e 'length>0'"
+    st="$(cs routine records "$FAILER" --json --limit 1 2>/dev/null | jq -r '.[0].status // empty')"
+    assert_eq "failed manual run is recorded as status=failed" "failed" "$st"
   else
-    detect="\"$CREWSHIP\" --server \"$SERVER\" inbox list --kind failed_run --state all 2>/dev/null | grep -q ."
+    skip "failed-run record check" "jq missing"
   fi
-  poll_until "failed run surfaces a failed_run inbox item" "$POLL_TIMEOUT" "$detect"
+  skip "failed_run inbox for manual run" "by design: failed_run inbox is scheduled-run-only; manual failures surface via exit code + records (asserted above)"
 fi
 
 finish

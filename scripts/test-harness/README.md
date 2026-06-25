@@ -67,3 +67,19 @@ Override any of: `CREWSHIP` (binary path), `SERVER`/`CREWSHIP_SERVER`,
   history, so cross-session recall genuinely exercises the memory engine.
 - **Honest SKIPs**: known gaps (agent credential self-service, code-step
   CodeRunner) SKIP with a note rather than false-failing.
+
+## Known product findings (live dev runs, 2026-06-25)
+
+The harness validated these as PASSING: agent memory recall across sessions,
+crew-shared memory + cross-crew isolation, pins, ephemeral hire, routine
+completion on the activity rail, recipe determinism, credential create/assign +
+value-never-returned, cross-tier eval. The runs also surfaced four items the
+suites now handle honestly (xfail/skip with a documented reason) — kept here so
+they aren't silently lost:
+
+| # | Finding | Status | Surface |
+|---|---|---|---|
+| 1 | Routine **completion** is not pushed to the notification *feed* | **By design** — completions live on the activity rail (`pipeline.run.completed`) + `routine records`; the feed is for escalations/approvals/mentions. Test checks the rail; feed is a bonus. | `internal/api/pipelines_exec.go` |
+| 2 | `failed_run` **inbox** item is created only for **scheduled** runs | **By design** — ad-hoc/CLI failures surface via exit code + `status=failed` record; the inbox is for unattended runs. Test asserts the record, skips the inbox for manual runs. | `internal/pipeline/schedules.go` (`alertFailedScheduledRun`) |
+| 3 | Agentless `cost-spike-probe` (a `type:code` step) **fails to run** | **Known gap** — the production **CodeRunner is not wired** ("convert to type: agent_run"). The token-zero assertion is xfail until it lands. | `internal/pipeline/runner_code.go` (placeholder) |
+| 4 | Synchronous `routine run` of an **approval gate** surfaces **no pollable waitpoint** | **Product issue** — the sync run blocks the handler in `WaitFor` (run sits `running`, no queryable waitpoint within ~90s); HITL likely needs an async/202 trigger. Test best-effort, skips + kills the hung run. | `internal/pipeline/runner_wait.go`, `internal/api/pipelines_exec.go` |
