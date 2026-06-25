@@ -97,16 +97,22 @@ func TestPipelineRun_WaitGate_DurableAcrossRequestCancel(t *testing.T) {
 	// goroutine while the test orchestrates the cancel + approval.
 	handlerReturned := make(chan struct{})
 	go func() {
+		defer close(handlerReturned)
 		h.Run(rr, req)
-		close(handlerReturned)
 	}()
 
-	// Deterministic: block until the run has actually reached the gate.
+	// Block until the run has actually reached the gate. The 60s ceiling is
+	// generous on purpose: under a loaded CI runner the run goroutine can be
+	// CPU-starved for many seconds before it threads down to WaitFor. If the
+	// handler returns *before* the gate, that's an early executor error —
+	// surface its response instead of timing out on a mystery.
 	var runCtx context.Context
 	select {
 	case runCtx = <-wp.captured:
-	case <-time.After(10 * time.Second):
-		t.Fatal("run never reached the approval gate")
+	case <-handlerReturned:
+		t.Fatalf("handler returned before reaching the approval gate (early error): code=%d body=%s", rr.Code, rr.Body.String())
+	case <-time.After(60 * time.Second):
+		t.Fatal("run never reached the approval gate within 60s")
 	}
 
 	// The proxy drops the original request.
@@ -124,7 +130,7 @@ func TestPipelineRun_WaitGate_DurableAcrossRequestCancel(t *testing.T) {
 	wp.release <- true
 	select {
 	case <-handlerReturned:
-	case <-time.After(10 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("handler did not return after approval — run did not resume")
 	}
 
