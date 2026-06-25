@@ -229,6 +229,9 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	r.mux.Handle("GET /api/v1/inbox", authed(wsCtx(http.HandlerFunc(ih.List))))
 	r.mux.Handle("GET /api/v1/inbox/count", authed(wsCtx(http.HandlerFunc(ih.UnreadCount))))
 	r.mux.Handle("PATCH /api/v1/inbox/{id}", authed(wsCtx(http.HandlerFunc(ih.PatchState))))
+	// Bulk state transition — the tree-grouped UI's "resolve all under
+	// this routine / crew" action. POST so the body can carry the id list.
+	r.mux.Handle("POST /api/v1/inbox/bulk", authed(wsCtx(http.HandlerFunc(ih.BulkPatchState))))
 
 	// Memory health dashboard — 5-metric score with per-crew scope.
 	// Read-only; available to every workspace member because the

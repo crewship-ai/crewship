@@ -472,3 +472,113 @@ func TestInboxHandler_PatchState_SourceManagedKinds(t *testing.T) {
 		}
 	}
 }
+
+// TestInboxHandler_BulkPatchState covers the tree-grouped UI's
+// "resolve all under this group" action: a single call clears the
+// freely-resolvable rows and SKIPS (not fails) source-managed kinds
+// that can't take the requested state, reporting both counts.
+func TestInboxHandler_BulkPatchState(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	h := NewInboxHandler(db, newTestLogger(), nil)
+	now := time.Now().UTC()
+
+	// A mixed selection: 2 failed_run + 1 message (freely resolvable) and
+	// 1 waitpoint + 1 escalation (source-managed → skipped on 'resolved').
+	seedInboxItem(t, h, wsID, "fr-1", "failed_run", "unread", "", "", "fetch-and-extract", now)
+	seedInboxItem(t, h, wsID, "fr-2", "failed_run", "unread", "", "", "fetch-and-extract", now)
+	seedInboxItem(t, h, wsID, "msg-1", "message", "unread", "", "", "note", now)
+	seedInboxItem(t, h, wsID, "wp-1", "waitpoint", "unread", "", "", "approve", now)
+	seedInboxItem(t, h, wsID, "esc-1", "escalation", "unread", "", "", "help", now)
+
+	bulk := func(ids []string, state, action string) map[string]interface{} {
+		t.Helper()
+		body, _ := json.Marshal(map[string]interface{}{"ids": ids, "state": state, "resolved_action": action})
+		req := httptest.NewRequest("POST", "/api/v1/inbox/bulk", strings.NewReader(string(body)))
+		req = withWorkspaceUser(req, userID, wsID, "OWNER")
+		rr := httptest.NewRecorder()
+		h.BulkPatchState(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("bulk: code = %d body=%s, want 200", rr.Code, rr.Body.String())
+		}
+		var out map[string]interface{}
+		if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+			t.Fatalf("bulk: decode: %v", err)
+		}
+		return out
+	}
+
+	out := bulk([]string{"fr-1", "fr-2", "msg-1", "wp-1", "esc-1"}, "resolved", "cancelled")
+	if got := out["updated"]; got != float64(3) {
+		t.Errorf("updated = %v, want 3 (2 failed_run + 1 message)", got)
+	}
+	if got := out["skipped"]; got != float64(2) {
+		t.Errorf("skipped = %v, want 2 (waitpoint + escalation)", got)
+	}
+
+	// The 3 freely-resolvable rows are now resolved with the action recorded.
+	for _, id := range []string{"fr-1", "fr-2", "msg-1"} {
+		var state, action string
+		db.QueryRow(`SELECT state, COALESCE(resolved_action,'') FROM inbox_items WHERE id=?`, id).Scan(&state, &action)
+		if state != "resolved" || action != "cancelled" {
+			t.Errorf("%s: state=%s action=%s, want resolved/cancelled", id, state, action)
+		}
+	}
+	// The source-managed rows are untouched (still unread).
+	for _, id := range []string{"wp-1", "esc-1"} {
+		var state string
+		db.QueryRow(`SELECT state FROM inbox_items WHERE id=?`, id).Scan(&state)
+		if state != "unread" {
+			t.Errorf("%s: state=%s, want unread (skipped)", id, state)
+		}
+	}
+
+	// 'read' is allowed for every kind, including source-managed ones.
+	out = bulk([]string{"wp-1", "esc-1"}, "read", "")
+	if got := out["updated"]; got != float64(2) {
+		t.Errorf("read updated = %v, want 2 (read allowed for all kinds)", got)
+	}
+
+	// Cross-workspace / unknown ids are counted as not_found, not errors.
+	out = bulk([]string{"does-not-exist"}, "resolved", "dismissed")
+	if got := out["not_found"]; got != float64(1) {
+		t.Errorf("not_found = %v, want 1", got)
+	}
+	if got := out["updated"]; got != float64(0) {
+		t.Errorf("updated = %v, want 0 for unknown id", got)
+	}
+}
+
+// TestInboxHandler_BulkPatchState_Validation covers the request guards.
+func TestInboxHandler_BulkPatchState_Validation(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	h := NewInboxHandler(db, newTestLogger(), nil)
+
+	call := func(bodyJSON string) int {
+		req := httptest.NewRequest("POST", "/api/v1/inbox/bulk", strings.NewReader(bodyJSON))
+		req = withWorkspaceUser(req, userID, wsID, "OWNER")
+		rr := httptest.NewRecorder()
+		h.BulkPatchState(rr, req)
+		return rr.Code
+	}
+
+	if code := call(`{"ids":[],"state":"resolved"}`); code != http.StatusBadRequest {
+		t.Errorf("empty ids: code = %d, want 400", code)
+	}
+	if code := call(`{"ids":["a"],"state":"bogus"}`); code != http.StatusBadRequest {
+		t.Errorf("bad state: code = %d, want 400", code)
+	}
+
+	// Over the 500 cap.
+	tooMany := make([]string, 501)
+	for i := range tooMany {
+		tooMany[i] = fmt.Sprintf("id-%d", i)
+	}
+	body, _ := json.Marshal(map[string]interface{}{"ids": tooMany, "state": "read"})
+	if code := call(string(body)); code != http.StatusBadRequest {
+		t.Errorf("over cap: code = %d, want 400", code)
+	}
+}
