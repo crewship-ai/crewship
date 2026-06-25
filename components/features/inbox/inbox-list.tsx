@@ -414,15 +414,13 @@ export function InboxList() {
                             onToggleCheck={() => toggleItem(item.id)}
                             onSelect={() => {
                               setSelectedId(item.id)
-                              // Snapshot immediately so the detail survives
-                              // the read-transition evicting this row.
+                              // Snapshot immediately so the detail survives if
+                              // the row later changes state. Opening no longer
+                              // marks the item read — that vanished items from
+                              // the unread filter just by glancing at them. The
+                              // user marks read deliberately from the detail
+                              // pane's "Mark read" button instead.
                               setSelectedSnapshot(item)
-                              if (item.state === "unread") {
-                                // Fire-and-forget; useInbox surfaces the
-                                // error itself, so just swallow the reject
-                                // to avoid an unhandled rejection.
-                                void patch(item.id, "read").catch(() => {})
-                              }
                             }}
                           />
                         ))}
@@ -486,6 +484,7 @@ export function InboxList() {
                   toast.success(`Marked as ${action}`)
                   refresh()
                 }}
+                onMarkRead={() => patch(selected.id, "read")}
                 onMarkUnread={() => patch(selected.id, "unread")}
                 // onRefresh lets source-managed actions (e.g. PR-D
                 // approve-hire, which resolves the inbox row server-
@@ -613,14 +612,16 @@ function InboxRow({
   )
 }
 
-function InboxDetail({
+export function InboxDetail({
   item,
   onResolve,
+  onMarkRead,
   onMarkUnread,
   onRefresh,
 }: {
   item: InboxItem
   onResolve: (action: string) => void | Promise<void>
+  onMarkRead: () => void
   onMarkUnread: () => void
   onRefresh: () => void | Promise<void>
 }) {
@@ -704,16 +705,24 @@ function InboxDetail({
       )}
 
       <div className="mt-auto border-t border-white/[0.06] bg-card/20 px-6 py-3">
-        {!isResolved ? (
-          <Button size="sm" variant="ghost" onClick={onMarkUnread} className="text-xs">
-            <Bell className="mr-1.5 h-3 w-3" />
-            Mark unread
-          </Button>
-        ) : (
+        {isResolved ? (
           <span className="text-[11px] text-muted-foreground">
             Resolved {relTime(item.resolved_at ?? item.updated_at)}
             {item.resolved_action && ` · ${item.resolved_action}`}
           </span>
+        ) : item.state === "unread" ? (
+          // Opening an item no longer marks it read; the user does it
+          // here when they're done with it, which is the only thing that
+          // should drop it from the unread filter.
+          <Button size="sm" variant="ghost" onClick={onMarkRead} className="text-xs">
+            <CheckCheck className="mr-1.5 h-3 w-3" />
+            Mark read
+          </Button>
+        ) : (
+          <Button size="sm" variant="ghost" onClick={onMarkUnread} className="text-xs">
+            <Bell className="mr-1.5 h-3 w-3" />
+            Mark unread
+          </Button>
         )}
       </div>
     </div>
