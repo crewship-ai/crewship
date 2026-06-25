@@ -4,6 +4,13 @@ import * as React from "react"
 import { Zap, Search } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { ToolkitIcon, EmptyHint, TableSkeleton } from "./shared"
 import type { TriggerType, TriggerTypesResp, TriggerInstance, ActiveTriggersResp } from "./types"
 
@@ -252,20 +259,16 @@ function TriggerModal({
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
-      onClick={onClose}
-    >
-      <div
-        className="w-full max-w-md rounded-xl border border-white/10 bg-card p-6 shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 className="text-base font-semibold text-foreground">Enable trigger</h2>
-        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-          Subscribe a Composio user to{" "}
-          <span className="font-mono text-foreground/90">{trigger.slug}</span>. Events for that
-          user&apos;s connected account will fire this trigger.
-        </p>
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="block max-w-md rounded-xl border-white/10 bg-card shadow-2xl sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="text-base">Enable trigger</DialogTitle>
+          <DialogDescription className="text-xs leading-relaxed">
+            Subscribe a Composio user to{" "}
+            <span className="font-mono text-foreground/90">{trigger.slug}</span>. Events for that
+            user&apos;s connected account will fire this trigger.
+          </DialogDescription>
+        </DialogHeader>
 
         <div className="mt-4 space-y-3">
           {users.length > 0 && (
@@ -306,7 +309,7 @@ function TriggerModal({
             {busy ? "Creating…" : "Create trigger"}
           </Button>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   )
 }

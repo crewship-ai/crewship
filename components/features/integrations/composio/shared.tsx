@@ -21,6 +21,12 @@ export function brandLogo(slug: string): string {
 export function ToolkitIcon({ toolkit, size = 20 }: { toolkit: Toolkit; size?: number }) {
   const src = toolkit.logo || (toolkit.slug ? brandLogo(toolkit.slug) : "")
   const [failed, setFailed] = React.useState(false)
+  // Reset the fallback state when the underlying logo source changes — otherwise
+  // a re-used component instance keeps showing the glyph for a different toolkit
+  // after one icon 404s.
+  React.useEffect(() => {
+    setFailed(false)
+  }, [src])
   if (src && !failed) {
     return (
       <img

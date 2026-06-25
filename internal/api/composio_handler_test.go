@@ -3,11 +3,13 @@ package api
 import (
 	"bytes"
 	"database/sql"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/config"
@@ -51,14 +53,32 @@ func fakeComposioAPI(t *testing.T, authConfigs, connectedAccounts string) *httpt
 		case "/api/v3.1/connected_accounts/link":
 			_, _ = w.Write([]byte(`{"link_token":"lt_1","redirect_url":"https://oauth.example/authorize?x=1","connected_account_id":"ca_new"}`))
 		case "/api/v3.1/mcp/servers":
-			// Mirror Composio's create-server response: an id + a base mcp_url
-			// the handler scopes per-user with a `?user_id=` suffix.
-			_, _ = w.Write([]byte(`{"id":"mcp_srv_1","mcp_url":"https://mcp.composio.dev/server/mcp_srv_1"}`))
+			// find-or-create: GET lists existing servers (none here, so the
+			// handler provisions one); POST mirrors Composio's create-server
+			// response — an id + a base mcp_url the handler scopes per-user.
+			switch r.Method {
+			case http.MethodGet:
+				_, _ = w.Write([]byte(`{"items":[]}`))
+			case http.MethodPost:
+				_, _ = w.Write([]byte(`{"id":"mcp_srv_1","mcp_url":"https://mcp.composio.dev/server/mcp_srv_1"}`))
+			default:
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			}
 		// Connected-account management: revoke/refresh (POST) + delete (DELETE).
-		// Composio returns no useful body; 204 exercises the client's no-decode path.
+		// Branch on method so a wrong-verb regression fails instead of silently
+		// 204-ing. Composio returns no useful body; 204 exercises the no-decode path.
 		case "/api/v3.1/connected_accounts/ca_1/revoke",
-			"/api/v3.1/connected_accounts/ca_1/refresh",
-			"/api/v3.1/connected_accounts/ca_1":
+			"/api/v3.1/connected_accounts/ca_1/refresh":
+			if r.Method != http.MethodPost {
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		case "/api/v3.1/connected_accounts/ca_1":
+			if r.Method != http.MethodDelete {
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
 			w.WriteHeader(http.StatusNoContent)
 		default:
 			http.Error(w, "not found", http.StatusNotFound)
@@ -290,11 +310,17 @@ func TestComposio_Settings_UpsertAndUse(t *testing.T) {
 	wsID := seedTestWorkspace(t, db, userID)
 
 	srv := fakeComposioAPI(t, `{"items":[]}`, `{"items":[]}`)
-	// nil env config → the provider is ONLY configurable via the stored key.
-	h := NewComposioHandler(db, newComposioTestLogger(), nil)
+	// base_url is no longer client-supplied: the validation probe and the
+	// resolved client both honour only the server env base URL, so point that
+	// at the fake server. The stored workspace key is still what gets persisted
+	// and used (source: "workspace").
+	h := NewComposioHandler(db, newComposioTestLogger(), &config.ComposioConfig{
+		Enabled: true, APIKey: "ak_env", BaseURL: srv.URL,
+	})
 
-	// PUT a key (validated against the fake toolkits endpoint).
-	body := bytes.NewBufferString(`{"api_key":"ak_ws","base_url":"` + srv.URL + `","label":"Proj"}`)
+	// PUT a key (validated against the fake toolkits endpoint). No base_url:
+	// the API rejects/ignores it now (SSRF guard).
+	body := bytes.NewBufferString(`{"api_key":"ak_ws","label":"Proj"}`)
 	req := withWorkspaceUser(httptest.NewRequest("PUT", "/api/v1/integrations/composio/settings", body), userID, wsID, "OWNER")
 	rr := httptest.NewRecorder()
 	h.UpsertSettings(rr, req)
@@ -336,8 +362,12 @@ func TestComposio_Settings_InvalidKeyRejected(t *testing.T) {
 	}))
 	t.Cleanup(bad.Close)
 
-	h := NewComposioHandler(db, newComposioTestLogger(), nil)
-	body := bytes.NewBufferString(`{"api_key":"nope","base_url":"` + bad.URL + `"}`)
+	// Probe host is env-only now; point it at the bad server so the key
+	// validation hits the 401 (base_url in the body would be ignored).
+	h := NewComposioHandler(db, newComposioTestLogger(), &config.ComposioConfig{
+		Enabled: true, APIKey: "ak_env", BaseURL: bad.URL,
+	})
+	body := bytes.NewBufferString(`{"api_key":"nope"}`)
 	req := withWorkspaceUser(httptest.NewRequest("PUT", "/api/v1/integrations/composio/settings", body), userID, wsID, "OWNER")
 	rr := httptest.NewRecorder()
 	h.UpsertSettings(rr, req)
@@ -404,9 +434,36 @@ func TestComposio_BindAgent_PersistsRows(t *testing.T) {
 		t.Fatalf("insert agent: %v", err)
 	}
 
-	srv := fakeComposioAPI(t,
-		`{"items":[{"id":"ac_gm","name":"gmail-x","status":"ENABLED","toolkit":{"slug":"gmail"}}]}`,
-		`{"items":[]}`)
+	// Stateful fake: find-or-create. GET /mcp/servers lists what POST created
+	// (echoing the ?name= filter so the handler can match by name); mcpCreates
+	// counts provisioning calls so re-binding can assert "created exactly once".
+	var mu sync.Mutex
+	mcpCreates := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/api/v3/auth_configs" && r.Method == http.MethodGet:
+			_, _ = w.Write([]byte(`{"items":[{"id":"ac_gm","name":"gmail-x","status":"ENABLED","toolkit":{"slug":"gmail"}}]}`))
+		case r.URL.Path == "/api/v3.1/mcp/servers" && r.Method == http.MethodGet:
+			mu.Lock()
+			created := mcpCreates
+			mu.Unlock()
+			if created > 0 {
+				name := r.URL.Query().Get("name")
+				_, _ = w.Write([]byte(fmt.Sprintf(`{"items":[{"id":"mcp_srv_1","name":%q,"mcp_url":"https://mcp.composio.dev/server/mcp_srv_1"}]}`, name)))
+			} else {
+				_, _ = w.Write([]byte(`{"items":[]}`))
+			}
+		case r.URL.Path == "/api/v3.1/mcp/servers" && r.Method == http.MethodPost:
+			mu.Lock()
+			mcpCreates++
+			mu.Unlock()
+			_, _ = w.Write([]byte(`{"id":"mcp_srv_1","mcp_url":"https://mcp.composio.dev/server/mcp_srv_1"}`))
+		default:
+			http.Error(w, "not found", http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(srv.Close)
 	h := NewComposioHandler(db, newComposioTestLogger(), &config.ComposioConfig{
 		Enabled: true, APIKey: "ak_test", BaseURL: srv.URL,
 	})
@@ -485,6 +542,15 @@ func TestComposio_BindAgent_PersistsRows(t *testing.T) {
 	}
 	if serverCount != 1 || bindCount != 1 {
 		t.Errorf("after re-bind: servers=%d bindings=%d, want 1/1", serverCount, bindCount)
+	}
+
+	// Find-or-create: the Composio MCP server must be provisioned exactly ONCE
+	// across both binds — the second bind reuses the existing server's mcp_url.
+	mu.Lock()
+	creates := mcpCreates
+	mu.Unlock()
+	if creates != 1 {
+		t.Errorf("Composio MCP server created %d times, want exactly 1 (find-or-create)", creates)
 	}
 }
 

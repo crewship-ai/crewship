@@ -409,6 +409,37 @@ func (c *Client) CreateManagedAuthConfig(ctx context.Context, toolkitSlug, name 
 	return out.ID, nil
 }
 
+// MCPServer is one Composio-managed MCP server (the find-or-create unit
+// BindAgent keys off). Name is the stable, caller-chosen identifier we reuse a
+// server by; MCPURL is the base endpoint a `user_id` query param scopes.
+type MCPServer struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	MCPURL string `json:"mcp_url"`
+}
+
+// ListMCPServers returns the project's MCP servers, optionally filtered to a
+// single name (Composio's `name` query param). BindAgent uses the name filter
+// to find an existing server before provisioning a new one — without this the
+// bind flow would create (and leak) a fresh Composio MCP server on every call.
+func (c *Client) ListMCPServers(ctx context.Context, name string) ([]MCPServer, error) {
+	q := url.Values{}
+	if name != "" {
+		q.Set("name", name)
+	}
+	path := "/api/v3.1/mcp/servers"
+	if enc := q.Encode(); enc != "" {
+		path += "?" + enc
+	}
+	var env struct {
+		Items []MCPServer `json:"items"`
+	}
+	if err := c.get(ctx, path, &env); err != nil {
+		return nil, err
+	}
+	return env.Items, nil
+}
+
 // CreateMCPServer provisions a Composio-managed MCP server scoped to the given
 // auth configs and returns its id and base MCP URL. The returned URL is the
 // project-wide endpoint; callers append a `user_id` query param to scope it to

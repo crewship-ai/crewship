@@ -4,6 +4,13 @@ import * as React from "react"
 import { Bot } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
 import { ToolkitIcon, AppChip, EmptyHint, TableSkeleton } from "./shared"
 import type { AgentLite, AgentBindingsMap, Inventory, Toolkit } from "./types"
@@ -235,22 +242,18 @@ function AssignModal({
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
-      onClick={onClose}
-    >
-      <div
-        className="w-full max-w-md rounded-xl border border-white/10 bg-card p-6 shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 className="text-base font-semibold text-foreground">
-          {current ? "Edit" : "Assign"} agent access
-        </h2>
-        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-          <span className="font-medium text-foreground/90">{agent.name}</span>
-          {agent.crew?.name ? ` (${agent.crew.name})` : ""} acts as the chosen Composio user.
-          Crewship generates a scoped MCP URL for this agent.
-        </p>
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="block max-w-md rounded-xl border-white/10 bg-card shadow-2xl sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="text-base">
+            {current ? "Edit" : "Assign"} agent access
+          </DialogTitle>
+          <DialogDescription className="text-xs leading-relaxed">
+            <span className="font-medium text-foreground/90">{agent.name}</span>
+            {agent.crew?.name ? ` (${agent.crew.name})` : ""} acts as the chosen Composio user.
+            Crewship generates a scoped MCP URL for this agent.
+          </DialogDescription>
+        </DialogHeader>
 
         <div className="mt-4 space-y-3">
           {users.length > 0 && (
@@ -332,7 +335,7 @@ function AssignModal({
             </Button>
           </div>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   )
 }

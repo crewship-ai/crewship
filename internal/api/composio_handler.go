@@ -58,9 +58,9 @@ func NewComposioHandler(db *sql.DB, logger *slog.Logger, cfg *config.ComposioCon
 func (h *ComposioHandler) resolveClient(r *http.Request) (*composio.Client, string) {
 	wsID := WorkspaceIDFromContext(r.Context())
 	if wsID != "" {
-		var enc, baseURL sql.NullString
+		var enc sql.NullString
 		err := h.db.QueryRowContext(r.Context(),
-			`SELECT encrypted_api_key, base_url FROM composio_settings WHERE workspace_id = ?`, wsID).Scan(&enc, &baseURL)
+			`SELECT encrypted_api_key FROM composio_settings WHERE workspace_id = ?`, wsID).Scan(&enc)
 		switch {
 		case err == nil && enc.Valid && enc.String != "":
 			key, derr := encryption.Decrypt(enc.String)
@@ -69,7 +69,9 @@ func (h *ComposioHandler) resolveClient(r *http.Request) (*composio.Client, stri
 				break
 			}
 			if key != "" {
-				return composio.NewClient(key, baseURL.String), "workspace"
+				// Base URL is never client-supplied (SSRF): only the server env
+				// COMPOSIO_BASE_URL (h.envBaseURL) may pin a non-default host.
+				return composio.NewClient(key, h.envBaseURL), "workspace"
 			}
 		case err != nil && !errors.Is(err, sql.ErrNoRows):
 			// Table missing (pre-migration) or other read error: log and fall
@@ -487,9 +489,9 @@ const composioManagedKeyName = "composio-managed-key"
 func (h *ComposioHandler) resolveKey(r *http.Request) (key, baseURL string, ok bool) {
 	wsID := WorkspaceIDFromContext(r.Context())
 	if wsID != "" {
-		var enc, bu sql.NullString
+		var enc sql.NullString
 		err := h.db.QueryRowContext(r.Context(),
-			`SELECT encrypted_api_key, base_url FROM composio_settings WHERE workspace_id = ?`, wsID).Scan(&enc, &bu)
+			`SELECT encrypted_api_key FROM composio_settings WHERE workspace_id = ?`, wsID).Scan(&enc)
 		switch {
 		case err == nil && enc.Valid && enc.String != "":
 			k, derr := encryption.Decrypt(enc.String)
@@ -498,7 +500,8 @@ func (h *ComposioHandler) resolveKey(r *http.Request) (key, baseURL string, ok b
 				break
 			}
 			if k != "" {
-				return k, bu.String, true
+				// Base URL is env-only (see resolveClient): never the stored row.
+				return k, h.envBaseURL, true
 			}
 		case err != nil && !errors.Is(err, sql.ErrNoRows):
 			h.logger.Warn("composio: read workspace settings", "error", err)
@@ -574,9 +577,10 @@ func (h *ComposioHandler) BindAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Gather the auth-config ids the MCP server should expose. By default every
-	// configured connector; with toolkits given, filter to those toolkits'
-	// configs so the agent only sees the requested apps.
+	// Gather the auth-config ids the MCP server should expose. An EMPTY toolkits
+	// list means "all of the workspace's auth configs" (every connected app) —
+	// NOT zero; the filter below only narrows when at least one toolkit is named,
+	// so the agent then sees just the requested apps.
 	authConfigs, err := client.ListAuthConfigs(ctx)
 	if err != nil {
 		h.logger.Error("composio: list auth configs", "error", err)
@@ -610,11 +614,28 @@ func (h *ComposioHandler) BindAgent(w http.ResponseWriter, r *http.Request) {
 		wsShort = wsShort[len(wsShort)-12:]
 	}
 	mcpName := "crewship-" + wsShort
-	_, mcpURL, err := client.CreateMCPServer(ctx, mcpName, authConfigIDs)
-	if err != nil {
-		h.logger.Error("composio: create mcp server", "error", err)
-		writeProblem(w, r, http.StatusBadGateway, "Composio API error (mcp server)")
-		return
+
+	// Find-or-create: reuse the workspace's existing Composio MCP server when one
+	// already carries this stable name — creating a fresh server on every bind
+	// leaks duplicate Composio-side resources. A list error is non-fatal: fall
+	// through to create (mcpURL stays empty) rather than block the binding.
+	var mcpURL string
+	if servers, lerr := client.ListMCPServers(ctx, mcpName); lerr != nil {
+		h.logger.Warn("composio: list mcp servers", "error", lerr)
+	} else {
+		for _, s := range servers {
+			if s.Name == mcpName && s.MCPURL != "" {
+				mcpURL = s.MCPURL
+				break
+			}
+		}
+	}
+	if mcpURL == "" {
+		if _, mcpURL, err = client.CreateMCPServer(ctx, mcpName, authConfigIDs); err != nil {
+			h.logger.Error("composio: create mcp server", "error", err)
+			writeProblem(w, r, http.StatusBadGateway, "Composio API error (mcp server)")
+			return
+		}
 	}
 	if mcpURL == "" {
 		h.logger.Error("composio: mcp server returned empty url")
@@ -978,18 +999,17 @@ type composioSettingsResponse struct {
 	Configured bool   `json:"configured"`
 	Source     string `json:"source"` // "workspace" | "env" | "none"
 	Label      string `json:"label,omitempty"`
-	BaseURL    string `json:"base_url,omitempty"`
 }
 
 // settingsState reports the effective config without ever returning the key.
 func (h *ComposioHandler) settingsState(r *http.Request) composioSettingsResponse {
 	wsID := WorkspaceIDFromContext(r.Context())
 	if wsID != "" {
-		var label, baseURL sql.NullString
+		var label sql.NullString
 		err := h.db.QueryRowContext(r.Context(),
-			`SELECT label, base_url FROM composio_settings WHERE workspace_id = ?`, wsID).Scan(&label, &baseURL)
+			`SELECT label FROM composio_settings WHERE workspace_id = ?`, wsID).Scan(&label)
 		if err == nil {
-			return composioSettingsResponse{Configured: true, Source: "workspace", Label: label.String, BaseURL: baseURL.String}
+			return composioSettingsResponse{Configured: true, Source: "workspace", Label: label.String}
 		}
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			h.logger.Warn("composio: read settings", "error", err)
@@ -1020,25 +1040,28 @@ func (h *ComposioHandler) UpsertSettings(w http.ResponseWriter, r *http.Request)
 		writeProblem(w, r, http.StatusBadRequest, "workspace context required")
 		return
 	}
+	// base_url is intentionally NOT accepted from the API: letting a client pin
+	// the Composio host would point the key-bearing client at an arbitrary/
+	// internal target (SSRF). Only the server env COMPOSIO_BASE_URL may override
+	// the default host; the stored base_url column is always written empty.
 	var req struct {
-		APIKey  string `json:"api_key"`
-		BaseURL string `json:"base_url"`
-		Label   string `json:"label"`
+		APIKey string `json:"api_key"`
+		Label  string `json:"label"`
 	}
 	if err := readJSON(r, &req); err != nil {
 		writeProblem(w, r, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
 	req.APIKey = strings.TrimSpace(req.APIKey)
-	req.BaseURL = strings.TrimSpace(req.BaseURL)
 	if req.APIKey == "" {
 		writeProblem(w, r, http.StatusBadRequest, "api_key is required")
 		return
 	}
 
 	// Validate against Composio before persisting — a cheap authed call that
-	// fails fast on a bad key/project (the UI surfaces this inline).
-	probe := composio.NewClient(req.APIKey, req.BaseURL)
+	// fails fast on a bad key/project (the UI surfaces this inline). The probe
+	// uses the server-controlled base URL only (never a client-supplied one).
+	probe := composio.NewClient(req.APIKey, h.envBaseURL)
 	if _, err := probe.ListToolkits(r.Context(), "", "", 1); err != nil {
 		h.logger.Warn("composio: api key validation failed", "error", err)
 		writeProblem(w, r, http.StatusBadRequest, "Composio rejected this API key (check the key and project)")
@@ -1065,7 +1088,7 @@ func (h *ComposioHandler) UpsertSettings(w http.ResponseWriter, r *http.Request)
 			base_url          = excluded.base_url,
 			label             = excluded.label,
 			updated_at        = excluded.updated_at`,
-		wsID, enc, req.BaseURL, req.Label, createdBy, now, now)
+		wsID, enc, "", req.Label, createdBy, now, now)
 	if err != nil {
 		h.logger.Error("composio: upsert settings", "error", err)
 		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
@@ -1073,7 +1096,7 @@ func (h *ComposioHandler) UpsertSettings(w http.ResponseWriter, r *http.Request)
 	}
 
 	writeJSON(w, http.StatusOK, composioSettingsResponse{
-		Configured: true, Source: "workspace", Label: req.Label, BaseURL: req.BaseURL,
+		Configured: true, Source: "workspace", Label: req.Label,
 	})
 }
 

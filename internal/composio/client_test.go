@@ -221,6 +221,35 @@ func TestClient_ConnectedAccountManagement(t *testing.T) {
 	}
 }
 
+func TestClient_ListMCPServers(t *testing.T) {
+	var gotMethod, gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotQuery = r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"items":[
+			{"id":"mcp_srv_1","name":"crewship-abc","mcp_url":"https://mcp.composio.dev/server/mcp_srv_1"}
+		]}`))
+	}))
+	t.Cleanup(srv.Close)
+	c := NewClient("ak_test", srv.URL)
+
+	got, err := c.ListMCPServers(context.Background(), "crewship-abc")
+	if err != nil {
+		t.Fatalf("ListMCPServers: %v", err)
+	}
+	if gotMethod != http.MethodGet {
+		t.Errorf("method = %s, want GET", gotMethod)
+	}
+	if !strings.Contains(gotQuery, "name=crewship-abc") {
+		t.Errorf("query = %q, want name=crewship-abc", gotQuery)
+	}
+	if len(got) != 1 || got[0].ID != "mcp_srv_1" || got[0].Name != "crewship-abc" ||
+		got[0].MCPURL != "https://mcp.composio.dev/server/mcp_srv_1" {
+		t.Errorf("unexpected servers: %+v", got)
+	}
+}
+
 func TestClient_DefaultBaseURL(t *testing.T) {
 	c := NewClient("ak_test", "")
 	if c.baseURL != DefaultBaseURL {

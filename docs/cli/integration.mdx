@@ -54,8 +54,10 @@ accepts a slug or id. `account revoke`/`refresh`/`remove` map to
 and `DELETE .../accounts/{accountId}` (all workspace manage); the `account-id` is
 the Composio account id shown by `integration composio inventory --output json`.
 
-Maps to `GET /api/v1/integrations/composio/inventory`. Requires `COMPOSIO_API_KEY`
-on the server; prints a "not configured" notice otherwise. Add `--output json`
+Maps to `GET /api/v1/integrations/composio/inventory`. Requires a Composio API key
+for the active workspace — set one per-workspace with `integration composio key set`
+(or from the Integrations UI), or fall back to a server-level `COMPOSIO_API_KEY`.
+Prints a "not configured" notice when neither is present. Add `--output json`
 for the raw payload. See the [Integrations guide](/guides/integrations#managed-integrations-composio).
 
 ### Workspace-scoped

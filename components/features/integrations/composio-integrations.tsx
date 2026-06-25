@@ -7,6 +7,13 @@ import { Plug, ShieldCheck, KeyRound, RefreshCw } from "lucide-react"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
 
 import type {
@@ -45,6 +52,14 @@ const TABS: { key: TabKey; label: string }[] = [
 export function ComposioIntegrations() {
   const { workspaceId, loading: wsLoading } = useWorkspace()
 
+  // Latest workspace id, mirrored into a ref so async loaders can detect when a
+  // late response belongs to a workspace the operator has already switched away
+  // from — and bail before clobbering the current workspace's state.
+  const wsRef = React.useRef(workspaceId)
+  React.useEffect(() => {
+    wsRef.current = workspaceId
+  }, [workspaceId])
+
   // ── Inventory (connected accounts + auth configs) ──
   const [data, setData] = React.useState<Inventory | null>(null)
   const [loading, setLoading] = React.useState(true)
@@ -56,11 +71,14 @@ export function ComposioIntegrations() {
     try {
       const r = await fetch(`/api/v1/integrations/composio/inventory?workspace_id=${wid}`)
       if (!r.ok) throw new Error(`Request failed (${r.status})`)
-      setData((await r.json()) as Inventory)
+      const j = (await r.json()) as Inventory
+      if (wsRef.current !== wid) return // workspace switched mid-flight
+      setData(j)
     } catch (e) {
+      if (wsRef.current !== wid) return
       setError(e instanceof Error ? e.message : "Failed to load inventory")
     } finally {
-      setLoading(false)
+      if (wsRef.current === wid) setLoading(false)
     }
   }, [])
 
@@ -82,12 +100,14 @@ export function ComposioIntegrations() {
       const r = await fetch(`/api/v1/integrations/composio/toolkits?${params}`)
       if (!r.ok) throw new Error(String(r.status))
       const j = (await r.json()) as ToolkitsResp
+      if (wsRef.current !== wid) return // workspace switched mid-flight
       setToolkits(j.toolkits ?? [])
       setTotal(j.total ?? 0)
     } catch {
+      if (wsRef.current !== wid) return
       setToolkits([])
     } finally {
-      setTkLoading(false)
+      if (wsRef.current === wid) setTkLoading(false)
     }
   }, [])
 
@@ -109,6 +129,7 @@ export function ComposioIntegrations() {
       const r = await fetch(`/api/v1/agents?workspace_id=${wid}`)
       if (!r.ok) throw new Error(String(r.status))
       const list = (await r.json()) as AgentLite[]
+      if (wsRef.current !== wid) return // workspace switched mid-flight
       setAgents(list)
       // Fetch each agent's Composio binding in parallel. A failed lookup for one
       // agent shouldn't blank the whole table — degrade that row to "no access".
@@ -126,12 +147,14 @@ export function ComposioIntegrations() {
           }
         }),
       )
+      if (wsRef.current !== wid) return // workspace switched mid-flight
       setBindings(Object.fromEntries(entries))
     } catch {
+      if (wsRef.current !== wid) return
       setAgents([])
       setBindings({})
     } finally {
-      setAgentsLoading(false)
+      if (wsRef.current === wid) setAgentsLoading(false)
     }
   }, [])
 
@@ -158,7 +181,10 @@ export function ComposioIntegrations() {
   const loadSettings = React.useCallback(async (wid: string) => {
     try {
       const r = await fetch(`/api/v1/integrations/composio/settings?workspace_id=${wid}`)
-      if (r.ok) setSettings((await r.json()) as ComposioSettings)
+      if (!r.ok) return
+      const j = (await r.json()) as ComposioSettings
+      if (wsRef.current !== wid) return // workspace switched mid-flight
+      setSettings(j)
     } catch {
       /* non-fatal */
     }
@@ -452,16 +478,15 @@ function ApiKeyModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
-      <div
-        className="w-full max-w-md rounded-xl border border-white/10 bg-card p-6 shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 className="text-base font-semibold text-foreground">Composio API key</h2>
-        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-          Stored encrypted for this workspace. We validate it against Composio before saving.
-          From app.composio.dev → your project → Settings → API keys.
-        </p>
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="block max-w-md rounded-xl border-white/10 bg-card shadow-2xl sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="text-base">Composio API key</DialogTitle>
+          <DialogDescription className="text-xs leading-relaxed">
+            Stored encrypted for this workspace. We validate it against Composio before saving.
+            From app.composio.dev → your project → Settings → API keys.
+          </DialogDescription>
+        </DialogHeader>
 
         <div className="mt-4 space-y-3">
           <div>
@@ -504,8 +529,8 @@ function ApiKeyModal({
             </Button>
           </div>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -546,6 +571,10 @@ function ConnectModal({
     }
     setBusy(true)
     setErr(null)
+    // Open the popup synchronously, inside the click gesture, so browser popup
+    // blockers don't kill it. We navigate it to Composio's hosted OAuth once the
+    // request resolves (and close it if there's no redirect or an error).
+    const popup = window.open("", "_blank", "noopener,noreferrer")
     try {
       const r = await fetch(`/api/v1/integrations/composio/connect?workspace_id=${workspaceId}`, {
         method: "POST",
@@ -555,12 +584,16 @@ function ConnectModal({
       const body = await r.json().catch(() => null)
       if (!r.ok) throw new Error(body?.detail || `Failed (${r.status})`)
       if (body?.redirect_url) {
-        // Open Composio's hosted OAuth in a new tab; the account lands under
-        // user_id when the user finishes. We refresh on return.
-        window.open(body.redirect_url, "_blank", "noopener,noreferrer")
+        // Point the pre-opened tab at Composio's hosted OAuth; the account lands
+        // under user_id when the user finishes. We refresh on return.
+        if (popup) popup.location.href = body.redirect_url
+        else window.open(body.redirect_url, "_blank", "noopener,noreferrer")
+      } else {
+        popup?.close()
       }
       onConnected()
     } catch (e) {
+      popup?.close()
       setErr(e instanceof Error ? e.message : "Failed to start connection")
     } finally {
       setBusy(false)
@@ -568,16 +601,15 @@ function ConnectModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
-      <div
-        className="w-full max-w-md rounded-xl border border-white/10 bg-card p-6 shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 className="text-base font-semibold text-foreground">{title}</h2>
-        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-          Authorize the app via OAuth. Pick the Composio user (the person/mailbox) this account
-          belongs to — agents bound to that user will be able to use it.
-        </p>
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="block max-w-md rounded-xl border-white/10 bg-card shadow-2xl sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="text-base">{title}</DialogTitle>
+          <DialogDescription className="text-xs leading-relaxed">
+            Authorize the app via OAuth. Pick the Composio user (the person/mailbox) this account
+            belongs to — agents bound to that user will be able to use it.
+          </DialogDescription>
+        </DialogHeader>
 
         <div className="mt-4 space-y-3">
           {!toolkit && (
@@ -633,8 +665,8 @@ function ConnectModal({
             {busy ? "Starting…" : "Connect with OAuth"}
           </Button>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   )
 }
 

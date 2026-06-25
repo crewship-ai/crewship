@@ -116,7 +116,6 @@ type composioSettingsResponse struct {
 	Configured bool   `json:"configured"`
 	Source     string `json:"source"`
 	Label      string `json:"label"`
-	BaseURL    string `json:"base_url"`
 }
 
 var composioCmd = &cobra.Command{
@@ -148,7 +147,7 @@ var composioInventoryCmd = &cobra.Command{
 		}
 
 		if !inv.Enabled {
-			fmt.Println("Composio is not configured on this server (set COMPOSIO_API_KEY).")
+			fmt.Println("Composio is not configured. Set a workspace key with `crewship integration composio key set` or from the dashboard (Integrations -> Composio); the COMPOSIO_API_KEY server env is also honoured.")
 			return nil
 		}
 
@@ -221,7 +220,7 @@ var composioToolkitsCmd = &cobra.Command{
 			return f.Auto(res, nil, nil)
 		}
 		if !res.Enabled {
-			fmt.Println("Composio is not configured on this server (set COMPOSIO_API_KEY).")
+			fmt.Println("Composio is not configured. Set a workspace key with `crewship integration composio key set` or from the dashboard (Integrations -> Composio); the COMPOSIO_API_KEY server env is also honoured.")
 			return nil
 		}
 		rows := make([][]string, 0, len(res.Toolkits))
@@ -271,7 +270,7 @@ var composioToolsCmd = &cobra.Command{
 			return f.Auto(res, nil, nil)
 		}
 		if !res.Enabled {
-			fmt.Println("Composio is not configured on this server (set COMPOSIO_API_KEY).")
+			fmt.Println("Composio is not configured. Set a workspace key with `crewship integration composio key set` or from the dashboard (Integrations -> Composio); the COMPOSIO_API_KEY server env is also honoured.")
 			return nil
 		}
 		rows := make([][]string, 0, len(res.Tools))
@@ -326,7 +325,7 @@ var composioTriggersTypesCmd = &cobra.Command{
 			return f.Auto(res, nil, nil)
 		}
 		if !res.Enabled {
-			fmt.Println("Composio is not configured on this server (set COMPOSIO_API_KEY).")
+			fmt.Println("Composio is not configured. Set a workspace key with `crewship integration composio key set` or from the dashboard (Integrations -> Composio); the COMPOSIO_API_KEY server env is also honoured.")
 			return nil
 		}
 		rows := make([][]string, 0, len(res.Triggers))
@@ -356,7 +355,7 @@ var composioTriggersActiveCmd = &cobra.Command{
 			return f.Auto(res, nil, nil)
 		}
 		if !res.Enabled {
-			fmt.Println("Composio is not configured on this server (set COMPOSIO_API_KEY).")
+			fmt.Println("Composio is not configured. Set a workspace key with `crewship integration composio key set` or from the dashboard (Integrations -> Composio); the COMPOSIO_API_KEY server env is also honoured.")
 			return nil
 		}
 		rows := make([][]string, 0, len(res.Triggers))
@@ -418,15 +417,15 @@ var composioKeyShowCmd = &cobra.Command{
 			return f.Auto(s, nil, nil)
 		}
 		if !s.Configured {
-			fmt.Println("Composio: not configured. Set a key with: crewship integration composio key set --key <ak_…>")
+			fmt.Println("Composio: not configured. Set a workspace key with:")
+			fmt.Println("  crewship integration composio key set --key <ak_...>")
+			fmt.Println("(or from the dashboard: Integrations -> Composio). The server")
+			fmt.Println("COMPOSIO_API_KEY env var is also honoured as a fallback.")
 			return nil
 		}
 		fmt.Printf("Composio: configured (source: %s)\n", s.Source)
 		if s.Label != "" {
 			fmt.Printf("  Label:    %s\n", s.Label)
-		}
-		if s.BaseURL != "" {
-			fmt.Printf("  Base URL: %s\n", s.BaseURL)
 		}
 		return nil
 	},
@@ -441,14 +440,13 @@ var composioKeySetCmd = &cobra.Command{
 			return err
 		}
 		key, _ := cmd.Flags().GetString("key")
-		baseURL, _ := cmd.Flags().GetString("base-url")
 		label, _ := cmd.Flags().GetString("label")
 		if strings.TrimSpace(key) == "" {
 			return fmt.Errorf("--key is required")
 		}
 		var s composioSettingsResponse
 		if err := putJSON(client, "/api/v1/integrations/composio/settings", map[string]string{
-			"api_key": key, "base_url": baseURL, "label": label,
+			"api_key": key, "label": label,
 		}, &s); err != nil {
 			return err
 		}
@@ -690,7 +688,6 @@ func init() {
 	composioTriggersCmd.AddCommand(composioTriggersTypesCmd, composioTriggersActiveCmd, composioTriggersEnableCmd)
 
 	composioKeySetCmd.Flags().String("key", "", "Composio project API key (ak_…)")
-	composioKeySetCmd.Flags().String("base-url", "", "Override Composio base URL (optional)")
 	composioKeySetCmd.Flags().String("label", "", "Human-friendly project label (optional)")
 	composioKeyCmd.AddCommand(composioKeyShowCmd, composioKeySetCmd, composioKeyRemoveCmd)
 
