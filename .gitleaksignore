@@ -50,3 +50,12 @@
 # Same finding under the pre-squash branch commit (PR #641's head before
 # squash-merge) — covers PR-branch scans and local full-history runs.
 06c261ba16f7c9683d6b2e8fb10f4df5b73cbe0d:internal/server/mission_reattach_boot_test.go:generic-api-key:48
+
+# Composio handler tests (PR #696) — a throwaway 32-byte AES key (hex) that
+# exercises credential encryption. Already removed from HEAD (built at runtime
+# via strings.Repeat in armTestEncryptionKey), but gitleaks scans full branch
+# history and still sees the literal in these two commits. Not a real secret —
+# the deterministic "0123456789abcdef"×4 test value.
+5d53262b7201743f181b7d3bc8e22a8c2cbd20a7:internal/api/composio_handler_test.go:generic-api-key:110
+5fb1efc9e308e5f1c889be57255e7fa357a3996d:internal/api/composio_handler_test.go:generic-api-key:380
+5fb1efc9e308e5f1c889be57255e7fa357a3996d:internal/api/composio_handler_test.go:generic-api-key:476
