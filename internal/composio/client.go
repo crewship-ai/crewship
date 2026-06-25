@@ -44,9 +44,10 @@ const maxResponseBytes = 8 << 20 // 8 MiB
 
 // Client talks to the Composio v3 REST API with a project-scoped API key.
 type Client struct {
-	apiKey  string
-	baseURL string
-	http    *http.Client
+	apiKey   string
+	baseURL  string
+	baseHost string // host of baseURL; every request must stay on it (SSRF guard)
+	http     *http.Client
 }
 
 // NewClient builds a Composio client. An empty baseURL falls back to
@@ -55,9 +56,15 @@ func NewClient(apiKey, baseURL string) *Client {
 	if baseURL == "" {
 		baseURL = DefaultBaseURL
 	}
+	trimmed := strings.TrimRight(baseURL, "/")
+	host := ""
+	if u, err := url.Parse(trimmed); err == nil {
+		host = u.Host
+	}
 	return &Client{
-		apiKey:  apiKey,
-		baseURL: strings.TrimRight(baseURL, "/"),
+		apiKey:   apiKey,
+		baseURL:  trimmed,
+		baseHost: host,
 		http: &http.Client{
 			Timeout: 20 * time.Second,
 		},
@@ -471,7 +478,19 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 		}
 		reqBody = strings.NewReader(string(b))
 	}
-	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, reqBody)
+	// Resolve + host-pin the URL before issuing the request. Caller-supplied
+	// path segments are already url.PathEscape'd and query values go through
+	// url.Values, but validating the resolved host against the configured one
+	// is the real SSRF guard (and a sanitizer for the "uncontrolled URL" check):
+	// no path/query value can redirect the request to a different host.
+	u, perr := url.Parse(c.baseURL + path)
+	if perr != nil {
+		return fmt.Errorf("composio: parse url %s: %w", path, perr)
+	}
+	if u.Host != c.baseHost {
+		return fmt.Errorf("composio: refusing request to unexpected host %q", u.Host)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, u.String(), reqBody)
 	if err != nil {
 		return fmt.Errorf("composio: build request %s: %w", path, err)
 	}
