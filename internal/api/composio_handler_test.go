@@ -24,6 +24,8 @@ func fakeComposioAPI(t *testing.T, authConfigs, connectedAccounts string) *httpt
 			_, _ = w.Write([]byte(authConfigs))
 		case "/api/v3/connected_accounts":
 			_, _ = w.Write([]byte(connectedAccounts))
+		case "/api/v3/toolkits":
+			_, _ = w.Write([]byte(`{"total_items":1047,"items":[{"slug":"github","name":"GitHub","meta":{"description":"x","logo":"l","tools_count":846,"categories":[{"id":"developer-tools","name":"developer tools"}]}}]}`))
 		default:
 			http.Error(w, "not found", http.StatusNotFound)
 		}
@@ -74,6 +76,31 @@ func TestComposio_ListInventory_Enabled(t *testing.T) {
 	}
 	if len(got.Users[0].ConnectedAccounts) != 1 || got.Users[0].ConnectedAccounts[0].ID != "ca_1" {
 		t.Errorf("user-a accounts = %+v", got.Users[0].ConnectedAccounts)
+	}
+}
+
+func TestComposio_ListToolkits(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	srv := fakeComposioAPI(t, `{"items":[]}`, `{"items":[]}`)
+	h := NewComposioHandler(db, newComposioTestLogger(), &config.ComposioConfig{
+		Enabled: true, APIKey: "ak_test", BaseURL: srv.URL,
+	})
+
+	req := httptest.NewRequest("GET", "/api/v1/integrations/composio/toolkits?search=git", nil)
+	req = withWorkspaceUser(req, userID, wsID, "VIEWER")
+	rr := httptest.NewRecorder()
+	h.ListToolkits(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	var got composioToolkitsResponse
+	mustUnmarshal(t, rr, &got)
+	if !got.Enabled || got.Total != 1047 || len(got.Toolkits) != 1 || got.Toolkits[0].Slug != "github" {
+		t.Errorf("unexpected toolkits response: %+v", got)
 	}
 }
 

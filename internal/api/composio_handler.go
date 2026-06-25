@@ -17,6 +17,7 @@ import (
 	"log/slog"
 	"net/http"
 	"sort"
+	"strconv"
 
 	"github.com/crewship-ai/crewship/internal/composio"
 	"github.com/crewship-ai/crewship/internal/config"
@@ -102,6 +103,55 @@ func (h *ComposioHandler) ListInventory(w http.ResponseWriter, r *http.Request) 
 		resp.AuthConfigs = []composio.AuthConfig{}
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// ── ListToolkits — GET /api/v1/integrations/composio/toolkits ────────────────
+
+type composioToolkitsResponse struct {
+	Enabled  bool                   `json:"enabled"`
+	Total    int                    `json:"total"`
+	Toolkits []composio.ToolkitInfo `json:"toolkits"`
+}
+
+// toolkitsPageLimit caps the catalog page we proxy from Composio (1000+ apps
+// total). The UI drives narrowing via the search box rather than scrolling the
+// whole catalog.
+const toolkitsPageLimit = 40
+
+// ListToolkits proxies the Composio app catalog (1000+ connectable apps) with
+// optional search/category filters. Read-gated.
+func (h *ComposioHandler) ListToolkits(w http.ResponseWriter, r *http.Request) {
+	if !requireRole(w, r, "read") {
+		return
+	}
+	if !h.enabled || h.client == nil {
+		writeJSON(w, http.StatusOK, composioToolkitsResponse{Enabled: false, Toolkits: []composio.ToolkitInfo{}})
+		return
+	}
+
+	search := r.URL.Query().Get("search")
+	category := r.URL.Query().Get("category")
+	limit := toolkitsPageLimit
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 100 {
+			limit = n
+		}
+	}
+
+	page, err := h.client.ListToolkits(r.Context(), search, category, limit)
+	if err != nil {
+		h.logger.Error("composio: list toolkits", "error", err)
+		writeProblem(w, r, http.StatusBadGateway, "Composio API error")
+		return
+	}
+	if page.Items == nil {
+		page.Items = []composio.ToolkitInfo{}
+	}
+	writeJSON(w, http.StatusOK, composioToolkitsResponse{
+		Enabled:  true,
+		Total:    page.TotalItems,
+		Toolkits: page.Items,
+	})
 }
 
 // groupByUser folds connected accounts into per-user buckets, sorted by

@@ -31,7 +31,8 @@ crewship intg <subcommand> [flags]
 
 | Command | Purpose |
 | --- | --- |
-| `integration composio inventory` | Show the Composio connector catalog (auth configs) and connected accounts grouped by `user_id`. |
+| `integration composio inventory` | Show configured connectors (auth configs) and connected accounts grouped by `user_id`. |
+| `integration composio toolkits` | Browse the Composio app catalog (1000+ apps). Filters: `--search`, `--category`, `--limit`. |
 
 Maps to `GET /api/v1/integrations/composio/inventory`. Requires `COMPOSIO_API_KEY`
 on the server; prints a "not configured" notice otherwise. Add `--output json`

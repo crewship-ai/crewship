@@ -45,6 +45,7 @@ All integration endpoints require authentication and workspace context (except w
 | `GET` | [`/api/v1/mcp-registry/search`](#search-registry) | Search the MCP registry |
 | `POST` | [`/api/v1/mcp-registry/sync`](#sync-registry) | Sync the MCP registry |
 | `GET` | [`/api/v1/integrations/composio/inventory`](#composio-inventory) | Composio catalog + connected accounts per user |
+| `GET` | [`/api/v1/integrations/composio/toolkits`](#composio-toolkits) | Browse the Composio app catalog (1000+ apps) |
 
 ---
 
@@ -102,6 +103,46 @@ view; agents are scoped to a single `user_id` and never receive the full list.
 | `users` | array | Connected accounts grouped by Composio `user_id`, sorted by `user_id` |
 
 CLI: `crewship integration composio inventory`.
+
+### Composio Toolkits
+
+```
+GET /api/v1/integrations/composio/toolkits?workspace_id={workspaceId}&search={q}&category={cat}&limit={n}
+```
+
+Proxies the Composio app catalog (1000+ connectable apps). `search`, `category`,
+and `limit` (max 100, default 40) are optional server-side filters. Read-gated;
+returns `enabled: false` when the provider is unconfigured.
+
+**Response:** `200 OK`
+
+```json
+{
+  "enabled": true,
+  "total": 1047,
+  "toolkits": [
+    {
+      "slug": "github",
+      "name": "GitHub",
+      "no_auth": false,
+      "meta": {
+        "description": "Code hosting platform…",
+        "logo": "https://logos.composio.dev/api/github",
+        "tools_count": 846,
+        "categories": [{ "id": "developer-tools", "name": "developer tools" }]
+      }
+    }
+  ]
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `enabled` | boolean | Whether the provider is configured |
+| `total` | integer | Total apps matching the filter in the Composio catalog |
+| `toolkits` | array | The current page of apps (slug, name, meta) |
+
+CLI: `crewship integration composio toolkits [--search] [--category] [--limit]`.
 
 ---
 

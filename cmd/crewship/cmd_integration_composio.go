@@ -2,7 +2,9 @@ package main
 
 import (
 	"fmt"
+	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -41,6 +43,28 @@ type composioConnectedAccount struct {
 type composioUserInventory struct {
 	UserID            string                     `json:"user_id"`
 	ConnectedAccounts []composioConnectedAccount `json:"connected_accounts"`
+}
+
+type composioToolkitCategory struct {
+	Name string `json:"name"`
+}
+
+type composioToolkitMeta struct {
+	Description string                    `json:"description"`
+	ToolsCount  int                       `json:"tools_count"`
+	Categories  []composioToolkitCategory `json:"categories"`
+}
+
+type composioToolkitInfo struct {
+	Slug string              `json:"slug"`
+	Name string              `json:"name"`
+	Meta composioToolkitMeta `json:"meta"`
+}
+
+type composioToolkitsResponse struct {
+	Enabled  bool                  `json:"enabled"`
+	Total    int                   `json:"total"`
+	Toolkits []composioToolkitInfo `json:"toolkits"`
 }
 
 var composioCmd = &cobra.Command{
@@ -108,7 +132,66 @@ func distinctToolkits(u composioUserInventory) []string {
 	return out
 }
 
+var composioToolkitsCmd = &cobra.Command{
+	Use:   "toolkits",
+	Short: "Browse the Composio app catalog (1000+ connectable apps)",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client, err := requireAuthAndWorkspace()
+		if err != nil {
+			return err
+		}
+		search, _ := cmd.Flags().GetString("search")
+		category, _ := cmd.Flags().GetString("category")
+		limit, _ := cmd.Flags().GetInt("limit")
+
+		path := "/api/v1/integrations/composio/toolkits"
+		q := url.Values{}
+		if search != "" {
+			q.Set("search", search)
+		}
+		if category != "" {
+			q.Set("category", category)
+		}
+		if limit > 0 {
+			q.Set("limit", strconv.Itoa(limit))
+		}
+		if enc := q.Encode(); enc != "" {
+			path += "?" + enc
+		}
+
+		var res composioToolkitsResponse
+		if err := getJSON(client, path, &res); err != nil {
+			return err
+		}
+
+		f := newFormatter()
+		if f.Format == "json" || f.Format == "yaml" {
+			return f.Auto(res, nil, nil)
+		}
+		if !res.Enabled {
+			fmt.Println("Composio is not configured on this server (set COMPOSIO_API_KEY).")
+			return nil
+		}
+		rows := make([][]string, 0, len(res.Toolkits))
+		for _, t := range res.Toolkits {
+			cat := ""
+			if len(t.Meta.Categories) > 0 {
+				cat = t.Meta.Categories[0].Name
+			}
+			rows = append(rows, []string{t.Slug, t.Name, cat, fmt.Sprintf("%d", t.Meta.ToolsCount)})
+		}
+		f.Table([]string{"SLUG", "NAME", "CATEGORY", "TOOLS"}, rows)
+		fmt.Printf("\nShowing %d of %d apps. Narrow with --search / --category.\n", len(res.Toolkits), res.Total)
+		return nil
+	},
+}
+
 func init() {
+	composioToolkitsCmd.Flags().String("search", "", "Filter apps by name/slug")
+	composioToolkitsCmd.Flags().String("category", "", "Filter by category (e.g. email, developer-tools)")
+	composioToolkitsCmd.Flags().Int("limit", 0, "Max apps to return (default server-side)")
+
 	composioCmd.AddCommand(composioInventoryCmd)
+	composioCmd.AddCommand(composioToolkitsCmd)
 	integrationCmd.AddCommand(composioCmd)
 }

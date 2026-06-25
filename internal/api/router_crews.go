@@ -142,6 +142,7 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	// /integrations so it never collides with the /{integrationId} wildcard.
 	composioH := NewComposioHandler(r.db, r.logger, r.composioConfig)
 	r.mux.Handle("GET /api/v1/integrations/composio/inventory", authed(wsCtx(http.HandlerFunc(composioH.ListInventory))))
+	r.mux.Handle("GET /api/v1/integrations/composio/toolkits", authed(wsCtx(http.HandlerFunc(composioH.ListToolkits))))
 	// Connectors — curated manifest catalog + install flow. List/Get are
 	// catalog browse (auth only, no workspace context); Verify/Install
 	// mutate workspace state and gate on MANAGER+ via wsCtx-resolved role.

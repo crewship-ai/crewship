@@ -11,6 +11,7 @@ import {
   Users,
   CheckCircle2,
   AlertCircle,
+  Search,
 } from "lucide-react"
 
 import { useWorkspace } from "@/hooks/use-workspace"
@@ -29,6 +30,13 @@ type AuthConfig = { id: string; name: string; status: string; toolkit: Toolkit }
 type ConnectedAccount = { id: string; user_id: string; status: string; toolkit: Toolkit }
 type UserInventory = { user_id: string; connected_accounts: ConnectedAccount[] }
 type Inventory = { enabled: boolean; auth_configs: AuthConfig[]; users: UserInventory[] }
+
+type ToolkitInfo = {
+  slug: string
+  name: string
+  meta: { description?: string; logo?: string; tools_count?: number; categories?: { name: string }[] }
+}
+type ToolkitsResp = { enabled: boolean; total: number; toolkits: ToolkitInfo[] }
 
 function ToolkitIcon({ toolkit, size = 20 }: { toolkit: Toolkit; size?: number }) {
   if (toolkit.logo) {
@@ -85,6 +93,44 @@ export function ComposioIntegrations() {
     if (workspaceId) void load(workspaceId)
   }, [workspaceId, load])
 
+  // ── Catalog (toolkits) ──
+  const [toolkits, setToolkits] = React.useState<ToolkitInfo[]>([])
+  const [total, setTotal] = React.useState(0)
+  const [search, setSearch] = React.useState("")
+  const [tkLoading, setTkLoading] = React.useState(true)
+
+  const loadToolkits = React.useCallback(async (wid: string, q: string) => {
+    setTkLoading(true)
+    try {
+      const params = new URLSearchParams({ workspace_id: wid })
+      if (q) params.set("search", q)
+      const r = await fetch(`/api/v1/integrations/composio/toolkits?${params}`)
+      if (!r.ok) throw new Error(String(r.status))
+      const j = (await r.json()) as ToolkitsResp
+      setToolkits(j.toolkits ?? [])
+      setTotal(j.total ?? 0)
+    } catch {
+      setToolkits([])
+    } finally {
+      setTkLoading(false)
+    }
+  }, [])
+
+  // Debounce the catalog search so each keystroke doesn't hammer Composio.
+  React.useEffect(() => {
+    if (!workspaceId) return
+    const t = setTimeout(() => void loadToolkits(workspaceId, search), 300)
+    return () => clearTimeout(t)
+  }, [workspaceId, search, loadToolkits])
+
+  // Slugs already configured (auth config exists) or connected (has accounts).
+  const configured = React.useMemo(() => {
+    const s = new Set<string>()
+    data?.auth_configs.forEach((ac) => s.add(ac.toolkit.slug))
+    data?.users.forEach((u) => u.connected_accounts.forEach((a) => s.add(a.toolkit.slug)))
+    return s
+  }, [data])
+
   const busy = wsLoading || loading
 
   return (
@@ -122,27 +168,61 @@ export function ComposioIntegrations() {
             Read-only preview. Connecting apps (OAuth) and assigning them to agents ship in the next update.
           </div>
 
-          {/* Connector catalog */}
+          {/* Connector catalog — searchable, 1000+ apps from Composio */}
           <section className="space-y-3">
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              Connectable apps ({data.auth_configs.length})
-            </h2>
-            {data.auth_configs.length === 0 ? (
-              <EmptyHint text="No connectors configured in this Composio project yet." />
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Connector catalog{total ? ` (${total} apps)` : ""}
+              </h2>
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                <input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search apps (gmail, github, slack…)"
+                  className="w-64 rounded-lg border border-white/10 bg-card py-1.5 pl-8 pr-3 text-xs text-foreground placeholder:text-muted-foreground focus:border-blue-400/50 focus:outline-none"
+                />
+              </div>
+            </div>
+            {tkLoading ? (
+              <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4">
+                {Array.from({ length: 8 }).map((_, i) => (
+                  <Skeleton key={i} className="h-16 rounded-xl" />
+                ))}
+              </div>
+            ) : toolkits.length === 0 ? (
+              <EmptyHint text={search ? `No apps match “${search}”.` : "No apps found."} />
             ) : (
               <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4">
-                {data.auth_configs.map((ac) => (
-                  <div
-                    key={ac.id}
-                    className="flex items-center gap-3 rounded-xl border border-white/10 bg-card p-3"
-                  >
-                    <ToolkitIcon toolkit={ac.toolkit} />
-                    <div className="min-w-0 flex-1">
-                      <div className="text-sm font-medium capitalize truncate">{ac.toolkit.slug}</div>
-                      <StatusDot status={ac.status} />
+                {toolkits.map((t) => {
+                  const isConfigured = configured.has(t.slug)
+                  return (
+                    <div
+                      key={t.slug}
+                      className="flex items-center gap-3 rounded-xl border border-white/10 bg-card p-3"
+                    >
+                      <ToolkitIcon toolkit={{ slug: t.slug, logo: t.meta.logo }} />
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm font-medium">{t.name}</div>
+                        <div className="truncate text-[11px] text-muted-foreground">
+                          {t.meta.tools_count ? `${t.meta.tools_count} tools` : t.slug}
+                        </div>
+                      </div>
+                      {isConfigured ? (
+                        <span className="shrink-0 text-[10px] text-emerald-400">● connected</span>
+                      ) : (
+                        <button
+                          type="button"
+                          disabled
+                          title="Connecting apps ships in the next update"
+                          className="shrink-0 cursor-not-allowed rounded-lg border border-white/10 px-2 py-1 text-[11px] text-muted-foreground/60"
+                        >
+                          Connect
+                        </button>
+                      )}
                     </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             )}
           </section>

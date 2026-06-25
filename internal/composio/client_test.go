@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -69,6 +70,34 @@ func TestClient_ListConnectedAccounts(t *testing.T) {
 	}
 	if acct.Toolkit.Slug != "gmail" || acct.AuthConfig.AuthScheme != "OAUTH2" || !acct.AuthConfig.IsComposioManaged {
 		t.Errorf("unexpected embedded fields: %+v", acct)
+	}
+}
+
+func TestClient_ListToolkits(t *testing.T) {
+	var gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"total_items":1047,"items":[
+			{"slug":"github","name":"GitHub","no_auth":false,"meta":{"description":"code hosting","logo":"https://logos.composio.dev/api/github","tools_count":846,"categories":[{"id":"developer-tools","name":"developer tools"}]}}
+		]}`))
+	}))
+	t.Cleanup(srv.Close)
+	c := NewClient("ak_test", srv.URL)
+
+	page, err := c.ListToolkits(context.Background(), "git", "", 5)
+	if err != nil {
+		t.Fatalf("ListToolkits: %v", err)
+	}
+	if !strings.Contains(gotQuery, "search=git") || !strings.Contains(gotQuery, "limit=5") {
+		t.Errorf("query = %q, want search=git & limit=5", gotQuery)
+	}
+	if page.TotalItems != 1047 || len(page.Items) != 1 {
+		t.Fatalf("page = %+v", page)
+	}
+	tk := page.Items[0]
+	if tk.Slug != "github" || tk.Name != "GitHub" || tk.Meta.ToolsCount != 846 || len(tk.Meta.Categories) != 1 {
+		t.Errorf("unexpected toolkit: %+v", tk)
 	}
 }
 

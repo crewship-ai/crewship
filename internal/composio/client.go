@@ -26,6 +26,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -96,6 +98,63 @@ type ConnectedAccountAuthConfig struct {
 	AuthScheme        string `json:"auth_scheme"`
 	IsComposioManaged bool   `json:"is_composio_managed"`
 	IsDisabled        bool   `json:"is_disabled"`
+}
+
+// ToolkitCategory tags a toolkit (e.g. "email", "developer tools").
+type ToolkitCategory struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// ToolkitMeta is the descriptive payload Composio nests under `meta`.
+type ToolkitMeta struct {
+	Description string            `json:"description"`
+	Logo        string            `json:"logo"`
+	ToolsCount  int               `json:"tools_count"`
+	Categories  []ToolkitCategory `json:"categories"`
+}
+
+// ToolkitInfo is one entry in the Composio app catalog (1000+ apps). Distinct
+// from the minimal Toolkit embedded in accounts/auth-configs.
+type ToolkitInfo struct {
+	Slug   string      `json:"slug"`
+	Name   string      `json:"name"`
+	NoAuth bool        `json:"no_auth"`
+	Meta   ToolkitMeta `json:"meta"`
+}
+
+// ToolkitPage is a paginated slice of the catalog.
+type ToolkitPage struct {
+	Items      []ToolkitInfo
+	TotalItems int
+}
+
+// ListToolkits returns a page of the connector catalog. search/category are
+// passed through to Composio (both are server-side filters); limit caps the
+// page size (Composio default applies when <= 0).
+func (c *Client) ListToolkits(ctx context.Context, search, category string, limit int) (ToolkitPage, error) {
+	q := url.Values{}
+	if search != "" {
+		q.Set("search", search)
+	}
+	if category != "" {
+		q.Set("category", category)
+	}
+	if limit > 0 {
+		q.Set("limit", strconv.Itoa(limit))
+	}
+	path := "/api/v3/toolkits"
+	if enc := q.Encode(); enc != "" {
+		path += "?" + enc
+	}
+	var env struct {
+		Items      []ToolkitInfo `json:"items"`
+		TotalItems int           `json:"total_items"`
+	}
+	if err := c.get(ctx, path, &env); err != nil {
+		return ToolkitPage{}, err
+	}
+	return ToolkitPage{Items: env.Items, TotalItems: env.TotalItems}, nil
 }
 
 // ListAuthConfigs returns the project's connector catalog (one entry per
