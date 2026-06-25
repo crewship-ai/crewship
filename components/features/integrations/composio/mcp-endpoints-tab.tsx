@@ -22,7 +22,7 @@ export function McpEndpointsTab({
     () =>
       agents.flatMap((a) =>
         (bindings[a.id] ?? []).map((b) => ({
-          key: `${a.id}:${b.user_id}`,
+          key: `${a.id}:${b.toolkit}:${b.user_id}`,
           agent: a,
           binding: b,
         })),

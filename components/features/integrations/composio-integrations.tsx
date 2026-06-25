@@ -364,7 +364,6 @@ export function ComposioIntegrations() {
               workspaceId={workspaceId}
               agents={agents}
               bindings={bindings}
-              data={data}
               loading={agentsLoading}
               onChanged={() => refreshAll(workspaceId)}
             />

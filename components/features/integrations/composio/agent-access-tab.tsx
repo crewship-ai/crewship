@@ -1,341 +1,178 @@
 "use client"
 
 import * as React from "react"
-import { Bot } from "lucide-react"
+import { Bot, Search } from "lucide-react"
 
-import { Button } from "@/components/ui/button"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
-import { cn } from "@/lib/utils"
-import { ToolkitIcon, AppChip, EmptyHint, TableSkeleton } from "./shared"
-import type { AgentLite, AgentBindingsMap, Inventory, Toolkit } from "./types"
+import { ScopeChip, EmptyHint, TableSkeleton, toolkitLabel } from "./shared"
+import { AccessEditor } from "./access-editor"
+import type { AgentLite, AgentBindingsMap } from "./types"
 
-// AgentAccessTab — which agent acts as which Composio user, and therefore which
-// connected accounts (apps) it can call. Binding maps an agent → a user_id;
-// the apps it sees are that user's connected accounts (or the restricted
-// subset). Assign/Edit opens AssignModal; Remove access deletes the binding.
+// AgentAccessTab — agent-centric vertical list of Composio access. One row per
+// agent shows only the apps that agent is granted (as colour-coded scope
+// chips), so the view stays compact even with 50+ connectable apps in the
+// project — you browse the full catalogue inside the editor, not here. Filter
+// by agent name + by app/access status. Edit/Assign opens the shared
+// AccessEditor.
+type AccessFilter = "any" | "has" | "none" | `app:${string}`
+
 export function AgentAccessTab({
   workspaceId,
   agents,
   bindings,
-  data,
   loading,
   onChanged,
 }: {
   workspaceId: string
   agents: AgentLite[]
   bindings: AgentBindingsMap
-  data: Inventory
   loading: boolean
   onChanged: () => void
 }) {
-  const [assign, setAssign] = React.useState<AgentLite | null>(null)
+  const [editing, setEditing] = React.useState<AgentLite | null>(null)
+  const [query, setQuery] = React.useState("")
+  const [filter, setFilter] = React.useState<AccessFilter>("any")
 
-  // The set of connectable toolkit slugs (auth configs + connected accounts) —
-  // the chips an operator can toggle to restrict an agent's access.
-  const allToolkits = React.useMemo(() => {
-    const seen = new Set<string>()
-    const list: Toolkit[] = []
-    const add = (t: Toolkit) => {
-      if (t.slug && !seen.has(t.slug)) {
-        seen.add(t.slug)
-        list.push(t)
+  // Toolkits that appear in at least one agent's grant — power the per-app
+  // filter options ("has Gmail", "has GitHub", …).
+  const appOptions = React.useMemo(() => {
+    const s = new Set<string>()
+    Object.values(bindings).forEach((bs) => bs.forEach((b) => s.add(b.toolkit)))
+    return Array.from(s).sort()
+  }, [bindings])
+
+  const visible = React.useMemo(() => {
+    const q = query.trim().toLowerCase()
+    return agents.filter((a) => {
+      if (q && !a.name.toLowerCase().includes(q)) return false
+      const bs = bindings[a.id] ?? []
+      if (filter === "has") return bs.length > 0
+      if (filter === "none") return bs.length === 0
+      if (filter.startsWith("app:")) {
+        const slug = filter.slice(4)
+        return bs.some((b) => b.toolkit === slug)
       }
-    }
-    data.auth_configs.forEach((ac) => add(ac.toolkit))
-    data.users.forEach((u) => u.connected_accounts.forEach((a) => add(a.toolkit)))
-    return list
-  }, [data])
-
-  // user_id → connected-account toolkits (the apps an agent bound to that user
-  // can reach).
-  const appsForUser = React.useCallback(
-    (userId: string): Toolkit[] => {
-      const u = data.users.find((x) => x.user_id === userId)
-      return u ? u.connected_accounts.map((a) => a.toolkit) : []
-    },
-    [data],
-  )
+      return true
+    })
+  }, [agents, bindings, query, filter])
 
   return (
     <section className="space-y-3">
-      <h2 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-        <Bot className="h-3.5 w-3.5" /> Agent access
-        <span className="font-normal normal-case tracking-normal text-muted-foreground/70">
-          · which agent acts as which user
-        </span>
-      </h2>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          <Bot className="h-3.5 w-3.5" /> Agent access
+          <span className="font-normal normal-case tracking-normal text-muted-foreground/70">
+            · each agent lists only the apps it&apos;s granted
+          </span>
+        </h2>
+        <div className="flex items-center gap-2">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Filter agents…"
+              className="w-44 rounded-lg border border-white/10 bg-card py-1.5 pl-8 pr-3 text-xs text-foreground placeholder:text-muted-foreground focus:border-blue-400/50 focus:outline-none"
+            />
+          </div>
+          <select
+            value={filter}
+            onChange={(e) => setFilter(e.target.value as AccessFilter)}
+            className="rounded-lg border border-white/10 bg-card px-2.5 py-1.5 text-xs focus:border-blue-400/50 focus:outline-none"
+          >
+            <option value="any">Any app</option>
+            <option value="has">Has access</option>
+            <option value="none">No access</option>
+            {appOptions.map((slug) => (
+              <option key={slug} value={`app:${slug}`}>
+                Has {toolkitLabel(slug)}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
 
       {loading ? (
         <TableSkeleton rows={4} />
       ) : agents.length === 0 ? (
         <EmptyHint text="No agents in this workspace yet." />
+      ) : visible.length === 0 ? (
+        <EmptyHint text="No agents match the current filter." />
       ) : (
         <div className="overflow-hidden rounded-xl border border-white/10 bg-card">
-          <table className="w-full border-collapse">
-            <thead>
-              <tr>
-                {["Agent", "Crew", "Bound user", "Apps it can use", ""].map((h, i) => (
-                  <th
-                    key={i}
-                    className="px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
-                  >
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {agents.map((a) => {
-                const bound = bindings[a.id]?.[0]
-                const apps = bound ? appsForUser(bound.user_id) : []
-                return (
-                  <tr key={a.id} className="border-t border-white/[0.06]">
-                    <td className="px-3 py-2.5 text-sm font-medium">{a.name}</td>
-                    <td className="px-3 py-2.5 text-[13px] text-muted-foreground">
-                      {a.crew?.name ?? "—"}
-                    </td>
-                    <td className="px-3 py-2.5">
-                      {bound ? (
-                        <span className="font-mono text-xs text-foreground/90">
-                          {bound.user_id}
-                        </span>
-                      ) : (
-                        <span className="text-[11px] text-muted-foreground">— not bound —</span>
-                      )}
-                    </td>
-                    <td className="px-3 py-2.5">
-                      {bound ? (
-                        apps.length > 0 ? (
-                          <span className="flex flex-wrap gap-1.5">
-                            {apps.map((t) => (
-                              <AppChip key={t.slug} toolkit={t} />
-                            ))}
-                          </span>
-                        ) : (
-                          <span className="text-[11px] text-muted-foreground">
-                            all of {bound.user_id}&apos;s accounts
-                          </span>
-                        )
-                      ) : (
-                        <span className="text-[11px] text-muted-foreground">no access</span>
-                      )}
-                    </td>
-                    <td className="px-3 py-2.5 text-right">
-                      <button
-                        type="button"
-                        onClick={() => setAssign(a)}
-                        className="text-xs text-blue-400 hover:text-blue-300"
-                      >
-                        {bound ? "Edit" : "Assign"}
-                      </button>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
+          {visible.map((a) => {
+            const bs = bindings[a.id] ?? []
+            const actsAs = bs[0]?.user_id
+            return (
+              <div
+                key={a.id}
+                className="flex items-start justify-between gap-3 border-t border-white/[0.06] px-4 py-3 first:border-t-0"
+              >
+                <div className="min-w-0">
+                  <div className="text-sm">
+                    <span className="font-medium">{a.name}</span>{" "}
+                    <span className="text-[11px] text-muted-foreground">
+                      {a.crew?.name ?? ""}
+                      {actsAs ? (
+                        <>
+                          {a.crew?.name ? " · " : ""}acts as{" "}
+                          <span className="font-mono text-foreground/80">{actsAs}</span>
+                        </>
+                      ) : null}
+                    </span>
+                  </div>
+                  {bs.length > 0 ? (
+                    <div className="mt-1.5 flex flex-wrap gap-1.5">
+                      {bs.map((b) => (
+                        <ScopeChip
+                          key={b.toolkit}
+                          toolkit={{ slug: b.toolkit }}
+                          mode={b.mode}
+                          count={b.tools?.length}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="mt-1 text-[12px] text-muted-foreground">
+                      — no connector access —
+                    </div>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setEditing(a)}
+                  className="shrink-0 text-xs text-blue-400 hover:text-blue-300"
+                >
+                  {bs.length > 0 ? "Edit" : "Assign"}
+                </button>
+              </div>
+            )
+          })}
         </div>
       )}
 
-      {assign && (
-        <AssignModal
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+        <span>Scope legend —</span>
+        <span className="text-emerald-400">● Full</span>
+        <span>all tools</span>
+        <span className="text-blue-300">● Read-only</span>
+        <span>fetch/list/get/search</span>
+        <span className="text-amber-300">● Custom</span>
+        <span>hand-picked tools.</span>
+      </div>
+
+      {editing && (
+        <AccessEditor
           workspaceId={workspaceId}
-          agent={assign}
-          current={bindings[assign.id]?.[0] ?? null}
-          users={data.users.map((u) => u.user_id)}
-          toolkits={allToolkits}
-          onClose={() => setAssign(null)}
+          agentId={editing.id}
+          agentName={editing.name}
+          agentCrew={editing.crew?.name}
+          onClose={() => setEditing(null)}
           onSaved={() => {
-            setAssign(null)
+            setEditing(null)
             onChanged()
           }}
         />
       )}
     </section>
-  )
-}
-
-function AssignModal({
-  workspaceId,
-  agent,
-  current,
-  users,
-  toolkits,
-  onClose,
-  onSaved,
-}: {
-  workspaceId: string
-  agent: AgentLite
-  current: { user_id: string } | null
-  users: string[]
-  toolkits: Toolkit[]
-  onClose: () => void
-  onSaved: () => void
-}) {
-  const [userId, setUserId] = React.useState(current?.user_id ?? users[0] ?? "")
-  const [selected, setSelected] = React.useState<Set<string>>(new Set())
-  const [busy, setBusy] = React.useState(false)
-  const [err, setErr] = React.useState<string | null>(null)
-
-  const toggle = (slug: string) =>
-    setSelected((s) => {
-      const next = new Set(s)
-      if (next.has(slug)) next.delete(slug)
-      else next.add(slug)
-      return next
-    })
-
-  const save = async () => {
-    const uid = userId.trim()
-    if (!uid) {
-      setErr("Pick or enter a Composio user id.")
-      return
-    }
-    setBusy(true)
-    setErr(null)
-    try {
-      const r = await fetch(
-        `/api/v1/integrations/composio/agents/${agent.id}/bind?workspace_id=${workspaceId}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ user_id: uid, toolkits: Array.from(selected) }),
-        },
-      )
-      if (!r.ok) {
-        const body = await r.json().catch(() => null)
-        throw new Error(body?.detail || `Failed (${r.status})`)
-      }
-      onSaved()
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : "Failed to save binding")
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const remove = async () => {
-    if (!current) return
-    setBusy(true)
-    setErr(null)
-    try {
-      const r = await fetch(
-        `/api/v1/integrations/composio/agents/${agent.id}/bind?workspace_id=${workspaceId}&user_id=${encodeURIComponent(current.user_id)}`,
-        { method: "DELETE" },
-      )
-      if (!r.ok) {
-        const body = await r.json().catch(() => null)
-        throw new Error(body?.detail || `Failed (${r.status})`)
-      }
-      onSaved()
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : "Failed to remove access")
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="block max-w-md rounded-xl border-white/10 bg-card shadow-2xl sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle className="text-base">
-            {current ? "Edit" : "Assign"} agent access
-          </DialogTitle>
-          <DialogDescription className="text-xs leading-relaxed">
-            <span className="font-medium text-foreground/90">{agent.name}</span>
-            {agent.crew?.name ? ` (${agent.crew.name})` : ""} acts as the chosen Composio user.
-            Crewship generates a scoped MCP URL for this agent.
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="mt-4 space-y-3">
-          {users.length > 0 && (
-            <div>
-              <label className="mb-1 block text-xs text-muted-foreground">Acts as user</label>
-              <select
-                value={users.includes(userId) ? userId : ""}
-                onChange={(e) => setUserId(e.target.value)}
-                className="w-full rounded-lg border border-white/10 bg-background px-3 py-2 font-mono text-xs focus:border-blue-400/50 focus:outline-none"
-              >
-                <option value="">— enter a user id —</option>
-                {users.map((u) => (
-                  <option key={u} value={u}>
-                    {u}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-          <div>
-            <label className="mb-1 block text-xs text-muted-foreground">User id</label>
-            <input
-              value={userId}
-              onChange={(e) => setUserId(e.target.value)}
-              placeholder="e.g. alice@acme.com"
-              className="w-full rounded-lg border border-white/10 bg-background px-3 py-2 font-mono text-xs focus:border-blue-400/50 focus:outline-none"
-            />
-          </div>
-
-          {toolkits.length > 0 && (
-            <div>
-              <label className="mb-1 block text-xs text-muted-foreground">
-                Restrict to apps (optional)
-              </label>
-              <div className="flex flex-wrap gap-2">
-                {toolkits.map((t) => {
-                  const on = selected.has(t.slug)
-                  return (
-                    <button
-                      key={t.slug}
-                      type="button"
-                      onClick={() => toggle(t.slug)}
-                      className={cn(
-                        "inline-flex items-center gap-1.5 rounded-lg border px-2 py-1 text-[11px] transition-colors",
-                        on
-                          ? "border-blue-400/40 bg-blue-500/10 text-blue-300"
-                          : "border-white/10 bg-white/[0.03] text-muted-foreground hover:text-foreground",
-                      )}
-                    >
-                      <ToolkitIcon toolkit={t} size={14} />
-                      <span className="capitalize">{t.slug}</span>
-                    </button>
-                  )
-                })}
-              </div>
-              <p className="mt-1.5 text-[11px] text-muted-foreground">
-                Empty = all of the user&apos;s connected accounts.
-              </p>
-            </div>
-          )}
-        </div>
-
-        {err && <div className="mt-3 text-xs text-red-400">{err}</div>}
-
-        <div className="mt-5 flex items-center justify-between gap-2">
-          <div>
-            {current && (
-              <Button variant="ghost" size="sm" onClick={remove} disabled={busy}>
-                Remove access
-              </Button>
-            )}
-          </div>
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={onClose} disabled={busy}>
-              Cancel
-            </Button>
-            <Button size="sm" onClick={save} disabled={busy || !userId.trim()}>
-              {busy ? "Saving…" : "Save binding"}
-            </Button>
-          </div>
-        </div>
-      </DialogContent>
-    </Dialog>
   )
 }

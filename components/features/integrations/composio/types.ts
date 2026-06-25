@@ -55,8 +55,20 @@ export type AgentLite = {
   crew?: { name: string } | null
 }
 
+// Scope of an agent↔app grant. "full" = every tool on the toolkit, "read" =
+// the read-only subset, "custom" = a hand-picked tool list.
+export type BindingMode = "full" | "read" | "custom"
+
 // One Composio binding on an agent (GET .../agents/{id}/bind → {bindings:[…]}).
-export type AgentBinding = { user_id: string; endpoint: string }
+// Each binding is now per-toolkit with a scope mode; `tools` is only populated
+// for custom-mode grants (and only when the backend echoes it back).
+export type AgentBinding = {
+  toolkit: string
+  mode: BindingMode
+  user_id: string
+  endpoint: string
+  tools?: string[]
+}
 
 // agentId → its Composio bindings.
 export type AgentBindingsMap = Record<string, AgentBinding[]>
