@@ -285,6 +285,23 @@ ORDER BY created_at DESC LIMIT 1`, pipelineRunID, stepID).Scan(&token)
 	return token, nil
 }
 
+// RunIDForToken returns the pipeline_run_id a waitpoint token belongs to.
+// The approve handler uses it to trigger an in-process resume of the parked
+// run after recording the decision (async WAITING model).
+func (s *SQLWaitpointStore) RunIDForToken(ctx context.Context, token string) (string, error) {
+	var runID string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT pipeline_run_id FROM pipeline_waitpoints WHERE token = ?`, token,
+	).Scan(&runID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("waitpoints: run id for token: %w", err)
+	}
+	return runID, nil
+}
+
 // WaitpointStatus implements WaitpointStatusReader: it returns the
 // row's current status string so the wait step can distinguish a
 // timeout/cancellation from a human denial after WaitFor reports

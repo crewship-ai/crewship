@@ -432,6 +432,35 @@ exec because it goes through the LLM. For pure shell probes that's
 acceptable as a stopgap; the proper fix is to land a Docker-backed
 CodeRunner — tracked separately from this doc.
 
+## Approval gates (`type: wait`, kind `approval`)
+
+A `wait` step with `kind: approval` pauses the run for a human decision. The run
+does NOT block the caller: when a foreground `routine run` reaches the gate it
+returns promptly with status **`WAITING`** and a waitpoint token, and the run
+row is parked (`status=waiting`) — it has released its execution slot.
+
+```text
+$ crewship routine run release-with-approval
+Run run_abc: WAITING (12ms, $0.0021)
+  paused at approval step: approve
+  approve: crewship routine waitpoints approve <token> --comment "LGTM"
+  reject:  crewship routine waitpoints reject <token>
+```
+
+Resolve it from the inbox UI or the CLI:
+
+```text
+crewship routine waitpoints list                 # find the pending token
+crewship routine waitpoints approve <token>      # → run resumes to COMPLETED
+crewship routine waitpoints reject  <token>      # → run resumes and FAILS (denied)
+```
+
+Approving (or rejecting) resumes the run from the gate: completed steps are
+restored and skipped, the wait step resolves from the recorded decision, and
+the rest of the routine runs. A parked run also survives a server restart — the
+boot-time resume scan re-enters `waiting` runs. (Timeouts on a parked approval
+are reconciled at the next boot scan rather than live.)
+
 ## See also
 
 - [Your First Crew](/guides/first-crew) — the parent concept; routines reference a crew via

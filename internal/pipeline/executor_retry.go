@@ -72,6 +72,12 @@ func (e *Executor) runStepWithRetry(
 		if err == nil {
 			return out, costSum, dur, nil
 		}
+		// A suspend (wait-step park) is not a retryable failure — return it
+		// immediately so the run parks instead of minting duplicate waitpoints.
+		var susp *suspendError
+		if errors.As(err, &susp) {
+			return out, costSum, dur, err
+		}
 		lastOut, lastDur, lastErr = out, dur, err
 		if !shouldRetry(err, rp.RetryOn) || attempt == maxAttempts {
 			break

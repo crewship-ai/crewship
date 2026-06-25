@@ -546,6 +546,26 @@ func (h *PipelineHandler) ApproveWaitpoint(w http.ResponseWriter, r *http.Reques
 		replyError(w, http.StatusInternalServerError, "Failed to complete waitpoint")
 		return
 	}
+
+	// Async WAITING model: a run parked on this approval (status=waiting)
+	// released its slot when it suspended, so there's no blocked WaitFor to
+	// wake — we must explicitly resume it. CompleteApproval committed the
+	// decision above, so the resumed wait step resolves it immediately
+	// (approved → continue, denied/timeout → fail). Resume on EITHER outcome
+	// so a denial doesn't strand the run in 'waiting'. ResumeAfterApproval
+	// no-ops if the run isn't actually parked (e.g. a legacy blocking run
+	// whose WaitFor goroutine already handled the channel signal).
+	type runLookup interface {
+		RunIDForToken(ctx context.Context, token string) (string, error)
+	}
+	if lk, ok := h.waitpoints.(runLookup); ok {
+		if runID, lerr := lk.RunIDForToken(r.Context(), token); lerr == nil && runID != "" {
+			h.newExecutor().ResumeAfterApproval(runID, h.logger)
+		} else if lerr != nil {
+			h.logger.Warn("waitpoint resume: run lookup failed", "error", lerr, "token", tokenFingerprint(token))
+		}
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "approved": body.Approved})
 }
 

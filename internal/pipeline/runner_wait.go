@@ -19,7 +19,7 @@ import (
 // return a stable "waited:<reason>" string so downstream templates
 // can detect a waited-step transition. If approvals carry data
 // (e.g. user comment), Phase 2 plumbs it through.
-func (e *Executor) runWaitStep(ctx context.Context, step Step, parentRender RenderContext, in RunInput, runID string) (string, float64, int64, error) {
+func (e *Executor) runWaitStep(ctx context.Context, step Step, parentRender RenderContext, in RunInput, runID string, depth int) (string, float64, int64, error) {
 	stepStart := time.Now()
 	if step.Wait == nil {
 		return "", 0, 0, fmt.Errorf("wait step %q missing body", step.ID)
@@ -94,6 +94,23 @@ func (e *Executor) runWaitStep(ctx context.Context, step Step, parentRender Rend
 			}
 			token = created
 		}
+
+		// Async suspend: for a top-level foreground run (depth==0, ModeRun,
+		// not a resume) with a persisted run row, PARK instead of blocking.
+		// Mark the run waiting (status=waiting + current_step) and return the
+		// suspend sentinel; runDSL/runDAG turn it into a WAITING RunResult and
+		// release the slot. Approving the waitpoint calls ResumeAfterApproval,
+		// which re-enters with in.resume=true — that path falls through to
+		// WaitFor below and resolves immediately from the recorded decision.
+		// Non-top-level / test_run / no-store callers keep the blocking
+		// behaviour (they have no row to resume and nobody to return WAITING to).
+		if depth == 0 && in.Mode == ModeRun && !in.resume && e.runStore != nil && in.pipeline != nil {
+			if err := e.runStore.MarkWaiting(ctx, runID, step.ID); err != nil {
+				return "", 0, time.Since(stepStart).Milliseconds(), fmt.Errorf("wait step %q mark waiting: %w", step.ID, err)
+			}
+			return "", 0, time.Since(stepStart).Milliseconds(), &suspendError{token: token, stepID: step.ID}
+		}
+
 		approved, err := e.waitpoints.WaitFor(ctx, token)
 		if err != nil {
 			return "", 0, time.Since(stepStart).Milliseconds(), fmt.Errorf("wait step %q wait: %w", step.ID, err)

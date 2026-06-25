@@ -21,6 +21,23 @@ var ErrPipelineNotFound = errors.New("pipeline: target pipeline not found")
 // only flagged at runtime.
 var ErrMaxDepthExceeded = fmt.Errorf("pipeline: max nested depth %d exceeded", MaxNestedPipelineDepth)
 
+// suspendError is the internal sentinel a wait(approval) step returns when a
+// top-level foreground run should PARK (return WAITING) instead of blocking
+// the caller in WaitFor for up to the approval timeout. It carries the
+// waitpoint token + step id so the executor can surface them on the WAITING
+// RunResult. The run row is already MarkWaiting'd and its step outputs are
+// persisted, so an approval-triggered resume (Executor.ResumeAfterApproval) or
+// a boot-time resume re-enters from the wait step. Detected via errors.As; it
+// must never be treated as a step failure.
+type suspendError struct {
+	token  string
+	stepID string
+}
+
+func (s *suspendError) Error() string {
+	return fmt.Sprintf("run suspended awaiting approval at step %q", s.stepID)
+}
+
 // ErrConcurrencyKeyEmpty is returned when a DSL declares a non-empty
 // concurrency_key template but the rendered value is empty — typically
 // because a referenced input was omitted at trigger time. Treating it
@@ -864,6 +881,18 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (result *
 			emit.emitStepStarted(ctx, step, i, tier)
 
 			output, stepCost, stepDur, stepErr := e.runStepWithRetry(ctx, step, renderedPrompt, tier, fallback, in, runID, pipelineID, emit, ctxRender, depth)
+			// Suspend: the wait step parked on an approval. NOT a failure —
+			// return WAITING promptly so the caller (and slot) is released.
+			// MarkWaiting + step-output persistence already happened in
+			// runWaitStep; the deferred terminal write skips WAITING.
+			var susp *suspendError
+			if errors.As(stepErr, &susp) {
+				result.Status = "WAITING"
+				result.CurrentStep = susp.stepID
+				result.WaitpointToken = susp.token
+				result.DurationMs = time.Since(startedAt).Milliseconds()
+				return result, nil
+			}
 			if stepErr != nil {
 				result.Status = "FAILED"
 				result.FailedAtStep = step.ID
@@ -973,7 +1002,7 @@ func (e *Executor) runStep(
 	case StepCode:
 		return e.runCodeStep(ctx, step, parentRender, in)
 	case StepWait:
-		return e.runWaitStep(ctx, step, parentRender, in, runID)
+		return e.runWaitStep(ctx, step, parentRender, in, runID, depth)
 	case StepTransform:
 		return e.runTransformStep(step, parentRender)
 	default:
@@ -1388,6 +1417,12 @@ func (e *Executor) persistRunTerminal(runCtx context.Context, runID string, in R
 			terminal.Status = RunStatusDryRunOK
 		case "DEDUPED":
 			// dedupe doesn't transition the existing row; leave it.
+			return
+		case "WAITING":
+			// NON-terminal: the run parked on an approval. MarkWaiting
+			// already set status=waiting + current_step; the deferred
+			// terminal write must NOT overwrite it. The approval-triggered
+			// (or boot-time) resume lands the eventual terminal row.
 			return
 		default:
 			terminal.Status = RunStatusFailed

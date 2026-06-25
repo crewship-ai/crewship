@@ -33,6 +33,7 @@ const (
 	RunStatusCancelled   RunStatus = "cancelled"
 	RunStatusDryRunOK    RunStatus = "dry_run"
 	RunStatusInterrupted RunStatus = "interrupted" // boot-recovery marker for runs the previous lifetime didn't terminate
+	RunStatusWaiting     RunStatus = "waiting"     // NON-terminal: parked on a human approval (wait step); resumes on approve
 )
 
 // RunMode is defined in types.go (ModeRun / ModeTestRun / ModeDryRun)
@@ -196,6 +197,18 @@ WHERE id = ?`, stepID, runID)
 	return err
 }
 
+// MarkWaiting parks a run on a human approval (wait step): status=waiting,
+// current_step_id=the wait step. NON-terminal — boot resume + ListActive
+// include 'waiting' so the parked run survives a restart and shows in the UI.
+// Approving the waitpoint triggers a resume that flips it onward.
+func (s *RunStore) MarkWaiting(ctx context.Context, runID, stepID string) error {
+	_, err := s.db.ExecContext(ctx, `
+UPDATE pipeline_runs
+SET status = 'waiting', current_step_id = ?, updated_at = datetime('now','subsec')
+WHERE id = ?`, stepID, runID)
+	return err
+}
+
 // AppendStepOutput rewrites step_outputs_json with the supplied map.
 // We don't try to merge JSON in SQL — the caller has the full map in
 // memory anyway, and serializing once is cheaper than parsing+merging
@@ -295,7 +308,7 @@ func (s *RunStore) ListByPipeline(ctx context.Context, pipelineID string, status
 // recovery scan.
 func (s *RunStore) ListActive(ctx context.Context, workspaceID string) ([]*RunRecord, error) {
 	rows, err := s.db.QueryContext(ctx,
-		runSelectColumns+` WHERE workspace_id = ? AND status IN ('queued','running') ORDER BY started_at DESC`,
+		runSelectColumns+` WHERE workspace_id = ? AND status IN ('queued','running','waiting') ORDER BY started_at DESC`,
 		workspaceID)
 	if err != nil {
 		return nil, fmt.Errorf("pipeline_runs: list active: %w", err)
@@ -318,7 +331,7 @@ func (s *RunStore) ListActive(ctx context.Context, workspaceID string) ([]*RunRe
 // (ListActive) serves the UI panels.
 func (s *RunStore) ListInFlight(ctx context.Context) ([]*RunRecord, error) {
 	rows, err := s.db.QueryContext(ctx,
-		runSelectColumns+` WHERE status IN ('queued','running') ORDER BY started_at ASC`)
+		runSelectColumns+` WHERE status IN ('queued','running','waiting') ORDER BY started_at ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("pipeline_runs: list in-flight: %w", err)
 	}

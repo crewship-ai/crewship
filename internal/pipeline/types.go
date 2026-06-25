@@ -708,6 +708,9 @@ type RunResult struct {
 	//   DEDUPED    — idempotency key matched a prior run; this
 	//                response is a recovery handle, not a fresh
 	//                execution. RunID points at the original run.
+	//   WAITING    — parked on a human approval (wait step). NON-terminal:
+	//                the run released its slot and returned promptly;
+	//                approving the waitpoint resumes it to COMPLETED.
 	//   DRY_RUN_OK — preview mode, nothing actually executed
 	Status       string            `json:"status"`
 	Output       string            `json:"output"`
@@ -723,6 +726,12 @@ type RunResult struct {
 	// field is the wire-friendly form; Deduped is the structured
 	// flag.
 	Deduped bool `json:"deduped,omitempty"`
+	// WaitpointToken + CurrentStep are set only when Status == WAITING:
+	// the approval token to poll/approve and the wait step the run is
+	// parked on. Let callers (CLI, API) surface the handle without a
+	// second round-trip.
+	WaitpointToken string `json:"waitpoint_token,omitempty"`
+	CurrentStep    string `json:"current_step,omitempty"`
 }
 
 // DryRunStep is one entry in WouldExecute: what the executor WOULD
