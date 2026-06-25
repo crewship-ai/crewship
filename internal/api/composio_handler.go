@@ -549,9 +549,13 @@ func composioServerName(wsID, toolkitSlug, scopeTag string) string {
 	slug := strings.ToLower(toolkitSlug)
 	name := "crewship-" + wsShort + "-" + slug + "-" + scopeTag
 	if len(name) > 30 {
+		// Composio caps names at 30 chars. Collapse slug+scope into a single
+		// 8-hex hash so the name is always "crewship-<ws8>-<8hex>" = 26 chars,
+		// deterministic per (slug, scope) within the workspace (read/custom apps
+		// and long slugs like googlecalendar land here).
 		hsh := fnv.New32a()
-		_, _ = hsh.Write([]byte(slug))
-		name = "crewship-" + wsShort + "-" + fmt.Sprintf("%08x", hsh.Sum32()) + "-" + scopeTag
+		_, _ = hsh.Write([]byte(slug + ":" + scopeTag))
+		name = "crewship-" + wsShort + "-" + fmt.Sprintf("%08x", hsh.Sum32())
 	}
 	return name
 }
