@@ -268,7 +268,7 @@ func TestRunMemoryHealthSweep_DenyTriggersConsolidationInbox(t *testing.T) {
 	}
 }
 
-func TestRunMemoryHealthSweep_EscalateWritesEscalationInbox(t *testing.T) {
+func TestRunMemoryHealthSweep_EscalateWritesAdvisoryInbox(t *testing.T) {
 	t.Parallel()
 	db := krDB(t)
 	covSeedCrews(t, db)
@@ -276,21 +276,24 @@ func TestRunMemoryHealthSweep_EscalateWritesEscalationInbox(t *testing.T) {
 	runMemoryHealthSweep(context.Background(), db,
 		covMemEval(`{"decision":"ESCALATE","reason":"mixed signals","risk":5}`), krLogger())
 
+	// The memory-health advisory is a system notification (kind=message),
+	// NOT an escalation — it has no escalations-table row behind it, so as
+	// kind=escalation it could never be cleared. One per crew.
 	var rows int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM inbox_items
-		WHERE kind = 'escalation' AND source_id LIKE 'memory_health_escalate_%'`).Scan(&rows); err != nil {
+		WHERE kind = 'message' AND source_id LIKE 'memory_health_advisory_%'`).Scan(&rows); err != nil {
 		t.Fatalf("count inbox: %v", err)
 	}
 	if rows != 2 {
-		t.Errorf("escalation inbox rows = %d, want 2 (one per crew)", rows)
+		t.Errorf("advisory inbox rows = %d, want 2 (one per crew)", rows)
 	}
 	var body string
 	if err := db.QueryRow(`SELECT body_md FROM inbox_items
-		WHERE source_id LIKE 'memory_health_escalate_cr_m2_%'`).Scan(&body); err != nil {
-		t.Fatalf("read cr_m2 escalation row: %v", err)
+		WHERE source_id LIKE 'memory_health_advisory_cr_m2_%'`).Scan(&body); err != nil {
+		t.Fatalf("read cr_m2 advisory row: %v", err)
 	}
 	if !strings.Contains(body, "mixed signals") {
-		t.Errorf("escalation body = %q, want the evaluator reason", body)
+		t.Errorf("advisory body = %q, want the evaluator reason", body)
 	}
 }
 
@@ -339,16 +342,25 @@ func TestSqlMemoryHealthPersister_DirectWrites(t *testing.T) {
 		t.Errorf("row = (%q,%q), want memory_consolidation / suggestion title", kind, title)
 	}
 
+	// The advisory is written as a non-blocking message regardless of the
+	// blocking arg — there is no decision to block on, and a blocking row
+	// would be (correctly) protected from bulk-clear, re-creating the
+	// pile-up. So even called with blocking=true it lands non-blocking.
 	if err := pers.WriteInboxItem(ctx, "ws_m2", "cr_m2", "contradictions found", true); err != nil {
 		t.Fatalf("WriteInboxItem: %v", err)
 	}
+	var kind2 string
 	var blocking int
-	if err := db.QueryRow(`SELECT blocking FROM inbox_items WHERE workspace_id = 'ws_m2' AND kind = 'escalation'`).
-		Scan(&blocking); err != nil {
-		t.Fatalf("read escalation row: %v", err)
+	if err := db.QueryRow(`SELECT kind, blocking FROM inbox_items
+		WHERE workspace_id = 'ws_m2' AND sender_id = 'keeper_memory_health_routine'`).
+		Scan(&kind2, &blocking); err != nil {
+		t.Fatalf("read advisory row: %v", err)
 	}
-	if blocking != 1 {
-		t.Errorf("blocking = %d, want 1", blocking)
+	if kind2 != "message" {
+		t.Errorf("advisory kind = %q, want message (not escalation)", kind2)
+	}
+	if blocking != 0 {
+		t.Errorf("blocking = %d, want 0 (advisory is a non-blocking notification)", blocking)
 	}
 
 	// inbox.Insert failures must propagate (regression guard mirrors the

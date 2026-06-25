@@ -472,3 +472,165 @@ func TestInboxHandler_PatchState_SourceManagedKinds(t *testing.T) {
 		}
 	}
 }
+
+// seedInboxItemBlocking inserts a row with an explicit blocking flag
+// (the shared seedInboxItem hardcodes blocking=1). The bulk decision-
+// protection skips blocking rows on resolve, so the bulk test needs
+// non-blocking rows to exercise the resolve path.
+func seedInboxItemBlocking(t *testing.T, h *InboxHandler, wsID, id, kind, title string, blocking int, createdAt time.Time) {
+	t.Helper()
+	_, err := h.db.Exec(`
+		INSERT INTO inbox_items (id, workspace_id, kind, source_id, title, body_md,
+			sender_type, state, priority, blocking, payload_json, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, '', 'system', 'unread', 'medium', ?, '{}', ?, ?)`,
+		id, wsID, kind, "src-"+id, title, blocking,
+		createdAt.Format(time.RFC3339Nano), createdAt.Format(time.RFC3339Nano))
+	if err != nil {
+		t.Fatalf("seed inbox %s: %v", id, err)
+	}
+}
+
+// TestInboxHandler_BulkPatchState covers the tree-grouped UI's
+// "resolve all under this group" action: a single call clears the
+// freely-resolvable rows and SKIPS (not fails) anything that needs an
+// explicit human decision — source-managed kinds AND blocking rows —
+// reporting both counts.
+func TestInboxHandler_BulkPatchState(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	h := NewInboxHandler(db, newTestLogger(), nil)
+	now := time.Now().UTC()
+
+	// Freely resolvable: non-blocking failed_run + message.
+	seedInboxItemBlocking(t, h, wsID, "fr-1", "failed_run", "fetch-and-extract", 0, now)
+	seedInboxItemBlocking(t, h, wsID, "fr-2", "failed_run", "fetch-and-extract", 0, now)
+	seedInboxItemBlocking(t, h, wsID, "msg-1", "message", "note", 0, now)
+	// Decision items that must be skipped on resolve:
+	//   - waitpoint + escalation (source-managed kinds), and
+	//   - a BLOCKING message (blocking=1, regardless of kind).
+	seedInboxItemBlocking(t, h, wsID, "wp-1", "waitpoint", "approve", 1, now)
+	seedInboxItemBlocking(t, h, wsID, "esc-1", "escalation", "help", 0, now)
+	seedInboxItemBlocking(t, h, wsID, "bmsg-1", "message", "needs decision", 1, now)
+
+	bulk := func(ids []string, state, action string) map[string]interface{} {
+		t.Helper()
+		body, _ := json.Marshal(map[string]interface{}{"ids": ids, "state": state, "resolved_action": action})
+		req := httptest.NewRequest("POST", "/api/v1/inbox/bulk", strings.NewReader(string(body)))
+		req = withWorkspaceUser(req, userID, wsID, "OWNER")
+		rr := httptest.NewRecorder()
+		h.BulkPatchState(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("bulk: code = %d body=%s, want 200", rr.Code, rr.Body.String())
+		}
+		var out map[string]interface{}
+		if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+			t.Fatalf("bulk: decode: %v", err)
+		}
+		return out
+	}
+
+	out := bulk([]string{"fr-1", "fr-2", "msg-1", "wp-1", "esc-1", "bmsg-1"}, "resolved", "cancelled")
+	if got := out["updated"]; got != float64(3) {
+		t.Errorf("updated = %v, want 3 (2 failed_run + 1 non-blocking message)", got)
+	}
+	if got := out["skipped"]; got != float64(3) {
+		t.Errorf("skipped = %v, want 3 (waitpoint + escalation + blocking message)", got)
+	}
+
+	// The 3 freely-resolvable rows are now resolved with the action recorded.
+	for _, id := range []string{"fr-1", "fr-2", "msg-1"} {
+		var state, action string
+		db.QueryRow(`SELECT state, COALESCE(resolved_action,'') FROM inbox_items WHERE id=?`, id).Scan(&state, &action)
+		if state != "resolved" || action != "cancelled" {
+			t.Errorf("%s: state=%s action=%s, want resolved/cancelled", id, state, action)
+		}
+	}
+	// The decision items are untouched (still unread) — nothing closed.
+	for _, id := range []string{"wp-1", "esc-1", "bmsg-1"} {
+		var state string
+		db.QueryRow(`SELECT state FROM inbox_items WHERE id=?`, id).Scan(&state)
+		if state != "unread" {
+			t.Errorf("%s: state=%s, want unread (skipped, must not be bulk-closed)", id, state)
+		}
+	}
+
+	// 'read' is harmless and allowed for every kind — including the
+	// decision items (it doesn't close anything).
+	out = bulk([]string{"wp-1", "esc-1", "bmsg-1"}, "read", "")
+	if got := out["updated"]; got != float64(3) {
+		t.Errorf("read updated = %v, want 3 (read allowed for all kinds)", got)
+	}
+
+	// Unknown ids are counted as not_found, not errors.
+	out = bulk([]string{"does-not-exist"}, "resolved", "dismissed")
+	if got := out["not_found"]; got != float64(1) {
+		t.Errorf("not_found = %v, want 1", got)
+	}
+	if got := out["updated"]; got != float64(0) {
+		t.Errorf("updated = %v, want 0 for unknown id", got)
+	}
+
+	// An id that EXISTS but is targeted at another user is invisible to
+	// this caller — the visibility clause must make bulk treat it as
+	// not_found, never act on it (no flipping rows addressed to someone
+	// else by stuffing ids into the array).
+	_, err := db.Exec(`INSERT INTO users (id, email, full_name) VALUES ('other-u', 'other@x.io', 'Other')`)
+	if err != nil {
+		t.Fatalf("seed other user: %v", err)
+	}
+	_, err = db.Exec(`
+		INSERT INTO inbox_items (id, workspace_id, kind, source_id, target_user_id,
+			title, body_md, sender_type, state, priority, blocking, payload_json, created_at, updated_at)
+		VALUES ('inaccessible', ?, 'message', 'src-inacc', 'other-u', 'private', '', 'system',
+			'unread', 'medium', 0, '{}', ?, ?)`,
+		wsID, now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano))
+	if err != nil {
+		t.Fatalf("seed inaccessible item: %v", err)
+	}
+	out = bulk([]string{"inaccessible"}, "resolved", "dismissed")
+	if got := out["not_found"]; got != float64(1) {
+		t.Errorf("inaccessible not_found = %v, want 1 (invisible to caller)", got)
+	}
+	if got := out["updated"]; got != float64(0) {
+		t.Errorf("inaccessible updated = %v, want 0 (must not act on others' rows)", got)
+	}
+	var state string
+	db.QueryRow(`SELECT state FROM inbox_items WHERE id='inaccessible'`).Scan(&state)
+	if state != "unread" {
+		t.Errorf("inaccessible item state = %s, want unread (untouched)", state)
+	}
+}
+
+// TestInboxHandler_BulkPatchState_Validation covers the request guards.
+func TestInboxHandler_BulkPatchState_Validation(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	h := NewInboxHandler(db, newTestLogger(), nil)
+
+	call := func(bodyJSON string) int {
+		req := httptest.NewRequest("POST", "/api/v1/inbox/bulk", strings.NewReader(bodyJSON))
+		req = withWorkspaceUser(req, userID, wsID, "OWNER")
+		rr := httptest.NewRecorder()
+		h.BulkPatchState(rr, req)
+		return rr.Code
+	}
+
+	if code := call(`{"ids":[],"state":"resolved"}`); code != http.StatusBadRequest {
+		t.Errorf("empty ids: code = %d, want 400", code)
+	}
+	if code := call(`{"ids":["a"],"state":"bogus"}`); code != http.StatusBadRequest {
+		t.Errorf("bad state: code = %d, want 400", code)
+	}
+
+	// Over the 500 cap.
+	tooMany := make([]string, 501)
+	for i := range tooMany {
+		tooMany[i] = fmt.Sprintf("id-%d", i)
+	}
+	body, _ := json.Marshal(map[string]interface{}{"ids": tooMany, "state": "read"})
+	if code := call(string(body)); code != http.StatusBadRequest {
+		t.Errorf("over cap: code = %d, want 400", code)
+	}
+}

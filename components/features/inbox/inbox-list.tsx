@@ -5,11 +5,15 @@ import { motion, AnimatePresence } from "motion/react"
 import {
   AlertCircle,
   Bell,
+  CheckCheck,
   CheckCircle2,
+  ChevronDown,
   ChevronRight,
   CircleDot,
   Clock,
   Inbox as InboxIcon,
+  Layers,
+  MailOpen,
   ScrollText,
   Sparkles,
   XCircle,
@@ -19,13 +23,26 @@ import { cn } from "@/lib/utils"
 import { useInbox, type InboxItem } from "@/hooks/use-inbox"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { ListRow } from "@/components/ui/list-row"
 import { TabBar } from "@/components/ui/tab-bar"
 import { ListRowSkeleton } from "@/components/ui/skeletons"
 import { EmptyState as PageEmptyState } from "@/components/layout/empty-state"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { toast } from "sonner"
 import { WaitpointRunDetail } from "./waitpoint-run-detail"
 import { waitpointDecide } from "@/lib/api/waitpoints"
+import { inboxBulk } from "@/lib/api/inbox"
+import { escalationResolve } from "@/lib/api/escalations"
 
 // InboxList — the /inbox page surface. Linear-Triage UX: three states
 // (unread → read → resolved) with no archive / flag / snooze. List on
@@ -47,6 +64,75 @@ const KIND_META: Record<InboxItem["kind"], KindMeta> = {
   escalation: { label: "Escalation", icon: AlertCircle, accent: "text-rose-300" },
   failed_run: { label: "Failed run", icon: XCircle, accent: "text-rose-400" },
   message: { label: "Message", icon: Sparkles, accent: "text-blue-300" },
+}
+
+// The kind column can hold values the UI doesn't have a card for yet
+// (e.g. memory_consolidation, admitted by migration v90). Render those
+// as a generic notification instead of crashing on an undefined meta.
+const FALLBACK_META: KindMeta = {
+  label: "Notification",
+  icon: Sparkles,
+  accent: "text-muted-foreground",
+}
+
+function metaFor(kind: string): KindMeta {
+  return (KIND_META as Record<string, KindMeta>)[kind] ?? FALLBACK_META
+}
+
+// Decision items must never be bulk-closed: a waitpoint or escalation is
+// an agent waiting on a human to approve / decide, and a blocking row of
+// any kind means "needs explicit action". Used to warn before a bulk
+// Resolve and to split the selection into safe vs protected.
+function isDecisionItem(item: InboxItem): boolean {
+  return item.kind === "waitpoint" || item.kind === "escalation" || item.blocking
+}
+
+// Tree grouping. The list can collapse 100 rows into a handful of
+// folders so "47 failures from one routine" reads as one line you can
+// expand, bulk-select, and clear — instead of 47 rows to scroll past.
+// Every dimension keys off a field already on the row (payload + kind),
+// so grouping is pure client-side over the data the list already holds.
+type GroupDim = "kind" | "routine" | "issue" | "crew"
+
+const GROUP_DIMS: { id: GroupDim; label: string }[] = [
+  { id: "kind", label: "Type" },
+  { id: "routine", label: "Routine" },
+  { id: "issue", label: "Issue" },
+  { id: "crew", label: "Crew" },
+]
+
+function payloadString(item: InboxItem, key: string): string {
+  const v = item.payload?.[key]
+  return typeof v === "string" ? v : ""
+}
+
+// groupOf returns the bucket key + display label for an item under a
+// dimension. Items missing the dimension's field land in a stable
+// "No …" bucket (key prefixed so it can't collide with a real value).
+function groupOf(item: InboxItem, dim: GroupDim): { key: string; label: string } {
+  switch (dim) {
+    case "routine": {
+      const slug = payloadString(item, "pipeline_slug")
+      return slug ? { key: `r:${slug}`, label: slug } : { key: "r:_none", label: "No routine" }
+    }
+    case "issue": {
+      const iss = payloadString(item, "issue_identifier")
+      return iss ? { key: `i:${iss}`, label: iss } : { key: "i:_none", label: "No issue" }
+    }
+    case "crew": {
+      const crew = payloadString(item, "crew_id")
+      return crew ? { key: `c:${crew}`, label: crew } : { key: "c:_none", label: "No crew" }
+    }
+    case "kind":
+    default:
+      return { key: `k:${item.kind}`, label: metaFor(item.kind).label }
+  }
+}
+
+interface InboxGroup {
+  key: string
+  label: string
+  items: InboxItem[]
 }
 
 export function InboxList() {
@@ -74,7 +160,14 @@ export function InboxList() {
   useEffect(() => {
     if (liveSelected) setSelectedSnapshot(liveSelected)
   }, [liveSelected])
-  const selected = liveSelected ?? (selectedSnapshot?.id === selectedId ? selectedSnapshot : null)
+  // Scope the snapshot to the active workspace too — switching workspaces
+  // must not keep rendering the prior workspace's detail item until fresh
+  // list data lands.
+  const selected =
+    liveSelected ??
+    (selectedSnapshot?.id === selectedId && selectedSnapshot.workspace_id === workspaceId
+      ? selectedSnapshot
+      : null)
 
   const counts = useMemo(() => {
     const unread = items.filter((i) => i.state === "unread").length
@@ -82,6 +175,120 @@ export function InboxList() {
     const resolved = items.filter((i) => i.state === "resolved").length
     return { unread, read, resolved, total: items.length }
   }, [items])
+
+  // ── Tree grouping + bulk selection ──────────────────────────────
+  const [groupBy, setGroupBy] = useState<GroupDim>("kind")
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  const [checked, setChecked] = useState<Set<string>>(new Set())
+  const [bulkBusy, setBulkBusy] = useState(false)
+  const [confirmResolve, setConfirmResolve] = useState(false)
+
+  const groups = useMemo<InboxGroup[]>(() => {
+    const map = new Map<string, InboxGroup>()
+    for (const it of items) {
+      const g = groupOf(it, groupBy)
+      const bucket = map.get(g.key)
+      if (bucket) bucket.items.push(it)
+      else map.set(g.key, { key: g.key, label: g.label, items: [it] })
+    }
+    return Array.from(map.values())
+  }, [items, groupBy])
+
+  // Drop checked ids that are no longer visible (filter switch, refresh,
+  // regroup) so the bulk bar count never lies about what it will act on.
+  useEffect(() => {
+    setChecked((prev) => {
+      if (prev.size === 0) return prev
+      const live = new Set(items.map((i) => i.id))
+      let changed = false
+      const next = new Set<string>()
+      for (const id of prev) {
+        if (live.has(id)) next.add(id)
+        else changed = true
+      }
+      return changed ? next : prev
+    })
+  }, [items])
+
+  const toggleCollapse = (key: string) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev)
+      next.has(key) ? next.delete(key) : next.add(key)
+      return next
+    })
+
+  const toggleItem = (id: string) =>
+    setChecked((prev) => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+
+  const toggleGroup = (g: InboxGroup) =>
+    setChecked((prev) => {
+      const next = new Set(prev)
+      const allOn = g.items.every((it) => next.has(it.id))
+      for (const it of g.items) allOn ? next.delete(it.id) : next.add(it.id)
+      return next
+    })
+
+  const clearChecked = () => setChecked(new Set())
+
+  // Split the current selection into items a bulk Resolve will actually
+  // close vs. decision items the server will refuse to close. Drives the
+  // confirmation warning so nothing important gets mass-closed by mistake.
+  const selectionSplit = useMemo(() => {
+    const sel = items.filter((it) => checked.has(it.id))
+    const decision = sel.filter(isDecisionItem)
+    return { total: sel.length, decision: decision.length, safe: sel.length - decision.length }
+  }, [items, checked])
+
+  // Bulk apply via /inbox/bulk. Chunked to the backend's 500-id cap so a
+  // large select-all can't fail the whole action; the server skips
+  // decision items it must not close, and we surface every count
+  // (resolved / left-open / no-longer-available).
+  const runBulk = async (state: "read" | "resolved", action?: string) => {
+    if (!workspaceId || checked.size === 0) return
+    setBulkBusy(true)
+    try {
+      const ids = Array.from(checked)
+      const CHUNK = 500
+      let updated = 0
+      let skipped = 0
+      let notFound = 0
+      for (let i = 0; i < ids.length; i += CHUNK) {
+        const res = await inboxBulk(workspaceId, ids.slice(i, i + CHUNK), state, action)
+        if (!res.ok) {
+          toast.error(res.error)
+          return
+        }
+        updated += res.result.updated
+        skipped += res.result.skipped
+        notFound += res.result.not_found
+      }
+      const verb = state === "resolved" ? "resolved" : "marked read"
+      const extra = [
+        skipped > 0 ? `${skipped} left open (need a decision)` : "",
+        notFound > 0 ? `${notFound} no longer available` : "",
+      ]
+        .filter(Boolean)
+        .join(" · ")
+      toast.success(extra ? `${updated} ${verb} · ${extra}` : `${updated} ${verb}`)
+      clearChecked()
+      await refresh()
+    } finally {
+      setBulkBusy(false)
+    }
+  }
+
+  // Resolve entry point. If the selection holds any decision item
+  // (waitpoint / escalation / blocking), warn first — a bulk Resolve must
+  // never quietly close something an agent is waiting on. Otherwise go
+  // straight through.
+  const requestResolve = () => {
+    if (selectionSplit.decision > 0) setConfirmResolve(true)
+    else void runBulk("resolved", "dismissed")
+  }
 
   return (
     <div className="flex h-[calc(100vh-48px)] bg-background">
@@ -123,7 +330,30 @@ export function InboxList() {
           </TabBar.Item>
         </TabBar>
 
-        {/* List */}
+        {/* Group-by control */}
+        <div className="flex shrink-0 items-center gap-1 border-b border-white/[0.06] px-3 py-1.5">
+          <Layers className="mr-1 h-3 w-3 text-muted-foreground/50" />
+          <span className="mr-1 text-[10px] uppercase tracking-wider text-muted-foreground/50">
+            Group
+          </span>
+          {GROUP_DIMS.map((d) => (
+            <button
+              key={d.id}
+              onClick={() => setGroupBy(d.id)}
+              aria-pressed={groupBy === d.id}
+              className={cn(
+                "rounded px-1.5 py-0.5 text-[11px] transition-colors",
+                groupBy === d.id
+                  ? "bg-white/[0.08] text-foreground"
+                  : "text-muted-foreground/60 hover:text-foreground",
+              )}
+            >
+              {d.label}
+            </button>
+          ))}
+        </div>
+
+        {/* List — collapsible tree, one folder per group */}
         <div className="flex-1 overflow-y-auto">
           {loading && items.length === 0 ? (
             <ListRowSkeleton rows={3} className="p-3" />
@@ -134,26 +364,107 @@ export function InboxList() {
           ) : items.length === 0 ? (
             <InboxEmpty filter={stateFilter} />
           ) : (
-            <ul className="divide-y divide-white/[0.04]">
-              {items.map((item) => (
-                <InboxRow
-                  key={item.id}
-                  item={item}
-                  selected={selectedId === item.id}
-                  onSelect={() => {
-                    setSelectedId(item.id)
-                    // Snapshot immediately so the detail survives the
-                    // read-transition evicting this row from the list.
-                    setSelectedSnapshot(item)
-                    if (item.state === "unread") {
-                      patch(item.id, "read")
-                    }
-                  }}
-                />
-              ))}
-            </ul>
+            <div>
+              {groups.map((g) => {
+                const isCollapsed = collapsed.has(g.key)
+                const checkedCount = g.items.reduce(
+                  (n, it) => n + (checked.has(it.id) ? 1 : 0),
+                  0,
+                )
+                const groupState: boolean | "indeterminate" =
+                  checkedCount === 0
+                    ? false
+                    : checkedCount === g.items.length
+                      ? true
+                      : "indeterminate"
+                return (
+                  <div key={g.key}>
+                    {/* Group header — checkbox selects the whole folder */}
+                    <div className="sticky top-0 z-[1] flex items-center gap-2 border-b border-white/[0.04] bg-card/95 px-3 py-1.5 backdrop-blur">
+                      <Checkbox
+                        checked={groupState}
+                        onCheckedChange={() => toggleGroup(g)}
+                        aria-label={`Select all in ${g.label}`}
+                      />
+                      <button
+                        onClick={() => toggleCollapse(g.key)}
+                        aria-expanded={!isCollapsed}
+                        className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+                      >
+                        {isCollapsed ? (
+                          <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground/50" />
+                        ) : (
+                          <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground/50" />
+                        )}
+                        <span className="truncate text-xs font-medium">{g.label}</span>
+                        <span className="ml-auto shrink-0 rounded-full bg-white/[0.06] px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                          {g.items.length}
+                        </span>
+                      </button>
+                    </div>
+                    {/* Group rows */}
+                    {!isCollapsed && (
+                      <ul className="divide-y divide-white/[0.04]">
+                        {g.items.map((item) => (
+                          <InboxRow
+                            key={item.id}
+                            item={item}
+                            selected={selectedId === item.id}
+                            checked={checked.has(item.id)}
+                            onToggleCheck={() => toggleItem(item.id)}
+                            onSelect={() => {
+                              setSelectedId(item.id)
+                              // Snapshot immediately so the detail survives
+                              // the read-transition evicting this row.
+                              setSelectedSnapshot(item)
+                              if (item.state === "unread") {
+                                // Fire-and-forget; useInbox surfaces the
+                                // error itself, so just swallow the reject
+                                // to avoid an unhandled rejection.
+                                void patch(item.id, "read").catch(() => {})
+                              }
+                            }}
+                          />
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
           )}
         </div>
+
+        {/* Bulk action bar — appears once anything is checked */}
+        {checked.size > 0 && (
+          <div className="flex shrink-0 items-center gap-2 border-t border-white/[0.06] bg-card/40 px-3 py-2">
+            <span className="text-xs font-medium">{checked.size} selected</span>
+            <div className="ml-auto flex items-center gap-1.5">
+              <Button
+                size="sm"
+                disabled={bulkBusy}
+                onClick={requestResolve}
+                className="gap-1.5"
+              >
+                <CheckCheck className="h-3 w-3" />
+                {bulkBusy ? "Working…" : "Resolve"}
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={bulkBusy}
+                onClick={() => runBulk("read")}
+                className="gap-1.5"
+              >
+                <MailOpen className="h-3 w-3" />
+                Mark read
+              </Button>
+              <Button size="sm" variant="ghost" disabled={bulkBusy} onClick={clearChecked}>
+                Clear
+              </Button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ── Detail panel ───────────────────────────────────────── */}
@@ -198,6 +509,41 @@ export function InboxList() {
           )}
         </AnimatePresence>
       </div>
+
+      {/* Bulk-resolve safety gate. Shown only when the selection contains
+          decision items; reassures the user those won't be closed and
+          confirms resolving just the safe remainder. */}
+      <AlertDialog open={confirmResolve} onOpenChange={setConfirmResolve}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {selectionSplit.safe > 0
+                ? `Resolve ${selectionSplit.safe} item${selectionSplit.safe === 1 ? "" : "s"}?`
+                : "Nothing to resolve in bulk"}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {selectionSplit.decision} of the {selectionSplit.total} selected{" "}
+              {selectionSplit.decision === 1 ? "is an" : "are"} approval / escalation request
+              {selectionSplit.decision === 1 ? "" : "s"} an agent is waiting on — these are{" "}
+              <span className="font-medium text-foreground">never closed in bulk</span> and stay in
+              your inbox to decide one by one.
+              {selectionSplit.safe > 0
+                ? ` Only the ${selectionSplit.safe} dismissable item${
+                    selectionSplit.safe === 1 ? "" : "s"
+                  } will be resolved.`
+                : " Open each one to approve, deny, or resolve it individually."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            {selectionSplit.safe > 0 && (
+              <AlertDialogAction onClick={() => void runBulk("resolved", "dismissed")}>
+                Resolve {selectionSplit.safe}
+              </AlertDialogAction>
+            )}
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
@@ -205,13 +551,17 @@ export function InboxList() {
 function InboxRow({
   item,
   selected,
+  checked,
+  onToggleCheck,
   onSelect,
 }: {
   item: InboxItem
   selected: boolean
+  checked: boolean
+  onToggleCheck: () => void
   onSelect: () => void
 }) {
-  const meta = KIND_META[item.kind]
+  const meta = metaFor(item.kind)
   const Icon = meta.icon
   return (
     <ListRow
@@ -222,6 +572,16 @@ function InboxRow({
         item.state === "resolved" && "opacity-60",
       )}
     >
+      {/* Per-row checkbox for bulk select. Toggle is wired through
+          onCheckedChange so it works for keyboard + screen-reader users;
+          the wrapper just stops the click from also opening the detail. */}
+      <span className="mt-0.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+        <Checkbox
+          checked={checked}
+          onCheckedChange={onToggleCheck}
+          aria-label={`Select ${item.title}`}
+        />
+      </span>
       {/* unread dot — left of icon */}
       <span
         className={cn(
@@ -264,7 +624,7 @@ function InboxDetail({
   onMarkUnread: () => void
   onRefresh: () => void | Promise<void>
 }) {
-  const meta = KIND_META[item.kind]
+  const meta = metaFor(item.kind)
   const Icon = meta.icon
   const isResolved = item.state === "resolved"
 
@@ -495,18 +855,97 @@ function KindActions({
         </div>
       )
     }
-    case "escalation":
+    case "escalation": {
+      // An escalation is an agent decision request — resolving it must go
+      // through the escalation lifecycle (/escalations/{id}/resolve), NOT
+      // a blind inbox flip (that 409s, since escalation is source-managed).
+      // Real agent escalations carry escalation_type + a source_id that IS
+      // the escalations-row id. Keeper/synthetic escalations don't — for
+      // those the inbox can't resolve inline, so we point at the source.
+      const escType =
+        typeof item.payload?.escalation_type === "string"
+          ? (item.payload.escalation_type as string)
+          : ""
+      const resolveEsc = (action: "approve" | "reject") =>
+        wrap(action, async () => {
+          const res = await escalationResolve(
+            item.source_id,
+            action,
+            action === "approve" ? "Approved from inbox" : "Rejected from inbox",
+          )
+          if (!res.ok) {
+            // 404 = no escalations row behind this item (keeper/synthetic):
+            // tell the user where to handle it instead of a raw error.
+            toast.error(
+              res.status === 404
+                ? "Resolve this from its source (crew escalations / review panel)."
+                : res.error,
+            )
+            return
+          }
+          // The lifecycle cascades the inbox row to resolved via
+          // ResolveBySource server-side; refresh to pick that up.
+          toast.success(`Escalation ${action === "approve" ? "approved" : "rejected"}`)
+          await onRefresh()
+        })
+
+      // CREDENTIAL escalations can't be approved without supplying the
+      // secret value — that belongs to the credential flow, not a blind
+      // inbox button. Offer Reject only, and say where to approve.
+      if (escType === "CREDENTIAL") {
+        return (
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={disabled || busy !== null}
+              onClick={() => resolveEsc("reject")}
+              className="gap-1.5"
+            >
+              <XCircle className="h-3 w-3" />
+              {busy === "reject" ? "Rejecting…" : "Reject"}
+            </Button>
+            <span className="text-[11px] text-muted-foreground">
+              To grant the credential, resolve from the crew’s escalations panel.
+            </span>
+          </div>
+        )
+      }
+      // Real agent escalation (non-credential): inline approve / reject.
+      if (escType !== "") {
+        return (
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              disabled={disabled || busy !== null}
+              onClick={() => resolveEsc("approve")}
+              className="gap-1.5 bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30"
+            >
+              <CheckCircle2 className="h-3 w-3" />
+              {busy === "approve" ? "Approving…" : "Approve"}
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={disabled || busy !== null}
+              onClick={() => resolveEsc("reject")}
+              className="gap-1.5"
+            >
+              <XCircle className="h-3 w-3" />
+              {busy === "reject" ? "Rejecting…" : "Reject"}
+            </Button>
+          </div>
+        )
+      }
+      // Keeper / synthetic escalation — no inline resolve path. Surface
+      // that honestly instead of a button that 409s.
       return (
-        <Button
-          size="sm"
-          disabled={disabled || busy !== null}
-          onClick={() => wrap("acknowledged", async () => onResolve("acknowledged"))}
-          className="gap-1.5"
-        >
-          <CheckCircle2 className="h-3 w-3" />
-          Mark resolved
-        </Button>
+        <span className="text-[11px] text-muted-foreground">
+          This escalation is resolved from its source review (crew escalations / keeper). Use “Mark
+          read” to declutter.
+        </span>
       )
+    }
     case "failed_run":
       // Retry actually re-fires the routine: POST /pipelines/{slug}/run
       // with the same inputs that produced the failure (replayed from

@@ -387,3 +387,171 @@ func (h *InboxHandler) PatchState(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, map[string]string{"id": id, "state": body.State})
 }
+
+// bulkMaxIDs caps a single bulk request. The tree-grouped UI resolves a
+// whole routine/crew group at once; 500 matches the list LIMIT ceiling
+// so "select everything visible, resolve" can't exceed what one page
+// loaded.
+const bulkMaxIDs = 500
+
+// BulkPatchState handles POST /api/v1/inbox/bulk — apply ONE state
+// transition to many items at once, the engine behind the tree-grouped
+// UI's "resolve all under this routine / crew" action. The body carries
+// an explicit id list (the client already has the rows loaded and knows
+// exactly which group it's clearing); the server re-checks workspace +
+// visibility per id so a caller can't flip rows addressed to someone
+// else by stuffing ids into the array.
+//
+// The same source-managed guard as PatchState applies, but PARTIALLY:
+// waitpoint/escalation rows that can't take the requested non-read
+// state are SKIPPED rather than failing the whole batch, so a mixed
+// selection still clears everything it legitimately can (failed_run +
+// message resolve freely; see PatchState for why failed_run isn't
+// source-managed). The response reports updated vs skipped counts so
+// the UI can say "22 resolved, 3 need the source endpoint".
+func (h *InboxHandler) BulkPatchState(w http.ResponseWriter, r *http.Request) {
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	user := UserFromContext(r.Context())
+	role := RoleFromContext(r.Context())
+	if workspaceID == "" || user == nil {
+		replyError(w, http.StatusUnauthorized, "auth required")
+		return
+	}
+
+	var body struct {
+		IDs            []string `json:"ids"`
+		State          string   `json:"state"`
+		ResolvedAction string   `json:"resolved_action,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		replyError(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	if body.State != "unread" && body.State != "read" && body.State != "resolved" {
+		replyError(w, http.StatusBadRequest, "state must be unread|read|resolved")
+		return
+	}
+	if len(body.IDs) == 0 {
+		replyError(w, http.StatusBadRequest, "ids required")
+		return
+	}
+	if len(body.IDs) > bulkMaxIDs {
+		replyError(w, http.StatusBadRequest, "too many ids (max 500)")
+		return
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		replyError(w, http.StatusInternalServerError, "tx failed")
+		return
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	visClause, visArgs := inboxVisibilityClause(user.ID, role)
+
+	updated := 0
+	skipped := make([]string, 0)
+	notFound := 0
+	seen := make(map[string]bool, len(body.IDs))
+	for _, id := range body.IDs {
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+
+		var existing, kind string
+		var blocking int
+		lookupArgs := append([]interface{}{id, workspaceID}, visArgs...)
+		err = tx.QueryRowContext(r.Context(),
+			`SELECT id, kind, blocking FROM inbox_items WHERE id = ? AND workspace_id = ?`+visClause,
+			lookupArgs...).Scan(&existing, &kind, &blocking)
+		if errors.Is(err, sql.ErrNoRows) {
+			notFound++
+			continue
+		}
+		if err != nil {
+			h.logger.Error("inbox bulk lookup", "error", err)
+			replyError(w, http.StatusInternalServerError, "lookup failed")
+			return
+		}
+
+		// Decision-item protection. Bulk MUST NOT silently close anything
+		// an agent is waiting on a human to decide — one misclick on
+		// "Resolve all" could otherwise approve/dismiss dozens of pending
+		// requests. So on a resolve (not 'read', which is harmless) we
+		// SKIP, never fail:
+		//   - source-managed kinds (waitpoint/escalation): their real
+		//     state lives in the source table, not the inbox row; and
+		//   - any blocking=true row regardless of kind: "blocking" means
+		//     "needs explicit human action".
+		// Non-blocking message/failed_run still clear. The client warns
+		// the user before calling; this is the server-side backstop.
+		if body.State == "resolved" && (kind == "waitpoint" || kind == "escalation" || blocking != 0) {
+			skipped = append(skipped, id)
+			continue
+		}
+		// 'unread' on source-managed kinds would desync the source row —
+		// only 'read' is allowed for those. Skip (not fail) here too.
+		if body.State == "unread" && (kind == "waitpoint" || kind == "escalation") {
+			skipped = append(skipped, id)
+			continue
+		}
+
+		switch body.State {
+		case "read":
+			_, err = tx.ExecContext(r.Context(), `
+				UPDATE inbox_items
+				SET state = 'read',
+				    read_at = COALESCE(read_at, ?),
+				    read_by_user_id = COALESCE(read_by_user_id, ?),
+				    updated_at = ?
+				WHERE id = ?`,
+				now, user.ID, now, id)
+		case "unread":
+			_, err = tx.ExecContext(r.Context(), `
+				UPDATE inbox_items
+				SET state = 'unread', read_at = NULL, read_by_user_id = NULL,
+				    resolved_at = NULL, resolved_by_user_id = NULL, resolved_action = NULL,
+				    updated_at = ?
+				WHERE id = ?`,
+				now, id)
+		case "resolved":
+			_, err = tx.ExecContext(r.Context(), `
+				UPDATE inbox_items
+				SET state = 'resolved', resolved_at = ?, resolved_by_user_id = ?,
+				    resolved_action = ?, updated_at = ?
+				WHERE id = ?`,
+				now, user.ID, body.ResolvedAction, now, id)
+		}
+		if err != nil {
+			h.logger.Error("inbox bulk update", "error", err, "id", id)
+			replyError(w, http.StatusInternalServerError, "update failed")
+			return
+		}
+		updated++
+	}
+
+	if err := tx.Commit(); err != nil {
+		replyError(w, http.StatusInternalServerError, "commit failed")
+		return
+	}
+
+	// One broadcast for the whole batch — the client invalidates its
+	// inbox queries on any inbox.updated, so a single event repaints the
+	// list + badge without flooding the socket with N messages.
+	if h.hub != nil && updated > 0 {
+		broadcastWorkspaceEvent(h.hub, workspaceID, "inbox.updated", map[string]string{
+			"bulk":  "true",
+			"state": body.State,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"updated":     updated,
+		"skipped":     len(skipped),
+		"skipped_ids": skipped,
+		"not_found":   notFound,
+		"state":       body.State,
+	})
+}
