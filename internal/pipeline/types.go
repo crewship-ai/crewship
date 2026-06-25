@@ -709,8 +709,10 @@ type RunResult struct {
 	//                response is a recovery handle, not a fresh
 	//                execution. RunID points at the original run.
 	//   WAITING    — parked on a human approval (wait step). NON-terminal:
-	//                the run released its slot and returned promptly;
-	//                approving the waitpoint resumes it to COMPLETED.
+	//                the run released its slot and returned promptly.
+	//                Resolving the waitpoint resumes the run to a terminal
+	//                state — COMPLETED on approval, or a failure terminal on
+	//                rejection / a later step failure / approval timeout.
 	//   DRY_RUN_OK — preview mode, nothing actually executed
 	Status       string            `json:"status"`
 	Output       string            `json:"output"`

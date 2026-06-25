@@ -23,6 +23,10 @@ func TestExprCodeRunner_ComparisonEmitsBool(t *testing.T) {
 		{code: "1.5 > 0.5", want: "true"},
 		{code: `"a" == "a"`, want: "true"},
 		{code: `"a" != "b"`, want: "true"},
+		// Legitimately-empty operand must stay comparable (raw token is `""`,
+		// non-empty) — guards the CodeRabbit empty-operand fix.
+		{code: `"" == ""`, want: "true"},
+		{code: `"x" != ""`, want: "true"},
 		// CREWSHIP_INPUT_* operands resolve from env (the non-rendered path).
 		{code: "CREWSHIP_INPUT_SPEND > CREWSHIP_INPUT_THRESHOLD",
 			env:  map[string]string{"CREWSHIP_INPUT_SPEND": "9", "CREWSHIP_INPUT_THRESHOLD": "5"},
@@ -64,7 +68,8 @@ func TestExprCodeRunner_RejectsNonExprRuntime(t *testing.T) {
 
 // Malformed expressions fail closed rather than guessing.
 func TestExprCodeRunner_MalformedFailsClosed(t *testing.T) {
-	for _, code := range []string{"", "true", "5", "5 5"} {
+	// "> 5" / "5 >" have a missing side (raw boundary empty) → fail closed.
+	for _, code := range []string{"", "true", "5", "5 5", "> 5", "5 >="} {
 		res, err := ExprCodeRunner{}.RunCode(context.Background(), CodeRunRequest{
 			Runtime: "expr", Code: code, TimeoutSec: 15, MaxBytes: 1_000_000,
 		})

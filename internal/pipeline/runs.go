@@ -202,11 +202,25 @@ WHERE id = ?`, stepID, runID)
 // include 'waiting' so the parked run survives a restart and shows in the UI.
 // Approving the waitpoint triggers a resume that flips it onward.
 func (s *RunStore) MarkWaiting(ctx context.Context, runID, stepID string) error {
-	_, err := s.db.ExecContext(ctx, `
+	res, err := s.db.ExecContext(ctx, `
 UPDATE pipeline_runs
 SET status = 'waiting', current_step_id = ?, updated_at = datetime('now','subsec')
 WHERE id = ?`, stepID, runID)
-	return err
+	if err != nil {
+		return fmt.Errorf("pipeline_runs: mark waiting: %w", err)
+	}
+	// Durability guard: the async WAITING contract requires a persisted run
+	// row to resume from. If no row matched (e.g. RunDefinition path with no
+	// persisted run), report it so the caller fails closed / falls back to
+	// blocking instead of surfacing a WAITING token nothing can resume.
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("pipeline_runs: mark waiting rows: %w", err)
+	}
+	if n != 1 {
+		return fmt.Errorf("pipeline_runs: mark waiting matched %d rows for run %q (no durable row to park)", n, runID)
+	}
+	return nil
 }
 
 // AppendStepOutput rewrites step_outputs_json with the supplied map.
@@ -362,7 +376,7 @@ SET status = 'interrupted',
     ended_at = COALESCE(ended_at, datetime('now','subsec')),
     error_message = ?,
     updated_at = datetime('now','subsec')
-WHERE id = ? AND status IN ('queued','running')`, reason, runID)
+WHERE id = ? AND status IN ('queued','running','waiting')`, reason, runID)
 	if err != nil {
 		return fmt.Errorf("pipeline_runs: mark interrupted: %w", err)
 	}

@@ -44,7 +44,7 @@ func (ExprCodeRunner) RunCode(ctx context.Context, req CodeRunRequest) (CodeRunR
 			"code runtime %q not available in this build (no sandbox wired) — "+
 				"use runtime: expr for agentless probes, or convert this step to "+
 				"type: agent_run with an agent that has shell-tool access "+
-				"(see docs/manifest/routine.md `Code-step limitation`)", req.Runtime)
+				"(see docs/manifest/routine.md `Code steps`)", req.Runtime)
 	}
 
 	out, err := evalExprBool(req.Code, req.InputEnv)
@@ -71,12 +71,15 @@ func evalExprBool(code string, env map[string]string) (bool, error) {
 		if i < 0 {
 			continue
 		}
-		left := resolveOperand(strings.TrimSpace(s[:i]), env)
-		right := resolveOperand(strings.TrimSpace(s[i+len(op):]), env)
-		if left == "" || right == "" {
+		// Validate the RAW token boundaries before resolution so a missing
+		// side (e.g. "> 5") fails closed, while a legitimately empty operand
+		// — an `""` literal or an input that resolves to "" — stays comparable.
+		rawLeft := strings.TrimSpace(s[:i])
+		rawRight := strings.TrimSpace(s[i+len(op):])
+		if rawLeft == "" || rawRight == "" {
 			return false, fmt.Errorf("expr: malformed comparison %q", s)
 		}
-		return compareOperands(left, op, right)
+		return compareOperands(resolveOperand(rawLeft, env), op, resolveOperand(rawRight, env))
 	}
 	return false, fmt.Errorf("expr: no comparison operator (%s) in %q",
 		strings.Join(exprOps, " "), s)

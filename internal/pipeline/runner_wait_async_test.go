@@ -238,6 +238,17 @@ func TestRun_TestRunMode_DoesNotSuspend(t *testing.T) {
 // resumeAndAwait runs the approval-resume synchronously (the in-process
 // ResumeAfterApproval spawns this on a goroutine; here we drive it directly
 // for a deterministic assertion).
+// MarkWaiting must fail closed when no run row matches — the async WAITING
+// contract needs a durable row to resume from (CodeRabbit durability guard).
+func TestMarkWaiting_NoRow_Errors(t *testing.T) {
+	db := openResumeTestDB(t)
+	defer db.Close()
+	rs := NewRunStore(db)
+	if err := rs.MarkWaiting(context.Background(), "run_does_not_exist", "gate"); err == nil {
+		t.Fatal("MarkWaiting on a missing run must error (0 rows), got nil")
+	}
+}
+
 func resumeAndAwait(t *testing.T, exec *Executor, runStore *RunStore, runID string) {
 	t.Helper()
 	ctx := context.Background()

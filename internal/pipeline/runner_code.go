@@ -39,11 +39,11 @@ func (e *Executor) runCodeStep(ctx context.Context, step Step, parentRender Rend
 		// (internal/manifest/routine_warnings.go); the message here is
 		// the runtime fallback for routines that bypassed apply (legacy
 		// `routine save -f`, import bundles, direct API calls).
-		// See docs/manifest/routine.md "Code-step limitation" for the
+		// See docs/manifest/routine.md "Code steps" for the
 		// agent_run conversion recipe.
 		return "", 0, 0, fmt.Errorf("code step %q: no CodeRunner wired (production wiring missing) — "+
 			"convert this step to type: agent_run with an agent that has shell-tool access "+
-			"(see docs/manifest/routine.md `Code-step limitation`)", step.ID)
+			"(see docs/manifest/routine.md `Code steps`)", step.ID)
 	}
 
 	// Translate render context inputs → env vars. Use a fresh map
