@@ -6,6 +6,19 @@ icon: "plug"
 
 # Integrations
 
+<Note>
+**The Integrations page is being reworked.** The self-hosted MCP connector
+management UI at `/integrations` is being replaced by a **managed integration
+platform** (Composio) so you can connect apps via OAuth without standing up and
+maintaining your own MCP servers. The legacy UI is now hidden by default and the
+page shows a placeholder while the managed experience is built.
+
+To restore the legacy UI during the transition, build the dashboard with
+`NEXT_PUBLIC_LEGACY_MCP_INTEGRATIONS=true`. No legacy code or API has been
+removed — the MCP endpoints documented below still work, and **credentials are
+unaffected**. The sections below describe the legacy mechanism.
+</Note>
+
 Crewship supports two integration mechanisms: **OAuth 2.0 connections** for service authentication and **MCP (Model Context Protocol) servers** for extending agent tool capabilities.
 
 ## OAuth 2.0 Integrations
