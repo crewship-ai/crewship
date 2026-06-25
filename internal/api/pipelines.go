@@ -31,6 +31,7 @@ type PipelineHandler struct {
 	runs       *pipeline.RunRegistry   // optional; nil → cancel endpoint returns 503
 	webhooks   *pipeline.WebhookStore  // optional; nil → webhook endpoints return 503
 	runStore   *pipeline.RunStore      // optional; nil → list-runs falls back to journal LIKE scan, no persistence
+	codeRunner pipeline.CodeRunner     // optional; nil → type:code steps fail closed with a wiring hint
 	// saveTokenSecret signs the optional save_token returned by
 	// /test_run and verified by /save. Lets save flows skip the body-
 	// trust on last_test_run_at (callers can otherwise mint timestamps;
@@ -67,6 +68,13 @@ func NewPipelineHandler(db *sql.DB, logger *slog.Logger, runner pipeline.AgentRu
 // the orchestrator boots, so we accept post-construction injection.
 func (h *PipelineHandler) SetRunner(r pipeline.AgentRunner) {
 	h.runner = r
+}
+
+// SetCodeRunner wires execution of type:code steps. Without it, code steps
+// fail closed with a wiring hint. Production wires the deterministic,
+// token-zero pipeline.ExprCodeRunner at boot (cmd_start.go).
+func (h *PipelineHandler) SetCodeRunner(r pipeline.CodeRunner) {
+	h.codeRunner = r
 }
 
 // SetSaveTokenSecret enables the HMAC-signed save_token flow so save
@@ -176,6 +184,9 @@ func (h *PipelineHandler) newExecutor() *pipeline.Executor {
 	}
 	if h.runStore != nil {
 		exec = exec.WithRunStore(h.runStore)
+	}
+	if h.codeRunner != nil {
+		exec = exec.WithCodeRunner(h.codeRunner)
 	}
 	return exec
 }

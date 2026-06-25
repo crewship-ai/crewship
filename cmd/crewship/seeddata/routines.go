@@ -955,8 +955,12 @@ var Routines = []RoutineDef{
 					"id":   "probe",
 					"type": "code",
 					"code": map[string]interface{}{
-						"runtime": "bash",
-						"code":    "if awk \"BEGIN{exit !({{ inputs.spend_usd }} > {{ inputs.threshold_usd }})}\"; then echo true; else echo false; fi",
+						// runtime: expr — the deterministic, token-zero CodeRunner.
+						// The body is rendered (inputs substituted) then evaluated
+						// as a single comparison emitting true/false. No shell, no
+						// container, no LLM — the agentless wake-gate contract.
+						"runtime": "expr",
+						"code":    "{{ inputs.spend_usd }} > {{ inputs.threshold_usd }}",
 					},
 					"timeout_seconds": 15,
 				},

@@ -66,10 +66,15 @@ func (e *Executor) runCodeStep(ctx context.Context, step Step, parentRender Rend
 		WorkspaceID: in.WorkspaceID,
 		Runtime:     step.Code.Runtime,
 		Version:     step.Code.Version,
-		Code:        step.Code.Code,
-		InputEnv:    envIn,
-		TimeoutSec:  timeoutSec,
-		MaxBytes:    1_000_000, // 1 MB stdout cap; matches HTTP step default
+		// Render the body so {{ inputs.x }} / {{ steps.y.output }} substitute
+		// exactly like agent_run prompts (executor renders step.Prompt the same
+		// way). Inputs ALSO flow as CREWSHIP_INPUT_* env (below) for runners
+		// that prefer env over substitution. Without this, templated code
+		// reaches the runtime literally.
+		Code:       Render(step.Code.Code, parentRender),
+		InputEnv:   envIn,
+		TimeoutSec: timeoutSec,
+		MaxBytes:   1_000_000, // 1 MB stdout cap; matches HTTP step default
 	})
 	dur := time.Since(stepStart).Milliseconds()
 	if err != nil {

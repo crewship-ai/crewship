@@ -339,32 +339,60 @@ manually before re-applying, otherwise the Plan layer will print a
 warning that the webhook's public URL won't be discoverable from the
 env.
 
-## Code-step limitation
+## Code steps: `runtime: expr` (wired) vs shell runtimes (not wired)
 
-`type: code` is part of the DSL surface and the validator accepts it,
-but the production CodeRunner is not yet wired
-(`internal/pipeline/runner_code.go`). A routine that declares a code
-step **will save successfully** and the schedule will fire on cron,
-but the step itself fails at runtime with:
+`type: code` supports two tiers of runtime.
 
-```text
-code step "<id>": no CodeRunner wired (production wiring missing) —
-convert this step to type: agent_run with an agent that has
-shell-tool access
+### `runtime: expr` — wired, deterministic, token-zero
+
+The `expr` runtime is the production runner for **agentless** probes
+(`internal/pipeline/runner_code_expr.go`). It is a pure-Go, in-process
+evaluator: it spins no container, calls no LLM, and touches no
+filesystem or network — so it honours the token-zero guarantee and adds
+no code-execution surface. It evaluates a single comparison and emits
+`true` / `false`:
+
+```yaml
+steps:
+  - id: probe
+    type: code
+    code:
+      runtime: expr
+      # body is rendered first ({{ inputs.x }} substituted), then
+      # evaluated. Operators: >  >=  <  <=  ==  !=
+      code: "{{ inputs.spend_usd }} > {{ inputs.threshold_usd }}"
 ```
 
-`crewship apply` surfaces this at plan time as a yellow warning so
-you see the gap before the cron fires the first time:
+Operands are numeric or string literals, or a `CREWSHIP_INPUT_<NAME>`
+env reference. This is the wake-gate / cost-spike primitive — pair it
+with a schedule whose `wake_gate` checks the probe output. Anything that
+isn't a single comparison fails closed at validation/run time.
+
+### `runtime: bash | python | go` — validated, but no sandbox wired
+
+These runtimes pass the DSL validator but have **no sandboxed runner
+wired** in this build. A routine that uses one **saves successfully**
+and the schedule fires on cron, but the step fails at runtime with:
+
+```text
+code runtime "bash" not available in this build (no sandbox wired) —
+use runtime: expr for agentless probes, or convert this step to
+type: agent_run with an agent that has shell-tool access
+```
+
+`crewship apply` surfaces this at plan time as a yellow warning (only
+for the unwired runtimes — `expr` steps do not warn) so you see the gap
+before the cron fires the first time:
 
 ```text
 Warnings:
-  ! routine "seznam-check": step "probe" is type: code, but the
-    production CodeRunner is not yet wired — invocations will fail
-    until the step is converted to type: agent_run with a shell-tool-
-    enabled agent
+  ! routine "seznam-check": step "probe" is type: code with runtime
+    "bash", which has no wired runner — invocations will fail until it
+    is converted to type: agent_run with a shell-tool-enabled agent, or
+    to runtime: expr for agentless probes
 ```
 
-### Conversion recipe
+### Conversion recipe (shell runtimes → agent_run)
 
 Replace the code step with an `agent_run` against an agent whose
 `tool_profile: FULL` (or any profile that includes shell). The agent
