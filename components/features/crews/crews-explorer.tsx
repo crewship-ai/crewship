@@ -2,19 +2,22 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import {
-  ChevronRight, Search, PanelLeftClose, PanelLeftOpen,
+  ChevronRight, Search, PanelLeftClose, PanelLeftOpen, Clock,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { CrewIcon } from "@/components/ui/crew-icon"
 import { cn } from "@/lib/utils"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
+import { isGhost, effectiveStatus } from "@/lib/agent-ephemeral"
 
 const STATUS_BADGE: Record<string, { label: string; className: string; pulse?: boolean }> = {
   RUNNING: { label: "Running", className: "text-emerald-400", pulse: true },
   IDLE: { label: "Idle", className: "text-muted-foreground" },
   ERROR: { label: "Error", className: "text-red-400" },
   STOPPED: { label: "Stopped", className: "text-amber-400" },
+  PENDING_REVIEW: { label: "Pending", className: "text-amber-300" },
+  EXPIRED: { label: "Expired", className: "text-slate-400" },
 }
 
 interface CrewData {
@@ -37,6 +40,10 @@ interface AgentData {
   avatar_seed?: string | null
   avatar_style?: string | null
   crew?: { avatar_style?: string | null } | null
+  // PR-D F5 ephemeral lifecycle (server returns these; absent on permanent agents).
+  ephemeral?: boolean
+  expires_at?: string | null
+  expired_at?: string | null
 }
 
 export interface CrewsExplorerProps {
@@ -233,17 +240,20 @@ export function CrewsExplorer({
 
                   {/* Agent rows */}
                   {expanded && crewAgents.map((agent) => {
-                    const badge = STATUS_BADGE[agent.status] || STATUS_BADGE.IDLE
+                    const ghost = isGhost(agent)
+                    const badge = STATUS_BADGE[effectiveStatus(agent)] || STATUS_BADGE.IDLE
                     const isAgentSelected = selectedAgentId === agent.id
                     return (
                       <button
                         key={agent.id}
                         aria-current={isAgentSelected ? "true" : undefined}
+                        data-expired={ghost ? "true" : undefined}
                         className={cn(
                           "w-full flex items-center gap-2 pl-9 pr-2 py-1 rounded-md text-left transition-colors",
                           isAgentSelected
                             ? "row-interactive row-selected"
                             : "row-interactive row-hover",
+                          ghost && "opacity-55 grayscale-[0.4] hover:opacity-90 hover:grayscale-0",
                         )}
                         onClick={() => onAgentSelect(agent.id)}
                       >
@@ -259,6 +269,9 @@ export function CrewsExplorer({
                           </span>
                         </div>
                         <div className="flex items-center gap-1 shrink-0">
+                          {agent.ephemeral && !ghost && (
+                            <Clock className="h-2.5 w-2.5 text-cyan-300/80" aria-label="Ephemeral hire" />
+                          )}
                           {badge.pulse && (
                             <span className="relative flex h-1.5 w-1.5">
                               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
@@ -281,15 +294,18 @@ export function CrewsExplorer({
                   Unassigned
                 </div>
                 {unassigned.map((agent) => {
-                  const badge = STATUS_BADGE[agent.status] || STATUS_BADGE.IDLE
+                  const ghost = isGhost(agent)
+                  const badge = STATUS_BADGE[effectiveStatus(agent)] || STATUS_BADGE.IDLE
                   const isAgentSelected = selectedAgentId === agent.id
                   return (
                     <button
                       key={agent.id}
                       aria-current={isAgentSelected ? "true" : undefined}
+                      data-expired={ghost ? "true" : undefined}
                       className={cn(
-                        "w-full px-2 py-1 rounded-md text-left items-center gap-2",
+                        "w-full flex px-2 py-1 rounded-md text-left items-center gap-2",
                         isAgentSelected ? "row-interactive row-selected" : "row-interactive row-hover",
+                        ghost && "opacity-55 grayscale-[0.4] hover:opacity-90 hover:grayscale-0",
                       )}
                       onClick={() => onAgentSelect(agent.id)}
                     >
@@ -304,7 +320,12 @@ export function CrewsExplorer({
                           {agent.role_title || agent.agent_role}
                         </span>
                       </div>
-                      <span className={cn("text-[10px]", badge.className)}>{badge.label}</span>
+                      <div className="flex items-center gap-1 shrink-0">
+                        {agent.ephemeral && !ghost && (
+                          <Clock className="h-2.5 w-2.5 text-cyan-300/80" aria-label="Ephemeral hire" />
+                        )}
+                        <span className={cn("text-[10px]", badge.className)}>{badge.label}</span>
+                      </div>
                     </button>
                   )
                 })}
