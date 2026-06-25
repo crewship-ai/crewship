@@ -37,6 +37,16 @@ Crewship's managed integration path uses [Composio](https://composio.dev) so you
 
 **Enabling.** Add a Composio **project API key** either per-workspace from the app (Integrations → **API key**, or `crewship integration composio key set`) — validated and stored encrypted — or server-wide via the `COMPOSIO_API_KEY` env. The effective key resolves workspace-first, then env. Billing is by tool calls (Composio free tier = 20K/mo), not by number of users or connected accounts.
 
+<Warning>
+**Multi-tenant isolation.** A Composio API key maps to a single Composio
+**project**, which is the isolation boundary — every connected account, user,
+and trigger under that key is visible to anyone with access to a workspace
+using it. The server-wide `COMPOSIO_API_KEY` env therefore puts **all**
+workspaces in **one shared project**: do not back multiple independent tenant
+workspaces with it. For true per-tenant isolation, give each workspace its own
+key (Integrations → API key) so it maps to a separate Composio project.
+</Warning>
+
 **Inspecting the inventory.** The operator view of the catalog and connected accounts (grouped by user):
 
 ```bash
