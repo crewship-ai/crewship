@@ -720,7 +720,7 @@ function InboxDetail({
   )
 }
 
-function KindActions({
+export function KindActions({
   item,
   onResolve,
   onRefresh,
@@ -765,8 +765,13 @@ function KindActions({
                   // no toast and the action looks like silent success.
                   let res: Response
                   try {
+                    // workspace_id is required by the wsCtx (RequireWorkspace)
+                    // middleware on this route — it reads it from the query
+                    // string (the route has no {workspaceId} path param). The
+                    // CLI auto-injects it on every request; the dashboard must
+                    // do the same here or the call 400s before the handler runs.
                     res = await fetch(
-                      `/api/v1/agents/${encodeURIComponent(item.source_id)}/approve-hire`,
+                      `/api/v1/agents/${encodeURIComponent(item.source_id)}/approve-hire?workspace_id=${encodeURIComponent(item.workspace_id)}`,
                       {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
@@ -869,6 +874,7 @@ function KindActions({
       const resolveEsc = (action: "approve" | "reject") =>
         wrap(action, async () => {
           const res = await escalationResolve(
+            item.workspace_id,
             item.source_id,
             action,
             action === "approve" ? "Approved from inbox" : "Rejected from inbox",

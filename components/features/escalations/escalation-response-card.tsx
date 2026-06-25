@@ -101,16 +101,22 @@ export function EscalationResponseCard({
     setSubmitting(true)
     setError(null)
     try {
-      const res = await fetch(`/api/v1/escalations/${escalation.id}/resolve`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          resolution: resolution.trim(),
-          action,
-          redirect_to: action === "redirect" ? redirectTo : undefined,
-          workspace_id: workspaceId,
-        }),
-      })
+      // workspace_id must ride in the query string: the wsCtx
+      // (RequireWorkspace) middleware reads it from there (or a path param),
+      // never the body, so a body-only workspace_id 400s before the handler.
+      const res = await fetch(
+        `/api/v1/escalations/${escalation.id}/resolve?workspace_id=${encodeURIComponent(workspaceId)}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            resolution: resolution.trim(),
+            action,
+            redirect_to: action === "redirect" ? redirectTo : undefined,
+            workspace_id: workspaceId,
+          }),
+        },
+      )
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: "Failed to resolve" }))
         setError(err.error || "Failed to resolve")
