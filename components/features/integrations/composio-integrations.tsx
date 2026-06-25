@@ -37,6 +37,8 @@ type ToolkitInfo = {
 }
 type ToolkitsResp = { enabled: boolean; total: number; toolkits: ToolkitInfo[] }
 
+type ComposioSettings = { configured: boolean; source: string; label?: string; base_url?: string }
+
 function ToolkitIcon({ toolkit, size = 20 }: { toolkit: Toolkit; size?: number }) {
   // Composio logos are remote SVGs. next/image chokes on them under static
   // export, so use a plain <img> with a graceful fallback to the Plug glyph.
@@ -140,6 +142,32 @@ export function ComposioIntegrations() {
     return s
   }, [data])
 
+  // ── Settings (API key) ──
+  const [settings, setSettings] = React.useState<ComposioSettings | null>(null)
+  const [keyOpen, setKeyOpen] = React.useState(false)
+
+  const loadSettings = React.useCallback(async (wid: string) => {
+    try {
+      const r = await fetch(`/api/v1/integrations/composio/settings?workspace_id=${wid}`)
+      if (r.ok) setSettings((await r.json()) as ComposioSettings)
+    } catch {
+      /* non-fatal */
+    }
+  }, [])
+
+  React.useEffect(() => {
+    if (workspaceId) void loadSettings(workspaceId)
+  }, [workspaceId, loadSettings])
+
+  const refreshAll = React.useCallback(
+    (wid: string) => {
+      void load(wid)
+      void loadToolkits(wid, search)
+      void loadSettings(wid)
+    },
+    [load, loadToolkits, search, loadSettings],
+  )
+
   const busy = wsLoading || loading
 
   return (
@@ -149,17 +177,40 @@ export function ComposioIntegrations() {
           <Plug className="h-4 w-4 text-foreground/60" />
           <h1 className="text-body font-medium text-foreground/80">Connectors</h1>
           <span className="text-[11px] text-muted-foreground">· powered by Composio</span>
+          {settings?.configured && (
+            <span className="ml-1 inline-flex items-center gap-1 rounded-full border border-emerald-400/30 bg-emerald-500/[0.08] px-2 py-0.5 text-[10px] text-emerald-400">
+              ● key set{settings.source === "env" ? " (env)" : settings.label ? ` · ${settings.label}` : ""}
+            </span>
+          )}
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => workspaceId && load(workspaceId)}
-          disabled={busy}
-        >
-          <RefreshCw className={cn("h-3.5 w-3.5", busy && "animate-spin")} />
-          Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => setKeyOpen(true)}>
+            <KeyRound className="h-3.5 w-3.5" />
+            API key
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => workspaceId && refreshAll(workspaceId)}
+            disabled={busy}
+          >
+            <RefreshCw className={cn("h-3.5 w-3.5", busy && "animate-spin")} />
+            Refresh
+          </Button>
+        </div>
       </div>
+
+      {keyOpen && workspaceId && (
+        <ApiKeyModal
+          workspaceId={workspaceId}
+          current={settings}
+          onClose={() => setKeyOpen(false)}
+          onChanged={() => {
+            setKeyOpen(false)
+            refreshAll(workspaceId)
+          }}
+        />
+      )}
 
       {busy && <InventorySkeleton />}
 
@@ -169,7 +220,9 @@ export function ComposioIntegrations() {
         </div>
       )}
 
-      {!busy && !error && data && !data.enabled && <NotConfigured />}
+      {!busy && !error && data && !data.enabled && (
+        <NotConfigured onAddKey={() => setKeyOpen(true)} />
+      )}
 
       {!busy && !error && data && data.enabled && (
         <>
@@ -301,7 +354,118 @@ function EmptyHint({ text }: { text: string }) {
   )
 }
 
-function NotConfigured() {
+function ApiKeyModal({
+  workspaceId,
+  current,
+  onClose,
+  onChanged,
+}: {
+  workspaceId: string
+  current: ComposioSettings | null
+  onClose: () => void
+  onChanged: () => void
+}) {
+  const [apiKey, setApiKey] = React.useState("")
+  const [label, setLabel] = React.useState(current?.label ?? "")
+  const [saving, setSaving] = React.useState(false)
+  const [err, setErr] = React.useState<string | null>(null)
+
+  const save = async () => {
+    setSaving(true)
+    setErr(null)
+    try {
+      const r = await fetch(`/api/v1/integrations/composio/settings?workspace_id=${workspaceId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ api_key: apiKey.trim(), base_url: current?.base_url ?? "", label: label.trim() }),
+      })
+      if (!r.ok) {
+        const body = await r.json().catch(() => null)
+        throw new Error(body?.detail || `Failed (${r.status})`)
+      }
+      onChanged()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Failed to save")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const remove = async () => {
+    setSaving(true)
+    setErr(null)
+    try {
+      const r = await fetch(`/api/v1/integrations/composio/settings?workspace_id=${workspaceId}`, {
+        method: "DELETE",
+      })
+      if (!r.ok) throw new Error(`Failed (${r.status})`)
+      onChanged()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Failed to remove")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+      <div
+        className="w-full max-w-md rounded-xl border border-white/10 bg-card p-6 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 className="text-base font-semibold text-foreground">Composio API key</h2>
+        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+          Stored encrypted for this workspace. We validate it against Composio before saving.
+          From app.composio.dev → your project → Settings → API keys.
+        </p>
+
+        <div className="mt-4 space-y-3">
+          <div>
+            <label className="mb-1 block text-xs text-muted-foreground">Project API key</label>
+            <input
+              type="password"
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+              placeholder="ak_…"
+              className="w-full rounded-lg border border-white/10 bg-background px-3 py-2 font-mono text-sm focus:border-blue-400/50 focus:outline-none"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs text-muted-foreground">Label (optional)</label>
+            <input
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+              placeholder="Crewship_dev_1"
+              className="w-full rounded-lg border border-white/10 bg-background px-3 py-2 text-sm focus:border-blue-400/50 focus:outline-none"
+            />
+          </div>
+        </div>
+
+        {err && <div className="mt-3 text-xs text-red-400">{err}</div>}
+
+        <div className="mt-5 flex items-center justify-between gap-2">
+          <div>
+            {current?.source === "workspace" && (
+              <Button variant="ghost" size="sm" onClick={remove} disabled={saving}>
+                Remove key
+              </Button>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={onClose} disabled={saving}>
+              Cancel
+            </Button>
+            <Button size="sm" onClick={save} disabled={saving || !apiKey.trim()}>
+              {saving ? "Validating…" : "Validate & save"}
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function NotConfigured({ onAddKey }: { onAddKey: () => void }) {
   return (
     <div
       className={cn(
@@ -312,12 +476,17 @@ function NotConfigured() {
       <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-blue-500/10">
         <Plug className="h-6 w-6 text-blue-400" />
       </div>
-      <h2 className="text-base font-semibold text-foreground">Managed integrations are coming soon</h2>
+      <h2 className="text-base font-semibold text-foreground">Connect Composio to get started</h2>
       <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
         We&apos;re replacing self-hosted MCP servers with a managed integration platform
-        (Composio). Set <code className="text-foreground/80">COMPOSIO_API_KEY</code> on the
-        server to enable it.
+        (Composio). Add your Composio project API key to browse 1,000+ apps and connect them.
       </p>
+      <div className="mt-5">
+        <Button onClick={onAddKey}>
+          <KeyRound className="h-3.5 w-3.5" />
+          Add API key
+        </Button>
+      </div>
       <div className="mt-6 grid gap-3 text-left sm:grid-cols-2">
         <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
           <ShieldCheck className="h-4 w-4 text-blue-400" />

@@ -67,6 +67,13 @@ type composioToolkitsResponse struct {
 	Toolkits []composioToolkitInfo `json:"toolkits"`
 }
 
+type composioSettingsResponse struct {
+	Configured bool   `json:"configured"`
+	Source     string `json:"source"`
+	Label      string `json:"label"`
+	BaseURL    string `json:"base_url"`
+}
+
 var composioCmd = &cobra.Command{
 	Use:   "composio",
 	Short: "Composio managed integrations (catalog + connected users)",
@@ -186,12 +193,95 @@ var composioToolkitsCmd = &cobra.Command{
 	},
 }
 
+var composioKeyCmd = &cobra.Command{
+	Use:   "key",
+	Short: "Manage the workspace Composio API key",
+}
+
+var composioKeyShowCmd = &cobra.Command{
+	Use:   "show",
+	Short: "Show whether/how Composio is configured (never prints the key)",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client, err := requireAuthAndWorkspace()
+		if err != nil {
+			return err
+		}
+		var s composioSettingsResponse
+		if err := getJSON(client, "/api/v1/integrations/composio/settings", &s); err != nil {
+			return err
+		}
+		f := newFormatter()
+		if f.Format == "json" || f.Format == "yaml" {
+			return f.Auto(s, nil, nil)
+		}
+		if !s.Configured {
+			fmt.Println("Composio: not configured. Set a key with: crewship integration composio key set --key <ak_…>")
+			return nil
+		}
+		fmt.Printf("Composio: configured (source: %s)\n", s.Source)
+		if s.Label != "" {
+			fmt.Printf("  Label:    %s\n", s.Label)
+		}
+		if s.BaseURL != "" {
+			fmt.Printf("  Base URL: %s\n", s.BaseURL)
+		}
+		return nil
+	},
+}
+
+var composioKeySetCmd = &cobra.Command{
+	Use:   "set",
+	Short: "Set & validate the workspace Composio API key (stored encrypted)",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client, err := requireAuthAndWorkspace()
+		if err != nil {
+			return err
+		}
+		key, _ := cmd.Flags().GetString("key")
+		baseURL, _ := cmd.Flags().GetString("base-url")
+		label, _ := cmd.Flags().GetString("label")
+		if strings.TrimSpace(key) == "" {
+			return fmt.Errorf("--key is required")
+		}
+		var s composioSettingsResponse
+		if err := putJSON(client, "/api/v1/integrations/composio/settings", map[string]string{
+			"api_key": key, "base_url": baseURL, "label": label,
+		}, &s); err != nil {
+			return err
+		}
+		fmt.Printf("Composio key saved & validated (source: %s).\n", s.Source)
+		return nil
+	},
+}
+
+var composioKeyRemoveCmd = &cobra.Command{
+	Use:   "remove",
+	Short: "Remove the workspace Composio API key (reverts to the server env, if any)",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client, err := requireAuthAndWorkspace()
+		if err != nil {
+			return err
+		}
+		if err := deleteJSON(client, "/api/v1/integrations/composio/settings"); err != nil {
+			return err
+		}
+		fmt.Println("Composio workspace key removed.")
+		return nil
+	},
+}
+
 func init() {
 	composioToolkitsCmd.Flags().String("search", "", "Filter apps by name/slug")
 	composioToolkitsCmd.Flags().String("category", "", "Filter by category (e.g. email, developer-tools)")
 	composioToolkitsCmd.Flags().Int("limit", 0, "Max apps to return (default server-side)")
 
+	composioKeySetCmd.Flags().String("key", "", "Composio project API key (ak_…)")
+	composioKeySetCmd.Flags().String("base-url", "", "Override Composio base URL (optional)")
+	composioKeySetCmd.Flags().String("label", "", "Human-friendly project label (optional)")
+	composioKeyCmd.AddCommand(composioKeyShowCmd, composioKeySetCmd, composioKeyRemoveCmd)
+
 	composioCmd.AddCommand(composioInventoryCmd)
 	composioCmd.AddCommand(composioToolkitsCmd)
+	composioCmd.AddCommand(composioKeyCmd)
 	integrationCmd.AddCommand(composioCmd)
 }

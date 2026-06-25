@@ -46,6 +46,9 @@ All integration endpoints require authentication and workspace context (except w
 | `POST` | [`/api/v1/mcp-registry/sync`](#sync-registry) | Sync the MCP registry |
 | `GET` | [`/api/v1/integrations/composio/inventory`](#composio-inventory) | Composio catalog + connected accounts per user |
 | `GET` | [`/api/v1/integrations/composio/toolkits`](#composio-toolkits) | Browse the Composio app catalog (1000+ apps) |
+| `GET` | [`/api/v1/integrations/composio/settings`](#composio-settings) | Get the workspace Composio config status |
+| `PUT` | [`/api/v1/integrations/composio/settings`](#composio-settings) | Set & validate the workspace Composio API key |
+| `DELETE` | [`/api/v1/integrations/composio/settings`](#composio-settings) | Remove the workspace API key (revert to env) |
 
 ---
 
@@ -143,6 +146,38 @@ returns `enabled: false` when the provider is unconfigured.
 | `toolkits` | array | The current page of apps (slug, name, meta) |
 
 CLI: `crewship integration composio toolkits [--search] [--category] [--limit]`.
+
+### Composio Settings
+
+Manage the **per-workspace** Composio API key from the app instead of the
+server env. The key is **validated against Composio** before being stored
+**encrypted** (AES-GCM). The effective key is resolved per request: the
+workspace key first, then the server `COMPOSIO_API_KEY` env fallback. The key
+is never returned by any endpoint.
+
+```
+GET    /api/v1/integrations/composio/settings?workspace_id={workspaceId}
+PUT    /api/v1/integrations/composio/settings?workspace_id={workspaceId}
+DELETE /api/v1/integrations/composio/settings?workspace_id={workspaceId}
+```
+
+`GET` (read) returns the status; `PUT`/`DELETE` require workspace **manage**
+(OWNER/ADMIN). `PUT` body: `{ "api_key": "ak_…", "base_url": "", "label": "" }`.
+
+**Response (GET / PUT / DELETE):** `200 OK`
+
+```json
+{ "configured": true, "source": "workspace", "label": "Crewship_dev_1", "base_url": "" }
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `configured` | boolean | Whether a usable key exists (workspace or env) |
+| `source` | string | `workspace`, `env`, or `none` |
+| `label` | string | Optional project label (workspace source only) |
+
+A `PUT` with an invalid key returns `400` (Composio rejected it). CLI:
+`crewship integration composio key {show,set,remove}`.
 
 ---
 

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -101,6 +102,70 @@ func TestComposio_ListToolkits(t *testing.T) {
 	mustUnmarshal(t, rr, &got)
 	if !got.Enabled || got.Total != 1047 || len(got.Toolkits) != 1 || got.Toolkits[0].Slug != "github" {
 		t.Errorf("unexpected toolkits response: %+v", got)
+	}
+}
+
+func TestComposio_Settings_UpsertAndUse(t *testing.T) {
+	// 32-byte AES key (hex) so encryption.Encrypt works in the test env.
+	t.Setenv("ENCRYPTION_KEY", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	srv := fakeComposioAPI(t, `{"items":[]}`, `{"items":[]}`)
+	// nil env config → the provider is ONLY configurable via the stored key.
+	h := NewComposioHandler(db, newComposioTestLogger(), nil)
+
+	// PUT a key (validated against the fake toolkits endpoint).
+	body := bytes.NewBufferString(`{"api_key":"ak_ws","base_url":"` + srv.URL + `","label":"Proj"}`)
+	req := withWorkspaceUser(httptest.NewRequest("PUT", "/api/v1/integrations/composio/settings", body), userID, wsID, "OWNER")
+	rr := httptest.NewRecorder()
+	h.UpsertSettings(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("upsert status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var put composioSettingsResponse
+	mustUnmarshal(t, rr, &put)
+	if !put.Configured || put.Source != "workspace" || put.Label != "Proj" {
+		t.Fatalf("upsert resp=%+v", put)
+	}
+
+	// GET reflects the workspace source.
+	grr := httptest.NewRecorder()
+	h.GetSettings(grr, withWorkspaceUser(httptest.NewRequest("GET", "/s", nil), userID, wsID, "VIEWER"))
+	var got composioSettingsResponse
+	mustUnmarshal(t, grr, &got)
+	if got.Source != "workspace" {
+		t.Errorf("GetSettings source=%s, want workspace", got.Source)
+	}
+
+	// Inventory now resolves the stored key (no env fallback present).
+	irr := httptest.NewRecorder()
+	h.ListInventory(irr, withWorkspaceUser(httptest.NewRequest("GET", "/i", nil), userID, wsID, "VIEWER"))
+	var inv composioInventoryResponse
+	mustUnmarshal(t, irr, &inv)
+	if !inv.Enabled {
+		t.Errorf("expected enabled via stored workspace key, got %+v", inv)
+	}
+}
+
+func TestComposio_Settings_InvalidKeyRejected(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"error":"invalid"}`, http.StatusUnauthorized)
+	}))
+	t.Cleanup(bad.Close)
+
+	h := NewComposioHandler(db, newComposioTestLogger(), nil)
+	body := bytes.NewBufferString(`{"api_key":"nope","base_url":"` + bad.URL + `"}`)
+	req := withWorkspaceUser(httptest.NewRequest("PUT", "/api/v1/integrations/composio/settings", body), userID, wsID, "OWNER")
+	rr := httptest.NewRecorder()
+	h.UpsertSettings(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d, want 400 (invalid key rejected)", rr.Code)
 	}
 }
 

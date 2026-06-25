@@ -143,6 +143,9 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	composioH := NewComposioHandler(r.db, r.logger, r.composioConfig)
 	r.mux.Handle("GET /api/v1/integrations/composio/inventory", authed(wsCtx(http.HandlerFunc(composioH.ListInventory))))
 	r.mux.Handle("GET /api/v1/integrations/composio/toolkits", authed(wsCtx(http.HandlerFunc(composioH.ListToolkits))))
+	r.mux.Handle("GET /api/v1/integrations/composio/settings", authed(wsCtx(http.HandlerFunc(composioH.GetSettings))))
+	r.mux.Handle("PUT /api/v1/integrations/composio/settings", authed(wsCtx(http.HandlerFunc(composioH.UpsertSettings))))
+	r.mux.Handle("DELETE /api/v1/integrations/composio/settings", authed(wsCtx(http.HandlerFunc(composioH.DeleteSettings))))
 	// Connectors — curated manifest catalog + install flow. List/Get are
 	// catalog browse (auth only, no workspace context); Verify/Install
 	// mutate workspace state and gate on MANAGER+ via wsCtx-resolved role.

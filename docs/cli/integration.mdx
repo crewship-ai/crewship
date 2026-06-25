@@ -33,6 +33,9 @@ crewship intg <subcommand> [flags]
 | --- | --- |
 | `integration composio inventory` | Show configured connectors (auth configs) and connected accounts grouped by `user_id`. |
 | `integration composio toolkits` | Browse the Composio app catalog (1000+ apps). Filters: `--search`, `--category`, `--limit`. |
+| `integration composio key show` | Show whether/how Composio is configured (never prints the key). |
+| `integration composio key set` | Set & validate the workspace API key (`--key`, `--base-url`, `--label`); stored encrypted. |
+| `integration composio key remove` | Remove the workspace key (revert to the server env, if any). |
 
 Maps to `GET /api/v1/integrations/composio/inventory`. Requires `COMPOSIO_API_KEY`
 on the server; prints a "not configured" notice otherwise. Add `--output json`

@@ -14,34 +14,72 @@ package api
 
 import (
 	"database/sql"
+	"errors"
 	"log/slog"
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/composio"
 	"github.com/crewship-ai/crewship/internal/config"
+	"github.com/crewship-ai/crewship/internal/encryption"
 )
 
-// ComposioHandler serves the /api/v1/integrations/composio/* routes.
+// ComposioHandler serves the /api/v1/integrations/composio/* routes. The
+// effective API key is resolved per request: the workspace's stored key
+// (composio_settings, encrypted) takes precedence, with the server
+// COMPOSIO_API_KEY env as a fallback. This lets operators configure Composio
+// from the UI without touching the server env.
 type ComposioHandler struct {
-	db      *sql.DB
-	logger  *slog.Logger
-	client  *composio.Client // nil when the provider is not configured
-	enabled bool
+	db         *sql.DB
+	logger     *slog.Logger
+	envKey     string // COMPOSIO_API_KEY fallback (empty when unset/disabled)
+	envBaseURL string
 }
 
-// NewComposioHandler wires a handler from the resolved Composio config. When
-// the provider is disabled or has no API key, the handler still mounts but
-// reports `enabled: false` so the UI can render a "not configured" state
-// instead of erroring.
+// NewComposioHandler wires a handler. The env config is kept as a fallback
+// only; the workspace-stored key (when present) wins at request time.
 func NewComposioHandler(db *sql.DB, logger *slog.Logger, cfg *config.ComposioConfig) *ComposioHandler {
 	h := &ComposioHandler{db: db, logger: logger}
 	if cfg != nil && cfg.Enabled && cfg.APIKey != "" {
-		h.client = composio.NewClient(cfg.APIKey, cfg.BaseURL)
-		h.enabled = true
+		h.envKey = cfg.APIKey
+		h.envBaseURL = cfg.BaseURL
 	}
 	return h
+}
+
+// resolveClient builds a Composio client for the workspace and reports the
+// config source ("workspace" | "env" | "" when unconfigured). Workspace row
+// first, env fallback second. Any DB/decrypt error degrades to the env path
+// (logged) rather than failing the request.
+func (h *ComposioHandler) resolveClient(r *http.Request) (*composio.Client, string) {
+	wsID := WorkspaceIDFromContext(r.Context())
+	if wsID != "" {
+		var enc, baseURL sql.NullString
+		err := h.db.QueryRowContext(r.Context(),
+			`SELECT encrypted_api_key, base_url FROM composio_settings WHERE workspace_id = ?`, wsID).Scan(&enc, &baseURL)
+		switch {
+		case err == nil && enc.Valid && enc.String != "":
+			key, derr := encryption.Decrypt(enc.String)
+			if derr != nil {
+				h.logger.Error("composio: decrypt workspace key", "error", derr)
+				break
+			}
+			if key != "" {
+				return composio.NewClient(key, baseURL.String), "workspace"
+			}
+		case err != nil && !errors.Is(err, sql.ErrNoRows):
+			// Table missing (pre-migration) or other read error: log and fall
+			// through to the env key rather than 500.
+			h.logger.Warn("composio: read workspace settings", "error", err)
+		}
+	}
+	if h.envKey != "" {
+		return composio.NewClient(h.envKey, h.envBaseURL), "env"
+	}
+	return nil, ""
 }
 
 // ── Response types ───────────────────────────────────────────────────────────
@@ -69,9 +107,10 @@ func (h *ComposioHandler) ListInventory(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	client, _ := h.resolveClient(r)
 	// Provider not configured: report disabled rather than failing, so the
 	// dashboard renders the "connect Composio" empty state.
-	if !h.enabled || h.client == nil {
+	if client == nil {
 		writeJSON(w, http.StatusOK, composioInventoryResponse{
 			Enabled:     false,
 			AuthConfigs: []composio.AuthConfig{},
@@ -81,13 +120,13 @@ func (h *ComposioHandler) ListInventory(w http.ResponseWriter, r *http.Request) 
 	}
 
 	ctx := r.Context()
-	authConfigs, err := h.client.ListAuthConfigs(ctx)
+	authConfigs, err := client.ListAuthConfigs(ctx)
 	if err != nil {
 		h.logger.Error("composio: list auth configs", "error", err)
 		writeProblem(w, r, http.StatusBadGateway, "Composio API error")
 		return
 	}
-	accounts, err := h.client.ListConnectedAccounts(ctx)
+	accounts, err := client.ListConnectedAccounts(ctx)
 	if err != nil {
 		h.logger.Error("composio: list connected accounts", "error", err)
 		writeProblem(w, r, http.StatusBadGateway, "Composio API error")
@@ -124,7 +163,8 @@ func (h *ComposioHandler) ListToolkits(w http.ResponseWriter, r *http.Request) {
 	if !requireRole(w, r, "read") {
 		return
 	}
-	if !h.enabled || h.client == nil {
+	client, _ := h.resolveClient(r)
+	if client == nil {
 		writeJSON(w, http.StatusOK, composioToolkitsResponse{Enabled: false, Toolkits: []composio.ToolkitInfo{}})
 		return
 	}
@@ -138,7 +178,7 @@ func (h *ComposioHandler) ListToolkits(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	page, err := h.client.ListToolkits(r.Context(), search, category, limit)
+	page, err := client.ListToolkits(r.Context(), search, category, limit)
 	if err != nil {
 		h.logger.Error("composio: list toolkits", "error", err)
 		writeProblem(w, r, http.StatusBadGateway, "Composio API error")
@@ -152,6 +192,131 @@ func (h *ComposioHandler) ListToolkits(w http.ResponseWriter, r *http.Request) {
 		Total:    page.TotalItems,
 		Toolkits: page.Items,
 	})
+}
+
+// ── Settings (API key) — /api/v1/integrations/composio/settings ──────────────
+
+type composioSettingsResponse struct {
+	Configured bool   `json:"configured"`
+	Source     string `json:"source"` // "workspace" | "env" | "none"
+	Label      string `json:"label,omitempty"`
+	BaseURL    string `json:"base_url,omitempty"`
+}
+
+// settingsState reports the effective config without ever returning the key.
+func (h *ComposioHandler) settingsState(r *http.Request) composioSettingsResponse {
+	wsID := WorkspaceIDFromContext(r.Context())
+	if wsID != "" {
+		var label, baseURL sql.NullString
+		err := h.db.QueryRowContext(r.Context(),
+			`SELECT label, base_url FROM composio_settings WHERE workspace_id = ?`, wsID).Scan(&label, &baseURL)
+		if err == nil {
+			return composioSettingsResponse{Configured: true, Source: "workspace", Label: label.String, BaseURL: baseURL.String}
+		}
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			h.logger.Warn("composio: read settings", "error", err)
+		}
+	}
+	if h.envKey != "" {
+		return composioSettingsResponse{Configured: true, Source: "env"}
+	}
+	return composioSettingsResponse{Configured: false, Source: "none"}
+}
+
+// GetSettings reports whether/how Composio is configured for the workspace.
+func (h *ComposioHandler) GetSettings(w http.ResponseWriter, r *http.Request) {
+	if !requireRole(w, r, "read") {
+		return
+	}
+	writeJSON(w, http.StatusOK, h.settingsState(r))
+}
+
+// UpsertSettings validates an API key against Composio, then stores it
+// encrypted for the workspace. OWNER/ADMIN only.
+func (h *ComposioHandler) UpsertSettings(w http.ResponseWriter, r *http.Request) {
+	if !requireRole(w, r, "manage") {
+		return
+	}
+	wsID := WorkspaceIDFromContext(r.Context())
+	if wsID == "" {
+		writeProblem(w, r, http.StatusBadRequest, "workspace context required")
+		return
+	}
+	var req struct {
+		APIKey  string `json:"api_key"`
+		BaseURL string `json:"base_url"`
+		Label   string `json:"label"`
+	}
+	if err := readJSON(r, &req); err != nil {
+		writeProblem(w, r, http.StatusBadRequest, "Invalid JSON body")
+		return
+	}
+	req.APIKey = strings.TrimSpace(req.APIKey)
+	req.BaseURL = strings.TrimSpace(req.BaseURL)
+	if req.APIKey == "" {
+		writeProblem(w, r, http.StatusBadRequest, "api_key is required")
+		return
+	}
+
+	// Validate against Composio before persisting — a cheap authed call that
+	// fails fast on a bad key/project (the UI surfaces this inline).
+	probe := composio.NewClient(req.APIKey, req.BaseURL)
+	if _, err := probe.ListToolkits(r.Context(), "", "", 1); err != nil {
+		h.logger.Warn("composio: api key validation failed", "error", err)
+		writeProblem(w, r, http.StatusBadRequest, "Composio rejected this API key (check the key and project)")
+		return
+	}
+
+	enc, err := encryption.Encrypt(req.APIKey)
+	if err != nil {
+		h.logger.Error("composio: encrypt api key", "error", err)
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+
+	var createdBy any
+	if u := UserFromContext(r.Context()); u != nil {
+		createdBy = u.ID
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err = h.db.ExecContext(r.Context(), `
+		INSERT INTO composio_settings (workspace_id, encrypted_api_key, base_url, label, created_by, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(workspace_id) DO UPDATE SET
+			encrypted_api_key = excluded.encrypted_api_key,
+			base_url          = excluded.base_url,
+			label             = excluded.label,
+			updated_at        = excluded.updated_at`,
+		wsID, enc, req.BaseURL, req.Label, createdBy, now, now)
+	if err != nil {
+		h.logger.Error("composio: upsert settings", "error", err)
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, composioSettingsResponse{
+		Configured: true, Source: "workspace", Label: req.Label, BaseURL: req.BaseURL,
+	})
+}
+
+// DeleteSettings removes the workspace's stored key, reverting to the env
+// fallback (if any). OWNER/ADMIN only.
+func (h *ComposioHandler) DeleteSettings(w http.ResponseWriter, r *http.Request) {
+	if !requireRole(w, r, "manage") {
+		return
+	}
+	wsID := WorkspaceIDFromContext(r.Context())
+	if wsID == "" {
+		writeProblem(w, r, http.StatusBadRequest, "workspace context required")
+		return
+	}
+	if _, err := h.db.ExecContext(r.Context(),
+		`DELETE FROM composio_settings WHERE workspace_id = ?`, wsID); err != nil {
+		h.logger.Error("composio: delete settings", "error", err)
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	writeJSON(w, http.StatusOK, h.settingsState(r))
 }
 
 // groupByUser folds connected accounts into per-user buckets, sorted by

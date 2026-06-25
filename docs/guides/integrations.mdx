@@ -35,7 +35,7 @@ Crewship's managed integration path uses [Composio](https://composio.dev) so you
 
 **How isolation works.** An agent is bound to exactly **one `user_id`** and therefore sees only that user's connected accounts — never anyone else's. To give 30 mailboxes to 30 agents, create 30 users (one per mailbox) and bind each agent to its user; the per-agent MCP URL is scoped server-side, so an agent cannot reach another user's accounts even in principle. Use Composio **projects** only for coarse isolation (per environment, or per customer/workspace) — not per agent.
 
-**Enabling.** Set `COMPOSIO_API_KEY` (a project API key) on the server; presence of the key auto-enables the provider. Optionally pin `COMPOSIO_BASE_URL`. Billing is by tool calls (Composio free tier = 20K/mo), not by number of users or connected accounts.
+**Enabling.** Add a Composio **project API key** either per-workspace from the app (Integrations → **API key**, or `crewship integration composio key set`) — validated and stored encrypted — or server-wide via the `COMPOSIO_API_KEY` env. The effective key resolves workspace-first, then env. Billing is by tool calls (Composio free tier = 20K/mo), not by number of users or connected accounts.
 
 **Inspecting the inventory.** The operator view of the catalog and connected accounts (grouped by user):
 
