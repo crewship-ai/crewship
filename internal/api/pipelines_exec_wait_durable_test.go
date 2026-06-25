@@ -7,48 +7,44 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/pipeline"
 )
 
-// blockingWaitpoints parks WaitFor on a channel until approve() fires, so
-// a test can hold a run at its approval gate, cancel the originating HTTP
-// request, and then prove the run still resumes.
-type blockingWaitpoints struct {
-	mu       sync.Mutex
-	created  int
-	approved chan bool
+// capturingWaitpoints hands the test the exact context the executor blocks
+// on at the approval gate, then parks WaitFor until release() fires. The
+// captured context lets the test assert detachment deterministically (no
+// polling/timeout races): cancel the request and prove the run's context
+// is NOT cancelled with it.
+type capturingWaitpoints struct {
+	captured chan context.Context
+	release  chan bool
 }
 
-func newBlockingWaitpoints() *blockingWaitpoints {
-	return &blockingWaitpoints{approved: make(chan bool, 1)}
+func newCapturingWaitpoints() *capturingWaitpoints {
+	return &capturingWaitpoints{
+		captured: make(chan context.Context, 1),
+		release:  make(chan bool, 1),
+	}
 }
 
-func (b *blockingWaitpoints) CreateApproval(_ context.Context, _ pipeline.WaitpointApprovalRequest) (string, error) {
-	b.mu.Lock()
-	b.created++
-	b.mu.Unlock()
-	return "tok-block", nil
+func (c *capturingWaitpoints) CreateApproval(_ context.Context, _ pipeline.WaitpointApprovalRequest) (string, error) {
+	return "tok-cap", nil
 }
 
-func (b *blockingWaitpoints) WaitFor(ctx context.Context, _ string) (bool, error) {
+func (c *capturingWaitpoints) WaitFor(ctx context.Context, _ string) (bool, error) {
 	select {
-	case v := <-b.approved:
+	case c.captured <- ctx:
+	default:
+	}
+	select {
+	case v := <-c.release:
 		return v, nil
 	case <-ctx.Done():
 		return false, ctx.Err()
 	}
-}
-
-func (b *blockingWaitpoints) approve() { b.approved <- true }
-
-func (b *blockingWaitpoints) parked() bool {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.created > 0
 }
 
 func seedWaitPipeline(t *testing.T, db *sql.DB, slug string) {
@@ -67,11 +63,11 @@ VALUES (?, 'ws_smoke', ?, ?, ?, ?, 0, 1, 'crew_a', 'agent_lead', 'agent_tool_cal
 // A run parked on an approval gate must survive the originating request
 // being cancelled (the reverse proxy timing out the held-open request) and
 // resume to completion once the waitpoint is approved — not get marked
-// failed. This is RED on main: there the handler runs exec.Run on
-// r.Context(), so cancelling the request cancels the parked WaitFor and the
-// run fails at the gate (handler returns 500). The WithoutCancel detach
-// makes it GREEN: the run ignores the request cancel and completes on
-// approval (200).
+// failed. This is RED on the pre-fix code: there the handler runs exec.Run
+// on r.Context(), so cancelling the request cancels the parked WaitFor and
+// the run fails at the gate. The WithoutCancel detach makes it GREEN: the
+// run context is independent of the request, so it survives the cancel and
+// completes on approval.
 func TestPipelineRun_WaitGate_DurableAcrossRequestCancel(t *testing.T) {
 	db := openSmokeDB(t)
 	defer db.Close()
@@ -79,8 +75,16 @@ func TestPipelineRun_WaitGate_DurableAcrossRequestCancel(t *testing.T) {
 
 	h := NewPipelineHandler(db, slog.Default(), &stubRunner{output: "x"}, nil)
 	h.SetRunStore(pipeline.NewRunStore(db))
-	wp := newBlockingWaitpoints()
+	wp := newCapturingWaitpoints()
 	h.SetWaitpointStore(wp)
+	// Always unblock a parked WaitFor so the run goroutine can't leak past
+	// the test (a leaked goroutine would touch the DB after db.Close()).
+	t.Cleanup(func() {
+		select {
+		case wp.release <- true:
+		default:
+		}
+	})
 
 	// Cancellable request context = the proxy connection that will time out.
 	ctx, cancel := context.WithCancel(context.Background())
@@ -97,25 +101,30 @@ func TestPipelineRun_WaitGate_DurableAcrossRequestCancel(t *testing.T) {
 		close(handlerReturned)
 	}()
 
-	// Wait until the run has parked on the approval waitpoint.
-	parkDeadline := time.Now().Add(3 * time.Second)
-	for !wp.parked() {
-		if time.Now().After(parkDeadline) {
-			t.Fatal("run never reached the approval gate")
-		}
-		time.Sleep(10 * time.Millisecond)
+	// Deterministic: block until the run has actually reached the gate.
+	var runCtx context.Context
+	select {
+	case runCtx = <-wp.captured:
+	case <-time.After(10 * time.Second):
+		t.Fatal("run never reached the approval gate")
 	}
 
-	// The proxy drops the original request — the detached run must survive.
+	// The proxy drops the original request.
 	cancel()
-	// Give a buggy (request-context-coupled) implementation a beat to fail.
-	time.Sleep(50 * time.Millisecond)
-	// Approve the gate → the run resumes and the handler returns.
-	wp.approve()
 
+	// The run's context must NOT be cancelled with the request — that's the
+	// whole fix. On the pre-fix r.Context() path this Done channel fires.
+	select {
+	case <-runCtx.Done():
+		t.Fatal("run context was cancelled with the request — not detached")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	// Approve the gate → the run resumes and the handler returns.
+	wp.release <- true
 	select {
 	case <-handlerReturned:
-	case <-time.After(3 * time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("handler did not return after approval — run did not resume")
 	}
 
