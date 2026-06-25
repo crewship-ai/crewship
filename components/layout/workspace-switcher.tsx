@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { Check, ChevronDown, Plus } from "lucide-react"
 import { toast } from "sonner"
 import { useWorkspace, type WorkspaceData } from "@/hooks/use-workspace"
@@ -20,7 +20,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "@/components/ui/sidebar"
+import { SidebarMenu, SidebarMenuButton, SidebarMenuItem, useSidebar } from "@/components/ui/sidebar"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -51,6 +51,26 @@ function slugify(name: string): string {
 export function WorkspaceSwitcher() {
   const { workspace, workspaces, role, loading, setWorkspaceId, refresh } = useWorkspace()
   const [createOpen, setCreateOpen] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const { setPopoverOpen } = useSidebar()
+
+  // Bridge the dropdown's open state to the sidebar so a hover-expanded
+  // sidebar stays pinned open while this menu is up — the menu portals
+  // outside the sidebar, so otherwise moving onto it collapses the panel
+  // mid-click. A ref mirrors the state so the unmount cleanup only
+  // releases the lock when the menu was actually open.
+  const menuOpenRef = useRef(false)
+  const handleMenuOpenChange = useCallback(
+    (open: boolean) => {
+      menuOpenRef.current = open
+      setMenuOpen(open)
+      setPopoverOpen(open)
+    },
+    [setPopoverOpen],
+  )
+  useEffect(() => () => {
+    if (menuOpenRef.current) setPopoverOpen(false)
+  }, [setPopoverOpen])
 
   const triggerLabel = workspace?.name ?? (loading ? "Loading…" : "No workspace")
   const triggerSub = workspace ? ROLE_LABEL[role ?? ""] ?? role ?? "" : ""
@@ -59,7 +79,7 @@ export function WorkspaceSwitcher() {
     <>
       <SidebarMenu>
         <SidebarMenuItem>
-          <DropdownMenu>
+          <DropdownMenu open={menuOpen} onOpenChange={handleMenuOpenChange}>
             <DropdownMenuTrigger asChild>
               <SidebarMenuButton
                 size="lg"

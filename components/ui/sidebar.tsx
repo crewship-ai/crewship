@@ -60,6 +60,8 @@ type SidebarContextProps = {
   toggleSidebar: () => void
   hoverExpanded: boolean
   setHoverExpanded: (expanded: boolean) => void
+  isPopoverOpen: boolean
+  setPopoverOpen: (open: boolean) => void
   sidebarMode: SidebarMode
   setSidebarMode: (mode: SidebarMode) => void
 }
@@ -93,6 +95,20 @@ function SidebarProvider({
   const isMobile = useIsMobile()
   const [openMobile, setOpenMobile] = React.useState(false)
   const [hoverExpanded, setHoverExpanded] = React.useState(false)
+
+  // Tracks popovers/dropdowns anchored inside the sidebar (e.g. the
+  // workspace switcher). While one is open the sidebar must NOT collapse
+  // a hover-expanded panel out from under it: those menus portal outside
+  // the sidebar element, so moving the cursor onto them fires the
+  // sidebar's mouseleave and would otherwise yank the panel shut
+  // mid-interaction. Ref-counted so concurrent popovers don't clobber
+  // each other's open state.
+  const popoverCountRef = React.useRef(0)
+  const [isPopoverOpen, setIsPopoverOpen] = React.useState(false)
+  const setPopoverOpen = React.useCallback((open: boolean) => {
+    popoverCountRef.current = Math.max(0, popoverCountRef.current + (open ? 1 : -1))
+    setIsPopoverOpen(popoverCountRef.current > 0)
+  }, [])
 
   // Sidebar mode: hover (default), collapsed, pinned — persisted in localStorage
   const [sidebarMode, _setSidebarMode] = React.useState<SidebarMode>(() => {
@@ -171,10 +187,12 @@ function SidebarProvider({
       toggleSidebar,
       hoverExpanded,
       setHoverExpanded,
+      isPopoverOpen,
+      setPopoverOpen,
       sidebarMode,
       setSidebarMode,
     }),
-    [state, open, setOpen, isMobile, openMobile, setOpenMobile, toggleSidebar, hoverExpanded, setHoverExpanded, sidebarMode, setSidebarMode]
+    [state, open, setOpen, isMobile, openMobile, setOpenMobile, toggleSidebar, hoverExpanded, setHoverExpanded, isPopoverOpen, setPopoverOpen, sidebarMode, setSidebarMode]
   )
 
   return (
@@ -216,10 +234,26 @@ function Sidebar({
   collapsible?: "offcanvas" | "icon" | "none"
 }) {
   const ctx = React.useContext(SidebarContext)!
-  const { isMobile, state, openMobile, setOpenMobile, hoverExpanded, sidebarMode } = ctx
+  const { isMobile, state, openMobile, setOpenMobile, hoverExpanded, sidebarMode, isPopoverOpen } = ctx
   const hoverTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Whether the cursor is currently over the sidebar, and whether a
+  // sidebar-anchored popover is open. Both are read inside event-handler
+  // closures, so they live in refs to stay current without re-binding.
+  const pointerInsideRef = React.useRef(false)
+  const popoverOpenRef = React.useRef(isPopoverOpen)
+
+  const scheduleCollapse = React.useCallback(() => {
+    if (hoverTimeoutRef.current) {
+      clearTimeout(hoverTimeoutRef.current)
+      hoverTimeoutRef.current = null
+    }
+    hoverTimeoutRef.current = setTimeout(() => {
+      ctx.setHoverExpanded(false)
+    }, 250)
+  }, [ctx])
 
   const handleMouseEnter = React.useCallback(() => {
+    pointerInsideRef.current = true
     // Only hover-expand in "hover" mode
     if (sidebarMode !== "hover" || state !== "collapsed" || isMobile) return
     if (hoverTimeoutRef.current) {
@@ -232,14 +266,30 @@ function Sidebar({
   }, [state, isMobile, ctx, sidebarMode])
 
   const handleMouseLeave = React.useCallback(() => {
+    pointerInsideRef.current = false
     if (hoverTimeoutRef.current) {
       clearTimeout(hoverTimeoutRef.current)
       hoverTimeoutRef.current = null
     }
-    hoverTimeoutRef.current = setTimeout(() => {
-      ctx.setHoverExpanded(false)
-    }, 250)
-  }, [ctx])
+    // Keep the panel open while a popover anchored in the sidebar is up —
+    // the cursor "left" only because it moved onto the portalled menu.
+    if (popoverOpenRef.current) return
+    scheduleCollapse()
+  }, [scheduleCollapse])
+
+  // Pin the hover panel open while a popover is open; once it closes,
+  // collapse unless the cursor has returned inside the sidebar.
+  React.useEffect(() => {
+    popoverOpenRef.current = isPopoverOpen
+    if (isPopoverOpen) {
+      if (hoverTimeoutRef.current) {
+        clearTimeout(hoverTimeoutRef.current)
+        hoverTimeoutRef.current = null
+      }
+    } else if (!pointerInsideRef.current) {
+      scheduleCollapse()
+    }
+  }, [isPopoverOpen, scheduleCollapse])
 
   React.useEffect(() => {
     return () => {
