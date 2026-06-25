@@ -56,6 +56,9 @@ All integration endpoints require authentication and workspace context (except w
 | `GET` | [`/api/v1/integrations/composio/agents/{agentId}/bind`](#composio-agent-binding) | List an agent's Composio user binding(s) |
 | `POST` | [`/api/v1/integrations/composio/agents/{agentId}/bind`](#composio-agent-binding) | Bind a Composio user to an agent |
 | `DELETE` | [`/api/v1/integrations/composio/agents/{agentId}/bind`](#composio-agent-binding) | Unbind a Composio user from an agent |
+| `POST` | [`/api/v1/integrations/composio/accounts/{accountId}/revoke`](#composio-connected-account-management) | Revoke (de-authorize) a connected account |
+| `POST` | [`/api/v1/integrations/composio/accounts/{accountId}/refresh`](#composio-connected-account-management) | Refresh a connected account's credentials |
+| `DELETE` | [`/api/v1/integrations/composio/accounts/{accountId}`](#composio-connected-account-management) | Delete a connected account |
 
 ---
 
@@ -378,6 +381,29 @@ soft-deletes the per-user MCP server when no other agent still binds it.
 `POST` returns `404` for an unknown/foreign agent and `400` when Composio is
 unconfigured or no matching auth configs exist. CLI:
 `crewship integration composio {bind,unbind,bindings} <agent> --user <id> [--toolkits a,b]`.
+
+### Composio Connected-Account Management
+
+Lifecycle operations on an existing connected account. The `accountId` is the
+Composio account id surfaced by the [inventory](#composio-inventory) endpoint.
+All three require workspace **manage** (OWNER/ADMIN) and return `400` when
+Composio is unconfigured.
+
+```
+POST   /api/v1/integrations/composio/accounts/{accountId}/revoke?workspace_id={workspaceId}
+POST   /api/v1/integrations/composio/accounts/{accountId}/refresh?workspace_id={workspaceId}
+DELETE /api/v1/integrations/composio/accounts/{accountId}?workspace_id={workspaceId}
+```
+
+- **revoke** — de-authorizes the account at the provider. Its credentials are
+  invalidated upstream; the user must re-connect before it can be used again.
+- **refresh** — refreshes the account's credentials (e.g. exchanging a refresh
+  token for a new access token).
+- **delete** — permanently removes the connected account at the provider.
+
+**Response:** `204 No Content` on success; `502` when Composio returns an error.
+
+CLI: `crewship integration composio account {revoke,refresh,remove} <account-id>`.
 
 ---
 

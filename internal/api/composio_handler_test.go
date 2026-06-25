@@ -44,6 +44,12 @@ func fakeComposioAPI(t *testing.T, authConfigs, connectedAccounts string) *httpt
 			// Mirror Composio's create-server response: an id + a base mcp_url
 			// the handler scopes per-user with a `?user_id=` suffix.
 			_, _ = w.Write([]byte(`{"id":"mcp_srv_1","mcp_url":"https://mcp.composio.dev/server/mcp_srv_1"}`))
+		// Connected-account management: revoke/refresh (POST) + delete (DELETE).
+		// Composio returns no useful body; 204 exercises the client's no-decode path.
+		case "/api/v3.1/connected_accounts/ca_1/revoke",
+			"/api/v3.1/connected_accounts/ca_1/refresh",
+			"/api/v3.1/connected_accounts/ca_1":
+			w.WriteHeader(http.StatusNoContent)
 		default:
 			http.Error(w, "not found", http.StatusNotFound)
 		}
@@ -510,6 +516,67 @@ func TestComposio_BindAgent_RequiresUserID(t *testing.T) {
 	h.BindAgent(rr, req)
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("status=%d, want 400", rr.Code)
+	}
+}
+
+func TestComposio_RevokeAccount(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	srv := fakeComposioAPI(t, `{"items":[]}`, `{"items":[]}`)
+	h := NewComposioHandler(db, newComposioTestLogger(), &config.ComposioConfig{
+		Enabled: true, APIKey: "ak_test", BaseURL: srv.URL,
+	})
+
+	req := withWorkspaceUser(httptest.NewRequest("POST",
+		"/api/v1/integrations/composio/accounts/ca_1/revoke", nil), userID, wsID, "OWNER")
+	req.SetPathValue("accountId", "ca_1")
+	rr := httptest.NewRecorder()
+	h.RevokeAccount(rr, req)
+
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("status=%d body=%s, want 204", rr.Code, rr.Body.String())
+	}
+}
+
+func TestComposio_DeleteAccount(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	srv := fakeComposioAPI(t, `{"items":[]}`, `{"items":[]}`)
+	h := NewComposioHandler(db, newComposioTestLogger(), &config.ComposioConfig{
+		Enabled: true, APIKey: "ak_test", BaseURL: srv.URL,
+	})
+
+	req := withWorkspaceUser(httptest.NewRequest("DELETE",
+		"/api/v1/integrations/composio/accounts/ca_1", nil), userID, wsID, "OWNER")
+	req.SetPathValue("accountId", "ca_1")
+	rr := httptest.NewRecorder()
+	h.DeleteAccount(rr, req)
+
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("status=%d body=%s, want 204", rr.Code, rr.Body.String())
+	}
+}
+
+func TestComposio_RevokeAccount_NotConfigured(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	// nil config → provider unconfigured: management ops 400 rather than proxying.
+	h := NewComposioHandler(db, newComposioTestLogger(), nil)
+
+	req := withWorkspaceUser(httptest.NewRequest("POST",
+		"/api/v1/integrations/composio/accounts/ca_1/revoke", nil), userID, wsID, "OWNER")
+	req.SetPathValue("accountId", "ca_1")
+	rr := httptest.NewRecorder()
+	h.RevokeAccount(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d, want 400 (Composio not configured)", rr.Code)
 	}
 }
 

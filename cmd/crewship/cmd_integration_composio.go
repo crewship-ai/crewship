@@ -616,6 +616,65 @@ var composioBindingsCmd = &cobra.Command{
 	},
 }
 
+var composioAccountCmd = &cobra.Command{
+	Use:   "account",
+	Short: "Manage a Composio connected account (revoke / refresh / remove)",
+}
+
+var composioAccountRevokeCmd = &cobra.Command{
+	Use:   "revoke <account-id>",
+	Short: "De-authorize a connected account at the provider",
+	Long: "Revokes a connected account's credentials upstream. The account row " +
+		"survives but must be re-connected before it can be used again. The " +
+		"account-id is the Composio account id shown by `integration composio inventory`.",
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client, err := requireAuthAndWorkspace()
+		if err != nil {
+			return err
+		}
+		if err := postJSON(client, "/api/v1/integrations/composio/accounts/"+url.PathEscape(args[0])+"/revoke", nil, nil); err != nil {
+			return err
+		}
+		fmt.Printf("Connected account %s revoked.\n", args[0])
+		return nil
+	},
+}
+
+var composioAccountRefreshCmd = &cobra.Command{
+	Use:   "refresh <account-id>",
+	Short: "Refresh a connected account's credentials",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client, err := requireAuthAndWorkspace()
+		if err != nil {
+			return err
+		}
+		if err := postJSON(client, "/api/v1/integrations/composio/accounts/"+url.PathEscape(args[0])+"/refresh", nil, nil); err != nil {
+			return err
+		}
+		fmt.Printf("Connected account %s refreshed.\n", args[0])
+		return nil
+	},
+}
+
+var composioAccountRemoveCmd = &cobra.Command{
+	Use:   "remove <account-id>",
+	Short: "Permanently delete a connected account at the provider",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client, err := requireAuthAndWorkspace()
+		if err != nil {
+			return err
+		}
+		if err := deleteJSON(client, "/api/v1/integrations/composio/accounts/"+url.PathEscape(args[0])); err != nil {
+			return err
+		}
+		fmt.Printf("Connected account %s deleted.\n", args[0])
+		return nil
+	},
+}
+
 func init() {
 	composioConnectCmd.Flags().String("user", "", "Composio user_id to connect the account under (required)")
 	composioToolkitsCmd.Flags().String("search", "", "Filter apps by name/slug")
@@ -641,6 +700,9 @@ func init() {
 	composioCmd.AddCommand(composioTriggersCmd)
 	composioCmd.AddCommand(composioKeyCmd)
 	composioCmd.AddCommand(composioConnectCmd)
+
+	composioAccountCmd.AddCommand(composioAccountRevokeCmd, composioAccountRefreshCmd, composioAccountRemoveCmd)
+	composioCmd.AddCommand(composioAccountCmd)
 
 	composioBindCmd.Flags().String("user", "", "Composio user_id to bind the agent to (required)")
 	composioBindCmd.Flags().String("toolkits", "", "Comma-separated toolkit slugs to restrict the binding to (optional)")

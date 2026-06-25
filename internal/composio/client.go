@@ -326,6 +326,29 @@ func (c *Client) ListConnectedAccounts(ctx context.Context) ([]ConnectedAccount,
 	return env.Items, nil
 }
 
+// RevokeConnectedAccount de-authorizes a connected account at the provider
+// (Composio's POST .../revoke). The account row survives but its credentials
+// are invalidated upstream — the user must re-connect to use it again. id is
+// the account's Composio nanoid. No response body is consumed.
+func (c *Client) RevokeConnectedAccount(ctx context.Context, id string) error {
+	return c.post(ctx, "/api/v3.1/connected_accounts/"+url.PathEscape(id)+"/revoke", nil, nil)
+}
+
+// RefreshConnectedAccount refreshes a connected account's credentials
+// (Composio's POST .../refresh), e.g. exchanging a refresh token for a new
+// access token. id is the account's Composio nanoid. No response body is
+// consumed.
+func (c *Client) RefreshConnectedAccount(ctx context.Context, id string) error {
+	return c.post(ctx, "/api/v3.1/connected_accounts/"+url.PathEscape(id)+"/refresh", nil, nil)
+}
+
+// DeleteConnectedAccount permanently removes a connected account (Composio's
+// DELETE on the account resource). id is the account's Composio nanoid. No
+// response body is consumed.
+func (c *Client) DeleteConnectedAccount(ctx context.Context, id string) error {
+	return c.del(ctx, "/api/v3.1/connected_accounts/"+url.PathEscape(id))
+}
+
 // ConnectLink is the hosted-auth session returned by CreateConnectLink. The
 // caller sends the user to RedirectURL to complete OAuth; the connected
 // account lands under the requested user_id when they finish.
@@ -430,6 +453,13 @@ func (c *Client) get(ctx context.Context, path string, out any) error {
 // post performs an authenticated POST with a JSON body and decodes the response.
 func (c *Client) post(ctx context.Context, path string, body, out any) error {
 	return c.do(ctx, http.MethodPost, path, body, out)
+}
+
+// del performs an authenticated DELETE. Composio's delete endpoints return
+// 200/204 with no useful body, so nothing is decoded — do treats any 2xx as
+// success and skips the decode when out is nil.
+func (c *Client) del(ctx context.Context, path string) error {
+	return c.do(ctx, http.MethodDelete, path, nil, nil)
 }
 
 func (c *Client) do(ctx context.Context, method, path string, body, out any) error {

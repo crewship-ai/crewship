@@ -188,6 +188,39 @@ func TestClient_CreateTriggerInstance(t *testing.T) {
 	}
 }
 
+func TestClient_ConnectedAccountManagement(t *testing.T) {
+	var gotMethod, gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		// Revoke/delete return no useful body; 204 exercises the no-decode path.
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(srv.Close)
+	c := NewClient("ak_test", srv.URL)
+
+	if err := c.RevokeConnectedAccount(context.Background(), "ca_2pjydr0oHqiI"); err != nil {
+		t.Fatalf("RevokeConnectedAccount: %v", err)
+	}
+	if gotMethod != http.MethodPost || gotPath != "/api/v3.1/connected_accounts/ca_2pjydr0oHqiI/revoke" {
+		t.Errorf("revoke = %s %s, want POST .../ca_2pjydr0oHqiI/revoke", gotMethod, gotPath)
+	}
+
+	if err := c.RefreshConnectedAccount(context.Background(), "ca_2pjydr0oHqiI"); err != nil {
+		t.Fatalf("RefreshConnectedAccount: %v", err)
+	}
+	if gotMethod != http.MethodPost || gotPath != "/api/v3.1/connected_accounts/ca_2pjydr0oHqiI/refresh" {
+		t.Errorf("refresh = %s %s, want POST .../ca_2pjydr0oHqiI/refresh", gotMethod, gotPath)
+	}
+
+	if err := c.DeleteConnectedAccount(context.Background(), "ca_2pjydr0oHqiI"); err != nil {
+		t.Fatalf("DeleteConnectedAccount: %v", err)
+	}
+	if gotMethod != http.MethodDelete || gotPath != "/api/v3.1/connected_accounts/ca_2pjydr0oHqiI" {
+		t.Errorf("delete = %s %s, want DELETE .../ca_2pjydr0oHqiI", gotMethod, gotPath)
+	}
+}
+
 func TestClient_DefaultBaseURL(t *testing.T) {
 	c := NewClient("ak_test", "")
 	if c.baseURL != DefaultBaseURL {

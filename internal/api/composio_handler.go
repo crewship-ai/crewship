@@ -886,6 +886,92 @@ func (h *ComposioHandler) ListAgentBindings(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, composioListBindingsResponse{AgentID: agentID, Bindings: bindings})
 }
 
+// ── Connected-account management — /accounts/{accountId}/{revoke,refresh} ────
+//
+// Lifecycle operations on an existing Composio connected account. Unlike the
+// inventory (read) view, these mutate provider-side state, so they're all
+// manage-gated. The account id is the Composio nanoid surfaced by the inventory
+// endpoint; each handler proxies one Composio call and returns 204 on success.
+
+// RevokeAccount de-authorizes a connected account at the provider (its
+// credentials are invalidated upstream; the account must be re-connected to be
+// usable again). OWNER/ADMIN only.
+//
+// POST /api/v1/integrations/composio/accounts/{accountId}/revoke
+func (h *ComposioHandler) RevokeAccount(w http.ResponseWriter, r *http.Request) {
+	if !requireRole(w, r, "manage") {
+		return
+	}
+	client, _ := h.resolveClient(r)
+	if client == nil {
+		writeProblem(w, r, http.StatusBadRequest, "Composio is not configured (set an API key first)")
+		return
+	}
+	accountID := strings.TrimSpace(r.PathValue("accountId"))
+	if accountID == "" {
+		writeProblem(w, r, http.StatusBadRequest, "account id required")
+		return
+	}
+	if err := client.RevokeConnectedAccount(r.Context(), accountID); err != nil {
+		h.logger.Error("composio: revoke connected account", "account", accountID, "error", err)
+		writeProblem(w, r, http.StatusBadGateway, "Composio API error")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// RefreshAccount refreshes a connected account's credentials (e.g. exchanging a
+// refresh token for a new access token). OWNER/ADMIN only.
+//
+// POST /api/v1/integrations/composio/accounts/{accountId}/refresh
+func (h *ComposioHandler) RefreshAccount(w http.ResponseWriter, r *http.Request) {
+	if !requireRole(w, r, "manage") {
+		return
+	}
+	client, _ := h.resolveClient(r)
+	if client == nil {
+		writeProblem(w, r, http.StatusBadRequest, "Composio is not configured (set an API key first)")
+		return
+	}
+	accountID := strings.TrimSpace(r.PathValue("accountId"))
+	if accountID == "" {
+		writeProblem(w, r, http.StatusBadRequest, "account id required")
+		return
+	}
+	if err := client.RefreshConnectedAccount(r.Context(), accountID); err != nil {
+		h.logger.Error("composio: refresh connected account", "account", accountID, "error", err)
+		writeProblem(w, r, http.StatusBadGateway, "Composio API error")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// DeleteAccount permanently removes a connected account at the provider.
+// OWNER/ADMIN only.
+//
+// DELETE /api/v1/integrations/composio/accounts/{accountId}
+func (h *ComposioHandler) DeleteAccount(w http.ResponseWriter, r *http.Request) {
+	if !requireRole(w, r, "manage") {
+		return
+	}
+	client, _ := h.resolveClient(r)
+	if client == nil {
+		writeProblem(w, r, http.StatusBadRequest, "Composio is not configured (set an API key first)")
+		return
+	}
+	accountID := strings.TrimSpace(r.PathValue("accountId"))
+	if accountID == "" {
+		writeProblem(w, r, http.StatusBadRequest, "account id required")
+		return
+	}
+	if err := client.DeleteConnectedAccount(r.Context(), accountID); err != nil {
+		h.logger.Error("composio: delete connected account", "account", accountID, "error", err)
+		writeProblem(w, r, http.StatusBadGateway, "Composio API error")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // ── Settings (API key) — /api/v1/integrations/composio/settings ──────────────
 
 type composioSettingsResponse struct {

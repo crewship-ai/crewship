@@ -43,10 +43,16 @@ crewship intg <subcommand> [flags]
 | `integration composio bind <agent>` | Bind a Composio `user_id` to an agent (per-user MCP server at runtime). Requires `--user <id>`; optional `--toolkits a,b` to restrict apps. |
 | `integration composio unbind <agent>` | Remove an agent's Composio user binding. Requires `--user <id>`. |
 | `integration composio bindings <agent>` | Show an agent's Composio user binding(s). |
+| `integration composio account revoke <account-id>` | De-authorize a connected account at the provider (must be re-connected to use again). |
+| `integration composio account refresh <account-id>` | Refresh a connected account's credentials. |
+| `integration composio account remove <account-id>` | Permanently delete a connected account at the provider. |
 
 `bind`/`unbind` map to `POST`/`DELETE /api/v1/integrations/composio/agents/{agentId}/bind`
 (workspace manage); `bindings` to the matching `GET` (read). The agent argument
-accepts a slug or id.
+accepts a slug or id. `account revoke`/`refresh`/`remove` map to
+`POST .../accounts/{accountId}/revoke`, `POST .../accounts/{accountId}/refresh`,
+and `DELETE .../accounts/{accountId}` (all workspace manage); the `account-id` is
+the Composio account id shown by `integration composio inventory --output json`.
 
 Maps to `GET /api/v1/integrations/composio/inventory`. Requires `COMPOSIO_API_KEY`
 on the server; prints a "not configured" notice otherwise. Add `--output json`
