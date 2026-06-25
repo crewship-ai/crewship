@@ -498,15 +498,23 @@ var composioConnectCmd = &cobra.Command{
 	},
 }
 
+// composioBindAppResult mirrors one provisioned app in the bind response.
+type composioBindAppResult struct {
+	Toolkit  string `json:"toolkit"`
+	Mode     string `json:"mode"`
+	Endpoint string `json:"endpoint"`
+}
+
 // composioBindResponse mirrors the server's bind wire shape.
 type composioBindResponse struct {
-	AgentID     string `json:"agent_id"`
-	UserID      string `json:"user_id"`
-	MCPServerID string `json:"mcp_server_id"`
-	Endpoint    string `json:"endpoint"`
+	AgentID string                  `json:"agent_id"`
+	UserID  string                  `json:"user_id"`
+	Apps    []composioBindAppResult `json:"apps"`
 }
 
 type composioAgentBinding struct {
+	Toolkit  string `json:"toolkit"`
+	Mode     string `json:"mode"`
 	UserID   string `json:"user_id"`
 	Endpoint string `json:"endpoint"`
 }
@@ -516,12 +524,44 @@ type composioListBindingsResponse struct {
 	Bindings []composioAgentBinding `json:"bindings"`
 }
 
+// composioAppSpec mirrors the per-app scope in the bind request body.
+type composioAppSpec struct {
+	Toolkit string   `json:"toolkit"`
+	Mode    string   `json:"mode"`
+	Tools   []string `json:"tools,omitempty"`
+}
+
+// parseComposioApp parses a `--app` value of the form
+// `toolkit[:mode[:tool1,tool2]]` (e.g. `gmail`, `calendar:read`,
+// `gmail:custom:GMAIL_FETCH_EMAILS,GMAIL_LIST_THREADS`). Mode defaults to "full".
+func parseComposioApp(spec string) (composioAppSpec, error) {
+	parts := strings.SplitN(strings.TrimSpace(spec), ":", 3)
+	toolkit := strings.TrimSpace(parts[0])
+	if toolkit == "" {
+		return composioAppSpec{}, fmt.Errorf("invalid --app %q: toolkit is required", spec)
+	}
+	app := composioAppSpec{Toolkit: toolkit, Mode: "full"}
+	if len(parts) >= 2 && strings.TrimSpace(parts[1]) != "" {
+		app.Mode = strings.ToLower(strings.TrimSpace(parts[1]))
+	}
+	if len(parts) == 3 {
+		app.Tools = splitCSV(parts[2])
+	}
+	if app.Mode == "custom" && len(app.Tools) == 0 {
+		return composioAppSpec{}, fmt.Errorf("invalid --app %q: custom mode needs a tool list (toolkit:custom:TOOL_A,TOOL_B)", spec)
+	}
+	return app, nil
+}
+
 var composioBindCmd = &cobra.Command{
 	Use:   "bind <agent-slug-or-id>",
-	Short: "Assign a Composio user (its connected apps/tools) to an agent",
-	Long: "Binds a Composio user_id to an agent so the agent gets a per-user " +
-		"scoped Composio MCP server at runtime. Optionally restrict the bound " +
-		"tools to specific toolkits with --toolkits.",
+	Short: "Assign a Composio user's apps (with per-app tool scope) to an agent",
+	Long: "Binds a Composio user_id to an agent so the agent gets per-app, " +
+		"tool-scoped Composio MCP servers at runtime. Use repeatable --app flags " +
+		"of the form toolkit[:mode[:tool1,tool2]] where mode is full|read|custom, " +
+		"e.g. --app gmail:full --app calendar:read " +
+		"--app gmail:custom:GMAIL_FETCH_EMAILS,GMAIL_LIST_THREADS. " +
+		"--toolkits a,b is a shorthand for binding each at full scope.",
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		client, err := requireAuthAndWorkspace()
@@ -532,50 +572,69 @@ var composioBindCmd = &cobra.Command{
 		if strings.TrimSpace(user) == "" {
 			return fmt.Errorf("--user is required (the Composio user_id to bind the agent to)")
 		}
+		appFlags, _ := cmd.Flags().GetStringArray("app")
 		toolkitsCSV, _ := cmd.Flags().GetString("toolkits")
 		agentID, err := resolveAgentID(client, args[0])
 		if err != nil {
 			return err
 		}
 
+		var apps []composioAppSpec
+		for _, raw := range appFlags {
+			app, perr := parseComposioApp(raw)
+			if perr != nil {
+				return perr
+			}
+			apps = append(apps, app)
+		}
+		// --toolkits shorthand: each toolkit at full scope.
+		for _, tk := range splitCSV(toolkitsCSV) {
+			apps = append(apps, composioAppSpec{Toolkit: tk, Mode: "full"})
+		}
+
 		body := map[string]any{"user_id": user}
-		if tk := splitCSV(toolkitsCSV); len(tk) > 0 {
-			body["toolkits"] = tk
+		if len(apps) > 0 {
+			body["apps"] = apps
 		}
 
 		var res composioBindResponse
 		if err := postJSON(client, "/api/v1/integrations/composio/agents/"+agentID+"/bind", body, &res); err != nil {
 			return err
 		}
-		fmt.Printf("Bound agent %s to Composio user %q.\n  MCP server: %s\n  Endpoint:   %s\n",
-			args[0], res.UserID, res.MCPServerID, res.Endpoint)
+		fmt.Printf("Bound agent %s to Composio user %q (%d app(s)):\n", args[0], res.UserID, len(res.Apps))
+		for _, a := range res.Apps {
+			fmt.Printf("  %-14s %-10s %s\n", a.Toolkit, a.Mode, a.Endpoint)
+		}
 		return nil
 	},
 }
 
 var composioUnbindCmd = &cobra.Command{
 	Use:   "unbind <agent-slug-or-id>",
-	Short: "Remove an agent's Composio user binding",
+	Short: "Remove an agent's Composio access (one app with --app, else all)",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		client, err := requireAuthAndWorkspace()
 		if err != nil {
 			return err
 		}
-		user, _ := cmd.Flags().GetString("user")
-		if strings.TrimSpace(user) == "" {
-			return fmt.Errorf("--user is required (the Composio user_id to unbind)")
-		}
+		app, _ := cmd.Flags().GetString("app")
 		agentID, err := resolveAgentID(client, args[0])
 		if err != nil {
 			return err
 		}
-		path := "/api/v1/integrations/composio/agents/" + agentID + "/bind?" +
-			url.Values{"user_id": {user}}.Encode()
+		path := "/api/v1/integrations/composio/agents/" + agentID + "/bind"
+		if tk := strings.TrimSpace(app); tk != "" {
+			path += "?" + url.Values{"toolkit": {tk}}.Encode()
+		}
 		if err := deleteJSON(client, path); err != nil {
 			return err
 		}
-		fmt.Printf("Unbound agent %s from Composio user %q.\n", args[0], user)
+		if tk := strings.TrimSpace(app); tk != "" {
+			fmt.Printf("Unbound app %q from agent %s.\n", tk, args[0])
+		} else {
+			fmt.Printf("Unbound all Composio apps from agent %s.\n", args[0])
+		}
 		return nil
 	},
 }
@@ -607,9 +666,9 @@ var composioBindingsCmd = &cobra.Command{
 		}
 		rows := make([][]string, 0, len(res.Bindings))
 		for _, b := range res.Bindings {
-			rows = append(rows, []string{b.UserID, b.Endpoint})
+			rows = append(rows, []string{b.Toolkit, b.Mode, b.UserID, b.Endpoint})
 		}
-		f.Table([]string{"USER_ID", "ENDPOINT"}, rows)
+		f.Table([]string{"TOOLKIT", "MODE", "USER_ID", "ENDPOINT"}, rows)
 		return nil
 	},
 }
@@ -702,8 +761,9 @@ func init() {
 	composioCmd.AddCommand(composioAccountCmd)
 
 	composioBindCmd.Flags().String("user", "", "Composio user_id to bind the agent to (required)")
-	composioBindCmd.Flags().String("toolkits", "", "Comma-separated toolkit slugs to restrict the binding to (optional)")
-	composioUnbindCmd.Flags().String("user", "", "Composio user_id to unbind (required)")
+	composioBindCmd.Flags().StringArray("app", nil, "App + tool scope, repeatable: toolkit[:mode[:tool1,tool2]] (mode = full|read|custom)")
+	composioBindCmd.Flags().String("toolkits", "", "Shorthand: comma-separated toolkit slugs to bind at full scope")
+	composioUnbindCmd.Flags().String("app", "", "Toolkit slug to unbind (optional; omit to remove all the agent's Composio apps)")
 	composioCmd.AddCommand(composioBindCmd, composioUnbindCmd, composioBindingsCmd)
 
 	integrationCmd.AddCommand(composioCmd)

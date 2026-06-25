@@ -339,48 +339,74 @@ A `PUT` with an invalid key returns `400` (Composio rejected it). CLI:
 
 ### Composio Agent Binding
 
-Assign a Composio **user** (its connected accounts/tools) to a specific agent
-so the agent gets a **per-user-scoped MCP server** at runtime. The binding is
-**persisted** as the three rows the runtime resolver already reads — a
-workspace MCP server pointing at the per-user Composio MCP URL, a credential
-holding the workspace Composio API key, and an agent MCP binding joining them
-(`cred_type: api_key`, `cred_header: x-api-key`). No resolver change is needed:
-the sidecar injects the `x-api-key` header on the streamable-http request.
+Grant an agent **per-app, tool-scoped** access to a Composio **user**'s
+connected apps. For **each** granted app the binding provisions one
+tool-scoped Composio MCP server and persists the rows the runtime resolver
+reads — a per-(agent, app) workspace MCP server pointing at the per-user
+Composio MCP URL, a workspace credential holding the Composio API key, and an
+agent MCP binding joining them (`cred_type: api_key`, `cred_header: x-api-key`).
+No resolver change is needed: the sidecar injects the `x-api-key` header on the
+streamable-http request.
+
+Each app carries a **mode** that maps to the MCP server's `allowed_tools`:
+
+| Mode | `allowed_tools` | Effect |
+|---|---|---|
+| `full` | *(empty)* | Every tool the app exposes (no enumeration). |
+| `read` | the app's read-ish tools | Server-resolved: tools whose slug carries a read verb (`GET`, `LIST`, `FETCH`, `SEARCH`, `READ`, …). Conservative — unknown verbs are treated as not-read. |
+| `custom` | the picked tool slugs | The request's `tools`, intersected with the app's real tools (bogus slugs are dropped). |
 
 ```
 GET    /api/v1/integrations/composio/agents/{agentId}/bind?workspace_id={workspaceId}
 POST   /api/v1/integrations/composio/agents/{agentId}/bind?workspace_id={workspaceId}
-DELETE /api/v1/integrations/composio/agents/{agentId}/bind?workspace_id={workspaceId}&user_id={userId}
+DELETE /api/v1/integrations/composio/agents/{agentId}/bind?workspace_id={workspaceId}[&toolkit={slug}]
 ```
 
-`GET` (read) lists the agent's Composio binding(s); `POST`/`DELETE` require
-workspace **manage** (OWNER/ADMIN). `POST` body:
+`GET` (read) lists the agent's per-app Composio bindings; `POST`/`DELETE`
+require workspace **manage** (OWNER/ADMIN). `POST` body:
 
 ```json
-{ "user_id": "user-42", "toolkits": ["github", "gmail"] }
+{
+  "user_id": "user-42",
+  "apps": [
+    { "toolkit": "gmail", "mode": "read" },
+    { "toolkit": "github", "mode": "full" },
+    { "toolkit": "gmail", "mode": "custom", "tools": ["GMAIL_FETCH_EMAILS", "GMAIL_LIST_THREADS"] }
+  ]
+}
 ```
 
-`user_id` is required (the Composio user the agent is scoped to). `toolkits` is
-optional — when given, the MCP server is restricted to those toolkits' auth
-configs; omitted means every configured connector. Re-binding the same user is
-idempotent (upserts on the unique keys). `DELETE` removes the agent binding and
-soft-deletes the per-user MCP server when no other agent still binds it.
+`user_id` is required (the Composio user the agent is scoped to). The legacy
+shape `{ "user_id": "…", "toolkits": ["gmail"] }` is still accepted — each
+toolkit becomes an app at `full`. When neither `apps` nor `toolkits` is given,
+every connected app is bound at `full`. Re-binding **replaces** the agent's app
+set: apps no longer present are removed (their server row + binding deleted).
+`read`/`custom` with an empty resolved tool set returns `400`. `DELETE` with
+`?toolkit=<slug>` removes one app; without it, removes all the agent's Composio
+apps.
 
 **Response (POST):** `200 OK`
 
 ```json
-{ "agent_id": "clx…", "user_id": "user-42", "mcp_server_id": "clx…", "endpoint": "https://mcp.composio.dev/server/…?user_id=user-42" }
+{
+  "agent_id": "clx…",
+  "user_id": "user-42",
+  "apps": [
+    { "toolkit": "gmail", "mode": "read", "endpoint": "https://mcp.composio.dev/server/…?user_id=user-42" },
+    { "toolkit": "github", "mode": "full", "endpoint": "https://mcp.composio.dev/server/…?user_id=user-42" }
+  ]
+}
 ```
 
 **Response (GET):** `200 OK`
 
 ```json
-{ "agent_id": "clx…", "bindings": [ { "user_id": "user-42", "endpoint": "https://mcp.composio.dev/server/…?user_id=user-42" } ] }
+{ "agent_id": "clx…", "bindings": [ { "toolkit": "gmail", "mode": "read", "user_id": "user-42", "endpoint": "https://mcp.composio.dev/server/…?user_id=user-42" } ] }
 ```
 
 `POST` returns `404` for an unknown/foreign agent and `400` when Composio is
-unconfigured or no matching auth configs exist. CLI:
-`crewship integration composio {bind,unbind,bindings} <agent> --user <id> [--toolkits a,b]`.
+unconfigured or no apps resolve. CLI:
+`crewship integration composio {bind,unbind,bindings} <agent> --user <id> [--app toolkit[:mode[:t1,t2]]]…`.
 
 ### Composio Connected-Account Management
 

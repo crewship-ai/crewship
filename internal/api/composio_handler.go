@@ -467,43 +467,139 @@ func (h *ComposioHandler) Connect(w http.ResponseWriter, r *http.Request) {
 // All three are upserts on their UNIQUE keys so re-binding the same user is
 // idempotent.
 
-// composioBindRequest is the POST body for binding a Composio user to an agent.
-type composioBindRequest struct {
-	UserID   string   `json:"user_id"`
-	Toolkits []string `json:"toolkits"`
+// composioAppScope is one granted app in a bind request: a toolkit plus the
+// tool scope to expose for it.
+//
+//	mode "full"   → every tool the app has (allowed_tools empty on the MCP server).
+//	mode "read"   → only the app's read-ish tools (resolved server-side via isReadTool).
+//	mode "custom" → exactly the slugs in Tools (validated against the app's real tools).
+type composioAppScope struct {
+	Toolkit string   `json:"toolkit"`
+	Mode    string   `json:"mode"`
+	Tools   []string `json:"tools"`
 }
 
-// composioToolkitTag derives a short, name-safe tag identifying a toolkit
-// restriction set, so the per-toolkit-set Composio MCP server name stays stable
-// and within Composio's 30-char [a-zA-Z0-9- ] limit. Empty restriction → "all"
-// (every connected app); otherwise an 8-hex FNV hash of the sorted, lowercased
-// slugs (the set, not the order). Two agents restricted to the same apps reuse
-// the same server; different restrictions get different servers.
-func composioToolkitTag(toolkits []string) string {
-	seen := map[string]struct{}{}
-	for _, t := range toolkits {
-		if t = strings.TrimSpace(strings.ToLower(t)); t != "" {
-			seen[t] = struct{}{}
+// composioBindRequest is the POST body for binding a Composio user to an agent.
+// The current shape is {user_id, apps:[{toolkit,mode,tools}]}; the legacy
+// {user_id, toolkits:[...]} shape is still accepted (each toolkit ⇒ an app at
+// mode "full") for backward compatibility.
+type composioBindRequest struct {
+	UserID   string             `json:"user_id"`
+	Apps     []composioAppScope `json:"apps"`
+	Toolkits []string           `json:"toolkits"`
+}
+
+// composioReadVerbs is the token set isReadTool matches a tool slug against to
+// classify it as read-only. Conservative on purpose: an unrecognised verb is
+// treated as NOT read so a read-mode binding never over-grants a write tool.
+var composioReadVerbs = map[string]struct{}{
+	"GET": {}, "LIST": {}, "FETCH": {}, "SEARCH": {}, "READ": {}, "FIND": {},
+	"DOWNLOAD": {}, "EXPORT": {}, "RETRIEVE": {}, "COUNT": {}, "CHECK": {},
+	"VIEW": {}, "GETPROFILE": {},
+}
+
+// isReadTool reports whether a Composio tool slug looks read-only. It strips the
+// leading toolkit prefix (e.g. "GMAIL_") and checks whether any remaining
+// underscore-token is one of composioReadVerbs (case-insensitive). Heuristic and
+// deliberately conservative — when unsure it returns false so we never expose a
+// mutating tool under a "read" scope.
+func isReadTool(slug string) bool {
+	s := strings.ToUpper(strings.TrimSpace(slug))
+	if i := strings.Index(s, "_"); i >= 0 {
+		s = s[i+1:]
+	}
+	for _, tok := range strings.Split(s, "_") {
+		if _, ok := composioReadVerbs[tok]; ok {
+			return true
 		}
 	}
-	if len(seen) == 0 {
-		return "all"
+	return false
+}
+
+// composioScopeTag derives a short, name-safe tag identifying a tool-scope set,
+// so the per-(app,scope) Composio MCP server name stays stable and within
+// Composio's 30-char [a-zA-Z0-9- ] limit. Empty allowedTools (full scope) → "full";
+// otherwise an 8-hex FNV hash of the sorted, lowercased tool slugs (the set, not
+// the order). Identical scopes reuse the same Composio server.
+func composioScopeTag(allowedTools []string) string {
+	if len(allowedTools) == 0 {
+		return "full"
 	}
-	slugs := make([]string, 0, len(seen))
-	for s := range seen {
-		slugs = append(slugs, s)
+	tools := make([]string, len(allowedTools))
+	for i, t := range allowedTools {
+		tools[i] = strings.ToLower(t)
 	}
-	sort.Strings(slugs)
+	sort.Strings(tools)
 	hsh := fnv.New32a()
-	_, _ = hsh.Write([]byte(strings.Join(slugs, ",")))
+	_, _ = hsh.Write([]byte(strings.Join(tools, ",")))
 	return fmt.Sprintf("%08x", hsh.Sum32())
 }
 
+// composioServerName builds the Composio MCP server name for one (workspace,
+// toolkit, scope). Composio caps names at 30 chars of [a-zA-Z0-9- ], so we use
+// the last 8 chars of the workspace id and, when the toolkit slug would push the
+// name over the limit, replace the slug with an 8-hex FNV hash of it (the server
+// stays unique because the hash is deterministic per slug). The "full"/scope-hash
+// suffix keeps different scopes of the same app on different servers.
+func composioServerName(wsID, toolkitSlug, scopeTag string) string {
+	wsShort := wsID
+	if len(wsShort) > 8 {
+		wsShort = wsShort[len(wsShort)-8:]
+	}
+	slug := strings.ToLower(toolkitSlug)
+	name := "crewship-" + wsShort + "-" + slug + "-" + scopeTag
+	if len(name) > 30 {
+		hsh := fnv.New32a()
+		_, _ = hsh.Write([]byte(slug))
+		name = "crewship-" + wsShort + "-" + fmt.Sprintf("%08x", hsh.Sum32()) + "-" + scopeTag
+	}
+	return name
+}
+
+// composioModeLabel renders the human-readable scope label embedded in a
+// workspace_mcp_servers display_name. ListAgentBindings parses the mode back out
+// of this label (storage has no dedicated mode column).
+func composioModeLabel(mode string, toolCount int) string {
+	switch mode {
+	case "read":
+		return "Read-only"
+	case "custom":
+		return fmt.Sprintf("Custom %d", toolCount)
+	default:
+		return "Full"
+	}
+}
+
+// composioModeFromDisplay is the inverse of composioModeLabel: it recovers the
+// scope mode from a stored display_name ("…· Full" / "…· Read-only" / "…· Custom N").
+func composioModeFromDisplay(display string) string {
+	idx := strings.LastIndex(display, "·")
+	if idx < 0 {
+		return ""
+	}
+	label := strings.TrimSpace(display[idx+len("·"):])
+	switch {
+	case strings.HasPrefix(label, "Read"):
+		return "read"
+	case strings.HasPrefix(label, "Custom"):
+		return "custom"
+	case strings.HasPrefix(label, "Full"):
+		return "full"
+	}
+	return ""
+}
+
+// composioBindAppResult is one provisioned app in the bind response.
+type composioBindAppResult struct {
+	Toolkit  string `json:"toolkit"`
+	Mode     string `json:"mode"`
+	Endpoint string `json:"endpoint"`
+}
+
 type composioBindResponse struct {
-	AgentID     string `json:"agent_id"`
-	UserID      string `json:"user_id"`
-	MCPServerID string `json:"mcp_server_id"`
-	Endpoint    string `json:"endpoint"`
+	AgentID string                  `json:"agent_id"`
+	UserID  string                  `json:"user_id"`
+	Apps    []composioBindAppResult `json:"apps"`
 }
 
 // composioManagedKeyName is the stable credentials.name the binding flow upserts
@@ -552,10 +648,66 @@ func composioUserIDFromEndpoint(endpoint string) string {
 	return u.Query().Get("user_id")
 }
 
-// BindAgent assigns a Composio user to an agent: it ensures a Composio MCP
-// server exists for the workspace, then persists the credential +
-// workspace_mcp_servers + agent_mcp_bindings rows the runtime resolver reads.
-// OWNER/ADMIN only.
+// normalizeComposioApps resolves the granted app set from a bind request into a
+// deduped, lower-cased list with a default mode of "full". Priority: explicit
+// apps[] → legacy toolkits[] (each at full) → when both empty, every connected
+// app (from acBySlug) at full. The first occurrence of a toolkit wins.
+func normalizeComposioApps(req composioBindRequest, acBySlug map[string]string) []composioAppScope {
+	var raw []composioAppScope
+	switch {
+	case len(req.Apps) > 0:
+		raw = req.Apps
+	case len(req.Toolkits) > 0:
+		for _, t := range req.Toolkits {
+			raw = append(raw, composioAppScope{Toolkit: t, Mode: "full"})
+		}
+	default:
+		slugs := make([]string, 0, len(acBySlug))
+		for s := range acBySlug {
+			slugs = append(slugs, s)
+		}
+		sort.Strings(slugs)
+		for _, s := range slugs {
+			raw = append(raw, composioAppScope{Toolkit: s, Mode: "full"})
+		}
+	}
+	seen := map[string]struct{}{}
+	out := make([]composioAppScope, 0, len(raw))
+	for _, a := range raw {
+		slug := strings.ToLower(strings.TrimSpace(a.Toolkit))
+		if slug == "" {
+			continue
+		}
+		if _, dup := seen[slug]; dup {
+			continue
+		}
+		seen[slug] = struct{}{}
+		mode := strings.ToLower(strings.TrimSpace(a.Mode))
+		if mode == "" {
+			mode = "full"
+		}
+		out = append(out, composioAppScope{Toolkit: slug, Mode: mode, Tools: a.Tools})
+	}
+	return out
+}
+
+// composioResolvedApp is one granted app after its Composio MCP server has been
+// provisioned, carrying everything the DB transaction needs.
+type composioResolvedApp struct {
+	toolkit   string
+	mode      string
+	serverRow string // workspace_mcp_servers.name ("composio-<agentID>-<toolkit>")
+	display   string
+	endpoint  string
+}
+
+// BindAgent grants an agent PER-APP, tool-scoped access to a Composio user's
+// connected apps. For each granted app it provisions (find-or-create) a Composio
+// MCP server scoped to THAT app's auth config with an allowed_tools set matching
+// the requested mode (full → all tools, read → the app's read-ish tools, custom →
+// the picked tools), then persists the workspace_mcp_servers + agent_mcp_bindings
+// rows the runtime resolver reads. Apps the agent previously had but that aren't
+// in this request are removed (de-selection). OWNER/ADMIN only.
 func (h *ComposioHandler) BindAgent(w http.ResponseWriter, r *http.Request) {
 	if !requireRole(w, r, "manage") {
 		return
@@ -572,7 +724,7 @@ func (h *ComposioHandler) BindAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	client, _ := h.resolveClient(r)
-	key, baseURL, ok := h.resolveKey(r)
+	key, _, ok := h.resolveKey(r)
 	if client == nil || !ok {
 		writeProblem(w, r, http.StatusBadRequest, "Composio is not configured (set an API key first)")
 		return
@@ -605,80 +757,141 @@ func (h *ComposioHandler) BindAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Gather the auth-config ids the MCP server should expose. An EMPTY toolkits
-	// list means "all of the workspace's auth configs" (every connected app) —
-	// NOT zero; the filter below only narrows when at least one toolkit is named,
-	// so the agent then sees just the requested apps.
+	// Auth-config catalog, indexed by toolkit slug. Used to resolve each app's
+	// auth_config_id (creating a managed config on the fly when missing) and, for
+	// the implicit "all apps" case, to enumerate the connected apps.
 	authConfigs, err := client.ListAuthConfigs(ctx)
 	if err != nil {
 		h.logger.Error("composio: list auth configs", "error", err)
 		writeProblem(w, r, http.StatusBadGateway, "Composio API error")
 		return
 	}
-	wantToolkit := map[string]struct{}{}
-	for _, t := range req.Toolkits {
-		if t = strings.TrimSpace(strings.ToLower(t)); t != "" {
-			wantToolkit[t] = struct{}{}
-		}
-	}
-	var authConfigIDs []string
+	acBySlug := map[string]string{}
 	for _, ac := range authConfigs {
-		if len(wantToolkit) > 0 {
-			if _, keep := wantToolkit[strings.ToLower(ac.Toolkit.Slug)]; !keep {
-				continue
+		slug := strings.ToLower(ac.Toolkit.Slug)
+		if slug != "" {
+			if _, dup := acBySlug[slug]; !dup {
+				acBySlug[slug] = ac.ID
 			}
 		}
-		authConfigIDs = append(authConfigIDs, ac.ID)
 	}
-	if len(authConfigIDs) == 0 {
-		writeProblem(w, r, http.StatusBadRequest, "no matching Composio auth configs (connect an app first)")
+
+	apps := normalizeComposioApps(req, acBySlug)
+	if len(apps) == 0 {
+		writeProblem(w, r, http.StatusBadRequest, "no apps to bind (connect an app first)")
 		return
 	}
 
-	// Composio MCP server: one per (workspace, toolkit-set), named within
-	// Composio's 30-char [a-zA-Z0-9- ] limit. Restricting an agent to specific
-	// apps MUST yield a different server (different auth configs) — a single
-	// workspace-wide server would expose every connected app regardless of the
-	// requested restriction.
-	wsShort := wsID
-	if len(wsShort) > 12 {
-		wsShort = wsShort[len(wsShort)-12:]
-	}
-	toolkitTag := composioToolkitTag(req.Toolkits)
-	mcpName := "crewship-" + wsShort + "-" + toolkitTag
+	// Per-app: resolve auth config + allowed_tools, then find-or-create a
+	// scoped Composio MCP server. All external calls happen BEFORE the DB tx so a
+	// Composio error never leaves a half-written binding.
+	resolved := make([]composioResolvedApp, 0, len(apps))
+	for _, app := range apps {
+		authID := acBySlug[app.Toolkit]
+		if authID == "" {
+			id, cerr := client.CreateManagedAuthConfig(ctx, app.Toolkit, app.Toolkit+"-crewship")
+			if cerr != nil {
+				h.logger.Error("composio: create auth config", "toolkit", app.Toolkit, "error", cerr)
+				writeProblem(w, r, http.StatusBadGateway, "Composio API error (auth config)")
+				return
+			}
+			authID = id
+			acBySlug[app.Toolkit] = id
+		}
 
-	// Find-or-create by that name (reuse avoids leaking duplicate Composio
-	// servers; a list error is non-fatal — fall through to create).
-	var composioServerID string
-	if servers, lerr := client.ListMCPServers(ctx, mcpName); lerr != nil {
-		h.logger.Warn("composio: list mcp servers", "error", lerr)
-	} else {
-		for _, s := range servers {
-			if s.Name == mcpName && s.ID != "" {
-				composioServerID = s.ID
-				break
+		var allowedTools []string
+		switch app.Mode {
+		case "full":
+			allowedTools = nil // empty ⇒ Composio exposes every tool
+		case "read":
+			tools, terr := client.ListAllTools(ctx, app.Toolkit)
+			if terr != nil {
+				h.logger.Error("composio: list all tools", "toolkit", app.Toolkit, "error", terr)
+				writeProblem(w, r, http.StatusBadGateway, "Composio API error (tools)")
+				return
+			}
+			for _, t := range tools {
+				if isReadTool(t.Slug) {
+					allowedTools = append(allowedTools, t.Slug)
+				}
+			}
+			if len(allowedTools) == 0 {
+				writeProblem(w, r, http.StatusBadRequest, "no tools selected for "+app.Toolkit)
+				return
+			}
+		case "custom":
+			tools, terr := client.ListAllTools(ctx, app.Toolkit)
+			if terr != nil {
+				h.logger.Error("composio: list all tools", "toolkit", app.Toolkit, "error", terr)
+				writeProblem(w, r, http.StatusBadGateway, "Composio API error (tools)")
+				return
+			}
+			real := make(map[string]string, len(tools))
+			for _, t := range tools {
+				real[strings.ToUpper(t.Slug)] = t.Slug
+			}
+			seen := map[string]struct{}{}
+			for _, want := range app.Tools {
+				canon, valid := real[strings.ToUpper(strings.TrimSpace(want))]
+				if !valid {
+					continue // reject bogus slugs rather than over-granting
+				}
+				if _, dup := seen[canon]; dup {
+					continue
+				}
+				seen[canon] = struct{}{}
+				allowedTools = append(allowedTools, canon)
+			}
+			if len(allowedTools) == 0 {
+				writeProblem(w, r, http.StatusBadRequest, "no tools selected for "+app.Toolkit)
+				return
+			}
+		default:
+			writeProblem(w, r, http.StatusBadRequest, "invalid mode for "+app.Toolkit+" (use full|read|custom)")
+			return
+		}
+
+		// One Composio MCP server per (workspace, app, scope), name-shaped to
+		// Composio's 30-char limit. Find-or-create by name (a list error is
+		// non-fatal — fall through to create).
+		scopeTag := composioScopeTag(allowedTools)
+		mcpName := composioServerName(wsID, app.Toolkit, scopeTag)
+		var composioServerID string
+		if servers, lerr := client.ListMCPServers(ctx, mcpName); lerr != nil {
+			h.logger.Warn("composio: list mcp servers", "error", lerr)
+		} else {
+			for _, s := range servers {
+				if s.Name == mcpName && s.ID != "" {
+					composioServerID = s.ID
+					break
+				}
 			}
 		}
-	}
-	if composioServerID == "" {
-		id, _, cerr := client.CreateMCPServer(ctx, mcpName, authConfigIDs)
-		if cerr != nil {
-			h.logger.Error("composio: create mcp server", "error", cerr)
+		if composioServerID == "" {
+			id, _, cerr := client.CreateMCPServer(ctx, mcpName, []string{authID}, allowedTools)
+			if cerr != nil {
+				h.logger.Error("composio: create mcp server", "error", cerr)
+				writeProblem(w, r, http.StatusBadGateway, "Composio API error (mcp server)")
+				return
+			}
+			composioServerID = id
+		}
+		if composioServerID == "" {
+			h.logger.Error("composio: mcp server returned empty id")
 			writeProblem(w, r, http.StatusBadGateway, "Composio API error (mcp server)")
 			return
 		}
-		composioServerID = id
-	}
-	if composioServerID == "" {
-		h.logger.Error("composio: mcp server returned empty id")
-		writeProblem(w, r, http.StatusBadGateway, "Composio API error (mcp server)")
-		return
-	}
 
-	// Per-user transport URL — NOT the canonical mcp_url, which 307-redirects to
-	// a path the sidecar's MCP client won't follow. This is what the agent
-	// runtime actually connects to.
-	endpoint := client.MCPUserURL(composioServerID, req.UserID)
+		resolved = append(resolved, composioResolvedApp{
+			toolkit:   app.Toolkit,
+			mode:      app.Mode,
+			serverRow: "composio-" + agentID + "-" + app.Toolkit,
+			display:   "Composio: " + app.Toolkit + " · " + composioModeLabel(app.Mode, len(allowedTools)),
+			// Per-user transport URL — NOT the canonical mcp_url (it 307-redirects
+			// to a path the sidecar's MCP client won't follow).
+			endpoint: client.MCPUserURL(composioServerID, req.UserID),
+		})
+	}
 
 	enc, err := encryption.Encrypt(key)
 	if err != nil {
@@ -686,30 +899,15 @@ func (h *ComposioHandler) BindAgent(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 		return
 	}
-
 	var createdBy any
 	if u := UserFromContext(ctx); u != nil {
 		createdBy = u.ID
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	// Persist all three rows in one transaction: a half-written binding (server
-	// without credential, or binding without server) is worse than none.
-	credID := generateCUID()
-	serverID := generateCUID()
-	bindingID := generateCUID()
-	// One workspace_mcp_servers row PER AGENT (not per user): resolveAgentMCPServers
-	// treats a server that has any binding as opt-in (only bound agents get it),
-	// so a per-agent row keeps each agent's access — and its toolkit restriction —
-	// isolated. A per-user row would be shared by every agent on that user and
-	// collide on the restriction.
-	serverName := "composio-" + agentID
-	toolkitLabel := "all apps"
-	if toolkitTag != "all" {
-		toolkitLabel = strings.Join(req.Toolkits, ", ")
-	}
-	displayName := "Composio: " + req.UserID + " (" + toolkitLabel + ")"
-
+	// One transaction across all apps: the managed credential (once) + a
+	// workspace_mcp_servers row and agent_mcp_bindings row per app, then a sweep
+	// that removes the agent's other (de-selected) composio rows.
 	tx, err := h.db.BeginTx(ctx, nil)
 	if err != nil {
 		h.logger.Error("composio: begin bind tx", "error", err)
@@ -720,6 +918,7 @@ func (h *ComposioHandler) BindAgent(w http.ResponseWriter, r *http.Request) {
 
 	// (1) Credential — upsert on UNIQUE(workspace_id, name); capture the id of
 	// whichever row now holds the key (existing or freshly inserted).
+	credID := generateCUID()
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO credentials (id, workspace_id, name, encrypted_value, type, provider, scope, created_by, created_at, updated_at)
 		VALUES (?, ?, ?, ?, 'API_KEY', 'CUSTOM', 'WORKSPACE', ?, ?, ?)
@@ -743,47 +942,95 @@ func (h *ComposioHandler) BindAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// (2) workspace_mcp_servers — upsert on UNIQUE(workspace_id, name); refresh
-	// the endpoint (the URL changes each time we create a fresh MCP server) and
-	// clear any soft-delete so the FK trigger on (3) sees a live row.
-	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO workspace_mcp_servers (id, workspace_id, name, display_name, transport, endpoint, icon, enabled, created_at, updated_at)
-		VALUES (?, ?, ?, ?, 'streamable-http', ?, 'composio', 1, ?, ?)
-		ON CONFLICT(workspace_id, name) DO UPDATE SET
-			display_name = excluded.display_name,
-			transport    = excluded.transport,
-			endpoint     = excluded.endpoint,
-			icon         = excluded.icon,
-			enabled      = 1,
-			deleted_at   = NULL,
-			updated_at   = excluded.updated_at`,
-		serverID, wsID, serverName, displayName, endpoint, now, now); err != nil {
-		h.logger.Error("composio: upsert mcp server row", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
-		return
-	}
-	if err := tx.QueryRowContext(ctx,
-		`SELECT id FROM workspace_mcp_servers WHERE workspace_id = ? AND name = ?`, wsID, serverName).Scan(&serverID); err != nil {
-		h.logger.Error("composio: read mcp server id", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
-		return
+	// (2)+(3) Per app: workspace_mcp_servers row (upsert) then its agent binding.
+	grantedNames := make([]string, 0, len(resolved))
+	for _, ra := range resolved {
+		serverID := generateCUID()
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO workspace_mcp_servers (id, workspace_id, name, display_name, transport, endpoint, icon, enabled, created_at, updated_at)
+			VALUES (?, ?, ?, ?, 'streamable-http', ?, 'composio', 1, ?, ?)
+			ON CONFLICT(workspace_id, name) DO UPDATE SET
+				display_name = excluded.display_name,
+				transport    = excluded.transport,
+				endpoint     = excluded.endpoint,
+				icon         = excluded.icon,
+				enabled      = 1,
+				deleted_at   = NULL,
+				updated_at   = excluded.updated_at`,
+			serverID, wsID, ra.serverRow, ra.display, ra.endpoint, now, now); err != nil {
+			h.logger.Error("composio: upsert mcp server row", "error", err)
+			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			return
+		}
+		if err := tx.QueryRowContext(ctx,
+			`SELECT id FROM workspace_mcp_servers WHERE workspace_id = ? AND name = ?`, wsID, ra.serverRow).Scan(&serverID); err != nil {
+			h.logger.Error("composio: read mcp server id", "error", err)
+			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			return
+		}
+		bindingID := generateCUID()
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO agent_mcp_bindings (id, agent_id, mcp_server_id, mcp_server_scope, credential_id, cred_type, cred_header, enabled, created_at)
+			VALUES (?, ?, ?, 'workspace', ?, 'api_key', 'x-api-key', 1, ?)
+			ON CONFLICT(agent_id, mcp_server_id, mcp_server_scope) DO UPDATE SET
+				credential_id = excluded.credential_id,
+				cred_type     = excluded.cred_type,
+				cred_header   = excluded.cred_header,
+				enabled       = 1`,
+			bindingID, agentID, serverID, credID, now); err != nil {
+			h.logger.Error("composio: upsert agent binding", "error", err)
+			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			return
+		}
+		grantedNames = append(grantedNames, ra.serverRow)
 	}
 
-	// (3) agent_mcp_bindings — upsert on UNIQUE(agent_id, mcp_server_id,
-	// mcp_server_scope). cred_type 'api_key' + cred_header 'x-api-key' is what
-	// makes the sidecar inject the Composio key as the x-api-key header.
-	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO agent_mcp_bindings (id, agent_id, mcp_server_id, mcp_server_scope, credential_id, cred_type, cred_header, enabled, created_at)
-		VALUES (?, ?, ?, 'workspace', ?, 'api_key', 'x-api-key', 1, ?)
-		ON CONFLICT(agent_id, mcp_server_id, mcp_server_scope) DO UPDATE SET
-			credential_id = excluded.credential_id,
-			cred_type     = excluded.cred_type,
-			cred_header   = excluded.cred_header,
-			enabled       = 1`,
-		bindingID, agentID, serverID, credID, now); err != nil {
-		h.logger.Error("composio: upsert agent binding", "error", err)
+	// (4) De-selection sweep: remove the agent's OTHER composio rows + bindings
+	// (per-app names "composio-<agentID>-<…>" plus the legacy single-row name
+	// "composio-<agentID>"), excluding the granted set. Delete bindings before
+	// server rows so the polymorphic-FK trigger stays satisfied.
+	staleArgs := []any{wsID, "composio-" + agentID, "composio-" + agentID + "-%"}
+	notIn := ""
+	if len(grantedNames) > 0 {
+		ph := make([]string, len(grantedNames))
+		for i, n := range grantedNames {
+			ph[i] = "?"
+			staleArgs = append(staleArgs, n)
+		}
+		notIn = " AND name NOT IN (" + strings.Join(ph, ",") + ")"
+	}
+	staleRows, err := tx.QueryContext(ctx,
+		`SELECT id FROM workspace_mcp_servers WHERE workspace_id = ? AND icon = 'composio' AND (name = ? OR name LIKE ?)`+notIn, staleArgs...)
+	if err != nil {
+		h.logger.Error("composio: query stale servers", "error", err)
 		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 		return
+	}
+	var staleIDs []string
+	for staleRows.Next() {
+		var id string
+		if err := staleRows.Scan(&id); err != nil {
+			staleRows.Close()
+			h.logger.Error("composio: scan stale server", "error", err)
+			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			return
+		}
+		staleIDs = append(staleIDs, id)
+	}
+	staleRows.Close()
+	for _, id := range staleIDs {
+		if _, err := tx.ExecContext(ctx,
+			`DELETE FROM agent_mcp_bindings WHERE agent_id = ? AND mcp_server_id = ?`, agentID, id); err != nil {
+			h.logger.Error("composio: delete stale binding", "error", err)
+			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			return
+		}
+		if _, err := tx.ExecContext(ctx,
+			`DELETE FROM workspace_mcp_servers WHERE id = ? AND workspace_id = ?`, id, wsID); err != nil {
+			h.logger.Error("composio: delete stale server", "error", err)
+			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			return
+		}
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -791,22 +1038,24 @@ func (h *ComposioHandler) BindAgent(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 		return
 	}
-	_ = baseURL // baseURL is captured for parity with resolveClient; the URL the
-	// agent actually hits is the Composio-returned mcpURL, not the API base.
 
+	respApps := make([]composioBindAppResult, 0, len(resolved))
+	for _, ra := range resolved {
+		respApps = append(respApps, composioBindAppResult{Toolkit: ra.toolkit, Mode: ra.mode, Endpoint: ra.endpoint})
+	}
 	writeJSON(w, http.StatusOK, composioBindResponse{
-		AgentID:     agentID,
-		UserID:      req.UserID,
-		MCPServerID: serverID,
-		Endpoint:    endpoint,
+		AgentID: agentID,
+		UserID:  req.UserID,
+		Apps:    respApps,
 	})
 }
 
-// UnbindAgent removes an agent's Composio binding for a user. It deletes the
-// agent_mcp_bindings row, and the workspace_mcp_servers row too when no other
-// agent still binds it. OWNER/ADMIN only.
+// UnbindAgent removes an agent's Composio access. With ?toolkit=<slug> it removes
+// just that one app's row + binding; without it, it removes ALL of the agent's
+// composio rows + bindings. Hard-deletes (bindings first, then server rows, to
+// respect the polymorphic-FK trigger). OWNER/ADMIN only.
 //
-// DELETE /api/v1/integrations/composio/agents/{agentId}/bind?user_id=...
+// DELETE /api/v1/integrations/composio/agents/{agentId}/bind[?toolkit=...]
 func (h *ComposioHandler) UnbindAgent(w http.ResponseWriter, r *http.Request) {
 	if !requireRole(w, r, "manage") {
 		return
@@ -817,29 +1066,49 @@ func (h *ComposioHandler) UnbindAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	agentID := r.PathValue("agentId")
-	userID := strings.TrimSpace(r.URL.Query().Get("user_id"))
-	if agentID == "" || userID == "" {
-		writeProblem(w, r, http.StatusBadRequest, "agent id and user_id are required")
+	if agentID == "" {
+		writeProblem(w, r, http.StatusBadRequest, "agent id required")
 		return
 	}
-	// The Composio server row is per-agent (see BindAgent); user_id is accepted
-	// for API symmetry but the agent has a single Composio binding to remove.
-	_ = userID
-	serverName := "composio-" + agentID
+	toolkit := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("toolkit")))
 
 	ctx := r.Context()
-	// Resolve the workspace server row (scoped to this workspace) so we never
-	// touch another workspace's binding even if ids were guessed.
-	var serverID string
-	err := h.db.QueryRowContext(ctx,
-		`SELECT id FROM workspace_mcp_servers WHERE workspace_id = ? AND name = ?`, wsID, serverName).Scan(&serverID)
-	if errors.Is(err, sql.ErrNoRows) {
-		writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
-		return
+	// Resolve the agent's composio server rows (scoped to this workspace so we
+	// never touch another workspace's rows). With a toolkit filter, match only
+	// that app's row; otherwise every composio row for the agent (per-app names
+	// plus the legacy single-row name).
+	var (
+		rows *sql.Rows
+		err  error
+	)
+	if toolkit != "" {
+		rows, err = h.db.QueryContext(ctx,
+			`SELECT id FROM workspace_mcp_servers WHERE workspace_id = ? AND icon = 'composio' AND name = ?`,
+			wsID, "composio-"+agentID+"-"+toolkit)
+	} else {
+		rows, err = h.db.QueryContext(ctx,
+			`SELECT id FROM workspace_mcp_servers WHERE workspace_id = ? AND icon = 'composio' AND (name = ? OR name LIKE ?)`,
+			wsID, "composio-"+agentID, "composio-"+agentID+"-%")
 	}
 	if err != nil {
-		h.logger.Error("composio: lookup unbind server", "error", err)
+		h.logger.Error("composio: lookup unbind servers", "error", err)
 		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	var serverIDs []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			h.logger.Error("composio: scan unbind server", "error", err)
+			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			return
+		}
+		serverIDs = append(serverIDs, id)
+	}
+	rows.Close()
+	if len(serverIDs) == 0 {
+		writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 		return
 	}
 
@@ -851,29 +1120,17 @@ func (h *ComposioHandler) UnbindAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback()
 
-	if _, err := tx.ExecContext(ctx,
-		`DELETE FROM agent_mcp_bindings WHERE agent_id = ? AND mcp_server_id = ? AND mcp_server_scope = 'workspace'`,
-		agentID, serverID); err != nil {
-		h.logger.Error("composio: delete agent binding", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
-		return
-	}
-
-	// Soft-delete the workspace server if no agent binds it anymore — keeps the
-	// per-user server from lingering once its last agent is unbound.
-	var remaining int
-	if err := tx.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM agent_mcp_bindings WHERE mcp_server_id = ? AND mcp_server_scope = 'workspace'`,
-		serverID).Scan(&remaining); err != nil {
-		h.logger.Error("composio: count remaining bindings", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
-		return
-	}
-	if remaining == 0 {
+	for _, id := range serverIDs {
 		if _, err := tx.ExecContext(ctx,
-			`UPDATE workspace_mcp_servers SET deleted_at = ?, updated_at = ? WHERE id = ? AND workspace_id = ?`,
-			time.Now().UTC().Format(time.RFC3339), time.Now().UTC().Format(time.RFC3339), serverID, wsID); err != nil {
-			h.logger.Error("composio: soft-delete mcp server", "error", err)
+			`DELETE FROM agent_mcp_bindings WHERE agent_id = ? AND mcp_server_id = ? AND mcp_server_scope = 'workspace'`,
+			agentID, id); err != nil {
+			h.logger.Error("composio: delete agent binding", "error", err)
+			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			return
+		}
+		if _, err := tx.ExecContext(ctx,
+			`DELETE FROM workspace_mcp_servers WHERE id = ? AND workspace_id = ?`, id, wsID); err != nil {
+			h.logger.Error("composio: delete mcp server", "error", err)
 			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 			return
 		}
@@ -887,8 +1144,10 @@ func (h *ComposioHandler) UnbindAgent(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
-// composioAgentBinding is one Composio binding on an agent (user_id + endpoint).
+// composioAgentBinding is one Composio app binding on an agent.
 type composioAgentBinding struct {
+	Toolkit  string `json:"toolkit"`
+	Mode     string `json:"mode"`
 	UserID   string `json:"user_id"`
 	Endpoint string `json:"endpoint"`
 }
@@ -898,8 +1157,9 @@ type composioListBindingsResponse struct {
 	Bindings []composioAgentBinding `json:"bindings"`
 }
 
-// ListAgentBindings returns the agent's Composio binding(s): the user_id (derived
-// from the server endpoint) and the endpoint. Read-gated.
+// ListAgentBindings returns the agent's per-app Composio bindings: the toolkit
+// (parsed from the server-row name), the scope mode (parsed from the display
+// name), the user_id (from the endpoint), and the endpoint. Read-gated.
 //
 // GET /api/v1/integrations/composio/agents/{agentId}/bind
 func (h *ComposioHandler) ListAgentBindings(w http.ResponseWriter, r *http.Request) {
@@ -913,9 +1173,10 @@ func (h *ComposioHandler) ListAgentBindings(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Composio-managed servers carry icon 'composio' and name 'composio-<user>'.
+	// Composio-managed servers carry icon 'composio' and per-app names
+	// 'composio-<agentID>-<toolkit>' (legacy: 'composio-<agentID>').
 	rows, err := h.db.QueryContext(r.Context(), `
-		SELECT ws.endpoint, ws.name
+		SELECT ws.endpoint, ws.name, ws.display_name
 		FROM agent_mcp_bindings b
 		JOIN workspace_mcp_servers ws ON ws.id = b.mcp_server_id
 		WHERE b.agent_id = ? AND b.mcp_server_scope = 'workspace'
@@ -928,19 +1189,25 @@ func (h *ComposioHandler) ListAgentBindings(w http.ResponseWriter, r *http.Reque
 	}
 	defer rows.Close()
 
+	prefix := "composio-" + agentID + "-"
 	bindings := []composioAgentBinding{}
 	for rows.Next() {
-		var endpoint sql.NullString
+		var endpoint, display sql.NullString
 		var name string
-		if err := rows.Scan(&endpoint, &name); err != nil {
+		if err := rows.Scan(&endpoint, &name, &display); err != nil {
 			h.logger.Error("composio: scan agent binding", "error", err)
 			continue
 		}
-		userID := composioUserIDFromEndpoint(endpoint.String)
-		if userID == "" {
-			userID = strings.TrimPrefix(name, "composio-")
+		toolkit := ""
+		if strings.HasPrefix(name, prefix) {
+			toolkit = strings.TrimPrefix(name, prefix)
 		}
-		bindings = append(bindings, composioAgentBinding{UserID: userID, Endpoint: endpoint.String})
+		bindings = append(bindings, composioAgentBinding{
+			Toolkit:  toolkit,
+			Mode:     composioModeFromDisplay(display.String),
+			UserID:   composioUserIDFromEndpoint(endpoint.String),
+			Endpoint: endpoint.String,
+		})
 	}
 	if err := rows.Err(); err != nil {
 		h.logger.Error("composio: iterate agent bindings", "error", err)

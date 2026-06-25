@@ -209,6 +209,45 @@ func (c *Client) ListTools(ctx context.Context, toolkitSlug, search string, limi
 	return ToolPage{Items: env.Items, TotalItems: env.TotalItems}, nil
 }
 
+// listAllToolsHardCap bounds ListAllTools so a misbehaving cursor (or a toolkit
+// with thousands of tools) can't page forever. The largest real toolkit today
+// exposes ~850 tools, so 1000 covers the catalog while staying defensive.
+const listAllToolsHardCap = 1000
+
+// ListAllTools returns EVERY tool a toolkit exposes by following Composio's
+// `next_cursor` pagination (100 per page) until exhausted or the hard cap is
+// hit. The per-app binding flow uses it to resolve the Read-only tool set
+// (filtering by read verb) and to validate Custom tool slugs against the
+// toolkit's real tools. Mirrors ListTools but aggregates all pages.
+func (c *Client) ListAllTools(ctx context.Context, toolkitSlug string) ([]Tool, error) {
+	var all []Tool
+	cursor := ""
+	for {
+		q := url.Values{}
+		if toolkitSlug != "" {
+			q.Set("toolkit_slug", toolkitSlug)
+		}
+		q.Set("limit", "100")
+		if cursor != "" {
+			q.Set("cursor", cursor)
+		}
+		path := "/api/v3.1/tools?" + q.Encode()
+		var env struct {
+			Items      []Tool `json:"items"`
+			NextCursor string `json:"next_cursor"`
+		}
+		if err := c.get(ctx, path, &env); err != nil {
+			return nil, err
+		}
+		all = append(all, env.Items...)
+		if env.NextCursor == "" || len(all) >= listAllToolsHardCap {
+			break
+		}
+		cursor = env.NextCursor
+	}
+	return all, nil
+}
+
 // TriggerType is one available event subscription a toolkit exposes
 // (GMAIL_NEW_MESSAGE, GITHUB_PR_OPENED, …). Type is the delivery mechanism
 // Composio uses ("webhook" event-based / "poll" scheduled check). Distinct
@@ -449,10 +488,20 @@ func (c *Client) ListMCPServers(ctx context.Context, name string) ([]MCPServer, 
 // a 400); the caller is responsible for shaping it. managed_auth_via_composio is
 // always set so the server brokers credentials through Composio rather than
 // expecting the caller to forward per-account tokens.
-func (c *Client) CreateMCPServer(ctx context.Context, name string, authConfigIDs []string) (string, string, error) {
+//
+// allowedTools restricts the server to a specific set of tool slugs: an EMPTY
+// (or nil) slice exposes ALL of the auth configs' tools, while a non-empty slice
+// exposes only the listed ones. This is how per-app Read-only / Custom scopes
+// are enforced — a "full" app passes nil so we never enumerate its (potentially
+// 800+) tools.
+func (c *Client) CreateMCPServer(ctx context.Context, name string, authConfigIDs, allowedTools []string) (string, string, error) {
+	if allowedTools == nil {
+		allowedTools = []string{}
+	}
 	body := map[string]any{
 		"name":                      name,
 		"auth_config_ids":           authConfigIDs,
+		"allowed_tools":             allowedTools,
 		"managed_auth_via_composio": true,
 	}
 	var out struct {

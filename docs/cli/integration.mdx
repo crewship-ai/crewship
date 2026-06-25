@@ -40,9 +40,9 @@ crewship intg <subcommand> [flags]
 | `integration composio key show` | Show whether/how Composio is configured (never prints the key). |
 | `integration composio key set` | Set & validate the workspace API key (`--key`, `--base-url`, `--label`); stored encrypted. |
 | `integration composio key remove` | Remove the workspace key (revert to the server env, if any). |
-| `integration composio bind <agent>` | Bind a Composio `user_id` to an agent (per-user MCP server at runtime). Requires `--user <id>`; optional `--toolkits a,b` to restrict apps. |
-| `integration composio unbind <agent>` | Remove an agent's Composio user binding. Requires `--user <id>`. |
-| `integration composio bindings <agent>` | Show an agent's Composio user binding(s). |
+| `integration composio bind <agent>` | Bind a Composio `user_id` to an agent with **per-app tool scope**. Requires `--user <id>`; repeatable `--app toolkit[:mode[:t1,t2]]` (mode = `full`\|`read`\|`custom`), e.g. `--app gmail:read --app github:full --app gmail:custom:GMAIL_FETCH_EMAILS,GMAIL_LIST_THREADS`. `--toolkits a,b` is a shorthand for each app at `full`. Re-binding replaces the app set. |
+| `integration composio unbind <agent>` | Remove an agent's Composio access. `--app <toolkit>` removes one app; omit it to remove all. |
+| `integration composio bindings <agent>` | Show an agent's per-app Composio bindings (toolkit, mode, user, endpoint). |
 | `integration composio account revoke <account-id>` | De-authorize a connected account at the provider (must be re-connected to use again). |
 | `integration composio account refresh <account-id>` | Refresh a connected account's credentials. |
 | `integration composio account remove <account-id>` | Permanently delete a connected account at the provider. |

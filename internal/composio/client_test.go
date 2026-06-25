@@ -250,6 +250,71 @@ func TestClient_ListMCPServers(t *testing.T) {
 	}
 }
 
+func TestClient_ListAllTools(t *testing.T) {
+	var pages int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		cursor := r.URL.Query().Get("cursor")
+		if r.URL.Query().Get("toolkit_slug") != "gmail" || r.URL.Query().Get("limit") != "100" {
+			t.Errorf("query = %q, want toolkit_slug=gmail & limit=100", r.URL.RawQuery)
+		}
+		pages++
+		// First page returns a next_cursor; second page exhausts it.
+		if cursor == "" {
+			_, _ = w.Write([]byte(`{"items":[{"slug":"GMAIL_FETCH_EMAILS","toolkit":{"slug":"gmail"}}],"next_cursor":"c2"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"items":[{"slug":"GMAIL_SEND_EMAIL","toolkit":{"slug":"gmail"}}]}`))
+	}))
+	t.Cleanup(srv.Close)
+	c := NewClient("ak_test", srv.URL)
+
+	tools, err := c.ListAllTools(context.Background(), "gmail")
+	if err != nil {
+		t.Fatalf("ListAllTools: %v", err)
+	}
+	if pages != 2 {
+		t.Errorf("fetched %d pages, want 2 (followed next_cursor)", pages)
+	}
+	if len(tools) != 2 || tools[0].Slug != "GMAIL_FETCH_EMAILS" || tools[1].Slug != "GMAIL_SEND_EMAIL" {
+		t.Errorf("tools = %+v, want both pages aggregated", tools)
+	}
+}
+
+func TestClient_CreateMCPServer_AllowedTools(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"mcp_1","mcp_url":"https://mcp.composio.dev/server/mcp_1"}`))
+	}))
+	t.Cleanup(srv.Close)
+	c := NewClient("ak_test", srv.URL)
+
+	// Non-empty restriction is forwarded verbatim.
+	id, mcpURL, err := c.CreateMCPServer(context.Background(), "crewship-x", []string{"ac_gm"}, []string{"GMAIL_FETCH_EMAILS"})
+	if err != nil {
+		t.Fatalf("CreateMCPServer: %v", err)
+	}
+	if id != "mcp_1" || mcpURL == "" {
+		t.Errorf("create returned id=%q url=%q", id, mcpURL)
+	}
+	at, ok := gotBody["allowed_tools"].([]any)
+	if !ok || len(at) != 1 || at[0] != "GMAIL_FETCH_EMAILS" {
+		t.Errorf("allowed_tools = %v, want [GMAIL_FETCH_EMAILS]", gotBody["allowed_tools"])
+	}
+
+	// nil (full scope) marshals to an empty array (Composio: empty ⇒ all tools).
+	gotBody = nil
+	if _, _, err := c.CreateMCPServer(context.Background(), "crewship-y", []string{"ac_gm"}, nil); err != nil {
+		t.Fatalf("CreateMCPServer (full): %v", err)
+	}
+	at, ok = gotBody["allowed_tools"].([]any)
+	if !ok || len(at) != 0 {
+		t.Errorf("full-scope allowed_tools = %v, want empty array", gotBody["allowed_tools"])
+	}
+}
+
 func TestClient_DefaultBaseURL(t *testing.T) {
 	c := NewClient("ak_test", "")
 	if c.baseURL != DefaultBaseURL {

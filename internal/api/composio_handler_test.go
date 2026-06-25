@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -41,7 +42,21 @@ func fakeComposioAPI(t *testing.T, authConfigs, connectedAccounts string) *httpt
 		case "/api/v3/toolkits":
 			_, _ = w.Write([]byte(`{"total_items":1047,"items":[{"slug":"github","name":"GitHub","meta":{"description":"x","logo":"l","tools_count":846,"categories":[{"id":"developer-tools","name":"developer tools"}]}}]}`))
 		case "/api/v3.1/tools":
-			_, _ = w.Write([]byte(`{"total_items":846,"items":[{"slug":"GITHUB_CREATE_AN_ISSUE","name":"Create an issue","description":"Create a new issue","toolkit":{"slug":"github"}}]}`))
+			// Branch on toolkit_slug so gmail returns a read+write mix (the bind
+			// read/custom paths resolve their allowed_tools from here) while github
+			// keeps the single tool the catalog tests assert. No next_cursor ⇒
+			// ListAllTools stops after one page.
+			switch r.URL.Query().Get("toolkit_slug") {
+			case "gmail":
+				_, _ = w.Write([]byte(`{"total_items":4,"items":[
+					{"slug":"GMAIL_FETCH_EMAILS","name":"Fetch emails","description":"read","toolkit":{"slug":"gmail"}},
+					{"slug":"GMAIL_LIST_THREADS","name":"List threads","description":"read","toolkit":{"slug":"gmail"}},
+					{"slug":"GMAIL_SEND_EMAIL","name":"Send email","description":"write","toolkit":{"slug":"gmail"}},
+					{"slug":"GMAIL_CREATE_EMAIL_DRAFT","name":"Create draft","description":"write","toolkit":{"slug":"gmail"}}
+				]}`))
+			default:
+				_, _ = w.Write([]byte(`{"total_items":846,"items":[{"slug":"GITHUB_CREATE_AN_ISSUE","name":"Create an issue","description":"Create a new issue","toolkit":{"slug":"github"}}]}`))
+			}
 		case "/api/v3.1/triggers_types":
 			_, _ = w.Write([]byte(`{"total_items":12,"items":[{"slug":"GMAIL_NEW_GMAIL_MESSAGE","name":"New Gmail message","description":"New email arrives","type":"poll","toolkit":{"slug":"gmail"}}]}`))
 		case "/api/v3.1/trigger_instances/active":
@@ -483,19 +498,24 @@ func TestComposio_BindAgent_PersistsRows(t *testing.T) {
 	if got.AgentID != agentID || got.UserID != "user-42" {
 		t.Errorf("unexpected bind resp: %+v", got)
 	}
+	// Empty body ⇒ every connected app (here just gmail) bound at full scope.
+	if len(got.Apps) != 1 || got.Apps[0].Toolkit != "gmail" || got.Apps[0].Mode != "full" {
+		t.Fatalf("unexpected apps in bind resp: %+v", got.Apps)
+	}
 	// Endpoint is the per-user MCP *transport* URL (…/v3/mcp/<serverID>/mcp),
 	// built from the client's base host — not the canonical mcp_url.
 	wantEndpoint := srv.URL + "/v3/mcp/mcp_srv_1/mcp?user_id=user-42"
-	if got.Endpoint != wantEndpoint {
-		t.Errorf("endpoint = %q, want %q", got.Endpoint, wantEndpoint)
+	if got.Apps[0].Endpoint != wantEndpoint {
+		t.Errorf("endpoint = %q, want %q", got.Apps[0].Endpoint, wantEndpoint)
 	}
 
-	// workspace_mcp_servers row exists PER AGENT (composio-<agentID>),
+	// workspace_mcp_servers row exists PER (agent, app): composio-<agentID>-gmail,
 	// streamable-http.
+	rowName := "composio-" + agentID + "-gmail"
 	var srvName, transport, endpoint, icon string
 	var enabled int
 	if err := db.QueryRow(`SELECT name, transport, endpoint, icon, enabled
-		FROM workspace_mcp_servers WHERE workspace_id = ? AND name = ?`, wsID, "composio-"+agentID).
+		FROM workspace_mcp_servers WHERE workspace_id = ? AND name = ?`, wsID, rowName).
 		Scan(&srvName, &transport, &endpoint, &icon, &enabled); err != nil {
 		t.Fatalf("query workspace_mcp_servers: %v", err)
 	}
@@ -537,7 +557,7 @@ func TestComposio_BindAgent_PersistsRows(t *testing.T) {
 		t.Fatalf("re-bind status=%d body=%s", rr2.Code, rr2.Body.String())
 	}
 	var serverCount, bindCount int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM workspace_mcp_servers WHERE workspace_id = ? AND name = ?`, wsID, "composio-"+agentID).Scan(&serverCount); err != nil {
+	if err := db.QueryRow(`SELECT COUNT(*) FROM workspace_mcp_servers WHERE workspace_id = ? AND name = ?`, wsID, rowName).Scan(&serverCount); err != nil {
 		t.Fatalf("count servers: %v", err)
 	}
 	if err := db.QueryRow(`SELECT COUNT(*) FROM agent_mcp_bindings WHERE agent_id = ?`, agentID).Scan(&bindCount); err != nil {
@@ -595,6 +615,284 @@ func TestComposio_BindAgent_RequiresUserID(t *testing.T) {
 	h.BindAgent(rr, req)
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("status=%d, want 400", rr.Code)
+	}
+}
+
+// composioBindFake is a stateful Composio fake for the per-app bind tests. It
+// serves auth configs + gmail/github tools, implements find-or-create for MCP
+// servers, and records the allowed_tools each create POST received (keyed by
+// server name) so tests can assert how a mode maps to allowed_tools.
+type composioBindFake struct {
+	srv           *httptest.Server
+	mu            sync.Mutex
+	creates       int
+	allowedByName map[string][]string // server name → allowed_tools posted
+	idByName      map[string]string   // server name → assigned id (find-or-create)
+}
+
+func newComposioBindFake(t *testing.T, authConfigs string) *composioBindFake {
+	t.Helper()
+	f := &composioBindFake{allowedByName: map[string][]string{}, idByName: map[string]string{}}
+	f.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/api/v3/auth_configs" && r.Method == http.MethodGet:
+			_, _ = w.Write([]byte(authConfigs))
+		case r.URL.Path == "/api/v3.1/tools" && r.Method == http.MethodGet:
+			switch r.URL.Query().Get("toolkit_slug") {
+			case "gmail":
+				_, _ = w.Write([]byte(`{"items":[
+					{"slug":"GMAIL_FETCH_EMAILS","name":"Fetch","description":"r","toolkit":{"slug":"gmail"}},
+					{"slug":"GMAIL_LIST_THREADS","name":"List","description":"r","toolkit":{"slug":"gmail"}},
+					{"slug":"GMAIL_SEND_EMAIL","name":"Send","description":"w","toolkit":{"slug":"gmail"}},
+					{"slug":"GMAIL_CREATE_EMAIL_DRAFT","name":"Draft","description":"w","toolkit":{"slug":"gmail"}}
+				]}`))
+			default:
+				_, _ = w.Write([]byte(`{"items":[{"slug":"GITHUB_CREATE_AN_ISSUE","name":"Issue","description":"w","toolkit":{"slug":"github"}}]}`))
+			}
+		case r.URL.Path == "/api/v3.1/mcp/servers" && r.Method == http.MethodGet:
+			name := r.URL.Query().Get("name")
+			f.mu.Lock()
+			id := f.idByName[name]
+			f.mu.Unlock()
+			if id == "" {
+				_, _ = w.Write([]byte(`{"items":[]}`))
+				return
+			}
+			_, _ = w.Write([]byte(fmt.Sprintf(`{"items":[{"id":%q,"name":%q,"mcp_url":"https://mcp.composio.dev/server/%s"}]}`, id, name, id)))
+		case r.URL.Path == "/api/v3.1/mcp/servers" && r.Method == http.MethodPost:
+			var body struct {
+				Name         string   `json:"name"`
+				AllowedTools []string `json:"allowed_tools"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			f.mu.Lock()
+			f.creates++
+			id := fmt.Sprintf("mcp_srv_%d", f.creates)
+			f.idByName[body.Name] = id
+			f.allowedByName[body.Name] = body.AllowedTools
+			f.mu.Unlock()
+			_, _ = w.Write([]byte(fmt.Sprintf(`{"id":%q,"mcp_url":"https://mcp.composio.dev/server/%s"}`, id, id)))
+		default:
+			http.Error(w, "not found", http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(f.srv.Close)
+	return f
+}
+
+// allowed returns the allowed_tools recorded for a server name (the toolkit's
+// scope tag is part of the name; tests look it up by the composioServerName the
+// handler would compute).
+func (f *composioBindFake) allowed(name string) ([]string, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	v, ok := f.allowedByName[name]
+	return v, ok
+}
+
+// gmailGithubAuthConfigs is the auth-config catalog the per-app bind tests use.
+const gmailGithubAuthConfigs = `{"items":[
+	{"id":"ac_gm","name":"gmail-x","status":"ENABLED","toolkit":{"slug":"gmail"}},
+	{"id":"ac_gh","name":"github-x","status":"ENABLED","toolkit":{"slug":"github"}}
+]}`
+
+func seedComposioBindAgent(t *testing.T, db *sql.DB, wsID, agentID string) {
+	t.Helper()
+	if _, err := db.Exec(`INSERT INTO agents (id, workspace_id, name, slug) VALUES (?, ?, 'Binder', ?)`, agentID, wsID, agentID); err != nil {
+		t.Fatalf("insert agent: %v", err)
+	}
+}
+
+func TestComposio_BindAgent_PerAppScopes(t *testing.T) {
+	armTestEncryptionKey(t)
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	agentID := "agent-perapp"
+	seedComposioBindAgent(t, db, wsID, agentID)
+
+	fake := newComposioBindFake(t, gmailGithubAuthConfigs)
+	h := NewComposioHandler(db, newComposioTestLogger(), &config.ComposioConfig{
+		Enabled: true, APIKey: "ak_test", BaseURL: fake.srv.URL,
+	})
+
+	// gmail at read scope + github at full scope, in ONE bind.
+	body := bytes.NewBufferString(`{"user_id":"user-7","apps":[{"toolkit":"gmail","mode":"read"},{"toolkit":"github","mode":"full"}]}`)
+	req := withWorkspaceUser(httptest.NewRequest("POST",
+		"/api/v1/integrations/composio/agents/"+agentID+"/bind", body), userID, wsID, "OWNER")
+	req.SetPathValue("agentId", agentID)
+	rr := httptest.NewRecorder()
+	h.BindAgent(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("bind status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var got composioBindResponse
+	mustUnmarshal(t, rr, &got)
+	if len(got.Apps) != 2 {
+		t.Fatalf("apps = %+v, want 2", got.Apps)
+	}
+
+	// Two per-app workspace_mcp_servers rows.
+	for _, tk := range []string{"gmail", "github"} {
+		var n int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM workspace_mcp_servers WHERE workspace_id=? AND name=?`, wsID, "composio-"+agentID+"-"+tk).Scan(&n); err != nil {
+			t.Fatalf("count %s row: %v", tk, err)
+		}
+		if n != 1 {
+			t.Errorf("server row for %s = %d, want 1", tk, n)
+		}
+	}
+
+	// read mode → only the read gmail tools are passed as allowed_tools.
+	gmailName := composioServerName(wsID, "gmail", composioScopeTag([]string{"GMAIL_FETCH_EMAILS", "GMAIL_LIST_THREADS"}))
+	gmailAllowed, ok := fake.allowed(gmailName)
+	if !ok {
+		t.Fatalf("no create recorded for gmail server %q (recorded: %v)", gmailName, fake.allowedByName)
+	}
+	if len(gmailAllowed) != 2 {
+		t.Fatalf("gmail allowed_tools = %v, want the 2 read tools", gmailAllowed)
+	}
+	for _, s := range gmailAllowed {
+		if s != "GMAIL_FETCH_EMAILS" && s != "GMAIL_LIST_THREADS" {
+			t.Errorf("gmail read scope leaked non-read tool %q (allowed=%v)", s, gmailAllowed)
+		}
+	}
+
+	// full mode → allowed_tools empty (every tool).
+	githubName := composioServerName(wsID, "github", "full")
+	githubAllowed, ok := fake.allowed(githubName)
+	if !ok {
+		t.Fatalf("no create recorded for github server %q (recorded: %v)", githubName, fake.allowedByName)
+	}
+	if len(githubAllowed) != 0 {
+		t.Errorf("github full scope allowed_tools = %v, want empty (all tools)", githubAllowed)
+	}
+}
+
+func TestComposio_BindAgent_CustomScope(t *testing.T) {
+	armTestEncryptionKey(t)
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	agentID := "agent-custom"
+	seedComposioBindAgent(t, db, wsID, agentID)
+
+	fake := newComposioBindFake(t, gmailGithubAuthConfigs)
+	h := NewComposioHandler(db, newComposioTestLogger(), &config.ComposioConfig{
+		Enabled: true, APIKey: "ak_test", BaseURL: fake.srv.URL,
+	})
+
+	// custom: one real tool + one bogus slug (must be rejected, not over-granted).
+	body := bytes.NewBufferString(`{"user_id":"user-7","apps":[{"toolkit":"gmail","mode":"custom","tools":["GMAIL_SEND_EMAIL","NOT_A_REAL_TOOL"]}]}`)
+	req := withWorkspaceUser(httptest.NewRequest("POST",
+		"/api/v1/integrations/composio/agents/"+agentID+"/bind", body), userID, wsID, "OWNER")
+	req.SetPathValue("agentId", agentID)
+	rr := httptest.NewRecorder()
+	h.BindAgent(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("bind status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	name := composioServerName(wsID, "gmail", composioScopeTag([]string{"GMAIL_SEND_EMAIL"}))
+	allowed, ok := fake.allowed(name)
+	if !ok {
+		t.Fatalf("no create recorded for %q (recorded: %v)", name, fake.allowedByName)
+	}
+	if len(allowed) != 1 || allowed[0] != "GMAIL_SEND_EMAIL" {
+		t.Errorf("custom allowed_tools = %v, want exactly [GMAIL_SEND_EMAIL] (bogus slug dropped)", allowed)
+	}
+}
+
+func TestComposio_BindAgent_ReadNoToolsRejected(t *testing.T) {
+	armTestEncryptionKey(t)
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	agentID := "agent-noread"
+	seedComposioBindAgent(t, db, wsID, agentID)
+
+	// github's only tool (GITHUB_CREATE_AN_ISSUE) is not a read tool, so a read
+	// scope on github resolves to an empty set → 400.
+	fake := newComposioBindFake(t, gmailGithubAuthConfigs)
+	h := NewComposioHandler(db, newComposioTestLogger(), &config.ComposioConfig{
+		Enabled: true, APIKey: "ak_test", BaseURL: fake.srv.URL,
+	})
+
+	body := bytes.NewBufferString(`{"user_id":"user-7","apps":[{"toolkit":"github","mode":"read"}]}`)
+	req := withWorkspaceUser(httptest.NewRequest("POST",
+		"/api/v1/integrations/composio/agents/"+agentID+"/bind", body), userID, wsID, "OWNER")
+	req.SetPathValue("agentId", agentID)
+	rr := httptest.NewRecorder()
+	h.BindAgent(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d, want 400 (no read tools for github)", rr.Code)
+	}
+}
+
+func TestComposio_BindAgent_ReBindDropsApp(t *testing.T) {
+	armTestEncryptionKey(t)
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	agentID := "agent-rebind"
+	seedComposioBindAgent(t, db, wsID, agentID)
+
+	fake := newComposioBindFake(t, gmailGithubAuthConfigs)
+	h := NewComposioHandler(db, newComposioTestLogger(), &config.ComposioConfig{
+		Enabled: true, APIKey: "ak_test", BaseURL: fake.srv.URL,
+	})
+
+	bind := func(jsonBody string) {
+		t.Helper()
+		req := withWorkspaceUser(httptest.NewRequest("POST",
+			"/api/v1/integrations/composio/agents/"+agentID+"/bind", bytes.NewBufferString(jsonBody)), userID, wsID, "OWNER")
+		req.SetPathValue("agentId", agentID)
+		rr := httptest.NewRecorder()
+		h.BindAgent(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("bind status=%d body=%s", rr.Code, rr.Body.String())
+		}
+	}
+
+	// First: gmail + github. Then: gmail only → github row + binding removed.
+	bind(`{"user_id":"user-7","apps":[{"toolkit":"gmail","mode":"full"},{"toolkit":"github","mode":"full"}]}`)
+	bind(`{"user_id":"user-7","apps":[{"toolkit":"gmail","mode":"full"}]}`)
+
+	var ghServers, ghBindings, gmServers int
+	githubRow := "composio-" + agentID + "-github"
+	gmailRow := "composio-" + agentID + "-gmail"
+	if err := db.QueryRow(`SELECT COUNT(*) FROM workspace_mcp_servers WHERE workspace_id=? AND name=?`, wsID, githubRow).Scan(&ghServers); err != nil {
+		t.Fatalf("count github servers: %v", err)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM agent_mcp_bindings b JOIN workspace_mcp_servers ws ON ws.id=b.mcp_server_id WHERE b.agent_id=? AND ws.name=?`, agentID, githubRow).Scan(&ghBindings); err != nil {
+		t.Fatalf("count github bindings: %v", err)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM workspace_mcp_servers WHERE workspace_id=? AND name=?`, wsID, gmailRow).Scan(&gmServers); err != nil {
+		t.Fatalf("count gmail servers: %v", err)
+	}
+	if ghServers != 0 || ghBindings != 0 {
+		t.Errorf("after re-bind dropping github: servers=%d bindings=%d, want 0/0", ghServers, ghBindings)
+	}
+	if gmServers != 1 {
+		t.Errorf("gmail server after re-bind = %d, want 1 (kept)", gmServers)
+	}
+
+	// Unbind one app (gmail) leaves nothing.
+	ureq := withWorkspaceUser(httptest.NewRequest("DELETE",
+		"/api/v1/integrations/composio/agents/"+agentID+"/bind?toolkit=gmail", nil), userID, wsID, "OWNER")
+	ureq.SetPathValue("agentId", agentID)
+	urr := httptest.NewRecorder()
+	h.UnbindAgent(urr, ureq)
+	if urr.Code != http.StatusOK {
+		t.Fatalf("unbind status=%d body=%s", urr.Code, urr.Body.String())
+	}
+	var remaining int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM workspace_mcp_servers WHERE workspace_id=? AND icon='composio' AND name LIKE ?`, wsID, "composio-"+agentID+"-%").Scan(&remaining); err != nil {
+		t.Fatalf("count remaining: %v", err)
+	}
+	if remaining != 0 {
+		t.Errorf("after unbind gmail: remaining composio rows=%d, want 0", remaining)
 	}
 }
 
