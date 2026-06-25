@@ -249,6 +249,31 @@ func TestMarkWaiting_NoRow_Errors(t *testing.T) {
 	}
 }
 
+// MarkWaiting must refuse to resurrect a TERMINAL run — a late/racing wait
+// update can never flip a completed/failed/cancelled row back to 'waiting'
+// (CodeRabbit transition-validity guard).
+func TestMarkWaiting_TerminalRun_Errors(t *testing.T) {
+	db := openResumeTestDB(t)
+	defer db.Close()
+	ctx := context.Background()
+	store := NewStore(db)
+	runStore := NewRunStore(db)
+	p := saveResumePipeline(t, store, "done-pipe",
+		`{"dsl_version":"1.0","name":"done-pipe","steps":[{"id":"t","type":"transform","transform":{"input":"ok","expression":"."}}]}`)
+	exec := NewExecutor(store, NewResolver(db), newMockRunner(), &captureEmitter{}).WithRunStore(runStore)
+
+	res, err := exec.Run(ctx, RunInput{PipelineID: p.ID, WorkspaceID: "ws_test", Mode: ModeRun})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if res.Status != "COMPLETED" {
+		t.Fatalf("status: got %q, want COMPLETED", res.Status)
+	}
+	if err := runStore.MarkWaiting(ctx, res.RunID, "gate"); err == nil {
+		t.Fatal("MarkWaiting on a completed run must error (terminal transition), got nil")
+	}
+}
+
 func resumeAndAwait(t *testing.T, exec *Executor, runStore *RunStore, runID string) {
 	t.Helper()
 	ctx := context.Background()

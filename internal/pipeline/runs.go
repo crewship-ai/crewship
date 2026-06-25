@@ -205,20 +205,22 @@ func (s *RunStore) MarkWaiting(ctx context.Context, runID, stepID string) error 
 	res, err := s.db.ExecContext(ctx, `
 UPDATE pipeline_runs
 SET status = 'waiting', current_step_id = ?, updated_at = datetime('now','subsec')
-WHERE id = ?`, stepID, runID)
+WHERE id = ? AND status IN ('queued','running')`, stepID, runID)
 	if err != nil {
 		return fmt.Errorf("pipeline_runs: mark waiting: %w", err)
 	}
-	// Durability guard: the async WAITING contract requires a persisted run
-	// row to resume from. If no row matched (e.g. RunDefinition path with no
-	// persisted run), report it so the caller fails closed / falls back to
-	// blocking instead of surfacing a WAITING token nothing can resume.
+	// Durability + transition guard: the async WAITING contract requires a
+	// persisted, still-live run row to resume from. The status filter ensures
+	// we only park a queued/running run — a late/racing wait update can never
+	// resurrect a terminal (completed/failed/cancelled/interrupted) row back to
+	// 'waiting'. RowsAffected!=1 means no eligible row matched, so the caller
+	// fails closed instead of surfacing a WAITING token nothing can resume.
 	n, err := res.RowsAffected()
 	if err != nil {
 		return fmt.Errorf("pipeline_runs: mark waiting rows: %w", err)
 	}
 	if n != 1 {
-		return fmt.Errorf("pipeline_runs: mark waiting matched %d rows for run %q (no durable row to park)", n, runID)
+		return fmt.Errorf("pipeline_runs: mark waiting matched %d rows for run %q (no live row to park)", n, runID)
 	}
 	return nil
 }
