@@ -27,6 +27,10 @@ func fakeComposioAPI(t *testing.T, authConfigs, connectedAccounts string) *httpt
 			_, _ = w.Write([]byte(connectedAccounts))
 		case "/api/v3/toolkits":
 			_, _ = w.Write([]byte(`{"total_items":1047,"items":[{"slug":"github","name":"GitHub","meta":{"description":"x","logo":"l","tools_count":846,"categories":[{"id":"developer-tools","name":"developer tools"}]}}]}`))
+		case "/api/v3.1/auth_configs":
+			_, _ = w.Write([]byte(`{"id":"ac_new"}`))
+		case "/api/v3.1/connected_accounts/link":
+			_, _ = w.Write([]byte(`{"link_token":"lt_1","redirect_url":"https://oauth.example/authorize?x=1","connected_account_id":"ca_new"}`))
 		default:
 			http.Error(w, "not found", http.StatusNotFound)
 		}
@@ -166,6 +170,51 @@ func TestComposio_Settings_InvalidKeyRejected(t *testing.T) {
 	h.UpsertSettings(rr, req)
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("status=%d, want 400 (invalid key rejected)", rr.Code)
+	}
+}
+
+func TestComposio_Connect(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	// auth_configs GET returns only gmail → connecting github must create a new
+	// managed auth config, then a connect link.
+	srv := fakeComposioAPI(t,
+		`{"items":[{"id":"ac_gm","name":"gmail-x","status":"ENABLED","toolkit":{"slug":"gmail"}}]}`,
+		`{"items":[]}`)
+	h := NewComposioHandler(db, newComposioTestLogger(), &config.ComposioConfig{
+		Enabled: true, APIKey: "ak_test", BaseURL: srv.URL,
+	})
+
+	body := bytes.NewBufferString(`{"toolkit":"github","user_id":"user-1"}`)
+	req := withWorkspaceUser(httptest.NewRequest("POST", "/api/v1/integrations/composio/connect", body), userID, wsID, "OWNER")
+	rr := httptest.NewRecorder()
+	h.Connect(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var got composioConnectResponse
+	mustUnmarshal(t, rr, &got)
+	if got.RedirectURL != "https://oauth.example/authorize?x=1" || got.ConnectedAccountID != "ca_new" || got.UserID != "user-1" {
+		t.Errorf("unexpected connect resp: %+v", got)
+	}
+}
+
+func TestComposio_Connect_RequiresFields(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	srv := fakeComposioAPI(t, `{"items":[]}`, `{"items":[]}`)
+	h := NewComposioHandler(db, newComposioTestLogger(), &config.ComposioConfig{Enabled: true, APIKey: "k", BaseURL: srv.URL})
+
+	body := bytes.NewBufferString(`{"toolkit":"github"}`) // missing user_id
+	req := withWorkspaceUser(httptest.NewRequest("POST", "/c", body), userID, wsID, "OWNER")
+	rr := httptest.NewRecorder()
+	h.Connect(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d, want 400", rr.Code)
 	}
 }
 

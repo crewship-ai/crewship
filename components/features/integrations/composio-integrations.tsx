@@ -145,6 +145,7 @@ export function ComposioIntegrations() {
   // ── Settings (API key) ──
   const [settings, setSettings] = React.useState<ComposioSettings | null>(null)
   const [keyOpen, setKeyOpen] = React.useState(false)
+  const [connectToolkit, setConnectToolkit] = React.useState<{ slug: string; name: string } | null>(null)
 
   const loadSettings = React.useCallback(async (wid: string) => {
     try {
@@ -212,6 +213,19 @@ export function ComposioIntegrations() {
         />
       )}
 
+      {connectToolkit && workspaceId && (
+        <ConnectModal
+          workspaceId={workspaceId}
+          toolkit={connectToolkit}
+          users={data?.users.map((u) => u.user_id) ?? []}
+          onClose={() => setConnectToolkit(null)}
+          onConnected={() => {
+            setConnectToolkit(null)
+            refreshAll(workspaceId)
+          }}
+        />
+      )}
+
       {busy && <InventorySkeleton />}
 
       {!busy && error && (
@@ -227,7 +241,7 @@ export function ComposioIntegrations() {
       {!busy && !error && data && data.enabled && (
         <>
           <div className="rounded-lg border border-blue-400/20 bg-blue-500/[0.04] px-4 py-2.5 text-[11px] text-muted-foreground">
-            Read-only preview. Connecting apps (OAuth) and assigning them to agents ship in the next update.
+            Connect apps via OAuth below. Assigning connected accounts to specific agents (per-agent access) ships next.
           </div>
 
           {/* Connector catalog — searchable, 1000+ apps from Composio */}
@@ -270,18 +284,18 @@ export function ComposioIntegrations() {
                           {t.meta.tools_count ? `${t.meta.tools_count} tools` : t.slug}
                         </div>
                       </div>
-                      {isConfigured ? (
-                        <span className="shrink-0 text-[10px] text-emerald-400">● connected</span>
-                      ) : (
-                        <button
-                          type="button"
-                          disabled
-                          title="Connecting apps ships in the next update"
-                          className="shrink-0 cursor-not-allowed rounded-lg border border-white/10 px-2 py-1 text-[11px] text-muted-foreground/60"
-                        >
-                          Connect
-                        </button>
-                      )}
+                      <button
+                        type="button"
+                        onClick={() => setConnectToolkit({ slug: t.slug, name: t.name })}
+                        className={cn(
+                          "shrink-0 rounded-lg border px-2 py-1 text-[11px] transition-colors",
+                          isConfigured
+                            ? "border-emerald-400/30 text-emerald-400 hover:bg-emerald-500/10"
+                            : "border-white/10 text-foreground/80 hover:border-blue-400/50 hover:text-blue-400",
+                        )}
+                      >
+                        {isConfigured ? "+ Account" : "Connect"}
+                      </button>
                     </div>
                   )
                 })}
@@ -459,6 +473,108 @@ function ApiKeyModal({
               {saving ? "Validating…" : "Validate & save"}
             </Button>
           </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ConnectModal({
+  workspaceId,
+  toolkit,
+  users,
+  onClose,
+  onConnected,
+}: {
+  workspaceId: string
+  toolkit: { slug: string; name: string }
+  users: string[]
+  onClose: () => void
+  onConnected: () => void
+}) {
+  const [userId, setUserId] = React.useState(users[0] ?? "")
+  const [busy, setBusy] = React.useState(false)
+  const [err, setErr] = React.useState<string | null>(null)
+
+  const connect = async () => {
+    const uid = userId.trim()
+    if (!uid) {
+      setErr("Enter a user id (the person/mailbox this account belongs to).")
+      return
+    }
+    setBusy(true)
+    setErr(null)
+    try {
+      const r = await fetch(`/api/v1/integrations/composio/connect?workspace_id=${workspaceId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ toolkit: toolkit.slug, user_id: uid }),
+      })
+      const body = await r.json().catch(() => null)
+      if (!r.ok) throw new Error(body?.detail || `Failed (${r.status})`)
+      if (body?.redirect_url) {
+        // Open Composio's hosted OAuth in a new tab; the account lands under
+        // user_id when the user finishes. We refresh on return.
+        window.open(body.redirect_url, "_blank", "noopener,noreferrer")
+      }
+      onConnected()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Failed to start connection")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+      <div
+        className="w-full max-w-md rounded-xl border border-white/10 bg-card p-6 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 className="text-base font-semibold text-foreground">Connect {toolkit.name}</h2>
+        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+          Authorize {toolkit.name} via OAuth. Pick the Composio user (the person/mailbox) this
+          account belongs to — agents bound to that user will be able to use it.
+        </p>
+
+        <div className="mt-4 space-y-3">
+          {users.length > 0 && (
+            <div>
+              <label className="mb-1 block text-xs text-muted-foreground">Existing user</label>
+              <select
+                value={users.includes(userId) ? userId : ""}
+                onChange={(e) => setUserId(e.target.value)}
+                className="w-full rounded-lg border border-white/10 bg-background px-3 py-2 font-mono text-xs focus:border-blue-400/50 focus:outline-none"
+              >
+                <option value="">— new user —</option>
+                {users.map((u) => (
+                  <option key={u} value={u}>
+                    {u}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+          <div>
+            <label className="mb-1 block text-xs text-muted-foreground">User id</label>
+            <input
+              value={userId}
+              onChange={(e) => setUserId(e.target.value)}
+              placeholder="e.g. alice@acme.com or a stable user id"
+              className="w-full rounded-lg border border-white/10 bg-background px-3 py-2 font-mono text-xs focus:border-blue-400/50 focus:outline-none"
+            />
+          </div>
+        </div>
+
+        {err && <div className="mt-3 text-xs text-red-400">{err}</div>}
+
+        <div className="mt-5 flex justify-end gap-2">
+          <Button variant="outline" size="sm" onClick={onClose} disabled={busy}>
+            Cancel
+          </Button>
+          <Button size="sm" onClick={connect} disabled={busy || !userId.trim()}>
+            {busy ? "Starting…" : "Connect with OAuth"}
+          </Button>
         </div>
       </div>
     </div>

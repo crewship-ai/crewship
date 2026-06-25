@@ -146,6 +146,7 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.mux.Handle("GET /api/v1/integrations/composio/settings", authed(wsCtx(http.HandlerFunc(composioH.GetSettings))))
 	r.mux.Handle("PUT /api/v1/integrations/composio/settings", authed(wsCtx(http.HandlerFunc(composioH.UpsertSettings))))
 	r.mux.Handle("DELETE /api/v1/integrations/composio/settings", authed(wsCtx(http.HandlerFunc(composioH.DeleteSettings))))
+	r.mux.Handle("POST /api/v1/integrations/composio/connect", authed(wsCtx(http.HandlerFunc(composioH.Connect))))
 	// Connectors — curated manifest catalog + install flow. List/Get are
 	// catalog browse (auth only, no workspace context); Verify/Install
 	// mutate workspace state and gate on MANAGER+ via wsCtx-resolved role.

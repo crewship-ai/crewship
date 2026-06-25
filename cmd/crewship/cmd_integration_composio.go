@@ -270,7 +270,35 @@ var composioKeyRemoveCmd = &cobra.Command{
 	},
 }
 
+var composioConnectCmd = &cobra.Command{
+	Use:   "connect <toolkit>",
+	Short: "Start an OAuth connect link to authorize an app for a Composio user",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client, err := requireAuthAndWorkspace()
+		if err != nil {
+			return err
+		}
+		user, _ := cmd.Flags().GetString("user")
+		if strings.TrimSpace(user) == "" {
+			return fmt.Errorf("--user is required (the Composio user_id to connect the account under)")
+		}
+		var res struct {
+			RedirectURL string `json:"redirect_url"`
+			UserID      string `json:"user_id"`
+		}
+		if err := postJSON(client, "/api/v1/integrations/composio/connect", map[string]string{
+			"toolkit": args[0], "user_id": user,
+		}, &res); err != nil {
+			return err
+		}
+		fmt.Printf("Open this URL to authorize %s for user %q:\n\n  %s\n", args[0], res.UserID, res.RedirectURL)
+		return nil
+	},
+}
+
 func init() {
+	composioConnectCmd.Flags().String("user", "", "Composio user_id to connect the account under (required)")
 	composioToolkitsCmd.Flags().String("search", "", "Filter apps by name/slug")
 	composioToolkitsCmd.Flags().String("category", "", "Filter by category (e.g. email, developer-tools)")
 	composioToolkitsCmd.Flags().Int("limit", 0, "Max apps to return (default server-side)")
@@ -283,5 +311,6 @@ func init() {
 	composioCmd.AddCommand(composioInventoryCmd)
 	composioCmd.AddCommand(composioToolkitsCmd)
 	composioCmd.AddCommand(composioKeyCmd)
+	composioCmd.AddCommand(composioConnectCmd)
 	integrationCmd.AddCommand(composioCmd)
 }

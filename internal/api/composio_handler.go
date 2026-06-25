@@ -194,6 +194,73 @@ func (h *ComposioHandler) ListToolkits(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// ── Connect — POST /api/v1/integrations/composio/connect ─────────────────────
+
+type composioConnectRequest struct {
+	Toolkit string `json:"toolkit"`
+	UserID  string `json:"user_id"`
+}
+
+type composioConnectResponse struct {
+	RedirectURL        string `json:"redirect_url"`
+	ConnectedAccountID string `json:"connected_account_id"`
+	UserID             string `json:"user_id"`
+}
+
+// Connect starts a hosted-auth (Connect Link) session so a user can authorise
+// an app via OAuth. It ensures an auth config exists for the toolkit (creating
+// a Composio-managed one if needed), then returns the redirect URL the caller
+// opens in the browser. OWNER/ADMIN only.
+func (h *ComposioHandler) Connect(w http.ResponseWriter, r *http.Request) {
+	if !requireRole(w, r, "manage") {
+		return
+	}
+	client, _ := h.resolveClient(r)
+	if client == nil {
+		writeProblem(w, r, http.StatusBadRequest, "Composio is not configured (set an API key first)")
+		return
+	}
+	var req composioConnectRequest
+	if err := readJSON(r, &req); err != nil {
+		writeProblem(w, r, http.StatusBadRequest, "Invalid JSON body")
+		return
+	}
+	req.Toolkit = strings.TrimSpace(req.Toolkit)
+	req.UserID = strings.TrimSpace(req.UserID)
+	if req.Toolkit == "" || req.UserID == "" {
+		writeProblem(w, r, http.StatusBadRequest, "toolkit and user_id are required")
+		return
+	}
+
+	ctx := r.Context()
+	authID, err := client.FindAuthConfig(ctx, req.Toolkit)
+	if err != nil {
+		h.logger.Error("composio: find auth config", "error", err)
+		writeProblem(w, r, http.StatusBadGateway, "Composio API error")
+		return
+	}
+	if authID == "" {
+		authID, err = client.CreateManagedAuthConfig(ctx, req.Toolkit, req.Toolkit+"-crewship")
+		if err != nil {
+			h.logger.Error("composio: create auth config", "toolkit", req.Toolkit, "error", err)
+			writeProblem(w, r, http.StatusBadGateway, "Composio API error (auth config)")
+			return
+		}
+	}
+
+	link, err := client.CreateConnectLink(ctx, authID, req.UserID, "")
+	if err != nil {
+		h.logger.Error("composio: create connect link", "error", err)
+		writeProblem(w, r, http.StatusBadGateway, "Composio API error (connect link)")
+		return
+	}
+	writeJSON(w, http.StatusOK, composioConnectResponse{
+		RedirectURL:        link.RedirectURL,
+		ConnectedAccountID: link.ConnectedAccountID,
+		UserID:             req.UserID,
+	})
+}
+
 // ── Settings (API key) — /api/v1/integrations/composio/settings ──────────────
 
 type composioSettingsResponse struct {

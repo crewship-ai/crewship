@@ -181,29 +181,121 @@ func (c *Client) ListConnectedAccounts(ctx context.Context) ([]ConnectedAccount,
 	return env.Items, nil
 }
 
+// ConnectLink is the hosted-auth session returned by CreateConnectLink. The
+// caller sends the user to RedirectURL to complete OAuth; the connected
+// account lands under the requested user_id when they finish.
+type ConnectLink struct {
+	LinkToken          string `json:"link_token"`
+	RedirectURL        string `json:"redirect_url"`
+	ExpiresAt          string `json:"expires_at"`
+	ConnectedAccountID string `json:"connected_account_id"`
+}
+
+// FindAuthConfig returns the auth config for a toolkit slug, or ("", nil) when
+// none exists yet.
+func (c *Client) FindAuthConfig(ctx context.Context, toolkitSlug string) (string, error) {
+	configs, err := c.ListAuthConfigs(ctx)
+	if err != nil {
+		return "", err
+	}
+	for _, ac := range configs {
+		if ac.Toolkit.Slug == toolkitSlug {
+			return ac.ID, nil
+		}
+	}
+	return "", nil
+}
+
+// CreateManagedAuthConfig creates a Composio-managed (no BYO OAuth app) auth
+// config for a toolkit and returns its id. Used when connecting an app that
+// has no auth config yet.
+func (c *Client) CreateManagedAuthConfig(ctx context.Context, toolkitSlug, name string) (string, error) {
+	body := map[string]any{
+		"toolkit": map[string]string{"slug": toolkitSlug},
+		"auth_config": map[string]any{
+			"type": "use_composio_managed_auth",
+			"name": name,
+		},
+	}
+	var out struct {
+		// Composio returns either {auth_config:{id}} or a flat {id} depending
+		// on version; accept both.
+		ID         string `json:"id"`
+		AuthConfig struct {
+			ID string `json:"id"`
+		} `json:"auth_config"`
+	}
+	if err := c.post(ctx, "/api/v3.1/auth_configs", body, &out); err != nil {
+		return "", err
+	}
+	if out.AuthConfig.ID != "" {
+		return out.AuthConfig.ID, nil
+	}
+	return out.ID, nil
+}
+
+// CreateConnectLink starts a hosted-auth (Connect Link) session for a user
+// against an auth config. callbackURL is optional (empty → Composio's hosted
+// success page).
+func (c *Client) CreateConnectLink(ctx context.Context, authConfigID, userID, callbackURL string) (ConnectLink, error) {
+	body := map[string]any{
+		"auth_config_id": authConfigID,
+		"user_id":        userID,
+	}
+	if callbackURL != "" {
+		body["callback_url"] = callbackURL
+	}
+	var out ConnectLink
+	if err := c.post(ctx, "/api/v3.1/connected_accounts/link", body, &out); err != nil {
+		return ConnectLink{}, err
+	}
+	return out, nil
+}
+
 // get performs an authenticated GET and decodes the JSON body into out.
 func (c *Client) get(ctx context.Context, path string, out any) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
+	return c.do(ctx, http.MethodGet, path, nil, out)
+}
+
+// post performs an authenticated POST with a JSON body and decodes the response.
+func (c *Client) post(ctx context.Context, path string, body, out any) error {
+	return c.do(ctx, http.MethodPost, path, body, out)
+}
+
+func (c *Client) do(ctx context.Context, method, path string, body, out any) error {
+	var reqBody io.Reader
+	if body != nil {
+		b, err := json.Marshal(body)
+		if err != nil {
+			return fmt.Errorf("composio: marshal %s body: %w", path, err)
+		}
+		reqBody = strings.NewReader(string(b))
+	}
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, reqBody)
 	if err != nil {
 		return fmt.Errorf("composio: build request %s: %w", path, err)
 	}
 	req.Header.Set("x-api-key", c.apiKey)
 	req.Header.Set("Accept", "application/json")
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return fmt.Errorf("composio: GET %s: %w", path, err)
+		return fmt.Errorf("composio: %s %s: %w", method, path, err)
 	}
 	defer resp.Body.Close()
 
-	body := io.LimitReader(resp.Body, maxResponseBytes)
+	rd := io.LimitReader(resp.Body, maxResponseBytes)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		// Surface a trimmed snippet so the operator sees Composio's own
-		// error (bad key, disabled project) rather than a bare status.
-		snippet, _ := io.ReadAll(io.LimitReader(body, 512))
-		return fmt.Errorf("composio: GET %s: status %d: %s", path, resp.StatusCode, strings.TrimSpace(string(snippet)))
+		snippet, _ := io.ReadAll(io.LimitReader(rd, 512))
+		return fmt.Errorf("composio: %s %s: status %d: %s", method, path, resp.StatusCode, strings.TrimSpace(string(snippet)))
 	}
-	if err := json.NewDecoder(body).Decode(out); err != nil {
+	if out == nil {
+		return nil
+	}
+	if err := json.NewDecoder(rd).Decode(out); err != nil {
 		return fmt.Errorf("composio: decode %s: %w", path, err)
 	}
 	return nil
