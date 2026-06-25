@@ -379,6 +379,31 @@ func (c *Client) CreateManagedAuthConfig(ctx context.Context, toolkitSlug, name 
 	return out.ID, nil
 }
 
+// CreateMCPServer provisions a Composio-managed MCP server scoped to the given
+// auth configs and returns its id and base MCP URL. The returned URL is the
+// project-wide endpoint; callers append a `user_id` query param to scope it to
+// a single Composio user (see internal/api/composio_handler.go BindAgent).
+//
+// name must be 4–30 chars of [a-zA-Z0-9- ] (Composio rejects anything else with
+// a 400); the caller is responsible for shaping it. managed_auth_via_composio is
+// always set so the server brokers credentials through Composio rather than
+// expecting the caller to forward per-account tokens.
+func (c *Client) CreateMCPServer(ctx context.Context, name string, authConfigIDs []string) (string, string, error) {
+	body := map[string]any{
+		"name":                      name,
+		"auth_config_ids":           authConfigIDs,
+		"managed_auth_via_composio": true,
+	}
+	var out struct {
+		ID     string `json:"id"`
+		MCPURL string `json:"mcp_url"`
+	}
+	if err := c.post(ctx, "/api/v3.1/mcp/servers", body, &out); err != nil {
+		return "", "", err
+	}
+	return out.ID, out.MCPURL, nil
+}
+
 // CreateConnectLink starts a hosted-auth (Connect Link) session for a user
 // against an auth config. callbackURL is optional (empty → Composio's hosted
 // success page).

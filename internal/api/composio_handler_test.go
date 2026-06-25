@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"database/sql"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -39,6 +40,10 @@ func fakeComposioAPI(t *testing.T, authConfigs, connectedAccounts string) *httpt
 			_, _ = w.Write([]byte(`{"id":"ac_new"}`))
 		case "/api/v3.1/connected_accounts/link":
 			_, _ = w.Write([]byte(`{"link_token":"lt_1","redirect_url":"https://oauth.example/authorize?x=1","connected_account_id":"ca_new"}`))
+		case "/api/v3.1/mcp/servers":
+			// Mirror Composio's create-server response: an id + a base mcp_url
+			// the handler scopes per-user with a `?user_id=` suffix.
+			_, _ = w.Write([]byte(`{"id":"mcp_srv_1","mcp_url":"https://mcp.composio.dev/server/mcp_srv_1"}`))
 		default:
 			http.Error(w, "not found", http.StatusNotFound)
 		}
@@ -365,6 +370,144 @@ func TestComposio_Connect_RequiresFields(t *testing.T) {
 	req := withWorkspaceUser(httptest.NewRequest("POST", "/c", body), userID, wsID, "OWNER")
 	rr := httptest.NewRecorder()
 	h.Connect(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d, want 400", rr.Code)
+	}
+}
+
+func TestComposio_BindAgent_PersistsRows(t *testing.T) {
+	// Encrypting the managed Composio key requires a 32-byte AES key (hex).
+	t.Setenv("ENCRYPTION_KEY", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	// Seed an agent in the workspace (the bind validates ownership).
+	agentID := "agent-bind-1"
+	if _, err := db.Exec(`INSERT INTO agents (id, workspace_id, name, slug) VALUES (?, ?, 'Binder', 'binder')`, agentID, wsID); err != nil {
+		t.Fatalf("insert agent: %v", err)
+	}
+
+	srv := fakeComposioAPI(t,
+		`{"items":[{"id":"ac_gm","name":"gmail-x","status":"ENABLED","toolkit":{"slug":"gmail"}}]}`,
+		`{"items":[]}`)
+	h := NewComposioHandler(db, newComposioTestLogger(), &config.ComposioConfig{
+		Enabled: true, APIKey: "ak_test", BaseURL: srv.URL,
+	})
+
+	body := bytes.NewBufferString(`{"user_id":"user-42"}`)
+	req := withWorkspaceUser(httptest.NewRequest("POST",
+		"/api/v1/integrations/composio/agents/"+agentID+"/bind", body), userID, wsID, "OWNER")
+	req.SetPathValue("agentId", agentID)
+	rr := httptest.NewRecorder()
+	h.BindAgent(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("bind status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var got composioBindResponse
+	mustUnmarshal(t, rr, &got)
+	if got.AgentID != agentID || got.UserID != "user-42" {
+		t.Errorf("unexpected bind resp: %+v", got)
+	}
+	wantEndpoint := "https://mcp.composio.dev/server/mcp_srv_1?user_id=user-42"
+	if got.Endpoint != wantEndpoint {
+		t.Errorf("endpoint = %q, want %q", got.Endpoint, wantEndpoint)
+	}
+
+	// workspace_mcp_servers row exists, scoped to the user, streamable-http.
+	var srvName, transport, endpoint, icon string
+	var enabled int
+	if err := db.QueryRow(`SELECT name, transport, endpoint, icon, enabled
+		FROM workspace_mcp_servers WHERE workspace_id = ? AND name = 'composio-user-42'`, wsID).
+		Scan(&srvName, &transport, &endpoint, &icon, &enabled); err != nil {
+		t.Fatalf("query workspace_mcp_servers: %v", err)
+	}
+	if transport != "streamable-http" || endpoint != wantEndpoint || icon != "composio" || enabled != 1 {
+		t.Errorf("ws server row = name=%s transport=%s endpoint=%s icon=%s enabled=%d",
+			srvName, transport, endpoint, icon, enabled)
+	}
+
+	// agent_mcp_bindings row exists with the api_key/x-api-key cred shape.
+	var credType, credHeader, scope string
+	var credID sql.NullString
+	if err := db.QueryRow(`SELECT cred_type, cred_header, mcp_server_scope, credential_id
+		FROM agent_mcp_bindings WHERE agent_id = ?`, agentID).
+		Scan(&credType, &credHeader, &scope, &credID); err != nil {
+		t.Fatalf("query agent_mcp_bindings: %v", err)
+	}
+	if credType != "api_key" || credHeader != "x-api-key" || scope != "workspace" || !credID.Valid {
+		t.Errorf("binding row = cred_type=%s cred_header=%s scope=%s cred=%v", credType, credHeader, scope, credID)
+	}
+
+	// The referenced credential holds the (encrypted) Composio key.
+	var credName, credKind string
+	if err := db.QueryRow(`SELECT name, type FROM credentials WHERE id = ?`, credID.String).
+		Scan(&credName, &credKind); err != nil {
+		t.Fatalf("query credentials: %v", err)
+	}
+	if credName != composioManagedKeyName || credKind != "API_KEY" {
+		t.Errorf("credential row = name=%s type=%s", credName, credKind)
+	}
+
+	// Re-binding the same user is idempotent (upserts, no duplicate rows).
+	body2 := bytes.NewBufferString(`{"user_id":"user-42"}`)
+	req2 := withWorkspaceUser(httptest.NewRequest("POST",
+		"/api/v1/integrations/composio/agents/"+agentID+"/bind", body2), userID, wsID, "OWNER")
+	req2.SetPathValue("agentId", agentID)
+	rr2 := httptest.NewRecorder()
+	h.BindAgent(rr2, req2)
+	if rr2.Code != http.StatusOK {
+		t.Fatalf("re-bind status=%d body=%s", rr2.Code, rr2.Body.String())
+	}
+	var serverCount, bindCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM workspace_mcp_servers WHERE workspace_id = ? AND name = 'composio-user-42'`, wsID).Scan(&serverCount); err != nil {
+		t.Fatalf("count servers: %v", err)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM agent_mcp_bindings WHERE agent_id = ?`, agentID).Scan(&bindCount); err != nil {
+		t.Fatalf("count bindings: %v", err)
+	}
+	if serverCount != 1 || bindCount != 1 {
+		t.Errorf("after re-bind: servers=%d bindings=%d, want 1/1", serverCount, bindCount)
+	}
+}
+
+func TestComposio_BindAgent_RejectsForeignAgent(t *testing.T) {
+	t.Setenv("ENCRYPTION_KEY", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	srv := fakeComposioAPI(t,
+		`{"items":[{"id":"ac_gm","name":"gmail-x","status":"ENABLED","toolkit":{"slug":"gmail"}}]}`,
+		`{"items":[]}`)
+	h := NewComposioHandler(db, newComposioTestLogger(), &config.ComposioConfig{
+		Enabled: true, APIKey: "ak_test", BaseURL: srv.URL,
+	})
+
+	body := bytes.NewBufferString(`{"user_id":"user-42"}`)
+	req := withWorkspaceUser(httptest.NewRequest("POST",
+		"/api/v1/integrations/composio/agents/ghost/bind", body), userID, wsID, "OWNER")
+	req.SetPathValue("agentId", "ghost")
+	rr := httptest.NewRecorder()
+	h.BindAgent(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status=%d, want 404 (foreign/unknown agent)", rr.Code)
+	}
+}
+
+func TestComposio_BindAgent_RequiresUserID(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	srv := fakeComposioAPI(t, `{"items":[]}`, `{"items":[]}`)
+	h := NewComposioHandler(db, newComposioTestLogger(), &config.ComposioConfig{Enabled: true, APIKey: "k", BaseURL: srv.URL})
+
+	body := bytes.NewBufferString(`{}`) // missing user_id
+	req := withWorkspaceUser(httptest.NewRequest("POST", "/api/v1/integrations/composio/agents/a/bind", body), userID, wsID, "OWNER")
+	req.SetPathValue("agentId", "a")
+	rr := httptest.NewRecorder()
+	h.BindAgent(rr, req)
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("status=%d, want 400", rr.Code)
 	}

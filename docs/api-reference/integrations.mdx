@@ -53,6 +53,9 @@ All integration endpoints require authentication and workspace context (except w
 | `GET` | [`/api/v1/integrations/composio/settings`](#composio-settings) | Get the workspace Composio config status |
 | `PUT` | [`/api/v1/integrations/composio/settings`](#composio-settings) | Set & validate the workspace Composio API key |
 | `DELETE` | [`/api/v1/integrations/composio/settings`](#composio-settings) | Remove the workspace API key (revert to env) |
+| `GET` | [`/api/v1/integrations/composio/agents/{agentId}/bind`](#composio-agent-binding) | List an agent's Composio user binding(s) |
+| `POST` | [`/api/v1/integrations/composio/agents/{agentId}/bind`](#composio-agent-binding) | Bind a Composio user to an agent |
+| `DELETE` | [`/api/v1/integrations/composio/agents/{agentId}/bind`](#composio-agent-binding) | Unbind a Composio user from an agent |
 
 ---
 
@@ -330,6 +333,51 @@ DELETE /api/v1/integrations/composio/settings?workspace_id={workspaceId}
 
 A `PUT` with an invalid key returns `400` (Composio rejected it). CLI:
 `crewship integration composio key {show,set,remove}`.
+
+### Composio Agent Binding
+
+Assign a Composio **user** (its connected accounts/tools) to a specific agent
+so the agent gets a **per-user-scoped MCP server** at runtime. The binding is
+**persisted** as the three rows the runtime resolver already reads — a
+workspace MCP server pointing at the per-user Composio MCP URL, a credential
+holding the workspace Composio API key, and an agent MCP binding joining them
+(`cred_type: api_key`, `cred_header: x-api-key`). No resolver change is needed:
+the sidecar injects the `x-api-key` header on the streamable-http request.
+
+```
+GET    /api/v1/integrations/composio/agents/{agentId}/bind?workspace_id={workspaceId}
+POST   /api/v1/integrations/composio/agents/{agentId}/bind?workspace_id={workspaceId}
+DELETE /api/v1/integrations/composio/agents/{agentId}/bind?workspace_id={workspaceId}&user_id={userId}
+```
+
+`GET` (read) lists the agent's Composio binding(s); `POST`/`DELETE` require
+workspace **manage** (OWNER/ADMIN). `POST` body:
+
+```json
+{ "user_id": "user-42", "toolkits": ["github", "gmail"] }
+```
+
+`user_id` is required (the Composio user the agent is scoped to). `toolkits` is
+optional — when given, the MCP server is restricted to those toolkits' auth
+configs; omitted means every configured connector. Re-binding the same user is
+idempotent (upserts on the unique keys). `DELETE` removes the agent binding and
+soft-deletes the per-user MCP server when no other agent still binds it.
+
+**Response (POST):** `200 OK`
+
+```json
+{ "agent_id": "clx…", "user_id": "user-42", "mcp_server_id": "clx…", "endpoint": "https://mcp.composio.dev/server/…?user_id=user-42" }
+```
+
+**Response (GET):** `200 OK`
+
+```json
+{ "agent_id": "clx…", "bindings": [ { "user_id": "user-42", "endpoint": "https://mcp.composio.dev/server/…?user_id=user-42" } ] }
+```
+
+`POST` returns `404` for an unknown/foreign agent and `400` when Composio is
+unconfigured or no matching auth configs exist. CLI:
+`crewship integration composio {bind,unbind,bindings} <agent> --user <id> [--toolkits a,b]`.
 
 ---
 

@@ -151,6 +151,12 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.mux.Handle("PUT /api/v1/integrations/composio/settings", authed(wsCtx(http.HandlerFunc(composioH.UpsertSettings))))
 	r.mux.Handle("DELETE /api/v1/integrations/composio/settings", authed(wsCtx(http.HandlerFunc(composioH.DeleteSettings))))
 	r.mux.Handle("POST /api/v1/integrations/composio/connect", authed(wsCtx(http.HandlerFunc(composioH.Connect))))
+	// Agent access binding — assign a Composio user (its connected accounts/
+	// tools) to a specific agent, persisting the credential + workspace MCP
+	// server + agent binding the runtime resolver already reads.
+	r.mux.Handle("GET /api/v1/integrations/composio/agents/{agentId}/bind", authed(wsCtx(http.HandlerFunc(composioH.ListAgentBindings))))
+	r.mux.Handle("POST /api/v1/integrations/composio/agents/{agentId}/bind", authed(wsCtx(http.HandlerFunc(composioH.BindAgent))))
+	r.mux.Handle("DELETE /api/v1/integrations/composio/agents/{agentId}/bind", authed(wsCtx(http.HandlerFunc(composioH.UnbindAgent))))
 	// Connectors — curated manifest catalog + install flow. List/Get are
 	// catalog browse (auth only, no workspace context); Verify/Install
 	// mutate workspace state and gate on MANAGER+ via wsCtx-resolved role.

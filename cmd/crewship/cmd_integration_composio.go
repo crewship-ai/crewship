@@ -500,6 +500,122 @@ var composioConnectCmd = &cobra.Command{
 	},
 }
 
+// composioBindResponse mirrors the server's bind wire shape.
+type composioBindResponse struct {
+	AgentID     string `json:"agent_id"`
+	UserID      string `json:"user_id"`
+	MCPServerID string `json:"mcp_server_id"`
+	Endpoint    string `json:"endpoint"`
+}
+
+type composioAgentBinding struct {
+	UserID   string `json:"user_id"`
+	Endpoint string `json:"endpoint"`
+}
+
+type composioListBindingsResponse struct {
+	AgentID  string                 `json:"agent_id"`
+	Bindings []composioAgentBinding `json:"bindings"`
+}
+
+var composioBindCmd = &cobra.Command{
+	Use:   "bind <agent-slug-or-id>",
+	Short: "Assign a Composio user (its connected apps/tools) to an agent",
+	Long: "Binds a Composio user_id to an agent so the agent gets a per-user " +
+		"scoped Composio MCP server at runtime. Optionally restrict the bound " +
+		"tools to specific toolkits with --toolkits.",
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client, err := requireAuthAndWorkspace()
+		if err != nil {
+			return err
+		}
+		user, _ := cmd.Flags().GetString("user")
+		if strings.TrimSpace(user) == "" {
+			return fmt.Errorf("--user is required (the Composio user_id to bind the agent to)")
+		}
+		toolkitsCSV, _ := cmd.Flags().GetString("toolkits")
+		agentID, err := resolveAgentID(client, args[0])
+		if err != nil {
+			return err
+		}
+
+		body := map[string]any{"user_id": user}
+		if tk := splitCSV(toolkitsCSV); len(tk) > 0 {
+			body["toolkits"] = tk
+		}
+
+		var res composioBindResponse
+		if err := postJSON(client, "/api/v1/integrations/composio/agents/"+agentID+"/bind", body, &res); err != nil {
+			return err
+		}
+		fmt.Printf("Bound agent %s to Composio user %q.\n  MCP server: %s\n  Endpoint:   %s\n",
+			args[0], res.UserID, res.MCPServerID, res.Endpoint)
+		return nil
+	},
+}
+
+var composioUnbindCmd = &cobra.Command{
+	Use:   "unbind <agent-slug-or-id>",
+	Short: "Remove an agent's Composio user binding",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client, err := requireAuthAndWorkspace()
+		if err != nil {
+			return err
+		}
+		user, _ := cmd.Flags().GetString("user")
+		if strings.TrimSpace(user) == "" {
+			return fmt.Errorf("--user is required (the Composio user_id to unbind)")
+		}
+		agentID, err := resolveAgentID(client, args[0])
+		if err != nil {
+			return err
+		}
+		path := "/api/v1/integrations/composio/agents/" + agentID + "/bind?" +
+			url.Values{"user_id": {user}}.Encode()
+		if err := deleteJSON(client, path); err != nil {
+			return err
+		}
+		fmt.Printf("Unbound agent %s from Composio user %q.\n", args[0], user)
+		return nil
+	},
+}
+
+var composioBindingsCmd = &cobra.Command{
+	Use:   "bindings <agent-slug-or-id>",
+	Short: "Show an agent's Composio user binding(s)",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client, err := requireAuthAndWorkspace()
+		if err != nil {
+			return err
+		}
+		agentID, err := resolveAgentID(client, args[0])
+		if err != nil {
+			return err
+		}
+		var res composioListBindingsResponse
+		if err := getJSON(client, "/api/v1/integrations/composio/agents/"+agentID+"/bind", &res); err != nil {
+			return err
+		}
+		f := newFormatter()
+		if f.Format == "json" || f.Format == "yaml" {
+			return f.Auto(res, nil, nil)
+		}
+		if len(res.Bindings) == 0 {
+			fmt.Printf("Agent %s has no Composio bindings.\n", args[0])
+			return nil
+		}
+		rows := make([][]string, 0, len(res.Bindings))
+		for _, b := range res.Bindings {
+			rows = append(rows, []string{b.UserID, b.Endpoint})
+		}
+		f.Table([]string{"USER_ID", "ENDPOINT"}, rows)
+		return nil
+	},
+}
+
 func init() {
 	composioConnectCmd.Flags().String("user", "", "Composio user_id to connect the account under (required)")
 	composioToolkitsCmd.Flags().String("search", "", "Filter apps by name/slug")
@@ -525,5 +641,11 @@ func init() {
 	composioCmd.AddCommand(composioTriggersCmd)
 	composioCmd.AddCommand(composioKeyCmd)
 	composioCmd.AddCommand(composioConnectCmd)
+
+	composioBindCmd.Flags().String("user", "", "Composio user_id to bind the agent to (required)")
+	composioBindCmd.Flags().String("toolkits", "", "Comma-separated toolkit slugs to restrict the binding to (optional)")
+	composioUnbindCmd.Flags().String("user", "", "Composio user_id to unbind (required)")
+	composioCmd.AddCommand(composioBindCmd, composioUnbindCmd, composioBindingsCmd)
+
 	integrationCmd.AddCommand(composioCmd)
 }

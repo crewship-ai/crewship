@@ -40,6 +40,13 @@ crewship intg <subcommand> [flags]
 | `integration composio key show` | Show whether/how Composio is configured (never prints the key). |
 | `integration composio key set` | Set & validate the workspace API key (`--key`, `--base-url`, `--label`); stored encrypted. |
 | `integration composio key remove` | Remove the workspace key (revert to the server env, if any). |
+| `integration composio bind <agent>` | Bind a Composio `user_id` to an agent (per-user MCP server at runtime). Requires `--user <id>`; optional `--toolkits a,b` to restrict apps. |
+| `integration composio unbind <agent>` | Remove an agent's Composio user binding. Requires `--user <id>`. |
+| `integration composio bindings <agent>` | Show an agent's Composio user binding(s). |
+
+`bind`/`unbind` map to `POST`/`DELETE /api/v1/integrations/composio/agents/{agentId}/bind`
+(workspace manage); `bindings` to the matching `GET` (read). The agent argument
+accepts a slug or id.
 
 Maps to `GET /api/v1/integrations/composio/inventory`. Requires `COMPOSIO_API_KEY`
 on the server; prints a "not configured" notice otherwise. Add `--output json`
