@@ -28,6 +28,12 @@ export interface AgentRecord {
   crew: { id?: string; name: string; slug: string; color: string | null; avatar_style: string | null } | null
   _count?: { skills: number; credentials: number; chats: number }
   last_active_at?: string | null
+  // PR-D F5 ephemeral lifecycle (server returns these; absent on permanent agents).
+  ephemeral?: boolean
+  expires_at?: string | null
+  expired_at?: string | null
+  parent_lead_id?: string | null
+  hire_reason?: string | null
 }
 
 export interface InboxSummary { count: number; summary?: string; cost?: number }

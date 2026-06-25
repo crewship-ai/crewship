@@ -39,6 +39,8 @@ export function ttlRemaining(
   if (Number.isNaN(ms)) return ""
   if (ms <= 0) return "expiring"
   const totalMin = Math.floor(ms / 60000)
+  // Under a minute still left: don't round down to a misleading "0m left".
+  if (totalMin === 0) return "<1m left"
   const h = Math.floor(totalMin / 60)
   const m = totalMin % 60
   if (h >= 1) return `${h}h ${m}m left`

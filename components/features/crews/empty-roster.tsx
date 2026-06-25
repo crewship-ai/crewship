@@ -124,7 +124,7 @@ export function EmptyRoster({ agents, crews, onAgentSelect }: EmptyRosterProps) 
                     className={cn(
                       "group relative",
                       ghost &&
-                        "opacity-60 grayscale-[0.4] hover:opacity-100 hover:grayscale-0 transition-[opacity,filter] duration-150",
+                        "opacity-60 grayscale-[0.4] hover:opacity-100 hover:grayscale-0 focus-within:opacity-100 focus-within:grayscale-0 transition-[opacity,filter] duration-150",
                     )}
                   >
                     <button
@@ -174,7 +174,9 @@ export function EmptyRoster({ agents, crews, onAgentSelect }: EmptyRosterProps) 
 
                     {ghost && (
                       // Sibling of the selection button (not nested) so we
-                      // don't put a button inside a button. Reveals on hover.
+                      // don't put a button inside a button. Reveals on hover
+                      // or keyboard focus (focus-visible keeps it reachable
+                      // when tabbed to, matching the agent-card Rehire).
                       <Button
                         size="sm"
                         variant="outline"
@@ -185,7 +187,7 @@ export function EmptyRoster({ agents, crews, onAgentSelect }: EmptyRosterProps) 
                             }),
                           )
                         }
-                        className="absolute right-3 top-1/2 -translate-y-1/2 h-6 gap-1 px-2 text-[10px] opacity-0 group-hover:opacity-100 transition-opacity"
+                        className="absolute right-3 top-1/2 -translate-y-1/2 h-6 gap-1 px-2 text-[10px] opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
                       >
                         <RotateCcw className="h-3 w-3" />
                         Rehire

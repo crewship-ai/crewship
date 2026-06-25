@@ -6,7 +6,7 @@ import { motion } from "motion/react"
 import { toast } from "sonner"
 import {
   MessageSquare, MoreHorizontal, Square,
-  Trash2, RotateCcw,
+  Trash2, RotateCcw, CheckCircle2, Clock,
 } from "lucide-react"
 import { EditableField } from "@/components/shared/editable-field"
 import { AvatarPickerDialog } from "@/components/features/crews/avatar-picker-dialog"
@@ -21,6 +21,7 @@ import {
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 import { cn } from "@/lib/utils"
+import { isGhost, effectiveStatus, ttlRemaining, latestHireReason } from "@/lib/agent-ephemeral"
 
 import {
   CanvasShell,
@@ -72,6 +73,8 @@ const STATUS_BADGE: Record<string, { label: string; className: string; pulse?: b
   IDLE: { label: "idle", className: "bg-zinc-700/40 text-muted-foreground border-white/10" },
   ERROR: { label: "error", className: "bg-red-500/15 text-red-300 border-red-500/30" },
   STOPPED: { label: "stopped", className: "bg-amber-500/15 text-amber-300 border-amber-500/30" },
+  PENDING_REVIEW: { label: "pending review", className: "bg-amber-500/15 text-amber-300 border-amber-500/30" },
+  EXPIRED: { label: "expired", className: "bg-slate-500/15 text-slate-400 border-slate-500/30" },
 }
 
 /**
@@ -212,6 +215,51 @@ export function AgentCanvas({
     }
   }, [agent, fetchAgent])
 
+  // Approve a pending ephemeral hire straight from the agent page (same
+  // endpoint the inbox uses). workspace_id rides in the query string —
+  // the route's RequireWorkspace middleware reads it from there, never
+  // the body. The server resolves the blocking inbox waitpoint too.
+  const handleApproveHire = useCallback(async () => {
+    if (!agent) return
+    try {
+      const res = await fetch(
+        `/api/v1/agents/${agent.id}/approve-hire?workspace_id=${encodeURIComponent(agent.workspace_id)}`,
+        { method: "POST", headers: { "Content-Type": "application/json" } },
+      )
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as { error?: string } | null
+        throw new Error(body?.error ?? `HTTP ${res.status}`)
+      }
+      toast.success("Hire approved — agent is live")
+      void fetchAgent()
+    } catch (err) {
+      toast.error(`Approve failed: ${err instanceof Error ? err.message : err}`)
+    }
+  }, [agent, fetchAgent])
+
+  // Re-hire a ghost (expired) ephemeral agent with a fresh TTL.
+  const handleRehire = useCallback(async () => {
+    if (!agent) return
+    try {
+      const res = await fetch(
+        `/api/v1/agents/${agent.id}/rehire?workspace_id=${encodeURIComponent(agent.workspace_id)}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ttl_minutes: 60, reason: "rehire from agent page" }),
+        },
+      )
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as { error?: string } | null
+        throw new Error(body?.error ?? `HTTP ${res.status}`)
+      }
+      toast.success("Re-hired — agent is live again")
+      void fetchAgent()
+    } catch (err) {
+      toast.error(`Re-hire failed: ${err instanceof Error ? err.message : err}`)
+    }
+  }, [agent, fetchAgent])
+
   const handleAvatarSave = useCallback(async (next: { avatar_seed: string; avatar_style: string | null }) => {
     if (!agent) return
     try {
@@ -247,8 +295,13 @@ export function AgentCanvas({
     )
   }
 
-  const status = STATUS_BADGE[agent.status] || STATUS_BADGE.IDLE
-  const isRunning = agent.status === "RUNNING"
+  const ghost = isGhost(agent)
+  const statusKey = effectiveStatus(agent)
+  const status = STATUS_BADGE[statusKey] || STATUS_BADGE.IDLE
+  const isRunning = agent.status === "RUNNING" && !ghost
+  const isPendingHire = agent.ephemeral === true && agent.status === "PENDING_REVIEW" && !ghost
+  const ttl = agent.ephemeral && !ghost ? ttlRemaining(agent.expires_at) : ""
+  const hireReason = latestHireReason(agent.hire_reason)
 
   return (
     <CanvasShell loading={false} error={null} notLoadedLabel="">
@@ -309,6 +362,28 @@ export function AgentCanvas({
               </>
             )}
           </div>
+          {/* Ephemeral hire context — what's being approved, TTL, reason */}
+          {agent.ephemeral && (
+            <div className="mb-3 text-xs">
+              {isPendingHire ? (
+                <div className="inline-flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-amber-200/90">
+                  <Clock className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                  <span>
+                    Requesting to join <span className="font-medium">{agent.crew?.name ?? "this crew"}</span> — approve to add it.
+                    {ttl && <> · TTL {ttl}</>}
+                    {hireReason && <> · {hireReason}</>}
+                  </span>
+                </div>
+              ) : ghost ? (
+                <span className="text-muted-foreground">Expired ephemeral hire — re-hire to bring it back.</span>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 text-cyan-300/80">
+                  <Clock className="h-3 w-3" /> Ephemeral hire{ttl && <span className="text-muted-foreground"> · TTL {ttl}</span>}
+                </span>
+              )}
+            </div>
+          )}
+
           {/* 6-stat strip */}
           <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 max-w-[640px]">
             <StatTile label="Sessions" value={agent._count?.chats ?? 0} />
@@ -320,6 +395,28 @@ export function AgentCanvas({
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
+          {isPendingHire && (
+            <button
+              type="button"
+              onClick={handleApproveHire}
+              className="px-3.5 py-2 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/30 text-sm font-medium flex items-center gap-1.5"
+              title="Approve this ephemeral hire — the agent joins the crew and any waiting work resumes"
+            >
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              Approve hire
+            </button>
+          )}
+          {ghost && (
+            <button
+              type="button"
+              onClick={handleRehire}
+              className="px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-foreground/80 border border-white/10 text-sm font-medium flex items-center gap-1.5"
+              title="Re-hire this expired agent with a fresh TTL"
+            >
+              <RotateCcw className="h-3 w-3" />
+              Re-hire
+            </button>
+          )}
           {isRunning && (
             <button
               type="button"

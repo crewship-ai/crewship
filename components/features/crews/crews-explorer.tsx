@@ -294,15 +294,18 @@ export function CrewsExplorer({
                   Unassigned
                 </div>
                 {unassigned.map((agent) => {
-                  const badge = STATUS_BADGE[agent.status] || STATUS_BADGE.IDLE
+                  const ghost = isGhost(agent)
+                  const badge = STATUS_BADGE[effectiveStatus(agent)] || STATUS_BADGE.IDLE
                   const isAgentSelected = selectedAgentId === agent.id
                   return (
                     <button
                       key={agent.id}
                       aria-current={isAgentSelected ? "true" : undefined}
+                      data-expired={ghost ? "true" : undefined}
                       className={cn(
-                        "w-full px-2 py-1 rounded-md text-left items-center gap-2",
+                        "w-full flex px-2 py-1 rounded-md text-left items-center gap-2",
                         isAgentSelected ? "row-interactive row-selected" : "row-interactive row-hover",
+                        ghost && "opacity-55 grayscale-[0.4] hover:opacity-90 hover:grayscale-0",
                       )}
                       onClick={() => onAgentSelect(agent.id)}
                     >
@@ -317,7 +320,12 @@ export function CrewsExplorer({
                           {agent.role_title || agent.agent_role}
                         </span>
                       </div>
-                      <span className={cn("text-[10px]", badge.className)}>{badge.label}</span>
+                      <div className="flex items-center gap-1 shrink-0">
+                        {agent.ephemeral && !ghost && (
+                          <Clock className="h-2.5 w-2.5 text-cyan-300/80" aria-label="Ephemeral hire" />
+                        )}
+                        <span className={cn("text-[10px]", badge.className)}>{badge.label}</span>
+                      </div>
                     </button>
                   )
                 })}

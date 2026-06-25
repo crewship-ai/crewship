@@ -34,6 +34,9 @@ describe("agent-ephemeral helpers", () => {
     it("says 'expiring' once past the deadline", () => {
       expect(ttlRemaining("2026-06-25T11:59:00Z", now)).toBe("expiring")
     })
+    it("shows '<1m left' for under a minute instead of rounding to 0m", () => {
+      expect(ttlRemaining("2026-06-25T12:00:30Z", now)).toBe("<1m left")
+    })
     it("returns empty for missing/unparseable expiry", () => {
       expect(ttlRemaining(null, now)).toBe("")
       expect(ttlRemaining(undefined, now)).toBe("")
