@@ -2,6 +2,7 @@ package composio
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -126,6 +127,64 @@ func TestClient_ListTools(t *testing.T) {
 	tool := page.Items[0]
 	if tool.Slug != "GITHUB_CREATE_AN_ISSUE" || tool.Name != "Create an issue" || tool.Toolkit.Slug != "github" {
 		t.Errorf("unexpected tool: %+v", tool)
+	}
+}
+
+func TestClient_ListTriggerTypes(t *testing.T) {
+	var gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"total_items":12,"items":[
+			{"slug":"GMAIL_NEW_GMAIL_MESSAGE","name":"New Gmail message","description":"Triggers when a new email arrives","type":"poll","toolkit":{"slug":"gmail","logo":"https://logos.composio.dev/api/gmail"}}
+		]}`))
+	}))
+	t.Cleanup(srv.Close)
+	c := NewClient("ak_test", srv.URL)
+
+	page, err := c.ListTriggerTypes(context.Background(), "gmail", "message", 5)
+	if err != nil {
+		t.Fatalf("ListTriggerTypes: %v", err)
+	}
+	if !strings.Contains(gotQuery, "toolkit_slugs=gmail") || !strings.Contains(gotQuery, "search=message") || !strings.Contains(gotQuery, "limit=5") {
+		t.Errorf("query = %q, want toolkit_slugs=gmail & search=message & limit=5", gotQuery)
+	}
+	if page.TotalItems != 12 || len(page.Items) != 1 {
+		t.Fatalf("page = %+v", page)
+	}
+	tt := page.Items[0]
+	if tt.Slug != "GMAIL_NEW_GMAIL_MESSAGE" || tt.Name != "New Gmail message" || tt.Type != "poll" || tt.Toolkit.Slug != "gmail" {
+		t.Errorf("unexpected trigger type: %+v", tt)
+	}
+}
+
+func TestClient_CreateTriggerInstance(t *testing.T) {
+	var gotPath string
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"trigger_id":"ti_abc123"}`))
+	}))
+	t.Cleanup(srv.Close)
+	c := NewClient("ak_test", srv.URL)
+
+	inst, err := c.CreateTriggerInstance(context.Background(), "GMAIL_NEW_GMAIL_MESSAGE", "user-1", map[string]any{"interval": 60})
+	if err != nil {
+		t.Fatalf("CreateTriggerInstance: %v", err)
+	}
+	if gotPath != "/api/v3.1/trigger_instances/GMAIL_NEW_GMAIL_MESSAGE/upsert" {
+		t.Errorf("path = %q, want .../GMAIL_NEW_GMAIL_MESSAGE/upsert", gotPath)
+	}
+	if gotBody["user_id"] != "user-1" {
+		t.Errorf("body user_id = %v, want user-1", gotBody["user_id"])
+	}
+	if cfg, ok := gotBody["trigger_config"].(map[string]any); !ok || cfg["interval"] != float64(60) {
+		t.Errorf("body trigger_config = %v, want {interval:60}", gotBody["trigger_config"])
+	}
+	if inst.ID != "ti_abc123" || inst.TriggerName != "GMAIL_NEW_GMAIL_MESSAGE" || inst.UserID != "user-1" {
+		t.Errorf("unexpected instance: %+v", inst)
 	}
 }
 

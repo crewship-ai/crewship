@@ -80,6 +80,38 @@ type composioToolsResponse struct {
 	Tools   []composioTool `json:"tools"`
 }
 
+type composioTriggerType struct {
+	Slug        string          `json:"slug"`
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	Type        string          `json:"type"`
+	Toolkit     composioToolkit `json:"toolkit"`
+}
+
+type composioTriggerTypesResponse struct {
+	Enabled  bool                  `json:"enabled"`
+	Total    int                   `json:"total"`
+	Triggers []composioTriggerType `json:"triggers"`
+}
+
+type composioTriggerInstance struct {
+	ID            string         `json:"id"`
+	TriggerName   string         `json:"trigger_name"`
+	UserID        string         `json:"user_id"`
+	TriggerConfig map[string]any `json:"trigger_config"`
+	DisabledAt    string         `json:"disabled_at"`
+}
+
+type composioActiveTriggersResponse struct {
+	Enabled  bool                      `json:"enabled"`
+	Triggers []composioTriggerInstance `json:"triggers"`
+}
+
+type composioCreateTriggerResponse struct {
+	Enabled bool                    `json:"enabled"`
+	Trigger composioTriggerInstance `json:"trigger"`
+}
+
 type composioSettingsResponse struct {
 	Configured bool   `json:"configured"`
 	Source     string `json:"source"`
@@ -252,6 +284,118 @@ var composioToolsCmd = &cobra.Command{
 	},
 }
 
+var composioTriggersCmd = &cobra.Command{
+	Use:   "triggers",
+	Short: "Composio triggers (event subscriptions like GMAIL_NEW_MESSAGE)",
+}
+
+var composioTriggersTypesCmd = &cobra.Command{
+	Use:   "types",
+	Short: "List available Composio trigger types (filter by toolkit)",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client, err := requireAuthAndWorkspace()
+		if err != nil {
+			return err
+		}
+		toolkit, _ := cmd.Flags().GetString("toolkit")
+		search, _ := cmd.Flags().GetString("search")
+		limit, _ := cmd.Flags().GetInt("limit")
+
+		path := "/api/v1/integrations/composio/triggers"
+		q := url.Values{}
+		if toolkit != "" {
+			q.Set("toolkit", toolkit)
+		}
+		if search != "" {
+			q.Set("search", search)
+		}
+		if limit > 0 {
+			q.Set("limit", strconv.Itoa(limit))
+		}
+		if enc := q.Encode(); enc != "" {
+			path += "?" + enc
+		}
+
+		var res composioTriggerTypesResponse
+		if err := getJSON(client, path, &res); err != nil {
+			return err
+		}
+
+		f := newFormatter()
+		if f.Format == "json" || f.Format == "yaml" {
+			return f.Auto(res, nil, nil)
+		}
+		if !res.Enabled {
+			fmt.Println("Composio is not configured on this server (set COMPOSIO_API_KEY).")
+			return nil
+		}
+		rows := make([][]string, 0, len(res.Triggers))
+		for _, t := range res.Triggers {
+			rows = append(rows, []string{t.Slug, t.Toolkit.Slug, t.Type, t.Description})
+		}
+		f.Table([]string{"SLUG", "TOOLKIT", "TYPE", "DESCRIPTION"}, rows)
+		fmt.Printf("\nShowing %d of %d trigger types. Narrow with --toolkit / --search.\n", len(res.Triggers), res.Total)
+		return nil
+	},
+}
+
+var composioTriggersActiveCmd = &cobra.Command{
+	Use:   "active",
+	Short: "List active Composio trigger instances (across all users)",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client, err := requireAuthAndWorkspace()
+		if err != nil {
+			return err
+		}
+		var res composioActiveTriggersResponse
+		if err := getJSON(client, "/api/v1/integrations/composio/triggers/active", &res); err != nil {
+			return err
+		}
+		f := newFormatter()
+		if f.Format == "json" || f.Format == "yaml" {
+			return f.Auto(res, nil, nil)
+		}
+		if !res.Enabled {
+			fmt.Println("Composio is not configured on this server (set COMPOSIO_API_KEY).")
+			return nil
+		}
+		rows := make([][]string, 0, len(res.Triggers))
+		for _, t := range res.Triggers {
+			state := "active"
+			if t.DisabledAt != "" {
+				state = "disabled"
+			}
+			rows = append(rows, []string{t.ID, t.TriggerName, t.UserID, state})
+		}
+		f.Table([]string{"ID", "TRIGGER", "USER_ID", "STATE"}, rows)
+		return nil
+	},
+}
+
+var composioTriggersEnableCmd = &cobra.Command{
+	Use:   "enable <slug>",
+	Short: "Create/enable a Composio trigger instance for a user",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client, err := requireAuthAndWorkspace()
+		if err != nil {
+			return err
+		}
+		user, _ := cmd.Flags().GetString("user")
+		if strings.TrimSpace(user) == "" {
+			return fmt.Errorf("--user is required (the Composio user_id the trigger fires for)")
+		}
+		var res composioCreateTriggerResponse
+		if err := postJSON(client, "/api/v1/integrations/composio/triggers", map[string]any{
+			"slug": args[0], "user_id": user,
+		}, &res); err != nil {
+			return err
+		}
+		fmt.Printf("Trigger %s enabled for user %q (id: %s).\n", args[0], res.Trigger.UserID, res.Trigger.ID)
+		return nil
+	},
+}
+
 var composioKeyCmd = &cobra.Command{
 	Use:   "key",
 	Short: "Manage the workspace Composio API key",
@@ -364,6 +508,12 @@ func init() {
 	composioToolsCmd.Flags().String("search", "", "Filter tools by name/slug")
 	composioToolsCmd.Flags().Int("limit", 0, "Max tools to return (default server-side)")
 
+	composioTriggersTypesCmd.Flags().String("toolkit", "", "Filter trigger types by toolkit slug")
+	composioTriggersTypesCmd.Flags().String("search", "", "Filter trigger types by name/slug")
+	composioTriggersTypesCmd.Flags().Int("limit", 0, "Max trigger types to return (default server-side)")
+	composioTriggersEnableCmd.Flags().String("user", "", "Composio user_id the trigger fires for (required)")
+	composioTriggersCmd.AddCommand(composioTriggersTypesCmd, composioTriggersActiveCmd, composioTriggersEnableCmd)
+
 	composioKeySetCmd.Flags().String("key", "", "Composio project API key (ak_…)")
 	composioKeySetCmd.Flags().String("base-url", "", "Override Composio base URL (optional)")
 	composioKeySetCmd.Flags().String("label", "", "Human-friendly project label (optional)")
@@ -372,6 +522,7 @@ func init() {
 	composioCmd.AddCommand(composioInventoryCmd)
 	composioCmd.AddCommand(composioToolkitsCmd)
 	composioCmd.AddCommand(composioToolsCmd)
+	composioCmd.AddCommand(composioTriggersCmd)
 	composioCmd.AddCommand(composioKeyCmd)
 	composioCmd.AddCommand(composioConnectCmd)
 	integrationCmd.AddCommand(composioCmd)

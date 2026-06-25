@@ -202,6 +202,106 @@ func (c *Client) ListTools(ctx context.Context, toolkitSlug, search string, limi
 	return ToolPage{Items: env.Items, TotalItems: env.TotalItems}, nil
 }
 
+// TriggerType is one available event subscription a toolkit exposes
+// (GMAIL_NEW_MESSAGE, GITHUB_PR_OPENED, …). Type is the delivery mechanism
+// Composio uses ("webhook" event-based / "poll" scheduled check). Distinct
+// from a TriggerInstance, which is a *live* subscription bound to a user.
+type TriggerType struct {
+	Slug        string  `json:"slug"`
+	Name        string  `json:"name"`
+	Description string  `json:"description"`
+	Type        string  `json:"type"`
+	Toolkit     Toolkit `json:"toolkit"`
+}
+
+// TriggerTypePage is a paginated slice of a toolkit's trigger types.
+type TriggerTypePage struct {
+	Items      []TriggerType
+	TotalItems int
+}
+
+// TriggerInstance is a live trigger subscription bound to one Composio user
+// (and its connected account). TriggerName is the underlying trigger-type slug
+// Composio nests under `trigger_name`. State carries the subscription's config
+// echo / status; DisabledAt is set once a trigger has been turned off.
+type TriggerInstance struct {
+	ID                 string         `json:"id"`
+	TriggerName        string         `json:"trigger_name"`
+	UserID             string         `json:"user_id"`
+	ConnectedAccountID string         `json:"connected_account_id"`
+	TriggerConfig      map[string]any `json:"trigger_config"`
+	DisabledAt         string         `json:"disabled_at,omitempty"`
+}
+
+// ListTriggerTypes returns a page of the trigger types a toolkit exposes.
+// toolkitSlug filters to one app (Composio's `toolkit_slugs` query param, which
+// accepts repeated slugs — we pass the single slug); search is passed through
+// (server-side filter); limit caps the page size (Composio default applies when
+// <= 0).
+func (c *Client) ListTriggerTypes(ctx context.Context, toolkitSlug, search string, limit int) (TriggerTypePage, error) {
+	q := url.Values{}
+	if toolkitSlug != "" {
+		q.Set("toolkit_slugs", toolkitSlug)
+	}
+	if search != "" {
+		q.Set("search", search)
+	}
+	if limit > 0 {
+		q.Set("limit", strconv.Itoa(limit))
+	}
+	path := "/api/v3.1/triggers_types"
+	if enc := q.Encode(); enc != "" {
+		path += "?" + enc
+	}
+	var env struct {
+		Items      []TriggerType `json:"items"`
+		TotalItems int           `json:"total_items"`
+	}
+	if err := c.get(ctx, path, &env); err != nil {
+		return TriggerTypePage{}, err
+	}
+	return TriggerTypePage{Items: env.Items, TotalItems: env.TotalItems}, nil
+}
+
+// ListActiveTriggers returns every active trigger instance in the project
+// across all users. Grouping/filtering by user happens caller-side, mirroring
+// ListConnectedAccounts.
+func (c *Client) ListActiveTriggers(ctx context.Context) ([]TriggerInstance, error) {
+	var env struct {
+		Items []TriggerInstance `json:"items"`
+	}
+	if err := c.get(ctx, "/api/v3.1/trigger_instances/active", &env); err != nil {
+		return nil, err
+	}
+	return env.Items, nil
+}
+
+// CreateTriggerInstance creates (or re-enables) a trigger instance for a user.
+// slug is the trigger-type slug (GMAIL_NEW_MESSAGE, …); userID is the Composio
+// user that owns the connected account the trigger fires against; config is the
+// trigger-type-specific configuration (may be nil/empty). Composio's upsert
+// endpoint returns the new trigger's id under `trigger_id`.
+func (c *Client) CreateTriggerInstance(ctx context.Context, slug, userID string, config map[string]any) (TriggerInstance, error) {
+	body := map[string]any{
+		"user_id": userID,
+	}
+	if config != nil {
+		body["trigger_config"] = config
+	}
+	var out struct {
+		TriggerID string `json:"trigger_id"`
+	}
+	if err := c.post(ctx, "/api/v3.1/trigger_instances/"+url.PathEscape(slug)+"/upsert", body, &out); err != nil {
+		return TriggerInstance{}, err
+	}
+	return TriggerInstance{
+		ID:            out.TriggerID,
+		TriggerName:   slug,
+		UserID:        userID,
+		TriggerConfig: config,
+	}, nil
+}
+
 // ListAuthConfigs returns the project's connector catalog (one entry per
 // configured app).
 func (c *Client) ListAuthConfigs(ctx context.Context) ([]AuthConfig, error) {

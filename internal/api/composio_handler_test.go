@@ -29,6 +29,12 @@ func fakeComposioAPI(t *testing.T, authConfigs, connectedAccounts string) *httpt
 			_, _ = w.Write([]byte(`{"total_items":1047,"items":[{"slug":"github","name":"GitHub","meta":{"description":"x","logo":"l","tools_count":846,"categories":[{"id":"developer-tools","name":"developer tools"}]}}]}`))
 		case "/api/v3.1/tools":
 			_, _ = w.Write([]byte(`{"total_items":846,"items":[{"slug":"GITHUB_CREATE_AN_ISSUE","name":"Create an issue","description":"Create a new issue","toolkit":{"slug":"github"}}]}`))
+		case "/api/v3.1/triggers_types":
+			_, _ = w.Write([]byte(`{"total_items":12,"items":[{"slug":"GMAIL_NEW_GMAIL_MESSAGE","name":"New Gmail message","description":"New email arrives","type":"poll","toolkit":{"slug":"gmail"}}]}`))
+		case "/api/v3.1/trigger_instances/active":
+			_, _ = w.Write([]byte(`{"items":[{"id":"ti_1","trigger_name":"GMAIL_NEW_GMAIL_MESSAGE","user_id":"user-1","connected_account_id":"ca_1","trigger_config":{"interval":60}}]}`))
+		case "/api/v3.1/trigger_instances/GMAIL_NEW_GMAIL_MESSAGE/upsert":
+			_, _ = w.Write([]byte(`{"trigger_id":"ti_new"}`))
 		case "/api/v3.1/auth_configs":
 			_, _ = w.Write([]byte(`{"id":"ac_new"}`))
 		case "/api/v3.1/connected_accounts/link":
@@ -155,6 +161,103 @@ func TestComposio_ListTools_RequiresToolkit(t *testing.T) {
 	h.ListTools(rr, req)
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("status=%d, want 400 (toolkit required)", rr.Code)
+	}
+}
+
+func TestComposio_ListTriggerTypes(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	srv := fakeComposioAPI(t, `{"items":[]}`, `{"items":[]}`)
+	h := NewComposioHandler(db, newComposioTestLogger(), &config.ComposioConfig{
+		Enabled: true, APIKey: "ak_test", BaseURL: srv.URL,
+	})
+
+	req := httptest.NewRequest("GET", "/api/v1/integrations/composio/triggers?toolkit=gmail", nil)
+	req = withWorkspaceUser(req, userID, wsID, "VIEWER")
+	rr := httptest.NewRecorder()
+	h.ListTriggerTypes(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	var got composioTriggerTypesResponse
+	mustUnmarshal(t, rr, &got)
+	if !got.Enabled || got.Total != 12 || len(got.Triggers) != 1 || got.Triggers[0].Slug != "GMAIL_NEW_GMAIL_MESSAGE" {
+		t.Errorf("unexpected trigger types response: %+v", got)
+	}
+	if got.Triggers[0].Type != "poll" || got.Triggers[0].Toolkit.Slug != "gmail" {
+		t.Errorf("unexpected trigger type fields: %+v", got.Triggers[0])
+	}
+}
+
+func TestComposio_ListActiveTriggers(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	srv := fakeComposioAPI(t, `{"items":[]}`, `{"items":[]}`)
+	h := NewComposioHandler(db, newComposioTestLogger(), &config.ComposioConfig{
+		Enabled: true, APIKey: "ak_test", BaseURL: srv.URL,
+	})
+
+	req := httptest.NewRequest("GET", "/api/v1/integrations/composio/triggers/active", nil)
+	req = withWorkspaceUser(req, userID, wsID, "VIEWER")
+	rr := httptest.NewRecorder()
+	h.ListActiveTriggers(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	var got composioActiveTriggersResponse
+	mustUnmarshal(t, rr, &got)
+	if !got.Enabled || len(got.Triggers) != 1 || got.Triggers[0].ID != "ti_1" {
+		t.Errorf("unexpected active triggers response: %+v", got)
+	}
+	if got.Triggers[0].TriggerName != "GMAIL_NEW_GMAIL_MESSAGE" || got.Triggers[0].UserID != "user-1" {
+		t.Errorf("unexpected active trigger fields: %+v", got.Triggers[0])
+	}
+}
+
+func TestComposio_CreateTrigger(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	srv := fakeComposioAPI(t, `{"items":[]}`, `{"items":[]}`)
+	h := NewComposioHandler(db, newComposioTestLogger(), &config.ComposioConfig{
+		Enabled: true, APIKey: "ak_test", BaseURL: srv.URL,
+	})
+
+	body := bytes.NewBufferString(`{"slug":"GMAIL_NEW_GMAIL_MESSAGE","user_id":"user-1","config":{"interval":60}}`)
+	req := withWorkspaceUser(httptest.NewRequest("POST", "/api/v1/integrations/composio/triggers", body), userID, wsID, "OWNER")
+	rr := httptest.NewRecorder()
+	h.CreateTrigger(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var got composioCreateTriggerResponse
+	mustUnmarshal(t, rr, &got)
+	if !got.Enabled || got.Trigger.ID != "ti_new" || got.Trigger.TriggerName != "GMAIL_NEW_GMAIL_MESSAGE" || got.Trigger.UserID != "user-1" {
+		t.Errorf("unexpected create trigger resp: %+v", got)
+	}
+}
+
+func TestComposio_CreateTrigger_RequiresFields(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	srv := fakeComposioAPI(t, `{"items":[]}`, `{"items":[]}`)
+	h := NewComposioHandler(db, newComposioTestLogger(), &config.ComposioConfig{Enabled: true, APIKey: "k", BaseURL: srv.URL})
+
+	body := bytes.NewBufferString(`{"slug":"GMAIL_NEW_GMAIL_MESSAGE"}`) // missing user_id
+	req := withWorkspaceUser(httptest.NewRequest("POST", "/t", body), userID, wsID, "OWNER")
+	rr := httptest.NewRecorder()
+	h.CreateTrigger(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d, want 400", rr.Code)
 	}
 }
 

@@ -248,6 +248,135 @@ func (h *ComposioHandler) ListTools(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// ── ListTriggerTypes — GET /api/v1/integrations/composio/triggers ────────────
+
+type composioTriggerTypesResponse struct {
+	Enabled  bool                   `json:"enabled"`
+	Total    int                    `json:"total"`
+	Triggers []composio.TriggerType `json:"triggers"`
+}
+
+// triggerTypesPageLimit caps the trigger-types page we proxy from Composio. The
+// UI narrows via the toolkit filter / search box.
+const triggerTypesPageLimit = 40
+
+// ListTriggerTypes proxies the available trigger types (event subscriptions
+// like GMAIL_NEW_MESSAGE). `toolkit`, `search`, and `limit` (max 100, default
+// 40) are optional server-side filters. Read-gated; returns enabled:false when
+// the provider is unconfigured.
+func (h *ComposioHandler) ListTriggerTypes(w http.ResponseWriter, r *http.Request) {
+	if !requireRole(w, r, "read") {
+		return
+	}
+	client, _ := h.resolveClient(r)
+	if client == nil {
+		writeJSON(w, http.StatusOK, composioTriggerTypesResponse{Enabled: false, Triggers: []composio.TriggerType{}})
+		return
+	}
+
+	toolkit := strings.TrimSpace(r.URL.Query().Get("toolkit"))
+	search := r.URL.Query().Get("search")
+	limit := triggerTypesPageLimit
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 100 {
+			limit = n
+		}
+	}
+
+	page, err := client.ListTriggerTypes(r.Context(), toolkit, search, limit)
+	if err != nil {
+		h.logger.Error("composio: list trigger types", "error", err)
+		writeProblem(w, r, http.StatusBadGateway, "Composio API error")
+		return
+	}
+	if page.Items == nil {
+		page.Items = []composio.TriggerType{}
+	}
+	writeJSON(w, http.StatusOK, composioTriggerTypesResponse{
+		Enabled:  true,
+		Total:    page.TotalItems,
+		Triggers: page.Items,
+	})
+}
+
+// ── ListActiveTriggers — GET /api/v1/integrations/composio/triggers/active ───
+
+type composioActiveTriggersResponse struct {
+	Enabled  bool                       `json:"enabled"`
+	Triggers []composio.TriggerInstance `json:"triggers"`
+}
+
+// ListActiveTriggers proxies the live trigger instances in the project (all
+// users). Read-gated; returns enabled:false when the provider is unconfigured.
+func (h *ComposioHandler) ListActiveTriggers(w http.ResponseWriter, r *http.Request) {
+	if !requireRole(w, r, "read") {
+		return
+	}
+	client, _ := h.resolveClient(r)
+	if client == nil {
+		writeJSON(w, http.StatusOK, composioActiveTriggersResponse{Enabled: false, Triggers: []composio.TriggerInstance{}})
+		return
+	}
+
+	triggers, err := client.ListActiveTriggers(r.Context())
+	if err != nil {
+		h.logger.Error("composio: list active triggers", "error", err)
+		writeProblem(w, r, http.StatusBadGateway, "Composio API error")
+		return
+	}
+	if triggers == nil {
+		triggers = []composio.TriggerInstance{}
+	}
+	writeJSON(w, http.StatusOK, composioActiveTriggersResponse{Enabled: true, Triggers: triggers})
+}
+
+// ── CreateTrigger — POST /api/v1/integrations/composio/triggers ──────────────
+
+type composioCreateTriggerRequest struct {
+	Slug   string         `json:"slug"`
+	UserID string         `json:"user_id"`
+	Config map[string]any `json:"config"`
+}
+
+type composioCreateTriggerResponse struct {
+	Enabled bool                     `json:"enabled"`
+	Trigger composio.TriggerInstance `json:"trigger"`
+}
+
+// CreateTrigger creates (or re-enables) a trigger instance for a user. The body
+// carries {slug, user_id, config?}: slug is the trigger-type slug
+// (GMAIL_NEW_MESSAGE, …), user_id the Composio user that owns the connected
+// account, config the trigger-type-specific configuration. OWNER/ADMIN only.
+func (h *ComposioHandler) CreateTrigger(w http.ResponseWriter, r *http.Request) {
+	if !requireRole(w, r, "manage") {
+		return
+	}
+	client, _ := h.resolveClient(r)
+	if client == nil {
+		writeProblem(w, r, http.StatusBadRequest, "Composio is not configured (set an API key first)")
+		return
+	}
+	var req composioCreateTriggerRequest
+	if err := readJSON(r, &req); err != nil {
+		writeProblem(w, r, http.StatusBadRequest, "Invalid JSON body")
+		return
+	}
+	req.Slug = strings.TrimSpace(req.Slug)
+	req.UserID = strings.TrimSpace(req.UserID)
+	if req.Slug == "" || req.UserID == "" {
+		writeProblem(w, r, http.StatusBadRequest, "slug and user_id are required")
+		return
+	}
+
+	inst, err := client.CreateTriggerInstance(r.Context(), req.Slug, req.UserID, req.Config)
+	if err != nil {
+		h.logger.Error("composio: create trigger instance", "slug", req.Slug, "error", err)
+		writeProblem(w, r, http.StatusBadGateway, "Composio API error")
+		return
+	}
+	writeJSON(w, http.StatusOK, composioCreateTriggerResponse{Enabled: true, Trigger: inst})
+}
+
 // ── Connect — POST /api/v1/integrations/composio/connect ─────────────────────
 
 type composioConnectRequest struct {

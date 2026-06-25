@@ -47,6 +47,9 @@ All integration endpoints require authentication and workspace context (except w
 | `GET` | [`/api/v1/integrations/composio/inventory`](#composio-inventory) | Composio catalog + connected accounts per user |
 | `GET` | [`/api/v1/integrations/composio/toolkits`](#composio-toolkits) | Browse the Composio app catalog (1000+ apps) |
 | `GET` | [`/api/v1/integrations/composio/tools`](#composio-tools) | List the tools a toolkit exposes |
+| `GET` | [`/api/v1/integrations/composio/triggers`](#composio-triggers) | List available trigger types |
+| `GET` | [`/api/v1/integrations/composio/triggers/active`](#composio-active-triggers) | List active trigger instances |
+| `POST` | [`/api/v1/integrations/composio/triggers`](#composio-create-trigger) | Create/enable a trigger instance for a user |
 | `GET` | [`/api/v1/integrations/composio/settings`](#composio-settings) | Get the workspace Composio config status |
 | `PUT` | [`/api/v1/integrations/composio/settings`](#composio-settings) | Set & validate the workspace Composio API key |
 | `DELETE` | [`/api/v1/integrations/composio/settings`](#composio-settings) | Remove the workspace API key (revert to env) |
@@ -183,6 +186,118 @@ default 40) are optional server-side filters. Read-gated; returns
 | `tools` | array | The current page of tools (slug, name, description, toolkit) |
 
 CLI: `crewship integration composio tools <toolkit> [--search] [--limit]`.
+
+### Composio Triggers
+
+```
+GET /api/v1/integrations/composio/triggers?workspace_id={workspaceId}&toolkit={slug}&search={q}&limit={n}
+```
+
+Lists the available **trigger types** — event subscriptions a toolkit exposes
+(e.g. `GMAIL_NEW_MESSAGE`, `GITHUB_PR_OPENED`). `toolkit`, `search`, and
+`limit` (max 100, default 40) are optional server-side filters. Read-gated;
+returns `enabled: false` when the provider is unconfigured.
+
+**Response:** `200 OK`
+
+```json
+{
+  "enabled": true,
+  "total": 12,
+  "triggers": [
+    {
+      "slug": "GMAIL_NEW_GMAIL_MESSAGE",
+      "name": "New Gmail message",
+      "description": "Triggers when a new email arrives",
+      "type": "poll",
+      "toolkit": { "slug": "gmail" }
+    }
+  ]
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `enabled` | boolean | Whether the provider is configured |
+| `total` | integer | Total trigger types matching the filter |
+| `triggers` | array | The current page of trigger types (slug, name, description, type, toolkit) |
+
+CLI: `crewship integration composio triggers types [--toolkit] [--search] [--limit]`.
+
+### Composio Active Triggers
+
+```
+GET /api/v1/integrations/composio/triggers/active?workspace_id={workspaceId}
+```
+
+Lists the **live trigger instances** in the project across all users. Read-gated;
+returns `enabled: false` when the provider is unconfigured.
+
+**Response:** `200 OK`
+
+```json
+{
+  "enabled": true,
+  "triggers": [
+    {
+      "id": "ti_abc123",
+      "trigger_name": "GMAIL_NEW_GMAIL_MESSAGE",
+      "user_id": "user-1",
+      "connected_account_id": "ca_1",
+      "trigger_config": { "interval": 60 }
+    }
+  ]
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `enabled` | boolean | Whether the provider is configured |
+| `triggers` | array | The active trigger instances (id, trigger_name, user_id, connected_account_id, trigger_config, disabled_at) |
+
+CLI: `crewship integration composio triggers active`.
+
+### Composio Create Trigger
+
+```
+POST /api/v1/integrations/composio/triggers?workspace_id={workspaceId}
+```
+
+Creates (or re-enables) a trigger instance for a Composio user. **OWNER/ADMIN
+only.** Returns `400` if `slug` or `user_id` is empty, or if the provider is
+unconfigured.
+
+**Request body:**
+
+```json
+{
+  "slug": "GMAIL_NEW_GMAIL_MESSAGE",
+  "user_id": "user-1",
+  "config": { "interval": 60 }
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `slug` | string | Trigger-type slug to enable (**required**) |
+| `user_id` | string | Composio user the trigger fires for (**required**) |
+| `config` | object | Trigger-type-specific configuration (optional) |
+
+**Response:** `200 OK`
+
+```json
+{
+  "enabled": true,
+  "trigger": {
+    "id": "ti_new",
+    "trigger_name": "GMAIL_NEW_GMAIL_MESSAGE",
+    "user_id": "user-1",
+    "trigger_config": { "interval": 60 }
+  }
+}
+```
+
+CLI: `crewship integration composio triggers enable <slug> --user <id>`.
 
 ### Composio Settings
 
