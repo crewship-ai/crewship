@@ -307,16 +307,24 @@ func (h *InboxHandler) PatchState(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Source-managed kinds (waitpoint / escalation / failed_run) must
-	// keep their inbox state in sync with the authoritative source
-	// row. The inbox PATCH is fine for "read" (the inbox row tracks
-	// its own visibility marker) but "resolved" and "unread" would
-	// desync — the user expects the inbox flip to also approve the
-	// waitpoint / close the escalation / retry the run, and it
-	// doesn't. Force callers through the proper source endpoints
-	// (/pipelines/waitpoints/{token}/approve, etc.) for those
-	// transitions. Generic kinds (message) can flip freely.
-	if kind == "waitpoint" || kind == "escalation" || kind == "failed_run" {
+	// Source-managed kinds (waitpoint / escalation) must keep their
+	// inbox state in sync with the authoritative source row. The inbox
+	// PATCH is fine for "read" (the inbox row tracks its own visibility
+	// marker) but "resolved" and "unread" would desync — the user
+	// expects the inbox flip to also approve the waitpoint / close the
+	// escalation, and it doesn't. Force callers through the proper
+	// source endpoints (/pipelines/waitpoints/{token}/approve, etc.)
+	// for those transitions.
+	//
+	// failed_run is deliberately NOT in this set: a terminally-failed
+	// run has no source "resolve" endpoint — the inbox item is the only
+	// artifact, so resolving/dismissing it on the inbox row IS the
+	// correct semantics. (Retry is a separate re-fire via
+	// /pipelines/{slug}/run; it creates a NEW run rather than resolving
+	// the source.) Keeping failed_run here made its Cancel/Retry inbox
+	// actions 409 and the items pile up with no way to clear them.
+	// Generic kinds (message) can flip freely too.
+	if kind == "waitpoint" || kind == "escalation" {
 		if body.State != "read" {
 			writeJSON(w, http.StatusConflict, map[string]string{
 				"error": "use the source endpoint for this kind (e.g. /pipelines/waitpoints/{token}/approve) — inbox PATCH only supports 'read' for source-managed items",
