@@ -406,7 +406,9 @@ func TestInboxHandler_PatchState_SourceManagedKinds(t *testing.T) {
 
 	now := time.Now().UTC()
 	// Source-managed kinds: only 'read' is allowed; resolved/unread must 409.
-	for _, kind := range []string{"waitpoint", "escalation", "failed_run"} {
+	// failed_run is intentionally excluded — it has no source resolve
+	// endpoint, so the inbox row is freely resolvable (asserted below).
+	for _, kind := range []string{"waitpoint", "escalation"} {
 		id := "src-" + kind
 		seedInboxItem(t, h, wsID, id, kind, "unread", "", "", "managed "+kind, now)
 
@@ -448,14 +450,25 @@ func TestInboxHandler_PatchState_SourceManagedKinds(t *testing.T) {
 		}
 	}
 
-	// Generic 'message' kind still supports full flip set
-	seedInboxItem(t, h, wsID, "src-msg", "message", "unread", "", "", "generic", now)
-	req := httptest.NewRequest("PATCH", "/api/v1/inbox/src-msg", strings.NewReader(`{"state":"resolved","resolved_action":"approved"}`))
-	req.SetPathValue("id", "src-msg")
-	req = withWorkspaceUser(req, userID, wsID, "OWNER")
-	rr := httptest.NewRecorder()
-	h.PatchState(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Errorf("message resolved: code = %d, want 200", rr.Code)
+	// Freely-resolvable kinds (message + failed_run) support the full
+	// flip set. failed_run especially: a terminally-failed run has no
+	// source resolve endpoint, so dismissing it from the inbox must be
+	// allowed or the items pile up unclearable.
+	for _, kind := range []string{"message", "failed_run"} {
+		id := "free-" + kind
+		seedInboxItem(t, h, wsID, id, kind, "unread", "", "", "generic "+kind, now)
+		req := httptest.NewRequest("PATCH", "/api/v1/inbox/"+id, strings.NewReader(`{"state":"resolved","resolved_action":"cancelled"}`))
+		req.SetPathValue("id", id)
+		req = withWorkspaceUser(req, userID, wsID, "OWNER")
+		rr := httptest.NewRecorder()
+		h.PatchState(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Errorf("%s resolved: code = %d body=%s, want 200", kind, rr.Code, rr.Body.String())
+		}
+		var state, action string
+		db.QueryRow(`SELECT state, COALESCE(resolved_action,'') FROM inbox_items WHERE id=?`, id).Scan(&state, &action)
+		if state != "resolved" || action != "cancelled" {
+			t.Errorf("%s after resolve: state=%s action=%s, want resolved/cancelled", kind, state, action)
+		}
 	}
 }

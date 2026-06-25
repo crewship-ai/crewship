@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
 import {
   AlertCircle,
@@ -53,14 +53,28 @@ export function InboxList() {
   const { workspaceId } = useWorkspace()
   const [stateFilter, setStateFilter] = useState<StateFilter>("unread")
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  // Snapshot of the open item. Clicking an *unread* row marks it read,
+  // which drops it from the unread-filtered list (see use-inbox
+  // onSuccess reconciliation) — so a `selected` derived purely from
+  // `items` would go null the instant you open it and the detail pane
+  // would snap shut. We keep the last live version here so the detail
+  // stays open after the row leaves the current filter (Linear-style:
+  // the row greys out of Unread, the detail keeps showing).
+  const [selectedSnapshot, setSelectedSnapshot] = useState<InboxItem | null>(null)
 
   const filterParam = stateFilter === "all" ? "all" : stateFilter
   const { items, unreadCount, loading, error, patch, refresh } = useInbox(workspaceId, filterParam)
 
-  const selected = useMemo(
+  const liveSelected = useMemo(
     () => items.find((it) => it.id === selectedId) ?? null,
     [items, selectedId],
   )
+  // Track the freshest live version while the row is still in the list;
+  // fall back to the snapshot once it's been filtered out.
+  useEffect(() => {
+    if (liveSelected) setSelectedSnapshot(liveSelected)
+  }, [liveSelected])
+  const selected = liveSelected ?? (selectedSnapshot?.id === selectedId ? selectedSnapshot : null)
 
   const counts = useMemo(() => {
     const unread = items.filter((i) => i.state === "unread").length
@@ -128,6 +142,9 @@ export function InboxList() {
                   selected={selectedId === item.id}
                   onSelect={() => {
                     setSelectedId(item.id)
+                    // Snapshot immediately so the detail survives the
+                    // read-transition evicting this row from the list.
+                    setSelectedSnapshot(item)
                     if (item.state === "unread") {
                       patch(item.id, "read")
                     }
