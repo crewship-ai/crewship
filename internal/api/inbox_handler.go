@@ -461,10 +461,11 @@ func (h *InboxHandler) BulkPatchState(w http.ResponseWriter, r *http.Request) {
 		seen[id] = true
 
 		var existing, kind string
+		var blocking int
 		lookupArgs := append([]interface{}{id, workspaceID}, visArgs...)
 		err = tx.QueryRowContext(r.Context(),
-			`SELECT id, kind FROM inbox_items WHERE id = ? AND workspace_id = ?`+visClause,
-			lookupArgs...).Scan(&existing, &kind)
+			`SELECT id, kind, blocking FROM inbox_items WHERE id = ? AND workspace_id = ?`+visClause,
+			lookupArgs...).Scan(&existing, &kind, &blocking)
 		if errors.Is(err, sql.ErrNoRows) {
 			notFound++
 			continue
@@ -475,10 +476,24 @@ func (h *InboxHandler) BulkPatchState(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Same guard as PatchState: source-managed kinds only accept
-		// 'read' here. Skip (not fail) so the batch still clears the
-		// freely-resolvable rows.
-		if (kind == "waitpoint" || kind == "escalation") && body.State != "read" {
+		// Decision-item protection. Bulk MUST NOT silently close anything
+		// an agent is waiting on a human to decide — one misclick on
+		// "Resolve all" could otherwise approve/dismiss dozens of pending
+		// requests. So on a resolve (not 'read', which is harmless) we
+		// SKIP, never fail:
+		//   - source-managed kinds (waitpoint/escalation): their real
+		//     state lives in the source table, not the inbox row; and
+		//   - any blocking=true row regardless of kind: "blocking" means
+		//     "needs explicit human action".
+		// Non-blocking message/failed_run still clear. The client warns
+		// the user before calling; this is the server-side backstop.
+		if body.State == "resolved" && (kind == "waitpoint" || kind == "escalation" || blocking != 0) {
+			skipped = append(skipped, id)
+			continue
+		}
+		// 'unread' on source-managed kinds would desync the source row —
+		// only 'read' is allowed for those. Skip (not fail) here too.
+		if body.State == "unread" && (kind == "waitpoint" || kind == "escalation") {
 			skipped = append(skipped, id)
 			continue
 		}

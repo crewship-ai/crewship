@@ -473,10 +473,28 @@ func TestInboxHandler_PatchState_SourceManagedKinds(t *testing.T) {
 	}
 }
 
+// seedInboxItemBlocking inserts a row with an explicit blocking flag
+// (the shared seedInboxItem hardcodes blocking=1). The bulk decision-
+// protection skips blocking rows on resolve, so the bulk test needs
+// non-blocking rows to exercise the resolve path.
+func seedInboxItemBlocking(t *testing.T, h *InboxHandler, wsID, id, kind, title string, blocking int, createdAt time.Time) {
+	t.Helper()
+	_, err := h.db.Exec(`
+		INSERT INTO inbox_items (id, workspace_id, kind, source_id, title, body_md,
+			sender_type, state, priority, blocking, payload_json, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, '', 'system', 'unread', 'medium', ?, '{}', ?, ?)`,
+		id, wsID, kind, "src-"+id, title, blocking,
+		createdAt.Format(time.RFC3339Nano), createdAt.Format(time.RFC3339Nano))
+	if err != nil {
+		t.Fatalf("seed inbox %s: %v", id, err)
+	}
+}
+
 // TestInboxHandler_BulkPatchState covers the tree-grouped UI's
 // "resolve all under this group" action: a single call clears the
-// freely-resolvable rows and SKIPS (not fails) source-managed kinds
-// that can't take the requested state, reporting both counts.
+// freely-resolvable rows and SKIPS (not fails) anything that needs an
+// explicit human decision — source-managed kinds AND blocking rows —
+// reporting both counts.
 func TestInboxHandler_BulkPatchState(t *testing.T) {
 	db := setupTestDB(t)
 	userID := seedTestUser(t, db)
@@ -484,13 +502,16 @@ func TestInboxHandler_BulkPatchState(t *testing.T) {
 	h := NewInboxHandler(db, newTestLogger(), nil)
 	now := time.Now().UTC()
 
-	// A mixed selection: 2 failed_run + 1 message (freely resolvable) and
-	// 1 waitpoint + 1 escalation (source-managed → skipped on 'resolved').
-	seedInboxItem(t, h, wsID, "fr-1", "failed_run", "unread", "", "", "fetch-and-extract", now)
-	seedInboxItem(t, h, wsID, "fr-2", "failed_run", "unread", "", "", "fetch-and-extract", now)
-	seedInboxItem(t, h, wsID, "msg-1", "message", "unread", "", "", "note", now)
-	seedInboxItem(t, h, wsID, "wp-1", "waitpoint", "unread", "", "", "approve", now)
-	seedInboxItem(t, h, wsID, "esc-1", "escalation", "unread", "", "", "help", now)
+	// Freely resolvable: non-blocking failed_run + message.
+	seedInboxItemBlocking(t, h, wsID, "fr-1", "failed_run", "fetch-and-extract", 0, now)
+	seedInboxItemBlocking(t, h, wsID, "fr-2", "failed_run", "fetch-and-extract", 0, now)
+	seedInboxItemBlocking(t, h, wsID, "msg-1", "message", "note", 0, now)
+	// Decision items that must be skipped on resolve:
+	//   - waitpoint + escalation (source-managed kinds), and
+	//   - a BLOCKING message (blocking=1, regardless of kind).
+	seedInboxItemBlocking(t, h, wsID, "wp-1", "waitpoint", "approve", 1, now)
+	seedInboxItemBlocking(t, h, wsID, "esc-1", "escalation", "help", 0, now)
+	seedInboxItemBlocking(t, h, wsID, "bmsg-1", "message", "needs decision", 1, now)
 
 	bulk := func(ids []string, state, action string) map[string]interface{} {
 		t.Helper()
@@ -509,12 +530,12 @@ func TestInboxHandler_BulkPatchState(t *testing.T) {
 		return out
 	}
 
-	out := bulk([]string{"fr-1", "fr-2", "msg-1", "wp-1", "esc-1"}, "resolved", "cancelled")
+	out := bulk([]string{"fr-1", "fr-2", "msg-1", "wp-1", "esc-1", "bmsg-1"}, "resolved", "cancelled")
 	if got := out["updated"]; got != float64(3) {
-		t.Errorf("updated = %v, want 3 (2 failed_run + 1 message)", got)
+		t.Errorf("updated = %v, want 3 (2 failed_run + 1 non-blocking message)", got)
 	}
-	if got := out["skipped"]; got != float64(2) {
-		t.Errorf("skipped = %v, want 2 (waitpoint + escalation)", got)
+	if got := out["skipped"]; got != float64(3) {
+		t.Errorf("skipped = %v, want 3 (waitpoint + escalation + blocking message)", got)
 	}
 
 	// The 3 freely-resolvable rows are now resolved with the action recorded.
@@ -525,19 +546,20 @@ func TestInboxHandler_BulkPatchState(t *testing.T) {
 			t.Errorf("%s: state=%s action=%s, want resolved/cancelled", id, state, action)
 		}
 	}
-	// The source-managed rows are untouched (still unread).
-	for _, id := range []string{"wp-1", "esc-1"} {
+	// The decision items are untouched (still unread) — nothing closed.
+	for _, id := range []string{"wp-1", "esc-1", "bmsg-1"} {
 		var state string
 		db.QueryRow(`SELECT state FROM inbox_items WHERE id=?`, id).Scan(&state)
 		if state != "unread" {
-			t.Errorf("%s: state=%s, want unread (skipped)", id, state)
+			t.Errorf("%s: state=%s, want unread (skipped, must not be bulk-closed)", id, state)
 		}
 	}
 
-	// 'read' is allowed for every kind, including source-managed ones.
-	out = bulk([]string{"wp-1", "esc-1"}, "read", "")
-	if got := out["updated"]; got != float64(2) {
-		t.Errorf("read updated = %v, want 2 (read allowed for all kinds)", got)
+	// 'read' is harmless and allowed for every kind — including the
+	// decision items (it doesn't close anything).
+	out = bulk([]string{"wp-1", "esc-1", "bmsg-1"}, "read", "")
+	if got := out["updated"]; got != float64(3) {
+		t.Errorf("read updated = %v, want 3 (read allowed for all kinds)", got)
 	}
 
 	// Cross-workspace / unknown ids are counted as not_found, not errors.

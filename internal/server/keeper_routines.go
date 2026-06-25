@@ -500,25 +500,35 @@ func (p *sqlMemoryHealthPersister) TriggerConsolidation(ctx context.Context, wor
 }
 
 func (p *sqlMemoryHealthPersister) WriteInboxItem(ctx context.Context, workspaceID, crewID, reason string, blocking bool) error {
+	// This is a SYSTEM ADVISORY ("this crew's memory looks unhealthy"),
+	// not an agent asking a human to decide something. It must NOT be
+	// kind=escalation: an escalation is source-managed (only the
+	// escalations-table lifecycle resolves it), but this row has no
+	// escalations record behind it — so as kind=escalation it could
+	// never be cleared (inbox PATCH→409, /escalations/{id}/resolve→404)
+	// and the advisories piled up unclearable. As kind=message it's a
+	// freely-dismissable notification, and the bulk-resolve guard no
+	// longer treats it as a protected decision item. Non-blocking for
+	// the same reason: there is no decision to block on.
 	if err := inbox.Insert(ctx, p.db, p.logger, inbox.Item{
 		WorkspaceID: workspaceID,
-		Kind:        inbox.KindEscalation,
-		SourceID:    "memory_health_escalate_" + crewID + "_" + time.Now().UTC().Format("20060102"),
+		Kind:        inbox.KindMessage,
+		SourceID:    "memory_health_advisory_" + crewID + "_" + time.Now().UTC().Format("20060102"),
 		TargetRole:  "MANAGER",
-		Title:       "Memory health escalation",
+		Title:       "Memory health advisory",
 		BodyMD:      reason,
 		SenderType:  "system",
 		SenderID:    "keeper_memory_health_routine",
 		SenderName:  "Memory Health",
 		Priority:    "medium",
-		Blocking:    blocking,
+		Blocking:    false,
 		Payload: map[string]interface{}{
 			"crew_id": crewID,
 			"reason":  reason,
 			"source":  "routine",
 		},
 	}); err != nil {
-		return fmt.Errorf("inbox insert (memory_health escalate): %w", err)
+		return fmt.Errorf("inbox insert (memory_health advisory): %w", err)
 	}
 	return nil
 }
