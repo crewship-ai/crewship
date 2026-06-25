@@ -15,6 +15,8 @@ package api
 import (
 	"database/sql"
 	"errors"
+	"fmt"
+	"hash/fnv"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -471,6 +473,32 @@ type composioBindRequest struct {
 	Toolkits []string `json:"toolkits"`
 }
 
+// composioToolkitTag derives a short, name-safe tag identifying a toolkit
+// restriction set, so the per-toolkit-set Composio MCP server name stays stable
+// and within Composio's 30-char [a-zA-Z0-9- ] limit. Empty restriction → "all"
+// (every connected app); otherwise an 8-hex FNV hash of the sorted, lowercased
+// slugs (the set, not the order). Two agents restricted to the same apps reuse
+// the same server; different restrictions get different servers.
+func composioToolkitTag(toolkits []string) string {
+	seen := map[string]struct{}{}
+	for _, t := range toolkits {
+		if t = strings.TrimSpace(strings.ToLower(t)); t != "" {
+			seen[t] = struct{}{}
+		}
+	}
+	if len(seen) == 0 {
+		return "all"
+	}
+	slugs := make([]string, 0, len(seen))
+	for s := range seen {
+		slugs = append(slugs, s)
+	}
+	sort.Strings(slugs)
+	hsh := fnv.New32a()
+	_, _ = hsh.Write([]byte(strings.Join(slugs, ",")))
+	return fmt.Sprintf("%08x", hsh.Sum32())
+}
+
 type composioBindResponse struct {
 	AgentID     string `json:"agent_id"`
 	UserID      string `json:"user_id"`
@@ -607,48 +635,50 @@ func (h *ComposioHandler) BindAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Composio MCP server name: 4–30 chars of [a-zA-Z0-9- ]. Derive a stable,
-	// pattern-safe name from a short slice of the workspace id.
+	// Composio MCP server: one per (workspace, toolkit-set), named within
+	// Composio's 30-char [a-zA-Z0-9- ] limit. Restricting an agent to specific
+	// apps MUST yield a different server (different auth configs) — a single
+	// workspace-wide server would expose every connected app regardless of the
+	// requested restriction.
 	wsShort := wsID
 	if len(wsShort) > 12 {
 		wsShort = wsShort[len(wsShort)-12:]
 	}
-	mcpName := "crewship-" + wsShort
+	toolkitTag := composioToolkitTag(req.Toolkits)
+	mcpName := "crewship-" + wsShort + "-" + toolkitTag
 
-	// Find-or-create: reuse the workspace's existing Composio MCP server when one
-	// already carries this stable name — creating a fresh server on every bind
-	// leaks duplicate Composio-side resources. A list error is non-fatal: fall
-	// through to create (mcpURL stays empty) rather than block the binding.
-	var mcpURL string
+	// Find-or-create by that name (reuse avoids leaking duplicate Composio
+	// servers; a list error is non-fatal — fall through to create).
+	var composioServerID string
 	if servers, lerr := client.ListMCPServers(ctx, mcpName); lerr != nil {
 		h.logger.Warn("composio: list mcp servers", "error", lerr)
 	} else {
 		for _, s := range servers {
-			if s.Name == mcpName && s.MCPURL != "" {
-				mcpURL = s.MCPURL
+			if s.Name == mcpName && s.ID != "" {
+				composioServerID = s.ID
 				break
 			}
 		}
 	}
-	if mcpURL == "" {
-		if _, mcpURL, err = client.CreateMCPServer(ctx, mcpName, authConfigIDs); err != nil {
-			h.logger.Error("composio: create mcp server", "error", err)
+	if composioServerID == "" {
+		id, _, cerr := client.CreateMCPServer(ctx, mcpName, authConfigIDs)
+		if cerr != nil {
+			h.logger.Error("composio: create mcp server", "error", cerr)
 			writeProblem(w, r, http.StatusBadGateway, "Composio API error (mcp server)")
 			return
 		}
+		composioServerID = id
 	}
-	if mcpURL == "" {
-		h.logger.Error("composio: mcp server returned empty url")
-		writeProblem(w, r, http.StatusBadGateway, "Composio API error (mcp url)")
+	if composioServerID == "" {
+		h.logger.Error("composio: mcp server returned empty id")
+		writeProblem(w, r, http.StatusBadGateway, "Composio API error (mcp server)")
 		return
 	}
 
-	// Scope the URL to this Composio user. Preserve any existing query.
-	sep := "?"
-	if strings.Contains(mcpURL, "?") {
-		sep = "&"
-	}
-	endpoint := mcpURL + sep + "user_id=" + url.QueryEscape(req.UserID)
+	// Per-user transport URL — NOT the canonical mcp_url, which 307-redirects to
+	// a path the sidecar's MCP client won't follow. This is what the agent
+	// runtime actually connects to.
+	endpoint := client.MCPUserURL(composioServerID, req.UserID)
 
 	enc, err := encryption.Encrypt(key)
 	if err != nil {
@@ -668,7 +698,17 @@ func (h *ComposioHandler) BindAgent(w http.ResponseWriter, r *http.Request) {
 	credID := generateCUID()
 	serverID := generateCUID()
 	bindingID := generateCUID()
-	serverName := "composio-" + req.UserID
+	// One workspace_mcp_servers row PER AGENT (not per user): resolveAgentMCPServers
+	// treats a server that has any binding as opt-in (only bound agents get it),
+	// so a per-agent row keeps each agent's access — and its toolkit restriction —
+	// isolated. A per-user row would be shared by every agent on that user and
+	// collide on the restriction.
+	serverName := "composio-" + agentID
+	toolkitLabel := "all apps"
+	if toolkitTag != "all" {
+		toolkitLabel = strings.Join(req.Toolkits, ", ")
+	}
+	displayName := "Composio: " + req.UserID + " (" + toolkitLabel + ")"
 
 	tx, err := h.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -717,7 +757,7 @@ func (h *ComposioHandler) BindAgent(w http.ResponseWriter, r *http.Request) {
 			enabled      = 1,
 			deleted_at   = NULL,
 			updated_at   = excluded.updated_at`,
-		serverID, wsID, serverName, "Composio: "+req.UserID, endpoint, now, now); err != nil {
+		serverID, wsID, serverName, displayName, endpoint, now, now); err != nil {
 		h.logger.Error("composio: upsert mcp server row", "error", err)
 		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 		return
@@ -782,7 +822,10 @@ func (h *ComposioHandler) UnbindAgent(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, r, http.StatusBadRequest, "agent id and user_id are required")
 		return
 	}
-	serverName := "composio-" + userID
+	// The Composio server row is per-agent (see BindAgent); user_id is accepted
+	// for API symmetry but the agent has a single Composio binding to remove.
+	_ = userID
+	serverName := "composio-" + agentID
 
 	ctx := r.Context()
 	// Resolve the workspace server row (scoped to this workspace) so we never

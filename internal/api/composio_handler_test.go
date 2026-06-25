@@ -483,16 +483,19 @@ func TestComposio_BindAgent_PersistsRows(t *testing.T) {
 	if got.AgentID != agentID || got.UserID != "user-42" {
 		t.Errorf("unexpected bind resp: %+v", got)
 	}
-	wantEndpoint := "https://mcp.composio.dev/server/mcp_srv_1?user_id=user-42"
+	// Endpoint is the per-user MCP *transport* URL (…/v3/mcp/<serverID>/mcp),
+	// built from the client's base host — not the canonical mcp_url.
+	wantEndpoint := srv.URL + "/v3/mcp/mcp_srv_1/mcp?user_id=user-42"
 	if got.Endpoint != wantEndpoint {
 		t.Errorf("endpoint = %q, want %q", got.Endpoint, wantEndpoint)
 	}
 
-	// workspace_mcp_servers row exists, scoped to the user, streamable-http.
+	// workspace_mcp_servers row exists PER AGENT (composio-<agentID>),
+	// streamable-http.
 	var srvName, transport, endpoint, icon string
 	var enabled int
 	if err := db.QueryRow(`SELECT name, transport, endpoint, icon, enabled
-		FROM workspace_mcp_servers WHERE workspace_id = ? AND name = 'composio-user-42'`, wsID).
+		FROM workspace_mcp_servers WHERE workspace_id = ? AND name = ?`, wsID, "composio-"+agentID).
 		Scan(&srvName, &transport, &endpoint, &icon, &enabled); err != nil {
 		t.Fatalf("query workspace_mcp_servers: %v", err)
 	}
@@ -534,7 +537,7 @@ func TestComposio_BindAgent_PersistsRows(t *testing.T) {
 		t.Fatalf("re-bind status=%d body=%s", rr2.Code, rr2.Body.String())
 	}
 	var serverCount, bindCount int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM workspace_mcp_servers WHERE workspace_id = ? AND name = 'composio-user-42'`, wsID).Scan(&serverCount); err != nil {
+	if err := db.QueryRow(`SELECT COUNT(*) FROM workspace_mcp_servers WHERE workspace_id = ? AND name = ?`, wsID, "composio-"+agentID).Scan(&serverCount); err != nil {
 		t.Fatalf("count servers: %v", err)
 	}
 	if err := db.QueryRow(`SELECT COUNT(*) FROM agent_mcp_bindings WHERE agent_id = ?`, agentID).Scan(&bindCount); err != nil {

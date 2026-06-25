@@ -465,6 +465,16 @@ func (c *Client) CreateMCPServer(ctx context.Context, name string, authConfigIDs
 	return out.ID, out.MCPURL, nil
 }
 
+// MCPUserURL builds the per-user MCP *transport* URL for a server. The
+// create/list `mcp_url` (…/v3.1/mcp/<id>) is a canonical link that 307-redirects
+// to the streamable-http transport at …/v3/mcp/<id>/mcp; MCP clients (incl. our
+// sidecar) issue POSTs that don't follow that redirect, so we construct the
+// transport URL directly and scope it to the Composio user. This is the URL the
+// agent runtime actually connects to.
+func (c *Client) MCPUserURL(serverID, userID string) string {
+	return c.baseURL + "/v3/mcp/" + url.PathEscape(serverID) + "/mcp?user_id=" + url.QueryEscape(userID)
+}
+
 // CreateConnectLink starts a hosted-auth (Connect Link) session for a user
 // against an auth config. callbackURL is optional (empty → Composio's hosted
 // success page).
