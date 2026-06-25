@@ -99,6 +99,47 @@ func TestRun_ApprovalWaitStep_ReturnsWaiting(t *testing.T) {
 	}
 }
 
+// TestRun_ApprovalDenied_ResolvesRunFailed — a DENIED approval must resume the
+// parked run to a terminal FAILED state, never strand it in 'waiting'. Guards
+// the "deny doesn't strand the run" contract (resume fires on reject too).
+func TestRun_ApprovalDenied_ResolvesRunFailed(t *testing.T) {
+	db := openResumeTestDB(t)
+	defer db.Close()
+	ctx := context.Background()
+
+	store := NewStore(db)
+	runStore := NewRunStore(db)
+	wpStore := NewSQLWaitpointStore(db)
+	defer wpStore.Close()
+	p := saveResumePipeline(t, store, "appr-deny", asyncApprovalLinearDSL)
+
+	exec := NewExecutor(store, NewResolver(db), newMockRunner(), &captureEmitter{}).
+		WithRunStore(runStore).
+		WithWaitpointStore(wpStore)
+
+	res, err := exec.Run(ctx, RunInput{PipelineID: p.ID, WorkspaceID: "ws_test", Mode: ModeRun})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if res.Status != "WAITING" {
+		t.Fatalf("status: got %q, want WAITING", res.Status)
+	}
+
+	// Deny the approval, then resume. The run must reach a terminal state.
+	if err := wpStore.CompleteApproval(ctx, res.WaitpointToken, false, "u_admin", "nope"); err != nil {
+		t.Fatalf("complete (deny): %v", err)
+	}
+	resumeAndAwait(t, exec, runStore, res.RunID)
+
+	rec, _ := runStore.Get(ctx, res.RunID)
+	if rec.Status == RunStatusWaiting {
+		t.Fatal("denied run is stranded in 'waiting' — it must resolve to a terminal state")
+	}
+	if rec.Status != RunStatusFailed {
+		t.Fatalf("after denial+resume status: got %q, want failed", rec.Status)
+	}
+}
+
 const asyncApprovalDAGDSL = `{
   "dsl_version": "1.0",
   "name": "appr-dag",
