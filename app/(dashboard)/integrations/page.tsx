@@ -33,7 +33,7 @@ import { AddMCPWizard } from "@/components/features/integrations/add-mcp-wizard"
 import { MCPLogo } from "@/components/icons/mcp-logos"
 import { RecipesEmptyState } from "@/components/features/dashboard/recipes-cards"
 import { serializeArgs, subtitleFor } from "@/components/features/integrations/helpers"
-import { ManagedIntegrationsComingSoon } from "@/components/features/integrations/managed-coming-soon"
+import { ComposioIntegrations } from "@/components/features/integrations/composio-integrations"
 import { legacyMcpIntegrations } from "@/lib/feature-flags"
 import type {
   AgentBinding,
@@ -56,7 +56,7 @@ import type {
 // back, so this is a fully reversible rollback path, not a deletion.
 export default function IntegrationsPage() {
   if (!legacyMcpIntegrations()) {
-    return <ManagedIntegrationsComingSoon />
+    return <ComposioIntegrations />
   }
   return <LegacyIntegrationsPage />
 }
