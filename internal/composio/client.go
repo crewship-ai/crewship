@@ -495,23 +495,49 @@ func (c *Client) ListMCPServers(ctx context.Context, name string) ([]MCPServer, 
 // are enforced — a "full" app passes nil so we never enumerate its (potentially
 // 800+) tools.
 func (c *Client) CreateMCPServer(ctx context.Context, name string, authConfigIDs, allowedTools []string) (string, string, error) {
-	if allowedTools == nil {
-		allowedTools = []string{}
+	// Composio's /tools catalog can list slugs that the MCP-server create then
+	// rejects as not belonging to the toolkit (error code 1154,
+	// MCP_InvalidToolsProvided — e.g. deprecated aliases like GMAIL_LIST_MESSAGES).
+	// When that happens, drop exactly the rejected tools (which the error names)
+	// and retry. We never widen scope: if every requested tool is rejected we
+	// fail rather than silently fall back to "all tools".
+	tools := append([]string{}, allowedTools...)
+	var lastErr error
+	for attempt := 0; attempt < 4; attempt++ {
+		body := map[string]any{
+			"name":                      name,
+			"auth_config_ids":           authConfigIDs,
+			"allowed_tools":             tools,
+			"managed_auth_via_composio": true,
+		}
+		var out struct {
+			ID     string `json:"id"`
+			MCPURL string `json:"mcp_url"`
+		}
+		err := c.post(ctx, "/api/v3.1/mcp/servers", body, &out)
+		if err == nil {
+			return out.ID, out.MCPURL, nil
+		}
+		lastErr = err
+		// Only the invalid-tools case is retryable, and only when we actually
+		// requested a restricted set (full mode has no tools to prune).
+		msg := err.Error()
+		if len(tools) == 0 || !strings.Contains(msg, "MCP_InvalidToolsProvided") {
+			return "", "", err
+		}
+		kept := tools[:0:0]
+		for _, t := range tools {
+			if !strings.Contains(msg, t) { // the error lists the rejected slugs verbatim
+				kept = append(kept, t)
+			}
+		}
+		if len(kept) == len(tools) || len(kept) == 0 {
+			// Couldn't identify what to drop, or everything was rejected — don't loop.
+			return "", "", err
+		}
+		tools = kept
 	}
-	body := map[string]any{
-		"name":                      name,
-		"auth_config_ids":           authConfigIDs,
-		"allowed_tools":             allowedTools,
-		"managed_auth_via_composio": true,
-	}
-	var out struct {
-		ID     string `json:"id"`
-		MCPURL string `json:"mcp_url"`
-	}
-	if err := c.post(ctx, "/api/v3.1/mcp/servers", body, &out); err != nil {
-		return "", "", err
-	}
-	return out.ID, out.MCPURL, nil
+	return "", "", lastErr
 }
 
 // MCPUserURL builds the per-user MCP *transport* URL for a server. The
@@ -598,7 +624,7 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 
 	rd := io.LimitReader(resp.Body, maxResponseBytes)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		snippet, _ := io.ReadAll(io.LimitReader(rd, 512))
+		snippet, _ := io.ReadAll(io.LimitReader(rd, 2048))
 		return fmt.Errorf("composio: %s %s: status %d: %s", method, path, resp.StatusCode, strings.TrimSpace(string(snippet)))
 	}
 	if out == nil {
