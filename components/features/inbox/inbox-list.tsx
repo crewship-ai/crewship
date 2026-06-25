@@ -28,10 +28,21 @@ import { ListRow } from "@/components/ui/list-row"
 import { TabBar } from "@/components/ui/tab-bar"
 import { ListRowSkeleton } from "@/components/ui/skeletons"
 import { EmptyState as PageEmptyState } from "@/components/layout/empty-state"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { toast } from "sonner"
 import { WaitpointRunDetail } from "./waitpoint-run-detail"
 import { waitpointDecide } from "@/lib/api/waitpoints"
 import { inboxBulk } from "@/lib/api/inbox"
+import { escalationResolve } from "@/lib/api/escalations"
 
 // InboxList — the /inbox page surface. Linear-Triage UX: three states
 // (unread → read → resolved) with no archive / flag / snooze. List on
@@ -53,6 +64,27 @@ const KIND_META: Record<InboxItem["kind"], KindMeta> = {
   escalation: { label: "Escalation", icon: AlertCircle, accent: "text-rose-300" },
   failed_run: { label: "Failed run", icon: XCircle, accent: "text-rose-400" },
   message: { label: "Message", icon: Sparkles, accent: "text-blue-300" },
+}
+
+// The kind column can hold values the UI doesn't have a card for yet
+// (e.g. memory_consolidation, admitted by migration v90). Render those
+// as a generic notification instead of crashing on an undefined meta.
+const FALLBACK_META: KindMeta = {
+  label: "Notification",
+  icon: Sparkles,
+  accent: "text-muted-foreground",
+}
+
+function metaFor(kind: string): KindMeta {
+  return (KIND_META as Record<string, KindMeta>)[kind] ?? FALLBACK_META
+}
+
+// Decision items must never be bulk-closed: a waitpoint or escalation is
+// an agent waiting on a human to approve / decide, and a blocking row of
+// any kind means "needs explicit action". Used to warn before a bulk
+// Resolve and to split the selection into safe vs protected.
+function isDecisionItem(item: InboxItem): boolean {
+  return item.kind === "waitpoint" || item.kind === "escalation" || item.blocking
 }
 
 // Tree grouping. The list can collapse 100 rows into a handful of
@@ -93,7 +125,7 @@ function groupOf(item: InboxItem, dim: GroupDim): { key: string; label: string }
     }
     case "kind":
     default:
-      return { key: `k:${item.kind}`, label: KIND_META[item.kind]?.label ?? item.kind }
+      return { key: `k:${item.kind}`, label: metaFor(item.kind).label }
   }
 }
 
@@ -142,6 +174,7 @@ export function InboxList() {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [checked, setChecked] = useState<Set<string>>(new Set())
   const [bulkBusy, setBulkBusy] = useState(false)
+  const [confirmResolve, setConfirmResolve] = useState(false)
 
   const groups = useMemo<InboxGroup[]>(() => {
     const map = new Map<string, InboxGroup>()
@@ -194,8 +227,17 @@ export function InboxList() {
 
   const clearChecked = () => setChecked(new Set())
 
-  // Bulk apply: one round-trip via /inbox/bulk. The server skips
-  // source-managed kinds it can't move, so we surface both counts.
+  // Split the current selection into items a bulk Resolve will actually
+  // close vs. decision items the server will refuse to close. Drives the
+  // confirmation warning so nothing important gets mass-closed by mistake.
+  const selectionSplit = useMemo(() => {
+    const sel = items.filter((it) => checked.has(it.id))
+    const decision = sel.filter(isDecisionItem)
+    return { total: sel.length, decision: decision.length, safe: sel.length - decision.length }
+  }, [items, checked])
+
+  // Bulk apply: one round-trip via /inbox/bulk. The server skips decision
+  // items it must not close, so we surface both counts.
   const runBulk = async (state: "read" | "resolved", action?: string) => {
     if (!workspaceId || checked.size === 0) return
     setBulkBusy(true)
@@ -209,7 +251,7 @@ export function InboxList() {
       const verb = state === "resolved" ? "resolved" : "marked read"
       toast.success(
         skipped > 0
-          ? `${updated} ${verb} · ${skipped} need the source endpoint (approve/deny)`
+          ? `${updated} ${verb} · ${skipped} left open (need an explicit decision)`
           : `${updated} ${verb}`,
       )
       clearChecked()
@@ -217,6 +259,15 @@ export function InboxList() {
     } finally {
       setBulkBusy(false)
     }
+  }
+
+  // Resolve entry point. If the selection holds any decision item
+  // (waitpoint / escalation / blocking), warn first — a bulk Resolve must
+  // never quietly close something an agent is waiting on. Otherwise go
+  // straight through.
+  const requestResolve = () => {
+    if (selectionSplit.decision > 0) setConfirmResolve(true)
+    else void runBulk("resolved", "dismissed")
   }
 
   return (
@@ -367,7 +418,7 @@ export function InboxList() {
               <Button
                 size="sm"
                 disabled={bulkBusy}
-                onClick={() => runBulk("resolved", "dismissed")}
+                onClick={requestResolve}
                 className="gap-1.5"
               >
                 <CheckCheck className="h-3 w-3" />
@@ -433,6 +484,41 @@ export function InboxList() {
           )}
         </AnimatePresence>
       </div>
+
+      {/* Bulk-resolve safety gate. Shown only when the selection contains
+          decision items; reassures the user those won't be closed and
+          confirms resolving just the safe remainder. */}
+      <AlertDialog open={confirmResolve} onOpenChange={setConfirmResolve}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {selectionSplit.safe > 0
+                ? `Resolve ${selectionSplit.safe} item${selectionSplit.safe === 1 ? "" : "s"}?`
+                : "Nothing to resolve in bulk"}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {selectionSplit.decision} of the {selectionSplit.total} selected{" "}
+              {selectionSplit.decision === 1 ? "is an" : "are"} approval / escalation request
+              {selectionSplit.decision === 1 ? "" : "s"} an agent is waiting on — these are{" "}
+              <span className="font-medium text-foreground">never closed in bulk</span> and stay in
+              your inbox to decide one by one.
+              {selectionSplit.safe > 0
+                ? ` Only the ${selectionSplit.safe} dismissable item${
+                    selectionSplit.safe === 1 ? "" : "s"
+                  } will be resolved.`
+                : " Open each one to approve, deny, or resolve it individually."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            {selectionSplit.safe > 0 && (
+              <AlertDialogAction onClick={() => void runBulk("resolved", "dismissed")}>
+                Resolve {selectionSplit.safe}
+              </AlertDialogAction>
+            )}
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
@@ -450,7 +536,7 @@ function InboxRow({
   onToggleCheck: () => void
   onSelect: () => void
 }) {
-  const meta = KIND_META[item.kind]
+  const meta = metaFor(item.kind)
   const Icon = meta.icon
   return (
     <ListRow
@@ -514,7 +600,7 @@ function InboxDetail({
   onMarkUnread: () => void
   onRefresh: () => void | Promise<void>
 }) {
-  const meta = KIND_META[item.kind]
+  const meta = metaFor(item.kind)
   const Icon = meta.icon
   const isResolved = item.state === "resolved"
 
@@ -745,18 +831,97 @@ function KindActions({
         </div>
       )
     }
-    case "escalation":
+    case "escalation": {
+      // An escalation is an agent decision request — resolving it must go
+      // through the escalation lifecycle (/escalations/{id}/resolve), NOT
+      // a blind inbox flip (that 409s, since escalation is source-managed).
+      // Real agent escalations carry escalation_type + a source_id that IS
+      // the escalations-row id. Keeper/synthetic escalations don't — for
+      // those the inbox can't resolve inline, so we point at the source.
+      const escType =
+        typeof item.payload?.escalation_type === "string"
+          ? (item.payload.escalation_type as string)
+          : ""
+      const resolveEsc = (action: "approve" | "reject") =>
+        wrap(action, async () => {
+          const res = await escalationResolve(
+            item.source_id,
+            action,
+            action === "approve" ? "Approved from inbox" : "Rejected from inbox",
+          )
+          if (!res.ok) {
+            // 404 = no escalations row behind this item (keeper/synthetic):
+            // tell the user where to handle it instead of a raw error.
+            toast.error(
+              res.status === 404
+                ? "Resolve this from its source (crew escalations / review panel)."
+                : res.error,
+            )
+            return
+          }
+          // The lifecycle cascades the inbox row to resolved via
+          // ResolveBySource server-side; refresh to pick that up.
+          toast.success(`Escalation ${action === "approve" ? "approved" : "rejected"}`)
+          await onRefresh()
+        })
+
+      // CREDENTIAL escalations can't be approved without supplying the
+      // secret value — that belongs to the credential flow, not a blind
+      // inbox button. Offer Reject only, and say where to approve.
+      if (escType === "CREDENTIAL") {
+        return (
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={disabled || busy !== null}
+              onClick={() => resolveEsc("reject")}
+              className="gap-1.5"
+            >
+              <XCircle className="h-3 w-3" />
+              {busy === "reject" ? "Rejecting…" : "Reject"}
+            </Button>
+            <span className="text-[11px] text-muted-foreground">
+              To grant the credential, resolve from the crew’s escalations panel.
+            </span>
+          </div>
+        )
+      }
+      // Real agent escalation (non-credential): inline approve / reject.
+      if (escType !== "") {
+        return (
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              disabled={disabled || busy !== null}
+              onClick={() => resolveEsc("approve")}
+              className="gap-1.5 bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30"
+            >
+              <CheckCircle2 className="h-3 w-3" />
+              {busy === "approve" ? "Approving…" : "Approve"}
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={disabled || busy !== null}
+              onClick={() => resolveEsc("reject")}
+              className="gap-1.5"
+            >
+              <XCircle className="h-3 w-3" />
+              {busy === "reject" ? "Rejecting…" : "Reject"}
+            </Button>
+          </div>
+        )
+      }
+      // Keeper / synthetic escalation — no inline resolve path. Surface
+      // that honestly instead of a button that 409s.
       return (
-        <Button
-          size="sm"
-          disabled={disabled || busy !== null}
-          onClick={() => wrap("acknowledged", async () => onResolve("acknowledged"))}
-          className="gap-1.5"
-        >
-          <CheckCircle2 className="h-3 w-3" />
-          Mark resolved
-        </Button>
+        <span className="text-[11px] text-muted-foreground">
+          This escalation is resolved from its source review (crew escalations / keeper). Use “Mark
+          read” to declutter.
+        </span>
       )
+    }
     case "failed_run":
       // Retry actually re-fires the routine: POST /pipelines/{slug}/run
       // with the same inputs that produced the failure (replayed from
