@@ -162,6 +162,14 @@ type ComposioConfig struct {
 	Enabled bool   `yaml:"enabled"`
 	APIKey  string `yaml:"api_key"`
 	BaseURL string `yaml:"base_url"`
+	// DefaultConnector, when true, gives EVERY agent a workspace-wide
+	// default Composio MCP connector (full access to all connected apps)
+	// unless the agent has an explicit per-agent Composio binding, AND
+	// turns legacy (non-Composio) MCP servers OFF at resolve time. Set via
+	// COMPOSIO_DEFAULT_CONNECTOR (true/1 → on; default off). Unlike APIKey
+	// this NEVER auto-enables the provider — it is a behaviour flag layered
+	// on top of an already-configured Composio.
+	DefaultConnector bool `yaml:"default_connector"`
 }
 
 // Default returns a Config populated with sensible defaults for all settings.
@@ -453,6 +461,12 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("COMPOSIO_BASE_URL"); v != "" {
 		cfg.Composio.BaseURL = v
+	}
+	// Default-connector behaviour flag. Deliberately does NOT auto-enable the
+	// provider (a key is still required for it to do anything) — it only
+	// changes how an already-configured Composio is projected onto agents.
+	if val, ok := envBool("COMPOSIO_DEFAULT_CONNECTOR"); ok {
+		cfg.Composio.DefaultConnector = val
 	}
 }
 

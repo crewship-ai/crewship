@@ -76,8 +76,17 @@ type InternalHandler struct {
 	logger        *slog.Logger
 	internalToken string
 	keeperEnabled atomic.Bool
-	hub           *ws.Hub
-	journal       journal.Emitter
+	// composioDefaultConnector mirrors config.ComposioConfig.DefaultConnector
+	// (COMPOSIO_DEFAULT_CONNECTOR). When true, resolveAgentMCPServers turns
+	// legacy (non-Composio) MCP servers off and injects a workspace-wide
+	// default Composio connector for agents without a per-agent binding.
+	// Off = today's resolve behaviour, byte-for-byte. composioBaseURL is the
+	// server-env Composio base URL used only to build the default MCP
+	// transport URL (no API call) in the hot path.
+	composioDefaultConnector atomic.Bool
+	composioBaseURL          atomic.Value // string
+	hub                      *ws.Hub
+	journal                  journal.Emitter
 	// postRunTrigger fires the memory consolidator opportunistically
 	// after each successful run.completed emit. nil → no trigger (the
 	// 6h cron stays as the safety net). Wired via SetPostRunTrigger
@@ -118,6 +127,24 @@ func (h *InternalHandler) SetJournal(j journal.Emitter) {
 // SetKeeperEnabled toggles whether Keeper is advertised as enabled in the agent config.
 func (h *InternalHandler) SetKeeperEnabled(enabled bool) {
 	h.keeperEnabled.Store(enabled)
+}
+
+// SetComposioDefaultConnector arms (or disarms) the default-connector
+// behaviour in resolveAgentMCPServers and pins the Composio base URL used to
+// build the default MCP transport URL. baseURL may be empty (the resolver
+// falls back to the Composio production host via the client). Wired at router
+// build time from config.ComposioConfig.
+func (h *InternalHandler) SetComposioDefaultConnector(enabled bool, baseURL string) {
+	h.composioDefaultConnector.Store(enabled)
+	h.composioBaseURL.Store(baseURL)
+}
+
+// composioBase returns the configured Composio base URL (empty when unset).
+func (h *InternalHandler) composioBase() string {
+	if v, ok := h.composioBaseURL.Load().(string); ok {
+		return v
+	}
+	return ""
 }
 
 // SetPostRunTrigger wires the memory→consolidator post-run hook. Pass

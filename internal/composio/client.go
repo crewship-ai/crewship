@@ -540,6 +540,28 @@ func (c *Client) CreateMCPServer(ctx context.Context, name string, authConfigIDs
 	return "", "", lastErr
 }
 
+// UpdateMCPServer refreshes an existing Composio MCP server's auth-config set
+// (and allowed_tools) in place, so a server provisioned earlier picks up apps
+// the workspace has connected since. Used by the default-connector flow to
+// keep `crewship-<ws8>-default` covering ALL connected apps without leaking a
+// new server on every reconcile. An EMPTY allowedTools slice keeps the server
+// at "all tools of all auth configs" (the default-connector contract).
+func (c *Client) UpdateMCPServer(ctx context.Context, serverID string, authConfigIDs, allowedTools []string) error {
+	if serverID == "" {
+		return fmt.Errorf("composio: UpdateMCPServer requires a server id")
+	}
+	tools := allowedTools
+	if tools == nil {
+		tools = []string{}
+	}
+	body := map[string]any{
+		"auth_config_ids":           authConfigIDs,
+		"allowed_tools":             tools,
+		"managed_auth_via_composio": true,
+	}
+	return c.do(ctx, http.MethodPatch, "/api/v3.1/mcp/servers/"+url.PathEscape(serverID), body, nil)
+}
+
 // MCPUserURL builds the per-user MCP *transport* URL for a server. The
 // create/list `mcp_url` (…/v3.1/mcp/<id>) is a canonical link that 307-redirects
 // to the streamable-http transport at …/v3/mcp/<id>/mcp; MCP clients (incl. our

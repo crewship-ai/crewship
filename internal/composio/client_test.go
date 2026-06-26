@@ -315,6 +315,43 @@ func TestClient_CreateMCPServer_AllowedTools(t *testing.T) {
 	}
 }
 
+func TestClient_UpdateMCPServer(t *testing.T) {
+	var gotMethod, gotPath string
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+	c := NewClient("ak_test", srv.URL)
+
+	if err := c.UpdateMCPServer(context.Background(), "mcp_1", []string{"ac_a", "ac_b"}, nil); err != nil {
+		t.Fatalf("UpdateMCPServer: %v", err)
+	}
+	if gotMethod != http.MethodPatch {
+		t.Errorf("method = %q, want PATCH", gotMethod)
+	}
+	if gotPath != "/api/v3.1/mcp/servers/mcp_1" {
+		t.Errorf("path = %q", gotPath)
+	}
+	ac, ok := gotBody["auth_config_ids"].([]any)
+	if !ok || len(ac) != 2 {
+		t.Errorf("auth_config_ids = %v, want 2 ids", gotBody["auth_config_ids"])
+	}
+	// nil allowed_tools → empty array (keep server at "all tools").
+	at, ok := gotBody["allowed_tools"].([]any)
+	if !ok || len(at) != 0 {
+		t.Errorf("allowed_tools = %v, want empty array", gotBody["allowed_tools"])
+	}
+
+	// Empty server id is a client-side error (no request issued).
+	if err := c.UpdateMCPServer(context.Background(), "", []string{"ac_a"}, nil); err == nil {
+		t.Error("expected error for empty server id")
+	}
+}
+
 func TestClient_DefaultBaseURL(t *testing.T) {
 	c := NewClient("ak_test", "")
 	if c.baseURL != DefaultBaseURL {

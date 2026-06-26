@@ -53,6 +53,8 @@ All integration endpoints require authentication and workspace context (except w
 | `GET` | [`/api/v1/integrations/composio/settings`](#composio-settings) | Get the workspace Composio config status |
 | `PUT` | [`/api/v1/integrations/composio/settings`](#composio-settings) | Set & validate the workspace Composio API key |
 | `DELETE` | [`/api/v1/integrations/composio/settings`](#composio-settings) | Remove the workspace API key (revert to env) |
+| `GET` | [`/api/v1/integrations/composio/default`](#composio-default-connector) | Inspect the default-connector state |
+| `PUT` | [`/api/v1/integrations/composio/default`](#composio-default-connector) | Provision/re-point the default connector |
 | `GET` | [`/api/v1/integrations/composio/agents/{agentId}/bind`](#composio-agent-binding) | List an agent's Composio user binding(s) |
 | `POST` | [`/api/v1/integrations/composio/agents/{agentId}/bind`](#composio-agent-binding) | Bind a Composio user to an agent |
 | `DELETE` | [`/api/v1/integrations/composio/agents/{agentId}/bind`](#composio-agent-binding) | Unbind a Composio user from an agent |
@@ -336,6 +338,42 @@ DELETE /api/v1/integrations/composio/settings?workspace_id={workspaceId}
 
 A `PUT` with an invalid key returns `400` (Composio rejected it). CLI:
 `crewship integration composio key {show,set,remove}`.
+
+### Composio Default Connector
+
+Inspect / provision the **workspace-wide default connector**. When the server
+flag `COMPOSIO_DEFAULT_CONNECTOR` is **ON**, every agent **without** an explicit
+per-agent binding inherits this connector (full access to all the workspace's
+connected apps), and legacy non-Composio MCP servers are turned **off** at
+resolve time (not deleted). See the
+[Integrations guide](/guides/integrations#default-connector-composio_default_connector).
+
+```
+GET /api/v1/integrations/composio/default?workspace_id={workspaceId}
+PUT /api/v1/integrations/composio/default?workspace_id={workspaceId}
+```
+
+`GET` (read) reports state; `PUT` requires workspace **manage** (OWNER/ADMIN).
+`PUT` body is optional: `{ "user_id": "<id>" }` pins the default Composio user;
+omit it to **auto-derive** the user when exactly one is connected. `PUT` errors
+`400` when zero users are connected ("connect an account first") or when
+multiple users exist (pin one). Re-running is idempotent and refreshes the
+connector's app set.
+
+**Response (GET / PUT):** `200 OK`
+
+```json
+{ "enabled_flag": true, "default_user_id": "user-a", "default_mcp_server_id": "mcp_srv_1", "connected_user_count": 1 }
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `enabled_flag` | boolean | Whether `COMPOSIO_DEFAULT_CONNECTOR` is armed on the server |
+| `default_user_id` | string | The Composio user the default is scoped to (`""` if unset) |
+| `default_mcp_server_id` | string | The provisioned Composio MCP server id (`""` if not provisioned) |
+| `connected_user_count` | integer | Live count of Composio users with connected accounts |
+
+CLI: `crewship integration composio default {show,set,enable}`.
 
 ### Composio Agent Binding
 

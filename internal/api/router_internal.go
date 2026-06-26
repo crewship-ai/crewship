@@ -30,6 +30,12 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 	if r.keeperConfig != nil && r.keeperConfig.Enabled {
 		internal.SetKeeperEnabled(true)
 	}
+	// Default-connector behaviour flag (COMPOSIO_DEFAULT_CONNECTOR). Threaded
+	// from the same Composio config the ComposioHandler uses so the runtime
+	// resolver and the operator surface agree on whether it's armed.
+	if r.composioConfig != nil {
+		internal.SetComposioDefaultConnector(r.composioConfig.DefaultConnector, r.composioConfig.BaseURL)
+	}
 	internal.SetJournal(r.Journal())
 	// Attach the sleep-time consolidator hook (PRD §8.1). nil is a
 	// no-op; SetPostRunTrigger no-ops on a nil receiver hook.

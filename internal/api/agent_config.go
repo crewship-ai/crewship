@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/crewship-ai/crewship/internal/composio"
 	"github.com/crewship-ai/crewship/internal/pipeline"
 )
 
@@ -84,10 +85,13 @@ type mcpServerEntry struct {
 	EnvVarName  string            `json:"env_var_name,omitempty"`
 }
 
-// mcpServerRow is a raw DB row for an MCP server definition.
+// mcpServerRow is a raw DB row for an MCP server definition. icon
+// distinguishes Composio-managed rows (icon='composio') from legacy MCP
+// servers — the default-connector legacy gate keys off it.
 type mcpServerRow struct {
 	id, name, displayName, transport     string
 	endpoint, command, argsJSON, envJSON *string
+	icon                                 *string
 }
 
 // installedSkillResponse is the per-skill payload that ships in the
@@ -863,11 +867,11 @@ func (h *InternalHandler) resolveAgentMCPServers(r *http.Request, data *agentCon
 	// Step 1: Workspace MCP servers (keyed by name)
 	merged := make(map[string]*mcpServerRow)
 	if wsRows, err := h.db.QueryContext(r.Context(), `
-		SELECT id, name, display_name, transport, endpoint, command, args_json, env_json
+		SELECT id, name, display_name, transport, endpoint, command, args_json, env_json, icon
 		FROM workspace_mcp_servers WHERE workspace_id = ? AND enabled = 1 AND deleted_at IS NULL`, data.wsID); err == nil {
 		for wsRows.Next() {
 			var s mcpServerRow
-			if err := wsRows.Scan(&s.id, &s.name, &s.displayName, &s.transport, &s.endpoint, &s.command, &s.argsJSON, &s.envJSON); err != nil {
+			if err := wsRows.Scan(&s.id, &s.name, &s.displayName, &s.transport, &s.endpoint, &s.command, &s.argsJSON, &s.envJSON, &s.icon); err != nil {
 				continue
 			}
 			merged[s.name] = &s
@@ -878,18 +882,43 @@ func (h *InternalHandler) resolveAgentMCPServers(r *http.Request, data *agentCon
 	// Step 2: Crew MCP servers override workspace by name
 	if data.crewID.Valid {
 		if crewRows, err := h.db.QueryContext(r.Context(), `
-			SELECT cs.id, cs.name, cs.display_name, cs.transport, cs.endpoint, cs.command, cs.args_json, cs.env_json
+			SELECT cs.id, cs.name, cs.display_name, cs.transport, cs.endpoint, cs.command, cs.args_json, cs.env_json, cs.icon
 			FROM crew_mcp_servers cs
 			JOIN crews c ON c.id = cs.crew_id AND c.deleted_at IS NULL
 			WHERE cs.crew_id = ? AND cs.enabled = 1 AND cs.deleted_at IS NULL`, data.crewID.String); err == nil {
 			for crewRows.Next() {
 				var s mcpServerRow
-				if err := crewRows.Scan(&s.id, &s.name, &s.displayName, &s.transport, &s.endpoint, &s.command, &s.argsJSON, &s.envJSON); err != nil {
+				if err := crewRows.Scan(&s.id, &s.name, &s.displayName, &s.transport, &s.endpoint, &s.command, &s.argsJSON, &s.envJSON, &s.icon); err != nil {
 					continue
 				}
 				merged[s.name] = &s
 			}
 			crewRows.Close()
+		}
+	}
+
+	// Default-connector gate (COMPOSIO_DEFAULT_CONNECTOR). Active only when the
+	// flag is ON AND the workspace has a configured default (user + server).
+	// When OFF the entire block below is skipped and resolution is byte-for-
+	// byte unchanged. When active it (a) turns legacy non-Composio servers off
+	// during the build loop and (b) injects a workspace-wide default Composio
+	// connector for agents lacking a per-agent Composio binding.
+	var (
+		defaultActive bool
+		defaultUserID string
+		defaultSrvID  string
+	)
+	if h.composioDefaultConnector.Load() {
+		var u, s sql.NullString
+		if err := h.db.QueryRowContext(r.Context(),
+			`SELECT default_user_id, default_mcp_server_id FROM composio_settings WHERE workspace_id = ?`, data.wsID).Scan(&u, &s); err != nil {
+			if !errors.Is(err, sql.ErrNoRows) {
+				h.logger.Warn("resolve default composio settings", "workspace_id", data.wsID, "error", err)
+			}
+		} else if strings.TrimSpace(u.String) != "" && strings.TrimSpace(s.String) != "" {
+			defaultActive = true
+			defaultUserID = strings.TrimSpace(u.String)
+			defaultSrvID = strings.TrimSpace(s.String)
 		}
 	}
 
@@ -968,6 +997,13 @@ func (h *InternalHandler) resolveAgentMCPServers(r *http.Request, data *agentCon
 
 	// Step 5: Build result entries
 	for _, srv := range merged {
+		// Legacy gate: with the default connector active, turn OFF any
+		// non-Composio (legacy) workspace/crew server WITHOUT deleting it.
+		// Composio rows (icon='composio') — including per-agent bindings —
+		// pass through unchanged.
+		if defaultActive && (srv.icon == nil || *srv.icon != "composio") {
+			continue
+		}
 		entry := mcpServerEntry{
 			ID: srv.id, Name: srv.name, DisplayName: srv.displayName,
 			Transport: srv.transport, Endpoint: srv.endpoint, Command: srv.command,
@@ -1009,7 +1045,72 @@ func (h *InternalHandler) resolveAgentMCPServers(r *http.Request, data *agentCon
 		mcpServers = append(mcpServers, entry)
 	}
 
+	// Step 6: Default-connector injection. When active and the agent has NO
+	// per-agent Composio binding (no resolved row named composio-<agentID>-*),
+	// append the workspace-wide default connector (full access to all
+	// connected apps). A per-agent binding OVERRIDES the default — its scoped
+	// server already resolved above, so we skip injection entirely.
+	if defaultActive {
+		bindingPrefix := "composio-" + agentID + "-"
+		hasComposioBinding := false
+		for _, s := range mcpServers {
+			if strings.HasPrefix(s.Name, bindingPrefix) {
+				hasComposioBinding = true
+				break
+			}
+		}
+		if !hasComposioBinding {
+			if entry, ok := h.buildDefaultComposioEntry(r, data.wsID, defaultSrvID, defaultUserID); ok {
+				mcpServers = append(mcpServers, entry)
+			}
+		}
+	}
+
 	return mcpServers
+}
+
+// buildDefaultComposioEntry synthesises the default Composio MCP server entry
+// every agent inherits under the default-connector flag. It reads ONLY DB
+// columns (the shared composio-managed-key credential) and builds the per-user
+// transport URL locally — NO Composio API call, since this runs on the
+// agent-config hot path. Any failure (missing key, decrypt error) logs and
+// returns ok=false so the agent still resolves without the default rather than
+// failing the whole config.
+func (h *InternalHandler) buildDefaultComposioEntry(r *http.Request, wsID, serverID, userID string) (mcpServerEntry, bool) {
+	if serverID == "" || userID == "" {
+		return mcpServerEntry{}, false
+	}
+	var encVal string
+	err := h.db.QueryRowContext(r.Context(),
+		`SELECT encrypted_value FROM credentials
+		 WHERE workspace_id = ? AND name = ? AND deleted_at IS NULL AND status = 'ACTIVE'`,
+		wsID, composioManagedKeyName).Scan(&encVal)
+	if err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			h.logger.Warn("default composio: read managed key", "workspace_id", wsID, "error", err)
+		} else {
+			h.logger.Warn("default composio: managed key missing", "workspace_id", wsID)
+		}
+		return mcpServerEntry{}, false
+	}
+	token, derr := decryptCredential(encVal)
+	if derr != nil || token == "" || isPendingSentinel(token) {
+		h.logger.Warn("default composio: decrypt managed key", "workspace_id", wsID, "error", derr)
+		return mcpServerEntry{}, false
+	}
+
+	// MCPUserURL is pure string-building on the base URL (no network).
+	endpoint := composio.NewClient("", h.composioBase()).MCPUserURL(serverID, userID)
+	return mcpServerEntry{
+		ID:          "composio-default",
+		Name:        "composio-default",
+		DisplayName: "Composio",
+		Transport:   "streamable-http",
+		Endpoint:    &endpoint,
+		CredToken:   token,
+		CredType:    "api_key",
+		CredHeader:  "x-api-key",
+	}, true
 }
 
 // -----------------------------------------------------------------------------
