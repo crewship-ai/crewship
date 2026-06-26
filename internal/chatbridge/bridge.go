@@ -402,6 +402,17 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		return fmt.Errorf("persist user message: %w", err)
 	}
 
+	// Broadcast the human message to OTHER participants subscribed to this
+	// session so a shared group chat updates live for everyone (the sender
+	// already rendered it optimistically; streamFn's BroadcastExcept skips the
+	// sender). Carries the author id so the UI can attribute the turn. Harmless
+	// in a private 1:1 chat — there are no other subscribers.
+	streamFn(ws.ChatEvent{
+		Type:     "user_message",
+		Content:  content,
+		Metadata: map[string]interface{}{"author_user_id": userID},
+	})
+
 	// Group-chat turn-taking: in a group chat the agent stays silent unless it
 	// is @mentioned, so humans can talk among themselves without the bot
 	// responding to every line. The message is still persisted (above) and

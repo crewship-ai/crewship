@@ -7,6 +7,7 @@ import {
   Wifi,
   WifiOff,
   Loader2,
+  Users,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -25,6 +26,7 @@ import {
 } from "@/components/ai-elements/prompt-input"
 import { Suggestion, Suggestions } from "@/components/ai-elements/suggestion"
 import { useChat, type HistoryPart } from "@/hooks/use-chat"
+import { useSession } from "@/hooks/use-auth"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useDrawerStore } from "@/stores/drawer-store"
 
@@ -202,6 +204,39 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     return () => { cancelled = true }
   }, [sessionId, workspaceId, loadHistory])
 
+  // Group-chat participants → display-name map for author attribution. Empty
+  // for a private 1:1 chat (the endpoint returns no participants), so the
+  // resolver yields null and messages render exactly as before.
+  const session = useSession()
+  const currentUserId = session.data?.user?.id ?? null
+  const [participantNames, setParticipantNames] = useState<Record<string, string>>({})
+  useEffect(() => {
+    if (!sessionId || !workspaceId) return
+    let cancelled = false
+    apiFetch(`/api/v1/chats/${sessionId}/participants?workspace_id=${encodeURIComponent(workspaceId)}`)
+      .then((r) => (r.ok ? r.json() : { participants: [] }))
+      .then((data: { participants?: { user_id: string; email?: string; full_name?: string }[] }) => {
+        if (cancelled) return
+        const map: Record<string, string> = {}
+        for (const p of data?.participants ?? []) {
+          map[p.user_id] = p.full_name || p.email || "Teammate"
+        }
+        setParticipantNames(map)
+      })
+      .catch(() => { /* private chat / transient — no attribution, no error */ })
+    return () => { cancelled = true }
+  }, [sessionId, workspaceId])
+
+  const resolveAuthorName = useCallback(
+    (userId: string): string | null => {
+      if (!userId || userId === currentUserId) return null
+      return participantNames[userId] ?? "Teammate"
+    },
+    [currentUserId, participantNames],
+  )
+
+  const isGroupChat = Object.keys(participantNames).length > 1
+
   const ensureSession = useCallback(async () => {
     if (sessionReady || !workspaceId || !sessionId) return
     try {
@@ -296,6 +331,12 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
       <div className="flex flex-col h-full">
         <div className="flex items-center gap-2 px-4 py-1.5 shrink-0">
           <ConnectionBadge status={connectionStatus} />
+          {isGroupChat && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-micro font-medium text-primary">
+              <Users className="h-3 w-3" />
+              Group · {Object.keys(participantNames).length}
+            </span>
+          )}
           <span className="text-micro text-muted-foreground ml-auto font-mono">
             {sessionId.slice(0, 8)}
           </span>
@@ -323,6 +364,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
                     animateAfter={animateAfter}
                     agentId={agentId}
                     chatId={sessionId}
+                    resolveAuthorName={resolveAuthorName}
                   />
                 ))}
               </AnimatePresence>
@@ -396,6 +438,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
                     animateAfter={animateAfter}
                     agentId={agentId}
                     chatId={sessionId}
+                    resolveAuthorName={resolveAuthorName}
                   />
                 ))}
               </AnimatePresence>

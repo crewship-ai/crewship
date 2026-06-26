@@ -47,6 +47,10 @@ export interface ChatTurn {
   parts: TurnPart[]
   isStreaming: boolean
   timestamp: Date
+  /** For user turns in a group chat: which human authored it. Lets the UI
+   *  attribute a teammate's message (avatar/name) and distinguish it from the
+   *  local user's own turns. Undefined for the local user / private chats. */
+  authorUserId?: string
   /** Per-turn metadata. Currently only `trace_id` is consumed (by the
    *  feedback store to link signals back to the OTel trace that
    *  produced the message). Backend wiring is not yet shipped — see
@@ -74,6 +78,7 @@ export type StreamEventType =
   | "result"
   | "image"
   | "crew_provisioning"
+  | "user_message"
 
 /** WebSocket event types for agent-to-agent task assignment lifecycle. */
 export type AssignmentEventType = "assignment_created" | "assignment_running" | "assignment_completed" | "assignment_failed"
@@ -127,6 +132,8 @@ export interface ChatMessage {
    *  is rebuilt from these (faithful reload of thinking + tools + text). When
    *  absent (legacy messages), a single text part is synthesized from content. */
   parts?: HistoryPart[]
+  /** Which human authored a user message (group-chat attribution). */
+  authorUserId?: string
   timestamp: Date
   isStreaming?: boolean
   metadata?: Record<string, unknown>
@@ -184,6 +191,7 @@ export function messagesToTurns(messages: ChatMessage[]): ChatTurn[] {
         parts: [{ id: msg.id, type: "text", content: msg.content, timestamp: msg.timestamp }],
         isStreaming: false,
         timestamp: msg.timestamp,
+        authorUserId: msg.authorUserId,
       })
     } else if (msg.role === "system") {
       turns.push({
@@ -444,6 +452,29 @@ export function useChat({ wsUrl, getToken, sessionId }: UseChatOptions) {
           },
         ]
       })
+    },
+    [],
+  )
+
+  // A message from ANOTHER human in a shared group chat (the backend broadcasts
+  // it to other session subscribers). Render it as a distinct user turn,
+  // attributed to its author, without touching the local streaming state.
+  const handleUserMessageEvent = useCallback(
+    (content: string, metadata: Record<string, unknown> | undefined) => {
+      const authorUserId = typeof metadata?.author_user_id === "string"
+        ? (metadata.author_user_id as string)
+        : undefined
+      setTurns((prev) => [
+        ...prev,
+        {
+          id: uuid(),
+          role: "user",
+          parts: [{ id: uuid(), type: "text", content, timestamp: new Date() }],
+          isStreaming: false,
+          timestamp: new Date(),
+          authorUserId,
+        },
+      ])
     },
     [],
   )
@@ -905,6 +936,9 @@ export function useChat({ wsUrl, getToken, sessionId }: UseChatOptions) {
         case "crew_provisioning":
           handleCrewProvisioningEvent(content, metadata)
           break
+        case "user_message":
+          handleUserMessageEvent(content, metadata)
+          break
         case "error":
           handleErrorEvent(content)
           break
@@ -924,6 +958,7 @@ export function useChat({ wsUrl, getToken, sessionId }: UseChatOptions) {
       handleSystemEvent,
       handleDoneEvent,
       handleCrewProvisioningEvent,
+      handleUserMessageEvent,
       handleErrorEvent,
     ],
   )

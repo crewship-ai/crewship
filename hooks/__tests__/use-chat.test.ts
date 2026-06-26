@@ -194,6 +194,24 @@ describe("useChat", () => {
     expect(statusParts[0].content).toBe("task_progress")
   })
 
+  it("renders a broadcast user_message from another participant, attributed", () => {
+    const { result } = renderHook(() =>
+      useChat({ wsUrl: "ws://localhost:8080/ws", token: "test", sessionId: "s1" }),
+    )
+    const onMessage = getOnMessage()
+    act(() => {
+      onMessage({
+        type: "chat_event",
+        channel: "session:s1",
+        payload: { type: "user_message", content: "hi from Petr", metadata: { author_user_id: "u-petr" } },
+      })
+    })
+    expect(result.current.turns).toHaveLength(1)
+    expect(result.current.turns[0].role).toBe("user")
+    expect(result.current.turns[0].parts[0].content).toBe("hi from Petr")
+    expect(result.current.turns[0].authorUserId).toBe("u-petr")
+  })
+
   it("separates multiple complete thinking blocks into distinct parts", () => {
     const { result } = renderHook(() =>
       useChat({ wsUrl: "ws://localhost:8080/ws", token: "test", sessionId: "s1" }),
