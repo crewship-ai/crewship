@@ -30,8 +30,10 @@ export interface ActiveRunItem {
   href: string
 }
 
-const AGENT_HREF = "/activity"
-const ROUTINE_HREF = "/routines"
+// Clicking a run jumps straight to its live trace on the Activity canvas.
+// Routine runs render as a trace keyed by run_id; agent runs land on the
+// Activity rail (their run id selects on the rail when present).
+const traceHref = (runId: string) => `/activity?run=${encodeURIComponent(runId)}`
 // Steady safety poll. WS events make updates near-instant; this only backstops
 // dropped frames / runs whose start event we never saw.
 const POLL_MS = 6000
@@ -80,7 +82,7 @@ export function useActiveRuns(workspaceId: string | null | undefined) {
             label: str(row, "agent_name", "agent_slug", "agent_id") ?? "Agent run",
             sublabel: str(row, "trigger_type"),
             startedAt: str(row, "started_at", "created_at"),
-            href: AGENT_HREF,
+            href: traceHref(id),
           })
         }
       }
@@ -98,7 +100,7 @@ export function useActiveRuns(workspaceId: string | null | undefined) {
             label: str(row, "pipeline_name", "pipeline_slug") ?? "Routine run",
             sublabel: str(row, "current_step_id"),
             startedAt: str(row, "started_at"),
-            href: ROUTINE_HREF,
+            href: traceHref(id),
           })
         }
       }
