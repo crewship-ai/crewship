@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { AnimatePresence } from "motion/react"
 import {
   Bot,
@@ -35,6 +35,7 @@ import { RightPanel } from "./right-panel"
 import { RightRail } from "./right-rail"
 import { RightDrawer } from "./right-drawer"
 import { SlashPalette } from "./composer/slash-palette"
+import { MentionAutocomplete, type CrewMember } from "./composer/mention-autocomplete"
 import { AttachmentZone, AttachmentButton } from "./composer/attachment-zone"
 import { ArtifactPane } from "./artifact/artifact-pane"
 import { FollowUps } from "./suggestions/follow-ups"
@@ -131,10 +132,14 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     return data.token
   }, [])
 
+  const session = useSession()
+  const currentUserId = session.data?.user?.id ?? null
+
   const { turns, sendMessage, stopGeneration, regenerateLastTurn, editAndResend, loadHistory, isStreaming, connectionStatus } = useChat({
     wsUrl: getWsUrl(),
     getToken: getWsToken,
     sessionId,
+    currentUserId: currentUserId ?? undefined,
   })
 
   useEffect(() => {
@@ -207,8 +212,6 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
   // Group-chat participants → display-name map for author attribution. Empty
   // for a private 1:1 chat (the endpoint returns no participants), so the
   // resolver yields null and messages render exactly as before.
-  const session = useSession()
-  const currentUserId = session.data?.user?.id ?? null
   const [participantNames, setParticipantNames] = useState<Record<string, string>>({})
   useEffect(() => {
     if (!sessionId || !workspaceId) return
@@ -236,6 +239,28 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
   )
 
   const isGroupChat = Object.keys(participantNames).length > 1
+
+  // @mention autocomplete. The chat's agent is always offered (mentioning it is
+  // what makes it respond in a group chat); teammates are offered too as a
+  // courtesy. The textarea ref lets the popover anchor to the caret.
+  const mentionTextareaRef = useRef<HTMLTextAreaElement>(null)
+  const mentionMembers = useMemo<CrewMember[]>(() => {
+    const list: CrewMember[] = [{ id: agentId, slug: agentSlug, name: agentName ?? agentSlug, role_title: agentRole ?? undefined }]
+    for (const [uid, name] of Object.entries(participantNames)) {
+      if (uid !== currentUserId) {
+        list.push({ id: uid, slug: name.replace(/\s+/g, "").toLowerCase(), name })
+      }
+    }
+    return list
+  }, [agentId, agentSlug, agentName, agentRole, participantNames, currentUserId])
+  const handleMentionPick = useCallback((member: CrewMember, atIndex: number) => {
+    setInput((prev) => {
+      const after = prev.slice(atIndex)
+      const ws = after.search(/\s/)
+      const end = ws === -1 ? prev.length : atIndex + ws
+      return prev.slice(0, atIndex) + "@" + member.slug + " " + prev.slice(end)
+    })
+  }, [])
 
   const ensureSession = useCallback(async () => {
     if (sessionReady || !workspaceId || !sessionId) return
@@ -465,8 +490,15 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
         </div>
         <div className="mx-auto w-full max-w-3xl p-3 md:px-6 shrink-0">
           <AttachmentZone agentId={agentId} sessionId={sessionId}>
+            <MentionAutocomplete
+              text={input}
+              textareaRef={mentionTextareaRef}
+              members={mentionMembers}
+              onPick={handleMentionPick}
+            />
             <PromptInput className="rounded-xl border" onSubmit={handleSubmit}>
               <PromptInputTextarea
+                ref={mentionTextareaRef}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 placeholder={agentName ? `Message ${agentName}...` : "Send a message..."}

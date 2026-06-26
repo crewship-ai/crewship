@@ -161,6 +161,11 @@ interface UseChatOptions {
    *  retry loop. */
   getToken: () => Promise<string | null>
   sessionId: string
+  /** The local user's id. Used to drop the echo of our OWN broadcast
+   *  user_message (the server fans every message out to all session
+   *  subscribers including the sender) so the message we already rendered
+   *  optimistically doesn't appear twice. */
+  currentUserId?: string
 }
 
 /** Map a structured history part to a renderable TurnPart, coercing unknown
@@ -253,11 +258,15 @@ export function messagesToTurns(messages: ChatMessage[]): ChatTurn[] {
  * Handles streaming text/thinking/tool events, turn grouping, history loading,
  * message editing, regeneration, and stop/cancel.
  */
-export function useChat({ wsUrl, getToken, sessionId }: UseChatOptions) {
+export function useChat({ wsUrl, getToken, sessionId, currentUserId }: UseChatOptions) {
   const [turns, setTurns] = useState<ChatTurn[]>([])
   const [isStreaming, setIsStreaming] = useState(false)
   const textBufferRef = useRef("")
   const thinkingBufferRef = useRef("")
+  // Tracked in a ref so the (deps: []) WS handlers see the latest value without
+  // being re-created on every render.
+  const currentUserIdRef = useRef(currentUserId)
+  currentUserIdRef.current = currentUserId
   // Streaming text arrives token-by-token. pendingTextRef accumulates the
   // tokens seen since the last commit; rafIdRef holds the scheduled frame
   // so a whole burst commits with a single setTurns instead of one per
@@ -464,6 +473,13 @@ export function useChat({ wsUrl, getToken, sessionId }: UseChatOptions) {
       const authorUserId = typeof metadata?.author_user_id === "string"
         ? (metadata.author_user_id as string)
         : undefined
+      // Drop the echo of our OWN message — the server broadcasts every user
+      // message to all session subscribers (incl. the sender), but we already
+      // rendered it optimistically in sendMessage. Without this guard the
+      // sender sees their message twice.
+      if (authorUserId && currentUserIdRef.current && authorUserId === currentUserIdRef.current) {
+        return
+      }
       setTurns((prev) => [
         ...prev,
         {

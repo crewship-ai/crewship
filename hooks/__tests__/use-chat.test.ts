@@ -212,6 +212,22 @@ describe("useChat", () => {
     expect(result.current.turns[0].authorUserId).toBe("u-petr")
   })
 
+  it("drops the echo of the local user's OWN broadcast user_message", () => {
+    const { result } = renderHook(() =>
+      useChat({ wsUrl: "ws://localhost:8080/ws", token: "test", sessionId: "s1", currentUserId: "me" }),
+    )
+    const onMessage = getOnMessage()
+    act(() => {
+      onMessage({
+        type: "chat_event",
+        channel: "session:s1",
+        payload: { type: "user_message", content: "mine", metadata: { author_user_id: "me" } },
+      })
+    })
+    // Own echo is dropped (we already rendered it optimistically) — no dup turn.
+    expect(result.current.turns).toHaveLength(0)
+  })
+
   it("separates multiple complete thinking blocks into distinct parts", () => {
     const { result } = renderHook(() =>
       useChat({ wsUrl: "ws://localhost:8080/ws", token: "test", sessionId: "s1" }),
