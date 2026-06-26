@@ -1439,6 +1439,13 @@ END;
 	// keeps existing schedules on today's fire-every-tick path. See
 	// migrate_consts_v115_schedule_wake_gates.go.
 	{version: 115, name: "schedule_wake_gates", sql: migrationScheduleWakeGates},
+
+	// v116: per-workspace Composio provider config (encrypted API key +
+	// optional base_url/label) so the managed-integration key can be set from
+	// the UI instead of the server env. The handler resolves workspace row →
+	// COMPOSIO_API_KEY env fallback. See
+	// migrate_consts_v116_composio_settings.go.
+	{version: 116, name: "composio_settings", sql: migrationComposioSettings},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

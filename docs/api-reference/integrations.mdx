@@ -44,6 +44,392 @@ All integration endpoints require authentication and workspace context (except w
 | `GET` | [`/api/v1/mcp-registry`](#list-registry-entries) | List MCP registry entries |
 | `GET` | [`/api/v1/mcp-registry/search`](#search-registry) | Search the MCP registry |
 | `POST` | [`/api/v1/mcp-registry/sync`](#sync-registry) | Sync the MCP registry |
+| `GET` | [`/api/v1/integrations/composio/inventory`](#composio-inventory) | Composio catalog + connected accounts per user |
+| `GET` | [`/api/v1/integrations/composio/toolkits`](#composio-toolkits) | Browse the Composio app catalog (1000+ apps) |
+| `GET` | [`/api/v1/integrations/composio/tools`](#composio-tools) | List the tools a toolkit exposes |
+| `GET` | [`/api/v1/integrations/composio/triggers`](#composio-triggers) | List available trigger types |
+| `GET` | [`/api/v1/integrations/composio/triggers/active`](#composio-active-triggers) | List active trigger instances |
+| `POST` | [`/api/v1/integrations/composio/triggers`](#composio-create-trigger) | Create/enable a trigger instance for a user |
+| `GET` | [`/api/v1/integrations/composio/settings`](#composio-settings) | Get the workspace Composio config status |
+| `PUT` | [`/api/v1/integrations/composio/settings`](#composio-settings) | Set & validate the workspace Composio API key |
+| `DELETE` | [`/api/v1/integrations/composio/settings`](#composio-settings) | Remove the workspace API key (revert to env) |
+| `GET` | [`/api/v1/integrations/composio/agents/{agentId}/bind`](#composio-agent-binding) | List an agent's Composio user binding(s) |
+| `POST` | [`/api/v1/integrations/composio/agents/{agentId}/bind`](#composio-agent-binding) | Bind a Composio user to an agent |
+| `DELETE` | [`/api/v1/integrations/composio/agents/{agentId}/bind`](#composio-agent-binding) | Unbind a Composio user from an agent |
+| `POST` | [`/api/v1/integrations/composio/accounts/{accountId}/revoke`](#composio-connected-account-management) | Revoke (de-authorize) a connected account |
+| `POST` | [`/api/v1/integrations/composio/accounts/{accountId}/refresh`](#composio-connected-account-management) | Refresh a connected account's credentials |
+| `DELETE` | [`/api/v1/integrations/composio/accounts/{accountId}`](#composio-connected-account-management) | Delete a connected account |
+
+---
+
+## Managed Integrations (Composio)
+
+Read-only inventory of the Composio managed-integration provider. See the
+[Integrations guide](/guides/integrations#managed-integrations-composio) for the
+object model. Requires `COMPOSIO_API_KEY` on the server; when unset the endpoint
+returns `enabled: false` with empty lists rather than an error.
+
+### Composio Inventory
+
+```
+GET /api/v1/integrations/composio/inventory?workspace_id={workspaceId}
+```
+
+Returns the connector catalog (auth configs) and every connected account
+grouped by Composio `user_id`. Gated on workspace `read`. This is an operator
+view; agents are scoped to a single `user_id` and never receive the full list.
+
+**Response:** `200 OK`
+
+```json
+{
+  "enabled": true,
+  "auth_configs": [
+    {
+      "id": "ac_JE6J7fDSsneA",
+      "name": "gmail-i6p1sb",
+      "status": "ENABLED",
+      "toolkit": { "slug": "gmail", "logo": "https://logos.composio.dev/api/gmail" }
+    }
+  ],
+  "users": [
+    {
+      "user_id": "pg-test-8acca167",
+      "connected_accounts": [
+        {
+          "id": "ca_2pjydr0oHqiI",
+          "user_id": "pg-test-8acca167",
+          "status": "ACTIVE",
+          "toolkit": { "slug": "gmail" },
+          "auth_config": { "id": "ac_JE6J7fDSsneA", "auth_scheme": "OAUTH2", "is_composio_managed": true, "is_disabled": false }
+        }
+      ]
+    }
+  ]
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `enabled` | boolean | Whether the provider is configured (`COMPOSIO_API_KEY` set) |
+| `auth_configs` | array | Connector catalog — one entry per configured app |
+| `users` | array | Connected accounts grouped by Composio `user_id`, sorted by `user_id` |
+
+CLI: `crewship integration composio inventory`.
+
+### Composio Toolkits
+
+```
+GET /api/v1/integrations/composio/toolkits?workspace_id={workspaceId}&search={q}&category={cat}&limit={n}
+```
+
+Proxies the Composio app catalog (1000+ connectable apps). `search`, `category`,
+and `limit` (max 100, default 40) are optional server-side filters. Read-gated;
+returns `enabled: false` when the provider is unconfigured.
+
+**Response:** `200 OK`
+
+```json
+{
+  "enabled": true,
+  "total": 1047,
+  "toolkits": [
+    {
+      "slug": "github",
+      "name": "GitHub",
+      "no_auth": false,
+      "meta": {
+        "description": "Code hosting platform…",
+        "logo": "https://logos.composio.dev/api/github",
+        "tools_count": 846,
+        "categories": [{ "id": "developer-tools", "name": "developer tools" }]
+      }
+    }
+  ]
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `enabled` | boolean | Whether the provider is configured |
+| `total` | integer | Total apps matching the filter in the Composio catalog |
+| `toolkits` | array | The current page of apps (slug, name, meta) |
+
+CLI: `crewship integration composio toolkits [--search] [--category] [--limit]`.
+
+### Composio Tools
+
+```
+GET /api/v1/integrations/composio/tools?workspace_id={workspaceId}&toolkit={slug}&search={q}&limit={n}
+```
+
+Lists the tools a single toolkit exposes (e.g. `github` has 846, `gmail` 61).
+`toolkit` is **required** (`400` otherwise). `search` and `limit` (max 100,
+default 40) are optional server-side filters. Read-gated; returns
+`enabled: false` when the provider is unconfigured.
+
+**Response:** `200 OK`
+
+```json
+{
+  "enabled": true,
+  "total": 846,
+  "tools": [
+    {
+      "slug": "GITHUB_CREATE_AN_ISSUE",
+      "name": "Create an issue",
+      "description": "Create a new issue in a repository",
+      "toolkit": { "slug": "github" }
+    }
+  ]
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `enabled` | boolean | Whether the provider is configured |
+| `total` | integer | Total tools matching the filter for the toolkit |
+| `tools` | array | The current page of tools (slug, name, description, toolkit) |
+
+CLI: `crewship integration composio tools <toolkit> [--search] [--limit]`.
+
+### Composio Triggers
+
+```
+GET /api/v1/integrations/composio/triggers?workspace_id={workspaceId}&toolkit={slug}&search={q}&limit={n}
+```
+
+Lists the available **trigger types** — event subscriptions a toolkit exposes
+(e.g. `GMAIL_NEW_MESSAGE`, `GITHUB_PR_OPENED`). `toolkit`, `search`, and
+`limit` (max 100, default 40) are optional server-side filters. Read-gated;
+returns `enabled: false` when the provider is unconfigured.
+
+**Response:** `200 OK`
+
+```json
+{
+  "enabled": true,
+  "total": 12,
+  "triggers": [
+    {
+      "slug": "GMAIL_NEW_GMAIL_MESSAGE",
+      "name": "New Gmail message",
+      "description": "Triggers when a new email arrives",
+      "type": "poll",
+      "toolkit": { "slug": "gmail" }
+    }
+  ]
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `enabled` | boolean | Whether the provider is configured |
+| `total` | integer | Total trigger types matching the filter |
+| `triggers` | array | The current page of trigger types (slug, name, description, type, toolkit) |
+
+CLI: `crewship integration composio triggers types [--toolkit] [--search] [--limit]`.
+
+### Composio Active Triggers
+
+```
+GET /api/v1/integrations/composio/triggers/active?workspace_id={workspaceId}
+```
+
+Lists the **live trigger instances** in the project across all users. Read-gated;
+returns `enabled: false` when the provider is unconfigured.
+
+**Response:** `200 OK`
+
+```json
+{
+  "enabled": true,
+  "triggers": [
+    {
+      "id": "ti_abc123",
+      "trigger_name": "GMAIL_NEW_GMAIL_MESSAGE",
+      "user_id": "user-1",
+      "connected_account_id": "ca_1",
+      "trigger_config": { "interval": 60 }
+    }
+  ]
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `enabled` | boolean | Whether the provider is configured |
+| `triggers` | array | The active trigger instances (id, trigger_name, user_id, connected_account_id, trigger_config, disabled_at) |
+
+CLI: `crewship integration composio triggers active`.
+
+### Composio Create Trigger
+
+```
+POST /api/v1/integrations/composio/triggers?workspace_id={workspaceId}
+```
+
+Creates (or re-enables) a trigger instance for a Composio user. **OWNER/ADMIN
+only.** Returns `400` if `slug` or `user_id` is empty, or if the provider is
+unconfigured.
+
+**Request body:**
+
+```json
+{
+  "slug": "GMAIL_NEW_GMAIL_MESSAGE",
+  "user_id": "user-1",
+  "config": { "interval": 60 }
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `slug` | string | Trigger-type slug to enable (**required**) |
+| `user_id` | string | Composio user the trigger fires for (**required**) |
+| `config` | object | Trigger-type-specific configuration (optional) |
+
+**Response:** `200 OK`
+
+```json
+{
+  "enabled": true,
+  "trigger": {
+    "id": "ti_new",
+    "trigger_name": "GMAIL_NEW_GMAIL_MESSAGE",
+    "user_id": "user-1",
+    "trigger_config": { "interval": 60 }
+  }
+}
+```
+
+CLI: `crewship integration composio triggers enable <slug> --user <id>`.
+
+### Composio Settings
+
+Manage the **per-workspace** Composio API key from the app instead of the
+server env. The key is **validated against Composio** before being stored
+**encrypted** (AES-GCM). The effective key is resolved per request: the
+workspace key first, then the server `COMPOSIO_API_KEY` env fallback. The key
+is never returned by any endpoint.
+
+```
+GET    /api/v1/integrations/composio/settings?workspace_id={workspaceId}
+PUT    /api/v1/integrations/composio/settings?workspace_id={workspaceId}
+DELETE /api/v1/integrations/composio/settings?workspace_id={workspaceId}
+```
+
+`GET` (read) returns the status; `PUT`/`DELETE` require workspace **manage**
+(OWNER/ADMIN). `PUT` body: `{ "api_key": "ak_…", "base_url": "", "label": "" }`.
+
+**Response (GET / PUT / DELETE):** `200 OK`
+
+```json
+{ "configured": true, "source": "workspace", "label": "Crewship_dev_1", "base_url": "" }
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `configured` | boolean | Whether a usable key exists (workspace or env) |
+| `source` | string | `workspace`, `env`, or `none` |
+| `label` | string | Optional project label (workspace source only) |
+
+A `PUT` with an invalid key returns `400` (Composio rejected it). CLI:
+`crewship integration composio key {show,set,remove}`.
+
+### Composio Agent Binding
+
+Grant an agent **per-app, tool-scoped** access to a Composio **user**'s
+connected apps. For **each** granted app the binding provisions one
+tool-scoped Composio MCP server and persists the rows the runtime resolver
+reads — a per-(agent, app) workspace MCP server pointing at the per-user
+Composio MCP URL, a workspace credential holding the Composio API key, and an
+agent MCP binding joining them (`cred_type: api_key`, `cred_header: x-api-key`).
+No resolver change is needed: the sidecar injects the `x-api-key` header on the
+streamable-http request.
+
+Each app carries a **mode** that maps to the MCP server's `allowed_tools`:
+
+| Mode | `allowed_tools` | Effect |
+|---|---|---|
+| `full` | *(empty)* | Every tool the app exposes (no enumeration). |
+| `read` | the app's read-ish tools | Server-resolved: tools whose slug carries a read verb (`GET`, `LIST`, `FETCH`, `SEARCH`, `READ`, …). Conservative — unknown verbs are treated as not-read. |
+| `custom` | the picked tool slugs | The request's `tools`, intersected with the app's real tools (bogus slugs are dropped). |
+
+```
+GET    /api/v1/integrations/composio/agents/{agentId}/bind?workspace_id={workspaceId}
+POST   /api/v1/integrations/composio/agents/{agentId}/bind?workspace_id={workspaceId}
+DELETE /api/v1/integrations/composio/agents/{agentId}/bind?workspace_id={workspaceId}[&toolkit={slug}]
+```
+
+`GET` (read) lists the agent's per-app Composio bindings; `POST`/`DELETE`
+require workspace **manage** (OWNER/ADMIN). `POST` body:
+
+```json
+{
+  "user_id": "user-42",
+  "apps": [
+    { "toolkit": "gmail", "mode": "read" },
+    { "toolkit": "github", "mode": "full" },
+    { "toolkit": "gmail", "mode": "custom", "tools": ["GMAIL_FETCH_EMAILS", "GMAIL_LIST_THREADS"] }
+  ]
+}
+```
+
+`user_id` is required (the Composio user the agent is scoped to). The legacy
+shape `{ "user_id": "…", "toolkits": ["gmail"] }` is still accepted — each
+toolkit becomes an app at `full`. When neither `apps` nor `toolkits` is given,
+every connected app is bound at `full`. Re-binding **replaces** the agent's app
+set: apps no longer present are removed (their server row + binding deleted).
+`read`/`custom` with an empty resolved tool set returns `400`. `DELETE` with
+`?toolkit=<slug>` removes one app; without it, removes all the agent's Composio
+apps.
+
+**Response (POST):** `200 OK`
+
+```json
+{
+  "agent_id": "clx…",
+  "user_id": "user-42",
+  "apps": [
+    { "toolkit": "gmail", "mode": "read", "endpoint": "https://mcp.composio.dev/server/…?user_id=user-42" },
+    { "toolkit": "github", "mode": "full", "endpoint": "https://mcp.composio.dev/server/…?user_id=user-42" }
+  ]
+}
+```
+
+**Response (GET):** `200 OK`
+
+```json
+{ "agent_id": "clx…", "bindings": [ { "toolkit": "gmail", "mode": "read", "user_id": "user-42", "endpoint": "https://mcp.composio.dev/server/…?user_id=user-42" } ] }
+```
+
+`POST` returns `404` for an unknown/foreign agent and `400` when Composio is
+unconfigured or no apps resolve. CLI:
+`crewship integration composio {bind,unbind,bindings} <agent> --user <id> [--app toolkit[:mode[:t1,t2]]]…`.
+
+### Composio Connected-Account Management
+
+Lifecycle operations on an existing connected account. The `accountId` is the
+Composio account id surfaced by the [inventory](#composio-inventory) endpoint.
+All three require workspace **manage** (OWNER/ADMIN) and return `400` when
+Composio is unconfigured.
+
+```
+POST   /api/v1/integrations/composio/accounts/{accountId}/revoke?workspace_id={workspaceId}
+POST   /api/v1/integrations/composio/accounts/{accountId}/refresh?workspace_id={workspaceId}
+DELETE /api/v1/integrations/composio/accounts/{accountId}?workspace_id={workspaceId}
+```
+
+- **revoke** — de-authorizes the account at the provider. Its credentials are
+  invalidated upstream; the user must re-connect before it can be used again.
+- **refresh** — refreshes the account's credentials (e.g. exchanging a refresh
+  token for a new access token).
+- **delete** — permanently removes the connected account at the provider.
+
+**Response:** `204 No Content` on success; `502` when Composio returns an error.
+
+CLI: `crewship integration composio account {revoke,refresh,remove} <account-id>`.
 
 ---
 

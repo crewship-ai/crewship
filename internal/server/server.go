@@ -598,6 +598,9 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 
 		// Wire Keeper gatekeeper (Ollama-based credential access control)
 		opts = append(opts, goapi.WithKeeperConfig(&cfg.Keeper))
+
+		// Wire Composio managed-integration provider (API key from env/yaml)
+		opts = append(opts, goapi.WithComposioConfig(&cfg.Composio))
 		if cfg.Keeper.Enabled {
 			// Wrap the Ollama provider with the full middleware stack so
 			// gatekeeper LLM calls are cost-tracked, guardrail-scanned,

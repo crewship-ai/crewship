@@ -137,6 +137,31 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.mux.Handle("PATCH /api/v1/crews/{crewId}/integrations/{integrationId}", authed(wsCtx(http.HandlerFunc(integrations.UpdateCrewIntegration))))
 	r.mux.Handle("DELETE /api/v1/crews/{crewId}/integrations/{integrationId}", authed(wsCtx(http.HandlerFunc(integrations.DeleteCrewIntegration))))
 	r.mux.Handle("POST /api/v1/crews/{crewId}/integrations/{integrationId}/test", authed(wsCtx(http.HandlerFunc(integrations.TestCrewIntegrationConnection))))
+	// Composio managed integrations — read-only inventory (auth-config catalog
+	// + connected accounts grouped by user_id). Two literal path segments after
+	// /integrations so it never collides with the /{integrationId} wildcard.
+	composioH := NewComposioHandler(r.db, r.logger, r.composioConfig)
+	r.mux.Handle("GET /api/v1/integrations/composio/inventory", authed(wsCtx(http.HandlerFunc(composioH.ListInventory))))
+	r.mux.Handle("GET /api/v1/integrations/composio/toolkits", authed(wsCtx(http.HandlerFunc(composioH.ListToolkits))))
+	r.mux.Handle("GET /api/v1/integrations/composio/tools", authed(wsCtx(http.HandlerFunc(composioH.ListTools))))
+	r.mux.Handle("GET /api/v1/integrations/composio/triggers", authed(wsCtx(http.HandlerFunc(composioH.ListTriggerTypes))))
+	r.mux.Handle("GET /api/v1/integrations/composio/triggers/active", authed(wsCtx(http.HandlerFunc(composioH.ListActiveTriggers))))
+	r.mux.Handle("POST /api/v1/integrations/composio/triggers", authed(wsCtx(http.HandlerFunc(composioH.CreateTrigger))))
+	r.mux.Handle("GET /api/v1/integrations/composio/settings", authed(wsCtx(http.HandlerFunc(composioH.GetSettings))))
+	r.mux.Handle("PUT /api/v1/integrations/composio/settings", authed(wsCtx(http.HandlerFunc(composioH.UpsertSettings))))
+	r.mux.Handle("DELETE /api/v1/integrations/composio/settings", authed(wsCtx(http.HandlerFunc(composioH.DeleteSettings))))
+	r.mux.Handle("POST /api/v1/integrations/composio/connect", authed(wsCtx(http.HandlerFunc(composioH.Connect))))
+	// Agent access binding — assign a Composio user (its connected accounts/
+	// tools) to a specific agent, persisting the credential + workspace MCP
+	// server + agent binding the runtime resolver already reads.
+	r.mux.Handle("GET /api/v1/integrations/composio/agents/{agentId}/bind", authed(wsCtx(http.HandlerFunc(composioH.ListAgentBindings))))
+	r.mux.Handle("POST /api/v1/integrations/composio/agents/{agentId}/bind", authed(wsCtx(http.HandlerFunc(composioH.BindAgent))))
+	r.mux.Handle("DELETE /api/v1/integrations/composio/agents/{agentId}/bind", authed(wsCtx(http.HandlerFunc(composioH.UnbindAgent))))
+	// Connected-account management — revoke/refresh/delete a Composio connected
+	// account (manage-gated; proxies the matching Composio lifecycle call).
+	r.mux.Handle("POST /api/v1/integrations/composio/accounts/{accountId}/revoke", authed(wsCtx(http.HandlerFunc(composioH.RevokeAccount))))
+	r.mux.Handle("POST /api/v1/integrations/composio/accounts/{accountId}/refresh", authed(wsCtx(http.HandlerFunc(composioH.RefreshAccount))))
+	r.mux.Handle("DELETE /api/v1/integrations/composio/accounts/{accountId}", authed(wsCtx(http.HandlerFunc(composioH.DeleteAccount))))
 	// Connectors — curated manifest catalog + install flow. List/Get are
 	// catalog browse (auth only, no workspace context); Verify/Install
 	// mutate workspace state and gate on MANAGER+ via wsCtx-resolved role.

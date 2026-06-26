@@ -86,7 +86,10 @@ func securityHeadersMiddleware(next http.Handler) http.Handler {
 				"default-src 'self'; "+
 					"script-src 'self' 'unsafe-inline' 'unsafe-eval'; "+
 					"style-src 'self' 'unsafe-inline'; "+
-					"img-src 'self' data: blob:; "+
+					// logos.composio.dev serves the managed-integration brand
+					// logos (Gmail, GitHub, Slack, …) shown in the connector
+					// catalog. Scoped to that one host — not a blanket https:.
+					"img-src 'self' data: blob: https://logos.composio.dev; "+
 					"font-src 'self' data:; "+
 					"connect-src 'self'; "+
 					"frame-ancestors 'none'; "+

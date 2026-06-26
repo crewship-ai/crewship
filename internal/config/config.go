@@ -50,6 +50,7 @@ type Config struct {
 	LLMProxy  LLMProxyConfig  `yaml:"llm_proxy"`
 	Keeper    KeeperConfig    `yaml:"keeper"`
 	License   LicenseConfig   `yaml:"license"`
+	Composio  ComposioConfig  `yaml:"composio"`
 }
 
 // LicenseConfig holds the path to the license key file.
@@ -151,6 +152,16 @@ type KeeperConfig struct {
 	Enabled   bool   `yaml:"enabled"`
 	OllamaURL string `yaml:"ollama_url"`
 	Model     string `yaml:"model"`
+}
+
+// ComposioConfig configures the Composio managed-integration provider.
+// Enabled is derived: setting COMPOSIO_API_KEY auto-enables it (see
+// applyEnvOverrides) since the provider is useless without a key. BaseURL is
+// optional and defaults to the Composio production host inside the client.
+type ComposioConfig struct {
+	Enabled bool   `yaml:"enabled"`
+	APIKey  string `yaml:"api_key"`
+	BaseURL string `yaml:"base_url"`
 }
 
 // Default returns a Config populated with sensible defaults for all settings.
@@ -426,6 +437,22 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("CREWSHIP_LICENSE_FILE"); v != "" {
 		cfg.License.FilePath = v
+	}
+	if v := os.Getenv("COMPOSIO_API_KEY"); v != "" {
+		cfg.Composio.APIKey = v
+		// A key is the only thing the provider needs to function, so its
+		// presence auto-enables Composio unless an operator explicitly
+		// disabled it via COMPOSIO_ENABLED (same envBool gate as Keeper so a
+		// junk value doesn't silently suppress auto-enable).
+		if _, ok := envBool("COMPOSIO_ENABLED"); !ok {
+			cfg.Composio.Enabled = true
+		}
+	}
+	if val, ok := envBool("COMPOSIO_ENABLED"); ok {
+		cfg.Composio.Enabled = val
+	}
+	if v := os.Getenv("COMPOSIO_BASE_URL"); v != "" {
+		cfg.Composio.BaseURL = v
 	}
 }
 

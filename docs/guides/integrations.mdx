@@ -6,7 +6,59 @@ icon: "plug"
 
 # Integrations
 
+<Note>
+**The Integrations page is being reworked.** The self-hosted MCP connector
+management UI at `/integrations` is being replaced by a **managed integration
+platform** (Composio) so you can connect apps via OAuth without standing up and
+maintaining your own MCP servers. The legacy UI is now hidden by default and the
+page shows a placeholder while the managed experience is built.
+
+To restore the legacy UI during the transition, build the dashboard with
+`NEXT_PUBLIC_LEGACY_MCP_INTEGRATIONS=true`. No legacy code or API has been
+removed — the MCP endpoints documented below still work, and **credentials are
+unaffected**. The sections below describe the legacy mechanism.
+</Note>
+
 Crewship supports two integration mechanisms: **OAuth 2.0 connections** for service authentication and **MCP (Model Context Protocol) servers** for extending agent tool capabilities.
+
+## Managed Integrations (Composio)
+
+Crewship's managed integration path uses [Composio](https://composio.dev) so you connect apps once instead of hosting MCP servers yourself.
+
+**Object model**
+
+| Concept | What it is |
+| --- | --- |
+| **Auth config** | Per-app OAuth blueprint (GitHub, Slack, Gmail, …). One per app, shared by all users. The "connector catalog". |
+| **User (`user_id`)** | An end-user identity — the isolation boundary. A user owns a set of connected accounts. |
+| **Connected account** | One user's authorised connection to an app (OAuth tokens). |
+
+**How isolation works.** An agent is bound to exactly **one `user_id`** and therefore sees only that user's connected accounts — never anyone else's. To give 30 mailboxes to 30 agents, create 30 users (one per mailbox) and bind each agent to its user; the per-agent MCP URL is scoped server-side, so an agent cannot reach another user's accounts even in principle. Use Composio **projects** only for coarse isolation (per environment, or per customer/workspace) — not per agent.
+
+**Enabling.** Add a Composio **project API key** either per-workspace from the app (Integrations → **API key**, or `crewship integration composio key set`) — validated and stored encrypted — or server-wide via the `COMPOSIO_API_KEY` env. The effective key resolves workspace-first, then env. Billing is by tool calls (Composio free tier = 20K/mo), not by number of users or connected accounts.
+
+<Warning>
+**Multi-tenant isolation.** A Composio API key maps to a single Composio
+**project**, which is the isolation boundary — every connected account, user,
+and trigger under that key is visible to anyone with access to a workspace
+using it. The server-wide `COMPOSIO_API_KEY` env therefore puts **all**
+workspaces in **one shared project**: do not back multiple independent tenant
+workspaces with it. For true per-tenant isolation, give each workspace its own
+key (Integrations → API key) so it maps to a separate Composio project.
+</Warning>
+
+**Inspecting the inventory.** The operator view of the catalog and connected accounts (grouped by user):
+
+```bash
+crewship integration composio inventory
+```
+
+returns the same data as `GET /api/v1/integrations/composio/inventory`. This is an operator/admin view — agents are never handed the full list.
+
+<Note>
+Connecting accounts and per-agent binding (the write/OAuth flow and UI) ship in
+follow-up slices. Today the managed path is read-only inventory.
+</Note>
 
 ## OAuth 2.0 Integrations
 

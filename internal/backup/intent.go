@@ -50,6 +50,9 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"agent_credentials":    IntentInclude,
 	"credential_audit":     IntentInclude,
 	"credential_rotations": IntentInclude,
+	// Composio managed-integration provider config (encrypted API key per
+	// workspace). Workspace-scoped; round-trips with the encrypted value.
+	"composio_settings": IntentInclude,
 
 	// === Files & memory (round-trip) ==========================
 	"chat_branches":           IntentInclude,

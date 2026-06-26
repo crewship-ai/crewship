@@ -3,6 +3,7 @@
 import { MoreHorizontal } from "lucide-react"
 import { SystemPromptEditor } from "@/components/features/crews/system-prompt-editor"
 import { AgentLearningToggle } from "@/components/features/agents/agent-learning-toggle"
+import { AgentConnectorsCard } from "@/components/features/integrations/composio/access-editor"
 
 import { AdvancedSection } from "./advanced-section"
 import { RuntimeSection } from "./runtime-section"
@@ -46,6 +47,17 @@ export function SettingsTab({
       <section className="space-y-3">
         <h2 className="text-lg font-semibold">Learning posture</h2>
         <AgentLearningToggle agentId={agent.id} workspaceId={agent.workspace_id} />
+      </section>
+
+      {/* Connectors — Composio access summary + shared AccessEditor */}
+      <section className="space-y-3">
+        <h2 className="text-lg font-semibold">Connectors</h2>
+        <AgentConnectorsCard
+          agentId={agent.id}
+          agentName={agent.name}
+          agentCrew={agent.crew?.name}
+          workspaceId={agent.workspace_id}
+        />
       </section>
 
       {/* Runtime — provider chips + rich model dropdown */}

@@ -27,6 +27,39 @@ crewship intg <subcommand> [flags]
 
 ## Subcommands
 
+### Managed integrations (Composio)
+
+| Command | Purpose |
+| --- | --- |
+| `integration composio inventory` | Show configured connectors (auth configs) and connected accounts grouped by `user_id`. |
+| `integration composio toolkits` | Browse the Composio app catalog (1000+ apps). Filters: `--search`, `--category`, `--limit`. |
+| `integration composio tools <toolkit>` | List the tools a toolkit exposes (e.g. `github` has 846). Filters: `--search`, `--limit`. |
+| `integration composio triggers types` | List available trigger types (event subscriptions like `GMAIL_NEW_MESSAGE`). Filters: `--toolkit`, `--search`, `--limit`. |
+| `integration composio triggers active` | List active trigger instances across all users. |
+| `integration composio triggers enable <slug>` | Create/enable a trigger instance for a user. Requires `--user <id>`. |
+| `integration composio key show` | Show whether/how Composio is configured (never prints the key). |
+| `integration composio key set` | Set & validate the workspace API key (`--key`, `--base-url`, `--label`); stored encrypted. |
+| `integration composio key remove` | Remove the workspace key (revert to the server env, if any). |
+| `integration composio bind <agent>` | Bind a Composio `user_id` to an agent with **per-app tool scope**. Requires `--user <id>`; repeatable `--app toolkit[:mode[:t1,t2]]` (mode = `full`\|`read`\|`custom`), e.g. `--app gmail:read --app github:full --app gmail:custom:GMAIL_FETCH_EMAILS,GMAIL_LIST_THREADS`. `--toolkits a,b` is a shorthand for each app at `full`. Re-binding replaces the app set. |
+| `integration composio unbind <agent>` | Remove an agent's Composio access. `--app <toolkit>` removes one app; omit it to remove all. |
+| `integration composio bindings <agent>` | Show an agent's per-app Composio bindings (toolkit, mode, user, endpoint). |
+| `integration composio account revoke <account-id>` | De-authorize a connected account at the provider (must be re-connected to use again). |
+| `integration composio account refresh <account-id>` | Refresh a connected account's credentials. |
+| `integration composio account remove <account-id>` | Permanently delete a connected account at the provider. |
+
+`bind`/`unbind` map to `POST`/`DELETE /api/v1/integrations/composio/agents/{agentId}/bind`
+(workspace manage); `bindings` to the matching `GET` (read). The agent argument
+accepts a slug or id. `account revoke`/`refresh`/`remove` map to
+`POST .../accounts/{accountId}/revoke`, `POST .../accounts/{accountId}/refresh`,
+and `DELETE .../accounts/{accountId}` (all workspace manage); the `account-id` is
+the Composio account id shown by `integration composio inventory --output json`.
+
+Maps to `GET /api/v1/integrations/composio/inventory`. Requires a Composio API key
+for the active workspace — set one per-workspace with `integration composio key set`
+(or from the Integrations UI), or fall back to a server-level `COMPOSIO_API_KEY`.
+Prints a "not configured" notice when neither is present. Add `--output json`
+for the raw payload. See the [Integrations guide](/guides/integrations#managed-integrations-composio).
+
 ### Workspace-scoped
 
 | Command | Purpose |

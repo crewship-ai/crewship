@@ -33,6 +33,8 @@ import { AddMCPWizard } from "@/components/features/integrations/add-mcp-wizard"
 import { MCPLogo } from "@/components/icons/mcp-logos"
 import { RecipesEmptyState } from "@/components/features/dashboard/recipes-cards"
 import { serializeArgs, subtitleFor } from "@/components/features/integrations/helpers"
+import { ComposioIntegrations } from "@/components/features/integrations/composio-integrations"
+import { legacyMcpIntegrations } from "@/lib/feature-flags"
 import type {
   AgentBinding,
   AgentInfo,
@@ -47,7 +49,19 @@ import type {
 // focused on the list/add/delete orchestration for the default
 // export.
 
+// Default export: gate the legacy self-hosted MCP connector UI behind the
+// `legacyMcpIntegrations()` flag (default OFF). While the managed integration
+// platform (Composio) is being built, the page renders a placeholder. The
+// legacy implementation below is untouched — flipping the env var brings it
+// back, so this is a fully reversible rollback path, not a deletion.
 export default function IntegrationsPage() {
+  if (!legacyMcpIntegrations()) {
+    return <ComposioIntegrations />
+  }
+  return <LegacyIntegrationsPage />
+}
+
+function LegacyIntegrationsPage() {
   const { workspaceId, loading: wsLoading } = useWorkspace()
   const { abilities } = useAbilities()
   const canManage = abilities.can("create", "Credential")
