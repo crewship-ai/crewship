@@ -8,6 +8,7 @@ import { TabBar } from "@/components/ui/tab-bar"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
+import { buildPipelineActionRequest, canTestRun } from "@/lib/pipeline-actions"
 import { RoutineOverviewTab } from "./routine-overview-tab"
 import { RoutineEditorTab } from "./routine-editor-tab"
 import { RoutineRunsTab } from "./routine-runs-tab"
@@ -109,12 +110,16 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
   }, [workspaceId, slug])
 
   const triggerAction = async (action: "run" | "test_run" | "dry_run") => {
+    if (!routine) return
     setBusyAction(action)
     try {
-      const res = await fetch(`/api/v1/workspaces/${workspaceId}/pipelines/${slug}/${action}`, {
+      // Test run hits a slugless route with the draft definition in the body;
+      // Run / Dry run address the saved pipeline by slug. See lib/pipeline-actions.
+      const { url, body } = buildPipelineActionRequest(workspaceId, slug, action, routine)
+      const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ inputs: {} }),
+        body: JSON.stringify(body),
       })
       if (!res.ok) {
         const t = await res.text().catch(() => "")
@@ -260,9 +265,13 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
           <Button
             variant="outline"
             onClick={() => triggerAction("test_run")}
-            disabled={!!busyAction || !routine}
+            disabled={!!busyAction || !routine || !canTestRun(routine)}
             className="h-9 gap-2 rounded-md px-4 text-sm"
-            title="Run on execution tier; logs result without persisting state"
+            title={
+              canTestRun(routine)
+                ? "Run the draft definition on the execution tier; logs result without persisting state"
+                : "Test run needs an author crew — only available for crew-authored routines"
+            }
           >
             <FlaskConical className="h-3.5 w-3.5" />
             {busyAction === "test_run" ? "Testing…" : "Test run"}

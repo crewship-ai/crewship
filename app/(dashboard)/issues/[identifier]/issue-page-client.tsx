@@ -20,6 +20,7 @@ import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 import { MarkdownContent } from "@/components/features/issues/markdown-content"
 import { TiptapEditor } from "@/components/features/issues/tiptap-editor"
 import { ActivityFeed } from "@/components/features/issues/activity-feed"
+import { RunActivityTimeline } from "@/components/features/activity/run-activity-timeline"
 import { IssueSidebar, IssueSidebarMobile } from "@/components/features/orchestration/issue-sidebar"
 import { timeAgo, formatDate } from "@/lib/time"
 import { Button } from "@/components/ui/button"
@@ -641,7 +642,11 @@ export function IssuePageClient() {
 
             <Separator />
 
-            {/* ---- Activity section ---- */}
+            {/* ---- Run activity (live agent work, pulled from the journal by
+                 the run's trace_id) — renders only once the issue has a run. ---- */}
+            <RunActivityTimeline workspaceId={workspaceId} traceId={issue.trace_id || null} />
+
+            {/* ---- Activity section (issue lifecycle: assignee/status/etc.) ---- */}
             {loadingActivity ? (
               <div className="flex items-center justify-center py-4">
                 <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
