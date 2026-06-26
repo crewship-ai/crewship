@@ -497,6 +497,102 @@ func postMultipart(ctx context.Context, client *cli.Client, path, contentType st
 	return client.HTTPClient.Do(req)
 }
 
+// chatParticipantsCmd groups the group-chat membership subcommands. CLI
+// parity for the /api/v1/chats/{chatId}/participants endpoints. Adding the
+// first participant promotes the chat to a group, after which the agent
+// responds only when @mentioned.
+var chatParticipantsCmd = &cobra.Command{
+	Use:     "participants",
+	Aliases: []string{"members"},
+	Short:   "Manage who is in a multi-user group chat",
+}
+
+var chatParticipantsAddCmd = &cobra.Command{
+	Use:   "add <chat-id> <user-id>",
+	Short: "Add a user to a chat (promotes it to a group chat)",
+	Args:  cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client, err := requireAuthAndWorkspace()
+		if err != nil {
+			return err
+		}
+		role, _ := cmd.Flags().GetString("role")
+		body := map[string]string{"user_id": args[1]}
+		if role != "" {
+			body["role"] = role
+		}
+		path := "/api/v1/chats/" + url.PathEscape(args[0]) + "/participants"
+		if err := postJSON(client, path, body, nil); err != nil {
+			return err
+		}
+		cli.PrintSuccess(fmt.Sprintf("Added %s to chat %s (now a group chat).", args[1], args[0]))
+		return nil
+	},
+}
+
+var chatParticipantsRemoveCmd = &cobra.Command{
+	Use:     "remove <chat-id> <user-id>",
+	Aliases: []string{"rm", "delete"},
+	Short:   "Remove a user from a group chat",
+	Args:    cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client, err := requireAuthAndWorkspace()
+		if err != nil {
+			return err
+		}
+		path := "/api/v1/chats/" + url.PathEscape(args[0]) +
+			"/participants/" + url.PathEscape(args[1])
+		if err := deleteJSON(client, path); err != nil {
+			return err
+		}
+		cli.PrintSuccess(fmt.Sprintf("Removed %s from chat %s.", args[1], args[0]))
+		return nil
+	},
+}
+
+var chatParticipantsListCmd = &cobra.Command{
+	Use:   "list <chat-id>",
+	Short: "List the participants of a group chat",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client, err := requireAuthAndWorkspace()
+		if err != nil {
+			return err
+		}
+		path := "/api/v1/chats/" + url.PathEscape(args[0]) + "/participants"
+		var body struct {
+			Participants []struct {
+				UserID   string `json:"user_id"`
+				Email    string `json:"email"`
+				FullName string `json:"full_name"`
+				Role     string `json:"role"`
+				JoinedAt string `json:"joined_at"`
+			} `json:"participants"`
+		}
+		if err := getJSON(client, path, &body); err != nil {
+			return err
+		}
+		f := newFormatter()
+		switch f.Format {
+		case "json":
+			return f.JSON(body.Participants)
+		case "yaml":
+			return f.YAML(body.Participants)
+		}
+		if len(body.Participants) == 0 {
+			fmt.Printf("%sNo participants (private chat).%s\n", cli.Dim, cli.Reset)
+			return nil
+		}
+		headers := []string{"USER ID", "EMAIL", "NAME", "ROLE"}
+		var rows [][]string
+		for _, p := range body.Participants {
+			rows = append(rows, []string{p.UserID, p.Email, p.FullName, p.Role})
+		}
+		f.Table(headers, rows)
+		return nil
+	},
+}
+
 func init() {
 	chatCmd.Flags().String("since", "", "Only show messages newer than this (1h, 24h, RFC3339)")
 	chatCmd.Flags().Bool("markdown", false, "Force markdown ANSI styling")
@@ -511,7 +607,13 @@ func init() {
 	chatReactCmd.AddCommand(chatReactRemoveCmd)
 	chatReactCmd.AddCommand(chatReactListCmd)
 
+	chatParticipantsAddCmd.Flags().String("role", "member", "Participant role: member or owner")
+	chatParticipantsCmd.AddCommand(chatParticipantsAddCmd)
+	chatParticipantsCmd.AddCommand(chatParticipantsRemoveCmd)
+	chatParticipantsCmd.AddCommand(chatParticipantsListCmd)
+
 	chatCmd.AddCommand(chatReactCmd)
+	chatCmd.AddCommand(chatParticipantsCmd)
 	chatCmd.AddCommand(chatAttachCmd)
 	chatCmd.AddCommand(chatListCmd)
 	chatCmd.AddCommand(chatSteerCmd)
