@@ -110,6 +110,49 @@ describe("humanizeEntry", () => {
   })
 })
 
+describe("humanizeEntry — pipeline (routine) runs", () => {
+  it("pipeline.run.started → active opener with step count", () => {
+    const row = humanizeEntry(entry({ entry_type: "pipeline.run.started", payload: { step_count: 2, run_id: "r1" } }))
+    expect(row!.title).toBe("Routine started")
+    expect(row!.tone).toBe("active")
+    expect(row!.meta).toContain("2 steps")
+  })
+
+  it("pipeline.run.completed → success with total cost + duration", () => {
+    const row = humanizeEntry(entry({ entry_type: "pipeline.run.completed", payload: { total_cost_usd: 0.0001, total_duration_ms: 820 } }))
+    expect(row!.title).toBe("Completed")
+    expect(row!.tone).toBe("success")
+    expect(row!.meta).toContain("$0.0001")
+    expect(row!.meta).toContain("820ms")
+  })
+
+  it("pipeline.run.failed → error tone with error + failed step", () => {
+    const row = humanizeEntry(entry({ entry_type: "pipeline.run.failed", severity: "error", payload: { error_message: "404 page not found", failed_at_step: "convert" } }))
+    expect(row!.tone).toBe("error")
+    expect(row!.detail).toBe("404 page not found")
+    expect(row!.meta).toContain("convert")
+  })
+
+  it("pipeline.step.completed → step id title, output preview detail, cost/duration meta", () => {
+    const row = humanizeEntry(entry({ entry_type: "pipeline.step.completed", payload: { step_id: "convert", output_preview: "[{...}]", duration_ms: 1200, cost_usd: 0.0001 } }))
+    expect(row!.title).toContain("convert")
+    expect(row!.detail).toBe("[{...}]")
+    expect(row!.meta).toContain("1.2s")
+  })
+
+  it("pipeline.step.failed → error tone with class + message", () => {
+    const row = humanizeEntry(entry({ entry_type: "pipeline.step.failed", severity: "error", payload: { step_id: "convert", error_class: "http", error_message_preview: "boom" } }))
+    expect(row!.tone).toBe("error")
+    expect(row!.title).toContain("convert")
+    expect(row!.detail).toBe("boom")
+  })
+
+  it("pipeline.step.started and pipeline.dry_run are dropped as noise", () => {
+    expect(humanizeEntry(entry({ entry_type: "pipeline.step.started", payload: { step_id: "x" } }))).toBeNull()
+    expect(humanizeEntry(entry({ entry_type: "pipeline.dry_run" }))).toBeNull()
+  })
+})
+
 describe("humanizeRun", () => {
   it("filters noise, keeps order ascending by ts", () => {
     const rows = humanizeRun([

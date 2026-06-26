@@ -39,6 +39,10 @@ const NOISE_TYPES = new Set<string>([
   "container.snapshot",
   "llm.cache_hit",
   "agent.status_change",
+  // Pipeline noise: step.started duplicates the eventual step.completed row,
+  // and dry_run has its own dedicated report surface.
+  "pipeline.step.started",
+  "pipeline.dry_run",
 ])
 
 // ---- small payload accessors (payload is free-form JSON) -------------------
@@ -205,6 +209,58 @@ export function humanizeEntry(e: JournalEntry): RunActivityRow | null {
       }
     }
 
+    // ---- Pipeline (routine) runs. These group by payload.run_id, not
+    // trace_id, but the rows render identically. ----
+    case "pipeline.run.started":
+      return {
+        ...base,
+        tone: "active",
+        title: "Routine started",
+        meta: joinMeta(stepLabel(num(p, "step_count"))),
+      }
+
+    case "pipeline.run.completed":
+      return {
+        ...base,
+        tone: "success",
+        title: "Completed",
+        meta: joinMeta(
+          formatCost(num(p, "total_cost_usd", "cost_usd")),
+          formatDuration(num(p, "total_duration_ms", "duration_ms")),
+        ),
+      }
+
+    case "pipeline.run.failed":
+      return {
+        ...base,
+        tone: "error",
+        title: "Failed",
+        detail: str(p, "error_message", "error") ?? (e.summary || undefined),
+        meta: joinMeta(stepAt(str(p, "failed_at_step"))),
+      }
+
+    case "pipeline.step.completed": {
+      const step = str(p, "step_id")
+      return {
+        ...base,
+        tone: "default",
+        title: step ? `Step ${step}` : "Step done",
+        detail: str(p, "output_preview"),
+        meta: joinMeta(formatCost(num(p, "cost_usd")), formatDuration(num(p, "duration_ms"))),
+      }
+    }
+
+    case "pipeline.step.failed": {
+      const step = str(p, "step_id")
+      return {
+        ...base,
+        tone: "error",
+        title: step ? `Step ${step} failed` : "Step failed",
+        detail: str(p, "error_message_preview", "error_message"),
+        meta: joinMeta(str(p, "error_class")),
+      }
+    }
+
     case "keeper.request":
       return { ...base, tone: "warn", title: "Requested credential", detail: e.summary || undefined }
 
@@ -233,6 +289,31 @@ export function humanizeEntry(e: JournalEntry): RunActivityRow | null {
   }
 }
 
+// Entry types that OPEN a run vs. close it (terminal). Covers both agent
+// runs (run.*/assignment.*) and pipeline runs (pipeline.run.*).
+const RUN_OPEN_TYPES = new Set<string>(["run.started", "assignment.running", "pipeline.run.started"])
+const RUN_TERMINAL_TYPES = new Set<string>([
+  "run.completed",
+  "run.failed",
+  "run.cancelled",
+  "run.timeout",
+  "assignment.completed",
+  "assignment.failed",
+  "pipeline.run.completed",
+  "pipeline.run.failed",
+])
+
+/** A run is "in flight" when it has opened but not reached a terminal entry. */
+export function isRunInFlight(entryTypes: string[]): boolean {
+  let opened = false
+  let terminal = false
+  for (const t of entryTypes) {
+    if (RUN_OPEN_TYPES.has(t)) opened = true
+    if (RUN_TERMINAL_TYPES.has(t)) terminal = true
+  }
+  return opened && !terminal
+}
+
 /** Map a run's journal entries to readable rows, oldest first, noise removed. */
 export function humanizeRun(entries: JournalEntry[]): RunActivityRow[] {
   return entries
@@ -250,6 +331,10 @@ function actorLabel(e: JournalEntry): string | undefined {
 function stepLabel(n: number | undefined): string | null {
   if (n === undefined || n < 0) return null
   return `${n} step${n === 1 ? "" : "s"}`
+}
+
+function stepAt(stepId: string | undefined): string | null {
+  return stepId ? `at ${stepId}` : null
 }
 
 function severityTone(sev: unknown): RunActivityTone {

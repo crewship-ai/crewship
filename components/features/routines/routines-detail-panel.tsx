@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 import { buildPipelineActionRequest, canTestRun } from "@/lib/pipeline-actions"
+import { PipelineRunActivity } from "@/components/features/activity/pipeline-run-activity"
 import { RoutineOverviewTab } from "./routine-overview-tab"
 import { RoutineEditorTab } from "./routine-editor-tab"
 import { RoutineRunsTab } from "./routine-runs-tab"
@@ -62,6 +63,9 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
   // dryRunResult holds the `would_execute` report from the most recent
   // dry_run invocation so we can render it inline. Cleared on close.
   const [dryRunResult, setDryRunResult] = useState<DryRunResult | null>(null)
+  // lastRunId holds the run_id of the most recent Run / Test run so we can
+  // show its live activity rail inline (instant status after clicking).
+  const [lastRunId, setLastRunId] = useState<string | null>(null)
   // abortRef tracks the in-flight fetch so a fast workspace/slug
   // switch cancels stale work. Without this, a slow network +
   // rapid-fire selection could race-overwrite the panel with the
@@ -102,6 +106,7 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
     // manually dismisses it — a confusing "this report doesn't match
     // what I'm looking at" surface bug.
     setDryRunResult(null)
+    setLastRunId(null)
     fetchRoutine()
     return () => {
       abortRef.current?.abort()
@@ -148,10 +153,12 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
           description: "Per-step tier + cost estimate shown above the tabs.",
         })
       } else {
+        // Surface the just-started run's live activity rail inline.
+        if (typeof data.run_id === "string" && data.run_id) setLastRunId(data.run_id)
         toast.success(`${actionLabel(action)} started`, {
           description: data.run_id
             ? `Run ${String(data.run_id).slice(0, 12)}…`
-            : "Watch the Runs tab for live status",
+            : "Watch the activity below for live status",
         })
       }
       onChanged()
@@ -304,6 +311,19 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
           "Dry run". Pre-fix this payload was silently dropped. */}
       {dryRunResult && (
         <RoutineDryRunReport result={dryRunResult} onClose={() => setDryRunResult(null)} />
+      )}
+
+      {/* Run activity — instant readable status for the just-triggered
+          Run / Test run, so the user isn't left wondering what's happening
+          after clicking. Full history stays in the Runs tab. */}
+      {routine && lastRunId && (
+        <div className="border-b border-white/[0.06]">
+          <PipelineRunActivity
+            workspaceId={workspaceId}
+            slug={routine.slug}
+            runId={lastRunId}
+          />
+        </div>
       )}
 
       {/* Tab bar — primitive with animated underline */}

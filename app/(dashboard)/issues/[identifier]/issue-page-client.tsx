@@ -20,7 +20,7 @@ import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 import { MarkdownContent } from "@/components/features/issues/markdown-content"
 import { TiptapEditor } from "@/components/features/issues/tiptap-editor"
 import { ActivityFeed } from "@/components/features/issues/activity-feed"
-import { RunActivityTimeline } from "@/components/features/activity/run-activity-timeline"
+import { RunActivityTimeline, RUN_WORK_ENTRY_TYPES } from "@/components/features/activity/run-activity-timeline"
 import { IssueSidebar, IssueSidebarMobile } from "@/components/features/orchestration/issue-sidebar"
 import { timeAgo, formatDate } from "@/lib/time"
 import { Button } from "@/components/ui/button"
@@ -642,9 +642,14 @@ export function IssuePageClient() {
 
             <Separator />
 
-            {/* ---- Run activity (live agent work, pulled from the journal by
-                 the run's trace_id) — renders only once the issue has a run. ---- */}
-            <RunActivityTimeline workspaceId={workspaceId} traceId={issue.trace_id || null} />
+            {/* ---- Run activity (live agent work — exec/file/network/llm —
+                 pulled from the journal scoped to this mission; filtered to
+                 work entry types so it stays distinct from the lifecycle feed
+                 below. Hidden until the issue has produced run entries. ---- */}
+            <RunActivityTimeline
+              workspaceId={workspaceId}
+              params={{ mission_id: issue.id, entry_type: RUN_WORK_ENTRY_TYPES.join(",") }}
+            />
 
             {/* ---- Activity section (issue lifecycle: assignee/status/etc.) ---- */}
             {loadingActivity ? (

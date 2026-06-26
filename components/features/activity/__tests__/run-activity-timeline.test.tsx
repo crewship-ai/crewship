@@ -43,8 +43,8 @@ describe("RunActivityTimeline", () => {
     mockLoading = false
   })
 
-  it("renders nothing without a trace id", () => {
-    const { container } = render(<RunActivityTimeline workspaceId="ws_1" traceId={null} />)
+  it("renders nothing without any filter", () => {
+    const { container } = render(<RunActivityTimeline workspaceId="ws_1" params={{}} />)
     expect(container).toBeEmptyDOMElement()
   })
 
@@ -54,7 +54,7 @@ describe("RunActivityTimeline", () => {
       entry({ entry_type: "file.written", ts: "2026-06-26T10:31:08Z", payload: { path: "/tmp/x.txt", size: 412 } }),
       entry({ entry_type: "run.started", ts: "2026-06-26T10:31:02Z" }),
     ]
-    render(<RunActivityTimeline workspaceId="ws_1" traceId="trace_1" />)
+    render(<RunActivityTimeline workspaceId="ws_1" params={{ trace_id: "trace_1" }} />)
     expect(screen.getByText("Run started")).toBeInTheDocument()
     expect(screen.getByText("Wrote file")).toBeInTheDocument()
     expect(screen.getByText("Completed")).toBeInTheDocument()
@@ -65,7 +65,7 @@ describe("RunActivityTimeline", () => {
 
   it("shows the Running indicator when opened with no terminal entry", () => {
     mockEntries = [entry({ entry_type: "run.started", ts: "2026-06-26T10:31:02Z" })]
-    render(<RunActivityTimeline workspaceId="ws_1" traceId="trace_1" />)
+    render(<RunActivityTimeline workspaceId="ws_1" params={{ trace_id: "trace_1" }} />)
     expect(screen.getByText("Running")).toBeInTheDocument()
   })
 
@@ -74,7 +74,7 @@ describe("RunActivityTimeline", () => {
       entry({ entry_type: "run.started", ts: "2026-06-26T10:31:02Z" }),
       entry({ entry_type: "run.failed", ts: "2026-06-26T10:31:05Z", severity: "error", payload: { error: "boom" } }),
     ]
-    render(<RunActivityTimeline workspaceId="ws_1" traceId="trace_1" />)
+    render(<RunActivityTimeline workspaceId="ws_1" params={{ trace_id: "trace_1" }} />)
     expect(screen.queryByText("Running")).not.toBeInTheDocument()
     expect(screen.getByText("Failed")).toBeInTheDocument()
     expect(screen.getByText("boom")).toBeInTheDocument()
@@ -82,7 +82,13 @@ describe("RunActivityTimeline", () => {
 
   it("renders an empty-state message when the run has no surfaced steps", () => {
     mockEntries = []
-    render(<RunActivityTimeline workspaceId="ws_1" traceId="trace_1" />)
+    render(<RunActivityTimeline workspaceId="ws_1" params={{ trace_id: "trace_1" }} hideWhenEmpty={false} />)
     expect(screen.getByText(/No activity recorded/i)).toBeInTheDocument()
+  })
+
+  it("hides entirely when empty and hideWhenEmpty is on (default)", () => {
+    mockEntries = []
+    const { container } = render(<RunActivityTimeline workspaceId="ws_1" params={{ trace_id: "trace_1" }} />)
+    expect(container).toBeEmptyDOMElement()
   })
 })

@@ -5,17 +5,24 @@ import { cn } from "@/lib/utils"
 import { formatLogTime } from "@/lib/utils/log-format"
 import { useJournalList } from "@/hooks/use-journal-list"
 import { useJournalStream } from "@/hooks/use-journal-stream"
-import { humanizeRun, type RunActivityRow, type RunActivityTone } from "@/lib/run-activity"
+import type { JournalEntry } from "@/lib/types/journal"
+import {
+  humanizeRun,
+  isRunInFlight,
+  type RunActivityRow,
+  type RunActivityTone,
+} from "@/lib/run-activity"
 
 // RunActivityTimeline — the readable "what the agent did" rail for a single
-// run. Pulls every journal entry sharing one `trace_id`, humanizes each into a
-// one-liner (lib/run-activity), and renders the rail-with-detail layout: a
-// vertical connector, a toned icon node per step, title + right-aligned meta,
-// and an optional second line for the concrete target (path / command / url).
+// run. Pulls journal entries (filtered by the given params, e.g. a mission or
+// a trace), humanizes each into a one-liner (lib/run-activity), and renders the
+// rail-with-detail layout: a vertical connector, a toned icon node per step,
+// title + right-aligned meta, and an optional second line for the concrete
+// target (path / command / url).
 //
-// Shared surface: mounted on the issue detail page, the routine run view, and
-// (later) the global Activity Bar — anywhere we have a trace_id and want to
-// show progress without dumping raw logs.
+// The presentational RunActivityRail is exported so other run sources (routine
+// pipeline runs, the global Activity Bar) render the same rail without
+// re-deriving the journal fetch.
 
 const TONE_ICON: Record<RunActivityTone, string> = {
   active: "text-blue-400",
@@ -25,70 +32,119 @@ const TONE_ICON: Record<RunActivityTone, string> = {
   default: "text-foreground/50",
 }
 
+// The journal entry types that represent actual agent WORK during a run.
+// Issue pages filter to these so the "Run activity" rail stays distinct from
+// the existing issue-lifecycle "Activity" feed (assignee/status changes).
+export const RUN_WORK_ENTRY_TYPES = [
+  "run.started",
+  "run.completed",
+  "run.failed",
+  "run.cancelled",
+  "run.timeout",
+  "assignment.running",
+  "assignment.completed",
+  "assignment.failed",
+  "exec.command",
+  "file.written",
+  "network.egress",
+  "network.port_opened",
+  "llm.call",
+  "keeper.request",
+  "keeper.decision",
+] as const
+
 interface RunActivityTimelineProps {
   workspaceId: string | null
-  /** The run's trace_id; all spans for one run share it. */
-  traceId: string | null
+  /**
+   * Journal filter params — e.g. `{ mission_id }` for an issue run or
+   * `{ trace_id }` for a standalone run. The rail enables once at least one
+   * value is non-empty.
+   */
+  params: Record<string, string | undefined>
   /** Subscribe to the live journal stream for in-flight runs. Default true. */
   live?: boolean
   /** Header label. Default "Run activity". */
   title?: string
+  /** Hide the whole section when there's nothing to show (default true). */
+  hideWhenEmpty?: boolean
   className?: string
 }
 
 export function RunActivityTimeline({
   workspaceId,
-  traceId,
+  params,
   live = true,
   title = "Run activity",
+  hideWhenEmpty = true,
   className,
 }: RunActivityTimelineProps) {
-  const enabled = !!workspaceId && !!traceId
-  const params = useMemo(() => ({ trace_id: traceId ?? undefined }), [traceId])
+  const hasFilter = Object.values(params).some((v) => !!v)
+  const enabled = !!workspaceId && hasFilter
+
+  // Memoise on the serialised params so object-literal callers don't churn
+  // the fetch/stream effects every render.
+  const paramsKey = JSON.stringify(params)
+  const stableParams = useMemo(() => params, [paramsKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const { entries, loading, prependLive } = useJournalList({
     workspaceId,
-    params,
+    params: stableParams,
     enabled,
-    // A single run is bounded; cap defensively against a pathological trace.
+    // A single run is bounded; cap defensively against a pathological filter.
     maxEntries: 1000,
   })
 
-  // Live tail: prepend entries for THIS trace as they land. The stream may be
-  // workspace-wide, so guard on trace_id client-side regardless of server
-  // filtering. prependLive dedupes by id, so a poll/stream overlap is safe.
+  // Live tail: prepend entries matching this filter as they land. The stream
+  // may be workspace-wide, so guard client-side on the same keys we filter by.
   const onEntry = useCallback(
-    (entry: Parameters<typeof prependLive>[0]) => {
-      if (traceId && entry.trace_id && entry.trace_id !== traceId) return
+    (entry: JournalEntry) => {
+      if (params.trace_id && entry.trace_id !== params.trace_id) return
+      if (params.mission_id && entry.mission_id !== params.mission_id) return
       prependLive(entry)
     },
-    [traceId, prependLive],
+    [params.trace_id, params.mission_id, prependLive],
   )
-  useJournalStream({ workspaceId, params, enabled: enabled && live, onEntry })
+  useJournalStream({ workspaceId, params: stableParams, enabled: enabled && live, onEntry })
 
   const rows = useMemo(() => humanizeRun(entries), [entries])
-
-  // A run is "in flight" when it has opened but not reached a terminal entry.
-  const running = useMemo(() => {
-    let opened = false
-    let terminal = false
-    for (const e of entries) {
-      if (e.entry_type === "run.started" || e.entry_type === "assignment.running") opened = true
-      if (
-        e.entry_type === "run.completed" ||
-        e.entry_type === "run.failed" ||
-        e.entry_type === "run.cancelled" ||
-        e.entry_type === "run.timeout" ||
-        e.entry_type === "assignment.completed" ||
-        e.entry_type === "assignment.failed"
-      )
-        terminal = true
-    }
-    return opened && !terminal
-  }, [entries])
+  const running = useMemo(() => isRunInFlight(entries.map((e) => e.entry_type)), [entries])
 
   if (!enabled) return null
+  if (hideWhenEmpty && !loading && rows.length === 0 && !running) return null
 
+  return (
+    <RunActivityRail
+      rows={rows}
+      running={running}
+      loading={loading}
+      title={title}
+      className={className}
+    />
+  )
+}
+
+interface RunActivityRailProps {
+  rows: RunActivityRow[]
+  running?: boolean
+  loading?: boolean
+  title?: string
+  emptyLabel?: string
+  className?: string
+}
+
+/**
+ * Presentational rail. Renders humanized rows with the connector + toned
+ * icon nodes. Source-agnostic — fed by the journal timeline, pipeline runs,
+ * or the Activity Bar.
+ */
+export function RunActivityRail({
+  rows,
+  running = false,
+  loading = false,
+  title = "Run activity",
+  emptyLabel,
+  className,
+}: RunActivityRailProps) {
   return (
     <div className={cn("border-t border-white/[0.06] pt-3 px-4 pb-4", className)}>
       <div className="flex items-center justify-between mb-3">
@@ -110,7 +166,7 @@ export function RunActivityTimeline({
         <p className="text-[11px] text-foreground/40">Loading activity…</p>
       ) : rows.length === 0 ? (
         <p className="text-[11px] text-foreground/40">
-          {running ? "Waiting for the first step…" : "No activity recorded for this run"}
+          {running ? "Waiting for the first step…" : emptyLabel ?? "No activity recorded for this run"}
         </p>
       ) : (
         <ol className="space-y-0">
