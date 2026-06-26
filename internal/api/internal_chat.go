@@ -57,21 +57,22 @@ func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 	// OpenedByUserID downstream means "no peer card injection",
 	// which is what we want for non-human-opened sessions.
 	var (
-		agentID  string
-		openedBy sql.NullString
+		agentID    string
+		openedBy   sql.NullString
+		visibility sql.NullString
 	)
 	// Tenant scope (PR-F24 F-2). A workspace-bound token constrains the
 	// chat lookup to its workspace; a foreign chat id then yields the
 	// same ErrNoRows → 404 as a missing one (don't leak cross-tenant
 	// existence). Master-token (host-side) callers have an empty scope
 	// and keep the id-only behavior.
-	chatQuery := "SELECT agent_id, created_by FROM chats WHERE id = ?"
+	chatQuery := "SELECT agent_id, created_by, visibility FROM chats WHERE id = ?"
 	chatArgs := []any{chatID}
 	if scope := InternalTokenWorkspaceFromContext(r.Context()); scope != "" {
 		chatQuery += " AND workspace_id = ?"
 		chatArgs = append(chatArgs, scope)
 	}
-	err := h.db.QueryRowContext(r.Context(), chatQuery, chatArgs...).Scan(&agentID, &openedBy)
+	err := h.db.QueryRowContext(r.Context(), chatQuery, chatArgs...).Scan(&agentID, &openedBy, &visibility)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			replyError(w, http.StatusNotFound, "Chat not found")
@@ -82,7 +83,7 @@ func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.resolveAgentConfigWithOpener(w, r, agentID, openedBy.String)
+	h.resolveAgentConfigWithOpener(w, r, agentID, openedBy.String, visibility.String)
 }
 
 // ResolveAgent returns the full configuration for a given agent ID.

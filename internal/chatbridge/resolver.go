@@ -80,6 +80,12 @@ type chatResolveResponse struct {
 	// agents.role_title; empty for non-chat resolves.
 	OpenedByUserID string `json:"opened_by_user_id,omitempty"`
 	RoleTitle      string `json:"role_title,omitempty"`
+
+	// Group-chat visibility: "group" means the agent runs only when
+	// @mentioned; anything else (incl. empty/"private") is a normal 1:1 chat
+	// where every message runs the agent. Resolver populates from
+	// chats.visibility.
+	Visibility string `json:"visibility,omitempty"`
 }
 
 // installedSkillEntry mirrors internal/api.installedSkillResponse.
@@ -545,6 +551,7 @@ func (r *IPCResolver) resolve(ctx context.Context, resolveURL string) (*ChatInfo
 		InstalledSkills:    convertInstalledSkills(data.InstalledSkills),
 		OpenedByUserID:     data.OpenedByUserID,
 		RoleTitle:          data.RoleTitle,
+		Visibility:         data.Visibility,
 	}, nil
 }
 

@@ -117,6 +117,11 @@ type ChatInfo struct {
 	// PERSONA layers are empty.
 	OpenedByUserID string
 	RoleTitle      string
+
+	// Visibility is "group" for a multi-user group chat (agent runs only when
+	// @mentioned) or "private"/empty for a normal 1:1 chat. Sourced from
+	// chats.visibility by the resolver.
+	Visibility string
 }
 
 // ProvisioningEnqueueResult mirrors api.EnqueueResult shape locally so the
@@ -395,6 +400,20 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		b.logger.Error("failed to persist user message", "error", err)
 		streamFn(ws.ChatEvent{Type: "error", Content: "failed to save message"})
 		return fmt.Errorf("persist user message: %w", err)
+	}
+
+	// Group-chat turn-taking: in a group chat the agent stays silent unless it
+	// is @mentioned, so humans can talk among themselves without the bot
+	// responding to every line. The message is still persisted (above) and
+	// counted so the shared transcript records it; we just don't spin up the
+	// agent. A clean "done" settles the sender's UI without a hanging spinner.
+	// Private (1:1) chats always respond — ShouldAgentRespond returns true.
+	if !ShouldAgentRespond(info.Visibility, content, info.AgentSlug) {
+		if err := b.resolver.IncrementMessageCount(ctx, chatID, 1); err != nil {
+			b.logger.Warn("increment message count (group, no mention)", "error", err)
+		}
+		streamFn(ws.ChatEvent{Type: "done", Content: ""})
+		return nil
 	}
 
 	// Auto-title: use first user message (truncated) as session title
