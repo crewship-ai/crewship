@@ -34,6 +34,7 @@ import { getCrewDotColor } from "@/lib/entities"
 import { CommandPalette } from "@/components/command-palette"
 import { NotificationBell } from "@/components/features/notifications/notification-bell"
 import { InboxBell } from "@/components/features/inbox/inbox-bell"
+import { ActivityBell } from "@/components/features/activity/activity-bell"
 import { useAppStore } from "@/lib/store"
 
 import { ProvisioningBadge } from "./app-toolbar-provisioning"
@@ -482,6 +483,7 @@ export function AppToolbar() {
           * = "FYI" (mention, comment, status change). Inbox first so
           * the action surface gets the more prominent slot. */}
         <div className="hidden md:flex items-center gap-0.5">
+          <ActivityBell />
           <InboxBell />
           <NotificationBell />
         </div>

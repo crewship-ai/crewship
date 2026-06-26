@@ -229,6 +229,23 @@ The single-canvas trace view is intentionally a step back from that fragmentatio
 - **WebSocket drop ≠ stale canvas, but only if reconnect succeeds.** The trace hook (`hooks/use-trace.ts`) refetches on every `pipeline.*` event, so a brief disconnect that reconnects within a few seconds catches up automatically. A *failed* reconnect (laptop sleep, VPN flap) leaves the canvas frozen with the last-seen state — there's no "stale data" banner today. If a run looks suspiciously inactive, hard-refresh.
 - **Filter dimensions are computed client-side.** With ~5k runs in the rail, every filter chip toggle runs `lib/activity/run-filters.ts` over the whole list. Performance is fine at current data volume; if you're testing against a 50k-run workspace, expect a noticeable hitch on filter changes.
 
+## Activity Bar (toolbar)
+
+The full `/activity` canvas answers "what's happening" in depth; the **Activity Bar** answers it at a glance, from anywhere in the app. It's the `Activity` icon in the top toolbar (next to the Inbox bell), with a green badge counting runs currently in flight.
+
+Click it for a dropdown of everything executing right now — both **agent runs** (an issue's `Start`, an assignment) and **routine runs** — each row showing the agent name or routine slug, a pulsing "running" dot, and how long it's been going. Clicking a row jumps to the relevant surface; the footer link opens the full `/activity` canvas.
+
+The server is the source of truth: the bar fetches `GET /api/v1/runs?status=RUNNING` (agent runs) and `GET /api/v1/workspaces/{ws}/pipelines/runs/active` (routine runs) on load and re-fetches on a short poll, with every relevant lifecycle event (`assignment.updated`, `run.*`, `mission.updated`, `pipeline.run.*`, `pipeline.step.started`) triggering an immediate refetch — so a dropped frame can't leave the badge stale. Nothing in flight → the badge disappears and the dropdown reads "Nothing running right now". It's purely a launcher into detail — no actions live here.
+
+## Run activity rail
+
+Individual issue and routine pages carry an inline **Run activity** rail — the readable, human-first timeline of what an agent actually *did* during a run, built from the journal. Each step is one line: a toned icon, the time, a plain-language title ("Fetched news.ycombinator.com", "Wrote file", "Ran command"), an optional detail line (the path / command / url), and right-aligned metadata (`exit 0 · 1.2s`, `412 B`, `$0.0021`). Machine noise (output chunks, container metrics) is dropped so the rail stays the highlights reel.
+
+- **On an issue** (`/issues/<id>`): once the issue is started, a "Run activity" section appears below the description, scoped to that issue's run via `GET /api/v1/journal?mission_id=<id>` and filtered to work entry types (`exec.command`, `file.written`, `network.egress`, `llm.call`, `run.*`). It's distinct from the issue's lifecycle "Activity" feed (assignee/status changes) right below it. Hidden until the run produces entries.
+- **On a routine** (`/routines`): right after you click **Run** or **Test run**, the rail shows the just-started run inline so status is visible immediately — no hunting for the Runs tab. Routine runs group by `payload.run_id` (not `trace_id`) and render the same rail from `pipeline.run.*` / `pipeline.step.*` entries.
+
+The rail and the canvas read the same journal; the rail is the compact "what did it do" list, the canvas is the spatial "how do the steps connect" graph.
+
 ## Related
 
 - [Inbox](/guides/inbox) — the per-user feed that mirrors every waitpoint, escalation, failed-run, and message.

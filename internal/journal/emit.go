@@ -139,6 +139,16 @@ func (w *Writer) Emit(ctx context.Context, e Entry) (string, error) {
 			e.TraceID = rid
 		}
 	}
+	// Default mission_id from ctx (set via WithMission) when the caller
+	// didn't set it explicitly. ONLY a non-empty ctx value is applied: an
+	// explicit Entry.MissionID wins, and a chat-only run (no mission on ctx)
+	// keeps mission_id empty so nullable() persists NULL and the missions FK
+	// is never tripped.
+	if e.MissionID == "" {
+		if mid := MissionFromContext(ctx); mid != "" {
+			e.MissionID = mid
+		}
+	}
 	if e.TraceID == "" || e.SpanID == "" {
 		if t, s, ok := traceFromContext(ctx); ok {
 			if e.TraceID == "" {
@@ -467,6 +477,40 @@ func RunIDFromContext(ctx context.Context) string {
 		return ""
 	}
 	v := ctx.Value(runIDCtxKey{})
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return ""
+}
+
+// missionIDCtxKey is a private context key for the mission id, following the
+// same unexported-zero-size-type pattern as runIDCtxKey.
+type missionIDCtxKey struct{}
+
+// WithMission stamps missionID on ctx so any subsequent journal.Emit call that
+// inherits the same context inherits mission_id == missionID. Used to thread
+// a mission (issue) identity through an issue-originated agent run so every
+// run-scoped entry (run.started, exec.command, llm.call, network.egress,
+// run.completed/failed) anchors on the mission and a client can fetch the
+// full run timeline via `GET /api/v1/journal?mission_id={missionID}`.
+//
+// Mirrors WithRunID. Empty missionID is a no-op (returns ctx unchanged) so a
+// chat-only run — which has no missions row — never stamps a mission id and
+// therefore never trips the missions FK (empty mission_id persists as NULL).
+func WithMission(ctx context.Context, missionID string) context.Context {
+	if missionID == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, missionIDCtxKey{}, missionID)
+}
+
+// MissionFromContext returns the missionID stamped on ctx via WithMission, or
+// "" if none was set.
+func MissionFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	v := ctx.Value(missionIDCtxKey{})
 	if s, ok := v.(string); ok {
 		return s
 	}
