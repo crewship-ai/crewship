@@ -151,6 +151,11 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.mux.Handle("PUT /api/v1/integrations/composio/settings", authed(wsCtx(http.HandlerFunc(composioH.UpsertSettings))))
 	r.mux.Handle("DELETE /api/v1/integrations/composio/settings", authed(wsCtx(http.HandlerFunc(composioH.DeleteSettings))))
 	r.mux.Handle("POST /api/v1/integrations/composio/connect", authed(wsCtx(http.HandlerFunc(composioH.Connect))))
+	// Default connector — inspect (read) / provision (manage) the workspace-wide
+	// default Composio MCP server every agent inherits when
+	// COMPOSIO_DEFAULT_CONNECTOR is ON and the agent has no per-agent binding.
+	r.mux.Handle("GET /api/v1/integrations/composio/default", authed(wsCtx(http.HandlerFunc(composioH.GetDefault))))
+	r.mux.Handle("PUT /api/v1/integrations/composio/default", authed(wsCtx(http.HandlerFunc(composioH.SetDefault))))
 	// Agent access binding — assign a Composio user (its connected accounts/
 	// tools) to a specific agent, persisting the credential + workspace MCP
 	// server + agent binding the runtime resolver already reads.

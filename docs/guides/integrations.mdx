@@ -60,6 +60,51 @@ Connecting accounts and per-agent binding (the write/OAuth flow and UI) ship in
 follow-up slices. Today the managed path is read-only inventory.
 </Note>
 
+### Default connector (`COMPOSIO_DEFAULT_CONNECTOR`)
+
+By default an agent only reaches Composio tools an operator explicitly **bound**
+to it (`crewship integration composio bind`). The server flag
+`COMPOSIO_DEFAULT_CONNECTOR` flips this to a **default-on** model so agents never
+lack a tool they should obviously have (e.g. calendar):
+
+- **ON** — every agent **without** an explicit per-agent Composio binding
+  automatically gets a workspace-wide **default connector**: a Composio MCP
+  server with **full access to all the workspace's connected apps**, scoped to
+  the workspace's default Composio user. No manual bind needed.
+- A **per-agent binding always overrides** the default for that agent — the
+  bound (tool-scoped) server resolves and the default is **not** added, so you
+  can still restrict specific agents.
+- **Legacy (non-Composio) MCP servers are turned OFF** at resolve time while the
+  flag is on (they are **not deleted** — flip the flag back off to restore
+  them). This makes Composio the single managed connector surface.
+- **OFF** (default) — today's behaviour, unchanged: agents get only what's
+  explicitly bound.
+
+The flag is a behaviour switch layered on an already-configured Composio — it
+**never** auto-enables the provider (you still need a project API key). It is
+`false` unless `COMPOSIO_DEFAULT_CONNECTOR=true` (or `1`) is set on the server.
+
+**Provisioning the default.** The default connector needs a Composio
+**`user_id`** (whose connected accounts back it) and a provisioned MCP server.
+Both are set with one operator call:
+
+```bash
+# Auto-derive the user when exactly one Composio user has connected accounts:
+crewship integration composio default enable
+
+# Or pin a specific user explicitly:
+crewship integration composio default set <user_id>
+
+# Inspect the current state (flag, default user/server, connected-user count):
+crewship integration composio default show
+```
+
+`enable` errors if **zero** users have connected accounts ("connect an account
+first") or if **multiple** users exist (pin one with `default set`). Re-running
+is idempotent and refreshes the connector's app set, so apps you connect later
+show up in the default automatically. These map to
+`GET`/`PUT /api/v1/integrations/composio/default`.
+
 ## OAuth 2.0 Integrations
 
 Crewship includes pre-configured OAuth providers for popular services. The implementation uses PKCE (Proof Key for Code Exchange) per RFC 7636 for secure authorization.

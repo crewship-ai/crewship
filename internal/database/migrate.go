@@ -1446,6 +1446,15 @@ END;
 	// COMPOSIO_API_KEY env fallback. See
 	// migrate_consts_v116_composio_settings.go.
 	{version: 116, name: "composio_settings", sql: migrationComposioSettings},
+
+	// v117: default-connector columns on composio_settings
+	// (default_user_id, default_mcp_server_id). When the
+	// COMPOSIO_DEFAULT_CONNECTOR flag is ON, every agent without an
+	// explicit per-agent Composio binding gets a workspace-wide default
+	// Composio MCP server (full access to all connected apps); these
+	// columns pin the user + provisioned server backing it. Both NULL =
+	// today's behaviour. See migrate_consts_v117_composio_defaults.go.
+	{version: 117, name: "composio_default_connector", sql: migrationComposioDefaults},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

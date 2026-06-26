@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/spf13/cobra"
 )
 
@@ -395,6 +396,105 @@ var composioTriggersEnableCmd = &cobra.Command{
 	},
 }
 
+// composioDefaultResponse mirrors the server's /default wire shape.
+type composioDefaultResponse struct {
+	EnabledFlag        bool   `json:"enabled_flag"`
+	DefaultUserID      string `json:"default_user_id"`
+	DefaultMCPServerID string `json:"default_mcp_server_id"`
+	ConnectedUserCount int    `json:"connected_user_count"`
+}
+
+var composioDefaultCmd = &cobra.Command{
+	Use:   "default",
+	Short: "Manage the workspace-wide default Composio connector",
+	Long: "When the server's COMPOSIO_DEFAULT_CONNECTOR flag is ON, every agent " +
+		"without an explicit per-agent Composio binding automatically gets a " +
+		"default connector with full access to all the workspace's connected " +
+		"apps (legacy non-Composio MCP servers are turned off). Use `set`/`enable` " +
+		"to provision (or re-point) that default and `show` to inspect it.",
+}
+
+// printComposioDefault renders a composioDefaultResponse as a table (shared by
+// show/set/enable).
+func printComposioDefault(f *cli.Formatter, d composioDefaultResponse) {
+	flag := "OFF"
+	if d.EnabledFlag {
+		flag = "ON"
+	}
+	user := d.DefaultUserID
+	if user == "" {
+		user = "(not set)"
+	}
+	srv := d.DefaultMCPServerID
+	if srv == "" {
+		srv = "(not provisioned)"
+	}
+	f.Table([]string{"FLAG", "DEFAULT_USER", "DEFAULT_SERVER", "CONNECTED_USERS"},
+		[][]string{{flag, user, srv, fmt.Sprintf("%d", d.ConnectedUserCount)}})
+	if !d.EnabledFlag {
+		fmt.Println("\nNote: COMPOSIO_DEFAULT_CONNECTOR is OFF on the server — the default")
+		fmt.Println("connector is provisioned but agents won't inherit it until the flag is set.")
+	}
+}
+
+var composioDefaultShowCmd = &cobra.Command{
+	Use:   "show",
+	Short: "Show the default-connector state (flag, default user/server, connected users)",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client, err := requireAuthAndWorkspace()
+		if err != nil {
+			return err
+		}
+		var d composioDefaultResponse
+		if err := getJSON(client, "/api/v1/integrations/composio/default", &d); err != nil {
+			return err
+		}
+		f := newFormatter()
+		if f.Format == "json" || f.Format == "yaml" {
+			return f.Auto(d, nil, nil)
+		}
+		printComposioDefault(f, d)
+		return nil
+	},
+}
+
+var composioDefaultSetCmd = &cobra.Command{
+	Use:   "set <user_id>",
+	Short: "Set the default connector's Composio user and (re)provision the default server",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client, err := requireAuthAndWorkspace()
+		if err != nil {
+			return err
+		}
+		var d composioDefaultResponse
+		if err := putJSON(client, "/api/v1/integrations/composio/default",
+			map[string]string{"user_id": args[0]}, &d); err != nil {
+			return err
+		}
+		fmt.Printf("Default Composio connector set to user %q (server %s).\n", d.DefaultUserID, d.DefaultMCPServerID)
+		return nil
+	},
+}
+
+var composioDefaultEnableCmd = &cobra.Command{
+	Use:   "enable",
+	Short: "Provision the default connector, auto-deriving the user when exactly one is connected",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client, err := requireAuthAndWorkspace()
+		if err != nil {
+			return err
+		}
+		var d composioDefaultResponse
+		if err := putJSON(client, "/api/v1/integrations/composio/default",
+			map[string]any{}, &d); err != nil {
+			return err
+		}
+		fmt.Printf("Default Composio connector provisioned for user %q (server %s).\n", d.DefaultUserID, d.DefaultMCPServerID)
+		return nil
+	},
+}
+
 var composioKeyCmd = &cobra.Command{
 	Use:   "key",
 	Short: "Manage the workspace Composio API key",
@@ -749,6 +849,9 @@ func init() {
 	composioKeySetCmd.Flags().String("key", "", "Composio project API key (ak_…)")
 	composioKeySetCmd.Flags().String("label", "", "Human-friendly project label (optional)")
 	composioKeyCmd.AddCommand(composioKeyShowCmd, composioKeySetCmd, composioKeyRemoveCmd)
+
+	composioDefaultCmd.AddCommand(composioDefaultShowCmd, composioDefaultSetCmd, composioDefaultEnableCmd)
+	composioCmd.AddCommand(composioDefaultCmd)
 
 	composioCmd.AddCommand(composioInventoryCmd)
 	composioCmd.AddCommand(composioToolkitsCmd)
