@@ -505,6 +505,8 @@ export function AgentCanvas({
         <SkillsTab
           agentId={agent.id}
           agentSlug={agent.slug}
+          agentName={agent.name}
+          agentCrew={agent.crew?.name ?? null}
           workspaceId={workspaceId}
           onAgentChanged={onAgentChanged}
         />
