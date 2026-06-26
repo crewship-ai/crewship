@@ -405,6 +405,153 @@ func TestWithRunID_EmptyIsNoop(t *testing.T) {
 	}
 }
 
+// WithMission stamps mission_id on ctx so downstream Emit calls inherit it,
+// mirroring WithRunID/trace_id. This lets issue-originated agent runs anchor
+// every run-scoped entry on the mission so `?mission_id=` returns the full
+// run timeline.
+func TestWithMission_InheritedByEmit(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+
+	w := NewWriter(db, quietLogger(), WriterOptions{FlushSize: 1})
+	defer w.Close()
+
+	ctx := WithMission(context.Background(), "mission-xyz")
+	_, err := w.Emit(ctx, Entry{
+		WorkspaceID: "ws_test",
+		Type:        EntryExecCommand,
+		ActorType:   ActorAgent,
+		Summary:     "ran ls",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = w.Flush(ctx)
+	time.Sleep(50 * time.Millisecond)
+
+	entries, _, _ := List(ctx, db, Query{WorkspaceID: "ws_test"})
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+	if entries[0].MissionID != "mission-xyz" {
+		t.Errorf("mission_id should be inherited from ctx, got %q", entries[0].MissionID)
+	}
+}
+
+// An explicit Entry.MissionID set by the caller must win over the ctx value —
+// the ctx default only fills the gap when the entry left it empty.
+func TestWithMission_ExplicitEntryWins(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+
+	w := NewWriter(db, quietLogger(), WriterOptions{FlushSize: 1})
+	defer w.Close()
+
+	ctx := WithMission(context.Background(), "ctx-mission")
+	_, err := w.Emit(ctx, Entry{
+		WorkspaceID: "ws_test",
+		Type:        EntryMissionComment,
+		ActorType:   ActorAgent,
+		Summary:     "explicit mission",
+		MissionID:   "explicit-mission",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = w.Flush(ctx)
+	time.Sleep(50 * time.Millisecond)
+
+	entries, _, _ := List(ctx, db, Query{WorkspaceID: "ws_test"})
+	if len(entries) != 1 || entries[0].MissionID != "explicit-mission" {
+		t.Errorf("explicit mission_id lost: %+v", entries)
+	}
+}
+
+// Empty missionID is a no-op — ctx unchanged, MissionFromContext empty, and an
+// emit under a mission-less ctx must persist with NULL mission_id (no FK
+// violation against an absent missions row). This guards the chat-only run.
+func TestWithMission_EmptyIsNoop(t *testing.T) {
+	ctx := context.Background()
+	if WithMission(ctx, "") != ctx {
+		t.Error("WithMission with empty string should return ctx unchanged")
+	}
+	if MissionFromContext(ctx) != "" {
+		t.Error("MissionFromContext on plain ctx should return empty")
+	}
+	if MissionFromContext(nil) != "" { //nolint:staticcheck // intentionally passing nil to verify nil-tolerance contract
+		t.Error("MissionFromContext on nil ctx should return empty")
+	}
+}
+
+// FK guard: a mission-less emit (empty context, empty entry) must persist
+// against a schema that actually enforces the missions FK. nullable() stores
+// NULL, which is exempt from FK checks, so the chat-only run path never fails.
+func TestEmit_NoMission_NoFKViolation(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer db.Close()
+	if _, err := db.ExecContext(context.Background(), `PRAGMA foreign_keys = ON;`); err != nil {
+		t.Fatalf("pragma: %v", err)
+	}
+	const fkSchema = `
+CREATE TABLE workspaces (id TEXT PRIMARY KEY);
+INSERT INTO workspaces (id) VALUES ('ws_test');
+CREATE TABLE missions (id TEXT PRIMARY KEY);
+CREATE TABLE journal_entries (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    crew_id TEXT,
+    agent_id TEXT,
+    mission_id TEXT REFERENCES missions(id) ON DELETE SET NULL,
+    ts TEXT NOT NULL,
+    entry_type TEXT NOT NULL,
+    severity TEXT NOT NULL DEFAULT 'info',
+    priority TEXT NOT NULL DEFAULT 'normal',
+    actor_type TEXT NOT NULL,
+    actor_id TEXT,
+    summary TEXT NOT NULL,
+    payload TEXT NOT NULL DEFAULT '{}',
+    refs TEXT NOT NULL DEFAULT '{}',
+    trace_id TEXT,
+    span_id TEXT,
+    expires_at TEXT
+);
+CREATE INDEX idx_journal_ws_ts ON journal_entries(workspace_id, ts DESC);`
+	if _, err := db.ExecContext(context.Background(), fkSchema); err != nil {
+		t.Fatalf("schema: %v", err)
+	}
+
+	w := NewWriter(db, quietLogger(), WriterOptions{FlushSize: 1})
+	defer w.Close()
+
+	// Plain ctx (no WithMission) + entry with no MissionID — the chat-only run.
+	if _, err := w.Emit(context.Background(), Entry{
+		WorkspaceID: "ws_test",
+		Type:        EntryRunStarted,
+		ActorType:   ActorOrchestrator,
+		Summary:     "chat run started",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Flush(context.Background()); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+	time.Sleep(50 * time.Millisecond)
+
+	entries, _, err := List(context.Background(), db, Query{WorkspaceID: "ws_test"})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry persisted (no FK violation), got %d", len(entries))
+	}
+	if entries[0].MissionID != "" {
+		t.Errorf("mission_id should be empty for chat-only run, got %q", entries[0].MissionID)
+	}
+}
+
 func TestPagination(t *testing.T) {
 	db := openTestDB(t)
 	defer db.Close()
