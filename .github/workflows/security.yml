@@ -73,10 +73,10 @@ jobs:
   #     not reachable in Crewship's usage (we don't use AuthZ plugins)
   #   - GO-2026-4883 (docker/docker plugin privilege off-by-one) — no upstream
   #     fix, not reachable in Crewship's usage
-  #   - GO-2026-5746 (docker/docker, v28.5.2) — no upstream fix available
-  #     (Fixed in: N/A). Reachable via the container provider (we run Docker for
-  #     crew runtimes); accepted pending an upstream release. Repo-wide, not tied
-  #     to any one change.
+  #   - GO-2026-5746 / GO-2026-5668 / GO-2026-5617 (docker/docker, v28.5.2) — a
+  #     June-2026 advisory wave with no upstream fix yet (Fixed in: N/A).
+  #     Reachable via the container provider (we run Docker for crew runtimes);
+  #     accepted pending an upstream release. Repo-wide, not tied to any change.
   #   All documented in THIRD-PARTY-NOTICES.md.
   #
   # We wrap govulncheck in a script that accepts these specific CVE IDs and
@@ -120,7 +120,7 @@ jobs:
 
           # exit_code == 3: vulnerabilities were reported. Extract the GO IDs
           # and verify every one of them is on the known-accepted list.
-          accepted_pattern='GO-2026-4887|GO-2026-4883|GO-2026-5746'
+          accepted_pattern='GO-2026-4887|GO-2026-4883|GO-2026-5746|GO-2026-5668|GO-2026-5617'
           all_vulns=$(grep -oE 'GO-[0-9]{4}-[0-9]+' /tmp/govuln.log | sort -u)
           echo ""
           echo "=== Detected vulnerability IDs ==="
