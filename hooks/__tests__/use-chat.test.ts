@@ -169,6 +169,31 @@ describe("useChat", () => {
     expect(result.current.turns[0].parts[1].content).toBe("Here is the answer")
   })
 
+  it("collapses repeated status events into a single live status line", () => {
+    // Internal progress chatter (thinking_tokens, task_started, task_progress,
+    // …) arrives as a burst of status events. They must NOT stack into a column
+    // of rows — only one quiet status line is shown, reflecting the latest.
+    const { result } = renderHook(() =>
+      useChat({ wsUrl: "ws://localhost:8080/ws", token: "test", sessionId: "s1" }),
+    )
+    const onMessage = getOnMessage()
+
+    for (const content of ["Starting container...", "thinking_tokens", "task_started", "task_progress"]) {
+      act(() => {
+        onMessage({
+          type: "chat_event",
+          channel: "session:s1",
+          payload: { type: "status", content },
+        })
+      })
+    }
+
+    const turn = result.current.turns[result.current.turns.length - 1]
+    const statusParts = turn.parts.filter((p) => p.type === "status")
+    expect(statusParts).toHaveLength(1)
+    expect(statusParts[0].content).toBe("task_progress")
+  })
+
   it("separates multiple complete thinking blocks into distinct parts", () => {
     const { result } = renderHook(() =>
       useChat({ wsUrl: "ws://localhost:8080/ws", token: "test", sessionId: "s1" }),

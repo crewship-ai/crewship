@@ -336,7 +336,17 @@ export function useChat({ wsUrl, getToken, sessionId }: UseChatOptions) {
     setTurns((prev) => {
       const last = prev[prev.length - 1]
       if (last?.role === "assistant" && last.isStreaming) {
-        // Add status part to current assistant turn
+        // A turn shows at most ONE status line — a quiet, in-place "current
+        // step" indicator. Bursts of internal progress chatter (thinking_tokens,
+        // task_started, task_progress, …) must update that single line, never
+        // stack into a column of rows. Replace an existing status part if there
+        // is one; otherwise append a single status part at the end.
+        const statusIdx = last.parts.findLastIndex((p) => p.type === "status")
+        if (statusIdx >= 0) {
+          const updatedParts = [...last.parts]
+          updatedParts[statusIdx] = { ...updatedParts[statusIdx], content }
+          return [...prev.slice(0, -1), { ...last, parts: updatedParts }]
+        }
         return [
           ...prev.slice(0, -1),
           {
