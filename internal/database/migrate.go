@@ -1446,6 +1446,12 @@ END;
 	// COMPOSIO_API_KEY env fallback. See
 	// migrate_consts_v116_composio_settings.go.
 	{version: 116, name: "composio_settings", sql: migrationComposioSettings},
+
+	// v117: group-chat groundwork — chat_participants (who's in a chat),
+	// chats.visibility (private|group), and conversation_messages.author_user_id
+	// (per-human attribution). All additive; existing chats stay private 1:1.
+	// See migrate_consts_v117_group_chat.go.
+	{version: 117, name: "group_chat", sql: migrationGroupChat},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

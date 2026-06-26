@@ -69,6 +69,12 @@ type Message struct {
 	ToolSummary string    `json:"tool_summary,omitempty"`
 	Metadata    any       `json:"metadata,omitempty"`
 	Timestamp   time.Time `json:"ts"`
+
+	// Author attribution for multi-user group chats. AuthorUserID identifies
+	// which human wrote a user message so a shared transcript can show per-turn
+	// authorship (avatar/name). Empty for agent/system turns and for legacy
+	// messages written before group chat — those fall back to Role.
+	AuthorUserID string `json:"author_user_id,omitempty"`
 }
 
 // NormalizedParts returns the message's structured parts for rendering. When
@@ -291,11 +297,15 @@ func (s *Store) Append(ctx context.Context, sessionID string, msg Message) error
 // appendMirror inserts the searchable row. Triggers (migration v111) keep
 // conversation_messages_fts in sync, so this is a single INSERT.
 func (s *Store) appendMirror(ctx context.Context, sessionID string, msg Message) error {
+	var authorUserID any
+	if msg.AuthorUserID != "" {
+		authorUserID = msg.AuthorUserID
+	}
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO conversation_messages (id, session_id, agent_id, role, content, tool_summary, ts)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO conversation_messages (id, session_id, agent_id, role, content, tool_summary, ts, author_user_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		msg.ID, sessionID, msg.AgentID, string(msg.Role), msg.Content, msg.ToolSummary,
-		msg.Timestamp.UTC().Format("2006-01-02T15:04:05.000Z"),
+		msg.Timestamp.UTC().Format("2006-01-02T15:04:05.000Z"), authorUserID,
 	)
 	if err != nil {
 		return fmt.Errorf("insert mirror row: %w", err)
