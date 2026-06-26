@@ -649,6 +649,10 @@ export function IssuePageClient() {
             <RunActivityTimeline
               workspaceId={workspaceId}
               params={{ mission_id: issue.id, entry_type: RUN_WORK_ENTRY_TYPES.join(",") }}
+              // Once the issue has been started (anything past TODO), keep the
+              // section visible even before the first entry lands so there's
+              // immediate "run starting…" feedback. Un-started issues stay clean.
+              hideWhenEmpty={issue.status === "BACKLOG" || issue.status === "TODO"}
             />
 
             {/* ---- Activity section (issue lifecycle: assignee/status/etc.) ---- */}
