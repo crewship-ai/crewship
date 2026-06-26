@@ -1,20 +1,23 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { useRealtimeEvent, type RealtimeEvent } from "@/hooks/use-realtime"
+import { useRealtimeEvent } from "@/hooks/use-realtime"
 
 // useActiveRuns — the data behind the global Activity Bar: a live list of
 // runs currently in flight across the workspace, both agent runs (issue
 // "Start" / assignments) and routine (pipeline) runs.
 //
-// Agent runs and pipeline runs have different data models (see lib/run-activity
-// notes), so we seed from both their endpoints on mount and then keep the set
-// fresh from realtime: *.started adds, terminal events remove. Keyed by run id.
+// Server is the source of truth: we poll the two "active runs" endpoints and
+// treat every relevant workspace WS event as an invalidation that triggers an
+// immediate refetch. This mirrors usePipelineRuns / use-dashboard-data and is
+// far more robust than accumulating WS deltas — agent runs broadcast
+// `assignment.updated` (not a workspace `run.started`), runs can finish before
+// a delta is processed, and a dropped frame would otherwise leave the bar
+// wrong until reload. Polling + WS-as-accelerator can't drift.
 
 export type ActiveRunKind = "agent" | "routine"
 
 export interface ActiveRunItem {
-  /** run_id (agent) / pipeline run_id (routine). Unique within the set. */
   id: string
   kind: ActiveRunKind
   /** Display name — agent name or routine slug. */
@@ -29,6 +32,9 @@ export interface ActiveRunItem {
 
 const AGENT_HREF = "/activity"
 const ROUTINE_HREF = "/routines"
+// Steady safety poll. WS events make updates near-instant; this only backstops
+// dropped frames / runs whose start event we never saw.
+const POLL_MS = 6000
 
 function str(o: Record<string, unknown> | undefined, ...keys: string[]): string | undefined {
   if (!o) return undefined
@@ -40,52 +46,35 @@ function str(o: Record<string, unknown> | undefined, ...keys: string[]): string 
 }
 
 export function useActiveRuns(workspaceId: string | null | undefined) {
-  // Keyed map so add/remove from realtime is O(1) and dedupes against seed.
-  const [items, setItems] = useState<Map<string, ActiveRunItem>>(new Map())
+  const [runs, setRuns] = useState<ActiveRunItem[]>([])
   const [loading, setLoading] = useState(false)
-  const wsRef = useRef(workspaceId)
-  wsRef.current = workspaceId
+  const inFlight = useRef(false)
+  const debounce = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const upsert = useCallback((item: ActiveRunItem) => {
-    setItems((prev) => {
-      const next = new Map(prev)
-      next.set(item.id, { ...next.get(item.id), ...item })
-      return next
-    })
-  }, [])
-
-  const remove = useCallback((id: string | undefined) => {
-    if (!id) return
-    setItems((prev) => {
-      if (!prev.has(id)) return prev
-      const next = new Map(prev)
-      next.delete(id)
-      return next
-    })
-  }, [])
-
-  // Seed from both run sources on workspace change. Failures are tolerated —
-  // realtime still populates runs that start while the page is open.
-  useEffect(() => {
-    if (!workspaceId) {
-      setItems(new Map())
-      return
-    }
-    let cancelled = false
+  const fetchActive = useCallback(async () => {
+    if (!workspaceId || inFlight.current) return
+    inFlight.current = true
     setLoading(true)
-    const seed = new Map<string, ActiveRunItem>()
+    try {
+      const [agentRes, routineRes] = await Promise.allSettled([
+        fetch(`/api/v1/runs?workspace_id=${encodeURIComponent(workspaceId)}&status=RUNNING&limit=50`),
+        fetch(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/runs/active`),
+      ])
 
-    const agents = fetch(
-      `/api/v1/runs?workspace_id=${encodeURIComponent(workspaceId)}&status=RUNNING&limit=50`,
-    )
-      .then((r) => (r.ok ? r.json() : null))
-      .then((json) => {
+      const next: ActiveRunItem[] = []
+
+      if (agentRes.status === "fulfilled" && agentRes.value.ok) {
+        const json = await agentRes.value.json().catch(() => null)
         const rows: unknown[] = Array.isArray(json?.data) ? json.data : []
         for (const raw of rows) {
           const row = raw as Record<string, unknown>
+          // Defensive: only keep genuinely-running rows even if the server
+          // ignored the status filter.
+          const status = (str(row, "status") ?? "").toUpperCase()
+          if (status && status !== "RUNNING" && status !== "QUEUED") continue
           const id = str(row, "id")
           if (!id) continue
-          seed.set(id, {
+          next.push({
             id,
             kind: "agent",
             label: str(row, "agent_name", "agent_slug", "agent_id") ?? "Agent run",
@@ -94,20 +83,16 @@ export function useActiveRuns(workspaceId: string | null | undefined) {
             href: AGENT_HREF,
           })
         }
-      })
-      .catch(() => {})
+      }
 
-    const routines = fetch(
-      `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/runs/active`,
-    )
-      .then((r) => (r.ok ? r.json() : null))
-      .then((json) => {
+      if (routineRes.status === "fulfilled" && routineRes.value.ok) {
+        const json = await routineRes.value.json().catch(() => null)
         const rows: unknown[] = Array.isArray(json) ? json : Array.isArray(json?.rows) ? json.rows : []
         for (const raw of rows) {
           const row = raw as Record<string, unknown>
           const id = str(row, "id", "run_id")
           if (!id) continue
-          seed.set(id, {
+          next.push({
             id,
             kind: "routine",
             label: str(row, "pipeline_name", "pipeline_slug") ?? "Routine run",
@@ -116,75 +101,50 @@ export function useActiveRuns(workspaceId: string | null | undefined) {
             href: ROUTINE_HREF,
           })
         }
-      })
-      .catch(() => {})
+      }
 
-    Promise.all([agents, routines]).then(() => {
-      if (cancelled) return
-      setItems(seed)
+      next.sort((a, b) => (b.startedAt ?? "").localeCompare(a.startedAt ?? ""))
+      setRuns(next)
+    } finally {
+      inFlight.current = false
       setLoading(false)
-    })
-
-    return () => {
-      cancelled = true
     }
   }, [workspaceId])
 
-  // ---- realtime: keep the set in sync ----
-  useRealtimeEvent(
-    "run.started",
-    useCallback(
-      (e: RealtimeEvent) => {
-        const p = e.payload as Record<string, unknown>
-        const id = str(p, "run_id")
-        if (!id) return
-        upsert({
-          id,
-          kind: "agent",
-          label: str(p, "agent_name", "agent_id") ?? "Agent run",
-          startedAt: new Date().toISOString(),
-          href: AGENT_HREF,
-        })
-      },
-      [upsert],
-    ),
-  )
-  const onAgentDone = useCallback(
-    (e: RealtimeEvent) => remove(str(e.payload as Record<string, unknown>, "run_id")),
-    [remove],
-  )
-  useRealtimeEvent("run.completed", onAgentDone)
-  useRealtimeEvent("run.failed", onAgentDone)
+  // Coalesce bursts of WS events into one refetch shortly after.
+  const invalidate = useCallback(() => {
+    if (debounce.current) clearTimeout(debounce.current)
+    debounce.current = setTimeout(() => {
+      void fetchActive()
+    }, 400)
+  }, [fetchActive])
 
-  useRealtimeEvent(
-    "pipeline.run.started",
-    useCallback(
-      (e: RealtimeEvent) => {
-        const p = e.payload as Record<string, unknown>
-        const id = str(p, "run_id")
-        if (!id) return
-        upsert({
-          id,
-          kind: "routine",
-          label: str(p, "pipeline_slug") ?? "Routine run",
-          startedAt: new Date().toISOString(),
-          href: ROUTINE_HREF,
-        })
-      },
-      [upsert],
-    ),
-  )
-  const onRoutineDone = useCallback(
-    (e: RealtimeEvent) => remove(str(e.payload as Record<string, unknown>, "run_id")),
-    [remove],
-  )
-  useRealtimeEvent("pipeline.run.completed", onRoutineDone)
-  useRealtimeEvent("pipeline.run.failed", onRoutineDone)
+  // Initial load + steady safety poll.
+  useEffect(() => {
+    if (!workspaceId) {
+      setRuns([])
+      return
+    }
+    void fetchActive()
+    const t = setInterval(() => void fetchActive(), POLL_MS)
+    return () => {
+      clearInterval(t)
+      if (debounce.current) clearTimeout(debounce.current)
+    }
+  }, [workspaceId, fetchActive])
 
-  // Newest first.
-  const runs = Array.from(items.values()).sort((a, b) =>
-    (b.startedAt ?? "").localeCompare(a.startedAt ?? ""),
-  )
+  // WS events that imply a run started/changed/ended — each just nudges a
+  // refetch. Agent runs surface via assignment.updated (workspace channel),
+  // routine runs via pipeline.run.* / pipeline.step.started.
+  useRealtimeEvent("assignment.updated", invalidate)
+  useRealtimeEvent("run.started", invalidate)
+  useRealtimeEvent("run.completed", invalidate)
+  useRealtimeEvent("run.failed", invalidate)
+  useRealtimeEvent("mission.updated", invalidate)
+  useRealtimeEvent("pipeline.run.started", invalidate)
+  useRealtimeEvent("pipeline.run.completed", invalidate)
+  useRealtimeEvent("pipeline.run.failed", invalidate)
+  useRealtimeEvent("pipeline.step.started", invalidate)
 
   return { runs, count: runs.length, loading }
 }
