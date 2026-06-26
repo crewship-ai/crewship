@@ -130,6 +130,23 @@ func TestParticipants_List_NotMember_404(t *testing.T) {
 	}
 }
 
+func TestParticipants_Remove_OwnerRejected(t *testing.T) {
+	h, ownerID, colleagueID, _, chatID := setupParticipantsTestBed(t)
+	// promote to group (seeds owner participant)
+	areq := partReq("POST", "/api/v1/chats/"+chatID+"/participants", `{"user_id":"`+colleagueID+`"}`, ownerID)
+	areq.SetPathValue("chatId", chatID)
+	h.Add(httptest.NewRecorder(), areq)
+
+	dreq := partReq("DELETE", "/api/v1/chats/"+chatID+"/participants/"+ownerID, "", ownerID)
+	dreq.SetPathValue("chatId", chatID)
+	dreq.SetPathValue("userId", ownerID)
+	drr := httptest.NewRecorder()
+	h.Remove(drr, dreq)
+	if drr.Code != http.StatusBadRequest {
+		t.Errorf("removing owner = %d, want 400", drr.Code)
+	}
+}
+
 func TestParticipants_Remove(t *testing.T) {
 	h, ownerID, colleagueID, _, chatID := setupParticipantsTestBed(t)
 	// add then remove

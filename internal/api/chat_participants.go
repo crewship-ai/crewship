@@ -214,6 +214,15 @@ func (h *ChatParticipantsHandler) Remove(w http.ResponseWriter, r *http.Request)
 		replyError(w, http.StatusForbidden, "only the chat owner or a workspace admin can manage participants")
 		return
 	}
+	// The chat creator is the implicit owner — removing them would orphan the
+	// group roster, so reject it. (Add re-seeds created_by as an owner row.)
+	var createdBy sql.NullString
+	if err := h.db.QueryRowContext(r.Context(),
+		"SELECT created_by FROM chats WHERE id = ?", chatID).Scan(&createdBy); err == nil &&
+		createdBy.Valid && createdBy.String == userID {
+		replyError(w, http.StatusBadRequest, "cannot remove the chat owner")
+		return
+	}
 	if _, err := h.db.ExecContext(r.Context(),
 		`DELETE FROM chat_participants WHERE chat_id = ? AND user_id = ?`,
 		chatID, userID); err != nil {
