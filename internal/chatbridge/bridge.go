@@ -137,6 +137,16 @@ type ProvisioningEnqueuer interface {
 	EnqueueForCrew(ctx context.Context, crewID, workspaceID string) (ProvisioningEnqueueResult, error)
 }
 
+// imagePresenceChecker is the optional capability the bridge uses to detect
+// when a crew's recorded cached image has been pruned from the local Docker
+// daemon. The docker provider implements it (ImagePresentLocally); providers
+// that don't are treated as "image present" so we never spuriously
+// re-provision. Local interface (not provider.ContainerProvider) to keep the
+// capability opt-in and avoid forcing every provider to implement it.
+type imagePresenceChecker interface {
+	ImagePresentLocally(ctx context.Context, ref string) (bool, error)
+}
+
 // Bridge connects the WebSocket chat interface to the orchestrator, resolving
 // sessions, managing containers, persisting conversations, and streaming events.
 type Bridge struct {
@@ -318,9 +328,37 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	// frontend renders off this event) lets the user watch the build land.
 	// Configs that are no-ops at provision time (e.g. only containerEnv)
 	// launch directly from runtime_image.
-	if info.DevcontainerConfig != "" && info.CachedImage == "" && devcontainerNeedsProvision(info.DevcontainerConfig, info.MiseConfig) {
-		b.logger.Info("agent start auto-triggering devcontainer build",
-			"crew_slug", info.CrewSlug, "crew_id", info.CrewID)
+	//
+	// Re-provision in TWO cases: (a) no cached image has ever been built
+	// (CachedImage == ""), or (b) a cached image was recorded but is now
+	// missing from the local Docker daemon (pruned). Case (b) is the durable
+	// fix for the dead crewship-cache:* tag: that tag exists in no registry,
+	// so without rebuilding it the run path would ImagePull it and fail with
+	// "pull access denied", leaving the crew permanently broken.
+	needsProvision := info.DevcontainerConfig != "" && devcontainerNeedsProvision(info.DevcontainerConfig, info.MiseConfig)
+	cachedImageMissing := false
+	if needsProvision && info.CachedImage != "" {
+		if checker, ok := b.container.(imagePresenceChecker); ok {
+			present, err := checker.ImagePresentLocally(ctx, info.CachedImage)
+			if err != nil {
+				// Couldn't determine presence (transport error / wedged
+				// daemon). Assume present and let the normal run path proceed
+				// rather than triggering a spurious rebuild on every message.
+				b.logger.Warn("could not check cached image presence; assuming present",
+					"crew_slug", info.CrewSlug, "image", info.CachedImage, "error", err)
+			} else if !present {
+				cachedImageMissing = true
+			}
+		}
+	}
+	if needsProvision && (info.CachedImage == "" || cachedImageMissing) {
+		if cachedImageMissing {
+			b.logger.Info("cached image missing locally; re-provisioning",
+				"crew_slug", info.CrewSlug, "crew_id", info.CrewID, "cached_image", info.CachedImage)
+		} else {
+			b.logger.Info("agent start auto-triggering devcontainer build",
+				"crew_slug", info.CrewSlug, "crew_id", info.CrewID)
+		}
 		var (
 			status     string
 			enqErr     error

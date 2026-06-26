@@ -2,6 +2,7 @@ package docker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -307,6 +308,47 @@ func (p *Provider) ensureNetwork(ctx context.Context, name string) error {
 	return nil
 }
 
+// localCacheImagePrefix tags devcontainer cache images the provisioner
+// commits locally (e.g. "crewship-cache:0d08da4b8ac3"). These images exist
+// ONLY in the local Docker daemon — they are never pushed to any registry —
+// so a missing one can never be recovered by ImagePull.
+const localCacheImagePrefix = "crewship-cache:"
+
+// ErrCachedImageMissing signals that a crew's recorded local-cache image
+// (crewship-cache:*) is absent from the local Docker daemon. Because that tag
+// lives in no registry, pulling it is impossible; the crew must be
+// re-provisioned (`crewship crew provision <slug>`) to rebuild it. Callers can
+// detect this with errors.Is so they route to reprovisioning / a clear
+// "rebuild your environment" message instead of surfacing the opaque registry
+// error "pull access denied for crewship-cache, repository does not exist".
+var ErrCachedImageMissing = errors.New("cached devcontainer image missing locally; crew needs reprovisioning")
+
+// imagePresentLocally reports whether ref exists in the local image store.
+// Best-effort: any inspect failure (not-found, transport error, timeout) is
+// treated as "not present" so callers fall through to their not-present path.
+// Bounded by a short timeout so a wedged daemon can't block the caller.
+func (p *Provider) imagePresentLocally(ctx context.Context, ref string) bool {
+	present, err := p.ImagePresentLocally(ctx, ref)
+	return err == nil && present
+}
+
+// ImagePresentLocally reports whether ref exists in the local image store,
+// distinguishing "definitely absent" (false, nil) from "couldn't tell"
+// (false, err). Exported so higher layers — notably the chatbridge
+// auto-provision gate — can detect a pruned cached image and re-provision
+// rather than letting the run path hit the dead crewship-cache:* tag.
+func (p *Provider) ImagePresentLocally(ctx context.Context, ref string) (bool, error) {
+	inspectCtx, cancel := context.WithTimeout(ctx, dockerutil.DefaultHeadTimeout)
+	defer cancel()
+	if _, err := p.client.ImageInspect(inspectCtx, ref); err != nil {
+		if client.IsErrNotFound(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
 // ensureImage makes sure the agent runtime image is present locally and, when
 // reachable, matches the current remote manifest digest. Mirrors the
 // provisioner's ensureImage (internal/devcontainer/provisioner.go): a purely
@@ -320,6 +362,20 @@ func (p *Provider) ensureNetwork(ctx context.Context, name string) error {
 //  3. Local present AND RepoDigests contain the remote digest → done.
 //  4. Otherwise → pull. Offline with a local image is accepted (warn + reuse).
 func (p *Provider) ensureImage(ctx context.Context, ref string) error {
+	// Local-only cache images (crewship-cache:<hash>) are built and committed
+	// by the devcontainer provisioner and exist in NO registry. If such a tag
+	// is missing locally (pruned), an ImagePull can never succeed — it fails
+	// with the opaque "pull access denied for crewship-cache, repository does
+	// not exist", leaving the crew permanently broken. Short-circuit BEFORE
+	// any registry interaction: present → done; absent → typed sentinel so the
+	// caller can re-provision instead of attempting an impossible pull.
+	if strings.HasPrefix(ref, localCacheImagePrefix) {
+		if p.imagePresentLocally(ctx, ref) {
+			return nil
+		}
+		return fmt.Errorf("%w: %s", ErrCachedImageMissing, ref)
+	}
+
 	remoteDigest := p.digestResolver.Remote(ctx, ref)
 
 	// Cap ImageInspect with a short timeout. Older Docker Desktop versions
