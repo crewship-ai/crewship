@@ -158,18 +158,34 @@ func parseClaudeCodeStreamJSON(line []byte, handler EventHandler) {
 		}
 	}
 
+	// parentID is non-empty when this line came from a nested subagent (Task
+	// tool). tagSubagent stamps it onto an event's metadata so the UI can scope
+	// the activity under its parent.
+	parentID := msg.ParentToolUseID
+	tagSubagent := func(meta map[string]interface{}) map[string]interface{} {
+		if parentID == "" {
+			return meta
+		}
+		if meta == nil {
+			meta = map[string]interface{}{}
+		}
+		meta["parent_tool_use_id"] = parentID
+		meta["subagent"] = true
+		return meta
+	}
+
 	switch msg.Type {
 	case "stream_event":
 		// Token-level streaming (when --include-partial-messages is used).
 		if msg.Event != nil && msg.Event.Delta != nil {
 			switch msg.Event.Delta.Type {
 			case "text_delta":
-				handler(AgentEvent{Type: "text", Content: msg.Event.Delta.Text, Timestamp: time.Now()})
+				handler(AgentEvent{Type: "text", Content: msg.Event.Delta.Text, Metadata: tagSubagent(nil), Timestamp: time.Now()})
 			case "thinking_delta":
 				handler(AgentEvent{
 					Type:      "thinking",
 					Content:   msg.Event.Delta.Thinking,
-					Metadata:  map[string]interface{}{"streaming": true},
+					Metadata:  tagSubagent(map[string]interface{}{"streaming": true}),
 					Timestamp: time.Now(),
 				})
 			}
@@ -191,11 +207,11 @@ func parseClaudeCodeStreamJSON(line []byte, handler EventHandler) {
 				handler(AgentEvent{
 					Type:    "tool_call",
 					Content: name,
-					Metadata: map[string]interface{}{
+					Metadata: tagSubagent(map[string]interface{}{
 						"tool_name": name,
 						"tool_id":   block.ID,
 						"input":     block.Input,
-					},
+					}),
 					Timestamp: time.Now(),
 				})
 			case "tool_result":

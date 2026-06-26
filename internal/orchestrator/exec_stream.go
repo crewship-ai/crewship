@@ -55,6 +55,11 @@ type streamJSONMessage struct {
 	ErrorMessage string  `json:"error,omitempty"`
 	// For stream_event type (--include-partial-messages)
 	Event *streamEvent `json:"event,omitempty"`
+	// Present on every line emitted by a nested subagent (Task tool): the
+	// tool_use id of the Task call that spawned it. Lets the UI scope subagent
+	// thinking/tool activity under its parent instead of flattening it into the
+	// main stream. Empty on top-level (parent agent) lines.
+	ParentToolUseID string `json:"parent_tool_use_id,omitempty"`
 }
 
 // nestedMessage extracts content blocks from the "message" field if present.

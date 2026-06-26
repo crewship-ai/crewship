@@ -438,13 +438,20 @@ function summarizeTools(tools: ToolNode[]): string {
 }
 
 /** One tool invocation inside an activity group — the call card (with input),
- *  marked completed once its result arrives, plus any non-empty result body. */
+ *  marked completed once its result arrives, plus any non-empty result body.
+ *  Tool calls made by a nested subagent (Task tool) are indented and labelled
+ *  so their activity reads as "inside" the delegation rather than the parent's
+ *  own work. */
 function ActivityToolCard({ node, agentId }: { node: ToolNode; agentId?: string }) {
+  const isSubagent = node.call.metadata?.subagent === true
   const callPart: TurnPart = node.result
     ? { ...node.call, metadata: { ...(node.call.metadata ?? {}), completed: true } }
     : node.call
   return (
-    <div className="flex flex-col gap-1.5">
+    <div className={`flex flex-col gap-1.5${isSubagent ? " ml-3 border-l-2 border-border/60 pl-2.5" : ""}`}>
+      {isSubagent && (
+        <span className="text-micro text-muted-foreground">↳ subagent</span>
+      )}
       <DefaultToolCall part={callPart} agentId={agentId} />
       {node.result && node.result.content ? <InlineToolResult part={node.result} /> : null}
     </div>
