@@ -13,8 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/crewship-ai/crewship/internal/dockerutil"
-	"github.com/crewship-ai/crewship/internal/provider"
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/mount"
@@ -22,6 +21,9 @@ import (
 	"github.com/docker/docker/api/types/volume"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
+
+	"github.com/crewship-ai/crewship/internal/dockerutil"
+	"github.com/crewship-ai/crewship/internal/provider"
 )
 
 var _ provider.ContainerProvider = (*Provider)(nil)
@@ -341,7 +343,7 @@ func (p *Provider) ImagePresentLocally(ctx context.Context, ref string) (bool, e
 	inspectCtx, cancel := context.WithTimeout(ctx, dockerutil.DefaultHeadTimeout)
 	defer cancel()
 	if _, err := p.client.ImageInspect(inspectCtx, ref); err != nil {
-		if client.IsErrNotFound(err) {
+		if cerrdefs.IsNotFound(err) {
 			return false, nil
 		}
 		return false, err
