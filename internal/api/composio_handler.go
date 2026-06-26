@@ -498,6 +498,22 @@ var composioReadVerbs = map[string]struct{}{
 	"VIEW": {}, "GETPROFILE": {},
 }
 
+// composioWriteVerbs are mutation tokens that DISQUALIFY a slug from read mode
+// even when it also carries a read verb. This is the tightened guard: e.g.
+// GOOGLECALENDAR_CALENDAR_LIST_INSERT / _PATCH / _UPDATE / _DELETE contain
+// "LIST" but mutate, so they must never land in a read-only grant.
+var composioWriteVerbs = map[string]struct{}{
+	"CREATE": {}, "UPDATE": {}, "DELETE": {}, "INSERT": {}, "PATCH": {}, "PUT": {},
+	"POST": {}, "SEND": {}, "ADD": {}, "REMOVE": {}, "MODIFY": {}, "SET": {},
+	"MOVE": {}, "TRASH": {}, "CLEAR": {}, "IMPORT": {}, "WRITE": {}, "REPLY": {},
+	"FORWARD": {}, "ENABLE": {}, "DISABLE": {}, "REVOKE": {}, "MARK": {},
+	"ARCHIVE": {}, "UNARCHIVE": {}, "ASSIGN": {}, "RENAME": {}, "DUPLICATE": {},
+	"COPY": {}, "UPLOAD": {}, "BATCH": {}, "DRAFT": {}, "REPLACE": {}, "MERGE": {},
+	"CANCEL": {}, "DECLINE": {}, "ACCEPT": {}, "APPROVE": {}, "SUBMIT": {},
+	"UNTRASH": {}, "RESTORE": {}, "STOP": {}, "START": {}, "RUN": {}, "EXECUTE": {},
+	"TRIGGER": {}, "PUBLISH": {}, "UNPUBLISH": {}, "LOCK": {}, "UNLOCK": {},
+}
+
 // isReadTool reports whether a Composio tool slug looks read-only. It strips the
 // leading toolkit prefix (e.g. "GMAIL_") and checks whether any remaining
 // underscore-token is one of composioReadVerbs (case-insensitive). Heuristic and
@@ -508,7 +524,15 @@ func isReadTool(slug string) bool {
 	if i := strings.Index(s, "_"); i >= 0 {
 		s = s[i+1:]
 	}
-	for _, tok := range strings.Split(s, "_") {
+	tokens := strings.Split(s, "_")
+	// Write verbs take precedence: any mutation token disqualifies the slug even
+	// if it also carries a read verb (e.g. CALENDAR_LIST_INSERT).
+	for _, tok := range tokens {
+		if _, ok := composioWriteVerbs[tok]; ok {
+			return false
+		}
+	}
+	for _, tok := range tokens {
 		if _, ok := composioReadVerbs[tok]; ok {
 			return true
 		}

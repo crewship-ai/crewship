@@ -99,10 +99,26 @@ export function toolkitLabel(slug: string): string {
 // read-shaped verb (GET/LIST/FETCH/SEARCH/READ/FIND/VIEW) are treated as
 // read-only; everything else is a write. Used by the custom tool picker and the
 // "Read-only" quick-select.
-const READ_VERBS = ["GET", "LIST", "FETCH", "SEARCH", "READ", "FIND", "VIEW"]
+const READ_VERBS = new Set([
+  "GET", "LIST", "FETCH", "SEARCH", "READ", "FIND", "DOWNLOAD", "EXPORT",
+  "RETRIEVE", "COUNT", "CHECK", "VIEW", "GETPROFILE",
+])
+// Mutation tokens that disqualify a slug from "read" even when it also carries a
+// read verb (e.g. CALENDAR_LIST_INSERT). Mirrors the server's composioWriteVerbs.
+const WRITE_VERBS = new Set([
+  "CREATE", "UPDATE", "DELETE", "INSERT", "PATCH", "PUT", "POST", "SEND", "ADD",
+  "REMOVE", "MODIFY", "SET", "MOVE", "TRASH", "CLEAR", "IMPORT", "WRITE", "REPLY",
+  "FORWARD", "ENABLE", "DISABLE", "REVOKE", "MARK", "ARCHIVE", "UNARCHIVE",
+  "ASSIGN", "RENAME", "DUPLICATE", "COPY", "UPLOAD", "BATCH", "DRAFT", "REPLACE",
+  "MERGE", "CANCEL", "DECLINE", "ACCEPT", "APPROVE", "SUBMIT", "UNTRASH",
+  "RESTORE", "STOP", "START", "RUN", "EXECUTE", "TRIGGER", "PUBLISH",
+  "UNPUBLISH", "LOCK", "UNLOCK",
+])
 export function isReadTool(slug: string): boolean {
-  const s = slug.toUpperCase()
-  return READ_VERBS.some((v) => s.includes(v))
+  // Strip the leading toolkit prefix, tokenize; write verbs win, then read verbs.
+  const tokens = slug.toUpperCase().replace(/^[^_]+_/, "").split("_")
+  if (tokens.some((t) => WRITE_VERBS.has(t))) return false
+  return tokens.some((t) => READ_VERBS.has(t))
 }
 
 // A scope chip: brand icon + "<App> · <Scope>", colour-coded by mode
