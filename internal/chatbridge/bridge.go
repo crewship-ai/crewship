@@ -551,6 +551,12 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 
 	var fullResponse string
 	var toolSummaries []string
+	// partAcc assembles the ordered, structured parts (text / thinking / tool
+	// calls / tool results) of the assistant turn for faithful re-rendering on
+	// reload. It works on the normalized AgentEvent stream, so it is identical
+	// across CLI adapters. fullResponse/toolSummaries stay as the flattened
+	// text + compact summary used for search and prompt-context recall.
+	partAcc := conversation.NewPartAccumulator()
 
 	req := orchestrator.AgentRunRequest{
 		AgentID:            info.AgentID,
@@ -601,6 +607,11 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 			Content:  event.Content,
 			Metadata: event.Metadata,
 		})
+		// Assemble the structured parts for faithful re-rendering. The
+		// accumulator itself decides which event types are content parts
+		// (text/thinking/tool_call/tool_result/image) and ignores transport
+		// events (status/system/result/error).
+		partAcc.Add(event.Type, event.Content, event.Metadata)
 		// Only accumulate actual text content for the persisted assistant message.
 		// System events (sidecar security logs, etc.) and thinking events should not
 		// be stored as part of the assistant response.
@@ -676,6 +687,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 					AgentID:   info.AgentID,
 					Role:      conversation.RoleAssistant,
 					Content:   fullResponse,
+					Parts:     partAcc.Parts(),
 					Timestamp: time.Now().UTC(),
 				})
 				_ = b.resolver.IncrementMessageCount(cleanCtx, chatID, 2)
@@ -732,6 +744,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		AgentID:     info.AgentID,
 		Role:        conversation.RoleAssistant,
 		Content:     fullResponse,
+		Parts:       partAcc.Parts(),
 		ToolSummary: toolSummary,
 		Timestamp:   time.Now().UTC(),
 	}); err != nil {
