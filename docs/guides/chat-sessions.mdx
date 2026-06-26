@@ -358,6 +358,45 @@ These query params are stable. Do not link to the Next.js internal route segment
 
 </Accordion>
 
+## Group chats (multiple humans + the agent)
+
+A chat starts as a **private 1:1** conversation between you and the agent. Add a
+second person and it becomes a **group chat** — several teammates and the agent
+in one thread.
+
+**Turn-taking.** In a group chat the agent stays silent unless it is
+**@mentioned** by slug, so people can talk among themselves without the bot
+replying to every line. Mention it (e.g. `@riley can you check the logs`) and it
+runs as usual. In a private 1:1 chat every message runs the agent, unchanged.
+
+**Managing participants (CLI).** Adding the first participant flips the chat to
+group visibility. You can only add people who already belong to the workspace.
+
+```bash
+crewship chat participants add <chat-id> <user-id>      # add (promotes to group)
+crewship chat participants list <chat-id>               # who's in the chat
+crewship chat participants remove <chat-id> <user-id>   # remove
+```
+
+These map 1:1 to `POST` / `GET` / `DELETE /api/v1/chats/{chatId}/participants`.
+
+**Attribution & live sync.** Each human message is broadcast to the other
+participants in real time and labelled with its author (avatar + name); your own
+messages render as before. A `Group · N` badge in the header shows the
+participant count.
+
+**MVP scope / gotchas.**
+
+- **The agent runs under the chat's own credentials**, the same for every
+  participant — there's no per-user data grounding yet. Don't share a group chat
+  with people who shouldn't see what the agent can reach.
+- **Mention matching is by slug on a word boundary** (case-insensitive), so
+  `email@riley.com` and `@rileybot` do **not** mention agent `riley`.
+- **Presence / typing indicators and `@mention` autocomplete are not shipped
+  yet** — mention the slug by hand. Live message sync works today.
+- **Adding a participant does not introduce per-message visibility controls** —
+  anyone who can see the chat sees the whole transcript.
+
 ## Related
 
 - [Activity](/guides/activity) — the live canvas where the same agent's mission runs show up; the chat is one operator surface, Activity is the other.
