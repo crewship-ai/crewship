@@ -385,11 +385,12 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	}
 
 	if err := b.convStore.Append(ctx, chatID, conversation.Message{
-		ID:        generateMsgID(),
-		AgentID:   info.AgentID,
-		Role:      conversation.RoleUser,
-		Content:   content,
-		Timestamp: time.Now().UTC(),
+		ID:           generateMsgID(),
+		AgentID:      info.AgentID,
+		Role:         conversation.RoleUser,
+		Content:      content,
+		AuthorUserID: userID, // attribute the human author (group-chat transcripts)
+		Timestamp:    time.Now().UTC(),
 	}); err != nil {
 		b.logger.Error("failed to persist user message", "error", err)
 		streamFn(ws.ChatEvent{Type: "error", Content: "failed to save message"})
