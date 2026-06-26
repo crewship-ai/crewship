@@ -106,6 +106,19 @@ func TestParticipants_Add_NonWorkspaceUser_400(t *testing.T) {
 	}
 }
 
+func TestParticipants_Add_PlainMemberForbidden_403(t *testing.T) {
+	h, _, colleagueID, _, chatID := setupParticipantsTestBed(t)
+	// colleagueID is a workspace MEMBER but not the chat creator → may not
+	// mutate the roster.
+	req := partReq("POST", "/api/v1/chats/"+chatID+"/participants", `{"user_id":"`+colleagueID+`"}`, colleagueID)
+	req.SetPathValue("chatId", chatID)
+	rr := httptest.NewRecorder()
+	h.Add(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("plain member add = %d, want 403", rr.Code)
+	}
+}
+
 func TestParticipants_List_NotMember_404(t *testing.T) {
 	h, _, _, outsiderID, chatID := setupParticipantsTestBed(t)
 	req := partReq("GET", "/api/v1/chats/"+chatID+"/participants", "", outsiderID)

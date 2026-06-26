@@ -18,8 +18,8 @@ import (
 //
 // The accumulator works on the adapter-neutral normalized event vocabulary
 // (text|thinking|tool_call|tool_result|image) emitted by every CLI adapter —
-// NOT on Claude stream-json — so Codex/Gemini/OpenCode get the same behaviour
-// for free.
+// not on any single CLI's raw stream format — so every adapter gets the same
+// behaviour for free.
 func TestPartAccumulator_CoalescesAndSegments(t *testing.T) {
 	acc := NewPartAccumulator()
 

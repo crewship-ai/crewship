@@ -313,6 +313,48 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		return fmt.Errorf("agent %s pending review: hire not approved", info.AgentID)
 	}
 
+	// The human turn is recorded and fanned out to the other participants
+	// regardless of whether the agent will respond. streamFn's BroadcastExcept
+	// skips the sender (who already rendered it optimistically); harmless in a
+	// private 1:1 chat where there are no other subscribers.
+	persistUserMsg := func() error {
+		return b.convStore.Append(ctx, chatID, conversation.Message{
+			ID:           generateMsgID(),
+			AgentID:      info.AgentID,
+			Role:         conversation.RoleUser,
+			Content:      content,
+			AuthorUserID: userID,
+			Timestamp:    time.Now().UTC(),
+		})
+	}
+	broadcastUserMsg := func() {
+		streamFn(ws.ChatEvent{
+			Type:     "user_message",
+			Content:  content,
+			Metadata: map[string]interface{}{"author_user_id": userID},
+		})
+	}
+
+	// Group-chat turn-taking gate — evaluated BEFORE any container/provisioning
+	// side-effect, so a line that doesn't @mention the agent never kicks off an
+	// image build or container start. In a group chat the agent stays silent
+	// unless @mentioned; the human line is still persisted + broadcast + counted
+	// so the shared transcript records it, and a clean "done" settles the
+	// sender's UI. Private (1:1) chats always respond.
+	if !ShouldAgentRespond(info.Visibility, content, info.AgentSlug) {
+		if err := persistUserMsg(); err != nil {
+			b.logger.Error("failed to persist user message", "error", err)
+			streamFn(ws.ChatEvent{Type: "error", Content: "failed to save message"})
+			return fmt.Errorf("persist user message: %w", err)
+		}
+		broadcastUserMsg()
+		if err := b.resolver.IncrementMessageCount(ctx, chatID, 1); err != nil {
+			b.logger.Warn("increment message count (group, no mention)", "error", err)
+		}
+		streamFn(ws.ChatEvent{Type: "done", Content: ""})
+		return nil
+	}
+
 	containerKey := info.CrewID
 
 	// If the crew has a devcontainer config that actually needs provisioning
@@ -389,43 +431,14 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		return fmt.Errorf("crew %q provisioning kicked off; resend after build completes", info.CrewSlug)
 	}
 
-	if err := b.convStore.Append(ctx, chatID, conversation.Message{
-		ID:           generateMsgID(),
-		AgentID:      info.AgentID,
-		Role:         conversation.RoleUser,
-		Content:      content,
-		AuthorUserID: userID, // attribute the human author (group-chat transcripts)
-		Timestamp:    time.Now().UTC(),
-	}); err != nil {
+	// Agent IS responding (private chat, or @mentioned in a group). Persist +
+	// broadcast the human turn now that provisioning has cleared.
+	if err := persistUserMsg(); err != nil {
 		b.logger.Error("failed to persist user message", "error", err)
 		streamFn(ws.ChatEvent{Type: "error", Content: "failed to save message"})
 		return fmt.Errorf("persist user message: %w", err)
 	}
-
-	// Broadcast the human message to OTHER participants subscribed to this
-	// session so a shared group chat updates live for everyone (the sender
-	// already rendered it optimistically; streamFn's BroadcastExcept skips the
-	// sender). Carries the author id so the UI can attribute the turn. Harmless
-	// in a private 1:1 chat — there are no other subscribers.
-	streamFn(ws.ChatEvent{
-		Type:     "user_message",
-		Content:  content,
-		Metadata: map[string]interface{}{"author_user_id": userID},
-	})
-
-	// Group-chat turn-taking: in a group chat the agent stays silent unless it
-	// is @mentioned, so humans can talk among themselves without the bot
-	// responding to every line. The message is still persisted (above) and
-	// counted so the shared transcript records it; we just don't spin up the
-	// agent. A clean "done" settles the sender's UI without a hanging spinner.
-	// Private (1:1) chats always respond — ShouldAgentRespond returns true.
-	if !ShouldAgentRespond(info.Visibility, content, info.AgentSlug) {
-		if err := b.resolver.IncrementMessageCount(ctx, chatID, 1); err != nil {
-			b.logger.Warn("increment message count (group, no mention)", "error", err)
-		}
-		streamFn(ws.ChatEvent{Type: "done", Content: ""})
-		return nil
-	}
+	broadcastUserMsg()
 
 	// Auto-title: use first user message (truncated) as session title
 	title := content

@@ -70,7 +70,7 @@ export const TurnRenderer = React.memo(function TurnRenderer({ turn, onCopy, onF
       >
         {authorName && (
           <div className="ml-auto mb-0.5 flex items-center gap-1.5 text-micro text-muted-foreground">
-            <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-primary/15 text-[9px] font-semibold text-primary">
+            <span aria-hidden="true" className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-primary/15 text-[9px] font-semibold text-primary">
               {authorName.charAt(0).toUpperCase()}
             </span>
             <span>{authorName}</span>

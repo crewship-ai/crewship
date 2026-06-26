@@ -254,10 +254,14 @@ func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecRe
 // what matters — the poisoned text never reaches the model. Downstream
 // journal emission carries the scan category + pattern via the event
 // metadata.
-func emitToolResultBlock(block contentBlock, handler EventHandler) {
+func emitToolResultBlock(block contentBlock, parentID string, handler EventHandler) {
 	meta := map[string]interface{}{}
 	if block.ToolUseID != "" {
 		meta["tool_use_id"] = block.ToolUseID
+	}
+	if parentID != "" {
+		meta["parent_tool_use_id"] = parentID
+		meta["subagent"] = true
 	}
 	content := block.Text
 	if hit := memory.ScanContent(content); hit != nil {
@@ -284,14 +288,19 @@ func emitToolResultBlock(block contentBlock, handler EventHandler) {
 }
 
 // emitImageBlock sends an image event for the given content block.
-func emitImageBlock(block contentBlock, handler EventHandler) {
+func emitImageBlock(block contentBlock, parentID string, handler EventHandler) {
 	if block.Source != nil && block.Source.Data != "" {
+		meta := map[string]interface{}{
+			"media_type": block.Source.MediaType,
+		}
+		if parentID != "" {
+			meta["parent_tool_use_id"] = parentID
+			meta["subagent"] = true
+		}
 		handler(AgentEvent{
-			Type:    "image",
-			Content: block.Source.Data,
-			Metadata: map[string]interface{}{
-				"media_type": block.Source.MediaType,
-			},
+			Type:      "image",
+			Content:   block.Source.Data,
+			Metadata:  meta,
 			Timestamp: time.Now(),
 		})
 	}

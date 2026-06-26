@@ -215,9 +215,9 @@ func parseClaudeCodeStreamJSON(line []byte, handler EventHandler) {
 					Timestamp: time.Now(),
 				})
 			case "tool_result":
-				emitToolResultBlock(block, handler)
+				emitToolResultBlock(block, parentID, handler)
 			case "image":
-				emitImageBlock(block, handler)
+				emitImageBlock(block, parentID, handler)
 			}
 		}
 
@@ -225,9 +225,9 @@ func parseClaudeCodeStreamJSON(line []byte, handler EventHandler) {
 		for _, block := range msg.Content {
 			switch block.Type {
 			case "tool_result":
-				emitToolResultBlock(block, handler)
+				emitToolResultBlock(block, parentID, handler)
 			case "image":
-				emitImageBlock(block, handler)
+				emitImageBlock(block, parentID, handler)
 			}
 		}
 

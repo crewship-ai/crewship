@@ -3,6 +3,7 @@ package api
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 )
@@ -58,6 +59,28 @@ func (h *ChatParticipantsHandler) chatWorkspace(r *http.Request, chatID string) 
 	return ws, true
 }
 
+// canManageChat reports whether userID may mutate the chat's roster: only the
+// chat's creator or a workspace OWNER/ADMIN. Plain workspace members can SEE a
+// chat (chatWorkspace) but must not be able to add/remove participants or flip
+// it to a group — otherwise any member could reshape any chat in the workspace.
+func (h *ChatParticipantsHandler) canManageChat(r *http.Request, chatID, ws, userID string) bool {
+	var createdBy sql.NullString
+	if err := h.db.QueryRowContext(r.Context(),
+		"SELECT created_by FROM chats WHERE id = ?", chatID).Scan(&createdBy); err != nil {
+		return false
+	}
+	if createdBy.Valid && createdBy.String == userID {
+		return true
+	}
+	var role string
+	if err := h.db.QueryRowContext(r.Context(),
+		"SELECT role FROM workspace_members WHERE workspace_id = ? AND user_id = ?",
+		ws, userID).Scan(&role); err != nil {
+		return false
+	}
+	return role == "OWNER" || role == "ADMIN"
+}
+
 func (h *ChatParticipantsHandler) List(w http.ResponseWriter, r *http.Request) {
 	chatID := r.PathValue("chatId")
 	if _, ok := h.chatWorkspace(r, chatID); !ok {
@@ -105,6 +128,10 @@ func (h *ChatParticipantsHandler) Add(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusNotFound, "chat not found")
 		return
 	}
+	if !h.canManageChat(r, chatID, ws, user.ID) {
+		replyError(w, http.StatusForbidden, "only the chat owner or a workspace admin can manage participants")
+		return
+	}
 	var body struct {
 		UserID string `json:"user_id"`
 		Role   string `json:"role"`
@@ -123,7 +150,12 @@ func (h *ChatParticipantsHandler) Add(w http.ResponseWriter, r *http.Request) {
 	if err := h.db.QueryRowContext(r.Context(),
 		"SELECT user_id FROM workspace_members WHERE workspace_id = ? AND user_id = ?",
 		ws, body.UserID).Scan(&memberCheck); err != nil {
-		replyError(w, http.StatusBadRequest, "user is not a member of this workspace")
+		if errors.Is(err, sql.ErrNoRows) {
+			replyError(w, http.StatusBadRequest, "user is not a member of this workspace")
+			return
+		}
+		h.logger.Error("participant member check", "err", err)
+		replyError(w, http.StatusInternalServerError, "internal")
 		return
 	}
 
@@ -173,8 +205,13 @@ func (h *ChatParticipantsHandler) Remove(w http.ResponseWriter, r *http.Request)
 		replyError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
-	if _, ok := h.chatWorkspace(r, chatID); !ok {
+	ws, ok := h.chatWorkspace(r, chatID)
+	if !ok {
 		replyError(w, http.StatusNotFound, "chat not found")
+		return
+	}
+	if !h.canManageChat(r, chatID, ws, user.ID) {
+		replyError(w, http.StatusForbidden, "only the chat owner or a workspace admin can manage participants")
 		return
 	}
 	if _, err := h.db.ExecContext(r.Context(),

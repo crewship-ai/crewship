@@ -480,17 +480,24 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId }: UseChatOp
       if (authorUserId && currentUserIdRef.current && authorUserId === currentUserIdRef.current) {
         return
       }
-      setTurns((prev) => [
-        ...prev,
-        {
-          id: uuid(),
-          role: "user",
-          parts: [{ id: uuid(), type: "text", content, timestamp: new Date() }],
-          isStreaming: false,
-          timestamp: new Date(),
-          authorUserId,
-        },
-      ])
+      const userTurn: ChatTurn = {
+        id: uuid(),
+        role: "user",
+        parts: [{ id: uuid(), type: "text", content, timestamp: new Date() }],
+        isStreaming: false,
+        timestamp: new Date(),
+        authorUserId,
+      }
+      setTurns((prev) => {
+        // If the assistant is mid-turn, insert the teammate's message BEFORE the
+        // streaming turn so it stays the tail — otherwise the next text/tool
+        // delta would see a non-assistant last turn and spawn a second one.
+        const last = prev[prev.length - 1]
+        if (last?.role === "assistant" && last.isStreaming) {
+          return [...prev.slice(0, -1), userTurn, last]
+        }
+        return [...prev, userTurn]
+      })
     },
     [],
   )

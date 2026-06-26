@@ -141,9 +141,8 @@ func TestParseClaude_NilHandler(t *testing.T) {
 	parseClaudeCodeStreamJSON([]byte(`{"type":"system","subtype":"init"}`), nil)
 }
 
-// TestParseClaude_SubagentParentToolUseID — Claude Code tags every line from a
-// nested subagent (Task tool) with parent_tool_use_id. The adapter must carry
-// that onto the normalized event metadata so the UI can scope subagent
+// TestParseClaude_SubagentParentToolUseID — the adapter tags every line from a
+// nested subagent (parent_tool_use_id present) so the UI can scope subagent
 // thinking / tool activity under its parent instead of flattening it into the
 // main stream.
 func TestParseClaude_SubagentParentToolUseID(t *testing.T) {
@@ -175,6 +174,9 @@ func TestParseClaude_SubagentParentToolUseID(t *testing.T) {
 	line3 := []byte(`{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"hi"}}}`)
 	var got3 []AgentEvent
 	parseClaudeCodeStreamJSON(line3, func(e AgentEvent) { got3 = append(got3, e) })
+	if len(got3) != 1 {
+		t.Fatalf("expected 1 top-level event, got %d", len(got3))
+	}
 	if m, _ := got3[0].Metadata.(map[string]interface{}); m != nil && m["subagent"] == true {
 		t.Errorf("top-level event should not be tagged subagent, got %+v", got3[0].Metadata)
 	}

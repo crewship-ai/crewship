@@ -27,7 +27,7 @@ const (
 // Part is one ordered segment of a multi-part assistant turn — a run of text,
 // a thinking block, a tool call, a tool result, or an image. It is the
 // persisted, assembled form of the normalized orchestrator.AgentEvent stream:
-// every CLI adapter (Claude Code, Codex, Gemini, OpenCode, …) funnels its
+// every CLI adapter funnels its
 // native output through that one normalized vocabulary, so Part is
 // adapter-neutral by construction. Storing the ordered parts lets a reload
 // render a turn EXACTLY as it streamed (thinking + tools + interleaved text),
