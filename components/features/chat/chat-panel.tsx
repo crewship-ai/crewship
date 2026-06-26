@@ -74,12 +74,16 @@ interface ChatPanelProps {
   initialInput?: string
   /** Mobile-only: which panel to show full-screen. Undefined = desktop mode. */
   mobilePanel?: "chat" | "files" | "files-only" | "more"
+  /** Fired when the user sends a message — lets the parent optimistically
+   *  title a freshly-created session in the sidebar (matching the server's
+   *  auto-title) so the new entry shows its name without a manual refresh. */
+  onSend?: (sessionId: string, text: string) => void
 }
 
 const noopFileClick = () => {}
 
 /** Chat panel with split view: conversation on the left, tabbed panel on the right. */
-export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole, sessionOrigin, initialInput, mobilePanel }: ChatPanelProps) {
+export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole, sessionOrigin, initialInput, mobilePanel, onSend }: ChatPanelProps) {
   const suggestionPack = getSuggestions(agentRole)
   const defaultSuggestions = suggestionPack.empty
   const followUpPrompts = suggestionPack.followUps
@@ -290,16 +294,18 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     if (!text || isStreaming) return
     await ensureSession()
     sendMessage(text)
+    onSend?.(sessionId, text)
     setInput("")
     composer.clearDraft(sessionId)
     composer.clearAttachments(sessionId)
-  }, [isStreaming, sendMessage, ensureSession, composer, sessionId])
+  }, [isStreaming, sendMessage, ensureSession, composer, sessionId, onSend])
 
   const handleSuggestionClick = useCallback(async (suggestion: string) => {
     if (isStreaming) return
     await ensureSession()
     sendMessage(suggestion)
-  }, [isStreaming, sendMessage, ensureSession])
+    onSend?.(sessionId, suggestion)
+  }, [isStreaming, sendMessage, ensureSession, sessionId, onSend])
 
   const handleCopy = useCallback((content: string) => {
     navigator.clipboard.writeText(content).catch(() => {})

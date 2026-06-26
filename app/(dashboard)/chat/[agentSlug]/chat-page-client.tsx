@@ -216,6 +216,24 @@ export function ChatPageClient() {
     if (agent && !sessionId && !creatingSession && sessionsLoaded) void ensureSession()
   }, [agent, sessionId, creatingSession, sessionsLoaded, ensureSession])
 
+  // When a message is sent, optimistically title the (possibly brand-new)
+  // session in the sidebar so its name shows immediately — no manual refresh.
+  // Mirrors the server's auto-title (first message, truncated to 60 runes) and
+  // only fills an empty title, leaving an already-titled session untouched. Also
+  // bumps message_count so a freshly-created 0-message row isn't hidden by the
+  // empty-session filter.
+  const handleSessionSend = useCallback((sid: string, text: string) => {
+    const runes = Array.from(text)
+    const autoTitle = runes.length > 60 ? runes.slice(0, 57).join("") + "…" : text
+    setSessions((prev) =>
+      prev.map((s) =>
+        s.id === sid
+          ? { ...s, title: s.title ?? autoTitle, message_count: Math.max(s.message_count, 1) }
+          : s,
+      ),
+    )
+  }, [])
+
   // Owner-restricted: delete this agent. Confirmed via native confirm
   // (a richer Dialog variant lands later). On success the user is sent
   // back to the canvas, where the agent is no longer in the list.
@@ -401,6 +419,7 @@ export function ChatPageClient() {
               agentName={agent.name}
               agentSlug={agent.slug}
               sessionOrigin={sessions.find((s) => s.id === sessionId)?.origin ?? null}
+              onSend={handleSessionSend}
             />
           ) : (
             <div className="h-full grid place-items-center text-xs text-muted-foreground">
