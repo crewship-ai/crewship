@@ -24,7 +24,7 @@ import {
   type PromptInputMessage,
 } from "@/components/ai-elements/prompt-input"
 import { Suggestion, Suggestions } from "@/components/ai-elements/suggestion"
-import { useChat } from "@/hooks/use-chat"
+import { useChat, type HistoryPart } from "@/hooks/use-chat"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useDrawerStore } from "@/stores/drawer-store"
 
@@ -138,43 +138,63 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
   useEffect(() => {
     if (!sessionId) return
     let cancelled = false
-    apiFetch(`/api/v1/chats/${sessionId}/messages`)
-      .then(async (r) => {
-        // 404 means the chat row doesn't exist yet — it's a brand-new
-        // session. Don't mark it ready; ensureSession() must still run
-        // on first send to create the chat row.
-        if (r.status === 404) {
-          return { exists: false, messages: [] as { id: string; role: string; content: string; ts: string }[] }
-        }
-        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+
+    type HistoryMessage = {
+      id: string
+      role: string
+      content: string
+      parts?: HistoryPart[]
+      ts: string
+    }
+
+    // Fetch history with a couple of retries on transient failures. The old
+    // code called loadHistory([]) on ANY error, which blanked a conversation
+    // that actually had messages whenever a single fetch hiccupped. We now
+    // retry with backoff and, if it still fails, LEAVE the existing turns in
+    // place rather than wiping them — a network blip must never look like an
+    // empty chat. A genuine 404 (brand-new session) is not an error.
+    const fetchOnce = async (): Promise<{ exists: boolean; messages: HistoryMessage[] } | "retry"> => {
+      try {
+        const r = await apiFetch(`/api/v1/chats/${sessionId}/messages`)
+        if (r.status === 404) return { exists: false, messages: [] }
+        if (!r.ok) return "retry"
         const data = await r.json()
-        return {
-          exists: true,
-          messages: (data?.messages ?? []) as { id: string; role: string; content: string; ts: string }[],
-        }
-      })
-      .then(({ exists, messages }) => {
-        if (cancelled) return
-        setSessionReady(exists)
-        // Always replace — including with [] for an empty (newly created)
-        // session — so the visible turns swap atomically from old session
-        // → new session with no blank gap in between.
-        loadHistory(messages.map((m) => ({
-          id: m.id,
-          role: m.role as "user" | "assistant" | "system" | "tool",
-          content: m.content,
-          timestamp: new Date(m.ts),
-        })))
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setSessionReady(false)
-          loadHistory([])
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setHistoryLoading(false)
-      })
+        return { exists: true, messages: (data?.messages ?? []) as HistoryMessage[] }
+      } catch {
+        return "retry"
+      }
+    }
+
+    const run = async () => {
+      let result: { exists: boolean; messages: HistoryMessage[] } | "retry" = "retry"
+      for (let attempt = 0; attempt < 3 && !cancelled; attempt++) {
+        if (attempt > 0) await new Promise((res) => setTimeout(res, 300 * attempt))
+        result = await fetchOnce()
+        if (result !== "retry") break
+      }
+      if (cancelled) return
+
+      if (result === "retry") {
+        // All attempts failed — do NOT wipe; only stop the loading spinner.
+        setHistoryLoading(false)
+        return
+      }
+
+      const { exists, messages } = result
+      setSessionReady(exists)
+      // Replace atomically — including with [] for an empty (newly created)
+      // session — so visible turns swap cleanly between sessions.
+      loadHistory(messages.map((m) => ({
+        id: m.id,
+        role: m.role as "user" | "assistant" | "system" | "tool",
+        content: m.content,
+        parts: m.parts,
+        timestamp: new Date(m.ts),
+      })))
+      setHistoryLoading(false)
+    }
+
+    void run()
     return () => { cancelled = true }
   }, [sessionId, loadHistory])
 

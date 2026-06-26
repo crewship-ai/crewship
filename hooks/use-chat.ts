@@ -104,6 +104,18 @@ export function assignmentField(v: unknown): string {
   return String(v)
 }
 
+/** One structured segment of a persisted assistant turn, as returned by the
+ *  history API (`conversation.Part` on the Go side). The same canonical schema
+ *  the live WebSocket stream carries, so reloaded turns render identically to
+ *  streamed ones. */
+export interface HistoryPart {
+  type: TurnPartType | string
+  content: string
+  tool_name?: string
+  tool_id?: string
+  metadata?: Record<string, unknown>
+}
+
 /** @deprecated Legacy flat chat message; use ChatTurn/TurnPart for new code. Kept for history loading compatibility. */
 export interface ChatMessage {
   id: string
@@ -111,10 +123,27 @@ export interface ChatMessage {
   content: string
   toolName?: string
   eventType?: StreamEventType
+  /** Structured parts from the history API. When present, the assistant turn
+   *  is rebuilt from these (faithful reload of thinking + tools + text). When
+   *  absent (legacy messages), a single text part is synthesized from content. */
+  parts?: HistoryPart[]
   timestamp: Date
   isStreaming?: boolean
   metadata?: Record<string, unknown>
 }
+
+/** TurnPartTypes that the renderer knows how to display. Unknown/transport
+ *  types coming from history are coerced to "text" so a stray value never
+ *  renders as a raw label row. */
+const RENDERABLE_PART_TYPES: ReadonlySet<string> = new Set<TurnPartType>([
+  "text",
+  "thinking",
+  "tool_call",
+  "tool_result",
+  "error",
+  "result",
+  "image",
+])
 
 interface UseChatOptions {
   wsUrl: string
@@ -127,8 +156,25 @@ interface UseChatOptions {
   sessionId: string
 }
 
+/** Map a structured history part to a renderable TurnPart, coercing unknown
+ *  types to "text" and folding tool_name/tool_id into metadata so the tool
+ *  cards can read them the same way they do for live events. */
+function historyPartToTurnPart(part: HistoryPart, id: string, timestamp: Date): TurnPart {
+  const type: TurnPartType = RENDERABLE_PART_TYPES.has(part.type) ? (part.type as TurnPartType) : "text"
+  const metadata: Record<string, unknown> = { ...(part.metadata ?? {}) }
+  if (part.tool_name !== undefined) metadata.tool_name = part.tool_name
+  if (part.tool_id !== undefined) metadata.tool_id = part.tool_id
+  return {
+    id,
+    type,
+    content: part.content,
+    metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
+    timestamp,
+  }
+}
+
 /** Convert flat ChatMessage history into turns for display */
-function messagesToTurns(messages: ChatMessage[]): ChatTurn[] {
+export function messagesToTurns(messages: ChatMessage[]): ChatTurn[] {
   const turns: ChatTurn[] = []
   for (const msg of messages) {
     if (msg.role === "user") {
@@ -144,6 +190,18 @@ function messagesToTurns(messages: ChatMessage[]): ChatTurn[] {
         id: msg.id,
         role: "system",
         parts: [{ id: msg.id, type: msg.eventType === "error" ? "error" : "text", content: msg.content, timestamp: msg.timestamp }],
+        isStreaming: false,
+        timestamp: msg.timestamp,
+      })
+    } else if (msg.parts && msg.parts.length > 0) {
+      // Modern message: rebuild the turn from its structured parts so the
+      // reload renders thinking + tools + interleaved text exactly as streamed.
+      // Each persisted assistant message already carries its full ordered
+      // parts, so it is one complete turn (no consecutive-message grouping).
+      turns.push({
+        id: msg.id,
+        role: "assistant",
+        parts: msg.parts.map((p, i) => historyPartToTurnPart(p, `${msg.id}-${i}`, msg.timestamp)),
         isStreaming: false,
         timestamp: msg.timestamp,
       })
