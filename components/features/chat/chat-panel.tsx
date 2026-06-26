@@ -136,7 +136,11 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
   })
 
   useEffect(() => {
-    if (!sessionId) return
+    // workspaceId is REQUIRED by GET /chats/{id}/messages — without it the
+    // endpoint 400s ("workspace_id is required") and history silently stays
+    // empty. useWorkspace() resolves asynchronously, so wait for it (the effect
+    // re-runs when workspaceId arrives) rather than firing a doomed request.
+    if (!sessionId || !workspaceId) return
     let cancelled = false
 
     type HistoryMessage = {
@@ -155,7 +159,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     // empty chat. A genuine 404 (brand-new session) is not an error.
     const fetchOnce = async (): Promise<{ exists: boolean; messages: HistoryMessage[] } | "retry"> => {
       try {
-        const r = await apiFetch(`/api/v1/chats/${sessionId}/messages`)
+        const r = await apiFetch(`/api/v1/chats/${sessionId}/messages?workspace_id=${encodeURIComponent(workspaceId)}`)
         if (r.status === 404) return { exists: false, messages: [] }
         if (!r.ok) return "retry"
         const data = await r.json()
@@ -196,7 +200,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
 
     void run()
     return () => { cancelled = true }
-  }, [sessionId, loadHistory])
+  }, [sessionId, workspaceId, loadHistory])
 
   const ensureSession = useCallback(async () => {
     if (sessionReady || !workspaceId || !sessionId) return
