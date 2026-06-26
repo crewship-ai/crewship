@@ -304,9 +304,17 @@ func (h *AssignmentHandler) runAssignment(
 	// truth for "run started" post Phase J. trace_id == runID groups
 	// every entry the assignment will produce.
 	runID := generateCUID()
+	// body.MissionID is set only for mission (issue) dispatches — the mission
+	// engine threads ms.ID through DispatchRequest.MissionID. For a lead's
+	// `curl localhost:9119/assign` chat run it is empty. Setting it on the
+	// run-scoped entries lets a client fetch the issue's full run timeline via
+	// `GET /api/v1/journal?mission_id={missionID}`. Empty is safe: nullable()
+	// persists NULL so the missions FK is never tripped on a chat-only run.
+	missionID := body.MissionID
 	if _, err := h.journal.Emit(ctx, journal.Entry{
 		WorkspaceID: body.WorkspaceID,
 		AgentID:     target.ID,
+		MissionID:   missionID,
 		Type:        journal.EntryRunStarted,
 		Severity:    journal.SeverityInfo,
 		ActorType:   journal.ActorOrchestrator,
@@ -331,6 +339,11 @@ func (h *AssignmentHandler) runAssignment(
 	if runID != "" {
 		ctx = journal.WithRunID(ctx, runID)
 	}
+	// Likewise stamp the mission id so downstream run-scoped emits inherit
+	// mission_id and join the issue's timeline. No-op when missionID == "".
+	if missionID != "" {
+		ctx = journal.WithMission(ctx, missionID)
+	}
 
 	// Mark assignment as RUNNING
 	if _, err := h.db.ExecContext(ctx,
@@ -341,13 +354,16 @@ func (h *AssignmentHandler) runAssignment(
 	// kick-off. Without this the gap between "created" and the first
 	// exec.command can be seconds-to-minutes (image pull, container
 	// boot) and the user has no signal that work is actually happening.
-	// As with assignment.created above, omit MissionID to avoid the FK
-	// failure when body.ChatID is a chat session that has no missions
-	// row. trace_id ties the entry back to the run; chat_id lives in
-	// payload + refs.
+	// MissionID is the real mission id for an issue dispatch (or "" for a
+	// chat-only run, in which case nullable() stores NULL and the missions
+	// FK is not tripped). Note: this differs from assignment.created above,
+	// which keys off body.ChatID (a chat-session id with no guaranteed
+	// missions row) and so must omit MissionID. trace_id ties the entry
+	// back to the run; chat_id lives in payload + refs.
 	if _, jerr := h.journal.Emit(ctx, journal.Entry{
 		WorkspaceID: body.WorkspaceID,
 		AgentID:     target.ID,
+		MissionID:   missionID,
 		Type:        journal.EntryAssignmentRun,
 		Severity:    journal.SeverityInfo,
 		ActorType:   journal.ActorOrchestrator,
