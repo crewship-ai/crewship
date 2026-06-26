@@ -240,6 +240,102 @@ func TestHandleChatMessageAutoTriggersProvisioning(t *testing.T) {
 	}
 }
 
+// cacheCheckContainer is a container provider that also implements the
+// imagePresenceChecker capability the auto-provision gate uses to detect a
+// pruned cached image. It embeds failContainer so EnsureCrewRuntime (and the
+// rest of the ContainerProvider surface) behave like the existing fake — the
+// gate fires before EnsureCrewRuntime, so the present-image path stops there.
+type cacheCheckContainer struct {
+	failContainer
+	present bool
+	presErr error
+}
+
+func (c *cacheCheckContainer) ImagePresentLocally(_ context.Context, _ string) (bool, error) {
+	return c.present, c.presErr
+}
+
+func cacheMissingInfo(cachedImage string) *ChatInfo {
+	return &ChatInfo{
+		AgentID:            "a1",
+		AgentSlug:          "alice",
+		CrewID:             "crew-1",
+		CrewSlug:           "engineering",
+		WorkspaceID:        "ws-1",
+		CLIAdapter:         "CLAUDE_CODE",
+		ToolProfile:        "CODING",
+		TimeoutSecs:        30,
+		DevcontainerConfig: `{"image":"x","features":{"ghcr.io/devcontainers/features/go:1":{}}}`,
+		CachedImage:        cachedImage,
+	}
+}
+
+// A crew with a recorded cached image that's been pruned from the local Docker
+// daemon must re-provision rather than letting the run path ImagePull the dead
+// crewship-cache:* tag. The gate detects absence via ImagePresentLocally and
+// routes into the same EnqueueForCrew path used for never-built crews.
+func TestHandleChatMessage_ReprovisionsWhenCachedImageMissing(t *testing.T) {
+	t.Parallel()
+	resolver := &mockResolver{info: cacheMissingInfo("crewship-cache:deadbeef")}
+	b := testBridgeWithContainer(t, resolver, &cacheCheckContainer{present: false})
+	enq := &stubEnqueuer{resStarted: true}
+	b.SetProvisioningEnqueuer(enq)
+
+	var events []ws.ChatEvent
+	streamFn := func(e ws.ChatEvent) { events = append(events, e) }
+
+	err := b.HandleChatMessage(context.Background(), "user-1", "sess-1", "hello", streamFn)
+	if err == nil || !strings.Contains(err.Error(), "provisioning kicked off") {
+		t.Fatalf("err = %v, want 'provisioning kicked off'", err)
+	}
+	if !enq.called {
+		t.Fatal("expected EnqueueForCrew when cached image missing locally")
+	}
+	if enq.gotCrewID != "crew-1" || enq.gotWsID != "ws-1" {
+		t.Errorf("enqueue args: crew=%q ws=%q", enq.gotCrewID, enq.gotWsID)
+	}
+	var sawProvisioning bool
+	for _, e := range events {
+		if e.Type == "crew_provisioning" {
+			sawProvisioning = true
+		}
+		if e.Type == "error" {
+			t.Errorf("re-provision path must not emit a red error event; got: %+v", e)
+		}
+	}
+	if !sawProvisioning {
+		t.Errorf("expected crew_provisioning event, got: %+v", events)
+	}
+}
+
+// The mirror case: the cached image is still present locally, so the gate must
+// NOT re-provision — it falls through to the normal container-ensure path
+// (which here fails via the embedded failContainer, proving we got past the
+// gate without enqueueing a build).
+func TestHandleChatMessage_NoReprovisionWhenCachedImagePresent(t *testing.T) {
+	t.Parallel()
+	resolver := &mockResolver{info: cacheMissingInfo("crewship-cache:0d08da4b8ac3")}
+	b := testBridgeWithContainer(t, resolver, &cacheCheckContainer{present: true})
+	enq := &stubEnqueuer{resStarted: true}
+	b.SetProvisioningEnqueuer(enq)
+
+	var events []ws.ChatEvent
+	streamFn := func(e ws.ChatEvent) { events = append(events, e) }
+
+	err := b.HandleChatMessage(context.Background(), "user-1", "sess-1", "hello", streamFn)
+	if enq.called {
+		t.Fatal("must NOT re-provision when cached image is present locally")
+	}
+	if err == nil || !strings.Contains(err.Error(), "ensure team runtime") {
+		t.Fatalf("err = %v, want fall-through to container ensure ('ensure team runtime')", err)
+	}
+	for _, e := range events {
+		if e.Type == "crew_provisioning" {
+			t.Errorf("must not emit crew_provisioning when image present: %+v", e)
+		}
+	}
+}
+
 // Resolver returning info but with no container provider configured and no
 // container ID must surface the "container provider not configured" error
 // after the user message has been persisted.
