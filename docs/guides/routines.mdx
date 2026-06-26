@@ -375,6 +375,12 @@ The signing secret is shown **once**. To rotate it: delete the webhook + create 
 
 `crewship routine run <slug> --inputs '{...}'` or click the Run button in the UI detail panel. Same execution path.
 
+After you click **Run** or **Test run** in the UI, a live **Run activity** rail appears inline in the detail panel showing the just-started run step by step (started → each step → completed/failed) — so status is visible immediately without switching to the Runs tab. Full run history stays in the **Runs** tab; see the [Activity](/guides/activity#run-activity-rail) guide for the rail, and the toolbar Activity Bar for a workspace-wide "what's running now" view.
+
+<Note>
+**Test run** in the detail panel runs the routine's current definition as a draft against the execution tier (the same draft endpoint the save gate uses), so it requires an **author crew**. For routines without one, the button is disabled with a tooltip — use **Run** instead. (Run / Dry run address the saved routine by slug and have no such requirement.)
+</Note>
+
 ## Dry-run preview
 
 Three execution modes, distinguished by `Mode` in the request body and surface:
