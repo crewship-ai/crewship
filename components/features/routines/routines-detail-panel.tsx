@@ -269,20 +269,26 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
             )}
             {busyAction === "run" ? "Running…" : "Run"}
           </Button>
-          <Button
-            variant="outline"
-            onClick={() => triggerAction("test_run")}
-            disabled={!!busyAction || !routine || !canTestRun(routine)}
-            className="h-9 gap-2 rounded-md px-4 text-sm"
+          {/* Wrap in a span so the explanatory tooltip still shows when the
+              button is disabled — disabled buttons swallow hover events. */}
+          <span
             title={
               canTestRun(routine)
                 ? "Run the draft definition on the execution tier; logs result without persisting state"
                 : "Test run needs an author crew — only available for crew-authored routines"
             }
+            className="inline-flex"
           >
-            <FlaskConical className="h-3.5 w-3.5" />
-            {busyAction === "test_run" ? "Testing…" : "Test run"}
-          </Button>
+            <Button
+              variant="outline"
+              onClick={() => triggerAction("test_run")}
+              disabled={!!busyAction || !routine || !canTestRun(routine)}
+              className="h-9 gap-2 rounded-md px-4 text-sm"
+            >
+              <FlaskConical className="h-3.5 w-3.5" />
+              {busyAction === "test_run" ? "Testing…" : "Test run"}
+            </Button>
+          </span>
           <Button
             variant="outline"
             onClick={() => triggerAction("dry_run")}

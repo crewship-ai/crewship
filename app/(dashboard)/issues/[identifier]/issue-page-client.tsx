@@ -653,6 +653,7 @@ export function IssuePageClient() {
               // section visible even before the first entry lands so there's
               // immediate "run starting…" feedback. Un-started issues stay clean.
               hideWhenEmpty={issue.status === "BACKLOG" || issue.status === "TODO"}
+              forceRunning={issue.status === "IN_PROGRESS"}
             />
 
             {/* ---- Activity section (issue lifecycle: assignee/status/etc.) ---- */}

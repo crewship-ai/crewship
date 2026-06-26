@@ -39,6 +39,10 @@ describe("formatDuration", () => {
     expect(formatDuration(undefined)).toBeNull()
     expect(formatDuration(-5)).toBeNull()
   })
+  it("spills rounding into the minute form — never 60.0s or 1m 60s", () => {
+    expect(formatDuration(59_960)).toBe("1m 0s")
+    expect(formatDuration(119_600)).toBe("2m 0s")
+  })
 })
 
 describe("humanizeEntry", () => {
@@ -162,5 +166,14 @@ describe("humanizeRun", () => {
       entry({ entry_type: "file.written", ts: "2026-06-26T10:31:08Z", payload: { path: "/a" } }),
     ])
     expect(rows.map((r) => r.title)).toEqual(["Run started", "Wrote file", "Completed"])
+  })
+
+  it("orders by parsed time across mixed RFC3339 precision", () => {
+    const rows = humanizeRun([
+      entry({ entry_type: "run.completed", ts: "2026-06-26T10:31:09.500Z", payload: { cost_usd: 0.002 } }),
+      entry({ entry_type: "exec.command", ts: "2026-06-26T10:31:09Z", payload: { command: "x" } }),
+    ])
+    // 09Z precedes 09.5Z, even though a raw string sort would flip them.
+    expect(rows.map((r) => r.title)).toEqual(["Ran command", "Completed"])
   })
 })

@@ -79,9 +79,13 @@ export function formatBytes(n: number | undefined): string | null {
 export function formatDuration(ms: number | undefined): string | null {
   if (ms === undefined || !Number.isFinite(ms) || ms < 0) return null
   if (ms < 1000) return `${Math.round(ms)}ms`
-  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`
-  const mins = Math.floor(ms / 60_000)
-  const secs = Math.round((ms % 60_000) / 1000)
+  // One-decimal seconds, but if rounding reaches 60.0 spill into the minute
+  // form so we never render "60.0s" or (below) "1m 60s".
+  const oneDecimalSec = Math.round(ms / 100) / 10
+  if (oneDecimalSec < 60) return `${oneDecimalSec.toFixed(1)}s`
+  const totalSec = Math.round(ms / 1000)
+  const mins = Math.floor(totalSec / 60)
+  const secs = totalSec % 60
   return `${mins}m ${secs}s`
 }
 
@@ -319,7 +323,15 @@ export function humanizeRun(entries: JournalEntry[]): RunActivityRow[] {
   return entries
     .map(humanizeEntry)
     .filter((r): r is RunActivityRow => r !== null)
-    .sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0))
+    .sort((a, b) => {
+      // Sort by parsed time so mixed RFC3339 shapes (…09Z vs …09.5Z) don't
+      // scramble order within the same second. Fall back to string compare
+      // only when a timestamp is unparseable.
+      const ta = Date.parse(a.ts)
+      const tb = Date.parse(b.ts)
+      if (Number.isFinite(ta) && Number.isFinite(tb) && ta !== tb) return ta - tb
+      return a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0
+    })
 }
 
 // ---- tiny helpers ----------------------------------------------------------

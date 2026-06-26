@@ -235,7 +235,7 @@ The full `/activity` canvas answers "what's happening" in depth; the **Activity 
 
 Click it for a dropdown of everything executing right now — both **agent runs** (an issue's `Start`, an assignment) and **routine runs** — each row showing the agent name or routine slug, a pulsing "running" dot, and how long it's been going. Clicking a row jumps to the relevant surface; the footer link opens the full `/activity` canvas.
 
-The bar is realtime-first: it seeds from `GET /api/v1/runs?status=RUNNING` (agent runs) and `GET /api/v1/workspaces/{ws}/pipelines/runs/active` (routine runs) on load, then adds rows on `run.started` / `pipeline.run.started` and removes them on the terminal events. Nothing in flight → the badge disappears and the dropdown reads "Nothing running right now". It's purely a launcher into detail — no actions live here.
+The server is the source of truth: the bar fetches `GET /api/v1/runs?status=RUNNING` (agent runs) and `GET /api/v1/workspaces/{ws}/pipelines/runs/active` (routine runs) on load and re-fetches on a short poll, with every relevant lifecycle event (`assignment.updated`, `run.*`, `mission.updated`, `pipeline.run.*`, `pipeline.step.started`) triggering an immediate refetch — so a dropped frame can't leave the badge stale. Nothing in flight → the badge disappears and the dropdown reads "Nothing running right now". It's purely a launcher into detail — no actions live here.
 
 ## Run activity rail
 

@@ -67,6 +67,12 @@ interface RunActivityTimelineProps {
   title?: string
   /** Hide the whole section when there's nothing to show (default true). */
   hideWhenEmpty?: boolean
+  /**
+   * Treat the run as in-flight even before its first journal row lands (e.g.
+   * an issue is IN_PROGRESS but the container is still booting). Drives the
+   * "waiting for the first step…" empty state instead of "no activity".
+   */
+  forceRunning?: boolean
   className?: string
 }
 
@@ -76,6 +82,7 @@ export function RunActivityTimeline({
   live = true,
   title = "Run activity",
   hideWhenEmpty = true,
+  forceRunning = false,
   className,
 }: RunActivityTimelineProps) {
   const hasFilter = Object.values(params).some((v) => !!v)
@@ -107,7 +114,10 @@ export function RunActivityTimeline({
   useJournalStream({ workspaceId, params: stableParams, enabled: enabled && live, onEntry })
 
   const rows = useMemo(() => humanizeRun(entries), [entries])
-  const running = useMemo(() => isRunInFlight(entries.map((e) => e.entry_type)), [entries])
+  const detectedRunning = useMemo(() => isRunInFlight(entries.map((e) => e.entry_type)), [entries])
+  // Before the first row lands, fall back to the caller's hint so the empty
+  // state reads "waiting…" rather than "no activity recorded".
+  const running = detectedRunning || (forceRunning && entries.length === 0)
 
   if (!enabled) return null
   if (hideWhenEmpty && !loading && rows.length === 0 && !running) return null

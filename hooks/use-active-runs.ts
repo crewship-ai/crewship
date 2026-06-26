@@ -52,6 +52,10 @@ export function useActiveRuns(workspaceId: string | null | undefined) {
   const [loading, setLoading] = useState(false)
   const inFlight = useRef(false)
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // The workspace a result must still be for to be applied. Guards against an
+  // in-flight fetch for workspace A resolving after the user switched to B and
+  // briefly painting A's runs into B's bar.
+  const activeWs = useRef(workspaceId)
 
   const fetchActive = useCallback(async () => {
     if (!workspaceId || inFlight.current) return
@@ -106,6 +110,8 @@ export function useActiveRuns(workspaceId: string | null | undefined) {
       }
 
       next.sort((a, b) => (b.startedAt ?? "").localeCompare(a.startedAt ?? ""))
+      // Drop the result if the workspace changed while we were fetching.
+      if (activeWs.current !== workspaceId) return
       setRuns(next)
     } finally {
       inFlight.current = false
@@ -124,9 +130,15 @@ export function useActiveRuns(workspaceId: string | null | undefined) {
   // Initial load + steady safety poll.
   useEffect(() => {
     if (!workspaceId) {
+      activeWs.current = null
       setRuns([])
       return
     }
+    // Re-scope to this workspace and clear any prior run list + in-flight
+    // guard so the new workspace's first fetch isn't blocked or polluted.
+    activeWs.current = workspaceId
+    inFlight.current = false
+    setRuns([])
     void fetchActive()
     const t = setInterval(() => void fetchActive(), POLL_MS)
     return () => {

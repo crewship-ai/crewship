@@ -133,9 +133,10 @@ function relTime(iso?: string) {
   if (Number.isNaN(d.getTime())) return ""
   const diff = Date.now() - d.getTime()
   if (Math.abs(diff) < 60_000) return "just now"
-  const mins = Math.round(Math.abs(diff) / 60_000)
+  // Floor so a run never reads "1h ago" at 59.5 min — labels stay monotonic.
+  const mins = Math.floor(Math.abs(diff) / 60_000)
   if (mins < 60) return `${mins}m ago`
-  const hrs = Math.round(mins / 60)
+  const hrs = Math.floor(mins / 60)
   if (hrs < 24) return `${hrs}h ago`
-  return `${Math.round(hrs / 24)}d ago`
+  return `${Math.floor(hrs / 24)}d ago`
 }
