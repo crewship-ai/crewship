@@ -33,26 +33,28 @@ The inbox is a **projection**, not a queue. The authoritative state lives on the
 
 ## States
 
-The lifecycle is intentionally minimal: **unread → read → resolved**. No archive, no flag, no snooze — anything that needs reminding stays unread until you act on it. This matches Linear's triage UX; the v85 migration comment explicitly calls out that we considered and rejected the extra states.
+The lifecycle is **unread → read → resolved**, surfaced through three tabs with **Gmail-style** semantics: opening a row marks it read but **keeps it in your inbox** — it only leaves when you **Archive** it.
 
 ```
-unread ──(click row)──> read ──(action button)──> resolved
-   │                                                  ▲
-   └──────────────── "Mark unread" ───────────────────┘
+unread ──(click row)──> read ──(Archive / action)──> resolved
+   │                                                     ▲
+   └──────────────── "Mark unread" / "Restore" ──────────┘
 ```
 
-- Reading a row is a side-effect of opening it (`patch(id, "read")` fires on click).
-- Resolving requires a kind-specific action: Approve, Deny, Retry, Cancel, Mark resolved, Dismiss. The chosen action is stored on `resolved_action` so the audit trail shows the *shape* of the decision, not just that someone closed it.
-- "Mark unread" flips the row back. The bell count and sidebar badge both react.
+- **Inbox** (default tab) shows everything that isn't archived — unread *and* read. Clicking a row marks it read in place; it does **not** disappear. This is the fix for "I clicked a message, clicked away, and lost it."
+- **Unread** is a filter, not the default. **Archived** is the resolved bucket.
+- **Archive** is the Gmail move: clear a row from the inbox without recording a decision. It maps to `resolved` with `resolved_action="archived"`, shows an **Undo** toast, and is restorable from the Archived tab (or with `crewship inbox unread <id>`). Archive is offered only on non-decision rows (messages, failed-run notices, advisories) — a waitpoint/escalation is source-managed and needs an explicit Approve/Deny/Resolve.
+- Resolving via an action button (Approve, Deny, Retry, Cancel, Dismiss) stores the shape on `resolved_action` so the audit trail shows *what* you decided, not just that you closed it.
+- "Mark unread" flips a row back; "Restore" un-archives. The bell count and sidebar badge both react.
 
 ## The /inbox page
 
-A two-pane Linear-Triage layout:
+A two-pane layout:
 
 | Pane | Purpose |
 |------|---------|
-| Left list (420 px) | Item rows ordered newest-first. Three filter tabs at the top — **Unread**, **All**, **Resolved** — with live counts. Unread rows show a blue dot, a kind icon, the title, sender, and a relative timestamp. |
-| Right detail | Full title and body, sender, payload (collapsed JSON), kind-specific action buttons, and — for waitpoints — a `WaitpointRunDetail` block that fetches the underlying `pipeline_run` + DSL so you can see which step is paused and what each preceding step produced. |
+| Left list (420 px) | Item rows ordered newest-first. Three tabs at the top — **Inbox**, **Unread**, **Archived**. Each row shows a **sender avatar** (agent / crew / routine / system, coloured per sender), an unread dot, the title, the kind, sender, and a relative timestamp. A **Group** control buckets the list by **Smart** (Decisions needed → Needs review → FYI), Type, Sender, Routine, Issue, or Crew. |
+| Right detail | Sender avatar + name + role, a **rendered-markdown body** (headings, lists, code — not a raw blob), a humanised **Context** card (key/value, not raw JSON, with credential-looking values masked behind a reveal toggle), kind-specific action buttons, an **Archive** button on non-decision rows, and — for waitpoints — a `WaitpointRunDetail` block showing which step is paused. |
 
 The detail panel's action row is what the source-of-truth call hangs off:
 
@@ -61,7 +63,16 @@ The detail panel's action row is what the source-of-truth call hangs off:
 - **Escalations** show **Mark resolved** only — the actual decision is recorded by the escalation handler, the inbox just acknowledges you saw it.
 - **Messages** with an `issue_identifier` in payload show **Open &lt;identifier&gt;** as a direct link into `/issues/&lt;id&gt;`.
 
-When a row is resolved, the detail panel dims, the action row replaces itself with a "Resolved Xm ago · approved" line, and the row still appears in the **All** and **Resolved** filter tabs.
+When a row is resolved, the detail panel dims, the action row replaces itself with a "Resolved Xm ago · approved" line (or "Archived Xm ago · Restore" for archived rows), and the row moves to the **Archived** tab.
+
+## Readability & safety
+
+The inbox is the one surface that aggregates messages from every agent, routine, and curator — so it's also where raw machine output and leaked secrets would otherwise pile up. Several guards keep it human-readable and safe:
+
+- **Sender avatars.** Every row and the detail header render a coloured avatar keyed on `sender_type` (agent / crew / pipeline / system) so an agent message is visually distinct from a routine failure at a glance.
+- **Rendered bodies, not blobs.** `body_md` is rendered as markdown (`MarkdownContent`), and the `payload` is shown as a humanised key/value **Context** card instead of a raw `JSON.stringify` dump.
+- **Sanitised advisories.** Curator routines (skill review, memory health) used to paste the gatekeeper's internal decision text — e.g. `Keeper LLM unavailable: paymaster: workspace_id required — deny by default` — straight into the body. `inbox.SanitizeReason` now swaps that for a friendly line and keeps the raw text in `payload.raw_reason` for operators. When the cause is an infrastructure outage (curator LLM down), a **pure advisory is suppressed entirely** rather than written once per crew per sweep — this killed the recurring "Memory health advisory" flood.
+- **Secret redaction.** `inbox.RedactSecrets` masks credential material (connection strings, `password=…`, bearer tokens, high-entropy blobs) before it reaches `body_md`, so an agent escalation that quotes a generated `redis://:…@…` URL never broadcasts the secret to every MANAGER. CREDENTIAL-type escalations additionally lead with an explicit "secret handled in the credential flow" note. The source-of-truth row (escalations / credentials table) still holds the real value behind its own ACL; the UI also masks any remaining secret-looking Context values behind a reveal toggle.
 
 ## Realtime
 
@@ -86,8 +97,9 @@ The Inbox has full CLI parity — everything the web surface exposes is scriptab
 |---------|--------------|
 | `crewship inbox list` | Show unread items (default). `--state all\|read\|resolved`, `--kind waitpoint\|escalation\|failed_run\|message`, `--limit`, `--format json\|yaml\|quiet`. |
 | `crewship inbox read <id>` | Mark an item as read. |
-| `crewship inbox unread <id>` | Flip back to unread. |
+| `crewship inbox unread <id>` | Flip back to unread (also the way to **restore** an archived item). |
 | `crewship inbox resolve <id>` | Mark resolved. Optional `--action approved\|denied\|retried\|cancelled\|acknowledged\|dismissed` to record the decision shape. |
+| `crewship inbox archive <id>` | Gmail-style archive — clear a non-decision item from the inbox without a decision (resolve with `action=archived`). Restore with `crewship inbox unread <id>`. |
 
 Examples:
 

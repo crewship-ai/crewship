@@ -209,6 +209,39 @@ Examples:
 	},
 }
 
+// inboxArchiveCmd is the CLI mirror of the web "Archive" action — the
+// Gmail-style "get it out of my inbox without making a decision" move.
+// It's resolve with a dedicated resolved_action ("archived") so the
+// audit trail distinguishes an archive from an explicit approve/dismiss,
+// and the web Archived tab (state=resolved) picks it up. Restore with
+// `crewship inbox unread <id>`.
+//
+// Only non-decision kinds archive: a waitpoint/escalation is source-
+// managed (the server 409s a resolved PATCH for those), so this is for
+// messages, failed-run notices, and advisories.
+var inboxArchiveCmd = &cobra.Command{
+	Use:   "archive <id>",
+	Short: "Archive an inbox item (clear it from the inbox without a decision)",
+	Long: `Archive an inbox item — move it out of the active inbox into the
+Archived view without recording an approve/deny/dismiss decision. This
+is the CLI counterpart of the web Archive button.
+
+Archiving maps to resolve with action=archived. Restore an archived
+item with 'crewship inbox unread <id>'.
+
+Only non-decision items can be archived (messages, failed-run notices,
+advisories). Waitpoints and escalations are source-managed — resolve
+those through their decision flow instead.
+
+Examples:
+  crewship inbox archive <id>
+  crewship inbox unread <id>     # restore an archived item`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return patchInboxState(args[0], "resolved", "archived")
+	},
+}
+
 // patchInboxState issues a PATCH to /api/v1/inbox/{id} with the new
 // state + optional resolved_action. Shared by all three transition
 // subcommands so the request shape stays in one place.
@@ -443,6 +476,7 @@ func init() {
 	inboxCmd.AddCommand(inboxReadCmd)
 	inboxCmd.AddCommand(inboxUnreadCmd)
 	inboxCmd.AddCommand(inboxResolveCmd)
+	inboxCmd.AddCommand(inboxArchiveCmd)
 	inboxCmd.AddCommand(inboxCountCmd)
 	inboxCmd.AddCommand(inboxBulkCmd)
 }
