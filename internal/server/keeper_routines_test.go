@@ -108,3 +108,91 @@ func TestCR_SkillRoutine_NoAssignment_NoOp(t *testing.T) {
 		t.Errorf("inbox rows = %d, want 0 for orphan skill", rows)
 	}
 }
+
+// TestCR_SkillRoutine_SanitizesInfraError pins that a curator LLM outage
+// never leaks its raw "Keeper LLM unavailable: paymaster…" plumbing into
+// the inbox body. The skill still needs review, so the row is kept — but
+// the body is the friendly fallback and the raw text is tucked into
+// payload.raw_reason for operators/logs.
+func TestCR_SkillRoutine_SanitizesInfraError(t *testing.T) {
+	db := krDB(t)
+	mustExec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := db.Exec(q, args...); err != nil {
+			t.Fatalf("exec %q: %v", q, err)
+		}
+	}
+	mustExec(`INSERT INTO workspaces (id, name, slug) VALUES ('ws1','WS1','ws1')`)
+	mustExec(`INSERT INTO crews (id, workspace_id, name, slug) VALUES ('cr1','ws1','C1','c1')`)
+	mustExec(`INSERT INTO agents (id, crew_id, workspace_id, name, slug) VALUES ('a1','cr1','ws1','A1','a1')`)
+	mustExec(`INSERT INTO skills (id, name, slug, display_name) VALUES ('sk1','do','do','Do')`)
+	mustExec(`INSERT INTO agent_skills (agent_id, skill_id, enabled) VALUES ('a1','sk1',1)`)
+
+	leak := "Curator unavailable or returned unparseable response — operator review (underlying: Keeper LLM unavailable: paymaster: workspace_id required — deny by default)"
+	pers := &sqlSkillPersister{db: db, logger: krLogger()}
+	if err := pers.WriteInboxItem(context.Background(), "sk1", leak, false); err != nil {
+		t.Fatalf("WriteInboxItem: %v", err)
+	}
+
+	var body, payload string
+	if err := db.QueryRow(
+		`SELECT COALESCE(body_md,''), payload_json FROM inbox_items WHERE source_id = 'skill_review_sk1_ws1'`,
+	).Scan(&body, &payload); err != nil {
+		t.Fatalf("select: %v", err)
+	}
+	for _, leaked := range []string{"paymaster", "deny by default", "LLM", "underlying:"} {
+		if containsStr(body, leaked) {
+			t.Errorf("inbox body leaks %q: %q", leaked, body)
+		}
+	}
+	if !containsStr(payload, "raw_reason") {
+		t.Errorf("payload missing raw_reason for operators: %q", payload)
+	}
+}
+
+// TestCR_MemoryHealthAdvisory_InfraSuppressed pins the inbox-flooding fix:
+// when the memory-health evaluator's reason is an infrastructure outage
+// (curator LLM down), the advisory carries nothing actionable and is
+// SUPPRESSED — no inbox row. A real finding still lands, with a clean body.
+func TestCR_MemoryHealthAdvisory_InfraSuppressed(t *testing.T) {
+	db := krDB(t)
+	if _, err := db.Exec(`INSERT INTO workspaces (id, name, slug) VALUES ('ws1','WS1','ws1')`); err != nil {
+		t.Fatal(err)
+	}
+	pers := &sqlMemoryHealthPersister{db: db, logger: krLogger()}
+
+	// Infra outage → suppressed, zero rows.
+	leak := "MemoryHealth Curator unavailable or unparseable — operator review (underlying: Keeper LLM unavailable: paymaster: workspace_id required — deny by default)"
+	if err := pers.WriteInboxItem(context.Background(), "ws1", "crewA", leak, false); err != nil {
+		t.Fatalf("WriteInboxItem(infra): %v", err)
+	}
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM inbox_items`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Errorf("infra advisory wrote %d rows, want 0 (should be suppressed)", n)
+	}
+
+	// Real finding → one row, clean body.
+	real := "Crew memory has 4 contradictions in deployment runbook entries."
+	if err := pers.WriteInboxItem(context.Background(), "ws1", "crewB", real, false); err != nil {
+		t.Fatalf("WriteInboxItem(real): %v", err)
+	}
+	var body string
+	if err := db.QueryRow(`SELECT COALESCE(body_md,'') FROM inbox_items`).Scan(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body != real {
+		t.Errorf("real-finding body = %q, want %q", body, real)
+	}
+}
+
+func containsStr(s, sub string) bool {
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return len(sub) == 0
+}

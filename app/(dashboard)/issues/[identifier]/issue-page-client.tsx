@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { useParams, useRouter } from "next/navigation"
+import { useRouter } from "next/navigation"
 import {
   ArrowLeft,
   Check,
@@ -15,6 +15,7 @@ import {
 } from "lucide-react"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useSession } from "@/hooks/use-auth"
+import { useUrlSegment } from "@/lib/use-url-segment"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 import { MarkdownContent } from "@/components/features/issues/markdown-content"
@@ -52,14 +53,18 @@ function isMac(): boolean {
   return platform.includes("Mac")
 }
 
+// Issue identifier read from the URL, not useParams() — see useUrlSegment
+// for the static-export "_" placeholder bug this avoids. Module-scope so
+// the regex reference stays stable across renders.
+const ISSUE_PATH_RE = /^\/issues\/([^/]+)\/?$/
+
 // ---------------------------------------------------------------------------
 // Main page component
 // ---------------------------------------------------------------------------
 
 export function IssuePageClient() {
-  const params = useParams()
   const router = useRouter()
-  const identifier = params.identifier as string
+  const identifier = useUrlSegment(ISSUE_PATH_RE)
   const { workspaceId, loading: wsLoading } = useWorkspace()
   const { data: session } = useSession()
 
@@ -113,7 +118,7 @@ export function IssuePageClient() {
   // -----------------------------------------------------------------------
 
   const fetchIssue = useCallback(async () => {
-    if (!workspaceId) return
+    if (!workspaceId || !identifier) return
     try {
       const res = await fetch(
         `/api/v1/issues/${encodeURIComponent(identifier)}?workspace_id=${encodeURIComponent(workspaceId)}`,

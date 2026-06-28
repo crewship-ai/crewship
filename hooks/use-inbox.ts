@@ -40,7 +40,9 @@ interface InboxListResponse {
   unread_count: number
 }
 
-type StateFilter = "unread" | "read" | "resolved" | "all"
+// "active" = everything not archived (unread + read), resolved excluded
+// server-side — the Inbox tab's filter.
+type StateFilter = "unread" | "read" | "resolved" | "all" | "active"
 
 /**
  * Query keys follow the [resource, workspaceId, scope/params] convention
@@ -148,7 +150,12 @@ export function useInbox(workspaceId: string | null | undefined, stateFilter?: S
       qc.setQueryData<InboxListResponse>(listKey, (prev) => {
         if (!prev) return prev
         const before = prev.rows?.find((it) => it.id === id)
-        const matchesFilter = stateParam === "all" || stateParam === state
+        // "active" keeps the row for any non-resolved transition (unread→
+        // read stays in the Inbox view); exact filters match on the value.
+        const matchesFilter =
+          stateParam === "all" ||
+          stateParam === state ||
+          (stateParam === "active" && state !== "resolved")
         const rows = matchesFilter
           ? (prev.rows ?? []).map((it) =>
               it.id === id

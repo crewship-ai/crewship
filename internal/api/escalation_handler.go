@@ -132,22 +132,35 @@ func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) 
 	// unified Inbox without a fan-out query at read time. Best-effort:
 	// failure here is logged + swallowed; the escalations table stays
 	// the source of truth and a future inbox-rebuild job can backfill.
+	// The inbox row is a projection broadcast to every MANAGER in the
+	// workspace; the escalations table (access-controlled) stays the
+	// source of truth for the real value. So redact any credential
+	// material an agent put in reason/context before it lands in body_md.
+	// For CREDENTIAL escalations, lead with an explicit note that the
+	// secret is handled in the credential flow, not shown here.
+	inboxBody := inbox.RedactSecrets(body.Context)
+	if escalationType == "CREDENTIAL" {
+		inboxBody = "🔒 A credential is being requested — the secret is handled in the credential flow and is not shown here.\n\n" + inboxBody
+	}
 	inbox.Insert(r.Context(), h.db, h.logger, inbox.Item{
 		WorkspaceID: body.WorkspaceID,
 		Kind:        "escalation",
 		SourceID:    escalationID,
 		TargetRole:  "MANAGER",
-		Title:       fmt.Sprintf("Agent escalation: %s", truncate(body.Reason, 80)),
-		BodyMD:      body.Context,
-		SenderType:  "agent",
-		SenderID:    fromAgentID,
-		SenderName:  body.FromSlug,
-		Priority:    "high",
-		Blocking:    true,
+		// Redact BEFORE truncating: a secret whose closing delimiter falls
+		// past the 80-char cut would otherwise be a partial, unmatched
+		// (= unredacted) prefix in the title.
+		Title:      fmt.Sprintf("Agent escalation: %s", truncate(inbox.RedactSecrets(body.Reason), 80)),
+		BodyMD:     inboxBody,
+		SenderType: "agent",
+		SenderID:   fromAgentID,
+		SenderName: body.FromSlug,
+		Priority:   "high",
+		Blocking:   true,
 		Payload: map[string]interface{}{
 			"crew_id":         body.CrewID,
 			"chat_id":         body.ChatID,
-			"reason":          body.Reason,
+			"reason":          inbox.RedactSecrets(body.Reason),
 			"escalation_type": escalationType,
 		},
 	})
