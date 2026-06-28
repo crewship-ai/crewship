@@ -44,7 +44,7 @@ The active workspace is stored in `~/.crewship/cli-config.yaml` under `workspace
 | --- | --- | --- |
 | `--name <string>` | (required) | Display name. |
 | `--slug <string>` | (auto) | URL slug. Auto-generated from `--name` if omitted. |
-| `--language <code>` | (server default) | Preferred language (e.g. `cs`, `en`). Influences UI defaults. |
+| `--language <code>` | (server default) | Preferred reply language for agents (e.g. `cs`, `en`). Reinforced at the top and bottom of every agent prompt — including chat sessions, assignments, and pipelines — so the agent answers in this language. |
 
 ### `workspace update`
 
@@ -54,7 +54,7 @@ Only flags you actually set are sent — passing nothing returns `no fields to u
 | --- | --- |
 | `--name <string>` | Rename the workspace. |
 | `--slug <string>` | Change the slug (URLs flip immediately). |
-| `--language <code>` | Update preferred language. |
+| `--language <code>` | Preferred reply language for agents (e.g. `cs`, `en`). Reinforced at the top and bottom of every agent prompt — including chat sessions, assignments, and pipelines — so the agent answers in this language. |
 
 ### `workspace member add`
 
