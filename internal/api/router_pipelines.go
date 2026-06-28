@@ -76,6 +76,13 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipeline-runs", authed(wsCtx(http.HandlerFunc(pipes.ListWorkspaceRuns))))
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}", authed(wsCtx(http.HandlerFunc(pipes.GetRun))))
 	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/runs/{runId}/cancel", authed(wsCtx(http.HandlerFunc(pipes.CancelRun))))
+	// Observability (trigger.dev-informed): replay a failed run with its
+	// original inputs, bulk-replay a fingerprint group, and list failures
+	// bucketed by fingerprint. errors/bulk_replay are registered before
+	// the {runId} replay so the literal segments win net/http matching.
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/runs/errors", authed(wsCtx(http.HandlerFunc(pipes.ListErrorGroups))))
+	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/runs/bulk_replay", authed(wsCtx(http.HandlerFunc(pipes.BulkReplayRuns))))
+	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/runs/{runId}/replay", authed(wsCtx(http.HandlerFunc(pipes.ReplayRun))))
 	// Pipeline webhooks — event-driven trigger surface alongside
 	// cron schedules. CRUD requires auth; the public dispatch
 	// endpoint authenticates via the token + optional HMAC instead.

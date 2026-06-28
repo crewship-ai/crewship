@@ -35,6 +35,11 @@ type runRequestBody struct {
 	// "manual" when empty.
 	TriggeredVia  string `json:"triggered_via,omitempty"`
 	TriggeredByID string `json:"triggered_by_id,omitempty"`
+	// Tags label the run for filtering/grouping (trigger.dev parity);
+	// Metadata is a JSON scratchpad stored on the run and exposed to
+	// steps. Both optional.
+	Tags     []string       `json:"tags,omitempty"`
+	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
 // Run invokes a saved pipeline by slug.
@@ -132,6 +137,8 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 		TierOverride:    tierOverride,
 		TriggeredVia:    triggeredVia,
 		TriggeredByID:   body.TriggeredByID,
+		Tags:            body.Tags,
+		MetadataJSON:    marshalMetadata(body.Metadata),
 	})
 	if err != nil {
 		// Concurrency rejection is a normal 429, not an internal

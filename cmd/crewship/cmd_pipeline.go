@@ -380,11 +380,23 @@ var pipelineRunCmd = &cobra.Command{
 		}
 
 		tierOverride, _ := cmd.Flags().GetString("tier-override")
+		tags, _ := cmd.Flags().GetStringSlice("tag")
+		metadataRaw, _ := cmd.Flags().GetString("metadata")
 		client := newAPIClient()
 		ws := client.GetWorkspaceID()
 		runBody := map[string]any{"inputs": inputs}
 		if tierOverride != "" {
 			runBody["tier_override"] = tierOverride
+		}
+		if len(tags) > 0 {
+			runBody["tags"] = tags
+		}
+		if metadataRaw != "" {
+			var metadata map[string]any
+			if err := json.Unmarshal([]byte(metadataRaw), &metadata); err != nil {
+				return fmt.Errorf("parse --metadata JSON: %w", err)
+			}
+			runBody["metadata"] = metadata
 		}
 		// Synchronous run — blocks on the agent (and grader loop); lift the
 		// per-call timeout above the 30s default.
@@ -683,6 +695,8 @@ func init() {
 	pipelineRunCmd.Flags().String("inputs", "", "JSON inputs for the run (e.g. '{\"since\":\"yesterday\"}')")
 	pipelineRunCmd.Flags().String("invoking-crew", "", "crew_id to record as the invoker (cross-crew reuse audit)")
 	pipelineRunCmd.Flags().String("tier-override", "", "force every agent_run step onto a tier (trivial|fast|moderate|smart). Step-level model_override still wins. Empty = use authored complexity.")
+	pipelineRunCmd.Flags().StringSlice("tag", nil, "attach tag(s) to the run for filtering/grouping (repeatable; max 10)")
+	pipelineRunCmd.Flags().String("metadata", "", "JSON object stored on the run + exposed to steps (e.g. '{\"source\":\"manual\"}')")
 
 	pipelineDryRunCmd.Flags().String("inputs", "", "JSON inputs for the dry-run preview")
 

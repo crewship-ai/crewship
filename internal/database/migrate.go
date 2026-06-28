@@ -1467,6 +1467,13 @@ END;
 	// credentials.approved_by_user_id / approved_at record the human who activated it.
 	// All additive. See migrate_consts_v119_credential_approval.go.
 	{version: 119, name: "credential_approval", sql: migrationCredentialApproval},
+
+	// v120: routine-run observability (trigger.dev-informed). Additive
+	// columns on pipeline_runs (metadata_json, is_replay, replay_of) plus a
+	// run_tags join table for tag filtering. error_fingerprint (v83) is
+	// reused for bulk-replay grouping. See
+	// migrate_consts_v120_routine_run_observability.go.
+	{version: 120, name: "routine_run_observability", sql: migrationRoutineRunObservability},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

@@ -548,8 +548,19 @@ type RunInput struct {
 	// the projection accurately reflects the trigger.
 	TriggeredVia  TriggeredVia
 	TriggeredByID string
-	pipeline      *Pipeline
-	dsl           *DSL
+	// Tags are workspace-scoped labels attached to the run for
+	// filtering/grouping (trigger.dev parity). Persisted to run_tags.
+	Tags []string
+	// MetadataJSON is a JSON object stored on the run and exposed to
+	// steps as {{ run.metadata.X }}. Empty defaults to "{}".
+	MetadataJSON string
+	// IsReplay + ReplayOf mark a run created by replaying a prior run.
+	// IsReplay surfaces as {{ run.is_replay }} so steps can skip side
+	// effects on replay; ReplayOf records the source run id.
+	IsReplay bool
+	ReplayOf string
+	pipeline *Pipeline
+	dsl      *DSL
 
 	// resume marks this input as a boot-time re-entry of a run from a
 	// previous process lifetime (W6 resume-from-step). Set only by
@@ -658,6 +669,10 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (result *
 		"invoking_agent_id": in.InvokingAgentID,
 		"run_id":            runID,
 		"pipeline_slug":     pipelineSlug,
+		// Replay signal: a step can `if: "{{ env.is_replay }}"` to skip
+		// side effects when this run is a replay of a prior failure.
+		"is_replay": boolToEnvStr(in.IsReplay),
+		"replay_of": in.ReplayOf,
 	}
 
 	inputsForCtx := mergeInputs(in.Inputs, dsl)
@@ -1348,6 +1363,9 @@ func (e *Executor) persistRunStart(ctx context.Context, in RunInput, runID, pipe
 		InputsJSON:      string(inputsRaw),
 		TriggeredVia:    in.TriggeredVia,
 		TriggeredByID:   in.TriggeredByID,
+		MetadataJSON:    in.MetadataJSON,
+		IsReplay:        in.IsReplay,
+		ReplayOf:        in.ReplayOf,
 	}
 	if in.pipeline != nil {
 		// Stamp the definition content hash AS OF run start so the
@@ -1361,6 +1379,11 @@ func (e *Executor) persistRunStart(ctx context.Context, in RunInput, runID, pipe
 	}
 	if err := e.runStore.Insert(ctx, rec); err != nil {
 		e.persistWarn("run start", runID, err)
+	}
+	if len(in.Tags) > 0 {
+		if err := e.runStore.SetTags(ctx, in.WorkspaceID, runID, in.Tags); err != nil {
+			e.persistWarn("run tags", runID, err)
+		}
 	}
 }
 

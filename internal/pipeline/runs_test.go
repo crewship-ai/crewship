@@ -54,8 +54,17 @@ CREATE TABLE pipeline_runs (
     idempotency_key     TEXT,
     inputs_json         TEXT NOT NULL DEFAULT '{}',
     concurrency_key     TEXT,
+    metadata_json       TEXT NOT NULL DEFAULT '{}',
+    is_replay           INTEGER NOT NULL DEFAULT 0,
+    replay_of           TEXT,
     created_at          TEXT NOT NULL DEFAULT (datetime('now','subsec')),
     updated_at          TEXT NOT NULL DEFAULT (datetime('now','subsec'))
+);
+CREATE TABLE IF NOT EXISTS run_tags (
+    run_id       TEXT NOT NULL,
+    workspace_id TEXT NOT NULL,
+    tag          TEXT NOT NULL,
+    PRIMARY KEY (run_id, tag)
 );`); err != nil {
 		t.Fatalf("schema: %v", err)
 	}

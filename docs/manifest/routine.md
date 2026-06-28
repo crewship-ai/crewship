@@ -107,8 +107,8 @@ spec:
     - id: hello
       type: code
       code:
-        runtime: bash
-        code: "echo hi"
+        runtime: cel          # wired, token-zero (expr | cel only; bash/python/go are rejected)
+        code: '"hi"'
 ```
 
 ### Realistic — Discord hourly sync with cron + webhook
@@ -135,13 +135,16 @@ spec:
       description: Comma-separated channel ids, or "all" to pull every channel.
 
   steps:
+    # Shell work runs via an agent with shell-tool access — `type: code`
+    # only wires the token-zero expr/cel runtimes (bash/python/go are
+    # rejected at author time; see "Code steps" below).
     - id: pull
-      type: code
-      code:
-        runtime: bash
-        code: |
-          dce sync --channels "{{ inputs.channels }}" --json > /tmp/raw.json
-          cat /tmp/raw.json
+      type: agent_run
+      agent_slug: trapper             # MUST be a member of crew "uo-outlands"
+      prompt: |
+        Run exactly one shell command and return its raw JSON stdout:
+
+            dce sync --channels "{{ inputs.channels }}" --json
       timeout_seconds: 120
 
     - id: summarize
@@ -495,3 +498,57 @@ are reconciled at the next boot scan rather than live.)
   `spec:` (everything except `schedules` + `webhook`). Use with VSCode
   / JetBrains autocomplete: add `"$schema":
   "./schemas/routine.v1.json"` to a standalone `routine.json` file.
+
+## Run observability: tags, metadata, replay, errors
+
+Runs carry trigger.dev-style observability surface for filtering and
+post-failure recovery.
+
+### Tags + metadata at invoke
+
+```
+crewship routine run cost-spike-probe \
+  --tag prod --tag billing \
+  --metadata '{"source":"manual","ticket":"OPS-42"}'
+```
+
+- **Tags** — workspace-scoped labels (max 10/run, lowercased). Surfaced
+  on the run detail; group related runs (incl. replays, which inherit
+  the source run's tags).
+- **Metadata** — a JSON object stored on the run and returned by
+  `GET /pipeline-runs/{id}`. Set at invoke today; mid-run mutation +
+  `{{ run.metadata.X }}` templating is a follow-up.
+
+### Replay a failed run
+
+```
+crewship routine replay <run_id>
+```
+
+Re-invokes the routine with the run's **captured inputs**. The new run
+is stamped `is_replay=true` + `replay_of=<run_id>`; a step can skip side
+effects on replay by gating on `{{ env.is_replay }}`:
+
+```yaml
+steps:
+  - id: notify
+    if: "{{ env.is_replay }}"   # only on replays — or invert to skip on replay
+    type: agent_run
+    ...
+```
+
+### Errors view + bulk replay
+
+Failed runs are bucketed by a stable **error fingerprint** (failing step
++ normalized message), so like failures group together:
+
+```
+crewship routine errors                       # list fingerprint groups
+crewship routine bulk-replay --fingerprint <fp>   # replay the whole group after a fix
+```
+
+| Endpoint | CLI |
+|---|---|
+| `POST /pipelines/runs/{runId}/replay` | `routine replay <run_id>` |
+| `GET /pipelines/runs/errors` | `routine errors` |
+| `POST /pipelines/runs/bulk_replay` | `routine bulk-replay --fingerprint <fp>` |
