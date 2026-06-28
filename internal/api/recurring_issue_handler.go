@@ -353,18 +353,12 @@ func (h *RecurringIssueHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	riID := r.PathValue("recurringId")
 	wsID := WorkspaceIDFromContext(r.Context())
 
-	res, err := h.db.ExecContext(r.Context(),
-		`DELETE FROM recurring_issues WHERE id = ? AND workspace_id = ?`, riID, wsID)
+	found, err := deleteByID(r.Context(), h.db, "recurring_issues", riID, wsID)
 	if err != nil {
 		internalError(w, r, h.logger, "delete recurring issue", err)
 		return
 	}
-	affected, err := res.RowsAffected()
-	if err != nil {
-		internalError(w, r, h.logger, "delete recurring issue rows affected", err)
-		return
-	}
-	if affected == 0 {
+	if !found {
 		writeProblem(w, r, http.StatusNotFound, "Recurring issue not found")
 		return
 	}
