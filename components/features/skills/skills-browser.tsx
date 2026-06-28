@@ -7,13 +7,39 @@ import { create as createOrama, insertMultiple, search as oramaSearch } from "@o
 import type { AnyOrama } from "@orama/orama"
 import { VirtuosoGrid } from "react-virtuoso"
 import {
-  Search, Sparkles, Plus, X, ChevronDown, ChevronRight,
-  Package, RefreshCw, ShieldCheck, BadgeCheck, Lock, AlertTriangle, Loader2,
-  Library, CheckSquare, PanelLeftClose, PanelLeftOpen, Users,
-  Code2, Database, Cloud, PenLine, Microscope, ListChecks,
-  Palette, LifeBuoy, Shield, DollarSign, Settings, Workflow,
-  HandCoins, Box,
+  Search,
+  Sparkles,
+  Plus,
+  X,
+  ChevronDown,
+  ChevronRight,
+  Package,
+  RefreshCw,
+  ShieldCheck,
+  BadgeCheck,
+  Lock,
+  AlertTriangle,
+  Library,
+  CheckSquare,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Users,
+  Code2,
+  Database,
+  Cloud,
+  PenLine,
+  Microscope,
+  ListChecks,
+  Palette,
+  LifeBuoy,
+  Shield,
+  DollarSign,
+  Settings,
+  Workflow,
+  HandCoins,
+  Box,
 } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { Input } from "@/components/ui/input"
@@ -653,7 +679,7 @@ export function SkillsBrowser() {
           <div className="flex-1 min-h-0 overflow-hidden">
             {loading ? (
               <div className="flex h-full items-center justify-center text-white/45 text-sm">
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                <Spinner className="h-4 w-4 mr-2" />
                 Loading skills…
               </div>
             ) : error ? (

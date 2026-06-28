@@ -1,7 +1,8 @@
 "use client"
 
 import { useState } from "react"
-import { Plus, Check, KeyRound, Loader2, Type, ExternalLink } from "lucide-react"
+import { Plus, Check, KeyRound, Type, ExternalLink } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Button } from "@/components/ui/button"
@@ -226,7 +227,7 @@ export function CredentialPicker({
       <PopoverContent align="start" className="w-72 p-0">
         {credLoading ? (
           <div className="flex items-center justify-center py-6">
-            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+            <Spinner className="h-4 w-4 text-muted-foreground" />
           </div>
         ) : mode === "create" ? (
           <div className="p-3 space-y-3">
@@ -261,7 +262,7 @@ export function CredentialPicker({
                 disabled={creating || !createName.trim() || !createValue.trim()}
                 onClick={handleCreate}
               >
-                {creating && <Loader2 className="h-3 w-3 animate-spin" />}
+                {creating && <Spinner className="h-3 w-3" />}
                 Save
               </Button>
               <Button

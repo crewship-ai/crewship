@@ -12,7 +12,8 @@
  * as control messages. See `internal/terminal/handler.go`.
  */
 import { useEffect, useRef, useState } from "react"
-import { Loader2, RefreshCw, TerminalSquare, WifiOff } from "lucide-react"
+import { RefreshCw, TerminalSquare, WifiOff } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { useTerminal, type TerminalStatus } from "@/hooks/use-terminal"
 import { cn } from "@/lib/utils"
 import "@xterm/xterm/css/xterm.css"
@@ -25,7 +26,7 @@ interface BottomPanelTerminalProps {
 }
 
 function StatusDot({ status }: { status: TerminalStatus }) {
-  if (status === "connecting") return <Loader2 className="h-3 w-3 animate-spin text-amber-400" />
+  if (status === "connecting") return <Spinner className="h-3 w-3 text-amber-400" />
   if (status === "connected") return <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 inline-block" />
   if (status === "error") return <WifiOff className="h-3 w-3 text-red-400" />
   return <span className="h-1.5 w-1.5 rounded-full bg-zinc-500 inline-block" />

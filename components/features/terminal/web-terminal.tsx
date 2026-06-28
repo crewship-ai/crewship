@@ -10,7 +10,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { TerminalSquare, Maximize2, Minimize2, X, Loader2, WifiOff } from "lucide-react"
+import { TerminalSquare, Maximize2, Minimize2, X, WifiOff } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import "@xterm/xterm/css/xterm.css"
 
 interface Agent {
@@ -31,7 +32,7 @@ interface WebTerminalProps {
 function StatusIndicator({ status }: { status: TerminalStatus }) {
   switch (status) {
     case "connecting":
-      return <Loader2 className="h-3.5 w-3.5 animate-spin text-yellow-400" />
+      return <Spinner className="h-3.5 w-3.5 text-yellow-400" />
     case "connected":
       return <span className="h-2 w-2 rounded-full bg-emerald-400 inline-block" />
     case "error":

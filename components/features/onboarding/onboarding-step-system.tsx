@@ -2,13 +2,13 @@
 
 import { useEffect } from "react"
 import {
-  Loader2,
   Container,
   RefreshCw,
   ExternalLink,
   AlertTriangle,
   CheckCircle2,
 } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 
 const RUNTIME_LABELS: Record<string, string> = {
@@ -57,7 +57,7 @@ export function StepSystemCheck({
       >
         {checking && (
           <div className="flex items-center gap-3">
-            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            <Spinner className="h-5 w-5 text-muted-foreground" />
             <span className="text-sm">Detecting container runtime...</span>
           </div>
         )}

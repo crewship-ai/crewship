@@ -4,11 +4,11 @@ import * as React from "react"
 import {
   Globe,
   Terminal,
-  Loader2,
   Search,
   BadgeCheck,
   Plus,
 } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import {
   Dialog,
   DialogContent,
@@ -331,7 +331,7 @@ export function RegistryBrowser({
                     onClick={() => handleAdd(server)}
                   >
                     {addingId === server.id ? (
-                      <Loader2 className="h-3 w-3 animate-spin" />
+                      <Spinner className="h-3 w-3" />
                     ) : (
                       <>
                         <Plus className="mr-1 h-3 w-3" />
@@ -360,7 +360,7 @@ export function RegistryBrowser({
           {/* Loading spinner */}
           {loading && (
             <div className="flex items-center justify-center py-8">
-              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+              <Spinner className="h-5 w-5 text-muted-foreground" />
             </div>
           )}
         </div>

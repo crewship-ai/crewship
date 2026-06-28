@@ -1,7 +1,8 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { Loader2, ScrollText } from "lucide-react"
+import { ScrollText } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { useUserPreference } from "@/hooks/use-user-preference"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { usePipelines } from "@/hooks/use-pipelines"
@@ -190,7 +191,7 @@ export function RunTimelineRail({
       <div className="min-h-0 flex-1 overflow-y-auto">
         {loading && runs.length === 0 ? (
           <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
-            <Loader2 className="mr-2 h-3 w-3 animate-spin" /> Loading runs…
+            <Spinner className="mr-2 h-3 w-3" /> Loading runs…
           </div>
         ) : error ? (
           <div className="p-3 text-xs text-rose-300">Runs unavailable: {error}</div>

@@ -1,7 +1,8 @@
 "use client"
 
 import { useState } from "react"
-import { Check, Loader2, Pencil, Plus, Trash2, X } from "lucide-react"
+import { Check, Pencil, Plus, Trash2, X } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import {
   Dialog,
   DialogContent,
@@ -204,7 +205,7 @@ export function LabelsDialog({
               disabled={creating || !newName.trim()}
             >
               {creating ? (
-                <Loader2 className="h-3 w-3 animate-spin" />
+                <Spinner className="h-3 w-3" />
               ) : (
                 <Plus className="h-3 w-3" />
               )}
@@ -266,7 +267,7 @@ export function LabelsDialog({
                     aria-label="Save changes"
                   >
                     {saving ? (
-                      <Loader2 className="h-3 w-3 animate-spin" />
+                      <Spinner className="h-3 w-3" />
                     ) : (
                       <Check className="h-3 w-3" />
                     )}
@@ -326,7 +327,7 @@ export function LabelsDialog({
                         aria-label={`Confirm delete ${label.name}`}
                       >
                         {deletingId === label.id ? (
-                          <Loader2 className="h-3 w-3 animate-spin" />
+                          <Spinner className="h-3 w-3" />
                         ) : (
                           "Delete"
                         )}

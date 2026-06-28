@@ -6,6 +6,7 @@ import { toast } from "sonner"
 import {
   AlertTriangle, Check, Circle, Loader2, Package, Play, RotateCcw,
 } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { useProvisioningStatus } from "@/hooks/use-provisioning-status"
 
@@ -176,7 +177,7 @@ function ProvisioningRow({
         // first progress event, or for older backends that don't emit a
         // plan: a single-line spinner with whatever message we have.
         <div className="ml-4 text-[11px] text-muted-foreground flex items-center gap-2">
-          <Loader2 className="h-3 w-3 animate-spin shrink-0" />
+          <Spinner className="h-3 w-3 shrink-0" />
           <span className="truncate">{crew.message ?? "Building image…"}</span>
           <span className="tabular-nums shrink-0 text-muted-foreground">
             {crew.step ?? 0}/{crew.total}
@@ -219,7 +220,7 @@ function ProvisioningRow({
             } disabled:opacity-50 disabled:cursor-not-allowed`}
           >
             {busy ? (
-              <Loader2 className="h-3 w-3 animate-spin" />
+              <Spinner className="h-3 w-3" />
             ) : crew.status === "failed" ? (
               <RotateCcw className="h-3 w-3" />
             ) : isPendingRestart ? (
@@ -309,7 +310,7 @@ function ProvisioningChecklist({
             {row.state === "done" ? (
               <Check className="h-3 w-3 text-emerald-400" />
             ) : row.state === "active" ? (
-              <Loader2 className="h-3 w-3 animate-spin text-blue-400" />
+              <Spinner className="h-3 w-3 text-blue-400" />
             ) : (
               <Circle className="h-2 w-2 text-muted-foreground-soft" />
             )}
@@ -323,7 +324,7 @@ function ProvisioningChecklist({
 
 
 function ProvisioningStatusDot({ status }: { status: string }) {
-  if (status === "running") return <Loader2 className="h-3 w-3 text-blue-500 animate-spin shrink-0" />
+  if (status === "running") return <Spinner className="h-3 w-3 text-blue-500 shrink-0" />
   if (status === "failed") return <AlertTriangle className="h-3 w-3 text-red-500 shrink-0" />
   // needs_provision
   return <span className="h-2 w-2 rounded-full bg-amber-500 shrink-0" />

@@ -2,7 +2,8 @@
 
 import { useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
-import { Check, ChevronsUpDown, CheckCircle2, Loader2, PlayCircle, XCircle } from "lucide-react"
+import { Check, ChevronsUpDown, CheckCircle2, PlayCircle, XCircle } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -128,7 +129,7 @@ export function BackupSelfTestCard({ workspaceId }: SelfTestCardProps) {
                 >
                   {crewsQuery.isLoading ? (
                     <span className="flex items-center gap-2 text-muted-foreground">
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      <Spinner className="h-3.5 w-3.5" />
                       Loading crews…
                     </span>
                   ) : selectedCrew ? (
@@ -180,7 +181,7 @@ export function BackupSelfTestCard({ workspaceId }: SelfTestCardProps) {
           </div>
           <Button size="sm" disabled={!crewId || test.isPending} onClick={run} className="h-9">
             {test.isPending ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />
+              <Spinner className="h-3.5 w-3.5 mr-1" />
             ) : (
               <PlayCircle className="h-3.5 w-3.5 mr-1" />
             )}

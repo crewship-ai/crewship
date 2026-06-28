@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react"
 import dynamic from "next/dynamic"
-import { Loader2, X } from "lucide-react"
+import { X } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { motion } from "motion/react"
 import { toast } from "sonner"
 
@@ -25,7 +26,7 @@ const FileEditor = dynamic(
     ssr: false,
     loading: () => (
       <div className="flex items-center justify-center h-full">
-        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+        <Spinner className="h-5 w-5 text-muted-foreground" />
       </div>
     ),
   },
@@ -160,7 +161,7 @@ export function ArtifactPane({ agentId, width = 540 }: ArtifactPaneProps) {
         editor={
           loading ? (
             <div className="flex items-center justify-center h-full">
-              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+              <Spinner className="h-5 w-5 text-muted-foreground" />
             </div>
           ) : active && content !== null ? (
             <FileEditor

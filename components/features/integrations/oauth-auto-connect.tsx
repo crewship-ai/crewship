@@ -1,7 +1,8 @@
 "use client"
 
 import * as React from "react"
-import { Check, ExternalLink, Loader2 } from "lucide-react"
+import { Check, ExternalLink } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
@@ -172,7 +173,7 @@ export function OAuthAutoConnect({
         disabled={status === "discovering" || status === "authorizing" || status === "polling"}
       >
         {(status === "discovering" || status === "authorizing") && (
-          <Loader2 className="mr-2 h-3 w-3 animate-spin" />
+          <Spinner className="mr-2 h-3 w-3" />
         )}
         {status === "authorizing" ? "Waiting for authorization..."
           : isMissing || isExpired ? "Reconnect with OAuth"

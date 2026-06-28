@@ -5,12 +5,12 @@ import {
   Box,
   ChevronRight,
   Globe,
-  Loader2,
   Save,
   Search,
   Shield,
   Users,
 } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { motion, AnimatePresence } from "motion/react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
@@ -612,7 +612,7 @@ export function CrewsContainersSection({
                                           }}
                                         >
                                           {savingResources[crew.id] ? (
-                                            <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
+                                            <Spinner className="mr-1.5 h-3 w-3" />
                                           ) : (
                                             <Save className="mr-1.5 h-3 w-3" />
                                           )}
@@ -632,7 +632,7 @@ export function CrewsContainersSection({
                                           }}
                                         >
                                           {savingNetwork[crew.id] ? (
-                                            <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
+                                            <Spinner className="mr-1.5 h-3 w-3" />
                                           ) : (
                                             <Save className="mr-1.5 h-3 w-3" />
                                           )}

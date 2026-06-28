@@ -2,7 +2,8 @@
 
 import { useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
-import { Loader2, Trash2 } from "lucide-react"
+import { Trash2 } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -130,7 +131,7 @@ export function BackupRetentionCard({ workspaceId }: RetentionCardProps) {
             onClick={() => run(true)}
           >
             {rotate.isPending && rotate.variables?.dry_run ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />
+              <Spinner className="h-3.5 w-3.5 mr-1" />
             ) : null}
             Preview rotation
           </Button>
@@ -147,7 +148,7 @@ export function BackupRetentionCard({ workspaceId }: RetentionCardProps) {
             }
           >
             {rotate.isPending && !rotate.variables?.dry_run ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />
+              <Spinner className="h-3.5 w-3.5 mr-1" />
             ) : null}
             Apply
           </Button>

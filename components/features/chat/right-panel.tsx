@@ -7,7 +7,6 @@ import {
   Zap,
   Users,
   Bookmark,
-  Loader2,
   X,
   Save,
   Maximize2,
@@ -15,6 +14,7 @@ import {
   Globe,
   Bot as BotIcon,
 } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 
@@ -42,7 +42,7 @@ interface ChatFileTreeState {
 
 const FileEditor = dynamic(
   () => import("@/components/features/files/file-editor").then((m) => m.FileEditor),
-  { ssr: false, loading: () => <div className="flex items-center justify-center h-full"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div> },
+  { ssr: false, loading: () => <div className="flex items-center justify-center h-full"><Spinner className="h-5 w-5 text-muted-foreground" /></div> },
 )
 
 const RIGHT_PANEL_TABS = [
@@ -287,7 +287,7 @@ export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId,
                     : "bg-[#3c3c3c] text-[#666] cursor-default",
                 )}
               >
-                {editorSaving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
+                {editorSaving ? <Spinner className="h-3 w-3" /> : <Save className="h-3 w-3" />}
                 Save
               </button>
               <button onClick={() => setEditorExpanded(!editorExpanded)} aria-label={editorExpanded ? "Collapse editor" : "Expand editor"} className="p-1 rounded hover:bg-[#3c3c3c] text-[#888]">
@@ -303,7 +303,7 @@ export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId,
           <div className="flex-1 min-h-0 overflow-hidden">
             {editorLoading ? (
               <div className="flex items-center justify-center h-full">
-                <Loader2 className="h-5 w-5 animate-spin text-[#888]" />
+                <Spinner className="h-5 w-5 text-[#888]" />
               </div>
             ) : editorContent !== null ? (
               <FileEditor

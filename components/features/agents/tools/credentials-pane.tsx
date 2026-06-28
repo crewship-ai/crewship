@@ -3,7 +3,8 @@
 import { useAgentId } from "@/hooks/use-agent-id"
 
 import { useState, useEffect, useCallback } from "react"
-import { ShieldCheck, AlertCircle, Inbox, Plus, Trash2, Loader2, RotateCcw } from "lucide-react"
+import { ShieldCheck, AlertCircle, Inbox, Plus, Trash2, RotateCcw } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { SectionCard } from "@/components/ui/section-card"
@@ -172,7 +173,7 @@ export function CredentialsPageClient() {
                     disabled={removingId === c.id}
                   >
                     {removingId === c.id ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <Spinner className="h-4 w-4" />
                     ) : (
                       <Trash2 className="h-4 w-4" />
                     )}

@@ -1,7 +1,8 @@
 "use client"
 
 import { useState, type FormEvent } from "react"
-import { Check, X, ChevronsUpDown, Loader2 } from "lucide-react"
+import { Check, X, ChevronsUpDown } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import {
@@ -150,7 +151,7 @@ export function GeneralSection({
                 className="h-7 px-2.5 text-xs"
                 disabled={saveStatus === "saving"}
               >
-                {saveStatus === "saving" ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> : saveStatus === "success" ? <Check className="mr-1.5 h-3 w-3" /> : null}
+                {saveStatus === "saving" ? <Spinner className="mr-1.5 h-3 w-3" /> : saveStatus === "success" ? <Check className="mr-1.5 h-3 w-3" /> : null}
                 {saveStatus === "saving" ? "Saving…" : saveStatus === "success" ? "Saved" : "Save changes"}
               </Button>
             </div>
@@ -283,7 +284,7 @@ export function GeneralSection({
                     className="h-7 text-xs bg-destructive text-destructive-foreground hover:bg-destructive/90"
                     disabled={isDeleting}
                   >
-                    {isDeleting && <Loader2 className="h-3 w-3 animate-spin mr-1.5" />}
+                    {isDeleting && <Spinner className="h-3 w-3 mr-1.5" />}
                     {isDeleting ? "Deleting…" : "Delete workspace"}
                   </AlertDialogAction>
                 </AlertDialogFooter>

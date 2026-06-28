@@ -1,7 +1,8 @@
 "use client"
 
 import { useAgentDetail } from "@/hooks/use-agent-detail"
-import { Loader2, AlertTriangle, TerminalSquare } from "lucide-react"
+import { AlertTriangle, TerminalSquare } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import dynamic from "next/dynamic"
 import { EmptyState } from "@/components/layout/empty-state"
 
@@ -16,7 +17,7 @@ export function TerminalPageClient() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-[60vh]">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        <Spinner className="h-6 w-6 text-muted-foreground" />
       </div>
     )
   }

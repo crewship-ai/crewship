@@ -7,12 +7,12 @@ import {
   Check,
   ChevronRight,
   Link2,
-  Loader2,
   MessageSquare,
   Pencil,
   Send,
   X,
 } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useSession } from "@/hooks/use-auth"
 import { useUrlSegment } from "@/lib/use-url-segment"
@@ -492,7 +492,7 @@ export function IssuePageClient() {
                     aria-label="Save title"
                   >
                     {saving ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <Spinner className="h-4 w-4" />
                     ) : (
                       <Check className="h-4 w-4" />
                     )}
@@ -559,7 +559,7 @@ export function IssuePageClient() {
 
               {loadingComments ? (
                 <div className="flex items-center justify-center py-6">
-                  <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                  <Spinner className="h-4 w-4 text-muted-foreground" />
                 </div>
               ) : comments.length === 0 ? (
                 <p className="text-label text-muted-foreground/50 py-3">
@@ -633,7 +633,7 @@ export function IssuePageClient() {
                       disabled={submittingComment || !newComment.trim()}
                     >
                       {submittingComment ? (
-                        <Loader2 className="h-3 w-3 animate-spin" />
+                        <Spinner className="h-3 w-3" />
                       ) : (
                         <Send className="h-3 w-3" />
                       )}
@@ -663,7 +663,7 @@ export function IssuePageClient() {
             {/* ---- Activity section (issue lifecycle: assignee/status/etc.) ---- */}
             {loadingActivity ? (
               <div className="flex items-center justify-center py-4">
-                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                <Spinner className="h-4 w-4 text-muted-foreground" />
               </div>
             ) : (
               <ActivityFeed activities={activities} />

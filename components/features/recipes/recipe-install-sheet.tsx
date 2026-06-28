@@ -2,7 +2,8 @@
 
 import * as React from "react"
 import { useRouter } from "next/navigation"
-import { Check, ChevronRight, Loader2, Eye, EyeOff } from "lucide-react"
+import { Check, ChevronRight, Eye, EyeOff } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import {
   Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription,
 } from "@/components/ui/sheet"
@@ -114,7 +115,7 @@ export function RecipeInstallSheet({
         <div className="flex-1 px-5 py-4 overflow-y-auto">
           {previewLoading && (
             <div className="flex items-center justify-center py-12">
-              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+              <Spinner className="h-5 w-5 text-muted-foreground" />
             </div>
           )}
 
@@ -175,7 +176,7 @@ export function RecipeInstallSheet({
             disabled={!isStepValid(step, preview, credValues) || submitting}
             className={cn("text-sm px-3.5 py-1.5 rounded bg-blue-500 hover:bg-blue-400 text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5", step === 1 && "ml-auto")}
           >
-            {submitting && <Loader2 className="h-3 w-3 animate-spin" />}
+            {submitting && <Spinner className="h-3 w-3" />}
             {step === 3 ? (submitting ? "Installing..." : "Install") : "Continue"}
             {step < 3 && !submitting && <ChevronRight className="h-3.5 w-3.5" />}
           </button>

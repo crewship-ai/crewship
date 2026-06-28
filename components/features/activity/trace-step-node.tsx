@@ -7,7 +7,6 @@ import {
   Check,
   CircleDot,
   Globe,
-  Loader2,
   PauseCircle,
   ScrollText,
   Sparkles,
@@ -18,6 +17,7 @@ import {
   Zap,
   type LucideIcon,
 } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 import type {
@@ -83,7 +83,7 @@ function StatusPip({ status }: { status: StepStatus }) {
     case "running":
       return (
         <span className="absolute -right-1 -top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-blue-500 ring-2 ring-background">
-          <Loader2 className="h-2 w-2 animate-spin text-white" />
+          <Spinner className="h-2 w-2 text-white" />
         </span>
       )
     case "waiting":
@@ -328,7 +328,7 @@ function WaitpointActions({
         )}
       >
         {busy === "approve" ? (
-          <Loader2 className="h-2.5 w-2.5 animate-spin" />
+          <Spinner className="h-2.5 w-2.5" />
         ) : (
           <ThumbsUp className="h-2.5 w-2.5" />
         )}
@@ -344,7 +344,7 @@ function WaitpointActions({
         )}
       >
         {busy === "deny" ? (
-          <Loader2 className="h-2.5 w-2.5 animate-spin" />
+          <Spinner className="h-2.5 w-2.5" />
         ) : (
           <ThumbsDown className="h-2.5 w-2.5" />
         )}

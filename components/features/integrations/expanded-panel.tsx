@@ -7,13 +7,13 @@ import {
   ExternalLink,
   Globe,
   KeyRound,
-  Loader2,
   Plus,
   Settings2,
   Terminal,
   Trash2,
   Users,
 } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -453,7 +453,7 @@ export function ExpandedPanel({
               </Label>
               {discovering && (
                 <span className="inline-flex items-center gap-1 text-micro text-muted-foreground">
-                  <Loader2 className="h-3 w-3 animate-spin" />
+                  <Spinner className="h-3 w-3" />
                   Checking...
                 </span>
               )}

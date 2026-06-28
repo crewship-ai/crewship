@@ -1,13 +1,13 @@
 "use client"
 
 import {
-  Loader2,
   Users,
   Terminal,
   Shield,
   Cpu,
   Bot,
 } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { CLI_ADAPTERS, getModelLabel, getProviderLabel } from "@/lib/cli-adapters"
 import { useAgentFetch } from "@/hooks/use-agent-fetch"
 
@@ -62,7 +62,7 @@ export function SharedContextTab({ agentId, workspaceId }: SharedContextTabProps
     { enabled: workspaceId !== null, logLabel: "SharedContextTab" },
   )
 
-  if (loading) return <div className="flex items-center justify-center h-full"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+  if (loading) return <div className="flex items-center justify-center h-full"><Spinner className="h-5 w-5 text-muted-foreground" /></div>
   if (!workspaceId) return <div className="p-4 text-label text-muted-foreground">Select a workspace to view context.</div>
   if (!data) return <div className="p-4 text-label text-muted-foreground">Unable to load agent</div>
 

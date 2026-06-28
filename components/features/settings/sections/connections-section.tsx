@@ -2,8 +2,13 @@
 
 import { useCallback, useEffect, useState } from "react"
 import {
-  Link2, Unlink2, ArrowLeftRight, ArrowRight, Loader2, Trash2,
+  Link2,
+  Unlink2,
+  ArrowLeftRight,
+  ArrowRight,
+  Trash2,
 } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { StatusBadge } from "@/components/ui/status-badge"
 import {
@@ -241,7 +246,7 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
             onClick={handleConnect}
           >
             {connecting ? (
-              <Loader2 className="mr-1.5 size-3 animate-spin" />
+              <Spinner className="mr-1.5 size-3" />
             ) : (
               <Link2 className="mr-1.5 size-3" />
             )}
@@ -307,7 +312,7 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
                     className="h-6 w-6 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
                   >
                     {isDisconnecting ? (
-                      <Loader2 className="size-3 animate-spin" />
+                      <Spinner className="size-3" />
                     ) : (
                       <Trash2 className="size-3" />
                     )}

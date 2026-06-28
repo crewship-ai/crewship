@@ -1,7 +1,8 @@
 "use client"
 
 import * as React from "react"
-import { Loader2 } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
+
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -138,7 +139,7 @@ export function AssignCredentialDialog({
               <Label htmlFor="credential">Credential</Label>
               {loadingCreds ? (
                 <div className="flex items-center gap-2 text-body text-muted-foreground">
-                  <Loader2 className="h-4 w-4 animate-spin" /> Loading...
+                  <Spinner className="h-4 w-4" /> Loading...
                 </div>
               ) : credentials.length === 0 ? (
                 <p className="text-body text-muted-foreground">
@@ -214,7 +215,7 @@ export function AssignCredentialDialog({
               Cancel
             </Button>
             <Button type="submit" disabled={loading || !selectedCredentialId || !envVarName.trim()}>
-              {loading && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              {loading && <Spinner className="h-4 w-4 mr-2" />}
               Assign
             </Button>
           </DialogFooter>

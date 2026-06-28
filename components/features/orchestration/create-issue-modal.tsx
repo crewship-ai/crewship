@@ -2,9 +2,18 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import {
-  X, Loader2, Paperclip, ChevronRight, User, Bot, UserX, Check,
-  Tag, FolderKanban, ScrollText,
+  X,
+  Paperclip,
+  ChevronRight,
+  User,
+  Bot,
+  UserX,
+  Check,
+  Tag,
+  FolderKanban,
+  ScrollText,
 } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import type { Pipeline } from "@/hooks/use-pipelines"
 import {
   Dialog,
@@ -495,7 +504,7 @@ export function CreateIssueModal({
               disabled={saving || !title.trim() || !crewId}
               className="h-7 px-3 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:pointer-events-none flex items-center gap-1.5 transition-colors"
             >
-              {saving && <Loader2 className="h-3 w-3 animate-spin" />}
+              {saving && <Spinner className="h-3 w-3" />}
               Create issue
             </button>
           </div>

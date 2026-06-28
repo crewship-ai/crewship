@@ -1,7 +1,8 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { X, Play, FlaskConical, Eye, Square, Loader2 } from "lucide-react"
+import { X, Play, FlaskConical, Eye, Square } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
 import { TabBar } from "@/components/ui/tab-bar"
@@ -263,7 +264,7 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
             title="Invoke routine with empty inputs"
           >
             {busyAction === "run" ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              <Spinner className="h-3.5 w-3.5" />
             ) : (
               <Play className="h-3.5 w-3.5 fill-current" />
             )}

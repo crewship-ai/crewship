@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { Bot, Users, Globe, FileText } from "lucide-react"
-import { Loader2 } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 
 import {
   ChatTreeRow,
@@ -111,7 +111,7 @@ export function ThreeTierFiles({
         count={crewId ? crewFileCount : undefined}
         defaultOpen={false}
         badge={
-          crewLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : null
+          crewLoading ? <Spinner className="h-3 w-3" /> : null
         }
       >
         {!crewId ? (

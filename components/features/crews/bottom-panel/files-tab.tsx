@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import dynamic from "next/dynamic"
-import { ChevronDown, File, Folder, Loader2, Pencil, Save } from "lucide-react"
+import { ChevronDown, File, Folder, Pencil, Save } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 
@@ -329,7 +330,7 @@ export function FilesTab({ workspaceId, context }: { workspaceId: string; contex
                         )}
                       >
                         {saving
-                          ? <Loader2 className="h-3 w-3 animate-spin" />
+                          ? <Spinner className="h-3 w-3" />
                           : <Save className="h-3 w-3" />}
                         Save
                       </button>

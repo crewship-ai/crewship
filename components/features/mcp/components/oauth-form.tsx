@@ -1,7 +1,8 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
-import { Loader2, ExternalLink } from "lucide-react"
+import { ExternalLink } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Button } from "@/components/ui/button"
@@ -437,7 +438,7 @@ export function OAuthForm({
               onClick={handleAuthorize}
             >
               {polling ? (
-                <Loader2 className="h-3 w-3 animate-spin" />
+                <Spinner className="h-3 w-3" />
               ) : (
                 <ExternalLink className="h-3 w-3" />
               )}

@@ -1,7 +1,8 @@
 "use client"
 
 import * as React from "react"
-import { Check, ChevronRight, Loader2 } from "lucide-react"
+import { Check, ChevronRight } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import {
   Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription,
 } from "@/components/ui/sheet"
@@ -182,7 +183,7 @@ export function AddCredentialWizard({ workspaceId, open, onOpenChange, onSuccess
             disabled={!stepValid || state.submitting}
             className="text-sm px-3.5 py-1.5 rounded bg-blue-500 hover:bg-blue-400 text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
           >
-            {state.submitting && <Loader2 className="h-3 w-3 animate-spin" />}
+            {state.submitting && <Spinner className="h-3 w-3" />}
             {state.step === 4 ? (state.submitting ? "Creating…" : "✓ Create credential") : "Continue"}
             {state.step < 4 && !state.submitting && <ChevronRight className="h-3.5 w-3.5" />}
           </button>

@@ -1,7 +1,8 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { Wifi, WifiOff, Loader2 } from "lucide-react"
+import { Wifi, WifiOff } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { useRealtime } from "@/hooks/use-realtime"
 
 /**
@@ -61,7 +62,7 @@ export function RealtimeStatusBanner() {
         </>
       ) : (
         <>
-          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          <Spinner className="h-3.5 w-3.5" />
           Reconnecting...
         </>
       )}

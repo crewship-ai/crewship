@@ -1,7 +1,8 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
-import { ChevronRight, Loader2, CheckCircle2, XCircle, Eye, Play } from "lucide-react"
+import { ChevronRight, CheckCircle2, XCircle, Eye, Play } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { usePipelineRuns } from "@/hooks/use-pipelines"
 import { usePipelineRunRecords, type PipelineRunRecord } from "@/hooks/use-pipeline-run-records"
 import { cn } from "@/lib/utils"
@@ -205,7 +206,7 @@ export function RoutineRunsTab({ workspaceId, slug }: Props) {
 function RunStatusIcon({ status }: { status: "running" | "completed" | "failed" | "unknown" }) {
   if (status === "completed") return <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />
   if (status === "failed") return <XCircle className="h-4 w-4 shrink-0 text-rose-400" />
-  if (status === "running") return <Loader2 className="h-4 w-4 shrink-0 animate-spin text-blue-400" />
+  if (status === "running") return <Spinner className="h-4 w-4 shrink-0 text-blue-400" />
   return <Eye className="h-4 w-4 shrink-0 text-muted-foreground" />
 }
 

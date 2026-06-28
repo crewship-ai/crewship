@@ -10,12 +10,12 @@ import {
   ChevronRight,
   CircleDot,
   Globe,
-  Loader2,
   PauseCircle,
   ScrollText,
   Sparkles,
   Webhook,
 } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { motion, AnimatePresence } from "motion/react"
 import Link from "next/link"
 import { cn } from "@/lib/utils"
@@ -98,7 +98,7 @@ export function RunsView({ workspaceId }: RunsViewProps) {
         <FilterBtn label="Completed" count={counts.completed} active={filter === "completed"} onClick={() => setFilter("completed")} />
         <FilterBtn label="Failed" count={counts.failed} active={filter === "failed"} onClick={() => setFilter("failed")} />
         <div className="flex-1" />
-        {loading && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground/50" />}
+        {loading && <Spinner className="h-3 w-3 text-muted-foreground/50" />}
       </div>
 
       {/* Run list */}

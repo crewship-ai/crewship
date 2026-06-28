@@ -1,7 +1,8 @@
 "use client"
 
 import { useCallback, useState } from "react"
-import { Pause, Loader2 } from "lucide-react"
+import { Pause } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { StatusDot } from "@/components/ui/status-badge"
@@ -102,7 +103,7 @@ export function AgentHeader({ agentId }: AgentHeaderProps) {
           onClick={handleStop}
           disabled={stopping}
         >
-          {stopping ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Pause className="h-3.5 w-3.5" />}
+          {stopping ? <Spinner className="h-3.5 w-3.5" /> : <Pause className="h-3.5 w-3.5" />}
           Stop
         </Button>
       )}

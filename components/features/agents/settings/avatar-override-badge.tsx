@@ -1,7 +1,8 @@
 "use client"
 
 import { useState } from "react"
-import { AlertCircle, Loader2, RotateCcw } from "lucide-react"
+import { AlertCircle, RotateCcw } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { toast } from "sonner"
 
@@ -56,7 +57,7 @@ export function AvatarOverrideBadge({ agentId, workspaceId, hasOverride, onReset
         onClick={handleReset}
         disabled={loading}
       >
-        {loading ? <Loader2 className="h-3 w-3 animate-spin" /> : <RotateCcw className="h-3 w-3" />}
+        {loading ? <Spinner className="h-3 w-3" /> : <RotateCcw className="h-3 w-3" />}
         Reset to crew
       </Button>
     </div>

@@ -3,7 +3,8 @@
 import { useState, useEffect, type FormEvent } from "react"
 import { useRouter } from "next/navigation"
 import { motion, useReducedMotion } from "motion/react"
-import { Sparkles, ArrowRight, Loader2 } from "lucide-react"
+import { Sparkles, ArrowRight } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { CrewshipLogoTile } from "@/components/branding/crewship-logo"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -180,7 +181,7 @@ export default function BootstrapPage() {
               <Button type="submit" className="w-full h-11 text-sm font-semibold" disabled={loading}>
                 {loading ? (
                   <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    <Spinner className="mr-2 h-4 w-4" />
                     Creating account…
                   </>
                 ) : (

@@ -1,6 +1,7 @@
 "use client"
 
 import { Loader2, Package, AlertTriangle, Check } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useProvisioningStatus } from "@/hooks/use-provisioning-status"
 import { ProvisioningChecklist } from "@/components/layout/app-toolbar-provisioning"
@@ -74,7 +75,7 @@ export function CrewProvisioningCard({
     // replayed the plan yet. Show a placeholder spinner.
     return (
       <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-3 flex items-start gap-3">
-        <Loader2 className="h-4 w-4 text-amber-500 animate-spin shrink-0 mt-0.5" />
+        <Spinner className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
         <div className="flex-1 min-w-0">
           <div className="text-sm font-medium text-foreground mb-0.5">
             {crewSlug ? `Building ${crewSlug}…` : "Building crew image…"}

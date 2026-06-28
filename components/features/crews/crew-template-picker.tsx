@@ -1,6 +1,7 @@
 "use client"
 
-import { Bot, ChevronRight, Loader2 } from "lucide-react"
+import { Bot, ChevronRight } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { Badge } from "@/components/ui/badge"
 import { CrewIcon } from "@/components/ui/crew-icon"
 
@@ -63,7 +64,7 @@ export function QuickStartTemplateGrid({ templates, loading, onSelect }: QuickSt
         aria-live="polite"
         className="flex items-center gap-2 text-sm text-muted-foreground"
       >
-        <Loader2 className="h-4 w-4 animate-spin" /> Loading templates...
+        <Spinner className="h-4 w-4" /> Loading templates...
       </div>
     )
   }
@@ -119,7 +120,7 @@ export function TemplateGallery({ templates, loading, onSelect }: TemplateGaller
         aria-live="polite"
         className="flex items-center gap-2 text-sm text-muted-foreground py-8"
       >
-        <Loader2 className="h-4 w-4 animate-spin" /> Loading templates...
+        <Spinner className="h-4 w-4" /> Loading templates...
       </div>
     )
   }

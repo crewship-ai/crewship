@@ -1,7 +1,8 @@
 "use client"
 
 import * as React from "react"
-import { Loader2, Check, ChevronsUpDown, X } from "lucide-react"
+import { Check, ChevronsUpDown, X } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -145,7 +146,7 @@ export function StepIdentity({ state, setState, workspaceId }: Props) {
           </label>
           {crewLoading ? (
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              <Spinner className="h-3.5 w-3.5" />
               Loading crews...
             </div>
           ) : (
