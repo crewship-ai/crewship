@@ -24,6 +24,8 @@ import { useIsMobile } from "@/hooks/use-mobile"
 import { RunTimelineRail } from "./run-timeline-rail"
 import { TraceCanvas } from "./trace-canvas"
 import { TraceSidePanel } from "./trace-side-panel"
+import { BottomPanel } from "@/components/features/crews/bottom-panel"
+import type { BottomPanelContext } from "@/components/features/crews/bottom-panel/types"
 import type { TraceStep } from "@/lib/trace/types"
 import { shadeNodes, type HeatmapBucket, type HeatmapMode } from "@/lib/trace/percentile-heatmap"
 import { buildOverviewGraph } from "@/lib/trace/build-overview-graph"
@@ -212,6 +214,12 @@ export function ActivityTracePage() {
 
   const isFailedStep = run?.failed_at_step === stepId
 
+  // Context for the bottom dock — log / trace / changes of the selected
+  // run. Complements the canvas above with the run's raw output console.
+  const runCtx: BottomPanelContext = runId
+    ? { kind: "run", runId, pipelineId: run?.pipeline_id ?? null, pipelineSlug: run?.pipeline_slug ?? null }
+    : null
+
   // Loading state — show skeleton while workspace ID is resolving.
   // Rail's own loading state covers the empty-runs flicker afterwards.
   if (wsLoading) {
@@ -380,6 +388,16 @@ export function ActivityTracePage() {
           />
         </div>
       </div>
+
+      {/* ---- Bottom dock — log / trace / changes of the selected run.
+           The canvas shows structure; this shows the raw run console. ---- */}
+      {runCtx && (
+        <BottomPanel
+          workspaceId={workspaceId}
+          context={runCtx}
+          tabs={["logs", "trace", "changes"]}
+        />
+      )}
     </div>
   )
 }
