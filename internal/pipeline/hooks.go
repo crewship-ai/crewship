@@ -37,6 +37,10 @@ func (e *Executor) runRoutineHook(ctx context.Context, hook *Step, in RunInput, 
 	if in.dsl != nil {
 		inputs = mergeInputs(in.Inputs, in.dsl)
 	}
+	var egress []string
+	if in.dsl != nil {
+		egress = in.dsl.EgressTargets
+	}
 	render := RenderContext{
 		Inputs:      inputs,
 		StepOutputs: map[string]string{},
@@ -46,6 +50,7 @@ func (e *Executor) runRoutineHook(ctx context.Context, hook *Step, in RunInput, 
 			"invoking_crew_id": in.InvokingCrewID,
 			"is_replay":        boolToEnvStr(in.IsReplay),
 		},
+		EgressTargets: egress,
 	}
 	switch hook.Type {
 	case StepHTTP:

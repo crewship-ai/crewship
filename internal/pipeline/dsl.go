@@ -492,6 +492,12 @@ type RenderContext struct {
 	StepOutputs map[string]string // step_id → output (raw string from agent)
 	Env         map[string]string // safe env keys only — author_crew_name, run_id, etc.
 	Metadata    map[string]any    // run metadata scratchpad — {{ run.metadata.x }}
+	// EgressTargets is the routine's declared host allowlist. When
+	// non-empty, an http step (or http hook) may only reach a host in
+	// this set — enforced in runHTTPStep alongside the httpsafe
+	// private-IP/rebind guard. Empty leaves the httpsafe guard as the
+	// only host-level gate (back-compat for routines that declare none).
+	EgressTargets []string
 }
 
 // resolveRef walks one template body (already trimmed of {{ }}) against

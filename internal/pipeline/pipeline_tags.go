@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"database/sql"
+	"fmt"
 )
 
 // PipelineTagStore manages routine-DEFINITION tags (v123) for cross-crew
@@ -11,23 +12,41 @@ type PipelineTagStore struct {
 	db *sql.DB
 }
 
+// MaxPipelineTags caps discovery tags per routine so a caller can't
+// bloat pipeline_tags with unbounded labels.
+const MaxPipelineTags = 20
+
 // NewPipelineTagStore wraps a DB handle.
 func NewPipelineTagStore(db *sql.DB) *PipelineTagStore {
 	return &PipelineTagStore{db: db}
 }
 
 // Add tags a routine. Tags are normalized + de-duped (PK ignores dups).
+// Rejects the batch if it would push the routine past MaxPipelineTags.
 func (s *PipelineTagStore) Add(ctx context.Context, workspaceID, pipelineID string, tags []string) error {
+	var existing int
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM pipeline_tags WHERE pipeline_id = ?`, pipelineID).Scan(&existing); err != nil {
+		return err
+	}
+	added := 0
 	for _, raw := range tags {
 		t := normalizeTag(raw)
 		if t == "" {
 			continue
 		}
-		if _, err := s.db.ExecContext(ctx,
+		if existing+added >= MaxPipelineTags {
+			return fmt.Errorf("routine already has the max %d tags", MaxPipelineTags)
+		}
+		res, err := s.db.ExecContext(ctx,
 			`INSERT INTO pipeline_tags (pipeline_id, workspace_id, tag) VALUES (?, ?, ?)
              ON CONFLICT(pipeline_id, tag) DO NOTHING`,
-			pipelineID, workspaceID, t); err != nil {
+			pipelineID, workspaceID, t)
+		if err != nil {
 			return err
+		}
+		if n, _ := res.RowsAffected(); n > 0 {
+			added++
 		}
 	}
 	return nil

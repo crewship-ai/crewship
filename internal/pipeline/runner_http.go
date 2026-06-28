@@ -69,6 +69,17 @@ func (e *Executor) runHTTPStep(ctx context.Context, step Step, parentRender Rend
 	if e.egressAllowed != nil && !e.egressAllowed(parsed.Host) {
 		return "", 0, 0, fmt.Errorf("http step %q host %q not in egress allowlist", step.ID, parsed.Host)
 	}
+	// Per-routine egress_targets: when the routine declares a host
+	// allowlist, enforce it here (the deployment-level egressAllowed gate
+	// above is currently unwired, so without this the declared allowlist
+	// is silently ignored — a routine pinned to api.partner.com could
+	// exfiltrate to any public host). httpsafe already blocks private/
+	// link-local IPs; this restricts the *public* hosts to the declared
+	// set. Skipped under the allowPrivateHTTP test hatch, mirroring the
+	// httpsafe bypass above.
+	if !e.allowPrivateHTTP && !hostInEgressTargets(parsed.Hostname(), parentRender.EgressTargets) {
+		return "", 0, 0, fmt.Errorf("http step %q host %q not in routine egress_targets", step.ID, parsed.Hostname())
+	}
 
 	body := Render(step.HTTP.Body, parentRender)
 	method := strings.ToUpper(step.HTTP.Method)
@@ -134,6 +145,12 @@ func (e *Executor) runHTTPStep(ctx context.Context, step Step, parentRender Rend
 			}
 			if e.egressAllowed != nil && !e.egressAllowed(redirReq.URL.Host) {
 				return fmt.Errorf("http step %q redirect to %q blocked by egress allowlist", step.ID, redirReq.URL.Host)
+			}
+			// Re-enforce the routine's egress_targets on every redirect
+			// hop, else a host in the allowlist could 302 to one that
+			// isn't (the classic allowlist-bypass-via-redirect).
+			if !e.allowPrivateHTTP && !hostInEgressTargets(redirReq.URL.Hostname(), parentRender.EgressTargets) {
+				return fmt.Errorf("http step %q redirect to %q not in routine egress_targets", step.ID, redirReq.URL.Hostname())
 			}
 			return nil
 		},
@@ -209,4 +226,28 @@ func FingerprintHTTPRequest(method, rawURL string) string {
 	}
 	sum := sha256.Sum256([]byte(strings.ToUpper(method) + " " + host + path))
 	return hex.EncodeToString(sum[:8])
+}
+
+// hostInEgressTargets reports whether host is permitted by the routine's
+// declared egress_targets. Empty targets → no restriction (back-compat
+// for routines that declare none; httpsafe remains the IP-level gate).
+// A target matches the exact host or any subdomain of it ("api.x.com"
+// matches target "x.com" via the "."+target suffix, but "evilx.com"
+// does NOT match "x.com" — the leading dot prevents the classic
+// suffix-bypass).
+func hostInEgressTargets(host string, targets []string) bool {
+	if len(targets) == 0 {
+		return true
+	}
+	host = strings.ToLower(strings.TrimSuffix(host, "."))
+	for _, t := range targets {
+		t = strings.ToLower(strings.TrimSpace(t))
+		if t == "" {
+			continue
+		}
+		if host == t || strings.HasSuffix(host, "."+t) {
+			return true
+		}
+	}
+	return false
 }

@@ -876,10 +876,11 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (result *
 		stepStart := time.Now()
 		// Build the rendered prompt for both run + dry-run paths.
 		ctxRender := RenderContext{
-			Inputs:      inputsForCtx,
-			StepOutputs: result.StepOutputs,
-			Env:         renderEnv,
-			Metadata:    parseRunMetadata(in.MetadataJSON),
+			Inputs:        inputsForCtx,
+			StepOutputs:   result.StepOutputs,
+			Env:           renderEnv,
+			Metadata:      parseRunMetadata(in.MetadataJSON),
+			EgressTargets: dsl.EgressTargets,
 		}
 		renderedPrompt := Render(step.Prompt, ctxRender)
 

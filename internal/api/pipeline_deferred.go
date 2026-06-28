@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/pipeline"
@@ -10,7 +11,24 @@ import (
 
 // enqueueDeferredRun parks a delayed/debounced trigger in pending_runs.
 // Always writes the HTTP response (scheduled receipt or error).
+// maxDeferralSeconds bounds delay/ttl/debounce windows (30 days) — keeps
+// fire_at arithmetic well inside int64 Duration range (no overflow → no
+// accidental immediate fire) and rejects absurd far-future schedules.
+const maxDeferralSeconds = 30 * 24 * 3600
+
 func (h *PipelineHandler) enqueueDeferredRun(w http.ResponseWriter, r *http.Request, workspaceID string, p *pipeline.Pipeline, body runRequestBody) {
+	// Bound every duration field so a huge value can't overflow the
+	// fire_at/expires_at arithmetic (which would wrap negative and fire
+	// immediately). Reject rather than clamp so the caller sees the limit.
+	for name, v := range map[string]int{
+		"delay_seconds": body.DelaySeconds, "ttl_seconds": body.TTLSeconds,
+		"debounce_window_seconds": body.DebounceWindowSecond, "debounce_max_seconds": body.DebounceMaxSeconds,
+	} {
+		if v < 0 || v > maxDeferralSeconds {
+			replyError(w, http.StatusBadRequest, name+" out of range (0.."+strconv.Itoa(maxDeferralSeconds)+"s)")
+			return
+		}
+	}
 	now := time.Now().UTC()
 
 	// fire_at: a debounce trigger fires window-seconds after the latest
