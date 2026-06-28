@@ -86,6 +86,7 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	r.mux.Handle("POST /api/v1/crews/{crewId}/issues/{identifier}/stop", authed(wsCtx(http.HandlerFunc(issues.Stop))))
 	r.mux.Handle("POST /api/v1/crews/{crewId}/issues/{identifier}/review", authed(wsCtx(http.HandlerFunc(issues.Review))))
 	r.mux.Handle("GET /api/v1/crews/{crewId}/issues/{identifier}/activity", authed(wsCtx(http.HandlerFunc(issues.ListActivity))))
+	r.mux.Handle("GET /api/v1/crews/{crewId}/issues/{identifier}/runs", authed(wsCtx(http.HandlerFunc(issues.ListRuns))))
 	// Labels
 	r.mux.Handle("GET /api/v1/labels", authed(wsCtx(http.HandlerFunc(issues.ListLabels))))
 	r.mux.Handle("POST /api/v1/labels", authed(wsCtx(http.HandlerFunc(issues.CreateLabel))))

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/pipeline"
 )
 
@@ -192,6 +193,87 @@ func (h *PipelineHandler) GetRun(w http.ResponseWriter, r *http.Request) {
 		"issue_identifier": issueIdentifier.String,
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// runLogEntry is the wire shape for one line in a run's console. Mirrors
+// the loose {ts, level, message} shape the dashboard log renderers already
+// consume (exec-tab / logs-tab), so the same component works for agent
+// logs and run logs without branching.
+type runLogEntry struct {
+	TS      string `json:"ts"`
+	Level   string `json:"level"`
+	Message string `json:"message"`
+	Type    string `json:"type,omitempty"`
+}
+
+// RunLogs GET /workspaces/{wsId}/pipeline-runs/{runId}/logs
+//
+// The exec console for a single run. Reads journal_entries scoped to the
+// run's trace_id (run id == trace_id) and projects each entry to a log
+// line. Powers the dock's Logs tab on /activity (the selected run) and
+// /routines (the routine's latest run, resolved by the client first).
+//
+// Workspace-scoped via journal.Query.WorkspaceID, and the run is confirmed
+// to exist in this workspace first so a foreign / unknown run id surfaces
+// as 404 rather than an empty log (consistent with GetRun's existence
+// masking). Returns oldest-first so the console reads top-to-bottom.
+func (h *PipelineHandler) RunLogs(w http.ResponseWriter, r *http.Request) {
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	runID := r.PathValue("runId")
+	if runID == "" {
+		replyError(w, http.StatusBadRequest, "runId required")
+		return
+	}
+
+	// Existence + workspace scope check — masks cross-tenant lookups as
+	// 404 the same way GetRun does.
+	var exists int
+	err := h.db.QueryRowContext(r.Context(),
+		`SELECT 1 FROM pipeline_runs WHERE id = ? AND workspace_id = ?`, runID, workspaceID).Scan(&exists)
+	if errors.Is(err, sql.ErrNoRows) {
+		replyError(w, http.StatusNotFound, "run not found")
+		return
+	}
+	if err != nil {
+		h.logger.Error("run logs: existence check", "error", err, "run_id", runID)
+		replyError(w, http.StatusInternalServerError, "load run")
+		return
+	}
+
+	limit := 200
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, perr := parseSmallInt(v); perr == nil && n > 0 && n <= 1000 {
+			limit = n
+		}
+	}
+
+	entries, _, err := journal.List(r.Context(), h.db, journal.Query{
+		WorkspaceID: workspaceID,
+		TraceID:     runID,
+		Limit:       limit,
+	})
+	if err != nil {
+		h.logger.Error("run logs: journal list", "error", err, "run_id", runID)
+		replyError(w, http.StatusInternalServerError, "load logs")
+		return
+	}
+
+	// journal.List returns newest-first; a console reads oldest-first.
+	out := make([]runLogEntry, 0, len(entries))
+	for i := len(entries) - 1; i >= 0; i-- {
+		e := entries[i]
+		level := string(e.Severity)
+		if level == "" {
+			level = "info"
+		}
+		out = append(out, runLogEntry{
+			TS:      e.TS.UTC().Format(time.RFC3339),
+			Level:   level,
+			Message: e.Summary,
+			Type:    string(e.Type),
+		})
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // ListWorkspaceRuns GET /workspaces/{wsId}/pipeline-runs
