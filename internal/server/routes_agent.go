@@ -137,17 +137,12 @@ func (s *Server) handleAgentStart(w http.ResponseWriter, r *http.Request) {
 			defer logBuf.Close()
 		}
 
+		base, _ := orchestrator.NewBufferingHandler(orchestrator.BufferingHandlerOpts{
+			LogBuf:    logBuf,
+			AgentSlug: req.AgentSlug,
+		})
 		handler := func(event orchestrator.AgentEvent) {
-			if logBuf != nil {
-				_ = logBuf.Append(logcollector.LogEntry{
-					Timestamp: event.Timestamp,
-					Level:     "info",
-					Agent:     req.AgentSlug,
-					Event:     event.Type,
-					Content:   event.Content,
-					Metadata:  event.Metadata,
-				})
-			}
+			base(event)
 
 			// Broadcast real-time log events to the workspace channel
 			s.wsHub.BroadcastWorkspace(req.WorkspaceID, "agent.log",

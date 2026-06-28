@@ -357,15 +357,12 @@ func (h *WebhookHandler) trigger(ctx context.Context, crewID, agentID string, pa
 		logBuf := logcollector.NewOutputBuffer(h.logWriter, info.CrewID, info.AgentSlug)
 		defer logBuf.Close()
 
+		base, _ := orchestrator.NewBufferingHandler(orchestrator.BufferingHandlerOpts{
+			LogBuf:    logBuf,
+			AgentSlug: info.AgentSlug,
+		})
 		handler := func(event orchestrator.AgentEvent) {
-			_ = logBuf.Append(logcollector.LogEntry{
-				Timestamp: event.Timestamp,
-				Level:     "info",
-				Agent:     info.AgentSlug,
-				Event:     event.Type,
-				Content:   event.Content,
-				Metadata:  event.Metadata,
-			})
+			base(event)
 
 			broadcastWorkspaceEvent(h.hub, info.WorkspaceID, "agent.log",
 				map[string]interface{}{
