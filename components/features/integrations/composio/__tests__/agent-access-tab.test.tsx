@@ -4,6 +4,7 @@
 
 import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent, within } from "@testing-library/react"
+import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 import { AgentAccessTab } from "../agent-access-tab"
 import type { AgentLite, AgentBindingsMap } from "../types"
 
@@ -43,6 +44,15 @@ describe("AgentAccessTab avatars", () => {
     for (const img of screen.getAllByTestId("agent-avatar")) {
       expect(img.getAttribute("src")).toBeTruthy()
     }
+  })
+
+  it("falls back to the crew's avatar_style when the agent has none", () => {
+    renderTab()
+    // Morgan has no avatar_seed/avatar_style — seed falls back to the slug and
+    // style to the crew's "micah". Lock that exact contract, not just truthiness.
+    const morganRow = screen.getByText("Morgan").closest("[data-testid='agent-row']") as HTMLElement
+    const morganAvatar = within(morganRow).getByTestId("agent-avatar")
+    expect(morganAvatar.getAttribute("src")).toBe(getAgentAvatarUrl("morgan", "micah"))
   })
 
   it("filtering by name hides non-matching agents' avatars too", () => {

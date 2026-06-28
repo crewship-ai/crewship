@@ -397,7 +397,11 @@ export function AddAppMenu({
       </PopoverTrigger>
       <PopoverContent align="start" className="w-64 p-0">
         <Command>
-          <CommandInput placeholder="Search apps…" className="text-xs" />
+          <CommandInput
+            aria-label="Search apps"
+            placeholder="Search apps…"
+            className="text-xs"
+          />
           <CommandList>
             <CommandEmpty className="px-2 py-3 text-center text-[11px] text-muted-foreground">
               No matching apps.

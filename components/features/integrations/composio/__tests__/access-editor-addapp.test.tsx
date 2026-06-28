@@ -58,6 +58,28 @@ describe("AddAppMenu", () => {
     expect(onOpenChange).toHaveBeenCalledWith(false)
   })
 
+  it("filters the list from the search box and commits via keyboard", () => {
+    const onPick = vi.fn()
+    const onOpenChange = vi.fn()
+    render(
+      <AddAppMenu
+        toolkits={toolkits}
+        onPick={onPick}
+        open
+        onOpenChange={onOpenChange}
+      />,
+    )
+    const input = screen.getByPlaceholderText("Search apps…")
+    fireEvent.input(input, { target: { value: "mail" } })
+    expect(screen.queryByText("Youtube")).toBeNull()
+    expect(screen.getByText("Gmail")).toBeDefined()
+
+    fireEvent.keyDown(input, { key: "ArrowDown" })
+    fireEvent.keyDown(input, { key: "Enter" })
+    expect(onPick).toHaveBeenCalledWith(expect.objectContaining({ slug: "gmail" }))
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
   it("disables the trigger when there is nothing to add", () => {
     render(
       <AddAppMenu
