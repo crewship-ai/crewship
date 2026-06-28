@@ -47,12 +47,16 @@ export type ComposioSettings = {
 }
 
 // Agent (subset of /api/v1/agents) — only the fields the integrations surface
-// renders. crew is nested per the agents handler response.
+// renders. crew is nested per the agents handler response. avatar_seed /
+// avatar_style (and the crew's avatar_style fallback) feed getAgentAvatarUrl so
+// the agent-access list shows the same DiceBear avatar as the rest of the app.
 export type AgentLite = {
   id: string
   name: string
   slug: string
-  crew?: { name: string } | null
+  avatar_seed?: string | null
+  avatar_style?: string | null
+  crew?: { name: string; avatar_style?: string | null } | null
 }
 
 // Scope of an agent↔app grant. "full" = every tool on the toolkit, "read" =

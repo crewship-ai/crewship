@@ -322,6 +322,36 @@ func TestResolveChatFeatureEnvWithoutDevcontainerEnv(t *testing.T) {
 	}
 }
 
+// ---------- resolve(): PreferredLanguage wiring ----------
+
+// TestResolveChatWiresPreferredLanguage guards the chat language fix: the
+// agent-config endpoint returns the workspace's preferred_language and the
+// resolver must carry it onto ChatInfo so the orchestrator can reinforce the
+// language at the end of the prompt for chat sessions (previously this field
+// was silently dropped, so chat relied solely on the top-of-prompt block and
+// drifted to English mid-conversation).
+func TestResolveChatWiresPreferredLanguage(t *testing.T) {
+	t.Parallel()
+	resp := chatResolveResponse{
+		AgentID:           "a1",
+		CLIAdapter:        "CLAUDE_CODE",
+		PreferredLanguage: "Czech",
+	}
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	t.Cleanup(ts.Close)
+	r := NewIPCResolver(ts.URL, "tok", slog.Default())
+	info, err := r.ResolveChat(context.Background(), "c1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.PreferredLanguage != "Czech" {
+		t.Errorf("PreferredLanguage = %q, want Czech", info.PreferredLanguage)
+	}
+}
+
 // ---------- resolve(): ServiceEnvLookup wiring ----------
 
 func TestResolveChatWiresServiceEnvLookup(t *testing.T) {

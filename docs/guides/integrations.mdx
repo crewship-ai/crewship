@@ -7,16 +7,16 @@ icon: "plug"
 # Integrations
 
 <Note>
-**The Integrations page is being reworked.** The self-hosted MCP connector
-management UI at `/integrations` is being replaced by a **managed integration
-platform** (Composio) so you can connect apps via OAuth without standing up and
-maintaining your own MCP servers. The legacy UI is now hidden by default and the
-page shows a placeholder while the managed experience is built.
+**The managed Composio UI is now the default.** The `/integrations` page is the
+full managed integration platform (Composio) — a KPI header plus tabs for
+Catalog, Connected accounts, Agent access, Tools, Triggers, and MCP endpoints —
+so you can connect apps via OAuth without standing up and maintaining your own
+MCP servers.
 
-To restore the legacy UI during the transition, build the dashboard with
-`NEXT_PUBLIC_LEGACY_MCP_INTEGRATIONS=true`. No legacy code or API has been
-removed — the MCP endpoints documented below still work, and **credentials are
-unaffected**. The sections below describe the legacy mechanism.
+The legacy self-hosted MCP connector management UI is restorable by building the
+dashboard with `NEXT_PUBLIC_LEGACY_MCP_INTEGRATIONS=true`. No legacy code or API
+has been removed — the MCP endpoints documented below still work, and
+**credentials are unaffected**. The sections below describe the legacy mechanism.
 </Note>
 
 Crewship supports two integration mechanisms: **OAuth 2.0 connections** for service authentication and **MCP (Model Context Protocol) servers** for extending agent tool capabilities.
@@ -55,10 +55,38 @@ crewship integration composio inventory
 
 returns the same data as `GET /api/v1/integrations/composio/inventory`. This is an operator/admin view — agents are never handed the full list.
 
-<Note>
-Connecting accounts and per-agent binding (the write/OAuth flow and UI) ship in
-follow-up slices. Today the managed path is read-only inventory.
-</Note>
+### Connecting an account & binding an agent
+
+The end-to-end flow from a fresh project key to an agent that can drive an app:
+
+```bash
+# 1. Set the project API key (per-workspace, validated + stored encrypted):
+crewship integration composio key set --key ak_… [--label "My project"]
+
+# 2. Browse the app catalog:
+crewship integration composio toolkits --search gmail
+
+# 3. Connect an account — open the printed redirect_url to authorize:
+crewship integration composio connect gmail --user user-42
+
+# 4. Verify the connected account (and its user_id) landed:
+crewship integration composio inventory
+
+# 5. Bind the connected user to an agent with per-app tool scope:
+crewship integration composio bind <agent> --user user-42 \
+  --app gmail:read --app github:full
+
+# 6. Inspect / remove the agent's bindings:
+crewship integration composio bindings <agent>
+crewship integration composio unbind <agent> [--app gmail]
+```
+
+**Account lifecycle.** Refresh, revoke, or permanently remove a connected
+account at the provider:
+
+```bash
+crewship integration composio account {refresh,revoke,remove} <account-id>
+```
 
 ### Default connector (`COMPOSIO_DEFAULT_CONNECTOR`)
 
@@ -104,6 +132,23 @@ first") or if **multiple** users exist (pin one with `default set`). Re-running
 is idempotent and refreshes the connector's app set, so apps you connect later
 show up in the default automatically. These map to
 `GET`/`PUT /api/v1/integrations/composio/default`.
+
+### Agent awareness of connected integrations
+
+An agent is told **up front**, in its system prompt, which integrations it can
+already drive. Every MCP server that resolves for the agent — Composio apps as
+well as plain MCP servers — is listed in a `[CONNECTED INTEGRATIONS]` block,
+including the access mode encoded in the display name (e.g.
+`Composio: youtube · Full`).
+
+This exists so an agent never reflexively answers *"I don't have access to your
+YouTube account"* when the YouTube tools are in fact wired in. The block
+instructs the agent to use the matching tools directly and to only report that
+something isn't possible **after** checking the tools available for that app —
+so the user never has to tell it to "go look at the MCP server" first.
+
+Nothing to configure: the block appears automatically whenever the agent
+resolves at least one integration, and is omitted entirely when it has none.
 
 ## OAuth 2.0 Integrations
 

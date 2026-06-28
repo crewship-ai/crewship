@@ -154,13 +154,20 @@ func (h *InboxHandler) List(w http.ResponseWriter, r *http.Request) {
 	q.WriteString(visClause)
 	args = append(args, visArgs...)
 
-	if state != "" && state != "all" {
-		if state != "unread" && state != "read" && state != "resolved" {
-			replyError(w, http.StatusBadRequest, "invalid state")
-			return
-		}
+	switch state {
+	case "", "all":
+		// no state predicate — every visible row
+	case "active":
+		// The Inbox view: everything not archived (unread + read).
+		// Excluding resolved server-side means archived rows don't consume
+		// the LIMIT window and silently push active items out of view.
+		q.WriteString(" AND state != 'resolved'")
+	case "unread", "read", "resolved":
 		q.WriteString(" AND state = ?")
 		args = append(args, state)
+	default:
+		replyError(w, http.StatusBadRequest, "invalid state")
+		return
 	}
 	if kind != "" {
 		q.WriteString(" AND kind = ?")
@@ -244,6 +251,67 @@ func (h *InboxHandler) UnreadCount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]int{"unread_count": n})
+}
+
+// Get serves GET /api/v1/inbox/{id} — a single inbox item with its full
+// body + payload, the context the list view omits. This is what gives
+// the CLI (and any agent driving it) read parity with the web detail
+// pane: `crewship inbox get <id>` can show the change plan, the escalation
+// context, the run id, etc. Visibility is enforced exactly like List /
+// PatchState — a cross-workspace or mis-targeted id 404s rather than
+// leaking an item addressed to someone else.
+func (h *InboxHandler) Get(w http.ResponseWriter, r *http.Request) {
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	user := UserFromContext(r.Context())
+	role := RoleFromContext(r.Context())
+	if workspaceID == "" || user == nil {
+		replyError(w, http.StatusUnauthorized, "workspace required")
+		return
+	}
+	id := r.PathValue("id")
+	if id == "" {
+		replyError(w, http.StatusBadRequest, "id required")
+		return
+	}
+
+	visClause, visArgs := inboxVisibilityClause(user.ID, role)
+	args := append([]interface{}{id, workspaceID}, visArgs...)
+	var item inboxItemResponse
+	var blocking int
+	var payloadJSON string
+	err := h.db.QueryRowContext(r.Context(), `SELECT id, workspace_id, kind, source_id,
+		COALESCE(target_user_id, ''), COALESCE(target_role, ''),
+		title, COALESCE(body_md, ''),
+		COALESCE(sender_type, ''), COALESCE(sender_id, ''), COALESCE(sender_name, ''),
+		state, priority, blocking, payload_json,
+		COALESCE(read_at, ''), COALESCE(resolved_at, ''),
+		COALESCE(resolved_by_user_id, ''), COALESCE(resolved_action, ''),
+		created_at, updated_at
+	FROM inbox_items WHERE id = ? AND workspace_id = ?`+visClause,
+		args...).Scan(
+		&item.ID, &item.WorkspaceID, &item.Kind, &item.SourceID,
+		&item.TargetUserID, &item.TargetRole,
+		&item.Title, &item.BodyMD,
+		&item.SenderType, &item.SenderID, &item.SenderName,
+		&item.State, &item.Priority, &blocking, &payloadJSON,
+		&item.ReadAt, &item.ResolvedAt,
+		&item.ResolvedByUserID, &item.ResolvedAction,
+		&item.CreatedAt, &item.UpdatedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		replyError(w, http.StatusNotFound, "not found")
+		return
+	}
+	if err != nil {
+		h.logger.Error("inbox get", "error", err)
+		replyError(w, http.StatusInternalServerError, "get failed")
+		return
+	}
+	item.Blocking = blocking != 0
+	if payloadJSON != "" {
+		_ = json.Unmarshal([]byte(payloadJSON), &item.Payload)
+	}
+	writeJSON(w, http.StatusOK, item)
 }
 
 // PatchState handles PATCH /api/v1/inbox/{id} to flip an item's state

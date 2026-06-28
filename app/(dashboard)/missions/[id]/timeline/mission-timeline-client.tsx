@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useState } from "react"
 import Link from "next/link"
-import { useParams, useRouter } from "next/navigation"
+import { useRouter } from "next/navigation"
 import { ArrowLeft, ChevronRight, Flag, Map, RefreshCw } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -18,6 +18,7 @@ import { cn } from "@/lib/utils"
 import { useJournalList } from "@/hooks/use-journal-list"
 import { useJournalStream } from "@/hooks/use-journal-stream"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { useUrlSegment } from "@/lib/use-url-segment"
 import { MissionTimeline } from "@/components/features/timeline/mission-timeline"
 import { formatDateTime, formatRelativeTime } from "@/lib/time"
 import type { JournalEntry } from "@/lib/types/journal"
@@ -31,10 +32,14 @@ import type { JournalEntry } from "@/lib/types/journal"
  * breadcrumb top bar, centered max-width content, right-side Sheet for
  * checkpoint metadata. See `docs/design/patterns.md` #5.
  */
+// Mission id read from the URL, not useParams() — avoids the static-export
+// "_" placeholder bug (see useUrlSegment). The id is the middle segment of
+// /missions/<id>/timeline.
+const MISSION_TIMELINE_RE = /^\/missions\/([^/]+)\/timeline\/?$/
+
 export function MissionTimelineClient() {
-  const params = useParams<{ id: string }>()
   const router = useRouter()
-  const missionId = params?.id ?? ""
+  const missionId = useUrlSegment(MISSION_TIMELINE_RE) ?? ""
   const { workspaceId, loading: wsLoading } = useWorkspace()
 
   // `_` is the static-export placeholder route — bail before firing any

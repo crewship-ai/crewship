@@ -167,10 +167,14 @@ func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) 
 	// unified Inbox without a fan-out query at read time. Best-effort:
 	// failure here is logged + swallowed; the escalations table stays
 	// the source of truth and a future inbox-rebuild job can backfill.
+	// The inbox row is a projection broadcast to every MANAGER in the
+	// workspace; the escalations table (access-controlled) stays the source of
+	// truth. Redact any credential material an agent put in reason/context
+	// before it lands in the projection (body_md / title / payload).
 	inboxPayload := map[string]interface{}{
 		"crew_id":         body.CrewID,
 		"chat_id":         body.ChatID,
-		"reason":          body.Reason,
+		"reason":          inbox.RedactSecrets(body.Reason),
 		"escalation_type": escalationType,
 	}
 	// Signal to the inbox UI that this CREDENTIAL escalation already has a
@@ -181,11 +185,20 @@ func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) 
 		inboxPayload["has_pending_credential"] = true
 		inboxPayload["credential_id"] = cid
 	}
-	// A credential proposal reads more naturally in the inbox as a credential
-	// approval than as a generic "Agent escalation".
-	inboxTitle := fmt.Sprintf("Agent escalation: %s", truncate(body.Reason, 80))
+	// A credential proposal reads more naturally as a credential approval than a
+	// generic "Agent escalation". The credential NAME is safe to show (it is not
+	// the secret); the generic fallback redacts the reason. Redact before
+	// truncating so a secret straddling the 80-char cut can't leave an
+	// unmatched (= unredacted) prefix.
+	inboxTitle := fmt.Sprintf("Agent escalation: %s", truncate(inbox.RedactSecrets(body.Reason), 80))
 	if credentialName != "" {
 		inboxTitle = fmt.Sprintf("Credential approval: %s", credentialName)
+	}
+	// For CREDENTIAL escalations, lead the body with an explicit note that the
+	// secret is handled in the credential flow, not shown here.
+	inboxBody := inbox.RedactSecrets(body.Context)
+	if escalationType == "CREDENTIAL" {
+		inboxBody = "🔒 A credential is being requested — the secret is handled in the credential flow and is not shown here.\n\n" + inboxBody
 	}
 	inbox.Insert(r.Context(), h.db, h.logger, inbox.Item{
 		WorkspaceID: body.WorkspaceID,
@@ -193,7 +206,7 @@ func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) 
 		SourceID:    escalationID,
 		TargetRole:  "MANAGER",
 		Title:       inboxTitle,
-		BodyMD:      body.Context,
+		BodyMD:      inboxBody,
 		SenderType:  "agent",
 		SenderID:    fromAgentID,
 		SenderName:  body.FromSlug,

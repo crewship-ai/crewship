@@ -3,25 +3,35 @@
 import { useEffect, useMemo, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
 import {
-  AlertCircle,
+  AlertTriangle,
+  Archive,
   Bell,
+  Bot,
   CheckCheck,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
   CircleDot,
   Clock,
+  Cog,
+  Eye,
+  EyeOff,
   Inbox as InboxIcon,
   Layers,
   MailOpen,
+  MessageSquare,
+  RotateCcw,
   ScrollText,
   Sparkles,
+  Users,
+  Workflow,
   XCircle,
 } from "lucide-react"
 import Link from "next/link"
 import { cn } from "@/lib/utils"
 import { useInbox, type InboxItem } from "@/hooks/use-inbox"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { useCrewSummaries } from "@/hooks/use-dashboard-data"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { ListRow } from "@/components/ui/list-row"
@@ -40,18 +50,23 @@ import {
 } from "@/components/ui/alert-dialog"
 import { toast } from "sonner"
 import { WaitpointRunDetail } from "./waitpoint-run-detail"
+import { MarkdownContent } from "@/components/features/issues/markdown-content"
 import { waitpointDecide } from "@/lib/api/waitpoints"
 import { inboxBulk } from "@/lib/api/inbox"
 import { escalationResolve } from "@/lib/api/escalations"
 
-// InboxList — the /inbox page surface. Linear-Triage UX: three states
-// (unread → read → resolved) with no archive / flag / snooze. List on
-// the left, detail on the right. Action buttons in the detail are
-// kind-specific (Approve waitpoint, Resolve escalation, Retry failed
-// run, …) and call the source-of-truth endpoint, then flip the inbox
-// row to resolved.
+// InboxList — the /inbox page surface. Gmail-style triage: the default
+// "Inbox" tab shows everything that isn't archived (unread + read), so
+// opening a row marks it read but it STAYS in place — it only leaves the
+// list when you Archive it (→ resolved/archived). "Unread" is a filter,
+// "Archived" is the resolved bucket. Decision items (waitpoint /
+// escalation / blocking) keep their source-of-truth Approve/Deny/Resolve
+// actions and can't be blind-archived. List on the left, detail (with a
+// human-formatted body, not raw JSON) on the right.
 
-type StateFilter = "unread" | "all" | "resolved"
+// View tabs — see the component doc above. Mapped to the backend
+// state param in InboxList (inbox→all, unread→unread, archived→resolved).
+type StateFilter = "inbox" | "unread" | "archived"
 
 interface KindMeta {
   label: string
@@ -61,9 +76,9 @@ interface KindMeta {
 
 const KIND_META: Record<InboxItem["kind"], KindMeta> = {
   waitpoint: { label: "Waitpoint", icon: Clock, accent: "text-amber-300" },
-  escalation: { label: "Escalation", icon: AlertCircle, accent: "text-rose-300" },
+  escalation: { label: "Escalation", icon: AlertTriangle, accent: "text-rose-300" },
   failed_run: { label: "Failed run", icon: XCircle, accent: "text-rose-400" },
-  message: { label: "Message", icon: Sparkles, accent: "text-blue-300" },
+  message: { label: "Notification", icon: MessageSquare, accent: "text-blue-300" },
 }
 
 // The kind column can hold values the UI doesn't have a card for yet
@@ -92,14 +107,25 @@ function isDecisionItem(item: InboxItem): boolean {
 // expand, bulk-select, and clear — instead of 47 rows to scroll past.
 // Every dimension keys off a field already on the row (payload + kind),
 // so grouping is pure client-side over the data the list already holds.
-type GroupDim = "kind" | "routine" | "issue" | "crew"
+type GroupDim = "smart" | "kind" | "sender" | "routine" | "issue" | "crew"
 
 const GROUP_DIMS: { id: GroupDim; label: string }[] = [
+  { id: "smart", label: "Smart" },
   { id: "kind", label: "Type" },
+  { id: "sender", label: "Sender" },
   { id: "routine", label: "Routine" },
   { id: "issue", label: "Issue" },
   { id: "crew", label: "Crew" },
 ]
+
+// Smart buckets give the Linear-style "what needs me vs what's FYI" split
+// the flat kind list can't. Order is intentional (decisions first); the
+// rank drives group sorting so "Decisions needed" always sits on top.
+const SMART_ORDER: Record<string, number> = {
+  "sm:decisions": 0,
+  "sm:review": 1,
+  "sm:fyi": 2,
+}
 
 function payloadString(item: InboxItem, key: string): string {
   const v = item.payload?.[key]
@@ -109,8 +135,30 @@ function payloadString(item: InboxItem, key: string): string {
 // groupOf returns the bucket key + display label for an item under a
 // dimension. Items missing the dimension's field land in a stable
 // "No …" bucket (key prefixed so it can't collide with a real value).
-function groupOf(item: InboxItem, dim: GroupDim): { key: string; label: string } {
+// crewName resolves a crew_id to its human name so the Crew grouping
+// shows "Engineering" instead of a raw "cmqtg…" id (the key stays the id
+// so the bucket is stable even before names have loaded).
+function groupOf(
+  item: InboxItem,
+  dim: GroupDim,
+  crewName?: (id: string) => string,
+): { key: string; label: string } {
   switch (dim) {
+    case "smart": {
+      // Decisions = something an agent is blocked on (waitpoint /
+      // escalation / any blocking row). Review = a non-blocking nudge
+      // tied to an issue ("ENG-6 ready for review"). Everything else is
+      // FYI (advisories, failed-run notices).
+      if (item.kind === "waitpoint" || item.kind === "escalation" || item.blocking)
+        return { key: "sm:decisions", label: "Decisions needed" }
+      if (item.kind === "message" && payloadString(item, "issue_identifier"))
+        return { key: "sm:review", label: "Needs review" }
+      return { key: "sm:fyi", label: "FYI / advisories" }
+    }
+    case "sender": {
+      const s = item.sender_name || metaFor(item.kind).label
+      return { key: `sn:${s}`, label: s }
+    }
     case "routine": {
       const slug = payloadString(item, "pipeline_slug")
       return slug ? { key: `r:${slug}`, label: slug } : { key: "r:_none", label: "No routine" }
@@ -120,8 +168,13 @@ function groupOf(item: InboxItem, dim: GroupDim): { key: string; label: string }
       return iss ? { key: `i:${iss}`, label: iss } : { key: "i:_none", label: "No issue" }
     }
     case "crew": {
-      const crew = payloadString(item, "crew_id")
-      return crew ? { key: `c:${crew}`, label: crew } : { key: "c:_none", label: "No crew" }
+      // Waitpoints carry the crew on invoking_crew_id, other kinds on
+      // crew_id — accept either so a pipeline approval still groups under
+      // its crew.
+      const crew = payloadString(item, "crew_id") || payloadString(item, "invoking_crew_id")
+      if (!crew) return { key: "c:_none", label: "No crew" }
+      const name = crewName?.(crew)
+      return { key: `c:${crew}`, label: name && name !== "" ? name : crew }
     }
     case "kind":
     default:
@@ -135,13 +188,150 @@ interface InboxGroup {
   items: InboxItem[]
 }
 
+// ── Sender avatar ───────────────────────────────────────────────────
+// Renders a per-sender chip so an agent message reads as "🤖 Atlas", a
+// routine notice as a workflow glyph, etc. — instead of the bare kind
+// icon every row shared before. Icon keys off sender_type; the tile
+// colour is hashed from the sender name so each sender is visually
+// stable across rows without needing avatar data fetched per item.
+const SENDER_ICONS = {
+  agent: Bot,
+  crew: Users,
+  pipeline: Workflow,
+  system: Cog,
+} as const
+
+const AVATAR_COLORS = [
+  "bg-blue-500/20 text-blue-300",
+  "bg-violet-500/20 text-violet-300",
+  "bg-amber-500/20 text-amber-300",
+  "bg-emerald-500/20 text-emerald-300",
+  "bg-cyan-500/20 text-cyan-300",
+  "bg-rose-500/20 text-rose-300",
+  "bg-fuchsia-500/20 text-fuchsia-300",
+]
+
+function avatarColor(seed: string): string {
+  let h = 0
+  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0
+  return AVATAR_COLORS[h % AVATAR_COLORS.length]
+}
+
+function SenderAvatar({ item, className }: { item: InboxItem; className?: string }) {
+  const Icon =
+    (item.sender_type && SENDER_ICONS[item.sender_type as keyof typeof SENDER_ICONS]) ||
+    metaFor(item.kind).icon
+  const seed = item.sender_name || item.sender_id || item.kind
+  return (
+    <span
+      className={cn(
+        "grid shrink-0 place-items-center rounded-md",
+        avatarColor(seed),
+        className ?? "h-6 w-6",
+      )}
+      aria-hidden
+    >
+      <Icon className="h-3.5 w-3.5" />
+    </span>
+  )
+}
+
+// ── Secret redaction (client-side display) ──────────────────────────
+// The backend already redacts secrets before they hit body_md, but
+// payload values can still carry credential-ish material an agent put
+// there. Mask anything that looks like a secret in the Context card and
+// reveal it only on explicit click — defense in depth + don't shoulder-
+// surf-leak a token sitting in someone's inbox.
+// Display-only defense in depth: the backend already redacts real secrets
+// out of body_md before they ever reach the client (see inbox.RedactSecrets
+// / lookout.Redact — the source of truth). This just hides a credential-
+// looking *Context value* behind a reveal toggle. Keep the key vocabulary
+// in sync with the backend's kvSecretRe so the two agree on "looks secret"
+// (same keys + "credential"). Mask ONLY a credential-named key or a
+// connection string with inline creds — a bare skill_id / run_id / crew_id
+// is an identifier, not a secret (the thing the user flagged).
+const SECRET_KEY_RE =
+  /(password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|auth|bearer|credential)/i
+const SECRET_VAL_RE = /:\/\/[^/@\s]+:[^/@\s]+@/
+
+function looksSecret(key: string, value: string): boolean {
+  return SECRET_KEY_RE.test(key) || SECRET_VAL_RE.test(value)
+}
+
+function RevealableValue({ value }: { value: string }) {
+  const [shown, setShown] = useState(false)
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span className="font-mono text-[11px] text-foreground/80">
+        {shown ? value : "••••••••"}
+      </span>
+      <button
+        type="button"
+        onClick={() => setShown((s) => !s)}
+        className="text-muted-foreground/60 hover:text-foreground"
+        aria-label={shown ? "Hide value" : "Reveal value"}
+      >
+        {shown ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+      </button>
+    </span>
+  )
+}
+
+// Keys that duplicate what's already shown (body/title) or are pure
+// plumbing — hidden from the human Context card so it reads like a
+// summary, not a JSON dump. The data is still on the wire for anything
+// that needs it programmatically.
+const CONTEXT_HIDE_KEYS = new Set([
+  "reason",
+  "raw_reason",
+  "source",
+  "kind",
+  "inputs",
+  "step_id",
+])
+
+function humanizeKey(k: string): string {
+  return k
+    .replace(/_/g, " ")
+    .replace(/\bid\b/i, "ID")
+    .replace(/^\w/, (c) => c.toUpperCase())
+}
+
+// ContextDetails renders payload as a clean key/value summary instead of
+// a raw <pre>{JSON}</pre> block. Strings that look like secrets are
+// masked with a reveal toggle; nested objects fall back to compact JSON.
+function ContextDetails({ payload }: { payload: Record<string, unknown> }) {
+  const entries = Object.entries(payload).filter(
+    ([k, v]) => !CONTEXT_HIDE_KEYS.has(k) && v !== null && v !== undefined && v !== "",
+  )
+  if (entries.length === 0) return null
+  return (
+    <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1.5 text-[11px]">
+      {entries.map(([k, v]) => {
+        return (
+          <div key={k} className="contents">
+            <dt className="text-muted-foreground/70">{humanizeKey(k)}</dt>
+            <dd className="min-w-0 break-words text-foreground/80">
+              {typeof v === "string" ? (
+                looksSecret(k, v) ? (
+                  <RevealableValue value={v} />
+                ) : (
+                  <span>{v}</span>
+                )
+              ) : (
+                <span className="font-mono text-[10px]">{JSON.stringify(v)}</span>
+              )}
+            </dd>
+          </div>
+        )
+      })}
+    </dl>
+  )
+}
+
 export function InboxList() {
   const { workspaceId } = useWorkspace()
-  // Default to "all" (not "unread"): a blocking item the operator has merely
-  // *read* — e.g. a pending CREDENTIAL escalation they clicked through to — is
-  // still actionable, and a unread-only default silently hides it. The filter
-  // pills still let them narrow to unread.
-  const [stateFilter, setStateFilter] = useState<StateFilter>("all")
+  const [stateFilter, setStateFilter] = useState<StateFilter>("inbox")
   const [selectedId, setSelectedId] = useState<string | null>(null)
   // Snapshot of the open item. Clicking an *unread* row marks it read,
   // which drops it from the unread-filtered list (see use-inbox
@@ -152,8 +342,27 @@ export function InboxList() {
   // the row greys out of Unread, the detail keeps showing).
   const [selectedSnapshot, setSelectedSnapshot] = useState<InboxItem | null>(null)
 
-  const filterParam = stateFilter === "all" ? "all" : stateFilter
+  // inbox → state=active (unread+read, resolved excluded SERVER-SIDE so
+  // archived rows don't eat the LIMIT window); unread/archived map
+  // straight through.
+  const filterParam: "active" | "unread" | "resolved" =
+    stateFilter === "inbox" ? "active" : stateFilter === "unread" ? "unread" : "resolved"
   const { items, unreadCount, loading, error, patch, refresh } = useInbox(workspaceId, filterParam)
+
+  // Server already excludes resolved on the Inbox tab; this is a harmless
+  // belt-and-suspenders so a just-archived row leaves the view instantly
+  // (before the refetch) instead of lingering.
+  const visibleItems = useMemo(
+    () => (stateFilter === "inbox" ? items.filter((it) => it.state !== "resolved") : items),
+    [items, stateFilter],
+  )
+
+  // Crew id → name, so the Crew grouping reads "Engineering" not a raw id.
+  const { data: crews } = useCrewSummaries(workspaceId)
+  const crewName = useMemo(() => {
+    const m = new Map((crews ?? []).map((c) => [c.id, c.name]))
+    return (id: string) => m.get(id) ?? ""
+  }, [crews])
 
   const liveSelected = useMemo(
     () => items.find((it) => it.id === selectedId) ?? null,
@@ -173,15 +382,8 @@ export function InboxList() {
       ? selectedSnapshot
       : null)
 
-  const counts = useMemo(() => {
-    const unread = items.filter((i) => i.state === "unread").length
-    const read = items.filter((i) => i.state === "read").length
-    const resolved = items.filter((i) => i.state === "resolved").length
-    return { unread, read, resolved, total: items.length }
-  }, [items])
-
   // ── Tree grouping + bulk selection ──────────────────────────────
-  const [groupBy, setGroupBy] = useState<GroupDim>("kind")
+  const [groupBy, setGroupBy] = useState<GroupDim>("smart")
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [checked, setChecked] = useState<Set<string>>(new Set())
   const [bulkBusy, setBulkBusy] = useState(false)
@@ -189,21 +391,27 @@ export function InboxList() {
 
   const groups = useMemo<InboxGroup[]>(() => {
     const map = new Map<string, InboxGroup>()
-    for (const it of items) {
-      const g = groupOf(it, groupBy)
+    for (const it of visibleItems) {
+      const g = groupOf(it, groupBy, crewName)
       const bucket = map.get(g.key)
       if (bucket) bucket.items.push(it)
       else map.set(g.key, { key: g.key, label: g.label, items: [it] })
     }
-    return Array.from(map.values())
-  }, [items, groupBy])
+    const out = Array.from(map.values())
+    // Smart buckets get a fixed priority order (decisions → review →
+    // fyi); other dimensions keep newest-first insertion order.
+    if (groupBy === "smart") {
+      out.sort((a, b) => (SMART_ORDER[a.key] ?? 99) - (SMART_ORDER[b.key] ?? 99))
+    }
+    return out
+  }, [visibleItems, groupBy, crewName])
 
   // Drop checked ids that are no longer visible (filter switch, refresh,
   // regroup) so the bulk bar count never lies about what it will act on.
   useEffect(() => {
     setChecked((prev) => {
       if (prev.size === 0) return prev
-      const live = new Set(items.map((i) => i.id))
+      const live = new Set(visibleItems.map((i) => i.id))
       let changed = false
       const next = new Set<string>()
       for (const id of prev) {
@@ -212,7 +420,7 @@ export function InboxList() {
       }
       return changed ? next : prev
     })
-  }, [items])
+  }, [visibleItems])
 
   const toggleCollapse = (key: string) =>
     setCollapsed((prev) => {
@@ -242,10 +450,10 @@ export function InboxList() {
   // close vs. decision items the server will refuse to close. Drives the
   // confirmation warning so nothing important gets mass-closed by mistake.
   const selectionSplit = useMemo(() => {
-    const sel = items.filter((it) => checked.has(it.id))
+    const sel = visibleItems.filter((it) => checked.has(it.id))
     const decision = sel.filter(isDecisionItem)
     return { total: sel.length, decision: decision.length, safe: sel.length - decision.length }
-  }, [items, checked])
+  }, [visibleItems, checked])
 
   // Bulk apply via /inbox/bulk. Chunked to the backend's 500-id cap so a
   // large select-all can't fail the whole action; the server skips
@@ -318,19 +526,19 @@ export function InboxList() {
           className="shrink-0 [&>button]:flex-1"
         >
           <TabBar.Item
+            value="inbox"
+            count={stateFilter === "inbox" ? visibleItems.length : null}
+          >
+            Inbox
+          </TabBar.Item>
+          <TabBar.Item
             value="unread"
-            count={stateFilter === "unread" ? items.length : counts.unread}
+            count={stateFilter === "unread" ? visibleItems.length : unreadCount || null}
           >
             Unread
           </TabBar.Item>
-          <TabBar.Item value="all" count={stateFilter === "all" ? items.length : null}>
-            All
-          </TabBar.Item>
-          <TabBar.Item
-            value="resolved"
-            count={stateFilter === "resolved" ? items.length : null}
-          >
-            Resolved
+          <TabBar.Item value="archived" count={stateFilter === "archived" ? visibleItems.length : null}>
+            Archived
           </TabBar.Item>
         </TabBar>
 
@@ -359,13 +567,13 @@ export function InboxList() {
 
         {/* List — collapsible tree, one folder per group */}
         <div className="flex-1 overflow-y-auto">
-          {loading && items.length === 0 ? (
+          {loading && visibleItems.length === 0 ? (
             <ListRowSkeleton rows={3} className="p-3" />
           ) : error ? (
             <div className="p-6 text-center text-xs text-rose-300">
               Inbox unavailable: {error}
             </div>
-          ) : items.length === 0 ? (
+          ) : visibleItems.length === 0 ? (
             <InboxEmpty filter={stateFilter} />
           ) : (
             <div>
@@ -490,6 +698,25 @@ export function InboxList() {
                   toast.success(`Marked as ${action}`)
                   refresh()
                 }}
+                onArchive={async () => {
+                  // Gmail archive: move out of the inbox into Archived
+                  // without a "decision" outcome. Maps to resolved with a
+                  // dedicated action so it's distinguishable from an
+                  // explicit dismiss/approve in the audit trail. Undo
+                  // restores it to read (back in the inbox, not unread).
+                  const prevState = selected.state
+                  await patch(selected.id, "resolved", "archived")
+                  toast.success("Archived", {
+                    action: {
+                      label: "Undo",
+                      onClick: () => {
+                        void patch(selected.id, prevState === "unread" ? "unread" : "read")
+                          .then(refresh)
+                          .catch(() => {})
+                      },
+                    },
+                  })
+                }}
                 onMarkUnread={() => patch(selected.id, "unread")}
                 // onRefresh lets source-managed actions (e.g. PR-D
                 // approve-hire, which resolves the inbox row server-
@@ -586,14 +813,14 @@ function InboxRow({
           aria-label={`Select ${item.title}`}
         />
       </span>
-      {/* unread dot — left of icon */}
+      {/* unread dot — left of the sender avatar */}
       <span
         className={cn(
-          "mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full",
+          "mt-2 h-1.5 w-1.5 shrink-0 rounded-full",
           item.state === "unread" ? "bg-blue-400" : "bg-transparent",
         )}
       />
-      <Icon className={cn("mt-0.5 h-4 w-4 shrink-0", meta.accent)} />
+      <SenderAvatar item={item} className="mt-0.5 h-6 w-6" />
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline gap-2">
           <span
@@ -606,10 +833,11 @@ function InboxRow({
           </span>
         </div>
         <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-muted-foreground/70">
+          <Icon className={cn("h-3 w-3 shrink-0", meta.accent)} />
           <span>{meta.label}</span>
-          {item.sender_name && <><span>·</span><span>{item.sender_name}</span></>}
+          {item.sender_name && <><span>·</span><span className="truncate">{item.sender_name}</span></>}
           <span>·</span>
-          <span>{relTime(item.created_at)}</span>
+          <span className="shrink-0">{relTime(item.created_at)}</span>
         </div>
       </div>
       <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground/30" />
@@ -620,17 +848,25 @@ function InboxRow({
 function InboxDetail({
   item,
   onResolve,
+  onArchive,
   onMarkUnread,
   onRefresh,
 }: {
   item: InboxItem
   onResolve: (action: string) => void | Promise<void>
+  onArchive: () => void | Promise<void>
   onMarkUnread: () => void
   onRefresh: () => void | Promise<void>
 }) {
   const meta = metaFor(item.kind)
   const Icon = meta.icon
   const isResolved = item.state === "resolved"
+  // Decision items (waitpoint / escalation / blocking) can't be blind-
+  // archived — they're source-managed (inbox PATCH→resolved 409s) and an
+  // agent is waiting on a real decision. Everything else (messages,
+  // failed-run notices, advisories) archives Gmail-style.
+  const archivable =
+    !isResolved && item.kind !== "waitpoint" && item.kind !== "escalation" && !item.blocking
 
   return (
     <div className="flex h-full flex-col">
@@ -650,22 +886,32 @@ function InboxDetail({
           )}
         </div>
         <h1 className="mt-1.5 text-base font-semibold">{item.title}</h1>
-        <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
-          {item.sender_name && <span>From: {item.sender_name}</span>}
-          {item.sender_name && <span>·</span>}
-          <span>{relTime(item.created_at)}</span>
-          {isResolved && item.resolved_action && (
-            <>
-              <span>·</span>
-              <span className="text-emerald-400">resolved · {item.resolved_action}</span>
-            </>
-          )}
+        <div className="mt-3 flex items-center gap-2.5">
+          <SenderAvatar item={item} className="h-8 w-8" />
+          <div className="min-w-0">
+            <div className="text-xs font-medium text-foreground">
+              {item.sender_name || meta.label}
+            </div>
+            <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+              {item.sender_type && <span>{item.sender_type}</span>}
+              {item.sender_type && <span>·</span>}
+              <span>{relTime(item.created_at)}</span>
+              {isResolved && item.resolved_action && (
+                <>
+                  <span>·</span>
+                  <span className="text-emerald-400">{item.resolved_action}</span>
+                </>
+              )}
+            </div>
+          </div>
         </div>
       </div>
 
+      {/* Body — rendered markdown (headings, lists, code) rather than a
+          raw pre-wrapped blob, so a change plan reads like a document. */}
       {item.body_md && (
-        <div className="border-b border-white/[0.06] px-6 py-4 text-sm text-foreground/80 whitespace-pre-wrap">
-          {item.body_md}
+        <div className="border-b border-white/[0.06] px-6 py-4">
+          <MarkdownContent compact>{item.body_md}</MarkdownContent>
         </div>
       )}
 
@@ -695,24 +941,50 @@ function InboxDetail({
         )
       })()}
 
-      {/* Payload (debug / advanced) */}
+      {/* Context — humanised key/value summary (secrets masked) instead
+          of a raw JSON dump. */}
       {item.payload && Object.keys(item.payload).length > 0 && (
-        <div className="border-t border-white/[0.06] px-6 py-4 text-[11px]">
-          <div className="mb-2 text-[10px] uppercase tracking-wider text-muted-foreground/60">
+        <div className="border-t border-white/[0.06] px-6 py-4">
+          <div className="mb-2.5 text-[10px] uppercase tracking-wider text-muted-foreground/60">
             Context
           </div>
-          <pre className="overflow-auto rounded border border-white/[0.06] bg-card/40 p-2 text-[11px] font-mono">
-{JSON.stringify(item.payload, null, 2)}
-          </pre>
+          <ContextDetails payload={item.payload} />
         </div>
       )}
 
-      <div className="mt-auto border-t border-white/[0.06] bg-card/20 px-6 py-3">
+      <div className="mt-auto flex items-center gap-2 border-t border-white/[0.06] bg-card/20 px-6 py-3">
         {!isResolved ? (
-          <Button size="sm" variant="ghost" onClick={onMarkUnread} className="text-xs">
-            <Bell className="mr-1.5 h-3 w-3" />
-            Mark unread
-          </Button>
+          <>
+            <Button size="sm" variant="ghost" onClick={onMarkUnread} className="text-xs">
+              <Bell className="mr-1.5 h-3 w-3" />
+              Mark unread
+            </Button>
+            {archivable && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => void onArchive()}
+                className="text-xs"
+              >
+                <Archive className="mr-1.5 h-3 w-3" />
+                Archive
+              </Button>
+            )}
+          </>
+        ) : item.resolved_action === "archived" ? (
+          <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+            <Archive className="h-3 w-3" />
+            Archived {relTime(item.resolved_at ?? item.updated_at)}
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={onMarkUnread}
+              className="ml-1 h-auto px-1.5 py-0.5 text-[11px]"
+            >
+              <RotateCcw className="mr-1 h-3 w-3" />
+              Restore
+            </Button>
+          </span>
         ) : (
           <span className="text-[11px] text-muted-foreground">
             Resolved {relTime(item.resolved_at ?? item.updated_at)}
@@ -1094,14 +1366,14 @@ function InboxEmpty({ filter }: { filter: StateFilter }) {
       title={
         filter === "unread"
           ? "All caught up"
-          : filter === "resolved"
-            ? "No resolved items yet"
-            : "Nothing here"
+          : filter === "archived"
+            ? "Nothing archived yet"
+            : "Inbox zero"
       }
       description={
-        filter === "unread"
-          ? "Agents have nothing waiting on you. New waitpoints, escalations, and failed runs will appear here."
-          : "Items will show up as they get resolved."
+        filter === "archived"
+          ? "Archived items live here. Archive a message to clear it from your inbox without losing it."
+          : "Agents have nothing waiting on you. New waitpoints, escalations, failed runs, and messages will appear here."
       }
     />
   )

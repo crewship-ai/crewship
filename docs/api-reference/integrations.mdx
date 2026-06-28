@@ -50,6 +50,7 @@ All integration endpoints require authentication and workspace context (except w
 | `GET` | [`/api/v1/integrations/composio/triggers`](#composio-triggers) | List available trigger types |
 | `GET` | [`/api/v1/integrations/composio/triggers/active`](#composio-active-triggers) | List active trigger instances |
 | `POST` | [`/api/v1/integrations/composio/triggers`](#composio-create-trigger) | Create/enable a trigger instance for a user |
+| `POST` | [`/api/v1/integrations/composio/connect`](#composio-connect) | Start an OAuth Connect Link for an app/user |
 | `GET` | [`/api/v1/integrations/composio/settings`](#composio-settings) | Get the workspace Composio config status |
 | `PUT` | [`/api/v1/integrations/composio/settings`](#composio-settings) | Set & validate the workspace Composio API key |
 | `DELETE` | [`/api/v1/integrations/composio/settings`](#composio-settings) | Remove the workspace API key (revert to env) |
@@ -307,6 +308,42 @@ unconfigured.
 
 CLI: `crewship integration composio triggers enable <slug> --user <id>`.
 
+### Composio Connect
+
+```
+POST /api/v1/integrations/composio/connect?workspace_id={workspaceId}
+```
+
+Starts an OAuth Connect Link for an app and user. Requires workspace **manage**
+(OWNER/ADMIN). Finds the toolkit's auth config (creating a managed one on demand
+if none exists), then creates a Composio Connect Link for the given user.
+
+**Request body:**
+
+```json
+{ "toolkit": "gmail", "user_id": "user-42" }
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `toolkit` | string | App slug to authorize (**required**) |
+| `user_id` | string | Composio user to connect the account under (**required**) |
+
+Returns `400` if either field is empty, or if Composio is unconfigured.
+
+**Response:** `200 OK`
+
+```json
+{
+  "redirect_url": "https://…",
+  "connected_account_id": "ca_…",
+  "user_id": "user-42"
+}
+```
+
+The end-user opens `redirect_url` to authorize. Returns `502` on an upstream
+Composio failure. CLI: `crewship integration composio connect <toolkit> --user <id>`.
+
 ### Composio Settings
 
 Manage the **per-workspace** Composio API key from the app instead of the
@@ -322,12 +359,15 @@ DELETE /api/v1/integrations/composio/settings?workspace_id={workspaceId}
 ```
 
 `GET` (read) returns the status; `PUT`/`DELETE` require workspace **manage**
-(OWNER/ADMIN). `PUT` body: `{ "api_key": "ak_…", "base_url": "", "label": "" }`.
+(OWNER/ADMIN). `PUT` body: `{ "api_key": "ak_…", "label": "" }`.
+
+The Composio host is server-controlled via the `COMPOSIO_BASE_URL` env var, not
+via this API.
 
 **Response (GET / PUT / DELETE):** `200 OK`
 
 ```json
-{ "configured": true, "source": "workspace", "label": "Crewship_dev_1", "base_url": "" }
+{ "configured": true, "source": "workspace", "label": "Crewship_dev_1" }
 ```
 
 | Field | Type | Description |

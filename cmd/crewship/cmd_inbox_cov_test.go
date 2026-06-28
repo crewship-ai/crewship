@@ -441,3 +441,59 @@ func TestInboxBulkRunE_AuthGatesAndListErrors(t *testing.T) {
 		t.Errorf("expected decode error; got %v", err)
 	}
 }
+
+// ─── inbox get ───────────────────────────────────────────────────────────
+
+func TestInboxGetRunE_RendersBodyAndContext(t *testing.T) {
+	stub := covSetupCli5(t)
+	item := map[string]any{
+		"id": "inb_9", "kind": "waitpoint", "title": "Approve restart",
+		"body_md": "## Plan\nrolling restart", "sender_name": "atlas",
+		"sender_type": "pipeline", "state": "unread", "priority": "high",
+		"payload": map[string]any{"pipeline_run_id": "run_1", "step_id": "approve"},
+	}
+	stub.OnGet("/api/v1/inbox/inb_9", clitest.JSONResponse(200, item))
+
+	var err error
+	out := covCaptureStdoutCli5(t, func() { err = inboxGetCmd.RunE(inboxGetCmd, []string{"inb_9"}) })
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	for _, want := range []string{"Approve restart", "atlas", "## Plan", "pipeline_run_id"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("get output missing %q; got:\n%s", want, out)
+		}
+	}
+	calls := stub.CallsFor("GET", "/api/v1/inbox/inb_9")
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 GET, got %d", len(calls))
+	}
+	if !strings.Contains(calls[0].Query, "workspace_id="+covWSCli5) {
+		t.Errorf("get query missing workspace_id: %q", calls[0].Query)
+	}
+}
+
+// ─── inbox archive ───────────────────────────────────────────────────────
+
+func TestInboxArchiveRunE_MapsToResolvedArchived(t *testing.T) {
+	stub := covSetupCli5(t)
+	stub.OnPatch("/api/v1/inbox/inb_7", clitest.JSONResponse(200, map[string]any{"ok": true}))
+
+	var err error
+	covCaptureStdoutCli5(t, func() { err = inboxArchiveCmd.RunE(inboxArchiveCmd, []string{"inb_7"}) })
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	calls := stub.CallsFor("PATCH", "/api/v1/inbox/inb_7")
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 PATCH, got %d", len(calls))
+	}
+	var body map[string]string
+	clitest.MustDecodeJSONBody(calls[0].Body, &body)
+	if body["state"] != "resolved" {
+		t.Errorf("state = %q, want resolved", body["state"])
+	}
+	if body["resolved_action"] != "archived" {
+		t.Errorf("resolved_action = %q, want archived", body["resolved_action"])
+	}
+}

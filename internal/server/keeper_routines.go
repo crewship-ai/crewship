@@ -319,6 +319,21 @@ func (p *sqlSkillPersister) WriteInboxItem(ctx context.Context, skillID, reason 
 		return nil
 	}
 
+	// A skill needing review is a real pending item even when the curator
+	// LLM is down — so we keep the row, but never show the operator the
+	// raw "Keeper LLM unavailable: paymaster…" plumbing error. SanitizeReason
+	// swaps it for a friendly line; the raw text is preserved in payload
+	// for operators / logs.
+	friendly, infra := inbox.SanitizeReason(reason)
+	payload := map[string]interface{}{
+		"skill_id": skillID,
+		"reason":   friendly,
+		"source":   "routine",
+	}
+	if infra {
+		payload["raw_reason"] = reason
+	}
+
 	var firstErr error
 	for _, workspaceID := range workspaceIDs {
 		// Scope source_id by workspace because the inbox unique index
@@ -332,17 +347,13 @@ func (p *sqlSkillPersister) WriteInboxItem(ctx context.Context, skillID, reason 
 			SourceID:    "skill_review_" + skillID + "_" + workspaceID,
 			TargetRole:  "MANAGER",
 			Title:       "Skill review: " + skillID,
-			BodyMD:      reason,
+			BodyMD:      friendly,
 			SenderType:  "system",
 			SenderID:    "keeper_skill_review_routine",
 			SenderName:  "Skill Curator",
 			Priority:    "medium",
 			Blocking:    blocking,
-			Payload: map[string]interface{}{
-				"skill_id": skillID,
-				"reason":   reason,
-				"source":   "routine",
-			},
+			Payload:     payload,
 		}); err != nil {
 			// Log per-workspace and keep going — one workspace's
 			// inbox being unavailable shouldn't drop notifications for
@@ -510,13 +521,27 @@ func (p *sqlMemoryHealthPersister) WriteInboxItem(ctx context.Context, workspace
 	// freely-dismissable notification, and the bulk-resolve guard no
 	// longer treats it as a protected decision item. Non-blocking for
 	// the same reason: there is no decision to block on.
+	//
+	// Anti-spam: this advisory exists ONLY because the evaluator produced
+	// a reason. When that reason is an infrastructure outage (curator LLM
+	// down / unparseable) the row carries nothing the operator can act on
+	// — it's the same "Curator unavailable" line for every crew, every
+	// sweep, several times a day (the inbox-flooding bug). Suppress it:
+	// log once for diagnostics, write no row. A real finding still lands,
+	// with the raw plumbing error never shown to the user.
+	friendly, infra := inbox.SanitizeReason(reason)
+	if infra {
+		p.logger.Info("keeper.memory_health_check: advisory suppressed (curator unavailable)",
+			"workspace_id", workspaceID, "crew_id", crewID)
+		return nil
+	}
 	if err := inbox.Insert(ctx, p.db, p.logger, inbox.Item{
 		WorkspaceID: workspaceID,
 		Kind:        inbox.KindMessage,
 		SourceID:    "memory_health_advisory_" + crewID + "_" + time.Now().UTC().Format("20060102"),
 		TargetRole:  "MANAGER",
 		Title:       "Memory health advisory",
-		BodyMD:      reason,
+		BodyMD:      friendly,
 		SenderType:  "system",
 		SenderID:    "keeper_memory_health_routine",
 		SenderName:  "Memory Health",
@@ -524,7 +549,7 @@ func (p *sqlMemoryHealthPersister) WriteInboxItem(ctx context.Context, workspace
 		Blocking:    false,
 		Payload: map[string]interface{}{
 			"crew_id": crewID,
-			"reason":  reason,
+			"reason":  friendly,
 			"source":  "routine",
 		},
 	}); err != nil {

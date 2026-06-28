@@ -5,7 +5,7 @@ import { Users } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-import { ToolkitIcon, StatusDot, EmptyHint } from "./shared"
+import { ToolkitIcon, StatusDot, EmptyHint, toolkitLabel } from "./shared"
 import type { Inventory } from "./types"
 
 type AccountAction = "revoke" | "refresh" | "remove"
@@ -92,18 +92,27 @@ export function ConnectedAccountsTab({
                   + Connect account
                 </Button>
               </div>
-              <div className="mt-2 flex flex-wrap gap-2">
+              {/* Accounts stack vertically — one full-width row each — so
+                  duplicates and long slugs read top-to-bottom instead of
+                  wrapping unpredictably as inline pills. Reuses the bordered-
+                  rows pattern from the access editor's granted-apps list. */}
+              <div className="mt-2 overflow-hidden rounded-lg border border-white/10">
                 {u.connected_accounts.map((a) => {
                   const pending = busy[a.id]
                   return (
-                    <span
+                    <div
                       key={a.id}
-                      className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-2 py-1 text-[11px]"
+                      data-testid={`account-row-${a.id}`}
+                      className="flex items-center gap-3 border-t border-white/[0.06] px-3 py-2 first:border-t-0"
                     >
-                      <ToolkitIcon toolkit={a.toolkit} size={14} />
-                      <span className="capitalize">{a.toolkit.slug}</span>
+                      <span className="flex min-w-0 flex-1 items-center gap-2 text-[13px]">
+                        <ToolkitIcon toolkit={a.toolkit} size={16} />
+                        <span className="truncate font-medium">
+                          {toolkitLabel(a.toolkit.slug)}
+                        </span>
+                      </span>
                       <StatusDot status={a.status} />
-                      <span className="flex items-center gap-1 border-l border-white/10 pl-2">
+                      <span className="flex shrink-0 items-center gap-1 border-l border-white/10 pl-2.5">
                         <AccountAction
                           label="Refresh"
                           onClick={() => act(a.id, "refresh")}
@@ -124,7 +133,7 @@ export function ConnectedAccountsTab({
                           disabled={!!pending}
                         />
                       </span>
-                    </span>
+                    </div>
                   )
                 })}
               </div>
@@ -155,7 +164,10 @@ function AccountAction({
       onClick={onClick}
       disabled={disabled}
       className={cn(
+        // ring-inset so the focus outline draws inside the button and isn't
+        // clipped by the row container's overflow-hidden rounded border.
         "rounded px-1.5 py-0.5 text-[10px] transition-colors disabled:opacity-50",
+        "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-blue-400/70",
         danger
           ? "text-muted-foreground hover:text-red-400"
           : "text-muted-foreground hover:text-foreground",

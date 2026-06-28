@@ -111,7 +111,7 @@ crewship inbox bulk read --all-unread
 crewship inbox bulk resolve --ids inbox_abc,inbox_def --action acknowledged
 ```
 
-The bulk loop is sequential, not concurrent (the server has no bulk endpoint today). Per-item failures are reported but **do not abort the loop** — a stale id won't void a 200-item clean-up. The final line is `N ok / M failed`, and the process exits non-zero if any item failed.
+The bulk loop is sequential, not concurrent: the CLI still loops per-item client-side. The server now exposes [`POST /api/v1/inbox/bulk`](/api-reference/inbox#post-apiv1inboxbulk) (the web UI uses it for one-request group triage); wiring the CLI to that endpoint is a follow-up. Per-item failures are reported but **do not abort the loop** — a stale id won't void a 200-item clean-up. The final line is `N ok / M failed`, and the process exits non-zero if any item failed.
 
 If `--all-unread` returns exactly the page cap (500), the CLI refuses to proceed silently and tells you to re-run or narrow with `--ids`, so the tail isn't lost.
 

@@ -63,9 +63,16 @@ func (claudeCodeAdapter) BuildCommand(req AgentRunRequest) []string {
 	}
 	systemPrompt := crewshipSystemPreamble + req.SystemPrompt
 	cmd = append(cmd, "--system-prompt", systemPrompt)
-	if req.ToolProfile == "MINIMAL" {
-		cmd = append(cmd, "--tools", "Read,Search,Grep")
-	}
+	// Curate the built-in tool surface for EVERY profile (previously only
+	// MINIMAL was restricted, so CODING/FULL agents inherited Claude Code's
+	// full default catalog — including harness-internal tools like TaskCreate,
+	// ToolSearch, Agent, Workflow and Cron* that have no Crewship backing). An
+	// agent calling one of those wrote to ephemeral in-process state and could
+	// not say where the data went. `--tools` restricts AVAILABILITY (tools not
+	// listed are removed from the model's context); MCP tools come from
+	// --mcp-config and are unaffected, so crewship-memory + Composio still
+	// resolve. The per-profile policy lives in builtinToolAllowlist.
+	cmd = append(cmd, "--tools", builtinToolAllowlistCSV(req.ToolProfile))
 	// --max-turns caps runaway loops at the Claude side as defense-in-depth
 	// alongside Crewship's mission-level paymaster budget. 50 is generous
 	// enough for complex multi-step tasks without letting a stuck agent
