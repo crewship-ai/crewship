@@ -90,6 +90,11 @@ type Executor struct {
 	// step without bumping the routine version. Nil = run as authored.
 	stepOverrides *StepOverrideStore
 
+	// signals is the shared in-process registry for run signals (Wave
+	// 4.3). A wait:event step registers here and blocks; the signal
+	// endpoint delivers a payload. Nil = wait:event fails closed.
+	signals *SignalRegistry
+
 	// waitpoints persists wait step state so long sleeps survive
 	// process restarts. Nil = wait steps execute in-memory only
 	// (useful for tests; production wiring uses the WaitpointStore
@@ -155,6 +160,13 @@ func (e *Executor) SetAllowPrivateHTTPForTesting(v bool) {
 // table + encryption.Decrypt).
 func (e *Executor) WithCredentialResolver(fn func(ctx context.Context, credType string) (string, error)) *Executor {
 	e.credentialByType = fn
+	return e
+}
+
+// WithSignalRegistry wires the in-process run-signal registry (Wave 4.3).
+// Without it, wait:event steps fail closed.
+func (e *Executor) WithSignalRegistry(s *SignalRegistry) *Executor {
+	e.signals = s
 	return e
 }
 
@@ -1050,6 +1062,40 @@ func (e *Executor) runStep(
 		span.End()
 	}()
 
+	// Per-step before hook (Wave 4.1): runs ahead of the step; its
+	// failure fails the step (setup contract, like routine before_all).
+	if step.Hooks != nil && step.Hooks.Before != nil {
+		if _, herr := e.runStepHook(ctx, step.Hooks.Before, in, runID, parentRender); herr != nil {
+			return "", 0, 0, fmt.Errorf("step %q before hook: %w", step.ID, herr)
+		}
+	}
+
+	out, cost, dur, err := e.dispatchStep(ctx, step, renderedPrompt, primary, fallback, in, runID, pipelineID, emit, parentRender, depth)
+
+	// Per-step after hook: best-effort once the step itself completes
+	// (logged, never overrides the step's outcome).
+	if err == nil && step.Hooks != nil && step.Hooks.After != nil {
+		if _, herr := e.runStepHook(ctx, step.Hooks.After, in, runID, parentRender); herr != nil {
+			e.persistWarn("step after hook", runID, herr)
+		}
+	}
+	return out, cost, dur, err
+}
+
+// dispatchStep is the raw per-type step dispatch (no hooks). Split out so
+// runStep can wrap it with per-step lifecycle hooks.
+func (e *Executor) dispatchStep(
+	ctx context.Context,
+	step Step,
+	renderedPrompt string,
+	primary AdapterModel,
+	fallback []AdapterModel,
+	in RunInput,
+	runID, pipelineID string,
+	emit *pipelineEmitContext,
+	parentRender RenderContext,
+	depth int,
+) (string, float64, int64, error) {
 	switch step.Type {
 	case StepAgentRun:
 		return e.runAgentStep(ctx, step, renderedPrompt, primary, fallback, in, runID, pipelineID, emit)
@@ -1065,6 +1111,25 @@ func (e *Executor) runStep(
 		return e.runTransformStep(step, parentRender)
 	default:
 		return "", 0, 0, fmt.Errorf("unsupported step type %q", step.Type)
+	}
+}
+
+// runStepHook runs a per-step hook against the step's parent render
+// context (so it sees the same inputs/outputs the step does). Restricted
+// to code | http | transform, like routine hooks.
+func (e *Executor) runStepHook(ctx context.Context, hook *Step, in RunInput, runID string, parentRender RenderContext) (string, error) {
+	switch hook.Type {
+	case StepHTTP:
+		out, _, _, err := e.runHTTPStep(ctx, *hook, parentRender)
+		return out, err
+	case StepCode:
+		out, _, _, err := e.runCodeStep(ctx, *hook, parentRender, in)
+		return out, err
+	case StepTransform:
+		out, _, _, err := e.runTransformStep(*hook, parentRender)
+		return out, err
+	default:
+		return "", fmt.Errorf("step hook %q type %q not allowed (use code, http, or transform)", hook.ID, hook.Type)
 	}
 }
 

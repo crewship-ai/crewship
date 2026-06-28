@@ -20,6 +20,20 @@ func TestValidateHooks_RejectsNonSideChannelTypes(t *testing.T) {
 	}
 }
 
+func TestValidateStepHooks(t *testing.T) {
+	// agent_run per-step hook → rejected.
+	st := Step{ID: "s", Type: StepCode, Code: &CodeStep{Runtime: "cel", Code: "1 > 0"},
+		Hooks: &StepHooks{Before: &Step{ID: "b", Type: StepAgentRun, AgentSlug: "x", Prompt: "y"}}}
+	if err := validateStepHooks(st); err == nil {
+		t.Fatal("agent_run step hook should be rejected")
+	}
+	// http after hook → allowed.
+	st.Hooks = &StepHooks{After: &Step{ID: "a", Type: StepHTTP, HTTP: &HTTPStep{Method: "POST", URL: "https://x"}}}
+	if err := validateStepHooks(st); err != nil {
+		t.Fatalf("http step hook should be allowed: %v", err)
+	}
+}
+
 func TestRunHooksAround(t *testing.T) {
 	e := &Executor{codeRunner: NewMultiCodeRunner()}
 	ctx := context.Background()

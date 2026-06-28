@@ -25,13 +25,14 @@ type PipelineHandler struct {
 	resolver   *pipeline.Resolver
 	runner     pipeline.AgentRunner
 	emitter    pipeline.Emitter
-	waitpoints pipeline.WaitpointStore // optional; nil → wait approval steps fall back to in-memory timeout
-	ws         pipeline.WSBroadcaster  // optional; nil → no live pipeline event push to frontend
-	schedules  *pipeline.ScheduleStore // optional; nil → schedule endpoints return 503
-	runs       *pipeline.RunRegistry   // optional; nil → cancel endpoint returns 503
-	webhooks   *pipeline.WebhookStore  // optional; nil → webhook endpoints return 503
-	runStore   *pipeline.RunStore      // optional; nil → list-runs falls back to journal LIKE scan, no persistence
-	codeRunner pipeline.CodeRunner     // optional; nil → type:code steps fail closed with a wiring hint
+	waitpoints pipeline.WaitpointStore  // optional; nil → wait approval steps fall back to in-memory timeout
+	ws         pipeline.WSBroadcaster   // optional; nil → no live pipeline event push to frontend
+	schedules  *pipeline.ScheduleStore  // optional; nil → schedule endpoints return 503
+	runs       *pipeline.RunRegistry    // optional; nil → cancel endpoint returns 503
+	webhooks   *pipeline.WebhookStore   // optional; nil → webhook endpoints return 503
+	runStore   *pipeline.RunStore       // optional; nil → list-runs falls back to journal LIKE scan, no persistence
+	codeRunner pipeline.CodeRunner      // optional; nil → type:code steps fail closed with a wiring hint
+	signals    *pipeline.SignalRegistry // optional; shared registry for wait:event signal delivery (Wave 4.3)
 	// saveTokenSecret signs the optional save_token returned by
 	// /test_run and verified by /save. Lets save flows skip the body-
 	// trust on last_test_run_at (callers can otherwise mint timestamps;
@@ -93,6 +94,18 @@ func (h *PipelineHandler) SetSaveTokenSecret(secret []byte) {
 // and list-runs falls back to the legacy scan path.
 func (h *PipelineHandler) SetRunStore(s *pipeline.RunStore) {
 	h.runStore = s
+}
+
+// SetSignalRegistry wires the shared in-process run-signal registry so
+// wait:event steps and the signal endpoint share delivery channels.
+func (h *PipelineHandler) SetSignalRegistry(s *pipeline.SignalRegistry) {
+	h.signals = s
+}
+
+// SignalRegistry exposes the wired registry (nil until set) so the
+// scheduler/dispatcher executor can share it.
+func (h *PipelineHandler) SignalRegistry() *pipeline.SignalRegistry {
+	return h.signals
 }
 
 // SetJournal wires a journal Emitter post-construction so journal
@@ -191,6 +204,9 @@ func (h *PipelineHandler) newExecutor() *pipeline.Executor {
 	}
 	if h.codeRunner != nil {
 		exec = exec.WithCodeRunner(h.codeRunner)
+	}
+	if h.signals != nil {
+		exec = exec.WithSignalRegistry(h.signals)
 	}
 	return exec
 }

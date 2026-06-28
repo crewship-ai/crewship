@@ -111,7 +111,43 @@ var routineTreeCmd = &cobra.Command{
 	},
 }
 
+var routineSignalCmd = &cobra.Command{
+	Use:   "signal <run_id>",
+	Short: "Deliver a payload to a running run's wait:event step (input-stream injection)",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+		event, _ := cmd.Flags().GetString("event")
+		payload, _ := cmd.Flags().GetString("payload")
+		if event == "" {
+			return fmt.Errorf("--event <type> required")
+		}
+		client := newAPIClient()
+		ws := client.GetWorkspaceID()
+		resp, err := client.Do("POST",
+			fmt.Sprintf("/api/v1/workspaces/%s/pipeline-runs/%s/signal", ws, args[0]),
+			map[string]any{"event_type": event, "payload": payload})
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		fmt.Printf("Signal %q delivered to run %s.\n", event, args[0])
+		return nil
+	},
+}
+
 func init() {
+	routineSignalCmd.Flags().String("event", "", "event_type the wait:event step is waiting on (REQUIRED)")
+	routineSignalCmd.Flags().String("payload", "", "string payload that becomes the wait step's output")
+	pipelineCmd.AddCommand(routineSignalCmd)
 	routineMetadataCmd.Flags().String("set", "", "JSON object of keys to set (e.g. '{\"stage\":\"done\"}')")
 	routineMetadataCmd.Flags().String("increment", "", "JSON object of numeric keys to add to (e.g. '{\"count\":1}')")
 	routineMetadataCmd.Flags().String("append", "", "JSON object of array keys to push onto (e.g. '{\"errors\":\"oops\"}')")

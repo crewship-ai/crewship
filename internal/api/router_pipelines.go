@@ -85,6 +85,7 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}", authed(wsCtx(http.HandlerFunc(pipes.GetRun))))
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/tree", authed(wsCtx(http.HandlerFunc(pipes.GetRunTree))))
 	r.mux.Handle("PATCH /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/metadata", authed(wsCtx(http.HandlerFunc(pipes.UpdateRunMetadata))))
+	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/signal", authed(wsCtx(http.HandlerFunc(pipes.SignalRun))))
 	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/runs/{runId}/cancel", authed(wsCtx(http.HandlerFunc(pipes.CancelRun))))
 	// Observability (trigger.dev-informed): replay a failed run with its
 	// original inputs, bulk-replay a fingerprint group, and list failures

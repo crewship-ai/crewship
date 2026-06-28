@@ -46,6 +46,40 @@ func (h *PipelineHandler) UpdateRunMetadata(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, map[string]any{"metadata": merged})
 }
 
+// SignalRun delivers a payload to a wait:event step in a running run
+// (Wave 4.3 input-stream injection). The wait step resumes with the
+// payload as its output.
+// POST /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/signal
+func (h *PipelineHandler) SignalRun(w http.ResponseWriter, r *http.Request) {
+	runID := r.PathValue("runId")
+	if runID == "" {
+		replyError(w, http.StatusBadRequest, "runId required")
+		return
+	}
+	if h.signals == nil {
+		replyError(w, http.StatusServiceUnavailable, "signal registry not wired")
+		return
+	}
+	var body struct {
+		EventType string `json:"event_type"`
+		Payload   string `json:"payload"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxExecBodyBytes)).Decode(&body); err != nil {
+		replyError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if body.EventType == "" {
+		replyError(w, http.StatusBadRequest, "event_type required")
+		return
+	}
+	delivered := h.signals.Signal(runID, body.EventType, body.Payload)
+	if !delivered {
+		replyError(w, http.StatusNotFound, "no run waiting on that event (run not at the wait step, or wrong event_type)")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "delivered": true})
+}
+
 // GetRunTree returns a run and its descendants (call_pipeline / deferred
 // / replay parentage) as a flat, parent-linked list.
 // GET /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/tree

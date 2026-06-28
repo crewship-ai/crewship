@@ -442,6 +442,13 @@ var startCmd = &cobra.Command{
 			srv.APIRouter().PipelinesHandler.SetCodeRunner(pipeline.NewMultiCodeRunner())
 			logger.Info("pipeline code runner wired (deterministic expr+cel runtimes; token-zero, no container)")
 
+			// Shared signal registry for wait:event input-stream injection
+			// (Wave 4.3) — one process-wide instance so the signal endpoint
+			// and the executing run share delivery channels.
+			signalRegistry := pipeline.NewSignalRegistry()
+			srv.APIRouter().PipelinesHandler.SetSignalRegistry(signalRegistry)
+			logger.Info("pipeline signal registry wired (wait:event input-stream injection)")
+
 			// Wire production WaitpointStore so StepWait approvals
 			// persist across restarts and the inbox UI can fire
 			// /pipelines/waitpoints/{token}/approve. Without this,
@@ -616,7 +623,8 @@ var startCmd = &cobra.Command{
 					// a scheduled cost-spike-probe (a type:code routine)
 					// fails with "no CodeRunner wired".
 					WithCodeRunner(pipeline.NewMultiCodeRunner()).
-					WithStepOverrides(pipeline.NewStepOverrideStore(deps.DB))
+					WithStepOverrides(pipeline.NewStepOverrideStore(deps.DB)).
+					WithSignalRegistry(ph.SignalRegistry())
 				// Without WithRunStore here, scheduled runs would
 				// never land in the pipeline_runs projection — the
 				// /run-records endpoint and boot-time interrupted

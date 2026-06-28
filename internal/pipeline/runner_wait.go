@@ -135,11 +135,33 @@ func (e *Executor) runWaitStep(ctx context.Context, step Step, parentRender Rend
 		return "waited:approval:approved", 0, time.Since(stepStart).Milliseconds(), nil
 
 	case "event":
-		// Phase 2: subscribe to journal filter. For MVP we surface
-		// a clear "not yet implemented" so a pipeline that uses
-		// event waits fails loudly instead of silently hanging.
-		return "", 0, time.Since(stepStart).Milliseconds(),
-			fmt.Errorf("wait step %q (event) not yet implemented", step.ID)
+		// Input-stream injection (Wave 4.3): block until an external
+		// caller delivers a signal for this (run, event_type) via
+		// POST /pipeline-runs/{id}/signal. The payload becomes the step
+		// output (so downstream steps read {{ steps.<id>.output }}).
+		// Blocking + in-memory (like wait:datetime) — steers a live run.
+		eventType := Render(step.Wait.EventType, parentRender)
+		if e.signals == nil {
+			return "", 0, time.Since(stepStart).Milliseconds(),
+				fmt.Errorf("wait step %q (event) no signal registry wired", step.ID)
+		}
+		ch, cancel := e.signals.Register(runID, eventType)
+		defer cancel()
+		// Honor the step timeout (default 1h) so an event that never
+		// arrives doesn't hang the run forever.
+		timeout := time.Duration(step.TimeoutSec) * time.Second
+		if timeout <= 0 {
+			timeout = time.Hour
+		}
+		select {
+		case payload := <-ch:
+			return payload, 0, time.Since(stepStart).Milliseconds(), nil
+		case <-time.After(timeout):
+			return "", 0, time.Since(stepStart).Milliseconds(),
+				fmt.Errorf("wait step %q (event %q) timed out after %s", step.ID, eventType, timeout)
+		case <-ctx.Done():
+			return "", 0, time.Since(stepStart).Milliseconds(), ctx.Err()
+		}
 	}
 
 	return "", 0, time.Since(stepStart).Milliseconds(),

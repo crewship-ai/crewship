@@ -247,6 +247,18 @@ type Step struct {
 	// reshaping between steps — jq-style projection over a previous
 	// step's output, no LLM, no network.
 	Transform *TransformStep `json:"transform,omitempty"`
+
+	// Hooks are per-step lifecycle steps (Wave 4.1): before runs ahead
+	// of this step (its failure fails the step), after runs once this
+	// step completes. Same deterministic-side-channel restriction as
+	// routine hooks — code | http | transform only.
+	Hooks *StepHooks `json:"hooks,omitempty"`
+}
+
+// StepHooks wraps a single step with before/after lifecycle steps.
+type StepHooks struct {
+	Before *Step `json:"before,omitempty"`
+	After  *Step `json:"after,omitempty"`
 }
 
 // RoutineHooks are the routine-level lifecycle steps (Wave 4.1). Each is

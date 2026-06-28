@@ -122,6 +122,9 @@ func Validate(dsl *DSL, agentSlugs map[string]struct{}, pipelineSlugs map[string
 		if err := validateStepGates(st, agentSlugs); err != nil {
 			return err
 		}
+		if err := validateStepHooks(st); err != nil {
+			return err
+		}
 	}
 
 	if err := validateHooks(dsl); err != nil {
@@ -129,6 +132,28 @@ func Validate(dsl *DSL, agentSlugs map[string]struct{}, pipelineSlugs map[string
 	}
 
 	return validateTemplates(dsl)
+}
+
+// validateStepHooks checks a step's per-step before/after hooks (Wave
+// 4.1) — same deterministic-side-channel restriction as routine hooks.
+func validateStepHooks(st Step) error {
+	if st.Hooks == nil {
+		return nil
+	}
+	for name, hook := range map[string]*Step{"before": st.Hooks.Before, "after": st.Hooks.After} {
+		if hook == nil {
+			continue
+		}
+		switch hook.Type {
+		case StepHTTP, StepCode, StepTransform:
+		default:
+			return fmt.Errorf("pipeline: step %q %s hook must be type code, http, or transform (got %q)", st.ID, name, hook.Type)
+		}
+		if err := validateStepEgress(*hook); err != nil {
+			return fmt.Errorf("pipeline: step %q %s hook: %w", st.ID, name, err)
+		}
+	}
+	return nil
 }
 
 // validateHooks checks routine-level lifecycle hooks (Wave 4.1). Hook
