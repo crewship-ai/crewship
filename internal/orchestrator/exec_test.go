@@ -556,6 +556,38 @@ func TestSystemPreambleContainsFilesystem(t *testing.T) {
 	}
 }
 
+// TestSystemPreambleDocumentsCredentialEscalation guards the v1 fix for the
+// "silent false-success" failure mode: an agent asked to store a credential
+// had no documented mechanism, wrote a throwaway file to /secrets, and falsely
+// reported success. The universal preamble (injected for every agent — lead,
+// non-lead, and standalone) must now tell the agent that it cannot register a
+// credential by writing a file, and must instead raise a CREDENTIAL escalation
+// via the sidecar so a human can persist it in the vault.
+func TestSystemPreambleDocumentsCredentialEscalation(t *testing.T) {
+	// The escalation endpoint must be discoverable from the preamble, not
+	// only from the peer-communication block (which is non-lead + crew only).
+	if !strings.Contains(crewshipSystemPreamble, "/escalate") {
+		t.Error("preamble should document the /escalate sidecar endpoint for credential requests")
+	}
+	// A CREDENTIAL-typed escalation is the supported path for getting/storing
+	// a secret; the example must use that type so the agent picks the right one.
+	if !strings.Contains(crewshipSystemPreamble, "\"type\":\"CREDENTIAL\"") {
+		t.Error("preamble should show a CREDENTIAL-typed escalation example")
+	}
+	// The anti-fabrication guard: writing a file is NOT a stored credential.
+	if !strings.Contains(crewshipSystemPreamble, "does NOT register a credential") {
+		t.Error("preamble should warn that writing a file does NOT register a credential in the vault")
+	}
+	// The structured proposal contract: the agent must pass the credential value
+	// in the metadata JSON so it lands as a PENDING_APPROVAL row for one-click approval.
+	if !strings.Contains(crewshipSystemPreamble, "PENDING_APPROVAL") {
+		t.Error("preamble should explain the proposed credential is stored as PENDING_APPROVAL")
+	}
+	if !strings.Contains(crewshipSystemPreamble, `\"value\"`) {
+		t.Error("preamble should document the metadata JSON proposal contract incl. a value field")
+	}
+}
+
 func TestHandleStreamJSONLine_MixedContentBlocks(t *testing.T) {
 	// With --include-partial-messages, text and thinking are streamed via
 	// stream_event deltas and skipped in the assistant message. Only tool_use

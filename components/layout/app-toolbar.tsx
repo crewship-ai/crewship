@@ -26,7 +26,6 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { useEngineStatus } from "@/hooks/use-engine-status"
 import { useCrewsStatus } from "@/hooks/use-crews-status"
 import { useProvisioningStatus } from "@/hooks/use-provisioning-status"
-import { usePendingEscalations } from "@/hooks/use-pending-escalations"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useAbilities } from "@/hooks/use-abilities"
@@ -163,7 +162,6 @@ export function AppToolbar() {
   const { status: engineStatus } = useEngineStatus(workspaceId)
   const crewsStatus = useCrewsStatus(workspaceId)
   const provisioning = useProvisioningStatus(workspaceId)
-  const pendingEscalations = usePendingEscalations(workspaceId)
   const { session, signOut } = useAuth()
   const agentBreadcrumb = useAgentBreadcrumb(pathname, workspaceId)
   const { status: wsStatus } = useRealtime()
@@ -444,21 +442,9 @@ export function AppToolbar() {
                 </TooltipContent>
               </Tooltip>
 
-              {pendingEscalations > 0 && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Link href="/crews" className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border ${colorMap.amber.bg} hover:brightness-95 transition-all`}>
-                      <span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />
-                      <span className={`text-micro font-medium ${colorMap.amber.text}`}>
-                        {pendingEscalations > 99 ? "99+" : pendingEscalations} escalation{pendingEscalations !== 1 ? "s" : ""}
-                      </span>
-                    </Link>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    {pendingEscalations} pending escalation{pendingEscalations !== 1 ? "s" : ""} need your attention
-                  </TooltipContent>
-                </Tooltip>
-              )}
+              {/* Escalations (incl. agent credential-approval requests) surface
+                  through the unified Inbox (the InboxBell + /inbox page), not a
+                  separate toolbar badge — one place for "things needing action". */}
             </div>
           )
         })()}

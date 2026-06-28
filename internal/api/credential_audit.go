@@ -49,6 +49,11 @@ const (
 	AuditEventRevoke   CredentialAuditEvent = "REVOKE"
 	AuditEventDetected CredentialAuditEvent = "DETECTED"
 	AuditEventCreated  CredentialAuditEvent = "CREATED"
+	// Approval lifecycle for agent-proposed credentials (v119): an agent
+	// proposes a credential (CREATED, status PENDING_APPROVAL) and a human
+	// then APPROVED it (→ ACTIVE) or REJECTED it (→ soft-deleted).
+	AuditEventApproved CredentialAuditEvent = "APPROVED"
+	AuditEventRejected CredentialAuditEvent = "REJECTED"
 )
 
 var validAuditEvents = map[CredentialAuditEvent]struct{}{
@@ -58,6 +63,8 @@ var validAuditEvents = map[CredentialAuditEvent]struct{}{
 	AuditEventRevoke:   {},
 	AuditEventDetected: {},
 	AuditEventCreated:  {},
+	AuditEventApproved: {},
+	AuditEventRejected: {},
 }
 
 // RecordCredentialEvent appends one row to credential_audit and, when

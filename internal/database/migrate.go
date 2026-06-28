@@ -1461,6 +1461,12 @@ END;
 	// (per-human attribution). All additive; existing chats stay private 1:1.
 	// See migrate_consts_v118_group_chat.go.
 	{version: 118, name: "group_chat", sql: migrationGroupChat},
+
+	// v119: agent-proposed credentials with human approval. escalations.credential_id
+	// links a CREDENTIAL escalation to the PENDING_APPROVAL credential it proposed;
+	// credentials.approved_by_user_id / approved_at record the human who activated it.
+	// All additive. See migrate_consts_v119_credential_approval.go.
+	{version: 119, name: "credential_approval", sql: migrationCredentialApproval},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

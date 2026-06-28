@@ -132,9 +132,32 @@ var escalationResolveCmd = &cobra.Command{
 		}
 
 		resolution, _ := cmd.Flags().GetString("resolution")
+		action, _ := cmd.Flags().GetString("action")
+		redirectTo, _ := cmd.Flags().GetString("redirect-to")
+		// Guard the action/redirect-to combinations before the PATCH. The API
+		// defaults a missing action to "approve", so without these checks
+		// `--redirect-to x` (no --action) would silently APPROVE instead of
+		// redirect.
+		switch action {
+		case "", "approve", "reject", "redirect":
+		default:
+			return fmt.Errorf("--action must be approve, reject, or redirect")
+		}
+		if redirectTo != "" && action != "redirect" {
+			return fmt.Errorf("--redirect-to requires --action redirect")
+		}
+		if action == "redirect" && redirectTo == "" {
+			return fmt.Errorf("--action redirect requires --redirect-to")
+		}
 		body := map[string]interface{}{}
 		if resolution != "" {
 			body["resolution"] = resolution
+		}
+		if action != "" {
+			body["action"] = action
+		}
+		if redirectTo != "" {
+			body["redirect_to"] = redirectTo
 		}
 
 		client := newAPIClient()
@@ -207,6 +230,8 @@ func init() {
 	escalationListCmd.Flags().String("since", "", "Only entries newer than this (RFC3339 or 1h/24h/7d duration)")
 
 	escalationResolveCmd.Flags().String("resolution", "", "Resolution notes")
+	escalationResolveCmd.Flags().String("action", "", "Resolution action: approve|reject|redirect (default approve)")
+	escalationResolveCmd.Flags().String("redirect-to", "", "Agent slug to redirect to (when --action redirect)")
 
 	escalationCmd.AddCommand(escalationListCmd)
 	escalationCmd.AddCommand(escalationResolveCmd)

@@ -331,6 +331,10 @@ function ContextDetails({ payload }: { payload: Record<string, unknown> }) {
 
 export function InboxList() {
   const { workspaceId } = useWorkspace()
+  // Default to "inbox" (every non-resolved item): a blocking item the operator
+  // has merely *read* — e.g. a pending CREDENTIAL escalation they clicked
+  // through to — stays visible here (only `resolved` is filtered out), so it is
+  // never silently hidden. The filter pills still let them narrow to unread.
   const [stateFilter, setStateFilter] = useState<StateFilter>("inbox")
   const [selectedId, setSelectedId] = useState<string | null>(null)
   // Snapshot of the open item. Clicking an *unread* row marks it read,
@@ -1148,6 +1152,7 @@ function KindActions({
             item.source_id,
             action,
             action === "approve" ? "Approved from inbox" : "Rejected from inbox",
+            item.workspace_id,
           )
           if (!res.ok) {
             // 404 = no escalations row behind this item (keeper/synthetic):
@@ -1165,10 +1170,37 @@ function KindActions({
           await onRefresh()
         })
 
-      // CREDENTIAL escalations can't be approved without supplying the
-      // secret value — that belongs to the credential flow, not a blind
-      // inbox button. Offer Reject only, and say where to approve.
+      // CREDENTIAL escalations: when the agent already proposed a value, it is
+      // sitting in the vault as PENDING_APPROVAL, so Approve just activates it
+      // (no secret to type here) and Reject discards it — one-click both ways.
+      // Legacy CREDENTIAL escalations (no pending credential, the human must
+      // supply the secret) keep Reject-only and point at the crew panel.
       if (escType === "CREDENTIAL") {
+        if (item.payload?.has_pending_credential === true) {
+          return (
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                disabled={disabled || busy !== null}
+                onClick={() => resolveEsc("approve")}
+                className="gap-1.5 bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30"
+              >
+                <CheckCircle2 className="h-3 w-3" />
+                {busy === "approve" ? "Approving…" : "Approve"}
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={disabled || busy !== null}
+                onClick={() => resolveEsc("reject")}
+                className="gap-1.5"
+              >
+                <XCircle className="h-3 w-3" />
+                {busy === "reject" ? "Rejecting…" : "Reject"}
+              </Button>
+            </div>
+          )
+        }
         return (
           <div className="flex items-center gap-2">
             <Button

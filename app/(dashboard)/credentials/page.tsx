@@ -52,7 +52,7 @@ interface Credential {
   provider: "ANTHROPIC" | "OPENAI" | "GOOGLE" | "CURSOR" | "FACTORY"
           | "GITHUB" | "GITLAB" | "VERCEL" | "AWS" | "CUSTOM_CLI" | "NONE"
           | "VAULT_USERPASS" | "VAULT_SSH_KEY" | "VAULT_CERTIFICATE" | "VAULT_GENERIC"
-  status: "ACTIVE" | "EXPIRED" | "RATE_LIMITED" | "REVOKED" | "ERROR" | "PENDING"
+  status: "ACTIVE" | "EXPIRED" | "RATE_LIMITED" | "REVOKED" | "ERROR" | "PENDING" | "PENDING_APPROVAL"
   scope: "WORKSPACE" | "CREW"
   crew_id: string | null
   crew_ids: string[]
@@ -75,12 +75,16 @@ interface Credential {
   mcp_used: boolean
 }
 
-// 5-state status taxonomy from CONNECTIONS.md §3.4 (Datadog parity).
-type DerivedStatus = "Available" | "Detected" | "Connected" | "Error" | "Stale"
+// 5-state status taxonomy from CONNECTIONS.md §3.4 (Datadog parity), plus
+// "Pending" for an agent-proposed credential awaiting human approval.
+type DerivedStatus = "Available" | "Detected" | "Connected" | "Error" | "Stale" | "Pending"
 
 const STALE_THRESHOLD_DAYS = 90
 
 function deriveStatus(c: Credential): DerivedStatus {
+  // Agent-proposed, not yet approved: not usable by any agent until a human
+  // approves the linked escalation. Surfaced as a distinct "Pending" state.
+  if (c.status === "PENDING_APPROVAL") return "Pending"
   if (c.status === "EXPIRED" || c.status === "REVOKED" || c.status === "ERROR" || c.status === "RATE_LIMITED") return "Error"
   if (c.token_expires_at) {
     const exp = new Date(c.token_expires_at).getTime()
@@ -101,6 +105,7 @@ const STATUS_DOT_COLOR: Record<DerivedStatus, string> = {
   Connected: "bg-emerald-500",
   Error: "bg-red-500",
   Stale: "bg-amber-500",
+  Pending: "bg-amber-400",
 }
 
 interface Org { id: string; name: string }
@@ -262,13 +267,22 @@ export default function CredentialsPage() {
   const needsAttention = React.useMemo(
     () => credentials.filter((c) => {
       const s = deriveStatus(c)
-      if (s === "Error" || s === "Stale") return true
+      // Pending = agent-proposed, waiting for the human to approve/reject.
+      if (s === "Error" || s === "Stale" || s === "Pending") return true
       if (c.token_expires_at) {
         const exp = new Date(c.token_expires_at).getTime()
         if (!Number.isNaN(exp) && exp - Date.now() < 30 * 24 * 3600 * 1000) return true
       }
       return false
     }),
+    [credentials],
+  )
+
+  // How many of the needs-attention items are agent-proposed pending approvals
+  // (vs true problem states) — drives the banner copy so we don't tell an
+  // operator to "rotate/revoke" a credential that just needs approve/reject.
+  const pendingCount = React.useMemo(
+    () => credentials.filter((c) => deriveStatus(c) === "Pending").length,
     [credentials],
   )
 
@@ -403,7 +417,12 @@ export default function CredentialsPage() {
               <AlertTriangle className="h-3.5 w-3.5 text-amber-400 shrink-0" />
               <span className="text-foreground/90">
                 <strong>{needsAttention.length}</strong> credential{needsAttention.length === 1 ? "" : "s"}
-                {" "}need attention &mdash; rotate, refresh, or revoke them before they break agent runs.
+                {" "}need attention &mdash;{" "}
+                {pendingCount === needsAttention.length
+                  ? "approve or reject the agent-proposed ones."
+                  : pendingCount > 0
+                    ? "approve the pending ones; rotate, refresh, or revoke the rest before they break agent runs."
+                    : "rotate, refresh, or revoke them before they break agent runs."}
               </span>
               <button onClick={() => setActiveTab("needs")} className="ml-auto text-amber-300 hover:text-amber-200 font-medium">
                 Review →
@@ -660,6 +679,15 @@ function CredentialRow({ cred, selected, onToggleSelect, onOpen, onEdit, onDelet
           <Badge variant="outline" className="text-[9px] px-1 font-mono shrink-0 opacity-70">
             {TYPE_LABEL[cred.type]}
           </Badge>
+          {derived === "Pending" && (
+            <Badge
+              variant="outline"
+              className="text-[9px] h-4 px-1 border-amber-400/40 text-amber-300 font-mono shrink-0"
+              title="Proposed by an agent — approve it in the inbox to make it usable"
+            >
+              Pending approval
+            </Badge>
+          )}
           {expiresIn !== null && expiresIn >= 0 && expiresIn <= 30 && (
             <Badge
               variant="outline"
