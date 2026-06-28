@@ -132,9 +132,17 @@ var escalationResolveCmd = &cobra.Command{
 		}
 
 		resolution, _ := cmd.Flags().GetString("resolution")
+		action, _ := cmd.Flags().GetString("action")
+		redirectTo, _ := cmd.Flags().GetString("redirect-to")
 		body := map[string]interface{}{}
 		if resolution != "" {
 			body["resolution"] = resolution
+		}
+		if action != "" {
+			body["action"] = action
+		}
+		if redirectTo != "" {
+			body["redirect_to"] = redirectTo
 		}
 
 		client := newAPIClient()
@@ -207,6 +215,8 @@ func init() {
 	escalationListCmd.Flags().String("since", "", "Only entries newer than this (RFC3339 or 1h/24h/7d duration)")
 
 	escalationResolveCmd.Flags().String("resolution", "", "Resolution notes")
+	escalationResolveCmd.Flags().String("action", "", "Resolution action: approve|reject|redirect (default approve)")
+	escalationResolveCmd.Flags().String("redirect-to", "", "Agent slug to redirect to (when --action redirect)")
 
 	escalationCmd.AddCommand(escalationListCmd)
 	escalationCmd.AddCommand(escalationResolveCmd)
