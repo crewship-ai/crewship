@@ -134,6 +134,21 @@ var escalationResolveCmd = &cobra.Command{
 		resolution, _ := cmd.Flags().GetString("resolution")
 		action, _ := cmd.Flags().GetString("action")
 		redirectTo, _ := cmd.Flags().GetString("redirect-to")
+		// Guard the action/redirect-to combinations before the PATCH. The API
+		// defaults a missing action to "approve", so without these checks
+		// `--redirect-to x` (no --action) would silently APPROVE instead of
+		// redirect.
+		switch action {
+		case "", "approve", "reject", "redirect":
+		default:
+			return fmt.Errorf("--action must be approve, reject, or redirect")
+		}
+		if redirectTo != "" && action != "redirect" {
+			return fmt.Errorf("--redirect-to requires --action redirect")
+		}
+		if action == "redirect" && redirectTo == "" {
+			return fmt.Errorf("--action redirect requires --redirect-to")
+		}
 		body := map[string]interface{}{}
 		if resolution != "" {
 			body["resolution"] = resolution

@@ -34,6 +34,24 @@ func (p credentialProposal) redactedMetadata(credentialID string) string {
 	return string(b)
 }
 
+// metadataCarriesValue reports whether the escalate metadata is JSON with a
+// non-empty "value" field — i.e. it embeds a secret. Used to redact defensively
+// even when the proposal is malformed (missing name, bad type, ...), so a
+// secret can never reach escalations.metadata, ListEscalations, or the journal.
+func metadataCarriesValue(metadata string) bool {
+	s := strings.TrimSpace(metadata)
+	if s == "" || s[0] != '{' {
+		return false
+	}
+	var m struct {
+		Value string `json:"value"`
+	}
+	if err := json.Unmarshal([]byte(s), &m); err != nil {
+		return false
+	}
+	return strings.TrimSpace(m.Value) != ""
+}
+
 // parseCredentialProposal decodes the escalate `metadata` JSON. ok=false (no
 // error) when the metadata is absent or not a usable credential proposal — the
 // caller then falls back to a plain CREDENTIAL escalation (the legacy

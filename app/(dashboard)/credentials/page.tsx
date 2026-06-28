@@ -278,6 +278,14 @@ export default function CredentialsPage() {
     [credentials],
   )
 
+  // How many of the needs-attention items are agent-proposed pending approvals
+  // (vs true problem states) — drives the banner copy so we don't tell an
+  // operator to "rotate/revoke" a credential that just needs approve/reject.
+  const pendingCount = React.useMemo(
+    () => credentials.filter((c) => deriveStatus(c) === "Pending").length,
+    [credentials],
+  )
+
   // Distinct tags from data — drives the filter dropdown so we never
   // show tags the workspace doesn't have.
   const tagsInUse = React.useMemo(() => {
@@ -409,7 +417,12 @@ export default function CredentialsPage() {
               <AlertTriangle className="h-3.5 w-3.5 text-amber-400 shrink-0" />
               <span className="text-foreground/90">
                 <strong>{needsAttention.length}</strong> credential{needsAttention.length === 1 ? "" : "s"}
-                {" "}need attention &mdash; rotate, refresh, or revoke them before they break agent runs.
+                {" "}need attention &mdash;{" "}
+                {pendingCount === needsAttention.length
+                  ? "approve or reject the agent-proposed ones."
+                  : pendingCount > 0
+                    ? "approve the pending ones; rotate, refresh, or revoke the rest before they break agent runs."
+                    : "rotate, refresh, or revoke them before they break agent runs."}
               </span>
               <button onClick={() => setActiveTab("needs")} className="ml-auto text-amber-300 hover:text-amber-200 font-medium">
                 Review →

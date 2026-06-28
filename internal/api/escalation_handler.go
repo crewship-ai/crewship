@@ -129,6 +129,10 @@ func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) 
 				credentialID = cid
 			}
 			body.Metadata = proposal.redactedMetadata(cid)
+		} else if metadataCarriesValue(body.Metadata) {
+			// Malformed proposal that still embeds a secret (e.g. missing name) —
+			// never persist or journal it raw. Drop to a redacted marker.
+			body.Metadata = `{"redacted":true}`
 		}
 	}
 
@@ -143,6 +147,16 @@ func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) 
 	`, escalationID, body.WorkspaceID, body.CrewID, body.ChatID, fromAgentID, body.Reason, contextVal, escalationType, metadataVal, credentialID, now)
 	if err != nil {
 		h.logger.Error("create escalation", "error", err)
+		// Don't leave an orphaned PENDING_APPROVAL credential with no escalation
+		// to approve it through — roll it back. (createPendingCredential commits
+		// before this insert; this is the compensating delete.)
+		if cid, ok := credentialID.(string); ok && cid != "" {
+			if _, delErr := h.db.ExecContext(r.Context(),
+				`DELETE FROM credentials WHERE id = ? AND workspace_id = ? AND status = 'PENDING_APPROVAL'`,
+				cid, body.WorkspaceID); delErr != nil {
+				h.logger.Error("rollback orphaned pending credential", "error", delErr, "credential_id", cid)
+			}
+		}
 		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}

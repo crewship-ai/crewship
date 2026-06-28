@@ -198,6 +198,34 @@ func TestCreateEscalation_MalformedMetadata_Fallback(t *testing.T) {
 	}
 }
 
+// A malformed proposal that still carries a value (here: missing name) must NOT
+// leak the secret into escalations.metadata — it is redacted even though no
+// pending credential is created.
+func TestCreateEscalation_MalformedProposalWithValue_Redacted(t *testing.T) {
+	h, _, wsID, crewID, agentID := covEscFixture(t)
+	seedChat(t, h, "covesc-chat", agentID, wsID)
+	const leak = "leakme-canary-555" //gitleaks:allow — fake fixture, asserts redaction
+	rr := createEsc(h, wsID, map[string]string{
+		"from_slug": "covesc-ag", "reason": "bad proposal", "crew_id": crewID,
+		"workspace_id": wsID, "chat_id": "covesc-chat", "type": "CREDENTIAL",
+		"metadata": `{"type":"SECRET","value":"` + leak + `"}`, // no name → not a valid proposal
+	})
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", rr.Code, rr.Body.String())
+	}
+	var storedMeta, credID *string
+	if err := h.db.QueryRow(`SELECT metadata, credential_id FROM escalations
+		WHERE workspace_id=? AND type='CREDENTIAL'`, wsID).Scan(&storedMeta, &credID); err != nil {
+		t.Fatalf("load escalation: %v", err)
+	}
+	if storedMeta != nil && strings.Contains(*storedMeta, leak) {
+		t.Fatalf("malformed proposal leaked its value into escalations.metadata: %v", storedMeta)
+	}
+	if credID != nil && *credID != "" {
+		t.Errorf("no pending credential should be created for a nameless proposal, got %q", *credID)
+	}
+}
+
 // --- approve / reject ---
 
 func seedLinkedEscalation(t *testing.T, h *QueryHandler, escID, wsID, crewID, agentID, credID string) {
@@ -288,9 +316,18 @@ func TestAutoAssign_ExcludesPendingApproval(t *testing.T) {
 		assigned = append(assigned, c)
 	}
 	_ = crewID
+	seenActive := false
 	for _, c := range assigned {
 		if c == "cred-pending" {
 			t.Fatal("PENDING_APPROVAL credential must NOT be auto-assigned to an agent")
 		}
+		if c == "cred-active" {
+			seenActive = true
+		}
+	}
+	// Positive guard: without this the test would also pass if autoAssign
+	// inserted nothing at all, so it wouldn't actually prove the status filter.
+	if !seenActive {
+		t.Fatalf("ACTIVE credential should have been auto-assigned; assigned=%v", assigned)
 	}
 }

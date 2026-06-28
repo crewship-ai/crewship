@@ -64,7 +64,10 @@ ssh "$SERVER_HOST" bash -s -- "$SERVER_PATH" "$BRANCH" "$SENTRY_DSN_VAL" "$NEXT_
   if [ -n "$INSTANCE" ]; then
     docker rm -f $(docker ps -q --filter "name=crewship-${INSTANCE}-team-") 2>/dev/null || true
   else
-    docker rm -f $(docker ps -q --filter "name=-team-") 2>/dev/null || true
+    # No instance suffix on the checkout dir — skip the kill rather than fall back
+    # to a host-wide "team-" filter, which would stop sibling instances' agent
+    # containers on a shared host.
+    echo "  WARN: could not derive instance from '$SERVER_PATH'; skipping agent-container recycle (sidecar tokens may be stale)" >&2
   fi
 
   # Fetch and checkout

@@ -51,10 +51,13 @@ CREDENTIALS:
 - When you need to record a credential for the crew (e.g. a connection string or password for a
   service you just set up), raise a CREDENTIAL escalation. Put the proposed credential in the
   "metadata" field as JSON {"name","type","provider","value"}; the value is stored immediately in
-  the vault as PENDING_APPROVAL (not usable until a human approves it with one click):
+  the vault as PENDING_APPROVAL (not usable until a human approves it with one click). Send the
+  request body over STDIN so the secret never lands in the command line / process args:
     curl -s -X POST http://localhost:9119/escalate \
-      -H "Content-Type: application/json" \
-      -d '{"from":"{your-slug}","reason":"<what credential and why>","type":"CREDENTIAL","metadata":"{\"name\":\"PG_PASSWORD\",\"type\":\"SECRET\",\"provider\":\"NONE\",\"value\":\"<the secret>\"}"}'
+      -H "Content-Type: application/json" --data @- <<'JSON'
+    {"from":"{your-slug}","reason":"<what credential and why>","type":"CREDENTIAL",
+     "metadata":"{\"name\":\"PG_PASSWORD\",\"type\":\"SECRET\",\"provider\":\"NONE\",\"value\":\"<the secret>\"}"}
+    JSON
   "type" is one of SECRET|API_KEY|CLI_TOKEN (default SECRET); "provider" defaults to NONE. The call
   blocks until a human approves or rejects (up to 5 minutes): on approve the credential becomes
   usable by the crew, on reject it is discarded. If you do NOT have the value yourself and need a
