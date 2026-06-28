@@ -5,9 +5,10 @@ import { motion, AnimatePresence } from "motion/react"
 import {
   Workflow, Clock, Activity, GitBranch,
   PanelLeftClose, PanelLeftOpen,
-  MessageSquare, Terminal, FileCode2, Container,
+  FileCode2, Container,
   ChevronUp, ChevronDown, ChevronLeft, ChevronRight, X,
   CircleDot, FolderKanban, ScrollText,
+  Play, GitCompareArrows, MessageCircle,
 } from "lucide-react"
 // Tabs replaced with custom nav for orchestration toolbar
 import { Button } from "@/components/ui/button"
@@ -41,13 +42,20 @@ import { CreateProjectModal } from "@/components/features/orchestration/create-p
 import { toast } from "sonner"
 import { useAppStore } from "@/lib/store"
 import type { BreadcrumbItem } from "@/lib/store"
-import { LiveMessagesPanel, ExecLogPanel } from "@/components/features/orchestration/orchestration-drawer-panels"
+import { ActivityTab } from "@/components/features/crews/bottom-panel/activity-tab"
+import { RunsTab } from "@/components/features/crews/bottom-panel/runs-tab"
+import { ChangesTab } from "@/components/features/crews/bottom-panel/changes-tab"
+import { CommentsTab } from "@/components/features/crews/bottom-panel/comments-tab"
+import type { BottomPanelContext } from "@/components/features/crews/bottom-panel/types"
 import { RightPanelContent } from "@/components/features/orchestration/right-panel-content"
 import { IssuesToolbarStrip } from "@/components/features/orchestration/issues-toolbar-strip"
 import { RoutinesTab } from "@/components/features/routines/routines-tab"
 import { RunsView } from "@/components/features/activity/runs-view"
 
-type DrawerTab = "messages" | "exec" | "yaml" | "docker"
+// Issue-scoped drawer tabs. The old set (messages/exec) was agent-scoped
+// and showed nothing on an issue with no agent selected; these are the
+// entity the page is actually about — the issue/mission in focus.
+type DrawerTab = "activity" | "runs" | "changes" | "comments" | "spec" | "docker"
 
 // Page mode controls which top-level tabs are visible. Issues and
 // Routines now live as their own top-level pages (/issues, /routines);
@@ -71,9 +79,11 @@ export interface OrchestrationLayoutProps {
 }
 
 const ORCH_DRAWER_TABS = [
-  { id: "messages" as const, label: "Messages", icon: MessageSquare },
-  { id: "exec" as const, label: "Exec Log", icon: Terminal },
-  { id: "yaml" as const, label: "YAML", icon: FileCode2 },
+  { id: "activity" as const, label: "Activity", icon: Activity },
+  { id: "runs" as const, label: "Runs", icon: Play },
+  { id: "changes" as const, label: "Changes", icon: GitCompareArrows },
+  { id: "comments" as const, label: "Comments", icon: MessageCircle },
+  { id: "spec" as const, label: "Spec", icon: FileCode2 },
   { id: "docker" as const, label: "Docker", icon: Container },
 ]
 
@@ -120,7 +130,7 @@ export function OrchestrationLayout({
   // Panel state
   const [leftCollapsed, setLeftCollapsed] = useState(false)
   const [drawerOpen, setDrawerOpen] = useState(false)
-  const [drawerTab, setDrawerTab] = useState<DrawerTab>("messages")
+  const [drawerTab, setDrawerTab] = useState<DrawerTab>("activity")
 
   // Content state — initial active tab depends on the page mode.
   // /issues opens on Issues; /activity opens on Graph; /orchestration
@@ -366,6 +376,21 @@ export function OrchestrationLayout({
     if (selectedMissionId === "all") return null
     return missions.find((m) => m.id === selectedMissionId) || null
   }, [missions, selectedMissionId, selectedIssue])
+
+  // Bottom-drawer context for the shared dock tabs (Activity / Runs /
+  // Changes / Comments). Built only when an issue with an identifier is in
+  // focus — the issue endpoints resolve by crew_id + identifier.
+  const missionCtx = useMemo<BottomPanelContext>(() => {
+    if (!selectedMission || !selectedMission.identifier) return null
+    return {
+      kind: "mission",
+      missionId: selectedMission.id,
+      identifier: selectedMission.identifier,
+      title: selectedMission.title,
+      crewId: selectedMission.crew_id,
+      crewSlug: selectedMission.crew_slug ?? selectedMission.crew_id,
+    }
+  }, [selectedMission])
 
   // selectedIssue / selectedProject take over the middle pane (same
   // pattern as /routines). When set, the board/list is hidden and the
@@ -1070,15 +1095,29 @@ export function OrchestrationLayout({
                 transition={{ duration: 0.15 }}
                 className="flex-1 min-h-0 border-t border-border"
               >
-                {drawerTab === "messages" && (
-                  <LiveMessagesPanel />
+                {!missionCtx && drawerTab !== "docker" && (
+                  <div className="h-full grid place-items-center text-xs text-muted-foreground p-4 text-center">
+                    Select an issue to inspect its {drawerTab}.
+                  </div>
                 )}
 
-                {drawerTab === "exec" && (
-                  <ExecLogPanel />
+                {missionCtx && drawerTab === "activity" && (
+                  <ActivityTab workspaceId={workspaceId} context={missionCtx} />
                 )}
 
-                {drawerTab === "yaml" && (
+                {missionCtx && drawerTab === "runs" && (
+                  <RunsTab workspaceId={workspaceId} context={missionCtx} />
+                )}
+
+                {missionCtx && drawerTab === "changes" && (
+                  <ChangesTab workspaceId={workspaceId} context={missionCtx} />
+                )}
+
+                {missionCtx && drawerTab === "comments" && (
+                  <CommentsTab workspaceId={workspaceId} context={missionCtx} />
+                )}
+
+                {drawerTab === "spec" && (
                   <MissionYamlEditor
                     mission={selectedMission}
                     readOnly
