@@ -84,17 +84,17 @@ func NewInboxHandler(db *sql.DB, logger *slog.Logger, hub *ws.Hub) *InboxHandler
 // switch on `routine_id != null`-style checks without first checking
 // undefined.
 type inboxItemResponse struct {
-	ID               string                 `json:"id"`
-	WorkspaceID      string                 `json:"workspace_id"`
-	Kind             string                 `json:"kind"`
-	SourceID         string                 `json:"source_id"`
-	TargetUserID     string                 `json:"target_user_id,omitempty"`
-	TargetRole       string                 `json:"target_role,omitempty"`
-	Title            string                 `json:"title"`
-	BodyMD           string                 `json:"body_md,omitempty"`
-	SenderType       string                 `json:"sender_type,omitempty"`
-	SenderID         string                 `json:"sender_id,omitempty"`
-	SenderName       string                 `json:"sender_name,omitempty"`
+	ID           string `json:"id"`
+	WorkspaceID  string `json:"workspace_id"`
+	Kind         string `json:"kind"`
+	SourceID     string `json:"source_id"`
+	TargetUserID string `json:"target_user_id,omitempty"`
+	TargetRole   string `json:"target_role,omitempty"`
+	Title        string `json:"title"`
+	BodyMD       string `json:"body_md,omitempty"`
+	SenderType   string `json:"sender_type,omitempty"`
+	SenderID     string `json:"sender_id,omitempty"`
+	SenderName   string `json:"sender_name,omitempty"`
 	// AvatarSeed / AvatarStyle are filled (post-query, via enrichAgentAvatars)
 	// only when the sender is a real agent, so the inbox renders that agent's
 	// actual avatar instead of a generic glyph. Blank for system / crew /
