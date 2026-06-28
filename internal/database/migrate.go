@@ -1473,6 +1473,11 @@ END;
 	// instead of a full workspace scan. Additive. See
 	// migrate_consts_v120_journal_run_index.go.
 	{version: 120, name: "journal_run_index", sql: migrationJournalRunIndex},
+
+	// v121: harden the v120 run_id generated column with json_valid() so a
+	// non-JSON payload yields NULL instead of failing the INSERT / index.
+	// See migrate_consts_v121_journal_run_index_safe.go.
+	{version: 121, name: "journal_run_index_safe", sql: migrationJournalRunIndexSafe},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the
