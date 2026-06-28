@@ -21,6 +21,8 @@ import { RoutinesExplorer } from "./routines-explorer"
 import { RoutineCreateDialog } from "./routine-create-dialog"
 import { TabBar } from "@/components/ui/tab-bar"
 import type { Mission } from "@/lib/types/mission"
+import { BottomPanel } from "@/components/features/crews/bottom-panel"
+import type { BottomPanelContext } from "@/components/features/crews/bottom-panel/types"
 
 // RoutinesLayout — full /routines page. The IA refactor cut the
 // previous 4 tabs (Routines / Graph / Timeline / Activity) down to 3:
@@ -146,6 +148,12 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
   // The detail panel does its own fetch for the full DSL body.
   const selectedRoutine = selectedSlug
     ? pipelines.find((p) => p.slug === selectedSlug)
+    : null
+
+  // Context for the bottom dock — runs / logs / schedule / spec of the
+  // routine in focus. Only mounted while a routine is selected.
+  const routineCtx: BottomPanelContext = selectedSlug
+    ? { kind: "routine", slug: selectedSlug, pipelineId: selectedRoutine?.id ?? null, name: selectedRoutine?.name }
     : null
 
   return (
@@ -373,6 +381,17 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
           </AnimatePresence>
         </div>
       </div>
+
+      {/* ---- Bottom dock — runs / logs / schedule / spec of the selected
+           routine. Appears once a routine is selected, pairing the
+           definition above with its run console below. ---- */}
+      {routineCtx && (
+        <BottomPanel
+          workspaceId={workspaceId}
+          context={routineCtx}
+          tabs={["runs", "logs", "schedule", "yaml"]}
+        />
+      )}
 
       {/* Import dialog */}
       {importDialogOpen && (

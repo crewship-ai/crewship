@@ -65,9 +65,14 @@ export function YamlTab({ workspaceId, context }: { workspaceId: string; context
     let cancelled = false
     setData(null)
     setError(null)
-    const url = context.kind === "agent"
-      ? `/api/v1/agents/${context.agentId}?workspace_id=${workspaceId}`
-      : `/api/v1/crews/${context.crewId}?workspace_id=${workspaceId}`
+    let url: string
+    switch (context.kind) {
+      case "agent": url = `/api/v1/agents/${context.agentId}?workspace_id=${workspaceId}`; break
+      case "crew": url = `/api/v1/crews/${context.crewId}?workspace_id=${workspaceId}`; break
+      case "mission": url = `/api/v1/crews/${context.crewId}/missions/${context.missionId}?workspace_id=${workspaceId}`; break
+      case "routine": url = `/api/v1/workspaces/${workspaceId}/pipelines/${encodeURIComponent(context.slug)}`; break
+      default: return
+    }
     fetch(url)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((rec) => { if (!cancelled) setData(rec) })
@@ -75,7 +80,7 @@ export function YamlTab({ workspaceId, context }: { workspaceId: string; context
     return () => { cancelled = true }
   }, [context, workspaceId])
 
-  if (!context) return <EmptyState>Select an agent or crew to see its YAML config.</EmptyState>
+  if (!context || context.kind === "run") return <EmptyState>Select an entity to see its spec.</EmptyState>
   if (error) return <EmptyState><span className="text-red-300">Failed to load: {error}</span></EmptyState>
   if (data === null) return <EmptyState>Loading…</EmptyState>
 

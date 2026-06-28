@@ -75,6 +75,7 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	// because it spans every pipeline.
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipeline-runs", authed(wsCtx(http.HandlerFunc(pipes.ListWorkspaceRuns))))
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}", authed(wsCtx(http.HandlerFunc(pipes.GetRun))))
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/logs", authed(wsCtx(http.HandlerFunc(pipes.RunLogs))))
 	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/runs/{runId}/cancel", authed(wsCtx(http.HandlerFunc(pipes.CancelRun))))
 	// Pipeline webhooks — event-driven trigger surface alongside
 	// cron schedules. CRUD requires auth; the public dispatch

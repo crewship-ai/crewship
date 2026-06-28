@@ -115,6 +115,7 @@
                 "pages": [
                   "guides/crew-journal",
                   "guides/activity",
+                  "guides/bottom-dock",
                   "guides/tracing",
                   "observability/otlp-setup",
                   "observability/metrics",
