@@ -385,11 +385,22 @@ var startCmd = &cobra.Command{
 				logger.Info("pipeline runner wired (LLM-direct mode — bypasses container/adapter layer)",
 					"reason", reason)
 			default:
+				// The pipeline runner resolves agent config by calling the
+				// daemon's OWN internal API. Point it at the loopback address
+				// (127.0.0.1:<port>), NOT cfg.Auth.NextjsURL: the scheduler fires
+				// in the background (incl. seconds after a restart) and Next.js may
+				// not be up yet, so a NextjsURL-based resolver fails the scheduled
+				// run at "resolve agent config" with connection-refused. This
+				// mirrors the loopback pick the webhook resolver already makes
+				// (#535/#538). Chat runs keep the NextjsURL resolver (the dashboard
+				// is up when a human drives them).
+				loopbackURL := fmt.Sprintf("http://127.0.0.1:%d", cfg.Server.Port)
+				pipelineResolver := chatbridge.NewIPCResolver(loopbackURL, cfg.Auth.InternalToken, logger)
 				pipeRunner, err := pipeline.NewOrchestratorRunner(pipeline.OrchestratorRunnerDeps{
 					DB:        deps.DB,
 					Orch:      srv.Orchestrator(),
 					Container: deps.Container,
-					Resolver:  resolver,
+					Resolver:  pipelineResolver,
 					LogWriter: srv.LogWriter(),
 					ConvStore: srv.ConversationStore(),
 					Logger:    logger,

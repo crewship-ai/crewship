@@ -28,6 +28,12 @@ type IPCResolver struct {
 	logger        *slog.Logger
 }
 
+// BaseURL returns the internal-API base URL this resolver dials. Exposed so
+// callers/tests can verify which surface a resolver targets — e.g. the pipeline
+// runner must dial the daemon's own loopback, not NextjsURL (a scheduled run
+// fires while Next.js may be down).
+func (r *IPCResolver) BaseURL() string { return r.baseURL }
+
 // NewIPCResolver creates an IPCResolver that calls the internal API at the given URL.
 func NewIPCResolver(nextjsURL, internalToken string, logger *slog.Logger) *IPCResolver {
 	return &IPCResolver{
