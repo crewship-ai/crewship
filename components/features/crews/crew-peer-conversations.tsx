@@ -20,7 +20,7 @@ import {
 } from "@/components/ui/tooltip"
 import { peerConversationSchema, type PeerConversation } from "@/lib/types/peer-conversation"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
-import { formatRelativeTime } from "@/lib/time"
+import { formatRelativeTime, formatDurationClock } from "@/lib/time"
 import { z } from "zod"
 import { STATUS_STYLES, type StatusConfigEntryWithIcon } from "@/lib/status-config"
 
@@ -33,17 +33,6 @@ const STATUS_CONFIG: Record<PeerConversation["status"], StatusConfigEntryWithIco
   COMPLETED: { label: "Completed", className: STATUS_STYLES.emerald, icon: CheckCircle2 },
   RUNNING:   { label: "Running",   className: STATUS_STYLES.blue,    icon: Loader2 },
   FAILED:    { label: "Failed",    className: STATUS_STYLES.red,     icon: XCircle },
-}
-
-function formatDurationMs(ms: number | null): string {
-  if (ms === null) return "—"
-  const seconds = Math.floor(ms / 1000)
-  if (seconds < 60) return `${seconds}s`
-  const minutes = Math.floor(seconds / 60)
-  const remainSecs = seconds % 60
-  if (minutes < 60) return `${minutes}m ${remainSecs}s`
-  const hours = Math.floor(minutes / 60)
-  return `${hours}h ${minutes % 60}m`
 }
 
 export function CrewPeerConversations({ crewId, workspaceId }: CrewPeerConversationsProps) {
@@ -73,7 +62,7 @@ export function CrewPeerConversations({ crewId, workspaceId }: CrewPeerConversat
         setConversations(parsed.data)
       }
     } catch {
-      // Silently fail — component shows empty state
+      // Silently fail â component shows empty state
     } finally {
       if (ownsLoading && loadingOwnerRef.current === requestId) setLoading(false)
     }
@@ -208,7 +197,7 @@ export function CrewPeerConversations({ crewId, workspaceId }: CrewPeerConversat
                             {formatRelativeTime(c.created_at)}
                           </TableCell>
                           <TableCell className="text-label text-muted-foreground">
-                            {formatDurationMs(c.duration_ms)}
+                            {c.duration_ms === null ? "—" : formatDurationClock(c.duration_ms)}
                           </TableCell>
                         </TableRow>
                         {isExpanded && hasDetail && (

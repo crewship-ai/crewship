@@ -1,10 +1,11 @@
 import { describe, it, expect } from "vitest"
+import { statusLabel, toCanonicalStatus } from "@/lib/runs-format"
+// formatDuration(start, end) is now formatDurationBetween in lib/time;
+// formatRelativeShort moved there verbatim. Alias keeps the assertions intact.
 import {
-  formatDuration,
+  formatDurationBetween as formatDuration,
   formatRelativeShort,
-  statusLabel,
-  toCanonicalStatus,
-} from "@/lib/runs-format"
+} from "@/lib/time"
 
 describe("toCanonicalStatus", () => {
   it("maps RUNNING to IN_PROGRESS", () => {

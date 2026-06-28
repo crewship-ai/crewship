@@ -3,7 +3,7 @@
 import { ArrowRight } from "lucide-react"
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
 import { cn } from "@/lib/utils"
-import { formatDuration } from "@/lib/activity/format-time"
+import { formatDurationDecimal } from "@/lib/time"
 import { summarizeValue } from "@/lib/format/summarize-value"
 import type { StepStatus, TraceStep } from "@/lib/trace/types"
 
@@ -86,7 +86,7 @@ function Stats({ payload }: { payload: StepHoverPayload }) {
     <dl className="grid grid-cols-2 gap-x-2 gap-y-1 px-3 py-2 text-[11px]">
       {payload.durationMs !== undefined && payload.durationMs !== null && payload.durationMs > 0 && (
         <Row label="Duration">
-          <span className="font-mono">{formatDuration(payload.durationMs)}</span>
+          <span className="font-mono">{formatDurationDecimal(payload.durationMs)}</span>
         </Row>
       )}
       {payload.costUsd !== undefined && payload.costUsd !== null && payload.costUsd > 0 && (
