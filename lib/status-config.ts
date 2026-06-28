@@ -10,6 +10,8 @@
  *  - subtle  (text-{color}-700) — used in list/table views for less emphasis
  */
 
+import { CheckCircle2, Loader2, XCircle } from "lucide-react"
+
 // ── Badge className palette (text-800 intensity) ────────────────────────────
 /** Tailwind badge class strings keyed by color name (text-800 intensity). */
 export const STATUS_STYLES = {
@@ -46,4 +48,16 @@ export interface StatusConfigEntry {
 /** Status badge entry extended with a React icon component. */
 export interface StatusConfigEntryWithIcon extends StatusConfigEntry {
   icon: React.ComponentType<{ className?: string }>
+}
+
+// ── Shared async-run status entries ─────────────────────────────────────────
+/**
+ * Completed / Running / Failed status entries shared by features that track an
+ * async run (crew assignments, crew peer conversations). These three entries
+ * were byte-identical across those components, so they live here once.
+ */
+export const RUN_STATUS_CONFIG: Record<"COMPLETED" | "RUNNING" | "FAILED", StatusConfigEntryWithIcon> = {
+  COMPLETED: { label: "Completed", className: STATUS_STYLES.emerald, icon: CheckCircle2 },
+  RUNNING:   { label: "Running",   className: STATUS_STYLES.blue,    icon: Loader2 },
+  FAILED:    { label: "Failed",    className: STATUS_STYLES.red,     icon: XCircle },
 }

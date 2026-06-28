@@ -1,8 +1,9 @@
 "use client"
 
 import { Fragment, useCallback, useState } from "react"
-import { CheckCircle2, Loader2, XCircle, MessageSquare, AlertTriangle } from "lucide-react"
+import { MessageSquare, AlertTriangle } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
+import { StatusIconBadge } from "@/components/ui/status-icon-badge"
 import { Card, CardContent } from "@/components/ui/card"
 import {
   Table,
@@ -22,7 +23,7 @@ import { peerConversationSchema, type PeerConversation } from "@/lib/types/peer-
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 import { formatRelativeTime, formatDurationClock } from "@/lib/time"
 import { z } from "zod"
-import { STATUS_STYLES, type StatusConfigEntryWithIcon } from "@/lib/status-config"
+import { RUN_STATUS_CONFIG } from "@/lib/status-config"
 import { useApiResource } from "@/hooks/use-api-resource"
 
 interface CrewPeerConversationsProps {
@@ -30,11 +31,8 @@ interface CrewPeerConversationsProps {
   workspaceId: string
 }
 
-const STATUS_CONFIG: Record<PeerConversation["status"], StatusConfigEntryWithIcon> = {
-  COMPLETED: { label: "Completed", className: STATUS_STYLES.emerald, icon: CheckCircle2 },
-  RUNNING:   { label: "Running",   className: STATUS_STYLES.blue,    icon: Loader2 },
-  FAILED:    { label: "Failed",    className: STATUS_STYLES.red,     icon: XCircle },
-}
+// Completed / Running / Failed entries are shared with crew assignments.
+const STATUS_CONFIG = RUN_STATUS_CONFIG
 
 export function CrewPeerConversations({ crewId, workspaceId }: CrewPeerConversationsProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null)
@@ -103,7 +101,6 @@ export function CrewPeerConversations({ crewId, workspaceId }: CrewPeerConversat
                 <TableBody>
                   {conversations.map((c) => {
                     const config = STATUS_CONFIG[c.status]
-                    const StatusIcon = config.icon
                     const isExpanded = expandedId === c.id
                     const hasDetail = c.response
                     const detailId = `peer-detail-${c.id}`
@@ -128,20 +125,18 @@ export function CrewPeerConversations({ crewId, workspaceId }: CrewPeerConversat
                           }}
                         >
                           <TableCell>
-                            <Badge
-                              variant="outline"
-                              className={`gap-1.5 border-0 ${config.className}`}
-                            >
-                              {c.status === "RUNNING" ? (
-                                <span className="relative flex h-2 w-2 shrink-0">
-                                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
-                                  <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500" />
-                                </span>
-                              ) : (
-                                <StatusIcon className="h-3 w-3" />
-                              )}
-                              {config.label}
-                            </Badge>
+                            <StatusIconBadge
+                              entry={config}
+                              gap="gap-1.5"
+                              icon={
+                                c.status === "RUNNING" ? (
+                                  <span className="relative flex h-2 w-2 shrink-0">
+                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
+                                    <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500" />
+                                  </span>
+                                ) : undefined
+                              }
+                            />
                           </TableCell>
                           <TableCell>
                             <div className="flex items-center gap-2">

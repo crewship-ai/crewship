@@ -3,7 +3,7 @@
 import { Fragment, useCallback, useState } from "react"
 import { CheckCircle2, AlertTriangle, Send, ExternalLink, KeyRound } from "lucide-react"
 import { BadgeAlertIcon } from "@/components/ui/badge-alert"
-import { Badge } from "@/components/ui/badge"
+import { StatusIconBadge } from "@/components/ui/status-icon-badge"
 import { Card, CardContent } from "@/components/ui/card"
 import {
   Table,
@@ -116,7 +116,6 @@ export function CrewEscalations({ crewId, workspaceId }: CrewEscalationsProps) {
                 <TableBody>
                   {escalations.map((e) => {
                     const config = STATUS_CONFIG[e.status]
-                    const StatusIcon = config.icon
                     const isExpanded = expandedId === e.id
                     const isPending = e.status === "PENDING"
                     const hasDetail = isPending || e.context || e.resolution
@@ -144,13 +143,7 @@ export function CrewEscalations({ crewId, workspaceId }: CrewEscalationsProps) {
                         >
                           <TableCell>
                             <div className="flex flex-col gap-1">
-                              <Badge
-                                variant="outline"
-                                className={`gap-1 border-0 ${config.className}`}
-                              >
-                                <StatusIcon className="h-3 w-3" />
-                                {config.label}
-                              </Badge>
+                              <StatusIconBadge entry={config} />
                               {e.type !== "TEXT" && (
                                 <span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
                                   <typeInfo.icon className="h-2.5 w-2.5" />
