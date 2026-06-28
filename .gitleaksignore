@@ -59,3 +59,11 @@
 5d53262b7201743f181b7d3bc8e22a8c2cbd20a7:internal/api/composio_handler_test.go:generic-api-key:110
 5fb1efc9e308e5f1c889be57255e7fa357a3996d:internal/api/composio_handler_test.go:generic-api-key:380
 5fb1efc9e308e5f1c889be57255e7fa357a3996d:internal/api/composio_handler_test.go:generic-api-key:476
+
+# Agent-proposed credentials tests (PR #706) — a fake redaction-canary value in
+# the metadata-redaction assertion (TestCreateEscalation_CredentialProposal_RedactsAndLinks).
+# Annotated //gitleaks:allow at HEAD, but gitleaks scans full history and still
+# sees the literal in the original commit. Mirrored onto trunk so PRs branched
+# from main don't trip on it before #706 lands. Not a real secret — its whole
+# purpose is to assert the value gets redacted from the escalation row.
+242fdbffc9b50d36cbcfd5dd84b1e3e45a491ddf:internal/api/escalation_credential_test.go:generic-api-key:151
