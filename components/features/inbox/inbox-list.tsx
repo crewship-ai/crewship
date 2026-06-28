@@ -889,10 +889,37 @@ function KindActions({
           await onRefresh()
         })
 
-      // CREDENTIAL escalations can't be approved without supplying the
-      // secret value — that belongs to the credential flow, not a blind
-      // inbox button. Offer Reject only, and say where to approve.
+      // CREDENTIAL escalations: when the agent already proposed a value, it is
+      // sitting in the vault as PENDING_APPROVAL, so Approve just activates it
+      // (no secret to type here) and Reject discards it — one-click both ways.
+      // Legacy CREDENTIAL escalations (no pending credential, the human must
+      // supply the secret) keep Reject-only and point at the crew panel.
       if (escType === "CREDENTIAL") {
+        if (item.payload?.has_pending_credential === true) {
+          return (
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                disabled={disabled || busy !== null}
+                onClick={() => resolveEsc("approve")}
+                className="gap-1.5 bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30"
+              >
+                <CheckCircle2 className="h-3 w-3" />
+                {busy === "approve" ? "Approving…" : "Approve"}
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={disabled || busy !== null}
+                onClick={() => resolveEsc("reject")}
+                className="gap-1.5"
+              >
+                <XCircle className="h-3 w-3" />
+                {busy === "reject" ? "Rejecting…" : "Reject"}
+              </Button>
+            </div>
+          )
+        }
         return (
           <div className="flex items-center gap-2">
             <Button

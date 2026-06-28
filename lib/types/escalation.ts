@@ -17,6 +17,10 @@ export const escalationSchema = z.object({
   resolved_by: z.string().nullable(),
   resolved_at: z.string().nullable(),
   created_at: z.string(),
+  // Links an agent-proposed CREDENTIAL escalation to the PENDING_APPROVAL
+  // credential already in the vault. Non-null ⇒ Approve activates it (the
+  // human does not need to supply the secret).
+  credential_id: z.string().nullable().default(null),
 })
 
 /** Structured evidence attached to an escalation, providing context about what the agent was doing. */

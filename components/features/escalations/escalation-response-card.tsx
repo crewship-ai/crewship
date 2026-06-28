@@ -93,9 +93,13 @@ export function EscalationResponseCard({
 
   const evidencePack = parseEvidencePack(escalation.metadata)
   const metadataUrl = parseMetadataUrl(escalation.metadata)
+  // An agent-proposed credential is already in the vault as PENDING_APPROVAL,
+  // so approve/reject here don't require the human to type the secret.
+  const hasPendingCredential = Boolean(escalation.credential_id)
 
   const handleResolve = async (action: "approve" | "reject" | "redirect") => {
-    if (!resolution.trim()) return
+    const needsResolution = !(hasPendingCredential && action !== "redirect")
+    if (needsResolution && !resolution.trim()) return
     if (action === "redirect" && !redirectTo) return
 
     setSubmitting(true)
@@ -105,7 +109,9 @@ export function EscalationResponseCard({
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          resolution: resolution.trim(),
+          resolution:
+            resolution.trim() ||
+            (action === "approve" ? "Approved" : action === "reject" ? "Rejected" : ""),
           action,
           redirect_to: action === "redirect" ? redirectTo : undefined,
           workspace_id: workspaceId,
@@ -301,7 +307,7 @@ export function EscalationResponseCard({
           <Button
             size="sm"
             onClick={() => handleResolve("approve")}
-            disabled={submitting || !resolution.trim()}
+            disabled={submitting || (!hasPendingCredential && !resolution.trim())}
             className="bg-emerald-600 hover:bg-emerald-700 text-white"
           >
             <CheckCircle2 className="h-3.5 w-3.5 mr-1" />
@@ -311,7 +317,7 @@ export function EscalationResponseCard({
             size="sm"
             variant="outline"
             onClick={() => handleResolve("reject")}
-            disabled={submitting || !resolution.trim()}
+            disabled={submitting || (!hasPendingCredential && !resolution.trim())}
             className="border-red-300 text-red-700 hover:bg-red-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950/30"
           >
             <XCircle className="h-3.5 w-3.5 mr-1" />
