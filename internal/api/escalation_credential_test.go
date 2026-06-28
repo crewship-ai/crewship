@@ -11,6 +11,38 @@ import (
 	"github.com/crewship-ai/crewship/internal/encryption"
 )
 
+// --- metadataCarriesValue (pure) ---
+
+// metadataCarriesValue is the defensive redaction gate: any escalate metadata
+// that embeds a secret "value" must be detected so the caller redacts it before
+// it reaches escalations.metadata / the journal — even when the proposal is
+// invalid or the JSON is malformed. It fails closed on malformed input.
+func TestMetadataCarriesValue(t *testing.T) {
+	cases := []struct {
+		name     string
+		metadata string
+		want     bool
+	}{
+		{"valid with value", `{"name":"DB","value":"s3cret"}`, true},
+		{"valid value, no name (invalid proposal)", `{"value":"s3cret"}`, true},
+		{"valid, no value", `{"name":"DB","type":"SECRET"}`, false},
+		{"empty value", `{"value":""}`, false},
+		// Fail closed: malformed JSON that still embeds a value key must be
+		// treated as secret-bearing rather than persisted raw.
+		{"malformed but carries value", `{"value":"s3cret"`, true},
+		{"non-object", `PG_PASSWORD=v`, false},
+		{"empty", ``, false},
+		{"link url", `https://example.com`, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := metadataCarriesValue(c.metadata); got != c.want {
+				t.Errorf("metadataCarriesValue(%q) = %v, want %v", c.metadata, got, c.want)
+			}
+		})
+	}
+}
+
 // --- parseCredentialProposal (pure) ---
 
 func TestParseCredentialProposal(t *testing.T) {

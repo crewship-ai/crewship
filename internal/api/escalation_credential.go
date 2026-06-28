@@ -47,7 +47,13 @@ func metadataCarriesValue(metadata string) bool {
 		Value string `json:"value"`
 	}
 	if err := json.Unmarshal([]byte(s), &m); err != nil {
-		return false
+		// Malformed JSON object — we cannot trust it doesn't embed a secret
+		// (e.g. an unterminated `{"value":"secret"`). Fail closed: if it so
+		// much as mentions a "value" key, treat it as secret-bearing so the
+		// caller redacts instead of persisting/journaling the raw string. A
+		// false positive here only over-redacts a non-secret; the inverse
+		// would leak.
+		return strings.Contains(s, `"value"`)
 	}
 	return strings.TrimSpace(m.Value) != ""
 }
