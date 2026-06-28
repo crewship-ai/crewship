@@ -135,6 +135,55 @@ func TestRunLogs_MatchesPayloadRunID(t *testing.T) {
 	}
 }
 
+// TestRunLogs_ToleratesMalformedPayload — the v120 run_id generated column
+// runs json_extract over payload; a row with non-JSON payload in the same
+// workspace must NOT error the index build or the query (adversarial: a
+// legacy/buggy row shouldn't take down the Logs tab for every other run).
+func TestRunLogs_ToleratesMalformedPayload(t *testing.T) {
+	h, db, userID, wsID := runsHandlerRig(t)
+	seedRunsPipeline(t, db, wsID, "pl-mal", "mal-pipe")
+	seedRunRow(t, db, wsID, "pl-mal", "mal-pipe", "prn_mal", "completed")
+
+	// A poison row: non-JSON payload, same workspace.
+	if _, err := db.Exec(`
+		INSERT INTO journal_entries
+		    (id, workspace_id, ts, entry_type, severity, actor_type, actor_id,
+		     summary, payload, refs, trace_id, priority)
+		VALUES ('jm-bad', ?, '2026-01-01T00:00:00Z', 'note', 'info', 'system', 'sys',
+		        'poison', 'this is not json {', '{}', '', 'normal')`, wsID); err != nil {
+		t.Fatalf("inserting a malformed-payload row should not fail (got %v)", err)
+	}
+	// The real entry we want back.
+	if _, err := db.Exec(`
+		INSERT INTO journal_entries
+		    (id, workspace_id, ts, entry_type, severity, actor_type, actor_id,
+		     summary, payload, refs, trace_id, priority)
+		VALUES ('jm-ok', ?, '2026-01-01T00:00:01Z', 'pipeline.run.started', 'info',
+		        'orchestrator', 'prn_mal', 'started',
+		        '{"run_id":"prn_mal"}', '{}', '', 'normal')`, wsID); err != nil {
+		t.Fatalf("seed ok entry: %v", err)
+	}
+
+	req := withWorkspaceUser(
+		httptest.NewRequest("GET", "/api/v1/workspaces/"+wsID+"/pipeline-runs/prn_mal/logs", nil),
+		userID, wsID, "OWNER",
+	)
+	req.SetPathValue("runId", "prn_mal")
+	rr := httptest.NewRecorder()
+	h.RunLogs(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (malformed sibling row broke the query); body=%s", rr.Code, rr.Body.String())
+	}
+	var got []runLogEntry
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v; body=%s", err, rr.Body.String())
+	}
+	if len(got) != 1 || got[0].Message != "started" {
+		t.Fatalf("want the prn_mal entry only, got %+v", got)
+	}
+}
+
 // TestRunLogs_EmptyWhenNoEntries — a run that exists but produced no
 // journal rows returns an empty array (not null, not 404).
 func TestRunLogs_EmptyWhenNoEntries(t *testing.T) {
