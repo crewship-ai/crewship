@@ -105,7 +105,10 @@ export function EscalationResponseCard({
     setSubmitting(true)
     setError(null)
     try {
-      const res = await fetch(`/api/v1/escalations/${escalation.id}/resolve`, {
+      // workspace_id MUST be on the query string — RequireWorkspace reads it
+      // from the URL, not the body (a body-only workspace_id is silently ignored
+      // and the request 400s with "workspace_id is required").
+      const res = await fetch(`/api/v1/escalations/${escalation.id}/resolve?workspace_id=${encodeURIComponent(workspaceId)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

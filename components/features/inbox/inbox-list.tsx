@@ -876,6 +876,7 @@ function KindActions({
             item.source_id,
             action,
             action === "approve" ? "Approved from inbox" : "Rejected from inbox",
+            item.workspace_id,
           )
           if (!res.ok) {
             // 404 = no escalations row behind this item (keeper/synthetic):

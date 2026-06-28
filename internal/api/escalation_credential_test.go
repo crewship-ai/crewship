@@ -289,6 +289,52 @@ func TestRejectPendingCredential_SoftDeletes(t *testing.T) {
 	}
 }
 
+// TestResolveEscalation_ThroughRequireWorkspace exercises the FULL middleware
+// chain the dashboard hits (RequireWorkspace → ResolveEscalation), which the
+// other resolve tests skip by injecting the workspace into the context directly.
+// That gap let the inbox "workspace_id is required" bug ship: RequireWorkspace
+// reads workspace_id from the URL, so a resolve request without it 400s before
+// the handler runs. This guards both the rejection and the happy path.
+func TestResolveEscalation_ThroughRequireWorkspace(t *testing.T) {
+	ensureEncryptionKey(t)
+	h, userID, wsID, crewID, agentID := covEscFixture(t)
+	credID, ok := h.createPendingCredential(context.Background(), wsID, agentID,
+		credentialProposal{Name: "REDIS_URL", Type: "SECRET", Value: "v"})
+	if !ok {
+		t.Fatal("setup: pending credential not created")
+	}
+	seedLinkedEscalation(t, h, "esc-mw", wsID, crewID, agentID, credID)
+
+	am := NewAuthMiddleware(nil, nil, h.db, newTestLogger())
+	handler := am.RequireWorkspace(http.HandlerFunc(h.ResolveEscalation))
+	body := map[string]string{"action": "approve", "resolution": "Approved from inbox"}
+
+	// 1) No workspace_id on the URL (the inbox bug) → 400 from the middleware.
+	reqNo := httptest.NewRequest("PATCH", "/api/v1/escalations/esc-mw/resolve", jsonBody(body))
+	reqNo = reqNo.WithContext(withUser(reqNo.Context(), &AuthUser{ID: userID}))
+	reqNo.SetPathValue("escalationId", "esc-mw")
+	rrNo := httptest.NewRecorder()
+	handler.ServeHTTP(rrNo, reqNo)
+	if rrNo.Code != http.StatusBadRequest {
+		t.Fatalf("without workspace_id: status = %d, want 400; body=%s", rrNo.Code, rrNo.Body.String())
+	}
+
+	// 2) workspace_id on the query string → 200 and the credential activates.
+	reqYes := httptest.NewRequest("PATCH", "/api/v1/escalations/esc-mw/resolve?workspace_id="+wsID, jsonBody(body))
+	reqYes = reqYes.WithContext(withUser(reqYes.Context(), &AuthUser{ID: userID}))
+	reqYes.SetPathValue("escalationId", "esc-mw")
+	rrYes := httptest.NewRecorder()
+	handler.ServeHTTP(rrYes, reqYes)
+	if rrYes.Code != http.StatusOK {
+		t.Fatalf("with workspace_id: status = %d, want 200; body=%s", rrYes.Code, rrYes.Body.String())
+	}
+	var status string
+	h.db.QueryRow(`SELECT status FROM credentials WHERE id=?`, credID).Scan(&status)
+	if status != "ACTIVE" {
+		t.Errorf("credential status = %q, want ACTIVE after approve through middleware", status)
+	}
+}
+
 // --- delivery exclusion: auto-assign must skip PENDING_APPROVAL ---
 
 func TestAutoAssign_ExcludesPendingApproval(t *testing.T) {
