@@ -631,7 +631,6 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		return fmt.Errorf("no container provider and no container ID")
 	}
 
-	var fullResponse string
 	var toolSummaries []string
 	// partAcc assembles the ordered, structured parts (text / thinking / tool
 	// calls / tool results) of the assistant turn for faithful re-rendering on
@@ -659,7 +658,21 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	logBuf := logcollector.NewOutputBuffer(b.logWriter, info.CrewID, info.AgentSlug)
 	defer logBuf.Close()
 
-	var resultMeta map[string]interface{}
+	// The shared buffering handler owns the uniform per-event work:
+	// accumulating assistant text, capturing the final "result" metadata,
+	// and appending a LogEntry to logBuf. The wrapper below layers on the
+	// chat-only extras (live streaming, structured part assembly, tool
+	// summaries) and runs them BEFORE the base handler to preserve the
+	// previous ordering.
+	base, acc := orchestrator.NewBufferingHandler(orchestrator.BufferingHandlerOpts{
+		LogBuf:            logBuf,
+		AgentSlug:         info.AgentSlug,
+		AccumulateText:    true,
+		CaptureResultMeta: true,
+		OnLogError: func(err error) {
+			b.logger.Debug("log write error", "error", err)
+		},
+	})
 
 	handler := func(event orchestrator.AgentEvent) {
 		streamFn(ws.ChatEvent{
@@ -672,12 +685,6 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		// (text/thinking/tool_call/tool_result/image) and ignores transport
 		// events (status/system/result/error).
 		partAcc.Add(event.Type, event.Content, event.Metadata)
-		// Only accumulate actual text content for the persisted assistant message.
-		// System events (sidecar security logs, etc.) and thinking events should not
-		// be stored as part of the assistant response.
-		if event.Type == "text" {
-			fullResponse += event.Content
-		}
 		// Track tool calls for conversation context (compact summary, not full output).
 		if event.Type == "tool_call" {
 			toolSummaries = append(toolSummaries, fmt.Sprintf("[tool: %s]", event.Content))
@@ -689,23 +696,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 			}
 			toolSummaries = append(toolSummaries, fmt.Sprintf("[result: %s]", truncated))
 		}
-		// Capture result metadata (cost, usage, duration) for the run record.
-		if event.Type == "result" {
-			if m, ok := event.Metadata.(map[string]interface{}); ok {
-				resultMeta = m
-			}
-		}
-
-		if err := logBuf.Append(logcollector.LogEntry{
-			Timestamp: event.Timestamp,
-			Level:     "info",
-			Agent:     info.AgentSlug,
-			Event:     event.Type,
-			Content:   event.Content,
-			Metadata:  event.Metadata,
-		}); err != nil {
-			b.logger.Debug("log write error", "error", err)
-		}
+		base(event)
 	}
 
 	runID := generateMsgID()
@@ -741,12 +732,12 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 				b.logger.Warn("failed to update run status", "run_id", runID, "status", "CANCELLED", "error", err)
 			}
 			// Persist partial response if any
-			if fullResponse != "" {
+			if acc.Text() != "" {
 				_ = b.convStore.Append(cleanCtx, chatID, conversation.Message{
 					ID:        generateMsgID(),
 					AgentID:   info.AgentID,
 					Role:      conversation.RoleAssistant,
-					Content:   fullResponse,
+					Content:   acc.Text(),
 					Parts:     partAcc.Parts(),
 					Timestamp: time.Now().UTC(),
 				})
@@ -771,20 +762,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	completedMeta := map[string]interface{}{
 		"duration_ms": time.Since(startedAt).Milliseconds(),
 	}
-	if resultMeta != nil {
-		if v, ok := resultMeta["total_cost_usd"]; ok {
-			completedMeta["total_cost_usd"] = v
-		}
-		if v, ok := resultMeta["num_turns"]; ok {
-			completedMeta["num_turns"] = v
-		}
-		if v, ok := resultMeta["usage"]; ok {
-			completedMeta["usage"] = v
-		}
-		if v, ok := resultMeta["model_usage"]; ok {
-			completedMeta["model_usage"] = v
-		}
-	}
+	orchestrator.MergeResultUsageMeta(completedMeta, acc.ResultMeta())
 	if err := b.resolver.UpdateRun(ctx, runID, "COMPLETED", &exitCode, nil, completedMeta); err != nil {
 		b.logger.Warn("failed to update run status", "run_id", runID, "error", err)
 	}
@@ -803,7 +781,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		ID:          generateMsgID(),
 		AgentID:     info.AgentID,
 		Role:        conversation.RoleAssistant,
-		Content:     fullResponse,
+		Content:     acc.Text(),
 		Parts:       partAcc.Parts(),
 		ToolSummary: toolSummary,
 		Timestamp:   time.Now().UTC(),

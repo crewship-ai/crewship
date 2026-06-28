@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -375,7 +374,6 @@ func (s *Scheduler) triggerAgent(ag scheduledAgent) {
 
 	// 7. Run agent
 	startedAt := time.Now()
-	var fullResponse strings.Builder
 
 	var logBuf *logcollector.OutputBuffer
 	if s.logWriter != nil {
@@ -383,27 +381,12 @@ func (s *Scheduler) triggerAgent(ag scheduledAgent) {
 		defer logBuf.Close()
 	}
 
-	var resultMeta map[string]interface{}
-	handler := func(event orchestrator.AgentEvent) {
-		if event.Type == "text" {
-			fullResponse.WriteString(event.Content)
-		}
-		if event.Type == "result" {
-			if m, ok := event.Metadata.(map[string]interface{}); ok {
-				resultMeta = m
-			}
-		}
-		if logBuf != nil {
-			_ = logBuf.Append(logcollector.LogEntry{
-				Timestamp: event.Timestamp,
-				Level:     "info",
-				Agent:     info.AgentSlug,
-				Event:     event.Type,
-				Content:   event.Content,
-				Metadata:  event.Metadata,
-			})
-		}
-	}
+	handler, acc := orchestrator.NewBufferingHandler(orchestrator.BufferingHandlerOpts{
+		LogBuf:            logBuf,
+		AgentSlug:         info.AgentSlug,
+		AccumulateText:    true,
+		CaptureResultMeta: true,
+	})
 
 	runErr := s.orch.RunAgent(ctx, req, handler)
 
@@ -411,13 +394,7 @@ func (s *Scheduler) triggerAgent(ag scheduledAgent) {
 	completedMeta := map[string]interface{}{
 		"duration_ms": time.Since(startedAt).Milliseconds(),
 	}
-	if resultMeta != nil {
-		for _, k := range []string{"total_cost_usd", "num_turns", "usage", "model_usage"} {
-			if v, ok := resultMeta[k]; ok {
-				completedMeta[k] = v
-			}
-		}
-	}
+	orchestrator.MergeResultUsageMeta(completedMeta, acc.ResultMeta())
 
 	if runErr != nil {
 		errMsg := runErr.Error()
@@ -434,11 +411,11 @@ func (s *Scheduler) triggerAgent(ag scheduledAgent) {
 	}
 
 	// Persist assistant response
-	if s.convStore != nil && fullResponse.Len() > 0 {
+	if s.convStore != nil && acc.Text() != "" {
 		_ = s.convStore.Append(ctx, chatID, conversation.Message{
 			ID:        generateID(),
 			Role:      conversation.RoleAssistant,
-			Content:   fullResponse.String(),
+			Content:   acc.Text(),
 			Timestamp: time.Now().UTC(),
 		})
 		_ = s.resolver.IncrementMessageCount(ctx, chatID, 2)
