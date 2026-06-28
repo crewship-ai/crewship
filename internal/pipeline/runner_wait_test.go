@@ -123,19 +123,37 @@ func TestRunWaitStep_UnknownKind_Errors(t *testing.T) {
 
 // ---- event kind ----
 
-func TestRunWaitStep_EventKind_NotImplementedYet(t *testing.T) {
-	// Source: Phase-2 event waits return a clear "not yet implemented"
-	// instead of silently hanging. Pin so a regression that returned
-	// nil ("succeeded with no wait") doesn't let pipelines unknowingly
-	// skip event gates.
+func TestRunWaitStep_EventKind_NoRegistryFailsClosed(t *testing.T) {
+	// Without a signal registry wired, wait:event fails closed rather
+	// than silently succeeding/hanging (Wave 4.3).
 	e := &Executor{}
 	step := waitStepReq("event")
 	_, _, _, err := e.runWaitStep(context.Background(), step, emptyRender(), RunInput{}, "run-1", 0)
-	if err == nil {
-		t.Fatal("expected \"not yet implemented\" error on event kind")
+	if err == nil || !strings.Contains(err.Error(), "no signal registry") {
+		t.Fatalf("expected no-registry error, got %v", err)
 	}
-	if !strings.Contains(err.Error(), "not yet implemented") {
-		t.Errorf("err = %v, want \"not yet implemented\"", err)
+}
+
+func TestRunWaitStep_EventKind_DeliversSignalPayload(t *testing.T) {
+	// With a registry, wait:event blocks until a signal arrives and
+	// returns the payload as the step output (Wave 4.3).
+	reg := NewSignalRegistry()
+	e := &Executor{signals: reg}
+	step := waitStepReq("event") // event_type "" (waitStepReq sets none)
+	go func() {
+		for i := 0; i < 200; i++ {
+			if reg.Signal("run-1", "", "payload-x") {
+				return
+			}
+			time.Sleep(2 * time.Millisecond)
+		}
+	}()
+	out, _, _, err := e.runWaitStep(context.Background(), step, emptyRender(), RunInput{}, "run-1", 0)
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if out != "payload-x" {
+		t.Fatalf("event output: got %q, want payload-x", out)
 	}
 }
 
