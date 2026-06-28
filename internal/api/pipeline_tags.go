@@ -39,6 +39,10 @@ func (h *PipelineHandler) AddPipelineTags(w http.ResponseWriter, r *http.Request
 	}
 	store := pipeline.NewPipelineTagStore(h.db)
 	if err := store.Add(r.Context(), workspaceID, p.ID, body.Tags); err != nil {
+		if errors.Is(err, pipeline.ErrTooManyTags) {
+			replyError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		replyError(w, http.StatusInternalServerError, "add tags")
 		return
 	}

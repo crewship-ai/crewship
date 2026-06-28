@@ -3,7 +3,7 @@ package pipeline
 import (
 	"context"
 	"database/sql"
-	"fmt"
+	"errors"
 )
 
 // PipelineTagStore manages routine-DEFINITION tags (v123) for cross-crew
@@ -15,6 +15,10 @@ type PipelineTagStore struct {
 // MaxPipelineTags caps discovery tags per routine so a caller can't
 // bloat pipeline_tags with unbounded labels.
 const MaxPipelineTags = 20
+
+// ErrTooManyTags is returned by Add when the cap would be exceeded — a
+// client error the handler maps to 400, not 500.
+var ErrTooManyTags = errors.New("routine already has the maximum number of tags")
 
 // NewPipelineTagStore wraps a DB handle.
 func NewPipelineTagStore(db *sql.DB) *PipelineTagStore {
@@ -36,7 +40,7 @@ func (s *PipelineTagStore) Add(ctx context.Context, workspaceID, pipelineID stri
 			continue
 		}
 		if existing+added >= MaxPipelineTags {
-			return fmt.Errorf("routine already has the max %d tags", MaxPipelineTags)
+			return ErrTooManyTags
 		}
 		res, err := s.db.ExecContext(ctx,
 			`INSERT INTO pipeline_tags (pipeline_id, workspace_id, tag) VALUES (?, ?, ?)
