@@ -83,7 +83,26 @@ func applyStepOverrides(steps []Step, overrides map[string]StepOverride) {
 			steps[i].Prompt = ov.Prompt
 		}
 		if ov.ModelOverride != "" {
-			steps[i].ModelOverride = ov.ModelOverride
+			// A tier name (trivial|fast|moderate|smart) overrides the
+			// step's Complexity — and clears any authored ModelOverride so
+			// the tier actually wins (an explicit model id beats the tier
+			// at resolution). A non-tier value is treated as a concrete
+			// model id and set as ModelOverride.
+			if isComplexityTier(ov.ModelOverride) {
+				steps[i].Complexity = Complexity(ov.ModelOverride)
+				steps[i].ModelOverride = ""
+			} else {
+				steps[i].ModelOverride = ov.ModelOverride
+			}
 		}
 	}
+}
+
+// isComplexityTier reports whether s is one of the named tiers.
+func isComplexityTier(s string) bool {
+	switch Complexity(s) {
+	case ComplexityTrivial, ComplexityFast, ComplexityModerate, ComplexitySmart:
+		return true
+	}
+	return false
 }
