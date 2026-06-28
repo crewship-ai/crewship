@@ -88,17 +88,24 @@ func (h *MissionHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 			internalError(w, r, h.logger, "lookup dependency tasks", depErr)
 			return
 		}
+		defer depRows.Close()
 		depStatuses := make(map[string]string, len(req.DependsOn))
 		for depRows.Next() {
 			var id, st string
 			if err := depRows.Scan(&id, &st); err != nil {
-				depRows.Close()
 				internalError(w, r, h.logger, "scan dependency task", err)
 				return
 			}
 			depStatuses[id] = st
 		}
-		depRows.Close()
+		// Distinguish a driver iteration failure from genuinely-missing
+		// dependency IDs: a mid-scan DB error would otherwise leave
+		// depStatuses partial and the missing-ID check below would report
+		// a misleading 400 "dependency task not found".
+		if err := depRows.Err(); err != nil {
+			internalError(w, r, h.logger, "iterate dependency tasks", err)
+			return
+		}
 
 		allCompleted := true
 		for _, depID := range req.DependsOn {

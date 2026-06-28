@@ -145,10 +145,15 @@ func (r *OrchestratorRunner) RunStep(ctx context.Context, req AgentStepRequest) 
 		Slug:        info.CrewSlug,
 		Image:       info.RuntimeImage,
 		CachedImage: info.CachedImage,
-		// MemoryMB / CPUs default to the orchestrator's defaults
-		// when zero — the runner doesn't override those because
-		// pipelines aren't currently sized differently from chat
-		// runs.
+		// Size the crew container from the crew's configured limits,
+		// the same source the AgentRunRequest below uses. Without this
+		// a cold pipeline run that *creates* the container would pin it
+		// to the Docker fallback (8 GiB / 2 CPU) while the chat path
+		// (bridge.go) would have sized it to the crew's config. When
+		// these are zero the docker provider applies its own safe
+		// default, so unconfigured crews are unaffected.
+		MemoryMB: info.MemoryMB,
+		CPUs:     info.CPUs,
 	})
 	if err != nil {
 		return AgentStepResult{}, fmt.Errorf("ensure container: %w", err)
