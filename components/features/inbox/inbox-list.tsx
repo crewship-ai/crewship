@@ -168,7 +168,10 @@ function groupOf(
       return iss ? { key: `i:${iss}`, label: iss } : { key: "i:_none", label: "No issue" }
     }
     case "crew": {
-      const crew = payloadString(item, "crew_id")
+      // Waitpoints carry the crew on invoking_crew_id, other kinds on
+      // crew_id — accept either so a pipeline approval still groups under
+      // its crew.
+      const crew = payloadString(item, "crew_id") || payloadString(item, "invoking_crew_id")
       if (!crew) return { key: "c:_none", label: "No crew" }
       const name = crewName?.(crew)
       return { key: `c:${crew}`, label: name && name !== "" ? name : crew }
