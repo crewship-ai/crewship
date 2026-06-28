@@ -51,6 +51,7 @@ func (h *PipelineHandler) UpdateRunMetadata(w http.ResponseWriter, r *http.Reque
 // payload as its output.
 // POST /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/signal
 func (h *PipelineHandler) SignalRun(w http.ResponseWriter, r *http.Request) {
+	workspaceID := WorkspaceIDFromContext(r.Context())
 	runID := r.PathValue("runId")
 	if runID == "" {
 		replyError(w, http.StatusBadRequest, "runId required")
@@ -70,6 +71,20 @@ func (h *PipelineHandler) SignalRun(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.EventType == "" {
 		replyError(w, http.StatusBadRequest, "event_type required")
+		return
+	}
+	// Workspace isolation: the signal registry is keyed by run id alone,
+	// so verify the run belongs to the caller's workspace before
+	// delivering — otherwise an authed user in another workspace could
+	// inject a signal (and thus a wait-step output) into a run they don't
+	// own. 404 (not 403) so a cross-workspace run id is indistinguishable
+	// from a non-existent one.
+	if h.runStore == nil {
+		replyError(w, http.StatusServiceUnavailable, "run store not wired")
+		return
+	}
+	if rec, err := h.runStore.Get(r.Context(), runID); err != nil || rec.WorkspaceID != workspaceID {
+		replyError(w, http.StatusNotFound, "run not found")
 		return
 	}
 	delivered := h.signals.Signal(runID, body.EventType, body.Payload)

@@ -55,6 +55,27 @@ func TestUpdateMetadata_SetIncrementAppend(t *testing.T) {
 	}
 }
 
+func TestUpdateMetadata_RejectsOversized(t *testing.T) {
+	db := newMetaDB(t)
+	s := NewRunStore(db)
+	ctx := context.Background()
+	// A single set value larger than the cap must be rejected, not stored.
+	big := make([]byte, MaxRunMetadataBytes+10)
+	for i := range big {
+		big[i] = 'a'
+	}
+	_, err := s.UpdateMetadata(ctx, "w", "r1", MetadataOps{Set: map[string]any{"blob": string(big)}})
+	if err == nil {
+		t.Fatal("oversized metadata must be rejected")
+	}
+	// The row must be unchanged (still the seeded {"count":2}).
+	var raw string
+	_ = db.QueryRow(`SELECT metadata_json FROM pipeline_runs WHERE id='r1'`).Scan(&raw)
+	if len(raw) > 1000 {
+		t.Fatalf("rejected mutation must not have written: %d bytes", len(raw))
+	}
+}
+
 func TestRunTree_RootAndChildren(t *testing.T) {
 	db := newMetaDB(t)
 	// r1 is root; c1 child of r1; c2 child of c1.

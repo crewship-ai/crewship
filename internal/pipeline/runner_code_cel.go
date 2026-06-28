@@ -34,6 +34,10 @@ import (
 // runner's wake-gate contract so a probe can drive a schedule gate.
 type CelCodeRunner struct{}
 
+// celCostLimit bounds CEL evaluation cost — generous for real probe/
+// gate expressions, but a hard ceiling against a pathological one.
+const celCostLimit = 1_000_000
+
 var _ CodeRunner = CelCodeRunner{}
 
 func (CelCodeRunner) RunCode(ctx context.Context, req CodeRunRequest) (CodeRunResult, error) {
@@ -58,7 +62,11 @@ func (CelCodeRunner) RunCode(ctx context.Context, req CodeRunRequest) (CodeRunRe
 		err := fmt.Errorf("cel: compile: %w", iss.Err())
 		return CodeRunResult{Stderr: iss.Err().Error(), ExitCode: 1}, err
 	}
-	prg, err := env.Program(ast)
+	// Cost limit: CEL is already non-Turing-complete (guaranteed to
+	// terminate), but cap the evaluation cost as defense-in-depth so a
+	// pathological expression (deeply nested list/map ops) can't burn
+	// unbounded CPU on the request goroutine.
+	prg, err := env.Program(ast, cel.CostLimit(celCostLimit))
 	if err != nil {
 		return CodeRunResult{Stderr: err.Error(), ExitCode: 1}, fmt.Errorf("cel: program: %w", err)
 	}

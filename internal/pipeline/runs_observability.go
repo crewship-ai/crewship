@@ -7,9 +7,14 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"regexp"
 	"strings"
 )
+
+// MaxRunMetadataBytes caps a run's metadata_json so repeated appends
+// can't bloat the row. Mirrors trigger.dev's 256 KB ceiling.
+const MaxRunMetadataBytes = 256 * 1024
 
 // Run observability surface (trigger.dev-informed): tags, error
 // fingerprinting + failure grouping for bulk replay. is_replay/metadata
@@ -140,6 +145,13 @@ func (s *RunStore) UpdateMetadata(ctx context.Context, workspaceID, runID string
 	out, err := json.Marshal(md)
 	if err != nil {
 		return nil, err
+	}
+	// Cap the merged blob so repeated appends can't grow metadata_json
+	// unboundedly (DB-row bloat + slow reads). Matches trigger.dev's
+	// 256 KB ceiling; the mutation is rejected rather than truncated so
+	// the caller sees the limit instead of silent data loss.
+	if len(out) > MaxRunMetadataBytes {
+		return nil, fmt.Errorf("run metadata would exceed %d bytes (%d) — prune before appending", MaxRunMetadataBytes, len(out))
 	}
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE pipeline_runs SET metadata_json = ?, updated_at = datetime('now','subsec') WHERE id = ? AND workspace_id = ?`,

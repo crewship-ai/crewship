@@ -28,6 +28,7 @@ func TestCelCodeRunner(t *testing.T) {
 		{"compile error", "inputs.spend >>> 5", map[string]any{"spend": 1.0}, "", true},
 		{"unknown var", "missing.field > 1", map[string]any{}, "", true},
 		{"empty expr", "", map[string]any{}, "", true},
+		{"cost-limited expr still evaluates under budget", "[1,2,3].map(x, x * 2).size() == 3", map[string]any{}, "true", false},
 	}
 
 	for _, tc := range cases {
