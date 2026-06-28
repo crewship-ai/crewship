@@ -148,11 +148,11 @@ func TestCreateEscalation_CredentialProposal_RedactsAndLinks(t *testing.T) {
 	ensureEncryptionKey(t)
 	h, _, wsID, crewID, agentID := covEscFixture(t)
 	seedChat(t, h, "covesc-chat", agentID, wsID)
-	const secret = "s3cr3t-pg-xyz-987"
+	const canary = "redaction-canary-value-987" //gitleaks:allow — fake test fixture, asserts the value is redacted
 	rr := createEsc(h, wsID, map[string]string{
 		"from_slug": "covesc-ag", "reason": "store pg pw", "crew_id": crewID,
 		"workspace_id": wsID, "chat_id": "covesc-chat", "type": "CREDENTIAL",
-		"metadata": `{"name":"PG_PASSWORD","type":"SECRET","provider":"NONE","value":"` + secret + `"}`,
+		"metadata": `{"name":"PG_PASSWORD","type":"SECRET","provider":"NONE","value":"` + canary + `"}`,
 	})
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want 201; body=%s", rr.Code, rr.Body.String())
@@ -165,8 +165,8 @@ func TestCreateEscalation_CredentialProposal_RedactsAndLinks(t *testing.T) {
 	if credID == nil || *credID == "" {
 		t.Fatal("escalation.credential_id not linked")
 	}
-	if storedMeta == nil || strings.Contains(*storedMeta, secret) {
-		t.Fatalf("escalation.metadata must be redacted, leaked secret: %v", storedMeta)
+	if storedMeta == nil || strings.Contains(*storedMeta, canary) {
+		t.Fatalf("escalation.metadata must be redacted, leaked value: %v", storedMeta)
 	}
 	// The proposed credential exists and is PENDING_APPROVAL.
 	status, _, _, _, _, _ := credRow(t, h, *credID)
