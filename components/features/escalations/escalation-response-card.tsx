@@ -16,6 +16,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import type { Escalation } from "@/lib/types/escalation"
 import { parseEvidencePack } from "@/lib/types/escalation"
+import { apiFetch } from "@/lib/api-fetch"
 
 interface EscalationResponseCardProps {
   escalation: Escalation
@@ -108,7 +109,7 @@ export function EscalationResponseCard({
       // workspace_id MUST be on the query string — RequireWorkspace reads it
       // from the URL, not the body (a body-only workspace_id is silently ignored
       // and the request 400s with "workspace_id is required").
-      const res = await fetch(`/api/v1/escalations/${escalation.id}/resolve?workspace_id=${encodeURIComponent(workspaceId)}`, {
+      const res = await apiFetch(`/api/v1/escalations/${escalation.id}/resolve?workspace_id=${encodeURIComponent(workspaceId)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -137,7 +138,7 @@ export function EscalationResponseCard({
   const loadAgents = async () => {
     if (agentsLoaded) return
     try {
-      const res = await fetch(`/api/v1/agents?crew_id=${crewId}&workspace_id=${workspaceId}`)
+      const res = await apiFetch(`/api/v1/agents?crew_id=${crewId}&workspace_id=${workspaceId}`)
       if (!res.ok) return // Don't mark as loaded so user can retry
       const data = await res.json()
       const crewAgents = (Array.isArray(data) ? data : [])

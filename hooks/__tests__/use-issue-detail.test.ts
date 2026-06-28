@@ -73,6 +73,7 @@ describe("useIssueDetail", () => {
     expect(result.current.issueComments).toHaveLength(1)
     expect(mockFetch).toHaveBeenCalledWith(
       expect.stringContaining("/api/v1/crews/crew-1/issues/M1/comments?workspace_id=ws-1"),
+      expect.objectContaining({ credentials: "include" }),
     )
   })
 

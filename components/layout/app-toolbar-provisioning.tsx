@@ -9,6 +9,7 @@ import {
 import { Spinner } from "@/components/ui/spinner"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { useProvisioningStatus } from "@/hooks/use-provisioning-status"
+import { apiFetch } from "@/lib/api-fetch"
 
 // Provisioning UI extracted from app-toolbar.tsx — the badge popover
 // driving Build now / Retry / Restart agents from the global toolbar,
@@ -109,7 +110,7 @@ function ProvisioningRow({
     if (!workspaceId) return
     setBusy(true)
     try {
-      const r = await fetch(
+      const r = await apiFetch(
         `/api/v1/crews/${crew.id}/provision?workspace_id=${encodeURIComponent(workspaceId)}`,
         { method: "POST" },
       )
@@ -130,7 +131,7 @@ function ProvisioningRow({
     if (!workspaceId) return
     setBusy(true)
     try {
-      const r = await fetch(
+      const r = await apiFetch(
         `/api/v1/crews/${crew.id}/restart-agents?workspace_id=${encodeURIComponent(workspaceId)}`,
         { method: "POST" },
       )

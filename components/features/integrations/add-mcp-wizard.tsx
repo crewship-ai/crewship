@@ -26,6 +26,7 @@ import { MCPLogo } from "@/components/icons/mcp-logos"
 import { TrustTierBadge, type TrustTier } from "./trust-tier-badge"
 import { MCP_TEMPLATES, TEMPLATE_ICONS } from "@/components/features/mcp/templates"
 import type { MCPTemplate } from "@/components/features/mcp/types"
+import { apiFetch } from "@/lib/api-fetch"
 
 type Source = "marketplace" | "template" | "custom"
 type Step = 1 | 2 | 3 | 4
@@ -112,11 +113,11 @@ export function AddMCPWizard({ workspaceId, open, onOpenChange, onAdded, crewId 
   // Lazy-load crews + credentials when opening.
   React.useEffect(() => {
     if (!open) return
-    fetch(`/api/v1/crews?workspace_id=${workspaceId}`)
+    apiFetch(`/api/v1/crews?workspace_id=${workspaceId}`)
       .then((r) => r.ok ? r.json() : [])
       .then((d: CrewOption[]) => setCrews(Array.isArray(d) ? d : []))
       .catch(() => setCrews([]))
-    fetch(`/api/v1/credentials?workspace_id=${workspaceId}`)
+    apiFetch(`/api/v1/credentials?workspace_id=${workspaceId}`)
       .then((r) => r.ok ? r.json() : [])
       .then((d: CredentialOption[]) => setCredentials(Array.isArray(d) ? d : []))
       .catch(() => setCredentials([]))
@@ -129,7 +130,7 @@ export function AddMCPWizard({ workspaceId, open, onOpenChange, onAdded, crewId 
     const url = registryQ.trim()
       ? `/api/v1/mcp-registry/search?q=${encodeURIComponent(registryQ.trim())}&limit=60`
       : `/api/v1/mcp-registry?limit=60`
-    fetch(url)
+    apiFetch(url)
       .then((r) => r.ok ? r.json() : null)
       .then((d: { servers: RegistryEntry[] } | null) => setRegistry(d?.servers ?? []))
       .catch(() => setRegistry([]))
@@ -166,7 +167,7 @@ export function AddMCPWizard({ workspaceId, open, onOpenChange, onAdded, crewId 
           OAUTH_CLIENT_SECRET: oauthClientSecret.trim(),
         })
       }
-      const res = await fetch(`/api/v1/crews/${pickedCrewId}/integrations?workspace_id=${workspaceId}`, {
+      const res = await apiFetch(`/api/v1/crews/${pickedCrewId}/integrations?workspace_id=${workspaceId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),

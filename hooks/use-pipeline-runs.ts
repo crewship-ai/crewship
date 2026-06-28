@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
+import { apiFetch } from "@/lib/api-fetch"
 
 // PipelineRun mirrors the wire shape from /api/v1/workspaces/{ws}/
 // pipeline-runs. The backend enriches each row with pipeline_name +
@@ -79,7 +80,7 @@ export function usePipelineRuns(
       if (filter !== "all") params.set("status", filter)
       params.set("limit", "100")
       const url = `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipeline-runs?${params.toString()}`
-      const res = await fetch(url, { signal: ctrl.signal })
+      const res = await apiFetch(url, { signal: ctrl.signal })
       if (ctrl.signal.aborted) return
       if (!res.ok) {
         setError(`runs: ${res.status}`)

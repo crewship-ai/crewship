@@ -31,6 +31,7 @@ import { formatDate, formatRelativeTime } from "@/lib/time"
 import { getBrand } from "@/lib/credential-providers/registry"
 import { useAbilities } from "@/hooks/use-abilities"
 import { cn } from "@/lib/utils"
+import { apiFetch } from "@/lib/api-fetch"
 
 interface CredentialSummary {
   id: string
@@ -133,14 +134,14 @@ export function CredentialDetailSheet({
     if (!open || !credential) return
     if (tab === "audit") {
       setAuditLoading(true)
-      fetch(`/api/v1/credentials/${credential.id}/audit?workspace_id=${workspaceId}&limit=50`)
+      apiFetch(`/api/v1/credentials/${credential.id}/audit?workspace_id=${workspaceId}&limit=50`)
         .then((r) => r.ok ? r.json() : [])
         .then((data: AuditEvent[]) => setAudit(Array.isArray(data) ? data : []))
         .catch(() => setAudit([]))
         .finally(() => setAuditLoading(false))
     }
     if (tab === "settings") {
-      fetch(`/api/v1/credentials/${credential.id}/rotations?workspace_id=${workspaceId}`)
+      apiFetch(`/api/v1/credentials/${credential.id}/rotations?workspace_id=${workspaceId}`)
         .then((r) => r.ok ? r.json() : [])
         .then((data: RotationRow[]) => setRotations(Array.isArray(data) ? data : []))
         .catch(() => setRotations([]))
@@ -153,7 +154,7 @@ export function CredentialDetailSheet({
     setTesting(true)
     setTestResult(null)
     try {
-      const res = await fetch(`/api/v1/credentials/${credential.id}/test?workspace_id=${workspaceId}`, {
+      const res = await apiFetch(`/api/v1/credentials/${credential.id}/test?workspace_id=${workspaceId}`, {
         method: "POST",
       })
       if (!res.ok) {
@@ -170,7 +171,7 @@ export function CredentialDetailSheet({
   }
 
   const handleDelete = async () => {
-    const res = await fetch(`/api/v1/credentials/${credential.id}?workspace_id=${workspaceId}`, {
+    const res = await apiFetch(`/api/v1/credentials/${credential.id}?workspace_id=${workspaceId}`, {
       method: "DELETE",
     })
     if (res.ok) {
@@ -414,7 +415,7 @@ export function CredentialDetailSheet({
                         setValueSaved(false)
                         setValueError(null)
                         try {
-                          const res = await fetch(`/api/v1/credentials/${credential.id}?workspace_id=${workspaceId}`, {
+                          const res = await apiFetch(`/api/v1/credentials/${credential.id}?workspace_id=${workspaceId}`, {
                             method: "PATCH",
                             headers: { "Content-Type": "application/json" },
                             body: JSON.stringify({ value: valueDraft }),

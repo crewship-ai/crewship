@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react"
 import { Send } from "lucide-react"
 
 import { seedColor } from "@/lib/agent-avatar"
+import { apiFetch } from "@/lib/api-fetch"
 
 import type { BottomPanelContext } from "./types"
 import { EmptyState, formatRelative } from "./shared"
@@ -44,7 +45,7 @@ export function CommentsTab({ workspaceId, context }: { workspaceId: string; con
     let cancelled = false
     setComments(null)
     setError(null)
-    fetch(base)
+    apiFetch(base)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((data) => { if (!cancelled) setComments(Array.isArray(data) ? data : []) })
       .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)) })
@@ -61,7 +62,7 @@ export function CommentsTab({ workspaceId, context }: { workspaceId: string; con
     setError(null)
     try {
       const postUrl = base.split("?")[0] + `?workspace_id=${workspaceId}`
-      const r = await fetch(postUrl, {
+      const r = await apiFetch(postUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ body: draft.trim() }),

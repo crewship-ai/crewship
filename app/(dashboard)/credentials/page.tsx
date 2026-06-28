@@ -42,6 +42,7 @@ import { formatRelativeTime } from "@/lib/time"
 import { useAbilities } from "@/hooks/use-abilities"
 import { getBrand, brandColor } from "@/lib/credential-providers/registry"
 import { cn } from "@/lib/utils"
+import { apiFetch } from "@/lib/api-fetch"
 
 interface Credential {
   id: string
@@ -149,7 +150,7 @@ export default function CredentialsPage() {
 
   const fetchWorkspace = React.useCallback(async () => {
     try {
-      const res = await fetch("/api/v1/workspaces")
+      const res = await apiFetch("/api/v1/workspaces")
       if (!res.ok) return null
       const orgs: Org[] = await res.json() ?? []
       if (orgs.length > 0) {
@@ -164,7 +165,7 @@ export default function CredentialsPage() {
 
   const fetchCredentials = React.useCallback(async (oid: string) => {
     try {
-      const res = await fetch(`/api/v1/credentials?workspace_id=${oid}`)
+      const res = await apiFetch(`/api/v1/credentials?workspace_id=${oid}`)
       if (!res.ok) return
       const data = await res.json()
       const normalised: Credential[] = (Array.isArray(data) ? data : []).map((c: Credential) => ({
@@ -218,7 +219,7 @@ export default function CredentialsPage() {
   async function confirmDeleteCredential() {
     if (!deleteCredential || !workspaceId) return
     try {
-      const res = await fetch(`/api/v1/credentials/${deleteCredential.id}?workspace_id=${workspaceId}`, { method: "DELETE" })
+      const res = await apiFetch(`/api/v1/credentials/${deleteCredential.id}?workspace_id=${workspaceId}`, { method: "DELETE" })
       if (res.ok) handleRefresh()
     } catch { /* silently fail */ }
     finally { setDeleteCredential(null) }
@@ -238,7 +239,7 @@ export default function CredentialsPage() {
     const ids = Array.from(selectedIds)
     try {
       for (const id of ids) {
-        await fetch(`/api/v1/credentials/${id}?workspace_id=${workspaceId}`, { method: "DELETE" })
+        await apiFetch(`/api/v1/credentials/${id}?workspace_id=${workspaceId}`, { method: "DELETE" })
       }
       handleRefresh()
       setSelectedIds(new Set())

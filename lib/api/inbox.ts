@@ -1,3 +1,5 @@
+import { apiFetch } from "@/lib/api-fetch"
+
 // inboxBulk — POSTs a batch state transition to /api/v1/inbox/bulk, the
 // engine behind the tree-grouped inbox's "resolve all under this group"
 // action. The server re-checks visibility per id and SKIPS source-managed
@@ -18,7 +20,7 @@ export async function inboxBulk(
   resolvedAction?: string,
 ): Promise<{ ok: true; result: InboxBulkResult } | { ok: false; error: string }> {
   try {
-    const res = await fetch(
+    const res = await apiFetch(
       `/api/v1/inbox/bulk?workspace_id=${encodeURIComponent(workspaceID)}`,
       {
         method: "POST",

@@ -7,6 +7,7 @@
 
 import * as React from "react"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet"
+import { apiFetch } from "@/lib/api-fetch"
 import { CredentialForm } from "./credential-form"
 
 interface AddSecretSheetProps {
@@ -33,7 +34,7 @@ export function AddSecretSheet({ workspaceId, open, onOpenChange, onSuccess, kno
     if (values.scope === "CREW") body.crew_ids = values.crewIds
 
     try {
-      const res = await fetch(`/api/v1/credentials?workspace_id=${workspaceId}`, {
+      const res = await apiFetch(`/api/v1/credentials?workspace_id=${workspaceId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -52,7 +53,7 @@ export function AddSecretSheet({ workspaceId, open, onOpenChange, onSuccess, kno
 
   const handleTest = async (values: Parameters<NonNullable<React.ComponentProps<typeof CredentialForm>["onTest"]>>[0]) => {
     try {
-      const res = await fetch(`/api/v1/credentials/test`, {
+      const res = await apiFetch(`/api/v1/credentials/test`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

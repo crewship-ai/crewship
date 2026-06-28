@@ -18,6 +18,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { apiFetch } from "@/lib/api-fetch"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -131,7 +132,7 @@ export function RegistryBrowser({
           ? `/api/v1/mcp-registry/search?q=${encodeURIComponent(q.trim())}&limit=${PAGE_SIZE}&offset=${newOffset}`
           : `/api/v1/mcp-registry?limit=${PAGE_SIZE}&offset=${newOffset}`
 
-        const res = await fetch(url, { signal: controller.signal })
+        const res = await apiFetch(url, { signal: controller.signal })
         if (!res.ok) {
           if (res.status === 404) {
             setError("Registry not synced yet. Run the registry sync from settings.")

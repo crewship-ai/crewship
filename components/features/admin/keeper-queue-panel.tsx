@@ -34,6 +34,7 @@ import {
 import { cn } from "@/lib/utils"
 import { redactSecrets } from "@/app/(dashboard)/admin/utils"
 import type { KeeperLogEntry } from "@/app/(dashboard)/admin/types"
+import { apiFetch } from "@/lib/api-fetch"
 
 // Sub-tab keys mirror the request_type enum values in
 // internal/keeper/types.go so we can filter rows by string equality.
@@ -120,7 +121,7 @@ export const KeeperQueuePanel = React.memo(function KeeperQueuePanel({
     try {
       // Pull a wide window so all four sub-tabs can filter from one
       // payload. Server caps at 200 (keeper_log.go).
-      const r = await fetch(
+      const r = await apiFetch(
         `/api/v1/admin/keeper/requests?workspace_id=${encodeURIComponent(workspaceId)}&limit=200`,
         { signal },
       )

@@ -20,6 +20,7 @@
 //      to forever-opt-out).
 
 import { useCallback, useEffect, useState } from "react"
+import { apiFetch } from "@/lib/api-fetch"
 
 interface ConsentResp {
   user_id: string
@@ -52,8 +53,8 @@ export function PrivacySection({ workspaceId }: { workspaceId: string }) {
     try {
       const headers = { "X-Workspace-ID": workspaceId }
       const [c, p] = await Promise.all([
-        fetch("/api/v1/users/me/peer-consent", { headers }),
-        fetch("/api/v1/users/me/peer-cards", { headers }),
+        apiFetch("/api/v1/users/me/peer-consent", { headers }),
+        apiFetch("/api/v1/users/me/peer-cards", { headers }),
       ])
       // Fail fast on non-2xx so the UI never presents stale consent
       // state as if it were the operator's actual choice. Both routes
@@ -81,7 +82,7 @@ export function PrivacySection({ workspaceId }: { workspaceId: string }) {
       setActing(true)
       setErr(null)
       try {
-        const r = await fetch("/api/v1/users/me/peer-consent", {
+        const r = await apiFetch("/api/v1/users/me/peer-consent", {
           method: "PUT",
           headers: { "Content-Type": "application/json", "X-Workspace-ID": workspaceId },
           body: JSON.stringify({ opted_out: optOut }),
@@ -102,7 +103,7 @@ export function PrivacySection({ workspaceId }: { workspaceId: string }) {
     setActing(true)
     setErr(null)
     try {
-      const r = await fetch("/api/v1/users/me/peer-cards", {
+      const r = await apiFetch("/api/v1/users/me/peer-cards", {
         method: "DELETE",
         headers: { "X-Workspace-ID": workspaceId },
       })

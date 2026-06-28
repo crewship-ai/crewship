@@ -38,6 +38,7 @@ import {
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 import { KpiCard } from "@/components/features/dashboard/kpi-card"
 import { SettingsCard } from "@/components/features/settings/shared"
+import { apiFetch } from "@/lib/api-fetch"
 import { cn } from "@/lib/utils"
 import { statusLabel, toCanonicalStatus } from "@/lib/runs-format"
 import { formatDurationBetween, formatRelativeShort } from "@/lib/time"
@@ -121,7 +122,7 @@ export function RunsView({ workspaceId, workspaceLoading }: RunsViewProps) {
         if (statusFilter !== "all") params.set("status", statusFilter)
         if (triggerFilter !== "all") params.set("trigger", triggerFilter)
 
-        const res = await fetch(`/api/v1/runs?${params}`)
+        const res = await apiFetch(`/api/v1/runs?${params}`)
         if (!res.ok) {
           setError("Failed to load runs")
           return

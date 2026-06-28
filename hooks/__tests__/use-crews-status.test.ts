@@ -49,7 +49,7 @@ describe("useCrewsStatus", () => {
     const { result } = renderHook(() => useCrewsStatus("ws-1"))
     await act(async () => { await flushAsync() })
 
-    expect(mockFetch).toHaveBeenCalledWith("/api/v1/agents/crews-status?workspace_id=ws-1")
+    expect(mockFetch).toHaveBeenCalledWith("/api/v1/agents/crews-status?workspace_id=ws-1", expect.objectContaining({ credentials: "include" }))
     expect(result.current).toEqual({ total: 10, running: 2, error: 1, idle: 7, queued: 0 })
   })
 

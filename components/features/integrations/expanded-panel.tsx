@@ -30,6 +30,7 @@ import {
 } from "@/components/ui/select"
 import { CredentialPicker } from "@/components/features/mcp/components/credential-picker"
 import { useCredentials } from "@/components/features/mcp/hooks/use-credentials"
+import { apiFetch } from "@/lib/api-fetch"
 import { cn } from "@/lib/utils"
 
 import { OAuthAutoConnect } from "./oauth-auto-connect"
@@ -252,7 +253,7 @@ export function ExpandedPanel({
     }
     setDiscovering(true)
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/oauth/discover?workspace_id=${workspaceId}`,
         {
           method: "POST",
@@ -501,7 +502,7 @@ export function ExpandedPanel({
                 const bId = bindingIds[server.id]?.[agentId]
                 if (bId) {
                   try {
-                    const res = await fetch(`/api/v1/agents/${agentId}/integrations/${bId}?workspace_id=${workspaceId}`, {
+                    const res = await apiFetch(`/api/v1/agents/${agentId}/integrations/${bId}?workspace_id=${workspaceId}`, {
                       method: "PATCH",
                       headers: { "Content-Type": "application/json" },
                       body: JSON.stringify({ credential_id: credId, cred_type: "bearer" }),
@@ -516,7 +517,7 @@ export function ExpandedPanel({
               // No bindings yet — auto-grant access to ALL agents in the crew with credential
               for (const agent of agents) {
                 try {
-                  const res = await fetch(`/api/v1/agents/${agent.id}/integrations?workspace_id=${workspaceId}`, {
+                  const res = await apiFetch(`/api/v1/agents/${agent.id}/integrations?workspace_id=${workspaceId}`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({

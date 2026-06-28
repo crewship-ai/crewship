@@ -5,6 +5,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useRealtimeEvent, type RealtimeEvent } from "@/hooks/use-realtime"
 import { OrchestrationLayout, type OrchestrationMode } from "@/components/features/orchestration/orchestration-layout"
+import { apiFetch } from "@/lib/api-fetch"
 import type { Mission } from "@/lib/types/mission"
 import type { CrewSummary, AgentSummary, CrewConnection } from "@/lib/types/orchestration"
 
@@ -29,10 +30,10 @@ export function OrchestrationPageShell({ mode }: { mode: OrchestrationMode }) {
     if (!workspaceId) return
     try {
       const [missionsRes, crewsRes, agentsRes, connsRes] = await Promise.all([
-        fetch(`/api/v1/missions?workspace_id=${workspaceId}&limit=50&include_tasks=true`),
-        fetch(`/api/v1/crews?workspace_id=${workspaceId}`),
-        fetch(`/api/v1/agents?workspace_id=${workspaceId}`),
-        fetch(`/api/v1/crew-connections?workspace_id=${workspaceId}`),
+        apiFetch(`/api/v1/missions?workspace_id=${workspaceId}&limit=50&include_tasks=true`),
+        apiFetch(`/api/v1/crews?workspace_id=${workspaceId}`),
+        apiFetch(`/api/v1/agents?workspace_id=${workspaceId}`),
+        apiFetch(`/api/v1/crew-connections?workspace_id=${workspaceId}`),
       ])
       if (missionsRes.ok) setMissions(await missionsRes.json())
       if (crewsRes.ok) setCrews(await crewsRes.json())
@@ -56,7 +57,7 @@ export function OrchestrationPageShell({ mode }: { mode: OrchestrationMode }) {
   const fetchMissionsOnly = useCallback(async () => {
     if (!workspaceId) return
     try {
-      const res = await fetch(`/api/v1/missions?workspace_id=${workspaceId}&limit=50&include_tasks=true`)
+      const res = await apiFetch(`/api/v1/missions?workspace_id=${workspaceId}&limit=50&include_tasks=true`)
       if (res.ok) setMissions(await res.json())
     } catch { /* ignore */ }
   }, [workspaceId])

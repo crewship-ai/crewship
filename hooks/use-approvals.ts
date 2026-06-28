@@ -7,6 +7,7 @@ import {
   type ApprovalRow,
   type ApprovalStatus,
 } from "@/lib/types/approvals"
+import { apiFetch } from "@/lib/api-fetch"
 
 interface UseApprovalsOptions {
   status: ApprovalStatus
@@ -50,7 +51,7 @@ export function useApprovals(opts: UseApprovalsOptions): UseApprovalsResult {
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch(`/api/v1/approvals?status=${status}&limit=${limit}`)
+      const res = await apiFetch(`/api/v1/approvals?status=${status}&limit=${limit}`)
       if (reqIdRef.current !== reqId) return
       if (res.status === 404) {
         setRows([])
@@ -119,7 +120,7 @@ export async function decideApproval(
   decision: "approved" | "denied",
   comment: string,
 ): Promise<{ status: string; decided_by?: string }> {
-  const res = await fetch(`/api/v1/approvals/${encodeURIComponent(id)}/decide`, {
+  const res = await apiFetch(`/api/v1/approvals/${encodeURIComponent(id)}/decide`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ status: decision, comment }),

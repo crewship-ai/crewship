@@ -17,6 +17,7 @@ import {
 import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
+import { apiFetch } from "@/lib/api-fetch"
 
 import {
   ChatTreeRow,
@@ -159,7 +160,7 @@ export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId,
       fetchedDirsRef.current.add(path)
       const relPath = path.startsWith(basePrefix) ? path.slice(basePrefix.length) : path
       setLoadingDirs((p) => new Set(p).add(path))
-      fetch(`/api/v1/agents/${agentId}/files?workspace_id=${workspaceId}&subdir=${encodeURIComponent(relPath)}`)
+      apiFetch(`/api/v1/agents/${agentId}/files?workspace_id=${workspaceId}&subdir=${encodeURIComponent(relPath)}`)
         .then((r) => { if (!r.ok) throw new Error("Failed"); return r.json() })
         .then((data: FileEntry[] | null) => setTree((prev) => insertTreeChildren(prev, path, data ?? [])))
         .catch(() => { toast.error("Failed to load folder") })

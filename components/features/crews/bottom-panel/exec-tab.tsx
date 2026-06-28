@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { cn } from "@/lib/utils"
+import { apiFetch } from "@/lib/api-fetch"
 
 import type { BottomPanelContext, LogEntry } from "./types"
 import { EmptyState, formatTime } from "./shared"
@@ -21,7 +22,7 @@ export function ExecTab({ workspaceId, context }: { workspaceId: string; context
     let cancelled = false
     setLogs(null)
     setError(null)
-    fetch(`/api/v1/agents/${context.agentId}/logs?workspace_id=${workspaceId}&limit=200`)
+    apiFetch(`/api/v1/agents/${context.agentId}/logs?workspace_id=${workspaceId}&limit=200`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((data) => {
         if (cancelled) return

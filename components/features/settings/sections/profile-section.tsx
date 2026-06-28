@@ -16,6 +16,7 @@ import {
   AlertTriangle,
   Shield,
 } from "lucide-react"
+import { apiFetch } from "@/lib/api-fetch"
 import { Spinner } from "@/components/ui/spinner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -199,7 +200,7 @@ export function ProfileSection({
 
   const fetchTokens = useCallback(async () => {
     try {
-      const res = await fetch("/api/v1/auth/cli-tokens")
+      const res = await apiFetch("/api/v1/auth/cli-tokens")
       if (res.ok) { const data = await res.json(); setTokens(data.data ?? []) }
     } catch { /* ignore */ }
     finally { setTokensLoading(false) }
@@ -221,7 +222,7 @@ export function ProfileSection({
       if (tokenScopes.size > 0) body.scopes = Array.from(tokenScopes)
       if (tokenExpirySeconds > 0) body.expires_in_seconds = tokenExpirySeconds
 
-      const res = await fetch("/api/v1/auth/cli-token", {
+      const res = await apiFetch("/api/v1/auth/cli-token", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       })
@@ -262,7 +263,7 @@ export function ProfileSection({
     if (!revokeTarget) return
     setRevoking(true)
     try {
-      await fetch(`/api/v1/auth/cli-tokens/${revokeTarget.id}`, { method: "DELETE" })
+      await apiFetch(`/api/v1/auth/cli-tokens/${revokeTarget.id}`, { method: "DELETE" })
       fetchTokens()
     } catch { /* ignore */ }
     finally { setRevoking(false); setRevokeTarget(null) }

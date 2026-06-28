@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
+import { apiFetch } from "@/lib/api-fetch"
 
 // PipelineWebhook mirrors the wire shape returned by /pipeline-webhooks.
 // SigningSecret only surfaces on the create response (mirroring how
@@ -55,7 +56,7 @@ export function usePipelineWebhooks(workspaceId: string | null | undefined) {
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch(`/api/v1/workspaces/${workspaceId}/pipeline-webhooks`, {
+      const res = await apiFetch(`/api/v1/workspaces/${workspaceId}/pipeline-webhooks`, {
         signal: ctrl.signal,
       })
       if (ctrl.signal.aborted) return
@@ -89,7 +90,7 @@ export function usePipelineWebhooks(workspaceId: string | null | undefined) {
   const create = useCallback(
     async (body: WebhookSaveBody): Promise<PipelineWebhook | null> => {
       if (!workspaceId) return null
-      const res = await fetch(`/api/v1/workspaces/${workspaceId}/pipeline-webhooks`, {
+      const res = await apiFetch(`/api/v1/workspaces/${workspaceId}/pipeline-webhooks`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
@@ -108,7 +109,7 @@ export function usePipelineWebhooks(workspaceId: string | null | undefined) {
   const remove = useCallback(
     async (id: string): Promise<void> => {
       if (!workspaceId) return
-      const res = await fetch(`/api/v1/workspaces/${workspaceId}/pipeline-webhooks/${id}`, {
+      const res = await apiFetch(`/api/v1/workspaces/${workspaceId}/pipeline-webhooks/${id}`, {
         method: "DELETE",
       })
       if (!res.ok && res.status !== 404) {

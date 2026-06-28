@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useSyncExternalStore } from "react"
+import { apiFetch } from "@/lib/api-fetch"
 
 export interface WorkspaceData {
   id: string
@@ -69,7 +70,7 @@ function loadWorkspaces(): Promise<void> {
   setSnapshot({ ...snapshot, loading: true })
   inflight = (async () => {
     try {
-      const res = await fetch("/api/v1/workspaces")
+      const res = await apiFetch("/api/v1/workspaces")
       if (!res.ok) {
         setSnapshot({ workspaces: [], currentId: null, loading: false })
         return

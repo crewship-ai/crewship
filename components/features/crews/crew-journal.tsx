@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils"
 import { formatRelativeTime } from "@/lib/time"
 import { useJournalList } from "@/hooks/use-journal-list"
 import { useJournalStream } from "@/hooks/use-journal-stream"
+import { apiFetch } from "@/lib/api-fetch"
 
 const SEVERITY_PILL: Record<string, string> = {
   info: "bg-blue-500/15 text-blue-300 border-blue-500/30",
@@ -58,7 +59,7 @@ export function CrewJournal({ crewId, workspaceId }: CrewJournalProps) {
   async function handleGenerateSummary() {
     setSummarizing(true)
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/crews/${encodeURIComponent(crewId)}/journal/summarize?workspace_id=${encodeURIComponent(workspaceId)}`,
         { method: "POST", headers: { "Content-Type": "application/json" } },
       )

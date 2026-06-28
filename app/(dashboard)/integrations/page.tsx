@@ -25,6 +25,7 @@ import type { MCPTemplate } from "@/components/features/mcp/types"
 import { RegistryBrowser } from "@/components/features/mcp/components/registry-browser"
 import type { RegistryAddPayload } from "@/components/features/mcp/components/registry-browser"
 import { cn } from "@/lib/utils"
+import { apiFetch } from "@/lib/api-fetch"
 
 import { ExpandedPanel } from "@/components/features/integrations/expanded-panel"
 import { TemplatePopover } from "@/components/features/integrations/template-popover"
@@ -91,8 +92,8 @@ function LegacyIntegrationsPage() {
   const fetchAll = React.useCallback(async (wid: string) => {
     try {
       const [crewRes, crewsListRes] = await Promise.all([
-        fetch(`/api/v1/integrations/crews?workspace_id=${wid}`),
-        fetch(`/api/v1/crews?workspace_id=${wid}`),
+        apiFetch(`/api/v1/integrations/crews?workspace_id=${wid}`),
+        apiFetch(`/api/v1/crews?workspace_id=${wid}`),
       ])
 
       const data: CrewIntegration[] = crewRes.ok ? (await crewRes.json()) ?? [] : []
@@ -106,7 +107,7 @@ function LegacyIntegrationsPage() {
       const agentMap: Record<string, AgentInfo[]> = {}
       await Promise.all(
         crewIds.map(async (cid) => {
-          const r = await fetch(`/api/v1/agents?workspace_id=${wid}&crew_id=${cid}`)
+          const r = await apiFetch(`/api/v1/agents?workspace_id=${wid}&crew_id=${cid}`)
           if (r.ok) {
             const agents = await r.json()
             agentMap[cid] = Array.isArray(agents)
@@ -123,7 +124,7 @@ function LegacyIntegrationsPage() {
       const idMap: Record<string, Record<string, string>> = {}
       await Promise.all(
         allAgents.map(async (agent) => {
-          const r = await fetch(`/api/v1/agents/${agent.id}/integrations?workspace_id=${wid}`)
+          const r = await apiFetch(`/api/v1/agents/${agent.id}/integrations?workspace_id=${wid}`)
           if (r.ok) {
             const bindings: AgentBinding[] = (await r.json()) ?? []
             if (Array.isArray(bindings)) {
@@ -204,7 +205,7 @@ function LegacyIntegrationsPage() {
         }
 
     try {
-      let res = await fetch(
+      let res = await apiFetch(
         `/api/v1/crews/${defaultCrewId}/integrations?workspace_id=${workspaceId}`,
         {
           method: "POST",
@@ -215,7 +216,7 @@ function LegacyIntegrationsPage() {
       // If name conflict, retry with a numbered suffix
       if (res.status === 409 && payload.name) {
         const suffixed = { ...payload, name: `${payload.name}-${Date.now().toString(36).slice(-4)}` }
-        res = await fetch(
+        res = await apiFetch(
           `/api/v1/crews/${defaultCrewId}/integrations?workspace_id=${workspaceId}`,
           {
             method: "POST",
@@ -275,7 +276,7 @@ function LegacyIntegrationsPage() {
   ) {
     if (!workspaceId) return
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/crews/${server.crew_id}/integrations/${server.id}?workspace_id=${workspaceId}`,
         {
           method: "PATCH",
@@ -315,7 +316,7 @@ function LegacyIntegrationsPage() {
         icon: server.icon,
         enabled: server.enabled,
       }
-      const createRes = await fetch(
+      const createRes = await apiFetch(
         `/api/v1/crews/${newCrewId}/integrations?workspace_id=${workspaceId}`,
         {
           method: "POST",
@@ -329,7 +330,7 @@ function LegacyIntegrationsPage() {
       }
 
       // Delete from old crew only after successful create
-      const delRes = await fetch(
+      const delRes = await apiFetch(
         `/api/v1/crews/${server.crew_id}/integrations/${server.id}?workspace_id=${workspaceId}`,
         { method: "DELETE" },
       )
@@ -341,7 +342,7 @@ function LegacyIntegrationsPage() {
       await fetchAll(workspaceId)
 
       // Find the new server by name to keep panel open
-      const refetchRes = await fetch(
+      const refetchRes = await apiFetch(
         `/api/v1/integrations/crews?workspace_id=${workspaceId}`,
       )
       if (refetchRes.ok) {
@@ -371,14 +372,14 @@ function LegacyIntegrationsPage() {
         // Remove binding
         const bId = bindingIds[server.id]?.[agent.id]
         if (bId) {
-          await fetch(
+          await apiFetch(
             `/api/v1/agents/${agent.id}/integrations/${bId}?workspace_id=${workspaceId}`,
             { method: "DELETE" },
           )
         }
       } else {
         // Create binding
-        await fetch(`/api/v1/agents/${agent.id}/integrations?workspace_id=${workspaceId}`, {
+        await apiFetch(`/api/v1/agents/${agent.id}/integrations?workspace_id=${workspaceId}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -401,7 +402,7 @@ function LegacyIntegrationsPage() {
   async function handleDelete(server: CrewIntegration) {
     if (!workspaceId) return
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/crews/${server.crew_id}/integrations/${server.id}?workspace_id=${workspaceId}`,
         { method: "DELETE" },
       )

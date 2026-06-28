@@ -11,6 +11,7 @@ import {
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 import { useAgentFetch } from "@/hooks/use-agent-fetch"
+import { apiFetch } from "@/lib/api-fetch"
 
 interface AgentCrew {
   name: string
@@ -85,7 +86,7 @@ export function AgentDetailProvider({
       // server's own error string.
       let res: Response
       try {
-        res = await fetch(
+        res = await apiFetch(
           `/api/v1/agents/${agentId}?workspace_id=${workspaceId}`,
           { signal },
         )

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { cn } from "@/lib/utils"
+import { apiFetch } from "@/lib/api-fetch"
 
 import type { BottomPanelContext } from "./types"
 import { EmptyState, formatRelative, statusColor } from "./shared"
@@ -51,7 +52,7 @@ export function RunsTab({ workspaceId, context }: { workspaceId: string; context
     let cancelled = false
     setRuns(null)
     setError(null)
-    fetch(url)
+    apiFetch(url)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((data) => {
         if (cancelled) return

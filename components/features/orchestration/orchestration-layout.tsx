@@ -40,6 +40,7 @@ import { CreateIssueModal } from "@/components/features/orchestration/create-iss
 import { CreateProjectModal } from "@/components/features/orchestration/create-project-modal"
 
 import { toast } from "sonner"
+import { apiFetch } from "@/lib/api-fetch"
 import { useAppStore } from "@/lib/store"
 import type { BreadcrumbItem } from "@/lib/store"
 import { ActivityTab } from "@/components/features/crews/bottom-panel/activity-tab"
@@ -301,7 +302,7 @@ export function OrchestrationLayout({
   const fetchIssues = useCallback(async () => {
     if (!workspaceId) return
     try {
-      const res = await fetch(`/api/v1/issues?workspace_id=${encodeURIComponent(workspaceId)}&limit=100`)
+      const res = await apiFetch(`/api/v1/issues?workspace_id=${encodeURIComponent(workspaceId)}&limit=100`)
       if (res.ok) setIssues(await res.json())
     } catch { /* ignore */ }
   }, [workspaceId])
@@ -309,7 +310,7 @@ export function OrchestrationLayout({
   const fetchIssueLabels = useCallback(async () => {
     if (!workspaceId) return
     try {
-      const res = await fetch(`/api/v1/labels?workspace_id=${encodeURIComponent(workspaceId)}`)
+      const res = await apiFetch(`/api/v1/labels?workspace_id=${encodeURIComponent(workspaceId)}`)
       if (res.ok) setIssueLabels(await res.json())
     } catch { /* ignore */ }
   }, [workspaceId])
@@ -317,7 +318,7 @@ export function OrchestrationLayout({
   const fetchProjects = useCallback(async () => {
     if (!workspaceId) return
     try {
-      const res = await fetch(`/api/v1/projects?workspace_id=${encodeURIComponent(workspaceId)}`)
+      const res = await apiFetch(`/api/v1/projects?workspace_id=${encodeURIComponent(workspaceId)}`)
       if (res.ok) setProjects(await res.json())
     } catch { /* ignore */ }
   }, [workspaceId])
@@ -325,7 +326,7 @@ export function OrchestrationLayout({
   const fetchSavedViews = useCallback(async () => {
     if (!workspaceId) return
     try {
-      const res = await fetch(`/api/v1/saved-views?workspace_id=${encodeURIComponent(workspaceId)}`)
+      const res = await apiFetch(`/api/v1/saved-views?workspace_id=${encodeURIComponent(workspaceId)}`)
       if (res.ok) setSavedViews(parseSavedViews(await res.json()))
     } catch { /* ignore */ }
   }, [workspaceId])
@@ -456,7 +457,7 @@ export function OrchestrationLayout({
     const qs = `?workspace_id=${encodeURIComponent(workspaceId)}`
 
     if (action === "retry") {
-      await fetch(`/api/v1/crews/${mission.crew_id}/missions/${missionId}/tasks/${taskId}${qs}`, {
+      await apiFetch(`/api/v1/crews/${mission.crew_id}/missions/${missionId}/tasks/${taskId}${qs}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: "PENDING" }),
@@ -464,7 +465,7 @@ export function OrchestrationLayout({
       toast.success("Task queued for retry")
       onRefresh()
     } else if (action === "skip") {
-      await fetch(`/api/v1/crews/${mission.crew_id}/missions/${missionId}/tasks/${taskId}${qs}`, {
+      await apiFetch(`/api/v1/crews/${mission.crew_id}/missions/${missionId}/tasks/${taskId}${qs}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: "SKIPPED" }),

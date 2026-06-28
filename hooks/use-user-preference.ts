@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
+import { apiFetch } from "@/lib/api-fetch"
 
 /**
  * Per-user UI preference with cross-device sync via the server +
@@ -51,7 +52,7 @@ export function useUserPreference<T>(
   // value at startup — the server always wins on initial sync.
   useEffect(() => {
     let cancelled = false
-    fetch("/api/v1/me/preferences", { credentials: "include" })
+    apiFetch("/api/v1/me/preferences")
       .then((r) => (r.ok ? r.json() : null))
       .then((data: Record<string, unknown> | null) => {
         if (cancelled || !data) return
@@ -93,9 +94,8 @@ export function useUserPreference<T>(
       debounceRef.current = setTimeout(() => {
         hasPendingRef.current = false
         pendingValueRef.current = undefined
-        fetch(`/api/v1/me/preferences/${encodeURIComponent(key)}`, {
+        apiFetch(`/api/v1/me/preferences/${encodeURIComponent(key)}`, {
           method: "PUT",
-          credentials: "include",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(next),
         }).catch(() => {
@@ -113,9 +113,8 @@ export function useUserPreference<T>(
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current)
       if (hasPendingRef.current) {
-        fetch(`/api/v1/me/preferences/${encodeURIComponent(key)}`, {
+        apiFetch(`/api/v1/me/preferences/${encodeURIComponent(key)}`, {
           method: "PUT",
-          credentials: "include",
           keepalive: true,
           headers: { "Content-Type": "application/json" },
           // pendingValueRef.current may legitimately be null — JSON.stringify

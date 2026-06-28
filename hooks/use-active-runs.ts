@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
+import { apiFetch } from "@/lib/api-fetch"
 
 // useActiveRuns — the data behind the global Activity Bar: a live list of
 // runs currently in flight across the workspace, both agent runs (issue
@@ -63,8 +64,8 @@ export function useActiveRuns(workspaceId: string | null | undefined) {
     setLoading(true)
     try {
       const [agentRes, routineRes] = await Promise.allSettled([
-        fetch(`/api/v1/runs?workspace_id=${encodeURIComponent(workspaceId)}&status=RUNNING&limit=50`),
-        fetch(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/runs/active`),
+        apiFetch(`/api/v1/runs?workspace_id=${encodeURIComponent(workspaceId)}&status=RUNNING&limit=50`),
+        apiFetch(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/runs/active`),
       ])
 
       const next: ActiveRunItem[] = []

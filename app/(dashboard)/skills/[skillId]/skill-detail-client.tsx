@@ -9,6 +9,7 @@ import { SkillDetailView } from "@/components/skills/skill-detail"
 import { InstallSkillDialog } from "@/components/skills/install-skill-dialog"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useUrlSegment } from "@/lib/use-url-segment"
+import { apiFetch } from "@/lib/api-fetch"
 
 // Read skillId from the URL, not useParams() — avoids the static-export
 // "_" placeholder bug (see useUrlSegment). Module-scope for a stable ref.
@@ -71,7 +72,7 @@ export function SkillDetailPageClient() {
       setLoading(true)
       setError(null)
       try {
-        const res = await fetch(
+        const res = await apiFetch(
           `/api/v1/skills/${encodeURIComponent(skillId!)}?workspace_id=${workspaceId}`
         )
         if (!res.ok) {

@@ -11,6 +11,7 @@ import {
 import { Spinner } from "@/components/ui/spinner"
 import { toast } from "sonner"
 import { useAgentFetch } from "@/hooks/use-agent-fetch"
+import { apiFetch } from "@/lib/api-fetch"
 
 interface AgentScheduleInfo {
   schedule_cron: string | null
@@ -33,7 +34,7 @@ export function TriggersTab({ agentId, workspaceId }: TriggersTabProps) {
 
   const { data: agent, loading } = useAgentFetch<AgentScheduleInfo>(
     async (signal) => {
-      const r = await fetch(`/api/v1/agents/${agentId}?workspace_id=${workspaceId}`, { signal })
+      const r = await apiFetch(`/api/v1/agents/${agentId}?workspace_id=${workspaceId}`, { signal })
       if (!r.ok) throw new Error(`HTTP ${r.status}`)
       return r.json()
     },

@@ -11,6 +11,7 @@ import {
   buildTopLevelTree,
 } from "../chat-tree-row"
 import { ScopeSection } from "./scope-section"
+import { apiFetch } from "@/lib/api-fetch"
 
 interface ThreeTierFilesProps {
   crewId?: string | null
@@ -58,9 +59,8 @@ export function ThreeTierFiles({
     }
     const ac = new AbortController()
     setCrewLoading(true)
-    fetch(`/api/v1/crews/${crewId}/files?workspace_id=${workspaceId}`, {
+    apiFetch(`/api/v1/crews/${crewId}/files?workspace_id=${workspaceId}`, {
       signal: ac.signal,
-      credentials: "include",
     })
       .then((r) => (r.ok ? r.json() : []))
       .then((data: FileEntry[] | null) => setCrewFiles(data ?? []))

@@ -13,6 +13,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { apiFetch } from "@/lib/api-fetch"
 
 interface ForkDialogProps {
   open: boolean
@@ -35,7 +36,7 @@ export function ForkDialog({ open, onOpenChange, missionId, checkpointId, checkp
     if (!checkpointId) return
     setSubmitting(true)
     try {
-      const res = await fetch(`/api/v1/missions/${encodeURIComponent(missionId)}/fork`, {
+      const res = await apiFetch(`/api/v1/missions/${encodeURIComponent(missionId)}/fork`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ checkpoint_id: checkpointId, label }),

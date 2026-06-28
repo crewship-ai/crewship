@@ -30,6 +30,7 @@ import { detectProvider, detectType, detectFromValue } from "@/lib/credential-pr
 import { getBrand, brandColor } from "@/lib/credential-providers/registry"
 import { BrandPicker } from "./brand-picker"
 import { cn } from "@/lib/utils"
+import { apiFetch } from "@/lib/api-fetch"
 
 export type CredentialType = "AI_CLI_TOKEN" | "API_KEY" | "CLI_TOKEN" | "SECRET" | "OAUTH2"
 export type CredentialScope = "WORKSPACE" | "CREW"
@@ -108,7 +109,7 @@ export function CredentialForm({
   React.useEffect(() => {
     if (values.scope === "CREW" && crews.length === 0 && !crewsLoading) {
       setCrewsLoading(true)
-      fetch(`/api/v1/crews?workspace_id=${workspaceId}`)
+      apiFetch(`/api/v1/crews?workspace_id=${workspaceId}`)
         .then((r) => r.ok ? r.json() : [])
         .then((data: Crew[]) => setCrews(Array.isArray(data) ? data : []))
         .catch(() => setCrews([]))

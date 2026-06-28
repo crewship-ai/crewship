@@ -9,6 +9,7 @@ import { SectionHeader } from "@/components/features/issues/property-row"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 import { RELATION_TYPE_LABELS, RELATION_TYPE_OPTIONS } from "@/components/features/issues/issue-constants"
+import { apiFetch } from "@/lib/api-fetch"
 import type { Mission, IssueRelation, RelationType } from "@/lib/types/mission"
 
 interface IssueRelationsPanelProps {
@@ -36,7 +37,7 @@ export function IssueRelationsPanel({ issue, workspaceId }: IssueRelationsPanelP
   useEffect(() => {
     setSubIssues([])
     if (!issue.crew_id || !issue.identifier || !issue.sub_issues_count) return
-    fetch(`/api/v1/crews/${issue.crew_id}/issues/${issue.identifier}/subtasks?workspace_id=${workspaceId}`)
+    apiFetch(`/api/v1/crews/${issue.crew_id}/issues/${issue.identifier}/subtasks?workspace_id=${workspaceId}`)
       .then((r) => r.ok ? r.json() : [])
       .then((data) => setSubIssues(Array.isArray(data) ? data : data.subtasks ?? []))
       .catch(() => setSubIssues([]))
@@ -47,7 +48,7 @@ export function IssueRelationsPanel({ issue, workspaceId }: IssueRelationsPanelP
     if (!issue.crew_id || !issue.identifier) return
     setRelationsLoading(true)
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/crews/${issue.crew_id}/issues/${issue.identifier}/relations?workspace_id=${workspaceId}`,
       )
       if (res.ok) {
@@ -69,7 +70,7 @@ export function IssueRelationsPanel({ issue, workspaceId }: IssueRelationsPanelP
     if (!newRelationTarget.trim() || !issue.crew_id || !issue.identifier) return
     setAddingRelation(true)
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/crews/${issue.crew_id}/issues/${issue.identifier}/relations?workspace_id=${workspaceId}`,
         {
           method: "POST",
@@ -98,7 +99,7 @@ export function IssueRelationsPanel({ issue, workspaceId }: IssueRelationsPanelP
 
   const handleDeleteRelation = useCallback(async (relationId: string) => {
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/relations/${relationId}?workspace_id=${workspaceId}`,
         { method: "DELETE" },
       )

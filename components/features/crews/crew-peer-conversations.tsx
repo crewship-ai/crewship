@@ -23,6 +23,7 @@ import { useRealtimeEvent } from "@/hooks/use-realtime"
 import { formatRelativeTime, formatDurationClock } from "@/lib/time"
 import { z } from "zod"
 import { STATUS_STYLES, type StatusConfigEntryWithIcon } from "@/lib/status-config"
+import { apiFetch } from "@/lib/api-fetch"
 
 interface CrewPeerConversationsProps {
   crewId: string
@@ -51,7 +52,7 @@ export function CrewPeerConversations({ crewId, workspaceId }: CrewPeerConversat
       setLoading(true)
     }
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/crews/${crewId}/peer-conversations?workspace_id=${workspaceId}&limit=50`
       )
       if (!res.ok) return

@@ -45,6 +45,7 @@ function ResetForm() {
     }
     setLoading(true)
     try {
+      // eslint-disable-next-line no-restricted-syntax -- pre-session password-reset endpoint; raw fetch by design (no session to refresh)
       const res = await fetch("/api/v1/auth/reset", {
         method: "POST",
         headers: { "Content-Type": "application/json" },

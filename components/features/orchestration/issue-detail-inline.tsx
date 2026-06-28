@@ -12,6 +12,7 @@ import { PriorityIcon, priorityLabel } from "@/components/features/issues/priori
 import { getCrewIconDef } from "@/lib/entities"
 import { cn } from "@/lib/utils"
 import { LABEL_PRESET_COLORS, STATUS_COLORS } from "@/lib/colors"
+import { apiFetch } from "@/lib/api-fetch"
 import { toast } from "sonner"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { ActivityFeed } from "@/components/features/issues/activity-feed"
@@ -115,7 +116,7 @@ export function IssueDetailInline({
   // Fetch activities
   useEffect(() => {
     if (!issue.crew_id || !issue.identifier) return
-    fetch(`/api/v1/crews/${issue.crew_id}/issues/${issue.identifier}/activity?workspace_id=${workspaceId}`)
+    apiFetch(`/api/v1/crews/${issue.crew_id}/issues/${issue.identifier}/activity?workspace_id=${workspaceId}`)
       .then(r => r.ok ? r.json() : [])
       .then(setActivities)
       .catch(() => {})
@@ -125,7 +126,7 @@ export function IssueDetailInline({
     async (patch: Record<string, unknown>) => {
       if (!issue.crew_id || !issue.identifier) return
       try {
-        const res = await fetch(
+        const res = await apiFetch(
           `/api/v1/crews/${issue.crew_id}/issues/${issue.identifier}?workspace_id=${workspaceId}`,
           {
             method: "PATCH",
@@ -158,7 +159,7 @@ export function IssueDetailInline({
     if (!newComment.trim() || !issue.crew_id || !issue.identifier) return
     setSubmitting(true)
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/crews/${issue.crew_id}/issues/${issue.identifier}/comments?workspace_id=${workspaceId}`,
         {
           method: "POST",
@@ -192,7 +193,7 @@ export function IssueDetailInline({
     if (isTransitioning !== null) return
     setIsTransitioning(action)
     try {
-      const res = await fetch(url, {
+      const res = await apiFetch(url, {
         method: "POST",
         ...(body ? { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {}),
       })
@@ -384,7 +385,7 @@ export function IssueDetailInline({
                     </button>
                     <button
                       onClick={async () => {
-                        const res = await fetch(`/api/v1/crews/${issue.crew_id}/issues/${issue.identifier}/review${qs}`, {
+                        const res = await apiFetch(`/api/v1/crews/${issue.crew_id}/issues/${issue.identifier}/review${qs}`, {
                           method: "POST",
                           headers: { "Content-Type": "application/json" },
                           body: JSON.stringify({ action: "request_changes", comment: reviewComment }),
@@ -534,7 +535,7 @@ export function IssueDetailInline({
                                 setCreatingLabel(true)
                                 try {
                                   const color = LABEL_PRESET_COLORS[Math.floor(Math.random() * LABEL_PRESET_COLORS.length)].value
-                                  const res = await fetch(`/api/v1/labels?workspace_id=${workspaceId}`, {
+                                  const res = await apiFetch(`/api/v1/labels?workspace_id=${workspaceId}`, {
                                     method: "POST",
                                     headers: { "Content-Type": "application/json" },
                                     body: JSON.stringify({ name: labelSearch.trim(), color }),

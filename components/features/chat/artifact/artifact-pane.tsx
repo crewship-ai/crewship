@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils"
 import { spring } from "@/lib/motion"
 import { useArtifactStore } from "@/stores/artifact-store"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { apiFetch } from "@/lib/api-fetch"
 import { getEditorLanguage } from "../chat-tree-row"
 
 const FileEditor = dynamic(
@@ -65,7 +66,7 @@ export function ArtifactPane({ agentId, width = 540 }: ArtifactPaneProps) {
     }
     const ac = new AbortController()
     setLoading(true)
-    fetch(
+    apiFetch(
       `/api/v1/agents/${agentId}/files?workspace_id=${workspaceId}&path=${encodeURIComponent(active.path)}`,
       { signal: ac.signal },
     )
@@ -91,7 +92,7 @@ export function ArtifactPane({ agentId, width = 540 }: ArtifactPaneProps) {
   const handleSave = async (next: string) => {
     if (!active || !workspaceId) return
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/agents/${agentId}/files/save?path=${encodeURIComponent(active.path)}&workspace_id=${workspaceId}`,
         {
           method: "PUT",

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
+import { apiFetch } from "@/lib/api-fetch"
 
 // Pipeline mirrors the wire shape returned by GET
 // /api/v1/workspaces/{ws}/pipelines (list endpoint, no definition).
@@ -80,7 +81,7 @@ export function usePipelines(workspaceId: string | null | undefined) {
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch(`/api/v1/workspaces/${workspaceId}/pipelines`, {
+      const res = await apiFetch(`/api/v1/workspaces/${workspaceId}/pipelines`, {
         signal: controller.signal,
       })
       if (controller.signal.aborted) return
@@ -149,7 +150,7 @@ export function usePipelineRuns(workspaceId: string | null | undefined, slug: st
       // step entries to render the waterfall timeline when a run is
       // expanded. Server caps the LIMIT regardless so payload stays
       // bounded (50 entries ≈ 5 runs × 11-event lifecycle).
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/workspaces/${workspaceId}/pipelines/${slug}/runs?limit=50&include_steps=1`,
         { signal: controller.signal },
       )

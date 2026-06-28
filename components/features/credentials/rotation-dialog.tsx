@@ -8,6 +8,7 @@ import {
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
+import { apiFetch } from "@/lib/api-fetch"
 
 type GraceMode = "immediate" | "24h" | "custom"
 
@@ -55,7 +56,7 @@ export function RotationDialog({
       try {
         // We don't know the type/provider here without re-fetching the
         // credential — fall back to the per-credential test endpoint.
-        const res = await fetch(`/api/v1/credentials/${credentialId}/test?workspace_id=${workspaceId}`, {
+        const res = await apiFetch(`/api/v1/credentials/${credentialId}/test?workspace_id=${workspaceId}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ value: value.trim() }),
@@ -85,7 +86,7 @@ export function RotationDialog({
     setSubmitting(true)
     setError(null)
     try {
-      const res = await fetch(`/api/v1/credentials/${credentialId}/rotate?workspace_id=${workspaceId}`, {
+      const res = await apiFetch(`/api/v1/credentials/${credentialId}/rotate?workspace_id=${workspaceId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ value: value.trim(), grace_seconds: graceSeconds }),

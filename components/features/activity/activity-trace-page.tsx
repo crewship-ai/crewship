@@ -30,6 +30,7 @@ import type { TraceStep } from "@/lib/trace/types"
 import { shadeNodes, type HeatmapBucket, type HeatmapMode } from "@/lib/trace/percentile-heatmap"
 import { buildOverviewGraph } from "@/lib/trace/build-overview-graph"
 import type { Mission } from "@/lib/types/mission"
+import { apiFetch } from "@/lib/api-fetch"
 
 // ActivityTracePage — top-level page for /activity. Replaces the old
 // OrchestrationPageShell layout (which exposed Runs / Graph / Timeline
@@ -79,7 +80,7 @@ export function ActivityTracePage() {
   useEffect(() => {
     if (!workspaceId || runId) return
     let cancelled = false
-    fetch(`/api/v1/missions?workspace_id=${encodeURIComponent(workspaceId)}&limit=50`)
+    apiFetch(`/api/v1/missions?workspace_id=${encodeURIComponent(workspaceId)}&limit=50`)
       .then((r) => (r.ok ? r.json() : []))
       .then((d) => {
         if (cancelled) return

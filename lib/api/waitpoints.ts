@@ -1,3 +1,5 @@
+import { apiFetch } from "@/lib/api-fetch"
+
 // waitpointDecide — POSTs the explicit boolean to the workspace-scoped
 // approve endpoint. The handler treats an absent `approved` field as
 // false, so callers MUST send the field even on Deny. Originally
@@ -9,7 +11,7 @@ export async function waitpointDecide(
   approved: boolean,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
-    const res = await fetch(
+    const res = await apiFetch(
       `/api/v1/workspaces/${encodeURIComponent(workspaceID)}/pipelines/waitpoints/${encodeURIComponent(token)}/approve`,
       {
         method: "POST",
@@ -45,7 +47,7 @@ export interface PendingWaitpoint {
 export async function listPendingWaitpoints(
   workspaceID: string,
 ): Promise<PendingWaitpoint[]> {
-  const res = await fetch(
+  const res = await apiFetch(
     `/api/v1/workspaces/${encodeURIComponent(workspaceID)}/pipelines/waitpoints`,
   )
   if (!res.ok) return []

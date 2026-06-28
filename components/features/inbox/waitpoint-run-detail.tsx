@@ -13,6 +13,7 @@ import {
 import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 import { Skeleton } from "@/components/ui/skeleton"
+import { apiFetch } from "@/lib/api-fetch"
 
 // WaitpointRunDetail fetches the underlying pipeline run + its
 // definition and renders a step-by-step progress view: green checks
@@ -90,7 +91,7 @@ export function WaitpointRunDetail({
     let timer: ReturnType<typeof setTimeout> | null = null
 
     const fetchRun = async (): Promise<RunResponse | null> => {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipeline-runs/${encodeURIComponent(pipelineRunId)}`,
       )
       if (!res.ok) return null
@@ -98,7 +99,7 @@ export function WaitpointRunDetail({
     }
 
     const fetchPipeline = async (slug: string) => {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/${encodeURIComponent(slug)}`,
       )
       if (res.ok) return (await res.json()) as PipelineDetail

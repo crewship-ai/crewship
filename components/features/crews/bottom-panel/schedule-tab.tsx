@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 import { Play } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { apiFetch } from "@/lib/api-fetch"
 
 import type { BottomPanelContext } from "./types"
 import { EmptyState, formatRelative, statusColor } from "./shared"
@@ -81,7 +82,7 @@ export function ScheduleTab({ workspaceId, context }: { workspaceId: string; con
     // Clear the "Triggered ✓" state so a freshly selected routine doesn't
     // inherit the previous one's success button.
     setRan(false)
-    fetch(`/api/v1/workspaces/${workspaceId}/pipeline-schedules`)
+    apiFetch(`/api/v1/workspaces/${workspaceId}/pipeline-schedules`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((data: Schedule[]) => {
         if (cancelled) return
@@ -101,7 +102,7 @@ export function ScheduleTab({ workspaceId, context }: { workspaceId: string; con
     setRunning(true)
     setRan(false)
     try {
-      const r = await fetch(`/api/v1/workspaces/${workspaceId}/pipeline-schedules/${schedule.id}/run`, { method: "POST" })
+      const r = await apiFetch(`/api/v1/workspaces/${workspaceId}/pipeline-schedules/${schedule.id}/run`, { method: "POST" })
       if (!r.ok) throw new Error(`HTTP ${r.status}`)
       setRan(true)
     } catch (err) {

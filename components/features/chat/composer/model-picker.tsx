@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 
 import { ModelSelector, type ModelOption } from "@/components/ai-elements/model-selector"
 import { useComposerStore } from "@/stores/composer-store"
+import { apiFetch } from "@/lib/api-fetch"
 
 const FALLBACK_MODELS: ModelOption[] = [
   {
@@ -45,7 +46,7 @@ export function ModelPicker() {
 
   useEffect(() => {
     const ac = new AbortController()
-    fetch("/api/v1/llm/models", { credentials: "include", signal: ac.signal })
+    apiFetch("/api/v1/llm/models", { signal: ac.signal })
       .then((r) => (r.ok ? r.json() : null))
       .then((data: { models?: ModelOption[] } | null) => {
         if (!data?.models?.length) return

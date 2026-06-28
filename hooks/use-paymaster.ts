@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
+import { apiFetch } from "@/lib/api-fetch"
 import {
   agentSpendResponseSchema,
   crewSpendResponseSchema,
@@ -44,7 +45,7 @@ export function useCrewSpend(range: PaymasterRange, enabled = true, reloadKey = 
     setState((s) => ({ ...s, loading: true, error: null }))
     ;(async () => {
       try {
-        const res = await fetch(`/api/v1/paymaster/spend/by-crew?range=${range}`)
+        const res = await apiFetch(`/api/v1/paymaster/spend/by-crew?range=${range}`)
         if (reqIdRef.current !== reqId) return
         if (res.status === 404) {
           setState({ data: null, loading: false, error: null, notConfigured: true })
@@ -95,7 +96,7 @@ export function useAgentSpend(
     setState((s) => ({ ...s, loading: true, error: null }))
     ;(async () => {
       try {
-        const res = await fetch(`/api/v1/paymaster/spend/by-agent/${encodeURIComponent(crewId)}?range=${encodeURIComponent(range)}`)
+        const res = await apiFetch(`/api/v1/paymaster/spend/by-agent/${encodeURIComponent(crewId)}?range=${encodeURIComponent(range)}`)
         if (reqIdRef.current !== reqId) return
         if (res.status === 404) {
           setState({ data: null, loading: false, error: null, notConfigured: true })
@@ -132,7 +133,7 @@ export function useTopSpenders(range: PaymasterRange, limit = 10, reloadKey = 0)
     const reqId = ++reqIdRef.current
     setState((s) => ({ ...s, loading: true, error: null }))
     try {
-      const res = await fetch(`/api/v1/paymaster/top-spenders?range=${range}&limit=${limit}`)
+      const res = await apiFetch(`/api/v1/paymaster/top-spenders?range=${range}&limit=${limit}`)
       if (reqIdRef.current !== reqId) return
       if (res.status === 404) {
         setState({ data: null, loading: false, error: null, notConfigured: true })
@@ -184,7 +185,7 @@ export function useSubscriptionUsage(
     setState((s) => ({ ...s, loading: true, error: null }))
     ;(async () => {
       try {
-        const res = await fetch(`/api/v1/paymaster/subscriptions?range=${range}`)
+        const res = await apiFetch(`/api/v1/paymaster/subscriptions?range=${range}`)
         if (reqIdRef.current !== reqId) return
         if (res.status === 404) {
           setState({ data: null, loading: false, error: null, notConfigured: true })

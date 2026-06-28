@@ -25,6 +25,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { cn } from "@/lib/utils"
+import { apiFetch } from "@/lib/api-fetch"
 
 const ROLE_LABEL: Record<string, string> = {
   OWNER: "Owner",
@@ -200,7 +201,7 @@ export function CreateWorkspaceDialog({
     }
     setSubmitting(true)
     try {
-      const res = await fetch("/api/v1/workspaces", {
+      const res = await apiFetch("/api/v1/workspaces", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: name.trim(), slug }),

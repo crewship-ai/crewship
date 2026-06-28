@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
+import { apiFetch } from "@/lib/api-fetch"
 
 // RoutineCreateDialog — UI authoring flow for new routines. Two-step
 // pattern (write definition, then test) is compressed into one
@@ -139,7 +140,7 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
   useEffect(() => {
     if (!open || crews.length > 0) return
     let cancelled = false
-    fetch(`/api/v1/crews?workspace_id=${workspaceId}`)
+    apiFetch(`/api/v1/crews?workspace_id=${workspaceId}`)
       .then((r) => (r.ok ? r.json() : []))
       .then((data: Crew[]) => {
         if (!cancelled) setCrews(Array.isArray(data) ? data : [])
@@ -206,7 +207,7 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
     setTestResult(null)
     setSaveToken(null)
     try {
-      const res = await fetch(`/api/v1/workspaces/${workspaceId}/pipelines/test_run`, {
+      const res = await apiFetch(`/api/v1/workspaces/${workspaceId}/pipelines/test_run`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ definition: parsed, sample_inputs: {} }),
@@ -292,7 +293,7 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
       }
       if (authorCrewId) body.author_crew_id = authorCrewId
 
-      const res = await fetch(`/api/v1/workspaces/${workspaceId}/pipelines/save`, {
+      const res = await apiFetch(`/api/v1/workspaces/${workspaceId}/pipelines/save`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 
+import { apiFetch } from "@/lib/api-fetch"
 import type { BottomPanelContext } from "./types"
 import { EmptyState } from "./shared"
 
@@ -73,7 +74,7 @@ export function YamlTab({ workspaceId, context }: { workspaceId: string; context
       case "routine": url = `/api/v1/workspaces/${workspaceId}/pipelines/${encodeURIComponent(context.slug)}`; break
       default: return
     }
-    fetch(url)
+    apiFetch(url)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((rec) => { if (!cancelled) setData(rec) })
       .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)) })

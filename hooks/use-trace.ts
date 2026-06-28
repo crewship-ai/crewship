@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useRealtimeEvent, type RealtimeEvent } from "@/hooks/use-realtime"
+import { apiFetch } from "@/lib/api-fetch"
 import type { PipelineRun } from "@/hooks/use-pipeline-runs"
 import type { PipelineDSL } from "@/lib/trace/types"
 
@@ -61,7 +62,7 @@ export function useTrace(workspaceId: string | null | undefined, runId: string |
       // 1) Fetch the run. The endpoint is workspace-scoped: GET
       //    /api/v1/workspaces/{ws}/pipeline-runs/{id}. Response is the
       //    same shape used by the list endpoint plus an `inputs` map.
-      const runRes = await fetch(
+      const runRes = await apiFetch(
         `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipeline-runs/${encodeURIComponent(runId)}`,
         { signal: ctrl.signal },
       )
@@ -80,7 +81,7 @@ export function useTrace(workspaceId: string | null | undefined, runId: string |
       // 2) Fetch the pipeline DSL by slug — needed to render every
       //    step, including ones that haven't run yet.
       if (runData.pipeline_slug) {
-        const dslRes = await fetch(
+        const dslRes = await apiFetch(
           `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/${encodeURIComponent(runData.pipeline_slug)}`,
           { signal: ctrl.signal },
         )

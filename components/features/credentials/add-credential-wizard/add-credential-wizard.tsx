@@ -13,6 +13,7 @@ import { StepPaste } from "./step-paste"
 import { StepIdentity } from "./step-identity"
 import type { WizardState, WizardStep } from "./types"
 import { INITIAL } from "./types"
+import { apiFetch } from "@/lib/api-fetch"
 
 const STEP_LABELS: Record<WizardStep, { title: string; sub: string }> = {
   1: { title: "Provider", sub: "pick a service" },
@@ -74,7 +75,7 @@ export function AddCredentialWizard({ workspaceId, open, onOpenChange, onSuccess
       if (state.expiresAt) body.token_expires_at = new Date(state.expiresAt).toISOString()
       if (state.scope === "CREW") body.crew_ids = state.crewIds
 
-      const res = await fetch(`/api/v1/credentials?workspace_id=${workspaceId}`, {
+      const res = await apiFetch(`/api/v1/credentials?workspace_id=${workspaceId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),

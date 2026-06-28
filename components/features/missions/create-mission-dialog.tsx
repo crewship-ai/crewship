@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
 import { toast } from "sonner"
+import { apiFetch } from "@/lib/api-fetch"
 import type { WorkflowTemplate } from "@/lib/types/template"
 
 interface LeadAgent {
@@ -55,7 +56,7 @@ export function CreateMissionDialog({
 
   useEffect(() => {
     if (!open) return
-    fetch(`/api/v1/templates?workspace_id=${workspaceId}`)
+    apiFetch(`/api/v1/templates?workspace_id=${workspaceId}`)
       .then((res) => (res.ok ? res.json() : []))
       .then(setTemplates)
       .catch(() => {})
@@ -73,7 +74,7 @@ export function CreateMissionDialog({
 
     setSaving(true)
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/crews/${crewId}/missions?workspace_id=${workspaceId}`,
         {
           method: "POST",

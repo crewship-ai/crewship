@@ -41,6 +41,7 @@ import { useTreeState, findNode } from "@/hooks/use-tree-state"
 import { fmtSize, getLang, isPreviewable } from "@/lib/file-format"
 import { fmtTime } from "@/lib/time"
 import { cn } from "@/lib/utils"
+import { apiFetch } from "@/lib/api-fetch"
 import { toast } from "sonner"
 import type { FileEntry, TreeNode } from "@/lib/types/agent"
 
@@ -216,7 +217,7 @@ export function FilesPageClient() {
       return
     }
     setLoadingContent(true)
-    fetch(`/api/v1/agents/${agentId}/files/download?workspace_id=${workspaceId}&path=${encodeURIComponent(path)}`, { signal: ac.signal })
+    apiFetch(`/api/v1/agents/${agentId}/files/download?workspace_id=${workspaceId}&path=${encodeURIComponent(path)}`, { signal: ac.signal })
       .then((r) => { if (!r.ok) throw new Error("Unable to load"); return r.text() })
       .then((text) => { if (!ac.signal.aborted) setFileContent(text) })
       .catch((err) => { if (err.name !== "AbortError") { setFileContent(null); setFileError(err.message ?? "Network error") } })
@@ -227,7 +228,7 @@ export function FilesPageClient() {
     if (!selectedPath || !canQueryAgent) return
     setSaving(true)
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/agents/${agentId}/files/save?workspace_id=${workspaceId}&path=${encodeURIComponent(selectedPath)}`,
         { method: "PUT", body: content }
       )
@@ -329,7 +330,7 @@ export function FilesPageClient() {
                 containerAbortRef.current = ac
                 setContainerError(null)
                 setContainerLoading(true)
-                fetch(`/api/v1/agents/${agentId}/container-files?workspace_id=${workspaceId}`, {
+                apiFetch(`/api/v1/agents/${agentId}/container-files?workspace_id=${workspaceId}`, {
                   signal: ac.signal,
                 })
                   .then((r) => {
@@ -370,7 +371,7 @@ export function FilesPageClient() {
                 gitAbortRef.current = ac
                 setGitError(null)
                 setGitLoading(true)
-                fetch(`/api/v1/agents/${agentId}/git-log?workspace_id=${workspaceId}`, {
+                apiFetch(`/api/v1/agents/${agentId}/git-log?workspace_id=${workspaceId}`, {
                   signal: ac.signal,
                 })
                   .then((r) => {

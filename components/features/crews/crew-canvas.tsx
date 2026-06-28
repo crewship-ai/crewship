@@ -6,6 +6,7 @@ import { Files } from "lucide-react"
 import { CrewIcon } from "@/components/ui/crew-icon"
 import { EditableField } from "@/components/shared/editable-field"
 import { CrewIconPickerDialog } from "@/components/features/crews/crew-icon-picker-dialog"
+import { apiFetch } from "@/lib/api-fetch"
 
 import { ProvisioningBanner } from "./crew-canvas-banner"
 import {
@@ -104,7 +105,7 @@ export function CrewCanvas({
     let cancelled = false
     // The crew-scoped path only has POST registered; GET lives at the
     // workspace-scoped /issues endpoint with crew_id as filter.
-    fetch(`/api/v1/issues?workspace_id=${encodeURIComponent(workspaceId)}&crew_id=${encodeURIComponent(crew.id)}`)
+    apiFetch(`/api/v1/issues?workspace_id=${encodeURIComponent(workspaceId)}&crew_id=${encodeURIComponent(crew.id)}`)
       .then((r) => (r.ok ? r.json() : []))
       .then((data: IssueRow[]) => {
         if (cancelled || !Array.isArray(data)) return
@@ -131,7 +132,7 @@ export function CrewCanvas({
   useEffect(() => {
     if (!crew) return
     let cancelled = false
-    fetch(`/api/v1/crews/${crew.id}/integrations?workspace_id=${workspaceId}`)
+    apiFetch(`/api/v1/crews/${crew.id}/integrations?workspace_id=${workspaceId}`)
       .then((r) => (r.ok ? r.json() : []))
       .then((data: CrewIntegration[]) => {
         if (!cancelled && Array.isArray(data)) setIntegrations(data)
@@ -144,7 +145,7 @@ export function CrewCanvas({
   useEffect(() => {
     if (!crew || tab !== "roster" || members !== null) return
     let cancelled = false
-    fetch(`/api/v1/crews/${crew.id}/members?workspace_id=${workspaceId}`)
+    apiFetch(`/api/v1/crews/${crew.id}/members?workspace_id=${workspaceId}`)
       .then((r) => (r.ok ? r.json() : []))
       .then((data: CrewMemberRow[]) => {
         if (!cancelled && Array.isArray(data)) setMembers(data)
@@ -167,7 +168,7 @@ export function CrewCanvas({
     if (!confirm(`${verb} avatar style "${crew.avatar_style ?? "robots"}" ${resetOverrides ? "and clear per-agent overrides" : ""} for all ${agentsForCrew.length} agents in ${crew.name}?`)) return
     try {
       const url = `/api/v1/crews/${crew.id}/apply-avatar-style?workspace_id=${workspaceId}${resetOverrides ? "&reset_overrides=true" : ""}`
-      const res = await fetch(url, { method: "POST" })
+      const res = await apiFetch(url, { method: "POST" })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       toast.success(`${verb} done for ${agentsForCrew.length} agent${agentsForCrew.length === 1 ? "" : "s"}`)
       onCrewChanged()
@@ -180,7 +181,7 @@ export function CrewCanvas({
     if (!crew) return
     if (!confirm(`Delete crew "${crew.name}"? All ${agentsForCrew.length} agents will be detached. Container will be torn down. Journal kept 30 days.`)) return
     try {
-      const res = await fetch(`/api/v1/crews/${crew.id}?workspace_id=${workspaceId}`, { method: "DELETE" })
+      const res = await apiFetch(`/api/v1/crews/${crew.id}?workspace_id=${workspaceId}`, { method: "DELETE" })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       toast.success(`Crew "${crew.name}" deleted`)
       onCrewChanged()

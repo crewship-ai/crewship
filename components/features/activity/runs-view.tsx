@@ -24,6 +24,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { usePipelineRuns, type PipelineRun } from "@/hooks/use-pipeline-runs"
 import { statusIcon, statusTint } from "@/lib/activity/run-status"
 import { relTime, formatDurationDecimal } from "@/lib/time"
+import { apiFetch } from "@/lib/api-fetch"
 
 // RunsView — the /activity "what's happening right now" surface.
 // Each row is one pipeline_run. Collapsed shows source pill + routine
@@ -338,7 +339,7 @@ function RunStepTree({ workspaceId, run }: { workspaceId: string; run: PipelineR
   useEffect(() => {
     if (!run.pipeline_slug) return
     let cancelled = false
-    fetch(
+    apiFetch(
       `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/${encodeURIComponent(run.pipeline_slug)}`,
     )
       .then(async (res) => (res.ok ? ((await res.json()) as PipelineDetail) : null))

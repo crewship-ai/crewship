@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
 import { LABEL_PRESET_COLORS } from "@/lib/colors"
+import { apiFetch } from "@/lib/api-fetch"
 import { toast } from "sonner"
 import type { IssueLabel } from "@/lib/types/mission"
 
@@ -57,7 +58,7 @@ export function LabelsDialog({
     }
     setCreating(true)
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/labels?workspace_id=${encodeURIComponent(workspaceId)}`,
         {
           method: "POST",
@@ -94,7 +95,7 @@ export function LabelsDialog({
     }
     setSaving(true)
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/labels/${encodeURIComponent(id)}?workspace_id=${encodeURIComponent(workspaceId)}`,
         {
           method: "PATCH",
@@ -125,7 +126,7 @@ export function LabelsDialog({
     if (deletingId === id) return
     setDeletingId(id)
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/labels/${encodeURIComponent(id)}?workspace_id=${encodeURIComponent(workspaceId)}`,
         {
           method: "DELETE",

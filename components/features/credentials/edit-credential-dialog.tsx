@@ -7,6 +7,7 @@
 import * as React from "react"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet"
 import { CredentialForm, type CredentialFormValues, type CredentialType } from "./credential-form"
+import { apiFetch } from "@/lib/api-fetch"
 
 export interface CredentialData {
   id: string
@@ -64,7 +65,7 @@ export function EditCredentialDialog({
       : null
 
     try {
-      const res = await fetch(`/api/v1/credentials/${credential.id}?workspace_id=${workspaceId}`, {
+      const res = await apiFetch(`/api/v1/credentials/${credential.id}?workspace_id=${workspaceId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),

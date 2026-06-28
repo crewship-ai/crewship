@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { cn } from "@/lib/utils"
+import { apiFetch } from "@/lib/api-fetch"
 
 import type { BottomPanelContext, LogEntry } from "./types"
 import { EmptyState, formatTime } from "./shared"
@@ -32,7 +33,7 @@ export function LogsTab({ workspaceId, context }: { workspaceId: string; context
     }
     if (isRoutine) {
       // Latest run for this routine = first record in run-records.
-      fetch(`/api/v1/workspaces/${workspaceId}/pipelines/${encodeURIComponent(context.slug)}/run-records?limit=1`)
+      apiFetch(`/api/v1/workspaces/${workspaceId}/pipelines/${encodeURIComponent(context.slug)}/run-records?limit=1`)
         .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
         .then((data) => {
           if (cancelled) return
@@ -51,7 +52,7 @@ export function LogsTab({ workspaceId, context }: { workspaceId: string; context
     if (!runId) return
     let cancelled = false
     setLogs(null)
-    fetch(`/api/v1/workspaces/${workspaceId}/pipeline-runs/${encodeURIComponent(runId)}/logs`)
+    apiFetch(`/api/v1/workspaces/${workspaceId}/pipeline-runs/${encodeURIComponent(runId)}/logs`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((data) => {
         if (cancelled) return

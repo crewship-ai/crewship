@@ -20,6 +20,7 @@ import {
 import { useWorkspace } from "@/hooks/use-workspace"
 import { getCrewDotColor, getGradientPalette } from "@/lib/entities"
 import { cn } from "@/lib/utils"
+import { apiFetch } from "@/lib/api-fetch"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { CrewIcon } from "@/components/ui/crew-icon"
 
@@ -138,12 +139,12 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
 
     const opts = { signal: ac.signal }
     Promise.allSettled([
-      fetch(`/api/v1/agents?${qs}`, opts),
-      fetch(`/api/v1/crews?${qs}`, opts),
-      fetch(`/api/v1/skills?${qs}`, opts),
-      fetch(`/api/v1/credentials?${qs}`, opts),
-      fetch(`/api/v1/issues?${qs}&limit=50`, opts),
-      fetch(`/api/v1/projects?${qs}`, opts),
+      apiFetch(`/api/v1/agents?${qs}`, opts),
+      apiFetch(`/api/v1/crews?${qs}`, opts),
+      apiFetch(`/api/v1/skills?${qs}`, opts),
+      apiFetch(`/api/v1/credentials?${qs}`, opts),
+      apiFetch(`/api/v1/issues?${qs}&limit=50`, opts),
+      apiFetch(`/api/v1/projects?${qs}`, opts),
     ]).then(async ([agentsRes, crewsRes, skillsRes, credsRes, issuesRes, projectsRes]) => {
       if (ac.signal.aborted) return
       const safeJson = async (r: PromiseSettledResult<Response>) =>

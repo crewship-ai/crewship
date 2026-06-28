@@ -32,6 +32,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { MarkdownEditor } from "@/components/shared/markdown-editor"
+import { apiFetch } from "@/lib/api-fetch"
 
 // Char caps — must match server-side enforcement.
 //   AGENT.md / CREW.md: 4000 B (PR-A F1)
@@ -401,7 +402,7 @@ function useMemoryTierLatest(path: string, workspaceId: string) {
     async function load() {
       setErr(null)
       try {
-        const r = await fetch(
+        const r = await apiFetch(
           `/api/v1/memory/versions?path=${encodeURIComponent(path)}&limit=20`,
           { headers },
         )
@@ -429,7 +430,7 @@ function useMemoryTierLatest(path: string, workspaceId: string) {
         }
         const latest = entries[0]
         // Show endpoint returns the raw blob bytes for the latest sha.
-        const cr = await fetch(
+        const cr = await apiFetch(
           `/api/v1/memory/versions/${encodeURIComponent(latest.sha256)}?path=${encodeURIComponent(path)}`,
           { headers },
         )
@@ -475,8 +476,8 @@ function PersonaPanel({
     const headers = { "X-Workspace-ID": workspaceId }
     try {
       const [pr, hist] = await Promise.all([
-        fetch(`/api/v1/agents/${encodeURIComponent(agentId)}/persona`, { headers }),
-        fetch(`/api/v1/agents/${encodeURIComponent(agentId)}/persona/history?limit=20`, { headers }),
+        apiFetch(`/api/v1/agents/${encodeURIComponent(agentId)}/persona`, { headers }),
+        apiFetch(`/api/v1/agents/${encodeURIComponent(agentId)}/persona/history?limit=20`, { headers }),
       ])
       if (pr.ok) setAgentPersona(await pr.json())
       if (hist.ok) {
@@ -484,7 +485,7 @@ function PersonaPanel({
         setHistory(h.entries || [])
       }
       if (crewId) {
-        const cr = await fetch(`/api/v1/crews/${encodeURIComponent(crewId)}/persona`, { headers })
+        const cr = await apiFetch(`/api/v1/crews/${encodeURIComponent(crewId)}/persona`, { headers })
         if (cr.ok) setCrewPersona(await cr.json())
       }
     } catch (e) {
@@ -501,7 +502,7 @@ function PersonaPanel({
       setSaving(true)
       setErr(null)
       try {
-        const r = await fetch(`/api/v1/agents/${encodeURIComponent(agentId)}/persona`, {
+        const r = await apiFetch(`/api/v1/agents/${encodeURIComponent(agentId)}/persona`, {
           method: "PUT",
           headers: { "Content-Type": "application/json", "X-Workspace-ID": workspaceId },
           body: JSON.stringify({ content: next }),
@@ -523,7 +524,7 @@ function PersonaPanel({
     setSaving(true)
     setErr(null)
     try {
-      const r = await fetch(`/api/v1/agents/${encodeURIComponent(agentId)}/persona`, {
+      const r = await apiFetch(`/api/v1/agents/${encodeURIComponent(agentId)}/persona`, {
         method: "DELETE",
         headers: { "X-Workspace-ID": workspaceId },
       })
@@ -598,7 +599,7 @@ function PeersPanel({ agentId, workspaceId }: { agentId: string; workspaceId: st
     setErr(null)
     setLoading(true)
     try {
-      const r = await fetch(`/api/v1/agents/${encodeURIComponent(agentId)}/peers`, {
+      const r = await apiFetch(`/api/v1/agents/${encodeURIComponent(agentId)}/peers`, {
         headers: { "X-Workspace-ID": workspaceId },
       })
       if (!r.ok) throw new Error(`list peers failed: ${r.status}`)
@@ -618,7 +619,7 @@ function PeersPanel({ agentId, workspaceId }: { agentId: string; workspaceId: st
   const loadDetail = useCallback(
     async (userID: string) => {
       try {
-        const r = await fetch(
+        const r = await apiFetch(
           `/api/v1/agents/${encodeURIComponent(agentId)}/peers/${encodeURIComponent(userID)}`,
           { headers: { "X-Workspace-ID": workspaceId } },
         )
@@ -635,7 +636,7 @@ function PeersPanel({ agentId, workspaceId }: { agentId: string; workspaceId: st
   const deleteCard = useCallback(
     async (userID: string) => {
       if (!confirm("Delete this peer card? The next routine sweep may rebuild it.")) return
-      const r = await fetch(`/api/v1/agents/${encodeURIComponent(agentId)}/peers/${encodeURIComponent(userID)}`, {
+      const r = await apiFetch(`/api/v1/agents/${encodeURIComponent(agentId)}/peers/${encodeURIComponent(userID)}`, {
         method: "DELETE",
         headers: { "X-Workspace-ID": workspaceId },
       })

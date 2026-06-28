@@ -9,6 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { SectionCard } from "@/components/ui/section-card"
 import { toast } from "sonner"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { apiFetch } from "@/lib/api-fetch"
 import { MCPConfigEditor } from "@/components/features/mcp/mcp-config-editor"
 
 // ---------------------------------------------------------------------------
@@ -80,7 +81,7 @@ export function MCPPageClient() {
 
     async function fetchData() {
       try {
-        const agentRes = await fetch(
+        const agentRes = await apiFetch(
           `/api/v1/agents/${agentId}?workspace_id=${workspaceId}`,
         )
         if (!agentRes.ok) {
@@ -99,7 +100,7 @@ export function MCPPageClient() {
         // Fetch crew config for merged preview
         if (agentData.crew_id) {
           try {
-            const crewRes = await fetch(
+            const crewRes = await apiFetch(
               `/api/v1/crews/${agentData.crew_id}?workspace_id=${workspaceId}`,
             )
             if (crewRes.ok) {
@@ -130,7 +131,7 @@ export function MCPPageClient() {
     setSaving(true)
 
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/agents/${agentId}?workspace_id=${workspaceId}`,
         {
           method: "PATCH",

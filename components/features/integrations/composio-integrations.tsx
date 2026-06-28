@@ -15,6 +15,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
+import { apiFetch } from "@/lib/api-fetch"
 
 import type {
   Inventory,
@@ -69,7 +70,7 @@ export function ComposioIntegrations() {
     setLoading(true)
     setError(null)
     try {
-      const r = await fetch(`/api/v1/integrations/composio/inventory?workspace_id=${wid}`)
+      const r = await apiFetch(`/api/v1/integrations/composio/inventory?workspace_id=${wid}`)
       if (!r.ok) throw new Error(`Request failed (${r.status})`)
       const j = (await r.json()) as Inventory
       if (wsRef.current !== wid) return // workspace switched mid-flight
@@ -97,7 +98,7 @@ export function ComposioIntegrations() {
     try {
       const params = new URLSearchParams({ workspace_id: wid })
       if (q) params.set("search", q)
-      const r = await fetch(`/api/v1/integrations/composio/toolkits?${params}`)
+      const r = await apiFetch(`/api/v1/integrations/composio/toolkits?${params}`)
       if (!r.ok) throw new Error(String(r.status))
       const j = (await r.json()) as ToolkitsResp
       if (wsRef.current !== wid) return // workspace switched mid-flight
@@ -126,7 +127,7 @@ export function ComposioIntegrations() {
   const loadAgents = React.useCallback(async (wid: string) => {
     setAgentsLoading(true)
     try {
-      const r = await fetch(`/api/v1/agents?workspace_id=${wid}`)
+      const r = await apiFetch(`/api/v1/agents?workspace_id=${wid}`)
       if (!r.ok) throw new Error(String(r.status))
       const list = (await r.json()) as AgentLite[]
       if (wsRef.current !== wid) return // workspace switched mid-flight
@@ -136,7 +137,7 @@ export function ComposioIntegrations() {
       const entries = await Promise.all(
         list.map(async (a): Promise<[string, AgentBindingsMap[string]]> => {
           try {
-            const br = await fetch(
+            const br = await apiFetch(
               `/api/v1/integrations/composio/agents/${a.id}/bind?workspace_id=${wid}`,
             )
             if (!br.ok) return [a.id, []]
@@ -180,7 +181,7 @@ export function ComposioIntegrations() {
 
   const loadSettings = React.useCallback(async (wid: string) => {
     try {
-      const r = await fetch(`/api/v1/integrations/composio/settings?workspace_id=${wid}`)
+      const r = await apiFetch(`/api/v1/integrations/composio/settings?workspace_id=${wid}`)
       if (!r.ok) return
       const j = (await r.json()) as ComposioSettings
       if (wsRef.current !== wid) return // workspace switched mid-flight
@@ -443,7 +444,7 @@ function ApiKeyModal({
     setSaving(true)
     setErr(null)
     try {
-      const r = await fetch(`/api/v1/integrations/composio/settings?workspace_id=${workspaceId}`, {
+      const r = await apiFetch(`/api/v1/integrations/composio/settings?workspace_id=${workspaceId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ api_key: apiKey.trim(), base_url: current?.base_url ?? "", label: label.trim() }),
@@ -464,7 +465,7 @@ function ApiKeyModal({
     setSaving(true)
     setErr(null)
     try {
-      const r = await fetch(`/api/v1/integrations/composio/settings?workspace_id=${workspaceId}`, {
+      const r = await apiFetch(`/api/v1/integrations/composio/settings?workspace_id=${workspaceId}`, {
         method: "DELETE",
       })
       if (!r.ok) throw new Error(`Failed (${r.status})`)
@@ -575,7 +576,7 @@ function ConnectModal({
     // request resolves (and close it if there's no redirect or an error).
     const popup = window.open("", "_blank", "noopener,noreferrer")
     try {
-      const r = await fetch(`/api/v1/integrations/composio/connect?workspace_id=${workspaceId}`, {
+      const r = await apiFetch(`/api/v1/integrations/composio/connect?workspace_id=${workspaceId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ toolkit: slug, user_id: uid }),

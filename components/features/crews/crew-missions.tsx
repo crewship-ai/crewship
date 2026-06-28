@@ -8,6 +8,7 @@ import { Progress } from "@/components/ui/progress"
 import { MissionStatusBadge } from "@/components/features/missions/mission-status-badge"
 import { CreateMissionDialog } from "@/components/features/missions/create-mission-dialog"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
+import { apiFetch } from "@/lib/api-fetch"
 import type { Mission } from "@/lib/types/mission"
 
 interface CrewMissionsProps {
@@ -38,7 +39,7 @@ export function CrewMissions({ crewId, workspaceId, canCreate, leadAgents }: Cre
       setLoading(true)
     }
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/crews/${crewId}/missions?workspace_id=${workspaceId}&limit=5`
       )
       if (!res.ok) return

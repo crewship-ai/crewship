@@ -25,6 +25,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { MCPLogo } from "@/components/icons/mcp-logos"
 import { TrustTierBadge, type TrustTier } from "./trust-tier-badge"
+import { apiFetch } from "@/lib/api-fetch"
 import { cn } from "@/lib/utils"
 import { formatRelativeTime } from "@/lib/time"
 
@@ -86,7 +87,7 @@ export function MCPDetailSheet({
     if (!server) return
     setToolsLoading(true)
     try {
-      const res = await fetch(`/api/v1/crews/${server.crew_id}/integrations/${server.id}/tools?workspace_id=${workspaceId}`)
+      const res = await apiFetch(`/api/v1/crews/${server.crew_id}/integrations/${server.id}/tools?workspace_id=${workspaceId}`)
       if (res.ok) setTools(await res.json())
     } catch {
       setTools([])
@@ -110,7 +111,7 @@ export function MCPDetailSheet({
     const next = !tool.enabled
     setTools((prev) => prev.map((t) => t.id === tool.id ? { ...t, enabled: next } : t))
     try {
-      const res = await fetch(`/api/v1/crews/${server.crew_id}/integrations/${server.id}/tools/${encodeURIComponent(tool.tool_name)}?workspace_id=${workspaceId}`, {
+      const res = await apiFetch(`/api/v1/crews/${server.crew_id}/integrations/${server.id}/tools/${encodeURIComponent(tool.tool_name)}?workspace_id=${workspaceId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabled: next }),
@@ -140,7 +141,7 @@ export function MCPDetailSheet({
   }
 
   const handleDelete = async () => {
-    const res = await fetch(`/api/v1/crews/${server.crew_id}/integrations/${server.id}?workspace_id=${workspaceId}`, {
+    const res = await apiFetch(`/api/v1/crews/${server.crew_id}/integrations/${server.id}?workspace_id=${workspaceId}`, {
       method: "DELETE",
     })
     if (res.ok) {

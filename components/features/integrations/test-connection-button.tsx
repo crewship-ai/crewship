@@ -6,6 +6,7 @@ import { Spinner } from "@/components/ui/spinner"
 
 import { Button } from "@/components/ui/button"
 import { StatusBadge } from "@/components/ui/status-badge"
+import { apiFetch } from "@/lib/api-fetch"
 import type { TestResult } from "./types"
 
 interface TestConnectionButtonProps {
@@ -41,7 +42,7 @@ export function TestConnectionButton({
     if (timerRef.current) clearTimeout(timerRef.current)
 
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/crews/${crewId}/integrations/${serverId}/test?workspace_id=${workspaceId}`,
         { method: "POST" },
       )

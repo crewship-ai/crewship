@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
+import { apiFetch } from "@/lib/api-fetch"
 import { toast } from "sonner"
 import type { Mission } from "@/lib/types/mission"
 
@@ -77,12 +78,12 @@ export function MissionControlBar({ mission, workspaceId, onMissionChanged }: Mi
       const qs = `?workspace_id=${encodeURIComponent(workspaceId)}`
       let res: Response
       if (action === "start") {
-        res = await fetch(`/api/v1/crews/${mission.crew_id}/missions/${mission.id}/start${qs}`, {
+        res = await apiFetch(`/api/v1/crews/${mission.crew_id}/missions/${mission.id}/start${qs}`, {
           method: "POST",
         })
       } else {
         const newStatus = action === "cancel" ? "CANCELLED" : "COMPLETED"
-        res = await fetch(`/api/v1/crews/${mission.crew_id}/missions/${mission.id}${qs}`, {
+        res = await apiFetch(`/api/v1/crews/${mission.crew_id}/missions/${mission.id}${qs}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ status: newStatus }),
@@ -106,7 +107,7 @@ export function MissionControlBar({ mission, workspaceId, onMissionChanged }: Mi
     setLoading("restart")
     try {
       const qs = `?workspace_id=${encodeURIComponent(workspaceId)}`
-      const res = await fetch(`/api/v1/crews/${mission.crew_id}/missions/${mission.id}/restart${qs}`, {
+      const res = await apiFetch(`/api/v1/crews/${mission.crew_id}/missions/${mission.id}/restart${qs}`, {
         method: "POST",
       })
       if (!res.ok) {
@@ -127,7 +128,7 @@ export function MissionControlBar({ mission, workspaceId, onMissionChanged }: Mi
     setLoading("clone")
     try {
       const qs = `?workspace_id=${encodeURIComponent(workspaceId)}`
-      const res = await fetch(`/api/v1/crews/${mission.crew_id}/missions/${mission.id}/clone${qs}`, {
+      const res = await apiFetch(`/api/v1/crews/${mission.crew_id}/missions/${mission.id}/clone${qs}`, {
         method: "POST",
       })
       if (!res.ok) {

@@ -27,6 +27,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
+import { apiFetch } from "@/lib/api-fetch"
 
 type CredentialType = "AI_CLI_TOKEN" | "API_KEY" | "CLI_TOKEN" | "SECRET"
 type CredentialProvider = "ANTHROPIC" | "OPENAI" | "GOOGLE" | "CURSOR" | "FACTORY" | "GITHUB" | "GITLAB" | "VERCEL" | "AWS" | "CUSTOM_CLI" | "NONE"
@@ -112,7 +113,7 @@ export function AddCredentialDialog({
   React.useEffect(() => {
     if (scope === "CREW" && crews.length === 0) {
       setTeamsLoading(true)
-      fetch(`/api/v1/crews?workspace_id=${workspaceId}`)
+      apiFetch(`/api/v1/crews?workspace_id=${workspaceId}`)
         .then((res) => res.json())
         .then((data: Team[]) => setTeams(Array.isArray(data) ? data : []))
         .catch(() => setTeams([]))
@@ -145,7 +146,7 @@ export function AddCredentialDialog({
     setTestResult(null)
     setError("")
     try {
-      const res = await fetch(`/api/v1/credentials/test`, {
+      const res = await apiFetch(`/api/v1/credentials/test`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ provider, type, value: value.trim() }),
@@ -217,7 +218,7 @@ export function AddCredentialDialog({
       if (accountLabel.trim()) body.account_label = accountLabel.trim()
       if (scope === "CREW") body.crew_ids = crewIds
 
-      const res = await fetch(`/api/v1/credentials?workspace_id=${workspaceId}`, {
+      const res = await apiFetch(`/api/v1/credentials?workspace_id=${workspaceId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),

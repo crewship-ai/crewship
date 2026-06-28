@@ -95,7 +95,7 @@ describe("use-backups", () => {
       })
       await waitFor(() => expect(result.current.isSuccess).toBe(true))
 
-      expect(mockFetch).toHaveBeenCalledWith("/api/v1/admin/backups?workspace_id=ws-1")
+      expect(mockFetch).toHaveBeenCalledWith("/api/v1/admin/backups?workspace_id=ws-1", expect.objectContaining({ credentials: "include" }))
       expect(result.current.data).toEqual([{ path: "/a", file_name: "a.tar.zst" }])
     })
 
@@ -177,6 +177,7 @@ describe("use-backups", () => {
       await waitFor(() => expect(result.current.isSuccess).toBe(true))
       expect(mockFetch).toHaveBeenCalledWith(
         "/api/v1/admin/backups/status?workspace_id=ws-1",
+        expect.objectContaining({ credentials: "include" }),
       )
       expect(result.current.data?.held).toBe(false)
     })
