@@ -122,11 +122,13 @@ func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) 
 	// escalation row or emitted to the journal — even on the fallback path where
 	// no pending row was created (e.g. name collision, no workspace owner).
 	var credentialID interface{}
+	var credentialName string
 	if escalationType == "CREDENTIAL" {
 		if proposal, ok := parseCredentialProposal(body.Metadata); ok {
 			cid, created := h.createPendingCredential(r.Context(), body.WorkspaceID, fromAgentID, proposal)
 			if created {
 				credentialID = cid
+				credentialName = proposal.Name
 			}
 			body.Metadata = proposal.redactedMetadata(cid)
 		} else if metadataCarriesValue(body.Metadata) {
@@ -179,12 +181,18 @@ func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) 
 		inboxPayload["has_pending_credential"] = true
 		inboxPayload["credential_id"] = cid
 	}
+	// A credential proposal reads more naturally in the inbox as a credential
+	// approval than as a generic "Agent escalation".
+	inboxTitle := fmt.Sprintf("Agent escalation: %s", truncate(body.Reason, 80))
+	if credentialName != "" {
+		inboxTitle = fmt.Sprintf("Credential approval: %s", credentialName)
+	}
 	inbox.Insert(r.Context(), h.db, h.logger, inbox.Item{
 		WorkspaceID: body.WorkspaceID,
 		Kind:        "escalation",
 		SourceID:    escalationID,
 		TargetRole:  "MANAGER",
-		Title:       fmt.Sprintf("Agent escalation: %s", truncate(body.Reason, 80)),
+		Title:       inboxTitle,
 		BodyMD:      body.Context,
 		SenderType:  "agent",
 		SenderID:    fromAgentID,
