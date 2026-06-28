@@ -378,22 +378,25 @@ export function OrchestrationLayout({
   }, [missions, selectedMissionId, selectedIssue])
 
   // Bottom-drawer context for the shared dock tabs (Activity / Runs /
-  // Changes / Comments). Built only when an issue with an identifier is in
-  // focus — the issue endpoints resolve by crew_id + identifier.
+  // Changes / Comments). Prefer `selectedIssue` (the fully-loaded issue
+  // detail — always has crew_id + identifier) over `selectedMission`, which
+  // is resolved via missions.find() against the limit-50 list and is null
+  // whenever the issue isn't in that page (or the list row omits crew_id).
+  // That mismatch left every issue tab stuck on "Select an issue…" even with
+  // an issue open. crew_id + identifier are required — the issue
+  // sub-resource routes are nested under the crew and keyed by identifier.
   const missionCtx = useMemo<BottomPanelContext>(() => {
-    // crew_id + identifier are both required — the issue sub-resource routes
-    // are nested under the crew and keyed by identifier. Without crew_id the
-    // tabs would hit /api/v1/crews/undefined/...
-    if (!selectedMission || !selectedMission.identifier || !selectedMission.crew_id) return null
+    const m = selectedIssue ?? selectedMission
+    if (!m || !m.identifier || !m.crew_id) return null
     return {
       kind: "mission",
-      missionId: selectedMission.id,
-      identifier: selectedMission.identifier,
-      title: selectedMission.title,
-      crewId: selectedMission.crew_id,
-      crewSlug: selectedMission.crew_slug ?? selectedMission.crew_id,
+      missionId: m.id,
+      identifier: m.identifier,
+      title: m.title,
+      crewId: m.crew_id,
+      crewSlug: m.crew_slug ?? m.crew_id,
     }
-  }, [selectedMission])
+  }, [selectedIssue, selectedMission])
 
   // selectedIssue / selectedProject take over the middle pane (same
   // pattern as /routines). When set, the board/list is hidden and the
@@ -1122,7 +1125,7 @@ export function OrchestrationLayout({
 
                 {drawerTab === "spec" && (
                   <MissionYamlEditor
-                    mission={selectedMission}
+                    mission={selectedIssue ?? selectedMission}
                     readOnly
                   />
                 )}
