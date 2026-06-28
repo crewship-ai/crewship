@@ -95,7 +95,8 @@ The Inbox has full CLI parity — everything the web surface exposes is scriptab
 
 | Command | What it does |
 |---------|--------------|
-| `crewship inbox list` | Show unread items (default). `--state all\|read\|resolved`, `--kind waitpoint\|escalation\|failed_run\|message`, `--limit`, `--format json\|yaml\|quiet`. |
+| `crewship inbox list` | Show unread items (default). `--state all\|read\|resolved`, `--kind waitpoint\|escalation\|failed_run\|message`, `--limit`, `--format json\|yaml\|quiet`. JSON now includes `payload` + `sender_type`. |
+| `crewship inbox get <id>` | Show one item with its full markdown body **and** the structured Context (payload) — the read counterpart of the web detail pane. `--format json` for scripting. |
 | `crewship inbox read <id>` | Mark an item as read. |
 | `crewship inbox unread <id>` | Flip back to unread (also the way to **restore** an archived item). |
 | `crewship inbox resolve <id>` | Mark resolved. Optional `--action approved\|denied\|retried\|cancelled\|acknowledged\|dismissed` to record the decision shape. |

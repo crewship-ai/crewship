@@ -634,3 +634,57 @@ func TestInboxHandler_BulkPatchState_Validation(t *testing.T) {
 		t.Errorf("over cap: code = %d, want 400", code)
 	}
 }
+
+// TestInboxHandler_Get covers the single-item read endpoint: a visible
+// item returns its full body + parsed payload; a cross-user item or an
+// unknown id 404s (same visibility contract as List/PatchState).
+func TestInboxHandler_Get(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	h := NewInboxHandler(db, newTestLogger(), nil)
+
+	otherUser := "user-other-" + fmt.Sprint(time.Now().UnixNano())
+	if _, err := db.Exec(`INSERT INTO users (id, email, full_name) VALUES (?, ?, 'Other')`,
+		otherUser, otherUser+"@example.com"); err != nil {
+		t.Fatalf("seed other user: %v", err)
+	}
+
+	now := time.Now().UTC()
+	seedInboxItem(t, h, wsID, "get-mine", "message", "unread", "", "", "for the workspace", now)
+	seedInboxItem(t, h, wsID, "get-theirs", "message", "unread", otherUser, "", "not for me", now)
+
+	get := func(id string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest("GET", "/api/v1/inbox/"+id, nil)
+		req.SetPathValue("id", id)
+		req = withWorkspaceUser(req, userID, wsID, "OWNER")
+		rr := httptest.NewRecorder()
+		h.Get(rr, req)
+		return rr
+	}
+
+	// Visible item → 200 with full body + parsed payload.
+	rr := get("get-mine")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("get visible: code = %d body=%s", rr.Code, rr.Body.String())
+	}
+	var item inboxItemResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &item); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if item.ID != "get-mine" || item.Title != "for the workspace" {
+		t.Errorf("unexpected item: %+v", item)
+	}
+	if item.Payload["k"] != "v" {
+		t.Errorf("payload not parsed: %+v", item.Payload)
+	}
+
+	// Cross-user item → 404 (visibility, not a leak).
+	if rr := get("get-theirs"); rr.Code != http.StatusNotFound {
+		t.Errorf("get cross-user: code = %d, want 404", rr.Code)
+	}
+	// Unknown id → 404.
+	if rr := get("nope"); rr.Code != http.StatusNotFound {
+		t.Errorf("get unknown: code = %d, want 404", rr.Code)
+	}
+}

@@ -228,6 +228,7 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	ih := NewInboxHandler(r.db, r.logger, r.hub)
 	r.mux.Handle("GET /api/v1/inbox", authed(wsCtx(http.HandlerFunc(ih.List))))
 	r.mux.Handle("GET /api/v1/inbox/count", authed(wsCtx(http.HandlerFunc(ih.UnreadCount))))
+	r.mux.Handle("GET /api/v1/inbox/{id}", authed(wsCtx(http.HandlerFunc(ih.Get))))
 	r.mux.Handle("PATCH /api/v1/inbox/{id}", authed(wsCtx(http.HandlerFunc(ih.PatchState))))
 	// Bulk state transition — the tree-grouped UI's "resolve all under
 	// this routine / crew" action. POST so the body can carry the id list.

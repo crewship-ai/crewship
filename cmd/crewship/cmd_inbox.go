@@ -47,9 +47,11 @@ Examples:
 
 Status:
   list      — live (GET /api/v1/inbox)
+  get       — live (GET /api/v1/inbox/{id})
   read      — live (PATCH /api/v1/inbox/{id} state=read)
   unread    — live (PATCH /api/v1/inbox/{id} state=unread)
-  resolve   — live (PATCH /api/v1/inbox/{id} state=resolved)`,
+  resolve   — live (PATCH /api/v1/inbox/{id} state=resolved)
+  archive   — live (PATCH /api/v1/inbox/{id} state=resolved action=archived)`,
 }
 
 var inboxListCmd = &cobra.Command{
@@ -93,17 +95,19 @@ var inboxListCmd = &cobra.Command{
 
 		var body struct {
 			Rows []struct {
-				ID             string `json:"id"`
-				Kind           string `json:"kind"`
-				SourceID       string `json:"source_id"`
-				Title          string `json:"title"`
-				BodyMD         string `json:"body_md"`
-				SenderName     string `json:"sender_name"`
-				State          string `json:"state"`
-				Priority       string `json:"priority"`
-				Blocking       bool   `json:"blocking"`
-				CreatedAt      string `json:"created_at"`
-				ResolvedAction string `json:"resolved_action"`
+				ID             string                 `json:"id"`
+				Kind           string                 `json:"kind"`
+				SourceID       string                 `json:"source_id"`
+				Title          string                 `json:"title"`
+				BodyMD         string                 `json:"body_md"`
+				SenderType     string                 `json:"sender_type"`
+				SenderName     string                 `json:"sender_name"`
+				State          string                 `json:"state"`
+				Priority       string                 `json:"priority"`
+				Blocking       bool                   `json:"blocking"`
+				Payload        map[string]interface{} `json:"payload"`
+				CreatedAt      string                 `json:"created_at"`
+				ResolvedAction string                 `json:"resolved_action"`
 			} `json:"rows"`
 			Count       int `json:"count"`
 			UnreadCount int `json:"unread_count"`
@@ -206,6 +210,97 @@ Examples:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		action, _ := cmd.Flags().GetString("action")
 		return patchInboxState(args[0], "resolved", action)
+	},
+}
+
+// inboxGetCmd is the read-detail counterpart of `inbox list`: it fetches
+// ONE item with its full body + payload (the context the list view
+// omits), giving the CLI parity with the web detail pane. An agent
+// triaging via CLI uses this to read the change plan / escalation context
+// before deciding. Backed by GET /api/v1/inbox/{id}.
+var inboxGetCmd = &cobra.Command{
+	Use:   "get <id>",
+	Short: "Show a single inbox item with its full body and context",
+	Long: `Fetch one inbox item by id, including its markdown body and the
+structured payload (Context) that 'inbox list' leaves out. This is the
+CLI counterpart of the web detail pane.
+
+Examples:
+  crewship inbox get <id>
+  crewship inbox get <id> --format json | jq .payload`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+		client := newAPIClient()
+		path := "/api/v1/inbox/" + url.PathEscape(args[0]) +
+			"?workspace_id=" + url.QueryEscape(cli.ResolveWorkspace(flagWorkspace, cliCfg))
+		resp, err := client.Get(path)
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+
+		var item struct {
+			ID             string                 `json:"id"`
+			Kind           string                 `json:"kind"`
+			SourceID       string                 `json:"source_id"`
+			Title          string                 `json:"title"`
+			BodyMD         string                 `json:"body_md"`
+			SenderType     string                 `json:"sender_type"`
+			SenderName     string                 `json:"sender_name"`
+			State          string                 `json:"state"`
+			Priority       string                 `json:"priority"`
+			Blocking       bool                   `json:"blocking"`
+			ResolvedAction string                 `json:"resolved_action"`
+			CreatedAt      string                 `json:"created_at"`
+			Payload        map[string]interface{} `json:"payload"`
+		}
+		if err := cli.ReadJSON(resp, &item); err != nil {
+			return err
+		}
+
+		f := newFormatter()
+		if f.Format == "json" {
+			return f.JSON(item)
+		}
+		if f.Format == "yaml" {
+			return f.YAML(item)
+		}
+		if f.Format == "quiet" {
+			return nil
+		}
+
+		// Human detail view.
+		fmt.Printf("%s%s%s\n", cli.Bold, item.Title, cli.Reset)
+		fmt.Printf("%s%s · %s · %s%s\n", cli.Dim, item.Kind, item.State, item.Priority, cli.Reset)
+		from := item.SenderName
+		if from == "" {
+			from = item.SenderType
+		}
+		if from != "" {
+			fmt.Printf("%sfrom %s%s\n", cli.Dim, from, cli.Reset)
+		}
+		fmt.Printf("%sid %s%s\n", cli.Dim, item.ID, cli.Reset)
+		if item.ResolvedAction != "" {
+			fmt.Printf("%sresolved · %s%s\n", cli.Green, item.ResolvedAction, cli.Reset)
+		}
+		if item.BodyMD != "" {
+			fmt.Printf("\n%s\n", item.BodyMD)
+		}
+		if len(item.Payload) > 0 {
+			fmt.Printf("\n%sContext:%s\n", cli.Bold, cli.Reset)
+			for k, v := range item.Payload {
+				fmt.Printf("  %s%-18s%s %v\n", cli.Dim, k, cli.Reset, v)
+			}
+		}
+		return nil
 	},
 }
 
@@ -475,6 +570,7 @@ func init() {
 	inboxCmd.AddCommand(inboxListCmd)
 	inboxCmd.AddCommand(inboxReadCmd)
 	inboxCmd.AddCommand(inboxUnreadCmd)
+	inboxCmd.AddCommand(inboxGetCmd)
 	inboxCmd.AddCommand(inboxResolveCmd)
 	inboxCmd.AddCommand(inboxArchiveCmd)
 	inboxCmd.AddCommand(inboxCountCmd)
