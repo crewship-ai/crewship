@@ -384,6 +384,7 @@ func (e *Executor) executeOneStep(
 		Inputs:      inputsForCtx,
 		StepOutputs: outputsSnap,
 		Env:         renderEnv,
+		Metadata:    parseRunMetadata(in.MetadataJSON),
 	}
 	renderedPrompt := Render(step.Prompt, ctxRender)
 

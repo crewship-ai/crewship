@@ -2,8 +2,23 @@ package pipeline
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 )
+
+// parseRunMetadata decodes a run's metadata_json into a map for
+// {{ run.metadata.x }} templating. Empty/invalid → nil (lookups miss
+// cleanly).
+func parseRunMetadata(s string) map[string]any {
+	if s == "" || s == "{}" {
+		return nil
+	}
+	var m map[string]any
+	if err := json.Unmarshal([]byte(s), &m); err != nil {
+		return nil
+	}
+	return m
+}
 
 // runRoutineHook executes a single lifecycle hook step (Wave 4.1). Hooks
 // are deterministic side-channels: only code | http | transform are

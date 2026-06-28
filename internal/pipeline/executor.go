@@ -867,6 +867,7 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (result *
 			Inputs:      inputsForCtx,
 			StepOutputs: result.StepOutputs,
 			Env:         renderEnv,
+			Metadata:    parseRunMetadata(in.MetadataJSON),
 		}
 		renderedPrompt := Render(step.Prompt, ctxRender)
 

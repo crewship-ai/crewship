@@ -28,6 +28,8 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/run_batch", authed(wsCtx(http.HandlerFunc(pipes.RunBatch))))
 	// Per-step prompt/model override layer (v121) — tweak a step without
 	// bumping the routine version.
+	r.mux.Handle("PUT /api/v1/workspaces/{workspaceId}/pipelines/{slug}/tags", authed(wsCtx(http.HandlerFunc(pipes.AddPipelineTags))))
+	r.mux.Handle("DELETE /api/v1/workspaces/{workspaceId}/pipelines/{slug}/tags/{tag}", authed(wsCtx(http.HandlerFunc(pipes.RemovePipelineTag))))
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/overrides", authed(wsCtx(http.HandlerFunc(pipes.ListStepOverrides))))
 	r.mux.Handle("PUT /api/v1/workspaces/{workspaceId}/pipelines/{slug}/steps/{stepId}/override", authed(wsCtx(http.HandlerFunc(pipes.SetStepOverride))))
 	r.mux.Handle("DELETE /api/v1/workspaces/{workspaceId}/pipelines/{slug}/steps/{stepId}/override", authed(wsCtx(http.HandlerFunc(pipes.DeleteStepOverride))))
@@ -81,6 +83,8 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	// because it spans every pipeline.
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipeline-runs", authed(wsCtx(http.HandlerFunc(pipes.ListWorkspaceRuns))))
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}", authed(wsCtx(http.HandlerFunc(pipes.GetRun))))
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/tree", authed(wsCtx(http.HandlerFunc(pipes.GetRunTree))))
+	r.mux.Handle("PATCH /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/metadata", authed(wsCtx(http.HandlerFunc(pipes.UpdateRunMetadata))))
 	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/runs/{runId}/cancel", authed(wsCtx(http.HandlerFunc(pipes.CancelRun))))
 	// Observability (trigger.dev-informed): replay a failed run with its
 	// original inputs, bulk-replay a fingerprint group, and list failures

@@ -3,7 +3,10 @@ package pipeline
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"regexp"
 	"strings"
 )
@@ -91,6 +94,80 @@ func (s *RunStore) TagsFor(ctx context.Context, runID string) ([]string, error) 
 	return out, rows.Err()
 }
 
+// MetadataOps is a batch of run-metadata mutations (trigger.dev
+// set/increment/append parity). Applied read-modify-write under the
+// row's update; nil/empty maps are skipped.
+type MetadataOps struct {
+	Set       map[string]any `json:"set,omitempty"`
+	Increment map[string]any `json:"increment,omitempty"`
+	Append    map[string]any `json:"append,omitempty"`
+}
+
+// UpdateMetadata applies ops to a run's metadata_json and returns the
+// merged object. Increment adds to a numeric key (creating it at 0);
+// Append pushes onto an array key (creating it empty). Workspace-scoped.
+func (s *RunStore) UpdateMetadata(ctx context.Context, workspaceID, runID string, ops MetadataOps) (map[string]any, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback() //nolint:errcheck // best-effort; commit precedes on success
+
+	var raw string
+	err = tx.QueryRowContext(ctx,
+		`SELECT COALESCE(metadata_json,'{}') FROM pipeline_runs WHERE id = ? AND workspace_id = ?`,
+		runID, workspaceID).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrRunNotFoundInStore
+	}
+	if err != nil {
+		return nil, err
+	}
+	md := map[string]any{}
+	_ = json.Unmarshal([]byte(raw), &md)
+
+	for k, v := range ops.Set {
+		md[k] = v
+	}
+	for k, v := range ops.Increment {
+		md[k] = toFloat(md[k]) + toFloat(v)
+	}
+	for k, v := range ops.Append {
+		arr, _ := md[k].([]any)
+		md[k] = append(arr, v)
+	}
+
+	out, err := json.Marshal(md)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE pipeline_runs SET metadata_json = ?, updated_at = datetime('now','subsec') WHERE id = ? AND workspace_id = ?`,
+		string(out), runID, workspaceID); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return md, nil
+}
+
+// toFloat coerces a JSON-decoded numeric (float64 or json.Number) to
+// float64 for the increment op; non-numerics count as 0.
+func toFloat(v any) float64 {
+	switch t := v.(type) {
+	case float64:
+		return t
+	case int64:
+		return float64(t)
+	case json.Number:
+		f, _ := t.Float64()
+		return f
+	default:
+		return 0
+	}
+}
+
 // ListByTag returns a pipeline's runs carrying a given tag, newest
 // first. Backs `routine records --tag` (and batch retrieval via the
 // synthetic batch:<id> tag). Reuses runSelectColumns so the rows scan
@@ -114,6 +191,56 @@ LIMIT ?`, normalizeTag(tag), pipelineID, limit)
 			return nil, err
 		}
 		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// RunTreeNode is one run in a parent/child run tree (call_pipeline /
+// deferred / replay parentage via triggered_by_id).
+type RunTreeNode struct {
+	ID           string `json:"id"`
+	ParentID     string `json:"parent_id,omitempty"`
+	PipelineSlug string `json:"pipeline_slug"`
+	Status       string `json:"status"`
+	TriggeredVia string `json:"triggered_via"`
+	CostUSD      float64
+}
+
+// RunTree returns the root run plus all descendants (runs whose
+// triggered_by_id chains back to root), via a recursive CTE. Flat,
+// newest-first within a depth; the caller nests by ParentID. Capped at
+// 500 nodes so a pathological fan-out can't blow up the response.
+func (s *RunStore) RunTree(ctx context.Context, workspaceID, rootID string) ([]RunTreeNode, error) {
+	rows, err := s.db.QueryContext(ctx, `
+WITH RECURSIVE tree(id) AS (
+    SELECT id FROM pipeline_runs WHERE id = ? AND workspace_id = ?
+    UNION
+    SELECT r.id FROM pipeline_runs r JOIN tree t ON r.triggered_by_id = t.id
+    WHERE r.workspace_id = ?
+)
+SELECT r.id, COALESCE(r.triggered_by_id,''), COALESCE(r.pipeline_slug,''),
+       COALESCE(r.status,''), COALESCE(r.triggered_via,''), COALESCE(r.cost_usd,0)
+FROM pipeline_runs r JOIN tree t ON r.id = t.id
+WHERE r.workspace_id = ?
+ORDER BY r.started_at ASC
+LIMIT 500`, rootID, workspaceID, workspaceID, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []RunTreeNode
+	for rows.Next() {
+		var n RunTreeNode
+		if err := rows.Scan(&n.ID, &n.ParentID, &n.PipelineSlug, &n.Status, &n.TriggeredVia, &n.CostUSD); err != nil {
+			return nil, err
+		}
+		// The root's own triggered_by_id points outside the tree (a
+		// schedule/webhook/pending id, not a run) — blank it so the
+		// caller treats it as the root.
+		if n.ID == rootID {
+			n.ParentID = ""
+		}
+		out = append(out, n)
 	}
 	return out, rows.Err()
 }

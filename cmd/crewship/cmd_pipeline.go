@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"text/tabwriter"
@@ -106,6 +107,13 @@ var pipelineListCmd = &cobra.Command{
 		path := fmt.Sprintf("/api/v1/workspaces/%s/pipelines", ws)
 		if order, _ := cmd.Flags().GetString("order"); order != "" {
 			path += "?order=" + order
+		}
+		if tag, _ := cmd.Flags().GetString("tag"); tag != "" {
+			sep := "?"
+			if strings.Contains(path, "?") {
+				sep = "&"
+			}
+			path += sep + "tag=" + url.QueryEscape(tag)
 		}
 		resp, err := client.Get(path)
 		if err != nil {
@@ -813,6 +821,7 @@ func indent(s, prefix string) string {
 
 func init() {
 	pipelineListCmd.Flags().String("order", "popularity", "sort order: popularity | recent | name")
+	pipelineListCmd.Flags().String("tag", "", "filter routines by definition tag (cross-crew discovery)")
 	pipelineGetCmd.Flags().StringP("format", "f", "human", "output format: human | json")
 	pipelineRunsCmd.Flags().Int("limit", 20, "max number of run entries to return (1-500)")
 

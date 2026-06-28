@@ -46,8 +46,22 @@ func (h *PipelineHandler) List(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusInternalServerError, "list pipelines")
 		return
 	}
+	// Routine-definition tag filter (v123): browse routines by tag for
+	// cross-crew discovery. Best-effort — a tag-store error degrades to
+	// the unfiltered list rather than failing.
+	var tagSet map[string]struct{}
+	if tag := q.Get("tag"); tag != "" && h.db != nil {
+		if ids, terr := pipeline.NewPipelineTagStore(h.db).PipelineIDsByTag(r.Context(), workspaceID, tag); terr == nil {
+			tagSet = ids
+		}
+	}
 	out := make([]pipelineResponse, 0, len(rows))
 	for _, p := range rows {
+		if tagSet != nil {
+			if _, ok := tagSet[p.ID]; !ok {
+				continue
+			}
+		}
 		out = append(out, toPipelineResponse(p, false))
 	}
 	// Enrich the list with two cross-cutting bits:

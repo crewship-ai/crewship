@@ -1486,6 +1486,11 @@ END;
 	// in-process dispatcher fires due rows priority-first and expires
 	// past-ttl rows. See migrate_consts_v122_pending_runs.go.
 	{version: 122, name: "pending_runs", sql: migrationPendingRuns},
+
+	// v123: routine-DEFINITION tags for cross-crew discovery (browse
+	// routines by tag, independent of runs). See
+	// migrate_consts_v123_pipeline_tags.go.
+	{version: 123, name: "pipeline_tags", sql: migrationPipelineTags},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

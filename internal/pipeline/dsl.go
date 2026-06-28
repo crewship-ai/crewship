@@ -462,6 +462,7 @@ type RenderContext struct {
 	Inputs      map[string]any
 	StepOutputs map[string]string // step_id → output (raw string from agent)
 	Env         map[string]string // safe env keys only — author_crew_name, run_id, etc.
+	Metadata    map[string]any    // run metadata scratchpad — {{ run.metadata.x }}
 }
 
 // resolveRef walks one template body (already trimmed of {{ }}) against
@@ -510,6 +511,19 @@ func resolveRef(ref string, ctx RenderContext) (string, bool) {
 		return "", false
 	case "env":
 		if v, ok := ctx.Env[parts[1]]; ok {
+			return v, true
+		}
+		return "", false
+	case "run":
+		// run.metadata.<key> reads the run's metadata scratchpad;
+		// run.is_replay / run.replay_of mirror the env signals.
+		if parts[1] == "metadata" && len(parts) == 3 {
+			if v, ok := ctx.Metadata[parts[2]]; ok {
+				return stringify(v), true
+			}
+			return "", false
+		}
+		if v, ok := ctx.Env[parts[1]]; ok { // is_replay, replay_of, run_id
 			return v, true
 		}
 		return "", false
