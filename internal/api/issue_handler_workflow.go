@@ -44,8 +44,7 @@ func (h *IssueHandler) Review(w http.ResponseWriter, r *http.Request) {
 			writeProblem(w, r, http.StatusNotFound, "Issue not found")
 			return
 		}
-		h.logger.Error("review: load issue", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "review: load issue", err)
 		return
 	}
 
@@ -62,8 +61,7 @@ func (h *IssueHandler) Review(w http.ResponseWriter, r *http.Request) {
 			`UPDATE missions SET status = 'DONE', completed_at = ?, updated_at = ? WHERE id = ?`,
 			now, now, missionID)
 		if err != nil {
-			h.logger.Error("review: approve", "error", err)
-			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			internalError(w, r, h.logger, "review: approve", err)
 			return
 		}
 
@@ -100,8 +98,7 @@ func (h *IssueHandler) Review(w http.ResponseWriter, r *http.Request) {
 		query, args := ub.Build("missions", "id = ?", missionID)
 		_, err = h.db.ExecContext(r.Context(), query, args...)
 		if err != nil {
-			h.logger.Error("review: request_changes", "error", err)
-			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			internalError(w, r, h.logger, "review: request_changes", err)
 			return
 		}
 
@@ -146,8 +143,7 @@ func (h *IssueHandler) ListActivity(w http.ResponseWriter, r *http.Request) {
 		ORDER BY a.created_at DESC
 		LIMIT 50`, missionID)
 	if err != nil {
-		h.logger.Error("list activity", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "list activity", err)
 		return
 	}
 	defer rows.Close()
@@ -190,8 +186,7 @@ func (h *IssueHandler) Start(w http.ResponseWriter, r *http.Request) {
 			writeProblem(w, r, http.StatusNotFound, "Issue not found")
 			return
 		}
-		h.logger.Error("start issue: load", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "start issue: load", err)
 		return
 	}
 
@@ -270,8 +265,7 @@ func (h *IssueHandler) Start(w http.ResponseWriter, r *http.Request) {
 		UPDATE missions SET status = 'IN_PROGRESS', updated_at = ? WHERE id = ? AND status IN ('BACKLOG', 'TODO')`,
 		now, missionID)
 	if err != nil {
-		h.logger.Error("start issue: update status", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "start issue: update status", err)
 		return
 	}
 	n, _ := res.RowsAffected()
@@ -316,8 +310,7 @@ func (h *IssueHandler) Stop(w http.ResponseWriter, r *http.Request) {
 			writeProblem(w, r, http.StatusNotFound, "Issue not found")
 			return
 		}
-		h.logger.Error("stop issue: load", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "stop issue: load", err)
 		return
 	}
 
@@ -338,8 +331,7 @@ func (h *IssueHandler) Stop(w http.ResponseWriter, r *http.Request) {
 		UPDATE missions SET status = 'CANCELLED', completed_at = ?, updated_at = ? WHERE id = ?`,
 		now, now, missionID)
 	if err != nil {
-		h.logger.Error("stop issue: update", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "stop issue: update", err)
 		return
 	}
 

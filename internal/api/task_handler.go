@@ -37,8 +37,7 @@ func (h *MissionHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 			writeProblem(w, r, http.StatusNotFound, "Mission not found")
 			return
 		}
-		h.logger.Error("get mission for task creation", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "get mission for task creation", err)
 		return
 	}
 	if missionStatus != "PLANNING" && missionStatus != "IN_PROGRESS" {
@@ -86,8 +85,7 @@ func (h *MissionHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 		depRows, depErr := h.db.QueryContext(r.Context(),
 			`SELECT id, status FROM mission_tasks WHERE mission_id = ? AND id IN (`+sqlPlaceholders(len(req.DependsOn))+`)`, args...)
 		if depErr != nil {
-			h.logger.Error("lookup dependency tasks", "error", depErr)
-			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			internalError(w, r, h.logger, "lookup dependency tasks", depErr)
 			return
 		}
 		depStatuses := make(map[string]string, len(req.DependsOn))
@@ -95,8 +93,7 @@ func (h *MissionHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 			var id, st string
 			if err := depRows.Scan(&id, &st); err != nil {
 				depRows.Close()
-				h.logger.Error("scan dependency task", "error", err)
-				writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+				internalError(w, r, h.logger, "scan dependency task", err)
 				return
 			}
 			depStatuses[id] = st
@@ -127,8 +124,7 @@ func (h *MissionHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, missionID, req.AssignedAgentID, req.Title, req.Description, status, req.TaskOrder, dependsOnJSON, req.MaxIterations, now, now)
 	if err != nil {
-		h.logger.Error("create mission task", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "create mission task", err)
 		return
 	}
 
@@ -348,8 +344,7 @@ func (h *MissionHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
-		h.logger.Error("begin transaction", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "begin transaction", err)
 		return
 	}
 	defer tx.Rollback() //nolint:errcheck
@@ -366,8 +361,7 @@ func (h *MissionHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 			writeProblem(w, r, http.StatusNotFound, "Task not found")
 			return
 		}
-		h.logger.Error("get task for update", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "get task for update", err)
 		return
 	}
 
@@ -390,8 +384,7 @@ func (h *MissionHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if err := h.applyTaskStatus(r.Context(), tx, taskID, missionID, currentStatus, *req.Status, now); err != nil {
-			h.logger.Error("update task status", "error", err)
-			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			internalError(w, r, h.logger, "update task status", err)
 			return
 		}
 
@@ -406,14 +399,12 @@ func (h *MissionHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 
 	// Apply result/metadata fields
 	if err := h.applyTaskMetadataFields(r.Context(), tx, &req, taskID); err != nil {
-		h.logger.Error("update task metadata", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "update task metadata", err)
 		return
 	}
 
 	if err = tx.Commit(); err != nil {
-		h.logger.Error("commit task update", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "commit task update", err)
 		return
 	}
 
@@ -442,8 +433,7 @@ func (h *MissionHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 			writeProblem(w, r, http.StatusNotFound, "Task not found")
 			return
 		}
-		h.logger.Error("read updated task", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "read updated task", err)
 		return
 	}
 

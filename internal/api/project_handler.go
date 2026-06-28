@@ -95,8 +95,7 @@ func (h *ProjectHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := h.db.QueryContext(r.Context(), query, args...)
 	if err != nil {
-		h.logger.Error("list projects", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "list projects", err)
 		return
 	}
 	defer rows.Close()
@@ -111,8 +110,7 @@ func (h *ProjectHandler) List(w http.ResponseWriter, r *http.Request) {
 			&p.StartDate, &p.TargetDate, &p.CreatedAt, &p.UpdatedAt,
 			&p.IssueCount, &p.DoneCount,
 		); err != nil {
-			h.logger.Error("scan project", "error", err)
-			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			internalError(w, r, h.logger, "scan project", err)
 			return
 		}
 		if p.IssueCount > 0 {
@@ -121,8 +119,7 @@ func (h *ProjectHandler) List(w http.ResponseWriter, r *http.Request) {
 		result = append(result, p)
 	}
 	if err := rows.Err(); err != nil {
-		h.logger.Error("rows iteration (projects)", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "rows iteration (projects)", err)
 		return
 	}
 
@@ -184,8 +181,7 @@ func (h *ProjectHandler) Create(w http.ResponseWriter, r *http.Request) {
 		req.Status, req.Priority, req.LeadType, req.LeadID,
 		req.StartDate, req.TargetDate, now, now)
 	if err != nil {
-		h.logger.Error("insert project", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "insert project", err)
 		return
 	}
 
@@ -248,8 +244,7 @@ func (h *ProjectHandler) Get(w http.ResponseWriter, r *http.Request) {
 			writeProblem(w, r, http.StatusNotFound, "Project not found")
 			return
 		}
-		h.logger.Error("get project", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "get project", err)
 		return
 	}
 
@@ -273,8 +268,7 @@ func (h *ProjectHandler) Update(w http.ResponseWriter, r *http.Request) {
 	// Verify project exists
 	found, err := projectExists(r.Context(), h.db, projectID, wsID)
 	if err != nil {
-		h.logger.Error("get project for update", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "get project for update", err)
 		return
 	}
 	if !found {
@@ -344,8 +338,7 @@ func (h *ProjectHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 	query, args := ub.Build("projects", "id = ? AND workspace_id = ?", projectID, wsID)
 	if _, err := h.db.ExecContext(r.Context(), query, args...); err != nil {
-		h.logger.Error("update project", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "update project", err)
 		return
 	}
 
@@ -373,8 +366,7 @@ func (h *ProjectHandler) Update(w http.ResponseWriter, r *http.Request) {
 		&p.IssueCount, &p.DoneCount,
 	)
 	if err != nil {
-		h.logger.Error("read updated project", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "read updated project", err)
 		return
 	}
 	if p.IssueCount > 0 {
@@ -396,8 +388,7 @@ func (h *ProjectHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
-		h.logger.Error("begin tx", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "begin tx", err)
 		return
 	}
 	defer tx.Rollback() //nolint:errcheck
@@ -406,8 +397,7 @@ func (h *ProjectHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	_, err = tx.ExecContext(r.Context(),
 		`UPDATE missions SET project_id = NULL WHERE project_id = ?`, projectID)
 	if err != nil {
-		h.logger.Error("unlink missions from project", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "unlink missions from project", err)
 		return
 	}
 
@@ -415,14 +405,12 @@ func (h *ProjectHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	res, err := tx.ExecContext(r.Context(),
 		`DELETE FROM projects WHERE id = ? AND workspace_id = ?`, projectID, wsID)
 	if err != nil {
-		h.logger.Error("delete project", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "delete project", err)
 		return
 	}
 	affected, err := res.RowsAffected()
 	if err != nil {
-		h.logger.Error("delete project rows affected", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "delete project rows affected", err)
 		return
 	}
 	if affected == 0 {
@@ -431,8 +419,7 @@ func (h *ProjectHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := tx.Commit(); err != nil {
-		h.logger.Error("commit delete project", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "commit delete project", err)
 		return
 	}
 
@@ -449,8 +436,7 @@ func (h *ProjectHandler) Stats(w http.ResponseWriter, r *http.Request) {
 	// Verify project exists
 	found, err := projectExists(r.Context(), h.db, projectID, wsID)
 	if err != nil {
-		h.logger.Error("project exists check", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "project exists check", err)
 		return
 	}
 	if !found {

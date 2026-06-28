@@ -21,8 +21,7 @@ func (h *IssueHandler) ListComments(w http.ResponseWriter, r *http.Request) {
 			writeProblem(w, r, http.StatusNotFound, "Issue not found")
 			return
 		}
-		h.logger.Error("resolve issue for comments", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "resolve issue for comments", err)
 		return
 	}
 
@@ -38,8 +37,7 @@ func (h *IssueHandler) ListComments(w http.ResponseWriter, r *http.Request) {
 		WHERE mc.mission_id = ?
 		ORDER BY mc.created_at ASC`, missionID)
 	if err != nil {
-		h.logger.Error("list comments", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "list comments", err)
 		return
 	}
 	defer rows.Close()
@@ -49,15 +47,13 @@ func (h *IssueHandler) ListComments(w http.ResponseWriter, r *http.Request) {
 		var c commentResponse
 		if err := rows.Scan(&c.ID, &c.MissionID, &c.AuthorType, &c.AuthorID,
 			&c.AuthorName, &c.Body, &c.CreatedAt, &c.UpdatedAt); err != nil {
-			h.logger.Error("scan comment", "error", err)
-			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			internalError(w, r, h.logger, "scan comment", err)
 			return
 		}
 		result = append(result, c)
 	}
 	if err := rows.Err(); err != nil {
-		h.logger.Error("rows iteration (comments)", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "rows iteration (comments)", err)
 		return
 	}
 
@@ -95,8 +91,7 @@ func (h *IssueHandler) CreateComment(w http.ResponseWriter, r *http.Request) {
 			writeProblem(w, r, http.StatusNotFound, "Issue not found")
 			return
 		}
-		h.logger.Error("resolve issue for comment creation", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "resolve issue for comment creation", err)
 		return
 	}
 
@@ -108,8 +103,7 @@ func (h *IssueHandler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		VALUES (?, ?, 'user', ?, ?, ?, ?)`,
 		id, missionID, user.ID, req.Body, now, now)
 	if err != nil {
-		h.logger.Error("create comment", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "create comment", err)
 		return
 	}
 

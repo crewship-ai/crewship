@@ -105,8 +105,7 @@ func (h *FeatureFlagHandler) List(w http.ResponseWriter, r *http.Request) {
 		  ON o.flag_id = f.id AND o.workspace_id = ?
 		ORDER BY f.key ASC`, wsID)
 	if err != nil {
-		h.logger.Error("list feature flags", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "list feature flags", err)
 		return
 	}
 	defer rows.Close()
@@ -122,8 +121,7 @@ func (h *FeatureFlagHandler) List(w http.ResponseWriter, r *http.Request) {
 			&ff.ID, &ff.Key, &ff.Description, &enabledInt, &ff.Percentage,
 			&ff.CreatedAt, &ff.UpdatedAt, &overrideNull,
 		); err != nil {
-			h.logger.Error("scan feature flag", "error", err)
-			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			internalError(w, r, h.logger, "scan feature flag", err)
 			return
 		}
 		ff.Enabled = enabledInt != 0
@@ -134,8 +132,7 @@ func (h *FeatureFlagHandler) List(w http.ResponseWriter, r *http.Request) {
 		result = append(result, ff)
 	}
 	if err := rows.Err(); err != nil {
-		h.logger.Error("rows iteration (feature flags)", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "rows iteration (feature flags)", err)
 		return
 	}
 
@@ -198,8 +195,7 @@ func (h *FeatureFlagHandler) Create(w http.ResponseWriter, r *http.Request) {
 			writeProblem(w, r, http.StatusConflict, "feature flag with this key already exists")
 			return
 		}
-		h.logger.Error("insert feature flag", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "insert feature flag", err)
 		return
 	}
 
@@ -245,8 +241,7 @@ func (h *FeatureFlagHandler) Update(w http.ResponseWriter, r *http.Request) {
 			writeProblem(w, r, http.StatusNotFound, "Feature flag not found")
 			return
 		}
-		h.logger.Error("get feature flag for update", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "get feature flag for update", err)
 		return
 	}
 
@@ -290,8 +285,7 @@ func (h *FeatureFlagHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 	query, args := ub.Build("feature_flags", "id = ?", id)
 	if _, err := h.db.ExecContext(r.Context(), query, args...); err != nil {
-		h.logger.Error("update feature flag", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "update feature flag", err)
 		return
 	}
 
@@ -319,8 +313,7 @@ func (h *FeatureFlagHandler) Update(w http.ResponseWriter, r *http.Request) {
 		&ff.CreatedAt, &ff.UpdatedAt, &overrideNull,
 	)
 	if err != nil {
-		h.logger.Error("read updated feature flag", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "read updated feature flag", err)
 		return
 	}
 	ff.Enabled = enabledInt != 0
@@ -351,14 +344,12 @@ func (h *FeatureFlagHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	res, err := h.db.ExecContext(r.Context(),
 		`DELETE FROM feature_flags WHERE key = ?`, key)
 	if err != nil {
-		h.logger.Error("delete feature flag", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "delete feature flag", err)
 		return
 	}
 	affected, err := res.RowsAffected()
 	if err != nil {
-		h.logger.Error("delete feature flag rows affected", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "delete feature flag rows affected", err)
 		return
 	}
 	if affected == 0 {
@@ -424,8 +415,7 @@ func (h *FeatureFlagHandler) UpsertOverride(w http.ResponseWriter, r *http.Reque
 			writeProblem(w, r, http.StatusNotFound, "Feature flag not found")
 			return
 		}
-		h.logger.Error("get feature flag for override", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "get feature flag for override", err)
 		return
 	}
 
@@ -444,8 +434,7 @@ func (h *FeatureFlagHandler) UpsertOverride(w http.ResponseWriter, r *http.Reque
 		ON CONFLICT(flag_id, workspace_id) DO UPDATE SET enabled = excluded.enabled`,
 		id, flagID, wsID, enabledInt, now)
 	if err != nil {
-		h.logger.Error("upsert feature flag override", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "upsert feature flag override", err)
 		return
 	}
 
@@ -489,8 +478,7 @@ func (h *FeatureFlagHandler) DeleteOverride(w http.ResponseWriter, r *http.Reque
 			writeProblem(w, r, http.StatusNotFound, "Feature flag not found")
 			return
 		}
-		h.logger.Error("get feature flag for delete override", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "get feature flag for delete override", err)
 		return
 	}
 
@@ -498,14 +486,12 @@ func (h *FeatureFlagHandler) DeleteOverride(w http.ResponseWriter, r *http.Reque
 		`DELETE FROM feature_flag_overrides WHERE flag_id = ? AND workspace_id = ?`,
 		flagID, wsID)
 	if err != nil {
-		h.logger.Error("delete feature flag override", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "delete feature flag override", err)
 		return
 	}
 	affected, err := res.RowsAffected()
 	if err != nil {
-		h.logger.Error("delete feature flag override rows affected", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "delete feature flag override rows affected", err)
 		return
 	}
 	if affected == 0 {

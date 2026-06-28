@@ -65,8 +65,7 @@ func (h *IssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
-		h.logger.Error("begin tx", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "begin tx", err)
 		return
 	}
 	defer tx.Rollback() //nolint:errcheck
@@ -82,8 +81,7 @@ func (h *IssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 			writeProblem(w, r, http.StatusNotFound, "Crew not found")
 			return
 		}
-		h.logger.Error("get crew for issue", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "get crew for issue", err)
 		return
 	}
 
@@ -106,8 +104,7 @@ func (h *IssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 		RETURNING next_number`,
 		crewID).Scan(&issueNumber)
 	if err != nil {
-		h.logger.Error("issue counter upsert", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "issue counter upsert", err)
 		return
 	}
 
@@ -123,8 +120,7 @@ func (h *IssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 			writeProblem(w, r, http.StatusBadRequest, "Crew has no lead agent")
 			return
 		}
-		h.logger.Error("find lead agent", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "find lead agent", err)
 		return
 	}
 
@@ -160,8 +156,7 @@ func (h *IssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 			`SELECT COUNT(*) FROM pipelines WHERE id = ? AND workspace_id = ?`,
 			*req.RoutineID, wsID).Scan(&exists)
 		if err != nil {
-			h.logger.Error("validate routine_id", "error", err)
-			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			internalError(w, r, h.logger, "validate routine_id", err)
 			return
 		}
 		if exists == 0 {
@@ -193,8 +188,7 @@ func (h *IssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 			`SELECT COUNT(*) FROM missions WHERE id = ? AND workspace_id = ?`,
 			*req.ParentIssueID, wsID).Scan(&parentExists)
 		if err != nil {
-			h.logger.Error("validate parent_issue_id", "error", err)
-			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			internalError(w, r, h.logger, "validate parent_issue_id", err)
 			return
 		}
 		if parentExists == 0 {
@@ -218,8 +212,7 @@ func (h *IssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 		req.RoutineID, routineInputsJSON,
 		now, now)
 	if err != nil {
-		h.logger.Error("insert issue", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "insert issue", err)
 		return
 	}
 
@@ -229,15 +222,13 @@ func (h *IssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 			`INSERT OR IGNORE INTO mission_labels (mission_id, label_id) VALUES (?, ?)`,
 			id, labelID)
 		if err != nil {
-			h.logger.Error("insert mission label", "error", err)
-			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			internalError(w, r, h.logger, "insert mission label", err)
 			return
 		}
 	}
 
 	if err := tx.Commit(); err != nil {
-		h.logger.Error("commit issue", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "commit issue", err)
 		return
 	}
 

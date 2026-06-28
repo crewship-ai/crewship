@@ -52,8 +52,7 @@ func (h *TemplateHandler) List(w http.ResponseWriter, r *http.Request) {
 		WHERE workspace_id = ?
 		ORDER BY is_builtin DESC, name ASC`, wsID)
 	if err != nil {
-		h.logger.Error("list templates", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "list templates", err)
 		return
 	}
 	defer rows.Close()
@@ -64,16 +63,14 @@ func (h *TemplateHandler) List(w http.ResponseWriter, r *http.Request) {
 		var tmplJSON string
 		if err := rows.Scan(&t.ID, &t.WorkspaceID, &t.Name, &t.Description, &tmplJSON,
 			&t.Icon, &t.Color, &t.IsBuiltin, &t.CreatedAt, &t.UpdatedAt); err != nil {
-			h.logger.Error("scan template", "error", err)
-			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			internalError(w, r, h.logger, "scan template", err)
 			return
 		}
 		t.TemplateJSON = json.RawMessage(tmplJSON)
 		result = append(result, t)
 	}
 	if err := rows.Err(); err != nil {
-		h.logger.Error("rows iteration (templates)", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "rows iteration (templates)", err)
 		return
 	}
 
@@ -100,8 +97,7 @@ func (h *TemplateHandler) Get(w http.ResponseWriter, r *http.Request) {
 			writeProblem(w, r, http.StatusNotFound, "Template not found")
 			return
 		}
-		h.logger.Error("get template", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "get template", err)
 		return
 	}
 	t.TemplateJSON = json.RawMessage(tmplJSON)

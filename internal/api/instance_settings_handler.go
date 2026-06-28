@@ -148,8 +148,7 @@ func (h *InstanceSettingsHandler) List(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.db.QueryContext(r.Context(),
 		`SELECT key, value, COALESCE(updated_at, '') FROM app_settings ORDER BY key ASC`)
 	if err != nil {
-		h.logger.Error("list app_settings", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "list app_settings", err)
 		return
 	}
 	defer rows.Close()
@@ -158,8 +157,7 @@ func (h *InstanceSettingsHandler) List(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var s instanceSetting
 		if err := rows.Scan(&s.Key, &s.Value, &s.UpdatedAt); err != nil {
-			h.logger.Error("scan app_setting", "error", err)
-			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			internalError(w, r, h.logger, "scan app_setting", err)
 			return
 		}
 		if isSensitiveKey(s.Key) {
@@ -168,8 +166,7 @@ func (h *InstanceSettingsHandler) List(w http.ResponseWriter, r *http.Request) {
 		out = append(out, s)
 	}
 	if err := rows.Err(); err != nil {
-		h.logger.Error("rows iteration (app_settings)", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "rows iteration (app_settings)", err)
 		return
 	}
 

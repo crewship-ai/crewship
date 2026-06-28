@@ -40,8 +40,7 @@ func (h *IssueHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
 			writeProblem(w, r, http.StatusNotFound, "Issue not found")
 			return
 		}
-		h.logger.Error("issue runs: resolve mission", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "issue runs: resolve mission", err)
 		return
 	}
 
@@ -53,8 +52,7 @@ func (h *IssueHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
 		ORDER BY started_at DESC
 		LIMIT 100`, wsID, ident)
 	if err != nil {
-		h.logger.Error("issue runs: query", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "issue runs: query", err)
 		return
 	}
 	defer rows.Close()
@@ -70,8 +68,7 @@ func (h *IssueHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
 			// Fail loudly rather than silently dropping a row — a NULL/type
 			// drift would otherwise hide runs from the dock + CLI with a
 			// misleading 200.
-			h.logger.Error("issue runs: scan", "error", err)
-			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			internalError(w, r, h.logger, "issue runs: scan", err)
 			return
 		}
 		dto.Mode = mode.String
@@ -83,8 +80,7 @@ func (h *IssueHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
 		out = append(out, dto)
 	}
 	if err := rows.Err(); err != nil {
-		h.logger.Error("issue runs: rows", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "issue runs: rows", err)
 		return
 	}
 

@@ -56,8 +56,7 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 			writeProblem(w, r, http.StatusNotFound, "Issue not found")
 			return
 		}
-		h.logger.Error("get issue for update", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "get issue for update", err)
 		return
 	}
 
@@ -113,8 +112,7 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 				`SELECT COUNT(*) FROM missions WHERE id = ? AND workspace_id = ?`,
 				*req.ParentIssueID, wsID).Scan(&parentExists)
 			if err != nil {
-				h.logger.Error("validate parent_issue_id", "error", err)
-				writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+				internalError(w, r, h.logger, "validate parent_issue_id", err)
 				return
 			}
 			if parentExists == 0 {
@@ -148,8 +146,7 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 				`SELECT COUNT(*) FROM pipelines WHERE id = ? AND workspace_id = ?`,
 				*req.RoutineID, wsID).Scan(&exists)
 			if err != nil {
-				h.logger.Error("validate routine_id", "error", err)
-				writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+				internalError(w, r, h.logger, "validate routine_id", err)
 				return
 			}
 			if exists == 0 {
@@ -192,8 +189,7 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if !ub.Empty() {
 		query, args := ub.Build("missions", "id = ?", missionID)
 		if _, err := h.db.ExecContext(r.Context(), query, args...); err != nil {
-			h.logger.Error("update issue", "error", err)
-			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			internalError(w, r, h.logger, "update issue", err)
 			return
 		}
 	}
@@ -236,8 +232,7 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 	issue, err := scanIssueRow(h.db.QueryRowContext(r.Context(),
 		issueSelectQuery()+` WHERE m.id = ?`, missionID))
 	if err != nil {
-		h.logger.Error("read updated issue", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "read updated issue", err)
 		return
 	}
 
@@ -260,14 +255,12 @@ func (h *IssueHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		`DELETE FROM missions WHERE identifier = ? AND crew_id = ? AND workspace_id = ? AND status IN ('BACKLOG', 'CANCELLED')`,
 		ident, crewID, wsID)
 	if err != nil {
-		h.logger.Error("delete issue", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "delete issue", err)
 		return
 	}
 	affected, err := res.RowsAffected()
 	if err != nil {
-		h.logger.Error("delete issue rows affected", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "delete issue rows affected", err)
 		return
 	}
 	if affected == 0 {
@@ -280,8 +273,7 @@ func (h *IssueHandler) Delete(w http.ResponseWriter, r *http.Request) {
 				writeProblem(w, r, http.StatusNotFound, "Issue not found")
 				return
 			}
-			h.logger.Error("delete issue follow-up query", "error", qErr)
-			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			internalError(w, r, h.logger, "delete issue follow-up query", qErr)
 			return
 		}
 		writeProblem(w, r, http.StatusBadRequest, "Only BACKLOG or CANCELLED issues can be deleted")

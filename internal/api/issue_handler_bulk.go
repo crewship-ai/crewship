@@ -138,8 +138,7 @@ func (h *IssueHandler) ListSubIssues(w http.ResponseWriter, r *http.Request) {
 			writeProblem(w, r, http.StatusNotFound, "Issue not found")
 			return
 		}
-		h.logger.Error("resolve issue for subtasks", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "resolve issue for subtasks", err)
 		return
 	}
 
@@ -148,8 +147,7 @@ func (h *IssueHandler) ListSubIssues(w http.ResponseWriter, r *http.Request) {
 		WHERE m.parent_issue_id = ?
 		ORDER BY COALESCE(m.sort_order, 0) ASC, m.created_at ASC`, parentID)
 	if err != nil {
-		h.logger.Error("list sub-issues", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "list sub-issues", err)
 		return
 	}
 	defer rows.Close()
@@ -158,15 +156,13 @@ func (h *IssueHandler) ListSubIssues(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		issue, err := scanIssueRow(rows)
 		if err != nil {
-			h.logger.Error("scan sub-issue", "error", err)
-			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			internalError(w, r, h.logger, "scan sub-issue", err)
 			return
 		}
 		result = append(result, issue)
 	}
 	if err := rows.Err(); err != nil {
-		h.logger.Error("rows iteration (sub-issues)", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "rows iteration (sub-issues)", err)
 		return
 	}
 

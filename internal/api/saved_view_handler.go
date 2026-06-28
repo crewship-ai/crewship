@@ -52,8 +52,7 @@ func (h *SavedViewHandler) List(w http.ResponseWriter, r *http.Request) {
 		WHERE workspace_id = ? AND (user_id = ? OR shared = 1)
 		ORDER BY is_default DESC, name ASC`, wsID, user.ID)
 	if err != nil {
-		h.logger.Error("list saved views", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "list saved views", err)
 		return
 	}
 	defer rows.Close()
@@ -65,15 +64,13 @@ func (h *SavedViewHandler) List(w http.ResponseWriter, r *http.Request) {
 			&sv.ID, &sv.Name, &sv.FiltersJSON, &sv.SortJSON,
 			&sv.ViewType, &sv.IsDefault, &sv.Shared, &sv.CreatedAt,
 		); err != nil {
-			h.logger.Error("scan saved view", "error", err)
-			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			internalError(w, r, h.logger, "scan saved view", err)
 			return
 		}
 		result = append(result, sv)
 	}
 	if err := rows.Err(); err != nil {
-		h.logger.Error("rows iteration (saved views)", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "rows iteration (saved views)", err)
 		return
 	}
 
@@ -132,8 +129,7 @@ func (h *SavedViewHandler) Create(w http.ResponseWriter, r *http.Request) {
 		id, wsID, user.ID, req.Name, req.FiltersJSON,
 		req.SortJSON, req.ViewType, req.Shared, now)
 	if err != nil {
-		h.logger.Error("insert saved view", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "insert saved view", err)
 		return
 	}
 
@@ -178,8 +174,7 @@ func (h *SavedViewHandler) Update(w http.ResponseWriter, r *http.Request) {
 			writeProblem(w, r, http.StatusNotFound, "Saved view not found")
 			return
 		}
-		h.logger.Error("get saved view for update", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "get saved view for update", err)
 		return
 	}
 	if ownerID != user.ID {
@@ -228,8 +223,7 @@ func (h *SavedViewHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 	query, args := ub.Build("saved_views", "id = ? AND workspace_id = ?", viewID, wsID)
 	if _, err := h.db.ExecContext(r.Context(), query, args...); err != nil {
-		h.logger.Error("update saved view", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "update saved view", err)
 		return
 	}
 
@@ -243,8 +237,7 @@ func (h *SavedViewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		&sv.ViewType, &sv.IsDefault, &sv.Shared, &sv.CreatedAt,
 	)
 	if err != nil {
-		h.logger.Error("read updated saved view", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "read updated saved view", err)
 		return
 	}
 
@@ -274,8 +267,7 @@ func (h *SavedViewHandler) Delete(w http.ResponseWriter, r *http.Request) {
 			writeProblem(w, r, http.StatusNotFound, "Saved view not found")
 			return
 		}
-		h.logger.Error("get saved view for delete", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "get saved view for delete", err)
 		return
 	}
 	if ownerID != user.ID {
@@ -286,14 +278,12 @@ func (h *SavedViewHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	res, err := h.db.ExecContext(r.Context(),
 		`DELETE FROM saved_views WHERE id = ? AND workspace_id = ?`, viewID, wsID)
 	if err != nil {
-		h.logger.Error("delete saved view", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "delete saved view", err)
 		return
 	}
 	affected, err := res.RowsAffected()
 	if err != nil {
-		h.logger.Error("delete saved view rows affected", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "delete saved view rows affected", err)
 		return
 	}
 	if affected == 0 {
