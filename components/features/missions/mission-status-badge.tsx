@@ -12,7 +12,7 @@ import {
   Eye,
   Ban,
 } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
+import { StatusIconBadge } from "@/components/ui/status-icon-badge"
 import { CircleCheckIcon } from "@/components/ui/circle-check"
 import { LoaderPinwheelIcon } from "@/components/ui/loader-pinwheel"
 import type { MissionStatus, MissionTaskStatus } from "@/lib/types/mission"
@@ -49,20 +49,10 @@ function StatusIcon({ status, icon: Icon }: { status: string; icon: React.Compon
 
 export function MissionStatusBadge({ status }: { status: MissionStatus }) {
   const config = MISSION_STATUS_CONFIG[status]
-  return (
-    <Badge variant="outline" className={`gap-1 border-0 ${config.className}`}>
-      <StatusIcon status={status} icon={config.icon} />
-      {config.label}
-    </Badge>
-  )
+  return <StatusIconBadge entry={config} icon={<StatusIcon status={status} icon={config.icon} />} />
 }
 
 export function TaskStatusBadge({ status }: { status: MissionTaskStatus }) {
   const config = TASK_STATUS_CONFIG[status]
-  return (
-    <Badge variant="outline" className={`gap-1 border-0 ${config.className}`}>
-      <StatusIcon status={status} icon={config.icon} />
-      {config.label}
-    </Badge>
-  )
+  return <StatusIconBadge entry={config} icon={<StatusIcon status={status} icon={config.icon} />} />
 }
