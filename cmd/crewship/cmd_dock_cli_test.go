@@ -14,10 +14,10 @@ func TestIssueRunsRunE(t *testing.T) {
 	covStubIssue(s)
 	path := "/api/v1/crews/" + covCrewID + "/issues/" + covIssueIdent + "/runs"
 	s.OnGet(path, clitest.JSONResponse(200, []map[string]any{
-		{"id": "prn_aaaaaaaaaaaa1", "status": "completed", "started_at": "2026-06-01T10:00:00Z",
-			"duration_ms": 3041, "cost_usd": 0.12, "triggered_via": "issue", "error_message": ""},
-		{"id": "prn_bbbbbbbbbbbb2", "status": "failed", "started_at": "2026-06-01T09:00:00Z",
-			"duration_ms": 520, "cost_usd": 0, "triggered_via": "issue", "error_message": "boom"},
+		{"id": "asg_a", "status": "COMPLETED", "agent_name": "Sam", "task": "Write report",
+			"started_at": "2026-06-01T10:00:00Z", "duration_ms": 3041, "result_summary": "wrote report"},
+		{"id": "asg_b", "status": "FAILED", "agent_name": "Riley", "task": "Trace DNS",
+			"started_at": "2026-06-01T09:00:00Z", "duration_ms": 520, "error_message": "boom"},
 	}))
 	out, err := covCaptureStdout(t, func() error {
 		return issueRunsCmd.RunE(issueRunsCmd, []string{covIssueIdent})
@@ -25,7 +25,7 @@ func TestIssueRunsRunE(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunE: %v", err)
 	}
-	for _, want := range []string{"prn_aaaaaaaa", "completed", "failed", "boom"} {
+	for _, want := range []string{"Sam", "Riley", "COMPLETED", "FAILED", "boom", "wrote report"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("runs table missing %q:\n%s", want, out)
 		}
