@@ -242,8 +242,12 @@ function SenderAvatar({ item, className }: { item: InboxItem; className?: string
 // there. Mask anything that looks like a secret in the Context card and
 // reveal it only on explicit click — defense in depth + don't shoulder-
 // surf-leak a token sitting in someone's inbox.
-const SECRET_KEY_RE = /(password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|bearer|credential|dsn|conn)/i
-const SECRET_VAL_RE = /^[A-Za-z0-9_\-+/]{24,}={0,2}$|:\/\/[^@\s]+@/
+// Mask ONLY genuine secrets: a credential-named key, or a value that's a
+// connection string carrying inline creds (scheme://user:pass@host). A
+// bare long token like a skill_id / run_id / crew_id is an identifier, not
+// a secret — masking those was noise (and the thing the user flagged).
+const SECRET_KEY_RE = /(password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|bearer|credential)/i
+const SECRET_VAL_RE = /:\/\/[^/@\s]+:[^/@\s]+@/
 
 function looksSecret(key: string, value: string): boolean {
   return SECRET_KEY_RE.test(key) || SECRET_VAL_RE.test(value)
