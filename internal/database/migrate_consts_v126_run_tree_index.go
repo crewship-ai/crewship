@@ -1,6 +1,6 @@
 package database
 
-// migrationRunTreeIndex (v124) indexes pipeline_runs.triggered_by_id so
+// migrationRunTreeIndex (v126) indexes pipeline_runs.triggered_by_id so
 // the parent/child run-tree recursive CTE (RunStore.RunTree) joins
 // `r.triggered_by_id = t.id` via an index instead of a full table scan
 // per recursion level. Workspace-prefixed to match the scoped query.

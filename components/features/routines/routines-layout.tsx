@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
 import { useRouter } from "next/navigation"
 import {
@@ -21,6 +21,8 @@ import { RoutinesExplorer } from "./routines-explorer"
 import { RoutineCreateDialog } from "./routine-create-dialog"
 import { TabBar } from "@/components/ui/tab-bar"
 import type { Mission } from "@/lib/types/mission"
+import { BottomPanel } from "@/components/features/crews/bottom-panel"
+import type { BottomPanelContext } from "@/components/features/crews/bottom-panel/types"
 
 // RoutinesLayout — full /routines page. The IA refactor cut the
 // previous 4 tabs (Routines / Graph / Timeline / Activity) down to 3:
@@ -111,7 +113,6 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search, filters.status, filters.invocations, filters.authorAgentId, filters.showEphemeral])
 
   const setBreadcrumbs = useAppStore((s) => s.setBreadcrumbs)
@@ -147,6 +148,18 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
   const selectedRoutine = selectedSlug
     ? pipelines.find((p) => p.slug === selectedSlug)
     : null
+
+  // Context for the bottom dock — runs / logs / schedule / spec of the
+  // routine in focus. MEMOIZED: this layout re-renders on every poll tick,
+  // and a fresh context object each render makes the dock tabs (logs/yaml)
+  // re-fetch + flash "Loading…" forever. Identity must only change when the
+  // routine actually changes.
+  const routineCtx: BottomPanelContext = useMemo(
+    () => (selectedSlug
+      ? { kind: "routine", slug: selectedSlug, pipelineId: selectedRoutine?.id ?? null, name: selectedRoutine?.name }
+      : null),
+    [selectedSlug, selectedRoutine?.id, selectedRoutine?.name],
+  )
 
   return (
     <div className="flex h-[calc(100vh-48px)] flex-col bg-background">
@@ -373,6 +386,17 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
           </AnimatePresence>
         </div>
       </div>
+
+      {/* ---- Bottom dock — runs / logs / schedule / spec of the selected
+           routine. Appears once a routine is selected, pairing the
+           definition above with its run console below. ---- */}
+      {routineCtx && (
+        <BottomPanel
+          workspaceId={workspaceId}
+          context={routineCtx}
+          tabs={["runs", "logs", "schedule", "yaml"]}
+        />
+      )}
 
       {/* Import dialog */}
       {importDialogOpen && (

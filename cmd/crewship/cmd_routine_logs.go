@@ -24,17 +24,19 @@ var routineLogsCmd = &cobra.Command{
 	Long: `Fetches every journal entry tagged to the given run_id (run + step
 events) and prints them in chronological order.
 
-When --slug is provided, the CLI takes the fast path: it pulls the
-journal scoped to that routine and filters to this run_id. Without
---slug, the CLI falls back to the slug-free workspace lookup at
-GET /api/v1/workspaces/{ws}/pipeline-runs/{runId} — that endpoint
-returns the persisted run state (status, step outputs, error) but
-NOT every journal entry. Use --slug when you want the full timeline.
+Three modes:
+  • default (slug-free): GET /pipeline-runs/{runId} — the persisted run
+    state (status, step outputs, error). Not the full timeline.
+  • --full (slug-free): GET /pipeline-runs/{runId}/logs — the FULL
+    per-run journal timeline, server-side, no --slug needed.
+  • --slug <routine>: pulls that routine's journal and filters to this
+    run_id (the original full-timeline path).
 
 Examples:
   crewship routine logs run_abc123                      # slug-free state lookup
-  crewship routine logs run_abc123 --slug pr-review     # full journal timeline
-  crewship routine logs run_abc123 --slug pr-review --json | jq '.[] | select(.severity=="error")'
+  crewship routine logs run_abc123 --full               # full timeline, no slug
+  crewship routine logs run_abc123 --slug pr-review     # full timeline via routine journal
+  crewship routine logs run_abc123 --full --json | jq '.[] | select(.level=="error")'
 
 Output formats:
   table  Human-readable timeline with timestamp + entry-type + summary
@@ -45,6 +47,7 @@ Output formats:
 		runID := args[0]
 		slug, _ := cmd.Flags().GetString("slug")
 		jsonMode, _ := cmd.Flags().GetBool("json")
+		full, _ := cmd.Flags().GetBool("full")
 		if err := requireAuth(); err != nil {
 			return err
 		}
@@ -53,6 +56,42 @@ Output formats:
 		}
 		client := newAPIClient()
 		ws := client.GetWorkspaceID()
+
+		// Slug-free full timeline: GET /pipeline-runs/{runId}/logs returns
+		// every journal entry for the run server-side (no --slug needed).
+		// CLI parity for the dock's Logs tab endpoint.
+		if slug == "" && full {
+			resp, err := client.Get(fmt.Sprintf("/api/v1/workspaces/%s/pipeline-runs/%s/logs", ws, runID))
+			if err != nil {
+				return err
+			}
+			defer resp.Body.Close()
+			if err := cli.CheckError(resp); err != nil {
+				return err
+			}
+			var entries []struct {
+				TS      string `json:"ts"`
+				Level   string `json:"level"`
+				Message string `json:"message"`
+				Type    string `json:"type"`
+			}
+			if err := json.NewDecoder(resp.Body).Decode(&entries); err != nil {
+				return fmt.Errorf("decode response: %w", err)
+			}
+			if jsonMode {
+				b, _ := json.MarshalIndent(entries, "", "  ")
+				fmt.Println(string(b))
+				return nil
+			}
+			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+			fmt.Fprintln(w, "TIME\tLEVEL\tEVENT\tSUMMARY")
+			for _, e := range entries {
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
+					parseTime(e.TS).Local().Format("15:04:05.000"),
+					e.Level, strings.TrimPrefix(e.Type, "pipeline."), e.Message)
+			}
+			return w.Flush()
+		}
 
 		// Slug-free path: hit /pipeline-runs/{runId} for the persisted
 		// state record. The journal-scoped path below is the older,
@@ -295,5 +334,6 @@ func parseTime(s string) time.Time {
 func init() {
 	routineLogsCmd.Flags().String("slug", "", "routine slug the run belongs to (optional; enables full journal timeline)")
 	routineLogsCmd.Flags().Bool("json", false, "JSON output for jq / scripting")
+	routineLogsCmd.Flags().Bool("full", false, "Full per-run journal timeline via the run-logs endpoint (no --slug needed)")
 	pipelineCmd.AddCommand(routineLogsCmd)
 }

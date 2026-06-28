@@ -12,6 +12,11 @@ import { useUserPreference } from "@/hooks/use-user-preference"
 import type { BottomPanelContext, FileEntry } from "./types"
 import { EmptyState, formatBytes } from "./shared"
 
+// Files only operate on a container-backed entity — an agent's home dir or
+// a crew's shared tree. The dock router guarantees this narrower context;
+// the type keeps the field accesses below sound.
+type FilesContext = Extract<BottomPanelContext, { kind: "agent" } | { kind: "crew" }> | null
+
 const FileEditor = dynamic(
   () => import("@/components/features/files/file-editor").then((m) => m.FileEditor),
   {
@@ -42,7 +47,7 @@ interface TreeState {
  * children inline) + inline file preview pane on the right (click a
  * file to read its contents via /agents/{id}/files/download).
  */
-export function FilesTab({ workspaceId, context }: { workspaceId: string; context: BottomPanelContext }) {
+export function FilesTab({ workspaceId, context }: { workspaceId: string; context: FilesContext }) {
   const [tree, setTree] = useState<FileEntry[] | null>(null)
   const [expanded, setExpanded] = useState<Record<string, FileEntry[] | "loading" | "error">>({})
   const [error, setError] = useState<string | null>(null)

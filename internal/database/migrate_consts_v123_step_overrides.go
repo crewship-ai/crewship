@@ -1,6 +1,6 @@
 package database
 
-// migrationStepOverrides (v121) adds a per-step prompt/model override
+// migrationStepOverrides (v123) adds a per-step prompt/model override
 // layer (trigger.dev "prompts-as-code with dashboard override" parity).
 //
 // An operator can tweak a single step's prompt or model WITHOUT bumping

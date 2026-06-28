@@ -1,6 +1,6 @@
 package database
 
-// migrationPipelineTags (v123) tags the routine DEFINITION (not just
+// migrationPipelineTags (v125) tags the routine DEFINITION (not just
 // runs) for cross-crew discovery — the "pipelines are workspace-scoped
 // shared assets" thesis. A workspace can browse routines by tag
 // (`routine list --tag billing`) independent of any run.

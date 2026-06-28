@@ -1,6 +1,6 @@
 package database
 
-// migrationPendingRuns (v122) adds deferred run dispatch — the storage
+// migrationPendingRuns (v124) adds deferred run dispatch — the storage
 // behind delay / ttl / debounce / priority on a run trigger
 // (trigger.dev parity). A trigger that carries a delay or a debounce key
 // is parked here instead of executing immediately; an in-process

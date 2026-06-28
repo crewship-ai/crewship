@@ -102,6 +102,8 @@ var inboxListCmd = &cobra.Command{
 				BodyMD         string                 `json:"body_md"`
 				SenderType     string                 `json:"sender_type"`
 				SenderName     string                 `json:"sender_name"`
+				AvatarSeed     string                 `json:"avatar_seed,omitempty"`
+				AvatarStyle    string                 `json:"avatar_style,omitempty"`
 				State          string                 `json:"state"`
 				Priority       string                 `json:"priority"`
 				Blocking       bool                   `json:"blocking"`
@@ -255,6 +257,8 @@ Examples:
 			BodyMD         string                 `json:"body_md"`
 			SenderType     string                 `json:"sender_type"`
 			SenderName     string                 `json:"sender_name"`
+			AvatarSeed     string                 `json:"avatar_seed,omitempty"`
+			AvatarStyle    string                 `json:"avatar_style,omitempty"`
 			State          string                 `json:"state"`
 			Priority       string                 `json:"priority"`
 			Blocking       bool                   `json:"blocking"`

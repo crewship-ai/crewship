@@ -347,3 +347,111 @@ func (h *ProxyHandler) AgentGitLog(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, []interface{}{})
 }
+
+// CrewGitDiff proxies the crew container's base-branch git diff to the
+// dashboard's Changes tab. Crew-scoped (the diff is the whole crew
+// workspace's change set) — GET /api/v1/crews/{crewId}/git-diff.
+func (h *ProxyHandler) CrewGitDiff(w http.ResponseWriter, r *http.Request) {
+	crewID := r.PathValue("crewId")
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	if !canRole(RoleFromContext(r.Context()), "read") {
+		replyError(w, http.StatusForbidden, "Forbidden")
+		return
+	}
+
+	// Confirm the crew exists in this workspace before reaching into its
+	// container — masks cross-tenant probes as 404.
+	var exists int
+	err := h.db.QueryRowContext(r.Context(),
+		"SELECT 1 FROM crews WHERE id = ? AND workspace_id = ?", crewID, workspaceID).Scan(&exists)
+	if errors.Is(err, sql.ErrNoRows) {
+		replyError(w, http.StatusNotFound, "Crew not found")
+		return
+	}
+	if err != nil {
+		replyError(w, http.StatusInternalServerError, "Failed to resolve crew")
+		return
+	}
+
+	ipcPath := fmt.Sprintf("/crews/%s/git-diff", url.PathEscape(crewID))
+	if slug := r.URL.Query().Get("agent_slug"); slug != "" {
+		ipcPath += "?agent_slug=" + url.QueryEscape(slug)
+	}
+	resp, err := h.ipcGet(r.Context(), ipcPath)
+	if err != nil {
+		replyError(w, http.StatusBadGateway, "Failed to compute diff")
+		return
+	}
+	defer resp.Body.Close()
+
+	var data map[string]interface{}
+	if json.NewDecoder(resp.Body).Decode(&data) != nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"is_repo": false})
+		return
+	}
+	writeJSON(w, http.StatusOK, data)
+}
+
+// RunGitDiff resolves a pipeline run to its crew and returns that crew
+// container's base-branch diff — the change set the run produced. Powers
+// the Activity dock's Changes tab.
+// GET /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/changes.
+//
+// Crew resolution: the run's invoking_crew_id, falling back to the
+// pipeline's author_crew_id. A run with no resolvable crew (e.g. a
+// workspace-level pipeline) degrades to is_repo:false rather than erroring.
+func (h *ProxyHandler) RunGitDiff(w http.ResponseWriter, r *http.Request) {
+	runID := r.PathValue("runId")
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	if !canRole(RoleFromContext(r.Context()), "read") {
+		replyError(w, http.StatusForbidden, "Forbidden")
+		return
+	}
+
+	var crewID sql.NullString
+	err := h.db.QueryRowContext(r.Context(), `
+		SELECT COALESCE(NULLIF(pr.invoking_crew_id, ''), p.author_crew_id)
+		FROM pipeline_runs pr
+		LEFT JOIN pipelines p ON pr.pipeline_id = p.id AND p.workspace_id = pr.workspace_id
+		WHERE pr.id = ? AND pr.workspace_id = ?`, runID, workspaceID).Scan(&crewID)
+	if errors.Is(err, sql.ErrNoRows) {
+		replyError(w, http.StatusNotFound, "Run not found")
+		return
+	}
+	if err != nil {
+		replyError(w, http.StatusInternalServerError, "Failed to resolve run")
+		return
+	}
+	if !crewID.Valid || crewID.String == "" {
+		// No crew bound to this run — nothing to diff against a container.
+		writeJSON(w, http.StatusOK, map[string]interface{}{"is_repo": false})
+		return
+	}
+
+	// SECURITY: re-validate the resolved crew belongs to THIS workspace
+	// before reaching into its container. author_crew_id is just a column
+	// value and is never re-checked otherwise — a cross-workspace reference
+	// (template copy / migration bug) would otherwise leak a foreign crew's
+	// diff. The IPC handler resolves the crew by id only, so this is the sole
+	// tenant guard.
+	var ck int
+	if cerr := h.db.QueryRowContext(r.Context(),
+		"SELECT 1 FROM crews WHERE id = ? AND workspace_id = ?", crewID.String, workspaceID).Scan(&ck); cerr != nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"is_repo": false})
+		return
+	}
+
+	resp, err := h.ipcGet(r.Context(), fmt.Sprintf("/crews/%s/git-diff", url.PathEscape(crewID.String)))
+	if err != nil {
+		replyError(w, http.StatusBadGateway, "Failed to compute diff")
+		return
+	}
+	defer resp.Body.Close()
+
+	var data map[string]interface{}
+	if json.NewDecoder(resp.Body).Decode(&data) != nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"is_repo": false})
+		return
+	}
+	writeJSON(w, http.StatusOK, data)
+}

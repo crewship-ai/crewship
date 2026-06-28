@@ -1,0 +1,82 @@
+---
+title: "Bottom dock — context-aware inspector"
+description: "The collapsible panel at the bottom of the dashboard adapts its tabs to whatever entity you're looking at — an agent, crew, issue, routine, or run — so the live, hands-on layer is always one click away."
+icon: "panel-bottom"
+---
+
+# Bottom dock
+
+Every primary dashboard surface has a **collapsible dock** pinned to the bottom of the viewport. It's collapsed to a thin tab strip by default — click any tab to expand it, drag the top edge to resize, and it remembers your height.
+
+The dock is **context-aware**: the tabs it shows depend on the entity in focus, so what you see is always the live layer of *that* thing — not a fixed set that's half-empty. Selecting a different agent / issue / routine / run re-scopes every tab.
+
+## What each page shows
+
+<Tabs>
+  <Tab title="Crews & Agents">
+    Scoped to the selected agent or crew container:
+
+    | Tab | What it shows |
+    |-----|----------------|
+    | **Terminal** | Interactive shell into the crew container (xterm over WebSocket) |
+    | **Files** | Browse + edit the agent's home dir or the crew's shared tree |
+    | **Messages** | The agent's peer inbox — questions, escalations, approvals |
+    | **Exec Log** | The agent's container log |
+    | **Docker** | Containers for the workspace + status |
+    | **YAML** | Read-only projection of the agent/crew record |
+  </Tab>
+  <Tab title="Issues">
+    Scoped to the issue (mission) in focus:
+
+    | Tab | What it shows |
+    |-----|----------------|
+    | **Activity** | Timeline of everything that happened on the issue — assignments, status changes, escalations, runs |
+    | **Runs** | Every run triggered by the issue, with status + duration. CLI: `crewship issue runs <id>` |
+    | **Changes** | Diff produced by the work (see [Changes](#changes-tab)) |
+    | **Comments** | Discussion thread on the issue (humans + agents). CLI: `crewship issue comments <id>` |
+    | **Spec** | The issue's YAML record |
+    | **Docker** | Environment the work is running in |
+
+    The old agent-scoped **Messages / Exec Log** tabs were removed from issues — they showed nothing when no agent was selected. Comments (issue discussion) is a different thing from Messages (an agent's peer inbox).
+  </Tab>
+  <Tab title="Routines">
+    Appears when you select a routine — pair the definition editor above with its run console below:
+
+    | Tab | What it shows |
+    |-----|----------------|
+    | **Runs** | Run history for the routine (status, duration, trigger) |
+    | **Logs** | Exec log of the routine's most recent run. CLI: `crewship routine logs <run> --full` |
+    | **Schedule** | Cron, timezone, next + last run, enabled state, and a **Run now** button |
+    | **Spec** | The routine's YAML definition |
+  </Tab>
+  <Tab title="Activity">
+    Appears when you select a run on the trace canvas — the raw run console alongside the visual trace:
+
+    | Tab | What it shows |
+    |-----|----------------|
+    | **Logs** | The run's exec log, oldest-first |
+    | **Trace** | Step-by-step output of the run |
+    | **Changes** | Diff produced by the run (see [Changes](#changes-tab)) |
+  </Tab>
+</Tabs>
+
+## Changes tab
+
+The **Changes** tab shows the diff a run or issue produced. It's computed on demand — there's no stored snapshot — and degrades to a calm "not wired up for this workspace yet" note when the diff source isn't available, rather than erroring.
+
+<Note>
+The diff source (working-tree changes vs. a diff against the base branch) is a workspace-level decision. Until it's configured the tab stays in its idle state; the rest of the dock is unaffected.
+</Note>
+
+## CLI parity
+
+The dock's read tabs have matching CLI commands, so an agent can pull the same data without the UI:
+
+```bash
+crewship issue runs CRE-142          # runs triggered by an issue
+crewship issue comments CRE-142      # issue discussion thread
+crewship issue activity CRE-142      # issue timeline
+crewship routine logs run_abc123 --full   # full per-run journal timeline
+```
+
+See [Issues & triage](/api-reference/issues) and [Routines](/guides/routines) for the underlying endpoints.

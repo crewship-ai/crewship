@@ -5,6 +5,8 @@ package server
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,6 +16,11 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/provider"
 )
+
+// gitDiffSem bounds concurrent `git diff` container execs. Each exec blocks a
+// goroutine + a docker exec slot for up to 10s; without a cap, many dashboard
+// Changes tabs opening at once could saturate Docker and starve agent work.
+var gitDiffSem = make(chan struct{}, 4)
 
 func (s *Server) handleContainerStatus(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
@@ -257,4 +264,202 @@ func (s *Server) handleContainerGitLog(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{"crew_id": crewID, "commits": commits})
+}
+
+// gitDiffScript computes "what this branch changed against its base" inside
+// a crew container. Base = merge-base with the default branch (origin/HEAD,
+// falling back to main/master), so it shows everything the work produced —
+// committed or not — not just the dirty working tree.
+//
+// Section markers carry a per-invocation random nonce ($CRW_NONCE, injected
+// via Exec env) so they CANNOT collide with diff content. Without a nonce a
+// source file containing the literal "__DIFF__" (e.g. this very file) would
+// inject a fake marker and corrupt the parse / hide the changeset.
+const gitDiffScript = `
+N="${CRW_NONCE}"
+if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then echo "${N}NOTREPO"; exit 0; fi
+def=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@')
+[ -z "$def" ] && git show-ref --verify --quiet refs/remotes/origin/main && def=main
+[ -z "$def" ] && git show-ref --verify --quiet refs/remotes/origin/master && def=master
+[ -z "$def" ] && def=main
+base=$(git merge-base "origin/$def" HEAD 2>/dev/null || git merge-base "$def" HEAD 2>/dev/null || echo "")
+echo "${N}STATUS"
+if [ -n "$base" ]; then git diff --name-status "$base" HEAD; else git diff --name-status; fi
+echo "${N}NUMSTAT"
+if [ -n "$base" ]; then git diff --numstat "$base" HEAD; else git diff --numstat; fi
+echo "${N}DIFF"
+if [ -n "$base" ]; then git diff "$base" HEAD; else git diff; fi
+`
+
+// gitDiffMaxBytes caps the patch we ship to the dashboard. A huge refactor
+// shouldn't stream megabytes into a browser tab; past the cap we flag
+// truncated:true and the UI says so.
+const gitDiffMaxBytes = 256 * 1024
+
+// handleContainerGitDiff runs `git diff <base>...HEAD` inside a crew's
+// container and returns the changed-file summary + unified patch. Powers
+// the dock's Changes tab.
+func (s *Server) handleContainerGitDiff(w http.ResponseWriter, r *http.Request) {
+	crewID := r.PathValue("id")
+	agentSlug := r.URL.Query().Get("agent_slug")
+
+	if s.container == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "container provider not configured"})
+		return
+	}
+
+	var slug string
+	if s.db != nil {
+		_ = s.db.QueryRowContext(r.Context(), "SELECT slug FROM crews WHERE id = ?", crewID).Scan(&slug)
+	}
+	if slug == "" {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "crew not found"})
+		return
+	}
+
+	containerName := s.container.CrewContainerName(slug)
+	workDir := "/home"
+	if agentSlug != "" {
+		clean := filepath.Base(agentSlug)
+		if clean != "." && clean != ".." && !strings.ContainsAny(clean, `/\`) {
+			workDir = filepath.Join("/output", clean)
+		}
+	}
+
+	// Bound concurrency — wait for an exec slot (or give up if the client
+	// goes away) so a burst of Changes-tab opens can't exhaust docker exec.
+	select {
+	case gitDiffSem <- struct{}{}:
+		defer func() { <-gitDiffSem }()
+	case <-r.Context().Done():
+		writeJSON(w, http.StatusOK, map[string]interface{}{"is_repo": false, "error": "busy"})
+		return
+	}
+
+	// Random per-call nonce for the section markers — makes them
+	// uncollidable with diff content. Fail CLOSED if rand fails: a zero
+	// nonce would be a constant, predictable marker, defeating the guard.
+	nb := make([]byte, 8)
+	if _, rerr := rand.Read(nb); rerr != nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"is_repo": false, "error": "diff unavailable"})
+		return
+	}
+	nonce := "CRWDIFF" + hex.EncodeToString(nb)
+
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	result, err := s.container.Exec(ctx, provider.ExecConfig{
+		ContainerID: containerName,
+		Cmd:         []string{"sh", "-c", gitDiffScript},
+		Env:         []string{"CRW_NONCE=" + nonce},
+		WorkingDir:  workDir,
+		User:        "1001:1001",
+	})
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"is_repo": false, "error": "git not available"})
+		return
+	}
+	defer result.Reader.Close()
+
+	output, _ := io.ReadAll(io.LimitReader(result.Reader, gitDiffMaxBytes+1))
+	writeJSON(w, http.StatusOK, parseGitDiff(string(output), nonce))
+}
+
+// gitChangedFile is one row of the Changes tab's file summary.
+type gitChangedFile struct {
+	Path      string `json:"path"`
+	Status    string `json:"status"`
+	Additions int    `json:"additions"`
+	Deletions int    `json:"deletions"`
+}
+
+// parseGitDiff turns the marker-delimited gitDiffScript output into the
+// diffResponse shape the Changes tab consumes. nonce is the per-call random
+// marker prefix; markers are matched EXACTLY (no TrimSpace) so a diff context
+// line — always carrying a leading +/-/space — can never be mistaken for one.
+// Kept pure (no I/O) so it's unit-testable against canned container output.
+func parseGitDiff(output, nonce string) map[string]interface{} {
+	mNotRepo := nonce + "NOTREPO"
+	mStatus := nonce + "STATUS"
+	mNumstat := nonce + "NUMSTAT"
+	mDiff := nonce + "DIFF"
+	if strings.Contains(output, mNotRepo) {
+		return map[string]interface{}{"is_repo": false}
+	}
+
+	files := map[string]*gitChangedFile{}
+	order := []string{}
+	get := func(path string) *gitChangedFile {
+		if f, ok := files[path]; ok {
+			return f
+		}
+		f := &gitChangedFile{Path: path, Status: "modified"}
+		files[path] = f
+		order = append(order, path)
+		return f
+	}
+
+	section := ""
+	var diff strings.Builder
+	for _, line := range strings.Split(output, "\n") {
+		// Exact match (no TrimSpace) — diff body lines carry a leading
+		// +/-/space so they can't equal a bare marker.
+		switch line {
+		case mStatus:
+			section = "status"
+			continue
+		case mNumstat:
+			section = "numstat"
+			continue
+		case mDiff:
+			section = "diff"
+			continue
+		}
+		switch section {
+		case "status":
+			fields := strings.Fields(line)
+			if len(fields) < 2 {
+				continue
+			}
+			path := fields[len(fields)-1]
+			switch fields[0][0] {
+			case 'A':
+				get(path).Status = "added"
+			case 'D':
+				get(path).Status = "deleted"
+			case 'R':
+				get(path).Status = "renamed"
+			default:
+				get(path).Status = "modified"
+			}
+		case "numstat":
+			fields := strings.Fields(line)
+			if len(fields) < 3 {
+				continue
+			}
+			f := get(fields[2])
+			fmt.Sscanf(fields[0], "%d", &f.Additions)
+			fmt.Sscanf(fields[1], "%d", &f.Deletions)
+		case "diff":
+			diff.WriteString(line)
+			diff.WriteString("\n")
+		}
+	}
+
+	out := make([]gitChangedFile, 0, len(order))
+	for _, p := range order {
+		out = append(out, *files[p])
+	}
+	diffText := diff.String()
+	truncated := len(diffText) > gitDiffMaxBytes
+	if truncated {
+		diffText = diffText[:gitDiffMaxBytes]
+	}
+	return map[string]interface{}{
+		"is_repo":   true,
+		"files":     out,
+		"diff":      strings.TrimRight(diffText, "\n"),
+		"truncated": truncated,
+	}
 }

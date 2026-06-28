@@ -38,6 +38,7 @@ func (s *Server) registerIPCRoutes() {
 	s.ipcMux.HandleFunc("GET /crews/{id}/stats", s.handleCrewStats)
 	s.ipcMux.HandleFunc("GET /crews/{id}/container-files", s.handleContainerFileList)
 	s.ipcMux.HandleFunc("GET /crews/{id}/git-log", s.handleContainerGitLog)
+	s.ipcMux.HandleFunc("GET /crews/{id}/git-diff", s.handleContainerGitDiff)
 	s.ipcMux.HandleFunc("GET /crews/{id}/files", s.handleFileList)
 	s.ipcMux.HandleFunc("GET /crews/{id}/files/download", s.handleFileDownload)
 	s.ipcMux.HandleFunc("PUT /crews/{id}/files/save", s.handleFileSave)

@@ -1,6 +1,6 @@
 package database
 
-// migrationRoutineRunObservability (v120) adds the observability surface
+// migrationRoutineRunObservability (v122) adds the observability surface
 // borrowed from trigger.dev's runs model. All additive — existing rows
 // default cleanly.
 //
