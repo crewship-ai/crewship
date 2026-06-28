@@ -90,7 +90,7 @@ func TestAgentCov_ListHelpers(t *testing.T) {
 			}
 			// non-2xx
 			c = newCovClient(map[string]covRoute{"GET " + l.path: {status: 500, body: "boom"}})
-			if _, err := l.call(c); err == nil || !strings.Contains(err.Error(), "HTTP 500") {
+			if _, err := l.call(c); err == nil || !strings.Contains(err.Error(), "unexpected status 500") {
 				t.Errorf("500: got %v", err)
 			}
 			// body read failure
@@ -217,18 +217,18 @@ func TestAgentCov_DecodeCreateResponse(t *testing.T) {
 
 func TestAgentCov_CheckStatusAndReadAll(t *testing.T) {
 	t.Parallel()
-	if err := agentCheckStatus(nil, "op"); err == nil || !strings.Contains(err.Error(), "nil response") {
+	if err := checkStatus(nil, "op"); err == nil || !strings.Contains(err.Error(), "response is nil") {
 		t.Errorf("nil resp: got %v", err)
 	}
-	err := agentCheckStatus(&internalapi.Response{StatusCode: 500, Body: strings.NewReader("why")}, "op")
-	if err == nil || !strings.Contains(err.Error(), "HTTP 500") || !strings.Contains(err.Error(), "why") {
+	err := checkStatus(&internalapi.Response{StatusCode: 500, Body: strings.NewReader("why")}, "op")
+	if err == nil || !strings.Contains(err.Error(), "unexpected status 500") || !strings.Contains(err.Error(), "why") {
 		t.Errorf("500: got %v", err)
 	}
-	if err := agentCheckStatus(&internalapi.Response{StatusCode: 204}, "op"); err != nil {
+	if err := checkStatus(&internalapi.Response{StatusCode: 204}, "op"); err != nil {
 		t.Errorf("204: got %v", err)
 	}
-	if b, err := agentReadAll(nil); b != nil || err != nil {
-		t.Errorf("agentReadAll(nil) = %v, %v", b, err)
+	if b, err := readAll(nil); b != nil || err != nil {
+		t.Errorf("readAll(nil) = %v, %v", b, err)
 	}
 }
 
@@ -286,7 +286,7 @@ func TestAgentCov_BindSkills(t *testing.T) {
 			"POST /api/v1/agents/a1/skills": {status: 500, body: "boom"},
 		})
 		err := agentBindSkills(context.Background(), c, "a1", "viktor", []string{"research"})
-		if err == nil || !strings.Contains(err.Error(), "HTTP 500") {
+		if err == nil || !strings.Contains(err.Error(), "unexpected status 500") {
 			t.Fatalf("got %v", err)
 		}
 	})
@@ -354,7 +354,7 @@ func TestAgentCov_BindEnvRefs(t *testing.T) {
 			"POST /api/v1/agents/a1/credentials": {status: 500, body: "boom"},
 		})
 		err := agentBindEnvRefs(context.Background(), c, "a1", "viktor", []string{"API_KEY"})
-		if err == nil || !strings.Contains(err.Error(), "HTTP 500") {
+		if err == nil || !strings.Contains(err.Error(), "unexpected status 500") {
 			t.Fatalf("500: got %v", err)
 		}
 	})
@@ -560,7 +560,7 @@ func TestAgentCov_Plan_CreateExecFailures(t *testing.T) {
 			"POST /api/v1/agents": {status: 500, body: "boom"},
 		})
 		item := planCreate(t, c)
-		if err := item.Exec(context.Background(), c); err == nil || !strings.Contains(err.Error(), "HTTP 500") {
+		if err := item.Exec(context.Background(), c); err == nil || !strings.Contains(err.Error(), "unexpected status 500") {
 			t.Fatalf("got %v", err)
 		}
 	})
@@ -612,7 +612,7 @@ func TestAgentCov_Plan_UpdateExec(t *testing.T) {
 		if err != nil || len(items) != 1 || items[0].Action != internalapi.ActionUpdate {
 			t.Fatalf("plan: items=%+v err=%v", items, err)
 		}
-		if err := items[0].Exec(context.Background(), c); err == nil || !strings.Contains(err.Error(), "HTTP 500") {
+		if err := items[0].Exec(context.Background(), c); err == nil || !strings.Contains(err.Error(), "unexpected status 500") {
 			t.Fatalf("got %v", err)
 		}
 	})

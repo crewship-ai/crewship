@@ -27,7 +27,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/manifest/internalapi"
@@ -212,7 +211,7 @@ func ExportRecipes(ctx context.Context, c internalapi.Client) ([]*RecipeDocument
 	if err := recipeCheckStatus(resp, "list recipes"); err != nil {
 		return nil, err
 	}
-	body, err := recipeReadAll(resp.Body)
+	body, err := readAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("read /api/v1/recipes body: %w", err)
 	}
@@ -259,7 +258,7 @@ func LookupRecipeRemote(ctx context.Context, c internalapi.Client, d *RecipeDocu
 	if err := recipeCheckStatus(resp, "get recipe "+d.Metadata.Slug); err != nil {
 		return nil, err
 	}
-	body, err := recipeReadAll(resp.Body)
+	body, err := readAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("read %s body: %w", path, err)
 	}
@@ -291,17 +290,8 @@ func recipeCheckStatus(resp *internalapi.Response, op string) error {
 		return fmt.Errorf("%s: nil response", op)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := recipeReadAll(resp.Body)
+		body, _ := readAll(resp.Body)
 		return fmt.Errorf("%s: HTTP %d: %s", op, resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 	return nil
-}
-
-// recipeReadAll consumes the body reader; tolerates nil so that mock
-// responses without bodies stay cheap to construct.
-func recipeReadAll(r io.Reader) ([]byte, error) {
-	if r == nil {
-		return nil, nil
-	}
-	return io.ReadAll(r)
 }

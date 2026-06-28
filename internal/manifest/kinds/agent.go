@@ -426,7 +426,7 @@ func (d *AgentDocument) Plan(ctx context.Context, c internalapi.Client, remote *
 				if err != nil {
 					return fmt.Errorf("POST /api/v1/agents: %w", err)
 				}
-				if err := agentCheckStatus(resp, "create agent "+slug); err != nil {
+				if err := checkStatus(resp, "create agent "+slug); err != nil {
 					return err
 				}
 				created, err := agentDecodeCreateResponse(resp.Body)
@@ -483,7 +483,7 @@ func (d *AgentDocument) Plan(ctx context.Context, c internalapi.Client, remote *
 				if err != nil {
 					return fmt.Errorf("PATCH /api/v1/agents/%s: %w", agentID, err)
 				}
-				if err := agentCheckStatus(resp, "update agent "+slug); err != nil {
+				if err := checkStatus(resp, "update agent "+slug); err != nil {
 					return err
 				}
 			}
@@ -569,10 +569,10 @@ func (d *AgentDocument) diffPatch(remote *AgentRemote, crewID string) map[string
 	if d.Metadata.Name != "" && d.Metadata.Name != remote.Name {
 		patch["name"] = d.Metadata.Name
 	}
-	if d.Metadata.Description != "" && d.Metadata.Description != agentDerefOrEmpty(remote.Description) {
+	if d.Metadata.Description != "" && d.Metadata.Description != deref(remote.Description) {
 		patch["description"] = d.Metadata.Description
 	}
-	if d.Spec.RoleTitle != "" && d.Spec.RoleTitle != agentDerefOrEmpty(remote.RoleTitle) {
+	if d.Spec.RoleTitle != "" && d.Spec.RoleTitle != deref(remote.RoleTitle) {
 		patch["role_title"] = d.Spec.RoleTitle
 	}
 	if d.Spec.AgentRole != "" && d.Spec.AgentRole != remote.AgentRole {
@@ -582,10 +582,10 @@ func (d *AgentDocument) diffPatch(remote *AgentRemote, crewID string) map[string
 		patch["cli_adapter"] = d.Spec.CLIAdapter
 	}
 	if d.Spec.LLM.Provider != "" && d.Spec.LLM.Provider != "NONE" &&
-		d.Spec.LLM.Provider != agentDerefOrEmpty(remote.LLMProvider) {
+		d.Spec.LLM.Provider != deref(remote.LLMProvider) {
 		patch["llm_provider"] = d.Spec.LLM.Provider
 	}
-	if d.Spec.LLM.Model != "" && d.Spec.LLM.Model != agentDerefOrEmpty(remote.LLMModel) {
+	if d.Spec.LLM.Model != "" && d.Spec.LLM.Model != deref(remote.LLMModel) {
 		patch["llm_model"] = d.Spec.LLM.Model
 	}
 	if d.Spec.ToolProfile != "" && d.Spec.ToolProfile != remote.ToolProfile {
@@ -594,7 +594,7 @@ func (d *AgentDocument) diffPatch(remote *AgentRemote, crewID string) map[string
 	if d.Spec.TimeoutSeconds > 0 && d.Spec.TimeoutSeconds != remote.TimeoutSeconds {
 		patch["timeout_seconds"] = d.Spec.TimeoutSeconds
 	}
-	if d.Spec.Prompt != "" && d.Spec.Prompt != agentDerefOrEmpty(remote.SystemPrompt) {
+	if d.Spec.Prompt != "" && d.Spec.Prompt != deref(remote.SystemPrompt) {
 		patch["system_prompt"] = d.Spec.Prompt
 	}
 	if d.Spec.MemoryEnabled != nil && *d.Spec.MemoryEnabled != remote.MemoryEnabled {
@@ -690,7 +690,7 @@ func ExportAgents(ctx context.Context, c internalapi.Client) ([]*AgentDocument, 
 				Slug: r.Slug,
 			},
 			Spec: AgentSpec{
-				RoleTitle:      agentDerefOrEmpty(r.RoleTitle),
+				RoleTitle:      deref(r.RoleTitle),
 				AgentRole:      r.AgentRole,
 				CLIAdapter:     r.CLIAdapter,
 				ToolProfile:    r.ToolProfile,
@@ -747,10 +747,10 @@ func agentListAll(ctx context.Context, c internalapi.Client) ([]AgentRemote, err
 	if err != nil {
 		return nil, fmt.Errorf("GET /api/v1/agents: %w", err)
 	}
-	if err := agentCheckStatus(resp, "list agents"); err != nil {
+	if err := checkStatus(resp, "list agents"); err != nil {
 		return nil, err
 	}
-	body, err := agentReadAll(resp.Body)
+	body, err := readAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("read /api/v1/agents body: %w", err)
 	}
@@ -771,10 +771,10 @@ func agentListCrews(ctx context.Context, c internalapi.Client) ([]agentCrewStub,
 	if err != nil {
 		return nil, fmt.Errorf("GET /api/v1/crews: %w", err)
 	}
-	if err := agentCheckStatus(resp, "list crews"); err != nil {
+	if err := checkStatus(resp, "list crews"); err != nil {
 		return nil, err
 	}
-	body, err := agentReadAll(resp.Body)
+	body, err := readAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("read /api/v1/crews body: %w", err)
 	}
@@ -795,10 +795,10 @@ func agentListSkills(ctx context.Context, c internalapi.Client) ([]agentSkillStu
 	if err != nil {
 		return nil, fmt.Errorf("GET /api/v1/skills: %w", err)
 	}
-	if err := agentCheckStatus(resp, "list skills"); err != nil {
+	if err := checkStatus(resp, "list skills"); err != nil {
 		return nil, err
 	}
-	body, err := agentReadAll(resp.Body)
+	body, err := readAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("read /api/v1/skills body: %w", err)
 	}
@@ -820,10 +820,10 @@ func agentListCredentials(ctx context.Context, c internalapi.Client) ([]agentCre
 	if err != nil {
 		return nil, fmt.Errorf("GET /api/v1/credentials: %w", err)
 	}
-	if err := agentCheckStatus(resp, "list credentials"); err != nil {
+	if err := checkStatus(resp, "list credentials"); err != nil {
 		return nil, err
 	}
-	body, err := agentReadAll(resp.Body)
+	body, err := readAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("read /api/v1/credentials body: %w", err)
 	}
@@ -871,7 +871,7 @@ func agentBindSkills(ctx context.Context, c internalapi.Client, agentID, agentSl
 		if resp != nil && resp.StatusCode == 409 {
 			continue
 		}
-		if err := agentCheckStatus(resp, fmt.Sprintf("bind skill %q to agent %q", slug, agentSlug)); err != nil {
+		if err := checkStatus(resp, fmt.Sprintf("bind skill %q to agent %q", slug, agentSlug)); err != nil {
 			return err
 		}
 	}
@@ -914,7 +914,7 @@ func agentBindEnvRefs(ctx context.Context, c internalapi.Client, agentID, agentS
 		if resp != nil && resp.StatusCode == 409 {
 			continue
 		}
-		if err := agentCheckStatus(resp, fmt.Sprintf("bind credential %q to agent %q", env, agentSlug)); err != nil {
+		if err := checkStatus(resp, fmt.Sprintf("bind credential %q to agent %q", env, agentSlug)); err != nil {
 			return err
 		}
 	}
@@ -930,10 +930,10 @@ func agentListSkillSlugs(ctx context.Context, c internalapi.Client, agentID stri
 	if err != nil {
 		return nil, err
 	}
-	if err := agentCheckStatus(resp, "list agent skills"); err != nil {
+	if err := checkStatus(resp, "list agent skills"); err != nil {
 		return nil, err
 	}
-	body, err := agentReadAll(resp.Body)
+	body, err := readAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}
@@ -970,10 +970,10 @@ func agentListCredentialEnvNames(ctx context.Context, c internalapi.Client, agen
 	if err != nil {
 		return nil, err
 	}
-	if err := agentCheckStatus(resp, "list agent credentials"); err != nil {
+	if err := checkStatus(resp, "list agent credentials"); err != nil {
 		return nil, err
 	}
-	body, err := agentReadAll(resp.Body)
+	body, err := readAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}
@@ -1027,45 +1027,3 @@ func agentDecodeCreateResponse(r io.Reader) (*agentCreatedResponse, error) {
 	return out, nil
 }
 
-// agentDerefOrEmpty unboxes a *string into its value or "" for nil.
-// The agents REST API returns sql.NullString-style pointers for
-// nullable text columns; the manifest treats absent and "" as
-// equivalent for diffing purposes.
-func agentDerefOrEmpty(p *string) string {
-	if p == nil {
-		return ""
-	}
-	return *p
-}
-
-// agentCheckStatus mirrors milestoneCheckStatus / projectExpectSuccess
-// — duplicated here under an agent-prefix to avoid the cross-file
-// "which package-local helper wins" puzzle that would arise from
-// reusing the shared helpers.checkStatus across kinds that need
-// slightly different error wrapping. Reads up to 4 KiB of the body
-// into the error message so the server's RFC 7807 Problem Details
-// reach the CLI.
-func agentCheckStatus(resp *internalapi.Response, op string) error {
-	if resp == nil {
-		return fmt.Errorf("%s: nil response", op)
-	}
-	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		return nil
-	}
-	snippet := ""
-	if resp.Body != nil {
-		if b, err := io.ReadAll(io.LimitReader(resp.Body, 4<<10)); err == nil && len(b) > 0 {
-			snippet = ": " + strings.TrimSpace(string(b))
-		}
-	}
-	return fmt.Errorf("%s: HTTP %d%s", op, resp.StatusCode, snippet)
-}
-
-// agentReadAll consumes a Response body and returns the bytes;
-// tolerates nil so test mocks can omit Body for not-stubbed paths.
-func agentReadAll(r io.Reader) ([]byte, error) {
-	if r == nil {
-		return nil, nil
-	}
-	return io.ReadAll(r)
-}

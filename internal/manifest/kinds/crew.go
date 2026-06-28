@@ -1022,17 +1022,6 @@ func parseMiseConfigJSON(s string) (*MiseConfig, error) {
 
 // ── Small helpers ────────────────────────────────────────────────────────
 
-// deref returns the pointee or "" for nil. Used heavily in the
-// update-patch path where remote-side fields are pointers (so we
-// can distinguish "no value" from "empty value") but the diff only
-// cares about the string form.
-func deref(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return *s
-}
-
 // jsonStringEqual normalises two JSON strings (parsing + re-marshaling)
 // before comparing. Catches whitespace differences and key-order
 // drift that would otherwise produce false "drifted" verdicts on

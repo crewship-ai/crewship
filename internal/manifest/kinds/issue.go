@@ -66,7 +66,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"sort"
 	"strings"
 
@@ -449,7 +448,7 @@ func (d *IssueDocument) Plan(ctx context.Context, c internalapi.Client, remote *
 				if err != nil {
 					return fmt.Errorf("POST %s: %w", path, err)
 				}
-				return issueCheckStatus(resp, "create issue "+slug)
+				return checkStatus(resp, "create issue "+slug)
 			},
 		}}, nil
 	}
@@ -526,7 +525,7 @@ func (d *IssueDocument) Plan(ctx context.Context, c internalapi.Client, remote *
 			if err != nil {
 				return fmt.Errorf("PATCH %s: %w", path, err)
 			}
-			return issueCheckStatus(resp, "update issue "+slug)
+			return checkStatus(resp, "update issue "+slug)
 		},
 	}}, nil
 }
@@ -588,7 +587,7 @@ func (d *IssueDocument) diffPatch(remote *IssueRemote, projectID, assigneeID str
 	if t := d.resolvedTitle(); t != "" && t != remote.Title {
 		patch["title"] = t
 	}
-	if d.Spec.Description != "" && d.Spec.Description != issueDerefOrEmpty(remote.Description) {
+	if d.Spec.Description != "" && d.Spec.Description != deref(remote.Description) {
 		patch["description"] = d.Spec.Description
 	}
 	if d.Spec.Priority != "" && d.Spec.Priority != remote.Priority {
@@ -606,14 +605,14 @@ func (d *IssueDocument) diffPatch(remote *IssueRemote, projectID, assigneeID str
 	// "set to empty string", not "clear". We document the
 	// limitation; clearing is a UI operation today.
 	if assigneeID != "" {
-		remoteAssigneeID := issueDerefOrEmpty(remote.AssigneeID)
-		remoteAssigneeType := issueDerefOrEmpty(remote.AssigneeType)
+		remoteAssigneeID := deref(remote.AssigneeID)
+		remoteAssigneeType := deref(remote.AssigneeType)
 		if remoteAssigneeID != assigneeID || remoteAssigneeType != "agent" {
 			patch["assignee_type"] = "agent"
 			patch["assignee_id"] = assigneeID
 		}
 	}
-	if projectID != "" && projectID != issueDerefOrEmpty(remote.ProjectID) {
+	if projectID != "" && projectID != deref(remote.ProjectID) {
 		patch["project_id"] = projectID
 	}
 
@@ -841,7 +840,7 @@ func ExportIssues(ctx context.Context, c internalapi.Client) ([]*IssueDocument, 
 				Spec: IssueSpec{
 					CrewSlug:    crew.Slug,
 					Title:       row.Title,
-					Description: issueDerefOrEmpty(row.Description),
+					Description: deref(row.Description),
 					Priority:    row.Priority,
 					Status:      row.Status,
 				},
@@ -851,7 +850,7 @@ func ExportIssues(ctx context.Context, c internalapi.Client) ([]*IssueDocument, 
 					doc.Spec.ProjectSlug = slug
 				}
 			}
-			if row.AssigneeID != nil && issueDerefOrEmpty(row.AssigneeType) == "agent" {
+			if row.AssigneeID != nil && deref(row.AssigneeType) == "agent" {
 				if slug, ok := agentSlugByID[*row.AssigneeID]; ok {
 					doc.Spec.AssigneeSlug = slug
 				}
@@ -911,10 +910,10 @@ func issueListCrews(ctx context.Context, c internalapi.Client) ([]issueCrewStub,
 	if err != nil {
 		return nil, fmt.Errorf("GET /api/v1/crews: %w", err)
 	}
-	if err := issueCheckStatus(resp, "list crews"); err != nil {
+	if err := checkStatus(resp, "list crews"); err != nil {
 		return nil, err
 	}
-	body, err := issueReadAll(resp.Body)
+	body, err := readAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("read /api/v1/crews body: %w", err)
 	}
@@ -935,10 +934,10 @@ func issueListProjects(ctx context.Context, c internalapi.Client) ([]issueProjec
 	if err != nil {
 		return nil, fmt.Errorf("GET /api/v1/projects: %w", err)
 	}
-	if err := issueCheckStatus(resp, "list projects"); err != nil {
+	if err := checkStatus(resp, "list projects"); err != nil {
 		return nil, err
 	}
-	body, err := issueReadAll(resp.Body)
+	body, err := readAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("read /api/v1/projects body: %w", err)
 	}
@@ -958,10 +957,10 @@ func issueListAgents(ctx context.Context, c internalapi.Client) ([]issueAgentStu
 	if err != nil {
 		return nil, fmt.Errorf("GET /api/v1/agents: %w", err)
 	}
-	if err := issueCheckStatus(resp, "list agents"); err != nil {
+	if err := checkStatus(resp, "list agents"); err != nil {
 		return nil, err
 	}
-	body, err := issueReadAll(resp.Body)
+	body, err := readAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("read /api/v1/agents body: %w", err)
 	}
@@ -983,10 +982,10 @@ func issueListLabels(ctx context.Context, c internalapi.Client) ([]issueLabelStu
 	if err != nil {
 		return nil, fmt.Errorf("GET /api/v1/labels: %w", err)
 	}
-	if err := issueCheckStatus(resp, "list labels"); err != nil {
+	if err := checkStatus(resp, "list labels"); err != nil {
 		return nil, err
 	}
-	body, err := issueReadAll(resp.Body)
+	body, err := readAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("read /api/v1/labels body: %w", err)
 	}
@@ -1029,10 +1028,10 @@ func issueListForCrew(ctx context.Context, c internalapi.Client, crewID string) 
 		if err != nil {
 			return nil, fmt.Errorf("GET %s: %w", path, err)
 		}
-		if err := issueCheckStatus(resp, "list issues for crew"); err != nil {
+		if err := checkStatus(resp, "list issues for crew"); err != nil {
 			return nil, err
 		}
-		body, err := issueReadAll(resp.Body)
+		body, err := readAll(resp.Body)
 		if err != nil {
 			return nil, fmt.Errorf("read %s body: %w", path, err)
 		}
@@ -1054,45 +1053,3 @@ func issueListForCrew(ctx context.Context, c internalapi.Client, crewID string) 
 	return all, nil
 }
 
-// issueDerefOrEmpty unboxes a *string into its value or "" for nil.
-// The issues REST API returns sql.NullString-style pointers for
-// nullable text columns; the manifest treats absent and "" as
-// equivalent for diffing purposes.
-func issueDerefOrEmpty(p *string) string {
-	if p == nil {
-		return ""
-	}
-	return *p
-}
-
-// issueCheckStatus mirrors agentCheckStatus / milestoneCheckStatus —
-// duplicated here under an issue-prefix to avoid the cross-file
-// "which package-local helper wins" puzzle that would arise from
-// reusing the shared helpers.checkStatus across kinds that need
-// slightly different error wrapping. Reads up to 4 KiB of the body
-// into the error message so the server's RFC 7807 Problem Details
-// reach the CLI.
-func issueCheckStatus(resp *internalapi.Response, op string) error {
-	if resp == nil {
-		return fmt.Errorf("%s: nil response", op)
-	}
-	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		return nil
-	}
-	snippet := ""
-	if resp.Body != nil {
-		if b, err := io.ReadAll(io.LimitReader(resp.Body, 4<<10)); err == nil && len(b) > 0 {
-			snippet = ": " + strings.TrimSpace(string(b))
-		}
-	}
-	return fmt.Errorf("%s: HTTP %d%s", op, resp.StatusCode, snippet)
-}
-
-// issueReadAll consumes a Response body and returns the bytes;
-// tolerates nil so test mocks can omit Body for not-stubbed paths.
-func issueReadAll(r io.Reader) ([]byte, error) {
-	if r == nil {
-		return nil, nil
-	}
-	return io.ReadAll(r)
-}
