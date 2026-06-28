@@ -324,18 +324,12 @@ func (h *TriageHandler) DeleteRule(w http.ResponseWriter, r *http.Request) {
 	ruleID := r.PathValue("ruleId")
 	wsID := WorkspaceIDFromContext(r.Context())
 
-	res, err := h.db.ExecContext(r.Context(),
-		`DELETE FROM triage_rules WHERE id = ? AND workspace_id = ?`, ruleID, wsID)
+	found, err := deleteByID(r.Context(), h.db, "triage_rules", ruleID, wsID)
 	if err != nil {
 		internalError(w, r, h.logger, "delete triage rule", err)
 		return
 	}
-	affected, err := res.RowsAffected()
-	if err != nil {
-		internalError(w, r, h.logger, "delete triage rule rows affected", err)
-		return
-	}
-	if affected == 0 {
+	if !found {
 		writeProblem(w, r, http.StatusNotFound, "Triage rule not found")
 		return
 	}

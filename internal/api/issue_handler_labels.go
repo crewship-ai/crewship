@@ -157,18 +157,12 @@ func (h *IssueHandler) DeleteLabel(w http.ResponseWriter, r *http.Request) {
 	labelID := r.PathValue("labelId")
 	wsID := WorkspaceIDFromContext(r.Context())
 
-	res, err := h.db.ExecContext(r.Context(),
-		`DELETE FROM labels WHERE id = ? AND workspace_id = ?`, labelID, wsID)
+	found, err := deleteByID(r.Context(), h.db, "labels", labelID, wsID)
 	if err != nil {
 		internalError(w, r, h.logger, "delete label", err)
 		return
 	}
-	affected, err := res.RowsAffected()
-	if err != nil {
-		internalError(w, r, h.logger, "delete label rows affected", err)
-		return
-	}
-	if affected == 0 {
+	if !found {
 		writeProblem(w, r, http.StatusNotFound, "Label not found")
 		return
 	}

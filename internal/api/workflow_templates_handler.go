@@ -446,18 +446,12 @@ func (h *WorkflowTemplateHandler) Delete(w http.ResponseWriter, r *http.Request)
 	id := r.PathValue("id")
 	wsID := WorkspaceIDFromContext(r.Context())
 
-	res, err := h.db.ExecContext(r.Context(),
-		`DELETE FROM workflow_templates WHERE id = ? AND workspace_id = ?`, id, wsID)
+	found, err := deleteByID(r.Context(), h.db, "workflow_templates", id, wsID)
 	if err != nil {
 		internalError(w, r, h.logger, "delete workflow template", err)
 		return
 	}
-	affected, err := res.RowsAffected()
-	if err != nil {
-		internalError(w, r, h.logger, "delete workflow template rows affected", err)
-		return
-	}
-	if affected == 0 {
+	if !found {
 		writeProblem(w, r, http.StatusNotFound, "Workflow template not found")
 		return
 	}

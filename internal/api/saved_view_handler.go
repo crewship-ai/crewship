@@ -275,18 +275,12 @@ func (h *SavedViewHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	res, err := h.db.ExecContext(r.Context(),
-		`DELETE FROM saved_views WHERE id = ? AND workspace_id = ?`, viewID, wsID)
+	found, err := deleteByID(r.Context(), h.db, "saved_views", viewID, wsID)
 	if err != nil {
 		internalError(w, r, h.logger, "delete saved view", err)
 		return
 	}
-	affected, err := res.RowsAffected()
-	if err != nil {
-		internalError(w, r, h.logger, "delete saved view rows affected", err)
-		return
-	}
-	if affected == 0 {
+	if !found {
 		writeProblem(w, r, http.StatusNotFound, "Saved view not found")
 		return
 	}
