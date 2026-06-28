@@ -640,37 +640,15 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	// text + compact summary used for search and prompt-context recall.
 	partAcc := conversation.NewPartAccumulator()
 
-	req := orchestrator.AgentRunRequest{
-		AgentID:            info.AgentID,
-		AgentSlug:          info.AgentSlug,
-		AgentRole:          info.AgentRole,
-		CrewID:             info.CrewID,
-		CrewSlug:           info.CrewSlug,
-		WorkspaceID:        info.WorkspaceID,
-		ChatID:             chatID,
-		ContainerID:        containerID,
-		CLIAdapter:         info.CLIAdapter,
-		LLMModel:           info.LLMModel,
-		SystemPrompt:       info.SystemPrompt,
-		UserMessage:        content,
-		ToolProfile:        info.ToolProfile,
-		Credentials:        info.Credentials,
-		TimeoutSecs:        info.TimeoutSecs,
-		MemoryEnabled:      info.MemoryEnabled,
-		CrewMembers:        info.CrewMembers,
-		NetworkMode:        info.NetworkMode,
-		AllowedDomains:     info.AllowedDomains,
-		MemoryMB:           memoryMB,
-		CPUs:               cpuVal,
-		TTLHours:           info.TTLHours,
-		MCPServers:         info.MCPServers,
-		CrewMCPConfigJSON:  info.CrewMCPConfigJSON,
-		AgentMCPConfigJSON: info.AgentMCPConfigJSON,
-		PreferredLanguage:  info.PreferredLanguage,
-		Skills:             info.InstalledSkills,
-		OpenedByUserID:     info.OpenedByUserID,
-		RoleTitle:          info.RoleTitle,
-	}
+	req := info.ToAgentRunRequest(AgentRunOverrides{
+		ChatID:      chatID,
+		ContainerID: containerID,
+		UserMessage: content,
+		LLMModel:    info.LLMModel,
+		TimeoutSecs: info.TimeoutSecs,
+		MemoryMB:    memoryMB,
+		CPUs:        cpuVal,
+	})
 
 	// Only show "Starting agent..." on cold start (first message, container freshly created).
 	// On subsequent messages the container is warm — no progress noise.

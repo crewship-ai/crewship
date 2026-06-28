@@ -208,7 +208,10 @@ func (r *OrchestratorRunner) RunStep(ctx context.Context, req AgentStepRequest) 
 	//
 	// SystemPrompt and ToolProfile likewise stay agent-defined — the
 	// routine doesn't get to mess with persona or tool whitelist.
-	cliAdapter := info.CLIAdapter
+	//
+	// CLIAdapter therefore is not a per-call override: the converter
+	// sources it from info.CLIAdapter, which is the value the old
+	// `cliAdapter := info.CLIAdapter` resolved to.
 	llmModel := info.LLMModel
 	if req.Model != "" {
 		llmModel = req.Model
@@ -230,32 +233,17 @@ func (r *OrchestratorRunner) RunStep(ctx context.Context, req AgentStepRequest) 
 		timeoutSecs = 600 // 10-minute default; agents that need
 		// longer override on a per-step basis via DSL TimeoutSec.
 	}
-	runReq := orchestrator.AgentRunRequest{
-		AgentID:            info.AgentID,
-		AgentSlug:          info.AgentSlug,
-		AgentRole:          info.AgentRole,
-		CrewID:             info.CrewID,
-		CrewSlug:           info.CrewSlug,
-		WorkspaceID:        info.WorkspaceID,
-		ChatID:             chatID,
-		ContainerID:        containerID,
-		CLIAdapter:         cliAdapter,
-		LLMModel:           llmModel,
-		SystemPrompt:       info.SystemPrompt,
-		UserMessage:        req.Prompt,
-		ToolProfile:        info.ToolProfile,
-		Credentials:        info.Credentials,
-		TimeoutSecs:        timeoutSecs,
-		MemoryEnabled:      info.MemoryEnabled,
-		CrewMembers:        info.CrewMembers,
-		NetworkMode:        info.NetworkMode,
-		AllowedDomains:     info.AllowedDomains,
-		MCPServers:         info.MCPServers,
-		CrewMCPConfigJSON:  info.CrewMCPConfigJSON,
-		AgentMCPConfigJSON: info.AgentMCPConfigJSON,
-		PreferredLanguage:  info.PreferredLanguage,
-		Skills:             info.InstalledSkills,
-	}
+	runReq := info.ToAgentRunRequest(chatbridge.AgentRunOverrides{
+		ChatID:      chatID,
+		ContainerID: containerID,
+		UserMessage: req.Prompt,
+		LLMModel:    llmModel,
+		TimeoutSecs: timeoutSecs,
+		// Previously omitted — pipeline-launched agents silently lost
+		// their resource limits. Pass the agent's configured limits.
+		MemoryMB: info.MemoryMB,
+		CPUs:     info.CPUs,
+	})
 
 	// 7. Run with buffering handler that captures text + result
 	//    events. The "result" event carries usage metadata
