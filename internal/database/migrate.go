@@ -1474,6 +1474,12 @@ END;
 	// reused for bulk-replay grouping. See
 	// migrate_consts_v120_routine_run_observability.go.
 	{version: 120, name: "routine_run_observability", sql: migrationRoutineRunObservability},
+
+	// v121: per-step prompt/model override layer — tweak one step's
+	// prompt or tier without bumping the routine version (applied at run
+	// start over the versioned DSL). See
+	// migrate_consts_v121_step_overrides.go.
+	{version: 121, name: "routine_step_overrides", sql: migrationStepOverrides},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

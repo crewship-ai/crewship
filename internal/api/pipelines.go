@@ -181,6 +181,10 @@ func (h *PipelineHandler) newExecutor() *pipeline.Executor {
 		// thin DB wrapper with no goroutines. Keeping construction
 		// here means tests don't need to set it explicitly.
 		exec = exec.WithIdempotencyStore(pipeline.NewIdempotencyStore(h.db))
+		// Step-override store is the same shape — a thin DB wrapper —
+		// so construct it here too. No-op at run time unless a step
+		// actually has an override row.
+		exec = exec.WithStepOverrides(pipeline.NewStepOverrideStore(h.db))
 	}
 	if h.runStore != nil {
 		exec = exec.WithRunStore(h.runStore)

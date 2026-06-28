@@ -25,6 +25,12 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines", authed(wsCtx(http.HandlerFunc(pipes.List))))
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}", authed(wsCtx(http.HandlerFunc(pipes.Get))))
 	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/run", authed(wsCtx(http.HandlerFunc(pipes.Run))))
+	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/run_batch", authed(wsCtx(http.HandlerFunc(pipes.RunBatch))))
+	// Per-step prompt/model override layer (v121) — tweak a step without
+	// bumping the routine version.
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/overrides", authed(wsCtx(http.HandlerFunc(pipes.ListStepOverrides))))
+	r.mux.Handle("PUT /api/v1/workspaces/{workspaceId}/pipelines/{slug}/steps/{stepId}/override", authed(wsCtx(http.HandlerFunc(pipes.SetStepOverride))))
+	r.mux.Handle("DELETE /api/v1/workspaces/{workspaceId}/pipelines/{slug}/steps/{stepId}/override", authed(wsCtx(http.HandlerFunc(pipes.DeleteStepOverride))))
 	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/dry_run", authed(wsCtx(http.HandlerFunc(pipes.DryRun))))
 	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/test_run", authed(wsCtx(http.HandlerFunc(pipes.TestRun))))
 	r.mux.Handle("DELETE /api/v1/workspaces/{workspaceId}/pipelines/{slug}", authed(wsCtx(http.HandlerFunc(pipes.Delete))))

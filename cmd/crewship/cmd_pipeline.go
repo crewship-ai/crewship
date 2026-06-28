@@ -382,8 +382,53 @@ var pipelineRunCmd = &cobra.Command{
 		tierOverride, _ := cmd.Flags().GetString("tier-override")
 		tags, _ := cmd.Flags().GetStringSlice("tag")
 		metadataRaw, _ := cmd.Flags().GetString("metadata")
+		batchFile, _ := cmd.Flags().GetString("batch")
 		client := newAPIClient()
 		ws := client.GetWorkspaceID()
+
+		// --batch: read a JSONL (one inputs object per line) or JSON-array
+		// file and fan out N runs of this routine via run_batch. Each run
+		// is tagged batch:<id> for retrieval.
+		if batchFile != "" {
+			items, err := readBatchItems(batchFile, tags, metadataRaw)
+			if err != nil {
+				return err
+			}
+			batchBody := map[string]any{"items": items}
+			if tierOverride != "" {
+				batchBody["tier_override"] = tierOverride
+			}
+			resp, err := client.WithTimeout(evalRunTimeout).Do("POST", fmt.Sprintf("/api/v1/workspaces/%s/pipelines/%s/run_batch", ws, args[0]), batchBody)
+			if err != nil {
+				return err
+			}
+			defer resp.Body.Close()
+			if err := cli.CheckError(resp); err != nil {
+				return err
+			}
+			var br struct {
+				BatchID string `json:"batch_id"`
+				Count   int    `json:"count"`
+				Results []struct {
+					Index  int    `json:"index"`
+					RunID  string `json:"run_id"`
+					Status string `json:"status"`
+					Error  string `json:"error"`
+				} `json:"results"`
+			}
+			if err := json.NewDecoder(resp.Body).Decode(&br); err != nil {
+				return fmt.Errorf("decode batch response: %w", err)
+			}
+			ok := 0
+			for _, r := range br.Results {
+				if r.Error == "" {
+					ok++
+				}
+			}
+			fmt.Printf("Batch %s: %d runs (%d ok). Retrieve with: crewship routine runs %s --tag batch:%s\n",
+				br.BatchID, br.Count, ok, args[0], br.BatchID)
+			return nil
+		}
 		runBody := map[string]any{"inputs": inputs}
 		if tierOverride != "" {
 			runBody["tier_override"] = tierOverride
@@ -639,6 +684,59 @@ var pipelineRunsCmd = &cobra.Command{
 // passed via --name on the CLI produces the same slug the sidecar
 // would mint for the same name from an in-container agent. Keeps
 // the two save flows interchangeable.
+// readBatchItems parses a --batch file into run_batch items. Accepts a
+// JSON array of input objects OR JSONL (one input object per line). The
+// run-level --tag/--metadata flags apply to every item.
+func readBatchItems(path string, tags []string, metadataRaw string) ([]map[string]any, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read batch file: %w", err)
+	}
+	var metadata map[string]any
+	if metadataRaw != "" {
+		if err := json.Unmarshal([]byte(metadataRaw), &metadata); err != nil {
+			return nil, fmt.Errorf("parse --metadata JSON: %w", err)
+		}
+	}
+	build := func(inputs map[string]any) map[string]any {
+		item := map[string]any{"inputs": inputs}
+		if len(tags) > 0 {
+			item["tags"] = tags
+		}
+		if metadata != nil {
+			item["metadata"] = metadata
+		}
+		return item
+	}
+	trimmed := strings.TrimSpace(string(data))
+	var items []map[string]any
+	if strings.HasPrefix(trimmed, "[") {
+		var arr []map[string]any
+		if err := json.Unmarshal(data, &arr); err != nil {
+			return nil, fmt.Errorf("parse batch JSON array: %w", err)
+		}
+		for _, inputs := range arr {
+			items = append(items, build(inputs))
+		}
+	} else {
+		for _, line := range strings.Split(trimmed, "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			var inputs map[string]any
+			if err := json.Unmarshal([]byte(line), &inputs); err != nil {
+				return nil, fmt.Errorf("parse batch line %q: %w", line, err)
+			}
+			items = append(items, build(inputs))
+		}
+	}
+	if len(items) == 0 {
+		return nil, fmt.Errorf("batch file %s has no input sets", path)
+	}
+	return items, nil
+}
+
 func slugifyName(name string) string {
 	var out []rune
 	prevHyphen := true
@@ -697,6 +795,7 @@ func init() {
 	pipelineRunCmd.Flags().String("tier-override", "", "force every agent_run step onto a tier (trivial|fast|moderate|smart). Step-level model_override still wins. Empty = use authored complexity.")
 	pipelineRunCmd.Flags().StringSlice("tag", nil, "attach tag(s) to the run for filtering/grouping (repeatable; max 10)")
 	pipelineRunCmd.Flags().String("metadata", "", "JSON object stored on the run + exposed to steps (e.g. '{\"source\":\"manual\"}')")
+	pipelineRunCmd.Flags().String("batch", "", "path to a JSONL/JSON-array file of input sets — fan out N runs (tagged batch:<id>)")
 
 	pipelineDryRunCmd.Flags().String("inputs", "", "JSON inputs for the dry-run preview")
 

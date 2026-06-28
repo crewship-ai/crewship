@@ -574,3 +574,35 @@ curl -X POST <callback_url> -d '{"approved":true,"payload":{"result":"ok"}}'
 `approved` defaults to `true` (bare POST = "task done, continue").
 `payload` is stored on the waitpoint for the resumed step. Endpoint:
 `POST /api/v1/waitpoint-tokens/{token}`.
+
+## Batch trigger
+
+Fan out N runs of one routine from an array of input sets. Every run is
+tagged `batch:<id>` so the set is retrievable.
+
+```
+crewship routine run my-routine --batch inputs.jsonl --tag nightly
+crewship routine runs my-routine --tag batch:<id>
+```
+
+`inputs.jsonl` is one inputs object per line (or a JSON array). Endpoint:
+`POST /pipelines/{slug}/run_batch` (max 50 items/batch). The run-level
+`--tag` / `--metadata` apply to every run in the batch.
+
+## Per-step prompt/model override (no version bump)
+
+Tweak a single step's prompt or model **without** bumping the routine
+version — the override is applied at run start over the versioned DSL.
+The durable, versioned routine stays the source of truth; the override
+is a thin live patch an operator can set and clear.
+
+```
+crewship routine step-override set my-routine summarize \
+  --prompt "Summarize in 3 bullets, lead with the risk." --model smart
+crewship routine step-override list my-routine
+crewship routine step-override clear my-routine summarize
+```
+
+Only non-empty fields win, so a prompt-only override leaves the authored
+model. Endpoints: `PUT|DELETE /pipelines/{slug}/steps/{stepId}/override`,
+`GET /pipelines/{slug}/overrides`.

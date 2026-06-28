@@ -85,6 +85,11 @@ type Executor struct {
 	// trying to exec the script in-process.
 	codeRunner CodeRunner
 
+	// stepOverrides, when wired, patches each run's DSL at start with
+	// per-step prompt/model overrides (v121) so an operator can nudge a
+	// step without bumping the routine version. Nil = run as authored.
+	stepOverrides *StepOverrideStore
+
 	// waitpoints persists wait step state so long sleeps survive
 	// process restarts. Nil = wait steps execute in-memory only
 	// (useful for tests; production wiring uses the WaitpointStore
@@ -150,6 +155,13 @@ func (e *Executor) SetAllowPrivateHTTPForTesting(v bool) {
 // table + encryption.Decrypt).
 func (e *Executor) WithCredentialResolver(fn func(ctx context.Context, credType string) (string, error)) *Executor {
 	e.credentialByType = fn
+	return e
+}
+
+// WithStepOverrides wires the per-step prompt/model override layer.
+// Without it, runs execute the versioned DSL verbatim.
+func (e *Executor) WithStepOverrides(s *StepOverrideStore) *Executor {
+	e.stepOverrides = s
 	return e
 }
 
@@ -371,6 +383,16 @@ func (e *Executor) Run(ctx context.Context, in RunInput) (*RunResult, error) {
 	dsl, err := Parse([]byte(p.DefinitionJSON))
 	if err != nil {
 		return nil, fmt.Errorf("executor: parse stored DSL: %w", err)
+	}
+	// Apply per-step prompt/model overrides (v121) over the versioned
+	// DSL. No-op when the store isn't wired or has no rows for this
+	// pipeline — the run then executes exactly as authored.
+	if e.stepOverrides != nil {
+		if ov, oerr := e.stepOverrides.OverridesFor(ctx, in.PipelineID); oerr == nil {
+			applyStepOverrides(dsl.Steps, ov)
+		} else {
+			e.persistWarn("step overrides", in.PipelineID, oerr)
+		}
 	}
 	in.pipeline = p
 	in.dsl = dsl
