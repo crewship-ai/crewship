@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { usePathname } from "next/navigation"
 
 /**
  * Read a dynamic route segment from the live URL after client hydration.
@@ -25,13 +26,31 @@ import { useEffect, useState } from "react"
  *
  * `pattern` is an effect dependency, so define it at module scope (a
  * stable reference) rather than inline per render.
+ *
+ * Reactivity: keyed on usePathname() so it re-reads on client-side
+ * navigation between sibling dynamic routes that reuse the same component
+ * instance (e.g. /issues/OPS-1 → /issues/OPS-2 — no remount). usePathname
+ * is the change signal; window.location.pathname stays the source of
+ * truth (it never returns the "_" placeholder).
  */
 export function useUrlSegment(pattern: RegExp): string | null {
+  const pathname = usePathname()
   const [value, setValue] = useState<string | null>(null)
   useEffect(() => {
     if (typeof window === "undefined") return
     const m = window.location.pathname.match(pattern)
-    setValue(m ? decodeURIComponent(m[1]) : null)
-  }, [pattern])
+    if (!m) {
+      setValue(null)
+      return
+    }
+    // Malformed percent-encoding (e.g. "/issues/50%off") makes
+    // decodeURIComponent throw — fall back to the raw segment rather than
+    // crashing the page into its error boundary.
+    try {
+      setValue(decodeURIComponent(m[1]))
+    } catch {
+      setValue(m[1])
+    }
+  }, [pattern, pathname])
   return value
 }

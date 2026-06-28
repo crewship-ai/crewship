@@ -147,13 +147,16 @@ func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) 
 		Kind:        "escalation",
 		SourceID:    escalationID,
 		TargetRole:  "MANAGER",
-		Title:       fmt.Sprintf("Agent escalation: %s", inbox.RedactSecrets(truncate(body.Reason, 80))),
-		BodyMD:      inboxBody,
-		SenderType:  "agent",
-		SenderID:    fromAgentID,
-		SenderName:  body.FromSlug,
-		Priority:    "high",
-		Blocking:    true,
+		// Redact BEFORE truncating: a secret whose closing delimiter falls
+		// past the 80-char cut would otherwise be a partial, unmatched
+		// (= unredacted) prefix in the title.
+		Title:      fmt.Sprintf("Agent escalation: %s", truncate(inbox.RedactSecrets(body.Reason), 80)),
+		BodyMD:     inboxBody,
+		SenderType: "agent",
+		SenderID:   fromAgentID,
+		SenderName: body.FromSlug,
+		Priority:   "high",
+		Blocking:   true,
 		Payload: map[string]interface{}{
 			"crew_id":         body.CrewID,
 			"chat_id":         body.ChatID,

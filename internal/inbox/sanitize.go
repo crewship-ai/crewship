@@ -3,6 +3,8 @@ package inbox
 import (
 	"regexp"
 	"strings"
+
+	"github.com/crewship-ai/crewship/internal/lookout"
 )
 
 // This file owns the presentation hygiene for inbox rows: turning the
@@ -26,20 +28,19 @@ import (
 // with a friendly line and (b) let pure-advisory call sites suppress the
 // inbox row entirely instead of spamming one per crew per sweep.
 //
-// Matched case-insensitively. Kept deliberately broad: a false positive
-// just means a slightly more generic message, never a dropped real alert
-// (callers only suppress rows that are advisories by construction).
+// Matched case-insensitively. Kept DELIBERATELY NARROW — strong infra
+// signatures only ("the curator/LLM couldn't run"). Loose single words
+// like "unconfigured" / "deny by default" / "workspace_id required" were
+// removed: a real memory-health finding ("references an unconfigured
+// deployment target") must not be matched as an outage and silently
+// dropped. Every marker here is a phrase a genuine finding won't contain.
 var internalErrorMarkers = []string{
 	"llm unavailable",
 	"llm not configured",
 	"llm error",
 	"llm returned",
-	"unparseable",
-	"deny by default",
-	"paymaster:",
-	"workspace_id required",
 	"curator unavailable",
-	"unconfigured",
+	"unparseable response",
 }
 
 // infraFriendly is the user-facing replacement for a leaked plumbing
@@ -84,26 +85,26 @@ var connURIRe = regexp.MustCompile(`([a-zA-Z][a-zA-Z0-9+.\-]*://)[^@\s/]+@`)
 // key; masks the value up to the next whitespace, comma, or quote.
 var kvSecretRe = regexp.MustCompile(`(?i)\b(password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|auth|bearer)\b(\s*[:=]\s*)("?)[^\s",;]+`)
 
-// longTokenRe masks bare high-entropy blobs (>=24 chars of base64/hex-ish
-// material) that aren't otherwise labelled — generated keys an agent
-// might paste raw. Conservative length bound so ordinary identifiers
-// (issue keys, run ids ~20 chars) aren't clobbered.
-var longTokenRe = regexp.MustCompile(`\b[A-Za-z0-9_\-+/]{32,}={0,2}\b`)
-
 // RedactSecrets masks credential material in a free-text string so it
-// never lands in an inbox body that's broadcast to every MANAGER in the
+// never lands in an inbox title/body broadcast to every MANAGER in the
 // workspace. The source-of-truth row (escalations / credentials table)
 // still holds the real value behind its own access control; this is the
 // projection, and the projection must not leak.
+//
+// Provider-aware first: delegates to the vetted lookout.Redact, which
+// masks Anthropic / AWS (AKIA…, only 20 chars) / GitHub PAT / bearer
+// tokens and labelled key=value secrets — coverage a local regex set
+// would keep drifting behind. We then layer connection-string userinfo
+// (redis://:pass@…, postgres://u:p@…) which lookout doesn't target.
 //
 // Idempotent and safe on already-clean text (returns it unchanged).
 func RedactSecrets(s string) string {
 	if s == "" {
 		return s
 	}
-	out := connURIRe.ReplaceAllString(s, "$1••••@")
+	out, _ := lookout.Redact(s)
+	out = connURIRe.ReplaceAllString(out, "$1••••@")
 	out = kvSecretRe.ReplaceAllString(out, "$1$2$3••••")
-	out = longTokenRe.ReplaceAllString(out, "••••")
 	return out
 }
 

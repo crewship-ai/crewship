@@ -688,3 +688,38 @@ func TestInboxHandler_Get(t *testing.T) {
 		t.Errorf("get unknown: code = %d, want 404", rr.Code)
 	}
 }
+
+// TestInboxHandler_List_ActiveExcludesResolved pins the Inbox-tab filter:
+// state=active returns unread + read but NOT resolved, so archived rows
+// don't consume the LIMIT window and hide active items.
+func TestInboxHandler_List_ActiveExcludesResolved(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	h := NewInboxHandler(db, newTestLogger(), nil)
+
+	now := time.Now().UTC()
+	seedInboxItem(t, h, wsID, "a-unread", "message", "unread", "", "", "u", now)
+	seedInboxItem(t, h, wsID, "a-read", "message", "read", "", "", "r", now.Add(-time.Minute))
+	seedInboxItem(t, h, wsID, "a-resolved", "message", "resolved", "", "", "done", now.Add(-time.Hour))
+
+	req := httptest.NewRequest("GET", "/api/v1/inbox?state=active", nil)
+	req = withWorkspaceUser(req, userID, wsID, "OWNER")
+	rr := httptest.NewRecorder()
+	h.List(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp inboxListResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Count != 2 {
+		t.Errorf("active count = %d, want 2 (unread + read, resolved excluded)", resp.Count)
+	}
+	for _, r := range resp.Rows {
+		if r.State == "resolved" {
+			t.Errorf("state=active leaked a resolved row: %s", r.ID)
+		}
+	}
+}

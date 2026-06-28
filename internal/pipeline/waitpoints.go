@@ -183,7 +183,10 @@ INSERT INTO pipeline_waitpoints (
 	// and truncates — so the list row reads cleanly instead of dragging
 	// "\n\n##" into the title. Body is redacted in case the prompt quotes
 	// a credential.
-	title := inbox.CleanTitle(req.Prompt, 80, "Waitpoint pending approval")
+	// Redact the prompt before deriving the title — CleanTitle takes the
+	// first line verbatim, so a credential quoted there would otherwise
+	// land in the title even though the body below is redacted.
+	title := inbox.CleanTitle(inbox.RedactSecrets(req.Prompt), 80, "Waitpoint pending approval")
 	// Give the row a sender so the UI can render an icon + "From" line
 	// instead of a blank. The invoking crew is the most meaningful actor
 	// behind a pipeline approval; fall back to a generic label.

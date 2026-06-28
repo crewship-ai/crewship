@@ -154,13 +154,20 @@ func (h *InboxHandler) List(w http.ResponseWriter, r *http.Request) {
 	q.WriteString(visClause)
 	args = append(args, visArgs...)
 
-	if state != "" && state != "all" {
-		if state != "unread" && state != "read" && state != "resolved" {
-			replyError(w, http.StatusBadRequest, "invalid state")
-			return
-		}
+	switch state {
+	case "", "all":
+		// no state predicate — every visible row
+	case "active":
+		// The Inbox view: everything not archived (unread + read).
+		// Excluding resolved server-side means archived rows don't consume
+		// the LIMIT window and silently push active items out of view.
+		q.WriteString(" AND state != 'resolved'")
+	case "unread", "read", "resolved":
 		q.WriteString(" AND state = ?")
 		args = append(args, state)
+	default:
+		replyError(w, http.StatusBadRequest, "invalid state")
+		return
 	}
 	if kind != "" {
 		q.WriteString(" AND kind = ?")

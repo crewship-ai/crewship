@@ -242,11 +242,16 @@ function SenderAvatar({ item, className }: { item: InboxItem; className?: string
 // there. Mask anything that looks like a secret in the Context card and
 // reveal it only on explicit click — defense in depth + don't shoulder-
 // surf-leak a token sitting in someone's inbox.
-// Mask ONLY genuine secrets: a credential-named key, or a value that's a
-// connection string carrying inline creds (scheme://user:pass@host). A
-// bare long token like a skill_id / run_id / crew_id is an identifier, not
-// a secret — masking those was noise (and the thing the user flagged).
-const SECRET_KEY_RE = /(password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|bearer|credential)/i
+// Display-only defense in depth: the backend already redacts real secrets
+// out of body_md before they ever reach the client (see inbox.RedactSecrets
+// / lookout.Redact — the source of truth). This just hides a credential-
+// looking *Context value* behind a reveal toggle. Keep the key vocabulary
+// in sync with the backend's kvSecretRe so the two agree on "looks secret"
+// (same keys + "credential"). Mask ONLY a credential-named key or a
+// connection string with inline creds — a bare skill_id / run_id / crew_id
+// is an identifier, not a secret (the thing the user flagged).
+const SECRET_KEY_RE =
+  /(password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|auth|bearer|credential)/i
 const SECRET_VAL_RE = /:\/\/[^/@\s]+:[^/@\s]+@/
 
 function looksSecret(key: string, value: string): boolean {
@@ -337,15 +342,16 @@ export function InboxList() {
   // the row greys out of Unread, the detail keeps showing).
   const [selectedSnapshot, setSelectedSnapshot] = useState<InboxItem | null>(null)
 
-  // inbox → fetch everything (state=all) and hide resolved client-side so
-  // a read item stays put; unread/archived map straight through.
-  const filterParam: "all" | "unread" | "resolved" =
-    stateFilter === "inbox" ? "all" : stateFilter === "unread" ? "unread" : "resolved"
+  // inbox → state=active (unread+read, resolved excluded SERVER-SIDE so
+  // archived rows don't eat the LIMIT window); unread/archived map
+  // straight through.
+  const filterParam: "active" | "unread" | "resolved" =
+    stateFilter === "inbox" ? "active" : stateFilter === "unread" ? "unread" : "resolved"
   const { items, unreadCount, loading, error, patch, refresh } = useInbox(workspaceId, filterParam)
 
-  // The list the UI actually renders. On the Inbox tab we drop resolved
-  // rows (they live in Archived) so opening an item marks it read but
-  // doesn't make it vanish — only Archive (→ resolved) removes it.
+  // Server already excludes resolved on the Inbox tab; this is a harmless
+  // belt-and-suspenders so a just-archived row leaves the view instantly
+  // (before the refetch) instead of lingering.
   const visibleItems = useMemo(
     () => (stateFilter === "inbox" ? items.filter((it) => it.state !== "resolved") : items),
     [items, stateFilter],

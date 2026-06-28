@@ -36,6 +36,15 @@ func TestSanitizeReason(t *testing.T) {
 			wantBody:  "Crew memory has 4 contradictions in deployment runbook entries.",
 		},
 		{
+			// Regression: a genuine finding that merely contains a loose
+			// word like "unconfigured" must NOT be flagged as an infra
+			// outage and silently suppressed by the caller.
+			name:      "real finding containing 'unconfigured' is not infra",
+			in:        "Crew memory references an unconfigured deployment target.",
+			wantInfra: false,
+			wantBody:  "Crew memory references an unconfigured deployment target.",
+		},
+		{
 			name:      "empty stays empty, not infra",
 			in:        "",
 			wantInfra: false,
@@ -89,6 +98,14 @@ func TestRedactSecrets(t *testing.T) {
 			name:   "labelled token masked",
 			in:     "api_key: ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ012345",
 			absent: "ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ012345",
+		},
+		{
+			// Provider-aware via lookout: a bare (unlabelled, 20-char) AWS
+			// access key id is below any generic blob bound but must still
+			// be masked.
+			name:   "bare AWS access key id masked via lookout",
+			in:     "deploy used AKIAIOSFODNN7EXAMPLE for s3",
+			absent: "AKIAIOSFODNN7EXAMPLE",
 		},
 		{
 			name: "clean text unchanged",

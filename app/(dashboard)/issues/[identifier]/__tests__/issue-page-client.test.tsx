@@ -8,6 +8,7 @@ import { render, screen, waitFor } from "@testing-library/react"
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
   useParams: () => ({ identifier: "_" }),
+  usePathname: () => (typeof window !== "undefined" ? window.location.pathname : "/"),
 }))
 
 vi.mock("@/hooks/use-workspace", () => ({
