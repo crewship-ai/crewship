@@ -18,14 +18,42 @@ Adding another vendor is intentionally small: one new `case` in `BuildCLICommand
 
 | Adapter | Binary | Turn-1 system prompt | Turn-2+ persistence | Output | Notes |
 |---|---|---|---|---|---|
-| `CLAUDE_CODE` | `claude --print --output-format stream-json --include-partial-messages --dangerously-skip-permissions --verbose` | `--system-prompt` flag | `AGENTS.md` + canonical memory file set written to CWD | stream-JSON on stdout | Supports `--model`, `--tools`, `--mcp-config <path>`. Default. |
+| `CLAUDE_CODE` | `claude --print --output-format stream-json --include-partial-messages --dangerously-skip-permissions --verbose` | `--system-prompt` flag | `AGENTS.md` + canonical memory file set written to CWD | stream-JSON on stdout | Supports `--model`, `--mcp-config <path>`. `--tools` is **always** passed with the per-profile built-in allowlist (see below). Default. |
 | `CODEX_CLI` | `codex exec --json --sandbox <mode>` | `[SYSTEM]/[USER]` prepend in the prompt body (Codex has no system-prompt flag) | `AGENTS.md` written into CWD before exec | NDJSON | `--sandbox` is always passed: `read-only` for `tool_profile=MINIMAL`, `workspace-write` otherwise. |
-| `GEMINI_CLI` | `gemini -p <message> --output-format stream-json` | `[SYSTEM]/[USER]` prepend (no documented `--system-instruction` flag in headless mode) | `GEMINI.md` + canonical memory file set | NDJSON | Uses `-p` for the user message. |
+| `GEMINI_CLI` | `gemini -p <message> --output-format stream-json` | `[SYSTEM]/[USER]` prepend (no documented `--system-instruction` flag in headless mode) | `GEMINI.md` + canonical memory file set | NDJSON | Uses `-p` for the user message. `tool_profile=MINIMAL` adds `--approval-mode plan` (read-only); `--allowed-tools` is deprecated upstream. |
 | `OPENCODE` | `opencode run --format json` | `[SYSTEM]/[USER]` prepend | `AGENTS.md` written into CWD before exec | single JSON object (no streaming) | sst.dev's BYOK CLI; works with any provider. |
 | `CURSOR_CLI` | `cursor-agent -p --output-format stream-json` | `[SYSTEM]/[USER]` prepend (no `--system-prompt` flag in headless mode) | `.cursor/rules/`, `AGENTS.md`, `CLAUDE.md` written into CWD | stream-JSON on stdout (same shape as Claude Code) | Added 2026-04. `-m <model>` for model override. |
 | `FACTORY_DROID` | `droid exec --auto {low\|medium\|high} -o stream-json` | `[SYSTEM]/[USER]` prepend | `AGENTS.md` + `.factory/AGENTS.md` written into CWD | stream-JSON (NDJSON) | Added 2026-04. Tiered autonomy — see below. |
 
 The default fallback when `cli_adapter` is empty or unknown is `claude --print <message>` — minimal flags, no streaming, lowest-risk degradation.
+
+## Tool profiles & the built-in tool allowlist
+
+An agent's `tool_profile` (`FULL` | `CODING` | `MINIMAL`, default `CODING`) curates which of the CLI's **built-in** tools the agent may use. This is an **allowlist**, not a denylist: tools not on the list are removed from the model's context entirely.
+
+Why an allowlist matters: a headless Claude Code agent otherwise inherits the CLI's *entire* default tool catalog — including harness-internal tools (`TaskCreate`/`TaskUpdate`/`TaskList`/`TaskGet`/`TaskStop`, `TodoWrite`, `ToolSearch`, `Agent`, `Workflow`, `Cron*`, `ScheduleWakeup`, `RemoteTrigger`, `EnterPlanMode`, `AskUserQuestion`, …) that have **no Crewship backing**. An agent that calls one (e.g. `TaskCreate` to "create a task") writes to ephemeral in-process CLI state that persists nowhere the user can see, then can't explain where the data went. A denylist would let any newly-added builtin leak back in on the next CLI upgrade; the allowlist is closed by default.
+
+The per-profile built-in sets (single source of truth: `builtinToolAllowlist` in `internal/orchestrator/tool_profiles.go`):
+
+| Profile | Built-in tools | Posture |
+|---|---|---|
+| `MINIMAL` | `Read, Glob, Grep, ToolSearch` | Read-only — inspection, review, grading. |
+| `CODING` (default) | `+ Write, Edit, Bash, WebFetch, WebSearch` | Write + execute + network. The workhorse. |
+| `FULL` | `+ NotebookEdit` | Everything useful. |
+
+`ToolSearch` is in **every** profile on purpose. Claude Code defers MCP tools by default (tool search enabled) and the model discovers them via the built-in `ToolSearch` tool — drop it and the agent can no longer see or call **any** MCP tool (`crewship-memory`, Composio/YouTube, everything). Verified: with `ToolSearch` allowed, MCP tools load on demand while a builtin that's *not* in the allowlist (e.g. `TaskCreate`) stays unreachable even via `ToolSearch`. Keeping deferral also scales to large MCP catalogs (e.g. GitHub's ~846 tools) without bloating context.
+
+This governs **only built-in tools**. MCP tools (`crewship-memory`, Composio apps, …) come from the agent's `.mcp.json` via `--mcp-config` and are unaffected by `--tools`, so they always resolve (discovered through `ToolSearch`). The real Crewship capabilities (missions, issues, pipelines, keeper, peer messaging) are sidecar HTTP endpoints advertised in the system prompt — not CLI tools — and are gated by the agent's role capabilities.
+
+Per-adapter enforcement (each CLI exposes a different lever):
+
+| Adapter | Mechanism |
+|---|---|
+| `CLAUDE_CODE` | `--tools <allowlist>` (named built-ins). |
+| `CODEX_CLI` | `--sandbox read-only` (MINIMAL) vs `workspace-write` — capability gate, no named-tool list. |
+| `GEMINI_CLI` | `--approval-mode plan` (MINIMAL, read-only); `--allowed-tools` is deprecated upstream. |
+| `FACTORY_DROID` | `--auto low\|medium\|high` autonomy tier. |
+| `OPENCODE` / `CURSOR_CLI` | Profile-based built-in curation not yet wired (these CLIs lack the harness-internal tool surface that motivated the allowlist). |
 
 ## Cursor (`CURSOR_CLI`)
 
