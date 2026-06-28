@@ -85,6 +85,16 @@ type Executor struct {
 	// trying to exec the script in-process.
 	codeRunner CodeRunner
 
+	// stepOverrides, when wired, patches each run's DSL at start with
+	// per-step prompt/model overrides (v121) so an operator can nudge a
+	// step without bumping the routine version. Nil = run as authored.
+	stepOverrides *StepOverrideStore
+
+	// signals is the shared in-process registry for run signals (Wave
+	// 4.3). A wait:event step registers here and blocks; the signal
+	// endpoint delivers a payload. Nil = wait:event fails closed.
+	signals *SignalRegistry
+
 	// waitpoints persists wait step state so long sleeps survive
 	// process restarts. Nil = wait steps execute in-memory only
 	// (useful for tests; production wiring uses the WaitpointStore
@@ -150,6 +160,20 @@ func (e *Executor) SetAllowPrivateHTTPForTesting(v bool) {
 // table + encryption.Decrypt).
 func (e *Executor) WithCredentialResolver(fn func(ctx context.Context, credType string) (string, error)) *Executor {
 	e.credentialByType = fn
+	return e
+}
+
+// WithSignalRegistry wires the in-process run-signal registry (Wave 4.3).
+// Without it, wait:event steps fail closed.
+func (e *Executor) WithSignalRegistry(s *SignalRegistry) *Executor {
+	e.signals = s
+	return e
+}
+
+// WithStepOverrides wires the per-step prompt/model override layer.
+// Without it, runs execute the versioned DSL verbatim.
+func (e *Executor) WithStepOverrides(s *StepOverrideStore) *Executor {
+	e.stepOverrides = s
 	return e
 }
 
@@ -247,12 +271,18 @@ type CodeRunner interface {
 // to env vars in the container.
 type CodeRunRequest struct {
 	WorkspaceID string
-	Runtime     string // python | go | bash
+	Runtime     string // expr | cel (python | go | bash reserved, unwired)
 	Version     string
 	Code        string
 	InputEnv    map[string]string
-	TimeoutSec  int
-	MaxBytes    int // stdout cap
+	// Inputs carries the render context's inputs with their ORIGINAL
+	// names and types (numbers stay numbers). The expr runner ignores
+	// it (operates on rendered literals); the CEL runner exposes it as
+	// the `inputs` map variable so expressions can do typed arithmetic
+	// and field access (inputs.spend_usd > inputs.threshold_usd).
+	Inputs     map[string]any
+	TimeoutSec int
+	MaxBytes   int // stdout cap
 }
 
 // CodeRunResult is the output of a code-step run. Stdout becomes
@@ -366,6 +396,16 @@ func (e *Executor) Run(ctx context.Context, in RunInput) (*RunResult, error) {
 	if err != nil {
 		return nil, fmt.Errorf("executor: parse stored DSL: %w", err)
 	}
+	// Apply per-step prompt/model overrides (v121) over the versioned
+	// DSL. No-op when the store isn't wired or has no rows for this
+	// pipeline — the run then executes exactly as authored.
+	if e.stepOverrides != nil {
+		if ov, oerr := e.stepOverrides.OverridesFor(ctx, in.PipelineID); oerr == nil {
+			applyStepOverrides(dsl.Steps, ov)
+		} else {
+			e.persistWarn("step overrides", in.PipelineID, oerr)
+		}
+	}
 	in.pipeline = p
 	in.dsl = dsl
 
@@ -395,8 +435,12 @@ func (e *Executor) Run(ctx context.Context, in RunInput) (*RunResult, error) {
 	// Idempotency check — if the caller supplied a key and we have
 	// a store, dedupe before doing anything else.
 	if in.IdempotencyKey != "" && e.idempotency != nil && in.Mode == ModeRun {
+		idemTTL := in.IdempotencyKeyTTL
+		if idemTTL <= 0 {
+			idemTTL = DefaultIdempotencyTTL
+		}
 		resolvedID, isNew, idemErr := e.idempotency.LookupOrReserve(
-			ctx, in.WorkspaceID, in.IdempotencyKey, preallocRunID, p.ID, DefaultIdempotencyTTL,
+			ctx, in.WorkspaceID, in.IdempotencyKey, preallocRunID, p.ID, idemTTL,
 		)
 		if idemErr != nil {
 			return nil, fmt.Errorf("executor: idempotency: %w", idemErr)
@@ -465,7 +509,13 @@ func (e *Executor) Run(ctx context.Context, in RunInput) (*RunResult, error) {
 		ctx = regCtx
 	}
 
-	res, err := e.runDSL(ctx, in, 0)
+	hookSlug := ""
+	if in.pipeline != nil {
+		hookSlug = in.pipeline.Slug
+	}
+	res, err := e.runHooksAround(ctx, in, preallocRunID, hookSlug, func() (*RunResult, error) {
+		return e.runDSL(ctx, in, 0)
+	})
 	// Translate context-cancellation into a CANCELLED status when
 	// the registry confirms the cancel was user-driven (vs. a parent
 	// ctx going away unexpectedly). The runDSL loop returns the
@@ -521,6 +571,10 @@ type RunInput struct {
 	// (workspace_id, key) within the TTL returns the original run id
 	// with Status="DEDUPED" instead of executing again.
 	IdempotencyKey string
+	// IdempotencyKeyTTL bounds how long the dedupe key is honored. Zero
+	// uses DefaultIdempotencyTTL (24h). Lets a caller scope dedup tightly
+	// (e.g. "same key only collides within 5 min").
+	IdempotencyKeyTTL time.Duration
 	// RunIDOverride lets the caller force a specific run id. Used by
 	// the idempotency layer to ensure the reserved id is the one the
 	// run actually emits to the journal. Leave empty for the default
@@ -542,8 +596,19 @@ type RunInput struct {
 	// the projection accurately reflects the trigger.
 	TriggeredVia  TriggeredVia
 	TriggeredByID string
-	pipeline      *Pipeline
-	dsl           *DSL
+	// Tags are workspace-scoped labels attached to the run for
+	// filtering/grouping (trigger.dev parity). Persisted to run_tags.
+	Tags []string
+	// MetadataJSON is a JSON object stored on the run and exposed to
+	// steps as {{ run.metadata.X }}. Empty defaults to "{}".
+	MetadataJSON string
+	// IsReplay + ReplayOf mark a run created by replaying a prior run.
+	// IsReplay surfaces as {{ run.is_replay }} so steps can skip side
+	// effects on replay; ReplayOf records the source run id.
+	IsReplay bool
+	ReplayOf string
+	pipeline *Pipeline
+	dsl      *DSL
 
 	// resume marks this input as a boot-time re-entry of a run from a
 	// previous process lifetime (W6 resume-from-step). Set only by
@@ -652,6 +717,10 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (result *
 		"invoking_agent_id": in.InvokingAgentID,
 		"run_id":            runID,
 		"pipeline_slug":     pipelineSlug,
+		// Replay signal: a step can `if: "{{ env.is_replay }}"` to skip
+		// side effects when this run is a replay of a prior failure.
+		"is_replay": boolToEnvStr(in.IsReplay),
+		"replay_of": in.ReplayOf,
 	}
 
 	inputsForCtx := mergeInputs(in.Inputs, dsl)
@@ -807,9 +876,11 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (result *
 		stepStart := time.Now()
 		// Build the rendered prompt for both run + dry-run paths.
 		ctxRender := RenderContext{
-			Inputs:      inputsForCtx,
-			StepOutputs: result.StepOutputs,
-			Env:         renderEnv,
+			Inputs:        inputsForCtx,
+			StepOutputs:   result.StepOutputs,
+			Env:           renderEnv,
+			Metadata:      parseRunMetadata(in.MetadataJSON),
+			EgressTargets: dsl.EgressTargets,
 		}
 		renderedPrompt := Render(step.Prompt, ctxRender)
 
@@ -992,6 +1063,40 @@ func (e *Executor) runStep(
 		span.End()
 	}()
 
+	// Per-step before hook (Wave 4.1): runs ahead of the step; its
+	// failure fails the step (setup contract, like routine before_all).
+	if step.Hooks != nil && step.Hooks.Before != nil {
+		if _, herr := e.runStepHook(ctx, step.Hooks.Before, in, runID, parentRender); herr != nil {
+			return "", 0, 0, fmt.Errorf("step %q before hook: %w", step.ID, herr)
+		}
+	}
+
+	out, cost, dur, err := e.dispatchStep(ctx, step, renderedPrompt, primary, fallback, in, runID, pipelineID, emit, parentRender, depth)
+
+	// Per-step after hook: best-effort once the step itself completes
+	// (logged, never overrides the step's outcome).
+	if err == nil && step.Hooks != nil && step.Hooks.After != nil {
+		if _, herr := e.runStepHook(ctx, step.Hooks.After, in, runID, parentRender); herr != nil {
+			e.persistWarn("step after hook", runID, herr)
+		}
+	}
+	return out, cost, dur, err
+}
+
+// dispatchStep is the raw per-type step dispatch (no hooks). Split out so
+// runStep can wrap it with per-step lifecycle hooks.
+func (e *Executor) dispatchStep(
+	ctx context.Context,
+	step Step,
+	renderedPrompt string,
+	primary AdapterModel,
+	fallback []AdapterModel,
+	in RunInput,
+	runID, pipelineID string,
+	emit *pipelineEmitContext,
+	parentRender RenderContext,
+	depth int,
+) (string, float64, int64, error) {
 	switch step.Type {
 	case StepAgentRun:
 		return e.runAgentStep(ctx, step, renderedPrompt, primary, fallback, in, runID, pipelineID, emit)
@@ -1007,6 +1112,25 @@ func (e *Executor) runStep(
 		return e.runTransformStep(step, parentRender)
 	default:
 		return "", 0, 0, fmt.Errorf("unsupported step type %q", step.Type)
+	}
+}
+
+// runStepHook runs a per-step hook against the step's parent render
+// context (so it sees the same inputs/outputs the step does). Restricted
+// to code | http | transform, like routine hooks.
+func (e *Executor) runStepHook(ctx context.Context, hook *Step, in RunInput, runID string, parentRender RenderContext) (string, error) {
+	switch hook.Type {
+	case StepHTTP:
+		out, _, _, err := e.runHTTPStep(ctx, *hook, parentRender)
+		return out, err
+	case StepCode:
+		out, _, _, err := e.runCodeStep(ctx, *hook, parentRender, in)
+		return out, err
+	case StepTransform:
+		out, _, _, err := e.runTransformStep(*hook, parentRender)
+		return out, err
+	default:
+		return "", fmt.Errorf("step hook %q type %q not allowed (use code, http, or transform)", hook.ID, hook.Type)
 	}
 }
 
@@ -1342,6 +1466,9 @@ func (e *Executor) persistRunStart(ctx context.Context, in RunInput, runID, pipe
 		InputsJSON:      string(inputsRaw),
 		TriggeredVia:    in.TriggeredVia,
 		TriggeredByID:   in.TriggeredByID,
+		MetadataJSON:    in.MetadataJSON,
+		IsReplay:        in.IsReplay,
+		ReplayOf:        in.ReplayOf,
 	}
 	if in.pipeline != nil {
 		// Stamp the definition content hash AS OF run start so the
@@ -1355,6 +1482,11 @@ func (e *Executor) persistRunStart(ctx context.Context, in RunInput, runID, pipe
 	}
 	if err := e.runStore.Insert(ctx, rec); err != nil {
 		e.persistWarn("run start", runID, err)
+	}
+	if len(in.Tags) > 0 {
+		if err := e.runStore.SetTags(ctx, in.WorkspaceID, runID, in.Tags); err != nil {
+			e.persistWarn("run tags", runID, err)
+		}
 	}
 }
 

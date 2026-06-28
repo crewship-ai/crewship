@@ -35,6 +35,24 @@ type runRequestBody struct {
 	// "manual" when empty.
 	TriggeredVia  string `json:"triggered_via,omitempty"`
 	TriggeredByID string `json:"triggered_by_id,omitempty"`
+	// Tags label the run for filtering/grouping (trigger.dev parity);
+	// Metadata is a JSON scratchpad stored on the run and exposed to
+	// steps. Both optional.
+	Tags     []string       `json:"tags,omitempty"`
+	Metadata map[string]any `json:"metadata,omitempty"`
+	// Deferred-dispatch options (trigger.dev delay/ttl/debounce/priority).
+	// Any of DelaySeconds>0 or DebounceKey set parks the trigger in
+	// pending_runs; the dispatcher fires it priority-first, expiring it
+	// if TTLSeconds elapses first. Priority orders the dispatch queue.
+	DelaySeconds         int    `json:"delay_seconds,omitempty"`
+	TTLSeconds           int    `json:"ttl_seconds,omitempty"`
+	DebounceKey          string `json:"debounce_key,omitempty"`
+	DebounceWindowSecond int    `json:"debounce_window_seconds,omitempty"`
+	DebounceMaxSeconds   int    `json:"debounce_max_seconds,omitempty"`
+	Priority             int    `json:"priority,omitempty"`
+	// IdempotencyKeyTTLSeconds bounds the dedupe window for the
+	// Idempotency-Key header (0 = default 24h).
+	IdempotencyKeyTTLSeconds int `json:"idempotency_key_ttl_seconds,omitempty"`
 }
 
 // Run invokes a saved pipeline by slug.
@@ -120,18 +138,31 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 		triggeredVia = pipeline.TriggeredViaManual
 	}
 
+	// Deferred dispatch: a delay or a debounce key parks the trigger in
+	// pending_runs instead of executing now. The in-process dispatcher
+	// fires it priority-first once fire_at arrives (and expires it if
+	// ttl elapses first). Immediate runs (no delay/debounce) fall through
+	// to the synchronous path below unchanged.
+	if h.db != nil && (body.DelaySeconds > 0 || body.DebounceKey != "") {
+		h.enqueueDeferredRun(w, r, workspaceID, p, body)
+		return
+	}
+
 	exec := h.newExecutor()
 	res, err := exec.Run(r.Context(), pipeline.RunInput{
-		PipelineID:      p.ID,
-		WorkspaceID:     workspaceID,
-		InvokingCrewID:  invokingCrew,
-		InvokingAgentID: invokingAgent,
-		Inputs:          body.Inputs,
-		Mode:            pipeline.ModeRun,
-		IdempotencyKey:  idempotencyKey,
-		TierOverride:    tierOverride,
-		TriggeredVia:    triggeredVia,
-		TriggeredByID:   body.TriggeredByID,
+		PipelineID:        p.ID,
+		WorkspaceID:       workspaceID,
+		InvokingCrewID:    invokingCrew,
+		InvokingAgentID:   invokingAgent,
+		Inputs:            body.Inputs,
+		Mode:              pipeline.ModeRun,
+		IdempotencyKey:    idempotencyKey,
+		TierOverride:      tierOverride,
+		TriggeredVia:      triggeredVia,
+		TriggeredByID:     body.TriggeredByID,
+		Tags:              body.Tags,
+		MetadataJSON:      marshalMetadata(body.Metadata),
+		IdempotencyKeyTTL: time.Duration(body.IdempotencyKeyTTLSeconds) * time.Second,
 	})
 	if err != nil {
 		// Concurrency rejection is a normal 429, not an internal
@@ -321,7 +352,13 @@ func (h *PipelineHandler) ListRunRecords(w http.ResponseWriter, r *http.Request)
 		}
 	}
 	statusFilter := pipeline.RunStatus(r.URL.Query().Get("status"))
-	records, err := h.runStore.ListByPipeline(r.Context(), p.ID, statusFilter, limit)
+	tagFilter := r.URL.Query().Get("tag")
+	var records []*pipeline.RunRecord
+	if tagFilter != "" {
+		records, err = h.runStore.ListByTag(r.Context(), p.ID, tagFilter, limit)
+	} else {
+		records, err = h.runStore.ListByPipeline(r.Context(), p.ID, statusFilter, limit)
+	}
 	if err != nil {
 		h.logger.Error("pipeline list run-records: query", "error", err)
 		replyError(w, http.StatusInternalServerError, "list run records")
@@ -596,12 +633,20 @@ LIMIT 200`, workspaceID)
 		InvokingCrewID string `json:"invoking_crew_id,omitempty"`
 		TimeoutAt      string `json:"timeout_at"`
 		CreatedAt      string `json:"created_at"`
+		// CallbackURL is the PUBLIC completion endpoint for this
+		// waitpoint — an external system holding it can complete the
+		// waitpoint without a workspace JWT (the token is the auth).
+		// Hand it to a third-party task/approval service to drive a
+		// human-in-the-loop or external-completion wait.
+		CallbackURL string `json:"callback_url"`
 	}
+	base := InstanceURLFromRequest(r, "")
 	out := make([]wpRow, 0, 50)
 	for rows.Next() {
-		var r wpRow
-		if err := rows.Scan(&r.Token, &r.PipelineRunID, &r.StepID, &r.Kind, &r.Prompt, &r.InvokingCrewID, &r.TimeoutAt, &r.CreatedAt); err == nil {
-			out = append(out, r)
+		var row wpRow
+		if err := rows.Scan(&row.Token, &row.PipelineRunID, &row.StepID, &row.Kind, &row.Prompt, &row.InvokingCrewID, &row.TimeoutAt, &row.CreatedAt); err == nil {
+			row.CallbackURL = base + "/api/v1/waitpoint-tokens/" + row.Token
+			out = append(out, row)
 		}
 	}
 	writeJSON(w, http.StatusOK, out)

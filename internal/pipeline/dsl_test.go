@@ -380,8 +380,8 @@ func TestValidate_RejectsBadTemplateInCodeBody(t *testing.T) {
 				ID:   "run_script",
 				Type: StepCode,
 				Code: &CodeStep{
-					Runtime: "python",
-					Code:    "print('{{ inputs.absent_var }}')",
+					Runtime: "cel",
+					Code:    "'{{ inputs.absent_var }}'",
 				},
 			},
 		},

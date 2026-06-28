@@ -104,8 +104,18 @@ type RunRecord struct {
 	IdempotencyKey   string
 	InputsJSON       string
 	ConcurrencyKey   string
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
+	// MetadataJSON is a typed scratchpad threaded through the run
+	// (trigger.dev parity). Defaults to "{}"; readable from steps as
+	// {{ run.metadata.X }}.
+	MetadataJSON string
+	// IsReplay is true when this run was created by replaying a prior
+	// run; ReplayOf is that prior run's id. Injected into the render
+	// context as {{ run.is_replay }} so steps can short-circuit side
+	// effects on replay.
+	IsReplay  bool
+	ReplayOf  string
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // RunStore is the thin DB access layer. Keep methods small and
@@ -152,6 +162,9 @@ func (s *RunStore) Insert(ctx context.Context, r *RunRecord) error {
 	if r.InputsJSON == "" {
 		r.InputsJSON = "{}"
 	}
+	if r.MetadataJSON == "" {
+		r.MetadataJSON = "{}"
+	}
 	if r.StartedAt.IsZero() {
 		r.StartedAt = time.Now().UTC()
 	}
@@ -171,15 +184,15 @@ INSERT INTO pipeline_runs (
     error_message, failed_at_step, error_fingerprint,
     invoking_crew_id, invoking_agent_id, invoking_user_id,
     triggered_via, triggered_by_id, idempotency_key,
-    inputs_json, concurrency_key, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    inputs_json, concurrency_key, metadata_json, is_replay, replay_of, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		r.ID, r.WorkspaceID, r.PipelineID, r.PipelineSlug, nullableIntPtr(r.PipelineVersion), nullableStr(r.DefinitionHash),
 		string(r.Status), string(r.Mode), formatRFC3339(r.StartedAt), nullableTime(r.EndedAt), nullableStr(r.CurrentStepID),
 		r.StepOutputsJSON, nullableStr(r.Output), r.CostUSD, r.DurationMs,
 		nullableStr(r.ErrorMessage), nullableStr(r.FailedAtStep), nullableStr(r.ErrorFingerprint),
 		nullableStr(r.InvokingCrewID), nullableStr(r.InvokingAgentID), nullableStr(r.InvokingUserID),
 		string(r.TriggeredVia), nullableStr(r.TriggeredByID), nullableStr(r.IdempotencyKey),
-		r.InputsJSON, nullableStr(r.ConcurrencyKey), formatRFC3339(r.CreatedAt), formatRFC3339(r.UpdatedAt))
+		r.InputsJSON, nullableStr(r.ConcurrencyKey), r.MetadataJSON, boolToInt(r.IsReplay), nullableStr(r.ReplayOf), formatRFC3339(r.CreatedAt), formatRFC3339(r.UpdatedAt))
 	if err != nil {
 		return fmt.Errorf("pipeline_runs: insert: %w", err)
 	}
@@ -267,13 +280,23 @@ func (s *RunStore) MarkTerminal(ctx context.Context, in MarkTerminalInput) error
 	if in.EndedAt.IsZero() {
 		in.EndedAt = time.Now().UTC()
 	}
+	// Populate error_fingerprint on failure so the errors view can group
+	// like failures and bulk-replay them. Stable across runs of the same
+	// bug (step id + normalized message), so a fix → bulk replay flow has
+	// a grouping key. NULL for non-failed terminal states.
+	var fp any
+	if in.Status == RunStatusFailed {
+		fp = ErrorFingerprint(in.FailedAtStep, in.ErrorMessage)
+	}
 	_, err := s.db.ExecContext(ctx, `
 UPDATE pipeline_runs
 SET status = ?, output = ?, error_message = ?, failed_at_step = ?,
+    error_fingerprint = ?,
     cost_usd = ?, duration_ms = ?, ended_at = ?,
     updated_at = datetime('now','subsec')
 WHERE id = ?`,
 		string(in.Status), nullableStr(in.Output), nullableStr(in.ErrorMessage), nullableStr(in.FailedAtStep),
+		fp,
 		in.CostUSD, in.DurationMs, formatRFC3339(in.EndedAt), in.RunID)
 	return err
 }
@@ -438,7 +461,9 @@ SELECT id, workspace_id, pipeline_id, pipeline_slug, pipeline_version,
        COALESCE(error_message,''), COALESCE(failed_at_step,''), COALESCE(error_fingerprint,''),
        COALESCE(invoking_crew_id,''), COALESCE(invoking_agent_id,''), COALESCE(invoking_user_id,''),
        triggered_via, COALESCE(triggered_by_id,''), COALESCE(idempotency_key,''),
-       inputs_json, COALESCE(concurrency_key,''), created_at, updated_at
+       inputs_json, COALESCE(concurrency_key,''),
+       COALESCE(metadata_json,'{}'), COALESCE(is_replay,0), COALESCE(replay_of,''),
+       created_at, updated_at
 FROM pipeline_runs`
 
 // scanRunRow is the row-scanner contract — both sql.Row and sql.Rows
@@ -448,12 +473,15 @@ type scanRunRow interface {
 	Scan(dest ...any) error
 }
 
+// scanRun materializes a RunRecord from a row selected with
+// runSelectColumns (shared by Get and the list paths).
 func scanRun(row scanRunRow) (*RunRecord, error) {
 	var r RunRecord
 	var version sql.NullInt64
 	var endedAt sql.NullString
 	var startedAt, createdAt, updatedAt string
 	var status, mode, triggeredVia string
+	var isReplay int64
 	if err := row.Scan(
 		&r.ID, &r.WorkspaceID, &r.PipelineID, &r.PipelineSlug, &version,
 		&r.DefinitionHash,
@@ -462,10 +490,13 @@ func scanRun(row scanRunRow) (*RunRecord, error) {
 		&r.ErrorMessage, &r.FailedAtStep, &r.ErrorFingerprint,
 		&r.InvokingCrewID, &r.InvokingAgentID, &r.InvokingUserID,
 		&triggeredVia, &r.TriggeredByID, &r.IdempotencyKey,
-		&r.InputsJSON, &r.ConcurrencyKey, &createdAt, &updatedAt,
+		&r.InputsJSON, &r.ConcurrencyKey,
+		&r.MetadataJSON, &isReplay, &r.ReplayOf,
+		&createdAt, &updatedAt,
 	); err != nil {
 		return nil, err
 	}
+	r.IsReplay = isReplay != 0
 	r.Status = RunStatus(status)
 	r.Mode = RunMode(mode)
 	r.TriggeredVia = TriggeredVia(triggeredVia)
@@ -491,6 +522,8 @@ func scanRun(row scanRunRow) (*RunRecord, error) {
 	return &r, nil
 }
 
+// nullableIntPtr returns the pointed-to int, or nil for a nil pointer —
+// so an unset optional int binds as SQL NULL.
 func nullableIntPtr(p *int) any {
 	if p == nil {
 		return nil
@@ -498,6 +531,8 @@ func nullableIntPtr(p *int) any {
 	return *p
 }
 
+// nullableTime returns the RFC3339Nano string for a non-zero time, or
+// nil — so an unset/zero time binds as SQL NULL.
 func nullableTime(p *time.Time) any {
 	if p == nil || p.IsZero() {
 		return nil
@@ -505,10 +540,13 @@ func nullableTime(p *time.Time) any {
 	return formatRFC3339(*p)
 }
 
+// formatRFC3339 renders a time as the lex-sortable UTC RFC3339Nano string
+// the pipeline_runs timestamp columns store.
 func formatRFC3339(t time.Time) string {
 	return t.UTC().Format(time.RFC3339Nano)
 }
 
+// parseRFC3339Opt parses an optional RFC3339Nano string; empty → zero time.
 func parseRFC3339Opt(s string) (time.Time, error) {
 	if s == "" {
 		return time.Time{}, nil

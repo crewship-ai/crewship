@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/crewship-ai/crewship/internal/manifest/kinds"
+	"github.com/crewship-ai/crewship/internal/pipeline"
 )
 
 // routinePlanWarnings returns non-fatal advisory lines for a routine
@@ -30,8 +31,9 @@ func routinePlanWarnings(doc *kinds.RoutineDocument) []string {
 		if step.Type != "code" {
 			continue
 		}
-		// runtime: expr is wired (deterministic, token-zero) — no warning.
-		if codeStepRuntime(step) == "expr" {
+		// Wired runtimes (expr, cel) are deterministic + token-zero — no
+		// warning. The pipeline package owns the canonical registry.
+		if pipeline.IsWiredCodeRuntime(codeStepRuntime(step)) {
 			continue
 		}
 		out = append(out, fmt.Sprintf(

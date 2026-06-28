@@ -55,6 +55,9 @@ CREATE TABLE IF NOT EXISTS pipeline_runs (
     idempotency_key     TEXT,
     inputs_json         TEXT NOT NULL DEFAULT '{}',
     concurrency_key     TEXT,
+    metadata_json       TEXT NOT NULL DEFAULT '{}',
+    is_replay           INTEGER NOT NULL DEFAULT 0,
+    replay_of           TEXT,
     created_at          TEXT NOT NULL DEFAULT (datetime('now','subsec')),
     updated_at          TEXT NOT NULL DEFAULT (datetime('now','subsec'))
 );

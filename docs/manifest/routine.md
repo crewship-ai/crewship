@@ -107,8 +107,8 @@ spec:
     - id: hello
       type: code
       code:
-        runtime: bash
-        code: "echo hi"
+        runtime: cel          # wired, token-zero (expr | cel only; bash/python/go are rejected)
+        code: '"hi"'
 ```
 
 ### Realistic — Discord hourly sync with cron + webhook
@@ -135,13 +135,16 @@ spec:
       description: Comma-separated channel ids, or "all" to pull every channel.
 
   steps:
+    # Shell work runs via an agent with shell-tool access — `type: code`
+    # only wires the token-zero expr/cel runtimes (bash/python/go are
+    # rejected at author time; see "Code steps" below).
     - id: pull
-      type: code
-      code:
-        runtime: bash
-        code: |
-          dce sync --channels "{{ inputs.channels }}" --json > /tmp/raw.json
-          cat /tmp/raw.json
+      type: agent_run
+      agent_slug: trapper             # MUST be a member of crew "uo-outlands"
+      prompt: |
+        Run exactly one shell command and return its raw JSON stdout:
+
+            dce sync --channels "{{ inputs.channels }}" --json
       timeout_seconds: 120
 
     - id: summarize
@@ -339,17 +342,18 @@ manually before re-applying, otherwise the Plan layer will print a
 warning that the webhook's public URL won't be discoverable from the
 env.
 
-## Code steps: `runtime: expr` (wired) vs shell runtimes (not wired)
+## Code steps: wired runtimes (`expr`, `cel`) vs shell runtimes (rejected)
 
-`type: code` supports two tiers of runtime.
+`type: code` supports two **wired**, deterministic, token-zero runtimes.
+Shell runtimes (`bash | python | go`) are **rejected at author time**
+because no sandbox runner is wired.
 
-### `runtime: expr` — wired, deterministic, token-zero
+### `runtime: expr` — single comparison, token-zero
 
-The `expr` runtime is the production runner for **agentless** probes
-(`internal/pipeline/runner_code_expr.go`). It is a pure-Go, in-process
-evaluator: it spins no container, calls no LLM, and touches no
-filesystem or network — so it honours the token-zero guarantee and adds
-no code-execution surface. It evaluates a single comparison and emits
+The `expr` runtime (`internal/pipeline/runner_code_expr.go`) is a
+pure-Go, in-process evaluator: no container, no LLM, no filesystem or
+network — it honours the token-zero guarantee and adds no
+code-execution surface. It evaluates a single comparison and emits
 `true` / `false`:
 
 ```yaml
@@ -365,32 +369,52 @@ steps:
 
 Operands are numeric or string literals, or a `CREWSHIP_INPUT_<NAME>`
 env reference. This is the wake-gate / cost-spike primitive — pair it
-with a schedule whose `wake_gate` checks the probe output. Anything that
-isn't a single comparison fails closed at validation/run time.
+with a schedule whose `wake_gate` checks the probe output.
 
-### `runtime: bash | python | go` — validated, but no sandbox wired
+### `runtime: cel` — general agentless logic, token-zero
 
-These runtimes pass the DSL validator but have **no sandboxed runner
-wired** in this build. A routine that uses one **saves successfully**
-and the schedule fires on cron, but the step fails at runtime with:
+The `cel` runtime (`internal/pipeline/runner_code_cel.go`) evaluates a
+[Google CEL](https://github.com/google/cel-go) expression. CEL is
+**non-Turing-complete** (every expression provably terminates), pure-Go,
+and sandboxed by construction — no loops, no I/O — so it keeps the
+token-zero / no-RCE guarantees while giving you real logic: boolean
+operators (`&&`, `||`, `!`), arithmetic, string ops, list/map
+membership, ternaries, and field access. It is the primitive to reach
+for when `expr`'s single comparison is not enough.
 
-```text
-code runtime "bash" not available in this build (no sandbox wired) —
-use runtime: expr for agentless probes, or convert this step to
-type: agent_run with an agent that has shell-tool access
+Inputs are exposed as the typed `inputs` map variable (numbers stay
+numbers), so reference them directly — no `{{ }}` needed:
+
+```yaml
+steps:
+  - id: spike
+    type: code
+    code:
+      runtime: cel
+      # Real logic in one deterministic, token-zero step:
+      code: 'inputs.spend_usd > inputs.threshold_usd && inputs.region in ["eu", "us"]'
 ```
 
-`crewship apply` surfaces this at plan time as a yellow warning (only
-for the unwired runtimes — `expr` steps do not warn) so you see the gap
-before the cron fires the first time:
+A `bool` result emits `true` / `false`; numeric and string results emit
+their canonical string form. Compile/eval errors (unknown variable, bad
+syntax) fail closed.
+
+### `runtime: bash | python | go` — rejected at author time
+
+These runtimes are schema-legal names but have **no sandboxed runner
+wired** in this build. As of PR #710 a routine that uses one is
+**rejected when you save / apply / test_run it** — it can no longer
+save-cleanly-then-fail-at-3am:
 
 ```text
-Warnings:
-  ! routine "seznam-check": step "probe" is type: code with runtime
-    "bash", which has no wired runner — invocations will fail until it
-    is converted to type: agent_run with a shell-tool-enabled agent, or
-    to runtime: expr for agentless probes
+pipeline: step "probe" (code) runtime "bash" has no wired runner in this
+build — use runtime: expr or cel for agentless logic, or convert to
+type: agent_run with a shell-tool-enabled agent
 ```
+
+`crewship apply` also surfaces the same gap as a plan-time warning for
+any routine that bypassed the validator (legacy import bundles, direct
+API writes). If you need real shell, use the conversion recipe below.
 
 ### Conversion recipe (shell runtimes → agent_run)
 
@@ -474,3 +498,188 @@ are reconciled at the next boot scan rather than live.)
   `spec:` (everything except `schedules` + `webhook`). Use with VSCode
   / JetBrains autocomplete: add `"$schema":
   "./schemas/routine.v1.json"` to a standalone `routine.json` file.
+
+## Run observability: tags, metadata, replay, errors
+
+Runs carry trigger.dev-style observability surface for filtering and
+post-failure recovery.
+
+### Tags + metadata at invoke
+
+```
+crewship routine run cost-spike-probe \
+  --tag prod --tag billing \
+  --metadata '{"source":"manual","ticket":"OPS-42"}'
+```
+
+- **Tags** — workspace-scoped labels (max 10/run, lowercased). Surfaced
+  on the run detail; group related runs (incl. replays, which inherit
+  the source run's tags).
+- **Metadata** — a JSON object stored on the run and returned by
+  `GET /pipeline-runs/{id}`. Set at invoke today; mid-run mutation +
+  `{{ run.metadata.X }}` templating is a follow-up.
+
+### Replay a failed run
+
+```
+crewship routine replay <run_id>
+```
+
+Re-invokes the routine with the run's **captured inputs**. The new run
+is stamped `is_replay=true` + `replay_of=<run_id>`; a step can skip side
+effects on replay by gating on `{{ env.is_replay }}`:
+
+```yaml
+steps:
+  - id: notify
+    if: "{{ env.is_replay }}"   # only on replays — or invert to skip on replay
+    type: agent_run
+    ...
+```
+
+### Errors view + bulk replay
+
+Failed runs are bucketed by a stable **error fingerprint** (failing step
++ normalized message), so like failures group together:
+
+```
+crewship routine errors                       # list fingerprint groups
+crewship routine bulk-replay --fingerprint <fp>   # replay the whole group after a fix
+```
+
+| Endpoint | CLI |
+|---|---|
+| `POST /pipelines/runs/{runId}/replay` | `routine replay <run_id>` |
+| `GET /pipelines/runs/errors` | `routine errors` |
+| `POST /pipelines/runs/bulk_replay` | `routine bulk-replay --fingerprint <fp>` |
+
+## Waitpoint callback tokens (external completion)
+
+A `wait` step parks the run on a high-entropy **token**. Beyond the
+inbox approve/reject flow, an **external system** can complete the wait
+via a public callback URL — no workspace JWT, the token is the auth
+(same model as webhook dispatch). Surface the URL from the pending
+waitpoint:
+
+```
+crewship routine waitpoints <token>     # prints "Callback URL: …"
+```
+
+The external task then completes (or denies) the wait:
+
+```
+curl -X POST <callback_url> -d '{"approved":true,"payload":{"result":"ok"}}'
+```
+
+`approved` defaults to `true` (bare POST = "task done, continue").
+`payload` is stored on the waitpoint for the resumed step. Endpoint:
+`POST /api/v1/waitpoint-tokens/{token}`.
+
+## Batch trigger
+
+Fan out N runs of one routine from an array of input sets. Every run is
+tagged `batch:<id>` so the set is retrievable.
+
+```
+crewship routine run my-routine --batch inputs.jsonl --tag nightly
+crewship routine runs my-routine --tag batch:<id>
+```
+
+`inputs.jsonl` is one inputs object per line (or a JSON array). Endpoint:
+`POST /pipelines/{slug}/run_batch` (max 50 items/batch). The run-level
+`--tag` / `--metadata` apply to every run in the batch.
+
+## Per-step prompt/model override (no version bump)
+
+Tweak a single step's prompt or model **without** bumping the routine
+version — the override is applied at run start over the versioned DSL.
+The durable, versioned routine stays the source of truth; the override
+is a thin live patch an operator can set and clear.
+
+```
+crewship routine step-override set my-routine summarize \
+  --prompt "Summarize in 3 bullets, lead with the risk." --model smart
+crewship routine step-override list my-routine
+crewship routine step-override clear my-routine summarize
+```
+
+Only non-empty fields win, so a prompt-only override leaves the authored
+model. Endpoints: `PUT|DELETE /pipelines/{slug}/steps/{stepId}/override`,
+`GET /pipelines/{slug}/overrides`.
+
+## Deferred dispatch: delay, ttl, debounce, priority
+
+A trigger that carries a delay or a debounce key is parked in
+`pending_runs` instead of running immediately; an in-process dispatcher
+(5s tick) fires due rows **highest-priority-first** and expires rows past
+their ttl. Immediate runs (no delay/debounce) are unchanged.
+
+```
+# fire 60s from now, expire if not dispatched within 5 min, high priority
+crewship routine run my-routine --delay 60 --ttl 300 --priority 9
+
+# coalesce a burst: repeated triggers with the same key collapse into one
+crewship routine run my-routine --debounce-key vendor-42 --debounce-window 30 --debounce-max 300
+
+crewship routine pending list            # not-yet-fired deferred triggers
+crewship routine pending cancel <id>     # cancel before it fires
+```
+
+- `--delay N` — fire N seconds out (returns `SCHEDULED` with a pending id).
+- `--ttl N` — expire the deferred run if not dispatched within N seconds.
+- `--debounce-key K` — repeat triggers sharing K extend the window +
+  replace inputs (one run fires); `--debounce-window` (default 30) sets
+  the window, `--debounce-max` caps total extension so a hot key still fires.
+- `--priority N` — higher fires first among due deferred runs.
+
+API: `POST /pipelines/{slug}/run` accepts `delay_seconds`, `ttl_seconds`,
+`debounce_key`, `debounce_window_seconds`, `debounce_max_seconds`,
+`priority`, `idempotency_key_ttl_seconds`. `GET /pipelines/pending`,
+`POST /pipelines/pending/{id}/cancel`.
+
+> Note: `priority` orders the **deferred** dispatch queue. Immediate runs
+> execute on arrival, so priority there is recorded but not consumed
+> until the per-crew admission queue (QUEUE-MECHANISM) lands.
+
+## Lifecycle hooks (before_all / after_all / on_failure)
+
+Routine-level hooks run deterministic side-channel steps around the main
+execution — a clean home for setup/teardown that isn't a pipeline step.
+Hook steps must be `code | http | transform` (no `agent_run`: a hook must
+not recurse or spend tokens).
+
+```yaml
+spec:
+  dsl_version: "1.0"
+  hooks:
+    before_all:                 # setup — its FAILURE aborts the run
+      id: claim
+      type: http
+      http: { method: POST, url: "https://ops.example.com/claim", credential_ref: { type: ops } }
+    after_all:                  # on COMPLETED — best-effort
+      id: release
+      type: http
+      http: { method: POST, url: "https://ops.example.com/release" }
+    on_failure:                 # on FAILED — best-effort cleanup
+      id: alert
+      type: http
+      http: { method: POST, url: "https://ops.example.com/alert" }
+  steps:
+    - id: work
+      type: agent_run
+      ...
+```
+
+Semantics: `before_all` runs first; if it fails the run is marked FAILED
+and the steps never execute. `after_all` runs after a COMPLETED run,
+`on_failure` after a FAILED run — both best-effort (logged, never change
+the run's outcome). Hooks fire only on the **top-level** run (not nested
+`call_pipeline` expansions) and are skipped on resume re-entry + dry-run.
+
+## Declarative cron
+
+Cron triggers are already declarative + versioned with the routine via
+`spec.schedules` (cron expr + IANA `timezone`, see "YAML schema" above) —
+a `crewship apply -f routine.yaml` deploys the steps + schedules + webhook
+atomically, so a schedule change is version-controlled alongside the
+logic. The in-process scheduler (30s tick) fires them.

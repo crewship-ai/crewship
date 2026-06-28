@@ -46,19 +46,23 @@ func validateStepEgress(st Step) error {
 		if st.Code == nil {
 			return fmt.Errorf("pipeline: step %q (code) missing code body", st.ID)
 		}
-		switch st.Code.Runtime {
-		case "expr", "python", "go", "bash":
-			// expr = the wired deterministic/token-zero runtime (agentless
-			// probes); python/go/bash validate but need a sandbox runner wired
-			// (fail closed at runtime until then).
-		default:
-			return fmt.Errorf("pipeline: step %q (code) runtime %q invalid (allowed: expr python go bash)", st.ID, st.Code.Runtime)
+		if !IsKnownCodeRuntime(st.Code.Runtime) {
+			return fmt.Errorf("pipeline: step %q (code) runtime %q invalid (allowed: expr cel python go bash)", st.ID, st.Code.Runtime)
 		}
 		if st.Code.Code == "" {
 			return fmt.Errorf("pipeline: step %q (code) missing code", st.ID)
 		}
 		if len(st.Code.Code) > 1_000_000 {
 			return fmt.Errorf("pipeline: step %q (code) script >1MB — externalize via skills/files instead", st.ID)
+		}
+		// Reject runtimes with no wired runner at AUTHOR time. python/go/bash
+		// are schema-legal but have no sandbox runner in this build, so a step
+		// using them would save cleanly then fail at every invocation. Fail
+		// fast here instead of at a 03:00 cron run (see code_runtimes.go).
+		if !IsWiredCodeRuntime(st.Code.Runtime) {
+			return fmt.Errorf("pipeline: step %q (code) runtime %q has no wired runner in this build — "+
+				"use runtime: expr or cel for agentless logic, or convert to type: agent_run "+
+				"with a shell-tool-enabled agent (see docs/manifest/routine.md `Code steps`)", st.ID, st.Code.Runtime)
 		}
 	case StepWait:
 		if st.Wait == nil {

@@ -381,9 +381,11 @@ func (e *Executor) executeOneStep(
 	}
 	resMu.Unlock()
 	ctxRender := RenderContext{
-		Inputs:      inputsForCtx,
-		StepOutputs: outputsSnap,
-		Env:         renderEnv,
+		Inputs:        inputsForCtx,
+		StepOutputs:   outputsSnap,
+		Env:           renderEnv,
+		Metadata:      parseRunMetadata(in.MetadataJSON),
+		EgressTargets: dsl.EgressTargets,
 	}
 	renderedPrompt := Render(step.Prompt, ctxRender)
 

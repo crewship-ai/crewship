@@ -432,14 +432,22 @@ var startCmd = &cobra.Command{
 			logger.Info("pipeline save_token signing enabled (HMAC-SHA256 over internal token)")
 
 			// Wire the production CodeRunner for type:code steps. The
-			// ExprCodeRunner is a pure-Go, deterministic comparison/arithmetic
-			// evaluator — token-zero, no container, no exec surface — which is
-			// exactly what agentless wake-gate probes (e.g. cost-spike-probe)
-			// need. It needs no Docker/provider dependency, so it works in
-			// every deployment incl. the no-Docker llm_direct branch. Other
-			// runtimes (bash/python/go) still fail closed with a wiring hint.
-			srv.APIRouter().PipelinesHandler.SetCodeRunner(pipeline.ExprCodeRunner{})
-			logger.Info("pipeline code runner wired (deterministic expr runtime; token-zero, no container)")
+			// MultiCodeRunner dispatches by runtime to pure-Go, deterministic,
+			// token-zero evaluators — `expr` (single comparison) and `cel`
+			// (Google CEL: bool logic, arithmetic, strings, lists). Both are
+			// non-Turing-complete with no container/exec/network surface, so
+			// they work in every deployment incl. the no-Docker llm_direct
+			// branch. Reserved runtimes (bash/python/go) fail closed with a
+			// wiring hint until a WASM/Starlark sandbox lands.
+			srv.APIRouter().PipelinesHandler.SetCodeRunner(pipeline.NewMultiCodeRunner())
+			logger.Info("pipeline code runner wired (deterministic expr+cel runtimes; token-zero, no container)")
+
+			// Shared signal registry for wait:event input-stream injection
+			// (Wave 4.3) — one process-wide instance so the signal endpoint
+			// and the executing run share delivery channels.
+			signalRegistry := pipeline.NewSignalRegistry()
+			srv.APIRouter().PipelinesHandler.SetSignalRegistry(signalRegistry)
+			logger.Info("pipeline signal registry wired (wait:event input-stream injection)")
 
 			// Wire production WaitpointStore so StepWait approvals
 			// persist across restarts and the inbox UI can fire
@@ -608,7 +616,15 @@ var startCmd = &cobra.Command{
 				// of the same concurrency_key would slip past the gate.
 				schedExec = schedExec.WithRunRegistry(runRegistry).
 					WithIdempotencyStore(pipeline.NewIdempotencyStore(deps.DB)).
-					WithRunStore(pipeline.NewRunStore(deps.DB))
+					WithRunStore(pipeline.NewRunStore(deps.DB)).
+					// Code runner + step overrides so cron- and deferred-
+					// dispatched runs of code-step / overridden routines
+					// behave like HTTP-driven ones. Without the code runner,
+					// a scheduled cost-spike-probe (a type:code routine)
+					// fails with "no CodeRunner wired".
+					WithCodeRunner(pipeline.NewMultiCodeRunner()).
+					WithStepOverrides(pipeline.NewStepOverrideStore(deps.DB)).
+					WithSignalRegistry(ph.SignalRegistry())
 				// Without WithRunStore here, scheduled runs would
 				// never land in the pipeline_runs projection — the
 				// /run-records endpoint and boot-time interrupted
@@ -617,6 +633,15 @@ var startCmd = &cobra.Command{
 				scheduler.Start(ctx)
 				defer scheduler.Stop()
 				logger.Info("pipeline scheduler wired (cron triggers; 30s tick)")
+
+				// Deferred-dispatch dispatcher fires delayed/debounced
+				// triggers (pending_runs, v122) priority-first and expires
+				// past-ttl rows. Shares the scheduler's executor so deferred
+				// runs hit the same registry + run-store projection.
+				pendingDispatcher := pipeline.NewPendingRunDispatcher(pipeline.NewPendingRunStore(deps.DB), schedExec, logger)
+				pendingDispatcher.Start(ctx)
+				defer pendingDispatcher.Stop()
+				logger.Info("pending-run dispatcher wired (delay/ttl/debounce/priority; 5s tick)")
 			}
 		}
 

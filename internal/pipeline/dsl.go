@@ -122,9 +122,68 @@ func Validate(dsl *DSL, agentSlugs map[string]struct{}, pipelineSlugs map[string
 		if err := validateStepGates(st, agentSlugs); err != nil {
 			return err
 		}
+		if err := validateStepHooks(st); err != nil {
+			return err
+		}
+	}
+
+	if err := validateHooks(dsl); err != nil {
+		return err
 	}
 
 	return validateTemplates(dsl)
+}
+
+// validateStepHooks checks a step's per-step before/after hooks (Wave
+// 4.1) — same deterministic-side-channel restriction as routine hooks.
+func validateStepHooks(st Step) error {
+	if st.Hooks == nil {
+		return nil
+	}
+	for name, hook := range map[string]*Step{"before": st.Hooks.Before, "after": st.Hooks.After} {
+		if hook == nil {
+			continue
+		}
+		switch hook.Type {
+		case StepHTTP, StepCode, StepTransform:
+		default:
+			return fmt.Errorf("pipeline: step %q %s hook must be type code, http, or transform (got %q)", st.ID, name, hook.Type)
+		}
+		if err := validateStepEgress(*hook); err != nil {
+			return fmt.Errorf("pipeline: step %q %s hook: %w", st.ID, name, err)
+		}
+	}
+	return nil
+}
+
+// validateHooks checks routine-level lifecycle hooks (Wave 4.1). Hook
+// steps must be deterministic side-channels — code | http | transform —
+// so a hook can never recurse (call_pipeline), spend tokens (agent_run),
+// or block the run (wait). Each present hook is validated with the same
+// per-step shape checks as a normal step.
+func validateHooks(dsl *DSL) error {
+	if dsl.Hooks == nil {
+		return nil
+	}
+	for name, hook := range map[string]*Step{
+		"before_all": dsl.Hooks.BeforeAll,
+		"after_all":  dsl.Hooks.AfterAll,
+		"on_failure": dsl.Hooks.OnFailure,
+	} {
+		if hook == nil {
+			continue
+		}
+		switch hook.Type {
+		case StepHTTP, StepCode, StepTransform:
+			// allowed deterministic side-channels
+		default:
+			return fmt.Errorf("pipeline: hook %q must be type code, http, or transform (got %q)", name, hook.Type)
+		}
+		if err := validateStepEgress(*hook); err != nil {
+			return fmt.Errorf("pipeline: hook %q: %w", name, err)
+		}
+	}
+	return nil
 }
 
 // validateTemplates resolves every {{ ... }} placeholder across the
@@ -346,8 +405,12 @@ func checkTemplateRef(ref string, inputs, earlier map[string]struct{}) error {
 	case "env":
 		// env.* allowlist enforced at render time, not parse time —
 		// the allowed set may differ between dry-run and live run.
+	case "run":
+		// run.metadata.<key> / run.is_replay / run.replay_of — resolved
+		// at render time from the run's metadata + env (Wave 2.4). A
+		// missing key renders empty, like inputs/steps.
 	default:
-		return fmt.Errorf("template ref %q uses unknown namespace %q (allowed: inputs, steps, env)", ref, parts[0])
+		return fmt.Errorf("template ref %q uses unknown namespace %q (allowed: inputs, steps, env, run)", ref, parts[0])
 	}
 	return nil
 }
@@ -428,6 +491,13 @@ type RenderContext struct {
 	Inputs      map[string]any
 	StepOutputs map[string]string // step_id → output (raw string from agent)
 	Env         map[string]string // safe env keys only — author_crew_name, run_id, etc.
+	Metadata    map[string]any    // run metadata scratchpad — {{ run.metadata.x }}
+	// EgressTargets is the routine's declared host allowlist. When
+	// non-empty, an http step (or http hook) may only reach a host in
+	// this set — enforced in runHTTPStep alongside the httpsafe
+	// private-IP/rebind guard. Empty leaves the httpsafe guard as the
+	// only host-level gate (back-compat for routines that declare none).
+	EgressTargets []string
 }
 
 // resolveRef walks one template body (already trimmed of {{ }}) against
@@ -476,6 +546,19 @@ func resolveRef(ref string, ctx RenderContext) (string, bool) {
 		return "", false
 	case "env":
 		if v, ok := ctx.Env[parts[1]]; ok {
+			return v, true
+		}
+		return "", false
+	case "run":
+		// run.metadata.<key> reads the run's metadata scratchpad;
+		// run.is_replay / run.replay_of mirror the env signals.
+		if parts[1] == "metadata" && len(parts) == 3 {
+			if v, ok := ctx.Metadata[parts[2]]; ok {
+				return stringify(v), true
+			}
+			return "", false
+		}
+		if v, ok := ctx.Env[parts[1]]; ok { // is_replay, replay_of, run_id
 			return v, true
 		}
 		return "", false

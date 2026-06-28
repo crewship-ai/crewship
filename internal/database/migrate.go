@@ -1478,6 +1478,33 @@ END;
 	// non-JSON payload yields NULL instead of failing the INSERT / index.
 	// See migrate_consts_v121_journal_run_index_safe.go.
 	{version: 121, name: "journal_run_index_safe", sql: migrationJournalRunIndexSafe},
+
+	// v122: routine-run observability (trigger.dev-informed). Additive
+	// columns on pipeline_runs (metadata_json, is_replay, replay_of) plus a
+	// run_tags join table for tag filtering. error_fingerprint (v83) is
+	// reused for bulk-replay grouping. (Renumbered from v120 on rebase past
+	// main's journal v120/v121.) See migrate_consts_v122_routine_run_observability.go.
+	{version: 122, name: "routine_run_observability", sql: migrationRoutineRunObservability},
+
+	// v123: per-step prompt/model override layer — tweak one step's
+	// prompt or tier without bumping the routine version (applied at run
+	// start over the versioned DSL). See migrate_consts_v123_step_overrides.go.
+	{version: 123, name: "routine_step_overrides", sql: migrationStepOverrides},
+
+	// v124: deferred run dispatch (delay / ttl / debounce / priority on a
+	// trigger). pending_runs parks a delayed/debounced trigger; an
+	// in-process dispatcher fires due rows priority-first and expires
+	// past-ttl rows. See migrate_consts_v124_pending_runs.go.
+	{version: 124, name: "pending_runs", sql: migrationPendingRuns},
+
+	// v125: routine-DEFINITION tags for cross-crew discovery (browse
+	// routines by tag, independent of runs). See migrate_consts_v125_pipeline_tags.go.
+	{version: 125, name: "pipeline_tags", sql: migrationPipelineTags},
+
+	// v126: index pipeline_runs.triggered_by_id so the run-tree recursive
+	// CTE joins via an index, not a per-level table scan. See
+	// migrate_consts_v126_run_tree_index.go.
+	{version: 126, name: "run_tree_index", sql: migrationRunTreeIndex},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

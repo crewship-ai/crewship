@@ -64,6 +64,7 @@ Examples:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		slug := args[0]
 		statusFilter, _ := cmd.Flags().GetString("status")
+		tagFilter, _ := cmd.Flags().GetString("tag")
 		limit, _ := cmd.Flags().GetInt("limit")
 		jsonMode, _ := cmd.Flags().GetBool("json")
 		if limit <= 0 || limit > 500 {
@@ -81,6 +82,9 @@ Examples:
 			url.PathEscape(ws), url.PathEscape(slug), limit)
 		if statusFilter != "" {
 			path += "&status=" + url.QueryEscape(statusFilter)
+		}
+		if tagFilter != "" {
+			path += "&tag=" + url.QueryEscape(tagFilter)
 		}
 		resp, err := client.Get(path)
 		if err != nil {
@@ -150,6 +154,7 @@ func formatDurMs(ms int64) string {
 
 func init() {
 	routineRecordsCmd.Flags().String("status", "", "filter by status: queued | running | completed | failed | cancelled | interrupted | dry_run")
+	routineRecordsCmd.Flags().String("tag", "", "filter by run tag (e.g. batch:<id>)")
 	routineRecordsCmd.Flags().Int("limit", 50, "max number of records to return (1-500)")
 	routineRecordsCmd.Flags().Bool("json", false, "output as JSON for scripting")
 	pipelineCmd.AddCommand(routineRecordsCmd)

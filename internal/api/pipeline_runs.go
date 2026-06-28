@@ -111,6 +111,8 @@ func (h *PipelineHandler) GetRun(w http.ResponseWriter, r *http.Request) {
 		triggeredVia, triggeredByID, idempotencyKey      sql.NullString
 		inputsJSON                                       string
 		pipelineName, issueIdentifier                    sql.NullString
+		metadataJSON, replayOf                           sql.NullString
+		isReplay                                         int64
 	)
 	// Same LEFT JOIN as ListWorkspaceRuns so /pipeline-runs/{id}
 	// returns the human pipeline name + issue identifier without
@@ -127,6 +129,7 @@ func (h *PipelineHandler) GetRun(w http.ResponseWriter, r *http.Request) {
 		       r.ended_at, r.error_message, r.failed_at_step,
 		       r.cost_usd, r.duration_ms,
 		       r.triggered_via, r.triggered_by_id, r.idempotency_key, r.inputs_json,
+		       r.metadata_json, r.is_replay, r.replay_of,
 		       p.name, m.identifier
 		FROM pipeline_runs r
 		LEFT JOIN pipelines p ON r.pipeline_id = p.id
@@ -143,6 +146,7 @@ func (h *PipelineHandler) GetRun(w http.ResponseWriter, r *http.Request) {
 		&endedAt, &errorMessage, &failedAtStep,
 		&costUSD, &durationMs,
 		&triggeredVia, &triggeredByID, &idempotencyKey, &inputsJSON,
+		&metadataJSON, &isReplay, &replayOf,
 		&pipelineName, &issueIdentifier,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -167,6 +171,18 @@ func (h *PipelineHandler) GetRun(w http.ResponseWriter, r *http.Request) {
 	if inputsJSON != "" {
 		_ = json.Unmarshal([]byte(inputsJSON), &inputs)
 	}
+	var metadata map[string]interface{}
+	if metadataJSON.Valid && metadataJSON.String != "" {
+		_ = json.Unmarshal([]byte(metadataJSON.String), &metadata)
+	}
+	// Tags live in the run_tags join table; best-effort fetch so a tag
+	// query failure doesn't sink the whole run detail.
+	var tags []string
+	if h.runStore != nil {
+		if t, err := h.runStore.TagsFor(r.Context(), runID); err == nil {
+			tags = t
+		}
+	}
 
 	resp := map[string]interface{}{
 		"id":               id,
@@ -190,6 +206,10 @@ func (h *PipelineHandler) GetRun(w http.ResponseWriter, r *http.Request) {
 		"idempotency_key":  idempotencyKey.String,
 		"inputs":           inputs,
 		"issue_identifier": issueIdentifier.String,
+		"metadata":         metadata,
+		"is_replay":        isReplay != 0,
+		"replay_of":        replayOf.String,
+		"tags":             tags,
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

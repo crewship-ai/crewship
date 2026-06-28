@@ -73,6 +73,7 @@ func (e *Executor) runCodeStep(ctx context.Context, step Step, parentRender Rend
 		// reaches the runtime literally.
 		Code:       Render(step.Code.Code, parentRender),
 		InputEnv:   envIn,
+		Inputs:     parentRender.Inputs, // typed inputs for the CEL runner (expr ignores)
 		TimeoutSec: timeoutSec,
 		MaxBytes:   1_000_000, // 1 MB stdout cap; matches HTTP step default
 	})
