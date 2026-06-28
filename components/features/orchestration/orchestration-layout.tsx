@@ -381,7 +381,10 @@ export function OrchestrationLayout({
   // Changes / Comments). Built only when an issue with an identifier is in
   // focus — the issue endpoints resolve by crew_id + identifier.
   const missionCtx = useMemo<BottomPanelContext>(() => {
-    if (!selectedMission || !selectedMission.identifier) return null
+    // crew_id + identifier are both required — the issue sub-resource routes
+    // are nested under the crew and keyed by identifier. Without crew_id the
+    // tabs would hit /api/v1/crews/undefined/...
+    if (!selectedMission || !selectedMission.identifier || !selectedMission.crew_id) return null
     return {
       kind: "mission",
       missionId: selectedMission.id,

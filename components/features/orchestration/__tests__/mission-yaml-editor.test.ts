@@ -36,7 +36,7 @@ describe("missionToYaml", () => {
     } as unknown as Mission
 
     const yaml = missionToYaml(mission)
-    expect(yaml).toContain("- id: t1")
+    expect(yaml).toContain("- id: \"t1\"")
     expect(yaml).toContain("title: \"Do thing\"")
   })
 })

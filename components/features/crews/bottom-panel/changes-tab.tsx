@@ -123,13 +123,24 @@ export function ChangesTab({ workspaceId, context }: { workspaceId: string; cont
         </div>
       )}
 
-      {data.diff && (
-        <pre className="font-mono text-[11px] leading-relaxed border border-white/8 rounded-md overflow-x-auto">
-          {data.diff.split("\n").map((line, i) => (
-            <div key={i} className={cn("px-3", lineClass(line))}>{line || " "}</div>
-          ))}
-        </pre>
-      )}
+      {data.diff && (() => {
+        // Cap rendered DOM nodes — a big diff split line-by-line is thousands
+        // of nodes that jank scroll. Show the first slice; the full patch is
+        // available via the CLI (`issue changes <id> --patch`).
+        const MAX_LINES = 2000
+        const lines = data.diff.split("\n")
+        const shown = lines.slice(0, MAX_LINES)
+        return (
+          <pre className="font-mono text-[11px] leading-relaxed border border-white/8 rounded-md overflow-x-auto">
+            {shown.map((line, i) => (
+              <div key={i} className={cn("px-3", lineClass(line))}>{line || " "}</div>
+            ))}
+            {lines.length > MAX_LINES && (
+              <div className="px-3 py-1 text-amber-300">… {lines.length - MAX_LINES} more lines — open the full diff in the CLI</div>
+            )}
+          </pre>
+        )
+      })()}
     </div>
   )
 }

@@ -11,7 +11,8 @@ import { EmptyState, formatRelative, statusColor } from "./shared"
 // 03:00") for the common shapes operators actually use; falls back to the
 // raw expression for anything exotic so we never lie about the schedule.
 const DOW = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
-function describeCron(expr: string): string {
+function describeCron(expr?: string | null): string {
+  if (!expr) return "—"
   const p = expr.trim().split(/\s+/)
   if (p.length !== 5) return expr
   const [min, hr, dom, mon, dow] = p
@@ -64,6 +65,9 @@ interface Schedule {
 export function ScheduleTab({ workspaceId, context }: { workspaceId: string; context: BottomPanelContext }) {
   const [schedule, setSchedule] = useState<Schedule | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // A failed "Run now" must not wipe the loaded schedule — keep it separate
+  // from the load error and surface it inline.
+  const [actionError, setActionError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [running, setRunning] = useState(false)
   const [ran, setRan] = useState(false)
@@ -78,6 +82,7 @@ export function ScheduleTab({ workspaceId, context }: { workspaceId: string; con
     setLoading(true)
     setSchedule(null)
     setError(null)
+    setActionError(null)
     // Clear the "Triggered ✓" state so a freshly selected routine doesn't
     // inherit the previous one's success button.
     setRan(false)
@@ -100,12 +105,13 @@ export function ScheduleTab({ workspaceId, context }: { workspaceId: string; con
     if (!schedule || running) return
     setRunning(true)
     setRan(false)
+    setActionError(null)
     try {
       const r = await fetch(`/api/v1/workspaces/${workspaceId}/pipeline-schedules/${schedule.id}/run`, { method: "POST" })
       if (!r.ok) throw new Error(`HTTP ${r.status}`)
       setRan(true)
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setActionError(err instanceof Error ? err.message : String(err))
     } finally {
       setRunning(false)
     }
@@ -148,6 +154,11 @@ export function ScheduleTab({ workspaceId, context }: { workspaceId: string; con
           <Play className="h-3 w-3" /> {running ? "Starting…" : ran ? "Triggered ✓" : "Run now"}
         </button>
       </div>
+      {actionError && (
+        <div className="mb-3 text-[11px] text-red-300 border border-red-500/20 bg-red-500/5 rounded-md px-3 py-1.5">
+          Run now failed: {actionError}
+        </div>
+      )}
       <div className="grid grid-cols-2 gap-2.5 max-w-xl">
         {cells.map((c) => (
           <div key={c.k} className="bg-background/40 border border-white/8 rounded-lg px-3 py-2.5">

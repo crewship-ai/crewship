@@ -6,17 +6,22 @@ import { cn } from "@/lib/utils"
 import type { BottomPanelContext } from "./types"
 import { EmptyState, formatRelative, statusColor } from "./shared"
 
-// Normalised run row rendered by both modes. The routine endpoint returns
-// runRecordDTO (pipelines_exec.go) and the issue endpoint returns the same
-// shape plus optional agent fields, so one renderer covers both.
+// One row covers both modes. Issue runs are agent task-executions
+// (assignments) → agent_name / task / result_summary. Routine runs are
+// pipeline runs → triggered_via / cost_usd.
 interface RunRow {
   id: string
   status: string
   started_at?: string
   ended_at?: string
   duration_ms?: number
+  // routine
   cost_usd?: number
   triggered_via?: string
+  // issue (agent task-run)
+  agent_name?: string
+  task?: string
+  result_summary?: string
   error_message?: string
 }
 
@@ -68,33 +73,45 @@ export function RunsTab({ workspaceId, context }: { workspaceId: string; context
   }
   if (error) return <EmptyState><span className="text-red-300">Failed to load: {error}</span></EmptyState>
   if (runs === null) return <EmptyState>Loading…</EmptyState>
-  if (runs.length === 0) return <EmptyState>No runs yet.</EmptyState>
+  if (runs.length === 0) {
+    return <EmptyState>No runs yet — start the issue (or trigger the routine) to see executions here.</EmptyState>
+  }
+
+  const isMission = context.kind === "mission"
 
   return (
     <div className="h-full overflow-y-auto p-3 text-xs">
       <table className="w-full border-collapse">
         <thead>
           <tr className="text-muted-foreground-soft text-[10px] uppercase tracking-wide">
-            <th className="text-left font-medium pb-2 pr-3">Run</th>
+            <th className="text-left font-medium pb-2 pr-3">{isMission ? "Agent" : "Run"}</th>
+            {isMission && <th className="text-left font-medium pb-2 pr-3">Task</th>}
             <th className="text-left font-medium pb-2 pr-3">Status</th>
             <th className="text-left font-medium pb-2 pr-3">Started</th>
             <th className="text-left font-medium pb-2 pr-3">Duration</th>
-            <th className="text-left font-medium pb-2 pr-3">Trigger</th>
+            {!isMission && <th className="text-left font-medium pb-2 pr-3">Trigger</th>}
             <th className="text-left font-medium pb-2">Result</th>
           </tr>
         </thead>
         <tbody>
-          {runs.map((run) => (
-            <tr key={run.id} className="border-t border-white/5 hover:bg-white/[0.02]">
-              <td className="py-2 pr-3 font-mono text-blue-300/90 truncate max-w-[120px]">{run.id.slice(0, 12)}</td>
+          {runs.map((run, i) => (
+            <tr key={run.id ?? i} className="border-t border-white/5 hover:bg-white/[0.02]">
+              {isMission ? (
+                <td className="py-2 pr-3 text-foreground/90">{run.agent_name || "—"}</td>
+              ) : (
+                <td className="py-2 pr-3 font-mono text-blue-300/90 truncate max-w-[120px]">{(run.id ?? "").slice(0, 12)}</td>
+              )}
+              {isMission && <td className="py-2 pr-3 text-muted-foreground truncate max-w-[180px]">{run.task || "—"}</td>}
               <td className={cn("py-2 pr-3", statusColor(run.status))}>{run.status}</td>
               <td className="py-2 pr-3 text-muted-foreground">{run.started_at ? formatRelative(run.started_at) : "—"}</td>
               <td className="py-2 pr-3 text-muted-foreground">{fmtDuration(run.duration_ms)}</td>
-              <td className="py-2 pr-3 text-muted-foreground">{run.triggered_via || "—"}</td>
-              <td className="py-2 text-muted-foreground truncate max-w-[200px]">
+              {!isMission && <td className="py-2 pr-3 text-muted-foreground">{run.triggered_via || "—"}</td>}
+              <td className="py-2 text-muted-foreground truncate max-w-[220px]">
                 {run.error_message
                   ? <span className="text-red-300">{run.error_message}</span>
-                  : (typeof run.cost_usd === "number" ? `$${run.cost_usd.toFixed(4)}` : "—")}
+                  : isMission
+                    ? (run.result_summary || "—")
+                    : (typeof run.cost_usd === "number" ? `$${run.cost_usd.toFixed(4)}` : "—")}
               </td>
             </tr>
           ))}

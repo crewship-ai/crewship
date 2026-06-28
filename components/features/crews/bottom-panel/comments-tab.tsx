@@ -94,7 +94,7 @@ export function CommentsTab({ workspaceId, context }: { workspaceId: string; con
           <div className="text-muted-foreground text-center py-4">No comments yet. Start the discussion.</div>
         )}
         {comments.map((c) => {
-          const name = c.author_name || c.author_type
+          const name = c.author_name || c.author_type || "?"
           return (
             <div key={c.id} className="flex gap-2.5 py-2 border-b border-white/5 last:border-0">
               <span

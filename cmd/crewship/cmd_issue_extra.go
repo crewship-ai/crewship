@@ -450,35 +450,39 @@ var issueRunsCmd = &cobra.Command{
 			return err
 		}
 		var runs []struct {
-			ID           string  `json:"id"`
-			Status       string  `json:"status"`
-			StartedAt    string  `json:"started_at"`
-			DurationMs   int64   `json:"duration_ms"`
-			CostUSD      float64 `json:"cost_usd"`
-			TriggeredVia string  `json:"triggered_via"`
-			ErrorMessage string  `json:"error_message"`
+			ID            string `json:"id"`
+			Status        string `json:"status"`
+			AgentName     string `json:"agent_name"`
+			Task          string `json:"task"`
+			StartedAt     string `json:"started_at"`
+			DurationMs    int64  `json:"duration_ms"`
+			ResultSummary string `json:"result_summary"`
+			ErrorMessage  string `json:"error_message"`
 		}
 		if err := cli.ReadJSON(resp, &runs); err != nil {
 			return err
 		}
 
 		f := newFormatter()
-		headers := []string{"RUN", "STATUS", "STARTED", "DURATION", "COST", "RESULT"}
+		headers := []string{"AGENT", "TASK", "STATUS", "STARTED", "DURATION", "RESULT"}
 		rows := make([][]string, 0, len(runs))
 		for _, run := range runs {
 			result := run.ErrorMessage
 			if result == "" {
-				result = fmt.Sprintf("$%.4f", run.CostUSD)
+				result = run.ResultSummary
+			}
+			dur := "—"
+			if run.DurationMs > 0 {
+				dur = fmt.Sprintf("%dms", run.DurationMs)
 			}
 			rows = append(rows, []string{
-				truncateID(run.ID, 12),
+				run.AgentName,
+				truncateStr(run.Task, 28),
 				run.Status,
 				issueRelativeTime(run.StartedAt),
-				fmt.Sprintf("%dms", run.DurationMs),
-				fmt.Sprintf("$%.4f", run.CostUSD),
-				// error_message is verbatim executor output — strip ANSI /
-				// control bytes before printing so a failed run can't inject
-				// terminal escapes into the table.
+				dur,
+				// result/error is verbatim agent output — strip ANSI / control
+				// bytes before printing so a failed run can't inject escapes.
 				truncateStr(strings.ReplaceAll(sanitizeTerminal(result), "\n", " "), 50),
 			})
 		}

@@ -223,6 +223,13 @@ func (h *PipelineHandler) RunLogs(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusBadRequest, "runId required")
 		return
 	}
+	// Run logs are journal-backed and can carry prompts / partial responses
+	// — gate on read like AgentLogs / the git-diff endpoints, and fail
+	// closed on an empty/unmapped role.
+	if !canRole(RoleFromContext(r.Context()), "read") {
+		replyError(w, http.StatusForbidden, "Forbidden")
+		return
+	}
 
 	// Existence + workspace scope check — masks cross-tenant lookups as
 	// 404 the same way GetRun does.
@@ -249,12 +256,15 @@ func (h *PipelineHandler) RunLogs(w http.ResponseWriter, r *http.Request) {
 	// Pipeline runs tag their journal entries with the run id in the
 	// payload (payload.run_id) — NOT the trace_id column (trace_id carries
 	// the OTel/mission trace). Agent-driven runs use trace_id instead. Match
-	// either so the console works for both. ORDER BY ts ASC → oldest-first.
+	// either so the console works for both. `run_id` is the VIRTUAL generated
+	// column (v120) over payload.run_id, indexed via idx_journal_ws_run, so
+	// both OR arms are index-unionable instead of full-scanning the journal.
+	// ORDER BY ts ASC → oldest-first.
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT ts, severity, entry_type, summary
 		FROM journal_entries
 		WHERE workspace_id = ?
-		  AND (trace_id = ? OR json_extract(payload, '$.run_id') = ?)
+		  AND (trace_id = ? OR run_id = ?)
 		ORDER BY ts ASC
 		LIMIT ?`, workspaceID, runID, runID, limit)
 	if err != nil {
@@ -281,6 +291,12 @@ func (h *PipelineHandler) RunLogs(w http.ResponseWriter, r *http.Request) {
 			Message: summary,
 			Type:    entryType,
 		})
+	}
+	if err := rows.Err(); err != nil {
+		// Don't present a half-streamed log as complete.
+		h.logger.Error("run logs: rows", "error", err, "run_id", runID)
+		replyError(w, http.StatusInternalServerError, "load logs")
+		return
 	}
 	writeJSON(w, http.StatusOK, out)
 }

@@ -19,6 +19,11 @@ export function LogsTab({ workspaceId, context }: { workspaceId: string; context
 
   const isRun = context?.kind === "run"
   const isRoutine = context?.kind === "routine"
+  // Depend on PRIMITIVE context fields, never the object — parents that
+  // don't memoize the context would otherwise re-run this on every render,
+  // reset logs to null, and (runId unchanged) never reload → stuck "Loading".
+  const ctxRunId = context?.kind === "run" ? context.runId : null
+  const ctxSlug = context?.kind === "routine" ? context.slug : null
 
   // Resolve which run to tail.
   useEffect(() => {
@@ -26,13 +31,13 @@ export function LogsTab({ workspaceId, context }: { workspaceId: string; context
     setRunId(null)
     setLogs(null)
     setError(null)
-    if (isRun) {
-      setRunId(context.runId)
+    if (ctxRunId) {
+      setRunId(ctxRunId)
       return
     }
-    if (isRoutine) {
+    if (ctxSlug) {
       // Latest run for this routine = first record in run-records.
-      fetch(`/api/v1/workspaces/${workspaceId}/pipelines/${encodeURIComponent(context.slug)}/run-records?limit=1`)
+      fetch(`/api/v1/workspaces/${workspaceId}/pipelines/${encodeURIComponent(ctxSlug)}/run-records?limit=1`)
         .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
         .then((data) => {
           if (cancelled) return
@@ -44,7 +49,7 @@ export function LogsTab({ workspaceId, context }: { workspaceId: string; context
         .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)) })
     }
     return () => { cancelled = true }
-  }, [isRun, isRoutine, context, workspaceId])
+  }, [ctxRunId, ctxSlug, workspaceId])
 
   // Fetch the resolved run's logs.
   useEffect(() => {

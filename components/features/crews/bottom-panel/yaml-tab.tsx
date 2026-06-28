@@ -60,25 +60,29 @@ export function YamlTab({ workspaceId, context }: { workspaceId: string; context
   const [data, setData] = useState<Record<string, unknown> | null>(null)
   const [error, setError] = useState<string | null>(null)
 
+  // Resolve the fetch URL from the context up front so the effect can depend
+  // on the URL string (identity-stable) rather than the context object — a
+  // non-memoized context would otherwise refetch + flash "Loading…" on every
+  // parent render.
+  let url: string | null = null
+  switch (context?.kind) {
+    case "agent": url = `/api/v1/agents/${context.agentId}?workspace_id=${workspaceId}`; break
+    case "crew": url = `/api/v1/crews/${context.crewId}?workspace_id=${workspaceId}`; break
+    case "mission": url = `/api/v1/crews/${context.crewId}/missions/${context.missionId}?workspace_id=${workspaceId}`; break
+    case "routine": url = `/api/v1/workspaces/${workspaceId}/pipelines/${encodeURIComponent(context.slug)}`; break
+  }
+
   useEffect(() => {
-    if (!context) return
+    if (!url) return
     let cancelled = false
     setData(null)
     setError(null)
-    let url: string
-    switch (context.kind) {
-      case "agent": url = `/api/v1/agents/${context.agentId}?workspace_id=${workspaceId}`; break
-      case "crew": url = `/api/v1/crews/${context.crewId}?workspace_id=${workspaceId}`; break
-      case "mission": url = `/api/v1/crews/${context.crewId}/missions/${context.missionId}?workspace_id=${workspaceId}`; break
-      case "routine": url = `/api/v1/workspaces/${workspaceId}/pipelines/${encodeURIComponent(context.slug)}`; break
-      default: return
-    }
     fetch(url)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((rec) => { if (!cancelled) setData(rec) })
       .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)) })
     return () => { cancelled = true }
-  }, [context, workspaceId])
+  }, [url])
 
   if (!context || context.kind === "run") return <EmptyState>Select an entity to see its spec.</EmptyState>
   if (error) return <EmptyState><span className="text-red-300">Failed to load: {error}</span></EmptyState>
