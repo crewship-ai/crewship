@@ -14,9 +14,11 @@ import (
 func TestBuiltinToolAllowlist(t *testing.T) {
 	// Tools that must NEVER appear in any profile — harness-internal /
 	// interactive tools with no Crewship meaning in a headless agent.
+	// NOTE: ToolSearch is intentionally NOT forbidden — it's required so the
+	// agent can still discover deferred MCP tools (see required-tools check).
 	forbidden := []string{
 		"Task", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet", "TaskStop",
-		"TaskOutput", "TodoWrite", "ToolSearch", "Agent", "Workflow",
+		"TaskOutput", "TodoWrite", "Agent", "Workflow",
 		"CronCreate", "CronDelete", "CronList", "ScheduleWakeup", "RemoteTrigger",
 		"EnterPlanMode", "ExitPlanMode", "AskUserQuestion", "Artifact",
 		"SendMessage", "Skill", "Monitor", "PushNotification",
@@ -49,6 +51,11 @@ func TestBuiltinToolAllowlist(t *testing.T) {
 		// Read is the floor — every profile can at least read.
 		if !set["Read"] {
 			t.Errorf("profile %q: Read must always be allowed", profile)
+		}
+		// ToolSearch must be present in EVERY profile, otherwise the agent
+		// cannot discover deferred MCP tools (crewship-memory, Composio, …).
+		if !set["ToolSearch"] {
+			t.Errorf("profile %q: ToolSearch must be allowed so deferred MCP tools stay reachable", profile)
 		}
 	}
 

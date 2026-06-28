@@ -37,11 +37,13 @@ The per-profile built-in sets (single source of truth: `builtinToolAllowlist` in
 
 | Profile | Built-in tools | Posture |
 |---|---|---|
-| `MINIMAL` | `Read, Glob, Grep` | Read-only — inspection, review, grading. |
+| `MINIMAL` | `Read, Glob, Grep, ToolSearch` | Read-only — inspection, review, grading. |
 | `CODING` (default) | `+ Write, Edit, Bash, WebFetch, WebSearch` | Write + execute + network. The workhorse. |
 | `FULL` | `+ NotebookEdit` | Everything useful. |
 
-This governs **only built-in tools**. MCP tools (`crewship-memory`, Composio apps, …) come from the agent's `.mcp.json` via `--mcp-config` and are unaffected by `--tools`, so they always resolve. The real Crewship capabilities (missions, issues, pipelines, keeper, peer messaging) are sidecar HTTP endpoints advertised in the system prompt — not CLI tools — and are gated by the agent's role capabilities.
+`ToolSearch` is in **every** profile on purpose. Claude Code defers MCP tools by default (tool search enabled) and the model discovers them via the built-in `ToolSearch` tool — drop it and the agent can no longer see or call **any** MCP tool (`crewship-memory`, Composio/YouTube, everything). Verified: with `ToolSearch` allowed, MCP tools load on demand while a builtin that's *not* in the allowlist (e.g. `TaskCreate`) stays unreachable even via `ToolSearch`. Keeping deferral also scales to large MCP catalogs (e.g. GitHub's ~846 tools) without bloating context.
+
+This governs **only built-in tools**. MCP tools (`crewship-memory`, Composio apps, …) come from the agent's `.mcp.json` via `--mcp-config` and are unaffected by `--tools`, so they always resolve (discovered through `ToolSearch`). The real Crewship capabilities (missions, issues, pipelines, keeper, peer messaging) are sidecar HTTP endpoints advertised in the system prompt — not CLI tools — and are gated by the agent's role capabilities.
 
 Per-adapter enforcement (each CLI exposes a different lever):
 
