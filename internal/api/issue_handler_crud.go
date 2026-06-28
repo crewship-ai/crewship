@@ -103,8 +103,7 @@ func (h *IssueHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := h.db.QueryContext(r.Context(), query, args...)
 	if err != nil {
-		h.logger.Error("list issues", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "list issues", err)
 		return
 	}
 	defer rows.Close()
@@ -114,16 +113,14 @@ func (h *IssueHandler) List(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		issue, err := scanIssueRow(rows)
 		if err != nil {
-			h.logger.Error("scan issue", "error", err)
-			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			internalError(w, r, h.logger, "scan issue", err)
 			return
 		}
 		result = append(result, issue)
 		issueIDs = append(issueIDs, issue.ID)
 	}
 	if err := rows.Err(); err != nil {
-		h.logger.Error("rows iteration (issues)", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "rows iteration (issues)", err)
 		return
 	}
 
@@ -214,8 +211,7 @@ func (h *IssueHandler) Get(w http.ResponseWriter, r *http.Request) {
 			writeProblem(w, r, http.StatusNotFound, "Issue not found")
 			return
 		}
-		h.logger.Error("get issue", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "get issue", err)
 		return
 	}
 
@@ -244,8 +240,7 @@ func (h *IssueHandler) GetByIdentifier(w http.ResponseWriter, r *http.Request) {
 			writeProblem(w, r, http.StatusNotFound, "Issue not found")
 			return
 		}
-		h.logger.Error("get issue by identifier", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "get issue by identifier", err)
 		return
 	}
 

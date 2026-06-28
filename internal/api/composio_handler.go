@@ -790,8 +790,7 @@ func (h *ComposioHandler) BindAgent(w http.ResponseWriter, r *http.Request) {
 			writeProblem(w, r, http.StatusNotFound, "agent not found")
 			return
 		}
-		h.logger.Error("composio: lookup agent", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "composio: lookup agent", err)
 		return
 	}
 
@@ -933,8 +932,7 @@ func (h *ComposioHandler) BindAgent(w http.ResponseWriter, r *http.Request) {
 
 	enc, err := encryption.Encrypt(key)
 	if err != nil {
-		h.logger.Error("composio: encrypt managed key", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "composio: encrypt managed key", err)
 		return
 	}
 	var createdBy any
@@ -948,8 +946,7 @@ func (h *ComposioHandler) BindAgent(w http.ResponseWriter, r *http.Request) {
 	// that removes the agent's other (de-selected) composio rows.
 	tx, err := h.db.BeginTx(ctx, nil)
 	if err != nil {
-		h.logger.Error("composio: begin bind tx", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "composio: begin bind tx", err)
 		return
 	}
 	defer tx.Rollback()
@@ -969,14 +966,12 @@ func (h *ComposioHandler) BindAgent(w http.ResponseWriter, r *http.Request) {
 			deleted_at      = NULL,
 			updated_at      = excluded.updated_at`,
 		credID, wsID, composioManagedKeyName, enc, createdBy, now, now); err != nil {
-		h.logger.Error("composio: upsert managed credential", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "composio: upsert managed credential", err)
 		return
 	}
 	if err := tx.QueryRowContext(ctx,
 		`SELECT id FROM credentials WHERE workspace_id = ? AND name = ?`, wsID, composioManagedKeyName).Scan(&credID); err != nil {
-		h.logger.Error("composio: read managed credential id", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "composio: read managed credential id", err)
 		return
 	}
 
@@ -996,14 +991,12 @@ func (h *ComposioHandler) BindAgent(w http.ResponseWriter, r *http.Request) {
 				deleted_at   = NULL,
 				updated_at   = excluded.updated_at`,
 			serverID, wsID, ra.serverRow, ra.display, ra.endpoint, now, now); err != nil {
-			h.logger.Error("composio: upsert mcp server row", "error", err)
-			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			internalError(w, r, h.logger, "composio: upsert mcp server row", err)
 			return
 		}
 		if err := tx.QueryRowContext(ctx,
 			`SELECT id FROM workspace_mcp_servers WHERE workspace_id = ? AND name = ?`, wsID, ra.serverRow).Scan(&serverID); err != nil {
-			h.logger.Error("composio: read mcp server id", "error", err)
-			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			internalError(w, r, h.logger, "composio: read mcp server id", err)
 			return
 		}
 		bindingID := generateCUID()
@@ -1016,8 +1009,7 @@ func (h *ComposioHandler) BindAgent(w http.ResponseWriter, r *http.Request) {
 				cred_header   = excluded.cred_header,
 				enabled       = 1`,
 			bindingID, agentID, serverID, credID, now); err != nil {
-			h.logger.Error("composio: upsert agent binding", "error", err)
-			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			internalError(w, r, h.logger, "composio: upsert agent binding", err)
 			return
 		}
 		grantedNames = append(grantedNames, ra.serverRow)
@@ -1040,8 +1032,7 @@ func (h *ComposioHandler) BindAgent(w http.ResponseWriter, r *http.Request) {
 	staleRows, err := tx.QueryContext(ctx,
 		`SELECT id FROM workspace_mcp_servers WHERE workspace_id = ? AND icon = 'composio' AND (name = ? OR name LIKE ?)`+notIn, staleArgs...)
 	if err != nil {
-		h.logger.Error("composio: query stale servers", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "composio: query stale servers", err)
 		return
 	}
 	var staleIDs []string
@@ -1049,8 +1040,7 @@ func (h *ComposioHandler) BindAgent(w http.ResponseWriter, r *http.Request) {
 		var id string
 		if err := staleRows.Scan(&id); err != nil {
 			staleRows.Close()
-			h.logger.Error("composio: scan stale server", "error", err)
-			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			internalError(w, r, h.logger, "composio: scan stale server", err)
 			return
 		}
 		staleIDs = append(staleIDs, id)
@@ -1059,21 +1049,18 @@ func (h *ComposioHandler) BindAgent(w http.ResponseWriter, r *http.Request) {
 	for _, id := range staleIDs {
 		if _, err := tx.ExecContext(ctx,
 			`DELETE FROM agent_mcp_bindings WHERE agent_id = ? AND mcp_server_id = ?`, agentID, id); err != nil {
-			h.logger.Error("composio: delete stale binding", "error", err)
-			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			internalError(w, r, h.logger, "composio: delete stale binding", err)
 			return
 		}
 		if _, err := tx.ExecContext(ctx,
 			`DELETE FROM workspace_mcp_servers WHERE id = ? AND workspace_id = ?`, id, wsID); err != nil {
-			h.logger.Error("composio: delete stale server", "error", err)
-			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			internalError(w, r, h.logger, "composio: delete stale server", err)
 			return
 		}
 	}
 
 	if err := tx.Commit(); err != nil {
-		h.logger.Error("composio: commit bind", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "composio: commit bind", err)
 		return
 	}
 
@@ -1129,8 +1116,7 @@ func (h *ComposioHandler) UnbindAgent(w http.ResponseWriter, r *http.Request) {
 			wsID, "composio-"+agentID, "composio-"+agentID+"-%")
 	}
 	if err != nil {
-		h.logger.Error("composio: lookup unbind servers", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "composio: lookup unbind servers", err)
 		return
 	}
 	var serverIDs []string
@@ -1138,8 +1124,7 @@ func (h *ComposioHandler) UnbindAgent(w http.ResponseWriter, r *http.Request) {
 		var id string
 		if err := rows.Scan(&id); err != nil {
 			rows.Close()
-			h.logger.Error("composio: scan unbind server", "error", err)
-			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			internalError(w, r, h.logger, "composio: scan unbind server", err)
 			return
 		}
 		serverIDs = append(serverIDs, id)
@@ -1152,8 +1137,7 @@ func (h *ComposioHandler) UnbindAgent(w http.ResponseWriter, r *http.Request) {
 
 	tx, err := h.db.BeginTx(ctx, nil)
 	if err != nil {
-		h.logger.Error("composio: begin unbind tx", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "composio: begin unbind tx", err)
 		return
 	}
 	defer tx.Rollback()
@@ -1162,21 +1146,18 @@ func (h *ComposioHandler) UnbindAgent(w http.ResponseWriter, r *http.Request) {
 		if _, err := tx.ExecContext(ctx,
 			`DELETE FROM agent_mcp_bindings WHERE agent_id = ? AND mcp_server_id = ? AND mcp_server_scope = 'workspace'`,
 			agentID, id); err != nil {
-			h.logger.Error("composio: delete agent binding", "error", err)
-			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			internalError(w, r, h.logger, "composio: delete agent binding", err)
 			return
 		}
 		if _, err := tx.ExecContext(ctx,
 			`DELETE FROM workspace_mcp_servers WHERE id = ? AND workspace_id = ?`, id, wsID); err != nil {
-			h.logger.Error("composio: delete mcp server", "error", err)
-			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			internalError(w, r, h.logger, "composio: delete mcp server", err)
 			return
 		}
 	}
 
 	if err := tx.Commit(); err != nil {
-		h.logger.Error("composio: commit unbind", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "composio: commit unbind", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
@@ -1221,8 +1202,7 @@ func (h *ComposioHandler) ListAgentBindings(w http.ResponseWriter, r *http.Reque
 		  AND ws.workspace_id = ? AND ws.deleted_at IS NULL AND ws.icon = 'composio'
 		ORDER BY ws.name`, agentID, wsID)
 	if err != nil {
-		h.logger.Error("composio: list agent bindings", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "composio: list agent bindings", err)
 		return
 	}
 	defer rows.Close()
@@ -1248,8 +1228,7 @@ func (h *ComposioHandler) ListAgentBindings(w http.ResponseWriter, r *http.Reque
 		})
 	}
 	if err := rows.Err(); err != nil {
-		h.logger.Error("composio: iterate agent bindings", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "composio: iterate agent bindings", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, composioListBindingsResponse{AgentID: agentID, Bindings: bindings})
@@ -1418,8 +1397,7 @@ func (h *ComposioHandler) UpsertSettings(w http.ResponseWriter, r *http.Request)
 
 	enc, err := encryption.Encrypt(req.APIKey)
 	if err != nil {
-		h.logger.Error("composio: encrypt api key", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "composio: encrypt api key", err)
 		return
 	}
 
@@ -1438,8 +1416,7 @@ func (h *ComposioHandler) UpsertSettings(w http.ResponseWriter, r *http.Request)
 			updated_at        = excluded.updated_at`,
 		wsID, enc, "", req.Label, createdBy, now, now)
 	if err != nil {
-		h.logger.Error("composio: upsert settings", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "composio: upsert settings", err)
 		return
 	}
 
@@ -1461,8 +1438,7 @@ func (h *ComposioHandler) DeleteSettings(w http.ResponseWriter, r *http.Request)
 	}
 	if _, err := h.db.ExecContext(r.Context(),
 		`DELETE FROM composio_settings WHERE workspace_id = ?`, wsID); err != nil {
-		h.logger.Error("composio: delete settings", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "composio: delete settings", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, h.settingsState(r))
@@ -1734,8 +1710,7 @@ func (h *ComposioHandler) SetDefault(w http.ResponseWriter, r *http.Request) {
 			writeProblem(w, r, de.status, de.msg)
 			return
 		}
-		h.logger.Error("composio: ensure default server", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "composio: ensure default server", err)
 		return
 	}
 

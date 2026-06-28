@@ -75,8 +75,7 @@ func (h *RecurringIssueHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := h.db.QueryContext(r.Context(), query, args...)
 	if err != nil {
-		h.logger.Error("list recurring issues", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "list recurring issues", err)
 		return
 	}
 	defer rows.Close()
@@ -91,15 +90,13 @@ func (h *RecurringIssueHandler) List(w http.ResponseWriter, r *http.Request) {
 			&ri.CronExpression, &ri.Enabled, &ri.NextRun, &ri.LastRun,
 			&ri.RunCount, &ri.CreatedAt,
 		); err != nil {
-			h.logger.Error("scan recurring issue", "error", err)
-			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			internalError(w, r, h.logger, "scan recurring issue", err)
 			return
 		}
 		result = append(result, ri)
 	}
 	if err := rows.Err(); err != nil {
-		h.logger.Error("rows iteration (recurring issues)", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "rows iteration (recurring issues)", err)
 		return
 	}
 
@@ -182,8 +179,7 @@ func (h *RecurringIssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 		req.ProjectID, req.MilestoneID, req.AssigneeType, req.AssigneeID, req.LabelsJSON,
 		req.CronExpression, nextRun, now)
 	if err != nil {
-		h.logger.Error("insert recurring issue", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "insert recurring issue", err)
 		return
 	}
 
@@ -232,8 +228,7 @@ func (h *RecurringIssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 			writeProblem(w, r, http.StatusNotFound, "Recurring issue not found")
 			return
 		}
-		h.logger.Error("get recurring issue for update", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "get recurring issue for update", err)
 		return
 	}
 
@@ -315,8 +310,7 @@ func (h *RecurringIssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 	query, args := ub.Build("recurring_issues", "id = ? AND workspace_id = ?", riID, wsID)
 	if _, err := h.db.ExecContext(r.Context(), query, args...); err != nil {
-		h.logger.Error("update recurring issue", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "update recurring issue", err)
 		return
 	}
 
@@ -340,8 +334,7 @@ func (h *RecurringIssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 		&ri.RunCount, &ri.CreatedAt,
 	)
 	if err != nil {
-		h.logger.Error("read updated recurring issue", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "read updated recurring issue", err)
 		return
 	}
 
@@ -363,14 +356,12 @@ func (h *RecurringIssueHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	res, err := h.db.ExecContext(r.Context(),
 		`DELETE FROM recurring_issues WHERE id = ? AND workspace_id = ?`, riID, wsID)
 	if err != nil {
-		h.logger.Error("delete recurring issue", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "delete recurring issue", err)
 		return
 	}
 	affected, err := res.RowsAffected()
 	if err != nil {
-		h.logger.Error("delete recurring issue rows affected", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "delete recurring issue rows affected", err)
 		return
 	}
 	if affected == 0 {

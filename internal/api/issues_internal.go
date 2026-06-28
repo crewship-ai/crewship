@@ -74,8 +74,7 @@ func (h *InternalIssueHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := h.db.QueryContext(r.Context(), query, args...)
 	if err != nil {
-		h.logger.Error("internal list issues", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "internal list issues", err)
 		return
 	}
 	defer rows.Close()
@@ -133,8 +132,7 @@ func (h *InternalIssueHandler) Get(w http.ResponseWriter, r *http.Request) {
 			writeProblem(w, r, http.StatusNotFound, "Issue not found")
 			return
 		}
-		h.logger.Error("internal get issue", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "internal get issue", err)
 		return
 	}
 	// Load labels
@@ -209,16 +207,14 @@ func (h *InternalIssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 				writeProblem(w, r, http.StatusBadRequest, "author agent does not belong to the specified crew/workspace")
 				return
 			}
-			h.logger.Error("validate author agent", "error", err)
-			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			internalError(w, r, h.logger, "validate author agent", err)
 			return
 		}
 	}
 
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
-		h.logger.Error("begin tx", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "begin tx", err)
 		return
 	}
 	defer tx.Rollback() //nolint:errcheck
@@ -234,8 +230,7 @@ func (h *InternalIssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 			writeProblem(w, r, http.StatusNotFound, "Crew not found")
 			return
 		}
-		h.logger.Error("get crew for issue", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "get crew for issue", err)
 		return
 	}
 
@@ -255,8 +250,7 @@ func (h *InternalIssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 		 ON CONFLICT(crew_id) DO UPDATE SET next_number = issue_counters.next_number + 1
 		 RETURNING next_number`, req.CrewID).Scan(&number)
 	if err != nil {
-		h.logger.Error("issue counter", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "issue counter", err)
 		return
 	}
 
@@ -288,8 +282,7 @@ func (h *InternalIssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 		req.Priority, req.AssigneeType, req.AssigneeID,
 		now, now)
 	if err != nil {
-		h.logger.Error("insert issue", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "insert issue", err)
 		return
 	}
 
@@ -303,8 +296,7 @@ func (h *InternalIssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := tx.Commit(); err != nil {
-		h.logger.Error("commit issue", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "commit issue", err)
 		return
 	}
 
@@ -352,8 +344,7 @@ func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Reque
 			writeProblem(w, r, http.StatusNotFound, "Issue not found")
 			return
 		}
-		h.logger.Error("find issue for update", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "find issue for update", err)
 		return
 	}
 
@@ -384,8 +375,7 @@ func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Reque
 	if !ub.Empty() {
 		query, args := ub.Build("missions", "id = ?", missionID)
 		if _, err := h.db.ExecContext(r.Context(), query, args...); err != nil {
-			h.logger.Error("update issue", "error", err)
-			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			internalError(w, r, h.logger, "update issue", err)
 			return
 		}
 	}
@@ -445,8 +435,7 @@ func (h *InternalIssueHandler) CreateComment(w http.ResponseWriter, r *http.Requ
 			writeProblem(w, r, http.StatusNotFound, "Issue not found")
 			return
 		}
-		h.logger.Error("find issue for comment", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "find issue for comment", err)
 		return
 	}
 
@@ -463,8 +452,7 @@ func (h *InternalIssueHandler) CreateComment(w http.ResponseWriter, r *http.Requ
 		VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		commentID, missionID, authorType, authorID, req.Body, now, now)
 	if err != nil {
-		h.logger.Error("insert comment", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "insert comment", err)
 		return
 	}
 

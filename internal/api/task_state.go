@@ -28,14 +28,12 @@ func (h *MissionHandler) Restart(w http.ResponseWriter, r *http.Request) {
 		 WHERE id = ? AND crew_id = ? AND workspace_id = ? AND status IN ('COMPLETED', 'FAILED', 'CANCELLED')`,
 		now, missionID, crewID, wsID)
 	if err != nil {
-		h.logger.Error("restart: claim mission", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "restart: claim mission", err)
 		return
 	}
 	claimed, err := res.RowsAffected()
 	if err != nil {
-		h.logger.Error("restart: check rows affected", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "restart: check rows affected", err)
 		return
 	}
 	if claimed == 0 {
@@ -116,14 +114,12 @@ func (h *MissionHandler) Resume(w http.ResponseWriter, r *http.Request) {
 		`UPDATE missions SET status = 'RESUMING', updated_at = ? WHERE id = ? AND crew_id = ? AND workspace_id = ? AND status = 'FAILED'`,
 		now, missionID, crewID, wsID)
 	if err != nil {
-		h.logger.Error("claim mission for resume", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "claim mission for resume", err)
 		return
 	}
 	claimed, err := res.RowsAffected()
 	if err != nil {
-		h.logger.Error("resume: check rows affected", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "resume: check rows affected", err)
 		return
 	}
 	if claimed == 0 {

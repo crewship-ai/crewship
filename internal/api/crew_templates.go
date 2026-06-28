@@ -299,8 +299,7 @@ func (h *CrewTemplateHandler) List(w http.ResponseWriter, r *http.Request) {
 		WHERE is_builtin = 1 OR workspace_id = ?
 		ORDER BY is_builtin DESC, category ASC, name ASC`, wsID)
 	if err != nil {
-		h.logger.Error("list crew templates", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "list crew templates", err)
 		return
 	}
 	defer rows.Close()
@@ -311,8 +310,7 @@ func (h *CrewTemplateHandler) List(w http.ResponseWriter, r *http.Request) {
 		var agentsJSON string
 		if err := rows.Scan(&t.ID, &t.Name, &t.Slug, &t.Description, &t.Icon, &t.Color,
 			&t.Category, &agentsJSON, &t.IsBuiltin, &t.CreatedAt); err != nil {
-			h.logger.Error("scan crew template", "error", err)
-			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			internalError(w, r, h.logger, "scan crew template", err)
 			return
 		}
 		if err := json.Unmarshal([]byte(agentsJSON), &t.Agents); err != nil {
@@ -322,8 +320,7 @@ func (h *CrewTemplateHandler) List(w http.ResponseWriter, r *http.Request) {
 		result = append(result, t)
 	}
 	if err := rows.Err(); err != nil {
-		h.logger.Error("iterate crew templates", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "iterate crew templates", err)
 		return
 	}
 	if result == nil {
@@ -349,8 +346,7 @@ func (h *CrewTemplateHandler) Get(w http.ResponseWriter, r *http.Request) {
 			writeProblem(w, r, http.StatusNotFound, "Template not found")
 			return
 		}
-		h.logger.Error("get crew template", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "get crew template", err)
 		return
 	}
 	if err := json.Unmarshal([]byte(agentsJSON), &t.Agents); err != nil {

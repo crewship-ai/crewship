@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -275,6 +276,23 @@ func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 // Wraps the previously repeated writeJSON(w, status, map[string]string{"error": ...}) idiom.
 func replyError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+// internalError is the canonical "log the error, return a 500" tail that was
+// hand-written at hundreds of handler sites. It reproduces the dominant idiom
+// exactly:
+//
+//	logger.Error(msg, "error", err)
+//	writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+//
+// The logger is guarded so a nil logger (e.g. a handler constructed without
+// one in a test) degrades to just writing the problem response rather than
+// panicking. Callers still issue their own `return` after this call.
+func internalError(w http.ResponseWriter, r *http.Request, logger *slog.Logger, msg string, err error) {
+	if logger != nil {
+		logger.Error(msg, "error", err)
+	}
+	writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 }
 
 // readJSON decodes the request body (up to 1 MB) into v.
