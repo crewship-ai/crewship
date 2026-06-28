@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
 import {
-  AlertCircle,
+  AlertTriangle,
   Archive,
   Bell,
   Bot,
@@ -19,6 +19,7 @@ import {
   Inbox as InboxIcon,
   Layers,
   MailOpen,
+  MessageSquare,
   RotateCcw,
   ScrollText,
   Sparkles,
@@ -30,6 +31,7 @@ import Link from "next/link"
 import { cn } from "@/lib/utils"
 import { useInbox, type InboxItem } from "@/hooks/use-inbox"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { useCrewSummaries } from "@/hooks/use-dashboard-data"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { ListRow } from "@/components/ui/list-row"
@@ -74,9 +76,9 @@ interface KindMeta {
 
 const KIND_META: Record<InboxItem["kind"], KindMeta> = {
   waitpoint: { label: "Waitpoint", icon: Clock, accent: "text-amber-300" },
-  escalation: { label: "Escalation", icon: AlertCircle, accent: "text-rose-300" },
+  escalation: { label: "Escalation", icon: AlertTriangle, accent: "text-rose-300" },
   failed_run: { label: "Failed run", icon: XCircle, accent: "text-rose-400" },
-  message: { label: "Message", icon: Sparkles, accent: "text-blue-300" },
+  message: { label: "Notification", icon: MessageSquare, accent: "text-blue-300" },
 }
 
 // The kind column can hold values the UI doesn't have a card for yet
@@ -133,7 +135,14 @@ function payloadString(item: InboxItem, key: string): string {
 // groupOf returns the bucket key + display label for an item under a
 // dimension. Items missing the dimension's field land in a stable
 // "No …" bucket (key prefixed so it can't collide with a real value).
-function groupOf(item: InboxItem, dim: GroupDim): { key: string; label: string } {
+// crewName resolves a crew_id to its human name so the Crew grouping
+// shows "Engineering" instead of a raw "cmqtg…" id (the key stays the id
+// so the bucket is stable even before names have loaded).
+function groupOf(
+  item: InboxItem,
+  dim: GroupDim,
+  crewName?: (id: string) => string,
+): { key: string; label: string } {
   switch (dim) {
     case "smart": {
       // Decisions = something an agent is blocked on (waitpoint /
@@ -160,7 +169,9 @@ function groupOf(item: InboxItem, dim: GroupDim): { key: string; label: string }
     }
     case "crew": {
       const crew = payloadString(item, "crew_id")
-      return crew ? { key: `c:${crew}`, label: crew } : { key: "c:_none", label: "No crew" }
+      if (!crew) return { key: "c:_none", label: "No crew" }
+      const name = crewName?.(crew)
+      return { key: `c:${crew}`, label: name && name !== "" ? name : crew }
     }
     case "kind":
     default:
@@ -333,6 +344,13 @@ export function InboxList() {
     [items, stateFilter],
   )
 
+  // Crew id → name, so the Crew grouping reads "Engineering" not a raw id.
+  const { data: crews } = useCrewSummaries(workspaceId)
+  const crewName = useMemo(() => {
+    const m = new Map((crews ?? []).map((c) => [c.id, c.name]))
+    return (id: string) => m.get(id) ?? ""
+  }, [crews])
+
   const liveSelected = useMemo(
     () => items.find((it) => it.id === selectedId) ?? null,
     [items, selectedId],
@@ -361,7 +379,7 @@ export function InboxList() {
   const groups = useMemo<InboxGroup[]>(() => {
     const map = new Map<string, InboxGroup>()
     for (const it of visibleItems) {
-      const g = groupOf(it, groupBy)
+      const g = groupOf(it, groupBy, crewName)
       const bucket = map.get(g.key)
       if (bucket) bucket.items.push(it)
       else map.set(g.key, { key: g.key, label: g.label, items: [it] })
@@ -373,7 +391,7 @@ export function InboxList() {
       out.sort((a, b) => (SMART_ORDER[a.key] ?? 99) - (SMART_ORDER[b.key] ?? 99))
     }
     return out
-  }, [visibleItems, groupBy])
+  }, [visibleItems, groupBy, crewName])
 
   // Drop checked ids that are no longer visible (filter switch, refresh,
   // regroup) so the bulk bar count never lies about what it will act on.
