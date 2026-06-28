@@ -364,8 +364,12 @@ func (h *ProxyHandler) CrewGitDiff(w http.ResponseWriter, r *http.Request) {
 	var exists int
 	err := h.db.QueryRowContext(r.Context(),
 		"SELECT 1 FROM crews WHERE id = ? AND workspace_id = ?", crewID, workspaceID).Scan(&exists)
-	if err != nil {
+	if errors.Is(err, sql.ErrNoRows) {
 		replyError(w, http.StatusNotFound, "Crew not found")
+		return
+	}
+	if err != nil {
+		replyError(w, http.StatusInternalServerError, "Failed to resolve crew")
 		return
 	}
 
@@ -410,12 +414,29 @@ func (h *ProxyHandler) RunGitDiff(w http.ResponseWriter, r *http.Request) {
 		FROM pipeline_runs pr
 		LEFT JOIN pipelines p ON pr.pipeline_id = p.id AND p.workspace_id = pr.workspace_id
 		WHERE pr.id = ? AND pr.workspace_id = ?`, runID, workspaceID).Scan(&crewID)
-	if err != nil {
+	if errors.Is(err, sql.ErrNoRows) {
 		replyError(w, http.StatusNotFound, "Run not found")
+		return
+	}
+	if err != nil {
+		replyError(w, http.StatusInternalServerError, "Failed to resolve run")
 		return
 	}
 	if !crewID.Valid || crewID.String == "" {
 		// No crew bound to this run — nothing to diff against a container.
+		writeJSON(w, http.StatusOK, map[string]interface{}{"is_repo": false})
+		return
+	}
+
+	// SECURITY: re-validate the resolved crew belongs to THIS workspace
+	// before reaching into its container. author_crew_id is just a column
+	// value and is never re-checked otherwise — a cross-workspace reference
+	// (template copy / migration bug) would otherwise leak a foreign crew's
+	// diff. The IPC handler resolves the crew by id only, so this is the sole
+	// tenant guard.
+	var ck int
+	if cerr := h.db.QueryRowContext(r.Context(),
+		"SELECT 1 FROM crews WHERE id = ? AND workspace_id = ?", crewID.String, workspaceID).Scan(&ck); cerr != nil {
 		writeJSON(w, http.StatusOK, map[string]interface{}{"is_repo": false})
 		return
 	}

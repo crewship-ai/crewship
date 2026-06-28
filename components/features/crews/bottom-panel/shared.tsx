@@ -39,9 +39,10 @@ export function formatRelative(iso: string): string {
   return d.toLocaleDateString()
 }
 
-/** Short status pill colour by run/mission status string. */
-export function statusColor(status: string): string {
-  const s = status.toLowerCase()
+/** Short status pill colour by run/mission status string. Null-safe — a
+ *  row missing `status` must not crash the whole tab. */
+export function statusColor(status?: string | null): string {
+  const s = (status ?? "").toLowerCase()
   if (s.includes("success") || s.includes("complete") || s.includes("done") || s.includes("ok")) return "text-emerald-300"
   if (s.includes("fail") || s.includes("error")) return "text-red-300"
   if (s.includes("run") || s.includes("active") || s.includes("progress")) return "text-blue-300"

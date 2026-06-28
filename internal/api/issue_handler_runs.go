@@ -41,6 +41,9 @@ func parseRunTime(s string) (time.Time, bool) {
 // status, timing, result, and error — the real "what ran" for an issue.
 // Newest-first.
 func (h *IssueHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
+	if !requireRole(w, r, "read") {
+		return
+	}
 	crewID := r.PathValue("crewId")
 	ident := r.PathValue("identifier")
 	wsID := WorkspaceIDFromContext(r.Context())

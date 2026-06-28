@@ -17,7 +17,8 @@ export interface MissionYamlEditorProps {
   onSave?: (yaml: string) => void
 }
 
-function escapeYaml(val: string): string {
+function escapeYaml(raw: string | null | undefined): string {
+  const val = String(raw ?? "")
   if (/[:#\[\]{}&*!|>'",%@`]/.test(val) || val.trim() !== val) {
     return `"${val.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`
   }
@@ -47,9 +48,9 @@ export function missionToYaml(mission: Mission): string {
   lines.push("  tasks:")
 
   for (const task of mission.tasks ?? []) {
-    lines.push(`    - id: ${task.id}`)
+    lines.push(`    - id: ${task.id ?? ""}`)
     lines.push(`      title: ${escapeYaml(task.title)}`)
-    lines.push(`      status: ${task.status}`)
+    lines.push(`      status: ${task.status ?? ""}`)
     if (task.agent_slug) lines.push(`      agent: ${task.agent_slug}`)
     if (task.complexity) lines.push(`      complexity: ${task.complexity}`)
     if (task.token_budget != null) lines.push(`      token_budget: ${task.token_budget}`)

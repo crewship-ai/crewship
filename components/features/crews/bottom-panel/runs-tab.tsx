@@ -94,12 +94,12 @@ export function RunsTab({ workspaceId, context }: { workspaceId: string; context
           </tr>
         </thead>
         <tbody>
-          {runs.map((run) => (
-            <tr key={run.id} className="border-t border-white/5 hover:bg-white/[0.02]">
+          {runs.map((run, i) => (
+            <tr key={run.id ?? i} className="border-t border-white/5 hover:bg-white/[0.02]">
               {isMission ? (
                 <td className="py-2 pr-3 text-foreground/90">{run.agent_name || "—"}</td>
               ) : (
-                <td className="py-2 pr-3 font-mono text-blue-300/90 truncate max-w-[120px]">{run.id.slice(0, 12)}</td>
+                <td className="py-2 pr-3 font-mono text-blue-300/90 truncate max-w-[120px]">{(run.id ?? "").slice(0, 12)}</td>
               )}
               {isMission && <td className="py-2 pr-3 text-muted-foreground truncate max-w-[180px]">{run.task || "—"}</td>}
               <td className={cn("py-2 pr-3", statusColor(run.status))}>{run.status}</td>

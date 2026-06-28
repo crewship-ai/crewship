@@ -215,10 +215,15 @@ export function ActivityTracePage() {
   const isFailedStep = run?.failed_at_step === stepId
 
   // Context for the bottom dock — log / trace / changes of the selected
-  // run. Complements the canvas above with the run's raw output console.
-  const runCtx: BottomPanelContext = runId
-    ? { kind: "run", runId, pipelineId: run?.pipeline_id ?? null, pipelineSlug: run?.pipeline_slug ?? null }
-    : null
+  // run. MEMOIZED: this page re-renders on every poll tick; a fresh context
+  // object each render makes the Logs tab re-resolve to the same runId and
+  // hang on "Loading…". Identity must only change with the actual run.
+  const runCtx: BottomPanelContext = useMemo(
+    () => (runId
+      ? { kind: "run", runId, pipelineId: run?.pipeline_id ?? null, pipelineSlug: run?.pipeline_slug ?? null }
+      : null),
+    [runId, run?.pipeline_id, run?.pipeline_slug],
+  )
 
   // Loading state — show skeleton while workspace ID is resolving.
   // Rail's own loading state covers the empty-runs flicker afterwards.

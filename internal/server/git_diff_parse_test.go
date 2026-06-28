@@ -1,36 +1,36 @@
 package server
 
 import (
+	"strings"
 	"testing"
 )
 
-// TestParseGitDiff_NotRepo — the __NOTREPO__ sentinel maps to is_repo:false
-// so the UI shows "not a git repository" rather than an empty diff.
+const tN = "CRWDIFFtestnonce" // marker prefix used by the tests
+
+// TestParseGitDiff_NotRepo — the NOTREPO sentinel maps to is_repo:false so
+// the UI shows "not a git repository" rather than an empty diff.
 func TestParseGitDiff_NotRepo(t *testing.T) {
-	got := parseGitDiff("__NOTREPO__\n")
+	got := parseGitDiff(tN+"NOTREPO\n", tN)
 	if got["is_repo"] != false {
 		t.Fatalf("is_repo = %v, want false", got["is_repo"])
 	}
 }
 
 // TestParseGitDiff_FilesAndPatch — status + numstat merge per path, and the
-// unified patch is captured verbatim under the __DIFF__ marker.
+// unified patch is captured verbatim under the DIFF marker.
 func TestParseGitDiff_FilesAndPatch(t *testing.T) {
-	out := `__STATUS__
-M	internal/api/inbox.go
-A	docs/new.mdx
-D	old/gone.go
-__NUMSTAT__
-8	1	internal/api/inbox.go
-40	0	docs/new.mdx
-0	12	old/gone.go
-__DIFF__
-diff --git a/internal/api/inbox.go b/internal/api/inbox.go
-@@ -1 +1 @@
--old
-+new
-`
-	got := parseGitDiff(out)
+	out := tN + "STATUS\n" +
+		"M\tinternal/api/inbox.go\n" +
+		"A\tdocs/new.mdx\n" +
+		"D\told/gone.go\n" +
+		tN + "NUMSTAT\n" +
+		"8\t1\tinternal/api/inbox.go\n" +
+		"40\t0\tdocs/new.mdx\n" +
+		"0\t12\told/gone.go\n" +
+		tN + "DIFF\n" +
+		"diff --git a/internal/api/inbox.go b/internal/api/inbox.go\n" +
+		"@@ -1 +1 @@\n-old\n+new\n"
+	got := parseGitDiff(out, tN)
 	if got["is_repo"] != true {
 		t.Fatalf("is_repo = %v, want true", got["is_repo"])
 	}
@@ -41,7 +41,6 @@ diff --git a/internal/api/inbox.go b/internal/api/inbox.go
 	if len(files) != 3 {
 		t.Fatalf("len(files) = %d, want 3", len(files))
 	}
-	// First file: modified, 8/1.
 	if files[0].Path != "internal/api/inbox.go" || files[0].Status != "modified" ||
 		files[0].Additions != 8 || files[0].Deletions != 1 {
 		t.Fatalf("file[0] = %+v", files[0])
@@ -58,13 +57,40 @@ diff --git a/internal/api/inbox.go b/internal/api/inbox.go
 	}
 }
 
+// TestParseGitDiff_MarkerCollisionImmune — a diff body that literally
+// contains the bare (un-prefixed) marker words and even a context line
+// equal to a fake marker must NOT corrupt parsing, now that markers carry a
+// random nonce and are matched exactly.
+func TestParseGitDiff_MarkerCollisionImmune(t *testing.T) {
+	out := tN + "STATUS\n" +
+		"M\troutes_container.go\n" +
+		tN + "NUMSTAT\n" +
+		"5\t2\troutes_container.go\n" +
+		tN + "DIFF\n" +
+		"diff --git a/routes_container.go b/routes_container.go\n" +
+		"@@ -1 +1 @@\n" +
+		"+const x = \"__DIFF__ and __NOTREPO__ in source\"\n" + // bare words in content
+		" __NUMSTAT__\n" // a context line (leading space) equal to an old marker
+	got := parseGitDiff(out, tN)
+	if got["is_repo"] != true {
+		t.Fatalf("is_repo = %v, want true (collision corrupted parse)", got["is_repo"])
+	}
+	files, _ := got["files"].([]gitChangedFile)
+	if len(files) != 1 {
+		t.Fatalf("len(files) = %d, want 1 — markers in diff body leaked into the file list", len(files))
+	}
+	if diff, _ := got["diff"].(string); !strings.Contains(diff, "in source") {
+		t.Fatalf("diff body truncated by a fake marker: %q", diff)
+	}
+}
+
 // TestParseGitDiff_Truncates — a patch over the cap is clipped and flagged.
 func TestParseGitDiff_Truncates(t *testing.T) {
 	var diffContent string
 	for len(diffContent) <= gitDiffMaxBytes+5000 {
 		diffContent += "+some added line of diff content here\n"
 	}
-	got := parseGitDiff("__STATUS__\n__NUMSTAT__\n__DIFF__\n" + diffContent)
+	got := parseGitDiff(tN+"STATUS\n"+tN+"NUMSTAT\n"+tN+"DIFF\n"+diffContent, tN)
 	if got["truncated"] != true {
 		t.Fatalf("truncated = %v, want true", got["truncated"])
 	}

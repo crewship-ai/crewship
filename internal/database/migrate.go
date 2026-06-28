@@ -1467,6 +1467,12 @@ END;
 	// credentials.approved_by_user_id / approved_at record the human who activated it.
 	// All additive. See migrate_consts_v119_credential_approval.go.
 	{version: 119, name: "credential_approval", sql: migrationCredentialApproval},
+
+	// v120: index payload.run_id on journal_entries (VIRTUAL generated column
+	// + partial index) so the dock's run-logs query is an indexed lookup
+	// instead of a full workspace scan. Additive. See
+	// migrate_consts_v120_journal_run_index.go.
+	{version: 120, name: "journal_run_index", sql: migrationJournalRunIndex},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

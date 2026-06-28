@@ -254,7 +254,7 @@ export function BottomPanel({
       </div>
 
       {open && (
-        <div className="flex-1 min-h-0 overflow-hidden border-t border-white/5">
+        <div role="tabpanel" aria-label={`${tab} panel`} className="flex-1 min-h-0 overflow-hidden border-t border-white/5">
           {tab === "messages" && <MessagesTab workspaceId={workspaceId} context={context} />}
           {tab === "exec" && <ExecTab workspaceId={workspaceId} context={context} />}
           {tab === "yaml" && <YamlTab workspaceId={workspaceId} context={context} />}
