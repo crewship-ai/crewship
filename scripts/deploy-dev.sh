@@ -52,8 +52,20 @@ ssh "$SERVER_HOST" bash -s -- "$SERVER_PATH" "$BRANCH" "$SENTRY_DSN_VAL" "$NEXT_
   export PATH=$PATH:/usr/local/go/bin:$HOME/go/bin
   cd "$SERVER_PATH"
 
-  # Stop containers to avoid stale processes
-  docker rm -f $(docker ps -q --filter "name=crewship-team-") 2>/dev/null || true
+  # Recreate this instance's agent containers so each one's sidecar mints a
+  # fresh workspace-bound IPC token under the current server. The containers are
+  # named crewship-<N>-team-<crew> (N = instance, from the checkout dir), but the
+  # old "crewship-team-" filter matched NONE of them — so stale sidecars survived
+  # every deploy and their tokens went invalid after an internal-token / restart
+  # change, making agent escalations fail with 403 "invalid workspace-bound
+  # token". Scope the kill to THIS instance so sibling instances on the same host
+  # are untouched.
+  INSTANCE="$(basename "$SERVER_PATH" | grep -oE '[0-9]+$' || true)"
+  if [ -n "$INSTANCE" ]; then
+    docker rm -f $(docker ps -q --filter "name=crewship-${INSTANCE}-team-") 2>/dev/null || true
+  else
+    docker rm -f $(docker ps -q --filter "name=-team-") 2>/dev/null || true
+  fi
 
   # Fetch and checkout
   git fetch origin "$BRANCH" 2>&1
