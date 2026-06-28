@@ -203,7 +203,7 @@ Returns `200` with a per-id breakdown:
 ```
 
 - `updated` — rows that took the transition.
-- `skipped` / `skipped_ids` — decision items the server refused to flip; the UI can surface "22 resolved, 3 need the source endpoint" and link each skipped id to its [source endpoint](#source-managed-kinds--409-conflict).
+- `skipped` / `skipped_ids` — rows the server refused to flip on this transition. Two reasons: **source-managed kinds** (`waitpoint` / `escalation`) must be resolved via their [source endpoint](#source-managed-kinds--409-conflict); and **`blocking=true`** rows of any kind are left for individual handling (they have no generic source endpoint). The UI surfaces e.g. "22 resolved, 3 left open" and routes each skipped id to the appropriate action.
 - `not_found` — ids that didn't resolve to a visible row (wrong workspace / target, or already gone).
 
 A single `inbox.updated` event broadcasts for the whole batch — see the [WebSocket section](#websocket-event) below.

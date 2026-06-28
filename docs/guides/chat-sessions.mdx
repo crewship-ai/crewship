@@ -214,13 +214,13 @@ The chat surface is small — no dedicated `/api-reference/chats` page yet; the 
 | Method | Path | Purpose |
 |---|---|---|
 | `GET` | `/api/v1/chats/{chatId}/participants` | List participants: `{participants:[{user_id, email, full_name, role, joined_at}]}`. |
-| `POST` | `/api/v1/chats/{chatId}/participants` | Body `{user_id, role?}` (`role` = `member` \| `owner`, default `member`). Promotes the chat to `visibility='group'` and seeds the creator as an `owner` row. Returns `204`. |
+| `POST` | `/api/v1/chats/{chatId}/participants` | Body `{user_id, role?}` (`role` = `member` \| `owner`, default `member`). `role` is an informational label only — it does **not** grant manage-participants rights (see below). Promotes the chat to `visibility='group'` and seeds the creator as an `owner` row. Returns `204`. |
 | `DELETE` | `/api/v1/chats/{chatId}/participants/{userId}` | Remove a participant. Returns `204`. |
 
 Access and tenancy rules:
 
 - Scoped via `chats.workspace_id` — a cross-tenant or unknown chat returns `404`.
-- Mutations (`POST` / `DELETE`) require the chat creator **or** a workspace `OWNER`/`ADMIN`; otherwise `403 only the chat owner or a workspace admin can manage participants`.
+- Mutations (`POST` / `DELETE`) require the chat creator **or** a workspace `OWNER`/`ADMIN`; otherwise `403 only the chat owner or a workspace admin can manage participants`. A participant whose `role` is `owner` is **not** thereby granted this right — manage-participants permission comes only from being the chat creator or a workspace admin, independent of the per-participant `role` label.
 - Plain members can `GET` the participant list but cannot mutate it.
 - The target user must already be a workspace member, else `400 user is not a member of this workspace`.
 - Removing the chat owner is rejected with `400 cannot remove the chat owner`.
@@ -300,7 +300,7 @@ Chat sessions honor the workspace `preferred_language` — the agent replies in 
 
 ### Faithful reload
 
-Reopening a session now rehydrates the full structured turn — assistant text, reasoning/thinking, **and** tool call cards (input + result) — not just the final text. Previously thinking and tool activity were dropped on reload and only the last assistant message survived. Persistence is built on a normalized `Part` model over the adapter-neutral event stream, so the rehydrated transcript is identical across CLI adapters (Claude Code today; Codex / Gemini / OpenCode later); legacy JSONL transcripts remain readable. MVP limit: `tool_result` bodies are stored as a correlation id only.
+Reopening a session now rehydrates the full structured turn — assistant text, reasoning/thinking, **and** tool call cards (input + result) — not just the final text. Previously thinking and tool activity were dropped on reload and only the last assistant message survived. Persistence is built on a normalized `Part` model over the adapter-neutral event stream, so the rehydrated transcript is identical across every CLI adapter (the one in use today and any added later); legacy JSONL transcripts remain readable. MVP limit: `tool_result` bodies are stored as a correlation id only.
 
 ### How assistant turns render
 
@@ -409,8 +409,10 @@ crewship chat participants list <chat-id>                         # who's in the
 crewship chat participants remove <chat-id> <user-id>             # remove
 ```
 
-The `--role` flag accepts `member` (default) or `owner`. These map 1:1 to
-`POST` / `GET` / `DELETE /api/v1/chats/{chatId}/participants`.
+The `--role` flag accepts `member` (default) or `owner`; it maps to the `role`
+field of the `POST /api/v1/chats/{chatId}/participants` body, and the same values
+appear in `GET` responses. `DELETE` takes no role. The label is informational —
+it does not by itself grant manage-participants rights (see [Group chats](#group-chats)).
 
 **Attribution & live sync.** Each human message is broadcast to the other
 participants in real time and labelled with its author (avatar + name); your own
