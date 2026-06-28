@@ -446,6 +446,7 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	r.mux.Handle("GET /api/v1/agents/{agentId}/container-files", authed(wsCtx(http.HandlerFunc(proxy.AgentContainerFiles))))
 	r.mux.Handle("GET /api/v1/agents/{agentId}/git-log", authed(wsCtx(http.HandlerFunc(proxy.AgentGitLog))))
 	r.mux.Handle("GET /api/v1/crews/{crewId}/git-diff", authed(wsCtx(http.HandlerFunc(proxy.CrewGitDiff))))
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/changes", authed(wsCtx(http.HandlerFunc(proxy.RunGitDiff))))
 	r.mux.Handle("GET /api/v1/agents/{agentId}/logs", authed(wsCtx(http.HandlerFunc(proxy.AgentLogs))))
 	r.mux.Handle("POST /api/v1/agents/{agentId}/stop", authed(wsCtx(http.HandlerFunc(proxy.AgentStop))))
 	// wsCtx is required because ChatMessages runs canRole(RoleFromContext)

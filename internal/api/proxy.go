@@ -387,3 +387,50 @@ func (h *ProxyHandler) CrewGitDiff(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, data)
 }
+
+// RunGitDiff resolves a pipeline run to its crew and returns that crew
+// container's base-branch diff — the change set the run produced. Powers
+// the Activity dock's Changes tab.
+// GET /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/changes.
+//
+// Crew resolution: the run's invoking_crew_id, falling back to the
+// pipeline's author_crew_id. A run with no resolvable crew (e.g. a
+// workspace-level pipeline) degrades to is_repo:false rather than erroring.
+func (h *ProxyHandler) RunGitDiff(w http.ResponseWriter, r *http.Request) {
+	runID := r.PathValue("runId")
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	if !canRole(RoleFromContext(r.Context()), "read") {
+		replyError(w, http.StatusForbidden, "Forbidden")
+		return
+	}
+
+	var crewID sql.NullString
+	err := h.db.QueryRowContext(r.Context(), `
+		SELECT COALESCE(NULLIF(pr.invoking_crew_id, ''), p.author_crew_id)
+		FROM pipeline_runs pr
+		LEFT JOIN pipelines p ON pr.pipeline_id = p.id AND p.workspace_id = pr.workspace_id
+		WHERE pr.id = ? AND pr.workspace_id = ?`, runID, workspaceID).Scan(&crewID)
+	if err != nil {
+		replyError(w, http.StatusNotFound, "Run not found")
+		return
+	}
+	if !crewID.Valid || crewID.String == "" {
+		// No crew bound to this run — nothing to diff against a container.
+		writeJSON(w, http.StatusOK, map[string]interface{}{"is_repo": false})
+		return
+	}
+
+	resp, err := h.ipcGet(r.Context(), fmt.Sprintf("/crews/%s/git-diff", url.PathEscape(crewID.String)))
+	if err != nil {
+		replyError(w, http.StatusBadGateway, "Failed to compute diff")
+		return
+	}
+	defer resp.Body.Close()
+
+	var data map[string]interface{}
+	if json.NewDecoder(resp.Body).Decode(&data) != nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"is_repo": false})
+		return
+	}
+	writeJSON(w, http.StatusOK, data)
+}

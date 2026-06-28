@@ -47,9 +47,9 @@ export function ChangesTab({ workspaceId, context }: { workspaceId: string; cont
   const [unavailable, setUnavailable] = useState(false)
 
   // Diff is computed at the crew-container level (base-branch diff of the
-  // crew's workspace), so the issue maps to its owning crew. Run-scoped diff
-  // needs run→crew resolution and isn't wired yet — it degrades to the idle
-  // state below.
+  // crew workspace). An issue maps to its owning crew directly; a run maps
+  // via its invoking/author crew (resolved server-side). A run with no crew
+  // degrades to the idle state below.
   let url: string | null = null
   if (context?.kind === "mission") {
     url = `/api/v1/crews/${context.crewId}/git-diff?workspace_id=${workspaceId}`
