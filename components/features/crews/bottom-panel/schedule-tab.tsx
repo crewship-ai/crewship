@@ -44,6 +44,9 @@ export function ScheduleTab({ workspaceId, context }: { workspaceId: string; con
     setLoading(true)
     setSchedule(null)
     setError(null)
+    // Clear the "Triggered ✓" state so a freshly selected routine doesn't
+    // inherit the previous one's success button.
+    setRan(false)
     fetch(`/api/v1/workspaces/${workspaceId}/pipeline-schedules`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((data: Schedule[]) => {

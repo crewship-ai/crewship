@@ -67,8 +67,12 @@ func (h *IssueHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
 		)
 		if err := rows.Scan(&dto.ID, &dto.Status, &mode, &startedAt, &endedAt,
 			&dto.DurationMs, &dto.CostUSD, &dto.TriggeredVia, &errMsg); err != nil {
+			// Fail loudly rather than silently dropping a row — a NULL/type
+			// drift would otherwise hide runs from the dock + CLI with a
+			// misleading 200.
 			h.logger.Error("issue runs: scan", "error", err)
-			continue
+			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			return
 		}
 		dto.Mode = mode.String
 		dto.StartedAt = startedAt.String

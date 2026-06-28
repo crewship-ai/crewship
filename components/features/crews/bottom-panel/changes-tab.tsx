@@ -65,7 +65,7 @@ export function ChangesTab({ workspaceId, context }: { workspaceId: string; cont
     setUnavailable(false)
     fetch(url)
       .then((r) => {
-        if (r.status === 404 || r.status === 501) { setUnavailable(true); return null }
+        if (r.status === 404 || r.status === 501) { if (!cancelled) setUnavailable(true); return null }
         return r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))
       })
       .then((d) => { if (!cancelled && d) setData(d) })
@@ -107,9 +107,10 @@ export function ChangesTab({ workspaceId, context }: { workspaceId: string; cont
                 <span className={cn(
                   "inline-block w-4",
                   f.status === "added" ? "text-emerald-300" :
-                  f.status === "deleted" ? "text-red-300" : "text-amber-300",
+                  f.status === "deleted" ? "text-red-300" :
+                  f.status === "renamed" ? "text-blue-300" : "text-amber-300",
                 )}>
-                  {f.status === "added" ? "A" : f.status === "deleted" ? "D" : "M"}
+                  {f.status === "added" ? "A" : f.status === "deleted" ? "D" : f.status === "renamed" ? "R" : "M"}
                 </span>
                 {f.path}
               </span>

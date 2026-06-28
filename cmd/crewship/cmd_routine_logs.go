@@ -24,17 +24,19 @@ var routineLogsCmd = &cobra.Command{
 	Long: `Fetches every journal entry tagged to the given run_id (run + step
 events) and prints them in chronological order.
 
-When --slug is provided, the CLI takes the fast path: it pulls the
-journal scoped to that routine and filters to this run_id. Without
---slug, the CLI falls back to the slug-free workspace lookup at
-GET /api/v1/workspaces/{ws}/pipeline-runs/{runId} — that endpoint
-returns the persisted run state (status, step outputs, error) but
-NOT every journal entry. Use --slug when you want the full timeline.
+Three modes:
+  • default (slug-free): GET /pipeline-runs/{runId} — the persisted run
+    state (status, step outputs, error). Not the full timeline.
+  • --full (slug-free): GET /pipeline-runs/{runId}/logs — the FULL
+    per-run journal timeline, server-side, no --slug needed.
+  • --slug <routine>: pulls that routine's journal and filters to this
+    run_id (the original full-timeline path).
 
 Examples:
   crewship routine logs run_abc123                      # slug-free state lookup
-  crewship routine logs run_abc123 --slug pr-review     # full journal timeline
-  crewship routine logs run_abc123 --slug pr-review --json | jq '.[] | select(.severity=="error")'
+  crewship routine logs run_abc123 --full               # full timeline, no slug
+  crewship routine logs run_abc123 --slug pr-review     # full timeline via routine journal
+  crewship routine logs run_abc123 --full --json | jq '.[] | select(.level=="error")'
 
 Output formats:
   table  Human-readable timeline with timestamp + entry-type + summary

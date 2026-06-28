@@ -476,7 +476,10 @@ var issueRunsCmd = &cobra.Command{
 				issueRelativeTime(run.StartedAt),
 				fmt.Sprintf("%dms", run.DurationMs),
 				fmt.Sprintf("$%.4f", run.CostUSD),
-				truncateStr(strings.ReplaceAll(result, "\n", " "), 50),
+				// error_message is verbatim executor output — strip ANSI /
+				// control bytes before printing so a failed run can't inject
+				// terminal escapes into the table.
+				truncateStr(strings.ReplaceAll(sanitizeTerminal(result), "\n", " "), 50),
 			})
 		}
 		return f.Auto(runs, headers, rows)

@@ -94,7 +94,7 @@ export function RunsTab({ workspaceId, context }: { workspaceId: string; context
               <td className="py-2 text-muted-foreground truncate max-w-[200px]">
                 {run.error_message
                   ? <span className="text-red-300">{run.error_message}</span>
-                  : (run.cost_usd ? `$${run.cost_usd.toFixed(4)}` : "—")}
+                  : (typeof run.cost_usd === "number" ? `$${run.cost_usd.toFixed(4)}` : "—")}
               </td>
             </tr>
           ))}

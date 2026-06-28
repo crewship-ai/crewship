@@ -11,7 +11,7 @@ import (
 // seedIssueRun inserts a pipeline_run linked to an issue via the
 // triggered_via='issue' + triggered_by_id=<identifier> convention that
 // GetRun's JOIN and ListRuns both rely on.
-func seedIssueRun(t *testing.T, h *IssueHandler, wsID, pipelineID, slug, runID, identifier, status string) {
+func seedIssueRun(t *testing.T, h *IssueHandler, wsID, pipelineID, slug, runID, identifier, status, startedAt string) {
 	t.Helper()
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	if _, err := h.db.Exec(`
@@ -20,7 +20,7 @@ func seedIssueRun(t *testing.T, h *IssueHandler, wsID, pipelineID, slug, runID, 
 		    step_outputs_json, cost_usd, duration_ms, triggered_via, triggered_by_id,
 		    inputs_json, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, 'run', ?, '{}', 0, 0, 'issue', ?, '{}', ?, ?)`,
-		runID, wsID, pipelineID, slug, status, now, identifier, now, now); err != nil {
+		runID, wsID, pipelineID, slug, status, startedAt, identifier, now, now); err != nil {
 		t.Fatalf("seed issue run: %v", err)
 	}
 }
@@ -56,10 +56,11 @@ func TestIssueRuns_ReturnsLinkedRuns(t *testing.T) {
 	seedIssue(t, h.db, wsID, crewID, leadID, "ENG-2", "IN_PROGRESS")
 	seedRunsPipeline(t, h.db, wsID, "pl-iss", "iss-pipe")
 
-	// Two runs for ENG-1, one for ENG-2 — the latter must NOT leak in.
-	seedIssueRun(t, h, wsID, "pl-iss", "iss-pipe", "prn_a", "ENG-1", "completed")
-	seedIssueRun(t, h, wsID, "pl-iss", "iss-pipe", "prn_b", "ENG-1", "failed")
-	seedIssueRun(t, h, wsID, "pl-iss", "iss-pipe", "prn_c", "ENG-2", "completed")
+	// Two runs for ENG-1 (distinct started_at), one for ENG-2 — the latter
+	// must NOT leak in. prn_b is newer than prn_a so we can assert DESC.
+	seedIssueRun(t, h, wsID, "pl-iss", "iss-pipe", "prn_a", "ENG-1", "completed", "2026-06-01T09:00:00Z")
+	seedIssueRun(t, h, wsID, "pl-iss", "iss-pipe", "prn_b", "ENG-1", "failed", "2026-06-01T10:00:00Z")
+	seedIssueRun(t, h, wsID, "pl-iss", "iss-pipe", "prn_c", "ENG-2", "completed", "2026-06-01T11:00:00Z")
 
 	rr := httptest.NewRecorder()
 	h.ListRuns(rr, issueRunsRequest(t, userID, wsID, crewID, "ENG-1"))
@@ -73,6 +74,10 @@ func TestIssueRuns_ReturnsLinkedRuns(t *testing.T) {
 	}
 	if len(got) != 2 {
 		t.Fatalf("len = %d, want 2 (ENG-1 runs only); body=%s", len(got), rr.Body.String())
+	}
+	// Newest-first: prn_b (10:00) before prn_a (09:00).
+	if got[0].ID != "prn_b" || got[1].ID != "prn_a" {
+		t.Fatalf("order = [%s, %s], want [prn_b, prn_a] (DESC by started_at)", got[0].ID, got[1].ID)
 	}
 	for _, run := range got {
 		if run.ID == "prn_c" {

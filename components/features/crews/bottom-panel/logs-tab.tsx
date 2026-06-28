@@ -36,7 +36,9 @@ export function LogsTab({ workspaceId, context }: { workspaceId: string; context
         .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
         .then((data) => {
           if (cancelled) return
-          const list = Array.isArray(data) ? data : []
+          // run-records may come back bare or wrapped as { runs: [...] } —
+          // accept both, same as RunsTab.
+          const list = Array.isArray(data) ? data : (data?.runs ?? [])
           setRunId(list[0]?.id ?? "")
         })
         .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)) })

@@ -44,27 +44,26 @@ export function CommentsTab({ workspaceId, context }: { workspaceId: string; con
     ? `/api/v1/crews/${crewId}/issues/${encodeURIComponent(identifier)}/comments?workspace_id=${workspaceId}`
     : null
 
-  const load = () => {
-    if (!base) return
-    fetch(base)
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
-      .then((data) => setComments(Array.isArray(data) ? data : []))
-      .catch((err) => setError(err instanceof Error ? err.message : String(err)))
-  }
-
   useEffect(() => {
-    if (!isMission) return
+    if (!isMission || !base) return
+    let cancelled = false
     setComments(null)
     setError(null)
-    load()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isMission, crewId, identifier, workspaceId])
+    fetch(base)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then((data) => { if (!cancelled) setComments(Array.isArray(data) ? data : []) })
+      .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)) })
+    // Ignore a slow response after the user switches issues — otherwise the
+    // previous thread's comments can overwrite the current one.
+    return () => { cancelled = true }
+  }, [isMission, base])
 
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }) }, [comments?.length])
 
   const send = async () => {
     if (!base || !draft.trim() || sending) return
     setSending(true)
+    setError(null)
     try {
       const postUrl = base.split("?")[0] + `?workspace_id=${workspaceId}`
       const r = await fetch(postUrl, {
@@ -117,12 +116,21 @@ export function CommentsTab({ workspaceId, context }: { workspaceId: string; con
         })}
         <div ref={endRef} />
       </div>
+      {/* Send failures surface here — the load-error path returns early
+          above, so once the thread is shown this is the only place a
+          failed POST can report itself. */}
+      {error && comments !== null && (
+        <div className="shrink-0 px-3 py-1.5 text-[11px] text-red-300 border-t border-red-500/20 bg-red-500/5">
+          Failed to send: {error}
+        </div>
+      )}
       <div className="shrink-0 flex gap-2 p-2 border-t border-white/8">
         <input
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send() } }}
           placeholder="Write a comment…"
+          aria-label="Write a comment"
           className="flex-1 bg-background border border-white/10 rounded-md px-3 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-blue-500/50"
         />
         <button

@@ -218,7 +218,7 @@ export function BottomPanel({
         />
       )}
 
-      <div className="h-9 shrink-0 flex items-center gap-1 px-2 text-xs overflow-x-auto">
+      <div role="tablist" aria-label="Bottom panel" className="h-9 shrink-0 flex items-center gap-1 px-2 text-xs overflow-x-auto">
         {tabIds.map((id) => {
           const meta = TAB_META[id]
           const Icon = meta.icon
@@ -227,6 +227,8 @@ export function BottomPanel({
             <button
               key={id}
               type="button"
+              role="tab"
+              aria-selected={active}
               onClick={() => handleTab(id)}
               className={cn(
                 "px-2.5 py-1 rounded flex items-center gap-1.5 transition-colors whitespace-nowrap",

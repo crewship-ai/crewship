@@ -22,11 +22,20 @@ export function formatRelative(iso: string): string {
   const d = new Date(iso)
   const t = d.getTime()
   if (Number.isNaN(t)) return iso
-  const sec = Math.floor((Date.now() - t) / 1000)
-  if (sec < 45) return "just now"
-  if (sec < 3600) return `${Math.floor(sec / 60)}m ago`
-  if (sec < 86400) return `${Math.floor(sec / 3600)}h ago`
-  if (sec < 86400 * 30) return `${Math.floor(sec / 86400)}d ago`
+  const diff = Math.floor((Date.now() - t) / 1000)
+  // Future timestamps (e.g. a schedule's next_run_at) read forward.
+  if (diff < 0) {
+    const sec = -diff
+    if (sec < 45) return "in moments"
+    if (sec < 3600) return `in ${Math.floor(sec / 60)}m`
+    if (sec < 86400) return `in ${Math.floor(sec / 3600)}h`
+    if (sec < 86400 * 30) return `in ${Math.floor(sec / 86400)}d`
+    return d.toLocaleDateString()
+  }
+  if (diff < 45) return "just now"
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
+  if (diff < 86400 * 30) return `${Math.floor(diff / 86400)}d ago`
   return d.toLocaleDateString()
 }
 
