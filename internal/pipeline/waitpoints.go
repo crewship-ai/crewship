@@ -177,11 +177,25 @@ INSERT INTO pipeline_waitpoints (
 	// is logged but doesn't fail the waitpoint creation — the
 	// pipeline_waitpoints row remains the source of truth and a
 	// follow-up rebuild job can backfill missed projections.
-	title := "Waitpoint pending approval"
-	if req.Prompt != "" {
-		title = req.Prompt
-		if len(title) > 80 {
-			title = title[:77] + "…"
+	// Title is a one-line label, not a body excerpt. The prompt is often
+	// a multi-line markdown change plan ("Approve this…\n\n## Change
+	// Plan…"); CleanTitle takes the first line, drops markdown markers,
+	// and truncates — so the list row reads cleanly instead of dragging
+	// "\n\n##" into the title. Body is redacted in case the prompt quotes
+	// a credential.
+	// Redact the prompt before deriving the title — CleanTitle takes the
+	// first line verbatim, so a credential quoted there would otherwise
+	// land in the title even though the body below is redacted.
+	title := inbox.CleanTitle(inbox.RedactSecrets(req.Prompt), 80, "Waitpoint pending approval")
+	// Give the row a sender so the UI can render an icon + "From" line
+	// instead of a blank. The invoking crew is the most meaningful actor
+	// behind a pipeline approval; fall back to a generic label.
+	senderName := "Approval required"
+	if req.InvokingCrewID != "" {
+		var name string
+		if err := s.db.QueryRowContext(ctx,
+			`SELECT name FROM crews WHERE id = ?`, req.InvokingCrewID).Scan(&name); err == nil && name != "" {
+			senderName = name
 		}
 	}
 	inbox.Insert(ctx, s.db, slog.Default(), inbox.Item{
@@ -190,8 +204,9 @@ INSERT INTO pipeline_waitpoints (
 		SourceID:    token,
 		TargetRole:  "MANAGER",
 		Title:       title,
-		BodyMD:      req.Prompt,
+		BodyMD:      inbox.RedactSecrets(req.Prompt),
 		SenderType:  "pipeline",
+		SenderName:  senderName,
 		Priority:    "high",
 		Blocking:    true,
 		Payload: map[string]interface{}{

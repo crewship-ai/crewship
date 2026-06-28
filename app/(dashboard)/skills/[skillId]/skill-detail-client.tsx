@@ -1,7 +1,6 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { useParams } from "next/navigation"
 import { ArrowLeft, AlertCircle } from "lucide-react"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
@@ -9,6 +8,11 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { SkillDetailView } from "@/components/skills/skill-detail"
 import { InstallSkillDialog } from "@/components/skills/install-skill-dialog"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { useUrlSegment } from "@/lib/use-url-segment"
+
+// Read skillId from the URL, not useParams() — avoids the static-export
+// "_" placeholder bug (see useUrlSegment). Module-scope for a stable ref.
+const SKILL_PATH_RE = /^\/skills\/([^/]+)\/?$/
 
 export interface SkillDetail {
   id: string
@@ -45,7 +49,7 @@ export interface SkillDetail {
 }
 
 export function SkillDetailPageClient() {
-  const params = useParams<{ skillId: string }>()
+  const skillId = useUrlSegment(SKILL_PATH_RE)
   const { workspaceId, loading: wsLoading } = useWorkspace()
 
   const [skill, setSkill] = useState<SkillDetail | null>(null)
@@ -57,6 +61,9 @@ export function SkillDetailPageClient() {
       if (!wsLoading) setLoading(false)
       return
     }
+    // Pre-mount the URL segment is null — keep the skeleton until it
+    // resolves rather than fetching /api/v1/skills/null.
+    if (!skillId) return
 
     let cancelled = false
 
@@ -65,7 +72,7 @@ export function SkillDetailPageClient() {
       setError(null)
       try {
         const res = await fetch(
-          `/api/v1/skills/${params.skillId}?workspace_id=${workspaceId}`
+          `/api/v1/skills/${encodeURIComponent(skillId!)}?workspace_id=${workspaceId}`
         )
         if (!res.ok) {
           setError("Skill not found")
@@ -84,7 +91,7 @@ export function SkillDetailPageClient() {
     return () => {
       cancelled = true
     }
-  }, [workspaceId, wsLoading, params.skillId])
+  }, [workspaceId, wsLoading, skillId])
 
   const isLoading = wsLoading || loading
 
