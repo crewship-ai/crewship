@@ -48,6 +48,16 @@ func (geminiAdapter) BuildCommand(req AgentRunRequest) []string {
 		prompt = "[SYSTEM]\n" + sys + "\n\n[USER]\n" + req.UserMessage
 	}
 	cmd := []string{"gemini", "-p", prompt, "--output-format", "stream-json"}
+	// Profile enforcement. Gemini's named-tool allowlist (--allowed-tools) is
+	// deprecated in favour of the Policy Engine, so the portable lever for a
+	// read-only MINIMAL agent (graders/reviewers) is --approval-mode plan,
+	// Gemini's built-in read-only mode. This is the closest equivalent to the
+	// Claude --tools MINIMAL restriction; CODING/FULL keep the default flow.
+	// (Gemini has none of Claude Code's harness-internal tools, so there is no
+	// TaskCreate-style dead-tool surface to strip here.)
+	if req.ToolProfile == "MINIMAL" {
+		cmd = append(cmd, "--approval-mode", "plan")
+	}
 	if req.LLMModel != "" {
 		cmd = append(cmd, "-m", req.LLMModel)
 	}

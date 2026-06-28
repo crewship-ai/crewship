@@ -160,19 +160,24 @@ func TestBuildCLICommand(t *testing.T) {
 			// CLAUDE_CODE because setupMCPConfig auto-injects the
 			// sidecar-hosted crewship-memory server. Path renders with
 			// an empty AgentSlug here because the test doesn't set one.
+			// Default (empty) profile normalises to CODING → curated built-in
+			// allowlist via --tools. Harness-internal tools (TaskCreate, etc.)
+			// are NOT in the list, so the agent can't reach for them.
 			"claude code default",
 			AgentRunRequest{CLIAdapter: "CLAUDE_CODE", UserMessage: "hello"},
-			[]string{"claude", "--print", "--output-format", "stream-json", "--include-partial-messages", "--dangerously-skip-permissions", "--verbose", "--bare", "--setting-sources", "", "--strict-mcp-config", "--no-session-persistence", "--system-prompt", crewshipSystemPreamble, "--max-turns", "50", "--mcp-config", "/crew/agents//.mcp.json", "--", "hello"},
+			[]string{"claude", "--print", "--output-format", "stream-json", "--include-partial-messages", "--dangerously-skip-permissions", "--verbose", "--bare", "--setting-sources", "", "--strict-mcp-config", "--no-session-persistence", "--system-prompt", crewshipSystemPreamble, "--tools", "Read,Glob,Grep,Write,Edit,Bash,WebFetch,WebSearch", "--max-turns", "50", "--mcp-config", "/crew/agents//.mcp.json", "--", "hello"},
 		},
 		{
 			"claude code with system prompt",
 			AgentRunRequest{CLIAdapter: "CLAUDE_CODE", SystemPrompt: "be helpful", UserMessage: "hello"},
-			[]string{"claude", "--print", "--output-format", "stream-json", "--include-partial-messages", "--dangerously-skip-permissions", "--verbose", "--bare", "--setting-sources", "", "--strict-mcp-config", "--no-session-persistence", "--system-prompt", crewshipSystemPreamble + "be helpful", "--max-turns", "50", "--mcp-config", "/crew/agents//.mcp.json", "--", "hello"},
+			[]string{"claude", "--print", "--output-format", "stream-json", "--include-partial-messages", "--dangerously-skip-permissions", "--verbose", "--bare", "--setting-sources", "", "--strict-mcp-config", "--no-session-persistence", "--system-prompt", crewshipSystemPreamble + "be helpful", "--tools", "Read,Glob,Grep,Write,Edit,Bash,WebFetch,WebSearch", "--max-turns", "50", "--mcp-config", "/crew/agents//.mcp.json", "--", "hello"},
 		},
 		{
+			// MINIMAL is read-only: Read,Glob,Grep (the old value listed a
+			// non-existent "Search" tool and omitted Glob — fixed here).
 			"claude code minimal profile",
 			AgentRunRequest{CLIAdapter: "CLAUDE_CODE", ToolProfile: "MINIMAL", UserMessage: "hello"},
-			[]string{"claude", "--print", "--output-format", "stream-json", "--include-partial-messages", "--dangerously-skip-permissions", "--verbose", "--bare", "--setting-sources", "", "--strict-mcp-config", "--no-session-persistence", "--system-prompt", crewshipSystemPreamble, "--tools", "Read,Search,Grep", "--max-turns", "50", "--mcp-config", "/crew/agents//.mcp.json", "--", "hello"},
+			[]string{"claude", "--print", "--output-format", "stream-json", "--include-partial-messages", "--dangerously-skip-permissions", "--verbose", "--bare", "--setting-sources", "", "--strict-mcp-config", "--no-session-persistence", "--system-prompt", crewshipSystemPreamble, "--tools", "Read,Glob,Grep", "--max-turns", "50", "--mcp-config", "/crew/agents//.mcp.json", "--", "hello"},
 		},
 		{
 			// Codex Rust port (npm @openai/codex 0.128.x): non-interactive
@@ -206,6 +211,13 @@ func TestBuildCLICommand(t *testing.T) {
 			"gemini cli with system prompt + model",
 			AgentRunRequest{CLIAdapter: "GEMINI_CLI", SystemPrompt: "be helpful", LLMModel: "gemini-2.5-pro", UserMessage: "hello"},
 			[]string{"gemini", "-p", "[SYSTEM]\n" + crewshipSystemPreamble + "be helpful" + "\n\n[USER]\nhello", "--output-format", "stream-json", "-m", "gemini-2.5-pro"},
+		},
+		{
+			// MINIMAL → read-only via Gemini's plan approval mode (its
+			// --allowed-tools allowlist is deprecated).
+			"gemini cli minimal profile is read-only (plan mode)",
+			AgentRunRequest{CLIAdapter: "GEMINI_CLI", ToolProfile: "MINIMAL", UserMessage: "audit"},
+			[]string{"gemini", "-p", "[SYSTEM]\n" + crewshipSystemPreamble + "\n\n[USER]\naudit", "--output-format", "stream-json", "--approval-mode", "plan"},
 		},
 		{
 			// opencode flag is --format (NOT --output-format), values
