@@ -12,6 +12,19 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover"
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command"
 import { cn } from "@/lib/utils"
 import {
   ToolkitIcon,
@@ -163,14 +176,12 @@ export function AccessEditor({
   const removeApp = (slug: string) =>
     setApps((prev) => prev.filter((a) => a.toolkit.slug !== slug))
 
-  const addApp = (t: Toolkit) => {
+  const addApp = (t: Toolkit) =>
     setApps((prev) =>
       prev.some((a) => a.toolkit.slug === t.slug)
         ? prev
         : [...prev, { toolkit: t, mode: "full", tools: new Set<string>() }],
     )
-    setAddOpen(false)
-  }
 
   const setTools = (slug: string, next: Set<string>) =>
     setApps((prev) =>
@@ -313,34 +324,28 @@ export function AccessEditor({
                 </div>
               )}
 
-              {/* Add app */}
-              <div className="relative mt-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setAddOpen((o) => !o)}
+              {/* Add app — a Popover combobox that portals out of this
+                  scrollable dialog, so the menu is never clipped by the
+                  dialog's overflow (the old absolute dropdown forced a
+                  full-modal scroll to reach its options). */}
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <AddAppMenu
+                  toolkits={addable}
+                  onPick={addApp}
+                  open={addOpen}
+                  onOpenChange={setAddOpen}
                   disabled={addable.length === 0}
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                  Add app
-                </Button>
+                />
                 {addable.length === 0 ? (
-                  <span className="ml-2 text-[11px] text-muted-foreground">
+                  <span className="text-[11px] text-muted-foreground">
                     {userToolkits.length === 0
                       ? "this user has no connected apps"
                       : "all connected apps already granted"}
                   </span>
                 ) : (
-                  <span className="ml-2 text-[11px] text-muted-foreground">
+                  <span className="text-[11px] text-muted-foreground">
                     only {userId || "the user"}&apos;s connected apps
                   </span>
-                )}
-                {addOpen && addable.length > 0 && (
-                  <AddAppMenu
-                    toolkits={addable}
-                    onPick={addApp}
-                    onClose={() => setAddOpen(false)}
-                  />
                 )}
               </div>
             </div>
@@ -365,64 +370,58 @@ export function AccessEditor({
   )
 }
 
-// A small searchable popover of toolkits to grant. Closes on outside click.
-function AddAppMenu({
+// A searchable combobox of toolkits to grant, rendered in a Popover that
+// portals out of the (scrollable) dialog so the menu is never clipped by the
+// dialog's overflow. cmdk's Command gives keyboard search + arrow-key nav for
+// free. Open state is controlled by the parent so it can be closed on pick.
+export function AddAppMenu({
   toolkits,
   onPick,
-  onClose,
+  open,
+  onOpenChange,
+  disabled,
 }: {
   toolkits: Toolkit[]
   onPick: (t: Toolkit) => void
-  onClose: () => void
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  disabled?: boolean
 }) {
-  const [q, setQ] = React.useState("")
-  const ref = React.useRef<HTMLDivElement>(null)
-
-  React.useEffect(() => {
-    const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose()
-    }
-    document.addEventListener("mousedown", onDown)
-    return () => document.removeEventListener("mousedown", onDown)
-  }, [onClose])
-
-  const filtered = toolkits.filter((t) => t.slug.toLowerCase().includes(q.toLowerCase()))
-
   return (
-    <div
-      ref={ref}
-      className="absolute left-0 top-full z-10 mt-1 w-60 rounded-xl border border-white/10 bg-card p-2 shadow-2xl"
-    >
-      <div className="relative mb-1.5">
-        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-        <input
-          autoFocus
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="Search apps…"
-          className="w-full rounded-lg border border-white/10 bg-background py-1.5 pl-8 pr-2 text-xs focus:border-blue-400/50 focus:outline-none"
-        />
-      </div>
-      <div className="max-h-56 overflow-y-auto">
-        {filtered.length === 0 ? (
-          <div className="px-2 py-3 text-center text-[11px] text-muted-foreground">
-            No matching apps.
-          </div>
-        ) : (
-          filtered.map((t) => (
-            <button
-              key={t.slug}
-              type="button"
-              onClick={() => onPick(t)}
-              className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs hover:bg-white/[0.04]"
-            >
-              <ToolkitIcon toolkit={t} size={14} />
-              <span className="capitalize">{toolkitLabel(t.slug)}</span>
-            </button>
-          ))
-        )}
-      </div>
-    </div>
+    <Popover open={open} onOpenChange={onOpenChange}>
+      <PopoverTrigger asChild>
+        <Button variant="outline" size="sm" disabled={disabled}>
+          <Plus className="h-3.5 w-3.5" />
+          Add app
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-64 p-0">
+        <Command>
+          <CommandInput placeholder="Search apps…" className="text-xs" />
+          <CommandList>
+            <CommandEmpty className="px-2 py-3 text-center text-[11px] text-muted-foreground">
+              No matching apps.
+            </CommandEmpty>
+            <CommandGroup>
+              {toolkits.map((t) => (
+                <CommandItem
+                  key={t.slug}
+                  value={toolkitLabel(t.slug)}
+                  onSelect={() => {
+                    onPick(t)
+                    onOpenChange(false)
+                  }}
+                  className="gap-2 text-xs"
+                >
+                  <ToolkitIcon toolkit={t} size={14} />
+                  <span className="capitalize">{toolkitLabel(t.slug)}</span>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
   )
 }
 
