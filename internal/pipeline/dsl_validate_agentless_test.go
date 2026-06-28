@@ -25,7 +25,7 @@ func agentlessProbeDSL() *DSL {
 		Inputs:     []InputSpec{{Name: "threshold", Type: "string"}},
 		Steps: []Step{
 			{ID: "fetch", Type: StepHTTP, HTTP: &HTTPStep{Method: "GET", URL: "https://billing.example.com/today"}},
-			{ID: "judge", Type: StepCode, Code: &CodeStep{Runtime: "bash", Code: "echo true"}},
+			{ID: "judge", Type: StepCode, Code: &CodeStep{Runtime: "cel", Code: "inputs.threshold == \"hi\""}},
 			{ID: "shape", Type: StepTransform, Transform: &TransformStep{Input: "{{ steps.judge.output }}", Expression: "."}},
 		},
 	}

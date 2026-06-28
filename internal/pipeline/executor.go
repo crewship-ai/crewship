@@ -247,12 +247,18 @@ type CodeRunner interface {
 // to env vars in the container.
 type CodeRunRequest struct {
 	WorkspaceID string
-	Runtime     string // python | go | bash
+	Runtime     string // expr | cel (python | go | bash reserved, unwired)
 	Version     string
 	Code        string
 	InputEnv    map[string]string
-	TimeoutSec  int
-	MaxBytes    int // stdout cap
+	// Inputs carries the render context's inputs with their ORIGINAL
+	// names and types (numbers stay numbers). The expr runner ignores
+	// it (operates on rendered literals); the CEL runner exposes it as
+	// the `inputs` map variable so expressions can do typed arithmetic
+	// and field access (inputs.spend_usd > inputs.threshold_usd).
+	Inputs     map[string]any
+	TimeoutSec int
+	MaxBytes   int // stdout cap
 }
 
 // CodeRunResult is the output of a code-step run. Stdout becomes

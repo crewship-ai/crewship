@@ -64,6 +64,18 @@ func TestSeedRoutinesValidateAgainstDSL(t *testing.T) {
 			if err := pipeline.Validate(dsl, crewAgents, pipelineSlugs); err != nil {
 				t.Fatalf("validate: %v", err)
 			}
+			// Explicit guard: every type:code step must use a runtime with a
+			// wired runner. Validate() already enforces this, but asserting it
+			// directly documents the intent and gives a runtime-specific
+			// failure — this is exactly the gap that let a `runtime: bash`
+			// cost-spike-probe ship and fail at every invocation.
+			for _, st := range dsl.Steps {
+				if st.Type == pipeline.StepCode && st.Code != nil {
+					if !pipeline.IsWiredCodeRuntime(st.Code.Runtime) {
+						t.Fatalf("step %q uses code runtime %q with no wired runner — use expr or cel (see code_runtimes.go)", st.ID, st.Code.Runtime)
+					}
+				}
+			}
 		})
 	}
 }

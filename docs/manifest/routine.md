@@ -339,17 +339,18 @@ manually before re-applying, otherwise the Plan layer will print a
 warning that the webhook's public URL won't be discoverable from the
 env.
 
-## Code steps: `runtime: expr` (wired) vs shell runtimes (not wired)
+## Code steps: wired runtimes (`expr`, `cel`) vs shell runtimes (rejected)
 
-`type: code` supports two tiers of runtime.
+`type: code` supports two **wired**, deterministic, token-zero runtimes.
+Shell runtimes (`bash | python | go`) are **rejected at author time**
+because no sandbox runner is wired.
 
-### `runtime: expr` — wired, deterministic, token-zero
+### `runtime: expr` — single comparison, token-zero
 
-The `expr` runtime is the production runner for **agentless** probes
-(`internal/pipeline/runner_code_expr.go`). It is a pure-Go, in-process
-evaluator: it spins no container, calls no LLM, and touches no
-filesystem or network — so it honours the token-zero guarantee and adds
-no code-execution surface. It evaluates a single comparison and emits
+The `expr` runtime (`internal/pipeline/runner_code_expr.go`) is a
+pure-Go, in-process evaluator: no container, no LLM, no filesystem or
+network — it honours the token-zero guarantee and adds no
+code-execution surface. It evaluates a single comparison and emits
 `true` / `false`:
 
 ```yaml
@@ -365,32 +366,52 @@ steps:
 
 Operands are numeric or string literals, or a `CREWSHIP_INPUT_<NAME>`
 env reference. This is the wake-gate / cost-spike primitive — pair it
-with a schedule whose `wake_gate` checks the probe output. Anything that
-isn't a single comparison fails closed at validation/run time.
+with a schedule whose `wake_gate` checks the probe output.
 
-### `runtime: bash | python | go` — validated, but no sandbox wired
+### `runtime: cel` — general agentless logic, token-zero
 
-These runtimes pass the DSL validator but have **no sandboxed runner
-wired** in this build. A routine that uses one **saves successfully**
-and the schedule fires on cron, but the step fails at runtime with:
+The `cel` runtime (`internal/pipeline/runner_code_cel.go`) evaluates a
+[Google CEL](https://github.com/google/cel-go) expression. CEL is
+**non-Turing-complete** (every expression provably terminates), pure-Go,
+and sandboxed by construction — no loops, no I/O — so it keeps the
+token-zero / no-RCE guarantees while giving you real logic: boolean
+operators (`&&`, `||`, `!`), arithmetic, string ops, list/map
+membership, ternaries, and field access. It is the primitive to reach
+for when `expr`'s single comparison is not enough.
 
-```text
-code runtime "bash" not available in this build (no sandbox wired) —
-use runtime: expr for agentless probes, or convert this step to
-type: agent_run with an agent that has shell-tool access
+Inputs are exposed as the typed `inputs` map variable (numbers stay
+numbers), so reference them directly — no `{{ }}` needed:
+
+```yaml
+steps:
+  - id: spike
+    type: code
+    code:
+      runtime: cel
+      # Real logic in one deterministic, token-zero step:
+      code: 'inputs.spend_usd > inputs.threshold_usd && inputs.region in ["eu", "us"]'
 ```
 
-`crewship apply` surfaces this at plan time as a yellow warning (only
-for the unwired runtimes — `expr` steps do not warn) so you see the gap
-before the cron fires the first time:
+A `bool` result emits `true` / `false`; numeric and string results emit
+their canonical string form. Compile/eval errors (unknown variable, bad
+syntax) fail closed.
+
+### `runtime: bash | python | go` — rejected at author time
+
+These runtimes are schema-legal names but have **no sandboxed runner
+wired** in this build. As of PR #710 a routine that uses one is
+**rejected when you save / apply / test_run it** — it can no longer
+save-cleanly-then-fail-at-3am:
 
 ```text
-Warnings:
-  ! routine "seznam-check": step "probe" is type: code with runtime
-    "bash", which has no wired runner — invocations will fail until it
-    is converted to type: agent_run with a shell-tool-enabled agent, or
-    to runtime: expr for agentless probes
+pipeline: step "probe" (code) runtime "bash" has no wired runner in this
+build — use runtime: expr or cel for agentless logic, or convert to
+type: agent_run with a shell-tool-enabled agent
 ```
+
+`crewship apply` also surfaces the same gap as a plan-time warning for
+any routine that bypassed the validator (legacy import bundles, direct
+API writes). If you need real shell, use the conversion recipe below.
 
 ### Conversion recipe (shell runtimes → agent_run)
 

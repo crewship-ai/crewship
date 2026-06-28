@@ -45,7 +45,10 @@ func TestValidateStepEgress_Branches(t *testing.T) {
 		{"code invalid runtime", Step{ID: "c", Type: StepCode, Code: &CodeStep{Runtime: "ruby", Code: "puts 1"}}, `runtime "ruby" invalid`},
 		{"code missing code", Step{ID: "c", Type: StepCode, Code: &CodeStep{Runtime: "python"}}, "missing code"},
 		{"code script too big", Step{ID: "c", Type: StepCode, Code: &CodeStep{Runtime: "bash", Code: bigCode}}, ">1MB"},
-		{"code valid go", Step{ID: "c", Type: StepCode, Code: &CodeStep{Runtime: "go", Code: "package main"}}, ""},
+		{"code valid expr", Step{ID: "c", Type: StepCode, Code: &CodeStep{Runtime: "expr", Code: "1 > 0"}}, ""},
+		{"code valid cel", Step{ID: "c", Type: StepCode, Code: &CodeStep{Runtime: "cel", Code: "inputs.x > 0"}}, ""},
+		{"code unwired go", Step{ID: "c", Type: StepCode, Code: &CodeStep{Runtime: "go", Code: "package main"}}, "no wired runner"},
+		{"code unwired bash", Step{ID: "c", Type: StepCode, Code: &CodeStep{Runtime: "bash", Code: "echo hi"}}, "no wired runner"},
 
 		// --- wait ---
 		{"wait missing body", Step{ID: "w", Type: StepWait}, "missing wait body"},
