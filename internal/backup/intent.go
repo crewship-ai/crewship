@@ -124,41 +124,51 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	// (access) / Art. 17 (deletion) compliance events with required
 	// `reason` fields — a regulator audit reading "we lost the
 	// GDPR log on a restore" is not a defensible posture.
-	"gdpr_actions":       IntentInclude,
-	"hooks_config":       IntentInclude,
-	"inbox_items":        IntentInclude,
-	"issue_counters":     IntentInclude,
-	"memory_proposals":   IntentInclude,
-	"memory_versions":    IntentInclude,
-	"message_feedback":   IntentInclude,
-	"mission_activity":   IntentInclude,
-	"mission_comments":   IntentInclude,
-	"mission_labels":     IntentInclude,
-	"mission_proposals":  IntentInclude,
-	"mission_relations":  IntentInclude,
-	"mission_tasks":      IntentInclude,
-	"peer_card_audit":    IntentExcludeOperational, // audit trail
-	"peer_cards":         IntentInclude,
+	"gdpr_actions":      IntentInclude,
+	"hooks_config":      IntentInclude,
+	"inbox_items":       IntentInclude,
+	"issue_counters":    IntentInclude,
+	"memory_proposals":  IntentInclude,
+	"memory_versions":   IntentInclude,
+	"message_feedback":  IntentInclude,
+	"mission_activity":  IntentInclude,
+	"mission_comments":  IntentInclude,
+	"mission_labels":    IntentInclude,
+	"mission_proposals": IntentInclude,
+	"mission_relations": IntentInclude,
+	"mission_tasks":     IntentInclude,
+	"peer_card_audit":   IntentExcludeOperational, // audit trail
+	"peer_cards":        IntentInclude,
+	// pending_runs holds deferred/debounced triggers waiting to fire
+	// (delay/ttl/priority). A pending row is a scheduled future run —
+	// durable, like a waitpoint; dropping it on restore loses queued work.
+	"pending_runs":       IntentInclude,
 	"pipeline_runs":      IntentInclude,
 	"pipeline_schedules": IntentInclude,
-	"pipeline_versions":  IntentInclude,
+	// pipeline_tags = routine-DEFINITION discovery tags (v125).
+	"pipeline_tags":     IntentInclude,
+	"pipeline_versions": IntentInclude,
 	// pipeline_waitpoints holds suspended-workflow state (pending
 	// approval tokens, event-wait, decision_payload, timeout_at).
 	// These are DURABLE state — a "pending" waitpoint is a real
 	// suspended pipeline run with a token an approver still holds.
 	// Dropping these on restore breaks every in-flight workflow.
 	// Initial classification (IntentExcludeRuntime) was wrong.
-	"pipeline_waitpoints":   IntentInclude,
-	"pipeline_webhooks":     IntentInclude,
-	"pipelines":             IntentInclude,
-	"skill_invocations":     IntentExcludeOperational, // telemetry
-	"subscriptions":         IntentInclude,
-	"user_models":           IntentInclude, // durable per-operator model
-	"user_peer_consent":     IntentInclude,
-	"workflow_states":       IntentInclude,
-	"workspace_invitations": IntentInclude,
-	"workspace_mcp_servers": IntentInclude,
-	"workspace_members":     IntentInclude, // who can access — must restore
+	"pipeline_waitpoints": IntentInclude,
+	"pipeline_webhooks":   IntentInclude,
+	"pipelines":           IntentInclude,
+	// routine_step_overrides = per-step prompt/model overrides (v123);
+	// run_tags = per-run labels (v122). Both durable workspace state.
+	"routine_step_overrides": IntentInclude,
+	"run_tags":               IntentInclude,
+	"skill_invocations":      IntentExcludeOperational, // telemetry
+	"subscriptions":          IntentInclude,
+	"user_models":            IntentInclude, // durable per-operator model
+	"user_peer_consent":      IntentInclude,
+	"workflow_states":        IntentInclude,
+	"workspace_invitations":  IntentInclude,
+	"workspace_mcp_servers":  IntentInclude,
+	"workspace_members":      IntentInclude, // who can access — must restore
 }
 
 // IncludedTables returns the names of tables the bundle should

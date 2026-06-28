@@ -150,14 +150,14 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 
 	exec := h.newExecutor()
 	res, err := exec.Run(r.Context(), pipeline.RunInput{
-		PipelineID:      p.ID,
-		WorkspaceID:     workspaceID,
-		InvokingCrewID:  invokingCrew,
-		InvokingAgentID: invokingAgent,
-		Inputs:          body.Inputs,
-		Mode:            pipeline.ModeRun,
-		IdempotencyKey:  idempotencyKey,
-		TierOverride:    tierOverride,
+		PipelineID:        p.ID,
+		WorkspaceID:       workspaceID,
+		InvokingCrewID:    invokingCrew,
+		InvokingAgentID:   invokingAgent,
+		Inputs:            body.Inputs,
+		Mode:              pipeline.ModeRun,
+		IdempotencyKey:    idempotencyKey,
+		TierOverride:      tierOverride,
 		TriggeredVia:      triggeredVia,
 		TriggeredByID:     body.TriggeredByID,
 		Tags:              body.Tags,
