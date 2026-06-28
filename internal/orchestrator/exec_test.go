@@ -578,6 +578,14 @@ func TestSystemPreambleDocumentsCredentialEscalation(t *testing.T) {
 	if !strings.Contains(crewshipSystemPreamble, "does NOT register a credential") {
 		t.Error("preamble should warn that writing a file does NOT register a credential in the vault")
 	}
+	// The structured proposal contract: the agent must pass the credential value
+	// in the metadata JSON so it lands as a PENDING_APPROVAL row for one-click approval.
+	if !strings.Contains(crewshipSystemPreamble, "PENDING_APPROVAL") {
+		t.Error("preamble should explain the proposed credential is stored as PENDING_APPROVAL")
+	}
+	if !strings.Contains(crewshipSystemPreamble, `\"value\"`) {
+		t.Error("preamble should document the metadata JSON proposal contract incl. a value field")
+	}
 }
 
 func TestHandleStreamJSONLine_MixedContentBlocks(t *testing.T) {

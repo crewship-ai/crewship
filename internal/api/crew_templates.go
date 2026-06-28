@@ -168,7 +168,7 @@ func autoAssignCredentials(ctx context.Context, db *sql.DB, logger *slog.Logger,
 	rows, err := db.QueryContext(ctx, `
 		SELECT id, name FROM credentials
 		WHERE workspace_id = ? AND type IN ('API_KEY', 'AI_CLI_TOKEN')
-		  AND provider = 'ANTHROPIC' AND deleted_at IS NULL
+		  AND provider = 'ANTHROPIC' AND deleted_at IS NULL AND status = 'ACTIVE'
 		ORDER BY created_at ASC`, wsID)
 	if err != nil {
 		if logger != nil {

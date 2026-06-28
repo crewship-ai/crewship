@@ -113,15 +113,34 @@ func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
+	// CREDENTIAL escalations may carry a structured proposal in `metadata`:
+	// {"name","type","provider","value"}. When present we create the proposed
+	// credential up front in PENDING_APPROVAL state (value encrypted) and link
+	// it here, so a human can approve it with one click. SECURITY: the metadata
+	// carries a secret, so once a proposal is detected we ALWAYS replace
+	// body.Metadata with a redacted blob (no value) before it is stored on the
+	// escalation row or emitted to the journal — even on the fallback path where
+	// no pending row was created (e.g. name collision, no workspace owner).
+	var credentialID interface{}
+	if escalationType == "CREDENTIAL" {
+		if proposal, ok := parseCredentialProposal(body.Metadata); ok {
+			cid, created := h.createPendingCredential(r.Context(), body.WorkspaceID, fromAgentID, proposal)
+			if created {
+				credentialID = cid
+			}
+			body.Metadata = proposal.redactedMetadata(cid)
+		}
+	}
+
 	var metadataVal interface{}
 	if body.Metadata != "" {
 		metadataVal = body.Metadata
 	}
 
 	_, err = h.db.ExecContext(r.Context(), `
-		INSERT INTO escalations (id, workspace_id, crew_id, chat_id, from_agent_id, reason, context, type, metadata, status, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?)
-	`, escalationID, body.WorkspaceID, body.CrewID, body.ChatID, fromAgentID, body.Reason, contextVal, escalationType, metadataVal, now)
+		INSERT INTO escalations (id, workspace_id, crew_id, chat_id, from_agent_id, reason, context, type, metadata, credential_id, status, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?)
+	`, escalationID, body.WorkspaceID, body.CrewID, body.ChatID, fromAgentID, body.Reason, contextVal, escalationType, metadataVal, credentialID, now)
 	if err != nil {
 		h.logger.Error("create escalation", "error", err)
 		replyError(w, http.StatusInternalServerError, "Internal server error")
@@ -132,6 +151,20 @@ func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) 
 	// unified Inbox without a fan-out query at read time. Best-effort:
 	// failure here is logged + swallowed; the escalations table stays
 	// the source of truth and a future inbox-rebuild job can backfill.
+	inboxPayload := map[string]interface{}{
+		"crew_id":         body.CrewID,
+		"chat_id":         body.ChatID,
+		"reason":          body.Reason,
+		"escalation_type": escalationType,
+	}
+	// Signal to the inbox UI that this CREDENTIAL escalation already has a
+	// proposed credential waiting in the vault, so it can show a one-click
+	// Approve (vs the legacy human-supplies-the-secret flow that routes to the
+	// crew escalations panel).
+	if cid, ok := credentialID.(string); ok && cid != "" {
+		inboxPayload["has_pending_credential"] = true
+		inboxPayload["credential_id"] = cid
+	}
 	inbox.Insert(r.Context(), h.db, h.logger, inbox.Item{
 		WorkspaceID: body.WorkspaceID,
 		Kind:        "escalation",
@@ -144,12 +177,7 @@ func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) 
 		SenderName:  body.FromSlug,
 		Priority:    "high",
 		Blocking:    true,
-		Payload: map[string]interface{}{
-			"crew_id":         body.CrewID,
-			"chat_id":         body.ChatID,
-			"reason":          body.Reason,
-			"escalation_type": escalationType,
-		},
+		Payload:     inboxPayload,
 	})
 
 	// Dual-write the escalation into the journal. Severity=warn because
@@ -244,12 +272,13 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 	}
 
 	var status, chatID, crewID, fromSlug, escalationType string
+	var credentialID sql.NullString
 	err := h.db.QueryRowContext(r.Context(), `
-		SELECT e.status, e.chat_id, e.crew_id, a.slug, e.type
+		SELECT e.status, e.chat_id, e.crew_id, a.slug, e.type, e.credential_id
 		FROM escalations e
 		JOIN agents a ON a.id = e.from_agent_id
 		WHERE e.id = ? AND e.workspace_id = ?
-	`, escalationID, workspaceID).Scan(&status, &chatID, &crewID, &fromSlug, &escalationType)
+	`, escalationID, workspaceID).Scan(&status, &chatID, &crewID, &fromSlug, &escalationType, &credentialID)
 
 	// Validate redirect_to agent exists in the same crew (after we know crew_id).
 	if err == nil && body.Action == "redirect" && body.RedirectTo != "" {
@@ -319,6 +348,48 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 	if n == 0 {
 		replyError(w, http.StatusConflict, "escalation already resolved")
 		return
+	}
+
+	// Agent-proposed credential: a CREDENTIAL escalation may link a credential
+	// already sitting in the vault as PENDING_APPROVAL. Approve activates it —
+	// attributed to the human approver, which is the named-human gate that makes
+	// the credential usable; reject soft-deletes it. Idempotent + best-effort:
+	// the escalation has already transitioned, so a missing/already-flipped
+	// credential is logged, never a 500.
+	if credentialID.Valid && credentialID.String != "" {
+		approverID := ""
+		if user := UserFromContext(r.Context()); user != nil {
+			approverID = user.ID
+		}
+		switch body.Action {
+		case "approve":
+			res, credErr := h.db.ExecContext(r.Context(), `
+				UPDATE credentials
+				SET status = 'ACTIVE', approved_by_user_id = ?, approved_at = ?, created_by = ?, updated_at = ?
+				WHERE id = ? AND workspace_id = ? AND status = 'PENDING_APPROVAL' AND deleted_at IS NULL
+			`, approverID, now, approverID, now, credentialID.String, workspaceID)
+			if credErr != nil {
+				h.logger.Error("approve pending credential", "error", credErr, "credential_id", credentialID.String)
+			} else if rows, _ := res.RowsAffected(); rows == 0 {
+				h.logger.Warn("approve pending credential: no pending row to activate", "credential_id", credentialID.String)
+			} else {
+				_ = RecordCredentialEvent(r.Context(), h.db, h.logger, credentialID.String,
+					AuditEventApproved, "", "", map[string]any{"approved_by": approverID})
+			}
+		case "reject":
+			res, credErr := h.db.ExecContext(r.Context(), `
+				UPDATE credentials SET status = 'REJECTED', deleted_at = ?, updated_at = ?
+				WHERE id = ? AND workspace_id = ? AND status = 'PENDING_APPROVAL' AND deleted_at IS NULL
+			`, now, now, credentialID.String, workspaceID)
+			if credErr != nil {
+				h.logger.Error("reject pending credential", "error", credErr, "credential_id", credentialID.String)
+			} else if rows, _ := res.RowsAffected(); rows == 0 {
+				h.logger.Warn("reject pending credential: no pending row to delete", "credential_id", credentialID.String)
+			} else {
+				_ = RecordCredentialEvent(r.Context(), h.db, h.logger, credentialID.String,
+					AuditEventRejected, "", "", map[string]any{"rejected_by": approverID})
+			}
+		}
 	}
 
 	// Mirror the resolution into the unified inbox so the row drops
@@ -425,12 +496,16 @@ func (h *QueryHandler) ListEscalations(w http.ResponseWriter, r *http.Request) {
 		ResolvedBy         *string `json:"resolved_by"`
 		ResolvedAt         *string `json:"resolved_at"`
 		CreatedAt          string  `json:"created_at"`
+		// CredentialID links an agent-proposed CREDENTIAL escalation to the
+		// PENDING_APPROVAL credential it created; non-null means "approve here
+		// activates it" (no secret to type).
+		CredentialID *string `json:"credential_id"`
 	}
 
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT e.id, e.type, e.reason, e.context, e.metadata, e.peer_conversation_id, e.status,
 		       e.resolution, e.action, e.redirect_to, e.resolved_by, e.resolved_at, e.created_at,
-		       from_a.name, from_a.slug
+		       e.credential_id, from_a.name, from_a.slug
 		FROM escalations e
 		JOIN agents from_a ON from_a.id = e.from_agent_id
 		WHERE e.crew_id = ? AND e.workspace_id = ?
@@ -451,7 +526,7 @@ func (h *QueryHandler) ListEscalations(w http.ResponseWriter, r *http.Request) {
 			&item.ID, &item.Type, &item.Reason, &item.Context, &item.Metadata,
 			&item.PeerConversationID, &item.Status, &item.Resolution, &item.Action,
 			&item.RedirectTo, &item.ResolvedBy, &item.ResolvedAt, &item.CreatedAt,
-			&item.FromName, &item.FromSlug,
+			&item.CredentialID, &item.FromName, &item.FromSlug,
 		); err != nil {
 			h.logger.Error("scan escalation", "error", err)
 			replyError(w, http.StatusInternalServerError, "Internal server error")
