@@ -1491,6 +1491,11 @@ END;
 	// routines by tag, independent of runs). See
 	// migrate_consts_v123_pipeline_tags.go.
 	{version: 123, name: "pipeline_tags", sql: migrationPipelineTags},
+
+	// v124: index pipeline_runs.triggered_by_id so the run-tree recursive
+	// CTE joins via an index, not a per-level table scan. See
+	// migrate_consts_v124_run_tree_index.go.
+	{version: 124, name: "run_tree_index", sql: migrationRunTreeIndex},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the
