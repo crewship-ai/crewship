@@ -471,12 +471,16 @@ var issueRunsCmd = &cobra.Command{
 			if result == "" {
 				result = run.ResultSummary
 			}
+			dur := "—"
+			if run.DurationMs > 0 {
+				dur = fmt.Sprintf("%dms", run.DurationMs)
+			}
 			rows = append(rows, []string{
 				run.AgentName,
 				truncateStr(run.Task, 28),
 				run.Status,
 				issueRelativeTime(run.StartedAt),
-				fmt.Sprintf("%dms", run.DurationMs),
+				dur,
 				// result/error is verbatim agent output — strip ANSI / control
 				// bytes before printing so a failed run can't inject escapes.
 				truncateStr(strings.ReplaceAll(sanitizeTerminal(result), "\n", " "), 50),

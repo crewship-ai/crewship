@@ -82,6 +82,7 @@ export function ScheduleTab({ workspaceId, context }: { workspaceId: string; con
     setLoading(true)
     setSchedule(null)
     setError(null)
+    setActionError(null)
     // Clear the "Triggered ✓" state so a freshly selected routine doesn't
     // inherit the previous one's success button.
     setRan(false)

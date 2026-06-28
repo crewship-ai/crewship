@@ -66,7 +66,7 @@ func (h *IssueHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
 		JOIN assignments a ON a.id = mt.assignment_id
 		LEFT JOIN agents ag ON ag.id = a.assigned_to_id
 		WHERE mt.mission_id = ? AND a.workspace_id = ?
-		ORDER BY a.created_at DESC
+		ORDER BY COALESCE(a.started_at, a.created_at) DESC
 		LIMIT 100`, missionID, wsID)
 	if err != nil {
 		h.logger.Error("issue runs: query", "error", err)

@@ -337,9 +337,13 @@ func (s *Server) handleContainerGitDiff(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Random per-call nonce for the section markers — makes them
-	// uncollidable with diff content.
+	// uncollidable with diff content. Fail CLOSED if rand fails: a zero
+	// nonce would be a constant, predictable marker, defeating the guard.
 	nb := make([]byte, 8)
-	_, _ = rand.Read(nb)
+	if _, rerr := rand.Read(nb); rerr != nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"is_repo": false, "error": "diff unavailable"})
+		return
+	}
 	nonce := "CRWDIFF" + hex.EncodeToString(nb)
 
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
