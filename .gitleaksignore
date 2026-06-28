@@ -59,3 +59,9 @@
 5d53262b7201743f181b7d3bc8e22a8c2cbd20a7:internal/api/composio_handler_test.go:generic-api-key:110
 5fb1efc9e308e5f1c889be57255e7fa357a3996d:internal/api/composio_handler_test.go:generic-api-key:380
 5fb1efc9e308e5f1c889be57255e7fa357a3996d:internal/api/composio_handler_test.go:generic-api-key:476
+
+# Fake redaction-canary test fixture from the agent-proposed-credentials branch
+# (PR #706, commit 242fdbff). gitleaks detect scans full fetched history across
+# refs, so this surfaces on sibling branches until #706 (which carries the same
+# ignore + the renamed fixture) lands on main. Not a real secret.
+242fdbffc9b50d36cbcfd5dd84b1e3e45a491ddf:internal/api/escalation_credential_test.go:generic-api-key:151
