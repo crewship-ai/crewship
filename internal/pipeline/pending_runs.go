@@ -49,35 +49,15 @@ func (s *PendingRunStore) Enqueue(ctx context.Context, pr PendingRun) (string, b
 		return "", false, errors.New("pending_runs: id required")
 	}
 	if pr.DebounceKey != "" {
-		var existingID string
-		var maxAt sql.NullString
-		err := s.db.QueryRowContext(ctx, `
-SELECT id, COALESCE(debounce_max_at,'') FROM pending_runs
-WHERE pipeline_id = ? AND debounce_key = ? AND status = 'pending'`,
-			pr.PipelineID, pr.DebounceKey).Scan(&existingID, &maxAt)
-		if err == nil {
-			// Coalesce: push fire_at, but never past the original max.
-			fireAt := pr.FireAt
-			if maxAt.String != "" {
-				if cap, perr := time.Parse(time.RFC3339Nano, maxAt.String); perr == nil && fireAt.After(cap) {
-					fireAt = cap
-				}
-			}
-			_, uerr := s.db.ExecContext(ctx, `
-UPDATE pending_runs
-SET inputs_json = ?, tags_json = ?, metadata_json = ?, tier_override = ?,
-    priority = ?, fire_at = ?, expires_at = ?, updated_at = datetime('now','subsec')
-WHERE id = ?`,
-				orJSON(pr.InputsJSON, "{}"), orJSON(pr.TagsJSON, "[]"), orJSON(pr.MetadataJSON, "{}"),
-				nullableStr(pr.TierOverride), pr.Priority, fireAt.UTC().Format(time.RFC3339Nano),
-				nullableTime(pr.ExpiresAt), existingID)
-			if uerr != nil {
-				return "", false, fmt.Errorf("pending_runs: coalesce: %w", uerr)
-			}
-			return existingID, true, nil
-		}
-		if !errors.Is(err, sql.ErrNoRows) {
+		// If a pending row for this key already exists, coalesce into it.
+		var existing int
+		if err := s.db.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM pending_runs WHERE pipeline_id = ? AND debounce_key = ? AND status = 'pending'`,
+			pr.PipelineID, pr.DebounceKey).Scan(&existing); err != nil {
 			return "", false, fmt.Errorf("pending_runs: debounce lookup: %w", err)
+		}
+		if existing > 0 {
+			return s.coalesceDebounce(ctx, pr)
 		}
 	}
 
@@ -92,9 +72,47 @@ INSERT INTO pending_runs (
 		nullableStr(pr.TierOverride), pr.Priority, nullableStr(pr.DebounceKey),
 		pr.FireAt.UTC().Format(time.RFC3339Nano), nullableTime(pr.ExpiresAt), nullableTime(pr.DebounceMaxAt))
 	if err != nil {
+		// Debounce race: a concurrent trigger with the same key inserted
+		// first, so the partial-unique index rejects this one. Both
+		// requests SELECTed empty before either INSERTed — fall back to the
+		// coalesce path (the row now exists) instead of surfacing a 500.
+		if pr.DebounceKey != "" && isUniqueViolation(err) {
+			return s.coalesceDebounce(ctx, pr)
+		}
 		return "", false, fmt.Errorf("pending_runs: insert: %w", err)
 	}
 	return pr.ID, false, nil
+}
+
+// coalesceDebounce updates the existing pending row for (pipeline,
+// debounce_key) — the merge path shared by Enqueue's normal coalesce and
+// its race fallback.
+func (s *PendingRunStore) coalesceDebounce(ctx context.Context, pr PendingRun) (string, bool, error) {
+	var existingID string
+	var maxAt sql.NullString
+	if err := s.db.QueryRowContext(ctx, `
+SELECT id, COALESCE(debounce_max_at,'') FROM pending_runs
+WHERE pipeline_id = ? AND debounce_key = ? AND status = 'pending'`,
+		pr.PipelineID, pr.DebounceKey).Scan(&existingID, &maxAt); err != nil {
+		return "", false, fmt.Errorf("pending_runs: coalesce lookup: %w", err)
+	}
+	fireAt := pr.FireAt
+	if maxAt.String != "" {
+		if cap, perr := time.Parse(time.RFC3339Nano, maxAt.String); perr == nil && fireAt.After(cap) {
+			fireAt = cap
+		}
+	}
+	if _, err := s.db.ExecContext(ctx, `
+UPDATE pending_runs
+SET inputs_json = ?, tags_json = ?, metadata_json = ?, tier_override = ?,
+    priority = ?, fire_at = ?, expires_at = ?, updated_at = datetime('now','subsec')
+WHERE id = ?`,
+		orJSON(pr.InputsJSON, "{}"), orJSON(pr.TagsJSON, "[]"), orJSON(pr.MetadataJSON, "{}"),
+		nullableStr(pr.TierOverride), pr.Priority, fireAt.UTC().Format(time.RFC3339Nano),
+		nullableTime(pr.ExpiresAt), existingID); err != nil {
+		return "", false, fmt.Errorf("pending_runs: coalesce: %w", err)
+	}
+	return existingID, true, nil
 }
 
 // ExpireDue marks pending rows past their ttl as expired. Returns the
