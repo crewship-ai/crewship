@@ -207,25 +207,46 @@ Egress allowlist enforced both pre-flight AND on every redirect (CheckRedirect c
 
 Three kinds: `approval` (HITL token), `datetime` (sleep until ISO timestamp), `event` (filter on journal events). The DB-backed waitpoint store survives process restart for the `approval` kind: at boot, the run that was parked on the wait step is resumed and re-attaches to the original pending token, so the approval stays answerable (see [Durability and restart recovery](#durability-and-restart-recovery)).
 
+**Async, non-blocking.** Hitting a `kind: approval` gate does **not** hold a goroutine or fail the run. A foreground `crewship routine run` returns promptly with `status: WAITING` (exit 0) and a waitpoint token, and **releases its execution slot** while it waits. Approving **or** rejecting resumes the run from the gate (already-completed steps are restored/skipped); a rejection resolves the run to `FAILED` cleanly rather than stranding it. Parked approvals whose `timeout_sec` elapsed are reconciled at the next boot scan.
+
 Approve via UI Inbox, CLI `crewship routine waitpoints approve <token>`, or API.
 
 ### `code`
 
-```json
-{
-  "id": "process",
-  "type": "code",
-  "code": {
-    "runtime": "python",
-    "code": "import json\nprint(json.dumps({'sum': sum(input_nums)}))"
-  }
-}
+A `code` step has a `runtime`. Exactly one runtime is wired today: **`expr`**.
+
+#### `runtime: expr` (wired, token-zero)
+
+```yaml
+- id: probe
+  type: code
+  code:
+    runtime: expr
+    code: "{{ inputs.spend_usd }} > {{ inputs.threshold_usd }}"
 ```
 
-Runs in a sandboxed container with `--cap-drop=ALL`, no host mounts, network constrained by the same egress allowlist. Inputs auto-mapped to `CREWSHIP_INPUT_<NAME>` env vars.
+`expr` is an in-process, pure-Go evaluator — **no container, no LLM, no filesystem, no network**, so it costs zero tokens and runs in microseconds. It evaluates a **single comparison** and emits `true` or `false`:
+
+- Operators: `>`  `>=`  `<`  `<=`  `==`  `!=`.
+- The body is `Render()`-ed first, so `{{ inputs.x }}` / `{{ steps.y.output }}` placeholders substitute before evaluation.
+- Anything that isn't a single comparison (multiple operators, function calls, arbitrary code) **fails closed** with a clear error — `expr` is deliberately not a scripting language.
+
+This is the canonical primitive for **agentless** probes and **schedule wake-gates** (emit `true` only when work is needed). See [Wake gates](#wake-gates).
+
+#### `runtime: bash | python | go` (not wired)
+
+```yaml
+- id: process
+  type: code
+  code:
+    runtime: python
+    code: "import json; print(json.dumps({'sum': sum(input_nums)}))"
+```
+
+The container-backed runtimes are accepted by the schema but have **no sandboxed runner wired** in current builds.
 
 <Warning>
-Default production builds do not yet wire the Docker-backed CodeRunner — a `code` step currently fails at runtime with a clear "no CodeRunner wired" error (and `apply` warns at plan time). Until [#618](https://github.com/crewship-ai/crewship/issues/618) lands, express the logic with `http` + `transform` steps, or run it through an `agent_run` step.
+`runtime: bash`, `python`, and `go` are **not executable today**: a step using them **fails closed at runtime**, and `crewship apply` emits a plan-time warning. Use `runtime: expr` for boolean probes, or express richer logic with `http` + `transform` steps (or an `agent_run` step). Only `expr` is wired.
 </Warning>
 
 ### `transform`
@@ -273,14 +294,16 @@ Declare `"agentless": true` to get a **token-zero guarantee**: the routine can n
   "egress_targets": ["billing.example.com"],
   "steps": [
     { "id": "fetch", "type": "http",
-      "http": { "method": "GET", "url": "https://billing.example.com/today?threshold=100" } },
-    { "id": "judge", "type": "transform",
-      "transform": { "input": "{{ steps.fetch.output }}", "expression": ".over_threshold" } }
+      "http": { "method": "GET", "url": "https://billing.example.com/today" } },
+    { "id": "amount", "type": "transform",
+      "transform": { "input": "{{ steps.fetch.output }}", "expression": ".spend_usd" } },
+    { "id": "judge", "type": "code",
+      "code": { "runtime": "expr", "code": "{{ steps.amount.output }} > 100" } }
   ]
 }
 ```
 
-The probe's verdict comes from data reshaping, not scripting: the `http` step fetches a JSON status and the `transform` step projects the boolean out of it. (`code` steps are also agentless-eligible, but see the [CodeRunner caveat](#code) before relying on them.)
+The probe's verdict comes from data reshaping plus a single comparison, not scripting: the `http` step fetches a JSON status, `transform` projects the number out of it, and the [`expr` code step](#code) emits the boolean `true`/`false` — all token-zero. (A pure `http` + `transform` projection of an already-boolean field works too; reach for `expr` when you need the comparison.)
 
 Enforced at two layers:
 
@@ -433,7 +456,7 @@ The bundle format is `crewship-pipeline-bundle/v1`: routine row + (optionally) t
 
 ## HITL waitpoints
 
-A routine that includes a `wait` step of `kind: approval` parks the run goroutine on a DB-backed waitpoint. Operators decide via three paths:
+A routine that includes a `wait` step of `kind: approval` parks the run on a DB-backed waitpoint — **without** holding a goroutine or an execution slot. The triggering `crewship routine run` returns immediately with `status: WAITING` and the token (see the [`wait` step](#wait)). Operators decide via three paths:
 
 ```bash
 # CLI

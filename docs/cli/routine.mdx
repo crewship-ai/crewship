@@ -122,6 +122,10 @@ crewship routine run eval-extract-emails --tier-override smart
 
 Output: `run_id`, `status`, `output`, `duration_ms`, `cost_usd`.
 
+<Note>
+If the routine hits a `kind: approval` gate, `run` terminates with **`status: WAITING`** (exit 0, not a failure): it prints `paused at approval step: <id>` plus the waitpoint token and the `approve`/`reject` command hints, then releases its execution slot. Resume it with [`crewship routine waitpoints approve|reject <token>`](#crewship-routine-waitpoints). See [HITL waitpoints](/guides/routines#hitl-waitpoints).
+</Note>
+
 ### Common errors
 
 - **API error (500): `pipeline: concurrency_key rendered to empty value (referenced input missing or empty)`** — the DSL declared a `concurrency_key` template that references an input you didn't supply, and the template has no literal text to fall back on. See [Troubleshooting in the routines guide](/guides/routines#run-returns-500-pipeline-concurrency_key-rendered-to-empty-value) for the four fixes.
