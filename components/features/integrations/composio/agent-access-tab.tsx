@@ -3,7 +3,7 @@
 import * as React from "react"
 import { Bot, Search } from "lucide-react"
 
-import { getAgentAvatarUrl } from "@/lib/agent-avatar"
+import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { ScopeChip, EmptyHint, TableSkeleton, toolkitLabel } from "./shared"
 import { AccessEditor } from "./access-editor"
 import type { AgentLite, AgentBindingsMap } from "./types"
@@ -112,13 +112,10 @@ export function AgentAccessTab({
                 <div className="flex min-w-0 items-start gap-3">
                   {/* Lead with the agent's DiceBear avatar (same seed/style as
                       everywhere else) so the list is scannable by face. */}
-                  <img
+                  <AgentAvatar
                     data-testid="agent-avatar"
-                    src={getAgentAvatarUrl(
-                      a.avatar_seed || a.slug || a.name,
-                      a.avatar_style || a.crew?.avatar_style,
-                    )}
-                    alt=""
+                    seed={a.avatar_seed || a.slug || a.name}
+                    style={a.avatar_style || a.crew?.avatar_style}
                     className="mt-0.5 h-8 w-8 shrink-0 rounded-lg"
                   />
                   <div className="min-w-0">

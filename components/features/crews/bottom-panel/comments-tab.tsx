@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from "react"
 import { Send } from "lucide-react"
 
+import { seedColor } from "@/lib/agent-avatar"
+
 import type { BottomPanelContext } from "./types"
 import { EmptyState, formatRelative } from "./shared"
 
@@ -16,13 +18,6 @@ interface Comment {
   body: string
   created_at: string
   updated_at: string
-}
-
-function avatarColor(name: string): string {
-  // Deterministic hue from the name so each author keeps a stable colour.
-  let h = 0
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % 360
-  return `hsl(${h} 55% 45%)`
 }
 
 /**
@@ -99,7 +94,7 @@ export function CommentsTab({ workspaceId, context }: { workspaceId: string; con
             <div key={c.id} className="flex gap-2.5 py-2 border-b border-white/5 last:border-0">
               <span
                 className="h-6 w-6 rounded-md shrink-0 grid place-items-center text-[10px] font-semibold text-white"
-                style={{ background: avatarColor(name) }}
+                style={{ background: seedColor(name) }}
               >
                 {name.slice(0, 1).toUpperCase()}
               </span>

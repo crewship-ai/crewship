@@ -9,7 +9,7 @@ import { StatusIcon, statusLabel } from "@/components/features/issues/status-ico
 import { PriorityIcon, priorityLabel } from "@/components/features/issues/priority-icon"
 import { Calendar } from "@/components/ui/calendar"
 import { cn } from "@/lib/utils"
-import { getAgentAvatarUrl } from "@/lib/agent-avatar"
+import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { SectionHeader, PropertyRow } from "@/components/features/issues/property-row"
 import { ISSUE_STATUSES, ALL_PRIORITIES } from "@/components/features/issues/issue-constants"
 import type { Mission, IssuePriority, Milestone } from "@/lib/types/mission"
@@ -158,7 +158,7 @@ export function IssuePropertiesPanel({ issue, workspaceId, patchIssue }: IssuePr
               <div>
                 <PropertyRow label="Assignee">
                   {issue.assignee_id && (
-                    <img src={getAgentAvatarUrl(issue.assignee_id)} alt="" className="h-4 w-4 rounded-full" />
+                    <AgentAvatar seed={issue.assignee_id} className="h-4 w-4 rounded-full" />
                   )}
                   {issue.assignee_name || <span className="text-foreground/40">Unassigned</span>}
                 </PropertyRow>

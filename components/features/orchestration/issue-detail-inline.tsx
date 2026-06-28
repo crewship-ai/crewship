@@ -13,7 +13,7 @@ import { getCrewIconDef } from "@/lib/entities"
 import { cn } from "@/lib/utils"
 import { LABEL_PRESET_COLORS, STATUS_COLORS } from "@/lib/colors"
 import { toast } from "sonner"
-import { getAgentAvatarUrl } from "@/lib/agent-avatar"
+import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { ActivityFeed } from "@/components/features/issues/activity-feed"
 import { timeAgo } from "@/lib/time"
 import type { Mission, IssueLabel, IssueComment, Project, IssueActivity, IssuePriority } from "@/lib/types/mission"
@@ -234,9 +234,8 @@ export function IssueDetailInline({
             {issue.assignee_name && (
               <span className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
                 <span className="text-muted-foreground/60">·</span>
-                <img
-                  src={getAgentAvatarUrl(issue.assignee_id || issue.assignee_name)}
-                  alt=""
+                <AgentAvatar
+                  seed={issue.assignee_id || issue.assignee_name}
                   className="h-4 w-4 rounded-full"
                 />
                 <span>{issue.assignee_name}</span>
@@ -423,9 +422,8 @@ export function IssueDetailInline({
                     {comments.map((comment) => (
                       <div key={comment.id} className="flex gap-3">
                         {comment.author_type === "agent" && comment.author_id ? (
-                          <img
-                            src={getAgentAvatarUrl(comment.author_id)}
-                            alt=""
+                          <AgentAvatar
+                            seed={comment.author_id}
                             className="mt-0.5 h-7 w-7 shrink-0 rounded-full"
                           />
                         ) : (

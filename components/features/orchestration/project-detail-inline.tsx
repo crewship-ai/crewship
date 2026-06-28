@@ -12,7 +12,7 @@ import { PROJECT_STATUSES, HEALTH_OPTIONS, PRIORITY_OPTIONS } from "@/components
 import { cn } from "@/lib/utils"
 import { ISSUE_STATUS_COLORS, CREW_COLOR_DEFAULT } from "@/lib/colors"
 import { toast } from "sonner"
-import { getAgentAvatarUrl } from "@/lib/agent-avatar"
+import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { ProjectStatusIcon, HealthBadge } from "@/components/features/issues/project-status-icon"
 import type { Project, ProjectStatus, ProjectStats, IssuePriority } from "@/lib/types/mission"
 
@@ -403,7 +403,7 @@ export function ProjectDetailInline({ project, workspaceId, onClose, onUpdated }
                 <PopoverTrigger asChild>
                   <div>
                     <PropertyRow label="Lead">
-                      {project.lead_id && <img src={getAgentAvatarUrl(project.lead_id)} alt="" className="h-4 w-4 rounded-full" />}
+                      {project.lead_id && <AgentAvatar seed={project.lead_id} className="h-4 w-4 rounded-full" />}
                       {project.lead_name || <span className="text-muted-foreground/40">Add lead</span>}
                     </PropertyRow>
                   </div>
@@ -431,7 +431,7 @@ export function ProjectDetailInline({ project, workspaceId, onClose, onUpdated }
                               setLeadOpen(false)
                             }}
                           >
-                            <img src={getAgentAvatarUrl(a.id)} alt="" className="h-4 w-4 rounded-full mr-2" />
+                            <AgentAvatar seed={a.id} className="h-4 w-4 rounded-full mr-2" />
                             {a.name}
                           </CommandItem>
                         ))}
@@ -446,7 +446,7 @@ export function ProjectDetailInline({ project, workspaceId, onClose, onUpdated }
                 <PropertyRow label="Members" className="cursor-default">
                   <div className="flex -space-x-1">
                     {stats.by_assignee.slice(0, 5).map((a) => (
-                      <img key={a.agent_id} src={getAgentAvatarUrl(a.agent_id || a.agent_name)} alt={a.agent_name} title={a.agent_name} className="h-4 w-4 rounded-full ring-1 ring-card" />
+                      <AgentAvatar key={a.agent_id} seed={a.agent_id || a.agent_name} alt={a.agent_name} title={a.agent_name} className="h-4 w-4 rounded-full ring-1 ring-card" />
                     ))}
                     {stats.by_assignee.length > 5 && (
                       <span className="text-[10px] text-muted-foreground/50 pl-1">+{stats.by_assignee.length - 5}</span>
@@ -595,9 +595,8 @@ export function ProjectDetailInline({ project, workspaceId, onClose, onUpdated }
                   {stats?.by_assignee && stats.by_assignee.length > 0 ? (
                     stats.by_assignee.map((a) => (
                       <div key={a.agent_id || a.agent_name} className="flex items-center gap-2">
-                        <img
-                          src={getAgentAvatarUrl(a.agent_id || a.agent_name)}
-                          alt=""
+                        <AgentAvatar
+                          seed={a.agent_id || a.agent_name}
                           className="h-5 w-5 rounded-full"
                         />
                         <span className="text-[12px] text-foreground/80 flex-1 truncate">{a.agent_name}</span>

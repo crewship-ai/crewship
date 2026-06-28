@@ -2,7 +2,7 @@
 
 import { Ghost, RotateCcw } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { getAgentAvatarUrl } from "@/lib/agent-avatar"
+import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { timeAgo } from "@/lib/time"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
@@ -133,9 +133,9 @@ export function EmptyRoster({ agents, crews, onAgentSelect }: EmptyRosterProps) 
                       className="w-full grid grid-cols-[1fr_140px_180px_120px_120px] gap-3 px-4 py-2.5 hover:bg-white/[0.03] text-left items-center"
                     >
                       <span className="flex items-center gap-2.5 min-w-0">
-                        <img
-                          src={getAgentAvatarUrl(a.avatar_seed || a.name, a.avatar_style || a.crew?.avatar_style)}
-                          alt=""
+                        <AgentAvatar
+                          seed={a.avatar_seed || a.name}
+                          style={a.avatar_style || a.crew?.avatar_style}
                           className="h-6 w-6 rounded-full shrink-0"
                         />
                         <span className="truncate">{a.name}</span>

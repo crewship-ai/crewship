@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { Plus } from "lucide-react"
-import { getAgentAvatarUrl } from "@/lib/agent-avatar"
+import { AgentAvatar } from "@/components/ui/agent-avatar"
 
 import type { AgentSummary, CrewMemberRow, CrewRecord } from "./types"
 
@@ -37,9 +37,9 @@ export function RosterTab({ crew, agentsForCrew, members, onSelectAgent }: Roste
                 className="rounded-xl border border-white/8 bg-card p-3.5 text-left hover:border-white/15 transition-colors"
               >
                 <div className="flex items-center gap-3">
-                  <img
-                    src={getAgentAvatarUrl(a.avatar_seed || a.name, a.avatar_style || crew.avatar_style)}
-                    alt=""
+                  <AgentAvatar
+                    seed={a.avatar_seed || a.name}
+                    style={a.avatar_style || crew.avatar_style}
                     className="w-10 h-10 rounded-xl"
                   />
                   <div className="flex-1 min-w-0">

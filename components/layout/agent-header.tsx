@@ -8,7 +8,7 @@ import { StatusDot } from "@/components/ui/status-badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useAgentDetail } from "@/hooks/use-agent-detail"
 import { useWorkspace } from "@/hooks/use-workspace"
-import { getAgentAvatarUrl } from "@/lib/agent-avatar"
+import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { cn } from "@/lib/utils"
 
@@ -73,8 +73,9 @@ export function AgentHeader({ agentId }: AgentHeaderProps) {
 
   return (
     <div className="flex items-center gap-4 px-5 pt-4 pb-3">
-      <img
-        src={getAgentAvatarUrl(agent.avatar_seed || agent.name, agent.avatar_style || agent.crew?.avatar_style)}
+      <AgentAvatar
+        seed={agent.avatar_seed || agent.name}
+        style={agent.avatar_style || agent.crew?.avatar_style}
         alt={agent.name}
         className="h-8 w-8 md:h-10 md:w-10 rounded-xl shrink-0"
       />

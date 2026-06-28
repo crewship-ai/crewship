@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { MessageSquare, Terminal } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useRealtimeEvent, type RealtimeEvent } from "@/hooks/use-realtime"
-import { getAgentAvatarUrl } from "@/lib/agent-avatar"
+import { AgentAvatar } from "@/components/ui/agent-avatar"
 
 export const MSG_TYPE_COLORS: Record<string, string> = {
   "task.updated": "text-blue-400",
@@ -83,7 +83,7 @@ export function LiveMessagesPanel() {
             <span className={cn("shrink-0 text-[10px] px-1 rounded", MSG_TYPE_COLORS[msg.type] || "text-muted-foreground", "bg-white/[0.03]")}>
               {MSG_TYPE_LABELS[msg.type] || msg.type}
             </span>
-            {msg.agent && <img src={getAgentAvatarUrl(msg.agent)} alt="" className="w-3.5 h-3.5 rounded-full shrink-0 mt-0.5" />}
+            {msg.agent && <AgentAvatar seed={msg.agent} className="w-3.5 h-3.5 rounded-full shrink-0 mt-0.5" />}
             {msg.agent && <span className="text-muted-foreground shrink-0 w-[50px] truncate">@{msg.agent}</span>}
             <span className="text-foreground/80 truncate">{msg.content}</span>
           </div>
@@ -144,7 +144,7 @@ export function ExecLogPanel() {
         {logs.map((log, i) => (
           <div key={i} className="flex items-start gap-2 py-0.5 hover:bg-white/[0.02]">
             <span className="text-foreground/40 tabular-nums shrink-0 w-[52px]">{log.ts.slice(11, 19)}</span>
-            <img src={getAgentAvatarUrl(log.agent)} alt="" className="w-3.5 h-3.5 rounded-full shrink-0 mt-0.5" />
+            <AgentAvatar seed={log.agent} className="w-3.5 h-3.5 rounded-full shrink-0 mt-0.5" />
             <span className="text-muted-foreground shrink-0 w-[60px] truncate">@{log.agent}</span>
             <span className={cn("truncate", EVENT_COLORS[log.event] || "text-foreground")}>{log.content}</span>
           </div>

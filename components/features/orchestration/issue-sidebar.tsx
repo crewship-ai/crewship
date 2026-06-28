@@ -15,7 +15,7 @@ import {
   ThumbsDown,
   ThumbsUp,
 } from "lucide-react"
-import { getAgentAvatarUrl } from "@/lib/agent-avatar"
+import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { StatusIcon, statusLabel } from "@/components/features/issues/status-icon"
 import { PriorityIcon, priorityLabel } from "@/components/features/issues/priority-icon"
 import { LabelBadge } from "@/components/features/issues/label-badge"
@@ -179,9 +179,8 @@ function IssueSidebarBody({
             <PopoverTrigger asChild>
               <button className="flex items-center gap-1.5 text-sm hover:bg-accent rounded px-1.5 py-0.5 transition-colors -mr-1.5">
                 {issue.assignee_id && assigneeAgent ? (
-                  <img
-                    src={getAgentAvatarUrl(assigneeAgent.slug ?? assigneeAgent.name)}
-                    alt=""
+                  <AgentAvatar
+                    seed={assigneeAgent.slug ?? assigneeAgent.name}
                     className="h-4 w-4 rounded-full"
                   />
                 ) : issue.assignee_id ? (
@@ -217,9 +216,8 @@ function IssueSidebarBody({
                           setAssigneeOpen(false)
                         }}
                       >
-                        <img
-                          src={getAgentAvatarUrl(agent.slug ?? agent.name)}
-                          alt=""
+                        <AgentAvatar
+                          seed={agent.slug ?? agent.name}
                           className="mr-2 h-4 w-4 rounded-full"
                         />
                         <span className="text-xs">{agent.name}</span>

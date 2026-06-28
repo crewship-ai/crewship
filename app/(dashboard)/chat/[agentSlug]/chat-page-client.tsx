@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import Link from "next/link"
 import { ChevronLeft, MessageSquarePlus, MoreVertical, Trash2, RotateCcw, Settings as SettingsIcon, FolderOpen, Loader2 } from "lucide-react"
@@ -17,7 +17,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { ChatPanel } from "@/components/features/chat/chat-panel"
 import { SessionsSidebar } from "@/components/features/chat/sessions-sidebar"
-import { getAgentAvatarUrl } from "@/lib/agent-avatar"
+import { AgentAvatar } from "@/components/ui/agent-avatar"
 
 /**
  * Read the agent slug from the live URL after client hydration.
@@ -286,11 +286,6 @@ export function ChatPageClient() {
     }
   }, [agent, workspaceId, slug, selectSession])
 
-  const avatarSrc = useMemo(() => {
-    if (!agent) return ""
-    return getAgentAvatarUrl(agent.avatar_seed || agent.name, agent.avatar_style || agent.crew?.avatar_style)
-  }, [agent])
-
   // Wait for client mount + workspace + agent fetch before rendering chat.
   if (slug === null || wsLoading || loadingAgent) {
     return (
@@ -325,7 +320,11 @@ export function ChatPageClient() {
         >
           <ChevronLeft className="h-4 w-4" />
         </Link>
-        <img src={avatarSrc} alt="" className="w-7 h-7 rounded-full" />
+        <AgentAvatar
+          seed={agent.avatar_seed || agent.name}
+          style={agent.avatar_style || agent.crew?.avatar_style}
+          className="w-7 h-7 rounded-full"
+        />
         <div className="flex-1 min-w-0">
           <div className="text-sm font-medium truncate">{agent.name}</div>
           <div className="text-[11px] text-muted-foreground truncate">

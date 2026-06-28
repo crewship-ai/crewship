@@ -18,7 +18,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { getAgentAvatarUrl } from "@/lib/agent-avatar"
+import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 import { cn } from "@/lib/utils"
 import { isGhost, effectiveStatus, ttlRemaining, latestHireReason } from "@/lib/agent-ephemeral"
@@ -319,9 +319,9 @@ export function AgentCanvas({
           className="relative shrink-0 group"
           title="Customize avatar"
         >
-          <img
-            src={getAgentAvatarUrl(agent.avatar_seed || agent.name, agent.avatar_style || agent.crew?.avatar_style)}
-            alt=""
+          <AgentAvatar
+            seed={agent.avatar_seed || agent.name}
+            style={agent.avatar_style || agent.crew?.avatar_style}
             className={cn(
               "w-20 h-20 rounded-2xl transition-transform group-hover:scale-[1.03]",
               isRunning && "ring-2 ring-emerald-500/40",

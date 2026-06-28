@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest"
 import {
   getAgentAvatarUrl,
+  seedColor,
   _resetAvatarCacheForTest,
   _avatarCacheSizeForTest,
 } from "@/lib/agent-avatar"
@@ -97,5 +98,28 @@ describe("getAgentAvatarUrl LRU cache", () => {
     getAgentAvatarUrl("agent-z", undefined)
     getAgentAvatarUrl("agent-z", "bottts-neutral")
     expect(_avatarCacheSizeForTest()).toBe(1)
+  })
+})
+
+describe("seedColor", () => {
+  it("is deterministic for the same seed", () => {
+    expect(seedColor("alice")).toBe(seedColor("alice"))
+  })
+
+  it("returns a well-formed hsl() string in the expected band", () => {
+    // 55% saturation / 45% lightness is the fixed band; only the hue
+    // varies by seed, so any output must match this shape.
+    expect(seedColor("casey")).toMatch(/^hsl\((\d{1,3}) 55% 45%\)$/)
+  })
+
+  it("maps a known seed to its computed hue", () => {
+    // "a" -> charCode 97 -> hue 97; guards the (h * 31 + c) % 360 hash.
+    expect(seedColor("a")).toBe("hsl(97 55% 45%)")
+  })
+
+  it("clamps the hue below 360 for long seeds", () => {
+    const m = seedColor("a-much-longer-author-name").match(/^hsl\((\d+) /)
+    expect(m).not.toBeNull()
+    expect(Number(m![1])).toBeLessThan(360)
   })
 })
