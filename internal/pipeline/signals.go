@@ -24,6 +24,7 @@ func NewSignalRegistry() *SignalRegistry {
 	return &SignalRegistry{waiters: make(map[string]chan string)}
 }
 
+// signalKey builds the registry map key for a (run, event_type) waiter.
 func signalKey(runID, eventType string) string { return runID + "\x00" + eventType }
 
 // Register creates (or returns the existing) waiter channel for a

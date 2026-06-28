@@ -53,6 +53,8 @@ func (d *PendingRunDispatcher) Stop() {
 	})
 }
 
+// run is the dispatch loop: sweep once on start, then on every tick
+// until the stop signal or context cancellation.
 func (d *PendingRunDispatcher) run(ctx context.Context) {
 	defer close(d.stopped)
 	t := time.NewTicker(d.tick)
@@ -70,6 +72,7 @@ func (d *PendingRunDispatcher) run(ctx context.Context) {
 	}
 }
 
+// sweep expires past-ttl rows, then fires the due rows (priority-first).
 func (d *PendingRunDispatcher) sweep(ctx context.Context) {
 	now := time.Now().UTC()
 	if n, err := d.store.ExpireDue(ctx, now); err != nil {
@@ -87,6 +90,8 @@ func (d *PendingRunDispatcher) sweep(ctx context.Context) {
 	}
 }
 
+// fireOne claims a due pending row (winner-takes-once) and dispatches it
+// through the executor, then backfills the resulting run id.
 func (d *PendingRunDispatcher) fireOne(ctx context.Context, pr PendingRun) {
 	// Claim the row first so a second tick (or replica) can't double-fire.
 	claimed, err := d.store.MarkFired(ctx, pr.ID, "")

@@ -29,6 +29,8 @@ func NewMultiCodeRunner() *MultiCodeRunner {
 	}
 }
 
+// RunCode dispatches the request to the runner for req.Runtime, or
+// returns a clear "not available" error for an unwired runtime.
 func (m *MultiCodeRunner) RunCode(ctx context.Context, req CodeRunRequest) (CodeRunResult, error) {
 	r, ok := m.runners[req.Runtime]
 	if !ok {

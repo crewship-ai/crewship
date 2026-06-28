@@ -473,6 +473,8 @@ type scanRunRow interface {
 	Scan(dest ...any) error
 }
 
+// scanRun materializes a RunRecord from a row selected with
+// runSelectColumns (shared by Get and the list paths).
 func scanRun(row scanRunRow) (*RunRecord, error) {
 	var r RunRecord
 	var version sql.NullInt64
@@ -520,6 +522,8 @@ func scanRun(row scanRunRow) (*RunRecord, error) {
 	return &r, nil
 }
 
+// nullableIntPtr returns the pointed-to int, or nil for a nil pointer —
+// so an unset optional int binds as SQL NULL.
 func nullableIntPtr(p *int) any {
 	if p == nil {
 		return nil
@@ -527,6 +531,8 @@ func nullableIntPtr(p *int) any {
 	return *p
 }
 
+// nullableTime returns the RFC3339Nano string for a non-zero time, or
+// nil — so an unset/zero time binds as SQL NULL.
 func nullableTime(p *time.Time) any {
 	if p == nil || p.IsZero() {
 		return nil
@@ -534,10 +540,13 @@ func nullableTime(p *time.Time) any {
 	return formatRFC3339(*p)
 }
 
+// formatRFC3339 renders a time as the lex-sortable UTC RFC3339Nano string
+// the pipeline_runs timestamp columns store.
 func formatRFC3339(t time.Time) string {
 	return t.UTC().Format(time.RFC3339Nano)
 }
 
+// parseRFC3339Opt parses an optional RFC3339Nano string; empty → zero time.
 func parseRFC3339Opt(s string) (time.Time, error) {
 	if s == "" {
 		return time.Time{}, nil

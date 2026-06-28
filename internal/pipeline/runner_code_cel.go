@@ -40,6 +40,9 @@ const celCostLimit = 1_000_000
 
 var _ CodeRunner = CelCodeRunner{}
 
+// RunCode compiles + evaluates the CEL expression in req.Code against
+// the typed `inputs` variable and returns the canonical string form of
+// the result (bool → "true"/"false", numbers/strings verbatim).
 func (CelCodeRunner) RunCode(ctx context.Context, req CodeRunRequest) (CodeRunResult, error) {
 	if err := ctx.Err(); err != nil {
 		return CodeRunResult{}, err
@@ -98,6 +101,8 @@ func celInputs(in map[string]any) map[string]any {
 	return out
 }
 
+// celValue normalizes one decoded JSON value (recursively) into a
+// CEL-friendly Go value — chiefly coercing json.Number to int64/float64.
 func celValue(v any) any {
 	switch t := v.(type) {
 	case json.Number:
