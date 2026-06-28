@@ -552,3 +552,25 @@ crewship routine bulk-replay --fingerprint <fp>   # replay the whole group after
 | `POST /pipelines/runs/{runId}/replay` | `routine replay <run_id>` |
 | `GET /pipelines/runs/errors` | `routine errors` |
 | `POST /pipelines/runs/bulk_replay` | `routine bulk-replay --fingerprint <fp>` |
+
+## Waitpoint callback tokens (external completion)
+
+A `wait` step parks the run on a high-entropy **token**. Beyond the
+inbox approve/reject flow, an **external system** can complete the wait
+via a public callback URL — no workspace JWT, the token is the auth
+(same model as webhook dispatch). Surface the URL from the pending
+waitpoint:
+
+```
+crewship routine waitpoints <token>     # prints "Callback URL: …"
+```
+
+The external task then completes (or denies) the wait:
+
+```
+curl -X POST <callback_url> -d '{"approved":true,"payload":{"result":"ok"}}'
+```
+
+`approved` defaults to `true` (bare POST = "task done, continue").
+`payload` is stored on the waitpoint for the resumed step. Endpoint:
+`POST /api/v1/waitpoint-tokens/{token}`.

@@ -24,6 +24,7 @@ type waitpointRow struct {
 	InvokingCrewID string `json:"invoking_crew_id,omitempty"`
 	TimeoutAt      string `json:"timeout_at"`
 	CreatedAt      string `json:"created_at"`
+	CallbackURL    string `json:"callback_url,omitempty"`
 }
 
 var routineWaitpointsCmd = &cobra.Command{
@@ -134,7 +135,14 @@ var routineWaitpointsShowCmd = &cobra.Command{
 				}
 				fmt.Fprintf(w, "Created:\t%s\n", formatTimestamp(r.CreatedAt))
 				fmt.Fprintf(w, "Timeout:\t%s\n", formatTimestamp(r.TimeoutAt))
+				if r.CallbackURL != "" {
+					fmt.Fprintf(w, "Callback URL:\t%s\n", r.CallbackURL)
+				}
 				_ = w.Flush()
+				if r.CallbackURL != "" {
+					fmt.Println("\nAn external system can complete this waitpoint with no auth via:")
+					fmt.Printf("  curl -X POST %s -d '{\"approved\":true,\"payload\":{}}'\n", r.CallbackURL)
+				}
 				fmt.Println("\nPrompt:")
 				fmt.Println(r.Prompt)
 				return nil

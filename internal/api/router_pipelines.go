@@ -92,6 +92,11 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	// Public dispatch — no `authed` wrapper. The token in the path
 	// is the auth surface; signing_secret + HMAC layered on top.
 	r.mux.HandleFunc("POST /api/v1/webhooks/{token}", pipes.FireWebhook)
+	// Public waitpoint completion — an external system completes a wait
+	// via callback URL with no workspace JWT (the high-entropy token is
+	// the auth, same model as webhook dispatch). Surfaced as callback_url
+	// on the pending-waitpoints list.
+	r.mux.HandleFunc("POST /api/v1/waitpoint-tokens/{token}", pipes.CompleteWaitpointToken)
 	// Internal /api/v1/internal/pipelines/save route is registered
 	// alongside the other /internal endpoints in router_internal.go.
 

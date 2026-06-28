@@ -603,12 +603,20 @@ LIMIT 200`, workspaceID)
 		InvokingCrewID string `json:"invoking_crew_id,omitempty"`
 		TimeoutAt      string `json:"timeout_at"`
 		CreatedAt      string `json:"created_at"`
+		// CallbackURL is the PUBLIC completion endpoint for this
+		// waitpoint — an external system holding it can complete the
+		// waitpoint without a workspace JWT (the token is the auth).
+		// Hand it to a third-party task/approval service to drive a
+		// human-in-the-loop or external-completion wait.
+		CallbackURL string `json:"callback_url"`
 	}
+	base := InstanceURLFromRequest(r, "")
 	out := make([]wpRow, 0, 50)
 	for rows.Next() {
-		var r wpRow
-		if err := rows.Scan(&r.Token, &r.PipelineRunID, &r.StepID, &r.Kind, &r.Prompt, &r.InvokingCrewID, &r.TimeoutAt, &r.CreatedAt); err == nil {
-			out = append(out, r)
+		var row wpRow
+		if err := rows.Scan(&row.Token, &row.PipelineRunID, &row.StepID, &row.Kind, &row.Prompt, &row.InvokingCrewID, &row.TimeoutAt, &row.CreatedAt); err == nil {
+			row.CallbackURL = base + "/api/v1/waitpoint-tokens/" + row.Token
+			out = append(out, row)
 		}
 	}
 	writeJSON(w, http.StatusOK, out)

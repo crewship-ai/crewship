@@ -53,7 +53,23 @@ Answers the user's "can't it be done generally / properly sandboxed" question. B
 - **Touch:** new `runner_code_cel.go`, wire in executor's runtime switch, add `cel-go` to go.mod, add to `wiredCodeRuntimes`.
 - **Effort:** **MED.** No schema/DSL change. Net-new dep (Apache-2.0, OK).
 
-### 1.2 Sandboxed code runtime — validly, via WASM (`wazero`)
+### 1.2 Sandboxed code runtime — DROPPED (2026-06-28 decision)
+
+**Status: not building.** CEL (1.1, shipped) already covers the
+"general deterministic logic" gap that motivated this PRD, and real
+shell is already served by `agent_run` against a shell-tool agent. A
+WASM/container code runtime is a large, security-sensitive,
+self-contained build for low near-term value — trigger.dev itself only
+*roadmaps* microVM isolation, so we won't ship arbitrary-code execution
+ahead of the incumbent. Revisit only if a concrete need for in-process
+BYO-language compute (that `agent_run` can't serve) appears; then prefer
+`wazero`/`starlark-go` (pure-Go, sandbox-by-construction) behind the
+existing `CodeRunner` interface. Original design retained below for that
+future revisit.
+
+<details><summary>Deferred design (not in scope)</summary>
+
+#### (former) Sandboxed code runtime via WASM (`wazero`)
 - **Problem:** `CodeStep` already documents a sandboxed container model (cap-drop, egress allowlist, timeout — `types.go:285`) but no runner is wired. We do NOT want a Docker/microVM rewrite.
 - **Approach:** Implement a `WasmCodeRunner` (wazero — pure-Go, **no CGO, no Docker daemon**, sandbox-by-construction: no filesystem/network unless explicitly granted). Two viable surfaces, pick in design:
   - **(a) `runtime: wasm`** — author supplies/compiles a WASM module; we run it with inputs on stdin, stdout = output. Maximally general, BYO-language.
@@ -62,6 +78,8 @@ Answers the user's "can't it be done generally / properly sandboxed" question. B
 - **Touch:** new `runner_code_wasm.go` (+ maybe `runner_code_starlark.go`), executor runtime switch, go.mod, `wiredCodeRuntimes`, docs.
 - **Effort:** **MED–HIGH.** Behind existing interface; no backend rewrite.
 - **Tiering:** core gets `expr`/CEL/Starlark (token-zero, safe); `runtime: wasm` BYO-module could be an EE gate if we want a paywall line (matches the licensing memory).
+
+</details>
 
 ---
 
