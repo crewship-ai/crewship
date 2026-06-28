@@ -137,7 +137,11 @@ interface InboxGroup {
 
 export function InboxList() {
   const { workspaceId } = useWorkspace()
-  const [stateFilter, setStateFilter] = useState<StateFilter>("unread")
+  // Default to "all" (not "unread"): a blocking item the operator has merely
+  // *read* — e.g. a pending CREDENTIAL escalation they clicked through to — is
+  // still actionable, and a unread-only default silently hides it. The filter
+  // pills still let them narrow to unread.
+  const [stateFilter, setStateFilter] = useState<StateFilter>("all")
   const [selectedId, setSelectedId] = useState<string | null>(null)
   // Snapshot of the open item. Clicking an *unread* row marks it read,
   // which drops it from the unread-filtered list (see use-inbox
