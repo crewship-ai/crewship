@@ -57,6 +57,7 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	// === Files & memory (round-trip) ==========================
 	"chat_branches":           IntentInclude,
 	"chat_attachments":        IntentInclude,
+	"chat_participants":       IntentInclude,
 	"message_reactions":       IntentInclude,
 	"workspace_files":         IntentInclude,
 	"memory_relations":        IntentInclude,
