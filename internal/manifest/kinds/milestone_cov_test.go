@@ -241,7 +241,7 @@ func TestMilestoneCov_SmallHelpers(t *testing.T) {
 	if got := milestoneSlugFromName("V1.0 Launch_pad"); got != "v1-0-launch-pad" {
 		t.Errorf("slug = %q", got)
 	}
-	if b, err := milestoneReadAll(nil); b != nil || err != nil {
-		t.Errorf("milestoneReadAll(nil) = %v, %v", b, err)
+	if b, err := readAll(nil); b != nil || err != nil {
+		t.Errorf("readAll(nil) = %v, %v", b, err)
 	}
 }

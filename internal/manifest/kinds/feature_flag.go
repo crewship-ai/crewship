@@ -12,7 +12,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -301,7 +300,7 @@ func ExportFeatureFlags(ctx context.Context, c internalapi.Client) ([]*FeatureFl
 		return nil, fmt.Errorf("ExportFeatureFlags: unexpected status %d", resp.StatusCode)
 	}
 
-	data, err := ffReadAll(resp.Body)
+	data, err := readAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("ExportFeatureFlags: read body: %w", err)
 	}
@@ -371,13 +370,4 @@ func ffCheckStatus(resp *internalapi.Response, err error, accepted ...int) error
 		}
 	}
 	return fmt.Errorf("unexpected status %d", resp.StatusCode)
-}
-
-// ffReadAll drains a response body, tolerating a nil reader (some
-// fakes return Response{Body: nil} for 204s).
-func ffReadAll(r io.Reader) ([]byte, error) {
-	if r == nil {
-		return nil, nil
-	}
-	return io.ReadAll(r)
 }

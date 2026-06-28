@@ -578,11 +578,11 @@ func TestMilestone_HelperEdges(t *testing.T) {
 	if got := milestoneSlugFromName(""); got != "milestone" {
 		t.Errorf("empty name should fall back to %q, got %q", "milestone", got)
 	}
-	if got := milestoneDerefOrEmpty(nil); got != "" {
+	if got := deref(nil); got != "" {
 		t.Errorf("derefOrEmpty(nil): got %q", got)
 	}
 	v := "ok"
-	if got := milestoneDerefOrEmpty(&v); got != "ok" {
+	if got := deref(&v); got != "ok" {
 		t.Errorf("derefOrEmpty(&v): got %q", got)
 	}
 

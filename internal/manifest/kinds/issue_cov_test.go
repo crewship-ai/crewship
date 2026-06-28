@@ -21,18 +21,18 @@ import (
 func TestIssueCov_CheckStatus(t *testing.T) {
 	t.Parallel()
 
-	if err := issueCheckStatus(nil, "op"); err == nil || !strings.Contains(err.Error(), "nil response") {
+	if err := checkStatus(nil, "op"); err == nil || !strings.Contains(err.Error(), "response is nil") {
 		t.Fatalf("nil response: got %v", err)
 	}
-	if err := issueCheckStatus(&internalapi.Response{StatusCode: 204}, "op"); err != nil {
+	if err := checkStatus(&internalapi.Response{StatusCode: 204}, "op"); err != nil {
 		t.Fatalf("2xx must pass, got %v", err)
 	}
-	err := issueCheckStatus(&internalapi.Response{StatusCode: 500, Body: strings.NewReader("boom")}, "op")
-	if err == nil || !strings.Contains(err.Error(), "HTTP 500") || !strings.Contains(err.Error(), "boom") {
+	err := checkStatus(&internalapi.Response{StatusCode: 500, Body: strings.NewReader("boom")}, "op")
+	if err == nil || !strings.Contains(err.Error(), "unexpected status 500") || !strings.Contains(err.Error(), "boom") {
 		t.Fatalf("500 with body: got %v", err)
 	}
-	err = issueCheckStatus(&internalapi.Response{StatusCode: 404}, "op")
-	if err == nil || !strings.Contains(err.Error(), "HTTP 404") {
+	err = checkStatus(&internalapi.Response{StatusCode: 404}, "op")
+	if err == nil || !strings.Contains(err.Error(), "unexpected status 404") {
 		t.Fatalf("404 nil body: got %v", err)
 	}
 }
@@ -40,11 +40,11 @@ func TestIssueCov_CheckStatus(t *testing.T) {
 func TestIssueCov_ReadAll(t *testing.T) {
 	t.Parallel()
 
-	b, err := issueReadAll(nil)
+	b, err := readAll(nil)
 	if b != nil || err != nil {
 		t.Fatalf("nil reader: want (nil,nil), got (%v,%v)", b, err)
 	}
-	b, err = issueReadAll(strings.NewReader("xy"))
+	b, err = readAll(strings.NewReader("xy"))
 	if err != nil || string(b) != "xy" {
 		t.Fatalf("read: got (%q,%v)", b, err)
 	}
@@ -82,7 +82,7 @@ func TestIssueCov_ListHelpers_Errors(t *testing.T) {
 				return err
 			},
 			route:   covRoute{status: 500, body: "oops"},
-			wantErr: "HTTP 500",
+			wantErr: "unexpected status 500",
 		},
 		{
 			name: "crews body read failure",
@@ -122,7 +122,7 @@ func TestIssueCov_ListHelpers_Errors(t *testing.T) {
 				return err
 			},
 			route:   covRoute{status: 403},
-			wantErr: "HTTP 403",
+			wantErr: "unexpected status 403",
 		},
 		{
 			name: "projects body read failure",
@@ -162,7 +162,7 @@ func TestIssueCov_ListHelpers_Errors(t *testing.T) {
 				return err
 			},
 			route:   covRoute{status: 502},
-			wantErr: "HTTP 502",
+			wantErr: "unexpected status 502",
 		},
 		{
 			name: "agents body read failure",
@@ -202,7 +202,7 @@ func TestIssueCov_ListHelpers_Errors(t *testing.T) {
 				return err
 			},
 			route:   covRoute{status: 500},
-			wantErr: "HTTP 500",
+			wantErr: "unexpected status 500",
 		},
 		{
 			name: "labels body read failure",
@@ -313,7 +313,7 @@ func TestIssueCov_ListForCrew_Errors(t *testing.T) {
 	t.Run("bad status", func(t *testing.T) {
 		t.Parallel()
 		c := newCovClient(map[string]covRoute{base: {status: 500}})
-		if _, err := issueListForCrew(context.Background(), c, "c1"); err == nil || !strings.Contains(err.Error(), "HTTP 500") {
+		if _, err := issueListForCrew(context.Background(), c, "c1"); err == nil || !strings.Contains(err.Error(), "unexpected status 500") {
 			t.Fatalf("got %v", err)
 		}
 	})
@@ -592,7 +592,7 @@ func TestIssueCov_Plan_CreateExec(t *testing.T) {
 		if err != nil {
 			t.Fatalf("plan: %v", err)
 		}
-		if execErr := items[0].Exec(context.Background(), c); execErr == nil || !strings.Contains(execErr.Error(), "HTTP 422") {
+		if execErr := items[0].Exec(context.Background(), c); execErr == nil || !strings.Contains(execErr.Error(), "unexpected status 422") {
 			t.Fatalf("exec: got %v", execErr)
 		}
 	})

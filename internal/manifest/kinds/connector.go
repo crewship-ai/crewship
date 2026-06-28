@@ -355,7 +355,7 @@ func ExportConnectors(ctx context.Context, c internalapi.Client) ([]*ConnectorDo
 	if err := connectorCheckStatus(resp, "list connectors"); err != nil {
 		return nil, err
 	}
-	body, err := connectorReadAll(resp.Body)
+	body, err := readAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("read connectors body: %w", err)
 	}
@@ -425,10 +425,10 @@ func fetchConnector(ctx context.Context, c internalapi.Client, slug string) (*Co
 		return nil, fmt.Errorf("connector slug %q is not in the catalog (GET %s returned 404)", slug, path)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := connectorReadAll(resp.Body)
+		body, _ := readAll(resp.Body)
 		return nil, fmt.Errorf("GET %s: HTTP %d: %s", path, resp.StatusCode, strings.TrimSpace(string(body)))
 	}
-	body, err := connectorReadAll(resp.Body)
+	body, err := readAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("read %s body: %w", path, err)
 	}
@@ -504,7 +504,7 @@ func listCredentialNames(ctx context.Context, c internalapi.Client) (map[string]
 	if err := connectorCheckStatus(resp, "list credentials"); err != nil {
 		return nil, err
 	}
-	body, err := connectorReadAll(resp.Body)
+	body, err := readAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("read /api/v1/credentials body: %w", err)
 	}
@@ -568,17 +568,8 @@ func connectorCheckStatus(resp *internalapi.Response, op string) error {
 		return fmt.Errorf("%s: nil response", op)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := connectorReadAll(resp.Body)
+		body, _ := readAll(resp.Body)
 		return fmt.Errorf("%s: HTTP %d: %s", op, resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 	return nil
-}
-
-// connectorReadAll drains the response body. Tolerates a nil reader so
-// fake clients can return empty 204-style responses without panicking.
-func connectorReadAll(r io.Reader) ([]byte, error) {
-	if r == nil {
-		return nil, nil
-	}
-	return io.ReadAll(r)
 }
