@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { CrewIcon } from "@/components/ui/crew-icon"
 import { cn } from "@/lib/utils"
-import { getAgentAvatarUrl } from "@/lib/agent-avatar"
+import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { isGhost, effectiveStatus } from "@/lib/agent-ephemeral"
 
 const STATUS_BADGE: Record<string, { label: string; className: string; pulse?: boolean }> = {
@@ -257,9 +257,9 @@ export function CrewsExplorer({
                         )}
                         onClick={() => onAgentSelect(agent.id)}
                       >
-                        <img
-                          src={getAgentAvatarUrl(agent.avatar_seed || agent.name, agent.avatar_style || agent.crew?.avatar_style)}
-                          alt=""
+                        <AgentAvatar
+                          seed={agent.avatar_seed || agent.name}
+                          style={agent.avatar_style || agent.crew?.avatar_style}
                           className="h-5 w-5 rounded-full shrink-0"
                         />
                         <div className="flex-1 min-w-0">
@@ -309,9 +309,9 @@ export function CrewsExplorer({
                       )}
                       onClick={() => onAgentSelect(agent.id)}
                     >
-                      <img
-                        src={getAgentAvatarUrl(agent.avatar_seed || agent.name, agent.avatar_style)}
-                        alt=""
+                      <AgentAvatar
+                        seed={agent.avatar_seed || agent.name}
+                        style={agent.avatar_style}
                         className="h-5 w-5 rounded-full shrink-0"
                       />
                       <div className="flex-1 min-w-0">

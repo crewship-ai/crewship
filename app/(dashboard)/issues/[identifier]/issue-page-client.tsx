@@ -17,7 +17,7 @@ import { useWorkspace } from "@/hooks/use-workspace"
 import { useSession } from "@/hooks/use-auth"
 import { useUrlSegment } from "@/lib/use-url-segment"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
-import { getAgentAvatarUrl } from "@/lib/agent-avatar"
+import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { MarkdownContent } from "@/components/features/issues/markdown-content"
 import { TiptapEditor } from "@/components/features/issues/tiptap-editor"
 import { ActivityFeed } from "@/components/features/issues/activity-feed"
@@ -572,9 +572,8 @@ export function IssuePageClient() {
                       {/* Avatar */}
                       <div className="shrink-0 mt-0.5">
                         {comment.author_type === "agent" ? (
-                          <img
-                            src={getAgentAvatarUrl(comment.author_name ?? comment.author_id)}
-                            alt=""
+                          <AgentAvatar
+                            seed={comment.author_name ?? comment.author_id}
                             className="h-7 w-7 rounded-full"
                           />
                         ) : (

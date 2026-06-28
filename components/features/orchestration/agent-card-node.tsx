@@ -4,7 +4,7 @@ import { memo } from "react"
 import { type NodeProps } from "@xyflow/react"
 import { Brain, Crown, Cpu } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { getAgentAvatarUrl } from "@/lib/agent-avatar"
+import { AgentAvatar } from "@/components/ui/agent-avatar"
 
 export interface AgentCardData {
   name: string
@@ -87,7 +87,7 @@ function AgentCardNodeInner({ data }: NodeProps) {
           </div>
 
           {/* Avatar */}
-          <img src={getAgentAvatarUrl(d.avatarSeed || d.slug, d.avatarStyle)} alt="" className="w-5 h-5 rounded-full shrink-0" />
+          <AgentAvatar seed={d.avatarSeed || d.slug} style={d.avatarStyle} className="w-5 h-5 rounded-full shrink-0" />
 
           {/* Name */}
           <span className="text-[12px] font-semibold text-foreground truncate flex-1">

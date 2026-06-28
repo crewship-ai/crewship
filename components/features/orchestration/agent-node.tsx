@@ -5,7 +5,7 @@ import { Handle, Position, type NodeProps } from "@xyflow/react"
 import { AlertTriangle } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { STATUS_COLORS, STATUS_BG } from "@/lib/colors"
-import { getAgentAvatarUrl } from "@/lib/agent-avatar"
+import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { formatDurationDecimal } from "@/lib/time"
 
 interface AgentNodeData {
@@ -159,8 +159,9 @@ function AgentNodeComponent({ data }: NodeProps) {
         <div className="flex items-start gap-2.5">
           {/* Avatar */}
           {(d.avatarSeed || d.agentSlug || d.agentName) ? (
-            <img
-              src={getAgentAvatarUrl(d.avatarSeed || d.agentSlug || d.agentName, d.avatarStyle)}
+            <AgentAvatar
+              seed={d.avatarSeed || d.agentSlug || d.agentName}
+              style={d.avatarStyle}
               alt={d.agentName}
               className="w-8 h-8 rounded-lg shrink-0"
             />

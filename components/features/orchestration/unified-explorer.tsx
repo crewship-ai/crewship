@@ -10,7 +10,7 @@ import type { IssuePriority } from "@/lib/types/mission"
 import { UnifiedInbox } from "@/components/features/orchestration/unified-inbox"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
-import { getAgentAvatarUrl } from "@/lib/agent-avatar"
+import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { getCrewIconDef, getGradientPalette } from "@/lib/entities"
 import type { Mission, MissionTask, Project } from "@/lib/types/mission"
 import type { CrewSummary } from "@/lib/types/orchestration"
@@ -206,7 +206,7 @@ export function UnifiedExplorer({
                           onClick={() => { onAgentFilter(a.id); onCrewFilter(null); onPriorityFilter?.(null); setFilterDropdownOpen(false) }}
                           className={cn("w-full text-left px-3 py-1.5 text-xs hover:bg-white/[0.06] flex items-center gap-2", filterAgentId === a.id ? "text-blue-400" : "text-muted-foreground/80")}
                         >
-                          <img src={getAgentAvatarUrl(a.id)} alt="" className="h-4 w-4 rounded-full shrink-0" />
+                          <AgentAvatar seed={a.id} className="h-4 w-4 rounded-full shrink-0" />
                           {a.name}
                         </button>
                       ))}
@@ -314,7 +314,7 @@ export function UnifiedExplorer({
                         <span className="text-[10px] font-mono text-foreground/50 shrink-0 w-[44px] truncate">{issue.identifier || "--"}</span>
                         <span className="text-xs text-foreground/80 truncate flex-1">{issue.title}</span>
                         {issue.assignee_id && (
-                          <img src={getAgentAvatarUrl(issue.assignee_id)} alt={issue.assignee_name || ""} className="h-4 w-4 rounded-full shrink-0" />
+                          <AgentAvatar seed={issue.assignee_id} alt={issue.assignee_name || ""} className="h-4 w-4 rounded-full shrink-0" />
                         )}
                         <PriorityIcon priority={issue.priority || "none"} className="h-3 w-3 shrink-0" />
                       </motion.button>

@@ -54,7 +54,7 @@ import { MarkdownContent } from "@/components/features/issues/markdown-content"
 import { waitpointDecide } from "@/lib/api/waitpoints"
 import { inboxBulk } from "@/lib/api/inbox"
 import { escalationResolve } from "@/lib/api/escalations"
-import { getAgentAvatarUrl } from "@/lib/agent-avatar"
+import { AgentAvatar } from "@/components/ui/agent-avatar"
 
 // InboxList — the /inbox page surface. Gmail-style triage: the default
 // "Inbox" tab shows everything that isn't archived (unread + read), so
@@ -235,9 +235,9 @@ function SenderAvatar({ item, className }: { item: InboxItem; className?: string
   // system/crew/pipeline keep the kind-keyed glyph below.
   if (item.sender_type === "agent" && (item.avatar_seed || item.sender_name)) {
     return (
-      <img
-        src={getAgentAvatarUrl(item.avatar_seed || item.sender_name || "agent", item.avatar_style)}
-        alt=""
+      <AgentAvatar
+        seed={item.avatar_seed || item.sender_name || "agent"}
+        style={item.avatar_style}
         className={cn("shrink-0 rounded-md object-cover", className ?? "h-6 w-6")}
         aria-hidden
       />

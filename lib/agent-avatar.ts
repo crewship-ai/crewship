@@ -45,6 +45,23 @@ const AVATAR_CACHE_MAX_ENTRIES = 500
 const _avatarCache = new Map<string, string>()
 
 /**
+ * Deterministic background colour for an initials/glyph avatar, derived
+ * from a seed string (author name, agent slug, …). Same seed always maps
+ * to the same hue, so a given author keeps a stable colour across rows
+ * without persisting any per-entity colour. Returns an `hsl(...)` string
+ * suitable for an inline `background` style.
+ *
+ * Deduped from the identical `avatarColor` helper that used to live in
+ * `comments-tab.tsx`; kept here next to getAgentAvatarUrl so all
+ * seed→avatar mapping lives in one module.
+ */
+export function seedColor(seed: string): string {
+  let h = 0
+  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) % 360
+  return `hsl(${h} 55% 45%)`
+}
+
+/**
  * Generate a DiceBear avatar data URI for an agent. Results are cached
  * in a bounded LRU keyed by (style, seed); see AVATAR_CACHE_MAX_ENTRIES.
  * @param seed - Deterministic seed for avatar generation (typically the agent slug).

@@ -12,7 +12,7 @@ import {
 import { ChevronDown, Clock } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { Mission, MissionTask, MissionStatus } from "@/lib/types/mission"
-import { getAgentAvatarUrl } from "@/lib/agent-avatar"
+import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { formatDurationRounded } from "@/lib/time"
 
 interface MissionTimelineProps {
@@ -262,8 +262,8 @@ export function MissionTimeline({ missions, highlightSlugs }: MissionTimelinePro
                           className="shrink-0 sticky left-0 z-20 bg-card border-r border-border border-b border-b-border/50 flex items-center gap-2 px-2.5 hover:bg-muted/30 transition-colors"
                           style={{ width: AGENT_W, height: LANE_H }}
                         >
-                          <img
-                            src={getAgentAvatarUrl(slug)}
+                          <AgentAvatar
+                            seed={slug}
                             alt={slug}
                             className="w-[26px] h-[26px] rounded-full shrink-0"
                           />
