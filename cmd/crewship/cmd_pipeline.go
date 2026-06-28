@@ -425,7 +425,7 @@ var pipelineRunCmd = &cobra.Command{
 					ok++
 				}
 			}
-			fmt.Printf("Batch %s: %d runs (%d ok). Retrieve with: crewship routine runs %s --tag batch:%s\n",
+			fmt.Printf("Batch %s: %d runs (%d ok). Retrieve with: crewship routine records %s --tag batch:%s\n",
 				br.BatchID, br.Count, ok, args[0], br.BatchID)
 			return nil
 		}

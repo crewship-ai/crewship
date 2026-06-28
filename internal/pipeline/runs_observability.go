@@ -91,6 +91,33 @@ func (s *RunStore) TagsFor(ctx context.Context, runID string) ([]string, error) 
 	return out, rows.Err()
 }
 
+// ListByTag returns a pipeline's runs carrying a given tag, newest
+// first. Backs `routine records --tag` (and batch retrieval via the
+// synthetic batch:<id> tag). Reuses runSelectColumns so the rows scan
+// identically to the other list paths.
+func (s *RunStore) ListByTag(ctx context.Context, pipelineID, tag string, limit int) ([]*RunRecord, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 50
+	}
+	rows, err := s.db.QueryContext(ctx, runSelectColumns+`
+WHERE id IN (SELECT run_id FROM run_tags WHERE tag = ?) AND pipeline_id = ?
+ORDER BY started_at DESC
+LIMIT ?`, normalizeTag(tag), pipelineID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*RunRecord
+	for rows.Next() {
+		r, err := scanRun(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 // FailureGroup is one fingerprint bucket of failed runs.
 type FailureGroup struct {
 	Fingerprint  string   `json:"fingerprint"`

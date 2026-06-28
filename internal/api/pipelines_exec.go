@@ -328,7 +328,13 @@ func (h *PipelineHandler) ListRunRecords(w http.ResponseWriter, r *http.Request)
 		}
 	}
 	statusFilter := pipeline.RunStatus(r.URL.Query().Get("status"))
-	records, err := h.runStore.ListByPipeline(r.Context(), p.ID, statusFilter, limit)
+	tagFilter := r.URL.Query().Get("tag")
+	var records []*pipeline.RunRecord
+	if tagFilter != "" {
+		records, err = h.runStore.ListByTag(r.Context(), p.ID, tagFilter, limit)
+	} else {
+		records, err = h.runStore.ListByPipeline(r.Context(), p.ID, statusFilter, limit)
+	}
 	if err != nil {
 		h.logger.Error("pipeline list run-records: query", "error", err)
 		replyError(w, http.StatusInternalServerError, "list run records")
