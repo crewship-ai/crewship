@@ -18,7 +18,6 @@ interface RunRow {
   cost_usd?: number
   triggered_via?: string
   error_message?: string
-  agent_name?: string
 }
 
 function fmtDuration(ms?: number): string {
@@ -41,10 +40,8 @@ export function RunsTab({ workspaceId, context }: { workspaceId: string; context
   const [error, setError] = useState<string | null>(null)
 
   let url: string | null = null
-  let showAgent = false
   if (context?.kind === "mission") {
     url = `/api/v1/crews/${context.crewId}/issues/${encodeURIComponent(context.identifier)}/runs?workspace_id=${workspaceId}`
-    showAgent = true
   } else if (context?.kind === "routine") {
     url = `/api/v1/workspaces/${workspaceId}/pipelines/${encodeURIComponent(context.slug)}/run-records?limit=50`
   }
@@ -79,7 +76,6 @@ export function RunsTab({ workspaceId, context }: { workspaceId: string; context
         <thead>
           <tr className="text-muted-foreground-soft text-[10px] uppercase tracking-wide">
             <th className="text-left font-medium pb-2 pr-3">Run</th>
-            {showAgent && <th className="text-left font-medium pb-2 pr-3">Agent</th>}
             <th className="text-left font-medium pb-2 pr-3">Status</th>
             <th className="text-left font-medium pb-2 pr-3">Started</th>
             <th className="text-left font-medium pb-2 pr-3">Duration</th>
@@ -91,7 +87,6 @@ export function RunsTab({ workspaceId, context }: { workspaceId: string; context
           {runs.map((run) => (
             <tr key={run.id} className="border-t border-white/5 hover:bg-white/[0.02]">
               <td className="py-2 pr-3 font-mono text-blue-300/90 truncate max-w-[120px]">{run.id.slice(0, 12)}</td>
-              {showAgent && <td className="py-2 pr-3">{run.agent_name || "—"}</td>}
               <td className={cn("py-2 pr-3", statusColor(run.status))}>{run.status}</td>
               <td className="py-2 pr-3 text-muted-foreground">{run.started_at ? formatRelative(run.started_at) : "—"}</td>
               <td className="py-2 pr-3 text-muted-foreground">{fmtDuration(run.duration_ms)}</td>

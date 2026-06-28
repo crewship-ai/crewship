@@ -41,6 +41,10 @@ function lineClass(line: string): string {
 export function ChangesTab({ workspaceId, context }: { workspaceId: string; context: BottomPanelContext }) {
   const [data, setData] = useState<DiffResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // The diff endpoint is gated on a product decision (working-tree vs
+  // base-branch diff). Until it lands the handler returns 501; we render a
+  // calm "not wired yet" state rather than a red error.
+  const [unavailable, setUnavailable] = useState(false)
 
   let url: string | null = null
   if (context?.kind === "mission") {
@@ -54,9 +58,13 @@ export function ChangesTab({ workspaceId, context }: { workspaceId: string; cont
     let cancelled = false
     setData(null)
     setError(null)
+    setUnavailable(false)
     fetch(url)
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
-      .then((d) => { if (!cancelled) setData(d) })
+      .then((r) => {
+        if (r.status === 404 || r.status === 501) { setUnavailable(true); return null }
+        return r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))
+      })
+      .then((d) => { if (!cancelled && d) setData(d) })
       .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)) })
     return () => { cancelled = true }
   }, [url])
@@ -65,6 +73,7 @@ export function ChangesTab({ workspaceId, context }: { workspaceId: string; cont
   if (context.kind !== "mission" && context.kind !== "run") {
     return <EmptyState>Changes are shown per issue or run.</EmptyState>
   }
+  if (unavailable) return <EmptyState>Change diffs aren&apos;t wired up for this workspace yet.</EmptyState>
   if (error) return <EmptyState><span className="text-red-300">Failed to load: {error}</span></EmptyState>
   if (data === null) return <EmptyState>Computing diff…</EmptyState>
   if (!data.is_repo) return <EmptyState>This workspace isn&apos;t a git repository — no tracked changes.</EmptyState>

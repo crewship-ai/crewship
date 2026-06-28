@@ -420,6 +420,69 @@ var issueActivityCmd = &cobra.Command{
 	},
 }
 
+// issueRunsCmd lists the pipeline runs triggered by an issue. CLI parity
+// for GET /api/v1/crews/{crewId}/issues/{identifier}/runs — the data the
+// dashboard's issue "Runs" tab shows.
+var issueRunsCmd = &cobra.Command{
+	Use:   "runs <identifier>",
+	Short: "List runs triggered by an issue",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+		client := newAPIClient()
+		issue, err := fetchIssue(client, args[0])
+		if err != nil {
+			return err
+		}
+		identifier := derefStr(issue.Identifier, issue.ID)
+		resp, err := client.Get(fmt.Sprintf("/api/v1/crews/%s/issues/%s/runs",
+			issue.CrewID, url.PathEscape(identifier)))
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		var runs []struct {
+			ID           string  `json:"id"`
+			Status       string  `json:"status"`
+			StartedAt    string  `json:"started_at"`
+			DurationMs   int64   `json:"duration_ms"`
+			CostUSD      float64 `json:"cost_usd"`
+			TriggeredVia string  `json:"triggered_via"`
+			ErrorMessage string  `json:"error_message"`
+		}
+		if err := cli.ReadJSON(resp, &runs); err != nil {
+			return err
+		}
+
+		f := newFormatter()
+		headers := []string{"RUN", "STATUS", "STARTED", "DURATION", "COST", "RESULT"}
+		rows := make([][]string, 0, len(runs))
+		for _, run := range runs {
+			result := run.ErrorMessage
+			if result == "" {
+				result = fmt.Sprintf("$%.4f", run.CostUSD)
+			}
+			rows = append(rows, []string{
+				truncateID(run.ID, 12),
+				run.Status,
+				issueRelativeTime(run.StartedAt),
+				fmt.Sprintf("%dms", run.DurationMs),
+				fmt.Sprintf("$%.4f", run.CostUSD),
+				truncateStr(strings.ReplaceAll(result, "\n", " "), 50),
+			})
+		}
+		return f.Auto(runs, headers, rows)
+	},
+}
+
 // issueBulkCmd applies the same patch to many issues in one round-trip
 // via PATCH /api/v1/issues/bulk. The server hard-caps at 100 IDs; we
 // enforce that client-side so the user gets a friendly error instead
@@ -547,6 +610,7 @@ func init() {
 		"Relation type: blocks, blocked_by, relates_to (alias: relates-to), duplicate_of (alias: duplicate-of)")
 
 	issueCmd.AddCommand(issueCommentsCmd)
+	issueCmd.AddCommand(issueRunsCmd)
 	issueCmd.AddCommand(issueRelateCmd)
 	issueCmd.AddCommand(issueRelationsCmd)
 	issueCmd.AddCommand(issueUnrelateCmd)

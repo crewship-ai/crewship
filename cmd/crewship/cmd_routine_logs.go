@@ -45,6 +45,7 @@ Output formats:
 		runID := args[0]
 		slug, _ := cmd.Flags().GetString("slug")
 		jsonMode, _ := cmd.Flags().GetBool("json")
+		full, _ := cmd.Flags().GetBool("full")
 		if err := requireAuth(); err != nil {
 			return err
 		}
@@ -53,6 +54,42 @@ Output formats:
 		}
 		client := newAPIClient()
 		ws := client.GetWorkspaceID()
+
+		// Slug-free full timeline: GET /pipeline-runs/{runId}/logs returns
+		// every journal entry for the run server-side (no --slug needed).
+		// CLI parity for the dock's Logs tab endpoint.
+		if slug == "" && full {
+			resp, err := client.Get(fmt.Sprintf("/api/v1/workspaces/%s/pipeline-runs/%s/logs", ws, runID))
+			if err != nil {
+				return err
+			}
+			defer resp.Body.Close()
+			if err := cli.CheckError(resp); err != nil {
+				return err
+			}
+			var entries []struct {
+				TS      string `json:"ts"`
+				Level   string `json:"level"`
+				Message string `json:"message"`
+				Type    string `json:"type"`
+			}
+			if err := json.NewDecoder(resp.Body).Decode(&entries); err != nil {
+				return fmt.Errorf("decode response: %w", err)
+			}
+			if jsonMode {
+				b, _ := json.MarshalIndent(entries, "", "  ")
+				fmt.Println(string(b))
+				return nil
+			}
+			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+			fmt.Fprintln(w, "TIME\tLEVEL\tEVENT\tSUMMARY")
+			for _, e := range entries {
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
+					parseTime(e.TS).Local().Format("15:04:05.000"),
+					e.Level, strings.TrimPrefix(e.Type, "pipeline."), e.Message)
+			}
+			return w.Flush()
+		}
 
 		// Slug-free path: hit /pipeline-runs/{runId} for the persisted
 		// state record. The journal-scoped path below is the older,
@@ -295,5 +332,6 @@ func parseTime(s string) time.Time {
 func init() {
 	routineLogsCmd.Flags().String("slug", "", "routine slug the run belongs to (optional; enables full journal timeline)")
 	routineLogsCmd.Flags().Bool("json", false, "JSON output for jq / scripting")
+	routineLogsCmd.Flags().Bool("full", false, "Full per-run journal timeline via the run-logs endpoint (no --slug needed)")
 	pipelineCmd.AddCommand(routineLogsCmd)
 }
