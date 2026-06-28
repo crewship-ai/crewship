@@ -140,3 +140,44 @@ func TestParseClaude_NilHandler(t *testing.T) {
 	}()
 	parseClaudeCodeStreamJSON([]byte(`{"type":"system","subtype":"init"}`), nil)
 }
+
+// TestParseClaude_SubagentParentToolUseID — the adapter tags every line from a
+// nested subagent (parent_tool_use_id present) so the UI can scope subagent
+// thinking / tool activity under its parent instead of flattening it into the
+// main stream.
+func TestParseClaude_SubagentParentToolUseID(t *testing.T) {
+	// subagent thinking delta
+	line := []byte(`{"type":"stream_event","parent_tool_use_id":"toolu_parent","event":{"type":"content_block_delta","delta":{"type":"thinking_delta","thinking":"sub thinking"}}}`)
+	var got []AgentEvent
+	parseClaudeCodeStreamJSON(line, func(e AgentEvent) { got = append(got, e) })
+	if len(got) != 1 || got[0].Type != "thinking" {
+		t.Fatalf("expected thinking event, got %+v", got)
+	}
+	meta, _ := got[0].Metadata.(map[string]interface{})
+	if meta == nil || meta["parent_tool_use_id"] != "toolu_parent" || meta["subagent"] != true {
+		t.Errorf("expected subagent metadata on thinking, got %+v", got[0].Metadata)
+	}
+
+	// subagent tool call
+	line2 := []byte(`{"type":"assistant","parent_tool_use_id":"toolu_parent","message":{"content":[{"type":"tool_use","id":"tu-2","name":"Bash","input":{"command":"ls"}}]}}`)
+	var got2 []AgentEvent
+	parseClaudeCodeStreamJSON(line2, func(e AgentEvent) { got2 = append(got2, e) })
+	if len(got2) != 1 || got2[0].Type != "tool_call" {
+		t.Fatalf("expected tool_call event, got %+v", got2)
+	}
+	meta2, _ := got2[0].Metadata.(map[string]interface{})
+	if meta2["parent_tool_use_id"] != "toolu_parent" || meta2["subagent"] != true {
+		t.Errorf("expected subagent metadata on tool_call, got %+v", got2[0].Metadata)
+	}
+
+	// top-level (no parent) event must NOT carry subagent metadata
+	line3 := []byte(`{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"hi"}}}`)
+	var got3 []AgentEvent
+	parseClaudeCodeStreamJSON(line3, func(e AgentEvent) { got3 = append(got3, e) })
+	if len(got3) != 1 {
+		t.Fatalf("expected 1 top-level event, got %d", len(got3))
+	}
+	if m, _ := got3[0].Metadata.(map[string]interface{}); m != nil && m["subagent"] == true {
+		t.Errorf("top-level event should not be tagged subagent, got %+v", got3[0].Metadata)
+	}
+}

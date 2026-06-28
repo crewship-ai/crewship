@@ -117,6 +117,11 @@ type ChatInfo struct {
 	// PERSONA layers are empty.
 	OpenedByUserID string
 	RoleTitle      string
+
+	// Visibility is "group" for a multi-user group chat (agent runs only when
+	// @mentioned) or "private"/empty for a normal 1:1 chat. Sourced from
+	// chats.visibility by the resolver.
+	Visibility string
 }
 
 // ProvisioningEnqueueResult mirrors api.EnqueueResult shape locally so the
@@ -318,6 +323,48 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		return fmt.Errorf("agent %s pending review: hire not approved", info.AgentID)
 	}
 
+	// The human turn is recorded and fanned out to the other participants
+	// regardless of whether the agent will respond. streamFn's BroadcastExcept
+	// skips the sender (who already rendered it optimistically); harmless in a
+	// private 1:1 chat where there are no other subscribers.
+	persistUserMsg := func() error {
+		return b.convStore.Append(ctx, chatID, conversation.Message{
+			ID:           generateMsgID(),
+			AgentID:      info.AgentID,
+			Role:         conversation.RoleUser,
+			Content:      content,
+			AuthorUserID: userID,
+			Timestamp:    time.Now().UTC(),
+		})
+	}
+	broadcastUserMsg := func() {
+		streamFn(ws.ChatEvent{
+			Type:     "user_message",
+			Content:  content,
+			Metadata: map[string]interface{}{"author_user_id": userID},
+		})
+	}
+
+	// Group-chat turn-taking gate — evaluated BEFORE any container/provisioning
+	// side-effect, so a line that doesn't @mention the agent never kicks off an
+	// image build or container start. In a group chat the agent stays silent
+	// unless @mentioned; the human line is still persisted + broadcast + counted
+	// so the shared transcript records it, and a clean "done" settles the
+	// sender's UI. Private (1:1) chats always respond.
+	if !ShouldAgentRespond(info.Visibility, content, info.AgentSlug) {
+		if err := persistUserMsg(); err != nil {
+			b.logger.Error("failed to persist user message", "error", err)
+			streamFn(ws.ChatEvent{Type: "error", Content: "failed to save message"})
+			return fmt.Errorf("persist user message: %w", err)
+		}
+		broadcastUserMsg()
+		if err := b.resolver.IncrementMessageCount(ctx, chatID, 1); err != nil {
+			b.logger.Warn("increment message count (group, no mention)", "error", err)
+		}
+		streamFn(ws.ChatEvent{Type: "done", Content: ""})
+		return nil
+	}
+
 	containerKey := info.CrewID
 
 	// If the crew has a devcontainer config that actually needs provisioning
@@ -422,17 +469,14 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		return fmt.Errorf("crew %q provisioning kicked off; resend after build completes", info.CrewSlug)
 	}
 
-	if err := b.convStore.Append(ctx, chatID, conversation.Message{
-		ID:        generateMsgID(),
-		AgentID:   info.AgentID,
-		Role:      conversation.RoleUser,
-		Content:   content,
-		Timestamp: time.Now().UTC(),
-	}); err != nil {
+	// Agent IS responding (private chat, or @mentioned in a group). Persist +
+	// broadcast the human turn now that provisioning has cleared.
+	if err := persistUserMsg(); err != nil {
 		b.logger.Error("failed to persist user message", "error", err)
 		streamFn(ws.ChatEvent{Type: "error", Content: "failed to save message"})
 		return fmt.Errorf("persist user message: %w", err)
 	}
+	broadcastUserMsg()
 
 	// Auto-title: use first user message (truncated) as session title
 	title := content
@@ -589,6 +633,12 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 
 	var fullResponse string
 	var toolSummaries []string
+	// partAcc assembles the ordered, structured parts (text / thinking / tool
+	// calls / tool results) of the assistant turn for faithful re-rendering on
+	// reload. It works on the normalized AgentEvent stream, so it is identical
+	// across CLI adapters. fullResponse/toolSummaries stay as the flattened
+	// text + compact summary used for search and prompt-context recall.
+	partAcc := conversation.NewPartAccumulator()
 
 	req := orchestrator.AgentRunRequest{
 		AgentID:            info.AgentID,
@@ -639,6 +689,11 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 			Content:  event.Content,
 			Metadata: event.Metadata,
 		})
+		// Assemble the structured parts for faithful re-rendering. The
+		// accumulator itself decides which event types are content parts
+		// (text/thinking/tool_call/tool_result/image) and ignores transport
+		// events (status/system/result/error).
+		partAcc.Add(event.Type, event.Content, event.Metadata)
 		// Only accumulate actual text content for the persisted assistant message.
 		// System events (sidecar security logs, etc.) and thinking events should not
 		// be stored as part of the assistant response.
@@ -714,6 +769,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 					AgentID:   info.AgentID,
 					Role:      conversation.RoleAssistant,
 					Content:   fullResponse,
+					Parts:     partAcc.Parts(),
 					Timestamp: time.Now().UTC(),
 				})
 				_ = b.resolver.IncrementMessageCount(cleanCtx, chatID, 2)
@@ -770,6 +826,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		AgentID:     info.AgentID,
 		Role:        conversation.RoleAssistant,
 		Content:     fullResponse,
+		Parts:       partAcc.Parts(),
 		ToolSummary: toolSummary,
 		Timestamp:   time.Now().UTC(),
 	}); err != nil {

@@ -47,6 +47,10 @@ export interface ChatTurn {
   parts: TurnPart[]
   isStreaming: boolean
   timestamp: Date
+  /** For user turns in a group chat: which human authored it. Lets the UI
+   *  attribute a teammate's message (avatar/name) and distinguish it from the
+   *  local user's own turns. Undefined for the local user / private chats. */
+  authorUserId?: string
   /** Per-turn metadata. Currently only `trace_id` is consumed (by the
    *  feedback store to link signals back to the OTel trace that
    *  produced the message). Backend wiring is not yet shipped — see
@@ -74,6 +78,7 @@ export type StreamEventType =
   | "result"
   | "image"
   | "crew_provisioning"
+  | "user_message"
 
 /** WebSocket event types for agent-to-agent task assignment lifecycle. */
 export type AssignmentEventType = "assignment_created" | "assignment_running" | "assignment_completed" | "assignment_failed"
@@ -104,6 +109,18 @@ export function assignmentField(v: unknown): string {
   return String(v)
 }
 
+/** One structured segment of a persisted assistant turn, as returned by the
+ *  history API (`conversation.Part` on the Go side). The same canonical schema
+ *  the live WebSocket stream carries, so reloaded turns render identically to
+ *  streamed ones. */
+export interface HistoryPart {
+  type: TurnPartType | string
+  content: string
+  tool_name?: string
+  tool_id?: string
+  metadata?: Record<string, unknown>
+}
+
 /** @deprecated Legacy flat chat message; use ChatTurn/TurnPart for new code. Kept for history loading compatibility. */
 export interface ChatMessage {
   id: string
@@ -111,10 +128,29 @@ export interface ChatMessage {
   content: string
   toolName?: string
   eventType?: StreamEventType
+  /** Structured parts from the history API. When present, the assistant turn
+   *  is rebuilt from these (faithful reload of thinking + tools + text). When
+   *  absent (legacy messages), a single text part is synthesized from content. */
+  parts?: HistoryPart[]
+  /** Which human authored a user message (group-chat attribution). */
+  authorUserId?: string
   timestamp: Date
   isStreaming?: boolean
   metadata?: Record<string, unknown>
 }
+
+/** TurnPartTypes that the renderer knows how to display. Unknown/transport
+ *  types coming from history are coerced to "text" so a stray value never
+ *  renders as a raw label row. */
+const RENDERABLE_PART_TYPES: ReadonlySet<string> = new Set<TurnPartType>([
+  "text",
+  "thinking",
+  "tool_call",
+  "tool_result",
+  "error",
+  "result",
+  "image",
+])
 
 interface UseChatOptions {
   wsUrl: string
@@ -125,10 +161,32 @@ interface UseChatOptions {
    *  retry loop. */
   getToken: () => Promise<string | null>
   sessionId: string
+  /** The local user's id. Used to drop the echo of our OWN broadcast
+   *  user_message (the server fans every message out to all session
+   *  subscribers including the sender) so the message we already rendered
+   *  optimistically doesn't appear twice. */
+  currentUserId?: string
+}
+
+/** Map a structured history part to a renderable TurnPart, coercing unknown
+ *  types to "text" and folding tool_name/tool_id into metadata so the tool
+ *  cards can read them the same way they do for live events. */
+function historyPartToTurnPart(part: HistoryPart, id: string, timestamp: Date): TurnPart {
+  const type: TurnPartType = RENDERABLE_PART_TYPES.has(part.type) ? (part.type as TurnPartType) : "text"
+  const metadata: Record<string, unknown> = { ...(part.metadata ?? {}) }
+  if (part.tool_name !== undefined) metadata.tool_name = part.tool_name
+  if (part.tool_id !== undefined) metadata.tool_id = part.tool_id
+  return {
+    id,
+    type,
+    content: part.content,
+    metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
+    timestamp,
+  }
 }
 
 /** Convert flat ChatMessage history into turns for display */
-function messagesToTurns(messages: ChatMessage[]): ChatTurn[] {
+export function messagesToTurns(messages: ChatMessage[]): ChatTurn[] {
   const turns: ChatTurn[] = []
   for (const msg of messages) {
     if (msg.role === "user") {
@@ -138,12 +196,25 @@ function messagesToTurns(messages: ChatMessage[]): ChatTurn[] {
         parts: [{ id: msg.id, type: "text", content: msg.content, timestamp: msg.timestamp }],
         isStreaming: false,
         timestamp: msg.timestamp,
+        authorUserId: msg.authorUserId,
       })
     } else if (msg.role === "system") {
       turns.push({
         id: msg.id,
         role: "system",
         parts: [{ id: msg.id, type: msg.eventType === "error" ? "error" : "text", content: msg.content, timestamp: msg.timestamp }],
+        isStreaming: false,
+        timestamp: msg.timestamp,
+      })
+    } else if (msg.parts && msg.parts.length > 0) {
+      // Modern message: rebuild the turn from its structured parts so the
+      // reload renders thinking + tools + interleaved text exactly as streamed.
+      // Each persisted assistant message already carries its full ordered
+      // parts, so it is one complete turn (no consecutive-message grouping).
+      turns.push({
+        id: msg.id,
+        role: "assistant",
+        parts: msg.parts.map((p, i) => historyPartToTurnPart(p, `${msg.id}-${i}`, msg.timestamp)),
         isStreaming: false,
         timestamp: msg.timestamp,
       })
@@ -187,11 +258,15 @@ function messagesToTurns(messages: ChatMessage[]): ChatTurn[] {
  * Handles streaming text/thinking/tool events, turn grouping, history loading,
  * message editing, regeneration, and stop/cancel.
  */
-export function useChat({ wsUrl, getToken, sessionId }: UseChatOptions) {
+export function useChat({ wsUrl, getToken, sessionId, currentUserId }: UseChatOptions) {
   const [turns, setTurns] = useState<ChatTurn[]>([])
   const [isStreaming, setIsStreaming] = useState(false)
   const textBufferRef = useRef("")
   const thinkingBufferRef = useRef("")
+  // Tracked in a ref so the (deps: []) WS handlers see the latest value without
+  // being re-created on every render.
+  const currentUserIdRef = useRef(currentUserId)
+  currentUserIdRef.current = currentUserId
   // Streaming text arrives token-by-token. pendingTextRef accumulates the
   // tokens seen since the last commit; rafIdRef holds the scheduled frame
   // so a whole burst commits with a single setTurns instead of one per
@@ -278,7 +353,17 @@ export function useChat({ wsUrl, getToken, sessionId }: UseChatOptions) {
     setTurns((prev) => {
       const last = prev[prev.length - 1]
       if (last?.role === "assistant" && last.isStreaming) {
-        // Add status part to current assistant turn
+        // A turn shows at most ONE status line — a quiet, in-place "current
+        // step" indicator. Bursts of internal progress chatter (thinking_tokens,
+        // task_started, task_progress, …) must update that single line, never
+        // stack into a column of rows. Replace an existing status part if there
+        // is one; otherwise append a single status part at the end.
+        const statusIdx = last.parts.findLastIndex((p) => p.type === "status")
+        if (statusIdx >= 0) {
+          const updatedParts = [...last.parts]
+          updatedParts[statusIdx] = { ...updatedParts[statusIdx], content }
+          return [...prev.slice(0, -1), { ...last, parts: updatedParts }]
+        }
         return [
           ...prev.slice(0, -1),
           {
@@ -375,6 +460,43 @@ export function useChat({ wsUrl, getToken, sessionId }: UseChatOptions) {
             timestamp: new Date(),
           },
         ]
+      })
+    },
+    [],
+  )
+
+  // A message from ANOTHER human in a shared group chat (the backend broadcasts
+  // it to other session subscribers). Render it as a distinct user turn,
+  // attributed to its author, without touching the local streaming state.
+  const handleUserMessageEvent = useCallback(
+    (content: string, metadata: Record<string, unknown> | undefined) => {
+      const authorUserId = typeof metadata?.author_user_id === "string"
+        ? (metadata.author_user_id as string)
+        : undefined
+      // Drop the echo of our OWN message — the server broadcasts every user
+      // message to all session subscribers (incl. the sender), but we already
+      // rendered it optimistically in sendMessage. Without this guard the
+      // sender sees their message twice.
+      if (authorUserId && currentUserIdRef.current && authorUserId === currentUserIdRef.current) {
+        return
+      }
+      const userTurn: ChatTurn = {
+        id: uuid(),
+        role: "user",
+        parts: [{ id: uuid(), type: "text", content, timestamp: new Date() }],
+        isStreaming: false,
+        timestamp: new Date(),
+        authorUserId,
+      }
+      setTurns((prev) => {
+        // If the assistant is mid-turn, insert the teammate's message BEFORE the
+        // streaming turn so it stays the tail — otherwise the next text/tool
+        // delta would see a non-assistant last turn and spawn a second one.
+        const last = prev[prev.length - 1]
+        if (last?.role === "assistant" && last.isStreaming) {
+          return [...prev.slice(0, -1), userTurn, last]
+        }
+        return [...prev, userTurn]
       })
     },
     [],
@@ -837,6 +959,9 @@ export function useChat({ wsUrl, getToken, sessionId }: UseChatOptions) {
         case "crew_provisioning":
           handleCrewProvisioningEvent(content, metadata)
           break
+        case "user_message":
+          handleUserMessageEvent(content, metadata)
+          break
         case "error":
           handleErrorEvent(content)
           break
@@ -856,6 +981,7 @@ export function useChat({ wsUrl, getToken, sessionId }: UseChatOptions) {
       handleSystemEvent,
       handleDoneEvent,
       handleCrewProvisioningEvent,
+      handleUserMessageEvent,
       handleErrorEvent,
     ],
   )

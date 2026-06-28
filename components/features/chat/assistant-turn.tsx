@@ -24,6 +24,7 @@ import { Tool, ToolContent, ToolHeader } from "@/components/ai-elements/tool"
 import { CodeBlock } from "@/components/ai-elements/code-block"
 import { StatusIndicator } from "@/components/features/chat/status-indicator"
 import type { ChatTurn, TurnPart } from "@/hooks/use-chat"
+import { groupTurnParts, type ToolNode } from "./turn-grouping"
 import { formatCost } from "@/lib/utils/format"
 
 interface AssistantTurnProps {
@@ -423,6 +424,70 @@ function DelegationContent({ content }: { content: string }) {
   )
 }
 
+/** Compact summary of the tools in an activity group, e.g. "Bash ×4" or
+ *  "Bash ×2, Read". */
+function summarizeTools(tools: ToolNode[]): string {
+  const counts = new Map<string, number>()
+  for (const t of tools) {
+    const name = (t.call.metadata?.tool_name as string) || t.call.content || "tool"
+    counts.set(name, (counts.get(name) ?? 0) + 1)
+  }
+  return Array.from(counts.entries())
+    .map(([name, n]) => (n > 1 ? `${name} ×${n}` : name))
+    .join(", ")
+}
+
+/** One tool invocation inside an activity group — the call card (with input),
+ *  marked completed once its result arrives, plus any non-empty result body.
+ *  Tool calls made by a nested subagent (Task tool) are indented and labelled
+ *  so their activity reads as "inside" the delegation rather than the parent's
+ *  own work. */
+function ActivityToolCard({ node, agentId }: { node: ToolNode; agentId?: string }) {
+  const isSubagent = node.call.metadata?.subagent === true
+  const callPart: TurnPart = node.result
+    ? { ...node.call, metadata: { ...(node.call.metadata ?? {}), completed: true } }
+    : node.call
+  return (
+    <div className={`flex flex-col gap-1.5${isSubagent ? " ml-3 border-l-2 border-border/60 pl-2.5" : ""}`}>
+      {isSubagent && (
+        <span className="text-micro text-muted-foreground">↳ subagent</span>
+      )}
+      <DefaultToolCall part={callPart} agentId={agentId} />
+      {node.result && node.result.content ? <InlineToolResult part={node.result} /> : null}
+    </div>
+  )
+}
+
+/** A run of consecutive tool calls. A single tool renders as a plain card; two
+ *  or more collapse into one quiet "Worked · N steps" disclosure so tool
+ *  activity never floods the transcript yet stays fully inspectable on expand. */
+function ActivityGroup({ tools, agentId }: { tools: ToolNode[]; agentId?: string }) {
+  if (tools.length === 0) return null
+  if (tools.length === 1) return <ActivityToolCard node={tools[0]} agentId={agentId} />
+  const allDone = tools.every((t) => !!t.result)
+  return (
+    <details className="rounded-xl border border-border bg-muted/20 overflow-hidden">
+      <summary className="flex items-center gap-2 px-3 py-2 cursor-pointer select-none text-label text-muted-foreground hover:text-foreground [&::-webkit-details-marker]:hidden">
+        <Zap className="h-3.5 w-3.5" />
+        <span className="font-medium text-foreground">Worked</span>
+        <span>· {tools.length} steps · {summarizeTools(tools)}</span>
+        <span className="ml-auto inline-flex items-center">
+          {allDone ? (
+            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
+          ) : (
+            <Clock className="h-3.5 w-3.5 animate-spin text-amber-500" />
+          )}
+        </span>
+      </summary>
+      <div className="flex flex-col gap-2 p-2 border-t border-border">
+        {tools.map((t, i) => (
+          <ActivityToolCard key={t.call.id ?? i} node={t} agentId={agentId} />
+        ))}
+      </div>
+    </details>
+  )
+}
+
 export function AssistantTurn({ turn, onCopy, onFileClick, agentId, chatId }: AssistantTurnProps) {
   // Collect all text content for copy action
   const fullText = turn.parts
@@ -447,7 +512,11 @@ export function AssistantTurn({ turn, onCopy, onFileClick, agentId, chatId }: As
 
   return (
     <Message from="assistant">
-      {turn.parts.map((part) => {
+      {groupTurnParts(turn.parts).map((node, nodeIdx) => {
+        if (node.kind === "activity") {
+          return <ActivityGroup key={`act-${nodeIdx}`} tools={node.tools} agentId={agentId} />
+        }
+        const part = node.part
         switch (part.type) {
           case "status":
             return <StatusIndicator key={part.id} content={part.content} />

@@ -266,6 +266,17 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	r.mux.Handle("DELETE /api/v1/chats/{chatId}/messages/{messageId}/reactions/{emoji}",
 		authed(http.HandlerFunc(mrh.Remove)))
 
+	// Chat participants: who is in a multi-user group chat. Adding the first
+	// extra participant flips chats.visibility to 'group' (agent responds only
+	// on @mention). Scoped via chats.workspace_id like reactions.
+	cph := NewChatParticipantsHandler(r.db, r.logger)
+	r.mux.Handle("GET /api/v1/chats/{chatId}/participants",
+		authed(http.HandlerFunc(cph.List)))
+	r.mux.Handle("POST /api/v1/chats/{chatId}/participants",
+		authed(http.HandlerFunc(cph.Add)))
+	r.mux.Handle("DELETE /api/v1/chats/{chatId}/participants/{userId}",
+		authed(http.HandlerFunc(cph.Remove)))
+
 	// Mid-turn steering: POST a steering message into a chat. The bridge
 	// guards against racing a second run into a live turn — today the
 	// message is QUEUED for the next turn (live injection is a deferred

@@ -114,7 +114,7 @@ func (h *InternalHandler) resolveAgentConfig(w http.ResponseWriter, r *http.Requ
 	// Agent-only entry point — no chat opener known. PR-E F6: empty
 	// opener means the response won't include a peer card hint and
 	// the orchestrator will skip the [PEER CONTEXT] block.
-	h.resolveAgentConfigWithOpener(w, r, agentID, "")
+	h.resolveAgentConfigWithOpener(w, r, agentID, "", "")
 }
 
 // resolveAgentConfigWithOpener is the chat-aware sibling that
@@ -122,7 +122,7 @@ func (h *InternalHandler) resolveAgentConfig(w http.ResponseWriter, r *http.Requ
 // can inject exactly one peer card (the opener's) at session start.
 // Called from ResolveChat which knows the (chat → created_by)
 // linkage; everyone else uses the zero-arg path.
-func (h *InternalHandler) resolveAgentConfigWithOpener(w http.ResponseWriter, r *http.Request, agentID, openedByUserID string) {
+func (h *InternalHandler) resolveAgentConfigWithOpener(w http.ResponseWriter, r *http.Request, agentID, openedByUserID, visibility string) {
 	data, err := h.loadAgentData(r, agentID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -276,6 +276,9 @@ func (h *InternalHandler) resolveAgentConfigWithOpener(w http.ResponseWriter, r 
 	// row has no role_title (rare).
 	if openedByUserID != "" {
 		resp["opened_by_user_id"] = openedByUserID
+	}
+	if visibility != "" {
+		resp["visibility"] = visibility
 	}
 	if data.roleTitle.Valid && data.roleTitle.String != "" {
 		resp["role_title"] = data.roleTitle.String

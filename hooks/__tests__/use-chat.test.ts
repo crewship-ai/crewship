@@ -169,6 +169,65 @@ describe("useChat", () => {
     expect(result.current.turns[0].parts[1].content).toBe("Here is the answer")
   })
 
+  it("collapses repeated status events into a single live status line", () => {
+    // Internal progress chatter (thinking_tokens, task_started, task_progress,
+    // …) arrives as a burst of status events. They must NOT stack into a column
+    // of rows — only one quiet status line is shown, reflecting the latest.
+    const { result } = renderHook(() =>
+      useChat({ wsUrl: "ws://localhost:8080/ws", token: "test", sessionId: "s1" }),
+    )
+    const onMessage = getOnMessage()
+
+    for (const content of ["Starting container...", "thinking_tokens", "task_started", "task_progress"]) {
+      act(() => {
+        onMessage({
+          type: "chat_event",
+          channel: "session:s1",
+          payload: { type: "status", content },
+        })
+      })
+    }
+
+    const turn = result.current.turns[result.current.turns.length - 1]
+    const statusParts = turn.parts.filter((p) => p.type === "status")
+    expect(statusParts).toHaveLength(1)
+    expect(statusParts[0].content).toBe("task_progress")
+  })
+
+  it("renders a broadcast user_message from another participant, attributed", () => {
+    const { result } = renderHook(() =>
+      useChat({ wsUrl: "ws://localhost:8080/ws", token: "test", sessionId: "s1" }),
+    )
+    const onMessage = getOnMessage()
+    act(() => {
+      onMessage({
+        type: "chat_event",
+        channel: "session:s1",
+        payload: { type: "user_message", content: "hi from Petr", metadata: { author_user_id: "u-petr" } },
+      })
+    })
+    expect(result.current.turns).toHaveLength(1)
+    expect(result.current.turns[0].role).toBe("user")
+    expect(result.current.turns[0].parts[0].content).toBe("hi from Petr")
+    expect(result.current.turns[0].authorUserId).toBe("u-petr")
+  })
+
+  it("drops the echo of the local user's OWN broadcast user_message", () => {
+    const { result } = renderHook(() =>
+      useChat({ wsUrl: "ws://localhost:8080/ws", token: "test", sessionId: "s1", currentUserId: "me" }),
+    )
+    const onMessage = getOnMessage()
+    act(() => {
+      onMessage({
+        type: "chat_event",
+        channel: "session:s1",
+        payload: { type: "user_message", content: "mine", metadata: { author_user_id: "me" } },
+      })
+    })
+    // Own echo is dropped (we already rendered it optimistically) — no dup turn.
+    expect(result.current.turns).toHaveLength(0)
+  })
+
   it("separates multiple complete thinking blocks into distinct parts", () => {
     const { result } = renderHook(() =>
       useChat({ wsUrl: "ws://localhost:8080/ws", token: "test", sessionId: "s1" }),

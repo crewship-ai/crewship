@@ -24,18 +24,164 @@ const (
 	RoleTool      Role = "tool"
 )
 
+// Part is one ordered segment of a multi-part assistant turn — a run of text,
+// a thinking block, a tool call, a tool result, or an image. It is the
+// persisted, assembled form of the normalized orchestrator.AgentEvent stream:
+// every CLI adapter funnels its
+// native output through that one normalized vocabulary, so Part is
+// adapter-neutral by construction. Storing the ordered parts lets a reload
+// render a turn EXACTLY as it streamed (thinking + tools + interleaved text),
+// not just a flattened text blob.
+//
+// Type uses the same vocabulary as orchestrator.AgentEvent.Type and the
+// frontend TurnPart.type, deliberately: one canonical schema shared by the
+// live WebSocket stream, the history API, and the renderer, so live and
+// reloaded turns are indistinguishable. Known types: "text", "thinking",
+// "tool_call", "tool_result", "image". Unknown/transport events
+// (status/system/result/error) are NOT parts.
+//
+// Fields are additive and JSON-omitempty so the schema can grow without
+// breaking older JSONL lines; never remove a field, only add.
+type Part struct {
+	Type     string `json:"type"`
+	Content  string `json:"content,omitempty"`
+	ToolName string `json:"tool_name,omitempty"`
+	ToolID   string `json:"tool_id,omitempty"` // correlates a tool_call with its tool_result
+	Metadata any    `json:"metadata,omitempty"`
+}
+
 // Message represents a single message in a chat conversation, including
 // role, content, and optional tool call metadata.
+//
+// Content remains the flattened plain text of the turn (used for keyword
+// search and prompt-context recall); Parts carries the ordered structured
+// segments for faithful re-rendering. Legacy messages written before the
+// parts model have a non-empty Content and an empty Parts — NormalizedParts
+// bridges that gap so they still render.
 type Message struct {
 	ID          string    `json:"id"`
 	ChatID      string    `json:"session_id"`
 	AgentID     string    `json:"agent_id,omitempty"`
 	Role        Role      `json:"role"`
 	Content     string    `json:"content"`
+	Parts       []Part    `json:"parts,omitempty"`
 	ToolName    string    `json:"tool_name,omitempty"`
 	ToolSummary string    `json:"tool_summary,omitempty"`
 	Metadata    any       `json:"metadata,omitempty"`
 	Timestamp   time.Time `json:"ts"`
+
+	// Author attribution for multi-user group chats. AuthorUserID identifies
+	// which human wrote a user message so a shared transcript can show per-turn
+	// authorship (avatar/name). Empty for agent/system turns and for legacy
+	// messages written before group chat — those fall back to Role.
+	AuthorUserID string `json:"author_user_id,omitempty"`
+}
+
+// NormalizedParts returns the message's structured parts for rendering. When
+// Parts is populated (messages written under the parts model) it is returned
+// verbatim. For legacy messages that predate the parts model — Content only,
+// no Parts — it synthesizes a single text part from Content so old
+// conversations render instead of appearing blank. A message with neither
+// Parts nor Content yields nil.
+func (m Message) NormalizedParts() []Part {
+	if len(m.Parts) > 0 {
+		return m.Parts
+	}
+	if m.Content != "" {
+		return []Part{{Type: "text", Content: m.Content}}
+	}
+	return nil
+}
+
+// PartAccumulator assembles a normalized orchestrator.AgentEvent stream into an
+// ordered []Part for persistence. It coalesces consecutive text deltas into one
+// text part and consecutive thinking deltas into one thinking part (the stream
+// arrives token-by-token under --include-partial-messages, but we persist the
+// assembled block, never per-token rows). Tool calls and tool results each
+// become their own part and, critically, BREAK the current text/thinking run —
+// so any text that follows tool activity starts a fresh part rather than
+// appending to the bubble above the tools.
+//
+// It is intentionally pure and adapter-agnostic: feed it the normalized event
+// (type, content, metadata) that every CLI adapter emits and it produces the
+// same parts regardless of which CLI ran.
+type PartAccumulator struct {
+	parts []Part
+	// open tracks the index of the current coalescing part (-1 when none),
+	// and openType its type, so consecutive same-type deltas append in place.
+	open     int
+	openType string
+}
+
+// NewPartAccumulator returns an empty accumulator ready for Add.
+func NewPartAccumulator() *PartAccumulator {
+	return &PartAccumulator{open: -1}
+}
+
+// metaString reads a string field from the normalized event metadata, which
+// adapters emit as map[string]any. Missing/!string yields "".
+func metaString(metadata any, key string) string {
+	m, ok := metadata.(map[string]any)
+	if !ok {
+		return ""
+	}
+	if v, ok := m[key].(string); ok {
+		return v
+	}
+	return ""
+}
+
+// Add folds one normalized event into the accumulator. Content-bearing types
+// (text, thinking, tool_call, tool_result, image) become parts; transport and
+// telemetry events (status, system, result, error, …) are ignored.
+func (a *PartAccumulator) Add(eventType, content string, metadata any) {
+	switch eventType {
+	case "text", "thinking":
+		// Coalesce into the open part of the same type, else open a new one.
+		if a.open >= 0 && a.openType == eventType {
+			a.parts[a.open].Content += content
+			return
+		}
+		a.parts = append(a.parts, Part{Type: eventType, Content: content})
+		a.open = len(a.parts) - 1
+		a.openType = eventType
+	case "tool_call":
+		a.parts = append(a.parts, Part{
+			Type:     "tool_call",
+			Content:  content,
+			ToolName: metaString(metadata, "tool_name"),
+			ToolID:   metaString(metadata, "tool_id"),
+			Metadata: metadata,
+		})
+		a.closeRun()
+	case "tool_result":
+		a.parts = append(a.parts, Part{
+			Type:     "tool_result",
+			Content:  content,
+			ToolID:   metaString(metadata, "tool_id"),
+			Metadata: metadata,
+		})
+		a.closeRun()
+	case "image":
+		a.parts = append(a.parts, Part{Type: "image", Content: content, Metadata: metadata})
+		a.closeRun()
+	default:
+		// status / system / result / error and any future transport event:
+		// not conversation content, never persisted as a part.
+	}
+}
+
+// closeRun ends the current text/thinking coalescing run so the next text or
+// thinking delta opens a fresh part. This is what segments text-after-tools
+// into its own bubble.
+func (a *PartAccumulator) closeRun() {
+	a.open = -1
+	a.openType = ""
+}
+
+// Parts returns the assembled ordered parts. Safe to call once at end of turn.
+func (a *PartAccumulator) Parts() []Part {
+	return a.parts
 }
 
 // SearchHit is a single conversation_messages row returned by Search,
@@ -151,11 +297,15 @@ func (s *Store) Append(ctx context.Context, sessionID string, msg Message) error
 // appendMirror inserts the searchable row. Triggers (migration v111) keep
 // conversation_messages_fts in sync, so this is a single INSERT.
 func (s *Store) appendMirror(ctx context.Context, sessionID string, msg Message) error {
+	var authorUserID any
+	if msg.AuthorUserID != "" {
+		authorUserID = msg.AuthorUserID
+	}
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO conversation_messages (id, session_id, agent_id, role, content, tool_summary, ts)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO conversation_messages (id, session_id, agent_id, role, content, tool_summary, ts, author_user_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		msg.ID, sessionID, msg.AgentID, string(msg.Role), msg.Content, msg.ToolSummary,
-		msg.Timestamp.UTC().Format("2006-01-02T15:04:05.000Z"),
+		msg.Timestamp.UTC().Format("2006-01-02T15:04:05.000Z"), authorUserID,
 	)
 	if err != nil {
 		return fmt.Errorf("insert mirror row: %w", err)

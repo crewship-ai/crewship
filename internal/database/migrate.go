@@ -1455,6 +1455,12 @@ END;
 	// columns pin the user + provisioned server backing it. Both NULL =
 	// today's behaviour. See migrate_consts_v117_composio_defaults.go.
 	{version: 117, name: "composio_default_connector", sql: migrationComposioDefaults},
+
+	// v118: group-chat groundwork — chat_participants (who's in a chat),
+	// chats.visibility (private|group), and conversation_messages.author_user_id
+	// (per-human attribution). All additive; existing chats stay private 1:1.
+	// See migrate_consts_v118_group_chat.go.
+	{version: 118, name: "group_chat", sql: migrationGroupChat},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

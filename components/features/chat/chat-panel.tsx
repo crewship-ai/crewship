@@ -1,12 +1,13 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { AnimatePresence } from "motion/react"
 import {
   Bot,
   Wifi,
   WifiOff,
   Loader2,
+  Users,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -24,7 +25,8 @@ import {
   type PromptInputMessage,
 } from "@/components/ai-elements/prompt-input"
 import { Suggestion, Suggestions } from "@/components/ai-elements/suggestion"
-import { useChat } from "@/hooks/use-chat"
+import { useChat, type HistoryPart } from "@/hooks/use-chat"
+import { useSession } from "@/hooks/use-auth"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useDrawerStore } from "@/stores/drawer-store"
 
@@ -33,6 +35,7 @@ import { RightPanel } from "./right-panel"
 import { RightRail } from "./right-rail"
 import { RightDrawer } from "./right-drawer"
 import { SlashPalette } from "./composer/slash-palette"
+import { MentionAutocomplete, type CrewMember } from "./composer/mention-autocomplete"
 import { AttachmentZone, AttachmentButton } from "./composer/attachment-zone"
 import { ArtifactPane } from "./artifact/artifact-pane"
 import { FollowUps } from "./suggestions/follow-ups"
@@ -71,12 +74,16 @@ interface ChatPanelProps {
   initialInput?: string
   /** Mobile-only: which panel to show full-screen. Undefined = desktop mode. */
   mobilePanel?: "chat" | "files" | "files-only" | "more"
+  /** Fired when the user sends a message — lets the parent optimistically
+   *  title a freshly-created session in the sidebar (matching the server's
+   *  auto-title) so the new entry shows its name without a manual refresh. */
+  onSend?: (sessionId: string, text: string) => void
 }
 
 const noopFileClick = () => {}
 
 /** Chat panel with split view: conversation on the left, tabbed panel on the right. */
-export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole, sessionOrigin, initialInput, mobilePanel }: ChatPanelProps) {
+export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole, sessionOrigin, initialInput, mobilePanel, onSend }: ChatPanelProps) {
   const suggestionPack = getSuggestions(agentRole)
   const defaultSuggestions = suggestionPack.empty
   const followUpPrompts = suggestionPack.followUps
@@ -129,54 +136,135 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     return data.token
   }, [])
 
+  const session = useSession()
+  const currentUserId = session.data?.user?.id ?? null
+
   const { turns, sendMessage, stopGeneration, regenerateLastTurn, editAndResend, loadHistory, isStreaming, connectionStatus } = useChat({
     wsUrl: getWsUrl(),
     getToken: getWsToken,
     sessionId,
+    currentUserId: currentUserId ?? undefined,
   })
 
   useEffect(() => {
-    if (!sessionId) return
+    // workspaceId is REQUIRED by GET /chats/{id}/messages — without it the
+    // endpoint 400s ("workspace_id is required") and history silently stays
+    // empty. useWorkspace() resolves asynchronously, so wait for it (the effect
+    // re-runs when workspaceId arrives) rather than firing a doomed request.
+    if (!sessionId || !workspaceId) return
     let cancelled = false
-    apiFetch(`/api/v1/chats/${sessionId}/messages`)
-      .then(async (r) => {
-        // 404 means the chat row doesn't exist yet — it's a brand-new
-        // session. Don't mark it ready; ensureSession() must still run
-        // on first send to create the chat row.
-        if (r.status === 404) {
-          return { exists: false, messages: [] as { id: string; role: string; content: string; ts: string }[] }
-        }
-        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+
+    type HistoryMessage = {
+      id: string
+      role: string
+      content: string
+      parts?: HistoryPart[]
+      ts: string
+    }
+
+    // Fetch history with a couple of retries on transient failures. The old
+    // code called loadHistory([]) on ANY error, which blanked a conversation
+    // that actually had messages whenever a single fetch hiccupped. We now
+    // retry with backoff and, if it still fails, LEAVE the existing turns in
+    // place rather than wiping them — a network blip must never look like an
+    // empty chat. A genuine 404 (brand-new session) is not an error.
+    const fetchOnce = async (): Promise<{ exists: boolean; messages: HistoryMessage[] } | "retry"> => {
+      try {
+        const r = await apiFetch(`/api/v1/chats/${sessionId}/messages?workspace_id=${encodeURIComponent(workspaceId)}`)
+        if (r.status === 404) return { exists: false, messages: [] }
+        if (!r.ok) return "retry"
         const data = await r.json()
-        return {
-          exists: true,
-          messages: (data?.messages ?? []) as { id: string; role: string; content: string; ts: string }[],
-        }
-      })
-      .then(({ exists, messages }) => {
-        if (cancelled) return
-        setSessionReady(exists)
-        // Always replace — including with [] for an empty (newly created)
-        // session — so the visible turns swap atomically from old session
-        // → new session with no blank gap in between.
-        loadHistory(messages.map((m) => ({
-          id: m.id,
-          role: m.role as "user" | "assistant" | "system" | "tool",
-          content: m.content,
-          timestamp: new Date(m.ts),
-        })))
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setSessionReady(false)
-          loadHistory([])
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setHistoryLoading(false)
-      })
+        return { exists: true, messages: (data?.messages ?? []) as HistoryMessage[] }
+      } catch {
+        return "retry"
+      }
+    }
+
+    const run = async () => {
+      let result: { exists: boolean; messages: HistoryMessage[] } | "retry" = "retry"
+      for (let attempt = 0; attempt < 3 && !cancelled; attempt++) {
+        if (attempt > 0) await new Promise((res) => setTimeout(res, 300 * attempt))
+        result = await fetchOnce()
+        if (result !== "retry") break
+      }
+      if (cancelled) return
+
+      if (result === "retry") {
+        // All attempts failed — do NOT wipe; only stop the loading spinner.
+        setHistoryLoading(false)
+        return
+      }
+
+      const { exists, messages } = result
+      setSessionReady(exists)
+      // Replace atomically — including with [] for an empty (newly created)
+      // session — so visible turns swap cleanly between sessions.
+      loadHistory(messages.map((m) => ({
+        id: m.id,
+        role: m.role as "user" | "assistant" | "system" | "tool",
+        content: m.content,
+        parts: m.parts,
+        timestamp: new Date(m.ts),
+      })))
+      setHistoryLoading(false)
+    }
+
+    void run()
     return () => { cancelled = true }
-  }, [sessionId, loadHistory])
+  }, [sessionId, workspaceId, loadHistory])
+
+  // Group-chat participants → display-name map for author attribution. Empty
+  // for a private 1:1 chat (the endpoint returns no participants), so the
+  // resolver yields null and messages render exactly as before.
+  const [participantNames, setParticipantNames] = useState<Record<string, string>>({})
+  useEffect(() => {
+    if (!sessionId || !workspaceId) return
+    let cancelled = false
+    apiFetch(`/api/v1/chats/${sessionId}/participants?workspace_id=${encodeURIComponent(workspaceId)}`)
+      .then((r) => (r.ok ? r.json() : { participants: [] }))
+      .then((data: { participants?: { user_id: string; email?: string; full_name?: string }[] }) => {
+        if (cancelled) return
+        const map: Record<string, string> = {}
+        for (const p of data?.participants ?? []) {
+          map[p.user_id] = p.full_name || p.email || "Teammate"
+        }
+        setParticipantNames(map)
+      })
+      .catch(() => { /* private chat / transient — no attribution, no error */ })
+    return () => { cancelled = true }
+  }, [sessionId, workspaceId])
+
+  const resolveAuthorName = useCallback(
+    (userId: string): string | null => {
+      if (!userId || userId === currentUserId) return null
+      return participantNames[userId] ?? "Teammate"
+    },
+    [currentUserId, participantNames],
+  )
+
+  const isGroupChat = Object.keys(participantNames).length > 1
+
+  // @mention autocomplete. The chat's agent is always offered (mentioning it is
+  // what makes it respond in a group chat); teammates are offered too as a
+  // courtesy. The textarea ref lets the popover anchor to the caret.
+  const mentionTextareaRef = useRef<HTMLTextAreaElement>(null)
+  const mentionMembers = useMemo<CrewMember[]>(() => {
+    const list: CrewMember[] = [{ id: agentId, slug: agentSlug, name: agentName ?? agentSlug, role_title: agentRole ?? undefined }]
+    for (const [uid, name] of Object.entries(participantNames)) {
+      if (uid !== currentUserId) {
+        list.push({ id: uid, slug: name.replace(/\s+/g, "").toLowerCase(), name })
+      }
+    }
+    return list
+  }, [agentId, agentSlug, agentName, agentRole, participantNames, currentUserId])
+  const handleMentionPick = useCallback((member: CrewMember, atIndex: number) => {
+    setInput((prev) => {
+      const after = prev.slice(atIndex)
+      const ws = after.search(/\s/)
+      const end = ws === -1 ? prev.length : atIndex + ws
+      return prev.slice(0, atIndex) + "@" + member.slug + " " + prev.slice(end)
+    })
+  }, [])
 
   const ensureSession = useCallback(async () => {
     if (sessionReady || !workspaceId || !sessionId) return
@@ -206,16 +294,18 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     if (!text || isStreaming) return
     await ensureSession()
     sendMessage(text)
+    onSend?.(sessionId, text)
     setInput("")
     composer.clearDraft(sessionId)
     composer.clearAttachments(sessionId)
-  }, [isStreaming, sendMessage, ensureSession, composer, sessionId])
+  }, [isStreaming, sendMessage, ensureSession, composer, sessionId, onSend])
 
   const handleSuggestionClick = useCallback(async (suggestion: string) => {
     if (isStreaming) return
     await ensureSession()
     sendMessage(suggestion)
-  }, [isStreaming, sendMessage, ensureSession])
+    onSend?.(sessionId, suggestion)
+  }, [isStreaming, sendMessage, ensureSession, sessionId, onSend])
 
   const handleCopy = useCallback((content: string) => {
     navigator.clipboard.writeText(content).catch(() => {})
@@ -272,6 +362,12 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
       <div className="flex flex-col h-full">
         <div className="flex items-center gap-2 px-4 py-1.5 shrink-0">
           <ConnectionBadge status={connectionStatus} />
+          {isGroupChat && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-micro font-medium text-primary">
+              <Users className="h-3 w-3" />
+              Group · {Object.keys(participantNames).length}
+            </span>
+          )}
           <span className="text-micro text-muted-foreground ml-auto font-mono">
             {sessionId.slice(0, 8)}
           </span>
@@ -299,6 +395,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
                     animateAfter={animateAfter}
                     agentId={agentId}
                     chatId={sessionId}
+                    resolveAuthorName={resolveAuthorName}
                   />
                 ))}
               </AnimatePresence>
@@ -372,6 +469,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
                     animateAfter={animateAfter}
                     agentId={agentId}
                     chatId={sessionId}
+                    resolveAuthorName={resolveAuthorName}
                   />
                 ))}
               </AnimatePresence>
@@ -398,8 +496,15 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
         </div>
         <div className="mx-auto w-full max-w-3xl p-3 md:px-6 shrink-0">
           <AttachmentZone agentId={agentId} sessionId={sessionId}>
+            <MentionAutocomplete
+              text={input}
+              textareaRef={mentionTextareaRef}
+              members={mentionMembers}
+              onPick={handleMentionPick}
+            />
             <PromptInput className="rounded-xl border" onSubmit={handleSubmit}>
               <PromptInputTextarea
+                ref={mentionTextareaRef}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 placeholder={agentName ? `Message ${agentName}...` : "Send a message..."}
