@@ -411,6 +411,13 @@ func TestInboxHandler_PatchState_SourceManagedKinds(t *testing.T) {
 	for _, kind := range []string{"waitpoint", "escalation"} {
 		id := "src-" + kind
 		seedInboxItem(t, h, wsID, id, kind, "unread", "", "", "managed "+kind, now)
+		// A real agent escalation is backed by an escalations row (source_id
+		// IS the escalations.id) — that's what makes it source-managed. Seed
+		// it so this case keeps 409 (vs the source-less keeper case below,
+		// which now resolves on the inbox row).
+		if kind == "escalation" {
+			seedBackingEscalation(t, db, wsID, "src-"+id)
+		}
 
 		// read is allowed
 		req := httptest.NewRequest("PATCH", "/api/v1/inbox/"+id, strings.NewReader(`{"state":"read"}`))
@@ -473,6 +480,138 @@ func TestInboxHandler_PatchState_SourceManagedKinds(t *testing.T) {
 	}
 }
 
+// TestInboxHandler_List_AgentAvatar verifies the inbox surfaces a real
+// agent's avatar (seed/style) for escalations whose sender is that agent, so
+// the row renders the agent's actual avatar instead of a generic glyph.
+// Non-agent senders (system) stay blank and fall back to the kind glyph.
+func TestInboxHandler_List_AgentAvatar(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	h := NewInboxHandler(db, newTestLogger(), nil)
+
+	agentID := "agent-casey"
+	if _, err := db.Exec(
+		`INSERT INTO agents (id, workspace_id, name, slug, avatar_seed, avatar_style)
+		 VALUES (?, ?, 'Casey', 'casey', 'casey-seed', 'fun-emoji')`, agentID, wsID); err != nil {
+		t.Fatalf("seed agent: %v", err)
+	}
+
+	now := time.Now().UTC()
+	// Agent-sent escalation: sender_id points at the agent row.
+	if _, err := db.Exec(`
+		INSERT INTO inbox_items (id, workspace_id, kind, source_id, title, body_md,
+			sender_type, sender_id, sender_name, state, priority, blocking, payload_json, created_at, updated_at)
+		VALUES ('esc-casey', ?, 'escalation', 'src-esc-casey', 'API key', '',
+			'agent', ?, 'casey', 'unread', 'high', 1, '{}', ?, ?)`,
+		wsID, agentID, now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano)); err != nil {
+		t.Fatalf("seed agent escalation: %v", err)
+	}
+	// System-sent escalation (keeper): must stay blank — no agent avatar.
+	seedInboxItem(t, h, wsID, "sys-esc", "escalation", "unread", "", "", "Skill review", now)
+
+	req := httptest.NewRequest("GET", "/api/v1/inbox", nil)
+	req = withWorkspaceUser(req, userID, wsID, "OWNER")
+	rr := httptest.NewRecorder()
+	h.List(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("list: code=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp inboxListResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	var caseyAvatar, sysAvatar string
+	var sawCasey, sawSys bool
+	for _, row := range resp.Rows {
+		switch row.ID {
+		case "esc-casey":
+			sawCasey = true
+			caseyAvatar = row.AvatarSeed + "/" + row.AvatarStyle
+		case "sys-esc":
+			sawSys = true
+			sysAvatar = row.AvatarSeed + row.AvatarStyle
+		}
+	}
+	if !sawCasey || !sawSys {
+		t.Fatalf("missing rows: casey=%v sys=%v", sawCasey, sawSys)
+	}
+	if caseyAvatar != "casey-seed/fun-emoji" {
+		t.Errorf("agent avatar = %q, want casey-seed/fun-emoji", caseyAvatar)
+	}
+	if sysAvatar != "" {
+		t.Errorf("system sender avatar = %q, want empty (glyph fallback)", sysAvatar)
+	}
+}
+
+// seedBackingEscalation inserts a real escalations row so an inbox
+// escalation whose source_id == this id reads as source-managed (resolve
+// at /escalations/{id}/resolve, inbox PATCH→resolved 409s).
+func seedBackingEscalation(t *testing.T, db *sql.DB, wsID, id string) {
+	t.Helper()
+	_, err := db.Exec(`
+		INSERT INTO escalations (id, workspace_id, crew_id, chat_id, from_agent_id,
+			reason, status, created_at)
+		VALUES (?, ?, 'crew-x', 'chat-x', 'agent-x', 'need help', 'PENDING', ?)`,
+		id, wsID, time.Now().UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		t.Fatalf("seed backing escalation %s: %v", id, err)
+	}
+}
+
+// TestInboxHandler_PatchState_SourceLessEscalation covers the keeper-synthetic
+// escalation case: kind=escalation but NO backing escalations row (Skill
+// review / memory health). Those have no /escalations/{id}/resolve endpoint,
+// so the inbox must let the operator dismiss them on the row itself —
+// otherwise they pile up unclearable in "Decisions needed". Contrast with
+// TestInboxHandler_PatchState_SourceManagedKinds, where a backed escalation
+// still 409s.
+func TestInboxHandler_PatchState_SourceLessEscalation(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	h := NewInboxHandler(db, newTestLogger(), nil)
+
+	now := time.Now().UTC()
+	// Synthetic keeper escalation — seedInboxItem gives source_id "src-<id>",
+	// which matches no escalations row, so it's source-less by definition.
+	id := "skill-review-1"
+	seedInboxItem(t, h, wsID, id, "escalation", "unread", "", "", "Skill review: sk_abc", now)
+
+	// resolved/archived is now ALLOWED (no source endpoint to defer to).
+	req := httptest.NewRequest("PATCH", "/api/v1/inbox/"+id,
+		strings.NewReader(`{"state":"resolved","resolved_action":"archived"}`))
+	req.SetPathValue("id", id)
+	req = withWorkspaceUser(req, userID, wsID, "OWNER")
+	rr := httptest.NewRecorder()
+	h.PatchState(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("source-less escalation resolve: code = %d body=%s, want 200", rr.Code, rr.Body.String())
+	}
+	var state, action string
+	if err := db.QueryRow(`SELECT state, COALESCE(resolved_action,'') FROM inbox_items WHERE id=?`, id).
+		Scan(&state, &action); err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if state != "resolved" || action != "archived" {
+		t.Errorf("after dismiss: state=%s action=%s, want resolved/archived", state, action)
+	}
+
+	// 'unread' is still blocked even for source-less escalations: only the
+	// terminal dismiss (resolved) is the new affordance; reopening an inbox
+	// escalation has no meaning without a source to re-pend.
+	id2 := "skill-review-2"
+	seedInboxItem(t, h, wsID, id2, "escalation", "read", "", "", "Skill review: sk_def", now)
+	req2 := httptest.NewRequest("PATCH", "/api/v1/inbox/"+id2, strings.NewReader(`{"state":"unread"}`))
+	req2.SetPathValue("id", id2)
+	req2 = withWorkspaceUser(req2, userID, wsID, "OWNER")
+	rr2 := httptest.NewRecorder()
+	h.PatchState(rr2, req2)
+	if rr2.Code != http.StatusConflict {
+		t.Errorf("source-less escalation unread: code = %d, want 409", rr2.Code)
+	}
+}
+
 // seedInboxItemBlocking inserts a row with an explicit blocking flag
 // (the shared seedInboxItem hardcodes blocking=1). The bulk decision-
 // protection skips blocking rows on resolve, so the bulk test needs
@@ -511,7 +650,10 @@ func TestInboxHandler_BulkPatchState(t *testing.T) {
 	//   - a BLOCKING message (blocking=1, regardless of kind).
 	seedInboxItemBlocking(t, h, wsID, "wp-1", "waitpoint", "approve", 1, now)
 	seedInboxItemBlocking(t, h, wsID, "esc-1", "escalation", "help", 0, now)
+	seedBackingEscalation(t, db, wsID, "src-esc-1") // real agent escalation → stays skipped
 	seedInboxItemBlocking(t, h, wsID, "bmsg-1", "message", "needs decision", 1, now)
+	// Source-less keeper escalation (no backing row) — bulk resolve clears it.
+	seedInboxItemBlocking(t, h, wsID, "esc-sl", "escalation", "skill review", 0, now)
 
 	bulk := func(ids []string, state, action string) map[string]interface{} {
 		t.Helper()
@@ -530,16 +672,16 @@ func TestInboxHandler_BulkPatchState(t *testing.T) {
 		return out
 	}
 
-	out := bulk([]string{"fr-1", "fr-2", "msg-1", "wp-1", "esc-1", "bmsg-1"}, "resolved", "cancelled")
-	if got := out["updated"]; got != float64(3) {
-		t.Errorf("updated = %v, want 3 (2 failed_run + 1 non-blocking message)", got)
+	out := bulk([]string{"fr-1", "fr-2", "msg-1", "wp-1", "esc-1", "bmsg-1", "esc-sl"}, "resolved", "cancelled")
+	if got := out["updated"]; got != float64(4) {
+		t.Errorf("updated = %v, want 4 (2 failed_run + 1 message + 1 source-less escalation)", got)
 	}
 	if got := out["skipped"]; got != float64(3) {
-		t.Errorf("skipped = %v, want 3 (waitpoint + escalation + blocking message)", got)
+		t.Errorf("skipped = %v, want 3 (waitpoint + backed escalation + blocking message)", got)
 	}
 
-	// The 3 freely-resolvable rows are now resolved with the action recorded.
-	for _, id := range []string{"fr-1", "fr-2", "msg-1"} {
+	// The 4 freely-resolvable rows are now resolved with the action recorded.
+	for _, id := range []string{"fr-1", "fr-2", "msg-1", "esc-sl"} {
 		var state, action string
 		db.QueryRow(`SELECT state, COALESCE(resolved_action,'') FROM inbox_items WHERE id=?`, id).Scan(&state, &action)
 		if state != "resolved" || action != "cancelled" {

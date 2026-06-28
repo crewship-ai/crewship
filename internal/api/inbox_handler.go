@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -94,6 +95,12 @@ type inboxItemResponse struct {
 	SenderType       string                 `json:"sender_type,omitempty"`
 	SenderID         string                 `json:"sender_id,omitempty"`
 	SenderName       string                 `json:"sender_name,omitempty"`
+	// AvatarSeed / AvatarStyle are filled (post-query, via enrichAgentAvatars)
+	// only when the sender is a real agent, so the inbox renders that agent's
+	// actual avatar instead of a generic glyph. Blank for system / crew /
+	// pipeline senders, which fall back to the kind glyph client-side.
+	AvatarSeed       string                 `json:"avatar_seed,omitempty"`
+	AvatarStyle      string                 `json:"avatar_style,omitempty"`
 	State            string                 `json:"state"`
 	Priority         string                 `json:"priority"`
 	Blocking         bool                   `json:"blocking"`
@@ -208,6 +215,7 @@ func (h *InboxHandler) List(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, item)
 	}
+	h.enrichAgentAvatars(r.Context(), out)
 
 	// Bell badge fetched in the same response so the UI doesn't need
 	// a second round-trip on every poll. Cheap because it's a partial-
@@ -311,7 +319,73 @@ func (h *InboxHandler) Get(w http.ResponseWriter, r *http.Request) {
 	if payloadJSON != "" {
 		_ = json.Unmarshal([]byte(payloadJSON), &item.Payload)
 	}
-	writeJSON(w, http.StatusOK, item)
+	batch := []inboxItemResponse{item}
+	h.enrichAgentAvatars(r.Context(), batch)
+	writeJSON(w, http.StatusOK, batch[0])
+}
+
+// enrichAgentAvatars fills avatar_seed / avatar_style on rows whose sender is
+// a real agent, so the inbox can render the agent's actual avatar (the same
+// DiceBear seed/style the agent card uses) instead of a generic glyph. One
+// batched lookup keyed by sender_id; non-agent senders (system / crew /
+// pipeline) and unknown ids are left blank and fall back to the kind glyph
+// client-side. Best-effort: a lookup error logs and leaves avatars blank
+// rather than failing the list.
+func (h *InboxHandler) enrichAgentAvatars(ctx context.Context, rows []inboxItemResponse) {
+	ids := make([]interface{}, 0)
+	seen := make(map[string]bool)
+	for i := range rows {
+		if rows[i].SenderType == "agent" && rows[i].SenderID != "" && !seen[rows[i].SenderID] {
+			seen[rows[i].SenderID] = true
+			ids = append(ids, rows[i].SenderID)
+		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+	ph := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
+	r, err := h.db.QueryContext(ctx,
+		`SELECT id, COALESCE(avatar_seed, ''), COALESCE(avatar_style, '') FROM agents WHERE id IN (`+ph+`)`,
+		ids...)
+	if err != nil {
+		h.logger.Warn("inbox avatar enrich", "error", err)
+		return
+	}
+	defer r.Close()
+	type avatar struct{ seed, style string }
+	byID := make(map[string]avatar, len(ids))
+	for r.Next() {
+		var id, seed, style string
+		if err := r.Scan(&id, &seed, &style); err != nil {
+			continue
+		}
+		byID[id] = avatar{seed, style}
+	}
+	for i := range rows {
+		if a, ok := byID[rows[i].SenderID]; ok {
+			rows[i].AvatarSeed = a.seed
+			rows[i].AvatarStyle = a.style
+		}
+	}
+}
+
+// escalationHasBackingRow reports whether an inbox escalation's source_id
+// points at a real row in the escalations table (i.e. it's resolvable at
+// /escalations/{id}/resolve). Keeper-synthetic advisories (Skill review,
+// memory health) use a synthetic source_id with no backing row — those have
+// no source endpoint, so the inbox row itself is the only handle and may be
+// dismissed directly. On a query error we stay conservative (treat as backed)
+// so the source-managed guard is never weakened by a transient failure.
+func escalationHasBackingRow(ctx context.Context, tx *sql.Tx, sourceID string) bool {
+	if sourceID == "" {
+		return false
+	}
+	var exists int
+	if err := tx.QueryRowContext(ctx,
+		`SELECT EXISTS(SELECT 1 FROM escalations WHERE id = ?)`, sourceID).Scan(&exists); err != nil {
+		return true
+	}
+	return exists == 1
 }
 
 // PatchState handles PATCH /api/v1/inbox/{id} to flip an item's state
@@ -361,10 +435,10 @@ func (h *InboxHandler) PatchState(w http.ResponseWriter, r *http.Request) {
 	// to a specific OWNER.
 	visClause, visArgs := inboxVisibilityClause(user.ID, role)
 	lookupArgs := append([]interface{}{id, workspaceID}, visArgs...)
-	var existing, kind string
+	var existing, kind, sourceID string
 	err = tx.QueryRowContext(r.Context(),
-		`SELECT id, kind FROM inbox_items WHERE id = ? AND workspace_id = ?`+visClause,
-		lookupArgs...).Scan(&existing, &kind)
+		`SELECT id, kind, source_id FROM inbox_items WHERE id = ? AND workspace_id = ?`+visClause,
+		lookupArgs...).Scan(&existing, &kind, &sourceID)
 	if errors.Is(err, sql.ErrNoRows) {
 		replyError(w, http.StatusNotFound, "not found")
 		return
@@ -394,11 +468,22 @@ func (h *InboxHandler) PatchState(w http.ResponseWriter, r *http.Request) {
 	// Generic kinds (message) can flip freely too.
 	if kind == "waitpoint" || kind == "escalation" {
 		if body.State != "read" {
-			writeJSON(w, http.StatusConflict, map[string]string{
-				"error": "use the source endpoint for this kind (e.g. /pipelines/waitpoints/{token}/approve) — inbox PATCH only supports 'read' for source-managed items",
-				"kind":  kind,
-			})
-			return
+			// Exception: a keeper-synthetic escalation (Skill review, memory
+			// health) carries kind=escalation but has NO backing escalations
+			// row — its source_id is a synthetic key, not an escalations.id —
+			// so there's no /escalations/{id}/resolve endpoint to drive it.
+			// Blocking inbox-resolve would trap it forever; allow the operator
+			// to dismiss it on the inbox row instead. Real agent escalations
+			// (backing row present) still 409 → resolve at source.
+			sourceLess := kind == "escalation" && body.State == "resolved" &&
+				!escalationHasBackingRow(r.Context(), tx, sourceID)
+			if !sourceLess {
+				writeJSON(w, http.StatusConflict, map[string]string{
+					"error": "use the source endpoint for this kind (e.g. /pipelines/waitpoints/{token}/approve) — inbox PATCH only supports 'read' for source-managed items",
+					"kind":  kind,
+				})
+				return
+			}
 		}
 	}
 
@@ -528,12 +613,12 @@ func (h *InboxHandler) BulkPatchState(w http.ResponseWriter, r *http.Request) {
 		}
 		seen[id] = true
 
-		var existing, kind string
+		var existing, kind, sourceID string
 		var blocking int
 		lookupArgs := append([]interface{}{id, workspaceID}, visArgs...)
 		err = tx.QueryRowContext(r.Context(),
-			`SELECT id, kind, blocking FROM inbox_items WHERE id = ? AND workspace_id = ?`+visClause,
-			lookupArgs...).Scan(&existing, &kind, &blocking)
+			`SELECT id, kind, source_id, blocking FROM inbox_items WHERE id = ? AND workspace_id = ?`+visClause,
+			lookupArgs...).Scan(&existing, &kind, &sourceID, &blocking)
 		if errors.Is(err, sql.ErrNoRows) {
 			notFound++
 			continue
@@ -555,7 +640,13 @@ func (h *InboxHandler) BulkPatchState(w http.ResponseWriter, r *http.Request) {
 		//     "needs explicit human action".
 		// Non-blocking message/failed_run still clear. The client warns
 		// the user before calling; this is the server-side backstop.
-		if body.State == "resolved" && (kind == "waitpoint" || kind == "escalation" || blocking != 0) {
+		// Same source-less exception as PatchState: a keeper-synthetic
+		// escalation with no backing escalations row has no source endpoint,
+		// so dismissing it on the inbox row is the only way to clear it.
+		// Those resolve even under bulk; real escalations/waitpoints/blocking
+		// rows are still skipped.
+		sourceLess := kind == "escalation" && !escalationHasBackingRow(r.Context(), tx, sourceID)
+		if body.State == "resolved" && !sourceLess && (kind == "waitpoint" || kind == "escalation" || blocking != 0) {
 			skipped = append(skipped, id)
 			continue
 		}
