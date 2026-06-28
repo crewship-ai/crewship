@@ -94,6 +94,47 @@ func TestRunLogs_ReturnsEntriesOldestFirst(t *testing.T) {
 	}
 }
 
+// TestRunLogs_MatchesPayloadRunID — pipeline runs tag the run id in the
+// payload (payload.run_id), not the trace_id column. The handler must match
+// those entries too, else the Activity Logs tab shows "no output" for every
+// pipeline run despite a full timeline.
+func TestRunLogs_MatchesPayloadRunID(t *testing.T) {
+	h, db, userID, wsID := runsHandlerRig(t)
+	seedRunsPipeline(t, db, wsID, "pl-pl", "pl-pipe")
+	seedRunRow(t, db, wsID, "pl-pl", "pl-pipe", "prn_pl", "running")
+
+	// Entry tagged the pipeline way: empty trace_id, run id only in payload.
+	if _, err := db.Exec(`
+		INSERT INTO journal_entries
+		    (id, workspace_id, ts, entry_type, severity, actor_type, actor_id,
+		     summary, payload, refs, trace_id, priority)
+		VALUES ('jp-1', ?, '2026-01-01T00:00:01Z', 'pipeline.run.started', 'info',
+		        'orchestrator', 'prn_pl', 'Pipeline started',
+		        '{"run_id":"prn_pl","pipeline_slug":"pl-pipe"}', '{}', '', 'normal')`,
+		wsID); err != nil {
+		t.Fatalf("seed payload entry: %v", err)
+	}
+
+	req := withWorkspaceUser(
+		httptest.NewRequest("GET", "/api/v1/workspaces/"+wsID+"/pipeline-runs/prn_pl/logs", nil),
+		userID, wsID, "OWNER",
+	)
+	req.SetPathValue("runId", "prn_pl")
+	rr := httptest.NewRecorder()
+	h.RunLogs(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	var got []runLogEntry
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v; body=%s", err, rr.Body.String())
+	}
+	if len(got) != 1 || got[0].Message != "Pipeline started" {
+		t.Fatalf("payload-run_id entry not matched: %+v", got)
+	}
+}
+
 // TestRunLogs_EmptyWhenNoEntries — a run that exists but produced no
 // journal rows returns an empty array (not null, not 404).
 func TestRunLogs_EmptyWhenNoEntries(t *testing.T) {

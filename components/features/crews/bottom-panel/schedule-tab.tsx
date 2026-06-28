@@ -7,6 +7,40 @@ import { cn } from "@/lib/utils"
 import type { BottomPanelContext } from "./types"
 import { EmptyState, formatRelative, statusColor } from "./shared"
 
+// describeCron renders a 5-field cron as a human sentence ("Every day at
+// 03:00") for the common shapes operators actually use; falls back to the
+// raw expression for anything exotic so we never lie about the schedule.
+const DOW = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+function describeCron(expr: string): string {
+  const p = expr.trim().split(/\s+/)
+  if (p.length !== 5) return expr
+  const [min, hr, dom, mon, dow] = p
+  const at = (h: string, m: string) => `${h.padStart(2, "0")}:${m.padStart(2, "0")}`
+  const everyN = (f: string) => (f.startsWith("*/") ? Number(f.slice(2)) : null)
+
+  // */N minutes
+  const nMin = everyN(min)
+  if (nMin && hr === "*" && dom === "*" && mon === "*" && dow === "*") {
+    return nMin === 1 ? "Every minute" : `Every ${nMin} minutes`
+  }
+  // every N hours (on the minute)
+  const nHr = everyN(hr)
+  if (/^\d+$/.test(min) && nHr && dom === "*" && mon === "*" && dow === "*") {
+    return `Every ${nHr} hour${nHr === 1 ? "" : "s"}`
+  }
+  // fixed minute + hour
+  if (/^\d+$/.test(min) && /^\d+$/.test(hr)) {
+    const time = at(hr, min)
+    if (dom === "*" && mon === "*" && dow === "*") return `Every day at ${time}`
+    if (dom === "*" && mon === "*" && /^\d+$/.test(dow)) {
+      const d = DOW[Number(dow) % 7] ?? `day ${dow}`
+      return `Every ${d} at ${time}`
+    }
+    if (/^\d+$/.test(dom) && mon === "*" && dow === "*") return `Monthly on the ${dom}. at ${time}`
+  }
+  return expr
+}
+
 // Subset of internal/api scheduleResponse we render.
 interface Schedule {
   id: string
@@ -84,7 +118,12 @@ export function ScheduleTab({ workspaceId, context }: { workspaceId: string; con
   if (!schedule) return <EmptyState>This routine has no schedule — it runs only when triggered manually.</EmptyState>
 
   const cells: Array<{ k: string; v: React.ReactNode }> = [
-    { k: "Cron", v: <span className="font-mono text-cyan-300">{schedule.cron_expr}</span> },
+    { k: "Runs", v: (
+      <span>
+        {describeCron(schedule.cron_expr)}
+        <span className="ml-2 font-mono text-[10px] text-muted-foreground-soft">{schedule.cron_expr}</span>
+      </span>
+    ) },
     { k: "Timezone", v: schedule.timezone || "UTC" },
     { k: "Status", v: <span className={schedule.enabled ? "text-emerald-300" : "text-muted-foreground"}>{schedule.enabled ? "Enabled" : "Paused"}</span> },
     { k: "Next run", v: schedule.next_run_at ? formatRelative(schedule.next_run_at) : "—" },

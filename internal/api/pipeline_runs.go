@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/pipeline"
 )
 
@@ -247,30 +246,40 @@ func (h *PipelineHandler) RunLogs(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	entries, _, err := journal.List(r.Context(), h.db, journal.Query{
-		WorkspaceID: workspaceID,
-		TraceID:     runID,
-		Limit:       limit,
-	})
+	// Pipeline runs tag their journal entries with the run id in the
+	// payload (payload.run_id) — NOT the trace_id column (trace_id carries
+	// the OTel/mission trace). Agent-driven runs use trace_id instead. Match
+	// either so the console works for both. ORDER BY ts ASC → oldest-first.
+	rows, err := h.db.QueryContext(r.Context(), `
+		SELECT ts, severity, entry_type, summary
+		FROM journal_entries
+		WHERE workspace_id = ?
+		  AND (trace_id = ? OR json_extract(payload, '$.run_id') = ?)
+		ORDER BY ts ASC
+		LIMIT ?`, workspaceID, runID, runID, limit)
 	if err != nil {
-		h.logger.Error("run logs: journal list", "error", err, "run_id", runID)
+		h.logger.Error("run logs: query", "error", err, "run_id", runID)
 		replyError(w, http.StatusInternalServerError, "load logs")
 		return
 	}
+	defer rows.Close()
 
-	// journal.List returns newest-first; a console reads oldest-first.
-	out := make([]runLogEntry, 0, len(entries))
-	for i := len(entries) - 1; i >= 0; i-- {
-		e := entries[i]
-		level := string(e.Severity)
-		if level == "" {
-			level = "info"
+	out := make([]runLogEntry, 0, limit)
+	for rows.Next() {
+		var ts, severity, entryType, summary string
+		if err := rows.Scan(&ts, &severity, &entryType, &summary); err != nil {
+			h.logger.Error("run logs: scan", "error", err, "run_id", runID)
+			replyError(w, http.StatusInternalServerError, "load logs")
+			return
+		}
+		if severity == "" {
+			severity = "info"
 		}
 		out = append(out, runLogEntry{
-			TS:      e.TS.UTC().Format(time.RFC3339),
-			Level:   level,
-			Message: e.Summary,
-			Type:    string(e.Type),
+			TS:      ts,
+			Level:   severity,
+			Message: summary,
+			Type:    entryType,
 		})
 	}
 	writeJSON(w, http.StatusOK, out)

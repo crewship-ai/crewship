@@ -390,7 +390,8 @@ export function ActivityTracePage() {
       </div>
 
       {/* ---- Bottom dock — log / trace / changes of the selected run.
-           The canvas shows structure; this shows the raw run console. ---- */}
+           Appears once a run is selected; the canvas shows structure,
+           this shows the raw run console. ---- */}
       {runCtx && (
         <BottomPanel
           workspaceId={workspaceId}

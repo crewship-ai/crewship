@@ -383,9 +383,8 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
       </div>
 
       {/* ---- Bottom dock — runs / logs / schedule / spec of the selected
-           routine. Lets you edit the definition above while tailing the
-           last run's log below, the way operator tools pair a pipeline
-           editor with its run console. ---- */}
+           routine. Appears once a routine is selected, pairing the
+           definition above with its run console below. ---- */}
       {routineCtx && (
         <BottomPanel
           workspaceId={workspaceId}
