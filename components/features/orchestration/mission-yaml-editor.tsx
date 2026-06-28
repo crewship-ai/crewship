@@ -24,12 +24,16 @@ function escapeYaml(val: string): string {
   return `"${val}"`
 }
 
-function missionToYaml(mission: Mission): string {
+// Exported for unit testing. Defensive against partially-loaded missions:
+// the /issues list endpoint omits `tasks` (no include_tasks), so a mission
+// in the drawer can arrive with tasks === undefined. Iterating that threw
+// "undefined is not iterable" and crashed the Spec tab's error boundary.
+export function missionToYaml(mission: Mission): string {
   const lines: string[] = [
     "mission:",
-    `  title: ${escapeYaml(mission.title)}`,
-    `  status: ${mission.status}`,
-    `  lead_agent: ${mission.lead_agent_slug}`,
+    `  title: ${escapeYaml(mission.title ?? "")}`,
+    `  status: ${mission.status ?? ""}`,
+    `  lead_agent: ${mission.lead_agent_slug ?? ""}`,
   ]
 
   if (mission.pattern) lines.push(`  pattern: ${mission.pattern}`)
@@ -39,7 +43,7 @@ function missionToYaml(mission: Mission): string {
 
   lines.push("  tasks:")
 
-  for (const task of mission.tasks) {
+  for (const task of mission.tasks ?? []) {
     lines.push(`    - id: ${task.id}`)
     lines.push(`      title: ${escapeYaml(task.title)}`)
     lines.push(`      status: ${task.status}`)
