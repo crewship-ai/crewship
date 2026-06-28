@@ -15,8 +15,15 @@ func (e *Executor) runRoutineHook(ctx context.Context, hook *Step, in RunInput, 
 	if hook == nil {
 		return "", nil
 	}
+	// Hooks run at the Run() boundary — BEFORE runDSL merges input
+	// defaults — so merge here too, else a hook referencing a defaulted
+	// input (inputs.x where x has a default) sees it as undefined.
+	inputs := in.Inputs
+	if in.dsl != nil {
+		inputs = mergeInputs(in.Inputs, in.dsl)
+	}
 	render := RenderContext{
-		Inputs:      in.Inputs,
+		Inputs:      inputs,
 		StepOutputs: map[string]string{},
 		Env: map[string]string{
 			"run_id":           runID,

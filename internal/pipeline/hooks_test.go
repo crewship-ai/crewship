@@ -55,6 +55,18 @@ func TestRunHooksAround(t *testing.T) {
 		t.Fatalf("happy path: bodyRan=%v status=%s err=%v", bodyRan, res.Status, err)
 	}
 
+	// before_all referencing a DEFAULTED input must see the default
+	// (hooks run before runDSL merges defaults — merged in the hook too).
+	bodyRan = false
+	inDef := RunInput{PipelineID: "p", dsl: &DSL{
+		Inputs: []InputSpec{{Name: "x", Type: "number", Default: 9.0}},
+		Hooks:  &RoutineHooks{BeforeAll: &Step{ID: "pre", Type: StepCode, Code: &CodeStep{Runtime: "cel", Code: "inputs.x > 0"}}},
+	}}
+	res, err = e.runHooksAround(ctx, inDef, "runD", "slug", body)
+	if err != nil || !bodyRan || res.Status != "COMPLETED" {
+		t.Fatalf("defaulted-input hook should pass: bodyRan=%v status=%s err=%v", bodyRan, res.Status, err)
+	}
+
 	// Resume re-entry skips hooks entirely (body runs, before_all ignored).
 	bodyRan = false
 	in3 := RunInput{PipelineID: "p", resume: true, dsl: &DSL{Hooks: &RoutineHooks{
