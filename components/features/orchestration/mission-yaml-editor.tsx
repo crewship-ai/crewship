@@ -32,8 +32,11 @@ export function missionToYaml(mission: Mission): string {
   const lines: string[] = [
     "mission:",
     `  title: ${escapeYaml(mission.title ?? "")}`,
-    `  status: ${mission.status ?? ""}`,
-    `  lead_agent: ${mission.lead_agent_slug ?? ""}`,
+    // Route nullish scalars through escapeYaml so a missing field serializes
+    // as "" rather than a bare `status:` (which YAML reads as null) — a
+    // partially-loaded issue mustn't silently change shape on save.
+    `  status: ${escapeYaml(mission.status ?? "")}`,
+    `  lead_agent: ${escapeYaml(mission.lead_agent_slug ?? "")}`,
   ]
 
   if (mission.pattern) lines.push(`  pattern: ${mission.pattern}`)

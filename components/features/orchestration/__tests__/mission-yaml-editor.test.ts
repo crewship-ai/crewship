@@ -17,7 +17,8 @@ describe("missionToYaml", () => {
     expect(() => missionToYaml(mission)).not.toThrow()
     const yaml = missionToYaml(mission)
     expect(yaml).toContain("title:")
-    expect(yaml).toContain("status: IN_PROGRESS")
+    // status is escaped (quoted), so a missing value yields "" not null.
+    expect(yaml).toContain('status: "IN_PROGRESS"')
     expect(yaml).toContain("tasks:")
   })
 
