@@ -3,8 +3,9 @@
 import { useEffect, useRef, useState } from "react"
 import dynamic from "next/dynamic"
 import {
-  ChevronDown, ChevronUp, Container, FileCode2, Files,
-  MessageSquare, Terminal,
+  Activity, CalendarClock, ChevronDown, ChevronUp, Container, FileCode2,
+  Files, GitCompareArrows, MessageCircle, MessageSquare, Play, ScrollText,
+  Terminal, Workflow,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -17,6 +18,13 @@ import { ExecTab } from "./exec-tab"
 import { YamlTab } from "./yaml-tab"
 import { DockerTab } from "./docker-tab"
 import { FilesTab } from "./files-tab"
+import { ActivityTab } from "./activity-tab"
+import { RunsTab } from "./runs-tab"
+import { CommentsTab } from "./comments-tab"
+import { ChangesTab } from "./changes-tab"
+import { ScheduleTab } from "./schedule-tab"
+import { LogsTab } from "./logs-tab"
+import { TraceTab } from "./trace-tab"
 
 export type { BottomTab, BottomPanelProps } from "./types"
 
@@ -35,14 +43,33 @@ const BottomPanelTerminal = dynamic(
   },
 )
 
-const TABS: Array<{ id: BottomTab; label: string; icon: typeof MessageSquare; soon?: boolean }> = [
-  { id: "messages", label: "Messages", icon: MessageSquare },
-  { id: "exec", label: "Exec Log", icon: Terminal },
-  { id: "yaml", label: "YAML", icon: FileCode2 },
-  { id: "docker", label: "Docker", icon: Container },
-  { id: "files", label: "Files", icon: Files },
-  { id: "terminal", label: "Terminal", icon: Terminal },
-]
+// Registry of every tab the dock can render. A page selects which subset
+// to show via BottomPanelProps.tabs; the entries here are the single source
+// of truth for label + icon so all pages stay visually consistent.
+type TabMeta = { label: string; icon: typeof MessageSquare }
+const TAB_META: Record<BottomTab, TabMeta> = {
+  // crew / agent
+  messages: { label: "Messages", icon: MessageSquare },
+  exec: { label: "Exec Log", icon: Terminal },
+  yaml: { label: "YAML", icon: FileCode2 },
+  docker: { label: "Docker", icon: Container },
+  files: { label: "Files", icon: Files },
+  terminal: { label: "Terminal", icon: Terminal },
+  // issue / mission
+  activity: { label: "Activity", icon: Activity },
+  runs: { label: "Runs", icon: Play },
+  changes: { label: "Changes", icon: GitCompareArrows },
+  comments: { label: "Comments", icon: MessageCircle },
+  // routine
+  schedule: { label: "Schedule", icon: CalendarClock },
+  // run / activity
+  logs: { label: "Logs", icon: ScrollText },
+  trace: { label: "Trace", icon: Workflow },
+}
+
+// Default tab set — the original crew/agent dock. Pages that don't pass a
+// `tabs` prop (i.e. the Crews page) get exactly this, unchanged.
+const DEFAULT_TABS: BottomTab[] = ["messages", "exec", "yaml", "docker", "files", "terminal"]
 
 // Sensible bounds for the resize gesture. The min keeps something
 // useful visible (headers + a few rows); the max stops the panel
@@ -66,11 +93,16 @@ const PANEL_HEIGHT_DEFAULT = 320
 export function BottomPanel({
   workspaceId,
   context,
-  initialTab = "messages",
+  tabs,
+  initialTab,
   initialOpen = false,
   onOpenChange,
 }: BottomPanelProps) {
-  const [tab, setTab] = useState<BottomTab>(initialTab)
+  const tabIds = tabs && tabs.length > 0 ? tabs : DEFAULT_TABS
+  // Fall back to the first tab in the page's own set rather than a hardcoded
+  // "messages" (which a non-crew page may not even show).
+  const firstTab = initialTab && tabIds.includes(initialTab) ? initialTab : tabIds[0]
+  const [tab, setTab] = useState<BottomTab>(firstTab)
   const [open, setOpen] = useState(initialOpen)
   const [height, setHeight] = useUserPreference<number>(
     "crews.bottomPanel.height",
@@ -80,9 +112,9 @@ export function BottomPanel({
   const [dragging, setDragging] = useState(false)
 
   useEffect(() => {
-    setTab(initialTab)
+    setTab(firstTab)
     setOpen(initialOpen)
-  }, [initialTab, initialOpen])
+  }, [firstTab, initialOpen])
 
   useEffect(() => { onOpenChange?.(open) }, [open, onOpenChange])
 
@@ -130,8 +162,7 @@ export function BottomPanel({
     document.body.style.cursor = "ns-resize"
   }
 
-  const handleTab = (next: BottomTab, soon?: boolean) => {
-    if (soon) return
+  const handleTab = (next: BottomTab) => {
     setTab(next)
     setOpen(true)
   }
@@ -187,30 +218,24 @@ export function BottomPanel({
         />
       )}
 
-      <div className="h-9 shrink-0 flex items-center gap-1 px-2 text-xs">
-        {TABS.map((t) => {
-          const Icon = t.icon
-          const active = tab === t.id && open
+      <div className="h-9 shrink-0 flex items-center gap-1 px-2 text-xs overflow-x-auto">
+        {tabIds.map((id) => {
+          const meta = TAB_META[id]
+          const Icon = meta.icon
+          const active = tab === id && open
           return (
             <button
-              key={t.id}
+              key={id}
               type="button"
-              onClick={() => handleTab(t.id, t.soon)}
-              disabled={t.soon}
+              onClick={() => handleTab(id)}
               className={cn(
-                "px-2.5 py-1 rounded flex items-center gap-1.5 transition-colors",
+                "px-2.5 py-1 rounded flex items-center gap-1.5 transition-colors whitespace-nowrap",
                 active && "bg-white/[0.06] text-foreground",
-                !active && !t.soon && "text-muted-foreground hover:bg-white/5",
-                t.soon && "text-muted-foreground-soft cursor-not-allowed",
+                !active && "text-muted-foreground hover:bg-white/5",
               )}
             >
               <Icon className="h-3 w-3" />
-              {t.label}
-              {t.soon && (
-                <span className="text-[9px] px-1.5 py-0.5 rounded bg-zinc-800 text-muted-foreground border border-white/10">
-                  soon
-                </span>
-              )}
+              {meta.label}
             </button>
           )
         })}
@@ -232,7 +257,16 @@ export function BottomPanel({
           {tab === "exec" && <ExecTab workspaceId={workspaceId} context={context} />}
           {tab === "yaml" && <YamlTab workspaceId={workspaceId} context={context} />}
           {tab === "docker" && <DockerTab />}
-          {tab === "files" && <FilesTab workspaceId={workspaceId} context={context} />}
+          {tab === "files" && (context === null || context.kind === "agent" || context.kind === "crew") && (
+            <FilesTab workspaceId={workspaceId} context={context} />
+          )}
+          {tab === "activity" && <ActivityTab workspaceId={workspaceId} context={context} />}
+          {tab === "runs" && <RunsTab workspaceId={workspaceId} context={context} />}
+          {tab === "changes" && <ChangesTab workspaceId={workspaceId} context={context} />}
+          {tab === "comments" && <CommentsTab workspaceId={workspaceId} context={context} />}
+          {tab === "schedule" && <ScheduleTab workspaceId={workspaceId} context={context} />}
+          {tab === "logs" && <LogsTab workspaceId={workspaceId} context={context} />}
+          {tab === "trace" && <TraceTab workspaceId={workspaceId} context={context} />}
           {tab === "terminal" && (
             context?.kind === "agent" && context.crewId && context.crewSlug ? (
               <BottomPanelTerminal
