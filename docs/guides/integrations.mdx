@@ -105,6 +105,23 @@ is idempotent and refreshes the connector's app set, so apps you connect later
 show up in the default automatically. These map to
 `GET`/`PUT /api/v1/integrations/composio/default`.
 
+### Agent awareness of connected integrations
+
+An agent is told **up front**, in its system prompt, which integrations it can
+already drive. Every MCP server that resolves for the agent — Composio apps as
+well as plain MCP servers — is listed in a `[CONNECTED INTEGRATIONS]` block,
+including the access mode encoded in the display name (e.g.
+`Composio: youtube · Full`).
+
+This exists so an agent never reflexively answers *"I don't have access to your
+YouTube account"* when the YouTube tools are in fact wired in. The block
+instructs the agent to use the matching tools directly and to only report that
+something isn't possible **after** checking the tools available for that app —
+so the user never has to tell it to "go look at the MCP server" first.
+
+Nothing to configure: the block appears automatically whenever the agent
+resolves at least one integration, and is omitted entirely when it has none.
+
 ## OAuth 2.0 Integrations
 
 Crewship includes pre-configured OAuth providers for popular services. The implementation uses PKCE (Proof Key for Code Exchange) per RFC 7636 for secure authorization.

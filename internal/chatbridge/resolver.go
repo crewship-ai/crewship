@@ -55,6 +55,7 @@ type chatResolveResponse struct {
 	Credentials        []credentialResponse     `json:"credentials"`
 	TimeoutSecs        int                      `json:"timeout_seconds"`
 	WorkspaceID        string                   `json:"workspace_id"`
+	PreferredLanguage  string                   `json:"preferred_language,omitempty"`
 	MemoryEnabled      bool                     `json:"memory_enabled"`
 	CrewMembers        []crewMemberResponse     `json:"crew_members"`
 	AllCrews           []crewInfoResponse       `json:"all_crews,omitempty"`
@@ -529,6 +530,7 @@ func (r *IPCResolver) resolve(ctx context.Context, resolveURL string) (*ChatInfo
 		Credentials:        creds,
 		TimeoutSecs:        data.TimeoutSecs,
 		WorkspaceID:        data.WorkspaceID,
+		PreferredLanguage:  data.PreferredLanguage,
 		MemoryEnabled:      data.MemoryEnabled,
 		CrewMembers:        crewMembers,
 		NetworkMode:        networkMode,

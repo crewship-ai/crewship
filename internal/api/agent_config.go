@@ -32,6 +32,12 @@ type agentConfigData struct {
 	timeoutSecs   int
 	memoryEnabled bool
 
+	// preferredLanguage is the workspace's preferred language (e.g. "Czech").
+	// Resolved while building the system prompt and surfaced in the agent-config
+	// response so the chat resolver can also reinforce it at runtime. Empty when
+	// the workspace has no preference set.
+	preferredLanguage string
+
 	crewID                 sql.NullString
 	crewSlug               sql.NullString
 	crewName               sql.NullString
@@ -213,6 +219,14 @@ func (h *InternalHandler) resolveAgentConfigWithOpener(w http.ResponseWriter, r 
 		}
 	}
 
+	// [CONNECTED INTEGRATIONS] section — appended after MCP resolution so the
+	// agent knows which third-party apps (YouTube, Gmail, …) it can already
+	// drive through its tools, instead of disclaiming access. Empty when the
+	// agent has no MCP servers.
+	if integrationsBlock := buildConnectedIntegrationsBlock(mcpServers); integrationsBlock != "" {
+		sysPrompt += "\n\n" + integrationsBlock
+	}
+
 	crewIDStr := ""
 	crewSlugStr := ""
 	if data.crewID.Valid {
@@ -252,6 +266,7 @@ func (h *InternalHandler) resolveAgentConfigWithOpener(w http.ResponseWriter, r 
 		"credentials":           creds,
 		"timeout_seconds":       data.timeoutSecs,
 		"workspace_id":          data.wsID,
+		"preferred_language":    data.preferredLanguage,
 		"memory_enabled":        data.memoryEnabled,
 		"crew_members":          crewMembers,
 		"network_mode":          networkMode,
@@ -355,6 +370,7 @@ func (h *InternalHandler) loadAgentSystemPrompt(r *http.Request, data *agentConf
 	}
 	if preferredLanguage.Valid && preferredLanguage.String != "" {
 		lang := preferredLanguage.String
+		data.preferredLanguage = lang
 		promptParts = append(promptParts, fmt.Sprintf(
 			"[LANGUAGE PREFERENCE]\nAlways respond in: %s\nAll output, thinking, and communication must be in %s.\nIf the user writes in a different language, still respond in %s unless explicitly asked otherwise.\n[END LANGUAGE PREFERENCE]",
 			lang, lang, lang))
@@ -1154,4 +1170,49 @@ func (h *InternalHandler) buildKeeperBlock(agentSlug string, creds []mcpCredEntr
 	}
 	keeperBlock.WriteString("[END CREDENTIAL ACCESS CONTROL]")
 	return keeperBlock.String()
+}
+
+// -----------------------------------------------------------------------------
+// Connected integrations — make the agent aware UP FRONT of the third-party
+// apps it can already drive through its MCP tools.
+// -----------------------------------------------------------------------------
+
+// buildConnectedIntegrationsBlock renders the [CONNECTED INTEGRATIONS] system
+// prompt section from the agent's resolved MCP servers (Composio apps + any
+// other MCP servers). Returns "" when the agent has no servers.
+//
+// Why this exists: MCP/Composio tools are wired into the runtime, but nothing
+// in the system prompt told the agent which apps it can reach. So when a user
+// asked "what YouTube videos did I watch?", the model — especially smaller ones
+// like Haiku — reflexively answered "I have no access to your YouTube account"
+// instead of reaching for the YouTube tools it actually had. This block names
+// the connected apps (and their access mode, already encoded in the display
+// name as e.g. "Composio: youtube · Full") and instructs the agent to USE the
+// tools rather than disclaim access — without having to be told to "go look at
+// the MCP server" first.
+func buildConnectedIntegrationsBlock(servers []mcpServerEntry) string {
+	labels := make([]string, 0, len(servers))
+	for _, s := range servers {
+		label := strings.TrimSpace(s.DisplayName)
+		if label == "" {
+			label = strings.TrimSpace(s.Name)
+		}
+		if label == "" {
+			continue // unlabeled server — nothing useful to surface
+		}
+		labels = append(labels, label)
+	}
+	if len(labels) == 0 {
+		return ""
+	}
+
+	var b strings.Builder
+	b.WriteString("[CONNECTED INTEGRATIONS]\n")
+	b.WriteString("The following third-party integrations are connected and available to you RIGHT NOW through your tools. They are already authenticated on the user's behalf — you do NOT need the user to log in, paste credentials, or do anything manually.\n\n")
+	for _, label := range labels {
+		fmt.Fprintf(&b, "- %s\n", label)
+	}
+	b.WriteString("\nWhen a request relates to one of these apps, use the matching tools directly to fulfil it. Do NOT tell the user you have no access, and do NOT ask them to do it themselves. Only state that a specific operation isn't possible AFTER you have checked the tools available for that app and confirmed none of them cover it.\n")
+	b.WriteString("[END CONNECTED INTEGRATIONS]")
+	return b.String()
 }
