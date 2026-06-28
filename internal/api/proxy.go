@@ -347,3 +347,43 @@ func (h *ProxyHandler) AgentGitLog(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, []interface{}{})
 }
+
+// CrewGitDiff proxies the crew container's base-branch git diff to the
+// dashboard's Changes tab. Crew-scoped (the diff is the whole crew
+// workspace's change set) — GET /api/v1/crews/{crewId}/git-diff.
+func (h *ProxyHandler) CrewGitDiff(w http.ResponseWriter, r *http.Request) {
+	crewID := r.PathValue("crewId")
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	if !canRole(RoleFromContext(r.Context()), "read") {
+		replyError(w, http.StatusForbidden, "Forbidden")
+		return
+	}
+
+	// Confirm the crew exists in this workspace before reaching into its
+	// container — masks cross-tenant probes as 404.
+	var exists int
+	err := h.db.QueryRowContext(r.Context(),
+		"SELECT 1 FROM crews WHERE id = ? AND workspace_id = ?", crewID, workspaceID).Scan(&exists)
+	if err != nil {
+		replyError(w, http.StatusNotFound, "Crew not found")
+		return
+	}
+
+	ipcPath := fmt.Sprintf("/crews/%s/git-diff", url.PathEscape(crewID))
+	if slug := r.URL.Query().Get("agent_slug"); slug != "" {
+		ipcPath += "?agent_slug=" + url.QueryEscape(slug)
+	}
+	resp, err := h.ipcGet(r.Context(), ipcPath)
+	if err != nil {
+		replyError(w, http.StatusBadGateway, "Failed to compute diff")
+		return
+	}
+	defer resp.Body.Close()
+
+	var data map[string]interface{}
+	if json.NewDecoder(resp.Body).Decode(&data) != nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"is_repo": false})
+		return
+	}
+	writeJSON(w, http.StatusOK, data)
+}

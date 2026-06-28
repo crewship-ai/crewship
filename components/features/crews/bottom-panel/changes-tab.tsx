@@ -46,9 +46,13 @@ export function ChangesTab({ workspaceId, context }: { workspaceId: string; cont
   // calm "not wired yet" state rather than a red error.
   const [unavailable, setUnavailable] = useState(false)
 
+  // Diff is computed at the crew-container level (base-branch diff of the
+  // crew's workspace), so the issue maps to its owning crew. Run-scoped diff
+  // needs run→crew resolution and isn't wired yet — it degrades to the idle
+  // state below.
   let url: string | null = null
   if (context?.kind === "mission") {
-    url = `/api/v1/crews/${context.crewId}/issues/${encodeURIComponent(context.identifier)}/changes?workspace_id=${workspaceId}`
+    url = `/api/v1/crews/${context.crewId}/git-diff?workspace_id=${workspaceId}`
   } else if (context?.kind === "run") {
     url = `/api/v1/workspaces/${workspaceId}/pipeline-runs/${encodeURIComponent(context.runId)}/changes`
   }
