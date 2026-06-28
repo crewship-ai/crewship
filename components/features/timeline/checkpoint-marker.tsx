@@ -2,7 +2,8 @@
 
 import { useState } from "react"
 import { toast } from "sonner"
-import { Flag, GitBranch, Loader2, MoreHorizontal, RotateCcw } from "lucide-react"
+import { Flag, GitBranch, MoreHorizontal, RotateCcw } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -90,7 +91,7 @@ export function CheckpointMarker({ entry, onFork }: CheckpointMarkerProps) {
               </DropdownMenuItem>
               <DropdownMenuItem onClick={handleRestore} disabled={restoring}>
                 {restoring ? (
-                  <Loader2 className="h-3 w-3 mr-1.5 animate-spin" />
+                  <Spinner className="h-3 w-3 mr-1.5" />
                 ) : (
                   <RotateCcw className="h-3 w-3 mr-1.5" />
                 )}

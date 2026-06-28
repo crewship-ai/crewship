@@ -3,11 +3,25 @@
 import { useState, useEffect, useCallback } from "react"
 import { useAgentId } from "@/hooks/use-agent-id"
 import {
-  Save, Loader2, AlertCircle, CheckCircle2,
-  User, Hash, Users, FileText, Briefcase, Shield, Cpu,
-  Wrench, Timer, MessageSquare, Image as ImageIcon,
-  ChevronDown, Maximize2, ChevronRight,
+  Save,
+  AlertCircle,
+  CheckCircle2,
+  User,
+  Hash,
+  Users,
+  FileText,
+  Briefcase,
+  Shield,
+  Cpu,
+  Wrench,
+  Timer,
+  MessageSquare,
+  Image as ImageIcon,
+  ChevronDown,
+  Maximize2,
+  ChevronRight,
 } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -565,7 +579,7 @@ export function SettingsPageClient() {
         {/* Save (Delete moved to chat header 3-dots menu) */}
         <div className="flex items-center gap-3 pt-2">
           <Button type="submit" disabled={submitting} className="gap-2">
-            {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            {submitting ? <Spinner className="h-4 w-4" /> : <Save className="h-4 w-4" />}
             Save Changes
           </Button>
           <span className="text-micro text-muted-foreground">

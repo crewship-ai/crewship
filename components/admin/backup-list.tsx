@@ -5,7 +5,6 @@ import {
   Download,
   Eye,
   Lock,
-  Loader2,
   RefreshCw,
   ShieldCheck,
   Trash2,
@@ -13,6 +12,7 @@ import {
   Unlock,
   XCircle,
 } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
@@ -145,7 +145,7 @@ export function BackupList({ workspaceId }: { workspaceId: string | undefined })
           aria-label="Refresh backup list"
         >
           {isFetching ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            <Spinner className="h-3.5 w-3.5" />
           ) : (
             <RefreshCw className="h-3.5 w-3.5" />
           )}
@@ -257,7 +257,7 @@ export function BackupList({ workspaceId }: { workspaceId: string | undefined })
                           const ours =
                             verify.data && verify.variables === row.path
                           if (verify.isPending && verify.variables === row.path) {
-                            return <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            return <Spinner className="h-3.5 w-3.5" />
                           }
                           if (ours && verify.data!.valid && !verify.data!.error) {
                             return <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />

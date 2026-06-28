@@ -2,13 +2,13 @@
 
 import { useState } from "react"
 import {
-  Loader2,
   Clock,
   Globe,
   Copy,
   CheckCircle2,
   XCircle,
 } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { toast } from "sonner"
 import { useAgentFetch } from "@/hooks/use-agent-fetch"
 
@@ -41,7 +41,7 @@ export function TriggersTab({ agentId, workspaceId }: TriggersTabProps) {
     { enabled: workspaceId !== null, logLabel: "TriggersTab" },
   )
 
-  if (loading) return <div className="flex items-center justify-center h-full"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+  if (loading) return <div className="flex items-center justify-center h-full"><Spinner className="h-5 w-5 text-muted-foreground" /></div>
   if (!workspaceId) return <div className="p-4 text-label text-muted-foreground">Select a workspace to view triggers.</div>
   if (!agent) return <div className="p-4 text-label text-muted-foreground">Unable to load agent</div>
 

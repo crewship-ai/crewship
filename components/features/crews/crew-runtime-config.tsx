@@ -1,7 +1,8 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
-import { Loader2, RefreshCw, CheckCircle2, Circle } from "lucide-react"
+import { RefreshCw, CheckCircle2, Circle } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { RuntimeConfig, type RuntimeConfigValue } from "@/components/features/crews/runtime-config"
@@ -144,7 +145,7 @@ export function CrewRuntimeConfig({
                 title={hasChanges ? "Save changes before provisioning" : undefined}
               >
                 {provisioning ? (
-                  <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
+                  <Spinner className="mr-1.5 h-3 w-3" />
                 ) : null}
                 Provision
               </Button>
@@ -158,7 +159,7 @@ export function CrewRuntimeConfig({
                 disabled={rebuilding}
               >
                 {rebuilding ? (
-                  <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
+                  <Spinner className="mr-1.5 h-3 w-3" />
                 ) : (
                   <RefreshCw className="mr-1.5 h-3 w-3" />
                 )}

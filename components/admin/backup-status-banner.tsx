@@ -2,7 +2,8 @@
 
 import { useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
-import { AlertTriangle, CheckCircle2, Lock, Loader2 } from "lucide-react"
+import { AlertTriangle, CheckCircle2, Lock } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -175,7 +176,7 @@ export function BackupStatusBanner({ workspaceId }: BackupStatusBannerProps) {
                 onClick={onConfirmUnlock}
               >
                 {forceUnlock.isPending ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />
+                  <Spinner className="h-3.5 w-3.5 mr-1" />
                 ) : null}
                 Force unlock
               </Button>

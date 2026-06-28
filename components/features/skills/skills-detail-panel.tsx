@@ -4,9 +4,19 @@ import { useEffect, useMemo, useState } from "react"
 import { Streamdown } from "streamdown"
 import Link from "next/link"
 import {
-  Copy, Check, X, ShieldCheck, BadgeCheck, Lock, Dot, Sparkles,
-  AlertTriangle, Loader2, Trash2, ExternalLink,
+  Copy,
+  Check,
+  X,
+  ShieldCheck,
+  BadgeCheck,
+  Lock,
+  Dot,
+  Sparkles,
+  AlertTriangle,
+  Trash2,
+  ExternalLink,
 } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
@@ -328,7 +338,7 @@ function InstallToAgentDialog({
         <div className="max-h-72 overflow-y-auto rounded border border-white/[0.08] divide-y divide-white/[0.04]">
           {loading ? (
             <div className="p-4 text-center text-xs text-white/45">
-              <Loader2 className="h-3 w-3 inline mr-1 animate-spin" />
+              <Spinner className="h-3 w-3 inline mr-1" />
               Loading agents…
             </div>
           ) : filtered.length === 0 ? (
@@ -377,7 +387,7 @@ function InstallToAgentDialog({
         <DialogFooter>
           <Button variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
           <Button onClick={handleInstall} disabled={picked.size === 0 || submitting}>
-            {submitting ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : null}
+            {submitting ? <Spinner className="h-3 w-3 mr-1" /> : null}
             Install ({picked.size})
           </Button>
         </DialogFooter>
@@ -516,7 +526,7 @@ function UninstallSkillDialog({
         <div className="max-h-72 overflow-y-auto rounded border border-white/[0.08] divide-y divide-white/[0.04]">
           {loading ? (
             <div className="p-4 text-center text-xs text-white/45">
-              <Loader2 className="h-3 w-3 inline mr-1 animate-spin" />
+              <Spinner className="h-3 w-3 inline mr-1" />
               Looking up agents that have this skill installed…
             </div>
           ) : installed.length === 0 ? (
@@ -571,7 +581,7 @@ function UninstallSkillDialog({
             disabled={picked.size === 0 || submitting}
             variant="destructive"
           >
-            {submitting ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Trash2 className="h-3 w-3 mr-1" />}
+            {submitting ? <Spinner className="h-3 w-3 mr-1" /> : <Trash2 className="h-3 w-3 mr-1" />}
             Uninstall ({picked.size})
           </Button>
         </DialogFooter>
@@ -686,7 +696,7 @@ function AssignToCrewDialog({
         <div className="max-h-72 overflow-y-auto rounded border border-white/[0.08] divide-y divide-white/[0.04]">
           {loading ? (
             <div className="p-4 text-center text-xs text-white/45">
-              <Loader2 className="h-3 w-3 inline mr-1 animate-spin" />
+              <Spinner className="h-3 w-3 inline mr-1" />
               Loading crews…
             </div>
           ) : crews.length === 0 ? (
@@ -728,7 +738,7 @@ function AssignToCrewDialog({
         <DialogFooter>
           <Button variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
           <Button onClick={handleAssign} disabled={!pickedCrew || submitting}>
-            {submitting ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : null}
+            {submitting ? <Spinner className="h-3 w-3 mr-1" /> : null}
             Apply to crew
           </Button>
         </DialogFooter>

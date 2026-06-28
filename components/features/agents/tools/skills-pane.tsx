@@ -3,9 +3,19 @@
 import { useAgentId } from "@/hooks/use-agent-id"
 import { useState, useEffect, useCallback } from "react"
 import {
-  Puzzle, AlertCircle, Plus, Trash2, Loader2,
-  Blocks, Code, Search, Hammer, Server, MessageCircle, Settings,
+  Puzzle,
+  AlertCircle,
+  Plus,
+  Trash2,
+  Blocks,
+  Code,
+  Search,
+  Hammer,
+  Server,
+  MessageCircle,
+  Settings,
 } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -227,7 +237,7 @@ export function SkillsPageClient() {
                       disabled={removingId === agentSkill.skill_id}
                     >
                       {removingId === agentSkill.skill_id ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
+                        <Spinner className="h-4 w-4" />
                       ) : (
                         <Trash2 className="h-4 w-4" />
                       )}
@@ -361,7 +371,7 @@ function AddSkillDialog({ open, onOpenChange, agentId, workspaceId, assignedSkil
                   disabled={adding === skill.id}
                 >
                   {adding === skill.id ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    <Spinner className="h-3.5 w-3.5" />
                   ) : (
                     <Plus className="h-3.5 w-3.5" />
                   )}

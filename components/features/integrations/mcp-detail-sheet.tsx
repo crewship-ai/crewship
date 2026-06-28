@@ -3,9 +3,16 @@
 import * as React from "react"
 import { motion } from "motion/react"
 import {
-  Loader2, AlertTriangle, RefreshCw, Trash2, Settings as SettingsIcon,
-  Wrench, Activity, Globe, Terminal,
+  AlertTriangle,
+  RefreshCw,
+  Trash2,
+  Settings as SettingsIcon,
+  Wrench,
+  Activity,
+  Globe,
+  Terminal,
 } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { toast } from "sonner"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
@@ -201,7 +208,7 @@ export function MCPDetailSheet({
                     {totalCount === 0 ? "No tools recorded yet" : `${enabledCount} of ${totalCount} enabled`}
                   </div>
                   <Button variant="outline" size="sm" onClick={refreshTools} disabled={reloading} className="h-7 text-xs">
-                    {reloading ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <RefreshCw className="h-3 w-3 mr-1" />}
+                    {reloading ? <Spinner className="h-3 w-3 mr-1" /> : <RefreshCw className="h-3 w-3 mr-1" />}
                     Refresh
                   </Button>
                 </div>
@@ -217,7 +224,7 @@ export function MCPDetailSheet({
                 )}
 
                 {toolsLoading ? (
-                  <div className="text-center py-8"><Loader2 className="inline h-4 w-4 animate-spin text-muted-foreground" /></div>
+                  <div className="text-center py-8"><Spinner className="inline h-4 w-4 text-muted-foreground" /></div>
                 ) : totalCount === 0 ? (
                   <div className="rounded-md border border-white/10 bg-zinc-950 p-4 text-xs text-muted-foreground">
                     No tools recorded yet. Click <strong>Refresh</strong> after a successful test
@@ -262,7 +269,7 @@ export function MCPDetailSheet({
 
               <TabsContent value="settings" className="m-0 space-y-3">
                 <Button variant="outline" size="sm" onClick={refreshTools} disabled={reloading} className="w-full justify-start">
-                  {reloading ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5 mr-1.5" />}
+                  {reloading ? <Spinner className="h-3.5 w-3.5 mr-1.5" /> : <RefreshCw className="h-3.5 w-3.5 mr-1.5" />}
                   Hot-swap reload
                 </Button>
 

@@ -1,7 +1,8 @@
 "use client"
 
 import { useState } from "react"
-import { UserPlus, Pencil, Check, Loader2, X } from "lucide-react"
+import { UserPlus, Pencil, Check, X } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -225,7 +226,7 @@ export function CrewMembers({ members, crewId, workspaceId, canEdit, onMembersCh
                               disabled={savingRole}
                               title="Save"
                             >
-                              {savingRole ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+                              {savingRole ? <Spinner className="h-3 w-3" /> : <Check className="h-3 w-3" />}
                             </Button>
                             <Button
                               variant="ghost"

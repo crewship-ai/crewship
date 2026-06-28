@@ -2,7 +2,8 @@
 
 import { useEffect, useState, useCallback } from "react"
 import { useAgentId } from "@/hooks/use-agent-id"
-import { Plug, Loader2, AlertCircle, Info } from "lucide-react"
+import { Plug, AlertCircle, Info } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { SectionCard } from "@/components/ui/section-card"
@@ -209,7 +210,7 @@ export function MCPPageClient() {
 
           {hasChanges && (
             <Button size="sm" onClick={handleSave} disabled={saving} className="gap-1.5">
-              {saving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+              {saving && <Spinner className="h-3.5 w-3.5" />}
               {saving ? "Saving..." : "Save MCP Configuration"}
             </Button>
           )}

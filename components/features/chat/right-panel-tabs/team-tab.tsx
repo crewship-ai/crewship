@@ -1,6 +1,7 @@
 "use client"
 
-import { Loader2, Users } from "lucide-react"
+import { Users } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 import { useAgentFetch } from "@/hooks/use-agent-fetch"
 
@@ -54,7 +55,7 @@ export function TeamTab({ agentId, workspaceId }: TeamTabProps) {
     { enabled: workspaceId !== null, logLabel: "TeamChatTab" },
   )
 
-  if (loading) return <div className="flex items-center justify-center h-full"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+  if (loading) return <div className="flex items-center justify-center h-full"><Spinner className="h-5 w-5 text-muted-foreground" /></div>
 
   // Workspace-specific empty state — reachable when useWorkspace() returns
   // null. Must come BEFORE the !crewId fall-through so users don't see
@@ -122,7 +123,7 @@ export function TeamTab({ agentId, workspaceId }: TeamTabProps) {
             )}
             {msg.status === "RUNNING" && (
               <div className="flex items-center gap-1 text-micro text-blue-400">
-                <Loader2 className="h-3 w-3 animate-spin" /> Processing...
+                <Spinner className="h-3 w-3" /> Processing...
               </div>
             )}
           </div>

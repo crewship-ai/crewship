@@ -10,6 +10,7 @@ import {
   Loader2,
   PauseCircle,
 } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 import { Skeleton } from "@/components/ui/skeleton"
 
@@ -239,7 +240,7 @@ export function WaitpointRunDetail({
           ) : isFailed ? (
             <AlertCircle className="h-4 w-4 text-rose-400" />
           ) : run.current_step_id && completedSteps.includes(run.current_step_id) ? (
-            <Loader2 className="h-4 w-4 animate-spin text-blue-400" />
+            <Spinner className="h-4 w-4 text-blue-400" />
           ) : (
             <PauseCircle className="h-4 w-4 text-amber-400" />
           )}

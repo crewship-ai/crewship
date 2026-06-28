@@ -2,8 +2,13 @@
 
 import { useCallback, useEffect, useState } from "react"
 import {
-  Link2, Unlink2, ArrowLeftRight, ArrowRight, Loader2, Users,
+  Link2,
+  Unlink2,
+  ArrowLeftRight,
+  ArrowRight,
+  Users,
 } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import {
@@ -170,7 +175,7 @@ export function CrewConnections({ workspaceId }: CrewConnectionsProps) {
               className="gap-1.5 shrink-0"
               size="sm"
             >
-              {connecting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Link2 className="h-3.5 w-3.5" />}
+              {connecting ? <Spinner className="h-3.5 w-3.5" /> : <Link2 className="h-3.5 w-3.5" />}
               Connect
             </Button>
           </div>
@@ -222,7 +227,7 @@ export function CrewConnections({ workspaceId }: CrewConnectionsProps) {
                     onClick={() => handleDisconnect(conn.id)}
                     disabled={disconnecting === conn.id}
                   >
-                    {disconnecting === conn.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Unlink2 className="h-3 w-3" />}
+                    {disconnecting === conn.id ? <Spinner className="h-3 w-3" /> : <Unlink2 className="h-3 w-3" />}
                     Disconnect
                   </Button>
                 </div>

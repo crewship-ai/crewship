@@ -1,7 +1,8 @@
 "use client"
 
 import { useState } from "react"
-import { Check, ChevronsUpDown, Loader2 } from "lucide-react"
+import { Check, ChevronsUpDown } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { toast } from "sonner"
 
 import {
@@ -235,7 +236,7 @@ export function BackupCreateDialog({ workspaceId }: { workspaceId: string | unde
                   >
                     {crewsQuery.isLoading ? (
                       <span className="flex items-center gap-2 text-muted-foreground">
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        <Spinner className="h-3.5 w-3.5" />
                         Loading crews…
                       </span>
                     ) : selectedCrew ? (
@@ -368,7 +369,7 @@ export function BackupCreateDialog({ workspaceId }: { workspaceId: string | unde
               Cancel
             </Button>
             <Button type="submit" disabled={create.isPending}>
-              {create.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : null}
+              {create.isPending ? <Spinner className="h-3.5 w-3.5 mr-1" /> : null}
               Create
             </Button>
           </DialogFooter>

@@ -1,7 +1,8 @@
 "use client"
 
 import { useState } from "react"
-import { BookOpen, AlertCircle, Loader2 } from "lucide-react"
+import { BookOpen, AlertCircle } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { JournalEntryCard } from "@/components/features/journal/journal-entry-card"
 import { CheckpointMarker } from "./checkpoint-marker"
 import { ForkDialog } from "./fork-dialog"
@@ -31,7 +32,7 @@ export function MissionTimeline({ missionId, entries, loading, error }: MissionT
   if (loading && entries.length === 0) {
     return (
       <div className="flex items-center justify-center py-16 text-muted-foreground">
-        <Loader2 className="h-4 w-4 mr-2 animate-spin" /> Loading timeline…
+        <Spinner className="h-4 w-4 mr-2" /> Loading timeline…
       </div>
     )
   }

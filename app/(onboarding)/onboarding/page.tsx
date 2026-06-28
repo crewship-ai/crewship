@@ -3,7 +3,8 @@
 import { useState, useEffect, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import { motion, AnimatePresence, useReducedMotion } from "motion/react"
-import { Loader2, ArrowRight, ArrowLeft, Rocket, Globe, Terminal, Copy, Check, ExternalLink, Sparkles, AlertTriangle, ChevronsUpDown } from "lucide-react"
+import { ArrowRight, ArrowLeft, Rocket, Globe, Terminal, Copy, Check, ExternalLink, Sparkles, AlertTriangle, ChevronsUpDown } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { CrewshipLogoTile } from "@/components/branding/crewship-logo"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -454,7 +455,7 @@ export default function OnboardingPage() {
   if (checking) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        <Spinner className="h-8 w-8 text-muted-foreground" />
       </div>
     )
   }
@@ -782,7 +783,7 @@ export default function OnboardingPage() {
                             </div>
                           ) : (
                             <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                              <Loader2 className="h-3.5 w-3.5 animate-spin" /> Generating code…
+                              <Spinner className="h-3.5 w-3.5" /> Generating code…
                             </div>
                           )}
                         </motion.div>
@@ -981,7 +982,7 @@ export default function OnboardingPage() {
                 ) : (
                   <Button onClick={handleLaunch} disabled={!canContinue() || submitting}>
                     {submitting ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      <Spinner className="mr-2 h-4 w-4" />
                     ) : (
                       <Rocket className="mr-2 h-4 w-4" />
                     )}

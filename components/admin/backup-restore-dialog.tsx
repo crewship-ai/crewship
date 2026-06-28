@@ -6,10 +6,10 @@ import {
   AlertTriangle,
   CheckCircle2,
   FileCheck2,
-  Loader2,
   Lock,
   XCircle,
 } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -365,7 +365,7 @@ export function BackupRestoreDialog({ workspaceId }: { workspaceId: string | und
             title="Validate checksum and compatibility — no writes"
           >
             {restore.isPending && restore.variables?.dry_run ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />
+              <Spinner className="h-3.5 w-3.5 mr-1" />
             ) : (
               <FileCheck2 className="h-3.5 w-3.5 mr-1" />
             )}
@@ -378,7 +378,7 @@ export function BackupRestoreDialog({ workspaceId }: { workspaceId: string | und
             onClick={runApply}
           >
             {restore.isPending && !restore.variables?.dry_run ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />
+              <Spinner className="h-3.5 w-3.5 mr-1" />
             ) : null}
             Apply restore
           </Button>

@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import Link from "next/link"
-import { ChevronLeft, MessageSquarePlus, MoreVertical, Trash2, RotateCcw, Settings as SettingsIcon, FolderOpen, Loader2 } from "lucide-react"
+import { ChevronLeft, MessageSquarePlus, MoreVertical, Trash2, RotateCcw, Settings as SettingsIcon, FolderOpen } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -393,7 +394,7 @@ export function ChatPageClient() {
               disabled={deleting}
               className="flex items-center gap-2 text-destructive focus:text-destructive focus:bg-destructive/10"
             >
-              {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+              {deleting ? <Spinner className="h-4 w-4" /> : <Trash2 className="h-4 w-4" />}
               <span>Delete agent</span>
             </DropdownMenuItem>
           </DropdownMenuContent>

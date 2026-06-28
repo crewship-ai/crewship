@@ -1,7 +1,8 @@
 "use client"
 
 import * as React from "react"
-import { AlertTriangle, Check, Info, Loader2, XCircle, Zap } from "lucide-react"
+import { AlertTriangle, Check, Info, XCircle, Zap } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 
 import { Button } from "@/components/ui/button"
 import { StatusBadge } from "@/components/ui/status-badge"
@@ -77,7 +78,7 @@ export function TestConnectionButton({
         disabled={testing}
       >
         {testing ? (
-          <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+          <Spinner className="mr-1.5 h-3.5 w-3.5" />
         ) : (
           <Zap className="mr-1.5 h-3.5 w-3.5" />
         )}

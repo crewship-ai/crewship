@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
-import { AlertTriangle, Loader2 } from "lucide-react"
+import { AlertTriangle } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { useAbilities } from "@/hooks/use-abilities"
 import { cn } from "@/lib/utils"
 
@@ -306,7 +307,7 @@ export function CrewPolicyControls({ crewId, workspaceId, canEdit }: CrewPolicyC
   if (loading) {
     return (
       <div className="rounded-xl border border-white/8 bg-card p-4 flex items-center gap-2 text-sm text-muted-foreground">
-        <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading policy…
+        <Spinner className="h-3.5 w-3.5" /> Loading policy…
       </div>
     )
   }

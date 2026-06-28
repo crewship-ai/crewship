@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
-import { Loader2, Sparkles } from "lucide-react"
+import { Sparkles } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { Switch } from "@/components/ui/switch"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -141,7 +142,7 @@ export function AgentLearningToggle({ agentId, workspaceId, canEdit }: AgentLear
   if (loading) {
     return (
       <div className="rounded-xl border border-white/8 bg-card p-4 flex items-center gap-2 text-sm text-muted-foreground">
-        <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading…
+        <Spinner className="h-3.5 w-3.5" /> Loading…
       </div>
     )
   }

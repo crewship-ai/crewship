@@ -3,9 +3,20 @@
 import { useCallback, useEffect, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
 import {
-  LogOut, Copy, Check, Key, Plus, Trash2, Clock, Loader2,
-  Terminal, Eye, EyeOff, AlertTriangle, Shield,
+  LogOut,
+  Copy,
+  Check,
+  Key,
+  Plus,
+  Trash2,
+  Clock,
+  Terminal,
+  Eye,
+  EyeOff,
+  AlertTriangle,
+  Shield,
 } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -564,7 +575,7 @@ export function ProfileSection({
                     setCreateError(null)
                   }}>Cancel</Button>
                   <Button size="sm" className="h-7 px-3 text-xs gap-1" onClick={handleCreateToken} disabled={creating || !tokenName.trim()}>
-                    {creating && <Loader2 className="h-3 w-3 animate-spin" />}Create token
+                    {creating && <Spinner className="h-3 w-3" />}Create token
                   </Button>
                 </div>
               </div>
@@ -575,7 +586,7 @@ export function ProfileSection({
         {/* Token list */}
         {tokensLoading ? (
           <div className="px-4 py-6 text-center">
-            <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground mx-auto" />
+            <Spinner className="h-3.5 w-3.5 text-muted-foreground mx-auto" />
           </div>
         ) : tokens.length === 0 && !showCreateForm ? (
           <SettingsEmpty>No tokens yet</SettingsEmpty>
@@ -606,7 +617,7 @@ export function ProfileSection({
           <AlertDialogFooter>
             <AlertDialogCancel className="h-7 text-xs">Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={handleRevoke} className="h-7 text-xs bg-destructive text-destructive-foreground hover:bg-destructive/90" disabled={revoking}>
-              {revoking && <Loader2 className="h-3 w-3 animate-spin mr-1.5" />}Revoke
+              {revoking && <Spinner className="h-3 w-3 mr-1.5" />}Revoke
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

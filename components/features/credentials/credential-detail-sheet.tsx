@@ -3,10 +3,21 @@
 import * as React from "react"
 import { motion } from "motion/react"
 import {
-  Activity, Settings as SettingsIcon, Users,
-  Loader2, FlaskConical, RefreshCw, AlertTriangle, Trash2,
-  CheckCircle2, XCircle, Clock, Pencil, Eye, EyeOff,
+  Activity,
+  Settings as SettingsIcon,
+  Users,
+  FlaskConical,
+  RefreshCw,
+  AlertTriangle,
+  Trash2,
+  CheckCircle2,
+  XCircle,
+  Clock,
+  Pencil,
+  Eye,
+  EyeOff,
 } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
@@ -287,7 +298,7 @@ export function CredentialDetailSheet({
                 {getBrand(credential.provider).cli && canManage && (
                 <div className="pt-3 border-t border-white/10 flex gap-2">
                   <Button size="sm" variant="outline" onClick={handleTest} disabled={testing}>
-                    {testing ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <FlaskConical className="h-3.5 w-3.5 mr-1.5" />}
+                    {testing ? <Spinner className="h-3.5 w-3.5 mr-1.5" /> : <FlaskConical className="h-3.5 w-3.5 mr-1.5" />}
                     Test now
                   </Button>
                   {testResult && (
@@ -324,7 +335,7 @@ export function CredentialDetailSheet({
 
               <TabsContent value="audit" className="m-0">
                 {auditLoading ? (
-                  <div className="text-center py-8"><Loader2 className="inline h-4 w-4 animate-spin text-muted-foreground" /></div>
+                  <div className="text-center py-8"><Spinner className="inline h-4 w-4 text-muted-foreground" /></div>
                 ) : audit.length === 0 ? (
                   <p className="text-xs text-muted-foreground py-6 text-center">No audit events yet.</p>
                 ) : (
@@ -431,7 +442,7 @@ export function CredentialDetailSheet({
                         }
                       }}
                     >
-                      {savingValue && <Loader2 className="h-3 w-3 mr-1.5 animate-spin" />}
+                      {savingValue && <Spinner className="h-3 w-3 mr-1.5" />}
                       Save value
                     </Button>
                     <Button

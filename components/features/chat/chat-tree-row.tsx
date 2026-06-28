@@ -12,8 +12,8 @@ import {
   Terminal,
   Box,
   File as FileIcon,
-  Loader2,
 } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 import { isPreviewable } from "@/lib/file-format"
 
@@ -122,7 +122,7 @@ export const ChatTreeRow = React.memo(function ChatTreeRow({ node, depth, expand
         }}
       >
         {node.is_dir ? (
-          isLoading ? <Loader2 className="h-3 w-3 shrink-0 animate-spin" /> :
+          isLoading ? <Spinner className="h-3 w-3 shrink-0" /> :
           isOpen ? <ChevronDown className="h-3 w-3 shrink-0" /> : <ChevronRight className="h-3 w-3 shrink-0" />
         ) : <span className="w-3" />}
         {getChatFileIcon(node.name, node.is_dir, isOpen)}

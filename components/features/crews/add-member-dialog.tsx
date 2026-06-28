@@ -1,7 +1,8 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Loader2 } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
+
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -115,7 +116,7 @@ export function AddMemberDialog({
 
         {loading ? (
           <div className="flex items-center justify-center py-6">
-            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            <Spinner className="h-5 w-5 text-muted-foreground" />
           </div>
         ) : users.length === 0 ? (
           <p className="text-body text-muted-foreground py-4 text-center">
@@ -143,7 +144,7 @@ export function AddMemberDialog({
           <Button onClick={handleSubmit} disabled={!selectedUserId || submitting || loading}>
             {submitting ? (
               <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                <Spinner className="mr-2 h-4 w-4" />
                 Adding...
               </>
             ) : (

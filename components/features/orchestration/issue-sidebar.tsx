@@ -8,13 +8,13 @@ import {
   ChevronsUpDown,
   FolderKanban,
   Hash,
-  Loader2,
   Play,
   Plus,
   Square,
   ThumbsDown,
   ThumbsUp,
 } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { StatusIcon, statusLabel } from "@/components/features/issues/status-icon"
 import { PriorityIcon, priorityLabel } from "@/components/features/issues/priority-icon"
@@ -483,7 +483,7 @@ function IssueSidebarBody({
               disabled={actionLoading}
             >
               {actionLoading ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                <Spinner className="h-3.5 w-3.5" />
               ) : (
                 <Play className="h-3.5 w-3.5" />
               )}
@@ -498,7 +498,7 @@ function IssueSidebarBody({
               disabled={actionLoading}
             >
               {actionLoading ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                <Spinner className="h-3.5 w-3.5" />
               ) : (
                 <Square className="h-3.5 w-3.5" />
               )}
@@ -513,7 +513,7 @@ function IssueSidebarBody({
                 disabled={actionLoading}
               >
                 {actionLoading ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  <Spinner className="h-3.5 w-3.5" />
                 ) : (
                   <ThumbsUp className="h-3.5 w-3.5" />
                 )}
@@ -526,7 +526,7 @@ function IssueSidebarBody({
                 disabled={actionLoading}
               >
                 {actionLoading ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  <Spinner className="h-3.5 w-3.5" />
                 ) : (
                   <ThumbsDown className="h-3.5 w-3.5" />
                 )}
