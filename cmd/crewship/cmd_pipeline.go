@@ -443,6 +443,26 @@ var pipelineRunCmd = &cobra.Command{
 			}
 			runBody["metadata"] = metadata
 		}
+		// Deferred-dispatch options: any of these parks the trigger in
+		// pending_runs (server returns SCHEDULED) instead of running now.
+		if v, _ := cmd.Flags().GetInt("delay"); v > 0 {
+			runBody["delay_seconds"] = v
+		}
+		if v, _ := cmd.Flags().GetInt("ttl"); v > 0 {
+			runBody["ttl_seconds"] = v
+		}
+		if v, _ := cmd.Flags().GetString("debounce-key"); v != "" {
+			runBody["debounce_key"] = v
+		}
+		if v, _ := cmd.Flags().GetInt("debounce-window"); v > 0 {
+			runBody["debounce_window_seconds"] = v
+		}
+		if v, _ := cmd.Flags().GetInt("debounce-max"); v > 0 {
+			runBody["debounce_max_seconds"] = v
+		}
+		if v, _ := cmd.Flags().GetInt("priority"); v != 0 {
+			runBody["priority"] = v
+		}
 		// Synchronous run — blocks on the agent (and grader loop); lift the
 		// per-call timeout above the 30s default.
 		resp, err := client.WithTimeout(evalRunTimeout).Do("POST", fmt.Sprintf("/api/v1/workspaces/%s/pipelines/%s/run", ws, args[0]), runBody)
@@ -476,9 +496,22 @@ var pipelineRunCmd = &cobra.Command{
 			ErrorMessage   string            `json:"error_message"`
 			WaitpointToken string            `json:"waitpoint_token"`
 			CurrentStep    string            `json:"current_step"`
+			// Deferred-dispatch receipt (delay/debounce path).
+			PendingID string `json:"pending_id"`
+			FireAt    string `json:"fire_at"`
+			Coalesced bool   `json:"coalesced"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 			return fmt.Errorf("decode run response: %w", err)
+		}
+		if result.Status == "SCHEDULED" {
+			verb := "Scheduled"
+			if result.Coalesced {
+				verb = "Debounced (coalesced into existing pending run)"
+			}
+			fmt.Printf("%s: pending %s fires at %s\n", verb, result.PendingID, result.FireAt)
+			fmt.Printf("  cancel: crewship routine pending cancel %s\n", result.PendingID)
+			return nil
 		}
 		fmt.Printf("Run %s: %s (%dms, $%.4f)\n", result.RunID, result.Status, result.DurationMs, result.CostUSD)
 		if result.Status == "FAILED" {
@@ -796,6 +829,12 @@ func init() {
 	pipelineRunCmd.Flags().StringSlice("tag", nil, "attach tag(s) to the run for filtering/grouping (repeatable; max 10)")
 	pipelineRunCmd.Flags().String("metadata", "", "JSON object stored on the run + exposed to steps (e.g. '{\"source\":\"manual\"}')")
 	pipelineRunCmd.Flags().String("batch", "", "path to a JSONL/JSON-array file of input sets — fan out N runs (tagged batch:<id>)")
+	pipelineRunCmd.Flags().Int("delay", 0, "defer the run N seconds (parked in pending_runs; returns SCHEDULED)")
+	pipelineRunCmd.Flags().Int("ttl", 0, "expire a deferred run if not dispatched within N seconds")
+	pipelineRunCmd.Flags().String("debounce-key", "", "coalesce burst triggers sharing this key into one run")
+	pipelineRunCmd.Flags().Int("debounce-window", 0, "debounce window in seconds (default 30) — fires this long after the last trigger")
+	pipelineRunCmd.Flags().Int("debounce-max", 0, "max debounce extension in seconds (a continuously-retriggered key still fires by then)")
+	pipelineRunCmd.Flags().Int("priority", 0, "dispatch priority for deferred runs (higher fires first)")
 
 	pipelineDryRunCmd.Flags().String("inputs", "", "JSON inputs for the dry-run preview")
 

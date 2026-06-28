@@ -606,3 +606,37 @@ crewship routine step-override clear my-routine summarize
 Only non-empty fields win, so a prompt-only override leaves the authored
 model. Endpoints: `PUT|DELETE /pipelines/{slug}/steps/{stepId}/override`,
 `GET /pipelines/{slug}/overrides`.
+
+## Deferred dispatch: delay, ttl, debounce, priority
+
+A trigger that carries a delay or a debounce key is parked in
+`pending_runs` instead of running immediately; an in-process dispatcher
+(5s tick) fires due rows **highest-priority-first** and expires rows past
+their ttl. Immediate runs (no delay/debounce) are unchanged.
+
+```
+# fire 60s from now, expire if not dispatched within 5 min, high priority
+crewship routine run my-routine --delay 60 --ttl 300 --priority 9
+
+# coalesce a burst: repeated triggers with the same key collapse into one
+crewship routine run my-routine --debounce-key vendor-42 --debounce-window 30 --debounce-max 300
+
+crewship routine pending list            # not-yet-fired deferred triggers
+crewship routine pending cancel <id>     # cancel before it fires
+```
+
+- `--delay N` — fire N seconds out (returns `SCHEDULED` with a pending id).
+- `--ttl N` — expire the deferred run if not dispatched within N seconds.
+- `--debounce-key K` — repeat triggers sharing K extend the window +
+  replace inputs (one run fires); `--debounce-window` (default 30) sets
+  the window, `--debounce-max` caps total extension so a hot key still fires.
+- `--priority N` — higher fires first among due deferred runs.
+
+API: `POST /pipelines/{slug}/run` accepts `delay_seconds`, `ttl_seconds`,
+`debounce_key`, `debounce_window_seconds`, `debounce_max_seconds`,
+`priority`, `idempotency_key_ttl_seconds`. `GET /pipelines/pending`,
+`POST /pipelines/pending/{id}/cancel`.
+
+> Note: `priority` orders the **deferred** dispatch queue. Immediate runs
+> execute on arrival, so priority there is recorded but not consumed
+> until the per-crew admission queue (QUEUE-MECHANISM) lands.

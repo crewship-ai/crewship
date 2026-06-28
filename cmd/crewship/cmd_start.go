@@ -618,6 +618,15 @@ var startCmd = &cobra.Command{
 				scheduler.Start(ctx)
 				defer scheduler.Stop()
 				logger.Info("pipeline scheduler wired (cron triggers; 30s tick)")
+
+				// Deferred-dispatch dispatcher fires delayed/debounced
+				// triggers (pending_runs, v122) priority-first and expires
+				// past-ttl rows. Shares the scheduler's executor so deferred
+				// runs hit the same registry + run-store projection.
+				pendingDispatcher := pipeline.NewPendingRunDispatcher(pipeline.NewPendingRunStore(deps.DB), schedExec, logger)
+				pendingDispatcher.Start(ctx)
+				defer pendingDispatcher.Stop()
+				logger.Info("pending-run dispatcher wired (delay/ttl/debounce/priority; 5s tick)")
 			}
 		}
 

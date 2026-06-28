@@ -423,8 +423,12 @@ func (e *Executor) Run(ctx context.Context, in RunInput) (*RunResult, error) {
 	// Idempotency check — if the caller supplied a key and we have
 	// a store, dedupe before doing anything else.
 	if in.IdempotencyKey != "" && e.idempotency != nil && in.Mode == ModeRun {
+		idemTTL := in.IdempotencyKeyTTL
+		if idemTTL <= 0 {
+			idemTTL = DefaultIdempotencyTTL
+		}
 		resolvedID, isNew, idemErr := e.idempotency.LookupOrReserve(
-			ctx, in.WorkspaceID, in.IdempotencyKey, preallocRunID, p.ID, DefaultIdempotencyTTL,
+			ctx, in.WorkspaceID, in.IdempotencyKey, preallocRunID, p.ID, idemTTL,
 		)
 		if idemErr != nil {
 			return nil, fmt.Errorf("executor: idempotency: %w", idemErr)
@@ -549,6 +553,10 @@ type RunInput struct {
 	// (workspace_id, key) within the TTL returns the original run id
 	// with Status="DEDUPED" instead of executing again.
 	IdempotencyKey string
+	// IdempotencyKeyTTL bounds how long the dedupe key is honored. Zero
+	// uses DefaultIdempotencyTTL (24h). Lets a caller scope dedup tightly
+	// (e.g. "same key only collides within 5 min").
+	IdempotencyKeyTTL time.Duration
 	// RunIDOverride lets the caller force a specific run id. Used by
 	// the idempotency layer to ensure the reserved id is the one the
 	// run actually emits to the journal. Leave empty for the default

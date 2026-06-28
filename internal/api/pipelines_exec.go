@@ -40,6 +40,19 @@ type runRequestBody struct {
 	// steps. Both optional.
 	Tags     []string       `json:"tags,omitempty"`
 	Metadata map[string]any `json:"metadata,omitempty"`
+	// Deferred-dispatch options (trigger.dev delay/ttl/debounce/priority).
+	// Any of DelaySeconds>0 or DebounceKey set parks the trigger in
+	// pending_runs; the dispatcher fires it priority-first, expiring it
+	// if TTLSeconds elapses first. Priority orders the dispatch queue.
+	DelaySeconds         int    `json:"delay_seconds,omitempty"`
+	TTLSeconds           int    `json:"ttl_seconds,omitempty"`
+	DebounceKey          string `json:"debounce_key,omitempty"`
+	DebounceWindowSecond int    `json:"debounce_window_seconds,omitempty"`
+	DebounceMaxSeconds   int    `json:"debounce_max_seconds,omitempty"`
+	Priority             int    `json:"priority,omitempty"`
+	// IdempotencyKeyTTLSeconds bounds the dedupe window for the
+	// Idempotency-Key header (0 = default 24h).
+	IdempotencyKeyTTLSeconds int `json:"idempotency_key_ttl_seconds,omitempty"`
 }
 
 // Run invokes a saved pipeline by slug.
@@ -125,6 +138,16 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 		triggeredVia = pipeline.TriggeredViaManual
 	}
 
+	// Deferred dispatch: a delay or a debounce key parks the trigger in
+	// pending_runs instead of executing now. The in-process dispatcher
+	// fires it priority-first once fire_at arrives (and expires it if
+	// ttl elapses first). Immediate runs (no delay/debounce) fall through
+	// to the synchronous path below unchanged.
+	if h.db != nil && (body.DelaySeconds > 0 || body.DebounceKey != "") {
+		h.enqueueDeferredRun(w, r, workspaceID, p, body)
+		return
+	}
+
 	exec := h.newExecutor()
 	res, err := exec.Run(r.Context(), pipeline.RunInput{
 		PipelineID:      p.ID,
@@ -135,10 +158,11 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 		Mode:            pipeline.ModeRun,
 		IdempotencyKey:  idempotencyKey,
 		TierOverride:    tierOverride,
-		TriggeredVia:    triggeredVia,
-		TriggeredByID:   body.TriggeredByID,
-		Tags:            body.Tags,
-		MetadataJSON:    marshalMetadata(body.Metadata),
+		TriggeredVia:      triggeredVia,
+		TriggeredByID:     body.TriggeredByID,
+		Tags:              body.Tags,
+		MetadataJSON:      marshalMetadata(body.Metadata),
+		IdempotencyKeyTTL: time.Duration(body.IdempotencyKeyTTLSeconds) * time.Second,
 	})
 	if err != nil {
 		// Concurrency rejection is a normal 429, not an internal

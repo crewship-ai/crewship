@@ -1480,6 +1480,12 @@ END;
 	// start over the versioned DSL). See
 	// migrate_consts_v121_step_overrides.go.
 	{version: 121, name: "routine_step_overrides", sql: migrationStepOverrides},
+
+	// v122: deferred run dispatch (delay / ttl / debounce / priority on a
+	// trigger). pending_runs parks a delayed/debounced trigger; an
+	// in-process dispatcher fires due rows priority-first and expires
+	// past-ttl rows. See migrate_consts_v122_pending_runs.go.
+	{version: 122, name: "pending_runs", sql: migrationPendingRuns},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

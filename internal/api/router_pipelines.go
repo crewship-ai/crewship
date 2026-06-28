@@ -86,6 +86,11 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	// original inputs, bulk-replay a fingerprint group, and list failures
 	// bucketed by fingerprint. errors/bulk_replay are registered before
 	// the {runId} replay so the literal segments win net/http matching.
+	// Deferred dispatch (delay/ttl/debounce/priority) — list + cancel
+	// parked triggers. Registered before {slug} routes so the literal
+	// "pending" segment wins net/http matching.
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/pending", authed(wsCtx(http.HandlerFunc(pipes.ListPendingRuns))))
+	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/pending/{pendingId}/cancel", authed(wsCtx(http.HandlerFunc(pipes.CancelPendingRun))))
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/runs/errors", authed(wsCtx(http.HandlerFunc(pipes.ListErrorGroups))))
 	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/runs/bulk_replay", authed(wsCtx(http.HandlerFunc(pipes.BulkReplayRuns))))
 	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/runs/{runId}/replay", authed(wsCtx(http.HandlerFunc(pipes.ReplayRun))))
