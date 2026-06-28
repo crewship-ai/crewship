@@ -62,10 +62,10 @@ export function AgentLearningToggle({ agentId, workspaceId, canEdit }: AgentLear
     setLoading(true)
     setErr(null)
     try {
-      const res = await fetch(`/api/v1/agents/${agentId}/learning`, {
-        headers: { "X-Workspace-ID": workspaceId },
-        signal,
-      })
+      const res = await fetch(
+        `/api/v1/agents/${agentId}/learning?workspace_id=${encodeURIComponent(workspaceId)}`,
+        { signal },
+      )
       if (!res.ok) {
         setErr(`Failed to load (HTTP ${res.status})`)
         return
@@ -107,14 +107,14 @@ export function AgentLearningToggle({ agentId, workspaceId, canEdit }: AgentLear
     }
     setSaving(true)
     try {
-      const res = await fetch(`/api/v1/agents/${agentId}/learning`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Workspace-ID": workspaceId,
+      const res = await fetch(
+        `/api/v1/agents/${agentId}/learning?workspace_id=${encodeURIComponent(workspaceId)}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ enabled: pendingEnabled, reason: reason.trim() }),
         },
-        body: JSON.stringify({ enabled: pendingEnabled, reason: reason.trim() }),
-      })
+      )
       if (!res.ok) {
         let msg = `HTTP ${res.status}`
         try {

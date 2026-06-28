@@ -1447,11 +1447,20 @@ END;
 	// migrate_consts_v116_composio_settings.go.
 	{version: 116, name: "composio_settings", sql: migrationComposioSettings},
 
-	// v117: group-chat groundwork — chat_participants (who's in a chat),
+	// v117: default-connector columns on composio_settings
+	// (default_user_id, default_mcp_server_id). When the
+	// COMPOSIO_DEFAULT_CONNECTOR flag is ON, every agent without an
+	// explicit per-agent Composio binding gets a workspace-wide default
+	// Composio MCP server (full access to all connected apps); these
+	// columns pin the user + provisioned server backing it. Both NULL =
+	// today's behaviour. See migrate_consts_v117_composio_defaults.go.
+	{version: 117, name: "composio_default_connector", sql: migrationComposioDefaults},
+
+	// v118: group-chat groundwork — chat_participants (who's in a chat),
 	// chats.visibility (private|group), and conversation_messages.author_user_id
 	// (per-human attribution). All additive; existing chats stay private 1:1.
-	// See migrate_consts_v117_group_chat.go.
-	{version: 117, name: "group_chat", sql: migrationGroupChat},
+	// See migrate_consts_v118_group_chat.go.
+	{version: 118, name: "group_chat", sql: migrationGroupChat},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

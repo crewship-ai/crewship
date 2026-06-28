@@ -1,6 +1,6 @@
 package database
 
-// migrationGroupChat (v117) lays the data-model groundwork for multi-user
+// migrationGroupChat (v118) lays the data-model groundwork for multi-user
 // "group" chats — several humans plus an agent in one conversation.
 //
 //   - chat_participants: who is in a chat and in what role. A chat with only

@@ -40,15 +40,25 @@ type ComposioHandler struct {
 	logger     *slog.Logger
 	envKey     string // COMPOSIO_API_KEY fallback (empty when unset/disabled)
 	envBaseURL string
+	// defaultConnector mirrors config.ComposioConfig.DefaultConnector
+	// (COMPOSIO_DEFAULT_CONNECTOR). It only feeds the operator-facing
+	// /default GET so the dashboard/CLI can show whether the behaviour is
+	// armed; the runtime resolver reads its own copy on InternalHandler.
+	defaultConnector bool
 }
 
 // NewComposioHandler wires a handler. The env config is kept as a fallback
 // only; the workspace-stored key (when present) wins at request time.
 func NewComposioHandler(db *sql.DB, logger *slog.Logger, cfg *config.ComposioConfig) *ComposioHandler {
 	h := &ComposioHandler{db: db, logger: logger}
-	if cfg != nil && cfg.Enabled && cfg.APIKey != "" {
-		h.envKey = cfg.APIKey
-		h.envBaseURL = cfg.BaseURL
+	if cfg != nil {
+		if cfg.Enabled && cfg.APIKey != "" {
+			h.envKey = cfg.APIKey
+			h.envBaseURL = cfg.BaseURL
+		}
+		// DefaultConnector is independent of the env key: it can be armed
+		// against a workspace-stored key with no server-env key present.
+		h.defaultConnector = cfg.DefaultConnector
 	}
 	return h
 }
@@ -1456,6 +1466,290 @@ func (h *ComposioHandler) DeleteSettings(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeJSON(w, http.StatusOK, h.settingsState(r))
+}
+
+// ── Default connector — /api/v1/integrations/composio/default ────────────────
+//
+// When COMPOSIO_DEFAULT_CONNECTOR is ON, every agent without an explicit
+// per-agent Composio binding gets a workspace-wide DEFAULT Composio MCP server
+// granting full access to all connected apps (the runtime injection lives in
+// resolveAgentMCPServers). These two endpoints are the operator surface that
+// provisions / inspects that default; the provisioning itself is
+// ensureDefaultComposioServer below.
+
+// composioDefaultError carries an HTTP status alongside the message so the PUT
+// handler can map operator-actionable failures (no/multiple users) to 400 and
+// genuine upstream/DB failures to 502/500 without string-matching.
+type composioDefaultError struct {
+	status int
+	msg    string
+}
+
+func (e *composioDefaultError) Error() string { return e.msg }
+
+// composioDefaultServerName builds the workspace-wide default Composio MCP
+// server name: `crewship-<ws8>-default` (≤30 chars — 9 + 8 + 8 = 25).
+func composioDefaultServerName(wsID string) string {
+	wsShort := wsID
+	if len(wsShort) > 8 {
+		wsShort = wsShort[len(wsShort)-8:]
+	}
+	return "crewship-" + wsShort + "-default"
+}
+
+// ensureDefaultComposioServer provisions (find-or-create) the workspace's
+// default Composio MCP server — full access to EVERY connected app — and
+// persists default_user_id + default_mcp_server_id on composio_settings, plus
+// the shared composio-managed-key credential the resolver attaches at runtime.
+//
+// requestedUser, when non-empty, sets/overrides the default user_id; empty
+// reuses the stored default, else derives it from the connected accounts
+// (exactly one user → use it; zero/multiple → an operator-actionable error).
+//
+// Idempotent: re-running refreshes the server's auth-config set so apps the
+// workspace has connected since show up in the default without leaking a new
+// Composio server. All Composio API calls happen here (NOT in the hot-path
+// resolver).
+func (h *ComposioHandler) ensureDefaultComposioServer(r *http.Request, wsID, requestedUser string) (userID, serverID string, err error) {
+	client, _ := h.resolveClient(r)
+	key, _, ok := h.resolveKey(r)
+	if client == nil || !ok {
+		return "", "", &composioDefaultError{status: http.StatusBadRequest, msg: "Composio is not configured (set an API key first)"}
+	}
+	ctx := r.Context()
+
+	// (1) Resolve the default user_id: explicit override → stored default →
+	// auto-derive from the single connected user.
+	userID = strings.TrimSpace(requestedUser)
+	if userID == "" {
+		var stored sql.NullString
+		derr := h.db.QueryRowContext(ctx,
+			`SELECT default_user_id FROM composio_settings WHERE workspace_id = ?`, wsID).Scan(&stored)
+		if derr != nil && !errors.Is(derr, sql.ErrNoRows) {
+			h.logger.Error("composio: read default user", "error", derr)
+			return "", "", &composioDefaultError{status: http.StatusInternalServerError, msg: "Internal server error"}
+		}
+		if stored.Valid {
+			userID = strings.TrimSpace(stored.String)
+		}
+	}
+	if userID == "" {
+		accounts, lerr := client.ListConnectedAccounts(ctx)
+		if lerr != nil {
+			h.logger.Error("composio: list connected accounts", "error", lerr)
+			return "", "", &composioDefaultError{status: http.StatusBadGateway, msg: "Composio API error"}
+		}
+		users := groupByUser(accounts)
+		switch len(users) {
+		case 0:
+			return "", "", &composioDefaultError{status: http.StatusBadRequest, msg: "no Composio accounts connected; connect an account first"}
+		case 1:
+			userID = users[0].UserID
+		default:
+			return "", "", &composioDefaultError{status: http.StatusBadRequest, msg: "multiple Composio users connected; set one with `crewship integration composio default set <user_id>`"}
+		}
+	}
+
+	// (2) Collect ALL the workspace's auth config ids → full app coverage.
+	authConfigs, lerr := client.ListAuthConfigs(ctx)
+	if lerr != nil {
+		h.logger.Error("composio: list auth configs", "error", lerr)
+		return "", "", &composioDefaultError{status: http.StatusBadGateway, msg: "Composio API error"}
+	}
+	authIDs := make([]string, 0, len(authConfigs))
+	seen := map[string]struct{}{}
+	for _, ac := range authConfigs {
+		if ac.ID == "" {
+			continue
+		}
+		if _, dup := seen[ac.ID]; dup {
+			continue
+		}
+		seen[ac.ID] = struct{}{}
+		authIDs = append(authIDs, ac.ID)
+	}
+	if len(authIDs) == 0 {
+		return "", "", &composioDefaultError{status: http.StatusBadRequest, msg: "no connected apps; connect an app first"}
+	}
+
+	// (3) Find-or-create the default Composio MCP server with EMPTY
+	// allowed_tools (= all tools of all auth configs). On a found server,
+	// refresh its auth set so newly connected apps appear (best-effort).
+	name := composioDefaultServerName(wsID)
+	if servers, sErr := client.ListMCPServers(ctx, name); sErr != nil {
+		h.logger.Warn("composio: list mcp servers", "error", sErr)
+	} else {
+		for _, s := range servers {
+			if s.Name == name && s.ID != "" {
+				serverID = s.ID
+				break
+			}
+		}
+	}
+	if serverID == "" {
+		id, _, cErr := client.CreateMCPServer(ctx, name, authIDs, nil)
+		if cErr != nil {
+			h.logger.Error("composio: create default mcp server", "error", cErr)
+			return "", "", &composioDefaultError{status: http.StatusBadGateway, msg: "Composio API error (mcp server)"}
+		}
+		serverID = id
+	} else if uErr := client.UpdateMCPServer(ctx, serverID, authIDs, nil); uErr != nil {
+		// Non-fatal: the server still works with its prior auth set; a new
+		// app just won't appear until the next successful reconcile.
+		h.logger.Warn("composio: refresh default mcp server auth set", "error", uErr)
+	}
+	if serverID == "" {
+		h.logger.Error("composio: default mcp server returned empty id")
+		return "", "", &composioDefaultError{status: http.StatusBadGateway, msg: "Composio API error (mcp server)"}
+	}
+
+	// (4)+(5) Persist the managed key credential + the default columns in one
+	// transaction so the resolver always sees a consistent (key, server) pair.
+	enc, eErr := encryption.Encrypt(key)
+	if eErr != nil {
+		h.logger.Error("composio: encrypt managed key", "error", eErr)
+		return "", "", &composioDefaultError{status: http.StatusInternalServerError, msg: "Internal server error"}
+	}
+	var createdBy any
+	if u := UserFromContext(ctx); u != nil {
+		createdBy = u.ID
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	tx, txErr := h.db.BeginTx(ctx, nil)
+	if txErr != nil {
+		h.logger.Error("composio: begin default tx", "error", txErr)
+		return "", "", &composioDefaultError{status: http.StatusInternalServerError, msg: "Internal server error"}
+	}
+	defer tx.Rollback()
+
+	credID := generateCUID()
+	if _, exErr := tx.ExecContext(ctx, `
+		INSERT INTO credentials (id, workspace_id, name, encrypted_value, type, provider, scope, created_by, created_at, updated_at)
+		VALUES (?, ?, ?, ?, 'API_KEY', 'CUSTOM', 'WORKSPACE', ?, ?, ?)
+		ON CONFLICT(workspace_id, name) DO UPDATE SET
+			encrypted_value = excluded.encrypted_value,
+			type            = excluded.type,
+			provider        = excluded.provider,
+			scope           = excluded.scope,
+			status          = 'ACTIVE',
+			deleted_at      = NULL,
+			updated_at      = excluded.updated_at`,
+		credID, wsID, composioManagedKeyName, enc, createdBy, now, now); exErr != nil {
+		h.logger.Error("composio: upsert managed credential", "error", exErr)
+		return "", "", &composioDefaultError{status: http.StatusInternalServerError, msg: "Internal server error"}
+	}
+
+	// Upsert composio_settings: when no row exists yet (env-only key) write the
+	// effective key so the resolver's workspace read finds it; when a row
+	// exists keep its key untouched and only set the default columns.
+	if _, exErr := tx.ExecContext(ctx, `
+		INSERT INTO composio_settings (workspace_id, encrypted_api_key, base_url, default_user_id, default_mcp_server_id, created_by, created_at, updated_at)
+		VALUES (?, ?, '', ?, ?, ?, ?, ?)
+		ON CONFLICT(workspace_id) DO UPDATE SET
+			default_user_id       = excluded.default_user_id,
+			default_mcp_server_id = excluded.default_mcp_server_id,
+			updated_at            = excluded.updated_at`,
+		wsID, enc, userID, serverID, createdBy, now, now); exErr != nil {
+		h.logger.Error("composio: upsert default settings", "error", exErr)
+		return "", "", &composioDefaultError{status: http.StatusInternalServerError, msg: "Internal server error"}
+	}
+
+	if cErr := tx.Commit(); cErr != nil {
+		h.logger.Error("composio: commit default", "error", cErr)
+		return "", "", &composioDefaultError{status: http.StatusInternalServerError, msg: "Internal server error"}
+	}
+	return userID, serverID, nil
+}
+
+type composioDefaultResponse struct {
+	EnabledFlag        bool   `json:"enabled_flag"`
+	DefaultUserID      string `json:"default_user_id"`
+	DefaultMCPServerID string `json:"default_mcp_server_id"`
+	ConnectedUserCount int    `json:"connected_user_count"`
+}
+
+// GetDefault reports the default-connector state: whether the
+// COMPOSIO_DEFAULT_CONNECTOR flag is armed, the configured default user/server,
+// and how many Composio users have connected accounts. Read-gated.
+//
+// GET /api/v1/integrations/composio/default
+func (h *ComposioHandler) GetDefault(w http.ResponseWriter, r *http.Request) {
+	if !requireRole(w, r, "read") {
+		return
+	}
+	wsID := WorkspaceIDFromContext(r.Context())
+	resp := composioDefaultResponse{EnabledFlag: h.defaultConnector}
+
+	if wsID != "" {
+		var u, s sql.NullString
+		err := h.db.QueryRowContext(r.Context(),
+			`SELECT default_user_id, default_mcp_server_id FROM composio_settings WHERE workspace_id = ?`, wsID).Scan(&u, &s)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			h.logger.Warn("composio: read default settings", "error", err)
+		}
+		resp.DefaultUserID = u.String
+		resp.DefaultMCPServerID = s.String
+	}
+
+	// connected_user_count is a live count from Composio; absent a configured
+	// provider it's simply 0 (the dashboard renders the connect empty-state).
+	if client, _ := h.resolveClient(r); client != nil {
+		if accounts, err := client.ListConnectedAccounts(r.Context()); err != nil {
+			h.logger.Warn("composio: list connected accounts", "error", err)
+		} else {
+			resp.ConnectedUserCount = len(groupByUser(accounts))
+		}
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// SetDefault provisions (or re-points) the workspace default Composio
+// connector. Body {user_id?}: when given it sets/overrides the default user;
+// when omitted the user is auto-derived from the single connected user.
+// OWNER/ADMIN only.
+//
+// PUT /api/v1/integrations/composio/default
+func (h *ComposioHandler) SetDefault(w http.ResponseWriter, r *http.Request) {
+	if !requireRole(w, r, "manage") {
+		return
+	}
+	wsID := WorkspaceIDFromContext(r.Context())
+	if wsID == "" {
+		writeProblem(w, r, http.StatusBadRequest, "workspace context required")
+		return
+	}
+	// Body is optional (PUT with no body = auto-derive). Tolerate an empty body.
+	var req struct {
+		UserID string `json:"user_id"`
+	}
+	if r.Body != nil {
+		_ = readJSON(r, &req)
+	}
+
+	userID, serverID, err := h.ensureDefaultComposioServer(r, wsID, strings.TrimSpace(req.UserID))
+	if err != nil {
+		var de *composioDefaultError
+		if errors.As(err, &de) {
+			writeProblem(w, r, de.status, de.msg)
+			return
+		}
+		h.logger.Error("composio: ensure default server", "error", err)
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+
+	resp := composioDefaultResponse{
+		EnabledFlag:        h.defaultConnector,
+		DefaultUserID:      userID,
+		DefaultMCPServerID: serverID,
+	}
+	if client, _ := h.resolveClient(r); client != nil {
+		if accounts, lerr := client.ListConnectedAccounts(r.Context()); lerr == nil {
+			resp.ConnectedUserCount = len(groupByUser(accounts))
+		}
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // groupByUser folds connected accounts into per-user buckets, sorted by

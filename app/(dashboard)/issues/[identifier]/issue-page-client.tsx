@@ -20,6 +20,7 @@ import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 import { MarkdownContent } from "@/components/features/issues/markdown-content"
 import { TiptapEditor } from "@/components/features/issues/tiptap-editor"
 import { ActivityFeed } from "@/components/features/issues/activity-feed"
+import { RunActivityTimeline, RUN_WORK_ENTRY_TYPES } from "@/components/features/activity/run-activity-timeline"
 import { IssueSidebar, IssueSidebarMobile } from "@/components/features/orchestration/issue-sidebar"
 import { timeAgo, formatDate } from "@/lib/time"
 import { Button } from "@/components/ui/button"
@@ -641,7 +642,21 @@ export function IssuePageClient() {
 
             <Separator />
 
-            {/* ---- Activity section ---- */}
+            {/* ---- Run activity (live agent work — exec/file/network/llm —
+                 pulled from the journal scoped to this mission; filtered to
+                 work entry types so it stays distinct from the lifecycle feed
+                 below. Hidden until the issue has produced run entries. ---- */}
+            <RunActivityTimeline
+              workspaceId={workspaceId}
+              params={{ mission_id: issue.id, entry_type: RUN_WORK_ENTRY_TYPES.join(",") }}
+              // Once the issue has been started (anything past TODO), keep the
+              // section visible even before the first entry lands so there's
+              // immediate "run starting…" feedback. Un-started issues stay clean.
+              hideWhenEmpty={issue.status === "BACKLOG" || issue.status === "TODO"}
+              forceRunning={issue.status === "IN_PROGRESS"}
+            />
+
+            {/* ---- Activity section (issue lifecycle: assignee/status/etc.) ---- */}
             {loadingActivity ? (
               <div className="flex items-center justify-center py-4">
                 <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />

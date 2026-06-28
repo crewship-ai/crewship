@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 )
 
@@ -202,6 +203,81 @@ func TestRunAssignment_NoOrchestrator_FailsAssignment(t *testing.T) {
 	}
 	if started == "" || finished == "" {
 		t.Errorf("timestamps not set: started=%q finished=%q", started, finished)
+	}
+}
+
+// A mission (issue) dispatch carries body.MissionID; the run-scoped journal
+// entries (run.started + assignment.running) must stamp it so a client can
+// fetch the issue's full run timeline via `?mission_id={missionID}`.
+func TestRunAssignment_MissionScoped_StampsMissionID(t *testing.T) {
+	h, wsID, crewID, leadID, workerID, chatID := covAsgRig(t)
+	jw := journal.NewWriter(h.db, newTestLogger(), journal.WriterOptions{FlushSize: 1})
+	t.Cleanup(func() { _ = jw.Close() })
+	h.SetJournal(jw)
+
+	// A real missions row is the FK target for journal_entries.mission_id.
+	missionID := "mission-asg-1"
+	if _, err := h.db.Exec(`
+		INSERT INTO missions (id, workspace_id, crew_id, lead_agent_id, trace_id, title, status, created_at, updated_at)
+		VALUES (?, ?, ?, ?, 'trace-asg-m', 'M', 'IN_PROGRESS', datetime('now'), datetime('now'))`,
+		missionID, wsID, crewID, leadID); err != nil {
+		t.Fatalf("seed mission: %v", err)
+	}
+	insertAssignment(t, h.db, "asg-run-m", wsID, chatID, leadID, workerID, "PENDING")
+
+	body := createAssignmentBody{
+		TargetSlug: "asg-worker", Task: "t", CrewID: crewID, WorkspaceID: wsID,
+		ChatID: chatID, MissionID: missionID,
+	}
+	target := targetAgentInfo{ID: workerID, Slug: "asg-worker", Name: "Worker", CrewSlug: "asg"}
+	// No orchestrator → fails fast, but run.started + assignment.running emit first.
+	h.runAssignment(context.Background(), "asg-run-m", body, target, nil)
+
+	if err := jw.Flush(context.Background()); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+
+	for _, et := range []string{"run.started", "assignment.running"} {
+		var mid string
+		if err := h.db.QueryRow(
+			`SELECT COALESCE(mission_id,'') FROM journal_entries WHERE entry_type = ? AND workspace_id = ?`,
+			et, wsID).Scan(&mid); err != nil {
+			t.Fatalf("query %s: %v", et, err)
+		}
+		if mid != missionID {
+			t.Errorf("%s mission_id = %q, want %q", et, mid, missionID)
+		}
+	}
+}
+
+// A chat-only run (lead's curl /assign) has no missions row and an empty
+// body.MissionID. run.started must still persist — nullable() stores NULL, so
+// the missions FK is never tripped — and mission_id stays empty.
+func TestRunAssignment_ChatOnly_NoMissionID_NoFKViolation(t *testing.T) {
+	h, wsID, crewID, leadID, workerID, chatID := covAsgRig(t)
+	jw := journal.NewWriter(h.db, newTestLogger(), journal.WriterOptions{FlushSize: 1})
+	t.Cleanup(func() { _ = jw.Close() })
+	h.SetJournal(jw)
+	insertAssignment(t, h.db, "asg-run-chat", wsID, chatID, leadID, workerID, "PENDING")
+
+	body := createAssignmentBody{
+		TargetSlug: "asg-worker", Task: "t", CrewID: crewID, WorkspaceID: wsID, ChatID: chatID,
+		// MissionID intentionally empty — chat-only run, no missions row.
+	}
+	target := targetAgentInfo{ID: workerID, Slug: "asg-worker", Name: "Worker", CrewSlug: "asg"}
+	h.runAssignment(context.Background(), "asg-run-chat", body, target, nil)
+
+	if err := jw.Flush(context.Background()); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+	var mid string
+	if err := h.db.QueryRow(
+		`SELECT COALESCE(mission_id,'') FROM journal_entries WHERE entry_type='run.started' AND workspace_id=?`,
+		wsID).Scan(&mid); err != nil {
+		t.Fatalf("run.started must persist with no FK violation: %v", err)
+	}
+	if mid != "" {
+		t.Errorf("chat-only run.started mission_id = %q, want empty", mid)
 	}
 }
 

@@ -8,6 +8,8 @@ import { TabBar } from "@/components/ui/tab-bar"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
+import { buildPipelineActionRequest, canTestRun } from "@/lib/pipeline-actions"
+import { PipelineRunActivity } from "@/components/features/activity/pipeline-run-activity"
 import { RoutineOverviewTab } from "./routine-overview-tab"
 import { RoutineEditorTab } from "./routine-editor-tab"
 import { RoutineRunsTab } from "./routine-runs-tab"
@@ -61,6 +63,9 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
   // dryRunResult holds the `would_execute` report from the most recent
   // dry_run invocation so we can render it inline. Cleared on close.
   const [dryRunResult, setDryRunResult] = useState<DryRunResult | null>(null)
+  // lastRunId holds the run_id of the most recent Run / Test run so we can
+  // show its live activity rail inline (instant status after clicking).
+  const [lastRunId, setLastRunId] = useState<string | null>(null)
   // abortRef tracks the in-flight fetch so a fast workspace/slug
   // switch cancels stale work. Without this, a slow network +
   // rapid-fire selection could race-overwrite the panel with the
@@ -101,6 +106,7 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
     // manually dismisses it — a confusing "this report doesn't match
     // what I'm looking at" surface bug.
     setDryRunResult(null)
+    setLastRunId(null)
     fetchRoutine()
     return () => {
       abortRef.current?.abort()
@@ -109,12 +115,16 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
   }, [workspaceId, slug])
 
   const triggerAction = async (action: "run" | "test_run" | "dry_run") => {
+    if (!routine) return
     setBusyAction(action)
     try {
-      const res = await fetch(`/api/v1/workspaces/${workspaceId}/pipelines/${slug}/${action}`, {
+      // Test run hits a slugless route with the draft definition in the body;
+      // Run / Dry run address the saved pipeline by slug. See lib/pipeline-actions.
+      const { url, body } = buildPipelineActionRequest(workspaceId, slug, action, routine)
+      const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ inputs: {} }),
+        body: JSON.stringify(body),
       })
       if (!res.ok) {
         const t = await res.text().catch(() => "")
@@ -143,10 +153,12 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
           description: "Per-step tier + cost estimate shown above the tabs.",
         })
       } else {
+        // Surface the just-started run's live activity rail inline.
+        if (typeof data.run_id === "string" && data.run_id) setLastRunId(data.run_id)
         toast.success(`${actionLabel(action)} started`, {
           description: data.run_id
             ? `Run ${String(data.run_id).slice(0, 12)}…`
-            : "Watch the Runs tab for live status",
+            : "Watch the activity below for live status",
         })
       }
       onChanged()
@@ -257,16 +269,26 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
             )}
             {busyAction === "run" ? "Running…" : "Run"}
           </Button>
-          <Button
-            variant="outline"
-            onClick={() => triggerAction("test_run")}
-            disabled={!!busyAction || !routine}
-            className="h-9 gap-2 rounded-md px-4 text-sm"
-            title="Run on execution tier; logs result without persisting state"
+          {/* Wrap in a span so the explanatory tooltip still shows when the
+              button is disabled — disabled buttons swallow hover events. */}
+          <span
+            title={
+              canTestRun(routine)
+                ? "Run the draft definition on the execution tier; logs result without persisting state"
+                : "Test run needs an author crew — only available for crew-authored routines"
+            }
+            className="inline-flex"
           >
-            <FlaskConical className="h-3.5 w-3.5" />
-            {busyAction === "test_run" ? "Testing…" : "Test run"}
-          </Button>
+            <Button
+              variant="outline"
+              onClick={() => triggerAction("test_run")}
+              disabled={!!busyAction || !routine || !canTestRun(routine)}
+              className="h-9 gap-2 rounded-md px-4 text-sm"
+            >
+              <FlaskConical className="h-3.5 w-3.5" />
+              {busyAction === "test_run" ? "Testing…" : "Test run"}
+            </Button>
+          </span>
           <Button
             variant="outline"
             onClick={() => triggerAction("dry_run")}
@@ -295,6 +317,19 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
           "Dry run". Pre-fix this payload was silently dropped. */}
       {dryRunResult && (
         <RoutineDryRunReport result={dryRunResult} onClose={() => setDryRunResult(null)} />
+      )}
+
+      {/* Run activity — instant readable status for the just-triggered
+          Run / Test run, so the user isn't left wondering what's happening
+          after clicking. Full history stays in the Runs tab. */}
+      {routine && lastRunId && (
+        <div className="border-b border-white/[0.06]">
+          <PipelineRunActivity
+            workspaceId={workspaceId}
+            slug={routine.slug}
+            runId={lastRunId}
+          />
+        </div>
       )}
 
       {/* Tab bar — primitive with animated underline */}

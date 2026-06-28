@@ -6,11 +6,11 @@ import (
 	"testing"
 )
 
-// TestMigrationV117_GroupChat verifies the group-chat groundwork lands:
+// TestMigrationV118_GroupChat verifies the group-chat groundwork lands:
 // chat_participants table + chats.visibility + conversation_messages.author_user_id.
-func TestMigrationV117_GroupChat(t *testing.T) {
+func TestMigrationV118_GroupChat(t *testing.T) {
 	dir := t.TempDir()
-	db, err := Open("file:" + filepath.Join(dir, "v117.db"))
+	db, err := Open("file:" + filepath.Join(dir, "v118.db"))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}

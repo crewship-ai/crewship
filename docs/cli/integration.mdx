@@ -40,6 +40,9 @@ crewship intg <subcommand> [flags]
 | `integration composio key show` | Show whether/how Composio is configured (never prints the key). |
 | `integration composio key set` | Set & validate the workspace API key (`--key`, `--base-url`, `--label`); stored encrypted. |
 | `integration composio key remove` | Remove the workspace key (revert to the server env, if any). |
+| `integration composio default show` | Show the default-connector state: the `COMPOSIO_DEFAULT_CONNECTOR` flag, the default user/server, and the connected-user count. |
+| `integration composio default enable` | Provision the default connector, auto-deriving the Composio `user_id` when exactly one is connected (errors on zero/multiple). |
+| `integration composio default set <user_id>` | Pin the default connector's Composio `user_id` and (re)provision the default server. |
 | `integration composio bind <agent>` | Bind a Composio `user_id` to an agent with **per-app tool scope**. Requires `--user <id>`; repeatable `--app toolkit[:mode[:t1,t2]]` (mode = `full`\|`read`\|`custom`), e.g. `--app gmail:read --app github:full --app gmail:custom:GMAIL_FETCH_EMAILS,GMAIL_LIST_THREADS`. `--toolkits a,b` is a shorthand for each app at `full`. Re-binding replaces the app set. |
 | `integration composio unbind <agent>` | Remove an agent's Composio access. `--app <toolkit>` removes one app; omit it to remove all. |
 | `integration composio bindings <agent>` | Show an agent's per-app Composio bindings (toolkit, mode, user, endpoint). |
@@ -53,6 +56,14 @@ accepts a slug or id. `account revoke`/`refresh`/`remove` map to
 `POST .../accounts/{accountId}/revoke`, `POST .../accounts/{accountId}/refresh`,
 and `DELETE .../accounts/{accountId}` (all workspace manage); the `account-id` is
 the Composio account id shown by `integration composio inventory --output json`.
+
+`default show` maps to `GET /api/v1/integrations/composio/default` (read);
+`default enable`/`default set` map to the matching `PUT` (workspace manage).
+When the server's `COMPOSIO_DEFAULT_CONNECTOR` flag is **on**, every agent
+without an explicit `bind` inherits the default connector (full access to all
+connected apps) and legacy non-Composio MCP servers are turned off at resolve
+time; a per-agent `bind` overrides the default for that agent. See the
+[Integrations guide](/guides/integrations#default-connector-composio_default_connector).
 
 Maps to `GET /api/v1/integrations/composio/inventory`. Requires a Composio API key
 for the active workspace — set one per-workspace with `integration composio key set`
