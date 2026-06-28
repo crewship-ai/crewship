@@ -405,8 +405,12 @@ func checkTemplateRef(ref string, inputs, earlier map[string]struct{}) error {
 	case "env":
 		// env.* allowlist enforced at render time, not parse time —
 		// the allowed set may differ between dry-run and live run.
+	case "run":
+		// run.metadata.<key> / run.is_replay / run.replay_of — resolved
+		// at render time from the run's metadata + env (Wave 2.4). A
+		// missing key renders empty, like inputs/steps.
 	default:
-		return fmt.Errorf("template ref %q uses unknown namespace %q (allowed: inputs, steps, env)", ref, parts[0])
+		return fmt.Errorf("template ref %q uses unknown namespace %q (allowed: inputs, steps, env, run)", ref, parts[0])
 	}
 	return nil
 }
