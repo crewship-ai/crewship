@@ -8,6 +8,18 @@ import {
   formatDateTime,
   formatRelativeTime,
   formatCommentTime,
+  formatDurationMillis,
+  formatDurationRounded,
+  formatDurationFloor,
+  formatDurationClock,
+  formatDurationDecimal,
+  formatDurationPrecise,
+  formatDurationHm,
+  formatDurationBetween,
+  formatDurationSpan,
+  formatDurationLong,
+  formatDurationMinutes,
+  relTime,
 } from "@/lib/time"
 
 const NOW = new Date("2026-06-15T12:00:00Z")
@@ -144,5 +156,152 @@ describe("formatCommentTime", () => {
     const out = formatCommentTime(minus(10 * DAY))
     expect(out).not.toContain("ago")
     expect(out).toBe(new Date(NOW.getTime() - 10 * DAY).toLocaleDateString())
+  })
+})
+
+// ===========================================================================
+// Consolidated duration variants (each pins one historical format exactly)
+// ===========================================================================
+
+describe("formatDurationMillis", () => {
+  it("surfaces sub-second as Nms (rounded)", () => {
+    expect(formatDurationMillis(820)).toBe("820ms")
+    expect(formatDurationMillis(0)).toBe("0ms")
+  })
+  it("matches formatDuration at/above 1s (rounds, drops 0s tail)", () => {
+    expect(formatDurationMillis(45_000)).toBe("45s")
+    expect(formatDurationMillis(1_499)).toBe("1s")
+    expect(formatDurationMillis(120_000)).toBe("2m")
+    expect(formatDurationMillis(192_000)).toBe("3m 12s")
+  })
+})
+
+describe("formatDurationRounded", () => {
+  it("renders raw Nms, rounded seconds, always-shown seconds field", () => {
+    expect(formatDurationRounded(820)).toBe("820ms")
+    expect(formatDurationRounded(1_500)).toBe("2s")
+    expect(formatDurationRounded(65_000)).toBe("1m 5s")
+    expect(formatDurationRounded(60_000)).toBe("1m 0s")
+  })
+})
+
+describe("formatDurationFloor", () => {
+  it("floors to seconds + minutes, no hours rollover", () => {
+    expect(formatDurationFloor(45_000)).toBe("45s")
+    expect(formatDurationFloor(65_000)).toBe("1m 5s")
+    expect(formatDurationFloor(3_700_000)).toBe("61m 40s")
+  })
+})
+
+describe("formatDurationClock", () => {
+  it("floors with an hours rollover", () => {
+    expect(formatDurationClock(42_000)).toBe("42s")
+    expect(formatDurationClock(330_000)).toBe("5m 30s")
+    expect(formatDurationClock(9_000_000)).toBe("2h 30m")
+  })
+})
+
+describe("formatDurationDecimal", () => {
+  it("renders Nms / one-decimal seconds / floored Nm Ns", () => {
+    expect(formatDurationDecimal(820)).toBe("820ms")
+    expect(formatDurationDecimal(1_200)).toBe("1.2s")
+    expect(formatDurationDecimal(65_000)).toBe("1m 5s")
+  })
+})
+
+describe("formatDurationPrecise", () => {
+  it("renders Nms / one-decimal seconds / Nm Ns", () => {
+    expect(formatDurationPrecise(820)).toBe("820ms")
+    expect(formatDurationPrecise(1_200)).toBe("1.2s")
+    expect(formatDurationPrecise(65_000)).toBe("1m 5s")
+  })
+  it("never renders 60.0s or 1m 60s (spill guard)", () => {
+    expect(formatDurationPrecise(59_960)).toBe("1m 0s")
+    expect(formatDurationPrecise(119_600)).toBe("2m 0s")
+  })
+  it("returns null for junk input", () => {
+    expect(formatDurationPrecise(undefined)).toBeNull()
+    expect(formatDurationPrecise(-5)).toBeNull()
+  })
+})
+
+describe("formatDurationHm", () => {
+  it("floors with hour rollover, dropping a zero tail", () => {
+    expect(formatDurationHm(45_000)).toBe("45s")
+    expect(formatDurationHm(90_000)).toBe("1m")
+    expect(formatDurationHm(5_400_000)).toBe("1h 30m")
+    expect(formatDurationHm(7_200_000)).toBe("2h")
+  })
+})
+
+describe("formatDurationBetween", () => {
+  it("formats Ns / Nm Ns / Nh Nm between two ISO timestamps", () => {
+    expect(formatDurationBetween("2026-01-01T00:00:00Z", "2026-01-01T00:00:42Z")).toBe("42s")
+    expect(formatDurationBetween("2026-01-01T00:00:00Z", "2026-01-01T00:05:30Z")).toBe("5m 30s")
+    expect(formatDurationBetween("2026-01-01T00:00:00Z", "2026-01-01T02:30:00Z")).toBe("2h 30m")
+  })
+  it("measures to now when end is null/omitted", () => {
+    expect(formatDurationBetween(minus(5 * MIN), null)).toBe("5m 0s")
+    expect(formatDurationBetween(minus(5 * MIN))).toBe("5m 0s")
+  })
+  it("returns the em-dash placeholder for missing/invalid/inverted", () => {
+    expect(formatDurationBetween(null)).toBe("—")
+    expect(formatDurationBetween("garbage", "2026-01-01T00:00:00Z")).toBe("—")
+    expect(formatDurationBetween("2026-01-01T00:00:00Z", "garbage")).toBe("—")
+    expect(formatDurationBetween("2026-01-01T01:00:00Z", "2026-01-01T00:00:00Z")).toBe("—")
+  })
+})
+
+describe("formatDurationSpan", () => {
+  it("floors to seconds + minutes (no hours rollover)", () => {
+    expect(formatDurationSpan("2026-01-01T00:00:00Z", "2026-01-01T00:00:42Z")).toBe("42s")
+    expect(formatDurationSpan("2026-01-01T00:00:00Z", "2026-01-01T01:05:00Z")).toBe("65m 0s")
+  })
+  it("returns the empty string for invalid/inverted pairs", () => {
+    expect(formatDurationSpan("2026-01-01T00:00:00Z", "garbage")).toBe("")
+    expect(formatDurationSpan("2026-01-01T01:00:00Z", "2026-01-01T00:00:00Z")).toBe("")
+  })
+})
+
+describe("formatDurationLong", () => {
+  it("drops the seconds tail past a minute and rolls into days", () => {
+    expect(formatDurationLong("2026-06-15T11:59:30Z", "2026-06-15T12:00:00Z")).toBe("30s")
+    expect(formatDurationLong("2026-06-15T11:55:00Z", "2026-06-15T12:00:00Z")).toBe("5m")
+    expect(formatDurationLong("2026-06-15T09:30:00Z", "2026-06-15T12:00:00Z")).toBe("2h 30m")
+    expect(formatDurationLong("2026-06-13T06:00:00Z", "2026-06-15T12:00:00Z")).toBe("2d 6h")
+  })
+  it("measures to now when end is null/omitted", () => {
+    expect(formatDurationLong(minus(5 * MIN), null)).toBe("5m")
+  })
+})
+
+describe("formatDurationMinutes", () => {
+  it("uses minute resolution with hour rollover", () => {
+    expect(formatDurationMinutes("2026-06-15T11:59:30Z", "2026-06-15T12:00:00Z")).toBe("<1m")
+    expect(formatDurationMinutes("2026-06-15T11:55:00Z", "2026-06-15T12:00:00Z")).toBe("5m")
+    expect(formatDurationMinutes("2026-06-15T09:30:00Z", "2026-06-15T12:00:00Z")).toBe("2h 30m")
+    expect(formatDurationMinutes("2026-06-15T10:00:00Z", "2026-06-15T12:00:00Z")).toBe("2h")
+  })
+  it("measures to now when end is null/omitted", () => {
+    expect(formatDurationMinutes(minus(5 * MIN), null)).toBe("5m")
+  })
+})
+
+describe("relTime", () => {
+  it("renders 'just now' under a minute", () => {
+    expect(relTime(minus(30_000))).toBe("just now")
+  })
+  it("renders past timestamps with an 'ago' suffix", () => {
+    expect(relTime(minus(5 * MIN))).toBe("5m ago")
+    expect(relTime(minus(3 * HOUR))).toBe("3h ago")
+    expect(relTime(minus(2 * DAY))).toBe("2d ago")
+  })
+  it("renders future timestamps with an 'in' prefix", () => {
+    expect(relTime(minus(-5 * MIN))).toBe("in 5m")
+    expect(relTime(minus(-3 * HOUR))).toBe("in 3h")
+  })
+  it("returns the em-dash placeholder for invalid/empty input", () => {
+    expect(relTime(undefined)).toBe("—")
+    expect(relTime("garbage")).toBe("—")
   })
 })

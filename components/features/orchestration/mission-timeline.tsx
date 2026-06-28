@@ -13,6 +13,7 @@ import { ChevronDown, Clock } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { Mission, MissionTask, MissionStatus } from "@/lib/types/mission"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
+import { formatDurationRounded } from "@/lib/time"
 
 interface MissionTimelineProps {
   missions: Mission[]
@@ -57,14 +58,6 @@ function getTimeRange(missions: Mission[]): { start: number; end: number } {
   }
   const range = end - start || 3600000
   return { start: start - range * 0.05, end: end + range * 0.05 }
-}
-
-function formatDuration(ms: number): string {
-  if (ms < 1000) return `${ms}ms`
-  const s = Math.round(ms / 1000)
-  if (s < 60) return `${s}s`
-  const m = Math.floor(s / 60)
-  return `${m}m ${s % 60}s`
 }
 
 const TASK_BAR_STYLES: Record<string, React.CSSProperties> = {
@@ -137,7 +130,7 @@ function TaskBar({ task, timeRange }: { task: MissionTask; timeRange: { start: n
             {duration != null && (
               <div className="flex justify-between gap-3">
                 <span className="text-muted-foreground">Duration</span>
-                <span className="font-mono">{formatDuration(duration)}</span>
+                <span className="font-mono">{formatDurationRounded(duration)}</span>
               </div>
             )}
             {task.token_count != null && (

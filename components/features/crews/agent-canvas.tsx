@@ -575,15 +575,8 @@ export function formatRelative(iso: string): string {
   return new Date(iso).toLocaleDateString()
 }
 
-export function formatDuration(startIso: string, endIso: string): string {
-  const ms = new Date(endIso).getTime() - new Date(startIso).getTime()
-  if (!Number.isFinite(ms) || ms < 0) return ""
-  const s = Math.floor(ms / 1000)
-  if (s < 60) return `${s}s`
-  const m = Math.floor(s / 60)
-  const rs = s % 60
-  return `${m}m ${rs}s`
-}
+// `formatDuration(startIso, endIso)` moved to lib/time.ts as
+// `formatDurationSpan` (canonical home for time formatters).
 
 export function formatCost(usd: number): string {
   if (!Number.isFinite(usd)) return "–"

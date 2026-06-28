@@ -13,7 +13,7 @@ import {
   Zap,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { relTime } from "@/lib/activity/format-time"
+import { relTime } from "@/lib/time"
 import { statusIcon, statusTint } from "@/lib/activity/run-status"
 import type { RunGroup } from "@/lib/activity/run-filters"
 import type { PipelineRun } from "@/hooks/use-pipeline-runs"

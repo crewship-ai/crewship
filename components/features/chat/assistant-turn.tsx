@@ -26,6 +26,7 @@ import { StatusIndicator } from "@/components/features/chat/status-indicator"
 import type { ChatTurn, TurnPart } from "@/hooks/use-chat"
 import { groupTurnParts, type ToolNode } from "./turn-grouping"
 import { formatCost } from "@/lib/utils/format"
+import { formatDurationMillis } from "@/lib/time"
 
 interface AssistantTurnProps {
   turn: ChatTurn
@@ -42,17 +43,6 @@ interface AssistantTurnProps {
    *  fallback. Optional; tests can omit it. */
   chatId?: string
 }
-
-function formatDuration(ms: number): string {
-  if (ms < 1000) return `${Math.round(ms)}ms`
-  const totalSecs = Math.round(ms / 1000)
-  if (totalSecs < 60) return `${totalSecs}s`
-  const mins = Math.floor(totalSecs / 60)
-  const remSecs = totalSecs % 60
-  return remSecs > 0 ? `${mins}m ${remSecs}s` : `${mins}m`
-}
-
-
 
 function formatTokens(n: number): string {
   if (n >= 1000) return `${(n / 1000).toFixed(1)}k`
@@ -87,7 +77,7 @@ function ResultCard({ part }: { part: TurnPart }) {
   // Compact one-line summary for the trigger
   const summaryParts: string[] = []
   if (cost != null && cost > 0) summaryParts.push(formatCost(cost, true))
-  if (durationMs != null && durationMs > 0) summaryParts.push(formatDuration(durationMs))
+  if (durationMs != null && durationMs > 0) summaryParts.push(formatDurationMillis(durationMs))
   if (numTurns != null && numTurns > 0) summaryParts.push(`${numTurns} turn${numTurns !== 1 ? "s" : ""}`)
   if (modelName) summaryParts.push(modelName)
 
@@ -110,7 +100,7 @@ function ResultCard({ part }: { part: TurnPart }) {
           {durationMs != null && durationMs > 0 && (
             <span className="flex items-center gap-1 text-muted-foreground">
               <Clock className="h-3 w-3" />
-              {formatDuration(durationMs)}
+              {formatDurationMillis(durationMs)}
             </span>
           )}
           {numTurns != null && numTurns > 0 && (

@@ -23,7 +23,7 @@ import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { usePipelineRuns, type PipelineRun } from "@/hooks/use-pipeline-runs"
 import { statusIcon, statusTint } from "@/lib/activity/run-status"
-import { relTime, formatDuration } from "@/lib/activity/format-time"
+import { relTime, formatDurationDecimal } from "@/lib/time"
 
 // RunsView — the /activity "what's happening right now" surface.
 // Each row is one pipeline_run. Collapsed shows source pill + routine
@@ -215,7 +215,7 @@ function RunCard({
             {run.duration_ms > 0 && (
               <>
                 <span>·</span>
-                <span>{formatDuration(run.duration_ms)}</span>
+                <span>{formatDurationDecimal(run.duration_ms)}</span>
               </>
             )}
             {run.cost_usd > 0 && (

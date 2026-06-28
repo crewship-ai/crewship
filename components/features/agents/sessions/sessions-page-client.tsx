@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge"
 import { StatusBadge } from "@/components/ui/status-badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { EmptyState } from "@/components/layout/empty-state"
-import { formatRelativeTime } from "@/lib/time"
+import { formatRelativeTime, formatDurationMinutes } from "@/lib/time"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 import type { Session } from "@/lib/types/agent"
@@ -23,20 +23,6 @@ function sessionStatusId(status: string): string {
     case "ERROR": return "FAILED"
     default: return "PENDING"
   }
-}
-
-function formatDuration(start: string, end: string | null): string {
-  const startDate = new Date(start)
-  const endDate = end ? new Date(end) : new Date()
-  const diffMs = endDate.getTime() - startDate.getTime()
-  const minutes = Math.floor(diffMs / 60000)
-  if (minutes < 1) return "<1m"
-  if (minutes >= 60) {
-    const hours = Math.floor(minutes / 60)
-    const remaining = minutes % 60
-    return remaining > 0 ? `${hours}h ${remaining}m` : `${hours}h`
-  }
-  return `${minutes}m`
 }
 
 export function SessionsPageClient() {
@@ -151,7 +137,7 @@ export function SessionsPageClient() {
                   </td>
                   <td className="px-4 sm:px-6 py-3 font-mono text-label">{s.message_count}</td>
                   <td className="px-4 sm:px-6 py-3 font-mono text-label hidden sm:table-cell">
-                    {formatDuration(s.started_at, s.ended_at)}
+                    {formatDurationMinutes(s.started_at, s.ended_at)}
                   </td>
                   <td className="px-4 sm:px-6 py-3 text-label text-muted-foreground hidden md:table-cell">
                     {formatRelativeTime(s.started_at)}

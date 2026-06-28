@@ -39,12 +39,8 @@ import { useRealtimeEvent } from "@/hooks/use-realtime"
 import { KpiCard } from "@/components/features/dashboard/kpi-card"
 import { SettingsCard } from "@/components/features/settings/shared"
 import { cn } from "@/lib/utils"
-import {
-  formatDuration,
-  formatRelativeShort,
-  statusLabel,
-  toCanonicalStatus,
-} from "@/lib/runs-format"
+import { statusLabel, toCanonicalStatus } from "@/lib/runs-format"
+import { formatDurationBetween, formatRelativeShort } from "@/lib/time"
 
 // Selectors for elements that should swallow row-level click/keypress
 // events. Hoisted so the per-render .map() doesn't reallocate them.
@@ -87,7 +83,7 @@ function LiveRunDuration({ startedAt }: { startedAt: string }) {
     const id = setInterval(() => setTick((t) => t + 1), 1000)
     return () => clearInterval(id)
   }, [])
-  return <>{formatDuration(startedAt, null)}</>
+  return <>{formatDurationBetween(startedAt, null)}</>
 }
 
 interface RunsViewProps {
@@ -431,7 +427,7 @@ export function RunsView({ workspaceId, workspaceLoading }: RunsViewProps) {
                     {isRunning && run.started_at ? (
                       <LiveRunDuration startedAt={run.started_at} />
                     ) : (
-                      formatDuration(run.started_at, run.finished_at)
+                      formatDurationBetween(run.started_at, run.finished_at)
                     )}
                   </span>
                   <span className="text-[11px] text-muted-foreground truncate">

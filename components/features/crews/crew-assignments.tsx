@@ -18,7 +18,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
-import { formatRelativeTime } from "@/lib/time"
+import { formatRelativeTime, formatDurationBetween } from "@/lib/time"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 import type { Assignment } from "@/lib/types/assignment"
 import { STATUS_STYLES, type StatusConfigEntryWithIcon } from "@/lib/status-config"
@@ -35,28 +35,13 @@ const STATUS_CONFIG: Record<Assignment["status"], StatusConfigEntryWithIcon> = {
   FAILED:    { label: "Failed",    className: STATUS_STYLES.red,     icon: XCircle },
 }
 
-function formatDuration(startedAt: string | null, finishedAt: string | null): string {
-  if (!startedAt) return "—"
-  const start = new Date(startedAt).getTime()
-  const end = finishedAt ? new Date(finishedAt).getTime() : Date.now()
-  const diffMs = end - start
-
-  const seconds = Math.floor(diffMs / 1000)
-  if (seconds < 60) return `${seconds}s`
-  const minutes = Math.floor(seconds / 60)
-  const remainSecs = seconds % 60
-  if (minutes < 60) return `${minutes}m ${remainSecs}s`
-  const hours = Math.floor(minutes / 60)
-  return `${hours}h ${minutes % 60}m`
-}
-
 function LiveDuration({ startedAt }: { startedAt: string }) {
   const [, setTick] = useState(0)
   useEffect(() => {
     const id = setInterval(() => setTick((t) => t + 1), 1000)
     return () => clearInterval(id)
   }, [])
-  return <>{formatDuration(startedAt, null)}</>
+  return <>{formatDurationBetween(startedAt, null)}</>
 }
 
 export function CrewAssignments({ crewId, workspaceId }: CrewAssignmentsProps) {
@@ -230,7 +215,7 @@ export function CrewAssignments({ crewId, workspaceId }: CrewAssignmentsProps) {
                           <TableCell className="text-label text-muted-foreground tabular-nums">
                             {a.status === "RUNNING" && a.started_at
                               ? <LiveDuration startedAt={a.started_at} />
-                              : formatDuration(a.started_at, a.finished_at)}
+                              : formatDurationBetween(a.started_at, a.finished_at)}
                           </TableCell>
                         </TableRow>
                         {isExpanded && hasDetail && (

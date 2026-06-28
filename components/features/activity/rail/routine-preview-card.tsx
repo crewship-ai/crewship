@@ -6,7 +6,7 @@ import { ExternalLink, Pause, Play } from "lucide-react"
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
 import { Button } from "@/components/ui/button"
 import { toast } from "sonner"
-import { formatDuration, relTime } from "@/lib/activity/format-time"
+import { formatDurationDecimal, relTime } from "@/lib/time"
 import type { PipelineRun } from "@/hooks/use-pipeline-runs"
 import type { PipelineSchedule } from "@/hooks/use-pipeline-schedules"
 import { useWorkspace } from "@/hooks/use-workspace"
@@ -90,7 +90,7 @@ export function RoutinePreviewCard({
           )}
           {stats.avgDurationMs !== null && (
             <Row label="Avg duration">
-              <span className="font-mono">{formatDuration(stats.avgDurationMs)}</span>
+              <span className="font-mono">{formatDurationDecimal(stats.avgDurationMs)}</span>
             </Row>
           )}
           {stats.lastAt && (

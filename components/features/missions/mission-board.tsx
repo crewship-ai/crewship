@@ -19,6 +19,7 @@ import {
 import { TaskStatusBadge } from "./mission-status-badge"
 import { AnimatedNumber } from "@/components/ui/animated-number"
 import { formatCost } from "@/lib/utils/format"
+import { formatDurationFloor } from "@/lib/time"
 import type { MissionTask, TaskStats } from "@/lib/types/mission"
 
 interface MissionBoardProps {
@@ -26,21 +27,14 @@ interface MissionBoardProps {
   taskStats: TaskStats | null
 }
 
+// Picks the duration source (explicit durationMs wins, else span from
+// started→completed/now) and renders via the canonical floored formatter.
 function formatDuration(startedAt: string | null, completedAt: string | null, durationMs: number | null): string {
-  if (durationMs != null) {
-    const seconds = Math.floor(durationMs / 1000)
-    if (seconds < 60) return `${seconds}s`
-    const minutes = Math.floor(seconds / 60)
-    return `${minutes}m ${seconds % 60}s`
-  }
+  if (durationMs != null) return formatDurationFloor(durationMs)
   if (!startedAt) return "—"
   const start = new Date(startedAt).getTime()
   const end = completedAt ? new Date(completedAt).getTime() : Date.now()
-  const diffMs = end - start
-  const seconds = Math.floor(diffMs / 1000)
-  if (seconds < 60) return `${seconds}s`
-  const minutes = Math.floor(seconds / 60)
-  return `${minutes}m ${seconds % 60}s`
+  return formatDurationFloor(end - start)
 }
 
 function LiveDuration({ startedAt }: { startedAt: string }) {
