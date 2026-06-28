@@ -1,7 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
-import { apiFetch } from "@/lib/api-fetch"
+import { useApiResource, type UseApiResourceState } from "@/hooks/use-api-resource"
 import {
   agentSpendResponseSchema,
   crewSpendResponseSchema,
@@ -18,64 +17,23 @@ import {
  * Shared fetch state shape. `notConfigured=true` when the endpoint 404s —
  * the page uses this to show a "Paymaster not yet configured" empty state
  * instead of a generic error.
+ *
+ * All four hooks below are thin wrappers over the generic
+ * `useApiResource`: 404→notConfigured, non-2xx→`HTTP <status>`, rejected
+ * fetch→"Network error", and a schema parse failure degrades to empty
+ * rows (`{ rows: [] }`) rather than a hard error. `reloadKey` forces a
+ * refetch without swapping `range` to a different value and back (which
+ * would fire two fetches).
  */
-interface FetchState<T> {
-  data: T | null
-  loading: boolean
-  error: string | null
-  notConfigured: boolean
-}
+type FetchState<T> = UseApiResourceState<T>
 
-const INITIAL: FetchState<never> = { data: null, loading: true, error: null, notConfigured: false }
-
-/**
- * Fetch `/api/v1/paymaster/spend/by-crew?range=…`. Refetches whenever
- * `range` or `enabled` changes. 404 → notConfigured; 5xx → error.
- */
+/** Fetch `/api/v1/paymaster/spend/by-crew?range=…`. 404 → notConfigured. */
 export function useCrewSpend(range: PaymasterRange, enabled = true, reloadKey = 0): FetchState<CrewSpendResponse> {
-  const [state, setState] = useState<FetchState<CrewSpendResponse>>({ ...INITIAL } as FetchState<CrewSpendResponse>)
-  const reqIdRef = useRef(0)
-
-  useEffect(() => {
-    if (!enabled) {
-      setState((s) => ({ ...s, loading: false }))
-      return
-    }
-    const reqId = ++reqIdRef.current
-    setState((s) => ({ ...s, loading: true, error: null }))
-    ;(async () => {
-      try {
-        const res = await apiFetch(`/api/v1/paymaster/spend/by-crew?range=${range}`)
-        if (reqIdRef.current !== reqId) return
-        if (res.status === 404) {
-          setState({ data: null, loading: false, error: null, notConfigured: true })
-          return
-        }
-        if (!res.ok) {
-          setState({ data: null, loading: false, error: `HTTP ${res.status}`, notConfigured: false })
-          return
-        }
-        const json = await res.json()
-        const parsed = crewSpendResponseSchema.safeParse(json)
-        if (reqIdRef.current !== reqId) return
-        if (!parsed.success) {
-          setState({ data: { rows: [] }, loading: false, error: null, notConfigured: false })
-          return
-        }
-        setState({ data: parsed.data, loading: false, error: null, notConfigured: false })
-      } catch {
-        if (reqIdRef.current === reqId) {
-          setState({ data: null, loading: false, error: "Network error", notConfigured: false })
-        }
-      }
-    })()
-    // reloadKey lets the page force a refetch by bumping a counter
-    // without swapping range to a different value and back (that would
-    // trigger two fetches). A naive `setRange(range)` would not change
-    // state identity so the effect wouldn't rerun — CodeRabbit flag.
-  }, [range, enabled, reloadKey])
-
-  return state
+  const { data, loading, error, notConfigured } = useApiResource<CrewSpendResponse>(
+    `/api/v1/paymaster/spend/by-crew?range=${range}`,
+    { schema: crewSpendResponseSchema, fallback: { rows: [] }, enabled, reloadKey },
+  )
+  return { data, loading, error, notConfigured }
 }
 
 /** Spend drill-down for a specific crew. `crewId=null` → hook is disabled. */
@@ -84,85 +42,22 @@ export function useAgentSpend(
   range: PaymasterRange,
   reloadKey = 0,
 ): FetchState<AgentSpendResponse> {
-  const [state, setState] = useState<FetchState<AgentSpendResponse>>({ ...INITIAL } as FetchState<AgentSpendResponse>)
-  const reqIdRef = useRef(0)
-
-  useEffect(() => {
-    if (!crewId) {
-      setState({ data: null, loading: false, error: null, notConfigured: false })
-      return
-    }
-    const reqId = ++reqIdRef.current
-    setState((s) => ({ ...s, loading: true, error: null }))
-    ;(async () => {
-      try {
-        const res = await apiFetch(`/api/v1/paymaster/spend/by-agent/${encodeURIComponent(crewId)}?range=${encodeURIComponent(range)}`)
-        if (reqIdRef.current !== reqId) return
-        if (res.status === 404) {
-          setState({ data: null, loading: false, error: null, notConfigured: true })
-          return
-        }
-        if (!res.ok) {
-          setState({ data: null, loading: false, error: `HTTP ${res.status}`, notConfigured: false })
-          return
-        }
-        const json = await res.json()
-        const parsed = agentSpendResponseSchema.safeParse(json)
-        if (reqIdRef.current !== reqId) return
-        if (!parsed.success) {
-          setState({ data: { rows: [] }, loading: false, error: null, notConfigured: false })
-          return
-        }
-        setState({ data: parsed.data, loading: false, error: null, notConfigured: false })
-      } catch {
-        if (reqIdRef.current === reqId) {
-          setState({ data: null, loading: false, error: "Network error", notConfigured: false })
-        }
-      }
-    })()
-  }, [crewId, range, reloadKey])
-
-  return state
+  const { data, loading, error, notConfigured } = useApiResource<AgentSpendResponse>(
+    crewId
+      ? `/api/v1/paymaster/spend/by-agent/${encodeURIComponent(crewId)}?range=${encodeURIComponent(range)}`
+      : null,
+    { schema: agentSpendResponseSchema, fallback: { rows: [] }, resetOnDisable: true, reloadKey },
+  )
+  return { data, loading, error, notConfigured }
 }
 
 /** Top spenders — shared by the KPI card and the "Top Spenders" table. */
 export function useTopSpenders(range: PaymasterRange, limit = 10, reloadKey = 0): FetchState<TopSpendersResponse> {
-  const [state, setState] = useState<FetchState<TopSpendersResponse>>({ ...INITIAL } as FetchState<TopSpendersResponse>)
-  const reqIdRef = useRef(0)
-  const fetcher = useCallback(async () => {
-    const reqId = ++reqIdRef.current
-    setState((s) => ({ ...s, loading: true, error: null }))
-    try {
-      const res = await apiFetch(`/api/v1/paymaster/top-spenders?range=${range}&limit=${limit}`)
-      if (reqIdRef.current !== reqId) return
-      if (res.status === 404) {
-        setState({ data: null, loading: false, error: null, notConfigured: true })
-        return
-      }
-      if (!res.ok) {
-        setState({ data: null, loading: false, error: `HTTP ${res.status}`, notConfigured: false })
-        return
-      }
-      const json = await res.json()
-      const parsed = topSpendersResponseSchema.safeParse(json)
-      if (reqIdRef.current !== reqId) return
-      if (!parsed.success) {
-        setState({ data: { rows: [] }, loading: false, error: null, notConfigured: false })
-        return
-      }
-      setState({ data: parsed.data, loading: false, error: null, notConfigured: false })
-    } catch {
-      if (reqIdRef.current === reqId) {
-        setState({ data: null, loading: false, error: "Network error", notConfigured: false })
-      }
-    }
-  }, [range, limit])
-
-  useEffect(() => {
-    fetcher()
-  }, [fetcher, reloadKey])
-
-  return state
+  const { data, loading, error, notConfigured } = useApiResource<TopSpendersResponse>(
+    `/api/v1/paymaster/top-spenders?range=${range}&limit=${limit}`,
+    { schema: topSpendersResponseSchema, fallback: { rows: [] }, reloadKey },
+  )
+  return { data, loading, error, notConfigured }
 }
 
 /**
@@ -175,44 +70,9 @@ export function useSubscriptionUsage(
   range: PaymasterRange,
   reloadKey = 0,
 ): FetchState<SubscriptionUsageResponse> {
-  const [state, setState] = useState<FetchState<SubscriptionUsageResponse>>(
-    { ...INITIAL } as FetchState<SubscriptionUsageResponse>,
+  const { data, loading, error, notConfigured } = useApiResource<SubscriptionUsageResponse>(
+    `/api/v1/paymaster/subscriptions?range=${range}`,
+    { schema: subscriptionUsageResponseSchema, fallback: { rows: [] }, reloadKey },
   )
-  const reqIdRef = useRef(0)
-
-  useEffect(() => {
-    const reqId = ++reqIdRef.current
-    setState((s) => ({ ...s, loading: true, error: null }))
-    ;(async () => {
-      try {
-        const res = await apiFetch(`/api/v1/paymaster/subscriptions?range=${range}`)
-        if (reqIdRef.current !== reqId) return
-        if (res.status === 404) {
-          setState({ data: null, loading: false, error: null, notConfigured: true })
-          return
-        }
-        if (!res.ok) {
-          setState({ data: null, loading: false, error: `HTTP ${res.status}`, notConfigured: false })
-          return
-        }
-        const json = await res.json()
-        const parsed = subscriptionUsageResponseSchema.safeParse(json)
-        if (reqIdRef.current !== reqId) return
-        if (!parsed.success) {
-          // Empty rows is the right fallback for a malformed response —
-          // showing the panel with "no data" beats a hard error for what
-          // is, in the worst case, a backend-old / new-frontend skew.
-          setState({ data: { rows: [] }, loading: false, error: null, notConfigured: false })
-          return
-        }
-        setState({ data: parsed.data, loading: false, error: null, notConfigured: false })
-      } catch {
-        if (reqIdRef.current === reqId) {
-          setState({ data: null, loading: false, error: "Network error", notConfigured: false })
-        }
-      }
-    })()
-  }, [range, reloadKey])
-
-  return state
+  return { data, loading, error, notConfigured }
 }
