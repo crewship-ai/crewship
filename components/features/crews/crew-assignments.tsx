@@ -1,6 +1,6 @@
 "use client"
 
-import { Fragment, useCallback, useEffect, useRef, useState } from "react"
+import { Fragment, useCallback, useEffect, useState } from "react"
 import { CheckCircle2, Loader2, Clock, XCircle, ClipboardList } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
@@ -22,7 +22,7 @@ import { formatRelativeTime, formatDurationBetween } from "@/lib/time"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 import type { Assignment } from "@/lib/types/assignment"
 import { STATUS_STYLES, type StatusConfigEntryWithIcon } from "@/lib/status-config"
-import { apiFetch } from "@/lib/api-fetch"
+import { useApiResource } from "@/hooks/use-api-resource"
 
 interface CrewAssignmentsProps {
   crewId: string
@@ -46,49 +46,17 @@ function LiveDuration({ startedAt }: { startedAt: string }) {
 }
 
 export function CrewAssignments({ crewId, workspaceId }: CrewAssignmentsProps) {
-  const [assignments, setAssignments] = useState<Assignment[]>([])
-  const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
   const [expandedId, setExpandedId] = useState<string | null>(null)
-  const requestIdRef = useRef(0)
-  const loadingOwnerRef = useRef<number | null>(null)
-  const refreshingOwnerRef = useRef<number | null>(null)
+  // keepDataOnError: a transient backend hiccup keeps the last good list
+  // (component shows empty state only when nothing has loaded yet).
+  const { data, loading, reload } = useApiResource<Assignment[]>(
+    `/api/v1/crews/${crewId}/assignments?workspace_id=${workspaceId}&limit=50`,
+    { keepDataOnError: true },
+  )
+  const assignments = data ?? []
 
-  const fetchAssignments = useCallback(async (showRefresh = false, silent = false) => {
-    const requestId = silent ? requestIdRef.current : ++requestIdRef.current
-    const ownsLoading = !silent && !showRefresh
-    const ownsRefresh = !silent && showRefresh
-
-    if (ownsRefresh) {
-      refreshingOwnerRef.current = requestId
-      setRefreshing(true)
-    } else if (ownsLoading) {
-      loadingOwnerRef.current = requestId
-      setLoading(true)
-    }
-    try {
-      const res = await apiFetch(
-        `/api/v1/crews/${crewId}/assignments?workspace_id=${workspaceId}&limit=50`
-      )
-      if (!res.ok) return
-      const data = (await res.json()) as Assignment[]
-      if (requestId === requestIdRef.current) {
-        setAssignments(data)
-      }
-    } catch {
-      // Silently fail — component shows empty state
-    } finally {
-      if (ownsLoading && loadingOwnerRef.current === requestId) setLoading(false)
-      if (ownsRefresh && refreshingOwnerRef.current === requestId) setRefreshing(false)
-    }
-  }, [crewId, workspaceId])
-
-  useEffect(() => {
-    fetchAssignments()
-  }, [fetchAssignments])
-
-  // Real-time: refetch when assignment status changes
-  useRealtimeEvent("assignment.updated", useCallback(() => { fetchAssignments(false, true) }, [fetchAssignments]))
+  // Real-time: refetch (silently, no spinner flash) when status changes.
+  useRealtimeEvent("assignment.updated", useCallback(() => { reload({ silent: true }) }, [reload]))
 
   if (loading) {
     return (
@@ -112,7 +80,7 @@ export function CrewAssignments({ crewId, workspaceId }: CrewAssignmentsProps) {
           )}
         </div>
         <span role="status" aria-live="polite" className="text-label text-muted-foreground">
-          {refreshing ? "Updating..." : "Live"}
+          Live
         </span>
       </div>
 

@@ -1,6 +1,6 @@
 "use client"
 
-import { Fragment, useCallback, useEffect, useRef, useState } from "react"
+import { Fragment, useCallback, useState } from "react"
 import { CheckCircle2, Loader2, XCircle, MessageSquare, AlertTriangle } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
@@ -23,7 +23,7 @@ import { useRealtimeEvent } from "@/hooks/use-realtime"
 import { formatRelativeTime, formatDurationClock } from "@/lib/time"
 import { z } from "zod"
 import { STATUS_STYLES, type StatusConfigEntryWithIcon } from "@/lib/status-config"
-import { apiFetch } from "@/lib/api-fetch"
+import { useApiResource } from "@/hooks/use-api-resource"
 
 interface CrewPeerConversationsProps {
   crewId: string
@@ -37,44 +37,17 @@ const STATUS_CONFIG: Record<PeerConversation["status"], StatusConfigEntryWithIco
 }
 
 export function CrewPeerConversations({ crewId, workspaceId }: CrewPeerConversationsProps) {
-  const [conversations, setConversations] = useState<PeerConversation[]>([])
-  const [loading, setLoading] = useState(true)
   const [expandedId, setExpandedId] = useState<string | null>(null)
-  const requestIdRef = useRef(0)
-  const loadingOwnerRef = useRef<number | null>(null)
+  // keepDataOnError + schema: parse/transport failures keep the last good
+  // list (component shows empty state only before the first load lands).
+  const { data, loading, reload } = useApiResource<PeerConversation[]>(
+    `/api/v1/crews/${crewId}/peer-conversations?workspace_id=${workspaceId}&limit=50`,
+    { schema: z.array(peerConversationSchema), keepDataOnError: true },
+  )
+  const conversations = data ?? []
 
-  const fetchConversations = useCallback(async (silent = false) => {
-    const requestId = silent ? requestIdRef.current : ++requestIdRef.current
-    const ownsLoading = !silent
-
-    if (ownsLoading) {
-      loadingOwnerRef.current = requestId
-      setLoading(true)
-    }
-    try {
-      const res = await apiFetch(
-        `/api/v1/crews/${crewId}/peer-conversations?workspace_id=${workspaceId}&limit=50`
-      )
-      if (!res.ok) return
-      const json = await res.json()
-      if (requestId !== requestIdRef.current) return
-      const parsed = z.array(peerConversationSchema).safeParse(json)
-      if (parsed.success) {
-        setConversations(parsed.data)
-      }
-    } catch {
-      // Silently fail â component shows empty state
-    } finally {
-      if (ownsLoading && loadingOwnerRef.current === requestId) setLoading(false)
-    }
-  }, [crewId, workspaceId])
-
-  useEffect(() => {
-    fetchConversations()
-  }, [fetchConversations])
-
-  // Real-time: refetch when peer conversations finish
-  useRealtimeEvent("peer_conversation.updated", useCallback(() => { fetchConversations(true) }, [fetchConversations]))
+  // Real-time: refetch (silently, no spinner flash) when conversations finish.
+  useRealtimeEvent("peer_conversation.updated", useCallback(() => { reload({ silent: true }) }, [reload]))
 
   if (loading) {
     return (
