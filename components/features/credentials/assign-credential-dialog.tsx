@@ -2,6 +2,7 @@
 
 import * as React from "react"
 import { Spinner } from "@/components/ui/spinner"
+import { apiFetch } from "@/lib/api-fetch"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -75,7 +76,7 @@ export function AssignCredentialDialog({
   React.useEffect(() => {
     if (!open || !workspaceId) return
     setLoadingCreds(true)
-    fetch(`/api/v1/credentials?workspace_id=${workspaceId}`)
+    apiFetch(`/api/v1/credentials?workspace_id=${workspaceId}`)
       .then((r) => r.json())
       .then((data: OrgCredential[]) => setCredentials(Array.isArray(data) ? data : []))
       .catch(() => setCredentials([]))
@@ -97,7 +98,7 @@ export function AssignCredentialDialog({
     setError(null)
 
     try {
-      const res = await fetch(`/api/v1/agents/${agentId}/credentials?workspace_id=${workspaceId}`, {
+      const res = await apiFetch(`/api/v1/agents/${agentId}/credentials?workspace_id=${workspaceId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

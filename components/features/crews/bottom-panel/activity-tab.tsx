@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { cn } from "@/lib/utils"
+import { apiFetch } from "@/lib/api-fetch"
 
 import type { BottomPanelContext } from "./types"
 import { EmptyState, formatRelative } from "./shared"
@@ -47,7 +48,7 @@ export function ActivityTab({ workspaceId, context }: { workspaceId: string; con
     let cancelled = false
     setEntries(null)
     setError(null)
-    fetch(`/api/v1/crews/${crewId}/issues/${encodeURIComponent(identifier)}/activity?workspace_id=${workspaceId}`)
+    apiFetch(`/api/v1/crews/${crewId}/issues/${encodeURIComponent(identifier)}/activity?workspace_id=${workspaceId}`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((data) => {
         if (cancelled) return

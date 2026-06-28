@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
+import { apiFetch } from "@/lib/api-fetch"
 
 // PipelineRunRecord mirrors the wire shape returned by the v83
 // pipeline_runs-backed endpoint:
@@ -64,7 +65,7 @@ export function usePipelineRunRecords(
     try {
       let url = `/api/v1/workspaces/${workspaceId}/pipelines/${slug}/run-records?limit=50`
       if (status) url += `&status=${encodeURIComponent(status)}`
-      const res = await fetch(url, { signal: ctrl.signal })
+      const res = await apiFetch(url, { signal: ctrl.signal })
       if (ctrl.signal.aborted) return
       if (res.status === 503) {
         // Server doesn't have runStore wired — UI falls back to /runs.

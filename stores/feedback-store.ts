@@ -2,6 +2,7 @@
 
 import { create } from "zustand"
 import { persist, createJSONStorage } from "zustand/middleware"
+import { apiFetch } from "@/lib/api-fetch"
 
 // Signal vocabulary mirrors the v95 message_feedback CHECK constraint.
 // The eval pipeline + drift detector query against these strings, so
@@ -148,9 +149,8 @@ export const useFeedbackStore = create<FeedbackState>()(
             })
 
           try {
-            const res = await fetch("/api/v1/feedback", {
+            const res = await apiFetch("/api/v1/feedback", {
               method: "POST",
-              credentials: "include",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
                 message_id: turnId,
@@ -188,9 +188,9 @@ export const useFeedbackStore = create<FeedbackState>()(
           if (get().userId !== userId) return
 
           try {
-            const res = await fetch(
+            const res = await apiFetch(
               `/api/v1/feedback?message_id=${encodeURIComponent(turnId)}&signal=${encodeURIComponent(signal)}`,
-              { method: "DELETE", credentials: "include" },
+              { method: "DELETE" },
             )
             if (!res.ok) {
               if (process.env.NODE_ENV !== "production") {

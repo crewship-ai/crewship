@@ -11,6 +11,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { apiFetch } from "@/lib/api-fetch"
 import { ToolkitIcon, EmptyHint, TableSkeleton } from "./shared"
 import type { TriggerType, TriggerTypesResp, TriggerInstance, ActiveTriggersResp } from "./types"
 
@@ -38,7 +39,7 @@ export function TriggersTab({
   const loadActive = React.useCallback(async () => {
     setActiveLoading(true)
     try {
-      const r = await fetch(
+      const r = await apiFetch(
         `/api/v1/integrations/composio/triggers/active?workspace_id=${workspaceId}`,
       )
       if (!r.ok) throw new Error(String(r.status))
@@ -64,7 +65,7 @@ export function TriggersTab({
         const params = new URLSearchParams({ workspace_id: workspaceId })
         if (toolkit.trim()) params.set("toolkit", toolkit.trim())
         if (search.trim()) params.set("search", search.trim())
-        const r = await fetch(`/api/v1/integrations/composio/triggers?${params}`, {
+        const r = await apiFetch(`/api/v1/integrations/composio/triggers?${params}`, {
           signal: ctrl.signal,
         })
         if (!r.ok) throw new Error(`Failed (${r.status})`)
@@ -241,7 +242,7 @@ function TriggerModal({
     setBusy(true)
     setErr(null)
     try {
-      const r = await fetch(`/api/v1/integrations/composio/triggers?workspace_id=${workspaceId}`, {
+      const r = await apiFetch(`/api/v1/integrations/composio/triggers?workspace_id=${workspaceId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ slug: trigger.slug, user_id: uid }),

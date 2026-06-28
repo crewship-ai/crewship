@@ -18,6 +18,7 @@ import {
 import { InviteMemberDialog } from "@/components/features/members/invite-member-dialog"
 import { CapabilityGrid } from "@/components/admin/capability-grid"
 import { cn } from "@/lib/utils"
+import { apiFetch } from "@/lib/api-fetch"
 import { SettingsCard, SettingsRow } from "../shared"
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -111,7 +112,7 @@ export function MembersSection({
   async function handleRemove(memberId: string) {
     setRemovingId(memberId)
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/workspaces/${workspaceId}/members/${memberId}?workspace_id=${workspaceId}`,
         { method: "DELETE" },
       )

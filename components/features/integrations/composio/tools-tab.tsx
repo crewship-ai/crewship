@@ -3,6 +3,7 @@
 import * as React from "react"
 import { Wrench, Search } from "lucide-react"
 
+import { apiFetch } from "@/lib/api-fetch"
 import { ToolkitIcon, EmptyHint, TableSkeleton } from "./shared"
 import type { Tool, ToolsResp } from "./types"
 
@@ -39,7 +40,7 @@ export function ToolsTab({
       try {
         const params = new URLSearchParams({ workspace_id: workspaceId, toolkit: tk })
         if (search.trim()) params.set("search", search.trim())
-        const r = await fetch(`/api/v1/integrations/composio/tools?${params}`, {
+        const r = await apiFetch(`/api/v1/integrations/composio/tools?${params}`, {
           signal: ctrl.signal,
         })
         if (!r.ok) throw new Error(`Failed (${r.status})`)

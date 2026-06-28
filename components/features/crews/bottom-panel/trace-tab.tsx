@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { cn } from "@/lib/utils"
+import { apiFetch } from "@/lib/api-fetch"
 
 import type { BottomPanelContext } from "./types"
 import { EmptyState, statusColor } from "./shared"
@@ -42,7 +43,7 @@ export function TraceTab({ workspaceId, context }: { workspaceId: string; contex
     let cancelled = false
     setRun(null)
     setError(null)
-    fetch(`/api/v1/workspaces/${workspaceId}/pipeline-runs/${encodeURIComponent(runId)}`)
+    apiFetch(`/api/v1/workspaces/${workspaceId}/pipeline-runs/${encodeURIComponent(runId)}`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((d) => { if (!cancelled) setRun(d) })
       .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)) })

@@ -5,6 +5,7 @@ import { AlertCircle, RotateCcw } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { toast } from "sonner"
+import { apiFetch } from "@/lib/api-fetch"
 
 interface AvatarOverrideBadgeProps {
   agentId: string
@@ -26,7 +27,7 @@ export function AvatarOverrideBadge({ agentId, workspaceId, hasOverride, onReset
   const handleReset = async () => {
     setLoading(true)
     try {
-      const res = await fetch(`/api/v1/agents/${agentId}?workspace_id=${workspaceId}`, {
+      const res = await apiFetch(`/api/v1/agents/${agentId}?workspace_id=${workspaceId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ avatar_style: null }),

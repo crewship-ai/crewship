@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { GitBranch, History, FileJson, RotateCcw, Download } from "lucide-react"
 import { usePipelineRuns } from "@/hooks/use-pipelines"
+import { apiFetch } from "@/lib/api-fetch"
 
 // PipelineDetailSheet is the right-side drawer that opens when a
 // PipelineRunNode is clicked in the Orchestration → Graph view.
@@ -76,8 +77,8 @@ export function PipelineDetailSheet({ workspaceId, slug, open, onClose }: Pipeli
       setError(null)
       try {
         const [pRes, vRes] = await Promise.all([
-          fetch(`/api/v1/workspaces/${workspaceId}/pipelines/${slug}`, { signal: ctrl.signal }),
-          fetch(`/api/v1/workspaces/${workspaceId}/pipelines/${slug}/versions`, { signal: ctrl.signal }),
+          apiFetch(`/api/v1/workspaces/${workspaceId}/pipelines/${slug}`, { signal: ctrl.signal }),
+          apiFetch(`/api/v1/workspaces/${workspaceId}/pipelines/${slug}/versions`, { signal: ctrl.signal }),
         ])
         if (!pRes.ok) throw new Error(`pipeline: ${pRes.status}`)
         if (!vRes.ok) throw new Error(`versions: ${vRes.status}`)
@@ -105,7 +106,7 @@ export function PipelineDetailSheet({ workspaceId, slug, open, onClose }: Pipeli
     if (!workspaceId || !slug) return
     if (!confirm(`Rollback to version ${version}? History is preserved; the next save will be version ${(versions[0]?.version ?? 0) + 1}.`)) return
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/workspaces/${workspaceId}/pipelines/${slug}/rollback`,
         {
           method: "POST",
@@ -120,11 +121,11 @@ export function PipelineDetailSheet({ workspaceId, slug, open, onClose }: Pipeli
       }
       // Reload — quick and dirty; a stale-fetch guard would be
       // overkill for an explicit user action like this
-      const reload = await fetch(`/api/v1/workspaces/${workspaceId}/pipelines/${slug}`)
+      const reload = await apiFetch(`/api/v1/workspaces/${workspaceId}/pipelines/${slug}`)
       if (reload.ok) {
         setPipeline(await reload.json())
       }
-      const vReload = await fetch(`/api/v1/workspaces/${workspaceId}/pipelines/${slug}/versions`)
+      const vReload = await apiFetch(`/api/v1/workspaces/${workspaceId}/pipelines/${slug}/versions`)
       if (vReload.ok) {
         setVersions(await vReload.json())
       }
@@ -135,7 +136,7 @@ export function PipelineDetailSheet({ workspaceId, slug, open, onClose }: Pipeli
 
   const handleExport = async () => {
     if (!workspaceId || !slug) return
-    const res = await fetch(`/api/v1/workspaces/${workspaceId}/pipelines/${slug}/export?include_history=1`)
+    const res = await apiFetch(`/api/v1/workspaces/${workspaceId}/pipelines/${slug}/export?include_history=1`)
     if (!res.ok) return
     const bundle = await res.json()
     // Trigger download. Browsers require an anchor click for File

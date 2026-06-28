@@ -33,6 +33,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
 import { toast } from "sonner"
+import { apiFetch } from "@/lib/api-fetch"
 import { AddMemberDialog } from "./add-member-dialog"
 import type { CrewMember, CrewMemberRole } from "@/lib/types/crew"
 
@@ -86,7 +87,7 @@ export function CrewMembers({ members, crewId, workspaceId, canEdit, onMembersCh
   async function handleRemoveMember(memberId: string, memberName: string) {
     setRemovingId(memberId)
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/crews/${crewId}/members/${memberId}?workspace_id=${workspaceId}`,
         { method: "DELETE" }
       )
@@ -118,7 +119,7 @@ export function CrewMembers({ members, crewId, workspaceId, canEdit, onMembersCh
     setSavingRole(true)
     const isInherit = pendingRole === null || pendingRole === undefined
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/crews/${crewId}/members/${memberId}?workspace_id=${workspaceId}`,
         {
           method: "PATCH",

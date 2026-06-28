@@ -16,6 +16,7 @@ import {
 import { AnimatedNumber } from "@/components/ui/animated-number"
 import { Button } from "@/components/ui/button"
 import { LANGUAGES } from "@/lib/languages"
+import { apiFetch } from "@/lib/api-fetch"
 import { SettingsCard, SettingsRow, SettingsDangerCard } from "../shared"
 
 interface GeneralSectionProps {
@@ -52,7 +53,7 @@ export function GeneralSection({
     setSaveStatus("saving")
     setSaveError(null)
     try {
-      const res = await fetch(`/api/v1/workspaces/${workspaceId}?workspace_id=${workspaceId}`, {
+      const res = await apiFetch(`/api/v1/workspaces/${workspaceId}?workspace_id=${workspaceId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: formName, slug: formSlug }),
@@ -80,7 +81,7 @@ export function GeneralSection({
     setLangOpen(false)
     setLangSaving(true)
     try {
-      const res = await fetch(`/api/v1/workspaces/${workspaceId}?workspace_id=${workspaceId}`, {
+      const res = await apiFetch(`/api/v1/workspaces/${workspaceId}?workspace_id=${workspaceId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ preferred_language: code ?? "" }),
@@ -103,7 +104,7 @@ export function GeneralSection({
     if (isDeleting) return
     setIsDeleting(true)
     try {
-      const res = await fetch(`/api/v1/workspaces/${workspaceId}?workspace_id=${workspaceId}`, { method: "DELETE" })
+      const res = await apiFetch(`/api/v1/workspaces/${workspaceId}?workspace_id=${workspaceId}`, { method: "DELETE" })
       if (res.ok) {
         onDelete()
       } else {

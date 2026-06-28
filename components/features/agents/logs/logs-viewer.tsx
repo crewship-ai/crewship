@@ -9,6 +9,7 @@ import { EmptyState } from "@/components/layout/empty-state"
 import { cn } from "@/lib/utils"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useRealtimeEvent, type RealtimeEvent } from "@/hooks/use-realtime"
+import { apiFetch } from "@/lib/api-fetch"
 
 import {
   redactSecrets,
@@ -38,7 +39,7 @@ export function LogsViewer() {
   const fetchLogs = useCallback(async () => {
     if (!workspaceId || !agentId) return
     try {
-      const res = await fetch(`/api/v1/agents/${agentId}/logs?workspace_id=${workspaceId}&limit=1000`)
+      const res = await apiFetch(`/api/v1/agents/${agentId}/logs?workspace_id=${workspaceId}&limit=1000`)
       if (!res.ok) {
         setError("Failed to load logs")
         return

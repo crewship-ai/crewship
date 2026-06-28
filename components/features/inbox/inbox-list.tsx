@@ -55,6 +55,7 @@ import { waitpointDecide } from "@/lib/api/waitpoints"
 import { inboxBulk } from "@/lib/api/inbox"
 import { escalationResolve } from "@/lib/api/escalations"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
+import { apiFetch } from "@/lib/api-fetch"
 
 // InboxList — the /inbox page surface. Gmail-style triage: the default
 // "Inbox" tab shows everything that isn't archived (unread + read), so
@@ -1074,7 +1075,7 @@ function KindActions({
                   // no toast and the action looks like silent success.
                   let res: Response
                   try {
-                    res = await fetch(
+                    res = await apiFetch(
                       `/api/v1/agents/${encodeURIComponent(item.source_id)}/approve-hire`,
                       {
                         method: "POST",
@@ -1314,7 +1315,7 @@ function KindActions({
                 // the retry appears to silently succeed.
                 let res: Response
                 try {
-                  res = await fetch(
+                  res = await apiFetch(
                     `/api/v1/workspaces/${encodeURIComponent(item.workspace_id)}/pipelines/${encodeURIComponent(slug)}/run`,
                     {
                       method: "POST",

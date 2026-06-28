@@ -10,6 +10,7 @@ import {
 import { Spinner } from "@/components/ui/spinner"
 import { CLI_ADAPTERS, getModelLabel, getProviderLabel } from "@/lib/cli-adapters"
 import { useAgentFetch } from "@/hooks/use-agent-fetch"
+import { apiFetch } from "@/lib/api-fetch"
 
 interface AgentContextInfo {
   name: string
@@ -44,7 +45,7 @@ export interface SharedContextTabProps {
 export function SharedContextTab({ agentId, workspaceId }: SharedContextTabProps) {
   const { data, loading } = useAgentFetch<ContextPayload>(
     async (signal) => {
-      const r = await fetch(`/api/v1/agents/${agentId}?workspace_id=${workspaceId}`, { signal })
+      const r = await apiFetch(`/api/v1/agents/${agentId}?workspace_id=${workspaceId}`, { signal })
       if (!r.ok) throw new Error(`agent fetch HTTP ${r.status}`)
       const agent: AgentContextInfo = await r.json()
       // Chain the crew fetch so the combined loading state only clears
@@ -52,7 +53,7 @@ export function SharedContextTab({ agentId, workspaceId }: SharedContextTabProps
       // after the spinner clears.
       let crew: CrewInfo | null = null
       if (agent.crew_id) {
-        const cr = await fetch(`/api/v1/crews/${agent.crew_id}?workspace_id=${workspaceId}`, { signal })
+        const cr = await apiFetch(`/api/v1/crews/${agent.crew_id}?workspace_id=${workspaceId}`, { signal })
         if (!cr.ok) throw new Error(`crew fetch HTTP ${cr.status}`)
         crew = await cr.json()
       }

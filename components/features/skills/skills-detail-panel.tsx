@@ -21,6 +21,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import { apiFetch } from "@/lib/api-fetch"
 import type { SkillCardData } from "@/components/features/skills/skill-card"
 
 interface SkillDetail extends SkillCardData {
@@ -89,7 +90,7 @@ export function SkillsDetailPanel({
     }
     let cancelled = false
     setLoading(true)
-    fetch(`/api/v1/skills/${skill.id}` + (workspaceId ? `?workspace_id=${workspaceId}` : ""))
+    apiFetch(`/api/v1/skills/${skill.id}` + (workspaceId ? `?workspace_id=${workspaceId}` : ""))
       .then((res) => (res.ok ? res.json() : Promise.reject()))
       .then((json) => {
         if (!cancelled) setDetail(json as SkillDetail)
@@ -231,7 +232,7 @@ function InstallToAgentDialog({
     let cancelled = false
     setLoading(true)
     setError(null)
-    fetch(`/api/v1/agents?workspace_id=${encodeURIComponent(workspaceId)}`)
+    apiFetch(`/api/v1/agents?workspace_id=${encodeURIComponent(workspaceId)}`)
       .then((res) => (res.ok ? res.json() : Promise.reject()))
       .then((json) => {
         if (cancelled) return
@@ -276,7 +277,7 @@ function InstallToAgentDialog({
     // which 2 of 5 failed rather than a single first-failure).
     const results = await Promise.allSettled(
       Array.from(picked).map((agentId) =>
-        fetch(`/api/v1/agents/${agentId}/skills${wsParam}`, {
+        apiFetch(`/api/v1/agents/${agentId}/skills${wsParam}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ skill_id: skill.id }),
@@ -439,13 +440,13 @@ function UninstallSkillDialog({
     // Two requests: list of agents in workspace, then per-agent skill
     // list. Probing in parallel keeps the dialog open-time tolerable
     // even at the worst-case 50 agents.
-    fetch(`/api/v1/agents?workspace_id=${encodeURIComponent(workspaceId)}`)
+    apiFetch(`/api/v1/agents?workspace_id=${encodeURIComponent(workspaceId)}`)
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error("HTTP " + res.status))))
       .then(async (agents: AgentRow[]) => {
         const wsParam = `workspace_id=${encodeURIComponent(workspaceId)}`
         const checks = await Promise.all(
           agents.map(async (a) => {
-            const res = await fetch(`/api/v1/agents/${encodeURIComponent(a.id)}/skills?${wsParam}`)
+            const res = await apiFetch(`/api/v1/agents/${encodeURIComponent(a.id)}/skills?${wsParam}`)
             if (!res.ok) return { agent: a, has: false }
             const rows = (await res.json().catch(() => [])) as AgentSkillRow[]
             return { agent: a, has: rows.some((r) => r.skill_id === skill.id) }
@@ -469,7 +470,7 @@ function UninstallSkillDialog({
     const errors: string[] = []
     for (const agentId of picked) {
       try {
-        const res = await fetch(
+        const res = await apiFetch(
           `/api/v1/agents/${encodeURIComponent(agentId)}/skills/${encodeURIComponent(skill.id)}?${wsParam}`,
           { method: "DELETE" },
         )
@@ -611,7 +612,7 @@ function AssignToCrewDialog({
     let cancelled = false
     setLoading(true)
     setError(null)
-    fetch(`/api/v1/crews?workspace_id=${encodeURIComponent(workspaceId)}`)
+    apiFetch(`/api/v1/crews?workspace_id=${encodeURIComponent(workspaceId)}`)
       .then((res) => (res.ok ? res.json() : Promise.reject()))
       .then((json) => {
         if (cancelled) return
@@ -630,7 +631,7 @@ function AssignToCrewDialog({
     setError(null)
     const wsParam = `workspace_id=${encodeURIComponent(workspaceId)}`
     try {
-      const agentsRes = await fetch(`/api/v1/agents?${wsParam}&crew_id=${encodeURIComponent(pickedCrew)}`)
+      const agentsRes = await apiFetch(`/api/v1/agents?${wsParam}&crew_id=${encodeURIComponent(pickedCrew)}`)
       if (!agentsRes.ok) {
         setError("Failed to load crew agents")
         setSubmitting(false)
@@ -649,7 +650,7 @@ function AssignToCrewDialog({
       // the JSON detail when the body is RFC7807 so the user sees
       // 'agent not in workspace X' instead of 'Bad Request'.
       for (const a of targets) {
-        const res = await fetch(`/api/v1/agents/${encodeURIComponent(a.id)}/skills?${wsParam}`, {
+        const res = await apiFetch(`/api/v1/agents/${encodeURIComponent(a.id)}/skills?${wsParam}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ skill_id: skill.id }),

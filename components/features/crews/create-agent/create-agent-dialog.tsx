@@ -23,6 +23,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
+import { apiFetch } from "@/lib/api-fetch"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 import { BUILTIN_PERSONAS, type AgentPersona } from "@/lib/entities"
 import { AvatarPickerDialog } from "@/components/features/crews/avatar-picker-dialog"
@@ -218,7 +219,7 @@ export function CreateAgentDialog({
         tool_profile: draft.toolProfile,
         memory_enabled: draft.memoryEnabled,
       }
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/agents?workspace_id=${encodeURIComponent(workspaceId)}`,
         {
           method: "POST",

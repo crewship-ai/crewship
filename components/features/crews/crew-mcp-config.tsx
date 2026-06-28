@@ -8,6 +8,7 @@ import {
 } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { toast } from "sonner"
+import { apiFetch } from "@/lib/api-fetch"
 
 interface CrewMCPServer {
   id: string
@@ -30,9 +31,8 @@ export function CrewMCPConfig({ crewId, workspaceId }: CrewMCPConfigProps) {
   const fetchIntegrations = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/crews/${crewId}/integrations?workspace_id=${workspaceId}`,
-        { credentials: "include" },
       )
       if (!res.ok) {
         toast.error("Failed to load crew MCP servers")

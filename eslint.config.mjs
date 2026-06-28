@@ -41,6 +41,38 @@ export default [
       // React Hooks rules
       "react-hooks/rules-of-hooks": "error",
       "react-hooks/exhaustive-deps": "warn",
+
+      // Force same-origin /api/* calls through apiFetch (lib/api-fetch.ts):
+      // single-flight 401->refresh, cross-tab session-expired broadcast, and
+      // the same-origin/CSRF guard live there. A bare `fetch("/api/...")`
+      // silently bypasses all of it. New bypasses are caught here.
+      //
+      // Legitimate exceptions (auth/pre-session flows where a 401 is
+      // meaningful rather than "session expired", and request/response
+      // streaming that the refresh-retry would break) must opt out with an
+      // explicit `// eslint-disable-next-line no-restricted-syntax -- <reason>`
+      // on the offending fetch call.
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector:
+            "CallExpression[callee.name='fetch'] > Literal.arguments[value=/^\\/api\\//]",
+          message:
+            "Route same-origin /api/* calls through apiFetch (@/lib/api-fetch) instead of bare fetch(). If this must stay on raw fetch (auth flow / streaming), add `// eslint-disable-next-line no-restricted-syntax -- <reason>`.",
+        },
+        {
+          selector:
+            "CallExpression[callee.name='fetch'] > TemplateLiteral.arguments > TemplateElement.quasis:first-child[value.raw=/^\\/api\\//]",
+          message:
+            "Route same-origin /api/* calls through apiFetch (@/lib/api-fetch) instead of bare fetch(). If this must stay on raw fetch (auth flow / streaming), add `// eslint-disable-next-line no-restricted-syntax -- <reason>`.",
+        },
+        {
+          selector:
+            "CallExpression[callee.property.name='fetch'] > Literal.arguments[value=/^\\/api\\//]",
+          message:
+            "Route same-origin /api/* calls through apiFetch (@/lib/api-fetch) instead of bare fetch(). If this must stay on raw fetch (auth flow / streaming), add `// eslint-disable-next-line no-restricted-syntax -- <reason>`.",
+        },
+      ],
     },
   },
   {

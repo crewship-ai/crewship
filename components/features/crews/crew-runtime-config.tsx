@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { RuntimeConfig, type RuntimeConfigValue } from "@/components/features/crews/runtime-config"
 import { toast } from "sonner"
+import { apiFetch } from "@/lib/api-fetch"
 
 interface CrewRuntimeConfigProps {
   crewId: string
@@ -79,7 +80,7 @@ export function CrewRuntimeConfig({
   const handleProvision = useCallback(async () => {
     setProvisioning(true)
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/crews/${crewId}/provision?workspace_id=${workspaceId}`,
         { method: "POST" }
       )
@@ -99,7 +100,7 @@ export function CrewRuntimeConfig({
   const handleRebuild = useCallback(async () => {
     setRebuilding(true)
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/crews/${crewId}/rebuild?workspace_id=${workspaceId}`,
         { method: "POST" }
       )

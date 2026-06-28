@@ -21,6 +21,7 @@ import { activityItemSchema, type ActivityItem } from "@/lib/types/activity"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 import { useTick } from "@/hooks/use-tick"
 import { formatRelativeTime } from "@/lib/time"
+import { apiFetch } from "@/lib/api-fetch"
 import { z } from "zod"
 
 interface CrewActivityFeedProps {
@@ -71,7 +72,7 @@ export function CrewActivityFeed({ workspaceId, agentId, crewId }: CrewActivityF
       })
       if (agentId) params.set("agent_id", agentId)
       if (crewId) params.set("crew_id", crewId)
-      const res = await fetch(`/api/v1/activity?${params.toString()}`)
+      const res = await apiFetch(`/api/v1/activity?${params.toString()}`)
       if (res.ok) {
         const json = await res.json()
         const parsed = z.array(activityItemSchema).safeParse(json)

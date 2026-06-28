@@ -13,6 +13,7 @@ import { formatDateTime } from "@/lib/time"
 import { useWorkspace } from "@/hooks/use-workspace"
 import type { AuditEvent } from "@/lib/types/agent"
 import { cn } from "@/lib/utils"
+import { apiFetch } from "@/lib/api-fetch"
 
 const CATEGORY_CONFIG: Record<
   string,
@@ -65,7 +66,7 @@ export function HistorySection() {
         setError(null)
       }
       try {
-        const res = await fetch(`/api/v1/audit?workspace_id=${workspaceId}&entity_id=${agentId}&limit=50`)
+        const res = await apiFetch(`/api/v1/audit?workspace_id=${workspaceId}&entity_id=${agentId}&limit=50`)
         if (!res.ok) {
           if (!cancelled) setError("Failed to load history")
           return

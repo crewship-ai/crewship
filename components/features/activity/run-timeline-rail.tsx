@@ -18,6 +18,7 @@ import {
 import { RailToolbar, type SortAxis } from "./rail/rail-toolbar"
 import { RunGroupTree } from "./rail/run-group-tree"
 import { SavedViewsButton } from "./rail/saved-views"
+import { apiFetch } from "@/lib/api-fetch"
 
 // RunTimelineRail v3 — composed of toolbar + grouped tree. Replaces
 // the v2 flat list with a Linear-style filter / sort / group UX.
@@ -59,7 +60,7 @@ export function RunTimelineRail({
   // crew list rarely changes mid-session.
   useEffect(() => {
     if (crewsProp || !workspaceId) return
-    fetch(`/api/v1/crews?workspace_id=${encodeURIComponent(workspaceId)}`)
+    apiFetch(`/api/v1/crews?workspace_id=${encodeURIComponent(workspaceId)}`)
       .then((r) => (r.ok ? r.json() : []))
       .then((d) => setCrews(Array.isArray(d) ? d.map((c) => ({ id: c.id, name: c.name })) : []))
       .catch(() => { /* non-fatal — filter dropdown just shows no options */ })

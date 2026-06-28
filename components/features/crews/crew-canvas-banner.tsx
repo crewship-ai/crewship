@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react"
 import { AlertTriangle, ChevronDown } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { toast } from "sonner"
+import { apiFetch } from "@/lib/api-fetch"
 
 // ProvisioningBanner is the canvas-level fallback that surfaces
 // container-image build state (needs_provision / running / failed) when
@@ -18,7 +19,7 @@ function ProvisioningBanner({ crewId, crewSlug, workspaceId }: { crewId: string;
     try {
       // wsCtx middleware mandates workspace_id; without it the endpoint
       // 400s and the polling loop re-renders forever.
-      const r = await fetch(`/api/v1/crews/${crewId}/provision?workspace_id=${encodeURIComponent(workspaceId)}`)
+      const r = await apiFetch(`/api/v1/crews/${crewId}/provision?workspace_id=${encodeURIComponent(workspaceId)}`)
       if (!r.ok) return
       const data = await r.json()
       setState({
@@ -43,7 +44,7 @@ function ProvisioningBanner({ crewId, crewSlug, workspaceId }: { crewId: string;
   const trigger = useCallback(async () => {
     setTriggering(true)
     try {
-      const r = await fetch(`/api/v1/crews/${crewId}/provision?workspace_id=${encodeURIComponent(workspaceId)}`, { method: "POST" })
+      const r = await apiFetch(`/api/v1/crews/${crewId}/provision?workspace_id=${encodeURIComponent(workspaceId)}`, { method: "POST" })
       if (!r.ok) {
         const text = await r.text()
         toast.error(`Provision failed to start: ${text}`)

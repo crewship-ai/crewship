@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/select"
 import { toast } from "sonner"
 import type { CrewMember } from "@/lib/types/crew"
+import { apiFetch } from "@/lib/api-fetch"
 
 interface WorkspaceUser {
   id: string
@@ -56,7 +57,7 @@ export function AddMemberDialog({
     setLoading(true)
     setSelectedUserId("")
 
-    fetch(`/api/v1/workspaces/${workspaceId}/members`)
+    apiFetch(`/api/v1/workspaces/${workspaceId}/members`)
       .then((res) => {
         if (!res.ok) throw new Error("Failed to fetch members")
         return res.json()
@@ -79,7 +80,7 @@ export function AddMemberDialog({
 
     setSubmitting(true)
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/crews/${crewId}/members?workspace_id=${workspaceId}`,
         {
           method: "POST",

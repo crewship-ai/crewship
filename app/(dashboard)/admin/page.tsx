@@ -8,6 +8,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { cn } from "@/lib/utils"
+import { apiFetch } from "@/lib/api-fetch"
 
 import type { TabKey, Stats, AdminOrg, AdminUser, KeeperStatus, KeeperLogEntry } from "./types"
 import { useAdminWebSocket } from "./hooks/use-admin-websocket"
@@ -101,7 +102,7 @@ export default function AdminPage() {
   const checkRuntime = useCallback(async () => {
     setRuntimeChecking(true)
     try {
-      const res = await fetch("/api/v1/system/runtime")
+      const res = await apiFetch("/api/v1/system/runtime")
       if (!res.ok) {
         setRuntimeAvailable(false)
         return
@@ -139,9 +140,9 @@ export default function AdminPage() {
       setLoading(true)
       try {
         const [statsRes, orgsRes, usersRes] = await Promise.all([
-          fetch(`/api/v1/admin/stats?workspace_id=${workspaceId}`),
-          fetch(`/api/v1/admin/workspaces?workspace_id=${workspaceId}`),
-          fetch(`/api/v1/admin/users?workspace_id=${workspaceId}`),
+          apiFetch(`/api/v1/admin/stats?workspace_id=${workspaceId}`),
+          apiFetch(`/api/v1/admin/workspaces?workspace_id=${workspaceId}`),
+          apiFetch(`/api/v1/admin/users?workspace_id=${workspaceId}`),
         ])
 
         if (statsRes.ok && !cancelled) setStats(await statsRes.json())
@@ -161,11 +162,11 @@ export default function AdminPage() {
   const fetchKeeperData = useCallback(async () => {
     setKeeperLoading(true)
     try {
-      const statusRes = await fetch("/api/v1/system/keeper")
+      const statusRes = await apiFetch("/api/v1/system/keeper")
       if (statusRes.ok) setKeeperStatus(await statusRes.json())
 
       if (workspaceId) {
-        const logRes = await fetch(`/api/v1/admin/keeper/requests?workspace_id=${workspaceId}&limit=50`)
+        const logRes = await apiFetch(`/api/v1/admin/keeper/requests?workspace_id=${workspaceId}&limit=50`)
         if (logRes.ok) setKeeperLog(await logRes.json())
       }
     } catch {

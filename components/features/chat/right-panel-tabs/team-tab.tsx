@@ -4,6 +4,7 @@ import { Users } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 import { useAgentFetch } from "@/hooks/use-agent-fetch"
+import { apiFetch } from "@/lib/api-fetch"
 
 interface PeerMessage {
   id: string
@@ -31,7 +32,7 @@ export interface TeamTabProps {
 export function TeamTab({ agentId, workspaceId }: TeamTabProps) {
   const { data, loading, error } = useAgentFetch<TeamPayload>(
     async (signal) => {
-      const r = await fetch(`/api/v1/agents/${agentId}?workspace_id=${workspaceId}`, { signal })
+      const r = await apiFetch(`/api/v1/agents/${agentId}?workspace_id=${workspaceId}`, { signal })
       if (!r.ok) throw new Error(`agent fetch HTTP ${r.status}`)
       const agent = await r.json()
       // Defensive shape check — if the API returns an unexpected payload
@@ -42,7 +43,7 @@ export function TeamTab({ agentId, workspaceId }: TeamTabProps) {
       const crewId: string | null = agent.crew_id ?? null
       let messages: PeerMessage[] = []
       if (crewId) {
-        const pr = await fetch(`/api/v1/crews/${crewId}/peer-conversations?workspace_id=${workspaceId}`, { signal })
+        const pr = await apiFetch(`/api/v1/crews/${crewId}/peer-conversations?workspace_id=${workspaceId}`, { signal })
         if (!pr.ok) throw new Error(`peer-conversations fetch HTTP ${pr.status}`)
         const all = await pr.json()
         // Filter to conversations involving this agent

@@ -55,6 +55,7 @@ describe("usePendingEscalations", () => {
 
     expect(mockFetch).toHaveBeenCalledWith(
       "/api/v1/escalations/pending-count?workspace_id=ws-1",
+      expect.objectContaining({ credentials: "include" }),
     )
     expect(result.current).toBe(7)
   })

@@ -4,6 +4,7 @@ import * as React from "react"
 import { Users } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { apiFetch } from "@/lib/api-fetch"
 import { cn } from "@/lib/utils"
 import { ToolkitIcon, StatusDot, EmptyHint, toolkitLabel } from "./shared"
 import type { Inventory } from "./types"
@@ -39,7 +40,7 @@ export function ConnectedAccountsTab({
           action === "remove"
             ? `${base}?workspace_id=${workspaceId}`
             : `${base}/${action}?workspace_id=${workspaceId}`
-        const r = await fetch(url, { method: action === "remove" ? "DELETE" : "POST" })
+        const r = await apiFetch(url, { method: action === "remove" ? "DELETE" : "POST" })
         if (!r.ok) {
           const body = await r.json().catch(() => null)
           throw new Error(body?.detail || `Failed (${r.status})`)

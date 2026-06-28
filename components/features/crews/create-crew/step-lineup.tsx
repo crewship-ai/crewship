@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react"
 import { Search, BookOpen, FileX2, Lock } from "lucide-react"
 import { CrewIcon } from "@/components/ui/crew-icon"
 import { cn } from "@/lib/utils"
+import { apiFetch } from "@/lib/api-fetch"
 import type { CrewTemplate } from "./api"
 import { asCrewColor, type WizardState } from "./types"
 
@@ -65,7 +66,7 @@ function BrowseTemplates({ state, setState }: Props) {
 
   useEffect(() => {
     let cancelled = false
-    fetch("/api/v1/crew-templates")
+    apiFetch("/api/v1/crew-templates")
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((data: CrewTemplate[]) => {
         if (!cancelled) setTemplates(Array.isArray(data) ? data : [])

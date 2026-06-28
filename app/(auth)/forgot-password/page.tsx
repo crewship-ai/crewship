@@ -17,6 +17,7 @@ export default function ForgotPasswordPage() {
     e.preventDefault()
     setLoading(true)
     try {
+      // eslint-disable-next-line no-restricted-syntax -- pre-session password-reset request; raw fetch by design (no session to refresh)
       await fetch("/api/v1/auth/forgot", {
         method: "POST",
         headers: { "Content-Type": "application/json" },

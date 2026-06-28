@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { MCPLogo } from "@/components/icons/mcp-logos"
+import { apiFetch } from "@/lib/api-fetch"
 import { TrustTierBadge, type TrustTier } from "./trust-tier-badge"
 
 interface RegistryEntry {
@@ -67,7 +68,7 @@ export function Marketplace({ onAdd, recipeEmptyState }: MarketplaceProps) {
 
   // Initial featured fetch
   React.useEffect(() => {
-    fetch(`/api/v1/mcp-registry?featured=true&limit=10`)
+    apiFetch(`/api/v1/mcp-registry?featured=true&limit=10`)
       .then((r) => r.ok ? r.json() : null)
       .then((data: RegistryResponse | null) => setFeatured(data?.servers ?? []))
       .catch(() => {})
@@ -86,7 +87,7 @@ export function Marketplace({ onAdd, recipeEmptyState }: MarketplaceProps) {
       ? `/api/v1/mcp-registry/search?q=${encodeURIComponent(debouncedQuery.trim())}&${params}`
       : `/api/v1/mcp-registry?${params}`
 
-    fetch(url, { signal: ctrl.signal })
+    apiFetch(url, { signal: ctrl.signal })
       .then((r) => r.ok ? r.json() : null)
       .then((data: RegistryResponse | null) => {
         if (!data) { setServers([]); setTotal(0); return }

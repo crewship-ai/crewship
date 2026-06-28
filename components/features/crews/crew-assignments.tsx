@@ -22,6 +22,7 @@ import { formatRelativeTime, formatDurationBetween } from "@/lib/time"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 import type { Assignment } from "@/lib/types/assignment"
 import { STATUS_STYLES, type StatusConfigEntryWithIcon } from "@/lib/status-config"
+import { apiFetch } from "@/lib/api-fetch"
 
 interface CrewAssignmentsProps {
   crewId: string
@@ -66,7 +67,7 @@ export function CrewAssignments({ crewId, workspaceId }: CrewAssignmentsProps) {
       setLoading(true)
     }
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/crews/${crewId}/assignments?workspace_id=${workspaceId}&limit=50`
       )
       if (!res.ok) return

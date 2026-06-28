@@ -160,6 +160,7 @@ export default function OnboardingPage() {
 
   // Already-onboarded gate
   useEffect(() => {
+    // eslint-disable-next-line no-restricted-syntax -- onboarding setup flow: pre-completion gate, raw fetch by design (not part of the steady-state authed app)
     fetch("/api/v1/onboarding/status")
       .then((r) => (r.ok ? r.json() : { completed: false }))
       .then((d) => {
@@ -178,6 +179,7 @@ export default function OnboardingPage() {
     // type into the input before /api/auth/session resolves without
     // having their typing overwritten — the setter sees the latest
     // committed value and only applies the prefill when it's empty.
+    // eslint-disable-next-line no-restricted-syntax -- onboarding prefill probe; auth endpoint, raw fetch by design
     fetch("/api/auth/session")
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
@@ -190,6 +192,7 @@ export default function OnboardingPage() {
   }, [])
 
   useEffect(() => {
+    // eslint-disable-next-line no-restricted-syntax -- onboarding runtime-readiness probe; raw fetch by design (setup flow)
     fetch("/api/v1/system/runtime")
       .then((r) => (r.ok ? r.json() : { available: false }))
       .then((d) => setRuntimeReady(Boolean(d.available)))
@@ -201,6 +204,7 @@ export default function OnboardingPage() {
   // builds default off (internal/crashreport.DefaultOptIn). On any fetch
   // failure the checkbox stays unticked — the privacy-preserving default.
   useEffect(() => {
+    // eslint-disable-next-line no-restricted-syntax -- onboarding telemetry-consent seed; raw fetch by design (setup flow)
     fetch("/api/v1/system/telemetry")
       .then((r) => (r.ok ? r.json() : { enabled: false }))
       .then((d) => setTelemetryOptIn(Boolean(d.enabled)))
@@ -225,6 +229,7 @@ export default function OnboardingPage() {
     if (mode !== "cli" || step !== 3 || !pairCode || pairStatus !== "pending") return
     const interval = setInterval(async () => {
       try {
+        // eslint-disable-next-line no-restricted-syntax -- CLI pairing poll during onboarding; auth endpoint, raw fetch by design
         const res = await fetch(`/api/v1/auth/pair/poll?code=${encodeURIComponent(pairCode)}`)
         if (!res.ok) return
         const data = await res.json()
@@ -265,6 +270,7 @@ export default function OnboardingPage() {
     //   idle → starting → pending (success) | failed (error)
     setPairStatus("starting")
     try {
+      // eslint-disable-next-line no-restricted-syntax -- CLI pairing start during onboarding; auth endpoint, raw fetch by design
       const res = await fetch("/api/v1/auth/pair/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -377,6 +383,7 @@ export default function OnboardingPage() {
         pairingMode: mode === "cli",
         telemetryOptIn,
       })
+      // eslint-disable-next-line no-restricted-syntax -- onboarding setup submit; raw fetch by design (setup flow, not steady-state authed app)
       const res = await fetch("/api/v1/onboarding/setup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -445,6 +452,7 @@ export default function OnboardingPage() {
 
   async function handleSkip() {
     try {
+      // eslint-disable-next-line no-restricted-syntax -- onboarding completion marker; raw fetch by design (setup flow)
       await fetch("/api/v1/onboarding/complete", { method: "POST" })
     } catch {
       // ignore

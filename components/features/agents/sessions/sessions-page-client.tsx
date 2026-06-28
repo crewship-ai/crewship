@@ -13,6 +13,7 @@ import { EmptyState } from "@/components/layout/empty-state"
 import { formatRelativeTime, formatDurationMinutes } from "@/lib/time"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
+import { apiFetch } from "@/lib/api-fetch"
 import type { Session } from "@/lib/types/agent"
 
 // Map session status → canonical status id used by StatusBadge.
@@ -36,7 +37,7 @@ export function SessionsPageClient() {
     if (!workspaceId) return
     if (!silent) { setLoading(true); setError(null) }
     try {
-      const res = await fetch(`/api/v1/agents/${agentId}/chats?workspace_id=${workspaceId}`)
+      const res = await apiFetch(`/api/v1/agents/${agentId}/chats?workspace_id=${workspaceId}`)
       if (!res.ok) {
         if (!silent) setError("Failed to load chats")
         return

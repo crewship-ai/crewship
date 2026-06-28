@@ -41,6 +41,7 @@ import {
 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
+import { apiFetch } from "@/lib/api-fetch"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -296,7 +297,7 @@ export function SkillsBrowser() {
     // the actual agent_skills join result rather than guessing from
     // downloads. Other tabs use the unfiltered list.
     const installedQuery = activeTab === "installed" ? "&installed=1" : ""
-    fetch(`/api/v1/skills?workspace_id=${workspaceId}${installedQuery}`)
+    apiFetch(`/api/v1/skills?workspace_id=${workspaceId}${installedQuery}`)
       .then((res) => {
         if (!res.ok) throw new Error("HTTP " + res.status)
         return res.json()
@@ -425,7 +426,7 @@ export function SkillsBrowser() {
     // reload after a transient failure doesn't leave the centre panel
     // stuck on the error state.
     setError(null)
-    fetch(`/api/v1/skills?workspace_id=${workspaceId}`)
+    apiFetch(`/api/v1/skills?workspace_id=${workspaceId}`)
       .then((res) => (res.ok ? res.json() : Promise.reject()))
       .then(async (json) => {
         const data = (json as SkillCardData[]) ?? []

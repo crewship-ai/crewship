@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import { journalEntrySchema, type JournalEntry } from "@/lib/types/journal"
+import { apiFetch } from "@/lib/api-fetch"
 
 /** Connection state for the journal SSE stream. */
 export type JournalStreamStatus = "idle" | "connecting" | "connected" | "error" | "polling"
@@ -85,7 +86,7 @@ export function useJournalStream(opts: UseJournalStreamOptions): UseJournalStrea
           const pollParams = new URLSearchParams(query)
           pollParams.set("since", pollWatermark)
           pollParams.set("limit", "50")
-          const res = await fetch(`/api/v1/journal?${pollParams.toString()}`)
+          const res = await apiFetch(`/api/v1/journal?${pollParams.toString()}`)
           if (!res.ok) return
           const json = await res.json()
           const entries = Array.isArray(json?.entries) ? json.entries : []

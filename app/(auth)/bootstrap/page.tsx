@@ -47,6 +47,7 @@ export default function BootstrapPage() {
   const [checking, setChecking] = useState(true)
 
   useEffect(() => {
+    // eslint-disable-next-line no-restricted-syntax -- first-run bootstrap gate: runs before any account exists; raw fetch by design
     fetch("/api/v1/system/setup-status")
       .then((r) => (r.ok ? r.json() : { needs_bootstrap: true }))
       .then((d) => {
@@ -72,6 +73,7 @@ export default function BootstrapPage() {
     }
     setLoading(true)
     try {
+      // eslint-disable-next-line no-restricted-syntax -- first-run bootstrap (creates the first admin); no session exists yet, raw fetch by design
       const res = await fetch("/api/v1/bootstrap", {
         method: "POST",
         headers: { "Content-Type": "application/json" },

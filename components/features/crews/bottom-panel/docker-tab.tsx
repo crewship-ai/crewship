@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { cn } from "@/lib/utils"
+import { apiFetch } from "@/lib/api-fetch"
 
 import type { ContainerStatus } from "./types"
 import { EmptyState } from "./shared"
@@ -11,7 +12,7 @@ export function DockerTab() {
   const [error, setError] = useState<string | null>(null)
   useEffect(() => {
     let cancelled = false
-    fetch("/api/v1/system/runtime")
+    apiFetch("/api/v1/system/runtime")
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`)
         return r.json()

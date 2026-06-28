@@ -5,6 +5,7 @@ import { Eye, EyeOff, CheckCircle2, XCircle, FileUp } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
+import { apiFetch } from "@/lib/api-fetch"
 import type { WizardState } from "./types"
 
 interface Props {
@@ -45,7 +46,7 @@ export function StepPaste({ state, setState }: Props) {
     debounceRef.current = setTimeout(async () => {
       setState({ testing: true, testResult: null })
       try {
-        const res = await fetch("/api/v1/credentials/test", {
+        const res = await apiFetch("/api/v1/credentials/test", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({

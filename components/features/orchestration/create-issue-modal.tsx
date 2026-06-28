@@ -40,6 +40,7 @@ import { PriorityIcon, priorityLabel } from "@/components/features/issues/priori
 import { StatusIcon } from "@/components/features/issues/status-icon"
 import type { AssigneeOption } from "@/components/features/issues/assignee-picker"
 import { cn } from "@/lib/utils"
+import { apiFetch } from "@/lib/api-fetch"
 import { toast } from "sonner"
 import type { IssueLabel, IssuePriority, Project } from "@/lib/types/mission"
 import type { CrewSummary } from "@/lib/types/orchestration"
@@ -115,7 +116,7 @@ export function CreateIssueModal({
     let cancelled = false
     async function fetchAgents() {
       try {
-        const res = await fetch(
+        const res = await apiFetch(
           `/api/v1/agents?workspace_id=${encodeURIComponent(workspaceId)}&crew_id=${encodeURIComponent(crewId)}`,
         )
         if (!res.ok || cancelled) return
@@ -161,7 +162,7 @@ export function CreateIssueModal({
 
     setSaving(true)
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/crews/${crewId}/issues?workspace_id=${encodeURIComponent(workspaceId)}`,
         {
           method: "POST",

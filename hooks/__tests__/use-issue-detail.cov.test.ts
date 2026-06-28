@@ -104,10 +104,12 @@ describe("useIssueDetail (uncovered paths)", () => {
     expect(mockFetch).toHaveBeenNthCalledWith(
       2,
       "/api/v1/issues/M1?workspace_id=ws-1",
+      expect.objectContaining({ credentials: "include" }),
     )
     expect(mockFetch).toHaveBeenNthCalledWith(
       3,
       "/api/v1/crews/crew-1/issues/M1/comments?workspace_id=ws-1",
+      expect.objectContaining({ credentials: "include" }),
     )
     expect(result.current.selectedIssue?.title).toBe("Updated title")
     expect(result.current.issueComments).toHaveLength(2)

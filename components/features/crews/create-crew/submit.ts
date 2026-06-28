@@ -1,4 +1,5 @@
 import { toast } from "sonner"
+import { apiFetch } from "@/lib/api-fetch"
 import type { WizardState } from "./types"
 
 export interface SubmitResult {
@@ -60,7 +61,7 @@ function hasMCPOverride(state: WizardState): boolean {
 }
 
 async function submitBlank(workspaceId: string, state: WizardState): Promise<SubmitResult> {
-  const res = await fetch(`/api/v1/crews?workspace_id=${encodeURIComponent(workspaceId)}`, {
+  const res = await apiFetch(`/api/v1/crews?workspace_id=${encodeURIComponent(workspaceId)}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -87,7 +88,7 @@ async function submitFromTemplate(workspaceId: string, state: WizardState): Prom
   if (!state.pickedTemplateSlug) {
     throw new Error("No template selected")
   }
-  const deployRes = await fetch(
+  const deployRes = await apiFetch(
     `/api/v1/crew-templates/${encodeURIComponent(state.pickedTemplateSlug)}/deploy?workspace_id=${encodeURIComponent(workspaceId)}`,
     {
       method: "POST",
@@ -135,7 +136,7 @@ async function applyOverrides(
 
   let status: number | "transport-error" = "transport-error"
   try {
-    const res = await fetch(
+    const res = await apiFetch(
       `/api/v1/crews/${encodeURIComponent(crewId)}?workspace_id=${encodeURIComponent(workspaceId)}`,
       {
         method: "PATCH",

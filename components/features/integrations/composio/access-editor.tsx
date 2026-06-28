@@ -26,6 +26,7 @@ import {
   CommandList,
 } from "@/components/ui/command"
 import { cn } from "@/lib/utils"
+import { apiFetch } from "@/lib/api-fetch"
 import {
   ToolkitIcon,
   ScopeChip,
@@ -101,8 +102,8 @@ export function AccessEditor({
     ;(async () => {
       try {
         const [invR, bindR] = await Promise.all([
-          fetch(`/api/v1/integrations/composio/inventory?workspace_id=${workspaceId}`),
-          fetch(
+          apiFetch(`/api/v1/integrations/composio/inventory?workspace_id=${workspaceId}`),
+          apiFetch(
             `/api/v1/integrations/composio/agents/${agentId}/bind?workspace_id=${workspaceId}`,
           ),
         ])
@@ -207,7 +208,7 @@ export function AccessEditor({
             ...(a.mode === "custom" ? { tools: Array.from(a.tools) } : {}),
           })),
       }
-      const r = await fetch(
+      const r = await apiFetch(
         `/api/v1/integrations/composio/agents/${agentId}/bind?workspace_id=${workspaceId}`,
         {
           method: "POST",
@@ -458,7 +459,7 @@ function ToolPicker({
       try {
         const params = new URLSearchParams({ workspace_id: workspaceId, toolkit })
         if (search.trim()) params.set("search", search.trim())
-        const r = await fetch(`/api/v1/integrations/composio/tools?${params}`, {
+        const r = await apiFetch(`/api/v1/integrations/composio/tools?${params}`, {
           signal: ctrl.signal,
         })
         if (!r.ok) throw new Error(`Failed (${r.status})`)
@@ -622,7 +623,7 @@ export function AgentConnectorsCard({
     if (!workspaceId) return
     setLoading(true)
     try {
-      const r = await fetch(
+      const r = await apiFetch(
         `/api/v1/integrations/composio/agents/${agentId}/bind?workspace_id=${workspaceId}`,
       )
       if (!r.ok) {

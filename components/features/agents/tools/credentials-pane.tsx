@@ -15,6 +15,7 @@ import { useRealtimeEvent } from "@/hooks/use-realtime"
 import { PROVIDER_ICONS } from "@/components/icons/provider-icons"
 import { AssignCredentialDialog } from "@/components/features/credentials/assign-credential-dialog"
 import { PROVIDER_ICON_COLOR, CREDENTIAL_TYPE_ICON_COLOR } from "@/lib/colors"
+import { apiFetch } from "@/lib/api-fetch"
 import { cn } from "@/lib/utils"
 
 interface AgentCredential {
@@ -42,7 +43,7 @@ export function CredentialsPageClient() {
   const fetchCredentials = useCallback(async () => {
     if (!workspaceId || !agentId) return
     try {
-      const res = await fetch(`/api/v1/agents/${agentId}/credentials?workspace_id=${workspaceId}`)
+      const res = await apiFetch(`/api/v1/agents/${agentId}/credentials?workspace_id=${workspaceId}`)
       if (!res.ok) {
         setError("Failed to load credentials")
         return
@@ -68,7 +69,7 @@ export function CredentialsPageClient() {
     if (!workspaceId || !agentId) return
     setRemovingId(assignmentId)
     try {
-      const res = await fetch(`/api/v1/agents/${agentId}/credentials/${assignmentId}?workspace_id=${workspaceId}`, {
+      const res = await apiFetch(`/api/v1/agents/${agentId}/credentials/${assignmentId}?workspace_id=${workspaceId}`, {
         method: "DELETE",
       })
       if (res.ok) {

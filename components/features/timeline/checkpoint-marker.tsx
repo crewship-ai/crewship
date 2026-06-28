@@ -13,6 +13,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { formatRelativeTime } from "@/lib/time"
+import { apiFetch } from "@/lib/api-fetch"
 import type { JournalEntry } from "@/lib/types/journal"
 
 interface CheckpointMarkerProps {
@@ -44,7 +45,7 @@ export function CheckpointMarker({ entry, onFork }: CheckpointMarkerProps) {
   async function handleRestore() {
     setRestoring(true)
     try {
-      const res = await fetch(`/api/v1/checkpoints/${encodeURIComponent(checkpointId)}/restore`, { method: "POST" })
+      const res = await apiFetch(`/api/v1/checkpoints/${encodeURIComponent(checkpointId)}/restore`, { method: "POST" })
       if (res.status === 404) {
         toast.error("Checkpoint not found or restore unavailable")
       } else if (!res.ok) {

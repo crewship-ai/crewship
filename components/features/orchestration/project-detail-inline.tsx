@@ -12,6 +12,7 @@ import { PROJECT_STATUSES, HEALTH_OPTIONS, PRIORITY_OPTIONS } from "@/components
 import { cn } from "@/lib/utils"
 import { ISSUE_STATUS_COLORS, CREW_COLOR_DEFAULT } from "@/lib/colors"
 import { toast } from "sonner"
+import { apiFetch } from "@/lib/api-fetch"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { ProjectStatusIcon, HealthBadge } from "@/components/features/issues/project-status-icon"
 import type { Project, ProjectStatus, ProjectStats, IssuePriority } from "@/lib/types/mission"
@@ -172,11 +173,11 @@ export function ProjectDetailInline({ project, workspaceId, onClose, onUpdated }
 
   // Fetch stats + agents
   useEffect(() => {
-    fetch(`/api/v1/projects/${project.id}/stats?workspace_id=${workspaceId}`)
+    apiFetch(`/api/v1/projects/${project.id}/stats?workspace_id=${workspaceId}`)
       .then((r) => (r.ok ? r.json() : null))
       .then(setStats)
       .catch(() => {})
-    fetch(`/api/v1/agents?workspace_id=${workspaceId}`)
+    apiFetch(`/api/v1/agents?workspace_id=${workspaceId}`)
       .then((r) => (r.ok ? r.json() : []))
       .then((agents: { id: string; name: string; slug: string }[]) =>
         setAllAgents(agents.map((a) => ({ id: a.id, name: a.name, slug: a.slug }))),
@@ -187,7 +188,7 @@ export function ProjectDetailInline({ project, workspaceId, onClose, onUpdated }
   const patchProject = useCallback(
     async (fields: Record<string, unknown>) => {
       const qs = `?workspace_id=${encodeURIComponent(workspaceId)}`
-      const res = await fetch(`/api/v1/projects/${project.id}${qs}`, {
+      const res = await apiFetch(`/api/v1/projects/${project.id}${qs}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(fields),

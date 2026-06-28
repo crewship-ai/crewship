@@ -18,6 +18,7 @@ import { Badge } from "@/components/ui/badge"
 import { EmptyState } from "@/components/layout/empty-state"
 import { cn } from "@/lib/utils"
 import { resolveCrewColor } from "@/lib/colors"
+import { apiFetch } from "@/lib/api-fetch"
 import { toast } from "sonner"
 
 interface Crew {
@@ -70,8 +71,8 @@ export function CrewConnections({ workspaceId }: CrewConnectionsProps) {
   const fetchData = useCallback(async () => {
     try {
       const [connsRes, crewsRes] = await Promise.all([
-        fetch(`/api/v1/crew-connections?workspace_id=${workspaceId}`),
-        fetch(`/api/v1/crews?workspace_id=${workspaceId}`),
+        apiFetch(`/api/v1/crew-connections?workspace_id=${workspaceId}`),
+        apiFetch(`/api/v1/crews?workspace_id=${workspaceId}`),
       ])
       if (connsRes.ok) setConnections(await connsRes.json())
       if (crewsRes.ok) setCrews(await crewsRes.json())
@@ -88,7 +89,7 @@ export function CrewConnections({ workspaceId }: CrewConnectionsProps) {
     }
     setConnecting(true)
     try {
-      const res = await fetch(`/api/v1/crew-connections?workspace_id=${workspaceId}`, {
+      const res = await apiFetch(`/api/v1/crew-connections?workspace_id=${workspaceId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ from_crew_id: fromCrew, to_crew_id: toCrew, direction }),
@@ -112,7 +113,7 @@ export function CrewConnections({ workspaceId }: CrewConnectionsProps) {
   const handleDisconnect = useCallback(async (id: string) => {
     setDisconnecting(id)
     try {
-      const res = await fetch(`/api/v1/crew-connections/${id}?workspace_id=${workspaceId}`, {
+      const res = await apiFetch(`/api/v1/crew-connections/${id}?workspace_id=${workspaceId}`, {
         method: "DELETE",
       })
       if (!res.ok) {

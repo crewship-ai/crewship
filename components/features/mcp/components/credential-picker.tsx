@@ -13,6 +13,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
+import { apiFetch } from "@/lib/api-fetch"
 import { toast } from "sonner"
 import type { Credential } from "../types"
 import { isCredentialRef, deriveCredentialName } from "../lib/credential-helpers"
@@ -107,7 +108,7 @@ export function CredentialPicker({
 
     setCreating(true)
     try {
-      const res = await fetch(`/api/v1/credentials?workspace_id=${workspaceId}`, {
+      const res = await apiFetch(`/api/v1/credentials?workspace_id=${workspaceId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

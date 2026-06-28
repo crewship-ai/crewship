@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
+import { apiFetch } from "@/lib/api-fetch"
 
 export interface KeeperLiveEvent {
   request_id: string
@@ -42,7 +43,7 @@ export function useAdminWebSocket({ enabled, workspaceId }: UseAdminWebSocketOpt
     const connect = async () => {
       try {
         setKeeperWsStatus("connecting")
-        const tokenRes = await fetch("/api/v1/ws-token", { credentials: "include" })
+        const tokenRes = await apiFetch("/api/v1/ws-token")
         if (!tokenRes.ok || cancelled) return
         const { token } = await tokenRes.json()
         if (!token || cancelled) return

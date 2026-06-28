@@ -7,6 +7,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
 import { SectionHeader, PropertyRow } from "@/components/features/issues/property-row"
 import { cn } from "@/lib/utils"
+import { apiFetch } from "@/lib/api-fetch"
 import { toast } from "sonner"
 import type { Mission } from "@/lib/types/mission"
 import type { Pipeline } from "@/hooks/use-pipelines"
@@ -44,7 +45,7 @@ export function IssueRoutineBinder({
       // identifier resolves the source pill back to the issue. We
       // fall back to issue.id only when identifier is absent (shouldn't
       // happen for issues but defends the type).
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/workspaces/${workspaceId}/pipelines/${encodeURIComponent(issue.routine_slug)}/run`,
         {
           method: "POST",

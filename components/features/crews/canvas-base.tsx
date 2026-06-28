@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { fetchWithRetry } from "@/lib/fetch-with-retry"
+import { apiFetch } from "@/lib/api-fetch"
 import { cn } from "@/lib/utils"
 
 // =============================================================================
@@ -132,7 +133,7 @@ export function usePatchEntity<T>({
     if (!entity) return
     const base = patchUrl(entity)
     const url = base.includes("?") ? `${base}&workspace_id=${workspaceId}` : `${base}?workspace_id=${workspaceId}`
-    const res = await fetch(url, {
+    const res = await apiFetch(url, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),

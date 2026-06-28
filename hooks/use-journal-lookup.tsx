@@ -24,6 +24,7 @@ import {
   type ReactNode,
 } from "react"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
+import { apiFetch } from "@/lib/api-fetch"
 
 export interface CrewLookup {
   id: string
@@ -102,7 +103,7 @@ export function JournalLookupProvider({ workspaceId, children }: ProviderProps) 
     const myWorkspace = workspaceId
     setLoading(true)
     try {
-      const res = await fetch(`/api/v1/journal/lookup?workspace_id=${encodeURIComponent(workspaceId)}`)
+      const res = await apiFetch(`/api/v1/journal/lookup?workspace_id=${encodeURIComponent(workspaceId)}`)
       if (!res.ok) return
       const data = (await res.json()) as {
         crews: CrewLookup[]

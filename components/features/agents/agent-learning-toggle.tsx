@@ -8,6 +8,7 @@ import { Switch } from "@/components/ui/switch"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { useAbilities } from "@/hooks/use-abilities"
+import { apiFetch } from "@/lib/api-fetch"
 
 // PR-G F4.1 UX — per-agent self-learning toggle.
 //
@@ -63,7 +64,7 @@ export function AgentLearningToggle({ agentId, workspaceId, canEdit }: AgentLear
     setLoading(true)
     setErr(null)
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/agents/${agentId}/learning?workspace_id=${encodeURIComponent(workspaceId)}`,
         { signal },
       )
@@ -108,7 +109,7 @@ export function AgentLearningToggle({ agentId, workspaceId, canEdit }: AgentLear
     }
     setSaving(true)
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/agents/${agentId}/learning?workspace_id=${encodeURIComponent(workspaceId)}`,
         {
           method: "PATCH",

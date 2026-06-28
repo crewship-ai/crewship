@@ -26,6 +26,7 @@ import { EscalationResponseCard, ActionBadge } from "@/components/features/escal
 import { formatRelativeTime } from "@/lib/time"
 import { z } from "zod"
 import { STATUS_STYLES, type StatusConfigEntryWithIcon } from "@/lib/status-config"
+import { apiFetch } from "@/lib/api-fetch"
 
 interface CrewEscalationsProps {
   crewId: string
@@ -71,7 +72,7 @@ export function CrewEscalations({ crewId, workspaceId }: CrewEscalationsProps) {
       setLoading(true)
     }
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/crews/${crewId}/escalations?workspace_id=${workspaceId}&limit=50`
       )
       if (!res.ok) return

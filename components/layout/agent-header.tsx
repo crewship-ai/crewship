@@ -12,6 +12,7 @@ import { useWorkspace } from "@/hooks/use-workspace"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { cn } from "@/lib/utils"
+import { apiFetch } from "@/lib/api-fetch"
 
 // Role label tone — neutral semantic tokens, no hardcoded palette shades.
 const AGENT_ROLE_TONE = "text-muted-foreground border-border bg-muted/40"
@@ -42,7 +43,7 @@ export function AgentHeader({ agentId }: AgentHeaderProps) {
     if (!workspaceId || !agent || stopping) return
     setStopping(true)
     try {
-      const res = await fetch(`/api/v1/agents/${agentId}/stop?workspace_id=${workspaceId}`, { method: "POST" })
+      const res = await apiFetch(`/api/v1/agents/${agentId}/stop?workspace_id=${workspaceId}`, { method: "POST" })
       if (res.ok) {
         const data = await res.json()
         setAgent((prev) => prev ? { ...prev, status: data.status } : prev)

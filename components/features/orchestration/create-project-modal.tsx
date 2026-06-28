@@ -49,6 +49,7 @@ import {
 import type { AssigneeOption } from "@/components/features/issues/assignee-picker"
 import { cn } from "@/lib/utils"
 import { ISSUE_ICON_COLORS } from "@/lib/colors"
+import { apiFetch } from "@/lib/api-fetch"
 import { toast } from "sonner"
 import type { IssueLabel, IssuePriority, ProjectStatus } from "@/lib/types/mission"
 import type { CrewSummary } from "@/lib/types/orchestration"
@@ -128,7 +129,7 @@ export function CreateProjectModal({
     let cancelled = false
     async function fetchAgents() {
       try {
-        const res = await fetch(`/api/v1/agents?workspace_id=${encodeURIComponent(workspaceId)}`)
+        const res = await apiFetch(`/api/v1/agents?workspace_id=${encodeURIComponent(workspaceId)}`)
         if (!res.ok || cancelled) return
         const data = await res.json()
         const list = Array.isArray(data) ? data : data.agents ?? []
@@ -172,7 +173,7 @@ export function CreateProjectModal({
 
     setSaving(true)
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/projects?workspace_id=${encodeURIComponent(workspaceId)}`,
         {
           method: "POST",

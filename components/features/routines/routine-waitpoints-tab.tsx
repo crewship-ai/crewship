@@ -5,6 +5,7 @@ import { CheckCircle2, XCircle, Clock, MessageSquare } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
+import { apiFetch } from "@/lib/api-fetch"
 import { RoutineListSkeleton } from "./routine-skeletons"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 import { Card, EmptyState, Pill } from "./_shared"
@@ -41,7 +42,7 @@ export function RoutineWaitpointsTab({ workspaceId, slug }: Props) {
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch(`/api/v1/workspaces/${workspaceId}/pipelines/waitpoints`)
+      const res = await apiFetch(`/api/v1/workspaces/${workspaceId}/pipelines/waitpoints`)
       if (!res.ok) {
         if (res.status === 503) {
           setPending([])
@@ -71,7 +72,7 @@ export function RoutineWaitpointsTab({ workspaceId, slug }: Props) {
   const decide = async (token: string, approved: boolean) => {
     setDecidingToken(token)
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/workspaces/${workspaceId}/pipelines/waitpoints/${token}/approve`,
         {
           method: "POST",

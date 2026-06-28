@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react"
 import { RefreshCw } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
+import { apiFetch } from "@/lib/api-fetch"
 
 // PR-G F3 UI surface — auxiliary model slot diagnostic panel.
 //
@@ -61,7 +62,7 @@ export function AuxStatusSection() {
     setLoading(true)
     setErr(null)
     try {
-      const res = await fetch("/api/v1/system/aux-status")
+      const res = await apiFetch("/api/v1/system/aux-status")
       if (!res.ok) {
         setErr(`Failed (HTTP ${res.status})`)
         return

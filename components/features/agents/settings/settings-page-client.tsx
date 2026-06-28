@@ -46,6 +46,7 @@ import { useWorkspace } from "@/hooks/use-workspace"
 import { CLI_ADAPTERS, CLI_ADAPTER_KEYS } from "@/lib/cli-adapters"
 import { AvatarPicker } from "@/components/avatar-picker"
 import { AvatarOverrideBadge } from "@/components/features/agents/settings/avatar-override-badge"
+import { apiFetch } from "@/lib/api-fetch"
 import { cn } from "@/lib/utils"
 
 interface AgentDetail {
@@ -144,8 +145,8 @@ export function SettingsPageClient() {
     async function fetchData() {
       try {
         const [agentRes, teamsRes] = await Promise.all([
-          fetch(`/api/v1/agents/${agentId}?workspace_id=${workspaceId}`),
-          fetch(`/api/v1/crews?workspace_id=${workspaceId}`),
+          apiFetch(`/api/v1/agents/${agentId}?workspace_id=${workspaceId}`),
+          apiFetch(`/api/v1/crews?workspace_id=${workspaceId}`),
         ])
         if (!agentRes.ok) {
           if (!cancelled) setError("Failed to load agent")
@@ -214,7 +215,7 @@ export function SettingsPageClient() {
     if (agentRole === "LEAD") body.lead_mode = leadMode
 
     try {
-      const res = await fetch(`/api/v1/agents/${agentId}?workspace_id=${workspaceId}`, {
+      const res = await apiFetch(`/api/v1/agents/${agentId}?workspace_id=${workspaceId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),

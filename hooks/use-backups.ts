@@ -6,6 +6,7 @@ import {
   useQueryClient,
   type UseQueryOptions,
 } from "@tanstack/react-query"
+import { apiFetch } from "@/lib/api-fetch"
 
 /**
  * React Query surface for the admin backups panel (CRE-128). One
@@ -176,7 +177,7 @@ export function useBackups(
   return useQuery<BackupListEntry[]>({
     queryKey: ["backups", workspaceId],
     queryFn: async () => {
-      const res = await fetch(withQuery("/api/v1/admin/backups", workspaceId!))
+      const res = await apiFetch(withQuery("/api/v1/admin/backups", workspaceId!))
       const body = await asJSON<{ data: BackupListEntry[] }>(res)
       return body.data ?? []
     },
@@ -189,7 +190,7 @@ export function useBackupStatus(workspaceId: string | undefined) {
   return useQuery<BackupStatus>({
     queryKey: ["backup-status", workspaceId],
     queryFn: async () => {
-      const res = await fetch(withQuery("/api/v1/admin/backups/status", workspaceId!))
+      const res = await apiFetch(withQuery("/api/v1/admin/backups/status", workspaceId!))
       return asJSON<BackupStatus>(res)
     },
     enabled: Boolean(workspaceId),
@@ -206,7 +207,7 @@ export function useInspectBackup(workspaceId: string | undefined, path: string |
   return useQuery<BackupManifest>({
     queryKey: ["backup-inspect", workspaceId, path],
     queryFn: async () => {
-      const res = await fetch(
+      const res = await apiFetch(
         withQuery("/api/v1/admin/backups/inspect", workspaceId!, { path: path! }),
       )
       return asJSON<BackupManifest>(res)
@@ -220,7 +221,7 @@ export function useCreateBackup(workspaceId: string | undefined) {
   return useMutation<CreateBackupResponse, Error, CreateBackupRequest>({
     mutationFn: async (req) => {
       const ws = requireWorkspaceId(workspaceId)
-      const res = await fetch(withQuery("/api/v1/admin/backups", ws), {
+      const res = await apiFetch(withQuery("/api/v1/admin/backups", ws), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(req),
@@ -239,7 +240,7 @@ export function useRestoreBackup(workspaceId: string | undefined) {
   return useMutation<unknown, Error, RestoreBackupRequest>({
     mutationFn: async (req) => {
       const ws = requireWorkspaceId(workspaceId)
-      const res = await fetch(withQuery("/api/v1/admin/backups/restore", ws), {
+      const res = await apiFetch(withQuery("/api/v1/admin/backups/restore", ws), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(req),
@@ -261,7 +262,7 @@ export function useDeleteBackup(workspaceId: string | undefined) {
   return useMutation<void, Error, string>({
     mutationFn: async (path) => {
       const ws = requireWorkspaceId(workspaceId)
-      const res = await fetch(withQuery("/api/v1/admin/backups", ws, { path }), {
+      const res = await apiFetch(withQuery("/api/v1/admin/backups", ws, { path }), {
         method: "DELETE",
       })
       if (!res.ok) {
@@ -368,7 +369,7 @@ export function useVerifyBackup(workspaceId: string | undefined) {
   return useMutation<VerifyBackupResponse, Error, string>({
     mutationFn: async (path) => {
       const ws = requireWorkspaceId(workspaceId)
-      const res = await fetch(
+      const res = await apiFetch(
         withQuery("/api/v1/admin/backups/verify", ws, { path }),
       )
       return asJSON<VerifyBackupResponse>(res)
@@ -397,7 +398,7 @@ export function useRotateBackups(workspaceId: string | undefined) {
   return useMutation<RotateBackupResponse, Error, RotateBackupRequest>({
     mutationFn: async (req) => {
       const ws = requireWorkspaceId(workspaceId)
-      const res = await fetch(withQuery("/api/v1/admin/backups/rotate", ws), {
+      const res = await apiFetch(withQuery("/api/v1/admin/backups/rotate", ws), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(req),
@@ -434,7 +435,7 @@ export function useBackupSelfTest(workspaceId: string | undefined) {
   return useMutation<SelfTestResponse, Error, SelfTestRequest>({
     mutationFn: async (req) => {
       const ws = requireWorkspaceId(workspaceId)
-      const res = await fetch(withQuery("/api/v1/admin/backups/self-test", ws), {
+      const res = await apiFetch(withQuery("/api/v1/admin/backups/self-test", ws), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(req),
@@ -456,7 +457,7 @@ export function useForceUnlock(workspaceId: string | undefined) {
   return useMutation<void, Error, void>({
     mutationFn: async () => {
       const ws = requireWorkspaceId(workspaceId)
-      const res = await fetch(withQuery("/api/v1/admin/backups/status", ws), {
+      const res = await apiFetch(withQuery("/api/v1/admin/backups/status", ws), {
         method: "DELETE",
       })
       if (!res.ok) {
@@ -487,7 +488,7 @@ export function useBackupMetrics(workspaceId: string | undefined) {
   return useQuery<BackupMetricsResponse>({
     queryKey: ["backup-metrics", workspaceId],
     queryFn: async () => {
-      const res = await fetch(withQuery("/api/v1/admin/backups/metrics", workspaceId!))
+      const res = await apiFetch(withQuery("/api/v1/admin/backups/metrics", workspaceId!))
       return asJSON<BackupMetricsResponse>(res)
     },
     enabled: Boolean(workspaceId),
@@ -510,7 +511,7 @@ export function useCrewsForBackup(workspaceId: string | undefined) {
   return useQuery<CrewLite[]>({
     queryKey: ["crews-lite", workspaceId],
     queryFn: async () => {
-      const res = await fetch(`/api/v1/crews?workspace_id=${encodeURIComponent(workspaceId!)}`)
+      const res = await apiFetch(`/api/v1/crews?workspace_id=${encodeURIComponent(workspaceId!)}`)
       const body = await asJSON<{ data?: CrewLite[] } | CrewLite[]>(res)
       // The /crews endpoint historically returned a bare array; the
       // newer paginated handler wraps it under { data }. Accept both.

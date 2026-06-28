@@ -2,6 +2,7 @@
 
 import { useState, type FormEvent } from "react"
 import { inviteMemberSchema } from "@/lib/validations"
+import { apiFetch } from "@/lib/api-fetch"
 import { UserPlus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -47,7 +48,7 @@ export function InviteMemberDialog({ workspaceId, onInvited }: InviteMemberDialo
     }
 
     try {
-      const res = await fetch(`/api/v1/workspaces/${workspaceId}/invitations?workspace_id=${workspaceId}`, {
+      const res = await apiFetch(`/api/v1/workspaces/${workspaceId}/invitations?workspace_id=${workspaceId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(parsed.data),
