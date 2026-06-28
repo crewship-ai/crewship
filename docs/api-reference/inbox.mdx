@@ -19,6 +19,7 @@ The inbox is the unified human-in-the-loop surface for the workspace. Rows are w
 | GET | [`/api/v1/inbox`](#get-apiv1inbox) | List items (newest-first, with unread count) |
 | GET | [`/api/v1/inbox/count`](#get-apiv1inboxcount) | Unread count for the bell badge |
 | PATCH | [`/api/v1/inbox/{id}`](#patch-apiv1inboxid) | Flip an item's state |
+| POST | [`/api/v1/inbox/bulk`](#post-apiv1inboxbulk) | Apply one state transition to many items in a single request |
 
 ---
 
@@ -141,7 +142,9 @@ Returns `200`:
 
 #### Source-managed kinds — `409 Conflict`
 
-For `kind` in `{ waitpoint, escalation, failed_run }`, the inbox row is a mirror of an authoritative source row (the waitpoint token, the escalation row, the failed pipeline run). PATCH only supports `state: "read"` for these — `unread` and `resolved` would desync the inbox row from the source, because the user expects the flip to *also* approve the waitpoint / close the escalation / retry the run, and the inbox PATCH doesn't do that.
+For `kind` in `{ waitpoint, escalation }`, the inbox row is a mirror of an authoritative source row (the waitpoint token, the escalation row). PATCH only supports `state: "read"` for these — `unread` and `resolved` would desync the inbox row from the source, because the user expects the flip to *also* approve the waitpoint / close the escalation, and the inbox PATCH doesn't do that.
+
+`failed_run` (and `message`) are **not** source-managed — they resolve freely between all three states via PATCH or the bulk endpoint, because there is no source row whose state the inbox flip would contradict.
 
 The non-read transition returns `409` with a hint at the right endpoint:
 
@@ -152,13 +155,58 @@ The non-read transition returns `409` with a hint at the right endpoint:
 }
 ```
 
-Generic kinds (`message`) flip freely between all three states.
+Generic kinds (`message`, `failed_run`) flip freely between all three states.
 
 #### State transitions
 
 - **→ read** sets `read_at` and `read_by_user_id` (both `COALESCE`'d so re-reading doesn't move the timestamp).
 - **→ unread** clears `read_at`, `read_by_user_id`, `resolved_at`, `resolved_by_user_id`, `resolved_action`.
 - **→ resolved** sets `resolved_at`, `resolved_by_user_id`, `resolved_action` (and overwrites whatever's currently set, in case the user resolved with a different action).
+
+## Bulk state transition
+
+Apply one state transition over many ids in a single round-trip. This backs the tree-grouped UI's "resolve all under this routine / crew" action — instead of N PATCHes, the client sends one request and gets back a per-id breakdown.
+
+### `POST /api/v1/inbox/bulk`
+
+Request body is JSON:
+
+```json
+{
+  "ids": ["ibx_01HVZ...", "ibx_01HW0...", "ibx_01HW1..."],
+  "state": "resolved",
+  "resolved_action": "approved"
+}
+```
+
+| Field | Type | Notes |
+|---|---|---|
+| `ids` | string[] | Required. Explicit id list. Empty → `400 ids required`. Duplicate / empty ids are de-duped and ignored. |
+| `state` | `"unread"` \| `"read"` \| `"resolved"` | Required. Invalid → `400 state must be unread\|read\|resolved`. |
+| `resolved_action` | string | Optional. Recorded on `resolved` transitions, same as PATCH. |
+
+More than 500 ids → `400 too many ids (max 500)`, matching the list `LIMIT` ceiling.
+
+**Per-id visibility re-check.** The server applies the [inbox visibility clause](#visibility-model) per id. Ids targeted at another user or another workspace count as `not_found`, not an error — you cannot flip rows you can't see, and the bulk call can't be used to probe which ids exist.
+
+**Decision-item protection (partial skip, never whole-batch fail).** Decision items are skipped individually rather than failing the request:
+
+- On `state: "resolved"`, rows are **skipped** when `kind` ∈ `{ waitpoint, escalation }` **or** `blocking = true` (any kind) — these need their source endpoint to resolve.
+- On `state: "unread"`, `waitpoint` / `escalation` rows are skipped (flipping them would desync the source).
+- Non-blocking `message` / `failed_run` rows resolve freely.
+- `state: "read"` is always harmless and applies to all rows.
+
+Returns `200` with a per-id breakdown:
+
+```json
+{ "updated": 22, "skipped": 3, "skipped_ids": ["ibx_…", "ibx_…", "ibx_…"], "not_found": 0, "state": "resolved" }
+```
+
+- `updated` — rows that took the transition.
+- `skipped` / `skipped_ids` — decision items the server refused to flip; the UI can surface "22 resolved, 3 need the source endpoint" and link each skipped id to its [source endpoint](#source-managed-kinds--409-conflict).
+- `not_found` — ids that didn't resolve to a visible row (wrong workspace / target, or already gone).
+
+A single `inbox.updated` event broadcasts for the whole batch — see the [WebSocket section](#websocket-event) below.
 
 ## WebSocket event
 
@@ -169,6 +217,16 @@ Every successful PATCH broadcasts on the workspace channel:
   "type": "inbox.updated",
   "channel": "workspace:wsp_01HVZ...",
   "payload": { "id": "ibx_01HVZ...", "state": "resolved" }
+}
+```
+
+A [bulk transition](#post-apiv1inboxbulk) emits a single `inbox.updated` for the whole batch instead of one per id — but only when `updated > 0` (a request that skipped everything broadcasts nothing). Its payload carries the batch markers rather than a single row id:
+
+```json
+{
+  "type": "inbox.updated",
+  "channel": "workspace:wsp_01HVZ...",
+  "payload": { "bulk": "true", "state": "resolved" }
 }
 ```
 

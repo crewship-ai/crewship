@@ -63,6 +63,20 @@ The detail panel's action row is what the source-of-truth call hangs off:
 
 When a row is resolved, the detail panel dims, the action row replaces itself with a "Resolved Xm ago · approved" line, and the row still appears in the **All** and **Resolved** filter tabs.
 
+### Grouping & bulk triage
+
+Once the list gets long, flat newest-first ordering stops scaling. The list can be grouped by **Type**, **Routine**, **Issue**, or **Crew** — the group key comes off `kind` plus the relevant `payload` field (`pipeline_slug` for Routine, `issue_identifier` for Issue, `crew_id` for Crew). A row whose field is missing lands in a stable "No routine" / "No issue" / "No crew" bucket rather than disappearing. Grouping is **client-side** — it re-buckets the rows already loaded, no extra fetch.
+
+Each group is a collapsible folder with a count in its header. A group-header checkbox selects the whole group (and renders **indeterminate** when only some rows under it are checked); per-row checkboxes select individuals. When you collapse a group or switch filters, off-screen checked ids are pruned from the selection so the counts in the bulk bar stay honest.
+
+With anything selected, a **bulk bar** appears: **Mark read** and **Resolve** apply across the whole selection in one request (`POST /api/v1/inbox/bulk`) rather than a PATCH per row.
+
+<Warning>
+Bulk **Resolve** never silently closes a decision item. If the selection contains any `waitpoint` / `escalation` row or any `blocking=true` row, a confirmation dialog spells out how many items will be left open and resolves only the dismissable remainder. If the *entire* selection is decision items, there is no **Resolve** action at all — open each one individually and act on its source. **Mark read** is always one click and closes nothing. Even if a client bypasses these guards, the [server backstop](/api-reference/inbox#post-apiv1inboxbulk) skips the same rows, so a decision item can never be resolved by the bulk path.
+</Warning>
+
+A row whose `kind` is an unknown value renders as a generic notification (hardened fallback) instead of crashing the row — new server-side kinds degrade gracefully in an older UI.
+
 ## Realtime
 
 The list is refreshed by two WebSocket events on the workspace channel:

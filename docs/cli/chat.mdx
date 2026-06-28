@@ -25,6 +25,9 @@ Auth: every subcommand requires an authenticated session (`crewship login`) and 
 | `chat react add <chat-id> <msg-id> <emoji>` | Add an emoji reaction to a single message. |
 | `chat react remove <chat-id> <msg-id> <emoji>` | Remove your reaction (`rm` / `delete` aliases). |
 | `chat react list <chat-id> <msg-id>` | List reactions with counts and whether the caller already reacted. |
+| `chat participants list <chat-id>` | List the humans in a group chat (columns `USER ID` / `EMAIL` / `NAME` / `ROLE`). Prints `No participants (private chat).` when empty. Alias: `members`. |
+| `chat participants add <chat-id> <user-id>` | Add a workspace user. Adding the first participant promotes the chat to a group, after which the agent only replies when @mentioned. |
+| `chat participants remove <chat-id> <user-id>` | Remove a user (`rm` / `delete` aliases). Cannot remove the chat owner. |
 
 ## Flags
 
@@ -46,6 +49,12 @@ The transcript renders assistant / `model` messages through the markdown ANSI re
 | `--agent <slug-or-id>` | (auto) | Override the auto-resolved agent. By default the CLI walks `GET /api/v1/agents` and asks each agent for its chats until the chat id is found. |
 
 The upload is one multipart POST to `POST /api/v1/agents/{agentId}/chats/{chatId}/attachments`. The server caps the body at 25 MB; the CLI assembles the multipart body in memory rather than streaming because the bound is small.
+
+### `chat participants add <chat-id> <user-id>`
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `--role <member\|owner>` | `member` | Role to grant the participant. Any value other than `owner` is stored as `member`. |
 
 ## Examples
 
@@ -89,6 +98,18 @@ crewship chat react rm c_abc123 msg_7a3b "👍"
 ```
 
 Server-side reactions are idempotent per `(chat, message, emoji, user)` — `add` and `remove` can be called blindly without first checking `list`.
+
+### Manage group-chat participants
+
+```bash
+crewship chat participants add c_abc123 usr_42            # promotes to group
+crewship chat participants add c_abc123 usr_42 --role owner
+crewship chat participants list c_abc123
+crewship chat participants list c_abc123 --format json
+crewship chat participants remove c_abc123 usr_42
+```
+
+Adding the first participant flips the chat to group visibility, after which the agent only replies when @mentioned. Mutations require the caller to be the chat owner or a workspace `OWNER`/`ADMIN` — otherwise the server returns `403`. Adding a user who isn't in the workspace returns `400 user is not a member of this workspace`, and removing the chat owner returns `400 cannot remove the chat owner`.
 
 ## Common errors
 

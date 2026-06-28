@@ -154,6 +154,16 @@ These are off by default and intended for operators debugging performance.
 | `ENCRYPTION_KEY` | Auto-generated on first boot | 256-bit hex-encoded AES key for credential encryption. Same auto-gen + persist path as `NEXTAUTH_SECRET` (32 bytes → 64 hex chars in `<dataDir>/secrets.env`). |
 | `ENCRYPTION_KEY_V2` | (optional) | Rotated encryption key (for key versioning) |
 
+## Composio integrations
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `COMPOSIO_API_KEY` | (unset — provider off) | Server-wide Composio project API key (`ak_…`). When set, auto-enables the Composio provider unless `COMPOSIO_ENABLED` is explicitly set. Fallback when a workspace has no per-workspace key. Single-tenant: one key = one Composio project shared by all workspaces. |
+| `COMPOSIO_ENABLED` | (derived from `COMPOSIO_API_KEY`) | Explicit on/off override (`true`/`1` … `false`/`0`). Forces the provider off even with a key present, or on without one. |
+| `COMPOSIO_BASE_URL` | (Composio production host) | Override the Composio API host (self-host / proxy / testing). |
+| `COMPOSIO_DEFAULT_CONNECTOR` | `false` | When `true`/`1`, every agent without an explicit per-agent Composio binding inherits a workspace-wide default connector (full access to all connected apps), and legacy non-Composio MCP servers are excluded at resolve time. Behaviour switch only — never auto-enables the provider. |
+| `NEXT_PUBLIC_LEGACY_MCP_INTEGRATIONS` | (unset) | Build-time dashboard flag. `=true` restores the legacy self-hosted MCP integrations UI at `/integrations` (default is the managed Composio UI). |
+
 ## Keeper (AI Security Gatekeeper)
 
 | Variable | Default | Description |

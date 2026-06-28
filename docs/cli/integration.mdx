@@ -38,17 +38,22 @@ crewship intg <subcommand> [flags]
 | `integration composio triggers active` | List active trigger instances across all users. |
 | `integration composio triggers enable <slug>` | Create/enable a trigger instance for a user. Requires `--user <id>`. |
 | `integration composio key show` | Show whether/how Composio is configured (never prints the key). |
-| `integration composio key set` | Set & validate the workspace API key (`--key`, `--base-url`, `--label`); stored encrypted. |
+| `integration composio key set` | Set & validate the workspace API key (`--key`, `--label`); stored encrypted. |
 | `integration composio key remove` | Remove the workspace key (revert to the server env, if any). |
 | `integration composio default show` | Show the default-connector state: the `COMPOSIO_DEFAULT_CONNECTOR` flag, the default user/server, and the connected-user count. |
 | `integration composio default enable` | Provision the default connector, auto-deriving the Composio `user_id` when exactly one is connected (errors on zero/multiple). |
 | `integration composio default set <user_id>` | Pin the default connector's Composio `user_id` and (re)provision the default server. |
+| `integration composio connect <toolkit>` | Start an OAuth Connect Link to authorize an app for a Composio user. Requires `--user <id>`. Prints a redirect URL the end-user opens to grant access. |
 | `integration composio bind <agent>` | Bind a Composio `user_id` to an agent with **per-app tool scope**. Requires `--user <id>`; repeatable `--app toolkit[:mode[:t1,t2]]` (mode = `full`\|`read`\|`custom`), e.g. `--app gmail:read --app github:full --app gmail:custom:GMAIL_FETCH_EMAILS,GMAIL_LIST_THREADS`. `--toolkits a,b` is a shorthand for each app at `full`. Re-binding replaces the app set. |
 | `integration composio unbind <agent>` | Remove an agent's Composio access. `--app <toolkit>` removes one app; omit it to remove all. |
 | `integration composio bindings <agent>` | Show an agent's per-app Composio bindings (toolkit, mode, user, endpoint). |
 | `integration composio account revoke <account-id>` | De-authorize a connected account at the provider (must be re-connected to use again). |
 | `integration composio account refresh <account-id>` | Refresh a connected account's credentials. |
 | `integration composio account remove <account-id>` | Permanently delete a connected account at the provider. |
+
+`connect` maps to `POST /api/v1/integrations/composio/connect` (workspace
+manage). Flag: `--user <id>` (required) — the Composio `user_id` to connect the
+account under. `<toolkit>` is a single positional arg.
 
 `bind`/`unbind` map to `POST`/`DELETE /api/v1/integrations/composio/agents/{agentId}/bind`
 (workspace manage); `bindings` to the matching `GET` (read). The agent argument
@@ -185,6 +190,14 @@ for the raw payload. See the [Integrations guide](/guides/integrations#managed-i
 `<binding-id>` here is the `agent_mcp_bindings.id` printed under the `BINDING ID` column by `integration agent-bindings`. It is **not** the workspace integration's id.
 
 ## Examples
+
+### Connect a Composio account
+
+```bash
+crewship integration composio connect gmail --user user-42
+# Open this URL to authorize gmail for user "user-42":
+#   https://backend.composio.dev/s/<link-id>
+```
 
 ### Add a workspace integration
 
