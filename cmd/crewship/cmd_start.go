@@ -609,7 +609,14 @@ var startCmd = &cobra.Command{
 				// of the same concurrency_key would slip past the gate.
 				schedExec = schedExec.WithRunRegistry(runRegistry).
 					WithIdempotencyStore(pipeline.NewIdempotencyStore(deps.DB)).
-					WithRunStore(pipeline.NewRunStore(deps.DB))
+					WithRunStore(pipeline.NewRunStore(deps.DB)).
+					// Code runner + step overrides so cron- and deferred-
+					// dispatched runs of code-step / overridden routines
+					// behave like HTTP-driven ones. Without the code runner,
+					// a scheduled cost-spike-probe (a type:code routine)
+					// fails with "no CodeRunner wired".
+					WithCodeRunner(pipeline.NewMultiCodeRunner()).
+					WithStepOverrides(pipeline.NewStepOverrideStore(deps.DB))
 				// Without WithRunStore here, scheduled runs would
 				// never land in the pipeline_runs projection — the
 				// /run-records endpoint and boot-time interrupted
