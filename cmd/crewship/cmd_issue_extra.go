@@ -486,6 +486,78 @@ var issueRunsCmd = &cobra.Command{
 	},
 }
 
+// issueChangesCmd shows the base-branch git diff of the crew working an
+// issue. CLI parity for GET /api/v1/crews/{crewId}/git-diff — the data the
+// dashboard's issue "Changes" tab renders.
+var issueChangesCmd = &cobra.Command{
+	Use:   "changes <identifier>",
+	Short: "Show the git diff produced by work on an issue",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+		client := newAPIClient()
+		issue, err := fetchIssue(client, args[0])
+		if err != nil {
+			return err
+		}
+		resp, err := client.Get(fmt.Sprintf("/api/v1/crews/%s/git-diff", issue.CrewID))
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		var diff struct {
+			IsRepo bool `json:"is_repo"`
+			Files  []struct {
+				Path      string `json:"path"`
+				Status    string `json:"status"`
+				Additions int    `json:"additions"`
+				Deletions int    `json:"deletions"`
+			} `json:"files"`
+			Diff      string `json:"diff"`
+			Truncated bool   `json:"truncated"`
+		}
+		if err := cli.ReadJSON(resp, &diff); err != nil {
+			return err
+		}
+		if !diff.IsRepo {
+			fmt.Println("No git repository in this crew's workspace — nothing to diff.")
+			return nil
+		}
+		if len(diff.Files) == 0 {
+			fmt.Println("No changes against the base branch.")
+			return nil
+		}
+		patch, _ := cmd.Flags().GetBool("patch")
+		if patch {
+			fmt.Println(diff.Diff)
+			if diff.Truncated {
+				fmt.Println("\n… (diff truncated)")
+			}
+			return nil
+		}
+		f := newFormatter()
+		headers := []string{"STATUS", "FILE", "+", "−"}
+		rows := make([][]string, 0, len(diff.Files))
+		for _, fl := range diff.Files {
+			rows = append(rows, []string{
+				fl.Status,
+				fl.Path,
+				fmt.Sprintf("%d", fl.Additions),
+				fmt.Sprintf("%d", fl.Deletions),
+			})
+		}
+		return f.Auto(diff.Files, headers, rows)
+	},
+}
+
 // issueBulkCmd applies the same patch to many issues in one round-trip
 // via PATCH /api/v1/issues/bulk. The server hard-caps at 100 IDs; we
 // enforce that client-side so the user gets a friendly error instead
@@ -614,6 +686,8 @@ func init() {
 
 	issueCmd.AddCommand(issueCommentsCmd)
 	issueCmd.AddCommand(issueRunsCmd)
+	issueChangesCmd.Flags().Bool("patch", false, "Print the raw unified diff instead of the file summary")
+	issueCmd.AddCommand(issueChangesCmd)
 	issueCmd.AddCommand(issueRelateCmd)
 	issueCmd.AddCommand(issueRelationsCmd)
 	issueCmd.AddCommand(issueUnrelateCmd)
