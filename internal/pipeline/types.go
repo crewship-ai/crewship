@@ -53,6 +53,14 @@ type DSL struct {
 	// "log" modes when its upstream produces text that occasionally
 	// trips the heuristic on benign content.
 	Guardrails *GuardrailsConfig `json:"guardrails,omitempty"`
+	// Hooks are routine-level lifecycle steps run around the main
+	// execution: before_all (setup; failure aborts the run), after_all
+	// (on success), on_failure (cleanup). Hook steps must be deterministic
+	// side-channels — type code | http | transform only (no agent_run) —
+	// so they can't recurse or spend tokens. Best-effort for after/on_failure
+	// (logged, never override the run's outcome). Only the TOP-LEVEL run
+	// fires hooks; nested call_pipeline expansions do not.
+	Hooks *RoutineHooks `json:"hooks,omitempty"`
 	// Eval configures continuous grading of production runs of this
 	// routine. The online sampler reads sample_rate to decide whether
 	// to enqueue a completed run for rubric grading via grader_agent.
@@ -239,6 +247,17 @@ type Step struct {
 	// reshaping between steps — jq-style projection over a previous
 	// step's output, no LLM, no network.
 	Transform *TransformStep `json:"transform,omitempty"`
+}
+
+// RoutineHooks are the routine-level lifecycle steps (Wave 4.1). Each is
+// an ordinary Step restricted to deterministic side-channel types
+// (code | http | transform). BeforeAll runs before the main steps and
+// aborts the run on failure; AfterAll runs after a COMPLETED run;
+// OnFailure runs after a FAILED run. After/OnFailure are best-effort.
+type RoutineHooks struct {
+	BeforeAll *Step `json:"before_all,omitempty"`
+	AfterAll  *Step `json:"after_all,omitempty"`
+	OnFailure *Step `json:"on_failure,omitempty"`
 }
 
 // HTTPStep is an outbound HTTP call. Method + URL are required;

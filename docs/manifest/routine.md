@@ -640,3 +640,46 @@ API: `POST /pipelines/{slug}/run` accepts `delay_seconds`, `ttl_seconds`,
 > Note: `priority` orders the **deferred** dispatch queue. Immediate runs
 > execute on arrival, so priority there is recorded but not consumed
 > until the per-crew admission queue (QUEUE-MECHANISM) lands.
+
+## Lifecycle hooks (before_all / after_all / on_failure)
+
+Routine-level hooks run deterministic side-channel steps around the main
+execution — a clean home for setup/teardown that isn't a pipeline step.
+Hook steps must be `code | http | transform` (no `agent_run`: a hook must
+not recurse or spend tokens).
+
+```yaml
+spec:
+  dsl_version: "1.0"
+  hooks:
+    before_all:                 # setup — its FAILURE aborts the run
+      id: claim
+      type: http
+      http: { method: POST, url: "https://ops.example.com/claim", credential_ref: { type: ops } }
+    after_all:                  # on COMPLETED — best-effort
+      id: release
+      type: http
+      http: { method: POST, url: "https://ops.example.com/release" }
+    on_failure:                 # on FAILED — best-effort cleanup
+      id: alert
+      type: http
+      http: { method: POST, url: "https://ops.example.com/alert" }
+  steps:
+    - id: work
+      type: agent_run
+      ...
+```
+
+Semantics: `before_all` runs first; if it fails the run is marked FAILED
+and the steps never execute. `after_all` runs after a COMPLETED run,
+`on_failure` after a FAILED run — both best-effort (logged, never change
+the run's outcome). Hooks fire only on the **top-level** run (not nested
+`call_pipeline` expansions) and are skipped on resume re-entry + dry-run.
+
+## Declarative cron
+
+Cron triggers are already declarative + versioned with the routine via
+`spec.schedules` (cron expr + IANA `timezone`, see "YAML schema" above) —
+a `crewship apply -f routine.yaml` deploys the steps + schedules + webhook
+atomically, so a schedule change is version-controlled alongside the
+logic. The in-process scheduler (30s tick) fires them.

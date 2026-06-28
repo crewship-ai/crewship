@@ -497,7 +497,13 @@ func (e *Executor) Run(ctx context.Context, in RunInput) (*RunResult, error) {
 		ctx = regCtx
 	}
 
-	res, err := e.runDSL(ctx, in, 0)
+	hookSlug := ""
+	if in.pipeline != nil {
+		hookSlug = in.pipeline.Slug
+	}
+	res, err := e.runHooksAround(ctx, in, preallocRunID, hookSlug, func() (*RunResult, error) {
+		return e.runDSL(ctx, in, 0)
+	})
 	// Translate context-cancellation into a CANCELLED status when
 	// the registry confirms the cancel was user-driven (vs. a parent
 	// ctx going away unexpectedly). The runDSL loop returns the

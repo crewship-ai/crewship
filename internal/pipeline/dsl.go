@@ -124,7 +124,41 @@ func Validate(dsl *DSL, agentSlugs map[string]struct{}, pipelineSlugs map[string
 		}
 	}
 
+	if err := validateHooks(dsl); err != nil {
+		return err
+	}
+
 	return validateTemplates(dsl)
+}
+
+// validateHooks checks routine-level lifecycle hooks (Wave 4.1). Hook
+// steps must be deterministic side-channels — code | http | transform —
+// so a hook can never recurse (call_pipeline), spend tokens (agent_run),
+// or block the run (wait). Each present hook is validated with the same
+// per-step shape checks as a normal step.
+func validateHooks(dsl *DSL) error {
+	if dsl.Hooks == nil {
+		return nil
+	}
+	for name, hook := range map[string]*Step{
+		"before_all": dsl.Hooks.BeforeAll,
+		"after_all":  dsl.Hooks.AfterAll,
+		"on_failure": dsl.Hooks.OnFailure,
+	} {
+		if hook == nil {
+			continue
+		}
+		switch hook.Type {
+		case StepHTTP, StepCode, StepTransform:
+			// allowed deterministic side-channels
+		default:
+			return fmt.Errorf("pipeline: hook %q must be type code, http, or transform (got %q)", name, hook.Type)
+		}
+		if err := validateStepEgress(*hook); err != nil {
+			return fmt.Errorf("pipeline: hook %q: %w", name, err)
+		}
+	}
+	return nil
 }
 
 // validateTemplates resolves every {{ ... }} placeholder across the
