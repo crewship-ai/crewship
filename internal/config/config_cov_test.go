@@ -101,10 +101,11 @@ func TestSidecarAutoEnable_WhenBinaryPathConfigured(t *testing.T) {
 	t.Setenv("CREWSHIP_SIDECAR_PATH", "/opt/crewship-sidecar")
 	t.Setenv("CREWSHIP_ENTRYPOINT_PATH", "/opt/entrypoint.sh")
 	cfg := Default()
-	// Path must be visible before the auto-enable check runs; the env
-	// var is applied later in applyEnvOverrides, so model the YAML case.
 	cfg.Container.SidecarBinaryPath = "/opt/crewship-sidecar"
+	// Auto-enable is derived AFTER path resolution (applyEnvOverrides +
+	// autodetect), so the real sequence is applyEnvOverrides → deriveSidecarEnabled.
 	applyEnvOverrides(cfg)
+	deriveSidecarEnabled(cfg)
 	if !cfg.Container.SidecarEnabled {
 		t.Error("SidecarEnabled = false, want auto-enable when binary path is set")
 	}
@@ -114,6 +115,7 @@ func TestSidecarAutoEnable_WhenBinaryPathConfigured(t *testing.T) {
 	cfg2 := Default()
 	cfg2.Container.SidecarBinaryPath = "/opt/crewship-sidecar"
 	applyEnvOverrides(cfg2)
+	deriveSidecarEnabled(cfg2)
 	if cfg2.Container.SidecarEnabled {
 		t.Error("SidecarEnabled = true despite explicit CREWSHIP_SIDECAR_ENABLED=false")
 	}

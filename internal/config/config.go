@@ -258,6 +258,15 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 
+	// Derive the sidecar enable flag AFTER path resolution. autodetectSidecarPaths
+	// (and the CREWSHIP_SIDECAR_PATH override in applyEnvOverrides) are what
+	// populate SidecarBinaryPath in the common no-env deployment; running the
+	// auto-enable inside applyEnvOverrides — before either had executed — meant
+	// the autodetected binary never flipped the flag, so the orchestrator skipped
+	// startSidecar and /escalate, expose-port and MCP-memory all hit ECONNREFUSED
+	// on :9119. This is the live-correct placement of issue #541's fix.
+	deriveSidecarEnabled(cfg)
+
 	// Auto-derive NextjsURL from server port if not explicitly overridden.
 	// In single binary mode, the internal resolver calls itself on the same port.
 	if os.Getenv("CREWSHIP_NEXTJS_URL") == "" {
@@ -394,17 +403,13 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if val, ok := envBool("CREWSHIP_SIDECAR_ENABLED"); ok {
 		cfg.Container.SidecarEnabled = val
-	} else if cfg.Container.SidecarBinaryPath != "" {
-		// Auto-enable when a sidecar binary is configured / autodetected,
-		// unless the operator explicitly opted out via the env var above.
-		// Pre-fix the default was `false` even with the binary mounted in,
-		// so the orchestrator's startSidecar call was skipped, every
-		// MCP-memory tool hit ECONNREFUSED on the agent side, and the
-		// "expose-port" sidecar surface documented in every system prompt
-		// was dead. Caught live on 2026-05-22 audit (issue #541). Mirrors
-		// the KEEPER_OLLAMA_URL → Keeper.Enabled auto-derivation above.
-		cfg.Container.SidecarEnabled = true
 	}
+	// NOTE: the binary-present → auto-enable derivation deliberately does
+	// NOT live here. SidecarBinaryPath is only populated by the env override
+	// just below AND by autodetectSidecarPaths, both of which run after this
+	// point — so deriving it here (as the original #541 fix did) read an
+	// empty path and silently left the sidecar OFF. See deriveSidecarEnabled,
+	// invoked from Load() after path resolution.
 	if v := os.Getenv("CREWSHIP_SIDECAR_PATH"); v != "" {
 		cfg.Container.SidecarBinaryPath = v
 	}
@@ -467,6 +472,23 @@ func applyEnvOverrides(cfg *Config) {
 	// changes how an already-configured Composio is projected onto agents.
 	if val, ok := envBool("COMPOSIO_DEFAULT_CONNECTOR"); ok {
 		cfg.Composio.DefaultConnector = val
+	}
+}
+
+// deriveSidecarEnabled turns the sidecar on when a binary path is known —
+// whether set explicitly (CREWSHIP_SIDECAR_PATH / YAML) or autodetected — and
+// the operator did not pin the flag via CREWSHIP_SIDECAR_ENABLED. It MUST be
+// called after autodetectSidecarPaths and the CREWSHIP_SIDECAR_PATH override,
+// because those are what populate SidecarBinaryPath in the default deployment.
+// An explicit CREWSHIP_SIDECAR_ENABLED (already applied in applyEnvOverrides)
+// always wins, so an operator can still force the sidecar off on a host that
+// happens to have the binary present.
+func deriveSidecarEnabled(cfg *Config) {
+	if _, explicit := envBool("CREWSHIP_SIDECAR_ENABLED"); explicit {
+		return
+	}
+	if cfg.Container.SidecarBinaryPath != "" {
+		cfg.Container.SidecarEnabled = true
 	}
 }
 
