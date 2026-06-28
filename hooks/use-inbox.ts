@@ -22,6 +22,11 @@ export interface InboxItem {
   sender_type?: "agent" | "crew" | "system" | "pipeline"
   sender_id?: string
   sender_name?: string
+  // Present only when the sender is a real agent: the DiceBear seed/style
+  // for that agent's avatar, so the inbox renders the same face the agent
+  // card shows instead of a generic glyph. Blank for system/crew/pipeline.
+  avatar_seed?: string
+  avatar_style?: string
   state: "unread" | "read" | "resolved"
   priority: "urgent" | "high" | "medium" | "low"
   blocking: boolean

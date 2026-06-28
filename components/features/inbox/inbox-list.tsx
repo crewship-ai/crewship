@@ -54,6 +54,7 @@ import { MarkdownContent } from "@/components/features/issues/markdown-content"
 import { waitpointDecide } from "@/lib/api/waitpoints"
 import { inboxBulk } from "@/lib/api/inbox"
 import { escalationResolve } from "@/lib/api/escalations"
+import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 
 // InboxList — the /inbox page surface. Gmail-style triage: the default
 // "Inbox" tab shows everything that isn't archived (unread + read), so
@@ -100,6 +101,16 @@ function metaFor(kind: string): KindMeta {
 // Resolve and to split the selection into safe vs protected.
 function isDecisionItem(item: InboxItem): boolean {
   return item.kind === "waitpoint" || item.kind === "escalation" || item.blocking
+}
+
+// A keeper-synthetic escalation (Skill review, memory health) carries
+// kind=escalation but no escalation_type — real agent escalations always do.
+// These have no backing escalations row and thus no /escalations/{id}/resolve
+// endpoint, so the inbox row itself is the only handle: they're dismissible
+// (the backend allows PATCH→resolved for them) even though other escalations
+// aren't. Without this they'd be trapped in "Decisions needed" forever.
+function isSourceLessEscalation(item: InboxItem): boolean {
+  return item.kind === "escalation" && typeof item.payload?.escalation_type !== "string"
 }
 
 // Tree grouping. The list can collapse 100 rows into a handful of
@@ -218,6 +229,20 @@ function avatarColor(seed: string): string {
 }
 
 function SenderAvatar({ item, className }: { item: InboxItem; className?: string }) {
+  // Real agent senders render their actual avatar (same DiceBear seed/style
+  // the agent card uses), so "casey escalated…" reads as Casey's face — not a
+  // generic bot glyph. The backend only fills avatar_seed for agent senders;
+  // system/crew/pipeline keep the kind-keyed glyph below.
+  if (item.sender_type === "agent" && (item.avatar_seed || item.sender_name)) {
+    return (
+      <img
+        src={getAgentAvatarUrl(item.avatar_seed || item.sender_name || "agent", item.avatar_style)}
+        alt=""
+        className={cn("shrink-0 rounded-md object-cover", className ?? "h-6 w-6")}
+        aria-hidden
+      />
+    )
+  }
   const Icon =
     (item.sender_type && SENDER_ICONS[item.sender_type as keyof typeof SENDER_ICONS]) ||
     metaFor(item.kind).icon
@@ -868,9 +893,13 @@ function InboxDetail({
   // Decision items (waitpoint / escalation / blocking) can't be blind-
   // archived — they're source-managed (inbox PATCH→resolved 409s) and an
   // agent is waiting on a real decision. Everything else (messages,
-  // failed-run notices, advisories) archives Gmail-style.
+  // failed-run notices, advisories) archives Gmail-style. Exception:
+  // source-less keeper escalations have no resolve endpoint, so the inbox
+  // row IS the handle — they archive like advisories.
   const archivable =
-    !isResolved && item.kind !== "waitpoint" && item.kind !== "escalation" && !item.blocking
+    !isResolved &&
+    ((item.kind !== "waitpoint" && item.kind !== "escalation" && !item.blocking) ||
+      isSourceLessEscalation(item))
 
   return (
     <div className="flex h-full flex-col">
@@ -1245,12 +1274,14 @@ function KindActions({
           </div>
         )
       }
-      // Keeper / synthetic escalation — no inline resolve path. Surface
-      // that honestly instead of a button that 409s.
+      // Keeper / synthetic escalation — no inline decision to make here; the
+      // source review tracks the outcome. There's no resolve endpoint behind
+      // it, so the inbox row is the only handle: point at Archive (enabled
+      // for these) rather than a button that 409s.
       return (
         <span className="text-[11px] text-muted-foreground">
-          This escalation is resolved from its source review (crew escalations / keeper). Use “Mark
-          read” to declutter.
+          No decision to make here — its source review tracks the outcome. Use “Archive” to clear it
+          from your inbox.
         </span>
       )
     }

@@ -43,7 +43,7 @@ unread ──(click row)──> read ──(Archive / action)──> resolved
 
 - **Inbox** (default tab) shows everything that isn't archived — unread *and* read. Clicking a row marks it read in place; it does **not** disappear. This is the fix for "I clicked a message, clicked away, and lost it."
 - **Unread** is a filter, not the default. **Archived** is the resolved bucket.
-- **Archive** is the Gmail move: clear a row from the inbox without recording a decision. It maps to `resolved` with `resolved_action="archived"`, shows an **Undo** toast, and is restorable from the Archived tab (or with `crewship inbox unread <id>`). Archive is offered only on non-decision rows (messages, failed-run notices, advisories) — a waitpoint/escalation is source-managed and needs an explicit Approve/Deny/Resolve.
+- **Archive** is the Gmail move: clear a row from the inbox without recording a decision. It maps to `resolved` with `resolved_action="archived"`, shows an **Undo** toast, and is restorable from the Archived tab (or with `crewship inbox unread <id>`). Archive is offered on non-decision rows (messages, failed-run notices, advisories) **and on keeper-synthetic escalations** (skill review / memory health) — those have no backing escalations row and thus no source endpoint, so the inbox row is the only handle. A real waitpoint/agent escalation is source-managed and still needs an explicit Approve/Deny/Resolve.
 - Resolving via an action button (Approve, Deny, Retry, Cancel, Dismiss) stores the shape on `resolved_action` so the audit trail shows *what* you decided, not just that you closed it.
 - "Mark unread" flips a row back; "Restore" un-archives. The bell count and sidebar badge both react.
 
@@ -60,7 +60,7 @@ The detail panel's action row is what the source-of-truth call hangs off:
 
 - **Waitpoints** show **Approve** + **Deny**. Both hit `/pipelines/waitpoints/{token}/approve`; the boolean `approved` in the body disambiguates. (An empty body decoded to `approved=false` because Go's `json.Unmarshal` gives bools their zero value when absent — the inbox always sends the explicit value.)
 - **Failed runs** show **Retry** + **Cancel**. Retry replays the routine's `inputs_json`. If the payload is missing a `pipeline_slug` for some reason, the row falls back to "cancelled" rather than getting wedged.
-- **Escalations** show **Mark resolved** only — the actual decision is recorded by the escalation handler, the inbox just acknowledges you saw it.
+- **Escalations** split two ways. A **real agent escalation** (carries an `escalation_type` and a backing `escalations` row) shows **Approve** / **Reject** — the decision is recorded through the escalation lifecycle, and the inbox just mirrors it. A **keeper-synthetic escalation** (skill review, memory health — `kind=escalation` but no backing row, so no `/escalations/{id}/resolve` endpoint) has no inline decision; the detail points you at **Archive** to clear it. These are the one escalation type the inbox lets you dismiss directly, because there is no source to defer to.
 - **Messages** with an `issue_identifier` in payload show **Open &lt;identifier&gt;** as a direct link into `/issues/&lt;id&gt;`.
 
 When a row is resolved, the detail panel dims, the action row replaces itself with a "Resolved Xm ago · approved" line (or "Archived Xm ago · Restore" for archived rows), and the row moves to the **Archived** tab.
@@ -69,7 +69,7 @@ When a row is resolved, the detail panel dims, the action row replaces itself wi
 
 The inbox is the one surface that aggregates messages from every agent, routine, and curator — so it's also where raw machine output and leaked secrets would otherwise pile up. Several guards keep it human-readable and safe:
 
-- **Sender avatars.** Every row and the detail header render a coloured avatar keyed on `sender_type` (agent / crew / pipeline / system) so an agent message is visually distinct from a routine failure at a glance.
+- **Sender avatars.** When the sender is a **real agent**, the row and detail header render that agent's **actual avatar** — the same DiceBear seed/style its agent card uses, so "casey escalated…" reads as Casey's face. The List/Get responses fill `avatar_seed` + `avatar_style` for agent senders via a batched lookup against the `agents` table (no schema change, works retroactively). Non-agent senders (crew / pipeline / system) fall back to a coloured glyph keyed on `sender_type`, so an agent message stays visually distinct from a routine failure.
 - **Rendered bodies, not blobs.** `body_md` is rendered as markdown (`MarkdownContent`), and the `payload` is shown as a humanised key/value **Context** card instead of a raw `JSON.stringify` dump.
 - **Sanitised advisories.** Curator routines (skill review, memory health) used to paste the gatekeeper's internal decision text — e.g. `Keeper LLM unavailable: paymaster: workspace_id required — deny by default` — straight into the body. `inbox.SanitizeReason` now swaps that for a friendly line and keeps the raw text in `payload.raw_reason` for operators. When the cause is an infrastructure outage (curator LLM down), a **pure advisory is suppressed entirely** rather than written once per crew per sweep — this killed the recurring "Memory health advisory" flood.
 - **Secret redaction.** `inbox.RedactSecrets` masks credential material (connection strings, `password=…`, bearer tokens, high-entropy blobs) before it reaches `body_md`, so an agent escalation that quotes a generated `redis://:…@…` URL never broadcasts the secret to every MANAGER. CREDENTIAL-type escalations additionally lead with an explicit "secret handled in the credential flow" note. The source-of-truth row (escalations / credentials table) still holds the real value behind its own ACL; the UI also masks any remaining secret-looking Context values behind a reveal toggle.
@@ -83,7 +83,7 @@ Each group is a collapsible folder with a count in its header. A group-header ch
 With anything selected, a **bulk bar** appears: **Mark read** and **Resolve** apply across the whole selection in one request (`POST /api/v1/inbox/bulk`) rather than a PATCH per row.
 
 <Warning>
-Bulk **Resolve** never silently closes a decision item. If the selection contains any `waitpoint` / `escalation` row or any `blocking=true` row, a confirmation dialog spells out how many items will be left open and resolves only the dismissable remainder. If the *entire* selection is decision items, there is no **Resolve** action at all — open each one individually and act on its source. **Mark read** is always one click and closes nothing. Even if a client bypasses these guards, the [server backstop](/api-reference/inbox#post-apiv1inboxbulk) skips the same rows, so a decision item can never be resolved by the bulk path.
+Bulk **Resolve** never silently closes a decision item. If the selection contains any `waitpoint` / `escalation` row or any `blocking=true` row, a confirmation dialog spells out how many items will be left open and resolves only the dismissable remainder. If the *entire* selection is decision items, there is no **Resolve** action at all — open each one individually and act on its source. **Mark read** is always one click and closes nothing. Even if a client bypasses these guards, the [server backstop](/api-reference/inbox#post-apiv1inboxbulk) skips the same rows, so a real decision item can never be resolved by the bulk path. The one exception, applied identically client- and server-side, is a keeper-synthetic escalation (`kind=escalation`, no backing `escalations` row): it has no source to defer to, so bulk **Resolve** clears it instead of skipping it.
 </Warning>
 
 A row whose `kind` is an unknown value renders as a generic notification (hardened fallback) instead of crashing the row — new server-side kinds degrade gracefully in an older UI.
@@ -109,7 +109,7 @@ The Inbox has full CLI parity — everything the web surface exposes is scriptab
 
 | Command | What it does |
 |---------|--------------|
-| `crewship inbox list` | Show unread items (default). `--state all\|read\|resolved`, `--kind waitpoint\|escalation\|failed_run\|message`, `--limit`, `--format json\|yaml\|quiet`. JSON now includes `payload` + `sender_type`. |
+| `crewship inbox list` | Show unread items (default). `--state all\|read\|resolved`, `--kind waitpoint\|escalation\|failed_run\|message`, `--limit`, `--format json\|yaml\|quiet`. JSON now includes `payload`, `sender_type`, and (for agent senders) `avatar_seed` + `avatar_style`. |
 | `crewship inbox get <id>` | Show one item with its full markdown body **and** the structured Context (payload) — the read counterpart of the web detail pane. `--format json` for scripting. |
 | `crewship inbox read <id>` | Mark an item as read. |
 | `crewship inbox unread <id>` | Flip back to unread (also the way to **restore** an archived item). |
