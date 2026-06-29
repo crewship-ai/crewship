@@ -74,8 +74,7 @@ const BASE_IMAGES: Array<{
   {
     value: "mcr.microsoft.com/devcontainers/go:1.23-bookworm",
     label: "Go 1.23 (Debian)",
-    description:
-      "Go 1.23 toolchain on Debian. KNOWN ISSUE: ships a stale yarn apt repo whose GPG key breaks provisioning. Prefer Debian + the Go feature for now.",
+    description: "Go 1.23 toolchain on Debian.",
     icon: SiGo,
     colorKey: "go",
   },
@@ -96,8 +95,7 @@ const BASE_IMAGES: Array<{
   {
     value: "mcr.microsoft.com/devcontainers/universal:2",
     label: "Universal (kitchen sink)",
-    description:
-      "Node + Python + Go + Rust + Java + Ruby pre-installed. ~8GB. KNOWN ISSUE: ships a stale yarn apt repo whose GPG key breaks provisioning.",
+    description: "Node + Python + Go + Rust + Java + Ruby pre-installed. ~8GB.",
     icon: Boxes,
     // No colorKey — Boxes is a generic lucide icon, not a brand mark.
     // Falls through to muted-foreground.

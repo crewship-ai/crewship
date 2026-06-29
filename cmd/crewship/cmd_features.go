@@ -147,7 +147,7 @@ var baseImagesCatalog = []baseImageEntry{
 	{
 		Image:       "mcr.microsoft.com/devcontainers/go:1.23-bookworm",
 		Label:       "Go 1.23 (Debian)",
-		Description: "Go 1.23 toolchain on Debian. KNOWN ISSUE: ships a stale yarn apt repo whose GPG key breaks apt-get update during provisioning (feature install fails). Use Debian + the Go feature until the apt-repo-resilience fix lands.",
+		Description: "Go 1.23 toolchain on Debian.",
 	},
 	{
 		Image:       "mcr.microsoft.com/devcontainers/rust:bookworm",
@@ -162,7 +162,7 @@ var baseImagesCatalog = []baseImageEntry{
 	{
 		Image:       "mcr.microsoft.com/devcontainers/universal:2",
 		Label:       "Universal (kitchen sink)",
-		Description: "Node + Python + Go + Rust + Java + Ruby pre-installed. ~8GB. KNOWN ISSUE: ships a stale yarn apt repo whose GPG key breaks apt-get update during provisioning. Pending the apt-repo-resilience fix.",
+		Description: "Node + Python + Go + Rust + Java + Ruby pre-installed. ~8GB.",
 	},
 	{
 		Image:       "mcr.microsoft.com/devcontainers/base:alpine-3.20",
