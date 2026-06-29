@@ -8,8 +8,17 @@ import (
 
 func TestPersistCredentialLegacy(t *testing.T) {
 	path := redirectConfigHome(t)
-	if err := persistCredential("https://dev1.example", "tok1", ""); err != nil {
+	t.Setenv("CREWSHIP_PROFILE", "")
+	old := flagProfile
+	flagProfile = ""
+	t.Cleanup(func() { flagProfile = old })
+
+	name, err := persistCredential("https://dev1.example", "tok1")
+	if err != nil {
 		t.Fatalf("persist: %v", err)
+	}
+	if name != "" {
+		t.Errorf("legacy mode should resolve no profile, got %q", name)
 	}
 	cfg := readCfg(t, path)
 	if cfg.Server != "https://dev1.example" || cfg.Token != "tok1" {
@@ -22,8 +31,17 @@ func TestPersistCredentialLegacy(t *testing.T) {
 
 func TestPersistCredentialProfile(t *testing.T) {
 	path := redirectConfigHome(t)
-	if err := persistCredential("https://dev2.example", "tok2", "dev2"); err != nil {
+	t.Setenv("CREWSHIP_PROFILE", "")
+	old := flagProfile
+	flagProfile = "dev2"
+	t.Cleanup(func() { flagProfile = old })
+
+	name, err := persistCredential("https://dev2.example", "tok2")
+	if err != nil {
 		t.Fatalf("persist: %v", err)
+	}
+	if name != "dev2" {
+		t.Errorf("expected profile dev2, got %q", name)
 	}
 	cfg := readCfg(t, path)
 	p := cfg.Servers["dev2"]
@@ -31,7 +49,7 @@ func TestPersistCredentialProfile(t *testing.T) {
 		t.Fatalf("profile creds not saved: %+v", cfg.Servers)
 	}
 	if cfg.Current != "dev2" {
-		t.Errorf("login --profile should set current, got %q", cfg.Current)
+		t.Errorf("first profile login should set current, got %q", cfg.Current)
 	}
 	if cfg.Token != "" {
 		t.Errorf("profile login leaked into top-level token: %q", cfg.Token)
@@ -40,6 +58,11 @@ func TestPersistCredentialProfile(t *testing.T) {
 
 func TestPersistCredentialPreservesProfileWorkspace(t *testing.T) {
 	path := redirectConfigHome(t)
+	t.Setenv("CREWSHIP_PROFILE", "")
+	old := flagProfile
+	flagProfile = "dev2"
+	t.Cleanup(func() { flagProfile = old })
+
 	// Pre-seed dev2 with a workspace, as `crewship server add --workspace` would.
 	seed := &cli.CLIConfig{
 		Servers: map[string]*cli.ServerProfile{
@@ -49,7 +72,7 @@ func TestPersistCredentialPreservesProfileWorkspace(t *testing.T) {
 	if err := cli.SaveConfig(seed); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	if err := persistCredential("https://dev2.example", "tok2", "dev2"); err != nil {
+	if _, err := persistCredential("https://dev2.example", "tok2"); err != nil {
 		t.Fatalf("persist: %v", err)
 	}
 	cfg := readCfg(t, path)

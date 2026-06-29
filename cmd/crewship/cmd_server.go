@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"net/url"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -110,22 +109,17 @@ default 'current' profile.`,
 		if raw == "" {
 			return fmt.Errorf("--server <url> is required (e.g. crewship server add %s --server https://host)", name)
 		}
-		if u, err := url.Parse(raw); err != nil || u.Hostname() == "" || (u.Scheme != "http" && u.Scheme != "https") {
-			return fmt.Errorf("invalid --server URL %q (want http(s)://host[:port])", raw)
+		// Reuse login's transport-security preflight (validates scheme/host,
+		// warns on plaintext HTTP) instead of a parallel inline URL check.
+		if err := preflightServerURL(cmd.ErrOrStderr(), raw); err != nil {
+			return err
 		}
 
 		cfg, err := cli.LoadConfig()
 		if err != nil {
 			return err
 		}
-		if cfg.Servers == nil {
-			cfg.Servers = map[string]*cli.ServerProfile{}
-		}
-		p := cfg.Servers[name]
-		if p == nil {
-			p = &cli.ServerProfile{}
-			cfg.Servers[name] = p
-		}
+		p := cfg.EnsureServer(name)
 		p.Server = raw
 		if ws := strings.TrimSpace(flagWorkspace); ws != "" {
 			p.Workspace = ws

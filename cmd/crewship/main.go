@@ -160,7 +160,10 @@ func main() {
 // common case (no --server override) the resolved host equals the configured
 // host, so there is zero friction.
 func newAPIClient() *cli.Client {
-	server := cli.ResolveServer(flagServer, cliCfg)
+	// EffectiveServer (not ResolveServer) so an active profile's server wins
+	// over a stale CREWSHIP_SERVER env left over from the #544 stopgap; the
+	// token is host-bound to that same profile server below, so the two agree.
+	server := cli.EffectiveServer(flagServer, flagProfile, cliCfg)
 	workspace := cli.ResolveWorkspace(flagWorkspace, cliCfg)
 	token := ""
 	tokenHost := ""
@@ -205,12 +208,21 @@ func newFormatter() *cli.Formatter {
 	return cli.NewFormatter(format)
 }
 
-// requireAuth checks that a token is configured.
+// requireAuth checks that a token is configured for the active target. When a
+// profile is selected but undefined (typo'd --profile/CREWSHIP_PROFILE or a
+// `current` pointing at a removed profile), the overlay blanks the token, so
+// point the operator at the profile rather than a generic "run login".
 func requireAuth() error {
-	if cliCfg == nil || cliCfg.Token == "" {
-		return fmt.Errorf("not logged in. Run 'crewship login' first")
+	if cliCfg != nil && cliCfg.Token != "" {
+		return nil
 	}
-	return nil
+	if name := cli.ActiveProfileName(flagProfile, cliCfg); name != "" {
+		if cliCfg == nil || cliCfg.Servers[name] == nil {
+			return fmt.Errorf("profile %q is not configured — run 'crewship server add %s --server <url>' then 'crewship login --profile %s'", name, name, name)
+		}
+		return fmt.Errorf("not logged into profile %q. Run 'crewship login --profile %s'", name, name)
+	}
+	return fmt.Errorf("not logged in. Run 'crewship login' first")
 }
 
 // confirmAction prompts for confirmation unless --yes is passed.

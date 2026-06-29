@@ -79,22 +79,120 @@ func (cfg *CLIConfig) ActiveProfile(flagProfile string) (string, *ServerProfile)
 }
 
 // WithActiveProfile returns a shallow copy of cfg whose Server/Token/Workspace
-// are taken from the active profile when one is active and defined. The profile
-// is authoritative: even an empty field overrides the top-level value, so
+// are taken from the active profile when one is active. The profile is
+// authoritative: even an empty field overrides the top-level value, so
 // selecting a tokenless profile clears the token rather than leaking the
-// previous target's bearer to a new host. Global preferences (Format,
-// DefaultAgent, Markdown, …) and the Servers/DirectoryProfiles maps are carried
-// through unchanged so the result still round-trips through SaveConfig. The
-// receiver is never mutated; a nil receiver returns nil.
+// previous target's bearer to a new host. When a profile is *selected but
+// undefined* (a typo'd --profile / CREWSHIP_PROFILE, or `current` pointing at a
+// removed profile), the target fields are blanked so reads fail closed against
+// the legacy/default target instead of silently using the wrong creds. Global
+// preferences (Format, DefaultAgent, Markdown, …) and the Servers/
+// DirectoryProfiles maps are carried through unchanged so the result still
+// round-trips through SaveConfig. The receiver is never mutated; a nil receiver
+// returns nil.
 func (cfg *CLIConfig) WithActiveProfile(flagProfile string) *CLIConfig {
 	if cfg == nil {
 		return nil
 	}
 	out := *cfg // copy struct; map headers are shared (treated read-only here)
-	if _, p := cfg.ActiveProfile(flagProfile); p != nil {
-		out.Server = p.Server
-		out.Token = p.Token
-		out.Workspace = p.Workspace
+	if name, p := cfg.ActiveProfile(flagProfile); name != "" {
+		if p != nil {
+			out.Server, out.Token, out.Workspace = p.Server, p.Token, p.Workspace
+		} else {
+			out.Server, out.Token, out.Workspace = "", "", ""
+		}
 	}
 	return &out
+}
+
+// EnsureServer returns the profile entry for name, creating it (and the Servers
+// map) if absent. Centralizes the get-or-create upsert used by the write
+// helpers and `crewship server add`.
+func (cfg *CLIConfig) EnsureServer(name string) *ServerProfile {
+	if cfg.Servers == nil {
+		cfg.Servers = map[string]*ServerProfile{}
+	}
+	p := cfg.Servers[name]
+	if p == nil {
+		p = &ServerProfile{}
+		cfg.Servers[name] = p
+	}
+	return p
+}
+
+// WriteCredential stores a server URL + token at the active write target: the
+// active profile (resolved via flagProfile / CREWSHIP_PROFILE / directory match
+// / current, created if needed) when one is selected, else the legacy top-level
+// fields. A non-empty workspace is written too; an empty one is left untouched
+// so a token refresh doesn't wipe a previously chosen workspace. The first
+// profile written becomes `current`, but an existing `current` is never
+// re-pointed (so a one-off `login --profile X` refresh doesn't move the default
+// target). Writes land where WithActiveProfile reads, keeping the two sides
+// symmetric.
+func (cfg *CLIConfig) WriteCredential(flagProfile, server, token, workspace string) {
+	name := ActiveProfileName(flagProfile, cfg)
+	if name == "" {
+		cfg.Server = server
+		cfg.Token = token
+		if workspace != "" {
+			cfg.Workspace = workspace
+		}
+		return
+	}
+	p := cfg.EnsureServer(name)
+	p.Server = server
+	p.Token = token
+	if workspace != "" {
+		p.Workspace = workspace
+	}
+	if cfg.Current == "" {
+		cfg.Current = name
+	}
+}
+
+// SetServerTarget / SetWorkspaceTarget set a single field on the active write
+// target (the active profile, created if needed, else the legacy top-level
+// field) so `config set` and `workspace use` land where reads look.
+func (cfg *CLIConfig) SetServerTarget(flagProfile, server string) {
+	if name := ActiveProfileName(flagProfile, cfg); name != "" {
+		cfg.EnsureServer(name).Server = server
+		return
+	}
+	cfg.Server = server
+}
+
+func (cfg *CLIConfig) SetWorkspaceTarget(flagProfile, workspace string) {
+	if name := ActiveProfileName(flagProfile, cfg); name != "" {
+		cfg.EnsureServer(name).Workspace = workspace
+		return
+	}
+	cfg.Workspace = workspace
+}
+
+// ClearTokenTarget clears the token on the active write target, and always
+// clears any top-level token too, so `crewship logout` never leaves a live
+// bearer on disk (in profile mode the top-level token is unused, so wiping it
+// is safe; sibling profiles keep their tokens).
+func (cfg *CLIConfig) ClearTokenTarget(flagProfile string) {
+	if name := ActiveProfileName(flagProfile, cfg); name != "" {
+		if p := cfg.Servers[name]; p != nil {
+			p.Token = ""
+		}
+	}
+	cfg.Token = ""
+}
+
+// EffectiveServer resolves the server URL the CLI should dial, honoring an
+// active profile over a stale CREWSHIP_SERVER env (the #544 stopgap that
+// profiles replace). Precedence: --server flag > active profile's server >
+// CREWSHIP_SERVER env > top-level server > default. In legacy mode (no profile
+// active) it is identical to ResolveServer.
+func EffectiveServer(flagServer, flagProfile string, cfg *CLIConfig) string {
+	if flagServer != "" {
+		return flagServer
+	}
+	if name, p := cfg.ActiveProfile(flagProfile); name != "" && p != nil && p.Server != "" {
+		return p.Server
+	}
+	return ResolveServer("", cfg)
 }

@@ -23,14 +23,19 @@ var configShowCmd = &cobra.Command{
 
 		path, _ := cli.DefaultConfigPath()
 
+		// Server/Workspace/Token come from the active-profile overlay so a
+		// profile-authenticated user sees their real target, not the empty
+		// top-level fields. Format/DefAgent/Markdown are global prefs.
+		eff := cfg.WithActiveProfile(flagProfile)
+
 		fmt.Printf("%sConfig file:%s %s\n", cli.Bold, cli.Reset, path)
-		fmt.Printf("%sServer:%s     %s\n", cli.Dim, cli.Reset, valueOrDefault(cfg.Server, "(default: http://localhost:8080)"))
-		fmt.Printf("%sWorkspace:%s  %s\n", cli.Dim, cli.Reset, valueOrDefault(cfg.Workspace, "(not set)"))
+		fmt.Printf("%sServer:%s     %s\n", cli.Dim, cli.Reset, valueOrDefault(eff.Server, "(default: http://localhost:8080)"))
+		fmt.Printf("%sWorkspace:%s  %s\n", cli.Dim, cli.Reset, valueOrDefault(eff.Workspace, "(not set)"))
 		fmt.Printf("%sFormat:%s     %s\n", cli.Dim, cli.Reset, valueOrDefault(cfg.Format, "(default: table)"))
 		fmt.Printf("%sDefAgent:%s   %s\n", cli.Dim, cli.Reset, valueOrDefault(cfg.DefaultAgent, "(not set, used by `crewship ask`)"))
 		fmt.Printf("%sMarkdown:%s   %s\n", cli.Dim, cli.Reset, valueOrDefault(cfg.Markdown, "(default: auto)"))
-		if cfg.Token != "" {
-			fmt.Printf("%sToken:%s      %s...%s\n", cli.Dim, cli.Reset, cfg.Token[:20], cfg.Token[len(cfg.Token)-4:])
+		if eff.Token != "" {
+			fmt.Printf("%sToken:%s      %s...%s\n", cli.Dim, cli.Reset, eff.Token[:20], eff.Token[len(eff.Token)-4:])
 		} else {
 			fmt.Printf("%sToken:%s      (not set)\n", cli.Dim, cli.Reset)
 		}
@@ -62,9 +67,12 @@ var configSetCmd = &cobra.Command{
 		key, value := args[0], args[1]
 		switch key {
 		case "server":
-			cfg.Server = value
+			// server/workspace are per-target: write to the active profile when
+			// one is active, else top-level — so the value isn't masked by the
+			// overlay on the next read.
+			cfg.SetServerTarget(flagProfile, value)
 		case "workspace":
-			cfg.Workspace = value
+			cfg.SetWorkspaceTarget(flagProfile, value)
 		case "format":
 			switch value {
 			case "table", "json", "yaml", "quiet":
@@ -127,16 +135,19 @@ var configValidateCmd = &cobra.Command{
 			warns++
 		}
 
+		// Validate the active target: a profile-authenticated user has their
+		// token under cfg.Servers[name], so check the overlay, not raw top-level.
+		eff := cfg.WithActiveProfile(flagProfile)
 		fmt.Printf("%sCLI config%s\n", cli.Bold, cli.Reset)
-		check("token present", cfg.Token != "",
+		check("token present", eff.Token != "",
 			"run `crewship login` to authenticate")
-		check("server URL set", cli.ResolveServer(flagServer, cfg) != "",
+		check("server URL set", cli.EffectiveServer(flagServer, flagProfile, cfg) != "",
 			"unexpected — default should be http://localhost:8080")
-		ws := cli.ResolveWorkspace(flagWorkspace, cfg)
+		ws := cli.ResolveWorkspace(flagWorkspace, eff)
 		check("workspace resolvable", ws != "",
 			"run `crewship workspace use <slug>` or set CREWSHIP_WORKSPACE")
 
-		if cfg.Token == "" || ws == "" {
+		if eff.Token == "" || ws == "" {
 			fmt.Printf("\n%s%d error(s), %d warning(s)%s\n", cli.Red, errs, warns, cli.Reset)
 			return fmt.Errorf("config validation failed")
 		}

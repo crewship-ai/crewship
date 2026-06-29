@@ -147,6 +147,138 @@ func TestWithActiveProfile(t *testing.T) {
 	}
 }
 
+func TestWithActiveProfileUndefinedFailsClosed(t *testing.T) {
+	t.Setenv("CREWSHIP_PROFILE", "")
+	// `current` points at a profile that no longer exists, plus a leftover
+	// legacy token — reads must NOT fall back to those creds.
+	cfg := &CLIConfig{
+		Server: "https://legacy", Token: "legacytok", Workspace: "legacyws",
+		Current: "ghost",
+		Servers: map[string]*ServerProfile{"other": {Server: "https://other", Token: "x"}},
+	}
+	got := cfg.WithActiveProfile("")
+	if got.Server != "" || got.Token != "" || got.Workspace != "" {
+		t.Errorf("undefined active profile should blank target, got server=%q token=%q ws=%q",
+			got.Server, got.Token, got.Workspace)
+	}
+}
+
+func TestEnsureServer(t *testing.T) {
+	cfg := &CLIConfig{}
+	p := cfg.EnsureServer("dev1")
+	if p == nil || cfg.Servers["dev1"] != p {
+		t.Fatalf("EnsureServer did not create+return entry")
+	}
+	p.Token = "t"
+	if cfg.EnsureServer("dev1") != p {
+		t.Errorf("EnsureServer should return the existing entry, not a new one")
+	}
+}
+
+func TestWriteCredential(t *testing.T) {
+	t.Setenv("CREWSHIP_PROFILE", "")
+
+	// Legacy: no profile selected → top-level fields.
+	legacy := &CLIConfig{}
+	legacy.WriteCredential("", "https://l", "ltok", "")
+	if legacy.Server != "https://l" || legacy.Token != "ltok" || len(legacy.Servers) != 0 {
+		t.Errorf("legacy write wrong: %+v", legacy)
+	}
+
+	// Profile (via flag): writes into the profile, sets current (was empty).
+	prof := &CLIConfig{}
+	prof.WriteCredential("dev2", "https://2", "tok2", "")
+	if prof.Servers["dev2"].Token != "tok2" || prof.Servers["dev2"].Server != "https://2" {
+		t.Errorf("profile write wrong: %+v", prof.Servers)
+	}
+	if prof.Current != "dev2" {
+		t.Errorf("first profile write should set current, got %q", prof.Current)
+	}
+	if prof.Token != "" {
+		t.Errorf("profile write must not touch top-level token")
+	}
+
+	// Existing current must NOT be re-pointed by a one-off refresh of another.
+	multi := &CLIConfig{
+		Current: "dev1",
+		Servers: map[string]*ServerProfile{
+			"dev1": {Server: "https://1", Token: "t1"},
+			"dev2": {Server: "https://2", Token: "old2", Workspace: "ws2"},
+		},
+	}
+	multi.WriteCredential("dev2", "https://2", "new2", "") // empty ws → preserve
+	if multi.Current != "dev1" {
+		t.Errorf("one-off refresh re-pointed current: %q", multi.Current)
+	}
+	if multi.Servers["dev2"].Token != "new2" {
+		t.Errorf("token not refreshed: %+v", multi.Servers["dev2"])
+	}
+	if multi.Servers["dev2"].Workspace != "ws2" {
+		t.Errorf("empty-workspace refresh wiped workspace: %+v", multi.Servers["dev2"])
+	}
+}
+
+func TestSetWorkspaceTarget(t *testing.T) {
+	t.Setenv("CREWSHIP_PROFILE", "")
+	legacy := &CLIConfig{}
+	legacy.SetWorkspaceTarget("", "wsX")
+	if legacy.Workspace != "wsX" {
+		t.Errorf("legacy workspace not set: %+v", legacy)
+	}
+	prof := &CLIConfig{Current: "dev1", Servers: map[string]*ServerProfile{"dev1": {Server: "s"}}}
+	prof.SetWorkspaceTarget("", "wsY")
+	if prof.Servers["dev1"].Workspace != "wsY" {
+		t.Errorf("profile workspace not set: %+v", prof.Servers["dev1"])
+	}
+	if prof.Workspace != "" {
+		t.Errorf("profile write leaked to top-level workspace")
+	}
+}
+
+func TestClearTokenTarget(t *testing.T) {
+	t.Setenv("CREWSHIP_PROFILE", "")
+	cfg := &CLIConfig{
+		Token:   "legacytok",
+		Current: "dev1",
+		Servers: map[string]*ServerProfile{
+			"dev1": {Server: "s1", Token: "t1"},
+			"dev2": {Server: "s2", Token: "t2"},
+		},
+	}
+	cfg.ClearTokenTarget("")
+	if cfg.Servers["dev1"].Token != "" {
+		t.Errorf("active profile token not cleared")
+	}
+	if cfg.Token != "" {
+		t.Errorf("stale legacy top-level token left on disk")
+	}
+	if cfg.Servers["dev2"].Token != "t2" {
+		t.Errorf("logout wrongly cleared a sibling profile's token")
+	}
+}
+
+func TestEffectiveServer(t *testing.T) {
+	t.Setenv("CREWSHIP_PROFILE", "")
+	cfg := &CLIConfig{
+		Current: "dev1",
+		Servers: map[string]*ServerProfile{"dev1": {Server: "https://profile-host"}},
+	}
+	// Active profile beats a stale CREWSHIP_SERVER env.
+	t.Setenv("CREWSHIP_SERVER", "https://stale-env")
+	if got := EffectiveServer("", "", cfg); got != "https://profile-host" {
+		t.Errorf("profile should beat env: got %q", got)
+	}
+	// Flag still wins.
+	if got := EffectiveServer("https://flag", "", cfg); got != "https://flag" {
+		t.Errorf("flag should win: got %q", got)
+	}
+	// Legacy mode falls back to ResolveServer (env > cfg > default).
+	legacy := &CLIConfig{Server: "https://cfg"}
+	if got := EffectiveServer("", "", legacy); got != "https://stale-env" {
+		t.Errorf("legacy should honor env: got %q", got)
+	}
+}
+
 func TestServersRoundTrip(t *testing.T) {
 	tmp := filepath.Join(t.TempDir(), "c.yaml")
 	orig := &CLIConfig{

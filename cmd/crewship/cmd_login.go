@@ -124,50 +124,26 @@ func preflightServerURL(out io.Writer, serverURL string) error {
 	return nil
 }
 
-// explicitProfile returns the profile named explicitly for this invocation —
-// the --profile flag, else CREWSHIP_PROFILE. Unlike cli.ActiveProfileName it
-// deliberately ignores directory-match and the persisted `current`, so a
-// credential-writing command (login) never silently stores a token into a
-// different profile than the operator actually named on this command.
-func explicitProfile() string {
-	if flagProfile != "" {
-		return flagProfile
-	}
-	return strings.TrimSpace(os.Getenv("CREWSHIP_PROFILE"))
-}
-
-// persistCredential stores a freshly minted token. With a non-empty profile it
-// writes into cfg.Servers[profile] — creating the entry, preserving any
-// pre-set workspace — and marks it current; otherwise it writes the legacy
-// top-level Server/Token. It mirrors the malformed-config guard every login
-// path uses: LoadConfig returns an empty config on a missing file, so a
-// non-nil error means the existing file is unreadable / malformed YAML and we
-// must not clobber it.
-func persistCredential(serverURL, token, profile string) error {
+// persistCredential stores a freshly minted token at the active write target
+// and returns the profile name it wrote to ("" for legacy single-server mode).
+// The target is resolved with cli.ActiveProfileName (flag > CREWSHIP_PROFILE >
+// directory match > current), so `crewship login` inside a directory-bound or
+// `current` profile authenticates THAT profile — matching where every read
+// path looks. It mirrors the malformed-config guard every login path uses:
+// LoadConfig returns an empty config on a missing file, so a non-nil error
+// means the existing file is unreadable / malformed YAML and we must not
+// clobber it.
+func persistCredential(serverURL, token string) (string, error) {
 	cfg, err := cli.LoadConfig()
 	if err != nil {
-		return fmt.Errorf("load CLI config (refusing to overwrite a malformed file — fix or remove ~/.crewship/cli-config.yaml and retry): %w", err)
+		return "", fmt.Errorf("load CLI config (refusing to overwrite a malformed file — fix or remove ~/.crewship/cli-config.yaml and retry): %w", err)
 	}
-	if profile != "" {
-		if cfg.Servers == nil {
-			cfg.Servers = map[string]*cli.ServerProfile{}
-		}
-		p := cfg.Servers[profile]
-		if p == nil {
-			p = &cli.ServerProfile{}
-			cfg.Servers[profile] = p
-		}
-		p.Server = serverURL
-		p.Token = token
-		cfg.Current = profile
-	} else {
-		cfg.Server = serverURL
-		cfg.Token = token
-	}
+	name := cli.ActiveProfileName(flagProfile, cfg)
+	cfg.WriteCredential(flagProfile, serverURL, token, "")
 	if err := cli.SaveConfig(cfg); err != nil {
-		return fmt.Errorf("save config: %w", err)
+		return "", fmt.Errorf("save config: %w", err)
 	}
-	return nil
+	return name, nil
 }
 
 // savedTokenMessage describes where a token was just stored, naming the
@@ -188,22 +164,19 @@ var logoutCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		// Clear the token for the active target only: in profile mode that's
-		// the selected profile's token (leaving sibling profiles logged in);
-		// otherwise the legacy top-level token.
-		if name, p := cfg.ActiveProfile(flagProfile); p != nil {
-			p.Token = ""
-			if err := cli.SaveConfig(cfg); err != nil {
-				return err
-			}
-			cli.PrintSuccess(fmt.Sprintf("Logged out of profile %q.", name))
-			return nil
-		}
-		cfg.Token = ""
+		// Clear the active target's token (the selected profile's, leaving
+		// sibling profiles logged in) and always wipe any top-level token too,
+		// so logout never leaves a live bearer on disk.
+		name := cli.ActiveProfileName(flagProfile, cfg)
+		cfg.ClearTokenTarget(flagProfile)
 		if err := cli.SaveConfig(cfg); err != nil {
 			return err
 		}
-		cli.PrintSuccess("Logged out successfully.")
+		if name != "" {
+			cli.PrintSuccess(fmt.Sprintf("Logged out of profile %q.", name))
+		} else {
+			cli.PrintSuccess("Logged out successfully.")
+		}
 		return nil
 	},
 }
@@ -421,9 +394,9 @@ func loginWithPairing(serverURL, code, adapterHint string) error {
 
 	// persistCredential keeps the malformed-config guard described above
 	// (LoadConfig errors only when an existing file is unreadable) and routes
-	// the token into the active profile when --profile / CREWSHIP_PROFILE is set.
-	profile := explicitProfile()
-	if err := persistCredential(serverURL, redeem.CliToken, profile); err != nil {
+	// the token into the active profile (flag/env/dir/current) when one is set.
+	profile, err := persistCredential(serverURL, redeem.CliToken)
+	if err != nil {
 		return err
 	}
 
@@ -462,9 +435,9 @@ func loginWithToken(serverURL, token string) error {
 	resp.Body.Close()
 
 	// persistCredential carries the same malformed-config guard and routes
-	// the token into the active profile when one is named.
-	profile := explicitProfile()
-	if err := persistCredential(serverURL, token, profile); err != nil {
+	// the token into the active profile when one is selected.
+	profile, err := persistCredential(serverURL, token)
+	if err != nil {
 		return err
 	}
 
@@ -660,8 +633,8 @@ func loginInteractive(serverURL string) error {
 		finalToken = sessionToken
 	}
 
-	profile := explicitProfile()
-	if err := persistCredential(serverURL, finalToken, profile); err != nil {
+	profile, err := persistCredential(serverURL, finalToken)
+	if err != nil {
 		return err
 	}
 

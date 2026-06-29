@@ -69,20 +69,23 @@ var workspaceUseCmd = &cobra.Command{
 	Short: "Set the default workspace",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// Validate workspace exists if user is logged in
+		// Validate workspace exists if user is logged in. Resolve auth through
+		// the active-profile overlay so a profile-authenticated user is
+		// validated against the right server/token, not the empty top-level.
 		localCfg, err := cli.LoadConfig()
 		if err != nil {
 			localCfg = &cli.CLIConfig{}
 		}
-		if localCfg.Token != "" {
+		eff := localCfg.WithActiveProfile(flagProfile)
+		if eff.Token != "" {
 			client := cli.NewClient(
-				cli.ResolveServer(flagServer, localCfg),
-				localCfg.Token, "",
+				cli.EffectiveServer(flagServer, flagProfile, localCfg),
+				eff.Token, "",
 			)
 			// Bind the token to the configured server host so `workspace use`
 			// never leaks it to a mismatched --server/CREWSHIP_SERVER target
 			// (issue #571 / CLI2).
-			client.TokenHost = serverHost(localCfg.Server)
+			client.TokenHost = serverHost(eff.Server)
 			client.AllowHostMismatch = flagAllowServerMismatch || envAllowServerMismatch()
 			resp, err := client.Get("/api/v1/workspaces")
 			if err == nil && resp.StatusCode == 200 {
@@ -106,7 +109,10 @@ var workspaceUseCmd = &cobra.Command{
 			}
 		}
 
-		localCfg.Workspace = args[0]
+		// Write to the active target (profile when one is active, else
+		// top-level) so the selection isn't masked by the overlay on the next
+		// command.
+		localCfg.SetWorkspaceTarget(flagProfile, args[0])
 		if err := cli.SaveConfig(localCfg); err != nil {
 			return err
 		}
