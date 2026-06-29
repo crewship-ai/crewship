@@ -38,6 +38,14 @@ var rootCmd = &cobra.Command{
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		cli.InitColors(flagNoColor)
 
+		// Inject the working directory so internal profile resolution can do
+		// directory_profiles matching without reaching into the filesystem
+		// itself (provider pattern). Best-effort: an error just disables
+		// directory-based selection.
+		if wd, werr := os.Getwd(); werr == nil {
+			cli.SetWorkingDir(wd)
+		}
+
 		cfg, err := cli.LoadConfig()
 		if err != nil {
 			cli.PrintWarning("failed to load config: " + err.Error())

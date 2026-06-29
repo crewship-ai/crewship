@@ -38,8 +38,9 @@ host-mismatch guard that protects `--server` applies (see
 ## Quick start
 
 The minimum is one `login` per instance — `login --profile <name> --server <url>`
-**creates the profile if it doesn't exist** and marks it current, so you don't
-need a separate `server add`:
+**creates the profile if it doesn't exist**. If no default profile is set yet,
+it also becomes `current`, so you don't need a separate `server add` (logging
+into another profile later does not re-point an existing default):
 
 ```bash
 crewship login --profile dev1 --server https://crewship-dev1.example
@@ -78,9 +79,10 @@ If no profile is selected, the CLI falls back to the legacy top-level
 keep working unchanged.
 
 The selected profile's `server`, `token`, and `workspace` then flow through the
-normal resolution chain. An explicit `--server` / `CREWSHIP_SERVER` still
-overrides the URL (and trips the host-mismatch guard if it points somewhere the
-profile's token wasn't issued for).
+normal resolution chain. An explicit `--server` still overrides the dial target;
+`CREWSHIP_SERVER` is only consulted when the active profile does not already
+define a server URL (and a host mismatch still fails if the token was minted for
+a different host).
 
 ---
 

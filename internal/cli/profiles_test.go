@@ -279,6 +279,61 @@ func TestEffectiveServer(t *testing.T) {
 	}
 }
 
+func TestEffectiveServerFailsClosedForServerlessProfile(t *testing.T) {
+	t.Setenv("CREWSHIP_PROFILE", "")
+	t.Setenv("CREWSHIP_SERVER", "https://stale-env")
+	// Profile explicitly selected but has no server — must NOT dial env/default.
+	cfg := &CLIConfig{Current: "dev1", Servers: map[string]*ServerProfile{"dev1": {Token: "t"}}}
+	if got := EffectiveServer("", "", cfg); got != "" {
+		t.Errorf("serverless selected profile should fail closed, got %q", got)
+	}
+}
+
+func TestSetServerTargetClearsTokenOnHostChange(t *testing.T) {
+	t.Setenv("CREWSHIP_PROFILE", "")
+
+	// Profile mode: changing host invalidates the old bearer.
+	cfg := &CLIConfig{Current: "dev1", Servers: map[string]*ServerProfile{"dev1": {Server: "https://old-host", Token: "t1"}}}
+	cfg.SetServerTarget("", "https://new-host")
+	if cfg.Servers["dev1"].Token != "" {
+		t.Errorf("token not cleared on host change")
+	}
+	if cfg.Servers["dev1"].Server != "https://new-host" {
+		t.Errorf("server not updated: %q", cfg.Servers["dev1"].Server)
+	}
+
+	// Same host (different path) keeps the token.
+	same := &CLIConfig{Current: "dev1", Servers: map[string]*ServerProfile{"dev1": {Server: "https://h:8080/a", Token: "keep"}}}
+	same.SetServerTarget("", "https://h:8080/b")
+	if same.Servers["dev1"].Token != "keep" {
+		t.Errorf("token wrongly cleared for same host")
+	}
+
+	// Legacy mode clears top-level token too.
+	leg := &CLIConfig{Server: "https://old", Token: "lt"}
+	leg.SetServerTarget("", "https://new")
+	if leg.Token != "" {
+		t.Errorf("legacy token not cleared on host change")
+	}
+}
+
+func TestActiveProfileNameDirectoryMatch(t *testing.T) {
+	t.Setenv("CREWSHIP_PROFILE", "")
+	SetWorkingDir("/work/crewship_2/sub")
+	defer SetWorkingDir("")
+	cfg := &CLIConfig{
+		Current:           "dev1",
+		DirectoryProfiles: map[string]string{"/work/crewship_2": "dev2"},
+		Servers:           map[string]*ServerProfile{"dev1": {}, "dev2": {}},
+	}
+	if got := ActiveProfileName("", cfg); got != "dev2" {
+		t.Errorf("directory match should beat current, got %q", got)
+	}
+	if got := ActiveProfileName("dev1", cfg); got != "dev1" {
+		t.Errorf("flag should beat directory, got %q", got)
+	}
+}
+
 func TestServersRoundTrip(t *testing.T) {
 	tmp := filepath.Join(t.TempDir(), "c.yaml")
 	orig := &CLIConfig{

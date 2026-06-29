@@ -1,10 +1,22 @@
 package cli
 
 import (
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 )
+
+// workingDir is the directory used for directory_profiles matching. The CLI
+// layer injects it once at startup via SetWorkingDir, so internal profile
+// resolution never reaches into the filesystem (provider pattern) and stays
+// deterministic in tests.
+var workingDir string
+
+// SetWorkingDir records the process working directory for directory-based
+// profile selection. cmd/crewship calls this from PersistentPreRun; tests set
+// it explicitly. Empty (the default) disables directory matching.
+func SetWorkingDir(dir string) { workingDir = dir }
 
 // ServerProfile is one named target: a server URL, the CLI token issued for
 // that server, and an optional default workspace. Profiles let a single
@@ -37,11 +49,9 @@ func ActiveProfileName(flagProfile string, cfg *CLIConfig) string {
 	if cfg == nil {
 		return ""
 	}
-	if len(cfg.DirectoryProfiles) > 0 {
-		if cwd, err := os.Getwd(); err == nil {
-			if name := matchDirectoryProfile(cwd, cfg.DirectoryProfiles); name != "" {
-				return name
-			}
+	if len(cfg.DirectoryProfiles) > 0 && workingDir != "" {
+		if name := matchDirectoryProfile(workingDir, cfg.DirectoryProfiles); name != "" {
+			return name
 		}
 	}
 	return cfg.Current
@@ -155,10 +165,35 @@ func (cfg *CLIConfig) WriteCredential(flagProfile, server, token, workspace stri
 // field) so `config set` and `workspace use` land where reads look.
 func (cfg *CLIConfig) SetServerTarget(flagProfile, server string) {
 	if name := ActiveProfileName(flagProfile, cfg); name != "" {
-		cfg.EnsureServer(name).Server = server
+		p := cfg.EnsureServer(name)
+		if p.Server != "" && !sameHost(p.Server, server) {
+			p.Token = "" // old bearer was issued for a different host
+		}
+		p.Server = server
 		return
 	}
+	if cfg.Server != "" && !sameHost(cfg.Server, server) {
+		cfg.Token = ""
+	}
 	cfg.Server = server
+}
+
+// sameHost reports whether two server URLs share a hostname (case-insensitive).
+// Used to decide whether repointing a server invalidates the stored token,
+// which is bound to its issuing host (see main.serverHost / token-host binding).
+func sameHost(a, b string) bool {
+	return profileHost(a) == profileHost(b)
+}
+
+func profileHost(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	if u, err := url.Parse(raw); err == nil && u.Hostname() != "" {
+		return strings.ToLower(u.Hostname())
+	}
+	return strings.ToLower(raw)
 }
 
 func (cfg *CLIConfig) SetWorkspaceTarget(flagProfile, workspace string) {
@@ -191,8 +226,14 @@ func EffectiveServer(flagServer, flagProfile string, cfg *CLIConfig) string {
 	if flagServer != "" {
 		return flagServer
 	}
-	if name, p := cfg.ActiveProfile(flagProfile); name != "" && p != nil && p.Server != "" {
-		return p.Server
+	// A profile is explicitly selected: use its server, and fail closed (empty)
+	// if it has none — never silently dial CREWSHIP_SERVER / the default under a
+	// named profile.
+	if name, p := cfg.ActiveProfile(flagProfile); name != "" {
+		if p != nil && p.Server != "" {
+			return p.Server
+		}
+		return ""
 	}
 	return ResolveServer("", cfg)
 }

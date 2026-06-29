@@ -45,6 +45,16 @@ Device-code pairing (paste the code shown in the browser onboarding
 or Settings → Pair CLI):
   crewship login --pair --code=XXXX-XXXX`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Validate the profile target first: a typo'd --profile/CREWSHIP_PROFILE
+		// should get a clear "unknown profile" message before server resolution
+		// (which would otherwise fail closed with an empty-server error). A
+		// malformed config is left for persistCredential's guard to surface.
+		if cfg, lerr := cli.LoadConfig(); lerr == nil {
+			if _, perr := loginProfileTarget(cfg); perr != nil {
+				return perr
+			}
+		}
+
 		server := cli.EffectiveServer(flagServer, flagProfile, cliCfg)
 
 		// Pre-flight transport-security check. Fail loud on a malformed
@@ -55,16 +65,6 @@ or Settings → Pair CLI):
 		// (dev VM, internal LAN behind a VPN, etc.).
 		if err := preflightServerURL(cmd.ErrOrStderr(), server); err != nil {
 			return err
-		}
-
-		// Fail fast on an unwritable profile target before any credential is
-		// sent or minted, so a typo'd --profile/CREWSHIP_PROFILE gets a clear
-		// message instead of a downstream connection/validation error. A
-		// malformed config is left for persistCredential's guard to surface.
-		if cfg, lerr := cli.LoadConfig(); lerr == nil {
-			if _, perr := loginProfileTarget(cfg); perr != nil {
-				return perr
-			}
 		}
 
 		if loginPairFlag {

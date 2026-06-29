@@ -73,7 +73,9 @@ Pairing is what the **First-run wizard → Pair CLI** card hands out. The browse
 
 Pass `--profile <name>` (or set `CREWSHIP_PROFILE`) to authenticate a named
 [server profile](/cli/server) instead of the top-level config. The minted token
-is stored **inside that profile** and the profile becomes `current`:
+is stored **inside that profile**. If no default profile is set yet, that
+profile also becomes `current` (logging into another profile later does **not**
+re-point an existing default):
 
 ```bash
 crewship server add dev2 --server https://crewship-dev2.example
