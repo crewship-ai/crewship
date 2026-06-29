@@ -85,6 +85,11 @@ type Server struct {
 	// domainMetricsTTL so scrape frequency never multiplies query load.
 	domainMetrics domainMetricsCache
 
+	// legacyCache memoizes the /healthz legacy_resources status for
+	// legacyResourceTTL so frequent health checks don't re-run the docker
+	// ContainerList+VolumeList scan on every hit.
+	legacyCache legacyResourceCache
+
 	// bgCtx / bgCancel scope the lifetime of goroutines launched by New()
 	// itself (rather than Start()) — currently the devcontainer catalog
 	// and mise runtime refresh tickers. Cancelled by Shutdown() and by

@@ -145,6 +145,11 @@ counters or filter the per-check array.`,
 		// (the reachable check above already covers a dead daemon).
 		runProbe(runCheckEpisodicRecallMode)
 
+		// Legacy C1 crew resources: reads `legacy_resources` off /healthz.
+		// WARN when orphaned pre-C1 slug-only volumes/containers survive (they
+		// block agent container start); INFO when unknown/older server.
+		runProbe(runCheckLegacyResources)
+
 		// New checks (CRE-XXX): telemetry visibility, DSN reachability,
 		// data-dir perm drift, and CLI staleness. Each one is implemented
 		// as a thin wrapper around a testable helper that accepts state via

@@ -175,6 +175,60 @@ func (f *failContainer) CopyToContainer(_ context.Context, _ string, _ string, _
 	return fmt.Errorf("copy failed: container unavailable")
 }
 
+// secretLeakContainer fails EnsureCrewRuntime with an operator-actionable
+// cause (the legacy-C1 guard message) that also happens to embed a secret, to
+// prove the bridge surfaces the cause to the client AND redacts the secret.
+type secretLeakContainer struct{ failContainer }
+
+func (s *secretLeakContainer) EnsureCrewRuntime(_ context.Context, _ provider.CrewConfig) (string, error) {
+	return "", fmt.Errorf(
+		"legacy slug-scoped volume %q exists from before the C1 naming change; leaked sk-ant-oat01AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+		"crewship-3-tools-engineering",
+	)
+}
+
+// TestHandleChatMessage_SurfacesRedactedContainerCause pins the fix for the
+// swallowed-cause bug: a container-start failure must reach the client with its
+// real cause (so "failed to start agent container" is self-diagnosing), with
+// any embedded secret redacted first.
+func TestHandleChatMessage_SurfacesRedactedContainerCause(t *testing.T) {
+	resolver := &mockResolver{
+		info: &ChatInfo{
+			AgentID:     "agent-1",
+			AgentSlug:   "test-agent",
+			CrewID:      "crew-1",
+			CrewSlug:    "test-crew",
+			CLIAdapter:  "CLAUDE_CODE",
+			ToolProfile: "CODING",
+			TimeoutSecs: 30,
+		},
+	}
+	b := testBridgeWithContainer(t, resolver, &secretLeakContainer{})
+
+	var events []ws.ChatEvent
+	streamFn := func(e ws.ChatEvent) { events = append(events, e) }
+	_ = b.HandleChatMessage(context.Background(), "user-1", "sess-1", "hello", streamFn)
+
+	var errContent string
+	for _, e := range events {
+		if e.Type == "error" {
+			errContent = e.Content
+		}
+	}
+	if errContent == "" {
+		t.Fatal("expected an error event")
+	}
+	// Cause surfaced (operator-actionable), not a bare generic string.
+	if !strings.Contains(errContent, "failed to start agent container:") ||
+		!strings.Contains(errContent, "crewship-3-tools-engineering") {
+		t.Errorf("error event should surface the real cause, got: %q", errContent)
+	}
+	// Embedded secret must be redacted before streaming.
+	if strings.Contains(errContent, "sk-ant-oat01AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA") {
+		t.Errorf("secret leaked into client error event: %q", errContent)
+	}
+}
+
 func testBridgeWithContainer(t *testing.T, resolver ChatResolver, ctr provider.ContainerProvider) *Bridge {
 	t.Helper()
 	dir := t.TempDir()

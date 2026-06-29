@@ -203,6 +203,23 @@ type VolumeManager interface {
 	RemoveCrewVolumes(ctx context.Context, id, slug string) error
 }
 
+// LegacyResourcePruner is an optional interface for removing pre-C1 (slug-only)
+// crew runtime resources that survive a normal DB nuke+reseed. checkNoLegacyCrewResources
+// only DETECTS them (and blocks provisioning); this REMOVES them so the
+// id-scoped runtime can start. Legacy names carry no crew id, so the caller
+// passes every live crew slug. Returns the names actually removed.
+type LegacyResourcePruner interface {
+	PruneLegacyCrewResources(ctx context.Context, slugs []string) (removed []string, err error)
+}
+
+// LegacyResourceDetector is the read-only counterpart to LegacyResourcePruner:
+// it reports whether any pre-C1 slug-only resource exists for the given slugs,
+// without removing anything. Powers the /healthz legacy_resources field that
+// `crewship doctor` surfaces as a WARN before agent runs start failing.
+type LegacyResourceDetector interface {
+	HasLegacyCrewResources(ctx context.Context, slugs []string) (present bool, err error)
+}
+
 // InteractiveExecConfig configures an interactive (TTY) exec session.
 type InteractiveExecConfig struct {
 	ContainerID string

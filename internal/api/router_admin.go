@@ -9,6 +9,7 @@ import (
 	"os"
 
 	"github.com/crewship-ai/crewship/internal/backup"
+	"github.com/crewship-ai/crewship/internal/provider"
 )
 
 // registerAdminRoutes wires admin + audit + backup endpoints.
@@ -122,4 +123,16 @@ func (r *Router) registerAdminRoutes() {
 	r.mux.Handle("POST /api/v1/admin/backups/restore", authed(wsCtx(http.HandlerFunc(backupH.Restore))))
 	r.mux.Handle("POST /api/v1/admin/backups/self-test", authed(wsCtx(http.HandlerFunc(backupH.SelfTest))))
 	r.mux.Handle("DELETE /api/v1/admin/backups", authed(wsCtx(http.HandlerFunc(backupH.Delete))))
+
+	// Legacy C1 resource prune (admin-only). Removes pre-C1 slug-only crew
+	// docker resources that survive nuke+reseed and block agent container
+	// start. Nil pruner (non-docker provider) → handler 503s.
+	var legacyPruner provider.LegacyResourcePruner
+	if r.keeperContainer != nil {
+		if lp, ok := r.keeperContainer.(provider.LegacyResourcePruner); ok {
+			legacyPruner = lp
+		}
+	}
+	pruneH := NewLegacyPruneHandler(r.db, r.logger, legacyPruner)
+	r.mux.Handle("POST /api/v1/admin/prune-legacy-resources", authed(wsCtx(http.HandlerFunc(pruneH.Prune))))
 }

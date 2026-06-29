@@ -49,7 +49,11 @@ func (s *Server) registerIPCRoutes() {
 	s.ipcMux.HandleFunc("GET /debug/info", s.handleDebugInfo)
 }
 
-func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
+	// Bound the legacy-resource docker scan so a slow/wedged daemon can never
+	// stall the health endpoint; on timeout the scan returns "" (unknown).
+	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+	defer cancel()
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"status":  "ok",
 		"service": "crewshipd",
@@ -58,6 +62,10 @@ func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
 		// sweeping) or "sparse-only" (degraded — no embedder, recall is
 		// keyword/FTS only). `crewship doctor` reads this field.
 		"episodic": s.episodicMode(),
+		// Orphaned pre-C1 slug-only crew docker resources: "present"
+		// (operator should run `crewship admin prune-legacy`), "clean", or
+		// "" (unknown). `crewship doctor` reads this field.
+		"legacy_resources": s.legacyResourceStatus(ctx),
 	})
 }
 

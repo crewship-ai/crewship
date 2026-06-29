@@ -14,6 +14,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/conversation"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/logcollector"
+	"github.com/crewship-ai/crewship/internal/lookout"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/telemetry"
@@ -593,7 +594,13 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 
 		cID, err := b.container.EnsureCrewRuntime(ctx, cc)
 		if err != nil {
-			streamFn(ws.ChatEvent{Type: "error", Content: "failed to start agent container"})
+			// Surface the real cause, not a bare generic string. A swallowed
+			// cause (e.g. the legacy-C1-resource guard, which names the exact
+			// orphaned volume and the remediation) leaves operators with
+			// nothing to act on — the symptom the user hit. Redact first so a
+			// secret embedded in a wrapped error never reaches the client.
+			safeCause, _ := lookout.Redact(err.Error())
+			streamFn(ws.ChatEvent{Type: "error", Content: "failed to start agent container: " + safeCause})
 			return fmt.Errorf("ensure team runtime: %w", err)
 		}
 		// Start sidecars after the agent runtime is ready so the

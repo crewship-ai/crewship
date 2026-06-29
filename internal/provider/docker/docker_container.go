@@ -92,6 +92,128 @@ func (p *Provider) checkNoLegacyCrewResources(ctx context.Context, slug string) 
 	return nil
 }
 
+// pruneLegacyCrewResources removes the pre-C1 (slug-only) container and
+// home/tools volumes for slug if they still exist on the daemon. It is the
+// remediation counterpart to checkNoLegacyCrewResources: that guard blocks
+// provisioning while these survive; this clears them so the id-scoped runtime
+// can start. The container is removed before its volumes (a running legacy
+// container would hold them). Per-resource removal failures are logged and
+// skipped rather than aborting — a volume that's still in use must not wedge
+// the rest of the prune (mirrors RemoveCrewVolumes). Returns the names removed.
+func (p *Provider) pruneLegacyCrewResources(ctx context.Context, slug string) ([]string, error) {
+	if slug == "" {
+		return nil, nil
+	}
+	prefix := p.cfg.ContainerPrefix
+	if prefix == "" {
+		prefix = "crewship"
+	}
+	legacyContainer := prefix + "-team-" + slug
+	legacyHome := prefix + "-home-" + slug
+	legacyTools := prefix + "-tools-" + slug
+
+	removed := []string{}
+
+	containers, err := p.client.ContainerList(ctx, container.ListOptions{All: true})
+	if err != nil {
+		return removed, fmt.Errorf("list containers (legacy C1 prune): %w", err)
+	}
+	for _, c := range containers {
+		for _, name := range c.Names {
+			if name == "/"+legacyContainer {
+				if rmErr := p.client.ContainerRemove(ctx, c.ID, container.RemoveOptions{Force: true}); rmErr != nil {
+					p.logger.Warn("legacy C1 container remove failed", "container", legacyContainer, "error", rmErr)
+				} else {
+					removed = append(removed, legacyContainer)
+				}
+			}
+		}
+	}
+
+	list, err := p.client.VolumeList(ctx, volumeListOptions())
+	if err != nil {
+		return removed, fmt.Errorf("list volumes (legacy C1 prune): %w", err)
+	}
+	for _, vol := range list.Volumes {
+		if vol == nil {
+			continue
+		}
+		if vol.Name == legacyHome || vol.Name == legacyTools {
+			if rmErr := p.client.VolumeRemove(ctx, vol.Name, true); rmErr != nil {
+				p.logger.Warn("legacy C1 volume remove failed", "volume", vol.Name, "error", rmErr)
+			} else {
+				removed = append(removed, vol.Name)
+			}
+		}
+	}
+	return removed, nil
+}
+
+// HasLegacyCrewResources reports whether any pre-C1 (slug-only) container or
+// home/tools volume exists for any of slugs. It is the read-only,
+// detection-only counterpart to PruneLegacyCrewResources — powers the
+// /healthz legacy_resources field so `crewship doctor` can warn an operator
+// before an agent run fails. Lists the daemon once and matches every slug
+// against that single snapshot. Satisfies provider.LegacyResourceDetector.
+func (p *Provider) HasLegacyCrewResources(ctx context.Context, slugs []string) (bool, error) {
+	prefix := p.cfg.ContainerPrefix
+	if prefix == "" {
+		prefix = "crewship"
+	}
+	legacy := make(map[string]bool, len(slugs)*3)
+	for _, slug := range slugs {
+		if slug == "" {
+			continue
+		}
+		legacy[prefix+"-team-"+slug] = true
+		legacy[prefix+"-home-"+slug] = true
+		legacy[prefix+"-tools-"+slug] = true
+	}
+	if len(legacy) == 0 {
+		return false, nil
+	}
+
+	containers, err := p.client.ContainerList(ctx, container.ListOptions{All: true})
+	if err != nil {
+		return false, fmt.Errorf("list containers (legacy C1 detect): %w", err)
+	}
+	for _, c := range containers {
+		for _, name := range c.Names {
+			if legacy[strings.TrimPrefix(name, "/")] {
+				return true, nil
+			}
+		}
+	}
+
+	list, err := p.client.VolumeList(ctx, volumeListOptions())
+	if err != nil {
+		return false, fmt.Errorf("list volumes (legacy C1 detect): %w", err)
+	}
+	for _, vol := range list.Volumes {
+		if vol != nil && legacy[vol.Name] {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// PruneLegacyCrewResources removes pre-C1 slug-only resources for every slug in
+// slugs and returns the aggregate list of removed resource names. Satisfies
+// provider.LegacyResourcePruner. A transport failure listing the daemon's
+// containers/volumes is returned (with whatever was removed so far) so the
+// operator sees a partial result rather than a silent no-op.
+func (p *Provider) PruneLegacyCrewResources(ctx context.Context, slugs []string) ([]string, error) {
+	var removed []string
+	for _, slug := range slugs {
+		r, err := p.pruneLegacyCrewResources(ctx, slug)
+		removed = append(removed, r...)
+		if err != nil {
+			return removed, err
+		}
+	}
+	return removed, nil
+}
+
 // EnsureCrewRuntime creates or starts a Docker container for the given crew.
 // It applies security isolation (non-root UID, cap-drop ALL, read-only rootfs)
 // and resource limits (memory, CPU, PID). Returns the container ID.
