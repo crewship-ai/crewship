@@ -3,12 +3,18 @@ package main
 import (
 	"fmt"
 	"net/url"
+	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/spf13/cobra"
 )
+
+// serverAddDir backs the `server add --dir` flag: a directory to bind to the
+// profile for cwd auto-select (see directory_profiles). "." / relative paths
+// resolve against the current working directory.
+var serverAddDir string
 
 var serverCmd = &cobra.Command{
 	Use:   "server",
@@ -127,10 +133,25 @@ default 'current' profile.`,
 		if cfg.Current == "" {
 			cfg.Current = name
 		}
+		boundDir := ""
+		if d := strings.TrimSpace(serverAddDir); d != "" {
+			abs, err := filepath.Abs(d)
+			if err != nil {
+				return fmt.Errorf("resolve --dir %q: %w", d, err)
+			}
+			if cfg.DirectoryProfiles == nil {
+				cfg.DirectoryProfiles = map[string]string{}
+			}
+			cfg.DirectoryProfiles[abs] = name
+			boundDir = abs
+		}
 		if err := cli.SaveConfig(cfg); err != nil {
 			return err
 		}
 		cli.PrintSuccess(fmt.Sprintf("Profile %q → %s", name, p.Server))
+		if boundDir != "" {
+			fmt.Printf("Auto-selected when running under: %s\n", boundDir)
+		}
 		if p.Token == "" {
 			fmt.Printf("Authenticate it with: crewship login --profile %s\n", name)
 		}
@@ -178,6 +199,13 @@ var serverRemoveCmd = &cobra.Command{
 		if cfg.Current == name {
 			cfg.Current = ""
 		}
+		// Drop any directory bindings that pointed at the removed profile so
+		// no cwd silently resolves to a profile that no longer exists.
+		for d, n := range cfg.DirectoryProfiles {
+			if n == name {
+				delete(cfg.DirectoryProfiles, d)
+			}
+		}
 		if err := cli.SaveConfig(cfg); err != nil {
 			return err
 		}
@@ -216,5 +244,7 @@ var serverCurrentCmd = &cobra.Command{
 }
 
 func init() {
+	serverAddCmd.Flags().StringVar(&serverAddDir, "dir", "",
+		"Bind a directory to this profile for cwd auto-select ('.' = current directory)")
 	serverCmd.AddCommand(serverListCmd, serverAddCmd, serverUseCmd, serverRemoveCmd, serverCurrentCmd)
 }

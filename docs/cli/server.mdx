@@ -28,7 +28,7 @@ host-mismatch guard that protects `--server` applies (see
 | Command | Description |
 |---------|-------------|
 | `list` | List configured profiles; the active one is marked `*`. |
-| `add <name>` | Add or update a profile's URL (from `--server`) and optional `--workspace`. |
+| `add <name>` | Add or update a profile's URL (from `--server`), optional `--workspace`, and optional `--dir` cwd binding. |
 | `use <name>` | Set the persisted default (`current`) profile. |
 | `remove <name>` (alias `rm`) | Delete a profile. |
 | `current` | Show the active profile and its server/workspace/token status. |
@@ -37,23 +37,17 @@ host-mismatch guard that protects `--server` applies (see
 
 ## Quick start
 
+The minimum is one `login` per instance — `login --profile <name> --server <url>`
+**creates the profile if it doesn't exist** and marks it current, so you don't
+need a separate `server add`:
+
 ```bash
-# Register the targets (URL comes from the global --server flag).
-crewship server add dev1 --server https://crewship-dev1.example
-crewship server add dev2 --server https://crewship-dev2.example
+crewship login --profile dev1 --server https://crewship-dev1.example
+crewship login --profile dev2 --server https://crewship-dev2.example
 
-# Authenticate each profile — the token lands in that profile.
-crewship login --profile dev1
-crewship login --profile dev2
-
-# Pick a default for this machine.
-crewship server use dev1
-
-# Use the default…
-crewship crew list
-
-# …or override for a single command.
-crewship --profile dev2 crew list
+crewship server use dev1                # default for this machine
+crewship crew list                      # uses the default…
+crewship --profile dev2 crew list       # …or override per command
 ```
 
 `crewship server list` then shows:
@@ -62,6 +56,11 @@ crewship --profile dev2 crew list
 * dev1   https://crewship-dev1.example   ws=-   token set
   dev2   https://crewship-dev2.example   ws=-   token set
 ```
+
+<Tip>
+Single-server users need none of this — plain `crewship login` keeps writing the
+top-level config exactly as before. Profiles are opt-in.
+</Tip>
 
 ---
 
@@ -88,25 +87,29 @@ profile's token wasn't issued for).
 ## Directory auto-select
 
 `directory_profiles` maps a directory to a profile, so the CLI picks the right
-target automatically based on where you run it. The **longest matching path
-wins**, and matching is on path boundaries (so `/work/crewship_1` never matches
-`/work/crewship_10`):
+target automatically based on where you run it. Bind a directory from the CLI
+with `server add --dir` (no YAML editing) — `.` means the current directory:
+
+```bash
+cd /work/crewship_1 && crewship server add dev1 --server https://crewship-dev1.example --dir .
+cd /work/crewship_2 && crewship server add dev2 --server https://crewship-dev2.example --dir .
+```
+
+That records:
 
 ```yaml
 # ~/.crewship/cli-config.yaml
-current: dev1
-servers:
-  dev1: { server: https://crewship-dev1.example, token: "…", workspace: "…" }
-  dev2: { server: https://crewship-dev2.example, token: "…", workspace: "…" }
-  dev3: { server: https://crewship-dev3.example, token: "…", workspace: "…" }
 directory_profiles:
   /work/crewship_1: dev1
   /work/crewship_2: dev2
-  /work/crewship_3: dev3
 ```
 
-With this in place, running `crewship` inside `/work/crewship_2` (or any
-subdirectory) automatically targets `dev2` — no `--profile` flag, no env var.
+Now running `crewship` inside `/work/crewship_2` (or any subdirectory)
+automatically targets `dev2` — no `--profile` flag, no env var. The **longest
+matching path wins**, and matching is on path boundaries (so `/work/crewship_1`
+never matches `/work/crewship_10`). `server remove` also prunes a profile's
+directory bindings, so no cwd resolves to a deleted profile.
+
 This is the native replacement for shell hooks that exported
 `CREWSHIP_SERVER`/`CREWSHIP_CONFIG` based on `$PWD`.
 

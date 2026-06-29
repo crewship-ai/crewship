@@ -71,6 +71,41 @@ func TestServerAddRejectsBadURL(t *testing.T) {
 	}
 }
 
+func TestServerAddBindsDirectory(t *testing.T) {
+	path := redirectConfigHome(t)
+	oldServer, oldDir := flagServer, serverAddDir
+	flagServer = "https://dev1.example"
+	serverAddDir = "/work/crewship_1"
+	t.Cleanup(func() { flagServer, serverAddDir = oldServer, oldDir })
+
+	if err := serverAddCmd.RunE(serverAddCmd, []string{"dev1"}); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	cfg := readCfg(t, path)
+	if cfg.DirectoryProfiles["/work/crewship_1"] != "dev1" {
+		t.Errorf("--dir did not bind directory: %+v", cfg.DirectoryProfiles)
+	}
+}
+
+func TestServerRemovePrunesDirBindings(t *testing.T) {
+	path := redirectConfigHome(t)
+	oldServer, oldDir := flagServer, serverAddDir
+	flagServer = "https://dev1.example"
+	serverAddDir = "/work/crewship_1"
+	t.Cleanup(func() { flagServer, serverAddDir = oldServer, oldDir })
+
+	if err := serverAddCmd.RunE(serverAddCmd, []string{"dev1"}); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	if err := serverRemoveCmd.RunE(serverRemoveCmd, []string{"dev1"}); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	cfg := readCfg(t, path)
+	if _, ok := cfg.DirectoryProfiles["/work/crewship_1"]; ok {
+		t.Errorf("remove left a dangling directory binding: %+v", cfg.DirectoryProfiles)
+	}
+}
+
 func TestServerUseRejectsUnknown(t *testing.T) {
 	redirectConfigHome(t)
 	if err := serverUseCmd.RunE(serverUseCmd, []string{"ghost"}); err == nil {
