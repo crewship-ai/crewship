@@ -792,15 +792,16 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 			secretValues = append(secretValues, c.PlainValue)
 		}
 	}
-	scrubHandler, flushScrub := o.wrapScrubHandler(handler, secretValues)
-	// Tap text events flowing to the user so we can emit one
-	// chat.agent_response journal entry at end-of-run with the
-	// agent's full reply. Capped buffer (8 KB) keeps memory bounded
-	// for chatty replies while still preserving the typical "thinking
-	// + final answer" payload size.
+	// Journal tap: accumulate the agent's reply for the end-of-run
+	// chat.agent_response journal entry. CRITICAL (CodeRabbit): this tap sits
+	// AFTER the scrubber (stream → scrub → journalTap → user) so the buffer
+	// only ever sees REDACTED text — a split/encoded secret stripped from the
+	// live stream can no longer land verbatim in the persisted journal entry.
+	// Capped buffer (8 KB) keeps memory bounded for chatty replies while still
+	// preserving the typical "thinking + final answer" payload size.
 	const responseCap = 8 * 1024
 	var responseBuf strings.Builder
-	tappedHandler := EventHandler(func(event AgentEvent) {
+	journalTap := EventHandler(func(event AgentEvent) {
 		if event.Type == "text" && responseBuf.Len() < responseCap {
 			remaining := responseCap - responseBuf.Len()
 			if len(event.Content) <= remaining {
@@ -809,6 +810,14 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 				responseBuf.WriteString(event.Content[:remaining])
 			}
 		}
+		// handler may be nil (no live consumer); the scrubber still runs so the
+		// journal buffer above receives REDACTED text.
+		if handler != nil {
+			handler(event)
+		}
+	})
+	scrubHandler, flushScrub := o.wrapScrubHandler(journalTap, secretValues)
+	tappedHandler := EventHandler(func(event AgentEvent) {
 		// PR-C F4.2: invoke the sampled behavior monitor on every
 		// tool_call event. The hook's MaybeEvaluate is the sampling
 		// gate — most calls return (nil, false) without firing the

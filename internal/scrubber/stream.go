@@ -61,7 +61,16 @@ func (ss *StreamScrubber) Write(chunk string) string {
 	ss.mu.Lock()
 	defer ss.mu.Unlock()
 
-	buf := ss.carry + chunk
+	// Normalize zero-width characters up front so boundary detection
+	// (matchBounds) and redaction (Scrub) agree. Scrub matches on the
+	// zero-width-stripped form; if we computed boundaries on raw bytes a token
+	// like "sk-ant-​api03-…" would be invisible to matchBounds, the cut
+	// could fall inside it, and the emitted prefix would normalize into a live
+	// secret fragment downstream — reopening the zero-width bypass on the
+	// streaming path (CodeRabbit). Stripping the combined buffer also
+	// reassembles a zero-width char whose bytes are split across chunks. The
+	// carry is therefore always already-normalized, matching Scrub's output.
+	buf := stripZeroWidth(ss.carry + chunk)
 
 	// Not enough buffered yet to safely emit anything: hold it all back. The
 	// exception is the memory-safety cap, handled below.

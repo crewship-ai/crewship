@@ -202,7 +202,7 @@ func (e *Engine) ReindexPath(ctx context.Context, relPath string) (int, error) {
 
 	chunks := ChunkMarkdown(fileKey, string(data))
 
-	tx, err := e.db.Begin()
+	tx, err := e.db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, fmt.Errorf("begin incremental reindex tx: %w", err)
 	}
@@ -211,24 +211,24 @@ func (e *Engine) ReindexPath(ctx context.Context, relPath string) (int, error) {
 	// Replace just this file's chunks. The DELETE+INSERT runs inside one
 	// transaction so a concurrent Search never observes the file with zero
 	// chunks mid-update (WAL snapshot isolation), matching ReindexContext.
-	if _, err := tx.Exec("DELETE FROM memory_chunks WHERE file = ?", fileKey); err != nil {
+	if _, err := tx.ExecContext(ctx, "DELETE FROM memory_chunks WHERE file = ?", fileKey); err != nil {
 		return 0, fmt.Errorf("delete chunks for %s: %w", fileKey, err)
 	}
 
-	stmt, err := tx.Prepare("INSERT INTO memory_chunks (file, content) VALUES (?, ?)")
+	stmt, err := tx.PrepareContext(ctx, "INSERT INTO memory_chunks (file, content) VALUES (?, ?)")
 	if err != nil {
 		return 0, fmt.Errorf("prepare insert: %w", err)
 	}
 	defer stmt.Close()
 
 	for _, chunk := range chunks {
-		if _, err := stmt.Exec(chunk.File, chunk.Content); err != nil {
+		if _, err := stmt.ExecContext(ctx, chunk.File, chunk.Content); err != nil {
 			return 0, fmt.Errorf("insert chunk %s: %w", fileKey, err)
 		}
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
-	if _, err := tx.Exec(`
+	if _, err := tx.ExecContext(ctx, `
 		INSERT OR REPLACE INTO memory_meta (key, value)
 		VALUES ('last_indexed', ?)
 	`, now); err != nil {

@@ -67,6 +67,10 @@ func (o *Orchestrator) wrapScrubHandler(handler EventHandler, secretValues []str
 		o.logger.Warn("scrubber redacted credential in agent output")
 	}
 
+	// Remember the type of the most recent streamed delta so a buffered tail
+	// is flushed under its original type ("thinking" stays "thinking") instead
+	// of being relabeled "text".
+	lastStreamType := "text"
 	flush := func() {
 		tail := ss.Flush()
 		if tail == "" {
@@ -75,12 +79,19 @@ func (o *Orchestrator) wrapScrubHandler(handler EventHandler, secretValues []str
 		if strings.Contains(tail, redactionMarker) {
 			notify()
 		}
-		handler(AgentEvent{Type: "text", Content: tail, Timestamp: time.Now()})
+		handler(AgentEvent{Type: lastStreamType, Content: tail, Timestamp: time.Now()})
 	}
 
 	wrapped := func(event AgentEvent) {
 		switch event.Type {
 		case "text", "thinking":
+			// A type transition (text↔thinking) with content still buffered
+			// would otherwise relabel the held tail; flush it under the prior
+			// type first, then switch.
+			if event.Type != lastStreamType {
+				flush()
+				lastStreamType = event.Type
+			}
 			out := ss.Write(event.Content)
 			if out == "" {
 				// Held entirely in the overlap buffer; nothing safe to emit
