@@ -51,8 +51,7 @@ func (h *CrewConnectionHandler) List(w http.ResponseWriter, r *http.Request) {
 		WHERE cc.workspace_id = ?
 		ORDER BY cc.created_at DESC`, wsID)
 	if err != nil {
-		h.logger.Error("list crew connections", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "list crew connections", err)
 		return
 	}
 	defer rows.Close()
@@ -112,8 +111,7 @@ func (h *CrewConnectionHandler) Create(w http.ResponseWriter, r *http.Request) {
 		if err == nil {
 			err = toErr
 		}
-		h.logger.Error("check crew", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "check crew", err)
 		return
 	}
 	if !fromFound || !toFound {
@@ -149,8 +147,7 @@ func (h *CrewConnectionHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	result, err := h.db.ExecContext(r.Context(),
 		`DELETE FROM crew_connections WHERE id = ? AND workspace_id = ?`, connID, wsID)
 	if err != nil {
-		h.logger.Error("delete crew connection", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "delete crew connection", err)
 		return
 	}
 	rows, _ := result.RowsAffected()

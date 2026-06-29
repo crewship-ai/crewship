@@ -44,8 +44,7 @@ func (h *MissionHandler) Create(w http.ResponseWriter, r *http.Request) {
 			writeProblem(w, r, http.StatusBadRequest, "lead agent not found in crew")
 			return
 		}
-		h.logger.Error("lookup lead agent", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "lookup lead agent", err)
 		return
 	}
 	if agentRole != "LEAD" {
@@ -59,8 +58,7 @@ func (h *MissionHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
-		h.logger.Error("begin tx", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "begin tx", err)
 		return
 	}
 	defer tx.Rollback() //nolint:errcheck
@@ -70,8 +68,7 @@ func (h *MissionHandler) Create(w http.ResponseWriter, r *http.Request) {
 		VALUES (?, ?, ?, ?, ?, ?, ?, 'PLANNING', ?, ?, ?)`,
 		id, wsID, crewID, req.LeadAgentID, traceID, req.Title, req.Description, req.WorkflowTemplate, now, now)
 	if err != nil {
-		h.logger.Error("create mission", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "create mission", err)
 		return
 	}
 
@@ -81,14 +78,12 @@ func (h *MissionHandler) Create(w http.ResponseWriter, r *http.Request) {
 		VALUES (?, ?, ?, ?, 'MISSION', 'ACTIVE', ?, ?, ?)`,
 		id, req.LeadAgentID, wsID, "Mission: "+req.Title, now, now, now)
 	if err != nil {
-		h.logger.Error("create synthetic chat for mission", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "create synthetic chat for mission", err)
 		return
 	}
 
 	if err := tx.Commit(); err != nil {
-		h.logger.Error("commit mission", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "commit mission", err)
 		return
 	}
 
@@ -138,8 +133,7 @@ func (h *MissionHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
-		h.logger.Error("begin transaction", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "begin transaction", err)
 		return
 	}
 	defer tx.Rollback() //nolint:errcheck
@@ -154,8 +148,7 @@ func (h *MissionHandler) Update(w http.ResponseWriter, r *http.Request) {
 			writeProblem(w, r, http.StatusNotFound, "Mission not found")
 			return
 		}
-		h.logger.Error("get mission for update", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "get mission for update", err)
 		return
 	}
 
@@ -191,8 +184,7 @@ func (h *MissionHandler) Update(w http.ResponseWriter, r *http.Request) {
 		if _, err = tx.ExecContext(r.Context(),
 			`UPDATE missions SET status = ?, completed_at = ?, updated_at = ? WHERE id = ?`,
 			newStatus, completedAt, now, missionID); err != nil {
-			h.logger.Error("update mission status", "error", err)
-			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			internalError(w, r, h.logger, "update mission status", err)
 			return
 		}
 		if _, terminal := terminalStatusToLessonKindLocal(newStatus); terminal {
@@ -202,29 +194,25 @@ func (h *MissionHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 	if req.Title != nil {
 		if _, err = tx.ExecContext(r.Context(), `UPDATE missions SET title = ?, updated_at = ? WHERE id = ?`, *req.Title, now, missionID); err != nil {
-			h.logger.Error("update mission title", "error", err)
-			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			internalError(w, r, h.logger, "update mission title", err)
 			return
 		}
 	}
 	if req.Description != nil {
 		if _, err = tx.ExecContext(r.Context(), `UPDATE missions SET description = ?, updated_at = ? WHERE id = ?`, *req.Description, now, missionID); err != nil {
-			h.logger.Error("update mission description", "error", err)
-			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			internalError(w, r, h.logger, "update mission description", err)
 			return
 		}
 	}
 	if req.Plan != nil {
 		if _, err = tx.ExecContext(r.Context(), `UPDATE missions SET plan = ?, updated_at = ? WHERE id = ?`, *req.Plan, now, missionID); err != nil {
-			h.logger.Error("update mission plan", "error", err)
-			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			internalError(w, r, h.logger, "update mission plan", err)
 			return
 		}
 	}
 
 	if err = tx.Commit(); err != nil {
-		h.logger.Error("commit mission update", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "commit mission update", err)
 		return
 	}
 
@@ -240,8 +228,7 @@ func (h *MissionHandler) Update(w http.ResponseWriter, r *http.Request) {
 	m, err := scanMission(h.db.QueryRowContext(r.Context(),
 		missionSelectColumns+` WHERE m.id = ?`, missionID))
 	if err != nil {
-		h.logger.Error("read updated mission", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "read updated mission", err)
 		return
 	}
 
@@ -273,14 +260,12 @@ func (h *MissionHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		`DELETE FROM missions WHERE id = ? AND crew_id = ? AND workspace_id = ? AND status IN ('PLANNING', 'CANCELLED')`,
 		missionID, crewID, wsID)
 	if err != nil {
-		h.logger.Error("delete mission", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "delete mission", err)
 		return
 	}
 	affected, err := res.RowsAffected()
 	if err != nil {
-		h.logger.Error("delete mission rows affected", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "delete mission rows affected", err)
 		return
 	}
 	if affected == 0 {
@@ -294,8 +279,7 @@ func (h *MissionHandler) Delete(w http.ResponseWriter, r *http.Request) {
 				writeProblem(w, r, http.StatusNotFound, "Mission not found")
 				return
 			}
-			h.logger.Error("delete mission follow-up query", "error", qErr)
-			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			internalError(w, r, h.logger, "delete mission follow-up query", qErr)
 			return
 		}
 		writeProblem(w, r, http.StatusBadRequest, "Only PLANNING or CANCELLED missions can be deleted")

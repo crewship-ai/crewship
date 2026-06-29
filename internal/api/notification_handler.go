@@ -104,8 +104,7 @@ func (h *NotificationHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := h.db.QueryContext(r.Context(), query, args...)
 	if err != nil {
-		h.logger.Error("list notifications", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "list notifications", err)
 		return
 	}
 	defer rows.Close()
@@ -118,15 +117,13 @@ func (h *NotificationHandler) List(w http.ResponseWriter, r *http.Request) {
 			&n.Action, &n.EntityType, &n.EntityID, &n.EntityTitle,
 			&n.ReadAt, &n.CreatedAt,
 		); err != nil {
-			h.logger.Error("scan notification", "error", err)
-			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			internalError(w, r, h.logger, "scan notification", err)
 			return
 		}
 		result = append(result, n)
 	}
 	if err := rows.Err(); err != nil {
-		h.logger.Error("rows iteration (notifications)", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "rows iteration (notifications)", err)
 		return
 	}
 
@@ -154,14 +151,12 @@ func (h *NotificationHandler) MarkRead(w http.ResponseWriter, r *http.Request) {
 		`UPDATE notifications SET read_at = ? WHERE id = ? AND user_id = ? AND read_at IS NULL`,
 		now, notifID, user.ID)
 	if err != nil {
-		h.logger.Error("mark notification read", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "mark notification read", err)
 		return
 	}
 	affected, err := res.RowsAffected()
 	if err != nil {
-		h.logger.Error("mark read rows affected", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "mark read rows affected", err)
 		return
 	}
 	if affected == 0 {
@@ -175,8 +170,7 @@ func (h *NotificationHandler) MarkRead(w http.ResponseWriter, r *http.Request) {
 				writeProblem(w, r, http.StatusNotFound, "Notification not found")
 				return
 			}
-			h.logger.Error("check notification exists", "error", err)
-			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			internalError(w, r, h.logger, "check notification exists", err)
 			return
 		}
 	}
@@ -201,8 +195,7 @@ func (h *NotificationHandler) MarkAllRead(w http.ResponseWriter, r *http.Request
 		`UPDATE notifications SET read_at = ? WHERE user_id = ? AND read_at IS NULL`,
 		now, user.ID)
 	if err != nil {
-		h.logger.Error("mark all notifications read", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "mark all notifications read", err)
 		return
 	}
 	affected, _ := res.RowsAffected()
@@ -227,14 +220,12 @@ func (h *NotificationHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		`DELETE FROM notifications WHERE id = ? AND user_id = ?`,
 		notifID, user.ID)
 	if err != nil {
-		h.logger.Error("delete notification", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "delete notification", err)
 		return
 	}
 	affected, err := res.RowsAffected()
 	if err != nil {
-		h.logger.Error("delete notification rows affected", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "delete notification rows affected", err)
 		return
 	}
 	if affected == 0 {
@@ -261,8 +252,7 @@ func (h *NotificationHandler) Count(w http.ResponseWriter, r *http.Request) {
 		`SELECT COUNT(*) FROM notifications WHERE user_id = ? AND read_at IS NULL`,
 		user.ID).Scan(&unread)
 	if err != nil {
-		h.logger.Error("count notifications", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "count notifications", err)
 		return
 	}
 

@@ -44,3 +44,17 @@ func readAll(r io.Reader) ([]byte, error) {
 	}
 	return io.ReadAll(r)
 }
+
+// deref returns the pointee or "" for nil. Used heavily in the
+// update-patch paths where remote-side fields are pointers (so we
+// can distinguish "no value" from "empty value") but the diff only
+// cares about the string form. Shared across kinds — the agents,
+// issues and milestones REST APIs all return sql.NullString-style
+// pointers for nullable text columns, and the manifest treats absent
+// and "" as equivalent for diffing.
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}

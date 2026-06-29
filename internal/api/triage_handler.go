@@ -57,8 +57,7 @@ func (h *TriageHandler) ListRules(w http.ResponseWriter, r *http.Request) {
 		WHERE workspace_id = ?
 		ORDER BY position ASC, created_at ASC`, wsID)
 	if err != nil {
-		h.logger.Error("list triage rules", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "list triage rules", err)
 		return
 	}
 	defer rows.Close()
@@ -71,15 +70,13 @@ func (h *TriageHandler) ListRules(w http.ResponseWriter, r *http.Request) {
 			&tr.AssigneeID, &tr.Priority, &tr.ProjectID, &tr.LabelsJSON,
 			&tr.Position, &tr.Enabled, &tr.MatchCount, &tr.CreatedAt,
 		); err != nil {
-			h.logger.Error("scan triage rule", "error", err)
-			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			internalError(w, r, h.logger, "scan triage rule", err)
 			return
 		}
 		result = append(result, tr)
 	}
 	if err := rows.Err(); err != nil {
-		h.logger.Error("rows iteration (triage rules)", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "rows iteration (triage rules)", err)
 		return
 	}
 
@@ -156,8 +153,7 @@ func (h *TriageHandler) CreateRule(w http.ResponseWriter, r *http.Request) {
 		req.CrewID, req.AssigneeID, req.Priority, req.ProjectID, req.LabelsJSON,
 		maxPos+1, now)
 	if err != nil {
-		h.logger.Error("insert triage rule", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "insert triage rule", err)
 		return
 	}
 
@@ -204,8 +200,7 @@ func (h *TriageHandler) UpdateRule(w http.ResponseWriter, r *http.Request) {
 			writeProblem(w, r, http.StatusNotFound, "Triage rule not found")
 			return
 		}
-		h.logger.Error("get triage rule for update", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "get triage rule for update", err)
 		return
 	}
 
@@ -292,8 +287,7 @@ func (h *TriageHandler) UpdateRule(w http.ResponseWriter, r *http.Request) {
 
 	query, args := ub.Build("triage_rules", "id = ? AND workspace_id = ?", ruleID, wsID)
 	if _, err := h.db.ExecContext(r.Context(), query, args...); err != nil {
-		h.logger.Error("update triage rule", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "update triage rule", err)
 		return
 	}
 
@@ -311,8 +305,7 @@ func (h *TriageHandler) UpdateRule(w http.ResponseWriter, r *http.Request) {
 		&tr.Position, &tr.Enabled, &tr.MatchCount, &tr.CreatedAt,
 	)
 	if err != nil {
-		h.logger.Error("read updated triage rule", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "read updated triage rule", err)
 		return
 	}
 
@@ -331,20 +324,12 @@ func (h *TriageHandler) DeleteRule(w http.ResponseWriter, r *http.Request) {
 	ruleID := r.PathValue("ruleId")
 	wsID := WorkspaceIDFromContext(r.Context())
 
-	res, err := h.db.ExecContext(r.Context(),
-		`DELETE FROM triage_rules WHERE id = ? AND workspace_id = ?`, ruleID, wsID)
+	found, err := deleteByID(r.Context(), h.db, "triage_rules", ruleID, wsID)
 	if err != nil {
-		h.logger.Error("delete triage rule", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "delete triage rule", err)
 		return
 	}
-	affected, err := res.RowsAffected()
-	if err != nil {
-		h.logger.Error("delete triage rule rows affected", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
-		return
-	}
-	if affected == 0 {
+	if !found {
 		writeProblem(w, r, http.StatusNotFound, "Triage rule not found")
 		return
 	}
@@ -372,8 +357,7 @@ func (h *TriageHandler) Process(w http.ResponseWriter, r *http.Request) {
 		WHERE workspace_id = ? AND enabled = 1
 		ORDER BY position ASC`, wsID)
 	if err != nil {
-		h.logger.Error("triage: load rules", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "triage: load rules", err)
 		return
 	}
 	defer ruleRows.Close()
@@ -409,8 +393,7 @@ func (h *TriageHandler) Process(w http.ResponseWriter, r *http.Request) {
 		rules = append(rules, tr)
 	}
 	if err := ruleRows.Err(); err != nil {
-		h.logger.Error("triage: rules iteration", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "triage: rules iteration", err)
 		return
 	}
 
@@ -425,8 +408,7 @@ func (h *TriageHandler) Process(w http.ResponseWriter, r *http.Request) {
 		WHERE workspace_id = ? AND status = 'BACKLOG' AND assignee_id IS NULL
 		  AND COALESCE(mission_type, 'mission') = 'issue'`, wsID)
 	if err != nil {
-		h.logger.Error("triage: load issues", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "triage: load issues", err)
 		return
 	}
 	defer issueRows.Close()
@@ -446,8 +428,7 @@ func (h *TriageHandler) Process(w http.ResponseWriter, r *http.Request) {
 		issues = append(issues, iss)
 	}
 	if err := issueRows.Err(); err != nil {
-		h.logger.Error("triage: issues iteration", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "triage: issues iteration", err)
 		return
 	}
 

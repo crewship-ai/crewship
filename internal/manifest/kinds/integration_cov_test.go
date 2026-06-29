@@ -21,17 +21,17 @@ import (
 func TestIntegrationCov_CheckStatus(t *testing.T) {
 	t.Parallel()
 
-	if err := integrationCheckStatus(nil, "op"); err == nil || !strings.Contains(err.Error(), "nil response") {
+	if err := checkStatus(nil, "op"); err == nil || !strings.Contains(err.Error(), "response is nil") {
 		t.Fatalf("nil response: got %v", err)
 	}
-	if err := integrationCheckStatus(&internalapi.Response{StatusCode: 201}, "op"); err != nil {
+	if err := checkStatus(&internalapi.Response{StatusCode: 201}, "op"); err != nil {
 		t.Fatalf("2xx: got %v", err)
 	}
-	err := integrationCheckStatus(&internalapi.Response{StatusCode: 500, Body: strings.NewReader(" detail ")}, "op")
-	if err == nil || !strings.Contains(err.Error(), "HTTP 500") || !strings.Contains(err.Error(), "detail") {
+	err := checkStatus(&internalapi.Response{StatusCode: 500, Body: strings.NewReader(" detail ")}, "op")
+	if err == nil || !strings.Contains(err.Error(), "unexpected status 500") || !strings.Contains(err.Error(), "detail") {
 		t.Fatalf("500: got %v", err)
 	}
-	if err := integrationCheckStatus(&internalapi.Response{StatusCode: 404}, "op"); err == nil || !strings.Contains(err.Error(), "HTTP 404") {
+	if err := checkStatus(&internalapi.Response{StatusCode: 404}, "op"); err == nil || !strings.Contains(err.Error(), "unexpected status 404") {
 		t.Fatalf("404 nil body: got %v", err)
 	}
 }
@@ -39,7 +39,7 @@ func TestIntegrationCov_CheckStatus(t *testing.T) {
 func TestIntegrationCov_ReadAll(t *testing.T) {
 	t.Parallel()
 
-	b, err := integrationReadAll(nil)
+	b, err := readAll(nil)
 	if b != nil || err != nil {
 		t.Fatalf("nil reader: got (%v,%v)", b, err)
 	}
@@ -114,7 +114,7 @@ func TestIntegrationCov_ListCrews(t *testing.T) {
 		t.Parallel()
 		c := newCovClient(map[string]covRoute{"GET /api/v1/crews": {status: 500}})
 		_, err := integrationListCrews(context.Background(), c)
-		if err == nil || !strings.Contains(err.Error(), "HTTP 500") {
+		if err == nil || !strings.Contains(err.Error(), "unexpected status 500") {
 			t.Fatalf("got %v", err)
 		}
 	})
@@ -167,7 +167,7 @@ func TestIntegrationCov_Listers_Errors(t *testing.T) {
 		t.Parallel()
 		c := newCovClient(map[string]covRoute{"GET /api/v1/integrations": {status: 503}})
 		_, err := integrationListWorkspace(context.Background(), c)
-		if err == nil || !strings.Contains(err.Error(), "HTTP 503") {
+		if err == nil || !strings.Contains(err.Error(), "unexpected status 503") {
 			t.Fatalf("got %v", err)
 		}
 	})
@@ -183,7 +183,7 @@ func TestIntegrationCov_Listers_Errors(t *testing.T) {
 		t.Parallel()
 		c := newCovClient(map[string]covRoute{"GET /api/v1/crews/c1/integrations": {status: 500}})
 		_, err := integrationListCrew(context.Background(), c, "c1")
-		if err == nil || !strings.Contains(err.Error(), "HTTP 500") {
+		if err == nil || !strings.Contains(err.Error(), "unexpected status 500") {
 			t.Fatalf("got %v", err)
 		}
 	})
@@ -398,7 +398,7 @@ func TestIntegrationCov_DeleteItem_ExecErrors(t *testing.T) {
 	t.Run("bad status", func(t *testing.T) {
 		t.Parallel()
 		c := newCovClient(map[string]covRoute{"DELETE /api/v1/integrations/i1": {status: 409, body: "in use"}})
-		if err := item.Exec(context.Background(), c); err == nil || !strings.Contains(err.Error(), "HTTP 409") {
+		if err := item.Exec(context.Background(), c); err == nil || !strings.Contains(err.Error(), "unexpected status 409") {
 			t.Fatalf("got %v", err)
 		}
 	})
@@ -457,7 +457,7 @@ func TestIntegrationCov_Plan_UpdateExec_Errors(t *testing.T) {
 		if err != nil {
 			t.Fatalf("plan: %v", err)
 		}
-		if execErr := items[0].Exec(context.Background(), c); execErr == nil || !strings.Contains(execErr.Error(), "HTTP 400") {
+		if execErr := items[0].Exec(context.Background(), c); execErr == nil || !strings.Contains(execErr.Error(), "unexpected status 400") {
 			t.Fatalf("exec: got %v", execErr)
 		}
 	})
@@ -515,7 +515,7 @@ func TestIntegrationCov_LookupCrewIDBySlug_ListError(t *testing.T) {
 
 	c := newCovClient(map[string]covRoute{"GET /api/v1/crews": {status: 500}})
 	_, err := integrationLookupCrewIDBySlug(context.Background(), c, "eng")
-	if err == nil || !strings.Contains(err.Error(), "HTTP 500") {
+	if err == nil || !strings.Contains(err.Error(), "unexpected status 500") {
 		t.Fatalf("got %v", err)
 	}
 }

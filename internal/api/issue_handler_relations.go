@@ -26,8 +26,7 @@ func (h *IssueHandler) ListRelations(w http.ResponseWriter, r *http.Request) {
 		WHERE mr.source_id = ? OR mr.target_id = ?`,
 		missionID, missionID, missionID)
 	if err != nil {
-		h.logger.Error("list relations", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "list relations", err)
 		return
 	}
 	defer rows.Close()
@@ -115,8 +114,7 @@ func (h *IssueHandler) CreateRelation(w http.ResponseWriter, r *http.Request) {
 			writeProblem(w, r, http.StatusConflict, "Relation already exists")
 			return
 		}
-		h.logger.Error("create relation", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "create relation", err)
 		return
 	}
 
@@ -148,8 +146,7 @@ func (h *IssueHandler) DeleteRelation(w http.ResponseWriter, r *http.Request) {
 		  AND target_id IN (SELECT id FROM missions WHERE workspace_id = ?)`,
 		relID, wsID, wsID)
 	if err != nil {
-		h.logger.Error("delete relation", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "delete relation", err)
 		return
 	}
 	n, _ := res.RowsAffected()

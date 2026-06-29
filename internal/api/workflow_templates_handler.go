@@ -195,8 +195,7 @@ func (h *WorkflowTemplateHandler) List(w http.ResponseWriter, r *http.Request) {
 		WHERE workspace_id = ?
 		ORDER BY is_builtin DESC, created_at ASC`, wsID)
 	if err != nil {
-		h.logger.Error("list workflow templates", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "list workflow templates", err)
 		return
 	}
 	defer rows.Close()
@@ -205,15 +204,13 @@ func (h *WorkflowTemplateHandler) List(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		wt, err := scanWorkflowTemplate(rows)
 		if err != nil {
-			h.logger.Error("scan workflow template", "error", err)
-			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			internalError(w, r, h.logger, "scan workflow template", err)
 			return
 		}
 		out = append(out, wt)
 	}
 	if err := rows.Err(); err != nil {
-		h.logger.Error("workflow templates iteration", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "workflow templates iteration", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -272,8 +269,7 @@ func (h *WorkflowTemplateHandler) Create(w http.ResponseWriter, r *http.Request)
 			writeProblem(w, r, http.StatusConflict, "A workflow template with this name already exists")
 			return
 		}
-		h.logger.Error("insert workflow template", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "insert workflow template", err)
 		return
 	}
 
@@ -314,8 +310,7 @@ func (h *WorkflowTemplateHandler) Get(w http.ResponseWriter, r *http.Request) {
 			writeProblem(w, r, http.StatusNotFound, "Workflow template not found")
 			return
 		}
-		h.logger.Error("get workflow template", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "get workflow template", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, wt)
@@ -347,8 +342,7 @@ func (h *WorkflowTemplateHandler) Update(w http.ResponseWriter, r *http.Request)
 			writeProblem(w, r, http.StatusNotFound, "Workflow template not found")
 			return
 		}
-		h.logger.Error("get workflow template for update", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "get workflow template for update", err)
 		return
 	}
 
@@ -418,8 +412,7 @@ func (h *WorkflowTemplateHandler) Update(w http.ResponseWriter, r *http.Request)
 			writeProblem(w, r, http.StatusConflict, "A workflow template with this name already exists")
 			return
 		}
-		h.logger.Error("update workflow template", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "update workflow template", err)
 		return
 	}
 
@@ -432,8 +425,7 @@ func (h *WorkflowTemplateHandler) Update(w http.ResponseWriter, r *http.Request)
 		WHERE id = ?`, id)
 	wt, err := scanWorkflowTemplate(row)
 	if err != nil {
-		h.logger.Error("read updated workflow template", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "read updated workflow template", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, wt)
@@ -454,20 +446,12 @@ func (h *WorkflowTemplateHandler) Delete(w http.ResponseWriter, r *http.Request)
 	id := r.PathValue("id")
 	wsID := WorkspaceIDFromContext(r.Context())
 
-	res, err := h.db.ExecContext(r.Context(),
-		`DELETE FROM workflow_templates WHERE id = ? AND workspace_id = ?`, id, wsID)
+	found, err := deleteByID(r.Context(), h.db, "workflow_templates", id, wsID)
 	if err != nil {
-		h.logger.Error("delete workflow template", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "delete workflow template", err)
 		return
 	}
-	affected, err := res.RowsAffected()
-	if err != nil {
-		h.logger.Error("delete workflow template rows affected", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
-		return
-	}
-	if affected == 0 {
+	if !found {
 		writeProblem(w, r, http.StatusNotFound, "Workflow template not found")
 		return
 	}

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/chatbridge"
@@ -146,10 +145,15 @@ func (r *OrchestratorRunner) RunStep(ctx context.Context, req AgentStepRequest) 
 		Slug:        info.CrewSlug,
 		Image:       info.RuntimeImage,
 		CachedImage: info.CachedImage,
-		// MemoryMB / CPUs default to the orchestrator's defaults
-		// when zero — the runner doesn't override those because
-		// pipelines aren't currently sized differently from chat
-		// runs.
+		// Size the crew container from the crew's configured limits,
+		// the same source the AgentRunRequest below uses. Without this
+		// a cold pipeline run that *creates* the container would pin it
+		// to the Docker fallback (8 GiB / 2 CPU) while the chat path
+		// (bridge.go) would have sized it to the crew's config. When
+		// these are zero the docker provider applies its own safe
+		// default, so unconfigured crews are unaffected.
+		MemoryMB: info.MemoryMB,
+		CPUs:     info.CPUs,
 	})
 	if err != nil {
 		return AgentStepResult{}, fmt.Errorf("ensure container: %w", err)
@@ -208,7 +212,10 @@ func (r *OrchestratorRunner) RunStep(ctx context.Context, req AgentStepRequest) 
 	//
 	// SystemPrompt and ToolProfile likewise stay agent-defined — the
 	// routine doesn't get to mess with persona or tool whitelist.
-	cliAdapter := info.CLIAdapter
+	//
+	// CLIAdapter therefore is not a per-call override: the converter
+	// sources it from info.CLIAdapter, which is the value the old
+	// `cliAdapter := info.CLIAdapter` resolved to.
 	llmModel := info.LLMModel
 	if req.Model != "" {
 		llmModel = req.Model
@@ -230,40 +237,23 @@ func (r *OrchestratorRunner) RunStep(ctx context.Context, req AgentStepRequest) 
 		timeoutSecs = 600 // 10-minute default; agents that need
 		// longer override on a per-step basis via DSL TimeoutSec.
 	}
-	runReq := orchestrator.AgentRunRequest{
-		AgentID:            info.AgentID,
-		AgentSlug:          info.AgentSlug,
-		AgentRole:          info.AgentRole,
-		CrewID:             info.CrewID,
-		CrewSlug:           info.CrewSlug,
-		WorkspaceID:        info.WorkspaceID,
-		ChatID:             chatID,
-		ContainerID:        containerID,
-		CLIAdapter:         cliAdapter,
-		LLMModel:           llmModel,
-		SystemPrompt:       info.SystemPrompt,
-		UserMessage:        req.Prompt,
-		ToolProfile:        info.ToolProfile,
-		Credentials:        info.Credentials,
-		TimeoutSecs:        timeoutSecs,
-		MemoryEnabled:      info.MemoryEnabled,
-		CrewMembers:        info.CrewMembers,
-		NetworkMode:        info.NetworkMode,
-		AllowedDomains:     info.AllowedDomains,
-		MCPServers:         info.MCPServers,
-		CrewMCPConfigJSON:  info.CrewMCPConfigJSON,
-		AgentMCPConfigJSON: info.AgentMCPConfigJSON,
-		PreferredLanguage:  info.PreferredLanguage,
-		Skills:             info.InstalledSkills,
-	}
+	runReq := info.ToAgentRunRequest(chatbridge.AgentRunOverrides{
+		ChatID:      chatID,
+		ContainerID: containerID,
+		UserMessage: req.Prompt,
+		LLMModel:    llmModel,
+		TimeoutSecs: timeoutSecs,
+		// Previously omitted — pipeline-launched agents silently lost
+		// their resource limits. Pass the agent's configured limits.
+		MemoryMB: info.MemoryMB,
+		CPUs:     info.CPUs,
+	})
 
 	// 7. Run with buffering handler that captures text + result
 	//    events. The "result" event carries usage metadata
 	//    (token counts, cost) that we surface as AgentStepResult
 	//    so the executor's run summary is accurate.
 	startedAt := time.Now()
-	var fullResponse strings.Builder
-	var resultMeta map[string]any
 
 	var logBuf *logcollector.OutputBuffer
 	if r.logWriter != nil {
@@ -271,30 +261,16 @@ func (r *OrchestratorRunner) RunStep(ctx context.Context, req AgentStepRequest) 
 		defer logBuf.Close()
 	}
 
-	handler := func(event orchestrator.AgentEvent) {
-		switch event.Type {
-		case "text":
-			fullResponse.WriteString(event.Content)
-		case "result":
-			if m, ok := event.Metadata.(map[string]any); ok {
-				resultMeta = m
-			}
-		}
-		if logBuf != nil {
-			_ = logBuf.Append(logcollector.LogEntry{
-				Timestamp: event.Timestamp,
-				Level:     "info",
-				Agent:     info.AgentSlug,
-				Event:     event.Type,
-				Content:   event.Content,
-				Metadata:  event.Metadata,
-			})
-		}
-	}
+	handler, acc := orchestrator.NewBufferingHandler(orchestrator.BufferingHandlerOpts{
+		LogBuf:            logBuf,
+		AgentSlug:         info.AgentSlug,
+		AccumulateText:    true,
+		CaptureResultMeta: true,
+	})
 
 	if err := r.orch.RunAgent(ctx, runReq, handler); err != nil {
 		return AgentStepResult{
-			Output:     fullResponse.String(),
+			Output:     acc.Text(),
 			DurationMs: time.Since(startedAt).Milliseconds(),
 		}, fmt.Errorf("orchestrator: %w", err)
 	}
@@ -302,24 +278,10 @@ func (r *OrchestratorRunner) RunStep(ctx context.Context, req AgentStepRequest) 
 	// 8. Extract token + cost from result metadata if the adapter
 	//    surfaced any. CLI adapters that wrap CLI tools may not —
 	//    that's fine, we report zero rather than fabricating.
-	tokIn, tokOut := 0, 0
-	costUSD := 0.0
-	if resultMeta != nil {
-		if v, ok := resultMeta["total_cost_usd"].(float64); ok {
-			costUSD = v
-		}
-		if usage, ok := resultMeta["usage"].(map[string]any); ok {
-			if v, ok := usage["input_tokens"].(float64); ok {
-				tokIn = int(v)
-			}
-			if v, ok := usage["output_tokens"].(float64); ok {
-				tokOut = int(v)
-			}
-		}
-	}
+	costUSD, tokIn, tokOut := orchestrator.ParseResultUsage(acc.ResultMeta())
 
 	return AgentStepResult{
-		Output:     fullResponse.String(),
+		Output:     acc.Text(),
 		DurationMs: time.Since(startedAt).Milliseconds(),
 		CostUSD:    costUSD,
 		TokensIn:   tokIn,

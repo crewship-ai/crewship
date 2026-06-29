@@ -181,8 +181,8 @@ func TestConnectorCov_CheckStatusAndIDForSlug(t *testing.T) {
 	if got := idForSlug(ConnectorRemote{ID: "id"}); got != "id" {
 		t.Errorf("id fallback: %q", got)
 	}
-	if b, err := connectorReadAll(nil); b != nil || err != nil {
-		t.Errorf("connectorReadAll(nil) = %v, %v", b, err)
+	if b, err := readAll(nil); b != nil || err != nil {
+		t.Errorf("readAll(nil) = %v, %v", b, err)
 	}
 }
 

@@ -49,8 +49,7 @@ func (h *MilestoneHandler) List(w http.ResponseWriter, r *http.Request) {
 	// Verify project belongs to workspace
 	found, err := projectExists(r.Context(), h.db, projectID, wsID)
 	if err != nil {
-		h.logger.Error("project exists check", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "project exists check", err)
 		return
 	}
 	if !found {
@@ -73,8 +72,7 @@ func (h *MilestoneHandler) List(w http.ResponseWriter, r *http.Request) {
 		WHERE m.project_id = ?
 		ORDER BY m.position ASC, m.created_at ASC`, projectID)
 	if err != nil {
-		h.logger.Error("list milestones", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "list milestones", err)
 		return
 	}
 	defer rows.Close()
@@ -87,15 +85,13 @@ func (h *MilestoneHandler) List(w http.ResponseWriter, r *http.Request) {
 			&ms.Status, &ms.Position, &ms.CreatedAt, &ms.UpdatedAt,
 			&ms.IssueCount, &ms.DoneCount,
 		); err != nil {
-			h.logger.Error("scan milestone", "error", err)
-			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			internalError(w, r, h.logger, "scan milestone", err)
 			return
 		}
 		result = append(result, ms)
 	}
 	if err := rows.Err(); err != nil {
-		h.logger.Error("rows iteration (milestones)", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "rows iteration (milestones)", err)
 		return
 	}
 
@@ -120,8 +116,7 @@ func (h *MilestoneHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// Verify project belongs to workspace
 	found, err := projectExists(r.Context(), h.db, projectID, wsID)
 	if err != nil {
-		h.logger.Error("project exists check", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "project exists check", err)
 		return
 	}
 	if !found {
@@ -166,8 +161,7 @@ func (h *MilestoneHandler) Create(w http.ResponseWriter, r *http.Request) {
 		id, projectID, req.Name, req.Description, req.TargetDate,
 		req.Status, position, now, now)
 	if err != nil {
-		h.logger.Error("insert milestone", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "insert milestone", err)
 		return
 	}
 
@@ -214,8 +208,7 @@ func (h *MilestoneHandler) Update(w http.ResponseWriter, r *http.Request) {
 			writeProblem(w, r, http.StatusNotFound, "Milestone not found")
 			return
 		}
-		h.logger.Error("get milestone for update", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "get milestone for update", err)
 		return
 	}
 
@@ -256,8 +249,7 @@ func (h *MilestoneHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 	query, args := ub.Build("milestones", "id = ?", milestoneID)
 	if _, err := h.db.ExecContext(r.Context(), query, args...); err != nil {
-		h.logger.Error("update milestone", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "update milestone", err)
 		return
 	}
 
@@ -277,8 +269,7 @@ func (h *MilestoneHandler) Update(w http.ResponseWriter, r *http.Request) {
 		&ms.IssueCount, &ms.DoneCount,
 	)
 	if err != nil {
-		h.logger.Error("read updated milestone", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "read updated milestone", err)
 		return
 	}
 
@@ -309,15 +300,13 @@ func (h *MilestoneHandler) Delete(w http.ResponseWriter, r *http.Request) {
 			writeProblem(w, r, http.StatusNotFound, "Milestone not found")
 			return
 		}
-		h.logger.Error("get milestone for delete", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "get milestone for delete", err)
 		return
 	}
 
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
-		h.logger.Error("begin tx", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "begin tx", err)
 		return
 	}
 	defer tx.Rollback() //nolint:errcheck
@@ -326,8 +315,7 @@ func (h *MilestoneHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	_, err = tx.ExecContext(r.Context(),
 		`UPDATE missions SET milestone_id = NULL WHERE milestone_id = ?`, milestoneID)
 	if err != nil {
-		h.logger.Error("unlink missions from milestone", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "unlink missions from milestone", err)
 		return
 	}
 
@@ -335,14 +323,12 @@ func (h *MilestoneHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	res, err := tx.ExecContext(r.Context(),
 		`DELETE FROM milestones WHERE id = ?`, milestoneID)
 	if err != nil {
-		h.logger.Error("delete milestone", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "delete milestone", err)
 		return
 	}
 	affected, err := res.RowsAffected()
 	if err != nil {
-		h.logger.Error("delete milestone rows affected", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "delete milestone rows affected", err)
 		return
 	}
 	if affected == 0 {
@@ -351,8 +337,7 @@ func (h *MilestoneHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := tx.Commit(); err != nil {
-		h.logger.Error("commit delete milestone", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "commit delete milestone", err)
 		return
 	}
 

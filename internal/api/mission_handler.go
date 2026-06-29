@@ -54,8 +54,7 @@ func (h *MissionHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := h.db.QueryContext(r.Context(), query, args...)
 	if err != nil {
-		h.logger.Error("list missions", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "list missions", err)
 		return
 	}
 	defer rows.Close()
@@ -64,15 +63,13 @@ func (h *MissionHandler) List(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		m, err := scanMission(rows)
 		if err != nil {
-			h.logger.Error("scan mission", "error", err)
-			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			internalError(w, r, h.logger, "scan mission", err)
 			return
 		}
 		result = append(result, m)
 	}
 	if err := rows.Err(); err != nil {
-		h.logger.Error("rows iteration (missions)", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "rows iteration (missions)", err)
 		return
 	}
 
@@ -119,8 +116,7 @@ func (h *MissionHandler) ListAll(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := h.db.QueryContext(r.Context(), query, args...)
 	if err != nil {
-		h.logger.Error("list all missions", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "list all missions", err)
 		return
 	}
 	defer rows.Close()
@@ -129,15 +125,13 @@ func (h *MissionHandler) ListAll(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		m, err := scanMission(rows)
 		if err != nil {
-			h.logger.Error("scan mission", "error", err)
-			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			internalError(w, r, h.logger, "scan mission", err)
 			return
 		}
 		result = append(result, m)
 	}
 	if err := rows.Err(); err != nil {
-		h.logger.Error("rows iteration (missions all)", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "rows iteration (missions all)", err)
 		return
 	}
 
@@ -187,16 +181,14 @@ func (h *MissionHandler) Get(w http.ResponseWriter, r *http.Request) {
 			writeProblem(w, r, http.StatusNotFound, "Mission not found")
 			return
 		}
-		h.logger.Error("get mission", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "get mission", err)
 		return
 	}
 
 	// Load tasks
 	tasks, tasksErr := h.loadTasksForMission(r, missionID)
 	if tasksErr != nil {
-		h.logger.Error("get mission tasks", "error", tasksErr)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "get mission tasks", tasksErr)
 		return
 	}
 	m.Tasks = tasks
@@ -230,8 +222,7 @@ func (h *MissionHandler) Start(w http.ResponseWriter, r *http.Request) {
 			writeProblem(w, r, http.StatusNotFound, "Mission not found")
 			return
 		}
-		h.logger.Error("get mission for start", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "get mission for start", err)
 		return
 	}
 
@@ -261,8 +252,7 @@ func (h *MissionHandler) Start(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := res.RowsAffected()
 	if err != nil {
-		h.logger.Error("check rows affected", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "check rows affected", err)
 		return
 	}
 	if rows == 0 {
@@ -325,8 +315,7 @@ func (h *MissionHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 				COALESCE(SUM(CASE WHEN status IN ('IN_PROGRESS', 'PLANNING', 'REVIEW') THEN 1 ELSE 0 END), 0)
 			FROM missions WHERE workspace_id = ?`, wsID).Scan(&m.TotalMissions, &m.ActiveMissions)
 		if err != nil {
-			h.logger.Error("mission metrics: totals", "error", err)
-			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			internalError(w, r, h.logger, "mission metrics: totals", err)
 			return
 		}
 	}

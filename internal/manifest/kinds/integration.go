@@ -511,7 +511,7 @@ func (d *IntegrationDocument) Plan(ctx context.Context, c internalapi.Client, re
 			if err != nil {
 				return fmt.Errorf("PATCH %s: %w", path, err)
 			}
-			return integrationCheckStatus(resp, "update integration "+slug)
+			return checkStatus(resp, "update integration "+slug)
 		},
 	}}, nil
 }
@@ -542,7 +542,7 @@ func (d *IntegrationDocument) createPlanItem(crewID, scope string) (internalapi.
 			if err != nil {
 				return fmt.Errorf("POST %s: %w", path, err)
 			}
-			return integrationCheckStatus(resp, "create integration "+slug)
+			return checkStatus(resp, "create integration "+slug)
 		},
 	}, nil
 }
@@ -568,7 +568,7 @@ func integrationDeleteItem(remote *IntegrationRemote, reason string) internalapi
 			if err != nil {
 				return fmt.Errorf("DELETE %s: %w", path, err)
 			}
-			return integrationCheckStatus(resp, "delete integration "+slug)
+			return checkStatus(resp, "delete integration "+slug)
 		},
 	}
 }
@@ -845,7 +845,7 @@ func integrationListWorkspace(ctx context.Context, c internalapi.Client) ([]Inte
 	if err != nil {
 		return nil, fmt.Errorf("GET /api/v1/integrations: %w", err)
 	}
-	if err := integrationCheckStatus(resp, "list workspace integrations"); err != nil {
+	if err := checkStatus(resp, "list workspace integrations"); err != nil {
 		return nil, err
 	}
 	return integrationDecodeList(resp.Body)
@@ -858,7 +858,7 @@ func integrationListCrew(ctx context.Context, c internalapi.Client, crewID strin
 	if err != nil {
 		return nil, fmt.Errorf("GET /api/v1/crews/%s/integrations: %w", crewID, err)
 	}
-	if err := integrationCheckStatus(resp, "list crew integrations"); err != nil {
+	if err := checkStatus(resp, "list crew integrations"); err != nil {
 		return nil, err
 	}
 	rows, err := integrationDecodeList(resp.Body)
@@ -885,10 +885,10 @@ func integrationListCrews(ctx context.Context, c internalapi.Client) ([]integrat
 	if err != nil {
 		return nil, fmt.Errorf("GET /api/v1/crews: %w", err)
 	}
-	if err := integrationCheckStatus(resp, "list crews"); err != nil {
+	if err := checkStatus(resp, "list crews"); err != nil {
 		return nil, err
 	}
-	body, err := integrationReadAll(resp.Body)
+	body, err := readAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("read /api/v1/crews body: %w", err)
 	}
@@ -914,7 +914,7 @@ func integrationListCrews(ctx context.Context, c internalapi.Client) ([]integrat
 // the workspace/crew listers because the two share identical decode
 // logic.
 func integrationDecodeList(r io.Reader) ([]IntegrationRemote, error) {
-	body, err := integrationReadAll(r)
+	body, err := readAll(r)
 	if err != nil {
 		return nil, fmt.Errorf("read integrations list body: %w", err)
 	}
@@ -1066,33 +1066,3 @@ func integrationRowToDoc(r *IntegrationRemote, scope, crewSlug string) (*Integra
 }
 
 // ── HTTP helpers (all integration-prefixed) ─────────────────────────────────
-
-// integrationCheckStatus mirrors agentCheckStatus / checkStatus —
-// duplicated under an integration-prefix to avoid the cross-file
-// "which package-local helper wins" puzzle. Reads up to 4 KiB of the
-// body into the error message so the server's RFC 7807 Problem
-// Details reach the CLI.
-func integrationCheckStatus(resp *internalapi.Response, op string) error {
-	if resp == nil {
-		return fmt.Errorf("%s: nil response", op)
-	}
-	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		return nil
-	}
-	snippet := ""
-	if resp.Body != nil {
-		if b, err := io.ReadAll(io.LimitReader(resp.Body, 4<<10)); err == nil && len(b) > 0 {
-			snippet = ": " + strings.TrimSpace(string(b))
-		}
-	}
-	return fmt.Errorf("%s: HTTP %d%s", op, resp.StatusCode, snippet)
-}
-
-// integrationReadAll consumes a Response body and returns the bytes;
-// tolerates nil so test mocks can omit Body for not-stubbed paths.
-func integrationReadAll(r io.Reader) ([]byte, error) {
-	if r == nil {
-		return nil, nil
-	}
-	return io.ReadAll(r)
-}

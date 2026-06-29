@@ -25,7 +25,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"regexp"
 	"strings"
 	"time"
@@ -233,10 +232,10 @@ func (d *MilestoneDocument) diffPatch(remote *MilestoneRemote) map[string]any {
 	if remote.Name != d.Metadata.Name {
 		patch["name"] = d.Metadata.Name
 	}
-	if milestoneDerefOrEmpty(remote.Description) != d.Spec.Description {
+	if deref(remote.Description) != d.Spec.Description {
 		patch["description"] = d.Spec.Description
 	}
-	if milestoneDerefOrEmpty(remote.TargetDate) != d.Spec.TargetDate {
+	if deref(remote.TargetDate) != d.Spec.TargetDate {
 		patch["target_date"] = d.Spec.TargetDate
 	}
 	// Status defaults to "active" on the server when omitted at
@@ -281,8 +280,8 @@ func ExportMilestones(ctx context.Context, c internalapi.Client) ([]*MilestoneDo
 				},
 				Spec: MilestoneSpec{
 					ProjectSlug: p.Slug,
-					Description: milestoneDerefOrEmpty(m.Description),
-					TargetDate:  milestoneDerefOrEmpty(m.TargetDate),
+					Description: deref(m.Description),
+					TargetDate:  deref(m.TargetDate),
 					Status:      m.Status,
 				},
 			}
@@ -346,7 +345,7 @@ func milestoneListProjects(ctx context.Context, c internalapi.Client) ([]milesto
 	if err := milestoneCheckStatus(resp, "list projects"); err != nil {
 		return nil, err
 	}
-	body, err := milestoneReadAll(resp.Body)
+	body, err := readAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("read /api/v1/projects body: %w", err)
 	}
@@ -388,7 +387,7 @@ func milestoneListForProject(ctx context.Context, c internalapi.Client, projectI
 	if err := milestoneCheckStatus(resp, "list milestones"); err != nil {
 		return nil, err
 	}
-	body, err := milestoneReadAll(resp.Body)
+	body, err := readAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("read %s body: %w", path, err)
 	}
@@ -431,17 +430,6 @@ func milestoneSlugFromName(name string) string {
 	return out
 }
 
-// milestoneDerefOrEmpty unboxes a *string into its value or "" for
-// nil. The milestone REST API returns sql.NullString-style pointers;
-// the manifest treats absent and "" as equivalent for diffing
-// purposes.
-func milestoneDerefOrEmpty(p *string) string {
-	if p == nil {
-		return ""
-	}
-	return *p
-}
-
 // milestoneCheckStatus returns an error if the response status code
 // is outside 2xx, decorating the message with the operation name so
 // a chain of wraps stays readable.
@@ -450,17 +438,8 @@ func milestoneCheckStatus(resp *internalapi.Response, op string) error {
 		return fmt.Errorf("%s: nil response", op)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := milestoneReadAll(resp.Body)
+		body, _ := readAll(resp.Body)
 		return fmt.Errorf("%s: HTTP %d: %s", op, resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 	return nil
-}
-
-// milestoneReadAll consumes the body reader; tolerates nil to keep
-// test mocks simple.
-func milestoneReadAll(r io.Reader) ([]byte, error) {
-	if r == nil {
-		return nil, nil
-	}
-	return io.ReadAll(r)
 }

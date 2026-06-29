@@ -14,8 +14,7 @@ func (h *IssueHandler) ListLabels(w http.ResponseWriter, r *http.Request) {
 		`SELECT id, name, color, label_group FROM labels WHERE workspace_id = ? ORDER BY name ASC`,
 		wsID)
 	if err != nil {
-		h.logger.Error("list labels", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "list labels", err)
 		return
 	}
 	defer rows.Close()
@@ -24,15 +23,13 @@ func (h *IssueHandler) ListLabels(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var lbl labelResponse
 		if err := rows.Scan(&lbl.ID, &lbl.Name, &lbl.Color, &lbl.LabelGroup); err != nil {
-			h.logger.Error("scan label", "error", err)
-			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			internalError(w, r, h.logger, "scan label", err)
 			return
 		}
 		result = append(result, lbl)
 	}
 	if err := rows.Err(); err != nil {
-		h.logger.Error("rows iteration (labels)", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "rows iteration (labels)", err)
 		return
 	}
 
@@ -73,8 +70,7 @@ func (h *IssueHandler) CreateLabel(w http.ResponseWriter, r *http.Request) {
 		`INSERT INTO labels (id, workspace_id, name, color, label_group, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
 		id, wsID, req.Name, req.Color, req.LabelGroup, now)
 	if err != nil {
-		h.logger.Error("create label", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "create label", err)
 		return
 	}
 
@@ -126,14 +122,12 @@ func (h *IssueHandler) UpdateLabel(w http.ResponseWriter, r *http.Request) {
 	query, args := ub.Build("labels", "id = ? AND workspace_id = ?", labelID, wsID)
 	res, err := h.db.ExecContext(r.Context(), query, args...)
 	if err != nil {
-		h.logger.Error("update label", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "update label", err)
 		return
 	}
 	affected, err := res.RowsAffected()
 	if err != nil {
-		h.logger.Error("update label rows affected", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "update label rows affected", err)
 		return
 	}
 	if affected == 0 {
@@ -146,8 +140,7 @@ func (h *IssueHandler) UpdateLabel(w http.ResponseWriter, r *http.Request) {
 		`SELECT id, name, color, label_group FROM labels WHERE id = ?`, labelID).
 		Scan(&lbl.ID, &lbl.Name, &lbl.Color, &lbl.LabelGroup)
 	if err != nil {
-		h.logger.Error("read updated label", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "read updated label", err)
 		return
 	}
 
@@ -164,20 +157,12 @@ func (h *IssueHandler) DeleteLabel(w http.ResponseWriter, r *http.Request) {
 	labelID := r.PathValue("labelId")
 	wsID := WorkspaceIDFromContext(r.Context())
 
-	res, err := h.db.ExecContext(r.Context(),
-		`DELETE FROM labels WHERE id = ? AND workspace_id = ?`, labelID, wsID)
+	found, err := deleteByID(r.Context(), h.db, "labels", labelID, wsID)
 	if err != nil {
-		h.logger.Error("delete label", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		internalError(w, r, h.logger, "delete label", err)
 		return
 	}
-	affected, err := res.RowsAffected()
-	if err != nil {
-		h.logger.Error("delete label rows affected", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
-		return
-	}
-	if affected == 0 {
+	if !found {
 		writeProblem(w, r, http.StatusNotFound, "Label not found")
 		return
 	}

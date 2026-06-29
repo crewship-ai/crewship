@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -256,6 +257,32 @@ func credentialExists(ctx context.Context, db *sql.DB, credentialID, workspaceID
 	return true, nil
 }
 
+// deleteByID issues the canonical workspace-scoped single-table delete that
+// many simple resources share:
+//
+//	DELETE FROM <table> WHERE id = ? AND workspace_id = ?
+//
+// and reports whether a row was actually removed. A (false, nil) return means
+// "no such row in this workspace" — callers map that to 404 — while a non-nil
+// err is an operational failure to map to 500.
+//
+// `table` MUST be a trusted compile-time constant supplied by the handler,
+// never user input: it is interpolated directly into the SQL string, so a
+// request-derived value would be a SQL-injection vector. The id and
+// workspace_id values stay bound parameters and are safe.
+func deleteByID(ctx context.Context, db *sql.DB, table, id, wsID string) (bool, error) {
+	res, err := db.ExecContext(ctx,
+		"DELETE FROM "+table+" WHERE id = ? AND workspace_id = ?", id, wsID)
+	if err != nil {
+		return false, err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return affected > 0, nil
+}
+
 // validSlugRe matches safe slug values: lowercase alphanumeric, starting with a letter or digit.
 var validSlugRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 
@@ -275,6 +302,23 @@ func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 // Wraps the previously repeated writeJSON(w, status, map[string]string{"error": ...}) idiom.
 func replyError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+// internalError is the canonical "log the error, return a 500" tail that was
+// hand-written at hundreds of handler sites. It reproduces the dominant idiom
+// exactly:
+//
+//	logger.Error(msg, "error", err)
+//	writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+//
+// The logger is guarded so a nil logger (e.g. a handler constructed without
+// one in a test) degrades to just writing the problem response rather than
+// panicking. Callers still issue their own `return` after this call.
+func internalError(w http.ResponseWriter, r *http.Request, logger *slog.Logger, msg string, err error) {
+	if logger != nil {
+		logger.Error(msg, "error", err)
+	}
+	writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 }
 
 // readJSON decodes the request body (up to 1 MB) into v.
