@@ -338,10 +338,25 @@ func CheckError(resp *http.Response) error {
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 
 	var errBody struct {
+		// Canonical {"error": "..."} shape.
 		Error string `json:"error"`
+		// RFC 7807 Problem Details (the routine run gate, among others).
+		Detail string `json:"detail"`
+		// Extension member the integration gate sets so the user sees
+		// exactly which connectors to wire up.
+		MissingIntegrations []string `json:"missing_integrations"`
 	}
-	if json.Unmarshal(data, &errBody) == nil && errBody.Error != "" {
-		return fmt.Errorf("API error (%d): %s", resp.StatusCode, errBody.Error)
+	if json.Unmarshal(data, &errBody) == nil {
+		if errBody.Error != "" {
+			return fmt.Errorf("API error (%d): %s", resp.StatusCode, errBody.Error)
+		}
+		if errBody.Detail != "" {
+			if len(errBody.MissingIntegrations) > 0 {
+				return fmt.Errorf("API error (%d): %s [connect: %s]",
+					resp.StatusCode, errBody.Detail, strings.Join(errBody.MissingIntegrations, ", "))
+			}
+			return fmt.Errorf("API error (%d): %s", resp.StatusCode, errBody.Detail)
+		}
 	}
 
 	return fmt.Errorf("API error (%d): %s", resp.StatusCode, string(data))

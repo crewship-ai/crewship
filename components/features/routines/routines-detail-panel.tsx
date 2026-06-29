@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
+import { useRouter } from "next/navigation"
 import { X, Play, FlaskConical, Eye, Square } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
@@ -11,6 +12,7 @@ import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 import { apiFetch } from "@/lib/api-fetch"
 import { buildPipelineActionRequest, canTestRun } from "@/lib/pipeline-actions"
+import { integrationLabel, extractMissingIntegrations } from "@/lib/integration-labels"
 import { PipelineRunActivity } from "@/components/features/activity/pipeline-run-activity"
 import { RoutineOverviewTab } from "./routine-overview-tab"
 import { RoutineEditorTab } from "./routine-editor-tab"
@@ -48,6 +50,11 @@ export interface RoutineDetail {
   created_at: string
   updated_at: string
   head_version?: number
+  // Composio connector slugs this routine needs the executing crew to
+  // have connected (e.g. ["github","slack"]). Absent/empty on routines
+  // with no third-party dependencies. Surfaced as chips on the Overview
+  // tab and used to explain a 422 run-refusal.
+  integrations_required?: string[]
 }
 
 interface Props {
@@ -58,6 +65,7 @@ interface Props {
 }
 
 export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: Props) {
+  const router = useRouter()
   const [routine, setRoutine] = useState<RoutineDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -129,8 +137,42 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
         body: JSON.stringify(body),
       })
       if (!res.ok) {
-        const t = await res.text().catch(() => "")
-        throw new Error(`${res.status}: ${t || res.statusText}`)
+        // A run can be refused with 422 + RFC 7807 Problem Details when
+        // the executing crew lacks a required integration. Parse the body
+        // once: if it carries `missing_integrations`, show the actionable
+        // "connect this integration" block instead of a generic failure
+        // toast — and return early so we don't double-report.
+        const rawBody = await res.text().catch(() => "")
+        if (res.status === 422) {
+          let parsed: unknown = null
+          try {
+            parsed = JSON.parse(rawBody)
+          } catch {
+            parsed = null
+          }
+          const missing = extractMissingIntegrations(parsed)
+          if (missing.length > 0) {
+            const labels = missing.map(integrationLabel)
+            const detail =
+              parsed && typeof parsed === "object" && typeof (parsed as Record<string, unknown>).detail === "string"
+                ? String((parsed as Record<string, unknown>).detail)
+                : undefined
+            toast.error(
+              `Tahle rutina potřebuje integraci: ${labels.join(", ")} — není připojená pro tuto crew`,
+              {
+                description:
+                  detail ?? "Připoj chybějící integraci pro crew, která rutinu spouští, a spusť ji znovu.",
+                action: {
+                  label: "Spravovat integrace",
+                  onClick: () => router.push("/integrations"),
+                },
+                duration: 10000,
+              },
+            )
+            return
+          }
+        }
+        throw new Error(`${res.status}: ${rawBody || res.statusText}`)
       }
       const data = await res.json().catch(() => ({}))
       if (action === "dry_run") {
