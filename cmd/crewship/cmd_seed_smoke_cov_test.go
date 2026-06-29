@@ -147,6 +147,25 @@ func TestPrintSmokeLine_Fail(t *testing.T) {
 	}
 }
 
+func TestPrintSmokeLine_FailSurfacesOutput(t *testing.T) {
+	out, _ := covCaptureStderrCli6(t, func() error {
+		printSmokeLine(smokeTestResult{
+			CrewSlug: "engineering", AgentSlug: "alex",
+			ErrMsg: "exit status 1",
+			Output: "agent error: failed to start agent container: legacy slug-scoped volume \"crewship-3-tools-engineering\" exists",
+		})
+		return nil
+	})
+	if !strings.Contains(out, "FAIL") || !strings.Contains(out, "exit status 1") {
+		t.Errorf("fail line missing status: %q", out)
+	}
+	// The real cause must be surfaced, not just "exit status 1".
+	if !strings.Contains(out, "failed to start agent container") ||
+		!strings.Contains(out, "crewship-3-tools-engineering") {
+		t.Errorf("fail line should surface captured output: %q", out)
+	}
+}
+
 func TestPrintSmokeSummary_AllPass(t *testing.T) {
 	out, err := covCaptureStderrCli6(t, func() error {
 		return printSmokeSummary([]smokeTestResult{{OK: true}, {OK: true}})

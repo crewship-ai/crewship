@@ -33,6 +33,7 @@ crewship admin <subcommand> [flags]
 | `promote` | Promote a user to a workspace role (`OWNER`, `ADMIN`, `MANAGER`). |
 | `invalidate-sessions` | Force-logout every active session for a user (no password change). |
 | `sessions list` | Forensic read of `user_sessions` for one user — all rows, including revoked + expired. |
+| `prune-legacy` | Remove orphaned pre-C1 crew docker resources that block agents from starting. **HTTP-backed — needs a running server + login** (the one exception in this group). |
 
 ---
 
@@ -149,8 +150,64 @@ Output columns: SESSION ID, CREATED, EXPIRES, REVOKED, STATUS (derived from `rev
 
 Pair with `admin invalidate-sessions` to act on what `sessions list` surfaces.
 
+## `crewship admin prune-legacy`
+
+Removes orphaned **pre-C1 (slug-only) crew docker resources** — volumes and
+containers named `<prefix>-{home,tools,team}-<slug>` (e.g.
+`crewship-3-tools-engineering`) left over from before the C1 naming change
+(2026-06 audit, which re-keyed crew resources to include the crew id).
+
+```bash
+crewship admin prune-legacy
+```
+
+<Warning>
+  **Unlike the rest of `crewship admin`, this command is HTTP-backed.** The
+  docker daemon lives behind the running server, not the local SQLite DB, so
+  this command needs a reachable server and an authenticated session
+  (`crewship login`) — it is **not** a host-only recovery command. It is filed
+  here because it is an operator/admin maintenance action.
+</Warning>
+
+### Why this exists
+
+A legacy slug-only volume **survives `crewship seed --nuke`**: the nuke clears
+the database, and crew teardown removes the *id-scoped* volumes — but never the
+orphaned slug-only ones, because no crew row references them. While they exist,
+the runtime's legacy-resource guard refuses to start the crew's container, and
+the failure reaches users only as a generic **"failed to start agent
+container"**. Every agent in the affected crew fails; a `seed --smoke-test`
+reports `N/N agents failed`.
+
+`crewship doctor` surfaces this proactively: the `legacy crew resources` check
+calls the authenticated `GET /api/v1/admin/legacy-resources` endpoint and
+**WARN**s with this command as the remediation when orphaned resources are
+present. (Detection runs on this admin endpoint, not on the unauthenticated
+`/healthz` hot path, so a slow docker daemon can never stall health probes.)
+
+The prune is **instance-wide**: legacy docker names carry no workspace or crew
+id, so detection (what `crewship doctor` surfaces) and prune enumerate the same
+full crew set — otherwise the doctor could WARN on a slug the prune can never
+reach. It removes **only** the orphaned legacy names; the id-scoped resources
+the live runtime uses are excluded (slug/id-collision safe) and never touched.
+It reports each resource removed:
+
+```text
+Pruned 4 legacy resource(s):
+  - crewship-3-tools-engineering
+  - crewship-3-home-engineering
+  - crewship-3-tools-quality
+  - crewship-3-home-quality
+```
+
+Requires the `OWNER` or `ADMIN` role. Returns `503` when the server's container
+provider is not docker (nothing to prune).
+
+---
+
 ## See also
 
 - [`crewship init`](/cli/init) — first-user bootstrap on a fresh database. After `init`, `admin promote` is how you add a second OWNER.
+- [`crewship doctor`](/cli/doctor) — the `legacy crew resources` check WARNs when a prune is needed.
 - [`crewship session`](/cli/session) — user-scoped self-service of the same `user_sessions` table.
 - [`crewship doctor`](/cli/doctor) — adjacent host-side diagnostics (data dir, schema version, container runtime).

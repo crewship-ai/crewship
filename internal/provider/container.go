@@ -6,6 +6,15 @@ import (
 	"time"
 )
 
+// CrewRef identifies a crew by its globally-unique id and workspace slug. The
+// legacy-resource detector/pruner take a list so they can both TARGET the
+// slug-only legacy names and PROTECT the live id-scoped names (a slug equal to
+// another crew's "<slug>-<id>" string would otherwise collide).
+type CrewRef struct {
+	ID   string
+	Slug string
+}
+
 // CrewConfig describes the resource requirements and network policy for a
 // crew's container runtime.
 type CrewConfig struct {
@@ -201,6 +210,23 @@ type CrewContainerLookup interface {
 // associated with crew containers (home directories, tool storage).
 type VolumeManager interface {
 	RemoveCrewVolumes(ctx context.Context, id, slug string) error
+}
+
+// LegacyResourcePruner is an optional interface for removing pre-C1 (slug-only)
+// crew runtime resources that survive a normal DB nuke+reseed. checkNoLegacyCrewResources
+// only DETECTS them (and blocks provisioning); this REMOVES them so the
+// id-scoped runtime can start. Legacy names carry no crew id, so the caller
+// passes every live crew slug. Returns the names actually removed.
+type LegacyResourcePruner interface {
+	PruneLegacyCrewResources(ctx context.Context, crews []CrewRef) (removed []string, err error)
+}
+
+// LegacyResourceDetector is the read-only counterpart to LegacyResourcePruner:
+// it reports whether any pre-C1 slug-only resource exists for the given crews,
+// without removing anything. Powers the admin legacy-resources endpoint that
+// `crewship doctor` surfaces as a WARN before agent runs start failing.
+type LegacyResourceDetector interface {
+	HasLegacyCrewResources(ctx context.Context, crews []CrewRef) (present bool, err error)
 }
 
 // InteractiveExecConfig configures an interactive (TTY) exec session.

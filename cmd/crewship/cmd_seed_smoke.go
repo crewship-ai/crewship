@@ -258,6 +258,13 @@ func printSmokeLine(r smokeTestResult) {
 	default:
 		status = "FAIL"
 		detail = "(" + r.ErrMsg + ")"
+		// The subprocess's captured output carries the REAL reason (e.g.
+		// "agent error: failed to start agent container: <cause>"); ErrMsg
+		// alone is just "exit status 1". Surface it so a failed smoke test is
+		// self-diagnosing instead of forcing a re-run without --quiet.
+		if out := truncateForSmoke(r.Output, 200); out != "" {
+			detail += "  " + fmt.Sprintf("%q", out)
+		}
 	}
 	if len(status) < statusW {
 		status = status + strings.Repeat(" ", statusW-len(status))

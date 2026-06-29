@@ -151,6 +151,124 @@ func (p *Provider) migrateLegacyCrewResources(ctx context.Context, id, slug, ima
 	return nil
 }
 
+// legacyNameSets computes, for the given crews, the set of pre-C1 slug-only
+// resource names to TARGET and the set of live id-scoped names to PROTECT.
+// Because slugs may contain hyphens, a crew whose slug equals another crew's
+// "<slug>-<id>" string would make a legacy key collide with that crew's LIVE
+// id-scoped resource; subtracting the protected set guarantees detection never
+// false-positives and prune never removes a live crew's container/volumes.
+func (p *Provider) legacyNameSets(crews []provider.CrewRef) map[string]bool {
+	prefix := p.cfg.ContainerPrefix
+	if prefix == "" {
+		prefix = "crewship"
+	}
+	legacy := make(map[string]bool, len(crews)*3)
+	protected := make(map[string]bool, len(crews)*3)
+	for _, c := range crews {
+		if c.Slug == "" {
+			continue
+		}
+		legacy[prefix+"-team-"+c.Slug] = true
+		legacy[prefix+"-home-"+c.Slug] = true
+		legacy[prefix+"-tools-"+c.Slug] = true
+		if c.ID != "" {
+			protected[prefix+"-team-"+c.Slug+"-"+c.ID] = true
+			protected[prefix+"-home-"+c.Slug+"-"+c.ID] = true
+			protected[prefix+"-tools-"+c.Slug+"-"+c.ID] = true
+		}
+	}
+	for name := range protected {
+		delete(legacy, name)
+	}
+	return legacy
+}
+
+// HasLegacyCrewResources reports whether any pre-C1 (slug-only) container or
+// home/tools volume exists for any of crews. Read-only, detection-only
+// counterpart to PruneLegacyCrewResources — `crewship doctor` reads it (via the
+// admin legacy-resources endpoint) to warn an operator before an agent run
+// fails. Lists the daemon ONCE and matches against that single snapshot; live
+// id-scoped resources are excluded so a slug/id collision can't false-positive.
+// Satisfies provider.LegacyResourceDetector.
+func (p *Provider) HasLegacyCrewResources(ctx context.Context, crews []provider.CrewRef) (bool, error) {
+	legacy := p.legacyNameSets(crews)
+	if len(legacy) == 0 {
+		return false, nil
+	}
+
+	containers, err := p.client.ContainerList(ctx, container.ListOptions{All: true})
+	if err != nil {
+		return false, fmt.Errorf("list containers (legacy C1 detect): %w", err)
+	}
+	for _, c := range containers {
+		for _, name := range c.Names {
+			if legacy[strings.TrimPrefix(name, "/")] {
+				return true, nil
+			}
+		}
+	}
+
+	list, err := p.client.VolumeList(ctx, volumeListOptions())
+	if err != nil {
+		return false, fmt.Errorf("list volumes (legacy C1 detect): %w", err)
+	}
+	for _, vol := range list.Volumes {
+		if vol != nil && legacy[vol.Name] {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// PruneLegacyCrewResources removes pre-C1 slug-only container/volumes for the
+// given crews and returns the names removed. Satisfies
+// provider.LegacyResourcePruner. The daemon is enumerated ONCE (not per crew);
+// live id-scoped resources are excluded so a slug/id collision can never delete
+// an active crew's data. Containers are removed before volumes (a surviving
+// legacy container would hold them). Per-resource removal failures are logged
+// and skipped — a volume still in use must not wedge the rest. A transport
+// failure listing the daemon is returned WITH whatever was removed so far so
+// the caller can surface the partial result rather than a silent no-op.
+func (p *Provider) PruneLegacyCrewResources(ctx context.Context, crews []provider.CrewRef) ([]string, error) {
+	legacy := p.legacyNameSets(crews)
+	removed := []string{}
+	if len(legacy) == 0 {
+		return removed, nil
+	}
+
+	containers, err := p.client.ContainerList(ctx, container.ListOptions{All: true})
+	if err != nil {
+		return removed, fmt.Errorf("list containers (legacy C1 prune): %w", err)
+	}
+	for _, c := range containers {
+		for _, name := range c.Names {
+			n := strings.TrimPrefix(name, "/")
+			if legacy[n] {
+				if rmErr := p.client.ContainerRemove(ctx, c.ID, container.RemoveOptions{Force: true}); rmErr != nil {
+					p.logger.Warn("legacy C1 container remove failed", "container", n, "error", rmErr)
+				} else {
+					removed = append(removed, n)
+				}
+			}
+		}
+	}
+
+	list, err := p.client.VolumeList(ctx, volumeListOptions())
+	if err != nil {
+		return removed, fmt.Errorf("list volumes (legacy C1 prune): %w", err)
+	}
+	for _, vol := range list.Volumes {
+		if vol != nil && legacy[vol.Name] {
+			if rmErr := p.client.VolumeRemove(ctx, vol.Name, true); rmErr != nil {
+				p.logger.Warn("legacy C1 volume remove failed", "volume", vol.Name, "error", rmErr)
+			} else {
+				removed = append(removed, vol.Name)
+			}
+		}
+	}
+	return removed, nil
+}
+
 // migrateLegacyVolume copies all data from a legacy slug-scoped volume into a
 // fresh id-scoped target volume, then prunes the legacy volume. It is fail-safe:
 // the legacy volume is removed ONLY after the copy completes with exit 0. Any
