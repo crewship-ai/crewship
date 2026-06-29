@@ -22,6 +22,10 @@ type ImportRequest struct {
 	URL                string
 	Content            string
 	AllowUnsafeLicense bool
+	// SourceType overrides the skills.source origin marker on INSERT. Empty
+	// keeps the default (CUSTOM). The proposed-approve path sets GENERATED so
+	// agent-authored / memory-promoted skills are distinguishable in the UI.
+	SourceType string
 }
 
 // ImportResult is returned by a successful Import call.
@@ -176,7 +180,7 @@ func (imp *Importer) Import(ctx context.Context, _, _ string, req ImportRequest)
 		vendor = "community"
 	}
 
-	return imp.upsertEnriched(ctx, parsed, vendor, spdx, scan, source)
+	return imp.upsertEnriched(ctx, parsed, vendor, spdx, scan, source, req.SourceType)
 }
 
 func (imp *Importer) fetchURL(ctx context.Context, rawURL string) (string, error) {
@@ -244,7 +248,17 @@ func (imp *Importer) upsertEnriched(
 	spdx string,
 	scan ScanResult,
 	homepage string,
+	sourceType string,
 ) (*ImportResult, error) {
+	// sourceType is the origin marker for the skills.source column (CUSTOM |
+	// GENERATED | ...). Empty defaults to CUSTOM so plain user imports are
+	// unchanged; the proposed-approve path passes GENERATED so agent-authored
+	// and memory-promoted skills are distinguishable in the catalog (and show
+	// in the "Generated" tab). Only applied on INSERT — re-importing an
+	// existing skill preserves its original source.
+	if sourceType == "" {
+		sourceType = "CUSTOM"
+	}
 	slug := parsed.Meta.Name
 	displayName := parsed.Meta.DisplayName
 	if displayName == "" {
@@ -321,7 +335,7 @@ func (imp *Importer) upsertEnriched(
 				created_at, updated_at
 			) VALUES (
 				?, ?, ?, ?, ?, ?, ?,
-				?, 'CUSTOM', ?, ?, ?, ?,
+				?, ?, ?, ?, ?, ?,
 				?, ?, ?, 'INSTRUCTIONS', 'COMMUNITY', ?,
 				?, ?,
 				?, ?
@@ -334,7 +348,7 @@ func (imp *Importer) upsertEnriched(
 			// between create and edit flows.
 			newID, displayName, slug, displayName,
 			nullableStr(parsed.Meta.Description), version, nullableStr(parsed.Meta.Author),
-			category, nullableStr(parsed.Meta.Icon),
+			category, sourceType, nullableStr(parsed.Meta.Icon),
 			credReqJSON, tagsJSON, parsed.Content,
 			nullableStr(vendor), nullableStr(homepage), nullableStr(spdx), scanStatus,
 			nullableStr(descQuality), nullableStr(parsed.Meta.License),

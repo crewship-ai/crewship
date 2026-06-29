@@ -108,12 +108,14 @@ func TestSkillAuthor_StagedSkillIsApprovable(t *testing.T) {
 		t.Fatalf("approve status = %d, body=%s", apprRR.Code, apprRR.Body.String())
 	}
 
-	// 3. The skill now exists in the registry.
-	var count int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM skills WHERE slug = ?`, "deploy-staging").Scan(&count); err != nil {
+	// 3. The skill now exists in the registry, tagged GENERATED so the
+	// catalog UI surfaces it in the Generated tab with the agent-origin badge
+	// (not as an indistinguishable manual import).
+	var source string
+	if err := db.QueryRow(`SELECT source FROM skills WHERE slug = ?`, "deploy-staging").Scan(&source); err != nil {
 		t.Fatalf("query skills: %v", err)
 	}
-	if count != 1 {
-		t.Fatalf("approved skill not in registry: count = %d", count)
+	if source != "GENERATED" {
+		t.Fatalf("approved agent-authored skill source = %q, want GENERATED", source)
 	}
 }

@@ -219,6 +219,11 @@ func (h *SkillProposedHandler) Approve(w http.ResponseWriter, r *http.Request) {
 
 	result, err := h.importer.Import(r.Context(), wsID, actorID, skills.ImportRequest{
 		Content: string(raw),
+		// Skills that came through the proposed queue were machine-originated
+		// (authored by an agent or promoted from memory), not hand-imported.
+		// Tag them GENERATED so the catalog UI shows them in the Generated tab
+		// with the agent-origin badge instead of looking like a manual import.
+		SourceType: "GENERATED",
 	})
 	if err != nil {
 		// Surface the importer's own error — typically a parser

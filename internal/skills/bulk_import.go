@@ -242,7 +242,7 @@ func (imp *Importer) BulkImport(ctx context.Context, req BulkImportRequest) (*Bu
 			vendor = defaultVendor
 		}
 
-		res, importErr := imp.upsertEnriched(ctx, parsed, vendor, spdx, scan, source)
+		res, importErr := imp.upsertEnriched(ctx, parsed, vendor, spdx, scan, source, "")
 		if importErr != nil {
 			out.Skipped = append(out.Skipped, SkippedSkill{
 				Path: p, Slug: parsed.Meta.Name,
