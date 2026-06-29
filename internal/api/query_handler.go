@@ -25,10 +25,16 @@ type QueryHandler struct {
 	logger        *slog.Logger
 	internalToken string
 	journal       journal.Emitter
+	provisioner   crewProvisioner
 
 	escalationMu      sync.Mutex
 	escalationWaiters map[string]chan escalationResult
 }
+
+// SetProvisioner wires the dispatch-time provisioning gate (same as
+// AssignmentHandler) so a peer query against a cold crew builds the
+// devcontainer image before running instead of booting the bare base image.
+func (h *QueryHandler) SetProvisioner(p crewProvisioner) { h.provisioner = p }
 
 // NewQueryHandler creates a QueryHandler with the given orchestrator, hub, and internal token.
 // Callers that want journal emits wire them after construction with SetJournal.
@@ -248,20 +254,31 @@ func (h *QueryHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Ensure crew container is running, created from the crew's PROVISIONED
-	// image (with claude + tools) rather than the bare runtime default —
-	// otherwise a cold target crew launches from the base image and the peer
-	// query exits 127. Peer queries target an already-active crew in the
-	// common case (container reused), so there's no provisioning gate here;
-	// the image resolution alone fixes the cold-start case.
-	var containerID string
-	if crewCfg, cfgErr := buildCrewRuntimeConfig(r.Context(), h.db, body.CrewID, body.WorkspaceID); cfgErr != nil {
-		h.logger.Warn("resolve crew runtime config for query; using bare container config",
-			"error", cfgErr, "crew_id", body.CrewID, "query_id", convID)
-		containerID, err = h.orch.GetOrCreateContainer(r.Context(), target.CrewSlug, body.CrewID, body.WorkspaceID)
-	} else {
-		containerID, err = h.orch.GetOrCreateContainerCfg(r.Context(), crewCfg, body.WorkspaceID)
+	// Ensure the target crew is provisioned and run the agent from its
+	// PROVISIONED image (with claude + tools), not the bare runtime base.
+	// A first peer query against a cold crew (devcontainer config, no cached
+	// image) would otherwise boot the base image and exit 127, so gate on the
+	// same provisioning step assignments use. Fail closed on resolution error
+	// (deleted/misconfigured crew) rather than degrading to the base image.
+	if h.provisioner != nil {
+		if perr := h.provisioner.EnsureProvisioned(r.Context(), body.CrewID, body.WorkspaceID, 0); perr != nil {
+			h.logger.Error("ensure provisioned for query", "error", perr, "query_id", convID, "crew_id", body.CrewID)
+			h.finishQuery(r.Context(), convID, runID, body.ChatID, body.FromSlug, body.TargetSlug, body.WorkspaceID, body.CrewID, target.ID, "",
+				fmt.Sprintf("preparing the crew container failed: %v", perr), startTime)
+			replyError(w, http.StatusServiceUnavailable, "crew not ready")
+			return
+		}
 	}
+	var containerID string
+	crewCfg, cfgErr := buildCrewRuntimeConfig(r.Context(), h.db, body.CrewID, body.WorkspaceID)
+	if cfgErr != nil {
+		h.logger.Error("resolve crew runtime config for query", "error", cfgErr, "crew_id", body.CrewID, "query_id", convID)
+		h.finishQuery(r.Context(), convID, runID, body.ChatID, body.FromSlug, body.TargetSlug, body.WorkspaceID, body.CrewID, target.ID, "",
+			fmt.Sprintf("resolve crew runtime config: %v", cfgErr), startTime)
+		replyError(w, http.StatusInternalServerError, "container error")
+		return
+	}
+	containerID, err = h.orch.GetOrCreateContainerCfg(r.Context(), crewCfg, body.WorkspaceID)
 	if err != nil {
 		h.logger.Error("get container for query", "error", err, "query_id", convID)
 		h.finishQuery(r.Context(), convID, runID, body.ChatID, body.FromSlug, body.TargetSlug, body.WorkspaceID, body.CrewID, target.ID, "",

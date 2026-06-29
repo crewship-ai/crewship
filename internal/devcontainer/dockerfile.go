@@ -59,8 +59,11 @@ func GenerateDockerfile(b DockerfileBuild) (string, error) {
 	// catalog. Yarn isn't needed to provision a crew (npm/corepack cover it),
 	// so we drop the offending source. This is the remediation hook for
 	// known-broken repos; extend the rm list as new offenders surface.
-	// No-op (|| true) on images that don't ship it, including Alpine (no apt).
-	sb.WriteString("RUN rm -f /etc/apt/sources.list.d/yarn.list 2>/dev/null || true\n")
+	// Guarded on existence so it's a clean no-op on images that don't ship it
+	// (including Alpine, no apt) — but an unexpected removal failure (e.g.
+	// read-only fs, permissions) still aborts the build loudly rather than
+	// leaving the broken repo in place to fail later with a vaguer error.
+	sb.WriteString("RUN if [ -e /etc/apt/sources.list.d/yarn.list ]; then rm -f /etc/apt/sources.list.d/yarn.list; fi\n")
 
 	for _, f := range b.Features {
 		if f == nil {

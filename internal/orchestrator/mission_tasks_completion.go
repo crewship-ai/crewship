@@ -362,8 +362,12 @@ func (e *MissionEngine) checkMissionCompletionWithTasks(ctx context.Context, ms 
 		// see the real outcome. A partial success (some assignment completed)
 		// still goes to REVIEW — work happened and is worth reviewing.
 		var failed int
-		_ = e.db.QueryRowContext(ctx,
-			`SELECT COUNT(*) FROM assignments WHERE group_id = ? AND status = 'FAILED'`, ms.ID).Scan(&failed)
+		if err := e.db.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM assignments WHERE group_id = ? AND status = 'FAILED'`, ms.ID).Scan(&failed); err != nil {
+			// This count decides FAILED vs REVIEW; a swallowed error would
+			// leave failed=0 and silently send an all-failed mission to review.
+			return fmt.Errorf("count failed assignments for mission %s: %w", ms.ID, err)
+		}
 		newStatus := "REVIEW"
 		if failed == total {
 			newStatus = "FAILED"
