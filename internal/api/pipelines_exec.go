@@ -87,6 +87,13 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Governance status gate (alongside the W0 integration gate below):
+	// refuse to run a routine that isn't 'active'. proposed → awaiting
+	// approval, disabled → admin airbag. dry_run still previews freely.
+	if h.gateRoutineStatus(w, p) {
+		return
+	}
+
 	var body runRequestBody
 	if r.ContentLength > 0 {
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxExecBodyBytes)).Decode(&body); err != nil {

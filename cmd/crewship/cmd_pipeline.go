@@ -50,9 +50,16 @@ Examples:
   crewship routine export email-fetch-summarize > bundle.json
   crewship routine import < bundle.json
   crewship routine cancel <run_id>
+  crewship routine list --status proposed
+  crewship routine approve <slug>
+  crewship routine disable <slug>
 
 Subcommand status:
   list       GET    /api/v1/workspaces/{ws}/pipelines
+  approve    POST   /api/v1/workspaces/{ws}/pipelines/{slug}/approve  (MANAGER+)
+  reject     POST   /api/v1/workspaces/{ws}/pipelines/{slug}/reject   (MANAGER+)
+  disable    POST   /api/v1/workspaces/{ws}/pipelines/{slug}/disable  (OWNER/ADMIN)
+  enable     POST   /api/v1/workspaces/{ws}/pipelines/{slug}/enable   (OWNER/ADMIN)
   get        GET    /api/v1/workspaces/{ws}/pipelines/{slug}
   run        POST   /api/v1/workspaces/{ws}/pipelines/{slug}/run
   dry-run    POST   /api/v1/workspaces/{ws}/pipelines/{slug}/dry_run
@@ -87,6 +94,7 @@ type pipelineRowJSON struct {
 	AuthorAgentID        string          `json:"author_agent_id"`
 	AuthorUserID         string          `json:"author_user_id"`
 	AuthoredVia          string          `json:"authored_via"`
+	Status               string          `json:"status"`
 	CreatedAt            string          `json:"created_at"`
 	UpdatedAt            string          `json:"updated_at"`
 	IntegrationsRequired []string        `json:"integrations_required,omitempty"`
@@ -116,6 +124,13 @@ var pipelineListCmd = &cobra.Command{
 			}
 			path += sep + "tag=" + url.QueryEscape(tag)
 		}
+		if status, _ := cmd.Flags().GetString("status"); status != "" {
+			sep := "?"
+			if strings.Contains(path, "?") {
+				sep = "&"
+			}
+			path += sep + "status=" + url.QueryEscape(status)
+		}
 		resp, err := client.Get(path)
 		if err != nil {
 			return err
@@ -134,7 +149,7 @@ var pipelineListCmd = &cobra.Command{
 			return nil
 		}
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "SLUG\tINVOC\tLAST STATUS\tAUTHOR CREW\tDESCRIPTION")
+		fmt.Fprintln(w, "SLUG\tSTATUS\tINVOC\tLAST STATUS\tAUTHOR CREW\tDESCRIPTION")
 		for _, p := range rows {
 			desc := p.Description
 			if len(desc) > 60 {
@@ -148,7 +163,11 @@ var pipelineListCmd = &cobra.Command{
 			if authorCrew == "" {
 				authorCrew = "—"
 			}
-			fmt.Fprintf(w, "%s\t%d\t%s\t%s\t%s\n", p.Slug, p.InvocationCount, lastStatus, authorCrew, desc)
+			govStatus := p.Status
+			if govStatus == "" {
+				govStatus = "active"
+			}
+			fmt.Fprintf(w, "%s\t%s\t%d\t%s\t%s\t%s\n", p.Slug, govStatus, p.InvocationCount, lastStatus, authorCrew, desc)
 		}
 		return w.Flush()
 	},
@@ -209,6 +228,11 @@ var pipelineGetCmd = &cobra.Command{
 		fmt.Fprintf(w, "Author crew:\t%s\n", p.AuthorCrewID)
 		fmt.Fprintf(w, "Author agent:\t%s\n", p.AuthorAgentID)
 		fmt.Fprintf(w, "Authored via:\t%s\n", p.AuthoredVia)
+		govStatus := p.Status
+		if govStatus == "" {
+			govStatus = "active"
+		}
+		fmt.Fprintf(w, "Status:\t%s\n", govStatus)
 		if len(p.IntegrationsRequired) > 0 {
 			// Enforced at run time: a run is blocked when the author crew
 			// hasn't connected one of these (422 + missing_integrations).
@@ -828,6 +852,7 @@ func indent(s, prefix string) string {
 func init() {
 	pipelineListCmd.Flags().String("order", "popularity", "sort order: popularity | recent | name")
 	pipelineListCmd.Flags().String("tag", "", "filter routines by definition tag (cross-crew discovery)")
+	pipelineListCmd.Flags().String("status", "", "filter by governance status: active | proposed | disabled")
 	pipelineGetCmd.Flags().StringP("format", "f", "human", "output format: human | json")
 	pipelineRunsCmd.Flags().Int("limit", 20, "max number of run entries to return (1-500)")
 

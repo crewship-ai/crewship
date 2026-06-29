@@ -236,8 +236,12 @@ type pipelineResponse struct {
 	AuthorAgentName string `json:"author_agent_name,omitempty"`
 	AuthorUserID    string `json:"author_user_id,omitempty"`
 	AuthoredVia     string `json:"authored_via"`
-	CreatedAt       string `json:"created_at"`
-	UpdatedAt       string `json:"updated_at"`
+	// Status is the governance lifecycle state: active | proposed | disabled.
+	// Risky agent/user-authored routines land 'proposed' and need MANAGER+
+	// approval; an OWNER/ADMIN can 'disabled' a live routine (airbag).
+	Status    string `json:"status"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
 	// LinkedIssueCount is the number of issues bound to this routine
 	// via missions.routine_id. LinkedIssues holds up to the first 3
 	// issue identifiers so the UI can render a "ENG-5, ENG-9 +1"
@@ -273,6 +277,7 @@ func toPipelineResponse(p *pipeline.Pipeline, includeDefinition bool) pipelineRe
 		AuthorAgentID:        p.AuthorAgentID,
 		AuthorUserID:         p.AuthorUserID,
 		AuthoredVia:          string(p.AuthoredVia),
+		Status:               p.Status,
 		CreatedAt:            p.CreatedAt.Format("2006-01-02T15:04:05.999999999Z07:00"),
 		UpdatedAt:            p.UpdatedAt.Format("2006-01-02T15:04:05.999999999Z07:00"),
 	}

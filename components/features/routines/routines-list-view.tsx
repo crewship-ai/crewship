@@ -17,6 +17,7 @@ import type { Pipeline } from "@/hooks/use-pipelines"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
+import { routineStatusBadge } from "@/lib/routine-governance"
 import { Card, Pill } from "./_shared"
 
 // RoutinesListView — catalog dashboard for the routine list tab.
@@ -332,6 +333,21 @@ function RoutineRow({
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <span className="truncate text-sm font-medium">{routine.name || routine.slug}</span>
+              {(() => {
+                const sb = routineStatusBadge(routine.status)
+                return sb ? (
+                  <span
+                    className={cn(
+                      "inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium",
+                      sb.bg,
+                      sb.text,
+                    )}
+                  >
+                    <span className={cn("h-1 w-1 rounded-full", sb.dot)} />
+                    {sb.label}
+                  </span>
+                ) : null
+              })()}
               {routine.ephemeral && (
                 <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
                   ephemeral

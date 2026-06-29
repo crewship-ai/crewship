@@ -1512,6 +1512,12 @@ END;
 	// of a full scan of every failed run in the workspace. See
 	// migrate_consts_v127_failure_groups_index.go.
 	{version: 127, name: "failure_groups_index", sql: migrationFailureGroupsIndex},
+
+	// v128: routine-governance lifecycle status on pipelines (active |
+	// proposed | disabled). Backs the maker-checker gate (risky agent-
+	// authored routines land 'proposed' for MANAGER+ approval) and the admin
+	// disable/enable airbag. See migrate_consts_v128_pipeline_status.go.
+	{version: 128, name: "pipeline_status", sql: migrationPipelineStatus},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

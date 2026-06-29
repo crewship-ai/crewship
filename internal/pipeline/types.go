@@ -549,6 +549,12 @@ type Pipeline struct {
 
 	ExecutionTierJSON string // empty = use workspace default
 
+	// Status is the governance lifecycle state (migration v128):
+	//   active   — live + runnable (default)
+	//   proposed — risky agent/user-authored save awaiting MANAGER+ approval
+	//   disabled — admin airbag; run gate refuses, in-flight runs cancelled
+	Status string
+
 	CreatedAt time.Time
 	UpdatedAt time.Time
 	DeletedAt *time.Time
@@ -617,6 +623,10 @@ type SaveInput struct {
 	// ExecutionTierJSON optional override of workspace tier mapping.
 	// Empty string ("") means "use workspace default".
 	ExecutionTierJSON string
+	// Status is the governance lifecycle state to persist. Empty defaults
+	// to 'active' (live). The save handlers set 'proposed' for risky
+	// agent/user-authored routines so they enter the maker-checker queue.
+	Status string
 }
 
 // ListFilters narrows a Store.List query. Zero value = "all
@@ -627,8 +637,11 @@ type ListFilters struct {
 	IncludeEphemeral bool
 	IncludeHidden    bool // include workspace_visible=false
 	AuthorCrewID     string
-	Limit            int
-	OrderBy          ListOrder
+	// Status optionally filters by governance lifecycle state
+	// (active | proposed | disabled). Empty = all states.
+	Status  string
+	Limit   int
+	OrderBy ListOrder
 }
 
 // ListOrder controls the ordering in Store.List. Default

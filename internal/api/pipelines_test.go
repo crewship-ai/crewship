@@ -59,6 +59,8 @@ CREATE TABLE pipelines (
     last_test_run_at         TEXT,
     last_test_run_passed     INTEGER NOT NULL DEFAULT 0,
     execution_tier_json      TEXT,
+    status                   TEXT NOT NULL DEFAULT 'active'
+                               CHECK (status IN ('active','proposed','disabled')),
     created_at               TEXT NOT NULL DEFAULT (datetime('now','subsec')),
     updated_at               TEXT NOT NULL DEFAULT (datetime('now','subsec')),
     deleted_at               TEXT,

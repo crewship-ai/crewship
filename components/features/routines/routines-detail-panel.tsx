@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
-import { X, Play, FlaskConical, Eye, Square } from "lucide-react"
+import { X, Play, FlaskConical, Eye, Square, Check, Ban, Power, PowerOff } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
@@ -11,6 +11,14 @@ import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 import { apiFetch } from "@/lib/api-fetch"
+import { useAbilities } from "@/hooks/use-abilities"
+import {
+  routineStatusBadge,
+  runDisabledReason,
+  canApproveRoutine,
+  canKillRoutine,
+  normalizeRoutineStatus,
+} from "@/lib/routine-governance"
 import { buildPipelineActionRequest, canTestRun } from "@/lib/pipeline-actions"
 import { integrationLabel, extractMissingIntegrations } from "@/lib/integration-labels"
 import { PipelineRunActivity } from "@/components/features/activity/pipeline-run-activity"
@@ -43,6 +51,9 @@ export interface RoutineDetail {
   invocation_count: number
   last_invoked_at?: string
   last_invocation_status?: string
+  // Lifecycle status: "active" (runnable), "proposed" (awaiting MANAGER+
+  // approval), "disabled" (killed by OWNER/ADMIN). Absent → "active".
+  status?: "active" | "proposed" | "disabled"
   author_crew_id?: string
   author_agent_id?: string
   author_user_id?: string
@@ -66,10 +77,14 @@ interface Props {
 
 export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: Props) {
   const router = useRouter()
+  const { role } = useAbilities()
   const [routine, setRoutine] = useState<RoutineDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [busyAction, setBusyAction] = useState<string | null>(null)
+  // Tracks the in-flight governance action (approve/reject/disable/enable)
+  // so its button shows a spinner and the others stay disabled meanwhile.
+  const [busyGov, setBusyGov] = useState<string | null>(null)
   // dryRunResult holds the `would_execute` report from the most recent
   // dry_run invocation so we can render it inline. Cleared on close.
   const [dryRunResult, setDryRunResult] = useState<DryRunResult | null>(null)
@@ -217,6 +232,47 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
     }
   }
 
+  // Lifecycle governance: approve/reject a proposed routine (MANAGER+),
+  // or disable/enable an existing one (OWNER/ADMIN). Each hits its own
+  // endpoint, toasts the outcome, then refetches so the hero badge +
+  // run-guard reflect the new status. enable/disable confirm first
+  // (matches the rollback confirm() pattern in the Versions tab).
+  const governanceAction = async (action: "approve" | "reject" | "disable" | "enable") => {
+    if (!routine) return
+    if (action === "disable" && !confirm(`Disable "${routine.name || routine.slug}"? It cannot be run until re-enabled.`)) {
+      return
+    }
+    if (action === "reject" && !confirm(`Reject "${routine.name || routine.slug}"? The proposed routine is discarded.`)) {
+      return
+    }
+    setBusyGov(action)
+    try {
+      const res = await apiFetch(`/api/v1/workspaces/${workspaceId}/pipelines/${slug}/${action}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      })
+      if (!res.ok) {
+        const t = await res.text().catch(() => "")
+        throw new Error(`${res.status}: ${t || res.statusText}`)
+      }
+      toast.success(governanceLabel(action))
+      onChanged()
+      fetchRoutine()
+    } catch (e) {
+      toast.error(`${governanceLabel(action)} failed`, {
+        description: e instanceof Error ? e.message : String(e),
+      })
+    } finally {
+      setBusyGov(null)
+    }
+  }
+
+  const lifecycle = normalizeRoutineStatus(routine?.status)
+  const lifecycleBadge = routineStatusBadge(routine?.status)
+  const runGuard = runDisabledReason(routine?.status)
+  const showApprovalBanner = lifecycle === "proposed" && canApproveRoutine(role)
+  const showKillControl = canKillRoutine(role)
+
   const status = routine?.last_invocation_status?.toLowerCase()
   // Status tones share the same `bg-{c}-500/20 text-{c}-400` pattern
   // as lib/colors.ts STATUS_BADGE_CLASSES so the pill matches the
@@ -248,6 +304,18 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
               <>
                 {/* Status + meta pills */}
                 <div className="flex flex-wrap items-center gap-2">
+                  {lifecycleBadge && (
+                    <span
+                      className={cn(
+                        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium",
+                        lifecycleBadge.bg,
+                        lifecycleBadge.text,
+                      )}
+                    >
+                      <span className={cn("h-1.5 w-1.5 rounded-full", lifecycleBadge.dot)} />
+                      {lifecycleBadge.label}
+                    </span>
+                  )}
                   <span
                     className={cn(
                       "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium",
@@ -300,50 +368,86 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
 
         {/* Action group — pill button row */}
         <div className="mt-5 flex items-center gap-2">
-          <Button
-            onClick={() => triggerAction("run")}
-            disabled={!!busyAction || !routine}
-            className="h-9 gap-2 rounded-md px-4 text-sm font-semibold"
-            title="Invoke routine with empty inputs"
-          >
-            {busyAction === "run" ? (
-              <Spinner className="h-3.5 w-3.5" />
-            ) : (
-              <Play className="h-3.5 w-3.5 fill-current" />
-            )}
-            {busyAction === "run" ? "Running…" : "Run"}
-          </Button>
+          {/* Wrap in a span so the run-guard tooltip still shows when the
+              button is disabled — disabled buttons swallow hover events. */}
+          <span title={runGuard ?? "Invoke routine with empty inputs"} className="inline-flex">
+            <Button
+              onClick={() => triggerAction("run")}
+              disabled={!!busyAction || !routine || !!runGuard}
+              className="h-9 gap-2 rounded-md px-4 text-sm font-semibold"
+            >
+              {busyAction === "run" ? (
+                <Spinner className="h-3.5 w-3.5" />
+              ) : (
+                <Play className="h-3.5 w-3.5 fill-current" />
+              )}
+              {busyAction === "run" ? "Running…" : "Run"}
+            </Button>
+          </span>
           {/* Wrap in a span so the explanatory tooltip still shows when the
               button is disabled — disabled buttons swallow hover events. */}
           <span
             title={
-              canTestRun(routine)
+              runGuard ??
+              (canTestRun(routine)
                 ? "Run the draft definition on the execution tier; logs result without persisting state"
-                : "Test run needs an author crew — only available for crew-authored routines"
+                : "Test run needs an author crew — only available for crew-authored routines")
             }
             className="inline-flex"
           >
             <Button
               variant="outline"
               onClick={() => triggerAction("test_run")}
-              disabled={!!busyAction || !routine || !canTestRun(routine)}
+              disabled={!!busyAction || !routine || !canTestRun(routine) || !!runGuard}
               className="h-9 gap-2 rounded-md px-4 text-sm"
             >
               <FlaskConical className="h-3.5 w-3.5" />
               {busyAction === "test_run" ? "Testing…" : "Test run"}
             </Button>
           </span>
-          <Button
-            variant="outline"
-            onClick={() => triggerAction("dry_run")}
-            disabled={!!busyAction || !routine}
-            className="h-9 gap-2 rounded-md px-4 text-sm"
-            title="Walk DSL, render templates, compute would_execute report — no agent invocations"
+          <span
+            title={runGuard ?? "Walk DSL, render templates, compute would_execute report — no agent invocations"}
+            className="inline-flex"
           >
-            <Eye className="h-3.5 w-3.5" />
-            {busyAction === "dry_run" ? "Computing…" : "Dry run"}
-          </Button>
+            <Button
+              variant="outline"
+              onClick={() => triggerAction("dry_run")}
+              disabled={!!busyAction || !routine || !!runGuard}
+              className="h-9 gap-2 rounded-md px-4 text-sm"
+            >
+              <Eye className="h-3.5 w-3.5" />
+              {busyAction === "dry_run" ? "Computing…" : "Dry run"}
+            </Button>
+          </span>
           <div className="flex-1" />
+          {/* Enable / Disable — OWNER/ADMIN kill switch. Disable when the
+              routine is active; Enable when it's disabled. Hidden for a
+              proposed routine (approve/reject is the right action there). */}
+          {showKillControl && routine && lifecycle !== "proposed" && (
+            lifecycle === "disabled" ? (
+              <Button
+                variant="outline"
+                onClick={() => governanceAction("enable")}
+                disabled={!!busyGov || !!busyAction}
+                className="h-9 gap-2 rounded-md px-3 text-sm text-emerald-400 hover:text-emerald-300"
+                title="Re-enable this routine so it can run again"
+              >
+                {busyGov === "enable" ? <Spinner className="h-3.5 w-3.5" /> : <Power className="h-3.5 w-3.5" />}
+                Enable
+              </Button>
+            ) : (
+              <Button
+                variant="outline"
+                onClick={() => governanceAction("disable")}
+                disabled={!!busyGov || !!busyAction}
+                className="h-9 gap-2 rounded-md px-3 text-sm text-rose-400 hover:text-rose-300"
+                title="Disable (kill) this routine — it cannot run until re-enabled"
+              >
+                {busyGov === "disable" ? <Spinner className="h-3.5 w-3.5" /> : <PowerOff className="h-3.5 w-3.5" />}
+                Disable
+              </Button>
+            )
+          )}
           <Button
             variant="ghost"
             className="h-9 gap-2 rounded-md px-3 text-sm text-muted-foreground hover:text-rose-400"
@@ -356,6 +460,40 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
           </Button>
         </div>
       </div>
+
+      {/* Approval banner — a proposed routine (risky / agent-authored)
+          needs a MANAGER+ to promote it before it can run. Approve →
+          active; Reject → discarded. Only rendered for MANAGER+ when the
+          routine is in the proposed state. */}
+      {showApprovalBanner && (
+        <div className="flex items-center gap-3 border-b border-amber-500/30 bg-amber-500/[0.07] px-6 py-3">
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-medium text-amber-300">This routine is awaiting approval</div>
+            <p className="mt-0.5 text-[12px] text-amber-200/70">
+              It was proposed for review and can&apos;t run until a manager approves it.
+            </p>
+          </div>
+          <Button
+            size="sm"
+            onClick={() => governanceAction("approve")}
+            disabled={!!busyGov}
+            className="h-8 gap-1.5 bg-amber-500 px-3 text-sm font-semibold text-amber-950 hover:bg-amber-400"
+          >
+            {busyGov === "approve" ? <Spinner className="h-3.5 w-3.5" /> : <Check className="h-3.5 w-3.5" />}
+            Approve
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => governanceAction("reject")}
+            disabled={!!busyGov}
+            className="h-8 gap-1.5 border-amber-500/40 px-3 text-sm text-amber-200 hover:text-amber-100"
+          >
+            {busyGov === "reject" ? <Spinner className="h-3.5 w-3.5" /> : <Ban className="h-3.5 w-3.5" />}
+            Reject
+          </Button>
+        </div>
+      )}
 
       {/* Dry-run report — surfaces would_execute when the user clicks
           "Dry run". Pre-fix this payload was silently dropped. */}
@@ -446,4 +584,17 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
 
 function actionLabel(a: "run" | "test_run" | "dry_run"): string {
   return a === "run" ? "Run" : a === "test_run" ? "Test run" : "Dry run"
+}
+
+function governanceLabel(a: "approve" | "reject" | "disable" | "enable"): string {
+  switch (a) {
+    case "approve":
+      return "Routine approved"
+    case "reject":
+      return "Routine rejected"
+    case "disable":
+      return "Routine disabled"
+    case "enable":
+      return "Routine enabled"
+  }
 }

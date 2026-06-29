@@ -30,6 +30,7 @@ func (h *PipelineHandler) List(w http.ResponseWriter, r *http.Request) {
 		IncludeEphemeral: q.Get("include_ephemeral") == "1",
 		IncludeHidden:    q.Get("include_hidden") == "1",
 		AuthorCrewID:     q.Get("author_crew_id"),
+		Status:           q.Get("status"),
 	}
 	switch q.Get("order") {
 	case "recent":
@@ -575,6 +576,12 @@ func (h *PipelineHandler) Save(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Governance maker-checker: classify the save. Risky routines (http/egress
+	// or code steps, declared credentials, or an integrations_required the
+	// author crew can't satisfy) land as 'proposed' and need MANAGER+ approval
+	// before they can run; safe ones go live as 'active'.
+	risky, riskReasons := h.classifyRoutineRisk(r.Context(), workspaceID, body.AuthorCrewID, dsl)
+
 	in := pipeline.SaveInput{
 		WorkspaceID:    workspaceID,
 		Slug:           body.Slug,
@@ -587,6 +594,7 @@ func (h *PipelineHandler) Save(w http.ResponseWriter, r *http.Request) {
 			Via:    pipeline.AuthoredViaUser,
 		},
 		LastTestRunPassed: body.LastTestRunPassed || body.SkipTestGate,
+		Status:            statusForRisk(risky),
 	}
 
 	// Three paths to clearing the test-gate gate, in priority order:
@@ -636,6 +644,9 @@ func (h *PipelineHandler) Save(w http.ResponseWriter, r *http.Request) {
 		h.logger.Error("pipeline user save", "error", err)
 		replyError(w, http.StatusInternalServerError, "Failed to save pipeline")
 		return
+	}
+	if risky {
+		h.proposeRoutineInbox(r.Context(), workspaceID, saved, riskReasons, "Routine author ("+user.Email+")")
 	}
 	writeJSON(w, http.StatusCreated, toPipelineResponse(saved, true))
 }
@@ -711,6 +722,11 @@ func (h *PipelineHandler) InternalSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Governance maker-checker (mirrors the user save path): classify the
+	// agent-authored save. Risky → 'proposed' (MANAGER+ approval before it can
+	// run) + an inbox review item; safe → 'active' as before.
+	risky, riskReasons := h.classifyRoutineRisk(r.Context(), body.WorkspaceID, body.AuthorCrewID, dsl)
+
 	in := pipeline.SaveInput{
 		WorkspaceID:    body.WorkspaceID,
 		Slug:           body.Slug,
@@ -725,6 +741,7 @@ func (h *PipelineHandler) InternalSave(w http.ResponseWriter, r *http.Request) {
 			Via:     pipeline.AuthoredViaAgent,
 		},
 		LastTestRunPassed: body.LastTestRunPassed,
+		Status:            statusForRisk(risky),
 	}
 	if t, err := parseRFC3339(body.LastTestRunAt); err == nil {
 		in.LastTestRunAt = &t
@@ -745,6 +762,9 @@ func (h *PipelineHandler) InternalSave(w http.ResponseWriter, r *http.Request) {
 		h.logger.Error("pipeline internal save", "error", err)
 		replyError(w, http.StatusInternalServerError, "Failed to save pipeline")
 		return
+	}
+	if risky {
+		h.proposeRoutineInbox(r.Context(), body.WorkspaceID, saved, riskReasons, "Agent routine author")
 	}
 	writeJSON(w, http.StatusCreated, toPipelineResponse(saved, true))
 }

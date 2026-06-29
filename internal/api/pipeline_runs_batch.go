@@ -51,6 +51,11 @@ func (h *PipelineHandler) RunBatch(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusInternalServerError, "load pipeline")
 		return
 	}
+	// Same governance status gate as Run — a proposed/disabled routine can't
+	// be batch-triggered either.
+	if h.gateRoutineStatus(w, p) {
+		return
+	}
 
 	var body batchRunBody
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxExecBodyBytes)).Decode(&body); err != nil {
