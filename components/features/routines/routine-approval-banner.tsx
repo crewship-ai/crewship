@@ -27,8 +27,14 @@ export function RoutineApprovalBanner({ waitpoint, deciding, onDecide, className
   const [remaining, setRemaining] = useState(() => fmtRemaining(waitpoint.timeout_at))
 
   // Live countdown, ticking once a minute — cheap and accurate enough for a
-  // 24h default window. Resets when the waitpoint (token) changes.
+  // 24h default window. Resets when the waitpoint (token) changes. We also clear
+  // the local comment draft and collapse the comment field on a token change so
+  // a different pending waitpoint replacing this one (while the banner stays
+  // mounted) can't carry the previous decision's comment/expanded state into the
+  // new one.
   useEffect(() => {
+    setComment("")
+    setShowComment(false)
     setRemaining(fmtRemaining(waitpoint.timeout_at))
     const id = setInterval(() => setRemaining(fmtRemaining(waitpoint.timeout_at)), 60_000)
     return () => clearInterval(id)
@@ -78,6 +84,7 @@ export function RoutineApprovalBanner({ waitpoint, deciding, onDecide, className
       {showComment && (
         <textarea
           autoFocus
+          aria-label="Decision comment"
           placeholder="Decision comment (optional, sent to the parked run as the waitpoint payload)…"
           value={comment}
           onChange={(e) => setComment(e.target.value)}

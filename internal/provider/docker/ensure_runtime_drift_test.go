@@ -110,6 +110,12 @@ func newDriftFixture(t *testing.T, containerName, runningImage string) (*Provide
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{"Id": "new-cid-0123456789ab"})
 
+		// Volume list — empty, so the legacy-C1 migration finds nothing to
+		// migrate (it now fails closed if it can't enumerate volumes).
+		case strings.HasSuffix(path, "/volumes") && r.Method == http.MethodGet:
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"Volumes": []any{}, "Warnings": nil})
+
 		// Volumes — accept blindly so the create path can proceed.
 		case strings.HasSuffix(path, "/volumes/create"):
 			w.Header().Set("Content-Type", "application/json")

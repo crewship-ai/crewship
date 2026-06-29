@@ -80,12 +80,37 @@ describe("usePendingApproval", () => {
     expect(result.current.waitpoint).toBeNull()
   })
 
-  it("treats 503 (store not wired) as nothing pending, not an error", async () => {
+  it("surfaces a 503 as a retryable error, not silent 'nothing pending'", async () => {
+    // apiFetch synthesizes a 503 on a transient session-refresh failure; the
+    // list endpoint never signals empty state that way. Hiding a real pending
+    // approval behind an auth blip would be worse than a retryable error.
     mockFetch.mockResolvedValueOnce({ ok: false, status: 503, json: async () => ({}) })
     const { result } = renderHook(() => usePendingApproval("ws-1", RUN))
     await act(async () => { await flushAsync() })
     expect(result.current.waitpoint).toBeNull()
-    expect(result.current.error).toBeNull()
+    expect(result.current.error).toContain("503")
+  })
+
+  it("clears the prior run's waitpoint immediately when the tracked run changes", async () => {
+    mockFetch.mockResolvedValueOnce({ ok: true, json: async () => [wp()] })
+    const { result, rerender } = renderHook(
+      ({ run }: { run: string }) => usePendingApproval("ws-1", run),
+      { initialProps: { run: RUN } },
+    )
+    await act(async () => { await flushAsync() })
+    expect(result.current.waitpoint?.token).toBe("tok_1")
+
+    // Switch to run B whose fetch is still in flight: the stale A waitpoint must
+    // be dropped right away rather than lingering until B resolves.
+    let resolveB: (v: unknown) => void = () => {}
+    mockFetch.mockReturnValueOnce(new Promise((r) => { resolveB = r }))
+    await act(async () => { rerender({ run: "run_b" }) })
+    expect(result.current.waitpoint).toBeNull()
+
+    // And A's response, if it ever lands late, is ignored (reqId moved on).
+    resolveB({ ok: true, json: async () => [] })
+    await act(async () => { await flushAsync() })
+    expect(result.current.waitpoint).toBeNull()
   })
 
   it("decide() POSTs to the approve endpoint and clears the banner", async () => {

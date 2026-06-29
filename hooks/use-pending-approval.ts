@@ -63,12 +63,13 @@ export function usePendingApproval(
       const res = await apiFetch(`/api/v1/workspaces/${workspaceId}/pipelines/waitpoints`)
       if (reqIdRef.current !== reqId) return
       if (!res.ok) {
-        // 503 = waitpoint store not wired on this server; treat as "nothing
-        // pending" rather than a hard error so the page stays usable.
-        if (res.status === 503) {
-          setWaitpoint(null)
-          return
-        }
+        // Don't collapse a 503 into "nothing pending". The list endpoint never
+        // reports an empty state via 503 — it reads the waitpoints table
+        // directly and returns 200 (possibly []) or 500. The only 503 that
+        // reaches here is the one apiFetch synthesizes on a transient
+        // session-refresh failure (X-Crewship-Refresh-Failed). Hiding a real
+        // pending approval behind an auth/backend blip is worse than a
+        // retryable error, so surface it like any other failure.
         throw new Error(`fetch waitpoints: ${res.status}`)
       }
       const data: PendingWaitpoint[] = await res.json()
@@ -85,8 +86,20 @@ export function usePendingApproval(
     }
   }, [workspaceId, runId])
 
+  // Invalidate the previous run's waitpoint the moment the tracked run (or
+  // workspace) changes, BEFORE the new run's fetch resolves. Bumping reqId
+  // discards any in-flight response from the prior run, and clearing the
+  // waitpoint stops the inline Approve/Reject UI from briefly pointing at the
+  // old run while run B's fetch is still outstanding.
   useEffect(() => {
-    refresh()
+    reqIdRef.current += 1
+    setWaitpoint(null)
+    setError(null)
+    setLoading(false)
+  }, [workspaceId, runId])
+
+  useEffect(() => {
+    void refresh()
   }, [refresh])
 
   useRealtimeEvent("pipeline.waitpoint.created", refresh)

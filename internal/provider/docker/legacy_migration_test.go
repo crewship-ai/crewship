@@ -235,6 +235,28 @@ func TestMigrateLegacy_MigratesHomeVolume(t *testing.T) {
 		t.Errorf("expected legacy volume %q removed after copy, got %v", legacyHome, f.removedVolumes)
 	}
 
+	// Assert the copy helper stays sandboxed: an explicit root user with only
+	// the three ownership caps cp -a needs, no network, and CapDrop ALL. A
+	// regression in any of these widens the helper's attack surface while the
+	// copy still passes, so lock them down here.
+	if user, _ := f.lastCreateBody["User"].(string); user != "0:0" {
+		t.Errorf("helper User = %q, want 0:0 (explicit root for ownership-preserving copy)", user)
+	}
+	hc, ok := f.lastCreateBody["HostConfig"].(map[string]any)
+	if !ok {
+		t.Fatalf("create body missing HostConfig: %v", f.lastCreateBody)
+	}
+	if mode, _ := hc["NetworkMode"].(string); mode != "none" {
+		t.Errorf("helper NetworkMode = %q, want none", mode)
+	}
+	if caps, ok := hc["CapDrop"].([]any); !ok || len(caps) != 1 || caps[0] != "ALL" {
+		t.Errorf("helper CapDrop = %v, want [ALL]", hc["CapDrop"])
+	}
+	// The Docker SDK normalizes capability names with a CAP_ prefix on the wire.
+	if got := toStringSet(hc["CapAdd"]); !equalStringSet(got, map[string]bool{"CAP_CHOWN": true, "CAP_DAC_OVERRIDE": true, "CAP_FOWNER": true}) {
+		t.Errorf("helper CapAdd = %v, want exactly [CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER]", hc["CapAdd"])
+	}
+
 	// Assert the helper mounts the right volume names.
 	mounts := mountsFromCreateBody(t, f.lastCreateBody)
 	gotFrom, gotTo := "", ""
@@ -333,6 +355,69 @@ func TestMigrateLegacy_EmptyImageIsFailSafe(t *testing.T) {
 	}
 }
 
+// Helper copy fails (non-zero exit) => the half-written target volume is rolled
+// back so a later provision can't mistake it for an authoritative migration and
+// skip re-copying, AND the legacy source is left intact (fail-safe).
+func TestMigrateLegacy_RollsBackTargetOnCopyFailure(t *testing.T) {
+	cases := []struct {
+		name     string
+		waitExit int64
+	}{
+		{name: "helper non-zero exit", waitExit: 1},
+		{name: "helper exit 2", waitExit: 2},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := &fakeDaemon{
+				volumeNames: []string{legacyHome},
+				waitExit:    tc.waitExit,
+			}
+			p, cleanup := newMigProvider(t, f)
+			defer cleanup()
+
+			err := p.migrateLegacyCrewResources(context.Background(), migCrewID, migSlug, migImage)
+			if err == nil {
+				t.Fatal("expected error when helper copy fails")
+			}
+			if !contains(f.createdVolumes, targetHome) {
+				t.Fatalf("expected target volume %q to have been created, got %v", targetHome, f.createdVolumes)
+			}
+			if !contains(f.removedVolumes, targetHome) {
+				t.Errorf("target volume %q MUST be rolled back (removed) on copy failure; removed=%v", targetHome, f.removedVolumes)
+			}
+			if contains(f.removedVolumes, legacyHome) {
+				t.Errorf("legacy volume %q MUST NOT be removed when copy failed; removed=%v", legacyHome, f.removedVolumes)
+			}
+		})
+	}
+}
+
+// VolumeList failing => fail closed: return an error and touch nothing, so
+// EnsureCrewRuntime cannot go on to create empty id-scoped volumes that strand
+// an unmigrated legacy home behind an authoritative-looking target.
+func TestMigrateLegacy_VolumeListFailureFailsClosed(t *testing.T) {
+	f := &fakeDaemon{
+		containerNames: []string{}, // no legacy container; isolate the volume-list path
+		volumeListErr:  true,
+	}
+	p, cleanup := newMigProvider(t, f)
+	defer cleanup()
+
+	err := p.migrateLegacyCrewResources(context.Background(), migCrewID, migSlug, migImage)
+	if err == nil {
+		t.Fatal("expected an error when volume enumeration fails (fail closed)")
+	}
+	if !strings.Contains(err.Error(), "list volumes") {
+		t.Errorf("error should mention the volume-list failure: %v", err)
+	}
+	if len(f.createdVolumes) != 0 || len(f.removedVolumes) != 0 {
+		t.Errorf("fail-closed path must touch no volumes: created=%v removed=%v", f.createdVolumes, f.removedVolumes)
+	}
+	if f.helperCreates != 0 {
+		t.Errorf("fail-closed path must not run a copy helper, got %d", f.helperCreates)
+	}
+}
+
 func mountsFromCreateBody(t *testing.T, body map[string]any) []map[string]any {
 	t.Helper()
 	hc, ok := body["HostConfig"].(map[string]any)
@@ -350,6 +435,32 @@ func mountsFromCreateBody(t *testing.T, body map[string]any) []map[string]any {
 		}
 	}
 	return out
+}
+
+func toStringSet(v any) map[string]bool {
+	out := map[string]bool{}
+	raw, ok := v.([]any)
+	if !ok {
+		return out
+	}
+	for _, e := range raw {
+		if s, ok := e.(string); ok {
+			out[s] = true
+		}
+	}
+	return out
+}
+
+func equalStringSet(a, b map[string]bool) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k := range a {
+		if !b[k] {
+			return false
+		}
+	}
+	return true
 }
 
 func contains(s []string, v string) bool {
