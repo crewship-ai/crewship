@@ -42,16 +42,54 @@ func (p *Provider) FindCrewContainer(ctx context.Context, id, slug string) (stri
 	return "", false, nil
 }
 
-// legacyCrewNames returns the three pre-C1 (slug-only) resource names for a
-// crew slug: container, home volume, tools volume. Centralised so the
-// provisioning guard, detection, and prune never disagree about which names are
-// legacy (a future naming change touches one place, not three).
-func (p *Provider) legacyCrewNames(slug string) (container, home, tools string) {
+// checkNoLegacyCrewResources fails when pre-C1 (slug-only) container or
+// home/tools volumes for slug still exist on the daemon. C1 (2026-06 audit)
+// re-keyed crew resources from "<prefix>-{team,home,tools}-<slug>" to also
+// include the globally-unique crew id; provisioning the id-scoped runtime
+// alongside a surviving legacy one would dual-mount the crew's bind mounts and
+// orphan its persistent volumes. The operator must migrate/prune the legacy
+// names first (dev: nuke + reseed). No-op on a fresh post-C1 daemon.
+func (p *Provider) checkNoLegacyCrewResources(ctx context.Context, slug string) error {
+	if slug == "" {
+		return nil
+	}
 	prefix := p.cfg.ContainerPrefix
 	if prefix == "" {
 		prefix = "crewship"
 	}
-	return prefix + "-team-" + slug, prefix + "-home-" + slug, prefix + "-tools-" + slug
+	legacyContainer := prefix + "-team-" + slug
+	legacyHome := prefix + "-home-" + slug
+	legacyTools := prefix + "-tools-" + slug
+
+	containers, err := p.client.ContainerList(ctx, container.ListOptions{All: true})
+	if err != nil {
+		return fmt.Errorf("list containers (legacy C1 check): %w", err)
+	}
+	for _, c := range containers {
+		for _, name := range c.Names {
+			if name == "/"+legacyContainer {
+				return fmt.Errorf("legacy slug-scoped container %q exists from before the C1 naming change; remove or migrate it (dev: nuke + reseed) before this crew can provision its id-scoped runtime", legacyContainer)
+			}
+		}
+	}
+
+	// Volume check is best-effort: the container guard above already blocks the
+	// dangerous dual-runtime case. If the daemon can't list volumes, log and
+	// proceed rather than wedge all provisioning.
+	list, err := p.client.VolumeList(ctx, volumeListOptions())
+	if err != nil {
+		p.logger.Warn("legacy C1 volume check skipped: list volumes failed", "error", err)
+		return nil
+	}
+	for _, vol := range list.Volumes {
+		if vol == nil {
+			continue
+		}
+		if vol.Name == legacyHome || vol.Name == legacyTools {
+			return fmt.Errorf("legacy slug-scoped volume %q exists from before the C1 naming change; remove or migrate it (dev: nuke + reseed) before provisioning", vol.Name)
+		}
+	}
+	return nil
 }
 
 // legacyNameSets computes, for the given crews, the set of pre-C1 slug-only
@@ -84,51 +122,6 @@ func (p *Provider) legacyNameSets(crews []provider.CrewRef) map[string]bool {
 		delete(legacy, name)
 	}
 	return legacy
-}
-
-// checkNoLegacyCrewResources fails when pre-C1 (slug-only) container or
-// home/tools volumes for slug still exist on the daemon. C1 (2026-06 audit)
-// re-keyed crew resources from "<prefix>-{team,home,tools}-<slug>" to also
-// include the globally-unique crew id; provisioning the id-scoped runtime
-// alongside a surviving legacy one would dual-mount the crew's bind mounts and
-// orphan its persistent volumes. No-op on a fresh post-C1 daemon. The returned
-// error wraps provider.ErrLegacyCrewResource so chatbridge can surface a safe,
-// actionable message instead of echoing the raw error to the end user.
-func (p *Provider) checkNoLegacyCrewResources(ctx context.Context, slug string) error {
-	if slug == "" {
-		return nil
-	}
-	legacyContainer, legacyHome, legacyTools := p.legacyCrewNames(slug)
-
-	containers, err := p.client.ContainerList(ctx, container.ListOptions{All: true})
-	if err != nil {
-		return fmt.Errorf("list containers (legacy C1 check): %w", err)
-	}
-	for _, c := range containers {
-		for _, name := range c.Names {
-			if name == "/"+legacyContainer {
-				return fmt.Errorf("legacy slug-scoped container %q exists from before the C1 naming change; run 'crewship admin prune-legacy' before this crew can provision its id-scoped runtime: %w", legacyContainer, provider.ErrLegacyCrewResource)
-			}
-		}
-	}
-
-	// Volume check is best-effort: the container guard above already blocks the
-	// dangerous dual-runtime case. If the daemon can't list volumes, log and
-	// proceed rather than wedge all provisioning.
-	list, err := p.client.VolumeList(ctx, volumeListOptions())
-	if err != nil {
-		p.logger.Warn("legacy C1 volume check skipped: list volumes failed", "error", err)
-		return nil
-	}
-	for _, vol := range list.Volumes {
-		if vol == nil {
-			continue
-		}
-		if vol.Name == legacyHome || vol.Name == legacyTools {
-			return fmt.Errorf("legacy slug-scoped volume %q exists from before the C1 naming change; run 'crewship admin prune-legacy' before provisioning: %w", vol.Name, provider.ErrLegacyCrewResource)
-		}
-	}
-	return nil
 }
 
 // HasLegacyCrewResources reports whether any pre-C1 (slug-only) container or

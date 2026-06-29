@@ -2,17 +2,9 @@ package provider
 
 import (
 	"context"
-	"errors"
 	"io"
 	"time"
 )
-
-// ErrLegacyCrewResource is wrapped by the container provider when a crew can't
-// start because a pre-C1 (slug-only) resource still exists on the daemon.
-// Callers (chatbridge) match it with errors.Is to surface a safe, actionable
-// message to the end user instead of echoing the raw error (which may carry
-// internal infra detail).
-var ErrLegacyCrewResource = errors.New("legacy pre-C1 crew resource present")
 
 // CrewRef identifies a crew by its globally-unique id and workspace slug. The
 // legacy-resource detector/pruner take a list so they can both TARGET the

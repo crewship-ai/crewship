@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"log/slog"
 	"strconv"
@@ -594,18 +593,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 
 		cID, err := b.container.EnsureCrewRuntime(ctx, cc)
 		if err != nil {
-			// Surface a safe, actionable message ONLY for the known
-			// legacy-resource cause (the actual user-facing failure mode the
-			// operator hit). For every other cause keep a generic string: an
-			// arbitrary wrapped EnsureCrewRuntime error may carry internal
-			// infra detail (DSNs, hostnames, filesystem paths) that must not
-			// reach a chat end user. The full cause is still returned below for
-			// the server logs.
-			msg := "failed to start agent container"
-			if errors.Is(err, provider.ErrLegacyCrewResource) {
-				msg += ": a legacy pre-C1 resource is blocking this crew — an operator must run 'crewship admin prune-legacy'"
-			}
-			streamFn(ws.ChatEvent{Type: "error", Content: msg})
+			streamFn(ws.ChatEvent{Type: "error", Content: "failed to start agent container"})
 			return fmt.Errorf("ensure team runtime: %w", err)
 		}
 		// Start sidecars after the agent runtime is ready so the
