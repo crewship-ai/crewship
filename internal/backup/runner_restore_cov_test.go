@@ -329,7 +329,7 @@ func TestRestoreBackup_DockerPhase(t *testing.T) {
 		Actor:             covAdminActor(),
 		NoEncrypt:         true,
 		DockerOps:         createOps,
-		CrewContainerName: func(slug string) string { return "ctr-" + slug },
+		CrewContainerName: func(_, slug string) string { return "ctr-" + slug },
 	})
 	if err != nil {
 		t.Fatalf("CreateBackup: %v", err)
@@ -341,7 +341,7 @@ func TestRestoreBackup_DockerPhase(t *testing.T) {
 		_, err := RestoreBackup(ctx, target, RestoreOptions{
 			Path: res.Path, Actor: covAdminActor(),
 			DockerOps:    ops,
-			ContainerFor: func(slug string) string { return "ctr-" + slug },
+			ContainerFor: func(_, slug string) string { return "ctr-" + slug },
 		})
 		if err == nil || !strings.Contains(err.Error(), "preflight crew") {
 			t.Fatalf("err = %v", err)
@@ -361,7 +361,7 @@ func TestRestoreBackup_DockerPhase(t *testing.T) {
 		_, err := RestoreBackup(ctx, openMigratedDBCov(t), RestoreOptions{
 			Path: res.Path, Actor: covAdminActor(),
 			DockerOps:    ops,
-			ContainerFor: func(slug string) string { return "ctr-" + slug },
+			ContainerFor: func(_, slug string) string { return "ctr-" + slug },
 		})
 		if err == nil || !strings.Contains(err.Error(), "is not provisioned on this instance") {
 			t.Fatalf("err = %v", err)
@@ -372,7 +372,7 @@ func TestRestoreBackup_DockerPhase(t *testing.T) {
 		got, err := RestoreBackup(ctx, openMigratedDBCov(t), RestoreOptions{
 			Path: res.Path, Actor: covAdminActor(),
 			DockerOps:    ops,
-			ContainerFor: func(slug string) string { return "" },
+			ContainerFor: func(_, slug string) string { return "" },
 		})
 		if err != nil {
 			t.Fatalf("RestoreBackup: %v", err)
@@ -386,7 +386,7 @@ func TestRestoreBackup_DockerPhase(t *testing.T) {
 		got, err := RestoreBackup(ctx, openMigratedDBCov(t), RestoreOptions{
 			Path: res.Path, Actor: covAdminActor(),
 			DockerOps:    ops,
-			ContainerFor: func(slug string) string { return "ctr-" + slug },
+			ContainerFor: func(_, slug string) string { return "ctr-" + slug },
 		})
 		if err != nil {
 			t.Fatalf("RestoreBackup: %v", err)

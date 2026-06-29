@@ -68,6 +68,17 @@ func (s *Server) handleMemoryRead(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Apply the write-side filename whitelist to the read path too (finding
+	// MEM, 2026-06 audit): the read surface must be no more permissive than
+	// the write surface, so an agent can only read the same AGENT.md / CREW.md
+	// / pins.md / daily/<name>.md files it is allowed to write.
+	if _, known := memoryFileCap(file); !known {
+		writeJSONResponse(w, http.StatusBadRequest, map[string]string{
+			"error": "unsupported file path; allowed: AGENT.md, CREW.md, pins.md, daily/<name>.md",
+		})
+		return
+	}
+
 	content, err := os.ReadFile(target)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {

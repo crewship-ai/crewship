@@ -32,7 +32,7 @@ func TestBuildMountsIncludesSidecarBinds(t *testing.T) {
 		SidecarBinaryPath: "/host/path/crewship-sidecar",
 		EntrypointPath:    "/host/path/entrypoint.sh",
 	}}
-	mounts, err := p.buildMounts("eng", "/ws", "/out", "/crew", "/secrets")
+	mounts, err := p.buildMounts("ckcrew1", "eng", "/ws", "/out", "/crew", "/secrets")
 	if err != nil {
 		t.Fatalf("buildMounts: %v", err)
 	}
@@ -68,14 +68,14 @@ func TestBuildMountsIncludesSidecarBinds(t *testing.T) {
 
 func TestBuildMountsErrorsWhenSidecarPathMissing(t *testing.T) {
 	p := &Provider{cfg: Config{EntrypointPath: "/host/entrypoint.sh"}}
-	if _, err := p.buildMounts("eng", "/ws", "/out", "/crew", "/secrets"); err == nil {
+	if _, err := p.buildMounts("ckcrew1", "eng", "/ws", "/out", "/crew", "/secrets"); err == nil {
 		t.Fatal("expected error when SidecarBinaryPath is empty")
 	}
 }
 
 func TestBuildMountsErrorsWhenEntrypointPathMissing(t *testing.T) {
 	p := &Provider{cfg: Config{SidecarBinaryPath: "/host/crewship-sidecar"}}
-	if _, err := p.buildMounts("eng", "/ws", "/out", "/crew", "/secrets"); err == nil {
+	if _, err := p.buildMounts("ckcrew1", "eng", "/ws", "/out", "/crew", "/secrets"); err == nil {
 		t.Fatal("expected error when EntrypointPath is empty")
 	}
 }

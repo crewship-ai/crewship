@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types/ref"
@@ -38,7 +39,90 @@ type CelCodeRunner struct{}
 // gate expressions, but a hard ceiling against a pathological one.
 const celCostLimit = 1_000_000
 
+// maxCELSourceBytes caps the rendered CEL source length BEFORE it reaches
+// env.Compile. This is the compile-bomb guard (finding M5): the step body is
+// Render()'d — so a webhook-controlled `{{ inputs.payload }}` is substituted
+// straight into the CEL source — and cel.Program's CostLimit bounds Eval
+// only, leaving Compile open. A genuine probe/gate expression is tens to a
+// few hundred bytes; 4 KB is generous headroom while denying an attacker the
+// ability to drive unbounded parse/type-check CPU through a routine input.
+const maxCELSourceBytes = 4096
+
+// celProgramCacheMax bounds the compiled-program cache so a stream of
+// distinct (e.g. input-templated) expressions can't grow it without limit.
+// On overflow the cache is flushed wholesale — simple, allocation-cheap, and
+// good enough for the steady-state case the cache targets (a fixed set of
+// recurring expression texts).
+const celProgramCacheMax = 256
+
 var _ CodeRunner = CelCodeRunner{}
+
+// celEnv is the single CEL environment shared across all evaluations — it
+// only declares the typed `inputs` variable and never changes, so there is
+// no reason to rebuild it per call. Built once via celEnvOnce.
+var (
+	celEnvOnce sync.Once
+	celEnv     *cel.Env
+	celEnvErr  error
+)
+
+// getCELEnv lazily constructs (once) and returns the shared CEL environment.
+func getCELEnv() (*cel.Env, error) {
+	celEnvOnce.Do(func() {
+		celEnv, celEnvErr = cel.NewEnv(
+			cel.Variable("inputs", cel.MapType(cel.StringType, cel.DynType)),
+		)
+	})
+	return celEnv, celEnvErr
+}
+
+// celProgramCache memoizes compiled cel.Programs keyed by expression text so
+// a routine whose CEL step fires repeatedly with unchanging source pays the
+// env-construction + compile cost once, not per eval (finding M4). cel.Program
+// is safe for concurrent Eval, so cached entries are shared across goroutines;
+// access to the map itself is guarded by celCacheMu.
+var (
+	celCacheMu sync.Mutex
+	celCache   = make(map[string]cel.Program, celProgramCacheMax)
+)
+
+// compileCELProgram returns a compiled, cost-limited program for the given
+// (already length-checked) expression text, building+caching it on first use.
+func compileCELProgram(code string) (cel.Program, error) {
+	celCacheMu.Lock()
+	if prg, ok := celCache[code]; ok {
+		celCacheMu.Unlock()
+		return prg, nil
+	}
+	celCacheMu.Unlock()
+
+	env, err := getCELEnv()
+	if err != nil {
+		return nil, fmt.Errorf("cel: env: %w", err)
+	}
+	ast, iss := env.Compile(code)
+	if iss != nil && iss.Err() != nil {
+		return nil, fmt.Errorf("cel: compile: %w", iss.Err())
+	}
+	// Cost limit: CEL is already non-Turing-complete (guaranteed to
+	// terminate), but cap the evaluation cost as defense-in-depth so a
+	// pathological expression (deeply nested list/map ops) can't burn
+	// unbounded CPU on the request goroutine.
+	prg, err := env.Program(ast, cel.CostLimit(celCostLimit))
+	if err != nil {
+		return nil, fmt.Errorf("cel: program: %w", err)
+	}
+
+	celCacheMu.Lock()
+	// Flush wholesale on overflow rather than tracking per-entry recency —
+	// keeps the cache bounded with negligible bookkeeping.
+	if len(celCache) >= celProgramCacheMax {
+		celCache = make(map[string]cel.Program, celProgramCacheMax)
+	}
+	celCache[code] = prg
+	celCacheMu.Unlock()
+	return prg, nil
+}
 
 // RunCode compiles + evaluates the CEL expression in req.Code against
 // the typed `inputs` variable and returns the canonical string form of
@@ -52,26 +136,21 @@ func (CelCodeRunner) RunCode(ctx context.Context, req CodeRunRequest) (CodeRunRe
 		err := fmt.Errorf("cel: empty expression")
 		return CodeRunResult{Stderr: err.Error(), ExitCode: 1}, err
 	}
-
-	env, err := cel.NewEnv(
-		cel.Variable("inputs", cel.MapType(cel.StringType, cel.DynType)),
-	)
-	if err != nil {
-		return CodeRunResult{Stderr: err.Error(), ExitCode: 1}, fmt.Errorf("cel: env: %w", err)
+	// Compile-bomb guard (M5): the body was Render()'d before reaching us,
+	// so an attacker-controlled input can inflate the source. Reject an
+	// oversized rendered expression BEFORE env.Compile — cel.Program's
+	// CostLimit bounds Eval only, not the parse/type-check workload.
+	if len(code) > maxCELSourceBytes {
+		err := fmt.Errorf("cel: expression too large: %d bytes (max %d)", len(code), maxCELSourceBytes)
+		return CodeRunResult{Stderr: err.Error(), ExitCode: 1}, err
 	}
 
-	ast, iss := env.Compile(code)
-	if iss != nil && iss.Err() != nil {
-		err := fmt.Errorf("cel: compile: %w", iss.Err())
-		return CodeRunResult{Stderr: iss.Err().Error(), ExitCode: 1}, err
-	}
-	// Cost limit: CEL is already non-Turing-complete (guaranteed to
-	// terminate), but cap the evaluation cost as defense-in-depth so a
-	// pathological expression (deeply nested list/map ops) can't burn
-	// unbounded CPU on the request goroutine.
-	prg, err := env.Program(ast, cel.CostLimit(celCostLimit))
+	// Compile once, cache by expression text (M4) — repeated firings of a
+	// fixed-source step reuse the compiled program instead of rebuilding
+	// env + AST + program every call.
+	prg, err := compileCELProgram(code)
 	if err != nil {
-		return CodeRunResult{Stderr: err.Error(), ExitCode: 1}, fmt.Errorf("cel: program: %w", err)
+		return CodeRunResult{Stderr: err.Error(), ExitCode: 1}, err
 	}
 
 	out, _, err := prg.Eval(map[string]any{"inputs": celInputs(req.Inputs)})

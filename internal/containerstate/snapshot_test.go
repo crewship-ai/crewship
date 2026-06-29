@@ -53,7 +53,7 @@ func (s *stubContainer) ContainerStats(_ context.Context, _ string) (*provider.C
 func (s *stubContainer) ExecInspect(_ context.Context, _ string) (bool, int, error) {
 	panic("not used")
 }
-func (s *stubContainer) CrewContainerName(slug string) string { return "test-" + slug }
+func (s *stubContainer) CrewContainerName(_ string, slug string) string { return "test-" + slug }
 func (s *stubContainer) CopyToContainer(_ context.Context, _, _ string, _ io.Reader) error {
 	panic("not used")
 }

@@ -183,13 +183,22 @@ func (p *Provider) ensureImage(ctx context.Context, ref string) error {
 	return nil
 }
 
-// CrewContainerName returns the container name for a crew based on its slug and the configured prefix.
-func (p *Provider) CrewContainerName(slug string) string {
+// CrewContainerName returns the container name for a crew. It folds in the
+// globally-unique crew id (not the per-workspace slug alone) so two tenants
+// with an identically-named crew never collide on a shared host (audit C1).
+func (p *Provider) CrewContainerName(id, slug string) string {
 	prefix := p.cfg.ContainerPrefix
 	if prefix == "" {
 		prefix = "crewship"
 	}
-	return prefix + "-team-" + slug
+	parts := []string{prefix, "team"}
+	if slug != "" {
+		parts = append(parts, slug)
+	}
+	if id != "" {
+		parts = append(parts, id)
+	}
+	return strings.Join(parts, "-")
 }
 
 // EnsureCrewRuntime creates or starts an Apple Container for the given crew.

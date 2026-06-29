@@ -43,7 +43,7 @@ func (m *mockContainer) Exec(context.Context, provider.ExecConfig) (*provider.Ex
 func (m *mockContainer) ExecInspect(context.Context, string) (bool, int, error) {
 	return false, 0, nil
 }
-func (m *mockContainer) CrewContainerName(slug string) string {
+func (m *mockContainer) CrewContainerName(_ string, slug string) string {
 	return "crewship-team-" + slug
 }
 func (m *mockContainer) CopyToContainer(context.Context, string, string, io.Reader) error {

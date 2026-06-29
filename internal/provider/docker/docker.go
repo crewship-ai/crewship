@@ -418,31 +418,56 @@ func (p *Provider) ensureImage(ctx context.Context, ref string) error {
 	return nil
 }
 
-// CrewContainerName returns the container name for a crew based on its slug and the configured prefix.
-func (p *Provider) CrewContainerName(slug string) string {
+// crewResourceName builds a globally-unique, Docker-safe name for a crew's
+// container or named volumes.
+//
+// Audit finding C1 (CRITICAL): a single crewshipd daemon serves many
+// workspaces, but crew slug is unique only per workspace
+// (crews UNIQUE(workspace_id, slug)). Keying container + home/tools volume
+// names on the slug alone made two tenants with an identically-named crew
+// (e.g. "backend") resolve to the SAME container and the SAME persistent
+// home/tools volumes — cross-tenant read of ~/.ssh, /secrets and /workspace,
+// or cross-tenant DoS. The crew id is a globally-unique CUID (the same value
+// used to scope the per-crew bind mounts under OutputBasePath), so folding it
+// into the name disambiguates tenants. The slug is kept as a human-readable
+// segment for operators; the id is the part that guarantees uniqueness.
+//
+// Components are validated upstream (EnsureCrewRuntime runs both id and slug
+// through safepath.ValidateComponent before any name is built), so the result
+// only ever contains DNS/Docker-safe characters. Empty segments are dropped so
+// callers that pass only an id (slug unset) still get a stable name.
+func (p *Provider) crewResourceName(kind, id, slug string) string {
 	prefix := p.cfg.ContainerPrefix
 	if prefix == "" {
 		prefix = "crewship"
 	}
-	return prefix + "-team-" + slug
+	parts := []string{prefix, kind}
+	if slug != "" {
+		parts = append(parts, slug)
+	}
+	if id != "" {
+		parts = append(parts, id)
+	}
+	return strings.Join(parts, "-")
 }
 
-// homeVolumeName returns the Docker named volume name for a crew's persistent home directory.
-func (p *Provider) homeVolumeName(slug string) string {
-	prefix := p.cfg.ContainerPrefix
-	if prefix == "" {
-		prefix = "crewship"
-	}
-	return prefix + "-home-" + slug
+// CrewContainerName returns the container name for a crew. It incorporates the
+// globally-unique crew id (not the per-workspace slug alone) to prevent
+// cross-tenant container collisions — see crewResourceName / audit C1.
+func (p *Provider) CrewContainerName(id, slug string) string {
+	return p.crewResourceName("team", id, slug)
 }
 
-// toolsVolumeName returns the Docker named volume name for a crew's persistent tools directory.
-func (p *Provider) toolsVolumeName(slug string) string {
-	prefix := p.cfg.ContainerPrefix
-	if prefix == "" {
-		prefix = "crewship"
-	}
-	return prefix + "-tools-" + slug
+// homeVolumeName returns the Docker named volume name for a crew's persistent
+// home directory, namespaced by crew id (audit C1).
+func (p *Provider) homeVolumeName(id, slug string) string {
+	return p.crewResourceName("home", id, slug)
+}
+
+// toolsVolumeName returns the Docker named volume name for a crew's persistent
+// tools directory, namespaced by crew id (audit C1).
+func (p *Provider) toolsVolumeName(id, slug string) string {
+	return p.crewResourceName("tools", id, slug)
 }
 
 // buildMounts returns the full list of mounts for a crew container, including
@@ -453,7 +478,7 @@ func (p *Provider) toolsVolumeName(slug string) string {
 // needs them injected from the host. Returns an error if the config is
 // missing either path — the operator should run 'make build:sidecar' or
 // set CREWSHIP_SIDECAR_PATH / CREWSHIP_ENTRYPOINT_PATH.
-func (p *Provider) buildMounts(slug, workspacePath, outputPath, crewPath, secretsPath string) ([]mount.Mount, error) {
+func (p *Provider) buildMounts(id, slug, workspacePath, outputPath, crewPath, secretsPath string) ([]mount.Mount, error) {
 	if p.cfg.SidecarBinaryPath == "" {
 		return nil, fmt.Errorf("docker provider: SidecarBinaryPath is required (run 'make build:sidecar' or set CREWSHIP_SIDECAR_PATH)")
 	}
@@ -468,8 +493,8 @@ func (p *Provider) buildMounts(slug, workspacePath, outputPath, crewPath, secret
 	}
 	if slug != "" {
 		mounts = append(mounts,
-			mount.Mount{Type: mount.TypeVolume, Source: p.homeVolumeName(slug), Target: "/home/agent"},
-			mount.Mount{Type: mount.TypeVolume, Source: p.toolsVolumeName(slug), Target: "/opt/crew-tools"},
+			mount.Mount{Type: mount.TypeVolume, Source: p.homeVolumeName(id, slug), Target: "/home/agent"},
+			mount.Mount{Type: mount.TypeVolume, Source: p.toolsVolumeName(id, slug), Target: "/opt/crew-tools"},
 		)
 	}
 	mounts = append(mounts,
@@ -569,8 +594,10 @@ func (p *Provider) ensureVolume(ctx context.Context, name string) error {
 }
 
 // RemoveCrewVolumes removes persistent named volumes for a crew (home + tools).
-func (p *Provider) RemoveCrewVolumes(ctx context.Context, slug string) error {
-	for _, name := range []string{p.homeVolumeName(slug), p.toolsVolumeName(slug)} {
+// Names are namespaced by the globally-unique crew id (audit C1) so a tenant
+// can only ever target its own volumes.
+func (p *Provider) RemoveCrewVolumes(ctx context.Context, id, slug string) error {
+	for _, name := range []string{p.homeVolumeName(id, slug), p.toolsVolumeName(id, slug)} {
 		if err := p.client.VolumeRemove(ctx, name, true); err != nil {
 			p.logger.Warn("volume remove failed", "volume", name, "error", err)
 		}

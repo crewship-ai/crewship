@@ -51,6 +51,12 @@ const Prefix = "wsv1"
 // context unambiguously delimited from the workspace ID.
 const derivationContext = "crewship internal-token workspace binding v1\x00"
 
+// callerSigContext domain-separates the caller-identity HMAC (SignCaller
+// / VerifyCaller) from the workspace-binding HMAC above so the two can
+// never be confused even though both run over the same key material.
+// The trailing NUL delimits the context from the signed payload.
+const callerSigContext = "crewship internal-token caller-identity v1\x00"
+
 // DeriveWorkspaceToken returns the workspace-bound internal token for
 // workspaceID, derived from the master internal token. Returns ""
 // when either input is empty — an empty master means internal auth is
@@ -106,4 +112,43 @@ func mac(master, workspaceID string) string {
 	m.Write([]byte(derivationContext))
 	m.Write([]byte(workspaceID))
 	return hex.EncodeToString(m.Sum(nil))
+}
+
+// SignCaller returns a hex HMAC that binds an acting user id to a
+// workspace, keyed by the internal token the caller authenticates with
+// (the workspace-bound token a sidecar holds, or the master token for
+// host-side callers). It is the signature the sidecar attaches as
+// X-Caller-Signature alongside the forwarded X-Caller-User-Id so the
+// backend can prove the identity was vouched for by a holder of the
+// token — and not forged by the agent process inside the container,
+// which never sees the token (ID1, PRD §11).
+//
+// Returns "" when any input is empty (an unsigned identity, which
+// VerifyCaller will reject). The workspaceID and callerUserID are
+// length-prefix-free but unambiguously delimited by a NUL byte; the
+// MAC over the domain-separated context makes cross-use forgery
+// infeasible.
+func SignCaller(token, workspaceID, callerUserID string) string {
+	if token == "" || workspaceID == "" || callerUserID == "" {
+		return ""
+	}
+	m := hmac.New(sha256.New, []byte(token))
+	m.Write([]byte(callerSigContext))
+	m.Write([]byte(workspaceID))
+	m.Write([]byte{0})
+	m.Write([]byte(callerUserID))
+	return hex.EncodeToString(m.Sum(nil))
+}
+
+// VerifyCaller reports whether signature is a valid SignCaller output
+// for (token, workspaceID, callerUserID). The comparison is
+// constant-time. It fails closed when any input — including the
+// signature itself — is empty, so a missing X-Caller-Signature never
+// authorizes a caller id.
+func VerifyCaller(token, workspaceID, callerUserID, signature string) bool {
+	expected := SignCaller(token, workspaceID, callerUserID)
+	if expected == "" || signature == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(signature), []byte(expected)) == 1
 }

@@ -17,47 +17,57 @@ import (
 func TestCrewContainerName_Compose(t *testing.T) {
 	t.Parallel()
 
+	// Names fold in the globally-unique crew id (audit C1): the format is
+	// <prefix>-team-<slug>-<id>. The slug is a readable segment; the id is
+	// what keeps names distinct across tenants that share a slug.
 	tests := []struct {
 		name   string
 		prefix string
+		id     string
 		slug   string
 		want   string
 	}{
 		{
 			name:   "default prefix when empty",
 			prefix: "",
+			id:     "ckcrew1",
 			slug:   "engineering",
-			want:   "crewship-team-engineering",
+			want:   "crewship-team-engineering-ckcrew1",
 		},
 		{
 			name:   "explicit default prefix",
 			prefix: "crewship",
+			id:     "ckcrew1",
 			slug:   "engineering",
-			want:   "crewship-team-engineering",
+			want:   "crewship-team-engineering-ckcrew1",
 		},
 		{
 			name:   "multi-instance prefix",
 			prefix: "crewship-2",
+			id:     "ckcrew1",
 			slug:   "engineering",
-			want:   "crewship-2-team-engineering",
+			want:   "crewship-2-team-engineering-ckcrew1",
 		},
 		{
 			name:   "single-letter slug",
 			prefix: "",
+			id:     "ckcrew1",
 			slug:   "x",
-			want:   "crewship-team-x",
+			want:   "crewship-team-x-ckcrew1",
 		},
 		{
 			name:   "slug with hyphens",
 			prefix: "",
+			id:     "ckcrew1",
 			slug:   "engineering-platform",
-			want:   "crewship-team-engineering-platform",
+			want:   "crewship-team-engineering-platform-ckcrew1",
 		},
 		{
-			name:   "empty slug still composes (caller responsibility)",
+			name:   "empty slug still composes from id alone",
 			prefix: "",
+			id:     "ckcrew1",
 			slug:   "",
-			want:   "crewship-team-",
+			want:   "crewship-team-ckcrew1",
 		},
 	}
 
@@ -66,10 +76,10 @@ func TestCrewContainerName_Compose(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			p := &Provider{cfg: Config{ContainerPrefix: tt.prefix}}
-			got := p.CrewContainerName(tt.slug)
+			got := p.CrewContainerName(tt.id, tt.slug)
 			if got != tt.want {
-				t.Errorf("CrewContainerName(prefix=%q, slug=%q) = %q, want %q",
-					tt.prefix, tt.slug, got, tt.want)
+				t.Errorf("CrewContainerName(prefix=%q, id=%q, slug=%q) = %q, want %q",
+					tt.prefix, tt.id, tt.slug, got, tt.want)
 			}
 		})
 	}
@@ -81,6 +91,7 @@ func TestVolumeNames_PrefixAware(t *testing.T) {
 	tests := []struct {
 		name      string
 		prefix    string
+		id        string
 		slug      string
 		wantHome  string
 		wantTools string
@@ -88,23 +99,26 @@ func TestVolumeNames_PrefixAware(t *testing.T) {
 		{
 			name:      "default prefix",
 			prefix:    "",
+			id:        "ckcrew1",
 			slug:      "alpha",
-			wantHome:  "crewship-home-alpha",
-			wantTools: "crewship-tools-alpha",
+			wantHome:  "crewship-home-alpha-ckcrew1",
+			wantTools: "crewship-tools-alpha-ckcrew1",
 		},
 		{
 			name:      "instance 3 prefix",
 			prefix:    "crewship-3",
+			id:        "ckcrew1",
 			slug:      "alpha",
-			wantHome:  "crewship-3-home-alpha",
-			wantTools: "crewship-3-tools-alpha",
+			wantHome:  "crewship-3-home-alpha-ckcrew1",
+			wantTools: "crewship-3-tools-alpha-ckcrew1",
 		},
 		{
 			name:      "custom org prefix",
 			prefix:    "myorg",
+			id:        "ckcrew2",
 			slug:      "rocket",
-			wantHome:  "myorg-home-rocket",
-			wantTools: "myorg-tools-rocket",
+			wantHome:  "myorg-home-rocket-ckcrew2",
+			wantTools: "myorg-tools-rocket-ckcrew2",
 		},
 	}
 
@@ -113,11 +127,11 @@ func TestVolumeNames_PrefixAware(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			p := &Provider{cfg: Config{ContainerPrefix: tt.prefix}}
-			if got := p.homeVolumeName(tt.slug); got != tt.wantHome {
-				t.Errorf("homeVolumeName(%q) = %q, want %q", tt.slug, got, tt.wantHome)
+			if got := p.homeVolumeName(tt.id, tt.slug); got != tt.wantHome {
+				t.Errorf("homeVolumeName(%q, %q) = %q, want %q", tt.id, tt.slug, got, tt.wantHome)
 			}
-			if got := p.toolsVolumeName(tt.slug); got != tt.wantTools {
-				t.Errorf("toolsVolumeName(%q) = %q, want %q", tt.slug, got, tt.wantTools)
+			if got := p.toolsVolumeName(tt.id, tt.slug); got != tt.wantTools {
+				t.Errorf("toolsVolumeName(%q, %q) = %q, want %q", tt.id, tt.slug, got, tt.wantTools)
 			}
 		})
 	}
@@ -135,7 +149,7 @@ func TestBuildMounts_FullLayout(t *testing.T) {
 		ContainerPrefix:   "crewship",
 	}}
 
-	mounts, err := p.buildMounts("eng", "/ws", "/out", "/crew", "/secrets")
+	mounts, err := p.buildMounts("ckcrew1", "eng", "/ws", "/out", "/crew", "/secrets")
 	if err != nil {
 		t.Fatalf("buildMounts: %v", err)
 	}
@@ -149,8 +163,8 @@ func TestBuildMounts_FullLayout(t *testing.T) {
 		"/output":                         {source: "/out", mtype: mount.TypeBind, readOnly: false},
 		"/crew":                           {source: "/crew", mtype: mount.TypeBind, readOnly: false},
 		"/secrets":                        {source: "/secrets", mtype: mount.TypeBind, readOnly: false},
-		"/home/agent":                     {source: "crewship-home-eng", mtype: mount.TypeVolume, readOnly: false},
-		"/opt/crew-tools":                 {source: "crewship-tools-eng", mtype: mount.TypeVolume, readOnly: false},
+		"/home/agent":                     {source: "crewship-home-eng-ckcrew1", mtype: mount.TypeVolume, readOnly: false},
+		"/opt/crew-tools":                 {source: "crewship-tools-eng-ckcrew1", mtype: mount.TypeVolume, readOnly: false},
 		"/usr/local/bin/crewship-sidecar": {source: "/h/sidecar", mtype: mount.TypeBind, readOnly: true},
 		"/usr/local/bin/entrypoint.sh":    {source: "/h/entrypoint.sh", mtype: mount.TypeBind, readOnly: true},
 	}
@@ -192,7 +206,7 @@ func TestBuildMounts_NoSlugSkipsHomeAndToolsVolumes(t *testing.T) {
 		EntrypointPath:    "/h/entrypoint.sh",
 	}}
 
-	mounts, err := p.buildMounts("", "/ws", "/out", "/crew", "/secrets")
+	mounts, err := p.buildMounts("ckcrew1", "", "/ws", "/out", "/crew", "/secrets")
 	if err != nil {
 		t.Fatalf("buildMounts: %v", err)
 	}
@@ -217,14 +231,14 @@ func TestBuildMounts_PrefixAppliedToVolumes(t *testing.T) {
 		ContainerPrefix:   "crewship-7",
 	}}
 
-	mounts, err := p.buildMounts("rocket", "/ws", "/out", "/crew", "/secrets")
+	mounts, err := p.buildMounts("ckcrew1", "rocket", "/ws", "/out", "/crew", "/secrets")
 	if err != nil {
 		t.Fatalf("buildMounts: %v", err)
 	}
 
 	wantSources := map[string]string{
-		"/home/agent":     "crewship-7-home-rocket",
-		"/opt/crew-tools": "crewship-7-tools-rocket",
+		"/home/agent":     "crewship-7-home-rocket-ckcrew1",
+		"/opt/crew-tools": "crewship-7-tools-rocket-ckcrew1",
 	}
 	for _, m := range mounts {
 		if expSrc, ok := wantSources[m.Target]; ok {
@@ -243,7 +257,7 @@ func TestBuildMounts_SidecarAndEntrypointAreReadOnly(t *testing.T) {
 		EntrypointPath:    "/h/entrypoint.sh",
 	}}
 
-	mounts, err := p.buildMounts("rocket", "/ws", "/out", "/crew", "/secrets")
+	mounts, err := p.buildMounts("ckcrew1", "rocket", "/ws", "/out", "/crew", "/secrets")
 	if err != nil {
 		t.Fatalf("buildMounts: %v", err)
 	}
@@ -271,7 +285,7 @@ func TestBuildMounts_MissingSidecarErrorMessage(t *testing.T) {
 	t.Parallel()
 
 	p := &Provider{cfg: Config{EntrypointPath: "/h/entrypoint.sh"}}
-	_, err := p.buildMounts("eng", "/ws", "/out", "/crew", "/secrets")
+	_, err := p.buildMounts("ckcrew1", "eng", "/ws", "/out", "/crew", "/secrets")
 	if err == nil {
 		t.Fatal("expected error when SidecarBinaryPath is empty")
 	}
@@ -287,7 +301,7 @@ func TestBuildMounts_MissingEntrypointErrorMessage(t *testing.T) {
 	t.Parallel()
 
 	p := &Provider{cfg: Config{SidecarBinaryPath: "/h/sidecar"}}
-	_, err := p.buildMounts("eng", "/ws", "/out", "/crew", "/secrets")
+	_, err := p.buildMounts("ckcrew1", "eng", "/ws", "/out", "/crew", "/secrets")
 	if err == nil {
 		t.Fatal("expected error when EntrypointPath is empty")
 	}
@@ -477,13 +491,13 @@ func TestConfig_ZeroValuesAreUsable(t *testing.T) {
 	p := &Provider{cfg: Config{}}
 
 	// Defaults kick in via empty-string fallback inside helpers.
-	if name := p.CrewContainerName("eng"); name != "crewship-team-eng" {
-		t.Errorf("zero-config name = %q, want crewship-team-eng", name)
+	if name := p.CrewContainerName("ck1", "eng"); name != "crewship-team-eng-ck1" {
+		t.Errorf("zero-config name = %q, want crewship-team-eng-ck1", name)
 	}
-	if name := p.homeVolumeName("eng"); name != "crewship-home-eng" {
-		t.Errorf("zero-config home volume = %q, want crewship-home-eng", name)
+	if name := p.homeVolumeName("ck1", "eng"); name != "crewship-home-eng-ck1" {
+		t.Errorf("zero-config home volume = %q, want crewship-home-eng-ck1", name)
 	}
-	if name := p.toolsVolumeName("eng"); name != "crewship-tools-eng" {
-		t.Errorf("zero-config tools volume = %q, want crewship-tools-eng", name)
+	if name := p.toolsVolumeName("ck1", "eng"); name != "crewship-tools-eng-ck1" {
+		t.Errorf("zero-config tools volume = %q, want crewship-tools-eng-ck1", name)
 	}
 }

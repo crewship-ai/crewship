@@ -26,8 +26,8 @@ import (
 // container by slug. Returns ("", false, nil) when none is found. Used
 // by Server.Start to re-register containers that survived a crewshipd
 // restart with the stats collector.
-func (p *Provider) FindCrewContainer(ctx context.Context, slug string) (string, bool, error) {
-	containerName := p.CrewContainerName(slug)
+func (p *Provider) FindCrewContainer(ctx context.Context, id, slug string) (string, bool, error) {
+	containerName := p.CrewContainerName(id, slug)
 	containers, err := p.client.ContainerList(ctx, container.ListOptions{All: true})
 	if err != nil {
 		return "", false, fmt.Errorf("list containers: %w", err)
@@ -79,7 +79,7 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 		}
 	}
 
-	containerName := p.CrewContainerName(team.Slug)
+	containerName := p.CrewContainerName(team.ID, team.Slug)
 
 	// Compute the image we WANT to run, mirroring the
 	// CachedImage > Image > default chain used at create time
@@ -264,10 +264,10 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 
 	// Ensure persistent named volumes for home directory and crew tools.
 	if team.Slug != "" {
-		if err := p.ensureVolume(ctx, p.homeVolumeName(team.Slug)); err != nil {
+		if err := p.ensureVolume(ctx, p.homeVolumeName(team.ID, team.Slug)); err != nil {
 			return "", err
 		}
-		if err := p.ensureVolume(ctx, p.toolsVolumeName(team.Slug)); err != nil {
+		if err := p.ensureVolume(ctx, p.toolsVolumeName(team.ID, team.Slug)); err != nil {
 			return "", err
 		}
 	}
@@ -381,7 +381,7 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	// buildMounts below (it errors out otherwise).
 	containerCfg.Entrypoint = []string{"/usr/local/bin/entrypoint.sh"}
 	containerCfg.Cmd = nil
-	crewMounts, err := p.buildMounts(team.Slug, workspacePath, outputPath, crewPath, secretsPath)
+	crewMounts, err := p.buildMounts(team.ID, team.Slug, workspacePath, outputPath, crewPath, secretsPath)
 	if err != nil {
 		return "", err
 	}

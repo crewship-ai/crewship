@@ -33,6 +33,10 @@ func completeAgentSlug(cmd *cobra.Command, args []string, toComplete string) ([]
 	workspace := cli.ResolveWorkspace(flagWorkspace, cfg)
 
 	c := cli.NewClient(server, cfg.Token, workspace)
+	// Bind the token to the configured server host so completion never leaks
+	// it to a mismatched --server/CREWSHIP_SERVER target (issue #571 / CLI2).
+	c.TokenHost = serverHost(cfg.Server)
+	c.AllowHostMismatch = flagAllowServerMismatch || envAllowServerMismatch()
 	resp, err := c.Get("/api/v1/agents")
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp

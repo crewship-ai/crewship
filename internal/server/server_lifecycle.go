@@ -677,7 +677,7 @@ func (s *Server) rehydrateContainers(ctx context.Context) {
 
 	registered := 0
 	for _, c := range crews {
-		containerID, running, err := lookup.FindCrewContainer(ctx, c.slug)
+		containerID, running, err := lookup.FindCrewContainer(ctx, c.id, c.slug)
 		if err != nil {
 			s.logger.Debug("rehydrate: find container failed", "crew_slug", c.slug, "err", err)
 			continue

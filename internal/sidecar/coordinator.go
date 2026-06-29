@@ -18,6 +18,8 @@ import (
 	"io"
 	"net/http"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
 )
 
 // maxProxyBodyBytes caps every body the sidecar will buffer when
@@ -275,15 +277,25 @@ func (s *Server) proxyToAPIFiltered(
 	//     to the sidecar, and the agent process can't intercept that
 	//     in-flight (different namespace).
 	//
-	// What remains untrusted: the agent inside the container can mint
-	// its own X-Caller-User-Id and forge a slash action AS IF a real
-	// user had clicked it. Future hardening should sign the header with
-	// an HMAC keyed by a secret only the chat-bridge / CLI repl knows
-	// (the same key shape as the IPC token); the backend would then
-	// reject any X-Caller-User-Id without a valid signature. Tracked in
-	// PRD §11 Out-of-scope.
+	// ID1 HARDENING (PRD §11, formerly out-of-scope, now implemented):
+	// the X-Caller-User-Id header is attacker-influenceable — the agent
+	// process can construct a request to this sidecar over loopback and
+	// set any user id it likes. To stop the backend from trusting a
+	// forged identity for privileged credential mutation we attach an
+	// HMAC signature keyed by the workspace-bound internal token
+	// (s.ipc.Token). That token lives only in the sidecar process
+	// (UID 1002); the agent (UID 1001) never holds it, so the agent
+	// cannot produce a valid signature itself. The backend re-derives
+	// the MAC from the same token (validated by the internal-auth
+	// middleware) and constant-time-compares before honouring the
+	// header — see internal/api/internal_credentials_mutate.go. The
+	// signature binds the caller id to THIS sidecar's workspace, so a
+	// captured signature can't be replayed against another tenant.
 	if callerID := r.Header.Get("X-Caller-User-Id"); callerID != "" {
 		req.Header.Set("X-Caller-User-Id", callerID)
+		if sig := internaltoken.SignCaller(s.ipc.Token, s.ipc.WorkspaceID, callerID); sig != "" {
+			req.Header.Set("X-Caller-Signature", sig)
+		}
 	}
 	if callerSrc := r.Header.Get("X-Caller-Source"); callerSrc != "" {
 		req.Header.Set("X-Caller-Source", callerSrc)

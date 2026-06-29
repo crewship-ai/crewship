@@ -213,7 +213,7 @@ func TestEnsureCrewRuntime_RecreatesOnImageDrift(t *testing.T) {
 	const oldImg = "crewship-cache:OLD-sha"
 	const newImg = "crewship-cache:NEW-sha"
 
-	p, calls := newDriftFixture(t, "crewship-team-"+slug, oldImg)
+	p, calls := newDriftFixture(t, "crewship-team-"+slug+"-crew-id-1", oldImg)
 
 	_, err := p.EnsureCrewRuntime(context.Background(), provider.CrewConfig{
 		ID:          "crew-id-1",
@@ -274,7 +274,7 @@ func TestEnsureCrewRuntime_NoRecreateOnSameImage(t *testing.T) {
 	const slug = "eng"
 	const img = "crewship-cache:SAME-sha"
 
-	p, calls := newDriftFixture(t, "crewship-team-"+slug, img)
+	p, calls := newDriftFixture(t, "crewship-team-"+slug+"-crew-id-1", img)
 
 	id, err := p.EnsureCrewRuntime(context.Background(), provider.CrewConfig{
 		ID:          "crew-id-1",
@@ -310,7 +310,7 @@ func TestEnsureCrewRuntime_NoRecreateWhenCallerOmitsImage(t *testing.T) {
 	const slug = "eng"
 	const runningImg = "crewship-cache:PROVISIONED-sha" // != cfg.RuntimeImage default
 
-	p, calls := newDriftFixture(t, "crewship-team-"+slug, runningImg)
+	p, calls := newDriftFixture(t, "crewship-team-"+slug+"-crew-id-1", runningImg)
 
 	id, err := p.EnsureCrewRuntime(context.Background(), provider.CrewConfig{
 		ID:   "crew-id-1",

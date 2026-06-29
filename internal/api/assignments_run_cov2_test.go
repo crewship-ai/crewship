@@ -54,7 +54,7 @@ func (covAsg2Provider) Exec(context.Context, provider.ExecConfig) (*provider.Exe
 func (covAsg2Provider) ExecInspect(context.Context, string) (bool, int, error) {
 	return false, 0, nil
 }
-func (covAsg2Provider) CrewContainerName(slug string) string { return "crew-" + slug }
+func (covAsg2Provider) CrewContainerName(_ string, slug string) string { return "crew-" + slug }
 func (covAsg2Provider) CopyToContainer(context.Context, string, string, io.Reader) error {
 	return nil
 }

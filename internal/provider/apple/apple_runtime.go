@@ -32,7 +32,7 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 		}
 	}
 
-	containerName := p.CrewContainerName(team.Slug)
+	containerName := p.CrewContainerName(team.ID, team.Slug)
 
 	// Check if container already exists
 	existing, err := p.findContainer(ctx, containerName)
@@ -183,13 +183,16 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	return containerID, nil
 }
 
-func (p *Provider) RemoveCrewVolumes(_ context.Context, slug string) error {
-	if _, err := safepath.ValidateComponent(slug); err != nil {
-		return fmt.Errorf("crew slug not safe for path: %w", err)
+func (p *Provider) RemoveCrewVolumes(_ context.Context, id, slug string) error {
+	// Namespace the per-crew home directory by the globally-unique crew id
+	// (audit C1) rather than the per-workspace slug, so one tenant can never
+	// target another's home path on a shared host.
+	if _, err := safepath.ValidateComponent(id); err != nil {
+		return fmt.Errorf("crew id not safe for path: %w", err)
 	}
-	homePath := filepath.Join(p.cfg.OutputBasePath, "homes", slug)
+	homePath := filepath.Join(p.cfg.OutputBasePath, "homes", id)
 	if err := os.RemoveAll(homePath); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("remove crew home %s: %w", slug, err)
+		return fmt.Errorf("remove crew home %s: %w", id, err)
 	}
 	return nil
 }

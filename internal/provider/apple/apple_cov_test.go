@@ -102,8 +102,8 @@ exit 0`)
 	if p.HostAddress() == "" {
 		t.Error("expected non-empty HostAddress")
 	}
-	if got := p.CrewContainerName("eng"); got != "crewship-team-eng" {
-		t.Errorf("CrewContainerName = %q, want crewship-team-eng", got)
+	if got := p.CrewContainerName("ck1", "eng"); got != "crewship-team-eng-ck1" {
+		t.Errorf("CrewContainerName = %q, want crewship-team-eng-ck1", got)
 	}
 	if !fake.hasCall(t, "network create mynet") {
 		t.Errorf("expected 'network create mynet' call, got %v", fake.calls(t))
@@ -123,12 +123,12 @@ func TestNewDetectFails(t *testing.T) {
 
 func TestCrewContainerNameCustomPrefix(t *testing.T) {
 	p := newTestProvider(Config{ContainerPrefix: "acme"})
-	if got := p.CrewContainerName("eng"); got != "acme-team-eng" {
-		t.Errorf("CrewContainerName = %q, want acme-team-eng", got)
+	if got := p.CrewContainerName("ck1", "eng"); got != "acme-team-eng-ck1" {
+		t.Errorf("CrewContainerName = %q, want acme-team-eng-ck1", got)
 	}
 	p2 := newTestProvider(Config{})
-	if got := p2.CrewContainerName("ops"); got != "crewship-team-ops" {
-		t.Errorf("CrewContainerName default prefix = %q, want crewship-team-ops", got)
+	if got := p2.CrewContainerName("ck2", "ops"); got != "crewship-team-ops-ck2" {
+		t.Errorf("CrewContainerName default prefix = %q, want crewship-team-ops-ck2", got)
 	}
 }
 

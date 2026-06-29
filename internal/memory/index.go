@@ -2,6 +2,8 @@ package memory
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
@@ -90,6 +92,12 @@ func (e *Engine) ReindexContext(ctx context.Context) error {
 	}
 	defer stmt.Close()
 
+	// Rebuild the per-file content-hash map from scratch so the incremental
+	// fast path (ReindexPath) is consistent with the just-rebuilt index. We
+	// stage it in a local and only swap it in on a successful commit, so a
+	// rolled-back reindex leaves the previous map intact.
+	hashes := make(map[string]string)
+
 	for _, fpath := range files {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -115,6 +123,7 @@ func (e *Engine) ReindexContext(ctx context.Context) error {
 				return fmt.Errorf("insert chunk %s: %w", relPath, err)
 			}
 		}
+		hashes[relPath] = hashContent(data)
 	}
 
 	// Update metadata
@@ -126,7 +135,118 @@ func (e *Engine) ReindexContext(ctx context.Context) error {
 		return fmt.Errorf("update meta: %w", err)
 	}
 
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	e.fileHashes = hashes
+	return nil
+}
+
+// ReindexPath incrementally re-indexes a SINGLE memory file, identified by its
+// path relative to the engine base (e.g. "AGENT.md" or "daily/2026-06-29.md").
+// Only that file's chunks are touched: its existing rows are DELETEd and the
+// freshly-chunked content re-INSERTed in one transaction, leaving every other
+// file's chunks intact. This is the per-write fast path — its cost is
+// O(size of the changed file), NOT O(corpus) like ReindexContext. It is the
+// fix for finding P2 (full-corpus reindex on every memory write).
+//
+// Behaviour:
+//   - Unchanged content (hash matches the last index of this file) is a no-op
+//     and returns 0 — a redundant write/watcher tick does zero index work.
+//   - A vanished or unreadable file (deleted, or swapped for a symlink and
+//     rejected by the O_NOFOLLOW open) has its chunks removed and returns 0,
+//     nil: an absent file is correctly absent from the index.
+//   - Otherwise the file's chunks are replaced and the number of chunks
+//     (re)inserted is returned.
+//
+// FTS correctness is preserved: the (file, content) rows written here are
+// identical in shape to those ReindexContext writes, so Search() behaves the
+// same whether a file was indexed incrementally or by a full rebuild.
+func (e *Engine) ReindexPath(ctx context.Context, relPath string) (int, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+
+	// Resolve the file key exactly as ReindexContext does (filepath.Rel of the
+	// cleaned join) so the DELETE here matches the `file` column a prior full
+	// reindex would have written. Reject anything that escapes the base.
+	clean := filepath.Clean(relPath)
+	if clean == "." || clean == "" || filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return 0, fmt.Errorf("reindex path: illegal relative path %q", relPath)
+	}
+	fpath := filepath.Join(e.basePath, clean)
+	fileKey, err := filepath.Rel(e.basePath, fpath)
+	if err != nil {
+		fileKey = filepath.Base(fpath)
+	}
+
+	data, readErr := readRegularNoFollow(fpath)
+	if readErr != nil {
+		// File is gone / unreadable / a symlink we refuse to follow. Drop any
+		// chunks it had and forget its hash so a later recreate re-indexes it.
+		if _, err := e.db.ExecContext(ctx, "DELETE FROM memory_chunks WHERE file = ?", fileKey); err != nil {
+			return 0, fmt.Errorf("delete chunks for %s: %w", fileKey, err)
+		}
+		delete(e.fileHashes, fileKey)
+		return 0, nil
+	}
+
+	h := hashContent(data)
+	if prev, ok := e.fileHashes[fileKey]; ok && prev == h {
+		// Content unchanged since we last indexed this file — nothing to do.
+		return 0, nil
+	}
+
+	chunks := ChunkMarkdown(fileKey, string(data))
+
+	tx, err := e.db.Begin()
+	if err != nil {
+		return 0, fmt.Errorf("begin incremental reindex tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Replace just this file's chunks. The DELETE+INSERT runs inside one
+	// transaction so a concurrent Search never observes the file with zero
+	// chunks mid-update (WAL snapshot isolation), matching ReindexContext.
+	if _, err := tx.Exec("DELETE FROM memory_chunks WHERE file = ?", fileKey); err != nil {
+		return 0, fmt.Errorf("delete chunks for %s: %w", fileKey, err)
+	}
+
+	stmt, err := tx.Prepare("INSERT INTO memory_chunks (file, content) VALUES (?, ?)")
+	if err != nil {
+		return 0, fmt.Errorf("prepare insert: %w", err)
+	}
+	defer stmt.Close()
+
+	for _, chunk := range chunks {
+		if _, err := stmt.Exec(chunk.File, chunk.Content); err != nil {
+			return 0, fmt.Errorf("insert chunk %s: %w", fileKey, err)
+		}
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	if _, err := tx.Exec(`
+		INSERT OR REPLACE INTO memory_meta (key, value)
+		VALUES ('last_indexed', ?)
+	`, now); err != nil {
+		return 0, fmt.Errorf("update meta: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	e.fileHashes[fileKey] = h
+	return len(chunks), nil
+}
+
+// hashContent returns a hex-encoded SHA-256 of file content, used to detect
+// whether a file changed since its last index pass.
+func hashContent(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
 }
 
 // readRegularNoFollow opens path safely for indexing:

@@ -224,7 +224,7 @@ func TestCreateBackup_ContainerProbe(t *testing.T) {
 			Actor:             covAdminActor(),
 			NoEncrypt:         true,
 			DockerOps:         ops,
-			CrewContainerName: func(slug string) string { return "ctr-" + slug },
+			CrewContainerName: func(_, slug string) string { return "ctr-" + slug },
 		})
 		if err == nil || !strings.Contains(err.Error(), "probe container") {
 			t.Fatalf("err = %v", err)
@@ -241,7 +241,7 @@ func TestCreateBackup_ContainerProbe(t *testing.T) {
 			Actor:             covAdminActor(),
 			NoEncrypt:         true,
 			DockerOps:         ops,
-			CrewContainerName: func(slug string) string { return "ctr-" + slug },
+			CrewContainerName: func(_, slug string) string { return "ctr-" + slug },
 		})
 		if err != nil {
 			t.Fatalf("CreateBackup: %v", err)
@@ -262,7 +262,7 @@ func TestCreateBackup_ContainerProbe(t *testing.T) {
 			Actor:             covAdminActor(),
 			NoEncrypt:         true,
 			DockerOps:         ops,
-			CrewContainerName: func(slug string) string { return "ctr-" + slug },
+			CrewContainerName: func(_, slug string) string { return "ctr-" + slug },
 		})
 		if err != nil {
 			t.Fatalf("CreateBackup: %v", err)
@@ -464,7 +464,7 @@ func TestCreateBackup_CollectError(t *testing.T) {
 		Actor:             covAdminActor(),
 		NoEncrypt:         true,
 		DockerOps:         ops,
-		CrewContainerName: func(slug string) string { return "ctr-" + slug },
+		CrewContainerName: func(_, slug string) string { return "ctr-" + slug },
 	})
 	if err == nil || !strings.Contains(err.Error(), "stream torn mid-tar") {
 		t.Fatalf("err = %v", err)

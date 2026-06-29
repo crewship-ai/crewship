@@ -53,8 +53,17 @@ func PreRunInstallPackages(
 		return nil
 	}
 
-	// Sanitize package names: only allow alphanumeric, dash, dot, plus
+	// Sanitize package names: only allow alphanumeric, dash, dot, plus.
+	// F9 (2026-06 audit): additionally reject empty tokens and any token
+	// beginning with '-'. apt treats a leading-dash argument as a FLAG, not a
+	// package — so "--reinstall" / "-y" would otherwise pass the per-char
+	// check and be spliced straight into `apt-get install … <pkg>`, letting a
+	// caller alter apt's behaviour. Internal dashes (e.g. "ca-certificates")
+	// remain valid; only a leading dash is a flag.
 	for _, pkg := range packages {
+		if pkg == "" || pkg[0] == '-' {
+			return fmt.Errorf("invalid package name: %q", pkg)
+		}
 		for _, c := range pkg {
 			if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '.' || c == '+') {
 				return fmt.Errorf("invalid package name: %q", pkg)

@@ -7,14 +7,14 @@ func TestIsAllowedMountSource(t *testing.T) {
 		source string
 		want   bool
 	}{
-		{"/var/run/docker.sock", true},
+		{"/var/run/docker.sock", false}, // F3: socket no longer allowed (container escape)
 		{"/tmp", true},
 		{"/", false},
 		{"/etc/shadow", false},
 		{"/etc/passwd", false},
 		{"/root/.ssh/id_rsa", false},
-		{"my-volume", true},                    // named volume, no leading /
-		{"/var/lib/docker/overlay2/foo", true}, // prefix match
+		{"my-volume", true},                     // named volume, no leading /
+		{"/var/lib/docker/overlay2/foo", false}, // F3: daemon storage no longer allowed
 		{"", false},
 	}
 	for _, tt := range tests {

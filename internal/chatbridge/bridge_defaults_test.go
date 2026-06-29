@@ -154,7 +154,7 @@ func (c *capturingContainer) ExecInspect(_ context.Context, _ string) (bool, int
 func (c *capturingContainer) ContainerStats(_ context.Context, _ string) (*provider.ContainerMetrics, error) {
 	return nil, errors.New("stats stub")
 }
-func (c *capturingContainer) CrewContainerName(slug string) string {
+func (c *capturingContainer) CrewContainerName(_ string, slug string) string {
 	return "crewship-team-" + slug
 }
 func (c *capturingContainer) CopyToContainer(_ context.Context, _ string, _ string, _ io.Reader) error {

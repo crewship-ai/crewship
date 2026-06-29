@@ -471,27 +471,12 @@ func lookupChatAgentID(client *cli.Client, chatID string) (string, error) {
 // the JSON-encoding client.Post path. Picks up auth + workspace_id the
 // same way cli.Client.Do does.
 func postMultipart(ctx context.Context, client *cli.Client, path, contentType string, body io.Reader) (*http.Response, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	u, err := url.Parse(client.BaseURL + path)
+	// Build through client.NewRequest so workspace injection AND the issue
+	// #571 token-host guard run here too — setting the bearer by hand would
+	// bypass that guard and leak the token to a mismatched server host (CLI1).
+	req, err := client.NewRequest(ctx, http.MethodPost, path, body)
 	if err != nil {
-		return nil, fmt.Errorf("parse url: %w", err)
-	}
-	wsID := client.GetWorkspaceID()
-	if wsID != "" {
-		q := u.Query()
-		if q.Get("workspace_id") == "" {
-			q.Set("workspace_id", wsID)
-			u.RawQuery = q.Encode()
-		}
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), body)
-	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
-	}
-	if client.Token != "" {
-		req.Header.Set("Authorization", "Bearer "+client.Token)
+		return nil, err
 	}
 	req.Header.Set("Content-Type", contentType)
 	return client.HTTPClient.Do(req)

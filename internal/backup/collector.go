@@ -172,7 +172,7 @@ func isNotFoundErr(err error) bool {
 // crewContainerName is the Docker provider's naming function (typically
 // `crewship-team-<slug>`). We pass it as a callback so this package does
 // not depend on internal/provider/docker.
-func LoadWorkspaceTarget(ctx context.Context, db *sql.DB, workspaceID string, crewContainerName func(slug string) string) (*WorkspaceTarget, error) {
+func LoadWorkspaceTarget(ctx context.Context, db *sql.DB, workspaceID string, crewContainerName func(id, slug string) string) (*WorkspaceTarget, error) {
 	var wt WorkspaceTarget
 	if err := db.QueryRowContext(ctx,
 		`SELECT id, slug, name FROM workspaces WHERE id = ?`,
@@ -204,7 +204,7 @@ func LoadWorkspaceTarget(ctx context.Context, db *sql.DB, workspaceID string, cr
 			return nil, err
 		}
 		if crewContainerName != nil {
-			c.ContainerID = crewContainerName(c.Slug)
+			c.ContainerID = crewContainerName(c.ID, c.Slug)
 		}
 		// Best-effort agent count; a missing table is not fatal.
 		_ = db.QueryRowContext(ctx,
@@ -219,7 +219,7 @@ func LoadWorkspaceTarget(ctx context.Context, db *sql.DB, workspaceID string, cr
 }
 
 // LoadCrewTarget resolves a single crew for --scope=crew backup.
-func LoadCrewTarget(ctx context.Context, db *sql.DB, crewID string, crewContainerName func(slug string) string) (*WorkspaceTarget, error) {
+func LoadCrewTarget(ctx context.Context, db *sql.DB, crewID string, crewContainerName func(id, slug string) string) (*WorkspaceTarget, error) {
 	var crew CrewTarget
 	var workspaceID string
 	if err := db.QueryRowContext(ctx, `
@@ -238,7 +238,7 @@ func LoadCrewTarget(ctx context.Context, db *sql.DB, crewID string, crewContaine
 		return nil, fmt.Errorf("backup: load crew %s: %w", crewID, err)
 	}
 	if crewContainerName != nil {
-		crew.ContainerID = crewContainerName(crew.Slug)
+		crew.ContainerID = crewContainerName(crew.ID, crew.Slug)
 	}
 	_ = db.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM agents WHERE crew_id = ?`, crew.ID,

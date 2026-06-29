@@ -99,7 +99,9 @@ func TestPutBytes(t *testing.T) {
 	t.Run("unparseable URL errors", func(t *testing.T) {
 		client := cli.NewClient("http://[::1]:bad", "t", covWSCli7)
 		err := putBytes(context.Background(), client, "/x", strings.NewReader("x"))
-		if err == nil || !strings.Contains(err.Error(), "parse url") {
+		// putBytes now builds the request via client.NewRequest, whose URL-parse
+		// failure is reported as "parse URL: …".
+		if err == nil || !strings.Contains(err.Error(), "parse URL") {
 			t.Fatalf("got %v", err)
 		}
 	})

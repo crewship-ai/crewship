@@ -41,7 +41,8 @@ func TestCredentialAdapter_Create_PassesCapabilityGate(t *testing.T) {
 	a := NewCredentialInternalAdapter(h)
 	r := httptest.NewRequest(http.MethodPost,
 		"/?workspace_id="+wsID, strings.NewReader(`{}`)) // empty body
-	r.Header.Set("X-Caller-User-Id", ownerID)
+	// ID1: caller id must be HMAC-signed by the workspace token holder.
+	stampSignedCaller(r, forgedTestMaster, wsID, ownerID)
 	w := httptest.NewRecorder()
 	a.Create(w, r)
 
@@ -81,7 +82,7 @@ func TestCredentialAdapter_Rotate_PassesCapabilityGate(t *testing.T) {
 	a := NewCredentialInternalAdapter(h)
 	r := httptest.NewRequest(http.MethodPost,
 		"/?workspace_id="+wsID, strings.NewReader(`{}`))
-	r.Header.Set("X-Caller-User-Id", ownerID)
+	stampSignedCaller(r, forgedTestMaster, wsID, ownerID)
 	r.SetPathValue("credentialId", "nonexistent")
 	w := httptest.NewRecorder()
 	a.Rotate(w, r)

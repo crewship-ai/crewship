@@ -101,7 +101,7 @@ func (m *secWebhook2Container) Exec(_ context.Context, _ provider.ExecConfig) (*
 func (m *secWebhook2Container) ExecInspect(_ context.Context, _ string) (bool, int, error) {
 	return false, 0, nil
 }
-func (m *secWebhook2Container) CrewContainerName(slug string) string { return "crew-" + slug }
+func (m *secWebhook2Container) CrewContainerName(_ string, slug string) string { return "crew-" + slug }
 func (m *secWebhook2Container) CopyToContainer(_ context.Context, _, _ string, _ io.Reader) error {
 	return nil
 }

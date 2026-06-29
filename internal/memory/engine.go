@@ -44,6 +44,17 @@ type Engine struct {
 	db       *sql.DB
 	mu       sync.RWMutex
 	config   Config
+
+	// fileHashes tracks the last-indexed content hash per file (keyed by the
+	// file's path relative to basePath, exactly as stored in the memory_chunks
+	// `file` column). It powers the incremental reindex fast path (ReindexPath):
+	// a write whose content matches the recorded hash is a no-op, and a changed
+	// file only ever re-chunks itself — never the whole corpus. ReindexContext
+	// rebuilds this map wholesale. Guarded by e.mu. It is intentionally in
+	// memory only: on process restart the sidecar runs a full Reindex at boot,
+	// which reseeds it, so a cold map just means the first per-file write does
+	// the (still O(file), not O(corpus)) re-chunk it would have done anyway.
+	fileHashes map[string]string
 }
 
 // New creates a memory engine for the given base path (e.g. /output/{agent}/.memory/).
@@ -68,9 +79,10 @@ func New(basePath string, cfg Config) (*Engine, error) {
 	}
 
 	return &Engine{
-		basePath: basePath,
-		db:       db,
-		config:   cfg,
+		basePath:   basePath,
+		db:         db,
+		config:     cfg,
+		fileHashes: make(map[string]string),
 	}, nil
 }
 

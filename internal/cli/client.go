@@ -98,6 +98,49 @@ func (c *Client) WithContext(ctx context.Context) *Client {
 	return &clone
 }
 
+// NewRequest builds an *http.Request targeting path (relative to BaseURL),
+// injects the workspace_id query parameter the same way Do does, and applies
+// the bearer token via applyAuth — so the issue #571 token-host guard runs for
+// EVERY request, including the streaming / multipart / raw-byte paths that
+// build their own requests instead of going through Do. body may be nil; the
+// caller is responsible for setting Content-Type (Do sets application/json for
+// its JSON bodies).
+//
+// On a host mismatch applyAuth returns a *ServerMismatchError and NewRequest
+// returns it (with no request), so the credential is never written to a request
+// bound for the wrong host. A nil ctx falls back to context.Background().
+func (c *Client) NewRequest(ctx context.Context, method, path string, body io.Reader) (*http.Request, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	u, err := url.Parse(c.BaseURL + path)
+	if err != nil {
+		return nil, fmt.Errorf("parse URL: %w", err)
+	}
+
+	// Inject workspace_id if set and not already in query. Resolve the slug
+	// using ctx (so any preflight lookup honours its cancellation) while still
+	// caching the result on c — using a WithContext clone here would discard
+	// that cache and re-resolve on every request.
+	if wsID := c.getWorkspaceID(ctx); wsID != "" {
+		q := u.Query()
+		if q.Get("workspace_id") == "" {
+			q.Set("workspace_id", wsID)
+			u.RawQuery = q.Encode()
+		}
+	}
+
+	req, err := http.NewRequestWithContext(ctx, method, u.String(), body)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	if err := c.applyAuth(req); err != nil {
+		return nil, err
+	}
+	return req, nil
+}
+
 // Do sends an HTTP request with the configured auth token and workspace ID.
 func (c *Client) Do(method, path string, body interface{}) (*http.Response, error) {
 	var bodyReader io.Reader
@@ -118,35 +161,12 @@ func (c *Client) Do(method, path string, body interface{}) (*http.Response, erro
 		}
 	}
 
-	u, err := url.Parse(c.BaseURL + path)
+	req, err := c.NewRequest(c.ctx, method, path, bodyReader)
 	if err != nil {
-		return nil, fmt.Errorf("parse URL: %w", err)
+		return nil, err
 	}
-
-	// Inject workspace_id if set and not already in query
-	wsID := c.GetWorkspaceID()
-	if wsID != "" {
-		q := u.Query()
-		if q.Get("workspace_id") == "" {
-			q.Set("workspace_id", wsID)
-			u.RawQuery = q.Encode()
-		}
-	}
-
-	ctx := c.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	req, err := http.NewRequestWithContext(ctx, method, u.String(), bodyReader)
-	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
-	}
-
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
-	}
-	if err := c.applyAuth(req); err != nil {
-		return nil, err
 	}
 
 	resp, err := c.HTTPClient.Do(req)
@@ -197,6 +217,13 @@ func (c *Client) applyAuth(req *http.Request) error {
 // GetWorkspaceID returns the resolved workspace ID (CUID).
 // If WorkspaceID looks like a slug (not a CUID), it resolves it.
 func (c *Client) GetWorkspaceID() string {
+	return c.getWorkspaceID(c.ctx)
+}
+
+// getWorkspaceID is GetWorkspaceID with an explicit context for the slug-
+// resolution preflight, so callers (e.g. NewRequest / StreamSSE) can bind it to
+// their own cancellation while the resolved CUID is still cached on c.
+func (c *Client) getWorkspaceID(ctx context.Context) string {
 	if c.WorkspaceID == "" {
 		return ""
 	}
@@ -209,7 +236,7 @@ func (c *Client) GetWorkspaceID() string {
 		return c.WorkspaceID
 	}
 	// Resolve slug to ID by calling workspaces list (without workspace_id param)
-	id, err := c.resolveWorkspaceSlug(c.ctx, c.WorkspaceID)
+	id, err := c.resolveWorkspaceSlug(ctx, c.WorkspaceID)
 	if err != nil {
 		// Fall back to using the slug directly
 		return c.WorkspaceID

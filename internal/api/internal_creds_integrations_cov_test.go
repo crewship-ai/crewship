@@ -477,7 +477,7 @@ func TestCovICICredAdapterCreate_Happy(t *testing.T) {
 	body := `{"name":"Adapter Key","value":"sk-adapter","type":"API_KEY","provider":"ANTHROPIC"}`
 	req := httptest.NewRequest("POST", "/api/v1/internal/credentials?workspace_id="+wsID,
 		strings.NewReader(body))
-	req.Header.Set("X-Caller-User-Id", userID)
+	stampSignedCaller(req, forgedTestMaster, wsID, userID)
 	rr := httptest.NewRecorder()
 	adapter.Create(rr, req)
 
@@ -502,10 +502,10 @@ func TestCovICICredAdapterCreate_ValidationMissingName(t *testing.T) {
 	wsID := seedTestWorkspace(t, db, userID)
 	adapter := covICINewCredAdapter(db)
 
-	// Passes envelope + capability, fails inner Create validation (no name).
+	// Passes envelope (signed) + capability, fails inner Create validation (no name).
 	req := httptest.NewRequest("POST", "/api/v1/internal/credentials?workspace_id="+wsID,
 		strings.NewReader(`{"value":"sk-x"}`))
-	req.Header.Set("X-Caller-User-Id", userID)
+	stampSignedCaller(req, forgedTestMaster, wsID, userID)
 	rr := httptest.NewRecorder()
 	adapter.Create(rr, req)
 

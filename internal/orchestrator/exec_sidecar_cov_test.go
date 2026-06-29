@@ -68,7 +68,9 @@ func (c *covContainer) ExecInspect(_ context.Context, execID string) (bool, int,
 func (c *covContainer) ContainerStats(_ context.Context, _ string) (*provider.ContainerMetrics, error) {
 	return nil, nil
 }
-func (c *covContainer) CrewContainerName(slug string) string { return "crewship-team-" + slug }
+func (c *covContainer) CrewContainerName(_ string, slug string) string {
+	return "crewship-team-" + slug
+}
 func (c *covContainer) CopyToContainer(_ context.Context, _ string, _ string, _ io.Reader) error {
 	return nil
 }

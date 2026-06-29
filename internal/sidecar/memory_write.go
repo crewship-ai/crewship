@@ -148,18 +148,12 @@ func (s *Server) handleMemoryWrite(w http.ResponseWriter, r *http.Request) {
 	// through (foo/AGENT.md basenamed to AGENT.md and inherited its
 	// cap). For daily/*, require exactly one slash so a path like
 	// "daily/x/y.md" is also refused.
-	rel := filepath.ToSlash(filepath.Clean(req.File))
-	cap, known := memoryWriteCaps[rel]
+	cap, known := memoryFileCap(req.File)
 	if !known {
-		// daily/<name>.md — single segment only.
-		if rest, ok := strings.CutPrefix(rel, "daily/"); ok && rest != "" && !strings.Contains(rest, "/") {
-			cap = dailyCap
-		} else {
-			writeJSONResponse(w, http.StatusBadRequest, map[string]string{
-				"error": "unsupported file path; allowed: AGENT.md, CREW.md, pins.md, daily/<name>.md",
-			})
-			return
-		}
+		writeJSONResponse(w, http.StatusBadRequest, map[string]string{
+			"error": "unsupported file path; allowed: AGENT.md, CREW.md, pins.md, daily/<name>.md",
+		})
+		return
 	}
 
 	cfg := memory.WriteConfig{
@@ -217,9 +211,12 @@ func (s *Server) handleMemoryWrite(w http.ResponseWriter, r *http.Request) {
 		defer cancel()
 
 		// Reindex on next watcher tick is the normal path; trigger an
-		// immediate reindex too so search hits the new content without
-		// debounce lag — the writer is the in-process consumer here.
-		if err := engine.ReindexContext(ctx); err != nil {
+		// immediate INCREMENTAL reindex too so search hits the new content
+		// without debounce lag — the writer is the in-process consumer here.
+		// Only the file that just changed is re-chunked (finding P2): the
+		// old full-corpus ReindexContext here cost O(corpus) per write, so N
+		// writes against a growing corpus amplified to O(N x corpus).
+		if _, err := engine.ReindexPath(ctx, file); err != nil {
 			s.logger.Warn("post-write reindex failed", "error", err, "scope", scope)
 		}
 
@@ -244,7 +241,7 @@ func (s *Server) handleMemoryWrite(w http.ResponseWriter, r *http.Request) {
 		// journal don't silently diverge from disk on this path. This
 		// runs on the request goroutine but only when the off-thread
 		// path is unavailable, so the common case stays non-blocking.
-		if err := engine.ReindexContext(r.Context()); err != nil {
+		if _, err := engine.ReindexPath(r.Context(), file); err != nil {
 			s.logger.Warn("post-write reindex failed (sync fallback)", "error", err, "scope", scope)
 		}
 		s.emitJournal(r.Context(), "memory.updated",
@@ -325,12 +322,30 @@ func safeJoinUnder(base, rel string) (string, error) {
 	if !strings.HasPrefix(absCleaned, absBase+string(filepath.Separator)) && absCleaned != absBase {
 		return "", errIllegalPath
 	}
-	// Symlink-escape guard: filepath.Clean is purely textual, so a
-	// symlink planted inside base that points outside still passes
-	// the prefix check above. Resolve the parent dir's real path
-	// (the file itself may not exist yet on first write) and verify
-	// it stays inside base. We don't EvalSymlinks the full target —
-	// that would fail when the file is brand new — only the parent.
+
+	// Final-component symlink guard (finding MEM, 2026-06 audit). The agent
+	// (uid 1001) writes into the same base the sidecar (uid 1002) reads from.
+	// filepath.Clean is purely textual, so an agent that plants the requested
+	// file ITSELF as a symlink (e.g. AGENT.md -> /sidecar-private/secret) still
+	// passes the prefix check above — its parent resolves inside base, only the
+	// leaf escapes — and the downstream os.ReadFile/os.WriteFile would then
+	// follow it across the UID boundary (confused deputy). lstat (which does
+	// NOT follow the link) the leaf and reject any symlink outright: none of
+	// the whitelisted memory files is ever legitimately a symlink. lstat also
+	// catches a DANGLING symlink that an EvalSymlinks-of-the-full-path check
+	// would miss (it returns ENOENT and looks like a fresh first write).
+	if fi, lerr := os.Lstat(absCleaned); lerr == nil {
+		if fi.Mode()&os.ModeSymlink != 0 {
+			return "", errIllegalPath
+		}
+	} else if !os.IsNotExist(lerr) {
+		return "", lerr
+	}
+
+	// Parent-directory symlink-escape guard: a symlink planted as a PARENT
+	// component inside base that points outside also passes the textual prefix
+	// check. Resolve the parent dir's real path (the file itself may not exist
+	// yet on first write) and verify it stays inside base.
 	parent := filepath.Dir(absCleaned)
 	resolved, err := filepath.EvalSymlinks(parent)
 	if err != nil {
@@ -351,6 +366,25 @@ func safeJoinUnder(base, rel string) (string, error) {
 		return "", errIllegalPath
 	}
 	return cleaned, nil
+}
+
+// isAllowedMemoryFile reports whether rel names one of the whitelisted
+// memory files: AGENT.md, CREW.md, pins.md, or daily/<name>.md (a single
+// segment under daily/). It mirrors the cap lookup performed in
+// handleMemoryWrite so the read and write surfaces share one allowlist
+// (finding MEM follow-up: the read path must be no more permissive than the
+// write path). Returns the byte cap for the write path; callers that only
+// need the allow decision can ignore it.
+func memoryFileCap(rel string) (int, bool) {
+	clean := filepath.ToSlash(filepath.Clean(rel))
+	if c, known := memoryWriteCaps[clean]; known {
+		return c, true
+	}
+	// daily/<name>.md — exactly one segment under daily/.
+	if rest, ok := strings.CutPrefix(clean, "daily/"); ok && rest != "" && !strings.Contains(rest, "/") {
+		return dailyCap, true
+	}
+	return 0, false
 }
 
 var errIllegalPath = errors.New("illegal file path")
