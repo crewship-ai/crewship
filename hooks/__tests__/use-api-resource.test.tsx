@@ -144,11 +144,14 @@ describe("useApiResource", () => {
 
     fetchMock.mockResolvedValueOnce(httpError(500))
     rerender({ key: 1 })
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    // Wait for the error to PROPAGATE — the second fetch being invoked
+    // (call count 2) does not mean its 500 has been processed + re-rendered
+    // yet. Asserting result.current.error synchronously raced that state
+    // update and made this test flaky across PRs; await the error instead.
+    await waitFor(() => expect(result.current.error).toBe("HTTP 500"))
 
     // List survives the backend hiccup instead of flashing to empty.
     expect(result.current.data).toEqual([{ id: "a" }])
-    expect(result.current.error).toBe("HTTP 500")
   })
 
   it("ignores a stale response that resolves after a newer one (race guard)", async () => {
