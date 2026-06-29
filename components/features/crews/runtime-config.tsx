@@ -55,6 +55,8 @@ interface CatalogFeature {
   category: string
   icon: string
   size_hint: string
+  publisher: string
+  tier: string
 }
 
 interface RuntimeEntry {
@@ -542,6 +544,22 @@ export function RuntimeConfig({ value, onChange }: RuntimeConfigProps) {
                           </span>
                         )}
                       </div>
+
+                      {feature.publisher && (
+                        <span
+                          className={cn(
+                            "shrink-0 text-[10px] font-mono",
+                            feature.tier === "official"
+                              ? "text-muted-foreground-soft"
+                              : feature.tier === "community"
+                                ? "text-sky-400/70"
+                                : "text-amber-400/80"
+                          )}
+                          title={`Published by ${feature.publisher} (${feature.tier})`}
+                        >
+                          {feature.publisher} · {feature.tier}
+                        </span>
+                      )}
 
                       {feature.size_hint && (
                         <span className="shrink-0 text-[10px] text-muted-foreground-soft font-mono">

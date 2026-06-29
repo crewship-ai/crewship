@@ -71,7 +71,7 @@ func (f *CatalogFetcher) GetCatalog(ctx context.Context) []CatalogEntry {
 		out := make([]CatalogEntry, len(f.memCache.entries))
 		copy(out, f.memCache.entries)
 		f.mu.RUnlock()
-		return out
+		return dedupeCatalogByID(out)
 	}
 	f.mu.RUnlock()
 
@@ -86,14 +86,98 @@ func (f *CatalogFetcher) GetCatalog(ctx context.Context) []CatalogEntry {
 			f.mu.Unlock()
 			out := make([]CatalogEntry, len(entries))
 			copy(out, entries)
-			return out
+			return dedupeCatalogByID(out)
 		}
 	}
 
 	// Fallback to embedded list.
 	out := make([]CatalogEntry, len(FallbackCatalog))
 	copy(out, FallbackCatalog)
+	return dedupeCatalogByID(out)
+}
+
+// publisherRank orders devcontainer feature publishers so the canonical
+// namespaces win when the same feature id is published by multiple owners.
+// The upstream community index lists, e.g., seven different "bun" features and
+// five "claude-code" features from assorted forks; surfacing all of them makes
+// the picker show the same name repeatedly and an operator can't tell the
+// official feature from an unmaintained fork. Lower rank wins.
+func publisherRank(ref string) int {
+	owner := ""
+	if rest, ok := strings.CutPrefix(ref, "ghcr.io/"); ok {
+		owner = strings.SplitN(rest, "/", 2)[0]
+	}
+	switch owner {
+	case "devcontainers":
+		return 0 // official
+	case "devcontainers-extra":
+		return 1 // official extended collection
+	case "devcontainers-community", "devcontainer-community":
+		return 2
+	default:
+		return 9 // third-party / forks
+	}
+}
+
+// catalogShortID is the feature's short id: the last path segment without the
+// version tag (ghcr.io/devcontainers-extra/features/ansible:2 -> "ansible").
+func catalogShortID(ref string) string {
+	withoutTag := strings.SplitN(ref, ":", 2)[0]
+	parts := strings.Split(withoutTag, "/")
+	return parts[len(parts)-1]
+}
+
+// dedupeCatalogByID collapses features that share a short id but come from
+// different publishers down to a single canonical entry — lowest publisherRank,
+// then lexically smallest ref for stability. Features whose id only exists
+// under a third-party publisher are kept (one each). Relative order of the kept
+// entries is preserved. This is what removes the visible "Ansible / Ansible"
+// style duplicates in the feature picker without dropping any genuinely unique
+// feature.
+func dedupeCatalogByID(entries []CatalogEntry) []CatalogEntry {
+	bestIdx := make(map[string]int, len(entries))
+	for i := range entries {
+		id := catalogShortID(entries[i].Ref)
+		j, seen := bestIdx[id]
+		if !seen {
+			bestIdx[id] = i
+			continue
+		}
+		ri, rj := publisherRank(entries[i].Ref), publisherRank(entries[j].Ref)
+		if ri < rj || (ri == rj && entries[i].Ref < entries[j].Ref) {
+			bestIdx[id] = i
+		}
+	}
+	keep := make(map[int]bool, len(bestIdx))
+	for _, i := range bestIdx {
+		keep[i] = true
+	}
+	out := make([]CatalogEntry, 0, len(bestIdx))
+	for i := range entries {
+		if keep[i] {
+			e := entries[i]
+			e.Publisher, e.Tier = featureProvenance(e.Ref)
+			out = append(out, e)
+		}
+	}
 	return out
+}
+
+// featureProvenance returns the publisher namespace and trust tier for a ref so
+// the picker can always show where a feature comes from.
+func featureProvenance(ref string) (publisher, tier string) {
+	if rest, ok := strings.CutPrefix(ref, "ghcr.io/"); ok {
+		publisher = strings.SplitN(rest, "/", 2)[0]
+	}
+	switch publisherRank(ref) {
+	case 0, 1:
+		tier = "official" // devcontainers + devcontainers-extra
+	case 2:
+		tier = "community"
+	default:
+		tier = "third-party"
+	}
+	return publisher, tier
 }
 
 // RefreshCatalog forces a network fetch and updates both caches.

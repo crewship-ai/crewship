@@ -12,6 +12,13 @@ type CatalogEntry struct {
 	Category    string `json:"category"`  // "languages", "tools", "cloud", "databases"
 	Icon        string `json:"icon"`      // lucide icon name
 	SizeHint    string `json:"size_hint"` // approximate installed size
+	// Publisher is the ghcr.io owner namespace the feature is published under
+	// (e.g. "devcontainers-extra", "guiyomh"). Tier classifies it as
+	// "official" / "community" / "third-party" so the picker can show where a
+	// feature comes from — multiple owners publish features with the same id,
+	// and the catalog keeps the most canonical one (see dedupeCatalogByID).
+	Publisher string `json:"publisher"`
+	Tier      string `json:"tier"`
 }
 
 // FallbackCatalog is the built-in list of popular devcontainer features. All entries
