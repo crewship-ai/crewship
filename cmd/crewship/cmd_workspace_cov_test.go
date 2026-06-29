@@ -547,26 +547,26 @@ func TestWorkspaceCmds_APIErrorPropagation(t *testing.T) {
 	}
 }
 
-func TestWorkspaceUse_MalformedConfigFallsBackToEmpty(t *testing.T) {
+func TestWorkspaceUse_MalformedConfigErrorsWithoutClobber(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "cli-config.yaml")
 	t.Setenv("CREWSHIP_CONFIG", cfgPath)
-	if err := os.WriteFile(cfgPath, []byte("\t: not yaml ["), 0o600); err != nil {
+	malformed := []byte("\t: not yaml [")
+	if err := os.WriteFile(cfgPath, malformed, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	saveCLIState(t)
 	flagServer = ""
 
-	_ = captureStdoutCovCli2(t, func() {
-		if err := workspaceUseCmd.RunE(workspaceUseCmd, []string{"fresh"}); err != nil {
-			t.Errorf("RunE: %v", err)
-		}
-	})
-	cfg, err := cli.LoadConfig()
-	if err != nil {
-		t.Fatalf("config should be valid after rewrite: %v", err)
+	// A malformed config is a real read/parse failure (LoadConfig only swallows
+	// a missing file). `workspace use` must surface it and leave the file
+	// untouched, never silently overwrite the user's saved config.
+	err := workspaceUseCmd.RunE(workspaceUseCmd, []string{"fresh"})
+	if err == nil || !strings.Contains(err.Error(), "load CLI config: parse config:") {
+		t.Fatalf("expected parse-config error, got %v", err)
 	}
-	if cfg.Workspace != "fresh" {
-		t.Errorf("workspace = %q, want fresh", cfg.Workspace)
+	got, _ := os.ReadFile(cfgPath)
+	if string(got) != string(malformed) {
+		t.Errorf("malformed config was clobbered: %q", string(got))
 	}
 }
 
@@ -720,8 +720,10 @@ func TestWorkspaceCmds_MalformedJSONResponses(t *testing.T) {
 	}
 }
 
-func TestWorkspaceUse_SaveConfigError(t *testing.T) {
-	// Config path nested under a regular file → SaveConfig's MkdirAll fails.
+func TestWorkspaceUse_ConfigIOErrorSurfaces(t *testing.T) {
+	// Config path nested under a regular file → the config is both unreadable
+	// (ENOTDIR) and unsaveable. `workspace use` must surface the error rather
+	// than continue with an empty config and clobber on save.
 	blocker := filepath.Join(t.TempDir(), "blocker")
 	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
@@ -730,8 +732,7 @@ func TestWorkspaceUse_SaveConfigError(t *testing.T) {
 	saveCLIState(t)
 	flagServer = ""
 
-	err := workspaceUseCmd.RunE(workspaceUseCmd, []string{"acme"})
-	if err == nil || !strings.Contains(err.Error(), "create config dir") {
-		t.Errorf("got %v", err)
+	if err := workspaceUseCmd.RunE(workspaceUseCmd, []string{"acme"}); err == nil || !strings.Contains(err.Error(), "load CLI config: read config:") {
+		t.Errorf("expected config read error, got %v", err)
 	}
 }

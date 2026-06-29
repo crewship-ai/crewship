@@ -25,11 +25,17 @@ func completeAgentSlug(cmd *cobra.Command, args []string, toComplete string) ([]
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
 
-	cfg, err := cli.LoadConfig()
-	if err != nil || cfg.Token == "" {
+	raw, err := cli.LoadConfig()
+	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	server := cli.ResolveServer(flagServer, cfg)
+	// Resolve through the active-profile overlay so completion works for
+	// profile-authenticated users (token lives under cfg.Servers[name]).
+	cfg := raw.WithActiveProfile(flagProfile)
+	if cfg.Token == "" {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	server := cli.EffectiveServer(flagServer, flagProfile, raw)
 	workspace := cli.ResolveWorkspace(flagWorkspace, cfg)
 
 	c := cli.NewClient(server, cfg.Token, workspace)

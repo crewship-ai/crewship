@@ -352,6 +352,7 @@
             "expanded": false,
             "pages": [
               "cli/config",
+              "cli/server",
               "cli/system",
               "cli/instance",
               "cli/backup",

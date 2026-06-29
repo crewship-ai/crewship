@@ -69,6 +69,24 @@ crewship login --pair --code K3F9-X2NM
 
 Pairing is what the **First-run wizard → Pair CLI** card hands out. The browser polls the server every few seconds; once the code is redeemed, the wizard's "Launch Crew" button unlocks.
 
+### Targeting a profile
+
+Pass `--profile <name>` (or set `CREWSHIP_PROFILE`) to authenticate a named
+[server profile](/cli/server) instead of the top-level config. The minted token
+is stored **inside that profile**. If no default profile is set yet, that
+profile also becomes `current` (logging into another profile later does **not**
+re-point an existing default):
+
+```bash
+crewship server add dev2 --server https://crewship-dev2.example
+crewship login --profile dev2          # token saved to profile "dev2"
+crewship --profile dev2 whoami
+```
+
+With no `--profile`/`CREWSHIP_PROFILE`, login writes the legacy top-level
+`server`/`token` fields exactly as before. `logout` is profile-aware too: it
+clears the active profile's token and leaves sibling profiles signed in.
+
 ### Common errors
 
 - **`pair: the pair code didn't work — codes expire after 10 minutes`** — codes have a 10-min TTL. The server intentionally folds *wrong code / expired / already consumed* into one message to avoid being an enumeration oracle; the most likely cause is the TTL.

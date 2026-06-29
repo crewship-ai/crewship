@@ -27,6 +27,22 @@ type CLIConfig struct {
 	// PlanByDefault toggles the `--plan` flag default to true for run/ask.
 	// Useful for teams that want plan-first to be the norm.
 	PlanByDefault bool `yaml:"plan_by_default,omitempty"`
+
+	// Current is the active server profile name (see Servers). Empty means
+	// legacy single-server mode, where the top-level Server/Token/Workspace
+	// fields above are used directly.
+	Current string `yaml:"current,omitempty"`
+	// Servers holds named targets so one config can address dev1/dev2/dev3,
+	// staging, prod, … and switch between them with `crewship server use
+	// <name>` or --profile / CREWSHIP_PROFILE, each with its own token. This
+	// is the native replacement for the per-clone CREWSHIP_CONFIG file juggling
+	// that issue #544 introduced as a stopgap.
+	Servers map[string]*ServerProfile `yaml:"servers,omitempty"`
+	// DirectoryProfiles auto-selects a profile when the CLI runs inside a
+	// mapped directory (or any child of it) — the native replacement for the
+	// per-clone shell hook that exported CREWSHIP_CONFIG by $PWD. The longest
+	// matching path wins. Empty = no directory-based selection.
+	DirectoryProfiles map[string]string `yaml:"directory_profiles,omitempty"`
 }
 
 // DefaultConfigDir returns the path to ~/.crewship.
