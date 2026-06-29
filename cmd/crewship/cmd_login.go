@@ -45,7 +45,7 @@ Device-code pairing (paste the code shown in the browser onboarding
 or Settings → Pair CLI):
   crewship login --pair --code=XXXX-XXXX`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		server := cli.ResolveServer(flagServer, cliCfg)
+		server := cli.EffectiveServer(flagServer, flagProfile, cliCfg)
 
 		// Pre-flight transport-security check. Fail loud on a malformed
 		// URL or empty host BEFORE the bearer / password hits the wire
@@ -55,6 +55,16 @@ or Settings → Pair CLI):
 		// (dev VM, internal LAN behind a VPN, etc.).
 		if err := preflightServerURL(cmd.ErrOrStderr(), server); err != nil {
 			return err
+		}
+
+		// Fail fast on an unwritable profile target before any credential is
+		// sent or minted, so a typo'd --profile/CREWSHIP_PROFILE gets a clear
+		// message instead of a downstream connection/validation error. A
+		// malformed config is left for persistCredential's guard to surface.
+		if cfg, lerr := cli.LoadConfig(); lerr == nil {
+			if _, perr := loginProfileTarget(cfg); perr != nil {
+				return perr
+			}
 		}
 
 		if loginPairFlag {
@@ -133,12 +143,33 @@ func preflightServerURL(out io.Writer, serverURL string) error {
 // LoadConfig returns an empty config on a missing file, so a non-nil error
 // means the existing file is unreadable / malformed YAML and we must not
 // clobber it.
+// loginProfileTarget resolves the profile that login will write the token to
+// and enforces the create-only rule: an unknown profile may be auto-created
+// ONLY when the operator both named it with --profile AND supplied --server
+// (the one-step "define and authenticate" onboarding). A name that resolves
+// from CREWSHIP_PROFILE / current / a directory binding but has no entry, or a
+// --profile with no --server, is a typo or stale selection — fail closed.
+// Returns the resolved name ("" = legacy single-server mode).
+func loginProfileTarget(cfg *cli.CLIConfig) (string, error) {
+	name := cli.ActiveProfileName(flagProfile, cfg)
+	if name == "" {
+		return "", nil
+	}
+	if _, ok := cfg.Servers[name]; !ok && (flagProfile == "" || flagServer == "") {
+		return "", fmt.Errorf("unknown profile %q — run 'crewship server add %s --server <url>' first (or 'crewship login --profile %s --server <url>' to define and authenticate it in one step)", name, name, name)
+	}
+	return name, nil
+}
+
 func persistCredential(serverURL, token string) (string, error) {
 	cfg, err := cli.LoadConfig()
 	if err != nil {
-		return "", fmt.Errorf("load CLI config (refusing to overwrite a malformed file — fix or remove ~/.crewship/cli-config.yaml and retry): %w", err)
+		return "", fmt.Errorf("load CLI config (refusing to overwrite a malformed file — fix or remove %s and retry): %w", configFilePath(), err)
 	}
-	name := cli.ActiveProfileName(flagProfile, cfg)
+	name, err := loginProfileTarget(cfg)
+	if err != nil {
+		return "", err
+	}
 	cfg.WriteCredential(flagProfile, serverURL, token, "")
 	if err := cli.SaveConfig(cfg); err != nil {
 		return "", fmt.Errorf("save config: %w", err)
@@ -146,14 +177,23 @@ func persistCredential(serverURL, token string) (string, error) {
 	return name, nil
 }
 
+// configFilePath returns the resolved CLI config path for user-facing messages,
+// honoring CREWSHIP_CONFIG instead of hardcoding the home-dir default.
+func configFilePath() string {
+	if p, err := cli.DefaultConfigPath(); err == nil && p != "" {
+		return p
+	}
+	return "~/.crewship/cli-config.yaml"
+}
+
 // savedTokenMessage describes where a token was just stored, naming the
 // profile when one is active so multi-instance users can see which target
 // they authenticated.
 func savedTokenMessage(prefix, profile string) string {
 	if profile != "" {
-		return fmt.Sprintf("%s Token saved to profile %q in ~/.crewship/cli-config.yaml", prefix, profile)
+		return fmt.Sprintf("%s Token saved to profile %q in %s", prefix, profile, configFilePath())
 	}
-	return fmt.Sprintf("%s Token saved to ~/.crewship/cli-config.yaml", prefix)
+	return fmt.Sprintf("%s Token saved to %s", prefix, configFilePath())
 }
 
 var logoutCmd = &cobra.Command{

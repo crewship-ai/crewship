@@ -213,14 +213,25 @@ func newFormatter() *cli.Formatter {
 // `current` pointing at a removed profile), the overlay blanks the token, so
 // point the operator at the profile rather than a generic "run login".
 func requireAuth() error {
-	if cliCfg != nil && cliCfg.Token != "" {
-		return nil
-	}
+	// Handle a selected profile first: a profile can carry a token but an empty
+	// server (hand-edited / half-written config), and accepting that token
+	// before the target is proven configured would let later fallbacks dial the
+	// wrong host. Require a non-empty profile server before the token counts.
 	if name := cli.ActiveProfileName(flagProfile, cliCfg); name != "" {
-		if cliCfg == nil || cliCfg.Servers[name] == nil {
+		if cliCfg == nil {
 			return fmt.Errorf("profile %q is not configured — run 'crewship server add %s --server <url>' then 'crewship login --profile %s'", name, name, name)
 		}
+		p := cliCfg.Servers[name]
+		if p == nil || strings.TrimSpace(p.Server) == "" {
+			return fmt.Errorf("profile %q is not configured — run 'crewship server add %s --server <url>' then 'crewship login --profile %s'", name, name, name)
+		}
+		if strings.TrimSpace(p.Token) != "" {
+			return nil
+		}
 		return fmt.Errorf("not logged into profile %q. Run 'crewship login --profile %s'", name, name)
+	}
+	if cliCfg != nil && cliCfg.Token != "" {
+		return nil
 	}
 	return fmt.Errorf("not logged in. Run 'crewship login' first")
 }

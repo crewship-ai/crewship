@@ -35,7 +35,7 @@ var configShowCmd = &cobra.Command{
 		fmt.Printf("%sDefAgent:%s   %s\n", cli.Dim, cli.Reset, valueOrDefault(cfg.DefaultAgent, "(not set, used by `crewship ask`)"))
 		fmt.Printf("%sMarkdown:%s   %s\n", cli.Dim, cli.Reset, valueOrDefault(cfg.Markdown, "(default: auto)"))
 		if eff.Token != "" {
-			fmt.Printf("%sToken:%s      %s...%s\n", cli.Dim, cli.Reset, eff.Token[:20], eff.Token[len(eff.Token)-4:])
+			fmt.Printf("%sToken:%s      %s\n", cli.Dim, cli.Reset, maskedToken(eff.Token))
 		} else {
 			fmt.Printf("%sToken:%s      (not set)\n", cli.Dim, cli.Reset)
 		}
@@ -106,6 +106,19 @@ func valueOrDefault(v, def string) string {
 		return def
 	}
 	return v
+}
+
+// maskedToken renders a token for display without panicking on short or
+// hand-edited values (the raw slice eff.Token[:20] would index past the end).
+func maskedToken(token string) string {
+	switch {
+	case len(token) <= 8:
+		return "(set)"
+	case len(token) < 24:
+		return token[:4] + "..." + token[len(token)-4:]
+	default:
+		return token[:20] + "..." + token[len(token)-4:]
+	}
 }
 
 // configValidateCmd performs sanity checks: token authenticates, workspace

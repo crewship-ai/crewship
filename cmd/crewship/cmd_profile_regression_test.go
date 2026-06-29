@@ -41,6 +41,71 @@ func TestLogin_NoFlag_WritesToActiveProfile(t *testing.T) {
 	}
 }
 
+// CodeRabbit #3: login must not create a profile for a typo'd selection that
+// comes from CREWSHIP_PROFILE / current / a directory binding (no --profile +
+// no --server). It may only auto-create when --profile AND --server are given.
+func TestPersistCredential_RejectsUnknownFromCurrent(t *testing.T) {
+	redirectConfigHome(t)
+	t.Setenv("CREWSHIP_PROFILE", "")
+	oldP, oldS := flagProfile, flagServer
+	flagProfile, flagServer = "", ""
+	t.Cleanup(func() { flagProfile, flagServer = oldP, oldS })
+
+	// `current` points at a profile that has no entry — a stale selection.
+	if err := cli.SaveConfig(&cli.CLIConfig{Current: "ghost"}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if _, err := persistCredential("https://x", "tok"); err == nil {
+		t.Errorf("expected error for unknown 'current' profile, got nil")
+	}
+}
+
+func TestPersistCredential_RejectsFlagWithoutServer(t *testing.T) {
+	redirectConfigHome(t)
+	t.Setenv("CREWSHIP_PROFILE", "")
+	oldP, oldS := flagProfile, flagServer
+	flagProfile, flagServer = "newp", "" // named but no --server to define it
+	t.Cleanup(func() { flagProfile, flagServer = oldP, oldS })
+
+	if _, err := persistCredential("https://x", "tok"); err == nil {
+		t.Errorf("expected error: unknown --profile without --server, got nil")
+	}
+}
+
+func TestPersistCredential_CreatesWithFlagAndServer(t *testing.T) {
+	path := redirectConfigHome(t)
+	t.Setenv("CREWSHIP_PROFILE", "")
+	oldP, oldS := flagProfile, flagServer
+	flagProfile, flagServer = "newp", "https://newp.example"
+	t.Cleanup(func() { flagProfile, flagServer = oldP, oldS })
+
+	name, err := persistCredential("https://newp.example", "tok")
+	if err != nil {
+		t.Fatalf("onboarding (--profile + --server) should create: %v", err)
+	}
+	if name != "newp" {
+		t.Errorf("name = %q, want newp", name)
+	}
+	cfg := readCfg(t, path)
+	if cfg.Servers["newp"] == nil || cfg.Servers["newp"].Token != "tok" {
+		t.Errorf("profile not created: %+v", cfg.Servers)
+	}
+}
+
+func TestMaskedToken(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"", "(set)"},
+		{"abcdefgh", "(set)"},         // len 8 → too short to reveal
+		{"abcdefghij", "abcd...ghij"}, // 8 < len 10 < 24
+		{"crewship_cli_0123456789abcd", "crewship_cli_0123456...abcd"}, // len 27 ≥ 24
+	}
+	for _, c := range cases {
+		if got := maskedToken(c.in); got != c.want {
+			t.Errorf("maskedToken(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
 // Regression for the review's #8: `config set workspace` under an active
 // profile must persist to the profile, not the top-level field the overlay
 // shadows on the next read.

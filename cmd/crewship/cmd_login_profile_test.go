@@ -32,9 +32,10 @@ func TestPersistCredentialLegacy(t *testing.T) {
 func TestPersistCredentialProfile(t *testing.T) {
 	path := redirectConfigHome(t)
 	t.Setenv("CREWSHIP_PROFILE", "")
-	old := flagProfile
-	flagProfile = "dev2"
-	t.Cleanup(func() { flagProfile = old })
+	oldP, oldS := flagProfile, flagServer
+	// Onboarding: --profile names a NEW profile and --server defines it.
+	flagProfile, flagServer = "dev2", "https://dev2.example"
+	t.Cleanup(func() { flagProfile, flagServer = oldP, oldS })
 
 	name, err := persistCredential("https://dev2.example", "tok2")
 	if err != nil {

@@ -63,6 +63,13 @@ var serverListCmd = &cobra.Command{
 
 		for _, n := range names {
 			p := cfg.Servers[n]
+			if p == nil {
+				// A hand-edited `servers: {name: null}` leaves a nil entry —
+				// show it rather than panicking on p.Token/p.Workspace.
+				fmt.Printf("  %s%-12s%s %-44s ws=%-26s %sundefined%s\n",
+					cli.Bold, n, cli.Reset, "(undefined)", "-", cli.Dim, cli.Reset)
+				continue
+			}
 			marker := "  "
 			if n == active {
 				marker = cli.Green + "* " + cli.Reset

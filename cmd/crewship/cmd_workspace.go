@@ -74,7 +74,10 @@ var workspaceUseCmd = &cobra.Command{
 		// validated against the right server/token, not the empty top-level.
 		localCfg, err := cli.LoadConfig()
 		if err != nil {
-			localCfg = &cli.CLIConfig{}
+			// LoadConfig returns an empty config for a missing file, so a real
+			// error means an unreadable / malformed file — don't continue with
+			// an empty config and clobber the user's saved profiles on save.
+			return fmt.Errorf("load CLI config: %w", err)
 		}
 		eff := localCfg.WithActiveProfile(flagProfile)
 		if eff.Token != "" {
