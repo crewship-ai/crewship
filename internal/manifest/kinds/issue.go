@@ -1052,4 +1052,3 @@ func issueListForCrew(ctx context.Context, c internalapi.Client, crewID string) 
 	}
 	return all, nil
 }
-

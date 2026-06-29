@@ -1066,4 +1066,3 @@ func integrationRowToDoc(r *IntegrationRemote, scope, crewSlug string) (*Integra
 }
 
 // ── HTTP helpers (all integration-prefixed) ─────────────────────────────────
-
