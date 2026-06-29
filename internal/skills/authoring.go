@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // StagedSkill is the outcome of staging an agent-authored SKILL.md document
@@ -54,6 +55,13 @@ func StageAuthoredSkill(proposedDir, content string) (StagedSkill, error) {
 // that pick the same slug serialise at the kernel level instead of clobbering
 // each other's staged file. Returns the absolute path written.
 func WriteUniqueSkillFile(dir, slug string, body []byte) (string, error) {
+	// Defense in depth: the slug becomes a filename joined onto dir, so it must
+	// be a single safe path segment. Slugify already strips separators, but the
+	// file writer must not trust its caller — reject anything that could let the
+	// join escape dir (path traversal).
+	if slug == "" || slug != filepath.Base(slug) || strings.ContainsAny(slug, `/\`) || strings.Contains(slug, "..") {
+		return "", fmt.Errorf("write skill file: unsafe slug %q", slug)
+	}
 	for i := 1; i < 100; i++ {
 		name := "skill-" + slug + ".md"
 		if i > 1 {
