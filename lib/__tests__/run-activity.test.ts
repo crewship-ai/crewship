@@ -1,6 +1,12 @@
 import { describe, it, expect } from "vitest"
 import type { JournalEntry } from "@/lib/types/journal"
-import { humanizeEntry, humanizeRun, formatBytes } from "@/lib/run-activity"
+import {
+  humanizeEntry,
+  humanizeRun,
+  formatBytes,
+  awaitingApprovalRow,
+  withAwaitingApproval,
+} from "@/lib/run-activity"
 // formatDuration moved to lib/time as formatDurationPrecise (byte-identical).
 import { formatDurationPrecise as formatDuration } from "@/lib/time"
 
@@ -44,6 +50,48 @@ describe("formatDuration", () => {
   it("spills rounding into the minute form — never 60.0s or 1m 60s", () => {
     expect(formatDuration(59_960)).toBe("1m 0s")
     expect(formatDuration(119_600)).toBe("2m 0s")
+  })
+})
+
+describe("awaitingApprovalRow", () => {
+  it("builds an amber awaiting row keyed by step", () => {
+    const row = awaitingApprovalRow({ stepId: "approve", ts: "2026-06-29T13:15:10.000Z" })
+    expect(row.tone).toBe("warn")
+    expect(row.awaiting).toBe(true)
+    expect(row.title).toContain("approve")
+    expect(row.title).toContain("awaiting")
+    expect(row.id).toBe("awaiting:approve")
+  })
+
+  it("falls back to a generic title + id when no step is known", () => {
+    const row = awaitingApprovalRow({ ts: "2026-06-29T13:15:10.000Z" })
+    expect(row.title).toBe("Awaiting your decision")
+    expect(row.id).toBe("awaiting:approval")
+  })
+})
+
+describe("withAwaitingApproval", () => {
+  const rows = [
+    { id: "a", ts: "2026-06-29T13:15:07.000Z", icon: (() => null) as never, tone: "active" as const, title: "Routine started" },
+    { id: "b", ts: "2026-06-29T13:15:09.000Z", icon: (() => null) as never, tone: "default" as const, title: "Step draft" },
+  ]
+
+  it("returns rows unchanged when no pending approval", () => {
+    expect(withAwaitingApproval(rows, null)).toBe(rows)
+    expect(withAwaitingApproval(rows, undefined)).toBe(rows)
+  })
+
+  it("appends the awaiting row in chronological position", () => {
+    const out = withAwaitingApproval(rows, { stepId: "approve", ts: "2026-06-29T13:15:10.000Z" })
+    expect(out).toHaveLength(3)
+    expect(out[2].awaiting).toBe(true)
+    expect(out[2].id).toBe("awaiting:approve")
+  })
+
+  it("is idempotent — does not duplicate on re-render with the same waitpoint", () => {
+    const once = withAwaitingApproval(rows, { stepId: "approve", ts: "2026-06-29T13:15:10.000Z" })
+    const twice = withAwaitingApproval(once, { stepId: "approve", ts: "2026-06-29T13:15:10.000Z" })
+    expect(twice).toHaveLength(3)
   })
 })
 

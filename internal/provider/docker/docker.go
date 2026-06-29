@@ -80,6 +80,17 @@ type Provider struct {
 	// run in parallel.
 	crewLocks sync.Map // crew_id (string) → *sync.Mutex
 
+	// migrationLocks serializes the pre-C1 legacy-resource migration by
+	// *legacy slug*, not crew id. The legacy resources reconciled in
+	// migrateLegacyCrewResources ("<prefix>-{team,home,tools}-<slug>") are
+	// keyed by slug alone, so two crews that share a slug but have distinct
+	// ids would each take their own crewLocks entry yet still observe and
+	// race for the same legacy volumes — both copying/claiming the same
+	// ambiguous data. A slug-scoped lock makes the "first crew to provision
+	// claims it" policy actually atomic. Held only around the migration; the
+	// id-scoped runtime setup keeps using crewLocks.
+	migrationLocks sync.Map // legacy slug (string) → *sync.Mutex
+
 	// checkVolumeMountpoint gates the host-side volume self-heal in
 	// ensureVolume. The check os.Stat's the daemon-reported Mountpoint
 	// (/var/lib/docker/volumes/<name>/_data), which is only reachable from
@@ -100,6 +111,17 @@ func (p *Provider) lockForCrew(crewID string) *sync.Mutex {
 		return mu.(*sync.Mutex)
 	}
 	actual, _ := p.crewLocks.LoadOrStore(crewID, &sync.Mutex{})
+	return actual.(*sync.Mutex)
+}
+
+// lockForMigration returns the mutex guarding the legacy-resource migration
+// for a given legacy slug, creating it on first use. See the migrationLocks
+// field for why migration is serialized by slug rather than crew id.
+func (p *Provider) lockForMigration(slug string) *sync.Mutex {
+	if mu, ok := p.migrationLocks.Load(slug); ok {
+		return mu.(*sync.Mutex)
+	}
+	actual, _ := p.migrationLocks.LoadOrStore(slug, &sync.Mutex{})
 	return actual.(*sync.Mutex)
 }
 

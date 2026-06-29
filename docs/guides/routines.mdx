@@ -521,6 +521,16 @@ crewship routine waitpoints reject  <token> --comment "needs revision"
 # API: POST /api/v1/workspaces/{ws}/pipelines/waitpoints/{token}/approve
 ```
 
+When you trigger a run from the routine detail page and it parks on an approval
+gate, you don't have to leave the page: the **Run activity** panel switches its
+status to amber **"Waiting for approval"**, pins the parked step in the
+timeline, and shows an inline **Approve / Reject** banner (with an optional
+comment) for that run's waitpoint. The same pending item also surfaces in the
+top-bar Inbox bell and the left-sidebar Inbox badge, so an approval waiting on
+you is visible whether or not you're looking at the routine. The workspace-wide
+**Wait points** tab and `/inbox` remain the places to act on approvals for runs
+you didn't just start.
+
 The decision comment is forwarded to the parked run as the wait step's output, so downstream steps can read approval rationale via `{{ steps.<wait_step_id>.output }}`.
 
 ## Durability and restart recovery
