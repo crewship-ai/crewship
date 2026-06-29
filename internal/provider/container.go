@@ -2,9 +2,26 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"io"
 	"time"
 )
+
+// ErrLegacyCrewResource is wrapped by the container provider when a crew can't
+// start because a pre-C1 (slug-only) resource still exists on the daemon.
+// Callers (chatbridge) match it with errors.Is to surface a safe, actionable
+// message to the end user instead of echoing the raw error (which may carry
+// internal infra detail).
+var ErrLegacyCrewResource = errors.New("legacy pre-C1 crew resource present")
+
+// CrewRef identifies a crew by its globally-unique id and workspace slug. The
+// legacy-resource detector/pruner take a list so they can both TARGET the
+// slug-only legacy names and PROTECT the live id-scoped names (a slug equal to
+// another crew's "<slug>-<id>" string would otherwise collide).
+type CrewRef struct {
+	ID   string
+	Slug string
+}
 
 // CrewConfig describes the resource requirements and network policy for a
 // crew's container runtime.
@@ -209,15 +226,15 @@ type VolumeManager interface {
 // id-scoped runtime can start. Legacy names carry no crew id, so the caller
 // passes every live crew slug. Returns the names actually removed.
 type LegacyResourcePruner interface {
-	PruneLegacyCrewResources(ctx context.Context, slugs []string) (removed []string, err error)
+	PruneLegacyCrewResources(ctx context.Context, crews []CrewRef) (removed []string, err error)
 }
 
 // LegacyResourceDetector is the read-only counterpart to LegacyResourcePruner:
-// it reports whether any pre-C1 slug-only resource exists for the given slugs,
-// without removing anything. Powers the /healthz legacy_resources field that
+// it reports whether any pre-C1 slug-only resource exists for the given crews,
+// without removing anything. Powers the admin legacy-resources endpoint that
 // `crewship doctor` surfaces as a WARN before agent runs start failing.
 type LegacyResourceDetector interface {
-	HasLegacyCrewResources(ctx context.Context, slugs []string) (present bool, err error)
+	HasLegacyCrewResources(ctx context.Context, crews []CrewRef) (present bool, err error)
 }
 
 // InteractiveExecConfig configures an interactive (TTY) exec session.

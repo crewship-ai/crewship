@@ -101,19 +101,21 @@ with a vector embedder or degraded to keyword/FTS only.
 
 ### Legacy crew resources
 
-Reads the `legacy_resources` field from the running server's `/healthz`.
-Detects orphaned **pre-C1 (slug-only) crew docker resources** that survive
+Calls the authenticated `GET /api/v1/admin/legacy-resources` endpoint to detect
+orphaned **pre-C1 (slug-only) crew docker resources** that survive
 `crewship seed --nuke` and make every agent in the affected crew fail to start
 — surfaced to users only as a generic *"failed to start agent container"*.
+(Detection runs on this admin endpoint rather than the unauthenticated
+`/healthz` path, so a slow docker daemon can't stall health probes.)
 
 - **PASS — `clean`** — no orphaned legacy volumes/containers for any
   current crew slug.
 - **WARN — `present`** — at least one orphaned pre-C1 resource exists.
   Agents in the affected crew(s) will fail to start. Run
   [`crewship admin prune-legacy`](/cli/admin) to remove them.
-- **INFO — server not reachable / older or non-docker server** — the daemon
-  is down (the *server reachable* check covers that), the server predates the
-  field, or the container provider isn't docker.
+- **INFO — not logged in / unreachable / non-docker server** — the check needs
+  an authenticated session (`crewship login`); or the daemon is down (the
+  *server reachable* check covers that) or the container provider isn't docker.
 
 ### Telemetry status
 

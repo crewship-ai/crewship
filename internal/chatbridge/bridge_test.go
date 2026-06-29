@@ -175,57 +175,63 @@ func (f *failContainer) CopyToContainer(_ context.Context, _ string, _ string, _
 	return fmt.Errorf("copy failed: container unavailable")
 }
 
-// secretLeakContainer fails EnsureCrewRuntime with an operator-actionable
-// cause (the legacy-C1 guard message) that also happens to embed a secret, to
-// prove the bridge surfaces the cause to the client AND redacts the secret.
-type secretLeakContainer struct{ failContainer }
+// legacyErrContainer fails EnsureCrewRuntime with an error wrapping
+// provider.ErrLegacyCrewResource — the known, safe-to-surface cause.
+type legacyErrContainer struct{ failContainer }
 
-func (s *secretLeakContainer) EnsureCrewRuntime(_ context.Context, _ provider.CrewConfig) (string, error) {
-	return "", fmt.Errorf(
-		"legacy slug-scoped volume %q exists from before the C1 naming change; leaked sk-ant-oat01AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-		"crewship-3-tools-engineering",
-	)
+func (s *legacyErrContainer) EnsureCrewRuntime(_ context.Context, _ provider.CrewConfig) (string, error) {
+	return "", fmt.Errorf("legacy slug-scoped volume %q exists: %w",
+		"crewship-3-tools-engineering", provider.ErrLegacyCrewResource)
 }
 
-// TestHandleChatMessage_SurfacesRedactedContainerCause pins the fix for the
-// swallowed-cause bug: a container-start failure must reach the client with its
-// real cause (so "failed to start agent container" is self-diagnosing), with
-// any embedded secret redacted first.
-func TestHandleChatMessage_SurfacesRedactedContainerCause(t *testing.T) {
-	resolver := &mockResolver{
-		info: &ChatInfo{
-			AgentID:     "agent-1",
-			AgentSlug:   "test-agent",
-			CrewID:      "crew-1",
-			CrewSlug:    "test-crew",
-			CLIAdapter:  "CLAUDE_CODE",
-			ToolProfile: "CODING",
-			TimeoutSecs: 30,
-		},
-	}
-	b := testBridgeWithContainer(t, resolver, &secretLeakContainer{})
+// leakyContainer fails with an error that embeds internal infra detail in a
+// form no secret-redactor recognizes (an internal DSN), to prove the bridge
+// does NOT echo arbitrary EnsureCrewRuntime errors to the chat end user.
+type leakyContainer struct{ failContainer }
 
-	var events []ws.ChatEvent
-	streamFn := func(e ws.ChatEvent) { events = append(events, e) }
-	_ = b.HandleChatMessage(context.Background(), "user-1", "sess-1", "hello", streamFn)
+func (s *leakyContainer) EnsureCrewRuntime(_ context.Context, _ provider.CrewConfig) (string, error) {
+	return "", fmt.Errorf("mount failed: postgres://svc:hunter2@db-internal.corp:5432/prod unreachable")
+}
 
-	var errContent string
-	for _, e := range events {
+func bridgeErrEvent(t *testing.T, ctr provider.ContainerProvider) string {
+	t.Helper()
+	resolver := &mockResolver{info: &ChatInfo{
+		AgentID: "agent-1", AgentSlug: "test-agent", CrewID: "crew-1", CrewSlug: "test-crew",
+		CLIAdapter: "CLAUDE_CODE", ToolProfile: "CODING", TimeoutSecs: 30,
+	}}
+	b := testBridgeWithContainer(t, resolver, ctr)
+	var content string
+	streamFn := func(e ws.ChatEvent) {
 		if e.Type == "error" {
-			errContent = e.Content
+			content = e.Content
 		}
 	}
-	if errContent == "" {
+	_ = b.HandleChatMessage(context.Background(), "user-1", "sess-1", "hello", streamFn)
+	if content == "" {
 		t.Fatal("expected an error event")
 	}
-	// Cause surfaced (operator-actionable), not a bare generic string.
-	if !strings.Contains(errContent, "failed to start agent container:") ||
-		!strings.Contains(errContent, "crewship-3-tools-engineering") {
-		t.Errorf("error event should surface the real cause, got: %q", errContent)
+	return content
+}
+
+// TestHandleChatMessage_SurfacesLegacyCause: the known legacy-resource cause is
+// surfaced as a safe, actionable message pointing at the prune command.
+func TestHandleChatMessage_SurfacesLegacyCause(t *testing.T) {
+	got := bridgeErrEvent(t, &legacyErrContainer{})
+	if !strings.Contains(got, "failed to start agent container") || !strings.Contains(got, "prune-legacy") {
+		t.Errorf("legacy cause should surface the prune remediation, got: %q", got)
 	}
-	// Embedded secret must be redacted before streaming.
-	if strings.Contains(errContent, "sk-ant-oat01AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA") {
-		t.Errorf("secret leaked into client error event: %q", errContent)
+}
+
+// TestHandleChatMessage_HidesArbitraryCause: any OTHER container-start error is
+// reduced to a generic string so internal infra detail can't leak to the
+// end user.
+func TestHandleChatMessage_HidesArbitraryCause(t *testing.T) {
+	got := bridgeErrEvent(t, &leakyContainer{})
+	if got != "failed to start agent container" {
+		t.Errorf("arbitrary cause must be generic, got: %q", got)
+	}
+	if strings.Contains(got, "db-internal") || strings.Contains(got, "hunter2") {
+		t.Errorf("internal infra detail leaked into client error event: %q", got)
 	}
 }
 

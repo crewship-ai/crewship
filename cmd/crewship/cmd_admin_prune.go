@@ -1,9 +1,10 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 
-	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/spf13/cobra"
 )
 
@@ -40,23 +41,33 @@ legacy names; the id-scoped resources the live runtime uses are never touched.`,
 		if err != nil {
 			return err
 		}
-		if err := cli.CheckError(resp); err != nil {
-			return err
-		}
+		defer resp.Body.Close()
+		// Read the body ourselves (not via cli.CheckError, which discards it on
+		// error): the handler returns the partial `removed` list even in the
+		// 500 path, and the operator — who works through the CLI, not the
+		// server logs — needs it to reconcile a partially-mutated docker state.
+		data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 		var out struct {
+			Error   string   `json:"error"`
 			Removed []string `json:"removed"`
 			Count   int      `json:"count"`
 		}
-		if err := cli.ReadJSON(resp, &out); err != nil {
-			return err
+		_ = json.Unmarshal(data, &out)
+
+		if len(out.Removed) > 0 {
+			fmt.Printf("Removed %d legacy resource(s):\n", len(out.Removed))
+			for _, name := range out.Removed {
+				fmt.Printf("  - %s\n", name)
+			}
 		}
-		if out.Count == 0 {
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			if out.Error != "" {
+				return fmt.Errorf("prune failed (HTTP %d): %s", resp.StatusCode, out.Error)
+			}
+			return fmt.Errorf("prune failed: HTTP %d", resp.StatusCode)
+		}
+		if len(out.Removed) == 0 {
 			fmt.Println("No legacy C1 resources found — nothing to prune.")
-			return nil
-		}
-		fmt.Printf("Pruned %d legacy resource(s):\n", out.Count)
-		for _, name := range out.Removed {
-			fmt.Printf("  - %s\n", name)
 		}
 		return nil
 	},

@@ -2,78 +2,58 @@
 
 package main
 
-// `crewship doctor` surfaces the legacy-C1-resource status reported by the
-// server's /healthz endpoint. The helper is table-tested against a stub HTTP
-// server — no crewshipd or Docker involved.
+// `crewship doctor` surfaces the legacy-C1-resource status from the
+// authenticated admin legacy-resources endpoint. Tested against the CLI stub
+// server (covStub wires cliCfg + auth at the stub URL).
 
 import (
 	"context"
-	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/crewship-ai/crewship/internal/cli/clitest"
 )
 
-func TestCheckLegacyResources(t *testing.T) {
+func TestRunCheckLegacyResources(t *testing.T) {
 	cases := []struct {
 		name       string
-		body       string
-		status     int
+		handler    clitest.Handler
 		wantStatus string
-		wantDetail string // substring
-		wantHint   string // substring, "" = don't care
+		wantDetail string
+		wantHint   string
 	}{
 		{
-			name:       "clean passes",
-			body:       `{"status":"ok","legacy_resources":"clean"}`,
-			status:     http.StatusOK,
-			wantStatus: "PASS",
-			wantDetail: "no orphaned",
-		},
-		{
 			name:       "present warns with prune hint",
-			body:       `{"status":"ok","legacy_resources":"present"}`,
-			status:     http.StatusOK,
+			handler:    clitest.JSONResponse(200, map[string]any{"present": true}),
 			wantStatus: "WARN",
 			wantDetail: "orphaned pre-C1",
 			wantHint:   "prune-legacy",
 		},
 		{
-			name:       "older/non-docker server without the field is informational",
-			body:       `{"status":"ok"}`,
-			status:     http.StatusOK,
-			wantStatus: "INFO",
-			wantDetail: "does not report",
+			name:       "clean passes",
+			handler:    clitest.JSONResponse(200, map[string]any{"present": false}),
+			wantStatus: "PASS",
+			wantDetail: "no orphaned",
 		},
 		{
-			name:       "non-200 healthz is informational, not a duplicate FAIL",
-			body:       `oops`,
-			status:     http.StatusBadGateway,
+			name:       "non-docker server is informational",
+			handler:    clitest.ErrorResponse(503, "docker not configured"),
 			wantStatus: "INFO",
-			wantDetail: "502",
+			wantDetail: "no docker provider",
 		},
 		{
-			name:       "unknown value is informational",
-			body:       `{"status":"ok","legacy_resources":"weird"}`,
-			status:     http.StatusOK,
+			name:       "forbidden is informational, not a duplicate FAIL",
+			handler:    clitest.ErrorResponse(403, "admin role required"),
 			wantStatus: "INFO",
-			wantDetail: "unknown legacy-resource status",
+			wantDetail: "not authorized",
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.URL.Path != "/healthz" {
-					http.NotFound(w, r)
-					return
-				}
-				w.WriteHeader(tc.status)
-				_, _ = w.Write([]byte(tc.body))
-			}))
-			defer srv.Close()
-
-			got := checkLegacyResources(context.Background(), srv.URL)
+			stub := covStub(t)
+			stub.OnGet("/api/v1/admin/legacy-resources", tc.handler)
+			got := runCheckLegacyResources(context.Background())
 			if got.status != tc.wantStatus {
 				t.Fatalf("status = %q, want %q (detail: %s)", got.status, tc.wantStatus, got.detail)
 			}
@@ -87,9 +67,12 @@ func TestCheckLegacyResources(t *testing.T) {
 	}
 }
 
-func TestCheckLegacyResources_ServerUnreachable(t *testing.T) {
-	got := checkLegacyResources(context.Background(), "http://127.0.0.1:1")
-	if got.status != "INFO" {
-		t.Fatalf("status = %q, want INFO when server is unreachable", got.status)
+func TestRunCheckLegacyResources_NotLoggedIn(t *testing.T) {
+	stub := covStub(t)
+	_ = stub
+	cliCfg.Token = "" // simulate a CLI that hasn't logged in
+	got := runCheckLegacyResources(context.Background())
+	if got.status != "INFO" || !strings.Contains(got.detail, "not logged in") {
+		t.Fatalf("want INFO 'not logged in', got %q / %q", got.status, got.detail)
 	}
 }

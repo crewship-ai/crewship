@@ -180,12 +180,17 @@ container"**. Every agent in the affected crew fails; a `seed --smoke-test`
 reports `N/N agents failed`.
 
 `crewship doctor` surfaces this proactively: the `legacy crew resources` check
-reads the server's `/healthz` `legacy_resources` field and **WARN**s with this
-command as the remediation when orphaned resources are present.
+calls the authenticated `GET /api/v1/admin/legacy-resources` endpoint and
+**WARN**s with this command as the remediation when orphaned resources are
+present. (Detection runs on this admin endpoint, not on the unauthenticated
+`/healthz` hot path, so a slow docker daemon can never stall health probes.)
 
-The prune removes **only** the legacy names; the id-scoped resources the live
-runtime uses are never touched. It scopes to the crew slugs in your workspace
-and reports each resource removed:
+The prune is **instance-wide**: legacy docker names carry no workspace or crew
+id, so detection (what `crewship doctor` surfaces) and prune enumerate the same
+full crew set — otherwise the doctor could WARN on a slug the prune can never
+reach. It removes **only** the orphaned legacy names; the id-scoped resources
+the live runtime uses are excluded (slug/id-collision safe) and never touched.
+It reports each resource removed:
 
 ```text
 Pruned 4 legacy resource(s):

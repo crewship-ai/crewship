@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"log/slog"
 	"net/http"
@@ -8,24 +9,30 @@ import (
 	"github.com/crewship-ai/crewship/internal/provider"
 )
 
-// LegacyPruneHandler removes pre-C1 (slug-only) crew runtime resources that
-// survive a DB nuke+reseed and otherwise block agent container start. The
-// docker provider's checkNoLegacyCrewResources only DETECTS them — and the
-// failure reaches the user as a generic "failed to start agent container" via
-// chatbridge — so without a remediation path an operator is stuck (no CLI for
-// `docker volume rm`, and SSHing the host is off-limits). This handler is that
-// path. Only the orphaned legacy names are touched; the id-scoped resources the
-// live runtime uses are never removed (enforced in PruneLegacyCrewResources).
-type LegacyPruneHandler struct {
+// LegacyResourceHandler detects and removes pre-C1 (slug-only) crew runtime
+// resources that survive a DB nuke+reseed and otherwise block agent container
+// start. The docker provider's checkNoLegacyCrewResources only DETECTS them at
+// provision time (and the failure reaches the user as a generic "failed to
+// start agent container"); without a remediation path an operator is stuck (no
+// CLI for `docker volume rm`, host SSH off-limits). This handler is that path.
+//
+// Both endpoints operate INSTANCE-WIDE: legacy docker names carry no workspace
+// or crew id, so detection (what `crewship doctor` surfaces) and prune (the
+// remediation) must enumerate the same full crew set — otherwise doctor could
+// WARN on a slug the prune command can never reach. Only orphaned legacy names
+// are ever touched; the id-scoped resources the live runtime uses are excluded
+// in the provider (slug/id-collision safe).
+type LegacyResourceHandler struct {
 	db     *sql.DB
 	logger *slog.Logger
-	// pruner is nil when the active container provider can't prune (e.g. a
-	// non-docker runtime); the endpoint then 503s rather than lying.
-	pruner provider.LegacyResourcePruner
+	// pruner/detector are nil when the active container provider can't act on
+	// them (e.g. a non-docker runtime); the endpoints then 503 rather than lie.
+	pruner   provider.LegacyResourcePruner
+	detector provider.LegacyResourceDetector
 }
 
-func NewLegacyPruneHandler(db *sql.DB, logger *slog.Logger, pruner provider.LegacyResourcePruner) *LegacyPruneHandler {
-	return &LegacyPruneHandler{db: db, logger: logger, pruner: pruner}
+func NewLegacyResourceHandler(db *sql.DB, logger *slog.Logger, pruner provider.LegacyResourcePruner, detector provider.LegacyResourceDetector) *LegacyResourceHandler {
+	return &LegacyResourceHandler{db: db, logger: logger, pruner: pruner, detector: detector}
 }
 
 type legacyPruneResponse struct {
@@ -33,21 +40,74 @@ type legacyPruneResponse struct {
 	Count   int      `json:"count"`
 }
 
-// Prune removes legacy slug-only docker resources for every crew slug in the
-// caller's workspace. Admin-only (manage), matching the rest of the admin
-// surface. 503 when the active container provider can't prune. The legacy
-// names carry no crew id, so enumerating the caller's slugs is enough to clear
-// the standard demo crews (engineering/quality/ops) — and it keeps the blast
-// radius inside the caller's own workspace.
-func (h *LegacyPruneHandler) Prune(w http.ResponseWriter, r *http.Request) {
+type legacyDetectResponse struct {
+	Present bool `json:"present"`
+}
+
+// allCrewRefs enumerates every live crew on the instance as (id, slug). The id
+// is carried so the provider can PROTECT live id-scoped resources from a
+// slug/id collision when matching the slug-only legacy names.
+func (h *LegacyResourceHandler) allCrewRefs(ctx context.Context) ([]provider.CrewRef, error) {
+	rows, err := h.db.QueryContext(ctx, `SELECT id, slug FROM crews WHERE deleted_at IS NULL`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var crews []provider.CrewRef
+	for rows.Next() {
+		var c provider.CrewRef
+		if err := rows.Scan(&c.ID, &c.Slug); err != nil {
+			return nil, err
+		}
+		crews = append(crews, c)
+	}
+	return crews, rows.Err()
+}
+
+// Detect reports whether the daemon carries orphaned pre-C1 legacy resources.
+// Admin-only, read-only. 503 when the provider can't detect (non-docker).
+func (h *LegacyResourceHandler) Detect(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	role := RoleFromContext(ctx)
-	workspaceID := WorkspaceIDFromContext(ctx)
-	if !canRole(role, "manage") {
+	if !canRole(RoleFromContext(ctx), "manage") {
 		replyError(w, http.StatusForbidden, "admin role required")
 		return
 	}
-	if workspaceID == "" {
+	if WorkspaceIDFromContext(ctx) == "" {
+		replyError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+	if h.detector == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "legacy detection unavailable: docker not configured",
+		})
+		return
+	}
+	crews, err := h.allCrewRefs(ctx)
+	if err != nil {
+		h.logger.Error("legacy detect: list crews", "error", err)
+		replyError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	present, err := h.detector.HasLegacyCrewResources(ctx, crews)
+	if err != nil {
+		h.logger.Error("legacy detect: scan", "error", err)
+		replyError(w, http.StatusInternalServerError, "legacy detection failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, legacyDetectResponse{Present: present})
+}
+
+// Prune removes orphaned pre-C1 legacy resources instance-wide. Admin-only.
+// 503 when the provider can't prune. On a mid-prune failure it returns 500 WITH
+// the partial removed list so the operator (who works through the CLI, not the
+// server logs) can reconcile a partially-mutated docker state.
+func (h *LegacyResourceHandler) Prune(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	if !canRole(RoleFromContext(ctx), "manage") {
+		replyError(w, http.StatusForbidden, "admin role required")
+		return
+	}
+	if WorkspaceIDFromContext(ctx) == "" {
 		replyError(w, http.StatusUnauthorized, "not authenticated")
 		return
 	}
@@ -57,44 +117,25 @@ func (h *LegacyPruneHandler) Prune(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-
-	// All crews in the workspace, including soft-deleted ones: a crew deleted
-	// after a pre-C1 provision is exactly the case that orphans legacy
-	// resources, so we still want its slug checked.
-	rows, err := h.db.QueryContext(ctx, `SELECT DISTINCT slug FROM crews WHERE workspace_id = ?`, workspaceID)
+	crews, err := h.allCrewRefs(ctx)
 	if err != nil {
-		h.logger.Error("legacy prune: list crew slugs", "error", err)
+		h.logger.Error("legacy prune: list crews", "error", err)
 		replyError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
-	defer rows.Close()
-	var slugs []string
-	for rows.Next() {
-		var slug string
-		if err := rows.Scan(&slug); err != nil {
-			h.logger.Error("legacy prune: scan slug", "error", err)
-			replyError(w, http.StatusInternalServerError, "internal error")
-			return
-		}
-		slugs = append(slugs, slug)
-	}
-	if err := rows.Err(); err != nil {
-		h.logger.Error("legacy prune: rows", "error", err)
-		replyError(w, http.StatusInternalServerError, "internal error")
-		return
-	}
-
-	removed, err := h.pruner.PruneLegacyCrewResources(ctx, slugs)
-	if err != nil {
-		// Partial removal is possible (a transport failure mid-prune); log
-		// what got cleared so the operator can reconcile.
-		h.logger.Error("legacy prune: pipeline", "error", err, "removed", removed)
-		replyError(w, http.StatusInternalServerError, "legacy prune failed")
-		return
-	}
+	removed, err := h.pruner.PruneLegacyCrewResources(ctx, crews)
 	if removed == nil {
 		removed = []string{}
 	}
-	h.logger.Info("legacy prune complete", "workspace_id", workspaceID, "removed", removed)
+	if err != nil {
+		h.logger.Error("legacy prune: pipeline", "error", err, "removed", removed)
+		writeJSON(w, http.StatusInternalServerError, map[string]any{
+			"error":   "legacy prune failed",
+			"removed": removed,
+			"count":   len(removed),
+		})
+		return
+	}
+	h.logger.Info("legacy prune complete", "removed", removed)
 	writeJSON(w, http.StatusOK, legacyPruneResponse{Removed: removed, Count: len(removed)})
 }
