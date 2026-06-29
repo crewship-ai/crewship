@@ -14,11 +14,13 @@ import {
   XCircle,
   ChevronRight,
   Activity,
+  Puzzle,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { JSONViewer } from "@/components/features/activity/json-viewer"
 import { relTime, formatDurationDecimal } from "@/lib/time"
 import { cn } from "@/lib/utils"
+import { integrationLabel } from "@/lib/integration-labels"
 import { usePipelineRunRecords, type PipelineRunRecord } from "@/hooks/use-pipeline-run-records"
 import { usePipelineSchedules } from "@/hooks/use-pipeline-schedules"
 import type { RoutineDetail } from "./routines-detail-panel"
@@ -75,6 +77,11 @@ export function RoutineOverviewTab({
   const outputs = asArrayOfObjects(def?.["outputs"])
   const creds = asArrayOfObjects(def?.["credentials_required"])
   const steps = asArrayOfObjects(def?.["steps"])
+  // Required third-party integrations (Composio connector slugs). Filter
+  // to non-empty strings so a malformed entry can't render a blank chip.
+  const integrations = Array.isArray(routine.integrations_required)
+    ? routine.integrations_required.filter((s): s is string => typeof s === "string" && s.trim().length > 0)
+    : []
 
   const { records: runs } = usePipelineRunRecords(workspaceId ?? null, routine.slug)
   const { schedules: allSchedules } = usePipelineSchedules(workspaceId ?? null)
@@ -314,6 +321,25 @@ export function RoutineOverviewTab({
               </div>
             </div>
           </Card>
+
+          {/* Integrations — third-party connectors the executing crew must
+              have connected for a run to succeed. Empty/absent → no card. */}
+          {integrations.length > 0 && (
+            <Card title="Integrations" subtitle={`${integrations.length} required`}>
+              <div className="flex flex-wrap gap-2 px-3 py-3">
+                {integrations.map((slug) => (
+                  <span
+                    key={slug}
+                    className="inline-flex items-center gap-1.5 rounded-full border border-border/60 bg-white/[0.04] px-2.5 py-1 text-xs font-medium text-foreground/90"
+                    title={slug}
+                  >
+                    <Puzzle className="h-3 w-3 text-cyan-400" aria-hidden />
+                    {integrationLabel(slug)}
+                  </span>
+                ))}
+              </div>
+            </Card>
+          )}
 
           {/* Credentials */}
           {creds.length > 0 && (

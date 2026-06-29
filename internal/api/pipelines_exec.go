@@ -138,6 +138,20 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 		triggeredVia = pipeline.TriggeredViaManual
 	}
 
+	// Integration gate (run-time enforcement of integrations_required).
+	// Block the run before any dispatch when the routine declares
+	// integrations its author crew hasn't connected. We parse the stored,
+	// already-validated definition; a parse failure here is non-fatal — we
+	// skip the gate and let the executor below surface the malformed
+	// definition. Deferred runs are gated here at ENQUEUE time (the
+	// dispatcher path doesn't re-check), which fails fast on a forgotten
+	// integration rather than after the delay elapses.
+	if dsl, perr := pipeline.Parse([]byte(p.DefinitionJSON)); perr == nil {
+		if h.gateMissingIntegrations(w, r, workspaceID, p.AuthorCrewID, "", dsl.NormalizedIntegrationsRequired()) {
+			return
+		}
+	}
+
 	// Deferred dispatch: a delay or a debounce key parks the trigger in
 	// pending_runs instead of executing now. The in-process dispatcher
 	// fires it priority-first once fire_at arrives (and expires it if
@@ -272,6 +286,15 @@ func (h *PipelineHandler) TestRun(w http.ResponseWriter, r *http.Request) {
 	// schema check).
 	if err := pipeline.Validate(dsl, nil, nil); err != nil {
 		replyError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+
+	// Integration gate also applies to test_run: a test_run really executes
+	// against the author crew's agents (ModeTestRun differs from ModeRun only
+	// in invocation accounting), so a routine that can't reach a required
+	// integration should fail fast here too rather than burn a token-spending
+	// run the agent has no way to complete. Uses the draft's author_crew_id.
+	if h.gateMissingIntegrations(w, r, workspaceID, body.AuthorCrewID, "", dsl.NormalizedIntegrationsRequired()) {
 		return
 	}
 

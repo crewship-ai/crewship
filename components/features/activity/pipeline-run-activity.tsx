@@ -3,7 +3,7 @@
 import { useMemo } from "react"
 import { usePipelineRuns } from "@/hooks/use-pipelines"
 import type { JournalEntry } from "@/lib/types/journal"
-import { humanizeRun, isRunInFlight } from "@/lib/run-activity"
+import { humanizeRun, isRunInFlight, withAwaitingApproval } from "@/lib/run-activity"
 import { RunActivityRail } from "./run-activity-timeline"
 
 // PipelineRunActivity — the readable rail for ONE routine (pipeline) run.
@@ -17,6 +17,12 @@ interface PipelineRunActivityProps {
   slug: string
   /** Restrict to one run. When omitted, shows the most recent run. */
   runId?: string | null
+  /**
+   * When this run is parked on a human approval, pass the waitpoint's step +
+   * created_at so the rail pins an amber "awaiting your decision" row and
+   * shows the "Waiting for approval" header state. Null when not waiting.
+   */
+  awaiting?: { stepId?: string; ts: string } | null
   title?: string
   className?: string
 }
@@ -25,6 +31,7 @@ export function PipelineRunActivity({
   workspaceId,
   slug,
   runId,
+  awaiting,
   title = "Run activity",
   className,
 }: PipelineRunActivityProps) {
@@ -59,7 +66,10 @@ export function PipelineRunActivity({
       }))
   }, [runs, targetRunId, workspaceId])
 
-  const rows = useMemo(() => humanizeRun(entries), [entries])
+  const rows = useMemo(
+    () => withAwaitingApproval(humanizeRun(entries), awaiting),
+    [entries, awaiting],
+  )
   const running = useMemo(() => isRunInFlight(entries.map((e) => e.entry_type)), [entries])
 
   // Nothing triggered yet for this routine — stay out of the way.
@@ -69,6 +79,7 @@ export function PipelineRunActivity({
     <RunActivityRail
       rows={rows}
       running={running}
+      waiting={!!awaiting}
       loading={loading}
       title={title}
       emptyLabel="Waiting for the run to start…"

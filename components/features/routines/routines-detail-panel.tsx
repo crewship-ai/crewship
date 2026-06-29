@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
+import { useRouter } from "next/navigation"
 import { X, Play, FlaskConical, Eye, Square } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
@@ -11,7 +12,10 @@ import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 import { apiFetch } from "@/lib/api-fetch"
 import { buildPipelineActionRequest, canTestRun } from "@/lib/pipeline-actions"
+import { integrationLabel, extractMissingIntegrations } from "@/lib/integration-labels"
 import { PipelineRunActivity } from "@/components/features/activity/pipeline-run-activity"
+import { usePendingApproval } from "@/hooks/use-pending-approval"
+import { RoutineApprovalBanner } from "@/components/features/routines/routine-approval-banner"
 import { RoutineOverviewTab } from "./routine-overview-tab"
 import { RoutineEditorTab } from "./routine-editor-tab"
 import { RoutineRunsTab } from "./routine-runs-tab"
@@ -48,6 +52,11 @@ export interface RoutineDetail {
   created_at: string
   updated_at: string
   head_version?: number
+  // Composio connector slugs this routine needs the executing crew to
+  // have connected (e.g. ["github","slack"]). Absent/empty on routines
+  // with no third-party dependencies. Surfaced as chips on the Overview
+  // tab and used to explain a 422 run-refusal.
+  integrations_required?: string[]
 }
 
 interface Props {
@@ -58,6 +67,7 @@ interface Props {
 }
 
 export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: Props) {
+  const router = useRouter()
   const [routine, setRoutine] = useState<RoutineDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -73,6 +83,16 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
   // rapid-fire selection could race-overwrite the panel with the
   // wrong routine's data.
   const abortRef = useRef<AbortController | null>(null)
+
+  // When the just-triggered run parks on an approval gate, this resolves the
+  // waitpoint so we can surface an inline Approve/Reject banner + amber status
+  // right here, instead of making the user hunt through the Wait points tab or
+  // /inbox. Realtime events keep it live (no refresh).
+  const {
+    waitpoint: pendingApproval,
+    deciding: decidingApproval,
+    decide: decideApproval,
+  } = usePendingApproval(workspaceId, lastRunId)
 
   const fetchRoutine = async () => {
     abortRef.current?.abort()
@@ -129,8 +149,42 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
         body: JSON.stringify(body),
       })
       if (!res.ok) {
-        const t = await res.text().catch(() => "")
-        throw new Error(`${res.status}: ${t || res.statusText}`)
+        // A run can be refused with 422 + RFC 7807 Problem Details when
+        // the executing crew lacks a required integration. Parse the body
+        // once: if it carries `missing_integrations`, show the actionable
+        // "connect this integration" block instead of a generic failure
+        // toast — and return early so we don't double-report.
+        const rawBody = await res.text().catch(() => "")
+        if (res.status === 422) {
+          let parsed: unknown = null
+          try {
+            parsed = JSON.parse(rawBody)
+          } catch {
+            parsed = null
+          }
+          const missing = extractMissingIntegrations(parsed)
+          if (missing.length > 0) {
+            const labels = missing.map(integrationLabel)
+            const detail =
+              parsed && typeof parsed === "object" && typeof (parsed as Record<string, unknown>).detail === "string"
+                ? String((parsed as Record<string, unknown>).detail)
+                : undefined
+            toast.error(
+              `Tahle rutina potřebuje integraci: ${labels.join(", ")} — není připojená pro tuto crew`,
+              {
+                description:
+                  detail ?? "Připoj chybějící integraci pro crew, která rutinu spouští, a spusť ji znovu.",
+                action: {
+                  label: "Spravovat integrace",
+                  onClick: () => router.push("/integrations"),
+                },
+                duration: 10000,
+              },
+            )
+            return
+          }
+        }
+        throw new Error(`${res.status}: ${rawBody || res.statusText}`)
       }
       const data = await res.json().catch(() => ({}))
       if (action === "dry_run") {
@@ -179,8 +233,13 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
   // Status tones share the same `bg-{c}-500/20 text-{c}-400` pattern
   // as lib/colors.ts STATUS_BADGE_CLASSES so the pill matches the
   // status pills rendered in Inbox / Issues / Activity.
-  const statusTone =
-    status === "completed" || status === "succeeded" || status === "success"
+  //
+  // A live approval gate wins over the persisted last_invocation_status: the
+  // run reads as "running" in the DB while parked, but the human is the
+  // bottleneck, so we show the amber "Waiting for approval" state instead.
+  const statusTone = pendingApproval
+    ? { bg: "bg-amber-500/20", text: "text-amber-400", label: "Waiting for approval" }
+    : status === "completed" || status === "succeeded" || status === "success"
       ? { bg: "bg-emerald-500/20", text: "text-emerald-400", label: "Last run · completed" }
       : status === "failed" || status === "error"
         ? { bg: "bg-rose-500/20", text: "text-rose-400", label: "Last run · failed" }
@@ -326,10 +385,24 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
           after clicking. Full history stays in the Runs tab. */}
       {routine && lastRunId && (
         <div className="border-b border-white/[0.06]">
+          {pendingApproval && (
+            <div className="px-4 pt-3">
+              <RoutineApprovalBanner
+                waitpoint={pendingApproval}
+                deciding={decidingApproval}
+                onDecide={decideApproval}
+              />
+            </div>
+          )}
           <PipelineRunActivity
             workspaceId={workspaceId}
             slug={routine.slug}
             runId={lastRunId}
+            awaiting={
+              pendingApproval
+                ? { stepId: pendingApproval.step_id, ts: pendingApproval.created_at }
+                : null
+            }
           />
         </div>
       )}

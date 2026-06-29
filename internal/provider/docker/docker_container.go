@@ -20,6 +20,7 @@ import (
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/mount"
 	dockernetwork "github.com/docker/docker/api/types/network"
+	"github.com/docker/docker/api/types/volume"
 )
 
 // FindCrewContainer is a non-mutating lookup for an existing crew
@@ -42,51 +43,109 @@ func (p *Provider) FindCrewContainer(ctx context.Context, id, slug string) (stri
 	return "", false, nil
 }
 
-// checkNoLegacyCrewResources fails when pre-C1 (slug-only) container or
-// home/tools volumes for slug still exist on the daemon. C1 (2026-06 audit)
-// re-keyed crew resources from "<prefix>-{team,home,tools}-<slug>" to also
-// include the globally-unique crew id; provisioning the id-scoped runtime
-// alongside a surviving legacy one would dual-mount the crew's bind mounts and
-// orphan its persistent volumes. The operator must migrate/prune the legacy
-// names first (dev: nuke + reseed). No-op on a fresh post-C1 daemon.
-func (p *Provider) checkNoLegacyCrewResources(ctx context.Context, slug string) error {
+// migrateLegacyCrewResources auto-migrates pre-C1 (slug-only) crew Docker
+// resources to the id-scoped C1 naming so provisioning survives an upgrade
+// across the C1 boundary instead of wedging and forcing a destructive
+// nuke+reseed.
+//
+// C1 (2026-06 audit) re-keyed crew resources from "<prefix>-{team,home,tools}-<slug>"
+// to also include the globally-unique crew id
+// ("<prefix>-{team,home,tools}-<slug>-<id>"). The dangerous state is a surviving
+// legacy resource sitting next to the freshly-named id-scoped one: a stale
+// legacy container would dual-mount the crew's bind mounts, and stranded
+// home/tools volumes would orphan the agent's persistent home (~/.ssh, tooling).
+// On the first provision after upgrade this function reconciles both:
+//
+//   - Legacy container "<prefix>-team-<slug>": stopped (short timeout) and
+//     force-removed. It is an ephemeral runtime — its persistent state lives in
+//     the home/tools volumes, not the container — so removing it is safe and
+//     unblocks provisioning.
+//   - Legacy volumes "<prefix>-{home,tools}-<slug>": their *data* is copied into
+//     the new id-scoped volume via a short-lived helper container before the
+//     legacy volume is pruned. The copy is fail-safe — the legacy volume is
+//     never removed unless its data was successfully copied. If the target
+//     id-scoped volume already exists we do NOT clobber it: the legacy volume is
+//     left in place as a (warned) orphan the operator can prune manually.
+//
+// No-op on a fresh post-C1 daemon. If the daemon can't enumerate volumes the
+// function fails closed (returns an error) rather than proceeding: skipping the
+// check would let EnsureCrewRuntime create empty id-scoped volumes that strand an
+// unmigrated legacy home behind an authoritative-looking target.
+func (p *Provider) migrateLegacyCrewResources(ctx context.Context, id, slug, image string) error {
 	if slug == "" {
 		return nil
 	}
+
+	// Serialize by *legacy slug*, not crew id: the legacy resources reconciled
+	// below are slug-scoped, so two crews sharing a slug (distinct ids) would
+	// otherwise both observe the same legacy volumes and race to copy/claim the
+	// same ambiguous data despite the "first crew to provision claims it" policy.
+	// The caller already holds the id-scoped crew lock; this nested slug lock is
+	// deadlock-free because crew-id locks are independent and acquired first.
+	mu := p.lockForMigration(slug)
+	mu.Lock()
+	defer mu.Unlock()
+
 	prefix := p.cfg.ContainerPrefix
 	if prefix == "" {
 		prefix = "crewship"
 	}
 	legacyContainer := prefix + "-team-" + slug
-	legacyHome := prefix + "-home-" + slug
-	legacyTools := prefix + "-tools-" + slug
 
 	containers, err := p.client.ContainerList(ctx, container.ListOptions{All: true})
 	if err != nil {
-		return fmt.Errorf("list containers (legacy C1 check): %w", err)
+		return fmt.Errorf("list containers (legacy C1 migration): %w", err)
 	}
 	for _, c := range containers {
 		for _, name := range c.Names {
 			if name == "/"+legacyContainer {
-				return fmt.Errorf("legacy slug-scoped container %q exists from before the C1 naming change; remove or migrate it (dev: nuke + reseed) before this crew can provision its id-scoped runtime", legacyContainer)
+				p.logger.Info("removing legacy slug-scoped crew container (C1 migration)",
+					"container", legacyContainer, "container_id", shortID(c.ID))
+				timeout := 10
+				_ = p.client.ContainerStop(ctx, c.ID, container.StopOptions{Timeout: &timeout})
+				if rmErr := p.client.ContainerRemove(ctx, c.ID, container.RemoveOptions{Force: true}); rmErr != nil {
+					return fmt.Errorf("remove legacy slug-scoped container %q (C1 migration): %w", legacyContainer, rmErr)
+				}
 			}
 		}
 	}
 
-	// Volume check is best-effort: the container guard above already blocks the
-	// dangerous dual-runtime case. If the daemon can't list volumes, log and
-	// proceed rather than wedge all provisioning.
+	// Fail closed if volumes can't be enumerated. We can't tell whether a legacy
+	// home/tools volume is sitting here unmigrated, and EnsureCrewRuntime would
+	// go on to create fresh empty id-scoped volumes — stranding the agent's
+	// persistent home (~/.ssh, tooling) behind an authoritative-looking empty
+	// target that future provisions won't re-migrate. Blocking provisioning until
+	// the daemon can list volumes again is the data-preserving choice; a transient
+	// list failure resolves on the next attempt.
 	list, err := p.client.VolumeList(ctx, volumeListOptions())
 	if err != nil {
-		p.logger.Warn("legacy C1 volume check skipped: list volumes failed", "error", err)
-		return nil
+		return fmt.Errorf("list volumes (legacy C1 migration): %w; "+
+			"legacy data was NOT removed and provisioning is paused so no empty id-scoped "+
+			"volumes strand it — retry once the daemon can enumerate volumes again", err)
 	}
+	existing := make(map[string]bool, len(list.Volumes))
 	for _, vol := range list.Volumes {
-		if vol == nil {
+		if vol != nil {
+			existing[vol.Name] = true
+		}
+	}
+
+	for _, role := range []string{"home", "tools"} {
+		legacy := prefix + "-" + role + "-" + slug
+		target := p.crewResourceName(role, id, slug)
+		if !existing[legacy] {
+			continue // already migrated / never existed
+		}
+		if existing[target] {
+			// Both names exist — do not clobber the id-scoped data. Leave the
+			// legacy volume in place; an operator can prune it once they confirm
+			// it is stale.
+			p.logger.Warn("legacy slug-scoped volume orphaned (C1 migration): target id-scoped volume already exists, leaving legacy in place — operator may prune it",
+				"legacy_volume", legacy, "target_volume", target)
 			continue
 		}
-		if vol.Name == legacyHome || vol.Name == legacyTools {
-			return fmt.Errorf("legacy slug-scoped volume %q exists from before the C1 naming change; remove or migrate it (dev: nuke + reseed) before provisioning", vol.Name)
+		if err := p.migrateLegacyVolume(ctx, legacy, target, image); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -210,6 +269,131 @@ func (p *Provider) PruneLegacyCrewResources(ctx context.Context, crews []provide
 	return removed, nil
 }
 
+// migrateLegacyVolume copies all data from a legacy slug-scoped volume into a
+// fresh id-scoped target volume, then prunes the legacy volume. It is fail-safe:
+// the legacy volume is removed ONLY after the copy completes with exit 0. Any
+// failure (empty image, VolumeCreate, helper create/start/wait, non-zero copy
+// exit) returns an actionable error and leaves the legacy volume untouched.
+// Data loss is the cardinal sin here.
+func (p *Provider) migrateLegacyVolume(ctx context.Context, legacy, target, image string) error {
+	failSafe := func(stage string, cause error) error {
+		return fmt.Errorf("C1 migration of legacy slug-scoped volume %q into %q failed at %s: %w; "+
+			"the legacy volume was NOT removed — its data is intact. Migrate it manually or prune it once confirmed stale (dev: nuke + reseed)",
+			legacy, target, stage, cause)
+	}
+
+	if image == "" {
+		return fmt.Errorf("cannot migrate legacy slug-scoped volume %q into %q: no runtime image resolved to run the copy helper; "+
+			"the legacy volume was NOT removed — its data is intact. Migrate it manually or prune it once confirmed stale (dev: nuke + reseed)",
+			legacy, target)
+	}
+
+	// copySucceeded gates the target-volume rollback defer below. The legacy
+	// volume is removed ONLY after a verified-good copy, so if any step between
+	// here and that point fails we must also remove the half-written target —
+	// otherwise the next provision sees an existing target (line ~"existing[target]"
+	// orphan check), treats the partial copy as authoritative, and skips migration,
+	// silently stranding the legacy data behind a corrupt half-copy.
+	copySucceeded := false
+	if _, err := p.client.VolumeCreate(ctx, volume.CreateOptions{
+		Name:   target,
+		Labels: map[string]string{"managed-by": "crewship"},
+	}); err != nil {
+		return failSafe("create target volume", err)
+	}
+	defer func() {
+		if copySucceeded {
+			return
+		}
+		// Roll back the partially-written target on any failure. Use a fresh
+		// context: ctx may already be cancelled (e.g. wait timeout) and we still
+		// must clean up. Best-effort — a failure here only leaves a benign empty
+		// volume the orphan check will later flag, and the legacy data is intact.
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := p.client.VolumeRemove(cleanupCtx, target, true); err != nil {
+			p.logger.Warn("C1 migration failed and could not remove the incomplete target volume — operator should prune it before the next provision",
+				"legacy_volume", legacy, "target_volume", target, "error", err)
+		}
+	}()
+
+	// Short-lived helper: cp -a /from/. /to/ with the legacy volume mounted
+	// read-only at /from and the target at /to. No network and an explicit
+	// root user with only the three capabilities cp -a needs to faithfully
+	// reproduce the legacy home: CHOWN (restore 1001:1001 ownership on the
+	// fresh root-owned target volume), DAC_OVERRIDE (read 0700 dirs like
+	// ~/.ssh and write the target regardless of mode) and FOWNER (preserve
+	// permission bits on files it doesn't own). Without an explicit user the
+	// helper would inherit the image's UID 1001 and fail to write the
+	// root-owned target; without these caps cp -a under CapDrop ALL silently
+	// drops ownership, landing the agent's home as root and breaking the agent.
+	helperCfg := &container.Config{
+		Image:      image,
+		User:       "0:0",
+		Entrypoint: []string{"sh", "-c", "cp -a /from/. /to/ 2>/dev/null"},
+	}
+	helperHost := &container.HostConfig{
+		NetworkMode: "none",
+		CapDrop:     []string{"ALL"},
+		CapAdd:      []string{"CHOWN", "DAC_OVERRIDE", "FOWNER"},
+		Mounts: []mount.Mount{
+			{Type: mount.TypeVolume, Source: legacy, Target: "/from", ReadOnly: true},
+			{Type: mount.TypeVolume, Source: target, Target: "/to"},
+		},
+	}
+	created, err := p.client.ContainerCreate(ctx, helperCfg, helperHost, nil, nil, "")
+	if err != nil {
+		return failSafe("create copy helper", err)
+	}
+	// Always clean up the helper, success or failure.
+	defer func() { _ = p.client.ContainerRemove(ctx, created.ID, container.RemoveOptions{Force: true}) }()
+
+	if err := p.client.ContainerStart(ctx, created.ID, container.StartOptions{}); err != nil {
+		return failSafe("start copy helper", err)
+	}
+
+	// ContainerWait returns two channels; the copy finishes quickly, so a short
+	// timeout protects against a wedged daemon. We picked ContainerWait over
+	// polling ContainerInspect because the SDK decodes a clean exit code from
+	// /containers/{id}/wait, which is also straightforward to fake in tests.
+	waitCtx, waitCancel := context.WithTimeout(ctx, 60*time.Second)
+	defer waitCancel()
+	statusCh, errCh := p.client.ContainerWait(waitCtx, created.ID, container.WaitConditionNotRunning)
+	select {
+	case status, ok := <-statusCh:
+		// ContainerWait closes statusCh (zero-value status, ok == false) on a
+		// wait failure while delivering the real cause on errCh. select can pick
+		// this ready-but-closed case first, so a closed channel must be treated
+		// as failure — otherwise a wait error masquerades as StatusCode 0 and we
+		// would go on to remove the legacy volume after a copy that never ran.
+		if !ok {
+			return failSafe("wait for copy helper", fmt.Errorf("wait channel closed before a status was delivered"))
+		}
+		if status.StatusCode != 0 {
+			return failSafe("copy helper exit", fmt.Errorf("helper exited with status %d", status.StatusCode))
+		}
+	case werr := <-errCh:
+		return failSafe("wait for copy helper", werr)
+	case <-waitCtx.Done():
+		return failSafe("wait for copy helper", waitCtx.Err())
+	}
+	// The copy completed with exit 0: the target volume is authoritative now, so
+	// suppress the rollback defer before we prune the legacy source.
+	copySucceeded = true
+
+	if err := p.client.VolumeRemove(ctx, legacy, true); err != nil {
+		// The data was copied successfully; failing to prune the legacy volume
+		// is non-fatal (it becomes a benign orphan). Warn and continue.
+		p.logger.Warn("C1 migration copied volume data but failed to prune legacy volume — operator may prune it manually",
+			"legacy_volume", legacy, "target_volume", target, "error", err)
+		return nil
+	}
+	p.logger.Info("migrated legacy slug-scoped crew volume (C1 migration)",
+		"legacy_volume", legacy, "target_volume", target,
+		"note", "if this crew's slug was shared across workspaces before C1, the migrated data may be ambiguous — the first crew to provision claims it")
+	return nil
+}
+
 // EnsureCrewRuntime creates or starts a Docker container for the given crew.
 // It applies security isolation (non-root UID, cap-drop ALL, read-only rootfs)
 // and resource limits (memory, CPU, PID). Returns the container ID.
@@ -249,17 +433,6 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 
 	containerName := p.CrewContainerName(team.ID, team.Slug)
 
-	// C1 migration guard (CodeRabbit): refuse to provision the new id-scoped
-	// runtime while pre-C1, slug-only resources for this crew still exist on
-	// the daemon. Silently creating fresh "<slug>-<id>" names alongside a
-	// surviving legacy "crewship-team-<slug>" container would point two
-	// runtimes at the same crew bind mounts, and fresh empty home/tools volumes
-	// would strand the agent's persistent home (~/.ssh, tooling). Fail loudly
-	// so an operator migrates/prunes the legacy resources first.
-	if err := p.checkNoLegacyCrewResources(ctx, team.Slug); err != nil {
-		return "", err
-	}
-
 	// Compute the image we WANT to run, mirroring the
 	// CachedImage > Image > default chain used at create time
 	// below. Lifted earlier so the existing-container loop can
@@ -276,6 +449,9 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	// ID+Slug) would otherwise resolve desiredImage to the default and tear
 	// down a perfectly good provisioned container out from under a concurrent
 	// run — killing that run with exit 137 and thrashing the container.
+	//
+	// Resolved BEFORE the C1 migration below so the migration's copy-helper has
+	// a concrete image to run.
 	desiredImage := p.cfg.RuntimeImage
 	callerSpecifiedImage := false
 	if team.Image != "" {
@@ -285,6 +461,19 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	if team.CachedImage != "" {
 		desiredImage = team.CachedImage
 		callerSpecifiedImage = true
+	}
+
+	// C1 migration (audit 2026-06): reconcile any surviving pre-C1, slug-only
+	// resources for this crew before provisioning the id-scoped runtime.
+	// Silently creating fresh "<slug>-<id>" names alongside a legacy
+	// "crewship-team-<slug>" container would point two runtimes at the same crew
+	// bind mounts, and fresh empty home/tools volumes would strand the agent's
+	// persistent home. Rather than fail and force a destructive nuke+reseed, this
+	// drops the (ephemeral) legacy container and copies legacy volume data into
+	// the id-scoped volumes — hard-failing only, fail-safe, when a copy can't
+	// complete (the legacy volume is never removed unless its data was copied).
+	if err := p.migrateLegacyCrewResources(ctx, team.ID, team.Slug, desiredImage); err != nil {
+		return "", err
 	}
 
 	p.logger.Debug("listing containers")

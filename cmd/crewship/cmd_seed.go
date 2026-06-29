@@ -470,12 +470,18 @@ func seedBootstrap(ctx context.Context, password string) (*cli.Client, string, e
 			return nil, "", fmt.Errorf("read bootstrap response: %w", err)
 		}
 
-		// Save config for future commands
-		cliCfg.Server = server
-		cliCfg.Token = result.CLIToken
-		cliCfg.Workspace = result.WorkspaceID
-		if err := cli.SaveConfig(cliCfg); err != nil {
-			cli.PrintWarning("could not save CLI config: " + err.Error())
+		// Save config for future commands. Load the RAW config (not the
+		// profile-overlaid cliCfg) and write the bootstrapped credential to the
+		// active target via WriteCredential, so under a profile the token lands
+		// in cfg.Servers[name] where reads look — not in a top-level slot the
+		// overlay would mask on the next command.
+		if raw, lerr := cli.LoadConfig(); lerr != nil {
+			cli.PrintWarning("could not load CLI config to save bootstrap token: " + lerr.Error())
+		} else {
+			raw.WriteCredential(flagProfile, server, result.CLIToken, result.WorkspaceID)
+			if err := cli.SaveConfig(raw); err != nil {
+				cli.PrintWarning("could not save CLI config: " + err.Error())
+			}
 		}
 
 		fmt.Fprintf(os.Stderr, "  Bootstrapped admin: demo@crewship.ai\n")

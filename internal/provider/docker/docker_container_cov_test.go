@@ -207,6 +207,14 @@ func (f *covRT) handler() http.HandlerFunc {
 			}
 			_, _ = w.Write([]byte("{}"))
 
+		case r.Method == http.MethodGet && strings.HasSuffix(path, "/volumes"):
+			// Volume LIST (distinct from inspect's /volumes/{name}). The legacy-C1
+			// migration enumerates volumes on every EnsureCrewRuntime with a slug
+			// and now fails closed if it can't; serve an empty list so it finds
+			// nothing to migrate and provisioning proceeds.
+			jsonHdr()
+			_ = json.NewEncoder(w).Encode(map[string]any{"Volumes": []any{}, "Warnings": nil})
+
 		case r.Method == http.MethodGet && strings.Contains(path, "/volumes/"):
 			http.Error(w, `{"message":"no such volume"}`, http.StatusNotFound)
 

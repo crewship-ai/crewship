@@ -3,6 +3,7 @@ package cli
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -242,7 +243,7 @@ func TestSaveConfig_RoundTripsThroughLoadConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
 	}
-	if *got != *orig {
+	if !reflect.DeepEqual(got, orig) {
 		t.Errorf("round-trip lost data:\n  saved: %+v\n  loaded: %+v", orig, got)
 	}
 }

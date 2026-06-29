@@ -136,6 +136,13 @@ export function RunActivityTimeline({
 interface RunActivityRailProps {
   rows: RunActivityRow[]
   running?: boolean
+  /**
+   * Run is parked on a human approval. Renders an amber "Waiting for approval"
+   * status in the header instead of the blue "Running" pulse. Takes precedence
+   * over `running` since a parked run is technically in-flight but the human,
+   * not the agent, is the bottleneck.
+   */
+  waiting?: boolean
   loading?: boolean
   title?: string
   emptyLabel?: string
@@ -150,6 +157,7 @@ interface RunActivityRailProps {
 export function RunActivityRail({
   rows,
   running = false,
+  waiting = false,
   loading = false,
   title = "Run activity",
   emptyLabel,
@@ -160,12 +168,17 @@ export function RunActivityRail({
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <span className="text-[11px] font-semibold text-foreground/80">{title}</span>
-          {running && (
+          {waiting ? (
+            <span className="inline-flex items-center gap-1 text-[10px] text-amber-400">
+              <span className="h-1.5 w-1.5 rounded-full bg-amber-400 animate-pulse" />
+              Waiting for approval
+            </span>
+          ) : running ? (
             <span className="inline-flex items-center gap-1 text-[10px] text-blue-400">
               <span className="h-1.5 w-1.5 rounded-full bg-blue-400 animate-pulse" />
               Running
             </span>
-          )}
+          ) : null}
         </div>
         {rows.length > 0 && (
           <span className="text-[10px] text-foreground/35 tabular-nums">{rows.length} steps</span>
@@ -192,10 +205,23 @@ export function RunActivityRail({
 function RunActivityRowView({ row, last }: { row: RunActivityRow; last: boolean }) {
   const Icon = row.icon
   return (
-    <li className="flex items-start gap-2.5 py-1.5 relative">
+    <li
+      className={cn(
+        "flex items-start gap-2.5 py-1.5 relative",
+        // Parked-on-approval row: amber tint + ring so the blocked step reads
+        // as "this is on you" rather than another grey completed line.
+        row.awaiting && "-mx-2 rounded-md bg-amber-500/[0.06] px-2 ring-1 ring-inset ring-amber-500/20",
+      )}
+    >
       {/* Connector rail down to the next node. */}
       {!last && <div className="absolute left-[7px] top-[24px] w-px h-[calc(100%-8px)] bg-white/[0.06]" />}
-      <Icon className={cn("h-3.5 w-3.5 shrink-0 mt-0.5", TONE_ICON[row.tone])} />
+      <Icon
+        className={cn(
+          "h-3.5 w-3.5 shrink-0 mt-0.5",
+          TONE_ICON[row.tone],
+          row.awaiting && "animate-pulse",
+        )}
+      />
       <div className="flex-1 min-w-0">
         <div className="flex items-baseline gap-2">
           <span className="text-[10px] text-foreground/30 tabular-nums shrink-0">
@@ -204,7 +230,11 @@ function RunActivityRowView({ row, last }: { row: RunActivityRow; last: boolean 
           <span
             className={cn(
               "text-[11px] truncate",
-              row.tone === "error" ? "text-red-300/90" : "text-foreground/85 font-medium",
+              row.awaiting
+                ? "font-semibold text-amber-300"
+                : row.tone === "error"
+                  ? "text-red-300/90"
+                  : "text-foreground/85 font-medium",
             )}
           >
             {row.title}

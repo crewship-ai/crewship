@@ -1,0 +1,139 @@
+---
+title: "Server profiles"
+description: "Target several Crewship instances (dev/staging/prod) from one CLI config — named profiles, each with its own token, switchable per-command, per-shell, or per-directory."
+icon: "server"
+---
+
+# crewship server
+
+`crewship server` manages **server profiles**: named targets stored in a single
+`~/.crewship/cli-config.yaml`, each with its own server URL, auth token, and
+default workspace. One config can address `dev1`/`dev2`/`dev3`, staging, and
+prod, and you switch between them without juggling config files or environment
+variables.
+
+```bash
+crewship server <subcommand>
+```
+
+<Note>
+Each profile's token is **bound to that profile's host**. Selecting a profile
+can never send another instance's bearer to the wrong server — the same
+host-mismatch guard that protects `--server` applies (see
+[`crewship login`](/cli/login)).
+</Note>
+
+## Subcommands
+
+| Command | Description |
+|---------|-------------|
+| `list` | List configured profiles; the active one is marked `*`. |
+| `add <name>` | Add or update a profile's URL (from `--server`), optional `--workspace`, and optional `--dir` cwd binding. |
+| `use <name>` | Set the persisted default (`current`) profile. |
+| `remove <name>` (alias `rm`) | Delete a profile. |
+| `current` | Show the active profile and its server/workspace/token status. |
+
+---
+
+## Quick start
+
+The minimum is one `login` per instance — `login --profile <name> --server <url>`
+**creates the profile if it doesn't exist**. If no default profile is set yet,
+it also becomes `current`, so you don't need a separate `server add` (logging
+into another profile later does not re-point an existing default):
+
+```bash
+crewship login --profile dev1 --server https://crewship-dev1.example
+crewship login --profile dev2 --server https://crewship-dev2.example
+
+crewship server use dev1                # default for this machine
+crewship crew list                      # uses the default…
+crewship --profile dev2 crew list       # …or override per command
+```
+
+`crewship server list` then shows:
+
+```text
+* dev1   https://crewship-dev1.example   ws=-   token set
+  dev2   https://crewship-dev2.example   ws=-   token set
+```
+
+<Tip>
+Single-server users need none of this — plain `crewship login` keeps writing the
+top-level config exactly as before. Profiles are opt-in.
+</Tip>
+
+---
+
+## How the active profile is resolved
+
+For every command, the active profile is chosen in this order (first match wins):
+
+1. **`--profile <name>`** flag — one-off override.
+2. **`CREWSHIP_PROFILE`** env var — scopes to a shell.
+3. **Directory match** — `directory_profiles` in the config (see below).
+4. **`current`** — the persisted default set by `crewship server use`.
+
+If no profile is selected, the CLI falls back to the legacy top-level
+`server`/`token`/`workspace` fields (single-server mode), so existing configs
+keep working unchanged.
+
+The selected profile's `server`, `token`, and `workspace` then flow through the
+normal resolution chain. An explicit `--server` still overrides the dial target;
+`CREWSHIP_SERVER` is only consulted when the active profile does not already
+define a server URL (and a host mismatch still fails if the token was minted for
+a different host).
+
+---
+
+## Directory auto-select
+
+`directory_profiles` maps a directory to a profile, so the CLI picks the right
+target automatically based on where you run it. Bind a directory from the CLI
+with `server add --dir` (no YAML editing) — `.` means the current directory:
+
+```bash
+cd /work/crewship_1 && crewship server add dev1 --server https://crewship-dev1.example --dir .
+cd /work/crewship_2 && crewship server add dev2 --server https://crewship-dev2.example --dir .
+```
+
+That records:
+
+```yaml
+# ~/.crewship/cli-config.yaml
+directory_profiles:
+  /work/crewship_1: dev1
+  /work/crewship_2: dev2
+```
+
+Now running `crewship` inside `/work/crewship_2` (or any subdirectory)
+automatically targets `dev2` — no `--profile` flag, no env var. The **longest
+matching path wins**, and matching is on path boundaries (so `/work/crewship_1`
+never matches `/work/crewship_10`). `server remove` also prunes a profile's
+directory bindings, so no cwd resolves to a deleted profile.
+
+This is the native replacement for shell hooks that exported
+`CREWSHIP_SERVER`/`CREWSHIP_CONFIG` based on `$PWD`.
+
+---
+
+## Migrating from `CREWSHIP_CONFIG`
+
+Earlier multi-instance setups pinned a separate config file per directory via
+the `CREWSHIP_CONFIG` env var. Profiles fold all of those into one file:
+
+| Before (per-clone files + shell hook) | After (native profiles) |
+|---|---|
+| `~/.crewship/dev1.yaml`, `dev2.yaml`, … | one `cli-config.yaml` with a `servers:` map |
+| `export CREWSHIP_CONFIG=…/dev2.yaml` on `cd` | `directory_profiles:` map (or `--profile` / `current`) |
+| token clobbering between clones | each profile token isolated by name + host |
+
+`CREWSHIP_CONFIG` still works (it points the CLI at a specific file) and remains
+useful for fully isolated configs, but it is no longer required to target
+multiple instances.
+
+## See also
+
+- [`crewship login`](/cli/login) — authenticate a profile with `--profile`.
+- [`crewship config`](/cli/config) — top-level settings and `config validate`.
+- [Authentication](/guides/auth) — how the CLI token is minted, bound to a host, and validated.

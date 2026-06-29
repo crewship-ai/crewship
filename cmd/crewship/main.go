@@ -23,6 +23,7 @@ var (
 	flagServer              string
 	flagWorkspace           string
 	flagFormat              string
+	flagProfile             string
 	flagVerbose             bool
 	flagNoColor             bool
 	flagAllowServerMismatch bool
@@ -37,12 +38,27 @@ var rootCmd = &cobra.Command{
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		cli.InitColors(flagNoColor)
 
+		// Inject the working directory so internal profile resolution can do
+		// directory_profiles matching without reaching into the filesystem
+		// itself (provider pattern). Best-effort: an error just disables
+		// directory-based selection.
+		if wd, werr := os.Getwd(); werr == nil {
+			cli.SetWorkingDir(wd)
+		}
+
 		cfg, err := cli.LoadConfig()
 		if err != nil {
 			cli.PrintWarning("failed to load config: " + err.Error())
 			cfg = &cli.CLIConfig{}
 		}
-		cliCfg = cfg
+		// Overlay the active server profile (--profile / CREWSHIP_PROFILE /
+		// directory match / `current`) onto the top-level Server/Token/
+		// Workspace so every downstream read path — ResolveServer,
+		// newAPIClient's token-host binding, requireAuth — sees the selected
+		// target with zero per-command changes. Profile-writing commands
+		// (login, server, config set) re-load the raw config themselves, so
+		// this read-side overlay never corrupts what gets saved.
+		cliCfg = cfg.WithActiveProfile(flagProfile)
 	},
 	SilenceUsage:  true,
 	SilenceErrors: true,
@@ -52,6 +68,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&flagServer, "server", "s", "", "Server URL (default: http://localhost:8080, env: CREWSHIP_SERVER)")
 	rootCmd.PersistentFlags().StringVarP(&flagWorkspace, "workspace", "w", "", "Workspace ID or slug (env: CREWSHIP_WORKSPACE)")
 	rootCmd.PersistentFlags().StringVarP(&flagFormat, "format", "f", "", "Output format: table|json|yaml|ndjson|quiet (default: table)")
+	rootCmd.PersistentFlags().StringVar(&flagProfile, "profile", "", "Server profile to target (env: CREWSHIP_PROFILE; manage with 'crewship server')")
 	rootCmd.PersistentFlags().BoolVarP(&flagVerbose, "verbose", "v", false, "Verbose output")
 	rootCmd.PersistentFlags().BoolVar(&flagNoColor, "no-color", false, "Disable ANSI colors")
 	rootCmd.PersistentFlags().BoolVar(&flagAllowServerMismatch, "server-allow-mismatch", false,
@@ -111,6 +128,7 @@ func init() {
 	rootCmd.AddCommand(tokenCmd)
 	rootCmd.AddCommand(sessionCmd)
 	rootCmd.AddCommand(configCmd)
+	rootCmd.AddCommand(serverCmd)
 	rootCmd.AddCommand(escalationCmd)
 	rootCmd.AddCommand(exposeCmd)
 	rootCmd.AddCommand(templateCmd)
@@ -150,7 +168,10 @@ func main() {
 // common case (no --server override) the resolved host equals the configured
 // host, so there is zero friction.
 func newAPIClient() *cli.Client {
-	server := cli.ResolveServer(flagServer, cliCfg)
+	// EffectiveServer (not ResolveServer) so an active profile's server wins
+	// over a stale CREWSHIP_SERVER env left over from the #544 stopgap; the
+	// token is host-bound to that same profile server below, so the two agree.
+	server := cli.EffectiveServer(flagServer, flagProfile, cliCfg)
 	workspace := cli.ResolveWorkspace(flagWorkspace, cliCfg)
 	token := ""
 	tokenHost := ""
@@ -195,12 +216,32 @@ func newFormatter() *cli.Formatter {
 	return cli.NewFormatter(format)
 }
 
-// requireAuth checks that a token is configured.
+// requireAuth checks that a token is configured for the active target. When a
+// profile is selected but undefined (typo'd --profile/CREWSHIP_PROFILE or a
+// `current` pointing at a removed profile), the overlay blanks the token, so
+// point the operator at the profile rather than a generic "run login".
 func requireAuth() error {
-	if cliCfg == nil || cliCfg.Token == "" {
-		return fmt.Errorf("not logged in. Run 'crewship login' first")
+	// Handle a selected profile first: a profile can carry a token but an empty
+	// server (hand-edited / half-written config), and accepting that token
+	// before the target is proven configured would let later fallbacks dial the
+	// wrong host. Require a non-empty profile server before the token counts.
+	if name := cli.ActiveProfileName(flagProfile, cliCfg); name != "" {
+		if cliCfg == nil {
+			return fmt.Errorf("profile %q is not configured — run 'crewship server add %s --server <url>' then 'crewship login --profile %s'", name, name, name)
+		}
+		p := cliCfg.Servers[name]
+		if p == nil || strings.TrimSpace(p.Server) == "" {
+			return fmt.Errorf("profile %q is not configured — run 'crewship server add %s --server <url>' then 'crewship login --profile %s'", name, name, name)
+		}
+		if strings.TrimSpace(p.Token) != "" {
+			return nil
+		}
+		return fmt.Errorf("not logged into profile %q. Run 'crewship login --profile %s'", name, name)
 	}
-	return nil
+	if cliCfg != nil && cliCfg.Token != "" {
+		return nil
+	}
+	return fmt.Errorf("not logged in. Run 'crewship login' first")
 }
 
 // confirmAction prompts for confirmation unless --yes is passed.

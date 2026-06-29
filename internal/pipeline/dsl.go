@@ -66,6 +66,14 @@ func Parse(data []byte) (*DSL, error) {
 			}
 		}
 	}
+	// Normalize integration slugs in place (lowercase + trim) so the
+	// parsed DSL carries the canonical form — the round-trip the run gate
+	// and the GET response both rely on. Empties are deliberately KEPT so
+	// Validate can reject a malformed (whitespace-only) entry rather than
+	// silently dropping it.
+	for i, s := range dsl.IntegrationsRequired {
+		dsl.IntegrationsRequired[i] = strings.ToLower(strings.TrimSpace(s))
+	}
 	return &dsl, nil
 }
 
@@ -105,6 +113,9 @@ func Validate(dsl *DSL, agentSlugs map[string]struct{}, pipelineSlugs map[string
 		return errors.New("pipeline: at least one step required")
 	}
 	if err := validateAgentless(dsl); err != nil {
+		return err
+	}
+	if err := validateIntegrationsRequired(dsl); err != nil {
 		return err
 	}
 
