@@ -89,6 +89,7 @@ type pipelineRowJSON struct {
 	AuthoredVia          string          `json:"authored_via"`
 	CreatedAt            string          `json:"created_at"`
 	UpdatedAt            string          `json:"updated_at"`
+	IntegrationsRequired []string        `json:"integrations_required,omitempty"`
 	Definition           json.RawMessage `json:"definition,omitempty"`
 }
 
@@ -208,6 +209,11 @@ var pipelineGetCmd = &cobra.Command{
 		fmt.Fprintf(w, "Author crew:\t%s\n", p.AuthorCrewID)
 		fmt.Fprintf(w, "Author agent:\t%s\n", p.AuthorAgentID)
 		fmt.Fprintf(w, "Authored via:\t%s\n", p.AuthoredVia)
+		if len(p.IntegrationsRequired) > 0 {
+			// Enforced at run time: a run is blocked when the author crew
+			// hasn't connected one of these (422 + missing_integrations).
+			fmt.Fprintf(w, "Integrations:\t%s\n", strings.Join(p.IntegrationsRequired, ", "))
+		}
 		fmt.Fprintf(w, "Invocations:\t%d\n", p.InvocationCount)
 		if p.LastInvokedAt != nil && *p.LastInvokedAt != "" {
 			fmt.Fprintf(w, "Last invoked:\t%s (status=%s)\n", *p.LastInvokedAt, p.LastInvocationStatus)

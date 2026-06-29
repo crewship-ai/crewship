@@ -87,7 +87,8 @@ Minimal valid routine:
 | `execution_tier` | object | `{preferred, fallback}` overriding workspace default. |
 | `estimated_cost_usd` | number | Author estimate; UI surfaces overrun warnings. |
 | `egress_targets` | array of string | Declared outbound hosts. Enforced for `http` step. |
-| `credentials_required` | array of CredReq | Declared credential needs (`type` + `scope`). |
+| `integrations_required` | array of string | Declared third-party integrations (Composio connector slugs like `"github"`, `"slack"`). **Declared AND enforced at run time** — see [Required integrations](#required-integrations) below. Slugs are lowercased/trimmed. |
+| `credentials_required` | array of CredReq | Declared credential needs (`type` + `scope`). Declared-only today (not yet enforced at run time). |
 | `max_cost_usd` | number | Runtime cost cap; run aborts if exceeded between steps. |
 | `concurrency_key` | string | Template that gates how many runs can be in flight at once for the same workspace + rendered key. Typical pattern `"{{ inputs.account_id }}"` to serialise per-tenant runs. Empty (default) = no gate. See [Concurrency + idempotency](/guides/routines-cookbook#recipe-5-idempotent-routine-with-concurrency-key) recipe and the fail-fast note in [Troubleshooting](#run-returns-500-pipeline-concurrency_key-rendered-to-empty-value). |
 | `max_concurrent` | integer | Cap on simultaneous runs sharing the resolved `concurrency_key`. Defaults to `1` when `concurrency_key` is set (strict per-key serialisation); ignored otherwise. |
@@ -129,6 +130,58 @@ Templates are **regex substitution, not expression evaluation**. There is no ari
 <Info>
 Save-time validation walks **every** template-bearing field and rejects placeholders that reference unknown inputs or unseen-yet steps — so a typo'd `{{ inputs.tyop }}` fails at save, not at 3am in production.
 </Info>
+
+## Required integrations
+
+A routine can DECLARE the third-party integrations (Composio connectors) it
+needs with the top-level `integrations_required` array, and the run path will
+**block** a run when the executing crew hasn't connected one of them. This
+closes the "integration forgotten" gap — the same shape as `egress_targets`,
+but for connectors instead of hosts.
+
+```json
+{
+  "name": "triage-incident",
+  "integrations_required": ["slack", "github"],
+  "steps": [ ... ]
+}
+```
+
+Semantics:
+
+- **Declared is always allowed.** Saving a routine that names an integration
+  the crew lacks is fine — declaring is a contract, not a connection. Only the
+  *run* enforces. (Save-time validation only checks the list is well-formed:
+  non-empty slugs, lowercased/trimmed, within a sane count cap.)
+- **Enforced at run time.** Before a run starts, Crewship resolves the
+  integrations the routine's **author crew** has connected and compares them to
+  `integrations_required`. If any are missing the run is **blocked** with an
+  RFC 7807 Problem Details response, HTTP **422**, carrying a machine-readable
+  `missing_integrations: string[]` member and a human `detail` like
+  `routine requires integration "slack" not connected for crew "Marketing"`.
+  The UI uses `missing_integrations` to render a **Connect** action. The run
+  never starts — no tokens spent.
+- **No-op fast path.** An empty / absent `integrations_required` does zero
+  resolution work — no overhead for routines that don't use it.
+- **Fail-open.** If integration-availability resolution itself errors, the run
+  is **allowed** (a warning is logged). A bug in resolution must never wedge
+  every run of every routine — a forgotten integration is a soft, recoverable
+  failure; a hard block on all runs would be a self-inflicted outage.
+- **`run` and `test_run` are gated; `dry_run` is not.** A `test_run` really
+  executes against the author crew's agents, so it's gated too (fail fast
+  rather than burn a token-spending run the agent can't complete). `dry_run`
+  is a preview that invokes nothing, so it's left ungated.
+
+<Note>
+Integration availability is resolved from the crew's connected Composio
+connectors (the MCP server rows the bind flow writes). Two limitations:
+under the workspace **default connector** (every agent inherits all connected
+apps), the gate treats integrations as available without enumerating them; and
+resolution reflects what's **wired**, not live connection health (a revoked
+account still reads as available until its binding is removed).
+`credentials_required` remains **declared-only** for now — it is not yet
+enforced at run time the way `integrations_required` is.
+</Note>
 
 ## Step types
 

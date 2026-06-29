@@ -245,6 +245,13 @@ type pipelineResponse struct {
 	// from a single GROUP BY query.
 	LinkedIssueCount int      `json:"linked_issue_count"`
 	LinkedIssues     []string `json:"linked_issues,omitempty"`
+	// IntegrationsRequired is the routine's declared third-party
+	// integrations (Composio connector slugs). Surfaced on both list and
+	// detail (it's a small array) so a UI can render a "needs Slack" chip
+	// and offer a Connect action. Parsed from the stored definition —
+	// there's no dedicated column. Enforced at run time (the run gate
+	// blocks a run whose author crew lacks one of these).
+	IntegrationsRequired []string `json:"integrations_required,omitempty"`
 	// Definition is included on the detail endpoint only — list
 	// responses omit it to keep payloads small.
 	Definition json.RawMessage `json:"definition,omitempty"`
@@ -272,6 +279,12 @@ func toPipelineResponse(p *pipeline.Pipeline, includeDefinition bool) pipelineRe
 	if p.LastInvokedAt != nil {
 		t := p.LastInvokedAt.Format("2006-01-02T15:04:05.999999999Z07:00")
 		out.LastInvokedAt = &t
+	}
+	// Surface declared integrations from the stored definition. Best-effort:
+	// a malformed definition just leaves the field empty (the executor /
+	// validators own reporting that elsewhere).
+	if dsl, err := pipeline.Parse([]byte(p.DefinitionJSON)); err == nil {
+		out.IntegrationsRequired = dsl.NormalizedIntegrationsRequired()
 	}
 	if includeDefinition {
 		out.Definition = json.RawMessage(p.DefinitionJSON)

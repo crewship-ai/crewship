@@ -25,7 +25,17 @@ type DSL struct {
 	EstimatedCostUSD float64        `json:"estimated_cost_usd,omitempty"`
 	EstimatedDurSec  int            `json:"estimated_duration_seconds,omitempty"`
 	EgressTargets    []string       `json:"egress_targets,omitempty"`
-	CredsRequired    []CredReq      `json:"credentials_required,omitempty"`
+	// IntegrationsRequired declares the third-party integrations (Composio
+	// connector slugs like "github", "slack") a run needs. Unlike
+	// CredsRequired (declared-only today), this list is ENFORCED at run
+	// time: the API run gate blocks a run whose author crew hasn't
+	// connected every declared integration (see
+	// internal/api/pipeline_integrations_gate.go). Declaring an integration
+	// is always allowed at save time — only the run path enforces. Slugs
+	// are lowercased/trimmed; use NormalizedIntegrationsRequired to read
+	// the canonical set.
+	IntegrationsRequired []string  `json:"integrations_required,omitempty"`
+	CredsRequired        []CredReq `json:"credentials_required,omitempty"`
 	// ConcurrencyKey gates how many runs of this pipeline can be in
 	// flight at once for the same workspace + key value. A typical
 	// pattern is `concurrency_key: "{{ inputs.account_id }}"` so the

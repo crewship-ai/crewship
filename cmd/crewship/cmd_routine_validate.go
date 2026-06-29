@@ -111,6 +111,9 @@ Server-side checks not run locally:
 		if len(dsl.EgressTargets) > 0 {
 			fmt.Printf("  Egress:    %s\n", strings.Join(dsl.EgressTargets, ", "))
 		}
+		if ir := dsl.NormalizedIntegrationsRequired(); len(ir) > 0 {
+			fmt.Printf("  Integr.:   %s\n", strings.Join(ir, ", "))
+		}
 		fmt.Println("Save with: crewship routine save --definition <file> --author-crew <crew_id>")
 		return nil
 	},
