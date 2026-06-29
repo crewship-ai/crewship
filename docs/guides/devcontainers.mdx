@@ -249,11 +249,12 @@ mise is installed as the `agent` user (UID 1001), so tools land under `/home/age
 
 ## Triggering provisioning
 
-Provisioning is **asynchronous**. The CLI command returns immediately after the backend enqueues a job; you then poll for status. Three triggers can put a crew into provisioning state:
+Provisioning is **asynchronous**. The CLI command returns immediately after the backend enqueues a job; you then poll for status. Four triggers can put a crew into provisioning state:
 
 1. **Explicit CLI/API trigger** — `crewship crew provision <slug>` or `POST /api/v1/crews/{crewId}/provision`.
 2. **Crew rebuild** — `crewship crew rebuild <slug>` clears the cached image marker and re-runs provision.
 3. **Auto-provision on first chat** *(PR #230)* — when an operator opens a chat with an agent in a crew that has a config but no cached image, the chat handler calls `ProvisioningHandler.EnqueueForCrew` directly. The chat surface renders an inline `CrewProvisioningCard` with the live progress checklist; once provisioning succeeds, the agent's first message starts on the freshly cached image.
+4. **Auto-provision on dispatch** — when an **issue, mission, or routine** is dispatched to an agent in a crew that needs provisioning but has no usable cached image (never built, or the cache tag was pruned from the daemon), the dispatch path (`AssignmentHandler.runAssignment` → `ProvisioningHandler.EnsureProvisioned`) **blocks until the image is built**, then starts the agent on it. The same `provision.*` workspace events fire, so the top-right toolbar provisioning popover lights up ("preparing container") with no extra wiring. If the build fails or times out, the run finishes with a clear *"preparing the crew container failed: …"* message instead of the cryptic `exit 127` you'd get from launching the agent on a bare base image with no `claude` CLI. This guarantee means a crew is runnable the moment it's created — operators don't have to remember to `crewship crew provision` first.
 
 The `EnqueueForCrew` API is idempotent: if a job is already running for the crew, the second call returns the existing job's ID rather than starting a duplicate. Rate limiting is enforced — `ErrRateLimited` is returned as RFC 7807 Problem Details if a workspace is enqueueing more than the per-minute cap.
 
