@@ -43,6 +43,8 @@ var featuresListCmd = &cobra.Command{
 				Description string `json:"description"`
 				Category    string `json:"category"`
 				SizeHint    string `json:"size_hint"`
+				Publisher   string `json:"publisher"`
+				Tier        string `json:"tier"`
 			} `json:"features"`
 		}
 		if err := cli.ReadJSON(resp, &result); err != nil {
@@ -50,11 +52,15 @@ var featuresListCmd = &cobra.Command{
 		}
 
 		f := newFormatter()
-		headers := []string{"NAME", "CATEGORY", "SIZE", "REF"}
+		headers := []string{"NAME", "CATEGORY", "SOURCE", "SIZE", "REF"}
 		var rows [][]string
 		for _, feat := range result.Features {
+			source := feat.Publisher
+			if feat.Tier != "" {
+				source = feat.Publisher + " · " + feat.Tier
+			}
 			rows = append(rows, []string{
-				feat.Name, feat.Category, feat.SizeHint, feat.Ref,
+				feat.Name, feat.Category, source, feat.SizeHint, feat.Ref,
 			})
 		}
 		return f.Auto(result.Features, headers, rows)
@@ -87,6 +93,8 @@ var featuresInfoCmd = &cobra.Command{
 				Category    string `json:"category"`
 				Icon        string `json:"icon"`
 				SizeHint    string `json:"size_hint"`
+				Publisher   string `json:"publisher"`
+				Tier        string `json:"tier"`
 			} `json:"features"`
 		}
 		if err := cli.ReadJSON(resp, &result); err != nil {
@@ -101,6 +109,8 @@ var featuresInfoCmd = &cobra.Command{
 					{"Name", feat.Name},
 					{"Ref", feat.Ref},
 					{"Category", feat.Category},
+					{"Publisher", feat.Publisher},
+					{"Tier", feat.Tier},
 					{"Description", feat.Description},
 					{"Icon", feat.Icon},
 					{"Size Hint", feat.SizeHint},
