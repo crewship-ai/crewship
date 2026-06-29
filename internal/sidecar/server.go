@@ -456,6 +456,9 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 			case r.Method == http.MethodPost && r.URL.Path == "/skills/generate":
 				s.handleSkillGenerate(w, r)
 				return
+			case r.Method == http.MethodPost && r.URL.Path == "/skills/author":
+				s.handleSkillAuthor(w, r)
+				return
 			case r.Method == http.MethodPost && r.URL.Path == "/credentials/create":
 				s.handleCredentialCreate(w, r)
 				return

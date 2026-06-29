@@ -367,6 +367,9 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	skillPropH := NewSkillProposedHandler(r.db, r.logger)
 	skillPropH.SetJournal(r.Journal())
 	skillPropH.SetCrewMemoryRoot(r.consolidateMemoryRoot)
+	// Stash for registerInternalRoutes (runs after this) so the internal
+	// agent-authoring route can reuse this instance (shared db/journal/root).
+	r.skillPropHandler = skillPropH
 	r.mux.Handle("GET /api/v1/skills/proposed", authed(wsCtx(http.HandlerFunc(skillPropH.List))))
 	r.mux.Handle("POST /api/v1/skills/proposed/approve", authed(wsCtx(http.HandlerFunc(skillPropH.Approve))))
 	r.mux.Handle("POST /api/v1/skills/proposed/reject", authed(wsCtx(http.HandlerFunc(skillPropH.Reject))))

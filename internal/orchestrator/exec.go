@@ -77,6 +77,33 @@ EXPOSE PORT (show a running server to the user):
   "ttl_seconds": N to request a different TTL (max 24h). The URL is a capability
   — anyone with it reaches the server, so avoid posting it to public channels.
 - Bind your server to 0.0.0.0 (not 127.0.0.1) so the reverse proxy can reach it.
+
+SAVE A REUSABLE SKILL (procedural memory for the crew):
+- When you work out a non-trivial, repeatable workflow -- multiple steps, a tool
+  setup, a gotcha you had to discover -- save it as a SKILL so you and your
+  crewmates can reuse it later instead of re-deriving it. Offer to do this after
+  you finish a complex task the crew is likely to repeat. Skip trivial
+  one-liners, and never put secrets in a skill.
+- You author the skill yourself: write a complete SKILL.md (YAML frontmatter +
+  markdown body) and post it. There is no separate generator -- your own write-up
+  IS the skill, so capture the exact commands and the pitfalls you actually hit.
+- Frontmatter: name (lowercase-hyphenated); description (ONE sentence, <=60
+  chars, starting with a trigger phrase like "Use when ..." -- this is what
+  routes the skill, so keep it tight and concrete); category (one of CODING,
+  DATA, DEVOPS, WRITING, RESEARCH, PM, DESIGN, SUPPORT, SECURITY, FINANCE, OPS,
+  AUTOMATION, SALES, CUSTOM).
+- Body, in this order: a one-line intro, then "## When to Use",
+  "## Procedure" (numbered, copy-paste-exact commands), "## Pitfalls",
+  "## Verification". Aim for ~100 lines; do not paste whole docs.
+- The skill is STAGED for human review, not made live immediately -- a manager
+  approves it before it ships to the crew. Send the SKILL.md over STDIN so it
+  never lands in the command line:
+    curl -s -X POST http://localhost:9119/skills/author \
+      -H "Content-Type: application/json" --data @- <<'JSON'
+    {"content":"---\nname: deploy-staging\ndescription: Use when deploying the app to staging.\ncategory: DEVOPS\n---\n# Deploy to staging\n\n## When to Use\n...\n"}
+    JSON
+- Response: {"file_name","slug","scan_status","scan_reason"}. A manager will see
+  it in the proposed-skills review queue and approve or reject it.
 `
 
 // BuildCLICommand constructs the CLI command and arguments for the configured

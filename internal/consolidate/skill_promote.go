@@ -97,38 +97,13 @@ func PromoteRuleToSkill(rule LearnedRule, score ScoreResult, opts SkillPromoteOp
 	return path, nil
 }
 
-// writeUniqueSkillFile picks the first non-colliding skill-{slug}.md
-// name and writes the body atomically. The OS handles the race —
-// O_CREATE | O_EXCL means "create or fail if exists", so concurrent
-// callers picking the same suffix get serialised: the loser sees
-// EEXIST and tries the next suffix.
+// writeUniqueSkillFile picks the first non-colliding skill-{slug}.md name
+// under dir and writes the body atomically. The atomic O_CREATE|O_EXCL write
+// lives in the skills package (skills.WriteUniqueSkillFile) so the consolidator
+// promotion path and the agent-authoring staging path share one implementation;
+// this wrapper keeps the existing call sites and tests stable.
 func writeUniqueSkillFile(dir, slug string, body []byte) (string, error) {
-	for i := 1; i < 100; i++ {
-		var name string
-		if i == 1 {
-			name = "skill-" + slug + ".md"
-		} else {
-			name = fmt.Sprintf("skill-%s-%d.md", slug, i)
-		}
-		path := filepath.Join(dir, name)
-		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
-		if err != nil {
-			if os.IsExist(err) {
-				continue // suffix taken — try the next one
-			}
-			return "", fmt.Errorf("promote: open skill: %w", err)
-		}
-		if _, werr := f.Write(body); werr != nil {
-			_ = f.Close()
-			_ = os.Remove(path)
-			return "", fmt.Errorf("promote: write skill: %w", werr)
-		}
-		if cerr := f.Close(); cerr != nil {
-			return "", fmt.Errorf("promote: close skill: %w", cerr)
-		}
-		return path, nil
-	}
-	return "", fmt.Errorf("promote: ran out of slugs trying to disambiguate skill-%s.md", slug)
+	return skills.WriteUniqueSkillFile(dir, slug, body)
 }
 
 // PromoteEligibleRules iterates rules and promotes only those that pass

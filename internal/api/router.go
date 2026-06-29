@@ -89,6 +89,7 @@ type Router struct {
 	// the parent handler isn't wired (test routers, early init).
 	credentialHandler      *CredentialHandler
 	skillGenHandler        *SkillGenerateHandler
+	skillPropHandler       *SkillProposedHandler
 	storagePath            string // base path for crew file storage
 	catalogFetcher         *devcontainer.CatalogFetcher
 	runtimeFetcher         *devcontainer.RuntimeFetcher

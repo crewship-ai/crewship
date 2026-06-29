@@ -83,6 +83,10 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 		skillAdapter := NewSkillInternalAdapter(r.skillGenHandler)
 		r.mux.Handle("POST /api/v1/internal/skills/generate", internalAuth(http.HandlerFunc(skillAdapter.Generate)))
 	}
+	if r.skillPropHandler != nil {
+		authorAdapter := NewSkillAuthorAdapter(r.skillPropHandler)
+		r.mux.Handle("POST /api/v1/internal/skills/author", internalAuth(http.HandlerFunc(authorAdapter.Author)))
+	}
 	if r.credentialHandler != nil {
 		credAdapter := NewCredentialInternalAdapter(r.credentialHandler)
 		r.mux.Handle("POST /api/v1/internal/credentials", internalAuth(http.HandlerFunc(credAdapter.Create)))

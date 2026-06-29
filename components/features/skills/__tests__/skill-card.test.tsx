@@ -58,6 +58,14 @@ describe("SkillCard", () => {
     expect(screen.getByText("Experimental")).toBeDefined()
   })
 
+  it("shows the Generated source badge for agent-authored / memory-promoted skills", () => {
+    // An approved agent-authored skill carries source=GENERATED so the catalog
+    // visibly marks it as machine-originated (and the Generated tab surfaces it)
+    // rather than letting it look like a hand-made import.
+    render(<SkillCard skill={makeSkill({ source: "GENERATED" })} />)
+    expect(screen.getByText("Generated")).toBeDefined()
+  })
+
   it("shows the FLAGGED chip when scan_status is FLAGGED", () => {
     render(<SkillCard skill={makeSkill({ scan_status: "FLAGGED" })} />)
     expect(screen.getByText("Flagged")).toBeDefined()
