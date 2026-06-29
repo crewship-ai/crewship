@@ -11,6 +11,27 @@ func TestGenerateDockerfile_BaseImageRequired(t *testing.T) {
 	}
 }
 
+func TestGenerateDockerfile_RemediatesBrokenYarnRepo(t *testing.T) {
+	// The go:1.x / universal:2 base images ship a yarn.list with an expired
+	// GPG key that breaks apt-get update during the first feature install.
+	// The generated Dockerfile must drop it before any feature runs, BEFORE
+	// the first feature COPY/RUN, so provisioning succeeds on those images.
+	out, err := GenerateDockerfile(DockerfileBuild{
+		BaseImage: "mcr.microsoft.com/devcontainers/go:1.23-bookworm",
+		Features:  []*ResolvedFeature{{Metadata: FeatureMetadata{ID: "common-utils"}}},
+	})
+	if err != nil {
+		t.Fatalf("GenerateDockerfile: %v", err)
+	}
+	rm := "rm -f /etc/apt/sources.list.d/yarn.list"
+	if !strings.Contains(out, rm) {
+		t.Errorf("Dockerfile missing yarn-repo remediation %q:\n%s", rm, out)
+	}
+	if i, j := strings.Index(out, rm), strings.Index(out, "# feature: common-utils"); i < 0 || j < 0 || i > j {
+		t.Errorf("remediation must precede the first feature layer (rm@%d, feature@%d)", i, j)
+	}
+}
+
 func TestGenerateDockerfile_InvalidFeatureID(t *testing.T) {
 	_, err := GenerateDockerfile(DockerfileBuild{
 		BaseImage: "ubuntu:22.04",
