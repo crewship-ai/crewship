@@ -76,7 +76,7 @@ jobs:
       # cache: true reuses module + build cache across releases keyed on
       # go.sum; on the ubuntu-latest hosted runner this cuts setup-go from
       # ~45s (cold module download for ~80 modules) to <2s.
-      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
