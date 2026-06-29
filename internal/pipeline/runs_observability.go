@@ -285,7 +285,8 @@ const maxFailureRunIDSample = 100
 // rather than accumulating every id in memory. Both steps resolve through
 // idx_pipeline_runs_failure_groups (migration v127).
 func (s *RunStore) FailureGroups(ctx context.Context, workspaceID string, limit int) ([]FailureGroup, error) {
-	if limit <= 0 || limit > 200 {
+	const maxFailureGroups = 200
+	if limit <= 0 || limit > maxFailureGroups {
 		limit = 50
 	}
 
@@ -312,7 +313,11 @@ LIMIT ?`, workspaceID, limit)
 	}
 	defer rows.Close()
 
-	out := make([]FailureGroup, 0, limit)
+	// Allocate against the constant upper bound (limit is already clamped to
+	// [1, maxFailureGroups] above). Using the constant rather than the
+	// user-derived `limit` as the capacity keeps the allocation provably
+	// bounded and clears the CodeQL "excessive size" taint on a request value.
+	out := make([]FailureGroup, 0, maxFailureGroups)
 	for rows.Next() {
 		var g FailureGroup
 		var latest string
