@@ -37,6 +37,8 @@ Crewship is unusual among workflow systems because **agents author routines**, n
 <CardGroup cols={3}>
   <Card title="Agent" icon="robot">
     The most common path. An agent that's solved a repetitive problem twice posts to `http://localhost:9119/pipelines/save` from inside its container; the sidecar injects authorship and forwards to the main API. Next time `[AVAILABLE ROUTINES]` block in the system prompt advertises it to other crews.
+
+    You can also just **describe a routine in chat** — "make a routine that summarizes yesterday's commits and posts to Slack." A crew **Lead** carries the bundled **`routine-author`** skill (an authoring playbook): it clarifies the essentials, grounds the DSL in the crew's `[CONNECTED INTEGRATIONS]` and `[AVAILABLE ROUTINES]`, writes and test-runs the routine, then tells you whether it went live or landed as a **proposed** routine for a Manager to approve (see [Governance](#governance--agent-proposes-human-approves-the-risky-ones)).
   </Card>
   <Card title="UI" icon="browser">
     Open `/routines`, click **+ New routine**, pick a starter template, edit the DSL JSON, click **Test & Save**. Test_run runs against the execution tier; on pass the routine is persisted with `authored_via=user_api` and the JWT user as author.

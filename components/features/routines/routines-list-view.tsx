@@ -413,9 +413,9 @@ function EmptyState() {
   const quickstarts: Array<{ icon: string; title: string; description: string; cta: string }> = [
     {
       icon: "+",
-      title: "Create from a template",
+      title: "Describe what you want",
       description:
-        "Open the New routine dialog and pick a starter (Empty / Summarize / Two-step). Edit the JSON DSL, then Test & Save.",
+        "Open New routine → Describe it. Tell a Lead agent your goal in plain words; it drafts the routine with you in chat. Or fork an existing routine, or build the JSON DSL step by step.",
       cta: "Click + New routine in the toolbar above",
     },
     {

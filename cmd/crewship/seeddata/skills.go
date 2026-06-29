@@ -64,15 +64,20 @@ func mustLoadSkills() []SkillDef {
 // Assignments match agents to the demo issues they'll handle. Stays as a
 // Go map (not YAML) because it's a relationship, not a catalogue — the
 // data is most useful when right next to the agent fixture review.
+// "routine-author" is a BUNDLED first-party skill (installed on server
+// startup, not in Skills above); the seed assignment loop resolves it via
+// GET /api/v1/skills, so referencing its slug here is enough. It goes to
+// the three crew LEADs — they field the "make a routine that…" requests and
+// own routine authoring for their crew.
 var SkillAssignments = map[string][]string{
-	// Engineering — scripting, file ops, inspection
-	"alex":  {"network-probe", "script-runner", "file-crafter"},
+	// Engineering — scripting, file ops, inspection (+ routine authoring for the lead)
+	"alex":  {"network-probe", "script-runner", "file-crafter", "routine-author"},
 	"sam":   {"script-runner", "file-crafter", "system-inspector"},
 	"robin": {"file-crafter", "web-scraper"},
 	// Quality — testing, validation, review
-	"jordan": {"script-runner", "file-crafter"},
+	"jordan": {"script-runner", "file-crafter", "routine-author"},
 	"casey":  {"system-inspector", "script-runner", "file-crafter"},
 	// Ops — network, system inspection, automation
-	"morgan": {"network-probe", "system-inspector"},
+	"morgan": {"network-probe", "system-inspector", "routine-author"},
 	"riley":  {"web-scraper", "script-runner", "network-probe"},
 }
