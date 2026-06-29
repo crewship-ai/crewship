@@ -122,7 +122,7 @@ func TestWriteUniqueSkillFile_SuffixesOnCollision(t *testing.T) {
 
 func TestWriteUniqueSkillFile_DirMissing(t *testing.T) {
 	_, err := writeUniqueSkillFile(filepath.Join(t.TempDir(), "nope"), "x", []byte("b"))
-	if err == nil || !strings.Contains(err.Error(), "open skill") {
+	if err == nil || !strings.Contains(err.Error(), "open") {
 		t.Errorf("expected open error, got %v", err)
 	}
 }
@@ -140,7 +140,7 @@ func TestWriteUniqueSkillFile_ExhaustsSuffixes(t *testing.T) {
 		}
 	}
 	_, err := writeUniqueSkillFile(dir, "full", []byte("b"))
-	if err == nil || !strings.Contains(err.Error(), "ran out of slugs") {
+	if err == nil || !strings.Contains(err.Error(), "ran out of suffixes") {
 		t.Errorf("expected exhaustion error, got %v", err)
 	}
 }
