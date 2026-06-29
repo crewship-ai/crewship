@@ -1,0 +1,149 @@
+---
+title: "Agent-Authored Skills"
+description: "How an agent turns a workflow it just performed into a reusable crew skill — staged, reviewed in the inbox, and published."
+icon: "robot"
+---
+
+# Agent-authored skills
+
+A skill is procedural memory for a crew: a reusable playbook the agent
+loads when a request matches its trigger. Most skills are written by
+operators (see [Author a Skill](/guides/skills-authoring)). But an agent
+can also **author a skill itself** — after it works out a non-trivial,
+repeatable workflow, it captures the exact steps (and the pitfalls it
+hit) as a `SKILL.md` so the whole crew can reuse it next time.
+
+Unlike `crewship skill create`, this needs **no Anthropic API key**: the
+agent writes the `SKILL.md` with its own runtime model, so it works on
+OAuth-only workspaces. And unlike a manual import, an agent-authored
+skill is never made live directly — it is **staged for human review**
+first.
+
+<Note>
+Authoring is open to any agent. Promotion is the gate: a **MANAGER+**
+reviews and approves before the skill ships to the crew.
+</Note>
+
+## The lifecycle
+
+```
+agent authors SKILL.md  →  staged (.proposed)  →  inbox review  →  approve/reject
+        │                                              │                  │
+   POST /skills/author                      MANAGER+ in the UI       live skill
+   (sidecar, no API key)                       or the CLI          (source=GENERATED)
+```
+
+1. **Author.** The agent POSTs a complete `SKILL.md` to its sidecar at
+   `http://localhost:9119/skills/author`. The crew and workspace are
+   taken from the sidecar's identity, so an agent can only stage into its
+   own crew's namespace.
+2. **Stage.** The document is validated (frontmatter), injection-scanned,
+   and written to the crew's staging area. It does **not** enter the live
+   registry yet.
+3. **Review.** The proposal appears in the **inbox** as a blocking item
+   visible to MANAGER, ADMIN, and OWNER. Approve or reject it with one
+   click — or from the CLI.
+4. **Publish.** On approval the skill is imported and tagged
+   `source=GENERATED`, so it shows up in the **Generated** tab of the
+   Skills browser with the agent-origin badge. Rejecting discards the
+   staged file.
+
+## How an agent authors a skill
+
+Every agent's system prompt documents the authoring tool and the house
+`SKILL.md` standards. The agent is told to offer to save a skill after it
+finishes a complex task the crew is likely to repeat (and to skip trivial
+one-liners or anything secret). When it does, it calls the sidecar:
+
+```bash
+curl -s -X POST http://localhost:9119/skills/author \
+  -H "Content-Type: application/json" --data @- <<'JSON'
+{"content":"---\nname: rollback-prod\ndescription: Use when rolling back a bad production deploy fast.\ncategory: DEVOPS\n---\n# Rollback production\n\n## When to Use\n- A bad deploy is live and must be reverted.\n\n## Procedure\n1. Find the last good release tag.\n2. Redeploy it and verify health.\n"}
+JSON
+```
+
+Response:
+
+```json
+{
+  "file_name": "skill-rollback-prod.md",
+  "slug": "rollback-prod",
+  "scan_status": "CLEAN",
+  "scan_reason": ""
+}
+```
+
+The `content` field is the full `SKILL.md` — YAML frontmatter plus the
+markdown body. The same format rules apply as for any skill (see
+[Skill format](/guides/skills-format)); the most important is a tight
+`description` that starts with a trigger phrase like `Use when …`.
+
+<Warning>
+A `scan_status` of `FLAGGED` does not block staging — the human review
+step is the real gate — but the reason is surfaced to the reviewer so a
+suspicious body is caught before it ships.
+</Warning>
+
+## Reviewing a proposal
+
+### In the inbox (UI)
+
+Agent-authored proposals land in the **inbox** as a blocking
+"Skill proposed for review" item. Open it and choose **Approve** or
+**Reject**. Approving promotes the staged `SKILL.md` into the crew's
+registry; the inbox item then resolves and leaves the queue. See the
+[Inbox guide](/guides/inbox) for how the inbox surfaces actionable items.
+
+### From the CLI
+
+The same staging area is driven by `crewship skill proposed`. The `--crew`
+flag takes a **crew id** (not a slug); grab it from
+`crewship crew list --format json`:
+
+```bash
+# List what's waiting for review in a crew
+crewship skill proposed list --crew <crew-id>
+
+# Approve a staged skill (imports it → source=GENERATED)
+crewship skill proposed approve --crew <crew-id> --file skill-rollback-prod.md
+
+# Reject (discards the staged file)
+crewship skill proposed reject --crew <crew-id> --file skill-rollback-prod.md
+```
+
+Approving or rejecting from the CLI resolves the matching inbox item too,
+so the two surfaces stay in sync.
+
+After approval, confirm the skill is live:
+
+```bash
+crewship skill get rollback-prod
+# Source: GENERATED
+```
+
+From here it behaves like any other skill — assign it to agents or a crew
+and it renders into their `[SKILLS AVAILABLE]` block on the next run (see
+[Author a Skill → Assign](/guides/skills-authoring)).
+
+## Two other ways skills get generated
+
+Agent authoring sits alongside two related paths, all of which land in the
+same review queue or the `GENERATED` source:
+
+| Path | Who triggers it | Needs API key? | Review |
+| --- | --- | --- | --- |
+| **Agent authoring** (this page) | the agent, from real work | No | Inbox / `skill proposed` |
+| **Memory→skills bridge** | the consolidator, from high-confidence learned rules | No | Inbox / `skill proposed` |
+| **`skill create`** | an operator, on demand | Yes (`type=API_KEY`) | None — lands live directly |
+
+The [autonomy and self-learning](/guides/autonomy-and-self-learning) guide
+covers the memory→skills bridge in depth.
+
+## Why a distinct origin
+
+Skills approved from the review queue are tagged `source=GENERATED` rather
+than `CUSTOM`. That keeps the catalog honest: a reviewer can tell at a
+glance which skills were machine-originated (by an agent or promoted from
+memory) versus hand-written, and the **Generated** tab filters to exactly
+those. Plain operator imports stay `CUSTOM`; re-importing an existing
+skill preserves its original origin.

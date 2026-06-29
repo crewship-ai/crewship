@@ -55,6 +55,7 @@
                 "pages": [
                   "guides/skills",
                   "guides/skills-authoring",
+                  "guides/skills-agent-authored",
                   "guides/skills-format"
                 ]
               },
