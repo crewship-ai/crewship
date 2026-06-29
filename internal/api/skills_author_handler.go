@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/skills"
 )
@@ -22,6 +23,13 @@ import (
 // authorRequest is the body the sidecar posts on behalf of an agent.
 type authorRequest struct {
 	Content string `json:"content"`
+}
+
+// skillProposalInboxSource is the (kind, source_id) dedup key tying a staged
+// skill to its inbox review item. Author inserts it; Approve/Reject resolve it.
+// Re-authoring the same crew+file is idempotent (INSERT OR IGNORE on this key).
+func skillProposalInboxSource(crewID, fileName string) string {
+	return "skillprop:" + crewID + ":" + fileName
 }
 
 // Author stages an agent-authored SKILL.md for human review.
@@ -83,6 +91,31 @@ func (h *SkillProposedHandler) Author(w http.ResponseWriter, r *http.Request) {
 	}); emitErr != nil {
 		h.logger.Warn("skill author emit", "err", emitErr)
 	}
+
+	// Surface the proposal in the inbox so a manager reviews/approves it in
+	// the UI (not just via the CLI). Visible to MANAGER+; blocking because it
+	// needs an explicit decision. The payload carries everything the inbox card
+	// needs to call proposed approve/reject. Fire-and-forget: a projection
+	// failure must not fail the author call (the staged file is authoritative).
+	_ = inbox.Insert(r.Context(), h.db, h.logger, inbox.Item{
+		WorkspaceID: wsID,
+		Kind:        inbox.KindEscalation,
+		SourceID:    skillProposalInboxSource(crewID, fileName),
+		TargetRole:  "MANAGER",
+		Title:       "Skill proposed for review: " + staged.Slug,
+		BodyMD:      "An agent authored a new skill. Approve it to add it to the crew, or reject it.",
+		SenderType:  "agent",
+		SenderName:  "Agent skill author",
+		Priority:    "high",
+		Blocking:    true,
+		Payload: map[string]interface{}{
+			"kind":        "skill_proposal",
+			"crew_id":     crewID,
+			"file_name":   fileName,
+			"slug":        staged.Slug,
+			"scan_status": staged.Scan.Status,
+		},
+	})
 
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"file_name":   fileName,

@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/skills"
 )
@@ -263,6 +264,13 @@ func (h *SkillProposedHandler) Approve(w http.ResponseWriter, r *http.Request) {
 		h.logger.Warn("skill approve emit", "err", emitErr)
 	}
 
+	// Resolve the inbox review item (if this skill came in via agent authoring)
+	// so it leaves the manager's inbox once approved — whether the approval
+	// happened from the inbox card or the CLI. No-op when there's no matching
+	// item (e.g. consolidator-promoted skills, which aren't surfaced there).
+	inbox.ResolveBySource(r.Context(), h.db, h.logger,
+		inbox.KindEscalation, skillProposalInboxSource(body.CrewID, body.FileName), "approved", actorID)
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"skill_id":  result.SkillID,
 		"slug":      result.Slug,
@@ -332,6 +340,10 @@ func (h *SkillProposedHandler) Reject(w http.ResponseWriter, r *http.Request) {
 	}); emitErr != nil {
 		h.logger.Warn("skill reject emit", "err", emitErr)
 	}
+
+	// Mirror the approve path: clear the inbox review item on reject too.
+	inbox.ResolveBySource(r.Context(), h.db, h.logger,
+		inbox.KindEscalation, skillProposalInboxSource(body.CrewID, body.FileName), "rejected", actorID)
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"file_name": body.FileName,

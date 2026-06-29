@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -117,5 +118,70 @@ func TestSkillAuthor_StagedSkillIsApprovable(t *testing.T) {
 	}
 	if source != "GENERATED" {
 		t.Fatalf("approved agent-authored skill source = %q, want GENERATED", source)
+	}
+}
+
+// An agent-authored skill must surface in the inbox as a MANAGER-visible
+// review item, so a human approves it in the UI (not only via the CLI).
+func TestSkillAuthor_SurfacesInboxReviewItem(t *testing.T) {
+	h, db, userID, wsID, crewID, _ := newSkillProposedHandlerTest(t, "inbox-crew")
+	h.SetCrewMemoryRoot(t.TempDir())
+
+	req := withWorkspaceUser(authorRequestFor(crewID, authoredSkillBody), userID, wsID, "AGENT")
+	rr := httptest.NewRecorder()
+	h.Author(rr, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("author status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+
+	src := "skillprop:" + crewID + ":skill-deploy-staging.md"
+	var state, payload, targetRole string
+	err := db.QueryRow(
+		`SELECT state, payload_json, COALESCE(target_role,'') FROM inbox_items WHERE kind='escalation' AND source_id=?`,
+		src).Scan(&state, &payload, &targetRole)
+	if err != nil {
+		t.Fatalf("inbox review item not created: %v", err)
+	}
+	if state != "unread" {
+		t.Errorf("inbox state = %q, want unread", state)
+	}
+	if targetRole != "MANAGER" {
+		t.Errorf("inbox target_role = %q, want MANAGER", targetRole)
+	}
+	if !strings.Contains(payload, "skill_proposal") || !strings.Contains(payload, "deploy-staging") {
+		t.Errorf("inbox payload missing discriminator/slug: %s", payload)
+	}
+}
+
+// Approving the proposal must clear its inbox item (whether the approval came
+// from the inbox card or the CLI), so it leaves the manager's queue.
+func TestSkillAuthor_ApproveResolvesInboxItem(t *testing.T) {
+	h, db, userID, wsID, crewID, _ := newSkillProposedHandlerTest(t, "inbox-resolve-crew")
+	h.SetCrewMemoryRoot(t.TempDir())
+
+	authReq := withWorkspaceUser(authorRequestFor(crewID, authoredSkillBody), userID, wsID, "AGENT")
+	authRR := httptest.NewRecorder()
+	h.Author(authRR, authReq)
+	if authRR.Code != http.StatusCreated {
+		t.Fatalf("author status = %d", authRR.Code)
+	}
+
+	approveBody, _ := json.Marshal(map[string]string{"crew_id": crewID, "file_name": "skill-deploy-staging.md"})
+	apprReq := withWorkspaceUser(
+		httptest.NewRequest("POST", "/api/v1/skills/proposed/approve", bytes.NewReader(approveBody)),
+		userID, wsID, "MANAGER")
+	apprRR := httptest.NewRecorder()
+	h.Approve(apprRR, apprReq)
+	if apprRR.Code != http.StatusOK {
+		t.Fatalf("approve status = %d, body=%s", apprRR.Code, apprRR.Body.String())
+	}
+
+	src := "skillprop:" + crewID + ":skill-deploy-staging.md"
+	var state string
+	if err := db.QueryRow(`SELECT state FROM inbox_items WHERE kind='escalation' AND source_id=?`, src).Scan(&state); err != nil {
+		t.Fatalf("query inbox item: %v", err)
+	}
+	if state != "resolved" {
+		t.Fatalf("inbox item state after approve = %q, want resolved", state)
 	}
 }

@@ -1030,7 +1030,7 @@ function InboxDetail({
   )
 }
 
-function KindActions({
+export function KindActions({
   item,
   onResolve,
   onRefresh,
@@ -1166,6 +1166,63 @@ function KindActions({
       )
     }
     case "escalation": {
+      // Agent-authored skill proposals ride the escalation kind (like keeper
+      // skill reviews) but resolve through the proposed-skills approve/reject
+      // endpoints, not the escalation lifecycle. Disambiguated by payload.kind.
+      // Approving here promotes the staged SKILL.md into the crew's registry
+      // (tagged GENERATED); the server resolves this inbox row via
+      // ResolveBySource so it leaves the queue.
+      if (item.payload?.kind === "skill_proposal") {
+        const crewId = typeof item.payload?.crew_id === "string" ? (item.payload.crew_id as string) : ""
+        const fileName = typeof item.payload?.file_name === "string" ? (item.payload.file_name as string) : ""
+        const resolveSkill = (action: "approve" | "reject") =>
+          wrap(action, async () => {
+            let res: Response
+            try {
+              res = await apiFetch(
+                `/api/v1/skills/proposed/${action}?workspace_id=${encodeURIComponent(item.workspace_id)}`,
+                {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ crew_id: crewId, file_name: fileName }),
+                },
+              )
+            } catch (e) {
+              toast.error(e instanceof Error ? `${action} failed: ${e.message}` : `${action} failed`)
+              return
+            }
+            if (!res.ok) {
+              const b = await res.json().catch(() => null)
+              toast.error(b?.error ?? `${action} failed (${res.status})`)
+              return
+            }
+            toast.success(action === "approve" ? "Skill approved" : "Skill rejected")
+            await onRefresh()
+          })
+        return (
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              disabled={disabled || busy !== null}
+              onClick={() => resolveSkill("approve")}
+              className="gap-1.5 bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30"
+            >
+              <CheckCircle2 className="h-3 w-3" />
+              {busy === "approve" ? "Approving…" : "Approve"}
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={disabled || busy !== null}
+              onClick={() => resolveSkill("reject")}
+              className="gap-1.5"
+            >
+              <XCircle className="h-3 w-3" />
+              {busy === "reject" ? "Rejecting…" : "Reject"}
+            </Button>
+          </div>
+        )
+      }
       // An escalation is an agent decision request — resolving it must go
       // through the escalation lifecycle (/escalations/{id}/resolve), NOT
       // a blind inbox flip (that 409s, since escalation is source-managed).
