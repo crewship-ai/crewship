@@ -8,7 +8,7 @@ import { PriorityIcon } from "@/components/features/issues/priority-icon"
 import { IssuesBoardView } from "@/components/features/issues/issues-board-view"
 import { IssuesListView } from "@/components/features/issues/issues-list-view"
 import { cn } from "@/lib/utils"
-import { getAgentAvatarUrl } from "@/lib/agent-avatar"
+import { AgentAvatar } from "@/components/ui/agent-avatar"
 import type { Mission, Project } from "@/lib/types/mission"
 
 // Re-exports for backwards compatibility
@@ -136,9 +136,8 @@ export function IssuesExplorerPanel({
                 </span>
                 <span className="text-[11px] text-foreground/80 truncate flex-1">{issue.title}</span>
                 {issue.assignee_id && (
-                  <img
-                    src={getAgentAvatarUrl(issue.assignee_id)}
-                    alt=""
+                  <AgentAvatar
+                    seed={issue.assignee_id}
                     className="h-4 w-4 rounded-full shrink-0"
                   />
                 )}

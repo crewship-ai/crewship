@@ -5,6 +5,7 @@ import { AlertCircle, Check, Copy, RotateCcw, Save, Wand2 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { FileEditor } from "@/components/features/files/file-editor"
+import { apiFetch } from "@/lib/api-fetch"
 import type { RoutineDetail } from "./routines-detail-panel"
 
 // RoutineEditorTab — editable JSON DSL view backed by the same
@@ -127,7 +128,7 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved }: Props) {
     }
     setSaving(true)
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/save`,
         {
           method: "POST",

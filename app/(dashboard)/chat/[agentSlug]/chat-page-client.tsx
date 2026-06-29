@@ -1,9 +1,10 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import Link from "next/link"
-import { ChevronLeft, MessageSquarePlus, MoreVertical, Trash2, RotateCcw, Settings as SettingsIcon, FolderOpen, Loader2 } from "lucide-react"
+import { ChevronLeft, MessageSquarePlus, MoreVertical, Trash2, RotateCcw, Settings as SettingsIcon, FolderOpen } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -17,7 +18,8 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { ChatPanel } from "@/components/features/chat/chat-panel"
 import { SessionsSidebar } from "@/components/features/chat/sessions-sidebar"
-import { getAgentAvatarUrl } from "@/lib/agent-avatar"
+import { AgentAvatar } from "@/components/ui/agent-avatar"
+import { apiFetch } from "@/lib/api-fetch"
 
 /**
  * Read the agent slug from the live URL after client hydration.
@@ -137,7 +139,7 @@ export function ChatPageClient() {
 
     let cancelled = false
     setLoadingAgent(true)
-    fetch(`/api/v1/agents?workspace_id=${workspaceId}`)
+    apiFetch(`/api/v1/agents?workspace_id=${workspaceId}`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((list: AgentRecord[]) => {
         if (cancelled) return
@@ -167,7 +169,7 @@ export function ChatPageClient() {
     if (!agent || !workspaceId) return
     let cancelled = false
     setSessionsLoaded(false)
-    fetch(`/api/v1/agents/${agent.id}/chats?workspace_id=${workspaceId}&limit=20`)
+    apiFetch(`/api/v1/agents/${agent.id}/chats?workspace_id=${workspaceId}&limit=20`)
       .then((r) => (r.ok ? r.json() : []))
       .then((list: SessionRecord[]) => {
         if (!cancelled && Array.isArray(list)) {
@@ -191,7 +193,7 @@ export function ChatPageClient() {
     }
     setCreatingSession(true)
     try {
-      const res = await fetch(`/api/v1/agents/${agent.id}/chats?workspace_id=${workspaceId}`, {
+      const res = await apiFetch(`/api/v1/agents/${agent.id}/chats?workspace_id=${workspaceId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ origin: "UI" }),
@@ -243,7 +245,7 @@ export function ChatPageClient() {
     if (!confirm(`Delete agent "${agent.name}"?\n\nThis cannot be undone.`)) return
     setDeleting(true)
     try {
-      const res = await fetch(`/api/v1/agents/${agent.id}?workspace_id=${workspaceId}`, {
+      const res = await apiFetch(`/api/v1/agents/${agent.id}?workspace_id=${workspaceId}`, {
         method: "DELETE",
       })
       if (!res.ok) {
@@ -264,7 +266,7 @@ export function ChatPageClient() {
     if (!agent || !workspaceId || !slug) return
     setCreatingSession(true)
     try {
-      const res = await fetch(`/api/v1/agents/${agent.id}/chats?workspace_id=${workspaceId}`, {
+      const res = await apiFetch(`/api/v1/agents/${agent.id}/chats?workspace_id=${workspaceId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ origin: "UI" }),
@@ -273,7 +275,7 @@ export function ChatPageClient() {
       const created: { id: string } = await res.json()
       // Refetch the sessions list (POST returns only {id}, not the full
       // record, so we'd otherwise show a partial entry in the sidebar).
-      const listRes = await fetch(`/api/v1/agents/${agent.id}/chats?workspace_id=${workspaceId}&limit=20`)
+      const listRes = await apiFetch(`/api/v1/agents/${agent.id}/chats?workspace_id=${workspaceId}&limit=20`)
       if (listRes.ok) {
         const list: SessionRecord[] = await listRes.json()
         if (Array.isArray(list)) setSessions(list)
@@ -285,11 +287,6 @@ export function ChatPageClient() {
       setCreatingSession(false)
     }
   }, [agent, workspaceId, slug, selectSession])
-
-  const avatarSrc = useMemo(() => {
-    if (!agent) return ""
-    return getAgentAvatarUrl(agent.avatar_seed || agent.name, agent.avatar_style || agent.crew?.avatar_style)
-  }, [agent])
 
   // Wait for client mount + workspace + agent fetch before rendering chat.
   if (slug === null || wsLoading || loadingAgent) {
@@ -325,7 +322,11 @@ export function ChatPageClient() {
         >
           <ChevronLeft className="h-4 w-4" />
         </Link>
-        <img src={avatarSrc} alt="" className="w-7 h-7 rounded-full" />
+        <AgentAvatar
+          seed={agent.avatar_seed || agent.name}
+          style={agent.avatar_style || agent.crew?.avatar_style}
+          className="w-7 h-7 rounded-full"
+        />
         <div className="flex-1 min-w-0">
           <div className="text-sm font-medium truncate">{agent.name}</div>
           <div className="text-[11px] text-muted-foreground truncate">
@@ -394,7 +395,7 @@ export function ChatPageClient() {
               disabled={deleting}
               className="flex items-center gap-2 text-destructive focus:text-destructive focus:bg-destructive/10"
             >
-              {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+              {deleting ? <Spinner className="h-4 w-4" /> : <Trash2 className="h-4 w-4" />}
               <span>Delete agent</span>
             </DropdownMenuItem>
           </DropdownMenuContent>

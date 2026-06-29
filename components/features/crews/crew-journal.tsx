@@ -2,7 +2,8 @@
 
 import { useMemo, useState } from "react"
 import Link from "next/link"
-import { BookOpen, Sparkles, ExternalLink, Loader2 } from "lucide-react"
+import { BookOpen, Sparkles, ExternalLink } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -11,6 +12,7 @@ import { cn } from "@/lib/utils"
 import { formatRelativeTime } from "@/lib/time"
 import { useJournalList } from "@/hooks/use-journal-list"
 import { useJournalStream } from "@/hooks/use-journal-stream"
+import { apiFetch } from "@/lib/api-fetch"
 
 const SEVERITY_PILL: Record<string, string> = {
   info: "bg-blue-500/15 text-blue-300 border-blue-500/30",
@@ -57,7 +59,7 @@ export function CrewJournal({ crewId, workspaceId }: CrewJournalProps) {
   async function handleGenerateSummary() {
     setSummarizing(true)
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/crews/${encodeURIComponent(crewId)}/journal/summarize?workspace_id=${encodeURIComponent(workspaceId)}`,
         { method: "POST", headers: { "Content-Type": "application/json" } },
       )
@@ -89,7 +91,7 @@ export function CrewJournal({ crewId, workspaceId }: CrewJournalProps) {
       <CardContent className="space-y-2">
         {loading && entries.length === 0 ? (
           <div className="flex items-center gap-2 py-6 text-label text-muted-foreground">
-            <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading journal…
+            <Spinner className="h-3.5 w-3.5" /> Loading journal…
           </div>
         ) : entries.length === 0 ? (
           <div className="flex flex-col items-center gap-2 py-8 text-center">
@@ -130,7 +132,7 @@ export function CrewJournal({ crewId, workspaceId }: CrewJournalProps) {
             disabled={summarizing}
           >
             {summarizing ? (
-              <Loader2 className="h-3 w-3 mr-1.5 animate-spin" />
+              <Spinner className="h-3 w-3 mr-1.5" />
             ) : (
               <Sparkles className="h-3 w-3 mr-1.5" />
             )}

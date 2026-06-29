@@ -14,6 +14,7 @@ import { useWorkspace } from "@/hooks/use-workspace"
 import { useRealtimeEvent, type RealtimeEvent } from "@/hooks/use-realtime"
 import type { DebugData } from "@/lib/types/agent"
 import { CLI_ADAPTERS } from "@/lib/cli-adapters"
+import { apiFetch } from "@/lib/api-fetch"
 
 function StatusIcon({ ok }: { ok: boolean }) {
   return ok
@@ -45,7 +46,7 @@ export function EngineStatusBanner() {
   const fetchDebug = useCallback(async () => {
     if (!workspaceId || !agentId) return
     try {
-      const res = await fetch(`/api/v1/agents/${agentId}/debug?workspace_id=${workspaceId}`)
+      const res = await apiFetch(`/api/v1/agents/${agentId}/debug?workspace_id=${workspaceId}`)
       if (!res.ok) return
       const d: DebugData = await res.json()
       setData(d)

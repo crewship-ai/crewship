@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
+import { apiFetch } from "@/lib/api-fetch"
 
 interface FileRef {
   path: string
@@ -57,7 +58,7 @@ export function useFileEditor({ agentId, workspaceId }: UseFileEditorOptions): U
     setEditorContent(null)
     setEditorDirty(false)
     setEditorExpanded(false)
-    fetch(`/api/v1/agents/${agentId}/files/download?workspace_id=${workspaceId}&path=${encodeURIComponent(node.path)}`, { signal: ac.signal })
+    apiFetch(`/api/v1/agents/${agentId}/files/download?workspace_id=${workspaceId}&path=${encodeURIComponent(node.path)}`, { signal: ac.signal })
       .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.text() })
       .then((text) => { if (!ac.signal.aborted) setEditorContent(text) })
       .catch((err) => { if (err.name !== "AbortError") { setEditorContent(null); toast.error("Failed to load file") } })
@@ -76,7 +77,7 @@ export function useFileEditor({ agentId, workspaceId }: UseFileEditorOptions): U
   const handleEditorSave = useCallback((content: string) => {
     if (!workspaceId || !editorFile) return
     setEditorSaving(true)
-    fetch(`/api/v1/agents/${agentId}/files/save?workspace_id=${workspaceId}&path=${encodeURIComponent(editorFile.path)}`, {
+    apiFetch(`/api/v1/agents/${agentId}/files/save?workspace_id=${workspaceId}&path=${encodeURIComponent(editorFile.path)}`, {
       method: "PUT",
       headers: { "Content-Type": "text/plain" },
       body: content,

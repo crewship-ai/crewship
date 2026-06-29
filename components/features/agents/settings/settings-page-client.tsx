@@ -3,11 +3,25 @@
 import { useState, useEffect, useCallback } from "react"
 import { useAgentId } from "@/hooks/use-agent-id"
 import {
-  Save, Loader2, AlertCircle, CheckCircle2,
-  User, Hash, Users, FileText, Briefcase, Shield, Cpu,
-  Wrench, Timer, MessageSquare, Image as ImageIcon,
-  ChevronDown, Maximize2, ChevronRight,
+  Save,
+  AlertCircle,
+  CheckCircle2,
+  User,
+  Hash,
+  Users,
+  FileText,
+  Briefcase,
+  Shield,
+  Cpu,
+  Wrench,
+  Timer,
+  MessageSquare,
+  Image as ImageIcon,
+  ChevronDown,
+  Maximize2,
+  ChevronRight,
 } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -32,6 +46,7 @@ import { useWorkspace } from "@/hooks/use-workspace"
 import { CLI_ADAPTERS, CLI_ADAPTER_KEYS } from "@/lib/cli-adapters"
 import { AvatarPicker } from "@/components/avatar-picker"
 import { AvatarOverrideBadge } from "@/components/features/agents/settings/avatar-override-badge"
+import { apiFetch } from "@/lib/api-fetch"
 import { cn } from "@/lib/utils"
 
 interface AgentDetail {
@@ -130,8 +145,8 @@ export function SettingsPageClient() {
     async function fetchData() {
       try {
         const [agentRes, teamsRes] = await Promise.all([
-          fetch(`/api/v1/agents/${agentId}?workspace_id=${workspaceId}`),
-          fetch(`/api/v1/crews?workspace_id=${workspaceId}`),
+          apiFetch(`/api/v1/agents/${agentId}?workspace_id=${workspaceId}`),
+          apiFetch(`/api/v1/crews?workspace_id=${workspaceId}`),
         ])
         if (!agentRes.ok) {
           if (!cancelled) setError("Failed to load agent")
@@ -200,7 +215,7 @@ export function SettingsPageClient() {
     if (agentRole === "LEAD") body.lead_mode = leadMode
 
     try {
-      const res = await fetch(`/api/v1/agents/${agentId}?workspace_id=${workspaceId}`, {
+      const res = await apiFetch(`/api/v1/agents/${agentId}?workspace_id=${workspaceId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -565,7 +580,7 @@ export function SettingsPageClient() {
         {/* Save (Delete moved to chat header 3-dots menu) */}
         <div className="flex items-center gap-3 pt-2">
           <Button type="submit" disabled={submitting} className="gap-2">
-            {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            {submitting ? <Spinner className="h-4 w-4" /> : <Save className="h-4 w-4" />}
             Save Changes
           </Button>
           <span className="text-micro text-muted-foreground">

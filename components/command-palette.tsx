@@ -20,7 +20,8 @@ import {
 import { useWorkspace } from "@/hooks/use-workspace"
 import { getCrewDotColor, getGradientPalette } from "@/lib/entities"
 import { cn } from "@/lib/utils"
-import { getAgentAvatarUrl } from "@/lib/agent-avatar"
+import { apiFetch } from "@/lib/api-fetch"
+import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { CrewIcon } from "@/components/ui/crew-icon"
 
 interface AgentResult {
@@ -138,12 +139,12 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
 
     const opts = { signal: ac.signal }
     Promise.allSettled([
-      fetch(`/api/v1/agents?${qs}`, opts),
-      fetch(`/api/v1/crews?${qs}`, opts),
-      fetch(`/api/v1/skills?${qs}`, opts),
-      fetch(`/api/v1/credentials?${qs}`, opts),
-      fetch(`/api/v1/issues?${qs}&limit=50`, opts),
-      fetch(`/api/v1/projects?${qs}`, opts),
+      apiFetch(`/api/v1/agents?${qs}`, opts),
+      apiFetch(`/api/v1/crews?${qs}`, opts),
+      apiFetch(`/api/v1/skills?${qs}`, opts),
+      apiFetch(`/api/v1/credentials?${qs}`, opts),
+      apiFetch(`/api/v1/issues?${qs}&limit=50`, opts),
+      apiFetch(`/api/v1/projects?${qs}`, opts),
     ]).then(async ([agentsRes, crewsRes, skillsRes, credsRes, issuesRes, projectsRes]) => {
       if (ac.signal.aborted) return
       const safeJson = async (r: PromiseSettledResult<Response>) =>
@@ -246,9 +247,9 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                   keywords={[agent.role_title ?? "", agent.crew?.name ?? "", agent.status]}
                   onSelect={() => runCommand(() => router.push(`/crews/agents/${agent.id}`))}
                 >
-                  <img
-                    src={getAgentAvatarUrl(agent.avatar_seed || agent.name, agent.avatar_style || agent.crew?.avatar_style)}
-                    alt=""
+                  <AgentAvatar
+                    seed={agent.avatar_seed || agent.name}
+                    style={agent.avatar_style || agent.crew?.avatar_style}
                     className="h-5 w-5 rounded-full shrink-0"
                   />
                   <span className="flex-1 truncate">{agent.name}</span>

@@ -11,6 +11,7 @@
 // fall back to their `summary` text; explicit noise types are dropped.
 
 import { iconForEntryType } from "@/lib/journal-icons"
+import { formatDurationPrecise } from "@/lib/time"
 import type { JournalEntry } from "@/lib/types/journal"
 import type { LucideIcon } from "lucide-react"
 
@@ -75,20 +76,6 @@ export function formatBytes(n: number | undefined): string | null {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`
 }
 
-/** Human duration: "820ms", "1.2s", "1m 5s". Null for junk input. */
-export function formatDuration(ms: number | undefined): string | null {
-  if (ms === undefined || !Number.isFinite(ms) || ms < 0) return null
-  if (ms < 1000) return `${Math.round(ms)}ms`
-  // One-decimal seconds, but if rounding reaches 60.0 spill into the minute
-  // form so we never render "60.0s" or (below) "1m 60s".
-  const oneDecimalSec = Math.round(ms / 100) / 10
-  if (oneDecimalSec < 60) return `${oneDecimalSec.toFixed(1)}s`
-  const totalSec = Math.round(ms / 1000)
-  const mins = Math.floor(totalSec / 60)
-  const secs = totalSec % 60
-  return `${mins}m ${secs}s`
-}
-
 /** Format a USD cost without lying about zero: "$0.0021". */
 function formatCost(usd: number | undefined): string | null {
   if (usd === undefined || !Number.isFinite(usd) || usd < 0) return null
@@ -130,7 +117,7 @@ export function humanizeEntry(e: JournalEntry): RunActivityRow | null {
       const meta = joinMeta(
         formatCost(num(p, "cost_usd", "cost")),
         stepLabel(num(p, "steps", "step_count")),
-        formatDuration(num(p, "duration_ms")),
+        formatDurationPrecise(num(p, "duration_ms")),
       )
       return { ...base, tone: "success", title: "Completed", meta }
     }
@@ -142,7 +129,7 @@ export function humanizeEntry(e: JournalEntry): RunActivityRow | null {
         tone: "error",
         title: "Failed",
         detail: str(p, "error", "message") ?? (e.summary || undefined),
-        meta: joinMeta(formatDuration(num(p, "duration_ms"))),
+        meta: joinMeta(formatDurationPrecise(num(p, "duration_ms"))),
       }
 
     case "run.cancelled":
@@ -175,7 +162,7 @@ export function humanizeEntry(e: JournalEntry): RunActivityRow | null {
         detail: cmd,
         meta: joinMeta(
           exit !== undefined ? `exit ${exit}` : null,
-          formatDuration(num(p, "duration_ms")),
+          formatDurationPrecise(num(p, "duration_ms")),
         ),
       }
     }
@@ -230,7 +217,7 @@ export function humanizeEntry(e: JournalEntry): RunActivityRow | null {
         title: "Completed",
         meta: joinMeta(
           formatCost(num(p, "total_cost_usd", "cost_usd")),
-          formatDuration(num(p, "total_duration_ms", "duration_ms")),
+          formatDurationPrecise(num(p, "total_duration_ms", "duration_ms")),
         ),
       }
 
@@ -250,7 +237,7 @@ export function humanizeEntry(e: JournalEntry): RunActivityRow | null {
         tone: "default",
         title: step ? `Step ${step}` : "Step done",
         detail: str(p, "output_preview"),
-        meta: joinMeta(formatCost(num(p, "cost_usd")), formatDuration(num(p, "duration_ms"))),
+        meta: joinMeta(formatCost(num(p, "cost_usd")), formatDurationPrecise(num(p, "duration_ms"))),
       }
     }
 

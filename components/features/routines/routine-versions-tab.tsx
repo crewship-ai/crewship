@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import { RotateCcw, GitCommit, History } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { toast } from "sonner"
+import { apiFetch } from "@/lib/api-fetch"
 import { RoutineListSkeleton } from "./routine-skeletons"
 import { Card, EmptyState, Pill } from "./_shared"
 
@@ -39,7 +40,7 @@ export function RoutineVersionsTab({ workspaceId, slug, onRolledBack }: Props) {
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch(`/api/v1/workspaces/${workspaceId}/pipelines/${slug}/versions`)
+      const res = await apiFetch(`/api/v1/workspaces/${workspaceId}/pipelines/${slug}/versions`)
       if (!res.ok) throw new Error(`fetch versions: ${res.status}`)
       const data: PipelineVersion[] = await res.json()
       setVersions(Array.isArray(data) ? data : [])
@@ -64,7 +65,7 @@ export function RoutineVersionsTab({ workspaceId, slug, onRolledBack }: Props) {
       return
     setRollingBack(target)
     try {
-      const res = await fetch(`/api/v1/workspaces/${workspaceId}/pipelines/${slug}/rollback`, {
+      const res = await apiFetch(`/api/v1/workspaces/${workspaceId}/pipelines/${slug}/rollback`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ target_version: target }),

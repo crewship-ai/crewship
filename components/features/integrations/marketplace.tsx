@@ -2,12 +2,14 @@
 
 import * as React from "react"
 import { motion } from "motion/react"
-import { Search, Loader2, Plus, Globe, Terminal } from "lucide-react"
+import { Search, Plus, Globe, Terminal } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { MCPLogo } from "@/components/icons/mcp-logos"
+import { apiFetch } from "@/lib/api-fetch"
 import { TrustTierBadge, type TrustTier } from "./trust-tier-badge"
 
 interface RegistryEntry {
@@ -66,7 +68,7 @@ export function Marketplace({ onAdd, recipeEmptyState }: MarketplaceProps) {
 
   // Initial featured fetch
   React.useEffect(() => {
-    fetch(`/api/v1/mcp-registry?featured=true&limit=10`)
+    apiFetch(`/api/v1/mcp-registry?featured=true&limit=10`)
       .then((r) => r.ok ? r.json() : null)
       .then((data: RegistryResponse | null) => setFeatured(data?.servers ?? []))
       .catch(() => {})
@@ -85,7 +87,7 @@ export function Marketplace({ onAdd, recipeEmptyState }: MarketplaceProps) {
       ? `/api/v1/mcp-registry/search?q=${encodeURIComponent(debouncedQuery.trim())}&${params}`
       : `/api/v1/mcp-registry?${params}`
 
-    fetch(url, { signal: ctrl.signal })
+    apiFetch(url, { signal: ctrl.signal })
       .then((r) => r.ok ? r.json() : null)
       .then((data: RegistryResponse | null) => {
         if (!data) { setServers([]); setTotal(0); return }
@@ -230,7 +232,7 @@ export function Marketplace({ onAdd, recipeEmptyState }: MarketplaceProps) {
           </div>
           {loading ? (
             <div className="flex items-center justify-center py-12">
-              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+              <Spinner className="h-5 w-5 text-muted-foreground" />
             </div>
           ) : filtered.length === 0 ? (
             recipeEmptyState ?? (
@@ -318,7 +320,7 @@ function Card({ entry, onAdd, installing }: { entry: RegistryEntry; onAdd: () =>
               onClick={onAdd}
             >
               {installing ? (
-                <Loader2 className="h-3 w-3 animate-spin" />
+                <Spinner className="h-3 w-3" />
               ) : (
                 <>
                   <Plus className="mr-0.5 h-3 w-3" />

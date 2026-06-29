@@ -4,13 +4,24 @@ import { useEffect, useMemo, useState } from "react"
 import { Streamdown } from "streamdown"
 import Link from "next/link"
 import {
-  Copy, Check, X, ShieldCheck, BadgeCheck, Lock, Dot, Sparkles,
-  AlertTriangle, Loader2, Trash2, ExternalLink,
+  Copy,
+  Check,
+  X,
+  ShieldCheck,
+  BadgeCheck,
+  Lock,
+  Dot,
+  Sparkles,
+  AlertTriangle,
+  Trash2,
+  ExternalLink,
 } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import { apiFetch } from "@/lib/api-fetch"
 import type { SkillCardData } from "@/components/features/skills/skill-card"
 
 interface SkillDetail extends SkillCardData {
@@ -79,7 +90,7 @@ export function SkillsDetailPanel({
     }
     let cancelled = false
     setLoading(true)
-    fetch(`/api/v1/skills/${skill.id}` + (workspaceId ? `?workspace_id=${workspaceId}` : ""))
+    apiFetch(`/api/v1/skills/${skill.id}` + (workspaceId ? `?workspace_id=${workspaceId}` : ""))
       .then((res) => (res.ok ? res.json() : Promise.reject()))
       .then((json) => {
         if (!cancelled) setDetail(json as SkillDetail)
@@ -221,7 +232,7 @@ function InstallToAgentDialog({
     let cancelled = false
     setLoading(true)
     setError(null)
-    fetch(`/api/v1/agents?workspace_id=${encodeURIComponent(workspaceId)}`)
+    apiFetch(`/api/v1/agents?workspace_id=${encodeURIComponent(workspaceId)}`)
       .then((res) => (res.ok ? res.json() : Promise.reject()))
       .then((json) => {
         if (cancelled) return
@@ -266,7 +277,7 @@ function InstallToAgentDialog({
     // which 2 of 5 failed rather than a single first-failure).
     const results = await Promise.allSettled(
       Array.from(picked).map((agentId) =>
-        fetch(`/api/v1/agents/${agentId}/skills${wsParam}`, {
+        apiFetch(`/api/v1/agents/${agentId}/skills${wsParam}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ skill_id: skill.id }),
@@ -328,7 +339,7 @@ function InstallToAgentDialog({
         <div className="max-h-72 overflow-y-auto rounded border border-white/[0.08] divide-y divide-white/[0.04]">
           {loading ? (
             <div className="p-4 text-center text-xs text-white/45">
-              <Loader2 className="h-3 w-3 inline mr-1 animate-spin" />
+              <Spinner className="h-3 w-3 inline mr-1" />
               Loading agents…
             </div>
           ) : filtered.length === 0 ? (
@@ -377,7 +388,7 @@ function InstallToAgentDialog({
         <DialogFooter>
           <Button variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
           <Button onClick={handleInstall} disabled={picked.size === 0 || submitting}>
-            {submitting ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : null}
+            {submitting ? <Spinner className="h-3 w-3 mr-1" /> : null}
             Install ({picked.size})
           </Button>
         </DialogFooter>
@@ -429,13 +440,13 @@ function UninstallSkillDialog({
     // Two requests: list of agents in workspace, then per-agent skill
     // list. Probing in parallel keeps the dialog open-time tolerable
     // even at the worst-case 50 agents.
-    fetch(`/api/v1/agents?workspace_id=${encodeURIComponent(workspaceId)}`)
+    apiFetch(`/api/v1/agents?workspace_id=${encodeURIComponent(workspaceId)}`)
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error("HTTP " + res.status))))
       .then(async (agents: AgentRow[]) => {
         const wsParam = `workspace_id=${encodeURIComponent(workspaceId)}`
         const checks = await Promise.all(
           agents.map(async (a) => {
-            const res = await fetch(`/api/v1/agents/${encodeURIComponent(a.id)}/skills?${wsParam}`)
+            const res = await apiFetch(`/api/v1/agents/${encodeURIComponent(a.id)}/skills?${wsParam}`)
             if (!res.ok) return { agent: a, has: false }
             const rows = (await res.json().catch(() => [])) as AgentSkillRow[]
             return { agent: a, has: rows.some((r) => r.skill_id === skill.id) }
@@ -459,7 +470,7 @@ function UninstallSkillDialog({
     const errors: string[] = []
     for (const agentId of picked) {
       try {
-        const res = await fetch(
+        const res = await apiFetch(
           `/api/v1/agents/${encodeURIComponent(agentId)}/skills/${encodeURIComponent(skill.id)}?${wsParam}`,
           { method: "DELETE" },
         )
@@ -516,7 +527,7 @@ function UninstallSkillDialog({
         <div className="max-h-72 overflow-y-auto rounded border border-white/[0.08] divide-y divide-white/[0.04]">
           {loading ? (
             <div className="p-4 text-center text-xs text-white/45">
-              <Loader2 className="h-3 w-3 inline mr-1 animate-spin" />
+              <Spinner className="h-3 w-3 inline mr-1" />
               Looking up agents that have this skill installed…
             </div>
           ) : installed.length === 0 ? (
@@ -571,7 +582,7 @@ function UninstallSkillDialog({
             disabled={picked.size === 0 || submitting}
             variant="destructive"
           >
-            {submitting ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Trash2 className="h-3 w-3 mr-1" />}
+            {submitting ? <Spinner className="h-3 w-3 mr-1" /> : <Trash2 className="h-3 w-3 mr-1" />}
             Uninstall ({picked.size})
           </Button>
         </DialogFooter>
@@ -601,7 +612,7 @@ function AssignToCrewDialog({
     let cancelled = false
     setLoading(true)
     setError(null)
-    fetch(`/api/v1/crews?workspace_id=${encodeURIComponent(workspaceId)}`)
+    apiFetch(`/api/v1/crews?workspace_id=${encodeURIComponent(workspaceId)}`)
       .then((res) => (res.ok ? res.json() : Promise.reject()))
       .then((json) => {
         if (cancelled) return
@@ -620,7 +631,7 @@ function AssignToCrewDialog({
     setError(null)
     const wsParam = `workspace_id=${encodeURIComponent(workspaceId)}`
     try {
-      const agentsRes = await fetch(`/api/v1/agents?${wsParam}&crew_id=${encodeURIComponent(pickedCrew)}`)
+      const agentsRes = await apiFetch(`/api/v1/agents?${wsParam}&crew_id=${encodeURIComponent(pickedCrew)}`)
       if (!agentsRes.ok) {
         setError("Failed to load crew agents")
         setSubmitting(false)
@@ -639,7 +650,7 @@ function AssignToCrewDialog({
       // the JSON detail when the body is RFC7807 so the user sees
       // 'agent not in workspace X' instead of 'Bad Request'.
       for (const a of targets) {
-        const res = await fetch(`/api/v1/agents/${encodeURIComponent(a.id)}/skills?${wsParam}`, {
+        const res = await apiFetch(`/api/v1/agents/${encodeURIComponent(a.id)}/skills?${wsParam}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ skill_id: skill.id }),
@@ -686,7 +697,7 @@ function AssignToCrewDialog({
         <div className="max-h-72 overflow-y-auto rounded border border-white/[0.08] divide-y divide-white/[0.04]">
           {loading ? (
             <div className="p-4 text-center text-xs text-white/45">
-              <Loader2 className="h-3 w-3 inline mr-1 animate-spin" />
+              <Spinner className="h-3 w-3 inline mr-1" />
               Loading crews…
             </div>
           ) : crews.length === 0 ? (
@@ -728,7 +739,7 @@ function AssignToCrewDialog({
         <DialogFooter>
           <Button variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
           <Button onClick={handleAssign} disabled={!pickedCrew || submitting}>
-            {submitting ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : null}
+            {submitting ? <Spinner className="h-3 w-3 mr-1" /> : null}
             Apply to crew
           </Button>
         </DialogFooter>

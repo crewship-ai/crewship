@@ -2,9 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
-import { AlertTriangle, Loader2 } from "lucide-react"
+import { AlertTriangle } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { useAbilities } from "@/hooks/use-abilities"
 import { cn } from "@/lib/utils"
+import { apiFetch } from "@/lib/api-fetch"
 
 // PR-G F2/F4.2 UI surface — per-crew policy controls.
 //
@@ -144,10 +146,10 @@ export function CrewPolicyControls({ crewId, workspaceId, canEdit }: CrewPolicyC
       // if it failed); quota silently defaults to 10 if its fetch
       // tripped, matching the server-side default.
       const [policyResult, crewResult] = await Promise.allSettled([
-        fetch(`/api/v1/crews/${crewId}/policy`, {
+        apiFetch(`/api/v1/crews/${crewId}/policy`, {
           headers: { "X-Workspace-ID": workspaceId },
         }),
-        fetch(`/api/v1/crews/${crewId}`, {
+        apiFetch(`/api/v1/crews/${crewId}`, {
           headers: { "X-Workspace-ID": workspaceId },
         }),
       ])
@@ -228,7 +230,7 @@ export function CrewPolicyControls({ crewId, workspaceId, canEdit }: CrewPolicyC
       // now this ordering keeps the dangerous failure mode (silent
       // partial governance change) off the table.
       if (policyFieldDirty) {
-        const res = await fetch(`/api/v1/crews/${crewId}/policy`, {
+        const res = await apiFetch(`/api/v1/crews/${crewId}/policy`, {
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
@@ -258,7 +260,7 @@ export function CrewPolicyControls({ crewId, workspaceId, canEdit }: CrewPolicyC
       }
 
       if (quotaDirty && parsedQuota.value !== null) {
-        const qRes = await fetch(`/api/v1/crews/${crewId}`, {
+        const qRes = await apiFetch(`/api/v1/crews/${crewId}`, {
           method: "PATCH",
           headers: {
             "Content-Type": "application/json",
@@ -306,7 +308,7 @@ export function CrewPolicyControls({ crewId, workspaceId, canEdit }: CrewPolicyC
   if (loading) {
     return (
       <div className="rounded-xl border border-white/8 bg-card p-4 flex items-center gap-2 text-sm text-muted-foreground">
-        <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading policy…
+        <Spinner className="h-3.5 w-3.5" /> Loading policy…
       </div>
     )
   }

@@ -1,11 +1,13 @@
 "use client"
 
 import * as React from "react"
-import { Check, ExternalLink, Loader2 } from "lucide-react"
+import { Check, ExternalLink } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { StatusBadge } from "@/components/ui/status-badge"
+import { apiFetch } from "@/lib/api-fetch"
 import { cn } from "@/lib/utils"
 
 interface OAuthAutoConnectProps {
@@ -54,7 +56,7 @@ export function OAuthAutoConnect({
     completedRef.current = false
 
     try {
-      const res = await fetch(`/api/v1/oauth/auto-connect?workspace_id=${workspaceId}`, {
+      const res = await apiFetch(`/api/v1/oauth/auto-connect?workspace_id=${workspaceId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ mcp_url: mcpURL, server_name: serverName }),
@@ -77,7 +79,7 @@ export function OAuthAutoConnect({
         const credId = data.credential_id
         pollRef.current = setInterval(async () => {
           try {
-            const credRes = await fetch(`/api/v1/credentials/${credId}?workspace_id=${workspaceId}`)
+            const credRes = await apiFetch(`/api/v1/credentials/${credId}?workspace_id=${workspaceId}`)
             if (credRes.ok) {
               const cred = await credRes.json()
               if (cred.status === "ACTIVE" && !completedRef.current) {
@@ -172,7 +174,7 @@ export function OAuthAutoConnect({
         disabled={status === "discovering" || status === "authorizing" || status === "polling"}
       >
         {(status === "discovering" || status === "authorizing") && (
-          <Loader2 className="mr-2 h-3 w-3 animate-spin" />
+          <Spinner className="mr-2 h-3 w-3" />
         )}
         {status === "authorizing" ? "Waiting for authorization..."
           : isMissing || isExpired ? "Reconnect with OAuth"

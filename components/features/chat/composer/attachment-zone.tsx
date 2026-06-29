@@ -11,6 +11,7 @@ import {
 } from "@/components/ai-elements/attachments"
 import { useComposerStore } from "@/stores/composer-store"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { apiFetch } from "@/lib/api-fetch"
 
 // 25 MB cap — best practice for chat attachments. Bigger than the
 // previous 10 MB which was too small for screenshots / log dumps but
@@ -66,9 +67,8 @@ async function uploadOne(
   // a different endpoint (e.g. an id with a slash in it) — CodeQL flags
   // unescaped path interpolation as js/client-side-request-forgery.
   const url = `/api/v1/agents/${encodeURIComponent(agentId)}/chats/${encodeURIComponent(sessionId)}/attachments?workspace_id=${encodeURIComponent(workspaceId)}`
-  const res = await fetch(url, {
+  const res = await apiFetch(url, {
     method: "POST",
-    credentials: "include",
     body: form,
     signal,
   })

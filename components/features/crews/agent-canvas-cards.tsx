@@ -4,7 +4,8 @@ import Link from "next/link"
 import { ChevronRight } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { ChatRow, PeerMessageRow, RunRow } from "./agent-canvas"
-import { formatDuration, formatRelative } from "./agent-canvas"
+import { formatRelative } from "./agent-canvas"
+import { formatDurationSpan } from "@/lib/time"
 
 function RecentSessionsCard({ agentSlug, chats }: { agentSlug: string; chats: ChatRow[] | null }) {
   const recent = chats === null ? null : chats.slice(0, 5)
@@ -78,7 +79,7 @@ function RecentRunsCard({ agentId, runs }: { agentId: string; runs: RunRow[] | n
                   {r.trigger_type.toLowerCase()}{r.error_message ? ` — ${r.error_message}` : ""}
                 </div>
                 <div className="text-[10px] text-muted-foreground">
-                  {formatRelative(r.created_at)}{r.finished_at && r.started_at ? ` · ${formatDuration(r.started_at, r.finished_at)}` : ""} · {r.status.toLowerCase()}
+                  {formatRelative(r.created_at)}{r.finished_at && r.started_at ? ` · ${formatDurationSpan(r.started_at, r.finished_at)}` : ""} · {r.status.toLowerCase()}
                 </div>
               </div>
             </div>

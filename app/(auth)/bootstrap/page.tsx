@@ -3,7 +3,8 @@
 import { useState, useEffect, type FormEvent } from "react"
 import { useRouter } from "next/navigation"
 import { motion, useReducedMotion } from "motion/react"
-import { Sparkles, ArrowRight, Loader2 } from "lucide-react"
+import { Sparkles, ArrowRight } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { CrewshipLogoTile } from "@/components/branding/crewship-logo"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -46,6 +47,7 @@ export default function BootstrapPage() {
   const [checking, setChecking] = useState(true)
 
   useEffect(() => {
+    // eslint-disable-next-line no-restricted-syntax -- first-run bootstrap gate: runs before any account exists; raw fetch by design
     fetch("/api/v1/system/setup-status")
       .then((r) => (r.ok ? r.json() : { needs_bootstrap: true }))
       .then((d) => {
@@ -71,6 +73,7 @@ export default function BootstrapPage() {
     }
     setLoading(true)
     try {
+      // eslint-disable-next-line no-restricted-syntax -- first-run bootstrap (creates the first admin); no session exists yet, raw fetch by design
       const res = await fetch("/api/v1/bootstrap", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -180,7 +183,7 @@ export default function BootstrapPage() {
               <Button type="submit" className="w-full h-11 text-sm font-semibold" disabled={loading}>
                 {loading ? (
                   <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    <Spinner className="mr-2 h-4 w-4" />
                     Creating account…
                   </>
                 ) : (

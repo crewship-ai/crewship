@@ -7,7 +7,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { getAgentAvatarUrl } from "@/lib/agent-avatar"
+import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { getCrewDotColor } from "@/lib/entities"
 import { timeAgo } from "@/lib/time"
 import { CLI_ADAPTERS, getModelLabel, getProviderLabel } from "@/lib/cli-adapters"
@@ -139,9 +139,9 @@ export const AgentCard = memo(function AgentCard({ agent }: { agent: AgentData }
         <Card className="hover:border-primary/50 hover:bg-accent/30 hover:shadow-md transition-all duration-150 cursor-pointer h-full border-border/80 shadow-md">
           <CardContent className="p-4 sm:p-5">
             <div className="flex items-start gap-3">
-              <img
-                src={getAgentAvatarUrl(agent.avatar_seed || agent.name, agent.avatar_style || agent.crew?.avatar_style)}
-                alt=""
+              <AgentAvatar
+                seed={agent.avatar_seed || agent.name}
+                style={agent.avatar_style || agent.crew?.avatar_style}
                 className="h-10 w-10 rounded-lg shrink-0"
               />
               <div className="flex-1 min-w-0">

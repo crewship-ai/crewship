@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
 import { Plus, Trash2 } from "lucide-react"
 import type { AgentCredRow, AgentSkillRow } from "./agent-canvas"
+import { apiFetch } from "@/lib/api-fetch"
 
 interface WorkspaceSkill {
   id: string
@@ -23,7 +24,7 @@ function SkillsManager({ agentId, agentSlug, workspaceId, onChange }: { agentId:
 
   const refresh = useCallback(async () => {
     try {
-      const r = await fetch(`/api/v1/agents/${agentId}/skills?workspace_id=${workspaceId}`)
+      const r = await apiFetch(`/api/v1/agents/${agentId}/skills?workspace_id=${workspaceId}`)
       if (!r.ok) throw new Error(`HTTP ${r.status}`)
       const data: AgentSkillRow[] = await r.json()
       setAssigned(Array.isArray(data) ? data : [])
@@ -39,7 +40,7 @@ function SkillsManager({ agentId, agentSlug, workspaceId, onChange }: { agentId:
     setPickerOpen(true)
     if (available !== null) return
     try {
-      const r = await fetch(`/api/v1/skills?workspace_id=${workspaceId}`)
+      const r = await apiFetch(`/api/v1/skills?workspace_id=${workspaceId}`)
       if (!r.ok) throw new Error(`HTTP ${r.status}`)
       const data: WorkspaceSkill[] = await r.json()
       setAvailable(Array.isArray(data) ? data : [])
@@ -52,7 +53,7 @@ function SkillsManager({ agentId, agentSlug, workspaceId, onChange }: { agentId:
   const assign = useCallback(async (skillId: string) => {
     setBusy(true)
     try {
-      const r = await fetch(`/api/v1/agents/${agentId}/skills`, {
+      const r = await apiFetch(`/api/v1/agents/${agentId}/skills`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ skill_id: skillId }),
@@ -73,7 +74,7 @@ function SkillsManager({ agentId, agentSlug, workspaceId, onChange }: { agentId:
     if (!confirm(`Remove skill "${name}" from ${agentSlug}?`)) return
     setBusy(true)
     try {
-      const r = await fetch(`/api/v1/agents/${agentId}/skills/${assignmentId}`, { method: "DELETE" })
+      const r = await apiFetch(`/api/v1/agents/${agentId}/skills/${assignmentId}`, { method: "DELETE" })
       if (!r.ok) throw new Error(await r.text())
       toast.success(`Skill "${name}" removed`)
       await refresh()
@@ -171,7 +172,7 @@ function CredentialsManager({ agentId, agentSlug, workspaceId, onChange }: { age
 
   const refresh = useCallback(async () => {
     try {
-      const r = await fetch(`/api/v1/agents/${agentId}/credentials?workspace_id=${workspaceId}`)
+      const r = await apiFetch(`/api/v1/agents/${agentId}/credentials?workspace_id=${workspaceId}`)
       if (!r.ok) throw new Error(`HTTP ${r.status}`)
       const data: AgentCredRow[] = await r.json()
       setAssigned(Array.isArray(data) ? data : [])
@@ -187,7 +188,7 @@ function CredentialsManager({ agentId, agentSlug, workspaceId, onChange }: { age
     setPickerOpen(true)
     if (available !== null) return
     try {
-      const r = await fetch(`/api/v1/credentials?workspace_id=${workspaceId}`)
+      const r = await apiFetch(`/api/v1/credentials?workspace_id=${workspaceId}`)
       if (!r.ok) throw new Error(`HTTP ${r.status}`)
       const data: WorkspaceCredential[] = await r.json()
       setAvailable(Array.isArray(data) ? data : [])
@@ -214,7 +215,7 @@ function CredentialsManager({ agentId, agentSlug, workspaceId, onChange }: { age
     const envVar = cred.default_env_var || sanitize(cred.name)
     setBusy(true)
     try {
-      const r = await fetch(`/api/v1/agents/${agentId}/credentials`, {
+      const r = await apiFetch(`/api/v1/agents/${agentId}/credentials`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ credential_id: cred.id, env_var_name: envVar, priority: 0 }),
@@ -235,7 +236,7 @@ function CredentialsManager({ agentId, agentSlug, workspaceId, onChange }: { age
     if (!confirm(`Unassign credential "${name}" from ${agentSlug}?`)) return
     setBusy(true)
     try {
-      const r = await fetch(`/api/v1/agents/${agentId}/credentials/${assignmentId}`, { method: "DELETE" })
+      const r = await apiFetch(`/api/v1/agents/${agentId}/credentials/${assignmentId}`, { method: "DELETE" })
       if (!r.ok) throw new Error(await r.text())
       toast.success(`Credential "${name}" unassigned`)
       await refresh()

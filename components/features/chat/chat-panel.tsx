@@ -6,9 +6,9 @@ import {
   Bot,
   Wifi,
   WifiOff,
-  Loader2,
   Users,
 } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 
 import {
@@ -562,7 +562,7 @@ function ConnectionBadge({ status }: { status: string }) {
       {status === "connected" ? (
         <Wifi className="h-3 w-3" />
       ) : status === "connecting" ? (
-        <Loader2 className="h-3 w-3 animate-spin" />
+        <Spinner className="h-3 w-3" />
       ) : (
         <WifiOff className="h-3 w-3" />
       )}

@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest"
 import type { JournalEntry } from "@/lib/types/journal"
-import { humanizeEntry, humanizeRun, formatBytes, formatDuration } from "@/lib/run-activity"
+import { humanizeEntry, humanizeRun, formatBytes } from "@/lib/run-activity"
+// formatDuration moved to lib/time as formatDurationPrecise (byte-identical).
+import { formatDurationPrecise as formatDuration } from "@/lib/time"
 
 /** Minimal JournalEntry factory — fills required fields, lets tests override. */
 function entry(over: Partial<JournalEntry> & Pick<JournalEntry, "entry_type">): JournalEntry {

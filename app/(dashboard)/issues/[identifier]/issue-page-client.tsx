@@ -7,17 +7,18 @@ import {
   Check,
   ChevronRight,
   Link2,
-  Loader2,
   MessageSquare,
   Pencil,
   Send,
   X,
 } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useSession } from "@/hooks/use-auth"
 import { useUrlSegment } from "@/lib/use-url-segment"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
-import { getAgentAvatarUrl } from "@/lib/agent-avatar"
+import { apiFetch } from "@/lib/api-fetch"
+import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { MarkdownContent } from "@/components/features/issues/markdown-content"
 import { TiptapEditor } from "@/components/features/issues/tiptap-editor"
 import { ActivityFeed } from "@/components/features/issues/activity-feed"
@@ -120,7 +121,7 @@ export function IssuePageClient() {
   const fetchIssue = useCallback(async () => {
     if (!workspaceId || !identifier) return
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/issues/${encodeURIComponent(identifier)}?workspace_id=${encodeURIComponent(workspaceId)}`,
       )
       if (!res.ok) {
@@ -141,7 +142,7 @@ export function IssuePageClient() {
     if (!crewId || !identifier || !workspaceId) return
     setLoadingComments(true)
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/crews/${crewId}/issues/${encodeURIComponent(identifier)}/comments?workspace_id=${encodeURIComponent(workspaceId)}`,
       )
       if (res.ok) {
@@ -159,7 +160,7 @@ export function IssuePageClient() {
     if (!crewId || !identifier || !workspaceId) return
     setLoadingActivity(true)
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/crews/${crewId}/issues/${encodeURIComponent(identifier)}/activity?workspace_id=${encodeURIComponent(workspaceId)}`,
       )
       if (res.ok) {
@@ -176,7 +177,7 @@ export function IssuePageClient() {
   const fetchRelations = useCallback(async () => {
     if (!crewId || !identifier || !workspaceId) return
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/crews/${crewId}/issues/${encodeURIComponent(identifier)}/relations?workspace_id=${encodeURIComponent(workspaceId)}`,
       )
       if (res.ok) {
@@ -192,9 +193,9 @@ export function IssuePageClient() {
     if (!workspaceId) return
     try {
       const [agentsRes, labelsRes, projectsRes] = await Promise.all([
-        fetch(`/api/v1/agents?workspace_id=${encodeURIComponent(workspaceId)}`),
-        fetch(`/api/v1/labels?workspace_id=${encodeURIComponent(workspaceId)}`),
-        fetch(`/api/v1/projects?workspace_id=${encodeURIComponent(workspaceId)}`),
+        apiFetch(`/api/v1/agents?workspace_id=${encodeURIComponent(workspaceId)}`),
+        apiFetch(`/api/v1/labels?workspace_id=${encodeURIComponent(workspaceId)}`),
+        apiFetch(`/api/v1/projects?workspace_id=${encodeURIComponent(workspaceId)}`),
       ])
       if (agentsRes.ok) {
         const data = await agentsRes.json()
@@ -255,7 +256,7 @@ export function IssuePageClient() {
     if (!crewId || !identifier || !workspaceId) return false
     setSaving(true)
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/crews/${crewId}/issues/${encodeURIComponent(identifier)}?workspace_id=${encodeURIComponent(workspaceId)}`,
         {
           method: "PATCH",
@@ -288,7 +289,7 @@ export function IssuePageClient() {
     if (!crewId || !identifier || !workspaceId || !newComment.trim()) return
     setSubmittingComment(true)
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/crews/${crewId}/issues/${encodeURIComponent(identifier)}/comments?workspace_id=${encodeURIComponent(workspaceId)}`,
         {
           method: "POST",
@@ -317,7 +318,7 @@ export function IssuePageClient() {
       const url = action === "review"
         ? `/api/v1/crews/${crewId}/issues/${encodeURIComponent(identifier)}/review?workspace_id=${encodeURIComponent(workspaceId)}`
         : `/api/v1/crews/${crewId}/issues/${encodeURIComponent(identifier)}/${action}?workspace_id=${encodeURIComponent(workspaceId)}`
-      const res = await fetch(url, {
+      const res = await apiFetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: action === "review" ? JSON.stringify({ action: reviewAction }) : undefined,
@@ -492,7 +493,7 @@ export function IssuePageClient() {
                     aria-label="Save title"
                   >
                     {saving ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <Spinner className="h-4 w-4" />
                     ) : (
                       <Check className="h-4 w-4" />
                     )}
@@ -559,7 +560,7 @@ export function IssuePageClient() {
 
               {loadingComments ? (
                 <div className="flex items-center justify-center py-6">
-                  <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                  <Spinner className="h-4 w-4 text-muted-foreground" />
                 </div>
               ) : comments.length === 0 ? (
                 <p className="text-label text-muted-foreground/50 py-3">
@@ -572,9 +573,8 @@ export function IssuePageClient() {
                       {/* Avatar */}
                       <div className="shrink-0 mt-0.5">
                         {comment.author_type === "agent" ? (
-                          <img
-                            src={getAgentAvatarUrl(comment.author_name ?? comment.author_id)}
-                            alt=""
+                          <AgentAvatar
+                            seed={comment.author_name ?? comment.author_id}
                             className="h-7 w-7 rounded-full"
                           />
                         ) : (
@@ -634,7 +634,7 @@ export function IssuePageClient() {
                       disabled={submittingComment || !newComment.trim()}
                     >
                       {submittingComment ? (
-                        <Loader2 className="h-3 w-3 animate-spin" />
+                        <Spinner className="h-3 w-3" />
                       ) : (
                         <Send className="h-3 w-3" />
                       )}
@@ -664,7 +664,7 @@ export function IssuePageClient() {
             {/* ---- Activity section (issue lifecycle: assignee/status/etc.) ---- */}
             {loadingActivity ? (
               <div className="flex items-center justify-center py-4">
-                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                <Spinner className="h-4 w-4 text-muted-foreground" />
               </div>
             ) : (
               <ActivityFeed activities={activities} />

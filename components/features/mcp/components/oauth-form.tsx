@@ -1,11 +1,13 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
-import { Loader2, ExternalLink } from "lucide-react"
+import { ExternalLink } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Button } from "@/components/ui/button"
 import { toast } from "sonner"
+import { apiFetch } from "@/lib/api-fetch"
 import type { Credential, OAuthProvider } from "../types"
 import { deriveCredentialName } from "../lib/credential-helpers"
 
@@ -71,7 +73,7 @@ export function OAuthForm({
 
     async function fetchProviders() {
       try {
-        const res = await fetch(`/api/v1/oauth/providers?workspace_id=${workspaceId}`)
+        const res = await apiFetch(`/api/v1/oauth/providers?workspace_id=${workspaceId}`)
         if (res.ok) {
           const data = await res.json()
           if (!cancelled) setProviders(data)
@@ -128,7 +130,7 @@ export function OAuthForm({
         : (selectedProvider ?? "custom") + "-oauth"
       const credName = baseName + "-" + Date.now().toString(36)
 
-      const createRes = await fetch(`/api/v1/credentials?workspace_id=${workspaceId}`, {
+      const createRes = await apiFetch(`/api/v1/credentials?workspace_id=${workspaceId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -167,7 +169,7 @@ export function OAuthForm({
 
       if (isLocalhost) {
         // LOCALHOST: loopback server (same as gh auth login, gcloud auth login)
-        const res = await fetch(`/api/v1/oauth/loopback?workspace_id=${workspaceId}`, {
+        const res = await apiFetch(`/api/v1/oauth/loopback?workspace_id=${workspaceId}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ credential_id: created.id }),
@@ -188,7 +190,7 @@ export function OAuthForm({
         // PUBLIC DOMAIN: standard redirect callback
         const redirectUri = `${window.location.origin}/api/v1/oauth/callback`
         setPendingRedirectUri(redirectUri)
-        const res = await fetch(`/api/v1/oauth/initiate?workspace_id=${workspaceId}`, {
+        const res = await apiFetch(`/api/v1/oauth/initiate?workspace_id=${workspaceId}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ credential_id: created.id, redirect_uri: redirectUri }),
@@ -203,7 +205,7 @@ export function OAuthForm({
         oauthRedirectUrl = result.auth_url
       } else {
         // PRIVATE IP: loopback + manual paste (callback won't reach browser)
-        const res = await fetch(`/api/v1/oauth/loopback?workspace_id=${workspaceId}`, {
+        const res = await apiFetch(`/api/v1/oauth/loopback?workspace_id=${workspaceId}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ credential_id: created.id }),
@@ -256,7 +258,7 @@ export function OAuthForm({
         }
 
         try {
-          const statusRes = await fetch(
+          const statusRes = await apiFetch(
             `/api/v1/credentials/${created.id}?workspace_id=${workspaceId}`,
           )
           if (statusRes.ok) {
@@ -296,7 +298,7 @@ export function OAuthForm({
     }
 
     try {
-      const res = await fetch(`/api/v1/oauth/exchange?workspace_id=${workspaceId}`, {
+      const res = await apiFetch(`/api/v1/oauth/exchange?workspace_id=${workspaceId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -437,7 +439,7 @@ export function OAuthForm({
               onClick={handleAuthorize}
             >
               {polling ? (
-                <Loader2 className="h-3 w-3 animate-spin" />
+                <Spinner className="h-3 w-3" />
               ) : (
                 <ExternalLink className="h-3 w-3" />
               )}

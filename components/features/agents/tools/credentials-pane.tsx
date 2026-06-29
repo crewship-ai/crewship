@@ -3,7 +3,8 @@
 import { useAgentId } from "@/hooks/use-agent-id"
 
 import { useState, useEffect, useCallback } from "react"
-import { ShieldCheck, AlertCircle, Inbox, Plus, Trash2, Loader2, RotateCcw } from "lucide-react"
+import { ShieldCheck, AlertCircle, Inbox, Plus, Trash2, RotateCcw } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { SectionCard } from "@/components/ui/section-card"
@@ -14,6 +15,7 @@ import { useRealtimeEvent } from "@/hooks/use-realtime"
 import { PROVIDER_ICONS } from "@/components/icons/provider-icons"
 import { AssignCredentialDialog } from "@/components/features/credentials/assign-credential-dialog"
 import { PROVIDER_ICON_COLOR, CREDENTIAL_TYPE_ICON_COLOR } from "@/lib/colors"
+import { apiFetch } from "@/lib/api-fetch"
 import { cn } from "@/lib/utils"
 
 interface AgentCredential {
@@ -41,7 +43,7 @@ export function CredentialsPageClient() {
   const fetchCredentials = useCallback(async () => {
     if (!workspaceId || !agentId) return
     try {
-      const res = await fetch(`/api/v1/agents/${agentId}/credentials?workspace_id=${workspaceId}`)
+      const res = await apiFetch(`/api/v1/agents/${agentId}/credentials?workspace_id=${workspaceId}`)
       if (!res.ok) {
         setError("Failed to load credentials")
         return
@@ -67,7 +69,7 @@ export function CredentialsPageClient() {
     if (!workspaceId || !agentId) return
     setRemovingId(assignmentId)
     try {
-      const res = await fetch(`/api/v1/agents/${agentId}/credentials/${assignmentId}?workspace_id=${workspaceId}`, {
+      const res = await apiFetch(`/api/v1/agents/${agentId}/credentials/${assignmentId}?workspace_id=${workspaceId}`, {
         method: "DELETE",
       })
       if (res.ok) {
@@ -172,7 +174,7 @@ export function CredentialsPageClient() {
                     disabled={removingId === c.id}
                   >
                     {removingId === c.id ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <Spinner className="h-4 w-4" />
                     ) : (
                       <Trash2 className="h-4 w-4" />
                     )}

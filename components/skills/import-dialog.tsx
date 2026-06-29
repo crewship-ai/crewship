@@ -18,6 +18,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
+import { apiFetch } from "@/lib/api-fetch"
 
 const ImportResultSchema = z.object({
   skill_id: z.string(),
@@ -87,7 +88,7 @@ export function ImportSkillDialog({
 
     try {
       if (tab === "repo") {
-        const res = await fetch(
+        const res = await apiFetch(
           `/api/v1/workspaces/${workspaceId}/skills/bulk-import`,
           {
             method: "POST",
@@ -129,7 +130,7 @@ export function ImportSkillDialog({
           ? { url: url.trim(), allow_unsafe_license: unsafeLicense }
           : { content: content.trim(), allow_unsafe_license: unsafeLicense }
 
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/workspaces/${workspaceId}/skills/import`,
         {
           method: "POST",

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { journalListResponseSchema, type JournalEntry } from "@/lib/types/journal"
+import { apiFetch } from "@/lib/api-fetch"
 
 interface UseJournalListOptions {
   workspaceId: string | null
@@ -82,7 +83,7 @@ export function useJournalList(opts: UseJournalListOptions): UseJournalListResul
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch(`/api/v1/journal?${buildParams().toString()}`)
+      const res = await apiFetch(`/api/v1/journal?${buildParams().toString()}`)
       if (!res.ok) {
         if (reqIdRef.current !== requestId) return
         // 404 before handler ships — treat as empty rather than surfacing an
@@ -119,7 +120,7 @@ export function useJournalList(opts: UseJournalListOptions): UseJournalListResul
     if (!nextCursor || loadingMore || !workspaceId) return
     setLoadingMore(true)
     try {
-      const res = await fetch(`/api/v1/journal?${buildParams(nextCursor).toString()}`)
+      const res = await apiFetch(`/api/v1/journal?${buildParams(nextCursor).toString()}`)
       if (!res.ok) return
       const json = await res.json()
       const parsed = journalListResponseSchema.safeParse(json)

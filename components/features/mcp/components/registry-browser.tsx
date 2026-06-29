@@ -4,11 +4,11 @@ import * as React from "react"
 import {
   Globe,
   Terminal,
-  Loader2,
   Search,
   BadgeCheck,
   Plus,
 } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import {
   Dialog,
   DialogContent,
@@ -18,6 +18,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { apiFetch } from "@/lib/api-fetch"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -131,7 +132,7 @@ export function RegistryBrowser({
           ? `/api/v1/mcp-registry/search?q=${encodeURIComponent(q.trim())}&limit=${PAGE_SIZE}&offset=${newOffset}`
           : `/api/v1/mcp-registry?limit=${PAGE_SIZE}&offset=${newOffset}`
 
-        const res = await fetch(url, { signal: controller.signal })
+        const res = await apiFetch(url, { signal: controller.signal })
         if (!res.ok) {
           if (res.status === 404) {
             setError("Registry not synced yet. Run the registry sync from settings.")
@@ -331,7 +332,7 @@ export function RegistryBrowser({
                     onClick={() => handleAdd(server)}
                   >
                     {addingId === server.id ? (
-                      <Loader2 className="h-3 w-3 animate-spin" />
+                      <Spinner className="h-3 w-3" />
                     ) : (
                       <>
                         <Plus className="mr-1 h-3 w-3" />
@@ -360,7 +361,7 @@ export function RegistryBrowser({
           {/* Loading spinner */}
           {loading && (
             <div className="flex items-center justify-center py-8">
-              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+              <Spinner className="h-5 w-5 text-muted-foreground" />
             </div>
           )}
         </div>

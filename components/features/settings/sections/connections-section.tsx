@@ -2,8 +2,13 @@
 
 import { useCallback, useEffect, useState } from "react"
 import {
-  Link2, Unlink2, ArrowLeftRight, ArrowRight, Loader2, Trash2,
+  Link2,
+  Unlink2,
+  ArrowLeftRight,
+  ArrowRight,
+  Trash2,
 } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { StatusBadge } from "@/components/ui/status-badge"
 import {
@@ -12,6 +17,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
 import { resolveCrewColor } from "@/lib/colors"
+import { apiFetch } from "@/lib/api-fetch"
 import { toast } from "sonner"
 import { SettingsCard, SettingsRow } from "../shared"
 
@@ -70,8 +76,8 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
   const fetchData = useCallback(async () => {
     try {
       const [connsRes, crewsRes] = await Promise.all([
-        fetch(`/api/v1/crew-connections?workspace_id=${workspaceId}`),
-        fetch(`/api/v1/crews?workspace_id=${workspaceId}`),
+        apiFetch(`/api/v1/crew-connections?workspace_id=${workspaceId}`),
+        apiFetch(`/api/v1/crews?workspace_id=${workspaceId}`),
       ])
       if (connsRes.ok) setConnections(await connsRes.json())
       if (crewsRes.ok) setCrews(await crewsRes.json())
@@ -86,7 +92,7 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
     if (!fromCrewId || !toCrewId || fromCrewId === toCrewId) return
     setConnecting(true)
     try {
-      const res = await fetch(`/api/v1/crew-connections?workspace_id=${workspaceId}`, {
+      const res = await apiFetch(`/api/v1/crew-connections?workspace_id=${workspaceId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -116,7 +122,7 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
     if (!window.confirm("Disconnect these crews?")) return
     setDisconnectingId(connId)
     try {
-      const res = await fetch(`/api/v1/crew-connections/${connId}?workspace_id=${workspaceId}`, {
+      const res = await apiFetch(`/api/v1/crew-connections/${connId}?workspace_id=${workspaceId}`, {
         method: "DELETE",
       })
       if (!res.ok) {
@@ -241,7 +247,7 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
             onClick={handleConnect}
           >
             {connecting ? (
-              <Loader2 className="mr-1.5 size-3 animate-spin" />
+              <Spinner className="mr-1.5 size-3" />
             ) : (
               <Link2 className="mr-1.5 size-3" />
             )}
@@ -307,7 +313,7 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
                     className="h-6 w-6 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
                   >
                     {isDisconnecting ? (
-                      <Loader2 className="size-3 animate-spin" />
+                      <Spinner className="size-3" />
                     ) : (
                       <Trash2 className="size-3" />
                     )}

@@ -3,9 +3,17 @@
 import * as React from "react"
 import { motion } from "motion/react"
 import {
-  Check, ChevronRight, Loader2, Search, Terminal, Globe, Sparkles,
-  CheckCircle2, XCircle, ChevronDown,
+  Check,
+  ChevronRight,
+  Search,
+  Terminal,
+  Globe,
+  Sparkles,
+  CheckCircle2,
+  XCircle,
+  ChevronDown,
 } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import {
   Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription,
 } from "@/components/ui/sheet"
@@ -18,6 +26,7 @@ import { MCPLogo } from "@/components/icons/mcp-logos"
 import { TrustTierBadge, type TrustTier } from "./trust-tier-badge"
 import { MCP_TEMPLATES, TEMPLATE_ICONS } from "@/components/features/mcp/templates"
 import type { MCPTemplate } from "@/components/features/mcp/types"
+import { apiFetch } from "@/lib/api-fetch"
 
 type Source = "marketplace" | "template" | "custom"
 type Step = 1 | 2 | 3 | 4
@@ -104,11 +113,11 @@ export function AddMCPWizard({ workspaceId, open, onOpenChange, onAdded, crewId 
   // Lazy-load crews + credentials when opening.
   React.useEffect(() => {
     if (!open) return
-    fetch(`/api/v1/crews?workspace_id=${workspaceId}`)
+    apiFetch(`/api/v1/crews?workspace_id=${workspaceId}`)
       .then((r) => r.ok ? r.json() : [])
       .then((d: CrewOption[]) => setCrews(Array.isArray(d) ? d : []))
       .catch(() => setCrews([]))
-    fetch(`/api/v1/credentials?workspace_id=${workspaceId}`)
+    apiFetch(`/api/v1/credentials?workspace_id=${workspaceId}`)
       .then((r) => r.ok ? r.json() : [])
       .then((d: CredentialOption[]) => setCredentials(Array.isArray(d) ? d : []))
       .catch(() => setCredentials([]))
@@ -121,7 +130,7 @@ export function AddMCPWizard({ workspaceId, open, onOpenChange, onAdded, crewId 
     const url = registryQ.trim()
       ? `/api/v1/mcp-registry/search?q=${encodeURIComponent(registryQ.trim())}&limit=60`
       : `/api/v1/mcp-registry?limit=60`
-    fetch(url)
+    apiFetch(url)
       .then((r) => r.ok ? r.json() : null)
       .then((d: { servers: RegistryEntry[] } | null) => setRegistry(d?.servers ?? []))
       .catch(() => setRegistry([]))
@@ -158,7 +167,7 @@ export function AddMCPWizard({ workspaceId, open, onOpenChange, onAdded, crewId 
           OAUTH_CLIENT_SECRET: oauthClientSecret.trim(),
         })
       }
-      const res = await fetch(`/api/v1/crews/${pickedCrewId}/integrations?workspace_id=${workspaceId}`, {
+      const res = await apiFetch(`/api/v1/crews/${pickedCrewId}/integrations?workspace_id=${workspaceId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -304,7 +313,7 @@ export function AddMCPWizard({ workspaceId, open, onOpenChange, onAdded, crewId 
             disabled={!stepValid || submitting}
             className="text-sm px-3.5 py-1.5 rounded bg-blue-500 hover:bg-blue-400 text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
           >
-            {submitting && <Loader2 className="h-3 w-3 animate-spin" />}
+            {submitting && <Spinner className="h-3 w-3" />}
             {step === 4 ? (submitting ? "Adding..." : "✓ Add MCP server") : "Continue"}
             {step < 4 && !submitting && <ChevronRight className="h-3.5 w-3.5" />}
           </button>
@@ -378,7 +387,7 @@ function ConfigureStep(p: {
           />
         </div>
         {p.registryLoading ? (
-          <div className="text-center py-8"><Loader2 className="inline h-4 w-4 animate-spin text-muted-foreground" /></div>
+          <div className="text-center py-8"><Spinner className="inline h-4 w-4 text-muted-foreground" /></div>
         ) : (
           <div className="grid gap-2 grid-cols-1">
             {p.registry.slice(0, 30).map((e) => (
@@ -610,7 +619,7 @@ function AssignStep({ crews, pickedCrewId, setPickedCrewId, testResult, testing,
 
       <div className="pt-3 border-t border-white/10 space-y-2">
         <Button variant="outline" size="sm" onClick={runTest} disabled={testing || !pickedCrewId}>
-          {testing ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5 mr-1.5" />}
+          {testing ? <Spinner className="h-3.5 w-3.5 mr-1.5" /> : <CheckCircle2 className="h-3.5 w-3.5 mr-1.5" />}
           Test config
         </Button>
         {testResult && (

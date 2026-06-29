@@ -5,7 +5,8 @@ import { Handle, Position, type NodeProps } from "@xyflow/react"
 import { AlertTriangle } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { STATUS_COLORS, STATUS_BG } from "@/lib/colors"
-import { getAgentAvatarUrl } from "@/lib/agent-avatar"
+import { AgentAvatar } from "@/components/ui/agent-avatar"
+import { formatDurationDecimal } from "@/lib/time"
 
 interface AgentNodeData {
   label: string
@@ -120,20 +121,13 @@ function formatTokens(count: number | null): string | null {
   return `${count}`
 }
 
-function formatDuration(ms: number | null): string | null {
-  if (ms == null || ms === 0) return null
-  if (ms < 1000) return `${ms}ms`
-  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`
-  return `${Math.floor(ms / 60000)}m ${Math.floor((ms % 60000) / 1000)}s`
-}
-
 function AgentNodeComponent({ data }: NodeProps) {
   const d = data as unknown as AgentNodeData
   const cfg = statusConfig[d.status] || statusConfig.PENDING
   const initials = getInitials(d.agentName)
   const color = hashColor(d.agentSlug)
   const tokens = formatTokens(d.tokenCount)
-  const duration = formatDuration(d.durationMs)
+  const duration = d.durationMs ? formatDurationDecimal(d.durationMs) : null
 
   return (
     <div
@@ -165,8 +159,9 @@ function AgentNodeComponent({ data }: NodeProps) {
         <div className="flex items-start gap-2.5">
           {/* Avatar */}
           {(d.avatarSeed || d.agentSlug || d.agentName) ? (
-            <img
-              src={getAgentAvatarUrl(d.avatarSeed || d.agentSlug || d.agentName, d.avatarStyle)}
+            <AgentAvatar
+              seed={d.avatarSeed || d.agentSlug || d.agentName}
+              style={d.avatarStyle}
               alt={d.agentName}
               className="w-8 h-8 rounded-lg shrink-0"
             />

@@ -1,16 +1,18 @@
 "use client"
 
 import { useCallback, useState } from "react"
-import { Pause, Loader2 } from "lucide-react"
+import { Pause } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { StatusDot } from "@/components/ui/status-badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useAgentDetail } from "@/hooks/use-agent-detail"
 import { useWorkspace } from "@/hooks/use-workspace"
-import { getAgentAvatarUrl } from "@/lib/agent-avatar"
+import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { cn } from "@/lib/utils"
+import { apiFetch } from "@/lib/api-fetch"
 
 // Role label tone — neutral semantic tokens, no hardcoded palette shades.
 const AGENT_ROLE_TONE = "text-muted-foreground border-border bg-muted/40"
@@ -41,7 +43,7 @@ export function AgentHeader({ agentId }: AgentHeaderProps) {
     if (!workspaceId || !agent || stopping) return
     setStopping(true)
     try {
-      const res = await fetch(`/api/v1/agents/${agentId}/stop?workspace_id=${workspaceId}`, { method: "POST" })
+      const res = await apiFetch(`/api/v1/agents/${agentId}/stop?workspace_id=${workspaceId}`, { method: "POST" })
       if (res.ok) {
         const data = await res.json()
         setAgent((prev) => prev ? { ...prev, status: data.status } : prev)
@@ -73,8 +75,9 @@ export function AgentHeader({ agentId }: AgentHeaderProps) {
 
   return (
     <div className="flex items-center gap-4 px-5 pt-4 pb-3">
-      <img
-        src={getAgentAvatarUrl(agent.avatar_seed || agent.name, agent.avatar_style || agent.crew?.avatar_style)}
+      <AgentAvatar
+        seed={agent.avatar_seed || agent.name}
+        style={agent.avatar_style || agent.crew?.avatar_style}
         alt={agent.name}
         className="h-8 w-8 md:h-10 md:w-10 rounded-xl shrink-0"
       />
@@ -101,7 +104,7 @@ export function AgentHeader({ agentId }: AgentHeaderProps) {
           onClick={handleStop}
           disabled={stopping}
         >
-          {stopping ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Pause className="h-3.5 w-3.5" />}
+          {stopping ? <Spinner className="h-3.5 w-3.5" /> : <Pause className="h-3.5 w-3.5" />}
           Stop
         </Button>
       )}

@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
+import { apiFetch } from "@/lib/api-fetch"
 
 export interface UseCatalogResult<T> {
   data: T[] | null
@@ -34,7 +35,7 @@ export function useCatalog<T>(
     setLoading(true)
     setError(null)
 
-    fetch(url, { signal: controller.signal })
+    apiFetch(url, { signal: controller.signal })
       .then((r) => {
         if (!r.ok) throw new Error(`fetch ${url} failed: ${r.status}`)
         return r.json()

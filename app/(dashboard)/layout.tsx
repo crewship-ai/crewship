@@ -1,8 +1,9 @@
 "use client"
 
 import { useEffect } from "react"
+import { Spinner } from "@/components/ui/spinner"
 import { useSession } from "@/hooks/use-auth"
-import { Loader2 } from "lucide-react"
+
 import { AppSidebar } from "@/components/layout/app-sidebar"
 import { AppToolbar } from "@/components/layout/app-toolbar"
 import { RuntimeBanner } from "@/components/layout/runtime-banner"
@@ -29,7 +30,7 @@ export default function DashboardLayout({
   if (status === "loading" || status === "unauthenticated") {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground-soft" />
+        <Spinner className="h-6 w-6 text-muted-foreground-soft" />
       </div>
     )
   }

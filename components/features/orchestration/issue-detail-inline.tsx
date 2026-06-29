@@ -12,8 +12,9 @@ import { PriorityIcon, priorityLabel } from "@/components/features/issues/priori
 import { getCrewIconDef } from "@/lib/entities"
 import { cn } from "@/lib/utils"
 import { LABEL_PRESET_COLORS, STATUS_COLORS } from "@/lib/colors"
+import { apiFetch } from "@/lib/api-fetch"
 import { toast } from "sonner"
-import { getAgentAvatarUrl } from "@/lib/agent-avatar"
+import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { ActivityFeed } from "@/components/features/issues/activity-feed"
 import { timeAgo } from "@/lib/time"
 import type { Mission, IssueLabel, IssueComment, Project, IssueActivity, IssuePriority } from "@/lib/types/mission"
@@ -115,7 +116,7 @@ export function IssueDetailInline({
   // Fetch activities
   useEffect(() => {
     if (!issue.crew_id || !issue.identifier) return
-    fetch(`/api/v1/crews/${issue.crew_id}/issues/${issue.identifier}/activity?workspace_id=${workspaceId}`)
+    apiFetch(`/api/v1/crews/${issue.crew_id}/issues/${issue.identifier}/activity?workspace_id=${workspaceId}`)
       .then(r => r.ok ? r.json() : [])
       .then(setActivities)
       .catch(() => {})
@@ -125,7 +126,7 @@ export function IssueDetailInline({
     async (patch: Record<string, unknown>) => {
       if (!issue.crew_id || !issue.identifier) return
       try {
-        const res = await fetch(
+        const res = await apiFetch(
           `/api/v1/crews/${issue.crew_id}/issues/${issue.identifier}?workspace_id=${workspaceId}`,
           {
             method: "PATCH",
@@ -158,7 +159,7 @@ export function IssueDetailInline({
     if (!newComment.trim() || !issue.crew_id || !issue.identifier) return
     setSubmitting(true)
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/crews/${issue.crew_id}/issues/${issue.identifier}/comments?workspace_id=${workspaceId}`,
         {
           method: "POST",
@@ -192,7 +193,7 @@ export function IssueDetailInline({
     if (isTransitioning !== null) return
     setIsTransitioning(action)
     try {
-      const res = await fetch(url, {
+      const res = await apiFetch(url, {
         method: "POST",
         ...(body ? { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {}),
       })
@@ -234,9 +235,8 @@ export function IssueDetailInline({
             {issue.assignee_name && (
               <span className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
                 <span className="text-muted-foreground/60">·</span>
-                <img
-                  src={getAgentAvatarUrl(issue.assignee_id || issue.assignee_name)}
-                  alt=""
+                <AgentAvatar
+                  seed={issue.assignee_id || issue.assignee_name}
                   className="h-4 w-4 rounded-full"
                 />
                 <span>{issue.assignee_name}</span>
@@ -385,7 +385,7 @@ export function IssueDetailInline({
                     </button>
                     <button
                       onClick={async () => {
-                        const res = await fetch(`/api/v1/crews/${issue.crew_id}/issues/${issue.identifier}/review${qs}`, {
+                        const res = await apiFetch(`/api/v1/crews/${issue.crew_id}/issues/${issue.identifier}/review${qs}`, {
                           method: "POST",
                           headers: { "Content-Type": "application/json" },
                           body: JSON.stringify({ action: "request_changes", comment: reviewComment }),
@@ -423,9 +423,8 @@ export function IssueDetailInline({
                     {comments.map((comment) => (
                       <div key={comment.id} className="flex gap-3">
                         {comment.author_type === "agent" && comment.author_id ? (
-                          <img
-                            src={getAgentAvatarUrl(comment.author_id)}
-                            alt=""
+                          <AgentAvatar
+                            seed={comment.author_id}
                             className="mt-0.5 h-7 w-7 shrink-0 rounded-full"
                           />
                         ) : (
@@ -536,7 +535,7 @@ export function IssueDetailInline({
                                 setCreatingLabel(true)
                                 try {
                                   const color = LABEL_PRESET_COLORS[Math.floor(Math.random() * LABEL_PRESET_COLORS.length)].value
-                                  const res = await fetch(`/api/v1/labels?workspace_id=${workspaceId}`, {
+                                  const res = await apiFetch(`/api/v1/labels?workspace_id=${workspaceId}`, {
                                     method: "POST",
                                     headers: { "Content-Type": "application/json" },
                                     body: JSON.stringify({ name: labelSearch.trim(), color }),

@@ -1,7 +1,8 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Loader2 } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
+
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -20,6 +21,7 @@ import {
 } from "@/components/ui/select"
 import { toast } from "sonner"
 import type { CrewMember } from "@/lib/types/crew"
+import { apiFetch } from "@/lib/api-fetch"
 
 interface WorkspaceUser {
   id: string
@@ -55,7 +57,7 @@ export function AddMemberDialog({
     setLoading(true)
     setSelectedUserId("")
 
-    fetch(`/api/v1/workspaces/${workspaceId}/members`)
+    apiFetch(`/api/v1/workspaces/${workspaceId}/members`)
       .then((res) => {
         if (!res.ok) throw new Error("Failed to fetch members")
         return res.json()
@@ -78,7 +80,7 @@ export function AddMemberDialog({
 
     setSubmitting(true)
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/crews/${crewId}/members?workspace_id=${workspaceId}`,
         {
           method: "POST",
@@ -115,7 +117,7 @@ export function AddMemberDialog({
 
         {loading ? (
           <div className="flex items-center justify-center py-6">
-            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            <Spinner className="h-5 w-5 text-muted-foreground" />
           </div>
         ) : users.length === 0 ? (
           <p className="text-body text-muted-foreground py-4 text-center">
@@ -143,7 +145,7 @@ export function AddMemberDialog({
           <Button onClick={handleSubmit} disabled={!selectedUserId || submitting || loading}>
             {submitting ? (
               <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                <Spinner className="mr-2 h-4 w-4" />
                 Adding...
               </>
             ) : (

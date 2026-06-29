@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { Terminal } from "@xterm/xterm"
 import { FitAddon } from "@xterm/addon-fit"
 import { WebLinksAddon } from "@xterm/addon-web-links"
+import { apiFetch } from "@/lib/api-fetch"
 
 /** Connection status for the WebSocket-based terminal session. */
 export type TerminalStatus = "connecting" | "connected" | "disconnected" | "error"
@@ -59,7 +60,7 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
         setStatus("connecting")
 
         // Fetch WS token.
-        const tokenRes = await fetch("/api/v1/ws-token", { credentials: "include" })
+        const tokenRes = await apiFetch("/api/v1/ws-token")
         if (!tokenRes.ok) {
           setStatus("error")
           return

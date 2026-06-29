@@ -5,10 +5,12 @@ import {
   Play, Square, Clock, Coins, CheckCircle2, AlertTriangle,
   Loader2, ChevronRight, RotateCcw, Copy,
 } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
+import { apiFetch } from "@/lib/api-fetch"
 import { toast } from "sonner"
 import type { Mission } from "@/lib/types/mission"
 
@@ -76,12 +78,12 @@ export function MissionControlBar({ mission, workspaceId, onMissionChanged }: Mi
       const qs = `?workspace_id=${encodeURIComponent(workspaceId)}`
       let res: Response
       if (action === "start") {
-        res = await fetch(`/api/v1/crews/${mission.crew_id}/missions/${mission.id}/start${qs}`, {
+        res = await apiFetch(`/api/v1/crews/${mission.crew_id}/missions/${mission.id}/start${qs}`, {
           method: "POST",
         })
       } else {
         const newStatus = action === "cancel" ? "CANCELLED" : "COMPLETED"
-        res = await fetch(`/api/v1/crews/${mission.crew_id}/missions/${mission.id}${qs}`, {
+        res = await apiFetch(`/api/v1/crews/${mission.crew_id}/missions/${mission.id}${qs}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ status: newStatus }),
@@ -105,7 +107,7 @@ export function MissionControlBar({ mission, workspaceId, onMissionChanged }: Mi
     setLoading("restart")
     try {
       const qs = `?workspace_id=${encodeURIComponent(workspaceId)}`
-      const res = await fetch(`/api/v1/crews/${mission.crew_id}/missions/${mission.id}/restart${qs}`, {
+      const res = await apiFetch(`/api/v1/crews/${mission.crew_id}/missions/${mission.id}/restart${qs}`, {
         method: "POST",
       })
       if (!res.ok) {
@@ -126,7 +128,7 @@ export function MissionControlBar({ mission, workspaceId, onMissionChanged }: Mi
     setLoading("clone")
     try {
       const qs = `?workspace_id=${encodeURIComponent(workspaceId)}`
-      const res = await fetch(`/api/v1/crews/${mission.crew_id}/missions/${mission.id}/clone${qs}`, {
+      const res = await apiFetch(`/api/v1/crews/${mission.crew_id}/missions/${mission.id}/clone${qs}`, {
         method: "POST",
       })
       if (!res.ok) {
@@ -201,7 +203,7 @@ export function MissionControlBar({ mission, workspaceId, onMissionChanged }: Mi
               disabled={loading !== null || total === 0}
               className="gap-1.5 bg-blue-600 hover:bg-blue-700"
             >
-              {loading === "start" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
+              {loading === "start" ? <Spinner className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
               Start Mission
             </Button>
           )}
@@ -213,7 +215,7 @@ export function MissionControlBar({ mission, workspaceId, onMissionChanged }: Mi
               disabled={loading !== null}
               className="gap-1.5 border-green-500/30 text-green-400 hover:bg-green-500/10"
             >
-              {loading === "complete" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+              {loading === "complete" ? <Spinner className="h-3.5 w-3.5" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
               Complete
             </Button>
           )}
@@ -225,7 +227,7 @@ export function MissionControlBar({ mission, workspaceId, onMissionChanged }: Mi
               disabled={loading !== null}
               className="gap-1.5 border-red-500/30 text-red-400 hover:bg-red-500/10"
             >
-              {loading === "cancel" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Square className="h-3.5 w-3.5" />}
+              {loading === "cancel" ? <Spinner className="h-3.5 w-3.5" /> : <Square className="h-3.5 w-3.5" />}
               Cancel
             </Button>
           )}
@@ -238,7 +240,7 @@ export function MissionControlBar({ mission, workspaceId, onMissionChanged }: Mi
               disabled={loading !== null}
               className="gap-1.5 border-amber-500/30 text-amber-400 hover:bg-amber-500/10"
             >
-              {loading === "restart" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
+              {loading === "restart" ? <Spinner className="h-3.5 w-3.5" /> : <RotateCcw className="h-3.5 w-3.5" />}
               Restart
             </Button>
           )}
@@ -250,7 +252,7 @@ export function MissionControlBar({ mission, workspaceId, onMissionChanged }: Mi
             disabled={loading !== null}
             className="gap-1.5 border-border text-muted-foreground hover:bg-accent/50"
           >
-            {loading === "clone" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Copy className="h-3.5 w-3.5" />}
+            {loading === "clone" ? <Spinner className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
             Clone
           </Button>
         </div>

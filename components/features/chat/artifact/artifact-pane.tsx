@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react"
 import dynamic from "next/dynamic"
-import { Loader2, X } from "lucide-react"
+import { X } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { motion } from "motion/react"
 import { toast } from "sonner"
 
@@ -16,6 +17,7 @@ import { cn } from "@/lib/utils"
 import { spring } from "@/lib/motion"
 import { useArtifactStore } from "@/stores/artifact-store"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { apiFetch } from "@/lib/api-fetch"
 import { getEditorLanguage } from "../chat-tree-row"
 
 const FileEditor = dynamic(
@@ -25,7 +27,7 @@ const FileEditor = dynamic(
     ssr: false,
     loading: () => (
       <div className="flex items-center justify-center h-full">
-        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+        <Spinner className="h-5 w-5 text-muted-foreground" />
       </div>
     ),
   },
@@ -64,7 +66,7 @@ export function ArtifactPane({ agentId, width = 540 }: ArtifactPaneProps) {
     }
     const ac = new AbortController()
     setLoading(true)
-    fetch(
+    apiFetch(
       `/api/v1/agents/${agentId}/files?workspace_id=${workspaceId}&path=${encodeURIComponent(active.path)}`,
       { signal: ac.signal },
     )
@@ -90,7 +92,7 @@ export function ArtifactPane({ agentId, width = 540 }: ArtifactPaneProps) {
   const handleSave = async (next: string) => {
     if (!active || !workspaceId) return
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/agents/${agentId}/files/save?path=${encodeURIComponent(active.path)}&workspace_id=${workspaceId}`,
         {
           method: "PUT",
@@ -160,7 +162,7 @@ export function ArtifactPane({ agentId, width = 540 }: ArtifactPaneProps) {
         editor={
           loading ? (
             <div className="flex items-center justify-center h-full">
-              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+              <Spinner className="h-5 w-5 text-muted-foreground" />
             </div>
           ) : active && content !== null ? (
             <FileEditor

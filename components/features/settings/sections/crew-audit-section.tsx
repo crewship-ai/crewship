@@ -11,6 +11,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
+import { apiFetch } from "@/lib/api-fetch"
 
 interface AuditLog {
   id: string
@@ -145,7 +146,7 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
       const dateFrom = getDateFrom(dateRange)
       if (dateFrom) params.set("date_from", dateFrom)
 
-      const res = await fetch(`/api/v1/audit?${params}`, { signal: controller.signal })
+      const res = await apiFetch(`/api/v1/audit?${params}`, { signal: controller.signal })
       if (!res.ok) {
         setError(`Failed to load audit logs (${res.status})`)
         return
@@ -194,7 +195,7 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
         if (category !== "all") params.set("entity_type", category)
         const dateFrom = getDateFrom(dateRange)
         if (dateFrom) params.set("date_from", dateFrom)
-        const res = await fetch(`/api/v1/audit?${params}`, { signal: controller.signal })
+        const res = await apiFetch(`/api/v1/audit?${params}`, { signal: controller.signal })
         if (!res.ok) {
           setError("Export failed — partial results discarded")
           return

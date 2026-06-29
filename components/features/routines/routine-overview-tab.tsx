@@ -17,7 +17,7 @@ import {
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { JSONViewer } from "@/components/features/activity/json-viewer"
-import { relTime, formatDuration } from "@/lib/activity/format-time"
+import { relTime, formatDurationDecimal } from "@/lib/time"
 import { cn } from "@/lib/utils"
 import { usePipelineRunRecords, type PipelineRunRecord } from "@/hooks/use-pipeline-run-records"
 import { usePipelineSchedules } from "@/hooks/use-pipeline-schedules"
@@ -164,8 +164,8 @@ export function RoutineOverviewTab({
         />
         <KpiTile
           label="Avg duration"
-          value={stats.avgDurMs > 0 ? formatDuration(stats.avgDurMs) : "—"}
-          delta={lastRun && lastRun.duration_ms > 0 ? `last ${formatDuration(lastRun.duration_ms)}` : "—"}
+          value={stats.avgDurMs > 0 ? formatDurationDecimal(stats.avgDurMs) : "—"}
+          delta={lastRun && lastRun.duration_ms > 0 ? `last ${formatDurationDecimal(lastRun.duration_ms)}` : "—"}
           spark={buckets.bins.map((b) => (b.total > 0 ? b.dur / b.total : 0))}
           tone="violet"
         />
@@ -602,7 +602,7 @@ function LastRunCard({
           </div>
           {run.duration_ms > 0 && (
             <div>
-              <div className="text-foreground tabular-nums">{formatDuration(run.duration_ms)}</div>
+              <div className="text-foreground tabular-nums">{formatDurationDecimal(run.duration_ms)}</div>
               <div>duration</div>
             </div>
           )}
@@ -670,7 +670,7 @@ function RunFeedRow({ run }: { run: PipelineRunRecord }) {
         {meta.label}
       </span>
       <span className="shrink-0 text-right tabular-nums text-muted-foreground">
-        {run.duration_ms > 0 ? formatDuration(run.duration_ms) : "—"}
+        {run.duration_ms > 0 ? formatDurationDecimal(run.duration_ms) : "—"}
       </span>
       <span className={cn("shrink-0 text-right text-muted-foreground", isFailed && "text-rose-400")}>
         {relTime(run.started_at)}

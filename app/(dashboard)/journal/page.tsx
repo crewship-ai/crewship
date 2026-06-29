@@ -29,6 +29,7 @@ import type { ScopeOption, SeverityFilter } from "@/components/features/logs/log
 import { GROUP_ORDER, type EntryGroup } from "@/lib/journal-style"
 import { entryTypesForGroups } from "@/lib/journal-groups"
 import { parseStructuredQuery } from "@/lib/log-search"
+import { apiFetch } from "@/lib/api-fetch"
 
 /**
  * Cap on entries kept in memory. Generous enough to hold a full
@@ -210,7 +211,7 @@ export default function JournalPage() {
     let cancelled = false
     ;(async () => {
       try {
-        const res = await fetch(`/api/v1/crews?workspace_id=${workspaceId}`)
+        const res = await apiFetch(`/api/v1/crews?workspace_id=${workspaceId}`)
         if (!res.ok) return
         const json = (await res.json()) as CrewSummary[]
         if (!cancelled && Array.isArray(json)) {
@@ -241,7 +242,7 @@ export default function JournalPage() {
       : `/api/v1/agents?workspace_id=${workspaceId}`
     ;(async () => {
       try {
-        const res = await fetch(url)
+        const res = await apiFetch(url)
         if (!res.ok) return
         const json = (await res.json()) as AgentSummary[]
         if (!cancelled && Array.isArray(json)) {

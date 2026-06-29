@@ -12,7 +12,8 @@
 // flat "paste a secret" path Doppler/Vercel are built around.
 
 import * as React from "react"
-import { Eye, EyeOff, Loader2, ChevronDown, ChevronRight, X, Plus, Check, ChevronsUpDown, FlaskConical, CheckCircle2, XCircle } from "lucide-react"
+import { Eye, EyeOff, ChevronDown, ChevronRight, X, Plus, Check, ChevronsUpDown, FlaskConical, CheckCircle2, XCircle } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -29,6 +30,7 @@ import { detectProvider, detectType, detectFromValue } from "@/lib/credential-pr
 import { getBrand, brandColor } from "@/lib/credential-providers/registry"
 import { BrandPicker } from "./brand-picker"
 import { cn } from "@/lib/utils"
+import { apiFetch } from "@/lib/api-fetch"
 
 export type CredentialType = "AI_CLI_TOKEN" | "API_KEY" | "CLI_TOKEN" | "SECRET" | "OAUTH2"
 export type CredentialScope = "WORKSPACE" | "CREW"
@@ -107,7 +109,7 @@ export function CredentialForm({
   React.useEffect(() => {
     if (values.scope === "CREW" && crews.length === 0 && !crewsLoading) {
       setCrewsLoading(true)
-      fetch(`/api/v1/crews?workspace_id=${workspaceId}`)
+      apiFetch(`/api/v1/crews?workspace_id=${workspaceId}`)
         .then((r) => r.ok ? r.json() : [])
         .then((data: Crew[]) => setCrews(Array.isArray(data) ? data : []))
         .catch(() => setCrews([]))
@@ -306,7 +308,7 @@ export function CredentialForm({
                 className="h-7 text-[11px]"
               >
                 {testing
-                  ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
+                  ? <Spinner className="mr-1.5 h-3 w-3" />
                   : <FlaskConical className="mr-1.5 h-3 w-3" />}
                 Test value
               </Button>
@@ -450,7 +452,7 @@ export function CredentialForm({
               <Label className="text-xs">Crews</Label>
               {crewsLoading ? (
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <Loader2 className="h-3 w-3 animate-spin" /> Loading crews…
+                  <Spinner className="h-3 w-3" /> Loading crews…
                 </div>
               ) : (
                 <>
@@ -546,7 +548,7 @@ export function CredentialForm({
             </button>
           )}
           <Button type="submit" disabled={submitting} size="sm">
-            {submitting && <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />}
+            {submitting && <Spinner className="mr-1.5 h-3 w-3" />}
             {submitLabel ?? (mode === "create" ? "Save secret" : "Save changes")}
           </Button>
         </div>

@@ -54,7 +54,8 @@ import { MarkdownContent } from "@/components/features/issues/markdown-content"
 import { waitpointDecide } from "@/lib/api/waitpoints"
 import { inboxBulk } from "@/lib/api/inbox"
 import { escalationResolve } from "@/lib/api/escalations"
-import { getAgentAvatarUrl } from "@/lib/agent-avatar"
+import { AgentAvatar } from "@/components/ui/agent-avatar"
+import { apiFetch } from "@/lib/api-fetch"
 
 // InboxList — the /inbox page surface. Gmail-style triage: the default
 // "Inbox" tab shows everything that isn't archived (unread + read), so
@@ -235,9 +236,9 @@ function SenderAvatar({ item, className }: { item: InboxItem; className?: string
   // system/crew/pipeline keep the kind-keyed glyph below.
   if (item.sender_type === "agent" && (item.avatar_seed || item.sender_name)) {
     return (
-      <img
-        src={getAgentAvatarUrl(item.avatar_seed || item.sender_name || "agent", item.avatar_style)}
-        alt=""
+      <AgentAvatar
+        seed={item.avatar_seed || item.sender_name || "agent"}
+        style={item.avatar_style}
         className={cn("shrink-0 rounded-md object-cover", className ?? "h-6 w-6")}
         aria-hidden
       />
@@ -1074,7 +1075,7 @@ function KindActions({
                   // no toast and the action looks like silent success.
                   let res: Response
                   try {
-                    res = await fetch(
+                    res = await apiFetch(
                       `/api/v1/agents/${encodeURIComponent(item.source_id)}/approve-hire`,
                       {
                         method: "POST",
@@ -1314,7 +1315,7 @@ function KindActions({
                 // the retry appears to silently succeed.
                 let res: Response
                 try {
-                  res = await fetch(
+                  res = await apiFetch(
                     `/api/v1/workspaces/${encodeURIComponent(item.workspace_id)}/pipelines/${encodeURIComponent(slug)}/run`,
                     {
                       method: "POST",

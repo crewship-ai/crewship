@@ -2,12 +2,14 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import dynamic from "next/dynamic"
-import { ChevronDown, File, Folder, Loader2, Pencil, Save } from "lucide-react"
+import { ChevronDown, File, Folder, Pencil, Save } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 
 import { getEditorLanguage } from "@/components/features/chat/chat-tree-row"
 import { useUserPreference } from "@/hooks/use-user-preference"
+import { apiFetch } from "@/lib/api-fetch"
 
 import type { BottomPanelContext, FileEntry } from "./types"
 import { EmptyState, formatBytes } from "./shared"
@@ -94,7 +96,7 @@ export function FilesTab({ workspaceId, context }: { workspaceId: string; contex
     const url = context.kind === "agent"
       ? `/api/v1/agents/${context.agentId}/files?workspace_id=${workspaceId}&path=/`
       : `/api/v1/crews/${context.crewId}/files?workspace_id=${workspaceId}`
-    fetch(url)
+    apiFetch(url)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((data) => {
         if (cancelled) return
@@ -120,7 +122,7 @@ export function FilesTab({ workspaceId, context }: { workspaceId: string; contex
       const url = context.kind === "agent"
         ? `/api/v1/agents/${context.agentId}/files?workspace_id=${workspaceId}&subdir=${encodeURIComponent(subdir)}`
         : `/api/v1/crews/${context.crewId}/files?workspace_id=${workspaceId}&subdir=${encodeURIComponent(subdir)}`
-      const r = await fetch(url)
+      const r = await apiFetch(url)
       if (!r.ok) throw new Error(`HTTP ${r.status}`)
       const data = await r.json()
       // Crew endpoint wraps in {crew_id, files}; agent endpoint already
@@ -163,7 +165,7 @@ export function FilesTab({ workspaceId, context }: { workspaceId: string; contex
       const url = context.kind === "agent"
         ? `/api/v1/agents/${context.agentId}/files/download?workspace_id=${workspaceId}&path=${encodeURIComponent(filePath)}`
         : `/api/v1/crews/${context.crewId}/files/download?workspace_id=${workspaceId}&path=${encodeURIComponent(filePath)}`
-      const r = await fetch(url)
+      const r = await apiFetch(url)
       if (!r.ok) throw new Error(`HTTP ${r.status}`)
       const text = await r.text()
       // Cap at 256 KB to avoid hammering the panel with pathological files.
@@ -220,7 +222,7 @@ export function FilesTab({ workspaceId, context }: { workspaceId: string; contex
       const url = context.kind === "agent"
         ? `/api/v1/agents/${context.agentId}/files/save?workspace_id=${workspaceId}&path=${encodeURIComponent(previewPath)}`
         : `/api/v1/crews/${context.crewId}/files/save?workspace_id=${workspaceId}&path=${encodeURIComponent(previewPath)}`
-      const r = await fetch(url, {
+      const r = await apiFetch(url, {
         method: "PUT",
         headers: { "Content-Type": "text/plain" },
         body: next,
@@ -329,7 +331,7 @@ export function FilesTab({ workspaceId, context }: { workspaceId: string; contex
                         )}
                       >
                         {saving
-                          ? <Loader2 className="h-3 w-3 animate-spin" />
+                          ? <Spinner className="h-3 w-3" />
                           : <Save className="h-3 w-3" />}
                         Save
                       </button>

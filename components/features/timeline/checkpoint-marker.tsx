@@ -2,7 +2,8 @@
 
 import { useState } from "react"
 import { toast } from "sonner"
-import { Flag, GitBranch, Loader2, MoreHorizontal, RotateCcw } from "lucide-react"
+import { Flag, GitBranch, MoreHorizontal, RotateCcw } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -12,6 +13,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { formatRelativeTime } from "@/lib/time"
+import { apiFetch } from "@/lib/api-fetch"
 import type { JournalEntry } from "@/lib/types/journal"
 
 interface CheckpointMarkerProps {
@@ -43,7 +45,7 @@ export function CheckpointMarker({ entry, onFork }: CheckpointMarkerProps) {
   async function handleRestore() {
     setRestoring(true)
     try {
-      const res = await fetch(`/api/v1/checkpoints/${encodeURIComponent(checkpointId)}/restore`, { method: "POST" })
+      const res = await apiFetch(`/api/v1/checkpoints/${encodeURIComponent(checkpointId)}/restore`, { method: "POST" })
       if (res.status === 404) {
         toast.error("Checkpoint not found or restore unavailable")
       } else if (!res.ok) {
@@ -90,7 +92,7 @@ export function CheckpointMarker({ entry, onFork }: CheckpointMarkerProps) {
               </DropdownMenuItem>
               <DropdownMenuItem onClick={handleRestore} disabled={restoring}>
                 {restoring ? (
-                  <Loader2 className="h-3 w-3 mr-1.5 animate-spin" />
+                  <Spinner className="h-3 w-3 mr-1.5" />
                 ) : (
                   <RotateCcw className="h-3 w-3 mr-1.5" />
                 )}

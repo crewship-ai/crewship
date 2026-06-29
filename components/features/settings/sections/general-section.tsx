@@ -1,7 +1,8 @@
 "use client"
 
 import { useState, type FormEvent } from "react"
-import { Check, X, ChevronsUpDown, Loader2 } from "lucide-react"
+import { Check, X, ChevronsUpDown } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import {
@@ -15,6 +16,7 @@ import {
 import { AnimatedNumber } from "@/components/ui/animated-number"
 import { Button } from "@/components/ui/button"
 import { LANGUAGES } from "@/lib/languages"
+import { apiFetch } from "@/lib/api-fetch"
 import { SettingsCard, SettingsRow, SettingsDangerCard } from "../shared"
 
 interface GeneralSectionProps {
@@ -51,7 +53,7 @@ export function GeneralSection({
     setSaveStatus("saving")
     setSaveError(null)
     try {
-      const res = await fetch(`/api/v1/workspaces/${workspaceId}?workspace_id=${workspaceId}`, {
+      const res = await apiFetch(`/api/v1/workspaces/${workspaceId}?workspace_id=${workspaceId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: formName, slug: formSlug }),
@@ -79,7 +81,7 @@ export function GeneralSection({
     setLangOpen(false)
     setLangSaving(true)
     try {
-      const res = await fetch(`/api/v1/workspaces/${workspaceId}?workspace_id=${workspaceId}`, {
+      const res = await apiFetch(`/api/v1/workspaces/${workspaceId}?workspace_id=${workspaceId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ preferred_language: code ?? "" }),
@@ -102,7 +104,7 @@ export function GeneralSection({
     if (isDeleting) return
     setIsDeleting(true)
     try {
-      const res = await fetch(`/api/v1/workspaces/${workspaceId}?workspace_id=${workspaceId}`, { method: "DELETE" })
+      const res = await apiFetch(`/api/v1/workspaces/${workspaceId}?workspace_id=${workspaceId}`, { method: "DELETE" })
       if (res.ok) {
         onDelete()
       } else {
@@ -150,7 +152,7 @@ export function GeneralSection({
                 className="h-7 px-2.5 text-xs"
                 disabled={saveStatus === "saving"}
               >
-                {saveStatus === "saving" ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> : saveStatus === "success" ? <Check className="mr-1.5 h-3 w-3" /> : null}
+                {saveStatus === "saving" ? <Spinner className="mr-1.5 h-3 w-3" /> : saveStatus === "success" ? <Check className="mr-1.5 h-3 w-3" /> : null}
                 {saveStatus === "saving" ? "Saving…" : saveStatus === "success" ? "Saved" : "Save changes"}
               </Button>
             </div>
@@ -283,7 +285,7 @@ export function GeneralSection({
                     className="h-7 text-xs bg-destructive text-destructive-foreground hover:bg-destructive/90"
                     disabled={isDeleting}
                   >
-                    {isDeleting && <Loader2 className="h-3 w-3 animate-spin mr-1.5" />}
+                    {isDeleting && <Spinner className="h-3 w-3 mr-1.5" />}
                     {isDeleting ? "Deleting…" : "Delete workspace"}
                   </AlertDialogAction>
                 </AlertDialogFooter>

@@ -7,6 +7,7 @@ import { CrewIcon } from "@/components/ui/crew-icon"
 import { asCrewColor } from "@/components/features/crews/create-crew/types"
 import { cn } from "@/lib/utils"
 import { RecipeInstallSheet } from "@/components/features/recipes/recipe-install-sheet"
+import { apiFetch } from "@/lib/api-fetch"
 
 interface Recipe {
   slug: string
@@ -28,7 +29,7 @@ export function RecipesEmptyState({ workspaceId, onInstalled }: Props) {
   const [open, setOpen] = React.useState(false)
 
   React.useEffect(() => {
-    fetch("/api/v1/recipes")
+    apiFetch("/api/v1/recipes")
       .then((r) => r.ok ? r.json() : [])
       .then((data: Recipe[]) => setRecipes(Array.isArray(data) ? data : []))
       .catch(() => setRecipes([]))

@@ -1,12 +1,14 @@
 "use client"
 
 import * as React from "react"
-import { Loader2, Eye, EyeOff, AlertTriangle, CheckCircle2, XCircle } from "lucide-react"
+import { Eye, EyeOff, AlertTriangle, CheckCircle2, XCircle } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
+import { apiFetch } from "@/lib/api-fetch"
 
 type GraceMode = "immediate" | "24h" | "custom"
 
@@ -54,7 +56,7 @@ export function RotationDialog({
       try {
         // We don't know the type/provider here without re-fetching the
         // credential — fall back to the per-credential test endpoint.
-        const res = await fetch(`/api/v1/credentials/${credentialId}/test?workspace_id=${workspaceId}`, {
+        const res = await apiFetch(`/api/v1/credentials/${credentialId}/test?workspace_id=${workspaceId}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ value: value.trim() }),
@@ -84,7 +86,7 @@ export function RotationDialog({
     setSubmitting(true)
     setError(null)
     try {
-      const res = await fetch(`/api/v1/credentials/${credentialId}/rotate?workspace_id=${workspaceId}`, {
+      const res = await apiFetch(`/api/v1/credentials/${credentialId}/rotate?workspace_id=${workspaceId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ value: value.trim(), grace_seconds: graceSeconds }),
@@ -139,7 +141,7 @@ export function RotationDialog({
             <div className="min-h-[16px] text-xs">
               {testing && (
                 <span className="inline-flex items-center gap-1.5 text-muted-foreground">
-                  <Loader2 className="h-3 w-3 animate-spin" />
+                  <Spinner className="h-3 w-3" />
                   Testing...
                 </span>
               )}
@@ -224,7 +226,7 @@ export function RotationDialog({
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>Cancel</Button>
           <Button onClick={handleRotate} disabled={!value.trim() || submitting}>
-            {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            {submitting && <Spinner className="mr-2 h-4 w-4" />}
             Rotate
           </Button>
         </DialogFooter>

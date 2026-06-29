@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
+import { apiFetch } from "@/lib/api-fetch"
 import type { FileEntry, TreeNode } from "@/lib/types/agent"
 
 function sortNodes(nodes: TreeNode[]) {
@@ -124,7 +125,7 @@ export function useTreeState({ agentId, workspaceId, wsLoading }: UseTreeStateAr
     let isFirstLoad = true
     async function fetchFiles() {
       try {
-        const res = await fetch(`/api/v1/agents/${agentId}/files?workspace_id=${workspaceId}`, { signal: ac.signal })
+        const res = await apiFetch(`/api/v1/agents/${agentId}/files?workspace_id=${workspaceId}`, { signal: ac.signal })
         if (!res.ok) { if (!ac.signal.aborted) setError("Failed to load files"); return }
         const data: FileEntry[] | null = await res.json()
         if (ac.signal.aborted) return
@@ -167,7 +168,7 @@ export function useTreeState({ agentId, workspaceId, wsLoading }: UseTreeStateAr
     setLoadingDirs((prev) => new Set(prev).add(dirPath))
     try {
       const relPath = dirPath.startsWith(basePrefix) ? dirPath.slice(basePrefix.length) : dirPath
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/agents/${agentId}/files?workspace_id=${workspaceId}&subdir=${encodeURIComponent(relPath)}`,
         signal ? { signal } : undefined,
       )

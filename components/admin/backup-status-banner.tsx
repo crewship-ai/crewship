@@ -2,7 +2,8 @@
 
 import { useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
-import { AlertTriangle, CheckCircle2, Lock, Loader2 } from "lucide-react"
+import { AlertTriangle, CheckCircle2, Lock } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -18,6 +19,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { useBackupStatus, useForceUnlock } from "@/hooks/use-backups"
 import { cn } from "@/lib/utils"
+import { formatDurationHm } from "@/lib/time"
 
 interface BackupStatusBannerProps {
   workspaceId: string | undefined
@@ -89,7 +91,7 @@ export function BackupStatusBanner({ workspaceId }: BackupStatusBannerProps) {
   }
 
   if (isStuck) {
-    const heldFor = formatDuration(Date.now() - acquiredAt!)
+    const heldFor = formatDurationHm(Date.now() - acquiredAt!)
     return (
       <>
         <motion.div
@@ -174,7 +176,7 @@ export function BackupStatusBanner({ workspaceId }: BackupStatusBannerProps) {
                 onClick={onConfirmUnlock}
               >
                 {forceUnlock.isPending ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />
+                  <Spinner className="h-3.5 w-3.5 mr-1" />
                 ) : null}
                 Force unlock
               </Button>
@@ -214,12 +216,3 @@ export function BackupStatusBanner({ workspaceId }: BackupStatusBannerProps) {
   )
 }
 
-function formatDuration(ms: number): string {
-  const sec = Math.floor(ms / 1000)
-  if (sec < 60) return `${sec}s`
-  const min = Math.floor(sec / 60)
-  if (min < 60) return `${min}m`
-  const hr = Math.floor(min / 60)
-  const remMin = min % 60
-  return remMin > 0 ? `${hr}h ${remMin}m` : `${hr}h`
-}

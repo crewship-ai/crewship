@@ -129,6 +129,7 @@ describe("<StepLineup> — browse mode (template fetch)", () => {
     await waitFor(() => {
       expect((globalThis.fetch as unknown as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith(
         expect.stringContaining("/api/v1/crew-templates"),
+        expect.objectContaining({ credentials: "include" }),
       )
     })
   })

@@ -1,8 +1,10 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
-import { AlertTriangle, ChevronDown, Loader2 } from "lucide-react"
+import { AlertTriangle, ChevronDown } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { toast } from "sonner"
+import { apiFetch } from "@/lib/api-fetch"
 
 // ProvisioningBanner is the canvas-level fallback that surfaces
 // container-image build state (needs_provision / running / failed) when
@@ -17,7 +19,7 @@ function ProvisioningBanner({ crewId, crewSlug, workspaceId }: { crewId: string;
     try {
       // wsCtx middleware mandates workspace_id; without it the endpoint
       // 400s and the polling loop re-renders forever.
-      const r = await fetch(`/api/v1/crews/${crewId}/provision?workspace_id=${encodeURIComponent(workspaceId)}`)
+      const r = await apiFetch(`/api/v1/crews/${crewId}/provision?workspace_id=${encodeURIComponent(workspaceId)}`)
       if (!r.ok) return
       const data = await r.json()
       setState({
@@ -42,7 +44,7 @@ function ProvisioningBanner({ crewId, crewSlug, workspaceId }: { crewId: string;
   const trigger = useCallback(async () => {
     setTriggering(true)
     try {
-      const r = await fetch(`/api/v1/crews/${crewId}/provision?workspace_id=${encodeURIComponent(workspaceId)}`, { method: "POST" })
+      const r = await apiFetch(`/api/v1/crews/${crewId}/provision?workspace_id=${encodeURIComponent(workspaceId)}`, { method: "POST" })
       if (!r.ok) {
         const text = await r.text()
         toast.error(`Provision failed to start: ${text}`)
@@ -67,7 +69,7 @@ function ProvisioningBanner({ crewId, crewSlug, workspaceId }: { crewId: string;
   if (state.status === "running") {
     return (
       <div className="rounded-xl border border-blue-500/30 bg-blue-500/5 px-4 py-3 flex items-center gap-3">
-        <Loader2 className="h-4 w-4 text-blue-300 animate-spin shrink-0" />
+        <Spinner className="h-4 w-4 text-blue-300 shrink-0" />
         <div className="flex-1">
           <div className="text-sm text-blue-200">Building container image…</div>
           <div className="text-xs text-muted-foreground">

@@ -1,12 +1,14 @@
 "use client"
 
 import * as React from "react"
-import { Loader2, Check, ChevronsUpDown, X } from "lucide-react"
+import { Check, ChevronsUpDown, X } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
 import { cn } from "@/lib/utils"
+import { apiFetch } from "@/lib/api-fetch"
 import type { WizardState } from "./types"
 
 interface Crew {
@@ -28,7 +30,7 @@ export function StepIdentity({ state, setState, workspaceId }: Props) {
   React.useEffect(() => {
     if (state.scope !== "CREW" || crews.length > 0) return
     setCrewLoading(true)
-    fetch(`/api/v1/crews?workspace_id=${workspaceId}`)
+    apiFetch(`/api/v1/crews?workspace_id=${workspaceId}`)
       .then((r) => {
         // 4xx/5xx responses still resolve the promise; reject so the
         // catch branch sets [] instead of trying to parse an error
@@ -145,7 +147,7 @@ export function StepIdentity({ state, setState, workspaceId }: Props) {
           </label>
           {crewLoading ? (
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              <Spinner className="h-3.5 w-3.5" />
               Loading crews...
             </div>
           ) : (

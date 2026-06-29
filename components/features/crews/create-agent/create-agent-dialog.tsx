@@ -7,11 +7,11 @@ import {
   ArrowRight,
   ChevronRight,
   Layers,
-  Loader2,
   Pencil,
   Search,
   X,
 } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import {
   Dialog,
   DialogContent,
@@ -23,6 +23,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
+import { apiFetch } from "@/lib/api-fetch"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 import { BUILTIN_PERSONAS, type AgentPersona } from "@/lib/entities"
 import { AvatarPickerDialog } from "@/components/features/crews/avatar-picker-dialog"
@@ -218,7 +219,7 @@ export function CreateAgentDialog({
         tool_profile: draft.toolProfile,
         memory_enabled: draft.memoryEnabled,
       }
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/agents?workspace_id=${encodeURIComponent(workspaceId)}`,
         {
           method: "POST",
@@ -697,7 +698,7 @@ WORK STYLE: …`}
             className="text-[12.5px] px-3.5 py-1.5 rounded-md bg-blue-500 hover:bg-blue-400 text-white font-medium disabled:opacity-50 flex items-center gap-1.5"
           >
             {submitting ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              <Spinner className="h-3.5 w-3.5" />
             ) : (
               <ArrowRight className="h-3.5 w-3.5" />
             )}

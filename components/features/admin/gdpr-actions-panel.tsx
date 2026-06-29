@@ -39,6 +39,7 @@ import {
   SettingsCard, SettingsDangerCard, SettingsRow,
 } from "@/components/features/settings/shared"
 import type { AdminUser } from "@/app/(dashboard)/admin/types"
+import { apiFetch } from "@/lib/api-fetch"
 
 export interface GdprActionsPanelProps {
   users: AdminUser[]
@@ -85,7 +86,7 @@ export const GdprActionsPanel = React.memo(function GdprActionsPanel({
     if (!selectedUser) return
     setBusy("export")
     try {
-      const r = await fetch(
+      const r = await apiFetch(
         `/api/v1/admin/users/${encodeURIComponent(selectedUser.id)}/data`,
         { headers: { Accept: "application/json" } },
       )
@@ -120,7 +121,7 @@ export const GdprActionsPanel = React.memo(function GdprActionsPanel({
     }
     setBusy("delete")
     try {
-      const r = await fetch(
+      const r = await apiFetch(
         `/api/v1/admin/users/${encodeURIComponent(selectedUser.id)}/data`,
         {
           method: "DELETE",

@@ -1,8 +1,9 @@
 "use client"
 
-import { Fragment, useCallback, useEffect, useRef, useState } from "react"
-import { CheckCircle2, Loader2, XCircle, MessageSquare, AlertTriangle } from "lucide-react"
+import { Fragment, useCallback, useState } from "react"
+import { MessageSquare, AlertTriangle } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
+import { StatusIconBadge } from "@/components/ui/status-icon-badge"
 import { Card, CardContent } from "@/components/ui/card"
 import {
   Table,
@@ -20,71 +21,31 @@ import {
 } from "@/components/ui/tooltip"
 import { peerConversationSchema, type PeerConversation } from "@/lib/types/peer-conversation"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
-import { formatRelativeTime } from "@/lib/time"
+import { formatRelativeTime, formatDurationClock } from "@/lib/time"
 import { z } from "zod"
-import { STATUS_STYLES, type StatusConfigEntryWithIcon } from "@/lib/status-config"
+import { RUN_STATUS_CONFIG } from "@/lib/status-config"
+import { useApiResource } from "@/hooks/use-api-resource"
 
 interface CrewPeerConversationsProps {
   crewId: string
   workspaceId: string
 }
 
-const STATUS_CONFIG: Record<PeerConversation["status"], StatusConfigEntryWithIcon> = {
-  COMPLETED: { label: "Completed", className: STATUS_STYLES.emerald, icon: CheckCircle2 },
-  RUNNING:   { label: "Running",   className: STATUS_STYLES.blue,    icon: Loader2 },
-  FAILED:    { label: "Failed",    className: STATUS_STYLES.red,     icon: XCircle },
-}
-
-function formatDurationMs(ms: number | null): string {
-  if (ms === null) return "—"
-  const seconds = Math.floor(ms / 1000)
-  if (seconds < 60) return `${seconds}s`
-  const minutes = Math.floor(seconds / 60)
-  const remainSecs = seconds % 60
-  if (minutes < 60) return `${minutes}m ${remainSecs}s`
-  const hours = Math.floor(minutes / 60)
-  return `${hours}h ${minutes % 60}m`
-}
+// Completed / Running / Failed entries are shared with crew assignments.
+const STATUS_CONFIG = RUN_STATUS_CONFIG
 
 export function CrewPeerConversations({ crewId, workspaceId }: CrewPeerConversationsProps) {
-  const [conversations, setConversations] = useState<PeerConversation[]>([])
-  const [loading, setLoading] = useState(true)
   const [expandedId, setExpandedId] = useState<string | null>(null)
-  const requestIdRef = useRef(0)
-  const loadingOwnerRef = useRef<number | null>(null)
+  // keepDataOnError + schema: parse/transport failures keep the last good
+  // list (component shows empty state only before the first load lands).
+  const { data, loading, reload } = useApiResource<PeerConversation[]>(
+    `/api/v1/crews/${crewId}/peer-conversations?workspace_id=${workspaceId}&limit=50`,
+    { schema: z.array(peerConversationSchema), keepDataOnError: true },
+  )
+  const conversations = data ?? []
 
-  const fetchConversations = useCallback(async (silent = false) => {
-    const requestId = silent ? requestIdRef.current : ++requestIdRef.current
-    const ownsLoading = !silent
-
-    if (ownsLoading) {
-      loadingOwnerRef.current = requestId
-      setLoading(true)
-    }
-    try {
-      const res = await fetch(
-        `/api/v1/crews/${crewId}/peer-conversations?workspace_id=${workspaceId}&limit=50`
-      )
-      if (!res.ok) return
-      const json = await res.json()
-      if (requestId !== requestIdRef.current) return
-      const parsed = z.array(peerConversationSchema).safeParse(json)
-      if (parsed.success) {
-        setConversations(parsed.data)
-      }
-    } catch {
-      // Silently fail — component shows empty state
-    } finally {
-      if (ownsLoading && loadingOwnerRef.current === requestId) setLoading(false)
-    }
-  }, [crewId, workspaceId])
-
-  useEffect(() => {
-    fetchConversations()
-  }, [fetchConversations])
-
-  // Real-time: refetch when peer conversations finish
-  useRealtimeEvent("peer_conversation.updated", useCallback(() => { fetchConversations(true) }, [fetchConversations]))
+  // Real-time: refetch (silently, no spinner flash) when conversations finish.
+  useRealtimeEvent("peer_conversation.updated", useCallback(() => { reload({ silent: true }) }, [reload]))
 
   if (loading) {
     return (
@@ -140,7 +101,6 @@ export function CrewPeerConversations({ crewId, workspaceId }: CrewPeerConversat
                 <TableBody>
                   {conversations.map((c) => {
                     const config = STATUS_CONFIG[c.status]
-                    const StatusIcon = config.icon
                     const isExpanded = expandedId === c.id
                     const hasDetail = c.response
                     const detailId = `peer-detail-${c.id}`
@@ -165,20 +125,18 @@ export function CrewPeerConversations({ crewId, workspaceId }: CrewPeerConversat
                           }}
                         >
                           <TableCell>
-                            <Badge
-                              variant="outline"
-                              className={`gap-1.5 border-0 ${config.className}`}
-                            >
-                              {c.status === "RUNNING" ? (
-                                <span className="relative flex h-2 w-2 shrink-0">
-                                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
-                                  <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500" />
-                                </span>
-                              ) : (
-                                <StatusIcon className="h-3 w-3" />
-                              )}
-                              {config.label}
-                            </Badge>
+                            <StatusIconBadge
+                              entry={config}
+                              gap="gap-1.5"
+                              icon={
+                                c.status === "RUNNING" ? (
+                                  <span className="relative flex h-2 w-2 shrink-0">
+                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
+                                    <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500" />
+                                  </span>
+                                ) : undefined
+                              }
+                            />
                           </TableCell>
                           <TableCell>
                             <div className="flex items-center gap-2">
@@ -208,7 +166,7 @@ export function CrewPeerConversations({ crewId, workspaceId }: CrewPeerConversat
                             {formatRelativeTime(c.created_at)}
                           </TableCell>
                           <TableCell className="text-label text-muted-foreground">
-                            {formatDurationMs(c.duration_ms)}
+                            {c.duration_ms === null ? "—" : formatDurationClock(c.duration_ms)}
                           </TableCell>
                         </TableRow>
                         {isExpanded && hasDetail && (

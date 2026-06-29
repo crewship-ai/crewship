@@ -2,9 +2,17 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
-  X, Loader2, ChevronRight, Check, User, Bot, UserX,
-  Tag, Calendar, Search,
+  X,
+  ChevronRight,
+  Check,
+  User,
+  Bot,
+  UserX,
+  Tag,
+  Calendar,
+  Search,
 } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import {
   Dialog,
   DialogContent,
@@ -41,6 +49,7 @@ import {
 import type { AssigneeOption } from "@/components/features/issues/assignee-picker"
 import { cn } from "@/lib/utils"
 import { ISSUE_ICON_COLORS } from "@/lib/colors"
+import { apiFetch } from "@/lib/api-fetch"
 import { toast } from "sonner"
 import type { IssueLabel, IssuePriority, ProjectStatus } from "@/lib/types/mission"
 import type { CrewSummary } from "@/lib/types/orchestration"
@@ -120,7 +129,7 @@ export function CreateProjectModal({
     let cancelled = false
     async function fetchAgents() {
       try {
-        const res = await fetch(`/api/v1/agents?workspace_id=${encodeURIComponent(workspaceId)}`)
+        const res = await apiFetch(`/api/v1/agents?workspace_id=${encodeURIComponent(workspaceId)}`)
         if (!res.ok || cancelled) return
         const data = await res.json()
         const list = Array.isArray(data) ? data : data.agents ?? []
@@ -164,7 +173,7 @@ export function CreateProjectModal({
 
     setSaving(true)
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/projects?workspace_id=${encodeURIComponent(workspaceId)}`,
         {
           method: "POST",
@@ -605,7 +614,7 @@ export function CreateProjectModal({
             disabled={saving || !name.trim()}
             className="h-7 px-3 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:pointer-events-none flex items-center gap-1.5 transition-colors"
           >
-            {saving && <Loader2 className="h-3 w-3 animate-spin" />}
+            {saving && <Spinner className="h-3 w-3" />}
             Create project
           </button>
         </div>

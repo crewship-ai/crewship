@@ -5,6 +5,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 import { CrewsLayout } from "@/components/features/crews/crews-layout"
+import { apiFetch } from "@/lib/api-fetch"
 
 interface CrewData {
   id: string
@@ -86,9 +87,9 @@ export default function CrewsPage() {
     }
     try {
       const [crewsRes, agentsRes, missionsRes] = await Promise.all([
-        fetch(`/api/v1/crews?workspace_id=${workspaceId}`, { signal: controller.signal }),
-        fetch(`/api/v1/agents?workspace_id=${workspaceId}`, { signal: controller.signal }),
-        fetch(`/api/v1/missions?workspace_id=${workspaceId}&limit=20&include_tasks=true`, { signal: controller.signal }),
+        apiFetch(`/api/v1/crews?workspace_id=${workspaceId}`, { signal: controller.signal }),
+        apiFetch(`/api/v1/agents?workspace_id=${workspaceId}`, { signal: controller.signal }),
+        apiFetch(`/api/v1/missions?workspace_id=${workspaceId}&limit=20&include_tasks=true`, { signal: controller.signal }),
       ])
       if (controller.signal.aborted) return
       if (crewsRes.ok) setCrews(await crewsRes.json())

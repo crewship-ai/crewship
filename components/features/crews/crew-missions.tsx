@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useState } from "react"
 import { Target } from "lucide-react"
 import Link from "next/link"
 import { Card, CardContent } from "@/components/ui/card"
@@ -8,6 +8,7 @@ import { Progress } from "@/components/ui/progress"
 import { MissionStatusBadge } from "@/components/features/missions/mission-status-badge"
 import { CreateMissionDialog } from "@/components/features/missions/create-mission-dialog"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
+import { useApiResource } from "@/hooks/use-api-resource"
 import type { Mission } from "@/lib/types/mission"
 
 interface CrewMissionsProps {
@@ -18,49 +19,26 @@ interface CrewMissionsProps {
 }
 
 export function CrewMissions({ crewId, workspaceId, canCreate, leadAgents }: CrewMissionsProps) {
-  const [missions, setMissions] = useState<Mission[]>([])
-  const [loading, setLoading] = useState(true)
+  // `refreshing` drives the "Updating..." indicator during the post-create
+  // refetch; the initial load uses the hook's own `loading`.
   const [refreshing, setRefreshing] = useState(false)
-  const requestIdRef = useRef(0)
-  const loadingOwnerRef = useRef<number | null>(null)
-  const refreshingOwnerRef = useRef<number | null>(null)
+  const { data, loading, reload } = useApiResource<Mission[]>(
+    `/api/v1/crews/${crewId}/missions?workspace_id=${workspaceId}&limit=5`,
+    { keepDataOnError: true },
+  )
+  const missions = data ?? []
 
-  const fetchMissions = useCallback(async (showRefresh = false, silent = false) => {
-    const requestId = silent ? requestIdRef.current : ++requestIdRef.current
-    const ownsLoading = !silent && !showRefresh
-    const ownsRefresh = !silent && showRefresh
+  // After creating a mission, refetch with the "Updating..." indicator on
+  // (silent so the hook's loading spinner stays down while data refreshes).
+  const refreshWithIndicator = useCallback(() => {
+    setRefreshing(true)
+    void reload({ silent: true }).finally(() => setRefreshing(false))
+  }, [reload])
 
-    if (ownsRefresh) {
-      refreshingOwnerRef.current = requestId
-      setRefreshing(true)
-    } else if (ownsLoading) {
-      loadingOwnerRef.current = requestId
-      setLoading(true)
-    }
-    try {
-      const res = await fetch(
-        `/api/v1/crews/${crewId}/missions?workspace_id=${workspaceId}&limit=5`
-      )
-      if (!res.ok) return
-      const data = (await res.json()) as Mission[]
-      if (requestId === requestIdRef.current) {
-        setMissions(data)
-      }
-    } catch {
-      // Silently fail
-    } finally {
-      if (ownsLoading && loadingOwnerRef.current === requestId) setLoading(false)
-      if (ownsRefresh && refreshingOwnerRef.current === requestId) setRefreshing(false)
-    }
-  }, [crewId, workspaceId])
-
-  useEffect(() => {
-    fetchMissions()
-  }, [fetchMissions])
-
-  // Real-time: refetch when mission or task status changes
-  useRealtimeEvent("mission.updated", useCallback(() => { fetchMissions(false, true) }, [fetchMissions]))
-  useRealtimeEvent("task.updated", useCallback(() => { fetchMissions(false, true) }, [fetchMissions]))
+  // Real-time: refetch (silently) when mission or task status changes.
+  const refreshSilently = useCallback(() => { reload({ silent: true }) }, [reload])
+  useRealtimeEvent("mission.updated", refreshSilently)
+  useRealtimeEvent("task.updated", refreshSilently)
 
   if (loading) {
     return (
@@ -84,7 +62,7 @@ export function CrewMissions({ crewId, workspaceId, canCreate, leadAgents }: Cre
               crewId={crewId}
               workspaceId={workspaceId}
               leadAgents={leadAgents}
-              onCreated={() => fetchMissions(true)}
+              onCreated={refreshWithIndicator}
             />
           )}
         </div>

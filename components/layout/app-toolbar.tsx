@@ -35,6 +35,7 @@ import { NotificationBell } from "@/components/features/notifications/notificati
 import { InboxBell } from "@/components/features/inbox/inbox-bell"
 import { ActivityBell } from "@/components/features/activity/activity-bell"
 import { useAppStore } from "@/lib/store"
+import { apiFetch } from "@/lib/api-fetch"
 
 import { ProvisioningBadge } from "./app-toolbar-provisioning"
 
@@ -128,7 +129,7 @@ function useAgentBreadcrumb(pathname: string, workspaceId: string | null): Agent
 
     async function fetchBreadcrumb() {
       try {
-        const res = await fetch(`/api/v1/agents/${agentId}?workspace_id=${workspaceId}`)
+        const res = await apiFetch(`/api/v1/agents/${agentId}?workspace_id=${workspaceId}`)
         if (!res.ok) {
           if (!cancelled) setData(null)
           return

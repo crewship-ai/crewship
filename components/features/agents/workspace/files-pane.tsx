@@ -5,12 +5,31 @@ import { useAgentId } from "@/hooks/use-agent-id"
 import { useState, useEffect, useCallback, useRef } from "react"
 import dynamic from "next/dynamic"
 import {
-  Download, AlertCircle, Inbox, Copy, Check, RefreshCw,
-  ChevronRight, ChevronDown, Search, Home, GitBranch,
-  FolderOpen, FolderClosed, FileText, FileCode, FileJson, Terminal,
-  Box, Settings, Loader2, Pencil, Save, X,
+  Download,
+  AlertCircle,
+  Inbox,
+  Copy,
+  Check,
+  RefreshCw,
+  ChevronRight,
+  ChevronDown,
+  Search,
+  Home,
+  GitBranch,
+  FolderOpen,
+  FolderClosed,
+  FileText,
+  FileCode,
+  FileJson,
+  Terminal,
+  Box,
+  Settings,
+  Pencil,
+  Save,
+  X,
   File as FileIcon,
 } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { Skeleton } from "@/components/ui/skeleton"
 import { StatusDot } from "@/components/ui/status-badge"
 import { CodeBlock } from "@/components/ai-elements/code-block"
@@ -19,14 +38,16 @@ import { useWorkspace } from "@/hooks/use-workspace"
 import { useAgentDetail } from "@/hooks/use-agent-detail"
 import { useRealtimeEvent, useRealtimeChannel } from "@/hooks/use-realtime"
 import { useTreeState, findNode } from "@/hooks/use-tree-state"
-import { fmtSize, fmtTime, getLang, isPreviewable } from "@/lib/file-format"
+import { fmtSize, getLang, isPreviewable } from "@/lib/file-format"
+import { fmtTime } from "@/lib/time"
 import { cn } from "@/lib/utils"
+import { apiFetch } from "@/lib/api-fetch"
 import { toast } from "sonner"
 import type { FileEntry, TreeNode } from "@/lib/types/agent"
 
 const FileEditor = dynamic(() => import("@/components/features/files/file-editor").then((m) => ({ default: m.FileEditor })), {
   ssr: false,
-  loading: () => <div className="flex items-center justify-center h-full"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>,
+  loading: () => <div className="flex items-center justify-center h-full"><Spinner className="h-5 w-5 text-muted-foreground" /></div>,
 })
 
 function getFileIcon(name: string, isDir: boolean, isOpen?: boolean) {
@@ -76,7 +97,7 @@ function TreeNodeRow({ node, depth, selectedPath, expandedPaths, loadingDirs, on
         onClick={() => node.is_dir ? onToggle(node.path) : onSelect(node.path)}
       >
         {node.is_dir ? (
-          isLoading ? <Loader2 className="h-3 w-3 shrink-0 animate-spin" /> :
+          isLoading ? <Spinner className="h-3 w-3 shrink-0" /> :
           isOpen ? <ChevronDown className="h-3 w-3 shrink-0" /> : <ChevronRight className="h-3 w-3 shrink-0" />
         ) : <span className="w-3" />}
         {getFileIcon(node.name, node.is_dir, isOpen)}
@@ -196,7 +217,7 @@ export function FilesPageClient() {
       return
     }
     setLoadingContent(true)
-    fetch(`/api/v1/agents/${agentId}/files/download?workspace_id=${workspaceId}&path=${encodeURIComponent(path)}`, { signal: ac.signal })
+    apiFetch(`/api/v1/agents/${agentId}/files/download?workspace_id=${workspaceId}&path=${encodeURIComponent(path)}`, { signal: ac.signal })
       .then((r) => { if (!r.ok) throw new Error("Unable to load"); return r.text() })
       .then((text) => { if (!ac.signal.aborted) setFileContent(text) })
       .catch((err) => { if (err.name !== "AbortError") { setFileContent(null); setFileError(err.message ?? "Network error") } })
@@ -207,7 +228,7 @@ export function FilesPageClient() {
     if (!selectedPath || !canQueryAgent) return
     setSaving(true)
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/agents/${agentId}/files/save?workspace_id=${workspaceId}&path=${encodeURIComponent(selectedPath)}`,
         { method: "PUT", body: content }
       )
@@ -309,7 +330,7 @@ export function FilesPageClient() {
                 containerAbortRef.current = ac
                 setContainerError(null)
                 setContainerLoading(true)
-                fetch(`/api/v1/agents/${agentId}/container-files?workspace_id=${workspaceId}`, {
+                apiFetch(`/api/v1/agents/${agentId}/container-files?workspace_id=${workspaceId}`, {
                   signal: ac.signal,
                 })
                   .then((r) => {
@@ -350,7 +371,7 @@ export function FilesPageClient() {
                 gitAbortRef.current = ac
                 setGitError(null)
                 setGitLoading(true)
-                fetch(`/api/v1/agents/${agentId}/git-log?workspace_id=${workspaceId}`, {
+                apiFetch(`/api/v1/agents/${agentId}/git-log?workspace_id=${workspaceId}`, {
                   signal: ac.signal,
                 })
                   .then((r) => {
@@ -417,7 +438,7 @@ export function FilesPageClient() {
         {activeFileTab === "container" && (
           <div className="flex-1 overflow-y-auto">
             {containerLoading ? (
-              <div className="flex items-center justify-center py-12"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+              <div className="flex items-center justify-center py-12"><Spinner className="h-5 w-5 text-muted-foreground" /></div>
             ) : containerError ? (
               <div className="flex-1 flex flex-col items-center justify-center text-center px-4 py-12">
                 <AlertCircle className="h-10 w-10 text-destructive/60 mb-3" />
@@ -447,7 +468,7 @@ export function FilesPageClient() {
         {activeFileTab === "git" && (
           <div className="flex-1 overflow-y-auto">
             {gitLoading ? (
-              <div className="flex items-center justify-center py-12"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+              <div className="flex items-center justify-center py-12"><Spinner className="h-5 w-5 text-muted-foreground" /></div>
             ) : gitError ? (
               <div className="flex-1 flex flex-col items-center justify-center text-center px-4 py-12">
                 <AlertCircle className="h-10 w-10 text-destructive/60 mb-3" />
@@ -508,7 +529,7 @@ export function FilesPageClient() {
                     disabled={saving}
                     className="h-6 px-2 flex items-center gap-1 rounded text-label bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
                   >
-                    {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />} Save
+                    {saving ? <Spinner className="h-3 w-3" /> : <Save className="h-3 w-3" />} Save
                   </button>
                 </>
               ) : (
@@ -533,7 +554,7 @@ export function FilesPageClient() {
           <div className="flex-1 overflow-hidden">
             {loadingContent ? (
               <div className="flex items-center justify-center h-full">
-                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                <Spinner className="h-5 w-5 text-muted-foreground" />
               </div>
             ) : !isPreviewable(selectedFile.name) ? (
               <div className="flex flex-col items-center justify-center h-full text-muted-foreground">

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { cn } from "@/lib/utils"
+import { apiFetch } from "@/lib/api-fetch"
 
 import type { BottomPanelContext, PeerMessage } from "./types"
 import { EmptyState, formatTime } from "./shared"
@@ -22,7 +23,7 @@ export function MessagesTab({ workspaceId, context }: { workspaceId: string; con
     setMessages(null)
     setCounters(null)
     setError(null)
-    fetch(`/api/v1/agents/${context.agentId}/inbox?workspace_id=${workspaceId}`)
+    apiFetch(`/api/v1/agents/${context.agentId}/inbox?workspace_id=${workspaceId}`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((data) => {
         if (cancelled) return

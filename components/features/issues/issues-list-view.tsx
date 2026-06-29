@@ -15,6 +15,7 @@ import { StatusIcon, statusLabel } from "./status-icon"
 import { LabelBadge } from "./label-badge"
 import { useUserPreference } from "@/hooks/use-user-preference"
 import { formatRelativeTime } from "@/lib/time"
+import { apiFetch } from "@/lib/api-fetch"
 import { cn } from "@/lib/utils"
 import type { Mission, MissionStatus, IssuePriority } from "@/lib/types/mission"
 
@@ -114,7 +115,7 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
         onBulkAction(ids, updates)
       } else if (workspaceId) {
         try {
-          await fetch(`/api/v1/issues/bulk?workspace_id=${workspaceId}`, {
+          await apiFetch(`/api/v1/issues/bulk?workspace_id=${workspaceId}`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ ids, updates }),

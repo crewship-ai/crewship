@@ -14,10 +14,11 @@ import {
   GitMerge,
   Plus,
   X,
-  Loader2,
   Trash2,
 } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
+import { apiFetch } from "@/lib/api-fetch"
 import { CREW_COLORS, CREW_COLOR_DEFAULT } from "@/lib/colors"
 import type { WorkflowTemplate, TemplateDefinition } from "@/lib/types/template"
 
@@ -170,7 +171,7 @@ export function TemplateGallery({ workspaceId }: TemplateGalleryProps) {
 
   const fetchTemplates = useCallback(async () => {
     try {
-      const res = await fetch(`/api/v1/templates?workspace_id=${workspaceId}`)
+      const res = await apiFetch(`/api/v1/templates?workspace_id=${workspaceId}`)
       if (res.ok) {
         setTemplates(await res.json())
       }
@@ -254,7 +255,7 @@ export function TemplateGallery({ workspaceId }: TemplateGalleryProps) {
                     className="absolute top-2 right-2 p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all"
                     onClick={async () => {
                       if (!window.confirm(`Delete template "${tmpl.name}"?`)) return
-                      const res = await fetch(`/api/v1/templates/${tmpl.id}?workspace_id=${workspaceId}`, { method: "DELETE" })
+                      const res = await apiFetch(`/api/v1/templates/${tmpl.id}?workspace_id=${workspaceId}`, { method: "DELETE" })
                       if (res.ok) { toast.success("Template deleted"); fetchTemplates() }
                       else toast.error("Failed to delete template")
                     }}
@@ -382,7 +383,7 @@ function TemplateEditor({ workspaceId, onClose, onCreated }: TemplateEditorProps
           })),
         },
       }
-      const res = await fetch(`/api/v1/templates?workspace_id=${workspaceId}`, {
+      const res = await apiFetch(`/api/v1/templates?workspace_id=${workspaceId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -463,7 +464,7 @@ function TemplateEditor({ workspaceId, onClose, onCreated }: TemplateEditorProps
       <div className="flex justify-end gap-2">
         <Button variant="outline" size="sm" className="h-7 text-xs" onClick={onClose}>Cancel</Button>
         <Button size="sm" className="h-7 text-xs gap-1.5" onClick={handleSave} disabled={saving}>
-          {saving && <Loader2 className="h-3 w-3 animate-spin" />}
+          {saving && <Spinner className="h-3 w-3" />}
           Create Template
         </Button>
       </div>

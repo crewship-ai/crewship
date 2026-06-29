@@ -40,6 +40,7 @@ const AuthContext = createContext<AuthContextValue | null>(null)
 
 async function fetchSession(): Promise<AuthSession | null> {
   try {
+    // eslint-disable-next-line no-restricted-syntax -- auth bootstrap: a 401 here means "no session yet", not "session expired"; must not trigger apiFetch's refresh/redirect cycle
     const res = await fetch("/api/auth/session")
     if (!res.ok) return null
     const data = await res.json()
@@ -52,6 +53,7 @@ async function fetchSession(): Promise<AuthSession | null> {
 
 async function fetchCsrfToken(): Promise<string | null> {
   try {
+    // eslint-disable-next-line no-restricted-syntax -- auth endpoint: CSRF token fetch is part of the login handshake, must stay on raw fetch
     const res = await fetch("/api/auth/csrf")
     if (!res.ok) return null
     const data = await res.json()
@@ -141,6 +143,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
 
     try {
+      // eslint-disable-next-line no-restricted-syntax -- login endpoint: a 401 means "bad credentials", not "session expired"; must not enter apiFetch's refresh cycle
       const res = await fetch("/api/auth/callback/credentials", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -173,6 +176,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     // this on PR #233.
     let serverAcknowledged = false
     try {
+      // eslint-disable-next-line no-restricted-syntax -- signout endpoint: this is the auth teardown itself; a 401 is an effective sign-out, not a refresh trigger
       const res = await fetch("/api/auth/signout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },

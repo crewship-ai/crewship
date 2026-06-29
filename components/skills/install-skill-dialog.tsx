@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/select"
 import { Label } from "@/components/ui/label"
 import { toast } from "sonner"
+import { apiFetch } from "@/lib/api-fetch"
 
 interface Agent {
   id: string
@@ -43,7 +44,7 @@ export function InstallSkillDialog({ skillId, workspaceId }: InstallSkillDialogP
   useEffect(() => {
     if (!open) return
     setLoading(true)
-    fetch(`/api/v1/agents?workspace_id=${workspaceId}`)
+    apiFetch(`/api/v1/agents?workspace_id=${workspaceId}`)
       .then((res) => (res.ok ? res.json() : []))
       .then((data: Agent[]) => setAgents(data))
       .catch(() => setAgents([]))
@@ -58,7 +59,7 @@ export function InstallSkillDialog({ skillId, workspaceId }: InstallSkillDialogP
 
     setInstalling(true)
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/agents/${selectedAgentId}/skills?workspace_id=${workspaceId}`,
         {
           method: "POST",

@@ -77,6 +77,7 @@ describe("use-backups (previously-unsurfaced endpoints)", () => {
 
       expect(mockFetch).toHaveBeenCalledWith(
         "/api/v1/admin/backups/verify?workspace_id=ws-1&path=%2Fb%2Fa+b.tar.zst",
+        expect.objectContaining({ credentials: "include" }),
       )
       expect(response).toMatchObject({ valid: true, size_bytes: 7 })
     })
@@ -241,6 +242,7 @@ describe("use-backups (previously-unsurfaced endpoints)", () => {
       await waitFor(() => expect(result.current.isSuccess).toBe(true))
       expect(mockFetch).toHaveBeenCalledWith(
         "/api/v1/admin/backups/metrics?workspace_id=ws-1",
+        expect.objectContaining({ credentials: "include" }),
       )
       expect(result.current.data?.created_total).toBe(4)
     })
@@ -275,7 +277,7 @@ describe("use-backups (previously-unsurfaced endpoints)", () => {
         wrapper: makeWrapper(qc),
       })
       await waitFor(() => expect(result.current.isSuccess).toBe(true))
-      expect(mockFetch).toHaveBeenCalledWith("/api/v1/crews?workspace_id=ws%261")
+      expect(mockFetch).toHaveBeenCalledWith("/api/v1/crews?workspace_id=ws%261", expect.objectContaining({ credentials: "include" }))
       expect(result.current.data).toEqual([{ id: "c1", slug: "alpha", name: "Alpha" }])
     })
 

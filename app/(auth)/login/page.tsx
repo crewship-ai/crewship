@@ -71,6 +71,7 @@ function LoginForm() {
   useEffect(() => {
     let cancelled = false
 
+    // eslint-disable-next-line no-restricted-syntax -- pre-session login gate: runs before any session exists; must not enter apiFetch's 401-refresh/redirect cycle
     void fetch("/api/v1/system/setup-status")
       .then(async (r) => (r.ok ? r.json() : { needs_bootstrap: false, allow_signup: true }))
       .then((data: { needs_bootstrap?: boolean; allow_signup?: boolean }) => {
@@ -90,6 +91,7 @@ function LoginForm() {
         if (!cancelled) setGateChecked(true)
       })
 
+    // eslint-disable-next-line no-restricted-syntax -- pre-session auth-provider probe; raw fetch by design (no session to refresh)
     void fetch("/api/v1/auth/google/status")
       .then(async (r) => {
         if (!r.ok) throw new Error("google status check failed")

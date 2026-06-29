@@ -1,7 +1,8 @@
 "use client"
 
 import { useState } from "react"
-import { Check, Loader2, Pencil, Plus, Trash2, X } from "lucide-react"
+import { Check, Pencil, Plus, Trash2, X } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import {
   Dialog,
   DialogContent,
@@ -12,6 +13,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
 import { LABEL_PRESET_COLORS } from "@/lib/colors"
+import { apiFetch } from "@/lib/api-fetch"
 import { toast } from "sonner"
 import type { IssueLabel } from "@/lib/types/mission"
 
@@ -56,7 +58,7 @@ export function LabelsDialog({
     }
     setCreating(true)
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/labels?workspace_id=${encodeURIComponent(workspaceId)}`,
         {
           method: "POST",
@@ -93,7 +95,7 @@ export function LabelsDialog({
     }
     setSaving(true)
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/labels/${encodeURIComponent(id)}?workspace_id=${encodeURIComponent(workspaceId)}`,
         {
           method: "PATCH",
@@ -124,7 +126,7 @@ export function LabelsDialog({
     if (deletingId === id) return
     setDeletingId(id)
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/labels/${encodeURIComponent(id)}?workspace_id=${encodeURIComponent(workspaceId)}`,
         {
           method: "DELETE",
@@ -204,7 +206,7 @@ export function LabelsDialog({
               disabled={creating || !newName.trim()}
             >
               {creating ? (
-                <Loader2 className="h-3 w-3 animate-spin" />
+                <Spinner className="h-3 w-3" />
               ) : (
                 <Plus className="h-3 w-3" />
               )}
@@ -266,7 +268,7 @@ export function LabelsDialog({
                     aria-label="Save changes"
                   >
                     {saving ? (
-                      <Loader2 className="h-3 w-3 animate-spin" />
+                      <Spinner className="h-3 w-3" />
                     ) : (
                       <Check className="h-3 w-3" />
                     )}
@@ -326,7 +328,7 @@ export function LabelsDialog({
                         aria-label={`Confirm delete ${label.name}`}
                       >
                         {deletingId === label.id ? (
-                          <Loader2 className="h-3 w-3 animate-spin" />
+                          <Spinner className="h-3 w-3" />
                         ) : (
                           "Delete"
                         )}

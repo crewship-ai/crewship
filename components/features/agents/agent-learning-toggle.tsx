@@ -2,11 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
-import { Loader2, Sparkles } from "lucide-react"
+import { Sparkles } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { Switch } from "@/components/ui/switch"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { useAbilities } from "@/hooks/use-abilities"
+import { apiFetch } from "@/lib/api-fetch"
 
 // PR-G F4.1 UX — per-agent self-learning toggle.
 //
@@ -62,7 +64,7 @@ export function AgentLearningToggle({ agentId, workspaceId, canEdit }: AgentLear
     setLoading(true)
     setErr(null)
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/agents/${agentId}/learning?workspace_id=${encodeURIComponent(workspaceId)}`,
         { signal },
       )
@@ -107,7 +109,7 @@ export function AgentLearningToggle({ agentId, workspaceId, canEdit }: AgentLear
     }
     setSaving(true)
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/agents/${agentId}/learning?workspace_id=${encodeURIComponent(workspaceId)}`,
         {
           method: "PATCH",
@@ -141,7 +143,7 @@ export function AgentLearningToggle({ agentId, workspaceId, canEdit }: AgentLear
   if (loading) {
     return (
       <div className="rounded-xl border border-white/8 bg-card p-4 flex items-center gap-2 text-sm text-muted-foreground">
-        <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading…
+        <Spinner className="h-3.5 w-3.5" /> Loading…
       </div>
     )
   }

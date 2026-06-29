@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
-import { fmtSize, fmtTime, getLang, isPreviewable } from "@/lib/file-format"
+import { fmtSize, getLang, isPreviewable } from "@/lib/file-format"
+// fmtTime moved to lib/time (canonical home for time formatters).
+import { fmtTime } from "@/lib/time"
 
 describe("fmtSize", () => {
   it("returns a placeholder for zero bytes", () => {

@@ -8,7 +8,7 @@ import {
   User,
 } from "lucide-react"
 import { Calendar } from "@/components/ui/calendar"
-import { getAgentAvatarUrl } from "@/lib/agent-avatar"
+import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { PriorityIcon, priorityLabel } from "@/components/features/issues/priority-icon"
 import { SectionHeader, PropertyRow } from "@/components/features/issues/property-row"
 import { ProjectStatusIcon } from "@/components/features/issues/project-status-icon"
@@ -215,7 +215,7 @@ export function ProjectSidebar({
                   <button className="flex items-center gap-1.5 px-2 py-0.5 rounded hover:bg-white/[0.06] transition-colors">
                     {project.lead_id ? (
                       <>
-                        <img src={getAgentAvatarUrl(project.lead_id)} alt="" className="h-4 w-4 rounded-full" />
+                        <AgentAvatar seed={project.lead_id} className="h-4 w-4 rounded-full" />
                         <span className="text-xs text-foreground/80">{project.lead_name || "Lead"}</span>
                       </>
                     ) : (
@@ -240,7 +240,7 @@ export function ProjectSidebar({
                         key={a.id}
                         onSelect={() => { patchProject({ lead_type: "agent", lead_id: a.id }); setLeadOpen(false) }}
                       >
-                        <img src={getAgentAvatarUrl(a.id)} alt="" className="h-4 w-4 rounded-full mr-2" />
+                        <AgentAvatar seed={a.id} className="h-4 w-4 rounded-full mr-2" />
                         {a.name}
                       </CommandItem>
                     ))}
@@ -255,9 +255,9 @@ export function ProjectSidebar({
             {stats?.by_assignee && stats.by_assignee.length > 0 ? (
               <div className="flex -space-x-1">
                 {stats.by_assignee.slice(0, 5).map((a) => (
-                  <img
+                  <AgentAvatar
                     key={a.agent_id}
-                    src={getAgentAvatarUrl(a.agent_id || a.agent_name)}
+                    seed={a.agent_id || a.agent_name}
                     alt={a.agent_name}
                     title={a.agent_name}
                     className="h-5 w-5 rounded-full ring-1 ring-card"
@@ -606,9 +606,8 @@ export function ProjectSidebar({
                   const pct = a.total > 0 ? Math.round((a.completed / a.total) * 100) : 0
                   return (
                     <div key={a.agent_id || a.agent_name} className="flex items-center gap-2">
-                      <img
-                        src={getAgentAvatarUrl(a.agent_id || a.agent_name)}
-                        alt=""
+                      <AgentAvatar
+                        seed={a.agent_id || a.agent_name}
                         className="h-5 w-5 rounded-full shrink-0"
                       />
                       <span className="text-[12px] text-foreground/80 flex-1 truncate">{a.agent_name}</span>

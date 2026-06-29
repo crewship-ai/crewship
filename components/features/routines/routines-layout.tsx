@@ -11,6 +11,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { useAppStore } from "@/lib/store"
+import { apiFetch } from "@/lib/api-fetch"
 import { usePipelines } from "@/hooks/use-pipelines"
 import { RoutinesListView } from "./routines-list-view"
 import { RoutinesSchedulesView } from "./routines-schedules-view"
@@ -73,7 +74,7 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
   useEffect(() => {
     let cancelled = false
     if (!workspaceId) return
-    fetch(`/api/v1/missions?workspace_id=${workspaceId}&limit=50&include_tasks=true`)
+    apiFetch(`/api/v1/missions?workspace_id=${workspaceId}&limit=50&include_tasks=true`)
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
       .then((data: Mission[]) => { if (!cancelled) setMissions(Array.isArray(data) ? data : []) })
       .catch(() => { if (!cancelled) setMissions([]) })
@@ -445,7 +446,7 @@ function ImportRoutineDialog({
     setBusy(true)
     try {
       const parsed = JSON.parse(json)
-      const res = await fetch(`/api/v1/workspaces/${workspaceId}/pipelines/import`, {
+      const res = await apiFetch(`/api/v1/workspaces/${workspaceId}/pipelines/import`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(parsed),

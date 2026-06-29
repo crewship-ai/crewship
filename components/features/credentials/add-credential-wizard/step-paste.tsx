@@ -1,9 +1,11 @@
 "use client"
 
 import * as React from "react"
-import { Eye, EyeOff, Loader2, CheckCircle2, XCircle, FileUp } from "lucide-react"
+import { Eye, EyeOff, CheckCircle2, XCircle, FileUp } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
+import { apiFetch } from "@/lib/api-fetch"
 import type { WizardState } from "./types"
 
 interface Props {
@@ -44,7 +46,7 @@ export function StepPaste({ state, setState }: Props) {
     debounceRef.current = setTimeout(async () => {
       setState({ testing: true, testResult: null })
       try {
-        const res = await fetch("/api/v1/credentials/test", {
+        const res = await apiFetch("/api/v1/credentials/test", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -102,7 +104,7 @@ export function StepPaste({ state, setState }: Props) {
         <div className="text-xs">
           {!NON_TESTABLE_TYPES.has(state.type) && state.testing && (
             <span className="inline-flex items-center gap-1.5 text-muted-foreground">
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              <Spinner className="h-3.5 w-3.5" />
               Testing key...
             </span>
           )}

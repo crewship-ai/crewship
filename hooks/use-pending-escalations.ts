@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
+import { apiFetch } from "@/lib/api-fetch"
 
 /**
  * Lightweight hook for pending escalation count (toolbar badge).
@@ -13,7 +14,7 @@ export function usePendingEscalations(workspaceId: string | null): number {
   const refresh = useCallback(async () => {
     if (!workspaceId) return
     try {
-      const res = await fetch(`/api/v1/escalations/pending-count?workspace_id=${workspaceId}`)
+      const res = await apiFetch(`/api/v1/escalations/pending-count?workspace_id=${workspaceId}`)
       if (res.ok) {
         const data = await res.json()
         setCount(data.count ?? 0)

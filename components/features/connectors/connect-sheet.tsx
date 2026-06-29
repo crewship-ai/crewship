@@ -24,6 +24,7 @@ import { useState, type ReactElement } from "react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
+import { apiFetch } from "@/lib/api-fetch"
 
 import { SchemaForm } from "./schema-form"
 import type { ConnectorManifest, InstallResponse, InstallResult } from "./types"
@@ -72,7 +73,7 @@ export function ConnectorConnectSheet(props: ConnectorConnectSheetProps): ReactE
     setSubmitting(true)
     try {
       const url = `/api/v1/connectors/${manifest.id}/install?workspace_id=${encodeURIComponent(workspaceId)}`
-      const resp = await fetch(url, {
+      const resp = await apiFetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ fields }),

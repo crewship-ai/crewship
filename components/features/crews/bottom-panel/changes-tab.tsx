@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { cn } from "@/lib/utils"
+import { apiFetch } from "@/lib/api-fetch"
 
 import type { BottomPanelContext } from "./types"
 import { EmptyState } from "./shared"
@@ -63,7 +64,7 @@ export function ChangesTab({ workspaceId, context }: { workspaceId: string; cont
     setData(null)
     setError(null)
     setUnavailable(false)
-    fetch(url)
+    apiFetch(url)
       .then((r) => {
         if (r.status === 404 || r.status === 501) { if (!cancelled) setUnavailable(true); return null }
         return r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))

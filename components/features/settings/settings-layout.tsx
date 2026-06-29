@@ -12,6 +12,7 @@ import { useWorkspace } from "@/hooks/use-workspace"
 import { useAbilities } from "@/hooks/use-abilities"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useAppStore } from "@/lib/store"
+import { apiFetch } from "@/lib/api-fetch"
 import { SettingsNav } from "./settings-nav"
 import { ProfileSection } from "./sections/profile-section"
 import { PrivacySection } from "./sections/privacy-section"
@@ -86,8 +87,8 @@ export function SettingsLayout() {
       setError(null)
       try {
         const [orgRes, membersRes] = await Promise.all([
-          fetch(`/api/v1/workspaces/${workspaceId}?workspace_id=${workspaceId}`),
-          fetch(`/api/v1/workspaces/${workspaceId}/members?workspace_id=${workspaceId}`),
+          apiFetch(`/api/v1/workspaces/${workspaceId}?workspace_id=${workspaceId}`),
+          apiFetch(`/api/v1/workspaces/${workspaceId}/members?workspace_id=${workspaceId}`),
         ])
         if (!orgRes.ok) { setError("Failed to load workspace"); return }
         const orgData = (await orgRes.json()) as Org

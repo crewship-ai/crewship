@@ -1,7 +1,8 @@
 "use client"
 
 import { motion, AnimatePresence } from "motion/react"
-import { Loader2, WifiOff } from "lucide-react"
+import { WifiOff } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 
 import { spring } from "@/lib/motion"
 
@@ -25,7 +26,7 @@ export function ReconnectBanner({ status, queuedCount = 0 }: ReconnectBannerProp
           aria-live="polite"
         >
           {status === "connecting" ? (
-            <Loader2 className="h-3 w-3 animate-spin" />
+            <Spinner className="h-3 w-3" />
           ) : (
             <WifiOff className="h-3 w-3" />
           )}

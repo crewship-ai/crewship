@@ -1,7 +1,8 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { Loader2, ScrollText } from "lucide-react"
+import { ScrollText } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { useUserPreference } from "@/hooks/use-user-preference"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { usePipelines } from "@/hooks/use-pipelines"
@@ -17,6 +18,7 @@ import {
 import { RailToolbar, type SortAxis } from "./rail/rail-toolbar"
 import { RunGroupTree } from "./rail/run-group-tree"
 import { SavedViewsButton } from "./rail/saved-views"
+import { apiFetch } from "@/lib/api-fetch"
 
 // RunTimelineRail v3 — composed of toolbar + grouped tree. Replaces
 // the v2 flat list with a Linear-style filter / sort / group UX.
@@ -58,7 +60,7 @@ export function RunTimelineRail({
   // crew list rarely changes mid-session.
   useEffect(() => {
     if (crewsProp || !workspaceId) return
-    fetch(`/api/v1/crews?workspace_id=${encodeURIComponent(workspaceId)}`)
+    apiFetch(`/api/v1/crews?workspace_id=${encodeURIComponent(workspaceId)}`)
       .then((r) => (r.ok ? r.json() : []))
       .then((d) => setCrews(Array.isArray(d) ? d.map((c) => ({ id: c.id, name: c.name })) : []))
       .catch(() => { /* non-fatal — filter dropdown just shows no options */ })
@@ -190,7 +192,7 @@ export function RunTimelineRail({
       <div className="min-h-0 flex-1 overflow-y-auto">
         {loading && runs.length === 0 ? (
           <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
-            <Loader2 className="mr-2 h-3 w-3 animate-spin" /> Loading runs…
+            <Spinner className="mr-2 h-3 w-3" /> Loading runs…
           </div>
         ) : error ? (
           <div className="p-3 text-xs text-rose-300">Runs unavailable: {error}</div>

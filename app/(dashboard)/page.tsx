@@ -54,6 +54,7 @@ export default function DashboardPage() {
 
   // ── Onboarding gate ────────────────────────────────────────────────
   useEffect(() => {
+    // eslint-disable-next-line no-restricted-syntax -- onboarding gate: redirects to /onboarding before the steady-state app loads; raw fetch by design
     fetch("/api/v1/onboarding/status")
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {

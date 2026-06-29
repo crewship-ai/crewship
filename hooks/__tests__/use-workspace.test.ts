@@ -84,7 +84,7 @@ describe("useWorkspace", () => {
   it("calls /api/v1/workspaces endpoint", async () => {
     mockFetch.mockResolvedValue({ ok: true, json: async () => [] })
     renderHook(() => useWorkspace())
-    await waitFor(() => expect(mockFetch).toHaveBeenCalledWith("/api/v1/workspaces"))
+    await waitFor(() => expect(mockFetch).toHaveBeenCalledWith("/api/v1/workspaces", expect.objectContaining({ credentials: "include" })))
   })
 
   it("handles workspace with null role", async () => {

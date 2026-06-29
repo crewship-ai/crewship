@@ -10,12 +10,12 @@ import {
   ChevronRight,
   CircleDot,
   Globe,
-  Loader2,
   PauseCircle,
   ScrollText,
   Sparkles,
   Webhook,
 } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { motion, AnimatePresence } from "motion/react"
 import Link from "next/link"
 import { cn } from "@/lib/utils"
@@ -23,7 +23,8 @@ import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { usePipelineRuns, type PipelineRun } from "@/hooks/use-pipeline-runs"
 import { statusIcon, statusTint } from "@/lib/activity/run-status"
-import { relTime, formatDuration } from "@/lib/activity/format-time"
+import { relTime, formatDurationDecimal } from "@/lib/time"
+import { apiFetch } from "@/lib/api-fetch"
 
 // RunsView — the /activity "what's happening right now" surface.
 // Each row is one pipeline_run. Collapsed shows source pill + routine
@@ -98,7 +99,7 @@ export function RunsView({ workspaceId }: RunsViewProps) {
         <FilterBtn label="Completed" count={counts.completed} active={filter === "completed"} onClick={() => setFilter("completed")} />
         <FilterBtn label="Failed" count={counts.failed} active={filter === "failed"} onClick={() => setFilter("failed")} />
         <div className="flex-1" />
-        {loading && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground/50" />}
+        {loading && <Spinner className="h-3 w-3 text-muted-foreground/50" />}
       </div>
 
       {/* Run list */}
@@ -215,7 +216,7 @@ function RunCard({
             {run.duration_ms > 0 && (
               <>
                 <span>·</span>
-                <span>{formatDuration(run.duration_ms)}</span>
+                <span>{formatDurationDecimal(run.duration_ms)}</span>
               </>
             )}
             {run.cost_usd > 0 && (
@@ -338,7 +339,7 @@ function RunStepTree({ workspaceId, run }: { workspaceId: string; run: PipelineR
   useEffect(() => {
     if (!run.pipeline_slug) return
     let cancelled = false
-    fetch(
+    apiFetch(
       `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/${encodeURIComponent(run.pipeline_slug)}`,
     )
       .then(async (res) => (res.ok ? ((await res.json()) as PipelineDetail) : null))

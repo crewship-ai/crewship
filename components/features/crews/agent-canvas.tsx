@@ -18,10 +18,11 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { getAgentAvatarUrl } from "@/lib/agent-avatar"
+import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 import { cn } from "@/lib/utils"
 import { isGhost, effectiveStatus, ttlRemaining, latestHireReason } from "@/lib/agent-ephemeral"
+import { apiFetch } from "@/lib/api-fetch"
 
 import {
   CanvasShell,
@@ -137,7 +138,7 @@ export function AgentCanvas({
     // never leaks into the next selection while the request is in flight.
     setInbox({ count: 0 })
     setPeerMessages([])
-    fetch(`/api/v1/agents/${agentId}/inbox?workspace_id=${workspaceId}`)
+    apiFetch(`/api/v1/agents/${agentId}/inbox?workspace_id=${workspaceId}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (cancelled || !data) return
@@ -170,13 +171,13 @@ export function AgentCanvas({
     // this canvas while the new request is pending.
     setRuns(null)
     setChats(null)
-    fetch(`/api/v1/agents/${agentId}/runs?workspace_id=${workspaceId}`)
+    apiFetch(`/api/v1/agents/${agentId}/runs?workspace_id=${workspaceId}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((data: RunRowType[] | null) => {
         if (!cancelled && Array.isArray(data)) setRuns(data)
       })
       .catch(() => { /* tolerate */ })
-    fetch(`/api/v1/agents/${agentId}/chats?workspace_id=${workspaceId}`)
+    apiFetch(`/api/v1/agents/${agentId}/chats?workspace_id=${workspaceId}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((data: ChatRowType[] | null) => {
         if (!cancelled && Array.isArray(data)) setChats(data)
@@ -206,7 +207,7 @@ export function AgentCanvas({
   const handleStop = useCallback(async () => {
     if (!agent) return
     try {
-      const res = await fetch(`/api/v1/agents/${agent.id}/stop`, { method: "POST" })
+      const res = await apiFetch(`/api/v1/agents/${agent.id}/stop`, { method: "POST" })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       toast.success("Stop requested")
       void fetchAgent()
@@ -222,7 +223,7 @@ export function AgentCanvas({
   const handleApproveHire = useCallback(async () => {
     if (!agent) return
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/agents/${agent.id}/approve-hire?workspace_id=${encodeURIComponent(agent.workspace_id)}`,
         { method: "POST", headers: { "Content-Type": "application/json" } },
       )
@@ -241,7 +242,7 @@ export function AgentCanvas({
   const handleRehire = useCallback(async () => {
     if (!agent) return
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/agents/${agent.id}/rehire?workspace_id=${encodeURIComponent(agent.workspace_id)}`,
         {
           method: "POST",
@@ -274,7 +275,7 @@ export function AgentCanvas({
     if (!agent) return
     if (!confirm(`Delete agent "${agent.name}"? Sessions and runs are kept for 30 days, then purged.`)) return
     try {
-      const res = await fetch(`/api/v1/agents/${agent.id}?workspace_id=${workspaceId}`, { method: "DELETE" })
+      const res = await apiFetch(`/api/v1/agents/${agent.id}?workspace_id=${workspaceId}`, { method: "DELETE" })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       toast.success(`Agent "${agent.name}" deleted`)
       onAgentChanged()
@@ -319,9 +320,9 @@ export function AgentCanvas({
           className="relative shrink-0 group"
           title="Customize avatar"
         >
-          <img
-            src={getAgentAvatarUrl(agent.avatar_seed || agent.name, agent.avatar_style || agent.crew?.avatar_style)}
-            alt=""
+          <AgentAvatar
+            seed={agent.avatar_seed || agent.name}
+            style={agent.avatar_style || agent.crew?.avatar_style}
             className={cn(
               "w-20 h-20 rounded-2xl transition-transform group-hover:scale-[1.03]",
               isRunning && "ring-2 ring-emerald-500/40",
@@ -575,15 +576,8 @@ export function formatRelative(iso: string): string {
   return new Date(iso).toLocaleDateString()
 }
 
-export function formatDuration(startIso: string, endIso: string): string {
-  const ms = new Date(endIso).getTime() - new Date(startIso).getTime()
-  if (!Number.isFinite(ms) || ms < 0) return ""
-  const s = Math.floor(ms / 1000)
-  if (s < 60) return `${s}s`
-  const m = Math.floor(s / 60)
-  const rs = s % 60
-  return `${m}m ${rs}s`
-}
+// `formatDuration(startIso, endIso)` moved to lib/time.ts as
+// `formatDurationSpan` (canonical home for time formatters).
 
 export function formatCost(usd: number): string {
   if (!Number.isFinite(usd)) return "–"

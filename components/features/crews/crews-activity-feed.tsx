@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { Activity } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useRealtimeEvent, type RealtimeEvent } from "@/hooks/use-realtime"
-import { getAgentAvatarUrl } from "@/lib/agent-avatar"
+import { AgentAvatar } from "@/components/ui/agent-avatar"
 
 interface AgentData {
   id: string
@@ -97,7 +97,7 @@ export function CrewsActivityFeed({ agents }: CrewsActivityFeedProps) {
           <span className={cn("text-[10px] px-1 rounded bg-white/[0.03] shrink-0", typeColors[entry.type] || "text-muted-foreground")}>
             {entry.type}
           </span>
-          <img src={getAgentAvatarUrl(entry.avatarSeed, entry.avatarStyle)} alt="" className="w-3.5 h-3.5 rounded-full shrink-0" />
+          <AgentAvatar seed={entry.avatarSeed} style={entry.avatarStyle} className="w-3.5 h-3.5 rounded-full shrink-0" />
           <span className="text-muted-foreground shrink-0 w-[60px] truncate">@{entry.agent}</span>
           <span className="text-foreground/80 truncate">{entry.content}</span>
         </div>

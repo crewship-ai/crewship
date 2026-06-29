@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
+import { apiFetch } from "@/lib/api-fetch"
 
 // PipelineSchedule mirrors the wire shape returned by the
 // /pipeline-schedules endpoint family. We keep target_pipeline_slug
@@ -58,7 +59,7 @@ export function usePipelineSchedules(workspaceId: string | null | undefined) {
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/workspaces/${workspaceId}/pipeline-schedules`,
         { signal: controller.signal },
       )
@@ -95,7 +96,7 @@ export function usePipelineSchedules(workspaceId: string | null | undefined) {
   const create = useCallback(
     async (body: ScheduleSaveBody): Promise<PipelineSchedule | null> => {
       if (!workspaceId) return null
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/workspaces/${workspaceId}/pipeline-schedules`,
         {
           method: "POST",
@@ -117,7 +118,7 @@ export function usePipelineSchedules(workspaceId: string | null | undefined) {
   const update = useCallback(
     async (id: string, body: ScheduleSaveBody): Promise<PipelineSchedule | null> => {
       if (!workspaceId) return null
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/workspaces/${workspaceId}/pipeline-schedules/${id}`,
         {
           method: "PATCH",
@@ -139,7 +140,7 @@ export function usePipelineSchedules(workspaceId: string | null | undefined) {
   const remove = useCallback(
     async (id: string): Promise<void> => {
       if (!workspaceId) return
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/workspaces/${workspaceId}/pipeline-schedules/${id}`,
         { method: "DELETE" },
       )

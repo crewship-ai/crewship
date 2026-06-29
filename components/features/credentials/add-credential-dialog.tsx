@@ -1,7 +1,8 @@
 "use client"
 
 import * as React from "react"
-import { Eye, EyeOff, Loader2, Bot, Key, Lock, Terminal, CheckCircle2, XCircle, FlaskConical, Check, ChevronsUpDown } from "lucide-react"
+import { Eye, EyeOff, Bot, Key, Lock, Terminal, CheckCircle2, XCircle, FlaskConical, Check, ChevronsUpDown } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { AnthropicIcon, OpenAIIcon, GeminiIcon, CursorIcon, FactoryIcon, GitHubIcon, GitLabIcon, VercelIcon, AWSIcon, CustomCLIIcon } from "@/components/icons/provider-icons"
 import { Button } from "@/components/ui/button"
 import {
@@ -26,6 +27,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
+import { apiFetch } from "@/lib/api-fetch"
 
 type CredentialType = "AI_CLI_TOKEN" | "API_KEY" | "CLI_TOKEN" | "SECRET"
 type CredentialProvider = "ANTHROPIC" | "OPENAI" | "GOOGLE" | "CURSOR" | "FACTORY" | "GITHUB" | "GITLAB" | "VERCEL" | "AWS" | "CUSTOM_CLI" | "NONE"
@@ -111,7 +113,7 @@ export function AddCredentialDialog({
   React.useEffect(() => {
     if (scope === "CREW" && crews.length === 0) {
       setTeamsLoading(true)
-      fetch(`/api/v1/crews?workspace_id=${workspaceId}`)
+      apiFetch(`/api/v1/crews?workspace_id=${workspaceId}`)
         .then((res) => res.json())
         .then((data: Team[]) => setTeams(Array.isArray(data) ? data : []))
         .catch(() => setTeams([]))
@@ -144,7 +146,7 @@ export function AddCredentialDialog({
     setTestResult(null)
     setError("")
     try {
-      const res = await fetch(`/api/v1/credentials/test`, {
+      const res = await apiFetch(`/api/v1/credentials/test`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ provider, type, value: value.trim() }),
@@ -216,7 +218,7 @@ export function AddCredentialDialog({
       if (accountLabel.trim()) body.account_label = accountLabel.trim()
       if (scope === "CREW") body.crew_ids = crewIds
 
-      const res = await fetch(`/api/v1/credentials?workspace_id=${workspaceId}`, {
+      const res = await apiFetch(`/api/v1/credentials?workspace_id=${workspaceId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -412,7 +414,7 @@ export function AddCredentialDialog({
                   disabled={testing}
                   className="h-7 text-label"
                 >
-                  {testing ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> : <FlaskConical className="mr-1.5 h-3 w-3" />}
+                  {testing ? <Spinner className="mr-1.5 h-3 w-3" /> : <FlaskConical className="mr-1.5 h-3 w-3" />}
                   Test Key
                 </Button>
                 {testResult && (
@@ -462,7 +464,7 @@ export function AddCredentialDialog({
               <Label>Crews</Label>
               {teamsLoading ? (
                 <div className="flex items-center gap-2 text-body text-muted-foreground">
-                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <Spinner className="h-4 w-4" />
                   Loading crews...
                 </div>
               ) : (
@@ -543,7 +545,7 @@ export function AddCredentialDialog({
               Cancel
             </Button>
             <Button type="submit" disabled={submitting}>
-              {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {submitting && <Spinner className="mr-2 h-4 w-4" />}
               Add Credential
             </Button>
           </DialogFooter>

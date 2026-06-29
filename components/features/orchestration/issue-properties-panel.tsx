@@ -9,9 +9,10 @@ import { StatusIcon, statusLabel } from "@/components/features/issues/status-ico
 import { PriorityIcon, priorityLabel } from "@/components/features/issues/priority-icon"
 import { Calendar } from "@/components/ui/calendar"
 import { cn } from "@/lib/utils"
-import { getAgentAvatarUrl } from "@/lib/agent-avatar"
+import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { SectionHeader, PropertyRow } from "@/components/features/issues/property-row"
 import { ISSUE_STATUSES, ALL_PRIORITIES } from "@/components/features/issues/issue-constants"
+import { apiFetch } from "@/lib/api-fetch"
 import type { Mission, IssuePriority, Milestone } from "@/lib/types/mission"
 
 // Parse a YYYY-MM-DD string as a local-midnight Date so toLocaleDateString
@@ -46,7 +47,7 @@ export function IssuePropertiesPanel({ issue, workspaceId, patchIssue }: IssuePr
   useEffect(() => {
     setMilestones([])
     if (!issue.project_id || !workspaceId) return
-    fetch(`/api/v1/projects/${issue.project_id}/milestones?workspace_id=${workspaceId}`)
+    apiFetch(`/api/v1/projects/${issue.project_id}/milestones?workspace_id=${workspaceId}`)
       .then((r) => r.ok ? r.json() : [])
       .then((data) => setMilestones(Array.isArray(data) ? data : data.milestones ?? []))
       .catch(() => setMilestones([]))
@@ -58,7 +59,7 @@ export function IssuePropertiesPanel({ issue, workspaceId, patchIssue }: IssuePr
     const url = issue.crew_id
       ? `/api/v1/agents?workspace_id=${workspaceId}&crew_id=${issue.crew_id}`
       : `/api/v1/agents?workspace_id=${workspaceId}`
-    fetch(url)
+    apiFetch(url)
       .then(r => r.ok ? r.json() : [])
       .then((agents: Array<{id: string, name: string, slug: string, crew?: {slug: string}}>) =>
         setCrewAgents(agents.map(a => ({ id: a.id, name: a.name, slug: a.slug, crew_slug: a.crew?.slug })))
@@ -158,7 +159,7 @@ export function IssuePropertiesPanel({ issue, workspaceId, patchIssue }: IssuePr
               <div>
                 <PropertyRow label="Assignee">
                   {issue.assignee_id && (
-                    <img src={getAgentAvatarUrl(issue.assignee_id)} alt="" className="h-4 w-4 rounded-full" />
+                    <AgentAvatar seed={issue.assignee_id} className="h-4 w-4 rounded-full" />
                   )}
                   {issue.assignee_name || <span className="text-foreground/40">Unassigned</span>}
                 </PropertyRow>

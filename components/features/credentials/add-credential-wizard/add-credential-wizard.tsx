@@ -1,7 +1,8 @@
 "use client"
 
 import * as React from "react"
-import { Check, ChevronRight, Loader2 } from "lucide-react"
+import { Check, ChevronRight } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import {
   Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription,
 } from "@/components/ui/sheet"
@@ -12,6 +13,7 @@ import { StepPaste } from "./step-paste"
 import { StepIdentity } from "./step-identity"
 import type { WizardState, WizardStep } from "./types"
 import { INITIAL } from "./types"
+import { apiFetch } from "@/lib/api-fetch"
 
 const STEP_LABELS: Record<WizardStep, { title: string; sub: string }> = {
   1: { title: "Provider", sub: "pick a service" },
@@ -73,7 +75,7 @@ export function AddCredentialWizard({ workspaceId, open, onOpenChange, onSuccess
       if (state.expiresAt) body.token_expires_at = new Date(state.expiresAt).toISOString()
       if (state.scope === "CREW") body.crew_ids = state.crewIds
 
-      const res = await fetch(`/api/v1/credentials?workspace_id=${workspaceId}`, {
+      const res = await apiFetch(`/api/v1/credentials?workspace_id=${workspaceId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -182,7 +184,7 @@ export function AddCredentialWizard({ workspaceId, open, onOpenChange, onSuccess
             disabled={!stepValid || state.submitting}
             className="text-sm px-3.5 py-1.5 rounded bg-blue-500 hover:bg-blue-400 text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
           >
-            {state.submitting && <Loader2 className="h-3 w-3 animate-spin" />}
+            {state.submitting && <Spinner className="h-3 w-3" />}
             {state.step === 4 ? (state.submitting ? "Creating…" : "✓ Create credential") : "Continue"}
             {state.step < 4 && !state.submitting && <ChevronRight className="h-3.5 w-3.5" />}
           </button>

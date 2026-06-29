@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
+import { apiFetch } from "@/lib/api-fetch"
 
 /** Aggregate agent counts by status for the crews toolbar badge.
  *
@@ -37,7 +38,7 @@ export function useCrewsStatus(workspaceId: string | null): CrewsStatus | null {
   const refresh = useCallback(async () => {
     if (!workspaceId) return
     try {
-      const res = await fetch(`/api/v1/agents/crews-status?workspace_id=${workspaceId}`)
+      const res = await apiFetch(`/api/v1/agents/crews-status?workspace_id=${workspaceId}`)
       if (res.ok) {
         const raw = (await res.json()) as Partial<CrewsStatus> | null
         // Normalise: server may omit `queued` on older builds, and a

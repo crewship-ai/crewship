@@ -1,13 +1,15 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { X, Play, FlaskConical, Eye, Square, Loader2 } from "lucide-react"
+import { X, Play, FlaskConical, Eye, Square } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
 import { TabBar } from "@/components/ui/tab-bar"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
+import { apiFetch } from "@/lib/api-fetch"
 import { buildPipelineActionRequest, canTestRun } from "@/lib/pipeline-actions"
 import { PipelineRunActivity } from "@/components/features/activity/pipeline-run-activity"
 import { RoutineOverviewTab } from "./routine-overview-tab"
@@ -79,7 +81,7 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch(`/api/v1/workspaces/${workspaceId}/pipelines/${slug}`, {
+      const res = await apiFetch(`/api/v1/workspaces/${workspaceId}/pipelines/${slug}`, {
         signal: ctrl.signal,
       })
       if (ctrl.signal.aborted) return
@@ -121,7 +123,7 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
       // Test run hits a slugless route with the draft definition in the body;
       // Run / Dry run address the saved pipeline by slug. See lib/pipeline-actions.
       const { url, body } = buildPipelineActionRequest(workspaceId, slug, action, routine)
-      const res = await fetch(url, {
+      const res = await apiFetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -263,7 +265,7 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
             title="Invoke routine with empty inputs"
           >
             {busyAction === "run" ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              <Spinner className="h-3.5 w-3.5" />
             ) : (
               <Play className="h-3.5 w-3.5 fill-current" />
             )}

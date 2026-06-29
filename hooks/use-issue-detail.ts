@@ -2,6 +2,7 @@
 
 import { useCallback, useRef, useState } from "react"
 import type { Mission, IssueComment } from "@/lib/types/mission"
+import { apiFetch } from "@/lib/api-fetch"
 
 /**
  * Manages the orchestration "selected issue" panel: which issue is open,
@@ -40,7 +41,7 @@ export function useIssueDetail({
     async (crewId: string, identifier: string) => {
       const myReq = ++commentRequestId.current
       try {
-        const res = await fetch(
+        const res = await apiFetch(
           `/api/v1/crews/${encodeURIComponent(crewId)}/issues/${encodeURIComponent(identifier)}/comments?workspace_id=${encodeURIComponent(workspaceId)}`,
         )
         if (myReq !== commentRequestId.current) return
@@ -91,7 +92,7 @@ export function useIssueDetail({
     if (myUpdateReq !== issueUpdateRequestId.current) return
     if (selectedIssue?.crew_id && selectedIssue?.identifier) {
       try {
-        const res = await fetch(
+        const res = await apiFetch(
           `/api/v1/issues/${encodeURIComponent(selectedIssue.identifier)}?workspace_id=${encodeURIComponent(workspaceId)}`,
         )
         if (myUpdateReq !== issueUpdateRequestId.current) return

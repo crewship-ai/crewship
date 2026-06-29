@@ -8,7 +8,7 @@ import { LabelBadge } from "./label-badge"
 import { Clock } from "lucide-react"
 import { formatShortDate } from "@/lib/time"
 import { cn } from "@/lib/utils"
-import { getAgentAvatarUrl } from "@/lib/agent-avatar"
+import { AgentAvatar } from "@/components/ui/agent-avatar"
 import type { Mission } from "@/lib/types/mission"
 
 const TERMINAL_STATUSES = new Set(["COMPLETED", "DONE", "CANCELLED", "FAILED", "DUPLICATE"])
@@ -54,8 +54,8 @@ export const IssueCard = memo(function IssueCard({ issue, onClick }: IssueCardPr
           <div className="flex items-center gap-1 shrink-0">
             <span className="text-[10px] text-foreground/50 truncate max-w-[80px]">{issue.assignee_name}</span>
             <div className="relative">
-              <img
-                src={getAgentAvatarUrl(issue.assignee_id)}
+              <AgentAvatar
+                seed={issue.assignee_id}
                 alt={issue.assignee_name || ""}
                 title={issue.assignee_name || ""}
                 className="h-4.5 w-4.5 rounded-full"

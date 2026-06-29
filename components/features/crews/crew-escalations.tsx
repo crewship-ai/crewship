@@ -1,9 +1,9 @@
 "use client"
 
-import { Fragment, useCallback, useEffect, useRef, useState } from "react"
+import { Fragment, useCallback, useState } from "react"
 import { CheckCircle2, AlertTriangle, Send, ExternalLink, KeyRound } from "lucide-react"
 import { BadgeAlertIcon } from "@/components/ui/badge-alert"
-import { Badge } from "@/components/ui/badge"
+import { StatusIconBadge } from "@/components/ui/status-icon-badge"
 import { Card, CardContent } from "@/components/ui/card"
 import {
   Table,
@@ -26,6 +26,7 @@ import { EscalationResponseCard, ActionBadge } from "@/components/features/escal
 import { formatRelativeTime } from "@/lib/time"
 import { z } from "zod"
 import { STATUS_STYLES, type StatusConfigEntryWithIcon } from "@/lib/status-config"
+import { useApiResource } from "@/hooks/use-api-resource"
 
 interface CrewEscalationsProps {
   crewId: string
@@ -49,52 +50,19 @@ const TYPE_LABELS: Record<string, { label: string; icon: React.ComponentType<{ c
 }
 
 export function CrewEscalations({ crewId, workspaceId }: CrewEscalationsProps) {
-  const [escalations, setEscalations] = useState<Escalation[]>([])
-  const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
   const [expandedId, setExpandedId] = useState<string | null>(null)
-  const requestIdRef = useRef(0)
   useTick(60_000) // re-render every 60s to keep relative times fresh
-  const loadingOwnerRef = useRef<number | null>(null)
-  const refreshingOwnerRef = useRef<number | null>(null)
+  // keepDataOnError + schema: parse/transport failures keep the last good
+  // list rather than blanking the panel.
+  const { data, loading, reload } = useApiResource<Escalation[]>(
+    `/api/v1/crews/${crewId}/escalations?workspace_id=${workspaceId}&limit=50`,
+    { schema: z.array(escalationSchema), keepDataOnError: true },
+  )
+  const escalations = data ?? []
 
-  const fetchEscalations = useCallback(async (showRefresh = false, silent = false) => {
-    const requestId = silent ? requestIdRef.current : ++requestIdRef.current
-    const ownsLoading = !silent && !showRefresh
-    const ownsRefresh = !silent && showRefresh
-
-    if (ownsRefresh) {
-      refreshingOwnerRef.current = requestId
-      setRefreshing(true)
-    } else if (ownsLoading) {
-      loadingOwnerRef.current = requestId
-      setLoading(true)
-    }
-    try {
-      const res = await fetch(
-        `/api/v1/crews/${crewId}/escalations?workspace_id=${workspaceId}&limit=50`
-      )
-      if (!res.ok) return
-      const json = await res.json()
-      if (requestId !== requestIdRef.current) return
-      const parsed = z.array(escalationSchema).safeParse(json)
-      if (parsed.success) {
-        setEscalations(parsed.data)
-      }
-    } catch {
-      // Silently fail
-    } finally {
-      if (ownsLoading && loadingOwnerRef.current === requestId) setLoading(false)
-      if (ownsRefresh && refreshingOwnerRef.current === requestId) setRefreshing(false)
-    }
-  }, [crewId, workspaceId])
-
-  useEffect(() => {
-    fetchEscalations()
-  }, [fetchEscalations])
-
-  useRealtimeEvent("escalation.created", useCallback(() => { fetchEscalations(false, true) }, [fetchEscalations]))
-  useRealtimeEvent("escalation.resolved", useCallback(() => { fetchEscalations(false, true) }, [fetchEscalations]))
+  const refreshSilently = useCallback(() => { reload({ silent: true }) }, [reload])
+  useRealtimeEvent("escalation.created", refreshSilently)
+  useRealtimeEvent("escalation.resolved", refreshSilently)
 
   if (loading) {
     return (
@@ -118,7 +86,7 @@ export function CrewEscalations({ crewId, workspaceId }: CrewEscalationsProps) {
           )}
         </div>
         <span role="status" aria-live="polite" className="text-label text-muted-foreground">
-          {refreshing ? "Updating..." : "Live"}
+          Live
         </span>
       </div>
 
@@ -148,7 +116,6 @@ export function CrewEscalations({ crewId, workspaceId }: CrewEscalationsProps) {
                 <TableBody>
                   {escalations.map((e) => {
                     const config = STATUS_CONFIG[e.status]
-                    const StatusIcon = config.icon
                     const isExpanded = expandedId === e.id
                     const isPending = e.status === "PENDING"
                     const hasDetail = isPending || e.context || e.resolution
@@ -176,13 +143,7 @@ export function CrewEscalations({ crewId, workspaceId }: CrewEscalationsProps) {
                         >
                           <TableCell>
                             <div className="flex flex-col gap-1">
-                              <Badge
-                                variant="outline"
-                                className={`gap-1 border-0 ${config.className}`}
-                              >
-                                <StatusIcon className="h-3 w-3" />
-                                {config.label}
-                              </Badge>
+                              <StatusIconBadge entry={config} />
                               {e.type !== "TEXT" && (
                                 <span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
                                   <typeInfo.icon className="h-2.5 w-2.5" />
@@ -216,7 +177,7 @@ export function CrewEscalations({ crewId, workspaceId }: CrewEscalationsProps) {
                                   escalation={e}
                                   workspaceId={workspaceId}
                                   crewId={crewId}
-                                  onResolved={() => fetchEscalations(false, true)}
+                                  onResolved={refreshSilently}
                                 />
                               ) : (
                                 <div className="text-body whitespace-pre-wrap max-h-60 overflow-y-auto p-3 space-y-2">

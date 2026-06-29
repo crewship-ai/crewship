@@ -12,7 +12,7 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { statusIcon, statusTint } from "@/lib/activity/run-status"
-import { relTime } from "@/lib/activity/format-time"
+import { relTime } from "@/lib/time"
 import type {
   OverviewIssueNodeData,
   OverviewRoutineNodeData,

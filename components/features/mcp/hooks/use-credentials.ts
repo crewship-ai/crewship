@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useCallback, useEffect } from "react"
+import { apiFetch } from "@/lib/api-fetch"
 import type { Credential } from "../types"
 
 export function useCredentials(workspaceId: string | undefined) {
@@ -11,7 +12,7 @@ export function useCredentials(workspaceId: string | undefined) {
     if (!workspaceId) return
     setLoading(true)
     try {
-      const res = await fetch(`/api/v1/credentials?workspace_id=${workspaceId}`)
+      const res = await apiFetch(`/api/v1/credentials?workspace_id=${workspaceId}`)
       if (res.ok) {
         const data: Credential[] = await res.json()
         setCredentials(data)

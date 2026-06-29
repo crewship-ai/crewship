@@ -1,7 +1,8 @@
 "use client"
 
 import { useState } from "react"
-import { UserPlus, Pencil, Check, Loader2, X } from "lucide-react"
+import { UserPlus, Pencil, Check, X } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -32,6 +33,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
 import { toast } from "sonner"
+import { apiFetch } from "@/lib/api-fetch"
 import { AddMemberDialog } from "./add-member-dialog"
 import type { CrewMember, CrewMemberRole } from "@/lib/types/crew"
 
@@ -85,7 +87,7 @@ export function CrewMembers({ members, crewId, workspaceId, canEdit, onMembersCh
   async function handleRemoveMember(memberId: string, memberName: string) {
     setRemovingId(memberId)
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/crews/${crewId}/members/${memberId}?workspace_id=${workspaceId}`,
         { method: "DELETE" }
       )
@@ -117,7 +119,7 @@ export function CrewMembers({ members, crewId, workspaceId, canEdit, onMembersCh
     setSavingRole(true)
     const isInherit = pendingRole === null || pendingRole === undefined
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/crews/${crewId}/members/${memberId}?workspace_id=${workspaceId}`,
         {
           method: "PATCH",
@@ -225,7 +227,7 @@ export function CrewMembers({ members, crewId, workspaceId, canEdit, onMembersCh
                               disabled={savingRole}
                               title="Save"
                             >
-                              {savingRole ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+                              {savingRole ? <Spinner className="h-3 w-3" /> : <Check className="h-3 w-3" />}
                             </Button>
                             <Button
                               variant="ghost"

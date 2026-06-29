@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { useRealtimeEvent, type RealtimeEvent } from "@/hooks/use-realtime"
+import { apiFetch } from "@/lib/api-fetch"
 
 // useStepMetrics — per-step duration + cost for a single run, sourced
 // from journal entries (`pipeline.step.completed`). Used by the
@@ -55,7 +56,7 @@ export function useStepMetrics(
     }
     let cancelled = false
     setLoading(true)
-    fetch(
+    apiFetch(
       `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/${encodeURIComponent(pipelineSlug)}/runs?limit=200&include_steps=1`,
     )
       .then(async (res) => (res.ok ? ((await res.json()) as JournalEntry[]) : []))

@@ -5,12 +5,12 @@ import {
   Box,
   ChevronRight,
   Globe,
-  Loader2,
   Save,
   Search,
   Shield,
   Users,
 } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { motion, AnimatePresence } from "motion/react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
 import { resolveCrewColor } from "@/lib/colors"
+import { apiFetch } from "@/lib/api-fetch"
 
 
 const MEMORY_OPTIONS = [
@@ -150,7 +151,7 @@ export function CrewsContainersSection({
 
   const fetchCrews = useCallback(async () => {
     try {
-      const res = await fetch(`/api/v1/crews?workspace_id=${workspaceId}`)
+      const res = await apiFetch(`/api/v1/crews?workspace_id=${workspaceId}`)
       if (res.ok) {
         const data = await res.json()
         setCrews(data)
@@ -187,7 +188,7 @@ export function CrewsContainersSection({
       if (!draft) return
       setSavingResources((prev) => ({ ...prev, [crew.id]: true }))
       try {
-        const res = await fetch(
+        const res = await apiFetch(
           `/api/v1/crews/${crew.id}?workspace_id=${workspaceId}`,
           {
             method: "PATCH",
@@ -226,7 +227,7 @@ export function CrewsContainersSection({
       if (!draft) return
       setSavingNetwork((prev) => ({ ...prev, [crew.id]: true }))
       try {
-        const res = await fetch(
+        const res = await apiFetch(
           `/api/v1/crews/${crew.id}?workspace_id=${workspaceId}`,
           {
             method: "PATCH",
@@ -612,7 +613,7 @@ export function CrewsContainersSection({
                                           }}
                                         >
                                           {savingResources[crew.id] ? (
-                                            <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
+                                            <Spinner className="mr-1.5 h-3 w-3" />
                                           ) : (
                                             <Save className="mr-1.5 h-3 w-3" />
                                           )}
@@ -632,7 +633,7 @@ export function CrewsContainersSection({
                                           }}
                                         >
                                           {savingNetwork[crew.id] ? (
-                                            <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
+                                            <Spinner className="mr-1.5 h-3 w-3" />
                                           ) : (
                                             <Save className="mr-1.5 h-3 w-3" />
                                           )}

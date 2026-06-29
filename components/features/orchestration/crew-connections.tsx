@@ -2,8 +2,13 @@
 
 import { useCallback, useEffect, useState } from "react"
 import {
-  Link2, Unlink2, ArrowLeftRight, ArrowRight, Loader2, Users,
+  Link2,
+  Unlink2,
+  ArrowLeftRight,
+  ArrowRight,
+  Users,
 } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import {
@@ -13,6 +18,7 @@ import { Badge } from "@/components/ui/badge"
 import { EmptyState } from "@/components/layout/empty-state"
 import { cn } from "@/lib/utils"
 import { resolveCrewColor } from "@/lib/colors"
+import { apiFetch } from "@/lib/api-fetch"
 import { toast } from "sonner"
 
 interface Crew {
@@ -65,8 +71,8 @@ export function CrewConnections({ workspaceId }: CrewConnectionsProps) {
   const fetchData = useCallback(async () => {
     try {
       const [connsRes, crewsRes] = await Promise.all([
-        fetch(`/api/v1/crew-connections?workspace_id=${workspaceId}`),
-        fetch(`/api/v1/crews?workspace_id=${workspaceId}`),
+        apiFetch(`/api/v1/crew-connections?workspace_id=${workspaceId}`),
+        apiFetch(`/api/v1/crews?workspace_id=${workspaceId}`),
       ])
       if (connsRes.ok) setConnections(await connsRes.json())
       if (crewsRes.ok) setCrews(await crewsRes.json())
@@ -83,7 +89,7 @@ export function CrewConnections({ workspaceId }: CrewConnectionsProps) {
     }
     setConnecting(true)
     try {
-      const res = await fetch(`/api/v1/crew-connections?workspace_id=${workspaceId}`, {
+      const res = await apiFetch(`/api/v1/crew-connections?workspace_id=${workspaceId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ from_crew_id: fromCrew, to_crew_id: toCrew, direction }),
@@ -107,7 +113,7 @@ export function CrewConnections({ workspaceId }: CrewConnectionsProps) {
   const handleDisconnect = useCallback(async (id: string) => {
     setDisconnecting(id)
     try {
-      const res = await fetch(`/api/v1/crew-connections/${id}?workspace_id=${workspaceId}`, {
+      const res = await apiFetch(`/api/v1/crew-connections/${id}?workspace_id=${workspaceId}`, {
         method: "DELETE",
       })
       if (!res.ok) {
@@ -170,7 +176,7 @@ export function CrewConnections({ workspaceId }: CrewConnectionsProps) {
               className="gap-1.5 shrink-0"
               size="sm"
             >
-              {connecting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Link2 className="h-3.5 w-3.5" />}
+              {connecting ? <Spinner className="h-3.5 w-3.5" /> : <Link2 className="h-3.5 w-3.5" />}
               Connect
             </Button>
           </div>
@@ -222,7 +228,7 @@ export function CrewConnections({ workspaceId }: CrewConnectionsProps) {
                     onClick={() => handleDisconnect(conn.id)}
                     disabled={disconnecting === conn.id}
                   >
-                    {disconnecting === conn.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Unlink2 className="h-3 w-3" />}
+                    {disconnecting === conn.id ? <Spinner className="h-3 w-3" /> : <Unlink2 className="h-3 w-3" />}
                     Disconnect
                   </Button>
                 </div>

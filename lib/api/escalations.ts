@@ -1,3 +1,5 @@
+import { apiFetch } from "@/lib/api-fetch"
+
 // escalationResolve — PATCHes the real escalation lifecycle endpoint
 // (the source of truth), NOT the inbox row. Used by the inbox detail so
 // an agent escalation gets a genuine approve/reject decision instead of
@@ -13,7 +15,7 @@ export async function escalationResolve(
     // workspace_id MUST be on the query string: the RequireWorkspace middleware
     // reads it from the URL (query/path), not the request body, and rejects with
     // 400 "workspace_id is required" without it.
-    const res = await fetch(
+    const res = await apiFetch(
       `/api/v1/escalations/${encodeURIComponent(escalationID)}/resolve?workspace_id=${encodeURIComponent(workspaceID)}`,
       {
         method: "PATCH",

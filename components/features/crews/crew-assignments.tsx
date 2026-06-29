@@ -1,8 +1,8 @@
 "use client"
 
-import { Fragment, useCallback, useEffect, useRef, useState } from "react"
-import { CheckCircle2, Loader2, Clock, XCircle, ClipboardList } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
+import { Fragment, useCallback, useEffect, useState } from "react"
+import { Clock, ClipboardList } from "lucide-react"
+import { StatusIconBadge } from "@/components/ui/status-icon-badge"
 import { Card, CardContent } from "@/components/ui/card"
 import {
   Table,
@@ -18,10 +18,11 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
-import { formatRelativeTime } from "@/lib/time"
+import { formatRelativeTime, formatDurationBetween } from "@/lib/time"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 import type { Assignment } from "@/lib/types/assignment"
-import { STATUS_STYLES, type StatusConfigEntryWithIcon } from "@/lib/status-config"
+import { STATUS_STYLES, RUN_STATUS_CONFIG, type StatusConfigEntryWithIcon } from "@/lib/status-config"
+import { useApiResource } from "@/hooks/use-api-resource"
 
 interface CrewAssignmentsProps {
   crewId: string
@@ -29,25 +30,8 @@ interface CrewAssignmentsProps {
 }
 
 const STATUS_CONFIG: Record<Assignment["status"], StatusConfigEntryWithIcon> = {
-  COMPLETED: { label: "Completed", className: STATUS_STYLES.emerald, icon: CheckCircle2 },
-  RUNNING:   { label: "Running",   className: STATUS_STYLES.blue,    icon: Loader2 },
-  PENDING:   { label: "Pending",   className: STATUS_STYLES.amber,   icon: Clock },
-  FAILED:    { label: "Failed",    className: STATUS_STYLES.red,     icon: XCircle },
-}
-
-function formatDuration(startedAt: string | null, finishedAt: string | null): string {
-  if (!startedAt) return "—"
-  const start = new Date(startedAt).getTime()
-  const end = finishedAt ? new Date(finishedAt).getTime() : Date.now()
-  const diffMs = end - start
-
-  const seconds = Math.floor(diffMs / 1000)
-  if (seconds < 60) return `${seconds}s`
-  const minutes = Math.floor(seconds / 60)
-  const remainSecs = seconds % 60
-  if (minutes < 60) return `${minutes}m ${remainSecs}s`
-  const hours = Math.floor(minutes / 60)
-  return `${hours}h ${minutes % 60}m`
+  ...RUN_STATUS_CONFIG,
+  PENDING: { label: "Pending", className: STATUS_STYLES.amber, icon: Clock },
 }
 
 function LiveDuration({ startedAt }: { startedAt: string }) {
@@ -56,53 +40,21 @@ function LiveDuration({ startedAt }: { startedAt: string }) {
     const id = setInterval(() => setTick((t) => t + 1), 1000)
     return () => clearInterval(id)
   }, [])
-  return <>{formatDuration(startedAt, null)}</>
+  return <>{formatDurationBetween(startedAt, null)}</>
 }
 
 export function CrewAssignments({ crewId, workspaceId }: CrewAssignmentsProps) {
-  const [assignments, setAssignments] = useState<Assignment[]>([])
-  const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
   const [expandedId, setExpandedId] = useState<string | null>(null)
-  const requestIdRef = useRef(0)
-  const loadingOwnerRef = useRef<number | null>(null)
-  const refreshingOwnerRef = useRef<number | null>(null)
+  // keepDataOnError: a transient backend hiccup keeps the last good list
+  // (component shows empty state only when nothing has loaded yet).
+  const { data, loading, reload } = useApiResource<Assignment[]>(
+    `/api/v1/crews/${crewId}/assignments?workspace_id=${workspaceId}&limit=50`,
+    { keepDataOnError: true },
+  )
+  const assignments = data ?? []
 
-  const fetchAssignments = useCallback(async (showRefresh = false, silent = false) => {
-    const requestId = silent ? requestIdRef.current : ++requestIdRef.current
-    const ownsLoading = !silent && !showRefresh
-    const ownsRefresh = !silent && showRefresh
-
-    if (ownsRefresh) {
-      refreshingOwnerRef.current = requestId
-      setRefreshing(true)
-    } else if (ownsLoading) {
-      loadingOwnerRef.current = requestId
-      setLoading(true)
-    }
-    try {
-      const res = await fetch(
-        `/api/v1/crews/${crewId}/assignments?workspace_id=${workspaceId}&limit=50`
-      )
-      if (!res.ok) return
-      const data = (await res.json()) as Assignment[]
-      if (requestId === requestIdRef.current) {
-        setAssignments(data)
-      }
-    } catch {
-      // Silently fail — component shows empty state
-    } finally {
-      if (ownsLoading && loadingOwnerRef.current === requestId) setLoading(false)
-      if (ownsRefresh && refreshingOwnerRef.current === requestId) setRefreshing(false)
-    }
-  }, [crewId, workspaceId])
-
-  useEffect(() => {
-    fetchAssignments()
-  }, [fetchAssignments])
-
-  // Real-time: refetch when assignment status changes
-  useRealtimeEvent("assignment.updated", useCallback(() => { fetchAssignments(false, true) }, [fetchAssignments]))
+  // Real-time: refetch (silently, no spinner flash) when status changes.
+  useRealtimeEvent("assignment.updated", useCallback(() => { reload({ silent: true }) }, [reload]))
 
   if (loading) {
     return (
@@ -126,7 +78,7 @@ export function CrewAssignments({ crewId, workspaceId }: CrewAssignmentsProps) {
           )}
         </div>
         <span role="status" aria-live="polite" className="text-label text-muted-foreground">
-          {refreshing ? "Updating..." : "Live"}
+          Live
         </span>
       </div>
 
@@ -158,7 +110,6 @@ export function CrewAssignments({ crewId, workspaceId }: CrewAssignmentsProps) {
                 <TableBody>
                   {assignments.map((a) => {
                     const config = STATUS_CONFIG[a.status]
-                    const StatusIcon = config.icon
                     const isExpanded = expandedId === a.id
                     const hasDetail = a.result_summary || a.error_message
 
@@ -171,20 +122,18 @@ export function CrewAssignments({ crewId, workspaceId }: CrewAssignmentsProps) {
                           }}
                         >
                           <TableCell>
-                            <Badge
-                              variant="outline"
-                              className={`gap-1.5 border-0 ${config.className}`}
-                            >
-                              {a.status === "RUNNING" ? (
-                                <span aria-hidden="true" className="relative flex h-2 w-2 shrink-0">
-                                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
-                                  <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500" />
-                                </span>
-                              ) : (
-                                <StatusIcon className="h-3 w-3" />
-                              )}
-                              {config.label}
-                            </Badge>
+                            <StatusIconBadge
+                              entry={config}
+                              gap="gap-1.5"
+                              icon={
+                                a.status === "RUNNING" ? (
+                                  <span aria-hidden="true" className="relative flex h-2 w-2 shrink-0">
+                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
+                                    <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500" />
+                                  </span>
+                                ) : undefined
+                              }
+                            />
                           </TableCell>
                           <TableCell>
                             {hasDetail ? (
@@ -230,7 +179,7 @@ export function CrewAssignments({ crewId, workspaceId }: CrewAssignmentsProps) {
                           <TableCell className="text-label text-muted-foreground tabular-nums">
                             {a.status === "RUNNING" && a.started_at
                               ? <LiveDuration startedAt={a.started_at} />
-                              : formatDuration(a.started_at, a.finished_at)}
+                              : formatDurationBetween(a.started_at, a.finished_at)}
                           </TableCell>
                         </TableRow>
                         {isExpanded && hasDetail && (

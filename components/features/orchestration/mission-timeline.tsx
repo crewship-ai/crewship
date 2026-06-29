@@ -12,7 +12,8 @@ import {
 import { ChevronDown, Clock } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { Mission, MissionTask, MissionStatus } from "@/lib/types/mission"
-import { getAgentAvatarUrl } from "@/lib/agent-avatar"
+import { AgentAvatar } from "@/components/ui/agent-avatar"
+import { formatDurationRounded } from "@/lib/time"
 
 interface MissionTimelineProps {
   missions: Mission[]
@@ -57,14 +58,6 @@ function getTimeRange(missions: Mission[]): { start: number; end: number } {
   }
   const range = end - start || 3600000
   return { start: start - range * 0.05, end: end + range * 0.05 }
-}
-
-function formatDuration(ms: number): string {
-  if (ms < 1000) return `${ms}ms`
-  const s = Math.round(ms / 1000)
-  if (s < 60) return `${s}s`
-  const m = Math.floor(s / 60)
-  return `${m}m ${s % 60}s`
 }
 
 const TASK_BAR_STYLES: Record<string, React.CSSProperties> = {
@@ -137,7 +130,7 @@ function TaskBar({ task, timeRange }: { task: MissionTask; timeRange: { start: n
             {duration != null && (
               <div className="flex justify-between gap-3">
                 <span className="text-muted-foreground">Duration</span>
-                <span className="font-mono">{formatDuration(duration)}</span>
+                <span className="font-mono">{formatDurationRounded(duration)}</span>
               </div>
             )}
             {task.token_count != null && (
@@ -269,8 +262,8 @@ export function MissionTimeline({ missions, highlightSlugs }: MissionTimelinePro
                           className="shrink-0 sticky left-0 z-20 bg-card border-r border-border border-b border-b-border/50 flex items-center gap-2 px-2.5 hover:bg-muted/30 transition-colors"
                           style={{ width: AGENT_W, height: LANE_H }}
                         >
-                          <img
-                            src={getAgentAvatarUrl(slug)}
+                          <AgentAvatar
+                            seed={slug}
                             alt={slug}
                             className="w-[26px] h-[26px] rounded-full shrink-0"
                           />
