@@ -50,6 +50,15 @@ const sectionTitles: Record<string, { title: string; description?: string }> = {
   audit: { title: "Audit Log", description: "Track workspace activity" },
 }
 
+// Resolve the initial tab from the URL `?tab=` param, falling back to
+// "profile" for missing/unknown values. This is what makes deep-links like
+// /settings?tab=audit (from the command palette and toolbar nav) land on the
+// right section instead of always opening Profile.
+export function initialSettingsTab(search: string): string {
+  const t = new URLSearchParams(search).get("tab")
+  return t && t in sectionTitles ? t : "profile"
+}
+
 export function SettingsLayout() {
   const { session, signOut } = useAuth()
   const { workspaceId, role, loading: wsLoading } = useWorkspace()
@@ -57,13 +66,22 @@ export function SettingsLayout() {
 
   const isMobile = useIsMobile()
   const setSettingsTab = useAppStore((s) => s.setSettingsTab)
-  const [activeTab, _setActiveTab] = useState("profile")
+  const [activeTab, _setActiveTab] = useState(() =>
+    typeof window === "undefined" ? "profile" : initialSettingsTab(window.location.search),
+  )
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
 
   // Sync active tab to global store for toolbar breadcrumb
   const setActiveTab = useCallback((tab: string) => {
     _setActiveTab(tab)
     setSettingsTab(tab)
+    // Keep the URL in sync so the active tab is shareable/bookmarkable and
+    // the back button works, without triggering a route navigation.
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href)
+      url.searchParams.set("tab", tab)
+      window.history.replaceState(null, "", url.toString())
+    }
   }, [setSettingsTab])
 
   // Set initial tab and cleanup on unmount

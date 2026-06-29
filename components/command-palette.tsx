@@ -4,7 +4,8 @@ import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import {
   Bot, Network, Zap, Key, Activity, Shield, Settings,
-  LayoutDashboard, Plus, ShieldCheck, Store, CircleDot, FolderKanban,
+  LayoutDashboard, Plus, ShieldCheck, CircleDot, FolderKanban,
+  Inbox, ClipboardCheck, CalendarClock, Plug, Users, Lock, User,
 } from "lucide-react"
 import { StatusIcon } from "@/components/features/issues/status-icon"
 import { PriorityIcon } from "@/components/features/issues/priority-icon"
@@ -93,14 +94,28 @@ const NAV_ITEMS = [
   { title: "Issues", href: "/issues", icon: CircleDot },
   { title: "Crews", href: "/crews", icon: Network },
   { title: "Agents", href: "/crews/agents", icon: Bot },
+  { title: "Inbox", href: "/inbox", icon: Inbox },
+  { title: "Approvals", href: "/approvals", icon: ClipboardCheck },
+  { title: "Activity", href: "/activity", icon: Activity },
+  { title: "Routines", href: "/routines", icon: CalendarClock },
+  { title: "Integrations", href: "/integrations", icon: Plug },
   { title: "Skills", href: "/skills", icon: Zap },
   { title: "Credentials", href: "/credentials", icon: Key },
-  { title: "Runs", href: "/journal?tab=runs", icon: Activity },
   { title: "Journal", href: "/journal", icon: Activity },
-  { title: "Audit Log", href: "/settings?tab=audit", icon: Shield },
+  { title: "Runs", href: "/journal?tab=runs", icon: Activity },
   { title: "Settings", href: "/settings", icon: Settings },
   { title: "Admin", href: "/admin", icon: ShieldCheck },
-  { title: "Marketplace", href: "/marketplace", icon: Store },
+]
+
+// Deep-links into the settings sub-tabs. These rely on SettingsLayout reading
+// the `?tab=` param on mount (see initialSettingsTab in settings-layout.tsx).
+const SETTINGS_LINKS = [
+  { title: "Profile", href: "/settings?tab=profile", icon: User },
+  { title: "General", href: "/settings?tab=general", icon: Settings },
+  { title: "Members", href: "/settings?tab=members", icon: Users },
+  { title: "Privacy & Memory", href: "/settings?tab=privacy", icon: Lock },
+  { title: "Connections", href: "/settings?tab=connections", icon: Network },
+  { title: "Audit Log", href: "/settings?tab=audit", icon: Shield },
 ]
 
 const QUICK_ACTIONS = [
@@ -176,7 +191,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       description="Search agents, crews, skills, and more..."
     >
       <CommandInput placeholder="Search issues, projects, agents..." />
-      <CommandList>
+      <CommandList className="max-h-[60vh]">
         <CommandEmpty>No results found.</CommandEmpty>
 
         <CommandGroup heading="Quick Actions">
@@ -338,6 +353,21 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
               key={item.href}
               value={`go to ${item.title}`}
               keywords={["navigate", "page", item.title.toLowerCase()]}
+              onSelect={() => runCommand(() => router.push(item.href))}
+            >
+              <item.icon className="h-4 w-4 text-muted-foreground" />
+              <span>{item.title}</span>
+            </CommandItem>
+          ))}
+        </CommandGroup>
+
+        <CommandSeparator />
+        <CommandGroup heading="Settings">
+          {SETTINGS_LINKS.map((item) => (
+            <CommandItem
+              key={item.href}
+              value={`settings ${item.title}`}
+              keywords={["settings", "preferences", item.title.toLowerCase()]}
               onSelect={() => runCommand(() => router.push(item.href))}
             >
               <item.icon className="h-4 w-4 text-muted-foreground" />
