@@ -13,7 +13,7 @@
 import { iconForEntryType } from "@/lib/journal-icons"
 import { formatDurationPrecise } from "@/lib/time"
 import type { JournalEntry } from "@/lib/types/journal"
-import type { LucideIcon } from "lucide-react"
+import { Clock, type LucideIcon } from "lucide-react"
 
 /** Visual tone for a row; the timeline maps these to icon/accent colours. */
 export type RunActivityTone = "default" | "active" | "success" | "warn" | "error"
@@ -29,6 +29,14 @@ export interface RunActivityRow {
   detail?: string
   /** Optional right-aligned metadata, e.g. "412 B" or "exit 0 · 1.2s". */
   meta?: string
+  /**
+   * Marks a row the run is currently PARKED on, waiting for a human decision
+   * (an approval `wait` step). The rail renders these with an amber pulse so
+   * the "this is blocked on you" step stands out from completed/active rows.
+   * Synthesised from the live waitpoint, not the journal — see
+   * {@link awaitingApprovalRow}.
+   */
+  awaiting?: boolean
 }
 
 // Entry types that are pure machine noise for a human-facing run timeline:
@@ -319,6 +327,53 @@ export function humanizeRun(entries: JournalEntry[]): RunActivityRow[] {
       if (Number.isFinite(ta) && Number.isFinite(tb) && ta !== tb) return ta - tb
       return a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0
     })
+}
+
+// ---- awaiting-approval injection -------------------------------------------
+
+/**
+ * Build the synthetic "awaiting human approval" row for a routine run parked
+ * at a `wait`/approval step. The journal records no completed/failed entry
+ * while the run is parked, so the timeline would otherwise just stop after the
+ * last finished step with no indication that the run is blocked on the viewer.
+ * We pin this row from the live waitpoint instead.
+ */
+export function awaitingApprovalRow(opts: {
+  stepId?: string
+  ts: string
+  id?: string
+}): RunActivityRow {
+  return {
+    id: opts.id ?? `awaiting:${opts.stepId ?? "approval"}`,
+    ts: opts.ts,
+    icon: Clock,
+    tone: "warn",
+    awaiting: true,
+    title: opts.stepId
+      ? `Step ${opts.stepId} — awaiting your decision`
+      : "Awaiting your decision",
+  }
+}
+
+/**
+ * Append the awaiting-approval row to an already-humanized run and re-sort by
+ * timestamp so it lands in chronological position (after the last completed
+ * step). Idempotent on row id, so a re-render with the same waitpoint doesn't
+ * duplicate it. Returns the original rows unchanged when `opts` is null.
+ */
+export function withAwaitingApproval(
+  rows: RunActivityRow[],
+  opts: { stepId?: string; ts: string; id?: string } | null | undefined,
+): RunActivityRow[] {
+  if (!opts) return rows
+  const row = awaitingApprovalRow(opts)
+  if (rows.some((r) => r.id === row.id)) return rows
+  return [...rows, row].sort((a, b) => {
+    const ta = Date.parse(a.ts)
+    const tb = Date.parse(b.ts)
+    if (Number.isFinite(ta) && Number.isFinite(tb) && ta !== tb) return ta - tb
+    return a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0
+  })
 }
 
 // ---- tiny helpers ----------------------------------------------------------

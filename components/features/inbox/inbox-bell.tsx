@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { useInbox, type InboxItem } from "@/hooks/use-inbox"
+import { useInbox, useInboxUnreadCount, type InboxItem } from "@/hooks/use-inbox"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { cn } from "@/lib/utils"
 
@@ -35,7 +35,14 @@ export function InboxBell() {
   const router = useRouter()
   const { workspaceId } = useWorkspace()
   const [open, setOpen] = useState(false)
-  const { items, unreadCount } = useInbox(workspaceId, "unread")
+  // Dropdown preview uses the unread LIST. The badge number, however, reads
+  // the dedicated /inbox/count endpoint — the SAME source the left-sidebar
+  // badge uses — so the two can never disagree. They previously diverged: the
+  // list response's unread_count and the count endpoint applied subtly
+  // different visibility filters, so a MANAGER-targeted approval gate could
+  // show "1" on the sidebar but nothing on the bell.
+  const { items } = useInbox(workspaceId, "unread")
+  const unreadCount = useInboxUnreadCount(workspaceId)
 
   const recent = items.slice(0, 5)
 
