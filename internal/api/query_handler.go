@@ -248,8 +248,20 @@ func (h *QueryHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Ensure crew container is running
-	containerID, err := h.orch.GetOrCreateContainer(r.Context(), target.CrewSlug, body.CrewID, body.WorkspaceID)
+	// Ensure crew container is running, created from the crew's PROVISIONED
+	// image (with claude + tools) rather than the bare runtime default —
+	// otherwise a cold target crew launches from the base image and the peer
+	// query exits 127. Peer queries target an already-active crew in the
+	// common case (container reused), so there's no provisioning gate here;
+	// the image resolution alone fixes the cold-start case.
+	var containerID string
+	if crewCfg, cfgErr := buildCrewRuntimeConfig(r.Context(), h.db, body.CrewID, body.WorkspaceID); cfgErr != nil {
+		h.logger.Warn("resolve crew runtime config for query; using bare container config",
+			"error", cfgErr, "crew_id", body.CrewID, "query_id", convID)
+		containerID, err = h.orch.GetOrCreateContainer(r.Context(), target.CrewSlug, body.CrewID, body.WorkspaceID)
+	} else {
+		containerID, err = h.orch.GetOrCreateContainerCfg(r.Context(), crewCfg, body.WorkspaceID)
+	}
 	if err != nil {
 		h.logger.Error("get container for query", "error", err, "query_id", convID)
 		h.finishQuery(r.Context(), convID, runID, body.ChatID, body.FromSlug, body.TargetSlug, body.WorkspaceID, body.CrewID, target.ID, "",

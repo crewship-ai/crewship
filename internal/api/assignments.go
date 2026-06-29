@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/journal"
@@ -25,6 +26,13 @@ type MissionCallback interface {
 // Assignments are created by the sidecar on behalf of lead agents and
 // executed as sub-agent runs in the crew container.
 
+// crewProvisioner is the dispatch-time provisioning gate. Satisfied by
+// *ProvisioningHandler; an interface so tests can stub it (and so the handler
+// works with provisioning disabled — nil means "skip the gate").
+type crewProvisioner interface {
+	EnsureProvisioned(ctx context.Context, crewID, workspaceID string, timeout time.Duration) error
+}
+
 type AssignmentHandler struct {
 	db              *sql.DB
 	orch            *orchestrator.Orchestrator
@@ -33,6 +41,7 @@ type AssignmentHandler struct {
 	internalToken   string
 	missionCallback MissionCallback
 	journal         journal.Emitter
+	provisioner     crewProvisioner
 
 	// dispatchWG tracks the async runAssignment/dispatchByID goroutines
 	// spawned by Create and pumpAndDispatch. Nothing in the request path
@@ -66,6 +75,14 @@ func NewAssignmentHandler(db *sql.DB, orch *orchestrator.Orchestrator, hub *ws.H
 
 func (h *AssignmentHandler) SetMissionCallback(cb MissionCallback) {
 	h.missionCallback = cb
+}
+
+// SetProvisioner wires the dispatch-time provisioning gate so a cold crew is
+// built (and its container created from the provisioned image) before the
+// agent runs. nil disables the gate — the run path falls back to whatever
+// image is available. Wired at server boot to the ProvisioningHandler.
+func (h *AssignmentHandler) SetProvisioner(p crewProvisioner) {
+	h.provisioner = p
 }
 
 // SetJournal wires a journal emitter for run lifecycle events. nil maps

@@ -29,6 +29,15 @@ func (r *Router) registerRoutes() {
 	// (assign, queries, portExposeH) for the internal registrar.
 	oh := r.registerOrchestrationRoutes()
 
+	// Wire the dispatch-time provisioning gate: the AssignmentHandler (created
+	// in registerOrchestrationRoutes) uses the ProvisioningHandler (created in
+	// registerCrewsRoutes, above) to ensure a crew's devcontainer image is
+	// built before an issue/mission run is dispatched — otherwise a cold crew
+	// launches from the bare runtime image and the agent exits 127.
+	if r.assignmentHandler != nil && r.provisioning != nil {
+		r.assignmentHandler.SetProvisioner(r.provisioning)
+	}
+
 	// Auth, signup, Google OAuth2, sessions, CLI tokens, NextAuth,
 	// onboarding.
 	r.registerAuthRoutes()

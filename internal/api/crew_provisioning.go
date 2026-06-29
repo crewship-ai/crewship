@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/journal"
@@ -28,6 +29,11 @@ type ProvisioningHandler struct {
 	// In-memory provisioning job state, keyed by crewID. MVP only.
 	mu   sync.RWMutex
 	jobs map[string]*ProvisionJob
+
+	// provisionPollInterval is how often EnsureProvisioned polls job state
+	// while blocking a dispatch on a build. 0 means the 2s default; tests set
+	// a small value to exercise the wait loop without real wall-clock waits.
+	provisionPollInterval time.Duration
 
 	// rateLimiter caps concurrent and recent provisions per workspace. Guards
 	// against runaway triggers (e.g. a buggy loop) exhausting Docker resources.

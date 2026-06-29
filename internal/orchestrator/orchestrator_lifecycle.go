@@ -43,6 +43,31 @@ func (o *Orchestrator) GetOrCreateContainer(ctx context.Context, crewSlug, crewI
 	return containerID, nil
 }
 
+// GetOrCreateContainerCfg is like GetOrCreateContainer but takes a fully
+// resolved CrewConfig (cached/provisioned image, containerEnv, mounts, caps,
+// resource limits) so the container is created from the crew's PROVISIONED
+// image rather than the bare runtime default. The mission/assignment dispatch
+// path uses this (internal/api/assignments_run.go) — passing only {slug, id}
+// there is what let a cold crew launch from the base image and fail the agent
+// exec with exit 127 (no `claude` in the base image). Stats registration is
+// preserved, same as GetOrCreateContainer.
+func (o *Orchestrator) GetOrCreateContainerCfg(ctx context.Context, cfg provider.CrewConfig, workspaceID string) (string, error) {
+	if o.container == nil {
+		return "", fmt.Errorf("container provider not configured")
+	}
+	containerID, err := o.container.EnsureCrewRuntime(ctx, cfg)
+	if err != nil {
+		return "", fmt.Errorf("ensure crew runtime for crew %s (workspace %s): %w", cfg.ID, workspaceID, err)
+	}
+	o.mu.RLock()
+	reg := o.statsRegister
+	o.mu.RUnlock()
+	if reg != nil && workspaceID != "" {
+		reg(containerID, cfg.ID, workspaceID)
+	}
+	return containerID, nil
+}
+
 // RunAgentForAssignment runs a sub-agent as part of a mission assignment.
 // It skips conversation history injection (each task gets a clean context via the mission brief).
 // SkipSidecar is respected from the caller — regular AGENT tasks skip sidecar,

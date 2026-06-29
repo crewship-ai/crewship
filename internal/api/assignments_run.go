@@ -396,8 +396,38 @@ func (h *AssignmentHandler) runAssignment(
 		return
 	}
 
-	// Ensure crew container is running
-	containerID, err := h.orch.GetOrCreateContainer(ctx, target.CrewSlug, body.CrewID, body.WorkspaceID)
+	// Ensure the crew's devcontainer image is built BEFORE we try to run the
+	// agent. A cold crew (just seeded, never provisioned, or with a cache tag
+	// pruned from the daemon) would otherwise be started from the bare runtime
+	// image — which has no `claude` CLI — and the exec would die with exit 127
+	// ("stdbuf: failed to run command 'claude'"). EnsureProvisioned blocks
+	// until the build finishes, emitting the provision.* events the top-right
+	// toolbar popover renders, so dispatch shows "preparing container" and then
+	// runs instead of failing. nil provisioner (Docker disabled) skips the gate.
+	if h.provisioner != nil {
+		if perr := h.provisioner.EnsureProvisioned(ctx, body.CrewID, body.WorkspaceID, 0); perr != nil {
+			h.logger.Error("ensure provisioned for assignment", "error", perr,
+				"assignment_id", assignmentID, "crew_id", body.CrewID)
+			h.finishAssignment(ctx, assignmentID, runID, body.ChatID, body.TargetSlug, body.WorkspaceID, "",
+				fmt.Sprintf("preparing the crew container failed: %v", perr))
+			return
+		}
+	}
+
+	// Resolve the crew's full runtime config so the container is created from
+	// the PROVISIONED image (with claude + tools), not the bare runtime
+	// default. Fall back to the bare {slug, id} path only if the lookup fails.
+	var (
+		containerID string
+		err         error
+	)
+	if crewCfg, cfgErr := buildCrewRuntimeConfig(ctx, h.db, body.CrewID, body.WorkspaceID); cfgErr != nil {
+		h.logger.Warn("resolve crew runtime config; using bare container config",
+			"error", cfgErr, "crew_id", body.CrewID, "assignment_id", assignmentID)
+		containerID, err = h.orch.GetOrCreateContainer(ctx, target.CrewSlug, body.CrewID, body.WorkspaceID)
+	} else {
+		containerID, err = h.orch.GetOrCreateContainerCfg(ctx, crewCfg, body.WorkspaceID)
+	}
 	if err != nil {
 		h.logger.Error("get container for assignment", "error", err, "assignment_id", assignmentID)
 		h.finishAssignment(ctx, assignmentID, runID, body.ChatID, body.TargetSlug, body.WorkspaceID, "",
