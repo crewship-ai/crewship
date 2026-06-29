@@ -275,6 +275,10 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 	h.broadcastCrewEvent("crew.created", workspaceID, map[string]string{
 		"id": crewID, "name": req.Name, "slug": req.Slug,
 	})
+
+	// Proactively build the devcontainer image now (background) so the crew is
+	// runnable the moment it's created — no manual "Build now" step.
+	h.maybeAutoProvision(crewID, workspaceID, derefStr(req.DevcontainerConfig), derefStr(req.MiseConfig))
 }
 
 // Get returns a single crew by ID with full details.

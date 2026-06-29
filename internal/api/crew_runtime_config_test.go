@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -99,6 +100,63 @@ func TestBuildCrewRuntimeConfig(t *testing.T) {
 	if cfg.ContainerEnv["ONLY_CREW"] != "1" {
 		t.Errorf("ContainerEnv[ONLY_CREW] = %q, want 1", cfg.ContainerEnv["ONLY_CREW"])
 	}
+}
+
+// fakeEnqueuer records EnqueueForCrew calls for the proactive-provision tests.
+type fakeEnqueuer struct {
+	calls int
+	last  string
+	err   error
+}
+
+func (f *fakeEnqueuer) EnqueueForCrew(_ context.Context, crewID, _ string) (EnqueueResult, error) {
+	f.calls++
+	f.last = crewID
+	if f.err != nil {
+		return EnqueueResult{}, f.err
+	}
+	return EnqueueResult{Started: true}, nil
+}
+
+func TestMaybeAutoProvision(t *testing.T) {
+	cases := []struct {
+		name       string
+		hasProv    bool
+		devcontain string
+		mise       string
+		wantCalls  int
+	}{
+		{"needs provision → enqueues", true, featuresCfg, "", 1},
+		{"mise-only needs provision → enqueues", true, "", `{"node":"22"}`, 1},
+		{"no provision needed → skips", true, `{"image":"debian:bookworm"}`, "", 0},
+		{"nil provisioner → skips (no panic)", false, featuresCfg, "", 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := &CrewHandler{logger: newTestLogger()}
+			var fe *fakeEnqueuer
+			if tc.hasProv {
+				fe = &fakeEnqueuer{}
+				h.SetProvisioner(fe)
+			}
+			h.maybeAutoProvision("crew-x", "ws-x", tc.devcontain, tc.mise)
+			got := 0
+			if fe != nil {
+				got = fe.calls
+			}
+			if got != tc.wantCalls {
+				t.Errorf("enqueue calls = %d, want %d", got, tc.wantCalls)
+			}
+		})
+	}
+}
+
+func TestMaybeAutoProvision_EnqueueErrorIsNonFatal(t *testing.T) {
+	h := &CrewHandler{logger: newTestLogger()}
+	h.SetProvisioner(&fakeEnqueuer{err: errors.New("rate limited")})
+	// Must not panic / must return cleanly even when enqueue fails — the
+	// dispatch-time gate is the safety net.
+	h.maybeAutoProvision("crew-x", "ws-x", featuresCfg, "")
 }
 
 func TestEnsureProvisioned_NilProvisioner_NoOp(t *testing.T) {

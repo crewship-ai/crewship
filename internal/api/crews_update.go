@@ -388,6 +388,15 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		"id": crewID, "name": c.Name, "slug": c.Slug,
 	})
 
+	// Devcontainer / mise / runtime-image changes invalidated the cached image
+	// above. Proactively rebuild now (background) so the crew stays runnable
+	// without the operator clicking "Build now". c holds the freshly-stored
+	// config, so partial updates (only mise, only devcontainer) resolve the
+	// combined need correctly.
+	if req.DevcontainerConfig != nil || req.MiseConfig != nil || req.RuntimeImage != nil {
+		h.maybeAutoProvision(crewID, workspaceID, derefStr(c.DevcontainerConfig), derefStr(c.MiseConfig))
+	}
+
 	// Restart crew container when network policy or sidecar services
 	// change so the docker provider picks up the new config on the
 	// next agent run. services_json edits otherwise stay stale

@@ -249,8 +249,9 @@ mise is installed as the `agent` user (UID 1001), so tools land under `/home/age
 
 ## Triggering provisioning
 
-Provisioning is **asynchronous**. The CLI command returns immediately after the backend enqueues a job; you then poll for status. Four triggers can put a crew into provisioning state:
+Provisioning is **asynchronous**. The CLI command returns immediately after the backend enqueues a job; you then poll for status. Five triggers can put a crew into provisioning state:
 
+0. **Proactive auto-provision on config save** — when a crew is **created** (`POST /api/v1/crews`, `crewship apply`, `crewship crew create`) or its **devcontainer / mise / runtime-image config changes** (`PATCH /api/v1/crews/{crewId}`), the handler immediately kicks off the build in the background (`CrewHandler.maybeAutoProvision`). This is the primary path: by the time anyone dispatches an issue the image is usually already cached, so operators never touch a "Build now" button. Editing the config invalidates the old cached image, so the rebuild keeps the crew current automatically.
 1. **Explicit CLI/API trigger** — `crewship crew provision <slug>` or `POST /api/v1/crews/{crewId}/provision`.
 2. **Crew rebuild** — `crewship crew rebuild <slug>` clears the cached image marker and re-runs provision.
 3. **Auto-provision on first chat** *(PR #230)* — when an operator opens a chat with an agent in a crew that has a config but no cached image, the chat handler calls `ProvisioningHandler.EnqueueForCrew` directly. The chat surface renders an inline `CrewProvisioningCard` with the live progress checklist; once provisioning succeeds, the agent's first message starts on the freshly cached image.

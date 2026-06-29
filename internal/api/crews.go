@@ -49,12 +49,20 @@ func normalizeDomain(raw string) string {
 
 // CrewHandler provides CRUD endpoints for managing crews (teams of agents) within a workspace.
 
+// crewProvisionEnqueuer kicks off an async devcontainer build for a crew.
+// Satisfied by *ProvisioningHandler; an interface so the crew handler stays
+// testable and works with provisioning disabled (nil = skip).
+type crewProvisionEnqueuer interface {
+	EnqueueForCrew(ctx context.Context, crewID, workspaceID string) (EnqueueResult, error)
+}
+
 type CrewHandler struct {
-	db         *sql.DB
-	hub        *ws.Hub
-	logger     *slog.Logger
-	license    *license.License
-	socketPath string
+	db          *sql.DB
+	hub         *ws.Hub
+	logger      *slog.Logger
+	license     *license.License
+	socketPath  string
+	provisioner crewProvisionEnqueuer
 }
 
 // NewCrewHandler creates a CrewHandler with the given database and logger.
@@ -66,6 +74,37 @@ func NewCrewHandler(db *sql.DB, logger *slog.Logger) *CrewHandler {
 // SetHub attaches a WebSocket hub for broadcasting crew events.
 
 func (h *CrewHandler) SetHub(hub *ws.Hub) { h.hub = hub }
+
+// SetProvisioner wires proactive provisioning: when a crew is created or its
+// devcontainer/mise config changes, the build is kicked off in the background
+// straight away — so the crew is runnable by the time the operator dispatches
+// an issue, without them ever touching a "Build now" button. nil disables it
+// (the dispatch-time gate still provisions lazily as a safety net).
+func (h *CrewHandler) SetProvisioner(p crewProvisionEnqueuer) { h.provisioner = p }
+
+// maybeAutoProvision enqueues a background devcontainer build when the crew's
+// config actually needs one. Fire-and-forget: EnqueueForCrew returns as soon as
+// the job is spawned (and is idempotent — a no-op if a build is already in
+// flight), and the provision.* WS events light up the toolbar popover. Failures
+// to enqueue are logged, not surfaced — the dispatch-time EnsureProvisioned gate
+// will retry and surface a real error if the crew is run before it's ready.
+func (h *CrewHandler) maybeAutoProvision(crewID, workspaceID, devcontainerCfg, miseCfg string) {
+	if h.provisioner == nil || !crewNeedsProvision(devcontainerCfg, miseCfg) {
+		return
+	}
+	if _, err := h.provisioner.EnqueueForCrew(context.Background(), crewID, workspaceID); err != nil {
+		h.logger.Warn("proactive auto-provision enqueue failed (dispatch gate will retry)",
+			"crew_id", crewID, "error", err)
+	}
+}
+
+// derefStr returns the pointed-to string or "" for a nil *string.
+func derefStr(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
 
 func (h *CrewHandler) broadcastCrewEvent(eventType, workspaceID string, payload map[string]string) {
 	broadcastWorkspaceEvent(h.hub, workspaceID, eventType, payload)
