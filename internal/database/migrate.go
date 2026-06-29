@@ -1505,6 +1505,13 @@ END;
 	// CTE joins via an index, not a per-level table scan. See
 	// migrate_consts_v126_run_tree_index.go.
 	{version: 126, name: "run_tree_index", sql: migrationRunTreeIndex},
+
+	// v127: index pipeline_runs for the failure-grouping query so
+	// RunStore.FailureGroups resolves GROUP BY error_fingerprint (and the
+	// per-fingerprint most-recent-N run-id sample) through an index instead
+	// of a full scan of every failed run in the workspace. See
+	// migrate_consts_v127_failure_groups_index.go.
+	{version: 127, name: "failure_groups_index", sql: migrationFailureGroupsIndex},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

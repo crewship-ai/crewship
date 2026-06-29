@@ -182,6 +182,22 @@ func (h *CrewHandler) AddMember(w http.ResponseWriter, r *http.Request) {
 				"role must be one of OWNER, ADMIN, MANAGER, MEMBER, VIEWER")
 			return
 		}
+		// Role-grant ceiling (A1): a caller may never grant a per-crew
+		// role that outranks their own effective role. canRole(...,
+		// "create") above only proves the caller is MANAGER+, which
+		// would otherwise let a MANAGER ladder a member straight to
+		// OWNER and bypass the workspace gate. This mirrors the gate
+		// UpdateMemberRole enforces on promotion/demotion.
+		if roleRank[req.Role] > roleRank[role] {
+			var uid string
+			if u := UserFromContext(r.Context()); u != nil {
+				uid = u.ID
+			}
+			replyForbidden(w, h.logger, uid, role,
+				"crew_member.grant_role",
+				"crew:"+crewID+"/role:"+req.Role)
+			return
+		}
 		roleParam = sql.NullString{String: req.Role, Valid: true}
 	}
 
@@ -347,6 +363,21 @@ func (h *CrewHandler) UpdateMemberRole(w http.ResponseWriter, r *http.Request) {
 		if _, ok := roleRank[req.Role]; !ok {
 			replyError(w, http.StatusBadRequest,
 				"role must be one of OWNER, ADMIN, MANAGER, MEMBER, VIEWER, or empty to clear")
+			return
+		}
+		// Role-grant ceiling (A1): the OWNER/ADMIN gate above proves the
+		// caller can reshape membership, but not that they may mint a
+		// role above their own — an ADMIN must not be able to pin a
+		// member to OWNER. Cap the granted role at the caller's effective
+		// role, same as AddMember.
+		if roleRank[req.Role] > roleRank[wsRole] {
+			var uid string
+			if user != nil {
+				uid = user.ID
+			}
+			replyForbidden(w, h.logger, uid, wsRole,
+				"crew_member.grant_role",
+				"crew:"+crewID+"/member:"+memberID+"/role:"+req.Role)
 			return
 		}
 		roleParam = sql.NullString{String: req.Role, Valid: true}

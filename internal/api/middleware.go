@@ -114,6 +114,43 @@ func SecurityHeaders(next http.Handler) http.Handler {
 	})
 }
 
+// maxAPIBodyBytes is the global ceiling on the size of a request body the
+// authed API router will buffer or decode. Many POST handlers decode
+// r.Body with an unbounded json.NewDecoder (pipelines, skills bulk
+// import, eval, inbox, agent learning, …); without a cap a single 2 GB
+// POST can drive the process into an OOM. 16 MiB is comfortably above any
+// legitimate JSON manifest or bundle import while killing the OOM vector.
+// Handlers that need a STRICTER limit keep their own MaxBytesReader — it
+// re-wraps the already-capped body, so the tighter limit still wins.
+const maxAPIBodyBytes int64 = 16 << 20 // 16 MiB
+
+// BodyCap returns middleware that bounds the request body to max bytes.
+//
+//   - A request that announces an oversized Content-Length is rejected up
+//     front with 413 (RFC 7807), before any handler reads it.
+//   - Bodies that lie about (chunked) or omit their length are bounded by
+//     a MaxBytesReader backstop, so a streaming upload still cannot exhaust
+//     memory — the read simply errors past the limit.
+//
+// Applied to the authed API surface (see NewRouter). Internal sidecar IPC
+// routes bypass this — they have their own per-handler caps and may carry
+// larger trusted payloads.
+func BodyCap(max int64) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.ContentLength > max {
+				writeProblem(w, r, http.StatusRequestEntityTooLarge,
+					"Request body too large")
+				return
+			}
+			if r.Body != nil {
+				r.Body = http.MaxBytesReader(w, r.Body, max)
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 // AuthMiddleware provides HTTP middleware for JWT and CLI token authentication.
 // The sessions store is consulted on every JWT-auth request to enforce
 // server-side revocation; pass a no-op store only in tests that exercise

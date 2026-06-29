@@ -9,7 +9,14 @@ package api
 // rotation_initiator_user_id column; the row literally cannot exist
 // without it). So this adapter REQUIRES X-Caller-User-Id on the
 // inbound and rejects with 401 when absent — autonomous-agent
-// credential mutation is intentionally not supported. If a future
+// credential mutation is intentionally not supported.
+//
+// ID1 (PRD §11): because X-Caller-User-Id is forgeable from inside the
+// agent container, the adapter ALSO requires a valid X-Caller-Signature
+// — an HMAC over (workspace_id, caller_user_id) keyed by the
+// workspace-bound internal token that only the sidecar process holds.
+// A missing or invalid signature is rejected with 401 before any
+// capability check, so a forged caller id can never escalate. If a future
 // autonomous workflow needs to rotate a credential it can either
 // (a) act on behalf of a real user via a delegated token (out of
 // scope here) or (b) we add an explicit system-actor row in users
@@ -24,6 +31,8 @@ package api
 import (
 	"context"
 	"net/http"
+
+	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
 )
 
 // CredentialInternalAdapter wraps CredentialHandler.Create + Rotate
@@ -109,7 +118,40 @@ func (h *CredentialInternalAdapter) envelope(w http.ResponseWriter, r *http.Requ
 		replyError(w, http.StatusUnauthorized, "credential mutation requires user attribution (X-Caller-User-Id)")
 		return "", "", false
 	}
+	// ID1: X-Caller-User-Id is attacker-influenceable — an agent inside the
+	// container can reach the sidecar over loopback and set any user id. Before
+	// we trust it for a privileged credential mutation it MUST carry a valid
+	// HMAC signature over (workspace_id, caller_user_id) keyed by a holder of
+	// the workspace-bound internal token. Crucially, the agent-reachable sidecar
+	// hop deliberately does NOT sign agent-supplied caller ids (that would be a
+	// signing oracle — see internal/sidecar/coordinator.go), so an agent's
+	// forged caller id arrives unsigned and is rejected here. Autonomous-agent
+	// credential mutation is therefore unsupported by construction; a future
+	// trusted out-of-container signer could attach a real signature. We re-derive
+	// the MAC from X-Internal-Token (already validated against the master secret
+	// by the internal-auth middleware) and constant-time compare. Missing/invalid
+	// → reject. The DB capability re-derivation below (requireCapabilityOrForbid)
+	// stays as defense-in-depth.
+	if !verifyCallerSignature(r, wsID, callerID) {
+		replyError(w, http.StatusUnauthorized, "caller identity is unsigned or its signature is invalid (X-Caller-Signature)")
+		return "", "", false
+	}
 	return wsID, callerID, true
+}
+
+// verifyCallerSignature checks the X-Caller-Signature header against an
+// HMAC of (workspaceID, callerID) keyed by the internal token the
+// caller authenticated with. The token is read from X-Internal-Token —
+// the internal-auth middleware already proved it is genuine (it
+// re-derives the MAC from the in-memory master), so only a real token
+// holder could have produced a matching signature. workspaceID is the
+// middleware-enforced query workspace, which for a workspace-bound
+// token equals the token's own workspace, so a signature can only be
+// honoured inside the tenant it was minted for.
+func verifyCallerSignature(r *http.Request, workspaceID, callerID string) bool {
+	token := r.Header.Get("X-Internal-Token")
+	sig := r.Header.Get("X-Caller-Signature")
+	return internaltoken.VerifyCaller(token, workspaceID, callerID, sig)
 }
 
 // injectContext stamps the workspace + role + synthetic AuthUser

@@ -26,8 +26,8 @@ import (
 // container by slug. Returns ("", false, nil) when none is found. Used
 // by Server.Start to re-register containers that survived a crewshipd
 // restart with the stats collector.
-func (p *Provider) FindCrewContainer(ctx context.Context, slug string) (string, bool, error) {
-	containerName := p.CrewContainerName(slug)
+func (p *Provider) FindCrewContainer(ctx context.Context, id, slug string) (string, bool, error) {
+	containerName := p.CrewContainerName(id, slug)
 	containers, err := p.client.ContainerList(ctx, container.ListOptions{All: true})
 	if err != nil {
 		return "", false, fmt.Errorf("list containers: %w", err)
@@ -40,6 +40,56 @@ func (p *Provider) FindCrewContainer(ctx context.Context, slug string) (string, 
 		}
 	}
 	return "", false, nil
+}
+
+// checkNoLegacyCrewResources fails when pre-C1 (slug-only) container or
+// home/tools volumes for slug still exist on the daemon. C1 (2026-06 audit)
+// re-keyed crew resources from "<prefix>-{team,home,tools}-<slug>" to also
+// include the globally-unique crew id; provisioning the id-scoped runtime
+// alongside a surviving legacy one would dual-mount the crew's bind mounts and
+// orphan its persistent volumes. The operator must migrate/prune the legacy
+// names first (dev: nuke + reseed). No-op on a fresh post-C1 daemon.
+func (p *Provider) checkNoLegacyCrewResources(ctx context.Context, slug string) error {
+	if slug == "" {
+		return nil
+	}
+	prefix := p.cfg.ContainerPrefix
+	if prefix == "" {
+		prefix = "crewship"
+	}
+	legacyContainer := prefix + "-team-" + slug
+	legacyHome := prefix + "-home-" + slug
+	legacyTools := prefix + "-tools-" + slug
+
+	containers, err := p.client.ContainerList(ctx, container.ListOptions{All: true})
+	if err != nil {
+		return fmt.Errorf("list containers (legacy C1 check): %w", err)
+	}
+	for _, c := range containers {
+		for _, name := range c.Names {
+			if name == "/"+legacyContainer {
+				return fmt.Errorf("legacy slug-scoped container %q exists from before the C1 naming change; remove or migrate it (dev: nuke + reseed) before this crew can provision its id-scoped runtime", legacyContainer)
+			}
+		}
+	}
+
+	// Volume check is best-effort: the container guard above already blocks the
+	// dangerous dual-runtime case. If the daemon can't list volumes, log and
+	// proceed rather than wedge all provisioning.
+	list, err := p.client.VolumeList(ctx, volumeListOptions())
+	if err != nil {
+		p.logger.Warn("legacy C1 volume check skipped: list volumes failed", "error", err)
+		return nil
+	}
+	for _, vol := range list.Volumes {
+		if vol == nil {
+			continue
+		}
+		if vol.Name == legacyHome || vol.Name == legacyTools {
+			return fmt.Errorf("legacy slug-scoped volume %q exists from before the C1 naming change; remove or migrate it (dev: nuke + reseed) before provisioning", vol.Name)
+		}
+	}
+	return nil
 }
 
 // EnsureCrewRuntime creates or starts a Docker container for the given crew.
@@ -79,7 +129,18 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 		}
 	}
 
-	containerName := p.CrewContainerName(team.Slug)
+	containerName := p.CrewContainerName(team.ID, team.Slug)
+
+	// C1 migration guard (CodeRabbit): refuse to provision the new id-scoped
+	// runtime while pre-C1, slug-only resources for this crew still exist on
+	// the daemon. Silently creating fresh "<slug>-<id>" names alongside a
+	// surviving legacy "crewship-team-<slug>" container would point two
+	// runtimes at the same crew bind mounts, and fresh empty home/tools volumes
+	// would strand the agent's persistent home (~/.ssh, tooling). Fail loudly
+	// so an operator migrates/prunes the legacy resources first.
+	if err := p.checkNoLegacyCrewResources(ctx, team.Slug); err != nil {
+		return "", err
+	}
 
 	// Compute the image we WANT to run, mirroring the
 	// CachedImage > Image > default chain used at create time
@@ -264,10 +325,10 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 
 	// Ensure persistent named volumes for home directory and crew tools.
 	if team.Slug != "" {
-		if err := p.ensureVolume(ctx, p.homeVolumeName(team.Slug)); err != nil {
+		if err := p.ensureVolume(ctx, p.homeVolumeName(team.ID, team.Slug)); err != nil {
 			return "", err
 		}
-		if err := p.ensureVolume(ctx, p.toolsVolumeName(team.Slug)); err != nil {
+		if err := p.ensureVolume(ctx, p.toolsVolumeName(team.ID, team.Slug)); err != nil {
 			return "", err
 		}
 	}
@@ -381,7 +442,7 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	// buildMounts below (it errors out otherwise).
 	containerCfg.Entrypoint = []string{"/usr/local/bin/entrypoint.sh"}
 	containerCfg.Cmd = nil
-	crewMounts, err := p.buildMounts(team.Slug, workspacePath, outputPath, crewPath, secretsPath)
+	crewMounts, err := p.buildMounts(team.ID, team.Slug, workspacePath, outputPath, crewPath, secretsPath)
 	if err != nil {
 		return "", err
 	}

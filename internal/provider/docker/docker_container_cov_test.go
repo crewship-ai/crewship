@@ -319,7 +319,7 @@ func covHealthyInspect(image string) string {
 func covExistingList(state string) string {
 	b, _ := json.Marshal([]map[string]any{{
 		"Id":    "old-cid",
-		"Names": []string{"/crewship-team-alpha"},
+		"Names": []string{"/crewship-team-alpha-crew1"},
 		"State": state,
 	}})
 	return string(b)
@@ -369,7 +369,7 @@ func TestFindCrewContainer(t *testing.T) {
 			f := &covRT{listBody: tt.listBody, listStatus: tt.listStatus}
 			p := f.provider(t, covRTConfig(t))
 
-			id, running, err := p.FindCrewContainer(context.Background(), "alpha")
+			id, running, err := p.FindCrewContainer(context.Background(), "crew1", "alpha")
 			if tt.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 					t.Fatalf("error = %v, want contains %q", err, tt.wantErr)
@@ -831,7 +831,7 @@ func TestEnsureCrewRuntime_ExtraMountsAllowlist(t *testing.T) {
 	team := covTeam()
 	team.ExtraMounts = []provider.CrewMount{
 		{Source: "/", Target: "/host"},                                   // must be rejected
-		{Source: "/var/run/docker.sock", Target: "/var/run/docker.sock"}, // allowlisted bind
+		{Source: "/var/run/docker.sock", Target: "/var/run/docker.sock"}, // F3: must be rejected (no longer allowlisted — host-root escape)
 		{Source: "covvol", Target: "/data", Type: "volume"},              // named volume OK
 		{Source: "/etc/shadow", Target: "/secrets-steal", Type: "bind"},  // must be rejected
 	}
@@ -852,8 +852,11 @@ func TestEnsureCrewRuntime_ExtraMountsAllowlist(t *testing.T) {
 	if _, ok := byTarget["/secrets-steal"]; ok {
 		t.Error("unsafe mount source /etc/shadow must be rejected")
 	}
-	if byTarget["/var/run/docker.sock"] != "/var/run/docker.sock" {
-		t.Errorf("docker.sock mount missing: %v", byTarget)
+	// F3 (2026-06 audit): the Docker socket is a host-root escape primitive
+	// and is no longer allowlisted, so it must be dropped like any other
+	// unsafe bind — even though an operator declared it in ExtraMounts.
+	if _, ok := byTarget["/var/run/docker.sock"]; ok {
+		t.Errorf("docker.sock mount must be rejected (F3), got: %v", byTarget)
 	}
 	if byTarget["/data"] != "covvol" || byType["/data"] != "volume" {
 		t.Errorf("named volume mount wrong: source=%q type=%q", byTarget["/data"], byType["/data"])
@@ -938,8 +941,8 @@ func TestEnsureCrewRuntime_DefaultHardening(t *testing.T) {
 	f.mu.Lock()
 	name := f.createNames[len(f.createNames)-1]
 	f.mu.Unlock()
-	if name != "crewship-team-alpha" {
-		t.Errorf("container name = %q, want crewship-team-alpha", name)
+	if name != "crewship-team-alpha-crew1" {
+		t.Errorf("container name = %q, want crewship-team-alpha-crew1", name)
 	}
 }
 

@@ -30,9 +30,9 @@ import (
 	"strings"
 	"time"
 
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/provider"
-	"github.com/docker/docker/client"
 )
 
 // crewNeedsProvision mirrors chatbridge.devcontainerNeedsProvision: a crew
@@ -252,7 +252,7 @@ func (h *ProvisioningHandler) imagePresentLocally(ctx context.Context, ref strin
 	ictx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	if _, err := h.docker.ImageInspect(ictx, ref); err != nil {
-		if client.IsErrNotFound(err) {
+		if cerrdefs.IsNotFound(err) {
 			return false
 		}
 		return true

@@ -65,7 +65,9 @@ func (m *covWPMContainerProvider) Exec(_ context.Context, _ provider.ExecConfig)
 func (m *covWPMContainerProvider) ExecInspect(_ context.Context, _ string) (bool, int, error) {
 	return false, 0, nil
 }
-func (m *covWPMContainerProvider) CrewContainerName(slug string) string { return "crew-" + slug }
+func (m *covWPMContainerProvider) CrewContainerName(_ string, slug string) string {
+	return "crew-" + slug
+}
 func (m *covWPMContainerProvider) CopyToContainer(_ context.Context, _, _ string, _ io.Reader) error {
 	return nil
 }

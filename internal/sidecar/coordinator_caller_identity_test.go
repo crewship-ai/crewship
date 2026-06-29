@@ -14,18 +14,19 @@ import (
 // from an autonomous agent tool call, and the dual-path enforcement
 // collapses to the autonomy_level path for everyone.
 func TestProxyToAPI_PropagatesCallerUserID(t *testing.T) {
-	var seenCaller, seenSource, seenInternal string
+	var seenCaller, seenSource, seenInternal, seenSig string
 	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		seenCaller = r.Header.Get("X-Caller-User-Id")
 		seenSource = r.Header.Get("X-Caller-Source")
 		seenInternal = r.Header.Get("X-Internal-Token")
+		seenSig = r.Header.Get("X-Caller-Signature")
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{}`))
 	}))
 	defer mock.Close()
 
-	srv := newQueryServer(t, &IPCConfig{BaseURL: mock.URL, Token: "tok"}, nil)
+	srv := newQueryServer(t, &IPCConfig{BaseURL: mock.URL, Token: "tok", WorkspaceID: "ws-1"}, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/x", strings.NewReader(`{}`))
 	req.Header.Set("X-Caller-User-Id", "ludmila-id")
@@ -43,6 +44,15 @@ func TestProxyToAPI_PropagatesCallerUserID(t *testing.T) {
 	if seenInternal != "tok" {
 		t.Errorf("X-Internal-Token regression: got %q, want tok", seenInternal)
 	}
+	// ID1: the sidecar must NOT sign the caller id on this hop. The port is
+	// reachable by the (untrusted) agent, which can set any X-Caller-User-Id;
+	// signing it here would make the sidecar a signing oracle and defeat the
+	// backend's X-Caller-Signature gate entirely. The id is still forwarded for
+	// non-privileged attribution, but no signature is attached — so the backend
+	// rejects any privileged credential mutation that arrives through this path.
+	if seenSig != "" {
+		t.Errorf("X-Caller-Signature must NOT be stamped on the agent-reachable hop (signing oracle); got %q", seenSig)
+	}
 }
 
 // TestProxyToAPI_OmitsHeadersWhenAbsent ensures we don't stamp empty
@@ -54,17 +64,18 @@ func TestProxyToAPI_PropagatesCallerUserID(t *testing.T) {
 // that short-circuits proxyToAPI before reaching upstream doesn't
 // let the header-absence assertion pass vacuously.
 func TestProxyToAPI_OmitsHeadersWhenAbsent(t *testing.T) {
-	var hadCaller, hadSource, upstreamReached bool
+	var hadCaller, hadSource, hadSig, upstreamReached bool
 	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		upstreamReached = true
 		_, hadCaller = r.Header["X-Caller-User-Id"]
 		_, hadSource = r.Header["X-Caller-Source"]
+		_, hadSig = r.Header["X-Caller-Signature"]
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{}`))
 	}))
 	defer mock.Close()
 
-	srv := newQueryServer(t, &IPCConfig{BaseURL: mock.URL, Token: "tok"}, nil)
+	srv := newQueryServer(t, &IPCConfig{BaseURL: mock.URL, Token: "tok", WorkspaceID: "ws-1"}, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/x", strings.NewReader(`{}`))
 	w := httptest.NewRecorder()
@@ -79,5 +90,8 @@ func TestProxyToAPI_OmitsHeadersWhenAbsent(t *testing.T) {
 	}
 	if hadSource {
 		t.Error("X-Caller-Source leaked onto outbound when inbound didn't set it")
+	}
+	if hadSig {
+		t.Error("X-Caller-Signature stamped without an inbound caller id — nothing to sign")
 	}
 }

@@ -150,8 +150,11 @@ type ContainerProvider interface {
 	ContainerStats(ctx context.Context, containerID string) (*ContainerMetrics, error)
 	Exec(ctx context.Context, cfg ExecConfig) (*ExecResult, error)
 	ExecInspect(ctx context.Context, execID string) (bool, int, error)
-	// CrewContainerName returns the container name for a given crew slug.
-	CrewContainerName(slug string) string
+	// CrewContainerName returns the container name for a crew. It is keyed by
+	// the globally-unique crew id (not the per-workspace slug alone) so two
+	// tenants with an identically-named crew never collide on a shared daemon
+	// (audit C1). The slug is retained as a human-readable name segment.
+	CrewContainerName(id, slug string) string
 	// CopyToContainer copies a tar archive into the container filesystem at dstPath.
 	CopyToContainer(ctx context.Context, containerID string, dstPath string, content io.Reader) error
 }
@@ -191,13 +194,13 @@ type CrewContainerLookup interface {
 	// the caller can decide whether to start it). When no container is
 	// found, returns ("", false, nil) — only error path is for transport
 	// failures talking to the runtime.
-	FindCrewContainer(ctx context.Context, slug string) (containerID string, running bool, err error)
+	FindCrewContainer(ctx context.Context, id, slug string) (containerID string, running bool, err error)
 }
 
 // VolumeManager is an optional interface for managing persistent volumes
 // associated with crew containers (home directories, tool storage).
 type VolumeManager interface {
-	RemoveCrewVolumes(ctx context.Context, slug string) error
+	RemoveCrewVolumes(ctx context.Context, id, slug string) error
 }
 
 // InteractiveExecConfig configures an interactive (TTY) exec session.

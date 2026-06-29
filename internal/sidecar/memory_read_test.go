@@ -89,11 +89,31 @@ func TestHandleMemoryRead_Subdir(t *testing.T) {
 
 func TestHandleMemoryRead_MissingFile_404(t *testing.T) {
 	s, _ := newReadTestServer(t)
-	req := httptest.NewRequest("GET", "http://localhost/memory/read?file=nope.md", nil)
+	// A whitelisted file that hasn't been written yet → 404. (Using a
+	// non-whitelisted name like "nope.md" now correctly yields 400 — see
+	// TestHandleMemoryRead_NonWhitelistedFile_400.)
+	req := httptest.NewRequest("GET", "http://localhost/memory/read?file=AGENT.md", nil)
 	rr := httptest.NewRecorder()
 	s.handleMemoryRead(rr, req)
 	if rr.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", rr.Code)
+	}
+}
+
+// TestHandleMemoryRead_NonWhitelistedFile_400 locks the read-side filename
+// whitelist (finding MEM, 2026-06 audit): the read surface is no more
+// permissive than the write surface, so a file name outside the allowed set
+// (AGENT.md / CREW.md / pins.md / daily/<name>.md) is rejected with 400 before
+// any filesystem access.
+func TestHandleMemoryRead_NonWhitelistedFile_400(t *testing.T) {
+	s, base := newReadTestServer(t)
+	// Even if the file exists on disk, a non-whitelisted name is refused.
+	seedFile(t, base, "secrets.md", "do not read me")
+	req := httptest.NewRequest("GET", "http://localhost/memory/read?file=secrets.md", nil)
+	rr := httptest.NewRecorder()
+	s.handleMemoryRead(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400 for non-whitelisted file", rr.Code)
 	}
 }
 

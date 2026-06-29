@@ -63,7 +63,7 @@ func (f *fakeContainer) ContainerStats(_ context.Context, _ string) (*provider.C
 func (f *fakeContainer) ExecInspect(_ context.Context, _ string) (bool, int, error) {
 	return true, 0, nil
 }
-func (f *fakeContainer) CrewContainerName(slug string) string { return "test-" + slug }
+func (f *fakeContainer) CrewContainerName(_ string, slug string) string { return "test-" + slug }
 func (f *fakeContainer) CopyToContainer(_ context.Context, _ string, _ string, _ io.Reader) error {
 	return nil
 }

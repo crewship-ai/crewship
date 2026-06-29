@@ -3,7 +3,9 @@ package orchestrator
 import (
 	"context"
 	"log/slog"
+	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -172,6 +174,22 @@ type Orchestrator struct {
 	mu             sync.RWMutex
 	accepting      bool
 	crews          map[string]*crewState
+
+	// runSem bounds concurrent agent-run exec fan-outs. RunAgent acquires a
+	// token before its container.Exec fan-out (sidecar start, the mkdir/setup
+	// pass, and the heavy agent CLI exec) and releases it on every exit path.
+	// Without it, N concurrent RunAgent calls translate into N simultaneous
+	// heavy execs against a single Docker daemon — finding P1 (HIGH) in the
+	// 2026-06 security audit. The lighter git-diff path already had a cap
+	// (gitDiffSem, internal/server/routes_container.go); this is the
+	// ~15×-heavier run path's equivalent. Capacity is runSemCap, configurable
+	// via CREWSHIP_MAX_CONCURRENT_RUNS. The token is acquired AFTER the
+	// `accepting` drain check (so a draining orchestrator rejects fast without
+	// consuming a slot) and with ctx-cancellation in the acquire (so a stopped
+	// or timed-out run never blocks forever on a full pool — no deadlock with
+	// drain).
+	runSem    chan struct{}
+	runSemCap int
 
 	// tmuxCache memoizes whether each container has tmux installed. Avoids a
 	// `command -v tmux` exec on every agent run (was ~50ms per call). Key is
@@ -790,11 +808,49 @@ const postToolCallSemCap = 64
 // statistically-acceptable loss policy as the behavior observer.
 const skillInvocationSemCap = 64
 
+// defaultRunSemCap bounds concurrent agent-run exec fan-outs when the
+// CREWSHIP_MAX_CONCURRENT_RUNS env override is unset or invalid. The run path
+// is far heavier than the git-diff path (gitDiffSem=4): each run fans out a
+// sidecar start, ~6 setup execs, and a long-lived agent CLI exec, all against
+// one Docker daemon. 8 trades a little queueing latency under burst for
+// protection against daemon saturation / host OOM (finding P1).
+const defaultRunSemCap = 8
+
+// resolveRunSemCap reads CREWSHIP_MAX_CONCURRENT_RUNS, falling back to
+// defaultRunSemCap when unset, non-numeric, or non-positive.
+func resolveRunSemCap() int {
+	if v := strings.TrimSpace(os.Getenv("CREWSHIP_MAX_CONCURRENT_RUNS")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return defaultRunSemCap
+}
+
+// acquireRunSlot blocks until a run-concurrency token is free or ctx is
+// cancelled. The returned release func must be called exactly once on every
+// exit path (it is idempotent). A nil runSem (constructed outside New) yields
+// an immediate no-op release so the run path never deadlocks on an
+// uninitialised orchestrator.
+func (o *Orchestrator) acquireRunSlot(ctx context.Context) (func(), error) {
+	if o.runSem == nil {
+		return func() {}, nil
+	}
+	select {
+	case o.runSem <- struct{}{}:
+		var once sync.Once
+		return func() { once.Do(func() { <-o.runSem }) }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
 func New(
 	container provider.ContainerProvider,
 	state provider.StateProvider,
 	logger *slog.Logger,
 ) *Orchestrator {
+	runSemCap := resolveRunSemCap()
 	return &Orchestrator{
 		container:          container,
 		state:              state,
@@ -809,6 +865,8 @@ func New(
 		snapshotInFlight:   make(map[string]*sync.Mutex),
 		postToolCallSem:    make(chan struct{}, postToolCallSemCap),
 		skillInvocationSem: make(chan struct{}, skillInvocationSemCap),
+		runSem:             make(chan struct{}, runSemCap),
+		runSemCap:          runSemCap,
 	}
 }
 

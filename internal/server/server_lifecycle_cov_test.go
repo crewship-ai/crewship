@@ -101,7 +101,7 @@ type covLookupContainer struct {
 	mockContainer
 }
 
-func (c *covLookupContainer) FindCrewContainer(_ context.Context, slug string) (string, bool, error) {
+func (c *covLookupContainer) FindCrewContainer(_ context.Context, _ string, slug string) (string, bool, error) {
 	switch slug {
 	case "run-slug":
 		return "ctr-running", true, nil

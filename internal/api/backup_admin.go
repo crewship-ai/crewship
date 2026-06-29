@@ -292,7 +292,7 @@ func (h *BackupHandler) SelfTest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	containerID := h.resolveCrewContainerName()(crewSlug)
+	containerID := h.resolveCrewContainerName()(crewID, crewSlug)
 	result, err := backup.BackupSelfTest(ctx, h.dockerOps, backup.SelfTestOpts{
 		ContainerID: containerID,
 		Crew: backup.CrewTarget{

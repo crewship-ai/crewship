@@ -75,7 +75,7 @@ func (minimalContainer) Exec(_ context.Context, _ provider.ExecConfig) (*provide
 func (minimalContainer) ExecInspect(_ context.Context, _ string) (bool, int, error) {
 	return false, 0, nil
 }
-func (minimalContainer) CrewContainerName(slug string) string {
+func (minimalContainer) CrewContainerName(_ string, slug string) string {
 	return "crewship-team-" + slug
 }
 func (minimalContainer) CopyToContainer(_ context.Context, _, _ string, _ io.Reader) error {

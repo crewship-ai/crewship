@@ -72,8 +72,8 @@ func TestResolveCrewContainerName_Default(t *testing.T) {
 	// prefix so old setups + tests without a provider still work.
 	h := &BackupHandler{}
 	fn := h.resolveCrewContainerName()
-	if got := fn("my-crew"); got != "crewship-team-my-crew" {
-		t.Errorf("default prefix: got %q, want crewship-team-my-crew", got)
+	if got := fn("ckcrew1", "my-crew"); got != "crewship-team-my-crew-ckcrew1" {
+		t.Errorf("default prefix: got %q, want crewship-team-my-crew-ckcrew1", got)
 	}
 }
 
@@ -82,9 +82,9 @@ func TestResolveCrewContainerName_Injected(t *testing.T) {
 	// what fixes multi-instance setups; the router wires the active
 	// ContainerProvider's CrewContainerName method).
 	h := &BackupHandler{}
-	h.SetCrewContainerName(func(slug string) string { return "crewship-3-team-" + slug })
+	h.SetCrewContainerName(func(_, slug string) string { return "crewship-3-team-" + slug })
 	fn := h.resolveCrewContainerName()
-	if got := fn("my-crew"); got != "crewship-3-team-my-crew" {
+	if got := fn("ckcrew1", "my-crew"); got != "crewship-3-team-my-crew" {
 		t.Errorf("injected prefix: got %q, want crewship-3-team-my-crew", got)
 	}
 }

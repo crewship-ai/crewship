@@ -140,7 +140,9 @@ func (s *snapshotStubContainer) ContainerStats(_ context.Context, _ string) (*pr
 func (s *snapshotStubContainer) ExecInspect(_ context.Context, _ string) (bool, int, error) {
 	return false, 0, nil
 }
-func (s *snapshotStubContainer) CrewContainerName(slug string) string { return "test-" + slug }
+func (s *snapshotStubContainer) CrewContainerName(_ string, slug string) string {
+	return "test-" + slug
+}
 func (s *snapshotStubContainer) CopyToContainer(_ context.Context, _, _ string, _ io.Reader) error {
 	return nil
 }

@@ -42,9 +42,10 @@ type CreateOptions struct {
 	// the source instance at backup time. Typically produced by the
 	// migration subsystem; caller passes it through unchanged.
 	SchemaMigrationVersions []int
-	// CrewContainerName maps a crew slug to a Docker container name
-	// (the provider owns this). Nil is valid for tests.
-	CrewContainerName func(slug string) string
+	// CrewContainerName maps a crew (id, slug) to a Docker container name
+	// (the provider owns this). The id is required so names stay globally
+	// unique across tenants (audit C1). Nil is valid for tests.
+	CrewContainerName func(id, slug string) string
 	// DockerOps executes pause/unpause/CopyFrom against the daemon.
 	DockerOps DockerOps
 	// Storage overrides the file-system operations used for bundle

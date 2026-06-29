@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 )
 
@@ -38,31 +37,18 @@ type SSEEvent struct {
 // Reconnect on transient failure is the caller's responsibility — wrap this
 // in a retry loop with exponential backoff if you want resumption.
 func (c *Client) StreamSSE(ctx context.Context, path string, lastEventID string, onEvent func(SSEEvent) error) error {
-	u, err := url.Parse(c.BaseURL + path)
+	// Build the request through NewRequest so workspace injection AND the
+	// issue #571 token-host guard run here too — the SSE path used to set the
+	// bearer by hand, which bypassed that guard and leaked the token to a
+	// mismatched --server/CREWSHIP_SERVER host (CLI1). NewRequest is also
+	// context-bound, so a cancelled follow no longer blocks on the
+	// workspace-resolution preflight before the connection is opened.
+	req, err := c.NewRequest(ctx, "GET", path, nil)
 	if err != nil {
-		return fmt.Errorf("parse URL: %w", err)
-	}
-	// Use a context-bound clone so the workspace-resolution preflight
-	// (which may issue an HTTP GET) honours the StreamSSE caller's
-	// cancellation. Without this, a cancelled follow could still block on
-	// that lookup before the SSE connection is even opened.
-	if wsID := c.WithContext(ctx).GetWorkspaceID(); wsID != "" {
-		q := u.Query()
-		if q.Get("workspace_id") == "" {
-			q.Set("workspace_id", wsID)
-			u.RawQuery = q.Encode()
-		}
-	}
-
-	req, err := http.NewRequestWithContext(ctx, "GET", u.String(), nil)
-	if err != nil {
-		return fmt.Errorf("create request: %w", err)
+		return err
 	}
 	req.Header.Set("Accept", "text/event-stream")
 	req.Header.Set("Cache-Control", "no-cache")
-	if c.Token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.Token)
-	}
 	if lastEventID != "" {
 		req.Header.Set("Last-Event-ID", lastEventID)
 	}

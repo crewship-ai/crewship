@@ -53,7 +53,7 @@ func (m *mockContainerProvider) Exec(_ context.Context, cfg provider.ExecConfig)
 func (m *mockContainerProvider) ExecInspect(_ context.Context, _ string) (bool, int, error) {
 	return m.execInspectOK, 0, nil
 }
-func (m *mockContainerProvider) CrewContainerName(slug string) string {
+func (m *mockContainerProvider) CrewContainerName(_ string, slug string) string {
 	if m.containerName != "" {
 		return m.containerName
 	}
@@ -63,7 +63,7 @@ func (m *mockContainerProvider) CopyToContainer(_ context.Context, _, _ string, 
 	return nil
 }
 func (m *mockContainerProvider) HostAddress() string { return m.hostAddr }
-func (m *mockContainerProvider) RemoveCrewVolumes(_ context.Context, _ string) error {
+func (m *mockContainerProvider) RemoveCrewVolumes(_ context.Context, _ string, _ string) error {
 	return nil
 }
 func (m *mockContainerProvider) ExecInteractive(_ context.Context, _ provider.InteractiveExecConfig) (*provider.InteractiveExecResult, error) {
@@ -105,7 +105,7 @@ func TestMockContainerProvider_BasicLifecycle(t *testing.T) {
 	if st.ID != id {
 		t.Errorf("status ID mismatch")
 	}
-	if name := m.CrewContainerName("alpha"); name != "crewship-team-alpha" {
+	if name := m.CrewContainerName("crew1", "alpha"); name != "crewship-team-alpha" {
 		t.Errorf("name = %q", name)
 	}
 	if got := m.HostAddress(); got != "host.docker.internal" {

@@ -95,7 +95,7 @@ func TestIsNotFoundErr_Classification(t *testing.T) {
 
 func TestLoadCrewTarget_NotFound(t *testing.T) {
 	db := openCollectorTestDB(t)
-	_, err := LoadCrewTarget(context.Background(), db, "missing", func(s string) string { return "n-" + s })
+	_, err := LoadCrewTarget(context.Background(), db, "missing", func(_, s string) string { return "n-" + s })
 	if err == nil {
 		t.Fatal("expected error for missing crew")
 	}
@@ -133,7 +133,7 @@ func TestLoadCrewTarget_HappyPath_PopulatesEverything(t *testing.T) {
 		t.Fatalf("seed agents: %v", err)
 	}
 
-	wt, err := LoadCrewTarget(context.Background(), db, "c1", func(slug string) string {
+	wt, err := LoadCrewTarget(context.Background(), db, "c1", func(_, slug string) string {
 		return "crewship-team-" + slug
 	})
 	if err != nil {

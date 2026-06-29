@@ -46,7 +46,12 @@ func openTestDB(t *testing.T) *sql.DB {
 		// on shutdown anyway.
 		path = filepath.Join(os.TempDir(), fmt.Sprintf("test-auth-lifecycle-%d-%d.db", os.Getpid(), atomic.AddInt64(&testDBCounter, 1)))
 	}
-	db, err := sql.Open("sqlite", "file:"+path+"?_foreign_keys=on&_journal=WAL")
+	// busy_timeout matches production (internal/database/database.go) so a
+	// transient writer lock during concurrent boot (e.g. recoverOrphanedRuns
+	// writing while a test polls a row) retries instead of returning an
+	// immediate SQLITE_BUSY — the lifecycle boot tests are otherwise flaky
+	// under slow/contended CI runners.
+	db, err := sql.Open("sqlite", "file:"+path+"?_foreign_keys=on&_journal=WAL&_pragma=busy_timeout(5000)")
 	if err != nil {
 		if t != nil {
 			t.Fatalf("open: %v", err)

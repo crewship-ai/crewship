@@ -267,51 +267,105 @@ type FailureGroup struct {
 	RunIDs       []string `json:"run_ids"`
 }
 
+// maxFailureRunIDSample caps how many run IDs FailureGroups materializes per
+// fingerprint group. The full Count is reported (a cheap SQL COUNT(*)), but
+// the caller only needs a bounded, most-recent sample to drive bulk replay —
+// loading every id of a fingerprint that has accreted thousands of failures
+// would make memory + the scan O(total failed runs) instead of O(limit).
+const maxFailureRunIDSample = 100
+
 // FailureGroups buckets a workspace's failed runs by error_fingerprint,
 // newest first. Backs the errors view + bulk replay: the caller picks a
 // group and replays its RunIDs after shipping a fix.
+//
+// The grouping is pushed into SQL (GROUP BY error_fingerprint ... LIMIT) so
+// the number of groups returned — and the work to produce them — is bounded
+// by the caller's limit, not the total failed-run count. Per group we then
+// pull only the most-recent maxFailureRunIDSample run IDs (a windowed query)
+// rather than accumulating every id in memory. Both steps resolve through
+// idx_pipeline_runs_failure_groups (migration v127).
 func (s *RunStore) FailureGroups(ctx context.Context, workspaceID string, limit int) ([]FailureGroup, error) {
-	if limit <= 0 || limit > 200 {
+	const maxFailureGroups = 200
+	if limit <= 0 || limit > maxFailureGroups {
 		limit = 50
 	}
+
+	// Step 1: the bounded set of fingerprint groups, newest-first by the
+	// most recent failure in each. SQLite's "bare column" rule means that
+	// with a single MAX() aggregate, the bare pipeline_slug / failed_at_step
+	// / error_message columns take their values from the row holding that
+	// MAX(started_at) — i.e. the newest run in the group — which is exactly
+	// the representative sample we want for the view.
 	rows, err := s.db.QueryContext(ctx, `
-SELECT COALESCE(error_fingerprint,''), COALESCE(pipeline_slug,''),
-       COALESCE(failed_at_step,''), COALESCE(error_message,''), id
+SELECT error_fingerprint,
+       COUNT(*) AS cnt,
+       COALESCE(pipeline_slug,''),
+       COALESCE(failed_at_step,''),
+       COALESCE(error_message,''),
+       MAX(started_at)
 FROM pipeline_runs
 WHERE workspace_id = ? AND status = 'failed' AND error_fingerprint IS NOT NULL
-ORDER BY started_at DESC`, workspaceID)
+GROUP BY error_fingerprint
+ORDER BY MAX(started_at) DESC
+LIMIT ?`, workspaceID, limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	byFP := map[string]*FailureGroup{}
-	var order []string
+	// Allocate against the constant upper bound (limit is already clamped to
+	// [1, maxFailureGroups] above). Using the constant rather than the
+	// user-derived `limit` as the capacity keeps the allocation provably
+	// bounded and clears the CodeQL "excessive size" taint on a request value.
+	out := make([]FailureGroup, 0, maxFailureGroups)
 	for rows.Next() {
-		var fp, slug, step, msg, id string
-		if err := rows.Scan(&fp, &slug, &step, &msg, &id); err != nil {
+		var g FailureGroup
+		var latest string
+		if err := rows.Scan(&g.Fingerprint, &g.Count, &g.PipelineSlug, &g.FailedAtStep, &g.SampleError, &latest); err != nil {
 			return nil, err
 		}
-		g, ok := byFP[fp]
-		if !ok {
-			g = &FailureGroup{Fingerprint: fp, PipelineSlug: slug, FailedAtStep: step, SampleError: msg}
-			byFP[fp] = g
-			order = append(order, fp)
-		}
-		g.Count++
-		g.RunIDs = append(g.RunIDs, id)
+		out = append(out, g)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	out := make([]FailureGroup, 0, len(order))
-	for _, fp := range order {
-		out = append(out, *byFP[fp])
-		if len(out) >= limit {
-			break
+
+	// Step 2: for each returned group, the most-recent N run IDs only. A
+	// windowed (ROW_NUMBER) query keeps the per-fingerprint sample bounded
+	// at maxFailureRunIDSample regardless of how many runs share the
+	// fingerprint, so the in-memory slice never tracks the total.
+	for i := range out {
+		ids, err := s.sampleFailureRunIDs(ctx, workspaceID, out[i].Fingerprint, maxFailureRunIDSample)
+		if err != nil {
+			return nil, err
 		}
+		out[i].RunIDs = ids
 	}
 	return out, nil
+}
+
+// sampleFailureRunIDs returns at most n most-recent failed run IDs for one
+// fingerprint in a workspace. Used by FailureGroups so the run-id sample is
+// bounded per group rather than accumulating every failed run's id.
+func (s *RunStore) sampleFailureRunIDs(ctx context.Context, workspaceID, fingerprint string, n int) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id FROM pipeline_runs
+WHERE workspace_id = ? AND status = 'failed' AND error_fingerprint = ?
+ORDER BY started_at DESC
+LIMIT ?`, workspaceID, fingerprint, n)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	ids := make([]string, 0, n)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 // fingerprintVolatile strips run-specific noise (ids, hex blobs, numbers,

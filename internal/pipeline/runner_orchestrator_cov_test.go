@@ -96,7 +96,9 @@ func (m *orchCovContainer) ExecInspect(_ context.Context, _ string) (bool, int, 
 func (m *orchCovContainer) ContainerStats(_ context.Context, _ string) (*provider.ContainerMetrics, error) {
 	return nil, nil
 }
-func (m *orchCovContainer) CrewContainerName(slug string) string { return "crewship-team-" + slug }
+func (m *orchCovContainer) CrewContainerName(_ string, slug string) string {
+	return "crewship-team-" + slug
+}
 func (m *orchCovContainer) CopyToContainer(_ context.Context, _ string, _ string, _ io.Reader) error {
 	return nil
 }

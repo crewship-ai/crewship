@@ -352,10 +352,17 @@ func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...Router
 
 	r.registerRoutes()
 
+	// Bound the request body on the public API surface (P3). The cap
+	// wraps the mux beneath the rate limiters so it applies to every
+	// auth/general/cred-test route, while internal sidecar IPC — which
+	// routes straight to r.mux in routeWithRateLimiting and may carry
+	// larger trusted payloads — is left to its own per-handler caps.
+	capped := BodyCap(maxAPIBodyBytes)(r.mux)
+
 	// Pre-wrap mux with rate limiters (once, not per-request)
-	r.authRateLimitedMux = NewRateLimiter(10).Middleware(r.mux)     // 10 req/min per IP
-	r.apiRateLimitedMux = NewRateLimiter(120).Middleware(r.mux)     // 120 req/min per IP
-	r.credTestRateLimitedMux = NewRateLimiter(60).Middleware(r.mux) // 60 req/min per IP — tighter on /credentials/test to limit its use as a credential-validation oracle (a tenant should never need 60 manual test clicks per minute)
+	r.authRateLimitedMux = NewRateLimiter(10).Middleware(capped)     // 10 req/min per IP
+	r.apiRateLimitedMux = NewRateLimiter(120).Middleware(capped)     // 120 req/min per IP
+	r.credTestRateLimitedMux = NewRateLimiter(60).Middleware(capped) // 60 req/min per IP — tighter on /credentials/test to limit its use as a credential-validation oracle (a tenant should never need 60 manual test clicks per minute)
 
 	return r, nil
 }

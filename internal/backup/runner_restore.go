@@ -30,7 +30,7 @@ type RestoreOptions struct {
 	AsCrew       string // optional slug override for crew scope
 	Actor        Actor
 	DockerOps    DockerOps
-	ContainerFor func(slug string) string // map crew slug -> container ID
+	ContainerFor func(id, slug string) string // map crew (id, slug) -> container ID
 	// DryRun, when true, runs every validation (checksum, schema-skew,
 	// decrypt, payload walk) but commits no DB writes and performs no
 	// docker CopyTo. RestoreResult reports what WOULD have happened.
@@ -360,7 +360,7 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 			if !c.WorkspaceIncluded && !c.MemoryIncluded && !c.SystemIncluded {
 				continue
 			}
-			containerID := opts.ContainerFor(c.Slug)
+			containerID := opts.ContainerFor(c.ID, c.Slug)
 			if containerID == "" {
 				continue
 			}
@@ -378,7 +378,7 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 				// already restored above). Skip silently.
 				continue
 			}
-			containerID := opts.ContainerFor(c.Slug)
+			containerID := opts.ContainerFor(c.ID, c.Slug)
 			if containerID == "" {
 				continue
 			}

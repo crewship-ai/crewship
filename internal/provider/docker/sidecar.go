@@ -61,6 +61,17 @@ import (
 // error path can name "image drift" specifically.
 const sidecarSpecHashLabel = "crewship.svc.spec_hash"
 
+// Default resource caps applied to every crew service (sidecar) container
+// (audit F6). Sidecars run untrusted, tenant-declared images on the shared
+// host, so an uncapped one is a host-wide DoS vector. These are deliberately
+// smaller than the agent-runtime caps (8 GiB / 2 CPU) — typical service
+// images (redis, postgres, mariadb, mongo, rabbitmq, nats, qdrant) sit well
+// under 2 GiB / 1 CPU at steady state — while still bounding a runaway.
+const (
+	sidecarMemoryBytes = int64(2048) * 1024 * 1024 // 2 GiB
+	sidecarNanoCPUs    = int64(1 * 1e9)            // 1.0 CPU
+)
+
 // computeSidecarSpecHash returns a SHA-256 of the fields that, when
 // changed, require recreating the container. Image is intentionally
 // excluded because it's checked + reported separately upstream.
@@ -363,12 +374,23 @@ func (p *Provider) ensureSidecar(ctx context.Context, crewSlug string, svc *prov
 	// images still need CHOWN/SETUID for entrypoint user-switching, and
 	// the audit's design note (notes/sidecar-zero-hardening.md) calls
 	// for a separate per-image test matrix before tightening further.
+	//
+	// Audit F6 (MED): the baseline above capped process count but left
+	// Memory and NanoCPUs at Docker's default of *unlimited*. A single
+	// crew's redis/postgres/etc. could therefore balloon and exhaust the
+	// shared host's RAM/CPU, DoSing every co-resident tenant on the daemon.
+	// Mirror the agent-runtime caps (docker_container.go) with a smaller
+	// default that comfortably fits typical service images (redis,
+	// postgres, mariadb, mongo, rabbitmq, nats, qdrant) while bounding a
+	// runaway container.
 	pidsLimit := int64(512)
 	hostCfg := &container.HostConfig{
 		Mounts:        mounts,
 		RestartPolicy: container.RestartPolicy{Name: container.RestartPolicyOnFailure, MaximumRetryCount: 3},
 		SecurityOpt:   []string{"no-new-privileges:true"},
 		Resources: container.Resources{
+			Memory:    sidecarMemoryBytes,
+			NanoCPUs:  sidecarNanoCPUs,
 			PidsLimit: &pidsLimit,
 		},
 	}

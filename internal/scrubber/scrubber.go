@@ -240,6 +240,24 @@ func (s *Scrubber) scrubGeneric(input string, re *regexp.Regexp) string {
 	})
 }
 
+// matchBounds returns the [start,end) byte ranges of every pattern match found
+// in input, across all registered patterns. It is used by StreamScrubber to
+// avoid cutting an emit boundary through a complete credential match. Matching
+// is done on the raw input (not zero-width-stripped) since callers only need
+// boundary positions, not the redacted form.
+func (s *Scrubber) matchBounds(input string) [][2]int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var out [][2]int
+	for _, p := range s.patterns {
+		for _, loc := range p.re.FindAllStringIndex(input, -1) {
+			out = append(out, [2]int{loc[0], loc[1]})
+		}
+	}
+	return out
+}
+
 // ContainsSecret returns true if the input contains any known credential pattern.
 // Like Scrub, this matches against the zero-width-stripped form so the
 // detector and the redactor agree on whether a string is sensitive.

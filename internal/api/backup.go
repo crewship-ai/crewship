@@ -37,13 +37,15 @@ type BackupHandler struct {
 	// future binaries can report what produced each bundle. Injected by
 	// the router from main's build-info; empty string when unknown.
 	crewshipVersion string
-	// crewContainerName maps a crew slug to its Docker container name.
+	// crewContainerName maps a crew (id, slug) to its Docker container name.
 	// Injected by the router from the active ContainerProvider so the
 	// per-instance prefix (e.g. "crewship-3-team-" on instance 3) is
 	// honored — the previous hardcoded "crewship-team-" prefix broke
-	// every non-default instance. Falls back to the hardcoded prefix
-	// when nil so unit tests + early-init code still build.
-	crewContainerName func(slug string) string
+	// every non-default instance. The crew id is required (not just the
+	// slug) so names stay globally unique across tenants on a shared
+	// daemon (audit C1). Falls back to the hardcoded prefix when nil so
+	// unit tests + early-init code still build.
+	crewContainerName func(id, slug string) string
 	// journal is the workspace event emitter. WriteAuditLog dual-emits
 	// audit.entity_* entries when this is non-nil so backup admin
 	// actions (create / delete / unlock / rotate / download) surface in
@@ -76,7 +78,7 @@ func (h *BackupHandler) SetJournal(j journal.Emitter) {
 // known. Without this, multi-instance setups (crewship_1, _2, _3) would
 // all collide on "crewship-team-<slug>" and backups would try to pause
 // containers that don't exist with that name on the current instance.
-func (h *BackupHandler) SetCrewContainerName(fn func(slug string) string) {
+func (h *BackupHandler) SetCrewContainerName(fn func(id, slug string) string) {
 	h.crewContainerName = fn
 }
 
@@ -640,11 +642,17 @@ func statusForBackupError(err error) int {
 // default "crewship-team-" prefix only when no provider is wired —
 // keeps unit tests + early-init code paths building without forcing
 // every test to construct a provider stub.
-func (h *BackupHandler) resolveCrewContainerName() func(slug string) string {
+func (h *BackupHandler) resolveCrewContainerName() func(id, slug string) string {
 	if h.crewContainerName != nil {
 		return h.crewContainerName
 	}
-	return func(slug string) string { return "crewship-team-" + slug }
+	return func(id, slug string) string {
+		name := "crewship-team-"
+		if slug != "" {
+			name += slug + "-"
+		}
+		return name + id
+	}
 }
 
 // selfTestRequest is the JSON body of POST /api/v1/admin/backups/self-test.

@@ -392,13 +392,13 @@ func TestRemoveCrewVolumes_FakeAPI(t *testing.T) {
 	defer cleanup()
 
 	p.cfg.ContainerPrefix = "crewship"
-	if err := p.RemoveCrewVolumes(context.Background(), "alpha"); err != nil {
+	if err := p.RemoveCrewVolumes(context.Background(), "crew1", "alpha"); err != nil {
 		t.Fatalf("RemoveCrewVolumes: %v", err)
 	}
 	if len(deletes) != 2 {
 		t.Fatalf("expected 2 volume deletes, got %d (%v)", len(deletes), deletes)
 	}
-	want := map[string]bool{"crewship-home-alpha": true, "crewship-tools-alpha": true}
+	want := map[string]bool{"crewship-home-alpha-crew1": true, "crewship-tools-alpha-crew1": true}
 	for _, d := range deletes {
 		if !want[d] {
 			t.Errorf("unexpected volume delete %q", d)
@@ -416,7 +416,7 @@ func TestRemoveCrewVolumes_FailureIsNonFatal(t *testing.T) {
 	})
 	defer cleanup()
 
-	if err := p.RemoveCrewVolumes(context.Background(), "alpha"); err != nil {
+	if err := p.RemoveCrewVolumes(context.Background(), "crew1", "alpha"); err != nil {
 		t.Errorf("RemoveCrewVolumes should not propagate per-volume errors: %v", err)
 	}
 }

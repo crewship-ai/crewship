@@ -64,7 +64,7 @@ func (c *captureContainer) ExecInspect(_ context.Context, _ string) (bool, int, 
 func (c *captureContainer) ContainerStats(_ context.Context, _ string) (*provider.ContainerMetrics, error) {
 	return nil, nil
 }
-func (c *captureContainer) CrewContainerName(slug string) string {
+func (c *captureContainer) CrewContainerName(_ string, slug string) string {
 	return "crewship-team-" + slug
 }
 func (c *captureContainer) CopyToContainer(_ context.Context, _ string, _ string, _ io.Reader) error {

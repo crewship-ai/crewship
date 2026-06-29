@@ -168,7 +168,7 @@ func (f *failContainer) ExecInspect(_ context.Context, _ string) (bool, int, err
 func (f *failContainer) ContainerStats(_ context.Context, _ string) (*provider.ContainerMetrics, error) {
 	return nil, fmt.Errorf("stats unavailable")
 }
-func (f *failContainer) CrewContainerName(slug string) string {
+func (f *failContainer) CrewContainerName(_ string, slug string) string {
 	return "crewship-team-" + slug
 }
 func (f *failContainer) CopyToContainer(_ context.Context, _ string, _ string, _ io.Reader) error {

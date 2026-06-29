@@ -137,3 +137,52 @@ func TestIsWorkspaceToken(t *testing.T) {
 		t.Error("prefix without separator misclassified")
 	}
 }
+
+func TestSignCaller_RoundTripAndBinding(t *testing.T) {
+	t.Parallel()
+	tok := DeriveWorkspaceToken("master-secret", "ws_123")
+	sig := SignCaller(tok, "ws_123", "user_abc")
+	if sig == "" {
+		t.Fatal("expected non-empty signature")
+	}
+	if !VerifyCaller(tok, "ws_123", "user_abc", sig) {
+		t.Error("valid signature did not verify")
+	}
+	// Wrong caller id, wrong workspace, wrong key, and tampered sig all fail.
+	if VerifyCaller(tok, "ws_123", "user_other", sig) {
+		t.Error("signature verified for a different caller id")
+	}
+	if VerifyCaller(tok, "ws_other", "user_abc", sig) {
+		t.Error("signature verified for a different workspace")
+	}
+	if VerifyCaller("other-token", "ws_123", "user_abc", sig) {
+		t.Error("signature verified under a different key")
+	}
+	if VerifyCaller(tok, "ws_123", "user_abc", sig+"00") {
+		t.Error("tampered signature verified")
+	}
+}
+
+func TestSignCaller_EmptyInputsFailClosed(t *testing.T) {
+	t.Parallel()
+	if SignCaller("", "ws", "u") != "" || SignCaller("tok", "", "u") != "" || SignCaller("tok", "ws", "") != "" {
+		t.Error("SignCaller must return empty on any empty input")
+	}
+	// Empty signature, empty token, or empty ids never verify.
+	if VerifyCaller("tok", "ws", "u", "") {
+		t.Error("empty signature must not verify")
+	}
+	if VerifyCaller("", "ws", "u", "deadbeef") {
+		t.Error("empty token must not verify")
+	}
+}
+
+func TestSignCaller_DomainSeparatedFromWorkspaceMAC(t *testing.T) {
+	t.Parallel()
+	// The caller-identity HMAC must not collide with the workspace-
+	// binding HMAC even over the same key material + workspace id.
+	tok := "shared-key"
+	if SignCaller(tok, "ws_x", "ws_x") == mac(tok, "ws_x") {
+		t.Error("caller-identity MAC collides with workspace-binding MAC (missing domain separation)")
+	}
+}

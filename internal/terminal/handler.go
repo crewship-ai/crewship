@@ -196,7 +196,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Ensure container is running (start if needed).
-	containerName := h.container.CrewContainerName(actualSlug)
+	containerName := h.container.CrewContainerName(init.CrewID, actualSlug)
 	status, err := h.container.ContainerStatus(r.Context(), containerName)
 	if err != nil || status.State != "running" {
 		h.logger.Info("terminal: starting container", "crew_slug", actualSlug)

@@ -60,7 +60,7 @@ exit 0`)
 func TestEnsureCrewRuntimeExistingRunning(t *testing.T) {
 	fake := installFakeContainer(t, `
 case "$1" in
-  list) echo '[{"status":"running","configuration":{"id":"crewship-team-eng"}}]'; exit 0;;
+  list) echo '[{"status":"running","configuration":{"id":"crewship-team-eng-crew1"}}]'; exit 0;;
 esac
 exit 0`)
 	p := newTestProvider(Config{OutputBasePath: t.TempDir()})
@@ -69,8 +69,8 @@ exit 0`)
 	if err != nil {
 		t.Fatalf("EnsureCrewRuntime: %v", err)
 	}
-	if id != "crewship-team-eng" {
-		t.Errorf("id = %q, want crewship-team-eng", id)
+	if id != "crewship-team-eng-crew1" {
+		t.Errorf("id = %q, want crewship-team-eng-crew1", id)
 	}
 	if fake.hasCall(t, "create") || fake.hasCall(t, "start") {
 		t.Errorf("running container should be returned as-is, calls: %v", fake.calls(t))
@@ -93,7 +93,7 @@ func TestEnsureCrewRuntimeStartsStoppedContainer(t *testing.T) {
 	// In Apple Containers configuration.id IS the container name.
 	fake := installFakeContainer(t, `
 case "$1" in
-  list) echo '[{"status":"stopped","configuration":{"id":"crewship-team-eng"}}]'; exit 0;;
+  list) echo '[{"status":"stopped","configuration":{"id":"crewship-team-eng-crew1"}}]'; exit 0;;
   start) exit 0;;
 esac
 exit 0`)
@@ -103,11 +103,11 @@ exit 0`)
 	if err != nil {
 		t.Fatalf("EnsureCrewRuntime: %v", err)
 	}
-	if id != "crewship-team-eng" {
-		t.Errorf("id = %q, want crewship-team-eng", id)
+	if id != "crewship-team-eng-crew1" {
+		t.Errorf("id = %q, want crewship-team-eng-crew1", id)
 	}
-	if !fake.hasCall(t, "start crewship-team-eng") {
-		t.Errorf("expected 'start crewship-team-eng' call, got %v", fake.calls(t))
+	if !fake.hasCall(t, "start crewship-team-eng-crew1") {
+		t.Errorf("expected 'start crewship-team-eng-crew1' call, got %v", fake.calls(t))
 	}
 	if fake.hasCall(t, "create") {
 		t.Errorf("should not recreate when binds exist, calls: %v", fake.calls(t))
@@ -128,7 +128,7 @@ func TestEnsureCrewRuntimeStartStoppedFails(t *testing.T) {
 
 	installFakeContainer(t, `
 case "$1" in
-  list) echo '[{"status":"stopped","configuration":{"id":"crewship-team-eng"}}]'; exit 0;;
+  list) echo '[{"status":"stopped","configuration":{"id":"crewship-team-eng-crew1"}}]'; exit 0;;
   start) exit 1;;
 esac
 exit 0`)
@@ -144,7 +144,7 @@ func TestEnsureCrewRuntimeBindsMissingRecreates(t *testing.T) {
 	// Bind-mount dirs do NOT exist -> stopped container is rm'd and recreated.
 	fake := installFakeContainer(t, `
 case "$1" in
-  list) echo '[{"status":"stopped","configuration":{"id":"crewship-team-eng"}}]'; exit 0;;
+  list) echo '[{"status":"stopped","configuration":{"id":"crewship-team-eng-crew1"}}]'; exit 0;;
   rm) exit 0;;
   image)
     if [ "$2" = "list" ]; then echo '[{"reference":"img:1"}]'; fi
@@ -163,8 +163,8 @@ exit 0`)
 	if id != "new-cid" {
 		t.Errorf("id = %q, want new-cid", id)
 	}
-	if !fake.hasCall(t, "rm crewship-team-eng") {
-		t.Errorf("expected 'rm crewship-team-eng' call, got %v", fake.calls(t))
+	if !fake.hasCall(t, "rm crewship-team-eng-crew1") {
+		t.Errorf("expected 'rm crewship-team-eng-crew1' call, got %v", fake.calls(t))
 	}
 	if !fake.hasCall(t, "create") {
 		t.Errorf("expected create call, got %v", fake.calls(t))
@@ -199,7 +199,7 @@ func TestEnsureCrewRuntimeCreatesNewWithDefaults(t *testing.T) {
 		t.Fatalf("no create call recorded: %v", fake.calls(t))
 	}
 	for _, want := range []string{
-		"--name crewship-team-eng",
+		"--name crewship-team-eng-crew1",
 		"--cpus 1",
 		"--memory 512M",
 		"--read-only",
@@ -335,7 +335,7 @@ func TestEnsureCrewRuntimeCreateRaceRecovered(t *testing.T) {
 case "$1" in
   list)
     if [ -f "$DIR/created" ]; then
-      echo '[{"status":"stopped","configuration":{"id":"crewship-team-eng"}}]'
+      echo '[{"status":"stopped","configuration":{"id":"crewship-team-eng-crew1"}}]'
     else
       echo '[]'
     fi
@@ -356,10 +356,10 @@ exit 0`)
 	if err != nil {
 		t.Fatalf("EnsureCrewRuntime: %v", err)
 	}
-	if id != "crewship-team-eng" {
-		t.Errorf("id = %q, want crewship-team-eng", id)
+	if id != "crewship-team-eng-crew1" {
+		t.Errorf("id = %q, want crewship-team-eng-crew1", id)
 	}
-	if !fake.hasCall(t, "start crewship-team-eng") {
+	if !fake.hasCall(t, "start crewship-team-eng-crew1") {
 		t.Errorf("expected stopped raced container to be started, calls: %v", fake.calls(t))
 	}
 }
@@ -369,7 +369,7 @@ func TestEnsureCrewRuntimeCreateRaceStartFails(t *testing.T) {
 case "$1" in
   list)
     if [ -f "$DIR/created" ]; then
-      echo '[{"status":"stopped","configuration":{"id":"crewship-team-eng"}}]'
+      echo '[{"status":"stopped","configuration":{"id":"crewship-team-eng-crew1"}}]'
     else
       echo '[]'
     fi
@@ -474,8 +474,8 @@ exit 0`)
 	if err != nil {
 		t.Fatalf("EnsureCrewRuntime: %v", err)
 	}
-	if id != "crewship-team-eng" {
-		t.Errorf("id = %q, want fallback container name crewship-team-eng", id)
+	if id != "crewship-team-eng-crew1" {
+		t.Errorf("id = %q, want fallback container name crewship-team-eng-crew1", id)
 	}
 }
 
@@ -483,19 +483,21 @@ func TestRemoveCrewVolumes(t *testing.T) {
 	base := t.TempDir()
 	p := newTestProvider(Config{OutputBasePath: base})
 
-	if err := p.RemoveCrewVolumes(context.Background(), "../evil"); err == nil ||
-		!strings.Contains(err.Error(), "crew slug not safe for path") {
-		t.Fatalf("err = %v, want slug not safe", err)
+	// The home directory is namespaced by the globally-unique crew id
+	// (audit C1), so an unsafe id is rejected before any RemoveAll.
+	if err := p.RemoveCrewVolumes(context.Background(), "../evil", "eng"); err == nil ||
+		!strings.Contains(err.Error(), "crew id not safe for path") {
+		t.Fatalf("err = %v, want id not safe", err)
 	}
 
-	home := filepath.Join(base, "homes", "eng")
+	home := filepath.Join(base, "homes", "crew1")
 	if err := os.MkdirAll(home, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(home, "f.txt"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := p.RemoveCrewVolumes(context.Background(), "eng"); err != nil {
+	if err := p.RemoveCrewVolumes(context.Background(), "crew1", "eng"); err != nil {
 		t.Fatalf("RemoveCrewVolumes: %v", err)
 	}
 	if _, err := os.Stat(home); !os.IsNotExist(err) {
@@ -503,7 +505,7 @@ func TestRemoveCrewVolumes(t *testing.T) {
 	}
 
 	// Removing a non-existent home is a no-op.
-	if err := p.RemoveCrewVolumes(context.Background(), "ghost"); err != nil {
+	if err := p.RemoveCrewVolumes(context.Background(), "ghost", "ghost"); err != nil {
 		t.Fatalf("RemoveCrewVolumes nonexistent: %v", err)
 	}
 }

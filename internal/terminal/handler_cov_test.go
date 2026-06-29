@@ -78,7 +78,9 @@ func (m *covContainer) ExecInspect(context.Context, string) (bool, int, error) {
 	defer m.mu.Unlock()
 	return m.inspectRunning, m.inspectExit, m.inspectErr
 }
-func (m *covContainer) CrewContainerName(slug string) string { return "crewship-team-" + slug }
+func (m *covContainer) CrewContainerName(_ string, slug string) string {
+	return "crewship-team-" + slug
+}
 func (m *covContainer) CopyToContainer(context.Context, string, string, io.Reader) error {
 	return nil
 }

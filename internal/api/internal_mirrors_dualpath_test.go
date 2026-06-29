@@ -135,7 +135,9 @@ func TestCredentialAdapter_DualPath_DenyOnMissingCredentialCapability(t *testing
 
 	r := httptest.NewRequest(http.MethodPost,
 		"/?workspace_id="+wsID, strings.NewReader(`{}`))
-	r.Header.Set("X-Caller-User-Id", ludmilaID)
+	// ID1: sign the caller id so the request clears the identity gate
+	// and the capability gate is what actually decides (403 here).
+	stampSignedCaller(r, forgedTestMaster, wsID, ludmilaID)
 	w := httptest.NewRecorder()
 	adapter.Create(w, r)
 
@@ -161,7 +163,7 @@ func TestCredentialAdapter_DualPath_RotateRequiresRotateNotCreate(t *testing.T) 
 
 	r := httptest.NewRequest(http.MethodPost,
 		"/?workspace_id="+wsID, strings.NewReader(`{}`))
-	r.Header.Set("X-Caller-User-Id", ludmilaID)
+	stampSignedCaller(r, forgedTestMaster, wsID, ludmilaID)
 	w := httptest.NewRecorder()
 	adapter.Rotate(w, r)
 

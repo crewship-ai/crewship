@@ -275,13 +275,20 @@ func (s *Server) proxyToAPIFiltered(
 	//     to the sidecar, and the agent process can't intercept that
 	//     in-flight (different namespace).
 	//
-	// What remains untrusted: the agent inside the container can mint
-	// its own X-Caller-User-Id and forge a slash action AS IF a real
-	// user had clicked it. Future hardening should sign the header with
-	// an HMAC keyed by a secret only the chat-bridge / CLI repl knows
-	// (the same key shape as the IPC token); the backend would then
-	// reject any X-Caller-User-Id without a valid signature. Tracked in
-	// PRD §11 Out-of-scope.
+	// ID1 (PRD §11): X-Caller-User-Id is attacker-influenceable — the agent
+	// process can hit this loopback port and set any user id. We deliberately
+	// do NOT sign it here: signing an agent-supplied value would turn the
+	// sidecar into a signing oracle and defeat the backend's signature check
+	// entirely (a compromised agent could mint a "trusted" id for any user).
+	// The header is still forwarded for the NON-privileged dual-path
+	// attribution (audit / capability for slash actions, which gate on the
+	// crew's autonomy_level — never on this forgeable header). Privileged
+	// credential mutation requires a valid X-Caller-Signature that nothing on
+	// this agent-reachable hop can produce, so the backend
+	// (internal/api/internal_credentials_mutate.go) rejects it outright —
+	// autonomous-agent credential mutation is intentionally unsupported. A
+	// future trusted, out-of-container signer can attach a real signature
+	// (internaltoken.SignCaller) without reopening the oracle here.
 	if callerID := r.Header.Get("X-Caller-User-Id"); callerID != "" {
 		req.Header.Set("X-Caller-User-Id", callerID)
 	}

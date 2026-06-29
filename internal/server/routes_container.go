@@ -89,7 +89,7 @@ func (s *Server) handleContainerStop(w http.ResponseWriter, r *http.Request) {
 	}
 	containerName := id // fallback: use raw id (works for Docker container hashes)
 	if slug != "" {
-		containerName = s.container.CrewContainerName(slug)
+		containerName = s.container.CrewContainerName(id, slug)
 	}
 
 	if err := s.container.StopCrewRuntime(r.Context(), containerName); err != nil {
@@ -130,7 +130,7 @@ func (s *Server) handleContainerFileList(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	containerName := s.container.CrewContainerName(slug)
+	containerName := s.container.CrewContainerName(crewID, slug)
 	targetDir := "/home"
 	if subdir != "" {
 		cleaned := filepath.Clean(subdir)
@@ -213,7 +213,7 @@ func (s *Server) handleContainerGitLog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	containerName := s.container.CrewContainerName(slug)
+	containerName := s.container.CrewContainerName(crewID, slug)
 	workDir := "/home"
 	if agentSlug != "" {
 		clean := filepath.Base(agentSlug)
@@ -317,7 +317,7 @@ func (s *Server) handleContainerGitDiff(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	containerName := s.container.CrewContainerName(slug)
+	containerName := s.container.CrewContainerName(crewID, slug)
 	workDir := "/home"
 	if agentSlug != "" {
 		clean := filepath.Base(agentSlug)

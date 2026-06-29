@@ -89,8 +89,11 @@ func TestServer_NetworkPolicy_Restricted_WithExtraDomains(t *testing.T) {
 
 func TestServer_NetworkPolicy_Free_AllowsEverything(t *testing.T) {
 	srv := NewServer(ServerConfig{
-		Addr:   "127.0.0.1:0",
-		Logger: testLogger(),
+		Addr: "127.0.0.1:0",
+		// Free mode is now an explicit opt-in (the nil-policy default is
+		// restricted — see TestServer_NetworkPolicy_Nil_DefaultsRestricted).
+		NetworkPolicy: &NetworkPolicyConfig{Mode: "free"},
+		Logger:        testLogger(),
 	})
 
 	// Send a request directly through the proxy's ServeHTTP to a domain
@@ -105,15 +108,17 @@ func TestServer_NetworkPolicy_Free_AllowsEverything(t *testing.T) {
 	}
 }
 
-func TestServer_NetworkPolicy_Nil_DefaultsFree(t *testing.T) {
+func TestServer_NetworkPolicy_Nil_DefaultsRestricted(t *testing.T) {
+	// Fail-closed by default (S1, 2026-06 audit): a crew that declares no
+	// network policy must run restricted, not free.
 	srv := NewServer(ServerConfig{
 		Addr:          "127.0.0.1:0",
 		NetworkPolicy: nil,
 		Logger:        testLogger(),
 	})
 
-	if !srv.proxy.freeMode {
-		t.Error("nil NetworkPolicy should default to freeMode=true")
+	if srv.proxy.freeMode {
+		t.Error("nil NetworkPolicy should default to restricted (freeMode=false)")
 	}
 }
 

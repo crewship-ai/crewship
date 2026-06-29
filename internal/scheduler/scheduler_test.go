@@ -120,7 +120,7 @@ func (m *mockContainer) ExecInspect(_ context.Context, _ string) (bool, int, err
 func (m *mockContainer) ContainerStats(_ context.Context, _ string) (*provider.ContainerMetrics, error) {
 	return nil, nil
 }
-func (m *mockContainer) CrewContainerName(_ string) string { return "test-container" }
+func (m *mockContainer) CrewContainerName(_ string, _ string) string { return "test-container" }
 func (m *mockContainer) CopyToContainer(_ context.Context, _ string, _ string, _ io.Reader) error {
 	return nil
 }

@@ -219,28 +219,12 @@ Examples:
 // request directly while still picking up the BaseURL + workspace_id query
 // parameter the server expects.
 func putBytes(ctx context.Context, client *cli.Client, path string, body io.Reader) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	u, err := url.Parse(client.BaseURL + path)
+	// Build through client.NewRequest so workspace injection AND the issue
+	// #571 token-host guard run here too — setting the bearer by hand would
+	// bypass that guard and leak the token to a mismatched server host (CLI1).
+	req, err := client.NewRequest(ctx, http.MethodPut, path, body)
 	if err != nil {
-		return fmt.Errorf("parse url: %w", err)
-	}
-	wsID := client.GetWorkspaceID()
-	if wsID != "" {
-		q := u.Query()
-		if q.Get("workspace_id") == "" {
-			q.Set("workspace_id", wsID)
-			u.RawQuery = q.Encode()
-		}
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, u.String(), body)
-	if err != nil {
-		return fmt.Errorf("create request: %w", err)
-	}
-	if client.Token != "" {
-		req.Header.Set("Authorization", "Bearer "+client.Token)
+		return err
 	}
 	req.Header.Set("Content-Type", "application/octet-stream")
 

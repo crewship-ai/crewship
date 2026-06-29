@@ -70,7 +70,7 @@ func (f *adapterTestContainer) ContainerStats(_ context.Context, _ string) (*pro
 func (f *adapterTestContainer) ExecInspect(_ context.Context, _ string) (bool, int, error) {
 	return false, 0, nil
 }
-func (f *adapterTestContainer) CrewContainerName(slug string) string {
+func (f *adapterTestContainer) CrewContainerName(_ string, slug string) string {
 	return "crewship-team-" + slug
 }
 func (f *adapterTestContainer) CopyToContainer(_ context.Context, _, _ string, _ io.Reader) error {

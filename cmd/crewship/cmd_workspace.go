@@ -79,6 +79,11 @@ var workspaceUseCmd = &cobra.Command{
 				cli.ResolveServer(flagServer, localCfg),
 				localCfg.Token, "",
 			)
+			// Bind the token to the configured server host so `workspace use`
+			// never leaks it to a mismatched --server/CREWSHIP_SERVER target
+			// (issue #571 / CLI2).
+			client.TokenHost = serverHost(localCfg.Server)
+			client.AllowHostMismatch = flagAllowServerMismatch || envAllowServerMismatch()
 			resp, err := client.Get("/api/v1/workspaces")
 			if err == nil && resp.StatusCode == 200 {
 				var workspaces []struct {

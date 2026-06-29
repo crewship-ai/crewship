@@ -151,8 +151,13 @@ func NewServer(cfg ServerConfig) *Server {
 	domains = append(domains, cfg.AllowedDomains...)
 
 	// Determine network mode: "free" means skip allowlist checks.
-	// Unknown modes default to restricted (fail closed) to prevent silent egress.
-	freeMode := true // default when no policy is set: unrestricted
+	// Fail CLOSED by default (S1, 2026-06 audit): when no NetworkPolicy is
+	// declared the sidecar runs RESTRICTED, so a crew that never set a policy
+	// can only reach the allowlisted hosts (DefaultAllowedDomains — the LLM /
+	// provider APIs every CLI adapter needs) rather than the entire internet.
+	// Unrestricted egress is opt-in via an explicit Mode:"free" policy.
+	// Unknown modes likewise default to restricted to prevent silent egress.
+	freeMode := false // default when no policy is set: restricted (fail closed)
 	if cfg.NetworkPolicy != nil {
 		switch cfg.NetworkPolicy.Mode {
 		case "free":

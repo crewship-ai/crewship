@@ -18,6 +18,30 @@ import (
 	"github.com/crewship-ai/crewship/internal/tokenutil"
 )
 
+// preflightExecTimeout bounds each individual pre-flight setup exec (mkdir,
+// manifest pre-create, memory-dir creation, the one-time memory migration, and
+// the stale-sidecar pkill). These are expected to be near-instant; without a
+// per-op deadline a hung container exec on any one of them would pin the run
+// goroutine (and its runSem slot) for the full request timeout (default 30m).
+// M2 in the 2026-06 audit — cheap, so applied here alongside the P1 cap.
+const preflightExecTimeout = 30 * time.Second
+
+// execPreflight runs a single pre-flight setup exec under a bounded per-op
+// deadline derived from ctx, draining and closing the result reader. Errors
+// (including deadline) are returned for the caller's existing warn-and-continue
+// handling; setup execs are best-effort and never abort the run on their own.
+func (o *Orchestrator) execPreflight(ctx context.Context, cfg provider.ExecConfig) error {
+	opCtx, cancel := context.WithTimeout(ctx, preflightExecTimeout)
+	defer cancel()
+	res, err := o.container.Exec(opCtx, cfg)
+	if err != nil {
+		return err
+	}
+	io.Copy(io.Discard, res.Reader)
+	res.Reader.Close()
+	return nil
+}
+
 func (o *Orchestrator) RunAgentForAssignment(ctx context.Context, req AgentRunRequest, handler EventHandler) error {
 	req.SkipConvHistory = true
 	return o.RunAgent(ctx, req, handler)
@@ -183,6 +207,21 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	}); hookErr != nil {
 		return fmt.Errorf("pre_agent_start hook blocked: %w", hookErr)
 	}
+
+	// P1 (HIGH, 2026-06 audit): bound concurrent agent-run exec fan-outs.
+	// Acquire a runSem token before any container.Exec (sidecar start, the
+	// mkdir/setup pass, and the heavy agent CLI exec). Deliberately AFTER the
+	// approval gate and pre_agent_start hook so a ModeSync run waiting on a
+	// human — or a hook-blocked run — never sits on a slot, and AFTER the
+	// `accepting` drain check so a draining orchestrator rejects without
+	// consuming one. The acquire honours ctx cancellation, so a stopped or
+	// timed-out caller backs out of a full pool instead of deadlocking.
+	releaseRunSlot, slotErr := o.acquireRunSlot(ctx)
+	if slotErr != nil {
+		return fmt.Errorf("acquire run slot: %w", slotErr)
+	}
+	defer releaseRunSlot()
+
 	// Always fire post_agent_stop on return so logging and cleanup
 	// hooks observe every run regardless of exit path.
 	defer func() {
@@ -472,7 +511,7 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 				o.logger.Warn("sidecar running with stale network policy, restarting",
 					"running_mode", health.NetworkMode, "desired_mode", desiredMode)
 				// Kill existing sidecar so we can start a new one
-				_, _ = o.container.Exec(ctx, provider.ExecConfig{
+				_ = o.execPreflight(ctx, provider.ExecConfig{
 					ContainerID: req.ContainerID,
 					Cmd:         []string{"sh", "-c", "pkill -f crewship-sidecar || true"},
 					User:        "0:0",
@@ -531,12 +570,8 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		Cmd:         []string{"mkdir", "-p", scratchDir, outputDir, crewAgentDir, crewSharedDir, secretsAgentDir, secretsSharedDir},
 		User:        "1001:1001",
 	}
-	mkResult, err := o.container.Exec(ctx, mkdirCfg)
-	if err != nil {
-		o.logger.Warn("failed to create agent dirs", "error", err)
-	} else {
-		io.Copy(io.Discard, mkResult.Reader)
-		mkResult.Reader.Close()
+	if mkErr := o.execPreflight(ctx, mkdirCfg); mkErr != nil {
+		o.logger.Warn("failed to create agent dirs", "error", mkErr)
 	}
 
 	// Pre-create /crew/manifest.json writable by both agent (1001) and sidecar (1002).
@@ -545,12 +580,8 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		Cmd:         []string{"sh", "-c", `test -f /crew/manifest.json || echo '{"version":1,"packages":{"apt":[],"npm":[],"pip":[]},"credentials":[],"setup_commands":[]}' > /crew/manifest.json; chmod 0666 /crew/manifest.json`},
 		User:        "0:0",
 	}
-	mfResult, err := o.container.Exec(ctx, manifestCfg)
-	if err != nil {
-		o.logger.Debug("manifest pre-create skipped", "error", err)
-	} else {
-		io.Copy(io.Discard, mfResult.Reader)
-		mfResult.Reader.Close()
+	if mfErr := o.execPreflight(ctx, manifestCfg); mfErr != nil {
+		o.logger.Debug("manifest pre-create skipped", "error", mfErr)
 	}
 
 	// Create .memory/ directories for persistent agent memory (in crew HOME)
@@ -563,12 +594,8 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 			Cmd:         []string{"mkdir", "-p", memoryDir, memoryDailyDir, memorySnapshotsDir},
 			User:        "1001:1001",
 		}
-		mkMemResult, err := o.container.Exec(ctx, mkMemCfg)
-		if err != nil {
-			o.logger.Warn("failed to create memory dirs", "error", err)
-		} else {
-			io.Copy(io.Discard, mkMemResult.Reader)
-			mkMemResult.Reader.Close()
+		if memErr := o.execPreflight(ctx, mkMemCfg); memErr != nil {
+			o.logger.Warn("failed to create memory dirs", "error", memErr)
 		}
 
 		// Create crew shared memory dirs for lead agents (if in a crew)
@@ -581,12 +608,8 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 				Cmd:         []string{"mkdir", "-p", crewMemDir, crewMemDailyDir, crewMemTopicsDir},
 				User:        "1001:1001",
 			}
-			mkCrewMemResult, err := o.container.Exec(ctx, mkCrewMemCfg)
-			if err != nil {
-				o.logger.Warn("failed to create crew memory dirs", "error", err)
-			} else {
-				io.Copy(io.Discard, mkCrewMemResult.Reader)
-				mkCrewMemResult.Reader.Close()
+			if crewMemErr := o.execPreflight(ctx, mkCrewMemCfg); crewMemErr != nil {
+				o.logger.Warn("failed to create crew memory dirs", "error", crewMemErr)
 			}
 		}
 
@@ -602,12 +625,8 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 			Cmd:         []string{"sh", "-c", migScript},
 			User:        "1001:1001",
 		}
-		migResult, err := o.container.Exec(ctx, migCfg)
-		if err != nil {
-			o.logger.Debug("memory migration skipped", "error", err)
-		} else {
-			io.Copy(io.Discard, migResult.Reader)
-			migResult.Reader.Close()
+		if migErr := o.execPreflight(ctx, migCfg); migErr != nil {
+			o.logger.Debug("memory migration skipped", "error", migErr)
 		}
 	}
 
@@ -763,16 +782,26 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	}
 
 	// Wrap handler with credential scrubbing to prevent secret leakage
-	// in agent output (prompt injection defense).
-	scrubHandler := o.wrapScrubHandler(handler)
-	// Tap text events flowing to the user so we can emit one
-	// chat.agent_response journal entry at end-of-run with the
-	// agent's full reply. Capped buffer (8 KB) keeps memory bounded
-	// for chatty replies while still preserving the typical "thinking
-	// + final answer" payload size.
+	// in agent output (prompt injection defense). SC1: feed the stateful
+	// stream scrubber the run's loaded credential values so split/encoded
+	// secrets are caught across streamed deltas, and flush the buffered tail
+	// once the stream ends.
+	var secretValues []string
+	for _, c := range req.Credentials {
+		if c.PlainValue != "" {
+			secretValues = append(secretValues, c.PlainValue)
+		}
+	}
+	// Journal tap: accumulate the agent's reply for the end-of-run
+	// chat.agent_response journal entry. CRITICAL (CodeRabbit): this tap sits
+	// AFTER the scrubber (stream → scrub → journalTap → user) so the buffer
+	// only ever sees REDACTED text — a split/encoded secret stripped from the
+	// live stream can no longer land verbatim in the persisted journal entry.
+	// Capped buffer (8 KB) keeps memory bounded for chatty replies while still
+	// preserving the typical "thinking + final answer" payload size.
 	const responseCap = 8 * 1024
 	var responseBuf strings.Builder
-	tappedHandler := EventHandler(func(event AgentEvent) {
+	journalTap := EventHandler(func(event AgentEvent) {
 		if event.Type == "text" && responseBuf.Len() < responseCap {
 			remaining := responseCap - responseBuf.Len()
 			if len(event.Content) <= remaining {
@@ -781,6 +810,14 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 				responseBuf.WriteString(event.Content[:remaining])
 			}
 		}
+		// handler may be nil (no live consumer); the scrubber still runs so the
+		// journal buffer above receives REDACTED text.
+		if handler != nil {
+			handler(event)
+		}
+	})
+	scrubHandler, flushScrub := o.wrapScrubHandler(journalTap, secretValues)
+	tappedHandler := EventHandler(func(event AgentEvent) {
 		// PR-C F4.2: invoke the sampled behavior monitor on every
 		// tool_call event. The hook's MaybeEvaluate is the sampling
 		// gate — most calls return (nil, false) without firing the
@@ -809,6 +846,10 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		}
 	})
 	o.streamOutput(execCtx, result, req, tappedHandler)
+	// Drain the stream scrubber's overlap buffer now the stream has ended,
+	// so any secret straddling the final chunk (or short output held back
+	// entirely) is scrubbed and the redacted tail still reaches the user.
+	flushScrub()
 	if response := strings.TrimSpace(responseBuf.String()); response != "" {
 		responseSummary := response
 		if len(responseSummary) > 240 {
