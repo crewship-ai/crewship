@@ -395,11 +395,21 @@ func (h *PipelineHandler) InternalTestRun(w http.ResponseWriter, r *http.Request
 	if h.gateMissingIntegrations(w, r, body.WorkspaceID, body.AuthorCrewID, "", dsl.NormalizedIntegrationsRequired()) {
 		return
 	}
+	// SPEED: the agent-authoring gate uses DRY-RUN, not a full test_run. A
+	// dry-run walks the DSL, renders every template, and validates step shapes
+	// WITHOUT invoking any agent (ModeDryRun skips the runner — see
+	// TestExecutor_DryRun_NoAgentInvocation). A full test_run would execute the
+	// routine's agent_run steps — a nested LLM call per save (and per retry) —
+	// which made agent authoring slow (tens of seconds). Structure + template
+	// validity is what authoring needs; real execution happens on the first
+	// run, and risky routines are human-reviewed (governance) before they go
+	// live anyway. The public/UI TestRun is unchanged (humans still get a real
+	// test_run + cost).
 	res, err := h.newExecutor().RunDefinition(r.Context(), dsl, pipeline.RunInput{
 		WorkspaceID:  body.WorkspaceID,
 		AuthorCrewID: body.AuthorCrewID,
 		Inputs:       body.SampleInputs,
-		Mode:         pipeline.ModeTestRun,
+		Mode:         pipeline.ModeDryRun,
 	})
 	if err != nil {
 		h.logger.Error("pipeline internal test_run: exec", "error", err)

@@ -113,9 +113,11 @@ func (s *Server) handlePipelinesSave(w http.ResponseWriter, r *http.Request) {
 		Status string `json:"status"`
 	}
 	_ = json.Unmarshal(testRes.body, &testRunResult)
-	if testRunResult.Status != "COMPLETED" {
+	// The internal authoring gate dry-run-validates (fast, no agent execution),
+	// so success is DRY_RUN_OK; COMPLETED is accepted too for forward-compat.
+	if testRunResult.Status != "DRY_RUN_OK" && testRunResult.Status != "COMPLETED" {
 		writeJSONResponse(w, http.StatusUnprocessableEntity, map[string]any{
-			"error":    "test_run did not complete cleanly; pipeline not saved",
+			"error":    "routine validation did not pass; not saved",
 			"test_run": json.RawMessage(testRes.body),
 			"hint":     "fix the DSL or sample_inputs and retry",
 			"status":   testRunResult.Status,
