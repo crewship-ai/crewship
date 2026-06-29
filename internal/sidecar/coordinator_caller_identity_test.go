@@ -5,8 +5,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-
-	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
 )
 
 // TestProxyToAPI_PropagatesCallerUserID asserts the sidecar
@@ -46,18 +44,14 @@ func TestProxyToAPI_PropagatesCallerUserID(t *testing.T) {
 	if seenInternal != "tok" {
 		t.Errorf("X-Internal-Token regression: got %q, want tok", seenInternal)
 	}
-	// ID1: the caller id must arrive HMAC-signed under the sidecar's
-	// workspace-bound token so the backend can prove a token holder —
-	// not the agent — vouched for it. The signature must verify and be
-	// bound to this caller + workspace.
-	if seenSig == "" {
-		t.Fatal("X-Caller-Signature missing — backend would reject the forwarded caller id")
-	}
-	if !internaltoken.VerifyCaller("tok", "ws-1", "ludmila-id", seenSig) {
-		t.Errorf("X-Caller-Signature %q does not verify for (tok, ws-1, ludmila-id)", seenSig)
-	}
-	if internaltoken.VerifyCaller("tok", "ws-1", "someone-else", seenSig) {
-		t.Error("X-Caller-Signature verified for a different caller id — binding is broken")
+	// ID1: the sidecar must NOT sign the caller id on this hop. The port is
+	// reachable by the (untrusted) agent, which can set any X-Caller-User-Id;
+	// signing it here would make the sidecar a signing oracle and defeat the
+	// backend's X-Caller-Signature gate entirely. The id is still forwarded for
+	// non-privileged attribution, but no signature is attached — so the backend
+	// rejects any privileged credential mutation that arrives through this path.
+	if seenSig != "" {
+		t.Errorf("X-Caller-Signature must NOT be stamped on the agent-reachable hop (signing oracle); got %q", seenSig)
 	}
 }
 

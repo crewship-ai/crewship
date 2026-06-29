@@ -118,17 +118,19 @@ func (h *CredentialInternalAdapter) envelope(w http.ResponseWriter, r *http.Requ
 		replyError(w, http.StatusUnauthorized, "credential mutation requires user attribution (X-Caller-User-Id)")
 		return "", "", false
 	}
-	// ID1: X-Caller-User-Id is attacker-influenceable — an agent inside
-	// the container can reach the sidecar over loopback and set any user
-	// id. Before we trust it for a privileged credential mutation it
-	// MUST carry a valid HMAC signature minted by a holder of the
-	// workspace-bound internal token. The sidecar (which holds the
-	// token, UID 1002) attaches X-Caller-Signature; the agent (UID 1001)
-	// never holds the token and so cannot forge one. We re-derive the
-	// MAC from the same token — which the internal-auth middleware
-	// already validated against the master secret before this handler
-	// runs — and constant-time compare. Missing/invalid → reject. The
-	// DB capability re-derivation below (requireCapabilityOrForbid)
+	// ID1: X-Caller-User-Id is attacker-influenceable — an agent inside the
+	// container can reach the sidecar over loopback and set any user id. Before
+	// we trust it for a privileged credential mutation it MUST carry a valid
+	// HMAC signature over (workspace_id, caller_user_id) keyed by a holder of
+	// the workspace-bound internal token. Crucially, the agent-reachable sidecar
+	// hop deliberately does NOT sign agent-supplied caller ids (that would be a
+	// signing oracle — see internal/sidecar/coordinator.go), so an agent's
+	// forged caller id arrives unsigned and is rejected here. Autonomous-agent
+	// credential mutation is therefore unsupported by construction; a future
+	// trusted out-of-container signer could attach a real signature. We re-derive
+	// the MAC from X-Internal-Token (already validated against the master secret
+	// by the internal-auth middleware) and constant-time compare. Missing/invalid
+	// → reject. The DB capability re-derivation below (requireCapabilityOrForbid)
 	// stays as defense-in-depth.
 	if !verifyCallerSignature(r, wsID, callerID) {
 		replyError(w, http.StatusUnauthorized, "caller identity is unsigned or its signature is invalid (X-Caller-Signature)")

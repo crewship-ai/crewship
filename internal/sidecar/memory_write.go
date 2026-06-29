@@ -380,8 +380,13 @@ func memoryFileCap(rel string) (int, bool) {
 	if c, known := memoryWriteCaps[clean]; known {
 		return c, true
 	}
-	// daily/<name>.md — exactly one segment under daily/.
-	if rest, ok := strings.CutPrefix(clean, "daily/"); ok && rest != "" && !strings.Contains(rest, "/") {
+	// daily/<name>.md — exactly one segment under daily/, and it must carry
+	// the .md suffix so the allowlist stays as tight as the advertised
+	// surface (rejects daily/token, daily/.env, etc.).
+	if rest, ok := strings.CutPrefix(clean, "daily/"); ok &&
+		!strings.Contains(rest, "/") &&
+		strings.HasSuffix(rest, ".md") &&
+		strings.TrimSuffix(rest, ".md") != "" {
 		return dailyCap, true
 	}
 	return 0, false
