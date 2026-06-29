@@ -68,8 +68,17 @@ Sanity-check the saved CLI configuration end-to-end: parse the YAML, dial the se
 crewship config validate
 ```
 
+## Multiple servers
+
+To target several instances (dev/staging/prod) from one config, use
+**[server profiles](/cli/server)** instead of swapping `server`/`token` by hand.
+Each profile carries its own token and is selectable per-command (`--profile`),
+per-shell (`CREWSHIP_PROFILE`), or per-directory. `config show` prints the
+active profile when any are defined.
+
 ## See also
 
+- [`crewship server`](/cli/server) — manage named server profiles for multi-instance targeting.
 - [`crewship workspace`](/cli/workspace) — switch / list / create workspaces, manage members and invitations (moved out of this page since `config` and `workspace` are distinct surfaces).
 - [`crewship login`](/cli/login) — populate `server` and `token` interactively.
 - [Authentication](/guides/auth) — how the CLI token is minted and validated end-to-end.

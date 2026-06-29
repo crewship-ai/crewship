@@ -23,6 +23,7 @@ var (
 	flagServer              string
 	flagWorkspace           string
 	flagFormat              string
+	flagProfile             string
 	flagVerbose             bool
 	flagNoColor             bool
 	flagAllowServerMismatch bool
@@ -42,7 +43,14 @@ var rootCmd = &cobra.Command{
 			cli.PrintWarning("failed to load config: " + err.Error())
 			cfg = &cli.CLIConfig{}
 		}
-		cliCfg = cfg
+		// Overlay the active server profile (--profile / CREWSHIP_PROFILE /
+		// directory match / `current`) onto the top-level Server/Token/
+		// Workspace so every downstream read path — ResolveServer,
+		// newAPIClient's token-host binding, requireAuth — sees the selected
+		// target with zero per-command changes. Profile-writing commands
+		// (login, server, config set) re-load the raw config themselves, so
+		// this read-side overlay never corrupts what gets saved.
+		cliCfg = cfg.WithActiveProfile(flagProfile)
 	},
 	SilenceUsage:  true,
 	SilenceErrors: true,
@@ -52,6 +60,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&flagServer, "server", "s", "", "Server URL (default: http://localhost:8080, env: CREWSHIP_SERVER)")
 	rootCmd.PersistentFlags().StringVarP(&flagWorkspace, "workspace", "w", "", "Workspace ID or slug (env: CREWSHIP_WORKSPACE)")
 	rootCmd.PersistentFlags().StringVarP(&flagFormat, "format", "f", "", "Output format: table|json|yaml|ndjson|quiet (default: table)")
+	rootCmd.PersistentFlags().StringVar(&flagProfile, "profile", "", "Server profile to target (env: CREWSHIP_PROFILE; manage with 'crewship server')")
 	rootCmd.PersistentFlags().BoolVarP(&flagVerbose, "verbose", "v", false, "Verbose output")
 	rootCmd.PersistentFlags().BoolVar(&flagNoColor, "no-color", false, "Disable ANSI colors")
 	rootCmd.PersistentFlags().BoolVar(&flagAllowServerMismatch, "server-allow-mismatch", false,
@@ -111,6 +120,7 @@ func init() {
 	rootCmd.AddCommand(tokenCmd)
 	rootCmd.AddCommand(sessionCmd)
 	rootCmd.AddCommand(configCmd)
+	rootCmd.AddCommand(serverCmd)
 	rootCmd.AddCommand(escalationCmd)
 	rootCmd.AddCommand(exposeCmd)
 	rootCmd.AddCommand(templateCmd)

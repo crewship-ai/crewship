@@ -34,6 +34,11 @@ var configShowCmd = &cobra.Command{
 		} else {
 			fmt.Printf("%sToken:%s      (not set)\n", cli.Dim, cli.Reset)
 		}
+		if len(cfg.Servers) > 0 {
+			active := cli.ActiveProfileName(flagProfile, cfg)
+			fmt.Printf("%sProfile:%s    %s %s(%d defined; switch with 'crewship server use')%s\n",
+				cli.Dim, cli.Reset, valueOrDefault(active, "(none active)"), cli.Dim, len(cfg.Servers), cli.Reset)
+		}
 		return nil
 	},
 }

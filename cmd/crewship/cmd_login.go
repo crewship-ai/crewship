@@ -124,6 +124,62 @@ func preflightServerURL(out io.Writer, serverURL string) error {
 	return nil
 }
 
+// explicitProfile returns the profile named explicitly for this invocation —
+// the --profile flag, else CREWSHIP_PROFILE. Unlike cli.ActiveProfileName it
+// deliberately ignores directory-match and the persisted `current`, so a
+// credential-writing command (login) never silently stores a token into a
+// different profile than the operator actually named on this command.
+func explicitProfile() string {
+	if flagProfile != "" {
+		return flagProfile
+	}
+	return strings.TrimSpace(os.Getenv("CREWSHIP_PROFILE"))
+}
+
+// persistCredential stores a freshly minted token. With a non-empty profile it
+// writes into cfg.Servers[profile] — creating the entry, preserving any
+// pre-set workspace — and marks it current; otherwise it writes the legacy
+// top-level Server/Token. It mirrors the malformed-config guard every login
+// path uses: LoadConfig returns an empty config on a missing file, so a
+// non-nil error means the existing file is unreadable / malformed YAML and we
+// must not clobber it.
+func persistCredential(serverURL, token, profile string) error {
+	cfg, err := cli.LoadConfig()
+	if err != nil {
+		return fmt.Errorf("load CLI config (refusing to overwrite a malformed file — fix or remove ~/.crewship/cli-config.yaml and retry): %w", err)
+	}
+	if profile != "" {
+		if cfg.Servers == nil {
+			cfg.Servers = map[string]*cli.ServerProfile{}
+		}
+		p := cfg.Servers[profile]
+		if p == nil {
+			p = &cli.ServerProfile{}
+			cfg.Servers[profile] = p
+		}
+		p.Server = serverURL
+		p.Token = token
+		cfg.Current = profile
+	} else {
+		cfg.Server = serverURL
+		cfg.Token = token
+	}
+	if err := cli.SaveConfig(cfg); err != nil {
+		return fmt.Errorf("save config: %w", err)
+	}
+	return nil
+}
+
+// savedTokenMessage describes where a token was just stored, naming the
+// profile when one is active so multi-instance users can see which target
+// they authenticated.
+func savedTokenMessage(prefix, profile string) string {
+	if profile != "" {
+		return fmt.Sprintf("%s Token saved to profile %q in ~/.crewship/cli-config.yaml", prefix, profile)
+	}
+	return fmt.Sprintf("%s Token saved to ~/.crewship/cli-config.yaml", prefix)
+}
+
 var logoutCmd = &cobra.Command{
 	Use:   "logout",
 	Short: "Remove stored authentication token",
@@ -131,6 +187,17 @@ var logoutCmd = &cobra.Command{
 		cfg, err := cli.LoadConfig()
 		if err != nil {
 			return err
+		}
+		// Clear the token for the active target only: in profile mode that's
+		// the selected profile's token (leaving sibling profiles logged in);
+		// otherwise the legacy top-level token.
+		if name, p := cfg.ActiveProfile(flagProfile); p != nil {
+			p.Token = ""
+			if err := cli.SaveConfig(cfg); err != nil {
+				return err
+			}
+			cli.PrintSuccess(fmt.Sprintf("Logged out of profile %q.", name))
+			return nil
 		}
 		cfg.Token = ""
 		if err := cli.SaveConfig(cfg); err != nil {
@@ -352,22 +419,15 @@ func loginWithPairing(serverURL, code, adapterHint string) error {
 		return fmt.Errorf("server returned empty cli_token — please report this to ops")
 	}
 
-	// LoadConfig returns (&CLIConfig{}, nil) when the file is missing
-	// — see internal/cli/config.go. A non-nil error therefore means
-	// the file *exists* but is unreadable / malformed YAML, and
-	// silently overwriting it would mask the real cause (typo, bad
-	// edit, permissions) and lose the user's other config. Surface it.
-	cfg, err := cli.LoadConfig()
-	if err != nil {
-		return fmt.Errorf("load CLI config (refusing to overwrite a malformed file — fix or remove ~/.crewship/cli-config.yaml and retry): %w", err)
-	}
-	cfg.Server = serverURL
-	cfg.Token = redeem.CliToken
-	if err := cli.SaveConfig(cfg); err != nil {
-		return fmt.Errorf("save config: %w", err)
+	// persistCredential keeps the malformed-config guard described above
+	// (LoadConfig errors only when an existing file is unreadable) and routes
+	// the token into the active profile when --profile / CREWSHIP_PROFILE is set.
+	profile := explicitProfile()
+	if err := persistCredential(serverURL, redeem.CliToken, profile); err != nil {
+		return err
 	}
 
-	cli.PrintSuccess(fmt.Sprintf("Paired as %s. Token saved to ~/.crewship/cli-config.yaml", redeem.Email))
+	cli.PrintSuccess(savedTokenMessage(fmt.Sprintf("Paired as %s.", redeem.Email), profile))
 
 	// Next-step guidance — without this the user is left holding a
 	// valid token and no idea what to do. Two paths from here:
@@ -401,21 +461,14 @@ func loginWithToken(serverURL, token string) error {
 	}
 	resp.Body.Close()
 
-	// Same rationale as the pairing path above: LoadConfig returns an
-	// empty config + nil err when the file is missing. Non-nil err
-	// means the existing file is unreadable / malformed YAML — don't
-	// silently overwrite the user's other config.
-	cfg, err := cli.LoadConfig()
-	if err != nil {
-		return fmt.Errorf("load CLI config (refusing to overwrite a malformed file — fix or remove ~/.crewship/cli-config.yaml and retry): %w", err)
-	}
-	cfg.Server = serverURL
-	cfg.Token = token
-	if err := cli.SaveConfig(cfg); err != nil {
-		return fmt.Errorf("save config: %w", err)
+	// persistCredential carries the same malformed-config guard and routes
+	// the token into the active profile when one is named.
+	profile := explicitProfile()
+	if err := persistCredential(serverURL, token, profile); err != nil {
+		return err
 	}
 
-	cli.PrintSuccess("Login successful! Token saved to ~/.crewship/cli-config.yaml")
+	cli.PrintSuccess(savedTokenMessage("Login successful!", profile))
 	return nil
 }
 
@@ -607,16 +660,11 @@ func loginInteractive(serverURL string) error {
 		finalToken = sessionToken
 	}
 
-	cfg, err := cli.LoadConfig()
-	if err != nil {
-		return fmt.Errorf("load CLI config (refusing to overwrite a malformed file — fix or remove ~/.crewship/cli-config.yaml and retry): %w", err)
-	}
-	cfg.Server = serverURL
-	cfg.Token = finalToken
-	if err := cli.SaveConfig(cfg); err != nil {
-		return fmt.Errorf("save config: %w", err)
+	profile := explicitProfile()
+	if err := persistCredential(serverURL, finalToken, profile); err != nil {
+		return err
 	}
 
-	cli.PrintSuccess("Login successful! Token saved to ~/.crewship/cli-config.yaml")
+	cli.PrintSuccess(savedTokenMessage("Login successful!", profile))
 	return nil
 }
