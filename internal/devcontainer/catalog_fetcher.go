@@ -155,10 +155,29 @@ func dedupeCatalogByID(entries []CatalogEntry) []CatalogEntry {
 	out := make([]CatalogEntry, 0, len(bestIdx))
 	for i := range entries {
 		if keep[i] {
-			out = append(out, entries[i])
+			e := entries[i]
+			e.Publisher, e.Tier = featureProvenance(e.Ref)
+			out = append(out, e)
 		}
 	}
 	return out
+}
+
+// featureProvenance returns the publisher namespace and trust tier for a ref so
+// the picker can always show where a feature comes from.
+func featureProvenance(ref string) (publisher, tier string) {
+	if rest, ok := strings.CutPrefix(ref, "ghcr.io/"); ok {
+		publisher = strings.SplitN(rest, "/", 2)[0]
+	}
+	switch publisherRank(ref) {
+	case 0, 1:
+		tier = "official" // devcontainers + devcontainers-extra
+	case 2:
+		tier = "community"
+	default:
+		tier = "third-party"
+	}
+	return publisher, tier
 }
 
 // RefreshCatalog forces a network fetch and updates both caches.
