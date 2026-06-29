@@ -294,6 +294,53 @@ func TestCheckMissionCompletionWithTasks_EmptyTaskVariants(t *testing.T) {
 			t.Errorf("inbox title = %q", title)
 		}
 	})
+
+	t.Run("all assignments FAILED marks mission FAILED, not REVIEW", func(t *testing.T) {
+		t.Parallel()
+		db := covMissionDB(t)
+		covSeed(t, db)
+		ms := covMission(t, db, "m1", "IN_PROGRESS")
+		ms.planningDispatched = true
+		mustExec(t, db, `UPDATE missions SET mission_type = 'issue', identifier = 'CRE-43' WHERE id = 'm1'`)
+		now := time.Now().UTC().Format(time.RFC3339)
+		// The lead-planning assignment failed (e.g. crew couldn't be
+		// provisioned) and produced no mission_tasks. The mission must surface
+		// as FAILED, not silently move to REVIEW.
+		mustExec(t, db, `INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, group_id, created_at)
+			VALUES ('a1', 'ws-1', 'm1', 'agent-lead', 'agent-lead', '[PLANNING] x', 'FAILED', 'm1', ?)`, now)
+		e := newLifecycleEngine(t, db)
+		if err := e.checkMissionCompletionWithTasks(context.Background(), ms, nil); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got := covMissionStatus(t, db, "m1"); got != "FAILED" {
+			t.Errorf("status = %q, want FAILED when the only assignment failed", got)
+		}
+		// No "ready for review" inbox item should be created for a failed mission.
+		var n int
+		_ = db.QueryRow(`SELECT COUNT(*) FROM inbox_items WHERE id = 'ibx_message_issue_review_m1'`).Scan(&n)
+		if n != 0 {
+			t.Errorf("review inbox item created for a FAILED mission (count=%d)", n)
+		}
+	})
+
+	t.Run("partial success (one completed) still moves to REVIEW", func(t *testing.T) {
+		t.Parallel()
+		db := covMissionDB(t)
+		covSeed(t, db)
+		ms := covMission(t, db, "m1", "IN_PROGRESS")
+		ms.planningDispatched = true
+		now := time.Now().UTC().Format(time.RFC3339)
+		mustExec(t, db, `INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, group_id, created_at)
+			VALUES ('a1', 'ws-1', 'm1', 'agent-lead', 'agent-worker', 'work', 'COMPLETED', 'm1', ?),
+			       ('a2', 'ws-1', 'm1', 'agent-lead', 'agent-worker', 'work', 'FAILED', 'm1', ?)`, now, now)
+		e := newLifecycleEngine(t, db)
+		if err := e.checkMissionCompletionWithTasks(context.Background(), ms, nil); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got := covMissionStatus(t, db, "m1"); got != "REVIEW" {
+			t.Errorf("status = %q, want REVIEW when at least one assignment succeeded", got)
+		}
+	})
 }
 
 func TestCheckMissionCompletionWithTasks_AnyFailedMarksMissionFailed(t *testing.T) {

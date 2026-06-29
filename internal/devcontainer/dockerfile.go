@@ -49,6 +49,22 @@ func GenerateDockerfile(b DockerfileBuild) (string, error) {
 	sb.WriteString("# syntax=docker/dockerfile:1\n")
 	sb.WriteString("FROM " + b.BaseImage + "\n")
 
+	// Remediate known-broken third-party apt repos that ship in some base
+	// images BEFORE any feature runs `apt-get update`. The MS devcontainer
+	// "language" images (go:1.x, universal:2, …) ship
+	// /etc/apt/sources.list.d/yarn.list whose signing key has expired
+	// upstream, so `apt-get update` fails with a GPG NO_PUBKEY error and the
+	// very first feature install (common-utils) aborts with exit 100 —
+	// breaking provisioning for an image the operator picked straight from our
+	// catalog. Yarn isn't needed to provision a crew (npm/corepack cover it),
+	// so we drop the offending source. This is the remediation hook for
+	// known-broken repos; extend the rm list as new offenders surface.
+	// Guarded on existence so it's a clean no-op on images that don't ship it
+	// (including Alpine, no apt) — but an unexpected removal failure (e.g.
+	// read-only fs, permissions) still aborts the build loudly rather than
+	// leaving the broken repo in place to fail later with a vaguer error.
+	sb.WriteString("RUN if [ -e /etc/apt/sources.list.d/yarn.list ]; then rm -f /etc/apt/sources.list.d/yarn.list; fi\n")
+
 	for _, f := range b.Features {
 		if f == nil {
 			continue

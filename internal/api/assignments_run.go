@@ -396,8 +396,44 @@ func (h *AssignmentHandler) runAssignment(
 		return
 	}
 
-	// Ensure crew container is running
-	containerID, err := h.orch.GetOrCreateContainer(ctx, target.CrewSlug, body.CrewID, body.WorkspaceID)
+	// Ensure the crew's devcontainer image is built BEFORE we try to run the
+	// agent. A cold crew (just seeded, never provisioned, or with a cache tag
+	// pruned from the daemon) would otherwise be started from the bare runtime
+	// image — which has no `claude` CLI — and the exec would die with exit 127
+	// ("stdbuf: failed to run command 'claude'"). EnsureProvisioned blocks
+	// until the build finishes, emitting the provision.* events the top-right
+	// toolbar popover renders, so dispatch shows "preparing container" and then
+	// runs instead of failing. nil provisioner (Docker disabled) skips the gate.
+	if h.provisioner != nil {
+		if perr := h.provisioner.EnsureProvisioned(ctx, body.CrewID, body.WorkspaceID, 0); perr != nil {
+			h.logger.Error("ensure provisioned for assignment", "error", perr,
+				"assignment_id", assignmentID, "crew_id", body.CrewID)
+			h.finishAssignment(ctx, assignmentID, runID, body.ChatID, body.TargetSlug, body.WorkspaceID, "",
+				fmt.Sprintf("preparing the crew container failed: %v", perr))
+			return
+		}
+	}
+
+	// Resolve the crew's full runtime config so the container is created from
+	// the PROVISIONED image (with claude + tools), not the bare runtime
+	// default. Fail closed if resolution fails: buildCrewRuntimeConfig is also
+	// the step that proves the crew exists in this workspace and isn't
+	// soft-deleted, and carries the cached image / network / env / capability
+	// settings — falling back to the bare {slug, id} path could start a
+	// deleted or misconfigured crew from the base image and bypass all of it.
+	var (
+		containerID string
+		err         error
+	)
+	crewCfg, cfgErr := buildCrewRuntimeConfig(ctx, h.db, body.CrewID, body.WorkspaceID)
+	if cfgErr != nil {
+		h.logger.Error("resolve crew runtime config for assignment",
+			"error", cfgErr, "crew_id", body.CrewID, "assignment_id", assignmentID)
+		h.finishAssignment(ctx, assignmentID, runID, body.ChatID, body.TargetSlug, body.WorkspaceID, "",
+			fmt.Sprintf("resolve crew runtime config: %v", cfgErr))
+		return
+	}
+	containerID, err = h.orch.GetOrCreateContainerCfg(ctx, crewCfg, body.WorkspaceID)
 	if err != nil {
 		h.logger.Error("get container for assignment", "error", err, "assignment_id", assignmentID)
 		h.finishAssignment(ctx, assignmentID, runID, body.ChatID, body.TargetSlug, body.WorkspaceID, "",

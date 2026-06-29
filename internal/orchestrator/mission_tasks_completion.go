@@ -353,22 +353,42 @@ func (e *MissionEngine) checkMissionCompletionWithTasks(ctx context.Context, ms 
 		if total == 0 {
 			return nil // no assignments yet — still waiting
 		}
-		// Lead planning completed, all assignments done → move to REVIEW
-		e.logger.Info("lead planning complete, all assignments finished — moving to REVIEW",
-			"mission_id", ms.ID, "total_assignments", total)
+		// All assignments terminal, but did any actually succeed? When EVERY
+		// assignment failed and no mission_tasks were produced, the mission did
+		// no real work — most commonly lead planning itself failed (e.g. the
+		// crew container couldn't be provisioned). Moving such a mission to
+		// REVIEW silently masks the failure: the issue looks "done" with no
+		// output. Surface it as FAILED instead so the operator (and the inbox)
+		// see the real outcome. A partial success (some assignment completed)
+		// still goes to REVIEW — work happened and is worth reviewing.
+		var failed int
+		if err := e.db.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM assignments WHERE group_id = ? AND status = 'FAILED'`, ms.ID).Scan(&failed); err != nil {
+			// This count decides FAILED vs REVIEW; a swallowed error would
+			// leave failed=0 and silently send an all-failed mission to review.
+			return fmt.Errorf("count failed assignments for mission %s: %w", ms.ID, err)
+		}
+		newStatus := "REVIEW"
+		if failed == total {
+			newStatus = "FAILED"
+		}
+		e.logger.Info("lead planning complete, all assignments finished",
+			"mission_id", ms.ID, "total_assignments", total, "failed", failed, "status", newStatus)
 		now := time.Now().UTC().Format(time.RFC3339)
 		if _, err := e.db.ExecContext(ctx,
-			`UPDATE missions SET status = 'REVIEW', completed_at = ?, updated_at = ? WHERE id = ? AND status = 'IN_PROGRESS'`,
-			now, now, ms.ID); err != nil {
-			return fmt.Errorf("update mission to REVIEW: %w", err)
+			`UPDATE missions SET status = ?, completed_at = ?, updated_at = ? WHERE id = ? AND status = 'IN_PROGRESS'`,
+			newStatus, now, now, ms.ID); err != nil {
+			return fmt.Errorf("update mission to %s: %w", newStatus, err)
 		}
-		e.broadcastMissionStatus(ms, "REVIEW")
+		e.broadcastMissionStatus(ms, newStatus)
 		e.pw.WriteEvent(ms.TraceID, ms.CrewSlug, ProgressEvent{
-			Type:      "mission_REVIEW",
+			Type:      "mission_" + newStatus,
 			MissionID: ms.ID,
 		})
-		e.logger.Info("mission completed", "mission_id", ms.ID, "status", "REVIEW")
-		e.fireIssueReviewInboxNotification(ctx, ms)
+		e.logger.Info("mission completed", "mission_id", ms.ID, "status", newStatus)
+		if newStatus == "REVIEW" {
+			e.fireIssueReviewInboxNotification(ctx, ms)
+		}
 		return nil
 	}
 

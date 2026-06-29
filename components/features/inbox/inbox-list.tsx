@@ -1131,11 +1131,14 @@ function KindActions({
                   toast.error(res.error)
                   return
                 }
-                // Server-side CompleteApproval already cascades
-                // inbox state via inbox.ResolveBySource — the local
-                // onResolve mostly ensures the optimistic UI
-                // matches before the WS event arrives.
-                await onResolve("approved")
+                // Server-side CompleteApproval already cascades the
+                // inbox row to resolved via inbox.ResolveBySource, so
+                // we must NOT PATCH the inbox ourselves — a waitpoint
+                // is a source-managed item and the inbox PATCH rejects
+                // any state other than "read" with a 409 ("use the
+                // source endpoint for this kind"). Re-fetch instead, to
+                // match the escalation branch below.
+                await onRefresh()
               })
             }
             className="gap-1.5 bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30"
@@ -1154,7 +1157,9 @@ function KindActions({
                   toast.error(res.error)
                   return
                 }
-                await onResolve("denied")
+                // Same as approve: the server cascades the inbox row;
+                // a self-PATCH to "resolved" would 409 (source-managed).
+                await onRefresh()
               })
             }
             className="gap-1.5"

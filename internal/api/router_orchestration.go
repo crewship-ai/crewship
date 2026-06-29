@@ -482,6 +482,12 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	// router_internal.go using the same instance.
 	queries := NewQueryHandler(r.db, r.orch, r.hub, r.internalToken, r.logger)
 	queries.SetJournal(r.Journal())
+	// Provisioning gate for the peer-query path: registerCrewsRoutes (which sets
+	// r.provisioning) runs before this, so a cold target crew builds its image
+	// before a peer query runs instead of booting the bare base.
+	if r.provisioning != nil {
+		queries.SetProvisioner(r.provisioning)
+	}
 
 	// Crew peer conversations, standup, and escalations (public, authenticated)
 	r.mux.Handle("GET /api/v1/crews/{crewId}/peer-conversations", authed(wsCtx(http.HandlerFunc(queries.ListPeerConversations))))

@@ -338,6 +338,10 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	// for the auto-provision-on-first-message UX without a second instance.
 	provisioning := NewProvisioningHandler(r.db, r.logger, r.catalogFetcher, r.runtimeFetcher, r.dockerClient, r.featureCacheDir, r.hub)
 	r.provisioning = provisioning
+	// Proactive provisioning: building the devcontainer image starts the moment
+	// a crew is created or its config changes (CrewHandler.maybeAutoProvision),
+	// so it's ready before the first dispatch — no manual "Build now" step.
+	crews.SetProvisioner(provisioning)
 	// Mirror provisioning lifecycle (queued / building / complete /
 	// failed) into the unified Crew Journal alongside the existing WS
 	// broadcast. Skipped when no journal is wired (early bring-up).
