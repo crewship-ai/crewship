@@ -81,6 +81,7 @@ func (s *Server) handlePipelinesSave(w http.ResponseWriter, r *http.Request) {
 	// using the wired AgentRunner. Passing test_run is mandatory for
 	// step 2 to succeed (the store enforces the gate).
 	testRunBody, err := json.Marshal(map[string]any{
+		"workspace_id":   s.ipc.WorkspaceID,
 		"definition":     body.Definition,
 		"author_crew_id": s.ipc.CrewID,
 		"sample_inputs":  body.SampleInputs,
@@ -89,7 +90,10 @@ func (s *Server) handlePipelinesSave(w http.ResponseWriter, r *http.Request) {
 		writeJSONResponse(w, http.StatusInternalServerError, map[string]string{"error": "marshal test_run body"})
 		return
 	}
-	testRunPath := "/api/v1/workspaces/" + s.ipc.WorkspaceID + "/pipelines/test_run"
+	// Internal (X-Internal-Token) test_run: the public workspace test_run is
+	// JWT-authed and rejected the sidecar's internal token (no_credentials),
+	// so the agent-authoring save loop could never get past Step 1.
+	testRunPath := "/api/v1/internal/pipelines/test_run"
 	testRes, err := s.ipcRequestJSON(r.Context(), http.MethodPost, testRunPath, testRunBody)
 	if err != nil {
 		writeJSONResponse(w, http.StatusBadGateway, map[string]string{"error": "test_run forward: " + err.Error()})
