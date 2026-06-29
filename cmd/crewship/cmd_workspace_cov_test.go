@@ -561,8 +561,8 @@ func TestWorkspaceUse_MalformedConfigErrorsWithoutClobber(t *testing.T) {
 	// a missing file). `workspace use` must surface it and leave the file
 	// untouched, never silently overwrite the user's saved config.
 	err := workspaceUseCmd.RunE(workspaceUseCmd, []string{"fresh"})
-	if err == nil {
-		t.Fatalf("expected error on malformed config, got nil")
+	if err == nil || !strings.Contains(err.Error(), "load CLI config: parse config:") {
+		t.Fatalf("expected parse-config error, got %v", err)
 	}
 	got, _ := os.ReadFile(cfgPath)
 	if string(got) != string(malformed) {
@@ -732,7 +732,7 @@ func TestWorkspaceUse_ConfigIOErrorSurfaces(t *testing.T) {
 	saveCLIState(t)
 	flagServer = ""
 
-	if err := workspaceUseCmd.RunE(workspaceUseCmd, []string{"acme"}); err == nil {
-		t.Errorf("expected the config IO failure to surface, got nil")
+	if err := workspaceUseCmd.RunE(workspaceUseCmd, []string{"acme"}); err == nil || !strings.Contains(err.Error(), "load CLI config: read config:") {
+		t.Errorf("expected config read error, got %v", err)
 	}
 }
