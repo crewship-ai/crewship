@@ -204,6 +204,18 @@ type AggregatedRequirements struct {
 	CapAdd            []string          `json:"capAdd,omitempty"`
 	SecurityOpt       []string          `json:"securityOpt,omitempty"`
 	PostStartCommands []string          `json:"postStartCommands,omitempty"`
+
+	// LoginPath is the agent user's full LOGIN-shell PATH, captured once inside
+	// the provisioned image at build time via `bash -lc`. Devcontainer features
+	// (e.g. pipx-installed ansible at /usr/local/py-utils/bin) extend PATH only
+	// through /etc/profile.d/*, which a non-login `docker exec` never sources —
+	// so the agent's `claude` process, run via such an exec, can't find those
+	// tools ("command not found: ansible"). Persisting the login PATH here lets
+	// the runtime set it explicitly on the agent container so every provisioned
+	// tool is reachable. Empty when capture failed or the crew wasn't
+	// provisioned; the runtime then falls back to prepending the well-known
+	// devcontainer bin dirs. NOT part of configHash — a pure runtime value.
+	LoginPath string `json:"loginPath,omitempty"`
 }
 
 // aggregateFeatureRequirements merges runtime requirements across features.
@@ -306,7 +318,7 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 
 	emitEvt(ProvisionEvent{Step: ProvStepStart, Detail: baseImage})
 
-	hash := configHash(baseImage, cfg, miseConfig)
+	hash := configHash(baseImage, cfg, miseConfig, dockerfileGenFingerprint(baseImage, cfg))
 	tag := cacheImageTag(hash)
 
 	// 1. Check cache.
@@ -480,6 +492,15 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 		return fail(ProvStepContainerEnvApply, err)
 	}
 	emitEvt(ProvisionEvent{Step: ProvStepContainerEnvApply, Status: ProvStatusCompleted, DurationMs: elapsedMs(envStart)})
+
+	// 7b. Capture the agent user's LOGIN-shell PATH from the fully-provisioned
+	// container (features installed, /etc/profile.d populated, /etc/environment
+	// written). The runtime sets this verbatim on the agent container so a
+	// non-login `docker exec` sees the same PATH a login shell would — making
+	// pipx/feature tools under /usr/local/py-utils/bin reachable. Best-effort:
+	// a capture failure leaves LoginPath empty and the runtime falls back to
+	// prepending the well-known dirs, so this can never break provisioning.
+	requirements.LoginPath = p.captureLoginPath(ctx, containerID)
 
 	// 8. Clean up caches inside the container.
 	if err := p.cleanupCaches(ctx, containerID); err != nil {

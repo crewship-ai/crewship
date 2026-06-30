@@ -22,7 +22,7 @@ type imageListCacheEntry struct {
 
 const imageListTTL = 60 * time.Second
 
-const provisionerSchemaVersion = "v1"
+const provisionerSchemaVersion = "v2"
 
 // cacheImageTag returns the Docker image tag for a given config hash.
 
@@ -35,17 +35,24 @@ func cacheImageTag(configHash string) string {
 }
 
 // configHash computes a deterministic SHA-256 hash from the base image,
-// devcontainer config, and mise config.
+// devcontainer config, mise config, AND the generated Dockerfile.
 //
 // Canonical JSON representation: Config.MarshalJSON emits a map with sorted
 // keys (Go's json package sorts map[string]X keys). miseConfig is re-parsed
 // and re-marshaled so that whitespace / key-order differences in the stored
 // JSON produce the same hash. Unparseable mise config falls back to raw.
 //
+// dockerfile is the (deterministic) output of GenerateDockerfile for this
+// config — see dockerfileGenFingerprint. Hashing it means a CODE change to
+// Dockerfile generation (e.g. a new ENV line, the yarn.list remediation, the
+// RUN template) produces a fresh hash → a new crewship-cache:<hash> tag → a
+// rebuild, instead of silently reusing a stale image baked by the OLD
+// generator. Before this, configHash ignored the Dockerfile entirely, so a
+// generator change never invalidated already-cached images.
+//
 // Note: changing the canonicalization changes existing hashes once; users
-
 // will re-provision on next run. Document in CHANGELOG when bumped.
-func configHash(baseImage string, cfg *Config, miseConfig string) string {
+func configHash(baseImage string, cfg *Config, miseConfig, dockerfile string) string {
 	h := sha256.New()
 	h.Write([]byte(provisionerSchemaVersion))
 	h.Write([]byte("|"))
@@ -70,7 +77,43 @@ func configHash(baseImage string, cfg *Config, miseConfig string) string {
 			h.Write([]byte(miseConfig))
 		}
 	}
+
+	// Fold in the generated Dockerfile so changes to the build-logic that
+	// produces it bust the cache. Deterministic by construction
+	// (GenerateDockerfile sorts env keys and emits a stable layer order).
+	h.Write([]byte("|"))
+	h.Write([]byte(dockerfile))
+
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+// dockerfileGenFingerprint returns a deterministic representation of the
+// Dockerfile-generation logic for a given base image + config, suitable for
+// folding into configHash. It renders the feature-INDEPENDENT skeleton of the
+// generated Dockerfile (the FROM line, the known-broken-repo remediation, and
+// the root-level containerEnv → ENV directives) via the real GenerateDockerfile
+// code path with no resolved features.
+//
+// Why a skeleton rather than the fully-resolved Dockerfile: the cache check
+// runs BEFORE features are downloaded/resolved (deliberately — a cache hit must
+// not pay for a feature download). The skeleton captures the parts of the
+// generator that are pure code (header, remediation hooks, env-emission logic)
+// so a code change there invalidates the cache. Per-feature layers are
+// data-driven by feature metadata, which is already covered by cfg.Features in
+// the hash, and by provisionerSchemaVersion for install-time logic bumps.
+//
+// On the (unexpected) generation error the fingerprint degrades to an empty
+// string — the hash still includes provisionerSchemaVersion + cfg, so this
+// never makes cache correctness worse than the pre-fix behaviour.
+func dockerfileGenFingerprint(baseImage string, cfg *Config) string {
+	df, err := GenerateDockerfile(DockerfileBuild{
+		BaseImage: baseImage,
+		RootEnv:   cfg.ContainerEnv,
+	})
+	if err != nil {
+		return ""
+	}
+	return df
 }
 
 // IsCached reports whether a cached image for the given config hash exists.

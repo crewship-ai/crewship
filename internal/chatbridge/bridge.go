@@ -550,6 +550,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 			ContainerEnv:   mergedEnv,
 		}
 		if info.CachedRequirements != nil {
+			cc.LoginPath = info.CachedRequirements.LoginPath
 			cc.Privileged = info.CachedRequirements.Privileged
 			cc.Init = info.CachedRequirements.Init
 			cc.CapAdd = append(cc.CapAdd, info.CachedRequirements.CapAdd...)

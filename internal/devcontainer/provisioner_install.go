@@ -346,6 +346,43 @@ func (p *Provisioner) runPostCreateCommands(ctx context.Context, containerID str
 	return nil
 }
 
+// captureLoginPath returns the agent user's LOGIN-shell PATH inside the
+// provisioned container, or "" on any failure. It runs `bash -lc` as the agent
+// user (UID 1001, HOME=/home/agent) so the value reflects /etc/profile,
+// /etc/profile.d/* (where features such as pipx add /usr/local/py-utils/bin),
+// /etc/environment, and the agent's own dotfiles — exactly the PATH a login
+// shell would compute, and a superset of the bare image ENV PATH a non-login
+// `docker exec` inherits.
+//
+// Best-effort by contract: every failure path returns "" (never an error) so a
+// capture problem degrades to the runtime's well-known-dirs fallback rather
+// than breaking the provisioning run.
+func (p *Provisioner) captureLoginPath(ctx context.Context, containerID string) string {
+	if p.installer == nil {
+		return ""
+	}
+	// printf (no trailing newline) keeps the value clean; bash -lc forces a
+	// login shell so profile.d contributions are applied.
+	out, exitCode, err := p.installer.execInContainerAsUser(ctx, containerID,
+		[]string{"bash", "-lc", `printf %s "$PATH"`},
+		"1001:1001",
+		[]string{"HOME=/home/agent", "USER=agent"},
+	)
+	if err != nil || exitCode != 0 {
+		p.logger.Debug("login PATH capture failed; runtime will fall back to well-known dirs",
+			"exit_code", exitCode, "error", err)
+		return ""
+	}
+	path := strings.TrimSpace(out)
+	// Sanity guard: a valid PATH always contains at least one absolute dir. A
+	// blank or junk value (e.g. a shell that printed a warning) must not
+	// override the image PATH, so treat it as a capture miss.
+	if !strings.Contains(path, "/") {
+		return ""
+	}
+	return path
+}
+
 // writeAggregatedContainerEnv writes the merged (feature + root-level)
 // containerEnv map to /etc/environment. Iteration order is deterministic.
 

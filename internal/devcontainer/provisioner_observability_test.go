@@ -227,7 +227,7 @@ func TestProvision_Sink_FeatureInstallFailure(t *testing.T) {
 // start → cache_hit → ready, and nothing else.
 func TestProvision_Sink_CacheHit(t *testing.T) {
 	cfg := &Config{Image: "ubuntu:22.04"}
-	hash := configHash("ubuntu:22.04", cfg, "")
+	hash := configHash("ubuntu:22.04", cfg, "", dockerfileGenFingerprint("ubuntu:22.04", cfg))
 	tag := cacheImageTag(hash)
 
 	mock := &mockCommitClient{existingImages: []string{tag}}
@@ -255,6 +255,66 @@ func TestProvision_Sink_CacheHit(t *testing.T) {
 	// cache_hit and ready must carry the tag for audit correlation.
 	if e := (*got)[1]; e.Tag != tag {
 		t.Errorf("cache_hit tag = %q, want %q", e.Tag, tag)
+	}
+}
+
+// TestProvision_CapturesLoginPath is the Fix-1 capture half: Provision runs
+// `bash -lc 'printf %s "$PATH"'` in the provisioned container and persists the
+// result on Requirements.LoginPath — the value the runtime later sets on the
+// agent container so feature/pipx tool dirs (e.g. /usr/local/py-utils/bin) are
+// reachable from a non-login exec.
+func TestProvision_CapturesLoginPath(t *testing.T) {
+	cacheDir := t.TempDir()
+	ref := "ghcr.io/devcontainers/features/common-utils:2"
+	covSeedFeature(t, cacheDir, ref, `{"id":"common-utils","version":"2"}`)
+
+	want := "/home/agent/.local/bin:/usr/local/py-utils/bin:/usr/local/bin:/usr/bin:/bin"
+	exec := newCovExecClient(func(_ int, cfg container.ExecOptions) covExecResult {
+		if strings.Contains(strings.Join(cfg.Cmd, " "), `printf %s "$PATH"`) {
+			return covExecResult{output: want}
+		}
+		return covExecResult{}
+	})
+	p := newCovProvisioner(&mockCommitClient{}, exec, cacheDir)
+	p.SetImageBuilder(&fakeBuilder{available: false})
+
+	cfg := &Config{Image: "ubuntu:22.04", Features: map[string]map[string]any{ref: nil}}
+	res, err := p.Provision(context.Background(), "ubuntu:22.04", cfg, "")
+	if err != nil {
+		t.Fatalf("Provision: %v", err)
+	}
+	if res.Requirements.LoginPath != want {
+		t.Errorf("LoginPath = %q, want %q", res.Requirements.LoginPath, want)
+	}
+	if !strings.Contains(res.Requirements.LoginPath, "/usr/local/py-utils/bin") {
+		t.Error("captured login PATH must include the pipx feature dir")
+	}
+}
+
+// TestProvision_LoginPathCaptureFailureIsNonFatal proves capture is best-effort:
+// a non-zero exit on the PATH probe leaves LoginPath empty but does NOT fail the
+// provision (the runtime falls back to the well-known dirs).
+func TestProvision_LoginPathCaptureFailureIsNonFatal(t *testing.T) {
+	cacheDir := t.TempDir()
+	ref := "ghcr.io/devcontainers/features/common-utils:2"
+	covSeedFeature(t, cacheDir, ref, `{"id":"common-utils","version":"2"}`)
+
+	exec := newCovExecClient(func(_ int, cfg container.ExecOptions) covExecResult {
+		if strings.Contains(strings.Join(cfg.Cmd, " "), `printf %s "$PATH"`) {
+			return covExecResult{output: "", exitCode: 1}
+		}
+		return covExecResult{}
+	})
+	p := newCovProvisioner(&mockCommitClient{}, exec, cacheDir)
+	p.SetImageBuilder(&fakeBuilder{available: false})
+
+	cfg := &Config{Image: "ubuntu:22.04", Features: map[string]map[string]any{ref: nil}}
+	res, err := p.Provision(context.Background(), "ubuntu:22.04", cfg, "")
+	if err != nil {
+		t.Fatalf("Provision must succeed despite PATH capture failure: %v", err)
+	}
+	if res.Requirements.LoginPath != "" {
+		t.Errorf("LoginPath = %q, want empty on capture failure", res.Requirements.LoginPath)
 	}
 }
 
