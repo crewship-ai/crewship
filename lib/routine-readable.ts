@@ -104,12 +104,17 @@ function hostOf(url: string): string {
  *  to e.g. a Slack webhook reads as "Slack" instead of "hooks.slack.com". */
 function knownIntegrationLabel(host: string): string | null {
   const h = host.toLowerCase()
-  if (h.includes("slack.com")) return "Slack"
-  if (h.includes("github.com")) return "GitHub"
-  if (h.includes("discord.com") || h.includes("discordapp.com")) return "Discord"
-  if (h.includes("notion.com") || h.includes("notion.so")) return "Notion"
-  if (h.includes("hooks.zapier.com")) return "Zapier"
-  if (h === "news.ycombinator.com" || h === "ycombinator.com") return "Hacker News"
+  // Anchored host match: the host must EQUAL the domain or be a subdomain of it
+  // (suffix at a dot boundary). A substring test (`h.includes("slack.com")`)
+  // is unsafe — "slack.com.evil.com" and "evilslack.com" would both match.
+  const is = (...domains: string[]) =>
+    domains.some((d) => h === d || h.endsWith("." + d))
+  if (is("slack.com")) return "Slack"
+  if (is("github.com")) return "GitHub"
+  if (is("discord.com", "discordapp.com")) return "Discord"
+  if (is("notion.com", "notion.so")) return "Notion"
+  if (is("zapier.com")) return "Zapier"
+  if (is("ycombinator.com")) return "Hacker News"
   return null
 }
 
