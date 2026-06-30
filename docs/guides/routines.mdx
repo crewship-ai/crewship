@@ -237,8 +237,12 @@ show up in the manifest:
 }
 ```
 
-- `datastores[].type` — `redis | postgres | mysql | mongodb | other`
-- `tools[].type` — `ansible | terraform | kubectl | bash | python | other`
+- `datastores[].type` — **any string**, but use the canonical vocabulary
+  `redis | postgres | mysql | mongodb | other` so it matches what the crew's
+  container catalog reports (the precondition gate compares `type`
+  case-insensitively; a non-canonical type simply won't match a crew resource).
+- `tools[].type` — **any string**; canonical examples `ansible | terraform |
+  kubectl | bash | python | other`. Same matching rule as datastores.
 - `name` / `note` are free-form and optional.
 
 Validation is **lenient**: declaring a resource is always allowed at **save**

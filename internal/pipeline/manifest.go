@@ -63,8 +63,13 @@ func (d *DSL) ExtractManifest() *Manifest {
 		m.Credentials = append(m.Credentials, d.CredsRequired...)
 	}
 
-	// Accumulators walked across steps + hooks.
-	egress := append([]string{}, d.EgressTargets...)
+	// Accumulators walked across steps + hooks. Egress entries are DNS
+	// hostnames (case-insensitive), so canonicalize to lowercase before they
+	// reach dedupeSorted — otherwise EXAMPLE.com and example.com survive as two.
+	egress := make([]string, 0, len(d.EgressTargets))
+	for _, e := range d.EgressTargets {
+		egress = append(egress, strings.ToLower(strings.TrimSpace(e)))
+	}
 	var agents, routines []string
 	var tools []ToolRef
 
@@ -137,7 +142,9 @@ func hostFromURL(raw string) string {
 	if err != nil {
 		return ""
 	}
-	return u.Hostname()
+	// Lowercase: DNS hostnames are case-insensitive, so the manifest dedupes
+	// http hosts against declared egress targets consistently.
+	return strings.ToLower(u.Hostname())
 }
 
 // dedupeSorted returns the input with empties dropped, duplicates removed, and
