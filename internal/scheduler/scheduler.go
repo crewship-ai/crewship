@@ -395,6 +395,11 @@ func (s *Scheduler) triggerAgent(ag scheduledAgent) {
 		"duration_ms": time.Since(startedAt).Milliseconds(),
 	}
 	orchestrator.MergeResultUsageMeta(completedMeta, acc.ResultMeta())
+	// Record the actually-resolved model (session-init ground truth) on the
+	// run so the run record can confirm which tier the subscription served.
+	if m := acc.ResolvedModel(); m != "" {
+		completedMeta["model"] = m
+	}
 
 	if runErr != nil {
 		errMsg := runErr.Error()

@@ -835,7 +835,23 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		}
 	})
 	scrubHandler, flushScrub := o.wrapScrubHandler(journalTap, secretValues)
+	// loggedModel guards the one-shot resolved-model log so a multi-init
+	// stream (sub-agents, restarts) doesn't re-log on every system event.
+	var loggedModel bool
 	tappedHandler := EventHandler(func(event AgentEvent) {
+		// Surface the model the run ACTUALLY resolved to. adapter_claude.go
+		// stamps meta["model"] on the session-init system event — that's
+		// ground truth for what the API served (the subscription may serve
+		// a lower tier than the requested --model). Compare against the
+		// requested override and WARN loudly on a family fallback.
+		if !loggedModel && event.Type == "system" {
+			if m, ok := event.Metadata.(map[string]interface{}); ok {
+				if actual, ok := m["model"].(string); ok && actual != "" {
+					loggedModel = true
+					logResolvedModel(o.logger, req.AgentID, req.LLMModel, actual)
+				}
+			}
+		}
 		// PR-C F4.2: invoke the sampled behavior monitor on every
 		// tool_call event. The hook's MaybeEvaluate is the sampling
 		// gate — most calls return (nil, false) without firing the

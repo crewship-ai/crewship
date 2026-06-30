@@ -72,6 +72,11 @@ Examples:
 		jqExpr, _ := cmd.Flags().GetString("filter")
 		if jqExpr != "" || f.Format == "json" || f.Format == "yaml" {
 			payload := map[string]any{"run_id": runID, "agent_id": runMeta.AgentID, "entries": entries}
+			// Surface the model the run actually resolved to so an operator
+			// can verify Opus-vs-Sonnet from the machine-readable output too.
+			if runMeta.Model != "" {
+				payload["model"] = runMeta.Model
+			}
 			if jqExpr != "" {
 				return emitJSONFiltered(cmd, payload)
 			}
@@ -80,7 +85,7 @@ Examples:
 			}
 			return f.JSON(payload)
 		}
-		printInspectTable(runID, runMeta.AgentSlug, runMeta.AgentID, entries)
+		printInspectTable(runID, runMeta.AgentSlug, runMeta.AgentID, runMeta.Model, entries)
 		return nil
 	},
 }
@@ -136,12 +141,16 @@ func filterEntriesByTrace(entries []map[string]any, runID string) []map[string]a
 // printInspectTable renders entries as a one-line-per-event timeline,
 // followed by a roll-up of cost (if any cost.incurred entries exist) and
 // tool call counts. Format mirrors `crewship journal` for muscle memory.
-func printInspectTable(runID, agentSlug, agentID string, entries []map[string]any) {
+func printInspectTable(runID, agentSlug, agentID, model string, entries []map[string]any) {
 	header := fmt.Sprintf("Run %s", runID)
 	if agentSlug != "" {
 		header += fmt.Sprintf(" · agent %s", agentSlug)
 	} else if agentID != "" {
 		header += fmt.Sprintf(" · agent %s", agentID)
+	}
+	// The resolved model is the answer to "did this run actually use Opus?".
+	if model != "" {
+		header += fmt.Sprintf(" · model %s", model)
 	}
 	fmt.Printf("%s%s%s  (%d entries)\n", cli.Bold, header, cli.Reset, len(entries))
 	fmt.Println(strings.Repeat("─", 80))

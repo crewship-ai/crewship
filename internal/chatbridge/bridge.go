@@ -763,6 +763,11 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		"duration_ms": time.Since(startedAt).Milliseconds(),
 	}
 	orchestrator.MergeResultUsageMeta(completedMeta, acc.ResultMeta())
+	// Persist the model the run actually resolved to (session-init ground
+	// truth) so `crewship inspect`/the run JSON can confirm Opus-vs-Sonnet.
+	if m := acc.ResolvedModel(); m != "" {
+		completedMeta["model"] = m
+	}
 	if err := b.resolver.UpdateRun(ctx, runID, "COMPLETED", &exitCode, nil, completedMeta); err != nil {
 		b.logger.Warn("failed to update run status", "run_id", runID, "error", err)
 	}

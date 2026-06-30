@@ -11,8 +11,9 @@ import (
 // event. Both are read-only via getters so callers can pull them after a run
 // without touching the handler's internals.
 type Accumulator struct {
-	text       strings.Builder
-	resultMeta map[string]any
+	text          strings.Builder
+	resultMeta    map[string]any
+	resolvedModel string
 }
 
 // Text returns the assistant text accumulated from "text" events. It is empty
@@ -31,6 +32,18 @@ func (a *Accumulator) ResultMeta() map[string]any {
 		return nil
 	}
 	return a.resultMeta
+}
+
+// ResolvedModel returns the model id the run ACTUALLY resolved to, captured
+// from the CLI's session-init event (ground truth for what the API served vs
+// what Crewship asked for via --model). Empty when no init event reported a
+// model (non-Claude adapter, or CaptureResultMeta was disabled). Callers
+// persist this on the run record so an operator can verify Opus-vs-Sonnet.
+func (a *Accumulator) ResolvedModel() string {
+	if a == nil {
+		return ""
+	}
+	return a.resolvedModel
 }
 
 // BufferingHandlerOpts configures NewBufferingHandler. Every field is optional;
@@ -75,6 +88,18 @@ func NewBufferingHandler(opts BufferingHandlerOpts) (EventHandler, *Accumulator)
 		if opts.CaptureResultMeta && event.Type == "result" {
 			if m, ok := event.Metadata.(map[string]any); ok {
 				acc.resultMeta = m
+			}
+		}
+		// The session-init system event carries the model the run actually
+		// resolved to (see adapter_claude.go). Capture the first one so the
+		// run record can record actual-vs-requested model. Gated behind the
+		// same flag as result-meta: the sites that finalize a run record
+		// (chat bridge, scheduler) are exactly the ones that want it.
+		if opts.CaptureResultMeta && event.Type == "system" && acc.resolvedModel == "" {
+			if m, ok := event.Metadata.(map[string]any); ok {
+				if model, ok := m["model"].(string); ok && model != "" {
+					acc.resolvedModel = model
+				}
 			}
 		}
 		if opts.LogBuf != nil {

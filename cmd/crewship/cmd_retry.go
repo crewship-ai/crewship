@@ -132,6 +132,10 @@ type runMetadata struct {
 	AgentID   string
 	AgentSlug string
 	ChatID    string
+	// Model is the model the run actually resolved to (server-side ground
+	// truth), surfaced by `crewship inspect` so an operator can confirm the
+	// tier the subscription served. Empty when the server didn't record one.
+	Model string
 }
 
 // fetchRun looks up a run by ID via /api/v1/runs and extracts the fields we
@@ -155,6 +159,7 @@ func fetchRun(client *cli.Client, runID string) (runMetadata, error) {
 			AgentID   string  `json:"agent_id"`
 			AgentSlug *string `json:"agent_slug"`
 			ChatID    *string `json:"chat_id"`
+			Model     *string `json:"model"`
 		} `json:"data"`
 	}
 	if err := cli.ReadJSON(resp, &body); err != nil {
@@ -170,6 +175,9 @@ func fetchRun(client *cli.Client, runID string) (runMetadata, error) {
 		}
 		if r.ChatID != nil {
 			out.ChatID = *r.ChatID
+		}
+		if r.Model != nil {
+			out.Model = *r.Model
 		}
 		return out, nil
 	}
