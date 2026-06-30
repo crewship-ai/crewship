@@ -150,6 +150,15 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 		if h.gateMissingIntegrations(w, r, workspaceID, p.AuthorCrewID, "", dsl.NormalizedIntegrationsRequired()) {
 			return
 		}
+		// Resource precondition gate (run-time enforcement of the declared
+		// resources block): block when the routine requires a datastore/tool
+		// the author crew's container doesn't have. Same fail-open / no-op
+		// contract as the integration gate above, evaluated here at ENQUEUE
+		// time so deferred runs fail fast rather than after the delay.
+		ds, tools := declaredResources(dsl)
+		if h.gateMissingResources(w, r, workspaceID, p.AuthorCrewID, "", ds, tools) {
+			return
+		}
 	}
 
 	// Deferred dispatch: a delay or a debounce key parks the trigger in
@@ -295,6 +304,13 @@ func (h *PipelineHandler) TestRun(w http.ResponseWriter, r *http.Request) {
 	// integration should fail fast here too rather than burn a token-spending
 	// run the agent has no way to complete. Uses the draft's author_crew_id.
 	if h.gateMissingIntegrations(w, r, workspaceID, body.AuthorCrewID, "", dsl.NormalizedIntegrationsRequired()) {
+		return
+	}
+	// Resource gate also applies to test_run — same reasoning as the
+	// integration gate: a test_run really executes against the author crew's
+	// agents, so a routine that requires a datastore/tool the crew lacks
+	// should fail fast rather than burn a token-spending run.
+	if ds, tools := declaredResources(dsl); h.gateMissingResources(w, r, workspaceID, body.AuthorCrewID, "", ds, tools) {
 		return
 	}
 

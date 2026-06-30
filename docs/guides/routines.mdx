@@ -89,7 +89,7 @@ Minimal valid routine:
 | `egress_targets` | array of string | Declared outbound hosts. Enforced for `http` step. |
 | `integrations_required` | array of string | Declared third-party integrations (Composio connector slugs like `"github"`, `"slack"`). **Declared AND enforced at run time** — see [Required integrations](#required-integrations) below. Slugs are lowercased/trimmed. |
 | `credentials_required` | array of CredReq | Declared credential needs (`type` + `scope`). Declared-only today (not yet enforced at run time). |
-| `resources` | object | Agent-declared capability manifest — `datastores[]` and `tools[]` the routine touches that **can't** be inferred from the step graph. Advisory only (never gates a run). See [Capability manifest](#capability-manifest) below. |
+| `resources` | object | Agent-declared capability manifest — `datastores[]` and `tools[]` the routine touches that **can't** be inferred from the step graph. **Declared AND enforced at run time** against the crew's container resources — see [Required resources](#required-resources) below. See [Capability manifest](#capability-manifest) below for the shape. |
 | `max_cost_usd` | number | Runtime cost cap; run aborts if exceeded between steps. |
 | `concurrency_key` | string | Template that gates how many runs can be in flight at once for the same workspace + rendered key. Typical pattern `"{{ inputs.account_id }}"` to serialise per-tenant runs. Empty (default) = no gate. See [Concurrency + idempotency](/guides/routines-cookbook#recipe-5-idempotent-routine-with-concurrency-key) recipe and the fail-fast note in [Troubleshooting](#run-returns-500-pipeline-concurrency_key-rendered-to-empty-value). |
 | `max_concurrent` | integer | Cap on simultaneous runs sharing the resolved `concurrency_key`. Defaults to `1` when `concurrency_key` is set (strict per-key serialisation); ignored otherwise. |
@@ -239,9 +239,45 @@ show up in the manifest:
 - `tools[].type` — `ansible | terraform | kubectl | bash | python | other`
 - `name` / `note` are free-form and optional.
 
-Validation is **lenient**: declaring a resource is always allowed (it never
-gates a run). Save only rejects malformed entries — a blank or non-slug `type`,
-or more than 32 of either kind.
+Validation is **lenient**: declaring a resource is always allowed at **save**
+time (declaring is a contract, not a provisioning request). Save only rejects
+malformed entries — a blank or non-slug `type`, or more than 32 of either kind.
+The *run* path enforces availability — see [Required resources](#required-resources).
+
+### Required resources
+
+The `resources` block is a **run-time precondition gate**, the resource sibling
+of [Required integrations](#required-integrations): it states what the routine
+**requires** (datastores like Postgres/Redis, CLI tools like `ansible`), and the
+run path checks it against what the executing crew's container actually **has**
+(`[CONTAINER RESOURCES]` — the crew's sidecar datastores + installed tools).
+
+Semantics:
+
+- **Enforced at run time.** Before a run starts, Crewship resolves the **author
+  crew's** container resources and compares them to the declared
+  `resources.datastores` + `resources.tools`. If the routine requires a
+  datastore or tool the crew doesn't have, the run is **blocked** with an
+  RFC 7807 Problem Details response, HTTP **422**, carrying a machine-readable
+  `missing_resources: [{ kind, type, name }]` member (`kind` is `"datastore"` or
+  `"tool"`) and a human `detail` like
+  `routine needs datastore postgres, tool ansible, not available to crew "Ops"`.
+  The run never starts — no tokens spent — until the resource is provisioned on
+  the crew.
+- **Matching.** A required **datastore** is satisfied when the crew has a
+  datastore of the same engine `type` (case-insensitive; the service `name` is
+  advisory and not matched). A required **tool** is satisfied when the crew has
+  an installed tool whose name matches the required `type` (the tool's `name`,
+  e.g. `deploy.yml`, is the concrete artifact and isn't matched against the
+  container).
+- **No-op fast path.** A routine that declares no `resources` block does zero
+  resolution work. Only the *declared* resources are gated — `code`-step
+  runtimes folded into the manifest's `tools` (e.g. `cel`) are internal
+  executor runtimes, not crew CLIs, and are never gated.
+- **Fail-open.** If the routine has no author crew, or resource resolution
+  itself errors, the run is **allowed** (a warning is logged) — same reasoning
+  as the integration gate: a resolver bug must never wedge every run.
+- **`run` and `test_run` are gated; `dry_run` is not.**
 
 ### Agents already know what the container has
 
