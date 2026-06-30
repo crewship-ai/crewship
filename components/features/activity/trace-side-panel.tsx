@@ -19,6 +19,7 @@ import { panel } from "@/lib/motion"
 import { TabBar } from "@/components/ui/tab-bar"
 import type { SubSpan, TraceStep } from "@/lib/trace/types"
 import { JSONViewer } from "./json-viewer"
+import { OutputView } from "./output-view"
 import { SubSpanWaterfall } from "./sub-span-waterfall"
 import { extractArtifacts, type Artifact } from "@/lib/trace/extract-artifacts"
 import { toast } from "sonner"
@@ -166,7 +167,7 @@ export function TraceSidePanel({
               <SubSpanWaterfall spans={spans} onOpenArtifact={copyArtifact} />
             )}
             {tab === "input" && <InputView step={step} resolved={resolvedInput} />}
-            {tab === "output" && <OutputView output={output} />}
+            {tab === "output" && <OutputView value={output} />}
             {tab === "logs" && (
               <LogsView errorMessage={isFailedStep ? errorMessage : undefined} />
             )}
@@ -263,22 +264,20 @@ function InputView({ step, resolved }: { step: TraceStep; resolved?: unknown }) 
   )
 }
 
-function OutputView({ output }: { output: unknown }) {
-  if (output === undefined || output === null || output === "") {
-    return (
-      <div className="flex h-32 items-center justify-center text-xs text-muted-foreground/50">
-        No output yet.
-      </div>
-    )
-  }
-  return <JSONViewer value={output} />
-}
-
 function LogsView({ errorMessage }: { errorMessage?: string }) {
   if (errorMessage) {
+    // Route the failure body through OutputView so a stack trace, YAML
+    // error block, or JSON problem-detail highlights like it does in
+    // chat — wrapped in a rose error frame to keep its "this failed"
+    // affordance.
     return (
-      <div className="rounded border border-rose-500/30 bg-rose-500/10 p-2 font-mono text-[11px] text-rose-300">
-        {errorMessage}
+      <div className="space-y-1.5">
+        <div className="text-[10px] uppercase tracking-wider text-rose-300/80">
+          Error
+        </div>
+        <div className="rounded border border-rose-500/30 bg-rose-500/5 p-1.5">
+          <OutputView value={errorMessage} emptyLabel="No error detail." />
+        </div>
       </div>
     )
   }

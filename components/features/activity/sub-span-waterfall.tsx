@@ -11,6 +11,7 @@ import {
   SUB_SPAN_STATUS_COLOR,
   SubSpanIcon,
 } from "./sub-span-visual"
+import { OutputView } from "./output-view"
 
 // SubSpanWaterfall — the drill-down view for one step: a compact Gantt
 // lane (each agent action positioned by started_at/duration within the
@@ -137,11 +138,7 @@ function SpanDetail({
         )}
       </dl>
 
-      {span.detail && (
-        <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded bg-[#0a0b0d] p-2 font-mono text-[10.5px] leading-relaxed text-foreground/80">
-          {span.detail}
-        </pre>
-      )}
+      {span.detail && <OutputView value={span.detail} />}
 
       {span.attributes.artifact_path && (
         <button
