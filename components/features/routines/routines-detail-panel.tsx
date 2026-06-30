@@ -24,6 +24,7 @@ import { RoutineSchedulesTab } from "./routine-schedules-tab"
 import { RoutineWebhooksTab } from "./routine-webhooks-tab"
 import { RoutineWaitpointsTab } from "./routine-waitpoints-tab"
 import { RoutineDryRunReport, type DryRunResult } from "./routine-dry-run-report"
+import type { RoutineManifest } from "@/lib/routine-flow"
 
 // RoutinesDetailPanel — right-side detail for the selected routine.
 // Hosts the seven sub-tabs (Overview, Editor, Runs, Versions,
@@ -57,6 +58,12 @@ export interface RoutineDetail {
   // with no third-party dependencies. Surfaced as chips on the Overview
   // tab and used to explain a 422 run-refusal.
   integrations_required?: string[]
+  // manifest is the server-derived "blast radius" — the union of declared
+  // resources and what's inferable from the step graph (integrations,
+  // egress, credentials, agents, sub-routines, datastores, tools, plus
+  // has_http / has_code flags). Only the detail endpoint returns it; absent
+  // on list responses. Drives the flow diagram + "What it touches" panel.
+  manifest?: RoutineManifest
 }
 
 interface Props {
@@ -247,7 +254,13 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
           ? { bg: "bg-blue-500/20", text: "text-blue-400", label: "Running…" }
           : { bg: "bg-muted", text: "text-muted-foreground", label: "Never invoked" }
 
+  // Top-level tabs are collapsed to the three the redesign elevates
+  // (Overview / Runs / Schedules); the four power-user surfaces
+  // (Editor · Versions · Webhooks · Wait points) live behind a single
+  // "Advanced" tab with its own sub-tab bar so the chrome reads as
+  // "the routine" first and "the machinery" second.
   const [activeTab, setActiveTab] = useState("overview")
+  const [advancedTab, setAdvancedTab] = useState("editor")
 
   return (
     <div className="flex h-full flex-col">
@@ -418,12 +431,9 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
             className="shrink-0 px-4"
           >
             <TabBar.Item value="overview" className="h-10 text-sm">Overview</TabBar.Item>
-            <TabBar.Item value="editor" className="h-10 text-sm">Editor</TabBar.Item>
             <TabBar.Item value="runs" className="h-10 text-sm">Runs</TabBar.Item>
-            <TabBar.Item value="versions" className="h-10 text-sm">Versions</TabBar.Item>
             <TabBar.Item value="schedules" className="h-10 text-sm">Schedules</TabBar.Item>
-            <TabBar.Item value="webhooks" className="h-10 text-sm">Webhooks</TabBar.Item>
-            <TabBar.Item value="waitpoints" className="h-10 text-sm">Wait points</TabBar.Item>
+            <TabBar.Item value="advanced" className="h-10 text-sm">Advanced</TabBar.Item>
           </TabBar>
 
           {error && (
@@ -436,37 +446,61 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
             <TabsContent value="overview" className="m-0 px-6 py-5">
               <RoutineOverviewTab routine={routine} workspaceId={workspaceId} />
             </TabsContent>
-            <TabsContent value="editor" className="m-0 h-full p-0">
-              <RoutineEditorTab
-                routine={routine}
-                workspaceId={workspaceId}
-                onSaved={() => {
-                  fetchRoutine()
-                  onChanged()
-                }}
-              />
-            </TabsContent>
             <TabsContent value="runs" className="m-0 px-6 py-5">
               <RoutineRunsTab workspaceId={workspaceId} slug={routine.slug} />
-            </TabsContent>
-            <TabsContent value="versions" className="m-0 px-6 py-5">
-              <RoutineVersionsTab
-                workspaceId={workspaceId}
-                slug={routine.slug}
-                onRolledBack={() => {
-                  fetchRoutine()
-                  onChanged()
-                }}
-              />
             </TabsContent>
             <TabsContent value="schedules" className="m-0 px-6 py-5">
               <RoutineSchedulesTab workspaceId={workspaceId} pipelineId={routine.id} slug={routine.slug} />
             </TabsContent>
-            <TabsContent value="webhooks" className="m-0 px-6 py-5">
-              <RoutineWebhooksTab workspaceId={workspaceId} pipelineId={routine.id} slug={routine.slug} />
-            </TabsContent>
-            <TabsContent value="waitpoints" className="m-0 px-6 py-5">
-              <RoutineWaitpointsTab workspaceId={workspaceId} slug={routine.slug} />
+            {/* Advanced — power-user machinery behind a sub-tab bar so the
+                top-level chrome stays at three approachable surfaces. */}
+            <TabsContent value="advanced" className="m-0 flex h-full flex-col p-0">
+              <Tabs
+                value={advancedTab}
+                onValueChange={setAdvancedTab}
+                className="flex flex-1 flex-col overflow-hidden"
+              >
+                <TabBar
+                  value={advancedTab}
+                  onValueChange={setAdvancedTab}
+                  layoutId="routine-advanced-tabs-indicator"
+                  ariaLabel="Advanced routine sections"
+                  className="shrink-0 border-b border-border/60 px-4"
+                >
+                  <TabBar.Item value="editor" className="h-9 text-[13px]">Editor / JSON</TabBar.Item>
+                  <TabBar.Item value="versions" className="h-9 text-[13px]">Versions</TabBar.Item>
+                  <TabBar.Item value="webhooks" className="h-9 text-[13px]">Webhooks</TabBar.Item>
+                  <TabBar.Item value="waitpoints" className="h-9 text-[13px]">Wait points</TabBar.Item>
+                </TabBar>
+                <div className="flex-1 overflow-auto">
+                  <TabsContent value="editor" className="m-0 h-full p-0">
+                    <RoutineEditorTab
+                      routine={routine}
+                      workspaceId={workspaceId}
+                      onSaved={() => {
+                        fetchRoutine()
+                        onChanged()
+                      }}
+                    />
+                  </TabsContent>
+                  <TabsContent value="versions" className="m-0 px-6 py-5">
+                    <RoutineVersionsTab
+                      workspaceId={workspaceId}
+                      slug={routine.slug}
+                      onRolledBack={() => {
+                        fetchRoutine()
+                        onChanged()
+                      }}
+                    />
+                  </TabsContent>
+                  <TabsContent value="webhooks" className="m-0 px-6 py-5">
+                    <RoutineWebhooksTab workspaceId={workspaceId} pipelineId={routine.id} slug={routine.slug} />
+                  </TabsContent>
+                  <TabsContent value="waitpoints" className="m-0 px-6 py-5">
+                    <RoutineWaitpointsTab workspaceId={workspaceId} slug={routine.slug} />
+                  </TabsContent>
+                </div>
+              </Tabs>
             </TabsContent>
           </div>
         </Tabs>

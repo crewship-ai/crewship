@@ -15,6 +15,10 @@ import {
   ChevronRight,
   Activity,
   Puzzle,
+  Workflow,
+  ListChecks,
+  ShieldAlert,
+  Clock,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { JSONViewer } from "@/components/features/activity/json-viewer"
@@ -25,6 +29,9 @@ import { usePipelineRunRecords, type PipelineRunRecord } from "@/hooks/use-pipel
 import { usePipelineSchedules } from "@/hooks/use-pipeline-schedules"
 import type { RoutineDetail } from "./routines-detail-panel"
 import { Card } from "./_shared"
+import { RoutineFlowDiagram } from "./routine-flow-diagram"
+import { RoutineTouches } from "./routine-touches"
+import { buildPlainSteps, type PlainStep } from "@/lib/routine-flow"
 
 // RoutineOverviewTab — operational dashboard for a single routine,
 // modeled on Stripe/Vercel: KPI tiles with sparklines, runs chart,
@@ -146,44 +153,61 @@ export function RoutineOverviewTab({
 
   const lastRun = runs[0] ?? null
 
+  // Plain-language step list + AI/script tags for the "What it does" panel,
+  // derived purely from the DSL (lib/routine-flow). Memoized on the
+  // definition object identity so we don't re-walk on unrelated re-renders.
+  const plainSteps = useMemo(
+    () => buildPlainSteps(routine.definition),
+    [routine.definition],
+  )
+  const manifest = routine.manifest
+
   return (
     <div className="space-y-4">
-      {/* ── KPI strip ──────────────────────────────────────────────── */}
-      <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <KpiTile
-          label="Total runs"
-          value={stats.total.toString()}
-          delta={runs.length > 0 ? `+${runs.length} last 30` : "no runs yet"}
-          spark={buckets.bins.map((b) => b.total)}
-          tone="blue"
-        />
-        <KpiTile
-          label="Pass rate"
+      {/* ── Compact stat strip (DEMOTED from 4 big KPI cards) ───────── */}
+      <section className="flex flex-wrap overflow-hidden rounded-lg border border-border/60">
+        <StatCell label="Runs" value={stats.total.toString()} />
+        <StatCell
+          label="Pass"
           value={stats.passRate !== null ? `${stats.passRate}%` : "—"}
-          deltaTone={stats.passRate !== null && stats.passRate >= 90 ? "up" : stats.passRate !== null && stats.passRate < 70 ? "down" : undefined}
-          delta={
-            stats.passRate !== null
-              ? `${stats.succeeded} ok · ${stats.failed} failed`
-              : "no completed runs yet"
-          }
-          spark={buckets.bins.map((b) => (b.total > 0 ? (b.total - b.failed) / b.total : 1))}
-          tone="green"
+          tone={stats.passRate !== null && stats.passRate >= 90 ? "green" : undefined}
         />
-        <KpiTile
-          label="Avg duration"
-          value={stats.avgDurMs > 0 ? formatDurationDecimal(stats.avgDurMs) : "—"}
-          delta={lastRun && lastRun.duration_ms > 0 ? `last ${formatDurationDecimal(lastRun.duration_ms)}` : "—"}
-          spark={buckets.bins.map((b) => (b.total > 0 ? b.dur / b.total : 0))}
-          tone="violet"
+        <StatCell label="Avg" value={stats.avgDurMs > 0 ? formatDurationDecimal(stats.avgDurMs) : "—"} />
+        <StatCell
+          label="Spend / run"
+          value={runs.length > 0 ? `$${(stats.costSum / Math.max(runs.length, 1)).toFixed(4)}` : "—"}
         />
-        <KpiTile
-          label="Total spend"
-          value={stats.costSum > 0 ? `$${stats.costSum.toFixed(4)}` : "—"}
-          delta={runs.length > 0 ? `avg $${(stats.costSum / Math.max(runs.length, 1)).toFixed(4)} / run` : "—"}
-          spark={buckets.bins.map((b) => b.cost)}
-          tone="amber"
+        <StatCell
+          label="Schedule"
+          value={schedules.length > 0 ? schedules[0].cron_expr : "manual"}
+          mono={schedules.length > 0}
         />
       </section>
+
+      {/* ── ★ Flow diagram — the centerpiece ───────────────────────── */}
+      <Card title="Data flow" subtitle="preview — not live" icon={Workflow}>
+        <div className="px-4 py-3">
+          <RoutineFlowDiagram definition={routine.definition} manifest={manifest} />
+        </div>
+      </Card>
+
+      {/* ── ★ What it does — plain-language steps + det/AI tags ─────── */}
+      <div className="grid gap-4 lg:grid-cols-[2fr_1fr]">
+        <Card title="What it does" subtitle="step by step" icon={ListChecks}>
+          <ol className="px-4 py-2">
+            {plainSteps.map((s) => (
+              <PlainStepRow key={s.id} step={s} />
+            ))}
+          </ol>
+        </Card>
+
+        {/* ── ★ What it touches — capability manifest ──────────────── */}
+        <Card title="What it touches" subtitle="blast radius" icon={ShieldAlert}>
+          <div className="px-3 py-2">
+            <RoutineTouches manifest={manifest} />
+          </div>
+        </Card>
+      </div>
 
       {/* ── Two-column body ────────────────────────────────────────── */}
       <div className="grid gap-4 lg:grid-cols-[2fr_1fr]">
@@ -373,74 +397,75 @@ export function RoutineOverviewTab({
  *  shared by every routine sub-tab.                                 *
  * ----------------------------------------------------------------- */
 
-const SPARK_TONES = {
-  blue: "rgb(107 141 247)",
-  green: "rgb(52 211 153)",
-  violet: "rgb(167 139 250)",
-  amber: "rgb(245 158 11)",
-} as const
-
-function KpiTile({
+// StatCell — one segment of the thin demoted stat strip. Replaces the four
+// large KPI tiles the redesign collapses into a single compact row.
+function StatCell({
   label,
   value,
-  delta,
-  deltaTone,
-  spark,
   tone,
+  mono,
 }: {
   label: string
   value: string
-  delta?: string
-  deltaTone?: "up" | "down"
-  spark: number[]
-  tone: keyof typeof SPARK_TONES
+  tone?: "green"
+  mono?: boolean
 }) {
-  const color = SPARK_TONES[tone]
-  const max = Math.max(1, ...spark)
   return (
-    <div className="relative flex flex-col gap-1 overflow-hidden rounded-xl border border-border/60 bg-card px-4 py-4">
+    <div className="min-w-[96px] flex-1 border-r border-border/60 px-3.5 py-2 last:border-r-0">
+      <div className="text-[10px] uppercase tracking-wide text-muted-foreground-soft">{label}</div>
       <div
-        aria-hidden
-        className="pointer-events-none absolute -right-6 -top-6 h-24 w-24 rounded-full"
-        style={{ background: `radial-gradient(circle, ${color}14, transparent 70%)` }}
-      />
-      {/* Label + value sized to match the dashboard's KpiCard so a KPI
-          renders identically whether shown on /dashboard or on a routine
-          detail Overview tab. */}
-      <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-        {label}
-      </div>
-      <div className="mt-1 text-[28px] font-semibold leading-none tabular-nums sm:text-[32px]">
+        className={cn(
+          "mt-0.5 truncate text-[13px] font-semibold tabular-nums",
+          tone === "green" && "text-emerald-400",
+          mono && "font-mono text-[11px] font-medium",
+        )}
+        title={value}
+      >
         {value}
       </div>
-      {delta && (
-        <div
-          className={cn(
-            "mt-1 text-[11px]",
-            deltaTone === "up"
-              ? "text-emerald-400"
-              : deltaTone === "down"
-                ? "text-rose-400"
-                : "text-muted-foreground",
-          )}
-        >
-          {delta}
-        </div>
-      )}
-      <div className="mt-2 flex h-7 items-end gap-[3px]">
-        {spark.map((v, i) => (
-          <span
-            key={i}
-            className="flex-1 rounded-sm"
-            style={{
-              height: `${Math.max(6, (v / max) * 100)}%`,
-              backgroundColor: color,
-              opacity: 0.55,
-            }}
-          />
-        ))}
-      </div>
     </div>
+  )
+}
+
+// PlainStepRow — one line of the "What it does" list: a numbered (or
+// trigger) marker, a human title with a det-vs-AI tag, and an optional
+// detail line. The AI tag (indigo) flags non-deterministic agent steps; the
+// script tag (violet) marks deterministic ones.
+function PlainStepRow({ step }: { step: PlainStep }) {
+  const isTrigger = step.determinism === "trigger"
+  return (
+    <li className="flex gap-3 border-t border-white/[0.04] py-2.5 first:border-t-0">
+      <span
+        className={cn(
+          "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[10px] font-medium",
+          isTrigger ? "bg-amber-500/15 text-amber-400" : "bg-white/[0.06] text-muted-foreground",
+        )}
+      >
+        {isTrigger ? <Clock className="h-3 w-3" aria-hidden /> : step.index}
+      </span>
+      <div className="min-w-0">
+        <div className="text-[12.5px] leading-snug text-foreground/90">
+          {step.title}
+          {!isTrigger && (
+            <span
+              className={cn(
+                "ml-1.5 rounded px-1.5 py-px align-middle text-[9.5px] font-medium",
+                step.determinism === "ai"
+                  ? "bg-indigo-500/15 text-indigo-300"
+                  : "bg-violet-500/15 text-violet-300",
+              )}
+            >
+              {step.determinism === "ai" ? "AI" : "script"}
+            </span>
+          )}
+        </div>
+        {step.detail && (
+          <div className="mt-0.5 truncate font-mono text-[10.5px] text-muted-foreground-soft" title={step.detail}>
+            {step.detail}
+          </div>
+        )}
+      </div>
+    </li>
   )
 }
 
