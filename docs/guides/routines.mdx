@@ -37,6 +37,8 @@ Crewship is unusual among workflow systems because **agents author routines**, n
 <CardGroup cols={3}>
   <Card title="Agent" icon="robot">
     The most common path. An agent that's solved a repetitive problem twice posts to `http://localhost:9119/pipelines/save` from inside its container; the sidecar injects authorship and forwards to the main API. Next time `[AVAILABLE ROUTINES]` block in the system prompt advertises it to other crews.
+
+    You can also just **describe a routine in chat** — "make a routine that summarizes yesterday's commits and posts to Slack." A crew **Lead** carries the bundled **`routine-author`** skill (an authoring playbook): it clarifies the essentials, grounds the DSL in the crew's `[CONNECTED INTEGRATIONS]` and `[AVAILABLE ROUTINES]`, writes and test-runs the routine, then tells you whether it went live or landed as a **proposed** routine for a Manager to approve (see [Governance](#governance--agent-proposes-human-approves-the-risky-ones)).
   </Card>
   <Card title="UI" icon="browser">
     Open `/routines`, click **+ New routine**, pick a starter template, edit the DSL JSON, click **Test & Save**. Test_run runs against the execution tier; on pass the routine is persisted with `authored_via=user_api` and the JWT user as author.
@@ -504,6 +506,52 @@ This is the **self-improvement loop**: an authoring agent that writes brittle DS
 <Tip>
 `skip_test_gate: true` is honored only when the caller's role is OWNER or ADMIN; lower roles get 403. Useful for hand-crafted DSL from known-good templates (the seed flow uses it).
 </Tip>
+
+## Governance — agent proposes, human approves the risky ones
+
+Routines have a lifecycle `status` (migration v128): **`active`** (live + runnable), **`proposed`** (awaiting approval), or **`disabled`** (admin airbag). The test-run gate still applies on top — `status` is an *additional* gate.
+
+### Maker-checker on save
+
+When a routine is saved (by an agent via the sidecar, or by a user via the UI/CLI), Crewship classifies it. A save is **risky** if **any** of these hold:
+
+- it declares an `integrations_required` the author crew can't currently satisfy (the same resolver the [run gate](#required-integrations) uses);
+- it has any `http`/egress step (or routine-level `egress_targets`);
+- it has any `code`-runtime step;
+- it declares `credentials_required`.
+
+Otherwise it's **safe** — only `agent_run` / `transform` / `call_pipeline` / `wait` steps over satisfiable integrations, no egress, no credentials.
+
+- **Safe → `active`.** Goes live immediately, exactly as before.
+- **Risky → `proposed`.** The routine is persisted but **not runnable**, and a **blocking inbox item** is raised for `MANAGER+` (the same Inbox surface as proposed skills). Approve it to go live, or reject it.
+
+A `proposed` (or `disabled`) routine refuses `run` / `run_batch` with `409 Conflict` — `"routine is awaiting approval"` or `"routine is disabled"`. `dry_run` always previews, and `test_run` runs an unsaved draft, so neither is blocked.
+
+### Approve / reject (MANAGER+)
+
+```bash
+crewship routine approve <slug>   # status → active, resolves the inbox item
+crewship routine reject  <slug>   # removes the routine, resolves the inbox item
+```
+
+- `POST /api/v1/workspaces/{ws}/pipelines/{slug}/approve` — `MANAGER+`. Flips to `active`.
+- `POST /api/v1/workspaces/{ws}/pipelines/{slug}/reject` — `MANAGER+`. Soft-deletes the proposed routine.
+
+### Disable / enable (OWNER/ADMIN airbag)
+
+```bash
+crewship routine disable <slug>   # status → disabled; cancels in-flight runs
+crewship routine enable  <slug>   # status → active
+```
+
+- `POST /api/v1/workspaces/{ws}/pipelines/{slug}/disable` — `OWNER/ADMIN`. Flips to `disabled` **and cancels any in-flight runs** of that routine immediately.
+- `POST /api/v1/workspaces/{ws}/pipelines/{slug}/enable` — `OWNER/ADMIN`. Returns it to `active`.
+
+List responses (and `crewship routine list`) carry `status`; filter the queue with:
+
+```bash
+crewship routine list --status proposed
+```
 
 ## Triggers
 

@@ -87,6 +87,13 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Governance status gate (alongside the W0 integration gate below):
+	// refuse to run a routine that isn't 'active'. proposed → awaiting
+	// approval, disabled → admin airbag. dry_run still previews freely.
+	if h.gateRoutineStatus(w, p) {
+		return
+	}
+
 	var body runRequestBody
 	if r.ContentLength > 0 {
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxExecBodyBytes)).Decode(&body); err != nil {
@@ -350,6 +357,82 @@ func (h *PipelineHandler) TestRun(w http.ResponseWriter, r *http.Request) {
 		SaveToken string `json:"save_token,omitempty"`
 	}
 	writeJSON(w, http.StatusOK, testRunResponse{RunResult: res, SaveToken: saveToken})
+}
+
+// InternalTestRun is the X-Internal-Token variant of TestRun used by the
+// sidecar agent-authoring flow (POST /pipelines/save Step 1). The public
+// TestRun is workspace-JWT-authed, but the sidecar carries only the internal
+// token, so its test_run forward to the public route was rejected with
+// `no_credentials` — leaving an agent unable to actually save a routine it
+// authored. This gives the agent path its own internally-authed test_run,
+// mirroring how /internal/pipelines/save mirrors the public Save. Workspace
+// comes from the body (internal routes have no wsCtx); no save_token is minted
+// (there is no user — the sidecar save sets last_test_run_passed directly).
+//
+// POST /api/v1/internal/pipelines/test_run  (X-Internal-Token)
+func (h *PipelineHandler) InternalTestRun(w http.ResponseWriter, r *http.Request) {
+	if h.runner == nil {
+		replyError(w, http.StatusServiceUnavailable, "pipeline runner not wired")
+		return
+	}
+	var body struct {
+		WorkspaceID  string          `json:"workspace_id"`
+		Definition   json.RawMessage `json:"definition"`
+		AuthorCrewID string          `json:"author_crew_id"`
+		SampleInputs map[string]any  `json:"sample_inputs"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxExecBodyBytes)).Decode(&body); err != nil {
+		replyError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if body.WorkspaceID == "" {
+		replyError(w, http.StatusBadRequest, "workspace_id required")
+		return
+	}
+	if len(body.Definition) == 0 {
+		replyError(w, http.StatusBadRequest, "definition required")
+		return
+	}
+	if body.AuthorCrewID == "" {
+		replyError(w, http.StatusBadRequest, "author_crew_id required")
+		return
+	}
+	dsl, err := pipeline.Parse(body.Definition)
+	if err != nil {
+		replyError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	if err := pipeline.Validate(dsl, nil, nil); err != nil {
+		replyError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	// Same integration gate as the public test_run — a draft that can't reach a
+	// required integration fails fast here rather than burning a run.
+	if h.gateMissingIntegrations(w, r, body.WorkspaceID, body.AuthorCrewID, "", dsl.NormalizedIntegrationsRequired()) {
+		return
+	}
+	// SPEED: the agent-authoring gate uses DRY-RUN, not a full test_run. A
+	// dry-run walks the DSL, renders every template, and validates step shapes
+	// WITHOUT invoking any agent (ModeDryRun skips the runner — see
+	// TestExecutor_DryRun_NoAgentInvocation). A full test_run would execute the
+	// routine's agent_run steps — a nested LLM call per save (and per retry) —
+	// which made agent authoring slow (tens of seconds). Structure + template
+	// validity is what authoring needs; real execution happens on the first
+	// run, and risky routines are human-reviewed (governance) before they go
+	// live anyway. The public/UI TestRun is unchanged (humans still get a real
+	// test_run + cost).
+	res, err := h.newExecutor().RunDefinition(r.Context(), dsl, pipeline.RunInput{
+		WorkspaceID:  body.WorkspaceID,
+		AuthorCrewID: body.AuthorCrewID,
+		Inputs:       body.SampleInputs,
+		Mode:         pipeline.ModeDryRun,
+	})
+	if err != nil {
+		h.logger.Error("pipeline internal test_run: exec", "error", err)
+		replyError(w, http.StatusInternalServerError, "Failed to test-run pipeline")
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
 }
 
 // ListRunRecords returns runs from the pipeline_runs table directly

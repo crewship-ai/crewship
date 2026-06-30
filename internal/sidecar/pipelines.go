@@ -105,6 +105,7 @@ func (s *Server) savePipeline(ctx context.Context, body pipelinesSaveRequest) (i
 	// using the wired AgentRunner. Passing test_run is mandatory for
 	// step 2 to succeed (the store enforces the gate).
 	testRunBody, err := json.Marshal(map[string]any{
+		"workspace_id":   s.ipc.WorkspaceID,
 		"definition":     body.Definition,
 		"author_crew_id": s.ipc.CrewID,
 		"sample_inputs":  body.SampleInputs,
@@ -112,7 +113,11 @@ func (s *Server) savePipeline(ctx context.Context, body pipelinesSaveRequest) (i
 	if err != nil {
 		return http.StatusInternalServerError, mustJSON(map[string]string{"error": "marshal test_run body"})
 	}
-	testRunPath := "/api/v1/workspaces/" + s.ipc.WorkspaceID + "/pipelines/test_run"
+	// Internal (X-Internal-Token) test_run: the public workspace test_run is
+	// JWT-authed and rejected the sidecar's internal token (no_credentials),
+	// so the agent-authoring save loop could never get past Step 1. The internal
+	// endpoint dry-run-validates (fast, no agent execution).
+	testRunPath := "/api/v1/internal/pipelines/test_run"
 	testRes, err := s.ipcRequestJSON(ctx, http.MethodPost, testRunPath, testRunBody)
 	if err != nil {
 		return http.StatusBadGateway, mustJSON(map[string]string{"error": "test_run forward: " + err.Error()})
@@ -128,9 +133,11 @@ func (s *Server) savePipeline(ctx context.Context, body pipelinesSaveRequest) (i
 		Status string `json:"status"`
 	}
 	_ = json.Unmarshal(testRes.body, &testRunResult)
-	if testRunResult.Status != "COMPLETED" {
+	// The internal test_run dry-run-validates (fast, no agent execution), so
+	// success is DRY_RUN_OK; COMPLETED is accepted too for forward-compat.
+	if testRunResult.Status != "DRY_RUN_OK" && testRunResult.Status != "COMPLETED" {
 		return http.StatusUnprocessableEntity, mustJSON(map[string]any{
-			"error":    "test_run did not complete cleanly; pipeline not saved",
+			"error":    "routine validation did not pass; not saved",
 			"test_run": json.RawMessage(testRes.body),
 			"hint":     "fix the DSL or sample_inputs and retry",
 			"status":   testRunResult.Status,

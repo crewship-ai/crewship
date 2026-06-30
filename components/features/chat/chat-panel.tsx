@@ -72,6 +72,11 @@ interface ChatPanelProps {
   sessionOrigin?: string | null
   /** Pre-populate the chat input with this text on first render. */
   initialInput?: string
+  /** When true, `initialInput` is auto-sent once the socket is connected
+   *  (used by the describe-first routine authoring handoff: navigate into
+   *  a Lead's chat and fire the authoring prompt without a manual click).
+   *  Fires at most once per mount. */
+  autoSendInitial?: boolean
   /** Mobile-only: which panel to show full-screen. Undefined = desktop mode. */
   mobilePanel?: "chat" | "files" | "files-only" | "more"
   /** Fired when the user sends a message — lets the parent optimistically
@@ -83,7 +88,7 @@ interface ChatPanelProps {
 const noopFileClick = () => {}
 
 /** Chat panel with split view: conversation on the left, tabbed panel on the right. */
-export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole, sessionOrigin, initialInput, mobilePanel, onSend }: ChatPanelProps) {
+export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole, sessionOrigin, initialInput, autoSendInitial, mobilePanel, onSend }: ChatPanelProps) {
   const suggestionPack = getSuggestions(agentRole)
   const defaultSuggestions = suggestionPack.empty
   const followUpPrompts = suggestionPack.followUps
@@ -299,6 +304,25 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     composer.clearDraft(sessionId)
     composer.clearAttachments(sessionId)
   }, [isStreaming, sendMessage, ensureSession, composer, sessionId, onSend])
+
+  // Auto-send the initial prompt once, after the socket is connected.
+  // The WS `send` silently drops while not OPEN, so we gate on
+  // connectionStatus rather than firing on mount. Guarded by a ref so a
+  // re-render (or a transient reconnect) can't double-send.
+  const autoSentRef = useRef(false)
+  useEffect(() => {
+    if (!autoSendInitial || autoSentRef.current) return
+    const text = (initialInput ?? "").trim()
+    if (!text) return
+    if (connectionStatus !== "connected" || isStreaming) return
+    autoSentRef.current = true
+    void (async () => {
+      await ensureSession()
+      sendMessage(text)
+      onSend?.(sessionId, text)
+      setInput("")
+    })()
+  }, [autoSendInitial, initialInput, connectionStatus, isStreaming, ensureSession, sendMessage, onSend, sessionId])
 
   const handleSuggestionClick = useCallback(async (suggestion: string) => {
     if (isStreaming) return

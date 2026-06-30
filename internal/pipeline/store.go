@@ -82,6 +82,12 @@ func (s *Store) Save(ctx context.Context, in SaveInput) (*Pipeline, error) {
 	if in.DSLVersion == "" {
 		in.DSLVersion = "1.0"
 	}
+	// Governance status: empty means "live". The save handlers set
+	// 'proposed' for risky routines so they land in the maker-checker queue.
+	status := in.Status
+	if status == "" {
+		status = "active"
+	}
 
 	hash := definitionHash(in.DefinitionJSON)
 	now := time.Now().UTC()
@@ -115,6 +121,7 @@ UPDATE pipelines SET
     authored_via = ?, imported_from_url = ?,
     last_test_run_at = ?, last_test_run_passed = 1,
     execution_tier_json = ?,
+    status = ?,
     updated_at = ?,
     deleted_at = NULL
 WHERE id = ?`,
@@ -124,6 +131,7 @@ WHERE id = ?`,
 			string(in.Author.Via), nullStr(in.Author.ImportedURL),
 			in.LastTestRunAt.UTC().Format(time.RFC3339Nano),
 			nullStr(in.ExecutionTierJSON),
+			status,
 			now.Format(time.RFC3339Nano),
 			existingID,
 		)
@@ -160,6 +168,7 @@ INSERT INTO pipelines (
     authored_via, imported_from_url,
     last_test_run_at, last_test_run_passed,
     execution_tier_json,
+    status,
     created_at, updated_at
 ) VALUES (
     ?, ?, ?, ?, ?, ?,
@@ -168,6 +177,7 @@ INSERT INTO pipelines (
     ?, ?, ?, ?, ?,
     ?, ?,
     ?, 1,
+    ?,
     ?,
     ?, ?
 )`,
@@ -178,6 +188,7 @@ INSERT INTO pipelines (
 		string(in.Author.Via), nullStr(in.Author.ImportedURL),
 		in.LastTestRunAt.UTC().Format(time.RFC3339Nano),
 		nullStr(in.ExecutionTierJSON),
+		status,
 		now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano),
 	)
 	if err != nil {
@@ -324,6 +335,10 @@ func (s *Store) List(ctx context.Context, f ListFilters) ([]*Pipeline, error) {
 		conds = append(conds, "author_crew_id = ?")
 		args = append(args, f.AuthorCrewID)
 	}
+	if f.Status != "" {
+		conds = append(conds, "status = ?")
+		args = append(args, f.Status)
+	}
 
 	var orderBy string
 	switch f.OrderBy {
@@ -374,6 +389,24 @@ func (s *Store) SoftDelete(ctx context.Context, id string) error {
 		now, now, id)
 	if err != nil {
 		return fmt.Errorf("pipeline: soft delete: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// SetStatus flips a pipeline's governance status (active | proposed |
+// disabled) by id. Used by the approve/enable (→active), reject (handled
+// via SoftDelete), and disable (→disabled) governance endpoints. Returns
+// ErrNotFound when no live row matches so callers can map to 404.
+func (s *Store) SetStatus(ctx context.Context, id, status string) error {
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE pipelines SET status = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL`,
+		status, now, id)
+	if err != nil {
+		return fmt.Errorf("pipeline: set status: %w", err)
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
 		return ErrNotFound
@@ -467,6 +500,7 @@ const pipelineColumns = `
     authored_via, COALESCE(imported_from_url, ''),
     last_test_run_at, last_test_run_passed,
     COALESCE(execution_tier_json, ''),
+    COALESCE(status, 'active'),
     created_at, updated_at, deleted_at`
 
 // rowScanner narrows the rows interface to just what we need so
@@ -504,6 +538,7 @@ func scanPipeline(rs rowScanner) (*Pipeline, error) {
 		&authoredVia, &p.ImportedFrom,
 		&lastTestRunAt, &lastTestRunPassed,
 		&p.ExecutionTierJSON,
+		&p.Status,
 		&createdAt, &updatedAt, &deletedAt,
 	)
 	if err != nil {

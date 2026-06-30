@@ -36,6 +36,14 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/dry_run", authed(wsCtx(http.HandlerFunc(pipes.DryRun))))
 	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/test_run", authed(wsCtx(http.HandlerFunc(pipes.TestRun))))
 	r.mux.Handle("DELETE /api/v1/workspaces/{workspaceId}/pipelines/{slug}", authed(wsCtx(http.HandlerFunc(pipes.Delete))))
+	// Routine governance (maker-checker + admin airbag). approve/reject are
+	// MANAGER+ (canRole "create"); disable/enable are OWNER/ADMIN
+	// (canRole "manage"). Literal sub-segments beat the {slug} catch-all in
+	// net/http's matcher, so no ordering hazard.
+	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/approve", authed(wsCtx(http.HandlerFunc(pipes.Approve))))
+	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/reject", authed(wsCtx(http.HandlerFunc(pipes.Reject))))
+	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/disable", authed(wsCtx(http.HandlerFunc(pipes.Disable))))
+	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/enable", authed(wsCtx(http.HandlerFunc(pipes.Enable))))
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/runs", authed(wsCtx(http.HandlerFunc(pipes.ListRuns))))
 	// run-records hits the v83 pipeline_runs table directly — column-typed
 	// reads beat the LIKE+json_extract scan ListRuns does over journal_entries.

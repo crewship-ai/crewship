@@ -36,7 +36,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/skills"
 )
 
-//go:embed all:anthropic _licenses
+//go:embed all:anthropic all:crewship _licenses
 var bundledFS embed.FS
 
 // FS exposes the embedded bundled-skill filesystem for tests / inspection.
@@ -60,6 +60,16 @@ var vendors = map[string]vendorMeta{
 		spdxLicense:    "Apache-2.0",
 		maturity:       "OFFICIAL",
 		homepageRoot:   "https://github.com/anthropics/skills/tree/main/skills/",
+	},
+	// First-party skills authored by Crewship itself — official playbooks
+	// that ship with every install (no internet, no import flow). Distinct
+	// vendor so the (vendor, slug) uniqueness never collides with an
+	// imported community skill of the same slug.
+	"crewship": {
+		displayLicense: "Apache-2.0 (crewship-ai/crewship)",
+		spdxLicense:    "Apache-2.0",
+		maturity:       "OFFICIAL",
+		homepageRoot:   "https://github.com/crewship-ai/crewship/tree/main/internal/skills/bundled/crewship/",
 	},
 }
 
@@ -96,6 +106,10 @@ var manifests = map[string]skillManifest{
 	"anthropic/theme-factory":         {category: "DESIGN", icon: "paintbrush", note: incompleteBundleNote},
 	"anthropic/algorithmic-art":       {category: "DESIGN", icon: "shapes", note: incompleteBundleNote},
 	"anthropic/slack-gif-creator":     {category: "DESIGN", icon: "image", note: incompleteBundleNote},
+
+	// First-party Crewship playbooks. Self-contained (no companion
+	// scripts/references folders) so no incompleteBundleNote.
+	"crewship/routine-author": {category: "AUTOMATION", icon: "workflow"},
 }
 
 // Install upserts every embedded SKILL.md into the skills table. Idempotent:

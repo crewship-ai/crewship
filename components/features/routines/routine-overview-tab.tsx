@@ -32,6 +32,7 @@ import { Card } from "./_shared"
 import { RoutineFlowDiagram } from "./routine-flow-diagram"
 import { RoutineTouches } from "./routine-touches"
 import { buildPlainSteps, type PlainStep } from "@/lib/routine-flow"
+import { RoutineReadableSummary } from "./routine-readable-summary"
 
 // RoutineOverviewTab — operational dashboard for a single routine,
 // modeled on Stripe/Vercel: KPI tiles with sparklines, runs chart,
@@ -213,6 +214,13 @@ export function RoutineOverviewTab({
       <div className="grid gap-4 lg:grid-cols-[2fr_1fr]">
         {/* Main column */}
         <div className="space-y-4">
+          {/* What it does — plain-language step summary so users aren't
+              reading raw DSL JSON to understand the routine. Backed by the
+              same renderer as the authoring draft previews. */}
+          <Card title="What it does" subtitle={`${steps.length} step${steps.length === 1 ? "" : "s"}`}>
+            <RoutineReadableSummary definition={def} />
+          </Card>
+
           {/* Runs over time chart */}
           <Card title="Runs over time" subtitle="last 7 days">
             <RunsChart bins={buckets.bins} />
