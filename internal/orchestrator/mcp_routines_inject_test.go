@@ -74,7 +74,23 @@ func TestInjectRoutinesMCPIntoClaudeJSON_AddsServer(t *testing.T) {
 	}
 }
 
-// TestInjectRoutinesMCPIntoClaudeJSON_PreservesUserEntry — override wins.
+// TestInjectRoutinesMCPIntoClaudeJSON_SetsAlwaysLoad asserts the injected
+// first-party server is flagged alwaysLoad so Claude Code presents save_routine/
+// list_routines/run_routine EAGERLY at session start — no ToolSearch discovery
+// round-trip before the agent can author or run a routine. Claude-only
+// .mcp.json field (v2.1.121+); the other CLIs load MCP tools eagerly already.
+func TestInjectRoutinesMCPIntoClaudeJSON_SetsAlwaysLoad(t *testing.T) {
+	out, err := injectRoutinesMCPIntoClaudeJSON(`{"mcpServers":{}}`)
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if !strings.Contains(out, `"alwaysLoad":true`) {
+		t.Errorf("injected routines server missing alwaysLoad:true — tools stay deferred behind ToolSearch: %s", out)
+	}
+}
+
+// TestInjectRoutinesMCPIntoClaudeJSON_PreservesUserEntry — override wins, and
+// we do NOT force alwaysLoad onto an operator's own entry.
 func TestInjectRoutinesMCPIntoClaudeJSON_PreservesUserEntry(t *testing.T) {
 	in := `{"mcpServers":{"crewship-routines":{"type":"http","url":"http://user/mcp"}}}`
 	out, err := injectRoutinesMCPIntoClaudeJSON(in)
@@ -83,6 +99,9 @@ func TestInjectRoutinesMCPIntoClaudeJSON_PreservesUserEntry(t *testing.T) {
 	}
 	if !strings.Contains(out, "http://user/mcp") {
 		t.Errorf("user entry not preserved: %s", out)
+	}
+	if strings.Contains(out, "alwaysLoad") {
+		t.Errorf("must not inject alwaysLoad onto a user-declared entry: %s", out)
 	}
 }
 

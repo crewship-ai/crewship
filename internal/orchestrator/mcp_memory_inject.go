@@ -86,6 +86,14 @@ func injectMemoryMCPIntoClaudeJSON(in string) (string, error) {
 	entry := map[string]any{
 		"type": "http",
 		"url":  memoryMCPSpec().URL,
+		// alwaysLoad presents this server's tools (memory.read / write /
+		// search / append_daily) to the model EAGERLY at session start
+		// instead of deferring them behind a ToolSearch discovery hop. These
+		// are first-party tools the agent needs almost every turn, so the
+		// one-time context cost is worth eliminating a round-trip per run.
+		// Claude-Code-only field (v2.1.121+); unknown keys are ignored by
+		// older CLIs, and the other adapters load MCP tools eagerly already.
+		"alwaysLoad": true,
 	}
 	entryJSON, err := json.Marshal(entry)
 	if err != nil {
