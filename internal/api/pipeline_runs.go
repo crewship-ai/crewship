@@ -1,14 +1,17 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/pipeline"
 )
 
@@ -210,8 +213,91 @@ func (h *PipelineHandler) GetRun(w http.ResponseWriter, r *http.Request) {
 		"is_replay":        isReplay != 0,
 		"replay_of":        replayOf.String,
 		"tags":             tags,
+		// sub_spans is the DEEP trace data: for an agent_run step, the
+		// agent's individual tool calls (Bash/Write/Read/MCP/HTTP) captured
+		// as run.agent_span journal entries, keyed by step_id. A run that
+		// recorded none (old run, agent with no tool calls, LLMRunner mode)
+		// gets an empty object — same shape, no error.
+		"sub_spans": h.loadRunAgentSpans(r.Context(), workspaceID, runID),
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// runAgentSpanQueryLimit bounds how many sub-spans GetRun pulls for one run.
+// The capture site caps each agent_run step at orchestrator.RunAgentSpanMaxPerStep
+// (200); a run with several agent_run steps can therefore legitimately have a
+// few hundred. 2000 covers the realistic ceiling while still bounding a
+// pathological journal read.
+const runAgentSpanQueryLimit = 2000
+
+// loadRunAgentSpans pulls a run's captured agent sub-spans (run.agent_span
+// journal entries, anchored to the run via trace_id) and returns them grouped
+// by step_id, each step's slice ordered by seq. Best-effort: a query failure
+// logs and yields an empty (non-nil) map so the run detail still renders.
+func (h *PipelineHandler) loadRunAgentSpans(ctx context.Context, workspaceID, runID string) map[string][]map[string]any {
+	out := map[string][]map[string]any{}
+	if h.db == nil || workspaceID == "" || runID == "" {
+		return out
+	}
+	entries, _, err := journal.List(ctx, h.db, journal.Query{
+		WorkspaceID: workspaceID,
+		TraceID:     runID,
+		Types:       []journal.EntryType{journal.EntryRunAgentSpan},
+		Limit:       runAgentSpanQueryLimit,
+	})
+	if err != nil {
+		h.logger.Warn("load run agent sub-spans", "error", err, "run_id", runID)
+		return out
+	}
+	for _, e := range entries {
+		p := e.Payload
+		if p == nil {
+			continue
+		}
+		stepID, _ := p["step_id"].(string)
+		if stepID == "" {
+			continue
+		}
+		span := map[string]any{
+			"seq":         p["seq"],
+			"kind":        p["kind"],
+			"name":        p["name"],
+			"started_at":  p["started_at"],
+			"duration_ms": p["duration_ms"],
+			"status":      p["status"],
+		}
+		if d, ok := p["detail"]; ok {
+			span["detail"] = d
+		}
+		if a, ok := p["attributes"]; ok {
+			span["attributes"] = a
+		}
+		out[stepID] = append(out[stepID], span)
+	}
+	// journal.List returns newest-first; re-sort each step by seq ascending so
+	// the trace renders in execution order.
+	for k := range out {
+		spans := out[k]
+		sort.SliceStable(spans, func(i, j int) bool {
+			return seqValue(spans[i]["seq"]) < seqValue(spans[j]["seq"])
+		})
+	}
+	return out
+}
+
+// seqValue coerces a JSON-decoded seq (float64 from the journal payload) to an
+// int for ordering. Unknown shapes sort first (0).
+func seqValue(v any) int {
+	switch n := v.(type) {
+	case float64:
+		return int(n)
+	case int:
+		return n
+	case int64:
+		return int(n)
+	default:
+		return 0
+	}
 }
 
 // runLogEntry is the wire shape for one line in a run's console. Mirrors

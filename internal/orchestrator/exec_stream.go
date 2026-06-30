@@ -76,6 +76,7 @@ type contentBlock struct {
 	ID        string       `json:"id,omitempty"`
 	Input     any          `json:"input,omitempty"`
 	ToolUseID string       `json:"tool_use_id,omitempty"`
+	IsError   bool         `json:"is_error,omitempty"`
 	Source    *imageSource `json:"source,omitempty"`
 }
 
@@ -262,6 +263,12 @@ func emitToolResultBlock(block contentBlock, parentID string, handler EventHandl
 	if parentID != "" {
 		meta["parent_tool_use_id"] = parentID
 		meta["subagent"] = true
+	}
+	// Surface tool failures so the run-trace sub-span recorder (and the UI)
+	// can mark the span errored. Only stamped when true so the common
+	// success case keeps the historic metadata shape byte-for-byte.
+	if block.IsError {
+		meta["is_error"] = true
 	}
 	content := block.Text
 	if hit := memory.ScanContent(content); hit != nil {
