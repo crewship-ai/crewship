@@ -3,6 +3,7 @@ import {
   buildFlowNodes,
   buildPlainSteps,
   stepDeterminism,
+  brandIconKey,
   type RoutineManifest,
 } from "@/lib/routine-flow"
 
@@ -70,6 +71,32 @@ describe("buildFlowNodes", () => {
     expect(tools[0].detail).toBe("deploy.yml")
   })
 
+  it("tags datastore + tool nodes with a brand-icon key for real logos", () => {
+    const nodes = buildFlowNodes(fullDsl, fullManifest)
+    const byId = Object.fromEntries(nodes.map((n) => [n.id, n]))
+    const stores = nodes.filter((n) => n.kind === "store")
+    const tools = nodes.filter((n) => n.kind === "tool")
+    expect(stores.map((n) => n.brandIconKey)).toEqual(["redis", "postgresql"])
+    expect(tools.map((n) => n.brandIconKey)).toEqual(["ansible", "bash"])
+    // Generic (non-resource) nodes carry no brand key — they stay lucide.
+    expect(byId["trigger"].brandIconKey).toBeUndefined()
+    expect(byId["fetch"].brandIconKey).toBeUndefined()
+    expect(byId["pick"].brandIconKey).toBeUndefined()
+  })
+
+  it("leaves brandIconKey undefined for an unbranded datastore/tool", () => {
+    const m: RoutineManifest = {
+      ...fullManifest,
+      datastores: [{ type: "sqlite", name: "local" }],
+      tools: [{ type: "make" }],
+    }
+    const nodes = buildFlowNodes({ steps: [] }, m)
+    const store = nodes.find((n) => n.kind === "store")!
+    const tool = nodes.find((n) => n.kind === "tool")!
+    expect(store.brandIconKey).toBeUndefined()
+    expect(tool.brandIconKey).toBeUndefined()
+  })
+
   it("orders resource nodes after the steps and before the output", () => {
     const nodes = buildFlowNodes(fullDsl, fullManifest)
     const kinds = nodes.map((n) => n.kind)
@@ -108,6 +135,46 @@ describe("buildFlowNodes", () => {
   it("labels the trigger detail from input count", () => {
     expect(buildFlowNodes({ inputs: [{ name: "a" }, { name: "b" }] })[0].detail).toBe("2 inputs")
     expect(buildFlowNodes({})[0].detail).toBe("manual / scheduled")
+  })
+})
+
+describe("brandIconKey", () => {
+  it("maps datastores and their aliases to a Simple-Icon key", () => {
+    expect(brandIconKey("postgres")).toBe("postgresql")
+    expect(brandIconKey("postgresql")).toBe("postgresql")
+    expect(brandIconKey("redis")).toBe("redis")
+    expect(brandIconKey("mysql")).toBe("mysql")
+    expect(brandIconKey("mariadb")).toBe("mysql")
+    expect(brandIconKey("mongodb")).toBe("mongodb")
+    expect(brandIconKey("mongo")).toBe("mongodb")
+  })
+
+  it("maps tools / runtimes to a Simple-Icon key", () => {
+    expect(brandIconKey("ansible")).toBe("ansible")
+    expect(brandIconKey("terraform")).toBe("terraform")
+    expect(brandIconKey("kubectl")).toBe("kubernetes")
+    expect(brandIconKey("kubernetes")).toBe("kubernetes")
+    expect(brandIconKey("docker")).toBe("docker")
+    expect(brandIconKey("python")).toBe("python")
+    expect(brandIconKey("bash")).toBe("bash")
+    expect(brandIconKey("git")).toBe("git")
+  })
+
+  it("maps integration slugs to a Simple-Icon key", () => {
+    expect(brandIconKey("slack")).toBe("slack")
+    expect(brandIconKey("discord")).toBe("discord")
+    expect(brandIconKey("github")).toBe("github")
+    expect(brandIconKey("notion")).toBe("notion")
+    expect(brandIconKey("gcal")).toBe("googlecalendar")
+    expect(brandIconKey("zapier")).toBe("zapier")
+  })
+
+  it("is case / whitespace insensitive and returns null when unknown", () => {
+    expect(brandIconKey("  Postgres ")).toBe("postgresql")
+    expect(brandIconKey("REDIS")).toBe("redis")
+    expect(brandIconKey("sqlite")).toBeNull()
+    expect(brandIconKey("make")).toBeNull()
+    expect(brandIconKey("")).toBeNull()
   })
 })
 

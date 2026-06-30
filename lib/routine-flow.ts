@@ -58,12 +58,93 @@ export type FlowIconKey =
   | "tool"
   | "out"
 
+// BrandIconKey is a stable, JSX-free identifier the React layer maps to a
+// real app/brand logo (Simple Icons via react-icons/si) — Postgres elephant,
+// Redis, Ansible, Slack, … — instead of a generic lucide glyph. A node only
+// carries one when its type resolves to a known brand (see brandIconKey()).
+export type BrandIconKey =
+  | "postgresql"
+  | "redis"
+  | "mysql"
+  | "mongodb"
+  | "ansible"
+  | "terraform"
+  | "kubernetes"
+  | "docker"
+  | "python"
+  | "bash"
+  | "git"
+  | "slack"
+  | "discord"
+  | "github"
+  | "notion"
+  | "googlecalendar"
+  | "zapier"
+
+// Alias table: every datastore type / tool type / integration slug we can
+// recognise → its canonical BrandIconKey. Keyed lowercase; the lookup
+// trims + lowercases first so "Postgres", " REDIS " etc. all resolve.
+const BRAND_ICON_ALIASES: Record<string, BrandIconKey> = {
+  // datastores
+  postgres: "postgresql",
+  postgresql: "postgresql",
+  pg: "postgresql",
+  redis: "redis",
+  mysql: "mysql",
+  mariadb: "mysql",
+  mongodb: "mongodb",
+  mongo: "mongodb",
+  // tools / runtimes
+  ansible: "ansible",
+  terraform: "terraform",
+  tf: "terraform",
+  kubernetes: "kubernetes",
+  kubectl: "kubernetes",
+  k8s: "kubernetes",
+  docker: "docker",
+  python: "python",
+  python3: "python",
+  py: "python",
+  bash: "bash",
+  sh: "bash",
+  shell: "bash",
+  git: "git",
+  // integrations
+  slack: "slack",
+  discord: "discord",
+  github: "github",
+  gh: "github",
+  notion: "notion",
+  google: "googlecalendar",
+  gcal: "googlecalendar",
+  googlecalendar: "googlecalendar",
+  "google-calendar": "googlecalendar",
+  google_calendar: "googlecalendar",
+  zapier: "zapier",
+}
+
+/**
+ * brandIconKey maps a datastore type, tool type, or integration slug to a
+ * canonical brand-logo key (resolved to a react-icons/si component in the
+ * React layer), or null when no real logo is known and the caller should
+ * fall back to a generic lucide glyph. Case- and whitespace-insensitive,
+ * never throws.
+ */
+export function brandIconKey(type: string): BrandIconKey | null {
+  if (!type || typeof type !== "string") return null
+  return BRAND_ICON_ALIASES[type.trim().toLowerCase()] ?? null
+}
+
 export interface FlowNode {
   id: string
   kind: FlowNodeKind
   label: string
   detail?: string
   iconKey: FlowIconKey
+  // Optional real brand logo (Postgres/Redis/Ansible/…). When set the
+  // diagram renders the Simple Icon in the brand's tint; when absent it
+  // falls back to the generic lucide icon keyed by `iconKey`.
+  brandIconKey?: BrandIconKey
 }
 
 // ── tiny defensive accessors ───────────────────────────────────────────────
@@ -240,6 +321,7 @@ export function buildFlowNodes(dsl: unknown, manifest?: RoutineManifest | null):
         label: storeLabel(type),
         detail: note || name || undefined,
         iconKey: storeIconKey(type),
+        brandIconKey: brandIconKey(type) ?? undefined,
       })
     })
     asArray(manifest.tools).forEach((raw, i) => {
@@ -254,6 +336,7 @@ export function buildFlowNodes(dsl: unknown, manifest?: RoutineManifest | null):
         label: type,
         detail: name || undefined,
         iconKey: "tool",
+        brandIconKey: brandIconKey(type) ?? undefined,
       })
     })
   }

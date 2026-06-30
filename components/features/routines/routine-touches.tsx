@@ -10,17 +10,22 @@ import {
   Send,
   KeyRound,
   ShieldAlert,
+  type LucideIcon,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { integrationLabel } from "@/lib/integration-labels"
 import type { RoutineManifest } from "@/lib/routine-flow"
+import { brandIconForType, BrandGlyph } from "./brand-icons"
 
 // RoutineTouches — the "What it touches" capability manifest panel. Renders
 // the routine's blast radius as chips grouped by kind (Integrations,
-// Datastores, Tools, Agents, Egress, Credentials). Risky rows — egress
-// (outbound network), credentials, and code/script tools — are highlighted
-// amber so a reviewer can see "what can this thing reach + what secrets does
-// it hold" at a glance. Read-only, derived entirely from `manifest`.
+// Datastores, Tools, Agents, Egress, Credentials). Each chip leads with the
+// real app/brand logo (Postgres elephant, Redis, Ansible, Slack, …) via the
+// shared brand-icons table, falling back to a generic lucide glyph when no
+// logo is known — so this panel and the flow diagram read as one design.
+// Risky rows — egress (outbound network), credentials, and code/script tools —
+// are highlighted amber so a reviewer can see "what can this thing reach + what
+// secrets does it hold" at a glance. Read-only, derived entirely from `manifest`.
 
 type ChipTone = "integ" | "store" | "tool" | "agent" | "neutral" | "risk"
 
@@ -35,13 +40,18 @@ const TONE: Record<ChipTone, string> = {
 
 function Chip({
   tone,
-  icon: Icon,
+  type,
+  fallback,
   children,
 }: {
   tone: ChipTone
-  icon?: typeof Puzzle
+  // Raw datastore/tool/integration type used to resolve a real brand logo.
+  type?: string
+  // Generic lucide glyph rendered when no brand logo resolves (or no type).
+  fallback?: LucideIcon
   children: ReactNode
 }) {
+  const brand = brandIconForType(type)
   return (
     <span
       className={cn(
@@ -49,7 +59,9 @@ function Chip({
         TONE[tone],
       )}
     >
-      {Icon && <Icon className="h-3 w-3" aria-hidden />}
+      {(brand || fallback) && (
+        <BrandGlyph brand={brand} fallback={fallback ?? Puzzle} className="h-3 w-3 shrink-0" />
+      )}
       {children}
     </span>
   )
@@ -64,7 +76,7 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
   )
 }
 
-function storeIcon(type: string) {
+function storeFallbackIcon(type: string): LucideIcon {
   return /^postgres|^mysql/i.test(type) ? Server : Database
 }
 
@@ -100,7 +112,7 @@ export function RoutineTouches({ manifest }: { manifest?: RoutineManifest | null
       {integrations.length > 0 && (
         <Row label="Integrations">
           {integrations.map((s) => (
-            <Chip key={s} tone="integ" icon={Puzzle}>
+            <Chip key={s} tone="integ" type={s} fallback={Puzzle}>
               {integrationLabel(s)}
             </Chip>
           ))}
@@ -109,15 +121,12 @@ export function RoutineTouches({ manifest }: { manifest?: RoutineManifest | null
 
       {datastores.length > 0 && (
         <Row label="Datastores">
-          {datastores.map((d, i) => {
-            const Icon = storeIcon(d.type)
-            return (
-              <Chip key={`${d.type}-${d.name ?? i}`} tone="store" icon={Icon}>
-                {d.type}
-                {d.name ? ` · ${d.name}` : ""}
-              </Chip>
-            )
-          })}
+          {datastores.map((d, i) => (
+            <Chip key={`${d.type}-${d.name ?? i}`} tone="store" type={d.type} fallback={storeFallbackIcon(d.type)}>
+              {d.type}
+              {d.name ? ` · ${d.name}` : ""}
+            </Chip>
+          ))}
         </Row>
       )}
 
@@ -125,7 +134,7 @@ export function RoutineTouches({ manifest }: { manifest?: RoutineManifest | null
         <Row label="Tools / scripts">
           {tools.map((t, i) => (
             // Tools run arbitrary code (ansible/bash/python) — flag amber as risky.
-            <Chip key={`${t.type}-${t.name ?? i}`} tone="risk" icon={Terminal}>
+            <Chip key={`${t.type}-${t.name ?? i}`} tone="risk" type={t.type} fallback={Terminal}>
               {t.type}
               {t.name ? ` · ${t.name}` : ""}
             </Chip>
@@ -136,7 +145,7 @@ export function RoutineTouches({ manifest }: { manifest?: RoutineManifest | null
       {agents.length > 0 && (
         <Row label="Agents">
           {agents.map((a) => (
-            <Chip key={a} tone="agent" icon={Bot}>
+            <Chip key={a} tone="agent" fallback={Bot}>
               @{a}
             </Chip>
           ))}
@@ -148,7 +157,7 @@ export function RoutineTouches({ manifest }: { manifest?: RoutineManifest | null
           {egress.map((host) => (
             // Outbound network reach is the highest-signal "what can it phone
             // home to" — always amber.
-            <Chip key={host} tone="risk" icon={Send}>
+            <Chip key={host} tone="risk" fallback={Send}>
               {host}
             </Chip>
           ))}
@@ -158,7 +167,7 @@ export function RoutineTouches({ manifest }: { manifest?: RoutineManifest | null
       {credentials.length > 0 && (
         <Row label="Credentials">
           {credentials.map((c, i) => (
-            <Chip key={`${c.type}-${i}`} tone="risk" icon={c.type ? ShieldAlert : KeyRound}>
+            <Chip key={`${c.type}-${i}`} tone="risk" fallback={c.type ? ShieldAlert : KeyRound}>
               {c.type}
               {c.scope ? ` · ${c.scope}` : ""}
             </Chip>

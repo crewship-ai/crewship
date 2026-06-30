@@ -15,7 +15,6 @@ import {
   ChevronRight,
   Activity,
   Puzzle,
-  Workflow,
   ListChecks,
   ShieldAlert,
   Clock,
@@ -29,19 +28,17 @@ import { usePipelineRunRecords, type PipelineRunRecord } from "@/hooks/use-pipel
 import { usePipelineSchedules } from "@/hooks/use-pipeline-schedules"
 import type { RoutineDetail } from "./routines-detail-panel"
 import { Card } from "./_shared"
-import { RoutineFlowDiagram } from "./routine-flow-diagram"
 import { RoutineTouches } from "./routine-touches"
 import { buildPlainSteps, type PlainStep } from "@/lib/routine-flow"
-import { RoutineReadableSummary } from "./routine-readable-summary"
 
-// RoutineOverviewTab — operational dashboard for a single routine,
-// modeled on Stripe/Vercel: KPI tiles with sparklines, runs chart,
-// schedule card, I/O schema, prominent last-run card with trigger
-// source + result, recent-runs feed, spend breakdown, compact
-// metadata footer. The whole tab answers the implicit question
-// "what does this routine do, when did it last run, what caused it
-// to run, and was it healthy?" — in that order — without leaving the
-// pane.
+// RoutineOverviewTab — the approachable, non-technical summary of a single
+// routine. Leads with the essentials a human asks first: a thin stat strip,
+// "What it does" (plain-language steps with deterministic/AI tags), "What it
+// touches" (brand-logo chips = blast radius), and the prominent last-run card.
+// Heavier/operational detail (runs-over-time chart, recent-runs feed,
+// schedules, metadata, integrations, credentials) is demoted below the fold.
+// The data-flow diagram lives in its own "Preview" tab; the raw I/O schema is
+// intentionally gone (it lived in the Editor/Advanced surfaces instead).
 
 // Defensive DSL field extraction so a malformed routine doesn't crash
 // the tab (the Editor tab still surfaces the raw JSON).
@@ -81,8 +78,6 @@ export function RoutineOverviewTab({
   workspaceId?: string
 }) {
   const def = routine.definition as Record<string, unknown> | undefined
-  const inputs = asArrayOfObjects(def?.["inputs"])
-  const outputs = asArrayOfObjects(def?.["outputs"])
   const creds = asArrayOfObjects(def?.["credentials_required"])
   const steps = asArrayOfObjects(def?.["steps"])
   // Required third-party integrations (Composio connector slugs). Filter
@@ -185,15 +180,10 @@ export function RoutineOverviewTab({
         />
       </section>
 
-      {/* ── ★ Flow diagram — the centerpiece ───────────────────────── */}
-      <Card title="Data flow" subtitle="preview — not live" icon={Workflow}>
-        <div className="px-4 py-3">
-          <RoutineFlowDiagram definition={routine.definition} manifest={manifest} />
-        </div>
-      </Card>
-
-      {/* ── ★ What it does — plain-language steps + det/AI tags ─────── */}
+      {/* ── ★ Essentials — what it does + what it touches ──────────── */}
       <div className="grid gap-4 lg:grid-cols-[2fr_1fr]">
+        {/* What it does — plain-language steps + deterministic/AI tags so
+            users aren't reading raw DSL JSON to understand the routine. */}
         <Card title="What it does" subtitle="step by step" icon={ListChecks}>
           <ol className="px-4 py-2">
             {plainSteps.map((s) => (
@@ -202,7 +192,7 @@ export function RoutineOverviewTab({
           </ol>
         </Card>
 
-        {/* ── ★ What it touches — capability manifest ──────────────── */}
+        {/* What it touches — capability manifest as brand-logo chips. */}
         <Card title="What it touches" subtitle="blast radius" icon={ShieldAlert}>
           <div className="px-3 py-2">
             <RoutineTouches manifest={manifest} />
@@ -210,54 +200,17 @@ export function RoutineOverviewTab({
         </Card>
       </div>
 
-      {/* ── Two-column body ────────────────────────────────────────── */}
+      {/* ── ★ Last run — the prominent result card ─────────────────── */}
+      <LastRunCard run={lastRun} workspaceId={workspaceId} />
+
+      {/* ── Operational detail — demoted below the essentials ──────── */}
       <div className="grid gap-4 lg:grid-cols-[2fr_1fr]">
         {/* Main column */}
         <div className="space-y-4">
-          {/* What it does — plain-language step summary so users aren't
-              reading raw DSL JSON to understand the routine. Backed by the
-              same renderer as the authoring draft previews. */}
-          <Card title="What it does" subtitle={`${steps.length} step${steps.length === 1 ? "" : "s"}`}>
-            <RoutineReadableSummary definition={def} />
-          </Card>
-
           {/* Runs over time chart */}
           <Card title="Runs over time" subtitle="last 7 days">
             <RunsChart bins={buckets.bins} />
           </Card>
-
-          {/* I/O schema */}
-          <Card title="I/O schema" subtitle={`${inputs.length} in · ${outputs.length} out`}>
-            <div className="divide-y divide-border/40">
-              {inputs.map((inp, i) => (
-                <IORow
-                  key={`in-${i}`}
-                  direction="in"
-                  name={String(inp["name"])}
-                  type={String(inp["type"])}
-                  required={inp["required"] === true}
-                  description={typeof inp["description"] === "string" ? String(inp["description"]) : undefined}
-                  defaultValue={"default" in inp ? inp["default"] : undefined}
-                />
-              ))}
-              {outputs.map((out, i) => (
-                <IORow
-                  key={`out-${i}`}
-                  direction="out"
-                  name={String(out["name"])}
-                  type={String(out["type"])}
-                />
-              ))}
-              {inputs.length === 0 && outputs.length === 0 && (
-                <div className="py-4 text-center text-xs text-muted-foreground">
-                  No inputs / outputs declared.
-                </div>
-              )}
-            </div>
-          </Card>
-
-          {/* Last run — the prominent "data flow" card */}
-          <LastRunCard run={lastRun} workspaceId={workspaceId} />
 
           {/* Recent runs feed */}
           {runs.length > 1 && (
@@ -514,77 +467,6 @@ function RunsChart({ bins }: { bins: Array<{ day: string; total: number; failed:
         {bins.map((b, i) => (
           <span key={i}>{b.day}</span>
         ))}
-      </div>
-    </div>
-  )
-}
-
-function IORow({
-  direction,
-  name,
-  type,
-  required,
-  description,
-  defaultValue,
-}: {
-  direction: "in" | "out"
-  name: string
-  type: string
-  required?: boolean
-  description?: string
-  defaultValue?: unknown
-}) {
-  const isIn = direction === "in"
-  // Long defaults (multi-line strings, big JSON) were rendering as a
-  // wall-of-text in the meta line. Render short defaults inline; collapse
-  // long ones into a <details> block so the row stays scannable.
-  const defaultStr = defaultValue !== undefined ? JSON.stringify(defaultValue) : null
-  const isLongDefault = defaultStr !== null && defaultStr.length > 60
-  return (
-    <div className="flex items-start gap-3 px-4 py-3">
-      <span
-        className={cn(
-          "shrink-0 font-mono text-base leading-tight",
-          isIn ? "text-blue-400" : "text-emerald-400",
-        )}
-        aria-hidden
-      >
-        {isIn ? "→" : "←"}
-      </span>
-      <div className="min-w-0 flex-1 space-y-1.5">
-        {/* Name + type + flags on one line */}
-        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-          <span className="font-mono text-sm font-semibold text-foreground">{name}</span>
-          <span className="rounded bg-white/[0.04] px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
-            {type}
-          </span>
-          {required && (
-            <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[11px] text-amber-300">
-              required
-            </span>
-          )}
-          {defaultStr !== null && !isLongDefault && (
-            <span className="font-mono text-[11px] text-muted-foreground">
-              default {defaultStr}
-            </span>
-          )}
-        </div>
-        {/* Description */}
-        {description && (
-          <p className="text-[13px] leading-relaxed text-muted-foreground">{description}</p>
-        )}
-        {/* Long default — collapsible, preview clipped */}
-        {isLongDefault && defaultStr !== null && (
-          <details className="group rounded-md border border-border/60 bg-black/20 text-[12px]">
-            <summary className="cursor-pointer list-none px-2.5 py-1.5 font-mono text-muted-foreground hover:text-foreground">
-              <span className="mr-1 inline-block transition-transform group-open:rotate-90">▸</span>
-              default value <span className="text-faint">· {defaultStr.length} chars</span>
-            </summary>
-            <pre className="m-0 max-h-48 overflow-auto border-t border-border/40 px-2.5 py-2 font-mono text-[12px] leading-relaxed text-foreground/85">
-              {defaultStr}
-            </pre>
-          </details>
-        )}
       </div>
     </div>
   )

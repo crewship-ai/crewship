@@ -16,6 +16,7 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { buildFlowNodes, type FlowNode, type FlowNodeKind, type FlowIconKey, type RoutineManifest } from "@/lib/routine-flow"
+import { brandIconByKey, BrandGlyph } from "./brand-icons"
 
 // RoutineFlowDiagram — read-only horizontal "data flow" preview, the
 // centerpiece of the routine detail redesign. Renders the node chain from
@@ -53,7 +54,10 @@ const KIND_STYLE: Record<FlowNodeKind, { node: string; icon: string }> = {
 }
 
 function FlowNodeCard({ node }: { node: FlowNode }) {
-  const Icon = ICONS[node.iconKey] ?? Shuffle
+  // Real brand logo (Postgres/Redis/Ansible/…) when the node resolves to one;
+  // otherwise the generic lucide glyph keyed by iconKey, tinted by node kind.
+  const brand = brandIconByKey(node.brandIconKey)
+  const fallback = ICONS[node.iconKey] ?? Shuffle
   const style = KIND_STYLE[node.kind] ?? KIND_STYLE.step
   return (
     <div
@@ -63,7 +67,11 @@ function FlowNodeCard({ node }: { node: FlowNode }) {
       )}
       title={node.detail ? `${node.label} · ${node.detail}` : node.label}
     >
-      <Icon className={cn("h-[18px] w-[18px]", style.icon)} aria-hidden />
+      <BrandGlyph
+        brand={brand}
+        fallback={fallback}
+        className={cn("h-[18px] w-[18px]", !brand && style.icon)}
+      />
       <div className="mt-1.5 truncate text-[11px] font-semibold leading-tight text-foreground/90 max-w-full">
         {node.label}
       </div>

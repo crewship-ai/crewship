@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
-import { X, Play, FlaskConical, Eye, Square, Check, Ban, Power, PowerOff } from "lucide-react"
+import { X, Play, FlaskConical, Eye, Square, Check, Ban, Power, PowerOff, Workflow } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
@@ -25,6 +25,8 @@ import { PipelineRunActivity } from "@/components/features/activity/pipeline-run
 import { usePendingApproval } from "@/hooks/use-pending-approval"
 import { RoutineApprovalBanner } from "@/components/features/routines/routine-approval-banner"
 import { RoutineOverviewTab } from "./routine-overview-tab"
+import { RoutineFlowDiagram } from "./routine-flow-diagram"
+import { Card } from "./_shared"
 import { RoutineEditorTab } from "./routine-editor-tab"
 import { RoutineRunsTab } from "./routine-runs-tab"
 import { RoutineVersionsTab } from "./routine-versions-tab"
@@ -569,6 +571,7 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
             className="shrink-0 px-4"
           >
             <TabBar.Item value="overview" className="h-10 text-sm">Overview</TabBar.Item>
+            <TabBar.Item value="preview" className="h-10 text-sm">Preview</TabBar.Item>
             <TabBar.Item value="runs" className="h-10 text-sm">Runs</TabBar.Item>
             <TabBar.Item value="schedules" className="h-10 text-sm">Schedules</TabBar.Item>
             <TabBar.Item value="advanced" className="h-10 text-sm">Advanced</TabBar.Item>
@@ -583,6 +586,16 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
           <div className="flex-1 overflow-auto">
             <TabsContent value="overview" className="m-0 px-6 py-5">
               <RoutineOverviewTab routine={routine} workspaceId={workspaceId} />
+            </TabsContent>
+            {/* Preview — the read-only data-flow diagram, moved out of Overview
+                into its own tab so the Overview stays scannable for non-technical
+                users. Static derivation of the DSL + manifest, not a live run. */}
+            <TabsContent value="preview" className="m-0 px-6 py-5">
+              <Card title="Data flow" subtitle="preview — not live" icon={Workflow}>
+                <div className="px-4 py-3">
+                  <RoutineFlowDiagram definition={routine.definition} manifest={routine.manifest} />
+                </div>
+              </Card>
             </TabsContent>
             <TabsContent value="runs" className="m-0 px-6 py-5">
               <RoutineRunsTab workspaceId={workspaceId} slug={routine.slug} />
