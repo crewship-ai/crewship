@@ -403,7 +403,12 @@ var startCmd = &cobra.Command{
 					Resolver:  pipelineResolver,
 					LogWriter: srv.LogWriter(),
 					ConvStore: srv.ConversationStore(),
-					Logger:    logger,
+					// Journal is the sink for agent sub-span capture (run.agent_span,
+					// the leaf of the drillable run-trace). Without it journalE is nil
+					// and emitRunAgentSpan silently no-ops, so the trace shows steps
+					// but never the agent's tool calls.
+					Journal: srv.JournalWriter(),
+					Logger:  logger,
 				})
 				if err != nil {
 					logger.Error("pipeline orchestrator runner construct failed", "error", err)
