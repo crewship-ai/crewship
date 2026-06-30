@@ -1,10 +1,17 @@
 "use client"
 
-import { Loader2, Package, AlertTriangle, Check } from "lucide-react"
+import { Loader2, Package, AlertTriangle, Check, X } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useProvisioningStatus } from "@/hooks/use-provisioning-status"
-import { ProvisioningChecklist } from "@/components/layout/app-toolbar-provisioning"
+import {
+  ProvisioningChecklist,
+  ProvisioningEventSteps,
+  ProvisioningFailure,
+  ProvisioningBuildLog,
+  RecentBuildSummary,
+  formatProvisionAgo,
+} from "@/components/layout/app-toolbar-provisioning"
 
 interface CrewProvisioningCardProps {
   crewId?: string
@@ -37,6 +44,7 @@ export function CrewProvisioningCard({
 }: CrewProvisioningCardProps) {
   const { workspaceId } = useWorkspace()
   const provisioning = useProvisioningStatus(workspaceId)
+  const { acknowledge } = provisioning
 
   const crew = crewId
     ? provisioning.detail.find((d) => d.id === crewId)
@@ -88,9 +96,14 @@ export function CrewProvisioningCard({
     )
   }
 
+  // A just-finished build keeps a lingering "ready · built 34s ago" summary so
+  // even a sub-minute build is visible after the fact, instead of the card
+  // flipping straight back to idle.
+  const recentCompleted = crew.status !== "failed" && crew.recent?.outcome === "completed"
+
   const Icon = crew.status === "failed"
     ? AlertTriangle
-    : crew.status === "completed"
+    : crew.status === "completed" || recentCompleted
       ? Check
       : crew.status === "running"
         ? Loader2
@@ -98,29 +111,52 @@ export function CrewProvisioningCard({
 
   const tone = crew.status === "failed"
     ? "border-red-500/30 bg-red-500/5"
-    : crew.status === "completed"
+    : crew.status === "completed" || recentCompleted
       ? "border-emerald-500/30 bg-emerald-500/5"
       : "border-amber-500/30 bg-amber-500/5"
 
   const iconTone = crew.status === "failed"
     ? "text-red-500"
-    : crew.status === "completed"
+    : crew.status === "completed" || recentCompleted
       ? "text-emerald-500"
       : "text-amber-500"
 
   const label = crew.status === "failed"
     ? `Build failed for ${crew.name}`
-    : crew.status === "completed"
-      ? `${crew.name} ready — re-send your message`
-      : `Building ${crew.name}…`
+    : recentCompleted && crew.recent
+      ? `${crew.name} ready — built ${formatProvisionAgo(crew.recent.at)}`
+      : crew.status === "completed"
+        ? `${crew.name} ready — re-send your message`
+        : crew.activeFeature
+          ? `Building ${crew.name} · installing ${crew.activeFeature}`
+          : `Building ${crew.name}…`
+
+  const dismissable = crew.status === "failed" || recentCompleted
 
   return (
     <div className={`rounded-lg border ${tone} px-4 py-3 flex items-start gap-3`}>
       <Icon className={`h-4 w-4 shrink-0 mt-0.5 ${iconTone} ${crew.status === "running" ? "animate-spin" : ""}`} />
       <div className="flex-1 min-w-0">
-        <div className="text-sm font-medium text-foreground mb-1">{label}</div>
+        <div className="flex items-start gap-2">
+          <div className="text-sm font-medium text-foreground mb-1 flex-1 min-w-0">{label}</div>
+          {dismissable && (
+            <button
+              type="button"
+              onClick={() => acknowledge(crew.id)}
+              aria-label="Dismiss"
+              title="Dismiss"
+              className="shrink-0 -mt-0.5 -mr-1 p-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
 
-        {crew.status === "running" && crew.steps && crew.steps.length > 0 ? (
+        {/* ONE coherent step list: prefer the richer provision.event feed, fall
+            back to the coarse provision.started plan, then a bare message. */}
+        {crew.status === "running" && crew.eventSteps && crew.eventSteps.length > 0 ? (
+          <ProvisioningEventSteps steps={crew.eventSteps} />
+        ) : crew.status === "running" && crew.steps && crew.steps.length > 0 ? (
           <ProvisioningChecklist
             steps={crew.steps}
             active={crew.step ?? 0}
@@ -137,11 +173,14 @@ export function CrewProvisioningCard({
           </div>
         ) : null}
 
-        {crew.status === "failed" && crew.error && (
-          <pre className="text-[11px] text-red-500/90 dark:text-red-400/90 font-mono whitespace-pre-wrap break-words mt-1 max-h-[80px] overflow-hidden">
-            {crew.error.slice(0, 320)}
-          </pre>
+        {/* Live build log while running, on demand. */}
+        {crew.status === "running" && crew.logTail && crew.logTail.length > 0 && (
+          <ProvisioningBuildLog lines={crew.logTail} label="build log" />
         )}
+
+        {crew.status === "failed" && <ProvisioningFailure crew={crew} />}
+
+        {recentCompleted && crew.recent && <RecentBuildSummary recent={crew.recent} />}
       </div>
     </div>
   )

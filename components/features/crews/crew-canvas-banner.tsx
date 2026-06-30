@@ -1,45 +1,32 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
-import { AlertTriangle, ChevronDown } from "lucide-react"
+import { useCallback, useState } from "react"
+import { AlertTriangle, Check, ChevronDown, X } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { toast } from "sonner"
 import { apiFetch } from "@/lib/api-fetch"
+import { useProvisioningStatus } from "@/hooks/use-provisioning-status"
+import {
+  ProvisioningEventSteps,
+  ProvisioningChecklist,
+  ProvisioningFailure,
+  RecentBuildSummary,
+  formatProvisionAgo,
+} from "@/components/layout/app-toolbar-provisioning"
 
-// ProvisioningBanner is the canvas-level fallback that surfaces
-// container-image build state (needs_provision / running / failed) when
-// the toolbar popover isn't open. Collapsible is a tiny details/summary
+// ProvisioningBanner is the canvas-level surface for container-image build
+// state. It shares the workspace-scoped useProvisioningStatus hook with the
+// toolbar badge and the chat card so all three move in lockstep — granular
+// per-feature progress while building, a lingering "ready · built 34s ago"
+// summary after a fast build (so it never looks dead), and a persistent red
+// failure with the BuildKit log tail. Collapsible is a tiny details/summary
 // wrapper used by the Settings tab. Extracted from crew-canvas.tsx.
 
 function ProvisioningBanner({ crewId, crewSlug, workspaceId }: { crewId: string; crewSlug: string; workspaceId: string }) {
-  const [state, setState] = useState<{ status: string; error?: string; cached?: string | null; hasConfig: boolean } | null>(null)
+  const provisioning = useProvisioningStatus(workspaceId)
+  const { acknowledge } = provisioning
+  const crew = provisioning.detail.find((d) => d.id === crewId)
   const [triggering, setTriggering] = useState(false)
-
-  const refresh = useCallback(async () => {
-    try {
-      // wsCtx middleware mandates workspace_id; without it the endpoint
-      // 400s and the polling loop re-renders forever.
-      const r = await apiFetch(`/api/v1/crews/${crewId}/provision?workspace_id=${encodeURIComponent(workspaceId)}`)
-      if (!r.ok) return
-      const data = await r.json()
-      setState({
-        status: data.status ?? "idle",
-        error: data.error,
-        cached: data.cached_image,
-        hasConfig: Boolean(data.devcontainer_config),
-      })
-    } catch { /* tolerate */ }
-  }, [crewId, workspaceId])
-
-  useEffect(() => { void refresh() }, [refresh])
-
-  // Poll fast while a build is in flight, slowly when idle/healthy.
-  useEffect(() => {
-    const isBusy = state?.status === "running"
-    const interval = isBusy ? 3000 : 30000
-    const id = setInterval(() => { void refresh() }, interval)
-    return () => clearInterval(id)
-  }, [state?.status, refresh])
 
   const trigger = useCallback(async () => {
     setTriggering(true)
@@ -50,58 +37,96 @@ function ProvisioningBanner({ crewId, crewSlug, workspaceId }: { crewId: string;
         toast.error(`Provision failed to start: ${text}`)
       } else {
         toast.success(`Provisioning started for ${crewSlug}`)
-        void refresh()
       }
     } catch (err) {
       toast.error(`Provision failed: ${err instanceof Error ? err.message : err}`)
     } finally {
       setTriggering(false)
     }
-  }, [crewId, crewSlug, workspaceId, refresh])
+  }, [crewId, crewSlug, workspaceId])
 
-  if (!state) return null
+  if (!crew) return null
 
-  const needsProvision = state.hasConfig && !state.cached && state.status === "idle"
-  if (state.status === "completed" || (!needsProvision && state.status !== "running" && state.status !== "failed")) {
+  const recentCompleted = crew.status !== "failed" && crew.recent?.outcome === "completed"
+  const isNeedsProvision = crew.status === "needs_provision"
+  if (crew.status !== "running" && crew.status !== "failed" && !isNeedsProvision && !recentCompleted) {
     return null
   }
 
-  if (state.status === "running") {
+  if (crew.status === "running") {
     return (
-      <div className="rounded-xl border border-blue-500/30 bg-blue-500/5 px-4 py-3 flex items-center gap-3">
-        <Spinner className="h-4 w-4 text-blue-300 shrink-0" />
-        <div className="flex-1">
-          <div className="text-sm text-blue-200">Building container image…</div>
-          <div className="text-xs text-muted-foreground">
-            Devcontainer features are installing. Agents in this crew will become runnable as soon as the image is ready (usually 30-90 s).
+      <div className="rounded-xl border border-blue-500/30 bg-blue-500/5 px-4 py-3 flex items-start gap-3">
+        <Spinner className="h-4 w-4 text-blue-300 shrink-0 mt-0.5" />
+        <div className="flex-1 min-w-0">
+          <div className="text-sm text-blue-200">
+            {crew.activeFeature
+              ? <>Building container image · installing <span className="font-medium">{crew.activeFeature}</span></>
+              : "Building container image…"}
           </div>
+          {crew.eventSteps && crew.eventSteps.length > 0 ? (
+            <ProvisioningEventSteps steps={crew.eventSteps} />
+          ) : crew.steps && crew.steps.length > 0 ? (
+            <ProvisioningChecklist steps={crew.steps} active={crew.step ?? 0} message={crew.message} />
+          ) : (
+            <div className="text-xs text-muted-foreground">
+              Devcontainer features are installing. Agents in this crew will become runnable as soon as the image is ready (usually 30-90 s).
+            </div>
+          )}
         </div>
       </div>
     )
   }
 
-  if (state.status === "failed") {
+  if (crew.status === "failed") {
     return (
       <div className="rounded-xl border border-red-500/40 bg-red-500/5 px-4 py-3 flex items-start gap-3">
         <AlertTriangle className="h-4 w-4 text-red-300 shrink-0 mt-0.5" />
         <div className="flex-1 min-w-0">
           <div className="text-sm text-red-200">Last provision failed</div>
-          {state.error && (
-            <pre className="text-[11px] text-muted-foreground mt-1 whitespace-pre-wrap font-mono break-words max-h-24 overflow-y-auto">
-              {state.error}
-            </pre>
-          )}
+          <ProvisioningFailure crew={crew} />
           <div className="text-xs text-muted-foreground mt-1.5">
             Fix the runtime config (Settings → Container image &amp; features) and try again.
           </div>
         </div>
+        <div className="flex flex-col items-end gap-1.5 shrink-0">
+          <button
+            type="button"
+            onClick={trigger}
+            disabled={triggering}
+            className="text-xs px-2.5 py-1.5 rounded bg-red-500/20 hover:bg-red-500/30 text-red-200 border border-red-500/40"
+          >
+            {triggering ? "Starting…" : "Retry"}
+          </button>
+          <button
+            type="button"
+            onClick={() => acknowledge(crew.id)}
+            className="text-[10px] text-muted-foreground hover:text-foreground inline-flex items-center gap-1"
+          >
+            <X className="h-3 w-3" /> Dismiss
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  if (recentCompleted && crew.recent) {
+    return (
+      <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 px-4 py-3 flex items-start gap-3">
+        <Check className="h-4 w-4 text-emerald-400 shrink-0 mt-0.5" />
+        <div className="flex-1 min-w-0">
+          <div className="text-sm text-emerald-200">
+            Container image built — {formatProvisionAgo(crew.recent.at)}
+          </div>
+          <RecentBuildSummary recent={crew.recent} />
+        </div>
         <button
           type="button"
-          onClick={trigger}
-          disabled={triggering}
-          className="text-xs px-2.5 py-1.5 rounded bg-red-500/20 hover:bg-red-500/30 text-red-200 border border-red-500/40 shrink-0"
+          onClick={() => acknowledge(crew.id)}
+          aria-label="Dismiss"
+          title="Dismiss"
+          className="shrink-0 p-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
         >
-          {triggering ? "Starting…" : "Retry"}
+          <X className="h-3.5 w-3.5" />
         </button>
       </div>
     )

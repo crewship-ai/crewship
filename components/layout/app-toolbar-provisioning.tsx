@@ -4,11 +4,15 @@ import Link from "next/link"
 import { useCallback, useState } from "react"
 import { toast } from "sonner"
 import {
-  AlertTriangle, Check, Circle, Loader2, Package, Play, RotateCcw,
+  AlertTriangle, Check, Circle, Loader2, Package, Play, RotateCcw, Terminal, X,
 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { useProvisioningStatus } from "@/hooks/use-provisioning-status"
+import {
+  useProvisioningStatus,
+  type ProvisionStepState,
+  type ProvisioningCrewState,
+} from "@/hooks/use-provisioning-status"
 import { apiFetch } from "@/lib/api-fetch"
 
 // Provisioning UI extracted from app-toolbar.tsx — the badge popover
@@ -25,26 +29,43 @@ function ProvisioningBadge({
   const [open, setOpen] = useState(false)
   if (provisioning.total === 0) return null
 
-  const tone = provisioning.failed > 0 ? "red" : "amber"
+  // Tone priority: a failure dominates; an in-flight or pending build is amber;
+  // a purely just-finished build (lingering) is a calm emerald "ready".
+  const onlyRecent = provisioning.failed === 0 && provisioning.building === 0
+    && provisioning.needsProvision === 0 && provisioning.pendingRestart === 0
+    && provisioning.recentlyCompleted > 0
+  const tone = provisioning.failed > 0 ? "red" : onlyRecent ? "emerald" : "amber"
   const colors = tone === "red"
     ? { bg: "bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800", text: "text-red-700 dark:text-red-400", icon: "text-red-600" }
-    : { bg: "bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800", text: "text-amber-700 dark:text-amber-400", icon: "text-amber-600" }
+    : tone === "emerald"
+      ? { bg: "bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800", text: "text-emerald-700 dark:text-emerald-400", icon: "text-emerald-600" }
+      : { bg: "bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800", text: "text-amber-700 dark:text-amber-400", icon: "text-amber-600" }
 
   const verbalize = () => {
     if (provisioning.failed > 0) return `${provisioning.failed} build${provisioning.failed > 1 ? "s" : ""} failed`
     if (provisioning.building > 0) return `Building ${provisioning.building}…`
     if (provisioning.needsProvision > 0) return `${provisioning.needsProvision} need${provisioning.needsProvision > 1 ? "" : "s"} rebuild`
     if (provisioning.pendingRestart > 0) return `${provisioning.pendingRestart} need${provisioning.pendingRestart > 1 ? "" : "s"} restart`
+    if (provisioning.recentlyCompleted > 0) return `Built ${provisioning.recentlyCompleted}`
     return ""
   }
-  const Icon = provisioning.building > 0 ? Loader2 : provisioning.failed > 0 ? AlertTriangle : Package
+  const Icon = provisioning.building > 0
+    ? Loader2
+    : provisioning.failed > 0
+      ? AlertTriangle
+      : onlyRecent
+        ? Check
+        : Package
   // Show every crew that needs the user's attention: build pending, building,
-  // failed, or build complete but agents still on the old image (waiting for
-  // explicit Restart). Idle / clean-completed crews are filtered out so the
-  // popover always reflects the badge count.
+  // failed, build complete but agents still on the old image (waiting for
+  // explicit Restart), or a just-finished build whose recent summary is still
+  // lingering. Acknowledged + idle / clean-completed crews are filtered out so
+  // the popover always reflects the badge count.
   const unhealthy = provisioning.detail.filter((d) => {
+    if (d.acknowledged) return false
     if (d.status === "needs_provision" || d.status === "running" || d.status === "failed") return true
     if (d.status === "completed" && (d.agentsPendingRestart ?? 0) > 0) return true
+    if (d.recent) return true
     return false
   })
 
@@ -72,6 +93,7 @@ function ProvisioningBadge({
               crew={d}
               workspaceId={workspaceId}
               onNavigate={() => setOpen(false)}
+              onAcknowledge={() => provisioning.acknowledge(d.id)}
             />
           ))}
         </ul>
@@ -97,10 +119,12 @@ function ProvisioningRow({
   crew,
   workspaceId,
   onNavigate,
+  onAcknowledge,
 }: {
   crew: ReturnType<typeof useProvisioningStatus>["detail"][number]
   workspaceId: string | null
   onNavigate: () => void
+  onAcknowledge?: () => void
 }) {
   const [busy, setBusy] = useState(false)
   const pendingRestart = crew.agentsPendingRestart ?? 0
@@ -149,16 +173,21 @@ function ProvisioningRow({
     }
   }, [crew.id, crew.name, workspaceId])
 
+  // A lingering completed recent on an otherwise-clean crew shows "ready · built
+  // 34s ago" so even a sub-minute build is visible after the fact.
+  const recentCompleted = crew.status !== "failed" && crew.recent?.outcome === "completed"
   const statusLabel = isPendingRestart
     ? "ready · restart agents"
     : crew.status === "needs_provision"
       ? "needs rebuild"
-      : crew.status
+      : recentCompleted && crew.recent
+        ? `ready · built ${formatProvisionAgo(crew.recent.at)}`
+        : crew.status
 
   return (
     <li className="px-3 py-2.5">
       <div className="flex items-center gap-2 mb-1.5">
-        <ProvisioningStatusDot status={crew.status} />
+        <ProvisioningStatusDot status={crew.status} recent={crew.recent?.outcome} />
         <Link
           href={`/crews?crew=${encodeURIComponent(crew.slug)}`}
           onClick={onNavigate}
@@ -166,12 +195,37 @@ function ProvisioningRow({
         >
           {crew.name}
         </Link>
-        <span className="text-[10px] uppercase tracking-wide text-muted-foreground shrink-0">
+        <span className={`text-[10px] uppercase tracking-wide shrink-0 ${recentCompleted ? "text-emerald-500" : "text-muted-foreground"}`}>
           {statusLabel}
         </span>
+        {(recentCompleted || crew.status === "failed") && onAcknowledge && (
+          <button
+            type="button"
+            onClick={onAcknowledge}
+            aria-label="Dismiss"
+            title="Dismiss"
+            className="shrink-0 -mr-1 p-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        )}
       </div>
 
-      {crew.status === "running" && crew.steps && crew.steps.length > 0 ? (
+      {/* Active step at feature granularity — "Building image · installing ansible". */}
+      {crew.status === "running" && crew.activeFeature && (
+        <div className="ml-4 mb-1 text-[11px] text-foreground flex items-center gap-1.5">
+          <Spinner className="h-3 w-3 shrink-0 text-blue-400" />
+          <span className="truncate">
+            Building image · installing <span className="font-medium">{crew.activeFeature}</span>
+          </span>
+        </div>
+      )}
+
+      {/* ONE coherent step list: prefer the richer provision.event feed, fall
+          back to the coarse provision.started plan, then a bare spinner. */}
+      {crew.status === "running" && crew.eventSteps && crew.eventSteps.length > 0 ? (
+        <ProvisioningEventSteps steps={crew.eventSteps} />
+      ) : crew.status === "running" && crew.steps && crew.steps.length > 0 ? (
         <ProvisioningChecklist steps={crew.steps} active={crew.step ?? 0} message={crew.message} />
       ) : crew.status === "running" && crew.total ? (
         // Fallback for the brief window between provision.started and the
@@ -186,13 +240,18 @@ function ProvisioningRow({
         </div>
       ) : null}
 
-      {crew.status === "failed" && crew.error && (
-        <pre className="text-[10px] text-red-500 dark:text-red-400 font-mono whitespace-pre-wrap break-words ml-4 max-h-[60px] overflow-hidden">
-          {crew.error.slice(0, 240)}
-        </pre>
+      {crew.status === "failed" && (
+        <ProvisioningFailure crew={crew} />
       )}
 
-      {crew.featureIds.length > 0 && crew.status !== "running" && (
+      {recentCompleted && crew.recent && <RecentBuildSummary recent={crew.recent} />}
+
+      {/* Live build log while running, surfaced on demand. */}
+      {crew.status === "running" && crew.logTail && crew.logTail.length > 0 && (
+        <ProvisioningBuildLog lines={crew.logTail} label="build log" />
+      )}
+
+      {crew.featureIds.length > 0 && crew.status !== "running" && !recentCompleted && (
         <div className="flex items-center gap-1 ml-4 mt-1.5 flex-wrap">
           {crew.featureIds.map((fid) => (
             <FeatureChip key={fid} featureRef={fid} />
@@ -324,11 +383,143 @@ function ProvisioningChecklist({
 }
 
 
-function ProvisioningStatusDot({ status }: { status: string }) {
+function ProvisioningStatusDot({ status, recent }: { status: string; recent?: "completed" | "failed" }) {
   if (status === "running") return <Spinner className="h-3 w-3 text-blue-500 shrink-0" />
   if (status === "failed") return <AlertTriangle className="h-3 w-3 text-red-500 shrink-0" />
+  if (recent === "completed") return <Check className="h-3 w-3 text-emerald-500 shrink-0" />
   // needs_provision
   return <span className="h-2 w-2 rounded-full bg-amber-500 shrink-0" />
+}
+
+/**
+ * Feature-granular step list folded from the `provision.event` feed. Each row
+ * is one resolve / build / per-feature install / container step, deduped by the
+ * hook so a step never appears twice across its started→completed transition.
+ * Richer counterpart to ProvisioningChecklist (the coarse plan view).
+ */
+function ProvisioningEventSteps({ steps }: { steps: ProvisionStepState[] }) {
+  // Active (still installing) first so the eye lands on what's happening now,
+  // then most-recently-finished, then the rest.
+  const active = steps.filter((s) => s.status === "started")
+  const failed = steps.filter((s) => s.status === "failed")
+  const done = steps.filter((s) => s.status === "completed").reverse()
+  const ordered = [...failed, ...active, ...done]
+  return (
+    <ol className="ml-1 mt-1 space-y-1 max-h-[180px] overflow-y-auto">
+      {ordered.map((s) => (
+        <li
+          key={s.key}
+          className={`flex items-center gap-2 text-[11px] ${
+            s.status === "failed"
+              ? "text-red-400 font-medium"
+              : s.status === "started"
+                ? "text-foreground font-medium"
+                : "text-muted-foreground"
+          }`}
+        >
+          <span className="w-3 h-3 shrink-0 flex items-center justify-center">
+            {s.status === "completed" ? (
+              <Check className="h-3 w-3 text-emerald-400" />
+            ) : s.status === "failed" ? (
+              <AlertTriangle className="h-3 w-3 text-red-400" />
+            ) : (
+              <Spinner className="h-3 w-3 text-blue-400" />
+            )}
+          </span>
+          <span className="truncate">{s.label}</span>
+          {s.durationMs ? (
+            <span className="tabular-nums text-muted-foreground-soft shrink-0">{formatProvisionDuration(s.durationMs)}</span>
+          ) : null}
+        </li>
+      ))}
+    </ol>
+  )
+}
+
+/**
+ * Red, persistent failure block: which step died, the error, and the BuildKit
+ * log tail behind an expandable "build log". Nothing disappears silently.
+ */
+function ProvisioningFailure({ crew }: { crew: ProvisioningCrewState }) {
+  const tail = crew.buildLogTail ?? crew.recent?.buildLogTail
+  const failedStep = crew.failedStep ?? crew.recent?.failedStep
+  return (
+    <div className="ml-4 mt-0.5">
+      {failedStep && (
+        <div className="text-[11px] text-red-400 font-medium">
+          Failed at <span className="font-semibold">{failedStep}</span>
+        </div>
+      )}
+      {crew.error && (
+        <pre className="text-[10px] text-red-500 dark:text-red-400 font-mono whitespace-pre-wrap break-words max-h-[60px] overflow-hidden mt-0.5">
+          {crew.error.slice(0, 240)}
+        </pre>
+      )}
+      {tail && tail.length > 0 && <ProvisioningBuildLog lines={tail} label="build log" defaultOpen={false} />}
+    </div>
+  )
+}
+
+/** Compact "built 34s ago · N steps (ansible ✓ terraform ✓ …)" line for a
+ *  lingering completed build. */
+function RecentBuildSummary({ recent }: { recent: NonNullable<ProvisioningCrewState["recent"]> }) {
+  const shown = recent.features.slice(0, 4)
+  const extra = recent.features.length - shown.length
+  return (
+    <div className="ml-4 mt-0.5 text-[11px] text-muted-foreground flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+      <span className="text-emerald-500">ready</span>
+      <span>·</span>
+      <span>built {formatProvisionAgo(recent.at)}</span>
+      {recent.durationMs ? <><span>·</span><span>{formatProvisionDuration(recent.durationMs)}</span></> : null}
+      {recent.stepCount > 0 && <><span>·</span><span>{recent.stepCount} step{recent.stepCount === 1 ? "" : "s"}</span></>}
+      {shown.length > 0 && (
+        <span className="flex flex-wrap items-center gap-1">
+          {shown.map((f) => (
+            <span key={f} className="text-foreground">{f} <Check className="inline h-2.5 w-2.5 text-emerald-400" /></span>
+          ))}
+          {extra > 0 && <span>+{extra}</span>}
+        </span>
+      )}
+    </div>
+  )
+}
+
+/** Expandable BuildKit log tail. Collapsed by default to keep the popover/card
+ *  compact; the tail is always one click away so a failure is never opaque. */
+function ProvisioningBuildLog({ lines, label = "build log", defaultOpen = false }: {
+  lines: string[]
+  label?: string
+  defaultOpen?: boolean
+}) {
+  return (
+    <details className="ml-4 mt-1 group" open={defaultOpen}>
+      <summary className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground cursor-pointer list-none select-none">
+        <Terminal className="h-3 w-3" />
+        <span>{label}</span>
+        <span className="text-muted-foreground-soft">({lines.length})</span>
+      </summary>
+      <pre className="mt-1 text-[10px] leading-snug font-mono text-muted-foreground bg-muted/40 rounded p-2 max-h-[160px] overflow-auto whitespace-pre-wrap break-words">
+        {lines.join("\n")}
+      </pre>
+    </details>
+  )
+}
+
+/** "34s ago" / "2m ago" / "1h ago" from an epoch-ms timestamp. */
+function formatProvisionAgo(at: number): string {
+  const secs = Math.max(0, Math.round((Date.now() - at) / 1000))
+  if (secs < 60) return `${secs}s ago`
+  const mins = Math.round(secs / 60)
+  if (mins < 60) return `${mins}m ago`
+  return `${Math.round(mins / 60)}h ago`
+}
+
+/** "1.2s" / "340ms" / "2m" for a build/step duration. */
+function formatProvisionDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`
+  const secs = ms / 1000
+  if (secs < 60) return `${secs.toFixed(secs < 10 ? 1 : 0)}s`
+  return `${Math.round(secs / 60)}m`
 }
 
 /**
@@ -353,6 +544,12 @@ export {
   ProvisioningBadge,
   ProvisioningRow,
   ProvisioningChecklist,
+  ProvisioningEventSteps,
+  ProvisioningFailure,
+  ProvisioningBuildLog,
+  RecentBuildSummary,
   ProvisioningStatusDot,
   FeatureChip,
+  formatProvisionAgo,
+  formatProvisionDuration,
 }
