@@ -243,6 +243,20 @@ Validation is **lenient**: declaring a resource is always allowed (it never
 gates a run). Save only rejects malformed entries — a blank or non-slug `type`,
 or more than 32 of either kind.
 
+### Agents already know what the container has
+
+You don't have to tell an agent that its crew runs Postgres or ships `kubectl` —
+Crewship surfaces it automatically. Every agent's system prompt now includes a
+`[CONTAINER RESOURCES]` block listing the crew's **datastores** (derived from the
+crew's sidecar services — a service named `postgres` is reachable at host
+`postgres` on its declared port) and **installed CLI tools** (derived from the
+crew's devcontainer features + mise toolchain, e.g. `ansible`, `kubectl`, `git`,
+`python`, `node`). The agent is instructed to use these directly instead of
+probing or trying to install them. So when you author a routine that needs a
+datastore, declare it under `resources.datastores` and connect via the host/port
+the agent already sees in that block. The block is omitted entirely when a crew
+has no services and no notable tools.
+
 ## Step types
 
 ### `agent_run`

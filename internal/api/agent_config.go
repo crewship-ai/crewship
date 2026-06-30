@@ -227,6 +227,24 @@ func (h *InternalHandler) resolveAgentConfigWithOpener(w http.ResponseWriter, r 
 		sysPrompt += "\n\n" + integrationsBlock
 	}
 
+	// [CONTAINER RESOURCES] section — tells the agent which datastores
+	// (Redis/Postgres/…) and CLI tools (ansible/kubectl/git/…) its crew
+	// container already has, so it uses them directly instead of probing
+	// or trying to install. Non-fatal: a resolver error logs and omits
+	// the block (mirrors how the integrations/routines blocks fail soft).
+	var crewResources *CrewResources
+	if data.crewID.Valid && data.crewID.String != "" {
+		cr, err := ResolveCrewResources(r.Context(), h.db, data.crewID.String)
+		if err != nil {
+			h.logger.Warn("resolve crew resources", "crew_id", data.crewID.String, "error", err)
+		} else {
+			crewResources = cr
+			if resourcesBlock := buildContainerResourcesBlock(cr); resourcesBlock != "" {
+				sysPrompt += "\n\n" + resourcesBlock
+			}
+		}
+	}
+
 	crewIDStr := ""
 	crewSlugStr := ""
 	if data.crewID.Valid {
@@ -284,6 +302,7 @@ func (h *InternalHandler) resolveAgentConfigWithOpener(w http.ResponseWriter, r 
 		"crew_mcp_config_json":  data.crewMCPConfigJSON.String,
 		"agent_mcp_config_json": data.agentMCPConfigJSON.String,
 		"installed_skills":      installedSkills,
+		"crew_resources":        crewResources,
 	}
 	// PR-E F6 — opener identity + role title for the orchestrator's
 	// PERSONA / peer card injection. opener is "" for agent-only
